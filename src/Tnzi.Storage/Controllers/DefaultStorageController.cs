@@ -240,7 +240,7 @@ public class DefaultStorageController : ApiControllerBase
     /// ★ <b>只有可展示的类型才内联</b>（<see cref="FileTypeHelper.IsInlineRenderable"/>：位图 / 视频 / 音频 /
     /// PDF / 纯文本），其余一律带文件名 ⇒ <c>Content-Disposition: attachment</c>，与 <see cref="Download"/> 同形。
     /// <c>FileRecord.ContentType</c> 是按<b>上传者给的文件名</b>算出来的（<c>.html → text/html</c>），
-    /// 而本端点匿名可达、还被缓存一年：不加这道闸，任何已登录用户传一个 <c>payload.html</c>
+    /// 而本端点匿名可达、还会被缓存：不加这道闸，任何已登录用户传一个 <c>payload.html</c>
     /// 并标 <c>isPublic</c>，再把预览链接发出去，脚本就跑在 API 的源上。
     /// </para>
     /// <para>
@@ -254,6 +254,14 @@ public class DefaultStorageController : ApiControllerBase
     /// 这不是授权判定（那仍只在 <see cref="IFileAccessAuthorizer"/>），是响应形态；
     /// 消费方整体替换本控制器时请沿用 <see cref="FileTypeHelper.IsInlineRenderable"/>。
     /// </para>
+    /// <para>
+    /// ★ <b>缓存指令按 <see cref="FileRecord.IsPublic"/> 分</b>（见 <see cref="ApplyPreviewCacheHeaders"/>）：
+    /// 响应体取决于 Authorization / <c>?sig=</c> / 公开标记，而 RFC 9111 §3.5 把 <c>public</c> 定义为
+    /// 「共享缓存可以存带 Authorization 的响应」的显式许可 —— 此前对所有文件一律
+    /// <c>public, max-age=31536000</c>，等于把私密合同放进代理与 CDN 一年，也让一枚 10 分钟的
+    /// <c>sig</c> 令牌在缓存里活一年。同一个 id 还会随建版本换内容，所以公开文件也只给一小时，
+    /// 靠 <c>ETag</c>（MD5）+ <c>If-None-Match</c> ⇒ 304 续。
+    /// </para>
     /// </remarks>
     [HttpGet("{id:guid}/preview")]
     [AllowAnonymous]
@@ -266,7 +274,15 @@ public class DefaultStorageController : ApiControllerBase
         }
         var record = recordResult.Data!;
 
-        var streamResult = await FileStorageService.GetAsync(id);
+        // 缓存指令与 ETag 在取字节之前就定下：304 也要带着它们，而且 304 一个字节都不该取。
+        var etag = ApplyPreviewCacheHeaders(record);
+        if (etag != null && IfNoneMatchMatches(etag))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        // 预览语义：发出的访问事件是 Preview 而不是 Download（审计 / 配额要能分开两者）。
+        var streamResult = await FileStorageService.GetForPreviewAsync(id);
         if (!streamResult.Succeeded)
         {
             return new NotFoundResult();
@@ -275,7 +291,6 @@ public class DefaultStorageController : ApiControllerBase
 
         var contentType = record.ContentType ?? "application/octet-stream";
         Response.Headers.XContentTypeOptions = "nosniff";
-        Response.Headers.CacheControl = "public, max-age=31536000";
 
         if (!FileTypeHelper.IsInlineRenderable(contentType))
         {
@@ -284,6 +299,70 @@ public class DefaultStorageController : ApiControllerBase
         }
 
         return File(stream, contentType);
+    }
+
+    /// <summary>
+    /// 公开文件的预览在共享缓存里最多停留多久。一小时而不是一年：同一个 id 会随建版本换内容，
+    /// 一年不重验证等于永远看旧字节；过了这一小时靠 <c>ETag</c> 走 304。
+    /// </summary>
+    protected const int PublicPreviewMaxAgeSeconds = 3600;
+
+    /// <summary>
+    /// 按记录写预览响应的缓存指令与 <c>ETag</c>，返回本响应的 ETag（无 MD5 时为 null）。
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>公开文件：<c>public, max-age=<see cref="PublicPreviewMaxAgeSeconds"/></c>。</item>
+    /// <item>其余：<c>private, no-cache</c> + <c>Vary: Authorization</c> —— 浏览器可以留一份私有副本，
+    /// 但每次复用都要带 <c>If-None-Match</c> 回来重验证（重验证仍过授权），共享缓存一律不存。
+    /// 于是 <c>?sig=</c> 令牌过期、读权限被收回，缓存副本随下一次请求一起失效。</item>
+    /// <item><c>ETag</c> 由记录 id 与 MD5 派生（<see cref="PreviewEtagHelper"/>，强校验器）：建版本 / 还原版本改写 MD5，
+    /// 旧副本在第一次重验证时就被换掉；不直接发 MD5 —— <c>FileRecordDto</c> 的契约是它不对普通读者外露，而这条路由匿名可达。</item>
+    /// </list>
+    /// 消费方整体替换本控制器时请沿用这套指令：一年的 <c>public</c> 曾经就是这里的默认值。
+    /// </remarks>
+    protected virtual string? ApplyPreviewCacheHeaders(FileRecord record)
+    {
+        if (record.IsPublic)
+        {
+            Response.Headers.CacheControl = $"public, max-age={PublicPreviewMaxAgeSeconds}";
+        }
+        else
+        {
+            Response.Headers.CacheControl = "private, no-cache";
+            // Append 而不是赋值：CORS 中间件在到达控制器之前已经写了 Vary: Origin，覆盖会把它抹掉。
+            Response.Headers.Append(HeaderNames.Vary, "Authorization");
+        }
+
+        var etag = PreviewEtagHelper.Compute(record);
+        if (etag == null)
+        {
+            return null;
+        }
+
+        Response.Headers.ETag = etag;
+        return etag;
+    }
+
+    /// <summary>
+    /// 请求的 <c>If-None-Match</c> 是否命中当前 ETag（弱比较：客户端可能把强校验器回成 <c>W/</c>）。
+    /// </summary>
+    protected bool IfNoneMatchMatches(string etag)
+    {
+        var header = Request.Headers.IfNoneMatch;
+        if (header.Count == 0)
+        {
+            return false;
+        }
+
+        if (!EntityTagHeaderValue.TryParseList(header, out var candidates))
+        {
+            return false;
+        }
+
+        var current = EntityTagHeaderValue.Parse(etag);
+        return candidates.Any(candidate =>
+            candidate.Equals(EntityTagHeaderValue.Any) || candidate.Compare(current, useStrongComparison: false));
     }
 
     /// <summary>

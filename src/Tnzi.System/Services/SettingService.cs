@@ -281,15 +281,22 @@ public class SettingService : ApplicationService, ISettingService
         if (IsManagedBySettingsCenter(input.Key, input.Scope))
             return Fail<SettingDto>($"Setting key '{input.Key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
 
+        // 与读路径同一道租户收口：租户内的调用者只能在自己的租户 / 自己的用户下建行。
+        var scopeResult = ResolveWritableScopeId(input.Scope, input.ScopeId);
+        if (!scopeResult.Succeeded)
+            return Fail<SettingDto>(scopeResult.Message!, scopeResult.Code ?? 403, scopeResult.ErrorCode);
+        var scopeId = scopeResult.Data;
+
         // 检查键是否已存在（按 Key + Scope + ScopeId 唯一约束）
         var exists = await _settingRepository
             .AsQueryable()
-            .AnyAsync(s => s.Key == input.Key && s.Scope == input.Scope && s.ScopeId == input.ScopeId);
+            .AnyAsync(s => s.Key == input.Key && s.Scope == input.Scope && s.ScopeId == scopeId);
 
         if (exists)
             return Fail<SettingDto>($"Setting with key '{input.Key}' already exists", 409, ErrorCodes.VALIDATION_ERROR);
 
         var setting = input.MapTo<Setting>();
+        setting.ScopeId = scopeId;
         setting.IsSystem = false;
 
         await _settingRepository.InsertAsync(setting);
@@ -313,8 +320,12 @@ public class SettingService : ApplicationService, ISettingService
         Check.NotNull(input);
 
         var setting = await _settingRepository.GetAsync(id);
-        if (setting == null || !CanAccess(setting))
+        if (setting == null)
             return Fail<SettingDto>("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var writable = CanWrite(setting);
+        if (!writable.Succeeded)
+            return Fail<SettingDto>(writable.Message!, writable.Code ?? 403, writable.ErrorCode);
 
         if (setting.IsSystem)
             return Fail<SettingDto>("Cannot update system setting", 403, ErrorCodes.SYSTEM_ERROR);
@@ -348,8 +359,12 @@ public class SettingService : ApplicationService, ISettingService
     public async Task<Result> DeleteSettingAsync(Guid id)
     {
         var setting = await _settingRepository.GetAsync(id);
-        if (setting == null || !CanAccess(setting))
+        if (setting == null)
             return Fail("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var writable = CanWrite(setting);
+        if (!writable.Succeeded)
+            return writable;
 
         if (setting.IsSystem)
             return Fail("Cannot delete system setting", 403, ErrorCodes.SYSTEM_ERROR);
@@ -375,9 +390,13 @@ public class SettingService : ApplicationService, ISettingService
             .Where(s => idList.Contains(s.Id))
             .ToListAsync();
 
-        // 别的租户的行对本调用者等同于不存在：与单条删除同一口径，绝不静默删一部分。
+        // 别的租户的行对本调用者等同于不存在、别人的 User 行拒绝：与单条删除同一口径，绝不静默删一部分。
         if (settings.Any(s => !CanAccess(s)))
             return Fail("One or more settings were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        var refused = settings.Select(CanWrite).FirstOrDefault(r => !r.Succeeded);
+        if (refused != null)
+            return refused;
 
         // 在进入事务前校验：存在系统配置则返回 Fail
         var systemSettings = settings.Where(s => s.IsSystem).ToList();
@@ -460,6 +479,12 @@ public class SettingService : ApplicationService, ISettingService
         // 与 Create / Update 同一道收口：受配置中心管理的 Global 键必须经 schema 校验写入。
         if (IsManagedBySettingsCenter(key, scope))
             return Fail($"Setting key '{key}' is managed by the settings center; use the settings center endpoints instead", 400, ErrorCodes.VALIDATION_ERROR);
+
+        // 与 Create 同一道租户收口：这个重载默认不经控制器暴露，但消费方代码可能把它接到自己的端点上。
+        var scopeResult = ResolveWritableScopeId(scope, scopeId);
+        if (!scopeResult.Succeeded)
+            return Fail(scopeResult.Message!, scopeResult.Code ?? 403, scopeResult.ErrorCode);
+        scopeId = scopeResult.Data;
 
         // 与另外两条写路径同一道防护：明文盖掉密文而 IsEncrypted 仍为 true，之后每次读取都拿明文去解密。
         // 在事务外先查一次并返回失败的 Result，而不是在事务里抛异常。
@@ -709,7 +734,7 @@ public class SettingService : ApplicationService, ISettingService
                     Scope = scope,
                     ScopeId = scopeId,
                     IsRemoval = isRemoval,
-                    OriginInstanceId = SettingChangedIntegrationEvent.LocalInstanceId
+                    OriginInstanceId = TnziInstance.Id
                 });
             }
             catch (Exception ex)
@@ -804,6 +829,78 @@ public class SettingService : ApplicationService, ISettingService
 
         var tenantId = CallerTenantId;
         return tenantId == null || string.Equals(setting.ScopeId, tenantId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 按 id 的改 / 删是否允许：先过 <see cref="CanAccess"/>（别的租户的行 404），
+    /// 再对 User 行套与创建相同的本人判定（别人的行 403）。
+    /// </summary>
+    /// <remarks>
+    /// 创建与按作用域设值经 <see cref="ResolveWritableScopeId"/> 拒绝给别人写 User 行，但同一行的 id
+    /// 经列表可查（读路径允许租户调用者带显式 scopeId 读任意用户的 User 行），拿到 id 后按 id 改 / 删
+    /// 若只过 <see cref="CanAccess"/> 就仍然放行 —— 规则就只对受害者从没设过的键成立。
+    /// 这里答 403 不答 404：该行对调用者本来就可读，装作不存在是撒谎，且与创建路径同一个回答。
+    /// </remarks>
+    private Result CanWrite(Setting setting)
+    {
+        if (!CanAccess(setting))
+            return Fail("Setting not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        if (setting.Scope == SettingScope.User && CallerTenantId != null && !IsCallersOwnUser(setting.ScopeId))
+            return Fail("User-scoped settings of another user cannot be written from inside a tenant", 403, ErrorCodes.FORBIDDEN);
+
+        return Ok();
+    }
+
+    /// <summary>User 行的 ScopeId 是否就是当前调用者自己的用户 id（未登录一律 false）。</summary>
+    private bool IsCallersOwnUser(string? scopeId)
+    {
+        var userId = CurrentUser?.Id?.ToString();
+        return scopeId != null && userId != null && string.Equals(scopeId, userId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 写路径（创建 / 按作用域设值）的作用域判定，返回实际落库的 <c>ScopeId</c>。
+    /// 与 <see cref="BuildScopeFilter"/> 同一口径：租户归属由身份决定，不由客户端参数决定。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 09-04 只收口了列表与按 id 的读 / 改 / 删，创建这条路漏了：租户 A 的管理员可以在租户 B 下植入一行，
+    /// <c>TenantSettingProvider</c>（优先级 200）随即对 B 的每个请求返回攻击者的值，而两边的读取面都看不见它。
+    /// </para>
+    /// <para>
+    /// 租户内的调用者：Tenant 行没点名租户则钉成本租户（缺省不是改写），点名别的租户 403；
+    /// User 行没有租户列，本模块也核验不了目标用户属于哪个租户，失败关闭 —— 只允许写自己的用户
+    /// （<c>UserSettingProvider</c> 优先级最高，一行就能盖掉那个用户的全部分层配置）；
+    /// Global 行沿用既有口径放行（改 / 删同样放行，要收紧应两处一起）。宿主不受限。
+    /// </para>
+    /// </remarks>
+    private Result<string?> ResolveWritableScopeId(SettingScope scope, string? scopeId)
+    {
+        var tenantId = CallerTenantId;
+        if (tenantId == null)
+            return Ok<string?>(scopeId);
+
+        switch (scope)
+        {
+            case SettingScope.Global:
+                return Ok<string?>(scopeId);
+
+            case SettingScope.Tenant:
+                if (scopeId != null && !string.Equals(scopeId, tenantId, StringComparison.OrdinalIgnoreCase))
+                    return Fail<string?>("Settings of another tenant are not accessible", 403, ErrorCodes.FORBIDDEN);
+
+                return Ok<string?>(tenantId);
+
+            case SettingScope.User:
+                if (!IsCallersOwnUser(scopeId))
+                    return Fail<string?>("User-scoped settings of another user cannot be written from inside a tenant", 403, ErrorCodes.FORBIDDEN);
+
+                return Ok<string?>(scopeId);
+
+            default:
+                return Fail<string?>($"Unknown setting scope '{scope}'", 400, ErrorCodes.VALIDATION_ERROR);
+        }
     }
 
 }

@@ -41,6 +41,7 @@ public abstract class IntegratedTestBase<TDbContext> : IDisposable
         {
             options.UseSqlite(_connection);
             options.EnableSensitiveDataLogging();
+            ConfigureDbContextOptions(options);
         });
 
         // 4. 允许子类配置额外服务 (如仓储、业务服务)
@@ -57,6 +58,19 @@ public abstract class IntegratedTestBase<TDbContext> : IDisposable
     /// 在子类中实现此方法以注册特定模块的服务
     /// </summary>
     protected virtual void ConfigureServices(IServiceCollection services)
+    {
+    }
+
+    /// <summary>
+    /// 在子类中覆写以补充 DbContext 选项（在 SQLite 连接与敏感数据日志之后调用）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 多租户消费方必须在这里调 <c>options.UseTnziMultiTenancy(true)</c>：框架的多租户开关只经
+    /// <c>DbContextOptions</c> 到达消费方 DbContext（构造函数上没有它的形参），而本基类用裸 <c>AddDbContext</c>，
+    /// 不覆写则集成测试全部跑在单租户模型上 —— 没有 <c>TenantId</c> 列、没有租户过滤器，
+    /// 与应用的 <c>MultiTenancy:Enabled</c> 无关。本基类只依赖核心包，故这里给的是钩子而不是一个开关值。
+    /// </remarks>
+    protected virtual void ConfigureDbContextOptions(DbContextOptionsBuilder options)
     {
     }
 

@@ -1,8 +1,14 @@
 
+using Anthropic.Models.Messages;
+using MeaiReasoningEffort = Microsoft.Extensions.AI.ReasoningEffort;
+
 namespace Tnzi.AI.Tests.Infrastructure;
 
 /// <summary>
-/// AnthropicThinkingChatClient 单元测试
+/// AnthropicThinkingChatClient 单元测试。
+/// 断言的是 SDK 适配器真正读取的两条通道（<see cref="ChatOptions.Reasoning"/> /
+/// <see cref="ChatOptions.RawRepresentationFactory"/>），而不是 AdditionalProperties 里没人读的键；
+/// 真正到线路的证据见 <see cref="AnthropicThinkingWireTests"/>。
 /// </summary>
 public class AnthropicThinkingChatClientTests : IDisposable
 {
@@ -46,7 +52,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
     }
 
     [Fact]
-    public async Task GetResponseAsync_WithThinkingContext_InjectsAdditionalProperties()
+    public async Task GetResponseAsync_WithThinkingContext_SetsChatOptionsReasoning()
     {
         ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
         {
@@ -67,12 +73,11 @@ public class AnthropicThinkingChatClientTests : IDisposable
         await client.GetResponseAsync([], new ChatOptions());
 
         capturedOptions.ShouldNotBeNull();
-        capturedOptions.AdditionalProperties.ShouldNotBeNull();
-        capturedOptions.AdditionalProperties.ShouldContainKey("thinking");
-
-        var thinking = capturedOptions.AdditionalProperties["thinking"].ShouldBeOfType<Dictionary<string, object>>();
-        thinking["type"].ShouldBe("enabled");
-        thinking["budget_tokens"].ShouldBe(16384);
+        capturedOptions.Reasoning.ShouldNotBeNull();
+        capturedOptions.Reasoning.Effort.ShouldBe(MeaiReasoningEffort.High);
+        // the dead key must be gone - the adapter never read it
+        capturedOptions.AdditionalProperties?.ContainsKey("thinking").ShouldNotBe(true);
+        capturedOptions.RawRepresentationFactory.ShouldBeNull();
     }
 
     [Fact]
@@ -96,11 +101,11 @@ public class AnthropicThinkingChatClientTests : IDisposable
     }
 
     [Theory]
-    [InlineData(ReasoningEffort.Low, 1024)]
-    [InlineData(ReasoningEffort.Medium, 8192)]
-    [InlineData(ReasoningEffort.High, 16384)]
-    [InlineData(ReasoningEffort.Max, 32768)]
-    public async Task GetResponseAsync_BudgetTokensMapping_CorrectValues(ReasoningEffort effort, int expectedBudget)
+    [InlineData(ReasoningEffort.Low, MeaiReasoningEffort.Low)]
+    [InlineData(ReasoningEffort.Medium, MeaiReasoningEffort.Medium)]
+    [InlineData(ReasoningEffort.High, MeaiReasoningEffort.High)]
+    [InlineData(ReasoningEffort.Max, MeaiReasoningEffort.ExtraHigh)]
+    public async Task GetResponseAsync_EffortMapping_CorrectValues(ReasoningEffort effort, MeaiReasoningEffort expected)
     {
         ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
         {
@@ -121,12 +126,11 @@ public class AnthropicThinkingChatClientTests : IDisposable
         await client.GetResponseAsync([], new ChatOptions());
 
         capturedOptions.ShouldNotBeNull();
-        var thinking = capturedOptions.AdditionalProperties!["thinking"].ShouldBeOfType<Dictionary<string, object>>();
-        thinking["budget_tokens"].ShouldBe(expectedBudget);
+        capturedOptions.Reasoning!.Effort.ShouldBe(expected);
     }
 
     [Fact]
-    public async Task GetResponseAsync_ExplicitBudgetTokens_OverridesDefault()
+    public async Task GetResponseAsync_ExplicitBudgetTokens_UsesRawRepresentationFactory()
     {
         ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
         {
@@ -147,8 +151,45 @@ public class AnthropicThinkingChatClientTests : IDisposable
         await client.GetResponseAsync([], new ChatOptions());
 
         capturedOptions.ShouldNotBeNull();
-        var thinking = capturedOptions.AdditionalProperties!["thinking"].ShouldBeOfType<Dictionary<string, object>>();
-        thinking["budget_tokens"].ShouldBe(5000);
+        capturedOptions.Reasoning.ShouldBeNull();
+        capturedOptions.RawRepresentationFactory.ShouldNotBeNull();
+
+        var metadataClient = new Mock<IChatClient>();
+        metadataClient.Setup(c => c.GetService(typeof(ChatClientMetadata), null))
+            .Returns(new ChatClientMetadata("anthropic", null, "claude-sonnet-4-5"));
+        var raw = capturedOptions.RawRepresentationFactory(metadataClient.Object).ShouldBeOfType<MessageCreateParams>();
+        raw.Thinking.ShouldNotBeNull();
+        var enabled = raw.Thinking.Value.ShouldBeOfType<ThinkingConfigEnabled>();
+        enabled.BudgetTokens.ShouldBe(5000);
+        // max_tokens must stay above the budget; model is taken from the adapter's metadata
+        raw.MaxTokens.ShouldBeGreaterThan(5000);
+        ((string)raw.Model).ShouldBe("claude-sonnet-4-5");
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_ExplicitBudgetLargerThanMaxOutputTokens_ShrinksBudgetToFit()
+    {
+        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.Low, BudgetTokens = 8000 },
+            ProviderName = "Anthropic"
+        };
+
+        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        ChatOptions? capturedOptions = null;
+
+        _innerClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(new ChatResponse([]));
+
+        await client.GetResponseAsync([], new ChatOptions { MaxOutputTokens = 4096, ModelId = "claude-sonnet-4-5" });
+
+        var raw = capturedOptions!.RawRepresentationFactory!(Mock.Of<IChatClient>()).ShouldBeOfType<MessageCreateParams>();
+        raw.MaxTokens.ShouldBe(4096);
+        raw.Thinking!.Value.ShouldBeOfType<ThinkingConfigEnabled>().BudgetTokens.ShouldBe(4095);
     }
 
     [Fact]
@@ -173,6 +214,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
 
         // 原始 options 不应被修改
         originalOptions.AdditionalProperties.ShouldBeNull();
+        originalOptions.Reasoning.ShouldBeNull();
     }
 
     [Fact]
@@ -197,8 +239,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
         await client.GetResponseAsync([], null);
 
         capturedOptions.ShouldNotBeNull();
-        capturedOptions.AdditionalProperties.ShouldNotBeNull();
-        capturedOptions.AdditionalProperties.ShouldContainKey("thinking");
+        capturedOptions.Reasoning!.Effort.ShouldBe(MeaiReasoningEffort.Medium);
     }
 
     [Fact]
@@ -216,7 +257,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
     }
 
     [Fact]
-    public async Task GetStreamingResponseAsync_WithThinkingContext_InjectsAdditionalPropertiesWithoutMutatingOriginalOptions()
+    public async Task GetStreamingResponseAsync_WithThinkingContext_SetsReasoningWithoutMutatingOriginalOptions()
     {
         ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
         {
@@ -243,13 +284,9 @@ public class AnthropicThinkingChatClientTests : IDisposable
 
         capturedOptions.ShouldNotBeNull();
         capturedOptions.ShouldNotBeSameAs(originalOptions);
-        capturedOptions.AdditionalProperties.ShouldNotBeNull();
-        capturedOptions.AdditionalProperties.ShouldContainKey("thinking");
+        capturedOptions.Reasoning!.Effort.ShouldBe(MeaiReasoningEffort.High);
 
-        var thinking = capturedOptions.AdditionalProperties["thinking"].ShouldBeOfType<Dictionary<string, object>>();
-        thinking["type"].ShouldBe("enabled");
-        thinking["budget_tokens"].ShouldBe(16384);
-
+        originalOptions.Reasoning.ShouldBeNull();
         originalOptions.AdditionalProperties.ShouldBeNull();
     }
 

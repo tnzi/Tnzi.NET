@@ -57,11 +57,14 @@ public class LocalizationModule : TnziFrameworkModule
         }
         else
         {
-            // Resx 模式：使用默认的 AddLocalization
+            // Resx 模式：使用默认的 AddLocalization，再把它注册的工厂包进缺失翻译追踪装饰器。
+            // ★ 追踪器在上面是无条件注册的，但写入点此前只在 JsonStringLocalizer 里：默认的 Resx 部署上
+            // 管理端的「缺失翻译」纵切（4 个端点 + 2 个权限码 + 页面）永远是空的，与「翻译都齐了」看不出区别。
             context.Services.AddLocalization(opts =>
             {
                 opts.ResourcesPath = resourcesPath;
             });
+            DecorateStringLocalizerFactoryWithTracking(context.Services);
         }
 
         // 配置支持的语言和语言检测方式
@@ -90,6 +93,32 @@ public class LocalizationModule : TnziFrameworkModule
         });
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 把 <c>AddLocalization</c> 注册的 <see cref="IStringLocalizerFactory"/> 换成 <see cref="TrackingStringLocalizerFactory"/>，
+    /// 内层仍按原描述符构造（不假设它是哪个具体类型，消费方先于本模块替换过工厂也照样被包住）。
+    /// </summary>
+    private static void DecorateStringLocalizerFactoryWithTracking(IServiceCollection services)
+    {
+        var descriptor = services.LastOrDefault(d => d.ServiceType == typeof(IStringLocalizerFactory))
+            ?? throw new InvalidOperationException(
+                "AddLocalization() did not register IStringLocalizerFactory; missing-translation tracking cannot be attached.");
+
+        services.Remove(descriptor);
+        services.Add(ServiceDescriptor.Describe(
+            typeof(IStringLocalizerFactory),
+            sp => new TrackingStringLocalizerFactory(CreateInner(sp, descriptor), sp.GetRequiredService<IMissingTranslationTracker>()),
+            descriptor.Lifetime));
+
+        static IStringLocalizerFactory CreateInner(IServiceProvider sp, ServiceDescriptor descriptor)
+        {
+            if (descriptor.ImplementationInstance is IStringLocalizerFactory instance)
+                return instance;
+            if (descriptor.ImplementationFactory != null)
+                return (IStringLocalizerFactory)descriptor.ImplementationFactory(sp);
+            return (IStringLocalizerFactory)ActivatorUtilities.CreateInstance(sp, descriptor.ImplementationType!);
+        }
     }
 
     public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)

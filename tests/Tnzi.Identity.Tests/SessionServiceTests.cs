@@ -16,7 +16,7 @@ public class SessionServiceTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
-        _sessionService = new DatabaseSessionService(_repositoryMock.Object, _serviceProviderMock.Object);
+        _sessionService = new DatabaseSessionService(_repositoryMock.Object, _serviceProviderMock.Object, UnscopedUserTenantScope.Create());
     }
 
     // IReadOnlyRepository<T> 本身是 IQueryable<T>；_repository.Where(...)/.AnyAsync() 走 LINQ/EF

@@ -39,15 +39,17 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
             .AddEnvironmentVariables()
             .Build();
 
-        // ★★★ 多租户开关必须在建模之前就位。DbContext 从**可选**构造参数
-        // IOptions<MultiTenancyOptions> 取它，而下面的 CreateDbContextInstance 只反射
-        // (DbContextOptions, ICurrentUser) 与 (DbContextOptions) —— 那个参数永远传不进去，
-        // 于是设计期恒 false。而全框架一百二十多个实体配置按这个开关分支，分的往往是
-        // **索引的列集**：设计期恒 false 让多租户应用生成的迁移建出不含 TenantId 的唯一索引
-        // （跨租户不变量从未进过数据库），同时模型与快照永久不一致、再加多少条迁移都消不掉。
-        // 见 DesignTimeMultiTenancy。
-        DesignTimeMultiTenancy.Enabled =
-            configuration.GetSection("MultiTenancy").Get<MultiTenancyOptions>()?.Enabled ?? false;
+        // ★★★ 两个建模开关必须在建模之前就位，且都要从这份 appsettings 读 —— 设计期不跑模块生命周期，
+        // 运行期由 EFCoreModule / AddTnziDbContext 写的值在这里一个都不存在：
+        // ① 多租户开关：全框架一百二十多个实体配置按它分支，分的往往是**索引的列集**；
+        //    设计期恒 false 让多租户应用生成的迁移建出不含 TenantId 的唯一索引，同时模型与快照永久不一致。
+        //    它随 options 走（见下方 UseTnziMultiTenancy），与运行期 AddTnziDbContext 同一载体、同一处解析。
+        // ② Outbox 开关：决定 OutboxMessage 进不进模型。此前只有 EFCoreModule.ConfigureServicesAsync 写它，
+        //    于是开了 Outbox 的应用迁移里永远没有那张表，首条集成事件 INSERT 打到不存在的表上。
+        var multiTenancyEnabled =
+            configuration.GetSection(ConfigSectionResolver.Resolve(typeof(MultiTenancyOptions))).Get<MultiTenancyOptions>()?.Enabled ?? false;
+        Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled =
+            configuration.GetSection(ConfigSectionResolver.Resolve(typeof(OutboxOptions))).Get<OutboxOptions>()?.Enabled ?? false;
 
         // Read from Database configuration
         var databaseOptions = configuration.GetSection("Database").Get<DatabaseOptions>();
@@ -138,6 +140,7 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
         // Build options using provider from configuration
         var optionsBuilder = new DbContextOptionsBuilder<TDbContext>();
         ConfigureOptionsByProvider(optionsBuilder, effectiveConnectionString, config.Provider);
+        optionsBuilder.UseTnziMultiTenancy(multiTenancyEnabled);
 
         // Create design-time CurrentUser
         var currentUser = new DesignTimeCurrentUser();

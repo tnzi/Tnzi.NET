@@ -76,15 +76,15 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         using var scope = _serviceProvider.CreateScope();
 
         // 自动捕获当前租户上下文到事件（仅当事件未显式设置 TenantId 时）
-        // 从当前 scope 解析 ICurrentTenant，避免 Singleton 持有 Scoped 引用
-        if (@event is EventBase eventBase && eventBase.TenantId == null)
-        {
-            var currentTenant = scope.ServiceProvider.GetService<ICurrentTenant>();
-            eventBase.TenantId = currentTenant?.Id;
-        }
+        // 从当前 scope 解析 ICurrentTenant，避免 Singleton 持有 Scoped 引用。
+        // 这里拿到的是一个全新的 Scoped 实例：它能答出发布者经 Change() 建立的租户，
+        // 全靠 CurrentTenant 的覆盖存在静态 AsyncLocal 上（见 CurrentTenant 的类注释）；
+        // 若改回实例字段，这一行只剩 JWT claim 来源的租户，Change() 来源的一律读空。
+        // 捕获与恢复都走 EventTenantContext —— 分布式传输的两侧也调它，契约不再只有本地总线兑现。
+        EventTenantContext.Capture(@event, scope.ServiceProvider);
 
         // 获取所有处理器（包括直接匹配和基类匹配的，以及运行时注册的）
-        var handlers = GetEventHandlers<TEvent>(eventType, scope.ServiceProvider).ToList();
+        var handlers = GetEventHandlers<TEvent>(eventType, scope.ServiceProvider);
 
         if (handlers.Count == 0)
         {
@@ -100,16 +100,14 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
 
         foreach (var handler in handlers)
         {
-            if (handler == null) continue;
-
-            var metadata = EventHandlerInvoker.GetMetadata(handler.GetType(), eventType);
+            var metadata = EventHandlerInvoker.GetMetadata(handler.Instance.GetType(), eventType);
             if (metadata.IsBackground)
             {
-                backgroundHandlerTypes.Add(handler.GetType());
+                backgroundHandlerTypes.Add(handler.Instance.GetType());
             }
             else
             {
-                syncTasks.Add(ExecuteHandlerWithConcurrencyControlAsync(handler, @event, eventType, cancellationToken));
+                syncTasks.Add(ExecuteHandlerWithConcurrencyControlAsync(handler.Instance, @event, eventType, cancellationToken));
             }
         }
 
@@ -118,14 +116,15 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         if (syncTasks.Count > 0)
             await Task.WhenAll(syncTasks).ConfigureAwait(false);
 
+        // 由总线自己构造的处理器不归作用域管，用完由总线释放（后台处理器在自己的作用域里另行构造，这里的实例只用来读元数据）
+        await DisposeOwnedHandlersAsync(handlers).ConfigureAwait(false);
+
         // Fire-and-forget 后台处理器（各自创建独立 Scope，不阻塞发布者）
         // 任务被跟踪,应用关闭时 DisposeAsync 会等待在飞任务排水(带超时),避免静默丢失
         foreach (var handlerType in backgroundHandlerTypes)
         {
             var capturedEvent = @event;
             var capturedEventType = eventType;
-            // 捕获租户 ID，在新 scope 中恢复上下文
-            var capturedTenantId = (@event as EventBase)?.TenantId;
             var backgroundTask = Task.Run(async () =>
             {
                 // 后台处理器运行在独立作用域/独立事务中,必须隔离发布者的环境事务上下文,
@@ -135,39 +134,24 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
                 {
                     using var bgScope = _serviceProvider.CreateScope();
 
-                    // 恢复后台处理器的租户上下文
-                    IDisposable? tenantScope = null;
-                    if (capturedTenantId.HasValue)
-                    {
-                        var bgTenant = bgScope.ServiceProvider.GetService<ICurrentTenant>();
-                        tenantScope = bgTenant?.Change(capturedTenantId.Value);
-                    }
+                    // 恢复后台处理器的租户上下文（事件上的 TenantId 已在发布时捕获）
+                    var tenantScope = EventTenantContext.Restore(capturedEvent, bgScope.ServiceProvider);
 
+                    ResolvedHandler? bgHandler = null;
                     try
                     {
-                        // Handlers are registered via `AddEventHandler<TEvent, THandler>()` as
-                        // `services.AddScoped<IEventHandler<TEvent>, THandler>()` - i.e. only the
-                        // interface descriptor exists, not a binding for the concrete type.
-                        // Resolving by `handlerType` directly returns null and the background
-                        // dispatch silently drops the event (regression introduced when sync
-                        // handlers were converted to [BackgroundEventHandler]). Resolve via the
-                        // interface and filter by concrete type to fix the dispatch.
-                        var handlerInterface = typeof(IEventHandler<>).MakeGenericType(capturedEventType);
-                        var allHandlers = bgScope.ServiceProvider.GetServices(handlerInterface);
-                        var bgHandler = allHandlers.FirstOrDefault(h => h?.GetType() == handlerType);
+                        // 与运行时订阅同一条解析链（接口 → 具体类型 → 构造）：此前这里只按接口解析，
+                        // 而运行时路径只按具体类型解析，两条各漏一半。
+                        bgHandler = ResolveHandlerByType(bgScope.ServiceProvider, capturedEventType, handlerType);
                         if (bgHandler == null)
-                        {
-                            _logger.LogWarning(
-                                "Background handler {HandlerType} for event {EventType} could not be resolved in a new scope. " +
-                                "Ensure the handler is registered via AddEventHandler<TEvent, THandler>().",
-                                handlerType.Name, capturedEventType.Name);
                             return;
-                        }
 
-                        await ExecuteHandlerAsync(bgHandler, capturedEvent, capturedEventType, CancellationToken.None);
+                        await ExecuteHandlerAsync(bgHandler.Value.Instance, capturedEvent, capturedEventType, CancellationToken.None);
                     }
                     finally
                     {
+                        if (bgHandler is { OwnedByBus: true } owned)
+                            await DisposeHandlerAsync(owned.Instance).ConfigureAwait(false);
                         tenantScope?.Dispose();
                     }
                 }
@@ -188,11 +172,17 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// 一个已解析的处理器实例。<see cref="OwnedByBus"/> 为 true 表示实例由总线经
+    /// <see cref="ActivatorUtilities"/> 构造而非容器交付，作用域不会释放它，须由总线在用完后释放。
+    /// </summary>
+    private readonly record struct ResolvedHandler(object Instance, bool OwnedByBus);
+
+    /// <summary>
     /// 获取事件的所有处理器（支持事件继承和运行时订阅）
     /// </summary>
-    private IEnumerable<object> GetEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
+    private List<ResolvedHandler> GetEventHandlers<TEvent>(Type eventType, IServiceProvider serviceProvider) where TEvent : class, IEvent
     {
-        var allHandlers = new List<object>();
+        var allHandlers = new List<ResolvedHandler>();
         var handlerTypes = new HashSet<Type>();
 
         // 1. 从DI容器获取直接匹配的处理器
@@ -202,7 +192,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         {
             if (handler != null)
             {
-                allHandlers.Add(handler);
+                allHandlers.Add(new ResolvedHandler(handler, OwnedByBus: false));
                 handlerTypes.Add(handler.GetType());
             }
         }
@@ -211,34 +201,91 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         var baseEventHandlers = GetBaseEventHandlers<TEvent>(eventType, serviceProvider);
         foreach (var handler in baseEventHandlers)
         {
-            if (handler != null && !handlerTypes.Contains(handler.GetType()))
+            if (handler != null && handlerTypes.Add(handler.GetType()))
             {
-                allHandlers.Add(handler);
-                handlerTypes.Add(handler.GetType());
+                allHandlers.Add(new ResolvedHandler(handler, OwnedByBus: false));
             }
         }
 
-        // 3. 获取运行时注册的处理器
-        // 注意：创建 HashSet 的副本以避免线程安全问题（HashSet 不是线程安全的）
-        if (_runtimeHandlers.TryGetValue(eventType, out var runtimeHandlerTypes))
+        // 3. 获取运行时注册的处理器（已经由 DI 接口路径取到的不再解析第二次，避免同一处理器跑两遍）
+        foreach (var handlerType in GetRuntimeHandlerTypes(eventType))
         {
-            // 创建副本以避免在遍历时 HashSet 被其他线程修改
-            var handlerTypesCopy = new HashSet<Type>(runtimeHandlerTypes);
-            foreach (var handlerType in handlerTypesCopy)
+            if (handlerTypes.Contains(handlerType))
+                continue;
+
+            var resolved = ResolveHandlerByType(serviceProvider, eventType, handlerType);
+            if (resolved != null)
             {
-                if (!handlerTypes.Contains(handlerType))
-                {
-                    var runtimeHandler = serviceProvider.GetService(handlerType);
-                    if (runtimeHandler != null)
-                    {
-                        allHandlers.Add(runtimeHandler);
-                        handlerTypes.Add(handlerType);
-                    }
-                }
+                allHandlers.Add(resolved.Value);
+                handlerTypes.Add(handlerType);
             }
         }
 
         return allHandlers;
+    }
+
+    /// <summary>
+    /// 运行时订阅集合的快照（HashSet 不是线程安全的，遍历前先复制）
+    /// </summary>
+    private IEnumerable<Type> GetRuntimeHandlerTypes(Type eventType)
+    {
+        return _runtimeHandlers.TryGetValue(eventType, out var runtimeHandlerTypes)
+            ? new HashSet<Type>(runtimeHandlerTypes)
+            : [];
+    }
+
+    /// <summary>
+    /// 按具体类型解析一个处理器：DI 接口路径（<c>AddEventHandler</c> 只注册接口描述符）→ 具体类型路径
+    /// （消费方自己 <c>AddScoped&lt;THandler&gt;</c>）→ 在当前作用域内 <see cref="ActivatorUtilities"/> 构造
+    /// （文档里的插件场景：处理器从未进过容器）。三条都失败才返回 null 并记 Warning，
+    /// 绝不静默跳过 —— 那会让 <see cref="HasHandlers{TEvent}"/> 报告存在而事件一次都不派发。
+    /// 后台派发与运行时订阅共用这一条链，避免两条路径各漏一半。
+    /// </summary>
+    private ResolvedHandler? ResolveHandlerByType(IServiceProvider serviceProvider, Type eventType, Type handlerType)
+    {
+        var handlerInterface = typeof(IEventHandler<>).MakeGenericType(eventType);
+        var fromInterface = serviceProvider.GetServices(handlerInterface).FirstOrDefault(h => h?.GetType() == handlerType);
+        if (fromInterface != null)
+            return new ResolvedHandler(fromInterface, OwnedByBus: false);
+
+        var fromConcrete = serviceProvider.GetService(handlerType);
+        if (fromConcrete != null)
+            return new ResolvedHandler(fromConcrete, OwnedByBus: false);
+
+        try
+        {
+            return new ResolvedHandler(ActivatorUtilities.CreateInstance(serviceProvider, handlerType), OwnedByBus: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Handler {HandlerType} for event {EventType} could not be resolved from the container or constructed. " +
+                "Register it with AddEventHandler<TEvent, THandler>() or as a concrete service, or make its constructor dependencies resolvable.",
+                handlerType.Name, eventType.Name);
+            return null;
+        }
+    }
+
+    private static async ValueTask DisposeOwnedHandlersAsync(List<ResolvedHandler> handlers)
+    {
+        foreach (var handler in handlers)
+        {
+            if (handler.OwnedByBus)
+                await DisposeHandlerAsync(handler.Instance).ConfigureAwait(false);
+        }
+    }
+
+    private static async ValueTask DisposeHandlerAsync(object instance)
+    {
+        switch (instance)
+        {
+            case IAsyncDisposable asyncDisposable:
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+                break;
+            case IDisposable disposable:
+                disposable.Dispose();
+                break;
+        }
     }
 
     /// <summary>
@@ -484,19 +531,49 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
                 handlerTypes.Add(handler.GetType());
         }
 
-        // 检查运行时注册的处理器（去重）
-        // 注意：创建 HashSet 的副本以避免线程安全问题（HashSet 不是线程安全的）
-        if (_runtimeHandlers.TryGetValue(eventType, out var runtimeHandlerTypes))
+        // 检查运行时注册的处理器（去重）：只计入真的解析得出来的，否则计数与派发互相打架
+        // （此前无条件计入，Subscribe 一个构造不出来的类型也会让 HasHandlers 答 true）。
+        // 判可解析性不实例化：为了计数把处理器构造一遍会跑它构造函数的副作用，再同步阻塞地释放它。
+        foreach (var handlerType in GetRuntimeHandlerTypes(eventType))
         {
-            // 创建副本以避免在遍历时 HashSet 被其他线程修改
-            var handlerTypesCopy = new HashSet<Type>(runtimeHandlerTypes);
-            foreach (var handlerType in handlerTypesCopy)
-            {
+            if (handlerTypes.Contains(handlerType))
+                continue;
+
+            if (CanResolveHandlerType(scope.ServiceProvider, eventType, handlerType))
                 handlerTypes.Add(handlerType);
-            }
         }
 
         return handlerTypes.Count;
+    }
+
+    /// <summary>
+    /// <see cref="ResolveHandlerByType"/> 三条链的「会成功吗」版本：具体类型已登记进容器，或有一个公共构造函数
+    /// 的每个参数都是容器认得的服务 / 带默认值（<see cref="ActivatorUtilities"/> 能构造的形态）。
+    /// 接口路径已由调用方经 <c>GetServices</c> 覆盖。容器不提供 <see cref="IServiceProviderIsService"/> 时
+    /// 退回到真的构造一次 —— 那是唯一能回答的办法。
+    /// </summary>
+    private bool CanResolveHandlerType(IServiceProvider serviceProvider, Type eventType, Type handlerType)
+    {
+        var isService = serviceProvider.GetService<IServiceProviderIsService>();
+        if (isService == null)
+        {
+            var resolved = ResolveHandlerByType(serviceProvider, eventType, handlerType);
+            if (resolved == null)
+                return false;
+            if (resolved.Value.OwnedByBus)
+                DisposeHandlerAsync(resolved.Value.Instance).AsTask().GetAwaiter().GetResult();
+            return true;
+        }
+
+        if (isService.IsService(handlerType))
+            return true;
+
+        if (handlerType.IsAbstract || handlerType.IsInterface)
+            return false;
+
+        return handlerType
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Any(ctor => ctor.GetParameters().All(p => p.HasDefaultValue || isService.IsService(p.ParameterType)));
     }
 
     public void Subscribe<TEvent, THandler>()

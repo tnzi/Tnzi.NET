@@ -26,25 +26,20 @@ public class PushSenderTests
     public void Constructor_Should_Initialize_Successfully()
     {
         // Act
-        var sender = new PushSender(_options, _loggerMock.Object);
+        var sender = new PushSender(_options.PushSender!, _loggerMock.Object);
 
         // Assert
         sender.ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// 「没配推送」不再是发送器自己的分支：构造函数只收一节推送配置，没有配置就构造不出来，
+    /// 分档（Null / Unconfigured / 真实现）由模块注册决定。见 <c>PushSenderWiringTests</c>。
+    /// </summary>
     [Fact]
-    public async Task SendToAsync_Should_Return_Failure_When_Options_Not_Configured()
+    public void Constructor_Rejects_A_Missing_Profile()
     {
-        // Arrange
-        var optionsWithoutPushSender = new NotificationOptions();
-        var sender = new PushSender(optionsWithoutPushSender, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendToAsync("device_token", "Title", "Body");
-
-        // Assert
-        result.Success.ShouldBeFalse();
-        result.FailureReason!.ShouldContain("not configured");
+        Should.Throw<ArgumentNullException>(() => new PushSender(null!, _loggerMock.Object));
     }
 
 }

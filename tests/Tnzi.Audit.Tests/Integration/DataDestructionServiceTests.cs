@@ -574,6 +574,8 @@ public class DataDestructionServiceTests : IntegrationTestBase
 
         Assert.False(result.Succeeded);
         Assert.Equal(409, result.Code);
+        // 与「另一轮正在跑」同为 409，但这是一个不会自愈的配置错误：后台服务必须把它记成 Error 而不是跳过。
+        Assert.NotEqual(ErrorCodes.AuditDestructionRunInProgress, result.ErrorCode);
     }
 
     [Fact]

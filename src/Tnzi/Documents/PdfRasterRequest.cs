@@ -32,8 +32,9 @@ public class PdfRasterRequest
     /// 渲染成灰度图，默认 <c>true</c>。
     /// </summary>
     /// <remarks>
-    /// 本接口服务的是机读（找码、OCR、比对），这些算法一律先把彩色扔掉；
-    /// 直接出灰度省掉一次转换，产物也小得多。要看颜色的场合把它设成 <c>false</c>。
+    /// 默认值偏向机读（找码、OCR、比对），这些算法一律先把彩色扔掉；
+    /// 直接出灰度省掉一次转换，产物也小得多。给人看的场合（缩略图、预览）把它设成 <c>false</c>：
+    /// 彩色的信头与印章是人分辨「这是哪一份」的一半依据。<c>Tnzi.Storage</c> 的 PDF 缩略图就是这样用的。
     /// </remarks>
     public bool Grayscale { get; set; } = true;
 

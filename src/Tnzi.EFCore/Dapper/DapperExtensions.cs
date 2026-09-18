@@ -7,36 +7,27 @@ namespace Tnzi.EFCore.Dapper;
 public static class DapperExtensions
 {
     /// <summary>
-    /// 获取 Dapper 服务（用于执行原始 SQL 和批量操作）
-    /// 优先从 DI 容器获取，如果不存在则创建新实例
+    /// 获取绑定到这个 DbContext 实例的 Dapper 服务（用于执行原始 SQL 和批量操作）
     /// </summary>
+    /// <remarks>
+    /// 恒绑定到传入的实例：容器里登记的 <see cref="IDapperService"/> 只对应首个 DbContext 类型，
+    /// 多 DbContext 场景下拿它会把语句路由到另一个上下文。应用容器经
+    /// <c>DbContextServiceResolver</c> 取（EF 内部容器看不到应用服务，此前 <c>IConfiguration</c>
+    /// 与工作单元管理器在这条路径上一律取不到）。
+    /// </remarks>
     /// <param name="dbContext">数据库上下文</param>
     /// <returns>Dapper 服务</returns>
     public static IDapperService GetDapper(this DbContext dbContext)
     {
-        var serviceProvider = dbContext.Database.GetService<IServiceProvider>();
-        if (serviceProvider == null && dbContext is IInfrastructure<IServiceProvider> infra)
-        {
-            serviceProvider = infra.Instance;
-        }
-        if (serviceProvider == null)
-        {
-            throw new InvalidOperationException("Cannot get IServiceProvider from DbContext");
-        }
-        
-        // 优先从 DI 容器获取 IDapperService（如果已注册）
-        // 注意：IDapperService 是 scoped 的，每个 DbContext 类型对应一个实例
-        var dapperService = serviceProvider.GetService<IDapperService>();
-        if (dapperService != null)
-        {
-            return dapperService;
-        }
-        
-        // 如果 DI 容器中没有，则创建新实例（向后兼容）
-        var configuration = serviceProvider.GetService<IConfiguration>();
+        Check.NotNull(dbContext);
+
+        var serviceProvider = DbContextServiceResolver.GetServiceProvider(dbContext);
+        var configuration = serviceProvider?.GetService<IConfiguration>();
+        var unitOfWorkManager = serviceProvider?.GetService<IUnitOfWorkManager>();
+        var unitOfWork = serviceProvider?.GetService<IUnitOfWork>();
         var databaseProvider = Providers.DapperDatabaseProviderFactory.CreateFromDbContext(dbContext, configuration);
-        
-        return new DapperService(dbContext, databaseProvider);
+
+        return new DapperService(dbContext, databaseProvider, unitOfWorkManager, unitOfWork);
     }
 
     /// <summary>

@@ -82,8 +82,11 @@ public class SubAgentTypeService : ApplicationService, ISubAgentTypeService
     }
 
     /// <summary>
-    /// 从数据库整表重载已启用的类型到注册表（不能逐条 Unregister，理由见接口注释）。
+    /// 从数据库整桶重载已启用的类型到注册表（不能逐条 Unregister，理由见接口注释）。
+    /// 只重载当前租户的桶：注册表是进程级单例，仓储受本作用域的租户过滤，
+    /// 不带租户键的整表重载会清掉其它租户的类型、并把本租户的定义暴露给全体。
     /// </summary>
     private Task ReloadRegistryAsync(CancellationToken cancellationToken)
-        => _registry.LoadFromStoreAsync(_repository, cancellationToken);
+        => _registry.LoadTenantFromStoreAsync(
+            _repository, SubAgentTenantKey.From(ServiceProvider.GetService<ICurrentTenant>()?.Id), cancellationToken);
 }

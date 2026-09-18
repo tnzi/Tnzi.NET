@@ -56,4 +56,13 @@ public class DefaultSigningRequestAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "signing.request.update")]
     public virtual async Task<ApiResult> Void(Guid id, CancellationToken cancellationToken)
         => (await Requests.VoidAsync(id, cancellationToken)).ToApiResult();
+
+    /// <summary>
+    /// 重新密封：收件人已全部签完、而最后那次提交里的密封失败（请求停在 InProgress）时的恢复动作。
+    /// 已密封的请求拒绝再密封（哈希只算一次）。
+    /// </summary>
+    [HttpPost("{id:guid}/seal")]
+    [ApiAuthorize(PermissionName = "signing.request.update")]
+    public virtual async Task<ApiResult<EnvelopeDto>> Seal(Guid id, CancellationToken cancellationToken)
+        => (await Requests.SealAsync(id, cancellationToken)).ToApiResult();
 }

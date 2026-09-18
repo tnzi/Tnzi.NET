@@ -86,34 +86,33 @@ public abstract class ApiControllerBase : ControllerBase
     }
 
     /// <summary>
-    /// 模型验证错误响应
+    /// 模型验证错误响应。message 与 errorDetails 的取法和全局 <c>ModelStateValidationFilter</c> 相同
+    /// （<see cref="MvcExtensions.ValidationMessage"/> / <see cref="MvcExtensions.GetValidationErrors"/>）。
     /// </summary>
     /// <typeparam name="T">数据类型</typeparam>
-    /// <param name="message">错误消息（可选，默认使用第一个验证错误）</param>
+    /// <param name="message">错误消息（可选，默认使用第一个验证错误；一条可读的都没有时为 "Validation failed"）</param>
     /// <returns>API结果</returns>
     protected ApiResult<T> ValidationError<T>(string? message = null)
     {
-        var errors = ModelState.GetValidationErrors();
         return ApiResult<T>.Error(
-            message ?? ModelState.FirstError() ?? "Validation failed",
+            message ?? ModelState.ValidationMessage(),
             400,
             null,
-            errors);
+            ModelState.GetValidationErrors());
     }
 
     /// <summary>
-    /// 模型验证错误响应（无数据）
+    /// 模型验证错误响应（无数据）。取法同 <see cref="ValidationError{T}"/>。
     /// </summary>
-    /// <param name="message">错误消息（可选，默认使用第一个验证错误）</param>
+    /// <param name="message">错误消息（可选，默认使用第一个验证错误；一条可读的都没有时为 "Validation failed"）</param>
     /// <returns>API结果</returns>
     protected ApiResult ValidationError(string? message = null)
     {
-        var errors = ModelState.GetValidationErrors();
         return ApiResult.Error(
-            message ?? ModelState.FirstError() ?? "Validation failed",
+            message ?? ModelState.ValidationMessage(),
             400,
             null,
-            errors);
+            ModelState.GetValidationErrors());
     }
 
     /// <summary>

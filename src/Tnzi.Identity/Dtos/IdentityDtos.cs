@@ -12,7 +12,7 @@ public class RefreshTokenDto
     public string RefreshToken { get; set; } = null!;
 }
 
-public class LoginDto
+public class LoginDto : ICaptchaSubmission
 {
     /// <summary>
     /// 用户名/邮箱/手机号（根据配置支持不同登录方式）
@@ -35,9 +35,15 @@ public class LoginDto
     /// 验证码（当启用登录验证码时必填）
     /// </summary>
     public string? CaptchaCode { get; set; }
+
+    /// <summary>
+    /// 人机验证令牌（统一控件产出的不透明字符串，任意提供商）。自适应登录验证码被要求时必填。
+    /// 与 <see cref="CaptchaId"/> + <see cref="CaptchaCode"/> 二选一，两者都给时以本字段为准。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
 }
 
-public class RegisterDto
+public class RegisterDto : ICaptchaSubmission
 {
     /// <summary>
     /// 用户名（可选，如果不提供且配置了 DefaultUserNameFromEmail，将使用邮箱作为用户名）
@@ -67,6 +73,12 @@ public class RegisterDto
     public string? CaptchaCode { get; set; }
 
     /// <summary>
+    /// 人机验证令牌（统一控件产出的不透明字符串，任意提供商）。启用注册验证码时必填。
+    /// 与 <see cref="CaptchaId"/> + <see cref="CaptchaCode"/> 二选一，两者都给时以本字段为准。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
+
+    /// <summary>
     /// 名字（可选）
     /// </summary>
     public string? FirstName { get; set; }
@@ -80,11 +92,23 @@ public class RegisterDto
 /// <summary>
 /// 忘记密码请求DTO
 /// </summary>
-public class ForgotPasswordDto
+public class ForgotPasswordDto : ICaptchaSubmission
 {
     [Required]
     [EmailAddress]
     public string Email { get; set; } = null!;
+
+    /// <summary>
+    /// 人机验证令牌。启用 <c>Identity:Captcha:EnableCaptchaOnPasswordRecovery</c> 时必填：
+    /// 这个端点每次调用都真的发一封邮件，与发码端点同属花钱的匿名入口。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
+
+    /// <summary>图形验证码 ID（历史形式，与 <see cref="CaptchaToken"/> 二选一）。</summary>
+    public string? CaptchaId { get; set; }
+
+    /// <summary>图形验证码答案（历史形式）。</summary>
+    public string? CaptchaCode { get; set; }
 }
 
 /// <summary>
@@ -104,30 +128,53 @@ public class ResetPasswordDto
 }
 
 /// <summary>
-/// 验证码DTO
+/// 带人机验证的请求。两种提交形式：<see cref="ICaptchaProtectedRequest.CaptchaToken"/>（任意提供商的不透明令牌，
+/// 前端统一控件产出）或 <see cref="CaptchaId"/> + <see cref="CaptchaCode"/>（内置图形验证码的历史形式，
+/// 仍然接受，服务端拼成 <c>id:code</c> 令牌）。两者都给时以 <c>CaptchaToken</c> 为准。
 /// </summary>
+public interface ICaptchaSubmission : ICaptchaProtectedRequest
+{
+    /// <summary>图形验证码 ID（历史形式）。</summary>
+    string? CaptchaId { get; }
+
+    /// <summary>图形验证码答案（历史形式）。</summary>
+    string? CaptchaCode { get; }
+}
+
+/// <summary>
+/// 人机验证挑战 DTO。随 <see cref="ErrorCodes.IDENTITY_CAPTCHA_REQUIRED"/> 一并下发，也是 <c>GET /auth/captcha/{purpose}/json</c> 的响应。
+/// </summary>
+/// <remarks>
+/// <see cref="Provider"/> 告诉前端该渲染什么：<c>image</c> 时带 <see cref="CaptchaId"/> + <see cref="ImageBase64"/>；
+/// 其它提供商只有 <see cref="Provider"/>，前端按 <c>/auth/config</c> 里的 <c>captcha</c> 客户端配置渲染对应控件。
+/// </remarks>
 public class CaptchaDto
 {
     /// <summary>
-    /// 验证码ID（提交时需要返回）
+    /// 生效的提供商名（<c>image</c> / <c>turnstile</c> / <c>altcha</c> …）。
     /// </summary>
-    public string CaptchaId { get; set; } = string.Empty;
+    public string Provider { get; set; } = IdentityConstants.ImageCaptchaProvider;
 
     /// <summary>
-    /// 验证码图片Base64编码
+    /// 图形验证码 ID（提交时需要返回）。只有 <c>image</c> 提供商有值。
     /// </summary>
-    public string ImageBase64 { get; set; } = string.Empty;
+    public string? CaptchaId { get; set; }
 
     /// <summary>
-    /// 验证码过期时间（秒）
+    /// 图形验证码 PNG 的 Base64（不带 data-uri 前缀）。只有 <c>image</c> 提供商有值。
     /// </summary>
-    public int ExpirationSeconds { get; set; }
+    public string? ImageBase64 { get; set; }
+
+    /// <summary>
+    /// 图形验证码过期时间（秒）。只有 <c>image</c> 提供商有值。
+    /// </summary>
+    public int? ExpirationSeconds { get; set; }
 }
 
 /// <summary>
 /// 发送快速注册验证码请求DTO
 /// </summary>
-public class SendQuickRegisterCodeDto
+public class SendQuickRegisterCodeDto : ICaptchaSubmission
 {
     /// <summary>
     /// 邮箱地址（邮箱快速注册时必填）
@@ -148,6 +195,12 @@ public class SendQuickRegisterCodeDto
     /// 验证码（当启用注册图形验证码时必填）
     /// </summary>
     public string? CaptchaCode { get; set; }
+
+    /// <summary>
+    /// 人机验证令牌（统一控件产出的不透明字符串，任意提供商）。启用注册验证码时必填，发送短信 / 邮件之前校验。
+    /// 与 <see cref="CaptchaId"/> + <see cref="CaptchaCode"/> 二选一，两者都给时以本字段为准。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
 }
 
 /// <summary>
@@ -240,7 +293,7 @@ public class SetPasswordDto
 /// <summary>
 /// 重发邮箱确认邮件请求DTO
 /// </summary>
-public class ResendEmailConfirmationDto
+public class ResendEmailConfirmationDto : ICaptchaSubmission
 {
     /// <summary>
     /// 用户ID（与 Email 二选一）
@@ -251,6 +304,18 @@ public class ResendEmailConfirmationDto
     /// 邮箱地址（与 UserId 二选一）
     /// </summary>
     public string? Email { get; set; }
+
+    /// <summary>
+    /// 人机验证令牌。启用 <c>Identity:Captcha:EnableCaptchaOnRegister</c> 时必填：
+    /// 重发确认邮件与注册发码一样，每次调用都真的发一封邮件。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
+
+    /// <summary>图形验证码 ID（历史形式，与 <see cref="CaptchaToken"/> 二选一）。</summary>
+    public string? CaptchaId { get; set; }
+
+    /// <summary>图形验证码答案（历史形式）。</summary>
+    public string? CaptchaCode { get; set; }
 }
 
 

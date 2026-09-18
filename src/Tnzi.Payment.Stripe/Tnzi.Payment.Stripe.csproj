@@ -15,4 +15,8 @@
     <PackageReference Include="Stripe.net" Version="52.3.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.Payment.Stripe.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

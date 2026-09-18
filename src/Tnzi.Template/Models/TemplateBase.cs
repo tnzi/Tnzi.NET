@@ -12,6 +12,12 @@ public abstract class TemplateBase : RazorEngineTemplateBase
     public HtmlHelper Html => new(this);
 
     /// <summary>
+    /// 这份输出要不要 HTML 编码。本类（HTML 输出）为 true；
+    /// <see cref="PlainTextTemplateBase"/>（主题、短信）为 false。编码是出口的属性，不是引擎的。
+    /// </summary>
+    protected virtual bool EncodesOutput => true;
+
+    /// <summary>
     /// 写出一个 <c>@expression</c> 的值：默认 <b>HTML 编码</b>，
     /// 只有 <see cref="RawContent"/>（即 <see cref="Raw"/> / <c>Html.Raw</c> 的产物）原样输出。
     /// </summary>
@@ -31,7 +37,7 @@ public abstract class TemplateBase : RazorEngineTemplateBase
     {
         if (obj is null)
             return;
-        if (obj is RawContent)
+        if (!EncodesOutput || obj is RawContent)
         {
             base.Write(obj);
             return;
@@ -49,7 +55,7 @@ public abstract class TemplateBase : RazorEngineTemplateBase
     /// </remarks>
     public override void WriteAttributeValue(string prefix, int prefixOffset, object? value, int valueOffset, int valueLength, bool isLiteral)
     {
-        if (isLiteral || value is RawContent)
+        if (isLiteral || !EncodesOutput || value is RawContent)
         {
             base.WriteAttributeValue(prefix, prefixOffset, value, valueOffset, valueLength, isLiteral);
             return;

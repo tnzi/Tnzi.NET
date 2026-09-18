@@ -49,10 +49,16 @@ public class SubscriptionCancellationIntegrationTests : SubscriptionsIntegration
         InScopeAsync<ISubscriptionService, Result>(
             svc => svc.CancelSubscriptionAsync(id, new CancelSubscriptionDto { Reason = "test", Immediate = immediate }));
 
+    /// <summary>
+    /// 立即取消：状态与结束时间落下、计费锁释放，但「已付到何时」（NextBillingTime）必须原样保留 ——
+    /// 它是恢复时唯一能据以判断「要不要再收一次钱」的记录。计费时钟由 Status 停下：
+    /// 续费扫描按状态排除 Cancelled，即便到期也不会碰它。
+    /// </summary>
     [Fact]
-    public async Task ImmediateCancel_MovesToCancelledAndStopsTheBillingClock()
+    public async Task ImmediateCancel_MovesToCancelledAndKeepsThePaidThroughDate()
     {
         var subscription = await SeedSubscriptionAsync();
+        var paidThrough = subscription.NextBillingTime!.Value;
 
         (await CancelAsync(subscription.Id, immediate: true)).Succeeded.ShouldBeTrue();
 
@@ -60,9 +66,21 @@ public class SubscriptionCancellationIntegrationTests : SubscriptionsIntegration
         reloaded!.Status.ShouldBe(SubscriptionStatus.Cancelled);
         reloaded.CancelReason.ShouldBe("test");
         reloaded.EndTime.ShouldNotBeNull();
-        reloaded.NextBillingTime.ShouldBeNull();
+        reloaded.NextBillingTime!.Value.ShouldBe(paidThrough, TimeSpan.FromSeconds(1));
         // 取消完成即释放计费锁，否则后台扫描白等一个锁窗口
         reloaded.BillingLockedUntil.ShouldBeNull();
+
+        // 已取消的订阅到期也不续费
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
+            var entity = ctx.Set<Subscription>().First(s => s.Id == subscription.Id);
+            entity.NextBillingTime = DateTime.UtcNow.AddMinutes(-1);
+            await ctx.SaveChangesAsync();
+        }
+
+        var renewed = await InScopeAsync<ISubscriptionService, Result<int>>(svc => svc.RenewExpiredSubscriptionsAsync());
+        renewed.Data.ShouldBe(0);
     }
 
     [Fact]

@@ -3,12 +3,15 @@ import type { HttpClient } from '../../src/http/http';
 import {
   isStepUpRequired,
   stepUpScopeOf,
+  sendStepUpCode,
   stepUpWithCode,
   stepUpWithPasskey,
   withStepUp,
   STEP_UP_REQUIRED,
 } from '../../src/services/identity/step-up';
 import { TwoFactorType } from '../../src/services/identity/metadata';
+import { normalizeApiResult, ensureOk } from '../../src/http/response';
+import { HttpError } from '../../src/errors/api-error';
 
 // ---------------------------------------------------------------------------
 // Step-up sits on top of a valid session, so the failure modes are subtle:
@@ -33,8 +36,28 @@ function createClient(overrides: Partial<Record<'get' | 'post', unknown>> = {}) 
   } as unknown as HttpClient;
 }
 
+/**
+ * The challenge exactly as `[RequireStepUp]` puts it on the wire and
+ * `HttpClient` normalises it: details travel under `errorDetails`, never
+ * `errors`. Built from JSON on purpose - a hand-written object here is how the
+ * previous fixture came to assert a field the backend never emits.
+ */
 function challenge(scope = 'tip.download') {
-  return { errorCode: STEP_UP_REQUIRED, code: 401, errors: { scope } };
+  return normalizeApiResult(
+    JSON.parse(
+      `{"succeeded":false,"success":false,"code":401,"message":"This action requires re-authentication","errorCode":"${STEP_UP_REQUIRED}","errorDetails":{"scope":"${scope}"}}`,
+    ),
+  );
+}
+
+/** The same challenge after a bridge has run it through `ensureOk` and thrown. */
+function thrownChallenge(scope = 'tip.download'): unknown {
+  try {
+    ensureOk(challenge(scope));
+  } catch (error) {
+    return error;
+  }
+  throw new Error('ensureOk did not throw');
 }
 
 function grant(scope = 'tip.download') {
@@ -73,9 +96,68 @@ describe('isStepUpRequired', () => {
 });
 
 describe('stepUpScopeOf', () => {
-  it('reads the scope the server named', () => {
+  it('reads the scope from the wire envelope (errorDetails.scope)', () => {
     expect(stepUpScopeOf(challenge('tip.destroy'))).toBe('tip.destroy');
     expect(stepUpScopeOf({ errorCode: STEP_UP_REQUIRED })).toBeUndefined();
+  });
+
+  it('reads the scope off the thrown shape the admin bridges produce', () => {
+    // `ensureOk` must keep the code and the details on what it throws:
+    // every ui-admin bridge goes through it, so a bare `Error(message)` would
+    // make step-up unrecognisable on that whole path.
+    const thrown = thrownChallenge('tip.destroy');
+    expect(thrown).toBeInstanceOf(HttpError);
+    expect(isStepUpRequired(thrown)).toBe(true);
+    expect(stepUpScopeOf(thrown)).toBe('tip.destroy');
+  });
+});
+
+describe('verify calls are auth-flow requests', () => {
+  // A wrong code answers 401 (the backend deliberately says the same thing
+  // for every failed verification). Without `skipAuthRefresh` the client would
+  // refresh, automatically re-submit the SAME wrong code (counted as a second
+  // failure server-side), and then log the user out.
+  it('stepUpWithCode posts with skipAuthRefresh', async () => {
+    const post = vi.fn(() => ok(grant()));
+    const client = createClient({ post });
+
+    await stepUpWithCode(client, 'tip.download', '123456', TwoFactorType.Totp);
+
+    expect(post).toHaveBeenCalledWith(
+      expect.stringContaining('/step-up/code'),
+      expect.anything(),
+      expect.objectContaining({ skipAuthRefresh: true }),
+    );
+  });
+
+  it('sendStepUpCode posts with skipAuthRefresh', async () => {
+    const post = vi.fn(() => ok('a***@example.com'));
+    const client = createClient({ post });
+
+    await sendStepUpCode(client, TwoFactorType.Email);
+
+    expect(post).toHaveBeenCalledWith(
+      expect.stringContaining('/step-up/send-code'),
+      expect.anything(),
+      expect.objectContaining({ skipAuthRefresh: true }),
+    );
+  });
+
+  it('stepUpWithPasskey posts the grant request with skipAuthRefresh', async () => {
+    givenBrowserSupportsPasskeys({ toJSON: () => ({ id: 'cred-1' }) });
+    const post = vi.fn((url: string) =>
+      url.includes('assert/begin')
+        ? ok({ optionsJson: '{}', stateId: 'state-1' })
+        : ok(grant()),
+    );
+    const client = createClient({ post });
+
+    await stepUpWithPasskey(client, 'tip.download');
+
+    const grantCall = (post.mock.calls as unknown as Array<[string, unknown, unknown]>).find(
+      ([url]) => url.includes('/step-up/passkey'),
+    );
+    expect(grantCall?.[2]).toEqual(expect.objectContaining({ skipAuthRefresh: true }));
   });
 });
 
@@ -90,6 +172,7 @@ describe('stepUpWithCode', () => {
     expect(post).toHaveBeenCalledWith(
       expect.stringContaining('/step-up/code'),
       { code: '123456', type: TwoFactorType.Totp, scope: 'tip.download' },
+      expect.objectContaining({ skipAuthRefresh: true }),
     );
   });
 
@@ -118,6 +201,7 @@ describe('stepUpWithPasskey', () => {
     expect(post).toHaveBeenCalledWith(
       expect.stringContaining('/step-up/passkey'),
       expect.objectContaining({ stateId: 'state-1', scope: 'tip.download' }),
+      expect.objectContaining({ skipAuthRefresh: true }),
     );
   });
 
@@ -182,7 +266,7 @@ describe('withStepUp', () => {
   it('verifies once and retries the original action', async () => {
     const action = vi
       .fn()
-      .mockRejectedValueOnce(challenge())
+      .mockRejectedValueOnce(thrownChallenge())
       .mockResolvedValueOnce('done');
     const verify = vi.fn(() => Promise.resolve(grant()));
 
@@ -193,7 +277,7 @@ describe('withStepUp', () => {
 
   it('retries only once, so a grant that never sticks does not loop', async () => {
     // Looping would re-prompt forever without ever telling the user what is wrong.
-    const action = vi.fn(() => Promise.reject(challenge()));
+    const action = vi.fn(() => Promise.reject(thrownChallenge()));
     const verify = vi.fn(() => Promise.resolve(grant()));
 
     await expect(withStepUp(action, verify)).rejects.toMatchObject({ errorCode: STEP_UP_REQUIRED });
@@ -204,7 +288,7 @@ describe('withStepUp', () => {
   it('rethrows the challenge when the user aborts verification', async () => {
     // Returning null means "not done". Swallowing it would look like success
     // to the caller while nothing actually happened.
-    const action = vi.fn(() => Promise.reject(challenge()));
+    const action = vi.fn(() => Promise.reject(thrownChallenge()));
     const verify = vi.fn(() => Promise.resolve(null));
 
     await expect(withStepUp(action, verify)).rejects.toMatchObject({ errorCode: STEP_UP_REQUIRED });

@@ -52,4 +52,19 @@ describe('user list status column, against the wire spelling of pendingActions',
   it('still accepts the numeric form, for a caller or deployment that sends it', () => {
     expect(labelOf({ pendingActions: 1 })).toBe('admin.identity.users.status.invited');
   });
+
+  // The backend names two composites and serialises an exact match as that single
+  // name. A local table without them parsed "Obligations" to 0 and rendered an
+  // account owing all three obligations as plain "active".
+  it('reads the named composite "Obligations" as owing a password change', () => {
+    expect(labelOf({ pendingActions: 'Obligations' })).toBe(
+      'admin.identity.users.status.mustChangePassword'
+    );
+  });
+
+  it('reads the named composite "Blocking" as an un-accepted invitation', () => {
+    expect(labelOf({ pendingActions: 'Blocking', isLockedOut: true })).toBe(
+      'admin.identity.users.status.invited'
+    );
+  });
 });

@@ -2,12 +2,18 @@
 namespace Tnzi.AI.Channels.Adapters.Discord;
 
 /// <summary>
-/// Discord 频道适配器 - 通过 HTTP REST API 收发消息，支持 Webhook/Gateway 事件接收。
+/// Discord 频道适配器 - 通过 HTTP REST API 收发消息，入站走 Interactions 回调（斜杠命令）。
 /// </summary>
 /// <remarks>
 /// 使用纯 HTTP API 调用（无 Discord.NET SDK 依赖）：
-/// - POST /channels/{id}/messages: 发送消息（纯文本；文件附件管线已于 2026-06-20 移除）
-/// - 事件接收通过 Webhook/Gateway 由 Controller 调用 ProcessWebhookAsync
+/// - 入站：Discord 签过名的 HTTP 回调<b>只会投递 Interaction</b>（type=2 斜杠命令等），频道消息
+///   （MESSAGE_CREATE）只在 WebSocket Gateway 上分发，框架不带 Gateway 客户端。斜杠命令三秒内先答
+///   type=5（延迟应答），回复凭交互令牌 PATCH 回原消息。消费方须在 Discord 开发者门户注册斜杠命令：
+///   带一个字符串参数的命令（如 <c>/ask prompt</c>）映射为聊天，无参数命令（<c>/new</c> / <c>/status</c> / <c>/help</c>）映射为命令路由。
+/// - 出站：带交互令牌 → PATCH /webhooks/{app}/{token}/messages/@original（后续分块 POST /webhooks/{app}/{token}）；
+///   否则 POST /channels/{id}/messages（纯文本；文件附件管线已于 2026-06-20 移除）
+/// - <see cref="HandleEventAsync(string, CancellationToken)"/> 还接受 Gateway 分发帧（MESSAGE_CREATE），
+///   供自带 Gateway 客户端的消费方转发；<see cref="ProcessWebhookAsync"/> 不接受该形状（Discord 从不会 POST 它）
 /// </remarks>
 public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
@@ -210,24 +216,176 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             return WebhookProcessResult.Rejected("Discord PublicKey not configured");
         }
 
-        // 验签通过后再处理 Interactions PING（type=1）→ PONG（type=1）。
-        if (IsPing(rawBody))
+        // 验签通过后按 Interaction 类型分发：PING（type=1）→ PONG；APPLICATION_COMMAND（type=2）→
+        // 发布入站 + 延迟应答（type=5，Discord 要求三秒内应答，agent 回复远不止三秒）。
+        // ★ 此前这里只认 Gateway 分发帧 { "t": "MESSAGE_CREATE", "d": {...} }：那是 WebSocket 的形状，
+        // Discord 从不会 POST 它；真实的斜杠命令验签通过后被静默忽略、答 200 空 body，
+        // 用户看到的是 "The application did not respond"。
+        switch (ReadInteractionType(rawBody))
         {
-            return WebhookProcessResult.Challenge("{\"type\":1}");
+            case InteractionTypePing:
+                return WebhookProcessResult.Challenge("{\"type\":1}");
+            case InteractionTypeApplicationCommand:
+                // 只有真的进了入站管线才延迟应答：不在允许名单里（或载荷没法用）的交互此前也答 type=5 却从不跟进，
+                // 用户看到 "thinking..." 十五分钟直到令牌过期。拒绝当场答 type=4 的临时消息（flags 64，只有本人可见）。
+                return await HandleInteractionAsync(rawBody, ct) switch
+                {
+                    InteractionOutcome.Published => WebhookProcessResult.Challenge("{\"type\":5}"),
+                    InteractionOutcome.NotAllowed => WebhookProcessResult.Challenge(EphemeralReply("You are not allowed to use this bot here.")),
+                    _ => WebhookProcessResult.Challenge(EphemeralReply("This command could not be processed."))
+                };
+            default:
+                _logger.LogDebug("Discord webhook payload is not a supported interaction; ignoring");
+                return WebhookProcessResult.Accepted();
         }
-
-        await HandleEventCoreAsync(rawBody, ct);
-        return WebhookProcessResult.Accepted();
     }
 
-    private static bool IsPing(string body)
+    private const int InteractionTypePing = 1;
+    private const int InteractionTypeApplicationCommand = 2;
+    private const int InteractionCallbackChannelMessage = 4;
+    private const int MessageFlagEphemeral = 64;
+
+    /// <summary>一条交互的去向：进了入站管线 / 被允许名单拒绝 / 载荷用不了（缺字段、解析失败）。</summary>
+    private enum InteractionOutcome
+    {
+        Published,
+        NotAllowed,
+        Unusable
+    }
+
+    /// <summary>type=4 + flags 64：当场回一条只有发起人看得见的消息。</summary>
+    private static string EphemeralReply(string content)
+        => JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["type"] = InteractionCallbackChannelMessage,
+            ["data"] = new Dictionary<string, object?> { ["content"] = content, ["flags"] = MessageFlagEphemeral }
+        });
+    private const int OptionTypeSubCommand = 1;
+    private const int OptionTypeSubCommandGroup = 2;
+    private const int OptionTypeString = 3;
+
+    /// <summary>读取 Interaction.type；不是 Interaction（无数字 type）时返回 null。</summary>
+    private static int? ReadInteractionType(string body)
     {
         try
         {
             using var doc = JsonDocument.Parse(body);
-            return doc.RootElement.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.Number && t.GetInt32() == 1;
+            // ValueKind 必须先判定：Gateway 载荷里 type 可能是非数字，裸 GetInt32() 会抛异常
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("type", out var t)
+                   && t.ValueKind == JsonValueKind.Number
+                ? t.GetInt32()
+                : null;
         }
-        catch (JsonException) { return false; }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// 把一条 APPLICATION_COMMAND 交互映射为入站消息：字符串参数拼成聊天文本，无字符串参数的命令
+    /// 映射为 <c>/{name}</c> 走命令路由；交互令牌与应用 ID 随 Metadata 带出，供出站按交互回复。
+    /// </summary>
+    private async Task<InteractionOutcome> HandleInteractionAsync(string interactionJson, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(interactionJson);
+            var root = doc.RootElement;
+
+            var channelId = root.TryGetProperty("channel_id", out var ch) ? ch.GetString() ?? "" : "";
+            var guildId = root.TryGetProperty("guild_id", out var g) ? g.GetString() : null;
+            var token = root.TryGetProperty("token", out var tk) ? tk.GetString() : null;
+            var applicationId = root.TryGetProperty("application_id", out var app) ? app.GetString() : null;
+            var userId = ReadInteractionUserId(root);
+
+            if (string.IsNullOrWhiteSpace(channelId) || string.IsNullOrWhiteSpace(userId)) return InteractionOutcome.Unusable;
+            if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object) return InteractionOutcome.Unusable;
+
+            var commandName = data.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+            if (string.IsNullOrWhiteSpace(commandName)) return InteractionOutcome.Unusable;
+
+            var stringValues = new List<string>();
+            CollectStringOptions(data, stringValues);
+            var text = stringValues.Count > 0 ? string.Join(" ", stringValues) : "/" + commandName;
+
+            if (guildId != null && !IsGuildAllowed(guildId))
+            {
+                _logger.LogDebug("Discord interaction from non-allowed guild {GuildId}, rejecting", guildId);
+                return InteractionOutcome.NotAllowed;
+            }
+
+            if (!IsChannelAllowed(channelId))
+            {
+                _logger.LogDebug("Discord interaction from non-allowed channel {ChannelId}, rejecting", channelId);
+                return InteractionOutcome.NotAllowed;
+            }
+
+            if (!IsUserAllowed(userId))
+            {
+                _logger.LogDebug("Discord interaction from non-allowed user {UserId}, rejecting", userId);
+                return InteractionOutcome.NotAllowed;
+            }
+
+            Dictionary<string, object>? metadata = null;
+            if (!string.IsNullOrWhiteSpace(token) && !string.IsNullOrWhiteSpace(applicationId))
+            {
+                metadata = new Dictionary<string, object>
+                {
+                    [DiscordInteractionMetadata.Token] = token,
+                    [DiscordInteractionMetadata.ApplicationId] = applicationId
+                };
+            }
+
+            var inbound = new InboundMessage(
+                ChannelName: Name,
+                ChatId: channelId,
+                UserId: userId,
+                Text: text,
+                Type: text.StartsWith('/') ? InboundMessageType.Command : InboundMessageType.Chat,
+                Metadata: metadata);
+
+            await _bus.PublishInboundAsync(inbound, ct);
+            return InteractionOutcome.Published;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to process Discord interaction");
+            return InteractionOutcome.Unusable;
+        }
+    }
+
+    /// <summary>群内交互带 member.user，私信交互带 user。</summary>
+    private static string ReadInteractionUserId(JsonElement root)
+    {
+        if (root.TryGetProperty("member", out var member)
+            && member.TryGetProperty("user", out var memberUser)
+            && memberUser.TryGetProperty("id", out var mid))
+        {
+            return mid.GetString() ?? "";
+        }
+
+        return root.TryGetProperty("user", out var user) && user.TryGetProperty("id", out var uid)
+            ? uid.GetString() ?? ""
+            : "";
+    }
+
+    /// <summary>递归收集命令参数里的字符串值（子命令 / 子命令组会再嵌一层 options）。</summary>
+    private static void CollectStringOptions(JsonElement node, List<string> values)
+    {
+        if (!node.TryGetProperty("options", out var options) || options.ValueKind != JsonValueKind.Array) return;
+
+        foreach (var option in options.EnumerateArray())
+        {
+            var type = option.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.Number ? t.GetInt32() : 0;
+            if (type is OptionTypeSubCommand or OptionTypeSubCommandGroup)
+            {
+                CollectStringOptions(option, values);
+            }
+            else if (type == OptionTypeString && option.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                var value = v.GetString();
+                if (!string.IsNullOrWhiteSpace(value)) values.Add(value);
+            }
+        }
     }
 
     private async Task HandleEventCoreAsync(string eventJson, CancellationToken ct)
@@ -237,14 +395,17 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             using var doc = JsonDocument.Parse(eventJson);
             var root = doc.RootElement;
 
-            // Discord Interactions 验证 ping（type=1）。ValueKind 必须先判定：Gateway 载荷里
-            // type 可能是非数字（甚至字符串），裸 GetInt32() 会抛异常并被外层 catch 静默吞掉。
-            if (root.TryGetProperty("type", out var typeEl)
-                && typeEl.ValueKind == JsonValueKind.Number
-                && typeEl.GetInt32() == 1)
-                return; // Controller 层处理 ping 响应
+            // Interaction（type 为数字）：PING 由控制器层应答；斜杠命令按交互映射；其它交互类型忽略。
+            if (root.TryGetProperty("type", out var typeEl) && typeEl.ValueKind == JsonValueKind.Number)
+            {
+                if (typeEl.GetInt32() == InteractionTypeApplicationCommand)
+                {
+                    await HandleInteractionAsync(eventJson, ct);
+                }
+                return;
+            }
 
-            // Gateway 事件格式: { "t": "MESSAGE_CREATE", "d": { ... } }
+            // Gateway 分发帧: { "t": "MESSAGE_CREATE", "d": { ... } } —— 只有自带 Gateway 客户端的消费方会转发进来
             var eventType = root.TryGetProperty("t", out var tEl) ? tEl.GetString() : null;
             if (eventType != "MESSAGE_CREATE") return;
 
@@ -262,12 +423,9 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             var guildId = data.TryGetProperty("guild_id", out var g) ? g.GetString() : null;
             var messageId = data.TryGetProperty("id", out var mid) ? mid.GetString() : null;
 
-            // Discord 线程：message_reference 表示回复，thread 的 channel 本身就是线程 ID
-            var threadId = data.TryGetProperty("message_reference", out var msgRef) &&
-                           msgRef.TryGetProperty("channel_id", out var refCh)
-                ? refCh.GetString()
-                : null;
-
+            // Discord 线程：thread 的 channel_id 本身就是线程，ChatId 已把回复路由进线程；
+            // ThreadTs 只承担 message_reference 引用，必须是这条消息自己的 id
+            //（message_reference.channel_id 是频道 id，拿它当 message_id 回复必错）。
             if (string.IsNullOrWhiteSpace(text)) return;
 
             // Guild 白名单
@@ -298,7 +456,7 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 UserId: userId,
                 Text: text,
                 Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
-                ThreadTs: threadId ?? messageId);
+                ThreadTs: messageId);
 
             await _bus.PublishInboundAsync(inbound, ct);
         }
@@ -310,14 +468,71 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
+        Func<string, CancellationToken, Task> sendChunk;
+        if (TryGetInteraction(message.Metadata, out var applicationId, out var interactionToken))
+        {
+            // 交互回复：第一块 PATCH 延迟应答的原消息，后续分块作为 follow-up 追加。
+            // 「已填过原消息」只在 PATCH 成功后才置位：发送前就翻转会让第一块的瞬时失败重试成 POST follow-up，
+            // 答案变成一条后续消息，原来的斜杠命令停在 "thinking..." 直到令牌过期。
+            var originalFilled = false;
+            sendChunk = async (chunk, token) =>
+            {
+                await PostInteractionReplyAsync(applicationId, interactionToken, chunk, editOriginal: !originalFilled, token);
+                originalFilled = true;
+            };
+        }
+        else
+        {
+            sendChunk = (chunk, token) => PostMessageAsync(message.ChatId, chunk, message.ThreadTs, token);
+        }
+
         return ChannelSendHelper.SendChunkedWithRetryAsync(
             message.Text,
             _options.MaxMessageLength,
             _options.MaxRetries,
-            (chunk, token) => PostMessageAsync(message.ChatId, chunk, message.ThreadTs, token),
+            sendChunk,
             _logger,
             Name,
             ct);
+    }
+
+    private static bool TryGetInteraction(Dictionary<string, object>? metadata, out string applicationId, out string interactionToken)
+    {
+        applicationId = string.Empty;
+        interactionToken = string.Empty;
+        if (metadata is null) return false;
+        if (!metadata.TryGetValue(DiscordInteractionMetadata.ApplicationId, out var app) || app is not string appId || string.IsNullOrWhiteSpace(appId)) return false;
+        if (!metadata.TryGetValue(DiscordInteractionMetadata.Token, out var tok) || tok is not string token || string.IsNullOrWhiteSpace(token)) return false;
+        applicationId = appId;
+        interactionToken = token;
+        return true;
+    }
+
+    /// <summary>
+    /// 凭交互令牌回复：<c>PATCH /webhooks/{app}/{token}/messages/@original</c> 填充延迟应答，
+    /// <c>POST /webhooks/{app}/{token}</c> 追加后续分块。Webhook 端点以令牌鉴权，不带 Bot 授权头。
+    /// </summary>
+    private async Task PostInteractionReplyAsync(string applicationId, string interactionToken, string content, bool editOriginal, CancellationToken ct)
+    {
+        var client = CreateClient();
+        var url = editOriginal
+            ? $"{BaseUrl}/webhooks/{applicationId}/{interactionToken}/messages/@original"
+            : $"{BaseUrl}/webhooks/{applicationId}/{interactionToken}";
+
+        using var request = new HttpRequestMessage(editOriginal ? HttpMethod.Patch : HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(new Dictionary<string, object?> { ["content"] = content })
+        };
+
+        var response = await client.SendAsync(request, ct);
+        var responseBody = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Discord interaction reply ({Method}) HTTP error: {StatusCode} {Body}",
+                request.Method, response.StatusCode, responseBody);
+            throw new HttpRequestException($"Discord API returned {response.StatusCode}");
+        }
     }
 
     public ValueTask DisposeAsync()

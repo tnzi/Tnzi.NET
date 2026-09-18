@@ -70,8 +70,13 @@ public class FunctionModule : FullAuditedEntity<Guid>
     public Guid? ParentId { get; set; }
 
     /// <summary>
-    /// 获取或设置 父模块
+    /// 获取或设置 父模块。
+    /// [JsonIgnore]:模块树/模块列表端点直接返回实体,查询带跟踪,父子模块进同一个
+    /// 变更跟踪器后 EF fix-up 会同时填上本导航与 <see cref="Children"/>,不忽略则
+    /// 序列化陷入 Parent↔Children 循环直接 500(与 <see cref="ModuleFunction.FunctionModule"/> 同规)。
+    /// 前端只读 <see cref="ParentId"/>。
     /// </summary>
+    [JsonIgnore]
     public virtual FunctionModule? Parent { get; set; }
 
     /// <summary>

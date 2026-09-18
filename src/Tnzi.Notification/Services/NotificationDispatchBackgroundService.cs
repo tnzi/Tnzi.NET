@@ -58,12 +58,21 @@ namespace Tnzi.Notification.Services;
 /// <b>失败只记日志不崩服务</b> —— 与框架其它遥测/派发后台服务同款取舍：一批失败丢这一批，
 /// 下一轮扫描会再次遇到它（状态没推进），而让整个后台服务崩掉会让所有后续批次都停摆。
 /// </para>
+/// <para>
+/// ★★ <b>多租户开启时逐租户跑。</b><c>Message</c> 的全局过滤器是严格等值 <c>TenantId == 当前租户</c>，
+/// 而这个后台作用域里没有租户 —— 三遍扫描此前看到的只有 host 级（<c>TenantId == null</c>）的消息，
+/// 每个租户的卡住批次 / 到期定时消息 / 延后的收件人一条都扫不到，且零日志。修法与
+/// <c>FileCleanupService</c> / <c>DataDestructionService</c> 的 <c>ForEachTenantAsync</c> 同形：
+/// 先跨租户取出候选消息的租户清单，再逐个 <c>ICurrentTenant.Change</c> 切进去跑三遍认领与续发，
+/// 让过滤器在该租户范围内照常生效 —— 不是关掉过滤器。
+/// </para>
 /// </remarks>
 public class NotificationDispatchBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptionsMonitor<NotificationOptions> _options;
     private readonly ILogger<NotificationDispatchBackgroundService> _logger;
+    private readonly bool _multiTenancyEnabled;
 
     /// <summary>
     /// 启动后的首次扫描延迟。给宿主留出完成迁移与预热的时间：启动瞬间就去抢一批
@@ -74,11 +83,13 @@ public class NotificationDispatchBackgroundService : BackgroundService
     public NotificationDispatchBackgroundService(
         IServiceProvider serviceProvider,
         IOptionsMonitor<NotificationOptions> options,
-        ILogger<NotificationDispatchBackgroundService> logger)
+        ILogger<NotificationDispatchBackgroundService> logger,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     /// <inheritdoc />
@@ -133,6 +144,42 @@ public class NotificationDispatchBackgroundService : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var sp = scope.ServiceProvider;
         var repository = sp.GetRequiredService<IRepository<Message, Guid>>();
+
+        var pacer = new SendPacer(dispatch.RatePerMinute);
+
+        if (!_multiTenancyEnabled)
+        {
+            // 单一逻辑租户：TenantId 列被框架 Ignore，按租户分组没有意义，直接跑一轮。
+            await RecoverOnceInCurrentTenantAsync(sp, dispatch, pacer, cancellationToken);
+            return;
+        }
+
+        // ★ 租户清单要跨租户取（IgnoreQueryFilters），否则这一句本身就被过滤成「只有 host」。
+        // 只取三遍扫描会关心的两种状态；候选是不是真的到期 / 真的卡住，由切进去之后的那三遍按原判据决定。
+        var tenantIds = await repository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(m => m.Status == NotificationStatus.Sending || m.Status == NotificationStatus.Scheduled)
+            .Select(m => m.TenantId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var currentTenant = sp.GetRequiredService<ICurrentTenant>();
+        foreach (var tenantId in tenantIds)
+        {
+            if (cancellationToken.IsCancellationRequested) return;
+
+            using (currentTenant.Change(tenantId))
+            {
+                await RecoverOnceInCurrentTenantAsync(sp, dispatch, pacer, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>在当前租户（或单租户部署的唯一逻辑租户）里跑三遍认领并续发。</summary>
+    private async Task RecoverOnceInCurrentTenantAsync(
+        IServiceProvider sp, DispatchOptions dispatch, SendPacer pacer, CancellationToken cancellationToken)
+    {
+        var repository = sp.GetRequiredService<IRepository<Message, Guid>>();
         var sender = sp.GetRequiredService<INotificationService>();
 
         var cutoff = DateTime.UtcNow.AddMinutes(-Math.Max(1, dispatch.StuckAfterMinutes));
@@ -146,8 +193,6 @@ public class NotificationDispatchBackgroundService : BackgroundService
 
         if (stuck.Count == 0 && due.Count == 0 && deferred.Count == 0)
             return;
-
-        var pacer = new SendPacer(dispatch.RatePerMinute);
 
         foreach (var messageId in stuck.Concat(due).Concat(deferred))
         {

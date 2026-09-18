@@ -12,7 +12,7 @@
  */
 import { computed } from 'vue'
 import { NModal, NImage, NButton } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TOverlayTheme, TSvgIcon } from '@tnzi/ui'
 import { fileGlyph, isImageType } from '../file-icons'
 import type { FileRecordDto } from '@tnzi/core/services/storage'
 
@@ -49,6 +49,8 @@ function close(): void {
 </script>
 
 <template>
+  <!-- The overlay provider: global light/dark mode + small controls. -->
+  <TOverlayTheme>
   <NModal
     :show="show"
     preset="card"
@@ -105,6 +107,7 @@ function close(): void {
       </div>
     </template>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <style scoped>

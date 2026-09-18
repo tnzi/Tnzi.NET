@@ -261,31 +261,53 @@ public static class StringExtensions
     #region 验证
 
     /// <summary>
-    /// 验证是否为有效的邮箱地址
+    /// 邮箱长度上限（RFC 5321 的 254）。校验是公开原语，常挂在匿名端点的模型绑定上，
+    /// 超长输入在进正则之前就拒绝。
+    /// </summary>
+    public const int MaxEmailLength = 254;
+
+    /// <summary>
+    /// 手机号（含国家码、分隔符与分机号）的长度上限；同上，超长直接拒绝。
+    /// </summary>
+    public const int MaxPhoneNumberLength = 48;
+
+    /// <summary>
+    /// 校验用正则一律走 <see cref="RegexOptions.NonBacktracking"/>：模式里相邻的可选分隔符量词彼此重叠
+    /// （空白同属 <c>\s</c> 与 <c>[.\-\s]</c>），回溯引擎对失败输入是平方到立方级；线性引擎把每次匹配
+    /// 钉在 O(n)，与长度闸门一起构成两道互不依赖的上限。
+    /// </summary>
+    private static readonly Regex EmailRegex = new(
+        @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+
+    private static readonly Regex NanpPhoneRegex = new(
+        @"^(?:(?:\+1\s*(?:[.\-\s]*)?)?(?:\(?([2-9][0-9]{2})\)?|\s*([2-9][0-9]{2})\s*)(?:[.\-\s]*)?)?([2-9][0-9]{2})(?:[.\-\s]*)?([0-9]{4})(?:\s*(?:#|x|ext|extension)\s*(\d+))?$",
+        RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+
+    private static readonly Regex LoosePhoneRegex = new(@"^1\d{10}$", RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// 验证是否为有效的邮箱地址（长度超过 <see cref="MaxEmailLength"/> 直接视为无效）
     /// </summary>
     public static bool IsEmail(this string str)
     {
-        if (string.IsNullOrEmpty(str))
+        if (string.IsNullOrEmpty(str) || str.Length > MaxEmailLength)
             return false;
 
-        const string pattern = @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$";
-        return Regex.IsMatch(str, pattern);
+        return EmailRegex.IsMatch(str);
     }
 
-
     /// <summary>
-    /// 是否手机号码
+    /// 是否手机号码（长度超过 <see cref="MaxPhoneNumberLength"/> 直接视为无效）
     /// </summary>
     /// <param name="value"></param>
-    /// <param name="isRestrict">是否按严格格式验证</param>
+    /// <param name="isRestrict">true = 北美 NANP 格式（可带 +1、括号、分隔符与分机号）；false = 以 1 开头的 11 位数字</param>
     public static bool IsPhoneNumber(this string value, bool isRestrict = true)
     {
-        if (value.IsNullOrEmpty()) return false;
+        if (value.IsNullOrEmpty() || value.Length > MaxPhoneNumberLength)
+            return false;
 
-        string pattern = isRestrict
-        ? @"^(?:(?:\+1\s*(?:[.\-\s]*)?)?(?:\(?([2-9][0-9]{2})\)?|\s*([2-9][0-9]{2})\s*)(?:[.\-\s]*)?)?([2-9][0-9]{2})(?:[.\-\s]*)?([0-9]{4})(?:\s*(?:#|x|ext|extension)\s*(\d+))?$"
-        : @"^[1]\d{10}$";
-        return Regex.IsMatch(value, pattern);
+        return (isRestrict ? NanpPhoneRegex : LoosePhoneRegex).IsMatch(value);
     }
 
     /// <summary>

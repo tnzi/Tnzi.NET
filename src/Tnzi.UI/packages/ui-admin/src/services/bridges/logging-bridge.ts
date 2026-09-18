@@ -15,6 +15,7 @@
  */
 
 import { useAdminLogFileApi } from '@tnzi/core/services/logging'
+import { ensureOk } from '../_mappers'
 import type {
   LogLevelInfoDto,
   LogFileInfoDto,
@@ -60,9 +61,13 @@ export function createLoggingBridge(deps: LoggingBridgeDeps = {}): LoggingBridge
 
   // ApiResult-unwrap helper - every endpoint returns `{ data, code, success, message }`;
   // the page only needs `.data`, mirroring how `system-bridge` unwraps its
-  // sub-contracts.
+  // sub-contracts. A refused envelope (403, module disabled) throws with the
+  // SERVER'S reason first; the generic "empty response" is only for a 2xx that
+  // carried no payload - before 2026-09-12 both cases surfaced as the generic
+  // text and the operator could not tell a permission problem from a bug.
   const unwrap = async <T>(p: Promise<{ data?: T | null } | undefined | null>): Promise<T> => {
     const r = await p
+    ensureOk(r)
     if (!r || r.data == null) {
       throw new Error('Empty response from log file API')
     }

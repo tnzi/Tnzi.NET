@@ -143,30 +143,107 @@ public class FileVersionService : ApplicationService, IFileVersionService
         //   把调用方给的名字写进了 FileName，派生等于把那份污染再传一代（见 StorageKeyHelper）。
         var versionFileName = StorageKeyHelper.NewKey(fileRecord.Extension);
         var filePath = await _storage.UploadAsync(versionFileName, content, fileRecord.ContentType);
-        var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
-        // 创建新版本记录
-        var newVersionRecord = new FileVersion
+        // 对象已交给 provider，从这里起任何一步抛出都要把它删掉：版本行没落成的对象没有任何记录
+        // 指向它，孤儿回收（按 FileRecord 枚举）永远看不见 —— 与父模块 SaveAsync 同一形状。
+        try
         {
-            FileId = fileId,
-            Version = newVersion,
-            Path = filePath,
-            Size = size,
-            Md5Hash = md5Hash,
-            Description = description,
-            IsCurrent = true
-        };
+            var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
-        await _versionRepository.InsertAsync(newVersionRecord, cancellationToken);
+            // 创建新版本记录
+            var newVersionRecord = new FileVersion
+            {
+                FileId = fileId,
+                Version = newVersion,
+                Path = filePath,
+                Size = size,
+                Md5Hash = md5Hash,
+                Description = description,
+                IsCurrent = true
+            };
 
-        // 更新文件记录的路径和大小
-        fileRecord.Path = filePath;
-        fileRecord.Size = size;
-        fileRecord.Md5Hash = md5Hash;
-        await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
+            await _versionRepository.InsertAsync(newVersionRecord, cancellationToken);
 
-        LogInformation("File version created: FileId: {FileId}, Version: {Version}", fileId, newVersion);
-        return Ok(MapToDto(newVersionRecord), $"File version {newVersion} created successfully");
+            // 更新文件记录的路径和大小
+            fileRecord.Path = filePath;
+            fileRecord.Size = size;
+            fileRecord.Md5Hash = md5Hash;
+            var staleThumbnail = ResetThumbnail(fileRecord);
+            await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
+            await RequestStaleThumbnailDeletionAsync(fileRecord, staleThumbnail, cancellationToken);
+
+            LogInformation("File version created: FileId: {FileId}, Version: {Version}", fileId, newVersion);
+            return Ok(MapToDto(newVersionRecord), $"File version {newVersion} created successfully");
+        }
+        catch
+        {
+            await DiscardUploadedObjectAsync(filePath);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 删掉一个交给了 provider 却没有任何记录指向的对象。删除失败只记日志：调用方正在把原异常抛出去，
+    /// 不能让收拾现场的异常把它盖掉。
+    /// </summary>
+    private async Task DiscardUploadedObjectAsync(string path)
+    {
+        try
+        {
+            await _storage.DeleteAsync(path);
+        }
+        catch (Exception ex)
+        {
+            LogWarning("Failed to discard uploaded object {Path} after an aborted version write: {Error}", path, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 换掉记录指向的字节之后，缩略图不能停在旧内容上：清掉 <see cref="FileRecord.ThumbnailPath"/>，
+    /// 把旧对象的路径交回给调用方，由它在行更新落库**之后**经 <see cref="RequestStaleThumbnailDeletionAsync"/> 处理。
+    /// </summary>
+    /// <remarks>
+    /// 缩略图是按版本之前的字节生成的，版本记录本身不存缩略图，所以建版本 / 还原版本之后它只有两种归宿：
+    /// 继续发旧图（<c>/thumbnail</c> 永远显示第一版），或者不发。这里选后者：404 是诚实的，旧图是错的。
+    /// ★ 对象不在这里删：此前先删对象再更新行，更新或提交失败时行仍指向一个已删除的对象，
+    /// <c>/thumbnail</c> 从此答 500（provider 抛 <c>FileNotFoundException</c>）而不是 404。
+    /// </remarks>
+    private static string? ResetThumbnail(FileRecord fileRecord)
+    {
+        var stale = fileRecord.ThumbnailPath;
+        fileRecord.ThumbnailPath = null;
+        return string.IsNullOrEmpty(stale) ? null : stale;
+    }
+
+    /// <summary>
+    /// 行更新已落库之后，请求删除旧缩略图对象。走模块自己的约定 <see cref="FileDeleteRequestedEvent"/>
+    /// （事务感知，提交之后才处理）；宿主没有事件总线时退回就地删除 —— 此时也已经在更新之后。
+    /// 删除失败只记日志：记录已不再指向它，清理任务会按孤儿对象再兜一次。
+    /// </summary>
+    private async Task RequestStaleThumbnailDeletionAsync(FileRecord fileRecord, string? stale, CancellationToken cancellationToken)
+    {
+        if (stale == null)
+            return;
+
+        if (EventBus != null)
+        {
+            await EventBus.PublishAsync(new FileDeleteRequestedEvent
+            {
+                FileId = fileRecord.Id,
+                ThumbnailPath = stale,
+                Provider = fileRecord.Provider ?? _storage.ProviderName
+            }, cancellationToken);
+            return;
+        }
+
+        try
+        {
+            await _storage.DeleteAsync(stale);
+        }
+        catch (Exception ex)
+        {
+            LogWarning("Failed to delete stale thumbnail {Path} of file {FileId}: {Error}", stale, fileRecord.Id, ex.Message);
+        }
     }
 
     public async Task<Result<IEnumerable<FileVersionDto>>> GetVersionsAsync(Guid fileId, CancellationToken cancellationToken = default)
@@ -231,7 +308,9 @@ public class FileVersionService : ApplicationService, IFileVersionService
         fileRecord.Path = targetVersion.Path;
         fileRecord.Size = targetVersion.Size;
         fileRecord.Md5Hash = targetVersion.Md5Hash;
+        var staleThumbnail = ResetThumbnail(fileRecord);
         await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
+        await RequestStaleThumbnailDeletionAsync(fileRecord, staleThumbnail, cancellationToken);
 
         LogInformation("File version restored: FileId: {FileId}, Version: {Version}", fileId, version);
         return Ok(fileRecord, $"File restored to version {version}");
@@ -253,7 +332,26 @@ public class FileVersionService : ApplicationService, IFileVersionService
             return Fail<Stream>($"Version {version} has no stored content for file {fileId}", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var stream = await _storage.DownloadAsync(targetVersion.Path);
+        await PublishVersionDownloadedAsync(fileId, version);
         return Ok(stream);
+    }
+
+    /// <summary>
+    /// 历史版本下载是一次完整内容读取，与 <c>download</c> 路由一样要发 <see cref="FileAccessType.Download"/>。
+    /// 版本的字节存在版本自己的键下，不经 <c>IFileStorageService</c> 取流，所以这是父模块之外唯一的发布点；
+    /// <see cref="FileAccessedEvent.Version"/> 让审计分得开「当前内容」与「某个历史版本」。
+    /// </summary>
+    private async Task PublishVersionDownloadedAsync(Guid fileId, int version)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new FileAccessedEvent
+        {
+            FileId = fileId,
+            AccessType = FileAccessType.Download,
+            Version = version
+        });
     }
 
     public async Task<Result> DeleteVersionAsync(Guid fileId, int version, CancellationToken cancellationToken = default)

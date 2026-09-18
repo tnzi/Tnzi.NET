@@ -54,6 +54,20 @@ public class RequestTrackingOptions
     public int MaxResponseBodyLength { get; set; } = 1024;
 
     /// <summary>
+    /// 请求体 / 响应体的<b>采集上界</b>（字节），默认 64 KB。超过它的体不读进内存、日志里只留一个标记。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="MaxRequestBodyLength"/> / <see cref="MaxResponseBodyLength"/> 是两个概念：
+    /// 那两个是<b>展示截断</b>，裁剪的是已经读进内存的字符串；这个是<b>读侧的闸门</b>，决定读不读。
+    /// 此前只有前者，于是打开体日志之后一次 100 MB 的上传或下载就是几百 MB 的临时对象（2026-09-12 修复）。
+    /// 超过的体刻意不记一半：截断过的 JSON 无法脱敏。
+    /// </remarks>
+    [RuntimeSetting(Label = "Max Captured Body Bytes", I18n = "admin.modules.system.settings.fields.maxCapturedBodyBytes",
+        Type = SettingFieldType.Int, Min = 0,
+        Description = "Bodies larger than this are not read into the log at all; only a marker is written. Display truncation is a separate setting.")]
+    public int MaxCapturedBodyBytes { get; set; } = 64 * 1024;
+
+    /// <summary>
     /// 是否记录响应时间
     /// </summary>
     public bool LogResponseTime { get; set; } = true;

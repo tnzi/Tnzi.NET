@@ -1,4 +1,4 @@
-
+﻿
 namespace Tnzi.Identity.Data;
 
 /// <summary>
@@ -8,6 +8,8 @@ namespace Tnzi.Identity.Data;
 /// <typeparam name="TDbContext">派生的 DbContext 类型</typeparam>
 public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Role, Guid, UserClaim, UserRole, UserLogin, RoleClaim, UserToken>
     , IMultiTenancySwitchProvider
+    , IQueryFilterContext
+    , IAuditPropertyContext
     where TDbContext : DbContext
 {
     protected ICurrentUser CurrentUser { get; }
@@ -35,12 +37,16 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         : base(options)
     {
         CurrentUser = Check.NotNull(currentUser);
-        CurrentTenant = currentTenant;
-        DataFilterManager = dataFilterManager;
-        TimeProvider = timeProvider;
-        // 注入值优先；设计期（dotnet ef）没有容器，回退到工厂从 appsettings 读出的值。
-        // 与 TnziDbContext 走同一处解析：两份各自的三元表达式漂开时不会有任何东西报错。
-        _multiTenancyEnabled = DesignTimeMultiTenancy.Resolve(multiTenancyOptions?.Value.Enabled);
+        // 三个可选协作者与下面的开关同一个根因：消费方只声明 (options, currentUser)，这里的实参恒为 null。
+        // 注入值缺席时从 options 携带的应用容器解析；手工构造（设计期）没有容器，仍是 null。
+        // 与 TnziDbContext 走同一处（DbContextCollaborators），两个基类必须给出同一个答案。
+        CurrentTenant = DbContextCollaborators.Resolve(currentTenant, options);
+        DataFilterManager = DbContextCollaborators.Resolve(dataFilterManager, options);
+        TimeProvider = DbContextCollaborators.Resolve(timeProvider, options);
+        // 显式转发的选项优先；否则读 options 里的 MultiTenancyOptionsExtension（AddTnziDbContext 与
+        // DesignTimeDbContextFactoryBase 共同写入的载体）。与 TnziDbContext 走同一处解析：
+        // 两份各自的三元表达式漂开时不会有任何东西报错。见 MultiTenancySwitch。
+        _multiTenancyEnabled = MultiTenancySwitch.Resolve(multiTenancyOptions?.Value.Enabled, options);
     }
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
@@ -65,6 +71,43 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         {
             ConfigureSingleTenantIdentityModel(builder);
         }
+
+        // 4. SQLite 下让 LockoutEnd 可以在 SQL 里做大小比较
+        ConfigureLockoutEndForSqlite(builder);
+    }
+
+    /// <summary>
+    /// SQLite 下把 <c>User.LockoutEnd</c>（<see cref="DateTimeOffset"/>）映射成可比较的 UTC 文本。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ EF Core 的 SQLite 提供者<b>不翻译</b> <see cref="DateTimeOffset"/> 的大小比较（只翻译等值）。
+    /// 框架有三处按 <c>LockoutEnd &lt;= UtcNow</c> / <c>&gt; UtcNow</c> 判「是否仍锁定」的查询
+    /// （用户统计、用户列表的 <c>isLockedOut</c> 筛选、登录安全总览），在 SQLite 部署上一律 500，
+    /// 而 SQLite 是框架宣称支持的提供者。
+    /// </para>
+    /// <para>
+    /// 转换成文本后比较退化成字典序，对<b>同一偏移量</b>的 ISO 文本，字典序 = 时间序，所以写入时归一到 UTC
+    /// （管理员经 JSON 传进来的 <c>LockoutEnd</c> 可以带 <c>+08:00</c>）。文本格式与 Microsoft.Data.Sqlite 自己写
+    /// <see cref="DateTimeOffset"/> 时用的逐字相同（<c>yyyy-MM-dd HH:mm:ss.FFFFFFFzzz</c>，列类型仍是 TEXT），
+    /// 所以既有的 SQLite 库<b>零迁移</b>、既有行照常读回；差别只在此前带非零偏移量写入的行读回来是 UTC 表示的同一瞬间。
+    /// 刻意不用 <c>DateTimeOffsetToBinaryConverter</c>：它把列改成 INTEGER，对既有库是一次数据迁移。
+    /// </para>
+    /// <para>
+    /// 只作用于 SQLite；其它提供者原生支持该类型的比较，一字不动。这是 ASP.NET Identity 自带的列，
+    /// 也是框架实体里唯一的 <see cref="DateTimeOffset"/> 属性，消费方自己的 <see cref="DateTimeOffset"/> 列不在此列。
+    /// </para>
+    /// </remarks>
+    protected virtual void ConfigureLockoutEndForSqlite(ModelBuilder builder)
+    {
+        if (EntityConfigurationContext.GetDatabaseProviderFromDbContext(this) != DatabaseProvider.Sqlite)
+        {
+            return;
+        }
+
+        builder.Entity<User>()
+            .Property(u => u.LockoutEnd)
+            .HasConversion(SqliteUtcDateTimeOffsetConverter.Instance);
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
@@ -150,45 +193,19 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         });
     }
 
-    // 缓存泛型方法实例，避免每次调用 MakeGenericMethod
-    private static readonly ConcurrentDictionary<Type, MethodInfo> SoftDeleteFilterMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo> MultiTenantFilterMethodCache = new();
-
-    // 基础方法缓存（非泛型）
-    private static readonly MethodInfo? BaseSoftDeleteFilterMethod = typeof(IdentityDbContext<TDbContext>)
-        .GetMethod(nameof(ConfigureSoftDeleteFilter), BindingFlags.NonPublic | BindingFlags.Instance);
-
-    private static readonly MethodInfo? BaseMultiTenantFilterMethod = typeof(IdentityDbContext<TDbContext>)
-        .GetMethod(nameof(ConfigureMultiTenantFilter), BindingFlags.NonPublic | BindingFlags.Instance);
-
     /// <summary>
-    /// 配置查询过滤器 (软删除和多租户)
+    /// 配置查询过滤器（软删除和多租户）。实现与 <c>TnziDbContext</c> 共用
+    /// （<see cref="TnziDbContextHelper.ConfigureQueryFilters"/>）：同时是 <c>ISoftDelete + IMultiTenant</c>
+    /// 的实体得到<b>一条</b>组合过滤器。
     /// </summary>
+    /// <remarks>
+    /// ★ 此前本类自己维护一套并对这类实体两次裸调 <c>HasQueryFilter</c>（软删一次、租户一次）。
+    /// EF Core 的无名 <c>HasQueryFilter</c> 是覆盖式的，多租户一开，租户过滤器顶掉软删过滤器，
+    /// 已软删的行（含已收回的授权）对所有查询重新可见。
+    /// </remarks>
     protected virtual void ConfigureQueryFilters(ModelBuilder builder)
     {
-        foreach (var entityType in builder.Model.GetEntityTypes())
-        {
-            var clrType = entityType.ClrType;
-
-            if (typeof(ISoftDelete).IsAssignableFrom(clrType))
-            {
-                var method = GetOrCreateSoftDeleteFilterMethod(clrType);
-                method?.Invoke(this, new object[] { builder });
-            }
-
-            if (typeof(IMultiTenant).IsAssignableFrom(clrType))
-            {
-                if (_multiTenancyEnabled)
-                {
-                    var method = GetOrCreateMultiTenantFilterMethod(clrType);
-                    method?.Invoke(this, new object[] { builder });
-                }
-                else
-                {
-                    builder.Entity(clrType).Ignore(nameof(IMultiTenant.TenantId));
-                }
-            }
-        }
+        TnziDbContextHelper.ConfigureQueryFilters(this, builder, _multiTenancyEnabled);
     }
 
     /// <summary>
@@ -203,30 +220,6 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
         builder.Ignore<Tenant>();
     }
 
-    /// <summary>
-    /// 获取或创建软删除过滤器的泛型方法实例
-    /// </summary>
-    private static MethodInfo? GetOrCreateSoftDeleteFilterMethod(Type entityType)
-    {
-        if (BaseSoftDeleteFilterMethod == null)
-            return null;
-
-        return SoftDeleteFilterMethodCache.GetOrAdd(entityType,
-            type => BaseSoftDeleteFilterMethod.MakeGenericMethod(type));
-    }
-
-    /// <summary>
-    /// 获取或创建多租户过滤器的泛型方法实例
-    /// </summary>
-    private static MethodInfo? GetOrCreateMultiTenantFilterMethod(Type entityType)
-    {
-        if (BaseMultiTenantFilterMethod == null)
-            return null;
-
-        return MultiTenantFilterMethodCache.GetOrAdd(entityType,
-            type => BaseMultiTenantFilterMethod.MakeGenericMethod(type));
-    }
-
     protected virtual bool IsSoftDeleteFilterEnabled => DataFilterManager?.IsEnabled<ISoftDeleteFilter>() ?? true;
     protected virtual bool IsMultiTenantFilterEnabled => _multiTenancyEnabled && (DataFilterManager?.IsEnabled<IMultiTenantFilter>() ?? true);
 
@@ -235,17 +228,33 @@ public abstract class IdentityDbContext<TDbContext> : IdentityDbContext<User, Ro
     /// </summary>
     protected virtual Guid? GetCurrentTenantId() => CurrentTenant?.Id ?? CurrentUser?.TenantId;
 
-    protected void ConfigureSoftDeleteFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete
-        => modelBuilder.Entity<T>().HasQueryFilter(e => !IsSoftDeleteFilterEnabled || !e.IsDeleted);
+    // 过滤器表达式经这个契约访问上面三个成员；显式实现让子类对 protected virtual 的覆写照常生效。
+    bool IQueryFilterContext.IsSoftDeleteFilterEnabled => IsSoftDeleteFilterEnabled;
+    bool IQueryFilterContext.IsMultiTenantFilterEnabled => IsMultiTenantFilterEnabled;
+    Guid? IQueryFilterContext.CurrentTenantId => GetCurrentTenantId();
+
+    // 绕过变更跟踪器的写入路径（Dapper 批量插入 / 更新）经这个契约取到与 SaveChanges 同一组协作者。
+    ICurrentUser IAuditPropertyContext.CurrentUser => CurrentUser;
+    ICurrentTenant? IAuditPropertyContext.CurrentTenant => CurrentTenant;
+    TimeProvider? IAuditPropertyContext.TimeProvider => TimeProvider;
 
     /// <summary>
-    /// 配置多租户查询过滤器
+    /// 单独为一个实体配置软删过滤器（<see cref="ConfigureQueryFilters"/> 已覆盖全部实体；保留给需要逐个实体覆写的子类）。
+    /// </summary>
+    protected void ConfigureSoftDeleteFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete
+        => QueryFilterHelper.ApplySoftDeleteFilter(this, modelBuilder, typeof(T));
+
+    /// <summary>
+    /// 单独为一个实体配置多租户过滤器。
     /// </summary>
     protected void ConfigureMultiTenantFilter<T>(ModelBuilder modelBuilder) where T : class, IMultiTenant
-    {
-        modelBuilder.Entity<T>().HasQueryFilter(e =>
-            !IsMultiTenantFilterEnabled || e.TenantId == GetCurrentTenantId());
-    }
+        => QueryFilterHelper.ApplyMultiTenantFilter(this, modelBuilder, typeof(T));
+
+    /// <summary>
+    /// 单独为一个实体配置组合过滤器（软删 + 多租户）。
+    /// </summary>
+    protected void ConfigureCombinedFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete, IMultiTenant
+        => QueryFilterHelper.ApplyCombinedFilter(this, modelBuilder, typeof(T));
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

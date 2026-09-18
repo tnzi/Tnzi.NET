@@ -94,7 +94,10 @@ public class ModuleBootTests
         // deployment that merely references the package.
         await using var provider = (await ComposeAsync(enabled: false)).Provider;
 
-        var hosted = provider.GetServices<IHostedService>().OfType<BackgroundService>().ToList();
+        var hosted = provider.GetServices<IHostedService>().OfType<BackgroundService>()
+            // 只数本模块自己的三个：模块图里的 Tnzi.AI 也带 BackgroundService（AgentDefinitionSyncService），它不受 AI:Cli:Enabled 门控。
+            .Where(s => s.GetType().Namespace?.StartsWith("Tnzi.AI.Cli", StringComparison.Ordinal) == true)
+            .ToList();
         hosted.Count.ShouldBe(3);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));

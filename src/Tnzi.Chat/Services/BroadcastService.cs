@@ -161,12 +161,13 @@ public class BroadcastService : ApplicationService, IBroadcastService
         return Ok(delivered, DeliverySummary(delivered, failed));
     }
 
-    /// <summary>四个字段任一越界时给出说明，合法时 <see langword="null"/>。</summary>
+    /// <summary>受限字段（内容 / 标题 / 链接 / 分类 / 来源）任一越界时给出说明，合法时 <see langword="null"/>。</summary>
     private static string? TooLong(ChatNotification notification)
         => ChatFieldLimits.Exceeded(notification.Content, ChatFieldLimits.MessageContent, "Notification content")
            ?? ChatFieldLimits.Exceeded(notification.Title, ChatFieldLimits.Title, "Notification title")
            ?? ChatFieldLimits.Exceeded(notification.LinkUrl, ChatFieldLimits.LinkUrl, "Notification link")
-           ?? ChatFieldLimits.Exceeded(notification.Category, ChatFieldLimits.Category, "Notification category");
+           ?? ChatFieldLimits.Exceeded(notification.Category, ChatFieldLimits.Category, "Notification category")
+           ?? ChatFieldLimits.Exceeded(notification.Source, ChatFieldLimits.BroadcastSource, "Notification source");
 
     /// <summary>投递结果的一句话说明。全部成功时不说话（免得每次广播都带一句噪音）。</summary>
     private static string? DeliverySummary(int delivered, int failed)

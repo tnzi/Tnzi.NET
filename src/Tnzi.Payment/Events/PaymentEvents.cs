@@ -46,6 +46,13 @@ public class PaymentCompletedEvent : EventBase
     public string? ExternalTradeNo { get; set; }
 
     /// <summary>
+    /// 付款人（<c>Payment.UserId</c>；off-session 扣款为发起方传入的用户，匿名建单为 null）。
+    /// 业务状态机据此核对「付的人是不是这条业务记录的主人」——
+    /// <see cref="ExtraData"/> 只是路由键，用户面建单端点也能填，不能拿它当凭据。
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
     /// 业务类型（用于将事件路由到对应业务状态机，如订阅）
     /// </summary>
     public BusinessType BusinessType { get; set; }
@@ -87,6 +94,13 @@ public class PaymentFailedEvent : EventBase
     public string? ErrorCode { get; set; }
 
     /// <summary>
+    /// 付款人（<c>Payment.UserId</c>；off-session 扣款为发起方传入的用户，匿名建单为 null）。
+    /// 业务状态机据此核对「付的人是不是这条业务记录的主人」——
+    /// <see cref="ExtraData"/> 只是路由键，用户面建单端点也能填，不能拿它当凭据。
+    /// </summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>
     /// 业务类型（用于将事件路由到对应业务状态机，如订阅）
     /// </summary>
     public BusinessType BusinessType { get; set; }
@@ -121,6 +135,13 @@ public class PaymentExpiredEvent : EventBase
     /// 过期时间
     /// </summary>
     public DateTime ExpiredTime { get; set; }
+
+    /// <summary>
+    /// 付款人（<c>Payment.UserId</c>；off-session 扣款为发起方传入的用户，匿名建单为 null）。
+    /// 业务状态机据此核对「付的人是不是这条业务记录的主人」——
+    /// <see cref="ExtraData"/> 只是路由键，用户面建单端点也能填，不能拿它当凭据。
+    /// </summary>
+    public Guid? UserId { get; set; }
 
     /// <summary>
     /// 业务类型（用于将事件路由到对应业务状态机，如订阅）

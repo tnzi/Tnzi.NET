@@ -1,6 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createAiBridge } from '../../../src/services/bridges/ai-bridge'
 
+/**
+ * The wire shape every core api returns: `ApiResult<T>` with the DTO in `data`.
+ * The probe DTOs (`{ success, message, latencyMs }`) carry their own `success`
+ * field, so a fixture that returns the bare DTO is not a harmless shortcut: the
+ * envelope helpers read `success` off whatever they are handed, and a bare
+ * `{ success: false }` reads as a refused envelope instead of a failed probe.
+ */
+function ok<T>(data: T) {
+  return { succeeded: true, success: true, code: 200, data, message: '' }
+}
+
 function pagedList<T>(items: T[]) {
   return {
     items,
@@ -116,7 +127,7 @@ function mockProviderApi() {
     create: vi.fn(async (d: unknown) => ({ id: 'p-new', hasApiKey: true, ...(d as object) })),
     update: vi.fn(async (id: string, d: unknown) => ({ id, hasApiKey: false, ...(d as object) })),
     delete: vi.fn(async () => undefined),
-    test: vi.fn(async () => ({ success: true, message: 'ok', latencyMs: 12 })),
+    test: vi.fn(async () => ok({ success: true, message: 'ok', latencyMs: 12 })),
   }
 }
 
@@ -172,7 +183,6 @@ function mockMcpApi() {
       transport: 'http',
       endpoint: '/mcp',
       requireAuthentication: true,
-      rateLimitPerTenant: true,
       rateLimitPerMinute: 60,
       exposedAgentCount: 0,
       customToolCount: 3,
@@ -202,7 +212,7 @@ function mockMcpApi() {
     create: vi.fn(async (d: unknown) => ({ id: 'm-new', hasAuthToken: false, ...(d as object) })),
     update: vi.fn(async (id: string, d: unknown) => ({ id, hasAuthToken: false, ...(d as object) })),
     delete: vi.fn(async () => undefined),
-    test: vi.fn(async () => ({ success: true, message: 'ok', latencyMs: 7 })),
+    test: vi.fn(async () => ok({ success: true, message: 'ok', latencyMs: 7 })),
   }
 }
 
@@ -242,6 +252,67 @@ function makeBridge() {
 }
 
 describe('ai-bridge', () => {
+  describe('rejects with the server message on a failed envelope', () => {
+    // These verbs (rollback / configure / reindex / cleanup, and `create` behind a
+    // non-null-asserted receiver) were outside the write gate's reach, so a refusal
+    // resolved `undefined`: AgentDetail then did `agent.value = undefined` and toasted a
+    // TypeError; Knowledge read `.chunkCount` of undefined.
+    const refused = (message: string) => ({ succeeded: false, success: false, code: 409, data: null, message })
+
+    it('agents.rollbackToVersion / configureAbTest', async () => {
+      const agentApi = {
+        ...mockAgentApi(),
+        rollbackToVersion: vi.fn(async () => refused('version is archived')),
+        configureAbTest: vi.fn(async () => refused('agent is locked')),
+      }
+      const bridge = createAiBridge({ agentApi: agentApi as never, client: {} as never })
+      await expect(bridge.agents.rollbackToVersion('a1', 2)).rejects.toThrow('version is archived')
+      await expect(bridge.agents.configureAbTest('a1', {} as never)).rejects.toThrow('agent is locked')
+    })
+
+    // Threads.vue serialises the export result into a file: a refusal resolved to
+    // `undefined` produced a download whose body was the string `undefined` plus a
+    // success toast.
+    it('threads.exportJson', async () => {
+      const threadApi = { ...mockThreadApi(), exportJson: vi.fn(async () => refused('thread is being archived')) }
+      const bridge = createAiBridge({ threadApi: threadApi as never, client: {} as never })
+      await expect(bridge.threads.exportJson('t1')).rejects.toThrow('thread is being archived')
+    })
+
+    it('knowledgeBases.reindex', async () => {
+      const knowledgeBaseApi = { ...mockKnowledgeBaseApi(), reindex: vi.fn(async () => refused('reindex already running')) }
+      const bridge = createAiBridge({ knowledgeBaseApi: knowledgeBaseApi as never, client: {} as never })
+      await expect(bridge.knowledge.reindex('kb1')).rejects.toThrow('reindex already running')
+    })
+
+    // skillCategories / mcpToolAnalytics are built straight from `deps.client` (no
+    // injectable api), so the refusal is fed through a client whose writes all refuse.
+    it('skillCategories.create / update and mcpToolAnalytics.cleanup', async () => {
+      const client = {
+        get: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: [] })),
+        post: vi.fn(async () => refused('category exists')),
+        put: vi.fn(async () => refused('category locked')),
+        delete: vi.fn(async () => refused('retention too short')),
+      }
+      const bridge = createAiBridge({ client: client as never })
+      await expect(bridge.skillCategories.create({ name: 'x' } as never)).rejects.toThrow('category exists')
+      await expect(bridge.skillCategories.update('c1', { name: 'x' } as never)).rejects.toThrow('category locked')
+      await expect(bridge.mcpToolAnalytics.cleanup(1)).rejects.toThrow('retention too short')
+    })
+
+    // Read-only probes with a non-optional result type: a refused envelope (403/404)
+    // used to hand back `undefined`, and the very next line read `.success` off it, so
+    // Providers / McpServers showed "Cannot read properties of undefined" instead of
+    // the server's reason. Not a false success, but the same masked refusal.
+    it('providers.test / mcpServers.test', async () => {
+      const providerApi = { ...mockProviderApi(), test: vi.fn(async () => refused('provider is disabled')) }
+      const mcpApi = { ...mockMcpApi(), test: vi.fn(async () => refused('server not found')) }
+      const bridge = createAiBridge({ providerApi: providerApi as never, mcpApi: mcpApi as never, client: {} as never })
+      await expect(bridge.providers.test('p1')).rejects.toThrow('provider is disabled')
+      await expect(bridge.mcpServers.test('m1')).rejects.toThrow('server not found')
+    })
+  })
+
   it('throws synchronously when called with no deps (fail-fast at construction)', () => {
     expect(() => createAiBridge()).toThrow(/provide either `client`/)
   })
@@ -283,6 +354,14 @@ describe('ai-bridge', () => {
     expect(agentApi.getList).toHaveBeenCalledWith(expect.objectContaining({ keyword: 'bot' }))
     expect(result.items).toHaveLength(1)
     expect(result.totalCount).toBe(1)
+  })
+
+  it('agents.create / update reject with the server message on a failed envelope', async () => {
+    const refused = { succeeded: false, success: false, code: 400, data: null, message: 'Agent name must be unique' }
+    const agentApi = { ...mockAgentApi(), create: vi.fn(async () => refused), update: vi.fn(async () => refused) }
+    const bridge = createAiBridge({ agentApi: agentApi as never, client: {} as never })
+    await expect(bridge.agents.create({ name: 'X' } as never)).rejects.toThrow('Agent name must be unique')
+    await expect(bridge.agents.update('a1', { name: 'Y' } as never)).rejects.toThrow('Agent name must be unique')
   })
 
   it('agents.create / update / delete delegate to agentApi', async () => {
@@ -450,7 +529,7 @@ describe('ai-bridge', () => {
 
   it('providers.test surfaces failure message in error field', async () => {
     const providerApi = mockProviderApi()
-    providerApi.test.mockResolvedValueOnce({ success: false, message: 'unreachable', latencyMs: 5 })
+    providerApi.test.mockResolvedValueOnce(ok({ success: false, message: 'unreachable', latencyMs: 5 }))
     const bridge = createAiBridge({ providerApi: providerApi as never, client: {} as never })
     const result = await bridge.providers.test('p1')
     expect(result.ok).toBe(false)
@@ -551,7 +630,7 @@ describe('ai-bridge', () => {
 
   it('mcpServers.test maps backend test result {success,message,latencyMs} → UI {ok,latency,error}', async () => {
     const mcpApi = mockMcpApi()
-    mcpApi.test = vi.fn(async () => ({ success: false, message: 'Auth token missing', latencyMs: 12 }))
+    mcpApi.test = vi.fn(async () => ok({ success: false, message: 'Auth token missing', latencyMs: 12 }))
     const bridge = createAiBridge({ mcpApi: mcpApi as never, client: {} as never })
     const result = await bridge.mcpServers.test('m1')
     expect(mcpApi.test).toHaveBeenCalledWith('m1')

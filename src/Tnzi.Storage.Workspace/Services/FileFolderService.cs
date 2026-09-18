@@ -26,6 +26,14 @@ public class FileFolderService : ApplicationService, IFileFolderService
         Check.NotNull(input);
         Check.NotNullOrWhiteSpace(input.Name);
 
+        // 名字要在进入路径拼装之前过形态检查：`archive/alpha` 会在根下造出一条
+        // Path 长在别人前缀里的行，让受害者之后的每一次改名 / 移动都撞唯一索引。
+        var name = input.Name.Trim();
+        if (!FolderNameValidator.IsValid(name))
+        {
+            return Fail<FileFolderDto>(FolderNameValidator.InvalidNameMessage, 400);
+        }
+
         // Validate parent exists if specified
         if (input.ParentId.HasValue)
         {
@@ -40,7 +48,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
         }
 
         // Build path
-        var path = await BuildPathAsync(input.Name, input.ParentId);
+        var path = await BuildPathAsync(name, input.ParentId);
 
         // Check for duplicate path
         var exists = await _folderRepository.AnyAsync(f => f.Path == path && !f.IsDeleted);
@@ -51,7 +59,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
 
         var folder = new FileFolder
         {
-            Name = input.Name.Trim(),
+            Name = name,
             ParentId = input.ParentId,
             Path = path,
             SortOrder = input.SortOrder,
@@ -98,6 +106,11 @@ public class FileFolderService : ApplicationService, IFileFolderService
         {
             Check.NotNullOrWhiteSpace(input.Name);
             var trimmedName = input.Name.Trim();
+            if (!FolderNameValidator.IsValid(trimmedName))
+            {
+                return Fail<FileFolderDto>(FolderNameValidator.InvalidNameMessage, 400);
+            }
+
             if (trimmedName != folder.Name)
             {
                 nameChanged = true;
@@ -110,6 +123,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
 
         // 重名冲突必须在写回实体之前判定：folder 处于 DbContext 跟踪中，
         // 提前赋值会让"校验失败"分支把脏值随外层 UoW 一起提交。
+        List<FileFolder> descendants = [];
         if (nameChanged)
         {
             newPath = await BuildPathAsync(newName, folder.ParentId);
@@ -119,6 +133,14 @@ public class FileFolderService : ApplicationService, IFileFolderService
             if (exists)
             {
                 return Fail<FileFolderDto>("A folder with the same name already exists at this location", 409);
+            }
+
+            // 后代的新路径同样要预检：自身路径空着不代表 `newPath/xxx` 也空着，
+            // 撞上唯一索引的是提交那一刻的 500，而且每次重试都一样。
+            descendants = await PlanDescendantPathsAsync(folder, newPath);
+            if (await DescendantPathsCollideAsync(descendants))
+            {
+                return Fail<FileFolderDto>("Renaming this folder would collide with an existing folder path under the new name", 409);
             }
         }
 
@@ -142,7 +164,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
             // failure cannot leave the tree inconsistent.
             await ExecuteInUnitOfWorkAsync(async ct =>
             {
-                await UpdateDescendantPathsAsync(oldPath, folder.Path);
+                await WriteDescendantPathsAsync(descendants, ct);
                 await _folderRepository.UpdateAsync(folder, ct);
             });
         }
@@ -298,6 +320,13 @@ public class FileFolderService : ApplicationService, IFileFolderService
             return Fail("A folder with the same name already exists at the target location", 409);
         }
 
+        // 后代的新路径同样要预检（理由见 UpdateAsync）。
+        var descendants = await PlanDescendantPathsAsync(folder, newPath);
+        if (await DescendantPathsCollideAsync(descendants))
+        {
+            return Fail("Moving this folder would collide with an existing folder path at the target location", 409);
+        }
+
         folder.ParentId = newParentId;
         folder.Path = newPath;
 
@@ -305,7 +334,7 @@ public class FileFolderService : ApplicationService, IFileFolderService
         // cannot leave the folder tree in an inconsistent state.
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            await UpdateDescendantPathsAsync(oldPath, folder.Path);
+            await WriteDescendantPathsAsync(descendants, ct);
             await _folderRepository.UpdateAsync(folder, ct);
         });
 
@@ -457,23 +486,62 @@ public class FileFolderService : ApplicationService, IFileFolderService
     }
 
     /// <summary>
-    /// Update paths for all descendants when a folder's path changes
+    /// 按 <c>ParentId</c> 闭包逐层取出后代，并把每一条的新路径从父链重建出来（写回 <see cref="FileFolder.Path"/>，
+    /// 但此时还**不落库**）。
     /// </summary>
-    private async Task UpdateDescendantPathsAsync(string oldPath, string newPath)
+    /// <remarks>
+    /// 刻意不用「<c>Path</c> 以旧路径为前缀」这个判据：它把整张表里任何恰好长在这个前缀下的行都当成后代
+    /// 改写掉 —— 而这样的行并不都属于这棵子树（分隔符校验落地之前建出来的存量行就是）。按父链重建还顺带
+    /// 修正与父链不一致的脏路径。
+    /// </remarks>
+    private async Task<List<FileFolder>> PlanDescendantPathsAsync(FileFolder root, string rootNewPath)
     {
-        var prefix = oldPath + "/";
-        var descendants = await _folderRepository.AsQueryable()
-            .Where(f => f.Path.StartsWith(prefix) && !f.IsDeleted)
-            .ToListAsync();
+        var planned = new List<FileFolder>();
+        var newPathById = new Dictionary<Guid, string> { [root.Id] = rootNewPath };
+        var frontier = new List<Guid> { root.Id };
 
-        foreach (var descendant in descendants)
+        while (frontier.Count > 0)
         {
-            descendant.Path = newPath + descendant.Path[oldPath.Length..];
+            var parentIds = frontier;
+            var level = await _folderRepository.AsQueryable()
+                .Where(f => f.ParentId.HasValue && parentIds.Contains(f.ParentId.Value) && !f.IsDeleted)
+                .ToListAsync();
+
+            foreach (var child in level)
+            {
+                var parentPath = newPathById[child.ParentId!.Value];
+                var childPath = $"{parentPath}/{child.Name}";
+                newPathById[child.Id] = childPath;
+                child.Path = childPath;
+                planned.Add(child);
+            }
+
+            frontier = level.Select(f => f.Id).ToList();
         }
 
-        if (descendants.Count > 0)
+        return planned;
+    }
+
+    /// <summary>
+    /// 计划中的后代新路径是否与子树之外的现存目录撞上。撞上就该以 409 回答，
+    /// 而不是把它留给提交时的唯一索引（那是一个每次重试都复现的 500）。
+    /// </summary>
+    private async Task<bool> DescendantPathsCollideAsync(List<FileFolder> planned)
+    {
+        if (planned.Count == 0)
+            return false;
+
+        var ids = planned.Select(f => f.Id).ToList();
+        var paths = planned.Select(f => f.Path).ToList();
+        return await _folderRepository.AnyAsync(
+            f => paths.Contains(f.Path) && !ids.Contains(f.Id) && !f.IsDeleted);
+    }
+
+    private async Task WriteDescendantPathsAsync(List<FileFolder> planned, CancellationToken cancellationToken)
+    {
+        if (planned.Count > 0)
         {
-            await _folderRepository.UpdateManyAsync(descendants);
+            await _folderRepository.UpdateManyAsync(planned, cancellationToken);
         }
     }
 

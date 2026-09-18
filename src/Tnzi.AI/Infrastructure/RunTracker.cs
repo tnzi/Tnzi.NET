@@ -24,6 +24,7 @@ public class RunTracker : IRunTracker
             Status = AgentRunStatus.Running,
             ExecutionMode = resolution.ExecutionMode,
             InputSummary = StringTruncator.Truncate(request.UserMessage, 500),
+            RequestSnapshot = AgentRunRequestSnapshot.From(request).Serialize(),
             ParentRunId = request.ParentRunId,
             RootRunId = request.RootRunId ?? request.ParentRunId,
             LastHeartbeatAt = now
@@ -48,6 +49,8 @@ public class RunTracker : IRunTracker
         run.InputSummary = string.IsNullOrWhiteSpace(run.InputSummary)
             ? StringTruncator.Truncate(request.UserMessage, 500)
             : run.InputSummary;
+        // 只补不覆盖：建行方可能已经记了快照；SpawnAsync 建的行在这里首次拿到快照（它建行时还没有 run.Id）
+        run.RequestSnapshot ??= AgentRunRequestSnapshot.From(request).Serialize();
         run.ParentRunId ??= request.ParentRunId;
         run.RootRunId ??= request.RootRunId ?? request.ParentRunId ?? run.Id;
         run.Status = AgentRunStatus.Running;
@@ -87,6 +90,9 @@ public class RunTracker : IRunTracker
 
     public async Task UpdateRunOnCompletionAsync(AgentRun run, AgentRunResult result, long durationMs, CancellationToken ct)
     {
+        // HistoryMiddleware 在 Run 记录建好之后才建线程：不回填，ResumeAsync 会给续跑的请求一个空 ThreadId，
+        // 续跑在一条没有历史的新线程上进行
+        run.ThreadId ??= result.ThreadId;
         run.Status = result.Status!.Value;
         run.Error = run.Status == AgentRunStatus.Failed ? result.Response : null;
         run.OutputSummary = StringTruncator.Truncate(result.Response, 500);
@@ -116,6 +122,18 @@ public class RunTracker : IRunTracker
             durationMs, ct);
     }
 
+    public async Task UpdateRunOnCancelledAsync(AgentRun run, string reason, long durationMs, CancellationToken ct)
+    {
+        run.Status = AgentRunStatus.Cancelled;
+        run.Error = StringTruncator.Truncate(reason, 1000);
+        run.DurationMs = durationMs;
+        run.LastHeartbeatAt = DateTime.UtcNow;
+        await _runStore.UpdateAsync(run, ct);
+
+        await RecordTraceAsync(run.Id, null, AgentTraceEventTypes.RunCancelled,
+            new { reason = run.Error }, durationMs, ct);
+    }
+
     public async Task FinalizeStreamingCompletedAsync(AgentRun run, AgentRunResult streamResult,
         int totalInputTokens, int totalOutputTokens, long durationMs, CancellationToken ct)
     {
@@ -123,6 +141,7 @@ public class RunTracker : IRunTracker
         run.TotalInputTokens = totalInputTokens;
         run.TotalOutputTokens = totalOutputTokens;
         run.LastHeartbeatAt = DateTime.UtcNow;
+        run.ThreadId ??= streamResult.ThreadId;
         run.Status = streamResult.Status!.Value;
         run.Error = run.Status == AgentRunStatus.Failed ? streamResult.Response : null;
         run.OutputSummary = StringTruncator.Truncate(streamResult.Response, 500);

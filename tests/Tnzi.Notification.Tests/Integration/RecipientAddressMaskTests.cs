@@ -1,5 +1,4 @@
 using Tnzi.Domain.Entities;
-using Tnzi.Notification.Metadata;
 using Tnzi.Notification.Services.Internal;
 
 namespace Tnzi.Notification.Tests.Integration;

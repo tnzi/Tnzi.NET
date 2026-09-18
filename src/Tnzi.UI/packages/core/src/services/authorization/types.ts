@@ -196,6 +196,44 @@ export interface CloneRolePermissionsRequest {
   sourceRoleId: string
 }
 
+/** Body of `POST /admin/role-functions/batch/assign`: grant the same functions to several roles at once. */
+export interface BatchAssignFunctionsRequest {
+  roleIds: string[]
+  functionIds: string[]
+}
+
+/**
+ * A role's permissions as a portable document (`GET /admin/role-functions/role/{roleId}/export`).
+ * Carries function codes, not ids, so it survives a move between deployments.
+ */
+export interface RolePermissionExportDto {
+  version: string
+  exportedAt: Date | string
+  sourceRoleId?: string | null
+  functionCodes: string[]
+}
+
+/** Outcome of `POST /admin/role-functions/role/{roleId}/import`. */
+export interface PermissionImportResultDto {
+  imported: number
+  skipped: number
+  /** Codes in the document that no declared function matches; nothing was granted for them. */
+  notFound: string[]
+}
+
+/**
+ * Body of `PUT /admin/user-functions/user/{userId}/set-in-scope` and `/set-denied-in-scope`.
+ *
+ * `scopeFunctionIds` is the slice this write may touch (the full id list the
+ * caller's matrix renders); `functionIds` is the new set inside that slice and
+ * must be a subset of it (400 otherwise, naming the ids). Rows outside the
+ * slice are left as they are. See docs/modules/authorization.md 有界覆盖.
+ */
+export interface SetUserFunctionsInScopeRequest {
+  scopeFunctionIds: string[]
+  functionIds: string[]
+}
+
 // ─── EntityInfo (data-auth entity registry) ───────────────────────────────────
 
 /** Data-auth EntityInfo - describes a backend entity type that supports row-level authorization. */

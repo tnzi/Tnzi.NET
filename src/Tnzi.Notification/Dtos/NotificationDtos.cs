@@ -30,6 +30,16 @@ public class CreateNotificationRequest
     public Guid? SenderId { get; set; }
 
     /// <summary>
+    /// 服务商键：由该渠道上哪一个具名发送器投递（<c>Notification:MailSenders:{key}</c> 这类配置节，
+    /// 或代码里注册的同键 keyed sender）。留空 = 交给 <c>INotificationProviderSelector</c>，
+    /// 它也不选时走默认发送器。
+    /// </summary>
+    /// <remarks>
+    /// 指定了就必须是已注册的键，否则创建直接 400 —— 不会静默换一家发出去。
+    /// </remarks>
+    public string? ProviderKey { get; set; }
+
+    /// <summary>
     /// 事务性消息（与商业/群发消息相对）：本条消息不受退订名单约束。默认 <c>false</c>。
     /// </summary>
     /// <remarks>
@@ -114,6 +124,10 @@ public class NotificationInfo
     public bool IsTransactional { get; set; }
 
     public string? TemplateName { get; set; }
+
+    /// <summary>投递这条消息的服务商键；<see langword="null"/> = 默认发送器。</summary>
+    public string? ProviderKey { get; set; }
+
     public DateTime? ScheduledTime { get; set; }
     public List<RecipientOutput> Recipients { get; set; } = new();
     public List<FileInfoDto> Attachments { get; set; } = new();

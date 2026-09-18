@@ -203,6 +203,29 @@ layout: TestLayout
         Assert.Equal("TestLayout", result.Data.DefaultLayoutName);
     }
 
+    /// <summary>
+    /// 没有自述类型的文件模板，渲染路径（<c>GetTemplateAsync</c>）与管理端列表（<c>QueryTemplatesAsync</c>）
+    /// 必须落到同一个默认值：列表曾显示 <c>Email</c> 而渲染按 <c>Generic</c>，管理端看到的类型不是渲染用的那一个。
+    /// </summary>
+    [Fact]
+    public async Task FileTemplate_WithoutDeclaredType_ListsAndRendersAsTheSameDefault()
+    {
+        var templateDir = Path.Combine(_testTemplatesDir, "Templates", "Notification", "Email");
+        Directory.CreateDirectory(templateDir);
+        await File.WriteAllTextAsync(Path.Combine(templateDir, "Untyped.cshtml"), "<p>Hello @Model.Name</p>");
+
+        MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
+
+        var rendered = await _service.GetTemplateAsync("Untyped", "Notification", "Email");
+        var listed = await _service.QueryTemplatesAsync(new QueryTemplateRequest { IncludeFileSource = true, PageIndex = 1, PageSize = 50 });
+
+        Assert.True(rendered.Succeeded);
+        Assert.True(listed.Succeeded);
+        var row = Assert.Single(listed.Data!.Items, i => i.TemplateName == "Untyped");
+        Assert.Equal(TemplateType.Generic, rendered.Data!.Type);
+        Assert.Equal(rendered.Data.Type, row.Type);
+    }
+
     public void Dispose()
     {
         // 清理临时目录

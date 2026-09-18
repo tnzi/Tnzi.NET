@@ -46,6 +46,10 @@ public class TemplateFileParser
             // 顶层 description 此前解析出来就被丢掉，只有嵌在 metadata: 下的同名键能被读到 ——
             // 于是按文件格式文档写法声明描述的模板，导入后描述是空的
             Description = metadata.Description,
+            // 类型同理：随包发布的模板写在 metadata.type，文件格式文档写法是顶层 type，两处都认。
+            // 它决定短信正文走不走 HTML 编码，解析不出就留 null（渲染服务按 HTML 处理）
+            Type = ParseTemplateType(metadata.Type)
+                ?? ParseTemplateType(metadata.Metadata?.TryGetValue("type", out var typeValue) == true ? typeValue?.ToString() : null),
             Metadata = metadata.Metadata ?? new Dictionary<string, object>(),
             FilePath = fileInfo.FullName,
             LastModified = fileInfo.LastWriteTimeUtc
@@ -125,6 +129,12 @@ public class TemplateFileParser
             return new LayoutMetadata();
         }
     }
+
+    /// <summary>
+    /// 把 front matter 里的类型字符串解析成 <see cref="TemplateType"/>（不区分大小写）；空或不认识的值返回 null。
+    /// </summary>
+    private static TemplateType? ParseTemplateType(string? value)
+        => !string.IsNullOrWhiteSpace(value) && Enum.TryParse<TemplateType>(value, ignoreCase: true, out var type) ? type : null;
 
     private class TemplateMetadata
     {

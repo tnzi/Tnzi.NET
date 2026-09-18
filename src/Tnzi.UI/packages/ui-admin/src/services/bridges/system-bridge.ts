@@ -30,6 +30,7 @@ import {
   type UpdateSettingDto,
   type AccessLogInfoDto,
   type AccessLogQueryDto,
+  type AccessLogStatisticsDto,
   type SettingsCenterGroupDto,
   useAdminScheduledJobApi,
   type ScheduledJobDto,
@@ -54,6 +55,12 @@ export interface SystemBridge {
   /** Access logs - read-only. create/update/delete reject. */
   accessLogs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<AccessLogInfoDto>>
+    /**
+     * Totals plus `captureEnabled`: capture is opt-in on the backend
+     * (`System:AccessLog:Enabled`, default off), so an empty table needs this
+     * bit to tell "not capturing" from "no traffic".
+     */
+    statistics(): Promise<AccessLogStatisticsDto>
   }
   /**
    * Scheduled jobs - Hangfire recurring-job admin, fully wired via direct
@@ -108,7 +115,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
     const noOp = () => Promise.reject(new Error('createSystemBridge: no deps provided'))
     return {
       settings: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never },
-      accessLogs: { fetch: noOp as never },
+      accessLogs: { fetch: noOp as never, statistics: noOp as never },
       scheduledJobs: {
         fetch: noOp as never,
         trigger: noOp as never,
@@ -163,6 +170,8 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
         pageSize: result.pageSize ?? query.pageSize,
       })
     },
+    statistics: async (): Promise<AccessLogStatisticsDto> =>
+      unwrapOk<AccessLogStatisticsDto>(await accessLogApi.getStatistics()),
   }
 
   const scheduledJobs: SystemBridge['scheduledJobs'] = {

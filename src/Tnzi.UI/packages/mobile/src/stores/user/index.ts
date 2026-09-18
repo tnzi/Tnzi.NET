@@ -9,6 +9,8 @@ import { computed } from 'vue';
 import { defineStore } from 'pinia';
 import { UserStateManager } from '@tnzi/core/state';
 import type { StateDeps } from '@tnzi/core/state';
+import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
+import { createVantThemeAdapter } from '../../adapters/theme';
 import { getStoreHttpClient, getStoreStorage } from '../factory';
 
 // ============================================
@@ -19,10 +21,16 @@ let _manager: UserStateManager | null = null;
 
 function getManager(): UserStateManager {
   if (!_manager) {
-    const deps = {
+    // Same shape as stores/auth and stores/app: `initStoreRuntime(httpClient)`
+    // without a storage adapter is the documented minimum, and the manager
+    // dereferences `storage` on every persist / load / clear path, so the
+    // fallback is what keeps a 300 ms debounced persist from throwing inside a
+    // timer. `theme` is what makes `updatePreferences({ theme })` reach the DOM.
+    const deps: StateDeps = {
       httpClient: getStoreHttpClient(),
-      storage: getStoreStorage(),
-    } as unknown as StateDeps;
+      storage: getStoreStorage() ?? createLocalStorageAdapter(),
+      theme: createVantThemeAdapter(),
+    };
     _manager = new UserStateManager(deps);
   }
   return _manager;

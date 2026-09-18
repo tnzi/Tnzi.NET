@@ -49,7 +49,8 @@ public class RateLimitService : IRateLimitService
     /// <summary>
     /// 固定窗口算法实现
     /// 直接使用 IncrementAsync 并始终传递过期时间，确保原子性
-    /// IncrementAsync 在键不存在时会创建并设置过期时间，已存在时仅递增（不更新过期时间）
+    /// IncrementAsync 在键不存在时会创建并设置过期时间，已存在时仅递增（不更新过期时间）——
+    /// 这是 ICache 的契约，两个实现都兑现（此前都在每次递增时重设 TTL，超限后持续重试的客户端永不恢复）
     /// </summary>
     private async Task<long> IncrementFixedWindowAsync(string key, int windowSeconds)
     {

@@ -23,6 +23,12 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
+        // 临时运行（评估用例）：不建线程、不读历史、不落库
+        if (context.Request.Ephemeral)
+        {
+            return await next(context, cancellationToken);
+        }
+
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 
@@ -100,6 +106,16 @@ public class HistoryMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        // 临时运行（评估用例）：不建线程、不读历史、不落库
+        if (context.Request.Ephemeral)
+        {
+            await foreach (var chunk in next(context, cancellationToken).WithCancellation(cancellationToken))
+            {
+                yield return chunk;
+            }
+            yield break;
+        }
+
         // Before: 自动创建线程（如果 ThreadId 为 null）
         await EnsureThreadAsync(context, cancellationToken);
 
@@ -414,28 +430,14 @@ public class HistoryMiddleware : IAiMiddleware
     /// 边界：未认证上下文（Gateway / MCP 等无用户的入站路径）下 <c>CurrentUser?.Id</c> 为 null，
     /// 归属判定按既有语义跳过。收紧那条属于另一处设计决定，不在本次修复范围内。
     /// </para>
+    /// <para>
+    /// 2026-09-12 起解析通常已由 <see cref="ThreadResolutionMiddleware"/>（Order 40）完成 —— 那是让 ThreadData / Sandbox
+    /// 在首轮就拿到线程的唯一办法；这里只在它没装（自定义管线）时兜底。唯一允许跳过的依据是那个中间件留下的标记，
+    /// 而不是「<c>ThreadId</c> 已有值」—— 后者正是上一段说的那个洞。
+    /// </para>
     /// </remarks>
-    private async Task EnsureThreadAsync(AiMiddlewareContext context, CancellationToken ct)
-    {
-        try
-        {
-            var (_, resolvedThreadId, isNewThread) = await _threadService.GetOrCreateThreadAsync(
-                context.Request.ThreadId, context.Request.AgentId, ct);
-            context.Request.ThreadId = resolvedThreadId;
-            context.IsNewThread = isNewThread;
-            _logger.LogDebug("Resolved thread {ThreadId} for agent {AgentId} (new: {IsNew})", resolvedThreadId, context.Request.AgentId, isNewThread);
-        }
-        catch (BusinessException)
-        {
-            // 归属不符 / 线程不存在 / Agent 不存在都走这里，必须向上传播 ——
-            // 吞掉它就等于放行一个未经校验的 threadId 继续跑完整条管线。
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve thread for agent {AgentId}", context.Request.AgentId);
-        }
-    }
+    private Task EnsureThreadAsync(AiMiddlewareContext context, CancellationToken ct)
+        => ThreadResolutionMiddleware.ResolveAsync(_threadService, context, _logger, ct);
 
     private static bool ShouldPersistResult(string? finishReason)
     {

@@ -172,6 +172,102 @@ public class BankAccountTests : FinanceIntegrationTestBase
         result.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// EFT Originator ID 的录入上限由文件格式的字段宽派生（同账号上限的做法）：
+    /// 让操作员在还看得见自己刚敲的那串字符时被拦下，而不是几天后装批生成时才收到报错。
+    /// </summary>
+    [Theory]
+    [InlineData(BankNumberScheme.UsAba)]
+    [InlineData(BankNumberScheme.CaEft)]
+    public async Task Create_EftOriginatorIdLongerThanTheEftField_Rejects400(BankNumberScheme scheme)
+    {
+        await SeedCoaAsync();
+        var bank = await BankAccountLedgerIdAsync();
+
+        var result = await CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank,
+            Name = "Operating",
+            Scheme = scheme,
+            RoutingNumber = scheme == BankNumberScheme.UsAba ? "021000021" : null,
+            InstitutionNumber = scheme == BankNumberScheme.CaEft ? "001" : null,
+            TransitNumber = scheme == BankNumberScheme.CaEft ? "12345" : null,
+            EftOriginatorId = new string('7', 11), // 两种格式的字段都是 10 位
+            EftOriginatorName = "ACME"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("originator id");
+    }
+
+    /// <summary>
+    /// 非 ASCII 与超长是同一类失效（写进 EFT 文件时不能折叠成另一串合法字符），故也在录入拒绝：
+    /// 全角数字录成账号保存 200、装批 200，几天后生成才 400，而报错的人已不是敲字的人。
+    /// </summary>
+    [Fact]
+    public async Task Create_AccountNumberWithNonAsciiCharacters_Rejects400()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAccountLedgerIdAsync();
+
+        var result = await CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank,
+            Name = "Operating",
+            Scheme = BankNumberScheme.UsAba,
+            RoutingNumber = "021000021",
+            AccountNumber = "１２３４５６７" // 全角 １２３４５６７，长度合法
+        });
+
+        result.Succeeded.ShouldBeFalse("a non-ASCII account number cannot be carried by an EFT file");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("ASCII");
+    }
+
+    [Fact]
+    public async Task Create_EftOriginatorIdWithNonAsciiCharacters_Rejects400()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAccountLedgerIdAsync();
+
+        var result = await CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank,
+            Name = "Operating",
+            Scheme = BankNumberScheme.UsAba,
+            RoutingNumber = "021000021",
+            EftOriginatorId = "ACMÉ123", // É，长度合法
+            EftOriginatorName = "ACME"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("originator id");
+        result.Message!.ShouldContain("ASCII");
+    }
+
+    [Fact]
+    public async Task Update_EftOriginatorIdLongerThanTheEftField_Rejects400()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAccountLedgerIdAsync();
+        var created = await CreateAsync(new CreateBankAccountDto { AccountId = bank, Name = "Operating", Scheme = BankNumberScheme.UsAba, RoutingNumber = "021000021", EftOriginatorId = "1234567890" });
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var updated = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.UpdateAsync(created.Data!.Id, new UpdateBankAccountDto
+        {
+            Name = "Operating",
+            Scheme = BankNumberScheme.UsAba,
+            RoutingNumber = "021000021",
+            EftOriginatorId = "12345678901"
+        }));
+
+        updated.Succeeded.ShouldBeFalse();
+        updated.Code.ShouldBe(400);
+        (await ReloadAsync<BankAccount>(created.Data!.Id))!.EftOriginatorId.ShouldBe("1234567890");
+    }
+
     [Fact]
     public async Task SetNextCheckNumber_Updates()
     {

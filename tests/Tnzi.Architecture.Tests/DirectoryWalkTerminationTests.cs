@@ -73,7 +73,6 @@ public class DirectoryWalkTerminationTests
     /// </remarks>
     private static readonly string[] ExpectedRawWalkFiles =
     [
-        "Tnzi.AI.Tests/Sandbox/SharedSkillExtractorTests.cs",            // (temp) 自建临时目录的清理
         "Tnzi.Architecture.Tests/DocsDisclosureTests.cs",                // docs/
         "Tnzi.Architecture.Tests/FrontendApiScanner.cs",                 // src/Tnzi.UI/packages/core/src/services
         "Tnzi.Architecture.Tests/IconManifestTests.cs",                  // src/Tnzi.UI/packages/{pkg}/src

@@ -14,7 +14,7 @@ public class TelegramChannelAdapter : IChannelAdapter
     private readonly ILogger<TelegramChannelAdapter> _logger;
     private readonly IChannelMessageBus _bus;
     private readonly TelegramAdapterOptions _options;
-    private readonly TelegramBotClient _botClient;
+    private readonly ITelegramBotClient _botClient;
     private readonly HashSet<long> _allowedUsers;
     private CancellationTokenSource? _cts;
 
@@ -24,10 +24,15 @@ public class TelegramChannelAdapter : IChannelAdapter
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
 
+    /// <param name="logger">日志</param>
+    /// <param name="bus">消息总线</param>
+    /// <param name="options">渠道模块配置（取 Telegram 小节）</param>
+    /// <param name="botClient">可选的 Bot 客户端（测试替身 / 自定义 Bot API 服务器）；为 null 时按 BotToken 新建</param>
     public TelegramChannelAdapter(
         ILogger<TelegramChannelAdapter> logger,
         IChannelMessageBus bus,
-        IOptions<ChannelsModuleOptions> options)
+        IOptions<ChannelsModuleOptions> options,
+        ITelegramBotClient? botClient = null)
     {
         _logger = Check.NotNull(logger);
         _bus = Check.NotNull(bus);
@@ -36,7 +41,7 @@ public class TelegramChannelAdapter : IChannelAdapter
         if (string.IsNullOrWhiteSpace(_options.BotToken))
             throw new ArgumentException("Telegram BotToken is required when adapter is enabled");
 
-        _botClient = new TelegramBotClient(_options.BotToken);
+        _botClient = botClient ?? new TelegramBotClient(_options.BotToken);
         _allowedUsers = _options.AllowedUsers.Count > 0
             ? new HashSet<long>(_options.AllowedUsers)
             : [];
@@ -81,12 +86,14 @@ public class TelegramChannelAdapter : IChannelAdapter
     public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
         var chatId = long.Parse(message.ChatId);
+        // 论坛话题：回复必须带 message_thread_id，否则落到 General、提问者永远看不到
+        int? messageThreadId = int.TryParse(message.TopicId, out var topicId) ? topicId : null;
 
         return ChannelSendHelper.SendChunkedWithRetryAsync(
             message.Text,
             maxLength: 4096,
             maxRetries: _options.MaxRetries,
-            sendChunk: (chunk, token) => _botClient.SendMessage(chatId, chunk, cancellationToken: token),
+            sendChunk: (chunk, token) => _botClient.SendMessage(chatId, chunk, messageThreadId: messageThreadId, cancellationToken: token),
             _logger,
             "Telegram",
             ct);

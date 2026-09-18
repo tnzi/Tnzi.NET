@@ -173,7 +173,8 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
                 {
                     Purpose = SubscriptionBillingPurpose.Initial,
                     SubscriptionId = subscription.Id
-                }.ToExtraData()
+                }.ToExtraData(),
+                IsSystemInitiated = true
             }, cancellationToken);
 
             if (!paymentResult.Succeeded || paymentResult.Data == null)
@@ -254,8 +255,10 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
             subscription.Status = SubscriptionStatus.Cancelled;
             subscription.EndTime = now;
             subscription.AutoRenew = false;
-            // 立刻断开后台计费的抓取窗口，缩小"取消与在途扣款"的竞态面
-            subscription.NextBillingTime = null;
+            // ★ 刻意保留 NextBillingTime：它是「已付到何时」唯一的记录。此前这里把它清空，
+            // 恢复时对 null 只能从现在起算一个新周期且不扣款 —— 取消再恢复 = 白送一个完整周期，
+            // 每期末重复即无限免费。续费扫描按 Status 排除 Cancelled（上面又已抢到计费锁），
+            // 「缩小与在途扣款的竞态面」这个理由已经不成立。
         }
         else
         {
@@ -265,6 +268,14 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         }
 
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+        // ★ 立即取消结束的是当前周期，与续费 / 过期结束周期是同一件事：仍在等补差款的变更是对这个周期
+        // 剩余段算的，周期没了它就失效，连它的待付单一起关掉。留着它，用户取消之后再付那张单，
+        // 钱收到了却撞上终态守卫，只剩一行「孤儿付款需退款」的告警。
+        // 到期后取消不关：当前周期仍归用户所有，补差覆盖的正是这段剩余期，付了就该生效；
+        // 周期真的结束时由逾期扫描（ExpireSubscriptionAsync）收口。
+        if (request.Immediate)
+            await CancelAwaitingChangesForEndedPeriodAsync(subscription.Id, cancellationToken);
 
         if (EventBus != null)
         {
@@ -347,11 +358,19 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
     }
 
     /// <summary>
-    /// 恢复订阅的统一实现：清理终止痕迹并把计费时间拨回未来。
+    /// 恢复订阅的统一实现：清理终止痕迹，并以「已付到何时」为准决定要不要收款。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 此前只是把状态改回 Active，既不清 EndTime 也不重算 NextBillingTime：
     /// 立即取消（EndTime=now）的订阅恢复后仍带着过去的时间，下一轮扫描会立刻再把它过期掉。
+    /// </para>
+    /// <para>
+    /// ★ <b>恢复不产生免费周期。</b>已付的那一期还没走完（NextBillingTime 在未来）→ 原样保留；
+    /// 已经走完或压根没有（取消后过了很久、逾期状态被取消）→ 当场按新的一期扣款，
+    /// 扣款回流成功才推进计费时间，失败落 PastDue 走催款。此前对这种情形一律
+    /// 「从现在起算一个新周期」且不扣款，取消再恢复就是白送一期，可无限重复。
+    /// </para>
     /// </remarks>
     private async Task ResumeInternalAsync(Subscription subscription, CancellationToken cancellationToken)
     {
@@ -385,17 +404,24 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         subscription.RenewalRetryCount = 0;
         subscription.PastDueSince = null;
 
+        var periodElapsed = subscription.Status != SubscriptionStatus.Trial
+            && (subscription.NextBillingTime == null || subscription.NextBillingTime <= now);
+
         if (subscription.Status == SubscriptionStatus.Trial)
         {
             subscription.NextBillingTime = subscription.TrialEndTime;
         }
-        else if (subscription.NextBillingTime == null || subscription.NextBillingTime <= now)
+        else if (periodElapsed)
         {
-            // 取消恢复（无暂停时长）或周期确已走完：从现在起算一个新周期
-            subscription.NextBillingTime = CalculateNextBillingTime(now, subscription.CycleType, subscription.CycleValue);
+            // 没有付款事实就没有延长：时钟停在「现在」，下面立刻发起一次续费扣款；
+            // 回流成功才从这里起算新的一期，失败则订阅落 PastDue 等用户处理
+            subscription.NextBillingTime = now;
         }
 
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+
+        if (periodElapsed)
+            await RetryBillingInternalAsync(subscription, cancellationToken);
     }
 
     public async Task<Result<SubscriptionDto>> UpdatePaymentMethodAsync(Guid subscriptionId, AttachPaymentMethodDto request, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
@@ -465,7 +491,9 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         if (subscription.Status != SubscriptionStatus.PastDue)
             return Fail(ErrorCodes.SubscriptionCannotRetryBilling, 400);
 
-        if (string.IsNullOrWhiteSpace(subscription.PaymentMethodToken))
+        // 折扣抵满全价的试用转正一分钱都不收，要一张永远不会被扣的卡只会把它卡在 PastDue 直到宽限期过期
+        // （修复「转正按全价收」之前落到 PastDue 的试用正是这种形态）。
+        if (string.IsNullOrWhiteSpace(subscription.PaymentMethodToken) && !IsChargeFreeTrialConversion(subscription, subscription.Plan))
             return Fail(ErrorCodes.SubscriptionPaymentMethodMissing, 400);
 
         await RetryBillingInternalAsync(subscription, cancellationToken);
@@ -538,11 +566,9 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
     {
         Check.NotNull(planDto);
 
-        if (planDto.Price < 0)
-            return Fail<SubscriptionPlanDto>(ErrorCodes.PaymentInvalidAmount, 400);
-
-        if (planDto.CycleValue <= 0 && planDto.CycleType != BillingCycleType.OneTime)
-            return Fail<SubscriptionPlanDto>(ErrorCodes.PaymentInvalidAmount, 400);
+        var pricing = ValidatePlanPricing(planDto);
+        if (!pricing.Succeeded)
+            return Fail<SubscriptionPlanDto>(pricing.Message ?? ErrorCodes.PaymentInvalidAmount, pricing.Code ?? 400);
 
         var duplicated = await _planRepository.AnyAsync(p => p.PlanCode == planDto.PlanCode, cancellationToken);
         if (duplicated)
@@ -559,6 +585,10 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
     public async Task<Result> UpdatePlanAsync(Guid planId, SubscriptionPlanDto planDto, CancellationToken cancellationToken = default)
     {
         Check.NotNull(planDto);
+
+        var pricing = ValidatePlanPricing(planDto);
+        if (!pricing.Succeeded)
+            return pricing;
 
         var plan = await _planRepository.FirstOrDefaultAsync(p => p.Id == planId, cancellationToken);
         if (plan == null)
@@ -602,6 +632,25 @@ public partial class SubscriptionService : ApplicationService, ISubscriptionServ
         await _planRepository.UpdateAsync(plan, cancellationToken);
 
         Logger.LogInformation("Subscription plan deactivated. PlanId: {PlanId}", planId);
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// 计划价目的合法性：价格非负、非一次性周期的周期值为正、试用折扣（金额）落在 [0, Price] 内 ——
+    /// 折扣在开通试用时快照进 <see cref="Subscription.DiscountAmount"/>，转正按「现价 − 折扣」收，
+    /// 超过价格的折扣只会变成一次免费转正，负数折扣则是向试用用户多收钱。
+    /// </summary>
+    private Result ValidatePlanPricing(SubscriptionPlanDto planDto)
+    {
+        if (planDto.Price < 0)
+            return Fail(ErrorCodes.PaymentInvalidAmount, 400);
+
+        if (planDto.CycleValue <= 0 && planDto.CycleType != BillingCycleType.OneTime)
+            return Fail(ErrorCodes.PaymentInvalidAmount, 400);
+
+        if (planDto.TrialDiscount is { } trialDiscount && (trialDiscount < 0 || trialDiscount > planDto.Price))
+            return Fail(ErrorCodes.SubscriptionTrialDiscountOutOfRange, 400);
 
         return Ok();
     }

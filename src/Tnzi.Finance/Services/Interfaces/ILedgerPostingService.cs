@@ -32,6 +32,33 @@ public interface ILedgerPostingService
     Task<Result<JournalEntryDto>> ReverseAsync(Guid journalEntryId, ReverseJournalEntryDto? input = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 代表 <paramref name="sourceType"/> 单据冲销它自己投影出来的凭证 —— 单据 <c>VoidAsync</c> 用这个。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="ReverseAsync"/> 的唯一区别：后者与总账冲销端点走同一道门，对
+    /// 「有单据级作废路径」的来源令牌（核心那几种 + <see cref="IDocumentProjectedSourceTypeProvider"/>
+    /// 贡献的）一律 409 —— 那道门存在的理由就是不让凭证绕过单据状态机被冲销。
+    /// 单据自己的作废流程正是那条被保护的路径，所以要走这里：凭证的 <c>SourceType</c> 与
+    /// <paramref name="sourceType"/> <b>相等</b>时放行，不相等时同样 409（一个单据的作废够不到别种单据的凭证）。
+    /// </para>
+    /// <para>
+    /// 期间封账、过账守卫、乐观并发（409）、事件语义与 <see cref="ReverseAsync"/> 逐字一致 —— 两者是同一段代码。
+    /// </para>
+    /// <para>
+    /// 默认实现返回 501：本方法晚于接口首版加入，自定义实现者不重写也不会编译失败；
+    /// 但不能退回 <see cref="ReverseAsync"/>（那会把自定义实现的门也一并跳过）。
+    /// </para>
+    /// </remarks>
+    /// <param name="journalEntryId">要冲销的凭证ID（通常经 <see cref="GetBySourceAsync"/> 反查获得）</param>
+    /// <param name="sourceType">发起冲销的单据来源类型，必须与凭证的 <c>SourceType</c> 相等</param>
+    /// <param name="input">冲销选项（null 表示与原凭证同日、自动生成摘要）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task<Result<JournalEntryDto>> ReverseOnBehalfOfDocumentAsync(Guid journalEntryId, string sourceType, ReverseJournalEntryDto? input = null, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<JournalEntryDto>.Failure(
+            "This ILedgerPostingService implementation does not support document-initiated reversal.", 501));
+
+    /// <summary>
     /// 按来源单据查询凭证（用于业务单据反查/防重复过账）
     /// </summary>
     Task<Result<List<JournalEntryDto>>> GetBySourceAsync(string sourceType, string sourceId, CancellationToken cancellationToken = default);

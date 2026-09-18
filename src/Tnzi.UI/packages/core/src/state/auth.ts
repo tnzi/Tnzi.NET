@@ -10,6 +10,7 @@ import type { AuthState } from './types/auth';
 import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';
 import { isSessionEndedForSecurity } from '../services/identity/session-security';
+import { HttpError, isHttpError } from '../errors/api-error';
 import { useLogger } from '../adapters/logger';
 import type { StateDeps } from './types/deps';
 
@@ -28,6 +29,72 @@ function toUserProfile(dto: UserDto, existingPermissions: string[] = []): UserPr
     roles: dto.roles,
     permissions: existingPermissions,
   };
+}
+
+// ============================================
+// Refresh failure classification
+// ============================================
+
+/**
+ * Statuses on which the server declined to *answer* rather than declining the
+ * token: a client timeout (408, from HttpClient) and rate limiting (429).
+ * Together with 5xx and transport errors (HttpClient reports those as 500)
+ * they mean "could not ask", and a token nobody has rejected must not be
+ * thrown away over them.
+ */
+const TRANSIENT_REFRESH_STATUSES: ReadonlySet<number> = new Set([408, 429]);
+
+/**
+ * Whether a refresh failure means the server looked at the refresh token and
+ * rejected it (expired, revoked, replayed), as opposed to the request never
+ * getting a verdict. Only a rejection justifies wiping the persisted tokens:
+ * opening the app offline, or a refresh that hits the 30s timeout on a slow
+ * link, used to erase the session for good although the server never said no.
+ *
+ * Unknown shapes (no status, a non-HttpError throw) count as "could not ask" -
+ * keeping a dead token costs one more failed refresh on the next boot, while
+ * wiping a live one costs the user their session.
+ */
+function isRefreshRejection(error: unknown): boolean {
+  if (!isHttpError(error)) return false;
+  const status = error.statusCode;
+  return status >= 400 && status < 500 && !TRANSIENT_REFRESH_STATUSES.has(status);
+}
+
+/**
+ * The message a session that ended for a security reason leaves for the login
+ * page. Kept in one place because two paths must agree on it: the refresh that
+ * detects the rejection, and the boot-restore cleanup that runs after it.
+ *
+ * Exported so a login page can render its own (translated) copy off
+ * {@link sessionEndReasonOf} instead of matching this English string.
+ */
+export const SESSION_ENDED_FOR_SECURITY_MESSAGE =
+  'Your session was ended for security reasons. Please sign in again.';
+export const SESSION_EXPIRED_MESSAGE = 'Session expired, please login again';
+
+/**
+ * Why the previous session ended, as far as a login page needs to know.
+ *
+ * - `'security'`: the backend revoked the session because the credentials
+ *   looked stolen (refresh-token replay, session binding mismatch). The one
+ *   moment the legitimate user can learn their account is in use elsewhere.
+ * - `'expired'`: the refresh token was rejected as expired / invalid. Routine.
+ */
+export type SessionEndReason = 'security' | 'expired';
+
+/**
+ * Classify the manager's `error` into a {@link SessionEndReason}.
+ *
+ * `error` is a single string slot shared with login failures ("Invalid user
+ * name or password"), so a login page cannot show every value in it as a
+ * session notice. Only the two messages `_doRefreshToken` /
+ * `_clearAfterFailedRestore` write are session ends; anything else is null.
+ */
+export function sessionEndReasonOf(message: string | null | undefined): SessionEndReason | null {
+  if (message === SESSION_ENDED_FOR_SECURITY_MESSAGE) return 'security';
+  if (message === SESSION_EXPIRED_MESSAGE) return 'expired';
+  return null;
 }
 
 // ============================================
@@ -85,6 +152,21 @@ export class AuthStateManager {
   /** Mutex: pending login promise for deduplication */
   private _loginPromise: Promise<LoginResultDto> | null = null;
 
+  /**
+   * The rejection that ended the current session, when a refresh was refused.
+   *
+   * ★ Recorded because the error that reaches a restore's `catch` is not always
+   * the one that ended the session. In bearer mode `restoreAuth()` fetches the
+   * profile first; the expired access token makes that a 401, the HttpClient
+   * drives a refresh through `refreshTokenFn` (see `createTnziClient`), and when
+   * the backend REJECTS it `_doRefreshToken` has already cleared the tokens by
+   * the time the profile call returns. The retry `restoreAuth` then makes throws
+   * the plain "No refresh token available" - and keying the security message off
+   * that error erased it on the default boot path. Reset whenever a new session
+   * is established or a new restore begins.
+   */
+  private _lastRefreshRejection: unknown = null;
+
   /** Persisted-storage keys derived from the configurable storage prefix. */
   private readonly _keys: { token: string; refresh: string; expiry: string };
 
@@ -119,6 +201,32 @@ export class AuthStateManager {
 
   get isLoggedIn(): boolean {
     return this.isAuthenticated && !!this.accessToken;
+  }
+
+  /**
+   * Whether the backend delivers the refresh token as an HttpOnly cookie.
+   *
+   * Anything outside this manager that issues a session (invitation
+   * acceptance builds its own `useInvitationApi`) has to pass
+   * `withCredentials` on that call in cookie mode, or a cross-origin SPA
+   * drops the `Set-Cookie` and the first refresh ends the session.
+   */
+  get cookieDelivery(): boolean {
+    return this._cookieDelivery;
+  }
+
+  /**
+   * Why the previous session ended, or null when nothing ended it (fresh boot,
+   * explicit logout, or a login failure occupying `error` instead).
+   *
+   * The login page reads this on mount. It is derived from `error` rather than
+   * stored separately so the existing invariants keep holding: `clearAuth()`
+   * resets it, a new login attempt resets it (`_doLogin` nulls `error` first),
+   * and the "keep the message after onUnauthorized" guard in `createTnziClient`
+   * protects it for free.
+   */
+  get sessionEndReason(): SessionEndReason | null {
+    return sessionEndReasonOf(this.error);
   }
 
   get userName(): string {
@@ -202,7 +310,13 @@ export class AuthStateManager {
       const api = this._authApi();
       const result = await api.loginWithRefreshToken(credentials);
       if (!result.succeeded || !result.data) {
-        throw new Error(result.message ?? 'Login failed');
+        // A failed envelope is not always a failure: `2FA_REQUIRED`,
+        // `IDENTITY_PENDING_ACTIONS_REQUIRED` and `IDENTITY_CAPTCHA_REQUIRED`
+        // are challenges whose `errorDetails` (temp token, methods, captcha)
+        // the caller needs to continue. Throw the envelope as an HttpError so
+        // `errorCode` / `details` survive - a bare Error(message) left the
+        // accounts with the strongest settings unable to sign in through here.
+        throw new HttpError({ ...result, message: result.message ?? 'Login failed' });
       }
       const tokenResult = result.data;
       // Set token first so profile fetch is authenticated
@@ -242,8 +356,7 @@ export class AuthStateManager {
       // cookie mode the HttpOnly refresh cookie is a credential only the server
       // can kill - skipping the call because `user` is null leaves it valid.
       if (this.accessToken) {
-        const api = this._authApi();
-        await api.logout().catch(() => {});
+        await this._revokeOnServer();
       }
     } finally {
       this.clearAuth();
@@ -257,6 +370,71 @@ export class AuthStateManager {
       }
 
       this.deps.router?.push(this.deps.loginPath ?? '/login');
+    }
+  }
+
+  /**
+   * Revoke the session server-side, obtaining a live access token first when
+   * the one we hold has expired.
+   *
+   * `/auth/logout` is `[ApiAuthorize]` and the call is `skipAuthRefresh`, so
+   * an expired bearer is rejected before the server ever reaches revocation -
+   * and the refresh token (or the HttpOnly cookie) stays alive after the user
+   * has watched "Sign out" succeed. On a shared machine in cookie mode the next
+   * cold boot then resumes the previous person's session from that cookie.
+   *
+   * The refresh here is deliberately NOT `_doRefreshToken`: that path is the
+   * session-expiry path and clears state, sets "Session expired" and navigates
+   * on failure. Failing to refresh before a logout is just "nothing left to
+   * revoke"; the local clear that follows is the same either way.
+   */
+  private async _revokeOnServer(): Promise<void> {
+    const api = this._authApi();
+    // Proactive: the client-side expiry says the token is dead.
+    const attemptedProactively = this.isTokenExpired;
+    if (attemptedProactively) await this._refreshForLogout(api);
+    let result = await this._callLogout(api);
+    // Reactive: the server disagreed with the client-side expiry (clock skew,
+    // a shorter server-side lifetime). One more try with a fresh token - but
+    // only when no refresh was ATTEMPTED yet. A proactive refresh that the
+    // server refused already answers the question; presenting the same dead
+    // token again is a wasted round trip, and the backend's replay detection
+    // would read a plain sign-out as a copied token.
+    if (result?.code === 401 && !attemptedProactively && (await this._refreshForLogout(api))) {
+      result = await this._callLogout(api);
+    }
+    if (result && !result.succeeded) {
+      useLogger().warn('Server-side logout did not succeed; the session may still be alive', {
+        code: result.code,
+        errorCode: result.errorCode,
+      });
+    }
+  }
+
+  /** One logout POST; a thrown error (network) counts as "no verdict". */
+  private async _callLogout(api: ReturnType<typeof useAuthApi>) {
+    try {
+      return await api.logout();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Obtain a fresh access token for the logout call. Returns whether it worked;
+   * on failure the caller proceeds to the local clear as before.
+   */
+  private async _refreshForLogout(api: ReturnType<typeof useAuthApi>): Promise<boolean> {
+    if (!this._cookieDelivery && !this.refreshToken) return false;
+    try {
+      const result = await api.refreshToken(
+        this._cookieDelivery ? {} : { refreshToken: this._currentRefreshToken() });
+      if (!result.succeeded || !result.data?.accessToken) return false;
+      this.accessToken = result.data.accessToken;
+      this.deps.httpClient.setAccessToken(this.accessToken);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -295,18 +473,19 @@ export class AuthStateManager {
   private async _doRefreshToken(): Promise<void> {
     this.isRefreshing = true;
     this.error = null;
+    this._lastRefreshRejection = null;
 
     try {
       const api = this._authApi();
       const result = await api.refreshToken(
         this._cookieDelivery ? {} : { refreshToken: this._currentRefreshToken() });
       if (!result.succeeded || !result.data) {
-        // Keep the server's error code on the thrown error: the caller (and the
-        // catch below) needs to tell "your session expired" apart from "we ended
-        // your session because the token appears to be compromised".
-        const failure = new Error(result.message ?? 'Token refresh failed');
-        (failure as { errorCode?: string }).errorCode = result.errorCode;
-        throw failure;
+        // Throw the envelope itself (as an HttpError): the catch below needs
+        // the status to tell "the server rejected the token" from "the server
+        // could not be asked", and the error code to tell "your session
+        // expired" from "we ended your session because the token appears to be
+        // compromised".
+        throw new HttpError({ ...result, message: result.message ?? 'Token refresh failed' });
       }
       this.accessToken = result.data.accessToken;
       // Cookie mode: the body's refreshToken is empty by design (the browser got
@@ -326,6 +505,16 @@ export class AuthStateManager {
     } catch (error) {
       // Clear mutex BEFORE cleanup so concurrent callers don't await a failed promise
       this._refreshPromise = null;
+      // Only a REJECTION is the end of the session. A transport failure
+      // (offline, timeout, 5xx, 429) means the server never looked at the
+      // token: rethrow so this attempt fails - the HttpClient's onUnauthorized
+      // will still sign this tab out - but leave the persisted tokens, the
+      // message and the router alone so the next boot can try again. Wiping
+      // here turned "opened the app on the train" into "signed out for good".
+      if (!isRefreshRejection(error)) {
+        throw error;
+      }
+      this._lastRefreshRejection = error;
       // Local sign-out only. The refresh token is already dead, so the backend
       // logout endpoint would just reject the stale access token; going through
       // logout() used to POST /auth/logout with that expired token, and the
@@ -340,8 +529,8 @@ export class AuthStateManager {
       // used from somewhere else. Rendering "session expired" for it discards
       // that signal entirely.
       this.error = isSessionEndedForSecurity(error)
-        ? 'Your session was ended for security reasons. Please sign in again.'
-        : 'Session expired, please login again';
+        ? SESSION_ENDED_FOR_SECURITY_MESSAGE
+        : SESSION_EXPIRED_MESSAGE;
       try {
         await this.deps.onLogout?.();
       } catch {
@@ -377,7 +566,7 @@ export class AuthStateManager {
       const api = useProfileApi(this.deps.httpClient);
       const result = await api.update(data);
       if (!result.succeeded || !result.data) {
-        throw new Error(result.message ?? 'Update failed');
+        throw new HttpError({ ...result, message: result.message ?? 'Update failed' });
       }
       this.user = toUserProfile(result.data, this.permissions);
       return this.user;
@@ -396,7 +585,7 @@ export class AuthStateManager {
       const api = useProfileApi(this.deps.httpClient);
       const result = await api.changePassword({ currentPassword, newPassword });
       if (!result.succeeded) {
-        throw new Error(result.message ?? 'Password change failed');
+        throw new HttpError({ ...result, message: result.message ?? 'Password change failed' });
       }
     } catch (error) {
       this.error = error instanceof Error ? error.message : 'Password change failed';
@@ -417,6 +606,7 @@ export class AuthStateManager {
     this.roles = result.user.roles;
     this.permissions = result.user.permissions;
     this.error = null;
+    this._lastRefreshRejection = null;
 
     // Sync token to HTTP client
     this.deps.httpClient.setAccessToken(this.accessToken);
@@ -471,6 +661,7 @@ export class AuthStateManager {
   // ============================================
 
   async restoreAuth(): Promise<void> {
+    this._lastRefreshRejection = null;
     // Cookie mode keeps nothing in web storage on purpose - the whole point is
     // that no script (ours or an attacker's) can read the credential. So there is
     // nothing to "restore": ask the server instead, and let the HttpOnly cookie
@@ -524,12 +715,41 @@ export class AuthStateManager {
         this.isAuthenticated = true;
         await this.fetchUserProfile();
         this.roles = this.user?.roles ?? [];
-      } catch {
-        // Refresh also failed, clear auth
-        this.clearAuth();
-        this.clearPersistedTokens();
+      } catch (error) {
+        // Refresh also failed. Nothing is signed in either way, but what is
+        // persisted depends on WHY: only a rejection by the server ends the
+        // session for good; offline / timeout keep the tokens for the next boot.
+        // ★ `error` may be the plain "No refresh token available": in bearer
+        // mode the profile 401 above already drove the refresh through the
+        // HttpClient, and a REJECTED one cleared the token before this retry.
+        // The rejection the manager recorded is the verdict; this error is not.
+        const cause = this._lastRefreshRejection ?? error;
+        this._clearAfterFailedRestore(cause);
+        if (isRefreshRejection(cause)) {
+          this.clearPersistedTokens();
+        }
       }
     }
+  }
+
+  /**
+   * Clear the half-restored in-memory state after a failed boot, keeping the
+   * one message worth showing. A boot that fails because the session was
+   * ended for a security reason must keep that message, or the user is bounced
+   * to the login page with nothing to tell them their credentials are in use
+   * elsewhere. An ordinary expiry (or the plain "no cookie" boot) stays quiet,
+   * as before - `clearAuth()` resets `error`.
+   *
+   * `cause` is the failure that actually ended the session - callers pass the
+   * recorded refresh rejection when there is one (see `_lastRefreshRejection`).
+   * The message is re-derived from it rather than read back from `this.error`,
+   * so nothing that ran in between (a second `clearAuth()`, an `onUnauthorized`
+   * listener) can have quietly blanked it first.
+   */
+  private _clearAfterFailedRestore(cause: unknown): void {
+    const securityMessage = isSessionEndedForSecurity(cause) ? SESSION_ENDED_FOR_SECURITY_MESSAGE : null;
+    this.clearAuth();
+    this.error = securityMessage;
   }
 
   // ============================================
@@ -572,8 +792,8 @@ export class AuthStateManager {
       this.isAuthenticated = true;
       await this.fetchUserProfile();
       this.roles = this.user?.roles ?? [];
-    } catch {
-      this.clearAuth();
+    } catch (error) {
+      this._clearAfterFailedRestore(this._lastRefreshRejection ?? error);
     }
   }
 

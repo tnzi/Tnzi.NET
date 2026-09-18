@@ -1,4 +1,5 @@
-﻿
+﻿namespace Tnzi.Identity.Dtos;
+
 /// <summary>
 /// 完成「必须先改密码」这件待办。
 /// </summary>
@@ -59,7 +60,12 @@ public class PendingActionChallengeDto
 /// <summary>
 /// 办完一件待办之后的结果。
 /// </summary>
-public class PendingActionResultDto
+/// <remarks>
+/// 实现 <see cref="IRefreshTokenCarrier"/> 并转发给嵌套的 <see cref="Token"/>：
+/// <c>RefreshTokenDeliveryFilter</c> 只看最外层载荷的形状，嵌一层它就看不见 ——
+/// cookie 模式下这条签发路径的刷新令牌会原样落进 JSON、cookie 一枚没写，access token 到期即掉线。
+/// </remarks>
+public class PendingActionResultDto : IRefreshTokenCarrier
 {
     /// <summary>是否全部办完。为 false 时账号仍进不去。</summary>
     public bool Completed { get; set; }
@@ -69,4 +75,13 @@ public class PendingActionResultDto
 
     /// <summary>全部办完时直接给出的登录令牌，否则为 null。</summary>
     public TokenResult? Token { get; set; }
+
+    /// <inheritdoc />
+    string? IRefreshTokenCarrier.ReadRefreshToken() => ((IRefreshTokenCarrier?)Token)?.ReadRefreshToken();
+
+    /// <inheritdoc />
+    int? IRefreshTokenCarrier.ReadRefreshTokenLifetimeSeconds() => ((IRefreshTokenCarrier?)Token)?.ReadRefreshTokenLifetimeSeconds();
+
+    /// <inheritdoc />
+    void IRefreshTokenCarrier.ClearRefreshToken() => ((IRefreshTokenCarrier?)Token)?.ClearRefreshToken();
 }

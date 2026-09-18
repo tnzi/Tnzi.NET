@@ -339,3 +339,44 @@ public class BudgetService_PeriodBoundary : BudgetTestBase
         result.CurrentSpendUsd.ShouldBe(10m);
     }
 }
+
+// -------------------------------------------------------------------------
+// Thread deletion must not shrink the ledger
+// -------------------------------------------------------------------------
+
+public class BudgetService_ThreadDeletion : BudgetTestBase
+{
+    [Fact]
+    public async Task ThreadCleanup_KeepsUsageLogRows_ButDetachesThreadId()
+    {
+        // 线程是软删的展示数据，UsageLog 是账目事实：用户删自己的线程不能让租户/Agent 的本期花费缩水。
+        // 处理器只解除 ThreadId 引用，token / cost / provider / model / agent / tenant / 时间一律保留。
+        var threadId = Guid.NewGuid();
+        var otherThreadId = Guid.NewGuid();
+        var log1 = CreateLog(30m);
+        log1.ThreadId = threadId;
+        var log2 = CreateLog(20m);
+        log2.ThreadId = threadId;
+        var untouched = CreateLog(10m);
+        untouched.ThreadId = otherThreadId;
+        await SeedLogsAsync(log1, log2, untouched);
+
+        var before = await Service.CheckBudgetAsync(null, null, null);
+        before.CurrentSpendUsd.ShouldBe(60m);
+
+        var handler = new ThreadCleanupHandler(
+            NullLogger<ThreadCleanupHandler>.Instance,
+            usageLogRepository: ServiceProvider.GetRequiredService<IRepository<UsageLog, Guid>>());
+        await handler.HandleAsync(new ThreadDeletedEvent { ThreadId = threadId });
+
+        DbContext.ChangeTracker.Clear();
+        var rows = await DbContext.Set<UsageLog>().OrderBy(l => l.EstimatedCostUsd).ToListAsync();
+        rows.Count.ShouldBe(3);
+        rows.Where(l => l.Id == log1.Id || l.Id == log2.Id).ShouldAllBe(l => l.ThreadId == null);
+        rows.Single(l => l.Id == untouched.Id).ThreadId.ShouldBe(otherThreadId);
+        rows.Sum(l => l.EstimatedCostUsd).ShouldBe(60m);
+
+        var after = await Service.CheckBudgetAsync(null, null, null);
+        after.CurrentSpendUsd.ShouldBe(60m);
+    }
+}

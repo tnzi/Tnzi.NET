@@ -179,6 +179,9 @@ public class FrontendBackendContractTests
                     foreach (var http in method.GetCustomAttributes<HttpMethodAttribute>(inherit: true))
                     {
                         var template = Combine(controllerTemplate, http.Template);
+                        if (template == null)
+                            continue;
+
                         foreach (var verb in http.HttpMethods)
                             routes.Add($"{verb.ToUpperInvariant()} {template}");
                     }
@@ -190,21 +193,25 @@ public class FrontendBackendContractTests
     }
 
     /// <summary>
-    /// 组合类级与方法级路由模板。
+    /// 组合类级与方法级路由模板；方法级模板是绝对路由时返回 <see langword="null"/>。
     /// </summary>
     /// <remarks>
     /// 刻意<b>不</b>加 <c>api/</c> 前缀：那是 <c>RoutePrefixConvention</c> 在运行时按
     /// <c>AspNetCore:ApiPathPrefix</c> 加的，而前端 HttpClient 的 baseUrl 也带着它 ——
-    /// 两边都不含前缀，对账口径才一致。方法级模板以 <c>/</c> 或 <c>~/</c> 开头时是绝对路由，
-    /// 覆盖类级模板（ASP.NET Core 语义）。
+    /// 两边都不含前缀，对账口径才一致。
+    /// <para>
+    /// ★ 这个口径对<b>绝对</b>方法级模板（以 <c>~/</c> 或 <c>/</c> 开头）恰恰不成立：ASP.NET Core 拿它整条
+    /// 覆盖控制器模板，而前缀只写在控制器选择器上，于是那个端点在运行时<b>没有</b> <c>/api</c>。
+    /// 第一版把 <c>~/</c> 剥掉后当普通相对路由对账，前端 <c>/subscription-changes/{id}/cancel</c>
+    /// 于是「命中」了一个客户端根本打不到的地址 —— 门禁绿、运行时 404。现在这类模板不进后端路由集
+    /// （客户端经 baseUrl 到不了它们），由 <see cref="NoControllerActionUsesAnAbsoluteRouteTemplate"/> 直接点名。
+    /// </para>
     /// </remarks>
-    private static string Combine(string? controllerTemplate, string? methodTemplate)
+    private static string? Combine(string? controllerTemplate, string? methodTemplate)
     {
         var method = methodTemplate?.Trim() ?? string.Empty;
-        if (method.StartsWith("~/", StringComparison.Ordinal))
-            return NormalizeRoute(method[1..]);
-        if (method.StartsWith('/'))
-            return NormalizeRoute(method);
+        if (IsAbsoluteTemplate(method))
+            return null;
 
         var controller = controllerTemplate?.Trim().Trim('/') ?? string.Empty;
         var combined = method.Length == 0 ? controller : $"{controller}/{method}";
@@ -213,6 +220,49 @@ public class FrontendBackendContractTests
 
     private static string NormalizeRoute(string template)
         => FrontendApiScanner.Normalize(RouteParam.Replace(template, "{}"));
+
+    private static bool IsAbsoluteTemplate(string methodTemplate)
+        => methodTemplate.StartsWith("~/", StringComparison.Ordinal) || methodTemplate.StartsWith('/');
+
+    /// <summary>
+    /// 没有任何控制器动作使用绝对路由模板（以 <c>~/</c> 或 <c>/</c> 开头）。
+    /// </summary>
+    /// <remarks>
+    /// <c>RoutePrefixConvention</c> 管不到它们：前缀只写进控制器选择器，而绝对方法级模板整条覆盖控制器模板，
+    /// 端点于是落在 <c>/api</c> 之外 —— 文档照常把它列在模块的路由表里，<c>@tnzi/core</c> 照常带着 baseUrl 去调，
+    /// 只有运行时是 404。要换一段路径，另建一个 <c>[Route]</c> 控制器，让前缀约定正常处理。
+    /// </remarks>
+    [Fact]
+    public void NoControllerActionUsesAnAbsoluteRouteTemplate()
+    {
+        var offenders = new List<string>();
+
+        var assemblies = ArchitectureModuleGraph.Load()
+            .Modules
+            .Select(m => m.Type.Assembly)
+            .Distinct();
+
+        foreach (var assembly in assemblies)
+        {
+            foreach (var type in GetLoadableTypes(assembly))
+            {
+                if (type.IsAbstract || !typeof(ControllerBase).IsAssignableFrom(type))
+                    continue;
+
+                foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    foreach (var http in method.GetCustomAttributes<HttpMethodAttribute>(inherit: false))
+                    {
+                        if (http.Template != null && IsAbsoluteTemplate(http.Template.Trim()))
+                            offenders.Add($"{type.FullName}.{method.Name}: \"{http.Template}\"");
+                    }
+                }
+            }
+        }
+
+        offenders.ShouldBeEmpty(
+            "以下动作用了绝对路由模板，它们逃出了 RoutePrefixConvention 的 api 前缀：\n  " + string.Join("\n  ", offenders));
+    }
 
     /// <summary>
     /// 取程序集里能加载的类型。

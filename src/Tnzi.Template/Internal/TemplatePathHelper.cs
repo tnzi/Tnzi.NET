@@ -26,18 +26,34 @@ internal static class TemplatePathHelper
     }
 
     /// <summary>
-    /// 构建模板搜索根路径列表（按优先级排序）
+    /// 构建<b>模板根</b>列表（按优先级排序）：每一项都是一个可以直接在下面找
+    /// <c>{module}/{category}/{name}</c> 与 <c>Layouts/{category}/_{name}</c> 的目录。
     /// </summary>
-    public static List<string> BuildSearchRoots(TemplateOptions? options, IServiceProvider? serviceProvider = null)
+    /// <remarks>
+    /// <para>
+    /// 顺序：<c>AppContext.BaseDirectory/TemplateRootPath</c>（或绝对的 <c>TemplateRootPath</c> 本身）
+    /// → <c>AdditionalSearchPaths</c> 逐项<b>原样</b>（相对项基于 <c>AppContext.BaseDirectory</c> 解析）
+    /// → <c>ContentRootPath/TemplateRootPath</c>（开发期源码目录）。
+    /// </para>
+    /// <para>
+    /// ★ <c>AdditionalSearchPaths</c> 的每一项<b>就是一个模板根</b>，与 <c>TemplateRootPath</c> 同级，
+    /// 不再拼 <c>TemplateRootPath</c>。此前这里出的是「搜索根」而调用方各自再拼一次 <c>TemplateRootPath</c>：
+    /// <c>TemplateOptionsPostConfigure</c> 按文档语义加进来的 <c>&lt;模块目录&gt;/Templates</c> 于是被解析成
+    /// <c>&lt;模块目录&gt;/Templates/Templates</c>，一个不存在的目录 —— 程序集扫描每次启动都记一行成功日志却一个
+    /// 模板都找不到，照文档配 <c>["D:/shared/Templates"]</c> 的部署得到的只是 404。三条消费路径
+    /// （文件模板 / 布局加载 / 布局扫描）此前各拼各的，这一份是唯一出口。
+    /// </para>
+    /// </remarks>
+    public static List<string> BuildTemplateRoots(TemplateOptions? options, IServiceProvider? serviceProvider = null)
     {
-        var searchRoots = new List<string>();
-
-        // 1. 优先级最高：AppContext.BaseDirectory（输出目录，如 bin/Debug/net10.0）
-        //    这是模板文件通过 CopyToOutputDirectory 复制到的位置
+        var templateRoot = string.IsNullOrWhiteSpace(options?.TemplateRootPath) ? "Templates" : options.TemplateRootPath;
         var appBaseDir = GetApplicationBasePath();
-        searchRoots.Add(appBaseDir);
+        var roots = new List<string>();
 
-        // 2. 额外搜索路径（由 Host 模块或其他模块配置）
+        // 1. 主模板根：绝对路径原样；相对路径基于输出目录（模板文件经 CopyToOutputDirectory 复制到这里）
+        AddRoot(roots, Path.IsPathRooted(templateRoot) ? templateRoot : Path.Combine(appBaseDir, templateRoot));
+
+        // 2. 附加模板根：逐项原样（相对项基于输出目录）
         if (options?.AdditionalSearchPaths != null)
         {
             foreach (var additionalPath in options.AdditionalSearchPaths)
@@ -45,27 +61,35 @@ internal static class TemplatePathHelper
                 if (string.IsNullOrWhiteSpace(additionalPath))
                     continue;
 
-                // 如果是绝对路径，直接添加；否则基于 AppBaseDir 解析
-                var resolvedPath = Path.IsPathRooted(additionalPath)
-                    ? additionalPath
-                    : Path.GetFullPath(Path.Combine(appBaseDir, additionalPath));
-
-                if (!searchRoots.Contains(resolvedPath, StringComparer.OrdinalIgnoreCase))
-                {
-                    searchRoots.Add(resolvedPath);
-                }
+                AddRoot(roots, Path.IsPathRooted(additionalPath) ? additionalPath : Path.Combine(appBaseDir, additionalPath));
             }
         }
 
-        // 3. ContentRootPath（项目根目录，在发布环境中可能与 AppBaseDir 相同）
+        // 3. 开发期源码目录下的模板根（发布环境中通常与 #1 相同，去重后不出现）
         var contentRoot = GetContentRootPath(serviceProvider);
-        if (!string.IsNullOrWhiteSpace(contentRoot) &&
-            !searchRoots.Contains(contentRoot, StringComparer.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(contentRoot) && !Path.IsPathRooted(templateRoot))
         {
-            searchRoots.Add(contentRoot);
+            AddRoot(roots, Path.Combine(contentRoot, templateRoot));
         }
 
-        return searchRoots;
+        return roots;
+    }
+
+    /// <summary>规范化后去重加入；路径非法时跳过（一个坏配置项不该让整个查找失效）。</summary>
+    private static void AddRoot(List<string> roots, string candidate)
+    {
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(candidate);
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return;
+        }
+
+        if (!roots.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+            roots.Add(normalized);
     }
 
     /// <summary>

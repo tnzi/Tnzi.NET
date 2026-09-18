@@ -88,7 +88,7 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
       },
       async probe() {
         if (!runtimeApi) return { runtimes: [], notFound: [] }
-        return unwrap<CliRuntimeProbeResultDto>(await runtimeApi.probe())
+        return unwrapOk<CliRuntimeProbeResultDto>(await runtimeApi.probe())
       },
       async update(id, input) {
         if (!runtimeApi) throw new Error('AI.Cli module is not available')

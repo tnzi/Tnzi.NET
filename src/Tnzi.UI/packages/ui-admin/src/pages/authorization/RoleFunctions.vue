@@ -478,7 +478,7 @@ import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { makePageTranslator } from '../_shared/translate'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, createDialogAdapter } from '@tnzi/ui'
 import type {
   FunctionModuleDto,
   ModuleFunctionDto,
@@ -509,19 +509,18 @@ const dialog = (() => {
   }
 })()
 
+// Through the adapter, not a hand-rolled promise: naive fires `onClose` only
+// for the X button, and Esc (`closeOnEsc`, default on) closes through none of
+// the button hooks. The adapter settles every close path via `onAfterLeave`,
+// so a dismissed confirmation never leaves the caller awaiting forever.
+const confirmDialog = createDialogAdapter(dialog ?? undefined)
+
 function confirmWarning(title: string, content: string): Promise<boolean> {
-  if (!dialog) return Promise.resolve(window.confirm(content))
-  return new Promise((resolve) => {
-    dialog.warning({
-      title,
-      content,
-      positiveText: t('admin.common.confirm'),
-      negativeText: t('admin.common.cancel'),
-      onPositiveClick: () => resolve(true),
-      onNegativeClick: () => resolve(false),
-      onClose: () => resolve(false),
-      onMaskClick: () => resolve(false),
-    })
+  return confirmDialog.confirm(content, {
+    title,
+    type: 'warning',
+    confirmText: t('admin.common.confirm'),
+    cancelText: t('admin.common.cancel'),
   })
 }
 
@@ -734,15 +733,11 @@ async function loadAll(): Promise<void> {
 async function loadRoles(): Promise<void> {
   rolesLoading.value = true
   try {
-    const result = await idBridge.roles.fetch({
-      pageIndex: 1,
-      pageSize: 500,
-      sortField: 'name',
-      sortOrder: 'asc' as const,
-      searchText: '',
-      filters: {},
-    })
-    roles.value = result.items
+    // The unpaged endpoint: the paged one clamps pageSize to 100 silently, so
+    // the former `pageSize: 500` call left roles 101+ out of the matrix.
+    const all = await idBridge.roles.getAll()
+    roles.value = [...all]
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
       .filter((r): r is RoleDto & { id: string; name: string } => !!(r.id && r.name))
       .map((r) => ({
         id: r.id,

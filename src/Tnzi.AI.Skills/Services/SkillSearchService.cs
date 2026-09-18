@@ -16,6 +16,17 @@ public class SkillSearchService : ISkillSearchService
 
     private TimeSpan CacheTtl => _options?.CurrentValue.ContextProviders.Skills.CacheTtl ?? TimeSpan.FromMinutes(15);
 
+    /// <summary>
+    /// 嵌入缓存是全进程共享的 <c>IMemoryCache</c>：任何人给它设了 <c>SizeLimit</c>（<c>Caching:MemorySizeLimit</c>）
+    /// 之后，不带 <c>Size</c> 的写入会抛 <c>InvalidOperationException</c>。抛点在查询嵌入已经生成之后、
+    /// 被外层的语义降级 catch 吞成关键词结果 —— 每次搜索先付一次嵌入费再静默失败。写共享缓存一律带 Size。
+    /// </summary>
+    private MemoryCacheEntryOptions EmbeddingCacheEntryOptions() => new()
+    {
+        AbsoluteExpirationRelativeToNow = CacheTtl,
+        Size = 1
+    };
+
     // 字段权重
     private const double NameWeight = 3.0;
     private const double TagWeight = 2.0;
@@ -215,7 +226,7 @@ public class SkillSearchService : ISkillSearchService
             return null;
         }
 
-        _embeddingCache?.Set(cacheKey, result.Data, CacheTtl);
+        _embeddingCache?.Set(cacheKey, result.Data, EmbeddingCacheEntryOptions());
         return result.Data;
     }
 
@@ -265,7 +276,7 @@ public class SkillSearchService : ISkillSearchService
             if (_embeddingCache != null)
             {
                 var cacheKey = EmbeddingCachePrefix + candidates[idx].Slug;
-                _embeddingCache.Set(cacheKey, generated[j], CacheTtl);
+                _embeddingCache.Set(cacheKey, generated[j], EmbeddingCacheEntryOptions());
             }
         }
 

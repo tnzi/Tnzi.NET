@@ -9,7 +9,7 @@ public class EntityRoleConfiguration : EntityTypeConfigurationBase<EntityRole, G
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.Filter).HasMaxLength(2000);
+        builder.Property(e => e.Filter).HasMaxLength(EntityRole.FilterMaxLength);
 
         // 创建索引
         if (multiTenancyEnabled)

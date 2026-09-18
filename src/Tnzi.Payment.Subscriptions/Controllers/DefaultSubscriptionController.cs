@@ -162,7 +162,14 @@ public class DefaultSubscriptionController : ApiControllerBase
     /// <summary>
     /// 取消待生效的计划变更
     /// </summary>
-    [HttpPost("~/subscription-changes/{id:guid}/cancel")]
+    /// <remarks>
+    /// ★ 模板必须是<b>相对</b>的。此前写成 <c>~/subscription-changes/{id}/cancel</c>：ASP.NET Core 对以 <c>~/</c>
+    /// 或 <c>/</c> 开头的方法级模板整条覆盖控制器模板，而 <c>api</c> 前缀是 <c>RoutePrefixConvention</c>
+    /// 只写进控制器选择器的 —— 那个端点于是成了全仓唯一没有 <c>/api</c> 的路由，
+    /// <c>@tnzi/core</c> 带着 baseUrl 去调必 404，一次降级之后用户在界面上就再也撤不回来。
+    /// <c>changes</c> 不是 guid，与 <c>{id}/cancel</c> 不撞。
+    /// </remarks>
+    [HttpPost("changes/{id:guid}/cancel")]
     public virtual async Task<ApiResult> CancelPendingChange(Guid id)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;

@@ -26,7 +26,10 @@ public class Provider : FullAuditedEntity<Guid>, IScopedResource, IHasOrder
 
     /// <summary>
     /// Provider type - e.g. "OpenAI", "Anthropic", "Azure", "Ollama".
-    /// 用作 IChatClientFactory 选择 SDK 的 key
+    /// 决定协议：<c>IChatClientFactory</c> 先按它匹配已注册的 <c>IChatClientProvider.ProviderName</c>
+    /// （当前内建 "OpenAI" / "Anthropic"），未命中再按 Name，仍未命中回退 OpenAI 兼容协议
+    /// （所以 "Azure" / "Ollama" / "DeepSeek" 这类值都走 OpenAI 兼容端点）。
+    /// 2026-09-12 前工厂根本不读它：Name=MyClaude / ProviderType=Anthropic 的行会用 OpenAI 兼容客户端打 api.anthropic.com。
     /// </summary>
     public string ProviderType { get; set; } = string.Empty;
 

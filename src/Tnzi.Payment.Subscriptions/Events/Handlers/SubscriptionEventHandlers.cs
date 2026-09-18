@@ -163,6 +163,7 @@ public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentComplete
             SubscriptionId = meta.SubscriptionId,
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
+            PayerUserId = eventData.UserId,
             PaymentTradeNo = eventData.TradeNo,
             Amount = eventData.Amount,
             Currency = eventData.Currency
@@ -203,6 +204,7 @@ public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent
             SubscriptionId = meta.SubscriptionId,
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
+            PayerUserId = eventData.UserId,
             PaymentTradeNo = eventData.TradeNo,
             FailReason = eventData.FailReason
         }, cancellationToken);
@@ -242,6 +244,8 @@ public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEve
             SubscriptionId = meta.SubscriptionId,
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
+            PayerUserId = eventData.UserId,
+            PaymentTradeNo = eventData.TradeNo,
             FailReason = "Payment order expired"
         }, cancellationToken);
     }

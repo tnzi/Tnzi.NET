@@ -112,18 +112,24 @@ public class CliRunQueueProcessor : BackgroundService
     /// 认领一条待执行运行。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 候选查询里已经排除了「同一 Agent + 同一 Thread 已有活跃运行」的情形 ——
     /// 同一个对话线程并发跑两个 turn，会让两边看到彼此写了一半的工作目录。
     /// 这个互斥用查询表达而不是分布式锁：多一条谓词，少一套要维护的锁基础设施。
+    /// </para>
+    /// <para>
+    /// 全部查询走 <see cref="CliRunQueries.AcrossTenants"/>：这里没有当前租户，
+    /// 带租户过滤的查询只看得见 <c>TenantId IS NULL</c> 的行，租户的运行会永远停在 Queued。
+    /// </para>
     /// </remarks>
-    private async Task<Guid?> TryClaimAsync(CancellationToken cancellationToken)
+    internal async Task<Guid?> TryClaimAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
         var options = _options.CurrentValue;
 
         var now = DateTime.UtcNow;
-        var candidates = await repository.AsQueryable()
+        var candidates = await repository.AcrossTenants()
             .Where(r => r.Status == CliRunStatus.Queued && !r.CancelRequested)
             .OrderByDescending(r => r.Priority)
             .ThenBy(r => r.CreationTime)
@@ -135,7 +141,7 @@ public class CliRunQueueProcessor : BackgroundService
         {
             if (candidate.ThreadId is { } threadId)
             {
-                var threadBusy = await repository.AsQueryable().AnyAsync(
+                var threadBusy = await repository.AcrossTenants().AnyAsync(
                     r => r.ThreadId == threadId
                          && r.Id != candidate.Id
                          && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running),
@@ -147,7 +153,7 @@ public class CliRunQueueProcessor : BackgroundService
                 }
             }
 
-            var claimed = await repository.AsQueryable()
+            var claimed = await repository.AcrossTenants()
                 .Where(r => r.Id == candidate.Id && r.Status == CliRunStatus.Queued)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(r => r.Status, CliRunStatus.Dispatched)
@@ -190,7 +196,7 @@ public class CliRunQueueProcessor : BackgroundService
                 var repository = scope.ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
                 var expiry = DateTime.UtcNow.Add(_options.CurrentValue.LeaseDuration);
 
-                var updated = await repository.AsQueryable()
+                var updated = await repository.AcrossTenants()
                     .Where(r => r.Id == runId
                                 && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running))
                     .ExecuteUpdateAsync(s => s.SetProperty(r => r.LeaseExpiresAt, expiry), cancellationToken);
@@ -201,7 +207,7 @@ public class CliRunQueueProcessor : BackgroundService
                 }
 
                 // 顺带看一眼取消标记：它可能由别的副本（或本副本的另一个请求）写下。
-                var cancelRequested = await repository.AsQueryable()
+                var cancelRequested = await repository.AcrossTenants()
                     .AnyAsync(r => r.Id == runId && r.CancelRequested, cancellationToken);
 
                 if (cancelRequested)
@@ -227,24 +233,51 @@ public class CliRunQueueProcessor : BackgroundService
     /// 回收租约过期的运行。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 宿主崩溃后没人续租，行会永远停在 Dispatched/Running。回收把它打回 Queued，
     /// 让别的副本接手。这是整套租约机制存在的唯一理由。
+    /// </para>
+    /// <para>
+    /// 已经被要求取消的行例外：它的宿主死了，没人能把取消落成终态，而打回 Queued 会让它以
+    /// <c>Queued + CancelRequested</c> 的形态永远躺在队列里 —— 认领谓词跳过它，取消端点又只处理
+    /// 读到时还是 Queued 的行，SSE 永远等不到终态。这里是「Queued」的第二个写入者，
+    /// 与执行器停机时的 <c>ReleaseToQueueAsync</c> 同形，所以同样改判 <c>Cancelled</c>。
+    /// </para>
     /// </remarks>
-    private async Task ReclaimExpiredLeasesAsync(CancellationToken cancellationToken)
+    internal async Task ReclaimExpiredLeasesAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
         var now = DateTime.UtcNow;
 
-        var reclaimed = await repository.AsQueryable()
+        var expired = repository.AcrossTenants()
             .Where(r => r.LeaseExpiresAt != null
                         && r.LeaseExpiresAt < now
-                        && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running))
+                        && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running));
+
+        var cancelled = await expired
+            .Where(r => r.CancelRequested)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.Status, CliRunStatus.Cancelled)
+                .SetProperty(r => r.FailureReason, (CliRunFailureReason?)CliRunFailureReason.Cancelled)
+                .SetProperty(r => r.Error, r => r.Error ?? "Execution cancelled.")
+                .SetProperty(r => r.CompletedAt, (DateTime?)now)
+                .SetProperty(r => r.LeaseExpiresAt, (DateTime?)null)
+                .SetProperty(r => r.WriteBackTokenHash, (string?)null)
+                .SetProperty(r => r.WriteBackTokenExpiresAt, (DateTime?)null), cancellationToken);
+
+        var reclaimed = await expired
+            .Where(r => !r.CancelRequested)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(r => r.Status, CliRunStatus.Queued)
                 .SetProperty(r => r.LeaseExpiresAt, (DateTime?)null)
                 .SetProperty(r => r.ClaimedByHostId, (string?)null)
                 .SetProperty(r => r.DispatchedAt, (DateTime?)null), cancellationToken);
+
+        if (cancelled > 0)
+        {
+            _logger.LogWarning("Cancelled {Count} CLI run(s) whose lease expired after cancellation was requested", cancelled);
+        }
 
         if (reclaimed > 0)
         {
@@ -258,7 +291,7 @@ public class CliRunQueueProcessor : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var repository = scope.ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>();
-            await repository.AsQueryable()
+            await repository.AcrossTenants()
                 .Where(r => r.Id == runId && r.Status != CliRunStatus.Completed)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(r => r.Status, CliRunStatus.Failed)

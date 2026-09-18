@@ -59,7 +59,11 @@ public class SignalRModule : TnziFrameworkModule
             options.HandshakeTimeout = hubOptions.HandshakeTimeout;
             options.MaximumReceiveMessageSize = hubOptions.MaximumReceiveMessageSize;
 
-            // 注册 Filters (按顺序: 异常处理 -> 授权 -> 速率限制(可选) -> 日志(可选))
+            // 注册 Filters (按顺序: 激活作用域 -> 异常处理 -> 授权 -> 速率限制(可选) -> 日志(可选))
+            // 激活作用域过滤器必须最先执行：TnziHub 的可选服务（事件总线/日志/中断表/
+            // 无参构造时的连接管理器）都从它暴露的作用域解析，HttpContext.RequestServices
+            // 在长轮询断开时已经释放。它没有依赖，按实例注册。
+            options.AddFilter(new HubInvocationServicesFilter());
             options.AddFilter<ExceptionHandlingHubFilter>();
             options.AddFilter<HubAuthorizationFilter>();
 

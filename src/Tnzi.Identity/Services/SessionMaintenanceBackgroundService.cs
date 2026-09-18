@@ -56,7 +56,8 @@ public class SessionMaintenanceBackgroundService : BackgroundService
         }
     }
 
-    private async Task RunMaintenanceAsync(CancellationToken cancellationToken)
+    /// <summary>跑一次完整的维护扫描。internal 只为让测试直接驱动它，不必等计时器。</summary>
+    internal async Task RunMaintenanceAsync(CancellationToken cancellationToken)
     {
         await using var scope = _serviceProvider.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -93,6 +94,19 @@ public class SessionMaintenanceBackgroundService : BackgroundService
             if (revoked > 0)
             {
                 _logger.LogInformation("Session maintenance: revoked {Count} inactive sessions.", revoked);
+            }
+        }
+
+        // 3) 删掉过期超过保留期的验证码（明文码 + 收件地址 + 用途）。
+        //    ★ 这张表此前没有任何清理路径：关闭 2FA 只删该用户的未用码，已用码与过期码永久留存，
+        //    为清理而建的 ExpiresAt 索引零消费者。保留期见 Identity:Otp:RetentionHours（0 = 不清理）。
+        var twoFactorService = services.GetService<ITwoFactorService>();
+        if (twoFactorService != null)
+        {
+            var removedCodes = await twoFactorService.CleanExpiredCodesAsync(cancellationToken);
+            if (removedCodes > 0)
+            {
+                _logger.LogInformation("Session maintenance: removed {Count} expired verification codes.", removedCodes);
             }
         }
     }

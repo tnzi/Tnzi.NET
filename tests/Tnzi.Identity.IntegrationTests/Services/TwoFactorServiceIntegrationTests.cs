@@ -220,4 +220,36 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
         Assert.False((await UserManager.FindByIdAsync(user.Id.ToString()))!.TwoFactorEnabled);
         Assert.Empty(DbContext.Set<TwoFactorCode>());
     }
+
+    /// <summary>
+    /// ★ 验证码表此前没有任何清理路径：明文码 + 收件地址 + 用途无限期留存（已用的置 IsUsed 后永久保留），
+    /// 为清理而建的 ExpiresAt 索引零消费者。清扫只看 <c>ExpiresAt</c> 过了保留期多久，用没用过都删 ——
+    /// 验码窗口只有 ExpirationMinutes，过期之后这一行对任何流程都没有意义。
+    /// </summary>
+    [Fact]
+    public async Task CleanExpiredCodes_RemovesRowsPastRetention_KeepsLiveOnes()
+    {
+        var now = DateTime.UtcNow;
+        var user = await CreateUserAsync(email: "retention@example.com");
+        TwoFactorCode Row(DateTime expiresAt, bool used) => new()
+        {
+            Id = Guid.NewGuid(), UserId = user.Id, Address = user.Email!, Code = "111111",
+            Type = TwoFactorType.Email, Purpose = VerificationCodePurpose.TwoFactor,
+            ExpiresAt = expiresAt, IsUsed = used, CreationTime = expiresAt.AddMinutes(-10)
+        };
+        var stale = Row(now.AddHours(-30), used: true);
+        var staleUnused = Row(now.AddHours(-25), used: false);
+        var expiredButRecent = Row(now.AddHours(-1), used: false);
+        var live = Row(now.AddMinutes(5), used: false);
+        DbContext.Set<TwoFactorCode>().AddRange(stale, staleUnused, expiredButRecent, live);
+        await SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        // 默认保留 24 小时（RetentionHours 的默认值）。
+        var removed = await _service.CleanExpiredCodesAsync();
+
+        Assert.Equal(2, removed);
+        var remaining = DbContext.Set<TwoFactorCode>().Select(c => c.Id).ToHashSet();
+        Assert.Equal(new HashSet<Guid> { expiredButRecent.Id, live.Id }, remaining);
+    }
 }

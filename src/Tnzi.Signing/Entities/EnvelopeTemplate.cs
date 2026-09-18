@@ -98,7 +98,8 @@ public class Field : EntityBase<Guid>, IMultiTenant, IHasOrder
 
     /// <summary>
     /// 绑定到哪个合并变量（<see cref="Services.MergeFieldDescriptor.Key"/>）。
-    /// 有绑定的字段在渲染时就填好，收件人看到的是已填内容。
+    /// 有绑定的字段在发出时（<c>SendAsync</c>）就烧进渲染稿，收件人看到的是已填内容；
+    /// 缺值的必填绑定字段会让发出被拒。
     /// </summary>
     public string? Binding { get; set; }
 

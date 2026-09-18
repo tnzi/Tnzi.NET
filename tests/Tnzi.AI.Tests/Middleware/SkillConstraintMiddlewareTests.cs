@@ -9,9 +9,14 @@ public class SkillConstraintMiddlewareTests
 {
     #region Helpers
 
-    private static SkillConstraintMiddleware CreateMiddleware(
+    /// <summary>
+    /// The activation tracker is the single source of truth the middleware reads; tests seed it
+    /// directly the way skill_activate would (Properties["ActiveSkills"] is no longer consulted).
+    /// </summary>
+    private static (SkillConstraintMiddleware middleware, SkillActivationTracker tracker) CreateMiddleware(
         ISkillConstraintEnforcer? enforcer = null,
-        IToolRegistry? toolRegistry = null)
+        IToolRegistry? toolRegistry = null,
+        params SkillDefinition[] activeSkills)
     {
         enforcer ??= new SkillConstraintEnforcer();
 
@@ -22,13 +27,18 @@ public class SkillConstraintMiddlewareTests
             toolRegistry = mockRegistry.Object;
         }
 
-        return new(enforcer, toolRegistry, Mock.Of<ILogger<SkillConstraintMiddleware>>());
+        var tracker = new SkillActivationTracker();
+        foreach (var skill in activeSkills)
+            tracker.Activate(skill);
+
+        return (new(enforcer, toolRegistry, tracker, Mock.Of<ILogger<SkillConstraintMiddleware>>()), tracker);
     }
 
     private static AiMiddlewareContext CreateContext(
         string? model = null,
         string? provider = null,
-        List<AITool>? additionalTools = null)
+        List<AITool>? additionalTools = null,
+        IAgentExecutor? agent = null)
     {
         return new AiMiddlewareContext
         {
@@ -39,13 +49,22 @@ public class SkillConstraintMiddlewareTests
                 Provider = provider
             },
             Agent = AgentResolution.Success(
-                agent: null!,
+                agent: agent!,
                 provider: provider ?? "OpenAI",
                 model: model ?? "gpt-4o",
                 agentId: null),
             ServiceProvider = new Mock<IServiceProvider>().Object,
             AdditionalTools = additionalTools ?? []
         };
+    }
+
+    /// <summary>An agent executor that only exposes a tool list (what the middleware inspects).</summary>
+    private static IAgentExecutor CreateAgentWithTools(params string[] toolNames)
+    {
+        var mock = new Mock<IAgentExecutor>();
+        mock.Setup(a => a.Name).Returns("agent");
+        mock.Setup(a => a.Tools).Returns(toolNames.Select(CreateAiTool).ToList());
+        return mock.Object;
     }
 
     private static AITool CreateAiTool(string name)
@@ -93,9 +112,9 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_NoActiveSkills_PassesThrough()
     {
-        var middleware = CreateMiddleware();
+        var (middleware, _) = CreateMiddleware();
         var context = CreateContext();
-        // No "ActiveSkills" key in Properties
+        // Nothing activated in the tracker
         var nextCalled = false;
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
@@ -112,9 +131,9 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_EmptyActiveSkillsList_PassesThrough()
     {
-        var middleware = CreateMiddleware();
+        var (middleware, tracker) = CreateMiddleware();
         var context = CreateContext();
-        context.Properties["ActiveSkills"] = new List<SkillDefinition>();
+        tracker.ActivatedSkills.ShouldBeEmpty();
         var nextCalled = false;
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
@@ -139,7 +158,8 @@ public class SkillConstraintMiddlewareTests
             ("git_commit", "git"),
             ("bash", "shell"));
 
-        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
+        var skill = CreateSkill(allowedToolGroups: ["git"]);
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: skill);
 
         var gitTool = CreateAiTool("git_diff");
         var gitCommitTool = CreateAiTool("git_commit");
@@ -147,9 +167,6 @@ public class SkillConstraintMiddlewareTests
 
         var context = CreateContext(
             additionalTools: [gitTool, gitCommitTool, bashTool]);
-
-        var skill = CreateSkill(allowedToolGroups: ["git"]);
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
 
         await middleware.InvokeAsync(context, NextDelegate);
 
@@ -166,12 +183,10 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_WithRequiredModel_SetsEffectiveModel()
     {
-        var middleware = CreateMiddleware();
+        var skill = CreateSkill(requiredModel: "claude-opus");
+        var (middleware, _) = CreateMiddleware(activeSkills: skill);
 
         var context = CreateContext(model: "gpt-4o");
-
-        var skill = CreateSkill(requiredModel: "claude-opus");
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
 
         await middleware.InvokeAsync(context, NextDelegate);
 
@@ -185,12 +200,10 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeAsync_WithRequiredProvider_SetsEffectiveProvider()
     {
-        var middleware = CreateMiddleware();
+        var skill = CreateSkill(requiredProvider: "Anthropic");
+        var (middleware, _) = CreateMiddleware(activeSkills: skill);
 
         var context = CreateContext(provider: "OpenAI");
-
-        var skill = CreateSkill(requiredProvider: "Anthropic");
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
 
         await middleware.InvokeAsync(context, NextDelegate);
 
@@ -209,18 +222,8 @@ public class SkillConstraintMiddlewareTests
             ("bash", "shell"),
             ("web_search", "web"));
 
-        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
-
-        var gitTool = CreateAiTool("git_diff");
-        var bashTool = CreateAiTool("bash");
-        var webTool = CreateAiTool("web_search");
-
-        var context = CreateContext(
-            additionalTools: [gitTool, bashTool, webTool]);
-
         // Skill A: allows git + shell
-        var skillA = CreateSkill(allowedToolGroups: ["git", "shell"], priority: 0);
-        skillA = new SkillDefinition
+        var skillA = new SkillDefinition
         {
             Slug = "skill-a",
             Name = "Skill A",
@@ -239,7 +242,14 @@ public class SkillConstraintMiddlewareTests
             Priority = 1
         };
 
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skillA, skillB };
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: [skillA, skillB]);
+
+        var gitTool = CreateAiTool("git_diff");
+        var bashTool = CreateAiTool("bash");
+        var webTool = CreateAiTool("web_search");
+
+        var context = CreateContext(
+            additionalTools: [gitTool, bashTool, webTool]);
 
         await middleware.InvokeAsync(context, NextDelegate);
 
@@ -258,7 +268,10 @@ public class SkillConstraintMiddlewareTests
     {
         // Registry only knows about "git_diff"
         var toolRegistry = CreateToolRegistry(("git_diff", "git"));
-        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
+        // Only shell allowed → git_diff filtered out (it's in registry as group "git" which is NOT "shell")
+        // but mcp_tool is NOT in registry → should pass through
+        var skill = CreateSkill(allowedToolGroups: ["shell"]);
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: skill);
 
         var gitTool = CreateAiTool("git_diff");
         // "mcp_tool" is not in the registry at all (OpenAPI/MCP dynamic tool)
@@ -266,11 +279,6 @@ public class SkillConstraintMiddlewareTests
 
         var context = CreateContext(
             additionalTools: [gitTool, mcpTool]);
-
-        // Only git allowed → git_diff filtered out (it's in registry as group "git" which is NOT "shell")
-        // but mcp_tool is NOT in registry → should pass through
-        var skill = CreateSkill(allowedToolGroups: ["shell"]);
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
 
         await middleware.InvokeAsync(context, NextDelegate);
 
@@ -289,10 +297,6 @@ public class SkillConstraintMiddlewareTests
     {
         // "tool-x" is in the registry (so it can be injected by the allow-list path)
         var toolRegistry = CreateToolRegistry(("tool-x", "group-a"));
-
-        var middleware = CreateMiddleware(toolRegistry: toolRegistry);
-
-        var context = CreateContext();
 
         // Skill A explicitly allows "tool-x"
         var skillA = new SkillDefinition
@@ -314,13 +318,70 @@ public class SkillConstraintMiddlewareTests
             Priority = 0
         };
 
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skillA, skillB };
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: [skillA, skillB]);
+
+        // The agent already has tool-x (from its tool groups) and it is also injected.
+        var context = CreateContext(additionalTools: [CreateAiTool("tool-x")], agent: CreateAgentWithTools("tool-x"));
 
         await middleware.InvokeAsync(context, NextDelegate);
 
-        // Deny wins: tool-x must NOT be injected or present
+        // Deny wins: tool-x must be withheld from both lists
         context.AdditionalTools.ShouldNotContain(t => t.Name != null &&
             string.Equals(t.Name, "tool-x", StringComparison.OrdinalIgnoreCase));
+        context.ExcludedToolNames.ShouldContain("tool-x");
+    }
+
+    #endregion
+
+    #region Agent's own tools (not only AdditionalTools) are withheld from the model
+
+    [Fact]
+    public async Task InvokeAsync_DeniedTool_OnAgentItself_IsAddedToExcludedToolNames()
+    {
+        var toolRegistry = CreateToolRegistry(("bash", "shell"), ("read_file", "fs"));
+        var skill = new SkillDefinition { Slug = "ro", Name = "Read Only", Content = "x", DeniedTools = ["bash"] };
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: skill);
+
+        // bash and read_file come from the agent's configured tool groups, not from a context provider.
+        var context = CreateContext(agent: CreateAgentWithTools("bash", "read_file"));
+
+        await middleware.InvokeAsync(context, NextDelegate);
+
+        context.ExcludedToolNames.ShouldBe(["bash"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AllowedToolGroups_OnAgentItself_ExcludesOtherGroups_KeepsWhitelistedAndUngrouped()
+    {
+        var toolRegistry = CreateToolRegistry(("git_diff", "git"), ("bash", "shell"), ("custom_lint", "lint"));
+        var skill = new SkillDefinition
+        {
+            Slug = "audit", Name = "Audit", Content = "x",
+            AllowedToolGroups = ["git"],
+            AllowedTools = ["custom_lint"] // supplementary whitelist: survives the group filter
+        };
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: skill);
+
+        var context = CreateContext(agent: CreateAgentWithTools("git_diff", "bash", "custom_lint", "mcp_dynamic"));
+
+        await middleware.InvokeAsync(context, NextDelegate);
+
+        context.ExcludedToolNames.ShouldBe(["bash"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NoToolRestrictions_LeavesAgentToolsAlone()
+    {
+        var toolRegistry = CreateToolRegistry(("bash", "shell"));
+        var skill = CreateSkill(requiredModel: "claude-opus"); // model override only
+        var (middleware, _) = CreateMiddleware(toolRegistry: toolRegistry, activeSkills: skill);
+
+        var context = CreateContext(agent: CreateAgentWithTools("bash"));
+
+        await middleware.InvokeAsync(context, NextDelegate);
+
+        context.ExcludedToolNames.ShouldBeEmpty();
+        context.EffectiveModel.ShouldBe("claude-opus");
     }
 
     #endregion
@@ -330,7 +391,7 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeStreamingAsync_NoActiveSkills_PassesThrough()
     {
-        var middleware = CreateMiddleware();
+        var (middleware, _) = CreateMiddleware();
         var context = CreateContext();
         var nextCalled = false;
 
@@ -351,12 +412,10 @@ public class SkillConstraintMiddlewareTests
     [Fact]
     public async Task InvokeStreamingAsync_WithRequiredModel_SetsEffectiveModel()
     {
-        var middleware = CreateMiddleware();
+        var skill = CreateSkill(requiredModel: "claude-opus");
+        var (middleware, _) = CreateMiddleware(activeSkills: skill);
 
         var context = CreateContext(model: "gpt-4o");
-
-        var skill = CreateSkill(requiredModel: "claude-opus");
-        context.Properties["ActiveSkills"] = new List<SkillDefinition> { skill };
 
         await foreach (var _ in middleware.InvokeStreamingAsync(context, (ctx, ct) =>
             AsyncEnumerable.Empty<AgentStreamChunk>()))

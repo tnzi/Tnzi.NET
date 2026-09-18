@@ -8,7 +8,7 @@ public class LoginLogServiceIntegrationTests : RelationalIdentityIntegrationTest
 
     public LoginLogServiceIntegrationTests()
     {
-        _service = new LoginLogService(CreateRepository<LoginLog>(), LoginLogSenderMock.Object, ServiceProvider);
+        _service = new LoginLogService(CreateRepository<LoginLog>(), LoginLogSenderMock.Object, ServiceProvider, new UserTenantScopeProvider(CreateRepository<User>()));
     }
 
     [Fact]

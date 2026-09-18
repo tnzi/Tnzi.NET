@@ -104,7 +104,8 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
             ServiceProvider,
-            Guard(effective));
+            Guard(effective),
+            new FileThumbnailGenerator(Storage, new StaticOptionsMonitor<StorageOptions>(effective)));
     }
 
     /// <summary>
@@ -173,6 +174,19 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             grantContext);
     }
 
+    /// <summary>
+    /// 父模块的清理服务。工作区用例用它证明「分片合并出的记录不会被孤儿回收选中」——
+    /// 那条路径此前把 ReferenceCount 写死成 0，于是分片通道传的正式文件在 72 小时后被静默删除。
+    /// </summary>
+    protected FileCleanupService CreateCleanupService(StorageOptions options)
+        => new(
+            Repo<FileRecord>(),
+            Repo<FileReference>(),
+            Storage,
+            new Tnzi.MultiTenancy.CurrentTenant(),
+            new StaticOptionsMonitor<StorageOptions>(options),
+            ServiceProvider);
+
     protected ExpiredUploadSessionCleanupContributor CreateCleanupContributor(
         Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null,
         bool multiTenancyEnabled = false)
@@ -217,10 +231,10 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
         }
     }
 
-    private EFCoreRepository<WorkspaceTestDbContext, TEntity, Guid> Repo<TEntity>() where TEntity : class, Tnzi.Domain.Entities.IEntity<Guid>
+    protected EFCoreRepository<WorkspaceTestDbContext, TEntity, Guid> Repo<TEntity>() where TEntity : class, Tnzi.Domain.Entities.IEntity<Guid>
         => new(DbContext, serviceProvider: ServiceProvider);
 
-    private static UploadGuard Guard(StorageOptions options, IEnumerable<IUploadSanitizer>? sanitizers = null)
+    protected static UploadGuard Guard(StorageOptions options, IEnumerable<IUploadSanitizer>? sanitizers = null)
         => new(new StaticOptionsMonitor<StorageOptions>(options), sanitizers);
 
     private static string ComputeMd5(byte[] content)

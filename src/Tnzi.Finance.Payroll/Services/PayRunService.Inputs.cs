@@ -60,7 +60,7 @@ public partial class PayRunService
 
         // 负的收入/扣减/雇主承担项就是一次没人申报的反向发放——与 DefaultAmount /
         // AmountOverride 同一口径。备注项是具名中间量，天然带符号。
-        if (input.Amount < 0 && component.Type != SalaryComponentType.Informational)
+        if (PayrollAmountRules.IsNegativeMonetary(component.Type, input.Amount))
             return Fail<PayRunInputDto>("A one-time input cannot be negative for an earning, deduction or employer-contribution component.", 400);
 
         var note = string.IsNullOrWhiteSpace(input.Note) ? null : input.Note.Trim();

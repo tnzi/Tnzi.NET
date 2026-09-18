@@ -17,12 +17,23 @@ public class CostTrackingOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// 模型成本率字典，键格式: "provider:model"（如 "OpenAI:gpt-4o"）
+    /// 模型成本率，按 provider → model 两级：<c>ModelCosts["OpenAI"]["gpt-4o"]</c>；
+    /// model 位可用 <c>"*"</c> 作该 provider 的通配。
     /// </summary>
     /// <remarks>
-    /// 查找顺序: 精确匹配 "provider:model" → 通配匹配 "provider:*" → 无匹配返回 null
+    /// <para>查找顺序: 精确匹配 provider/model → 通配 provider/"*" → <see cref="DefaultCostRate"/> → null。</para>
+    /// <para>
+    /// appsettings 里两种写法等价：嵌套 <c>"OpenAI": { "gpt-4o": { … } }</c>，或扁平键 <c>"OpenAI:gpt-4o": { … }</c>
+    /// （<c>:</c> 是 IConfiguration 的路径分隔符，扁平键本来就会被拆成两级）。
+    /// </para>
+    /// <para>
+    /// ★ 不能是 <c>Dictionary&lt;string, ModelCostRate&gt;</c> 配 "provider:model" 键。2026-09-12 之前就是那样：
+    /// 绑定器把 <c>"OpenAI:gpt-4o"</c> 拆成 <c>ModelCosts:OpenAI:gpt-4o</c>，键 <c>OpenAI</c> 得到一个全 0 的费率、
+    /// <c>gpt-4o</c> 被当未知属性丢弃 —— 从 appsettings 里从来没有一条费率绑进来过，而所有测试都用 C# 直接构造字典。
+    /// 绑定器建出来的内层字典不带比较器，查找方（<c>CostCalculator</c>）自己做大小写不敏感匹配。
+    /// </para>
     /// </remarks>
-    public Dictionary<string, ModelCostRate> ModelCosts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, Dictionary<string, ModelCostRate>> ModelCosts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 默认成本率（当 ModelCosts 中无匹配时使用，为 null 则不计算成本）

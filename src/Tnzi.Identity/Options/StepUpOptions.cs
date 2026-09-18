@@ -14,6 +14,10 @@ namespace Tnzi.Identity.Options;
 /// ★ 这与二次验证（2FA）是两件事：2FA 在<b>登录时</b>把关，step-up 在<b>操作时</b>把关。
 /// 一个账号可以既没开 2FA 也要求 step-up，反之亦然。
 /// </para>
+/// <para>
+/// ★ 确认记录绑定发起它的那条会话（<c>session_id</c> claim），不只绑用户：同一用户的另一条会话
+/// 不能搭本人这次确认的便车。没有会话 claim 的部署两边都是 <c>Guid.Empty</c>，行为与绑定之前相同。
+/// </para>
 /// </remarks>
 public class StepUpOptions
 {

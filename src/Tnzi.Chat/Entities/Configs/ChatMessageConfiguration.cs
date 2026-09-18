@@ -13,8 +13,8 @@ public class ChatMessageConfiguration : EntityTypeConfigurationBase<ChatMessage,
         builder.ToTable("Message");
 
         builder.Property(m => m.Content).IsRequired().HasMaxLength(ChatFieldLimits.MessageContent);
-        builder.Property(m => m.FileId).HasMaxLength(256);
-        builder.Property(m => m.FileName).HasMaxLength(512);
+        builder.Property(m => m.FileId).HasMaxLength(ChatFieldLimits.FileId);
+        builder.Property(m => m.FileName).HasMaxLength(ChatFieldLimits.FileName);
         builder.Property(m => m.Title).HasMaxLength(ChatFieldLimits.Title);
         builder.Property(m => m.LinkUrl).HasMaxLength(ChatFieldLimits.LinkUrl);
         builder.Property(m => m.Category).HasMaxLength(ChatFieldLimits.Category);

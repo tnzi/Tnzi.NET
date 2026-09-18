@@ -194,10 +194,12 @@ public sealed class RateLimitSelfCheckStartupModule : TnziCustomModule
     {
         if (CaptureFactory != null)
         {
-            // ★ 必须替换整个 ILoggerFactory，加 ILoggerProvider 没用：
-            // LoggingModule 的 AddSerilog() 把 ILoggerFactory 换成了 SerilogLoggerFactory，
-            // 而它的 AddProvider 是空实现，容器里的 ILoggerProvider 一个都不会被问到。
-            // 自检取 logger 走的正是 GetRequiredService<ILoggerFactory>()，这里替换即可覆盖它。
+            // 替换整个 ILoggerFactory：自检取 logger 走的正是 GetRequiredService<ILoggerFactory>()，
+            // 换掉它就与 Serilog 的管线（最低级别、来源覆盖、provider 桥接）彻底无关，
+            // 这条用例只看自检有没有被调用。
+            // 历史：2026-09-12 之前这里"必须"替换 —— LoggingModule 的 AddSerilog() 不带
+            // providers，SerilogLoggerFactory.AddProvider 是空实现，注册 ILoggerProvider 一条都收不到；
+            // 那正是 OpenTelemetry:EnableLogging 一直是死开关的原因，已修（ProviderBridgeTests）。
             context.Services.RemoveAll<ILoggerFactory>();
             context.Services.AddSingleton(CaptureFactory);
         }

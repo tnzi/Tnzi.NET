@@ -36,13 +36,17 @@
         </label>
 
         <!-- Empty role = the sender pre-fills it. That is a real choice, so the
-             control offers it explicitly rather than leaving the box blank. -->
+             control offers it explicitly rather than leaving the box blank.
+             For a signature field it is not a choice: the backend refuses a
+             signature nobody is asked to provide, so the placeholder says so
+             and the box is flagged while empty. -->
         <label class="sf-cell" :data-label="t('fields.recipientRole')">
           <NInput
             :value="row.recipientRole ?? ''"
             size="small"
             clearable
-            :placeholder="t('fields.senderFilled')"
+            :status="isSignatureLike(row) && !row.recipientRole ? 'error' : undefined"
+            :placeholder="t(isSignatureLike(row) ? 'fields.signerRoleRequired' : 'fields.senderFilled')"
             @update:value="(v: string) => patch(index, { recipientRole: v || null })"
           />
         </label>
@@ -169,6 +173,10 @@ const rows = computed<TemplateFieldInputDto[]>(() => props.modelValue ?? [])
 
 const typeOptions = SIGNING_FIELD_TYPE_OPTIONS.map((v) => ({ label: v, value: v }))
 const placementOptions = FIELD_PLACEMENT_OPTIONS.map((v) => ({ label: v, value: v }))
+
+function isSignatureLike(row: TemplateFieldInputDto): boolean {
+  return row.type === SigningFieldType.Signature || row.type === SigningFieldType.Initials
+}
 
 function patch(index: number, changes: Partial<TemplateFieldInputDto>): void {
   emit(

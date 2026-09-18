@@ -58,12 +58,18 @@ export interface RecipientOutput {
 /**
  * File info for attachments
  * Backend: Tnzi.Storage.FileInfoDto
+ *
+ * An attachment must carry either `fileId` (a stored file, materialised by
+ * the server through Tnzi.Storage) or `filePath` (a path under
+ * `Notification:Attachments:AllowedLocalRoots`, or an allowed URL). One with
+ * neither is rejected with 400 at creation; the request is not persisted.
+ * Field names mirror the backend serialisation (`filePath` / `fileSize`).
  */
 export interface FileInfoDto {
   fileId?: string | null;
   fileName: string;
-  url?: string | null;
-  size?: number;
+  filePath?: string | null;
+  fileSize?: number;
   contentType?: string | null;
 }
 
@@ -90,6 +96,8 @@ export interface NotificationInfo {
   senderId?: string | null;
   category: string;
   templateName?: string | null;
+  /** Provider key the message is delivered through; `null` = the channel's default sender. */
+  providerKey?: string | null;
   scheduledTime?: string | null;
   /** Transactional message: exempt from the opt-out list. */
   isTransactional: boolean;
@@ -128,6 +136,16 @@ export interface CreateNotificationRequest {
    * sending one message fewer rather than making an unsubscribe meaningless.
    */
   isTransactional?: boolean;
+  /**
+   * Provider key: which named sender on the channel delivers this message
+   * (a `Notification:MailSenders:{key}` style profile, or a keyed sender
+   * registered in code). Leave unset to let the server-side
+   * `INotificationProviderSelector` decide; when it does not choose either,
+   * the channel's default sender is used. An unregistered key is rejected
+   * with 400 at creation - the message is never silently sent through
+   * another provider. Keys are case-insensitive.
+   */
+  providerKey?: string;
 }
 
 /**

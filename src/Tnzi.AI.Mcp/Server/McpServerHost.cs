@@ -61,6 +61,14 @@ public partial class McpServerHost : IMcpServerHost
         _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.CallerHashItemKey] as string;
 
     /// <summary>
+    /// 当前请求的调用面（由 <see cref="McpServerHttpSecurityMiddleware"/> 存入）。
+    /// 没有 HTTP 上下文（进程内调用）时不受限 —— 那里没有外部调用方。
+    /// </summary>
+    private McpCallerScope GetCallerScope() =>
+        _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.CallerScopeItemKey] as McpCallerScope
+        ?? McpCallerScope.Unrestricted;
+
+    /// <summary>
     /// 为工具调用构造限流键，<b>按调用方分区</b>。
     /// </summary>
     /// <remarks>
@@ -72,21 +80,15 @@ public partial class McpServerHost : IMcpServerHost
     /// 一个普通客户端就能拒绝掉所有人对某个 agent 的访问。
     /// </para>
     /// <para>
-    /// 分区口径与 <c>BuildClientKey</c> 保持一致（租户段 + 调用方摘要），这样两个桶按同一个
-    /// 身份切分。没有 HTTP 上下文时（stdio 传输）落到单一 <c>local</c> 分区 —— 那里本来就
+    /// 分区口径与 <c>BuildClientKey</c> 保持一致（只有调用方摘要，不含任何客户端自报的段），
+    /// 这样两个桶按同一个身份切分。没有 HTTP 上下文时落到单一 <c>local</c> 分区 —— 那里本来就
     /// 只有一个调用方。
     /// </para>
     /// </remarks>
     private string BuildToolRateLimitKey(string bucket)
     {
         var caller = GetCallerHash();
-        if (caller is null)
-        {
-            return $"local:{bucket}";
-        }
-
-        var tenant = _httpContextAccessor?.HttpContext?.Items[McpServerSecurityMiddleware.TenantHeaderName] as string;
-        return $"{tenant ?? "shared"}:{caller}:{bucket}";
+        return caller is null ? $"local:{bucket}" : $"{caller}:{bucket}";
     }
 
     /// <inheritdoc />
@@ -108,7 +110,9 @@ public partial class McpServerHost : IMcpServerHost
     {
         EnsureConfiguredAgentsExposed();
         var tools = await BuildToolsAsync(cancellationToken);
-        return tools.Select(x => x.ProtocolTool).ToList();
+        var scope = GetCallerScope();
+        // 运行范围调用方只看得见凭据点名的工具：看不见 == 不存在
+        return tools.Where(x => scope.AllowsTool(x.ProtocolTool.Name)).Select(x => x.ProtocolTool).ToList();
     }
 
     /// <inheritdoc />
@@ -119,6 +123,17 @@ public partial class McpServerHost : IMcpServerHost
     {
         Check.NotNullOrWhiteSpace(name);
         EnsureConfiguredAgentsExposed();
+
+        var scope = GetCallerScope();
+        if (!scope.AllowsTool(name))
+        {
+            // 越界调用是 MCP 错误结果而不是 401：凭据本身有效，只是这把钥匙开不了这扇门。
+            // 与「工具不存在」给同一句话的形状 —— 运行范围调用方看不见的工具就是不存在的工具。
+            _logger.LogWarning("MCP tool call to '{ToolName}' refused: outside the caller's run-scoped allow-list", name);
+            await _security.AuditLogAsync(name, null, 0, false, "Tool is not permitted for this credential",
+                callerApiKeyId: GetCallerHash(), ct: cancellationToken);
+            return CreateErrorResult($"Tool '{name}' is not exposed by MCP Server.");
+        }
 
         if (_customTools.TryGetValue(name, out var customTool))
         {
@@ -132,7 +147,7 @@ public partial class McpServerHost : IMcpServerHost
         }
 
         var message = ExtractMessage(arguments);
-        var (response, isError) = await InvokeAgentAsync(agentRegistration.AgentId, name, message, cancellationToken);
+        var (response, isError) = await InvokeAgentAsync(agentRegistration.AgentId, name, message, scope.TenantId, cancellationToken);
         return CreateTextResult(response, isError);
     }
 

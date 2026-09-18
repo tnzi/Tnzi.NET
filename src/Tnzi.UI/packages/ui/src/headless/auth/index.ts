@@ -3,7 +3,7 @@
  *
  * Moved down from `@tnzi/ui-admin` on 2026-08-02 because none of it is
  * admin-specific: it is the identity domain's login logic (backend feature
- * gating via `GET /auth/config`, two-factor challenges, image captchas,
+ * gating via `GET /auth/config`, two-factor challenges, captcha challenges,
  * account-type detection, the OAuth hand-off), and `@tnzi/ui-ai` needs exactly
  * the same for its own sign-in page. It belongs to the layer both packages
  * build on.
@@ -27,6 +27,5 @@ export * from './login-features'
 export * from './useFormRules'
 export * from './useLoginAccountField'
 export * from './useCaptcha'
-export * from './useLoginCaptcha'
 export * from './oauth-providers'
 export * from './default-auth'

@@ -12,6 +12,7 @@ public class LoginSecurityServiceIntegrationTests : RelationalIdentityIntegratio
     {
         _service = new LoginSecurityService(
             ServiceProvider,
+            new UserTenantScopeProvider(CreateRepository<User>()),
             ServiceProvider.GetRequiredService<IOptionsMonitor<IdentityOptions>>(),
             CreateRepository<LoginLog>(),
             UserManager);

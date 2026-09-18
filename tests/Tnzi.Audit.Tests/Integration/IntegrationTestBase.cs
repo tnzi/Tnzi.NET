@@ -6,11 +6,27 @@ namespace Tnzi.Audit.Tests.Integration;
 /// </summary>
 public class AuditTestDbContext : TnziDbContext<AuditTestDbContext>
 {
+    /// <param name="options">DbContext 选项。</param>
+    /// <param name="currentUser">当前用户。</param>
+    /// <param name="multiTenancyOptions">
+    /// 多租户开关。默认关闭（与生产一致，三张审计表的 <c>TenantId</c> 被 Ignore）；
+    /// 租户收口的测试在 <c>ConfigureServices</c> 里 <c>Configure&lt;MultiTenancyOptions&gt;</c> 打开它，列才会被映射。
+    /// </param>
     public AuditTestDbContext(
         DbContextOptions<AuditTestDbContext> options,
-        Tnzi.Security.Claims.ICurrentUser currentUser)
-        : base(options, currentUser)
+        Tnzi.Security.Claims.ICurrentUser currentUser,
+        IOptions<Tnzi.MultiTenancy.MultiTenancyOptions>? multiTenancyOptions = null)
+        : base(options, currentUser, multiTenancyOptions: multiTenancyOptions)
     {
+    }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        // 生产经 AddTnziDbContext 注册同一个工厂：模型缓存键要含多租户开关，否则同一测试进程里
+        // 第一个构造的 AuditTestDbContext 模型（多租户关闭、TenantId 被 Ignore）会被之后
+        // 开启多租户的测试类原样复用，租户谓词在那张模型上翻译失败。
+        optionsBuilder.ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, Tnzi.EFCore.Internal.MultiTenancyModelCacheKeyFactory>();
+        base.OnConfiguring(optionsBuilder);
     }
 
     public DbSet<AuditOperation> AuditOperations => Set<AuditOperation>();
@@ -19,8 +35,10 @@ public class AuditTestDbContext : TnziDbContext<AuditTestDbContext>
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // 应用审计模块的实体配置
-        modelBuilder.ApplyConfiguration(new Tnzi.Audit.Entities.Configs.AuditOperationConfiguration());
+        // 应用审计模块的实体配置。★ 经 RegisterTo(…, this) 而不是裸 ApplyConfiguration：
+        // 配置类要从 DbContext 读多租户开关来决定 TenantId 是建索引还是 Ignore，
+        // 裸 ApplyConfiguration 拿不到 DbContext，开关恒读成关闭。
+        new Tnzi.Audit.Entities.Configs.AuditOperationConfiguration().RegisterTo(modelBuilder, this);
         modelBuilder.ApplyConfiguration(new Tnzi.Audit.Entities.Configs.AuditEntityEntryConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Audit.Entities.Configs.AuditPropertyEntryConfiguration());
 
@@ -37,6 +55,15 @@ public class AuditTestDbContext : TnziDbContext<AuditTestDbContext>
             b.Property(e => e.Category).HasMaxLength(64);
         });
 
+        // 带租户维度的被试实体：按租户逐个销毁、证书记在被销毁数据所属租户名下，只有它走得到。
+        // 同样必须在 base 之前配置（理由同上）；多租户关闭的 DbContext 里 base 会把它当普通实体。
+        modelBuilder.Entity<TenantRetentionTestRecord>(b =>
+        {
+            b.ToTable("TenantRetentionTestRecord");
+            b.HasKey(e => e.Id);
+            b.Property(e => e.Category).HasMaxLength(64);
+        });
+
         base.OnModelCreating(modelBuilder);
 
         // 记录级读取审计表：生产环境下建不建取决于 Audit:RecordAccess:Enabled，
@@ -47,11 +74,13 @@ public class AuditTestDbContext : TnziDbContext<AuditTestDbContext>
         // 在测试库里根本不会发生，「冲突后重读链尾重试」这条路径就永远测不到。
         // 所以这里用显式 enabled 构造把完整配置再跑一遍，再撤销排除标记并补上模块表前缀
         //（base 里的前缀约定只作用于它自己那一轮配置）。
-        modelBuilder.ApplyConfiguration(new Tnzi.Audit.Entities.Configs.AuditRecordAccessConfiguration(enabled: true));
+        new Tnzi.Audit.Entities.Configs.AuditRecordAccessConfiguration(enabled: true).RegisterTo(modelBuilder, this);
         modelBuilder.Entity<AuditRecordAccess>()
             .ToTable("Audit_RecordAccess", t => t.ExcludeFromMigrations(false));
 
-        // 销毁证明表同理（Audit:DataDestruction:Enabled 在测试里读不到）。
+        // 销毁证明表同理（Audit:DataDestruction:Enabled 在测试里读不到）。此前只调了 ToTable，
+        // 实体按约定映射 —— TenantId 无论开关都成了一列，「多租户关闭时谓词不得引用它」在这里守不住。
+        new Tnzi.Audit.Entities.Configs.AuditDataDestructionConfiguration(enabled: true).RegisterTo(modelBuilder, this);
         modelBuilder.Entity<AuditDataDestruction>()
             .ToTable("Audit_DataDestruction", t => t.ExcludeFromMigrations(false));
 
@@ -89,6 +118,10 @@ public abstract class IntegrationTestBase : IntegratedTestBase<AuditTestDbContex
             Tnzi.EFCore.EFCoreRepository<AuditTestDbContext, RetentionTestRecord, Guid>>();
         services.AddScoped<Tnzi.Domain.Repositories.IRepository<RetentionTestRecord>>(
             sp => sp.GetRequiredService<Tnzi.Domain.Repositories.IRepository<RetentionTestRecord, Guid>>());
+        services.AddScoped<Tnzi.Domain.Repositories.IRepository<TenantRetentionTestRecord, Guid>,
+            Tnzi.EFCore.EFCoreRepository<AuditTestDbContext, TenantRetentionTestRecord, Guid>>();
+        services.AddScoped<Tnzi.Domain.Repositories.IRepository<TenantRetentionTestRecord>>(
+            sp => sp.GetRequiredService<Tnzi.Domain.Repositories.IRepository<TenantRetentionTestRecord, Guid>>());
         services.AddScoped<Tnzi.Domain.Repositories.IRepository<AuditDataDestruction, Guid>,
             Tnzi.EFCore.EFCoreRepository<AuditTestDbContext, AuditDataDestruction, Guid>>();
 

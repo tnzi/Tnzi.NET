@@ -3,6 +3,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TSourceBadge } from '@tnzi/ui'
+import { templateTypeOptions } from '../_shared/template-type'
 
 /**
  * Template page config - Phase 3 Task 3.36.
@@ -62,6 +63,7 @@ export const templateFormSchema: FormSchemaItem[] = [
   { key: 'templateName',      labelKey: 'form.templateName', label: 'Template Name',    type: 'text',     required: true, section: 'placement' },
   { key: 'module',            labelKey: 'form.module', label: 'Module',           type: 'text',     required: true, section: 'placement' },
   { key: 'category',          labelKey: 'form.category', label: 'Category',         type: 'text', section: 'placement' },
+  { key: 'type',              labelKey: 'form.type', label: 'Type',             type: 'select', options: templateTypeOptions, section: 'placement' },
   { key: 'defaultLayoutName', labelKey: 'form.defaultLayoutName', label: 'Layout Name',      type: 'text', section: 'placement' },
   { key: 'isActive',          labelKey: 'form.isActive', label: 'Enabled',          type: 'switch', section: 'placement' },
   { key: 'description',       labelKey: 'form.description', label: 'Description',      type: 'textarea', section: 'placement' },

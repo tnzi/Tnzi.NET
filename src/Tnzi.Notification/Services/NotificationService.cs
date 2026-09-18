@@ -15,7 +15,12 @@ public class NotificationService : ApplicationService, INotificationService
     private readonly IOptionsMonitor<NotificationOptions> _optionsMonitor;
     private readonly INotificationOptOutService _optOutService;
     private readonly INotificationPreferenceService _preferenceService;
+    private readonly INotificationProviderResolver _providers;
+    private readonly INotificationProviderSelector _providerSelector;
     private readonly ITemplateRenderService? _templateRenderService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IFileContentReader? _fileContentReader;
+    private readonly IFileReadAccessProbe? _fileReadAccessProbe;
 
     // 静态信号量，确保跨请求的并发控制真正生效
     private static SemaphoreSlim? _sendSemaphore;
@@ -23,34 +28,46 @@ public class NotificationService : ApplicationService, INotificationService
 
     private NotificationOptions Options => _optionsMonitor.CurrentValue;
 
+    /// <summary>
+    /// 入队时随工作项带走的租户。与 <c>AuditPropertyHelper</c> 落库时写进 <c>Message.TenantId</c>
+    /// 的是同一个表达式，所以工作项切回去的正是那行所在的租户。
+    /// </summary>
+    private Guid? CurrentTenantId => _currentTenant?.Id ?? CurrentUser?.TenantId;
+
     public NotificationService(
         IRepository<Message, Guid> notificationRepository,
-        IEmailSender emailSender,
-        ISmsSender smsSender,
-        IPushSender pushSender,
-        IFaxSender faxSender,
+        INotificationProviderResolver providers,
+        INotificationProviderSelector providerSelector,
         IUnitOfWork unitOfWork,
         IOptionsMonitor<NotificationOptions> optionsMonitor,
         IServiceProvider serviceProvider,
         INotificationOptOutService optOutService,
         INotificationPreferenceService preferenceService,
         INotificationQueueService? queueService = null,
-        ITemplateRenderService? templateRenderService = null)
+        ITemplateRenderService? templateRenderService = null,
+        ICurrentTenant? currentTenant = null,
+        IFileContentReader? fileContentReader = null,
+        IFileReadAccessProbe? fileReadAccessProbe = null)
         : base(serviceProvider)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
         _unitOfWork = Check.NotNull(unitOfWork);
         _optionsMonitor = Check.NotNull(optionsMonitor);
-        // 四条渠道都是必需的：本模块无条件注册它们（传真未配置时是 UnconfiguredFaxSender），
-        // 缺了就该在容器里立刻炸，而不是让 Type=Fax 的消息在运行时落进 default 分支。
+        // 发送器不再直接注入：一条渠道可以有多个（默认 + 具名），派发时按 Message.ProviderKey
+        // 经 INotificationProviderResolver 取。四条渠道的默认发送器仍由本模块无条件注册
+        // （传真未配置时是 UnconfiguredFaxSender），取不到时那一次投递失败而不是落进别的分支。
+        _providers = Check.NotNull(providers);
+        _providerSelector = Check.NotNull(providerSelector);
+        // 两个核心契约都随 Tnzi.Storage 注册，未加载存储模块时为 null：
+        // 那时只带 FileId 的附件没人解析得出字节，创建那一刻就拒绝（见 BuildAttachmentsAsync）。
+        _fileContentReader = fileContentReader;
+        _fileReadAccessProbe = fileReadAccessProbe;
         _dispatcher = new RecipientChannelDispatcher(
-            Check.NotNull(emailSender),
-            Check.NotNull(smsSender),
-            Check.NotNull(pushSender),
-            Check.NotNull(faxSender),
+            _providers,
             _optionsMonitor,
             Check.NotNull(optOutService),
-            Logger);
+            Logger,
+            fileContentReader);
         // 必需而非可选：本模块自己无条件注册它，缺了就该在容器里立刻炸，
         // 而不是让退订在运行时静默失效 —— 后者恰恰是这条修复要终结的形态。
         _optOutService = Check.NotNull(optOutService);
@@ -62,6 +79,7 @@ public class NotificationService : ApplicationService, INotificationService
             _notificationRepository, _unitOfWork, _optOutService, _preferenceService, Logger);
         _queueService = queueService;
         _templateRenderService = templateRenderService;
+        _currentTenant = currentTenant;
 
         EnsureSemaphoreInitialized(Options.MaxConcurrency);
     }
@@ -84,12 +102,7 @@ public class NotificationService : ApplicationService, INotificationService
             if (_queueService != null)
             {
                 await _queueService.EnqueueWithDelayAsync(
-                    (sp, ct) =>
-                    {
-                        var svc = sp.GetRequiredService<INotificationService>();
-                        return svc.SendAsync(notificationInfo.Id, ct);
-                    },
-                    delay);
+                    NotificationWorkItem.SendMessage(notificationInfo.Id, CurrentTenantId), delay);
             }
 
             LogInformation("Notification scheduled: {NotificationId}, Type: {Type}, ScheduledTime: {ScheduledTime}",
@@ -134,7 +147,28 @@ public class NotificationService : ApplicationService, INotificationService
                     continue;
                 }
 
-                var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
+                var rendered = await RenderContentAsync(request, cancellationToken);
+                if (!rendered.Succeeded)
+                {
+                    errors.Add($"Request at index {i}: {rendered.Message}");
+                    continue;
+                }
+
+                var (subject, content, category) = rendered.Data;
+
+                var providerKey = await ResolveProviderKeyAsync(request, category, cancellationToken);
+                if (!providerKey.Succeeded)
+                {
+                    errors.Add($"Request at index {i}: {providerKey.Message}");
+                    continue;
+                }
+
+                var attachments = await BuildAttachmentsAsync(request, cancellationToken);
+                if (!attachments.Succeeded)
+                {
+                    errors.Add($"Request at index {i}: {attachments.Message}");
+                    continue;
+                }
 
                 var notification = new Message
                 {
@@ -148,6 +182,7 @@ public class NotificationService : ApplicationService, INotificationService
                     Category = category,
                     IsTransactional = request.IsTransactional,
                     TemplateName = request.TemplateName,
+                    ProviderKey = providerKey.Data,
                     RetryCount = 0,
                     MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
                     TotalRecipientCount = request.Recipients.Count,
@@ -163,14 +198,7 @@ public class NotificationService : ApplicationService, INotificationService
                     Status = NotificationStatus.Pending
                 }).ToList();
 
-                notification.Attachments = request.Attachments?.Select(a => new Attachment
-                {
-                    FileId = a.FileId,
-                    FileName = a.FileName,
-                    FilePath = a.FilePath,
-                    FileSize = a.FileSize,
-                    ContentType = a.ContentType
-                }).ToList() ?? new List<Attachment>();
+                notification.Attachments = attachments.Data!;
 
                 messageRequestMap.Add((notification, request));
             }
@@ -225,7 +253,19 @@ public class NotificationService : ApplicationService, INotificationService
         if (validationError != null)
             return Fail<NotificationInfo>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
+        var rendered = await RenderContentAsync(request, cancellationToken);
+        if (!rendered.Succeeded)
+            return Fail<NotificationInfo>(rendered.Message ?? "Notification content could not be rendered", rendered.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var (subject, content, category) = rendered.Data;
+
+        var providerKey = await ResolveProviderKeyAsync(request, category, cancellationToken);
+        if (!providerKey.Succeeded)
+            return Fail<NotificationInfo>(providerKey.Message ?? "Notification provider could not be resolved", providerKey.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var attachments = await BuildAttachmentsAsync(request, cancellationToken);
+        if (!attachments.Succeeded)
+            return Fail<NotificationInfo>(attachments.Message ?? "Attachment source is not allowed", attachments.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
 
         var notification = new Message
         {
@@ -239,6 +279,7 @@ public class NotificationService : ApplicationService, INotificationService
             Category = category,
             IsTransactional = request.IsTransactional,
             TemplateName = request.TemplateName,
+            ProviderKey = providerKey.Data,
             ScheduledTime = request.ScheduledTime,
             RetryCount = 0,
             MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
@@ -255,14 +296,7 @@ public class NotificationService : ApplicationService, INotificationService
             Status = NotificationStatus.Pending
         }).ToList();
 
-        notification.Attachments = request.Attachments?.Select(a => new Attachment
-        {
-            FileId = a.FileId,
-            FileName = a.FileName,
-            FilePath = a.FilePath,
-            FileSize = a.FileSize,
-            ContentType = a.ContentType
-        }).ToList() ?? new List<Attachment>();
+        notification.Attachments = attachments.Data!;
 
         await _notificationRepository.InsertAsync(notification, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -553,7 +587,11 @@ public class NotificationService : ApplicationService, INotificationService
         if (validationError != null)
             return Fail<NotificationPreviewDto>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        var (subject, content, category) = await RenderContentAsync(request, cancellationToken);
+        var rendered = await RenderContentAsync(request, cancellationToken);
+        if (!rendered.Succeeded)
+            return Fail<NotificationPreviewDto>(rendered.Message ?? "Notification content could not be rendered", rendered.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var (subject, content, category) = rendered.Data;
 
         return Ok(new NotificationPreviewDto
         {
@@ -718,19 +756,102 @@ public class NotificationService : ApplicationService, INotificationService
     }
 
     /// <summary>
-    /// 渲染通知内容（使用 ITemplateRenderService 或直接使用请求内容）
+    /// 定下这条消息由哪个服务商投递：请求显式指定的键优先，没指定就问 <see cref="INotificationProviderSelector"/>，
+    /// 它也不选就是默认发送器（<see langword="null"/>）。
     /// </summary>
-    private async Task<(string Subject, string Content, string Category)> RenderContentAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>
+    /// ★ <b>两种来路的键都在这里校验，未注册的一律让创建失败</b>，而不是留到后台派发才逐收件人失败：
+    /// 那时调用方早就拿到 200 走了。请求给错键是调用方的错（400）；选择器给错键是消费方接线的错（500，
+    /// 原因里指名是选择器给的），两者都不会静默换一家发出去。
+    /// </para>
+    /// <para>
+    /// 选择器只在请求<b>没有</b>指定键时才被问：显式指定表达的是「这条就要走这家」，
+    /// 让一条通用规则盖过它，调用方指定就没有意义了。显式写 <c>default</c> 也算指定 ——
+    /// 它落库仍是 <see langword="null"/>，但选择器不再被问。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<string?>> ResolveProviderKeyAsync(CreateNotificationRequest request, string category, CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(request.ProviderKey))
+        {
+            var explicitKey = NotificationProviderKeys.Normalize(request.ProviderKey);
+            if (explicitKey != null && NotificationProviderKeys.Describe(explicitKey) is { } shapeError)
+                return Fail<string?>(shapeError, 400, ErrorCodes.NOTIFICATION_ERROR);
+
+            if (!_providers.IsRegistered(request.Type, explicitKey))
+                return Fail<string?>(NotificationProviderProfiles.NotRegisteredMessage(request.Type, explicitKey), 400, ErrorCodes.NOTIFICATION_ERROR);
+
+            return Ok<string?>(explicitKey);
+        }
+
+        var context = new NotificationProviderSelectionContext
+        {
+            Type = request.Type,
+            Category = category,
+            IsTransactional = request.IsTransactional,
+            Priority = request.Priority,
+            TemplateName = request.TemplateName,
+            SenderId = request.SenderId,
+            Recipients = request.Recipients
+        };
+
+        var selectedKey = NotificationProviderKeys.Normalize(await _providerSelector.SelectAsync(context, cancellationToken));
+        if (selectedKey == null)
+            return Ok<string?>(null);
+
+        if (NotificationProviderKeys.Describe(selectedKey) is { } selectedShapeError)
+            return Fail<string?>(
+                $"{_providerSelector.GetType().Name} selected an invalid provider key: {selectedShapeError}",
+                500, ErrorCodes.NOTIFICATION_ERROR);
+
+        if (!_providers.IsRegistered(request.Type, selectedKey))
+            return Fail<string?>(
+                $"{_providerSelector.GetType().Name} selected a provider that is not registered. "
+                + NotificationProviderProfiles.NotRegisteredMessage(request.Type, selectedKey),
+                500, ErrorCodes.NOTIFICATION_ERROR);
+
+        return Ok<string?>(selectedKey);
+    }
+
+    /// <summary>渲染后的消息内容：主题、正文与消息分类。</summary>
+    private readonly record struct RenderedContent(string Subject, string Content, string Category);
+
+    /// <summary>
+    /// 渲染通知内容（使用 ITemplateRenderService 或直接使用请求内容）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>指定了模板却渲染不出来、而调用方又没给任何原始内容时，返回失败而不是回落。</strong>
+    /// 「回落到原始内容」在这种情况下回落到的是两个空串：一条空主题空正文的消息会被落库、
+    /// 被发送器照发，调用方拿到成功。2026-09-01 的邀请邮件正是这样丢的 ——
+    /// 处理器引用了一个仓库里不存在的模板，被邀请人收到一封没有标题、没有正文、没有链接的信，
+    /// 而日志里是「Invitation email sent」。调用方显式给了主题或正文时，回落照旧成立。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<RenderedContent>> RenderContentAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
+    {
+        var category = request.Category ?? "General";
+
         // 没有模板名称，直接使用请求中的内容
         if (string.IsNullOrWhiteSpace(request.TemplateName))
-            return (request.Subject, request.Content, request.Category ?? "General");
+            return Ok(new RenderedContent(request.Subject, request.Content, category));
+
+        var hasRawContent = !string.IsNullOrWhiteSpace(request.Subject) || !string.IsNullOrWhiteSpace(request.Content);
 
         // 没有模板渲染服务，使用原始内容
         if (_templateRenderService == null)
         {
+            if (!hasRawContent)
+            {
+                return Fail<RenderedContent>(
+                    $"Template '{request.TemplateName}' cannot be rendered because the Template module is not loaded, "
+                    + "and the request carries no subject or content to fall back to.",
+                    500, ErrorCodes.NOTIFICATION_ERROR);
+            }
+
             Logger.LogWarning("ITemplateRenderService not available, using raw content for template '{TemplateName}'", request.TemplateName);
-            return (request.Subject, request.Content, request.Category ?? "General");
+            return Ok(new RenderedContent(request.Subject, request.Content, category));
         }
 
         // Framework notification templates ship organized by channel
@@ -744,35 +865,143 @@ public class NotificationService : ApplicationService, INotificationService
             ? request.Type.ToString()
             : request.Category;
 
-        // 使用 ITemplateRenderService 一站式渲染
+        // 使用 ITemplateRenderService 一站式渲染。出口面由这里告诉渲染服务：
+        // 它只知道模板自述的类型，而推送正文与纯文本邮件都不是一种模板类型。
         var renderResult = await _templateRenderService.RenderByNameAsync(
             request.TemplateName,
             "Notification",
             request.TemplateVariables,
             templateCategory,
             request.LayoutName,
+            ResolveOutputKind(request),
             cancellationToken);
 
         if (!renderResult.Succeeded)
         {
+            if (!hasRawContent)
+            {
+                return Fail<RenderedContent>(
+                    $"Template '{request.TemplateName}' could not be rendered ({renderResult.Message}), "
+                    + "and the request carries no subject or content to fall back to.",
+                    renderResult.Code ?? 500, ErrorCodes.NOTIFICATION_ERROR);
+            }
+
             Logger.LogWarning("Template rendering failed for '{TemplateName}': {Error}. Using raw content.", request.TemplateName, renderResult.Message);
-            return (request.Subject, request.Content, request.Category ?? "General");
+            return Ok(new RenderedContent(request.Subject, request.Content, category));
         }
 
         var rendered = renderResult.Data!;
         var subject = !string.IsNullOrWhiteSpace(rendered.Subject) ? rendered.Subject : request.Subject;
-        return (subject, rendered.Content, request.Category ?? "General");
+        return Ok(new RenderedContent(subject, rendered.Content, category));
+    }
+
+    /// <summary>
+    /// 这条消息的正文进的是哪种出口：短信与推送正文恒为纯文本（<c>IsHtml</c> 对它们没有意义，默认值还是 true）；
+    /// 邮件按 <c>IsHtml</c>（false = <c>text/plain</c> 部分）；传真的正文只留档不投递，交模板类型决定。
+    /// </summary>
+    /// <remarks>
+    /// <c>@expr</c> 默认 HTML 编码。渲染服务只按 <c>Template.Type == Sms</c> 走纯文本，而 <c>TemplateType</c> 没有 Push
+    /// 成员、纯文本邮件也不是一种模板类型 —— 不在这里说清楚，推送里的 <c>@Model.Url</c> 就发成 <c>&amp;amp;</c>，
+    /// 发送状态成功、无日志。
+    /// </remarks>
+    private static TemplateOutputKind? ResolveOutputKind(CreateNotificationRequest request) => request.Type switch
+    {
+        NotificationType.Sms or NotificationType.Push => TemplateOutputKind.PlainText,
+        NotificationType.Email => request.IsHtml ? TemplateOutputKind.Html : TemplateOutputKind.PlainText,
+        _ => null
+    };
+
+    /// <summary>
+    /// 把请求里的附件变成实体，<b>先过来源纪律</b>（<see cref="AttachmentSourcePolicy"/>），
+    /// 再对只带 <c>FileId</c> 的附件问一句「这个人读得到它吗」。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ <c>FilePath</c> 来自请求体，此前原样落库、发信时按它读任意本地文件或取任意 URL —— 持
+    /// <c>notification.message.create</c> 的人能把服务端任意文件寄到任意邮箱。拒绝要发生在<b>创建这一刻</b>
+    /// （400，一条附件不合规整个请求不落库），不能留到后台发信时逐收件人失败：那时调用方早拿到 200 走了。
+    /// 两条创建路径共用这一份，规则不会漂开。
+    /// </para>
+    /// <para>
+    /// ★ <c>FileId</c> 同理：派发时是以<b>系统身份</b>读字节的（<see cref="IFileContentReader"/>，后台没有当前用户），
+    /// 所以「这个人能不能引用这份文件」只能在这里问（<see cref="IFileReadAccessProbe"/>）。
+    /// <b>有</b>当前用户就必须过探针；<b>没有</b>当前用户的是进程内的框架代码（事件处理器、后台队列），
+    /// 管理端点永远带着认证，走不到那一支。没加载存储模块时没人解析得出字节，也在这里拒绝并指名要加载的包 ——
+    /// 而不是接受之后在后台逐收件人失败。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<List<Attachment>>> BuildAttachmentsAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
+    {
+        var attachments = new List<Attachment>();
+        if (request.Attachments == null)
+            return Ok(attachments);
+
+        foreach (var a in request.Attachments)
+        {
+            // 既没有 FileId 也没有 FilePath 的附件没有任何发送器装得上：接受它只会把失败推迟到后台逐收件人报出，
+            // 而调用方早已拿到 200。与下面两道门同一判据 —— 拒绝要发生在创建这一刻。
+            var violation = DescribeMissingSourceViolation(a)
+                            ?? await AttachmentSourcePolicy.DescribeViolationAsync(a.FilePath, Options.Attachments, cancellationToken)
+                            ?? await DescribeFileIdViolationAsync(a, cancellationToken);
+            if (violation != null)
+                return Fail<List<Attachment>>(violation, 400, ErrorCodes.NOTIFICATION_ERROR);
+
+            attachments.Add(new Attachment
+            {
+                FileId = a.FileId,
+                FileName = a.FileName,
+                FilePath = a.FilePath,
+                FileSize = a.FileSize,
+                ContentType = a.ContentType
+            });
+        }
+
+        return Ok(attachments);
+    }
+
+    /// <summary>附件必须至少带 <c>FileId</c> 或 <c>FilePath</c> 之一；都没有时返回可直接回给调用方的英文原因。</summary>
+    private static string? DescribeMissingSourceViolation(FileInfoDto attachment)
+    {
+        var hasFileId = attachment.FileId is { } fileId && fileId != Guid.Empty;
+        if (hasFileId || !string.IsNullOrWhiteSpace(attachment.FilePath))
+            return null;
+
+        return $"Attachment '{attachment.FileName}' has neither a FileId nor a FilePath, so nothing could ever be attached; "
+               + "pass a stored file id, a path under Notification:Attachments:AllowedLocalRoots, or an allowed URL.";
+    }
+
+    /// <summary>只带 <c>FileId</c> 的附件允不允许；可以时返回 <see langword="null"/>，否则返回可直接回给调用方的英文原因。</summary>
+    private async Task<string?> DescribeFileIdViolationAsync(FileInfoDto attachment, CancellationToken cancellationToken)
+    {
+        if (attachment.FileId is not { } fileId || fileId == Guid.Empty)
+            return null;
+
+        if (_fileContentReader == null)
+        {
+            return $"Attachment '{attachment.FileName}' references stored file {fileId}, but no IFileContentReader is registered: "
+                   + "load Tnzi.Storage ([DependsOn(typeof(StorageModule))]) or pass a FilePath instead.";
+        }
+
+        // 没有当前用户 = 系统调用；有则必须证明这个人本来就读得到这份文件。
+        var user = CurrentUser;
+        if (user is not { IsAuthenticated: true })
+            return null;
+
+        if (_fileReadAccessProbe == null)
+            return $"Attachment '{attachment.FileName}' references stored file {fileId}, but read access cannot be verified: no IFileReadAccessProbe is registered.";
+
+        return await _fileReadAccessProbe.CanReadAsync(fileId, cancellationToken)
+            ? null
+            : $"Attachment '{attachment.FileName}' references stored file {fileId}, which the current user cannot read.";
     }
 
     private async Task QueueNotificationAsync(Guid messageId, CancellationToken cancellationToken)
     {
         if (_queueService != null)
         {
-            await _queueService.EnqueueAsync((sp, ct) =>
-            {
-                var svc = sp.GetRequiredService<INotificationService>();
-                return svc.SendAsync(messageId, ct);
-            });
+            // 工作项自己带着租户（见 NotificationWorkItem）：队列在无租户的新作用域里执行，
+            // 不带的话多租户下这条消息在那里查不到，SendAsync 回 404 而调用方早已拿到 200。
+            await _queueService.EnqueueAsync(NotificationWorkItem.SendMessage(messageId, CurrentTenantId));
         }
         else
         {

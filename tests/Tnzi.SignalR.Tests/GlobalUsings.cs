@@ -10,6 +10,7 @@ global using Tnzi.Caching;
 global using Tnzi.EventBus;
 global using Tnzi.SignalR.Dtos;
 global using Tnzi.SignalR.Events;
+global using Tnzi.SignalR.Filters;
 global using Tnzi.SignalR.Options;
 global using Tnzi.SignalR.Services;
 global using Xunit;

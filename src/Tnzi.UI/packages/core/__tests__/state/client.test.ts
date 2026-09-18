@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTnziClient } from '../../src/state/client';
 import { HttpClient } from '../../src/http/http';
 import { AuthStateManager } from '../../src/state/auth';
@@ -149,3 +149,166 @@ describe('createTnziClient', () => {
 function patchWith(http: HttpClient, fn: () => Promise<unknown>): void {
   Object.assign(http, { get: fn });
 }
+
+/**
+ * The canonical wiring end to end: a real HttpClient driving a real
+ * AuthStateManager through `refreshTokenFn` and `onUnauthorized`. The
+ * manager-only tests cannot see what this layer does to the state the manager
+ * leaves behind - which is exactly where the security message used to vanish.
+ */
+describe('createTnziClient session-expiry chain', () => {
+  function jsonResponse(body: Record<string, unknown>, status: number) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: 'x',
+      json: () => Promise.resolve(body),
+      headers: new Headers(),
+    };
+  }
+
+  function stubFetch(routes: Record<string, () => unknown>) {
+    const fetchMock = vi.fn(async (url: string) => {
+      const key = Object.keys(routes).find((k) => String(url).includes(k));
+      if (!key) throw new Error(`unexpected fetch ${url}`);
+      return routes[key]();
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function seededClient(storage: StorageAdapter) {
+    storage.set('tnzi:auth:token', 'stale-access');
+    storage.set('tnzi:auth:refresh', 'r1');
+    const client = createTnziClient({ baseUrl: '/api', storage, permissionsFetchFn: null });
+    client.auth.isAuthenticated = true;
+    client.auth.accessToken = 'stale-access';
+    client.auth.refreshToken = 'r1';
+    client.http.setAccessToken('stale-access');
+    return client;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('★ keeps the "ended for security reasons" message after onUnauthorized runs', async () => {
+    const storage = memStorage();
+    const { http, auth } = seededClient(storage);
+    stubFetch({
+      '/auth/refresh-token': () =>
+        jsonResponse(
+          { succeeded: false, code: 401, errorCode: 'IDENTITY_REFRESH_TOKEN_REUSED', message: 'Invalid or expired refresh token' },
+          401,
+        ),
+      '/protected': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    const result = await http.get('/protected');
+
+    expect(result.code).toBe(401);
+    expect(auth.isAuthenticated).toBe(false);
+    expect(http.getAccessToken()).toBeNull();
+    expect(auth.error).toContain('security');
+    expect(storage.get('tnzi:auth:refresh')).toBeNull();
+  });
+
+  /**
+   * ★ The bearer-mode BOOT path, which is how a replayed token is usually met
+   * (the user reloads the page). `restoreAuth()` fetches the profile first; the
+   * expired access token makes that a 401, the HttpClient runs the refresh through
+   * `refreshTokenFn`, the backend answers REUSED, `_doRefreshToken` clears the
+   * session and sets the security message - and then `restoreAuth`'s own catch
+   * retried the refresh, got the plain "No refresh token available" error, and
+   * `_clearAfterFailedRestore` keyed the message off THAT error: erased. The
+   * manager-only tests mock the profile/auth apis and the http client, so the
+   * HttpClient-driven refresh never ran there and the erasure was invisible.
+   */
+  it('★ bearer boot keeps the "ended for security reasons" message when the profile 401 drives a rejected refresh', async () => {
+    const storage = memStorage();
+    storage.set('tnzi:auth:token', 'stale-access');
+    storage.set('tnzi:auth:refresh', 'r1');
+    const { auth, http } = createTnziClient({ baseUrl: '/api', storage, permissionsFetchFn: null });
+    const fetchMock = stubFetch({
+      '/auth/refresh-token': () =>
+        jsonResponse(
+          { succeeded: false, code: 401, errorCode: 'IDENTITY_REFRESH_TOKEN_REUSED', message: 'Invalid or expired refresh token' },
+          401,
+        ),
+      '/users/profile': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    await auth.restoreAuth();
+
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.user).toBeNull();
+    expect(http.getAccessToken()).toBeNull();
+    expect(storage.get('tnzi:auth:refresh')).toBeNull();
+    expect(auth.error).toContain('security');
+    // The refresh token was rejected once; the boot must not present it again.
+    const refreshCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes('/auth/refresh-token'));
+    expect(refreshCalls).toHaveLength(1);
+  });
+
+  it('bearer boot stays quiet on an ordinary expiry (rejected refresh without a security code)', async () => {
+    const storage = memStorage();
+    storage.set('tnzi:auth:token', 'stale-access');
+    storage.set('tnzi:auth:refresh', 'r1');
+    const { auth } = createTnziClient({ baseUrl: '/api', storage, permissionsFetchFn: null });
+    stubFetch({
+      '/auth/refresh-token': () =>
+        jsonResponse({ succeeded: false, code: 400, message: 'Invalid or expired refresh token' }, 400),
+      '/users/profile': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    await auth.restoreAuth();
+
+    expect(auth.isAuthenticated).toBe(false);
+    expect(storage.get('tnzi:auth:refresh')).toBeNull();
+    expect(auth.error).toBeNull();
+  });
+
+  it('a transport failure on refresh signs the tab out but keeps the persisted tokens', async () => {
+    const storage = memStorage();
+    const { http, auth } = seededClient(storage);
+    stubFetch({
+      '/auth/refresh-token': () => Promise.reject(new TypeError('Failed to fetch')),
+      '/protected': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    const result = await http.get('/protected');
+
+    expect(result.code).toBe(401);
+    // This attempt is over: the HttpClient's onUnauthorized cleared the tab.
+    expect(auth.isAuthenticated).toBe(false);
+    // But the server never rejected the refresh token, so the next boot may retry.
+    expect(storage.get('tnzi:auth:refresh')).toBe('r1');
+  });
+
+  it('a step-up challenge passes through the whole chain without touching the session', async () => {
+    const storage = memStorage();
+    const { http, auth } = seededClient(storage);
+    const fetchMock = stubFetch({
+      '/auth/refresh-token': () => {
+        throw new Error('refresh must not be attempted for a step-up challenge');
+      },
+      '/files/1/original': () =>
+        jsonResponse(
+          {
+            succeeded: false,
+            code: 401,
+            errorCode: 'IDENTITY_STEP_UP_REQUIRED',
+            errorDetails: { scope: 'tip.download' },
+          },
+          401,
+        ),
+    });
+
+    const result = await http.post('/files/1/original');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+    expect(auth.isAuthenticated).toBe(true);
+    expect(http.getAccessToken()).toBe('stale-access');
+  });
+});

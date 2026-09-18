@@ -26,21 +26,33 @@ public class CostCalculator : ICostCalculator
     }
 
     /// <summary>
-    /// 解析成本率：精确匹配 "provider:model" → 通配 "provider:*" → 默认
+    /// 解析成本率：精确匹配 provider/model → 通配 provider/"*" → 默认
     /// </summary>
     private static ModelCostRate? ResolveCostRate(CostTrackingOptions options, string provider, string model)
     {
-        // 1. 精确匹配
-        var key = $"{provider}:{model}";
-        if (options.ModelCosts.TryGetValue(key, out var rate))
-            return rate;
+        var models = Lookup(options.ModelCosts, provider);
+        if (models == null)
+            return options.DefaultCostRate;
 
-        // 2. 通配匹配
-        var wildcardKey = $"{provider}:*";
-        if (options.ModelCosts.TryGetValue(wildcardKey, out rate))
-            return rate;
+        // 1. 精确匹配 → 2. 通配匹配 → 3. 默认
+        return Lookup(models, model) ?? Lookup(models, "*") ?? options.DefaultCostRate;
+    }
 
-        // 3. 默认
-        return options.DefaultCostRate;
+    /// <summary>
+    /// 大小写不敏感查找。配置绑定器为内层字典 <c>new</c> 出来的实例不带比较器，
+    /// 而 provider / model 名在用量日志里的大小写来自各 provider 的回包，不能指望与配置一致。
+    /// </summary>
+    private static TValue? Lookup<TValue>(Dictionary<string, TValue> dictionary, string key) where TValue : class
+    {
+        if (dictionary.TryGetValue(key, out var value))
+            return value;
+
+        foreach (var (candidate, candidateValue) in dictionary)
+        {
+            if (string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase))
+                return candidateValue;
+        }
+
+        return null;
     }
 }

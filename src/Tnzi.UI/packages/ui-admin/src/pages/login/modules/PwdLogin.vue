@@ -26,51 +26,49 @@ import {
   NFormItem,
   NInput,
   NButton,
-  NCheckbox,
   NSpace,
   NDivider,
   type FormRules,
 } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, TCaptcha } from '@tnzi/ui'
 import { useFormRules } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
-import { useLoginCaptcha } from '@tnzi/ui'
 import { isModuleAvailable } from '@tnzi/ui'
 import { useLoginContext, type LoginDemoAccount } from '@tnzi/ui'
-import TLoginCaptcha from './TLoginCaptcha.vue'
 
 defineOptions({ name: 'PwdLogin' })
 
-const { translate, toggleLoginModule, callbacks, demoAccounts, ui, thirdParty, scene, helpers, features, pendingCaptcha } =
-  useLoginContext()
+const {
+  translate,
+  toggleLoginModule,
+  callbacks,
+  demoAccounts,
+  ui,
+  thirdParty,
+  scene,
+  helpers,
+  features,
+  pendingCaptcha,
+  resolveUrl,
+} = useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 
 // Adaptive login captcha - hidden until the backend demands one (after repeated
-// failures) and pushes a fresh picture via `helpers.setCaptchaRequired`, which
-// lands in `pendingCaptcha`. We seed the field from it and show the refresh
-// button only when the consumer wired `callbacks.getCaptcha`.
-const {
-  captchaId,
-  imageBase64: captchaImage,
-  code: captchaCode,
-  loading: captchaLoading,
-  canRefresh: captchaCanRefresh,
-  load: loadCaptcha,
-  seed: seedCaptcha,
-} = useLoginCaptcha('login')
+// failures) and pushes the challenge via `helpers.setCaptchaRequired`, which
+// lands in `pendingCaptcha`. `TCaptcha` renders whichever provider the
+// deployment runs (`features.captcha`): the built-in picture seeded from the
+// challenge, or the provider's own widget (Turnstile / hCaptcha / reCAPTCHA / Altcha).
+const captchaRef = ref<InstanceType<typeof TCaptcha> | null>(null)
+const captchaToken = ref('')
 const showCaptcha = computed(() => pendingCaptcha.value !== null)
-watch(pendingCaptcha, (c) => {
-  if (c) seedCaptcha(c)
-})
 
 interface FormModel {
   userName: string
   password: string
-  remember: boolean
 }
 
-const model: FormModel = reactive({ userName: '', password: '', remember: true })
+const model: FormModel = reactive({ userName: '', password: '' })
 const submitting = ref(false)
 const submitError = ref('')
 
@@ -141,12 +139,19 @@ async function handleSubmit(): Promise<void> {
   }
   // When the adaptive captcha is on screen the user must solve it before we
   // resubmit - the backend would just re-issue the challenge otherwise.
-  if (showCaptcha.value && !captchaCode.value.trim()) {
-    submitError.value = translate('admin.login.captcha.required', 'Please enter the captcha.')
-    return
+  // `execute()` is what makes the invisible providers (reCAPTCHA v3) produce a
+  // token at all; for the others it returns what the user already solved.
+  let token: string | undefined
+  if (showCaptcha.value) {
+    try {
+      token = await captchaRef.value?.execute()
+    } catch {
+      submitError.value = translate('admin.login.captcha.required', 'Please complete the captcha.')
+      return
+    }
   }
   // Whether a captcha was already showing before this attempt - if it still is
-  // afterwards, the code we just submitted was wrong.
+  // afterwards, the token we just submitted was rejected.
   const hadCaptcha = pendingCaptcha.value !== null
   submitting.value = true
   try {
@@ -154,14 +159,14 @@ async function handleSubmit(): Promise<void> {
       {
         userName: model.userName,
         password: model.password,
-        remember: model.remember,
-        captchaId: captchaId.value || undefined,
-        captchaCode: captchaCode.value.trim() || undefined,
+        captchaToken: token,
       },
       helpers,
     )
     if (pendingCaptcha.value && hadCaptcha) {
-      submitError.value = translate('admin.login.captcha.invalid', 'Incorrect captcha, please try again.')
+      submitError.value = translate('admin.login.captcha.invalid', 'Captcha verification failed, please try again.')
+      // Tokens are single-use: the widget must be solved again (image: a fresh picture).
+      captchaRef.value?.reset()
     }
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Login failed')
@@ -218,24 +223,25 @@ async function handleAccountLogin(account: LoginDemoAccount): Promise<void> {
     </NFormItem>
     <NFormItem v-if="showCaptcha" :label="translate('admin.login.captcha.label', 'Captcha')">
       <div class="w-full">
-        <TLoginCaptcha
-          v-model="captchaCode"
-          :image="captchaImage"
-          :loading="captchaLoading"
-          :refreshable="captchaCanRefresh"
+        <TCaptcha
+          ref="captchaRef"
+          v-model:token="captchaToken"
+          purpose="login"
+          :config="features.captcha"
+          :seed="pendingCaptcha"
+          :load-image="callbacks.getCaptcha"
+          :resolve-url="resolveUrl"
           :placeholder="translate('admin.login.captcha.placeholder', 'Enter the characters shown')"
           :refresh-title="translate('admin.login.captcha.refresh', 'Refresh captcha')"
-          @refresh="loadCaptcha"
         />
         <p class="m-0 mt-6px text-12px text-muted">
-          {{ translate('admin.login.captcha.hint', 'For your security, please enter the captcha to continue.') }}
+          {{ translate('admin.login.captcha.hint', 'For your security, please complete the captcha to continue.') }}
         </p>
       </div>
     </NFormItem>
     <NSpace vertical :size="24">
-      <div class="flex-y-center justify-between">
-        <NCheckbox v-model:checked="model.remember">{{ translate('admin.login.rememberMe', 'Remember me') }}</NCheckbox>
-        <NButton v-if="showRecovery" quaternary @click="toggleLoginModule('reset-pwd')">{{ translate('admin.login.forgotPassword', 'Forgot password?') }}</NButton>
+      <div v-if="showRecovery" class="flex-y-center justify-end">
+        <NButton quaternary @click="toggleLoginModule('reset-pwd')">{{ translate('admin.login.forgotPassword', 'Forgot password?') }}</NButton>
       </div>
       <NButton type="primary" size="large" :round="ui.pill" block :loading="submitting" @click="handleSubmit">
         <template #icon>

@@ -19,6 +19,12 @@ public partial class PaymentService : ApplicationService, IPaymentService
     private readonly ICouponService? _couponService;
     private readonly ICache? _cache;
 
+    /// <summary>
+    /// 渠道回调是匿名请求，没有任何租户线索；按流水号跨租户找到支付之后，
+    /// 后续处理（CAS、事件发布、下游状态机）要切到那笔支付所属的租户里做。
+    /// </summary>
+    private readonly ICurrentTenant? _currentTenant;
+
     private const int ExpiredPaymentScanPageSize = 200;
 
     private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
@@ -31,7 +37,8 @@ public partial class PaymentService : ApplicationService, IPaymentService
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider,
         ICouponService? couponService = null,
-        ICache? cache = null)
+        ICache? cache = null,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
@@ -41,6 +48,7 @@ public partial class PaymentService : ApplicationService, IPaymentService
         _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
         _couponService = couponService;
         _cache = cache;
+        _currentTenant = currentTenant;
     }
 
     /// <summary>
@@ -65,6 +73,18 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
         if (!EnsureRedirectAllowed(request.ReturnUrl, nameof(request.ReturnUrl)))
             return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentReturnUrlNotAllowed, 400);
+
+        // 订阅支付只由订阅模块建（首付 / 补差），它的 ExtraData 驱动订阅状态机。
+        // 用户面端点建出来的这种单不能静默剥掉元数据放行：那会让一次前端误传看起来像
+        // 「付了钱但订阅没动」。直接拒绝，症状当场可见。
+        if (request.BusinessType == BusinessType.Subscription && !request.IsSystemInitiated)
+        {
+            Logger.LogWarning(
+                "Refused a user-initiated payment with BusinessType=Subscription. BusinessOrderNo: {BusinessOrderNo}, UserId: {UserId}. "
+                + "Subscription payments are created by the subscriptions module only.",
+                request.BusinessOrderNo, CurrentUser?.Id);
+            return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentBusinessTypeSystemOnly, 400);
+        }
 
         var channelCode = string.IsNullOrWhiteSpace(request.ChannelCode)
             ? PaymentOptions.DefaultChannelCode
@@ -231,6 +251,12 @@ public partial class PaymentService : ApplicationService, IPaymentService
         if (payment.Status != PaymentStatus.Pending && payment.Status != PaymentStatus.Processing)
             return Fail(ErrorCodes.PaymentCannotClose, 400);
 
+        // ★ 先让渠道侧失效，再改本地状态。只改本地，渠道侧的支付意图原样活着：付款人正开着收银台时
+        // 本地关了单，他接着付掉，成功回调撞上本地终态被幂等守卫吞掉 —— 钱收了，没有事件、没有告警。
+        var channel = await EnsureChannelSideNotPayableAsync(payment, cancellationToken);
+        if (!channel.Succeeded)
+            return channel;
+
         // CAS：并发回调可能正把这笔支付置为成功，条件更新确保不会把已成功的订单关掉
         var affected = await _paymentRepository.AsQueryable()
             .Where(p => p.Id == payment.Id
@@ -243,6 +269,94 @@ public partial class PaymentService : ApplicationService, IPaymentService
         Logger.LogInformation("Payment closed. TradeNo: {TradeNo}, Reason: {Reason}", tradeNo, reason);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// 本地关单 / 过期之前确认渠道侧再也收不到这张单的钱。三层：能作废的渠道先作废；作废不了（渠道没这能力，
+    /// 或渠道拒绝作废 —— Stripe 对已付 / 已作废的 intent 都会拒绝）就查渠道侧状态：已付则把它记成功并拒绝关单，
+    /// 已失败 / 已作废则放行；仍可付款而渠道又不能作废的（PayPal 订单没有作废接口）放行并告警，回调侧留痕兜底；
+    /// 渠道侧读不到时不放行 —— 宁可让这张单多开一轮，也不能在渠道侧仍可付款时本地关掉。
+    /// </summary>
+    /// <returns>成功 = 可以本地关单；失败 = 不能关（已记成功 409 <c>PAYMENT_ALREADY_PAID</c>，或渠道不可达 409 <c>PAYMENT_CHANNEL_STATE_UNKNOWN</c>）。</returns>
+    private async Task<Result> EnsureChannelSideNotPayableAsync(PaymentEntity payment, CancellationToken cancellationToken)
+    {
+        // 线下渠道没有渠道侧；ExternalTradeNo 为空的在线单也可能在渠道侧存在（建单后落库前进程死掉），
+        // 因此按 SyncOrderAsync 的口径用内部 TradeNo 兜底，渠道按元数据查得到就查。
+        if (IsOfflineChannel(payment.ChannelCode))
+            return Ok();
+
+        var provider = _paymentProviderFactory.GetProvider(payment.ChannelCode);
+        if (provider == null)
+        {
+            // 渠道包没加载：它的回调也验不了签，本地状态就是全部事实。留下告警而不是把这张单永远卡住。
+            Logger.LogWarning(
+                "Closing payment {TradeNo} on channel {Channel} without voiding it: the channel is not loaded, so its order {ExternalTradeNo} could neither be voided nor checked.",
+                payment.TradeNo, payment.ChannelCode, payment.ExternalTradeNo);
+            return Ok();
+        }
+
+        var channelTradeNo = payment.ExternalTradeNo ?? payment.TradeNo;
+
+        if (provider.SupportsPaymentCancellation)
+        {
+            var cancelled = await provider.CancelPaymentAsync(channelTradeNo);
+            if (cancelled.Succeeded)
+                return Ok();
+
+            Logger.LogInformation("Channel {Channel} refused to void payment {TradeNo} ({Message}); checking its state before closing.",
+                payment.ChannelCode, payment.TradeNo, cancelled.Message);
+        }
+
+        var state = await provider.SyncOrderAsync(channelTradeNo);
+        if (!state.Succeeded)
+        {
+            if (provider.SupportsPaymentCancellation)
+            {
+                // 作废与查询都失败 = 渠道不可达。这个渠道平时答得上来，等下一轮
+                Logger.LogWarning(
+                    "Payment {TradeNo} left open: channel {Channel} could not void it and its state could not be read ({Message}).",
+                    payment.TradeNo, payment.ChannelCode, state.Message);
+                return Fail(ErrorCodes.PaymentChannelStateUnknown, 409);
+            }
+
+            // 不能作废的渠道读不到状态：留着这张单下一轮也不会多知道什么（渠道把订单清掉后会永远 404），
+            // 而关掉之后钱若真的到了，回调侧留痕告警 —— 与「仍可付款」那条放行的残余形态相同
+            Logger.LogWarning(
+                "Closing payment {TradeNo} locally: channel {Channel} cannot void order {ExternalTradeNo} and its state could not be read ({Message}); a payment arriving after this close is recorded on the payment row and needs a manual refund.",
+                payment.TradeNo, payment.ChannelCode, channelTradeNo, state.Message);
+            return Ok();
+        }
+
+        switch (state.Data?.Status)
+        {
+            case PaymentStatus.Succeeded:
+            {
+                // 渠道已经收到钱：走与回调同一条推进路径（金额校验 + 事件），这不是一次关单
+                var paidAmount = state.Data.Amount > 0 ? state.Data.Amount : payment.PayableAmount;
+                await ApplySucceededAsync(payment, paidAmount, state.Data.ExternalTradeNo, JsonSerializer.Serialize(state.Data), cancellationToken);
+                Logger.LogWarning("Payment {TradeNo} was already paid on channel {Channel} when it was about to be closed; recorded as succeeded instead.",
+                    payment.TradeNo, payment.ChannelCode);
+                return Fail(ErrorCodes.PaymentAlreadyPaid, 409);
+            }
+
+            case PaymentStatus.Failed:
+            case PaymentStatus.Cancelled:
+                return Ok();
+
+            default:
+                if (provider.SupportsPaymentCancellation)
+                {
+                    // 作废被拒而渠道侧仍可付款（Stripe 的 processing 这类中间态）：等它落定，下一轮再来
+                    Logger.LogWarning("Payment {TradeNo} left open: channel {Channel} refused to void it while it is still payable (channel status {Status}).",
+                        payment.TradeNo, payment.ChannelCode, state.Data?.Status);
+                    return Fail(ErrorCodes.PaymentChannelStateUnknown, 409);
+                }
+
+                Logger.LogWarning(
+                    "Closing payment {TradeNo} locally while channel {Channel} cannot void order {ExternalTradeNo}: it stays payable on the channel side until it expires there; a payment arriving after this close is recorded on the payment row and needs a manual refund.",
+                    payment.TradeNo, payment.ChannelCode, channelTradeNo);
+                return Ok();
+        }
     }
 
     public async Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
@@ -287,6 +401,8 @@ public partial class PaymentService : ApplicationService, IPaymentService
                 payment.ExternalTradeNo = result.Data.ExternalTradeNo;
                 await _paymentRepository.UpdateAsync(payment, cancellationToken);
             }
+            if (result.Data != null)
+                await RecordPaidAfterLocalCloseAsync(payment, result.Data.Status, JsonSerializer.Serialize(result.Data), cancellationToken);
             return Ok();
         }
 

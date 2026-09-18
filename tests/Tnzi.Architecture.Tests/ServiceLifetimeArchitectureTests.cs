@@ -71,7 +71,6 @@ public partial class ServiceLifetimeArchitectureTests
         "Microsoft.AspNetCore.Identity.UserManager`1[Tnzi.Identity.Entities.User]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.DocumentChunk,System.Guid]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.KnowledgeBase,System.Guid]",
-        "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.KnowledgeDocument,System.Guid]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.KnowledgeGraphNode,System.Guid]",
         "Tnzi.ITnziApplication",
     ];

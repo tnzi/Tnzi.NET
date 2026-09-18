@@ -75,6 +75,10 @@ public class DispatchFacadeEnqueueScopeTests
         // transaction the queue row would have been written in.
         var services = new ServiceCollection();
         services.AddScoped<ICliAgentDispatcher>(_ => scoped);
+        // The thread is resolved in that same detached scope: the dispatcher's ownership check
+        // must be able to see a thread the facade has just created, which it cannot while that
+        // row sits uncommitted in the caller's transaction.
+        services.AddScoped<IAgentThreadInternalService>(_ => new StubThreadService());
 
         var facade = new AgentDispatchFacade(
             new ThrowingRuntime(),
@@ -105,6 +109,12 @@ public class DispatchFacadeEnqueueScopeTests
             => Task.FromResult(new List<ChatMessage>());
 
         public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
+            => Task.FromResult<string?>(null);
+
+        public Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default)
             => Task.CompletedTask;
     }
 

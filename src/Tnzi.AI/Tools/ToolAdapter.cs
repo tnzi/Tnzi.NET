@@ -64,7 +64,13 @@ internal static class ToolAdapter
                 options: new AIFunctionFactoryOptions
                 {
                     Name = tool.Name,
-                    Description = description
+                    Description = description,
+                    // 安全标记随函数走：权限评估器只看得见 AIFunction，看不见 ToolDefinition
+                    AdditionalProperties = new Dictionary<string, object?>
+                    {
+                        [ToolMetadataKeys.Destructive] = tool.IsDestructive,
+                        [ToolMetadataKeys.ReadOnly] = tool.IsReadOnly
+                    }
                 });
 
             return aiFunction;

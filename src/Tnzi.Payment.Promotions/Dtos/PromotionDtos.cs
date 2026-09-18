@@ -565,6 +565,12 @@ public class CreateRedemptionCodeDto
     /// </summary>
     [Range(1, 1000, ErrorMessage = "Quantity must be between 1 and 1000.")]
     public int Quantity { get; set; }
+
+    /// <summary>
+    /// 每个用户最多领几张。不传 = 默认 1；0 = 显式不限（一个人可以把整批名额领走）。唯一码恒为 1。
+    /// </summary>
+    [Range(0, 1000, ErrorMessage = "Per-user limit must be between 0 (unlimited) and 1000.")]
+    public int? PerUserLimit { get; set; }
 }
 
 /// <summary>

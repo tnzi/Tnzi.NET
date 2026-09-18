@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.SignalR.Hubs;
+using Tnzi.SignalR.Metadata;
 using Tnzi.SignalR.Tests.TestDoubles;
 
 namespace Tnzi.SignalR.Tests.Hubs;
@@ -221,5 +222,44 @@ public class TnziHubConnectionTrackingTests
         manager.Verify(
             m => m.AddConnectionAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ConnectionMetadata>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// ★ 带租户 claim 的连接进 <c>Tenant_{id}</c> 组：「发给整个租户」的推送靠它，而不是 <c>Clients.All</c>
+    /// （多租户下 All 会把一家租户的事件送到所有租户）。断开时移出。
+    /// </summary>
+    [Fact]
+    public async Task JoinsTheTenantGroup_WhenThePrincipalCarriesATenantClaim_AndLeavesItOnDisconnect()
+    {
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        using var hub = new ParameterlessHub();
+        var groups = new RecordingGroupManager();
+        hub.Context = new FakeHubCallerContext(
+            connectionId: "conn-t",
+            user: new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString()), new Claim("tenant_id", tenantId.ToString())], "test")),
+            requestServices: new ServiceCollection().BuildServiceProvider());
+        hub.Groups = groups;
+
+        await hub.OnConnectedAsync();
+        await hub.OnDisconnectedAsync(null);
+
+        groups.Added.ShouldContain(("conn-t", HubGroupNames.ForTenant(tenantId)));
+        groups.Added.ShouldContain(("conn-t", HubGroupNames.ForUser(userId)));
+        groups.Removed.ShouldContain(("conn-t", HubGroupNames.ForTenant(tenantId)));
+    }
+
+    /// <summary>没有租户 claim 的连接不进任何租户组 —— 关闭方向：按租户推送时它收不到，而不是收到所有租户的。</summary>
+    [Fact]
+    public async Task JoinsNoTenantGroup_WithoutATenantClaim()
+    {
+        var userId = Guid.NewGuid();
+        using var hub = new ParameterlessHub();
+        var (_, groups) = Wire(hub, userId, available: null);
+
+        await hub.OnConnectedAsync();
+
+        groups.Added.ShouldNotContain(g => g.GroupName.StartsWith(HubGroupNames.TenantGroupPrefix, StringComparison.Ordinal));
     }
 }

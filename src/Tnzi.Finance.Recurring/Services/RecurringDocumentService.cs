@@ -150,6 +150,17 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (entity.Status == RecurringStatus.Ended)
             return Fail<RecurringDocumentDto>("This template has ended and can no longer be edited.", 409);
 
+        // ★ 客户端的 stamp 要显式比对，不能赋给已跟踪实体：EF 的并发谓词用的是加载时的 OriginalValue，
+        // 赋值只改 CurrentValue，随后审计助手又把它覆写成新 Guid —— 那一行既不参与判定也不落库，
+        // 两个管理员同时编辑，后提交的静默覆盖先提交的，而模板决定的是「未来每一期开多少钱」。
+        // 留空视为「客户端不比对」，兼容从没回传过它的消费方；下面的 DbUpdateConcurrencyException
+        // 仍守着同一请求内 load→save 的窗口。
+        if (!string.IsNullOrEmpty(input.ConcurrencyStamp)
+            && !string.Equals(entity.ConcurrencyStamp, input.ConcurrencyStamp, StringComparison.Ordinal))
+        {
+            return Fail<RecurringDocumentDto>("This template was changed by someone else. Reload and try again.", 409);
+        }
+
         var validation = ValidateSchedule(input.Frequency, input.Interval, input.AnchorDay, input.StartDate, input.EndDate, input.MaxOccurrences);
         if (validation != null)
             return Fail<RecurringDocumentDto>(validation, 400);
@@ -180,7 +191,6 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         entity.MaxOccurrences = input.MaxOccurrences;
         entity.DueDays = input.DueDays;
         entity.AutoPost = input.AutoPost;
-        entity.ConcurrencyStamp = input.ConcurrencyStamp;
 
         // 改了排期规则就重算下一次；只改内容（价格/摘要）不动排期 —— 涨个价不该
         // 让下一期悄悄挪到别的日子。
@@ -316,7 +326,7 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         // 续上等于恢复的瞬间凭空补出一批单据。
         if (target == RecurringStatus.Active && entity.Status == RecurringStatus.Paused)
         {
-            var today = DateTime.UtcNow.ToUtcDate();
+            var today = TimeProvider.GetUtcNow().UtcDateTime.ToUtcDate();
             var next = entity.NextRunDate;
             var guard = 0;
             while (next < today && guard++ < MaxScheduleProjection)

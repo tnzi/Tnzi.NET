@@ -128,7 +128,8 @@ public class CliCustomProviderOptions : CliProviderOptions
 /// </summary>
 /// <remarks>
 /// <b>默认关闭</b>：打开它等于给一个能执行任意代码的子进程一把能调平台的钥匙。
-/// 即使打开，钥匙也是运行范围的（随运行结束失效，权限上限是该 Agent 自身的权限）。
+/// 即使打开，钥匙也是运行范围的：随运行结束失效，且只开得了 <see cref="AllowedTools"/> 点名的那几扇门
+/// （MCP server 按凭据自带的调用面过滤 <c>tools/list</c>、拒绝越界的 <c>tools/call</c>）。
 /// </remarks>
 public class CliWriteBackOptions
 {
@@ -149,6 +150,17 @@ public class CliWriteBackOptions
 
     /// <summary>凭据有效期。运行提前结束时也一并失效，两者取先到的那个。</summary>
     public TimeSpan TokenLifetime { get; set; } = TimeSpan.FromHours(12);
+
+    /// <summary>
+    /// 持运行范围凭据的 agent 在框架 MCP server 上<b>允许调用的工具名</b>（大小写不敏感）。
+    /// <c>["*"]</c> 表示全部；启用回写时必须显式给出（验证器拒绝空列表）—— 回写面是一个安全决定，不能靠缺省。
+    /// </summary>
+    /// <remarks>
+    /// ★ 此前凭据校验完就被丢掉，持凭据的子进程与一把静态 API Key 拿到的是同一个面
+    /// （全部暴露的 agent + 全部消费方自定义工具），而文档写着「上限是该 Agent 自身的权限」。
+    /// 该子进程以 <c>--permission-mode bypassPermissions</c> 跑任意代码，一次提示注入就是整个面。
+    /// </remarks>
+    public List<string> AllowedTools { get; set; } = [];
 }
 
 /// <summary>

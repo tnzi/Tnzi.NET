@@ -65,11 +65,6 @@ public class ContextInjection
     public List<CitationDto>? Citations { get; set; }
 
     /// <summary>
-    /// 激活的技能列表（供 SkillConstraintMiddleware 消费）
-    /// </summary>
-    public List<SkillDefinition>? ActiveSkills { get; set; }
-
-    /// <summary>
     /// 空注入
     /// </summary>
     public static readonly ContextInjection Empty = new();
@@ -78,6 +73,5 @@ public class ContextInjection
     /// 是否有实际内容
     /// </summary>
     public bool HasContent => (Messages != null && Messages.Count > 0)
-        || (Tools != null && Tools.Count > 0)
-        || (ActiveSkills != null && ActiveSkills.Count > 0);
+        || (Tools != null && Tools.Count > 0);
 }

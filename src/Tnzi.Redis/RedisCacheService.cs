@@ -1,3 +1,5 @@
+// 与 StackExchange.Redis.RedisConnectionException 同名：这里要的是本模块的类型（CacheException 族）
+using RedisConnectionException = Tnzi.Redis.Exceptions.RedisConnectionException;
 
 namespace Tnzi.Redis;
 
@@ -5,12 +7,25 @@ namespace Tnzi.Redis;
 /// Redis缓存服务实现
 /// </summary>
 /// <remarks>
+/// <para>
 /// 所有读写方法统一使用裸 <see cref="IDatabase"/> 的 String 表示（值序列化为 JSON），单键/批量/标签方法互通。
-/// 错误语义分两类：读路径（Get/Exists/GetMany 等）fail-open，失败记 LogError 并返回默认值/空集合；
-/// 计数器写路径（Increment/Decrement）fail-closed，失败记 LogError 后抛 <see cref="CacheWriteException"/>，
-/// 避免配额/限流等消费者把故障误读为"计数清零"。
+/// </para>
+/// <para>
+/// 错误语义分三类，判据是「失败能不能自愈」：
+/// <list type="bullet">
+/// <item>读路径（Get/Exists/GetMany 等）与写入路径（Set/SetMany/TrySet）<b>fail-open</b>：失败记 LogError
+/// 并返回默认值/空集合/false。写不进去等于一次未命中，下一次读会回填。</item>
+/// <item>计数器（Increment/Decrement）<b>fail-closed</b>：失败记 LogError 后抛 <see cref="CacheWriteException"/>，
+/// 避免配额/限流等消费者把故障误读为"计数清零"。</item>
+/// <item>失效路径（Remove/RemoveMany/RemoveByPattern/RemoveByPrefix/RemoveByTag/Clear，含同步重载）与它的前半段
+/// SetWithTags（值写进去而标签索引没建上时，RemoveByTag 永远找不到这一条）<b>fail-closed</b>：
+/// 失败记 LogError 后抛 <see cref="CacheWriteException"/>。删除失败不会自愈 —— 键活到 TTL、没有 TTL 的活到永远，
+/// 而吞掉异常会让调用方看到「删除成功」：权限撤销、会话吊销、一次性令牌消费这类失效的调用方要的正是失败可见
+/// （事件处理器据此让总线重试）。请求路径上若「500 比陈旧更糟」，由调用方就地捕获并降级。</item>
+/// </list>
+/// </para>
 /// </remarks>
-public class RedisCacheService : ICache, IPatternCache
+public class RedisCacheService : ICache
 {
     private readonly IConnectionMultiplexer _connectionMultiplexer;
     private readonly ILogger<RedisCacheService> _logger;
@@ -68,6 +83,70 @@ public class RedisCacheService : ICache, IPatternCache
     /// </summary>
     private Task<bool> WriteStringAsync(IDatabase database, string cacheKey, string json, TimeSpan? expiration, When when = When.Always)
         => database.StringSetAsync(cacheKey, json, NormalizeExpiration(expiration), when);
+
+    /// <summary>
+    /// 把完整 Redis 键还原成调用方看到的逻辑键（去掉实例前缀）。
+    /// </summary>
+    private string ToLogicalKey(string fullKey)
+        => !string.IsNullOrEmpty(_instanceName) && fullKey.StartsWith(_instanceName + ":", StringComparison.Ordinal)
+            ? fullKey[(_instanceName.Length + 1)..]
+            : fullKey;
+
+    /// <summary>
+    /// fire-and-forget 发布一条失效通知（启用了 <see cref="ICacheSyncService"/> 时）。
+    /// 使用 <see cref="CancellationToken.None"/>：后台任务不应受调用方取消令牌影响。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>每一条写入 / 删除路径都要经过这里或 <see cref="PublishRemovedKeys"/></b>，同步重载也不例外。
+    /// 这条通道只对「在 Redis 之上自建了 L1 的消费方」有意义，而一条覆盖不全的失效通道比没有更危险：
+    /// Redis 里删干净了、日志干净、没有异常，只有部分实例答旧值。
+    /// </remarks>
+    private void PublishInvalidation(string key, CacheOperation operation)
+    {
+        if (_cacheSyncService == null)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _cacheSyncService.PublishCacheInvalidationAsync(key, operation, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish cache {Operation} notification for key: {Key}", operation, key);
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// 为一批已删除的完整 Redis 键逐键发布 <see cref="CacheOperation.Remove"/>（键先还原成逻辑键）。
+    /// 一个后台任务顺序发完，而不是每键一个 <c>Task.Run</c>。
+    /// </summary>
+    private void PublishRemovedKeys(IEnumerable<RedisKey> deletedKeys, string context)
+    {
+        if (_cacheSyncService == null)
+            return;
+
+        var logicalKeys = deletedKeys.Select(k => ToLogicalKey(k.ToString())).ToArray();
+        if (logicalKeys.Length == 0)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                foreach (var key in logicalKeys)
+                {
+                    await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Remove, CancellationToken.None);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish cache remove notifications for {Context}", context);
+            }
+        }, CancellationToken.None);
+    }
 
     /// <summary>
     /// 获取缓存值
@@ -142,6 +221,7 @@ public class RedisCacheService : ICache, IPatternCache
                 : (TimeSpan?)null;
 
             GetDatabase().StringSet(cacheKey, json, expiry, When.Always);
+            PublishInvalidation(key, CacheOperation.Update);
         }
         catch (Exception ex)
         {
@@ -167,23 +247,7 @@ public class RedisCacheService : ICache, IPatternCache
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
 
             await WriteStringAsync(GetDatabase(), cacheKey, json, expiration);
-
-            // 发布缓存更新通知（如果启用了缓存同步）
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (_cacheSyncService != null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Update, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to publish cache update notification for key: {Key}", key);
-                    }
-                }, CancellationToken.None);
-            }
+            PublishInvalidation(key, CacheOperation.Update);
         }
         catch (Exception ex)
         {
@@ -204,10 +268,12 @@ public class RedisCacheService : ICache, IPatternCache
         {
             var cacheKey = GetCacheKey(key);
             GetDatabase().KeyDelete(cacheKey);
+            PublishInvalidation(key, CacheOperation.Remove);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache value for key: {Key}", key);
+            throw new CacheWriteException($"Failed to remove cache key '{key}'.", key, ex);
         }
     }
 
@@ -225,27 +291,12 @@ public class RedisCacheService : ICache, IPatternCache
         {
             var cacheKey = GetCacheKey(key);
             await GetDatabase().KeyDeleteAsync(cacheKey);
-
-            // 发布缓存删除通知（如果启用了缓存同步）
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (_cacheSyncService != null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Remove, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to publish cache remove notification for key: {Key}", key);
-                    }
-                }, CancellationToken.None);
-            }
+            PublishInvalidation(key, CacheOperation.Remove);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache value for key: {Key}", key);
+            throw new CacheWriteException($"Failed to remove cache key '{key}'.", key, ex);
         }
     }
 
@@ -338,8 +389,15 @@ public class RedisCacheService : ICache, IPatternCache
     }
 
     /// <summary>
-    /// 收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）
+    /// 收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）。
     /// </summary>
+    /// <remarks>
+    /// 只有失效路径（RemoveByPattern / RemoveByPrefix / Clear）调用它，所以它必须 <b>fail-closed</b>：
+    /// 副本被跳过（键空间的权威副本在主节点上），但一个<b>断开的主节点</b>或一次扫描失败都意味着
+    /// 「有键没扫到」，此时抛出而不是返回残缺的集合 —— 残缺集合会让后续 DEL 对着空数组「成功」，
+    /// 调用方看到删除成功而键一个都没动，外层的 <see cref="CacheWriteException"/> 永远碰不到。
+    /// </remarks>
+    /// <exception cref="RedisConnectionException">某个主节点当前未连接。</exception>
     private RedisKey[] CollectKeys(string cachePattern)
     {
         var allKeys = new HashSet<string>();
@@ -347,20 +405,14 @@ public class RedisCacheService : ICache, IPatternCache
 
         foreach (var endpoint in endpoints)
         {
-            try
+            var server = _connectionMultiplexer.GetServer(endpoint);
+            if (server.IsReplica)
+                continue;
+
+            ThrowIfPrimaryDisconnected(server, endpoint);
+            foreach (var key in server.Keys(pattern: cachePattern))
             {
-                var server = _connectionMultiplexer.GetServer(endpoint);
-                if (server.IsConnected && !server.IsReplica)
-                {
-                    foreach (var key in server.Keys(pattern: cachePattern))
-                    {
-                        allKeys.Add(key.ToString());
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error scanning keys on endpoint {Endpoint}", endpoint);
+                allKeys.Add(key.ToString());
             }
         }
 
@@ -368,8 +420,9 @@ public class RedisCacheService : ICache, IPatternCache
     }
 
     /// <summary>
-    /// 异步收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）
+    /// 异步收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）。语义见 <see cref="CollectKeys"/>。
     /// </summary>
+    /// <exception cref="RedisConnectionException">某个主节点当前未连接。</exception>
     private async Task<RedisKey[]> CollectKeysAsync(string cachePattern)
     {
         var allKeys = new HashSet<string>();
@@ -377,24 +430,31 @@ public class RedisCacheService : ICache, IPatternCache
 
         foreach (var endpoint in endpoints)
         {
-            try
+            var server = _connectionMultiplexer.GetServer(endpoint);
+            if (server.IsReplica)
+                continue;
+
+            ThrowIfPrimaryDisconnected(server, endpoint);
+            await foreach (var key in server.KeysAsync(pattern: cachePattern))
             {
-                var server = _connectionMultiplexer.GetServer(endpoint);
-                if (server.IsConnected && !server.IsReplica)
-                {
-                    await foreach (var key in server.KeysAsync(pattern: cachePattern))
-                    {
-                        allKeys.Add(key.ToString());
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error scanning keys on endpoint {Endpoint}", endpoint);
+                allKeys.Add(key.ToString());
             }
         }
 
         return allKeys.Select(k => (RedisKey)k).ToArray();
+    }
+
+    /// <summary>
+    /// 主节点未连接时抛出：这里没有异常可包，但「跳过它」等于把一整个节点的键当作不存在。
+    /// </summary>
+    private static void ThrowIfPrimaryDisconnected(IServer server, EndPoint endpoint)
+    {
+        if (server.IsConnected)
+            return;
+
+        throw new RedisConnectionException(
+            $"Redis endpoint '{endpoint}' is not connected; its key space cannot be scanned for removal.",
+            endpoint.ToString());
     }
 
     /// <summary>
@@ -420,12 +480,13 @@ public class RedisCacheService : ICache, IPatternCache
                 return 0;
 
             database.KeyDelete(keys);
+            PublishRemovedKeys(keys, $"pattern '{pattern}'");
             return keys.Length;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache by pattern: {Pattern}", pattern);
-            return 0;
+            throw new CacheWriteException($"Failed to remove cache keys matching pattern '{pattern}'.", pattern, ex);
         }
     }
 
@@ -451,36 +512,13 @@ public class RedisCacheService : ICache, IPatternCache
             if (keys.Length > 0)
             {
                 await database.KeyDeleteAsync(keys);
-
-                // 发布缓存删除通知（如果启用了缓存同步）
-                if (_cacheSyncService != null)
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            foreach (var deletedKey in keys)
-                            {
-                                var keyStr = deletedKey.ToString();
-                                // 移除实例名称前缀
-                                if (!string.IsNullOrEmpty(_instanceName) && keyStr.StartsWith(_instanceName + ":"))
-                                {
-                                    keyStr = keyStr[(_instanceName.Length + 1)..];
-                                }
-                                await _cacheSyncService.PublishCacheInvalidationAsync(keyStr, CacheOperation.Remove, CancellationToken.None);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to publish cache remove notifications for pattern: {Pattern}", pattern);
-                        }
-                    }, CancellationToken.None);
-                }
+                PublishRemovedKeys(keys, $"pattern '{pattern}'");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache by pattern: {Pattern}", pattern);
+            throw new CacheWriteException($"Failed to remove cache keys matching pattern '{pattern}'.", pattern, ex);
         }
     }
 
@@ -502,10 +540,14 @@ public class RedisCacheService : ICache, IPatternCache
             {
                 database.KeyDelete(keys);
             }
+
+            // 一条通配 Clear 而不是逐键：订阅方据此整体清空 L1。键量可能很大，逐键发只会把通道刷满
+            PublishInvalidation("*", CacheOperation.Clear);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error clearing cache");
+            throw new CacheWriteException("Failed to clear the cache.", null, ex);
         }
     }
 
@@ -528,10 +570,14 @@ public class RedisCacheService : ICache, IPatternCache
             {
                 await database.KeyDeleteAsync(keys);
             }
+
+            // 一条通配 Clear 而不是逐键：订阅方据此整体清空 L1。键量可能很大，逐键发只会把通道刷满
+            PublishInvalidation("*", CacheOperation.Clear);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error clearing cache");
+            throw new CacheWriteException("Failed to clear the cache.", null, ex);
         }
     }
 
@@ -549,11 +595,27 @@ public class RedisCacheService : ICache, IPatternCache
     }
 
     /// <summary>
-    /// 递增缓存值（带过期时间）
+    /// INCRBY 后仅当键<b>还没有</b> TTL 时才 PEXPIRE：过期时刻在键首次创建时定下，之后的递增沿用（固定窗口）。
+    /// 原子脚本，任何 Redis 版本都支持（<c>EXPIRE ... NX</c> 要 7.0）。
     /// </summary>
+    private const string IncrementWithWindowScript = @"
+            local v = redis.call('incrby', KEYS[1], ARGV[1])
+            if redis.call('pttl', KEYS[1]) == -1 then
+                redis.call('pexpire', KEYS[1], ARGV[2])
+            end
+            return v";
+
+    /// <summary>
+    /// 递增缓存值（带过期时间）。<b>固定窗口</b>：过期时刻在键首次创建时定下，之后的递增沿用它。
+    /// </summary>
+    /// <remarks>
+    /// 此前每次递增都重设 TTL，那是滑动惩罚窗口：限流 100 次 / 60 秒，客户端超限后每次重试都把窗口续到 60 秒之后，
+    /// 只要它以任何小于 60 秒的间隔重试，计数器永不过期 —— 被限流的调用方再也恢复不了，与配置的窗口长度无关。
+    /// <c>RateLimitService</c>、2FA 失败锁定、每日计数这类调用方要的都是「首个命中起 W 内 N 次」。
+    /// </remarks>
     /// <param name="key">缓存键</param>
     /// <param name="increment">递增量</param>
-    /// <param name="expiration">过期时间</param>
+    /// <param name="expiration">过期时间（仅键首次创建时生效）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递增后的值</returns>
     /// <exception cref="CacheWriteException">递增失败时抛出（fail-closed，语义见类型 remarks）。</exception>
@@ -565,15 +627,17 @@ public class RedisCacheService : ICache, IPatternCache
         try
         {
             var database = GetDatabase();
-            var result = await database.StringIncrementAsync(cacheKey, increment);
-
-            // 如果指定了过期时间，设置过期时间
-            if (expiration != default)
+            if (expiration <= TimeSpan.Zero)
             {
-                await database.KeyExpireAsync(cacheKey, expiration);
+                return await database.StringIncrementAsync(cacheKey, increment);
             }
 
-            return result;
+            var result = await database.ScriptEvaluateAsync(
+                IncrementWithWindowScript,
+                new RedisKey[] { cacheKey },
+                new RedisValue[] { increment, (long)expiration.TotalMilliseconds });
+
+            return (long)result!;
         }
         catch (Exception ex)
         {
@@ -629,22 +693,9 @@ public class RedisCacheService : ICache, IPatternCache
 
             // 使用 Redis SET NX 原子操作，只在键不存在时设置
             var success = await WriteStringAsync(GetDatabase(), cacheKey, json, expiration, When.NotExists);
-
-            // 如果设置成功且启用了缓存同步，发布通知
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (success && _cacheSyncService != null)
+            if (success)
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Update, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to publish cache set notification for key: {Key}", key);
-                    }
-                }, CancellationToken.None);
+                PublishInvalidation(key, CacheOperation.Update);
             }
 
             return success;
@@ -676,11 +727,13 @@ public class RedisCacheService : ICache, IPatternCache
             if (keys.Length > 0)
             {
                 await database.KeyDeleteAsync(keys);
+                PublishRemovedKeys(keys, $"prefix '{prefix}'");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache by prefix: {Prefix}", prefix);
+            throw new CacheWriteException($"Failed to remove cache keys with prefix '{prefix}'.", prefix, ex);
         }
     }
 
@@ -779,26 +832,11 @@ public class RedisCacheService : ICache, IPatternCache
             batch.Execute();
             await Task.WhenAll(tasks);
 
-            // 发布缓存更新通知（如果启用了缓存同步）
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (_cacheSyncService != null)
+            foreach (var item in itemsList)
             {
-                foreach (var item in itemsList)
+                if (!string.IsNullOrEmpty(item.Key))
                 {
-                    if (!string.IsNullOrEmpty(item.Key))
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await _cacheSyncService.PublishCacheInvalidationAsync(item.Key, CacheOperation.Update, CancellationToken.None);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to publish cache batch update notification for key: {Key}", item.Key);
-                            }
-                        }, CancellationToken.None);
-                    }
+                    PublishInvalidation(item.Key, CacheOperation.Update);
                 }
             }
         }
@@ -835,34 +873,13 @@ public class RedisCacheService : ICache, IPatternCache
             if (redisKeys.Length > 0)
             {
                 await database.KeyDeleteAsync(redisKeys);
-            }
-
-            // 发布缓存删除通知（如果启用了缓存同步）
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (_cacheSyncService != null)
-            {
-                foreach (var key in keyList)
-                {
-                    if (!string.IsNullOrEmpty(key))
-                    {
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Remove, CancellationToken.None);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogWarning(ex, "Failed to publish cache batch remove notification for key: {Key}", key);
-                            }
-                        }, CancellationToken.None);
-                    }
-                }
+                PublishRemovedKeys(redisKeys, $"{redisKeys.Length} key(s)");
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing multiple cache values");
+            throw new CacheWriteException($"Failed to remove {keyList.Count} cache key(s).", null, ex);
         }
     }
 
@@ -905,27 +922,12 @@ public class RedisCacheService : ICache, IPatternCache
                 }
             }
 
-            // 触发缓存同步
-            // 使用 CancellationToken.None：fire-and-forget 任务不应受调用方取消令牌影响
-            if (_cacheSyncService != null)
-            {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await _cacheSyncService.PublishCacheInvalidationAsync(key, CacheOperation.Update, CancellationToken.None);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to publish cache set notification for key: {Key}", key);
-                    }
-                }, CancellationToken.None);
-            }
+            PublishInvalidation(key, CacheOperation.Update);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error setting cache with tags for key: {Key}", key);
-            throw;
+            throw new CacheWriteException($"Failed to set cache key '{key}' with tags.", key, ex);
         }
     }
 
@@ -953,6 +955,7 @@ public class RedisCacheService : ICache, IPatternCache
             {
                 var keysToDelete = keys.Select(k => (RedisKey)k.ToString()).ToArray();
                 await database.KeyDeleteAsync(keysToDelete);
+                PublishRemovedKeys(keysToDelete, $"tag '{tag}'");
             }
 
             // 删除标签索引
@@ -961,6 +964,7 @@ public class RedisCacheService : ICache, IPatternCache
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing cache by tag: {Tag}", tag);
+            throw new CacheWriteException($"Failed to remove cache keys tagged '{tag}'.", tag, ex);
         }
     }
 }

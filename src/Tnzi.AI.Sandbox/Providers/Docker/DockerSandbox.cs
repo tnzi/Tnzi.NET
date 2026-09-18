@@ -22,9 +22,13 @@ public sealed class DockerSandbox : ISandbox
     /// </summary>
     private static readonly TimeSpan InContainerTimeoutGrace = TimeSpan.FromSeconds(5);
 
+    private static readonly StringComparison HostPathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
     private readonly HttpClient _httpClient;
     private readonly string _containerId;
     private readonly string _workspacePath;
+    private readonly string? _hostWorkspacePath;
     private readonly TimeSpan _commandTimeout;
     private readonly long _maxOutputSize;
     private readonly long _maxFileSize;
@@ -45,12 +49,17 @@ public sealed class DockerSandbox : ISandbox
         IEnumerable<string>? deniedCommandPrefixes = null,
         IShellCommandAnalyzer? commandAnalyzer = null,
         IEnumerable<string>? deniedPatterns = null,
-        long maxFileSize = 0)
+        long maxFileSize = 0,
+        string? hostWorkspacePath = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _httpClient = Check.NotNull(httpClient);
         _containerId = Check.NotNullOrWhiteSpace(containerId);
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
+        // 宿主侧挂载源。provider 一定会给；直接构造而不给的（测试）拿不到容器视图，MapPath 退化为恒等。
+        _hostWorkspacePath = string.IsNullOrWhiteSpace(hostWorkspacePath)
+            ? null
+            : Path.TrimEndingDirectorySeparator(RealPathResolver.Resolve(hostWorkspacePath));
         _commandTimeout = commandTimeout;
         _maxOutputSize = maxOutputSize;
         // <= 0 disables the file-size precheck.
@@ -61,6 +70,39 @@ public sealed class DockerSandbox : ISandbox
         _deniedPatterns = (deniedPatterns ?? []).ToArray();
         _commandAnalyzer = commandAnalyzer;
         _onDisposed = onDisposed;
+    }
+
+    /// <summary>
+    /// 宿主线程目录下的路径 → 容器里 <c>/workspace</c> 下的路径。
+    /// </summary>
+    /// <remarks>
+    /// 只换根、只认前缀：<c>{host}/workspace/a.txt</c> → <c>/workspace/workspace/a.txt</c>，分隔符统一成
+    /// <c>/</c>（Windows 宿主给的是反斜杠）。不在挂载源之下的路径抛 <see cref="SecurityException"/> ——
+    /// 这条路径本不该走到这里（围栏在翻译器里），走到了就说明上游漏了，猜一个容器位置只会把漏洞藏起来。
+    /// </remarks>
+    public string MapPath(string hostPath)
+    {
+        Check.NotNullOrWhiteSpace(hostPath);
+        if (_hostWorkspacePath is null)
+        {
+            return hostPath;
+        }
+
+        // 与 ToPhysical 同一口径地解析链接：DataRoot 本身可能挂在一条符号链接之下
+        // （/data → /mnt/disk/data），bash 里的字面 token 只有解析过才对得上解析过的挂载源。
+        var full = Path.TrimEndingDirectorySeparator(RealPathResolver.Resolve(hostPath));
+        if (string.Equals(full, _hostWorkspacePath, HostPathComparison))
+        {
+            return _workspacePath;
+        }
+
+        if (!full.StartsWith(_hostWorkspacePath + Path.DirectorySeparatorChar, HostPathComparison))
+        {
+            throw new SecurityException($"Path is outside sandbox workspace: {hostPath}");
+        }
+
+        var relative = full[(_hostWorkspacePath.Length + 1)..].Replace('\\', '/');
+        return $"{_workspacePath.TrimEnd('/')}/{relative}";
     }
 
     public async Task<CommandResult> ExecuteCommandAsync(string command, CancellationToken ct = default)

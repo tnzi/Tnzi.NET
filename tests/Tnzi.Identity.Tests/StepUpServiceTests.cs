@@ -157,9 +157,57 @@ public class StepUpServiceTests
         Assert.Equal(401, grant.Code);
     }
 
+    /// <summary>
+    /// ★★ 确认记录绑定发起确认的那条会话，不只绑用户。同一用户的另一条会话（被盗令牌）
+    /// 不能搭本人这次确认的便车 —— 否则 step-up 挡的正好不是它的威胁模型里那个「终端已易手」。
+    /// </summary>
+    [Fact]
+    public async Task AGrantInOneSession_DoesNotSatisfyAnotherSessionOfTheSameUser()
+    {
+        var store = new List<AuthToken>();
+        var victim = new Fixture(enabled: true, sessionId: Guid.NewGuid(), sharedTokens: store);
+        var attacker = new Fixture(enabled: true, sessionId: Guid.NewGuid(), sharedTokens: store);
+        victim.CodeIsValid = true;
+
+        await victim.Service.VerifyWithCodeAsync("123456", TwoFactorType.Totp, "identity.contact.change");
+
+        Assert.True(await victim.Service.IsSatisfiedAsync("identity.contact.change"));
+        Assert.False(await attacker.Service.IsSatisfiedAsync("identity.contact.change"));
+    }
+
+    /// <summary>
+    /// 没有会话 claim 的部署（未启用会话 / 遗留令牌）两边都是 Guid.Empty，行为与绑定之前逐字相同。
+    /// </summary>
+    [Fact]
+    public async Task WithoutASessionClaim_TheGrantStillSatisfiesTheSameUser()
+    {
+        var store = new List<AuthToken>();
+        var first = new Fixture(enabled: true, sharedTokens: store);
+        var second = new Fixture(enabled: true, sharedTokens: store);
+        first.CodeIsValid = true;
+
+        await first.Service.VerifyWithCodeAsync("123456", TwoFactorType.Totp, "tip.download");
+
+        Assert.True(await second.Service.IsSatisfiedAsync("tip.download"));
+    }
+
+    /// <summary>反向也要成立：在没有会话 claim 的上下文里做的确认，不能被一条有会话的请求拿去用。</summary>
+    [Fact]
+    public async Task AGrantWithoutASessionClaim_DoesNotSatisfyASessionBoundRequest()
+    {
+        var store = new List<AuthToken>();
+        var sessionless = new Fixture(enabled: true, sharedTokens: store);
+        var bound = new Fixture(enabled: true, sessionId: Guid.NewGuid(), sharedTokens: store);
+        sessionless.CodeIsValid = true;
+
+        await sessionless.Service.VerifyWithCodeAsync("123456", TwoFactorType.Totp, "tip.download");
+
+        Assert.False(await bound.Service.IsSatisfiedAsync("tip.download"));
+    }
+
     private sealed class Fixture
     {
-        private readonly List<AuthToken> _tokens = [];
+        private readonly List<AuthToken> _tokens;
 
         public StepUpService Service { get; }
 
@@ -169,18 +217,22 @@ public class StepUpServiceTests
 
         public Guid AssertedUserId { get; set; } = SessionUser;
 
-        public Fixture(bool enabled, bool singleUse = false, bool authenticated = true)
+        public Fixture(
+            bool enabled, bool singleUse = false, bool authenticated = true,
+            Guid? sessionId = null, List<AuthToken>? sharedTokens = null)
         {
+            _tokens = sharedTokens ?? [];
             var authTokenService = new Mock<IAuthTokenService>();
 
+            // 与真实 AuthTokenService 同一把唯一键 (UserId, LoginProvider, Name, SessionId)：会话绑定的记录按会话各存一条。
             authTokenService
                 .Setup(x => x.SaveTokenAsync(
                     It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
                     It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<Guid>()))
-                .ReturnsAsync((Guid userId, string provider, string name, string value, DateTime? expiresAt, Guid _) =>
+                .ReturnsAsync((Guid userId, string provider, string name, string value, DateTime? expiresAt, Guid session) =>
                 {
                     LastSavedValue = value;
-                    _tokens.RemoveAll(t => t.UserId == userId && t.LoginProvider == provider && t.Name == name);
+                    _tokens.RemoveAll(t => t.UserId == userId && t.LoginProvider == provider && t.Name == name && t.SessionId == session);
                     var token = new AuthToken
                     {
                         Id = Guid.NewGuid(),
@@ -188,7 +240,8 @@ public class StepUpServiceTests
                         LoginProvider = provider,
                         Name = name,
                         Value = value,
-                        ExpiresAt = expiresAt
+                        ExpiresAt = expiresAt,
+                        SessionId = session
                     };
                     _tokens.Add(token);
                     return token.Id;
@@ -236,7 +289,7 @@ public class StepUpServiceTests
             options.Setup(x => x.CurrentValue).Returns(identityOptions);
 
             Service = new StepUpService(
-                BuildServiceProvider(authenticated),
+                BuildServiceProvider(authenticated, sessionId),
                 authTokenService.Object,
                 passkeyService.Object,
                 TwoFactorService.Object,
@@ -254,13 +307,14 @@ public class StepUpServiceTests
             }
         }
 
-        private static IServiceProvider BuildServiceProvider(bool authenticated)
+        private static IServiceProvider BuildServiceProvider(bool authenticated, Guid? sessionId)
         {
             var loggerFactory = new Mock<ILoggerFactory>();
             loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
 
             var currentUser = new Mock<ICurrentUser>();
             currentUser.Setup(x => x.Id).Returns(authenticated ? SessionUser : null);
+            currentUser.Setup(x => x.FindClaim(IdentityConstants.ClaimTypeNames.SessionId)).Returns(sessionId?.ToString());
 
             var serviceProvider = new Mock<IServiceProvider>();
             serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);

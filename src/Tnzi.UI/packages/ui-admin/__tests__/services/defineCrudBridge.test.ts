@@ -79,6 +79,42 @@ describe('defineCrudBridge', () => {
     expect(put).toHaveBeenCalledWith('/admin/things/1', { id: '1', wrapped: { name: 'y' } })
   })
 
+  // A business refusal is RESOLVED by HttpClient as `{ succeeded: false, data: undefined }`.
+  // `useCrudPage.submit` only routes thrown errors to the error path, so a factory that
+  // resolves `undefined` here gets a green "created" toast, a closed form and a list
+  // without the row. Every write below must reject with the server's own message.
+  describe('rejects with the server message when the envelope is failed', () => {
+    const refused = { post: vi.fn(async () => fail('duplicate code')), put: vi.fn(async () => fail('period locked')) }
+
+    it('create', async () => {
+      const bridge = defineCrudBridge<Dto>(mockClient(refused), '/admin/things')
+      await expect(bridge.create({ name: 'x' } as Partial<Dto>)).rejects.toThrow('duplicate code')
+    })
+
+    it('update', async () => {
+      const bridge = defineCrudBridge<Dto>(mockClient(refused), '/admin/things')
+      await expect(bridge.update('1', { name: 'x' } as Partial<Dto>)).rejects.toThrow('period locked')
+    })
+
+    it('save(null) and save(id)', async () => {
+      const bridge = defineCrudBridge<Dto>(mockClient(refused), '/admin/things')
+      await expect(bridge.save(null, { name: 'x' } as Partial<Dto>)).rejects.toThrow('duplicate code')
+      await expect(bridge.save('1', { name: 'x' } as Partial<Dto>)).rejects.toThrow('period locked')
+    })
+
+    // Reads too: the declared return type is `TDto`, and `undefined` would only move the
+    // failure to a later TypeError that no longer carries the server's reason.
+    it('fetch / getDetail / listAll', async () => {
+      const bridge = defineCrudBridge<Dto>(
+        mockClient({ get: vi.fn(async () => fail('not found')), post: vi.fn(async () => fail('forbidden')) }),
+        '/admin/things',
+      )
+      await expect(bridge.fetch(q())).rejects.toThrow('forbidden')
+      await expect(bridge.getDetail('1')).rejects.toThrow('not found')
+      await expect(bridge.listAll()).rejects.toThrow('not found')
+    })
+  })
+
   it('save routes to create (null id) or update (id present)', async () => {
     const post = vi.fn(async () => ok({ id: 'new', name: 'n' }))
     const put = vi.fn(async () => ok({ id: '5', name: 'u' }))
@@ -102,4 +138,20 @@ describe('defineChildBridge', () => {
     const child = defineChildBridge<{ id: string }>(mockClient({ delete: vi.fn(async () => fail('locked')) }), '/admin/matters/parties', 'by-matter')
     await expect(child.delete('c1')).rejects.toThrow('locked')
   })
+
+  it('create / update / byParent reject on a failed envelope', async () => {
+    const child = defineChildBridge<{ id: string }>(
+      mockClient({
+        post: vi.fn(async () => fail('party exists')),
+        put: vi.fn(async () => fail('matter closed')),
+        get: vi.fn(async () => fail('no access')),
+      }),
+      '/admin/matters/parties',
+      'by-matter',
+    )
+    await expect(child.create({ name: 'p' })).rejects.toThrow('party exists')
+    await expect(child.update('c1', { name: 'p' })).rejects.toThrow('matter closed')
+    await expect(child.byParent('m1')).rejects.toThrow('no access')
+  })
 })
+

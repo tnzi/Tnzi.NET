@@ -7,7 +7,7 @@ public class AgentRunControlToolsTests
     {
         var runId = Guid.NewGuid();
         var service = new Mock<IAgentRuntimeControlService>();
-        service.Setup(x => x.GetStateAsync(runId, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.GetStateAsync(runId, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new AgentRunControlStateDto
             {
                 RunId = runId,
@@ -49,7 +49,7 @@ public class AgentRunControlToolsTests
     {
         var runId = Guid.NewGuid();
         var service = new Mock<IAgentRuntimeControlService>();
-        service.Setup(x => x.ListRunsAsync(20, null, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.ListRunsAsync(20, null, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new List<AgentRunListItemDto>
             {
                 new()
@@ -76,35 +76,35 @@ public class AgentRunControlToolsTests
     public async Task ListAgentRunsAsync_WithStatusFilter_PassesStatusToService()
     {
         var service = new Mock<IAgentRuntimeControlService>();
-        service.Setup(x => x.ListRunsAsync(10, AgentRunStatus.Running, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.ListRunsAsync(10, AgentRunStatus.Running, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new List<AgentRunListItemDto>()));
 
         var tools = new AgentRunControlTools(service.Object);
 
         var json = await tools.ListAgentRunsAsync(maxResults: 10, status: "Running");
 
-        service.Verify(x => x.ListRunsAsync(10, AgentRunStatus.Running, It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(x => x.ListRunsAsync(10, AgentRunStatus.Running, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task ListAgentRunsAsync_InvalidStatus_IgnoresFilter()
     {
         var service = new Mock<IAgentRuntimeControlService>();
-        service.Setup(x => x.ListRunsAsync(20, null, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.ListRunsAsync(20, null, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new List<AgentRunListItemDto>()));
 
         var tools = new AgentRunControlTools(service.Object);
 
         var json = await tools.ListAgentRunsAsync(status: "InvalidStatus");
 
-        service.Verify(x => x.ListRunsAsync(20, null, It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(x => x.ListRunsAsync(20, null, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task ListAgentRunsAsync_ServiceFails_ReturnsErrorMessage()
     {
         var service = new Mock<IAgentRuntimeControlService>();
-        service.Setup(x => x.ListRunsAsync(20, null, It.IsAny<CancellationToken>()))
+        service.Setup(x => x.ListRunsAsync(20, null, AgentRunAccessScope.Caller, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Failure<List<AgentRunListItemDto>>("Database error"));
 
         var tools = new AgentRunControlTools(service.Object);

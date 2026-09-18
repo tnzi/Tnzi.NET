@@ -40,6 +40,12 @@ public class RabbitMQOptionsValidator : OptionsValidatorBase<RabbitMQOptions>
             errors.Add("RabbitMQ.PrefetchCount must be greater than 0. A value of 0 means unlimited prefetch which can cause memory issues.");
         }
 
+        // 验证 ConsumerDispatchConcurrency（0 会被客户端拒绝；未设置则跟随 PrefetchCount）
+        if (options.ConsumerDispatchConcurrency is 0)
+        {
+            errors.Add("RabbitMQ.ConsumerDispatchConcurrency must be greater than 0 when set. Leave it unset to follow PrefetchCount.");
+        }
+
         // 验证 MaxRetryCount
         if (options.MaxRetryCount < 0)
         {

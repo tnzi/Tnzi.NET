@@ -78,11 +78,9 @@ public class McpToolAnalyticsCallerHashTests
         var clientKey = security.BuildClientKey(context, rawKey);
 
         clientKey.Contains(rawKey).ShouldBeFalse("raw key must not appear in client key");
-        // The hash segment is 16 hex chars (8 bytes of SHA-256)
-        var parts = clientKey.Split(':');
-        parts.Length.ShouldBe(2);
-        parts[1].Length.ShouldBe(16);
-        parts[1].All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')).ShouldBeTrue("hash segment must be uppercase hex");
+        // The client key is the hashed caller segment itself: 16 hex chars (8 bytes of SHA-256), no prefix
+        clientKey.Length.ShouldBe(16);
+        clientKey.All(c => (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')).ShouldBeTrue("hash segment must be uppercase hex");
     }
 
     /// <summary>
@@ -231,7 +229,6 @@ public class McpToolAnalyticsCallerHashTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            new StaticOptionsMonitor<McpServerOptions>(options),
             security);
 
         var context = new DefaultHttpContext();

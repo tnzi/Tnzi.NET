@@ -26,6 +26,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 启动期存量修复任务等纯内部协作类为 internal，仅对本模块的两个测试项目开放。 -->
+    <InternalsVisibleTo Include="Tnzi.Identity.Tests, PublicKey=$(TnziPublicKey)" />
+    <InternalsVisibleTo Include="Tnzi.Identity.IntegrationTests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\Tnzi.Imaging\Tnzi.Imaging.csproj" />

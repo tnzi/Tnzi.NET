@@ -25,12 +25,20 @@ public class CliRunTokenService : IRunScopedCredentialValidator
 
     private readonly IRepository<CliRun, Guid> _repository;
     private readonly ILogger<CliRunTokenService> _logger;
+    private readonly IOptionsMonitor<CliAgentOptions>? _options;
 
     /// <summary>初始化凭据服务。</summary>
-    public CliRunTokenService(IRepository<CliRun, Guid> repository, ILogger<CliRunTokenService> logger)
+    /// <param name="repository">运行记录仓储。</param>
+    /// <param name="logger">日志。</param>
+    /// <param name="options">模块配置；缺席时凭据不许调用任何工具（失败关闭）。</param>
+    public CliRunTokenService(
+        IRepository<CliRun, Guid> repository,
+        ILogger<CliRunTokenService> logger,
+        IOptionsMonitor<CliAgentOptions>? options = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
+        _options = options;
     }
 
     /// <summary>
@@ -65,7 +73,9 @@ public class CliRunTokenService : IRunScopedCredentialValidator
 
         // 三个条件缺一不可：哈希匹配、未过期、运行仍在进行中。
         // 第三条是关键 —— 运行结束后凭据必须立刻失效，哪怕名义上还没到期。
-        var match = await _repository.AsQueryable()
+        // 跨租户查：这里是未认证的 MCP 入站请求，没有当前租户；凭据本身就是范围
+        // （256 位随机数的哈希），按它查到的那一行的 TenantId 才是答案，而不是过滤器的输入。
+        var match = await _repository.AcrossTenants()
             .Where(r => r.WriteBackTokenHash == hash
                         && r.WriteBackTokenExpiresAt != null
                         && r.WriteBackTokenExpiresAt > now
@@ -80,11 +90,19 @@ public class CliRunTokenService : IRunScopedCredentialValidator
 
         _logger.LogDebug("Accepted run-scoped credential for CLI run {RunId} (agent {AgentId})", match.Id, match.AgentId);
 
+        // 调用面来自配置而不是运行记录：它是部署方的安全决定，不随单次派发变化。
+        // 配置缺席时是空列表 —— 凭据仍然有效但一个工具都不许调（失败关闭）。
+        var allowedTools = _options?.CurrentValue.WriteBack.AllowedTools
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t.Trim())
+            .ToList() ?? [];
+
         return new RunScopedCredential
         {
             RunId = match.Id,
             AgentId = match.AgentId,
-            TenantId = match.TenantId
+            TenantId = match.TenantId,
+            AllowedToolNames = allowedTools
         };
     }
 

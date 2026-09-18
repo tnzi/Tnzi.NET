@@ -7,6 +7,7 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
     private readonly IRepository<Message, Guid> _messageRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IOptionsMonitor<NotificationOptions> _options;
+    private readonly ICurrentTenant? _currentTenant;
 
     /// <summary>
     /// 按号码对号时最多捞多少条候选。窗口内的传真通常远少于这个数；
@@ -20,13 +21,15 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
         IRepository<Recipient, Guid> recipientRepository,
         IRepository<Message, Guid> messageRepository,
         IUnitOfWork unitOfWork,
-        IOptionsMonitor<NotificationOptions> options)
+        IOptionsMonitor<NotificationOptions> options,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _recipientRepository = Check.NotNull(recipientRepository);
         _messageRepository = Check.NotNull(messageRepository);
         _unitOfWork = Check.NotNull(unitOfWork);
         _options = Check.NotNull(options);
+        _currentTenant = currentTenant;
     }
 
     /// <inheritdoc />
@@ -48,12 +51,26 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
         if (recipient == null)
         {
             // 不是错误：回执收件箱里本来就有别人的信，也可能这份传真是另一个环境发的。
-            Logger.LogInformation(
+            // 但记 Warning 不记 Information：一份「没送到」的回执对不上号，那份传真就永远显示成已送达，
+            // 而回执邮件已被标已读、不会再来 —— 对号失败的规模只有在这一行看得见。
+            Logger.LogWarning(
                 "Fax failure confirmation could not be matched to any recipient (CarrierMessageId={CarrierMessageId}, FaxNumber={FaxNumber})",
                 confirmation.CarrierMessageId, confirmation.FaxNumber);
             return Ok(false);
         }
 
+        // ★ 对号是跨租户找的（见 FindRecipientAsync），写回要切进收件人自己的租户：
+        // RecountAsync 按 Id 取消息并 Include 收件人，那两条查询走的是全局过滤器，
+        // 在轮询作用域（无租户）里会把租户的消息过滤掉，计数与状态就落不下去。
+        using (_currentTenant?.Change(recipient.TenantId))
+        {
+            return await ApplyToRecipientAsync(recipient, confirmation, cancellationToken);
+        }
+    }
+
+    /// <summary>在收件人所属租户里落库并发事件；调用方已经切进了那个租户。</summary>
+    private async Task<Result<bool>> ApplyToRecipientAsync(Recipient recipient, FaxConfirmation confirmation, CancellationToken cancellationToken)
+    {
         // ★ 降级**只从 Sent 出发**，这一句同时兜住两件事：
         // ① 幂等 —— 同一封回执被处理两次（重启、标已读失败、人工补录撞上轮询）没有第二次效果；
         // ② <c>Cancelled</c> 不许被改成 <c>Failed</c> —— 那两个状态在本模块是刻意分开的
@@ -100,9 +117,19 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
     /// 把回执对回一个收件人：先按承载邮件的 Message-ID 精确匹配，拿不到再按号码在时间窗口里找。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// ★ 两条路的可靠程度差很多，所以待遇也不同：Message-ID 是那封信自己带的、不会认错，
     /// 因此不受时间窗口约束；号码是**从回执文字里读出来的**，同一个号码这个月可能发过好几份，
     /// 所以只在 <see cref="FaxConfirmationOptions.LookbackHours"/> 内、且只认还是 <c>Sent</c> 的那些。
+    /// </para>
+    /// <para>
+    /// ★★ <b>两条查询都跨租户找</b>（<c>IgnoreQueryFilters</c>）：回执来自一个共享收件箱，
+    /// 轮询作用域里没有任何租户，而 <c>Recipient</c> / <c>Message</c> 都是多租户实体 ——
+    /// 走全局过滤器就只剩 <c>TenantId == null</c>，租户发出去的传真永远对不上号，
+    /// 那份传真就一直显示成已送达，回执邮件却已被标已读、不会再来。对号条件本身已经足够精确
+    /// （Message-ID 等值，或号码 + Sent + 时间窗 + Fax），不靠租户过滤缩小范围。
+    /// 代价是软删过滤也一起关掉了，所以显式排除已删除的消息。
+    /// </para>
     /// </remarks>
     private async Task<Recipient?> FindRecipientAsync(FaxConfirmation confirmation, CancellationToken cancellationToken)
     {
@@ -110,10 +137,12 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
         {
             var byMessageId = await _recipientRepository
                 .AsQueryable(withTracking: true)
+                .IgnoreQueryFilters()
                 .Include(r => r.Message)
                 .FirstOrDefaultAsync(
                     r => r.ExternalMessageId == confirmation.CarrierMessageId
-                         && r.Message.Type == NotificationType.Fax,
+                         && r.Message.Type == NotificationType.Fax
+                         && !r.Message.IsDeleted,
                     cancellationToken);
 
             if (byMessageId != null)
@@ -137,8 +166,10 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
 
         var candidates = await _recipientRepository
             .AsQueryable(withTracking: true)
+            .IgnoreQueryFilters()
             .Include(r => r.Message)
             .Where(r => r.Message.Type == NotificationType.Fax
+                        && !r.Message.IsDeleted
                         && r.Status == NotificationStatus.Sent
                         && r.SentTime != null
                         && r.SentTime >= since)

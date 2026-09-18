@@ -30,6 +30,13 @@ public class AccessLogDto
 /// </summary>
 public class AccessLogStatisticsDto
 {
+    /// <summary>
+    /// 这个部署有没有在采集访问日志（<c>System:AccessLog:Enabled</c>）。
+    /// 采集默认关闭；前端据此把「恒为 0 的访问日志 KPI」藏起来、在列表页说明为什么是空的，
+    /// 而不是让一个永远为 0 的数字看起来像「没人访问」。
+    /// </summary>
+    public bool CaptureEnabled { get; set; }
+
     public int TotalRequests { get; set; }
     public int UniqueUsers { get; set; }
     public int SuccessRequests { get; set; }

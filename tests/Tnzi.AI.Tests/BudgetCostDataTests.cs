@@ -160,10 +160,13 @@ public class BudgetCostWiringValidationTests
         aiOptions.CostTracking.Enabled = costTrackingEnabled;
         if (withRate)
         {
-            aiOptions.CostTracking.ModelCosts["OpenAI:gpt-4o"] = new ModelCostRate
+            aiOptions.CostTracking.ModelCosts["OpenAI"] = new()
             {
-                InputCostPer1MTokens = 2.5m,
-                OutputCostPer1MTokens = 10m
+                ["gpt-4o"] = new ModelCostRate
+                {
+                    InputCostPer1MTokens = 2.5m,
+                    OutputCostPer1MTokens = 10m
+                }
             };
         }
 

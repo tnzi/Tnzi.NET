@@ -247,16 +247,19 @@ public class WorkflowIntegrationTests
 
         // Assert 1: 暂停在审批节点
         // ApprovalNode 通过 CheckInterruptAsync 返回 Approval 类型中断，
-        // 引擎在 HandleApprovalInterruptAsync 中对 Approval 类型保持向后兼容，同时设置两个标志
+        // 引擎在 RecordInterrupt 中对 Approval 类型保持向后兼容，同时设置两个标志
         result1.AwaitingApproval.ShouldBeTrue();
         result1.AwaitingApprovalStepId.ShouldBe("approval-step");
         result1.AwaitingInterrupt.ShouldNotBeNull();
         result1.AwaitingInterrupt!.Type.ShouldBe(InterruptType.Approval);
 
-        // 检查点已保存
+        // 检查点已保存：上游完成，被中断的审批节点**不在** completed 里（它没有执行过，
+        // 只有执行器的 [Awaiting ...] 占位输出；把它记成完成就是恢复时永远进不了节点的根因）
         var checkpoint = await checkpointStore.GetCheckpointAsync(executionId);
         checkpoint.ShouldNotBeNull();
         checkpoint!.CompletedStepIds.ShouldContain("agent-1");
+        checkpoint.CompletedStepIds.ShouldNotContain("approval-step");
+        checkpoint.StepsAwaitingApproval.ShouldContain("approval-step");
 
         // Act 2: 恢复执行 - 提交审批通过
         var resumeOptions = new WorkflowExecutionOptions
@@ -274,11 +277,14 @@ public class WorkflowIntegrationTests
 
         var result2 = await engine.ExecuteAsync(graph, "initial input", sp, resumeOptions);
 
-        // Assert 2: 恢复后完成
+        // Assert 2: 恢复后完成，审批节点真的重新执行了：输出是审批评语（或上游内容），
+        // 而不是首次运行留下的 [Awaiting Approval: ...] 占位符
         result2.HasFailure.ShouldBeFalse();
         result2.AwaitingInterrupt.ShouldBeNull();
         result2.StepResults.ShouldContain(r => r.StepId == "agent-2" && !r.Skipped);
         result2.FinalOutput.ShouldBe("Final result after approval");
+        result2.State.GetOutputText("approval-step").ShouldBe("Looks good");
+        result2.StepResults.Single(r => r.StepId == "approval-step").Output.ShouldBe("Looks good");
     }
 
     #endregion

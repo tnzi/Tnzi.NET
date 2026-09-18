@@ -13,6 +13,9 @@ public class PasswordService : ApplicationService, IPasswordService
     private readonly IPasswordPolicyService? _passwordPolicyService;
     private readonly ICurrentUser? _currentUser;
     private readonly ISessionRevocationService? _sessionRevocation;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly ICaptchaVerifier? _captchaVerifier;
+    private readonly bool _multiTenancyEnabled;
 
     public PasswordService(
         UserManager<User> userManager,
@@ -22,17 +25,49 @@ public class PasswordService : ApplicationService, IPasswordService
         IConfiguration? configuration = null,
         IPasswordPolicyService? passwordPolicyService = null,
         ICurrentUser? currentUser = null,
-        ISessionRevocationService? sessionRevocation = null)
+        ISessionRevocationService? sessionRevocation = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ICaptchaVerifier? captchaVerifier = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
         // Scoped 服务：IOptionsSnapshot 每请求重算，Recovery 开关随请求热更新。
         _identityOptions = Check.NotNull(identityOptions).Value;
+        _captchaVerifier = captchaVerifier;
         _eventBus = eventBus;
         _configuration = configuration;
         _passwordPolicyService = passwordPolicyService;
         _currentUser = currentUser;
         _sessionRevocation = sessionRevocation;
+        _currentTenant = currentTenant;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+    }
+
+    /// <summary>
+    /// 按 id 取账号，且只取当前租户范围内的（口径见 <see cref="UserTenantScope"/>）；
+    /// 范围外与不存在同样返回 <c>null</c>，调用方一律答 404。
+    /// 管理员重置密码是这个模块里越权后果最重的一条（顺手撤销对方全部会话），必须与
+    /// <c>UserService</c> 同一道裁剪。
+    /// </summary>
+    private async Task<User?> FindScopedUserAsync(Guid userId)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return null;
+        }
+
+        var scope = UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, _currentUser ?? CurrentUser);
+        if (scope.Contains(user))
+        {
+            return user;
+        }
+
+        LogWarning(
+            "Rejected a cross-tenant password operation: user {UserId} belongs to tenant {UserTenantId} but the request is scoped to tenant {TenantId}.",
+            user.Id, user.TenantId, scope.TenantId);
+        return null;
     }
 
     /// <summary>
@@ -86,6 +121,31 @@ public class PasswordService : ApplicationService, IPasswordService
         }
     }
 
+    public async Task<Result<string>> ForgotPasswordAsync(ForgotPasswordDto input)
+    {
+        Check.NotNull(input);
+
+        // 人机验证（启用找回密码验证码时，发出重置邮件之前先过）。无条件要求：这条路径没有失败次数可累计，
+        // 而每次调用都真的发一封信。此前它不受任何验证码开关管辖。
+        if (_identityOptions.Captcha.EnableCaptchaOnPasswordRecovery)
+        {
+            if (_captchaVerifier == null)
+            {
+                Logger.LogError("Captcha is required for password recovery but ICaptchaVerifier is not registered; rejecting.");
+                return Fail<string>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED);
+            }
+
+            var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), CaptchaPurpose.PasswordRecovery);
+            if (!verification.Passed)
+            {
+                return Fail<string>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED,
+                    new CaptchaDto { Provider = _captchaVerifier.ProviderName ?? ImageCaptchaProvider.ProviderName });
+            }
+        }
+
+        return await ForgotPasswordAsync(input.Email);
+    }
+
     public async Task<Result<string>> ForgotPasswordAsync(string email)
     {
         var recoveryOptions = _identityOptions.Recovery;
@@ -132,8 +192,8 @@ public class PasswordService : ApplicationService, IPasswordService
                     Email = email,
                     ResetToken = encodedToken,
                     RequestTime = DateTime.UtcNow,
-                    FrontendUrl = _configuration?["App:FrontendUrl"],
-                    SiteName = _configuration?["App:SiteName"]
+                    FrontendUrl = FrontendUrlResolver.Resolve(_configuration, Logger),
+                    SiteName = SiteNameResolver.Resolve(_configuration, Logger)
                 }, cancellationToken: default);
             }
             catch (Exception ex)
@@ -214,7 +274,7 @@ public class PasswordService : ApplicationService, IPasswordService
 
     public async Task<Result> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -323,7 +383,7 @@ public class PasswordService : ApplicationService, IPasswordService
 
     public async Task<Result> ResetPasswordByAdminAsync(Guid userId, string newPassword, bool requireChangeOnNextLogin = true)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);

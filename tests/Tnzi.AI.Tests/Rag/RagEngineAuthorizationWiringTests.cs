@@ -7,7 +7,7 @@ namespace Tnzi.AI.Tests.Rag;
 /// </summary>
 /// <remarks>
 /// 判定必须落在服务层：控制器可以被消费方整体替换，挂在其上的守卫会随之消失。
-/// agent 侧检索直接用 <c>IRagRetriever</c>，不经过这两个引擎，因此不受影响 —— 这也是
+/// agent 侧检索经 <c>ITextSearchService</c>（委托给 <c>IRagRetriever</c>），不经过这两个引擎，因此不受影响 —— 这也是
 /// 这些用例断言"检索用的是授权后的 id 列表"而不是"检索被拦住了"的原因。
 /// </remarks>
 public class RagEngineAuthorizationWiringTests
@@ -39,11 +39,13 @@ public class RagEngineAuthorizationWiringTests
             .ReturnsAsync(new AgentRunResult { Response = "answer", ThreadId = Guid.NewGuid() });
     }
 
+    private static StaticOptionsMonitor<AIRagOptions> RagOptions() => new(new AIRagOptions());
+
     private RagQueryEngine CreateQueryEngine()
-        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object);
+        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object, RagOptions());
 
     private RagChatEngine CreateChatEngine()
-        => new(_serviceProvider, _retriever.Object, _agentRuntime.Object, _authorizer.Object);
+        => new(_serviceProvider, _retriever.Object, _agentRuntime.Object, _authorizer.Object, RagOptions());
 
     private void Authorize(params Guid[] ids)
         => _authorizer

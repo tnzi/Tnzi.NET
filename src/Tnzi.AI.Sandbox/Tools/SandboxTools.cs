@@ -18,8 +18,14 @@ namespace Tnzi.AI.Sandbox.Tools;
 /// 环境缺失（中间件未运行 / 请求无线程 / 子代理裸执行器路径）时，
 /// 工具返回结构化英文错误对象，绝不抛出异常。
 /// </para>
+/// <para>
+/// ★ 沙箱在环境里<b>按需创建</b>：每个工具先经 <see cref="SandboxToolEnvironment.GetSandboxAsync"/>
+/// 取沙箱，第一次调用才布置线程目录、复制技能资源、向 provider 要实例。这一步刻意放在 try 之外：
+/// provider 的拒绝（Production 下的 Local 守卫、Docker 不可达）是基础设施 / 配置问题，
+/// 不该被折成一条 Warning 级的「bash failed」，让它抛给执行器按工具失败记 Error 日志并回给模型。
+/// </para>
 /// </remarks>
-[AIToolGroup("sandbox", "Sandbox", "Execute commands and manage files in isolated sandbox environment")]
+[AIToolGroup("sandbox", "Sandbox", "Execute commands and manage files in isolated sandbox environment", RequiredPermissions = AIToolPermissions.Sandbox)]
 public class SandboxTools : IAIToolProvider
 {
     /// <summary>
@@ -73,9 +79,10 @@ public class SandboxTools : IAIToolProvider
         if (string.IsNullOrWhiteSpace(command))
             return new { error = "Command cannot be empty" };
 
+        var sandbox = await env.GetSandboxAsync(ct);
         try
         {
-            return await ExecuteBashCoreAsync(env.Sandbox, env.ThreadId, command, ct);
+            return await ExecuteBashCoreAsync(sandbox, env.ThreadId, command, ct);
         }
         catch (OperationCanceledException)
         {
@@ -132,9 +139,13 @@ public class SandboxTools : IAIToolProvider
             }
         }
 
+        // 守卫过了才换根：Docker 的容器里没有宿主路径，每个以线程目录为根的 token 都换成
+        // 沙箱自己寻址的形态（Local 为恒等）。换根不放宽任何判定 —— 判定已经在上面做完了。
+        var sandboxCommand = MapThreadDirTokens(translatedCommand, threadId, sandbox);
+
         var startedAt = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
-        var result = await sandbox.ExecuteCommandAsync(translatedCommand, ct);
+        var result = await sandbox.ExecuteCommandAsync(sandboxCommand, ct);
         stopwatch.Stop();
 
         // Record the soft-cap cost (duration + output bytes) even on non-zero exits
@@ -165,10 +176,11 @@ public class SandboxTools : IAIToolProvider
     {
         if (ResolveEnvironment() is not { } env) return SandboxUnavailable();
 
+        var sandbox = await env.GetSandboxAsync(ct);
         try
         {
-            var physicalPath = _translator.ToPhysical(path, env.ThreadId);
-            var entries = await env.Sandbox.ListDirectoryAsync(physicalPath, maxDepth, ct);
+            var physicalPath = sandbox.MapPath(_translator.ToPhysical(path, env.ThreadId));
+            var entries = await sandbox.ListDirectoryAsync(physicalPath, maxDepth, ct);
             return new
             {
                 path,
@@ -202,12 +214,13 @@ public class SandboxTools : IAIToolProvider
     {
         if (ResolveEnvironment() is not { } env) return SandboxUnavailable();
 
+        var sandbox = await env.GetSandboxAsync(ct);
         try
         {
-            var physicalPath = _translator.ToPhysical(path, env.ThreadId);
+            var physicalPath = sandbox.MapPath(_translator.ToPhysical(path, env.ThreadId));
             // Slicing is pushed down into the sandbox so large files are streamed
             // line-by-line rather than read fully into memory just to be sliced.
-            var content = await env.Sandbox.ReadFileAsync(physicalPath, offset, limit, ct);
+            var content = await sandbox.ReadFileAsync(physicalPath, offset, limit, ct);
             return new { path, content };
         }
         catch (OperationCanceledException)
@@ -231,10 +244,11 @@ public class SandboxTools : IAIToolProvider
     {
         if (ResolveEnvironment() is not { } env) return SandboxUnavailable();
 
+        var sandbox = await env.GetSandboxAsync(ct);
         try
         {
-            var physicalPath = _translator.ToPhysical(path, env.ThreadId);
-            await env.Sandbox.WriteFileAsync(physicalPath, content, append, ct);
+            var physicalPath = sandbox.MapPath(_translator.ToPhysical(path, env.ThreadId));
+            await sandbox.WriteFileAsync(physicalPath, content, append, ct);
             return new { success = true, path };
         }
         catch (OperationCanceledException)
@@ -258,16 +272,17 @@ public class SandboxTools : IAIToolProvider
     {
         if (ResolveEnvironment() is not { } env) return SandboxUnavailable();
 
+        var sandbox = await env.GetSandboxAsync(ct);
         try
         {
-            var physicalPath = _translator.ToPhysical(path, env.ThreadId);
-            var content = await env.Sandbox.ReadFileAsync(physicalPath, ct: ct);
+            var physicalPath = sandbox.MapPath(_translator.ToPhysical(path, env.ThreadId));
+            var content = await sandbox.ReadFileAsync(physicalPath, ct: ct);
 
             if (!content.Contains(oldString))
                 return new { success = false, error = $"String '{oldString}' not found in file" };
 
             var updated = content.Replace(oldString, newString);
-            await env.Sandbox.WriteFileAsync(physicalPath, updated, append: false, ct);
+            await sandbox.WriteFileAsync(physicalPath, updated, append: false, ct);
             return new { success = true, path, replacements = content.Split(oldString).Length - 1 };
         }
         catch (OperationCanceledException)
@@ -370,29 +385,11 @@ public class SandboxTools : IAIToolProvider
     /// </summary>
     private bool IsTranslatedCommandWithinThreadDir(string translatedCommand, Guid threadId)
     {
-        // Search for the thread dir exactly as TranslatePathsInCommand emitted it
-        // (it does NOT call GetFullPath, so the substring may be relative); resolve
-        // both sides through GetFullPath only for the containment comparison.
-        var rawThreadDir = _translator.GetThreadDirectory(threadId);
-        var normalizedThreadDir = Path.GetFullPath(rawThreadDir);
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
+        var normalizedThreadDir = Path.GetFullPath(_translator.GetThreadDirectory(threadId));
+        var comparison = HostPathComparison;
 
-        var searchStart = 0;
-        while (true)
+        foreach (var (_, token) in EnumerateThreadDirTokens(translatedCommand, threadId))
         {
-            var idx = translatedCommand.IndexOf(rawThreadDir, searchStart, comparison);
-            if (idx < 0)
-                break;
-
-            // Slice from this occurrence to the next shell-token boundary so a
-            // `..` escape embedded in the path participates in normalization.
-            var end = idx;
-            while (end < translatedCommand.Length && !IsShellTokenBoundary(translatedCommand[end]))
-                end++;
-
-            var token = translatedCommand[idx..end];
             string resolved;
             try
             {
@@ -410,12 +407,60 @@ public class SandboxTools : IAIToolProvider
             {
                 return false;
             }
-
-            searchStart = end;
         }
 
         return true;
     }
+
+    /// <summary>
+    /// 把命令里每个以线程目录为根的 token 换成 <see cref="ISandbox.MapPath"/> 给出的沙箱视图。
+    /// 只在 <see cref="IsTranslatedCommandWithinThreadDir"/> 放行之后调用：那时每个 token 都已确认在界内。
+    /// </summary>
+    private string MapThreadDirTokens(string translatedCommand, Guid threadId, ISandbox sandbox)
+    {
+        var builder = new StringBuilder(translatedCommand.Length);
+        var copied = 0;
+        foreach (var (index, token) in EnumerateThreadDirTokens(translatedCommand, threadId))
+        {
+            builder.Append(translatedCommand, copied, index - copied);
+            builder.Append(sandbox.MapPath(token));
+            copied = index + token.Length;
+        }
+
+        builder.Append(translatedCommand, copied, translatedCommand.Length - copied);
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// 按出现顺序枚举命令里以线程目录开头的路径 token（<c>(起始下标, token)</c>）。
+    /// </summary>
+    /// <remarks>
+    /// Search for the thread dir exactly as <see cref="TranslatePathsInCommand"/> emitted it, and slice
+    /// from each occurrence to the next shell-token boundary so a <c>..</c> escape embedded in the path
+    /// participates in normalization.
+    /// </remarks>
+    private IEnumerable<(int Index, string Token)> EnumerateThreadDirTokens(string translatedCommand, Guid threadId)
+    {
+        var rawThreadDir = _translator.GetThreadDirectory(threadId);
+        var searchStart = 0;
+        while (true)
+        {
+            var idx = translatedCommand.IndexOf(rawThreadDir, searchStart, HostPathComparison);
+            if (idx < 0)
+                yield break;
+
+            var end = idx;
+            while (end < translatedCommand.Length && !IsShellTokenBoundary(translatedCommand[end]))
+                end++;
+
+            yield return (idx, translatedCommand[idx..end]);
+            searchStart = end;
+        }
+    }
+
+    private static StringComparison HostPathComparison => OperatingSystem.IsWindows()
+        ? StringComparison.OrdinalIgnoreCase
+        : StringComparison.Ordinal;
 
     private static bool IsShellTokenBoundary(char c)
         => c is ' ' or '\t' or '\n' or '\r' or '"' or '\'' or '|' or '&' or ';' or '<' or '>' or '`';

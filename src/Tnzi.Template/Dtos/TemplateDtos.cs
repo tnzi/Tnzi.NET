@@ -130,9 +130,12 @@ public abstract class TemplateRequestBase
     public string? DefaultLayoutName { get; set; }
 
     /// <summary>
-    /// Rendering-surface classification. Defaults to Generic when omitted.
+    /// Rendering-surface classification. <c>Sms</c> is the encoding switch (plain-text body, see
+    /// <see cref="ITemplateRenderService"/>). Omitted on create = <see cref="TemplateType.Generic"/>;
+    /// omitted on update = keep the stored value. A non-nullable default here would let any edit
+    /// that does not mention the type silently flip an SMS template back to HTML encoding.
     /// </summary>
-    public TemplateType Type { get; set; } = TemplateType.Generic;
+    public TemplateType? Type { get; set; }
 
     /// <summary>
     /// Optional header layout FK - points to a Template_Layout row whose
@@ -321,6 +324,11 @@ public class TemplateExportEntry
     public string SubjectTemplate { get; set; } = string.Empty;
     public string ContentTemplate { get; set; } = string.Empty;
     public string? DefaultLayoutName { get; set; }
+    /// <summary>
+    /// Serialized by member name (<c>"Sms"</c>); numeric values are accepted on import.
+    /// Null (files exported before the field existed) = Generic on insert, keep the stored value on overwrite.
+    /// </summary>
+    public TemplateType? Type { get; set; }
     public bool IsActive { get; set; }
     public string? Description { get; set; }
     public string? Metadata { get; set; }

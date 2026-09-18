@@ -386,6 +386,12 @@ const crud = useCrudPage<DepositRow>({
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.deposits.fetch(q),
+  // The page never opens this engine's overlay (no create/edit form here; the
+  // read-only drawer below is its own useDetail on `?detail=`), so it must not
+  // claim the key: two engines reconciling one key wipe a refreshed / shared
+  // `?detail=view:<id>` whose record is off the loaded page, and the drawer
+  // closes with no error (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
+  detailUrl: false,
 })
 
 // ── Record deposit ──────────────────────────────────────────────

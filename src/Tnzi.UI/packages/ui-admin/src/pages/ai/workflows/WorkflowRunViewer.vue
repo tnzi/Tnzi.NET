@@ -195,6 +195,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import { useSafeMessage } from '../../_shared/safe-message'
+import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
@@ -255,10 +256,8 @@ function workflowName(id?: string | null): string {
 async function loadWorkflows(): Promise<void> {
   workflowsLoading.value = true
   try {
-    const res = await bridge.workflows.fetch({
-      pageIndex: 1, pageSize: 200, searchText: '', filters: {},
-    })
-    workflows.value = res.items
+    // Every workflow, not the first clamped page (pageSize is clamped to 100 silently).
+    workflows.value = await fetchAllPages((q) => bridge.workflows.fetch(q))
   } catch {
     // best-effort: dropdown stays empty, free-text still works via URL
   } finally {

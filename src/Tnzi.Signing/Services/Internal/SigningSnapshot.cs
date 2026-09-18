@@ -29,6 +29,12 @@ public sealed record SigningSnapshot
     /// <summary>冻结的字段</summary>
     public IReadOnlyList<SnapshotField> Fields { get; init; } = [];
 
+    /// <summary>
+    /// 发出时已经烧进渲染稿的字段键（发起方负责的字段：合并变量 / 预填）。
+    /// 密封时跳过它们 —— 再盖一次就是双重盖章。空 = 发出时没有任何值可烧（或旧快照）。
+    /// </summary>
+    public IReadOnlyList<string> PrefilledKeys { get; init; } = [];
+
     private static readonly JsonSerializerOptions SerializerOptions = new(TnziJsonDefaults.Options);
 
     public string ToJson() => JsonSerializer.Serialize(this, SerializerOptions);

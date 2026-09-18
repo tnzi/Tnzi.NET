@@ -25,6 +25,17 @@ public class WorkflowWatchdogOptions
     public TimeSpan RunningTimeout { get; set; } = TimeSpan.FromMinutes(30);
 
     /// <summary>
+    /// 执行中的心跳间隔（默认 1 分钟）。引擎在执行期间按此间隔推进 <c>WorkflowExecution.UpdatedTime</c>，
+    /// 必须明显短于 <see cref="RunningTimeout"/>（验证器要求不超过它的一半）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 没有心跳时 <see cref="RunningTimeout"/> 量的不是"卡住多久"而是"跑了多久"：Sequential / Parallel
+    /// 从插入到终态一行不碰，DAG 只在层边界写检查点，于是任何超过 30 分钟的执行（或单个节点）都会在
+    /// 还在执行时被标成 timed_out。心跳是定时器而不是节点边界，一个跑 40 分钟的节点也保得住。
+    /// </remarks>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
     /// AwaitingApproval / AwaitingInput 状态超时阈值（等待人工介入的执行实例）。默认 7 天。
     /// </summary>
     [RuntimeSetting(Label = "Waiting Timeout", I18n = "admin.modules.system.settings.fields.workflowWatchdogWaitingTimeout",

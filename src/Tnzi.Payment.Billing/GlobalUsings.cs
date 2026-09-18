@@ -36,6 +36,7 @@ global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
+global using Tnzi.Security.Claims;
 global using Tnzi.Settings;
 global using Tnzi.Utilities;
 
@@ -48,6 +49,7 @@ global using Tnzi.Notification.Services;
 global using Tnzi.Storage;
 global using Tnzi.Storage.Services;
 global using Tnzi.Template;
+global using Tnzi.Template.Models;
 global using Tnzi.Template.Services;
 
 // Payment 核心：支付完成事件、支付状态枚举、错误码与常量。方向恒为「本模块 → 父模块」。

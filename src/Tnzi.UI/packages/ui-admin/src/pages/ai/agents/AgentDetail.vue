@@ -500,6 +500,7 @@ import AgentResourcePicker, { type ResourcePickerItem } from './sections/AgentRe
 import AgentPersonaPanel from './sections/AgentPersonaPanel.vue'
 import AgentExecutionPanel from './sections/AgentExecutionPanel.vue'
 import { useDetail, type DetailSection } from '../../../headless/useDetail'
+import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { useTabTitle } from '../../../headless/useTabTitle'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../_shared/translate'
@@ -929,10 +930,9 @@ function onProviderChange(name: string | null): void {
 async function loadKnowledgeBases(): Promise<void> {
   knowledgeBasesLoading.value = true
   try {
-    const result = await bridge.knowledge.fetch({
-      pageIndex: 1, pageSize: 200, sortField: 'name', sortOrder: 'asc' as const, searchText: '', filters: {},
-    })
-    knowledgeBaseList.value = result.items
+    // Pickers page until the server runs out: pageSize is clamped to 100
+    // silently, so a single large page hid every knowledge base past the 100th.
+    knowledgeBaseList.value = await fetchAllPages((q) => bridge.knowledge.fetch(q), { sortField: 'name', sortOrder: 'asc' })
   } catch {
     knowledgeBaseList.value = []
   } finally {
@@ -943,10 +943,7 @@ async function loadKnowledgeBases(): Promise<void> {
 async function loadSkills(): Promise<void> {
   skillsLoading.value = true
   try {
-    const result = await bridge.skills.fetch({
-      pageIndex: 1, pageSize: 500, sortField: 'name', sortOrder: 'asc' as const, searchText: '', filters: {},
-    })
-    skillList.value = result.items
+    skillList.value = await fetchAllPages((q) => bridge.skills.fetch(q), { sortField: 'name', sortOrder: 'asc' })
   } catch {
     skillList.value = []
   } finally {

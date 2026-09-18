@@ -60,7 +60,7 @@ public class DefaultPayrollPayRunAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 删除发薪批次草稿
+    /// 删除发薪批次（Draft 或 Calculated；已过账的批次只能作废）
     /// </summary>
     [HttpDelete("{id:guid}")]
     [ApiAuthorize(PermissionName = "payroll.run.delete")]

@@ -32,6 +32,7 @@
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
 import { TModalShell } from '@tnzi/ui'
+import { provideFormHost } from '@tnzi/ui/headless'
 import { useFormModal, useRetainedFormState } from '../../headless/useFormModal'
 
 type FormState = ReturnType<typeof useFormModal<unknown>>
@@ -84,6 +85,13 @@ const emit = defineEmits<{
   submit: []
 }>()
 
+// The modal owns the Confirm button, so it owns the form host: every
+// `TSchemaForm` rendered in its slot registers here, and Confirm validates
+// them before `submit` leaves. Without this a `required` rule drew its message
+// under the field while the request still went out and the backend's 400
+// toast came back on top of it.
+const formHost = provideFormHost()
+
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
@@ -96,7 +104,8 @@ function onCancel(): void {
   props.state.close()
 }
 
-function onConfirm(): void {
+async function onConfirm(): Promise<void> {
+  if (!(await formHost.validate())) return
   emit('submit')
 }
 </script>

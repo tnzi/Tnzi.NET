@@ -1,5 +1,4 @@
 using Tnzi.Domain.Entities;
-using Tnzi.Notification.Metadata;
 
 namespace Tnzi.Notification.Tests.Integration;
 
@@ -50,6 +49,8 @@ public class RetryPathTests : IntegrationTestBase
         services.AddScoped<INotificationOptOutService, NotificationOptOutService>();
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<INotificationProviderResolver, NotificationProviderResolver>();
+        services.AddScoped<INotificationProviderSelector, DefaultNotificationProviderSelector>();
         services.AddScoped<INotificationRetryService, NotificationRetryService>();
     }
 
@@ -173,14 +174,14 @@ public class RetryPathTests : IntegrationTestBase
     {
         public int Count { get; private set; }
 
-        public Task EnqueueAsync(Func<IServiceProvider, CancellationToken, Task> workItem)
+        public Task EnqueueAsync(NotificationWorkItem workItem)
         {
             Count++;
             return Task.CompletedTask;
         }
 
         // 默认接口方法会转调 EnqueueAsync，但显式写出来，免得读的人以为延迟入队走了别的路。
-        public Task EnqueueWithDelayAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+        public Task EnqueueWithDelayAsync(NotificationWorkItem workItem, TimeSpan delay)
             => EnqueueAsync(workItem);
     }
 

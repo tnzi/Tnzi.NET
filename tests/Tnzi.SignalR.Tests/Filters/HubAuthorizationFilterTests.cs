@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.Security.Authorization;
 using Tnzi.SignalR.Authorization;
-using Tnzi.SignalR.Filters;
 using Tnzi.SignalR.Tests.TestDoubles;
 
 namespace Tnzi.SignalR.Tests.Filters;

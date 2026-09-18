@@ -93,6 +93,40 @@ public class AgentVersionRouter : IAgentVersionRouter
         };
     }
 
+    /// <inheritdoc />
+    public async Task<AgentVersionRouteResult> RouteToVersionAsync(Agent agent, int version, CancellationToken ct)
+    {
+        Check.NotNull(agent);
+
+        var versionEntity = await _versionRepository
+            .Where(v => v.AgentId == agent.Id && v.Version == version)
+            .FirstOrDefaultAsync(ct);
+
+        if (versionEntity == null)
+        {
+            _logger.LogWarning(
+                "Pinned version {Version} not found for Agent {AgentId}, running the current configuration instead",
+                version, agent.Id);
+            return AgentVersionRouteResult.Passthrough(agent);
+        }
+
+        var snapshot = DeserializeSnapshot(versionEntity.ConfigSnapshot);
+        if (snapshot == null)
+        {
+            _logger.LogWarning(
+                "Failed to deserialize snapshot for Agent {AgentId} version {Version}, running the current configuration instead",
+                agent.Id, version);
+            return AgentVersionRouteResult.Passthrough(agent);
+        }
+
+        return new AgentVersionRouteResult
+        {
+            Agent = ApplySnapshot(agent, snapshot),
+            SelectedVersion = version,
+            SnapshotGrants = BuildSnapshotGrants(snapshot)
+        };
+    }
+
     /// <summary>
     /// 把版本快照的资源列折叠成 <see cref="AgentGrantsProjection"/>（null 列 → 空列表）。
     /// Projects a version snapshot's resource lists into an AgentGrantsProjection (null → empty list).

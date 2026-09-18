@@ -67,6 +67,51 @@ public class RunTrackerTests
         updated.Count.ShouldBe(1);
     }
 
+    /// <summary>
+    /// 请求快照随行落库：续跑按它重建请求（完整用户消息、工具选择、子 Agent 标记）。
+    /// SpawnAsync 建的行在起步时首次拿到快照；已经有快照的行不被覆盖。
+    /// </summary>
+    [Fact]
+    public async Task CreateRunAsync_RecordsTheRequestSnapshot()
+    {
+        var (tracker, _, _, _, _) = Build();
+        var request = new AgentRunRequest
+        {
+            UserMessage = new string('m', 700),
+            ToolGroups = ["sandbox"],
+            SubAgentName = "bash",
+            IsBackground = true,
+            TrustedToolSelection = true
+        };
+        var resolution = AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", null, null, AgentExecutionMode.Single);
+
+        var run = await tracker.CreateRunAsync(request, resolution, CancellationToken.None);
+
+        var snapshot = AgentRunRequestSnapshot.Parse(run.RequestSnapshot).ShouldNotBeNull();
+        snapshot.UserMessage.ShouldBe(request.UserMessage);
+        snapshot.ToolGroups.ShouldBe(["sandbox"]);
+        snapshot.SubAgentName.ShouldBe("bash");
+        snapshot.IsBackground.ShouldBeTrue();
+        snapshot.TrustedToolSelection.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GetOrCreateRunAsync_ExistingRowWithoutSnapshot_RecordsIt_ButKeepsAnExistingOne()
+    {
+        var existingId = Guid.NewGuid();
+        var existing = new AgentRun { Id = existingId, Status = AgentRunStatus.Pending, RequestSnapshot = null };
+        var (tracker, _, _, _, _) = Build(setupExistingRun: existing);
+        var request = new AgentRunRequest { ExistingRunId = existingId, UserMessage = "spawned", SubAgentName = "researcher" };
+        var resolution = AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-4o", null, null, AgentExecutionMode.Single);
+
+        var run = await tracker.GetOrCreateRunAsync(request, resolution, CancellationToken.None);
+        AgentRunRequestSnapshot.Parse(run.RequestSnapshot).ShouldNotBeNull().SubAgentName.ShouldBe("researcher");
+
+        var recorded = run.RequestSnapshot;
+        await tracker.GetOrCreateRunAsync(new AgentRunRequest { ExistingRunId = existingId, UserMessage = "second start" }, resolution, CancellationToken.None);
+        run.RequestSnapshot.ShouldBe(recorded);
+    }
+
     [Fact]
     public async Task GetOrCreateRunAsync_ExistingRunIdNotFound_ThrowsBusinessException()
     {
@@ -140,6 +185,47 @@ public class RunTrackerTests
         traceStore.Verify(x => x.AddAsync(
             It.Is<AgentRunTrace>(t => t.EventType == AgentTraceEventTypes.RunCompleted),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateRunOnCompletionAsync_BackfillsThreadIdCreatedDuringTheRun()
+    {
+        // spawn_agent 起的运行不带 ThreadId，线程由 HistoryMiddleware 在 Run 记录建好之后才创建；
+        // 不回填，ResumeAsync 会让续跑落在一条没有历史的新线程上
+        var (tracker, _, _, _, updated) = Build();
+        var threadId = Guid.NewGuid();
+        var run = new AgentRun { Id = Guid.NewGuid(), Status = AgentRunStatus.Running, ThreadId = null };
+        var result = new AgentRunResult { Response = "ok", Status = AgentRunStatus.Completed, ThreadId = threadId };
+
+        await tracker.UpdateRunOnCompletionAsync(run, result, 10, CancellationToken.None);
+
+        updated[0].ThreadId.ShouldBe(threadId);
+    }
+
+    [Fact]
+    public async Task UpdateRunOnCompletionAsync_KeepsAnExistingThreadId()
+    {
+        var (tracker, _, _, _, updated) = Build();
+        var original = Guid.NewGuid();
+        var run = new AgentRun { Id = Guid.NewGuid(), Status = AgentRunStatus.Running, ThreadId = original };
+        var result = new AgentRunResult { Response = "ok", Status = AgentRunStatus.Completed, ThreadId = Guid.NewGuid() };
+
+        await tracker.UpdateRunOnCompletionAsync(run, result, 10, CancellationToken.None);
+
+        updated[0].ThreadId.ShouldBe(original);
+    }
+
+    [Fact]
+    public async Task FinalizeStreamingCompletedAsync_BackfillsThreadIdCreatedDuringTheRun()
+    {
+        var (tracker, _, _, _, updated) = Build();
+        var threadId = Guid.NewGuid();
+        var run = new AgentRun { Id = Guid.NewGuid(), Status = AgentRunStatus.Running };
+        var result = new AgentRunResult { Response = "ok", Status = AgentRunStatus.Completed, ThreadId = threadId };
+
+        await tracker.FinalizeStreamingCompletedAsync(run, result, 1, 1, 10, CancellationToken.None);
+
+        updated[0].ThreadId.ShouldBe(threadId);
     }
 
     [Fact]

@@ -16,18 +16,23 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     /// </summary>
     private readonly IReadOnlyList<IStoredPaymentMethodBindingSink> _bindingSinks;
 
+    /// <summary>渠道撤销回调是匿名请求：跨租户定位到凭据之后要切到它所属的租户里处理。</summary>
+    private readonly ICurrentTenant? _currentTenant;
+
     public PaymentMethodService(
         IRepository<StoredPaymentMethod, Guid> methodRepository,
         IPaymentProviderFactory paymentProviderFactory,
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
         IServiceProvider serviceProvider,
-        IEnumerable<IStoredPaymentMethodBindingSink>? bindingSinks = null)
+        IEnumerable<IStoredPaymentMethodBindingSink>? bindingSinks = null,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _methodRepository = Check.NotNull(methodRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
         _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
         _bindingSinks = bindingSinks?.ToList() ?? [];
+        _currentTenant = currentTenant;
     }
 
     public async Task<Result<SetupSessionDto>> CreateSetupSessionAsync(Guid userId, CreateSetupSessionDto request, CancellationToken cancellationToken = default)
@@ -315,13 +320,17 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         if (string.IsNullOrWhiteSpace(channelCode) || string.IsNullOrWhiteSpace(token))
             return Ok();
 
-        var method = await _methodRepository.FirstOrDefaultAsync(
-            m => m.ChannelCode == channelCode && m.Token == token, cancellationToken);
+        // 渠道撤销事件同样来自匿名回调：多租户开启时先跨租户按凭据定位，再切到它所属的租户里处理
+        var method = await _methodRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(m => m.ChannelCode == channelCode && m.Token == token && !m.IsDeleted, cancellationToken);
 
         // 找不到 / 已失效都直接成功：渠道会重投同一事件，这条路径必须是幂等的；
         // 而且这个凭据也可能压根不是本系统绑的
         if (method == null || !method.IsActive)
             return Ok();
+
+        using var tenantScope = _currentTenant?.Change(method.TenantId);
 
         var affected = await ExecuteInUnitOfWorkAsync(async ct =>
         {

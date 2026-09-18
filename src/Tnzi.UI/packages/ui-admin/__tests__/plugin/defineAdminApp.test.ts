@@ -838,7 +838,7 @@ describe('defineAdminApp', () => {
     it('drives pwdLogin through loginWithRefreshToken + applyTokenSession on success', async () => {
       const runtime = makeRuntime()
       const { cfg } = installWithRuntime(runtime)
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired: vi.fn(),
         clearTwoFactor: vi.fn(),
         setCaptchaRequired: vi.fn(),
@@ -859,7 +859,7 @@ describe('defineAdminApp', () => {
       })) as never
       const { cfg } = installWithRuntime(runtime)
       const setTwoFactorRequired = vi.fn()
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired,
         clearTwoFactor: vi.fn(),
         setCaptchaRequired: vi.fn(),
@@ -889,7 +889,7 @@ describe('defineAdminApp', () => {
       })) as never
       const { cfg } = installWithRuntime(runtime)
       // Establish the pending challenge (remembers tempToken + type).
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired: vi.fn(),
         clearTwoFactor: vi.fn(),
         setCaptchaRequired: vi.fn(),
@@ -899,6 +899,50 @@ describe('defineAdminApp', () => {
       // TwoFactorType is a string enum matching the wire (PascalCase).
       expect(runtime.authApi.verifyTwoFactor).toHaveBeenCalledWith({ tempToken: 'tt', code: '123456', type: 'Totp' })
       expect(runtime.auth.applyTokenSession).toHaveBeenCalled()
+    })
+
+    /**
+     * The backend asks for obligations AFTER 2FA (a forced password change
+     * surfaces exactly here), and the shared callback only reports one when
+     * it is handed `helpers`; otherwise it can only throw "Verification
+     * failed" at a correct code. The wrapper discarded the second argument.
+     */
+    it('verifyTwoFactor forwards helpers, so a pending action after 2FA is reported instead of failing', async () => {
+      const runtime = makeRuntime()
+      runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tt', supportedTypes: ['Totp'] },
+      })) as never
+      runtime.authApi.verifyTwoFactor = vi.fn(async () => ({
+        succeeded: false,
+        success: false,
+        code: 403,
+        errorCode: 'IDENTITY_PENDING_ACTIONS_REQUIRED',
+        errorDetails: { tempToken: 'pt', requiredActions: ['ChangePassword'] },
+      })) as never
+      const { cfg, router } = installWithRuntime(runtime)
+      const helpers = {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+        setPendingActionRequired: vi.fn(),
+        clearPendingAction: vi.fn(),
+      }
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, helpers)
+      await cfg.callbacks!.verifyTwoFactor!({ challengeId: 'tt', code: '123456' }, helpers)
+
+      expect(helpers.setPendingActionRequired).toHaveBeenCalledWith({
+        tempToken: 'pt',
+        userName: 'admin',
+        requiredActions: ['ChangePassword'],
+      })
+      // No session, so the post-login flow (redirect) did not run.
+      expect(runtime.auth.applyTokenSession).not.toHaveBeenCalled()
+      expect(router.replace).not.toHaveBeenCalled()
     })
 
     it('verifyTwoFactor honours a switched method (email) over the challenge default', async () => {
@@ -911,7 +955,7 @@ describe('defineAdminApp', () => {
         errorDetails: { tempToken: 'tt', supportedTypes: ['Totp', 'Email'] },
       })) as never
       const { cfg } = installWithRuntime(runtime)
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired: vi.fn(),
         clearTwoFactor: vi.fn(),
         setCaptchaRequired: vi.fn(),
@@ -934,7 +978,7 @@ describe('defineAdminApp', () => {
       })) as never
       const { cfg } = installWithRuntime(runtime)
       const setTwoFactorRequired = vi.fn()
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired,
         clearTwoFactor: vi.fn(),
         setCaptchaRequired: vi.fn(),
@@ -961,14 +1005,15 @@ describe('defineAdminApp', () => {
       })) as never
       const { cfg } = installWithRuntime(runtime)
       const setCaptchaRequired = vi.fn()
-      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw', remember: false }, {
+      await cfg.callbacks!.pwdLogin!({ userName: 'admin', password: 'pw' }, {
         setTwoFactorRequired: vi.fn(),
         clearTwoFactor: vi.fn(),
         setCaptchaRequired,
         clearCaptcha: vi.fn(),
       })
-      // The fresh captcha from errorDetails is handed to the shell; no session.
-      expect(setCaptchaRequired).toHaveBeenCalledWith({ captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
+      // The fresh challenge from errorDetails is handed to the shell; no session. A backend that
+      // predates the provider layer sends no `provider`, which reads as the built-in image captcha.
+      expect(setCaptchaRequired).toHaveBeenCalledWith({ provider: 'image', captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
       expect(runtime.auth.applyTokenSession).not.toHaveBeenCalled()
     })
 
@@ -976,7 +1021,7 @@ describe('defineAdminApp', () => {
       const runtime = makeRuntime()
       const { cfg } = installWithRuntime(runtime)
       await cfg.callbacks!.pwdLogin!(
-        { userName: 'admin', password: 'pw', remember: false, captchaId: 'cid', captchaCode: 'abcd' },
+        { userName: 'admin', password: 'pw', captchaId: 'cid', captchaCode: 'abcd' },
         { setTwoFactorRequired: vi.fn(), clearTwoFactor: vi.fn(), setCaptchaRequired: vi.fn(), clearCaptcha: vi.fn() },
       )
       expect(runtime.authApi.loginWithRefreshToken).toHaveBeenCalledWith({
@@ -992,7 +1037,7 @@ describe('defineAdminApp', () => {
       const { cfg } = installWithRuntime(runtime)
       const c = await cfg.callbacks!.getCaptcha!('register')
       expect(runtime.authApi.getCaptchaJson).toHaveBeenCalledWith('register')
-      expect(c).toEqual({ captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
+      expect(c).toEqual({ provider: 'image', captchaId: 'cid', imageBase64: 'IMG', expirationSeconds: 300 })
     })
 
     it('sendCode forwards the captcha to the quick-register send-code (register purpose)', async () => {

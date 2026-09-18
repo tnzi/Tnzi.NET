@@ -160,7 +160,12 @@ public class OrganizationService : ApplicationService, IOrganizationService
 
         var organization = input.MapTo<Organization>();
         organization.IsEnabled = true;
-        organization.Path = $"{parentPath}{SequentialGuid.NewGuid()}/";
+        // ★ Path 的每一段都是**实体 Id**（GetAllParentsAsync 把路径段解析成祖先 Id；MoveAsync 也写真 Id）。
+        //   Id 由 SaveChanges 在值为默认值时才生成、且不回填到这里，所以要在拼路径之前先自己定下来 ——
+        //   此前这里写的是另一枚随机 GUID，祖先查询自初始提交起恒为空。
+        //   经仓储的 NewId() 而不是 SequentialGuid.NewGuid()：与保存时同一套规则（按 provider 选排列、认注册的生成器）。
+        organization.Id = NewOrganizationId();
+        organization.Path = $"{parentPath}{organization.Id}/";
         organization.Level = level + 1;
 
         try
@@ -425,6 +430,18 @@ public class OrganizationService : ApplicationService, IOrganizationService
     }
 
     /// <summary>
+    /// 预先定下新组织的 Id（路径段就是它）：经仓储与保存时同一套规则；拿到默认值一律拒绝 ——
+    /// 默认值会让 SaveChanges 另发一枚，Path 末段与实体 Id 从此对不上，正是修过的那个缺陷。
+    /// </summary>
+    private Guid NewOrganizationId()
+    {
+        var id = _organizationRepository.NewId();
+        return id != Guid.Empty
+            ? id
+            : throw new InvalidOperationException("The organization repository returned an empty id; the organization path cannot be built.");
+    }
+
+    /// <summary>
     /// 计算父组织的路径和层级
     /// </summary>
     private async Task<(string parentPath, int level)> CalculatePathAndLevelAsync(Guid? parentId)
@@ -524,7 +541,9 @@ public class OrganizationService : ApplicationService, IOrganizationService
 
             var organization = input.MapTo<Organization>();
             organization.IsEnabled = true;
-            organization.Path = $"{parentPath}{SequentialGuid.NewGuid()}/";
+            // 同 CreateAsync：路径段必须是实体自己的 Id，且与保存时同一套生成规则。
+            organization.Id = NewOrganizationId();
+            organization.Path = $"{parentPath}{organization.Id}/";
             organization.Level = level + 1;
             organizations.Add(organization);
         }
@@ -816,6 +835,32 @@ public class OrganizationService : ApplicationService, IOrganizationService
     }
 
     /// <summary>
+    /// 按 id 取账号，且只取当前租户范围内的（口径见 <see cref="UserTenantScope"/>）。
+    /// 组织本身受全局租户过滤器管，但用户不受 —— 少了这一道，租户 A 的管理员能把
+    /// 别家租户的账号挂进自己的组织。范围外与不存在同样返回 <c>null</c>，调用方答 404。
+    /// </summary>
+    private async Task<User?> FindScopedUserAsync(Guid userId)
+    {
+        // FindByGuidAsync 是核心的 internal 扩展，跨程序集用不了；它就是这一行。
+        var user = await _userManager!.FindByIdAsync(userId.ToString());
+        if (user == null)
+        {
+            return null;
+        }
+
+        var scope = UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, _currentUser ?? CurrentUser);
+        if (scope.Contains(user))
+        {
+            return user;
+        }
+
+        LogWarning(
+            "Rejected a cross-tenant organization assignment: user {UserId} belongs to tenant {UserTenantId} but the request is scoped to tenant {TenantId}.",
+            user.Id, user.TenantId, scope.TenantId);
+        return null;
+    }
+
+    /// <summary>
     /// 分配用户到组织
     /// </summary>
     public async Task<Result> AssignUserToOrganizationAsync(Guid userId, Guid organizationId)
@@ -825,8 +870,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("UserManager is not available", 500, ErrorCodes.CONFIGURATION_ERROR);
         }
 
-        // FindByGuidAsync 是核心的 internal 扩展，跨程序集用不了；它就是这一行。
-        var user = await _userManager.FindByIdAsync(userId.ToString());
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -884,8 +928,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("UserManager is not available", 500, ErrorCodes.CONFIGURATION_ERROR);
         }
 
-        // FindByGuidAsync 是核心的 internal 扩展，跨程序集用不了；它就是这一行。
-        var user = await _userManager.FindByIdAsync(userId.ToString());
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1067,7 +1110,10 @@ public class OrganizationService : ApplicationService, IOrganizationService
                 .Where(u => u.OrganizationId == organizationId && !u.IsDeleted);
         }
 
-        usersQuery = usersQuery.OrderByDescending(u => u.CreationTime);
+        // 组织已经按租户过滤，但用户表没有全局过滤器；按同一口径再裁一次。
+        usersQuery = UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, _currentUser ?? CurrentUser)
+            .Apply(usersQuery)
+            .OrderByDescending(u => u.CreationTime);
 
         var paged = await usersQuery
             .ProjectTo<User, UserListItemDto>()

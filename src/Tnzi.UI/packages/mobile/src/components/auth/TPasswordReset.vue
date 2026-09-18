@@ -57,6 +57,14 @@ const isDisabled = computed(() => props.disabled);
 const isLoading = computed(() => props.loading || form.isSubmitting.value);
 const canSendCode = computed(() => form.canSendCode.value && !props.disabled);
 
+// Mirror of the checks in usePasswordReset.submit(). The composable refuses an
+// incomplete submit and writes `errors`, but a refusal nobody renders looks
+// like a dead button; the Vant rules put the same message under the field.
+const requiredRule = (field: string) => [{ required: true, message: t('auth.pleaseEnter', { field }) }];
+const emailRules = computed(() => requiredRule(props.emailLabel || t('auth.email')));
+const codeRules = computed(() => requiredRule(props.codeLabel || t('auth.verificationCode')));
+const passwordRules = computed(() => requiredRule(props.passwordLabel || t('auth.newPassword')));
+
 onUnmounted(() => form.dispose());
 </script>
 
@@ -65,18 +73,22 @@ onUnmounted(() => form.dispose());
     <van-form @submit="form.submit">
       <van-field
         v-model="email"
+        name="email"
         type="email"
         :label="props.emailLabel || t('auth.email')"
         :placeholder="t('auth.email')"
         :disabled="isDisabled"
+        :rules="emailRules"
         required
       />
 
       <van-field
         v-model="code"
+        name="code"
         :label="props.codeLabel || t('auth.verificationCode')"
         :placeholder="t('auth.enterVerificationCode')"
         :disabled="isDisabled"
+        :rules="codeRules"
         required
       >
         <template #button>
@@ -94,15 +106,18 @@ onUnmounted(() => form.dispose());
 
       <van-field
         v-model="password"
+        name="password"
         type="password"
         :label="props.passwordLabel || t('auth.newPassword')"
         :placeholder="t('auth.newPassword')"
         :disabled="isDisabled"
+        :rules="passwordRules"
         required
       />
 
       <van-field
         v-model="confirmPassword"
+        name="confirmPassword"
         type="password"
         :label="props.confirmPasswordLabel || t('auth.confirmPassword')"
         :placeholder="t('auth.confirmPassword')"

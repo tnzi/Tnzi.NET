@@ -1,5 +1,3 @@
-using Tnzi.Data;
-
 namespace Tnzi.Audit.Tests.Integration;
 
 /// <summary>

@@ -542,8 +542,25 @@ function onRefresh(): void {
   void props.state.refresh()
 }
 async function onExport(): Promise<void> {
-  const blob = await props.state.exportAll()
+  let blob: Blob | null
+  try {
+    blob = await props.state.exportAll()
+  } catch {
+    // `exportAll` runs the bridge through runWithErrorHandling, which has
+    // already toasted the server's reason (row cap, "narrow the filter", 403)
+    // and re-thrown. Nothing else listens for the rejection, so stop it here.
+    return
+  }
   if (blob) downloadBlob(blob, `${props.title ?? 'export'}.csv`)
+}
+async function importPicked(file: File): Promise<void> {
+  try {
+    await props.state.importFile(file)
+  } catch {
+    // `importFile` runs the bridge through runWithErrorHandling, which has
+    // already toasted the server's reason and re-thrown. Nothing else listens
+    // for the rejection, so stop it here (same as onExport above).
+  }
 }
 function onImport(): void {
   if (typeof document === 'undefined') return
@@ -552,7 +569,7 @@ function onImport(): void {
   input.accept = '.csv,.xlsx,.json'
   input.onchange = (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0]
-    if (file) void props.state.importFile(file)
+    if (file) void importPicked(file)
   }
   input.click()
 }

@@ -10,8 +10,8 @@ namespace Tnzi.Utilities;
 /// ⚠️ **不要拿它们做输入校验**：<c>Regex.IsMatch("随便什么 a@b.com 后面还有一堆", Email)</c> 为 true
 /// —— 只要文本里**含有**一个邮箱就命中。校验请走带锚点的专用入口：
 /// <list type="bullet">
-/// <item>邮箱 → <c>StringExtensions.IsValidEmail()</c> 或 <c>[Email]</c> 特性</item>
-/// <item>手机号 → <c>StringExtensions.IsValidPhoneNumber()</c> 或 <c>[Phone]</c> 特性</item>
+/// <item>邮箱 → <c>StringExtensions.IsEmail()</c> 或 <c>[Email]</c> 特性</item>
+/// <item>手机号 → <c>StringExtensions.IsPhoneNumber()</c> 或 <c>[Phone]</c> 特性</item>
 /// <item>用户名 / 口令 → <c>[Username]</c> / <c>[Password]</c> 特性</item>
 /// </list>
 /// </remarks>
@@ -29,7 +29,7 @@ public static class RegexPatterns
     public const string SubstringFormat = "(?<=({0})).+(?=({1}))";
 
     /// <summary>
-    /// 邮箱的匹配字符串（提取用，无锚点；校验请用 <c>IsValidEmail()</c>）
+    /// 邮箱的匹配字符串（提取用，无锚点；校验请用 <c>IsEmail()</c>）
     /// </summary>
     public const string Email = @"[\w-]+(\.[\w-]+)*@[\w-]+(\.[\w-]+)+";
 

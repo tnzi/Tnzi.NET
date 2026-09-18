@@ -262,6 +262,7 @@ public class DefaultGateway : IGateway
             UserId = request.UserId,
             PeerKind = request.PeerKind,
             ExplicitAgentId = request.AgentId?.ToString(),
+            FallbackAgentId = request.FallbackAgentId,
             // 透传渠道归属租户 - 带 TenantId 的绑定规则按租户分区命中（null = 部署级全局）
             TenantId = request.TenantId
         };

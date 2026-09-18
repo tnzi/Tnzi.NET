@@ -55,9 +55,8 @@ public class BuiltInLoginGuardTests
     /// </summary>
     /// <remarks>
     /// ★ 它<b>不能</b>由上面那条锁定守卫代劳：邀请创建的账号确实同时被置上了锁定，
-    /// 但 <c>UserService.EnableAsync</c> 会执行 <c>SetLockoutEnabledAsync(user, false)</c>，
-    /// 而 <c>UserManager.IsLockedOutAsync</c> 内含 <c>LockoutEnabled</c> 前置判断 ——
-    /// 管理员对一个未接受邀请的账号点一下「启用」，锁定守卫就恒放行了，
+    /// 但「启用」与「解锁」本来就是清掉 <c>LockoutEnd</c> ——
+    /// 管理员对一个未接受邀请的账号点一下「启用」，锁定守卫就如其所愿地放行了，
     /// 而那个账号没有密码、没有二次验证、角色却已按管理员的意思预设好。
     /// 少了这行注册，验证码登录只需要收到一封邮件就能带着预设角色进来。
     /// </remarks>

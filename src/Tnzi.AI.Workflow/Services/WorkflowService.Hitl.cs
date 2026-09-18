@@ -53,13 +53,23 @@ public partial class WorkflowService
             var graph = BuildWorkflowGraph(workflowDef);
             var existingRun = await _runRepository.FirstOrDefaultAsync(r => r.WorkflowExecutionId == executionId, ct);
 
+            // ★ 审批节点（nodeType=approval）经 CheckInterruptAsync 暂停时**没有执行过**，不在
+            // CompletedStepIds 里；恢复时它会重新就绪。ApproveStepAsync 只在它的输出元数据上记下
+            // "已批准 + 反馈"，这里把它翻译成 ResumeStepId/ResumeData 送进引擎，节点的恢复分支才会
+            // 拿到 approved=true 并把上游内容（或反馈）作为真实输出交给下游 —— 否则它会再次中断，
+            // approve → resume 变成死循环。RequiresApproval 标记的步骤已真实执行过（在 completed 里），
+            // ResumeData 对它无效也无害。同层多个审批节点各自批准后要一次全带上，不然没带的那个
+            // 会再次中断、用占位符盖掉自己的已批准元数据、再要一次审批。
+            var approvalResumes = BuildApprovalResumes(checkpoint);
+
             var options = new WorkflowExecutionOptions
             {
                 ExecutionId = executionId,
                 WorkflowDefinitionId = workflowDef.Id,
                 RunId = existingRun?.Id,
                 Resume = true,
-                CheckpointStore = _checkpointStore
+                CheckpointStore = _checkpointStore,
+                ResumeDataByStep = approvalResumes.Count > 0 ? approvalResumes : null
             };
 
             var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, ct);
@@ -98,18 +108,23 @@ public partial class WorkflowService
         // 移除该步骤的审批等待
         checkpoint.StepsAwaitingApproval.Remove(stepId);
 
-        // 如果有 feedback，替换步骤输出
+        // 把审批结论记在步骤输出的元数据上：有 feedback 时它同时替换输出文本；
+        // ResumeAsync 据此为尚未执行的审批节点构造 ResumeData（见 BuildApprovalResumes）。
+        var existingOutput = checkpoint.StepOutputs.GetValueOrDefault(stepId);
+        var metadata = existingOutput?.Metadata != null
+            ? new Dictionary<string, string>(existingOutput.Metadata, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        metadata[ApprovalStatusMetadataKey] = ApprovalStatusApproved;
         if (!string.IsNullOrWhiteSpace(feedback))
         {
-            checkpoint.StepOutputs[stepId] = new WorkflowStepOutput
-            {
-                Text = feedback,
-                Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["approval_feedback"] = feedback
-                }
-            };
+            metadata[ApprovalFeedbackMetadataKey] = feedback;
         }
+
+        checkpoint.StepOutputs[stepId] = new WorkflowStepOutput
+        {
+            Text = !string.IsNullOrWhiteSpace(feedback) ? feedback : existingOutput?.Text ?? string.Empty,
+            Metadata = metadata
+        };
 
         // 如果没有更多步骤等待审批，将状态改为 paused（等待 resume）
         checkpoint.Status = checkpoint.StepsAwaitingApproval.Count > 0 ? WorkflowExecutionStatus.AwaitingApproval : WorkflowExecutionStatus.Paused;
@@ -136,13 +151,14 @@ public partial class WorkflowService
         if (!checkpoint.StepsAwaitingApproval.Contains(stepId))
             return Fail($"Step '{stepId}' is not awaiting approval", 400, ErrorCodes.WorkflowStepNotAwaitingApproval);
 
-        // 标记步骤输出为拒绝信息
+        // 标记步骤输出为拒绝信息。审批节点本身不在 completed 里，之后若 ResumeAsync（Failed 可恢复），
+        // 它会重新中断、再次请求审批，而不是把这段拒绝文本当作输出交给下游。
         checkpoint.StepOutputs[stepId] = new WorkflowStepOutput
         {
             Text = $"[Rejected: {reason}]",
             Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["approval_status"] = "rejected",
+                [ApprovalStatusMetadataKey] = "rejected",
                 ["approval_reason"] = reason
             }
         };
@@ -351,6 +367,43 @@ public partial class WorkflowService
             return Fail<List<WorkflowExecutionSignal>>("Workflow execution not found", 404, ErrorCodes.WorkflowExecutionNotFound);
 
         return Ok(await mailbox.GetPendingSignalsAsync(executionId, ct));
+    }
+
+    private const string ApprovalStatusMetadataKey = "approval_status";
+    private const string ApprovalFeedbackMetadataKey = "approval_feedback";
+    private const string ApprovalStatusApproved = "approved";
+
+    /// <summary>
+    /// Find every approval step that <see cref="ApproveStepAsync"/> approved but the engine has not
+    /// executed yet (an interrupt-style approval node stays out of CompletedStepIds), and build the
+    /// ResumeData its <c>ExecuteAsync</c> resume branch expects: <c>approved=true</c> plus the
+    /// operator's feedback as <c>comment</c>. Empty when nothing qualifies (run-then-gate
+    /// approvals are already completed and need no resume data; a rejected step must re-interrupt).
+    /// </summary>
+    private static Dictionary<string, Dictionary<string, object>> BuildApprovalResumes(WorkflowCheckpoint checkpoint)
+    {
+        var resumes = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (stepId, output) in checkpoint.StepOutputs)
+        {
+            if (checkpoint.CompletedStepIds.Contains(stepId))
+                continue;
+
+            if (output.Metadata == null
+                || !output.Metadata.TryGetValue(ApprovalStatusMetadataKey, out var status)
+                || !string.Equals(status, ApprovalStatusApproved, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var feedback = output.Metadata.GetValueOrDefault(ApprovalFeedbackMetadataKey) ?? string.Empty;
+            resumes[stepId] = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["approved"] = true,
+                ["comment"] = feedback
+            };
+        }
+
+        return resumes;
     }
 
     /// <summary>

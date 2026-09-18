@@ -27,7 +27,7 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
         _pdfConverter = pdfConverter;
     }
 
-    public async Task<Result<RenderedTemplate>> RenderByNameAsync(string templateName, string module, object? model = null, string? category = null, string? layoutName = null, CancellationToken cancellationToken = default)
+    public async Task<Result<RenderedTemplate>> RenderByNameAsync(string templateName, string module, object? model = null, string? category = null, string? layoutName = null, TemplateOutputKind? outputKind = null, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(templateName);
         Check.NotNullOrWhiteSpace(module);
@@ -42,36 +42,37 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
                 templateResult.ErrorCode);
         }
 
-        return await RenderAsync(templateResult.Data, model, layoutName, cancellationToken);
+        return await RenderAsync(templateResult.Data, model, layoutName, outputKind, cancellationToken);
     }
 
-    public async Task<Result<RenderedTemplate>> RenderAsync(TemplateEntity template, object? model = null, string? layoutName = null, CancellationToken cancellationToken = default)
+    public async Task<Result<RenderedTemplate>> RenderAsync(TemplateEntity template, object? model = null, string? layoutName = null, TemplateOutputKind? outputKind = null, CancellationToken cancellationToken = default)
     {
         Check.NotNull(template);
 
         try
         {
-            // 渲染主题（如有）
+            // 渲染主题（如有）。主题永远是纯文本：它进的是邮件头，不是 HTML 文档
             var subject = string.Empty;
             if (!string.IsNullOrWhiteSpace(template.SubjectTemplate))
             {
-                subject = await _templateEngine.RenderAsync(template.SubjectTemplate, model, cancellationToken);
+                subject = await _templateEngine.RenderAsync(template.SubjectTemplate, model, TemplateOutputKind.PlainText, cancellationToken);
             }
 
-            // 渲染内容
+            // 渲染内容：调用方说了出口就按调用方的，没说才按模板类型推导
+            var contentKind = outputKind ?? ContentOutputKind(template.Type);
             var content = string.Empty;
             if (!string.IsNullOrWhiteSpace(template.ContentTemplate))
             {
-                content = await _templateEngine.RenderAsync(template.ContentTemplate, model, cancellationToken);
+                content = await _templateEngine.RenderAsync(template.ContentTemplate, model, contentKind, cancellationToken);
             }
 
             // 解析布局名称：显式指定 > 模板默认布局
             var effectiveLayoutName = layoutName ?? template.DefaultLayoutName;
 
-            // 应用布局（如有）
+            // 应用布局（如有），布局与正文同一种输出
             if (!string.IsNullOrWhiteSpace(effectiveLayoutName) && _layoutStoreService != null)
             {
-                content = await ApplyLayoutByNameAsync(content, effectiveLayoutName, template.Module, template.Category, model, cancellationToken);
+                content = await ApplyLayoutByNameAsync(content, effectiveLayoutName, template.Module, template.Category, model, contentKind, cancellationToken);
             }
 
             return Ok(new RenderedTemplate
@@ -93,21 +94,21 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
         }
     }
 
-    public async Task<Result<RenderedTemplate>> RenderFromStringAsync(string contentTemplate, object? model = null, string? subjectTemplate = null, string? layoutContent = null, CancellationToken cancellationToken = default)
+    public async Task<Result<RenderedTemplate>> RenderFromStringAsync(string contentTemplate, object? model = null, string? subjectTemplate = null, string? layoutContent = null, TemplateOutputKind outputKind = TemplateOutputKind.Html, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(contentTemplate);
 
         try
         {
-            // 渲染主题
+            // 渲染主题（纯文本，见 RenderAsync）
             var subject = string.Empty;
             if (!string.IsNullOrWhiteSpace(subjectTemplate))
             {
-                subject = await _templateEngine.RenderAsync(subjectTemplate, model, cancellationToken);
+                subject = await _templateEngine.RenderAsync(subjectTemplate, model, TemplateOutputKind.PlainText, cancellationToken);
             }
 
-            // 渲染内容
-            var content = await _templateEngine.RenderAsync(contentTemplate, model, cancellationToken);
+            // 渲染内容（没有模板实体可退回，输出类型完全由调用方给）
+            var content = await _templateEngine.RenderAsync(contentTemplate, model, outputKind, cancellationToken);
 
             // 应用布局（直接使用布局字符串）
             if (!string.IsNullOrWhiteSpace(layoutContent))
@@ -123,7 +124,7 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
                     MergeModelToLayoutVariables(model, layoutVariables);
                 }
 
-                content = await _templateEngine.RenderAsync(layoutContent, layoutVariables, cancellationToken);
+                content = await _templateEngine.RenderAsync(layoutContent, layoutVariables, outputKind, cancellationToken);
             }
 
             return Ok(new RenderedTemplate
@@ -144,9 +145,21 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
     }
 
     /// <summary>
+    /// 调用方没说出口时，按模板类型推导正文的输出类型：短信是纯文本，其余（邮件正文、页面、打印件、PDF、未指定）都是 HTML。
+    /// </summary>
+    /// <remarks>
+    /// 编码归属于出口而不是引擎。2026-09-04 起引擎默认对 <c>@expr</c> 做 HTML 编码（邮件正文与打印件必须如此），
+    /// 但短信正文经同一个引擎渲染，插一条带查询串的链接就会变成 <c>?token=x&amp;amp;uid=y</c>：
+    /// 坏链接、无异常、发送状态成功。传真仍按 HTML：它经浏览器渲染成 PDF。
+    /// 这只是退路：推送正文、纯文本邮件都不是一种模板类型，知道出口面的是调用方，它经 <c>outputKind</c> 直说。
+    /// </remarks>
+    private static TemplateOutputKind ContentOutputKind(TemplateType type)
+        => type == TemplateType.Sms ? TemplateOutputKind.PlainText : TemplateOutputKind.Html;
+
+    /// <summary>
     /// 根据布局名称从存储加载布局并应用
     /// </summary>
-    private async Task<string> ApplyLayoutByNameAsync(string content, string layoutName, string module, string? category, object? model, CancellationToken cancellationToken)
+    private async Task<string> ApplyLayoutByNameAsync(string content, string layoutName, string module, string? category, object? model, TemplateOutputKind outputKind, CancellationToken cancellationToken)
     {
         if (_layoutStoreService == null)
             return content;
@@ -183,7 +196,7 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
             MergeModelToLayoutVariables(model, layoutVariables);
         }
 
-        return await _templateEngine.RenderAsync(layout.LayoutContent, layoutVariables, cancellationToken);
+        return await _templateEngine.RenderAsync(layout.LayoutContent, layoutVariables, outputKind, cancellationToken);
     }
 
     public async Task<Result<PdfRenderResult>> RenderToPdfAsync(string templateName, string module, object? model = null, string? category = null, string? layoutName = null, PdfConvertOptions? pdfOptions = null, CancellationToken cancellationToken = default)
@@ -192,7 +205,8 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
             return Fail<PdfRenderResult>("IHtmlToPdfConverter is not registered. Please register an implementation.", 500);
 
         // 先渲染 HTML
-        var renderResult = await RenderByNameAsync(templateName, module, model, category, layoutName, cancellationToken);
+        // PDF 经浏览器出：正文恒为 HTML
+        var renderResult = await RenderByNameAsync(templateName, module, model, category, layoutName, TemplateOutputKind.Html, cancellationToken);
         if (!renderResult.Succeeded)
             return Fail<PdfRenderResult>(renderResult.Message ?? "Template rendering failed", renderResult.Code ?? 500, renderResult.ErrorCode);
 

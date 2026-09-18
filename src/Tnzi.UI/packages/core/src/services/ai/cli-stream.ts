@@ -8,6 +8,7 @@
  */
 
 import type { CliAgentEvent, CliRunMessageDto } from './cli';
+import { StreamRequestError } from './stream-request-error';
 
 /** Options for consuming an external run's event stream. */
 export interface CliRunStreamOptions {
@@ -79,7 +80,10 @@ export async function streamCliRun(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => response.statusText);
-      const error = new Error(`CLI run stream failed: ${response.status} ${detail}`);
+      // Typed like streamChat's failure so the documented 401 refresh dance
+      // (branch on `status`, `http.refreshAccessToken()`, retry once) applies
+      // to this feed too instead of leaving the status buried in the message.
+      const error = new StreamRequestError(response.status, detail, 'CLI run stream');
       result.error = error;
       options.onError?.(error);
       return result;

@@ -38,6 +38,13 @@ public class AutomaticSubscriptionTests : IDisposable
     /// <summary>真正开始消费的队列。</summary>
     private readonly List<string> _consumedQueues = [];
 
+    /// <summary>声明过的队列及其形态（工作队列 vs 广播队列的差别全在这几个布尔上）。</summary>
+    private readonly List<DeclaredQueue> _declaredQueues = [];
+
+    private sealed record DeclaredQueue(string Name, bool Durable, bool Exclusive, bool AutoDelete, IDictionary<string, object?>? Arguments);
+
+    private const string ConsumerGroup = "tests";
+
     private ServiceProvider? _serviceProvider;
 
     public AutomaticSubscriptionTests()
@@ -58,6 +65,9 @@ public class AutomaticSubscriptionTests : IDisposable
                 It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<bool>(),
                 It.IsAny<IDictionary<string, object?>>(), It.IsAny<bool>(), It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<string, bool, bool, bool, IDictionary<string, object?>?, bool, bool, CancellationToken>(
+                (queue, durable, exclusive, autoDelete, arguments, _, _, _) =>
+                    _declaredQueues.Add(new DeclaredQueue(queue, durable, exclusive, autoDelete, arguments)))
             .ReturnsAsync(new QueueDeclareOk("q", 0, 0));
 
         _mockChannel.Setup(c => c.QueueBindAsync(
@@ -93,7 +103,7 @@ public class AutomaticSubscriptionTests : IDisposable
 
         await StartInitializerAsync(services);
 
-        var expectedQueue = $"Tnzi.Events.{typeof(ProbeIntegrationEvent).FullName}";
+        var expectedQueue = $"{ConsumerGroup}.{typeof(ProbeIntegrationEvent).FullName}";
 
         _bindings.ShouldContain(
             b => b.Queue == expectedQueue && b.RoutingKey == typeof(ProbeIntegrationEvent).FullName,
@@ -173,7 +183,7 @@ public class AutomaticSubscriptionTests : IDisposable
 
         ((IDistributedEventBus)bus).Subscribe<ProbeIntegrationEvent, ProbeIntegrationEventHandler>();
 
-        _consumedQueues.ShouldContain($"Tnzi.Events.{typeof(ProbeIntegrationEvent).FullName}");
+        _consumedQueues.ShouldContain($"{ConsumerGroup}.{typeof(ProbeIntegrationEvent).FullName}");
 
         await Task.CompletedTask;
     }
@@ -243,7 +253,8 @@ public class AutomaticSubscriptionTests : IDisposable
             await hostedService.StartAsync(CancellationToken.None);
         }
 
-        _consumedQueues.ShouldContain($"Tnzi.Events.{typeof(ProbeIntegrationEvent).FullName}");
+        // 队列名以 EventBus:ConsumerGroup 开头：模块必须把配置里的组名交给总线
+        _consumedQueues.ShouldContain($"tests-app.{typeof(ProbeIntegrationEvent).FullName}");
     }
 
     /// <summary>
@@ -261,6 +272,167 @@ public class AutomaticSubscriptionTests : IDisposable
 
         services.ShouldContain(d => d.ServiceType == typeof(IDistributedEventBusHealthProbe));
     }
+
+    #region 消费者身份
+
+    /// <summary>
+    /// 两个消费者组（两个服务）对同一个事件各得一条队列，都绑定到同一个路由键。
+    /// </summary>
+    /// <remarks>
+    /// <b>被保护的缺陷</b>：队列名此前只由事件类型决定。订单服务与通知服务都处理
+    /// <c>OrderCreated</c> 时共用一条持久队列，代理在两者之间<b>分发</b>而不是各投一份 ——
+    /// 各自只收到约一半的事件，没有异常、没有 basic.return、没有任何症状。
+    /// </remarks>
+    [Fact]
+    public async Task TwoConsumerGroups_DeclareDistinctQueuesForTheSameEvent()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var orders = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders"));
+        var notifications = CreateBus(_serviceProvider, new DistributedConsumerIdentity("notifications"));
+
+        await orders.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+        await notifications.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+
+        var routingKey = typeof(ProbeIntegrationEvent).FullName!;
+        var boundQueues = _bindings.Where(b => b.RoutingKey == routingKey).Select(b => b.Queue).Distinct().ToList();
+
+        boundQueues.ShouldBe([$"orders.{routingKey}", $"notifications.{routingKey}"], ignoreOrder: true);
+        _consumedQueues.ShouldBe([$"orders.{routingKey}", $"notifications.{routingKey}"], ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// 同一个组的两个实例声明的是同一条工作队列（代理在实例间分发，这是工作队列该有的形状）。
+    /// </summary>
+    [Fact]
+    public async Task TwoInstancesOfOneConsumerGroup_ShareTheWorkQueue()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var instanceA = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders", Guid.NewGuid()));
+        var instanceB = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders", Guid.NewGuid()));
+
+        await instanceA.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+        await instanceB.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+
+        _consumedQueues.Distinct().ShouldHaveSingleItem().ShouldBe($"orders.{typeof(ProbeIntegrationEvent).FullName}");
+    }
+
+    /// <summary>
+    /// 广播事件：每个实例一条独占、自动删除、不持久的队列，且不挂死信参数。
+    /// </summary>
+    /// <remarks>
+    /// 多实例配置广播就是受害者：每个实例都要 reload 自己的缓存，而共用一条队列时代理只投给其中一个 ——
+    /// 1/3 概率回到发布实例（处理器按 OriginInstanceId 直接 return，等于哪都没应用）。
+    /// 不挂死信：一条过期的广播重放出来是有害的。
+    /// </remarks>
+    [Fact]
+    public async Task BroadcastEvent_DeclaresAnExclusiveAutoDeletePerInstanceQueue()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var instanceId = Guid.NewGuid();
+        var bus = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders", instanceId));
+
+        await bus.SubscribeEventAsync(typeof(ProbeBroadcastEvent));
+
+        var routingKey = typeof(ProbeBroadcastEvent).FullName!;
+        var expectedQueue = $"orders.{routingKey}.{instanceId:N}";
+
+        var queue = _declaredQueues.ShouldHaveSingleItem("广播订阅只声明自己那条队列，没有死信队列");
+        queue.Name.ShouldBe(expectedQueue);
+        queue.Exclusive.ShouldBeTrue("独占：这条队列只属于本连接，连接断开即消失");
+        queue.AutoDelete.ShouldBeTrue("自动删除：实例下线后不能留下一条永远没人消费的队列");
+        queue.Durable.ShouldBeFalse("不持久：实例重启是一个新实例，旧队列里的广播没有意义");
+        (queue.Arguments == null || !queue.Arguments.ContainsKey("x-dead-letter-exchange"))
+            .ShouldBeTrue("广播不进死信：过期的广播重放出来是有害的");
+
+        _bindings.ShouldContain(b => b.Queue == expectedQueue && b.RoutingKey == routingKey);
+        _consumedQueues.ShouldBe([expectedQueue]);
+    }
+
+    /// <summary>
+    /// 两个实例各自的广播队列名不同 —— 否则又回到了竞争消费。
+    /// </summary>
+    [Fact]
+    public async Task BroadcastEvent_QueueNameDiffersPerInstance()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var instanceA = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders", Guid.NewGuid()));
+        var instanceB = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders", Guid.NewGuid()));
+
+        await instanceA.SubscribeEventAsync(typeof(ProbeBroadcastEvent));
+        await instanceB.SubscribeEventAsync(typeof(ProbeBroadcastEvent));
+
+        _consumedQueues.Count.ShouldBe(2);
+        _consumedQueues.Distinct().Count().ShouldBe(2, "两个实例共用一条广播队列 = 只有一个实例收到");
+    }
+
+    /// <summary>
+    /// 工作队列仍然持久、非独占，并挂着死信参数（at-least-once 那一套没有被广播改动波及）。
+    /// </summary>
+    [Fact]
+    public async Task WorkQueue_StaysDurableWithDeadLettering()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var bus = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders"));
+
+        await bus.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+
+        var routingKey = typeof(ProbeIntegrationEvent).FullName!;
+        var main = _declaredQueues.Single(q => q.Name == $"orders.{routingKey}");
+        main.Durable.ShouldBeTrue();
+        main.Exclusive.ShouldBeFalse();
+        main.AutoDelete.ShouldBeFalse();
+        main.Arguments.ShouldNotBeNull().ShouldContainKey("x-dead-letter-exchange");
+
+        _declaredQueues.ShouldContain(q => q.Name == $"orders.DeadLetter.{routingKey}");
+    }
+
+    /// <summary>
+    /// 死信按<b>队列名</b>路由，死信队列也按队列名绑定：死信交换机是各组共享的 topic，
+    /// 按事件名路由会让 A 组的死信同时落进 B 组的死信队列。
+    /// </summary>
+    /// <remarks>
+    /// 09-12 把路由键从事件名改成了队列名，但没有测试守着它 —— 把两处改回 <c>eventTypeName</c> 套件照绿。
+    /// </remarks>
+    [Fact]
+    public async Task WorkQueue_DeadLettersByQueueName_NotByEventName()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        _serviceProvider = services.BuildServiceProvider();
+
+        var bus = CreateBus(_serviceProvider, new DistributedConsumerIdentity("orders"));
+
+        await bus.SubscribeEventAsync(typeof(ProbeIntegrationEvent));
+
+        var eventName = typeof(ProbeIntegrationEvent).FullName!;
+        var queueName = $"orders.{eventName}";
+        var deadLetterQueueName = $"orders.DeadLetter.{eventName}";
+
+        var main = _declaredQueues.Single(q => q.Name == queueName);
+        main.Arguments.ShouldNotBeNull()["x-dead-letter-routing-key"].ShouldBe(queueName, "死信路由键必须是本队列名，不是事件名");
+
+        _bindings.ShouldContain(b => b.Queue == deadLetterQueueName && b.RoutingKey == queueName,
+            "死信队列按本队列名绑定到死信交换机");
+        _bindings.ShouldNotContain(b => b.Queue == deadLetterQueueName && b.RoutingKey == eventName,
+            "按事件名绑定会收下每一个组的死信");
+    }
+
+    #endregion
 
     #region Discovery
 
@@ -306,6 +478,7 @@ public class AutomaticSubscriptionTests : IDisposable
             {
                 ["EventBus:Type"] = "RabbitMQ",
                 ["EventBus:RabbitMqConnectionString"] = "amqp://guest:guest@localhost:5672/",
+                ["EventBus:ConsumerGroup"] = "tests-app",
             })
             .Build();
 
@@ -330,11 +503,12 @@ public class AutomaticSubscriptionTests : IDisposable
         await initializer.StartAsync(CancellationToken.None);
     }
 
-    private RabbitMQEventBus CreateBus(IServiceProvider serviceProvider) => new(
+    private RabbitMQEventBus CreateBus(IServiceProvider serviceProvider, DistributedConsumerIdentity? identity = null) => new(
         _mockConnection.Object,
         NullLogger<RabbitMQEventBus>.Instance,
         serviceProvider,
-        new RabbitMQOptions());
+        new RabbitMQOptions(),
+        consumerIdentity: identity ?? new DistributedConsumerIdentity(ConsumerGroup));
 
     public class ProbeIntegrationEvent : EventBase, IIntegrationEvent
     {
@@ -342,6 +516,11 @@ public class AutomaticSubscriptionTests : IDisposable
     }
 
     public class ProbeLocalEvent : EventBase;
+
+    public class ProbeBroadcastEvent : EventBase, IBroadcastIntegrationEvent
+    {
+        public string SourceService { get; set; } = "tests";
+    }
 
     private sealed class ProbeIntegrationEventHandler : IEventHandler<ProbeIntegrationEvent>
     {

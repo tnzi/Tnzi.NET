@@ -19,7 +19,7 @@ public class SessionStatisticsTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
-        _sessionService = new DatabaseSessionService(_repositoryMock.Object, serviceProviderMock.Object);
+        _sessionService = new DatabaseSessionService(_repositoryMock.Object, serviceProviderMock.Object, UnscopedUserTenantScope.Create());
     }
 
     private void SetupSessionQueryable(List<UserSession> sessions)

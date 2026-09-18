@@ -91,4 +91,21 @@ public static class ConnectionStringExpander
 
         return PlaceholderRegex.IsMatch(connectionString);
     }
+
+    /// <summary>
+    /// 列出连接字符串里所有占位符引用的变量名（按出现顺序去重）。
+    /// 对 <see cref="Expand"/> 的结果调用即得到「没解析出来的那些」，供调用方决定是告警还是拒绝。
+    /// </summary>
+    /// <param name="connectionString">连接字符串</param>
+    /// <returns>变量名列表；没有占位符时为空</returns>
+    public static IReadOnlyList<string> GetPlaceholderVariables(string connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+            return [];
+
+        return PlaceholderRegex.Matches(connectionString)
+            .Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
 }

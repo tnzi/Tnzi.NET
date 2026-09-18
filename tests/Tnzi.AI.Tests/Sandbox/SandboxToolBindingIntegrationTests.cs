@@ -1,6 +1,6 @@
-using Tnzi.AI.Sandbox.Middleware;
 using Tnzi.AI.Sandbox.Tools;
 using Tnzi.AI.Tools.Models;
+using static Tnzi.AI.Tests.Sandbox.SandboxTestSupport;
 
 namespace Tnzi.AI.Tests.Sandbox;
 
@@ -86,19 +86,10 @@ public class SandboxToolBindingIntegrationTests : IDisposable
             Tools = tools.ToList()
         });
 
-        var middleware = new SandboxMiddleware(
-            new FixedSandboxProvider(recordingSandbox),
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions()),
-            accessor,
-            NullLogger<SandboxMiddleware>.Instance);
+        var middleware = CreateSandboxMiddleware(SandboxOptions(_workDir), new FixedSandboxProvider(recordingSandbox), accessor);
 
         var context = TestHelpers.CreateMinimalContext(threadId: threadId);
-        context.Properties[SandboxPropertyKeys.ThreadData] = new ThreadDataState(
-            ThreadDirectory: _workDir,
-            WorkspacePath: Path.Combine(_workDir, "workspace"),
-            UploadsPath: Path.Combine(_workDir, "uploads"),
-            OutputsPath: Path.Combine(_workDir, "outputs"),
-            SkillsPath: Path.Combine(_workDir, "skills"));
+        context.Properties[SandboxPropertyKeys.ThreadData] = ThreadDataState.FromThreadDirectory(Path.Combine(_workDir, threadId.ToString("N")));
 
         var result = await middleware.InvokeAsync(context, async (ctx, ct) =>
         {
@@ -122,6 +113,107 @@ public class SandboxToolBindingIntegrationTests : IDisposable
 
         // 最终回复回传调用方
         result.Response.ShouldBe("done");
+    }
+
+    // -------------------------------------------------------------------------
+    // 2b. 没有沙箱工具的 Agent 经过 SandboxMiddleware：provider 不被调用、线程目录不建、技能不复制
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 解析出来的 Agent 一个沙箱工具都没有（某消费方的外呼 bot：零工具授权、零技能授权），
+    /// 整轮跑完磁盘上不能多出任何东西。此前每一次这样的运行都先建线程目录、复制约 2 MB 技能文件、
+    /// 再向 provider 要一个它永远用不上的沙箱。
+    /// </summary>
+    [Fact]
+    public async Task AgentExecutor_WithoutSandboxTools_NeverCreatesASandboxOrThreadDirectory()
+    {
+        var threadId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor();
+        var provider = new CountingSandboxProvider();
+        var store = new CountingSkillStore();
+        var threadDir = Path.Combine(_workDir, threadId.ToString("N"));
+
+        var chatClient = new PlainTextChatClient();
+        var executor = new AgentExecutor(chatClient, new AgentExecutorOptions { Name = "no-tools", Tools = [] });
+        var middleware = CreateSandboxMiddleware(SandboxOptions(_workDir), provider, accessor, store);
+
+        var context = TestHelpers.CreateMinimalContext(threadId: threadId);
+        context.Properties[SandboxPropertyKeys.ThreadData] = ThreadDataState.FromThreadDirectory(threadDir);
+
+        var result = await middleware.InvokeAsync(context, async (ctx, ct) =>
+        {
+            var response = await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "just talk")], ct);
+            return new AgentRunResult { Response = response.Text ?? string.Empty };
+        });
+
+        result.Response.ShouldBe("plain answer");
+        provider.CreateCalls.ShouldBe(0);
+        store.GetAllCalls.ShouldBe(0);
+        Directory.Exists(threadDir).ShouldBeFalse("a run that never touches the sandbox must leave no thread directory behind");
+    }
+
+    /// <summary>
+    /// 有沙箱工具但这一轮模型没用它：同样什么都不建。开销随「用了」走，不随「有」走。
+    /// </summary>
+    [Fact]
+    public async Task AgentExecutor_WithSandboxToolsButNoToolCall_NeverCreatesASandbox()
+    {
+        var threadId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor();
+        var provider = new CountingSandboxProvider();
+        var tools = await ResolveSandboxToolsAsync(BuildServiceProvider(accessor));
+
+        var executor = new AgentExecutor(new PlainTextChatClient(), new AgentExecutorOptions { Name = "idle-tools", Tools = tools.ToList() });
+        var middleware = CreateSandboxMiddleware(SandboxOptions(_workDir), provider, accessor);
+
+        var context = TestHelpers.CreateMinimalContext(threadId: threadId);
+        context.Properties[SandboxPropertyKeys.ThreadData] = ThreadDataState.FromThreadDirectory(Path.Combine(_workDir, threadId.ToString("N")));
+
+        await middleware.InvokeAsync(context, async (ctx, ct) =>
+        {
+            var response = await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "just talk")], ct);
+            return new AgentRunResult { Response = response.Text ?? string.Empty };
+        });
+
+        provider.CreateCalls.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// provider 建不出沙箱（Production 下的 Local 守卫、Docker 不可达）：异常在那次工具调用上抛给执行器，
+    /// 执行器把它记成一次失败的工具调用回给模型，整轮运行照常结束，不再是每一次运行在中间件入口崩掉。
+    /// </summary>
+    [Fact]
+    public async Task AgentExecutor_ProviderRefuses_SurfacesAsAFailedToolCall_NotARunFailure()
+    {
+        var threadId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor();
+        var provider = new CountingSandboxProvider
+        {
+            FailWith = _ => new InvalidOperationException("LocalSandboxProvider is disabled in Production environments")
+        };
+        var tools = await ResolveSandboxToolsAsync(BuildServiceProvider(accessor));
+
+        var chatClient = new ScriptedChatClient();
+        var executor = new AgentExecutor(chatClient, new AgentExecutorOptions { Name = "refused", Tools = tools.ToList() });
+        var middleware = CreateSandboxMiddleware(SandboxOptions(_workDir), provider, accessor);
+
+        var context = TestHelpers.CreateMinimalContext(threadId: threadId);
+        context.Properties[SandboxPropertyKeys.ThreadData] = ThreadDataState.FromThreadDirectory(Path.Combine(_workDir, threadId.ToString("N")));
+
+        var result = await middleware.InvokeAsync(context, async (ctx, ct) =>
+        {
+            var response = await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "run it")], ct);
+            return new AgentRunResult { Response = response.Text ?? string.Empty };
+        });
+
+        result.Response.ShouldBe("done");
+        provider.CreateCalls.ShouldBe(1);
+        var functionResults = chatClient.Requests[1]
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionResultContent>()
+            .ToList();
+        functionResults.ShouldHaveSingleItem();
+        functionResults[0].Result!.ToString()!.ShouldContain("disabled in Production");
     }
 
     // -------------------------------------------------------------------------
@@ -272,6 +364,28 @@ file sealed class ScriptedChatClient : IChatClient
 
         return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, "done")]));
     }
+
+    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Streaming is not used by these tests");
+
+    public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>从不发起工具调用的 chat client - 模拟一个只聊天的 Agent。</summary>
+file sealed class PlainTextChatClient : IChatClient
+{
+    public Task<ChatResponse> GetResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, "plain answer")]));
 
     public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,

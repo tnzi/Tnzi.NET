@@ -7,6 +7,7 @@ using Tnzi.Domain.Repositories;
 using Tnzi.Documents.Models;
 using Tnzi.Documents.Services;
 using Tnzi.EFCore;
+using Tnzi.MultiTenancy;
 using Tnzi.Results;
 using Tnzi.Security.Claims;
 using Tnzi.Signing.Dtos;
@@ -211,7 +212,8 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
             files,
             // 这一组 mock 掉了存储，授予表在这里不参与判定；真实存储栈下的匿名读取
             // 见 AnonymousRecipientStorageAccessTests。
-            new FileAccessGrantContext());
+            new FileAccessGrantContext(),
+            scoped.GetRequiredService<ICurrentTenant>());
     }
 
     /// <summary>建一份两方并行签署、已发出的请求，返回两个人的令牌。</summary>

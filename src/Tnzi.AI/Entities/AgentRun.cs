@@ -41,6 +41,13 @@ public class AgentRun : MultiTenantAuditedEntity<Guid>
     /// <summary>原始用户输入（摘要）</summary>
     public string InputSummary { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 建行时的请求快照（JSON，<see cref="AgentRunRequestSnapshot"/>）：续跑按它重建请求。
+    /// 迁移前的旧行为 null —— 有 AgentId 的照常续跑（工具由 grants 重建，父子链从行上回填），
+    /// 没有 AgentId 的（模板 spawn）拒绝续跑而不是退化成无工具的默认 agent。
+    /// </summary>
+    public string? RequestSnapshot { get; set; }
+
     /// <summary>最终输出（摘要）</summary>
     public string? OutputSummary { get; set; }
 

@@ -32,7 +32,7 @@
           :key="p.provider"
           size="small"
           tertiary
-          @click="linkProvider(p.provider)"
+          @click="void linkProvider(p.provider)"
         >
           <template #icon><TSvgIcon icon="mdi:link-variant" :size="14" /></template>
           {{ p.displayName || p.provider }}
@@ -89,12 +89,22 @@ async function unlink(provider: string): Promise<void> {
   }
 }
 
-function linkProvider(provider: string): void {
-  // Already-authenticated hit on the OAuth login endpoint links the provider to
-  // the current account; the backend redirects back to `returnUrl` when done.
-  const returnUrl = typeof window !== 'undefined' ? window.location.href : undefined
-  const url = ctx.bridge.oauthLoginUrl(provider, returnUrl)
-  if (url && typeof window !== 'undefined') window.location.assign(url)
+async function linkProvider(provider: string): Promise<void> {
+  // The OAuth start endpoint is anonymous and the navigation carries no bearer,
+  // so "already signed in" is invisible to it: without a link token the backend
+  // runs the login flow and, when the provider's email differs from ours,
+  // creates a brand-new account instead of linking. Fetch the one-time link
+  // token first (authenticated call), then hand it over on the URL; the
+  // callback links the provider to this account and redirects back to
+  // `returnUrl` without issuing tokens.
+  if (typeof window === 'undefined') return
+  try {
+    const linkToken = await ctx.bridge.me.issueOAuthLinkToken(provider)
+    const url = ctx.bridge.oauthLoginUrl(provider, window.location.href, linkToken.token)
+    if (url) window.location.assign(url)
+  } catch (e) {
+    ctx.message.error(e instanceof Error ? e.message : String(e))
+  }
 }
 
 onMounted(() => void load())

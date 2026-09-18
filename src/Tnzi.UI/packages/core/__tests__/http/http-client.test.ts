@@ -513,6 +513,28 @@ describe('HttpClient', () => {
       expect(result.message).toBe('Narrow the date range.');
     });
 
+    // A non-envelope error body (RFC 7807 ProblemDetails from a consumer
+    // endpoint, a gateway JSON page) carries its sentence in `title` /
+    // `detail`; normalising it without the status read only `message` and
+    // surfaced the generic "Download failed: 400 Bad Request" instead.
+    it('surfaces a ProblemDetails title/detail on a failed download', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({ type: 'about:blank', title: 'Export window too wide', status: 400, detail: 'The export window may not exceed 31 days.' }),
+          ),
+      });
+
+      const result = await client.download('/export');
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+      // Same precedence as the JSON request path: title first, then detail.
+      expect(result.message).toBe('Export window too wide');
+    });
+
     it('should fall back to the plain-text body when the error body is not JSON', async () => {
       mockFetch.mockResolvedValue({
         ok: false,
@@ -1196,6 +1218,260 @@ describe('HttpClient', () => {
       expect(refreshFn).not.toHaveBeenCalled();
       expect(sends.sends).toBe(1);
       expect(result.code).toBe(401);
+    });
+  });
+
+  // ------------------------------------------
+  // Auth challenges (step-up) are 401s that are NOT session expiry
+  // ------------------------------------------
+
+  describe('auth challenge passthrough', () => {
+    /**
+     * The exact wire shape `[RequireStepUp]` produces: status 401, the
+     * step-up error code, and the scope under `errorDetails`. Refreshing on it
+     * burns a refresh-token rotation for nothing, replays the request into the
+     * same challenge, and the second 401 then logs the user out - so the
+     * feature could never complete through this client.
+     */
+    const stepUpBody = {
+      succeeded: false,
+      code: 401,
+      errorCode: 'IDENTITY_STEP_UP_REQUIRED',
+      message: 'This action requires re-authentication',
+      errorDetails: { scope: 'tip.download' },
+    };
+
+    function challengeClient() {
+      const refreshFn = vi.fn().mockResolvedValue('new-token');
+      const onUnauthorized = vi.fn();
+      const listener = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn, onUnauthorized });
+      c.addUnauthorizedListener(listener);
+      return { c, refreshFn, onUnauthorized, listener };
+    }
+
+    it('returns a step-up 401 as-is from request(): no refresh, no onUnauthorized', async () => {
+      const { c, refreshFn, onUnauthorized, listener } = challengeClient();
+      mockFetch.mockResolvedValue(jsonResponse(stepUpBody, 401));
+
+      const result = await c.post('/files/1/original');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(listener).not.toHaveBeenCalled();
+      expect(result.code).toBe(401);
+      expect(result.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+      expect(result.errorDetails).toEqual({ scope: 'tip.download' });
+    });
+
+    it('returns a step-up 401 as-is from download()', async () => {
+      const { c, refreshFn, onUnauthorized } = challengeClient();
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve(JSON.stringify(stepUpBody)),
+      });
+
+      const result = await c.download('/files/1/original');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(result.code).toBe(401);
+      expect(result.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+      expect(result.errorDetails).toEqual({ scope: 'tip.download' });
+    });
+
+    it('returns a step-up 401 as-is from uploadFormData()', async () => {
+      class FakeXhr {
+        status = 0;
+        responseText = '';
+        timeout = 0;
+        withCredentials = false;
+        upload = { onprogress: null as unknown };
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        ontimeout: (() => void) | null = null;
+        static sends = 0;
+        open() {}
+        setRequestHeader() {}
+        send() {
+          FakeXhr.sends += 1;
+          this.status = 401;
+          this.responseText = JSON.stringify(stepUpBody);
+          queueMicrotask(() => this.onload?.());
+        }
+      }
+      vi.stubGlobal('XMLHttpRequest', FakeXhr);
+      try {
+        const { c, refreshFn, onUnauthorized } = challengeClient();
+
+        const result = await c.uploadFormData('/files/upload', new FormData());
+
+        expect(FakeXhr.sends).toBe(1);
+        expect(refreshFn).not.toHaveBeenCalled();
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(result.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+      } finally {
+        vi.unstubAllGlobals();
+        vi.stubGlobal('fetch', mockFetch);
+      }
+    });
+
+    it('does not sign out when the retry after a refresh answers with a challenge', async () => {
+      // Expired token on a step-up endpoint: the first 401 is real expiry, the
+      // refresh works, and the retried request now gets the step-up challenge.
+      // That second 401 is the answer, not a revoked session.
+      const { c, refreshFn, onUnauthorized } = challengeClient();
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401))
+        .mockResolvedValueOnce(jsonResponse(stepUpBody, 401));
+
+      const result = await c.post('/files/1/original');
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(result.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+    });
+
+    it('still refreshes on a plain 401 (the challenge exemption is by error code)', async () => {
+      const { c, refreshFn } = challengeClient();
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401))
+        .mockResolvedValueOnce(apiSuccessResponse({ ok: true }));
+
+      const result = await c.get('/protected');
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(true);
+    });
+
+    it('honors a custom authChallengeCodes list', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('new-token');
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: refreshFn,
+        authChallengeCodes: ['APP_CONFIRM_REQUIRED'],
+      });
+      mockFetch.mockResolvedValue(
+        jsonResponse({ succeeded: false, code: 401, errorCode: 'APP_CONFIRM_REQUIRED' }, 401),
+      );
+
+      const result = await c.get('/protected');
+
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(result.errorCode).toBe('APP_CONFIRM_REQUIRED');
+    });
+  });
+
+  // ------------------------------------------
+  // download() 401 handling (uploads got this on 2026-07-26, downloads did not)
+  // ------------------------------------------
+
+  describe('download 401 handling', () => {
+    const blob = new Blob(['csv'], { type: 'text/csv' });
+
+    function unauthorized() {
+      return {
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve(JSON.stringify({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' })),
+      };
+    }
+
+    function okBlob() {
+      return { ok: true, status: 200, blob: () => Promise.resolve(blob) };
+    }
+
+    it('refreshes and retries the download once on 401', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('fresh-token');
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn, onUnauthorized });
+      c.setAccessToken('stale-token');
+      mockFetch.mockResolvedValueOnce(unauthorized()).mockResolvedValueOnce(okBlob());
+
+      const result = await c.download('/export', { method: 'POST', body: { from: '2026-01-01' } });
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[1][1].headers['Authorization']).toBe('Bearer fresh-token');
+      expect(result.succeeded).toBe(true);
+      expect(result.data).toBe(blob);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+    });
+
+    it('fires onUnauthorized and returns the 401 when the refresh fails', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: vi.fn().mockRejectedValue(new Error('dead')),
+        onUnauthorized,
+      });
+      mockFetch.mockResolvedValue(unauthorized());
+
+      const result = await c.download('/export');
+
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(401);
+    });
+
+    it('fires onUnauthorized when the retry still 401s', async () => {
+      const onUnauthorized = vi.fn();
+      const c = new HttpClient({
+        baseUrl: '/api',
+        refreshTokenFn: vi.fn().mockResolvedValue('still-stale'),
+        onUnauthorized,
+      });
+      mockFetch.mockResolvedValue(unauthorized());
+
+      const result = await c.download('/export');
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(onUnauthorized).toHaveBeenCalledTimes(1);
+      expect(result.code).toBe(401);
+    });
+
+    it('passes the 401 through untouched with skipAuthRefresh', async () => {
+      const refreshFn = vi.fn().mockResolvedValue('fresh-token');
+      const c = new HttpClient({ baseUrl: '/api', refreshTokenFn: refreshFn });
+      mockFetch.mockResolvedValue(unauthorized());
+
+      const result = await c.download('/export', { skipAuthRefresh: true });
+
+      expect(refreshFn).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result.code).toBe(401);
+    });
+
+    it('carries errorCode and errorDetails off a failed download envelope', async () => {
+      const c = new HttpClient({ baseUrl: '/api' });
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              succeeded: false,
+              code: 409,
+              message: 'Export already running',
+              errorCode: 'EXPORT_BUSY',
+              errorDetails: { retryAfter: 30 },
+            }),
+          ),
+      });
+
+      const result = await c.download('/export');
+
+      expect(result.code).toBe(409);
+      expect(result.message).toBe('Export already running');
+      expect(result.errorCode).toBe('EXPORT_BUSY');
+      expect(result.errorDetails).toEqual({ retryAfter: 30 });
     });
   });
 });

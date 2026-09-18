@@ -43,35 +43,36 @@ public class AgentDispatchFacade : IAgentDispatchFacade
     }
 
     /// <summary>
-    /// 在独立作用域里入队，使这一行**立刻提交**。
-    /// </summary>
-    /// <remarks>
-    /// 排队行绝不能落在调用方的环境事务里。宿主开着 <c>EnableGlobalUnitOfWork</c> 时，
-    /// 请求的事务要到响应写出才提交，而门面紧接着就要等这条运行跑完 ——
-    /// 队列处理器在另一条连接上，看不见未提交的行，于是运行永远不会开始、
-    /// 请求永远等不到结果，**双方互相等到超时**；超时回滚后连记录都不留，
-    /// 现场只剩一次「聊天挂了三分钟」而数据库里什么都没有。
-    /// <para>
-    /// 语义上这也是对的：一次外部运行动辄几分钟到几小时，它的生命周期本就长于
-    /// 那个 HTTP 请求，不该由请求的事务决定它是否存在。
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// 取或建这一轮所属的会话线程，并把用户消息落库。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 内建路径的线程是中间件管线建的，而外部执行按红线①<b>整条管线都不进</b> ——
     /// 于是在补上这一步之前，外部路径的 <c>ThreadId</c> 恒为 null，后果不是「少个 id」
     /// 那么轻：<c>EnqueueAsync</c> 正是按 ThreadId 去找上一轮的 <c>ProviderSessionId</c> 才决定
     /// 要不要续接的，所以**每一轮都开一个全新的 CLI 会话**，用户看到的就是 agent 完全不记得
     /// 上一句话。整套 resume 机制（会话指针、被拒判据、上下文丢失披露）当时都已实现，
     /// 只是从来没有任何东西触发它。
+    /// </para>
+    /// <para>
+    /// ★ <b>线程服务的拒绝必须原样传播</b>。<c>GetOrCreateThreadAsync</c> 对「不是你的」「不存在」
+    /// 「不属于这个 Agent」一律抛 <see cref="BusinessException"/>（404）；这里若把它和基础设施故障
+    /// 一起吞掉再把调用方给的 id 原样交给调度器，就等于放行一个未经校验的 ThreadId ——
+    /// 运行会续接受害者的 CLI 会话、跑在受害者的每线程工作区里、再把回复写进受害者的线程。
+    /// 内建路径的 <c>HistoryMiddleware.EnsureThreadAsync</c> 早已是这个形状，本方法当初漏了。
+    /// </para>
+    /// <para>
+    /// 真正的基础设施故障（数据库不可达）仍然降级：这一轮照跑，只是没有续接与历史。
+    /// 但降级的答案是 <c>null</c> 而不是调用方给的那个 id —— 没人核过的 id 不能活过这一步，
+    /// 丢一轮连续性是安全的方向，放行则不是。
+    /// </para>
     /// </remarks>
-    private async Task<Guid?> EnsureThreadAsync(AgentRunRequest request, CancellationToken cancellationToken)
+    private async Task<Guid?> EnsureThreadAsync(
+        IAgentThreadInternalService threadService, AgentRunRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var (_, threadId, _) = await _threadService.GetOrCreateThreadAsync(
+            var (_, threadId, _) = await threadService.GetOrCreateThreadAsync(
                 request.ThreadId, request.AgentId, cancellationToken);
 
             // 就地回填到请求上。内建路径由 HistoryMiddleware 做这件事，而流式调用方
@@ -82,18 +83,22 @@ public class AgentDispatchFacade : IAgentDispatchFacade
 
             if (!string.IsNullOrEmpty(request.UserMessage))
             {
-                await _threadService.SaveMessageAsync(
+                await threadService.SaveMessageAsync(
                     threadId, "user", request.UserMessage, ct: cancellationToken);
             }
 
             return threadId;
         }
+        catch (BusinessException)
+        {
+            // 归属不符 / 线程不存在 / Agent 不存在：这是判决，不是故障。
+            throw;
+        }
         catch (Exception ex)
         {
-            // 建不出线程不该让这一轮直接失败：没有它只是失去续接与历史，
-            // 而用户要的那次执行本身仍然可以完成。
             _logger.LogWarning(ex, "Could not resolve a thread for the external run; continuity is lost for this turn");
-            return request.ThreadId;
+            request.ThreadId = null;
+            return null;
         }
     }
 
@@ -112,12 +117,39 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         }
     }
 
-    private async Task<Result<Guid>> EnqueueDetachedAsync(
-        CliRunRequestDto request, CancellationToken cancellationToken)
+    /// <summary>
+    /// 在独立作用域里解析线程并入队，使这两行**立刻提交**。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 排队行绝不能落在调用方的环境事务里。宿主开着 <c>EnableGlobalUnitOfWork</c> 时，
+    /// 请求的事务要到响应写出才提交，而门面紧接着就要等这条运行跑完 ——
+    /// 队列处理器在另一条连接上，看不见未提交的行，于是运行永远不会开始、
+    /// 请求永远等不到结果，**双方互相等到超时**；超时回滚后连记录都不留，
+    /// 现场只剩一次「聊天挂了三分钟」而数据库里什么都没有。
+    /// </para>
+    /// <para>
+    /// 线程也在这个作用域里解析，理由相同再加一条：<c>CliAgentDispatcher.EnqueueAsync</c> 自己会按
+    /// <c>AgentThread</c> 表核一遍 ThreadId 的归属（它是用户端控制器直接调用的入口，不能靠门面替它核），
+    /// 而一条刚在调用方事务里建出来、尚未提交的线程，在这个新作用域里是看不见的 —— 那会让每个
+    /// 新对话的第一轮都被判成「线程不存在」。同一作用域里先建线程再入队，两者看见的是同一份数据。
+    /// </para>
+    /// <para>
+    /// 语义上这也是对的：一次外部运行动辄几分钟到几小时，它的生命周期本就长于
+    /// 那个 HTTP 请求，不该由请求的事务决定它是否存在；承载它的线程亦然。
+    /// </para>
+    /// </remarks>
+    private async Task<(Guid? ThreadId, Result<Guid> Enqueued)> EnqueueDetachedAsync(
+        AgentRunRequest request, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
+
+        var threadService = scope.ServiceProvider.GetRequiredService<IAgentThreadInternalService>();
+        var threadId = await EnsureThreadAsync(threadService, request, cancellationToken);
+
         var dispatcher = scope.ServiceProvider.GetRequiredService<ICliAgentDispatcher>();
-        return await dispatcher.EnqueueAsync(request, cancellationToken);
+        var enqueued = await dispatcher.EnqueueAsync(ToCliRequest(request, threadId), cancellationToken);
+        return (threadId, enqueued);
     }
 
     /// <inheritdoc />
@@ -132,12 +164,10 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             return await _runtime.RunAsync(request, cancellationToken);
         }
 
-        var threadId = await EnsureThreadAsync(request, cancellationToken);
-
-        var enqueued = await EnqueueDetachedAsync(ToCliRequest(request, threadId), cancellationToken);
+        var (threadId, enqueued) = await EnqueueDetachedAsync(request, cancellationToken);
         if (!enqueued.Succeeded)
         {
-            return FailedResult(request, enqueued.Message ?? "Failed to enqueue external agent run");
+            return FailedResult(threadId, enqueued.Message ?? "Failed to enqueue external agent run");
         }
 
         var runId = enqueued.Data;
@@ -152,12 +182,12 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         var run = await _cliDispatcher.GetAsync(runId, cancellationToken);
         if (!run.Succeeded || run.Data is null)
         {
-            return FailedResult(request, run.Message ?? "External agent run vanished after dispatch");
+            return FailedResult(threadId, run.Message ?? "External agent run vanished after dispatch");
         }
 
         await PersistReplyAsync(threadId, run.Data.Output, cancellationToken);
 
-        return ToRunResult(request, run.Data, threadId);
+        return ToRunResult(run.Data, threadId);
     }
 
     /// <inheritdoc />
@@ -179,9 +209,7 @@ public class AgentDispatchFacade : IAgentDispatchFacade
             yield break;
         }
 
-        var threadId = await EnsureThreadAsync(request, cancellationToken);
-
-        var enqueued = await EnqueueDetachedAsync(ToCliRequest(request, threadId), cancellationToken);
+        var (_, enqueued) = await EnqueueDetachedAsync(request, cancellationToken);
         if (!enqueued.Succeeded)
         {
             yield return new AgentStreamChunk
@@ -249,29 +277,33 @@ public class AgentDispatchFacade : IAgentDispatchFacade
         return binding;
     }
 
+    /// <summary>
+    /// 只带<b>已核过</b>的线程 id 下去：<paramref name="threadId"/> 是 <c>EnsureThreadAsync</c> 的答案，
+    /// 拒绝已在那里抛出、故障已在那里归零，这里不再回退到调用方给的原值。
+    /// </summary>
     private static CliRunRequestDto ToCliRequest(AgentRunRequest request, Guid? threadId) => new()
     {
         AgentId = request.AgentId!.Value,
         Prompt = request.UserMessage ?? string.Empty,
-        ThreadId = threadId ?? request.ThreadId,
+        ThreadId = threadId,
         AgentRunId = request.ExistingRunId,
         UserId = request.UserId
     };
 
-    private static AgentRunResult ToRunResult(AgentRunRequest request, CliRunDto run, Guid? threadId) => new()
+    private static AgentRunResult ToRunResult(CliRunDto run, Guid? threadId) => new()
     {
         Response = run.Output ?? run.Error ?? string.Empty,
         RunId = run.AgentRunId,
-        ThreadId = run.ThreadId ?? threadId ?? request.ThreadId,
+        ThreadId = run.ThreadId ?? threadId,
         Usage = ParseUsage(run.UsageJson),
         FinishReason = ToFinishReason(run.Status),
         Status = ToAgentRunStatus(run.Status)
     };
 
-    private static AgentRunResult FailedResult(AgentRunRequest request, string message) => new()
+    private static AgentRunResult FailedResult(Guid? threadId, string message) => new()
     {
         Response = message,
-        ThreadId = request.ThreadId,
+        ThreadId = threadId,
         FinishReason = FinishReasons.Error,
         Status = AgentRunStatus.Failed
     };

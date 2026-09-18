@@ -40,5 +40,11 @@ public class AIPermissions : IPermissionDefinitionProvider
         context.AddCrudPermissions("ai.permissions", "AI Permissions", parentName: "ai", category: PermissionCategory.Technical);
         context.AddCrudPermissions("ai.thread", "Threads", parentName: "ai");
         context.AddPermission("ai.sql.execute", "Execute AI SQL Queries", parentName: "ai", category: PermissionCategory.Technical);
+
+        // 工具组权限码：敏感的框架内建工具组按 [AIToolGroup(RequiredPermissions)] 声明门控，
+        // AgentResolver 按请求身份检查；没有这些码，RequiredPermissions 门控对框架自带的每个工具都是空转。
+        // ai.tools.sandbox 由 Tnzi.AI.Sandbox 自己的 provider 声明（码随模块走）。
+        context.AddPermission(AIToolPermissions.Task, "Use Sub-Agent Tools", parentName: "ai", category: PermissionCategory.Technical);
+        context.AddPermission(AIToolPermissions.A2A, "Use Agent-to-Agent Tools", parentName: "ai", category: PermissionCategory.Technical);
     }
 }

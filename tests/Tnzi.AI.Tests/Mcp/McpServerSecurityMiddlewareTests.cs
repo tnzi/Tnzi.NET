@@ -109,49 +109,6 @@ public class McpServerSecurityMiddlewareTests
         middleware.ExtractApiKey(context.Request).ShouldBe("header-key");
     }
 
-    // ─── ExtractTenantId - header-only untrusted hint ────────────────────────
-
-    [Fact]
-    public void ExtractTenantId_Header_Returned()
-    {
-        var middleware = CreateMiddleware(new McpServerOptions());
-        var context = new DefaultHttpContext();
-        context.Request.Headers[McpServerSecurityMiddleware.TenantHeaderName] = "tenant-a";
-
-        middleware.ExtractTenantId(context.Request).ShouldBe("tenant-a");
-    }
-
-    [Fact]
-    public void ExtractTenantId_QueryTenantId_Ignored()
-    {
-        // 回归：query string 租户提取已删除 - 构造 URL 即可污染他租户限流分区的攻击面
-        var middleware = CreateMiddleware(new McpServerOptions());
-        var context = new DefaultHttpContext();
-        context.Request.QueryString = new QueryString("?tenantId=spoofed");
-
-        middleware.ExtractTenantId(context.Request).ShouldBeNull();
-    }
-
-    [Fact]
-    public void ExtractTenantId_LegacyQueryTenant_Ignored()
-    {
-        var middleware = CreateMiddleware(new McpServerOptions());
-        var context = new DefaultHttpContext();
-        context.Request.QueryString = new QueryString("?tenant=spoofed");
-
-        middleware.ExtractTenantId(context.Request).ShouldBeNull();
-    }
-
-    [Fact]
-    public void ExtractTenantId_WhitespaceHeader_ReturnsNull()
-    {
-        var middleware = CreateMiddleware(new McpServerOptions());
-        var context = new DefaultHttpContext();
-        context.Request.Headers[McpServerSecurityMiddleware.TenantHeaderName] = "  ";
-
-        middleware.ExtractTenantId(context.Request).ShouldBeNull();
-    }
-
     // ─── ValidateApiKey ──────────────────────────────────────────────────────
 
     [Fact]
@@ -202,73 +159,74 @@ public class McpServerSecurityMiddlewareTests
         middleware.ValidateApiKey("secret").ShouldBeFalse();
     }
 
-    // ─── BuildClientKey - partition logic ────────────────────────────────────
+    // ─── BuildClientKey - caller-only partition ──────────────────────────────
 
     [Fact]
-    public void BuildClientKey_PerTenantOn_HeaderTenant_PartitionsByTenant()
+    public void BuildClientKey_ApiKey_IsCallerHashOnly()
     {
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = true });
+        var middleware = CreateMiddleware(new McpServerOptions());
         var context = new DefaultHttpContext();
-        context.Request.Headers[McpServerSecurityMiddleware.TenantHeaderName] = "tenant-a";
 
-        var key = middleware.BuildClientKey(context, "secret");
-
-        key.ShouldBe($"tenant-a:{ExpectedHash("secret")}");
+        middleware.BuildClientKey(context, "secret").ShouldBe(ExpectedHash("secret"));
     }
 
     [Fact]
-    public void BuildClientKey_PerTenantOn_NoTenant_UsesPublicSegment()
+    public void BuildClientKey_TenantHeader_DoesNotChangeKey()
     {
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = true });
-        var context = new DefaultHttpContext();
+        // ★ 限流键绝不能含客户端可控输入：分区的那一方就是被限流的那一方。
+        // 此前 X-Tenant-Id 头是键的第一段（RateLimitPerTenant 默认开），每换一个头值就换一个满额的桶 ——
+        // 06-10 删掉 query 提取时说的「客户端不得污染分区」，头做的是同一件事。
+        var middleware = CreateMiddleware(new McpServerOptions());
+        var a = new DefaultHttpContext();
+        a.Request.Headers["X-Tenant-Id"] = "tenant-a";
+        var b = new DefaultHttpContext();
+        b.Request.Headers["X-Tenant-Id"] = "tenant-b";
+        var none = new DefaultHttpContext();
 
-        var key = middleware.BuildClientKey(context, "secret");
+        var keyA = middleware.BuildClientKey(a, "secret");
+        var keyB = middleware.BuildClientKey(b, "secret");
+        var keyNone = middleware.BuildClientKey(none, "secret");
 
-        key.ShouldBe($"public:{ExpectedHash("secret")}");
+        keyA.ShouldBe(keyB);
+        keyA.ShouldBe(keyNone);
+        keyA.ShouldNotContain("tenant");
     }
 
     [Fact]
-    public void BuildClientKey_PerTenantOn_QueryTenant_DoesNotPartition()
+    public void CheckRateLimit_RotatingTenantHeader_SharesOneBucket()
     {
-        // 回归：query 租户已不可污染限流分区
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = true });
-        var context = new DefaultHttpContext();
-        context.Request.QueryString = new QueryString("?tenantId=spoofed");
+        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerMinute = 3 });
 
-        var key = middleware.BuildClientKey(context, "secret");
+        for (var i = 0; i < 3; i++)
+        {
+            var context = new DefaultHttpContext();
+            context.Request.Headers["X-Tenant-Id"] = Guid.NewGuid().ToString();
+            middleware.CheckRateLimit(middleware.BuildClientKey(context, "secret")).ShouldBeTrue();
+        }
 
-        key.ShouldStartWith("public:");
-    }
-
-    [Fact]
-    public void BuildClientKey_PerTenantOff_UsesSharedSegment()
-    {
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = false });
-        var context = new DefaultHttpContext();
-        context.Request.Headers[McpServerSecurityMiddleware.TenantHeaderName] = "tenant-a";
-
-        var key = middleware.BuildClientKey(context, "secret");
-
-        key.ShouldBe($"shared:{ExpectedHash("secret")}");
+        var fourth = new DefaultHttpContext();
+        fourth.Request.Headers["X-Tenant-Id"] = Guid.NewGuid().ToString();
+        middleware.CheckRateLimit(middleware.BuildClientKey(fourth, "secret"))
+            .ShouldBeFalse("a fresh header value must not mint a fresh quota");
     }
 
     [Fact]
     public void BuildClientKey_NoApiKey_FallsBackToRemoteIp()
     {
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = false });
+        var middleware = CreateMiddleware(new McpServerOptions());
         var context = new DefaultHttpContext();
         context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.7");
 
-        middleware.BuildClientKey(context, apiKey: null).ShouldBe("shared:203.0.113.7");
+        middleware.BuildClientKey(context, apiKey: null).ShouldBe("203.0.113.7");
     }
 
     [Fact]
     public void BuildClientKey_NoApiKeyNoIp_FallsBackToAnonymous()
     {
-        var middleware = CreateMiddleware(new McpServerOptions { RateLimitPerTenant = false });
+        var middleware = CreateMiddleware(new McpServerOptions());
         var context = new DefaultHttpContext();
 
-        middleware.BuildClientKey(context, apiKey: null).ShouldBe("shared:anonymous");
+        middleware.BuildClientKey(context, apiKey: null).ShouldBe("anonymous");
     }
 
     [Fact]

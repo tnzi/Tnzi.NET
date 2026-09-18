@@ -26,7 +26,6 @@ public class DefaultMcpAdminControllerTests
             Enabled = true,
             Endpoint = "/mcp",
             RequireAuthentication = true,
-            RateLimitPerTenant = true,
             RateLimitPerMinute = 600
         };
 

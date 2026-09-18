@@ -496,7 +496,8 @@ public class InvitationServiceTests
                 authTokenService.Object,
                 handler.Object,
                 urlGenerator.Object,
-                options.Object);
+                options.Object,
+                UnscopedUserTenantScope.Create());
         }
 
         public string ExtractToken(string acceptUrl)

@@ -18,6 +18,15 @@ public class AiMiddlewareContext
     /// <summary>附加工具（中间件可注入工具）</summary>
     public List<AITool> AdditionalTools { get; set; } = [];
 
+    /// <summary>
+    /// 本轮要从模型可见工具列表里摘掉的工具名（不区分大小写）。对 Agent 自带的工具与
+    /// <see cref="AdditionalTools"/> 一并生效，由 AgentRuntime 在合并工具之后应用。
+    /// 由 SkillConstraintMiddleware 写入（已激活技能的组 / 白黑名单约束）。
+    /// 这只是「不给模型看」；真正的拦截在工具执行管线（SkillConstraintToolMiddleware），
+    /// 那一层不依赖本集合，自定义执行器不实现 <c>WithoutTools</c> 时约束仍然成立。
+    /// </summary>
+    public HashSet<string> ExcludedToolNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>引用来源（RAG/Memory 中间件填充）</summary>
     public List<CitationDto> Citations { get; set; } = [];
 

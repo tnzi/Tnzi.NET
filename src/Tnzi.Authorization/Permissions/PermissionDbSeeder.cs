@@ -8,10 +8,11 @@ namespace Tnzi.Authorization.Permissions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why</b>: provider-declared permissions used to live only in the
-/// in-memory <see cref="PermissionManager"/> snapshot - they were
-/// invisible to admin pages and couldn't be FK-referenced by
-/// <c>RoleFunction</c>. This seeder closes that gap so a developer can:
+/// <b>Why</b>: provider-declared permissions used to live only in an
+/// in-memory snapshot - they were invisible to admin pages and couldn't be
+/// FK-referenced by <c>RoleFunction</c>. This seeder closes that gap (and is
+/// now the only path by which a declared code exists at runtime) so a
+/// developer can:
 /// </para>
 /// <list type="number">
 ///   <item>Implement <see cref="IPermissionDefinitionProvider"/> in a module</item>
@@ -37,7 +38,9 @@ namespace Tnzi.Authorization.Permissions;
 ///     module loses nothing and gets everything back when it does
 ///     (<c>Authorization:PermissionRetirement</c>, see
 ///     <see cref="Options.PermissionRetirementMode"/>).
-///     Admin-created rows are never touched.</item>
+///     Admin-created rows are never touched. Retirement is skipped for the
+///     whole run when any provider's <c>Define</c> threw: a partial
+///     collection cannot tell "no longer shipped" from "broken today".</item>
 /// </list>
 /// </remarks>
 public class PermissionDbSeeder
@@ -84,9 +87,13 @@ public class PermissionDbSeeder
         var providerList = providers as IReadOnlyCollection<IPermissionDefinitionProvider> ?? providers.ToList();
 
         // Collapse all provider outputs into one context. Duplicate names
-        // across providers are first-wins (matches PermissionManager's
-        // existing semantics - see LoadFromProviders there).
+        // across providers are first-wins.
         var context = new PermissionDefinitionContext();
+        // Providers whose Define threw. A partial collection can still be
+        // upserted (what we did see is real), but it must never drive
+        // retirement: "not declared this run" would then mean "that provider
+        // has a bug today", not "this deployment no longer ships the code".
+        var failedProviders = new List<string>();
         foreach (var provider in providerList)
         {
             try
@@ -95,9 +102,11 @@ public class PermissionDbSeeder
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
-                    "PermissionDefinitionProvider {Provider} threw during Define; its declarations are skipped this seed run.",
-                    provider.GetType().FullName);
+                var providerName = provider.GetType().FullName ?? provider.GetType().Name;
+                failedProviders.Add(providerName);
+                _logger.LogError(ex,
+                    "PermissionDefinitionProvider {Provider} threw during Define; its declarations are skipped this seed run and no permission is retired this run.",
+                    providerName);
             }
         }
 
@@ -261,11 +270,24 @@ public class PermissionDbSeeder
         // owning module, and deleting takes the role grants with it,
         // irreversibly (the soft-delete filter hides the tombstone, so
         // re-declaring inserts a fresh id and the grants never reattach).
+        //
+        // Retirement only runs when THIS collection is complete. A provider
+        // that threw contributed nothing, so every code it owns would look
+        // orphaned; Disable mode would silently strip those permissions from
+        // every non-super-admin user, and Delete mode would drop their role
+        // grants and user direct grants irreversibly - all while the process
+        // starts and the health check stays green.
         var retirement = _options?.Value?.PermissionRetirement ?? Options.PermissionRetirementMode.Disable;
         var declaredFunctionCodes = new HashSet<string>(
             context.Permissions.Values.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
 
-        if (retirement != Options.PermissionRetirementMode.Off)
+        if (retirement != Options.PermissionRetirementMode.Off && failedProviders.Count > 0)
+        {
+            _logger.LogError(
+                "PermissionDbSeeder: permission retirement skipped this run because {Count} provider(s) threw during Define ({Providers}). Fix the provider; retirement resumes on the next clean seed run.",
+                failedProviders.Count, string.Join(", ", failedProviders));
+        }
+        else if (retirement != Options.PermissionRetirementMode.Off)
         {
             var orphanFunctions = existingFunctions
                 .Where(f => f.IsSystemManaged && !f.IsRetired && !declaredFunctionCodes.Contains(f.Code))

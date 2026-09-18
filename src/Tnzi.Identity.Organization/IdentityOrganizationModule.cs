@@ -59,6 +59,9 @@ public class IdentityOrganizationModule : TnziApplicationModule
         // DefaultUserAdminController 里按可空可选依赖持有它，未加载本模块时那两处降级。
         context.Services.AddScoped<IOrganizationService, OrganizationService>();
 
+        // 存量修复：把旧写法留下的「随机 GUID 路径段」重建成祖先 Id 链（迁移之后、每次启动、幂等）。
+        context.Services.AddTransient<IPostMigrationStartupTask, OrganizationPathRepairStartupTask>();
+
         return base.ConfigureServicesAsync(context);
     }
 }

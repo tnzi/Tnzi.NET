@@ -23,6 +23,15 @@ public interface IOAuthService
     Task<Result> LinkOAuthAccountAsync(Guid userId, string provider, string providerKey, string? displayName = null);
 
     /// <summary>
+    /// 个人中心发起的绑定在回调里的落地：把提供商证实的外部身份挂到<b>签发绑定令牌的那个账号</b>上。
+    /// 只做关联 —— 不签发令牌、不新建账号、不按邮箱认领；provider key 已属于另一个账号时 409。
+    /// </summary>
+    /// <param name="userId">绑定令牌签发给的用户（<see cref="IOAuthLinkTokenService.ConsumeAsync"/> 的结果）</param>
+    /// <param name="provider">提供者名称（小写）</param>
+    /// <param name="principal">提供商回调的 ClaimsPrincipal</param>
+    Task<Result> LinkExternalLoginAsync(Guid userId, string provider, ClaimsPrincipal principal);
+
+    /// <summary>
     /// 解绑OAuth账户
     /// </summary>
     /// <param name="userId">用户ID</param>

@@ -42,6 +42,13 @@ public class TemplateInfo
     public string? DefaultLayoutName { get; set; }
 
     /// <summary>
+    /// 模板文件自述的类型（front matter 顶层 <c>type:</c>，或 <c>metadata.type</c>），解析不出为 null。
+    /// 渲染服务据此决定正文是 HTML 还是纯文本（短信不做 HTML 编码），
+    /// 所以随包发布的短信模板必须把它写进 front matter，否则按 HTML 编码。
+    /// </summary>
+    public TemplateType? Type { get; set; }
+
+    /// <summary>
     /// 模板文件在 front matter 的 <c>metadata:</c> 块里自述的扩展键值。
     /// 键完全由模板作者定义，框架不做任何约定，也不参与校验。
     /// <para>

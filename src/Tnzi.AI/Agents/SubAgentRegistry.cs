@@ -5,13 +5,20 @@ namespace Tnzi.AI.Agents;
 /// </summary>
 /// <remarks>
 /// 内置类型：
-/// - general-purpose: 通用子 Agent，完整工具集（排除 task/clarification/present_files），50 轮次
+/// - general-purpose: 通用子 Agent，datetime/text/websearch/sandbox 工具集（排除 task/clarification/artifact），50 轮次
 /// - bash: 沙箱专用子 Agent，仅 sandbox 工具，30 轮次
-/// - researcher: 研究子 Agent，web-search + file 工具，30 轮次
+/// - researcher: 研究子 Agent，websearch 工具，30 轮次
 /// </remarks>
 public class SubAgentRegistry : ISubAgentRegistry
 {
-    private readonly ConcurrentDictionary<string, SubAgentTypeDefinition> _types = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>全局类型：内置 + 代码经 Register() 注册的，不随任何租户的重载消失</summary>
+    private readonly ConcurrentDictionary<string, SubAgentTypeDefinition> _globalTypes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 数据库来源的类型按租户桶存放。此前是一张单表：任一租户管理员 CRUD 后 Clear() 整表再按自己的
+    /// 租户过滤重载，其它租户的类型随之消失、本租户的 Instructions / ToolGroups 对全体可见。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, SubAgentTypeDefinition>> _tenantTypes = new();
 
     public SubAgentRegistry()
     {
@@ -20,13 +27,41 @@ public class SubAgentRegistry : ISubAgentRegistry
 
     /// <inheritdoc />
     public IReadOnlyList<SubAgentTypeDefinition> GetAll()
-        => _types.Values.ToList().AsReadOnly();
+        => GetAllForTenant(SubAgentTenantKey.Default);
 
     /// <inheritdoc />
     public SubAgentTypeDefinition? Get(string name)
+        => GetForTenant(name, SubAgentTenantKey.Default);
+
+    /// <inheritdoc />
+    public IReadOnlyList<SubAgentTypeDefinition> GetAllForTenant(string tenantKey)
+    {
+        Check.NotNullOrWhiteSpace(tenantKey);
+
+        var merged = new Dictionary<string, SubAgentTypeDefinition>(_globalTypes, StringComparer.OrdinalIgnoreCase);
+        if (_tenantTypes.TryGetValue(tenantKey, out var bucket))
+        {
+            foreach (var (name, definition) in bucket)
+            {
+                merged[name] = definition;
+            }
+        }
+
+        return merged.Values.ToList().AsReadOnly();
+    }
+
+    /// <inheritdoc />
+    public SubAgentTypeDefinition? GetForTenant(string name, string tenantKey)
     {
         Check.NotNullOrWhiteSpace(name);
-        return _types.GetValueOrDefault(name);
+        Check.NotNullOrWhiteSpace(tenantKey);
+
+        if (_tenantTypes.TryGetValue(tenantKey, out var bucket) && bucket.TryGetValue(name, out var tenantDefinition))
+        {
+            return tenantDefinition;
+        }
+
+        return _globalTypes.GetValueOrDefault(name);
     }
 
     /// <inheritdoc />
@@ -34,32 +69,65 @@ public class SubAgentRegistry : ISubAgentRegistry
     {
         Check.NotNull(definition);
         Check.NotNullOrWhiteSpace(definition.Name);
-        _types[definition.Name] = definition;
+        _globalTypes[definition.Name] = definition;
     }
 
     /// <inheritdoc />
     public bool Unregister(string name)
     {
         Check.NotNullOrWhiteSpace(name);
-        return _types.TryRemove(name, out _);
+        return _globalTypes.TryRemove(name, out _);
     }
 
     /// <inheritdoc />
-    public async Task LoadFromStoreAsync(IRepository<SubAgentType, Guid> repository, CancellationToken cancellationToken = default)
+    public Task LoadFromStoreAsync(IRepository<SubAgentType, Guid> repository, CancellationToken cancellationToken = default)
+        => LoadTenantFromStoreAsync(repository, SubAgentTenantKey.Default, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task LoadTenantFromStoreAsync(IRepository<SubAgentType, Guid> repository, string tenantKey, CancellationToken cancellationToken = default)
     {
         Check.NotNull(repository);
-
-        // 清空所有类型，重新注册内置 + DB 启用的类型（确保禁用的类型被移除）
-        _types.Clear();
-        RegisterBuiltInTypes();
+        Check.NotNullOrWhiteSpace(tenantKey);
 
         var entities = await repository.AsQueryable()
             .Where(e => e.IsEnabled)
             .ToListAsync(cancellationToken);
 
+        // 整桶替换（确保禁用 / 删除的类型被移除），只动这一个租户的桶
+        _tenantTypes[tenantKey] = ToBucket(entities);
+    }
+
+    /// <inheritdoc />
+    public async Task LoadAllTenantsFromStoreAsync(IRepository<SubAgentType, Guid> repository, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(repository);
+
+        var entities = await repository.AsQueryable()
+            .Where(e => e.IsEnabled)
+            .ToListAsync(cancellationToken);
+
+        var buckets = entities
+            .GroupBy(e => SubAgentTenantKey.From(e.TenantId))
+            .ToDictionary(g => g.Key, g => ToBucket(g));
+
+        // 启动期整体重建：读到几个租户就装几个桶；没读到的桶（该租户没有启用行）一并清掉
+        foreach (var staleKey in _tenantTypes.Keys.Where(k => !buckets.ContainsKey(k)).ToList())
+        {
+            _tenantTypes.TryRemove(staleKey, out _);
+        }
+
+        foreach (var (tenantKey, bucket) in buckets)
+        {
+            _tenantTypes[tenantKey] = bucket;
+        }
+    }
+
+    private static ConcurrentDictionary<string, SubAgentTypeDefinition> ToBucket(IEnumerable<SubAgentType> entities)
+    {
+        var bucket = new ConcurrentDictionary<string, SubAgentTypeDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var entity in entities)
         {
-            var definition = new SubAgentTypeDefinition(
+            bucket[entity.Name] = new SubAgentTypeDefinition(
                 Name: entity.Name,
                 Description: entity.Description,
                 ToolGroups: entity.ToolGroups ?? [],
@@ -69,18 +137,24 @@ public class SubAgentRegistry : ISubAgentRegistry
                 DefaultModel: entity.DefaultModel,
                 DefaultApprovalMode: entity.DefaultApprovalMode,
                 CapabilityTags: entity.CapabilityTags ?? []);
-
-            Register(definition);
         }
+
+        return bucket;
     }
 
+    /// <summary>
+    /// 内置类型的工具组名必须是注册表里真实存在的组名（<c>[AIToolGroup]</c> 声明的那个字符串）：
+    /// 未知组名在 <c>IToolRegistry.GetToolsByGroups</c> 里静默解析为零个工具，不报错。
+    /// 此前写的是 <c>default</c> / <c>file</c> / <c>code</c> / <c>web-search</c> / <c>present-files</c>
+    /// 这些从未存在过的名字，general-purpose 实际只剩 sandbox、researcher 一个工具都没有。
+    /// </summary>
     private void RegisterBuiltInTypes()
     {
         Register(new SubAgentTypeDefinition(
             Name: "general-purpose",
             Description: "General-purpose sub-agent with full toolset minus orchestration tools",
-            ToolGroups: ["default", "file", "code", "web-search", "sandbox"],
-            ExcludedToolGroups: ["task", "clarification", "present-files"],
+            ToolGroups: ["datetime", "text", "websearch", "sandbox"],
+            ExcludedToolGroups: ["task", "clarification", "artifact"],
             MaxTurns: 50,
             Instructions: "You are a general-purpose assistant. Complete the delegated task thoroughly.",
             DefaultApprovalMode: ToolApprovalMode.Specific,
@@ -98,12 +172,12 @@ public class SubAgentRegistry : ISubAgentRegistry
 
         Register(new SubAgentTypeDefinition(
             Name: "researcher",
-            Description: "Research sub-agent with web search and file access",
-            ToolGroups: ["web-search", "file"],
+            Description: "Research sub-agent with web search",
+            ToolGroups: ["websearch"],
             ExcludedToolGroups: [],
             MaxTurns: 30,
-            Instructions: "You are a research assistant. Search the web and read files to gather information for the task.",
+            Instructions: "You are a research assistant. Search the web to gather information for the task.",
             DefaultApprovalMode: ToolApprovalMode.NeverRequire,
-            CapabilityTags: ["research", "web", "files"]));
+            CapabilityTags: ["research", "web"]));
     }
 }

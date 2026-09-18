@@ -59,10 +59,13 @@ public class EvaluationService : ApplicationService, IEvaluationService
         Check.NotNull(dto);
         Check.NotNullOrEmpty(dto.Cases);
 
+        // 被评估的 Agent 与版本随每个用例走：评估器据此真的跑那个 Agent，而不是只把它们写进运行记录
         var cases = dto.Cases.Select(c => new EvaluationCase
         {
             Input = c.Input,
-            ExpectedOutput = c.ExpectedOutput
+            ExpectedOutput = c.ExpectedOutput,
+            AgentId = dto.AgentId,
+            VersionNumber = dto.VersionNumber
         }).ToList();
 
         var stopwatch = Stopwatch.StartNew();

@@ -104,6 +104,12 @@ export interface AccessLogInfoDto extends AuditedEntity<string> {
  * Access log statistics DTO
  */
 export interface AccessLogStatisticsDto {
+  /**
+   * Whether this deployment captures access logs at all
+   * (`System:AccessLog:Enabled`, default off). A permanent 0 and "nobody
+   * visited" look identical without it.
+   */
+  captureEnabled: boolean;
   totalRequests: number;
   uniqueUsers: number;
   successRequests: number;

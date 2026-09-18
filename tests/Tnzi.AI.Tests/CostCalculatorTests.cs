@@ -20,6 +20,66 @@ public class CostCalculatorTests
         return new CostCalculator(monitor.Object);
     }
 
+    private static CostCalculator CreateCalculatorFromJson(string json)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json)))
+            .Build();
+        var costOptions = configuration.GetSection("AI:CostTracking")
+            .Get<CostTrackingOptions>(o => o.ErrorOnUnknownConfiguration = true)!;
+        return CreateCalculator(costOptions);
+    }
+
+    // -------------------------------------------------------------------------
+    // Binding from appsettings
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// ★ <c>:</c> 是 IConfiguration 的路径分隔符。文档一直写 <c>"OpenAI:gpt-4o"</c> 作字典键，
+    /// 绑定器却把它拆成 <c>ModelCosts:OpenAI:gpt-4o</c>：键 <c>OpenAI</c> 得到一个全 0 的费率，
+    /// <c>gpt-4o</c> 被当未知属性丢弃 —— 从 appsettings 里从来没有一条费率绑进来过，
+    /// 而所有既有测试都用 C# 直接构造字典，全绿。两级字典让扁平键与嵌套写法在配置层等价。
+    /// </summary>
+    [Fact]
+    public void CalculateCost_FromAppSettings_FlatProviderColonModelKey_Binds()
+    {
+        var calc = CreateCalculatorFromJson("""
+            { "AI": { "CostTracking": { "Enabled": true, "ModelCosts": {
+                "OpenAI:gpt-4o": { "InputCostPer1MTokens": 5.0, "OutputCostPer1MTokens": 15.0 },
+                "Anthropic:*": { "InputCostPer1MTokens": 2.0, "OutputCostPer1MTokens": 8.0 }
+            } } } }
+            """);
+
+        calc.CalculateCost("OpenAI", "gpt-4o", 1000, 500).ShouldBe(0.0125m);
+        calc.CalculateCost("Anthropic", "claude-opus-5", 1000, 500).ShouldBe(0.006m);
+        calc.CalculateCost("OpenAI", "unknown", 1000, 500).ShouldBeNull();
+    }
+
+    [Fact]
+    public void CalculateCost_FromAppSettings_NestedProviderThenModel_Binds()
+    {
+        var calc = CreateCalculatorFromJson("""
+            { "AI": { "CostTracking": { "Enabled": true, "ModelCosts": {
+                "OpenAI": { "gpt-4o": { "InputCostPer1MTokens": 5.0, "OutputCostPer1MTokens": 15.0 } }
+            } } } }
+            """);
+
+        calc.CalculateCost("OpenAI", "gpt-4o", 1000, 500).ShouldBe(0.0125m);
+    }
+
+    /// <summary>绑定器建出来的内层字典不带比较器；provider / model 名的大小写不能影响命中。</summary>
+    [Fact]
+    public void CalculateCost_FromAppSettings_LookupIsCaseInsensitive()
+    {
+        var calc = CreateCalculatorFromJson("""
+            { "AI": { "CostTracking": { "Enabled": true, "ModelCosts": {
+                "openai:GPT-4O": { "InputCostPer1MTokens": 5.0, "OutputCostPer1MTokens": 15.0 }
+            } } } }
+            """);
+
+        calc.CalculateCost("OpenAI", "gpt-4o", 1000, 500).ShouldBe(0.0125m);
+    }
+
     // -------------------------------------------------------------------------
     // Enabled / Disabled
     // -------------------------------------------------------------------------
@@ -44,12 +104,15 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:gpt-4o"] = new ModelCostRate
+                ["OpenAI"] = new()
                 {
-                    InputCostPer1MTokens = 5.0m,
-                    OutputCostPer1MTokens = 15.0m
+                    ["gpt-4o"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 5.0m,
+                        OutputCostPer1MTokens = 15.0m
+                    }
                 }
             }
         };
@@ -68,12 +131,16 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            // 刻意不给比较器：绑定器建出来的内层字典就是这个形态。
+            ModelCosts = new()
             {
-                ["openai:GPT-4O"] = new ModelCostRate
+                ["openai"] = new()
                 {
-                    InputCostPer1MTokens = 5.0m,
-                    OutputCostPer1MTokens = 15.0m
+                    ["GPT-4O"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 5.0m,
+                        OutputCostPer1MTokens = 15.0m
+                    }
                 }
             }
         };
@@ -94,12 +161,15 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:*"] = new ModelCostRate
+                ["OpenAI"] = new()
                 {
-                    InputCostPer1MTokens = 2.0m,
-                    OutputCostPer1MTokens = 8.0m
+                    ["*"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 2.0m,
+                        OutputCostPer1MTokens = 8.0m
+                    }
                 }
             }
         };
@@ -118,10 +188,13 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:gpt-4o"] = new ModelCostRate { InputCostPer1MTokens = 5.0m, OutputCostPer1MTokens = 15.0m },
-                ["OpenAI:*"] = new ModelCostRate { InputCostPer1MTokens = 1.0m, OutputCostPer1MTokens = 1.0m }
+                ["OpenAI"] = new()
+                {
+                    ["gpt-4o"] = new ModelCostRate { InputCostPer1MTokens = 5.0m, OutputCostPer1MTokens = 15.0m },
+                    ["*"] = new ModelCostRate { InputCostPer1MTokens = 1.0m, OutputCostPer1MTokens = 1.0m }
+                }
             }
         };
         var calc = CreateCalculator(costOptions);
@@ -183,12 +256,15 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:gpt-4o"] = new ModelCostRate
+                ["OpenAI"] = new()
                 {
-                    InputCostPer1MTokens = 5.0m,
-                    OutputCostPer1MTokens = 15.0m
+                    ["gpt-4o"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 5.0m,
+                        OutputCostPer1MTokens = 15.0m
+                    }
                 }
             }
         };
@@ -210,12 +286,15 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:gpt-4o"] = new ModelCostRate
+                ["OpenAI"] = new()
                 {
-                    InputCostPer1MTokens = 5.0m,
-                    OutputCostPer1MTokens = 15.0m
+                    ["gpt-4o"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 5.0m,
+                        OutputCostPer1MTokens = 15.0m
+                    }
                 }
             }
         };
@@ -236,12 +315,15 @@ public class CostCalculatorTests
         var costOptions = new CostTrackingOptions
         {
             Enabled = true,
-            ModelCosts = new Dictionary<string, ModelCostRate>(StringComparer.OrdinalIgnoreCase)
+            ModelCosts = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["OpenAI:gpt-4o"] = new ModelCostRate
+                ["OpenAI"] = new()
                 {
-                    InputCostPer1MTokens = 5.0m,
-                    OutputCostPer1MTokens = 15.0m
+                    ["gpt-4o"] = new ModelCostRate
+                    {
+                        InputCostPer1MTokens = 5.0m,
+                        OutputCostPer1MTokens = 15.0m
+                    }
                 }
             }
         };

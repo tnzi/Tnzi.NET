@@ -91,7 +91,6 @@ public class AIModuleRegistrationTests
     #region TryAdd 服务（允许用户覆盖）
 
     [Theory]
-    [InlineData(typeof(IConversationStore))]
     [InlineData(typeof(IMemoryStore))]
     [InlineData(typeof(IMemoryConsolidator))]
     [InlineData(typeof(IEntityMemoryStore))]
@@ -122,14 +121,14 @@ public class AIModuleRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
 
-        // 预注册自定义 IConversationStore
-        var mock = Mock.Of<IConversationStore>();
+        // 预注册自定义 IMemoryStore
+        var mock = Mock.Of<IMemoryStore>();
         services.AddScoped(_ => mock);
 
         ConfigureModule(services);
 
         // 第一个注册应为自定义实现
-        var descriptor = services.First(d => d.ServiceType == typeof(IConversationStore));
+        var descriptor = services.First(d => d.ServiceType == typeof(IMemoryStore));
         descriptor.ImplementationFactory.ShouldNotBeNull();
     }
 
@@ -174,6 +173,7 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(PromptCachingMiddleware))]
     [InlineData(typeof(QuotaMiddleware))]
     [InlineData(typeof(InputGuardrailMiddleware))]
+    [InlineData(typeof(ThreadResolutionMiddleware))]
     [InlineData(typeof(HistoryMiddleware))]
     [InlineData(typeof(ContextInjectionMiddleware))]
     [InlineData(typeof(UsageLoggingMiddleware))]
@@ -181,7 +181,6 @@ public class AIModuleRegistrationTests
     [InlineData(typeof(ToolGuardrailMiddleware))]
     [InlineData(typeof(LoopDetectionMiddleware))]
     [InlineData(typeof(ToolErrorRecoveryMiddleware))]
-    [InlineData(typeof(SubAgentLimitMiddleware))]
     [InlineData(typeof(SummarizationMiddleware))]
     [InlineData(typeof(FileUploadMiddleware))]
     [InlineData(typeof(TodoMiddleware))]
@@ -205,8 +204,8 @@ public class AIModuleRegistrationTests
         var services = CreateServiceCollection();
         var middlewareCount = services.Count(d => d.ServiceType == typeof(IAiMiddleware));
 
-        // AIModule 注册了 17 个中间件（每个都有 IAiMiddleware 转发）
-        middlewareCount.ShouldBeGreaterThanOrEqualTo(17, "Should register at least 17 IAiMiddleware forwards");
+        // AIModule 注册了 16 个中间件（每个都有 IAiMiddleware 转发；2026-09-12 删掉从未生效的 SubAgentLimitMiddleware）
+        middlewareCount.ShouldBeGreaterThanOrEqualTo(16, "Should register at least 16 IAiMiddleware forwards");
     }
 
     [Fact]

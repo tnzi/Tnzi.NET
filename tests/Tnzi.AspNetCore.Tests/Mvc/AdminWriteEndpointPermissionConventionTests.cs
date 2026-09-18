@@ -82,10 +82,8 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceRevaluationAdminController.Preview:POST",
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceBalanceSummaryAdminController.Verify:POST",
         "Tnzi.Finance.Controllers.Admin.DefaultFinanceAccountAdminController.GetBalances:POST",
-        // 支票 preview:零副作用预览(与 print 同一套校验,但不分配号、不写登记簿、不动账;
-        // 票号是 NextCheckNumber 的 peek 而非 consume)。POST 仅因入参是一组付款单 id。
-        // 真正开票的 print/register/reprint/render 均带 finance.check.create 写码。
-        "Tnzi.Finance.Banking.Controllers.Admin.DefaultFinanceCheckAdminController.Preview:POST",
+        // 支票 preview 曾列在这里（零副作用）。2026-09-12 移出：它渲染完整票面，白纸票纸下
+        // 磁码行是解密后的真账号，产物与 {id}/render 同属可流通级，现带 finance.check.create 写码。
         // 周期性单据 PreviewSchedule:排期推演纯计算,不落库也不造单据(真正生成的
         // run/run-due 带 finance.recurring.execute)。POST 仅因入参是整个模板草案
         // ——锚点 31 号 x 每季度这类规则在脑子里算不清楚,让人先看见日期再保存。

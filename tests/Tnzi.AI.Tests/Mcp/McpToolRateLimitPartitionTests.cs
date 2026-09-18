@@ -54,7 +54,8 @@ public class McpToolRateLimitPartitionTests
         context.Items[McpServerSecurityMiddleware.CallerHashItemKey] = callerHash;
         if (tenant is not null)
         {
-            context.Items[McpServerSecurityMiddleware.TenantHeaderName] = tenant;
+            // 客户端自报的租户头：既不进 Items 也不进限流键，这里放进去只为证明它被无视
+            context.Items["X-Tenant-Id"] = tenant;
         }
         _accessor.HttpContext = context;
     }
@@ -84,8 +85,9 @@ public class McpToolRateLimitPartitionTests
     }
 
     [Fact]
-    public async Task DifferentTenants_DoNotShareABucket()
+    public async Task ToolBucket_IgnoresTenantItem()
     {
+        // 同一个调用方换一个租户头不能换来一个新桶：工具桶与 HTTP 桶一样只按调用方分区
         ExposeCustomTool("probe");
 
         ActAs("sameHash", tenant: "tenant-a");
@@ -94,7 +96,7 @@ public class McpToolRateLimitPartitionTests
         (await CallAsync("probe")).ShouldBeFalse();
 
         ActAs("sameHash", tenant: "tenant-b");
-        (await CallAsync("probe")).ShouldBeTrue();
+        (await CallAsync("probe")).ShouldBeFalse();
     }
 
     [Fact]

@@ -1,4 +1,8 @@
 <template>
+  <!-- The overlay provider: global light/dark mode + small controls, the
+       same defaults every TModalShell dialog gets. This family hand-rolls its
+       card (compact header + close), so it wears the provider explicitly. -->
+  <TOverlayTheme>
   <NModal
     :show="show"
     :z-index="zIndex"
@@ -23,10 +27,12 @@
       </div>
     </div>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
 import { NModal } from 'naive-ui'
+import { TOverlayTheme } from '@tnzi/ui'
 import { Icon } from '@iconify/vue'
 
 // Shared chrome for the chat pop-up dialogs (New Chat / Member Picker / Search

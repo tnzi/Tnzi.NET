@@ -23,10 +23,10 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     #region 权限检查
 
     /// <summary>
-    /// 检查用户是否有指定实体的数据权限
+    /// 检查用户对指定实体的某一行是否有数据权限（按该用户的过滤范围 + Id 真的查一次）
     /// </summary>
     /// <param name="request">检查权限请求</param>
-    /// <returns>是否有权限</returns>
+    /// <returns>该行是否在用户的数据范围内；类型未登记 404，登记了但本部署解析不到 CLR 类型 501</returns>
     [HttpPost("check")]
     public virtual async Task<ApiResult<bool>> CheckDataPermission([FromBody] CheckDataPermissionRequest request)
     {
@@ -233,7 +233,7 @@ public class CheckDataPermissionRequest
     public Guid UserId { get; set; }
 
     /// <summary>
-    /// 实体类型名称（完整类型名）
+    /// 实体类型名称（CLR 全名 <c>typeof(T).FullName</c>，不带程序集）
     /// </summary>
     public string EntityTypeName { get; set; } = string.Empty;
 

@@ -117,16 +117,18 @@ public class DocumentIngestionBackgroundJobTests : IntegratedTestBase<RagJobTest
     }
 
     [Fact]
-    public async Task MissingDocument_NoOp_DoesNotTouchCounters()
+    public async Task MissingDocument_Throws_SoTheSchedulerRetries_AndDoesNotTouchCounters()
     {
         var kbId = await SeedKbAsync();
         var missingDocId = Guid.NewGuid();
         var mock = new Mock<IDocumentIngestionService>();
         var job = CreateJob(mock);
 
-        await job.ExecuteAsync(JobArgs(kbId, missingDocId));
+        // 文档不存在必须抛出：静默返回会被 Hangfire 记成成功、永不重试，
+        // 而"行还没提交、worker 先跑到"正是这条路径最常见的成因。
+        await Should.ThrowAsync<InvalidOperationException>(() => job.ExecuteAsync(JobArgs(kbId, missingDocId)));
 
-        // 文档不存在直接跳过，绝不调用摄取、绝不动计数器
+        // 绝不调用摄取、绝不动计数器
         mock.Verify(s => s.IngestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         var kb = await ReloadKbAsync(kbId);
         kb.DocumentCount.ShouldBe(0);

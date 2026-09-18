@@ -62,4 +62,10 @@ public static class ErrorCodes
     /// database row, so no value can be attached to it yet.
     /// </summary>
     public const string FeatureDefinitionNotOverridable = "FEATURE_DEFINITION_NOT_OVERRIDABLE";
+
+    /// <summary>
+    /// The caller is bound to a tenant and named a provider key it does not own
+    /// (typically another tenant's id). Refused, never silently redirected to the caller's tenant.
+    /// </summary>
+    public const string FeatureValueScopeForbidden = "FEATURE_VALUE_SCOPE_FORBIDDEN";
 }

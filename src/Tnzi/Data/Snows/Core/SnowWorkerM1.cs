@@ -67,11 +67,6 @@ internal class SnowWorkerM1 : ISnowWorker
             BaseTime = options.BaseTime;
         }
 
-        if (WorkerId < 1)
-        {
-            WorkerId = (ushort)DateTime.Now.Millisecond;
-        }
-
         if (SeqBitLength == 0)
         {
             SeqBitLength = 6;

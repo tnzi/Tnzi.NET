@@ -37,6 +37,7 @@ public partial class ProviderService : ApplicationService, IProviderService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ICurrentTenant? _currentTenant;
     private readonly IOptionsMonitor<AIOptions>? _aiOptionsMonitor;
+    private readonly IChatClientFactory? _chatClientFactory;
 
     public ProviderService(
         IRepository<Provider, Guid> repository,
@@ -44,7 +45,8 @@ public partial class ProviderService : ApplicationService, IProviderService
         IHttpClientFactory httpClientFactory,
         IServiceProvider serviceProvider,
         ICurrentTenant? currentTenant = null,
-        IOptionsMonitor<AIOptions>? aiOptionsMonitor = null)
+        IOptionsMonitor<AIOptions>? aiOptionsMonitor = null,
+        IChatClientFactory? chatClientFactory = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -52,6 +54,23 @@ public partial class ProviderService : ApplicationService, IProviderService
         _httpClientFactory = Check.NotNull(httpClientFactory);
         _currentTenant = currentTenant;
         _aiOptionsMonitor = aiOptionsMonitor;
+        _chatClientFactory = chatClientFactory;
+    }
+
+    /// <summary>
+    /// 写入后让运行时工厂丢掉这个名字的缓存（数据库解析结果 60s TTL + 已建客户端），
+    /// 否则管理端改完端点/密钥，接口 200 而 agent 在 TTL 内继续打旧端点。
+    /// 更名时新旧两个名字都要清。
+    /// </summary>
+    private void InvalidateRuntimeCache(params string[] providerNames)
+    {
+        if (_chatClientFactory is null)
+            return;
+
+        foreach (var name in providerNames.Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _chatClientFactory.InvalidateProvider(name);
+        }
     }
 
     /// <summary>
@@ -197,9 +216,20 @@ public partial class ProviderService : ApplicationService, IProviderService
                 return Fail<ProviderDto>("Provider type is required", 400, ErrorCodes.ProviderOperationFailed);
             }
 
-            // 计算作用域：优先使用请求显式值，其次按当前租户上下文推断
+            // 计算作用域：优先使用请求显式值，其次按当前租户上下文推断。
+            // 租户上下文下不得建 System 行（与 Update/Delete 同一道门）：System 行对所有租户可见，
+            // 租户管理员借它就能把自己的端点与密钥塞进别的租户的运行时解析。
+            // 反向也拦：没有租户上下文时不得建 Tenant 行，那会落成 TenantId=null 的孤儿行，谁也解析不到。
             var tenantId = _currentTenant?.Id;
             var scope = dto.Scope ?? (tenantId.HasValue ? ResourceScope.Tenant : ResourceScope.System);
+            if (tenantId.HasValue && scope == ResourceScope.System)
+            {
+                return Fail<ProviderDto>("Access denied: system providers are managed by administrators.", 403, ErrorCodes.ProviderOperationFailed);
+            }
+            if (!tenantId.HasValue && scope == ResourceScope.Tenant)
+            {
+                return Fail<ProviderDto>("A tenant-scoped provider requires a tenant context.", 400, ErrorCodes.ProviderOperationFailed);
+            }
             var effectiveTenantId = scope == ResourceScope.Tenant ? tenantId : null;
 
             var exists = await _repository.AsQueryable().AnyAsync(
@@ -224,6 +254,7 @@ public partial class ProviderService : ApplicationService, IProviderService
             };
 
             await _repository.InsertAsync(entity);
+            InvalidateRuntimeCache(entity.Name);
             LogInformation("Created provider {Name} (type {Type})", entity.Name, entity.ProviderType);
             return Ok(ToDto(entity));
         }
@@ -258,6 +289,7 @@ public partial class ProviderService : ApplicationService, IProviderService
                 return Fail<ProviderDto>("Access denied: system providers are managed by administrators.", 403, ErrorCodes.ProviderOperationFailed);
             }
 
+            var previousName = entity.Name;
             if (!string.IsNullOrWhiteSpace(dto.Name) && dto.Name.Trim() != entity.Name)
             {
                 var newName = dto.Name.Trim();
@@ -290,6 +322,7 @@ public partial class ProviderService : ApplicationService, IProviderService
             }
 
             await _repository.UpdateAsync(entity);
+            InvalidateRuntimeCache(previousName, entity.Name);
             LogInformation("Updated provider {Id} ({Name})", entity.Id, entity.Name);
             return Ok(ToDto(entity));
         }
@@ -323,6 +356,7 @@ public partial class ProviderService : ApplicationService, IProviderService
             }
 
             await _repository.DeleteAsync(entity);
+            InvalidateRuntimeCache(entity.Name);
             LogInformation("Deleted provider {Id} ({Name})", id, entity.Name);
             return Ok();
         }
@@ -596,6 +630,13 @@ public partial class ProviderService : ApplicationService, IProviderService
 
         if (!result.Succeeded)
             return Result.Failure(result.Message ?? "Reorder failed.", result.Code ?? 400, result.ErrorCode);
+
+        // Priority 决定同名多行里运行时连哪一个（ChatClientFactory 按 Priority 取第一），改了顺序也要让工厂重读
+        var reorderedNames = await _repository.AsQueryable()
+            .Where(p => ids.Contains(p.Id))
+            .Select(p => p.Name)
+            .ToListAsync(ct);
+        InvalidateRuntimeCache(reorderedNames.ToArray());
 
         LogInformation("Reordered {Count} provider(s)", result.Data);
         return Ok();

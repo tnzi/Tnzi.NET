@@ -45,6 +45,12 @@ describe('useAdminSigningApi', () => {
     expect(c.post).toHaveBeenCalledWith('/admin/signing/requests/req-1/void')
   })
 
+  it('seals a stuck request by posting to its seal sub-route', async () => {
+    const c = mockClient()
+    await useAdminSigningApi(c as never).sealRequest('req-1')
+    expect(c.post).toHaveBeenCalledWith('/admin/signing/requests/req-1/seal')
+  })
+
   it('reaches templates on their own base, not under requests', async () => {
     const c = mockClient()
     const api = useAdminSigningApi(c as never)

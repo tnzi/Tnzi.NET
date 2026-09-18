@@ -6,6 +6,7 @@ global using Tnzi.Data;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.Modules;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.Settings;
@@ -22,6 +23,7 @@ global using Tnzi.Payment.Services;
 global using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
 // 折扣包（仅测试引用，见 csproj 里的说明）：促销实体与它的服务、枚举、选项。
+global using Tnzi.Payment.Promotions.Dtos;
 global using Tnzi.Payment.Promotions.Entities;
 global using Tnzi.Payment.Promotions.Metadata;
 global using Tnzi.Payment.Promotions.Options;

@@ -40,6 +40,15 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
     /// writer's steps are preserved rather than overwritten), and retry. Bounded retries
     /// (SaveCheckpointMaxRetries) prevent runaway loops under pathological contention.
     /// </para>
+    /// <para>
+    /// ★ The union-merge lives ONLY on that conflict path. A writer that read the current
+    /// row and saved without conflict is authoritative: its CompletedSteps / StepOutputs
+    /// replace the persisted ones. Merging on the normal path too (as this store did from
+    /// 2026-05-29) silently resurrected every step a caller deliberately removed - the
+    /// service's "re-enter the interrupted node" removal in ResumeWithInputAsync and the
+    /// engine's loop-body reset both write a smaller set on purpose - so human input was
+    /// never delivered while every call reported success.
+    /// </para>
     /// </remarks>
     public async Task SaveCheckpointAsync(WorkflowCheckpoint checkpoint, CancellationToken ct = default)
     {
@@ -60,7 +69,7 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 }
                 else
                 {
-                    ApplyCheckpoint(entity, checkpoint);
+                    ApplyCheckpoint(entity, checkpoint, mergeWithPersisted: false);
                     await _repository.UpdateAsync(entity, ct);
                     _logger.LogDebug("Updated workflow checkpoint for execution {ExecutionId}, status: {Status}",
                         checkpoint.ExecutionId, checkpoint.Status);
@@ -128,7 +137,7 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 if (entry.Entity is WorkflowExecution reloaded)
                 {
                     // Re-merge the incoming checkpoint onto the just-reloaded fresh state.
-                    ApplyCheckpoint(reloaded, checkpoint);
+                    ApplyCheckpoint(reloaded, checkpoint, mergeWithPersisted: true);
                     entry.State = EntityState.Modified;
                 }
             }
@@ -184,28 +193,38 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
 
     /// <summary>
     /// Apply an incoming checkpoint onto a (possibly already-persisted) entity.
-    /// CompletedSteps and StepOutputs are UNION-MERGED with the entity's currently
-    /// persisted values rather than blindly overwritten, so a concurrent writer's
-    /// completed steps and step outputs are preserved instead of being clobbered by a
-    /// last-write-wins update. Status / wait-reason / interrupt are last-writer (the
-    /// incoming checkpoint reflects the latest authored intent).
     /// </summary>
-    private void ApplyCheckpoint(WorkflowExecution entity, WorkflowCheckpoint checkpoint)
+    /// <param name="entity">The tracked row.</param>
+    /// <param name="checkpoint">The incoming checkpoint.</param>
+    /// <param name="mergeWithPersisted">
+    /// <c>false</c> (normal path): the incoming CompletedSteps / StepOutputs are
+    /// authoritative and replace the persisted ones - the writer read the current row and
+    /// the concurrency stamp proves nobody wrote in between, so a smaller set is a
+    /// deliberate removal, not a lost update.
+    /// <c>true</c> (conflict path only): UNION-MERGE with the values just reloaded from the
+    /// database so the concurrent writer's completed steps and step outputs survive
+    /// instead of being clobbered by a last-write-wins update. On key collisions the
+    /// incoming checkpoint wins (it carries the freshest output for a step this writer
+    /// just produced).
+    /// Status / wait-reason / interrupt are always last-writer (the incoming checkpoint
+    /// reflects the latest authored intent).
+    /// </param>
+    private void ApplyCheckpoint(WorkflowExecution entity, WorkflowCheckpoint checkpoint, bool mergeWithPersisted)
     {
-        // Union existing persisted completed steps with the incoming set.
-        var mergedSteps = DeserializeHashSet(entity.CompletedSteps);
-        mergedSteps.UnionWith(checkpoint.CompletedStepIds);
-        entity.CompletedSteps = JsonSerializer.Serialize(mergedSteps);
+        var steps = mergeWithPersisted
+            ? DeserializeHashSet(entity.CompletedSteps)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        steps.UnionWith(checkpoint.CompletedStepIds);
+        entity.CompletedSteps = JsonSerializer.Serialize(steps);
 
-        // Union existing persisted step outputs with the incoming outputs; the incoming
-        // checkpoint wins on key collisions (it carries the freshest output for a step
-        // this writer just produced), while the concurrent writer's distinct keys survive.
-        var mergedOutputs = DeserializeStepOutputs(entity.StepOutputs);
+        var outputs = mergeWithPersisted
+            ? DeserializeStepOutputs(entity.StepOutputs)
+            : new Dictionary<string, WorkflowStepOutput>(StringComparer.OrdinalIgnoreCase);
         foreach (var (stepId, output) in checkpoint.StepOutputs)
         {
-            mergedOutputs[stepId] = output;
+            outputs[stepId] = output;
         }
-        entity.StepOutputs = JsonSerializer.Serialize(mergedOutputs);
+        entity.StepOutputs = JsonSerializer.Serialize(outputs);
 
         entity.Status = checkpoint.Status;
         entity.UpdatedTime = checkpoint.UpdatedAt == default ? DateTime.UtcNow : checkpoint.UpdatedAt;

@@ -8,7 +8,7 @@ public class RegistrationServiceTests
     private readonly Mock<UserManager<User>> _userManagerMock;
     private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
     private readonly Mock<IEventBus> _eventBusMock;
-    private readonly Mock<ICaptchaService> _captchaServiceMock;
+    private readonly Mock<ICaptchaVerifier> _captchaVerifierMock;
     private readonly Mock<ITwoFactorService> _twoFactorServiceMock;
     private readonly Mock<IAuthTokenService> _authTokenServiceMock;
     private readonly Mock<IPasswordService> _passwordServiceMock;
@@ -40,7 +40,11 @@ public class RegistrationServiceTests
         });
 
         _eventBusMock = new Mock<IEventBus>();
-        _captchaServiceMock = new Mock<ICaptchaService>();
+        _captchaVerifierMock = new Mock<ICaptchaVerifier>();
+        _captchaVerifierMock.SetupGet(x => x.ProviderName).Returns("image");
+        // 默认：任何令牌都按「没交 / 不对」拒绝；具体用例再为某个令牌设 Pass（Moq 后设的 Setup 优先）。
+        _captchaVerifierMock.Setup(x => x.VerifyAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? token, string _, CancellationToken _) => CaptchaVerification.Fail("image", string.IsNullOrEmpty(token) ? CaptchaFailure.MissingToken : CaptchaFailure.Rejected));
         _twoFactorServiceMock = new Mock<ITwoFactorService>();
         _authTokenServiceMock = new Mock<IAuthTokenService>();
         _passwordServiceMock = new Mock<IPasswordService>();
@@ -58,10 +62,10 @@ public class RegistrationServiceTests
             _identityOptionsMock.Object,
             _serviceProviderMock.Object,
             _eventBusMock.Object,
-            _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             _authTokenServiceMock.Object,
-            passwordService: _passwordServiceMock.Object
+            passwordService: _passwordServiceMock.Object,
+            captchaVerifier: _captchaVerifierMock.Object
         );
     }
 
@@ -183,6 +187,45 @@ public class RegistrationServiceTests
         Assert.Equal(pending.Data, confirmed.Data);
     }
 
+    /// <summary>
+    /// 重发确认邮件与注册发码同一个开关：开着 <c>EnableCaptchaOnRegister</c> 时先过人机验证，且在查用户之前。
+    /// 此前这个每次调用都真的发一封信的匿名入口不受任何验证码开关管辖。
+    /// </summary>
+    [Fact]
+    public async Task ResendEmailConfirmation_WhenRegisterCaptchaEnabledAndMissing_RejectsBeforeLookingUpTheUser()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true }
+        });
+
+        var result = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "pending@example.com" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        _userManagerMock.Verify(x => x.FindByEmailAsync(It.IsAny<string>()), Times.Never);
+        _eventBusMock.Verify(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.EmailConfirmationResentEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendEmailConfirmation_WhenRegisterCaptchaValid_ProceedsUnderTheRegisterPurpose()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true }
+        });
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("widget-token", CaptchaPurpose.Register, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Pass("turnstile"));
+        _userManagerMock.Setup(x => x.FindByEmailAsync("pending@example.com"))
+            .ReturnsAsync(new User { Id = Guid.NewGuid(), Email = "pending@example.com", EmailConfirmed = false });
+        _userManagerMock.Setup(x => x.GenerateEmailConfirmationTokenAsync(It.IsAny<User>())).ReturnsAsync("confirm-token");
+
+        var result = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "pending@example.com", CaptchaToken = "widget-token" });
+
+        Assert.True(result.Succeeded);
+        _captchaVerifierMock.Verify(x => x.VerifyAsync("widget-token", CaptchaPurpose.Register, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task RegisterAsync_WithCaptchaEnabled_ValidatesCaptcha()
     {
@@ -201,10 +244,10 @@ public class RegistrationServiceTests
             _identityOptionsMock.Object,
             _serviceProviderMock.Object,
             _eventBusMock.Object,
-            _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             _authTokenServiceMock.Object,
-            passwordService: _passwordServiceMock.Object
+            passwordService: _passwordServiceMock.Object,
+            captchaVerifier: _captchaVerifierMock.Object
         );
 
         var input = new RegisterDto
@@ -216,15 +259,16 @@ public class RegistrationServiceTests
             CaptchaCode = "wrong_code"
         };
 
-        _captchaServiceMock.Setup(x => x.VerifyAsync("captcha_id", "wrong_code", "register"))
-            .ReturnsAsync(false);
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("captcha_id:wrong_code", CaptchaPurpose.Register, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Fail("image", CaptchaFailure.Rejected));
 
         // Act
         var result = await service.RegisterAsync(input);
 
-        // Assert
+        // Assert - the dedicated code, so the login page can reset its captcha widget.
         Assert.False(result.Succeeded);
-        Assert.Contains("captcha", result.Message);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        Assert.Equal("image", Assert.IsType<CaptchaDto>(result.ErrorDetails).Provider);
     }
 
     [Fact]
@@ -258,7 +302,8 @@ public class RegistrationServiceTests
             Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true },
             Otp = new OtpOptions()
         });
-        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "wrong", "register")).ReturnsAsync(false);
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("cid:wrong", CaptchaPurpose.Register, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Fail("image", CaptchaFailure.Rejected));
 
         var input = new SendQuickRegisterCodeDto { Email = "test@example.com", CaptchaId = "cid", CaptchaCode = "wrong" };
 
@@ -283,7 +328,8 @@ public class RegistrationServiceTests
             Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true },
             Otp = new OtpOptions()
         });
-        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "register")).ReturnsAsync(true);
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("cid:good", CaptchaPurpose.Register, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Pass("image"));
         _twoFactorServiceMock.Setup(x => x.SendCodeByAddressAsync("test@example.com", TwoFactorType.Email, VerificationCodePurpose.Registration, null))
             .ReturnsAsync(Result.Success());
 
@@ -416,12 +462,12 @@ public class RegistrationServiceTests
             _identityOptionsMock.Object,
             _serviceProviderMock.Object,
             _eventBusMock.Object,
-            _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             _authTokenServiceMock.Object,
             tokenService: tokenService.Object,
             loginSessionCoordinator: coordinator.Object,
-            passwordService: _passwordServiceMock.Object);
+            passwordService: _passwordServiceMock.Object,
+            captchaVerifier: _captchaVerifierMock.Object);
 
         _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>(), It.IsAny<string>()))
             .ReturnsAsync(IdentityResult.Success);
@@ -539,10 +585,10 @@ public class RegistrationServiceTests
             _identityOptionsMock.Object,
             _serviceProviderMock.Object,
             _eventBusMock.Object,
-            _captchaServiceMock.Object,
             _twoFactorServiceMock.Object,
             authTokenService: null,
-            passwordService: _passwordServiceMock.Object);
+            passwordService: _passwordServiceMock.Object,
+            captchaVerifier: _captchaVerifierMock.Object);
 
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(new User { Id = userId, UserName = "victim" });

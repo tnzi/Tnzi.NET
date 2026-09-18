@@ -130,7 +130,7 @@ public class EnableTotpDto
 /// <summary>
 /// 发送验证码登录验证码请求DTO
 /// </summary>
-public class SendCodeLoginCodeDto
+public class SendCodeLoginCodeDto : ICaptchaSubmission
 {
     /// <summary>
     /// 图形验证码ID（当启用登录图形验证码时必填，发短信/邮箱验证码前先校验）
@@ -141,6 +141,12 @@ public class SendCodeLoginCodeDto
     /// 图形验证码（当启用登录图形验证码时必填）
     /// </summary>
     public string? CaptchaCode { get; set; }
+
+    /// <summary>
+    /// 人机验证令牌（统一控件产出的不透明字符串，任意提供商）。启用登录验证码时必填，发送短信 / 邮件之前校验。
+    /// 与 <see cref="CaptchaId"/> + <see cref="CaptchaCode"/> 二选一，两者都给时以本字段为准。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
 
     /// <summary>
     /// 邮箱地址（邮箱登录时必填）
@@ -258,7 +264,7 @@ public class CodeLoginResultDto : IRefreshTokenCarrier
 /// <summary>
 /// 发送密码找回验证码请求DTO
 /// </summary>
-public class SendPasswordRecoveryCodeDto
+public class SendPasswordRecoveryCodeDto : ICaptchaSubmission
 {
     /// <summary>
     /// 邮箱地址（邮箱找回时必填）
@@ -277,6 +283,18 @@ public class SendPasswordRecoveryCodeDto
     /// </summary>
     [Required]
     public TwoFactorType Type { get; set; }
+
+    /// <summary>
+    /// 人机验证令牌。启用 <c>Identity:Captcha:EnableCaptchaOnPasswordRecovery</c> 时必填：
+    /// 发码之前校验，这条路径每次调用都真的产生短信 / 邮件费用。
+    /// </summary>
+    public string? CaptchaToken { get; set; }
+
+    /// <summary>图形验证码 ID（历史形式，与 <see cref="CaptchaToken"/> 二选一）。</summary>
+    public string? CaptchaId { get; set; }
+
+    /// <summary>图形验证码答案（历史形式）。</summary>
+    public string? CaptchaCode { get; set; }
 }
 
 /// <summary>

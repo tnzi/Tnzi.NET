@@ -19,6 +19,15 @@ export interface UseComposerAttachmentsOptions {
   /** Max file size in bytes (default 10MB). */
   maxFileSize?: number
   /**
+   * Whether attachments are accepted at all, read on every entry (so a prop
+   * can drive it). When it returns false, paste / drop / drag-over / addFiles
+   * are no-ops. Gating only the paperclip button is not enough: a pasted
+   * screenshot or a dropped file still became a chip that the composer then
+   * handed to a transport the consumer had turned attachments off for.
+   * Default: always enabled.
+   */
+  enabled?: () => boolean
+  /**
    * Called with the files that were refused by the most recent `addFiles`
    * call. Use it to surface a toast; the `rejected` ref carries the same list
    * for inline rendering.
@@ -50,6 +59,7 @@ export function useComposerAttachments(
   options: UseComposerAttachmentsOptions = {},
 ): UseComposerAttachmentsReturn {
   const maxFileSize = options.maxFileSize ?? DEFAULT_MAX
+  const isEnabled = () => options.enabled?.() ?? true
   /* shallowRef, not ref: a deep ref hands back a reactive proxy for each File,
      and a proxy is not the same key as the raw File. `previewUrls` lookups from
      the template (`getPreviewUrl(f)` inside `v-for`) then missed, so image
@@ -64,6 +74,7 @@ export function useComposerAttachments(
   const isImageFile = (file: File): boolean => file.type.startsWith('image/')
 
   function addFiles(incoming: FileList | File[]): void {
+    if (!isEnabled()) return
     const valid: File[] = []
     const refused: RejectedAttachment[] = []
     for (const f of Array.from(incoming)) {
@@ -106,6 +117,7 @@ export function useComposerAttachments(
   const getPreviewUrl = (file: File): string => previewUrls.get(file) ?? ''
 
   function onPaste(e: ClipboardEvent): void {
+    if (!isEnabled()) return
     const items = e.clipboardData?.items
     if (!items) return
     const imgs: File[] = []
@@ -119,12 +131,14 @@ export function useComposerAttachments(
   }
 
   function onDrop(e: DragEvent): void {
+    if (!isEnabled()) return
     e.preventDefault()
     isDragOver.value = false
     if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
   }
 
   function onDragOver(e: DragEvent): void {
+    if (!isEnabled()) return
     e.preventDefault()
     isDragOver.value = true
   }

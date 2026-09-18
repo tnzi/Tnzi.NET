@@ -37,6 +37,16 @@ public class GatewayRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? AgentId { get; init; }
 
+    /// <summary>
+    /// 兜底 Agent ID - 服务端按渠道配置（<c>AI:Channels:DefaultAgentId</c>）填充，
+    /// 仅在<b>没有任何绑定规则命中</b>时生效，优先级低于规则、高于 <c>AI:Channels:Gateway:DefaultAgentId</c>。
+    /// 与 <see cref="AgentId"/>（显式目标，短路全部规则）刻意分开：渠道默认值是兜底不是选择，
+    /// 把它填进 AgentId 会让每一条绑定规则对 IM 入站流量静默失效。
+    /// [JsonIgnore]：信任边界字段，绝不接受客户端 JSON 注入，也不向客户端回写。
+    /// </summary>
+    [JsonIgnore]
+    public Guid? FallbackAgentId { get; init; }
+
     /// <summary>线程 ID（可选，续接已有对话）</summary>
     [JsonPropertyName("threadId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

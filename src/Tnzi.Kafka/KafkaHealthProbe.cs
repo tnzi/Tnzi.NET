@@ -45,6 +45,15 @@ public class KafkaHealthProbe : IDistributedEventBusHealthProbe
             return new DistributedEventBusHealth(false, "no Kafka producer is registered");
         }
 
+        // 集群可达不等于本进程还在消费：消费循环耗尽重连预算后就停了，而元数据照样拿得到。
+        // 一个不再消费的实例被编排器当作就绪，它分到的分区就一直不动 —— Lag 曲线是唯一线索。
+        var stopped = _serviceProvider.GetService<KafkaEventBus>()?.StoppedConsumers;
+        if (stopped is { Count: > 0 })
+        {
+            return new DistributedEventBusHealth(false,
+                $"consumer stopped for {stopped.Count} event type(s) after exhausting reconnect attempts: {string.Join(", ", stopped)}");
+        }
+
         try
         {
             return await Task.Run(() =>

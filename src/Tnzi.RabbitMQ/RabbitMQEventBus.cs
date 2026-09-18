@@ -21,6 +21,7 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
     private readonly IServiceProvider _serviceProvider;
     private readonly RabbitMQOptions _options;
     private readonly string _exchangeName;
+    private readonly DistributedConsumerIdentity _consumerIdentity;
 
     // 发布 Channel（延迟初始化，自动恢复）
     // volatile 确保多线程下 IsOpen 检查的可见性
@@ -40,20 +41,36 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
     public bool IsLocal => false;
 
     /// <summary>
+    /// 本进程的消费者身份：队列名以它的消费者组开头，广播队列再带上实例 ID。
+    /// </summary>
+    public DistributedConsumerIdentity ConsumerIdentity => _consumerIdentity;
+
+    /// <summary>
     /// 初始化一个<see cref="RabbitMQEventBus"/>类型的新实例
     /// </summary>
+    /// <param name="connection">RabbitMQ 连接。</param>
+    /// <param name="logger">日志。</param>
+    /// <param name="serviceProvider">根服务提供者（处理器按消息各开一个作用域解析）。</param>
+    /// <param name="options">RabbitMQ 选项。</param>
+    /// <param name="exchangeName">事件交换机名，缺省 <c>Tnzi.Events</c>。</param>
+    /// <param name="consumerIdentity">
+    /// 消费者身份（<c>EventBus:ConsumerGroup</c> + 实例 ID）；缺省按入口程序集名解析。
+    /// 队列名此前只由事件类型决定，同一代理上所有 Tnzi 进程都在竞争消费同一条队列。
+    /// </param>
     public RabbitMQEventBus(
         IConnection connection,
         ILogger<RabbitMQEventBus> logger,
         IServiceProvider serviceProvider,
         RabbitMQOptions options,
-        string? exchangeName = null)
+        string? exchangeName = null,
+        DistributedConsumerIdentity? consumerIdentity = null)
     {
         _connection = Check.NotNull(connection);
         _logger = Check.NotNull(logger);
         _serviceProvider = Check.NotNull(serviceProvider);
         _options = Check.NotNull(options);
         _exchangeName = exchangeName ?? "Tnzi.Events";
+        _consumerIdentity = consumerIdentity ?? DistributedConsumerIdentity.FromOptions(new EventBusOptions());
 
         // Initialize channel pool if enabled
         if (_options.ChannelPool is { Enabled: true })
@@ -219,6 +236,11 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
 
         try
         {
+            // 兜底捕获环境租户（经 PublishEventAsync 来的事件已在调用方作用域捕获过；
+            // 这里服务的是直接注入本总线的调用方）。序列化之前不补，线上 JSON 的 TenantId 恒为 null，
+            // 消费侧就没有东西可恢复
+            EventTenantContext.CaptureInNewScope(@event, _serviceProvider);
+
             var json = JsonSerializer.Serialize(@event, TnziJsonDefaults.Options);
             var body = Encoding.UTF8.GetBytes(json);
 

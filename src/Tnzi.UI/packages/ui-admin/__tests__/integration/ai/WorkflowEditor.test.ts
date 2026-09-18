@@ -15,7 +15,12 @@ vi.mock('@tnzi/ui-ai/workflow', () => ({
   TWorkflowCanvas: {
     name: 'WorkflowCanvas',
     props: ['nodes', 'edges'],
-    template: '<div data-test="canvas-stub" :data-node-count="nodes?.length ?? 0">canvas</div>',
+    // `data-node-kinds` exposes the kind the page resolved for each node so a
+    // test can prove what the editor THINKS a step is (which is what it will
+    // save back) without reaching into the SFC's private draft state.
+    template:
+      `<div data-test="canvas-stub" :data-node-count="nodes?.length ?? 0"`
+      + ` :data-node-kinds="(nodes ?? []).map((n) => n.data?.kind).join(',')">canvas</div>`,
   },
 }))
 
@@ -44,16 +49,20 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+type MockStep = Record<string, unknown>
+let mockSteps: MockStep[] = []
+const defaultSteps = (): MockStep[] => [
+  { stepId: 'step-a', order: 1, dependsOn: [], maxRetries: 0, retryDelaySeconds: 5, requiresApproval: false },
+  { stepId: 'step-b', order: 2, dependsOn: ['step-a'], maxRetries: 0, retryDelaySeconds: 5, requiresApproval: false },
+]
+
 const mockGetById = vi.fn(async (id: string) => ({
   id,
   name: 'Hello Workflow',
   description: 'demo',
   executionMode: 'Sequential',
   isEnabled: true,
-  steps: [
-    { stepId: 'step-a', order: 1, dependsOn: [], maxRetries: 0, retryDelaySeconds: 5, requiresApproval: false },
-    { stepId: 'step-b', order: 2, dependsOn: ['step-a'], maxRetries: 0, retryDelaySeconds: 5, requiresApproval: false },
-  ],
+  steps: mockSteps,
   creationTime: '2026-04-10T00:00:00Z',
   lastModificationTime: '2026-04-10T00:01:00Z',
 }))
@@ -87,6 +96,7 @@ describe('WorkflowEditor page (Phase J full editor)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     routeParams = { id: 'wf-1' }
+    mockSteps = defaultSteps()
     mockGetById.mockClear()
   })
 
@@ -100,6 +110,40 @@ describe('WorkflowEditor page (Phase J full editor)', () => {
     const stub = wrapper.find('[data-test="canvas-stub"]')
     expect(stub.exists()).toBe(true)
     expect(stub.attributes('data-node-count')).toBe('2')
+  })
+
+  it('resolves the node kind from configuration.nodeType, the key the backend executor reads', async () => {
+    mockSteps = [
+      { stepId: 'route', order: 1, dependsOn: [], configuration: { nodeType: 'router' } },
+      { stepId: 'fan', order: 2, dependsOn: ['route'], configuration: { nodeType: 'parallel' } },
+      { stepId: 'plain', order: 3, dependsOn: ['fan'], configuration: {} },
+    ]
+    const wrapper = mount(WorkflowEditor)
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 5))
+    await flushPromises()
+    expect(wrapper.find('[data-test="canvas-stub"]').attributes('data-node-kinds')).toBe('router,parallel,agent')
+  })
+
+  it('migrates a definition saved with the legacy __nodeType key so it renders (and re-saves) as its real kind', async () => {
+    // Before 2026-09-12 the editor wrote `__nodeType`, which the backend never
+    // read: the step looked like a router in the editor and ran as an agent.
+    mockSteps = [
+      { stepId: 'route', order: 1, dependsOn: [], configuration: { __nodeType: 'router', __x: '1', __y: '2' } },
+    ]
+    const wrapper = mount(WorkflowEditor)
+    await flushPromises()
+    await new Promise((r) => setTimeout(r, 5))
+    await flushPromises()
+    expect(wrapper.find('[data-test="canvas-stub"]').attributes('data-node-kinds')).toBe('router')
+
+    // The JSON view mirrors draft.steps: the migrated bag carries `nodeType`
+    // and no longer carries the legacy key, so the next save heals the row.
+    const json = (wrapper.vm as unknown as { stepsJson: string }).stepsJson
+    const saved = JSON.parse(json) as Array<{ configuration: Record<string, string> }>
+    expect(saved[0].configuration.nodeType).toBe('router')
+    expect(saved[0].configuration).not.toHaveProperty('__nodeType')
+    expect(saved[0].configuration.__x).toBe('1')
   })
 
   it('renders empty state when route has no id', async () => {

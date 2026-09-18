@@ -51,6 +51,15 @@ public class KafkaOptionsValidator : OptionsValidatorBase<KafkaOptions>
         // 验证消费者配置
         if (options.Consumer != null)
         {
+            // 自动提交会架空整套失败处置：重试期间「不提交」、死信关闭时「保留偏移量等重投」、
+            // 毒消息「Seek 回原地卡住分区」全都依赖偏移量只由本模块提交。开着自动提交，
+            // 客户端会在后台按周期越过它们把位置提交出去 —— 静默丢消息，而配置、日志看起来都正常。
+            if (options.Consumer.EnableAutoCommit)
+            {
+                errors.Add("Consumer.EnableAutoCommit must be false: the consumer commits offsets itself after handlers succeed, "
+                    + "and automatic commits would silently skip messages that are being retried, held for redelivery, or blocking a partition.");
+            }
+
             if (options.Consumer.SessionTimeoutMs <= 0)
             {
                 errors.Add("Consumer.SessionTimeoutMs must be greater than 0.");

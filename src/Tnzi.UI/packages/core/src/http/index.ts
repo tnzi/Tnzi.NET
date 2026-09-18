@@ -6,7 +6,10 @@
 
 // HTTP Client
 export { HttpClient, createHttpClient, DEFAULT_REQUEST_TIMEOUT, REQUEST_TIMEOUT_ERROR_CODE } from './http';
-export type { HttpClientConfig, RetryConfig } from './http';
+export type { HttpClientConfig, RetryConfig, DownloadOptions } from './http';
+
+// Auth challenges (401s that are not session expiry)
+export { STEP_UP_REQUIRED, DEFAULT_AUTH_CHALLENGE_CODES } from './auth-challenge';
 
 // Middleware helpers
 export type {

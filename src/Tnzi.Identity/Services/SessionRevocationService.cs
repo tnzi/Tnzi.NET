@@ -7,17 +7,26 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
 {
     private readonly ISessionService _sessionService;
     private readonly IAuthTokenService _authTokenService;
+    private readonly IUserTenantScopeProvider _scope;
     private readonly IEventBus? _eventBus;
 
+    /// <summary>初始化一个 <see cref="SessionRevocationService"/> 类型的新实例。</summary>
+    /// <remarks>
+    /// <paramref name="scope"/>（当前请求的用户范围）★ 必需而不是可选：会话服务按范围答 404，而这里的令牌删除
+    /// <b>不以撤销成功为前提</b>（见 <see cref="RevokeSessionAsync"/>），少了范围判断，
+    /// 租户 A 的管理员拿一个会话 id 就能删掉租户 B 用户的刷新令牌 —— 而「没判」在返回值里看不出来。
+    /// </remarks>
     public SessionRevocationService(
         IServiceProvider serviceProvider,
         ISessionService sessionService,
         IAuthTokenService authTokenService,
+        IUserTenantScopeProvider scope,
         IEventBus? eventBus = null)
         : base(serviceProvider)
     {
         _sessionService = Check.NotNull(sessionService);
         _authTokenService = Check.NotNull(authTokenService);
+        _scope = Check.NotNull(scope);
         _eventBus = eventBus;
     }
 
@@ -29,8 +38,19 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
             return 0;
         }
 
-        // 先取一次，只为事件里的 UserId —— 撤销之后就取不到「这是谁的会话」了。
+        // 先取一次：事件里要填 UserId（撤销之后就取不到「这是谁的会话」了），范围判断也要用它。
         var session = await _sessionService.GetSessionAsync(sessionId);
+
+        // ★ 范围被收窄（多租户下的管理端）时，主人不在范围内的会话一个字节都不碰 ——
+        //   查不到的会话同样按不在范围内处理：拿一个猜来的 id 去删令牌就是跨租户删除。
+        //   不收窄（登录链路、后台任务、单租户）时保持原样：查不到也照删，
+        //   分布式会话过期后残留的令牌正靠这条路收走。
+        if (!_scope.Current.IsUnrestricted
+            && (session == null || !await _scope.ContainsAsync(session.UserId)))
+        {
+            LogWarning("Refused to revoke session {SessionId}: it is not within the caller's tenant scope.", sessionId);
+            return 0;
+        }
 
         var revokeResult = await _sessionService.RevokeSessionAsync(sessionId);
 
@@ -54,6 +74,14 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
     {
         if (userId == Guid.Empty)
         {
+            return 0;
+        }
+
+        // 理由同 RevokeSessionAsync：会话服务会按范围拒绝，但令牌是按用户直接删的。
+        // 不收窄时 ContainsAsync 恒为 true 且不查库。
+        if (!await _scope.ContainsAsync(userId))
+        {
+            LogWarning("Refused to revoke the sessions of user {UserId}: not within the caller's tenant scope.", userId);
             return 0;
         }
 

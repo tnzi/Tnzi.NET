@@ -174,6 +174,12 @@ public class SigningPacketDto
     /// <summary>待本人填写的字段</summary>
     public List<RecipientFieldDto> Fields { get; set; } = [];
 
+    /// <summary>
+    /// 发起方已填好、发出时已烧进文档的字段（合并变量 / 预填），只读：签署人看到的就是将被密封的内容。
+    /// 不含没有值的发起方字段。
+    /// </summary>
+    public List<RecipientFieldDto> PrefilledFields { get; set; } = [];
+
     /// <summary>可供预览的 PDF 文件 id（渲染稿；完成后是密封成品）</summary>
     public Guid? DocumentFileId { get; set; }
 

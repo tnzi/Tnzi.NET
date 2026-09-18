@@ -281,6 +281,16 @@ public static class ErrorCodes
     public const string CostCalculationFailed = "AI_COST_CALCULATION_FAILED";
 
     /// <summary>
+    /// A request without an AgentId asked for a tool group that is not in AI:AdHocTools:AllowedGroups.
+    /// </summary>
+    public const string ToolGroupNotAllowed = "AI_TOOL_GROUP_NOT_ALLOWED";
+
+    /// <summary>
+    /// A request without an AgentId asked for a tool name that is not in AI:AdHocTools:AllowedTools.
+    /// </summary>
+    public const string ToolNameNotAllowed = "AI_TOOL_NAME_NOT_ALLOWED";
+
+    /// <summary>
     /// Provider entity not found.
     /// </summary>
     public const string ProviderNotFound = "AI_PROVIDER_NOT_FOUND";
@@ -324,6 +334,16 @@ public static class ErrorCodes
     /// Sub-agent type definition not found.
     /// </summary>
     public const string SubAgentTypeNotFound = "AI_SUB_AGENT_TYPE_NOT_FOUND";
+
+    /// <summary>
+    /// Sub-agent spawning is switched off (AI:SubAgent:Enabled = false).
+    /// </summary>
+    public const string SubAgentsDisabled = "AI_SUB_AGENTS_DISABLED";
+
+    /// <summary>
+    /// The root run already has AI:SubAgent:MaxConcurrentSubAgents descendants still running.
+    /// </summary>
+    public const string SubAgentLimitExceeded = "AI_SUB_AGENT_LIMIT_EXCEEDED";
 
     /// <summary>
     /// External CLI agent capability requested but the Tnzi.AI.Cli module is not loaded.

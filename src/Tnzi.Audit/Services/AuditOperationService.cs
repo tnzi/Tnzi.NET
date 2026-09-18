@@ -1,4 +1,5 @@
 using AuditErrorCodes = Tnzi.Audit.Metadata.ErrorCodes;
+using CoreErrorCodes = Tnzi.Exceptions.ErrorCodes;
 
 namespace Tnzi.Audit.Services;
 
@@ -10,22 +11,53 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     private readonly IRepository<AuditOperation, Guid> _operationRepository;
     private readonly IAuditStore _auditStore;
     private readonly IOptionsMonitor<AuditOptions> _optionsMonitor;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
 
     private AuditOptions Options => _optionsMonitor.CurrentValue;
 
     /// <summary>
     /// 初始化一个<see cref="AuditOperationService"/>类型的新实例
     /// </summary>
+    /// <param name="operationRepository">操作审计仓储。</param>
+    /// <param name="auditStore">审计存储。</param>
+    /// <param name="optionsMonitor">审计选项（热读）。</param>
+    /// <param name="serviceProvider">服务提供程序。</param>
+    /// <param name="currentTenant">当前租户访问器；读取面按调用者的租户收口（见 <see cref="CallerTenantScope"/>）。</param>
+    /// <param name="multiTenancyOptions">多租户开关；关闭时 <c>TenantId</c> 列不存在，谓词一行不加。</param>
     public AuditOperationService(
         IRepository<AuditOperation, Guid> operationRepository,
         IAuditStore auditStore,
         IOptionsMonitor<AuditOptions> optionsMonitor,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _operationRepository = Check.NotNull(operationRepository);
         _auditStore = Check.NotNull(auditStore);
         _optionsMonitor = Check.NotNull(optionsMonitor);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
+    }
+
+    /// <summary>调用者的租户作用域（每次现算：租户上下文可在请求内被 <c>ICurrentTenant.Change</c> 切换）。</summary>
+    private CallerTenantScope TenantScope => CallerTenantScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser);
+
+    /// <summary>
+    /// 全部读取面的起点：调用者有租户则钉在本租户，宿主看全部。
+    /// 多租户关闭时原样返回 —— 那时 <c>TenantId</c> 被 Ignore，引用它会让查询翻译失败。
+    /// </summary>
+    private IQueryable<AuditOperation> ScopedOperations()
+    {
+        var scope = TenantScope;
+        if (!scope.IsPinned)
+        {
+            return _operationRepository.AsQueryable();
+        }
+
+        var tenantId = scope.TenantId;
+        return _operationRepository.Where(o => o.TenantId == tenantId);
     }
 
     /// <summary>
@@ -33,7 +65,8 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     public async Task<Result<AuditOperationDto>> GetAsync(Guid id)
     {
-        var operation = await _operationRepository
+        // 别的租户的行等同于不存在（404，不泄露存在性）。
+        var operation = await ScopedOperations()
             .Where(o => o.Id == id)
             .Include(o => o.EntityEntries)
                 .ThenInclude(e => e.PropertyEntries)
@@ -54,7 +87,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         DateTime? endDate = null,
         AuditResultType? resultType = null)
     {
-        var query = _operationRepository.Where(o => o.UserId == userId);
+        var query = ScopedOperations().Where(o => o.UserId == userId);
 
         if (startDate.HasValue)
         {
@@ -178,7 +211,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     /// </summary>
     public async Task<Result<IPagedList<AuditOperationDto>>> GetOperationsAsync(AuditOperationQueryDto query)
     {
-        var queryable = ApplyQueryFilters(_operationRepository.AsQueryable(), query)
+        var queryable = ApplyQueryFilters(ScopedOperations(), query)
             .OrderByDescending(o => o.CreationTime);
 
         var paged = await queryable.CreateAsync(query.PageIndex, query.PageSize);
@@ -196,7 +229,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         DateTime? startDate = null,
         DateTime? endDate = null)
     {
-        var query = _operationRepository.Where(o => o.FunctionName == functionName);
+        var query = ScopedOperations().Where(o => o.FunctionName == functionName);
 
         if (startDate.HasValue)
         {
@@ -220,7 +253,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         DateTime? startDate = null,
         DateTime? endDate = null)
     {
-        var query = _operationRepository.Where(o => o.UserId == userId);
+        var query = ScopedOperations().Where(o => o.UserId == userId);
 
         if (startDate.HasValue)
         {
@@ -244,6 +277,11 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         var retentionDays = days ?? Options.RetentionDays;
         if (retentionDays <= 0)
             return Fail<int>("Days must be greater than 0", 400, AuditErrorCodes.AuditDeleteExpiredFailed);
+
+        // 保留期清理是部署级的合规动作（RetentionDays 是部署配置），不是租户能替宿主做的事：
+        // 租户内的调用者 403，一行不删。审计记录是证据，按租户各删各的也不该开给租户管理员。
+        if (TenantScope.IsPinned)
+            return Fail<int>("Deleting expired audit operations is a host-level operation and is not available from inside a tenant", 403, CoreErrorCodes.FORBIDDEN);
 
         var count = await _auditStore.DeleteExpiredAsync(retentionDays);
         LogInformation("Deleted {Count} expired audit operations (older than {Days} days)", count, retentionDays);
@@ -315,7 +353,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     private async Task<Result<List<AuditOperation>>> GetFilteredOperationsAsync(AuditOperationQueryDto query, CancellationToken cancellationToken)
     {
         var max = Math.Max(1, Options.ExportMaxRows);
-        var filtered = ApplyQueryFilters(_operationRepository.AsQueryable(), query);
+        var filtered = ApplyQueryFilters(ScopedOperations(), query);
 
         var rows = await filtered
             .OrderByDescending(o => o.CreationTime)
@@ -350,7 +388,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
             return Fail<List<AuditTrendPointDto>>("End date must be after start date", 400);
 
         // 在数据库侧按日期分组聚合，避免加载全量记录到内存
-        var dailyAggregates = await _operationRepository
+        var dailyAggregates = await ScopedOperations()
             .Where(o => o.CreationTime >= startDate && o.CreationTime <= endDate)
             .GroupBy(o => o.CreationTime.Date)
             .Select(g => new
@@ -402,7 +440,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         if (topN <= 0)
             return Fail<List<TopFunctionDto>>("TopN must be greater than 0", 400);
 
-        var queryable = _operationRepository.AsQueryable();
+        var queryable = ScopedOperations();
 
         if (startDate.HasValue)
             queryable = queryable.Where(o => o.CreationTime >= startDate.Value);
@@ -442,7 +480,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         if (topN <= 0)
             return Fail<List<TopUserDto>>("TopN must be greater than 0", 400);
 
-        var queryable = _operationRepository.AsQueryable();
+        var queryable = ScopedOperations();
 
         if (startDate.HasValue)
             queryable = queryable.Where(o => o.CreationTime >= startDate.Value);

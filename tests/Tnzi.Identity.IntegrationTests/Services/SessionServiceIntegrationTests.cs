@@ -8,7 +8,7 @@ public class SessionServiceIntegrationTests : RelationalIdentityIntegrationTestB
 
     public SessionServiceIntegrationTests()
     {
-        _service = new DatabaseSessionService(CreateRepository<UserSession>(), ServiceProvider);
+        _service = new DatabaseSessionService(CreateRepository<UserSession>(), ServiceProvider, new UserTenantScopeProvider(CreateRepository<User>()));
     }
 
     [Fact]

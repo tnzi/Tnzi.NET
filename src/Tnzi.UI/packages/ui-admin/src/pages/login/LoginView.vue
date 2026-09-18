@@ -16,6 +16,11 @@
  *     unless the consumer supplied its own `thirdParty` array (an explicit `[]`
  *     force-hides them).
  *   - Wire `toggleLoginModule` to `router.replace({ name: 'login', params: { module } })`.
+ *   - Read why the previous session ended (`runtime.auth.sessionEndReason`)
+ *     and hand it to the shell as a notice. "Ended for security reasons" is
+ *     the one moment the user can learn their credentials are in use
+ *     elsewhere; core keeps it alive across the unauthorized signal precisely
+ *     so this page can show it.
  *
  * Consumers configure the page via `defineAdminApp({ login: { … } })`. To
  * fully replace the route component, pass `loginComponent` to `defineAdminApp`.
@@ -26,6 +31,7 @@ import TLoginPage from '../../components/pages/TLoginPage.vue'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminLoginConfig } from '../../plugin/login-config'
+import { useAdminRuntime } from '../../plugin/runtime'
 import { buildOAuthProviders } from '@tnzi/ui'
 import { mapAuthConfig, mergeFeatures, isModuleAvailable, firstReachableModule } from '@tnzi/ui'
 import { humanise, translatePageKey } from '../_shared/translate'
@@ -71,6 +77,14 @@ const config = useAdminLoginConfig()
 // Optional - isolated mounts / tests may have no client; the config fetch and
 // OAuth auto-render are simply skipped in that case.
 const client = useAdminClient(false)
+
+// ---- session-end notice -----------------------------------------------------
+// Snapshotted at mount, not a computed: the value lives in core's single
+// `auth.error` slot, and anything that runs `clearAuth()` afterwards (a retried
+// restore, a listener) would blank a computed while the user is still reading
+// it. A host that passed `client` instead of `runtime` owns its own session
+// and gets no notice from here.
+const sessionEndReason = useAdminRuntime()?.auth.sessionEndReason ?? null
 
 // ---- Feature flags ----------------------------------------------------------
 // Backend `GET /auth/config` mapped to login features, then merged with the
@@ -173,6 +187,7 @@ onMounted(async () => {
     :qr-component="config.qrComponent"
     :show-lang-switch="config.showLangSwitch"
     :show-theme-switch="config.showThemeSwitch"
+    :session-end-reason="sessionEndReason"
     :on-toggle-module="toggleLoginModule"
   />
 </template>

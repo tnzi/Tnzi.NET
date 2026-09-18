@@ -67,7 +67,12 @@ public class AuditOptions
     public HashSet<string> SensitiveQueryKeys { get; set; } =
         new(QueryStringRedactor.DefaultSensitiveKeys, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Channel 容量 (0 = 无限)</summary>
+    /// <summary>
+    /// Channel 容量 (0 = 无限)。
+    /// ★ 队列满时<b>丢弃新来的记录</b>并记 Error 日志（第一次与之后每 <c>AuditSender.DropLogInterval</c> 条各一条），
+    /// 累计丢弃数经 <c>AuditSender.DroppedCount</c> 暴露。数据库变慢或一波流量让消费落后时，审计表会少一段 ——
+    /// 这一条保证少的那一段至少看得见。
+    /// </summary>
     public int ChannelCapacity { get; set; } = 10000;
 
     /// <summary>是否记录请求参数</summary>

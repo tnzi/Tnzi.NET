@@ -27,10 +27,20 @@ public static class FilterExpressionBuilder
     };
 
     /// <summary>
-    /// 从 FilterGroup 构建表达式
+    /// 从 FilterGroup 构建表达式（不限制字段：给服务端自己构造的过滤器用）。
+    /// 请求来源的过滤器走 <see cref="Build{T}(FilterGroup?, FilterFieldPolicy)"/> 并传 <see cref="FilterFieldPolicy.Request"/>。
     /// </summary>
     public static Expression<Func<T, bool>> Build<T>(FilterGroup? group)
     {
+        return Build<T>(group, FilterFieldPolicy.Unrestricted);
+    }
+
+    /// <summary>
+    /// 从 FilterGroup 构建表达式，字段先经 <paramref name="policy"/> 准入；不允许的字段抛 <see cref="FilterFieldException"/>（400）
+    /// </summary>
+    public static Expression<Func<T, bool>> Build<T>(FilterGroup? group, FilterFieldPolicy policy)
+    {
+        Check.NotNull(policy);
         var param = Expression.Parameter(typeof(T), "e");
 
         if (group == null || !group.HasFilters)
@@ -39,8 +49,78 @@ public static class FilterExpressionBuilder
             return Expression.Lambda<Func<T, bool>>(Expression.Constant(true), param);
         }
 
+        EnsureFieldsAllowed(typeof(T), group, policy);
         var body = BuildGroupExpression(param, group);
         return Expression.Lambda<Func<T, bool>>(body, param);
+    }
+
+    /// <summary>
+    /// 校验 <paramref name="group"/> 里每条规则（含嵌套分组）的字段是否被 <paramref name="policy"/> 允许；
+    /// 失败时 <paramref name="error"/> 是可直接回给调用方的消息（不含实体类型名）
+    /// </summary>
+    public static bool TryValidateFields<T>(FilterGroup? group, FilterFieldPolicy policy, out string? error)
+    {
+        Check.NotNull(policy);
+        error = null;
+        if (group == null || !group.HasFilters)
+            return true;
+
+        var rejected = FindRejectedField(typeof(T), group, policy);
+        if (rejected == null)
+            return true;
+
+        error = new FilterFieldException(rejected).Message;
+        return false;
+    }
+
+    /// <summary>
+    /// 校验 <see cref="PagedQuery.OrderBy"/>（<c>"Name DESC, Id"</c> 形态）里每个字段是否被 <paramref name="policy"/> 允许。
+    /// 排序是过滤的弱形态：按一条从不投影的列排序就把它的相对次序交了出去，所以过同一道门。
+    /// 失败时 <paramref name="error"/> 只含字段名，不含实体类型名。
+    /// </summary>
+    public static bool TryValidateOrderBy<T>(string? orderBy, FilterFieldPolicy policy, out string? error)
+    {
+        Check.NotNull(policy);
+        error = null;
+        if (string.IsNullOrWhiteSpace(orderBy))
+            return true;
+
+        foreach (var part in orderBy.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var field = part.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0];
+            if (policy.IsAllowed(typeof(T), field))
+                continue;
+
+            error = $"Sort field '{field}' is not sortable.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private static void EnsureFieldsAllowed(Type rootType, FilterGroup group, FilterFieldPolicy policy)
+    {
+        var rejected = FindRejectedField(rootType, group, policy);
+        if (rejected != null)
+            throw new FilterFieldException(rejected);
+    }
+
+    private static string? FindRejectedField(Type rootType, FilterGroup group, FilterFieldPolicy policy)
+    {
+        foreach (var rule in group.Rules)
+        {
+            if (!policy.IsAllowed(rootType, rule.Field))
+                return rule.Field;
+        }
+
+        foreach (var subGroup in group.Groups)
+        {
+            var rejected = FindRejectedField(rootType, subGroup, policy);
+            if (rejected != null)
+                return rejected;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -200,9 +280,23 @@ public static class FilterExpressionBuilder
 
     private static Expression BuildRuleExpression(ParameterExpression param, FilterRule rule)
     {
-        // 解析嵌套属性（如 "Author.Name"）
+        // 解析嵌套属性（如 "Author.Name"）：字段不存在答「不可过滤」，与准入策略同一句
         var propertyAccess = BuildPropertyAccess(param, rule.Field);
 
+        // 字段之后的一切失败（操作符不认识、值解析不了、类型不匹配）都是请求给的值有问题：
+        // 一律 400 且只报字段与操作符，CLR 类型名留在内部异常里进日志
+        try
+        {
+            return BuildOperatorExpression(propertyAccess, rule);
+        }
+        catch (Exception ex) when (ex is not TnziException)
+        {
+            throw new FilterValueException(rule.Field, rule.Operator, ex);
+        }
+    }
+
+    private static Expression BuildOperatorExpression(Expression propertyAccess, FilterRule rule)
+    {
         // 获取操作符对应的表达式工厂
         if (!OperatorMap.TryGetValue(rule.Operator, out var factory))
         {
@@ -251,8 +345,8 @@ public static class FilterExpressionBuilder
 
             if (property == null)
             {
-                throw new InvalidOperationException(
-                    $"Property '{propName}' not found on type '{result.Type.Name}'.");
+                // 400 而不是 500，且消息不带实体类型名：这条异常会原样到达请求方
+                throw new FilterFieldException(propertyPath);
             }
 
             result = Expression.Property(result, property);

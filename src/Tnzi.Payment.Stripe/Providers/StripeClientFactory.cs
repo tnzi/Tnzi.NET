@@ -26,4 +26,18 @@ internal static class StripeClientFactory
         Check.NotNull(options);
         return Clients.GetOrAdd(options.SecretKey ?? string.Empty, static key => new StripeClient(key));
     }
+
+    /// <summary>
+    /// 把 <paramref name="client"/> 登记为 <paramref name="secretKey"/> 对应的客户端（测试用）。
+    /// </summary>
+    /// <remarks>
+    /// 唯一的用途是让测试塞进一个走桩 <c>HttpClient</c> 的 <see cref="StripeClient"/>，
+    /// 从而不触网地跑完绑卡归属校验这类要往返两次 Stripe 的路径。每个测试用自己的假密钥，互不干扰。
+    /// </remarks>
+    internal static void Use(string secretKey, StripeClient client)
+    {
+        Check.NotNullOrWhiteSpace(secretKey);
+        Check.NotNull(client);
+        Clients[secretKey] = client;
+    }
 }

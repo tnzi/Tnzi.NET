@@ -12,6 +12,7 @@ public class AuthService : ApplicationService, IAuthService
     private readonly IOptionsMonitor<IdentityOptions> _identityOptionsMonitor;
     private readonly IEventBus? _eventBus;
     private readonly ICaptchaService? _captchaService;
+    private readonly ICaptchaVerifier? _captchaVerifier;
     private readonly IAuthTokenService? _authTokenService;
     private readonly IPasswordPolicyService? _passwordPolicyService;
     private readonly ISessionService? _sessionService;
@@ -44,7 +45,8 @@ public class AuthService : ApplicationService, IAuthService
         ILoginSessionCoordinator? loginSessionCoordinator = null,
         ILoginGuardEvaluator? loginGuardEvaluator = null,
         ISessionRevocationService? sessionRevocation = null,
-        IPasswordService? passwordService = null)
+        IPasswordService? passwordService = null,
+        ICaptchaVerifier? captchaVerifier = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -53,6 +55,7 @@ public class AuthService : ApplicationService, IAuthService
         _identityOptionsMonitor = Check.NotNull(identityOptions);
         _eventBus = eventBus;
         _captchaService = captchaService;
+        _captchaVerifier = captchaVerifier;
         _authTokenService = authTokenService;
         _passwordPolicyService = passwordPolicyService;
         _sessionService = sessionService;
@@ -107,6 +110,9 @@ public class AuthService : ApplicationService, IAuthService
 
             EnableCaptchaOnLogin = captcha.EnableCaptchaOnLogin,
             EnableCaptchaOnRegister = captcha.EnableCaptchaOnRegister,
+            EnableCaptchaOnPasswordRecovery = captcha.EnableCaptchaOnPasswordRecovery,
+            // 与 GET /captcha/config 同一份：登录页只请求一次 /auth/config 就知道渲染哪家控件。
+            Captcha = _captchaVerifier?.GetClientConfig() ?? new CaptchaClientConfigDto(),
 
             EnablePasskey = opt.Passkey.Enabled,
 
@@ -381,10 +387,10 @@ public class AuthService : ApplicationService, IAuthService
             var captchaRequired = await _captchaService.IsCaptchaRequiredAsync(loginIdentifier);
             if (captchaRequired)
             {
-                var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "login");
+                var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.Login);
                 if (!captchaValid)
                 {
-                    return await BuildCaptchaRequiredResultAsync<(User, string)>("login");
+                    return await BuildCaptchaRequiredResultAsync<(User, string)>(CaptchaPurpose.Login);
                 }
             }
         }
@@ -1166,30 +1172,44 @@ public class AuthService : ApplicationService, IAuthService
         return result;
     }
 
-    private async Task<bool> VerifyCaptchaAsync(string? captchaId, string? captchaCode, string purpose)
+    /// <summary>
+    /// 校验一次提交的人机验证。令牌形状由提交方决定（统一控件的 <c>CaptchaToken</c>，或图形验证码的 id + code），
+    /// 交给 <see cref="ICaptchaVerifier"/> 按配置的提供商裁决。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>验证器缺席时拒绝，不放行</b>：走到这里说明流程开关已经要求验证码，「没有人能校验」与「校验通过」
+    /// 不是一回事 —— 放行会让一个 DI 缺口把整个验证码开关变成装饰，而响应、日志全部正常。
+    /// </remarks>
+    private async Task<bool> VerifyCaptchaAsync(ICaptchaSubmission input, string purpose)
     {
-        if (_captchaService == null) return true;
-        if (string.IsNullOrEmpty(captchaId) || string.IsNullOrEmpty(captchaCode)) return false;
-        return await _captchaService.VerifyAsync(captchaId, captchaCode, purpose);
+        if (_captchaVerifier == null)
+        {
+            Logger.LogError("Captcha is required for {Purpose} but ICaptchaVerifier is not registered; rejecting.", purpose);
+            return false;
+        }
+
+        var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), purpose);
+        return verification.Passed;
     }
 
     /// <summary>
-    /// 构建"需要图形验证码"失败结果:生成一张新验证码,连同专用错误码
-    /// <see cref="ErrorCodes.IDENTITY_CAPTCHA_REQUIRED"/> 一并返回,前端据此内联渲染
-    /// 验证码框(id + base64 图片)并让用户重试。缓存不可用(无法生成)时回退为不带图片的同码错误。
+    /// 构建「需要人机验证」失败结果：专用错误码 <see cref="ErrorCodes.IDENTITY_CAPTCHA_REQUIRED"/> +
+    /// <see cref="CaptchaDto"/>（带生效的提供商名）。提供商是内置图形验证码时顺带出一道新题
+    /// （id + base64 图片）让前端内联渲染；其它提供商只回提供商名，前端按 <c>/auth/config</c> 的客户端配置渲染控件。
+    /// 缓存不可用（无法出题）时回退为只带提供商名的同码错误。
     /// </summary>
     private async Task<Result<T>> BuildCaptchaRequiredResultAsync<T>(string purpose)
     {
-        object? details = null;
-        if (_captchaService is { IsCacheAvailable: true })
+        var provider = _captchaVerifier?.ProviderName ?? ImageCaptchaProvider.ProviderName;
+        var details = new CaptchaDto { Provider = provider };
+
+        if (string.Equals(provider, ImageCaptchaProvider.ProviderName, StringComparison.OrdinalIgnoreCase)
+            && _captchaService is { IsCacheAvailable: true })
         {
             var captcha = await _captchaService.GenerateAsync(purpose);
-            details = new CaptchaDto
-            {
-                CaptchaId = captcha.CaptchaId,
-                ImageBase64 = Convert.ToBase64String(captcha.ImageBytes),
-                ExpirationSeconds = captcha.ExpirationSeconds,
-            };
+            details.CaptchaId = captcha.CaptchaId;
+            details.ImageBase64 = Convert.ToBase64String(captcha.ImageBytes);
+            details.ExpirationSeconds = captcha.ExpirationSeconds;
         }
 
         return Fail<T>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, details);
@@ -1422,10 +1442,10 @@ public class AuthService : ApplicationService, IAuthService
         var captchaOptions = IdentityOptions.Captcha;
         if (captchaOptions.EnableCaptchaOnLogin)
         {
-            var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "login");
+            var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.Login);
             if (!captchaValid)
             {
-                return await BuildCaptchaRequiredResultAsync<string>("login");
+                return await BuildCaptchaRequiredResultAsync<string>(CaptchaPurpose.Login);
             }
         }
 
@@ -1705,6 +1725,17 @@ public class AuthService : ApplicationService, IAuthService
     {
         var otpOptions = IdentityOptions.Otp;
         var recoveryOptions = IdentityOptions.Recovery;
+
+        // 人机验证（启用找回密码验证码时，发出短信 / 邮件之前先过）。与验证码登录的发码门同形：无条件要求，
+        // 这条路径没有「失败次数」可累计，而每次调用都真的产生费用。此前它不受任何验证码开关管辖。
+        if (IdentityOptions.Captcha.EnableCaptchaOnPasswordRecovery)
+        {
+            var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.PasswordRecovery);
+            if (!captchaValid)
+            {
+                return await BuildCaptchaRequiredResultAsync<string>(CaptchaPurpose.PasswordRecovery);
+            }
+        }
 
         // 验证类型是否启用
         if (input.Type == TwoFactorType.Email && !otpOptions.EnableEmail)

@@ -242,9 +242,12 @@ public class WorkflowServiceStreamingTests
         }
 
         results.Count.ShouldBe(3);
-        results[2].Status.ShouldBe(nameof(WorkflowExecutionStatus.AwaitingInput));
+        // An approval-node interrupt is an approval, not a generic input wait: the checkpoint
+        // records AwaitingApproval and ApproveStepAsync only accepts that status. The row must
+        // say the same thing, otherwise the documented approve -> resume flow is rejected (400).
+        results[2].Status.ShouldBe(nameof(WorkflowExecutionStatus.AwaitingApproval));
         insertedExecution.ShouldNotBeNull();
-        insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.AwaitingInput);
+        insertedExecution!.Status.ShouldBe(WorkflowExecutionStatus.AwaitingApproval);
 
         usageLog.Verify(x => x.LogUsageAsync(
             AIOperationType.WorkflowRunStreaming,
@@ -254,7 +257,7 @@ public class WorkflowServiceStreamingTests
             It.IsAny<int>(),
             It.IsAny<long>(),
             false,
-            It.Is<string>(msg => msg.Contains("Approval required", StringComparison.OrdinalIgnoreCase) || msg.Contains("AwaitingInput", StringComparison.OrdinalIgnoreCase)),
+            It.Is<string>(msg => msg.Contains("Approval required", StringComparison.OrdinalIgnoreCase) || msg.Contains("AwaitingApproval", StringComparison.OrdinalIgnoreCase)),
             null,
             null,
             CancellationToken.None), Times.Once);
@@ -313,6 +316,7 @@ public class WorkflowServiceStreamingTests
             quota.Object,
             checkpointStore.Object,
             serviceProvider.GetRequiredService<WorkflowEngine>(),
+            serviceProvider.GetServices<IWorkflowNode>(),
             serviceProvider);
     }
 

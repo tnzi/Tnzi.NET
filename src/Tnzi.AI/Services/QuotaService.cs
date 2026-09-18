@@ -110,45 +110,11 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             }
 
             // 配额足够，计算使用率和预警级别
-            var remainingDaily = Math.Max(0, quota.DailyTokenLimit - quota.CurrentDailyUsage - estimatedTokens);
-            var remainingMonthly = Math.Max(0, quota.MonthlyTokenLimit - quota.CurrentMonthlyUsage - estimatedTokens);
+            var projected = ProjectUsage(quota, estimatedTokens);
+            await PublishThresholdIfCrossedAsync(userId, quota, projected);
 
-            var dailyPct = quota.DailyTokenLimit > 0
-                ? (decimal)(quota.CurrentDailyUsage + estimatedTokens) / quota.DailyTokenLimit
-                : 0m;
-            var monthlyPct = quota.MonthlyTokenLimit > 0
-                ? (decimal)(quota.CurrentMonthlyUsage + estimatedTokens) / quota.MonthlyTokenLimit
-                : 0m;
-            var maxPct = Math.Max(dailyPct, monthlyPct);
-
-            var warningLevel = maxPct >= quota.CriticalThreshold
-                ? QuotaWarningLevel.Critical
-                : maxPct >= quota.WarningThreshold
-                    ? QuotaWarningLevel.Warning
-                    : QuotaWarningLevel.None;
-
-            // 命中预警/严重阈值时发布事件（静默失败，不影响配额检查主流程）
-            if (warningLevel != QuotaWarningLevel.None)
-            {
-                try
-                {
-                    await (EventBus?.PublishAsync(new QuotaThresholdReachedEvent
-                    {
-                        UserId = userId,
-                        Level = warningLevel.ToString(),
-                        DailyUsagePercentage = dailyPct,
-                        MonthlyUsagePercentage = monthlyPct,
-                        RemainingDailyQuota = remainingDaily,
-                        RemainingMonthlyQuota = remainingMonthly
-                    }) ?? Task.CompletedTask);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning(ex, "Failed to publish QuotaThresholdReachedEvent for user {UserId}", userId);
-                }
-            }
-
-            return Ok(QuotaCheckResult.Allow(remainingDaily, remainingMonthly, dailyPct, monthlyPct, warningLevel));
+            return Ok(QuotaCheckResult.Allow(
+                projected.RemainingDaily, projected.RemainingMonthly, projected.DailyPct, projected.MonthlyPct, projected.Level));
         }
         catch (Exception ex)
         {
@@ -168,6 +134,9 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             // 与它对应的预留却随请求回滚 —— 两边不一致比少记一次更难查。
             await _quotaRepository.EnsureTransactionStartedAsync(ct);
 
+            // 加量前的快照：阈值事件只在等级上升的那一次发布，须拿加量前后两个等级比较
+            var before = await ReadQuotaSnapshotAsync(userId, ct);
+
             await _quotaRepository.AsQueryable()
                 .Where(q => q.UserId == userId)
                 .ExecuteUpdateAsync(s => s
@@ -175,6 +144,12 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                     .SetProperty(q => q.CurrentMonthlyUsage, q => q.CurrentMonthlyUsage + actualTokens), ct);
 
             Logger.LogDebug("Updated quota for user {UserId}. Added {Tokens} tokens", userId, actualTokens);
+
+            if (before is { IsEnabled: true })
+            {
+                await PublishThresholdIfCrossedAsync(userId, before, ProjectUsage(before, actualTokens));
+            }
+
             return Ok();
         }
         catch (Exception ex)
@@ -397,6 +372,12 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
                 "Reserved {Tokens} tokens for user {UserId}",
                 estimatedTokens, userId);
 
+            // 预留是运行时唯一的「越线」时刻（QuotaMiddleware 只走这里，不走 CheckQuotaAsync）：
+            // 文档承诺的 80% / 95% 预警事件必须从这条路径发出，否则宿主订阅了也一条收不到，
+            // 用户直接从「无预警」跳到 429。quota 是扣减前读到的快照，据此算扣减前后的等级，
+            // 只在等级上升的那一次发布。
+            await PublishThresholdIfCrossedAsync(userId, quota, ProjectUsage(quota, estimatedTokens));
+
             return Ok(new QuotaReservation
             {
                 ReservedTokens = estimatedTokens,
@@ -435,6 +416,11 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             // 预留上，用量被压到真实值以下。
             await _quotaRepository.EnsureTransactionStartedAsync(ct);
 
+            // ★ 结算也是一次「越线」时刻：实际用量超过预估是长补全的常态，越线发生在这里时预留那次
+            //   看不到（还在阈值下）；这里不投影就一条不发，而且下一次预留的「加量前」快照已经在阈值
+            //   之上，事件从此被永久抑制 —— 宿主照样从「无预警」直接跳到 429。
+            var before = await ReadQuotaSnapshotAsync(userId, ct);
+
             // 使用 ExecuteUpdateAsync 原子性补偿差值，绕过 ChangeTracker
             // SQL: SET CurrentDailyUsage = GREATEST(0, CurrentDailyUsage + @diff)
             await _quotaRepository.AsQueryable()
@@ -446,6 +432,11 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
             Logger.LogDebug(
                 "Settled quota for user {UserId}. Difference: {Difference} (Reserved: {Reserved}, Actual: {Actual})",
                 userId, difference, reservation.ReservedTokens, actualTokens);
+
+            if (before != null && difference > 0)
+            {
+                await PublishThresholdIfCrossedAsync(userId, before, ProjectUsage(before, difference));
+            }
 
             return Ok();
         }
@@ -527,6 +518,75 @@ public class QuotaService : ApplicationService, IQuotaService, IQuotaProvider
     /// 并发插入竞态由 UserId 唯一索引兜底：第二个请求捕获唯一约束冲突后重新查询。
     /// </para>
     /// </remarks>
+    /// <summary>加上 <paramref name="additionalTokens"/> 之后的使用率、余量与预警等级。</summary>
+    private static ProjectedUsage ProjectUsage(UserQuota quota, long additionalTokens)
+    {
+        var remainingDaily = Math.Max(0, quota.DailyTokenLimit - quota.CurrentDailyUsage - additionalTokens);
+        var remainingMonthly = Math.Max(0, quota.MonthlyTokenLimit - quota.CurrentMonthlyUsage - additionalTokens);
+
+        var dailyPct = quota.DailyTokenLimit > 0
+            ? (decimal)(quota.CurrentDailyUsage + additionalTokens) / quota.DailyTokenLimit
+            : 0m;
+        var monthlyPct = quota.MonthlyTokenLimit > 0
+            ? (decimal)(quota.CurrentMonthlyUsage + additionalTokens) / quota.MonthlyTokenLimit
+            : 0m;
+        var maxPct = Math.Max(dailyPct, monthlyPct);
+
+        var level = maxPct >= quota.CriticalThreshold
+            ? QuotaWarningLevel.Critical
+            : maxPct >= quota.WarningThreshold
+                ? QuotaWarningLevel.Warning
+                : QuotaWarningLevel.None;
+
+        return new ProjectedUsage(dailyPct, monthlyPct, remainingDaily, remainingMonthly, level);
+    }
+
+    private readonly record struct ProjectedUsage(
+        decimal DailyPct, decimal MonthlyPct, long RemainingDaily, long RemainingMonthly, QuotaWarningLevel Level);
+
+    /// <summary>
+    /// 读一份未跟踪的配额快照，供 <c>ExecuteUpdate</c> 之前算「加量前」等级；
+    /// 行不存在返回 null（本轮什么也累加不上，也就没有越线可言）。
+    /// </summary>
+    private Task<UserQuota?> ReadQuotaSnapshotAsync(Guid userId, CancellationToken ct)
+        => _quotaRepository.AsQueryable().FirstOrDefaultAsync(q => q.UserId == userId, ct);
+
+    /// <summary>
+    /// 只在预警等级<b>上升</b>（None→Warning、Warning→Critical、None→Critical）时发布
+    /// <see cref="QuotaThresholdReachedEvent"/>：<paramref name="quota"/> 是加量前的快照，
+    /// 已在阈值之上的后续预留不重复告警。发布失败只记日志，不影响配额主流程。
+    /// </summary>
+    private async Task PublishThresholdIfCrossedAsync(Guid userId, UserQuota quota, ProjectedUsage after)
+    {
+        if (after.Level == QuotaWarningLevel.None)
+        {
+            return;
+        }
+
+        var before = ProjectUsage(quota, 0).Level;
+        if (after.Level <= before)
+        {
+            return;
+        }
+
+        try
+        {
+            await (EventBus?.PublishAsync(new QuotaThresholdReachedEvent
+            {
+                UserId = userId,
+                Level = after.Level.ToString(),
+                DailyUsagePercentage = after.DailyPct,
+                MonthlyUsagePercentage = after.MonthlyPct,
+                RemainingDailyQuota = after.RemainingDaily,
+                RemainingMonthlyQuota = after.RemainingMonthly
+            }) ?? Task.CompletedTask);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to publish QuotaThresholdReachedEvent for user {UserId}", userId);
+        }
+    }
+
     private async Task<UserQuota> GetOrCreateQuotaAsync(Guid userId, CancellationToken ct = default)
     {
         var existing = await _quotaRepository.AsQueryable()

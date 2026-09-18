@@ -33,8 +33,16 @@ public class UserConfiguration : EntityTypeConfigurationBase<User, Guid>
         //   （注意该门禁只能看到当前分支注册的索引，多租户分支要靠这里的人工保证）。
         var isDeletedFilter = IndexFilterFactory.GetIsDeletedFalse();
 
-        // 单租户模式沿用 ASP.NET Identity 默认的 NormalizedUserName 唯一索引，
-        // 但补上过滤器 —— Identity 建的那个不带过滤器。
+        // 沿用 ASP.NET Identity 默认的 NormalizedUserName 唯一索引，但补上过滤器 —— Identity 建的那个不带过滤器。
+        //
+        // ★★ 多租户开启时用户名**仍然全局唯一**，这是 User 与 Role 的一处刻意不对称。
+        //   User 不受租户过滤器管（登录时租户上下文尚未建立、按用户名找人必须跨租户；全局账号 TenantId = null），
+        //   于是 UserManager 的 UserValidator 经无过滤的 FindByNameAsync 全局查重，第二个 admin 在哪个租户都建不出来；
+        //   登录查找（AuthService.FindUserByLoginInputAsync）同样不带租户。此前这里在多租户分支把本索引改成非唯一、
+        //   另建 (TenantId, NormalizedUserName) 复合唯一索引，文档据此写「允许不同租户存在相同用户名」——
+        //   那条索引是死的（validator 先拦），而一旦有人绕过 UserManager 造出重名，登录就分不清找的是谁。
+        //   三者（索引 / validator / 登录查找）必须一个口径：全局唯一。Role 受过滤器管，RoleValidator 按租户查重，
+        //   所以角色名保持租户内唯一。对已开启多租户的库这是一次索引迁移（删 UserTenantNameIndex、UserNameIndex 复为唯一）。
         builder.HasIndex(u => u.NormalizedUserName)
             .HasDatabaseName("UserNameIndex")
             .IsUnique()
@@ -43,18 +51,7 @@ public class UserConfiguration : EntityTypeConfigurationBase<User, Guid>
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
         if (multiTenancyEnabled)
         {
-            // 多租户模式下，不同租户可以拥有相同用户名：
-            // 移除 ASP.NET Identity 默认的 NormalizedUserName 单列唯一索引，
-            // 替换为 (TenantId, NormalizedUserName) 租户内唯一的复合索引。
-            builder.HasIndex(u => u.NormalizedUserName)
-                .HasDatabaseName("UserNameIndex")
-                .IsUnique(false);
-
-            builder.HasIndex(u => new { u.TenantId, u.NormalizedUserName })
-                .HasDatabaseName("UserTenantNameIndex")
-                .IsUnique()
-                .HasFilter(isDeletedFilter);
-
+            // 按租户裁剪的管理端查询（UserTenantScope）靠它。
             builder.HasIndex(u => u.TenantId);
         }
     }

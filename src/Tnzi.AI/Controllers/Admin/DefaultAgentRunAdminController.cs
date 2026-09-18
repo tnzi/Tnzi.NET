@@ -73,7 +73,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     [HttpGet("{runId:guid}/state")]
     public virtual async Task<ApiResult<AgentRunControlStateDto>> GetState(Guid runId)
     {
-        var result = await RuntimeControlService.GetStateAsync(runId);
+        var result = await RuntimeControlService.GetStateAsync(runId, AgentRunAccessScope.Tenant);
         return result.ToApiResult();
     }
 
@@ -134,7 +134,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     [HttpPost("{runId:guid}/wait")]
     public virtual async Task<ApiResult<AgentRunWaitResultDto>> Wait(Guid runId, [FromBody] WaitAgentRunInput? input)
     {
-        var result = await RuntimeControlService.WaitAsync(runId, input);
+        var result = await RuntimeControlService.WaitAsync(runId, input, AgentRunAccessScope.Tenant);
         return result.ToApiResult();
     }
 
@@ -156,7 +156,7 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult<AgentRunControlStateDto>> SendInput(Guid runId, [FromBody] SendAgentRunInput input)
     {
-        var result = await RuntimeControlService.SendInputAsync(runId, input);
+        var result = await RuntimeControlService.SendInputAsync(runId, input, AgentRunAccessScope.Tenant);
         return result.ToApiResult();
     }
 

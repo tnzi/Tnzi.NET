@@ -86,17 +86,11 @@ public class RateLimitingMiddleware
             }
         }
 
-        // 检查白名单
-        if (rule.Whitelist != null && rule.Whitelist.Length > 0)
+        // 检查白名单（用户 ID 与来源地址任一命中即放行）
+        if (IsWhitelisted(context, rule, options))
         {
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
-            var identifier = currentUser?.Id?.ToString() ?? context.Request.GetClientIp() ?? string.Empty;
-
-            if (rule.Whitelist.Contains(identifier, StringComparer.OrdinalIgnoreCase))
-            {
-                await _next(context);
-                return;
-            }
+            await _next(context);
+            return;
         }
 
         try
@@ -217,6 +211,55 @@ public class RateLimitingMiddleware
         }
 
         return (null, null);
+    }
+
+    /// <summary>
+    /// 判断请求是否命中白名单。
+    /// </summary>
+    /// <remarks>
+    /// 一个请求带两个标识：已登录用户的 ID 与来源地址。白名单条目可以是其中任何一种，
+    /// 任一命中即放行 —— 只比对一个标识的话，限流挪到认证之后（2026-09-12）会让
+    /// 已登录请求的标识从地址变成用户 ID，于是 <c>ByIp</c> 里写的内部主机地址对带凭据的
+    /// 调用方（监控、网关、服务账号）不再命中：配置还在、启动无告警，症状是白名单地址收到 429。
+    /// <para>
+    /// 参与比对的除了选中规则自己的白名单，还有 <c>ByIp</c> 的白名单（当选中的是 <c>ByUser</c> 时）：
+    /// 在 <c>ByUser</c> 真正生效之前，同时配了两条规则的部署里 <c>ByIp</c> 的地址白名单
+    /// 一直对每一个调用方生效，<c>ByUser</c> 接管已登录请求不该让它跟着消失 ——
+    /// 地址是请求的属性，不是某条规则的属性。
+    /// </para>
+    /// </remarks>
+    private static bool IsWhitelisted(HttpContext context, RateLimitRule rule, RateLimitOptions options)
+    {
+        var whitelists = new List<string[]>(2);
+        if (rule.Whitelist is { Length: > 0 })
+        {
+            whitelists.Add(rule.Whitelist);
+        }
+
+        if (ReferenceEquals(rule, options.ByUser) && options.ByIp?.Whitelist is { Length: > 0 } addressWhitelist)
+        {
+            whitelists.Add(addressWhitelist);
+        }
+
+        if (whitelists.Count == 0)
+        {
+            return false;
+        }
+
+        var currentUser = context.RequestServices.GetService<ICurrentUser>();
+        var identifiers = new List<string>(2);
+        if (currentUser?.Id is { } userId)
+        {
+            identifiers.Add(userId.ToString());
+        }
+
+        if (context.Request.GetClientIp() is { Length: > 0 } clientIp)
+        {
+            identifiers.Add(clientIp);
+        }
+
+        return identifiers.Any(identifier =>
+            whitelists.Any(whitelist => whitelist.Contains(identifier, StringComparer.OrdinalIgnoreCase)));
     }
 
     /// <summary>

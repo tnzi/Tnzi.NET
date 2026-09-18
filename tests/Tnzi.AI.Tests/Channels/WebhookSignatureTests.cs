@@ -276,7 +276,8 @@ public class WebhookSignatureTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateFeishu(bus, key);
 
-        var body = FeishuEventJson();
+        // 配置了 Encrypt Key 的飞书应用推送的是密文信封，签名算在信封上
+        var body = FeishuTestCrypto.Envelope(FeishuEventJson(), key);
         var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         var nonce = "nonce-1";
         var headers = new Dictionary<string, string>
@@ -333,7 +334,8 @@ public class WebhookSignatureTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateFeishu(bus, encryptKey: key);
 
-        var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "lark-challenge", token = "vtok" });
+        var body = FeishuTestCrypto.Envelope(
+            JsonSerializer.Serialize(new { type = "url_verification", challenge = "lark-challenge", token = "vtok" }), key);
         var result = await adapter.ProcessWebhookAsync(body, FeishuHeaders(key, body));
 
         result.Outcome.ShouldBe(WebhookOutcome.Challenge);
@@ -349,7 +351,8 @@ public class WebhookSignatureTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateFeishu(bus, encryptKey: key, verificationToken: "expected-token");
 
-        var body = JsonSerializer.Serialize(new { type = "url_verification", challenge = "c", token = "wrong-token" });
+        var body = FeishuTestCrypto.Envelope(
+            JsonSerializer.Serialize(new { type = "url_verification", challenge = "c", token = "wrong-token" }), key);
         var result = await adapter.ProcessWebhookAsync(body, FeishuHeaders(key, body));
 
         result.Outcome.ShouldBe(WebhookOutcome.Rejected);
@@ -372,7 +375,7 @@ public class WebhookSignatureTests
     // ---------------- Discord (Ed25519) ----------------
 
     private static (DiscordChannelAdapter adapter, NSec.Cryptography.Key key) CreateDiscord(
-        InMemoryChannelMessageBus bus, out string publicKeyHex)
+        InMemoryChannelMessageBus bus, out string publicKeyHex, List<string>? allowedUsers = null)
     {
         var algo = NSec.Cryptography.SignatureAlgorithm.Ed25519;
         var key = NSec.Cryptography.Key.Create(algo, new NSec.Cryptography.KeyCreationParameters
@@ -384,7 +387,7 @@ public class WebhookSignatureTests
 
         var options = MsOptions.Create(new ChannelsModuleOptions
         {
-            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot", PublicKey = publicKeyHex }
+            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot", PublicKey = publicKeyHex, AllowedUsers = allowedUsers ?? [] }
         });
         var adapter = new DiscordChannelAdapter(NullLogger<DiscordChannelAdapter>.Instance, bus, HttpFactory(), options);
         return (adapter, key);
@@ -399,8 +402,75 @@ public class WebhookSignatureTests
     }
 
     [Fact]
-    public async Task Discord_ValidSignature_Accepted_AndDispatched()
+    public async Task Discord_ValidSignature_ApplicationCommand_DeferredAck_AndDispatched()
     {
+        // Discord 的 HTTP 回调只会投递 Interaction（斜杠命令等），三秒内必须先答 type=5（延迟应答），
+        // 真正的回复之后经交互令牌 PATCH 回去。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var (adapter, key) = CreateDiscord(bus, out _);
+
+        var body = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C1", guild_id = "G1",
+            member = new { user = new { id = "U1" } },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "discord hi" } } }
+        });
+        var (sig, ts) = DiscordSign(key, body);
+        var headers = new Dictionary<string, string>
+        {
+            ["X-Signature-Ed25519"] = sig,
+            ["X-Signature-Timestamp"] = ts
+        };
+
+        var result = await adapter.ProcessWebhookAsync(body, headers);
+
+        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
+        result.ChallengeResponse!.ShouldContain("\"type\":5");
+        var msg = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        msg.ShouldNotBeNull();
+        msg.Text.ShouldBe("discord hi");
+        msg.ChatId.ShouldBe("C1");
+        msg.UserId.ShouldBe("U1");
+        msg.Metadata.ShouldNotBeNull();
+        msg.Metadata[DiscordInteractionMetadata.Token].ShouldBe("itok");
+        msg.Metadata[DiscordInteractionMetadata.ApplicationId].ShouldBe("app1");
+    }
+
+    [Fact]
+    public async Task Discord_ValidSignature_ApplicationCommand_NotAllowed_AnsweredImmediatelyNotDeferred()
+    {
+        // 不在允许名单里的交互此前也答 type=5（延迟应答）却从不跟进：用户看到 "thinking..." 十五分钟直到令牌过期。
+        // 拒绝要当场答 type=4 的临时消息（flags 64，只有本人可见）。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var (adapter, key) = CreateDiscord(bus, out _, allowedUsers: ["U-someone-else"]);
+
+        var body = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C1", guild_id = "G1",
+            member = new { user = new { id = "U1" } },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "discord hi" } } }
+        });
+        var (sig, ts) = DiscordSign(key, body);
+        var headers = new Dictionary<string, string>
+        {
+            ["X-Signature-Ed25519"] = sig,
+            ["X-Signature-Timestamp"] = ts
+        };
+
+        var result = await adapter.ProcessWebhookAsync(body, headers);
+
+        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
+        var challenge = result.ChallengeResponse.ShouldNotBeNull();
+        challenge.ShouldContain("\"type\":4");
+        challenge.ShouldContain("\"flags\":64");
+        challenge.ShouldNotContain("\"type\":5");
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Discord_ValidSignature_GatewayDispatchShape_NotDispatchedViaWebhook()
+    {
+        // MESSAGE_CREATE 是 WebSocket Gateway 的分发帧，Discord 从不会 POST 它；签过名的 HTTP 回调只会是 Interaction。
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var (adapter, key) = CreateDiscord(bus, out _);
 
@@ -419,9 +489,7 @@ public class WebhookSignatureTests
         var result = await adapter.ProcessWebhookAsync(body, headers);
 
         result.Outcome.ShouldBe(WebhookOutcome.Accepted);
-        var msg = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
-        msg.ShouldNotBeNull();
-        msg.Text.ShouldBe("discord hi");
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
     }
 
     [Fact]
@@ -452,8 +520,9 @@ public class WebhookSignatureTests
 
         var body = JsonSerializer.Serialize(new
         {
-            t = "MESSAGE_CREATE",
-            d = new { id = "m1", channel_id = "C1", content = "x", author = new { id = "U1" } }
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C1",
+            user = new { id = "U1" },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "x" } } }
         });
         // Sign a DIFFERENT body → signature won't verify against the real body.
         var (sig, ts) = DiscordSign(key, "tampered");

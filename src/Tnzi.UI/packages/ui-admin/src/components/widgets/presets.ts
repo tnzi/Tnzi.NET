@@ -101,7 +101,7 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.audit',
       to: { name: 'audit.logs' },
       tone: 'info',
-      permission: 'audit.log.view',
+      permission: 'audit.operation.view',
       module: 'audit',
     },
     {
@@ -252,7 +252,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       // the timeline can be re-polled from the widget toolbar (the
       // hardcoded i18n placeholder list never benefited from refresh).
       props: { limit: 6 },
-      permission: 'audit.log.view',
+      permission: 'audit.operation.view',
       module: 'audit',
     },
     {
@@ -261,7 +261,7 @@ export function defaultWorkbenchWidgets(): WidgetDef[] {
       title: 'admin.widgets.auditRecent.title',
       icon: 'mdi:shield-check-outline',
       span: { xs: 24, sm: 24, md: 12, lg: 12 },
-      permission: 'audit.log.view',
+      permission: 'audit.operation.view',
       module: 'audit',
     },
     {

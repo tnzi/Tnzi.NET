@@ -23,6 +23,7 @@ public partial class DefaultAuthController : ApiControllerBase
     protected readonly IPasskeyService? PasskeyService;
     protected readonly IStepUpService? StepUpService;
     protected readonly IPendingActionService? PendingActionService;
+    protected readonly IOAuthLinkTokenService? OAuthLinkTokens;
 
     /// <summary>
     /// 初始化认证控制器
@@ -40,6 +41,7 @@ public partial class DefaultAuthController : ApiControllerBase
     /// <param name="passkeyService">Passkey 服务（可选；未注册时六个 passkey 端点统一返回未启用）</param>
     /// <param name="stepUpService">二次确认服务（可选；未注册时两个 step-up 端点统一返回不可用）</param>
     /// <param name="pendingActionService">待办义务完成服务（可选）</param>
+    /// <param name="oauthLinkTokens">第三方账号绑定令牌服务（可选；未注册时 <c>linkToken</c> 参数一律 400）</param>
     public DefaultAuthController(
         ITwoFactorService twoFactorService,
         IAuthService authService,
@@ -53,7 +55,8 @@ public partial class DefaultAuthController : ApiControllerBase
         IPasswordPolicyService? passwordPolicyService = null,
         IPasskeyService? passkeyService = null,
         IStepUpService? stepUpService = null,
-        IPendingActionService? pendingActionService = null)
+        IPendingActionService? pendingActionService = null,
+        IOAuthLinkTokenService? oauthLinkTokens = null)
     {
         TwoFactorService = Check.NotNull(twoFactorService);
         AuthService = Check.NotNull(authService);
@@ -68,6 +71,7 @@ public partial class DefaultAuthController : ApiControllerBase
         PasskeyService = passkeyService;
         StepUpService = stepUpService;
         PendingActionService = pendingActionService;
+        OAuthLinkTokens = oauthLinkTokens;
     }
 
     /// <summary>
@@ -252,7 +256,7 @@ public partial class DefaultAuthController : ApiControllerBase
     [ApiExplorerSettings(GroupName = "auth")]
     public virtual async Task<ApiResult<string>> ForgotPassword([FromBody] ForgotPasswordDto input)
     {
-        var result = await PasswordService.ForgotPasswordAsync(input.Email);
+        var result = await PasswordService.ForgotPasswordAsync(input);
         return result.ToApiResult();
     }
 
@@ -280,13 +284,13 @@ public partial class DefaultAuthController : ApiControllerBase
         {
             try
             {
-                var frontendUrl = Configuration["App:FrontendUrl"];
+                var frontendUrl = FrontendUrlResolver.Resolve(Configuration, Logger);
                 var resetPasswordRoute = IdentityOptions.CurrentValue?.Recovery?.ResetPasswordRoute;
 
                 // 如果配置了 ResetPasswordRoute 和 FrontendUrl，重定向到前端
                 if (!string.IsNullOrEmpty(resetPasswordRoute) && !string.IsNullOrEmpty(frontendUrl))
                 {
-                    var redirectUrl = $"{frontendUrl.TrimEnd('/')}{resetPasswordRoute}?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+                    var redirectUrl = $"{frontendUrl}{resetPasswordRoute}?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
                     return Redirect(redirectUrl);
                 }
             }
@@ -364,9 +368,9 @@ public partial class DefaultAuthController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取验证码
+    /// 获取图形验证码（PNG）。
     /// </summary>
-    /// <param name="purpose">用途（login, register）</param>
+    /// <param name="purpose">用途（login / register / password-recovery，或消费方自己 [RequireCaptcha] 端点声明的任意合法用途名）</param>
     /// <returns>验证码图片和ID</returns>
     [HttpGet("captcha/{purpose}")]
     [AllowAnonymous]
@@ -378,9 +382,10 @@ public partial class DefaultAuthController : ApiControllerBase
             return new ObjectResult(Error<object>("Captcha service is not available", 503)) { StatusCode = 503 };
         }
 
-        if (string.IsNullOrEmpty(purpose) || (purpose != "login" && purpose != "register"))
+        // 用途只限形态不限枚举：内置图形验证码是 image 提供商，消费方自己的端点也要能用它出题。
+        if (!CaptchaPurpose.IsValid(purpose))
         {
-            return new BadRequestObjectResult(BadRequest<object>("Invalid captcha purpose. Use 'login' or 'register'."));
+            return new BadRequestObjectResult(BadRequest<object>("Invalid captcha purpose."));
         }
 
         var result = await CaptchaService.GenerateAsync(purpose);
@@ -393,9 +398,9 @@ public partial class DefaultAuthController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取验证码信息（返回JSON格式，包含Base64图片）
+    /// 获取图形验证码（JSON，含 Base64 图片）。
     /// </summary>
-    /// <param name="purpose">用途（login, register）</param>
+    /// <param name="purpose">用途（login / register / password-recovery，或消费方自己 [RequireCaptcha] 端点声明的任意合法用途名）</param>
     /// <returns>验证码信息</returns>
     [HttpGet("captcha/{purpose}/json")]
     [AllowAnonymous]
@@ -407,15 +412,16 @@ public partial class DefaultAuthController : ApiControllerBase
             return Error<CaptchaDto>("Captcha service is not available", 503);
         }
 
-        if (string.IsNullOrEmpty(purpose) || (purpose != "login" && purpose != "register"))
+        if (!CaptchaPurpose.IsValid(purpose))
         {
-            return BadRequest<CaptchaDto>("Invalid captcha purpose. Use 'login' or 'register'.");
+            return BadRequest<CaptchaDto>("Invalid captcha purpose.");
         }
 
         var result = await CaptchaService.GenerateAsync(purpose);
 
         return Ok(new CaptchaDto
         {
+            Provider = ImageCaptchaProvider.ProviderName,
             CaptchaId = result.CaptchaId,
             ImageBase64 = Convert.ToBase64String(result.ImageBytes),
             ExpirationSeconds = result.ExpirationSeconds

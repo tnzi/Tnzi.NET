@@ -1,3 +1,6 @@
+using Tnzi.EventBus;
+using Tnzi.Finance.Banking.Events;
+
 namespace Tnzi.Finance.Tests.Integration;
 
 /// <summary>
@@ -759,16 +762,28 @@ public class BankFeedTests : FinanceIntegrationTestBase
 }
 
 /// <summary>auto-confirm 开启：精确匹配 + 存在 Draft 对账时自动确认</summary>
+/// <remarks>
+/// 自动确认分支是 <c>ConfirmMatchAsync</c> 的后半段，必须与它同一口径：轮换父对账的并发戳
+/// （与 <c>CompleteAsync</c> 互斥，否则勾选行会插进已完成的对账）并发布匹配事件。
+/// 这两条既有用例都看不见：断言 <c>AutoConfirmed == 1</c> 对「漏掉 bump」与「漏掉事件」照样全绿。
+/// </remarks>
 public class BankFeedAutoConfirmTests : FinanceIntegrationTestBase
 {
+    private readonly MatchedEventRecorder _events = new();
+    private readonly ConcurrentCompleter _completer = new();
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         base.ConfigureServices(services);
         services.Configure<FinanceOptions>(o => o.BankFeedAutoConfirmExactMatches = true);
+        services.AddSingleton(_events);
+        services.AddScoped<IEventHandler<BankTransactionMatchedEvent>, RecordingMatchedHandler>();
+        services.AddSingleton(_completer);
+        // 后注册者胜：BankFeedService 拿到的是这个能在取候选时「并发完成对账」的子类。
+        services.AddScoped<BankMatchEngine, InterleavingBankMatchEngine>();
     }
 
-    [Fact]
-    public async Task Suggest_AutoConfirmsExactMatch_WhenDraftExists()
+    private async Task<(Guid Bank, Guid JournalLineId)> SeedExactRefScenarioAsync()
     {
         await SeedCoaAsync();
         var bank = await AccountIdByCodeAsync("1120");
@@ -792,16 +807,294 @@ public class BankFeedAutoConfirmTests : FinanceIntegrationTestBase
         var mapping = new CsvMappingDto { HasHeader = true, DateColumn = 0, DescriptionColumn = 1, AmountColumn = 2, ReferenceColumn = 3, DateFormat = "yyyy-MM-dd" };
         await InScopeAsync<IBankFeedService, Result<BankImportResultDto>>(s => s.ImportStatementAsync(bank, BankTransactionSource.Csv, "f.csv", csv, mapping));
 
-        await InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(
-            s => s.CreateDraftAsync(new CreateReconciliationDto { AccountId = bank, StatementDate = new DateTime(2026, 3, 31), StatementEndingBalance = 500m }));
+        var lines = ServiceProvider.GetRequiredService<IRepository<JournalLine, Guid>>();
+        var line = await lines.FirstOrDefaultAsync(l => l.AccountId == bank && l.Debit == 500m);
+        line.ShouldNotBeNull();
+        return (bank, line.Id);
+    }
 
-        var suggest = await InScopeAsync<IBankFeedService, Result<BankSuggestResultDto>>(s => s.SuggestMatchesAsync(bank));
+    private Task<Result<ReconciliationDto>> CreateDraftAsync(Guid bank, decimal ending)
+        => InScopeAsync<IReconciliationService, Result<ReconciliationDto>>(
+            s => s.CreateDraftAsync(new CreateReconciliationDto { AccountId = bank, StatementDate = new DateTime(2026, 3, 31), StatementEndingBalance = ending }));
+
+    private Task<Result<BankSuggestResultDto>> SuggestAsync(Guid bank)
+        => InScopeAsync<IBankFeedService, Result<BankSuggestResultDto>>(s => s.SuggestMatchesAsync(bank));
+
+    [Fact]
+    public async Task Suggest_AutoConfirmsExactMatch_WhenDraftExists()
+    {
+        var (bank, _) = await SeedExactRefScenarioAsync();
+        (await CreateDraftAsync(bank, 500m)).Succeeded.ShouldBeTrue();
+
+        var suggest = await SuggestAsync(bank);
         suggest.Succeeded.ShouldBeTrue(suggest.Message);
         suggest.Data!.AutoConfirmed.ShouldBe(1);
 
         var repo = ServiceProvider.GetRequiredService<IRepository<BankTransaction, Guid>>();
         var txn = (await repo.ToListAsync(t => t.AccountId == bank)).Single();
         txn.Status.ShouldBe(BankTransactionStatus.Matched);
+    }
+
+    /// <summary>
+    /// 自动确认往 Draft 对账里插了勾选行，父对账的并发戳必须随之轮换 ——
+    /// 那是它与 <c>CompleteAsync</c> 互斥的唯一机制（勾选行自己没有并发令牌）。
+    /// </summary>
+    [Fact]
+    public async Task Suggest_AutoConfirm_RotatesTheDraftReconciliationStamp()
+    {
+        var (bank, _) = await SeedExactRefScenarioAsync();
+        var draft = await CreateDraftAsync(bank, 500m);
+        var before = (await ReloadAsync<Reconciliation>(draft.Data!.Id))!.ConcurrencyStamp;
+
+        var suggest = await SuggestAsync(bank);
+        suggest.Succeeded.ShouldBeTrue(suggest.Message);
+        suggest.Data!.AutoConfirmed.ShouldBe(1);
+
+        (await ReloadAsync<Reconciliation>(draft.Data.Id))!.ConcurrencyStamp.ShouldNotBe(before);
+    }
+
+    /// <summary>自动确认的匹配与手工确认的匹配对订阅方必须长得一样 —— 否则消费方的联动只对手工那一半生效。</summary>
+    [Fact]
+    public async Task Suggest_AutoConfirm_PublishesMatchedEvent()
+    {
+        var (bank, journalLineId) = await SeedExactRefScenarioAsync();
+        (await CreateDraftAsync(bank, 500m)).Succeeded.ShouldBeTrue();
+
+        var suggest = await SuggestAsync(bank);
+        suggest.Succeeded.ShouldBeTrue(suggest.Message);
+
+        var repo = ServiceProvider.GetRequiredService<IRepository<BankTransaction, Guid>>();
+        var txn = (await repo.ToListAsync(t => t.AccountId == bank)).Single();
+
+        var evt = _events.Events.ShouldHaveSingleItem();
+        evt.BankTransactionId.ShouldBe(txn.Id);
+        evt.AccountId.ShouldBe(bank);
+        evt.JournalLineId.ShouldBe(journalLineId);
+        evt.ReconciliationLineId.ShouldBe(txn.ReconciliationLineId!.Value);
+    }
+
+    /// <summary>
+    /// 交错：建议匹配读到 Draft 之后、写入之前，另一个人完成了这张对账。
+    /// 勾选行绝不能落进已完成的对账（那一期从此永久对不平且不能重开），整批回滚并 409。
+    /// </summary>
+    /// <remarks>
+    /// 交错由替换进 DI 的引擎子类制造：取候选集那一刻（在 Draft 已被读出、事务尚未开始之间）
+    /// 用另一个 scope 完成对账。对账单期末余额取 0 = 完成时的 cleared 余额，让完成本身合法。
+    /// </remarks>
+    [Fact]
+    public async Task Suggest_AutoConfirm_WhenTheDraftIsCompletedMeanwhile_Returns409AndWritesNothing()
+    {
+        var (bank, _) = await SeedExactRefScenarioAsync();
+        var draft = await CreateDraftAsync(bank, 0m);
+        _completer.ReconciliationId = draft.Data!.Id;
+
+        var suggest = await SuggestAsync(bank);
+
+        _completer.Completed.ShouldBeTrue("the probe must actually have completed the reconciliation mid-flight");
+        suggest.Succeeded.ShouldBeFalse("a line must not be inserted into a reconciliation completed concurrently");
+        suggest.Code.ShouldBe(409);
+
+        var lines = ServiceProvider.GetRequiredService<IRepository<ReconciliationLine, Guid>>();
+        (await lines.CountAsync(l => l.ReconciliationId == draft.Data.Id)).ShouldBe(0);
+        var repo = ServiceProvider.GetRequiredService<IRepository<BankTransaction, Guid>>();
+        (await repo.ToListAsync(t => t.AccountId == bank)).Single().Status.ShouldBe(BankTransactionStatus.Pending);
+        _events.Events.ShouldBeEmpty();
+    }
+
+    private sealed class MatchedEventRecorder
+    {
+        public List<BankTransactionMatchedEvent> Events { get; } = new();
+    }
+
+    private sealed class RecordingMatchedHandler : IEventHandler<BankTransactionMatchedEvent>
+    {
+        private readonly MatchedEventRecorder _recorder;
+        public RecordingMatchedHandler(MatchedEventRecorder recorder) => _recorder = recorder;
+
+        public Task HandleAsync(BankTransactionMatchedEvent @event, CancellationToken cancellationToken = default)
+        {
+            _recorder.Events.Add(@event);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ConcurrentCompleter
+    {
+        public Guid? ReconciliationId { get; set; }
+        public bool Completed { get; set; }
+    }
+
+    private sealed class InterleavingBankMatchEngine : BankMatchEngine
+    {
+        private readonly ConcurrentCompleter _completer;
+        private readonly IServiceScopeFactory _scopes;
+
+        public InterleavingBankMatchEngine(
+            IReadOnlyRepository<JournalLine, Guid> journalLineRepository,
+            IReadOnlyRepository<ReconciliationLine, Guid> reconLineRepository,
+            IReadOnlyRepository<BankTransaction, Guid> bankTxnRepository,
+            IOptionsSnapshot<FinanceOptions> options,
+            ConcurrentCompleter completer,
+            IServiceScopeFactory scopes)
+            : base(journalLineRepository, reconLineRepository, bankTxnRepository, options)
+        {
+            _completer = completer;
+            _scopes = scopes;
+        }
+
+        public override async Task<Dictionary<decimal, List<BankMatchCandidate>>> GetCandidatesByAmountAsync(
+            Guid accountId, IReadOnlyCollection<decimal> amounts, CancellationToken cancellationToken)
+        {
+            var candidates = await base.GetCandidatesByAmountAsync(accountId, amounts, cancellationToken);
+            if (_completer.ReconciliationId is { } id && !_completer.Completed)
+            {
+                using var scope = _scopes.CreateScope();
+                var completed = await scope.ServiceProvider.GetRequiredService<IReconciliationService>().CompleteAsync(id, cancellationToken);
+                completed.Succeeded.ShouldBeTrue(completed.Message);
+                _completer.Completed = true;
+            }
+            return candidates;
+        }
+    }
+}
+
+/// <summary>
+/// 流水导入把解析器 / 提供者给的字符串写进定宽列（Description 512 / Payee 256 / Reference 128 / ExternalId 256）
+/// 之前必须按列宽归一化。
+/// </summary>
+/// <remarks>
+/// 此前原样赋值：SQL Server / PostgreSQL 上一行超长就在循环中间抛 500，批次头与前 N-1 行已各自提交、
+/// 计数停在 0/0、事件没发；重传时前 N-1 行按去重跳过、那一行再炸一次，这份对账单永远导不完。
+/// 判据同 <c>ReceiptFieldLimits</c>：机器给的值归一化（文件来自银行，操作员改不了它）；
+/// 给人看的字段截断保留开头，标识符不截断 —— 截出来的是另一个键。
+/// ⚠️ 测试库是 SQLite，它<b>不执行 varchar 长度约束</b>，所以断言落在「存下来的值已是归一化后的形状」
+/// 而不是「没有抛异常」；真实库上未归一化的值会让插入失败，那是本机制存在的动机，在这里测不出来。
+/// </remarks>
+public class BankFeedFieldLimitsTests : FinanceIntegrationTestBase
+{
+    private static string Ofx(params string[] stmttrns) =>
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <?OFX OFXHEADER="200" VERSION="211" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+        <OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS>
+        <CURDEF>USD</CURDEF>
+        <BANKTRANLIST>
+        <DTSTART>20260301</DTSTART><DTEND>20260331</DTEND>
+        """ + string.Concat(stmttrns) + """
+
+        </BANKTRANLIST>
+        <LEDGERBAL><BALAMT>400.00</BALAMT><DTASOF>20260331</DTASOF></LEDGERBAL>
+        </STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>
+        """;
+
+    private static string Stmttrn(string fitid, string name, string memo, string? checknum = null, string amount = "10.00")
+        => $"<STMTTRN><TRNTYPE>CREDIT</TRNTYPE><DTPOSTED>20260305</DTPOSTED><TRNAMT>{amount}</TRNAMT><FITID>{fitid}</FITID><NAME>{name}</NAME><MEMO>{memo}</MEMO>"
+           + (checknum == null ? "" : $"<CHECKNUM>{checknum}</CHECKNUM>") + "</STMTTRN>";
+
+    private Task<Result<BankImportResultDto>> ImportAsync(Guid account, string content)
+        => InScopeAsync<IBankFeedService, Result<BankImportResultDto>>(
+            s => s.ImportStatementAsync(account, BankTransactionSource.Ofx, "long.ofx", content, null));
+
+    private async Task<List<BankTransaction>> TxnsAsync(Guid account)
+    {
+        var repo = ServiceProvider.GetRequiredService<IRepository<BankTransaction, Guid>>();
+        return await repo.ToListAsync(t => t.AccountId == account);
+    }
+
+    [Fact]
+    public async Task Import_TruncatesOverlongDescriptionAndPayee_ToTheColumnWidth()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+        var memo = new string('m', 600);
+        var name = new string('n', 300);
+
+        var result = await ImportAsync(bank, Ofx(Stmttrn("FIT-LONG-1", name, memo)));
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ImportedCount.ShouldBe(1);
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.Description!.Length.ShouldBe(BankTransactionFieldLimits.DescriptionMaxLength);
+        txn.Description.ShouldBe(memo[..BankTransactionFieldLimits.DescriptionMaxLength]);
+        txn.Payee!.Length.ShouldBe(BankTransactionFieldLimits.PayeeMaxLength);
+    }
+
+    /// <summary>参考号是键（银行规则按它精确匹配）：超长丢弃而不截断 —— 截出来的看似合法却是另一个参考号。</summary>
+    [Fact]
+    public async Task Import_DropsAnOverlongReference_InsteadOfTruncatingIt()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+
+        var result = await ImportAsync(bank, Ofx(Stmttrn("FIT-REF-1", "Payee", "Memo", checknum: new string('9', 200))));
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        (await TxnsAsync(bank)).Single().Reference.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// ExternalId 是去重键，超长不能截断：两个只在第 300 位不同的 FITID 截成同一个值，
+    /// 第二笔真实流水会被计成重复而静默丢掉。折叠成哈希保证两者仍不同、且重传时确定性相同。
+    /// </summary>
+    [Fact]
+    public async Task Import_FoldsAnOverlongExternalId_KeepingDistinctIdsDistinct_AndReimportIdempotent()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+        var prefix = new string('f', 299);
+        var file = Ofx(Stmttrn(prefix + "A", "Payee A", "Memo A"), Stmttrn(prefix + "B", "Payee B", "Memo B", amount: "20.00"));
+
+        var first = await ImportAsync(bank, file);
+        first.Succeeded.ShouldBeTrue(first.Message);
+        first.Data!.ImportedCount.ShouldBe(2);
+
+        var txns = await TxnsAsync(bank);
+        txns.Count.ShouldBe(2);
+        txns.Select(t => t.ExternalId).Distinct().Count().ShouldBe(2);
+        txns.All(t => t.ExternalId.Length <= BankTransactionFieldLimits.ExternalIdMaxLength).ShouldBeTrue();
+
+        var second = await ImportAsync(bank, file);
+        second.Succeeded.ShouldBeTrue(second.Message);
+        second.Data!.ImportedCount.ShouldBe(0);
+        second.Data.SkippedCount.ShouldBe(2);
+    }
+
+    /// <summary>提供者拉取与文件导入共用同一个落库口，归一化对它同样生效。</summary>
+    [Fact]
+    public async Task PullFromProvider_NormalizesTheSameWay()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+        var created = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank, Name = "Operating", Scheme = BankNumberScheme.UsAba, RoutingNumber = "021000021", FeedProviderKey = "stub"
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var result = await InScopeAsync<IBankFeedService, Result<BankImportResultDto>>(s => s.PullFromProviderAsync(new PullBankFeedDto { AccountId = bank }));
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ImportedCount.ShouldBe(1);
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.Description!.Length.ShouldBe(BankTransactionFieldLimits.DescriptionMaxLength);
+        txn.ExternalId.Length.ShouldBeLessThanOrEqualTo(BankTransactionFieldLimits.ExternalIdMaxLength);
+    }
+
+    protected override void ConfigureServices(IServiceCollection services)
+    {
+        base.ConfigureServices(services);
+        services.AddSingleton<IBankFeedProvider, StubOverlongProvider>();
+    }
+
+    private sealed class StubOverlongProvider : IBankFeedProvider
+    {
+        public string Key => "stub";
+
+        public Task<BankFeedPullResult> PullAsync(BankFeedPullRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new BankFeedPullResult(
+                [new BankFeedTransaction(new DateTime(2026, 3, 5), 10m, "USD", new string('p', 400), new string('d', 700), "Provider Payee")],
+                NextCursor: null,
+                LedgerBalance: null));
     }
 }
 
@@ -826,5 +1119,79 @@ public class BankFeedMaxRowsTests : FinanceIntegrationTestBase
             s => s.ImportStatementAsync(bank, BankTransactionSource.Csv, "big.csv", csv, mapping));
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
+    }
+}
+
+/// <summary>
+/// 导入路径上还有两个越过列宽 / 币种守卫的值：上传文件名（人给的 → 400，不截断）与
+/// 提供者逐行币种（文件路径在对账单级比过账户币种，提供者路径此前一行都没比）。
+/// 两条都必须在批次头落库<b>之前</b>拒绝：批次头先提交、第一行再炸，留下的正是
+/// <c>BankTransactionFieldLimits</c> 那次修的孤儿头形态。
+/// </summary>
+public class BankFeedInputGuardTests : FinanceIntegrationTestBase
+{
+    protected override void ConfigureServices(IServiceCollection services)
+    {
+        base.ConfigureServices(services);
+        services.AddSingleton<IBankFeedProvider, StubForeignCurrencyProvider>();
+    }
+
+    private async Task<int> BatchCountAsync(Guid account)
+    {
+        var repo = ServiceProvider.GetRequiredService<IRepository<BankImportBatch, Guid>>();
+        return await repo.CountAsync(b => b.AccountId == account);
+    }
+
+    [Fact]
+    public async Task Import_OverlongFileName_Rejects400_BeforeWritingTheBatchHeader()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+        var csv = "Date,Description,Amount\n2026-03-01,A,1.00\n";
+        var mapping = new CsvMappingDto { HasHeader = true, DateColumn = 0, DescriptionColumn = 1, AmountColumn = 2, DateFormat = "yyyy-MM-dd" };
+        var fileName = new string('f', BankTransactionFieldLimits.ImportFileNameMaxLength + 1) + ".csv";
+
+        var result = await InScopeAsync<IBankFeedService, Result<BankImportResultDto>>(
+            s => s.ImportStatementAsync(bank, BankTransactionSource.Csv, fileName, csv, mapping));
+
+        result.Succeeded.ShouldBeFalse("the file name column is bounded and the name is operator-supplied");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("file name");
+        (await BatchCountAsync(bank)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task PullFromProvider_RowInAnotherCurrency_Rejects400_BeforeWritingTheBatchHeader()
+    {
+        await SeedCoaAsync();
+        var bank = await AccountIdByCodeAsync("1120");
+        var created = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = bank, Name = "Operating", Scheme = BankNumberScheme.UsAba, RoutingNumber = "021000021", FeedProviderKey = "foreign"
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var result = await InScopeAsync<IBankFeedService, Result<BankImportResultDto>>(s => s.PullFromProviderAsync(new PullBankFeedDto { AccountId = bank }));
+
+        result.Succeeded.ShouldBeFalse("a EUR row must not be cleared against a USD ledger account");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("EUR");
+        (await BatchCountAsync(bank)).ShouldBe(0);
+        var repo = ServiceProvider.GetRequiredService<IRepository<BankTransaction, Guid>>();
+        (await repo.CountAsync(t => t.AccountId == bank)).ShouldBe(0);
+    }
+
+    private sealed class StubForeignCurrencyProvider : IBankFeedProvider
+    {
+        public string Key => "foreign";
+
+        public Task<BankFeedPullResult> PullAsync(BankFeedPullRequest request, CancellationToken cancellationToken = default)
+            => Task.FromResult(new BankFeedPullResult(
+                [
+                    new BankFeedTransaction(new DateTime(2026, 3, 5), 10m, "USD", "OK-1", "Fine"),
+                    new BankFeedTransaction(new DateTime(2026, 3, 6), 20m, "EUR", "BAD-2", "Foreign")
+                ],
+                NextCursor: null,
+                LedgerBalance: null));
     }
 }

@@ -135,6 +135,8 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
         // ToolRegistry / ToolScanner - 空实现即可
         services.AddSingleton<IToolScanner, ToolScanner>();
         services.AddSingleton<IToolRegistry, ToolRegistry>();
+        // 子 agent 加载器经它算 userPermissions（与 AIModule 注册同形）；空注册表 ⇒ 不门控
+        services.AddScoped<IUserToolPermissionResolver, UserToolPermissionResolver>();
 
         // ToolResolver - 返回空工具列表
         var toolResolverMock = new Mock<IToolResolver>();

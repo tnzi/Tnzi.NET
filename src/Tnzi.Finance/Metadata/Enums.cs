@@ -140,7 +140,10 @@ public enum FinanceMasterDataKind
     Vendor = 2,
 
     /// <summary>目录项（商品 / 服务）</summary>
-    Item = 3
+    Item = 3,
+
+    /// <summary>会计科目（<c>ChartOfAccountsService.DeleteAsync</c> 在自己的分录行 / 子科目 / 角色检查之后提问）</summary>
+    Account = 4
 }
 
 /// <summary>

@@ -59,11 +59,17 @@ public interface ICache
     Task<long> IncrementAsync(string key, long increment = 1, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// 递增缓存值并设置过期时间
+    /// 递增缓存值；键不存在时创建并设置过期时间，<b>已存在时仅递增、不更新过期时间</b>（固定窗口）。
     /// </summary>
+    /// <remarks>
+    /// 过期时刻在键首次创建时定下，之后的递增沿用它。每次重设 TTL 是滑动惩罚窗口：限流 100 次 / 60 秒，
+    /// 客户端超限后每次重试都把窗口续到 60 秒之后，只要它以任何小于 60 秒的间隔重试，计数器永不过期。
+    /// 「首个命中起 W 内 N 次」（限流、2FA 失败锁定、每日计数）要的都是固定窗口；
+    /// 需要滑动语义的调用方自己在每次命中后 <c>Remove</c> + 重新计，或改用别的数据结构。
+    /// </remarks>
     /// <param name="key">缓存键</param>
     /// <param name="increment">递增量</param>
-    /// <param name="expiration">过期时间</param>
+    /// <param name="expiration">过期时间（仅键首次创建时生效）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>递增后的值</returns>
     Task<long> IncrementAsync(string key, long increment, TimeSpan expiration, CancellationToken cancellationToken = default);

@@ -15,6 +15,15 @@ public interface IAgentVersionRouter
     /// <param name="ct">取消令牌</param>
     /// <returns>可能被 A/B 版本覆盖后的 Agent 实体（不修改原始对象，返回新对象）</returns>
     Task<AgentVersionRouteResult> RouteAsync(Agent agent, CancellationToken ct);
+
+    /// <summary>
+    /// 钉住某个版本：加载 <paramref name="version"/> 的配置快照并套在 <paramref name="agent"/> 上，
+    /// 不做 A/B 分流。版本不存在或快照坏掉时返回 <see cref="AgentVersionRouteResult.Passthrough"/>
+    /// 并由实现记警告（评估会跑成活行，结果仍有意义只是不是那个版本的）。
+    /// 默认实现直接透传，供自定义路由器渐进实现。
+    /// </summary>
+    Task<AgentVersionRouteResult> RouteToVersionAsync(Agent agent, int version, CancellationToken ct)
+        => Task.FromResult(AgentVersionRouteResult.Passthrough(agent));
 }
 
 /// <summary>

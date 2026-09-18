@@ -88,4 +88,16 @@ public interface IAgentThreadInternalService
     /// 保存对话上下文的序列化数据到数据库
     /// </summary>
     Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default);
+
+    /// <summary>
+    /// 读取线程元数据（<c>AgentThread.Metadata</c> JSON 对象）中某个键的值，返回该值的原始 JSON 文本；
+    /// 线程不存在或键不存在返回 null。框架内部按键存放跨轮次的运行状态（如已激活技能）。
+    /// </summary>
+    Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// 写入线程元数据中某个键的值（<paramref name="valueJson"/> 为该值的 JSON 文本；null = 移除该键）。
+    /// 其它键原样保留。线程不存在时不做任何事。
+    /// </summary>
+    Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default);
 }

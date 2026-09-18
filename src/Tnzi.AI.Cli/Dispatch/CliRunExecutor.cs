@@ -32,6 +32,7 @@ public class CliRunExecutor
     private readonly IUsageLogService? _usageLogService;
     private readonly IBudgetService? _budgetService;
     private readonly IOptionsMonitor<CliAgentOptions> _options;
+    private readonly ICurrentTenant _currentTenant;
     private readonly ILogger<CliRunExecutor> _logger;
 
     /// <summary>初始化运行执行器。</summary>
@@ -53,6 +54,7 @@ public class CliRunExecutor
         ISkillService skillService,
         CliRunSignalHub signalHub,
         IOptionsMonitor<CliAgentOptions> options,
+        ICurrentTenant currentTenant,
         ILogger<CliRunExecutor> logger,
         ICostCalculator? costCalculator = null,
         IUsageLogService? usageLogService = null,
@@ -75,6 +77,7 @@ public class CliRunExecutor
         _skillService = Check.NotNull(skillService);
         _signalHub = Check.NotNull(signalHub);
         _options = Check.NotNull(options);
+        _currentTenant = Check.NotNull(currentTenant);
         _logger = Check.NotNull(logger);
         _costCalculator = costCalculator;
         _usageLogService = usageLogService;
@@ -82,14 +85,23 @@ public class CliRunExecutor
     }
 
     /// <summary>执行一条运行，直到终态。</summary>
+    /// <remarks>
+    /// 运行记录跨租户加载（见 <see cref="CliRunQueries.AcrossTenants"/>），随后<b>整段执行都切到
+    /// 它自己的租户</b>：绑定 / 运行时 / Agent / 授权 / 技能的查询与事件行的写入，都该在
+    /// 派出这次运行的租户里发生。这个后台作用域本身没有租户，不切的话租户的运行会在
+    /// 「Agent 已无绑定」上失败 —— 那条绑定明明在，只是在另一个租户的过滤器后面。
+    /// </remarks>
     public async Task ExecuteAsync(Guid runId, CancellationToken cancellationToken)
     {
-        var run = await _runRepository.AsQueryable(withTracking: true).FirstOrDefaultAsync(r => r.Id == runId, cancellationToken);
+        var run = await _runRepository.AcrossTenants(withTracking: true)
+            .FirstOrDefaultAsync(r => r.Id == runId, cancellationToken);
         if (run is null)
         {
             _logger.LogWarning("Claimed CLI run {RunId} no longer exists", runId);
             return;
         }
+
+        using var tenantScope = _currentTenant.Change(run.TenantId);
 
         CliWorkspace? workspace = null;
         var options = _options.CurrentValue;
@@ -151,8 +163,16 @@ public class CliRunExecutor
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // 宿主停机：把运行打回队列而不是判失败 —— 它一次都没跑完，别的副本还能接。
-            await ReleaseToQueueAsync(run);
+            // 同一枚令牌背后有两种来源，处置相反：用户取消 → 终态 Cancelled；宿主停机 → 打回队列
+            //（它一次都没跑完，别的副本还能接）。令牌本身分不清，持久化的取消标记才是判据。
+            if (await IsCancelRequestedAsync(run.Id))
+            {
+                await MarkCancelledAsync(run);
+            }
+            else
+            {
+                await ReleaseToQueueAsync(run);
+            }
         }
         finally
         {
@@ -372,6 +392,19 @@ public class CliRunExecutor
             await process.TerminateAsync(CancellationToken.None);
         }
 
+        if (externallyCancelled)
+        {
+            // 外部取消还要再分一次：用户取消在这里落终态；宿主停机则把决定交回
+            // ExecuteAsync 的停机分支（打回队列）—— 进程已经杀掉，这条运行要在别的副本上重跑。
+            if (!await IsCancelRequestedAsync(run.Id))
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+
+            // 实体是取消之前加载的，内存里的标记还是 false；下面的整实体回写会把它盖回去。
+            run.CancelRequested = true;
+        }
+
         var outcome = new CliSessionOutcome
         {
             ExitCode = process.ExitCode,
@@ -496,10 +529,12 @@ public class CliRunExecutor
         run.WriteBackTokenHash = null;
         run.WriteBackTokenExpiresAt = null;
 
-        await _runRepository.UpdateAsync(run, cancellationToken);
-        await _runRepository.SaveChangesAsync(cancellationToken);
+        // 终态一律用 None 写：运行已经停了，无论为什么停都必须记下来。带着已取消的令牌去写，
+        // 写库会当场抛 OCE，一条已经结束（并且已经付过钱）的运行就会被当成「没跑完」打回队列。
+        await _runRepository.UpdateAsync(run, CancellationToken.None);
+        await _runRepository.SaveChangesAsync(CancellationToken.None);
 
-        await LogUsageAsync(run, setup, result, cancellationToken);
+        await LogUsageAsync(run, setup, result, CancellationToken.None);
 
         _logger.LogInformation(
             "CLI run {RunId} finished with status {Status} in {DurationMs}ms ({Provider})",
@@ -583,25 +618,84 @@ public class CliRunExecutor
         run.WriteBackTokenHash = null;
         run.WriteBackTokenExpiresAt = null;
 
-        await _runRepository.UpdateAsync(run, cancellationToken);
-        await _runRepository.SaveChangesAsync(cancellationToken);
+        // 终态用 None 写，理由同 CompleteAsync。
+        await _runRepository.UpdateAsync(run, CancellationToken.None);
+        await _runRepository.SaveChangesAsync(CancellationToken.None);
 
         _logger.LogWarning("CLI run {RunId} failed ({Reason}): {Message}", run.Id, reason, message);
     }
 
-    private async Task ReleaseToQueueAsync(CliRun run)
+    /// <summary>
+    /// 用户取消落终态。<see cref="CompleteAsync"/> 已经写过终态时什么都不做 ——
+    /// 取消可能落在进程结束之后、方法返回之前的那几毫秒里。
+    /// </summary>
+    private async Task MarkCancelledAsync(CliRun run)
     {
-        run.Status = CliRunStatus.Queued;
-        run.LeaseExpiresAt = null;
-        run.ClaimedByHostId = null;
-        run.DispatchedAt = null;
+        if (IsTerminal(run.Status))
+        {
+            return;
+        }
 
-        // 用 None：宿主已经在停机，带着已取消的令牌去写库只会让这条运行卡在 Dispatched。
+        run.Status = CliRunStatus.Cancelled;
+        run.FailureReason = CliRunFailureReason.Cancelled;
+        run.Error ??= "Execution cancelled.";
+        run.CompletedAt = DateTime.UtcNow;
+        run.LeaseExpiresAt = null;
+        run.WriteBackTokenHash = null;
+        run.WriteBackTokenExpiresAt = null;
+
+        // 我们正是因为这个标记为 true 才走到这里；实体却是取消之前加载的，不补上会被整实体回写盖掉。
+        run.CancelRequested = true;
+
         await _runRepository.UpdateAsync(run, CancellationToken.None);
         await _runRepository.SaveChangesAsync(CancellationToken.None);
 
+        _logger.LogInformation("CLI run {RunId} cancelled on request", run.Id);
+    }
+
+    /// <summary>
+    /// 宿主停机：把运行打回队列。
+    /// </summary>
+    /// <remarks>
+    /// 只改队列相关的四列，并且以「没有人要求取消」为条件 —— 整实体回写会把内存里
+    /// 加载时的旧值（尤其是 <c>CancelRequested=false</c>）盖到别的副本刚写下的事实上；
+    /// 条件不成立（取消请求恰好落在判断与写库之间）就改判终态，否则这一行会以
+    /// <c>Queued + CancelRequested</c> 的形态永远躺在队列里：认领谓词跳过它，取消端点又只处理
+    /// 它读到时还是 Queued 的行。
+    /// </remarks>
+    private async Task ReleaseToQueueAsync(CliRun run)
+    {
+        // 用 None：宿主已经在停机，带着已取消的令牌去写库只会让这条运行卡在 Dispatched。
+        var released = await _runRepository.AcrossTenants()
+            .Where(r => r.Id == run.Id && !r.CancelRequested)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.Status, CliRunStatus.Queued)
+                .SetProperty(r => r.LeaseExpiresAt, (DateTime?)null)
+                .SetProperty(r => r.ClaimedByHostId, (string?)null)
+                .SetProperty(r => r.DispatchedAt, (DateTime?)null), CancellationToken.None);
+
+        if (released == 0)
+        {
+            await MarkCancelledAsync(run);
+            return;
+        }
+
         _logger.LogInformation("CLI run {RunId} released back to the queue during host shutdown", run.Id);
     }
+
+    /// <summary>
+    /// 现读持久化的取消标记。标量投影绕开跟踪器的身份映射：执行器手里那份实体是取消之前加载的，
+    /// 按实体查会原样拿回那份过期的 <c>false</c>。
+    /// </summary>
+    private Task<bool> IsCancelRequestedAsync(Guid runId)
+        => _runRepository.AcrossTenants()
+            .Where(r => r.Id == runId)
+            .Select(r => r.CancelRequested)
+            .FirstOrDefaultAsync(CancellationToken.None);
+
+    private static bool IsTerminal(CliRunStatus status)
+        => status is CliRunStatus.Completed or CliRunStatus.Failed
+            or CliRunStatus.Cancelled or CliRunStatus.TimedOut;
 
     private async Task CleanupWorkspaceAsync(CliWorkspace workspace)
     {

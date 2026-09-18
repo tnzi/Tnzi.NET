@@ -31,6 +31,7 @@ global using Tnzi.AI.Metadata;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.Extensions;
 global using Tnzi.Modules;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Security.Authorization;
 global using Tnzi.EFCore;
 global using Tnzi.Security.Claims;

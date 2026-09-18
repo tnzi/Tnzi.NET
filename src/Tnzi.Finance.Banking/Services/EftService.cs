@@ -382,7 +382,9 @@ public class EftService : ApplicationService, IEftService
         return Ok(new EftFileDto
         {
             FileName = batch.FileName ?? $"{batch.Number ?? batch.Id.ToString()}.txt",
-            Content = Encoding.UTF8.GetBytes(content)
+            // ASCII 而不是 UTF-8：写入器已保证内容纯 ASCII（EftFieldWriter），这里是第二道闸 ——
+            // 万一漏网一个非 ASCII 字符，它变成一个可见的 '?' 而不是让其后每个字段错位。
+            Content = Encoding.ASCII.GetBytes(content)
         });
     }
 

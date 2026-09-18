@@ -15,27 +15,12 @@ namespace Tnzi.Notification.Push.Tests;
 public class PushTopicDeliveryTests
 {
     private static PushSender CreateSender(string provider = "fcm") => new(
-        new NotificationOptions
+        new PushSenderOptions
         {
-            PushSender = new PushSenderOptions
-            {
-                Provider = provider,
-                FirebaseProjectId = "test_project_id",
-            },
+            Provider = provider,
+            FirebaseProjectId = "test_project_id",
         },
         new Mock<ILogger<PushSender>>().Object);
-
-    /// <summary>与 <c>SendToAsync</c> 同一句话：没有推送配置就没有投递。</summary>
-    [Fact]
-    public async Task SendToTopicAsync_WithoutOptions_Fails()
-    {
-        var sender = new PushSender(new NotificationOptions(), new Mock<ILogger<PushSender>>().Object);
-
-        var result = await sender.SendToTopicAsync("news", "Title", "Body");
-
-        result.Success.ShouldBeFalse();
-        result.FailureReason.ShouldNotBeNull().ShouldContain("not configured");
-    }
 
     /// <summary>
     /// ★ 不合法的主题名要以一句<b>读得懂</b>的失败结束：带上被拒的值、说清什么才算合法。
@@ -186,17 +171,5 @@ public class PushTopicDeliveryTests
         result.Success.ShouldBeFalse();
         // 走到了 apns 存根 = 没被主题守卫拦下。
         result.FailureReason.ShouldNotBeNull().ShouldContain("install the APNs SDK");
-    }
-
-    /// <summary>既有契约不变：<c>SendToAsync</c> 的行为不受本次改动影响。</summary>
-    [Fact]
-    public async Task SendToAsync_StillFailsWithoutOptions()
-    {
-        var sender = new PushSender(new NotificationOptions(), new Mock<ILogger<PushSender>>().Object);
-
-        var result = await sender.SendToAsync("device_token", "Title", "Body");
-
-        result.Success.ShouldBeFalse();
-        result.FailureReason.ShouldNotBeNull().ShouldContain("not configured");
     }
 }

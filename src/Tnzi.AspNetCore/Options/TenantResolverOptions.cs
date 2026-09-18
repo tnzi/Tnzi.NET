@@ -43,9 +43,20 @@ public class TenantResolverOptions
     public string CookieName { get; set; } = "TenantId";
 
     /// <summary>
-    /// Claims 中的租户标识键
+    /// 框架约定的租户 claim 名。登录时 <c>JwtTokenService</c> 写它，<c>HttpContextCurrentUser.TenantId</c>
+    /// 与 SignalR 的 <c>TnziHub</c>（按租户分组）读它 —— 三处必须同一个字符串，所以只从这里出。
     /// </summary>
-    public string ClaimType { get; set; } = "tenant_id";
+    public const string DefaultClaimType = "tenant_id";
+
+    /// <summary>
+    /// Claims 中的租户标识键。
+    /// </summary>
+    /// <remarks>
+    /// ★ 只有 <c>TenantResolverMiddleware</c> 读这个配置项；签发方与 <c>HttpContextCurrentUser</c> / <c>TnziHub</c>
+    /// 都按 <see cref="DefaultClaimType"/> 常量写 / 读。改成别的值只会让中间件去找一个框架从不签发的 claim，
+    /// 它是给「令牌由别家签发、claim 名不归框架定」的部署留的。
+    /// </remarks>
+    public string ClaimType { get; set; } = DefaultClaimType;
 
     /// <summary>
     /// 解析顺序（按列表顺序尝试，找到即停止）。

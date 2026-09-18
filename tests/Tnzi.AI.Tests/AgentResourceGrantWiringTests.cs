@@ -38,6 +38,10 @@ public class AgentResourceGrantWiringTests : IDisposable
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
 
+        // 注册表里没有任何工具声明权限：解析器每次都要问它「有哪些门控工具」，Moq 对 IReadOnlyList 默认答 null。
+        _toolRegistry.Setup(r => r.GetToolsByGroups(It.IsAny<IEnumerable<string>>())).Returns([]);
+        _toolRegistry.Setup(r => r.GetToolsByNames(It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>?>())).Returns([]);
+
         MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
 
         var currentUserMock = new Mock<ICurrentUser>();
@@ -86,7 +90,7 @@ public class AgentResourceGrantWiringTests : IDisposable
             _agentFactory.Object,
             new StaticOptionsMonitor<AIOptions>(new AIOptions()),
             agentRepo,
-            _toolRegistry.Object,
+            new UserToolPermissionResolver(_toolRegistry.Object, Mock.Of<ILogger<UserToolPermissionResolver>>()),
             _templateEngine.Object,
             _versionRouter.Object,
             _grantService,

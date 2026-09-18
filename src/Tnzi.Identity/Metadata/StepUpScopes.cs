@@ -43,4 +43,14 @@ public static class StepUpScopes
     /// 所以换掉它们等于换掉账号的恢复路径 —— 这一步需要本人在场。
     /// </remarks>
     public const string ContactChange = "identity.contact.change";
+
+    /// <summary>
+    /// 给本账号新增一种登录方式：绑定第三方账号（<c>linked-accounts/{provider}/link-token</c>）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 绑上去的外部身份在受害者改密、撤销全部会话之后<b>照样能登录</b>（解绑是唯一的移除路径），
+    /// 于是一枚被盗访问令牌借它换来的是永久的密码因子绕过 —— 与「换掉第二因子」后果同量级，
+    /// 判据仍是动作的后果。与 <see cref="TwoFactorManage"/> 分开：为绑定 GitHub 做的确认不该顺便把「关掉两步验证」也放行。
+    /// </remarks>
+    public const string LoginMethodManage = "identity.loginmethod.manage";
 }

@@ -15,6 +15,7 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
     private readonly ConcurrentDictionary<string, (AgentDefinitionDto Definition, string Hash)> _cache = new();
     private FileSystemWatcher? _watcher;
     private bool _disposed;
+    private readonly ConcurrentDictionary<Guid, Action> _changeSubscribers = new();
 
     public YamlAgentDefinitionProvider(IOptionsMonitor<AIOptions> options, ILogger<YamlAgentDefinitionProvider> logger)
     {
@@ -129,6 +130,9 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
             _watcher.Changed += OnFileChanged;
             _watcher.Created += OnFileChanged;
             _watcher.Deleted += OnFileDeleted;
+            // 原子保存（vim 默认、多数 IDE 的 safe-write）是写临时文件再改名盖过原文件：临时名不是 .yaml，
+            // Created 被过滤掉，真正的文件只来一个 Renamed —— 不订阅它，热重载就取决于编辑器而且零日志
+            _watcher.Renamed += OnFileRenamed;
 
             _logger.LogDebug("Started watching agent definition directory: {Directory}", directory);
         }
@@ -138,13 +142,24 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public IDisposable OnDefinitionsChanged(Action callback)
+    {
+        Check.NotNull(callback);
+        var key = Guid.NewGuid();
+        _changeSubscribers[key] = callback;
+        return new Subscription(() => _changeSubscribers.TryRemove(key, out _));
+    }
+
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
         if (!IsYamlFile(e.FullPath)) return;
 
-        // 清除缓存以触发下次访问时重新加载
+        // 清缓存只让下一次 LoadDefinitionsAsync 重读文件；而运行时从不经本提供者读（AgentResolver 只读 DB），
+        // 没有订阅方重跑同步的话，这条日志就是「热重载」的全部 —— 2026-09-12 前正是如此
         _cache.TryRemove(e.FullPath, out _);
         _logger.LogDebug("Agent definition file changed, cache invalidated: {File}", e.FullPath);
+        NotifyChanged();
     }
 
     private void OnFileDeleted(object sender, FileSystemEventArgs e)
@@ -153,6 +168,44 @@ public class YamlAgentDefinitionProvider : IAgentDefinitionProvider, IDisposable
 
         _cache.TryRemove(e.FullPath, out _);
         _logger.LogDebug("Agent definition file deleted, cache removed: {File}", e.FullPath);
+        NotifyChanged();
+    }
+
+    private void OnFileRenamed(object sender, RenamedEventArgs e)
+    {
+        var oldIsYaml = IsYamlFile(e.OldFullPath);
+        var newIsYaml = IsYamlFile(e.FullPath);
+        if (!oldIsYaml && !newIsYaml) return;
+
+        // 旧名是定义文件 = 它没了；新名是定义文件 = 它变了（或新来了）。两边都可能是同一个文件（原子保存）
+        if (oldIsYaml) _cache.TryRemove(e.OldFullPath, out _);
+        if (newIsYaml) _cache.TryRemove(e.FullPath, out _);
+        _logger.LogDebug("Agent definition file renamed, cache invalidated: {OldFile} -> {File}", e.OldFullPath, e.FullPath);
+        NotifyChanged();
+    }
+
+    private void NotifyChanged()
+    {
+        foreach (var subscriber in _changeSubscribers.Values)
+        {
+            try
+            {
+                subscriber();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Agent definition change subscriber threw");
+            }
+        }
+    }
+
+    private sealed class Subscription(Action dispose) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) dispose();
+        }
     }
 
     private static bool IsYamlFile(string path)

@@ -423,6 +423,39 @@ public class AgentThreadServiceTests
     }
 
     [Fact]
+    public async Task GetOrCreateThreadAsync_NewThread_StampsRunOriginatorAsCreatorWithoutAmbientUser()
+    {
+        // 后台子运行（spawn_agent）在父请求返回后建线程：作用域里没有环境用户，审计钩子只填 null，
+        // 线程 CreatorId 落成 null。归属检查（续跑前置的 IsOwnerAsync、读路径的 CreatorId 比对）
+        // 按运行发起人比对，于是对这些线程永远不满足 —— send_agent_input / 管理端 resume 恒 404。
+        var spawner = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest { UserMessage = "child task", UserId = spawner, IsBackground = true }
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IAgentExecutionContextAccessor>(accessor);
+        AgentThreadEntity? inserted = null;
+        _threadRepo.Setup(r => r.InsertAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentThreadEntity, CancellationToken>((e, _) => inserted = e)
+            .Returns(Task.CompletedTask);
+
+        var service = new AgentThreadService(_threadRepo.Object, _messageRepo.Object, _agentRepo.Object, services.BuildServiceProvider());
+        try
+        {
+            await service.GetOrCreateThreadAsync(null, null);
+        }
+        finally
+        {
+            accessor.CurrentRequest = null;
+        }
+
+        inserted.ShouldNotBeNull();
+        inserted!.CreatorId.ShouldBe(spawner, "the originator of the run owns the thread it creates");
+    }
+
+    [Fact]
     public async Task GetOrCreateThreadAsync_ValidThreadId_ReturnsExistingThread()
     {
         var threadId = Guid.NewGuid();
@@ -580,4 +613,57 @@ public class AgentThreadServiceTests
 
         _messageRepo.Verify(r => r.InsertAsync(It.IsAny<AgentThreadMessage>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    #region Thread metadata key/value (used by the skill activation tracker)
+
+    [Fact]
+    public async Task SetMetadataValueAsync_WritesKey_PreservesOtherKeys_AndGetReadsItBack()
+    {
+        var threadId = Guid.NewGuid();
+        var thread = MakeThread(id: threadId);
+        thread.Metadata = """{"source":"chat","activatedSkills":["old"]}""";
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        var service = CreateService();
+
+        await service.SetMetadataValueAsync(threadId, "activatedSkills", """["ro","x"]""");
+
+        _threadRepo.Verify(r => r.UpdateAsync(thread, It.IsAny<CancellationToken>()), Times.Once);
+        using var doc = JsonDocument.Parse(thread.Metadata!);
+        doc.RootElement.GetProperty("source").GetString().ShouldBe("chat", "unrelated keys must survive");
+        doc.RootElement.GetProperty("activatedSkills").EnumerateArray().Select(e => e.GetString()).ShouldBe(["ro", "x"]);
+
+        (await service.GetMetadataValueAsync(threadId, "activatedSkills")).ShouldNotBeNull();
+        JsonSerializer.Deserialize<string[]>((await service.GetMetadataValueAsync(threadId, "activatedSkills"))!).ShouldBe(["ro", "x"]);
+        (await service.GetMetadataValueAsync(threadId, "missing")).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task SetMetadataValueAsync_Null_RemovesKey_AndEmptyObjectCollapsesToNull()
+    {
+        var threadId = Guid.NewGuid();
+        var thread = MakeThread(id: threadId);
+        thread.Metadata = """{"activatedSkills":["ro"]}""";
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        var service = CreateService();
+
+        await service.SetMetadataValueAsync(threadId, "activatedSkills", null);
+
+        thread.Metadata.ShouldBeNull();
+        (await service.GetMetadataValueAsync(threadId, "activatedSkills")).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task MetadataValue_ThreadMissing_GetReturnsNull_SetDoesNothing()
+    {
+        var threadId = Guid.NewGuid();
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync((AgentThreadEntity?)null);
+        var service = CreateService();
+
+        (await service.GetMetadataValueAsync(threadId, "activatedSkills")).ShouldBeNull();
+        await service.SetMetadataValueAsync(threadId, "activatedSkills", """["ro"]""");
+
+        _threadRepo.Verify(r => r.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
 }

@@ -17,6 +17,7 @@ import { computed, onMounted, ref } from 'vue'
 import { NInput, NButton } from 'naive-ui'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
+import TStepUpPrompt from './TStepUpPrompt.vue'
 import type { UseAccountSettingsReturn } from '../../headless/useAccountSettings'
 
 const props = defineProps<{
@@ -96,6 +97,10 @@ async function onChangePassword(): Promise<void> {
 </script>
 
 <template>
+  <!-- Re-authentication for the [RequireStepUp] writes below (confirming an
+       email / phone change). See TSecuritySettings for the same mount. -->
+  <TStepUpPrompt v-if="controller.stepUp" :prompt="controller.stepUp" />
+
   <TSettingGroup title="Profile" :separator="false">
     <TSettingRow label="Display name" description="How you appear in this product.">
       <NInput

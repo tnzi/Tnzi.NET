@@ -9,7 +9,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     private readonly IConfiguration? _configuration;
 
     /// <summary>
-    /// postMessage target origin（从配置读取 App:FrontendUrl，未配置时回退到 window.location.origin）
+    /// postMessage target origin（经 <see cref="FrontendUrlResolver"/> 读前端 origin，未配置时回退到 window.location.origin）
     /// </summary>
     private readonly string _postMessageOrigin;
 
@@ -19,8 +19,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
         : base(serviceProvider)
     {
         _configuration = configuration;
-        var frontendUrl = configuration?["App:FrontendUrl"];
-        _postMessageOrigin = !string.IsNullOrEmpty(frontendUrl) ? frontendUrl.TrimEnd('/') : string.Empty;
+        _postMessageOrigin = FrontendUrlResolver.Resolve(configuration, Logger) ?? string.Empty;
     }
 
     /// <summary>
@@ -49,6 +48,8 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             // 前端按 errorCode 分支、从 errorDetails 取临时令牌，与 JSON 端点上的处理逐字相同。
             errorCode = result.ErrorCode,
             errorDetails = result.ErrorDetails,
+            // 绑定流程：回调页据此知道这次没有令牌可交，只需跳回 returnUrl / 通知 opener。
+            linkedProvider = result.LinkedProvider,
             returnUrl = returnUrl
         };
         // 使用 System.Text.Json 序列化为 JSON，然后作为 JavaScript 对象字面量嵌入
@@ -156,7 +157,8 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                         }}
                         window.location.href = url.toString();
                     }} else {{
-                        document.body.innerHTML = '<div class=""container""><div class=""message"">登录成功！请关闭此窗口。</div></div>';
+                        document.body.innerHTML = '<div class=""container""><div class=""message"">'
+                            + (jsonData.linkedProvider ? '绑定成功！请关闭此窗口。' : '登录成功！请关闭此窗口。') + '</div></div>';
                     }}
                 }}
             }} catch (e) {{

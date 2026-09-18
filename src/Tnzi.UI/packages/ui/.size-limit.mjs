@@ -58,11 +58,17 @@ const budget = (name, path, limit) => ({ name, path, limit, gzip: true })
 // so `pnpm size` has been red ever since without anyone reading it. The rename
 // of this directory (`composables` -> `headless`, one name per concept across
 // all five packages) moved no code and changed no byte.
+//
+// `headless` re-measured 2026-09-12 at 15.54 kB and raised 15 -> 17 kB. The
+// growth is the form host (`headless/form/form-host.ts`: provideFormHost /
+// useFormHost / useFormHostRegistration) that lets the container owning the
+// Save button validate slotted TSchemaForms; it is shipped weight, not churn.
+// 17 kB keeps the usual ~8% headroom above the measurement.
 export default [
   budget('index (whole package barrel)', 'dist/index.js', '78 kB'),
   budget('components barrel (61 SFCs; naive-ui external)', 'dist/components.js', '59 kB'),
   budget('stores barrel', 'dist/stores.js', '14 kB'),
-  budget('headless barrel (incl. the login stack)', 'dist/headless.js', '15 kB'),
+  budget('headless barrel (incl. the login stack)', 'dist/headless.js', '17 kB'),
   budget('utils barrel', 'dist/utils.js', '1.5 kB'),
   budget('resolvers barrel', 'dist/resolvers.js', '512 B'),
 

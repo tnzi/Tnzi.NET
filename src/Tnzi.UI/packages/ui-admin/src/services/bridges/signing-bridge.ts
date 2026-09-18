@@ -59,6 +59,11 @@ export interface SigningRequestContract extends BridgeCrudContract<EnvelopeListD
   send(id: string): Promise<IssuedSigningLink[]>
   /** Call off a request that has not completed. */
   void(id: string): Promise<void>
+  /**
+   * Seal a request whose recipients have all signed but whose sealing failed.
+   * The recovery for a transient storage / stamping failure; refused once sealed.
+   */
+  seal(id: string): Promise<EnvelopeDto>
 }
 
 export interface SigningTemplateContract
@@ -91,6 +96,7 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
         delete: unavailable('requests.delete'),
         send: unavailable('requests.send'),
         void: unavailable('requests.void'),
+        seal: unavailable('requests.seal'),
       },
       templates: {
         fetch: unavailable('templates.fetch') as never,
@@ -132,6 +138,7 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
     void: async (id: string) => {
       ensureOk(await a.voidRequest(id))
     },
+    seal: async (id: string) => unwrapOk<EnvelopeDto>(await a.sealRequest(id)),
   }
 
   // ---- templates ----

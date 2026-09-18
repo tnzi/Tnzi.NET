@@ -6,6 +6,7 @@ global using System.Threading;
 global using System.Threading.Tasks;
 global using Microsoft.Extensions.Logging.Abstractions;
 global using StackExchange.Redis;
+global using Tnzi.Locking;
 global using Tnzi.Redis.Exceptions;
 global using Tnzi.Redis.Locking;
 global using Tnzi.Redis.Options;

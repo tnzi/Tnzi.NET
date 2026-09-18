@@ -12,6 +12,8 @@ internal sealed class SkillContributor : IContextProviderContributor
     private readonly ISkillTemplateEngine? _skillTemplateEngine;
     private readonly ISkillConstraintEnforcer? _skillConstraintEnforcer;
     private readonly ISkillLoadTracker? _skillLoadTracker;
+    private readonly ISkillActivationTracker? _skillActivationTracker;
+    private readonly IEventBus? _eventBus;
 
     public int Order => ContextProviderOrders.Skills;
 
@@ -21,7 +23,9 @@ internal sealed class SkillContributor : IContextProviderContributor
         ISkillRegistry? skillRegistry = null,
         ISkillTemplateEngine? skillTemplateEngine = null,
         ISkillConstraintEnforcer? skillConstraintEnforcer = null,
-        ISkillLoadTracker? skillLoadTracker = null)
+        ISkillLoadTracker? skillLoadTracker = null,
+        ISkillActivationTracker? skillActivationTracker = null,
+        IEventBus? eventBus = null)
     {
         _options = Check.NotNull(options);
         _loggerFactory = Check.NotNull(loggerFactory);
@@ -29,6 +33,8 @@ internal sealed class SkillContributor : IContextProviderContributor
         _skillTemplateEngine = skillTemplateEngine;
         _skillConstraintEnforcer = skillConstraintEnforcer;
         _skillLoadTracker = skillLoadTracker;
+        _skillActivationTracker = skillActivationTracker;
+        _eventBus = eventBus;
     }
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
@@ -40,7 +46,10 @@ internal sealed class SkillContributor : IContextProviderContributor
         {
             var skillsOptions = _options.CurrentValue.ContextProviders.Skills;
             var logger = _loggerFactory.CreateLogger<SkillContextProvider>();
-            return new SkillContextProvider(_skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker, context.AgentName, context.SkillSlugs);
+            return new SkillContextProvider(
+                _skillRegistry, _skillTemplateEngine, skillsOptions, logger, _skillConstraintEnforcer, _skillLoadTracker,
+                context.AgentName, context.SkillSlugs, _skillActivationTracker, context.ThreadId,
+                _eventBus, context.UserId);
         }
         catch (Exception ex)
         {

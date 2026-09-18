@@ -11,7 +11,8 @@ public class CreateEntityInfoRequest
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// 实体类型名称（完整类型名）
+    /// 实体类型名称：CLR 全名（命名空间 + 类型名，<b>不带程序集</b>，即 <c>typeof(T).FullName</c>）。
+    /// 过滤路径按它等值查表，AssemblyQualifiedName 永远查不到；解析不到已加载实体的名字登记时 400。
     /// </summary>
     public string TypeName { get; set; } = string.Empty;
 

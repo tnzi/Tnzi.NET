@@ -227,4 +227,30 @@ public class SalaryStructureServiceTests : PayrollIntegrationTestBase
 
         (await CountAsync<SalaryStructureLine>(l => l.StructureId == created.Data!.Id)).ShouldBe(0);
     }
+
+    /// <summary>
+    /// 钉死额与 DefaultAmount / 一次性输入同一口径（`PayrollAmountRules`）：备注项是具名中间量，
+    /// 天然带符号且进不了任何合计，钉一个负数是合法的；其余三类的负钉死额仍然拒绝。
+    /// 此前结构校验对任何负钉死额一律拒绝，与文档写的「备注行保持带符号」矛盾。
+    /// </summary>
+    [Fact]
+    public async Task Create_NegativeAmountOverride_FollowsTheComponentSignRule()
+    {
+        var basic = await CreateComponentAsync("BASIC", formula: "BASE");
+        var credit = await CreateComponentAsync("CREDIT", SalaryComponentType.Informational, formula: "0");
+        var tax = await CreateComponentAsync("TAX", SalaryComponentType.Deduction, formula: "0");
+
+        var signedMemo = await CreateStructureAsync("SignedMemo",
+            new SalaryStructureLineInputDto { ComponentId = basic.Id, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = credit.Id, Sequence = 2, AmountOverride = -75m });
+        signedMemo.Succeeded.ShouldBeTrue(signedMemo.Message);
+        signedMemo.Data!.Lines.Single(l => l.ComponentCode == "CREDIT").AmountOverride.ShouldBe(-75m);
+
+        var negativeDeduction = await CreateStructureAsync("NegativeTax",
+            new SalaryStructureLineInputDto { ComponentId = basic.Id, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = tax.Id, Sequence = 2, AmountOverride = -500m });
+        negativeDeduction.Succeeded.ShouldBeFalse("a negative deduction override is an undeclared raise");
+        negativeDeduction.Code.ShouldBe(400);
+        negativeDeduction.Message!.ShouldContain("TAX");
+    }
 }

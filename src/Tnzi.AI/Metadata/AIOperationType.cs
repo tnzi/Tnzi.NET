@@ -11,4 +11,5 @@ public static class AIOperationType
     public const string AgentRunStreaming = "AgentRunStreaming";
     public const string WorkflowRun = "WorkflowRun";
     public const string WorkflowRunStreaming = "WorkflowRunStreaming";
+    public const string Evaluation = "Evaluation";
 }

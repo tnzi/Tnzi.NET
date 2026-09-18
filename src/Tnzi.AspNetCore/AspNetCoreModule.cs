@@ -46,6 +46,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册请求追踪选项（section 路径由 [ConfigSection] 派生；中间件通过 IOptionsMonitor<RequestTrackingOptions> 独立注入）
         context.Services.AddTnziOptions<RequestTrackingOptions>(context.Configuration);
 
+        // 人机验证选项（AspNetCore:Captcha）。校验器只管字段形态（托管型要密钥、Altcha 要 HMAC 密钥）；
+        // 「指名的提供商有没有注册」要等全部模块 Configure 完才知道，放在 OnApplicationInitialization 的 EnsureConfigured。
+        context.Services.AddTnziOptions<CaptchaVerifierOptions, CaptchaVerifierOptionsValidator>(context.Configuration);
+
         return Task.CompletedTask;
     }
 
@@ -127,6 +131,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         context.Services.AddSingleton(controllerDiagnostics);
 
         // 读取并配置 AspNetCore 选项
+        // ★ 这是一份直接从 IConfiguration 绑出来的独立实例，只能用于 Configure 阶段的「注册还是不注册」判断。
+        //   凡是在容器建好之后才消费的对象（应用模型提供者等），必须改从 IOptions<AspNetCoreOptions> 取值：
+        //   Configure / PostConfigure<AspNetCoreOptions> 作用在 options 工厂造的那个实例上，与这一份无关。
+        //   ControllerFilter.ControllerPredicate 曾因此永远为 null（2026-09-12 修复）。
         var aspNetCoreOptions = context.Configuration
             .GetSection("AspNetCore")
             .Get<AspNetCoreOptions>() ?? new AspNetCoreOptions();
@@ -147,8 +155,18 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册过滤器（根据配置）
         context.Services.Configure<MvcOptions>(options =>
         {
-            // 注册StringTrimModelBinder
-            options.ModelBinderProviders.Insert(0, new StringTrimModelBinderProvider());
+            // 注册 StringTrimModelBinder：排在内置 SimpleTypeModelBinderProvider 之前
+            // （它是 string 的默认 binder，我们是它的修剪版），而不是整个列表的第 0 位 ——
+            // 第 0 位会抢在 BinderType / Services / Body / Header 这些 provider 前面接管
+            // 每一个 string 参数，而那些来源的值不在 ValueProvider 里，参数就永远是 null。
+            // provider 自己还按绑定来源让路（见 StringTrimModelBinderProvider），
+            // 两道都在：位置保证 MVC 的优先序，来源判定保证列表被别人改过后仍然正确。
+            var simpleTypeIndex = options.ModelBinderProviders
+                .ToList()
+                .FindIndex(p => p is SimpleTypeModelBinderProvider);
+            options.ModelBinderProviders.Insert(
+                simpleTypeIndex >= 0 ? simpleTypeIndex : 0,
+                new StringTrimModelBinderProvider());
 
             // 全局模型验证过滤器
             if (aspNetCoreOptions.EnableGlobalModelValidation)
@@ -186,7 +204,8 @@ public class AspNetCoreModule : TnziFrameworkModule
         if (aspNetCoreOptions.EnableAutoRouteConvention)
         {
             context.Services.AddSingleton<IApplicationModelProvider>(
-                _ => new Mvc.Conventions.ApiControllerRouteProvider(aspNetCoreOptions));
+                sp => new Mvc.Conventions.ApiControllerRouteProvider(
+                    sp.GetRequiredService<IOptions<AspNetCoreOptions>>().Value));
         }
 
         // 注册默认 Controller 过滤提供者 (Order = -600)
@@ -206,13 +225,15 @@ public class AspNetCoreModule : TnziFrameworkModule
 
         // 注册配置化 Controller 过滤提供者 (Order = -400)
         // （按名称/程序集通配符禁用 Controller，以及按 [SensitiveEndpoint] 名字禁用单个端点）
-        if (aspNetCoreOptions.ControllerFilter != null)
-        {
-            context.Services.AddSingleton<IApplicationModelProvider>(
-                sp => new Mvc.Conventions.ConfigurationControllerFilterProvider(
-                    aspNetCoreOptions.ControllerFilter,
-                    sp.GetService<ILoggerFactory>()));
-        }
+        // ★ 无条件注册，且从 IOptions 取值：ControllerPredicate 是委托，配置绑不出来，唯一的设置途径是
+        //   PostConfigure<AspNetCoreOptions>，那作用在 options 管线的实例上。此前这里只在配置里有
+        //   AspNetCore:ControllerFilter 节时才注册，并把上面那份独立实例的 ControllerFilter 交给提供者 ——
+        //   按文档写的谓词一次都不会被调用，全部控制器照常挂在路由上而没有任何症状。
+        //   空选项是零成本的 no-op，应用模型提供者在容器建好之后才被解析，IOptions 在此安全。
+        context.Services.AddSingleton<IApplicationModelProvider>(
+            sp => new Mvc.Conventions.ConfigurationControllerFilterProvider(
+                sp.GetRequiredService<IOptions<AspNetCoreOptions>>().Value.ControllerFilter,
+                sp.GetService<ILoggerFactory>()));
 
         // 注册过滤器服务
         // API 结果包装过滤器
@@ -238,6 +259,20 @@ public class AspNetCoreModule : TnziFrameworkModule
         // IOptionsMonitor.CurrentValue.Enabled 热判断，boot 门控会让配置中心
         // 的 web-ratelimit 组在默认关闭部署下永远无法热开启。
         context.Services.TryAddScoped<IRateLimitService, Security.RateLimitService>();
+
+        // 人机验证：验证器无条件注册（未配置 Provider 时它就是「一律放行」），内置提供商无条件注册
+        // （注册的是能力，选不选由配置决定；四条 siteverify 描述符共用一个适配器 + 自托管 Altcha）。
+        // Identity / Imaging 在各自模块里追加 image / sliding。
+        if (!context.Services.Any(s => s.ServiceType == typeof(IHttpClientFactory)))
+        {
+            context.Services.AddHttpClient();
+        }
+        context.Services.TryAddScoped<ICaptchaVerifier, CaptchaVerifier>();
+        foreach (var descriptor in SiteVerifyCaptchaDescriptor.BuiltIn)
+        {
+            context.Services.AddSiteVerifyCaptchaProvider(descriptor);
+        }
+        context.Services.AddCaptchaProvider<AltchaCaptchaProvider>();
 
         // 注册异常统计服务（如果启用）
         if (aspNetCoreOptions.ExceptionHandling?.EnableMetrics == true)
@@ -297,6 +332,7 @@ public class AspNetCoreModule : TnziFrameworkModule
                 .Value;
 
             WarnIfAnonymousRateLimitingIsIneffective(context, aspNetCoreOptions);
+            CheckCaptchaConfiguration(context);
 
             // ===================================================================
             // 中间件注册顺序说明（从外到内）：
@@ -308,12 +344,24 @@ public class AspNetCoreModule : TnziFrameworkModule
             // 4. Localization     - 本地化，确保异常消息使用正确的 Culture
             // 5. HostHttpCrypto   - HTTP 加密/解密，异常可被外层捕获
             // 6. SecurityHeaders  - 安全响应头
-            // 7. RateLimiting     - 限流，在请求验证之前拦截恶意流量
-            // 8. RequestValidation- 请求验证，已通过限流检查的请求才做验证
-            // 9. ApiVersion       - API 版本控制
-            // 10. ResponseCompression - 响应压缩
-            // 11. Authentication + Authorization - 认证和授权
-            // 12. SPANotFound     - SPA 404 处理（最内层）
+            // 7. RequestValidation- 请求验证
+            // 8. ApiVersion       - API 版本控制
+            // 9. ResponseCompression - 响应压缩
+            // 10. Authentication  - 认证，之后 HttpContext.User 才有 claims
+            // 10.5. 模块插入点 RequestPipelineStage.AfterAuthentication - 经 AddRequestPipelineMiddleware
+            //                       登记的中间件挂在这里：用户已知，而被限流 / 未认证 / 无权限的请求
+            //                       还没被短路。模块在自己的 OnApplicationInitializationAsync 里
+            //                       UseMiddleware 只能追加在授权之后，那里看不见 401 / 403 / 429
+            //                       （Sys_AccessLog 的采集器曾挂在那里，被拒绝的请求一条都记不到）。
+            // 11. RateLimiting    - 限流，★必须在认证之后：ByUser 规则、user:{id} 分区键
+            //                       与白名单里的用户 ID 都读 ICurrentUser.Id，认证前它恒为空，
+            //                       三处判断对每一个请求都恒假 —— 配了 ByUser 的部署会静默
+            //                       退化成按来源地址分区，而启动校验与配置中心都说它开着
+            //                       （2026-09-12 修正；此前排在请求验证之前）。代价是洪水流量
+            //                       先付一次凭据解析；匿名洪水仍按来源地址挡下，不受影响。
+            // 11.5. TenantResolver - 租户解析（认证之后，Claims 来源可用）
+            // 12. Authorization   - 授权
+            // 13. SPANotFound     - SPA 404 处理（最内层）
             // ===================================================================
 
             // -1. PathBase（必须在所有中间件之前）
@@ -325,29 +373,18 @@ public class AspNetCoreModule : TnziFrameworkModule
                 app.UsePathBase(aspNetCoreOptions.PathBase);
             }
 
-            // 0. ForwardedHeaders 中间件（最外层，处理代理服务器转发的协议、主机和IP）
+            // 0. ForwardedHeaders 中间件（最外层，处理代理服务器转发的协议、主机、IP 与路径前缀）
             // 必须在异常处理之前，确保所有后续中间件都能获取正确的客户端 IP 和协议。
             // ★ 这是全框架**唯一**采信转发头的地方：它按 AspNetCore:TrustedProxies 声明的
-            //   受信代理从右往左消费，结果写进 Connection.RemoteIpAddress，
-            //   而 GetClientIp() 只读那个结果（见 HttpContextExtensions.GetClientIp）。
+            //   受信代理从右往左消费，地址写进 Connection.RemoteIpAddress（GetClientIp() 只读那个结果，
+            //   见 HttpContextExtensions.GetClientIp），前缀写进 Request.PathBase。
+            //   X-Forwarded-Prefix 曾由紧跟在后面的一段自建中间件无条件采信（2026-09-12 删除）：
+            //   任何直连调用方都能借它覆写部署级的 AspNetCore:PathBase，欢迎页链接、管理端 hub 路径、
+            //   OAuth 回调地址一并跟着改写。现在它与 For/Proto/Host 走同一道受信判定，
+            //   受信代理给的前缀**整体替换** Request.PathBase（不是追加在配置的 PathBase 之后）。
             if (aspNetCoreOptions.EnableForwardedHeaders)
             {
                 app.UseForwardedHeaders(ForwardedHeadersOptionsBuilder.Build(aspNetCoreOptions));
-
-                // 处理 X-Forwarded-Prefix 并设置为 PathBase
-                app.Use((context, next) =>
-                {
-                    if (context.Request.Headers.TryGetValue("X-Forwarded-Prefix", out var prefix) && !string.IsNullOrWhiteSpace(prefix))
-                    {
-                        var pathBase = prefix.ToString();
-                        if (!pathBase.StartsWith('/'))
-                        {
-                            pathBase = "/" + pathBase;
-                        }
-                        context.Request.PathBase = new PathString(pathBase);
-                    }
-                    return next();
-                });
             }
 
             // 1. 异常处理中间件（捕获所有下游中间件和业务逻辑的异常）
@@ -377,30 +414,35 @@ public class AspNetCoreModule : TnziFrameworkModule
             // IOptionsMonitor.CurrentValue.EnableSecurityHeaders 热判断（支持配置中心热开/热关）。
             app.UseMiddleware<SecurityHeadersMiddleware>();
 
-            // 7. 限流中间件（在请求验证之前，先拦截恶意高频流量，避免无效请求消耗验证资源）
-            // 无条件加入管道：Invoke 内按 CurrentValue.Enabled 热判断。
-            app.UseMiddleware<RateLimitingMiddleware>();
-
-            // 8. 请求验证中间件（在限流之后，只对通过限流检查的请求进行验证）
+            // 7. 请求验证中间件
             if (aspNetCoreOptions.RequestValidation?.Enabled == true)
             {
                 app.UseMiddleware<RequestValidationMiddleware>();
             }
 
-            // 9. API 版本控制中间件（如果启用）
+            // 8. API 版本控制中间件（如果启用）
             if (aspNetCoreOptions.ApiVersion?.Enabled == true)
             {
                 app.UseMiddleware<Versioning.ApiVersionMiddleware>();
             }
 
-            // 10. 响应压缩中间件（如果启用）
+            // 9. 响应压缩中间件（如果启用）
             if (aspNetCoreOptions.EnableResponseCompression)
             {
                 app.UseResponseCompression();
             }
 
-            // 11. 认证和授权中间件（必须在路由之前调用）
+            // 10. 认证中间件（必须在路由之前调用）
             app.UseAuthentication();
+
+            // 10.5. 模块插入点：认证之后、限流与授权之前（见 RequestPipelineStage.AfterAuthentication）
+            app.UseRequestPipelineStage(RequestPipelineStage.AfterAuthentication);
+
+            // 11. 限流中间件（★ 必须在认证之后：按用户分区 / ByUser 规则 / 用户白名单
+            // 都读 ICurrentUser.Id，而它来自 HttpContext.User 的 claims，认证没跑之前恒为空。
+            // 与 ASP.NET Core 内置 UseRateLimiter 的官方指引一致：按用户分区时排在 UseAuthentication 之后。）
+            // 无条件加入管道：Invoke 内按 CurrentValue.Enabled 热判断。
+            app.UseMiddleware<RateLimitingMiddleware>();
 
             // 11.5. 租户解析中间件（在认证之后，以便 Claims 来源可用）
             var tenantResolverOptions = context.ServiceProvider
@@ -412,9 +454,10 @@ public class AspNetCoreModule : TnziFrameworkModule
                 app.UseMiddleware<TenantResolverMiddleware>();
             }
 
+            // 12. 授权中间件
             app.UseAuthorization();
 
-            // 12. SPA 404 处理中间件（最内层，可选）
+            // 13. SPA 404 处理中间件（最内层，可选）
             if (aspNetCoreOptions.EnableSPANotFoundHandler)
             {
                 app.UseMiddleware<SPANotFoundMiddleware>();
@@ -496,6 +539,55 @@ public class AspNetCoreModule : TnziFrameworkModule
                 + "IRateLimitPartitionKeyProvider is registered, and AspNetCore:RateLimit:MissingPartitionKey "
                 + "is Allow - so every anonymous request has no partition key and is let through. "
                 + "Register an IRateLimitPartitionKeyProvider, or set MissingPartitionKey to Deny or Global.");
+    }
+
+    /// <summary>
+    /// 启动期自检：人机验证。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 配了 <c>AspNetCore:Captcha:Provider</c> 而没有同名实现 → <strong>启动即失败</strong>
+    /// （<see cref="ICaptchaVerifier.EnsureConfigured"/> 抛 <see cref="ConfigurationException"/>）。
+    /// 静默退回别的提供商会让配置、日志、接口全都正常而验证码换了一家。
+    /// </para>
+    /// <para>
+    /// 没配提供商 → 放行是刻意的（消费方按需启用），但要把每一个挂了 <c>[RequireCaptcha]</c> 的端点点名记 Warning：
+    /// 「挂了特性」与「有保护」在运行期长得一模一样，只有这条日志能把它们分开。
+    /// 数据源是生效的路由表（<see cref="IActionDescriptorCollectionProvider"/>），被抑制的端点不会出现。
+    /// </para>
+    /// </remarks>
+    private static void CheckCaptchaConfiguration(ApplicationInitializationContext context)
+    {
+        // 验证器与提供商允许注册成 scoped，从 root 解析会抛。
+        using var scope = context.ServiceProvider.CreateScope();
+        var verifier = scope.ServiceProvider.GetRequiredService<ICaptchaVerifier>();
+        verifier.EnsureConfigured();
+
+        if (verifier.IsEnabled)
+        {
+            return;
+        }
+
+        var gated = scope.ServiceProvider.GetRequiredService<IActionDescriptorCollectionProvider>()
+            .ActionDescriptors.Items
+            .Where(d => d.FilterDescriptors.Any(f => f.Filter is RequireCaptchaAttribute))
+            .Select(d => d.AttributeRouteInfo?.Template ?? d.DisplayName ?? "(unknown)")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(t => t, StringComparer.Ordinal)
+            .ToList();
+
+        if (gated.Count == 0)
+        {
+            return;
+        }
+
+        context.ServiceProvider.GetRequiredService<ILoggerFactory>()
+            .CreateLogger<AspNetCoreModule>()
+            .LogWarning(
+                "{Count} endpoint(s) carry [RequireCaptcha] but AspNetCore:Captcha:Provider is not configured, "
+                + "so the gate lets every request through: {Endpoints}. Configure a provider "
+                + "(recaptcha / recaptcha-v3 / hcaptcha / turnstile / altcha, or image when Tnzi.Identity is loaded) to enforce it.",
+                gated.Count, string.Join(", ", gated));
     }
 
     /// <summary>
@@ -626,8 +718,8 @@ public class AspNetCoreModule : TnziFrameworkModule
     /// 生成欢迎页面 HTML（从嵌入资源加载，Tnzi.NET 官网风格）。
     ///
     /// 只有与请求无关的部分进缓存：<paramref name="requestVars"/> 里的 PathBase 可以随
-    /// 请求变化（反向代理的 X-Forwarded-Prefix 是调用方可控的头），把它算进缓存键会让一串
-    /// 变化的头反复击穿缓存、每次都重读嵌入资源。逐请求要做的只是几次字符串替换。
+    /// 请求变化（受信代理给的 X-Forwarded-Prefix、ANCM 子应用），逐请求替换而不进缓存键 ——
+    /// 算进缓存键会让每个不同的前缀各占一份缓存、每次都重读嵌入资源。逐请求要做的只是几次字符串替换。
     /// </summary>
     private static string GetWelcomePageHtml(
         Dictionary<string, string> staticVars, Dictionary<string, string> requestVars)

@@ -472,6 +472,185 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("77");
     }
 
+    /// <summary>
+    /// 付款方式的判据必须在写路径上自己成立，不能靠「队列只列 Check 付款」：
+    /// <c>PrintAsync</c> 的入参是请求体里的一组 id，从不经过队列。一笔 BankTransfer 付款
+    /// （可能已装进 EFT 批次并交给银行）被开成支票 = 同一笔钱付两次，且付款单的参考号
+    /// 会被支票号覆盖掉。
+    /// </summary>
+    [Fact]
+    public async Task Print_BankTransferPayment_IsRejected_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var transfer = await CreatePostedPaymentAsync(ledger, vendor, 100m, PaymentMethods.BankTransfer, reference: "WIRE-2026-0042");
+        var nextBefore = (await ReloadAsync<BankAccount>(bank))!.NextCheckNumber;
+
+        var print = await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { transfer } });
+
+        print.Succeeded.ShouldBeFalse("a bank-transfer payment must not be printable as a cheque");
+        print.Code.ShouldBe(400);
+        print.Message!.ShouldContain("not a check payment");
+
+        var checks = ServiceProvider.GetRequiredService<IRepository<BankCheck, Guid>>();
+        (await checks.CountAsync(c => c.PaymentEntryId == transfer)).ShouldBe(0);
+        (await ReloadAsync<BankAccount>(bank))!.NextCheckNumber.ShouldBe(nextBefore);
+        (await ReloadAsync<PaymentEntry>(transfer))!.Reference.ShouldBe("WIRE-2026-0042");
+    }
+
+    /// <summary>
+    /// 手工登记与打印共用同一个付款方式判据（同一个 <c>finance.check.create</c> 码）：
+    /// 请求体里给一笔 BankTransfer 付款的 id，登记簿不能多出一张 Issued 票、
+    /// 付款单的电汇参考号也不能被支票号覆盖 —— 否则「两边登记各自看起来完全正常」这条
+    /// 打印路径刚关上的口子在登记路径上原样打开。
+    /// </summary>
+    [Fact]
+    public async Task RegisterManual_BankTransferPayment_IsRejected_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync(nextCheckNumber: 10);
+        var vendor = await CreateVendorAsync();
+        var transfer = await CreatePostedPaymentAsync(ledger, vendor, 100m, PaymentMethods.BankTransfer, reference: "WIRE-2026-0042");
+
+        var register = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 500, PayeeName = "Acme Supplies", Amount = 100m,
+            IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = transfer
+        }));
+
+        register.Succeeded.ShouldBeFalse("a bank-transfer payment must not be registered as a cheque");
+        register.Code.ShouldBe(400);
+        register.Message!.ShouldContain("not a check payment");
+
+        var checks = ServiceProvider.GetRequiredService<IRepository<BankCheck, Guid>>();
+        (await checks.CountAsync(c => c.BankAccountId == bank)).ShouldBe(0);
+        (await ReloadAsync<BankAccount>(bank))!.NextCheckNumber.ShouldBe(10);
+        (await ReloadAsync<PaymentEntry>(transfer))!.Reference.ShouldBe("WIRE-2026-0042");
+    }
+
+    /// <summary>不存在的付款单 id 不能静默登记成一张「付了某笔款」的票（回写会 no-op，登记簿却多了一行）。</summary>
+    [Fact]
+    public async Task RegisterManual_UnknownPayment_Rejects404_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var bank = await CreateBankAccountAsync();
+
+        var register = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 500, PayeeName = "Nobody", Amount = 1m,
+            IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = Guid.NewGuid()
+        }));
+
+        register.Succeeded.ShouldBeFalse();
+        register.Code.ShouldBe(404);
+        var checks = ServiceProvider.GetRequiredService<IRepository<BankCheck, Guid>>();
+        (await checks.CountAsync(c => c.BankAccountId == bank)).ShouldBe(0);
+    }
+
+    /// <summary>付款单的出款科目必须就是所选银行档案挂的科目：一张票不能登记在另一家银行的登记簿上。</summary>
+    [Fact]
+    public async Task RegisterManual_PaymentFundedFromAnotherBankAccount_Rejects400()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        await CreateBankAccountAsync();
+        var otherLedger = await AccountIdByCodeAsync("1110");
+        var otherBank = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = otherLedger, Name = "Payroll", Scheme = BankNumberScheme.UsAba,
+            RoutingNumber = "021000021", AccountNumber = "999999999999", NextCheckNumber = 1
+        }));
+        otherBank.Succeeded.ShouldBeTrue(otherBank.Message);
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+
+        var register = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = otherBank.Data!.Id, CheckNumber = 500, PayeeName = "Acme Supplies", Amount = 100m,
+            IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = payment
+        }));
+
+        register.Succeeded.ShouldBeFalse();
+        register.Code.ShouldBe(400);
+        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBeNull();
+    }
+
+    /// <summary>已有 Issued 票的付款单不能再登记第二张（与打印路径同一条 409；换票走 Reprint）。</summary>
+    [Fact]
+    public async Task RegisterManual_PaymentAlreadyIssued_Rejects409_AndKeepsReference()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } })).Succeeded.ShouldBeTrue();
+
+        var register = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 500, PayeeName = "Acme Supplies", Amount = 100m,
+            IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = payment
+        }));
+
+        register.Succeeded.ShouldBeFalse();
+        register.Code.ShouldBe(409);
+        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBe("1");
+    }
+
+    /// <summary>预览与打印共用同一条解析路径，收紧一处两边都收紧 —— 这条锁住共用没有被拆开。</summary>
+    [Fact]
+    public async Task Preview_BankTransferPayment_IsRejected()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var transfer = await CreatePostedPaymentAsync(ledger, vendor, 100m, PaymentMethods.BankTransfer);
+
+        var preview = await InScopeAsync<ICheckService, Result<CheckFileDto>>(
+            s => s.PreviewAsync(new PreviewChecksDto { PaymentEntryIds = new List<Guid> { transfer } }));
+
+        preview.Succeeded.ShouldBeFalse();
+        preview.Code.ShouldBe(400);
+    }
+
+    /// <summary>付款方式比较不区分大小写（队列路径比的是小写，写路径要与之一致，否则 "check" 进得了队列却打不了）。</summary>
+    [Fact]
+    public async Task Print_AcceptsCheckMethod_RegardlessOfCase()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var lower = await CreatePostedPaymentAsync(ledger, vendor, 100m, "check");
+
+        var print = await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { lower } });
+
+        print.Succeeded.ShouldBeTrue(print.Message);
+    }
+
+    private async Task<Guid> CreatePostedPaymentAsync(Guid ledgerId, Guid vendorId, decimal amount, string method, string? reference = null)
+    {
+        var draft = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.CreateDraftAsync(new CreatePaymentEntryDto
+        {
+            Direction = PaymentDirection.Outbound,
+            PartyType = FinancePartyType.Vendor,
+            PartyId = vendorId,
+            DocDate = new DateTime(2026, 7, 10),
+            Amount = amount,
+            DepositToAccountId = ledgerId,
+            PaymentMethod = method,
+            Reference = reference
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        var posted = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        return posted.Data!.Id;
+    }
+
     private sealed class FailingCheckRenderer : ICheckDocumentRenderer
     {
         public Result<byte[]> Render(CheckRenderRequest request) => Result<byte[]>.Failure("boom", 500);

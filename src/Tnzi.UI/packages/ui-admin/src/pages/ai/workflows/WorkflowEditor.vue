@@ -7,7 +7,9 @@
       - View tabs:      visual / JSON toggle rendered inside body (below header)
       - Left panel:     node palette ("add node by type") + node list (select/delete/duplicate)
       - Center canvas:  Vue Flow with drag-to-move + drag-to-connect.
-                        Node positions persist via configuration["__x"/"__y"].
+                        Node positions persist via configuration["__x"/"__y"];
+                        the node kind is configuration["nodeType"], the key the
+                        backend executor resolves the IWorkflowNode from.
                         Connections become DependsOn entries on the target step.
       - Right panel:    EITHER node property form (when a node is selected)
                         OR workflow metadata + stats (when nothing is selected).
@@ -476,6 +478,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import { TOverlayTheme } from '../../../components/overlay'
 import { useDetail } from '../../../headless/useDetail'
+import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { useTabTitle } from '../../../headless/useTabTitle'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
@@ -486,6 +489,8 @@ import { translatePageKey, interpolate } from '../../_shared/translate'
 import {
   workflowNodeTypes,
   getNodeTypeMeta,
+  getStepKind,
+  normalizeStepConfiguration,
   NODE_TYPE_KEY,
   POS_X_KEY,
   POS_Y_KEY,
@@ -641,13 +646,8 @@ const agentOptions = computed(() =>
 async function loadAgents(): Promise<void> {
   agentsLoading.value = true
   try {
-    const res = await bridge.agents.fetch({
-      pageIndex: 1,
-      pageSize: 200,
-      searchText: '',
-      filters: {},
-    })
-    agents.value = res.items
+    // Every agent, not the first clamped page (pageSize is clamped to 100 silently).
+    agents.value = await fetchAllPages((q) => bridge.agents.fetch(q))
   } catch {
     // best-effort: dropdown stays empty
   } finally {
@@ -788,22 +788,19 @@ function markDirty(): void {
 function ensureStepShape(steps: WorkflowStepDto[]): WorkflowStepDto[] {
   // Defensive normalization on load - older workflow definitions may not have
   // a stepId or a configuration bag. Without a stepId the canvas can't render
-  // and `dependsOn` references won't resolve, so we synthesize one.
+  // and `dependsOn` references won't resolve, so we synthesize one. The
+  // configuration bag is normalized too: a definition saved by the editor
+  // before 2026-09-12 carries the kind under `__nodeType`, which the backend
+  // never read; migrating it to `nodeType` here means the next save heals it.
   return steps.map((step, idx) => {
     const next: WorkflowStepDto = {
       ...step,
       stepId: step.stepId && step.stepId.trim() ? step.stepId : `step-${idx + 1}`,
       dependsOn: step.dependsOn ? [...step.dependsOn] : null,
-      configuration: step.configuration ? { ...step.configuration } : {},
+      configuration: normalizeStepConfiguration(step.configuration),
     }
     return next
   })
-}
-
-function getStepKind(step: WorkflowStepDto | null | undefined): WorkflowNodeKind {
-  if (!step) return 'agent'
-  const raw = step.configuration?.[NODE_TYPE_KEY]
-  return getNodeTypeMeta(raw ?? 'agent').kind
 }
 
 function changeKind(kind: string): void {

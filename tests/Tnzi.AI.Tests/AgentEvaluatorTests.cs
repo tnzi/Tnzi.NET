@@ -5,14 +5,14 @@ namespace Tnzi.AI.Tests;
 /// </summary>
 public class AgentEvaluatorTests
 {
-    private readonly Mock<IChatService> _chatServiceMock;
+    private readonly Mock<IAgentDispatchFacade> _runtimeMock;
     private readonly Mock<IRepository<EvaluationRun, Guid>> _repositoryMock;
     private readonly Mock<IAiUtility> _aiUtilityMock;
     private readonly DefaultAgentEvaluator _evaluator;
 
     public AgentEvaluatorTests()
     {
-        _chatServiceMock = new Mock<IChatService>();
+        _runtimeMock = new Mock<IAgentDispatchFacade>();
         _repositoryMock = new Mock<IRepository<EvaluationRun, Guid>>();
         _aiUtilityMock = new Mock<IAiUtility>();
         var loggerMock = new Mock<ILogger<DefaultAgentEvaluator>>();
@@ -27,7 +27,7 @@ public class AgentEvaluatorTests
         _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
 
-        _evaluator = new DefaultAgentEvaluator(_chatServiceMock.Object, _repositoryMock.Object, _aiUtilityMock.Object, loggerMock.Object);
+        _evaluator = new DefaultAgentEvaluator(_runtimeMock.Object, _repositoryMock.Object, _aiUtilityMock.Object, loggerMock.Object);
     }
 
     [Fact]
@@ -40,8 +40,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = "4"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "4" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "4", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -64,8 +64,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = "Paris"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "The capital of France is Paris." }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "The capital of France is Paris.", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -87,8 +87,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = "4"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "The answer is five." }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "The answer is five.", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -110,8 +110,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = null
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "Here is something." }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "Here is something.", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -132,7 +132,7 @@ public class AgentEvaluatorTests
             ExpectedOutput = "expected"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Chat service error"));
 
         // Act
@@ -155,8 +155,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = "test"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "test" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "test", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -176,10 +176,10 @@ public class AgentEvaluatorTests
             new() { Input = "Q3", ExpectedOutput = "A3" }
         };
 
-        _chatServiceMock.SetupSequence(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "A1" }))   // 精确匹配
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "Wrong" })) // 不匹配
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "A3" }));  // 精确匹配
+        _runtimeMock.SetupSequence(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "A1", Status = AgentRunStatus.Completed })   // 精确匹配
+            .ReturnsAsync(new AgentRunResult { Response = "Wrong", Status = AgentRunStatus.Completed }) // 不匹配
+            .ReturnsAsync(new AgentRunResult { Response = "A3", Status = AgentRunStatus.Completed });  // 精确匹配
 
         // Act
         var summary = await _evaluator.EvaluateBatchAsync(cases);
@@ -201,10 +201,10 @@ public class AgentEvaluatorTests
             new() { Input = "Q2", ExpectedOutput = "A2" }
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.Is<ChatRequestDto>(r => r.Message == "Q1"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "A1" }));
-        _chatServiceMock.Setup(s => s.ChatAsync(It.Is<ChatRequestDto>(r => r.Message == "Q2"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "A2" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.Is<AgentRunRequest>(r => r.UserMessage == "Q1"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "A1", Status = AgentRunStatus.Completed });
+        _runtimeMock.Setup(s => s.RunAsync(It.Is<AgentRunRequest>(r => r.UserMessage == "Q2"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "A2", Status = AgentRunStatus.Completed });
 
         // Act
         var summary = await _evaluator.EvaluateBatchAsync(cases);
@@ -225,8 +225,8 @@ public class AgentEvaluatorTests
             new() { Input = "Q2", ExpectedOutput = "A2" }
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "Wrong answer" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "Wrong answer", Status = AgentRunStatus.Completed });
 
         // Act
         var summary = await _evaluator.EvaluateBatchAsync(cases);
@@ -257,8 +257,8 @@ public class AgentEvaluatorTests
             })
             .Returns(Task.CompletedTask);
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "A1" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "A1", Status = AgentRunStatus.Completed });
 
         // Act
         await _evaluator.EvaluateBatchAsync(cases);
@@ -298,8 +298,8 @@ public class AgentEvaluatorTests
             ExpectedOutput = "hypertext transfer protocol"
         };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "Hypertext Transfer Protocol" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "Hypertext Transfer Protocol", Status = AgentRunStatus.Completed });
 
         // Act
         var result = await _evaluator.EvaluateAsync(evaluationCase);
@@ -315,8 +315,8 @@ public class AgentEvaluatorTests
         // Non-exact but semantically related → LLM judge scores it (not string match)
         var evaluationCase = new EvaluationCase { Input = "Capital of France?", ExpectedOutput = "Paris" };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "It is the City of Light." }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "It is the City of Light.", Status = AgentRunStatus.Completed });
         _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("""{"score":0.92,"pass":true,"reason":"refers to Paris"}""");
 
@@ -333,8 +333,8 @@ public class AgentEvaluatorTests
         // LLM responses often wrap JSON in markdown fences - must still parse
         var evaluationCase = new EvaluationCase { Input = "Q", ExpectedOutput = "Paris" };
 
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "unrelated wording" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "unrelated wording", Status = AgentRunStatus.Completed });
         _aiUtilityMock.Setup(u => u.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("```json\n{\"score\":0.2,\"pass\":false,\"reason\":\"unrelated\"}\n```");
 
@@ -349,8 +349,8 @@ public class AgentEvaluatorTests
     {
         // Exact match is a zero-cost fast path - LLM judge must not be invoked
         var evaluationCase = new EvaluationCase { Input = "What is 2+2?", ExpectedOutput = "4" };
-        _chatServiceMock.Setup(s => s.ChatAsync(It.IsAny<ChatRequestDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<ChatResponseDto>.Success(new ChatResponseDto { Content = "4" }));
+        _runtimeMock.Setup(s => s.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AgentRunResult { Response = "4", Status = AgentRunStatus.Completed });
 
         await _evaluator.EvaluateAsync(evaluationCase);
 

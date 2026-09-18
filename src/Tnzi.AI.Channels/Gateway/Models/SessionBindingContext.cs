@@ -20,8 +20,14 @@ public class SessionBindingContext
     /// <summary>话题 ID</summary>
     public string? TopicId { get; init; }
 
-    /// <summary>显式指定的 Agent ID（优先级最高）</summary>
+    /// <summary>显式指定的 Agent ID（优先级最高，短路全部规则）</summary>
     public string? ExplicitAgentId { get; init; }
+
+    /// <summary>
+    /// 兜底 Agent ID（渠道默认值）：仅在没有任何规则命中时生效，优先于 <c>GatewayOptions.DefaultAgentId</c>。
+    /// 解析优先级：<see cref="ExplicitAgentId"/> &gt; 绑定规则 &gt; <see cref="FallbackAgentId"/> &gt; Gateway 默认。
+    /// </summary>
+    public Guid? FallbackAgentId { get; init; }
 
     /// <summary>
     /// Owning tenant resolved from channel config in multi-tenant deployments;

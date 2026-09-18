@@ -18,6 +18,7 @@ import { onMounted, ref } from 'vue'
 import { NQrCode, NInput, NButton } from 'naive-ui'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
+import TStepUpPrompt from './TStepUpPrompt.vue'
 import type { UseAccountSettingsReturn } from '../../headless/useAccountSettings'
 
 const props = defineProps<{
@@ -31,6 +32,11 @@ onMounted(() => {
 
 const totpCode = ref('')
 const confirmingAllSessions = ref(false)
+// Two-step confirmation per row. The current session's row carries no Revoke
+// at all when the hook can tell which row that is; the confirmation is for
+// every other row, because on a deployment without session-bound tokens the
+// marker is unknown and any row might still be this device.
+const confirmingSessionId = ref<string | null>(null)
 
 async function onConfirmTotp(): Promise<void> {
   const ok = await props.controller.confirmTotp(totpCode.value.trim())
@@ -46,6 +52,15 @@ async function onRevokeAll(): Promise<void> {
   await props.controller.revokeAllSessions()
 }
 
+async function onRevokeSession(sessionId: string): Promise<void> {
+  if (confirmingSessionId.value !== sessionId) {
+    confirmingSessionId.value = sessionId
+    return
+  }
+  confirmingSessionId.value = null
+  await props.controller.revokeSession(sessionId)
+}
+
 function formatWhen(value: Date | string | undefined | null): string {
   if (!value) return ''
   const date = value instanceof Date ? value : new Date(value)
@@ -54,6 +69,11 @@ function formatWhen(value: Date | string | undefined | null): string {
 </script>
 
 <template>
+  <!-- Re-authentication for the [RequireStepUp] writes below (pause / remove
+       authenticator). The controller runs every write through the loop; this
+       renders the prompt where the user can still see the row they acted on. -->
+  <TStepUpPrompt v-if="controller.stepUp" :prompt="controller.stepUp" />
+
   <TSettingGroup title="Two-factor authentication" :separator="false">
     <TSettingRow
       label="Authenticator app"
@@ -152,29 +172,47 @@ function formatWhen(value: Date | string | undefined | null): string {
       :label="session.deviceInfo || session.userAgent || 'Unknown device'"
       :description="[session.ipAddress, formatWhen(session.lastActivityTime)].filter(Boolean).join(' · ')"
     >
-      <NButton size="small" :loading="controller.busy.value" @click="controller.revokeSession(session.id)">
-        Revoke
+      <!-- The row this tab is signed in with is labelled instead of revocable:
+           revoking it signs the user out of the page they are standing on. -->
+      <span
+        v-if="controller.isCurrentSession(session)"
+        class="t-settings-field__pill t-settings-field__pill--on"
+      >
+        This device
+      </span>
+      <NButton
+        v-if="!controller.isCurrentSession(session)"
+        size="small"
+        :type="confirmingSessionId === session.id ? 'error' : undefined"
+        :loading="controller.busy.value"
+        @click="onRevokeSession(session.id)"
+      >
+        {{ confirmingSessionId === session.id ? 'Sign out this device?' : 'Revoke' }}
       </NButton>
     </TSettingRow>
 
     <p v-if="controller.sessions.value.length === 0" class="t-settings-field__hint">
-      No other sessions recorded.
+      No sessions recorded.
     </p>
 
     <div class="t-settings-field__actions">
+      <!-- Disabled off `otherSessions`: the list always includes the caller's
+           own session while signed in, so `sessions.length === 0` never
+           disabled anything and the button was live with nobody to sign out. -->
       <NButton
         size="small"
         type="error"
         ghost
         :loading="controller.busy.value"
-        :disabled="controller.sessions.value.length === 0"
+        :disabled="controller.otherSessions.value.length === 0"
         @click="onRevokeAll"
       >
-        <!-- Says "including this one" because it does: the session DTO carries
-             no marker for the current session, so the caller cannot be spared,
-             and a button labelled "sign out other devices" would be a promise
-             the data cannot keep. -->
-        {{ confirmingAllSessions ? 'Sign out everywhere, including this tab?' : 'Sign out everywhere' }}
+        <!-- `revokeAllSessions()` keeps the caller's own session (the backend
+             excludes it unless asked), so the button says exactly that. A true
+             "sign out everywhere" would pass `true` AND have to clear local
+             auth / leave the page, which this component has no access to;
+             that is a product decision, not a label. -->
+        {{ confirmingAllSessions ? 'Sign out every other device? You stay signed in here.' : 'Sign out other devices' }}
       </NButton>
     </div>
   </TSettingGroup>

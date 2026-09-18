@@ -1,4 +1,4 @@
-﻿
+
 namespace Tnzi.AspNetCore.Middleware;
 
 /// <summary>
@@ -10,7 +10,6 @@ public class RequestTrackingMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<RequestTrackingMiddleware> _logger;
-    private readonly IOptionsMonitor<AspNetCoreOptions> _aspNetCoreOptions;
     private readonly IOptionsMonitor<RequestTrackingOptions> _trackingOptions;
 
     /// <summary>
@@ -116,25 +115,19 @@ public class RequestTrackingMiddleware
     {
         _next = Check.NotNull(next);
         _logger = Check.NotNull(logger);
-        _aspNetCoreOptions = Check.NotNull(aspNetCoreOptions);
+        // 构造签名保留 aspNetCoreOptions（UseMiddleware 按它解析）；此前只用它判 HttpEncrypt 决定是否提前开缓冲，
+        // 缓冲现在按需开，这里不再需要它
+        Check.NotNull(aspNetCoreOptions);
         _trackingOptions = Check.NotNull(trackingOptions);
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var aspNetCoreOptions = _aspNetCoreOptions.CurrentValue;
         var trackingOptions = _trackingOptions.CurrentValue;
 
-        // 注意：如果启用了 HTTP 加密，EnableBuffering 应该在加密中间件中处理
-        // 这里只在未启用加密时启用缓冲
-        if (aspNetCoreOptions.HttpEncrypt?.Enabled != true)
-        {
-            // 未启用加密时，早期启用请求体缓冲
-            if (trackingOptions.LogRequestBody || trackingOptions.LogResponseBody)
-            {
-                context.Request.EnableBuffering();
-            }
-        }
+        // 请求体缓冲不在这里开：EnableBuffering 把 Body 换成 FileBufferingReadStream，下游每读一次都被复制进缓冲、
+        // 超过 30 KB 溢出到临时文件 —— 闸门决定「不采」的体（multipart 上传、超上界的体、只开了 LogResponseBody）
+        // 此前仍被整条落盘一份。缓冲由 CaptureRequestBodyAsync 在 Content-Type / Content-Length 闸门之后按需开。
 
         // 获取或生成 RequestId
         var requestId = GetOrGenerateRequestId(context);
@@ -164,21 +157,21 @@ public class RequestTrackingMiddleware
         string? requestBody = null;
         if (trackingOptions.LogRequestBody && allowsBodyCapture)
         {
-            // ★ 先脱敏再截断，与下面的响应体同序。反过来会把 JSON 截成非法串，
-            // 脱敏器于是原样返回 —— 只有超过 MaxRequestBodyLength 的请求泄漏凭据。
-            var rawBody = await ReadRequestBodyAsync(context);
-            requestBody = Truncate(RedactBody(rawBody) ?? string.Empty, trackingOptions.MaxRequestBodyLength);
+            requestBody = await CaptureRequestBodyAsync(context, trackingOptions);
         }
 
-        // 启用响应缓冲（如果需要记录响应）
-        MemoryStream? responseBuffer = null;
+        // 响应体采集：直通式，每次写入立刻转发给原始流，旁路只留前 MaxCapturedBodyBytes 字节。
+        // ★ 不能换成 MemoryStream 等 action 跑完再拷回：那会把整条下载在内存里多存一份，
+        //   并让 SSE / 分块流式端点变成「等全部生成完再一次性吐出」（2026-09-12 修复）。
+        BoundedResponseCaptureStream? responseCapture = null;
         Stream? originalResponseBody = null;
 
         if (trackingOptions.LogResponseBody && allowsBodyCapture)
         {
-            responseBuffer = new MemoryStream();
             originalResponseBody = context.Response.Body;
-            context.Response.Body = responseBuffer;
+            responseCapture = new BoundedResponseCaptureStream(
+                originalResponseBody, context.Response, trackingOptions.MaxCapturedBodyBytes);
+            context.Response.Body = responseCapture;
         }
 
         try
@@ -217,14 +210,9 @@ public class RequestTrackingMiddleware
                     UserId = userId
                 };
 
-                // 读取响应体（使用 leaveOpen 保留 buffer 供后续复制）
-                if (trackingOptions.LogResponseBody && responseBuffer != null)
+                if (trackingOptions.LogResponseBody && responseCapture != null)
                 {
-                    responseBuffer.Position = 0;
-                    using var reader = new StreamReader(responseBuffer, leaveOpen: true);
-                    var responseBodyText = await reader.ReadToEndAsync();
-                    // ★ 先截断再脱敏会把 JSON 截成非法串，脱敏器于是原样返回 —— 顺序不能反。
-                    logEntry.ResponseBody = Truncate(RedactBody(responseBodyText) ?? string.Empty, trackingOptions.MaxResponseBodyLength);
+                    logEntry.ResponseBody = DescribeCapturedResponse(responseCapture, trackingOptions);
                 }
 
                 _logger.Log(logLevel, "{@RequestLog}", logEntry);
@@ -232,18 +220,66 @@ public class RequestTrackingMiddleware
         }
         finally
         {
-            // 始终将响应缓冲区复制回原始流（无论是否记录日志）
+            // 写入早已直通到原始流；这里只把流换回去并放掉旁路缓冲。
             if (originalResponseBody != null)
             {
-                if (responseBuffer is { Length: > 0 })
-                {
-                    responseBuffer.Position = 0;
-                    await responseBuffer.CopyToAsync(originalResponseBody);
-                }
                 context.Response.Body = originalResponseBody;
             }
-            responseBuffer?.Dispose();
+            responseCapture?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 采集请求体：先按 Content-Type 与 Content-Length 闸住，再有界地读，最后脱敏、截断。
+    /// </summary>
+    /// <remarks>
+    /// ★ 闸门在<b>读之前</b>。<see cref="RequestTrackingOptions.MaxRequestBodyLength"/> 只裁剪已经在内存里的字符串，
+    /// 此前读侧是 <c>ReadToEndAsync()</c>，打开开关后一次 100 MB 的 multipart 上传就是 ~200 MB 的 UTF-16 string
+    /// 再交给 JSON 脱敏器（2026-09-12 修复）。超过上界的体不记而不是记一半：截断过的 JSON 无法脱敏。
+    /// </remarks>
+    private static async Task<string> CaptureRequestBodyAsync(HttpContext context, RequestTrackingOptions options)
+    {
+        var request = context.Request;
+        if (!BodyCapturePolicy.IsCapturable(request.ContentType))
+        {
+            return BodyCapturePolicy.RequestNotCapturedMarker(request.ContentType);
+        }
+
+        var capacity = Math.Max(0, options.MaxCapturedBodyBytes);
+        if (request.ContentLength is { } declared && declared > capacity)
+        {
+            return BodyCapturePolicy.RequestExceededMarker;
+        }
+
+        var rawBody = await ReadRequestBodyAsync(context, capacity);
+        if (rawBody == null)
+        {
+            return BodyCapturePolicy.RequestExceededMarker;
+        }
+
+        // ★ 先脱敏再截断，与响应体同序。反过来会把 JSON 截成非法串，
+        // 脱敏器于是原样返回 —— 只有超过 MaxRequestBodyLength 的请求泄漏凭据。
+        return Truncate(RedactBody(rawBody) ?? string.Empty, options.MaxRequestBodyLength);
+    }
+
+    /// <summary>
+    /// 把采集到的响应体变成日志字段：跳过 / 超界只留标记，其余先脱敏再截断。
+    /// </summary>
+    private static string DescribeCapturedResponse(BoundedResponseCaptureStream capture, RequestTrackingOptions options)
+    {
+        if (capture.Skipped)
+        {
+            return BodyCapturePolicy.ResponseNotCapturedMarker(capture.ContentType, capture.ContentEncoding);
+        }
+
+        if (capture.Exceeded)
+        {
+            return BodyCapturePolicy.ResponseExceededMarker;
+        }
+
+        var responseBodyText = Encoding.UTF8.GetString(capture.Captured.Span);
+        // ★ 先截断再脱敏会把 JSON 截成非法串，脱敏器于是原样返回 —— 顺序不能反。
+        return Truncate(RedactBody(responseBodyText) ?? string.Empty, options.MaxResponseBodyLength);
     }
 
     /// <summary>
@@ -302,33 +338,16 @@ public class RequestTrackingMiddleware
     }
 
     /// <summary>
-    /// 读取请求体（原文，不截断）。
+    /// 有界地读取请求体原文：最多读 <paramref name="capacity"/> + 1 字节，多出的那一个只为判断「超了」。
     /// </summary>
+    /// <returns>整条体（未超界）；超界返回 <c>null</c>，已读的部分丢弃。</returns>
     /// <remarks>
-    /// ★ <strong>刻意不在这里截断。</strong>脱敏按 JSON 解析，
-    /// 而截断过的 JSON 是非法串、脱敏器只能原样返回。截断必须发生在脱敏之后。
+    /// ★ <strong>这里是「读不读」的界，不是「记多少」的截断。</strong>脱敏按 JSON 解析，
+    /// 而截断过的 JSON 是非法串、脱敏器只能原样返回，所以展示截断必须发生在脱敏之后；
+    /// 超界的体则整条不记。读完把流位置退回 0，下游模型绑定照常拿到整条体。
     /// </remarks>
-    private static async Task<string?> ReadRequestBodyAsync(HttpContext context)
-    {
-        if (!context.Request.Body.CanSeek)
-        {
-            // 如果流不支持定位，需要启用缓冲
-            context.Request.EnableBuffering();
-        }
-
-        context.Request.Body.Position = 0;
-
-        using var reader = new StreamReader(
-            context.Request.Body,
-            leaveOpen: true);
-
-        var body = await reader.ReadToEndAsync();
-
-        // 恢复流位置
-        context.Request.Body.Position = 0;
-
-        return body;
-    }
+    private static Task<string?> ReadRequestBodyAsync(HttpContext context, int capacity)
+        => context.Request.TryReadAsStringAsync(capacity, context.RequestAborted);
 
     /// <summary>
     /// 获取当前用户 ID

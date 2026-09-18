@@ -62,12 +62,31 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
+    // 每个封闭泛型算一次：TDto 的公共标量属性名就是请求方看得见的列
+    private static readonly FilterFieldPolicy ProjectedFilterPolicy = FilterFieldPolicy.ProjectedBy(typeof(TDto));
+
     /// <summary>
-    /// 分页查询。应用 <see cref="ApplyScopeAsync"/> 行级范围谓词与 <see cref="PagedQuery.Filter"/> 动态过滤。
+    /// 请求来源的 <see cref="PagedQuery.Filter"/> 与 <see cref="PagedQuery.OrderBy"/> 的字段准入策略。
+    /// 默认 <see cref="FilterFieldPolicy.ProjectedBy"/>(<typeparamref name="TDto"/>)：只允许 DTO 上同名的根标量列 ——
+    /// 口令哈希、安全戳、薪资这类实体有而 DTO 从不投影的根列对请求方不存在，导航路径一律拒绝。
+    /// 需要更宽的服务显式放宽（<see cref="FilterFieldPolicy.AllowOnly"/> 点名，或
+    /// <c>FilterFieldPolicy.Request with { AllowNavigation = true, MaxDepth = 2 }</c>，后者放行根实体全部标量列）。
+    /// </summary>
+    protected virtual FilterFieldPolicy FilterPolicy => ProjectedFilterPolicy;
+
+    /// <summary>
+    /// 分页查询。应用 <see cref="ApplyScopeAsync"/> 行级范围谓词与 <see cref="PagedQuery.Filter"/> 动态过滤；
+    /// 过滤与排序字段先过 <see cref="FilterPolicy"/>，不在允许范围内的答 400（消息不含实体类型名）。
     /// </summary>
     public virtual async Task<Result<IPagedList<TDto>>> QueryAsync(PagedQuery query, CancellationToken cancellationToken = default)
     {
         Check.NotNull(query);
+
+        var policy = FilterPolicy;
+        if (!FilterExpressionBuilder.TryValidateFields<TEntity>(query.Filter, policy, out var filterError))
+            return Fail<IPagedList<TDto>>(filterError!, 400, ErrorCodes.VALIDATION_ERROR);
+        if (!FilterExpressionBuilder.TryValidateOrderBy<TEntity>(query.OrderBy, policy, out var orderByError))
+            return Fail<IPagedList<TDto>>(orderByError!, 400, ErrorCodes.VALIDATION_ERROR);
 
         var scope = await ApplyScopeAsync(cancellationToken);
         var page = scope == null

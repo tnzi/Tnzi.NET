@@ -88,6 +88,7 @@ import type { AdminSettingsConfig } from './settings-config'
 import type { AdminUserCenterConfig } from './user-center-config'
 import { resolveHubConfigs } from './hub-config'
 import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } from './deep-link-config'
+import { provideAdminRuntime } from './runtime'
 import type { AdminThemeConfig } from './theme-config'
 import type { AdminShellConfig } from './shell-config'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
@@ -974,10 +975,15 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
           }
         : undefined,
       // After 2FA verification the session is established → run the same
-      // post-login flow (permissions + redirect) as a direct login.
+      // post-login flow (permissions + redirect) as a direct login. `helpers`
+      // must travel too: the backend asks for obligations (a forced password
+      // change) AFTER 2FA, and the shared callback reports them only through
+      // `helpers.setPendingActionRequired` - without it a correct code was
+      // answered with "Verification failed". `after()` no-ops without a
+      // session, so the pending-action path does not redirect.
       verifyTwoFactor: verify
-        ? async (payload) => {
-            await verify(payload)
+        ? async (payload, helpers) => {
+            await verify(payload, helpers)
             await after()
           }
         : undefined,
@@ -1086,6 +1092,13 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // via tryInjectDeepLinkConfig(). Provided unconditionally so per-page
     // engines never need to guard against a missing key.
     app.provide(ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig(options.deepLink))
+
+    // The wired runtime, for the one page that receives a session outside the
+    // login route (invitation acceptance applies the tokens the backend issues
+    // on completion). Absent when the host passed `client` instead.
+    if (options.runtime) {
+      provideAdminRuntime(app, options.runtime)
+    }
 
     // Attach the soybean-style route progress bar if a router is provided.
     // Idempotent - safe if the consumer already called useRouteProgress.

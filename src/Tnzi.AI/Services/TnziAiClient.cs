@@ -114,6 +114,8 @@ public class TnziAiClient : ITnziAiClient
             Provider = options?.Provider,
             Model = options?.Model,
             ToolGroups = options?.ToolGroups,
+            // 嵌入式客户端的工具组来自应用代码，不是 HTTP 请求体
+            TrustedToolSelection = true,
             EnableRunTracking = options?.EnableRunTracking ?? false,
             UserId = options?.UserId,
             StreamMode = options?.StreamMode ?? StreamMode.Messages

@@ -206,6 +206,55 @@ public class RedisCacheServiceTests
         Assert.Equal("c", ex.CacheKey);
     }
 
+    // ============ 计数器固定窗口：仅键首次创建时设 TTL ============
+
+    /// <summary>
+    /// 每次都重设 TTL 是滑动惩罚窗口：限流 100 次 / 60 秒，超限后持续重试的客户端把窗口一直续下去，永不恢复。
+    /// <c>RateLimitService</c> 按「已存在时仅递增、不更新过期时间」实现固定窗口，实现必须兑现这一条。
+    /// </summary>
+    [Fact]
+    public async Task IncrementAsync_WithExpiration_SetsTtl_OnlyWhenKeyIsCreated()
+    {
+        var redis = new InMemoryRedis();
+        var svc = BuildService(redis, instanceName: "app");
+        var window = TimeSpan.FromSeconds(10);
+
+        await svc.IncrementAsync("rl", 1, window);
+        var second = await svc.IncrementAsync("rl", 1, window);
+
+        Assert.Equal(2, second);
+        Assert.Equal(1, redis.ExpirySetCounts["app:rl"]);
+        Assert.Equal(10_000, redis.Expiries["app:rl"]);
+    }
+
+    [Fact]
+    public async Task IncrementAsync_AfterRemove_StartsANewWindow()
+    {
+        var redis = new InMemoryRedis();
+        var svc = BuildService(redis);
+        var window = TimeSpan.FromSeconds(10);
+
+        await svc.IncrementAsync("rl", 1, window);
+        await svc.RemoveAsync("rl");
+        var fresh = await svc.IncrementAsync("rl", 1, window);
+
+        Assert.Equal(1, fresh);
+        Assert.Equal(2, redis.ExpirySetCounts["rl"]);
+    }
+
+    [Fact]
+    public async Task IncrementAsync_WithoutExpiration_NeverSetsTtl()
+    {
+        var redis = new InMemoryRedis();
+        var svc = BuildService(redis);
+
+        await svc.IncrementAsync("plain");
+        await svc.IncrementAsync("plain", 5);
+
+        Assert.False(redis.Expiries.ContainsKey("plain"));
+        Assert.Equal(6, await svc.GetAsync<long>("plain"));
+    }
+
     // ============ 读路径 fail-open（对比计数器 fail-closed）============
 
     [Fact]

@@ -73,6 +73,10 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
         // 获取交换机名称（优先级：EventBusOptions.RabbitMqExchangeName > 默认值）
         var exchangeName = eventBusOptions.RabbitMqExchangeName ?? "Tnzi.Events";
 
+        // 消费者身份：EventBus:ConsumerGroup（缺省入口程序集名）+ 本进程实例 ID。
+        // 队列名以它开头，同一代理上的两个服务才各得一条队列，而不是竞争消费同一条
+        var consumerIdentity = DistributedConsumerIdentity.FromOptions(eventBusOptions);
+
         // 注册 RabbitMQ 连接工厂
         services.AddSingleton<IConnectionFactory>(provider =>
         {
@@ -119,7 +123,7 @@ public class RabbitMQEventBusModule : TnziInfrastructureModule
             var logger = provider.GetRequiredService<ILogger<RabbitMQEventBus>>();
             var rabbitOptions = provider.GetService<IOptions<RabbitMQOptions>>()?.Value ?? new RabbitMQOptions();
 
-            return new RabbitMQEventBus(connection, logger, provider, rabbitOptions, exchangeName);
+            return new RabbitMQEventBus(connection, logger, provider, rabbitOptions, exchangeName, consumerIdentity);
         });
 
         // 注册 IDistributedEventBus 和 IIntegrationEventBus 接口,指向同一实例（与 Kafka 模块一致）

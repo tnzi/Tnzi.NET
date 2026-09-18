@@ -277,13 +277,14 @@ public class ChannelsModuleOptionsValidatorTests
         return validator.Validate(null, options);
     }
 
+    // 配置了 EncryptKey 的飞书应用推送的是密文信封（2026-09-12 起适配器自行解封），明文 body 一律 401。
     private static string BuildChallengeBody(string challengeValue)
-        => JsonSerializer.Serialize(new
+        => FeishuTestCrypto.Envelope(JsonSerializer.Serialize(new
         {
             type = "url_verification",
             token = (string?)null,
             challenge = challengeValue
-        });
+        }), ChallengeEncryptKey);
 
     /// <summary>
     /// 验签用的 EncryptKey。这两条用例验的是 challenge 回显的 JSON 序列化，与验签无关，

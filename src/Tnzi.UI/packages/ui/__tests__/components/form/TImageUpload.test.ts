@@ -41,6 +41,11 @@ vi.mock('cropperjs', () => ({
 // Stub NModal so the dialog renders without Naive UI provider tree
 // ---------------------------------------------------------------------------
 vi.mock('naive-ui', () => ({
+  // The cropper modal wears `TOverlayTheme` (the overlay provider), which
+  // renders an abstract NConfigProvider bound to naive's light / dark bases.
+  NConfigProvider: { name: 'NConfigProvider', render(this: any) { return this.$slots.default?.() } },
+  lightTheme: { common: {} },
+  darkTheme: { common: {} },
   NModal: {
     name: 'NModal',
     props: ['show'],

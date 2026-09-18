@@ -3,19 +3,28 @@ namespace Tnzi.Finance.Services;
 /// <summary>
 /// 单据附件服务
 /// </summary>
+/// <remarks>
+/// <see cref="IFileReadAccessProbe"/> 可选注入（契约在核心 <c>Tnzi</c> 程序集，实现随 <c>Tnzi.Storage</c> 注册，
+/// Finance 核心仍零 Storage 引用）：登记附件前问一句「这个人本来就读得到这份文件吗」。
+/// 未加载 Storage 时为 null，<see cref="AttachAsync"/> 答 501 而不是跳过 —— 「跳过校验」与「校验通过」
+/// 在接口上完全一致，而 <c>[FileField]</c> 的引用登记本来就是存储模块的机制。
+/// </remarks>
 public class DocumentAttachmentService : ApplicationService, IDocumentAttachmentService
 {
     private readonly IRepository<DocumentAttachment, Guid> _repository;
     private readonly FinanceOptions _options;
+    private readonly IFileReadAccessProbe? _fileAccess;
 
     public DocumentAttachmentService(
         IServiceProvider serviceProvider,
         IRepository<DocumentAttachment, Guid> repository,
-        IOptionsSnapshot<FinanceOptions> options)
+        IOptionsSnapshot<FinanceOptions> options,
+        IFileReadAccessProbe? fileAccess = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _options = Check.NotNull(options).Value;
+        _fileAccess = fileAccess;
     }
 
     public async Task<Result<List<DocumentAttachmentDto>>> ListAsync(string sourceType, string sourceId, CancellationToken cancellationToken = default)
@@ -58,6 +67,15 @@ public class DocumentAttachmentService : ApplicationService, IDocumentAttachment
 
         if (input.FileId == Guid.Empty)
             return Fail<DocumentAttachmentDto>("A file is required.", 400);
+
+        // ★★★ 登记一个文件 id = 把那份文件**发布**给这张单据的全部可见者：FileId 是 [FileField]，
+        // 落库即登记一条 FileReference，而 FinanceFileReferenceAccessResolver 对 DocumentAttachment 名下的
+        // 文件只问 finance.attachment.view。不问一句归属，持 finance.attachment.create 的人把任意 fileId
+        // 挂到任意单据键上（单据类型是开放词汇，单据本身不必存在），那份文件就成了他永久可读的。
+        // 判据是「这个人本来就读得到它吗」，不认请求级凭据（分享链接 / 签名 URL），见 IFileReadAccessProbe。
+        var denial = await RejectFileReferenceAsync(input.FileId, cancellationToken);
+        if (denial != null)
+            return denial;
 
         // 内容类型白名单：空 = 不限（多数部署不想管这件事，那就别逼他们配）。
         var allowed = _options.AllowedAttachmentContentTypes;
@@ -135,6 +153,25 @@ public class DocumentAttachmentService : ApplicationService, IDocumentAttachment
             .ToDictionaryAsync(g => g.Key, g => g.Count, cancellationToken);
 
         return Ok(counts);
+    }
+
+    /// <summary>
+    /// 这个文件 id 能不能被当前用户挂到单据上。<see langword="null"/> = 可以。
+    /// </summary>
+    /// <remarks>
+    /// 存储模块缺席时拒绝，不是跳过：501 而不是 503，这不是暂时性故障，重试永远不会好。
+    /// 「读不到」与「不存在」回答同一句话：分开回答会让这个端点变成「这个文件 id 存不存在」的探针，
+    /// 而实体 ID 是顺序 GUID，可枚举性本来就高。
+    /// </remarks>
+    private async Task<Result<DocumentAttachmentDto>?> RejectFileReferenceAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        if (_fileAccess == null)
+            return Fail<DocumentAttachmentDto>("Attaching files needs the storage module. Load Tnzi.Storage.", 501);
+
+        if (!await _fileAccess.CanReadAsync(fileId, cancellationToken))
+            return Fail<DocumentAttachmentDto>("That file cannot be attached to this document.", 403);
+
+        return null;
     }
 
     /// <summary>

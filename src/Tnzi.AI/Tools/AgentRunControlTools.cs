@@ -3,8 +3,12 @@ namespace Tnzi.AI.Tools;
 /// <summary>
 /// Agent runtime 控制工具
 /// </summary>
-[AIToolGroup("task")]
-public class AgentRunControlTools
+/// <remarks>
+/// 整组由 <c>ai.tools.task</c> 门住：这些工具能起后台运行、读别人的运行摘要、取消或向其送输入，
+/// 不该是任何登录用户自选一个工具组就能拿到的能力。
+/// </remarks>
+[AIToolGroup("task", RequiredPermissions = AIToolPermissions.Task)]
+public class AgentRunControlTools : IAIToolProvider
 {
     private readonly IAgentRuntimeControlService _controlService;
 
@@ -17,7 +21,7 @@ public class AgentRunControlTools
     /// Spawn a tracked background agent run using an existing agent or sub-agent type template.
     /// </summary>
     [AIFunction("spawn_agent",
-        Description = "Spawn a tracked background agent run. Use agentId to run an existing agent, or subAgentType to launch a template-defined sub-agent.")]
+        "Spawn a tracked background agent run. Use agentId to run an existing agent, or subAgentType to launch a template-defined sub-agent.")]
     public async Task<string> SpawnAgentAsync(
         [Description("Initial user message for the spawned run")] string message,
         [Description("Optional existing agent ID")] Guid? agentId = null,
@@ -44,12 +48,12 @@ public class AgentRunControlTools
     /// Get the current state of a tracked agent run.
     /// </summary>
     [AIFunction("get_agent_run",
-        Description = "Get the current state of a tracked agent run, including whether it is waiting for approval or extra input.")]
+        "Get the current state of a tracked agent run, including whether it is waiting for approval or extra input.")]
     public async Task<string> GetAgentRunAsync(
         [Description("Tracked agent run ID")] Guid runId,
         CancellationToken cancellationToken = default)
     {
-        var result = await _controlService.GetStateAsync(runId, cancellationToken);
+        var result = await _controlService.GetStateAsync(runId, AgentRunAccessScope.Caller, cancellationToken);
         return result.Succeeded && result.Data != null
             ? result.Data.ToJsonString(camelCase: true)
             : result.Message ?? "Run not found";
@@ -59,7 +63,7 @@ public class AgentRunControlTools
     /// Wait until a tracked agent run reaches a stable observable state.
     /// </summary>
     [AIFunction("wait_agent",
-        Description = "Wait until a tracked agent run completes, fails, is cancelled, or pauses for approval/input.")]
+        "Wait until a tracked agent run completes, fails, is cancelled, or pauses for approval/input.")]
     public async Task<string> WaitAgentAsync(
         [Description("Tracked agent run ID")] Guid runId,
         [Description("Maximum seconds to wait before returning the latest state")] int timeoutSeconds = 30,
@@ -70,7 +74,7 @@ public class AgentRunControlTools
         {
             TimeoutSeconds = timeoutSeconds,
             PollIntervalMs = pollIntervalMs
-        }, cancellationToken);
+        }, AgentRunAccessScope.Caller, cancellationToken);
 
         return result.Succeeded && result.Data != null
             ? result.Data.ToJsonString(camelCase: true)
@@ -81,7 +85,7 @@ public class AgentRunControlTools
     /// Send additional input to a paused or failed agent run and resume it.
     /// </summary>
     [AIFunction("send_agent_input",
-        Description = "Send extra input to a paused agent run and attempt to resume it. Use workflowInput for structured workflow interrupts.")]
+        "Send extra input to a paused agent run and attempt to resume it. Use workflowInput for structured workflow interrupts.")]
     public async Task<string> SendAgentInputAsync(
         [Description("Tracked agent run ID")] Guid runId,
         [Description("Free-form message for the resumed run")] string? message = null,
@@ -94,7 +98,7 @@ public class AgentRunControlTools
             Message = message,
             WorkflowStepId = workflowStepId,
             WorkflowInput = workflowInput
-        }, cancellationToken);
+        }, AgentRunAccessScope.Caller, cancellationToken);
 
         return result.Succeeded && result.Data != null
             ? result.Data.ToJsonString(camelCase: true)
@@ -105,12 +109,12 @@ public class AgentRunControlTools
     /// Cancel a tracked agent run.
     /// </summary>
     [AIFunction("kill_agent",
-        Description = "Cancel a tracked agent run that is still active or waiting for approval/input.")]
+        "Cancel a tracked agent run that is still active or waiting for approval/input.")]
     public async Task<string> KillAgentAsync(
         [Description("Tracked agent run ID")] Guid runId,
         CancellationToken cancellationToken = default)
     {
-        var result = await _controlService.KillAsync(runId, cancellationToken);
+        var result = await _controlService.KillAsync(runId, AgentRunAccessScope.Caller, cancellationToken);
         return result.Succeeded ? $"Run {runId} cancelled." : result.Message ?? "Failed to cancel run";
     }
 
@@ -118,7 +122,7 @@ public class AgentRunControlTools
     /// List recent agent runs, optionally filtered by status.
     /// </summary>
     [AIFunction("list_agent_runs",
-        Description = "List recent agent runs ordered by creation time (newest first). Optionally filter by status (Pending, Running, Completed, Failed, Cancelled, AwaitingApproval, RequiresClarification).")]
+        "List recent agent runs ordered by creation time (newest first). Optionally filter by status (Pending, Running, Completed, Failed, Cancelled, AwaitingApproval, RequiresClarification).")]
     public async Task<string> ListAgentRunsAsync(
         [Description("Maximum number of results to return (1-100)")] int maxResults = 20,
         [Description("Optional status filter (e.g. Running, Completed, Failed)")] string? status = null,
@@ -130,7 +134,7 @@ public class AgentRunControlTools
             statusFilter = parsed;
         }
 
-        var result = await _controlService.ListRunsAsync(maxResults, statusFilter, cancellationToken);
+        var result = await _controlService.ListRunsAsync(maxResults, statusFilter, AgentRunAccessScope.Caller, cancellationToken);
         return result.Succeeded && result.Data != null
             ? result.Data.ToJsonString(camelCase: true)
             : result.Message ?? "Failed to list agent runs";
@@ -140,7 +144,7 @@ public class AgentRunControlTools
     /// List available sub-agent type templates.
     /// </summary>
     [AIFunction("list_sub_agent_types",
-        Description = "List registered sub-agent type templates, including tool groups, turn limits, and capability tags.")]
+        "List registered sub-agent type templates, including tool groups, turn limits, and capability tags.")]
     public async Task<string> ListSubAgentTypesAsync(CancellationToken cancellationToken = default)
     {
         var result = await _controlService.ListSubAgentTypesAsync(cancellationToken);

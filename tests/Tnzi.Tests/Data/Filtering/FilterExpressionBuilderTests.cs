@@ -460,20 +460,61 @@ public class FilterExpressionBuilderTests
         // Arrange
         var rule = new FilterRule("InvalidProperty", FilterOperator.Equal, "Test");
 
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() =>
+        // Act & Assert：400 的 FilterFieldException，消息不带实体类型名（这条异常会原样到达请求方）
+        var ex = Assert.Throws<FilterFieldException>(() =>
             FilterExpressionBuilder.Build<TestEntity>(rule));
+        Assert.Equal(400, ex.HttpStatusCode);
+        Assert.DoesNotContain(nameof(TestEntity), ex.Message);
     }
 
     [Fact]
-    public void Build_ContainsOnNonString_ShouldThrow()
+    public void Build_ContainsOnNonString_IsA400NamingOnlyTheField()
     {
-        // Arrange
         var rule = new FilterRule("Age", FilterOperator.Contains, "Test");
 
-        // Act & Assert
-        Assert.Throws<NotSupportedException>(() =>
-            FilterExpressionBuilder.Build<TestEntity>(rule));
+        var ex = Assert.Throws<FilterValueException>(() => FilterExpressionBuilder.Build<TestEntity>(rule));
+
+        Assert.Equal(400, ex.HttpStatusCode);
+        Assert.Equal("Age", ex.Field);
+        Assert.Equal(FilterOperator.Contains, ex.Operator);
+        Assert.Contains("Age", ex.Message);
+        Assert.DoesNotContain(nameof(Int32), ex.Message);
+        Assert.IsType<NotSupportedException>(ex.Cause);
+        Assert.Equal(ex.Cause.Message, ex.ContextData!["cause"]);
+    }
+
+    [Theory]
+    [InlineData("CategoryId", FilterOperator.Equal, "not-a-guid")]
+    [InlineData("CreatedAt", FilterOperator.GreaterThan, "yesterday-ish")]
+    [InlineData("Status", FilterOperator.Equal, "NoSuchStatus")]
+    [InlineData("Age", FilterOperator.Equal, "forty")]
+    [InlineData("Age", FilterOperator.Equal, null)]
+    [InlineData("Age", FilterOperator.In, 5)]
+    [InlineData("Name", (FilterOperator)999, "x")]
+    public void Build_RequestShapedValueOrOperatorErrors_AreA400NotA500(string field, FilterOperator op, object? value)
+    {
+        // 字段已经答 400 了，值与操作符此前还是 500：Filter.Rules[0].Field=Id&Operator=Equal&Value=not-a-guid
+        // 在任何列表端点上都能触发，消息里还带 CLR 类型名
+        var ex = Assert.Throws<FilterValueException>(() =>
+            FilterExpressionBuilder.Build<TestEntity>(new FilterRule(field, op, value)));
+
+        Assert.Equal(400, ex.HttpStatusCode);
+        Assert.Equal(field, ex.Field);
+        Assert.Contains(field, ex.Message);
+        Assert.DoesNotContain(nameof(TestEntity), ex.Message);
+        Assert.DoesNotContain("Guid", ex.Message);
+        Assert.DoesNotContain("Int32", ex.Message);
+        Assert.DoesNotContain("DateTime", ex.Message);
+        Assert.NotNull(ex.ValidationErrors);
+        Assert.Contains(field, ex.ValidationErrors.Keys);
+    }
+
+    [Fact]
+    public void Build_UnknownFieldStillWinsOverValueErrors()
+    {
+        // 字段不存在时答的仍是「不可过滤」，不是「值无效」—— 两句都不带类型名
+        Assert.Throws<FilterFieldException>(() =>
+            FilterExpressionBuilder.Build<TestEntity>(new FilterRule("Nope", FilterOperator.Equal, "not-a-guid")));
     }
 
     [Fact]

@@ -56,6 +56,22 @@ public class AgentExecutor : IAgentExecutor
         => WithAdditionalTools(additionalTools);
 
     /// <summary>
+    /// 创建一个去掉指定名称工具的新 AgentExecutor（不修改原实例，名称不区分大小写）。
+    /// </summary>
+    public AgentExecutor WithoutTools(IEnumerable<string> toolNames)
+    {
+        var excluded = toolNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (excluded.Count == 0 || _options.Tools is not { Count: > 0 })
+            return this;
+
+        var kept = _options.Tools.Where(t => t.Name == null || !excluded.Contains(t.Name)).ToList();
+        return kept.Count == _options.Tools.Count ? this : WithFilteredTools(kept);
+    }
+
+    IAgentExecutor IAgentExecutor.WithoutTools(IEnumerable<string> toolNames)
+        => WithoutTools(toolNames);
+
+    /// <summary>
     /// 创建一个使用指定工具列表的新 AgentExecutor（替换原有工具，不修改原实例）。
     /// 选项经 <see cref="AgentExecutorOptions.Clone"/> 全量复制。
     /// </summary>
@@ -631,7 +647,8 @@ public class AgentExecutor : IAgentExecutor
     {
         return ToolErrorRecoveryMiddleware.GetRecoveredError(context)
             ?? ToolGuardrailMiddleware.GetDenialReason(context)
-            ?? RequiresSkillToolMiddleware.GetShortCircuitReason(context);
+            ?? RequiresSkillToolMiddleware.GetShortCircuitReason(context)
+            ?? context.FailureReason;
     }
 
     /// <summary>

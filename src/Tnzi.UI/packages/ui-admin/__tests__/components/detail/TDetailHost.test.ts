@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref, h } from 'vue'
+import { ref, h, nextTick } from 'vue'
+import { useFormHostRegistration } from '@tnzi/ui/headless'
 import TDetailHost from '../../../src/components/detail/TDetailHost.vue'
 
 const stubs = {
@@ -37,6 +38,79 @@ function makeState(mode: 'modal' | 'drawer' | 'page', visible = true) {
 }
 
 describe('TDetailHost', () => {
+  /**
+   * The host owns the Confirm button in every mode, so it provides the form
+   * host: a slotted `TSchemaForm` registers and the button validates before
+   * `state.submit` runs. The `#footer` slot's `submit` is the same gated call.
+   */
+  describe('form host', () => {
+    function slottedForm(valid: boolean) {
+      const validate = vi.fn(async () => valid)
+      const component = {
+        setup() {
+          useFormHostRegistration({ validate })
+          return () => h('div', { class: 'slotted-form' })
+        },
+      }
+      return { component, validate }
+    }
+
+    for (const mode of ['modal', 'drawer'] as const) {
+      it(`${mode} mode: Confirm does not submit while a slotted form is invalid`, async () => {
+        const state = makeState(mode)
+        state.submit = vi.fn(async () => {})
+        const form = slottedForm(false)
+        const wrapper = mount(TDetailHost, {
+          props: { state: state as any, title: 'Edit', footer: true },
+          slots: { default: () => h(form.component) },
+          global: { stubs },
+        })
+        const confirm = wrapper.findAll('button').at(-1)!
+        await confirm.trigger('click')
+        await nextTick()
+        expect(form.validate).toHaveBeenCalled()
+        expect(state.submit).not.toHaveBeenCalled()
+      })
+    }
+
+    it('modal mode: Confirm submits once the slotted form validates', async () => {
+      const state = makeState('modal')
+      state.submit = vi.fn(async () => {})
+      const form = slottedForm(true)
+      const wrapper = mount(TDetailHost, {
+        props: { state: state as any, title: 'Edit', footer: true },
+        slots: { default: () => h(form.component) },
+        global: { stubs },
+      })
+      await wrapper.findAll('button').at(-1)!.trigger('click')
+      await nextTick()
+      expect(state.submit).toHaveBeenCalled()
+    })
+
+    // Page mode renders a footer only through the slot, so its Confirm is
+    // whatever the page puts there: the slot's `submit` has to be the gated one.
+    it('page mode: the #footer slot receives the gated submit', async () => {
+      const state = makeState('page')
+      state.submit = vi.fn(async () => {})
+      const form = slottedForm(false)
+      let slotSubmit: (() => Promise<void>) | undefined
+      mount(TDetailHost, {
+        props: { state: state as any, title: 'Edit', footer: true },
+        slots: {
+          default: () => h(form.component),
+          footer: (p: { submit: () => Promise<void> }) => {
+            slotSubmit = p.submit
+            return h('span')
+          },
+        },
+        global: { stubs },
+      })
+      await slotSubmit!()
+      expect(form.validate).toHaveBeenCalledTimes(1)
+      expect(state.submit).not.toHaveBeenCalled()
+    })
+  })
+
   it('renders NModal in modal mode', () => {
     const w = mount(TDetailHost, { props: { state: makeState('modal') as any, title: 'Edit' }, slots: { default: '<div class="body" />' }, global: { stubs } })
     expect(w.find('.n-modal-stub').exists()).toBe(true)

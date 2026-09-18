@@ -31,11 +31,17 @@ public class TemplateModule : TnziApplicationModule
         // provider up on startup (no-op when Authorization is not loaded).
         context.Services.AddTransient<IPermissionDefinitionProvider, TemplatePermissions>();
 
-        // 注册 MemoryCache（如果尚未注册），缓存大小限制从配置读取
-        var templateOptions = context.Configuration.GetSection("Template").Get<TemplateOptions>();
-        context.Services.AddMemoryCache(cacheOptions =>
+        // 模板编译缓存自持：Template:CacheSizeLimit 只作用于这一个实例。
+        // ★ 此前这里是 AddMemoryCache(o => o.SizeLimit = CacheSizeLimit)，而 AddMemoryCache(setup) 只是
+        // services.Configure(setup)：它与核心 CachingModule 的委托按注册顺序作用于同一个 MemoryCacheOptions，
+        // 本模块后跑 ⇒ 全进程共享的 IMemoryCache 被封顶 1000，Caching:MemorySizeLimit「为空即不限」被静默顶掉；
+        // 更糟的是 MemoryCache 在设了 SizeLimit 后拒绝任何不带 Size 的写入（InvalidOperationException），
+        // 别的模块往共享缓存里写时并不都带 Size —— 行级数据授权的过滤器缓存写入当场 500。
+        // 业务模块不得改全局 MemoryCacheOptions；要限自己的条目数，就自己开一个实例。
+        context.Services.AddKeyedSingleton<IMemoryCache>(RazorTemplateEngine.CacheServiceKey, static (sp, _) =>
         {
-            cacheOptions.SizeLimit = templateOptions?.CacheSizeLimit ?? 1000;
+            var sizeLimit = sp.GetRequiredService<IOptions<TemplateOptions>>().Value.CacheSizeLimit;
+            return new MemoryCache(new MemoryCacheOptions { SizeLimit = sizeLimit > 0 ? sizeLimit : null });
         });
 
         // 注册模板引擎

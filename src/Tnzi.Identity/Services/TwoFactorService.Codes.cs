@@ -171,37 +171,6 @@ public partial class TwoFactorService
     }
 
     /// <inheritdoc />
-    public async Task<Result> VerifyCodeByAddressAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose)
-    {
-        if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(code))
-        {
-            return Fail("Address and code are required", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 查找未使用且未过期的验证码。★ Purpose 进谓词：为别的流程发出的码在这里查不到，
-        // 因此与「码不对」同一种结果 —— 用途不匹配不单独报错，否则等于告诉试探者
-        // 「这枚码是真的，只是用错了地方」。
-        var twoFactorCode = await _repository
-            .Where(tfc => tfc.Address == address
-                && tfc.Code == code
-                && tfc.Type == type
-                && tfc.Purpose == purpose
-                && !tfc.IsUsed
-                && tfc.ExpiresAt > DateTime.UtcNow)
-            .OrderByDescending(tfc => tfc.CreationTime)
-            .FirstOrDefaultAsync();
-
-        if (twoFactorCode == null)
-        {
-            return Fail("Invalid or expired verification code", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
-        // 只验证，不标记为已使用
-        LogInformation("Verification code validated for address {Address}, type {Type}, purpose {Purpose}", address, type, purpose);
-        return Ok();
-    }
-
-    /// <inheritdoc />
     public async Task<Result<Guid?>> VerifyCodeByAddressAndMarkUsedAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose)
     {
         if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(code))
@@ -220,8 +189,9 @@ public partial class TwoFactorService
             return Fail<Guid?>(lockedOut.Message!, lockedOut.Code ?? 429, lockedOut.ErrorCode);
         }
 
-        // 查找未使用且未过期的验证码。★ Purpose 进谓词，理由同 VerifyCodeByAddressAsync：
-        // 用途不符与码不对返回同一种结果，不给出「码是真的」这条信息。
+        // 查找未使用且未过期的验证码。★ Purpose 进谓词：为别的流程发出的码在这里查不到，
+        // 因此与「码不对」同一种结果 —— 用途不匹配不单独报错，否则等于告诉试探者
+        // 「这枚码是真的，只是用错了地方」。
         var twoFactorCode = await _repository
             .Where(tfc => tfc.Address == address
                 && tfc.Code == code
@@ -249,6 +219,30 @@ public partial class TwoFactorService
 
         // 返回关联的 UserId（可能为空）
         return Ok<Guid?>(twoFactorCode.UserId);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CleanExpiredCodesAsync(CancellationToken cancellationToken = default)
+    {
+        var retentionHours = _otpOptions.RetentionHours;
+        if (retentionHours <= 0)
+        {
+            return 0;
+        }
+
+        // 按过期时刻算保留期（不是创建时刻）：ExpiresAt 上有索引，且「过期多久」才是这一行还有没有排查价值的判据。
+        // 单条 DELETE … WHERE，不把行读进内存：这张表在发码频繁的部署里是全模块增长最快的一张。
+        var cutoff = DateTime.UtcNow.AddHours(-retentionHours);
+        var removed = await _repository
+            .Where(c => c.ExpiresAt < cutoff)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (removed > 0)
+        {
+            LogInformation("Removed {Count} verification codes that expired before {Cutoff:o}.", removed, cutoff);
+        }
+
+        return removed;
     }
 
     #endregion

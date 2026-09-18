@@ -450,10 +450,13 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         return Ok(BuildDto(promotion, EmptyUsageCounts, userCoupon));
     }
 
-    public async Task<Result<string>> CreateRedemptionCodeAsync(Guid promotionId, int quantity, CancellationToken cancellationToken = default)
+    public async Task<Result<string>> CreateRedemptionCodeAsync(Guid promotionId, int quantity, int? perUserLimit = null, CancellationToken cancellationToken = default)
     {
         if (quantity <= 0)
             return Fail<string>(ErrorCodes.RedemptionCodeLimitReached, 400);
+
+        if (perUserLimit < 0)
+            return Fail<string>("Per-user limit must be 0 (unlimited) or a positive number.", 400);
 
         var promotion = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == promotionId, cancellationToken);
         if (promotion == null)
@@ -461,18 +464,21 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
 
         var code = RedemptionCode.GenerateCode();
 
+        var type = quantity > 1 ? RedemptionCodeType.General : RedemptionCodeType.Unique;
         var redemptionCode = new RedemptionCode
         {
             Code = code,
             PromotionId = promotionId,
-            Type = quantity > 1 ? RedemptionCodeType.General : RedemptionCodeType.Unique,
+            Type = type,
             Status = RedemptionCodeStatus.Active,
             TotalQuantity = quantity,
             RedeemedQuantity = 0,
             ValidFrom = DateTime.UtcNow,
             ValidUntil = promotion.EndTime,
-            // 唯一码天然一人一次；通用码不限，由促销自身的 per-user 上限收口
-            PerUserLimit = quantity > 1 ? null : 1
+            // ★ 通用码默认每人一张，「不限」要显式传 0。此前这里写 null 并注明「由促销自身的 per-user 上限收口」，
+            //   但那条上限只在核销路径读，RedeemAsync 的每用户判定只看这一列 —— 于是一个人能把整批名额兑光，
+            //   而 RedeemAsync 里那段「CAS 之后计数 + 补偿」的守卫在生产上没有任何可达输入。
+            PerUserLimit = ResolvePerUserLimit(type, perUserLimit)
         };
 
         await _redemptionCodeRepository.InsertAsync(redemptionCode, cancellationToken);
@@ -484,10 +490,24 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
 
     public async Task<Result<bool>> CanUseFirstSubscriptionDiscountAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var hasUsedFirstSubscriptionCoupon = await _couponUsageRepository.AsNoTracking()
-            .AnyAsync(c => c.UserId == userId && c.Coupon!.FirstSubscriptionOnly, cancellationToken);
+        // ★ 与核销守卫逐字同一个判定（PromotionService.IsFirstSubscriptionEligibleAsync）。
+        // 此前这里另查「用没用过标了 FirstSubscriptionOnly 的券」：老订户被答成「可用」而核销拒绝，
+        // 用过一张但订阅从没建成的人被答成「不可用」而核销放行 —— 预检不能单独多一条或少一条规则。
+        return Ok(await _promotionService.IsFirstSubscriptionEligibleAsync(userId, cancellationToken));
+    }
 
-        return Ok(!hasUsedFirstSubscriptionCoupon);
+    /// <summary>唯一码恒 1；通用码 null → 1、0 → 不限（存 null）、正数原样。</summary>
+    private static int? ResolvePerUserLimit(RedemptionCodeType type, int? requested)
+    {
+        if (type == RedemptionCodeType.Unique)
+            return 1;
+
+        return requested switch
+        {
+            null => 1,
+            0 => null,
+            var limit => limit
+        };
     }
 
     private static bool IsPromotionUsable(Promotion promotion, DateTime now)

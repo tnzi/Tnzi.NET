@@ -100,10 +100,10 @@ public static class ReturnUrlValidator
 
     /// <summary>
     /// 合并两处来源，得到实际生效的白名单：<c>Identity:OAuth:AllowedReturnOrigins</c>
-    /// 优先，未配置时回退到 <c>App:FrontendUrl</c>。
+    /// 优先，未配置时回退到前端 origin（<c>System:FrontendUrl</c>，经 <c>FrontendUrlResolver</c>）。
     /// </summary>
     /// <remarks>
-    /// 回退到 <c>App:FrontendUrl</c> 是为了让绝大多数部署<b>不必额外配一项</b>就得到正确行为：
+    /// 回退到前端 origin 是为了让绝大多数部署<b>不必额外配一项</b>就得到正确行为：
     /// 那个键本来就指着前端所在的源，而前端正是 OAuth 唯一要回到的地方。
     /// </remarks>
     public static IReadOnlyCollection<string> ResolveAllowedOrigins(

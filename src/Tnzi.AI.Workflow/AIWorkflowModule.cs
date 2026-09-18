@@ -55,6 +55,9 @@ public class AIWorkflowModule : TnziApplicationModule
         //   "根本没接上"在日志里长得一模一样，而这正是此前的状况。
         services.AddScoped<WorkflowWatchdogService>();
         services.AddHostedService<WorkflowWatchdogHostedService>();
+        // 执行期间的心跳（所有模式、与检查点无关）：没有它 RunningTimeout 量的是"跑了多久"而不是"卡住多久"。
+        // Singleton：每次心跳在自己的作用域里工作，与请求作用域的 DbContext 并发也安全。TryAdd 允许消费方替换。
+        services.TryAddSingleton<IWorkflowExecutionHeartbeat, DatabaseWorkflowExecutionHeartbeat>();
 
         // 注册工作流节点
         services.AddScoped<IWorkflowNode, AgentNode>();

@@ -23,10 +23,13 @@ const props = withDefaults(defineProps<{
   inputText?: string;
   suggestions?: SuggestionItem[];
   placeholder?: string;
+  /** Paperclip + drag/drop + paste in the prompt input. Default true. */
+  enableAttachments?: boolean;
 }>(), {
   isStreaming: false,
   inputText: '',
   suggestions: () => [],
+  enableAttachments: true,
 });
 
 const emit = defineEmits<{
@@ -111,6 +114,7 @@ function handleSend(content: string, files: File[]): void {
           :model-value="inputText"
           :placeholder="placeholder"
           :loading="isStreaming"
+          :enable-attachments="enableAttachments"
           @update:model-value="emit('update:inputText', $event)"
           @submit="handleSend"
           @stop="emit('stop')"

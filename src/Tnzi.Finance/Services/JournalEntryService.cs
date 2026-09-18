@@ -3,7 +3,7 @@
 /// <summary>
 /// 会计凭证服务（草稿工作流 + 过账 + 冲销）
 /// </summary>
-public class JournalEntryService : ApplicationService, IJournalEntryService
+public class JournalEntryService : ApplicationService, IJournalEntryService, IDocumentReversalChannel
 {
     private readonly IRepository<JournalEntry, Guid> _entryRepository;
     private readonly IRepository<JournalLine, Guid> _lineRepository;
@@ -11,6 +11,7 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
     private readonly LedgerPostingEngine _engine;
     private readonly PostingGuardRunner _guards;
     private readonly FinanceOptions _options;
+    private readonly HashSet<string> _documentProjectedSourceTypes;
 
     public JournalEntryService(
         IServiceProvider serviceProvider,
@@ -19,7 +20,8 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         IRepository<Account, Guid> accountRepository,
         LedgerPostingEngine engine,
         PostingGuardRunner guards,
-        IOptionsSnapshot<FinanceOptions> options)
+        IOptionsSnapshot<FinanceOptions> options,
+        IEnumerable<IDocumentProjectedSourceTypeProvider>? sourceTypeProviders = null)
         : base(serviceProvider)
     {
         _entryRepository = Check.NotNull(entryRepository);
@@ -28,6 +30,7 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         _engine = Check.NotNull(engine);
         _guards = Check.NotNull(guards);
         _options = Check.NotNull(options).Value;
+        _documentProjectedSourceTypes = BuildDocumentProjectedSourceTypes(sourceTypeProviders);
     }
 
     public async Task<Result<JournalEntryDto>> GetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -215,7 +218,7 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
     }
 
     /// <summary>
-    /// 有单据级作废端点的来源令牌 —— 它们的凭证只能经单据 void 撤销。
+    /// 核心自带的、有单据级作废端点的来源令牌 —— 它们的凭证只能经单据 void 撤销。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -226,10 +229,13 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
     /// 把它们一起拦下会堵死一条既定流程。
     /// </para>
     /// <para>
-    /// 新增带 <c>VoidAsync</c> 的单据类型时要同步加进来，否则它的凭证又可以从总账绕过去。
+    /// 核心新增带 <c>VoidAsync</c> 的单据类型时要同步加进来，否则它的凭证又可以从总账绕过去。
+    /// 核心之外的单据（子模块、消费应用）经 <see cref="IDocumentProjectedSourceTypeProvider"/> 贡献，
+    /// 并把自己的作废改走 <see cref="ILedgerPostingService.ReverseOnBehalfOfDocumentAsync"/> ——
+    /// 只补清单不改入口会把自己的作废一并堵死（Payroll 曾两头都没做：凭证可从总账冲销，2026-09-12 修）。
     /// </para>
     /// </remarks>
-    private static readonly HashSet<string> DocumentProjectedSourceTypes = new(StringComparer.Ordinal)
+    internal static readonly IReadOnlySet<string> CoreDocumentProjectedSourceTypes = new HashSet<string>(StringComparer.Ordinal)
     {
         FinanceSourceTypes.Invoice,
         FinanceSourceTypes.Bill,
@@ -242,7 +248,44 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         FinanceSourceTypes.Deposit,
     };
 
-    public async Task<Result<JournalEntryDto>> ReverseAsync(Guid id, ReverseJournalEntryDto input, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 本实例生效的清单：核心那几种 ∪ 所有 <see cref="IDocumentProjectedSourceTypeProvider"/> 的贡献。
+    /// 一个 provider 都没注册时就是核心清单本身 —— 缺省只增不减。
+    /// </summary>
+    internal IReadOnlySet<string> DocumentProjectedSourceTypes => _documentProjectedSourceTypes;
+
+    private static HashSet<string> BuildDocumentProjectedSourceTypes(IEnumerable<IDocumentProjectedSourceTypeProvider>? providers)
+    {
+        var set = new HashSet<string>(CoreDocumentProjectedSourceTypes, StringComparer.Ordinal);
+        if (providers == null)
+            return set;
+
+        foreach (var provider in providers)
+        {
+            foreach (var sourceType in provider.SourceTypes)
+            {
+                if (!string.IsNullOrWhiteSpace(sourceType))
+                    set.Add(sourceType.Trim());
+            }
+        }
+
+        return set;
+    }
+
+    public Task<Result<JournalEntryDto>> ReverseAsync(Guid id, ReverseJournalEntryDto input, CancellationToken cancellationToken = default)
+        => ReverseCoreAsync(id, input, onBehalfOfSourceType: null, cancellationToken);
+
+    /// <inheritdoc />
+    Task<Result<JournalEntryDto>> IDocumentReversalChannel.ReverseOnBehalfOfDocumentAsync(Guid id, string sourceType, ReverseJournalEntryDto input, CancellationToken cancellationToken)
+        => ReverseCoreAsync(id, input, Check.NotNullOrWhiteSpace(sourceType), cancellationToken);
+
+    /// <summary>
+    /// 冲销的唯一实现。<paramref name="onBehalfOfSourceType"/> 为 null 是总账端点（与
+    /// <see cref="ILedgerPostingService.ReverseAsync"/> 同一道门）；非 null 是单据代表自己发起 ——
+    /// 只在它与原凭证的 <c>SourceType</c> 相等时跳过「单据投影不得从总账冲销」那道门。
+    /// 这个参数刻意不出现在任何 DTO 或公开接口上，HTTP 调用方填不到它。
+    /// </summary>
+    private async Task<Result<JournalEntryDto>> ReverseCoreAsync(Guid id, ReverseJournalEntryDto input, string? onBehalfOfSourceType, CancellationToken cancellationToken)
     {
         Check.NotNull(input);
 
@@ -267,8 +310,20 @@ public class JournalEntryService : ApplicationService, IJournalEntryService
         // 所以「冲销一张发票冲销凭证」同样被拦下（那正是绕过单据状态门的第二条路）。
         // ★ **刻意不做成「一律禁止冲销冲销凭证」**：消费应用经 ILedgerPostingService 写的
         // 自定义单据带自己的 SourceType（不在本清单里），对它们而言冲销冲销是合法的撤销作废。
-        if (!string.IsNullOrEmpty(original.SourceType)
-            && DocumentProjectedSourceTypes.Contains(original.SourceType))
+        //
+        // ★ 单据代表自己发起（onBehalfOfSourceType 非 null）时，只对**同一来源类型**放行：
+        // 一个 PayRun 的作废够不到发票的凭证。不相等一律 409，不退回总账那条判定。
+        if (onBehalfOfSourceType != null)
+        {
+            if (!string.Equals(original.SourceType, onBehalfOfSourceType, StringComparison.Ordinal))
+            {
+                return Fail<JournalEntryDto>(
+                    $"This entry was posted from a {original.SourceType ?? "manual journal"} and cannot be reversed on behalf of a {onBehalfOfSourceType}.",
+                    409);
+            }
+        }
+        else if (!string.IsNullOrEmpty(original.SourceType)
+            && _documentProjectedSourceTypes.Contains(original.SourceType))
         {
             return Fail<JournalEntryDto>(
                 $"This entry was posted from a {original.SourceType}. Void that document instead so its status and the ledger stay in sync.",

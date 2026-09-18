@@ -5,7 +5,7 @@ namespace Tnzi.Notification.Services;
 /// </summary>
 public class ChannelQueueService : BackgroundService, INotificationQueueService
 {
-    private readonly Channel<Func<IServiceProvider, CancellationToken, Task>> _queue;
+    private readonly Channel<NotificationWorkItem> _queue;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ChannelQueueService> _logger;
 
@@ -32,16 +32,16 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
             SingleReader = true,
             SingleWriter = false
         };
-        _queue = Channel.CreateBounded<Func<IServiceProvider, CancellationToken, Task>>(channelOptions);
+        _queue = Channel.CreateBounded<NotificationWorkItem>(channelOptions);
     }
 
-    public async Task EnqueueAsync(Func<IServiceProvider, CancellationToken, Task> workItem)
+    public async Task EnqueueAsync(NotificationWorkItem workItem)
     {
         Check.NotNull(workItem);
         await _queue.Writer.WriteAsync(workItem);
     }
 
-    public Task EnqueueWithDelayAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+    public Task EnqueueWithDelayAsync(NotificationWorkItem workItem, TimeSpan delay)
     {
         Check.NotNull(workItem);
         if (delay <= TimeSpan.Zero)
@@ -57,7 +57,7 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
     }
 
     /// <summary>等待到期后再入队。等待不占用读循环，随服务停止一并取消。</summary>
-    private async Task WaitThenEnqueueAsync(Func<IServiceProvider, CancellationToken, Task> workItem, TimeSpan delay)
+    private async Task WaitThenEnqueueAsync(NotificationWorkItem workItem, TimeSpan delay)
     {
         try
         {
@@ -92,8 +92,10 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
 
                 try
                 {
+                    // ★ 新作用域里没有租户；工作项自己带着，RunAsync 会切回去。
+                    // 直接调委托就是租户丢失的那一步 —— 多租户下每条排队的消息都会 404 然后被丢掉。
                     using var scope = _serviceProvider.CreateScope();
-                    await workItem(scope.ServiceProvider, stoppingToken);
+                    await workItem.RunAsync(scope.ServiceProvider, stoppingToken);
                 }
                 catch (Exception ex)
                 {

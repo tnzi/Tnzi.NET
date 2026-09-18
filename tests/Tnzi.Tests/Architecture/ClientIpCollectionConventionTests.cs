@@ -36,15 +36,22 @@ public class ClientIpCollectionConventionTests
     /// 从<b>调用方可控</b>的代理头取地址的写法。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// ★★★ 这一条<b>没有允许列表</b>，<c>GetClientIp()</c> 自己也不例外。
     /// 转发头是调用方随便写的：每次请求换一个值，限流分区键就每次落进新桶，
     /// 于是「限流开着」而匿名端点一次都拦不住。哪一跳有资格改写地址，
     /// 是一次<b>部署声明</b>（<c>AspNetCore:TrustedProxies</c>）而不是请求自称的事 ——
     /// 声明交给 <c>UseForwardedHeaders</c> 兑现，它按受信代理从右往左消费并写进连接地址。
     /// 代码里任何一处自己解析这两个头，都在那道声明外面重开一个后门。
+    /// </para>
+    /// <para>
+    /// 2026-09-12 起同时覆盖 <c>X-Forwarded-Prefix</c> / <c>-Host</c> / <c>-Proto</c> 与
+    /// <c>TryGetValue(...)</c> 写法：路径前缀曾由一段自建中间件经 <c>TryGetValue</c> 无条件采信，
+    /// 任何直连调用方都能借它覆写部署级的 <c>PathBase</c>。它与地址是同一批头、同一道声明。
+    /// </para>
     /// </remarks>
     private static readonly Regex ForwardedHeaderRead = new(
-        """Headers\s*\[\s*"X-Forwarded-For"|Headers\s*\[\s*"X-Real-IP" """.TrimEnd(),
+        """Headers\s*(?:\[|\.TryGetValue\s*\()\s*"X-(?:Forwarded-(?:For|Prefix|Host|Proto)|Real-IP)" """.TrimEnd(),
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         TimeSpan.FromSeconds(1));
 
@@ -121,6 +128,8 @@ public class ClientIpCollectionConventionTests
         Assert.Matches(ConnectionAddressRead, """var ip = httpContext?.Connection?.RemoteIpAddress?.ToString();""");
         Assert.Matches(ForwardedHeaderRead, """var fwd = request.Headers["X-Forwarded-For"].FirstOrDefault();""");
         Assert.Matches(ForwardedHeaderRead, """var real = request.Headers["X-Real-IP"].FirstOrDefault();""");
+        Assert.Matches(ForwardedHeaderRead, """if (context.Request.Headers.TryGetValue("X-Forwarded-Prefix", out var prefix))""");
+        Assert.Matches(ForwardedHeaderRead, """var host = request.Headers["X-Forwarded-Host"].ToString();""");
 
         Assert.DoesNotMatch(ConnectionAddressRead, """Ip = context.Request.GetClientIp(),""");
         Assert.DoesNotMatch(ForwardedHeaderRead, """var ua = request.Headers["User-Agent"].ToString();""");

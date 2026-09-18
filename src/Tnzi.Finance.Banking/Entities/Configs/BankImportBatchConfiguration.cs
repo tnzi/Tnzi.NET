@@ -9,7 +9,7 @@ public class BankImportBatchConfiguration : EntityTypeConfigurationBase<BankImpo
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.FileName).HasMaxLength(256);
+        builder.Property(e => e.FileName).HasMaxLength(BankTransactionFieldLimits.ImportFileNameMaxLength);
         builder.Property(e => e.StatementEndBalance).HasMoneyPrecision();
 
         builder.HasIndex(e => new { e.AccountId, e.CreationTime });

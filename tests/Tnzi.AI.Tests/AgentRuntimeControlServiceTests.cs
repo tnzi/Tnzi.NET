@@ -232,7 +232,7 @@ public class AgentRuntimeControlServiceTests
     public async Task ListSubAgentTypesAsync_MapsExtendedMetadata()
     {
         var registry = new Mock<ISubAgentRegistry>();
-        registry.Setup(x => x.GetAll()).Returns([
+        registry.Setup(x => x.GetAllForTenant(It.IsAny<string>())).Returns([
             new SubAgentTypeDefinition(
                 Name: "reviewer",
                 Description: "Review code",
@@ -262,7 +262,7 @@ public class AgentRuntimeControlServiceTests
     {
         var runId = Guid.NewGuid();
         var runStore = new Mock<IRunStore>();
-        runStore.Setup(x => x.ListAsync(null, 20, It.IsAny<CancellationToken>()))
+        runStore.Setup(x => x.ListByOwnerAsync(null, null, 20, It.IsAny<CancellationToken>()))
             .ReturnsAsync(
             [
                 new AgentRun
@@ -290,7 +290,7 @@ public class AgentRuntimeControlServiceTests
     public async Task ListRunsAsync_WithStatusFilter_PassesFilterToStore()
     {
         var runStore = new Mock<IRunStore>();
-        runStore.Setup(x => x.ListAsync(AgentRunStatus.Running, 10, It.IsAny<CancellationToken>()))
+        runStore.Setup(x => x.ListByOwnerAsync(null, AgentRunStatus.Running, 10, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         var service = CreateService(runStore: runStore.Object);
@@ -298,14 +298,14 @@ public class AgentRuntimeControlServiceTests
         var result = await service.ListRunsAsync(maxResults: 10, status: AgentRunStatus.Running);
 
         result.Succeeded.ShouldBeTrue();
-        runStore.Verify(x => x.ListAsync(AgentRunStatus.Running, 10, It.IsAny<CancellationToken>()), Times.Once);
+        runStore.Verify(x => x.ListByOwnerAsync(null, AgentRunStatus.Running, 10, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task ListRunsAsync_ClampsMaxResults()
     {
         var runStore = new Mock<IRunStore>();
-        runStore.Setup(x => x.ListAsync(null, 100, It.IsAny<CancellationToken>()))
+        runStore.Setup(x => x.ListByOwnerAsync(null, null, 100, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
 
         var service = CreateService(runStore: runStore.Object);
@@ -313,7 +313,7 @@ public class AgentRuntimeControlServiceTests
         // maxResults=200 should be clamped to 100
         await service.ListRunsAsync(maxResults: 200);
 
-        runStore.Verify(x => x.ListAsync(null, 100, It.IsAny<CancellationToken>()), Times.Once);
+        runStore.Verify(x => x.ListByOwnerAsync(null, null, 100, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static AgentRuntimeControlService CreateService(

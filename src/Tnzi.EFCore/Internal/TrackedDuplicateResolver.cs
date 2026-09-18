@@ -110,8 +110,19 @@ internal static class TrackedDuplicateResolver
     /// 把脱离跟踪的实例上的值合并到已跟踪的同主键条目上。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 已跟踪的那一条是权威实例（别处可能正持有它的引用），所以合并方向只能是
     /// detached → tracked，绝不反过来 Detach 已跟踪的实例。
+    /// </para>
+    /// <para>
+    /// ★ <b>并发令牌要连 OriginalValue 一起合并</b>。EF 生成 <c>UPDATE ... WHERE token = @p</c> 用的是条目的
+    /// OriginalValue，而 <c>SetValues</c> 只写 CurrentValues。只合并当前值等于拿已跟踪条目<b>上一次加载时</b>的
+    /// 旧戳去比：「同作用域先跟踪过这一行 → 别的作用域中途写过 → 本作用域 <c>AsNoTracking</c> 读到新戳、改字段 →
+    /// <c>UpdateAsync</c>」这条序列里，调用方明明基于数据库最新状态做修改，却照样撞
+    /// <c>DbUpdateConcurrencyException</c>（Finance 的 catch 会把它当真冲突回 409，其它地方 500）。
+    /// 传入实例是刚读出来的，它带的戳至少与已跟踪条目一样新；把令牌的 OriginalValue 同步成传入值，WHERE 才比对
+    /// 调用方真正看见过的那一版。真冲突不受影响：传入实例本身是过期读时，同步过去的仍是过期的戳，照样 0 行、照样抛。
+    /// </para>
     /// </remarks>
     public static void Merge<TEntity>(EntityEntry<TEntity> tracked, TEntity incoming)
         where TEntity : class
@@ -119,9 +130,23 @@ internal static class TrackedDuplicateResolver
         tracked.CurrentValues.SetValues(incoming);
 
         // Added 保持 Added（理由同 EFCoreRepository.UpdateAsync：INSERT 不能被降级成 UPDATE）。
-        if (tracked.State != EntityState.Added)
+        // INSERT 没有 WHERE，并发令牌的 OriginalValue 不参与，也就不用碰。
+        if (tracked.State == EntityState.Added)
         {
-            tracked.State = EntityState.Modified;
+            return;
         }
+
+        foreach (var property in tracked.Metadata.GetProperties())
+        {
+            if (!property.IsConcurrencyToken)
+            {
+                continue;
+            }
+
+            var entry = tracked.Property(property.Name);
+            entry.OriginalValue = entry.CurrentValue;
+        }
+
+        tracked.State = EntityState.Modified;
     }
 }

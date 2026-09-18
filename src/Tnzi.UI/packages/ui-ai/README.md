@@ -43,6 +43,16 @@ app.mount('#app')
 const chat = useChatThreads({ http, chatApi, threadApi, onError: (m) => message.error(m) })
 ```
 
+**附件**：`send(text, files)` 接受 composer 交出的 `File[]`。图片内联成 base64 的 `image` 内容部分随请求发出；
+其它文件只能以 Storage 的文件 id 引用（`FileContentPartDto.fileId`），所以要给 `uploadFile`
+（通常是 `useStorageApi(http).upload` 解包后的样子）；没给的话非图片文件会经 `onError` **当场拒绝、整条不发**，
+而不是把文字发上去、让助手回答「我没看到文档」。`maxAttachmentBytes` 是单个附件上限（默认 10 MB）。
+`TChatApp` 的 `enableAttachments` 关掉时，回形针、粘贴、拖放**三条入口都失效**，不会出现发不出去的芯片。
+★后端只按 `message` 文本持久化用户消息，重开会话时看不到当初的附件。
+
+`useChat.regenerate(id)` 把会话截断到该回答之前的那条提问再发一次 —— 列表里始终只有一份提问，
+不会出现两条相同的用户气泡（08 月以前它只删助手行再 `send()`，测试还把重复钉成了预期）。
+
 `install()` 同时接管会话生命周期：`createTnziClient` 在 401 撑过刷新后清掉认证状态，`defineChatApp` 再把用户送回登录路由并把当前位置放进 redirect query（与 `@tnzi/ui-admin` 同一套行为）。传 `guard: false` 则两者都不做，由宿主自己接。
 
 ## 组件层接法：`TChatApp`
@@ -70,6 +80,8 @@ import '@tnzi/ui-ai/style.css'
 ```
 
 视觉通过插槽覆盖（`#brand`、`#topbar-actions`、`#sidebar-content`、`#composer-left`、`#settings-{id}` …）。
+`showToolCalls`（默认开）在每个回答上方渲染这一轮的工具调用卡片（流式期间实时出现，重开会话也在）；
+`showUsage`（默认关）在回答下方渲染一行 token 计数。两者的数据都由 `useChatThreads` 写进 `ChatMessage`。
 只有当 `TChatApp` 装不下你的设计时，才降到 `@tnzi/ui-ai/components` 自己拼（区域骨架在 `components/layout` 与 `components/overlay`）。
 
 ## 导出子路径

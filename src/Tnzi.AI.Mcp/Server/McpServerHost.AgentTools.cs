@@ -65,7 +65,7 @@ public partial class McpServerHost
         // 使用 McpServerTool.Create(Delegate) 创建工具（仅 tools/list 元数据，详见 McpServerHost.BuildCustomTool）
         Func<string, CancellationToken, Task<string>> handler = async (message, cancellation) =>
         {
-            var (text, _) = await InvokeAgentAsync(capturedAgentId, capturedToolName, message, cancellation);
+            var (text, _) = await InvokeAgentAsync(capturedAgentId, capturedToolName, message, GetCallerScope().TenantId, cancellation);
             return text;
         };
 
@@ -79,15 +79,25 @@ public partial class McpServerHost
     /// <summary>
     /// 调用 Agent（通过 IAgentRuntime），经统一守卫处理限流/审计/异常映射。
     /// </summary>
+    /// <param name="agentId">目标 Agent。</param>
+    /// <param name="toolName">MCP 工具名（审计 / 限流键）。</param>
+    /// <param name="message">用户消息。</param>
+    /// <param name="tenantId">执行租户：运行范围凭据自带的可信租户；静态 key 为 null（根作用域，行为与以前一致）。</param>
+    /// <param name="ct">取消令牌。</param>
     private Task<(string Text, bool IsError)> InvokeAgentAsync(
         Guid agentId,
         string toolName,
         string message,
+        Guid? tenantId,
         CancellationToken ct) =>
         ExecuteWithGuardsAsync(toolName, agentId, async () =>
         {
             // 通过 scoped IAgentRuntime 执行
             using var scope = _serviceProvider.CreateScope();
+            // 运行范围凭据带来的是唯一可信的租户来源（签发时的运行记录），静态 key 没有租户，仍在根作用域跑。
+            using var tenantScope = tenantId.HasValue
+                ? scope.ServiceProvider.GetService<ICurrentTenant>()?.Change(tenantId)
+                : null;
             var runtime = scope.ServiceProvider.GetRequiredService<IAgentRuntime>();
 
             var request = new AgentRunRequest

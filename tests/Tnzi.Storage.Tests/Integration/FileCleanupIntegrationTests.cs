@@ -214,19 +214,13 @@ public class FileCleanupIntegrationTests : StorageIntegrationTestBase
             Path = savedPath,
             Provider = Storage.ProviderName,
             ContentType = "text/plain",
-            ReferenceCount = 1, // 先插入为 1，避免 EF HasDefaultValue(1) 把 CLR 默认 0 当成"未设置"
+            // 直接以目标计数插入：0 能落库是 FileRecordConfiguration 的哨兵保证的（此前这里要先插 1
+            // 再 UPDATE 成 0 —— 那是在替模型缺陷打补丁，而生产代码没有这层补丁）。
+            ReferenceCount = referenceCount,
             CreationTime = DateTime.UtcNow.AddHours(-agedHours)
         };
         DbContext.FileRecords.Add(record);
         await DbContext.SaveChangesAsync();
-
-        // 通过一次 UPDATE 显式写入目标 ReferenceCount（Modified 实体会发送精确值，0 才能落库）
-        if (referenceCount != 1)
-        {
-            record.ReferenceCount = referenceCount;
-            DbContext.FileRecords.Update(record);
-            await DbContext.SaveChangesAsync();
-        }
 
         // 清空变更跟踪，模拟一次新请求；否则清理服务加载的 no-track 副本在 Remove 时会与已跟踪实例冲突
         DbContext.ChangeTracker.Clear();

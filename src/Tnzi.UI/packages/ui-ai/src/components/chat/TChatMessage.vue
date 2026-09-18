@@ -7,6 +7,7 @@
  */
 
 import { computed } from 'vue';
+import { Icon } from '@iconify/vue';
 import { TAvatar } from '@tnzi/ui';
 import { useAiI18n } from '../../i18n/index';
 import type { ChatMessage } from '../../headless/useChat';
@@ -137,6 +138,33 @@ const hasAttachments = computed(
         />
       </div>
 
+      <!-- Failure: the row keeps whatever text arrived, and says what went
+           wrong under it. Without this block an errored turn rendered as an
+           assistant that had nothing to say. -->
+      <div
+        v-if="isAssistant && message.status === 'error'"
+        class="t-chat-message__error"
+        role="alert"
+      >
+        <Icon icon="lucide:circle-alert" class="t-chat-message__error-icon" />
+        <span>{{ message.error || t.chat.errorGeneric }}</span>
+        <button
+          type="button"
+          class="t-chat-message__error-retry"
+          @click="emit('regenerate', message.id)"
+        >
+          <Icon icon="lucide:rotate-ccw" />
+          {{ t.common.retry }}
+        </button>
+      </div>
+      <div
+        v-else-if="isAssistant && message.status === 'stopped'"
+        class="t-chat-message__stopped"
+      >
+        <span class="t-chat-message__stopped-mark" aria-hidden="true" />
+        {{ t.chat.generationStopped }}
+      </div>
+
       <!-- Actions (assistant only, not while streaming) -->
       <div
         v-if="isAssistant && !isStreaming"
@@ -199,5 +227,53 @@ const hasAttachments = computed(
   background-color: var(--tnzi-ai-chat-assistant-bg);
   color: var(--tnzi-ai-chat-assistant-text);
   border: 1px solid var(--tnzi-border);
+}
+.t-chat-message__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-ai-danger) 28%, transparent);
+  background: color-mix(in srgb, var(--tnzi-ai-danger) 6%, var(--tnzi-ai-surface));
+  border-radius: 10px;
+  color: var(--tnzi-ai-danger);
+  font-size: 14px;
+}
+.t-chat-message__error-icon {
+  flex-shrink: 0;
+  font-size: 16px;
+}
+.t-chat-message__error-retry {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  color: var(--tnzi-ai-danger);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.t-chat-message__error-retry:hover {
+  background: color-mix(in srgb, var(--tnzi-ai-danger) 10%, transparent);
+}
+.t-chat-message__stopped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--tnzi-ai-text-tertiary);
+  user-select: none;
+}
+.t-chat-message__stopped-mark {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+  flex-shrink: 0;
 }
 </style>

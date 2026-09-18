@@ -1,5 +1,3 @@
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Tests.Services;
 
 /// <summary>
@@ -57,10 +55,8 @@ public class NotificationServiceTemplateTests
 
         _service = new NotificationService(
             _repositoryMock.Object,
-            _emailSenderMock.Object,
-            _smsSenderMock.Object,
-            _pushSenderMock.Object,
-            new Mock<IFaxSender>().Object,
+            new FixedProviderResolver(_emailSenderMock.Object, _smsSenderMock.Object, _pushSenderMock.Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
             _unitOfWorkMock.Object,
             _optionsMock.Object,
             serviceProviderMock.Object,
@@ -106,7 +102,7 @@ public class NotificationServiceTemplateTests
     {
         // Arrange
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
             {
                 Subject = "Welcome to Tnzi.NET!",
@@ -137,7 +133,7 @@ public class NotificationServiceTemplateTests
         result.Data.ShouldNotBeNull();
         result.Data.Subject.ShouldBe("Welcome to Tnzi.NET!");
         result.Data.Content.ShouldBe("Hello TestUser!");
-        _templateRenderServiceMock.Verify(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _templateRenderServiceMock.Verify(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -145,7 +141,7 @@ public class NotificationServiceTemplateTests
     {
         // Arrange - 渲染返回空 Subject，应回退使用 request.Subject
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
             {
                 Subject = string.Empty,
@@ -183,7 +179,7 @@ public class NotificationServiceTemplateTests
     {
         // Arrange - 渲染失败，应回退使用原始内容
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("BadTemplate", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("BadTemplate", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Failure("Template not found"));
 
         var request = new CreateNotificationRequest
@@ -210,11 +206,77 @@ public class NotificationServiceTemplateTests
     }
 
     [Fact]
+    public async Task CreateAsync_WithTemplate_Render_Failure_And_No_Raw_Content_Should_Fail_Instead_Of_Creating_An_Empty_Message()
+    {
+        // 模板缺失 / 渲染失败而调用方又没给任何原始内容时，「回落到原始内容」回落到的是两个空串：
+        // 一条空主题空正文的消息被落库并成功发出，处理器那边记「sent」。
+        // 2026-09-01 的邀请邮件正是这样丢的（引用了一个仓库里不存在的模板）。
+        _templateRenderServiceMock
+            .Setup(x => x.RenderByNameAsync("Missing", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<RenderedTemplate>.Failure("Template not found", 404));
+
+        var request = new CreateNotificationRequest
+        {
+            Type = NotificationType.Email,
+            TemplateName = "Missing",
+            TemplateVariables = new Dictionary<string, object> { ["AcceptUrl"] = "https://example.com/accept?token=x" },
+            Recipients = new List<RecipientInput>
+            {
+                new RecipientInput { Address = "test@example.com", Name = "TestUser" }
+            }
+        };
+
+        var result = await _service.CreateAsync(request);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Message.ShouldNotBeNull();
+        result.Message.ShouldContain("Missing");
+        _repositoryMock.Verify(r => r.InsertAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithTemplate_But_No_Render_Service_And_No_Raw_Content_Should_Fail()
+    {
+        // 同一条线的另一端：Template 模块没加载。有原始内容时照旧直接发；两手空空时同样不能发一封空的。
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        var withoutRenderer = new NotificationService(
+            _repositoryMock.Object,
+            new FixedProviderResolver(_emailSenderMock.Object, _smsSenderMock.Object, _pushSenderMock.Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
+            _unitOfWorkMock.Object,
+            _optionsMock.Object,
+            serviceProviderMock.Object,
+            PassThroughOptOut(),
+            PassThroughPreferences(),
+            null,
+            templateRenderService: null);
+
+        var request = new CreateNotificationRequest
+        {
+            Type = NotificationType.Email,
+            TemplateName = "WelcomeEmail",
+            Recipients = new List<RecipientInput>
+            {
+                new RecipientInput { Address = "test@example.com", Name = "TestUser" }
+            }
+        };
+
+        var result = await withoutRenderer.CreateAsync(request);
+
+        result.Succeeded.ShouldBeFalse();
+        _repositoryMock.Verify(r => r.InsertAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task CreateAsync_WithTemplate_Uses_Request_Category()
     {
         // Arrange
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), "Marketing", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), "Marketing", It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
             {
                 Subject = "Welcome!",
@@ -255,7 +317,7 @@ public class NotificationServiceTemplateTests
         // handlers set Type but not Category; without the channel default the
         // lookup used a flat path, missed the file, and sent an empty body.
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
             {
                 Subject = string.Empty,
@@ -284,7 +346,41 @@ public class NotificationServiceTemplateTests
         result.Data.ShouldNotBeNull();
         result.Data.Content.ShouldBe("Your code is 123456");
         _templateRenderServiceMock.Verify(
-            x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.RenderByNameAsync("TwoFactorCode", "Notification", It.IsAny<object?>(), expectedCategory, It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 出口面由通知服务告诉渲染服务：推送正文与纯文本邮件不是一种模板类型，
+    /// 只按 <c>Template.Type == Sms</c> 走纯文本会让推送里的 <c>@Model.Url</c> 变成 <c>&amp;amp;</c>。
+    /// 传真正文只留档不投递，交模板类型决定。
+    /// </summary>
+    [Theory]
+    [InlineData(NotificationType.Email, true, TemplateOutputKind.Html)]
+    [InlineData(NotificationType.Email, false, TemplateOutputKind.PlainText)]
+    [InlineData(NotificationType.Sms, true, TemplateOutputKind.PlainText)]
+    [InlineData(NotificationType.Push, true, TemplateOutputKind.PlainText)]
+    [InlineData(NotificationType.Fax, true, null)]
+    public async Task CreateAsync_WithTemplate_Tells_The_Renderer_The_Delivery_Surface(NotificationType type, bool isHtml, TemplateOutputKind? expectedKind)
+    {
+        _templateRenderServiceMock
+            .Setup(x => x.RenderByNameAsync("T", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), expectedKind, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate { Subject = "S", Content = "C", TemplateName = "T" }));
+
+        var request = new CreateNotificationRequest
+        {
+            Type = type,
+            IsHtml = isHtml,
+            TemplateName = "T",
+            Recipients = new List<RecipientInput> { new RecipientInput { Address = "r@example.com", Name = "R" } }
+        };
+
+        var result = await _service.CreateAsync(request);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Content.ShouldBe("C");
+        _templateRenderServiceMock.Verify(
+            x => x.RenderByNameAsync("T", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), expectedKind, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -313,7 +409,7 @@ public class NotificationServiceTemplateTests
         result.Data.Content.ShouldBe("Direct Content");
         // ITemplateRenderService should not be called
         _templateRenderServiceMock.Verify(
-            x => x.RenderByNameAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            x => x.RenderByNameAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<object?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -322,7 +418,7 @@ public class NotificationServiceTemplateTests
     {
         // Arrange - 验证 LayoutName 被传递给 ITemplateRenderService
         _templateRenderServiceMock
-            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), "MainLayout", It.IsAny<CancellationToken>()))
+            .Setup(x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), "MainLayout", It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result<RenderedTemplate>.Success(new RenderedTemplate
             {
                 Subject = "Welcome!",
@@ -351,7 +447,7 @@ public class NotificationServiceTemplateTests
         result.Data.ShouldNotBeNull();
         result.Data.Content.ShouldBe("<html>Hello!</html>");
         _templateRenderServiceMock.Verify(
-            x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), "MainLayout", It.IsAny<CancellationToken>()),
+            x => x.RenderByNameAsync("WelcomeEmail", "Notification", It.IsAny<object?>(), It.IsAny<string?>(), "MainLayout", It.IsAny<TemplateOutputKind?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 }

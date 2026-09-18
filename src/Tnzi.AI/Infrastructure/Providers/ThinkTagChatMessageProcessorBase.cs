@@ -52,6 +52,11 @@ public abstract partial class ThinkTagChatMessageProcessorBase : IChatMessagePro
         var newMsg = CloneWithText(msg, cleanedText);
         newMsg.AdditionalProperties ??= new AdditionalPropertiesDictionary();
         newMsg.AdditionalProperties["reasoning_content"] = thinkContent;
+        // 非流式路径的推理由 AgentExecutor.ExtractReasoning 从 TextReasoningContent 读，不读 AdditionalProperties
+        if (thinkContent.Length > 0)
+        {
+            newMsg.Contents.Insert(0, new TextReasoningContent(thinkContent));
+        }
 
         return newMsg;
     }

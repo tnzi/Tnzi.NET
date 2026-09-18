@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
+using System.Reflection;
 using Tnzi.AspNetCore.Extensions;
 using Tnzi.AspNetCore.Models;
 using Tnzi.Identity.Mvc;
@@ -163,5 +164,74 @@ public class RefreshTokenDeliveryFilterTests
         CreateFilter(TokenDeliveryMode.Cookie, cookieName: "app_rt").OnResultExecuting(context);
 
         Assert.NotNull(ReadSetCookie(httpContext, "app_rt"));
+    }
+
+    /// <summary>
+    /// ★ 待办办完之后签发的会话把 <c>TokenResult</c> 嵌在 <c>Token</c> 里：过滤器看的是最外层载荷的形状，
+    /// 嵌套一层它就看不见 —— 刷新令牌照样落进 JSON，cookie 一枚没写，access token 到期就掉线。
+    /// </summary>
+    [Fact]
+    public void CookieMode_CoversPendingActionPayload()
+    {
+        var httpContext = new DefaultHttpContext();
+        var token = new TokenResult { AccessToken = "access", RefreshToken = "pending-refresh", RefreshTokenExpiresIn = 604800 };
+        var payload = new PendingActionResultDto { Completed = true, Token = token };
+        var context = CreateContext(httpContext, Result<PendingActionResultDto>.Success(payload).ToApiResult());
+
+        CreateFilter(TokenDeliveryMode.Cookie).OnResultExecuting(context);
+
+        Assert.Equal(string.Empty, token.RefreshToken);
+        var setCookie = ReadSetCookie(httpContext, "tnzi_rt");
+        Assert.NotNull(setCookie);
+        Assert.Contains("pending-refresh", setCookie);
+        Assert.Contains("expires=", setCookie, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>接受邀请后 <c>SignInAfterAccept</c> 签发的会话，同一形态。</summary>
+    [Fact]
+    public void CookieMode_CoversAcceptInvitationPayload()
+    {
+        var httpContext = new DefaultHttpContext();
+        var token = new TokenResult { AccessToken = "access", RefreshToken = "invitation-refresh", RefreshTokenExpiresIn = 604800 };
+        var payload = new AcceptInvitationResultDto { Completed = true, Token = token };
+        var context = CreateContext(httpContext, Result<AcceptInvitationResultDto>.Success(payload).ToApiResult());
+
+        CreateFilter(TokenDeliveryMode.Cookie).OnResultExecuting(context);
+
+        Assert.Equal(string.Empty, token.RefreshToken);
+        Assert.NotNull(ReadSetCookie(httpContext, "tnzi_rt"));
+    }
+
+    /// <summary>挑战（未办完、没有令牌）的载荷不该凭空写出一枚 cookie。</summary>
+    [Fact]
+    public void CookieMode_PendingActionWithoutToken_WritesNothing()
+    {
+        var httpContext = new DefaultHttpContext();
+        var payload = new PendingActionResultDto { Completed = false, RemainingActions = ["ChangePassword"] };
+        var context = CreateContext(httpContext, Result<PendingActionResultDto>.Success(payload).ToApiResult());
+
+        CreateFilter(TokenDeliveryMode.Cookie).OnResultExecuting(context);
+
+        Assert.Equal(0, httpContext.Response.Headers.SetCookie.Count);
+    }
+
+    /// <summary>
+    /// ★ 关掉这一类缺陷：任何嵌着 <c>TokenResult</c>（或别的携带者）的响应 DTO 都必须自己实现
+    /// <see cref="IRefreshTokenCarrier"/>，否则过滤器在最外层就停下，嵌套的刷新令牌原样进 JSON。
+    /// 判据按形状扫整个程序集，新增一个嵌套签发的 DTO 时这里就会红。
+    /// </summary>
+    [Fact]
+    public void EveryDtoNestingARefreshTokenCarrier_IsItselfACarrier()
+    {
+        var carrierType = typeof(IRefreshTokenCarrier);
+        var offenders = typeof(TokenResult).Assembly.GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false })
+            .Where(t => !carrierType.IsAssignableFrom(t))
+            .Where(t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Any(p => carrierType.IsAssignableFrom(p.PropertyType)))
+            .Select(t => t.FullName)
+            .ToList();
+
+        Assert.Empty(offenders);
     }
 }

@@ -57,10 +57,48 @@ internal static class BankNumberHelper
         _ => Math.Min(NachaFileBuilder.AccountNumberWidth, Cpa005FileBuilder.AccountNumberWidth)
     };
 
-    /// <summary>按方案校验账号长度（明文，调用方须先 Trim）。</summary>
-    public static Result ValidateAccountNumberLength(BankNumberScheme scheme, string accountNumber)
+    /// <summary>
+    /// EFT Originator ID 的录入上限 = 该方案将要写进的文件字段宽（NACHA Company Identification 10 /
+    /// CPA-005 Originator ID 10）。与 <see cref="MaxAccountNumberLength"/> 同一理由：标识符不截断，
+    /// 上限前移到录入，让操作员在还看得见自己刚敲的那串字符时被拦下。
+    /// </summary>
+    public static int MaxEftOriginatorIdLength(BankNumberScheme scheme) => scheme switch
+    {
+        BankNumberScheme.UsAba => NachaFileBuilder.OriginatorIdWidth,
+        BankNumberScheme.CaEft => Cpa005FileBuilder.OriginatorIdWidth,
+        _ => Math.Min(NachaFileBuilder.OriginatorIdWidth, Cpa005FileBuilder.OriginatorIdWidth)
+    };
+
+    /// <summary>
+    /// 按方案校验 EFT Originator ID（调用方须先 Trim；空值放行 —— 是否必填由生成时判）：
+    /// 字符集与长度都对齐 <see cref="EftFieldWriter.IdentifierField"/> 在生成时的判据。
+    /// </summary>
+    /// <remarks>
+    /// 非 ASCII 与超长是同一类失效：文件写入器对标识符<b>不折叠</b>（é → e 得到的是另一串合法标识符），
+    /// 只会拒绝；那道拒绝落在几天后的生成时刻，报错的人已经不是敲字的人。录入侧必须与它同一判据。
+    /// </remarks>
+    public static Result ValidateEftOriginatorId(BankNumberScheme scheme, string? originatorId)
+    {
+        if (string.IsNullOrEmpty(originatorId))
+            return Result.Success();
+        if (!EftFieldWriter.IsAscii(originatorId))
+            return Result.Failure("The EFT originator id contains characters outside the ASCII range that an EFT file cannot carry.", 400);
+        var max = MaxEftOriginatorIdLength(scheme);
+        if (originatorId.Length > max)
+            return Result.Failure(
+                $"The EFT originator id is {originatorId.Length} characters; a {scheme} originator id cannot exceed {max} characters.", 400);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// 按方案校验账号（明文，调用方须先 Trim）：字符集与长度都对齐 <see cref="EftFieldWriter.AccountField"/>
+    /// 在生成时的判据（非 ASCII 拒绝、超长拒绝），账号本身不进错误消息。
+    /// </summary>
+    public static Result ValidateAccountNumber(BankNumberScheme scheme, string accountNumber)
     {
         Check.NotNull(accountNumber);
+        if (!EftFieldWriter.IsAscii(accountNumber))
+            return Result.Failure("The account number contains characters outside the ASCII range that an EFT file cannot carry.", 400);
         var max = MaxAccountNumberLength(scheme);
         if (accountNumber.Length > max)
             return Result.Failure(

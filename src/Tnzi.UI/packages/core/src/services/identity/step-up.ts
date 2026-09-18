@@ -12,12 +12,19 @@
  */
 
 import type { HttpClient } from '../../http/http';
+import { STEP_UP_REQUIRED } from '../../http/auth-challenge';
 import { useAuthApi } from './api';
 import { isPasskeySupported, PasskeyUnsupportedError } from './passkey';
 import type { StepUpGrantDto, TwoFactorType } from './types';
 
-/** The error code the backend uses to ask for re-authentication. */
-export const STEP_UP_REQUIRED = 'IDENTITY_STEP_UP_REQUIRED';
+/**
+ * The error code the backend uses to ask for re-authentication.
+ *
+ * Defined under `http/` because `HttpClient` has to recognise it too: a
+ * step-up 401 that entered the ordinary refresh-and-retry path would rotate
+ * the refresh token for nothing and then sign the user out.
+ */
+export { STEP_UP_REQUIRED };
 
 /**
  * Whether something is a step-up challenge rather than a real failure.
@@ -36,10 +43,21 @@ export function isStepUpRequired(value: unknown): boolean {
   return readErrorCode(value) === STEP_UP_REQUIRED;
 }
 
-/** The scope carried by a step-up challenge, if the server named one. */
+/**
+ * The scope carried by a step-up challenge, if the server named one.
+ *
+ * On the wire the challenge's details are the envelope's `errorDetails`
+ * (`ApiResult.Error(message, status, code, new { scope })` lands its last
+ * argument there); on the thrown `HttpError` shape the same object is
+ * `details`. There is no `errors` field anywhere in the contract - the first
+ * version of this helper read one, and `withStepUp` never called `verify`.
+ */
 export function stepUpScopeOf(value: unknown): string | undefined {
-  const source = value as { errors?: { scope?: string }; scope?: string } | null;
-  return source?.errors?.scope ?? source?.scope;
+  const source = value as
+    | { errorDetails?: { scope?: unknown }; details?: { scope?: unknown }; scope?: unknown }
+    | null;
+  const scope = source?.errorDetails?.scope ?? source?.details?.scope ?? source?.scope;
+  return typeof scope === 'string' && scope ? scope : undefined;
 }
 
 /**

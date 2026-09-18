@@ -31,6 +31,7 @@ public class IdentityTestDbContext : TnziDbContext<IdentityTestDbContext>
     {
         // 应用 Identity 实体配置
         modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.UserConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.UserDetailConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.Identity.Entities.Configs.LoginLogConfiguration());
 
         base.OnModelCreating(modelBuilder);

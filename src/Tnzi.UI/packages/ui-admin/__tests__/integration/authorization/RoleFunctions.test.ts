@@ -8,6 +8,18 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// Captures the options the page hands naive's dialog, so a test can drive
+// each close path (button / X / Esc) and see whether the promise settles.
+const dialogCalls = vi.hoisted(() => ({ warning: [] as Record<string, (() => void) | undefined>[] }))
+vi.mock('naive-ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('naive-ui')>()),
+  useDialog: () => ({
+    warning: (opts: Record<string, (() => void) | undefined>) => {
+      dialogCalls.warning.push(opts)
+    },
+  }),
+}))
+
 // Authorization bridge - supplies the module/permission/role-function set.
 vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
@@ -43,19 +55,18 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
 }))
 
 // Identity bridge - supplies the role list rendered in the left sidebar.
+// The page must read the UNPAGED `roles.getAll`: the paged `fetch` clamps to
+// 100 rows on the server whatever pageSize is asked for, so a `pageSize: 500`
+// call silently left roles 101+ out of the matrix. `fetch` stays on the mock
+// so the assertion that it is never called means something.
+const rolesFetch = vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 }))
+const rolesGetAll = vi.fn(async () => [
+  { id: 'r2', name: 'Editor', normalizedName: 'EDITOR', isSystem: false, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
+  { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
+])
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
-    roles: {
-      fetch: vi.fn(async () => ({
-        items: [
-          { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
-          { id: 'r2', name: 'Editor', normalizedName: 'EDITOR', isSystem: false, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
-        ],
-        totalCount: 2,
-        pageIndex: 1,
-        pageSize: 500,
-      })),
-    },
+    roles: { fetch: rolesFetch, getAll: rolesGetAll },
     users: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     tenants: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     organizations: { getTree: vi.fn() },
@@ -74,11 +85,40 @@ describe('RoleFunctions page (Tier 3: dual-pane assignment)', () => {
     await new Promise(r => setTimeout(r, 100))
     await nextTick()
     expect(wrapper.find('.t-content-page').exists()).toBe(true)
-    // Role sidebar shows both seeded roles.
+    // Role sidebar shows both seeded roles, sorted by name, from the unpaged endpoint.
     const roles = wrapper.findAll('.t-role-func-page__role-item')
     expect(roles.length).toBe(2)
     expect(roles[0]?.text()).toContain('Admin')
     expect(roles[1]?.text()).toContain('Editor')
+    expect(rolesGetAll).toHaveBeenCalled()
+    expect(rolesFetch).not.toHaveBeenCalled()
+  })
+
+  /**
+   * The unsaved-changes / clear-all / cleanup confirmations hand-rolled the
+   * dialog promise and settled it only on the buttons, X and mask click. Esc
+   * (`closeOnEsc`, default on) hides the dialog through none of those, so
+   * every Esc left the calling flow awaiting forever; the adapter listens to
+   * `onAfterLeave`, the one hook naive fires after any close.
+   */
+  it('a confirmation dismissed with Esc settles as cancelled', async () => {
+    const wrapper = mount(RoleFunctions)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 100))
+    await nextTick()
+    dialogCalls.warning.length = 0
+
+    const vm = wrapper.vm as unknown as { confirmSwitchDirty: () => Promise<boolean> }
+    let settled: boolean | undefined
+    const pending = vm.confirmSwitchDirty().then((ok) => { settled = ok })
+    await nextTick()
+    expect(dialogCalls.warning).toHaveLength(1)
+    const opts = dialogCalls.warning[0]!
+    // Esc: naive fires only the leave hook.
+    expect(typeof opts.onAfterLeave).toBe('function')
+    opts.onAfterLeave!()
+    await pending
+    expect(settled).toBe(false)
   })
 
   it('auto-selects the first role so the right pane is never blank on open', async () => {

@@ -17,7 +17,7 @@ import {
  *   status (NotificationStatus enum) / sentTime / failureReason /
  *   retryCount / maxRetryCount / totalRecipientCount / successCount /
  *   failureCount / creationTime / priority / senderId / category /
- *   templateName / scheduledTime / recipients[] / attachments[]
+ *   templateName / providerKey / scheduledTime / recipients[] / attachments[]
  *
  * Both enums now serialize as their PascalCase member name strings (global
  * JsonStringEnumConverter). The old hand-written numeric switch mismatched the
@@ -31,6 +31,8 @@ interface NotificationMessageRow {
   subject?: string
   status?: NotificationStatus
   templateName?: string
+  /** Named sender the message goes through; empty = the channel's default sender. */
+  providerKey?: string | null
   totalRecipientCount?: number
   successCount?: number
   failureCount?: number
@@ -86,6 +88,12 @@ export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
   },
   { key: 'templateName', title: 'columns.templateName', minWidth: 140 },
   {
+    key: 'providerKey',
+    title: 'columns.providerKey',
+    width: 120,
+    render: (row) => h('span', { style: 'font-family: monospace; font-size: 12px' }, row.providerKey || EMPTY_DASH),
+  },
+  {
     key: 'recipients',
     title: 'columns.recipients',
     width: 130,
@@ -109,6 +117,7 @@ export const notificationMessageColumns: ColumnDef<NotificationMessageRow>[] = [
 export const notificationMessageFormSchema: FormSchemaItem[] = [
   { key: 'subject', labelKey: 'form.subject', label: 'Subject', type: 'text' },
   { key: 'templateName', labelKey: 'form.templateName', label: 'Template', type: 'text' },
+  { key: 'providerKey', labelKey: 'form.providerKey', label: 'Provider', type: 'text' },
   { key: 'content', labelKey: 'form.content', label: 'Content', type: 'textarea' },
   { key: 'failureReason', labelKey: 'form.failureReason', label: 'Failure Reason', type: 'textarea' },
 ]

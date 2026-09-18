@@ -35,6 +35,18 @@ public class EventBusOptions
     /// 获取或设置 Kafka主题名称
     /// </summary>
     public string? KafkaTopicName { get; set; }
+
+    /// <summary>
+    /// 获取或设置 分布式订阅的消费者组名（= 这个服务的身份）。未配置时取入口程序集名。
+    /// </summary>
+    /// <remarks>
+    /// RabbitMQ 队列名与 Kafka 消费者组都以它开头：<c>{ConsumerGroup}.{事件全名}</c>。
+    /// 同一个服务的所有实例必须同名（它们共用一条工作队列，代理在实例间分发）；
+    /// 两个不同的服务必须不同名（否则它们会竞争消费同一条队列，各自只收到一部分事件，
+    /// 且没有任何症状）。入口程序集名天然满足这两条，所以通常不需要配置。
+    /// 部署形态里入口程序集名会撞（例如两个服务由同一个宿主程序集加载）时才需要显式指定。
+    /// </remarks>
+    public string? ConsumerGroup { get; set; }
     
     /// <summary>
     /// 获取或设置 本地事件总线的最大并发处理器数（默认10）

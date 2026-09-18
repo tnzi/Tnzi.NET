@@ -18,6 +18,10 @@ const props = defineProps<{
 type ToolStatus = 'pending' | 'running' | 'completed' | 'failed';
 
 const status = computed<ToolStatus>(() => {
+  // The backend reports the outcome directly (`ToolCallDetail.IsSuccess` /
+  // `Error`); that beats guessing from the output text.
+  if (props.toolCall.isSuccess === false || props.toolCall.error) return 'failed';
+  if (props.toolCall.isSuccess === true) return 'completed';
   if (props.toolCall.output === null || props.toolCall.output === undefined) {
     if (props.toolCall.durationMs != null) return 'running';
     return 'pending';
@@ -31,7 +35,7 @@ const status = computed<ToolStatus>(() => {
 
 /** Convert snake_case / camelCase tool name to readable form. */
 const readableName = computed(() => {
-  return props.toolCall.name
+  return (props.toolCall.name ?? '')
     .replace(/_/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -67,6 +71,15 @@ const durationLabel = computed(() => {
     <!-- Tool name -->
     <span class="t-tool-call__name truncate font-medium">{{ readableName }}</span>
 
+    <!-- Error -->
+    <span
+      v-if="status === 'failed' && toolCall.error"
+      class="min-w-0 truncate text-xs t-tool-call__error"
+      :title="toolCall.error"
+    >
+      {{ toolCall.error }}
+    </span>
+
     <!-- Duration -->
     <span
       v-if="durationLabel"
@@ -99,4 +112,5 @@ const durationLabel = computed(() => {
   color: var(--tnzi-base-text);
 }
 .t-tool-call__duration { color: var(--tnzi-base-text-muted); }
+.t-tool-call__error { color: var(--tnzi-ai-node-failed); }
 </style>

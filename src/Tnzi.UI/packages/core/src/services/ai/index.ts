@@ -8,6 +8,7 @@ export * from './metadata';
 export * from './types';
 export * from './api';
 export * from './streaming';
+export { StreamRequestError } from './stream-request-error';
 export { useRagApi, useAdminKnowledgeBaseApi } from './rag';
 export type {
   RagQueryParams,

@@ -1,5 +1,4 @@
 using Tnzi.Domain.Entities;
-using Tnzi.Notification.Metadata;
 
 namespace Tnzi.Notification.Tests.Integration;
 
@@ -60,6 +59,8 @@ public class OptOutSendPathTests : IntegrationTestBase
         // 所以这些用例的结论不受它影响 —— 用替身反而会掩盖两道过滤器串起来时的问题。
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<INotificationProviderResolver, NotificationProviderResolver>();
+        services.AddScoped<INotificationProviderSelector, DefaultNotificationProviderSelector>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

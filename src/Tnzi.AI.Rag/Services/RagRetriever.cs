@@ -51,6 +51,20 @@ public class RagRetriever : ApplicationService, IRagRetriever
         _parentDocumentRetriever = parentDocumentRetriever;
     }
 
+    private RagRetrievalOptions ClampTopK(RagRetrievalOptions options)
+    {
+        var clamped = Math.Clamp(options.TopK, 1, _ragOptions.MaxTopK);
+        return clamped == options.TopK
+            ? options
+            : new RagRetrievalOptions
+            {
+                KnowledgeBaseIds = options.KnowledgeBaseIds,
+                TopK = clamped,
+                MinRelevance = options.MinRelevance,
+                EnableParentRetrieval = options.EnableParentRetrieval
+            };
+    }
+
     /// <inheritdoc />
     public async Task<List<RetrievalResult>> RetrieveAsync(string query, RagRetrievalOptions? options = null, CancellationToken ct = default)
     {
@@ -59,7 +73,9 @@ public class RagRetriever : ApplicationService, IRagRetriever
             return [];
         }
 
-        options ??= new RagRetrievalOptions();
+        // 纵深防御：引擎已 clamp，但绕过引擎直接用检索器的调用方同样不得把整库拉进内存。
+        // 复制一份而不是改调用方的对象。
+        options = ClampTopK(options ?? new RagRetrievalOptions());
 
         try
         {
@@ -79,7 +95,8 @@ public class RagRetriever : ApplicationService, IRagRetriever
             // per-KB 嵌入配置，图谱路径读 KnowledgeGraphNode/Edge），并发使用同一 DbContext 会触发
             // "A second operation was started on this context" 并被下方 catch 吞成空结果。
             var allResults = await SearchVectorAsync(searchQuery, options, ct);
-            var graphResults = await SearchGraphAsync(searchQuery, options, ct);
+            var graphResults = await RetrievalAugmentation.SearchGraphAsync(
+                _graphSearchService, searchQuery, options.KnowledgeBaseIds, Logger, ct);
 
             // 4. 重排序
             allResults = await _reranker.RerankAsync(query, allResults, options.TopK, ct);
@@ -129,56 +146,11 @@ public class RagRetriever : ApplicationService, IRagRetriever
             }).ToList();
 
             // 9. Parent Document Retrieval（可选：将细粒度匹配块扩展为更大的上下文窗口）
-            if (_parentDocumentRetriever != null && IsParentRetrievalEnabled(options))
-            {
-                var parentOptions = new ParentRetrievalOptions
-                {
-                    WindowSize = _ragOptions.ParentDocumentRetrieval.WindowSize,
-                    MaxTokens = _ragOptions.ParentDocumentRetrieval.MaxTokens
-                };
-                var parentResults = await _parentDocumentRetriever.RetrieveAsync(results, parentOptions, ct);
-
-                if (parentResults.Count > 0)
-                {
-                    // 替换原始结果为扩展后的上下文块
-                    results = parentResults.Select(pr => new RetrievalResult
-                    {
-                        Content = pr.MergedContent,
-                        Score = pr.Score,
-                        DocumentId = pr.DocumentId,
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["searchType"] = "parent_document",
-                            ["startChunkIndex"] = pr.StartChunkIndex,
-                            ["endChunkIndex"] = pr.EndChunkIndex,
-                            ["documentName"] = pr.DocumentName ?? string.Empty
-                        }
-                    }).ToList();
-
-                    Logger.LogDebug("Parent document retrieval expanded results to {Count} context blocks", results.Count);
-                }
-            }
+            results = await RetrievalAugmentation.ExpandParentsAsync(
+                _parentDocumentRetriever, results, _ragOptions, options.EnableParentRetrieval, Logger, ct);
 
             // 10. 追加图谱搜索上下文片段（不参与向量结果排序，作为补充上下文）
-            if (graphResults.Count > 0)
-            {
-                foreach (var graphResult in graphResults)
-                {
-                    results.Add(new RetrievalResult
-                    {
-                        Content = graphResult.ContextSnippet,
-                        Score = graphResult.Score,
-                        Metadata = new Dictionary<string, object>
-                        {
-                            ["searchType"] = "graph",
-                            ["nodeName"] = graphResult.NodeName,
-                            ["nodeType"] = graphResult.NodeType
-                        }
-                    });
-                }
-
-                Logger.LogDebug("Appended {Count} graph context snippets to retrieval results", graphResults.Count);
-            }
+            results = RetrievalAugmentation.AppendGraphSnippets(results, graphResults);
 
             Logger.LogDebug("RAG retrieval returned {Count} results for query length {Length}",
                 results.Count, query.Length);
@@ -270,54 +242,5 @@ public class RagRetriever : ApplicationService, IRagRetriever
         }
 
         return await _vectorStore.SearchAsync(defaultEmbedding.Data!, options.TopK, ct: ct);
-    }
-
-    /// <summary>
-    /// 判断是否启用 Parent Document Retrieval（请求级 > 全局配置）
-    /// </summary>
-    private bool IsParentRetrievalEnabled(RagRetrievalOptions options)
-    {
-        return options.EnableParentRetrieval ?? _ragOptions.ParentDocumentRetrieval.Enabled;
-    }
-
-    /// <summary>
-    /// 执行图谱搜索（在指定知识库中搜索匹配的实体及关系）。
-    /// <para>
-    /// <b>有意限定为 KB-scoped</b>：<see cref="IGraphSearchService.SearchAsync"/> 的契约要求传入具体的
-    /// <c>knowledgeBaseId</c>，不存在跨库 / search-all 的重载。因此当请求未指定 <c>KnowledgeBaseIds</c>
-    /// （search-all 路径）时跳过图谱搜索，仅返回向量结果。要让图谱参与检索，调用方需显式指定一个或多个
-    /// 知识库 ID（图谱搜索内部经 EF 全局过滤器自动应用租户隔离，与向量 raw-SQL 路径不同）。
-    /// 跨库图谱搜索属于刻意推迟的范围扩展，不在 D1 默认关闭的接线内。
-    /// </para>
-    /// </summary>
-    private async Task<IReadOnlyList<GraphSearchResult>> SearchGraphAsync(
-        string query, RagRetrievalOptions options, CancellationToken ct)
-    {
-        if (_graphSearchService == null || options.KnowledgeBaseIds is not { Count: > 0 })
-        {
-            return [];
-        }
-
-        try
-        {
-            var graphOptions = new GraphSearchOptions(MaxResults: 3);
-
-            // 逐库顺序检索：GraphSearchService 走 EF 仓储，多 KB 并行会并发使用同一 scoped DbContext。
-            var merged = new List<GraphSearchResult>();
-            foreach (var kbId in options.KnowledgeBaseIds)
-            {
-                merged.AddRange(await _graphSearchService.SearchAsync(query, kbId, graphOptions, ct));
-            }
-
-            return merged
-                .OrderByDescending(r => r.Score)
-                .Take(graphOptions.MaxResults)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Graph search failed, continuing with vector results only");
-            return [];
-        }
     }
 }

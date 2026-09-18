@@ -12,6 +12,16 @@ namespace Tnzi.AI.Options;
 public class ProviderOptions : AiProviderOptions
 {
     /// <summary>
+    /// 协议 / SDK 类型（"OpenAI"、"Anthropic" ……），决定 <c>IChatClientFactory</c> 选哪个 <c>IChatClientProvider</c>。
+    /// </summary>
+    /// <remarks>
+    /// 匹配顺序：ProviderType 命中已注册的 <c>IChatClientProvider.ProviderName</c> → 条目名字命中 → 回退 OpenAI 兼容。
+    /// 数据库来源的条目由 <c>Provider.ProviderType</c> 填入；配置条目可显式写 <c>AI:Providers:{Name}:ProviderType</c>，
+    /// 不写则沿用按名字匹配的旧规则（"Anthropic" 这个名字仍走原生 Anthropic 协议）。
+    /// </remarks>
+    public string? ProviderType { get; set; }
+
+    /// <summary>
     /// 降级提供商列表（按优先级排序）
     /// </summary>
     /// <remarks>

@@ -111,6 +111,21 @@ public class PartyBankAccountTests : FinanceIntegrationTestBase
             s => s.GetByPartyAsync(FinancePartyType.Vendor, _party))).Data!.Count.ShouldBe(0);
     }
 
+    /// <summary>非 ASCII 与超长同一类：文件写入器拒绝的东西录入侧也要拒绝，否则「录入通过、生成时才拒」。</summary>
+    [Fact]
+    public async Task Create_AccountNumberWithNonAsciiCharacters_Rejects400()
+    {
+        await SeedCoaAsync();
+
+        var result = await CreateAsync(Input(false, "１２３４５６７")); // 全角数字，长度合法
+
+        result.Succeeded.ShouldBeFalse("a non-ASCII account number cannot be carried by an EFT file");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("ASCII");
+        (await InScopeAsync<IPartyBankAccountService, Result<List<PartyBankAccountDto>>>(
+            s => s.GetByPartyAsync(FinancePartyType.Vendor, _party))).Data!.Count.ShouldBe(0);
+    }
+
     /// <summary>加拿大方案的上限更严（CPA-005 账号字段 12 位）—— 上限跟着方案走，不是一个全局常数。</summary>
     [Fact]
     public async Task Create_CanadianAccountNumberUsesTheTighterLimit()

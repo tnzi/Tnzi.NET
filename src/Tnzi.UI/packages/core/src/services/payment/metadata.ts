@@ -400,6 +400,8 @@ export enum SubscriptionChangeStatus {
   Pending = 'Pending',
   Applied = 'Applied',
   Cancelled = 'Cancelled',
+  /** Immediate upgrade whose proration charge has been issued but not yet confirmed. */
+  AwaitingPayment = 'AwaitingPayment',
 }
 
 /**

@@ -16,6 +16,10 @@ internal static class NachaFileBuilder
     /// <see cref="BankNumberHelper.MaxAccountNumberLength"/> 直接引用它当录入上限 —— 两处各写一个数字的话，
     /// 漂移的症状是「录入通过、生成时才拒」而不是编译失败。</summary>
     internal const int AccountNumberWidth = 17;
+
+    /// <summary>Company Identification 字段宽度（Batch Header / Batch Control）。
+    /// <see cref="BankNumberHelper.MaxEftOriginatorIdLength"/> 直接引用它当录入上限。</summary>
+    internal const int OriginatorIdWidth = 10;
     private const string EntryClassCode = "CCD";
     private const string ServiceClassCredits = "220"; // ACH credits only
 
@@ -106,7 +110,7 @@ internal static class NachaFileBuilder
             ServiceClassCredits +                                      // Service Class Code
             EftFieldWriter.Text(r.OriginatorName, 16) +              // Company Name
             EftFieldWriter.Spaces(20) +                               // Company Discretionary Data
-            EftFieldWriter.Text(r.OriginatorId, 10) +                // Company Identification
+            EftFieldWriter.IdentifierField(r.OriginatorId, OriginatorIdWidth, "EFT originator id") + // Company Identification
             EntryClassCode +                                          // SEC Code
             EftFieldWriter.Text("PAYMENT", 10) +                     // Company Entry Description
             EftFieldWriter.Spaces(6) +                                // Company Descriptive Date
@@ -145,7 +149,7 @@ internal static class NachaFileBuilder
             EftFieldWriter.Num(entryHash, 10) +                     // Entry Hash
             EftFieldWriter.Num(0, 12) +                              // Total Debit Amount
             EftFieldWriter.Amount(totalCredits, 12, "the batch total") + // Total Credit Amount
-            EftFieldWriter.Text(r.OriginatorId, 10) +               // Company Identification
+            EftFieldWriter.IdentifierField(r.OriginatorId, OriginatorIdWidth, "EFT originator id") + // Company Identification
             EftFieldWriter.Spaces(19) +                              // Message Authentication Code
             EftFieldWriter.Spaces(6) +                               // Reserved
             odfi8 +                                                   // Originating DFI Identification

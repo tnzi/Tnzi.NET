@@ -326,12 +326,8 @@ public partial class WorkflowService
         {
             if (step.RequiresApproval) return true;
 
-            if (step.Configuration != null
-                && step.Configuration.TryGetValue("nodeType", out var nodeType)
-                && string.Equals(nodeType, WorkflowNodeTypes.Approval, StringComparison.OrdinalIgnoreCase))
-            {
+            if (string.Equals(WorkflowStepNodeType.Get(step), WorkflowNodeTypes.Approval, StringComparison.OrdinalIgnoreCase))
                 return true;
-            }
         }
 
         return false;

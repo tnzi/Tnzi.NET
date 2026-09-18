@@ -47,8 +47,6 @@ import type {
   DiscountCalculationResultDto,
   UserCouponDto,
   CouponUsageDto,
-  ApplyCouponDto,
-  CouponValidationDto,
   PaymentStatisticsDto,
   StatisticsQueryDto,
   RevenueTrendPointDto,
@@ -186,7 +184,7 @@ export function useSubscriptionApi(client: HttpClient) {
 
     /** Cancel a pending (not yet effective) plan change */
     cancelPendingChange: (changeId: string) =>
-      client.post<void>(`/subscription-changes/${changeId}/cancel`),
+      client.post<void>(`${SUBSCRIPTION_BASE}/changes/${changeId}/cancel`),
 
     /** Attach or replace the payment method used by this subscription */
     updatePaymentMethod: (id: string, data: AttachPaymentMethodDto) =>
@@ -291,26 +289,13 @@ export function useCouponApi(client: HttpClient) {
       client.get<CouponUsageDto[]>(`${PROMOTION_BASE}/used-coupons`),
 
     /**
-     * Preview a coupon's discount.
+     * Validate a coupon code for an order (typed, scope-aware).
      *
-     * NOTE: this only quotes the discount. Redemption happens server-side when
-     * the payment or subscription is created with `couponCode` - pass the code
-     * through to `createPayment` / `createSubscription` for it to take effect.
+     * NOTE: this only answers whether the code applies and what it is worth.
+     * Redemption happens server-side when the payment or subscription is
+     * created with `couponCode` - pass the code through to `createPayment` /
+     * `createSubscription` for it to take effect.
      */
-    apply: (data: ApplyCouponDto) =>
-      client.post<CouponValidationDto>(`${PROMOTION_BASE}/calculate-discount`, {
-        couponCode: data.code,
-        orderAmount: data.amount,
-      }),
-
-    /** Validate coupon */
-    validate: (data: ApplyCouponDto) =>
-      client.post<CouponValidationDto>(`${PROMOTION_BASE}/validate-coupon`, {
-        couponCode: data.code,
-        orderAmount: data.amount,
-      }),
-
-    /** Validate coupon (typed, scope-aware) */
     validateCoupon: (data: ValidateCouponDto) =>
       client.post<CouponValidationResponseDto>(`${PROMOTION_BASE}/validate-coupon`, data),
 

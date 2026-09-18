@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore.Diagnostics;
+
 namespace Tnzi.AI.Tests;
 
 /// <summary>
@@ -24,16 +26,58 @@ public class WorkflowCheckpointStoreDbContext : TnziDbContext<WorkflowCheckpoint
 
 /// <summary>
 /// B13 - verifies DatabaseWorkflowCheckpointStore uses optimistic concurrency
-/// (IConcurrencyStamp) plus a step union-merge so two concurrent writers do not
-/// silently drop each other's CompletedSteps / StepOutputs (no last-write-wins),
-/// and a stale-token Update is reloaded + re-merged + retried instead of overwriting.
+/// (IConcurrencyStamp): a stale-token Update is reloaded + union-merged + retried so two
+/// live writers do not drop each other's CompletedSteps / StepOutputs, while a writer
+/// that read the current row and saved without conflict is authoritative (its smaller
+/// set is a deliberate removal, not a lost update).
 /// </summary>
+/// <remarks>
+/// ★ The union-merge used to run on the normal path as well, and that silently undid every
+/// deliberate removal (ResumeWithInputAsync's "re-enter the interrupted node", the
+/// engine's loop-body reset). The earlier "two concurrent writers" test never reached the
+/// conflict path either: on SQLite the two saves serialize, so the second writer read the
+/// first writer's committed row and the union on the normal path is what kept it green.
+/// The stale-token test below makes the other writer commit <b>between the store's read and its
+/// SaveChanges</b> (a SavingChanges interceptor), so the optimistic-concurrency check really fires
+/// on a genuinely stale token. It used to force the conflict by tracking a stale instance in the
+/// second scope's DbContext instead; that was a pseudo-conflict (the store had read the latest row),
+/// and the repository's duplicate merge now carries the newer stamp so it no longer conflicts.
+/// </remarks>
 public class DatabaseWorkflowCheckpointStoreConcurrencyTests : IntegratedTestBase<WorkflowCheckpointStoreDbContext>
 {
+    private readonly ForeignWriterInterceptor _foreignWriter = new();
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         services.AddScoped<IRepository<WorkflowExecution, Guid>,
             EFCoreRepository<WorkflowCheckpointStoreDbContext, WorkflowExecution, Guid>>();
+    }
+
+    protected override void ConfigureDbContextOptions(DbContextOptionsBuilder options)
+    {
+        options.AddInterceptors(_foreignWriter);
+    }
+
+    /// <summary>
+    /// 在下一次 SaveChanges 真正生成 SQL 之前跑一次 <see cref="BeforeNextSave"/>（一次性）：
+    /// 用来把「别的写者在我读之后、写之前提交了」这个竞态做成确定性的。
+    /// </summary>
+    private sealed class ForeignWriterInterceptor : SaveChangesInterceptor
+    {
+        public Func<Task>? BeforeNextSave { get; set; }
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            var hook = BeforeNextSave;
+            if (hook != null)
+            {
+                BeforeNextSave = null;
+                await hook();
+            }
+
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     private DatabaseWorkflowCheckpointStore CreateStore(IServiceProvider scopedProvider)
@@ -58,40 +102,24 @@ public class DatabaseWorkflowCheckpointStoreConcurrencyTests : IntegratedTestBas
     }
 
     [Fact]
-    public async Task SaveCheckpoint_TwoConcurrentWriters_UnionsCompletedSteps_NoLostUpdate()
+    public async Task SaveCheckpoint_WithoutConflict_HonoursExplicitStepRemoval()
     {
         const string executionId = "wf-concurrency-001";
 
-        // Seed the row so both writers take the Update (not Insert) path.
         await CreateStore(ServiceProvider).SaveCheckpointAsync(
-            Checkpoint(executionId, ["seed"], ("seed", "seed-out")));
+            Checkpoint(executionId, ["a", "x"], ("a", "out-a"), ("x", "[Awaiting HumanInput: ...]")));
 
-        // Two independent scopes/DbContexts read the same row (same ConcurrencyStamp),
-        // then each adds a distinct completed step. Without merge + token, one would clobber
-        // the other (last-write-wins) and drop a completed step.
-        using var scope1 = ServiceProvider.CreateScope();
-        using var scope2 = ServiceProvider.CreateScope();
-        var store1 = CreateStore(scope1.ServiceProvider);
-        var store2 = CreateStore(scope2.ServiceProvider);
+        // A writer that read the committed row and removes a step (the interrupted node
+        // that must re-enter the ready queue) is authoritative: nothing wrote in between,
+        // so the smaller set must be persisted as-is, not unioned back to the old one.
+        using var scope = ServiceProvider.CreateScope();
+        await CreateStore(scope.ServiceProvider).SaveCheckpointAsync(
+            Checkpoint(executionId, ["a"], ("a", "out-a")));
 
-        var w1 = Checkpoint(executionId, ["seed", "step-a"], ("step-a", "out-a"));
-        var w2 = Checkpoint(executionId, ["seed", "step-b"], ("step-b", "out-b"));
-
-        var t1 = store1.SaveCheckpointAsync(w1);
-        var t2 = store2.SaveCheckpointAsync(w2);
-
-        await Should.NotThrowAsync(async () => await Task.WhenAll(t1, t2));
-
-        // Read back the persisted union - all three steps + all three outputs survive.
         var final = await CreateStore(ServiceProvider).GetCheckpointAsync(executionId);
         final.ShouldNotBeNull();
-        final!.CompletedStepIds.ShouldContain("seed");
-        final.CompletedStepIds.ShouldContain("step-a");
-        final.CompletedStepIds.ShouldContain("step-b");
-        final.StepOutputs.ShouldContainKey("step-a");
-        final.StepOutputs.ShouldContainKey("step-b");
-        final.StepOutputs["step-a"].Text.ShouldBe("out-a");
-        final.StepOutputs["step-b"].Text.ShouldBe("out-b");
+        final!.CompletedStepIds.ShouldBe(["a"], ignoreOrder: true);
+        final.StepOutputs.Keys.ShouldBe(["a"], ignoreOrder: true);
     }
 
     [Fact]
@@ -102,26 +130,24 @@ public class DatabaseWorkflowCheckpointStoreConcurrencyTests : IntegratedTestBas
         await CreateStore(ServiceProvider).SaveCheckpointAsync(
             Checkpoint(executionId, ["s0"], ("s0", "o0")));
 
-        // Deterministically force a stale-token conflict: both stores read the current
-        // row (same stamp) BEFORE either writes, by having store1 commit first, then
-        // store2 (which still holds the original stamp) attempt to write.
-        using var scope1 = ServiceProvider.CreateScope();
+        var staleStamp = (await DbContext.Set<WorkflowExecution>().AsNoTracking().FirstAsync(e => e.ExecutionId == executionId))
+            .ConcurrencyStamp;
+
+        // Deterministically force a REAL stale-token conflict: writer-1 commits between store2's
+        // read (which sees the original stamp) and store2's SaveChanges (whose WHERE still carries
+        // that stamp). store2 must reload + union-merge + retry, not throw and not drop writer-1's step.
         using var scope2 = ServiceProvider.CreateScope();
-        var repo2 = scope2.ServiceProvider.GetRequiredService<IRepository<WorkflowExecution, Guid>>();
-
-        // store2 reads the entity first (captures the original stamp in its tracker).
-        var staleEntity = await repo2.FirstOrDefaultAsync(e => e.ExecutionId == executionId);
-        staleEntity.ShouldNotBeNull();
-
-        // store1 commits a change → bumps the DB stamp.
-        await CreateStore(scope1.ServiceProvider).SaveCheckpointAsync(
-            Checkpoint(executionId, ["s0", "from-writer-1"], ("from-writer-1", "o1")));
-
-        // store2 now writes with its (now stale) view → store must reload + union-merge + retry,
-        // not throw and not drop writer-1's step.
         var store2 = CreateStore(scope2.ServiceProvider);
+        _foreignWriter.BeforeNextSave = async () =>
+        {
+            using var scope1 = ServiceProvider.CreateScope();
+            await CreateStore(scope1.ServiceProvider).SaveCheckpointAsync(
+                Checkpoint(executionId, ["s0", "from-writer-1"], ("from-writer-1", "o1")));
+        };
+
         await Should.NotThrowAsync(async () => await store2.SaveCheckpointAsync(
             Checkpoint(executionId, ["s0", "from-writer-2"], ("from-writer-2", "o2"))));
+        _foreignWriter.BeforeNextSave.ShouldBeNull("the foreign writer must have run inside store2's save");
 
         var final = await CreateStore(ServiceProvider).GetCheckpointAsync(executionId);
         final.ShouldNotBeNull();
@@ -129,6 +155,9 @@ public class DatabaseWorkflowCheckpointStoreConcurrencyTests : IntegratedTestBas
         final.CompletedStepIds.ShouldContain("from-writer-2");
         final.StepOutputs.ShouldContainKey("from-writer-1");
         final.StepOutputs.ShouldContainKey("from-writer-2");
+
+        var persisted = await DbContext.Set<WorkflowExecution>().AsNoTracking().FirstAsync(e => e.ExecutionId == executionId);
+        persisted.ConcurrencyStamp.ShouldNotBe(staleStamp, "the conflict path must have re-saved with a fresh stamp");
     }
 
     [Fact]

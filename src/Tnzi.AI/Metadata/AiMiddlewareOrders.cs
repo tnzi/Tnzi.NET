@@ -6,17 +6,23 @@ namespace Tnzi.AI.Metadata;
 /// <remarks>
 /// <para>
 /// 完整管道（700 = Core Execution 位置，非中间件）：
-///  50  ThreadData → 55 Sandbox → 60 FileUpload → 80 Thinking
+///  40 ThreadResolution → 50 ThreadData → 55 Sandbox → 60 FileUpload → 80 Thinking
 /// → 100 Retry → 200 InputGuardrail → 250 Quota → 300 History → 350 Summarization
 /// → 400 ContextInjection → 420 Todo → 450 SkillConstraint → 460 PromptCaching → 500 UsageLogging
-/// → 550 SubAgentLimit → 650 LoopDetection → 655 ToolGuardrail → 660 ToolErrorRecovery
+/// → 650 LoopDetection → 655 ToolGuardrail → 660 ToolErrorRecovery
 /// → [700 Core Execution]
 /// → 800 OutputGuardrail → 900 Title → 950 Memory → 999 Clarification
 /// </para>
 /// </remarks>
 public static class AiMiddlewareOrders
 {
-    // === Pre-execution: Environment Setup (50-80) ===
+    // === Pre-execution: Environment Setup (40-80) ===
+
+    /// <summary>
+    /// 线程解析：为 null 时新建、非 null 时校验归属并回写 <c>Request.ThreadId</c>。
+    /// 必须先于一切按 ThreadId 布置环境的中间件（ThreadData / Sandbox），否则新会话首轮没有沙箱。
+    /// </summary>
+    public const int ThreadResolution = 40;
 
     /// <summary>线程数据目录隔离 (Phase 1)</summary>
     public const int ThreadData = 50;
@@ -64,10 +70,10 @@ public static class AiMiddlewareOrders
     /// <summary>用量日志记录 (Phase 3 enhanced: granular)</summary>
     public const int UsageLogging = 500;
 
-    // === Pre-execution: Limits & Filters (550-660) ===
-
-    /// <summary>子 Agent 数量限制 (Phase 1)</summary>
-    public const int SubAgentLimit = 550;
+    // === Pre-execution: Limits & Filters (650-660) ===
+    // 550 曾是 SubAgentLimit：它在历史消息里找一个不存在的工具名 "task"，从未生效；
+    // 子 Agent 的开关 / 并发 / 超时现在由 SubAgentExecutionService.SpawnAsync 执行，
+    // 工具名单由 ToolResolver 执行。槽位刻意留空不复用。
 
     /// <summary>循环检测 (Phase 1)</summary>
     public const int LoopDetection = 650;

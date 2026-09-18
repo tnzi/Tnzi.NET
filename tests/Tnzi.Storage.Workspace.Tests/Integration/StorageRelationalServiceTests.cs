@@ -109,6 +109,47 @@ public class StorageRelationalServiceTests : WorkspaceIntegrationTestBase
         Assert.All(DbContext.FileShares, share => Assert.False(share.IsEnabled));
     }
 
+    // ==================== 建版本 / 还原版本后缩略图不能停在第一版 ====================
+
+    [Fact]
+    public async Task CreateVersionAsync_ResetsThumbnailPath()
+    {
+        // 建版本改写 Path / Size / Md5Hash 却不碰 ThumbnailPath：/thumbnail 永远发第一版的图。
+        // 旧对象的物理删除走 FileDeleteRequestedEvent（行更新之后），见 ThumbnailResetOrderingTests。
+        var service = CreateVersionService();
+        var file = await CreateStoredFileAsync("photo.png", "v1"u8.ToArray());
+        var thumbnailPath = await Storage.UploadAsync("thumb-of-v1.jpg", new MemoryStream("thumb"u8.ToArray()), "image/jpeg");
+        file.ThumbnailPath = thumbnailPath;
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var result = await service.CreateVersionAsync(file.Id, new MemoryStream("v2"u8.ToArray()), "second");
+
+        Assert.True(result.Succeeded, result.Message);
+        DbContext.ChangeTracker.Clear();
+        Assert.Null(DbContext.FileRecords.Single(f => f.Id == file.Id).ThumbnailPath);
+    }
+
+    [Fact]
+    public async Task RestoreVersionAsync_ResetsThumbnailPath()
+    {
+        var service = CreateVersionService();
+        var file = await CreateStoredFileAsync("photo.png", "v1"u8.ToArray());
+        Assert.True((await service.CreateVersionAsync(file.Id, new MemoryStream("v2"u8.ToArray()), "second")).Succeeded);
+        var thumbnailPath = await Storage.UploadAsync("thumb-of-v2.jpg", new MemoryStream("thumb"u8.ToArray()), "image/jpeg");
+        DbContext.ChangeTracker.Clear();
+        var tracked = DbContext.FileRecords.Single(f => f.Id == file.Id);
+        tracked.ThumbnailPath = thumbnailPath;
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var result = await service.RestoreVersionAsync(file.Id, 1);
+
+        Assert.True(result.Succeeded, result.Message);
+        DbContext.ChangeTracker.Clear();
+        Assert.Null(DbContext.FileRecords.Single(f => f.Id == file.Id).ThumbnailPath);
+    }
+
     // ==================== T9: Version content download / delete ====================
 
     [Fact]

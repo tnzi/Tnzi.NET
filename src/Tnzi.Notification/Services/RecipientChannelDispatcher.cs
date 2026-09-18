@@ -3,8 +3,8 @@ using Message = Tnzi.Notification.Entities.Message;
 namespace Tnzi.Notification.Services;
 
 /// <summary>
-/// 把一条已经定稿的消息投递给一个收件人：按 <see cref="Message.Type"/> 选渠道，
-/// 套上单次投递的超时，返回这一次投递的结果。
+/// 把一条已经定稿的消息投递给一个收件人：按 <see cref="Message.Type"/> 选渠道、按
+/// <see cref="Message.ProviderKey"/> 选该渠道上的发送器，套上单次投递的超时，返回这一次投递的结果。
 /// </summary>
 /// <remarks>
 /// 与 <see cref="NotificationService"/> 分开，是因为两者管的是不同的事：那边管流程
@@ -13,32 +13,29 @@ namespace Tnzi.Notification.Services;
 /// </remarks>
 internal sealed class RecipientChannelDispatcher
 {
-    private readonly IEmailSender _emailSender;
-    private readonly ISmsSender _smsSender;
-    private readonly IPushSender _pushSender;
-    private readonly IFaxSender _faxSender;
+    private readonly INotificationProviderResolver _providers;
     private readonly IOptionsMonitor<NotificationOptions> _optionsMonitor;
     private readonly INotificationOptOutService _optOutService;
     private readonly ILogger _logger;
+    private readonly IFileContentReader? _fileContentReader;
+
+    /// <summary>从存储流读附件时的分块大小（与 <c>Stream.CopyToAsync</c> 的默认缓冲一致）。</summary>
+    private const int CopyChunkBytes = 81920;
 
     private NotificationOptions Options => _optionsMonitor.CurrentValue;
 
     public RecipientChannelDispatcher(
-        IEmailSender emailSender,
-        ISmsSender smsSender,
-        IPushSender pushSender,
-        IFaxSender faxSender,
+        INotificationProviderResolver providers,
         IOptionsMonitor<NotificationOptions> optionsMonitor,
         INotificationOptOutService optOutService,
-        ILogger logger)
+        ILogger logger,
+        IFileContentReader? fileContentReader = null)
     {
-        _emailSender = Check.NotNull(emailSender);
-        _smsSender = Check.NotNull(smsSender);
-        _pushSender = Check.NotNull(pushSender);
-        _faxSender = Check.NotNull(faxSender);
+        _providers = Check.NotNull(providers);
         _optionsMonitor = Check.NotNull(optionsMonitor);
         _optOutService = Check.NotNull(optOutService);
         _logger = Check.NotNull(logger);
+        _fileContentReader = fileContentReader;
     }
 
     /// <summary>
@@ -53,11 +50,54 @@ internal sealed class RecipientChannelDispatcher
         return notification.Type switch
         {
             NotificationType.Email => await SendEmailAsync(notification, recipient, cts.Token),
-            NotificationType.Sms => await _smsSender.SendToAsync(recipient.Address, notification.Content, cts.Token),
-            NotificationType.Push => await _pushSender.SendToAsync(recipient.Address, notification.Subject, notification.Content, cts.Token),
+            NotificationType.Sms => await SendSmsAsync(notification, recipient, cts.Token),
+            NotificationType.Push => await SendPushAsync(notification, recipient, cts.Token),
             NotificationType.Fax => await SendFaxAsync(notification, recipient, cts.Token),
             _ => new SendResult { Success = false, FailureReason = $"Unsupported notification type: {notification.Type}" }
         };
+    }
+
+    /// <summary>
+    /// 取这条消息在 <typeparamref name="TSender"/> 渠道上的发送器；取不到时返回 <see langword="null"/>
+    /// 并把原因写进 <paramref name="failure"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>取不到就是这一次投递失败，不退回默认发送器。</b>键在创建时校验过，走到这里还取不到，
+    /// 说明配置在两次之间变了（删掉了那一节、或没加载提供实现的模块）。换一家发出去看着是成功，
+    /// 而调用方指定这一家是有原因的。失败原因逐收件人写进投递报告，修好配置后重试即可。
+    /// </remarks>
+    private TSender? ResolveSender<TSender>(Message notification, out SendResult? failure) where TSender : class
+    {
+        var sender = _providers.Resolve<TSender>(notification.ProviderKey);
+        if (sender != null)
+        {
+            failure = null;
+            return sender;
+        }
+
+        _logger.LogError(
+            "Notification {NotificationId} names provider {ProviderKey} for {Channel}, but no such sender is registered.",
+            notification.Id, notification.ProviderKey ?? NotificationProviderKeys.Default, notification.Type);
+        failure = SendResult.CreateFailure(NotificationProviderProfiles.NotRegisteredMessage(notification.Type, notification.ProviderKey));
+        return null;
+    }
+
+    private async Task<SendResult> SendSmsAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
+    {
+        var sender = ResolveSender<ISmsSender>(notification, out var failure);
+        if (sender == null)
+            return failure!;
+
+        return await sender.SendToAsync(recipient.Address, notification.Content, cancellationToken);
+    }
+
+    private async Task<SendResult> SendPushAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
+    {
+        var sender = ResolveSender<IPushSender>(notification, out var failure);
+        if (sender == null)
+            return failure!;
+
+        return await sender.SendToAsync(recipient.Address, notification.Subject, notification.Content, cancellationToken);
     }
 
     /// <summary>
@@ -79,28 +119,35 @@ internal sealed class RecipientChannelDispatcher
                 "Combine the documents into a single PDF first (IPdfCombiner in Tnzi.Documents).");
         }
 
-        var source = attachments.First();
-        var document = new EmailAttachment
-        {
-            FileName = source.FileName,
-            FilePath = source.FilePath,
-            ContentType = source.ContentType
-        };
+        var materialised = await MaterialiseAttachmentAsync(attachments.First(), cancellationToken);
+        if (materialised.Failure != null)
+            return SendResult.CreateFailure(materialised.Failure);
 
-        return await _faxSender.SendToAsync(recipient.Address, document, notification.Subject, cancellationToken);
+        var sender = ResolveSender<IFaxSender>(notification, out var failure);
+        if (sender == null)
+            return failure!;
+
+        return await sender.SendToAsync(recipient.Address, materialised.Attachment!, notification.Subject, cancellationToken);
     }
 
     private async Task<SendResult> SendEmailAsync(Message notification, Recipient recipient, CancellationToken cancellationToken)
     {
+        var sender = ResolveSender<IEmailSender>(notification, out var failure);
+        if (sender == null)
+            return failure!;
+
         List<EmailAttachment>? emailAttachments = null;
         if (notification.Attachments?.Count > 0)
         {
-            emailAttachments = notification.Attachments.Select(a => new EmailAttachment
+            emailAttachments = new List<EmailAttachment>(notification.Attachments.Count);
+            foreach (var source in notification.Attachments)
             {
-                FileName = a.FileName,
-                FilePath = a.FilePath,
-                ContentType = a.ContentType
-            }).ToList();
+                var materialised = await MaterialiseAttachmentAsync(source, cancellationToken);
+                if (materialised.Failure != null)
+                    return SendResult.CreateFailure(materialised.Failure);
+
+                emailAttachments.Add(materialised.Attachment!);
+            }
         }
 
         var headers = BuildUnsubscribeHeaders(notification, recipient);
@@ -110,12 +157,72 @@ internal sealed class RecipientChannelDispatcher
         // 「无信头 → SendToAsync」正是契约说的那件事。而对一个重写了该方法的自定义发送器来说，
         // 把不带信头的绝大多数投递也赶进那条较新、跑得较少的路径，是纯粹多出来的风险。
         return headers == null
-            ? await _emailSender.SendToAsync(
+            ? await sender.SendToAsync(
                 recipient.Address, recipient.Name, notification.Subject, notification.Content,
                 notification.IsHtml, emailAttachments, cancellationToken)
-            : await _emailSender.SendToWithHeadersAsync(
+            : await sender.SendToWithHeadersAsync(
                 recipient.Address, recipient.Name, notification.Subject, notification.Content,
                 notification.IsHtml, emailAttachments, headers, cancellationToken);
+    }
+
+    /// <summary>
+    /// 把一条附件实体变成发送器能装的 <see cref="EmailAttachment"/>：带 <c>FileId</c> 的以系统身份从存储读成字节，
+    /// 其余原样转 <c>FilePath</c>（由发送器按来源纪律取件）。
+    /// </summary>
+    /// <remarks>
+    /// ★★ <c>Attachment.FileId</c>（<c>[FileField]</c>）从建表起就在，却从没被解析过：派发只转 <c>FilePath</c>，
+    /// 而 Storage 承载的产物的 <c>FilePath</c> 是存储相对键、URL 又要鉴权，内置发送器两者都装不上 ——
+    /// 发票邮件正文写着「请查收附件」，附件却一次也没发出去过。读不到就是这一次投递<b>失败</b>，
+    /// 不发一封少了附件的信：那与「发出去了」在收件人眼里是两件事，在日志里却是同一条。
+    /// 字节上限沿用 <see cref="AttachmentOptions.MaxAttachmentBytes"/>，与本地 / 远程附件同一道闸。
+    /// </remarks>
+    private async Task<(EmailAttachment? Attachment, string? Failure)> MaterialiseAttachmentAsync(Attachment source, CancellationToken cancellationToken)
+    {
+        if (source.FileId is not { } fileId || fileId == Guid.Empty)
+        {
+            return (new EmailAttachment
+            {
+                FileName = source.FileName,
+                FilePath = source.FilePath,
+                ContentType = source.ContentType
+            }, null);
+        }
+
+        if (_fileContentReader == null)
+        {
+            _logger.LogWarning("Attachment {FileName} references stored file {FileId}, but no IFileContentReader is registered (Tnzi.Storage not loaded).",
+                source.FileName, fileId);
+            return (null, $"Attachment '{source.FileName}' references stored file {fileId}, but no IFileContentReader is registered: load Tnzi.Storage.");
+        }
+
+        var limit = Options.Attachments.MaxAttachmentBytes;
+        await using var stream = await _fileContentReader.OpenReadAsync(fileId, cancellationToken);
+        if (stream == null)
+        {
+            _logger.LogWarning("Attachment {FileName} references stored file {FileId}, which could not be read.", source.FileName, fileId);
+            return (null, $"Attachment '{source.FileName}' references stored file {fileId}, which could not be read.");
+        }
+
+        using var buffer = new MemoryStream();
+        var chunk = new byte[CopyChunkBytes];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+        {
+            if (buffer.Length + read > limit)
+            {
+                _logger.LogWarning("Attachment {FileName} (stored file {FileId}) exceeds the size limit of {Limit} bytes.", source.FileName, fileId, limit);
+                return (null, $"Attachment '{source.FileName}' exceeds Notification:Attachments:MaxAttachmentBytes ({limit}).");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return (new EmailAttachment
+        {
+            FileName = source.FileName,
+            Content = buffer.ToArray(),
+            ContentType = source.ContentType
+        }, null);
     }
 
     /// <summary>

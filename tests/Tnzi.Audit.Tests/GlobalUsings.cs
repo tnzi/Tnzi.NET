@@ -32,3 +32,5 @@ global using Tnzi.TestBase;
 global using Xunit;
 global using Tnzi.Utilities;
 global using Tnzi.EFCore.Encryption;
+global using Tnzi.Data;
+global using Tnzi.Results;

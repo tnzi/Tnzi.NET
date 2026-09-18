@@ -7,9 +7,9 @@ public class BroadcastLogConfiguration : EntityTypeConfigurationBase<BroadcastLo
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
         if (multiTenancyEnabled) builder.HasIndex(b => b.TenantId);
 
-        builder.Property(b => b.Content).HasMaxLength(4000).IsRequired();
+        builder.Property(b => b.Content).HasMaxLength(ChatFieldLimits.MessageContent).IsRequired();
         builder.Property(b => b.TargetSummary).HasMaxLength(200);
-        builder.Property(b => b.Source).HasMaxLength(128);
+        builder.Property(b => b.Source).HasMaxLength(ChatFieldLimits.BroadcastSource);
         builder.HasIndex(b => b.CreationTime);
     }
 }

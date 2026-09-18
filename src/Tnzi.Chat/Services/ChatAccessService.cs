@@ -41,16 +41,25 @@ public class ChatAccessService : ApplicationService, IChatAccessService
         return id is null ? Task.FromResult(false) : CanUseAsync(id.Value);
     }
 
+    /// <summary>
+    /// 名单里**没有** <c>chat.use</c> 的子集。
+    ///
+    /// ★ 走 <see cref="IFunctionAuthorizationService.FilterGrantedAsync"/> 一次批量判定，
+    /// 不是逐个 <c>IsGrantedAsync</c> 循环：每次单查至少一次无缓存的角色查询，而通讯录搜索、
+    /// 群发、会话列表都经这里 —— 逐个循环会把一个请求放大成 O(N) 次 DB 往返。
+    /// 与 <see cref="CanUseAsync"/> 同一判定源（<c>PermissionChecker</c> 本就委托给它）。
+    /// </summary>
     public async Task<IReadOnlySet<Guid>> FilterDisabledAsync(IEnumerable<Guid> userIds)
     {
         var ids = userIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? new List<Guid>();
         var disabled = new HashSet<Guid>();
         if (!GateActive || ids.Count == 0) return disabled;
 
+        var granted = await _functionAuthorization!.FilterGrantedAsync(ids, UsePermission)
+            ?? new HashSet<Guid>();
         foreach (var id in ids)
         {
-            if (!await _permissionChecker!.IsGrantedAsync(id, UsePermission))
-                disabled.Add(id);
+            if (!granted.Contains(id)) disabled.Add(id);
         }
         return disabled;
     }

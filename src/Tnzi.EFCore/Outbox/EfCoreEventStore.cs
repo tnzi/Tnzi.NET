@@ -25,6 +25,11 @@ public class EfCoreEventStore : IEventStore
         var dbContext = GetDbContext();
         var actualType = @event.GetType();
 
+        // 兜底捕获环境租户：TenantId 随 EventData 一起落库，中继重发时 LocalEventBus 不会覆盖已有值、
+        // 分布式发布原样序列化，处理器那一侧才恢复得出来。经 PublishEventAsync 来的事件已在调用方作用域
+        // 捕获过，本行服务的是直接注入 IEventStore 的调用方（本类是 Scoped，拿到的就是调用方的作用域）
+        EventTenantContext.Capture(@event, _serviceProvider);
+
         // 始终使用运行时类型的 AssemblyQualifiedName 存储，确保 Type.GetType() 跨程序集解析正确
         // 调用方传入的 eventType 可作为查询/路由用途，但序列化存储必须用完整类型名
         var resolvedEventType = actualType.AssemblyQualifiedName ?? actualType.FullName!;

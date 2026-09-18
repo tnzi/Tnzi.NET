@@ -208,6 +208,10 @@ const props = withDefaults(
     agentName?: string
     /** Small label rendered after the agent name (e.g. "Pro", "Lite"). */
     agentLabel?: string
+    /** Show the tool-call cards a turn reports (live and on reopen). Default true. */
+    showToolCalls?: boolean
+    /** Show the token line under each answer. Default false. */
+    showUsage?: boolean
 
     // ── Locale ──────────────────────────────────────────────────────────
     /**
@@ -373,6 +377,8 @@ const props = withDefaults(
     composerAccept: DEFAULT_COMPOSER_ACCEPT,
     voiceLang: 'en-US',
     agentName: 'Assistant',
+    showToolCalls: true,
+    showUsage: false,
     locales: () => [],
     locale: '',
     showLanding: true,
@@ -1154,6 +1160,8 @@ function onArtifactWidthChange(w: number): void {
                 :message="msg"
                 :agent-name="agentName"
                 :agent-label="agentLabel"
+                :show-tool-calls="showToolCalls"
+                :show-usage="showUsage"
                 :copied="copiedId === msg.id"
                 @copy="onCopyMessage(msg)"
                 @regenerate="emit('regenerate', $event)"

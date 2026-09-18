@@ -14,9 +14,6 @@ public class McpServerStatusDto
     /// <summary>Whether authentication is required</summary>
     public bool RequireAuthentication { get; set; }
 
-    /// <summary>Whether rate-limit keys are partitioned per tenant (not execution isolation)</summary>
-    public bool RateLimitPerTenant { get; set; }
-
     /// <summary>Rate limit per minute</summary>
     public int RateLimitPerMinute { get; set; }
 

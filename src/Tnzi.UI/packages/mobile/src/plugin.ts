@@ -5,7 +5,7 @@
  */
 
 import type { App, Plugin } from 'vue';
-import { Locale } from 'vant';
+import Vant, { Locale } from 'vant';
 import zhCN from 'vant/es/locale/lang/zh-CN';
 import enUS from 'vant/es/locale/lang/en-US';
 import { provideI18n } from '@tnzi/core/adapters/i18n';
@@ -27,7 +27,12 @@ export type TnziMobileLocale = 'zh-CN' | 'en-US';
 export interface TnziMobileOptions {
   /** Locale for Vant strings and @tnzi/core i18n (default: 'en-US') */
   locale?: TnziMobileLocale;
-  /** Whether to register components globally (default: true) */
+  /**
+   * Whether to register components globally (default: true). This covers the
+   * T* components and, because their templates resolve `<van-*>` tags
+   * globally, Vant itself. Switch it off to register selectively; Vant is
+   * then yours to install as well.
+   */
   registerComponents?: boolean;
   /** vue-router instance for runtime adapter */
   router?: VantRuntimeAdapterOptions['router'];
@@ -58,6 +63,14 @@ export function createTnziMobile(options: TnziMobileOptions = {}): Plugin {
       Locale.use(locale, locale === 'en-US' ? enUS : zhCN);
 
       if (registerComponents) {
+        // The T* templates use <van-field> and friends as global tags, so a T*
+        // component without Vant registered renders as empty custom elements:
+        // no <form>, no <input>, a submit that never fires - and only a dev-mode
+        // warning to say so. Skipped when the consumer already installed Vant,
+        // which would otherwise draw Vue's "already applied" warning.
+        if (!app.component('VanField')) {
+          app.use(Vant);
+        }
         registerAllComponents(app);
       }
 

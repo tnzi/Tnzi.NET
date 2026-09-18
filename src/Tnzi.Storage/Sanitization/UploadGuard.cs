@@ -12,6 +12,13 @@ namespace Tnzi.Storage.Sanitization;
 /// 而这类「手抄的清单会一条一条地漂」正是本仓反复记录过的失效形态。
 /// </para>
 /// <para>
+/// ★ 净化管线（<see cref="RunAsync"/>）覆盖的是<b>每一条</b>把调用方 / 上传者的字节交给 provider 的路径：
+/// 直传 <c>SaveAsync</c>、MD5 直存 <c>GetOrCreateByMd5Async</c>、解压 <c>DecompressAsync</c> 的每个条目、
+/// 分片完成、建新版本 —— 五条。前一段落里说「三条」的那次提取漏掉了解压与 MD5 直存（解压只落了扩展名闸门），
+/// 现由 <c>UploadSanitizationCallSiteGateTests</c> 按源码守着：任何 <c>UploadAsync</c> 调用点所在的方法都必须
+/// 先跑过 <c>RunAsync</c>，除非那些字节本就来自已经落库的记录（复制 / 打包 / 缩略图 / 按原键重传 / 分片临时块）。
+/// </para>
+/// <para>
 /// ★ 体积与扩展名<b>刻意分成两个方法</b>而不是捆在一起：分片上传是文档里明确推荐给超大文件的
 /// 通道（见 <c>docs/modules/storage.md</c>），对它套用 <c>MaxFileSize</c> 会打断按文档办事的部署。
 /// 那条路径因此只过扩展名与净化管线 —— 需要拦体积的场景由请求体上限在更外层兜底。

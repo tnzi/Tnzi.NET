@@ -45,6 +45,19 @@ public interface IPromotionService
     Task<Result<CouponValidationResultDto>> ValidateCouponAsync(CouponApplyContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 这个用户现在能不能用「仅限首次订阅」的券。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>这是 <see cref="ValidateCouponAsync"/> 里那道首单守卫用的同一个判定</b>，预检端点
+    /// （<c>GET /promotions/first-subscription-check</c>）也走它 —— 两边此前是两份判据
+    /// （预检查「用没用过首单券」，核销查「有没有订阅记录」），老订户被收银台先承诺再拒绝，
+    /// 用过一张首单券但从没订成的人则被界面藏掉入口。判据向续费域的
+    /// <see cref="ISubscriptionHistoryProbe"/> 提问；探针缺席（没装续费包）= 没有人订阅过 = 对所有人成立。
+    /// 服务间调用，返回裸 <see cref="bool"/>。
+    /// </remarks>
+    Task<bool> IsFirstSubscriptionEligibleAsync(Guid userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 计算折扣（校验通过后按促销规则算出折扣金额）
     /// </summary>
     Task<Result<DiscountCalculationResultDto>> CalculateDiscountAsync(CouponApplyContext context, CancellationToken cancellationToken = default);

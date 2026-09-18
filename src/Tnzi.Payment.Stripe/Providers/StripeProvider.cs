@@ -290,6 +290,57 @@ public class StripeProvider : IPaymentProvider
         return await QueryPaymentAsync(tradeNo);
     }
 
+    public bool SupportsPaymentCancellation => true;
+
+    /// <summary>
+    /// 作废 PaymentIntent。已作废 / 不存在视为成功（幂等）；**已付掉必须失败**（服务层随后把它记成功而不是关单）。
+    /// </summary>
+    /// <remarks>
+    /// Stripe 对状态不允许作废的 intent 抛 <c>payment_intent_unexpected_state</c>，错误体里带着当前的 intent：
+    /// 以它的状态区分「已经死了」与「已经付了」，不用再查一次。
+    /// PaymentIntent 不会自己过期（Checkout Session 才会）：本地过期而不作废它，付款人几天后打开旧收银台照样付得进去。
+    /// </remarks>
+    public async Task<Result> CancelPaymentAsync(string tradeNo)
+    {
+        try
+        {
+            var service = new PaymentIntentService(GetClient());
+            var intentId = tradeNo;
+            if (!tradeNo.StartsWith("pi_", StringComparison.Ordinal))
+            {
+                // 落库前进程死掉的单只有内部 TradeNo：按元数据找它，找不到 = 渠道侧没有可付的东西
+                var found = await service.SearchAsync(new PaymentIntentSearchOptions
+                {
+                    Query = $"metadata['TradeNo']:'{EscapeSearchValue(tradeNo)}'"
+                });
+                var match = found.Data.FirstOrDefault();
+                if (match == null)
+                    return Result.Success();
+                intentId = match.Id;
+            }
+
+            var cancelled = await service.CancelAsync(intentId, new PaymentIntentCancelOptions { CancellationReason = "abandoned" });
+            return string.Equals(cancelled.Status, "canceled", StringComparison.Ordinal)
+                ? Result.Success()
+                : Result.Failure(ErrorCodes.StripePaymentCancelFailed, 400);
+        }
+        catch (StripeException ex) when (ex.HttpStatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("Stripe payment intent {Id} no longer exists; nothing to void.", tradeNo);
+            return Result.Success();
+        }
+        catch (StripeException ex) when (ex.StripeError?.PaymentIntent?.Status == "canceled")
+        {
+            return Result.Success();
+        }
+        catch (StripeException ex)
+        {
+            _logger.LogWarning(ex, "Stripe payment intent {Id} could not be voided (intent status {Status}).",
+                tradeNo, ex.StripeError?.PaymentIntent?.Status);
+            return Result.Failure(ErrorCodes.StripePaymentCancelFailed, 400);
+        }
+    }
+
     public async Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo)
     {
         // ClientSecret 只在建单那一刻随创建结果返回过一次，用户刷新收银台就丢了。
@@ -377,8 +428,24 @@ public class StripeProvider : IPaymentProvider
             var paymentMethod = await service.GetAsync(input.PaymentMethodToken);
 
             var customerId = input.ProviderCustomerId;
-            if (string.IsNullOrWhiteSpace(customerId))
+            if (string.IsNullOrWhiteSpace(customerId) && !string.IsNullOrWhiteSpace(paymentMethod.CustomerId))
             {
+                // ★ 本地还没有渠道客户（首次绑卡），而 token 已经挂在某个 customer 名下。
+                //   此前这里直接把那个 customer 当作比对基准，下面再拿它与 paymentMethod.CustomerId 比 —— 恒等，
+                //   归属守卫在这条路径上自我抵消：知道别人 pm_ 标识的用户绑定成功，且从此以卡主的 customer 续费扣款。
+                //   合法的首次绑卡到这里时 pm 也已经带着 customer（SetupIntent 建在新建客户名下，Stripe 确认时就挂上了），
+                //   所以不能要求「未挂任何 customer」；判据是那个 customer 是不是本系统为**这个用户**建的：
+                //   CreateCustomerAsync 写了 Metadata["UserId"]。缺失或不等一律拒绝，方向关闭。
+                var customer = await new CustomerService(client).GetAsync(paymentMethod.CustomerId);
+                var violation = DescribeCustomerOwnershipViolation(customer, input.UserId);
+                if (violation != null)
+                {
+                    _logger.LogWarning(
+                        "Stripe payment method {PaymentMethodId} is attached to customer {CustomerId}, which is not the caller's ({UserId}): {Reason}",
+                        paymentMethod.Id, paymentMethod.CustomerId, input.UserId, violation);
+                    return Result.Failure<PaymentProviderPaymentMethodResult>(ErrorCodes.PaymentMethodBindingFailed, 403);
+                }
+
                 customerId = paymentMethod.CustomerId;
             }
 
@@ -501,6 +568,28 @@ public class StripeProvider : IPaymentProvider
                 FailReason = ex.StripeError?.Message ?? ex.Message
             });
         }
+    }
+
+    /// <summary>
+    /// <paramref name="customer"/> 是不是本系统为 <paramref name="userId"/> 建的客户；是则返回 <see langword="null"/>，
+    /// 否则返回一句写进日志的原因。
+    /// </summary>
+    /// <remarks>
+    /// 判据是 <see cref="CreateCustomerAsync"/> 写下的 <c>Metadata["UserId"]</c>。★ 缺失不等于放行：
+    /// 一个不是本系统建的（或已删除的）customer 上挂着的卡，本系统无从证明它属于调用者。
+    /// 与 PayPal 侧按 <c>merchant_customer_id</c> 的校验同形；纯函数，便于不触网断言。
+    /// </remarks>
+    internal static string? DescribeCustomerOwnershipViolation(Customer? customer, Guid userId)
+    {
+        if (customer == null || customer.Deleted == true)
+            return "the customer does not exist or has been deleted";
+
+        if (customer.Metadata == null || !customer.Metadata.TryGetValue("UserId", out var owner) || string.IsNullOrWhiteSpace(owner))
+            return "the customer carries no UserId metadata, so it was not created for this user by this system";
+
+        return string.Equals(owner, userId.ToString(), StringComparison.OrdinalIgnoreCase)
+            ? null
+            : "the customer was created for a different user";
     }
 
     private static async Task<string> CreateCustomerAsync(StripeClient client, Guid userId, string? name, string? email)

@@ -58,6 +58,8 @@ public class ImagingModule : TnziInfrastructureModule
 
         // 注册滑动验证码服务
         context.Services.TryAddScoped<ISlidingCaptchaService, SlidingCaptchaService>();
+        // 滑块作为一家 ICaptchaProvider（名字 sliding）：核销验证通过时签出的通行令牌。选不选它由 AspNetCore:Captcha:Provider 决定。
+        context.Services.AddCaptchaProvider<SlidingCaptchaProvider>();
 
         // 图像编辑（遮挡 / 模糊 / 裁切 / 缩放）。契约在核心，消费方可选注入；
         // 单例是因为它不持有任何状态，每次调用自带全部输入。

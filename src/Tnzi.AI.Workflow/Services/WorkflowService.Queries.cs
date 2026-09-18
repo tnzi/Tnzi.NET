@@ -134,6 +134,13 @@ public partial class WorkflowService
         };
     }
 
+    /// <summary>
+    /// 把引擎给出的终态写回 <c>WorkflowExecution</c> 行。★ 引擎自己的结局是权威的：看门狗若在执行期间
+    /// 误判回收过这一行（Failed / timed_out / 假的 CompletedTime），这里**覆盖**而不是 <c>??=</c> 保留 ——
+    /// 否则 DurationMs 会按那个假的结束时刻算；且看门狗那次写会推进并发标记，本作用域从插入起就跟踪着
+    /// 这个实体、原始标记已过期，直接保存会撞 <see cref="DbUpdateConcurrencyException"/> 然后被吞成一条
+    /// Warning，行就永远停在 timed_out。撞上时重读一次再按本方法的意图重写。
+    /// </summary>
     private async Task TryUpdateWorkflowExecutionStatusAsync(string executionId, WorkflowExecutionStatus status, CancellationToken ct, string? currentWaitReason = null)
     {
         try
@@ -144,25 +151,47 @@ public partial class WorkflowService
                 return;
             }
 
-            entity.Status = status;
-            entity.CurrentWaitReason = currentWaitReason;
-            var now = DateTime.UtcNow;
-            entity.UpdatedTime = now;
-            if (status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
-            {
-                entity.CompletedTime ??= now;
-                // 计算执行耗时
-                if (entity.StartedAt.HasValue)
-                {
-                    entity.DurationMs = (long)(entity.CompletedTime.Value - entity.StartedAt.Value).TotalMilliseconds;
-                }
-            }
+            ApplyTerminalStatus(entity, status, currentWaitReason);
 
-            await _executionRepository.UpdateAsync(entity, ct);
+            try
+            {
+                await _executionRepository.UpdateAsync(entity, ct);
+            }
+            catch (DbUpdateConcurrencyException conflict)
+            {
+                foreach (var entry in conflict.Entries)
+                {
+                    await entry.ReloadAsync(ct);
+                    if (entry.Entity is WorkflowExecution reloaded)
+                    {
+                        ApplyTerminalStatus(reloaded, status, currentWaitReason);
+                        entry.State = EntityState.Modified;
+                    }
+                }
+
+                await _executionRepository.SaveChangesAsync(ct);
+                Logger.LogInformation("Workflow execution {ExecutionId} was modified concurrently (watchdog?) before its terminal update; re-applied {Status} on the reloaded row.", executionId, status);
+            }
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to update workflow execution status: {ExecutionId} -> {Status}", executionId, status);
+        }
+    }
+
+    private static void ApplyTerminalStatus(WorkflowExecution entity, WorkflowExecutionStatus status, string? currentWaitReason)
+    {
+        var now = DateTime.UtcNow;
+        entity.Status = status;
+        entity.CurrentWaitReason = currentWaitReason;
+        entity.UpdatedTime = now;
+        if (status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
+        {
+            entity.CompletedTime = now;
+            if (entity.StartedAt.HasValue)
+            {
+                entity.DurationMs = (long)(now - entity.StartedAt.Value).TotalMilliseconds;
+            }
         }
     }
 

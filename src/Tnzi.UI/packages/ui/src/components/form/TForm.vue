@@ -15,6 +15,12 @@ interface Props {
   labelPlacement?: 'left' | 'top'
   disabled?: boolean
   showRequireMark?: boolean
+  /**
+   * Control size. Unset by default so naive resolves it from the nearest
+   * `componentOptions`: `medium` on a page, `small` inside `TModalShell` /
+   * `TDrawerShell`. A hard `medium` here would pin the form to medium inside
+   * every overlay, which is exactly the one place the density is decided.
+   */
   size?: 'small' | 'medium' | 'large'
 }
 
@@ -23,7 +29,7 @@ const props = withDefaults(defineProps<Props>(), {
   labelPlacement: 'top',
   disabled: false,
   showRequireMark: true,
-  size: 'medium',
+  size: undefined,
 })
 
 const emit = defineEmits<{

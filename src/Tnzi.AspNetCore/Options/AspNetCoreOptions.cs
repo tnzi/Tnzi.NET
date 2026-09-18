@@ -190,9 +190,11 @@ public class AspNetCoreOptions
 
     /// <summary>
     /// 获取或设置 Controller 过滤选项
-    /// 用于按名称通配符或程序集名称禁用特定 Controller
+    /// 用于按名称通配符或程序集名称禁用特定 Controller。
+    /// 恒非空：<see cref="ControllerFilterOptions.ControllerPredicate"/> 只能经
+    /// <c>PostConfigure&lt;AspNetCoreOptions&gt;</c> 设置，没有配置节时也得有对象可写。
     /// </summary>
-    public ControllerFilterOptions? ControllerFilter { get; set; }
+    public ControllerFilterOptions ControllerFilter { get; set; } = new();
 }
 
 /// <summary>

@@ -39,6 +39,7 @@ global using Tnzi.Storage.Dtos;
 // 父模块的核心实体（FileRecord / FileReference）—— 本模块的四个服务都要读写它们，
 // 这正是「子引用父」的方向。父模块反过来对本模块的实体一无所知。
 global using Tnzi.Storage.Entities;
+global using Tnzi.Storage.Events;
 global using Tnzi.Storage.Helpers;
 global using Tnzi.Storage.Options;
 global using Tnzi.Storage.Permissions;

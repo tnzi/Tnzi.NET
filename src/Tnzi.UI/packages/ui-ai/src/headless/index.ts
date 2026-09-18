@@ -45,8 +45,17 @@ export { useAutoGrowTextarea } from './useAutoGrowTextarea';
 export { useBodyScrollLock } from './useBodyScrollLock';
 export { useGlobalAiTheme, AI_THEME_SCOPE } from './useGlobalAiTheme';
 export type { UseGlobalAiThemeOptions, UseGlobalAiThemeReturn } from './useGlobalAiTheme';
+export { useAuthPage } from './useAuthPage';
+export type { UseAuthPageOptions, UseAuthPageReturn, AuthStep } from './useAuthPage';
 export { useChatThreads } from './useChatThreads';
 export type { UseChatThreadsOptions, UseChatThreadsReturn } from './useChatThreads';
+export { filesToContentParts, AttachmentRefusedError } from './attachment-parts';
+export type {
+  FilesToContentPartsOptions,
+  ContentPartsResult,
+  ChatContentPart,
+  UploadedAttachment,
+} from './attachment-parts';
 export { useAiPersonalization } from './useAiPersonalization';
 export type {
   UseAiPersonalizationOptions,

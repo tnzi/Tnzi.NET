@@ -14,6 +14,7 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
 {
     private readonly IRepository<SalaryComponent, Guid> _componentRepository;
     private readonly IRepository<SalaryStructureLine, Guid> _lineRepository;
+    private readonly IReadOnlyRepository<PayslipLine, Guid> _payslipLineRepository;
     private readonly ISalaryFormulaEvaluator _evaluator;
     private readonly IEnumerable<IPayslipCalculationHook> _hooks;
 
@@ -21,11 +22,13 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
         IServiceProvider serviceProvider,
         IRepository<SalaryComponent, Guid> componentRepository,
         IRepository<SalaryStructureLine, Guid> lineRepository,
+        IReadOnlyRepository<PayslipLine, Guid> payslipLineRepository,
         ISalaryFormulaEvaluator evaluator,
         IEnumerable<IPayslipCalculationHook> hooks) : base(serviceProvider)
     {
         _componentRepository = Check.NotNull(componentRepository);
         _lineRepository = Check.NotNull(lineRepository);
+        _payslipLineRepository = Check.NotNull(payslipLineRepository);
         _evaluator = Check.NotNull(evaluator);
         _hooks = Check.NotNull(hooks);
     }
@@ -88,6 +91,19 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
         if (!validation.Succeeded)
             return Fail<SalaryComponentDto>(validation.Message ?? "Invalid salary component.", validation.Code ?? 400);
 
+        // ★ 编码是 Ytd() 的聚合键：工资单行快照的是 ComponentCode 字符串，YTD 按它分组、Ytd('CODE') 按它查，
+        // 查不到就取 0（这个员工今年还没有过这一项，是正常的）。年中改名之后 Ytd('新码') 只含改名后的批次，
+        // 改名前已扣的供款全部消失于基数 —— 法定上限永不封顶，没有任何报错。
+        // 判据与「被结构行引用禁删」相同：有历史就拒绝，另建一个组件。
+        var normalizedCode = input.Code.Trim().ToUpperInvariant();
+        if (!string.Equals(normalizedCode, component.Code, StringComparison.Ordinal)
+            && await _payslipLineRepository.AnyAsync(l => l.ComponentId == id, cancellationToken))
+        {
+            return Fail<SalaryComponentDto>(
+                "The component code cannot be changed once it appears on a payslip; year-to-date accumulation is keyed by code. Create a new component instead.",
+                409);
+        }
+
         Apply(component, input, input.IsActive);
 
         try
@@ -131,10 +147,9 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
             return Fail("Component name is required.");
         if (!Enum.IsDefined(input.Type))
             return Fail("Component type must be Earning, Deduction, EmployerContribution or Informational.");
-        // 备注项不进任何合计，负数在它身上产生不了荒谬的净额；其余三类的负默认额
-        // 等于一次没人申报的反向发放。
-        if (input.DefaultAmount is < 0 && input.Type != SalaryComponentType.Informational)
-            return Fail("DefaultAmount cannot be negative.");
+        // 符号规则只有 PayrollAmountRules 一份（计算器 / 一次性输入 / 外部摄取 / 钉死额同一判据）。
+        if (input.DefaultAmount is { } defaultAmount && PayrollAmountRules.IsNegativeMonetary(input.Type, defaultAmount))
+            return Fail("DefaultAmount cannot be negative for an Earning, Deduction or EmployerContribution component.");
         // 备注项不产生分录，所以挂在它上面的科目**永远不会被用到**。静默忽略一个
         // 明确填写的配置，比拒绝它更糟：填的人会以为自己已经把账接好了。
         if (input.Type == SalaryComponentType.Informational

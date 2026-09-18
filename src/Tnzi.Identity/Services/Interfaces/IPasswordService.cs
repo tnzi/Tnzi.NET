@@ -7,7 +7,12 @@ namespace Tnzi.Identity.Services;
 public interface IPasswordService
 {
     /// <summary>
-    /// 忘记密码（发送重置链接）
+    /// 忘记密码（发送重置链接）。控制器入口：启用 <c>Identity:Captcha:EnableCaptchaOnPasswordRecovery</c> 时先过人机验证，再委托到按邮箱的重载。
+    /// </summary>
+    Task<Result<string>> ForgotPasswordAsync(ForgotPasswordDto input);
+
+    /// <summary>
+    /// 忘记密码（发送重置链接），不含人机验证。供服务间调用；HTTP 入口应走带 DTO 的重载。
     /// </summary>
     Task<Result<string>> ForgotPasswordAsync(string email);
 

@@ -12,6 +12,12 @@ public interface IRunTracker
     Task UpdateRunOnFailureAsync(AgentRun run, Exception? ex, long durationMs, CancellationToken ct);
 
     /// <summary>
+    /// Finalize a non-streaming run that was cancelled (caller token or kill_agent). Writes Cancelled with
+    /// <paramref name="reason"/> as the error text and records a RunCancelled trace.
+    /// </summary>
+    Task UpdateRunOnCancelledAsync(AgentRun run, string reason, long durationMs, CancellationToken ct);
+
+    /// <summary>
     /// Finalize a streaming run that completed normally. Persists token usage, status,
     /// truncated response summary, and records a StreamCompleted trace.
     /// </summary>

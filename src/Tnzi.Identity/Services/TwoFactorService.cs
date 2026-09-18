@@ -430,6 +430,13 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         // 在重置 key 之前先迁移旧用户状态,避免新生成的未验证 key 被 legacy 回退误判为已启用。
         await MaterializeAsync(user);
 
+        // ★★ 已启用验证器的账号不许再登记：下一行会无条件重置密钥，于是一枚被盗的访问令牌
+        //   借这条路能把受害者的第二因子**换成攻击者自己的**（而不只是摘掉），受害者手里的
+        //   验证器当场作废。换验证器的正路是先经二次确认禁用旧的（DisableTotp 标了 [RequireStepUp]），
+        //   再登记新的。登录期 EnrollTotp 义务走的也是这个方法，但欠着那项义务的账号本就没启用 TOTP。
+        if (user.AuthenticatorTwoFactorEnabled)
+            return Fail<TotpSetupDto>("An authenticator is already enabled. Disable it before enrolling a new one.", 409, ErrorCodes.DATA_CONFLICT);
+
         // 重置并获取 authenticator key
         await _userManager.ResetAuthenticatorKeyAsync(user);
         var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);

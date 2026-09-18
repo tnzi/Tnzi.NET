@@ -26,7 +26,14 @@ public class EntityRole : MultiTenantAuditedEntity<Guid>
     public DataAuthOperation Operation { get; set; }
 
     /// <summary>
-    /// 获取或设置 过滤条件（JSON格式的查询条件）
+    /// <see cref="Filter"/> 列的长度上限。保存期按它 400，别指望数据库：宽松模式的 MySQL 会把超长串
+    /// 静默截断成半截 JSON，那半截在查询时是 deny-all（零行、一条 Warning），与「配错了」无法区分。
+    /// </summary>
+    public const int FilterMaxLength = 2000;
+
+    /// <summary>
+    /// 获取或设置 过滤条件（<see cref="FilterGroup"/> 的 JSON，方言见 <see cref="FilterGroupJson"/>；
+    /// 留空 = 不设限）
     /// </summary>
     public string? Filter { get; set; }
 

@@ -34,6 +34,21 @@ public static class ErrorCodes
     public const string PaymentCannotClose = "PAYMENT_CANNOT_CLOSE";
 
     /// <summary>
+    /// 关单时发现渠道侧已经收到钱：这笔支付被记成功而不是关闭
+    /// </summary>
+    public const string PaymentAlreadyPaid = "PAYMENT_ALREADY_PAID";
+
+    /// <summary>
+    /// 关单前读不到渠道侧状态（作废与查询都失败）：渠道侧可能仍可付款，本地不关，稍后重试
+    /// </summary>
+    public const string PaymentChannelStateUnknown = "PAYMENT_CHANNEL_STATE_UNKNOWN";
+
+    /// <summary>
+    /// 渠道没有作废支付意图的能力（<c>IPaymentProvider.CancelPaymentAsync</c> 的默认实现）
+    /// </summary>
+    public const string PaymentChannelCancelNotSupported = "PAYMENT_CHANNEL_CANCEL_NOT_SUPPORTED";
+
+    /// <summary>
     /// 只有成功的支付才能退款
     /// </summary>
     public const string PaymentCannotRefund = "PAYMENT_CANNOT_REFUND";
@@ -108,6 +123,11 @@ public static class ErrorCodes
     /// </summary>
     public const string PaymentCouponRequiresUser = "PAYMENT_COUPON_REQUIRES_USER";
 
+    /// <summary>
+    /// 该业务类型的支付只能由服务端业务模块发起（如订阅首付 / 补差），用户面端点不接受
+    /// </summary>
+    public const string PaymentBusinessTypeSystemOnly = "PAYMENT_BUSINESS_TYPE_SYSTEM_ONLY";
+
     #endregion
 
     #region Stripe Provider 错误码
@@ -121,6 +141,11 @@ public static class ErrorCodes
     /// Stripe支付查询失败
     /// </summary>
     public const string StripePaymentQueryFailed = "STRIPE_PAYMENT_QUERY_FAILED";
+
+    /// <summary>
+    /// Stripe 支付意图作废失败（已付掉的 intent 作废必然失败，服务层随后把它记成功）
+    /// </summary>
+    public const string StripePaymentCancelFailed = "STRIPE_PAYMENT_CANCEL_FAILED";
 
     /// <summary>
     /// Stripe退款失败
@@ -308,6 +333,21 @@ public static class ErrorCodes
     /// 该产品下已存在有效订阅
     /// </summary>
     public const string SubscriptionProductAlreadySubscribed = "SUBSCRIPTION_PRODUCT_ALREADY_SUBSCRIBED";
+
+    /// <summary>
+    /// 回流的支付不是订阅主自己付的，状态机拒绝推进
+    /// </summary>
+    public const string SubscriptionPaymentOwnerMismatch = "SUBSCRIPTION_PAYMENT_OWNER_MISMATCH";
+
+    /// <summary>
+    /// 回流的支付金额低于这一次该收的下界，状态机拒绝推进
+    /// </summary>
+    public const string SubscriptionPaymentAmountTooLow = "SUBSCRIPTION_PAYMENT_AMOUNT_TOO_LOW";
+
+    /// <summary>
+    /// 计划的试用折扣（金额）必须落在 [0, Price] 内
+    /// </summary>
+    public const string SubscriptionTrialDiscountOutOfRange = "SUBSCRIPTION_TRIAL_DISCOUNT_OUT_OF_RANGE";
 
     #endregion
 

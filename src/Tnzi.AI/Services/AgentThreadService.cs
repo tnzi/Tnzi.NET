@@ -263,7 +263,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
             // 用户归属校验：已认证用户只能访问自己创建的线程
             // CreatorId 为空的线程视为无主线程，已认证用户不可访问（防止跨用户泄漏）
-            var currentUserId = CurrentUser?.Id;
+            var currentUserId = ResolveRunOriginatorId();
             if (currentUserId.HasValue && threadEntity.CreatorId != currentUserId)
             {
                 Logger.LogWarning("Thread ownership mismatch: ThreadId={ThreadId}, CreatorId={CreatorId}, CurrentUserId={CurrentUserId}", threadId.Value, threadEntity.CreatorId, currentUserId);
@@ -312,10 +312,14 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // 再调用 SaveThreadSerializedDataAsync。后者会 GetAsync 拿到尚未持久化的实体
         // （ChangeTracker State=Added），然后 UpdateAsync 把状态翻转成 Modified，导致
         // SaveChanges 时 EF Core 发 UPDATE 而非 INSERT，得到 0 rows affected 并整事务回滚。
+        // ★ CreatorId 显式按运行发起人写，不交给审计钩子：钩子只在为 null 时填环境用户，而后台子运行
+        //   （spawn_agent）在父请求返回后建线程时作用域里没有环境用户，线程会落成无主；
+        //   上面的读路径与续跑前置的 IsOwnerAsync 都按发起人比对，无主线程对它们永远不满足。
         var newContext = new ConversationContext();
         var newEntity = new AgentThreadEntity
         {
             AgentId = agentId,
+            CreatorId = ResolveRunOriginatorId(),
             Title = $"Thread {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
             LastActivityTime = DateTime.UtcNow,
             SerializedData = newContext.Serialize()
@@ -327,6 +331,14 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         return (newContext, newEntity.Id, true);
     }
+
+    /// <summary>
+    /// 本轮运行的发起人：取当前运行请求的 UserId（DefaultChatController 已按环境用户收口；续跑以运行归属人的
+    /// 身份跑，后台子运行没有环境用户只有请求用户），没有正在执行的请求才退回环境用户。
+    /// 读路径的归属比对与新线程的 CreatorId 必须出自同一个答案，否则写进去的和查出来的不是同一个人。
+    /// </summary>
+    private Guid? ResolveRunOriginatorId()
+        => ServiceProvider.GetService<IAgentExecutionContextAccessor>()?.CurrentRequest?.UserId ?? CurrentUser?.Id;
 
     /// <summary>
     /// 保存消息到线程。<paramref name="messageId"/> 非空时使用该 ID 持久化；为空时由
@@ -552,6 +564,64 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return null;
 
         return userMessage.TruncateByTextElements(maxLength);
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(key);
+
+        var threadEntity = await _repository.GetAsync(threadId, ct);
+        if (threadEntity == null || string.IsNullOrWhiteSpace(threadEntity.Metadata))
+            return null;
+
+        var metadata = ParseMetadata(threadEntity.Metadata);
+        return metadata != null && metadata.TryGetValue(key, out var value) ? value.GetRawText() : null;
+    }
+
+    /// <inheritdoc />
+    public async Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default)
+    {
+        Check.NotNullOrWhiteSpace(key);
+
+        var threadEntity = await _repository.GetAsync(threadId, ct);
+        if (threadEntity == null)
+        {
+            Logger.LogWarning("Thread not found when writing metadata key {Key}: {ThreadId}", key, threadId);
+            return;
+        }
+
+        var metadata = ParseMetadata(threadEntity.Metadata) ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (valueJson == null)
+        {
+            if (!metadata.Remove(key)) return;
+        }
+        else
+        {
+            using var doc = JsonDocument.Parse(valueJson);
+            metadata[key] = doc.RootElement.Clone();
+        }
+
+        threadEntity.Metadata = metadata.Count == 0 ? null : JsonSerializer.Serialize(metadata);
+        await _repository.UpdateAsync(threadEntity);
+    }
+
+    /// <summary>
+    /// 把 <c>Metadata</c> 列解析成键值字典；不是 JSON 对象（历史数据 / 消费方自写的其它形状）时返回 null，
+    /// 写入方会从空字典重新开始 —— 这会覆盖掉非对象形状的旧值，故只在写入时发生并记日志。
+    /// </summary>
+    private Dictionary<string, JsonElement>? ParseMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogWarning(ex, "Thread metadata is not a JSON object; it will be replaced on the next write");
+            return null;
+        }
     }
 
     /// <summary>

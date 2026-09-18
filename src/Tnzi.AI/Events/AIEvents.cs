@@ -179,6 +179,28 @@ public class ApprovalRequestedEvent : EventBase
 }
 
 /// <summary>
+/// Agent 运行取消事件 - 运行被调用方或 kill_agent / 管理端 cancel 取消时发布（与 AgentRunCompletedEvent /
+/// AgentRunFailedEvent 互斥）。超时不算取消：那是运行没干完，走 AgentRunFailedEvent。
+/// </summary>
+public class AgentRunCancelledEvent : EventBase
+{
+    /// <summary>Run ID</summary>
+    public Guid? RunId { get; set; }
+    /// <summary>Agent ID (null for agent-less chat)</summary>
+    public Guid? AgentId { get; set; }
+    /// <summary>User ID</summary>
+    public Guid? UserId { get; set; }
+    /// <summary>Thread ID</summary>
+    public Guid? ThreadId { get; set; }
+    /// <summary>Why the run was cancelled (as recorded on the run)</summary>
+    public string Reason { get; set; } = string.Empty;
+    /// <summary>Execution duration in milliseconds before cancellation</summary>
+    public long DurationMs { get; set; }
+    /// <summary>Whether this was a streaming call</summary>
+    public bool IsStreaming { get; set; }
+}
+
+/// <summary>
 /// Agent 运行失败事件 - 当 AI 运行因异常终止时发布（与 AgentRunCompletedEvent 互斥）。可用于告警、自动重试策略判定、运维监控。
 /// </summary>
 public class AgentRunFailedEvent : EventBase

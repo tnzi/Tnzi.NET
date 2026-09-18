@@ -2,6 +2,7 @@
 *REMOVED*readonly Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.LogFileService -> Tnzi.Logging.Services.Interfaces.ILogFileService!
 *REMOVED*Tnzi.AspNetCore.Controllers.DefaultLogFileAdminController.DefaultLogFileAdminController(Tnzi.Logging.Services.Interfaces.ILogFileService! logFileService) -> void
 abstract Tnzi.AspNetCore.Mvc.CrudAdminControllerBase<TKey, TDto, TCreateDto, TUpdateDto>.PermissionPrefix.get -> string!
+const Tnzi.AspNetCore.Options.TenantResolverOptions.DefaultClaimType = "tenant_id" -> string!
 override Tnzi.AspNetCore.Middleware.Handlers.DefaultExceptionHandler.Priority.get -> int
 override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.Equals(object? obj) -> bool
 override Tnzi.AspNetCore.Services.RealtimeHubDescriptor.GetHashCode() -> int
@@ -158,3 +159,188 @@ override Tnzi.AspNetCore.Options.AspNetCoreOptionsValidator.CollectWarnings(Tnzi
 Tnzi.AspNetCore.Versioning.ApiVersionMiddleware.ApiVersionMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Versioning.ApiVersionMiddleware!>! logger) -> void
 Tnzi.AspNetCore.Versioning.ApiVersionOptions.SupportedVersions.get -> string![]?
 Tnzi.AspNetCore.Versioning.ApiVersionOptions.SupportedVersions.set -> void
+static Tnzi.AspNetCore.ModelBinders.StringTrimModelBinderProvider.CanBindFromValueProviders(Microsoft.AspNetCore.Mvc.ModelBinding.BindingSource? source) -> bool
+*REMOVED*Tnzi.AspNetCore.Options.AspNetCoreOptions.ControllerFilter.get -> Tnzi.AspNetCore.Options.ControllerFilterOptions?
+Tnzi.AspNetCore.Options.AspNetCoreOptions.ControllerFilter.get -> Tnzi.AspNetCore.Options.ControllerFilterOptions!
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxCapturedBodyBytes.get -> int
+Tnzi.AspNetCore.Options.RequestTrackingOptions.MaxCapturedBodyBytes.set -> void
+static Tnzi.AspNetCore.Http.HttpExtensions.TryReadAsStringAsync(this Microsoft.AspNetCore.Http.HttpRequest! request, int maxBytes, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
+static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.AddRequestPipelineMiddleware(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Middleware.RequestPipelineStage stage, System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder!>! configure) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.AddRequestPipelineMiddleware<TMiddleware>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Middleware.RequestPipelineStage stage) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.UseRequestPipelineStage(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app, Tnzi.AspNetCore.Middleware.RequestPipelineStage stage) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
+static Tnzi.AspNetCore.Middleware.ExceptionHttpStatusCode.Resolve(System.Exception! exception) -> int
+Tnzi.AspNetCore.Extensions.RequestPipelineExtensions
+Tnzi.AspNetCore.Middleware.ExceptionHttpStatusCode
+Tnzi.AspNetCore.Middleware.RequestPipelineRegistration
+Tnzi.AspNetCore.Middleware.RequestPipelineRegistration.Configure.get -> System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder!>!
+Tnzi.AspNetCore.Middleware.RequestPipelineRegistration.RequestPipelineRegistration(Tnzi.AspNetCore.Middleware.RequestPipelineStage stage, System.Action<Microsoft.AspNetCore.Builder.IApplicationBuilder!>! configure) -> void
+Tnzi.AspNetCore.Middleware.RequestPipelineRegistration.Stage.get -> Tnzi.AspNetCore.Middleware.RequestPipelineStage
+Tnzi.AspNetCore.Middleware.RequestPipelineStage
+Tnzi.AspNetCore.Middleware.RequestPipelineStage.AfterAuthentication = 0 -> Tnzi.AspNetCore.Middleware.RequestPipelineStage
+static Tnzi.AspNetCore.Mvc.MvcExtensions.ValidationMessage(this Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary! modelState) -> string!
+const Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.TokenHeaderName = "X-Captcha-Token" -> string!
+const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.ChallengePath = "captcha/altcha/challenge?purpose={purpose}" -> string!
+const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.DefaultScriptUrl = "https://cdn.jsdelivr.net/npm/altcha@3/dist/altcha.min.js" -> string!
+const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.ProviderName = "altcha" -> string!
+const Tnzi.AspNetCore.Security.CaptchaPurpose.Login = "login" -> string!
+const Tnzi.AspNetCore.Security.CaptchaPurpose.PasswordRecovery = "password-recovery" -> string!
+const Tnzi.AspNetCore.Security.CaptchaPurpose.Register = "register" -> string!
+const Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.HttpClientName = "Tnzi.Captcha.SiteVerify" -> string!
+override Tnzi.AspNetCore.Options.CaptchaVerifierOptionsValidator.ValidateOptions(Tnzi.AspNetCore.Options.CaptchaVerifierOptions! options, System.Collections.Generic.List<string!>! errors) -> void
+readonly Tnzi.AspNetCore.Controllers.DefaultCaptchaController.Providers -> System.Collections.Generic.IEnumerable<Tnzi.AspNetCore.Security.ICaptchaProvider!>!
+readonly Tnzi.AspNetCore.Controllers.DefaultCaptchaController.Verifier -> Tnzi.AspNetCore.Security.ICaptchaVerifier!
+static Tnzi.AspNetCore.Extensions.CaptchaExtensions.AddCaptchaProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Func<System.IServiceProvider!, Tnzi.AspNetCore.Security.ICaptchaProvider!>! factory) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.AspNetCore.Extensions.CaptchaExtensions.AddCaptchaProvider<TProvider>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.AspNetCore.Extensions.CaptchaExtensions.AddSiteVerifyCaptchaProvider(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor! descriptor) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static Tnzi.AspNetCore.Security.CaptchaPurpose.IsValid(string? purpose) -> bool
+static Tnzi.AspNetCore.Security.CaptchaVerification.Fail(string! provider, Tnzi.AspNetCore.Security.CaptchaFailure failure, string? detail = null) -> Tnzi.AspNetCore.Security.CaptchaVerification!
+static Tnzi.AspNetCore.Security.CaptchaVerification.NotEnabled() -> Tnzi.AspNetCore.Security.CaptchaVerification!
+static Tnzi.AspNetCore.Security.CaptchaVerification.Pass(string! provider, string? detail = null) -> Tnzi.AspNetCore.Security.CaptchaVerification!
+static Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.BuiltIn.get -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor!>!
+static Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.HCaptcha.get -> Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor!
+static Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReCaptcha.get -> Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor!
+static Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReCaptchaV3.get -> Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor!
+static Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.Turnstile.get -> Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor!
+Tnzi.AspNetCore.Controllers.DefaultCaptchaController
+Tnzi.AspNetCore.Controllers.DefaultCaptchaController.DefaultCaptchaController(Tnzi.AspNetCore.Security.ICaptchaVerifier! verifier, System.Collections.Generic.IEnumerable<Tnzi.AspNetCore.Security.ICaptchaProvider!>! providers) -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Algorithm.get -> string!
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Algorithm.set -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.AltchaChallengeDto() -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Challenge.get -> string!
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Challenge.set -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.MaxNumber.get -> int
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.MaxNumber.set -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Salt.get -> string!
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Salt.set -> void
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Signature.get -> string!
+Tnzi.AspNetCore.Dtos.AltchaChallengeDto.Signature.set -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.CaptchaClientConfigDto() -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.ChallengeUrl.get -> string?
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.ChallengeUrl.set -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.Enabled.get -> bool
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.Enabled.set -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.Provider.get -> string?
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.Provider.set -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.ScriptUrl.get -> string?
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.ScriptUrl.set -> void
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.SiteKey.get -> string?
+Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto.SiteKey.set -> void
+Tnzi.AspNetCore.Extensions.CaptchaExtensions
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.CreateInstance(System.IServiceProvider! serviceProvider) -> Microsoft.AspNetCore.Mvc.Filters.IFilterMetadata!
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.IsReusable.get -> bool
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.Order.get -> int
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.Order.set -> void
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.Purpose.get -> string!
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.RequireCaptchaAttribute(string! purpose) -> void
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaFilter
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaFilter.OnActionExecutionAsync(Microsoft.AspNetCore.Mvc.Filters.ActionExecutingContext! context, Microsoft.AspNetCore.Mvc.Filters.ActionExecutionDelegate! next) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaFilter.RequireCaptchaFilter(string! purpose, Tnzi.AspNetCore.Security.ICaptchaVerifier! verifier, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaFilter!>! logger) -> void
+Tnzi.AspNetCore.Options.AltchaOptions
+Tnzi.AspNetCore.Options.AltchaOptions.AltchaOptions() -> void
+Tnzi.AspNetCore.Options.AltchaOptions.ExpiresSeconds.get -> int
+Tnzi.AspNetCore.Options.AltchaOptions.ExpiresSeconds.set -> void
+Tnzi.AspNetCore.Options.AltchaOptions.HmacKey.get -> string?
+Tnzi.AspNetCore.Options.AltchaOptions.HmacKey.set -> void
+Tnzi.AspNetCore.Options.AltchaOptions.MaxNumber.get -> int
+Tnzi.AspNetCore.Options.AltchaOptions.MaxNumber.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.Altcha.get -> Tnzi.AspNetCore.Options.AltchaOptions!
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.Altcha.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.CaptchaVerifierOptions() -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.EnforceAction.get -> bool
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.EnforceAction.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ExpectedHostnames.get -> string![]?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ExpectedHostnames.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.OnVerifierUnavailable.get -> Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.OnVerifierUnavailable.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.Provider.get -> string?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.Provider.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ScoreThreshold.get -> double
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ScoreThreshold.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ScriptUrl.get -> string?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.ScriptUrl.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.SecretKey.get -> string?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.SecretKey.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.SiteKey.get -> string?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.SiteKey.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.TimeoutSeconds.get -> int
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.TimeoutSeconds.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.VerifyUrl.get -> string?
+Tnzi.AspNetCore.Options.CaptchaVerifierOptions.VerifyUrl.set -> void
+Tnzi.AspNetCore.Options.CaptchaVerifierOptionsValidator
+Tnzi.AspNetCore.Options.CaptchaVerifierOptionsValidator.CaptchaVerifierOptionsValidator() -> void
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider.AltchaCaptchaProvider(Tnzi.Caching.ICache! cache, Microsoft.Extensions.Options.IOptionsSnapshot<Tnzi.AspNetCore.Options.CaptchaVerifierOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Security.AltchaCaptchaProvider!>! logger, System.TimeProvider? clock = null) -> void
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider.CreateChallenge(string! purpose) -> Tnzi.AspNetCore.Dtos.AltchaChallengeDto!
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider.GetClientConfig() -> Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider.Name.get -> string!
+Tnzi.AspNetCore.Security.AltchaCaptchaProvider.VerifyAsync(Tnzi.AspNetCore.Security.CaptchaVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
+Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.ActionMismatch = 4 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.ExpiredOrReplayed = 3 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.HostnameMismatch = 5 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.LowScore = 6 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.MissingToken = 1 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.None = 0 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.ProviderNotRegistered = 8 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.Rejected = 2 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaFailure.VerifierUnavailable = 7 -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaPurpose
+Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy
+Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy.Allow = 1 -> Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy
+Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy.Deny = 0 -> Tnzi.AspNetCore.Security.CaptchaUnavailablePolicy
+Tnzi.AspNetCore.Security.CaptchaVerification
+Tnzi.AspNetCore.Security.CaptchaVerification.Action.get -> string?
+Tnzi.AspNetCore.Security.CaptchaVerification.Detail.get -> string?
+Tnzi.AspNetCore.Security.CaptchaVerification.Failure.get -> Tnzi.AspNetCore.Security.CaptchaFailure
+Tnzi.AspNetCore.Security.CaptchaVerification.Hostname.get -> string?
+Tnzi.AspNetCore.Security.CaptchaVerification.Passed.get -> bool
+Tnzi.AspNetCore.Security.CaptchaVerification.Provider.get -> string!
+Tnzi.AspNetCore.Security.CaptchaVerification.Score.get -> double?
+Tnzi.AspNetCore.Security.CaptchaVerification.Skipped.get -> bool
+Tnzi.AspNetCore.Security.CaptchaVerification.WithReport(string? hostname, string? action, double? score) -> Tnzi.AspNetCore.Security.CaptchaVerification!
+Tnzi.AspNetCore.Security.CaptchaVerificationRequest
+Tnzi.AspNetCore.Security.CaptchaVerificationRequest.CaptchaVerificationRequest(string! token, string! purpose, string? remoteIp) -> void
+Tnzi.AspNetCore.Security.CaptchaVerificationRequest.Purpose.get -> string!
+Tnzi.AspNetCore.Security.CaptchaVerificationRequest.RemoteIp.get -> string?
+Tnzi.AspNetCore.Security.CaptchaVerificationRequest.Token.get -> string!
+Tnzi.AspNetCore.Security.CaptchaVerifier
+Tnzi.AspNetCore.Security.CaptchaVerifier.CaptchaVerifier(Microsoft.Extensions.Options.IOptionsSnapshot<Tnzi.AspNetCore.Options.CaptchaVerifierOptions!>! options, System.Collections.Generic.IEnumerable<Tnzi.AspNetCore.Security.ICaptchaProvider!>! providers, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Security.CaptchaVerifier!>! logger, Tnzi.ScopedContext.IScopedContext? scopedContext = null) -> void
+Tnzi.AspNetCore.Security.CaptchaVerifier.EnsureConfigured() -> void
+Tnzi.AspNetCore.Security.CaptchaVerifier.GetClientConfig() -> Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!
+Tnzi.AspNetCore.Security.CaptchaVerifier.IsEnabled.get -> bool
+Tnzi.AspNetCore.Security.CaptchaVerifier.ProviderName.get -> string?
+Tnzi.AspNetCore.Security.CaptchaVerifier.VerifyAsync(string? token, string! purpose, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
+Tnzi.AspNetCore.Security.ICaptchaProtectedRequest
+Tnzi.AspNetCore.Security.ICaptchaProtectedRequest.CaptchaToken.get -> string?
+Tnzi.AspNetCore.Security.ICaptchaProvider
+Tnzi.AspNetCore.Security.ICaptchaProvider.GetClientConfig() -> Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto?
+Tnzi.AspNetCore.Security.ICaptchaProvider.Name.get -> string!
+Tnzi.AspNetCore.Security.ICaptchaProvider.VerifyAsync(Tnzi.AspNetCore.Security.CaptchaVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
+Tnzi.AspNetCore.Security.ICaptchaVerifier
+Tnzi.AspNetCore.Security.ICaptchaVerifier.EnsureConfigured() -> void
+Tnzi.AspNetCore.Security.ICaptchaVerifier.GetClientConfig() -> Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!
+Tnzi.AspNetCore.Security.ICaptchaVerifier.IsEnabled.get -> bool
+Tnzi.AspNetCore.Security.ICaptchaVerifier.ProviderName.get -> string?
+Tnzi.AspNetCore.Security.ICaptchaVerifier.VerifyAsync(string? token, string! purpose, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.Name.get -> string!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReportsAction.get -> bool
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReportsAction.init -> void
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReportsScore.get -> bool
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ReportsScore.init -> void
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.ScriptUrl.get -> string!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.SendsSiteKey.get -> bool
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.SendsSiteKey.init -> void
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.SiteVerifyCaptchaDescriptor(string! name, string! verifyUrl, string! scriptUrl) -> void
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor.VerifyUrl.get -> string!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.GetClientConfig() -> Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.Name.get -> string!
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.SiteVerifyCaptchaProvider(Tnzi.AspNetCore.Security.SiteVerifyCaptchaDescriptor! descriptor, System.Net.Http.IHttpClientFactory! httpClientFactory, Microsoft.Extensions.Options.IOptionsSnapshot<Tnzi.AspNetCore.Options.CaptchaVerifierOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider!>! logger) -> void
+Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.VerifyAsync(Tnzi.AspNetCore.Security.CaptchaVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetAltchaChallenge(string! purpose = "default") -> Microsoft.AspNetCore.Mvc.IActionResult!
+virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetConfig() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!>!

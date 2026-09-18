@@ -10,7 +10,10 @@ public class VirtualPathTranslator : IVirtualPathTranslator
 
     public VirtualPathTranslator(string dataRoot)
     {
-        _dataRoot = Check.NotNullOrWhiteSpace(dataRoot);
+        // 一进门就归一化成绝对路径：DataRoot 可以配成相对路径（2026-09-14 之前默认就是相对的 `.tnzi-ai/threads`），
+        // 而它派生出的线程目录会直接进 Docker 的 Binds（相对挂载源不是无效就是被当成卷名）、进 bash 的 token 守卫、
+        // 进容器侧路径换根 —— 每一处都假设它是绝对的。
+        _dataRoot = Path.GetFullPath(Check.NotNullOrWhiteSpace(dataRoot));
     }
 
     public string ToPhysical(string virtualPath, Guid threadId)

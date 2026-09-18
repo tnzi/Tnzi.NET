@@ -16,7 +16,7 @@ public class HttpContextCurrentUser : ICurrentUser
 
     public string? UserName => FindClaim(ClaimTypes.Name);
 
-    public Guid? TenantId => FindClaim("tenant_id") is string id && Guid.TryParse(id, out var guid) ? guid : null;
+    public Guid? TenantId => FindClaim(TenantResolverOptions.DefaultClaimType) is string id && Guid.TryParse(id, out var guid) ? guid : null;
 
     public string[] Roles => FindClaims(ClaimTypes.Role);
 

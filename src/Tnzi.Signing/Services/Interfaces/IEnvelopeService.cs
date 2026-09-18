@@ -19,7 +19,8 @@ public interface IEnvelopeService
     Task<Result<EnvelopeDto>> CreateAsync(CreateEnvelopeDto input, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 发出：渲染合并稿、给每个收件人签发一次性令牌、推进到 <c>Sent</c>。
+    /// 发出：校验发起方负责的必填字段都有值、把这些值烧进一份本信封自有的渲染稿（渲染合并稿）、
+    /// 给每个收件人签发一次性令牌、推进到 <c>Sent</c>。
     /// </summary>
     /// <returns>
     /// 每个收件人的<b>明文令牌</b>，调用方据此拼签署链接发出去。
@@ -27,7 +28,11 @@ public interface IEnvelopeService
     /// </returns>
     Task<Result<IReadOnlyList<IssuedSigningLink>>> SendAsync(Guid requestId, CancellationToken cancellationToken = default);
 
-    /// <summary>按令牌取件（收件人视角）。顺序签署时未轮到者会被告知在排队。</summary>
+    /// <summary>
+    /// 按令牌取件（收件人视角）。顺序签署时未轮到者会被告知在排队。
+    /// 作废 / 拒签 / 过期的请求只回状态（<c>Fields</c> 为空、<c>DocumentFileId</c> 为 null，不记查看时间），
+    /// 好让消费方的签署页能说「这份请求已取消」；作废的链接已被吊销，答 404。
+    /// </summary>
     Task<Result<SigningPacketDto>> GetByTokenAsync(string token, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -41,7 +46,8 @@ public interface IEnvelopeService
     /// 与分享链接同一形状：令牌本身就是凭据，授予只在这一次请求内、只给读。
     /// </para>
     /// <para>
-    /// 令牌解析得出即可读，不看状态：已签成、已过期、已作废的收件人都仍然是这份文档的当事人。
+    /// 读取也看状态：进行中（未过期）给渲染稿，已完成给密封成品；作废 / 拒签 / 过期的请求答 404，
+    /// 作废还会吊销令牌。一条本该失效的链接不该永远保有读权限，一份发错人的请求要收得回来。
     /// </para>
     /// </remarks>
     Task<Result<SigningDocumentContent>> GetDocumentByTokenAsync(string token, CancellationToken cancellationToken = default);
@@ -54,8 +60,19 @@ public interface IEnvelopeService
     /// <summary>按令牌拒签。一人拒签即整份请求作废（<c>Declined</c>）。</summary>
     Task<Result<SigningPacketDto>> DeclineAsync(string token, string? reason, CancellationToken cancellationToken = default);
 
-    /// <summary>管理端作废一份尚未完成的请求。</summary>
+    /// <summary>管理端作废一份尚未完成的请求，并吊销每个收件人的签署链接（<c>TokenHash</c> 清空）。</summary>
     Task<Result> VoidAsync(Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 管理端重新密封：收件人已全部签完、而最后那次提交里的密封失败（请求停在 <c>InProgress</c>）时，
+    /// 再跑一遍密封 → 完成证书 → 归档。
+    /// </summary>
+    /// <remarks>
+    /// 密封在最后一位收件人的那次提交里进行，一次瞬时故障（存储超时、盖章异常）就会让它失败；
+    /// 那时收件人已全部 <c>Signed</c> 不能重交，没有这条路就只剩作废重发、作废每一个已收集的签名。
+    /// 已密封的请求拒绝再密封（409）：哈希只算一次。
+    /// </remarks>
+    Task<Result<EnvelopeDto>> SealAsync(Guid requestId, CancellationToken cancellationToken = default);
 
     /// <summary>取一份请求的管理端视图。</summary>
     Task<Result<EnvelopeDto>> GetAsync(Guid requestId, CancellationToken cancellationToken = default);
@@ -82,4 +99,8 @@ public sealed record SigningDocumentContent(Stream Content, string ContentType, 
 /// <param name="Name">姓名</param>
 /// <param name="Email">邮箱</param>
 /// <param name="Token">★ 明文令牌，只在签发这一刻存在于内存里</param>
-public sealed record IssuedSigningLink(Guid RecipientId, string Name, string? Email, string Token);
+/// <param name="TenantId">
+/// 请求所属的租户（多租户未开启时为 null）。匿名端点自己会按令牌切进这个租户，消费方不必传；
+/// 给出来是让多租户宿主的签署页能把自己的其它请求（不走本模块的）挂在同一个租户上。
+/// </param>
+public sealed record IssuedSigningLink(Guid RecipientId, string Name, string? Email, string Token, Guid? TenantId = null);

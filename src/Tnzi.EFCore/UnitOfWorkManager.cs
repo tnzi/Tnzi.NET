@@ -389,7 +389,7 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
 
     /// <summary>
     /// 获取所有已注册的 DbContext 类型
-    /// 综合多种方式：配置文件、EntityManager
+    /// 综合多种方式：AddTnziDbContext 的登记、配置文件、EntityManager
     /// 使用 volatile 缓存避免重复扫描
     /// 注意：多 DbContext 场景不保证分布式事务，每个 DbContext 独立提交
     /// </summary>
@@ -398,55 +398,27 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         return _cachedDbContextTypes ??= DiscoverDbContextTypes();
     }
 
+    /// <summary>
+    /// 发现上下文类型。★ 这份列表决定提交循环里有没有东西可提交：取不到主上下文时，
+    /// 事务内缓冲的写入一个 UoW 都不建、零次 SaveChanges，随作用域释放静默消失而接口 200。
+    /// 三条途径（AddTnziDbContext 的登记 / 配置 / EntityManager）收口在 <see cref="DbContextTypeDiscovery"/>，
+    /// 与 <c>EfCoreDbMigrator</c> 共用 —— 此前迁移器自己另抄了一份只含 EntityManager 那条，补登记时被漏掉。
+    /// </summary>
     private List<Type> DiscoverDbContextTypes()
     {
-        var dbContextTypes = new HashSet<Type>();
+        var dbContextTypes = DbContextTypeDiscovery.Discover(_serviceProvider, _logger);
 
-        // 方式1：从配置文件读取 DatabaseOptions
-        try
+        if (dbContextTypes.Count == 0)
         {
-            var configuration = _serviceProvider.GetService<IConfiguration>();
-            if (configuration != null)
-            {
-                var databaseOptions = configuration.GetSection("Database").Get<DatabaseOptions>();
-                if (databaseOptions?.DbContexts != null)
-                {
-                    foreach (var dbContextConfig in databaseOptions.DbContexts)
-                    {
-                        var dbContextType = dbContextConfig.GetDbContextType();
-                        if (dbContextType != null && typeof(DbContext).IsAssignableFrom(dbContextType))
-                        {
-                            dbContextTypes.Add(dbContextType);
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to read DbContext types from config");
+            // 失败方向：说出来。一个都发现不了时，每次提交都是空转 —— 事务内的写入不会报错，只会消失。
+            _logger?.LogWarning(
+                "No DbContext types are known to UnitOfWorkManager: nothing registered through AddTnziDbContext, " +
+                "no resolvable DbContextType in 'Database:DbContexts', and no entity registers bound to a DbContext. " +
+                "Changes made inside a unit of work will not be saved. Register the DbContext with AddTnziDbContext " +
+                "(or configure it under 'Database:DbContexts') so the unit of work can commit it.");
         }
 
-        // 方式2：通过 EntityManager 获取
-        try
-        {
-            var entityManager = _serviceProvider.GetService<IEntityManager>();
-            if (entityManager != null)
-            {
-                entityManager.Initialize();
-                var discoveredTypes = entityManager.GetAllDbContextTypes();
-                foreach (var dbContextType in discoveredTypes)
-                {
-                    dbContextTypes.Add(dbContextType);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to get DbContext types from EntityManager");
-        }
-
-        return dbContextTypes.ToList();
+        return dbContextTypes;
     }
 
     public void EnableTransaction()

@@ -205,6 +205,31 @@ public class PayPalVaultProviderTests
     }
 
     [Fact]
+    public async Task ResolvePaymentMethod_WhenTokenCarriesNoMerchantCustomerId_IsRejected()
+    {
+        // 本系统铸的每一枚凭据都带 merchant_customer_id（CreateSetupSessionAsync 写的）。
+        // 没带的只可能是同一商户名下、绕过本系统流程铸出来的凭据，本系统无从证明它属于调用者 ——
+        // 与 Stripe 侧「customer 没有 UserId 元数据 ⇒ 403」同一方向；此前这里放行，两个渠道对同一件事答案相反。
+        var provider = CreateProvider();
+
+        _handler.OnGet($"/v3/vault/payment-tokens/{PaymentTokenId}", _ => Json(new
+        {
+            id = PaymentTokenId,
+            customer = new { id = CustomerId },
+            payment_source = new { paypal = new { email_address = "someone@example.com", payer_id = "AJM9JTWQJCFTA" } }
+        }));
+
+        var result = await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = PaymentTokenId,
+            UserId = Guid.NewGuid()
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+    }
+
+    [Fact]
     public async Task ResolvePaymentMethod_MapsVaultedCardExpiry()
     {
         var provider = CreateProvider();

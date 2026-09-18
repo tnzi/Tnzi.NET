@@ -91,6 +91,98 @@ public class UserService : ApplicationService, IUserService
         }
     }
 
+    /// <summary>
+    /// 把账号从「停用 / 锁定」放出来：清掉 <c>LockoutEnd</c>、归零失败计数，
+    /// 并保证登录失败锁定机制仍然武装着。启用与解锁共用这一个原语。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <b>此前启用的第一句是 <c>SetLockoutEnabledAsync(user, false)</c>，那是一处双重缺陷。</b>
+    /// ASP.NET Identity 的 <c>SetLockoutEndDateAsync</c> 在 <c>LockoutEnabled == false</c> 时直接返回
+    /// <c>UserLockoutNotEnabled</c> 失败且什么都不写，而返回值又被丢弃 —— 于是「停用 → 启用」的真实结果是
+    /// <c>LockoutEnabled</c> 落成 false、<c>LockoutEnd</c> 仍是一百年后、接口答成功、列表继续显示已停用。
+    /// 与此同时 <c>IsLockedOutAsync</c> 的第一句就是查 <c>LockoutEnabled</c>，该账号自此密码可以无限次猜，
+    /// <c>MaxFailedLoginAttempts</c> 对它逐字失效，且没有任何一处会说出来。
+    /// </para>
+    /// <para>
+    /// ★ 顺序不能反：先武装（<c>true</c>）再清 <c>LockoutEnd</c>。三个 <c>IdentityResult</c> 都要检查 ——
+    /// Identity 的 <c>Set*Async</c> 系列有前置条件，失败是静默的（同 <c>InvitationService</c> 的记录）。
+    /// 先武装也让解锁对历史上被旧版启用过的行（<c>LockoutEnabled = false</c>）自愈，
+    /// 而不是在它们身上永远失败。
+    /// </para>
+    /// </remarks>
+    private async Task<IdentityResult> ClearLockoutAsync(User user)
+    {
+        var armed = await _userManager.SetLockoutEnabledAsync(user, true);
+        if (!armed.Succeeded)
+        {
+            return armed;
+        }
+
+        var released = await _userManager.SetLockoutEndDateAsync(user, null);
+        if (!released.Succeeded)
+        {
+            return released;
+        }
+
+        return await _userManager.ResetAccessFailedCountAsync(user);
+    }
+
+    /// <summary>
+    /// 把账号锁到某个时刻：停用（一百年后）、锁定（到期）、自助停用与自助注销共用这一个原语。
+    /// </summary>
+    /// <remarks>
+    /// ★ 与 <see cref="ClearLockoutAsync"/> 是同一个原语的两面，两个 <c>IdentityResult</c> 同样都要检查。
+    /// 此前四处都不看返回值：<c>UserValidator</c> 不过（存量行的用户名 / 邮箱早已不合当前规则）
+    /// 或并发戳冲突时 <c>LockoutEnd</c> 一字未写，而后面照样踢会话、发「已停用」事件、答 200 ——
+    /// 管理员看到的是「已停用」，审计里也是，账号继续登录。先武装再写 <c>LockoutEnd</c>，
+    /// 理由同上：未武装时后者必然以 <c>UserLockoutNotEnabled</c> 失败。
+    /// </remarks>
+    private async Task<IdentityResult> LockUntilAsync(User user, DateTimeOffset lockoutEnd)
+    {
+        var armed = await _userManager.SetLockoutEnabledAsync(user, true);
+        if (!armed.Succeeded)
+        {
+            return armed;
+        }
+
+        return await _userManager.SetLockoutEndDateAsync(user, lockoutEnd);
+    }
+
+    /// <summary>
+    /// 本次请求能碰到哪些账号（多租户裁剪口径见 <see cref="UserTenantScope"/>）。
+    /// 每次现算：<see cref="ICurrentTenant"/> 是 AsyncLocal 的，构造时读一次会把切换前的值钉死。
+    /// </summary>
+    private UserTenantScope Scope => UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, _currentUser ?? CurrentUser);
+
+    /// <summary>
+    /// 按 id 取账号，且只取范围内的：不在范围内与不存在同样返回 <c>null</c>，调用方一律答 404。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这里是全部按 id 的管理动作的唯一入口。<see cref="User"/> 没有全局租户过滤器
+    /// （理由见 <see cref="UserTenantScope"/>），少了这一道，租户 A 的管理员能重置、停用、删除
+    /// 别家租户的账号。越界留一条 Warning —— 一次真实的越权尝试不该长得和一次 404 一模一样。
+    /// </remarks>
+    private async Task<User?> FindScopedUserAsync(Guid id)
+    {
+        var user = await _userManager.FindByGuidAsync(id);
+        if (user == null)
+        {
+            return null;
+        }
+
+        var scope = Scope;
+        if (scope.Contains(user))
+        {
+            return user;
+        }
+
+        LogWarning(
+            "Rejected a cross-tenant user access: user {UserId} belongs to tenant {UserTenantId} but the request is scoped to tenant {TenantId}.",
+            user.Id, user.TenantId, scope.TenantId);
+        return null;
+    }
+
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
     {
         var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
@@ -168,7 +260,7 @@ public class UserService : ApplicationService, IUserService
     /// <inheritdoc />
     public async Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -284,7 +376,12 @@ public class UserService : ApplicationService, IUserService
         {
             var detailDto = new CreateUserDetailDto();
             input.MapTo(detailDto);
-            await _userDetailService.CreateOrUpdateAsync(user.Id, detailDto);
+            // ★ 结果不能丢：详情那一侧会拒绝（头像文件归属探针 403 / 存储模块缺席 501），丢掉返回值
+            //   就是把「头像没写进去」报成「资料已更新」。请求级工作单元会把前面 UserManager 已写的
+            //   部分一并回滚。
+            var detailResult = await _userDetailService.CreateOrUpdateAsync(user.Id, detailDto);
+            if (!detailResult.Succeeded)
+                return Fail<UserDto>(detailResult.Message ?? "Failed to update user details", detailResult.Code ?? 400, detailResult.ErrorCode);
         }
 
         var userDto = await MapUserToDtoAsync(user);
@@ -301,7 +398,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> DeleteAsync(Guid id)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -356,6 +453,21 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<UserDto>> GetByIdAsync(Guid id)
     {
+        // 缓存键不含租户，而 DTO 也不带 TenantId，无从事后核对 ——
+        // 裁剪时先用一次主键查询确认归属，再碰缓存。
+        var scope = Scope;
+        if (!scope.IsUnrestricted)
+        {
+            var inScope = await scope.Apply(_userRepository.Where(u => u.Id == id)).AnyAsync();
+            if (!inScope)
+            {
+                LogWarning(
+                    "Rejected a cross-tenant user read: user {UserId} is outside tenant {TenantId}.",
+                    id, scope.TenantId);
+                return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+            }
+        }
+
         // 尝试从缓存获取
         if (_cache != null)
         {
@@ -392,9 +504,7 @@ public class UserService : ApplicationService, IUserService
     {
         // 拆分前这里 Include 了 Organization 导航属性以便 ProjectTo 出组织名；
         // 导航属性随实体搬进可选包之后，组织名改为投影完成后按整页批量补一次（见下）。
-        var queryable = _userRepository
-            .Where(u => !u.IsDeleted)
-            .AsQueryable();
+        var queryable = Scope.Apply(_userRepository.Where(u => !u.IsDeleted));
 
         // 关键词搜索（大小写不敏感）
         if (!string.IsNullOrEmpty(query.Keyword))
@@ -416,13 +526,15 @@ public class UserService : ApplicationService, IUserService
         // 锁定状态筛选
         if (query.IsLockedOut.HasValue)
         {
+            // 「现在」先取成局部变量：理由见 GetStatisticsAsync（SQLite 翻不了内联的 DateTimeOffset.UtcNow）。
+            var now = DateTimeOffset.UtcNow;
             if (query.IsLockedOut.Value)
             {
-                queryable = queryable.Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow);
+                queryable = queryable.Where(u => u.LockoutEnd != null && u.LockoutEnd > now);
             }
             else
             {
-                queryable = queryable.Where(u => u.LockoutEnd == null || u.LockoutEnd <= DateTimeOffset.UtcNow);
+                queryable = queryable.Where(u => u.LockoutEnd == null || u.LockoutEnd <= now);
             }
         }
 
@@ -511,15 +623,14 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> EnableAsync(Guid id)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // ★★★ 未接受邀请的账号不能被「启用」放出来。这不是多余的守卫：本方法下面那句
-        //   SetLockoutEnabledAsync(user, false) 会让 UserManager.IsLockedOutAsync 恒为 false，
-        //   于是 LockedAccountLoginGuard 恒放行；若邀请状态也被这里一并清掉，
+        // ★★★ 未接受邀请的账号不能被「启用」放出来。这不是多余的守卫：启用就是清掉
+        //   LockoutEnd，LockedAccountLoginGuard 从此放行；若邀请状态也被这里一并清掉，
         //   一个没有密码、没有二次验证、角色却已预设好的账号就对全部登录路径敞开了
         //   （验证码登录只需要收到一封邮件）。让人进来的唯一途径必须是接受邀请本身。
         if (user.HasPendingAction(PendingUserActions.InvitationPending))
@@ -530,8 +641,14 @@ public class UserService : ApplicationService, IUserService
                 ErrorCodes.IDENTITY_ACTIVATION_PENDING);
         }
 
-        await _userManager.SetLockoutEnabledAsync(user, false);
-        await _userManager.SetLockoutEndDateAsync(user, null);
+        var cleared = await ClearLockoutAsync(user);
+        if (!cleared.Succeeded)
+        {
+            return Fail(
+                $"Failed to enable user: {cleared.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
 
         // 发布用户启用事件
         if (EventBus != null)
@@ -557,15 +674,21 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> DisableAsync(Guid id, string? reason = null)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
         // 禁用用户：锁定到未来某个时间（如100年后）
-        await _userManager.SetLockoutEnabledAsync(user, true);
-        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        if (!locked.Succeeded)
+        {
+            return Fail(
+                $"Failed to disable user: {locked.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
 
         // 把已经在线的会话与刷新令牌一并作废 —— 否则"停用"只对下一次登录生效。
         await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDisabled);
@@ -595,7 +718,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> LockAsync(Guid id, DateTimeOffset? lockoutEnd = null, string? reason = null)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -603,8 +726,14 @@ public class UserService : ApplicationService, IUserService
 
         var lockoutEndDate = lockoutEnd ?? DateTimeOffset.UtcNow.AddDays(DefaultLockoutDays);
 
-        await _userManager.SetLockoutEnabledAsync(user, true);
-        await _userManager.SetLockoutEndDateAsync(user, lockoutEndDate);
+        var locked = await LockUntilAsync(user, lockoutEndDate);
+        if (!locked.Succeeded)
+        {
+            return Fail(
+                $"Failed to lock user: {locked.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
 
         await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountLocked);
 
@@ -634,13 +763,20 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> UnlockAsync(Guid id)
     {
-        var user = await _userManager.FindByGuidAsync(id);
+        var user = await FindScopedUserAsync(id);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        await _userManager.SetLockoutEndDateAsync(user, null);
+        var cleared = await ClearLockoutAsync(user);
+        if (!cleared.Succeeded)
+        {
+            return Fail(
+                $"Failed to unlock user: {cleared.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
 
         // 发布用户解锁事件
         if (EventBus != null)
@@ -723,9 +859,8 @@ public class UserService : ApplicationService, IUserService
             return Ok("No users to delete");
         }
 
-        // 批量查找用户（使用一次查询而不是循环）
-        var users = await _userRepository
-            .Where(u => idList.Contains(u.Id))
+        // 批量查找用户（使用一次查询而不是循环）；范围外的 id 与不存在的 id 同样落不进来。
+        var users = await Scope.Apply(_userRepository.Where(u => idList.Contains(u.Id)))
             .ToListAsync();
 
         // 批量删除（使用UserManager的DeleteAsync，因为它会触发相关事件和清理）
@@ -778,7 +913,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> AssignRolesAsync(Guid userId, IEnumerable<Guid> roleIds)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -824,7 +959,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> RemoveRolesAsync(Guid userId, IEnumerable<Guid> roleIds)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -930,7 +1065,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<UserStatisticsDto>> GetStatisticsAsync(Guid? organizationId = null, Guid? roleId = null)
     {
-        var query = _userRepository.Where(u => !u.IsDeleted);
+        var query = Scope.Apply(_userRepository.Where(u => !u.IsDeleted));
 
         if (organizationId.HasValue)
         {
@@ -938,11 +1073,14 @@ public class UserService : ApplicationService, IUserService
         }
 
         var totalUsers = await query.CountAsync();
+        // ★ 「现在」先取成局部变量再进表达式：EF 不把 DateTimeOffset.UtcNow 当参数（它想翻成数据库函数），
+        //   而 SQLite 提供者没有这条翻译 ⇒ 整个谓词翻不了。局部变量走参数，与 LockoutEnd 同一个类型映射。
+        var now = DateTimeOffset.UtcNow;
         var activeUsers = await query
-            .Where(u => u.LockoutEnd == null || u.LockoutEnd <= DateTimeOffset.UtcNow)
+            .Where(u => u.LockoutEnd == null || u.LockoutEnd <= now)
             .CountAsync();
         var lockedUsers = await query
-            .Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow)
+            .Where(u => u.LockoutEnd != null && u.LockoutEnd > now)
             .CountAsync();
 
         // 统计组织用户数：如果指定了组织ID，则等于总用户数；否则统计所有有组织的用户数
@@ -987,7 +1125,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> ChangeEmailAsync(Guid userId, string newEmail)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1034,7 +1172,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> ChangePhoneNumberAsync(Guid userId, string newPhoneNumber)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1082,7 +1220,7 @@ public class UserService : ApplicationService, IUserService
             return Fail("Nothing to confirm", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1286,15 +1424,21 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> DeactivateAccountAsync(Guid userId, string? reason = null)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
         // 使用 lockout 机制禁用用户
-        await _userManager.SetLockoutEnabledAsync(user, true);
-        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        if (!locked.Succeeded)
+        {
+            return Fail(
+                $"Failed to deactivate account: {locked.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
 
         await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDisabled);
 
@@ -1322,7 +1466,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result> DeleteAccountAsync(Guid userId)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1330,13 +1474,21 @@ public class UserService : ApplicationService, IUserService
 
         var userName = user.UserName ?? string.Empty;
 
+        // 先锁定再软删：锁定写不进去时账号不能已经被标成删除 ——
+        // 此前是先在内存里置 IsDeleted 再调 Set*Async（它们各自 SaveChanges，会把软删标记一并带出去），
+        // 于是一次失败的注销留下的是一条已软删、却没锁的行。
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        if (!locked.Succeeded)
+        {
+            return Fail(
+                $"Failed to delete account: {locked.FormatErrors()}",
+                500,
+                ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+        }
+
         // 软删除
         user.IsDeleted = true;
         user.LastModificationTime = DateTime.UtcNow;
-
-        // 锁定账户
-        await _userManager.SetLockoutEnabledAsync(user, true);
-        await _userManager.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddYears(100));
 
         var result = await _userManager.UpdateAsync(user);
         if (!result.Succeeded)
@@ -1369,7 +1521,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<PersonalDataExportDto>> ExportPersonalDataAsync(Guid userId)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail<PersonalDataExportDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -1427,7 +1579,7 @@ public class UserService : ApplicationService, IUserService
     /// </summary>
     public async Task<Result<string>> ExportUsersCsvAsync(UserListQueryDto? query = null, CancellationToken cancellationToken = default)
     {
-        var queryable = _userRepository.Where(u => !u.IsDeleted);
+        var queryable = Scope.Apply(_userRepository.Where(u => !u.IsDeleted));
 
         if (query != null)
         {

@@ -3,13 +3,42 @@ namespace Tnzi.AI.Sandbox.Options;
 public class SandboxModuleOptions
 {
     public string Provider { get; set; } = "local";
-    public string DataRoot { get; set; } = ".tnzi-ai/threads";
+
+    /// <summary>
+    /// 线程数据根目录：每个用到沙箱的线程在 <c>{DataRoot}/{ThreadId:N}/</c> 下有 workspace / uploads /
+    /// outputs / skills 四个子目录。相对路径按进程当前目录解析。
+    /// </summary>
+    /// <remarks>
+    /// ★ 默认值是<b>应用目录之外</b>的 <see cref="DefaultDataRoot"/>（<c>{LocalApplicationData}/Tnzi/ai-threads</c>），
+    /// 2026-09-14 之前是内容根下的相对路径 <c>.tnzi-ai/threads</c>。运行期数据落在部署目录里，对把发布目录
+    /// 当作一个整体同步到生产主机的部署是一个事故点：某消费方一天 863 次运行留下的 92,000 个文件把一个
+    /// 62 字节的 <c>app_offline</c> 标记的送达拖到了 24 分钟。显式配置的值原样保留；配到内容根之下时
+    /// 启动期记一条 Warning（<see cref="SandboxModuleOptionsValidator"/>）。
+    /// </remarks>
+    public string DataRoot { get; set; } = DefaultDataRoot;
+
     public bool Enabled { get; set; } = true;
     public bool LazyDirectoryCreation { get; set; } = true;
     public LocalSandboxOptions Local { get; set; } = new();
     public DockerSandboxOptions Docker { get; set; } = new();
     public KubernetesSandboxOptions Kubernetes { get; set; } = new();
     public ThreadQuotaOptions ThreadQuota { get; set; } = new();
+
+    /// <summary>
+    /// 未显式配置 <see cref="DataRoot"/> 时的落点：<c>{LocalApplicationData}/Tnzi/ai-threads</c>，与
+    /// <c>Tnzi.AI.Cli</c> 的工作区根 <c>{LocalApplicationData}/Tnzi/agent-workspaces</c> 同一父目录。
+    /// 宿主解析不出用户数据目录（IIS 未加载用户配置文件、没有 HOME 的服务账号）时为空串，
+    /// 由验证器拒绝启动并指名要配 <c>AI:Sandbox:DataRoot</c>；不再退回任何相对路径，那正是要离开的地方。
+    /// </summary>
+    public static string DefaultDataRoot { get; } = ResolveDefaultDataRoot();
+
+    private static string ResolveDefaultDataRoot()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(localAppData)
+            ? string.Empty
+            : Path.Combine(localAppData, "Tnzi", "ai-threads");
+    }
 }
 
 /// <summary>

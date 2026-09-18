@@ -35,14 +35,24 @@
  */
 import { ref, shallowRef, getCurrentScope, onScopeDispose, type Ref } from 'vue';
 import type { HttpClient } from '@tnzi/core/http';
-import { streamChat, type useChatApi, type useThreadApi } from '@tnzi/core/services/ai';
+import { streamChat, ChatStreamRequestError, type useChatApi, type useThreadApi } from '@tnzi/core/services/ai';
 import { createPagedQuery } from '@tnzi/core/types';
-import type { ChatMessage } from './useChat';
+import type { ChatMessage, ToolCallInfo } from './useChat';
+import { filesToContentParts, type UploadedAttachment } from './attachment-parts';
 import type { ThreadItem } from '../components/chat/TThreadList.vue';
 import { toChatMessages, toThreadItem, toThreadItems } from '../adapters/index';
 
 export interface UseChatThreadsOptions {
-  /** The wired client - supplies the bearer token for the stream request. */
+  /**
+   * The wired client - supplies the bearer token for the stream request.
+   *
+   * The stream is a raw `fetch` (the client's request pipeline cannot carry an
+   * SSE body), so it never sees the client's 401 refresh-and-retry. The hook
+   * runs that dance itself through `http.refreshAccessToken()` /
+   * `http.reportUnauthorized()`: a token that expired while the tab sat idle
+   * is refreshed once and the turn retried; a 401 that survives the refresh is
+   * reported so the app's session-expired listener moves the user to login.
+   */
   http: HttpClient;
   /** `useThreadApi(http)`. */
   threadApi: ReturnType<typeof useThreadApi>;
@@ -64,6 +74,17 @@ export interface UseChatThreadsOptions {
   messageLimit?: number;
   /** Surface a failure to the user. Without one, failures are silent. */
   onError?: (message: string) => void;
+  /**
+   * Upload a non-image attachment and return its storage id, so the turn can
+   * reference it as a `file` content part (images travel inline as base64 and
+   * need nothing). Typically `useStorageApi(http).upload` unwrapped. Without
+   * it a non-image file is REFUSED through `onError` and the turn is not sent:
+   * the endpoint has no inline form for such a file, and sending the text
+   * alone would answer "I don't see a document" to a user who attached one.
+   */
+  uploadFile?: (file: File) => Promise<UploadedAttachment>;
+  /** Per-attachment ceiling in bytes. Default 10 MB. */
+  maxAttachmentBytes?: number;
 }
 
 export interface UseChatThreadsReturn {
@@ -79,8 +100,11 @@ export interface UseChatThreadsReturn {
   /** Drop back to the empty state without creating anything server-side. */
   newChat: () => void;
   deleteThread: (id: string) => Promise<void>;
-  /** Send a turn and stream the answer. Resolves when the turn settles. */
-  send: (content: string) => Promise<void>;
+  /**
+   * Send a turn and stream the answer. Resolves when the turn settles.
+   * `files` are the composer's attachments; a turn may be files only.
+   */
+  send: (content: string, files?: readonly File[]) => Promise<void>;
   /** Cancel an in-flight turn. */
   abort: () => void;
   /** Patch one rendered message (feedback, edits). */
@@ -112,9 +136,28 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
    * against.
    */
   let turnSeq = 0;
+  /**
+   * Same idea for `selectThread`: two clicks in a row each await their own
+   * `getDetail`, and whichever resolved LAST used to win `messages` - so A's
+   * transcript could land under B's active id.
+   */
+  let selectSeq = 0;
   let idCounter = 0;
   const newId = () => `m_${Date.now()}_${++idCounter}`;
-  const newTempThreadId = () => `pending_${Date.now()}_${++idCounter}`;
+  const PENDING_PREFIX = 'pending_';
+  const newTempThreadId = () => `${PENDING_PREFIX}${Date.now()}_${++idCounter}`;
+  /**
+   * Local ids exist only in this hook: the backend routes on GUIDs, so a
+   * `pending_` id 404s on detail and fails model binding on the next stream
+   * body. Nothing that talks to the server may ever be handed one.
+   */
+  const isPendingId = (id: string) => id.startsWith(PENDING_PREFIX);
+  /**
+   * The optimistic sidebar row of the first turn of a new conversation, until
+   * the backend reports the persisted thread id. Hook-scoped rather than
+   * turn-scoped so `abort()` and `selectThread()` can see it.
+   */
+  let pendingThreadId: string | null = null;
 
   const fail = (message: string) => options.onError?.(message);
 
@@ -133,16 +176,36 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     return trimmed.length > 40 ? `${trimmed.slice(0, 40)}…` : trimmed || untitled;
   }
 
-  function abort(): void {
+  /**
+   * Drop the optimistic row. A sidebar entry for a conversation that does not
+   * exist (the stream failed before the backend committed one) is worse than
+   * none; and after an abort the truth is unknown - the backend may well have
+   * persisted the thread - so the list is re-fetched to show whatever it did.
+   */
+  function dropPendingRow(refresh: boolean): void {
+    if (!pendingThreadId) return;
+    threads.value = threads.value.filter((t) => t.id !== pendingThreadId);
+    pendingThreadId = null;
+    if (refresh) void loadThreads();
+  }
+
+  function abort(refreshThreads = true): void {
     turnSeq += 1;
     if (abortController) {
       abortController.abort();
       abortController = null;
+      // The turn's tail returns early once superseded, so its own rollback
+      // never runs; the row would otherwise stay as a zombie that the next
+      // send does not replace.
+      dropPendingRow(refreshThreads);
     }
     if (isStreaming.value) {
       // Clear the flag on the row too - otherwise the caret keeps blinking on a
-      // message nothing is writing to any more.
-      messages.value = messages.value.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+      // message nothing is writing to any more - and mark it stopped, which is
+      // what the renderers key the "Generation stopped" mark off.
+      messages.value = messages.value.map((m) =>
+        m.isStreaming ? { ...m, isStreaming: false, status: 'stopped' } : m,
+      );
       isStreaming.value = false;
     }
   }
@@ -158,9 +221,17 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
 
   async function selectThread(id: string): Promise<void> {
     if (id === activeThreadId.value) return;
+    // The optimistic row IS the conversation on screen - clicking it is the
+    // same as clicking the active one. Aborting the first turn here and then
+    // fetching a local id was how `activeThreadId` got poisoned.
+    if (isPendingId(id)) return;
     abort();
+    const seq = ++selectSeq;
     activeThreadId.value = id;
     const result = await threadApi.getDetail(id, messageLimit);
+    // Superseded: another selection (or New chat) happened while this one was
+    // in flight. Its transcript belongs to a thread that is no longer open.
+    if (seq !== selectSeq || activeThreadId.value !== id) return;
     if (result.succeeded && result.data) {
       messages.value = toChatMessages(result.data.messages ?? []);
     } else {
@@ -170,11 +241,13 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
 
   function newChat(): void {
     abort();
+    selectSeq += 1;
     activeThreadId.value = undefined;
     messages.value = [];
   }
 
   async function deleteThread(id: string): Promise<void> {
+    if (isPendingId(id)) return;
     const result = await threadApi.delete(id);
     if (!result.succeeded) {
       fail(result.message || 'Could not delete the conversation');
@@ -184,20 +257,44 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     if (activeThreadId.value === id) newChat();
   }
 
-  async function send(content: string): Promise<void> {
-    if (!content.trim() || isStreaming.value) return;
+  async function send(content: string, files: readonly File[] = []): Promise<void> {
+    if ((!content.trim() && files.length === 0) || isStreaming.value) return;
 
     const turn = ++turnSeq;
     /** Whether this turn is still the one the hook is running. */
     const isCurrent = () => turn === turnSeq;
 
+    // Attachments are resolved BEFORE anything on screen moves: a refusal (a
+    // file the transport cannot carry, an oversized one, a failed upload)
+    // leaves no optimistic row, no user bubble and the draft intact. The
+    // composer has already cleared its chips, so the refusal is reported.
+    // A text-only turn never awaits here, so its state changes stay
+    // synchronous with the call, as they always were.
+    let parts: Awaited<ReturnType<typeof filesToContentParts>> = { parts: null, message: content, attachments: [] };
+    if (files.length > 0) {
+      // Reading / uploading is part of the turn: the stop button shows, and
+      // a second send cannot start underneath it.
+      isStreaming.value = true;
+      try {
+        parts = await filesToContentParts(content, files, {
+          uploadFile: options.uploadFile,
+          maxBytes: options.maxAttachmentBytes,
+        });
+      } catch (err) {
+        if (isCurrent()) isStreaming.value = false;
+        fail(err instanceof Error ? err.message : 'The attachment could not be sent');
+        return;
+      }
+      // Stopped (or superseded) while the upload was in flight.
+      if (!isCurrent()) return;
+    }
+
     // Optimistic sidebar entry for a brand-new conversation: the user should see
     // their context appear at once, not after the first token arrives.
-    let pendingThreadId: string | null = null;
     if (!activeThreadId.value) {
       pendingThreadId = newTempThreadId();
       threads.value = [
-        { id: pendingThreadId, title: previewTitle(content), updatedAt: new Date().toISOString() },
+        { id: pendingThreadId, title: previewTitle(content), updatedAt: new Date().toISOString(), pending: true },
         ...threads.value,
       ];
     }
@@ -207,36 +304,71 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     const now = new Date().toISOString();
     messages.value = [
       ...messages.value,
-      { id: userId, role: 'user', content, createdAt: now },
-      { id: assistantId, role: 'assistant', content: '', reasoning: '', createdAt: now, isStreaming: true },
+      {
+        id: userId,
+        role: 'user',
+        content,
+        createdAt: now,
+        ...(parts.attachments.length ? { attachments: parts.attachments } : {}),
+      },
+      {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        createdAt: now,
+        isStreaming: true,
+        status: 'streaming',
+      },
     ];
     inputText.value = '';
     isStreaming.value = true;
 
     abortController = new AbortController();
-    const headers: Record<string, string> = {};
-    const token = http.getAccessToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const signal = abortController.signal;
 
     let bufferedText = '';
     let bufferedReasoning = '';
     let streamFailed = false;
+    /** What went wrong, for the row's error block. Set together with `streamFailed`. */
+    let failure = '';
+    /**
+     * Set when the stream was refused with a 401. The raw fetch cannot go
+     * through the client's refresh path, so the turn handles it below:
+     * refresh once, retry once, and only then treat it as a failure.
+     */
+    let unauthorized = false;
     // The turn's ids change under us once the backend reports the persisted
     // ones, so finalisation has to write to the LIVE ids, not the initial ones.
     let liveUserId = userId;
     let liveAssistantId = assistantId;
+    /**
+     * Tool activity as the stream reports it: a name-only entry the moment a
+     * tool starts (`isToolCall` + `toolCallNames`), filled in with duration and
+     * outcome when the detail list arrives after it ran. The same tool called
+     * twice is two entries; a detail fills the FIRST still-pending entry of
+     * that name.
+     */
+    let toolCalls: ToolCallInfo[] = [];
+    const isPendingCall = (c: ToolCallInfo) => c.isSuccess == null && c.durationMs == null;
 
     const agentId = options.agentId?.() || undefined;
 
-    const result = await streamChat({
+    const streamOnce = (token: string | null) => streamChat({
       url: chatApi.getChatStreamUrl(),
+      // `message` stays alongside `content`: the backend builds the model
+      // input from the parts when present, but adds and persists the user
+      // turn only from a non-blank `message` (text only - history does not
+      // round-trip attachments). A files-only turn sends the attachment
+      // names as its message for that reason.
       body: {
-        message: content,
+        message: parts.message,
         threadId: activeThreadId.value ?? null,
         ...(agentId ? { agentId } : {}),
+        ...(parts.parts ? { content: parts.parts } : {}),
       },
-      headers,
-      signal: abortController.signal,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
       onDelta: (text) => {
         bufferedText += text;
         updateMessage(liveAssistantId, { content: bufferedText });
@@ -244,6 +376,27 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
       onReasoningDelta: (text) => {
         bufferedReasoning += text;
         updateMessage(liveAssistantId, { reasoning: bufferedReasoning });
+      },
+      onToolCall: (names) => {
+        if (!isCurrent()) return;
+        toolCalls = [...toolCalls, ...names.map((name) => ({ name }))];
+        updateMessage(liveAssistantId, { toolCalls });
+      },
+      onEvent: (event) => {
+        if (!isCurrent() || !event.toolCalls?.length) return;
+        let next = toolCalls;
+        for (const detail of event.toolCalls) {
+          const idx = next.findIndex((c) => c.name === detail.name && isPendingCall(c));
+          next = idx === -1
+            ? [...next, { ...detail }]
+            : next.map((c, i) => (i === idx ? { ...c, ...detail } : c));
+        }
+        toolCalls = next;
+        updateMessage(liveAssistantId, { toolCalls });
+      },
+      onAgentSwitch: (name) => {
+        if (!isCurrent()) return;
+        updateMessage(liveAssistantId, { agentName: name });
       },
       onDone: (event) => {
         // Defence in depth: aborting should stop the stream before this fires,
@@ -278,47 +431,73 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
           replaceMessageId(liveAssistantId, event.assistantMessageId);
           liveAssistantId = event.assistantMessageId;
         }
+        if (event.usage) updateMessage(liveAssistantId, { usage: event.usage });
       },
       onError: (err) => {
+        if (err instanceof ChatStreamRequestError && err.status === 401) {
+          // Not a failure yet: the turn decides after the refresh attempt.
+          unauthorized = true;
+          return;
+        }
         streamFailed = true;
-        const msg = err instanceof Error ? err.message : (err.errorMessage ?? 'Stream failed');
-        updateMessage(liveAssistantId, { content: `${bufferedText}\n\n_Error: ${msg}_` });
+        failure = err instanceof Error ? err.message : (err.errorMessage ?? 'Stream failed');
       },
     });
 
-    // On failure the row already carries the error text `onError` wrote. Writing
-    // the stream result over it would replace the only thing telling the user
-    // what went wrong with an empty message - a silent failure that looks like
-    // the assistant simply had nothing to say.
+    let result = await streamOnce(http.getAccessToken());
+
+    if (unauthorized && isCurrent()) {
+      // The access token expired while the tab sat idle. Refresh through the
+      // client's own mutex (shared with any JSON call that hit the same 401)
+      // and retry the turn once with the new token, exactly as the client does
+      // for its own requests. A failed refresh has already notified the
+      // session-expired handlers; a refreshed token that is still refused is
+      // reported here, because nothing else on this path would.
+      const fresh = await http.refreshAccessToken();
+      if (fresh && isCurrent()) {
+        unauthorized = false;
+        result = await streamOnce(fresh);
+        if (unauthorized) http.reportUnauthorized();
+      }
+    }
+    if (unauthorized && isCurrent()) {
+      streamFailed = true;
+      failure = 'Session expired, please login again';
+    }
+
     // Superseded turn (aborted, or the user already started another one): its
     // tail must not touch shared state. `isStreaming = false` here would clear
     // the flag of the turn that is currently running.
     if (!isCurrent()) return;
 
+    // On failure the row keeps whatever text was buffered and carries the error
+    // in `status` / `error`, which is what the renderers' error block reads.
+    // Writing the (empty) stream result over the content would turn the
+    // failure into an assistant that simply had nothing to say.
     updateMessage(
       liveAssistantId,
       streamFailed
-        ? { isStreaming: false }
+        ? { isStreaming: false, status: 'error', error: failure }
         : {
             content: result.text || bufferedText,
             reasoning: result.reasoning || bufferedReasoning || null,
             isStreaming: false,
+            status: 'done',
           },
     );
     isStreaming.value = false;
     abortController = null;
 
     // Roll the optimistic row back if the stream died before the backend
-    // committed a thread - a sidebar entry for a conversation that does not
-    // exist is worse than none.
-    if (streamFailed && pendingThreadId) {
-      threads.value = threads.value.filter((t) => t.id !== pendingThreadId);
-    }
+    // committed a thread. A turn that ended cleanly but never reported one
+    // (persistence skipped, say) has nothing to keep the row for either; the
+    // list is re-fetched so the sidebar shows what the server actually has.
+    dropPendingRow(!streamFailed);
   }
 
   // Guarded: the hook is usable outside a component (a store, a test), where an
   // unguarded `onScopeDispose` only emits a Vue warning and registers nothing.
-  if (getCurrentScope()) onScopeDispose(() => abort());
+  if (getCurrentScope()) onScopeDispose(() => abort(false));
 
   return {
     threads,
@@ -331,7 +510,7 @@ export function useChatThreads(options: UseChatThreadsOptions): UseChatThreadsRe
     newChat,
     deleteThread,
     send,
-    abort,
+    abort: () => abort(),
     updateMessage,
   };
 }

@@ -1,5 +1,10 @@
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Logging.Console;
+global using Microsoft.Extensions.Logging.Debug;
+global using Microsoft.Extensions.Logging.EventLog;
+global using Serilog.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using Serilog;
 global using Serilog.Events;

@@ -11,6 +11,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
     private readonly IWorkflowService _workflowService;
     private readonly ISubAgentRegistry _subAgentRegistry;
     private readonly IWorkflowExecutionQueryService? _workflowQueryService;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
 
     public AgentRuntimeControlService(
         ISubAgentExecutionService subAgentExecutionService,
@@ -19,7 +20,8 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         IWorkflowService workflowService,
         ISubAgentRegistry subAgentRegistry,
         IServiceProvider serviceProvider,
-        IWorkflowExecutionQueryService? workflowQueryService = null)
+        IWorkflowExecutionQueryService? workflowQueryService = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
         : base(serviceProvider)
     {
         _subAgentExecutionService = Check.NotNull(subAgentExecutionService);
@@ -28,6 +30,35 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         _workflowService = Check.NotNull(workflowService);
         _subAgentRegistry = Check.NotNull(subAgentRegistry);
         _workflowQueryService = workflowQueryService;
+        _executionContextAccessor = executionContextAccessor;
+    }
+
+    /// <summary>
+    /// 调用方身份：当前运行请求的 UserId（后台子 Agent 的作用域里没有当前用户，只能靠它），无则环境用户。
+    /// 与权限检查 / 权限规则评估 / 审批请求同源，不会各说各话。
+    /// </summary>
+    private Guid? ResolveCallerUserId() => _executionContextAccessor?.CurrentRequest?.UserId ?? CurrentUser?.Id;
+
+    /// <summary>
+    /// 按范围加载运行：<see cref="AgentRunAccessScope.Caller"/> 下归属人不是调用方的运行视为不存在（404，不泄露存在性）。
+    /// 未知调用方（null）只看得见同样无主的运行 —— 不知道是谁不等于就是那个人。
+    /// </summary>
+    private async Task<AgentRun?> LoadVisibleRunAsync(Guid runId, AgentRunAccessScope scope, CancellationToken cancellationToken)
+    {
+        var run = await _runStore.GetWithNodesAsync(runId, cancellationToken);
+        if (run == null || scope == AgentRunAccessScope.Tenant)
+        {
+            return run;
+        }
+
+        var caller = ResolveCallerUserId();
+        if (run.CreatorId != caller)
+        {
+            Logger.LogDebug("Run {RunId} is owned by {OwnerId}; hidden from caller {CallerId}", runId, run.CreatorId, caller);
+            return null;
+        }
+
+        return run;
     }
 
     public Task<Result<AgentRunControlStateDto>> SpawnAsync(SpawnAgentRunInput input, CancellationToken cancellationToken = default)
@@ -35,16 +66,16 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         return _subAgentExecutionService.SpawnAsync(input, cancellationToken);
     }
 
-    public async Task<Result<AgentRunControlStateDto>> GetStateAsync(Guid runId, CancellationToken cancellationToken = default)
+    public async Task<Result<AgentRunControlStateDto>> GetStateAsync(Guid runId, AgentRunAccessScope scope = AgentRunAccessScope.Caller, CancellationToken cancellationToken = default)
     {
-        var run = await _runStore.GetWithNodesAsync(runId, cancellationToken);
+        var run = await LoadVisibleRunAsync(runId, scope, cancellationToken);
         if (run == null)
             return Fail<AgentRunControlStateDto>("Run not found", 404, ErrorCodes.RunNotFound);
 
         return Ok(await BuildStateAsync(run, cancellationToken));
     }
 
-    public async Task<Result<AgentRunWaitResultDto>> WaitAsync(Guid runId, WaitAgentRunInput? input = null, CancellationToken cancellationToken = default)
+    public async Task<Result<AgentRunWaitResultDto>> WaitAsync(Guid runId, WaitAgentRunInput? input = null, AgentRunAccessScope scope = AgentRunAccessScope.Caller, CancellationToken cancellationToken = default)
     {
         input ??= new WaitAgentRunInput();
 
@@ -56,7 +87,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         AgentRunControlStateDto? state = null;
         while (true)
         {
-            var stateResult = await GetStateAsync(runId, cancellationToken);
+            var stateResult = await GetStateAsync(runId, scope, cancellationToken);
             if (!stateResult.Succeeded || stateResult.Data == null)
                 return Fail<AgentRunWaitResultDto>(
                     stateResult.Message ?? "Failed to get run state",
@@ -89,7 +120,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         });
     }
 
-    public async Task<Result<AgentRunControlStateDto>> SendInputAsync(Guid runId, SendAgentRunInput input, CancellationToken cancellationToken = default)
+    public async Task<Result<AgentRunControlStateDto>> SendInputAsync(Guid runId, SendAgentRunInput input, AgentRunAccessScope scope = AgentRunAccessScope.Caller, CancellationToken cancellationToken = default)
     {
         Check.NotNull(input);
 
@@ -97,6 +128,9 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
         var hasWorkflowInput = input.WorkflowInput is { Count: > 0 };
         if (!hasMessage && !hasWorkflowInput)
             return Fail<AgentRunControlStateDto>("Message or workflow input is required", 400, ErrorCodes.RunInvalidState);
+
+        if (await LoadVisibleRunAsync(runId, scope, cancellationToken) == null)
+            return Fail<AgentRunControlStateDto>("Run not found", 404, ErrorCodes.RunNotFound);
 
         var resumeResult = await _signalDispatcher.DispatchInputAsync(runId, input, cancellationToken);
 
@@ -108,19 +142,24 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
                 resumeResult.ErrorCode ?? ErrorCodes.AgentRunFailed);
         }
 
-        return await GetStateAsync(runId, cancellationToken);
+        return await GetStateAsync(runId, scope, cancellationToken);
     }
 
-    public Task<Result> KillAsync(Guid runId, CancellationToken cancellationToken = default)
+    public async Task<Result> KillAsync(Guid runId, AgentRunAccessScope scope = AgentRunAccessScope.Caller, CancellationToken cancellationToken = default)
     {
-        return _signalDispatcher.CancelAsync(runId, cancellationToken);
+        if (await LoadVisibleRunAsync(runId, scope, cancellationToken) == null)
+            return Fail("Run not found", 404, ErrorCodes.RunNotFound);
+
+        return await _signalDispatcher.CancelAsync(runId, cancellationToken);
     }
 
-    public async Task<Result<List<AgentRunListItemDto>>> ListRunsAsync(int maxResults = 20, AgentRunStatus? status = null, CancellationToken cancellationToken = default)
+    public async Task<Result<List<AgentRunListItemDto>>> ListRunsAsync(int maxResults = 20, AgentRunStatus? status = null, AgentRunAccessScope scope = AgentRunAccessScope.Caller, CancellationToken cancellationToken = default)
     {
         maxResults = Math.Clamp(maxResults, 1, 100);
 
-        var runs = await _runStore.ListAsync(status, maxResults, cancellationToken);
+        var runs = scope == AgentRunAccessScope.Tenant
+            ? await _runStore.ListAsync(status, maxResults, cancellationToken)
+            : await _runStore.ListByOwnerAsync(ResolveCallerUserId(), status, maxResults, cancellationToken);
 
         var items = runs.Select(r => new AgentRunListItemDto
         {
@@ -136,7 +175,7 @@ public class AgentRuntimeControlService : ApplicationService, IAgentRuntimeContr
 
     public Task<Result<List<SubAgentTypeDto>>> ListSubAgentTypesAsync(CancellationToken cancellationToken = default)
     {
-        var items = _subAgentRegistry.GetAll()
+        var items = _subAgentRegistry.GetAllForTenant(SubAgentTenantKey.From(ServiceProvider.GetService<ICurrentTenant>()?.Id))
             .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .Select(x => new SubAgentTypeDto
             {

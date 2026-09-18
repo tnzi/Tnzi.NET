@@ -39,6 +39,7 @@ export default defineConfig({
         // 业务服务
         "services/ai/index": "src/services/ai/index.ts",
         "services/authorization/index": "src/services/authorization/index.ts",
+        "services/captcha/index": "src/services/captcha/index.ts",
         "services/identity/index": "src/services/identity/index.ts",
         "services/payment/index": "src/services/payment/index.ts",
         "services/finance/index": "src/services/finance/index.ts",

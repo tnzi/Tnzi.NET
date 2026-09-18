@@ -11,4 +11,10 @@
     <ProjectReference Include="..\Tnzi.AI\Tnzi.AI.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 队列处理器的认领 / 回收是 internal 方法：测试要用真实实现证明多租户下的行为，
+         而不是在测试里重抄一遍认领 SQL。 -->
+    <InternalsVisibleTo Include="Tnzi.AI.Cli.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

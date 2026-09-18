@@ -2,7 +2,10 @@
 namespace Tnzi.AspNetCore.Mvc.Filters;
 
 /// <summary>
-/// 模型验证过滤器，自动验证模型状态
+/// 模型验证过滤器，自动验证模型状态。
+/// 失败时返回 <see cref="ApiResult{T}"/> 信封 + 400：message 是第一条字段错误原文、errorDetails 是
+/// 字段名 → 错误列表的完整字典。message 与 errorDetails 的取法与 <c>ApiControllerBase.ValidationError()</c>
+/// 共用同一组 <see cref="MvcExtensions"/> 扩展，手工验证与全局过滤器对同一份 ModelState 给出相同的信封。
 /// </summary>
 public class ModelStateValidationFilter : IAsyncActionFilter
 {
@@ -15,44 +18,12 @@ public class ModelStateValidationFilter : IAsyncActionFilter
 
         if (!ignoreValidation && !context.ModelState.IsValid)
         {
-            // 获取所有验证错误（字典格式：字段名 -> 错误列表）
-            var errors = new Dictionary<string, List<string>>();
-            
-            foreach (var keyValuePair in context.ModelState)
-            {
-                var key = keyValuePair.Key;
-                var state = keyValuePair.Value;
-                
-                if (state != null && state.Errors.Count > 0)
-                {
-                    var fieldErrors = new List<string>();
-                    foreach (var error in state.Errors)
-                    {
-                        var message = error.ErrorMessage;
-                        if (string.IsNullOrWhiteSpace(message) && error.Exception != null)
-                        {
-                            message = error.Exception.Message;
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(message))
-                        {
-                            fieldErrors.Add(message);
-                        }
-                    }
-
-                    if (fieldErrors.Count > 0)
-                    {
-                        errors[key] = fieldErrors;
-                    }
-                }
-            }
-            
             context.Result = new BadRequestObjectResult(
                 ApiResult<object>.Error(
-                    "Validation failed",
+                    context.ModelState.ValidationMessage(),
                     400,
                     null,
-                    errors));
+                    context.ModelState.GetValidationErrors()));
             return;
         }
 

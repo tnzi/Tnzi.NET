@@ -61,7 +61,7 @@ public class McpServerHttpEndToEndTests
                 Headers = new Dictionary<string, string>
                 {
                     [McpServerSecurityMiddleware.ApiKeyHeaderName] = "secret",
-                    [McpServerSecurityMiddleware.TenantHeaderName] = "tenant-a"
+                    ["X-Tenant-Id"] = "tenant-a"
                 }
             });
 

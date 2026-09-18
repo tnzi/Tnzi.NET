@@ -69,9 +69,67 @@ public class TwoFactorBruteForceTests
 
     private User ArrangeUser()
     {
-        var user = new User { Id = Guid.NewGuid(), UserName = "u" };
+        var user = new User { Id = Guid.NewGuid(), UserName = "u", Email = $"{Guid.NewGuid():N}@example.com", EmailConfirmed = true };
         _userManagerMock.Setup(x => x.FindByIdAsync(user.Id.ToString())).ReturnsAsync(user);
         return user;
+    }
+
+    /// <summary>让仓储表现为一张空表：任何按地址 / 码的查询都查不到，即「码不对」。</summary>
+    private void ArrangeNoStoredCodes()
+    {
+        var empty = new List<TwoFactorCode>().BuildMock();
+        _repositoryMock.As<IQueryable<TwoFactorCode>>().Setup(q => q.Provider).Returns(empty.Provider);
+        _repositoryMock.As<IQueryable<TwoFactorCode>>().Setup(q => q.Expression).Returns(empty.Expression);
+        _repositoryMock.As<IQueryable<TwoFactorCode>>().Setup(q => q.ElementType).Returns(empty.ElementType);
+        _repositoryMock.As<IQueryable<TwoFactorCode>>().Setup(q => q.GetEnumerator()).Returns(() => empty.GetEnumerator());
+    }
+
+    /// <summary>
+    /// ★★★ <see cref="ITwoFactorService"/> 上<b>每一条</b>验码方法都必须有闸门：按反射遍历 <c>Verify*</c>，
+    /// 用错码打 N+1 次，第 N+1 次必须是 429。此前 <c>VerifyCodeByAddressAsync</c> 是三条入口里唯一没有
+    /// 失败计数的一条（零调用方、零测试的公开契约，消费方一用就是无限次尝试的六位数预言机），
+    /// 而紧邻的注释断言「两种方式给出不同的爆破成本是不可接受的」。逐条手写清单挡不住下一条新方法，
+    /// 反射遍历让新增的验码路径自动纳入。
+    /// </summary>
+    public static TheoryData<string> VerifyMethods => new(
+        typeof(ITwoFactorService).GetMethods()
+            .Where(m => m.Name.StartsWith("Verify", StringComparison.Ordinal)
+                && m.GetParameters().Any(p => p.ParameterType == typeof(string) && p.Name == "code"))
+            .Select(m => m.Name));
+
+    [Theory]
+    [MemberData(nameof(VerifyMethods))]
+    public async Task EveryVerifyMethod_IsGatedAfterMaxFailures(string methodName)
+    {
+        var user = ArrangeUser();
+        ArrangeNoStoredCodes();
+        var method = typeof(ITwoFactorService).GetMethod(methodName)!;
+
+        object? Arg(System.Reflection.ParameterInfo p) => p.ParameterType switch
+        {
+            var t when t == typeof(Guid) => user.Id,
+            var t when t == typeof(string) && p.Name == "code" => "000000",
+            var t when t == typeof(string) => user.Email!,
+            var t when t == typeof(TwoFactorType) => TwoFactorType.Email,
+            var t when t == typeof(VerificationCodePurpose) => VerificationCodePurpose.TwoFactor,
+            var t when t == typeof(CancellationToken) => CancellationToken.None,
+            _ => throw new NotSupportedException($"{methodName}: add an argument rule for {p.ParameterType.Name} {p.Name}"),
+        };
+        var args = method.GetParameters().Select(Arg).ToArray();
+
+        async Task<Result> InvokeAsync()
+        {
+            var task = (Task)method.Invoke(_service, args)!;
+            await task;
+            return (Result)((dynamic)task).Result;
+        }
+
+        for (var i = 0; i < MaxAttempts; i++)
+        {
+            (await InvokeAsync()).Code.ShouldBe(400, $"{methodName}: attempt {i + 1} should be a plain wrong-code answer");
+        }
+
+        (await InvokeAsync()).Code.ShouldBe(429, $"{methodName}: attempt {MaxAttempts + 1} must be gated");
     }
 
     private void ArrangeTotp(User user, bool valid)

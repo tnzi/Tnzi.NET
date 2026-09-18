@@ -1199,7 +1199,19 @@ function openCreateFolder(parentId: string | null): void {
 function openRenameFolder(folder: FileFolderDto): void {
   void folderDetail.open('edit', folder)
 }
+// Mirrors the server-side FolderNameValidator: separators would let a root folder land under
+// someone else's path prefix, so the server answers 400; catching it here saves the round trip.
+// eslint-disable-next-line no-control-regex -- control characters are exactly what the server rejects
+const folderNameInvalid = /[/\\\u0000-\u001f]/
+function isFolderNameValid(name: string): boolean {
+  const trimmed = name.trim()
+  return trimmed.length > 0 && !folderNameInvalid.test(trimmed) && !/^\.+$/.test(trimmed)
+}
 async function submitFolderModal(): Promise<void> {
+  if (!isFolderNameValid(folderForm.name)) {
+    message.error(t('errors.folderNameInvalid'))
+    return
+  }
   folderSaving.value = true
   try {
     if (!isFolderRename.value) {

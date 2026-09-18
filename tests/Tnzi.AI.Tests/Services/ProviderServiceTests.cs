@@ -175,6 +175,76 @@ public class ProviderServiceTests
         result.Data.TenantId.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task CreateAsync_TenantContextRequestingSystemScope_Returns403()
+    {
+        // 租户管理员不得建 System 行：System 行对所有租户可见，运行时按名解析会把它塞进别的租户
+        SetupQueryable(new List<Provider>());
+        var inserted = false;
+        _repository.Setup(r => r.InsertAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>()))
+            .Callback(() => inserted = true)
+            .Returns(Task.CompletedTask);
+        var svc = CreateService(new StubCurrentTenant(Guid.NewGuid()));
+
+        var result = await svc.CreateAsync(new CreateProviderDto
+        {
+            Name = "OpenAI",
+            ProviderType = "OpenAI",
+            Scope = ResourceScope.System
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        inserted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task CreateAsync_NoTenantRequestingTenantScope_Returns400()
+    {
+        // 没有租户上下文却要建 Tenant 行会落成 TenantId=null 的孤儿行，谁也解析不到
+        SetupQueryable(new List<Provider>());
+        var svc = CreateService(currentTenant: null);
+
+        var result = await svc.CreateAsync(new CreateProviderDto
+        {
+            Name = "OpenAI",
+            ProviderType = "OpenAI",
+            Scope = ResourceScope.Tenant
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
+
+    [Fact]
+    public async Task Create_Update_Delete_InvalidateRuntimeFactoryCacheByName()
+    {
+        // 管理端改完端点/密钥，运行时工厂 60s TTL 内仍会打旧端点，除非写入侧主动失效
+        var factory = new Mock<IChatClientFactory>();
+        var invalidated = new List<string>();
+        factory.Setup(f => f.InvalidateProvider(It.IsAny<string>())).Callback<string>(invalidated.Add);
+
+        var existing = MakeProvider("old-name");
+        SetupQueryable(new List<Provider> { existing });
+        _repository.Setup(r => r.InsertAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _repository.Setup(r => r.UpdateAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        _repository.Setup(r => r.DeleteAsync(It.IsAny<Provider>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        var svc = new ProviderService(_repository.Object, _dataProtection, _httpClientFactory.Object, _serviceProvider,
+            currentTenant: null, aiOptionsMonitor: null, chatClientFactory: factory.Object);
+
+        (await svc.CreateAsync(new CreateProviderDto { Name = "created", ProviderType = "OpenAI" })).Succeeded.ShouldBeTrue();
+        invalidated.ShouldContain("created");
+
+        // 更名：新旧两个名字都要清
+        (await svc.UpdateAsync(existing.Id, new UpdateProviderDto { Name = "new-name" })).Succeeded.ShouldBeTrue();
+        invalidated.ShouldContain("old-name");
+        invalidated.ShouldContain("new-name");
+
+        invalidated.Clear();
+        (await svc.DeleteAsync(existing.Id)).Succeeded.ShouldBeTrue();
+        invalidated.ShouldContain("new-name");
+    }
+
     // -------------------------------------------------------------------------
     // Existing CRUD / encryption tests (unchanged)
     // -------------------------------------------------------------------------

@@ -64,52 +64,27 @@ public class MailKitEmailSenderTests
     public void Constructor_Should_Initialize_Successfully()
     {
         // Act
-        var sender = new MailKitEmailSender(_options, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new MailKitEmailSender(_options.MailSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Assert
         sender.ShouldNotBeNull();
     }
 
+    /// <summary>
+    /// 「没配 SMTP」不再是发送器自己的分支：构造函数只收一节 SMTP 配置，没有配置就构造不出来，
+    /// 分档（Null / Unconfigured / MailKit）由模块注册决定。见 <c>NamedSenderWiringTests</c>。
+    /// </summary>
     [Fact]
-    public async Task SendToAsync_Should_Return_Failure_When_Options_Not_Configured()
+    public void Constructor_Rejects_A_Missing_Profile()
     {
-        // Arrange
-        var optionsWithoutMailSender = new NotificationOptions();
-        var sender = new MailKitEmailSender(optionsWithoutMailSender, _httpClientFactoryMock.Object, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendToAsync("test@example.com", "Test", "Subject", "Body");
-
-        // Assert
-        result.Success.ShouldBeFalse();
-        result.FailureReason!.ShouldContain("not configured");
-    }
-
-    [Fact]
-    public async Task SendAsync_Should_Return_Failure_When_Options_Not_Configured()
-    {
-        // Arrange
-        var optionsWithoutMailSender = new NotificationOptions();
-        var sender = new MailKitEmailSender(optionsWithoutMailSender, _httpClientFactoryMock.Object, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendAsync(new EmailMessage
-        {
-            To = [new EmailAddress("a@example.com")],
-            Subject = "Subject",
-            Body = "Body"
-        });
-
-        // Assert
-        result.Success.ShouldBeFalse();
-        result.FailureReason!.ShouldContain("not configured");
+        Should.Throw<ArgumentNullException>(() => new MailKitEmailSender(null!, _httpClientFactoryMock.Object, _loggerMock.Object));
     }
 
     [Fact]
     public async Task SendAsync_Should_Return_Failure_When_Message_Has_No_Recipient()
     {
         // Arrange - 空信封在连 SMTP 之前就该被挡下，否则失败原因会变成一条难懂的协议错误
-        var sender = new MailKitEmailSender(_options, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new MailKitEmailSender(_options.MailSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Act
         var result = await sender.SendAsync(new EmailMessage { Subject = "Subject", Body = "Body" });
@@ -123,7 +98,7 @@ public class MailKitEmailSenderTests
     public async Task SendToAsync_Should_Return_Failure_When_Address_Is_Blank()
     {
         // Arrange - 单收件人重定向到多收件人路径后，空地址仍应返回失败结果而不是抛异常
-        var sender = new MailKitEmailSender(_options, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new MailKitEmailSender(_options.MailSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Act
         var result = await sender.SendToAsync("   ", null, "Subject", "Body");
@@ -160,7 +135,7 @@ public class MailKitEmailSenderTests
                 DevOverrideEmail = "dev@localhost"
             }
         };
-        var sender = new MailKitEmailSender(options, _httpClientFactoryMock.Object, loggerMock.Object);
+        var sender = new MailKitEmailSender(options.MailSender!, _httpClientFactoryMock.Object, loggerMock.Object);
 
         // Act
         var result = await sender.SendAsync(new EmailMessage
@@ -267,25 +242,10 @@ public class HttpSmsSenderTests
     public void Constructor_Should_Initialize_Successfully()
     {
         // Act
-        var sender = new HttpSmsSender(_options, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new HttpSmsSender(_options.SmsSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Assert
         sender.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task SendToAsync_Should_Return_Failure_When_Options_Not_Configured()
-    {
-        // Arrange
-        var optionsWithoutSmsSender = new NotificationOptions();
-        var sender = new HttpSmsSender(optionsWithoutSmsSender, _httpClientFactoryMock.Object, _loggerMock.Object);
-
-        // Act
-        var result = await sender.SendToAsync("+1234567890", "Test message");
-
-        // Assert
-        result.Success.ShouldBeFalse();
-        result.FailureReason!.ShouldContain("not configured");
     }
 
     [Fact]
@@ -301,7 +261,7 @@ public class HttpSmsSenderTests
                 TwilioAuthToken = "test"
             }
         };
-        var sender = new HttpSmsSender(optionsWithUnsupportedProvider, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new HttpSmsSender(optionsWithUnsupportedProvider.SmsSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Act
         var result = await sender.SendToAsync("+1234567890", "Test message");
@@ -331,7 +291,7 @@ public class HttpSmsSenderTests
                 Content = new StringContent(responseContent)
             });
 
-        var sender = new HttpSmsSender(_options, _httpClientFactoryMock.Object, _loggerMock.Object);
+        var sender = new HttpSmsSender(_options.SmsSender!, _httpClientFactoryMock.Object, _loggerMock.Object);
 
         // Act
         var result = await sender.SendToAsync("+1234567890", "Test message");

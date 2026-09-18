@@ -64,13 +64,23 @@ public class AuthConfigDto
     /// <summary>找回密码是否支持短信渠道</summary>
     public bool RecoveryViaSms { get; set; }
 
-    // ── 图形验证码 ──
+    // ── 人机验证 ──
 
-    /// <summary>登录是否启用图形验证码</summary>
+    /// <summary>登录是否启用人机验证（密码登录自适应；验证码登录发码前无条件）</summary>
     public bool EnableCaptchaOnLogin { get; set; }
 
-    /// <summary>注册是否启用图形验证码</summary>
+    /// <summary>注册是否启用人机验证（发码 / 注册 / 重发确认邮件之前无条件）</summary>
     public bool EnableCaptchaOnRegister { get; set; }
+
+    /// <summary>找回密码是否启用人机验证（<c>forgot-password</c> 与 <c>password-recovery/send-code</c> 发信之前无条件）</summary>
+    public bool EnableCaptchaOnPasswordRecovery { get; set; }
+
+    /// <summary>
+    /// 浏览器渲染人机验证控件所需的公开配置（提供商名、站点密钥、脚本地址、出题端点），
+    /// 与 <c>GET /captcha/config</c> 同一份。加载了本模块的部署里 <c>Enabled</c> 恒为 true：
+    /// 没配 <c>AspNetCore:Captcha:Provider</c> 时本模块把默认补成内置图形验证码 <c>image</c>。
+    /// </summary>
+    public CaptchaClientConfigDto Captcha { get; set; } = new();
 
     // ── Passkey（WebAuthn） ──
 

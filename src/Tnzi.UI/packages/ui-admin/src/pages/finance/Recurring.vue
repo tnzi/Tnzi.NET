@@ -249,7 +249,7 @@ const rowActions = computed((): RowAction<RecurringRow>[] => [
   editAction(crud),
   {
     key: 'run',
-    label: 'finance.recurring.actions.runNow',
+    label: 'actions.runNow',
     show: (row) => canRun.value && row.status === 'Active',
     onClick: async (row) => {
       if (!row.id) return
@@ -268,26 +268,26 @@ const rowActions = computed((): RowAction<RecurringRow>[] => [
   },
   {
     key: 'pause',
-    label: 'finance.recurring.actions.pause',
+    label: 'actions.pause',
     show: (row) => crud.canUpdate && row.status === 'Active',
     onClick: (row) => transition(row, 'pause'),
   },
   {
     key: 'resume',
-    label: 'finance.recurring.actions.resume',
+    label: 'actions.resume',
     show: (row) => crud.canUpdate && row.status === 'Paused',
     onClick: (row) => transition(row, 'resume'),
   },
   {
     key: 'history',
-    label: 'finance.recurring.actions.history',
+    label: 'actions.history',
     onClick: (row) => openHistory(row.id),
   },
   {
     key: 'end',
-    label: 'finance.recurring.actions.end',
+    label: 'actions.end',
     type: 'warning',
-    confirm: 'finance.recurring.actions.endConfirm',
+    confirm: 'actions.endConfirm',
     show: (row) => crud.canUpdate && row.status !== 'Ended',
     onClick: (row) => transition(row, 'end'),
   },

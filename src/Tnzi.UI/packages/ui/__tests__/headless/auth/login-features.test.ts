@@ -46,9 +46,28 @@ describe('mapAuthConfig', () => {
   it('maps the captcha flags', () => {
     expect(mapAuthConfig(fullConfig).captchaOnLogin).toBe(false)
     expect(mapAuthConfig(fullConfig).captchaOnRegister).toBe(false)
-    const on = mapAuthConfig({ ...fullConfig, enableCaptchaOnLogin: true, enableCaptchaOnRegister: true })
+    expect(mapAuthConfig(fullConfig).captchaOnPasswordRecovery).toBe(false)
+    const on = mapAuthConfig({
+      ...fullConfig,
+      enableCaptchaOnLogin: true,
+      enableCaptchaOnRegister: true,
+      enableCaptchaOnPasswordRecovery: true,
+    })
     expect(on.captchaOnLogin).toBe(true)
     expect(on.captchaOnRegister).toBe(true)
+    expect(on.captchaOnPasswordRecovery).toBe(true)
+  })
+
+  it('carries the captcha client config through, and tolerates a backend that predates it', () => {
+    const cfg = { enabled: true, provider: 'turnstile', siteKey: 'site', scriptUrl: 'https://x/turnstile.js' }
+    expect(mapAuthConfig({ ...fullConfig, captcha: cfg }).captcha).toEqual(cfg)
+    // No captcha block (older backend) → null, and the field falls back to the image captcha.
+    const legacy = { ...fullConfig } as Record<string, unknown>
+    delete legacy.captcha
+    delete legacy.enableCaptchaOnPasswordRecovery
+    const mapped = mapAuthConfig(legacy as never)
+    expect(mapped.captcha).toBeNull()
+    expect(mapped.captchaOnPasswordRecovery).toBe(false)
   })
 })
 
@@ -72,8 +91,15 @@ describe('mergeFeatures', () => {
   it('merges the captcha overrides (default off)', () => {
     expect(DEFAULT_LOGIN_FEATURES.captchaOnLogin).toBe(false)
     expect(DEFAULT_LOGIN_FEATURES.captchaOnRegister).toBe(false)
+    expect(DEFAULT_LOGIN_FEATURES.captchaOnPasswordRecovery).toBe(false)
+    expect(DEFAULT_LOGIN_FEATURES.captcha).toBeNull()
     expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captchaOnLogin: true }).captchaOnLogin).toBe(true)
     expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captchaOnRegister: true }).captchaOnRegister).toBe(true)
+    expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captchaOnPasswordRecovery: true }).captchaOnPasswordRecovery).toBe(true)
+    const cfg = { enabled: true, provider: 'altcha' }
+    expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captcha: cfg }).captcha).toEqual(cfg)
+    // An explicit null override clears a base config (a consumer forcing the image captcha).
+    expect(mergeFeatures({ ...DEFAULT_LOGIN_FEATURES, captcha: cfg }, { captcha: null }).captcha).toBeNull()
   })
 })
 

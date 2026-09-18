@@ -4,7 +4,7 @@ namespace Tnzi.AI.Tools;
 /// 澄清请求工具 - AI Agent 用于向用户提问以获取缺失信息
 /// </summary>
 [AIToolGroup("clarification")]
-public class ClarificationTools
+public class ClarificationTools : IAIToolProvider
 {
     private readonly IAgentExecutionContextAccessor _contextAccessor;
 
@@ -22,7 +22,7 @@ public class ClarificationTools
     /// - Operations with significant risk that need explicit confirmation
     /// </summary>
     [AIFunction("ask_clarification",
-        Description = "Ask the user a clarification question when you need more information to proceed correctly. This will pause execution and wait for the user's response.",
+        "Ask the user a clarification question when you need more information to proceed correctly. This will pause execution and wait for the user's response.",
         InterruptBehavior = ToolInterruptBehavior.GracefulShutdown)]
     public string AskClarification(
         [Description("The clarification question to ask the user")] string question,

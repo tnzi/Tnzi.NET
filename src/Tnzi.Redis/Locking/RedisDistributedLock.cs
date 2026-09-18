@@ -120,6 +120,12 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
     private readonly ILogger? _logger;
     private readonly CancellationTokenSource? _renewalCts;
     private readonly Task? _renewalTask;
+
+    // 丢失信号。只有看门狗会取消它；Dispose 不取消（正常释放不是丢失）。
+    // 刻意不 Dispose：它从不挂计时器，没有非托管资源；而调用方链接出去的令牌
+    // 在句柄释放之后仍可能被读到，Dispose 过的源会让那一读变成 ObjectDisposedException。
+    private readonly CancellationTokenSource? _lostCts;
+    private readonly CancellationToken _lost;
     private volatile bool _isDisposed;
     private volatile bool _lockLost;
 
@@ -129,6 +135,12 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
     /// 是否仍持有锁。已释放或续租失败（锁丢失）后为 false。
     /// </summary>
     public bool IsAcquired => !_isDisposed && !_lockLost;
+
+    /// <summary>
+    /// 看门狗判定锁丢失（续租脚本返回 0 或续租循环抛出）时取消。
+    /// 关闭自动续租时没有看门狗，返回永不取消的 <see cref="CancellationToken.None"/>。
+    /// </summary>
+    public CancellationToken Lost => _lost;
 
     public RedisDistributedLockHandle(IDatabase db, string lockKey, string lockValue)
         : this(db, lockKey, lockValue, TimeSpan.FromSeconds(30), autoRenew: false, logger: null)
@@ -152,8 +164,28 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
         if (autoRenew)
         {
             _renewalCts = new CancellationTokenSource();
+            _lostCts = new CancellationTokenSource();
+            _lost = _lostCts.Token;
             // 后台看门狗，续租失败会自行停止；异常在循环内被吞掉，不会成为未观察任务异常
             _renewalTask = RenewLoopAsync(_renewalCts.Token);
+        }
+    }
+
+    /// <summary>
+    /// 标记锁已丢失并取消 <see cref="Lost"/>。持锁者只有链接了这个令牌才会在临界区中途停手；
+    /// 单靠 <see cref="IsAcquired"/> 翻转成 false，没有人会回头看。
+    /// </summary>
+    private void MarkLost()
+    {
+        _lockLost = true;
+        try
+        {
+            _lostCts?.Cancel();
+        }
+        catch (AggregateException ex)
+        {
+            // 调用方注册在 Lost 上的回调抛出：那是它的问题，不能让看门狗循环因此终止在不确定的状态
+            _logger?.LogWarning(ex, "A callback registered on the Lost token of distributed lock '{Key}' threw.", Key);
         }
     }
 
@@ -174,7 +206,7 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
                 if (!extended)
                 {
                     // 锁已丢失（被抢占或 Redis 不可用），停止续租并标记
-                    _lockLost = true;
+                    MarkLost();
                     _logger?.LogWarning("Distributed lock '{Key}' auto-renewal failed; the lock is considered lost.", Key);
                     return;
                 }
@@ -186,7 +218,7 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
         }
         catch (Exception ex)
         {
-            _lockLost = true;
+            MarkLost();
             _logger?.LogWarning(ex, "Distributed lock '{Key}' auto-renewal loop terminated unexpectedly.", Key);
         }
     }

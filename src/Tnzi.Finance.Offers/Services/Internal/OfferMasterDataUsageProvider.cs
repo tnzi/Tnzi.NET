@@ -2,7 +2,7 @@ namespace Tnzi.Finance.Offers.Services.Internal;
 
 /// <summary>
 /// 要约模块对 <see cref="IMasterDataUsageProvider"/> 的实现：报价单与采购订单也在引用
-/// 客户 / 供应商 / 目录项，所以核心的删除守卫在拆分之后仍然问得到它们。
+/// 客户 / 供应商 / 目录项 / 行科目，所以核心的删除守卫在拆分之后仍然问得到它们。
 /// </summary>
 /// <remarks>
 /// 这是把"会计内核 → 要约模块"的反向依赖翻转过来的那一半：内核只认契约，本模块回答事实。
@@ -59,6 +59,15 @@ public class OfferMasterDataUsageProvider : IMasterDataUsageProvider
                     || await _orderLineRepository.AnyAsync(l => l.ItemId == id, cancellationToken);
                 return used
                     ? new MasterDataUsage("Cannot delete an item referenced by estimate or purchase-order lines. Deactivate it instead.")
+                    : null;
+
+            case FinanceMasterDataKind.Account:
+                // 行科目是转发票 / 转账单时要过账到的科目：只被要约行指着、还没被过账用过的科目
+                // 在核心的分录检查里是干净的，删掉后转单那一步才撞上「科目不存在」。
+                var posted = await _estimateLineRepository.AnyAsync(l => l.AccountId == id, cancellationToken)
+                    || await _orderLineRepository.AnyAsync(l => l.AccountId == id, cancellationToken);
+                return posted
+                    ? new MasterDataUsage("Cannot delete an account referenced by estimate or purchase-order lines. Edit those lines first.")
                     : null;
 
             default:

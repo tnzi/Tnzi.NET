@@ -13,8 +13,9 @@ namespace Tnzi.AI.Rag.Services;
 /// </para>
 /// <para>
 /// 判定<b>落在服务层</b>（<c>RagQueryEngine</c> / <c>RagChatEngine</c>），不是控制器：控制器可以被
-/// 消费方整体替换，挂在其上的守卫会随之消失。agent 侧检索直接用 <c>IRagRetriever</c>，
-/// 不经过这两个引擎，因此不受本契约影响。
+/// 消费方整体替换，挂在其上的守卫会随之消失。agent 侧检索经 <c>ITextSearchService</c>
+/// （<c>VectorTextSearchService</c> 委托给 <c>IRagRetriever</c> / <c>HybridSearchService</c>），
+/// 不经过这两个引擎，因此不受本契约影响 —— 它的知识库范围由 <c>AgentKnowledgeGrant</c> 约束。
 /// </para>
 /// <para>
 /// 默认实现见 <c>DefaultRagAccessAuthorizer</c>。消费方可注册自己的实现来接入自家的可见性模型

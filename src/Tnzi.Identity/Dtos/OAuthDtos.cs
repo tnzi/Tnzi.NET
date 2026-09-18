@@ -60,6 +60,12 @@ public class OAuthCallbackResultDto
     /// 每加一种挑战就在这里补一个强类型字段，等于给自己排了一条注定会漏的队。
     /// </remarks>
     public object? ErrorDetails { get; set; }
+
+    /// <summary>
+    /// 这次回调完成的是<b>账号绑定</b>而不是登录时，被绑定的提供商（小写）。绑定回调不签发任何令牌：
+    /// <see cref="AccessToken"/> / <see cref="RefreshToken"/> 为空，回调页只跳回 <c>returnUrl</c>。
+    /// </summary>
+    public string? LinkedProvider { get; set; }
 }
 
 /// <summary>
@@ -99,30 +105,22 @@ public class OAuthUserInfoDto
 }
 
 /// <summary>
-/// 关联OAuth账户请求DTO
+/// 个人中心「绑定第三方账号」签发的一次性绑定令牌。
 /// </summary>
-public class LinkOAuthDto
+/// <remarks>
+/// OAuth 的发起与回调都是匿名的整页跳转，不带 bearer；这枚令牌把「当前用户是谁」带到回调：
+/// 前端先 <c>POST users/profile/linked-accounts/{provider}/link-token</c>，再把 <see cref="Token"/> 作为
+/// <c>linkToken</c> 查询参数跳到 <c>GET auth/oauth/{provider}/login</c>。回调消费它并把外部登录挂到<b>签发它的账号</b>上，
+/// 不签发令牌、不新建账号。
+/// </remarks>
+public class OAuthLinkTokenDto
 {
-    /// <summary>
-    /// 用户ID（当前登录用户）
-    /// </summary>
-    [Required]
-    public Guid UserId { get; set; }
+    /// <summary>令牌明文（只在签发这次返回；库里只存哈希）</summary>
+    public string Token { get; set; } = null!;
 
-    /// <summary>
-    /// 提供者名称
-    /// </summary>
-    [Required]
+    /// <summary>它只能用来绑定的提供商（小写）</summary>
     public string Provider { get; set; } = null!;
 
-    /// <summary>
-    /// 提供者用户ID
-    /// </summary>
-    [Required]
-    public string ProviderKey { get; set; } = null!;
-
-    /// <summary>
-    /// 显示名称
-    /// </summary>
-    public string? DisplayName { get; set; }
+    /// <summary>过期时间（UTC）</summary>
+    public DateTime ExpiresAt { get; set; }
 }

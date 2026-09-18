@@ -10,15 +10,27 @@ public class RazorTemplateEngine : ITemplateEngine
     private readonly IMemoryCache _cache;
     private readonly RazorEngine _razorEngine;
     private readonly string _normalizedRootPath;
-    private readonly ConcurrentDictionary<string, byte> _trackedCacheKeys = new();
+
+    // 本引擎放进缓存的每个条目都挂在这个「代」的取消令牌上：ClearCache 取消它并换一代，
+    // 缓存自己把挂在旧代上的条目全部逐出。★ 不用「记住自己放进去的键」的集合：MemoryCache 覆盖同键
+    // （并发首渲染、热重载的 Remove 后重建）时旧条目的驱逐回调在线程池上迟到，按键名摘登记会把活着的
+    // 新条目从候选集里摘掉，ClearCache 于是漏掉它 —— 与核心 MemoryCacheService 09-12 修掉的是同一个缺陷。
+    private CancellationTokenSource _cacheGeneration = new();
 
     // 缓存键前缀，用于区分不同类型的缓存
     private const string CacheKeyPrefix = "Tnzi.Template:";
 
+    /// <summary>
+    /// 本引擎专用缓存实例的 keyed-service 键。模块按 <c>Template:CacheSizeLimit</c> 在这个键下注册一个
+    /// <b>独立的</b> <see cref="MemoryCache"/>：条目上限只落在模板编译缓存上，不碰全进程共享的
+    /// <see cref="IMemoryCache"/>（共享实例一旦带上限，别的模块不带 Size 的写入会当场抛异常）。
+    /// </summary>
+    public const string CacheServiceKey = "Tnzi.Template:EngineCache";
+
     public RazorTemplateEngine(
         IOptions<TemplateOptions> options,
         ILogger<RazorTemplateEngine> logger,
-        IMemoryCache cache)
+        [FromKeyedServices(CacheServiceKey)] IMemoryCache cache)
     {
         _options = Check.NotNull(options).Value;
         _logger = Check.NotNull(logger);
@@ -31,20 +43,26 @@ public class RazorTemplateEngine : ITemplateEngine
     }
 
     /// <summary>
-    /// 从字符串渲染模板
+    /// 从字符串渲染模板（HTML 输出）
     /// </summary>
-    public async Task<string> RenderAsync(string templateContent, object? model = null, CancellationToken cancellationToken = default)
+    public Task<string> RenderAsync(string templateContent, object? model = null, CancellationToken cancellationToken = default)
+        => RenderAsync(templateContent, model, TemplateOutputKind.Html, cancellationToken);
+
+    /// <summary>
+    /// 从字符串渲染模板，按输出类型决定 <c>@expr</c> 是否 HTML 编码
+    /// </summary>
+    public async Task<string> RenderAsync(string templateContent, object? model, TemplateOutputKind outputKind, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(templateContent))
             return templateContent ?? string.Empty;
 
         try
         {
-            // 生成缓存键（按模板内容哈希）
-            var cacheKey = GenerateCacheKey(templateContent);
+            // 生成缓存键（按模板内容哈希 + 输出类型：两种输出编译出的是不同基类的两个类）
+            var cacheKey = GenerateCacheKey(templateContent, outputKind);
 
             // 获取或编译模板
-            var compiledTemplate = await GetOrCompileTemplateAsync(cacheKey, templateContent, cancellationToken);
+            var compiledTemplate = await GetOrCompileTemplateAsync(cacheKey, templateContent, outputKind, cancellationToken);
 
             // 将模型转换为安全动态对象，访问不存在的属性时返回 null 而不是抛出异常
             var safeModel = ConvertToSafeDynamicObject(model);
@@ -170,8 +188,8 @@ public class RazorTemplateEngine : ITemplateEngine
         try
         {
             // 尝试编译模板以验证语法
-            var cacheKey = GenerateCacheKey(templateContent);
-            await GetOrCompileTemplateAsync(cacheKey, templateContent);
+            var cacheKey = GenerateCacheKey(templateContent, TemplateOutputKind.Html);
+            await GetOrCompileTemplateAsync(cacheKey, templateContent, TemplateOutputKind.Html);
 
             return TemplateValidationResult.Success();
         }
@@ -204,8 +222,8 @@ public class RazorTemplateEngine : ITemplateEngine
                 }
 
                 var content = await GetOrReadTemplateBodyAsync(fullPath, cancellationToken);
-                var cacheKey = GenerateCacheKey(content);
-                await GetOrCompileTemplateAsync(cacheKey, content, cancellationToken);
+                var cacheKey = GenerateCacheKey(content, TemplateOutputKind.Html);
+                await GetOrCompileTemplateAsync(cacheKey, content, TemplateOutputKind.Html, cancellationToken);
 
                 _logger.LogDebug("Precompiled template: {Path}", path);
             }
@@ -221,18 +239,29 @@ public class RazorTemplateEngine : ITemplateEngine
 
     /// <summary>
     /// 清除模板缓存
-    /// 仅移除本引擎管理的缓存条目，不影响 IMemoryCache 中其他模块的缓存
+    /// 仅移除本引擎管理的缓存条目（引擎缓存是独立实例，但测试可以传入共享实例，语义仍按「只清自己的」）
     /// </summary>
+    /// <remarks>
+    /// 换一代并取消旧代：挂在旧代上的每个条目对读取方<b>立刻</b>不可见（MemoryCache 读时先查过期令牌），
+    /// 物理逐出在线程池上随后落地。换代与取消之间落地的条目挂在旧代上、会一起被清掉，这是「清缓存」
+    /// 与一次并发写入的合法交错；换代之后落地的条目挂在新代上、不受影响。旧的 CTS 不 Dispose：
+    /// 取消后的令牌上再注册回调会同步触发，Dispose 只会把一个已经没有任何条目引用的对象变成陷阱。
+    /// </remarks>
     public void ClearCache()
     {
-        var keys = _trackedCacheKeys.Keys.ToList();
-        foreach (var key in keys)
-        {
-            _cache.Remove(key);
-        }
+        var previousGeneration = Interlocked.Exchange(ref _cacheGeneration, new CancellationTokenSource());
+        previousGeneration.Cancel();
+        _logger.LogInformation("Template cache cleared.");
+    }
 
-        _trackedCacheKeys.Clear();
-        _logger.LogInformation("Template cache cleared. Removed {Count} entries.", keys.Count);
+    /// <summary>
+    /// 给本引擎的缓存条目统一设过期策略、大小与「代」令牌。
+    /// </summary>
+    private void ConfigureCacheEntry(ICacheEntry entry)
+    {
+        entry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
+        entry.Size = 1;  // 用于限制缓存大小
+        entry.AddExpirationToken(new CancellationChangeToken(Volatile.Read(ref _cacheGeneration).Token));
     }
 
     /// <summary>
@@ -279,37 +308,30 @@ public class RazorTemplateEngine : ITemplateEngine
     /// <summary>
     /// 生成缓存键（使用 MD5 哈希确保唯一性）
     /// </summary>
-    private static string GenerateCacheKey(string content)
+    private static string GenerateCacheKey(string content, TemplateOutputKind outputKind)
     {
-        // 统一使用 MD5 哈希，避免 GetHashCode() 可能产生的哈希冲突
-        return $"{CacheKeyPrefix}{content.ToMd5()}";
+        // 统一使用 MD5 哈希，避免 GetHashCode() 可能产生的哈希冲突。
+        // 输出类型进键：同一段内容按 HTML 与纯文本编译出的是两个基类不同的类，共用一个条目
+        // 会让先渲染的那一种决定后面所有渲染的编码行为。
+        return $"{CacheKeyPrefix}{outputKind}:{content.ToMd5()}";
     }
 
     /// <summary>
     /// 获取或编译模板（使用 IMemoryCache 支持过期策略）
     /// </summary>
-    private async Task<IRazorEngineCompiledTemplate> GetOrCompileTemplateAsync(string cacheKey, string templateContent, CancellationToken cancellationToken = default)
+    private async Task<IRazorEngineCompiledTemplate> GetOrCompileTemplateAsync(string cacheKey, string templateContent, TemplateOutputKind outputKind, CancellationToken cancellationToken = default)
     {
         // 如果禁用缓存，直接编译
         if (!_options.EnableCache)
         {
-            return await CompileTemplateAsync(templateContent, cancellationToken);
+            return await CompileTemplateAsync(templateContent, outputKind, cancellationToken);
         }
 
         // 使用 GetOrCreateAsync 模式
         var compiledTemplate = await _cache.GetOrCreateAsync(cacheKey, async entry =>
         {
-            // 设置缓存过期策略
-            entry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
-            entry.Size = 1;  // 用于限制缓存大小
-
-            // 注册淘汰回调，自动清理跟踪集合
-            entry.RegisterPostEvictionCallback((key, _, _, _) => _trackedCacheKeys.TryRemove(key.ToString()!, out _));
-
-            // 跟踪缓存键
-            _trackedCacheKeys.TryAdd(cacheKey, 0);
-
-            return await CompileTemplateAsync(templateContent, cancellationToken);
+            ConfigureCacheEntry(entry);
+            return await CompileTemplateAsync(templateContent, outputKind, cancellationToken);
         });
 
         // GetOrCreateAsync 理论上不应该返回 null，但如果发生异常情况，提供清晰的错误信息
@@ -323,9 +345,9 @@ public class RazorTemplateEngine : ITemplateEngine
     }
 
     /// <summary>
-    /// 编译模板（使用自定义基类和引用）
+    /// 编译模板（使用自定义基类和引用）。基类按输出类型选：HTML 输出编码 <c>@expr</c>，纯文本输出不编码。
     /// </summary>
-    private async Task<IRazorEngineCompiledTemplate> CompileTemplateAsync(string templateContent, CancellationToken cancellationToken = default)
+    private async Task<IRazorEngineCompiledTemplate> CompileTemplateAsync(string templateContent, TemplateOutputKind outputKind, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -333,7 +355,7 @@ public class RazorTemplateEngine : ITemplateEngine
             return await _razorEngine.CompileAsync(templateContent, builder =>
             {
                 // 使用自定义模板基类，提供 Raw、HtmlEncode、DateTime 等方法
-                builder.Inherits(typeof(TemplateBase));
+                builder.Inherits(outputKind == TemplateOutputKind.PlainText ? typeof(PlainTextTemplateBase) : typeof(TemplateBase));
 
                 // 添加常用命名空间引用
                 builder.AddUsing("System");
@@ -432,17 +454,8 @@ public class RazorTemplateEngine : ITemplateEngine
                 _logger.LogWarning("File '{FilePath}' was modified multiple times during read. Using latest content after {RetryCount} retries.", fullPath, retryCount);
             }
 
-            var fileEntry = new FileContentCacheEntry(content, lastWrite);
-
-            // 设置缓存选项
-            cacheEntry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
-            cacheEntry.Size = 1;
-
-            // 注册淘汰回调并跟踪缓存键
-            cacheEntry.RegisterPostEvictionCallback((key, _, _, _) => _trackedCacheKeys.TryRemove(key.ToString()!, out _));
-            _trackedCacheKeys.TryAdd(cacheKey, 0);
-
-            return fileEntry;
+            ConfigureCacheEntry(cacheEntry);
+            return new FileContentCacheEntry(content, lastWrite);
         });
 
         return entry?.Content ?? throw new InvalidOperationException($"Failed to load template: {fullPath}");

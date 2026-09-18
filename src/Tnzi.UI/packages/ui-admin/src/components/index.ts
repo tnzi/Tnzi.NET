@@ -37,6 +37,11 @@ export * from './finance'
 
 export { default as TAdminLoginCard } from './auth/TAdminLoginCard.vue'
 export type { DemoAccount, LoginPayload } from './auth/TAdminLoginCard.vue'
+// Re-authentication prompt for `[RequireStepUp]` actions. Renders a core
+// `StepUpPromptController`; the User Center mounts one and feeds
+// `prompt.verify` to the identity bridge, and a consumer page that calls its
+// own step-up-gated endpoint can do the same.
+export { default as TStepUpModal } from './auth/TStepUpModal.vue'
 
 export { default as TIconPicker } from './inputs/TIconPicker.vue'
 export { default as TJsonEditor } from './inputs/TJsonEditor.vue'

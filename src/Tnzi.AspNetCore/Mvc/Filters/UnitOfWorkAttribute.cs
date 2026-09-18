@@ -11,7 +11,8 @@ public class UnitOfWorkAttribute : ServiceFilterAttribute
 {
     /// <summary>
     /// 获取或设置 是否禁用工作单元（默认false）
-    /// 用于在全局过滤器模式下禁用特定方法的事务
+    /// 用于在全局过滤器模式下禁用特定方法的事务；可选标记模式下同样生效（方法级禁用压过类级 [UnitOfWork]）。
+    /// 特性本身仍会把 <see cref="UnitOfWorkActionFilter"/> 带进管线，由它读到这个值后让路。
     /// </summary>
     public bool IsDisabled { get; set; } = false;
 

@@ -5,6 +5,13 @@ namespace Tnzi.EFCore.Internal;
 /// 审计属性辅助类
 /// 负责自动填充审计字段（创建时间、创建人、修改时间、软删除等）
 /// </summary>
+/// <remarks>
+/// 逐实体的填充规则（<see cref="ApplyCreationAudit(object, ICurrentUser?, ICurrentTenant?, DateTime)"/> /
+/// <see cref="ApplyModificationAudit(object, ICurrentUser?, DateTime)"/>）只有一份：<c>SaveChanges</c> 按变更跟踪器的状态套用，
+/// 绕过变更跟踪器的 Dapper 批量插入 / 更新按「整批都是新增 / 整批都是修改」套用。
+/// 两条路径此前各写各的，Dapper 那条压根没写 —— 主键解锁后一批 <c>CreationTime</c> 0001-01-01、
+/// <c>TenantId</c> 为 null 的行安静落库。
+/// </remarks>
 internal static class AuditPropertyHelper
 {
     /// <summary>
@@ -25,48 +32,12 @@ internal static class AuditPropertyHelper
             {
                 case EntityState.Added:
                     IdGenerationHelper.ApplyAutoId(dbContext, entry);
-                    if (entry.Entity is IHasCreationTime hasCreationTime && hasCreationTime.CreationTime == default)
-                    {
-                        hasCreationTime.CreationTime = utcNow;
-                    }
-                    if (entry.Entity is IHasCreator hasCreator && hasCreator.CreatorId == null)
-                    {
-                        hasCreator.CreatorId = currentUser?.Id;
-                    }
-                    // 无论是否启用租户隔离，都保留实体上的 TenantId 审计值。
-                    // 当多租户关闭时，EF 模型可能忽略该列，但实体内存状态仍应保持一致。
-                    if (entry.Entity is IMultiTenant multiTenant && multiTenant.TenantId == null)
-                    {
-                        multiTenant.TenantId = currentTenant?.Id ?? currentUser?.TenantId;
-                    }
-                    // 多租户启用时，IMultiTenant 实体的 TenantId 不应为 null（防止数据泄露）。
-                    // 刻意只写调试输出（不接 ILogger）：本方法在每次 SaveChanges 对每个跟踪实体执行，
-                    // 接日志会在批量操作中产生大量条目。注意 Debug.WriteLine 在 Release 构建中被编译移除，
-                    // 因此该提示仅在开发期可见。
-                    if (multiTenancyEnabled && entry.Entity is IMultiTenant mtEntity && mtEntity.TenantId == null)
-                    {
-                        var entityType = entry.Entity.GetType().Name;
-                        Debug.WriteLine($"[MultiTenancy] Warning: Entity '{entityType}' created without TenantId while multi-tenancy is enabled. This may cause data isolation issues.");
-                    }
-                    if (entry.Entity is IConcurrencyStamp addedConcurrency)
-                    {
-                        addedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
-                    }
+                    ApplyCreationAudit(entry.Entity, currentUser, currentTenant, utcNow);
+                    WarnIfTenantMissing(entry.Entity, multiTenancyEnabled);
                     break;
 
                 case EntityState.Modified:
-                    if (entry.Entity is IHasModificationTime hasModTime)
-                    {
-                        hasModTime.LastModificationTime = utcNow;
-                    }
-                    if (entry.Entity is IHasModifier hasModifier)
-                    {
-                        hasModifier.LastModifierId = currentUser?.Id;
-                    }
-                    if (entry.Entity is IConcurrencyStamp modifiedConcurrency)
-                    {
-                        modifiedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
-                    }
+                    ApplyModificationAudit(entry.Entity, currentUser, utcNow);
                     // 直接把 IsDeleted 置 true 的软删除（不经仓储 DeleteAsync，实体停在 Modified）
                     // 同样要留下删除人与删除时间。
                     //
@@ -97,22 +68,126 @@ internal static class AuditPropertyHelper
                             hasDeleter.DeleterId = currentUser?.Id;
                             hasDeleter.DeletionTime = utcNow;
                         }
-                        // 软删除也要更新修改时间和修改人
-                        if (entry.Entity is IHasModificationTime hasModTimeOnDelete)
-                        {
-                            hasModTimeOnDelete.LastModificationTime = utcNow;
-                        }
-                        if (entry.Entity is IHasModifier hasModifierOnDelete)
-                        {
-                            hasModifierOnDelete.LastModifierId = currentUser?.Id;
-                        }
-                        if (entry.Entity is IConcurrencyStamp deletedConcurrency)
-                        {
-                            deletedConcurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
-                        }
+                        // 软删除也要更新修改时间和修改人（含换并发戳）
+                        ApplyModificationAudit(entry.Entity, currentUser, utcNow);
                     }
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// 新增实体的创建审计：创建时间（仍为默认值时）、创建人（仍为 null 时）、租户（仍为 null 时）、并发戳（总是换新）。
+    /// 调用方已经赋的值一律保留。
+    /// </summary>
+    public static void ApplyCreationAudit(object entity, ICurrentUser? currentUser, ICurrentTenant? currentTenant, DateTime utcNow)
+    {
+        if (entity is IHasCreationTime hasCreationTime && hasCreationTime.CreationTime == default)
+        {
+            hasCreationTime.CreationTime = utcNow;
+        }
+        if (entity is IHasCreator hasCreator && hasCreator.CreatorId == null)
+        {
+            hasCreator.CreatorId = currentUser?.Id;
+        }
+        // 无论是否启用租户隔离，都保留实体上的 TenantId 审计值。
+        // 当多租户关闭时，EF 模型可能忽略该列，但实体内存状态仍应保持一致。
+        if (entity is IMultiTenant multiTenant && multiTenant.TenantId == null)
+        {
+            multiTenant.TenantId = currentTenant?.Id ?? currentUser?.TenantId;
+        }
+        if (entity is IConcurrencyStamp concurrency)
+        {
+            concurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+        }
+    }
+
+    /// <summary>
+    /// 修改实体的修改审计：修改时间、修改人、并发戳（总是换新）。
+    /// </summary>
+    public static void ApplyModificationAudit(object entity, ICurrentUser? currentUser, DateTime utcNow)
+    {
+        if (entity is IHasModificationTime hasModTime)
+        {
+            hasModTime.LastModificationTime = utcNow;
+        }
+        if (entity is IHasModifier hasModifier)
+        {
+            hasModifier.LastModifierId = currentUser?.Id;
+        }
+        if (entity is IConcurrencyStamp concurrency)
+        {
+            concurrency.ConcurrencyStamp = Guid.NewGuid().ToString("N");
+        }
+    }
+
+    /// <summary>
+    /// 绕过变更跟踪器的批量插入：对每个实体套用与 <c>SaveChanges</c> 新增分支同一套创建审计，
+    /// 协作者取自上下文自身（见 <see cref="IAuditPropertyContext"/>）。Id 生成不在这里（调用方按主键策略决定）。
+    /// </summary>
+    public static void ApplyCreationAudit(DbContext dbContext, IEnumerable<object> entities)
+    {
+        Check.NotNull(dbContext);
+        Check.NotNull(entities);
+
+        var (currentUser, currentTenant, timeProvider) = ResolveCollaborators(dbContext);
+        var multiTenancyEnabled = dbContext is IMultiTenancySwitchProvider provider && provider.IsMultiTenancyEnabled;
+        var utcNow = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+
+        foreach (var entity in entities)
+        {
+            ApplyCreationAudit(entity, currentUser, currentTenant, utcNow);
+            WarnIfTenantMissing(entity, multiTenancyEnabled);
+        }
+    }
+
+    /// <summary>
+    /// 绕过变更跟踪器的批量更新：对每个实体套用与 <c>SaveChanges</c> 修改分支同一套修改审计。
+    /// </summary>
+    public static void ApplyModificationAudit(DbContext dbContext, IEnumerable<object> entities)
+    {
+        Check.NotNull(dbContext);
+        Check.NotNull(entities);
+
+        var (currentUser, _, timeProvider) = ResolveCollaborators(dbContext);
+        var utcNow = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
+
+        foreach (var entity in entities)
+        {
+            ApplyModificationAudit(entity, currentUser, utcNow);
+        }
+    }
+
+    /// <summary>
+    /// 上下文实现了 <see cref="IAuditPropertyContext"/>（两个框架基类都实现）就取它自己的那组协作者；
+    /// 否则退到 options 携带的应用容器（手工构造的裸 DbContext 没有容器 ⇒ 全部为 null，审计值留空，
+    /// 与该上下文自己的 SaveChanges 行为一致：裸 DbContext 本来就不填审计）。
+    /// </summary>
+    private static (ICurrentUser? CurrentUser, ICurrentTenant? CurrentTenant, TimeProvider? TimeProvider) ResolveCollaborators(DbContext dbContext)
+    {
+        if (dbContext is IAuditPropertyContext auditContext)
+        {
+            return (auditContext.CurrentUser, auditContext.CurrentTenant, auditContext.TimeProvider);
+        }
+
+        var serviceProvider = DbContextServiceResolver.GetServiceProvider(dbContext);
+        return (
+            serviceProvider?.GetService<ICurrentUser>(),
+            serviceProvider?.GetService<ICurrentTenant>(),
+            serviceProvider?.GetService<TimeProvider>());
+    }
+
+    /// <summary>
+    /// 多租户启用时，IMultiTenant 实体的 TenantId 不应为 null（防止数据泄露）。
+    /// 刻意只写调试输出（不接 ILogger）：本方法对每个新增实体执行，接日志会在批量操作中产生大量条目。
+    /// 注意 Debug.WriteLine 在 Release 构建中被编译移除，因此该提示仅在开发期可见。
+    /// </summary>
+    private static void WarnIfTenantMissing(object entity, bool multiTenancyEnabled)
+    {
+        if (multiTenancyEnabled && entity is IMultiTenant { TenantId: null })
+        {
+            var entityType = entity.GetType().Name;
+            Debug.WriteLine($"[MultiTenancy] Warning: Entity '{entityType}' created without TenantId while multi-tenancy is enabled. This may cause data isolation issues.");
         }
     }
 

@@ -416,10 +416,18 @@ export interface ChatResponseDto {
   assistantMessageId?: string | null;
 }
 
-/** Tool call detail (name + duration) */
+/**
+ * Tool call detail. Mirrors backend `ToolCallDetail` (name, duration, outcome);
+ * emitted on the stream once the tool has run, and persisted on the thread
+ * message.
+ */
 export interface ToolCallDetailDto {
   name: string;
   durationMs?: number | null;
+  /** Whether the call succeeded. */
+  isSuccess?: boolean | null;
+  /** Error message when `isSuccess` is false. */
+  error?: string | null;
   input?: string | null;
   output?: string | null;
 }
@@ -1328,8 +1336,36 @@ export interface WorkflowDefinitionDto {
   steps: WorkflowStepDto[];
   executionMode: WorkflowExecutionMode;
   isEnabled: boolean;
+  /** Graph configuration (conditional edges + loops); null when the workflow has none */
+  configuration?: WorkflowGraphConfigurationDto | null;
   creationTime: string;
   lastModificationTime?: string | null;
+}
+
+/**
+ * Workflow graph configuration: conditional edges and loops, persisted alongside the steps.
+ * A router / conditional / review node's route only takes effect through a conditional edge
+ * whose `fromNodeId` is that step; without one every dependent branch runs.
+ */
+export interface WorkflowGraphConfigurationDto {
+  conditionalEdges?: WorkflowConditionalEdgeDto[] | null;
+  /** Loops keyed by loop id */
+  loops?: Record<string, WorkflowLoopDto> | null;
+}
+
+/** Conditional edge: route key (or matched output) -> target step id */
+export interface WorkflowConditionalEdgeDto {
+  fromNodeId: string;
+  routes: Record<string, string>;
+  defaultTarget?: string | null;
+  /** OutputContains (default) | OutputEquals | JsonPath */
+  conditionType?: string | null;
+}
+
+/** Loop: the listed steps re-run until the loop signals done, at most maxIterations times */
+export interface WorkflowLoopDto {
+  nodeIds: string[];
+  maxIterations?: number;
 }
 
 /** Create workflow request */
@@ -1339,6 +1375,7 @@ export interface CreateWorkflowDefinitionDto {
   steps: WorkflowStepDto[];
   executionMode?: WorkflowExecutionMode;
   isEnabled?: boolean;
+  configuration?: WorkflowGraphConfigurationDto | null;
 }
 
 /** Update workflow request */
@@ -1348,6 +1385,8 @@ export interface UpdateWorkflowDefinitionDto {
   steps?: WorkflowStepDto[] | null;
   executionMode?: WorkflowExecutionMode | null;
   isEnabled?: boolean | null;
+  /** Omit / null = leave untouched; an object with no edges and no loops clears the stored configuration */
+  configuration?: WorkflowGraphConfigurationDto | null;
 }
 
 /** Workflow step */
@@ -1564,8 +1603,6 @@ export interface McpServerStatusDto {
   enabled: boolean;
   endpoint: string;
   requireAuthentication: boolean;
-  /** Whether rate-limit keys are partitioned per tenant (not execution isolation) */
-  rateLimitPerTenant: boolean;
   rateLimitPerMinute: number;
   exposedAgentCount: number;
   customToolCount: number;

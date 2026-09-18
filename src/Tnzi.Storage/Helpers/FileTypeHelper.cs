@@ -16,16 +16,22 @@ public static class FileTypeHelper
         if (string.IsNullOrEmpty(extension))
             return false;
 
-        // ★ .heic/.heif 是 iOS 相机的默认格式，.tif/.tiff 是扫描仪的默认格式 —— 它们不在这张
-        // 表里的后果不是「判不出是图片」而是 GetContentType 回落 application/octet-stream，
-        // 于是任何按 image/* 分支的下游（预览、缩略图、收据识别）都当它是二进制附件拒掉。
-        var imageExtensions = new[]
-        {
-            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico",
-            ".heic", ".heif", ".avif", ".tif", ".tiff"
-        };
-        return Array.Exists(imageExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
+        return Array.Exists(ImageExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// 算作图片的扩展名（小写、带点）。
+    /// </summary>
+    /// <remarks>
+    /// ★ .heic/.heif 是 iOS 相机的默认格式，.tif/.tiff 是扫描仪的默认格式 —— 它们不在这张
+    /// 表里的后果不是「判不出是图片」而是 GetContentType 回落 application/octet-stream，
+    /// 于是任何按 image/* 分支的下游（预览、缩略图、收据识别）都当它是二进制附件拒掉。
+    /// </remarks>
+    private static readonly string[] ImageExtensions =
+    [
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico",
+        ".heic", ".heif", ".avif", ".tif", ".tiff"
+    ];
 
     /// <summary>
     /// 本机图片解码器（ImageSharp 3.1）读不了的图片格式。
@@ -59,6 +65,14 @@ public static class FileTypeHelper
     public static bool IsThumbnailable(string extension)
         => IsImage(extension)
            && !Array.Exists(NonDecodableImageExtensions, ext => ext.Equals(extension, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// <see cref="IsThumbnailable"/> 答「是」的全部扩展名（小写、带点），给要把这条判定翻译成 SQL 的调用方
+    /// （缩略图回填按 <c>Extension IN (...)</c> 挑候选记录）。与 <see cref="IsThumbnailable"/> 同源：
+    /// 图片表减去解码器读不了的那几个，不是第三张手抄的表。
+    /// </summary>
+    public static IReadOnlyList<string> ThumbnailableImageExtensions { get; } =
+        ImageExtensions.Where(IsThumbnailable).ToArray();
 
     /// <summary>
     /// 判断是否为 PDF 文件。

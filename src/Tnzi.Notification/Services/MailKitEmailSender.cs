@@ -9,18 +9,34 @@ namespace Tnzi.Notification.Services;
 /// </summary>
 public class MailKitEmailSender : IEmailSender
 {
-    private readonly NotificationOptions _options;
+    private readonly MailSenderOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<MailKitEmailSender> _logger;
+    private readonly AttachmentOptions _attachments;
 
+    /// <summary>
+    /// 初始化一个 <see cref="MailKitEmailSender"/>。
+    /// </summary>
+    /// <param name="options">
+    /// 这一个发送器的 SMTP 配置：默认发送器是 <c>Notification:MailSender</c> 那一节，
+    /// 具名发送器是 <c>Notification:MailSenders:{key}</c> 里的一节。同一个类按不同的一节各出一个实例。
+    /// </param>
+    /// <param name="httpClientFactory">取远程附件用。</param>
+    /// <param name="logger">日志。</param>
+    /// <param name="attachments">
+    /// 附件来源纪律（<c>Notification:Attachments</c>）。不传 = 缺省值：<b>一个本地根目录都不允许</b>，
+    /// 远程 URL 只放行过 <c>EgressGuard</c> 的 http/https。缺省方向是关的，所以漏传只会多拒绝、不会放开。
+    /// </param>
     public MailKitEmailSender(
-        NotificationOptions options,
+        MailSenderOptions options,
         IHttpClientFactory httpClientFactory,
-        ILogger<MailKitEmailSender> logger)
+        ILogger<MailKitEmailSender> logger,
+        AttachmentOptions? attachments = null)
     {
         _options = Check.NotNull(options);
         _httpClientFactory = Check.NotNull(httpClientFactory);
         _logger = Check.NotNull(logger);
+        _attachments = attachments ?? new AttachmentOptions();
     }
 
     public Task<SendResult> SendToAsync(string to, string? name, string subject, string body, bool isHtml = true, List<EmailAttachment>? attachments = null, CancellationToken cancellationToken = default)
@@ -47,12 +63,6 @@ public class MailKitEmailSender : IEmailSender
     {
         Check.NotNull(message);
 
-        if (_options.MailSender == null)
-        {
-            _logger.LogWarning("Mail sender options not configured");
-            return SendResult.CreateFailure("Mail sender options not configured");
-        }
-
         var envelope = EmailEnvelope.Normalize(message);
         if (EmailEnvelope.HasNoRecipient(envelope))
         {
@@ -61,7 +71,7 @@ public class MailKitEmailSender : IEmailSender
         }
 
         // In development, redirect all outbound email to the configured override address
-        var devOverride = _options.MailSender.DevOverrideEmail;
+        var devOverride = _options.DevOverrideEmail;
         if (!string.IsNullOrWhiteSpace(devOverride))
         {
             _logger.LogWarning("[DEV] Email redirected. OriginalRecipients={OriginalRecipients}, Override={Override}, Subject={Subject}", EmailEnvelope.Describe(envelope), devOverride, envelope.Subject);
@@ -73,7 +83,7 @@ public class MailKitEmailSender : IEmailSender
         try
         {
             var mimeMessage = new MimeMessage();
-            mimeMessage.From.Add(new MailboxAddress(_options.MailSender.FromName, _options.MailSender.FromEmail));
+            mimeMessage.From.Add(new MailboxAddress(_options.FromName, _options.FromEmail));
             AddAddresses(mimeMessage.To, envelope.To);
             AddAddresses(mimeMessage.Cc, envelope.Cc);
             AddAddresses(mimeMessage.Bcc, envelope.Bcc);
@@ -103,8 +113,8 @@ public class MailKitEmailSender : IEmailSender
             mimeMessage.Body = bodyBuilder.ToMessageBody();
 
             using var client = new MailKit.Net.Smtp.SmtpClient();
-            await client.ConnectAsync(_options.MailSender.SmtpServer, _options.MailSender.SmtpPort, _options.MailSender.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None, cancellationToken);
-            await client.AuthenticateAsync(_options.MailSender.Username, _options.MailSender.Password, cancellationToken);
+            await client.ConnectAsync(_options.SmtpServer, _options.SmtpPort, _options.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None, cancellationToken);
+            await client.AuthenticateAsync(_options.Username, _options.Password, cancellationToken);
 
             await client.SendAsync(mimeMessage, cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
@@ -187,6 +197,12 @@ public class MailKitEmailSender : IEmailSender
     /// ★ <b>为什么收集原因而不是抛异常</b>：调用方要在<b>连 SMTP 之前</b>就掉头。抛出去会被
     /// 外层 catch 记成 "Failed to send email"，读日志的人会以为是 SMTP 出了问题。
     /// </para>
+    /// <para>
+    /// ★★ <b>取件前先过来源纪律</b>（<see cref="AttachmentSourcePolicy"/>，与创建入口同一条规则）：
+    /// 实体里的 <c>FilePath</c> 曾经原样来自请求体，而这个发送器按它读任意本地文件 / 取任意 URL。
+    /// 入口那道门挡住新请求；这一道挡住落库后 DNS 已变的 URL、旧行、以及消费方绕过服务层直接调
+    /// <c>IEmailSender</c> 的路径。再加一道大小上限 —— 一个指向几 GB 的 URL 能把进程内存打满。
+    /// </para>
     /// </remarks>
     private async Task<string?> AddAttachmentsAsync(BodyBuilder bodyBuilder, List<EmailAttachment>? attachments, CancellationToken cancellationToken)
     {
@@ -206,23 +222,29 @@ public class MailKitEmailSender : IEmailSender
             }
             else if (!string.IsNullOrEmpty(attachment.FilePath))
             {
-                // 先判断 URL，再判断本地文件
-                if (Uri.TryCreate(attachment.FilePath, UriKind.Absolute, out var uri) && !uri.IsFile)
+                var violation = await AttachmentSourcePolicy.DescribeViolationAsync(attachment.FilePath, _attachments, cancellationToken);
+                if (violation != null)
                 {
-                    using var httpClient = _httpClientFactory.CreateClient();
-                    try
-                    {
-                        using var stream = await httpClient.GetStreamAsync(uri, cancellationToken);
-                        bodyBuilder.Attachments.Add(attachment.FileName, stream, contentType);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        _logger.LogWarning(ex, "Failed to download attachment from URL: {FilePath}", attachment.FilePath);
-                        return $"Attachment '{attachment.FileName}' could not be downloaded: {ex.Message}";
-                    }
+                    _logger.LogWarning("Attachment source rejected: {FileName}: {Reason}", attachment.FileName, violation);
+                    return $"Attachment '{attachment.FileName}' has a disallowed source: {violation}";
+                }
+
+                // 先判断 URL，再判断本地文件
+                if (AttachmentSourcePolicy.IsRemoteUrl(attachment.FilePath, out var uri))
+                {
+                    var failure = await DownloadAttachmentAsync(bodyBuilder, attachment, uri, contentType, cancellationToken);
+                    if (failure != null)
+                        return failure;
                 }
                 else if (File.Exists(attachment.FilePath))
                 {
+                    var length = new FileInfo(attachment.FilePath).Length;
+                    if (length > _attachments.MaxAttachmentBytes)
+                    {
+                        _logger.LogWarning("Attachment file exceeds the size limit: {FileName} ({Length} bytes > {Limit})", attachment.FileName, length, _attachments.MaxAttachmentBytes);
+                        return $"Attachment '{attachment.FileName}' is {length} bytes, above Notification:Attachments:MaxAttachmentBytes ({_attachments.MaxAttachmentBytes}).";
+                    }
+
                     // ★ 带上已解析的 ContentType：不给的话 MimeKit 按扩展名嗅探，
                     // 而 FaxEnvelope 特意把 MIME 归一成 application/pdf 正是因为网关只认它。
                     await bodyBuilder.Attachments.AddAsync(attachment.FilePath, contentType, cancellationToken);
@@ -241,6 +263,70 @@ public class MailKitEmailSender : IEmailSender
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 按 URL 取远程附件，读到 <see cref="AttachmentOptions.MaxAttachmentBytes"/> 就停。
+    /// 成功返回 <see langword="null"/>，否则返回失败原因。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 上限必须在<b>读流的过程中</b>生效：只看 <c>Content-Length</c> 挡不住不报长度的响应（分块传输），
+    /// 而先整个读进来再量长度，内存早已被占掉了。
+    /// </para>
+    /// <para>
+    /// ★★ <b>重定向不跟。</b><see cref="AttachmentSourcePolicy"/> 里的 <c>EgressGuard</c> 只审原始 URL；
+    /// 一个公网地址回 <c>302</c> 指向云元数据 / 内网，自动跟随的客户端会把第二跳直接发出去，回应装进信里寄走，
+    /// 而检查全过。所以这里用的是 <see cref="NotificationHttpClientNames.Attachments"/> 那个禁自动重定向的
+    /// 具名客户端，并且任何 3xx 都当取件失败 —— 消费方把重定向开回来也绕不过这一句。
+    /// </para>
+    /// </remarks>
+    private async Task<string?> DownloadAttachmentAsync(
+        BodyBuilder bodyBuilder, EmailAttachment attachment, Uri uri, ContentType contentType, CancellationToken cancellationToken)
+    {
+        var limit = _attachments.MaxAttachmentBytes;
+        using var httpClient = _httpClientFactory.CreateClient(NotificationHttpClientNames.Attachments);
+        try
+        {
+            using var response = await httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if ((int)response.StatusCode is >= 300 and < 400)
+            {
+                _logger.LogWarning("Remote attachment answered a redirect, which is not followed: {FilePath} -> {Location} ({StatusCode})",
+                    attachment.FilePath, response.Headers.Location, (int)response.StatusCode);
+                return $"Attachment '{attachment.FileName}' could not be downloaded: the server answered a redirect ({(int)response.StatusCode}), and redirects are not followed.";
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            if (response.Content.Headers.ContentLength is { } declared && declared > limit)
+            {
+                _logger.LogWarning("Remote attachment exceeds the size limit: {FileName} ({Length} bytes > {Limit})", attachment.FileName, declared, limit);
+                return $"Attachment '{attachment.FileName}' is {declared} bytes, above Notification:Attachments:MaxAttachmentBytes ({limit}).";
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var buffer = new MemoryStream();
+            var chunk = new byte[81920];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+            {
+                if (buffer.Length + read > limit)
+                {
+                    _logger.LogWarning("Remote attachment exceeds the size limit while downloading: {FileName} (> {Limit} bytes)", attachment.FileName, limit);
+                    return $"Attachment '{attachment.FileName}' exceeds Notification:Attachments:MaxAttachmentBytes ({limit}).";
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+
+            bodyBuilder.Attachments.Add(attachment.FileName, buffer.ToArray(), contentType);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to download attachment from URL: {FilePath}", attachment.FilePath);
+            return $"Attachment '{attachment.FileName}' could not be downloaded: {ex.Message}";
+        }
     }
 
 }

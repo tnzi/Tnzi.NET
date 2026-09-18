@@ -39,11 +39,11 @@ public class ChannelQueueServiceTests
     {
         // Arrange
         bool executed = false;
-        Func<IServiceProvider, CancellationToken, Task> workItem = (sp, ct) => 
+        var workItem = new NotificationWorkItem(null, (sp, ct) =>
         {
             executed = true;
             return Task.CompletedTask;
-        };
+        });
 
         // Act
         await _queueService.EnqueueAsync(workItem);
@@ -77,15 +77,15 @@ public class ChannelQueueServiceTests
     {
         // Arrange
         int executedCount = 0;
-        var workItems = new List<Func<IServiceProvider, CancellationToken, Task>>();
+        var workItems = new List<NotificationWorkItem>();
 
         for (int i = 0; i < 5; i++)
         {
-            workItems.Add((sp, ct) =>
+            workItems.Add(new NotificationWorkItem(null, (sp, ct) =>
             {
                 Interlocked.Increment(ref executedCount);
                 return Task.CompletedTask;
-            });
+            }));
         }
 
         // Act

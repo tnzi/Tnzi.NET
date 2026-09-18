@@ -7,10 +7,37 @@
     <Description>Smart composite host module for Tnzi.NET framework. Auto-adapts to loaded modules via OptionalDependsOn and activates [DefaultController] from each module.</Description>
   </PropertyGroup>
 
+  <!--
+    build\Tnzi.Hosting.props is a template: its TnziVersion default is the token __TNZI_VERSION__.
+    TnziGenerateHostingProps substitutes $(PackageVersion) into a copy under obj\ and that copy is
+    what gets packed, so the default always matches the Tnzi.Hosting package that imports it and
+    every <TnziModules> package resolves to the same version as the core. The template itself is
+    deliberately not packed (HostingTargetsSyncTests checks both halves; build/nuget-pack.ps1 and
+    the publish workflow open the produced nupkg and check the substituted value).
+  -->
+  <PropertyGroup>
+    <TnziHostingPropsTemplate>$(MSBuildProjectDirectory)\build\Tnzi.Hosting.props</TnziHostingPropsTemplate>
+    <TnziHostingPropsGenerated>$(BaseIntermediateOutputPath)Tnzi.Hosting.props</TnziHostingPropsGenerated>
+  </PropertyGroup>
+
   <ItemGroup>
-    <None Include="build\Tnzi.Hosting.props" Pack="true" PackagePath="build\" />
+    <None Include="$(TnziHostingPropsGenerated)" Pack="true" PackagePath="build\" Visible="false" />
     <None Include="build\Tnzi.Hosting.targets" Pack="true" PackagePath="build\" />
   </ItemGroup>
+
+  <Target Name="TnziGenerateHostingProps" BeforeTargets="_GetPackageFiles;GenerateNuspec">
+    <Error Condition="'$(PackageVersion)' == ''"
+           Text="PackageVersion is empty; the Tnzi.Hosting.props default TnziVersion cannot be generated." />
+    <Error Condition="!Exists('$(TnziHostingPropsTemplate)')"
+           Text="Template $(TnziHostingPropsTemplate) is missing." />
+    <PropertyGroup>
+      <_TnziHostingPropsContent>$([System.IO.File]::ReadAllText('$(TnziHostingPropsTemplate)').Replace('__TNZI_VERSION__', '$(PackageVersion)'))</_TnziHostingPropsContent>
+    </PropertyGroup>
+    <Error Condition="$(_TnziHostingPropsContent.Contains('__TNZI_VERSION__'))"
+           Text="The __TNZI_VERSION__ token in $(TnziHostingPropsTemplate) was not substituted." />
+    <WriteLinesToFile File="$(TnziHostingPropsGenerated)" Lines="$(_TnziHostingPropsContent)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <Message Importance="high" Text="Tnzi.Hosting.props generated with TnziVersion default $(PackageVersion)" />
+  </Target>
 
   <ItemGroup>
     <!-- 基线依赖 — 传递给 NuGet 消费者 -->

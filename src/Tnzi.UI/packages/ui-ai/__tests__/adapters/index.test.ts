@@ -66,14 +66,48 @@ describe('toChatMessage', () => {
    * was reopened - a gap nobody reports because it reads as "the history is
    * just shorter". The wire type is a JSON string, the view model wants objects.
    */
-  it('parses the JSON-string toolCalls and usage fields', () => {
+  it('parses backend-shaped toolCalls and usage (camelCase, as the SSE stream sends them)', () => {
     const m = toChatMessage({
       ...dto,
-      toolCalls: '[{"id":"c1","name":"search"}]',
-      usage: '{"promptTokens":10,"completionTokens":5}',
+      toolCalls: '[{"name":"search","durationMs":12.3,"isSuccess":true,"error":null}]',
+      usage:
+        '{"inputTokens":11649,"outputTokens":20,"totalTokens":11669,"cachedInputTokens":0,"cacheCreationTokens":0}',
     });
-    expect(m.toolCalls).toEqual([{ id: 'c1', name: 'search' }]);
-    expect(m.usage).toEqual({ promptTokens: 10, completionTokens: 5 });
+    expect(m.toolCalls).toEqual([{ name: 'search', durationMs: 12.3, isSuccess: true, error: null }]);
+    expect(m.usage).toEqual({
+      inputTokens: 11649,
+      outputTokens: 20,
+      totalTokens: 11669,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+    });
+  });
+
+  /**
+   * Rows persisted by HistoryMiddleware were serialised with System.Text.Json's
+   * DEFAULT options, i.e. PascalCase - not the camelCase every frontend type and
+   * the SSE stream use. Those rows are in every existing database, so the
+   * adapter accepts both spellings rather than requiring a data migration.
+   */
+  it('accepts legacy PascalCase rows verbatim', () => {
+    const m = toChatMessage({
+      ...dto,
+      toolCalls: '[{"Name":"search","DurationMs":12.3,"IsSuccess":false,"Error":"timeout"}]',
+      usage:
+        '{"InputTokens":11649,"OutputTokens":20,"TotalTokens":11669,"CachedInputTokens":0,"CacheCreationTokens":0}',
+    });
+    expect(m.toolCalls).toEqual([{ name: 'search', durationMs: 12.3, isSuccess: false, error: 'timeout' }]);
+    expect(m.usage?.inputTokens).toBe(11649);
+    expect(m.usage?.cacheCreationTokens).toBe(0);
+    expect(Object.keys(m.usage ?? {})).not.toContain('InputTokens');
+  });
+
+  it('drops tool-call entries without a name rather than rendering a nameless card', () => {
+    const m = toChatMessage({
+      ...dto,
+      toolCalls: '[{"DurationMs":1},{"Name":"ok"},"junk",null]',
+    });
+    expect(m.toolCalls).toEqual([{ name: 'ok' }]);
   });
 
   /** A message that cannot be fully understood must still render its text. */

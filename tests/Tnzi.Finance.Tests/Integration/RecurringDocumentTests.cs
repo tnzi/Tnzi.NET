@@ -416,4 +416,86 @@ public class RecurringDocumentTests : FinanceIntegrationTestBase
         updated.Data!.NextRunDate.ShouldBe(before);
         updated.Data.EstimatedTotal.ShouldBe(260m);
     }
+
+    // ── 乐观并发 ────────────────────────────────────────────
+
+    private static UpdateRecurringDocumentDto EditOf(RecurringDocumentDto current, Guid revenue, decimal unitPrice, string? stamp) => new()
+    {
+        Name = current.Name,
+        PartyId = current.PartyId,
+        Currency = current.Currency,
+        Frequency = current.Frequency,
+        Interval = current.Interval,
+        AnchorDay = current.AnchorDay,
+        StartDate = current.StartDate,
+        DueDays = current.DueDays,
+        ConcurrencyStamp = stamp,
+        Lines = [new CreateRecurringLineDto { AccountId = revenue, Quantity = 1, UnitPrice = unitPrice }],
+    };
+
+    /// <summary>
+    /// 带着过期的 ConcurrencyStamp 提交 → 409，先前那次改动原样保留。
+    /// </summary>
+    /// <remarks>
+    /// 被保护的缺陷：<c>UpdateAsync</c> 把客户端的 stamp 赋给<b>已跟踪</b>实体 —— EF 的并发谓词用的是加载时的
+    /// OriginalValue，赋值只改 CurrentValue，紧接着审计助手又把它覆写成新 Guid。于是那一行既不参与判定也不落库，
+    /// 两个管理员同时编辑同一条模板，后提交的静默覆盖先提交的，而模板决定的是「未来每一期开多少钱」。
+    /// 前端一直在回传 stamp、DTO 一直在收，整条链路给出的是「有乐观并发保护」的外观。
+    /// </remarks>
+    [Fact]
+    public async Task Update_WithStaleConcurrencyStamp_Returns409_AndKeepsTheEarlierEdit()
+    {
+        await SeedCoaAsync();
+        var created = await CreateAsync(await MonthlyInvoiceAsync(Today().AddDays(5), 200m));
+        var revenue = await AccountIdByCodeAsync("4100");
+        var staleStamp = created.Data!.ConcurrencyStamp;
+
+        var first = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(
+            s => s.UpdateAsync(created.Data.Id, EditOf(created.Data, revenue, 100m, staleStamp)));
+        first.Succeeded.ShouldBeTrue(first.Message);
+        first.Data!.ConcurrencyStamp.ShouldNotBe(staleStamp);
+
+        var second = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(
+            s => s.UpdateAsync(created.Data.Id, EditOf(created.Data, revenue, 999m, staleStamp)));
+
+        second.Succeeded.ShouldBeFalse("a stale stamp must not silently overwrite the other editor's change");
+        second.Code.ShouldBe(409);
+
+        var current = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(s => s.GetAsync(created.Data.Id));
+        current.Data!.EstimatedTotal.ShouldBe(100m);
+    }
+
+    [Fact]
+    public async Task Update_WithCurrentStamp_Succeeds()
+    {
+        await SeedCoaAsync();
+        var created = await CreateAsync(await MonthlyInvoiceAsync(Today().AddDays(5), 200m));
+        var revenue = await AccountIdByCodeAsync("4100");
+
+        var first = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(
+            s => s.UpdateAsync(created.Data!.Id, EditOf(created.Data, revenue, 100m, created.Data.ConcurrencyStamp)));
+        first.Succeeded.ShouldBeTrue(first.Message);
+
+        var second = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(
+            s => s.UpdateAsync(created.Data!.Id, EditOf(first.Data!, revenue, 300m, first.Data!.ConcurrencyStamp)));
+        second.Succeeded.ShouldBeTrue(second.Message);
+        second.Data!.EstimatedTotal.ShouldBe(300m);
+    }
+
+    /// <summary>
+    /// 不带 stamp 的客户端（从没回传过它的消费方）仍然能保存：空 = 不做客户端侧比对。
+    /// </summary>
+    [Fact]
+    public async Task Update_WithoutStamp_StillSucceeds()
+    {
+        await SeedCoaAsync();
+        var created = await CreateAsync(await MonthlyInvoiceAsync(Today().AddDays(5), 200m));
+        var revenue = await AccountIdByCodeAsync("4100");
+
+        var updated = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(
+            s => s.UpdateAsync(created.Data!.Id, EditOf(created.Data, revenue, 150m, stamp: null)));
+
+        updated.Succeeded.ShouldBeTrue(updated.Message);
+        updated.Data!.EstimatedTotal.ShouldBe(150m);
+    }
 }

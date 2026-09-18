@@ -12,6 +12,7 @@ global using Tnzi.AI.Metadata;
 global using Tnzi.AI.Dtos;
 global using Tnzi.AI.Engine;
 global using Tnzi.AI.Middleware;
+global using Tnzi.AI.Permissions;
 global using Tnzi.AI.Sandbox.Abstractions;
 global using Tnzi.AI.Sandbox.Dtos;
 global using Tnzi.AI.Sandbox.Middleware;

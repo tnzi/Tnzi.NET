@@ -2,6 +2,13 @@ namespace Tnzi.Chat.Services;
 
 public class ChatContactService : ApplicationService, IChatContactService
 {
+    /// <summary>
+    /// 候选窗倍数：SQL 侧取 <c>ContactSearchLimit × 本值</c> 个候选，再剔除没有 <c>chat.use</c> 的，
+    /// 最后截到 <c>ContactSearchLimit</c>。窗比页大，是为了让页面在少数候选被剔掉后仍然填满；
+    /// 窗有上界，是为了让一次搜索的代价与目录规模无关。
+    /// </summary>
+    internal const int CandidateWindowFactor = 3;
+
     private readonly IRepository<User, Guid> _userRepository;
     private readonly IRepository<UserDetail, Guid> _userDetailRepository;
     private readonly IPresenceService _presence;
@@ -46,15 +53,30 @@ public class ChatContactService : ApplicationService, IChatContactService
 
         // Blank keyword → first page of the directory (excluding self) so the picker can
         // show a starting contact list. A keyword narrows by username (case-insensitive).
-        var users = string.IsNullOrEmpty(kw)
-            ? await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && !hiddenIds.Contains(u.Id))
-            : await _userRepository.ToListAsync(u => u.Id != me && u.UserName != null && !hiddenIds.Contains(u.Id) && u.UserName.ToLower().Contains(kw));
+        //
+        // ★ Paging happens in SQL (ORDER BY + TAKE), never by materialising the whole
+        // directory: the previous shape loaded every User row into memory and ran one
+        // permission check per row before taking the first 20 - on a 100k-user
+        // deployment a single "new chat" click was 100k entities plus 100k+ DB
+        // round-trips, with no privilege required. The window is a bounded multiple of
+        // the page so the chat.use filter below still has room to fill the page.
+        var limit = Math.Max(1, _options.Value.ContactSearchLimit);
+        var candidates = _userRepository.AsQueryable()
+            .Where(u => u.Id != me && u.UserName != null && !hiddenIds.Contains(u.Id));
+        if (!string.IsNullOrEmpty(kw))
+            candidates = candidates.Where(u => u.UserName!.ToLower().Contains(kw));
+
+        var users = await candidates
+            .OrderBy(u => u.UserName)
+            .Take(limit * CandidateWindowFactor)
+            .ToListAsync();
 
         // Users without `chat.use` can't take part in chat (their inbound is blocked /
         // isolated), so they must not appear in the new-chat / add-member picker.
         // FilterDisabledAsync returns the subset lacking the grant (empty when the
         // gate is inactive → nothing hidden). Applied BEFORE Take so the page still
-        // fills up to the limit with usable contacts.
+        // fills up to the limit with usable contacts; the check is one batch call over
+        // the (bounded) candidate window.
         if (_chatAccess != null && users.Count > 0)
         {
             var disabled = await _chatAccess.FilterDisabledAsync(users.Select(u => u.Id));
@@ -62,7 +84,7 @@ public class ChatContactService : ApplicationService, IChatContactService
                 users = users.Where(u => !disabled.Contains(u.Id)).ToList();
         }
 
-        var taken = users.Take(Math.Max(1, _options.Value.ContactSearchLimit)).ToList();
+        var taken = users.Take(limit).ToList();
         var detailByUserId = await LoadDetailsAsync(taken.Select(u => u.Id).ToList());
 
         var list = taken.Select(u => ToContactDto(u, detailByUserId)).ToList();
@@ -91,6 +113,11 @@ public class ChatContactService : ApplicationService, IChatContactService
 
         var detail = (await LoadDetailsAsync(new[] { userId })).GetValueOrDefault(userId);
         var pr = (await _presence.ResolveEffectiveAsync(new[] { userId })).FirstOrDefault();
+        // The profile is an open directory (anyone with chat.use may look up anyone), so
+        // whether a colleague's e-mail and phone number belong on it is a deployment
+        // decision - ChatOptions.ExposeContactDetails, on by default. Bio is the user's
+        // own blurb and stays regardless.
+        var exposeDetails = _options.Value.ExposeContactDetails;
         return Ok(new ChatContactProfileDto
         {
             UserId = userId,
@@ -98,8 +125,8 @@ public class ChatContactService : ApplicationService, IChatContactService
             AvatarFileId = detail?.AvatarId?.ToString(),
             // Email/Phone live on the Identity User; Bio on UserDetail. All optional -
             // the profile card only renders the rows that carry a value.
-            Email = user.Email,
-            Phone = user.PhoneNumber,
+            Email = exposeDetails ? user.Email : null,
+            Phone = exposeDetails ? user.PhoneNumber : null,
             Bio = detail?.Bio,
             Status = pr?.Status ?? UserPresenceStatus.Offline,
             LastSeenAt = pr?.LastSeenAt

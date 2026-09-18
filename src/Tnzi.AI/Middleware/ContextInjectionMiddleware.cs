@@ -125,7 +125,9 @@ public class ContextInjectionMiddleware : IAiMiddleware
                 UserId = context.Request.UserId,
                 // Per-agent resource assignments → scope RAG retrieval + skill visibility at runtime.
                 KnowledgeBaseIds = context.Agent.KnowledgeBaseIds,
-                SkillSlugs = context.Agent.SkillSlugs
+                SkillSlugs = context.Agent.SkillSlugs,
+                // Resolved (and ownership-checked) by HistoryMiddleware (Order=300) before we run.
+                ThreadId = context.Request.ThreadId
             });
             if (compositeProvider is not null)
             {
@@ -152,12 +154,6 @@ public class ContextInjectionMiddleware : IAiMiddleware
                     {
                         context.Citations.AddRange(injection.Citations);
                         _logger.LogDebug("Injected {Count} citations", injection.Citations.Count);
-                    }
-
-                    if (injection.ActiveSkills is { Count: > 0 })
-                    {
-                        context.Properties["ActiveSkills"] = injection.ActiveSkills;
-                        _logger.LogDebug("Propagated {Count} active skills to middleware context", injection.ActiveSkills.Count);
                     }
 
                     // Propagate the composite provider into context so the post-completion

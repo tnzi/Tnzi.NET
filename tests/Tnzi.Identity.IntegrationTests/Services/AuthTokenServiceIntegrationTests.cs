@@ -204,6 +204,30 @@ public class AuthTokenServiceIntegrationTests : IDisposable
         Assert.Equal(tokenId, token.Id);
     }
 
+    /// <summary>
+    /// 会话绑定的记录（step-up 确认、按会话各存一条的刷新令牌）随会话撤销一起被收走；
+    /// 同一用户在另一条会话上的记录与不绑会话的记录（Guid.Empty）不受影响。
+    /// </summary>
+    [Fact]
+    public async Task RemoveSessionTokens_TakesTheSessionBoundGrantsWithIt_AndLeavesOtherSessionsAlone()
+    {
+        var userId = Guid.NewGuid();
+        await EnsureUserExistsAsync(userId);
+        var revokedSession = Guid.NewGuid();
+        var otherSession = Guid.NewGuid();
+        await _service.SaveTokenAsync(userId, "StepUp", "identity.contact.change", "h1", DateTime.UtcNow.AddMinutes(5), revokedSession);
+        await _service.SaveTokenAsync(userId, "StepUp", "identity.contact.change", "h2", DateTime.UtcNow.AddMinutes(5), otherSession);
+        await _service.SaveTokenAsync(userId, "Passkey", "EnrollmentToken", "h3", DateTime.UtcNow.AddMinutes(5));
+
+        var removed = await _service.RemoveSessionTokensAsync([revokedSession]);
+
+        Assert.Equal(1, removed);
+        var remaining = (await _service.GetUserTokensAsync(userId)).Select(t => t.SessionId).ToList();
+        Assert.Equal(2, remaining.Count);
+        Assert.Contains(otherSession, remaining);
+        Assert.Contains(Guid.Empty, remaining);
+    }
+
     public void Dispose()
     {
         _dbContext.Dispose();

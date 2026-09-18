@@ -10,24 +10,58 @@ namespace Tnzi.Notification.Options;
 public class NotificationOptions
 {
     /// <summary>
-    /// 获取或设置 邮件发送配置
+    /// 获取或设置 邮件发送配置（<b>默认</b>发送器；没带 <c>ProviderKey</c> 的消息走这里）
     /// </summary>
     public MailSenderOptions? MailSender { get; set; }
 
     /// <summary>
-    /// 获取或设置 短信发送配置
+    /// 获取或设置 <b>具名</b>邮件发送配置：键 = 服务商键，值 = 与 <see cref="MailSender"/> 同形的一节。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 消息用 <c>CreateNotificationRequest.ProviderKey</c> 指定走哪一个；一条渠道要接两家服务商
+    /// （验证码走一家、营销走另一家）就在这里各配一节。键不区分大小写，
+    /// 且<b>不能是 <c>default</c></b>（那个键永远指 <see cref="MailSender"/>）。
+    /// </para>
+    /// <para>
+    /// ★ 只配了具名节、没配 <see cref="MailSender"/> 时，默认发送器<b>不是</b>开发期那个报成功的
+    /// <c>NullEmailSender</c>，而是当场失败的 <c>UnconfiguredEmailSender</c>：一个显然要发信的部署里，
+    /// 没带键的消息被静默吞掉毫无症状。要么补上默认节，要么在代码里注册默认的 <c>IEmailSender</c>。
+    /// </para>
+    /// </remarks>
+    public Dictionary<string, MailSenderOptions> MailSenders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 获取或设置 短信发送配置（<b>默认</b>发送器）
     /// </summary>
     public SmsSenderOptions? SmsSender { get; set; }
 
     /// <summary>
-    /// 获取或设置 Push推送配置
+    /// 获取或设置 <b>具名</b>短信发送配置。规则与 <see cref="MailSenders"/> 相同。
+    /// </summary>
+    public Dictionary<string, SmsSenderOptions> SmsSenders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 获取或设置 Push推送配置（<b>默认</b>发送器）
     /// </summary>
     public PushSenderOptions? PushSender { get; set; }
 
     /// <summary>
-    /// 获取或设置 传真发送配置（email-to-fax 网关）
+    /// 获取或设置 <b>具名</b>推送发送配置。规则与 <see cref="MailSenders"/> 相同；
+    /// 实现同样住在可选的 <c>Tnzi.Notification.Push</c> 子模块里，没加载时每个具名键都失败并指名要加载什么。
+    /// </summary>
+    public Dictionary<string, PushSenderOptions> PushSenders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 获取或设置 传真发送配置（email-to-fax 网关；<b>默认</b>发送器）
     /// </summary>
     public FaxSenderOptions? FaxSender { get; set; }
+
+    /// <summary>
+    /// 获取或设置 <b>具名</b>传真发送配置。规则与 <see cref="MailSenders"/> 相同；
+    /// 每一节可以用 <see cref="FaxSenderOptions.EmailProviderKey"/> 指定承载它的邮件发送器。
+    /// </summary>
+    public Dictionary<string, FaxSenderOptions> FaxSenders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 获取或设置 队列配置
@@ -66,6 +100,58 @@ public class NotificationOptions
     /// 获取或设置 退订配置
     /// </summary>
     public OptOutOptions OptOut { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 附件来源配置
+    /// </summary>
+    public AttachmentOptions Attachments { get; set; } = new();
+}
+
+/// <summary>
+/// 附件来源配置：按路径 / URL 取件的附件允许来自哪里。
+/// </summary>
+/// <remarks>
+/// <para>
+/// ★★ <b>为什么要有这一节。</b>持久化的附件只存 <c>FilePath</c>（本地路径或 URL），字节在发信那一刻才取；
+/// 而 <c>FilePath</c> 可以从管理端请求体原样进来，收件人地址在同一个请求体里。没有来源约束时，
+/// 持 <c>notification.message.create</c> 的人一次请求就能把服务端任意文件（生产配置、密钥）寄到任意邮箱，
+/// 或对内网 / 云元数据端点做一次带回显的 SSRF —— 日志只记一次正常投递。
+/// </para>
+/// <para>
+/// ★ <b>缺省是关的。</b><see cref="AllowedLocalRoots"/> 默认为空 = 任何本地路径都拒绝；远程 URL 只放行
+/// http/https 且必须过 <c>EgressGuard</c>（拒 loopback / RFC1918 / 链路本地 / 云元数据）。
+/// 传本地路径的服务端调用方要么把那个目录列进来，要么改传字节（<c>EmailAttachment.FromBytes</c>）。
+/// </para>
+/// </remarks>
+[ConfigSection("Notification:Attachments")]
+public class AttachmentOptions
+{
+    /// <summary>
+    /// 获取或设置 允许作为附件来源的本地根目录（绝对路径）。空 = 拒绝一切本地路径。
+    /// </summary>
+    /// <remarks>
+    /// 路径先 <c>Path.GetFullPath</c> 归一化再做前缀比对（<c>..</c> 逃逸因此无效）；
+    /// 文件存在且是符号链接时，链接的最终目标也必须在某个根之下。
+    /// </remarks>
+    public string[] AllowedLocalRoots { get; set; } = [];
+
+    /// <summary>
+    /// 获取或设置 是否允许按 http/https URL 取远程附件（默认 true）。
+    /// </summary>
+    /// <remarks>
+    /// 开着时每个 URL 仍要过 <c>EgressGuard</c>：其它 scheme 与私网 / 链路本地 / loopback 一律拒绝，
+    /// 且创建与发信两刻各查一次（落库后 DNS 可能已变）。关掉后所有远程 URL 拒绝。
+    /// </remarks>
+    public bool AllowRemoteUrls { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 单个按路径 / URL 取件的附件的字节上限（默认 25 MB）。
+    /// </summary>
+    /// <remarks>
+    /// 是闸门不是调优项：没有它，一个指向几个 GB 的 URL 就能把发送进程的内存打满。
+    /// 内存附件（<c>EmailAttachment.Content</c>）不受此限 —— 那些字节已经在调用方手里了。
+    /// </remarks>
+    public long MaxAttachmentBytes { get; set; } = 25L * 1024 * 1024;
 }
 
 /// <summary>
@@ -388,6 +474,18 @@ public class FaxSenderOptions
     public string? DevOverrideEmail { get; set; }
 
     /// <summary>
+    /// 获取或设置 承载这条传真通道的邮件发送器的服务商键；留空 = 默认的 <c>IEmailSender</c>。
+    /// </summary>
+    /// <remarks>
+    /// 传真经 email-to-fax 网关投递，本质是一封发往网关的邮件。网关通常要求信从某个特定的
+    /// 发件账号发出（它按发件人认账号），而那个账号未必是应用发普通邮件的那一个 ——
+    /// 于是这里可以指向 <c>Notification:MailSenders</c> 里的某一节（或代码里注册的同键 keyed
+    /// <c>IEmailSender</c>）。指向一个不存在的键时，解析 <c>IFaxSender</c> 就抛 <c>ConfigurationException</c>，
+    /// <b>不会退回默认发送器</b>：退回去的信网关不认，症状是「传真发成功了但永远没到」。
+    /// </remarks>
+    public string? EmailProviderKey { get; set; }
+
+    /// <summary>
     /// 获取或设置 回执收件箱配置。**不配就是这个部署不收回执**，整条链一个后台线程都不起。
     /// </summary>
     public FaxConfirmationOptions? Confirmation { get; set; }
@@ -493,251 +591,5 @@ public class FaxConfirmationOptions
         && !string.IsNullOrWhiteSpace(Host)
         && !string.IsNullOrWhiteSpace(UserName)
         && !string.IsNullOrWhiteSpace(Password);
-}
-
-/// <summary>
-/// Notification配置验证器
-/// </summary>
-public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOptions>
-{
-    /// <summary>
-    /// 邮箱地址的形状检查：本地部分 + <c>@</c> + 带点的域名，三段都不含空白。
-    /// </summary>
-    /// <remarks>
-    /// 刻意宽松 —— 这里要挡的是配置写错（漏了域名、写了两个 <c>@</c>、粘进了空格），
-    /// 不是判定一个地址收不收得到信，那只有真发一封才知道。
-    /// </remarks>
-    private const string EmailShape = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
-
-    protected override void ValidateOptions(NotificationOptions options, List<string> errors)
-    {
-        // 验证各个配置部分
-        ValidateMailSenderOptions(options.MailSender, errors);
-        ValidateSmsSenderOptions(options.SmsSender, errors);
-        ValidatePushSenderOptions(options.PushSender, errors);
-        ValidateFaxSenderOptions(options.FaxSender, errors);
-        ValidateQueueOptions(options.Queue, errors);
-        ValidateCommonOptions(options, errors);
-    }
-
-    /// <summary>
-    /// 验证邮件发送配置
-    /// </summary>
-    private static void ValidateMailSenderOptions(MailSenderOptions? mailSender, List<string> errors)
-    {
-        if (mailSender == null)
-            return;
-
-        if (string.IsNullOrWhiteSpace(mailSender.SmtpServer))
-            errors.Add("MailSender.SmtpServer is required.");
-
-        if (mailSender.SmtpPort <= 0 || mailSender.SmtpPort > 65535)
-            errors.Add("MailSender.SmtpPort must be between 1 and 65535.");
-
-        if (string.IsNullOrWhiteSpace(mailSender.FromEmail))
-            errors.Add("MailSender.FromEmail is required.");
-
-        if (!string.IsNullOrWhiteSpace(mailSender.FromEmail) &&
-            !Regex.IsMatch(mailSender.FromEmail, EmailShape, RegexOptions.IgnoreCase))
-            errors.Add("MailSender.FromEmail must be a valid email address.");
-
-        // 如果启用了 SSL，验证用户名和密码
-        if (mailSender.EnableSsl)
-        {
-            if (string.IsNullOrWhiteSpace(mailSender.Username))
-                errors.Add("MailSender.Username is required when EnableSsl is true.");
-
-            if (string.IsNullOrWhiteSpace(mailSender.Password))
-                errors.Add("MailSender.Password is required when EnableSsl is true.");
-        }
-    }
-
-    /// <summary>
-    /// 验证短信发送配置
-    /// </summary>
-    private static void ValidateSmsSenderOptions(SmsSenderOptions? smsSender, List<string> errors)
-    {
-        if (smsSender == null)
-            return;
-
-        var provider = smsSender.Provider?.ToLower() ?? string.Empty;
-
-        if (provider == "twilio")
-        {
-            if (string.IsNullOrWhiteSpace(smsSender.TwilioAccountSid))
-                errors.Add("SmsSender.TwilioAccountSid is required when Provider is 'twilio'.");
-
-            if (string.IsNullOrWhiteSpace(smsSender.TwilioAuthToken))
-                errors.Add("SmsSender.TwilioAuthToken is required when Provider is 'twilio'.");
-
-            if (string.IsNullOrWhiteSpace(smsSender.TwilioFromPhoneNumber))
-                errors.Add("SmsSender.TwilioFromPhoneNumber is required when Provider is 'twilio'.");
-        }
-        else if (provider == "plivo")
-        {
-            if (string.IsNullOrWhiteSpace(smsSender.PlivoAuthId))
-                errors.Add("SmsSender.PlivoAuthId is required when Provider is 'plivo'.");
-
-            if (string.IsNullOrWhiteSpace(smsSender.PlivoAuthToken))
-                errors.Add("SmsSender.PlivoAuthToken is required when Provider is 'plivo'.");
-
-            if (string.IsNullOrWhiteSpace(smsSender.PlivoFromPhoneNumber))
-                errors.Add("SmsSender.PlivoFromPhoneNumber is required when Provider is 'plivo'.");
-        }
-        else if (!string.IsNullOrWhiteSpace(provider))
-        {
-            errors.Add($"SmsSender.Provider '{smsSender.Provider}' is not supported. Supported providers: twilio, plivo.");
-        }
-    }
-
-    /// <summary>
-    /// 验证推送通知配置
-    /// </summary>
-    private static void ValidatePushSenderOptions(PushSenderOptions? pushSender, List<string> errors)
-    {
-        if (pushSender == null)
-            return;
-
-        var provider = pushSender.Provider?.ToLower() ?? string.Empty;
-
-        if (provider == "fcm" || provider == "firebase")
-        {
-            if (string.IsNullOrWhiteSpace(pushSender.FirebaseProjectId))
-                errors.Add("PushSender.FirebaseProjectId is required when Provider is 'fcm' or 'firebase'.");
-
-            if (string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJson) &&
-                string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJsonPath))
-            {
-                errors.Add("PushSender.FirebaseServiceAccountJson or FirebaseServiceAccountJsonPath is required when Provider is 'fcm' or 'firebase'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJsonPath))
-            {
-                // 注意：不验证文件路径是否存在，因为文件可能在运行时才创建
-                // 如果文件不存在，会在实际使用时失败并记录错误
-            }
-            else if (!string.IsNullOrWhiteSpace(pushSender.FirebaseServiceAccountJson))
-            {
-                // 验证 JSON 内容是否有效
-                try
-                {
-                    JsonDocument.Parse(pushSender.FirebaseServiceAccountJson);
-                }
-                catch (JsonException)
-                {
-                    errors.Add("PushSender.FirebaseServiceAccountJson is not valid JSON.");
-                }
-            }
-        }
-        else if (provider == "apns")
-        {
-            errors.Add("PushSender.Provider 'apns' is not yet implemented.");
-        }
-        else if (!string.IsNullOrWhiteSpace(provider))
-        {
-            errors.Add($"PushSender.Provider '{pushSender.Provider}' is not supported. Supported providers: fcm, firebase.");
-        }
-    }
-
-    /// <summary>
-    /// 验证传真发送配置
-    /// </summary>
-    /// <remarks>
-    /// 网关域名写成邮箱地址（<c>fax@example.com</c>）是最容易犯的一个错，而它的后果是
-    /// 拼出 <c>9055551234@fax@example.com</c> —— 一个投递失败的地址。这里当场拦掉。
-    /// </remarks>
-    private static void ValidateFaxSenderOptions(FaxSenderOptions? faxSender, List<string> errors)
-    {
-        if (faxSender == null || !faxSender.Enabled)
-            return;
-
-        var domain = faxSender.GatewayDomain?.Trim().TrimStart('@') ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(domain))
-        {
-            errors.Add("FaxSender.GatewayDomain is required when FaxSender.Enabled is true.");
-        }
-        else if (domain.Contains('@') || domain.Any(char.IsWhiteSpace) || !domain.Contains('.'))
-        {
-            errors.Add($"FaxSender.GatewayDomain '{faxSender.GatewayDomain}' must be a bare domain such as 'fax.example.com', not an email address.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(faxSender.DevOverrideEmail) &&
-            !Regex.IsMatch(faxSender.DevOverrideEmail, EmailShape, RegexOptions.IgnoreCase))
-        {
-            errors.Add("FaxSender.DevOverrideEmail must be a valid email address.");
-        }
-
-        ValidateFaxConfirmationOptions(faxSender.Confirmation, errors);
-    }
-
-    /// <summary>
-    /// 验证传真回执收件箱配置
-    /// </summary>
-    /// <remarks>
-    /// ★ <b>整节缺省是合法的</b>（这个部署不收回执），所以 <c>Host</c> 为空直接放行。
-    /// 但填了 <c>Host</c> 就必须填全账号密码：那是笔误，而它的症状是"配了却不生效"——
-    /// 没有报错、没有日志、回执就是不进来。宁可在启动时炸。
-    /// </remarks>
-    private static void ValidateFaxConfirmationOptions(FaxConfirmationOptions? confirmation, List<string> errors)
-    {
-        if (confirmation == null || !confirmation.Enabled || string.IsNullOrWhiteSpace(confirmation.Host))
-            return;
-
-        if (string.IsNullOrWhiteSpace(confirmation.UserName))
-            errors.Add("FaxSender.Confirmation.UserName is required when a Host is configured.");
-
-        if (string.IsNullOrWhiteSpace(confirmation.Password))
-            errors.Add("FaxSender.Confirmation.Password is required when a Host is configured.");
-
-        if (confirmation.Port is < 1 or > 65535)
-            errors.Add($"FaxSender.Confirmation.Port '{confirmation.Port}' must be between 1 and 65535.");
-
-        if (string.IsNullOrWhiteSpace(confirmation.Folder))
-            errors.Add("FaxSender.Confirmation.Folder cannot be blank; the usual value is 'INBOX'.");
-
-        // 网关的回执本来就要几分钟才回，秒级轮询只是白白敲人家的 IMAP（还可能被限流）。
-        if (confirmation.PollIntervalSeconds < 30)
-            errors.Add($"FaxSender.Confirmation.PollIntervalSeconds '{confirmation.PollIntervalSeconds}' is too small; 30 is the minimum.");
-
-        if (confirmation.MaxMessagesPerPoll < 1)
-            errors.Add($"FaxSender.Confirmation.MaxMessagesPerPoll '{confirmation.MaxMessagesPerPoll}' must be at least 1.");
-
-        if (confirmation.LookbackHours < 1)
-            errors.Add($"FaxSender.Confirmation.LookbackHours '{confirmation.LookbackHours}' must be at least 1.");
-    }
-
-    /// <summary>
-    /// 验证队列配置
-    /// </summary>
-    private static void ValidateQueueOptions(QueueOptions queue, List<string> errors)
-    {
-        if (!queue.Enabled)
-            return;
-
-        if (queue.QueueCapacity <= 0)
-            errors.Add("Queue.QueueCapacity must be greater than 0.");
-    }
-
-    /// <summary>
-    /// 验证通用配置选项
-    /// </summary>
-    private static void ValidateCommonOptions(NotificationOptions options, List<string> errors)
-    {
-        // 验证并发配置
-        if (options.MaxConcurrency <= 0)
-            errors.Add("MaxConcurrency must be greater than 0.");
-
-        // 验证超时配置
-        if (options.SendTimeoutSeconds <= 0)
-            errors.Add("SendTimeoutSeconds must be greater than 0.");
-
-        // 验证 SMS 最大长度配置
-        if (options.SmsMaxContentLength <= 0)
-            errors.Add("SmsMaxContentLength must be greater than 0.");
-
-        // 验证重试配置
-        if (options.Retry.RetryDelaySeconds < 0)
-            errors.Add("Retry.RetryDelaySeconds must be greater than or equal to 0.");
-    }
 }
 

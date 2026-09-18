@@ -17,5 +17,9 @@ public sealed class SandboxAccessor : ISandboxAccessor
     public SandboxToolEnvironment? CurrentEnvironment =>
         _executionContextAccessor.Properties.GetValueOrDefault(SandboxPropertyKeys.ToolEnvironment) as SandboxToolEnvironment;
 
-    public ISandbox? Current => CurrentEnvironment?.Sandbox;
+    public async ValueTask<ISandbox?> GetCurrentAsync(CancellationToken ct = default)
+    {
+        var environment = CurrentEnvironment;
+        return environment is null ? null : await environment.GetSandboxAsync(ct);
+    }
 }

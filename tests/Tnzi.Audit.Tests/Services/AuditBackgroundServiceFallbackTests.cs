@@ -68,7 +68,7 @@ public class AuditBackgroundServiceFallbackTests
         var root = services.BuildServiceProvider();
 
         var options = new StaticOptionsMonitor<AuditOptions>(new AuditOptions());
-        var service = new Probe(root, new AuditSender(options), options);
+        var service = new Probe(root, new AuditSender(options, NullLogger<AuditSender>.Instance), options);
         return (service, root);
     }
 

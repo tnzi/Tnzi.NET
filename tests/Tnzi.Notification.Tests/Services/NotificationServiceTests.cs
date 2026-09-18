@@ -1,6 +1,3 @@
-
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Tests.Services;
 
 /// <summary>
@@ -48,10 +45,8 @@ public class NotificationServiceTests
 
         _service = new NotificationService(
             _repositoryMock.Object,
-            _emailSenderMock.Object,
-            _smsSenderMock.Object,
-            _pushSenderMock.Object,
-            new Mock<IFaxSender>().Object,
+            new FixedProviderResolver(_emailSenderMock.Object, _smsSenderMock.Object, _pushSenderMock.Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
             _unitOfWorkMock.Object,
             _optionsMock.Object,
             serviceProviderMock.Object,

@@ -13,6 +13,11 @@ namespace Tnzi.AI.Rag.Search;
 /// 2. 使用 RRF 算法融合两路结果：score = alpha/(k + rank_vector) + beta/(k + rank_keyword)
 /// 3. 按融合得分去重、排序、截取 topK
 /// 4. 可选经过 <see cref="IReranker"/> 重排序
+/// 5. 父文档窗口扩展（<c>ParentDocumentRetrieval.Enabled</c>）与图谱上下文片段（<c>GraphRag.Enabled</c>，仅知识库范围内）
+///    —— 与 <see cref="RagRetriever"/> / <see cref="VectorTextSearchService"/> 共用 <see cref="RetrievalAugmentation"/>
+/// </para>
+/// <para>
+/// 支持按知识库范围过滤（<see cref="TextSearchFilter.KnowledgeBaseIds"/>）：向量与关键词两路都逐库检索后再融合。
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "Hybrid search is in preview")]
@@ -25,6 +30,8 @@ public class HybridSearchService : ApplicationService, ITextSearchService
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
     private readonly AIRagOptions _ragOptions;
     private readonly HybridSearchOptions _hybridOptions;
+    private readonly IGraphSearchService? _graphSearchService;
+    private readonly IParentDocumentRetriever? _parentDocumentRetriever;
 
     public HybridSearchService(
         IServiceProvider serviceProvider,
@@ -33,7 +40,9 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         IEmbeddingService embeddingService,
         IReranker reranker,
         IRepository<KnowledgeDocument, Guid> docRepository,
-        IOptionsSnapshot<AIRagOptions> ragOptions) : base(serviceProvider)
+        IOptionsSnapshot<AIRagOptions> ragOptions,
+        IGraphSearchService? graphSearchService = null,
+        IParentDocumentRetriever? parentDocumentRetriever = null) : base(serviceProvider)
     {
         _vectorStore = Check.NotNull(vectorStore);
         _keywordSearchProvider = Check.NotNull(keywordSearchProvider);
@@ -42,16 +51,29 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         _docRepository = Check.NotNull(docRepository);
         _ragOptions = Check.NotNull(ragOptions).Value;
         _hybridOptions = _ragOptions.HybridSearch;
+        _graphSearchService = graphSearchService;
+        _parentDocumentRetriever = parentDocumentRetriever;
     }
 
     /// <inheritdoc />
-    public async Task<IEnumerable<TextSearchResult>> SearchAsync(
+    public Task<IEnumerable<TextSearchResult>> SearchAsync(
         string query, int maxResults = 5, CancellationToken ct = default)
+        => SearchCoreAsync(query, knowledgeBaseIds: null, maxResults, ct);
+
+    /// <inheritdoc />
+    public Task<IEnumerable<TextSearchResult>> SearchAsync(
+        string query, TextSearchFilter? filter, int maxResults = 5, CancellationToken ct = default)
+        => SearchCoreAsync(query, filter?.KnowledgeBaseIds, maxResults, ct);
+
+    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
+        string query, IReadOnlyList<Guid>? knowledgeBaseIds, int maxResults, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             return [];
         }
+
+        var kbIds = knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds.Distinct().ToList() : null;
 
         try
         {
@@ -68,10 +90,11 @@ public class HybridSearchService : ApplicationService, ITextSearchService
                 return [];
             }
 
-            // 2. 并行执行向量搜索和关键词搜索（请求双倍数量以便融合后仍有足够结果）
+            // 2. 并行执行向量搜索和关键词搜索（请求双倍数量以便融合后仍有足够结果）。
+            //    有知识库范围时两路都逐库检索后合并（关键词提供者按库过滤走 DB 侧，向量路径亦然）。
             var fetchCount = maxResults * 2;
-            var vectorTask = _vectorStore.SearchAsync(embeddingResult.Data!, fetchCount, ct: ct);
-            var keywordTask = _keywordSearchProvider.SearchAsync(query, fetchCount, ct: ct);
+            var vectorTask = SearchVectorAsync(embeddingResult.Data!, fetchCount, kbIds, ct);
+            var keywordTask = SearchKeywordAsync(query, fetchCount, kbIds, ct);
 
             await Task.WhenAll(vectorTask, keywordTask);
 
@@ -96,26 +119,28 @@ public class HybridSearchService : ApplicationService, ITextSearchService
                 return [];
             }
 
-            // 5. 获取文档名映射
-            var docIds = fusedResults.Select(r => r.DocumentId).Distinct().ToList();
-            var docs = await _docRepository.AsQueryable()
-                .Where(d => docIds.Contains(d.Id))
-                .ToDictionaryAsync(d => d.Id, d => d.FileName, ct);
-
-            // 6. 转换为 TextSearchResult
-            var searchResults = fusedResults.Select(r => new TextSearchResult
+            // 5. 父文档窗口扩展 + 图谱片段（与 RagRetriever 同一份实现；图谱只在知识库范围内）
+            var retrievalResults = fusedResults.Select(r => new RetrievalResult
             {
-                Text = r.Content,
-                SourceName = docs.GetValueOrDefault(r.DocumentId),
+                Content = r.Content,
                 Score = r.Score,
-                Metadata = new Dictionary<string, object?>
-                {
-                    ["chunkIndex"] = r.ChunkIndex,
-                    ["documentId"] = r.DocumentId,
-                    ["knowledgeBaseId"] = r.KnowledgeBaseId,
-                    ["searchType"] = "hybrid"
-                }
+                KnowledgeBaseId = r.KnowledgeBaseId,
+                DocumentId = r.DocumentId,
+                Metadata = new Dictionary<string, object> { ["chunkIndex"] = r.ChunkIndex, ["searchType"] = "hybrid" }
             }).ToList();
+            retrievalResults = await RetrievalAugmentation.ExpandParentsAsync(
+                _parentDocumentRetriever, retrievalResults, _ragOptions, enabledOverride: null, Logger, ct);
+            var graphResults = await RetrievalAugmentation.SearchGraphAsync(_graphSearchService, query, kbIds, Logger, ct);
+            retrievalResults = RetrievalAugmentation.AppendGraphSnippets(retrievalResults, graphResults);
+
+            // 6. 获取文档名映射并转换为 TextSearchResult
+            var docIds = retrievalResults.Select(r => r.DocumentId).Where(id => id != Guid.Empty).Distinct().ToList();
+            var docs = docIds.Count == 0
+                ? new Dictionary<Guid, string>()
+                : await _docRepository.AsQueryable()
+                    .Where(d => docIds.Contains(d.Id))
+                    .ToDictionaryAsync(d => d.Id, d => d.FileName, ct);
+            var searchResults = RetrievalAugmentation.ToTextSearchResults(retrievalResults, docs);
 
             sw.Stop();
             RagActivitySource.RecordSearch(searchResults.Count, sw.Elapsed.TotalSeconds);
@@ -132,6 +157,36 @@ public class HybridSearchService : ApplicationService, ITextSearchService
             RagActivitySource.RecordError("hybrid_search", ex);
             return [];
         }
+    }
+
+    private async Task<List<VectorSearchResult>> SearchVectorAsync(float[] queryVector, int fetchCount, List<Guid>? kbIds, CancellationToken ct)
+    {
+        if (kbIds is null)
+        {
+            return await _vectorStore.SearchAsync(queryVector, fetchCount, ct: ct);
+        }
+
+        var merged = new List<VectorSearchResult>();
+        foreach (var kbId in kbIds)
+        {
+            merged.AddRange(await _vectorStore.SearchAsync(queryVector, fetchCount, kbId, ct));
+        }
+        return merged.OrderByDescending(r => r.Score).Take(fetchCount).ToList();
+    }
+
+    private async Task<List<KeywordSearchResult>> SearchKeywordAsync(string query, int fetchCount, List<Guid>? kbIds, CancellationToken ct)
+    {
+        if (kbIds is null)
+        {
+            return await _keywordSearchProvider.SearchAsync(query, fetchCount, ct: ct);
+        }
+
+        var merged = new List<KeywordSearchResult>();
+        foreach (var kbId in kbIds)
+        {
+            merged.AddRange(await _keywordSearchProvider.SearchAsync(query, fetchCount, kbId, ct));
+        }
+        return merged.OrderByDescending(r => r.Score).Take(fetchCount).ToList();
     }
 
     /// <summary>

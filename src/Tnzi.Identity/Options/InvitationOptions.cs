@@ -40,7 +40,7 @@ public class InvitationOptions
     /// <remarks>
     /// <para>
     /// 例：<c>https://admin.example.com/accept-invitation?token={token}</c>。
-    /// 留空时框架退回按 <c>App:FrontendUrl</c> 拼一条默认路径。
+    /// 留空时框架退回按前端 origin（<c>System:FrontendUrl</c>，经 <c>FrontendUrlResolver</c>）拼一条默认路径。
     /// </para>
     /// <para>
     /// 真正需要自定义时，实现 <see cref="Services.IInvitationUrlGenerator"/> 覆盖整段逻辑；

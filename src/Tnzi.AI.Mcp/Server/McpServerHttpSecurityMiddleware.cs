@@ -6,16 +6,13 @@ namespace Tnzi.AI.Mcp.Server;
 public class McpServerHttpSecurityMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IOptionsMonitor<McpServerOptions> _options;
     private readonly McpServerSecurityMiddleware _security;
 
     public McpServerHttpSecurityMiddleware(
         RequestDelegate next,
-        IOptionsMonitor<McpServerOptions> options,
         McpServerSecurityMiddleware security)
     {
         _next = Check.NotNull(next);
-        _options = Check.NotNull(options);
         _security = Check.NotNull(security);
     }
 
@@ -24,7 +21,8 @@ public class McpServerHttpSecurityMiddleware
         Check.NotNull(context);
 
         var apiKey = _security.ExtractApiKey(context.Request);
-        if (!await _security.ValidateCallerAsync(apiKey, context.RequestAborted))
+        var callerScope = await _security.ValidateCallerAsync(apiKey, context.RequestAborted);
+        if (callerScope is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await context.Response.WriteAsync("Unauthorized MCP request.");
@@ -39,21 +37,13 @@ public class McpServerHttpSecurityMiddleware
             return;
         }
 
-        if (_options.CurrentValue.RateLimitPerTenant)
-        {
-            context.Items[McpServerSecurityMiddleware.TenantHeaderName] =
-                _security.ExtractTenantId(context.Request);
-        }
-
-        // Store the hashed caller segment so downstream audit logging can record
-        // which (hashed) key made the call - enables UniqueCallers statistics.
-        // The hash is already embedded in clientKey as "{tenant}:{hash16}"; extract it.
-        var colonIndex = clientKey.IndexOf(':');
-        if (colonIndex >= 0 && colonIndex < clientKey.Length - 1)
-        {
-            context.Items[McpServerSecurityMiddleware.CallerHashItemKey] =
-                clientKey[(colonIndex + 1)..];
-        }
+        // Store the caller segment so downstream audit logging can record which (hashed)
+        // key made the call (UniqueCallers statistics) and tool buckets partition by it.
+        // The client key IS the caller segment: no client-controlled prefix is ever part of it.
+        context.Items[McpServerSecurityMiddleware.CallerHashItemKey] = clientKey;
+        // The caller scope is what makes a run-scoped credential narrower than a static key:
+        // McpServerHost filters tools/list and refuses out-of-scope tools/call by it.
+        context.Items[McpServerSecurityMiddleware.CallerScopeItemKey] = callerScope;
 
         await _next(context);
     }

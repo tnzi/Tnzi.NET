@@ -30,6 +30,7 @@ public class LoginSecurityServiceTests
 
         _loginSecurityService = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object
         );
@@ -49,6 +50,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object
         );
@@ -133,6 +135,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object,
             userManagerMock.Object
@@ -165,6 +168,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object,
             userManagerMock.Object
@@ -207,6 +211,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object,
             userManagerMock.Object
@@ -226,6 +231,7 @@ public class LoginSecurityServiceTests
         // Arrange: 创建一个没有 repository 的服务
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             loginLogRepository: null
         );
@@ -274,6 +280,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object,
             userManagerMock.Object
@@ -310,6 +317,7 @@ public class LoginSecurityServiceTests
 
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             _loginLogRepositoryMock.Object,
             userManagerMock.Object
@@ -329,6 +337,7 @@ public class LoginSecurityServiceTests
         // Arrange
         var service = new LoginSecurityService(
             _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
             _identityOptionsMock.Object,
             loginLogRepository: null
         );

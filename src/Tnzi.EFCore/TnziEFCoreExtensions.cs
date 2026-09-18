@@ -27,6 +27,13 @@ public static class TnziEFCoreExtensions
             // 模型缓存键包含多租户开关，避免单/多租户模型串用
             options.ReplaceService<IModelCacheKeyFactory, MultiTenancyModelCacheKeyFactory>();
 
+            // 多租户开关随 options 到达 DbContext。★ 不能指望构造函数：消费方 DbContext 只声明
+            // (options, currentUser)，DI 填不了没声明的 IOptions<MultiTenancyOptions> 形参，
+            // 此前 MultiTenancy:Enabled=true 在运行期整条不生效（TenantId 不落库、租户过滤器一条不加）。
+            // 设计期工厂往同一个载体写同一份配置的值，两侧由 MultiTenancySwitch 同一处解析。
+            var multiTenancy = serviceProvider.GetService<IOptions<MultiTenancyOptions>>();
+            options.UseTnziMultiTenancy(multiTenancy?.Value.Enabled ?? false);
+
             // 添加慢查询拦截器（如果已注册）
             var interceptor = serviceProvider.GetService<Interceptors.SlowQueryLoggingInterceptor>();
             if (interceptor != null)
@@ -45,6 +52,10 @@ public static class TnziEFCoreExtensions
             }
         });
         services.AddScoped<IDbInitializer, EFCoreDbInitializer<TDbContext>>();
+
+        // 登记类型：UnitOfWorkManager 的上下文发现与 EFCoreModule 的启动核对都读这份登记，
+        // 不再依赖 Database 配置里写没写 DbContextType（见 RegisteredDbContext）。
+        services.AddSingleton(new RegisteredDbContext(typeof(TDbContext), isPrimary));
 
         // 非泛型 IUnitOfWork 只能有一个实现，它必须指向**主** DbContext。
         // 早先这里对每个 DbContext 都无条件 AddScoped，多 DbContext 应用里最后注册的
@@ -112,7 +123,7 @@ public static class TnziEFCoreExtensions
             var dbContext = sp.GetRequiredService(dbContextType) as DbContext
                 ?? throw new InvalidOperationException($"Type {dbContextType.Name} is not a DbContext");
             var databaseProvider = sp.GetRequiredService<IDatabaseProvider>();
-            return new DapperService(dbContext, databaseProvider);
+            return new DapperService(dbContext, databaseProvider, sp.GetService<IUnitOfWorkManager>(), sp.GetService<IUnitOfWork>());
         });
 
         // 注册 Dapper Executor 工厂（TryAdd 确保只注册一次）

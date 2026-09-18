@@ -8,6 +8,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 {
     private readonly IRepository<UserSession, Guid> _repository;
     private readonly IRepository<User, Guid>? _userRepository;
+    private readonly IUserTenantScopeProvider _scope;
     // Optional - validity cache for the per-request OnTokenValidated check, so an
     // authenticated request doesn't hit the DB for every call. Invalidated on revoke.
     private readonly ICache? _cache;
@@ -27,10 +28,19 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 
     private SessionOptions SessionOptions => _sessionOptionsMonitor?.CurrentValue ?? _fallbackSessionOptions;
 
-    public DatabaseSessionService(IRepository<UserSession, Guid> repository, IServiceProvider serviceProvider)
+    /// <param name="repository">会话仓储。</param>
+    /// <param name="serviceProvider">服务提供者。</param>
+    /// <param name="scope">
+    /// 当前请求能碰到哪些用户。<c>UserSession</c> 没有 <c>TenantId</c>，全局过滤器管不到它，
+    /// 管理端按用户读 / 撤销、全局列表与统计都要按用户表的租户裁剪 —— 少了这一道，
+    /// 租户管理员能列出并踢掉任何租户的任何人（见 <see cref="UserTenantScope"/>）。
+    /// 必填而不是可选：没有它就没有裁剪，而「没裁剪」在返回值上看不出来。
+    /// </param>
+    public DatabaseSessionService(IRepository<UserSession, Guid> repository, IServiceProvider serviceProvider, IUserTenantScopeProvider scope)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
+        _scope = Check.NotNull(scope);
         // Optional - only needed by GetActiveUsersAsync, resolved lazily so
         // existing call paths and tests that don't register the user repository
         // still construct the service successfully.
@@ -281,6 +291,11 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<UserSessionDto>>> GetUserSessionsAsync(Guid userId, bool includeRevoked = false)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail<IEnumerable<UserSessionDto>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var query = _repository.Where(us => us.UserId == userId);
 
         if (!includeRevoked)
@@ -301,7 +316,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     {
         Check.NotNull(query);
 
-        var queryable = _repository.AsQueryable()
+        var queryable = WhereInScope(_repository.AsQueryable())
             .WhereIf(us => us.UserId == query.UserId!.Value, query.UserId.HasValue)
             .WhereIf(us => !us.IsRevoked, !query.IncludeRevoked)
             .OrderByDescending(us => us.LastActivityTime)
@@ -318,6 +333,30 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 
         var paged = new PagedList<UserSessionDto>(sessions, query.PageIndex, query.PageSize, totalCount);
         return Ok<IPagedList<UserSessionDto>>(paged);
+    }
+
+    /// <summary>
+    /// 把「当前租户范围」加到会话查询上：全局列表、统计、活跃用户都经它。
+    /// 不裁剪时原样返回；裁剪时翻译成 <c>UserId IN (SELECT Id FROM User WHERE ...)</c>。
+    /// </summary>
+    private IQueryable<UserSession> WhereInScope(IQueryable<UserSession> query)
+    {
+        var ids = _scope.InScopeUserIds();
+        return ids == null ? query : query.Where(us => ids.Contains(us.UserId));
+    }
+
+    /// <summary>
+    /// 按 id 取会话，且只取其主人在范围内的：不在范围内与不存在同样返回 <c>null</c>，调用方一律答 404。
+    /// </summary>
+    private async Task<UserSession?> FindScopedSessionAsync(Guid sessionId)
+    {
+        var session = await _repository.GetAsync(sessionId);
+        if (session == null)
+        {
+            return null;
+        }
+
+        return await _scope.ContainsAsync(session.UserId) ? session : null;
     }
 
     /// <summary>
@@ -347,7 +386,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RevokeSessionAsync(Guid sessionId)
     {
-        var session = await _repository.GetAsync(sessionId);
+        var session = await FindScopedSessionAsync(sessionId);
         if (session == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -370,6 +409,11 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RevokeAllSessionsAsync(Guid userId, Guid? excludeSessionId = null)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
             var query = _repository.Where(us => us.UserId == userId && !us.IsRevoked);
@@ -401,7 +445,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> UpdateActivityTimeAsync(Guid sessionId)
     {
-        var session = await _repository.GetAsync(sessionId);
+        var session = await FindScopedSessionAsync(sessionId);
         if (session == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -446,12 +490,16 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★ 清扫按「谁不活跃了」整表扫，不经会话 id 也不经用户 id，于是单条 / 该用户全部那两处的范围判断
+    /// 一处都罩不到它：租户管理员传一个 0 分钟阈值，所有租户的全部会话一次翻成已撤销、绑定的刷新令牌随之全删。
+    /// 与列表 / 统计同源裁剪；没有主体的后台维护任务不裁剪，仍是全量。
+    /// </remarks>
     public async Task<Result<IReadOnlyCollection<Guid>>> CleanInactiveSessionsAsync(TimeSpan inactiveThreshold)
     {
         var cutoffTime = DateTime.UtcNow - inactiveThreshold;
 
-        var expiredSessions = await _repository
-            .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
+        var expiredSessions = await WhereInScope(_repository.Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime))
             .ToListAsync();
 
         if (expiredSessions.Count == 0)
@@ -476,7 +524,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result<SessionStatisticsDto>> GetSessionStatisticsAsync()
     {
-        var activeSessions = _repository.Where(us => !us.IsRevoked);
+        var activeSessions = WhereInScope(_repository.Where(us => !us.IsRevoked));
 
         var activeSessionCount = await activeSessions.CountAsync();
         var onlineUserCount = await activeSessions.Select(us => us.UserId).Distinct().CountAsync();
@@ -511,8 +559,7 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 
         // Step 1: GROUP BY on UserSession to get top-N userIds + per-user aggregates.
         // Single-column join key keeps the GROUP BY index-friendly across providers.
-        var aggregates = await _repository
-            .Where(us => !us.IsRevoked)
+        var aggregates = await WhereInScope(_repository.Where(us => !us.IsRevoked))
             .GroupBy(us => us.UserId)
             .Select(g => new
             {

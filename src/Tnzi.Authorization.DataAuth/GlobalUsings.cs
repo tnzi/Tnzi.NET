@@ -2,6 +2,7 @@ global using System;
 global using System.Collections.Generic;
 global using System.Linq;
 global using System.Linq.Expressions;
+global using System.Text.Json.Serialization;
 global using System.Threading.Tasks;
 
 global using Microsoft.AspNetCore.Mvc;
@@ -26,7 +27,6 @@ global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.Exceptions;
-global using Tnzi.Extensions;
 global using Tnzi.Identity.Services;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;

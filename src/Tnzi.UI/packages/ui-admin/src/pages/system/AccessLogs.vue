@@ -4,6 +4,14 @@
        mutating affordances automatically. The per-row View action opens the
        read-only #detail drawer with the full access-log record (11 fields the
        table can't fit - geo/UA/request metadata). -->
+  <NAlert
+    v-if="captureEnabled === false"
+    type="info"
+    :bordered="false"
+    class="access-logs__capture-off"
+  >
+    {{ t('captureDisabled') }}
+  </NAlert>
   <TCrudPage
     :state="crud"
     :all-columns="accessLogColumns"
@@ -26,6 +34,8 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { NAlert } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { viewAction, type RowAction } from '../../headless/row-actions'
@@ -52,4 +62,22 @@ const rowActions: RowAction<AccessLogInfoDto>[] = [viewAction(crud)]
 const detailTitle = (row: AccessLogInfoDto): string => `${row.method ?? ''} ${row.path ?? ''}`.trim()
 
 const t = makePageTranslator('system.accessLogs')
+
+// Capture is opt-in on the backend (System:AccessLog:Enabled, default off).
+// Without this banner an empty table reads as "no traffic"; `null` while the
+// probe is in flight (or failed) shows nothing rather than a wrong hint.
+const captureEnabled = ref<boolean | null>(null)
+onMounted(async () => {
+  try {
+    captureEnabled.value = (await bridge.accessLogs.statistics()).captureEnabled
+  } catch {
+    captureEnabled.value = null
+  }
+})
 </script>
+
+<style scoped>
+.access-logs__capture-off {
+  margin-bottom: 12px;
+}
+</style>

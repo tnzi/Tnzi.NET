@@ -1,4 +1,4 @@
-
+using Tnzi.Exceptions;
 
 namespace Tnzi.AI.Tests;
 
@@ -266,6 +266,219 @@ public class AgentRuntimeResumeTests
         result.RunId.ShouldBe(runId);
         result.Status.ShouldBe(AgentRunStatus.Completed);
         resolver.Verify(x => x.ResolveAgentAsync(agentId, null, null, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 续跑必须按建行时记下的请求快照重建请求：此前只带 AgentId / ThreadId / InputSummary，
+    /// 模板 spawn（AgentId 为 null）的运行续跑成一个没有任何工具的默认 agent，DB agent 的续跑丢掉
+    /// 子 Agent 标记（ToolResolver 的子 Agent 裁剪整体失效、比原运行更宽），用户消息还被 InputSummary 截到 500 字。
+    /// </summary>
+    [Fact]
+    public async Task ResumeAsync_NonWorkflowRun_RebuildsTheRequestFromTheSnapshot()
+    {
+        var runId = Guid.NewGuid();
+        var parentRunId = Guid.NewGuid();
+        var rootRunId = Guid.NewGuid();
+        var creatorId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var longMessage = new string('x', 601);
+        var original = new AgentRunRequest
+        {
+            OperationType = AIOperationType.AgentRun,
+            Provider = "openai",
+            Model = "gpt-5",
+            UserMessage = longMessage,
+            ToolGroups = ["sandbox"],
+            ToolNames = ["bash"],
+            TrustedToolSelection = true,
+            SubAgentName = "bash",
+            IsBackground = true,
+            PlanMode = true,
+            ReasoningEffort = ReasoningEffort.High,
+            Metadata = new Dictionary<string, object> { ["node_name"] = "step-1" },
+            Attachments = [new FileAttachment("spec.md", 12, "text/markdown")]
+        };
+        var run = new AgentRun
+        {
+            Id = runId,
+            AgentId = null,
+            ThreadId = threadId,
+            ParentRunId = parentRunId,
+            RootRunId = rootRunId,
+            CreatorId = creatorId,
+            Status = AgentRunStatus.Failed,
+            InputSummary = StringTruncator.Truncate(longMessage, 500),
+            RequestSnapshot = AgentRunRequestSnapshot.From(original).Serialize(),
+            Nodes = []
+        };
+
+        var (runtime, resolver, probe, accessor) = BuildRuntime(run, creatorId, threadId);
+
+        var result = await runtime.ResumeAsync(runId);
+
+        result.Status.ShouldBe(AgentRunStatus.Completed);
+        resolver.Verify(x => x.ResolveAgentAsync(null, "openai", "gpt-5",
+            It.Is<List<string>>(g => g.SequenceEqual(new[] { "sandbox" })), It.IsAny<CancellationToken>(),
+            It.Is<List<string>>(n => n.SequenceEqual(new[] { "bash" }))), Times.Once);
+
+        var rebuilt = probe.CapturedRequest.ShouldNotBeNull();
+        rebuilt.UserMessage.ShouldBe(longMessage);
+        rebuilt.ToolGroups.ShouldBe(["sandbox"]);
+        rebuilt.ToolNames.ShouldBe(["bash"]);
+        rebuilt.TrustedToolSelection.ShouldBeTrue();
+        rebuilt.SubAgentName.ShouldBe("bash");
+        rebuilt.IsBackground.ShouldBeTrue();
+        rebuilt.PlanMode.ShouldBeTrue();
+        rebuilt.ReasoningEffort.ShouldBe(ReasoningEffort.High);
+        rebuilt.ParentRunId.ShouldBe(parentRunId);
+        rebuilt.RootRunId.ShouldBe(rootRunId);
+        rebuilt.UserId.ShouldBe(creatorId);
+        rebuilt.ThreadId.ShouldBe(threadId);
+        rebuilt.EnableRunTracking.ShouldBeFalse();
+        rebuilt.Metadata.ShouldNotBeNull();
+        rebuilt.Metadata.ShouldContainKey("node_name");
+        rebuilt.Attachments.ShouldNotBeNull();
+        rebuilt.Attachments.Single().FileName.ShouldBe("spec.md");
+        // 子 Agent 标记在执行期成立：ToolResolver 的裁剪与 IsSubAgentOnly 规则据此匹配
+        probe.WasMarkedSubAgent.ShouldBeTrue();
+        accessor.Properties.ShouldNotContainKey(ContextPropertyKeys.IsSubAgent);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_ExplicitUserMessage_OverridesTheSnapshotMessage()
+    {
+        var runId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var run = new AgentRun
+        {
+            Id = runId,
+            AgentId = agentId,
+            Status = AgentRunStatus.RequiresClarification,
+            RequestSnapshot = AgentRunRequestSnapshot.From(new AgentRunRequest { AgentId = agentId, UserMessage = "original task" }).Serialize(),
+            Nodes = []
+        };
+        var (runtime, _, probe, _) = BuildRuntime(run, null, null);
+
+        await runtime.ResumeAsync(runId, new ResumeRunInput { UserMessage = "here is the clarification" });
+
+        probe.CapturedRequest.ShouldNotBeNull().UserMessage.ShouldBe("here is the clarification");
+    }
+
+    /// <summary>
+    /// 迁移前的旧行：没有快照、AgentId 也为 null（模板 spawn）—— 拒绝续跑，不能静默降级成无工具的默认 agent。
+    /// </summary>
+    [Fact]
+    public async Task ResumeAsync_AdHocRunWithoutSnapshot_Returns400InsteadOfDegrading()
+    {
+        var runId = Guid.NewGuid();
+        var run = new AgentRun { Id = runId, AgentId = null, Status = AgentRunStatus.Failed, RequestSnapshot = null, Nodes = [] };
+        var (runtime, resolver, _, _) = BuildRuntime(run, null, null);
+
+        var ex = await Should.ThrowAsync<BusinessException>(() => runtime.ResumeAsync(runId));
+
+        ex.Code.ShouldBe(ErrorCodes.RunInvalidState);
+        ex.HttpStatusCode.ShouldBe(400);
+        resolver.Verify(x => x.ResolveAgentAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<List<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<List<string>?>()), Times.Never);
+        run.Status.ShouldBe(AgentRunStatus.Failed, "the row must stay as it was, not be flipped to Running");
+    }
+
+    /// <summary>
+    /// 迁移前的旧行、DB agent：没有快照也能续跑（工具组由 grants 重建），父子链与归属人从行上回填。
+    /// </summary>
+    [Fact]
+    public async Task ResumeAsync_DbAgentRunWithoutSnapshot_BackfillsLineageFromTheRow()
+    {
+        var runId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var parentRunId = Guid.NewGuid();
+        var creatorId = Guid.NewGuid();
+        var run = new AgentRun
+        {
+            Id = runId, AgentId = agentId, ParentRunId = parentRunId, RootRunId = parentRunId, CreatorId = creatorId,
+            Status = AgentRunStatus.Failed, InputSummary = "legacy", RequestSnapshot = null, Nodes = []
+        };
+        var (runtime, _, probe, _) = BuildRuntime(run, creatorId, null);
+
+        await runtime.ResumeAsync(runId);
+
+        var rebuilt = probe.CapturedRequest.ShouldNotBeNull();
+        rebuilt.AgentId.ShouldBe(agentId);
+        rebuilt.ParentRunId.ShouldBe(parentRunId);
+        rebuilt.RootRunId.ShouldBe(parentRunId);
+        rebuilt.UserId.ShouldBe(creatorId);
+        rebuilt.UserMessage.ShouldBe("legacy");
+        probe.WasMarkedSubAgent.ShouldBeTrue();
+    }
+
+    private static (AgentRuntime Runtime, Mock<IAgentResolver> Resolver, RequestProbeMiddleware Probe, AgentExecutionContextAccessor Accessor)
+        BuildRuntime(AgentRun run, Guid? ownerId, Guid? ownedThreadId)
+    {
+        var runStore = new Mock<IRunStore>();
+        runStore.Setup(x => x.GetWithNodesAsync(run.Id, It.IsAny<CancellationToken>())).ReturnsAsync(run);
+        runStore.Setup(x => x.UpdateAsync(It.IsAny<AgentRun>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        var traceStore = new Mock<ITraceStore>();
+        traceStore.Setup(x => x.AddAsync(It.IsAny<AgentRunTrace>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AgentRunTrace trace, CancellationToken _) => trace);
+
+        var runTracker = new RunTracker(runStore.Object, traceStore.Object, Mock.Of<ILogger<RunTracker>>());
+
+        var resolver = new Mock<IAgentResolver>();
+        resolver.Setup(x => x.ResolveAgentAsync(It.IsAny<Guid?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<List<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<List<string>?>()))
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "test", "gpt-5", run.AgentId));
+
+        var accessor = new AgentExecutionContextAccessor();
+        var probe = new RequestProbeMiddleware(accessor);
+        var sp = new ServiceCollection().AddSingleton<IAiMiddleware>(probe).BuildServiceProvider();
+
+        var threadService = new Mock<IAgentThreadService>();
+        threadService.Setup(x => x.IsOwnerAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .ReturnsAsync((Guid t, Guid u) => t == ownedThreadId && u == ownerId);
+
+        var runtime = new AgentRuntime(
+            resolver.Object,
+            Mock.Of<IAgentFactory>(),
+            Mock.Of<IRepository<Agent, Guid>>(),
+            runTracker,
+            Mock.Of<IWorkflowDelegator>(),
+            accessor,
+            sp,
+            new StaticOptionsMonitor<AIOptions>(new AIOptions()),
+            Mock.Of<IEventPublisher>(),
+            Mock.Of<ILogger<AgentRuntime>>(),
+            threadService.Object);
+
+        return (runtime, resolver, probe, accessor);
+    }
+
+    /// <summary>抓住管线看到的请求与执行期的子 Agent 标记。</summary>
+    private sealed class RequestProbeMiddleware : IAiMiddleware
+    {
+        private readonly AgentExecutionContextAccessor _accessor;
+
+        public RequestProbeMiddleware(AgentExecutionContextAccessor accessor)
+        {
+            _accessor = accessor;
+        }
+
+        public AgentRunRequest? CapturedRequest { get; private set; }
+        public bool WasMarkedSubAgent { get; private set; }
+
+        public int Order => 0;
+
+        public Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
+        {
+            CapturedRequest = context.Request;
+            WasMarkedSubAgent = _accessor.Properties.TryGetValue(ContextPropertyKeys.IsSubAgent, out var flag) && flag is true;
+            return Task.FromResult(new AgentRunResult { Response = "resumed", FinishReason = FinishReasons.Stop });
+        }
+
+        public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield break;
+        }
     }
 
     /// <summary>

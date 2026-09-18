@@ -62,4 +62,11 @@ public class ToolExecutionContext
 
     /// <summary>扩展属性（中间件间传递数据）</summary>
     public IDictionary<string, object?> Properties { get; } = new Dictionary<string, object?>();
+
+    /// <summary>
+    /// 中间件短路（不调用 <c>next</c>）并以失败收场时填写的原因。执行器据此把该次调用
+    /// 记为失败（<c>ToolCallDetail.IsSuccess = false</c>），返回给模型的仍是中间件给出的结果文本。
+    /// 通用通道：不想再为每个中间件各起一对属性键时用它。
+    /// </summary>
+    public string? FailureReason { get; set; }
 }

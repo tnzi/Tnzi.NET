@@ -6,7 +6,7 @@ namespace Tnzi.Notification.Services;
 /// </summary>
 public class HttpSmsSender : ISmsSender
 {
-    private readonly NotificationOptions _options;
+    private readonly SmsSenderOptions _options;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HttpSmsSender> _logger;
 
@@ -16,8 +16,17 @@ public class HttpSmsSender : ISmsSender
     // Plivo API端点
     private const string PlivoApiBaseUrl = "https://api.plivo.com/v1";
 
+    /// <summary>
+    /// 初始化一个 <see cref="HttpSmsSender"/>。
+    /// </summary>
+    /// <param name="options">
+    /// 这一个发送器的短信配置（含 <c>Provider</c> 与该厂商的凭据）：默认发送器是 <c>Notification:SmsSender</c>，
+    /// 具名发送器是 <c>Notification:SmsSenders:{key}</c> 里的一节。
+    /// </param>
+    /// <param name="httpClientFactory">调厂商 REST API 用。</param>
+    /// <param name="logger">日志。</param>
     public HttpSmsSender(
-        NotificationOptions options,
+        SmsSenderOptions options,
         IHttpClientFactory httpClientFactory,
         ILogger<HttpSmsSender> logger)
     {
@@ -28,14 +37,8 @@ public class HttpSmsSender : ISmsSender
 
     public async Task<SendResult> SendToAsync(string phoneNumber, string message, CancellationToken cancellationToken = default)
     {
-        if (_options.SmsSender == null)
-        {
-            _logger.LogWarning("SMS sender options not configured");
-            return SendResult.CreateFailure("SMS sender options not configured");
-        }
-
         // In development, redirect all outbound SMS to the configured override number
-        var devOverride = _options.SmsSender.DevOverridePhone;
+        var devOverride = _options.DevOverridePhone;
         if (!string.IsNullOrWhiteSpace(devOverride))
         {
             _logger.LogWarning("[DEV] SMS redirected. OriginalTo={OriginalTo}, Override={Override}", phoneNumber, devOverride);
@@ -45,11 +48,11 @@ public class HttpSmsSender : ISmsSender
 
         try
         {
-            return _options.SmsSender.Provider.ToLower() switch
+            return _options.Provider.ToLower() switch
             {
                 "twilio" => await SendViaTwilioHttpAsync(phoneNumber, message, cancellationToken),
                 "plivo" => await SendViaPlivoHttpAsync(phoneNumber, message, cancellationToken),
-                _ => SendResult.CreateFailure($"SMS provider '{_options.SmsSender.Provider}' is not supported. Supported providers: twilio, plivo")
+                _ => SendResult.CreateFailure($"SMS provider '{_options.Provider}' is not supported. Supported providers: twilio, plivo")
             };
         }
         catch (Exception ex)
@@ -64,19 +67,16 @@ public class HttpSmsSender : ISmsSender
     /// </summary>
     private async Task<SendResult> SendViaTwilioHttpAsync(string phoneNumber, string message, CancellationToken cancellationToken)
     {
-        if (_options.SmsSender == null)
-            throw new ConfigurationException("Notification:SmsSender", "SMS sender options not configured.");
-
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.TwilioAccountSid))
+        if (string.IsNullOrWhiteSpace(_options.TwilioAccountSid))
             throw new ConfigurationException("Notification:SmsSender:TwilioAccountSid", "Twilio Account SID is not configured.");
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.TwilioAuthToken))
+        if (string.IsNullOrWhiteSpace(_options.TwilioAuthToken))
             throw new ConfigurationException("Notification:SmsSender:TwilioAuthToken", "Twilio Auth Token is not configured.");
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.TwilioFromPhoneNumber))
+        if (string.IsNullOrWhiteSpace(_options.TwilioFromPhoneNumber))
             throw new ConfigurationException("Notification:SmsSender:TwilioFromPhoneNumber", "Twilio From Phone Number is not configured.");
 
-        var accountSid = _options.SmsSender.TwilioAccountSid!;
-        var authToken = _options.SmsSender.TwilioAuthToken!;
-        var fromPhoneNumber = _options.SmsSender.TwilioFromPhoneNumber!;
+        var accountSid = _options.TwilioAccountSid!;
+        var authToken = _options.TwilioAuthToken!;
+        var fromPhoneNumber = _options.TwilioFromPhoneNumber!;
 
         var httpClient = _httpClientFactory.CreateClient();
 
@@ -139,19 +139,16 @@ public class HttpSmsSender : ISmsSender
     /// </summary>
     private async Task<SendResult> SendViaPlivoHttpAsync(string phoneNumber, string message, CancellationToken cancellationToken)
     {
-        if (_options.SmsSender == null)
-            throw new ConfigurationException("Notification:SmsSender", "SMS sender options not configured.");
-
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.PlivoAuthId))
+        if (string.IsNullOrWhiteSpace(_options.PlivoAuthId))
             throw new ConfigurationException("Notification:SmsSender:PlivoAuthId", "Plivo Auth ID is not configured.");
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.PlivoAuthToken))
+        if (string.IsNullOrWhiteSpace(_options.PlivoAuthToken))
             throw new ConfigurationException("Notification:SmsSender:PlivoAuthToken", "Plivo Auth Token is not configured.");
-        if (string.IsNullOrWhiteSpace(_options.SmsSender.PlivoFromPhoneNumber))
+        if (string.IsNullOrWhiteSpace(_options.PlivoFromPhoneNumber))
             throw new ConfigurationException("Notification:SmsSender:PlivoFromPhoneNumber", "Plivo From Phone Number is not configured.");
 
-        var authId = _options.SmsSender.PlivoAuthId!;
-        var authToken = _options.SmsSender.PlivoAuthToken!;
-        var fromPhoneNumber = _options.SmsSender.PlivoFromPhoneNumber!;
+        var authId = _options.PlivoAuthId!;
+        var authToken = _options.PlivoAuthToken!;
+        var fromPhoneNumber = _options.PlivoFromPhoneNumber!;
 
         var httpClient = _httpClientFactory.CreateClient();
 

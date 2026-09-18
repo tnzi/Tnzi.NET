@@ -1,6 +1,5 @@
 using System.Net.Mime;
 using Tnzi.Domain.Entities;
-using Tnzi.Notification.Metadata;
 
 namespace Tnzi.Notification.Tests.Integration;
 
@@ -48,6 +47,8 @@ public class FaxSendPathTests : IntegrationTestBase
         services.AddScoped<INotificationOptOutService, NotificationOptOutService>();
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<INotificationProviderResolver, NotificationProviderResolver>();
+        services.AddScoped<INotificationProviderSelector, DefaultNotificationProviderSelector>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

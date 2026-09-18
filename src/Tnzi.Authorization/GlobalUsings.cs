@@ -10,7 +10,6 @@ global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using System;
-global using System.Collections.Frozen;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations.Schema;
 global using System.Linq;

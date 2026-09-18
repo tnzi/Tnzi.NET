@@ -6,6 +6,7 @@
 import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination';
 import type { Flags } from '../../utils/flags';
 import { Gender, OAuthProvider, TwoFactorType, PasswordStrengthLevel, AbnormalLoginType, AbnormalLoginAction, LoginStatus } from './metadata';
+import type { CaptchaChallengeDto, CaptchaClientConfigDto } from '../captcha/types';
 
 export { Gender, OAuthProvider, TwoFactorType, PasswordStrengthLevel, AbnormalLoginType, AbnormalLoginAction, LoginStatus };
 
@@ -568,9 +569,19 @@ export interface AuthConfigDto {
   enablePasswordRecovery: boolean;
   recoveryViaEmail: boolean;
   recoveryViaSms: boolean;
-  // Image captcha
+  // Captcha (human verification)
+  /** Password login is gated adaptively (after repeated failures); code-login send-code unconditionally. */
   enableCaptchaOnLogin: boolean;
+  /** Register / quick-register send-code / resend-confirmation are gated unconditionally. */
   enableCaptchaOnRegister: boolean;
+  /** `forgot-password` and `password-recovery/send-code` are gated unconditionally. */
+  enableCaptchaOnPasswordRecovery: boolean;
+  /**
+   * Which captcha provider to render and with what (same payload as `GET /captcha/config`).
+   * With Tnzi.Identity loaded `enabled` is always true: an unconfigured deployment falls back
+   * to the built-in `image` provider.
+   */
+  captcha: CaptchaClientConfigDto;
   /**
    * Passkeys are enabled for this deployment (`Identity:Passkey:Enabled`).
    *
@@ -602,6 +613,11 @@ export interface LoginDto {
   password: string;
   captchaId?: string;
   captchaCode?: string;
+  /**
+   * Captcha token from the unified widget (any provider). Required once the adaptive login captcha has been demanded.
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
 }
 
 /**
@@ -623,6 +639,11 @@ export interface RegisterDto {
   password: string;
   captchaId?: string;
   captchaCode?: string;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the register captcha is on.
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
   firstName?: string;
   lastName?: string;
 }
@@ -647,6 +668,13 @@ export interface RefreshTokenDto {
  */
 export interface ForgotPasswordDto {
   email: string;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the password-recovery captcha is on.
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
+  captchaId?: string | null;
+  captchaCode?: string | null;
 }
 
 /**
@@ -659,13 +687,10 @@ export interface ResetPasswordDto {
 }
 
 /**
- * Captcha payload DTO
+ * Captcha challenge DTO - what `GET /auth/captcha/{purpose}/json` returns and what rides in the
+ * `errorDetails` of `IDENTITY_CAPTCHA_REQUIRED`. Only the `image` provider fills the picture fields.
  */
-export interface CaptchaDto {
-  captchaId: string;
-  imageBase64: string;
-  expirationSeconds: number;
-}
+export type CaptchaDto = CaptchaChallengeDto;
 
 /**
  * Resend email confirmation request
@@ -673,6 +698,13 @@ export interface CaptchaDto {
 export interface ResendEmailConfirmationDto {
   userId?: string | null;
   email?: string | null;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the register captcha is on (this endpoint sends a real email per call).
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
+  captchaId?: string | null;
+  captchaCode?: string | null;
 }
 
 /**
@@ -699,6 +731,11 @@ export interface SendQuickRegisterCodeDto {
   captchaId?: string;
   /** Image-captcha code the user typed (required when the register captcha is on). */
   captchaCode?: string;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the register captcha is on.
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
 }
 
 /**
@@ -751,6 +788,11 @@ export interface SendCodeLoginCodeDto {
   captchaId?: string | null;
   /** Image-captcha text the user typed. */
   captchaCode?: string | null;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the login captcha is on.
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
 }
 
 /**
@@ -789,6 +831,13 @@ export interface SendPasswordRecoveryCodeDto {
   email?: string | null;
   phoneNumber?: string | null;
   type: TwoFactorType;
+  /**
+   * Captcha token from the unified widget (any provider). Required when the password-recovery captcha is on (this endpoint spends a real SMS / email per call).
+   * Either this or the legacy `captchaId` + `captchaCode` pair; this wins when both are set.
+   */
+  captchaToken?: string | null;
+  captchaId?: string | null;
+  captchaCode?: string | null;
 }
 
 /**
@@ -951,6 +1000,21 @@ export interface UserLoginDto {
   loginProvider: string;
   providerKey: string;
   providerDisplayName?: string | null;
+}
+
+/**
+ * One-time token that turns the next OAuth start into an account *link* for
+ * the signed-in user (`POST /users/profile/linked-accounts/{provider}/link-token`).
+ *
+ * The OAuth start and callback endpoints are anonymous full-page navigations
+ * with no bearer on them, so this token is the only way the callback learns
+ * who is linking. Pass `token` as `linkToken` to `oauthLoginUrl`.
+ */
+export interface OAuthLinkTokenDto {
+  token: string;
+  /** Lower-cased provider the token is bound to. */
+  provider: string;
+  expiresAt: string;
 }
 
 // ============================================
@@ -1244,6 +1308,16 @@ export enum PendingUserActions {
   EnrollTotp = 1 << 9,
   /** Must confirm the email address first. */
   ConfirmEmail = 1 << 10,
+
+  // Named composites, mirrored for WIRE PARITY only. When a value is exactly one
+  // of these, the backend serialises it as the composite's name ("Obligations"
+  // for an account that owes all three), and `parseFlags` can only expand a name
+  // it knows: without these two rows that value parses to 0 and every badge is
+  // skipped. Test against the single bits, not against these.
+  /** Every bit that blocks the sign-in outright. */
+  Blocking = InvitationPending,
+  /** Every obligation bit. */
+  Obligations = ChangePassword | EnrollTotp | ConfirmEmail,
 }
 
 /**

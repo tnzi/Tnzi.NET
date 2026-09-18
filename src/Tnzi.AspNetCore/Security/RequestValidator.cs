@@ -151,12 +151,12 @@ public class RequestValidator : IRequestValidator
         var path = context.Request.Path.Value ?? string.Empty;
         var queryString = context.Request.QueryString.Value ?? string.Empty;
 
-        // 读取请求体（如果存在且需要）
-        // 注意：只读取小于 1MB 的请求体，避免性能问题
-        // 对于 chunked 传输（ContentLength 为 null），也需要读取 body 以确保签名完整性
+        // 读取请求体（如果存在且需要）。这段读发生在比对签名之前，任何未认证调用方都能让它跑：
+        // 有 Content-Length 的按声明值在读之前拒绝；没有的（chunked）只读到上限 + 1 字节就停，
+        // 绝不「先读到底再查大小」—— 那等于让调用方决定服务端分配多大的字符串。
         string body = string.Empty;
         var contentLength = context.Request.ContentLength;
-        const long maxBodySize = 1024 * 1024; // 1MB
+        const int maxBodySize = 1024 * 1024; // 1MB
 
         if (contentLength > maxBodySize)
         {
@@ -167,21 +167,14 @@ public class RequestValidator : IRequestValidator
         // ContentLength > 0 或 ContentLength 为 null（chunked 传输）时读取 body
         if (contentLength is null or > 0)
         {
-            // 启用缓冲以便可以多次读取
-            context.Request.EnableBuffering();
-
-            var originalPosition = context.Request.Body.Position;
-            context.Request.Body.Position = 0;
-            using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-            body = await reader.ReadToEndAsync();
-            context.Request.Body.Position = originalPosition;
-
-            // 对 chunked 请求进行大小检查（读取后才知道实际大小）
-            if (Encoding.UTF8.GetByteCount(body) > maxBodySize)
+            var bounded = await context.Request.TryReadAsStringAsync(maxBodySize, context.RequestAborted);
+            if (bounded == null)
             {
-                _logger.LogWarning("Request body too large for signature validation (chunked): {Size} bytes", body.Length);
+                _logger.LogWarning("Request body too large for signature validation (chunked): over {Limit} bytes", maxBodySize);
                 return "Request body too large for signature validation";
             }
+
+            body = bounded;
         }
 
         // 构建签名字符串：timestamp + nonce + method + path + queryString + body
@@ -212,9 +205,12 @@ public class RequestValidator : IRequestValidator
         }
 
         var cacheKey = $"RequestNonce:{nonceHeader}";
-        
-        // 使用原子操作尝试设置 Nonce
-        var success = await _cache.TrySetAsync(cacheKey, "1", TimeSpan.FromSeconds(_options.NonceExpirationSeconds));
+
+        // 使用原子操作尝试设置 Nonce。
+        // TTL 不得短于时间戳窗口的两倍（一条请求在其时间戳前后各 W 秒内都合法）：
+        // 启动校验已经挡住这种配置，这里再兜一次底，绕过校验的实例也开不出重放窗口。
+        var ttlSeconds = Math.Max(_options.NonceExpirationSeconds, 2L * _options.TimestampWindowSeconds);
+        var success = await _cache.TrySetAsync(cacheKey, "1", TimeSpan.FromSeconds(ttlSeconds));
         
         if (!success)
         {

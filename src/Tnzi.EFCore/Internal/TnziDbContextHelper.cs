@@ -6,6 +6,7 @@ namespace Tnzi.EFCore.Internal;
 /// 用于统一 TnziDbContext 和 IdentityDbContext 的底层实现
 /// 实际逻辑委托给专职 Helper 类：
 /// - EntityRegistrationHelper：实体发现与注册
+/// - QueryFilterHelper：软删 / 多租户查询过滤器
 /// - AuditPropertyHelper：审计属性填充
 /// - IdGenerationHelper：ID 自动生成
 /// - DbContextServiceResolver：服务解析
@@ -18,6 +19,18 @@ public static class TnziDbContextHelper
     public static void OnModelCreating(DbContext dbContext, ModelBuilder modelBuilder, Action<ModelBuilder>? additionalConfigurations = null)
     {
         EntityRegistrationHelper.RegisterEntities(dbContext, modelBuilder, additionalConfigurations);
+    }
+
+    /// <summary>
+    /// 统一配置软删 / 多租户查询过滤器（供 TnziDbContext 与 IdentityDbContext 的 ConfigureQueryFilters 共用）。
+    /// </summary>
+    /// <remarks>
+    /// 两个基类必须走同一处：同时是 <c>ISoftDelete + IMultiTenant</c> 的实体只能有<b>一条</b>组合过滤器，
+    /// 各自维护一份就会有一份忘了组合 —— 那正是 IdentityDbContext 此前的形状（多租户一开，软删行复活）。
+    /// </remarks>
+    public static void ConfigureQueryFilters(DbContext dbContext, ModelBuilder modelBuilder, bool multiTenancyEnabled)
+    {
+        QueryFilterHelper.ConfigureQueryFilters(dbContext, modelBuilder, multiTenancyEnabled);
     }
 
     /// <summary>

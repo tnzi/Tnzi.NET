@@ -60,4 +60,10 @@ public sealed class ContextProviderCreationContext
     /// 该 Agent 分配的技能 slug 列表（非空时仅这些技能对 Agent 可见）
     /// </summary>
     public IReadOnlyList<string>? SkillSlugs { get; init; }
+
+    /// <summary>
+    /// 当前会话线程 ID（可选；HistoryMiddleware 已解析并校验归属）。
+    /// 需要跨轮次状态的 provider（如技能激活集）按它读写线程元数据。
+    /// </summary>
+    public Guid? ThreadId { get; init; }
 }

@@ -6,7 +6,7 @@ namespace Tnzi.Identity.Services;
 /// <remarks>
 /// 与 <see cref="IResetPasswordUrlGenerator"/> 同一形状、同一理由：接受邀请的页面
 /// 住在消费应用的前端里，它的路径、查询参数名、是否带租户前缀，框架无从知道。
-/// 默认实现按 <c>Identity:Invitation:AcceptUrlTemplate</c> 或 <c>App:FrontendUrl</c> 拼，
+/// 默认实现按 <c>Identity:Invitation:AcceptUrlTemplate</c> 或前端 origin（<c>System:FrontendUrl</c>）拼，
 /// 覆盖不了的情况就换掉整个实现。
 /// </remarks>
 public interface IInvitationUrlGenerator

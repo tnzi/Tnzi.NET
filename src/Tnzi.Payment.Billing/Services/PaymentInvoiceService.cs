@@ -256,10 +256,30 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
         if (string.IsNullOrEmpty(email))
             return Fail(ErrorCodes.InvoiceRecipientEmailRequired, 400);
 
-        // 生成PDF
+        // 生成产物（落 Storage 或本地磁盘）
         var pdfResult = await GeneratePdfAsync(invoiceId, cancellationToken);
         if (!pdfResult.Succeeded)
             return Fail(pdfResult.Message ?? ErrorCodes.InvoiceNotFound);
+
+        // ★ 仓储查询不跟踪：上面那个 invoice 是产物生成**之前**的快照，PdfFileId / PdfFilePath 还是空的。
+        //   拿它去 UpdateAsync 会按整行合并，把刚写好的产物指针整个抹回 null —— 此前每发一次发票，
+        //   产物指针就丢一次，下次下载只好再生成一份。附件与状态更新都必须用重读的这一份。
+        invoice = await _invoiceRepository.FirstOrDefaultAsync(i => i.Id == invoiceId, cancellationToken);
+        if (invoice == null)
+            return Fail(ErrorCodes.InvoiceNotFound, 404);
+
+        // ★ 附件就是刚生成的那份产物。此前这里一条附件都没挂：正文写着「请查收附件」，
+        //   邮件却是空的，发票照样记为 Sent、SendCount 递增、日志「Invoice sent」。
+        //   Storage 承载的挂 FileId（字节由通知模块经核心的 IFileContentReader 以系统身份读出；
+        //   PdfFilePath 那时是存储相对键，对发送器没有意义，不挂），本地回退的挂绝对路径
+        //   （通知模块按 Notification:Attachments:AllowedLocalRoots 放行，默认全拒 —— 拒绝会让这次发送失败，
+        //   而不是发出一封没有附件的信）。
+        var attachment = DescribeDocumentAttachment(invoice);
+        if (attachment == null)
+        {
+            Logger.LogError("Invoice document was generated but neither a file id nor a local path was recorded. InvoiceNo: {InvoiceNo}", invoice.InvoiceNo);
+            return Fail(ErrorCodes.InvoiceDocumentUnavailable, 500);
+        }
 
         var sendResult = await _notificationService.CreateAndSendAsync(
             new CreateNotificationRequest
@@ -278,7 +298,8 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
                         Address = email,
                         Name = invoice.CustomerName
                     }
-                ]
+                ],
+                Attachments = [attachment]
             },
             cancellationToken);
 
@@ -382,6 +403,44 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
     }
 
     /// <summary>
+    /// 产物的文件扩展名与 MIME 类型：有 PDF 转换器时按转换器说的算，否则是渲染出的 HTML 本身。
+    /// </summary>
+    private (string Extension, string ContentType) DocumentFormat()
+        => _pdfConverter != null ? (_pdfConverter.FileExtension, _pdfConverter.ContentType) : (".html", "text/html");
+
+    /// <summary>
+    /// 把发票产物描述成通知附件：Storage 承载的按 FileId，本地回退的按绝对路径；两者都没有时为 null。
+    /// </summary>
+    private FileInfoDto? DescribeDocumentAttachment(Invoice invoice)
+    {
+        var (extension, contentType) = DocumentFormat();
+        var fileName = $"{invoice.InvoiceNo}{extension}";
+
+        if (invoice.PdfFileId.HasValue)
+        {
+            return new FileInfoDto
+            {
+                FileId = invoice.PdfFileId,
+                FileName = fileName,
+                FilePath = string.Empty,
+                ContentType = contentType
+            };
+        }
+
+        if (!string.IsNullOrEmpty(invoice.PdfFilePath))
+        {
+            return new FileInfoDto
+            {
+                FileName = fileName,
+                FilePath = invoice.PdfFilePath,
+                ContentType = contentType
+            };
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 本地文件系统回退（仅在未加载 Storage 模块时使用）
     /// </summary>
     private static async Task<string> WriteLocalFallbackAsync(string fileName, byte[] content, CancellationToken cancellationToken)
@@ -404,7 +463,7 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
         {
             var templateName = invoice.TemplateName ?? _invoiceOptions.Value.DefaultTemplate ?? "InvoiceDefault";
             var renderResult = await _templateRenderService.RenderByNameAsync(
-                templateName, "Payment", model, "Invoice", null, cancellationToken);
+                templateName, "Payment", model, "Invoice", null, TemplateOutputKind.Html, cancellationToken);
 
             if (renderResult.Succeeded)
                 return renderResult.Data!.Content;
@@ -498,8 +557,7 @@ public class PaymentInvoiceService : ApplicationService, IPaymentInvoiceService
                 return Fail<InvoiceDocumentDto>(ErrorCodes.InvoiceNotFound, 404);
         }
 
-        var extension = _pdfConverter != null ? ".pdf" : ".html";
-        var contentType = _pdfConverter?.ContentType ?? "text/html";
+        var (extension, contentType) = DocumentFormat();
 
         if (invoice.PdfFileId.HasValue && _fileStorage != null)
         {

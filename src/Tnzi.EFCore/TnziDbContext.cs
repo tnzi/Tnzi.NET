@@ -7,26 +7,11 @@ namespace Tnzi.EFCore;
 /// <typeparam name="TDbContext">派生的 DbContext 类型</typeparam>
 [StableApi(Since = "0.1.0")]
 public abstract class TnziDbContext<TDbContext> : DbContext
-    , Internal.IMultiTenancySwitchProvider
+    , IMultiTenancySwitchProvider
+    , IQueryFilterContext
+    , IAuditPropertyContext
     where TDbContext : DbContext
 {
-    // 缓存泛型方法实例，避免每次调用 MakeGenericMethod
-    private static readonly ConcurrentDictionary<Type, MethodInfo> SoftDeleteFilterMethodCache = new();
-    private static readonly ConcurrentDictionary<Type, MethodInfo> MultiTenantFilterMethodCache = new();
-
-    // 组合过滤器缓存（同时实现 ISoftDelete + IMultiTenant 的实体）
-    private static readonly ConcurrentDictionary<Type, MethodInfo> CombinedFilterMethodCache = new();
-
-    // 基础方法缓存（非泛型）
-    private static readonly MethodInfo? BaseSoftDeleteFilterMethod = typeof(TnziDbContext<TDbContext>)
-        .GetMethod(nameof(ConfigureSoftDeleteFilter), BindingFlags.NonPublic | BindingFlags.Instance);
-
-    private static readonly MethodInfo? BaseMultiTenantFilterMethod = typeof(TnziDbContext<TDbContext>)
-        .GetMethod(nameof(ConfigureMultiTenantFilter), BindingFlags.NonPublic | BindingFlags.Instance);
-
-    private static readonly MethodInfo? BaseCombinedFilterMethod = typeof(TnziDbContext<TDbContext>)
-        .GetMethod(nameof(ConfigureCombinedFilter), BindingFlags.NonPublic | BindingFlags.Instance);
-
     protected ICurrentUser CurrentUser { get; }
     protected ICurrentTenant? CurrentTenant { get; }
     protected IDataFilterManager? DataFilterManager { get; }
@@ -43,12 +28,17 @@ public abstract class TnziDbContext<TDbContext> : DbContext
         : base(options)
     {
         CurrentUser = Check.NotNull(currentUser);
-        CurrentTenant = currentTenant;
-        DataFilterManager = dataFilterManager;
-        TimeProvider = timeProvider;
-        // 注入值优先；设计期（dotnet ef）没有容器，回退到工厂从 appsettings 读出的值。
-        // 见 DesignTimeMultiTenancy —— 少了这条回退，多租户应用生成的每条迁移都是错的。
-        _multiTenancyEnabled = DesignTimeMultiTenancy.Resolve(multiTenancyOptions?.Value.Enabled);
+        // 三个可选协作者与下面的开关同一个根因：消费方只声明 (options, currentUser)，这里的实参恒为 null。
+        // 注入值缺席时从 options 携带的应用容器解析（AddDbContext 记下的请求作用域容器）；
+        // 手工构造（设计期）没有容器，仍是 null。见 DbContextCollaborators。
+        CurrentTenant = DbContextCollaborators.Resolve(currentTenant, options);
+        DataFilterManager = DbContextCollaborators.Resolve(dataFilterManager, options);
+        TimeProvider = DbContextCollaborators.Resolve(timeProvider, options);
+        // 显式转发的选项优先；否则读 options 里的 MultiTenancyOptionsExtension ——
+        // 那是 AddTnziDbContext（运行期）与 DesignTimeDbContextFactoryBase（设计期）共同写入的载体。
+        // ★ 绝大多数消费方 DbContext 只声明 (options, currentUser)，第一项恒为 null；
+        //   此前没有第二项时开关在运行期恒 false，MultiTenancy:Enabled=true 整条不生效。见 MultiTenancySwitch。
+        _multiTenancyEnabled = MultiTenancySwitch.Resolve(multiTenancyOptions?.Value.Enabled, options);
     }
 
     public bool IsMultiTenancyEnabled => _multiTenancyEnabled;
@@ -72,64 +62,13 @@ public abstract class TnziDbContext<TDbContext> : DbContext
         TnziDbContextHelper.ConfigureConventions(configurationBuilder);
     }
 
+    /// <summary>
+    /// 配置软删 / 多租户查询过滤器。实现与 <c>IdentityDbContext</c> 共用（<see cref="TnziDbContextHelper.ConfigureQueryFilters"/>），
+    /// 同时是 <c>ISoftDelete + IMultiTenant</c> 的实体得到一条组合过滤器。
+    /// </summary>
     protected virtual void ConfigureQueryFilters(ModelBuilder modelBuilder)
     {
-        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
-        {
-            var clrType = entityType.ClrType;
-            var isSoftDelete = typeof(ISoftDelete).IsAssignableFrom(clrType);
-            var isMultiTenant = typeof(IMultiTenant).IsAssignableFrom(clrType);
-
-            if (isSoftDelete && isMultiTenant)
-            {
-                // EF Core 限制每个实体只允许一个 HasQueryFilter，必须使用组合过滤器
-                if (_multiTenancyEnabled)
-                {
-                    var method = GetOrCreateCombinedFilterMethod(clrType);
-                    method?.Invoke(this, [modelBuilder]);
-                }
-                else
-                {
-                    var method = GetOrCreateSoftDeleteFilterMethod(clrType);
-                    method?.Invoke(this, [modelBuilder]);
-                    modelBuilder.Entity(clrType).Ignore(nameof(IMultiTenant.TenantId));
-                }
-            }
-            else if (isSoftDelete)
-            {
-                var method = GetOrCreateSoftDeleteFilterMethod(clrType);
-                method?.Invoke(this, [modelBuilder]);
-            }
-            else if (isMultiTenant)
-            {
-                if (_multiTenancyEnabled)
-                {
-                    var method = GetOrCreateMultiTenantFilterMethod(clrType);
-                    method?.Invoke(this, [modelBuilder]);
-                }
-                else
-                {
-                    modelBuilder.Entity(clrType).Ignore(nameof(IMultiTenant.TenantId));
-                }
-            }
-        }
-    }
-
-    private static MethodInfo? GetOrCreateSoftDeleteFilterMethod(Type entityType)
-        => GetOrCreateFilterMethod(SoftDeleteFilterMethodCache, BaseSoftDeleteFilterMethod, entityType);
-
-    private static MethodInfo? GetOrCreateMultiTenantFilterMethod(Type entityType)
-        => GetOrCreateFilterMethod(MultiTenantFilterMethodCache, BaseMultiTenantFilterMethod, entityType);
-
-    private static MethodInfo? GetOrCreateCombinedFilterMethod(Type entityType)
-        => GetOrCreateFilterMethod(CombinedFilterMethodCache, BaseCombinedFilterMethod, entityType);
-
-    private static MethodInfo? GetOrCreateFilterMethod(ConcurrentDictionary<Type, MethodInfo> cache, MethodInfo? baseMethod, Type entityType)
-    {
-        if (baseMethod == null)
-            return null;
-
-        return cache.GetOrAdd(entityType, type => baseMethod.MakeGenericMethod(type));
+        TnziDbContextHelper.ConfigureQueryFilters(this, modelBuilder, _multiTenancyEnabled);
     }
 
     protected virtual bool IsSoftDeleteFilterEnabled => DataFilterManager?.IsEnabled<ISoftDeleteFilter>() ?? true;
@@ -140,28 +79,34 @@ public abstract class TnziDbContext<TDbContext> : DbContext
     /// </summary>
     protected virtual Guid? GetCurrentTenantId() => CurrentTenant?.Id ?? CurrentUser?.TenantId;
 
-    protected void ConfigureSoftDeleteFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete
-        => modelBuilder.Entity<T>().HasQueryFilter(e => !IsSoftDeleteFilterEnabled || !e.IsDeleted);
+    // 过滤器表达式经这个契约访问上面三个成员；显式实现让子类对 protected virtual 的覆写照常生效。
+    bool IQueryFilterContext.IsSoftDeleteFilterEnabled => IsSoftDeleteFilterEnabled;
+    bool IQueryFilterContext.IsMultiTenantFilterEnabled => IsMultiTenantFilterEnabled;
+    Guid? IQueryFilterContext.CurrentTenantId => GetCurrentTenantId();
+
+    // 绕过变更跟踪器的写入路径（Dapper 批量插入 / 更新）经这个契约取到与 SaveChanges 同一组协作者。
+    ICurrentUser IAuditPropertyContext.CurrentUser => CurrentUser;
+    ICurrentTenant? IAuditPropertyContext.CurrentTenant => CurrentTenant;
+    TimeProvider? IAuditPropertyContext.TimeProvider => TimeProvider;
 
     /// <summary>
-    /// 配置多租户查询过滤器
+    /// 单独为一个实体配置软删过滤器（<see cref="ConfigureQueryFilters"/> 已覆盖全部实体；保留给需要逐个实体覆写的子类）。
+    /// </summary>
+    protected void ConfigureSoftDeleteFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete
+        => QueryFilterHelper.ApplySoftDeleteFilter(this, modelBuilder, typeof(T));
+
+    /// <summary>
+    /// 单独为一个实体配置多租户过滤器。
     /// </summary>
     protected void ConfigureMultiTenantFilter<T>(ModelBuilder modelBuilder) where T : class, IMultiTenant
-    {
-        modelBuilder.Entity<T>().HasQueryFilter(e =>
-            !IsMultiTenantFilterEnabled || e.TenantId == GetCurrentTenantId());
-    }
+        => QueryFilterHelper.ApplyMultiTenantFilter(this, modelBuilder, typeof(T));
 
     /// <summary>
-    /// 配置组合查询过滤器（软删除 + 多租户）
-    /// EF Core 限制每个实体只允许一个 HasQueryFilter，因此同时实现两个接口的实体必须使用组合过滤器
+    /// 单独为一个实体配置组合过滤器（软删 + 多租户）。
+    /// EF Core 的无名 HasQueryFilter 是覆盖式的，同时实现两个接口的实体必须用一条组合过滤器。
     /// </summary>
     protected void ConfigureCombinedFilter<T>(ModelBuilder modelBuilder) where T : class, ISoftDelete, IMultiTenant
-    {
-        modelBuilder.Entity<T>().HasQueryFilter(e =>
-            (!IsSoftDeleteFilterEnabled || !e.IsDeleted) &&
-            (!IsMultiTenantFilterEnabled || e.TenantId == GetCurrentTenantId()));
-    }
+        => QueryFilterHelper.ApplyCombinedFilter(this, modelBuilder, typeof(T));
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

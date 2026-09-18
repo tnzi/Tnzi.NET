@@ -12,11 +12,20 @@ public class DataAuthService : ApplicationService, IDataAuthService
     private readonly IUserRoleService? _userRoleService;
     private readonly ICache? _cache;
     private readonly IMemoryCache? _memoryCache;
+    private readonly IEntityManager? _entityManager;
 
     /// <summary>
     /// 数据过滤缓存前缀
     /// </summary>
     public const string DataFilterCachePrefix = "DataFilter:";
+
+    /// <summary>
+    /// <see cref="EntityInfo"/> 写路径的版本键。<b>不带租户段</b>：EntityInfo 是全局表（无 <c>IMultiTenant</c>），
+    /// 一次改动（尤其是 <see cref="EntityInfo.IsDataAuthEnabled"/> 这个总开关）影响所有租户，
+    /// 只 bump 调用者租户段的版本会让其它租户的内存缓存最长 15 分钟继续用旧表达式。
+    /// <see cref="EntityRole"/> 是按租户的表，它的写路径仍只 bump 调用者租户段（<see cref="ClearAllDataFilterCacheAsync"/>）。
+    /// </summary>
+    public const string EntityInfoVersionCacheKey = DataFilterCachePrefix + "EntityInfoVersion";
 
     /// <summary>
     /// 数据过滤缓存过期时间
@@ -36,7 +45,8 @@ public class DataAuthService : ApplicationService, IDataAuthService
         IServiceProvider serviceProvider,
         IUserRoleService? userRoleService = null,
         ICache? cache = null,
-        IMemoryCache? memoryCache = null)
+        IMemoryCache? memoryCache = null,
+        IEntityManager? entityManager = null)
         : base(serviceProvider)
     {
         _entityInfoRepository = Check.NotNull(entityInfoRepository);
@@ -44,6 +54,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
         _userRoleService = userRoleService;
         _cache = cache;
         _memoryCache = memoryCache;
+        _entityManager = entityManager;
     }
 
     /// <summary>
@@ -63,12 +74,13 @@ public class DataAuthService : ApplicationService, IDataAuthService
         // 获取租户标识用于缓存隔离
         var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
 
-        // 获取全局版本和用户版本，实现秒级缓存失效
+        // 获取全局版本和用户版本，实现秒级缓存失效；EntityInfo 版本跨租户（见 EntityInfoVersionCacheKey）
         var globalVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion") : 0;
         var userVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:UserVersion:{userId}") : 0;
+        var entityInfoVersion = _cache != null ? await _cache.GetAsync<int>(EntityInfoVersionCacheKey) : 0;
 
         // 生成版本化缓存键（含租户隔离）
-        var cacheKey = $"{DataFilterCachePrefix}{tenantSegment}:{globalVersion}:{userVersion}:{userId}:{entityTypeName}:{(int)operation}";
+        var cacheKey = $"{DataFilterCachePrefix}{tenantSegment}:{globalVersion}:{userVersion}:{entityInfoVersion}:{userId}:{entityTypeName}:{(int)operation}";
 
         // 尝试从内存缓存获取表达式
         if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out var cached) && cached is Expression<Func<TEntity, bool>> cachedExpression)
@@ -97,55 +109,79 @@ public class DataAuthService : ApplicationService, IDataAuthService
         if (entityRoles.Count == 0)
             return null;
 
+        // 留空 = 这个角色对该实体、该操作不设限（合法、且是唯一的「不限制」写法）。
+        // ★ 角色按 OR 合并，一个不设限的角色就是 OR 里的 true，别的角色再窄（或者坏掉、deny-all）
+        // 也收不回去 —— 所以命中一条就整体不过滤。此前留空是 continue（「不贡献任何行」），
+        // 持有不设限角色的用户反而被第二个角色限住；第二个角色的 Filter 坏了更是直接零行。
+        // 方向是 OR 的既有语义，不是放宽：deny-on-fail 说的是坏角色不能给出多于配置的行，
+        // 而不是把别的角色合法给出的行收走。
+        if (entityRoles.Any(er => string.IsNullOrWhiteSpace(er.Filter)))
+            return null;
+
         // 解析每个角色的Filter JSON并构建表达式
         var expressions = new List<Expression<Func<TEntity, bool>>>();
 
         foreach (var entityRole in entityRoles)
         {
-            if (string.IsNullOrWhiteSpace(entityRole.Filter))
+
+            // ⚠️ 安全策略 (deny-on-fail): 一条写下了却读不出规则的 Filter —— 非法 JSON、
+            // 或者解析成功但一条规则都没有（键名拼错就是这个形状）—— 这个角色对该实体的
+            // 数据权限规则无效。我们*不能*跳过这条规则继续 OR 合并，否则该 role 的
+            // "有限可见"会退化为"完全无过滤" → 用户拿到比配置更多的访问权限，且零症状。
+            // 改为加入一个永远 false 的表达式，与其他 role 的过滤条件 OR 合并后效果
+            // 等价于"这条 role 不贡献任何可见行"。配错的锅 admin 自己背，比静默扩大权限好。
+            // ★ 解析走 FilterGroupJson（与列表 API 同一方言），不走会吞异常的 FromJsonString：
+            // 后者对非法 JSON 返回 null、对 camelCase 返回零条规则，两条路都曾在这里被读成「跳过」。
+            if (!FilterGroupJson.TryParse(entityRole.Filter, out var filterGroup, out var parseError))
+            {
+                Logger.LogWarning(
+                    "Data filter for EntityRole {EntityRoleId} (role {RoleId}) cannot be parsed: {Error}. " +
+                    "Treating as deny-all for safety; admin must fix the filter via the EntityRole admin UI. Filter: {Filter}",
+                    entityRole.Id, entityRole.RoleId, parseError, entityRole.Filter);
+                expressions.Add(DenyAll<TEntity>());
                 continue;
+            }
+
+            if (!filterGroup!.HasFilters)
+            {
+                Logger.LogWarning(
+                    "Data filter for EntityRole {EntityRoleId} (role {RoleId}) parsed but contains no rules. " +
+                    "Treating as deny-all for safety; leave Filter blank for no restriction. Filter: {Filter}",
+                    entityRole.Id, entityRole.RoleId, entityRole.Filter);
+                expressions.Add(DenyAll<TEntity>());
+                continue;
+            }
 
             try
             {
-                // 反序列化 Filter JSON 为 FilterGroup
-                var filterGroup = entityRole.Filter.FromJsonString<FilterGroup>();
-                if (filterGroup == null || !filterGroup.HasFilters)
-                    continue;
-
                 // 使用 FilterExpressionBuilder 构建表达式
                 var expression = FilterExpressionBuilder.Build<TEntity>(filterGroup);
                 expressions.Add(expression);
             }
             catch (Exception ex)
             {
-                // ⚠️ 安全策略 (deny-on-fail): 任何一条 EntityRole 的 filter
-                // 解析失败 → 这个角色对该实体的数据权限规则无效。我们*不能*
-                // 跳过这条规则继续 OR 合并，否则该 role 的"有限可见"会退化为
-                // "完全无过滤" → 用户拿到比配置更多的访问权限。
-                // 改为加入一个永远 false 的表达式，与其他 role 的过滤条件
-                // OR 合并后效果等价于"这条 role 不贡献任何可见行"。配错的
-                // 锅 admin 自己背，比静默扩大权限好。
+                // 同上：属性名错 / 类型不匹配等表达式构建失败 → deny-on-fail。
                 Logger.LogWarning(ex,
-                    "Failed to parse data filter for EntityRole {EntityRoleId} (role {RoleId}). " +
+                    "Failed to build data filter for EntityRole {EntityRoleId} (role {RoleId}). " +
                     "Treating as deny-all for safety; admin must fix the filter via the EntityRole admin UI. Filter: {Filter}",
                     entityRole.Id, entityRole.RoleId, entityRole.Filter);
-                var param = Expression.Parameter(typeof(TEntity), "e");
-                expressions.Add(Expression.Lambda<Func<TEntity, bool>>(Expression.Constant(false), param));
-                continue;
+                expressions.Add(DenyAll<TEntity>());
             }
         }
 
-        if (expressions.Count == 0)
-            return null;
-
+        // 到这里每条角色都非空，且每条都贡献了一个表达式（合法过滤器或 deny-all），列表不可能为空；
+        // 不再留「空列表 ⇒ null（不过滤）」的兜底 —— 那是一条方向为放开的静默路径。
         // 合并所有角色的过滤条件（使用OR连接）
         var result = CombineExpressionsWithOr(expressions);
 
-        // 缓存表达式
-        if (_memoryCache != null)
+        // 缓存表达式。共享 IMemoryCache 一旦被设了 SizeLimit（Caching:MemorySizeLimit），
+        // 不带 Size 的写入会抛 InvalidOperationException —— 这里没有 try/catch，命中规则的每一次
+        // 行级过滤都会变成 500。写共享缓存一律带 Size。
+        _memoryCache?.Set(cacheKey, result, new MemoryCacheEntryOptions
         {
-            _memoryCache.Set(cacheKey, result, DataFilterCacheExpiration);
-        }
+            AbsoluteExpirationRelativeToNow = DataFilterCacheExpiration,
+            Size = 1
+        });
 
         return result;
     }
@@ -166,7 +202,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
     }
 
     /// <summary>
-    /// 清除所有数据过滤缓存
+    /// 清除所有数据过滤缓存（调用者所在租户段 —— EntityRole 写路径用）
     /// </summary>
     public async Task ClearAllDataFilterCacheAsync()
     {
@@ -176,6 +212,18 @@ public class DataAuthService : ApplicationService, IDataAuthService
             var key = $"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion";
             var version = await _cache.GetAsync<int>(key);
             await _cache.SetAsync(key, version + 1, TimeSpan.FromDays(7));
+        }
+    }
+
+    /// <summary>
+    /// 作废<b>所有租户</b>的数据过滤缓存 —— EntityInfo 写路径用（全局表，见 <see cref="EntityInfoVersionCacheKey"/>）。
+    /// </summary>
+    private async Task InvalidateEntityInfoCacheAsync()
+    {
+        if (_cache != null)
+        {
+            var version = await _cache.GetAsync<int>(EntityInfoVersionCacheKey);
+            await _cache.SetAsync(EntityInfoVersionCacheKey, version + 1, TimeSpan.FromDays(7));
         }
     }
 
@@ -204,6 +252,18 @@ public class DataAuthService : ApplicationService, IDataAuthService
         if (idProperty == null)
         {
             // 如果没有Id属性，无法检查，返回false
+            LogError("CheckDataPermissionAsync cannot check {EntityTypeName}: it has no Id property.", typeof(TEntity).FullName);
+            return false;
+        }
+
+        // 入参是 Guid，非 Guid 主键（雪花 long / int / string）拼不出 Id == entityId：
+        // Expression.Equal 会同步抛 InvalidOperationException，从 async 方法里出来就是一个 faulted task、端点 500。
+        // 与「没有 Id 属性」「仓储未注册」同一方向：拒绝并记 Error，而不是抛。
+        if (idProperty.PropertyType != typeof(Guid))
+        {
+            LogError(
+                "CheckDataPermissionAsync cannot check {EntityTypeName}: its Id is {KeyType}, and the check only supports Guid-keyed entities.",
+                typeof(TEntity).FullName, idProperty.PropertyType.Name);
             return false;
         }
 
@@ -247,8 +307,15 @@ public class DataAuthService : ApplicationService, IDataAuthService
     }
 
     /// <summary>
-    /// 通过实体类型名称检查数据权限（非泛型版本，用于 Admin API）
+    /// 通过实体类型名称检查数据权限（非泛型版本，用于 Admin API）。
+    /// 把 <see cref="EntityInfo.TypeName"/> 解析成 CLR 类型后走与
+    /// <see cref="CheckDataPermissionAsync{TEntity}"/> 逐字相同的判定：按用户的过滤范围 + Id 查一次 <c>AnyAsync</c>。
     /// </summary>
+    /// <remarks>
+    /// 此前除「未登记 404」外每条路径都 <c>Ok(true)</c>，包括「确实有命中的过滤规则」那条（当时的注释：不知道
+    /// CLR 类型就执行不了表达式过滤）—— 一个恒真的授权判定 API。现在解析不到类型答 <b>501</b>：
+    /// 登记存在但本部署没加载那个实体，这次判定做不了；不能答 true（放开且零症状），也不该答 404（登记明明在）。
+    /// </remarks>
     public async Task<Result<bool>> CheckDataPermissionByTypeNameAsync(Guid userId, string entityTypeName, Guid entityId, DataAuthOperation operation)
     {
         // 查询 EntityInfo 确认实体类型已注册
@@ -258,35 +325,30 @@ public class DataAuthService : ApplicationService, IDataAuthService
             return Fail<bool>($"Entity type '{entityTypeName}' is not registered for data authorization", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        if (!entityInfoResult.Data.IsDataAuthEnabled)
+        var entityType = ResolveEntityType(entityInfoResult.Data.TypeName);
+        if (entityType == null || !entityType.IsClass)
         {
-            return Ok(true); // 未启用数据授权，默认允许
+            return Fail<bool>(
+                $"Entity type '{entityTypeName}' is registered but does not resolve to a loaded entity class on this deployment, so the data permission check cannot be performed.",
+                501);
         }
 
-        // 获取用户角色
-        var userRoles = await GetUserRolesAsync(userId);
-        if (!userRoles.Any())
+        // 判定接受的是 Guid entityId；非 Guid 主键（雪花 long 是框架一等选项）的登记这次判定做不了。
+        // 在这里、而不是等泛型方法按过滤范围拒绝：无规则命中时泛型方法答 true，管理员会把「true」读成
+        // 「检查有效」，再加一条规则就变成拒绝 —— 对同一个实体类型，端点的回答必须是一致的 501。
+        var keyType = entityType.GetProperty("Id")?.PropertyType;
+        if (keyType != typeof(Guid))
         {
-            return Ok(true); // 无角色配置，默认允许
+            return Fail<bool>(
+                $"Entity type '{entityTypeName}' is keyed by '{keyType?.Name ?? "no Id property"}'; the data permission check accepts a Guid entityId and only supports Guid-keyed entities.",
+                501);
         }
 
-        // 获取用户角色的数据权限规则
-        var entityRoles = await _entityRoleRepository
-            .Where(er => er.EntityInfoId == entityInfoResult.Data.Id
-                && er.IsEnabled
-                && userRoles.Contains(er.RoleId)
-                && (er.Operation & operation) != 0)
-            .ToListAsync();
-
-        if (entityRoles.Count == 0)
-        {
-            return Ok(true); // 无过滤规则，默认允许
-        }
-
-        // 存在过滤规则，表示该实体受数据权限保护
-        // 此方法无法在不知道实体 CLR 类型的情况下执行完整的表达式过滤
-        // 返回 true 表示用户有相关的数据权限配置
-        return Ok(true);
+        var check = typeof(DataAuthService)
+            .GetMethod(nameof(CheckDataPermissionAsync))!
+            .MakeGenericMethod(entityType);
+        var task = (Task<bool>)check.Invoke(this, [userId, entityId, operation])!;
+        return Ok(await task);
     }
 
     #region EntityInfo 管理
@@ -350,9 +412,22 @@ public class DataAuthService : ApplicationService, IDataAuthService
             return Fail<EntityInfo>($"EntityInfo with type name '{request.TypeName}' already exists", 409, ErrorCodes.VALIDATION_ERROR);
         }
 
+        // A registration nothing can resolve is a configuration error, not a
+        // row to keep: the filter path looks rows up by typeof(T).FullName, so
+        // an assembly-qualified name would never be found (whole entity
+        // unfiltered) and a name from a module this deployment does not load
+        // can never have its filters validated.
+        if (ResolveEntityType(request.TypeName) == null)
+        {
+            return Fail<EntityInfo>(
+                $"EntityInfo.TypeName '{request.TypeName}' does not resolve to a loaded entity type; use the CLR full name (namespace + type, no assembly) of an entity this deployment loads.",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var entityInfo = request.MapTo<EntityInfo>();
 
         await _entityInfoRepository.InsertAsync(entityInfo);
+        await InvalidateEntityInfoCacheAsync();
         LogInformation("EntityInfo created: {TypeName}, Name: {Name}", request.TypeName, request.Name);
         return Ok(entityInfo, "EntityInfo created successfully");
     }
@@ -376,10 +451,10 @@ public class DataAuthService : ApplicationService, IDataAuthService
 
         await _entityInfoRepository.UpdateAsync(entityInfo);
 
-        // 如果启用状态改变，清除缓存
+        // 如果启用状态改变，清除缓存 —— 全局表，必须作废所有租户段
         if (oldEnabled != request.IsDataAuthEnabled)
         {
-            await ClearAllDataFilterCacheAsync();
+            await InvalidateEntityInfoCacheAsync();
         }
 
         LogInformation("EntityInfo updated: {TypeName}, Name: {Name}", entityInfo.TypeName, entityInfo.Name);
@@ -410,8 +485,8 @@ public class DataAuthService : ApplicationService, IDataAuthService
 
         await _entityInfoRepository.DeleteAsync(entityInfo);
 
-        // 清除缓存
-        await ClearAllDataFilterCacheAsync();
+        // 清除缓存 —— 全局表，必须作废所有租户段
+        await InvalidateEntityInfoCacheAsync();
         LogInformation("EntityInfo deleted: {TypeName}, Name: {Name}", entityInfo.TypeName, entityInfo.Name);
         return Ok("EntityInfo deleted successfully");
     }
@@ -429,12 +504,12 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// at query time.
     /// </para>
     /// <para>
-    /// Type resolution uses <see cref="Type.GetType(string)"/> which
-    /// only finds types from already-loaded assemblies. That's fine
-    /// because <see cref="EntityInfo"/> rows are typically seeded from
-    /// modules that *are* loaded; the validator returns "type not found"
-    /// when the host hasn't registered the target entity, which is also
-    /// a useful diagnostic (admin pointing at a non-existent entity).
+    /// Type resolution goes through <see cref="ResolveEntityType"/> (EF-registered
+    /// entity types first, then every loaded assembly, by CLR full name). A
+    /// <see cref="EntityInfo"/> whose type cannot be resolved is a configuration
+    /// error and the save is rejected: accepting it would store a filter this
+    /// deployment can never check, which is deny-all at query time with only a
+    /// warning to tell it from a typo.
     /// </para>
     /// </remarks>
     private Result ValidateFilter(string? filterJson, EntityInfo entityInfo)
@@ -442,43 +517,36 @@ public class DataAuthService : ApplicationService, IDataAuthService
         // Empty filter = "no row restriction". Legitimate, don't reject.
         if (string.IsNullOrWhiteSpace(filterJson)) return Ok();
 
-        FilterGroup? filterGroup;
-        try
+        // Reject over-long JSON here rather than letting the column do it: a
+        // lenient MySQL truncates silently, and the truncated half is deny-all
+        // at query time with nothing but a warning to tell it from a config error.
+        if (filterJson.Length > EntityRole.FilterMaxLength)
         {
-            filterGroup = filterJson.FromJsonString<FilterGroup>();
-        }
-        catch (Exception ex)
-        {
-            return Fail($"Filter JSON is malformed: {ex.Message}");
-        }
-        if (filterGroup == null || !filterGroup.HasFilters)
-        {
-            // Filter JSON parsed but contained no rules - same as empty.
-            return Ok();
+            return Fail($"Filter JSON exceeds {EntityRole.FilterMaxLength} characters.");
         }
 
-        // Resolve the target entity type. AssemblyQualifiedName is preferred;
-        // bare type name works only if already loaded.
-        Type? entityType;
-        try
+        // Same dialect and the same three verdicts as the query side
+        // (GetDataFilterAsync): malformed and "parsed but no rules" are both
+        // rejected here, because at query time both are deny-all. Accepting
+        // them would store a rule that silently shows the role zero rows.
+        if (!FilterGroupJson.TryParse(filterJson, out var filterGroup, out var parseError))
         {
-            entityType = Type.GetType(entityInfo.TypeName, throwOnError: false, ignoreCase: false);
+            return Fail(parseError ?? "Filter JSON is malformed.");
         }
-        catch (Exception ex)
+        if (!filterGroup!.HasFilters)
         {
-            return Fail($"Failed to resolve entity type '{entityInfo.TypeName}': {ex.Message}");
+            return Fail("Filter JSON contains no rules; omit the Filter field for no restriction.");
         }
+
+        // Resolve the target entity type by the same name the filter path
+        // queries by (typeof(T).FullName). Type.GetType(bareName) used to sit
+        // here: it only probes the calling assembly and CoreLib, so every
+        // consumer entity resolved to null and the save was waved through.
+        var entityType = ResolveEntityType(entityInfo.TypeName);
         if (entityType == null)
         {
-            // Soft failure - type isn't in the loading context. Don't reject
-            // the save (admin may be authoring rules for a module they're
-            // about to load), but log a warning so the discrepancy is
-            // visible at startup-time when validators sweep the table.
-            Logger.LogWarning(
-                "EntityRole filter validation skipped: cannot resolve type '{TypeName}' (not loaded yet?). " +
-                "The filter will be checked again at query time.",
-                entityInfo.TypeName);
-            return Ok();
+            return Fail(
+                $"EntityInfo.TypeName '{entityInfo.TypeName}' does not resolve to a loaded entity type, so the filter cannot be validated. Register the entity by its CLR full name in a deployment that loads it.");
         }
 
         // Reflectively call FilterExpressionBuilder.Build<entityType>(filterGroup).
@@ -706,6 +774,16 @@ public class DataAuthService : ApplicationService, IDataAuthService
             return Fail<IEnumerable<EntityRole>>("EntityInfo not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // Same save-time gate as CreateEntityRoleAsync: one shared Filter for
+        // every role, so validate once before anything is inserted. Without
+        // this the batch endpoint was the bypass for the single-create 400.
+        var filterValidation = ValidateFilter(request.Filter, entityInfo);
+        if (!filterValidation.Succeeded)
+        {
+            return Fail<IEnumerable<EntityRole>>(filterValidation.Message ?? "Invalid filter expression",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 批量加载已存在的相同配置，消除 N+1
         var existingRoleIds = await _entityRoleRepository
             .Where(er => er.EntityInfoId == request.EntityInfoId
@@ -741,6 +819,54 @@ public class DataAuthService : ApplicationService, IDataAuthService
     #endregion
 
     #region Private Methods
+
+    /// <summary>
+    /// 把 <see cref="EntityInfo.TypeName"/>（CLR 全名：命名空间 + 类型名，<b>不带程序集</b>，与
+    /// <c>typeof(T).FullName</c> 逐字相同 —— 过滤路径就按它等值查表）解析成 CLR 类型。
+    /// </summary>
+    /// <remarks>
+    /// 先问 EF 登记过的实体类型集合（最准，只认真的实体），再退到已加载程序集逐个按全名找。
+    /// ★ 不能用 <c>Type.GetType(裸全名)</c>：它只探测调用方程序集与 CoreLib，对任何住在别的程序集里的
+    /// 实体恒为 null；而反过来存 AssemblyQualifiedName 会让按 FullName 的等值查询永不命中、整个实体不过滤。
+    /// 两种格式互斥，这里钉死裸全名。
+    /// </remarks>
+    private Type? ResolveEntityType(string? typeName)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return null;
+        }
+
+        var registered = _entityManager?.GetAllEntityTypes()
+            .FirstOrDefault(t => string.Equals(t.FullName, typeName, StringComparison.Ordinal));
+        if (registered != null)
+        {
+            return registered;
+        }
+
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            if (assembly.IsDynamic)
+            {
+                continue;
+            }
+
+            var type = assembly.GetType(typeName, throwOnError: false);
+            if (type != null)
+            {
+                return type;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>deny-on-fail 用的恒 false 表达式：与其它角色的条件 OR 合并后，这条规则不贡献任何可见行。</summary>
+    private static Expression<Func<TEntity, bool>> DenyAll<TEntity>() where TEntity : class
+    {
+        var param = Expression.Parameter(typeof(TEntity), "e");
+        return Expression.Lambda<Func<TEntity, bool>>(Expression.Constant(false), param);
+    }
 
     /// <summary>
     /// 获取用户的角色ID集合

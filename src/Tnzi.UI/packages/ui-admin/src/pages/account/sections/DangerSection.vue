@@ -58,6 +58,10 @@ async function exportData(): Promise<void> {
   exporting.value = true
   try {
     const data = await ctx.bridge.me.exportPersonalData()
+    // The bridge rejects a refused envelope, but a bare-value regression there
+    // would put the string `undefined` in a file and toast success - a GDPR
+    // export reported as delivered. Refuse to write a file around no payload.
+    if (data == null) throw new Error(t('danger.export.empty'))
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     downloadBlob(blob, `personal-data-${new Date().toISOString().slice(0, 10)}.json`)
     ctx.message.success(t('danger.export.success'))

@@ -34,9 +34,8 @@ namespace Tnzi.Identity.Services;
 /// <para>
 /// ★ <strong>为什么不复用账号锁定</strong>：邀请创建的账号确实会同时被置上锁定，
 /// 但那只是为了让既有的「活跃用户」口径自动把它排除，<strong>安全性一分钱都不押在它上面</strong>。
-/// <c>UserService.EnableAsync</c> 会执行 <c>SetLockoutEnabledAsync(user, false)</c>，
-/// 而 <c>UserManager.IsLockedOutAsync</c> 内含 <c>LockoutEnabled</c> 前置判断 ——
-/// 管理员对一个未接受邀请的账号点一下「启用」，<see cref="LockedAccountLoginGuard"/> 就恒放行了。
+/// 「启用」与「解锁」本来就是清掉 <c>LockoutEnd</c> ——
+/// 管理员对一个未接受邀请的账号点一下「启用」，<see cref="LockedAccountLoginGuard"/> 就如其所愿地放行了。
 /// 判定必须落在一个只有「办完那件事」能清掉的独立字段上。
 /// </para>
 /// <para>

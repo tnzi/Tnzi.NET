@@ -38,24 +38,6 @@ public class McpServerOptions
     public List<string> AllowedApiKeys { get; set; } = [];
 
     /// <summary>
-    /// 是否按租户分区速率限制键（默认开启）。
-    /// <para>
-    /// 当 <c>RateLimitPerTenant = true</c> 时，<c>X-Tenant-Id</c> 请求头的值会被追加到
-    /// 速率限制键（client key）中，使各租户拥有独立的速率限制配额。
-    /// </para>
-    /// <para>
-    /// <b>注意 - 此选项仅做限流分区，不做执行隔离：</b> Agent 调用运行在根 DI 容器创建的
-    /// scope 中，没有 <c>ICurrentTenant.Change</c>，因此 MCP Server 对 Agent 执行而言是
-    /// 单租户的。若需要真正的按租户执行隔离，须在应用层另行实现（此字段不提供该能力，
-    /// 故命名为 RateLimitPerTenant 而非 TenantIsolation 以免误导）。
-    /// </para>
-    /// </summary>
-    [RuntimeSetting(Label = "Rate-limit per Tenant", I18n = "admin.modules.system.settings.fields.mcpServerRateLimitPerTenant",
-        Type = SettingFieldType.Boolean, Subsection = "Rate Limiting",
-        Description = "Partition rate-limit buckets by the (untrusted) X-Tenant-Id header. This is rate-limit partitioning only, NOT execution or data isolation.")]
-    public bool RateLimitPerTenant { get; set; } = true;
-
-    /// <summary>
     /// 是否启用审计日志（默认开启）。
     /// <para>
     /// 仅控制经 <c>IUsageLogService</c>（operation type <c>McpToolCall</c>）写入的审计日志，

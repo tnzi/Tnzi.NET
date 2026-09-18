@@ -10,12 +10,18 @@ import { showFailToast, showLoadingToast, showSuccessToast, showToast } from 'va
 // Re-export Vant functions so consumers can call them directly
 export { showFailToast, showLoadingToast, showSuccessToast, showToast };
 
-function toVantOptions(options?: MessageOptions): Record<string, unknown> | undefined {
-  if (!options) return undefined;
-  return {
-    duration: options.duration,
-    closeOnClick: options.closable,
-  };
+/**
+ * Only the keys the caller actually set. Vant merges toast options with
+ * Object.assign, where a key holding `undefined` overrides the default just
+ * like a value would - and the Toast prop then falls back to 2000 ms. Spreading
+ * `{ duration: undefined }` over `duration: 0` is how a loading toast that
+ * promised to stay until closed vanished after two seconds.
+ */
+function toVantOptions(options?: MessageOptions): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (options?.duration !== undefined) out.duration = options.duration;
+  if (options?.closable !== undefined) out.closeOnClick = options.closable;
+  return out;
 }
 
 export function createVantMessageAdapter(): MessageAdapter {

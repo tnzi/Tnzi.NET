@@ -15,18 +15,34 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
 
     private readonly IRepository<LoginLog, Guid> _repository;
     private readonly ILoginLogSender _sender;
+    private readonly IUserTenantScopeProvider _scope;
 
     /// <summary>
-    /// 初始化一个<see cref="LoginLogService"/>类型的新实例
+    /// 初始化一个<see cref="LoginLogService"/>类型的新实例。
+    /// <c>scope</c>（当前请求能碰到哪些用户）必填：<c>LoginLog</c> 没有 <c>TenantId</c>，全局过滤器管不到它，
+    /// 管理端按用户读与列表 / 统计都要按用户表的租户裁剪，而「没裁剪」在返回值上看不出来。
     /// </summary>
     public LoginLogService(
         IRepository<LoginLog, Guid> repository,
         ILoginLogSender sender,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        IUserTenantScopeProvider scope)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _sender = Check.NotNull(sender);
+        _scope = Check.NotNull(scope);
+    }
+
+    /// <summary>
+    /// 把「当前租户范围」加到日志查询上：不裁剪时原样返回；裁剪时翻译成
+    /// <c>UserId IN (SELECT Id FROM User WHERE ...)</c>。没有归属的行（用户名不存在的失败尝试，
+    /// <c>UserId = null</c>）不属于任何租户，只有不裁剪的全局管理员看得到。
+    /// </summary>
+    private IQueryable<LoginLog> WhereInScope(IQueryable<LoginLog> query)
+    {
+        var ids = _scope.InScopeUserIds();
+        return ids == null ? query : query.Where(ll => ll.UserId != null && ids.Contains(ll.UserId.Value));
     }
 
     /// <summary>
@@ -54,7 +70,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// </summary>
     public async Task<IPagedList<LoginLog>> GetPagedLogsAsync(Guid userId, int pageIndex = DefaultPageIndex, int pageSize = DefaultPageSize)
     {
-        var query = _repository.Where(ll => ll.UserId == userId)
+        var query = WhereInScope(_repository.Where(ll => ll.UserId == userId))
             .OrderByDescending(ll => ll.CreationTime);
 
         return await query.CreateAsync(pageIndex, pageSize);
@@ -72,7 +88,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             count = DefaultRecentLogsCount;
         }
 
-        var query = _repository.AsQueryable();
+        var query = WhereInScope(_repository.AsQueryable());
 
         if (userId.HasValue)
         {
@@ -116,8 +132,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     {
         Check.NotNullOrWhiteSpace(ipAddress);
 
-        var query = _repository
-            .Where(ll => ll.IpAddress == ipAddress)
+        var query = WhereInScope(_repository.Where(ll => ll.IpAddress == ipAddress))
             .OrderByDescending(ll => ll.CreationTime);
 
         return await query.CreateAsync(pageIndex, pageSize);
@@ -131,8 +146,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
         // 验证日期范围
         Check.Condition(startDate <= endDate, "Start date must be less than or equal to end date");
 
-        var query = _repository
-            .Where(ll => ll.CreationTime >= startDate && ll.CreationTime <= endDate)
+        var query = WhereInScope(_repository.Where(ll => ll.CreationTime >= startDate && ll.CreationTime <= endDate))
             .OrderByDescending(ll => ll.CreationTime);
 
         return await query.CreateAsync(pageIndex, pageSize);
@@ -143,7 +157,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// </summary>
     public async Task<IPagedList<LoginLog>> QueryLogsAsync(LoginLogQueryDto query)
     {
-        var queryable = _repository.AsQueryable();
+        var queryable = WhereInScope(_repository.AsQueryable());
 
         if (query.UserId.HasValue)
         {
@@ -180,7 +194,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// </summary>
     public async Task<LoginStatisticsDto> GetLoginStatisticsAsync(Guid? userId = null, DateTime? startDate = null, DateTime? endDate = null)
     {
-        var query = _repository.AsQueryable();
+        var query = WhereInScope(_repository.AsQueryable());
 
         if (userId.HasValue)
         {
@@ -236,7 +250,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// <returns>登录日志DTO</returns>
     public async Task<Result<LoginLogDto>> GetByIdAsync(Guid id)
     {
-        var log = await _repository.FindAsync(id);
+        var log = await WhereInScope(_repository.Where(ll => ll.Id == id)).FirstOrDefaultAsync();
         if (log == null)
         {
             return Fail<LoginLogDto>("Login log not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -253,7 +267,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// <returns>分页的登录日志列表</returns>
     public async Task<Result<IPagedList<LoginLogDto>>> GetPagedListAsync(LoginLogQueryDto query)
     {
-        var queryable = _repository.AsQueryable();
+        var queryable = WhereInScope(_repository.AsQueryable());
 
         if (query.UserId.HasValue)
         {
@@ -305,6 +319,11 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// <returns>登录日志列表</returns>
     public async Task<Result<IEnumerable<LoginLogDto>>> GetUserLoginLogsAsync(Guid userId, DateTime? startDate = null, DateTime? endDate = null, bool? isSuccess = null)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail<IEnumerable<LoginLogDto>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var query = _repository.Where(ll => ll.UserId == userId);
 
         if (startDate.HasValue)
@@ -352,6 +371,11 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// <returns>用户登录统计信息</returns>
     public async Task<Result<UserLoginStatisticsDto>> GetUserStatisticsAsync(Guid userId, DateTime? startDate = null, DateTime? endDate = null)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail<UserLoginStatisticsDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var query = _repository.Where(ll => ll.UserId == userId);
 
         if (startDate.HasValue)
@@ -403,7 +427,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
         if ((endDate - startDate).TotalDays > 365)
             return Fail<IEnumerable<LoginTrendItem>>("Date range cannot exceed 365 days", 400, ErrorCodes.VALIDATION_ERROR);
 
-        var query = _repository.AsQueryable()
+        var query = WhereInScope(_repository.AsQueryable())
             .Where(ll => ll.CreationTime >= startDate && ll.CreationTime <= endDate);
 
         if (userId.HasValue)
@@ -450,7 +474,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             top = DefaultFailedAttemptsTop;
         }
 
-        var query = _repository.Where(ll => ll.Status == LoginStatus.Failed);
+        var query = WhereInScope(_repository.Where(ll => ll.Status == LoginStatus.Failed));
 
         if (startDate.HasValue)
         {

@@ -1,8 +1,10 @@
-
+using Tnzi.AI.Rag.Dtos;
 namespace Tnzi.AI.Tests.Rag;
 
 /// <summary>
-/// VectorTextSearchService 单元测试 - 验证向量搜索管线各阶段
+/// VectorTextSearchService 单元测试 - 验证向量搜索管线各阶段。
+/// 服务委托给真实的 <see cref="RagRetriever"/>（同一批 mock 协作者），所以这里断言的是 agent 路径
+/// 实际走的那条管线，包括图谱片段与父文档窗口 —— 此前 agent 路径自带一条没有这两段的精简管线。
 /// </summary>
 public class VectorTextSearchServiceTests
 {
@@ -16,18 +18,19 @@ public class VectorTextSearchServiceTests
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null,
         IEnumerable<ISearchPostProcessor>? postProcessors = null,
-        AIRagOptions? ragOptions = null)
+        AIRagOptions? ragOptions = null,
+        IGraphSearchService? graphSearchService = null,
+        IParentDocumentRetriever? parentDocumentRetriever = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
             .Returns(NullLoggerFactory.Instance);
 
-        return new VectorTextSearchService(
+        var retriever = new RagRetriever(
             serviceProviderMock.Object,
             _embeddingServiceMock.Object,
             _vectorStoreMock.Object,
             _rerankerMock.Object,
-            _docRepoMock.Object,
             _kbRepoMock.Object,
             postProcessors ?? Enumerable.Empty<ISearchPostProcessor>(),
             new StaticOptionsMonitor<AIRagOptions>(ragOptions ?? new AIRagOptions
@@ -36,7 +39,100 @@ public class VectorTextSearchServiceTests
                 DefaultEmbeddingModel = "text-embedding-3-small"
             }),
             queryRewriter,
-            relevanceGrader);
+            relevanceGrader,
+            graphSearchService,
+            parentDocumentRetriever);
+
+        return new VectorTextSearchService(serviceProviderMock.Object, retriever, _docRepoMock.Object);
+    }
+
+    // =====================================================================
+    // GraphRAG / Parent Document Retrieval 必须到达 agent 路径（ITextSearchService）
+    // =====================================================================
+
+    [Fact]
+    public async Task SearchAsync_WithGraphRagEnabled_IncludesGraphResults()
+    {
+        var kbId = Guid.NewGuid();
+        var docId = Guid.NewGuid();
+        var queryVector = new float[] { 0.1f };
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeBase> { new() { Id = kbId, Name = "kb", EmbeddingProvider = "openai" } }.BuildMock());
+        var vectorResults = new List<VectorSearchResult>
+        {
+            new() { Id = Guid.NewGuid(), Content = "chunk", DocumentId = docId, KnowledgeBaseId = kbId, Score = 0.9 }
+        };
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(vectorResults);
+        _rerankerMock
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, List<VectorSearchResult> r, int k, CancellationToken _) => r.Take(k).ToList());
+        _docRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeDocument> { new() { Id = docId, FileName = "doc.txt", KnowledgeBaseId = kbId } }.BuildMock());
+
+        var graph = new Mock<IGraphSearchService>();
+        graph
+            .Setup(g => g.SearchAsync("query", kbId, It.IsAny<GraphSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GraphSearchResult> { new("Acme", "Organization", [], 0.8, "Acme acquired Foo in 2024") });
+
+        var service = CreateService(graphSearchService: graph.Object);
+
+        var results = (await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbId] })).ToList();
+
+        results.Count.ShouldBe(2);
+        var graphResult = results.Single(r => r.Metadata?.GetValueOrDefault("searchType") as string == "graph");
+        graphResult.Text.ShouldBe("Acme acquired Foo in 2024");
+        graphResult.Metadata!["nodeName"].ShouldBe("Acme");
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithParentRetrievalEnabled_ExpandsToParentWindow()
+    {
+        var docId = Guid.NewGuid();
+        var queryVector = new float[] { 0.1f };
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+        var vectorResults = new List<VectorSearchResult>
+        {
+            new() { Id = Guid.NewGuid(), Content = "small chunk", DocumentId = docId, KnowledgeBaseId = Guid.NewGuid(), ChunkIndex = 3, Score = 0.9 }
+        };
+        _vectorStoreMock
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(vectorResults);
+        _rerankerMock
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(vectorResults);
+        _docRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeDocument> { new() { Id = docId, FileName = "doc.txt" } }.BuildMock());
+
+        var parent = new Mock<IParentDocumentRetriever>();
+        parent
+            .Setup(p => p.RetrieveAsync(It.IsAny<IReadOnlyList<RetrievalResult>>(), It.IsAny<ParentRetrievalOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ParentDocumentResult>
+            {
+                new() { DocumentId = docId, StartChunkIndex = 2, EndChunkIndex = 4, MergedContent = "wider window", Score = 0.9, DocumentName = "doc.txt" }
+            });
+
+        var options = new AIRagOptions
+        {
+            DefaultEmbeddingProvider = "openai",
+            DefaultEmbeddingModel = "m",
+            ParentDocumentRetrieval = new ParentDocumentRetrievalOptions { Enabled = true }
+        };
+        var service = CreateService(ragOptions: options, parentDocumentRetriever: parent.Object);
+
+        var results = (await service.SearchAsync("query")).ToList();
+
+        var only = results.ShouldHaveSingleItem();
+        only.Text.ShouldBe("wider window");
+        only.SourceName.ShouldBe("doc.txt");
+        only.Metadata!["searchType"].ShouldBe("parent_document");
+        only.Metadata["startChunkIndex"].ShouldBe(2);
     }
 
     [Fact]

@@ -94,9 +94,11 @@ public class UserRegisteredEventHandlerTests
             RequiringConfirmation(true),
             RegistrationServiceReturning(Result<string>.Success("confirm-token")));
 
-        await Assert.ThrowsAsync<TnziException>(() => handler.HandleAsync(AnEvent()));
+        var ex = await Assert.ThrowsAsync<TnziException>(() => handler.HandleAsync(AnEvent()));
 
         Assert.Empty(_sent);
+        // 同一条消息此前指向不存在的 Application:* 键，见 PasswordResetRequestedEventHandlerTests。
+        PasswordResetRequestedEventHandlerTests.AssertNamesTheRealSettingKeys(ex);
     }
 
     [Fact]

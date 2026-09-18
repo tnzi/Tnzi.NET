@@ -40,42 +40,9 @@ public class PermissionDefinition
     /// 权限组（对应Module）
     /// </summary>
     public PermissionGroupDefinition? Group { get; set; }
-    
-    /// <summary>
-    /// 是否从父权限继承
-    /// 如果为 true，用户拥有父权限时自动拥有此权限
-    /// </summary>
-    public bool IsInheritedFromParent { get; set; } = false;
-    
-    /// <summary>
-    /// 依赖的权限名称列表
-    /// 检查此权限时，必须同时拥有所有依赖权限
-    /// </summary>
-    public List<string> RequiredPermissions { get; set; } = new();
-    
-    /// <summary>
-    /// 添加依赖权限
-    /// </summary>
-    /// <param name="permissionName">权限名称</param>
-    /// <returns>当前权限定义（支持链式调用）</returns>
-    public PermissionDefinition RequiresPermission(string permissionName)
-    {
-        if (!string.IsNullOrEmpty(permissionName) && !RequiredPermissions.Contains(permissionName))
-        {
-            RequiredPermissions.Add(permissionName);
-        }
-        return this;
-    }
-    
-    /// <summary>
-    /// 设置从父权限继承
-    /// </summary>
-    /// <param name="inherit">是否继承</param>
-    /// <returns>当前权限定义（支持链式调用）</returns>
-    public PermissionDefinition InheritFromParent(bool inherit = true)
-    {
-        IsInheritedFromParent = inherit;
-        return this;
-    }
-}
 
+    // 权限模型是扁平的 deny-by-default 码集合：一次判定只问「用户的有效集里有没有这个码」。
+    // 早期这里还有 RequiresPermission(...)（依赖码）与 InheritFromParent()（持父码即持子码）两个链式 API，
+    // 但唯一兑现它们的 PermissionManager.IsGrantedAsync 从未接入任何运行时判定路径，
+    // 消费方按 XML 文档写下的约束一行都不生效。2026-09-12 起整组删除，别再加回一个没人执行的承诺。
+}

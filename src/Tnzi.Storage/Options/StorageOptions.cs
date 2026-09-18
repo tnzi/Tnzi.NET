@@ -91,20 +91,25 @@ public class StorageOptions
     public string[] AllowedExtensions { get; set; } = Array.Empty<string>();
 
     /// <summary>
-    /// 获取或设置 是否自动生成缩略图
+    /// 获取或设置 上传时是否自动生成缩略图（位图与 PDF 首页的总开关；PDF 那一侧还受 <see cref="PdfThumbnail"/> 约束）。
     /// </summary>
     [RuntimeSetting(Label = "Auto-generate Thumbnails", I18n = "admin.modules.system.settings.fields.storageAutoGenerateThumbnail",
         Type = SettingFieldType.Boolean, Subsection = "Files",
-        Description = "Generate a square thumbnail for image uploads.")]
+        Description = "Generate a thumbnail on upload: a square one for images, the whole first page for PDFs (PDF requires the Tnzi.Documents package).")]
     public bool AutoGenerateThumbnail { get; set; } = true;
 
     /// <summary>
-    /// 获取或设置 缩略图尺寸（宽度x高度）
+    /// 获取或设置 缩略图尺寸（宽度x高度）。只管**位图**的缩略图；PDF 首页缩略图的尺寸见 <see cref="PdfThumbnail"/>。
     /// </summary>
     public ThumbnailSizeOptions ThumbnailSize { get; set; } = new();
 
     /// <summary>
-    /// 获取或设置 图片压缩质量（1-100）
+    /// 获取或设置 PDF 首页缩略图配置（需加载可选包 <c>Tnzi.Documents</c>）。
+    /// </summary>
+    public PdfThumbnailOptions PdfThumbnail { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 图片压缩质量（1-100）。位图缩略图与 PDF 首页缩略图的 JPEG 编码都用它。
     /// </summary>
     [RuntimeSetting(Label = "Image Compression Quality", I18n = "admin.modules.system.settings.fields.imageCompressionQuality",
         Type = SettingFieldType.Int, Min = 1, Max = 100)]
@@ -177,6 +182,71 @@ public class ArchiveOptions
     /// 获取或设置 一次解压最多解出的总字节数，默认 1 GiB。
     /// </summary>
     public long MaxTotalExtractedBytes { get; set; } = 1024L * 1024 * 1024;
+}
+
+/// <summary>
+/// PDF 首页缩略图。配置路径：Storage:PdfThumbnail
+/// </summary>
+/// <remarks>
+/// <para>
+/// 只在加载了可选包 <c>Tnzi.Documents</c>（<c>IPdfRasterizer</c>，PDFium）且它的原生库在本机装得上时生效；
+/// 否则 PDF 与此前一样没有缩略图，本节的每一个值都不起作用。<see cref="StorageOptions.AutoGenerateThumbnail"/>
+/// 仍是总开关：它关着时位图与 PDF 都不在上传时出图。
+/// </para>
+/// <para>
+/// ★ <b>形状与位图缩略图刻意不同</b>：位图出的是正方形（中心裁剪，尺寸见 <see cref="ThumbnailSizeOptions"/>），
+/// PDF 出的是<b>整页等比缩进一个盒子</b>。一张横向的支票，银行 / 分行 / 账号那一行印在下边缘、两侧还有
+/// 签名与金额栏 —— 裁成正方形丢掉的正是看这张图的人要找的东西；一封信丢掉的是信头。
+/// 盒子只缩不放：页面小于盒子时按渲染出来的原尺寸存。
+/// </para>
+/// <para>
+/// ★ <see cref="Dpi"/> 与盒子要一起改：页面先按 <see cref="Dpi"/> 渲染再缩进盒子，US Letter 在 100 dpi 下
+/// 是 850×1100，比默认盒子（600×800）大一截，缩小时有真实的像素可以平均、小字才不会锯齿。把盒子调大到超过
+/// 渲染尺寸而不调 dpi，得到的只是原样的渲染图，不会被放大。
+/// </para>
+/// </remarks>
+public class PdfThumbnailOptions
+{
+    /// <summary>
+    /// 获取或设置 是否为 PDF 出首页缩略图，默认 true。
+    /// </summary>
+    /// <remarks>
+    /// 单独于总开关，是因为「位图要缩略图、PDF 不要」是真实的部署形态：光栅化在整个进程里是串行的
+    /// （PDFium 不可重入），每份 PDF 上传多花约 0.1 到 0.3 秒 CPU；一个为签署或传真而加载了
+    /// <c>Tnzi.Documents</c>、却从不把 PDF 当图片展示的宿主，可以在这里关掉而不影响位图。
+    /// </remarks>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 获取或设置 缩略图盒子的最大宽度（像素），默认 600。
+    /// </summary>
+    /// <remarks>
+    /// 600 = 300 CSS 像素宽的卡片在 2 倍屏上要的像素。位图缩略图的 200 对一张支票不够用：
+    /// 缩到 200 宽之后账号那一行只剩几个像素高。
+    /// </remarks>
+    public int MaxWidth { get; set; } = 600;
+
+    /// <summary>
+    /// 获取或设置 缩略图盒子的最大高度（像素），默认 800。
+    /// </summary>
+    /// <remarks>
+    /// 3:4 的盒子：竖版信纸（Letter 8.5×11、A4）缩进去两边都到 600 宽附近，横版支票在 600 宽处约 250 高。
+    /// </remarks>
+    public int MaxHeight { get; set; } = 800;
+
+    /// <summary>
+    /// 获取或设置 首页的渲染分辨率（dpi，1 到 1200），默认 100。
+    /// </summary>
+    public int Dpi { get; set; } = 100;
+
+    /// <summary>
+    /// 获取或设置 超过这个字节数的 PDF 不出缩略图，默认 50 MiB；0 表示不限。
+    /// </summary>
+    /// <remarks>
+    /// 光栅化要把整份文件读进内存（渲染引擎只收字节数组），一份扫描成册的 PDF 可以有几百 MB，
+    /// 而缩略图只要它的第一页。这是「不画」不是「拒收」：文件照常存好、照常可下载，只是没有图。
+    /// </remarks>
+    public long MaxSourceBytes { get; set; } = 50L * 1024 * 1024;
 }
 
 /// <summary>
@@ -470,6 +540,17 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
         if (options.ThumbnailSize.Width <= 0 || options.ThumbnailSize.Height <= 0)
             errors.Add("ThumbnailSize width and height must be greater than 0.");
+
+        if (options.PdfThumbnail.MaxWidth <= 0 || options.PdfThumbnail.MaxHeight <= 0)
+            errors.Add("PdfThumbnail.MaxWidth and MaxHeight must be greater than 0.");
+
+        // 与 IPdfRasterizer 自己的 Dpi 边界一致：越界在那边是 ArgumentOutOfRangeException，
+        // 而缩略图把它当「画不出来」吞掉 —— 配错一个数字的症状就会是每份 PDF 都静默没有图。
+        if (options.PdfThumbnail.Dpi is < 1 or > 1200)
+            errors.Add("PdfThumbnail.Dpi must be between 1 and 1200.");
+
+        if (options.PdfThumbnail.MaxSourceBytes < 0)
+            errors.Add("PdfThumbnail.MaxSourceBytes cannot be negative (use 0 for no limit).");
 
         if (options.SignedUrlTtlSeconds < 30 || options.SignedUrlTtlSeconds > 86400)
             errors.Add("SignedUrlTtlSeconds must be between 30 and 86400.");

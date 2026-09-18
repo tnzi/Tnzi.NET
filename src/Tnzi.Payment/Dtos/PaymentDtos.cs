@@ -82,6 +82,25 @@ public class CreatePaymentDto
     /// 扩展数据（JSON格式）
     /// </summary>
     public string? ExtraData { get; set; }
+
+    /// <summary>
+    /// 这张单是不是由服务端业务模块（而不是用户面端点）发起的。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>BusinessType.Subscription</c> 的支付只能经系统通道建：它的 <see cref="ExtraData"/> 携带计费元数据，
+    /// 支付完成事件按它推进订阅状态机。用户面 <c>POST /payments</c> 若也能建这种单，
+    /// 任何人拿自己的 0.5 元支付单加一段自填的元数据就能激活 / 续期任意价位的订阅，
+    /// 或拿别人的订阅号建一张不付的单，等它过期把别人的订阅打成 PastDue。
+    /// </para>
+    /// <para>
+    /// <c>[JsonIgnore]</c> + <c>[BindNever]</c>：请求体与表单 / 查询串都绑不上它，只有代码能置 true。
+    /// 默认 false，于是任何不知道这一项的调用方都落在「外部」那一侧 —— 失败方向关闭。
+    /// </para>
+    /// </remarks>
+    [JsonIgnore]
+    [BindNever]
+    public bool IsSystemInitiated { get; set; }
 }
 
 /// <summary>

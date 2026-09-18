@@ -41,6 +41,7 @@ import { editAction, deleteAction, type RowAction } from '../../headless/row-act
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { hasFlag, type Flags } from '@tnzi/core/utils'
+import { PendingUserActions } from '@tnzi/core/services/identity'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import TFormSchemaRenderer from '../_shared/form-schema'
@@ -162,10 +163,7 @@ const handleRevokeInvitation = (id: string) =>
  * password and no second factor but already carries its roles.
  */
 const isPending = (row: UserListItem) =>
-  hasFlag(row.pendingActions, PENDING_INVITATION, { None: 0, InvitationPending: PENDING_INVITATION })
-
-/** `PendingUserActions.InvitationPending` (bit 0). */
-const PENDING_INVITATION = 1 << 0
+  hasFlag(row.pendingActions, PendingUserActions.InvitationPending, PendingUserActions)
 
 /**
  * Row operations.
@@ -192,8 +190,8 @@ const rowActions: RowAction<UserListItem>[] = [
   { key: 'manageRoles', label: 'actions.manageRoles', show: () => crud.canUpdate, onClick: (row) => openUser(row.id, 'roles') },
   { key: 'directGrants', label: 'actions.managePermissions', show: () => canViewGrants.value, onClick: (row) => openUser(row.id, 'grants') },
   // ★ 邀请中的账号只给「重发 / 撤销」，不给启用·停用·锁定·解锁。
-  //   后端对未接受邀请的账号拒绝 enable（否则那一步会连同 LockoutEnabled 一起清掉，
-  //   把一个没有密码、没有二次验证、角色却已预设好的账号放进系统）；这里不显示
+  //   后端对未接受邀请的账号拒绝 enable（启用就是清掉 LockoutEnd，那一步会把一个
+  //   没有密码、没有二次验证、角色却已预设好的账号放进系统）；这里不显示
   //   那几个按钮，是为了不让管理员点一个注定被拒的操作。
   { key: 'resendInvitation', label: 'actions.resendInvitation', show: (row) => crud.canUpdate && isPending(row), confirm: 'actions.confirmResendInvitation', onClick: (row) => void handleResendInvitation(row.id) },
   { key: 'revokeInvitation', label: 'actions.revokeInvitation', show: (row) => crud.canDelete && isPending(row), confirm: 'actions.confirmRevokeInvitation', onClick: (row) => void handleRevokeInvitation(row.id) },

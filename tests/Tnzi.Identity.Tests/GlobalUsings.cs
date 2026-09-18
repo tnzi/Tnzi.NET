@@ -30,6 +30,8 @@ global using Tnzi.Identity.Extensions;
 global using Tnzi.Identity.Events;
 global using Tnzi.Identity.Options;
 global using Tnzi.Identity.Services;
+global using Tnzi.AspNetCore.Dtos;
+global using Tnzi.AspNetCore.Security;
 global using IdentityConstants = Tnzi.Identity.Metadata.IdentityConstants;
 global using Tnzi.Mapster;
 global using Tnzi.Results;

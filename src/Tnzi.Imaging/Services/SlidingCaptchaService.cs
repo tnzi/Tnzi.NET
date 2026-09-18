@@ -13,6 +13,8 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
 
     private const string CacheKeyPrefix = "SlidingCaptcha:";
     private const string FailureCacheKeyPrefix = "captcha:failures:";
+    private const string PassTokenCacheKeyPrefix = "SlidingCaptcha:pass:";
+    private const int PassTokenExpirationMinutes = 5;
 
     /// <summary>
     /// 失败计数的保留窗口（分钟）：超过这个时间没有新的失败即视为重新开始
@@ -29,10 +31,10 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     }
 
     /// <inheritdoc />
-    public async Task<Result<SlidingCaptchaDto>> GenerateAsync(SlidingCaptchaOptions? options = null, CancellationToken cancellationToken = default)
+    public async Task<Result<SlidingCaptchaDto>> GenerateAsync(SlidingCaptchaOptions? options = null, string? purpose = null, CancellationToken cancellationToken = default)
     {
         var opts = options ?? _imagingOptions.Value.SlidingCaptcha;
-        return await GeneratePuzzleAsync(opts, addNoise: false, cancellationToken: cancellationToken);
+        return await GeneratePuzzleAsync(opts, addNoise: false, purpose: purpose, cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -81,15 +83,51 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             }
         }
 
+        // 通过才签通行令牌：受保护端点核销它，而不是相信浏览器说的「我滑过了」。
+        string? passToken = null;
+        if (isSuccess)
+        {
+            passToken = Guid.NewGuid().ToString("N");
+            await _cache.SetAsync(
+                GetPassTokenCacheKey(passToken),
+                new SlidingCaptchaPassData { Purpose = storedData.Purpose },
+                TimeSpan.FromMinutes(PassTokenExpirationMinutes),
+                cancellationToken);
+        }
+
         return Ok(new SlidingCaptchaVerifyResult
         {
             Success = isSuccess,
-            Message = isSuccess ? "Verification passed" : "Verification failed, please try again"
+            Message = isSuccess ? "Verification passed" : "Verification failed, please try again",
+            PassToken = passToken
         });
     }
 
     /// <inheritdoc />
-    public async Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> RedeemPassTokenAsync(string passToken, string purpose, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(purpose);
+        if (string.IsNullOrWhiteSpace(passToken) || _cache == null)
+        {
+            return false;
+        }
+
+        var key = GetPassTokenCacheKey(passToken);
+        var pass = await _cache.GetAsync<SlidingCaptchaPassData>(key, cancellationToken);
+        if (pass == null)
+        {
+            return false;
+        }
+
+        // 先删再判（一次性）：用途不符的那一次也把令牌烧掉，拿一枚令牌逐个用途试是不允许的。
+        await _cache.RemoveAsync(key, cancellationToken);
+
+        // 生成时没绑用途的通行令牌任何用途都收；绑了就必须一致。
+        return pass.Purpose == null || string.Equals(pass.Purpose, purpose, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(string? purpose = null, CancellationToken cancellationToken = default)
     {
         var baseOptions = _imagingOptions.Value.SlidingCaptcha;
         var clientId = ResolveClientKey();
@@ -114,7 +152,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             ExpirationMinutes = baseOptions.ExpirationMinutes
         };
 
-        return await GeneratePuzzleAsync(adaptiveOptions, addNoise, clientId, cancellationToken);
+        return await GeneratePuzzleAsync(adaptiveOptions, addNoise, clientId, purpose, cancellationToken);
     }
 
     /// <summary>
@@ -171,6 +209,7 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         SlidingCaptchaOptions options,
         bool addNoise,
         string? clientId = null,
+        string? purpose = null,
         CancellationToken cancellationToken = default)
     {
         var width = options.Width;
@@ -207,7 +246,8 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             {
                 CorrectX = correctX,
                 Tolerance = options.Tolerance,
-                ClientId = clientId
+                ClientId = clientId,
+                Purpose = purpose
             };
             var cacheKey = GetCacheKey(token);
             await _cache.SetAsync(cacheKey, storedData, TimeSpan.FromMinutes(options.ExpirationMinutes), cancellationToken);
@@ -488,6 +528,8 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     }
 
     private static string GetCacheKey(string token) => $"{CacheKeyPrefix}{token}";
+
+    private static string GetPassTokenCacheKey(string passToken) => $"{PassTokenCacheKeyPrefix}{passToken}";
 }
 
 /// <summary>
@@ -509,4 +551,18 @@ internal class SlidingCaptchaStoredData
     /// 客户端标识（用于自适应难度）
     /// </summary>
     public string? ClientId { get; set; }
+
+    /// <summary>
+    /// 生成时绑定的用途；验证通过签出的通行令牌只能用于它。null 表示不绑。
+    /// </summary>
+    public string? Purpose { get; set; }
+}
+
+/// <summary>
+/// 通行令牌在缓存里的形状。
+/// </summary>
+internal class SlidingCaptchaPassData
+{
+    /// <summary>绑定的用途；null 表示不绑。</summary>
+    public string? Purpose { get; set; }
 }

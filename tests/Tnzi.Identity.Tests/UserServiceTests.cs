@@ -45,6 +45,9 @@ public partial class UserServiceTests
         var loggerFactory = new Mock<ILoggerFactory>();
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
+        // ApplicationService.EventBus 是从 ServiceProvider 懒解析的，不走构造参数；
+        // 不接上这一条，「失败时不得发事件」的断言就是空的。
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IEventBus))).Returns(_eventBusMock.Object);
 
         _userService = new UserService(
             _userManagerMock.Object,
@@ -211,6 +214,43 @@ public partial class UserServiceTests
         Assert.True(user.EmailConfirmed);
     }
 
+    /// <summary>
+    /// ★ 详情写入的结果此前被整个丢掉：<c>await _userDetailService.CreateOrUpdateAsync(...)</c> 不看返回值。
+    /// 于是详情那一侧的任何拒绝（头像文件归属探针的 403 / 存储模块缺席的 501）都变成「资料已更新」的 200，
+    /// 而头像其实没写进去 —— 与「校验通过」在接口上完全一致。自助 <c>PUT users/profile</c> 走的就是这条路。
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_WhenTheDetailWriteIsRefused_PropagatesTheRefusal()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "testuser", Email = "same@example.com" };
+        var input = new UpdateUserDto { Nickname = "n", AvatarId = Guid.NewGuid() };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync(new List<string>());
+        var detailService = new Mock<IUserDetailService>();
+        detailService.Setup(d => d.CreateOrUpdateAsync(userId, It.IsAny<CreateUserDetailDto>()))
+            .ReturnsAsync(Result.Failure<UserDetailDto>("That file cannot be used as an avatar.", 403));
+        var service = new UserService(
+            _userManagerMock.Object,
+            _roleManagerMock.Object,
+            _userRepositoryMock.Object,
+            _serviceProviderMock.Object,
+            _organizationServiceMock.Object,
+            _eventBusMock.Object,
+            _currentUserMock.Object,
+            _cacheMock.Object,
+            userDetailService: detailService.Object,
+            sessionRevocation: _sessionRevocationMock.Object);
+
+        var result = await service.UpdateAsync(userId, input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal("That file cannot be used as an avatar.", result.Message);
+    }
+
     [Fact]
     public async Task UpdateAsync_WithUserNotFound_ReturnsFailResult()
     {
@@ -296,30 +336,63 @@ public partial class UserServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
-        _userManagerMock.Setup(x => x.SetLockoutEnabledAsync(user, false))
+        // ★ 顺序是契约：SetLockoutEndDateAsync 在 LockoutEnabled 为 false 时静默失败，
+        //   所以「启用」必须先武装（true）再清 LockoutEnd。真 UserManager 上的行为
+        //   由 IntegrationTests 的 UserLockoutIntegrationTests 覆盖；这里只钉调用序列与结果检查。
+        var sequence = new MockSequence();
+        _userManagerMock.InSequence(sequence).Setup(x => x.SetLockoutEnabledAsync(user, true))
             .ReturnsAsync(IdentityResult.Success);
-
-        _userManagerMock.Setup(x => x.SetLockoutEndDateAsync(user, null))
+        _userManagerMock.InSequence(sequence).Setup(x => x.SetLockoutEndDateAsync(user, null))
+            .ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.InSequence(sequence).Setup(x => x.ResetAccessFailedCountAsync(user))
             .ReturnsAsync(IdentityResult.Success);
 
         _eventBusMock.Setup(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.UserEnabledEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
-        await _userService.EnableAsync(userId);
+        var result = await _userService.EnableAsync(userId);
 
         // Assert
-        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, false), Times.Once);
+        Assert.True(result.Succeeded, result.Message);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, false), Times.Never);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, true), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, null), Times.Once);
+        _userManagerMock.Verify(x => x.ResetAccessFailedCountAsync(user), Times.Once);
+    }
+
+    /// <summary>
+    /// Identity 的 Set*Async 失败是静默的 IdentityResult；「启用」不能在它失败时照样答成功。
+    /// </summary>
+    [Fact]
+    public async Task EnableAsync_WhenClearingLockoutFails_ReturnsFailure_AndPublishesNothing()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "testuser" };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
+            .ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.SetLockoutEnabledAsync(user, true))
+            .ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.SetLockoutEndDateAsync(user, null))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityError { Code = "UserLockoutNotEnabled", Description = "Lockout is not enabled for this user." }));
+
+        var result = await _userService.EnableAsync(userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(500, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_UPDATE_FAILED, result.ErrorCode);
+        _eventBusMock.Verify(
+            x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.UserEnabledEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     /// <summary>
     /// ★★★ 「启用」不能把一个还没接受邀请的账号放出来。
     /// </summary>
     /// <remarks>
-    /// 这道守卫看着多余，实则是本方法自身造成的：下面那句
-    /// <c>SetLockoutEnabledAsync(user, false)</c> 会让 <c>IsLockedOutAsync</c> 恒为 false，
-    /// 于是 <c>LockedAccountLoginGuard</c> 也不再拦任何东西 —— 一个没有密码、
+    /// 这道守卫看着多余，实则是本方法自身造成的：启用就是清掉 <c>LockoutEnd</c>，
+    /// 于是 <c>LockedAccountLoginGuard</c> 如其所愿地放行 —— 一个没有密码、
     /// 没有二次验证、角色却已预设好的账号就对全部登录路径敞开了，
     /// 而验证码登录只需要收到一封邮件。让人进来的唯一途径必须是接受邀请本身。
     /// </remarks>
@@ -370,9 +443,10 @@ public partial class UserServiceTests
             .Returns(Task.CompletedTask);
 
         // Act
-        await _userService.DisableAsync(userId, "Test reason");
+        var result = await _userService.DisableAsync(userId, "Test reason");
 
         // Assert
+        Assert.True(result.Succeeded, result.Message);
         _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, true), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, It.IsAny<DateTimeOffset?>()), Times.Once);
     }
@@ -388,13 +462,17 @@ public partial class UserServiceTests
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
 
+        _userManagerMock.Setup(x => x.SetLockoutEnabledAsync(user, true))
+            .ReturnsAsync(IdentityResult.Success);
         _userManagerMock.Setup(x => x.SetLockoutEndDateAsync(user, lockoutEnd))
             .ReturnsAsync(IdentityResult.Success);
 
         // Act
-        await _userService.LockAsync(userId, lockoutEnd, "Test reason");
+        var result = await _userService.LockAsync(userId, lockoutEnd, "Test reason");
 
         // Assert
+        Assert.True(result.Succeeded, result.Message);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, true), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, lockoutEnd), Times.Once);
     }
 
@@ -407,15 +485,25 @@ public partial class UserServiceTests
 
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
             .ReturnsAsync(user);
-
-        _userManagerMock.Setup(x => x.SetLockoutEndDateAsync(user, null))
-            .ReturnsAsync(IdentityResult.Success);
+        SetupLockoutClearing(user);
 
         // Act
-        await _userService.UnlockAsync(userId);
+        var result = await _userService.UnlockAsync(userId);
 
         // Assert
+        Assert.True(result.Succeeded, result.Message);
+        // 解锁与启用共用同一个原语：先武装再清 LockoutEnd（否则后者静默失败）。
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, true), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, null), Times.Once);
+        _userManagerMock.Verify(x => x.ResetAccessFailedCountAsync(user), Times.Once);
+    }
+
+    /// <summary>三个 Set*Async 都返回成功的最小装配。</summary>
+    private void SetupLockoutClearing(User user)
+    {
+        _userManagerMock.Setup(x => x.SetLockoutEnabledAsync(user, true)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.SetLockoutEndDateAsync(user, null)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.ResetAccessFailedCountAsync(user)).ReturnsAsync(IdentityResult.Success);
     }
 
     [Fact]
@@ -883,6 +971,7 @@ public partial class UserServiceTests
         var userId = Guid.NewGuid();
         var user = new User { Id = userId, UserName = "u" };
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        SetupLockoutWriteSuccess(user);
 
         var result = await _userService.DisableAsync(userId);
 
@@ -898,6 +987,7 @@ public partial class UserServiceTests
         var userId = Guid.NewGuid();
         var user = new User { Id = userId, UserName = "u" };
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        SetupLockoutWriteSuccess(user);
 
         var result = await _userService.LockAsync(userId);
 
@@ -914,6 +1004,7 @@ public partial class UserServiceTests
         var userId = Guid.NewGuid();
         var user = new User { Id = userId, UserName = "u" };
         _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        SetupLockoutClearing(user);
 
         await _userService.UnlockAsync(userId);
 

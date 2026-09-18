@@ -11,6 +11,7 @@
  * empty placeholders that the modules don't yet invoke).
  */
 import { inject, provide, reactive, ref, type InjectionKey, type Ref } from 'vue'
+import type { CaptchaClientConfigDto } from '@tnzi/core/services/captcha'
 
 export type LoginModule =
   | 'pwd-login'
@@ -117,28 +118,49 @@ export interface ResendTwoFactorResult {
 }
 
 /**
- * A generated image captcha the login page renders (id + base64 PNG).
+ * A captcha challenge the login page renders.
  *
- * The two captcha flows differ:
+ * `provider` says what to render: for `image` (the built-in picture) the
+ * `captchaId` + `imageBase64` pair is present; for every other provider
+ * (Turnstile, hCaptcha, reCAPTCHA, Altcha, ...) only `provider` is set and the
+ * page renders that provider's widget from `LoginFeatures.captcha`.
+ *
+ * The flows differ in WHEN the challenge appears:
  *   - **login** is adaptive - the backend only demands a captcha after repeated
- *     failures (`Identity:Captcha:CaptchaFailThreshold`) and returns a fresh one
- *     in its `IDENTITY_CAPTCHA_REQUIRED` error, which `PwdLogin` renders inline.
- *   - **register** shows one up-front (fetched via `callbacks.getCaptcha`) and
- *     gates the send-code step.
+ *     failures (`Identity:Captcha:CaptchaFailThreshold`) and answers
+ *     `IDENTITY_CAPTCHA_REQUIRED` with this shape in `errorDetails`, which
+ *     `PwdLogin` renders inline.
+ *   - **register / code-login / reset-pwd** show the captcha up-front and gate
+ *     the send-code step (those endpoints spend a real SMS / email per call).
  */
 export interface LoginCaptchaData {
-  captchaId: string
-  imageBase64: string
-  expirationSeconds?: number
+  provider: string
+  captchaId?: string | null
+  /** Base64 PNG, no data-uri prefix (`image` provider only). */
+  imageBase64?: string | null
+  expirationSeconds?: number | null
 }
 
+/**
+ * No `remember` flag here on purpose. The login pages used to carry a
+ * "Remember me" checkbox whose value nothing ever read: the default callbacks
+ * dropped it and `AuthStateManager` persists the token pair the same way
+ * regardless, so unticking it changed nothing while looking like a choice.
+ * Session-scoped persistence is a core feature (a session storage adapter
+ * for the token pair); until it exists the payload does not pretend.
+ */
 export interface PwdLoginPayload {
   userName: string
   password: string
-  remember: boolean
-  /** Image-captcha id - set once the adaptive login captcha is revealed. */
+  /**
+   * Captcha token from the unified widget (any provider) - set once the adaptive
+   * login captcha is revealed and solved. The `image` provider's token is
+   * `{captchaId}:{code}`; `TCaptcha` composes it.
+   */
+  captchaToken?: string
+  /** @deprecated Legacy image-captcha id; prefer `captchaToken`. */
   captchaId?: string
-  /** Image-captcha code the user typed. */
+  /** @deprecated Legacy image-captcha code; prefer `captchaToken`. */
   captchaCode?: string
 }
 
@@ -170,12 +192,15 @@ export interface SendCodePayload {
   /** Which flow the code is for. Drives endpoint selection. */
   purpose: 'code-login' | 'register' | 'reset-pwd'
   /**
-   * Image-captcha id. Sent for `register` and `code-login` when the matching
-   * backend captcha switch is on - those two are the endpoints that spend a
-   * real SMS / email on every call.
+   * Captcha token from the unified widget (any provider). Sent when the matching
+   * backend switch is on (`captchaOnLogin` for code-login, `captchaOnRegister`
+   * for register, `captchaOnPasswordRecovery` for reset-pwd) - those endpoints
+   * spend a real SMS / email on every call.
    */
+  captchaToken?: string
+  /** @deprecated Legacy image-captcha id; prefer `captchaToken`. */
   captchaId?: string
-  /** Image-captcha code the user typed. */
+  /** @deprecated Legacy image-captcha code; prefer `captchaToken`. */
   captchaCode?: string
 }
 
@@ -218,8 +243,9 @@ export interface LoginCallbackHelpers {
   /** Dismiss the pending-action state (e.g. after it is discharged). */
   clearPendingAction: () => void
   /**
-   * Reveal the adaptive login captcha with the fresh picture the backend
-   * returned in its `IDENTITY_CAPTCHA_REQUIRED` response. `PwdLogin` watches
+   * Reveal the adaptive login captcha with the challenge the backend returned
+   * in its `IDENTITY_CAPTCHA_REQUIRED` response (a fresh picture for the
+   * `image` provider, just the provider name otherwise). `PwdLogin` watches
    * `pendingCaptcha` and shows the captcha field seeded with it.
    */
   setCaptchaRequired: (captcha: LoginCaptchaData) => void
@@ -294,12 +320,14 @@ export interface LoginCallbacks {
     method?: TwoFactorMethodName
   }) => Promise<ResendTwoFactorResult | void>
   /**
-   * Fetch a fresh image captcha for the given flow. Wired to
-   * `GET /auth/captcha/{purpose}/json`. The captcha field uses it to (re)load
-   * the picture; when omitted, the field can still render a captcha the backend
-   * pushed inline (login's adaptive flow) but the refresh button is hidden.
+   * Fetch a fresh built-in image captcha for the given purpose. Wired to
+   * `GET /auth/captcha/{purpose}/json`. Only the `image` provider uses it: the
+   * field (re)loads the picture through it; when omitted, the field can still
+   * render a captcha the backend pushed inline (login's adaptive flow) but the
+   * refresh button is hidden. Script providers (Turnstile, hCaptcha, ...) never
+   * call it.
    */
-  getCaptcha?: (purpose: 'login' | 'register') => Promise<LoginCaptchaData>
+  getCaptcha?: (purpose: string) => Promise<LoginCaptchaData>
 }
 
 /**
@@ -356,13 +384,22 @@ export interface LoginFeatures {
   /** Channels available for code-based flows (code-login / register / recovery). */
   codeChannels: { sms: boolean; email: boolean }
   /**
-   * Image captcha is enabled on the password-login flow. When on, the backend
-   * demands a captcha adaptively (after repeated failures); `PwdLogin` only
-   * reveals the field once the backend asks (`IDENTITY_CAPTCHA_REQUIRED`).
+   * Captcha is enabled on the password-login flow. When on, the backend demands
+   * a captcha adaptively (after repeated failures); `PwdLogin` only reveals the
+   * field once the backend asks (`IDENTITY_CAPTCHA_REQUIRED`). The code-login
+   * send-code step is gated unconditionally.
    */
   captchaOnLogin: boolean
-  /** Image captcha is enabled on the register flow - shown up-front (gates send-code). */
+  /** Captcha is enabled on the register flow - shown up-front (gates send-code). */
   captchaOnRegister: boolean
+  /** Captcha is enabled on the password-recovery flow - shown up-front (gates send-code). */
+  captchaOnPasswordRecovery: boolean
+  /**
+   * Which provider to render and with what (`GET /auth/config` → `captcha`).
+   * `null` when the backend predates the provider layer; the field then falls
+   * back to the built-in image captcha through `callbacks.getCaptcha`.
+   */
+  captcha: CaptchaClientConfigDto | null
 }
 
 /**
@@ -381,6 +418,8 @@ export const DEFAULT_LOGIN_FEATURES: LoginFeatures = Object.freeze({
   // off on config-failure avoids showing a captcha field the backend ignores.
   captchaOnLogin: false,
   captchaOnRegister: false,
+  captchaOnPasswordRecovery: false,
+  captcha: null,
 }) as LoginFeatures
 
 /**
@@ -397,6 +436,8 @@ export interface PartialLoginFeatures {
   codeChannels?: Partial<LoginFeatures['codeChannels']>
   captchaOnLogin?: boolean
   captchaOnRegister?: boolean
+  captchaOnPasswordRecovery?: boolean
+  captcha?: CaptchaClientConfigDto | null
 }
 
 /**
@@ -490,6 +531,18 @@ export interface LoginContext {
    * a single implementation.
    */
   helpers: LoginCallbackHelpers
+  /**
+   * Resolves an API-relative path against the API base (the `HttpClient`'s
+   * `resolveUrl`). The modules hand it to `<TCaptcha>` for providers whose
+   * widget fetches its own challenge (Altcha): `features.captcha.challengeUrl`
+   * is relative to the API root, and a widget left to resolve it against the
+   * page fetches `/admin/captcha/...`, receives the SPA's `index.html`, and
+   * every user is locked out from the moment the captcha is demanded. The
+   * shell fills this from the app's injected client; a hand-mounted shell
+   * passes it explicitly. Absent → `<TCaptcha>` reports the missing client
+   * instead of guessing.
+   */
+  resolveUrl?: (url: string) => string
 }
 
 export const LOGIN_CONTEXT_KEY: InjectionKey<LoginContext> = Symbol('tnzi-login-context')

@@ -60,6 +60,12 @@ public partial class CheckService : ApplicationService, ICheckService
         check.PrintOffsetYMm = settings.OffsetYMm;
     }
 
+    /// <summary>打印队列的付款方式判据。<c>PaymentMethods.Check</c> 的小写形式 ——
+    /// EF 要在 SQL 里比较，拿不到 <c>StringComparison</c>，只能比小写；写字面量的话，
+    /// 常量改名后这个队列会静默变空，而开票那一侧（<c>ResolveBatchAsync</c> 用常量）照常工作。
+    /// 与 <c>EftService.BankTransferMethodLower</c> 同一理由。</summary>
+    private static readonly string CheckMethodLower = PaymentMethods.Check.ToLowerInvariant();
+
     public async Task<Result<List<CheckQueueItemDto>>> GetQueueAsync(Guid? bankAccountId = null, CancellationToken cancellationToken = default)
     {
         // 银行档案（可选过滤）：建立 付款科目 → 档案 的映射
@@ -76,7 +82,7 @@ public partial class CheckService : ApplicationService, ICheckService
         var payments = await _paymentRepository.AsNoTracking()
             .Where(p => p.Status == FinanceDocumentStatus.Posted
                 && p.Direction == PaymentDirection.Outbound
-                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == "check"
+                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == CheckMethodLower
                 && p.DepositToAccountId != null && ledgerIds.Contains(p.DepositToAccountId.Value))
             .OrderBy(p => p.Number)
             .ToListAsync(cancellationToken);
@@ -216,7 +222,8 @@ public partial class CheckService : ApplicationService, ICheckService
                     await _checkRepository.InsertAsync(check, ct);
                     created.Add(check);
 
-                    // 队列口径已限定 PaymentMethod == "check"，故无条件回写支票号到付款单参考号
+                    // ResolveBatchAsync 已限定 PaymentMethod == Check（队列过滤对请求体里的 id 不起作用），
+                    // 故这里无条件回写支票号到付款单参考号
                     await StampPaymentReferenceAsync(p.Id, checkNumber, ct);
 
                     items.Add(CheckBatchComposer.BuildRenderItem(
@@ -356,6 +363,16 @@ public partial class CheckService : ApplicationService, ICheckService
         var bank = await _bankAccountRepository.AsNoTracking().FirstOrDefaultAsync(b => b.Id == input.BankAccountId, cancellationToken);
         if (bank == null)
             return Fail<BankCheckDto>("Bank account not found.", 404);
+
+        // 挂在付款单上的票与打印路径同一组判据（Posted Outbound Check / 同一出款科目 / 未开票）：
+        // 请求体里的 id 从不经过队列，少了这条，一笔已装进 EFT 批次的 BankTransfer 付款
+        // 会在登记簿上多出一张 Issued 票，且随后的回写把它的电汇参考号覆盖成支票号。
+        if (input.PaymentEntryId is { } paymentEntryId)
+        {
+            var linkable = await _composer.ResolveManualCheckPaymentAsync(paymentEntryId, bank, cancellationToken);
+            if (!linkable.Succeeded)
+                return Fail<BankCheckDto>(linkable.Message!, linkable.Code ?? 400);
+        }
 
         var check = new BankCheck
         {

@@ -15,4 +15,9 @@
     <ProjectReference Include="..\Tnzi.Identity\Tnzi.Identity.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 启动期存量修复任务为 internal，只对本模块的集成测试开放（与父模块同一做法）。 -->
+    <InternalsVisibleTo Include="Tnzi.Identity.IntegrationTests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

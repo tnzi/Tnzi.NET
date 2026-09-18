@@ -1,4 +1,5 @@
-﻿using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
+﻿using Tnzi.MultiTenancy;
+using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
 
@@ -20,6 +21,7 @@ public class SessionRevocationTests
     private readonly Mock<ISessionService> _sessionServiceMock = new();
     private readonly Mock<IAuthTokenService> _authTokenServiceMock = new();
     private readonly Mock<IEventBus> _eventBusMock = new();
+    private readonly Mock<IUserTenantScopeProvider> _scopeMock = new();
     private readonly SessionRevocationService _service;
 
     public SessionRevocationTests()
@@ -38,11 +40,92 @@ public class SessionRevocationTests
         _sessionServiceMock.Setup(x => x.GetSessionAsync(It.IsAny<Guid>()))
             .ReturnsAsync((UserSessionDto?)null);
 
+        _scopeMock.Setup(x => x.Current).Returns(UserTenantScope.Unrestricted);
+        _scopeMock.Setup(x => x.ContainsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
         _service = new SessionRevocationService(
             serviceProvider.Object,
             _sessionServiceMock.Object,
             _authTokenServiceMock.Object,
+            _scopeMock.Object,
             _eventBusMock.Object);
+    }
+
+    /// <summary>把范围收窄到某个租户，并让 <c>ContainsAsync</c> 按给定的用户集合回答。</summary>
+    private void RestrictScopeTo(params Guid[] usersInScope)
+    {
+        var tenant = new Mock<ICurrentTenant>();
+        tenant.Setup(x => x.Id).Returns(Guid.NewGuid());
+        var admin = new Mock<ICurrentUser>();
+        admin.Setup(x => x.IsAuthenticated).Returns(true);
+        admin.Setup(x => x.Id).Returns(Guid.NewGuid());
+        _scopeMock.Setup(x => x.Current).Returns(UserTenantScope.Resolve(true, tenant.Object, admin.Object));
+        _scopeMock.Setup(x => x.ContainsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => usersInScope.Contains(id));
+    }
+
+    /// <summary>
+    /// ★★ 范围被收窄（多租户下的管理员）时，别家租户的会话一个字节都不能碰：
+    /// 会话服务已经按范围答 404，但令牌删除此前<b>不以撤销成功为前提</b> ——
+    /// 于是租户 A 的管理员照样能删掉租户 B 用户的刷新令牌。
+    /// </summary>
+    [Fact]
+    public async Task RevokeSession_UnderARestrictedScope_WhenTheOwnerIsOutOfScope_TouchesNothing()
+    {
+        var sessionId = Guid.NewGuid();
+        var foreignUser = Guid.NewGuid();
+        RestrictScopeTo();
+        _sessionServiceMock.Setup(x => x.GetSessionAsync(sessionId))
+            .ReturnsAsync(new UserSessionDto { Id = sessionId, UserId = foreignUser });
+
+        var count = await _service.RevokeSessionAsync(sessionId, SessionRevocationReason.AdminRevoked);
+
+        Assert.Equal(0, count);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(It.IsAny<Guid>()), Times.Never);
+        _authTokenServiceMock.Verify(x => x.RemoveSessionTokensAsync(It.IsAny<IReadOnlyCollection<Guid>>()), Times.Never);
+        _eventBusMock.Verify(x => x.PublishAsync(It.IsAny<SessionsRevokedEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>范围收窄时，查不到的会话也当作不在范围内 —— 失败关闭，不拿一个猜来的 id 去删令牌。</summary>
+    [Fact]
+    public async Task RevokeSession_UnderARestrictedScope_WhenTheSessionIsUnknown_TouchesNothing()
+    {
+        RestrictScopeTo();
+
+        var count = await _service.RevokeSessionAsync(Guid.NewGuid(), SessionRevocationReason.AdminRevoked);
+
+        Assert.Equal(0, count);
+        _authTokenServiceMock.Verify(x => x.RemoveSessionTokensAsync(It.IsAny<IReadOnlyCollection<Guid>>()), Times.Never);
+    }
+
+    /// <summary>对照组：范围收窄但会话主人在范围内 → 与不收窄时逐字相同。</summary>
+    [Fact]
+    public async Task RevokeSession_UnderARestrictedScope_WhenTheOwnerIsInScope_RevokesAndRemovesTokens()
+    {
+        var sessionId = Guid.NewGuid();
+        var owner = Guid.NewGuid();
+        RestrictScopeTo(owner);
+        _sessionServiceMock.Setup(x => x.GetSessionAsync(sessionId))
+            .ReturnsAsync(new UserSessionDto { Id = sessionId, UserId = owner });
+
+        var count = await _service.RevokeSessionAsync(sessionId, SessionRevocationReason.AdminRevoked);
+
+        Assert.Equal(1, count);
+        _authTokenServiceMock.Verify(
+            x => x.RemoveSessionTokensAsync(It.Is<IReadOnlyCollection<Guid>>(ids => ids.Contains(sessionId))), Times.Once);
+    }
+
+    /// <summary>撤全部同理：目标用户不在范围内时既不撤会话也不删令牌。</summary>
+    [Fact]
+    public async Task RevokeUserSessions_WhenTheUserIsOutOfScope_TouchesNothing()
+    {
+        RestrictScopeTo();
+
+        var count = await _service.RevokeUserSessionsAsync(Guid.NewGuid(), SessionRevocationReason.AdminRevoked);
+
+        Assert.Equal(0, count);
+        _sessionServiceMock.Verify(x => x.RevokeAllSessionsAsync(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
+        _authTokenServiceMock.Verify(x => x.RemoveUserSessionTokensAsync(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
     }
 
     /// <summary>★ 撤单条会话 = 撤会话 + 删该会话绑定的刷新令牌。</summary>

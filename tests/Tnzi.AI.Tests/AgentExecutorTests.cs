@@ -366,4 +366,35 @@ public class AgentExecutorTests
             await Task.Yield();
         }
     }
+
+    [Fact]
+    public async Task WithoutTools_RemovesNamedTools_FromWhatTheModelSees_AndFromExecution()
+    {
+        // Arrange: bash and read_file both configured; the skill constraint layer asks to withhold bash.
+        var bash = AIFunctionFactory.Create(() => "ran bash", "bash", "Shell");
+        var readFile = AIFunctionFactory.Create(() => "ran read_file", "read_file", "Read");
+
+        ChatOptions? seenOptions = null;
+        var mockClient = new Mock<IChatClient>();
+        mockClient.Setup(c => c.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<ChatMessage> _, ChatOptions? o, CancellationToken _) =>
+            {
+                seenOptions = o;
+                return new ChatResponse([new ChatMessage(ChatRole.Assistant, "Done")]);
+            });
+
+        var executor = new AgentExecutor(mockClient.Object, new AgentExecutorOptions { Name = "A", Tools = [bash, readFile] });
+
+        // Act
+        var filtered = executor.WithoutTools(["BASH"]); // case-insensitive
+        await filtered.ExecuteAsync([new ChatMessage(ChatRole.User, "hi")], CancellationToken.None);
+
+        // Assert: the original is untouched (immutability), the copy exposes only read_file.
+        executor.Tools.Select(t => t.Name).ShouldBe(["bash", "read_file"]);
+        filtered.Tools.Select(t => t.Name).ShouldBe(["read_file"]);
+        seenOptions!.Tools!.Select(t => t.Name).ShouldBe(["read_file"]);
+
+        // Nothing to remove → same instance, no copy.
+        executor.WithoutTools(["not-there"]).ShouldBeSameAs(executor);
+    }
 }

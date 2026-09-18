@@ -25,6 +25,7 @@ public class InvitationService : ApplicationService, IInvitationService
     private readonly IInvitationAcceptanceHandler _acceptanceHandler;
     private readonly IInvitationUrlGenerator _urlGenerator;
     private readonly IOptionsMonitor<IdentityOptions> _options;
+    private readonly IUserTenantScopeProvider _scope;
     private readonly IConfiguration? _configuration;
     private readonly IAuthService? _authService;
 
@@ -39,6 +40,7 @@ public class InvitationService : ApplicationService, IInvitationService
         IInvitationAcceptanceHandler acceptanceHandler,
         IInvitationUrlGenerator urlGenerator,
         IOptionsMonitor<IdentityOptions> options,
+        IUserTenantScopeProvider scope,
         IConfiguration? configuration = null,
         IAuthService? authService = null)
         : base(serviceProvider)
@@ -49,6 +51,7 @@ public class InvitationService : ApplicationService, IInvitationService
         _acceptanceHandler = Check.NotNull(acceptanceHandler);
         _urlGenerator = Check.NotNull(urlGenerator);
         _options = Check.NotNull(options);
+        _scope = Check.NotNull(scope);
         _configuration = configuration;
         _authService = authService;
     }
@@ -105,10 +108,40 @@ public class InvitationService : ApplicationService, IInvitationService
         return await IssueAsync(user, input.LifetimeHours, isResend: false);
     }
 
+    /// <summary>
+    /// 按 id 取被邀请的账号，且只取当前租户范围内的（口径见 <see cref="UserTenantScope"/>）：
+    /// 不在范围内与不存在同样返回 <c>null</c>，调用方一律答 404。
+    /// </summary>
+    /// <remarks>
+    /// ★ 重发与撤销都必须先过这一道再碰令牌。撤销是「先作废令牌再删账号」，而删账号那一步
+    /// 走 <c>IUserService.DeleteAsync</c>、自带范围校验 —— 只裁剪后半段的结果是一次半截操作：
+    /// 外租户管理员拿到 404，被撤销那家的邀请链接却已经悄悄失效，账号留在 Pending、再没有令牌。
+    /// 令牌表不是 <c>IMultiTenant</c>，全局过滤器管不到它。
+    /// </remarks>
+    private async Task<User?> FindScopedUserAsync(Guid userId)
+    {
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return null;
+        }
+
+        var scope = _scope.Current;
+        if (scope.Contains(user))
+        {
+            return user;
+        }
+
+        LogWarning(
+            "Rejected a cross-tenant invitation access: user {UserId} belongs to tenant {UserTenantId} but the request is scoped to tenant {TenantId}.",
+            user.Id, user.TenantId, scope.TenantId);
+        return null;
+    }
+
     /// <inheritdoc />
     public async Task<Result<InvitationDto>> ResendAsync(Guid userId, int? lifetimeHours = null, CancellationToken cancellationToken = default)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail<InvitationDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -130,7 +163,7 @@ public class InvitationService : ApplicationService, IInvitationService
     /// <inheritdoc />
     public async Task<Result> RevokeAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var user = await _userManager.FindByGuidAsync(userId);
+        var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
@@ -312,7 +345,7 @@ public class InvitationService : ApplicationService, IInvitationService
             ExpiresAt = expiresAt,
             InvitedBy = CurrentUser?.Id,
             IsResend = isResend,
-            SiteName = _configuration?["App:SiteName"],
+            SiteName = SiteNameResolver.Resolve(_configuration, Logger),
         });
 
         LogInformation(

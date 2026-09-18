@@ -178,11 +178,6 @@
                       {{ status?.requireAuthentication ? t('status.yes') : t('status.no') }}
                     </NTag>
                   </NDescriptionsItem>
-                  <NDescriptionsItem :label="t('status.rateLimitPerTenant')">
-                    <NTag size="tiny" :bordered="false" :type="status?.rateLimitPerTenant ? 'info' : 'default'">
-                      {{ status?.rateLimitPerTenant ? t('status.yes') : t('status.no') }}
-                    </NTag>
-                  </NDescriptionsItem>
                   <NDescriptionsItem :label="t('status.rateLimitPerMinute')">
                     {{ status?.rateLimitPerMinute ?? 0 }}
                   </NDescriptionsItem>
@@ -373,6 +368,7 @@ import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
+import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -499,16 +495,17 @@ async function loadStatusTab(): Promise<void> {
   statusLoading.value = true
   agentsLoading.value = true
   try {
-    const [st, tls, exposed, agentPage] = await Promise.all([
+    const [st, tls, exposed, agents] = await Promise.all([
       bridge.mcp.getStatus(),
       bridge.mcp.getTools(),
       bridge.mcp.getExposedAgents(),
-      bridge.agents.fetch({ pageIndex: 1, pageSize: 200, searchText: '', filters: {} }),
+      // Every agent, not the first clamped page: this list decides which agents can be exposed.
+      fetchAllPages((q) => bridge.agents.fetch(q)),
     ])
     status.value = st
     tools.value = tls
     exposedAgentIds.value = exposed
-    allAgents.value = agentPage.items
+    allAgents.value = agents
   } catch {
     status.value = null
     tools.value = []

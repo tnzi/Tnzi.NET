@@ -258,7 +258,7 @@ public class AISettingDefinitionProviderTests
 
         Assert.Equal("ai-history", store.Key);
         Assert.Contains(store.Fields, f => f.Key == "AI:History:Store:MaxLoadedMessages");
-        // Store.Enabled has no runtime consumer → deliberately not exposed.
+        // Store.Enabled was removed (no runtime consumer) → must not resurface as a setting.
         Assert.DoesNotContain(store.Fields, f => f.Key == "AI:History:Store:Enabled");
 
         Assert.Equal("ai-history", reduction.Key);

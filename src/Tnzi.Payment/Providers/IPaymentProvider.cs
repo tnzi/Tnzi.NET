@@ -61,6 +61,25 @@ public interface IPaymentProvider
     Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo);
 
     /// <summary>
+    /// 是否能作废渠道侧的支付意图（默认 false）。为 true 的渠道在本地关单 / 过期前会先被调用
+    /// <see cref="CancelPaymentAsync"/>；为 false 的渠道，服务层退回「先查渠道侧状态，只在渠道侧未支付时本地关单」。
+    /// </summary>
+    bool SupportsPaymentCancellation => false;
+
+    /// <summary>
+    /// 作废渠道侧的支付意图，让付款人不能再对这张单付款。本地关单 / 过期清扫在改写本地状态之前调用它：
+    /// 只在本地关掉，渠道侧的意图原样活着，付款人正开着收银台时照样付得进去，而钱到账的回调会撞上
+    /// 本地终态被幂等守卫吞掉 —— 没有事件、没有告警、没有退款线索。
+    /// </summary>
+    /// <remarks>
+    /// 传入的是 <c>ExternalTradeNo ?? TradeNo</c>（与 <see cref="SyncOrderAsync"/> 同口径）。
+    /// 渠道侧已不存在 / 已作废时必须视为成功（幂等）；**已经付掉时必须失败**，服务层随后查渠道状态把它记成功
+    /// 而不是关单。默认实现返回"不支持"，服务层据 <see cref="SupportsPaymentCancellation"/> 判断而不据此返回值。
+    /// </remarks>
+    Task<Result> CancelPaymentAsync(string tradeNo)
+        => Task.FromResult(Result.Failure(ErrorCodes.PaymentChannelCancelNotSupported, 400));
+
+    /// <summary>
     /// off-session 自动扣款（后台续费/试用转正用，使用渠道侧已保存的支付方式无人值守扣款）。
     /// 默认实现返回"不支持"，渠道按需覆写（Stripe；PayPal 需开启 <c>Payment:PayPal:EnableVault</c>）。
     /// </summary>

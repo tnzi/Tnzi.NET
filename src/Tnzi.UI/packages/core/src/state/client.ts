@@ -127,7 +127,16 @@ export function createTnziClient(options: CreateTnziClientOptions = {}): TnziCli
       // Navigation is app-level: `@tnzi/ui-admin`'s built-in session-expired
       // listener (registered via defineAdminApp install) redirects the admin
       // app to the login route; other surfaces rely on their route guards.
-      authRef?.clearAuth();
+      //
+      // Only when there is still a session to clear. When the refresh was
+      // REJECTED, `_doRefreshToken` has already cleared the state and left the
+      // reason in `auth.error` - including "your session was ended for
+      // security reasons", the one moment the user can learn their credentials
+      // are in use elsewhere. `clearAuth()` resets `error`, so calling it
+      // again here erased that message before any login page could read it.
+      if (authRef && (authRef.isAuthenticated || authRef.accessToken)) {
+        authRef.clearAuth();
+      }
     },
   });
 

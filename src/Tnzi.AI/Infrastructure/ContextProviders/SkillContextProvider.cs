@@ -29,14 +29,20 @@ public sealed class SkillContextProvider : IContextProvider
     // 按需工具（仅当 InjectionMode 为 OnDemandTools 或 Both 时非空）
     private readonly AITool[] _skillTools;
 
-    // 当前 session 已激活的技能（通过 _activatedLock 保护线程安全）
-    private readonly object _activatedLock = new();
-    private readonly List<SkillDefinition> _activatedSkills = [];
+    /// <summary>
+    /// 已激活技能的唯一真值源（Scoped，跨本轮所有工具调用共享；经线程元数据跨轮次）。
+    /// 未注入时退回一个纯内存实例 —— 只在本 provider 实例的生命周期内有效。
+    /// </summary>
+    private readonly ISkillActivationTracker _activationTracker;
+    private readonly Guid? _threadId;
 
     /// <summary>
     /// ToolContext.Items 中存储已加载 Skill slug 的 key
     /// </summary>
     internal const string LoadedSkillsKey = "RequiresSkill.LoadedSlugs";
+
+    private readonly IEventBus? _eventBus;
+    private readonly Guid? _userId;
 
     /// <summary>
     /// 初始化 SkillContextProvider
@@ -49,7 +55,11 @@ public sealed class SkillContextProvider : IContextProvider
         ISkillConstraintEnforcer? constraintEnforcer = null,
         ISkillLoadTracker? skillLoadTracker = null,
         string? agentName = null,
-        IEnumerable<string>? restrictToSlugs = null)
+        IEnumerable<string>? restrictToSlugs = null,
+        ISkillActivationTracker? activationTracker = null,
+        Guid? threadId = null,
+        IEventBus? eventBus = null,
+        Guid? userId = null)
     {
         _registry = Check.NotNull(registry);
         _templateEngine = Check.NotNull(templateEngine);
@@ -58,6 +68,10 @@ public sealed class SkillContextProvider : IContextProvider
         _constraintEnforcer = constraintEnforcer;
         _skillLoadTracker = skillLoadTracker;
         _agentName = agentName;
+        _activationTracker = activationTracker ?? new SkillActivationTracker();
+        _threadId = threadId;
+        _eventBus = eventBus;
+        _userId = userId;
         var slugSet = restrictToSlugs?.Where(s => !string.IsNullOrWhiteSpace(s)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         _restrictToSlugs = slugSet is { Count: > 0 } ? slugSet : null;
 
@@ -102,6 +116,12 @@ public sealed class SkillContextProvider : IContextProvider
             var injection = new ContextInjection();
             var mode = _options.InjectionMode;
 
+            // 先把上一轮结束时的激活集从线程恢复回来，已激活技能的 AIFunction 才能注入。
+            // 这不是恢复的唯一入口：本步可被 Composite 的 token 预算 / agent 配置跳过，
+            // SkillConstraintMiddleware（450）每轮开始还会无条件再调一次（幂等）。
+            if (_threadId is { } threadId)
+                await _activationTracker.RestoreAsync(threadId, ct);
+
             // Instructions mode: inject skill summary (name + description only)
             if (mode is SkillInjectionMode.Instructions or SkillInjectionMode.Both)
             {
@@ -121,19 +141,9 @@ public sealed class SkillContextProvider : IContextProvider
                 _logger.LogDebug("Injected {Count} skill tools into context", _skillTools.Length);
             }
 
-            // Include activated skills (thread-safe snapshot)
-            List<SkillDefinition>? activeSnapshot = null;
-            lock (_activatedLock)
-            {
-                if (_activatedSkills.Count > 0)
-                {
-                    activeSnapshot = [.. _activatedSkills];
-                    injection.ActiveSkills = activeSnapshot;
-                }
-            }
-
             // 将已激活的 Skill 包装为 AIFunction，使 LLM 可原生调用
-            if (activeSnapshot is { Count: > 0 })
+            var activeSnapshot = _activationTracker.ActivatedSkills;
+            if (activeSnapshot.Count > 0)
             {
                 injection.Tools ??= [];
                 foreach (var activeSkill in activeSnapshot)
@@ -193,7 +203,7 @@ public sealed class SkillContextProvider : IContextProvider
 
         if (slugs.Length == 1)
         {
-            var skill = await _registry.GetBySlugAsync(slugs[0], ct);
+            var skill = await GetVisibleSkillAsync(slugs[0], ct);
             if (skill == null)
                 return $"Skill not found: {slugs[0]}";
 
@@ -207,7 +217,7 @@ public sealed class SkillContextProvider : IContextProvider
         var sb = new StringBuilder();
         foreach (var s in slugs)
         {
-            var skill = await _registry.GetBySlugAsync(s, ct);
+            var skill = await GetVisibleSkillAsync(s, ct);
             if (skill == null)
             {
                 sb.AppendLine($"--- Skill not found: {s} ---\n");
@@ -233,7 +243,7 @@ public sealed class SkillContextProvider : IContextProvider
         [Description("Resource path (e.g. 'scripts/generate.py', 'templates/SOUL.template.md')")] string path,
         CancellationToken ct = default)
     {
-        var skill = await _registry.GetBySlugAsync(slug, ct);
+        var skill = await GetVisibleSkillAsync(slug, ct);
         if (skill == null)
             return $"Skill not found: {slug}";
 
@@ -287,7 +297,7 @@ public sealed class SkillContextProvider : IContextProvider
         [Description("Parameters as JSON object")] string? parameters = null,
         CancellationToken ct = default)
     {
-        var skill = await _registry.GetBySlugAsync(slug, ct);
+        var skill = await GetVisibleSkillAsync(slug, ct);
         if (skill == null)
             return $"Skill not found: {slug}";
 
@@ -306,62 +316,101 @@ public sealed class SkillContextProvider : IContextProvider
         }
 
         // 幂等检查：同 slug 已激活时，相同参数直接返回，不同参数更新
-        lock (_activatedLock)
+        if (_activationTracker.IsActivated(slug) && paramDict == null)
         {
-            var existing = _activatedSkills.FindIndex(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
-            if (existing >= 0 && paramDict == null)
-            {
-                MarkSkillLoaded(slug);
-                return $"Skill '{skill.Name}' is already activated.";
-            }
+            MarkSkillLoaded(slug);
+            return $"Skill '{skill.Name}' is already activated.";
         }
 
         var renderResult = _templateEngine.Render(skill, paramDict);
         if (!renderResult.Success)
             return $"Skill activation failed:\n{string.Join("\n", renderResult.Errors)}";
 
-        lock (_activatedLock)
-        {
-            var existing = _activatedSkills.FindIndex(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
-            if (existing >= 0)
-                _activatedSkills.RemoveAt(existing);
-            _activatedSkills.Add(skill);
-        }
+        // 写入作用域跟踪器：从这一刻起，本轮后续每一次工具调用都受该技能约束
+        // （SkillConstraintToolMiddleware），下一轮开始时模型可见的工具列表与模型 / Provider
+        // 也随之调整（SkillConstraintMiddleware）。
+        _activationTracker.Activate(skill);
+        if (_threadId is { } threadId)
+            await _activationTracker.PersistAsync(threadId, ct);
 
         // Activation implies the AI has read the skill content - mark as loaded
         // so RequiresSkillToolMiddleware doesn't reject tools requiring this skill
         MarkSkillLoaded(slug);
+
+        await PublishActivatedAsync(skill, ct);
 
         var sb = new StringBuilder();
         sb.AppendLine($"## Skill Activated: {skill.Name}");
         sb.AppendLine();
         sb.AppendLine(renderResult.RenderedContent);
         if (skill.AllowedToolGroups is { Count: > 0 })
-            sb.AppendLine($"\n**Tool restriction applied**: Only [{string.Join(", ", skill.AllowedToolGroups)}] tools available.");
+            sb.AppendLine($"\n**Tool restriction applied**: Only [{string.Join(", ", skill.AllowedToolGroups)}] tool groups available.");
+        if (skill.AllowedTools is { Count: > 0 })
+            sb.AppendLine($"**Tool whitelist applied**: [{string.Join(", ", skill.AllowedTools)}].");
+        if (skill.DeniedTools is { Count: > 0 })
+            sb.AppendLine($"**Tools blocked**: [{string.Join(", ", skill.DeniedTools)}].");
         if (skill.RequiredModel != null)
-            sb.AppendLine($"**Model override**: Using {skill.RequiredModel}.");
+            sb.AppendLine($"**Model override**: {skill.RequiredModel} will be used from the next turn.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// 发布 <see cref="SkillActivatedEvent"/>，让 agent 侧激活也计入用量统计（ActivationCount / LastActivatedAt、
+    /// stats / popular 端点）。★ 此前该事件只在 REST 的 <c>SkillService.ActivateAsync</c> 发出：技能主要是 agent
+    /// 在对话里用的，管理端看到的却只是人点「激活」按钮的次数。统计失败不能让工具调用失败：只记 Warning。
+    /// </summary>
+    private async Task PublishActivatedAsync(SkillDefinition skill, CancellationToken ct)
+    {
+        if (_eventBus is null) return;
+
+        try
+        {
+            await _eventBus.PublishAsync(new SkillActivatedEvent
+            {
+                Slug = skill.Slug,
+                Scope = skill.Scope,
+                Source = skill.Source,
+                ActivatedAt = DateTime.UtcNow,
+                UserId = _userId,
+                SkillTenantId = skill.TenantId,
+                OwnerUserId = skill.OwnerUserId
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish SkillActivatedEvent for skill {Slug}; activation continues", skill.Slug);
+        }
     }
 
     /// <summary>
     /// Deactivates a previously activated skill. Removes its constraints from the session.
     /// </summary>
-    private Task<string> SkillDeactivateAsync(
+    private async Task<string> SkillDeactivateAsync(
         [Description("Skill slug to deactivate")] string slug,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(slug))
-            return Task.FromResult("Slug is required.");
+            return "Slug is required.";
 
-        int removed;
-        lock (_activatedLock)
-        {
-            removed = _activatedSkills.RemoveAll(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
-        }
+        var removed = _activationTracker.Deactivate(slug);
+        if (removed && _threadId is { } threadId)
+            await _activationTracker.PersistAsync(threadId, ct);
 
-        return Task.FromResult(removed > 0
+        return removed
             ? $"Skill '{slug}' has been deactivated. Its constraints are no longer applied."
-            : $"Skill '{slug}' was not active.");
+            : $"Skill '{slug}' was not active.";
+    }
+
+    /// <summary>
+    /// 按 slug 取技能，并套用与列表/搜索完全相同的可见性门（<see cref="FilterByAgent"/>）。
+    /// skill_get / skill_get_resource / skill_activate 三个按 slug 寻址的工具都必须走这里：
+    /// 它们要么把正文与附件送进模型、要么把约束套到本 agent 上，只允许本 agent 可见的技能
+    /// （agents 过滤 / 显式分配白名单 / 非内部技能）。不可见与不存在同答 null，不确认 slug 存在。
+    /// </summary>
+    private async Task<SkillDefinition?> GetVisibleSkillAsync(string slug, CancellationToken ct)
+    {
+        var skill = await _registry.GetBySlugAsync(slug, ct);
+        return skill != null && FilterByAgent([skill]).Count > 0 ? skill : null;
     }
 
     /// <summary>
@@ -371,12 +420,14 @@ public sealed class SkillContextProvider : IContextProvider
     {
         IEnumerable<SkillDefinition> filtered;
 
+        // 禁用的技能对 agent 不可见（== 不存在）：DatabaseSkillStore 已在查询层过滤 Enabled，
+        // 文件系统技能的 enabled:false 此前只有 REST 的 ActivateAsync 尊重，agent 照样能列出并激活。
         // 内部技能不暴露给 Agent（仅作为共享资源依赖存在）
         // 无 agent 上下文时，只返回无 agents 限制的 skill
         if (string.IsNullOrWhiteSpace(_agentName))
-            filtered = skills.Where(s => !s.IsInternal && s.Agents is not { Count: > 0 });
+            filtered = skills.Where(s => s.Enabled && !s.IsInternal && s.Agents is not { Count: > 0 });
         else
-            filtered = skills.Where(s => !s.IsInternal && IsAgentAllowed(s, _agentName));
+            filtered = skills.Where(s => s.Enabled && !s.IsInternal && IsAgentAllowed(s, _agentName));
 
         // Agent 显式分配了技能白名单时，仅保留白名单内的技能（精确分配优先于名称通配）。
         if (_restrictToSlugs != null)

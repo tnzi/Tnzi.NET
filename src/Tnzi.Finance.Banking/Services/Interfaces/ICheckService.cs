@@ -68,7 +68,8 @@ public interface ICheckService
     /// 预览支票（零副作用：不分配支票号、不写登记簿、不动账）
     /// </summary>
     /// <remarks>
-    /// 校验口径与 <see cref="PrintAsync"/> 一致（Posted Outbound Check + 同一银行账户 + 未开票），
+    /// 校验口径与 <see cref="PrintAsync"/> 一致（Posted Outbound Check + 同一银行账户 + 未开票，
+    /// 均由 <c>CheckBatchComposer.ResolveBatchAsync</c> 自己判定，不依赖队列过滤），
     /// 保证"所见即将打"；支票号取 <c>BankAccount.NextCheckNumber</c> 起的连号**预览值**
     /// （peek 不 consume，真正分配发生在 <see cref="PrintAsync"/>），渲染请求带
     /// <c>IsPreview=true</c> 供模板打上不可流通标记。
@@ -84,6 +85,12 @@ public interface ICheckService
     /// 从 <c>FundsAccountId</c> 解析银行账户档案,支票号取其 <c>NextCheckNumber</c> 起的连号预览值
     /// （peek 不 consume），带 <c>IsPreview=true</c>。渲染与 <see cref="PreviewAsync"/>/<see cref="PrintAsync"/>
     /// 共用同一模型工厂,故"所见即将打"。
+    /// <para>
+    /// ★ <b>框架不为它出端点，消费方自己接线时必须挂写码 <c>finance.check.create</c></b>（与 preview / render 同级）：
+    /// 它虽零副作用，渲染的却是完整票面 —— 对 <c>CheckStockType.Blank</c> 的档案，磁码行由解密后的
+    /// 真账号编成，水印挡得住人眼挡不住读票机，产物与 <c>{id}/render</c> 同属可流通级。
+    /// 挂在只读门（<c>finance.check.view</c>）下，就把 <c>preview</c> 端点 2026-09-12 才关上的口子在消费方那层原样打开。
+    /// </para>
     /// </remarks>
     Task<Result<CheckFileDto>> PreviewAdHocAsync(AdHocCheckPreviewDto input, CancellationToken cancellationToken = default);
 

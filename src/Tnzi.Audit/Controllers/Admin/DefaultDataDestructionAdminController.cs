@@ -55,6 +55,7 @@ public class DefaultDataDestructionAdminController : ApiAdminControllerBase
     /// <remarks>
     /// 定时任务已经在跑，这个端点用于首次上线时的空跑演练，
     /// 以及「刚接了一条新策略，想立刻看它会删什么」。
+    /// 与定时轮过同一把分布式锁（在 <c>RunAsync</c> 里）：撞上正在跑的一轮时答 409，而不是两边各自销毁、各自出证明。
     /// </remarks>
     [HttpPost("run")]
     [ApiAuthorize(PermissionName = "audit.destruction.execute")]

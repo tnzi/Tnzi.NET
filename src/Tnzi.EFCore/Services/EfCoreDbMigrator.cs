@@ -5,26 +5,34 @@ namespace Tnzi.EFCore.Services;
 /// EF Core 数据库迁移器实现
 /// 支持多 DbContext 迁移，自动发现所有注册的 DbContext
 /// </summary>
+/// <remarks>
+/// ★ 上下文发现与 <see cref="UnitOfWorkManager"/> 同源（<see cref="DbContextTypeDiscovery"/>）：
+/// 此前这里只经 <c>IEntityManager.GetAllDbContextTypes()</c> 发现，而它刻意排除承载主上下文实体的
+/// <c>object</c> 占位键（实体配置的 <c>DbContextType</c> 默认为 null），于是主库永远不在迁移循环里 ——
+/// <c>MigrateAsync</c> 记一条「No DbContext types found」后返回或只迁模块自带的次要上下文，
+/// <c>HasPendingMigrationsAsync</c> 对主库答 false。
+/// </remarks>
 public class EfCoreDbMigrator : IDbMigrator
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly IEntityManager _entityManager;
     private readonly ILogger<EfCoreDbMigrator> _logger;
+    private List<Type>? _dbContextTypes;
 
-    public EfCoreDbMigrator(
-        IServiceProvider serviceProvider,
-        IEntityManager entityManager,
-        ILogger<EfCoreDbMigrator> logger)
+    public EfCoreDbMigrator(IServiceProvider serviceProvider, ILogger<EfCoreDbMigrator> logger)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
-        _entityManager = Check.NotNull(entityManager);
         _logger = Check.NotNull(logger);
+    }
+
+    private List<Type> GetDbContextTypes()
+    {
+        return _dbContextTypes ??= DbContextTypeDiscovery.Discover(_serviceProvider, _logger);
     }
 
     public async Task MigrateAsync(CancellationToken cancellationToken = default)
     {
-        var dbContextTypes = _entityManager.GetAllDbContextTypes();
-        if (dbContextTypes.Length == 0)
+        var dbContextTypes = GetDbContextTypes();
+        if (dbContextTypes.Count == 0)
         {
             _logger.LogWarning("No DbContext types found. Skipping migration.");
             return;
@@ -69,7 +77,7 @@ public class EfCoreDbMigrator : IDbMigrator
     public async Task<IReadOnlyList<string>> GetPendingMigrationsAsync(CancellationToken cancellationToken = default)
     {
         var result = new List<string>();
-        var dbContextTypes = _entityManager.GetAllDbContextTypes();
+        var dbContextTypes = GetDbContextTypes();
 
         foreach (var dbContextType in dbContextTypes)
         {
@@ -93,7 +101,7 @@ public class EfCoreDbMigrator : IDbMigrator
     public async Task<IReadOnlyList<string>> GetAppliedMigrationsAsync(CancellationToken cancellationToken = default)
     {
         var result = new List<string>();
-        var dbContextTypes = _entityManager.GetAllDbContextTypes();
+        var dbContextTypes = GetDbContextTypes();
 
         foreach (var dbContextType in dbContextTypes)
         {
@@ -116,7 +124,7 @@ public class EfCoreDbMigrator : IDbMigrator
 
     public async Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken = default)
     {
-        var dbContextTypes = _entityManager.GetAllDbContextTypes();
+        var dbContextTypes = GetDbContextTypes();
 
         foreach (var dbContextType in dbContextTypes)
         {

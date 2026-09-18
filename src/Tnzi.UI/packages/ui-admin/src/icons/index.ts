@@ -32,7 +32,7 @@
 import { addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
-/** Every Iconify name `@tnzi/ui-admin` and its @tnzi dependencies can render (561 names, 6 collections). */
+/** Every Iconify name `@tnzi/ui-admin` and its @tnzi dependencies can render (563 names, 6 collections). */
 export const tnziIconNames: readonly string[] = [
   'line-md:menu-fold-left',
   'line-md:menu-fold-right',
@@ -323,6 +323,7 @@ export const tnziIconNames: readonly string[] = [
   'mdi:email-multiple',
   'mdi:email-multiple-outline',
   'mdi:email-off-outline',
+  'mdi:email-open-outline',
   'mdi:email-outline',
   'mdi:email-remove-outline',
   'mdi:emoticon-happy-outline',
@@ -489,6 +490,7 @@ export const tnziIconNames: readonly string[] = [
   'mdi:power',
   'mdi:printer-check',
   'mdi:printer-outline',
+  'mdi:progress-check',
   'mdi:pulse',
   'mdi:puzzle-outline',
   'mdi:qrcode',

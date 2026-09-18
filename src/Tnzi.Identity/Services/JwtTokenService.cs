@@ -29,7 +29,7 @@ public class JwtTokenService : ApplicationService, ITokenService
         "roles",
         JwtRegisteredClaimNames.Sub,  // "sub"
         JwtRegisteredClaimNames.Jti,  // "jti"
-        "tenant_id",
+        TenantResolverOptions.DefaultClaimType,
         // 会话ID 由框架内部按 sessionId 参数写入；禁止调用方经 extraClaims 伪造，
         // 否则可把令牌绑定到他人的有效会话绕过撤销。
         IdentityConstants.ClaimTypeNames.SessionId,
@@ -94,7 +94,8 @@ public class JwtTokenService : ApplicationService, ITokenService
 
         if (_multiTenancyEnabled && user.TenantId.HasValue)
         {
-            claims.Add(new Claim("tenant_id", user.TenantId.Value.ToString()));
+            // 名字只从 TenantResolverOptions.DefaultClaimType 出：HttpContextCurrentUser 与 TnziHub 按同一个常量读。
+            claims.Add(new Claim(TenantResolverOptions.DefaultClaimType, user.TenantId.Value.ToString()));
         }
 
         // 会话ID claim（框架内部写入，保留类型，extraClaims 无法伪造）：

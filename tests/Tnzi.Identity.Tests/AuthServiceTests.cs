@@ -12,6 +12,7 @@ public class AuthServiceTests
     private readonly Mock<IScopedContext> _scopedContextMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<ICaptchaService> _captchaServiceMock;
+    private readonly Mock<ICaptchaVerifier> _captchaVerifierMock;
     private readonly Mock<IAuthTokenService> _authTokenServiceMock;
 
     // Optional services
@@ -57,6 +58,13 @@ public class AuthServiceTests
         _scopedContextMock.Setup(x => x.UserAgent).Returns("Test Browser");
         _eventBusMock = new Mock<IEventBus>();
         _captchaServiceMock = new Mock<ICaptchaService>();
+        _captchaVerifierMock = new Mock<ICaptchaVerifier>();
+        _captchaVerifierMock.SetupGet(x => x.ProviderName).Returns("image");
+        _captchaVerifierMock.SetupGet(x => x.IsEnabled).Returns(true);
+        _captchaVerifierMock.Setup(x => x.GetClientConfig()).Returns(new CaptchaClientConfigDto { Enabled = true, Provider = "image" });
+        // 默认：任何令牌都按「没交 / 不对」拒绝；具体用例再为某个令牌设 Pass（Moq 后设的 Setup 优先）。
+        _captchaVerifierMock.Setup(x => x.VerifyAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? token, string _, CancellationToken _) => CaptchaVerification.Fail("image", string.IsNullOrEmpty(token) ? CaptchaFailure.MissingToken : CaptchaFailure.Rejected));
         _captchaServiceMock.Setup(x => x.RecordLoginFailureAsync(It.IsAny<string>()))
             .Returns(Task.CompletedTask);
         _captchaServiceMock.Setup(x => x.ClearLoginFailureAsync(It.IsAny<string>()))
@@ -121,7 +129,8 @@ public class AuthServiceTests
             _loginSecurityServiceMock.Object,
             _twoFactorServiceMock.Object,
             loginGuardEvaluator: loginGuardEvaluator,
-            sessionRevocation: _sessionRevocationMock.Object
+            sessionRevocation: _sessionRevocationMock.Object,
+            captchaVerifier: _captchaVerifierMock.Object
         );
     }
 
@@ -1040,7 +1049,8 @@ public class AuthServiceTests
             // 现在只回同一句话而不发信（见 SendCodeLoginCode_ForAnUnknownAddress_*）。
             Registration = new RegistrationOptions { EnableQuickRegisterEmail = true }
         });
-        _captchaServiceMock.Setup(x => x.VerifyAsync("cid", "good", "login")).ReturnsAsync(true);
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("cid:good", CaptchaPurpose.Login, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Pass("image"));
         _userManagerMock.Setup(x => x.FindByEmailAsync("captcha@example.com")).ReturnsAsync((User?)null);
         _twoFactorServiceMock
             .Setup(x => x.SendCodeByAddressAsync("captcha@example.com", TwoFactorType.Email, VerificationCodePurpose.CodeLogin, null))
@@ -1483,6 +1493,114 @@ public class AuthServiceTests
         _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(false);
         _userManagerMock.Setup(x => x.GetRolesAsync(user)).ReturnsAsync([]);
         return user;
+    }
+
+    #endregion
+
+    #region 人机验证提供商层（2026-09-16）
+
+    /// <summary>
+    /// 找回密码的发码入口与验证码登录的发码入口同形：开着 <c>EnableCaptchaOnPasswordRecovery</c> 时无条件先过人机验证。
+    /// 此前它不受任何验证码开关管辖，而每次调用都真的产生短信 / 邮件费用。
+    /// </summary>
+    [Fact]
+    public async Task SendPasswordRecoveryCodeAsync_WhenRecoveryCaptchaEnabledAndMissing_RejectsBeforeSending()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnPasswordRecovery = true },
+            Otp = new OtpOptions { EnableEmail = true },
+            Recovery = new RecoveryOptions { EnablePasswordResetByEmail = true }
+        });
+
+        var result = await _authService.SendPasswordRecoveryCodeAsync(new SendPasswordRecoveryCodeDto
+        {
+            Email = "recover@example.com",
+            Type = TwoFactorType.Email
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        _userManagerMock.Verify(x => x.FindByEmailAsync(It.IsAny<string>()), Times.Never);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 对照组：过了验证码就照常走后面的流程，且用途是 <c>password-recovery</c>（注册页解出的令牌在这里必须验不过）。
+    /// </summary>
+    [Fact]
+    public async Task SendPasswordRecoveryCodeAsync_WhenRecoveryCaptchaValid_ProceedsUnderThePasswordRecoveryPurpose()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnPasswordRecovery = true },
+            Otp = new OtpOptions { EnableEmail = true },
+            Recovery = new RecoveryOptions { EnablePasswordResetByEmail = true }
+        });
+        _captchaVerifierMock.Setup(x => x.VerifyAsync("widget-token", CaptchaPurpose.PasswordRecovery, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Pass("turnstile"));
+        _userManagerMock.Setup(x => x.FindByEmailAsync("recover@example.com")).ReturnsAsync((User?)null);
+
+        var result = await _authService.SendPasswordRecoveryCodeAsync(new SendPasswordRecoveryCodeDto
+        {
+            Email = "recover@example.com",
+            Type = TwoFactorType.Email,
+            CaptchaToken = "widget-token"
+        });
+
+        // 账号不存在时统一回成功（枚举预言机那条规则），但验证器一定被问过、用的是找回密码的用途。
+        Assert.True(result.Succeeded);
+        _captchaVerifierMock.Verify(x => x.VerifyAsync("widget-token", CaptchaPurpose.PasswordRecovery, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 生效的不是内置图形验证码时，拒绝响应只带提供商名、不出图 —— 前端按 /auth/config 的客户端配置重置控件。
+    /// </summary>
+    [Fact]
+    public async Task LoginAsync_WhenCaptchaRequired_AndProviderIsNotImage_ReturnsProviderNameWithoutAnImage()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnLogin = true },
+        });
+        _captchaServiceMock.Setup(x => x.IsCaptchaRequiredAsync(It.IsAny<string>())).ReturnsAsync(true);
+        _captchaServiceMock.Setup(x => x.IsCacheAvailable).Returns(true);
+        _captchaVerifierMock.SetupGet(x => x.ProviderName).Returns("turnstile");
+
+        var result = await _authService.LoginAsync(new LoginDto { UserName = "someone", Password = "whatever" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        var challenge = Assert.IsType<CaptchaDto>(result.ErrorDetails);
+        Assert.Equal("turnstile", challenge.Provider);
+        Assert.Null(challenge.CaptchaId);
+        Assert.Null(challenge.ImageBase64);
+        _captchaServiceMock.Verify(x => x.GenerateAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 登录页只请求一次 /auth/config：人机验证的客户端配置与新开关随它一起下发。
+    /// </summary>
+    [Fact]
+    public void GetAuthConfig_CarriesTheCaptchaClientConfig_AndTheRecoverySwitch()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnPasswordRecovery = true },
+        });
+        _captchaVerifierMock.Setup(x => x.GetClientConfig()).Returns(new CaptchaClientConfigDto
+        {
+            Enabled = true, Provider = "turnstile", SiteKey = "site", ScriptUrl = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        });
+
+        var dto = _authService.GetAuthConfig().Data!;
+
+        Assert.True(dto.EnableCaptchaOnPasswordRecovery);
+        Assert.True(dto.Captcha.Enabled);
+        Assert.Equal("turnstile", dto.Captcha.Provider);
+        Assert.Equal("site", dto.Captcha.SiteKey);
     }
 
     #endregion

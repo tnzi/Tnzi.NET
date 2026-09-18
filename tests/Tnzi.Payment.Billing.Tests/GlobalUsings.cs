@@ -9,6 +9,11 @@ global using Tnzi.Results;
 global using Tnzi.Security.Authorization;
 global using Tnzi.TestBase;
 
+// 发票的投递与落地：通知请求形状与存储契约（可选注入，测试里按用例注册替身）
+global using Tnzi.Notification.Dtos;
+global using Tnzi.Notification.Services;
+global using Tnzi.Storage.Services;
+
 // Payment 核心（支付实体 / 事件 / 选项 / 权限），方向恒为「本模块 → 父模块」
 global using Tnzi.Payment.Events;
 global using Tnzi.Payment.Metadata;

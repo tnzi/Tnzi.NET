@@ -1,4 +1,9 @@
 export * from './useTheme'
 export * from './usePalette'
 export * from './useBreakpoints'
-export { useOverlayTheme, useOverlayThemeOverrides } from './useOverlayTheme'
+export {
+  OVERLAY_CONTROL_SIZE,
+  useOverlayComponentOptions,
+  useOverlayTheme,
+  useOverlayThemeOverrides,
+} from './useOverlayTheme'

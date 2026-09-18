@@ -17,6 +17,8 @@ public class AgentRuntime : IAgentRuntime
     private readonly IEventPublisher _eventPublisher;
     private readonly ILogger<AgentRuntime> _logger;
     private readonly Lazy<List<IAiMiddleware>> _middlewares;
+    private readonly IAgentThreadService? _threadService;
+    private readonly ISubAgentRunCancellationRegistry? _cancellationRegistry;
     private AiMiddlewareDelegate? _cachedPipelineDelegate;
     private AiStreamingMiddlewareDelegate? _cachedStreamingPipelineDelegate;
 
@@ -30,8 +32,12 @@ public class AgentRuntime : IAgentRuntime
         IServiceProvider serviceProvider,
         IOptionsMonitor<AIOptions> aiOptions,
         IEventPublisher eventPublisher,
-        ILogger<AgentRuntime> logger)
+        ILogger<AgentRuntime> logger,
+        IAgentThreadService? threadService = null,
+        ISubAgentRunCancellationRegistry? cancellationRegistry = null)
     {
+        _threadService = threadService;
+        _cancellationRegistry = cancellationRegistry;
         _agentResolver = Check.NotNull(agentResolver);
         _agentFactory = Check.NotNull(agentFactory);
         _agentRepository = Check.NotNull(agentRepository);
@@ -121,6 +127,40 @@ public class AgentRuntime : IAgentRuntime
                     await _eventPublisher.HandleNewThreadTitleAsync(request, result);
                 }
             }
+            catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested
+                && ResolveCancellation(run) is { Kind: RunCancellationKind.TimedOut } timedOut)
+            {
+                // 超时不是用户的决定，是运行没干完：按 Failed 收尾（可续跑），但 Error 要说清是超时，
+                // 不能与 kill / 真失败共用一句 "The operation was canceled."
+                sw.Stop();
+                var timeout = new TimeoutException(timedOut.Reason, ex);
+                _logger.LogWarning("Agent run {RunId} timed out: {Reason}", run?.Id, timedOut.Reason);
+
+                await _eventPublisher.PublishRunFailedEventAsync(request, run, timeout, sw.ElapsedMilliseconds, false);
+                if (run != null)
+                {
+                    await _runTracker.UpdateRunOnFailureAsync(run, timeout, sw.ElapsedMilliseconds, CancellationToken.None);
+                }
+
+                throw;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // kill_agent / 管理端 cancel 已把行写成 Cancelled 再触发 CTS；调用方自己的令牌（HTTP 断连）同理。
+                // 此前落进下面的 catch (Exception)，Cancelled 被 UpdateRunOnFailureAsync 覆盖成 Failed 并发 RunFailed 事件，
+                // 管理端看到 Failed / CanResume=true。流式路径早有 FinalizeStreamingCancelledAsync，这里是非流式的那一半。
+                sw.Stop();
+                var reason = ResolveCancellation(run)?.Reason ?? "The run was cancelled by the caller";
+                _logger.LogInformation("Agent run {RunId} cancelled: {Reason}", run?.Id, reason);
+
+                await _eventPublisher.PublishRunCancelledEventAsync(request, run, reason, sw.ElapsedMilliseconds, false);
+                if (run != null)
+                {
+                    await _runTracker.UpdateRunOnCancelledAsync(run, reason, sw.ElapsedMilliseconds, CancellationToken.None);
+                }
+
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "AgentRuntime execution failed for request AgentId={AgentId}", request.AgentId);
@@ -163,14 +203,58 @@ public class AgentRuntime : IAgentRuntime
     /// <remarks>
     /// 判据必须来自请求本身：<c>spawn_agent</c> 起的运行在新作用域、新执行流里跑，父级的属性包不会流过去，
     /// 而本方法上一行的 <c>ClearProperties</c> 也会抹掉调用前设的任何标记。
-    /// 带 <c>ParentRunId</c> 的运行按定义就是别人起的子运行 ——
+    /// 带 <c>ParentRunId</c> 的运行按定义就是别人起的子运行；标了 <see cref="AgentRunRequest.IsBackground"/> 的
+    /// 根 spawn（没有父运行）同样是 <c>SpawnAsync</c> 起的子 Agent 运行 ——
     /// 少了这一步，<c>ToolPermissionRule.IsSubAgentOnly</c> 在最常用的那条起子 Agent 路径上一条都不生效。
     /// </remarks>
     private void MarkSubAgentRun(AgentRunRequest request)
     {
-        if (request.ParentRunId.HasValue)
+        if (request.ParentRunId.HasValue || request.IsBackground)
         {
             SubAgentContext.Mark(_executionContextAccessor, _serviceProvider, request.SubAgentName);
+        }
+    }
+
+    /// <summary>
+    /// 无 AgentId 的请求自选的工具组 / 工具名必须逐个在 <c>AI:AdHocTools</c> 允许列表里。
+    /// 有 AgentId 时解析器只看实体授权，请求体的组根本不参与，不在此拦；
+    /// 进程内调用方经 <see cref="AgentRunRequest.TrustedToolSelection"/> 放行。
+    /// 不允许的组一律拒绝而不是静默丢掉 —— 丢掉后调用方以为拿到了工具，模型只是回答「我没有那个工具」。
+    /// </summary>
+    private void EnsureAdHocToolSelectionAllowed(AgentRunRequest request)
+    {
+        var hasSelection = request.ToolGroups is { Count: > 0 } || request.ToolNames is { Count: > 0 };
+        if (!hasSelection || request.TrustedToolSelection || request.AgentId.HasValue)
+        {
+            return;
+        }
+
+        var allowList = _aiOptions.CurrentValue.AdHocTools;
+
+        var disallowedGroup = request.ToolGroups?
+            .FirstOrDefault(g => !allowList.AllowedGroups.Contains(g, StringComparer.OrdinalIgnoreCase));
+        if (disallowedGroup is not null)
+        {
+            _logger.LogWarning(
+                "Rejected ad-hoc tool group '{ToolGroup}' requested without an AgentId (UserId={UserId}); " +
+                "add it to AI:AdHocTools:AllowedGroups to permit client-selected use",
+                disallowedGroup, request.UserId);
+            throw new BusinessException(
+                $"Tool group '{disallowedGroup}' is not allowed for requests without an agent.",
+                ErrorCodes.ToolGroupNotAllowed, 403);
+        }
+
+        var disallowedTool = request.ToolNames?
+            .FirstOrDefault(t => !allowList.AllowedTools.Contains(t, StringComparer.OrdinalIgnoreCase));
+        if (disallowedTool is not null)
+        {
+            _logger.LogWarning(
+                "Rejected ad-hoc tool '{ToolName}' requested without an AgentId (UserId={UserId}); " +
+                "add it to AI:AdHocTools:AllowedTools to permit client-selected use",
+                disallowedTool, request.UserId);
+            throw new BusinessException(
+                $"Tool '{disallowedTool}' is not allowed for requests without an agent.",
+                ErrorCodes.ToolNameNotAllowed, 403);
         }
     }
 
@@ -410,6 +494,8 @@ public class AgentRuntime : IAgentRuntime
                 else if (cancelled)
                 {
                     await _runTracker.FinalizeStreamingCancelledAsync(run, lastFinishReason, durationMs, CancellationToken.None);
+                    await _eventPublisher.PublishRunCancelledEventAsync(
+                        request, run, "Streaming was cancelled by the caller", durationMs, true);
                 }
                 else
                 {
@@ -467,6 +553,20 @@ public class AgentRuntime : IAgentRuntime
             return await _workflowDelegator.ResumeWorkflowRunAsync(run, input, cancellationToken);
         }
 
+        // 授权在改状态之前：线程必须归运行归属人所有。此前先写 Running 再进管线，管线里的归属校验
+        // 抛 404 后 catch 块把运行写成 Failed / Error="Thread not found"，一次误点就毁掉了可续跑状态。
+        if (run.ThreadId.HasValue && run.CreatorId.HasValue && _threadService != null
+            && !await _threadService.IsOwnerAsync(run.ThreadId.Value, run.CreatorId.Value))
+        {
+            _logger.LogWarning("Resume rejected: thread {ThreadId} is not owned by run {RunId}'s owner {OwnerId}",
+                run.ThreadId, run.Id, run.CreatorId);
+            throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
+        }
+
+        // 快照也在改状态之前解析：解析不了（旧行没有 AgentId、或内容损坏）要在行还原样时拒绝，
+        // 不能先写 Running 再发现没法重建请求。
+        var snapshot = ParseResumeSnapshot(run);
+
         var previousStatus = run.Status;
         run.Status = AgentRunStatus.Running;
         await _runTracker.UpdateAsync(run, cancellationToken);
@@ -501,12 +601,31 @@ public class AgentRuntime : IAgentRuntime
             }
         }
 
+        // 按建行时的快照重建请求（工具选择、Provider/Model、子 Agent 标记、完整用户消息），
+        // 父子链与归属人从行上回填。此前只带 AgentId / ThreadId / InputSummary：模板 spawn 的运行续跑成
+        // 无工具的默认 agent，DB agent 的续跑丢掉 IsSubAgent 标记（子 Agent 裁剪整体失效），消息被截到 500 字。
         var resumeRequest = new AgentRunRequest
         {
-            OperationType = AIOperationType.AgentRun,
-            AgentId = run.AgentId,
+            OperationType = snapshot?.OperationType ?? AIOperationType.AgentRun,
+            AgentId = run.AgentId ?? snapshot?.AgentId,
+            Provider = snapshot?.Provider,
+            Model = snapshot?.Model,
             ThreadId = run.ThreadId,
-            UserMessage = input?.UserMessage ?? run.InputSummary,
+            UserMessage = input?.UserMessage ?? snapshot?.UserMessage ?? run.InputSummary,
+            ToolGroups = snapshot?.ToolGroups,
+            ToolNames = snapshot?.ToolNames,
+            TrustedToolSelection = snapshot?.TrustedToolSelection ?? false,
+            ParentRunId = run.ParentRunId,
+            RootRunId = run.RootRunId,
+            IsBackground = snapshot?.IsBackground ?? false,
+            SubAgentName = snapshot?.SubAgentName,
+            AgentVersionNumber = snapshot?.AgentVersionNumber,
+            ReasoningEffort = snapshot?.ReasoningEffort,
+            Attachments = snapshot?.Attachments,
+            Metadata = snapshot?.Metadata,
+            PlanMode = snapshot?.PlanMode ?? false,
+            // 以归属人的身份续跑：配额、权限规则与线程归属都按发起人认，不按点 Resume 的管理员认
+            UserId = run.CreatorId,
             EnableRunTracking = false
         };
 
@@ -529,6 +648,14 @@ public class AgentRuntime : IAgentRuntime
             await _runTracker.UpdateAsync(run, cancellationToken);
             await _runTracker.RecordTraceAsync(run.Id, null, AgentTraceEventTypes.RunCompleted, result, sw.ElapsedMilliseconds, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 续跑被取消（调用方令牌）：与首轮同口径，写 Cancelled 而不是 Failed
+            sw.Stop();
+            await _runTracker.UpdateRunOnCancelledAsync(run, "The resumed run was cancelled by the caller",
+                sw.ElapsedMilliseconds, CancellationToken.None);
+            throw;
+        }
         catch (Exception ex)
         {
             sw.Stop();
@@ -545,6 +672,41 @@ public class AgentRuntime : IAgentRuntime
 
         return result.CloneWith(runId: run.Id, status: run.Status);
     }
+
+    /// <summary>
+    /// 续跑用的请求快照。没有快照的是迁移前的旧行：有 AgentId 的照常续跑（工具由 grants 重建），
+    /// 没有 AgentId 的（模板 spawn）拒绝 —— 静默续跑成无工具的默认 agent 比拒绝更糟。快照损坏同样拒绝。
+    /// </summary>
+    private static AgentRunRequestSnapshot? ParseResumeSnapshot(AgentRun run)
+    {
+        AgentRunRequestSnapshot? snapshot;
+        try
+        {
+            snapshot = AgentRunRequestSnapshot.Parse(run.RequestSnapshot);
+        }
+        catch (JsonException ex)
+        {
+            throw new BusinessException(
+                $"Run {run.Id} cannot be resumed: its request snapshot is unreadable",
+                ErrorCodes.RunInvalidState, 400).WithData("reason", ex.Message);
+        }
+
+        if (snapshot == null && !run.AgentId.HasValue)
+        {
+            throw new BusinessException(
+                $"Run {run.Id} cannot be resumed: it was started without an agent and no request snapshot was recorded",
+                ErrorCodes.RunInvalidState, 400);
+        }
+
+        return snapshot;
+    }
+
+    /// <summary>
+    /// 这次取消是谁发的：kill_agent / 管理端 cancel 与后台超时都经 <see cref="ISubAgentRunCancellationRegistry"/>
+    /// 触发并留下原因；调用方自己的令牌（HTTP 断连等）不经注册表，返回 null。
+    /// </summary>
+    private RunCancellation? ResolveCancellation(AgentRun? run)
+        => run != null ? _cancellationRegistry?.GetCancellation(run.Id) : null;
 
     // ------------------------------------------------------------------------
     // AgentRuntime - core executor + helpers
@@ -571,6 +733,8 @@ public class AgentRuntime : IAgentRuntime
         CancellationToken ct)
     {
         var effectiveModel = ResolveThinkingModel(request);
+
+        EnsureAdHocToolSelectionAllowed(request);
 
         var resolution = await _agentResolver.ResolveAgentAsync(
             request.AgentId, request.Provider, effectiveModel, request.ToolGroups, ct, request.ToolNames);
@@ -622,6 +786,7 @@ public class AgentRuntime : IAgentRuntime
         }
 
         agent = MergeAdditionalTools(agent, context);
+        agent = ApplyToolExclusions(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
         // 逐次创建的策略（AgentAsTools 持有 SemaphoreSlim）必须随本次运行释放；
@@ -683,6 +848,7 @@ public class AgentRuntime : IAgentRuntime
         }
 
         agent = MergeAdditionalTools(agent, context);
+        agent = ApplyToolExclusions(agent, context);
 
         var strategy = ExecutionStrategyResolver.Resolve(resolution.ExecutionMode, resolution.AgentConfiguration);
         // 同 ExecuteCoreAsync：per-run 策略随枚举结束释放，单例策略 as 转换为 null。
@@ -769,6 +935,17 @@ public class AgentRuntime : IAgentRuntime
         var newTools = context.AdditionalTools.Where(t => !existingNames.Contains(t.Name)).ToList();
 
         return newTools.Count > 0 ? agent.WithAdditionalTools(newTools) : agent;
+    }
+
+    /// <summary>
+    /// Withhold the tools a middleware excluded for this turn (skill constraints) from the model.
+    /// Runs after <see cref="MergeAdditionalTools"/> so the agent's own tools and the injected ones
+    /// are treated alike. Execution-time enforcement lives in the tool middleware pipeline and does
+    /// not depend on this step.
+    /// </summary>
+    private static IAgentExecutor ApplyToolExclusions(IAgentExecutor agent, AiMiddlewareContext context)
+    {
+        return context.ExcludedToolNames.Count == 0 ? agent : agent.WithoutTools(context.ExcludedToolNames);
     }
 
     /// <summary>

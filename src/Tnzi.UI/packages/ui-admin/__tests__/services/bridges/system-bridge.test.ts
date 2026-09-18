@@ -121,6 +121,37 @@ describe('system-bridge', () => {
     expect(result.items).toHaveLength(1)
   })
 
+  it('accessLogs.statistics unwraps the envelope and surfaces captureEnabled', async () => {
+    // Capture is opt-in on the backend (System:AccessLog:Enabled, default off):
+    // the KPI tile and the page banner key off this bit to tell "not capturing"
+    // from "no traffic".
+    const accessLogApi = mockAccessLogApi()
+    accessLogApi.getStatistics = vi.fn(async () => ({
+      success: true,
+      data: { captureEnabled: false, totalRequests: 0, uniqueUsers: 0, successRequests: 0, errorRequests: 0, averageResponseTime: 0 },
+    }))
+    const bridge = createSystemBridge({
+      settingApi: mockSettingApi() as never,
+      accessLogApi: accessLogApi as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
+    })
+    const stats = await bridge.accessLogs.statistics()
+    expect(accessLogApi.getStatistics).toHaveBeenCalled()
+    expect(stats.captureEnabled).toBe(false)
+    expect(stats.totalRequests).toBe(0)
+  })
+
+  it('accessLogs.statistics throws on a failed envelope instead of resolving to null', async () => {
+    const accessLogApi = mockAccessLogApi()
+    accessLogApi.getStatistics = vi.fn(async () => ({ success: false, message: 'forbidden' }))
+    const bridge = createSystemBridge({
+      settingApi: mockSettingApi() as never,
+      accessLogApi: accessLogApi as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
+    })
+    await expect(bridge.accessLogs.statistics()).rejects.toThrow()
+  })
+
   it('scheduledJobs.fetch requires an HttpClient (no stub fallback)', async () => {
     // Plan E wired scheduledJobs to real /admin/scheduled-jobs via direct
     // HttpClient calls. When deps.client is missing, the bridge surfaces a

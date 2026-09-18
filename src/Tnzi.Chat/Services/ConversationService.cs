@@ -108,7 +108,17 @@ public class ConversationService : ApplicationService, IConversationService
         if (member == null)
             return Fail<ChatMessageDto>("You are not a member of this conversation.", 403);
 
-        if (input.ContentType == MessageContentType.Text && string.IsNullOrWhiteSpace(input.Content))
+        // ★★ 白名单，不是 `!= System`：System 是框架的带外通道，唯一合法产生者是
+        // GroupService.SystemMessageAsync 与 BroadcastService.DeliverAsync（一律 SenderId = null）。
+        // 此前这里只按「是不是媒体」分支，于是群里任意成员发一条 contentType=System 的消息，
+        // 前端就按框架系统提示渲染 —— 居中、无发件人、与 `[Group created]` 逐字不可区分，
+        // 拿来伪造「本群已迁移，请到 https://… 继续」或掩盖成员变更记录都行。
+        // 入参兼容数字，未定义的整数一并拒绝（预览与前端分支对它的行为未定义）。
+        var carriesFile = input.ContentType is MessageContentType.Image or MessageContentType.File;
+        if (input.ContentType != MessageContentType.Text && !carriesFile)
+            return Fail<ChatMessageDto>("Unsupported message content type.", 400);
+
+        if (!carriesFile && string.IsNullOrWhiteSpace(input.Content))
             return Fail<ChatMessageDto>("Message content is required.", 400);
 
         // ★ 越界的正文在 SQL Server / PostgreSQL 上是一次 DbUpdateException（给用户一个 500），
@@ -118,7 +128,6 @@ public class ConversationService : ApplicationService, IConversationService
         if (tooLong != null)
             return Fail<ChatMessageDto>(tooLong, 400);
 
-        var carriesFile = input.ContentType is MessageContentType.Image or MessageContentType.File;
         if (carriesFile)
         {
             // Deployment-level feature gate; the frontend hides the attachment entry
@@ -127,6 +136,12 @@ public class ConversationService : ApplicationService, IConversationService
                 return Fail<ChatMessageDto>("File and image messages are disabled.", 403);
             if (string.IsNullOrWhiteSpace(input.FileId))
                 return Fail<ChatMessageDto>("File reference is required for media messages.", 400);
+
+            // 文件名是调用方原样给的、与正文同一条写入路径，同样按列宽挡在这里（越界 = 生产 500，
+            // 消息不落库而 Storage 里已上传的文件成了孤儿）。FileId 经下面的 Guid 解析天然有界。
+            var fileNameTooLong = ChatFieldLimits.Exceeded(input.FileName, ChatFieldLimits.FileName, "File name");
+            if (fileNameTooLong != null)
+                return Fail<ChatMessageDto>(fileNameTooLong, 400);
 
             // ★★★ 引用一个文件 id = 把那份文件**发布**给这个会话的全部成员：一条
             // FileReference 落库之后，ChatFileReferenceAccessResolver 只要看到「你是在册成员」

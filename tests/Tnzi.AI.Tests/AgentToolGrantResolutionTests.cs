@@ -60,7 +60,7 @@ public class AgentToolGrantResolutionTests
             factory,
             CreateOptions(),
             agentRepository,
-            toolRegistry ?? new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>()),
+            new UserToolPermissionResolver(toolRegistry ?? new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>()), Mock.Of<ILogger<UserToolPermissionResolver>>()),
             new SimplePromptTemplateEngine(),
             versionRouter.Object,
             grantService,

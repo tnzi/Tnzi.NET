@@ -43,6 +43,9 @@ public class BankStatementIngestor : ApplicationService
     {
         if (string.IsNullOrWhiteSpace(content))
             return Fail<BankImportResultDto>("The statement file is empty.", 400);
+        // 文件名是人给的（上传名），越界拒绝而不截断；在 SQL Server / PostgreSQL 上原样赋值是批次头插入 500。
+        if (fileName != null && fileName.Length > BankTransactionFieldLimits.ImportFileNameMaxLength)
+            return Fail<BankImportResultDto>($"The statement file name is {fileName.Length} characters; it cannot exceed {BankTransactionFieldLimits.ImportFileNameMaxLength}. Rename the file and import it again.", 400);
 
         var accountResult = await _helper.GetFundsAccountAsync(accountId, requiredCurrency: null, cancellationToken);
         if (!accountResult.Succeeded)
@@ -83,6 +86,9 @@ public class BankStatementIngestor : ApplicationService
         {
             return Fail<BankImportResultDto>($"The statement currency '{parsed.Currency}' does not match the account currency '{defaultCurrency}'. Import it into a matching-currency account.", 400);
         }
+        var rowCurrencies = ValidateRowCurrencies(parsed.Transactions, defaultCurrency);
+        if (!rowCurrencies.Succeeded)
+            return Fail<BankImportResultDto>(rowCurrencies.Message!, rowCurrencies.Code ?? 400);
 
         var batch = new BankImportBatch
         {
@@ -153,6 +159,15 @@ public class BankStatementIngestor : ApplicationService
             return Fail<BankImportResultDto>($"The provider returned {pull.Transactions.Count} rows, exceeding the import limit of {_options.BankImportMaxRows}.", 400);
 
         var defaultCurrency = _helper.NormalizeCurrency(account.Currency);
+        var parsedList = pull.Transactions
+            .Select(t => new ParsedBankTransaction(t.PostedDate, t.Amount, t.Currency, t.ExternalId, t.Description, t.Payee, t.Reference))
+            .ToList();
+        // 提供者是消费方可替换的扩展点，逐行币种在批次头落库之前比过账户币种：
+        // 一行外币流水对着本位币 GL 行清算是错账；一个超宽的币种值则是第一行插入 500 而批次头已提交。
+        var rowCurrencies = ValidateRowCurrencies(parsedList, defaultCurrency);
+        if (!rowCurrencies.Succeeded)
+            return Fail<BankImportResultDto>(rowCurrencies.Message!, rowCurrencies.Code ?? 400);
+
         var batch = new BankImportBatch
         {
             AccountId = input.AccountId,
@@ -162,9 +177,6 @@ public class BankStatementIngestor : ApplicationService
         await _batchRepository.InsertAsync(batch, cancellationToken);
         await _batchRepository.SaveChangesAsync(cancellationToken);
 
-        var parsedList = pull.Transactions
-            .Select(t => new ParsedBankTransaction(t.PostedDate, t.Amount, t.Currency, t.ExternalId, t.Description, t.Payee, t.Reference))
-            .ToList();
         var (imported, skipped) = await PersistDeduplicatedTransactionsAsync(
             input.AccountId, batch.Id, BankTransactionSource.Provider, parsedList, defaultCurrency, cancellationToken);
 
@@ -189,6 +201,23 @@ public class BankStatementIngestor : ApplicationService
         }, cancellationToken);
 
         return Ok(new BankImportResultDto { BatchId = batch.Id, ImportedCount = imported, SkippedCount = skipped });
+    }
+
+    /// <summary>
+    /// 逐行币种必须与账户币种一致（空 = 沿用账户币种）。两条来源共用：文件路径此前只比对账单级
+    /// 币种，提供者路径一行都没比。在批次头落库之前调用，这样拒绝是干净的（没有孤儿批次头）。
+    /// </summary>
+    private static Result ValidateRowCurrencies(IReadOnlyList<ParsedBankTransaction> rows, string accountCurrency)
+    {
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var currency = rows[i].Currency;
+            if (string.IsNullOrWhiteSpace(currency))
+                continue;
+            if (!string.Equals(currency.Trim(), accountCurrency, StringComparison.OrdinalIgnoreCase))
+                return Result.Failure($"Row {i + 1} is in currency '{currency.Trim()}', which does not match the account currency '{accountCurrency}'. Import it into a matching-currency account.", 400);
+        }
+        return Result.Success();
     }
 
     /// <summary>
@@ -219,6 +248,9 @@ public class BankStatementIngestor : ApplicationService
                 continue;
             }
 
+            // ★ 按列宽归一化（BankTransactionFieldLimits）：这里是三条来源跨进持久化的唯一入口。
+            //    原样赋值在 SQL Server / PostgreSQL 上会让第 k 行插入抛 500，而批次头与前 k-1 行
+            //    已各自提交、计数停在 0/0 —— 重传时前 k-1 行按去重跳过、第 k 行再炸一次。
             var txn = new BankTransaction
             {
                 AccountId = accountId,
@@ -226,9 +258,9 @@ public class BankStatementIngestor : ApplicationService
                 TxnDate = p.PostedDate.ToUtcDate(),
                 Amount = _helper.Round(p.Amount),
                 Currency = string.IsNullOrWhiteSpace(p.Currency) ? defaultCurrency : p.Currency.Trim().ToUpperInvariant(),
-                Description = p.Description,
-                Payee = p.Payee,
-                Reference = p.Reference,
+                Description = BankTransactionFieldLimits.ClampDescription(p.Description),
+                Payee = BankTransactionFieldLimits.ClampPayee(p.Payee),
+                Reference = BankTransactionFieldLimits.NormalizeReference(p.Reference),
                 ExternalId = externalId,
                 Source = source,
                 Status = BankTransactionStatus.Pending,
@@ -257,13 +289,14 @@ public class BankStatementIngestor : ApplicationService
     }
 
     /// <summary>
-    /// 计算去重键：OFX FITID / provider id 直接用；否则 CSV 规则
-    /// <c>"csv:" + SHA256(accountId|date|amount|normalizedDescription|n)</c>（n = 同文件内相同元组序号）
+    /// 计算去重键：OFX FITID / provider id 直接用（超过列宽则折叠成哈希 —— 它是键，截断会让两个
+    /// 不同的 id 合并、第二笔被当重复静默丢掉；<c>existing</c> 集合按最终值比对，所以折叠在这里收口）；
+    /// 否则 CSV 规则 <c>"csv:" + SHA256(accountId|date|amount|normalizedDescription|n)</c>（n = 同文件内相同元组序号）
     /// </summary>
     private static string ExternalIdFor(BankTransactionSource source, Guid accountId, ParsedBankTransaction p, Dictionary<string, int> occurrences)
     {
         if (!string.IsNullOrWhiteSpace(p.ExternalId))
-            return p.ExternalId.Trim();
+            return BankTransactionFieldLimits.FoldExternalId(p.ExternalId.Trim());
 
         var normalizedDesc = NormalizeDescription(p.Description);
         var tupleKey = $"{p.PostedDate:yyyyMMdd}|{p.Amount.ToString(CultureInfo.InvariantCulture)}|{normalizedDesc}";

@@ -65,8 +65,13 @@ public partial class PaymentService
         if (string.IsNullOrWhiteSpace(callback.TradeNo))
             return Fail(ErrorCodes.PaymentNotFound, 404);
 
-        var payment = await _paymentRepository.FirstOrDefaultAsync(
-            p => p.TradeNo == callback.TradeNo, cancellationToken);
+        // ★ 跨租户按流水号定位。回调是匿名请求，中间件解析不出租户（Stripe / PayPal 不带任何租户线索），
+        // 多租户开启时过滤器就成了 TenantId IS NULL —— 别的租户的每一笔支付在这里都是 404，
+        // 渠道记投递失败并重投直到禁用端点，那些支付永远停在 Processing。
+        // TradeNo 全局唯一，跨租户查它不会串到别人的单上。IgnoreQueryFilters 会把软删过滤器一起关掉，故显式补上。
+        var payment = await _paymentRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.TradeNo == callback.TradeNo && !p.IsDeleted, cancellationToken);
 
         if (payment == null)
         {
@@ -76,14 +81,25 @@ public partial class PaymentService
             return Fail(ErrorCodes.PaymentNotFound, 404);
         }
 
+        // 后续的 CAS、事件发布与下游状态机都要在这笔支付所属的租户里做：
+        // 状态推进是带过滤器的条件更新，租户不对它就安静地影响 0 行。
+        using (_currentTenant?.Change(payment.TenantId))
+        {
+            return await AdvanceFromCallbackAsync(payment, callback, eventId, cancellationToken);
+        }
+    }
+
+    private async Task<Result> AdvanceFromCallbackAsync(PaymentEntity payment, PaymentProviderCallbackResult callback, string? eventId, CancellationToken cancellationToken)
+    {
+        var channelResponse = JsonSerializer.Serialize(callback);
+
         // 幂等 + 防回退：任何终态支付都不再被回调改写
         if (IsTerminalStatus(payment.Status))
         {
+            await RecordPaidAfterLocalCloseAsync(payment, callback.Status, channelResponse, cancellationToken);
             await MarkCallbackProcessedAsync(eventId, cancellationToken);
             return Ok();
         }
-
-        var channelResponse = JsonSerializer.Serialize(callback);
 
         Result applied;
         switch (callback.Status)
@@ -240,6 +256,26 @@ public partial class PaymentService
     }
 
     /// <summary>
+    /// 本地已经关掉 / 过期的单，渠道却报「已付」：钱收了但本地状态不能回退（那会让一张已关闭的业务单收到完成事件）。
+    /// 这笔钱只能退，所以必须留下线索 —— 把渠道回报写在支付行上并告警，而不是像其它终态那样静静吞掉。
+    /// 关单前的作废 / 查渠道状态是第一道，这里是它管不到的那部分（不能作废的渠道、回调与关单同时发生）。
+    /// </summary>
+    private async Task RecordPaidAfterLocalCloseAsync(PaymentEntity payment, PaymentStatus reportedStatus, string channelResponse, CancellationToken cancellationToken)
+    {
+        if (reportedStatus != PaymentStatus.Succeeded
+            || payment.Status is not (PaymentStatus.Closed or PaymentStatus.Expired))
+            return;
+
+        await _paymentRepository.AsQueryable()
+            .Where(p => p.Id == payment.Id && (p.Status == PaymentStatus.Closed || p.Status == PaymentStatus.Expired))
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.ChannelResponse, channelResponse), cancellationToken);
+
+        Logger.LogWarning(
+            "Channel {Channel} reports payment {TradeNo} (channel order {ExternalTradeNo}) as paid after it was locally {Status}: the money was captured for an order this system had already closed and needs a manual refund. Channel response recorded on the payment row.",
+            payment.ChannelCode, payment.TradeNo, payment.ExternalTradeNo, payment.Status);
+    }
+
+    /// <summary>
     /// 终态判定：处于这些状态的支付不应再被回调/同步改写，防止状态回退
     /// </summary>
     private static bool IsTerminalStatus(PaymentStatus status)
@@ -275,12 +311,19 @@ public partial class PaymentService
     private static string BuildCallbackCacheKey(string eventId)
         => $"{PaymentConstants.PaymentCacheKeyPrefix}callback:{eventId}";
 
+    /// <summary>
+    /// 支付事件显式带上付款人与租户：付款人是下游状态机核对归属的依据；租户是因为匿名回调与
+    /// 后台扫描的发布方没有请求上下文，事件总线在新 scope 里捕获到的是空租户，处理器随后会在
+    /// 「TenantId IS NULL」的过滤器下找不到它要推进的那条业务记录。
+    /// </summary>
     private static PaymentCompletedEvent BuildCompletedEvent(PaymentEntity payment) => new()
     {
         PaymentId = payment.Id,
         TradeNo = payment.TradeNo,
         BusinessOrderNo = payment.BusinessOrderNo,
         BusinessType = payment.BusinessType,
+        UserId = payment.UserId,
+        TenantId = payment.TenantId,
         Amount = payment.PaidAmount,
         Currency = payment.Currency,
         ChannelCode = payment.ChannelCode,
@@ -295,6 +338,8 @@ public partial class PaymentService
         TradeNo = payment.TradeNo,
         BusinessOrderNo = payment.BusinessOrderNo,
         BusinessType = payment.BusinessType,
+        UserId = payment.UserId,
+        TenantId = payment.TenantId,
         FailReason = failReason,
         ExtraData = payment.ExtraData
     };

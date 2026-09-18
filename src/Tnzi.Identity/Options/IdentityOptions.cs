@@ -399,12 +399,29 @@ public class OtpOptions
     [RuntimeSetting(Label = "Enable Authenticator (TOTP)", I18n = "admin.modules.system.settings.fields.otpEnableTotp", Type = SettingFieldType.Boolean,
         Description = "Enable authenticator app (TOTP) two-factor. Turn off for deployments that do not use TOTP: the User Center hides it and setup is rejected. Unlike SMS/email, TOTP has no passwordless code-login, it is a second factor only.")]
     public bool EnableTotp { get; set; } = true;
+
+    /// <summary>
+    /// 过期验证码在表里保留多少小时后由会话维护任务删除。默认 24；<c>0</c> 表示永不清理（须显式配置）。
+    /// </summary>
+    /// <remarks>
+    /// 验证码行存的是<b>明文码 + 收件地址 + 用途</b>，验码窗口只有 <see cref="ExpirationMinutes"/>，
+    /// 过期之后对任何流程都没有意义 —— 已用与未用一并清除。保留一段时间只为事后排查（谁在什么时候往哪发过码），
+    /// 所以按过期时刻算而不是按创建时刻算。
+    /// </remarks>
+    [RuntimeSetting(Label = "Code Retention (hours)", I18n = "admin.modules.system.settings.fields.otpRetentionHours", Type = SettingFieldType.Int, Min = 0,
+        Description = "How long (hours) expired one-time codes stay in the database before maintenance deletes them; 0 keeps them forever")]
+    public int RetentionHours { get; set; } = 24;
 }
 
 /// <summary>
-/// 图形验证码配置选项
+/// 人机验证在身份流程上的开关（<c>Identity:Captcha</c>）。
 /// GROUP MERGE：与 <see cref="MultiLoginOptions"/> 共享 identity-login 配置组。
 /// </summary>
+/// <remarks>
+/// 这里只决定<b>哪些流程</b>要过验证码；<b>用哪家</b>验证码在 <c>AspNetCore:Captcha</c>
+/// （<c>Tnzi.AspNetCore.Options.CaptchaVerifierOptions</c>）。没配那一节时本模块把默认提供商补成
+/// 内置图形验证码 <c>image</c>，行为与拆分前逐字相同。
+/// </remarks>
 [ConfigSection("Identity:Captcha")]
 [RuntimeSettingGroup(
     Key = "identity-login",
@@ -435,18 +452,22 @@ public class CaptchaOptions
     public int CaptchaFailThreshold { get; set; } = 3;
 
     /// <summary>
-    /// 验证码提供者（预留：reCAPTCHA, hCaptcha, 自定义等）
+    /// 是否在找回密码时启用验证码（<c>forgot-password</c> 与 <c>password-recovery/send-code</c>，发信之前校验，无条件要求）。
+    /// 这两个端点与注册 / 验证码登录的发码端点同属「每次调用都真的发一封信」的匿名入口，此前不受任何验证码开关管辖。
+    /// </summary>
+    [RuntimeSetting(Label = "Captcha On Password Recovery", I18n = "admin.modules.system.settings.fields.captchaEnableOnPasswordRecovery", Type = SettingFieldType.Boolean, Subsection = "Captcha")]
+    public bool EnableCaptchaOnPasswordRecovery { get; set; } = false;
+
+    /// <summary>
+    /// <b>已迁走</b>：提供商现在配在 <c>AspNetCore:Captcha:Provider</c>。这里保留只是为了让仍写着旧键的部署
+    /// <b>启动即失败</b>（见 <see cref="IdentityOptionsValidator"/>）而不是被静默忽略 —— 这三个键此前从未被任何代码读过。
     /// </summary>
     public string? Provider { get; set; }
 
-    /// <summary>
-    /// 站点密钥（用于客户端）
-    /// </summary>
+    /// <summary>已迁走：配在 <c>AspNetCore:Captcha:SiteKey</c>。设置它是启动错误。</summary>
     public string? SiteKey { get; set; }
 
-    /// <summary>
-    /// 服务端密钥
-    /// </summary>
+    /// <summary>已迁走：配在 <c>AspNetCore:Captcha:SecretKey</c>。设置它是启动错误。</summary>
     public string? SecretKey { get; set; }
 }
 
@@ -727,7 +748,7 @@ public class OAuthOptions
     /// 不设白名单时<b>只放行站内相对路径</b>，绝对地址一律拒绝 —— 这一项没配不等于放行一切。
     /// </para>
     /// <para>
-    /// 留空时回退到 <c>App:FrontendUrl</c>（前端所在的源，也就是 OAuth 唯一要回到的地方），
+    /// 留空时回退到前端 origin（<c>System:FrontendUrl</c>，经 <c>FrontendUrlResolver</c>；前端所在的源，也就是 OAuth 唯一要回到的地方），
     /// 所以绝大多数部署不需要单独配它。前端与 API 不同源、或者有多个前端入口时才需要列举。
     /// </para>
     /// <para>
@@ -736,6 +757,15 @@ public class OAuthOptions
     /// </para>
     /// </remarks>
     public List<string> AllowedReturnOrigins { get; set; } = [];
+
+    /// <summary>
+    /// 个人中心「绑定第三方账号」签发的一次性绑定令牌的有效分钟数。默认 5，须大于 0。
+    /// </summary>
+    /// <remarks>
+    /// 覆盖的是「点绑定 → 提供商同意页 → 回调」这一段人操作的时间；太长等于给一枚能把外部登录挂到
+    /// 本账号上的凭据留出被转发的窗口。回调消费后即失效，与长度无关。
+    /// </remarks>
+    public int LinkTokenLifetimeMinutes { get; set; } = 5;
 }
 
 /// <summary>

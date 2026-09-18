@@ -6,13 +6,29 @@ namespace Tnzi.Template.Services;
 public interface ITemplateEngine
 {
     /// <summary>
-    /// 从字符串渲染模板
+    /// 从字符串渲染模板（HTML 输出：<c>@expr</c> 编码，<c>Raw</c> 例外）。
+    /// 主题、短信这类非 HTML 出口请用带 <see cref="TemplateOutputKind"/> 的重载。
     /// </summary>
     /// <param name="templateContent">模板内容</param>
     /// <param name="model">模板模型</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>渲染后的内容</returns>
     Task<string> RenderAsync(string templateContent, object? model = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 从字符串渲染模板，按 <paramref name="outputKind"/> 决定 <c>@expr</c> 是否 HTML 编码。
+    /// </summary>
+    /// <remarks>
+    /// 编码归属于出口而不是引擎：邮件正文是 HTML（编码），邮件主题与短信正文是纯文本（不编码）。
+    /// 刻意不给默认实现 —— 一个忽略 <paramref name="outputKind"/> 的默认实现会把「主题里的 &amp;」
+    /// 静默渲染成实体，而那正是这个重载存在的理由。
+    /// </remarks>
+    /// <param name="templateContent">模板内容</param>
+    /// <param name="model">模板模型</param>
+    /// <param name="outputKind">输出类型</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>渲染后的内容</returns>
+    Task<string> RenderAsync(string templateContent, object? model, TemplateOutputKind outputKind, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 从文件渲染模板。

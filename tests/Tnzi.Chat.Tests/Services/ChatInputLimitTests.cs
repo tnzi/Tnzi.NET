@@ -36,6 +36,10 @@ public class ChatInputLimitTests : Integration.IntegrationTestBase
         MaxLengthOf<ChatMessage>(nameof(ChatMessage.Title)).ShouldBe(ChatFieldLimits.Title);
         MaxLengthOf<ChatMessage>(nameof(ChatMessage.LinkUrl)).ShouldBe(ChatFieldLimits.LinkUrl);
         MaxLengthOf<ChatMessage>(nameof(ChatMessage.Category)).ShouldBe(ChatFieldLimits.Category);
+        MaxLengthOf<ChatMessage>(nameof(ChatMessage.FileId)).ShouldBe(ChatFieldLimits.FileId);
+        MaxLengthOf<ChatMessage>(nameof(ChatMessage.FileName)).ShouldBe(ChatFieldLimits.FileName);
+        MaxLengthOf<BroadcastLog>(nameof(BroadcastLog.Content)).ShouldBe(ChatFieldLimits.MessageContent);
+        MaxLengthOf<BroadcastLog>(nameof(BroadcastLog.Source)).ShouldBe(ChatFieldLimits.BroadcastSource);
         MaxLengthOf<Conversation>(nameof(Conversation.Title)).ShouldBe(ChatFieldLimits.Title);
         MaxLengthOf<Conversation>(nameof(Conversation.Notice)).ShouldBe(ChatFieldLimits.Notice);
         MaxLengthOf<ConversationMember>(nameof(ConversationMember.Remark)).ShouldBe(ChatFieldLimits.MemberNote);
@@ -125,7 +129,63 @@ public class ChatInputLimitTests : Integration.IntegrationTestBase
         (await Groups.UpdateNoticeAsync(groupId, "Ship on Friday")).Succeeded.ShouldBeTrue();
     }
 
+    // ── 附件文件名 ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ★ <c>FileName</c> 是 09-04 那批唯一漏掉的用户可控字符串：列宽 512，写入侧此前零校验。
+    /// 客户端可任意构造（正常的超长文件名 + URL 编码也够），越界在 SQL Server / PostgreSQL 上
+    /// 是 500，消息不落库而 Storage 里已上传的文件成了无引用的孤儿。
+    /// </summary>
+    [Fact]
+    public async Task An_oversized_file_name_is_refused_and_persists_nothing()
+    {
+        var conversationId = (await Conversations.GetOrCreateDirectAsync(Guid.NewGuid())).Data!.Id;
+
+        var result = await Conversations.SendMessageAsync(conversationId, new SendMessageDto
+        {
+            ContentType = MessageContentType.File,
+            FileId = Guid.NewGuid().ToString(),
+            FileName = Of(ChatFieldLimits.FileName + 1)
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+
+        DbContext.ChangeTracker.Clear();
+        (await DbContext.Set<ChatMessage>().AsNoTracking()
+            .CountAsync(m => m.ConversationId == conversationId)).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_file_name_exactly_at_the_limit_is_accepted()
+    {
+        var conversationId = (await Conversations.GetOrCreateDirectAsync(Guid.NewGuid())).Data!.Id;
+
+        var result = await Conversations.SendMessageAsync(conversationId, new SendMessageDto
+        {
+            ContentType = MessageContentType.File,
+            FileId = Guid.NewGuid().ToString(),
+            FileName = Of(ChatFieldLimits.FileName)
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+    }
+
     // ── 广播 ─────────────────────────────────────────────────────────────────
+
+    /// <summary><c>BroadcastLog.Source</c> 由调用模块填，同样有列宽，同样要挡住。</summary>
+    [Fact]
+    public async Task An_oversized_notification_source_is_refused()
+    {
+        var result = await Broadcasts.NotifyUsersAsync([Guid.NewGuid()], new ChatNotification
+        {
+            Content = "ok",
+            Source = Of(ChatFieldLimits.BroadcastSource + 1)
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
 
     [Fact]
     public async Task An_oversized_broadcast_is_refused()

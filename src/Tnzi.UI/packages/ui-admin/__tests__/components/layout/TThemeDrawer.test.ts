@@ -8,6 +8,11 @@ import { useAdminThemeStore } from '../../../src/stores/useAdminThemeStore'
 
 // vi.mock factory is hoisted before module init - keep stubs inline.
 vi.mock('naive-ui', () => ({
+  // The drawer wears `TOverlayTheme` (the overlay provider); it renders an
+  // abstract NConfigProvider bound to naive's light / dark bases.
+  NConfigProvider: { name: 'NConfigProvider', template: '<slot />' },
+  lightTheme: { common: {} },
+  darkTheme: { common: {} },
   NDrawer: {
     name: 'NDrawer',
     props: ['show', 'width', 'placement'],

@@ -97,10 +97,10 @@ describe('useRagApi', () => {
     });
   });
 
-  it('should build stream URL', () => {
+  it('should build the stream URL through the client baseUrl', () => {
     const api = useRagApi(client);
     const url = api.getStreamUrl();
-    expect(url).toBe('/rag/chat/stream');
+    expect(url).toBe('http://localhost:5000/api/rag/chat/stream');
   });
 });
 

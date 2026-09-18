@@ -14,19 +14,22 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
     private readonly IOptionsMonitor<IdentityOptions>? _identityOptions;
     private readonly IRegistrationService? _registrationService;
     private readonly ILogger<UserRegisteredEventHandler> _logger;
+    private readonly IConfiguration? _configuration;
 
     public UserRegisteredEventHandler(
         INotificationService notificationService,
         ILogger<UserRegisteredEventHandler> logger,
         ISettingService? settingService = null,
         IOptionsMonitor<IdentityOptions>? identityOptions = null,
-        IRegistrationService? registrationService = null)
+        IRegistrationService? registrationService = null,
+        IConfiguration? configuration = null)
     {
         _notificationService = Check.NotNull(notificationService);
         _settingService = settingService;
         _identityOptions = identityOptions;
         _registrationService = registrationService;
         _logger = Check.NotNull(logger);
+        _configuration = configuration;
     }
 
     public async Task HandleAsync(UserRegisteredEvent @event, CancellationToken cancellationToken = default)
@@ -38,7 +41,9 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
             return;
         }
 
-        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底。
+        // 这句对 Result 形态的失败同样成立：CreateAndSendAsync 对业务失败不抛而是返回 Fail，
+        // 由 NotificationDispatch.SendOrThrowAsync 把它变成异常（见该类的注释）。
         // 1. 获取应用配置
         var (appName, frontendUrl, apiBaseUrl) = await GetApplicationConfigAsync();
 
@@ -62,7 +67,11 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
     private async Task<(string AppName, string FrontendUrl, string ApiBaseUrl)> GetApplicationConfigAsync()
     {
         var appName = "Tnzi.NET";
-        var frontendUrl = string.Empty;
+        // 前端 origin 与 Identity 那几处走同一个解析器（System:FrontendUrl，旧键 App:FrontendUrl 回退并告警）：
+        // 此前这里只读 ApplicationOptions.FrontendUrl 而 Identity 只读 App:*，消费方配一个键就以为全配了。
+        // 设置中心把库里的值投影回 IConfiguration，所以按键读到的就是运行期生效值；没注入 IConfiguration 时
+        // 退回 ApplicationOptions 那份。
+        var frontendUrl = FrontendUrlResolver.Resolve(_configuration, _logger) ?? string.Empty;
         var apiBaseUrl = string.Empty;
 
         if (_settingService == null)
@@ -76,7 +85,11 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
             appName = appNameResult.Succeeded ? appNameResult.Data ?? "Tnzi" : "Tnzi";
 
             var appOptions = _settingService.GetApplicationOptions();
-            frontendUrl = appOptions.FrontendUrl ?? string.Empty;
+            if (frontendUrl.Length == 0)
+            {
+                frontendUrl = appOptions.FrontendUrl?.TrimEnd('/') ?? string.Empty;
+            }
+
             apiBaseUrl = appOptions.ApiBaseUrl?.TrimEnd('/') ?? string.Empty;
         }
         catch (Exception ex)
@@ -125,7 +138,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         {
             throw new TnziException(
                 "Email confirmation is required but no API base URL is configured; "
-                + "set Application:ApiBaseUrl (or Application:FrontendUrl) so the confirmation link can be built.");
+                + $"set {ApplicationUrlSettingKeys.ApiBaseUrl} (or {ApplicationUrlSettingKeys.FrontendUrl}) so the confirmation link can be built.");
         }
 
         // 构建确认链接
@@ -207,6 +220,6 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
             ]
         };
 
-        await _notificationService.CreateAndSendAsync(request, cancellationToken);
+        await NotificationDispatch.SendOrThrowAsync(_notificationService, request, "welcome email", cancellationToken);
     }
 }

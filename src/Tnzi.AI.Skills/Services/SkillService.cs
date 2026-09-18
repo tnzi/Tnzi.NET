@@ -66,8 +66,11 @@ public partial class SkillService : ApplicationService, ISkillService
     /// 改一条等于对所有用到它的 agent 做提示注入。
     /// </para>
     /// <para>
-    /// 多租户开启时的分支<b>一字不动</b>：那里 System 一律 403（含租户管理员 —— System 属宿主，
-    /// 不属任何租户），跨租户行一律 404。本判定只补上「单租户 / 宿主上下文」这一半。
+    /// 多租户开启时 System 一律 403（含租户管理员 —— System 属宿主，不属任何租户），
+    /// 跨租户行一律 404。★ 本判定在<b>两种租户模式下都执行</b>：2026-08-09 那轮只补了
+    /// 单租户分支，多租户分支里本租户的 <c>Tenant</c> 作用域行仍然对任何已登录的租户成员
+    /// 敞开 —— 那些行会被 <c>DatabaseSkillStore</c> 加载进该租户每一个 agent 的提示词，
+    /// 「谁能动共享资产」这个问题在多租户下同样要问。
     /// </para>
     /// <para>
     /// 未注册 <c>IPermissionChecker</c> 时返回 false（fail-closed）：那说明宿主没装授权能力，
@@ -300,10 +303,13 @@ public partial class SkillService : ApplicationService, ISkillService
             if (entity.TenantId != tenantId)
                 return Fail<SkillDetailDto>("Skill not found.", 404, ErrorCodes.SkillNotFound);
         }
-        else if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillUpdatePermission))
-        {
+
+        // Shared-scope guard, in BOTH tenancy modes: a non-User row is a shared asset
+        // (System for the host, Tenant for every agent of that tenant) and only a caller
+        // holding the manage code may touch it. See HasManagePermissionAsync for why the
+        // service has to ask the permission code itself.
+        if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillUpdatePermission))
             return Fail<SkillDetailDto>(SharedSkillDeniedMessage, 403, ErrorCodes.SkillUnauthorized);
-        }
 
         // Ownership check for user-scoped skills
         if (entity.Scope == SkillScope.User)
@@ -352,10 +358,10 @@ public partial class SkillService : ApplicationService, ISkillService
             if (entity.TenantId != tenantId)
                 return Fail("Skill not found.", 404, ErrorCodes.SkillNotFound);
         }
-        else if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillDeletePermission))
-        {
+
+        // Shared-scope guard, in BOTH tenancy modes (see UpdateAsync).
+        if (entity.Scope != SkillScope.User && !await HasManagePermissionAsync(SkillDeletePermission))
             return Fail(SharedSkillDeniedMessage, 403, ErrorCodes.SkillUnauthorized);
-        }
 
         // Ownership check for user-scoped skills
         if (entity.Scope == SkillScope.User)

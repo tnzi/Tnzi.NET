@@ -16,7 +16,7 @@ public class SessionBindingIntegrationTests : RelationalIdentityIntegrationTestB
     private const string ChromeWinNewer = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
     private const string FirefoxLinux = "Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0";
 
-    private DatabaseSessionService CreateService() => new(CreateRepository<UserSession>(), ServiceProvider);
+    private DatabaseSessionService CreateService() => new(CreateRepository<UserSession>(), ServiceProvider, new UserTenantScopeProvider(CreateRepository<User>()));
 
     private async Task<UserSession> SeedSessionAsync(
         Guid userId,

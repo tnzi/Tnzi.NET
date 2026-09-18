@@ -81,6 +81,14 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 _logger.LogWarning("Feishu webhook signature verification failed or headers missing, rejecting event");
                 return Task.CompletedTask;
             }
+
+            if (!TryDecryptEnvelope(eventJson, out var plaintext))
+            {
+                _logger.LogWarning("Feishu webhook body is not a valid encrypted envelope, rejecting event");
+                return Task.CompletedTask;
+            }
+
+            return HandleEventCoreAsync(plaintext, ct);
         }
 
         return HandleEventCoreAsync(eventJson, ct);
@@ -170,14 +178,26 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         string rawBody, IReadOnlyDictionary<string, string> headers, CancellationToken ct = default)
     {
         // 验签：配置了 EncryptKey 时强制校验 X-Lark-Signature（SHA256(timestamp+nonce+key+body)）+ 时间窗。
-        // 注：本适配器处理已解密的 JSON（plaintext / 已由前置网关解密）；若启用了"事件加密"
-        // （body 为 {"encrypt":"..."}），需在前置层先用 EncryptKey 做 AES 解密后再转发。
+        // 签名算在原始 body（密文信封）上，所以先验签、后解密。
+        // ★ 在飞书那一侧，配置 Encrypt Key 就等于打开事件加密：此后每一个推送（含 url_verification）
+        // 的 body 都是 {"encrypt":"..."}，X-Lark-Signature 也只在配置了该密钥时才存在。
+        // 此前本适配器要求 EncryptKey 却只解析明文 —— 唯一能过验签的形状恰恰是它解析不了的形状，
+        // 挑战找不到 challenge、事件找不到 event，两边都答 200 空 body，飞书的 URL 验证就此失败。
         if (!string.IsNullOrWhiteSpace(_options.EncryptKey))
         {
             if (!ValidateFeishuSignature(rawBody, new Dictionary<string, string>(headers, StringComparer.OrdinalIgnoreCase)))
             {
                 return WebhookProcessResult.Rejected("Invalid Feishu signature");
             }
+
+            // 配置了密钥而 body 不是密文信封：不是飞书会发出的东西（只能是持钥者伪造），失败关闭。
+            if (!TryDecryptEnvelope(rawBody, out var plaintext))
+            {
+                _logger.LogWarning("Feishu webhook body is not a valid encrypted envelope; rejecting");
+                return WebhookProcessResult.Rejected("Feishu webhook body is not an encrypted envelope");
+            }
+
+            rawBody = plaintext;
         }
         else
         {
@@ -200,6 +220,56 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
         await HandleEventCoreAsync(rawBody, ct);
         return WebhookProcessResult.Accepted();
+    }
+
+    /// <summary>
+    /// 解开飞书「事件加密」信封 <c>{"encrypt":"base64"}</c>：key = SHA256(EncryptKey)，
+    /// 密文 = IV(16 字节) ‖ AES-256-CBC(PKCS7) 密文。非信封 / 解不开 / 解出的不是 JSON 一律返回 false。
+    /// </summary>
+    internal bool TryDecryptEnvelope(string rawBody, out string plaintext)
+    {
+        plaintext = string.Empty;
+        string? encrypted;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawBody);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("encrypt", out var encEl)
+                || encEl.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+            encrypted = encEl.GetString();
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(encrypted)) return false;
+
+        try
+        {
+            var payload = Convert.FromBase64String(encrypted);
+            if (payload.Length <= 16 || (payload.Length - 16) % 16 != 0) return false;
+
+            using var aes = Aes.Create();
+            aes.Key = SHA256.HashData(Encoding.UTF8.GetBytes(_options.EncryptKey!));
+            var decrypted = aes.DecryptCbc(payload.AsSpan(16), payload.AsSpan(0, 16), PaddingMode.PKCS7);
+            var text = Encoding.UTF8.GetString(decrypted);
+
+            // 解出来的必须是 JSON 对象，否则就是密钥不对而恰好通过了填充校验
+            using var check = JsonDocument.Parse(text);
+            if (check.RootElement.ValueKind != JsonValueKind.Object) return false;
+
+            plaintext = text;
+            return true;
+        }
+        catch (Exception ex) when (ex is FormatException or CryptographicException or JsonException or DecoderFallbackException)
+        {
+            _logger.LogDebug(ex, "Feishu encrypted envelope could not be decrypted");
+            return false;
+        }
     }
 
     private bool TryGetFeishuChallenge(string body, out string? challenge, out bool tokenMatches)

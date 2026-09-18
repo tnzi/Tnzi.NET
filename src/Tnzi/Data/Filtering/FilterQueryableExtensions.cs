@@ -6,12 +6,6 @@ namespace Tnzi.Data.Filtering;
 /// </summary>
 public static class FilterQueryableExtensions
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
-
     /// <summary>
     /// 应用过滤条件组
     /// </summary>
@@ -45,7 +39,7 @@ public static class FilterQueryableExtensions
             return query;
         }
 
-        var filter = JsonSerializer.Deserialize<FilterGroup>(json, JsonOptions);
+        var filter = JsonSerializer.Deserialize<FilterGroup>(json, FilterGroupJson.SerializerOptions);
         return query.ApplyFilter(filter);
     }
 
@@ -67,7 +61,7 @@ public static class FilterQueryableExtensions
 
         try
         {
-            var filter = JsonSerializer.Deserialize<FilterGroup>(json, JsonOptions);
+            var filter = JsonSerializer.Deserialize<FilterGroup>(json, FilterGroupJson.SerializerOptions);
             if (filter == null || !filter.HasFilters)
             {
                 return query;

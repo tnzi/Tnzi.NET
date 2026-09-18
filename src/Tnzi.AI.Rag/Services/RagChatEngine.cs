@@ -12,16 +12,19 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
     private readonly IRagRetriever _retriever;
     private readonly IAgentRuntime _agentRuntime;
     private readonly IRagAccessAuthorizer _authorizer;
+    private readonly AIRagOptions _ragOptions;
 
     public RagChatEngine(
         IServiceProvider serviceProvider,
         IRagRetriever retriever,
         IAgentRuntime agentRuntime,
-        IRagAccessAuthorizer authorizer) : base(serviceProvider)
+        IRagAccessAuthorizer authorizer,
+        IOptionsSnapshot<AIRagOptions> ragOptions) : base(serviceProvider)
     {
         _retriever = Check.NotNull(retriever);
         _agentRuntime = Check.NotNull(agentRuntime);
         _authorizer = Check.NotNull(authorizer);
+        _ragOptions = Check.NotNull(ragOptions).Value;
     }
 
     /// <inheritdoc />
@@ -159,10 +162,11 @@ public class RagChatEngine : ApplicationService, IRagChatEngine
     private async Task<List<RetrievalResult>> RetrieveContextAsync(
         RagQueryRequest request, IReadOnlyList<Guid> authorizedKnowledgeBaseIds, CancellationToken ct)
     {
+        // TopK 静默 clamp 到 MaxTopK：Chat 与 ChatStreaming 共用这一处，流式端点少了它就是同一个洞的另一扇门
         var options = new RagRetrievalOptions
         {
             KnowledgeBaseIds = authorizedKnowledgeBaseIds.ToList(),
-            TopK = request.TopK,
+            TopK = Math.Clamp(request.TopK, 1, _ragOptions.MaxTopK),
             MinRelevance = request.MinRelevance
         };
 

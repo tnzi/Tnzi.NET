@@ -23,6 +23,13 @@ export interface ThreadItem {
   readonly id: string
   readonly title: string
   readonly updatedAt?: string
+  /**
+   * An optimistic row for a conversation the backend has not committed yet
+   * (`useChatThreads` adds one on the first turn). It IS the conversation on
+   * screen, so it renders as the active row, and it has nothing server-side
+   * to delete, so the delete affordance is withheld.
+   */
+  readonly pending?: boolean
 }
 
 withDefaults(
@@ -89,7 +96,7 @@ function cancel(): void {
       v-for="thread in threads"
       :key="thread.id"
       class="t-thread-list__row"
-      :class="{ 'is-active': thread.id === activeThreadId }"
+      :class="{ 'is-active': thread.id === activeThreadId || thread.pending }"
     >
       <template v-if="confirmingId === thread.id">
         <span class="t-thread-list__confirm-label">{{ confirmLabel }}</span>
@@ -116,7 +123,7 @@ function cancel(): void {
           </slot>
         </button>
         <button
-          v-if="enableDelete"
+          v-if="enableDelete && !thread.pending"
           type="button"
           class="t-thread-list__del"
           :aria-label="t.chat.deleteConversation"

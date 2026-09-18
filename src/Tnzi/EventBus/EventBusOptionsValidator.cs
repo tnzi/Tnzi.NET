@@ -21,6 +21,12 @@ public class EventBusOptionsValidator : OptionsValidatorBase<EventBusOptions>
             }
         }
 
+        // 消费者组：显式配了就不能是空白（空白会让队列名以 "." 开头，且所有实例都"同名"于一个空串）
+        if (options.ConsumerGroup != null && string.IsNullOrWhiteSpace(options.ConsumerGroup))
+        {
+            errors.Add("EventBus.ConsumerGroup must not be blank when specified; omit it to use the entry assembly name.");
+        }
+
         // 验证最大并发数
         if (options.MaxConcurrency <= 0)
         {

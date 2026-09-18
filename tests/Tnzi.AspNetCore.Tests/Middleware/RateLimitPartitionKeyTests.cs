@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
+using Tnzi.Security.Claims;
 
 namespace Tnzi.AspNetCore.Tests.Middleware;
 
@@ -39,6 +40,18 @@ public class RateLimitPartitionKeyTests
         public string? GetPartitionKey(HttpContext context) => key;
     }
 
+    private sealed class StubCurrentUser(Guid id) : ICurrentUser
+    {
+        public bool IsAuthenticated => true;
+        public Guid? Id => id;
+        public string? UserName => "probe";
+        public Guid? TenantId => null;
+        public string[] Roles => [];
+        public bool IsInRole(string roleName) => false;
+        public string? FindClaim(string claimType) => null;
+        public string[] FindClaims(string claimType) => [];
+    }
+
     private static AspNetCoreOptions OptionsWith(
         MissingPartitionKeyBehavior missing = MissingPartitionKeyBehavior.Allow,
         bool collectIp = true)
@@ -59,7 +72,8 @@ public class RateLimitPartitionKeyTests
         AspNetCoreOptions options,
         IEnumerable<IRateLimitPartitionKeyProvider>? providers = null,
         string? remoteIp = "203.0.113.7",
-        long count = 1)
+        long count = 1,
+        ICurrentUser? currentUser = null)
     {
         var nextCalled = false;
         var middleware = new RateLimitingMiddleware(
@@ -82,6 +96,11 @@ public class RateLimitPartitionKeyTests
             services.AddSingleton(provider);
         }
 
+        if (currentUser != null)
+        {
+            services.AddSingleton(currentUser);
+        }
+
         context.RequestServices = services.BuildServiceProvider();
 
         var rateLimitService = new RecordingRateLimitService(count);
@@ -99,6 +118,48 @@ public class RateLimitPartitionKeyTests
         var (nextCalled, _, service) = await RunAsync(OptionsWith());
 
         Assert.True(nextCalled);
+        Assert.Equal("ip:203.0.113.7:/api/tips", Assert.Single(service.Keys));
+    }
+
+    [Fact]
+    public async Task AuthenticatedUser_IsPartitionedByUserId()
+    {
+        // 已登录用户按用户分区，不按来源地址：同一 NAT 出口的两个人不该共用一个桶，
+        // 一个人换地址也不该换桶。中间件直接调用时这条本来就绿 —— 它守的是分支不被删，
+        // 「认证前就跑、用户恒为空」那个缺陷由 RateLimitPipelineOrderTests 守。
+        var userId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var (nextCalled, _, service) = await RunAsync(OptionsWith(), currentUser: new StubCurrentUser(userId));
+
+        Assert.True(nextCalled);
+        Assert.Equal($"user:{userId}:/api/tips", Assert.Single(service.Keys));
+    }
+
+    [Fact]
+    public async Task ByUserRule_IsSelectedForAuthenticatedUser()
+    {
+        var options = OptionsWith();
+        options.RateLimit!.ByUser = new RateLimitRule { Limit = 5, WindowSeconds = 60 };
+        options.RateLimit.ByIp = new RateLimitRule { Limit = 500, WindowSeconds = 60 };
+
+        // ByUser 的 Limit=5，第 6 次要被挡下；若被误选成 ByIp（500）则会放行。
+        var (nextCalled, statusCode, _) = await RunAsync(
+            options, currentUser: new StubCurrentUser(Guid.NewGuid()), count: 6);
+
+        Assert.False(nextCalled);
+        Assert.Equal(429, statusCode);
+    }
+
+    [Fact]
+    public async Task ByUserRule_IsNotSelectedForAnonymousRequest()
+    {
+        var options = OptionsWith();
+        options.RateLimit!.ByUser = new RateLimitRule { Limit = 5, WindowSeconds = 60 };
+        options.RateLimit.ByIp = new RateLimitRule { Limit = 500, WindowSeconds = 60 };
+
+        var (nextCalled, statusCode, service) = await RunAsync(options, count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Equal(200, statusCode);
         Assert.Equal("ip:203.0.113.7:/api/tips", Assert.Single(service.Keys));
     }
 
@@ -140,6 +201,85 @@ public class RateLimitPartitionKeyTests
         var (_, _, service) = await RunAsync(OptionsWith(), [new StubPartitionProvider(null)]);
 
         Assert.Equal("ip:203.0.113.7:/api/tips", Assert.Single(service.Keys));
+    }
+
+    // ---- 白名单 -------------------------------------------------------------
+    //
+    // 2026-09-12 限流挪到认证之后，已登录请求的「标识」从来源地址变成了用户 ID。
+    // 此前白名单只比对一个标识，于是 ByIp 里写的内部主机地址对带凭据的调用方
+    // （监控、网关、服务账号）不再命中：配置还在、启动无告警，症状是白名单地址收到 429。
+    // 白名单条目既可以是用户 ID 也可以是来源地址，请求带的两个标识任一命中即放行。
+
+    [Fact]
+    public async Task IpInWhitelist_StillExemptsAuthenticatedCaller()
+    {
+        var options = OptionsWith();
+        options.RateLimit!.ByIp = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = ["203.0.113.7"] };
+
+        var (nextCalled, statusCode, service) = await RunAsync(
+            options, currentUser: new StubCurrentUser(Guid.NewGuid()), count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Equal(200, statusCode);
+        Assert.Empty(service.Keys);
+    }
+
+    [Fact]
+    public async Task IpInWhitelist_ExemptsAnonymousCaller()
+    {
+        // 既有行为，不能被这次改动动到。
+        var options = OptionsWith();
+        options.RateLimit!.ByIp = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = ["203.0.113.7"] };
+
+        var (nextCalled, _, service) = await RunAsync(options, count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Empty(service.Keys);
+    }
+
+    [Fact]
+    public async Task UserIdInWhitelist_ExemptsThatUser()
+    {
+        var userId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        var options = OptionsWith();
+        options.RateLimit!.ByUser = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = [userId.ToString()] };
+
+        var (nextCalled, _, service) = await RunAsync(options, currentUser: new StubCurrentUser(userId), count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Empty(service.Keys);
+    }
+
+    [Fact]
+    public async Task ByIpWhitelist_StillExemptsAuthenticatedCaller_WhenByUserRuleIsSelected()
+    {
+        // 2026-09-12 之前 ByUser 从未被选中过，所以同时配了 ByUser 与 ByIp 的部署里，
+        // ByIp 的地址白名单一直对每一个调用方生效。ByUser 现在接管已登录请求，
+        // 地址白名单不能跟着一起消失：地址是请求的属性，不是某条规则的属性。
+        var options = OptionsWith();
+        options.RateLimit!.ByUser = new RateLimitRule { Limit = 5, WindowSeconds = 60 };
+        options.RateLimit.ByIp = new RateLimitRule { Limit = 500, WindowSeconds = 60, Whitelist = ["203.0.113.7"] };
+
+        var (nextCalled, statusCode, service) = await RunAsync(
+            options, currentUser: new StubCurrentUser(Guid.NewGuid()), count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Equal(200, statusCode);
+        Assert.Empty(service.Keys);
+    }
+
+    [Fact]
+    public async Task WhitelistedAddress_DoesNotExemptOtherAddresses()
+    {
+        var options = OptionsWith();
+        options.RateLimit!.ByIp = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = ["10.0.0.5"] };
+
+        var (nextCalled, statusCode, service) = await RunAsync(
+            options, currentUser: new StubCurrentUser(Guid.NewGuid()), count: 6);
+
+        Assert.False(nextCalled);
+        Assert.Equal(429, statusCode);
+        Assert.Single(service.Keys);
     }
 
     // ---- 取不到分区键时的处置 -------------------------------------------------

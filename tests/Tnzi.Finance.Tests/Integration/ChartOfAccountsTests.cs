@@ -144,6 +144,28 @@ public class ChartOfAccountsTests : FinanceIntegrationTestBase
         (await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("4900"))).ShouldBeNull();
     }
 
+    /// <summary>
+    /// 目录项的收入 / 费用科目也是「分录之外还有谁要往这个科目上写」的一种：单据行引用目录项时
+    /// 按它解析科目。一个还没被过账用过的科目在分录检查里是干净的，删掉后下一张带该目录项的单据
+    /// 就解析到一条被软删的科目。这条引用住在核心自己的表里，不经契约提问。
+    /// </summary>
+    [Fact]
+    public async Task Delete_AccountReferencedByAnItem_Fails409()
+    {
+        await SeedCoaAsync();
+        var other = await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("4900"));
+        var item = await InScopeAsync<IItemService, Result<ItemDto>>(
+            s => s.CreateAsync(new CreateItemDto { Name = "Misc service", IncomeAccountId = other!.Id }));
+        item.Succeeded.ShouldBeTrue(item.Message);
+
+        var result = await InScopeAsync<IChartOfAccountsService, Result>(s => s.DeleteAsync(other!.Id));
+
+        result.Succeeded.ShouldBeFalse("an item resolves its income account here");
+        result.Code.ShouldBe(409);
+        result.Message!.ShouldContain("item");
+        (await InScopeAsync<IChartOfAccountsService, Account?>(s => s.FindByCodeAsync("4900"))).ShouldNotBeNull();
+    }
+
     // ---- 系统角色科目守卫（过账按角色解析且要求启用 → 删/停用即让对应过账永久 400）----
 
     /// <summary>1130 Undeposited Funds：种子科目，一条分录都没有，正是"第一天就能删掉"的场景</summary>

@@ -94,36 +94,15 @@ public class CacheInvalidationService : ICacheInvalidationService
 
         try
         {
-            // 如果缓存服务支持模式匹配（如Redis），直接使用
-            if (_cache is IPatternCache patternCache)
-            {
-                await patternCache.RemoveByPatternAsync(pattern, cancellationToken);
-                _logger?.LogDebug("Cache invalidated by pattern: {Pattern}", pattern);
-                return;
-            }
-
-            // 否则，对于内存缓存等不支持模式匹配的实现，记录警告
-            // 在实际应用中，可能需要维护一个缓存键索引来实现模式匹配
-            _logger?.LogWarning(
-                "Pattern-based cache invalidation is not supported by the current cache implementation. Pattern: {Pattern}",
-                pattern);
+            // RemoveByPatternAsync 是 ICache 的必选成员：内存实现与 Redis 实现都有完整的通配符支持。
+            // 此前这里只对一个 Redis 独有的标记接口委托，默认的内存缓存于是「记一条 Warning 然后什么都不删」，
+            // 与线上 Redis 部署行为分叉且零异常。
+            await _cache.RemoveByPatternAsync(pattern, cancellationToken);
+            _logger?.LogDebug("Cache invalidated by pattern: {Pattern}", pattern);
         }
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to invalidate cache by pattern: {Pattern}", pattern);
         }
     }
-}
-
-/// <summary>
-/// 支持模式匹配的缓存接口
-/// </summary>
-public interface IPatternCache : ICache
-{
-    /// <summary>
-    /// 按模式移除缓存（支持通配符）
-    /// </summary>
-    /// <param name="pattern">缓存键模式（支持 * 通配符）</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    new Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default);
 }

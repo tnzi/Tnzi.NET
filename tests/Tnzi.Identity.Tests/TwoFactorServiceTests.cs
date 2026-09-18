@@ -176,6 +176,49 @@ public class TwoFactorServiceTests
         _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(It.IsAny<User>()), Times.Never);
     }
 
+    /// <summary>
+    /// ★★ 已启用验证器的账号不能再走 setup：setup 会无条件 <c>ResetAuthenticatorKeyAsync</c>，
+    /// 拿到一枚被盗访问令牌的人借它就能把受害者的第二因子<b>换成自己的</b>（而不只是摘掉），
+    /// 受害者手里的验证器当场作废。要换验证器先经二次确认把旧的禁用掉。
+    /// </summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_WhenTotpAlreadyEnabled_DoesNotResetKey_Returns409()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId, UserName = "testuser", Email = "test@example.com",
+            TwoFactorEnabled = true, AuthenticatorTwoFactorEnabled = true, PreferredTwoFactorType = TwoFactorType.Totp
+        };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        var result = await _twoFactorService.GetTotpSetupInfoAsync(userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 对照组：旧式账号（总开关开着、按方式的标志位全空、有验证器密钥）经 Materialize 会被判成已启用 TOTP，
+    /// 同样不许重置 —— 判定必须在 Materialize <b>之后</b>做。
+    /// </summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_WhenLegacyTotpUserIsMaterializedAsEnabled_Returns409()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "legacy", Email = "legacy@example.com", TwoFactorEnabled = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.GetAuthenticatorKeyAsync(user)).ReturnsAsync("JBSWY3DPEHPK3PXP");
+        _userManagerMock.Setup(x => x.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+
+        var result = await _twoFactorService.GetTotpSetupInfoAsync(userId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(It.IsAny<User>()), Times.Never);
+    }
+
     [Fact]
     public async Task GetTotpSetupInfoAsync_FormatsSharedKeyWithSpaces()
     {

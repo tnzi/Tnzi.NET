@@ -33,6 +33,7 @@ global using Tnzi.EFCore;
 global using Tnzi.Exceptions;
 global using Tnzi.Extensions;
 global using Tnzi.Modules;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Options;
 global using Tnzi.Results;
 global using Tnzi.Settings;

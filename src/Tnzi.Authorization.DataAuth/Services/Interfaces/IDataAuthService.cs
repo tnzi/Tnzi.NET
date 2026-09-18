@@ -13,7 +13,8 @@ public interface IDataAuthService
     /// <typeparam name="TEntity">实体类型</typeparam>
     /// <param name="userId">用户ID</param>
     /// <param name="operation">操作类型</param>
-    /// <returns>过滤条件表达式</returns>
+    /// <returns>过滤条件表达式；<c>null</c> = 不过滤。角色按 OR 合并，用户只要持有一个对该实体、该操作
+    /// <see cref="EntityRole.Filter"/> 留空的角色就整体不过滤，其它角色再窄也收不回去</returns>
     Task<System.Linq.Expressions.Expression<Func<TEntity, bool>>?> GetDataFilterAsync<TEntity>(Guid userId, DataAuthOperation operation)
         where TEntity : class;
 
@@ -24,18 +25,21 @@ public interface IDataAuthService
     /// <param name="userId">用户ID</param>
     /// <param name="entityId">实体ID</param>
     /// <param name="operation">操作类型</param>
-    /// <returns>是否有权限</returns>
+    /// <returns>是否有权限。只支持 Guid 主键的实体（入参就是 Guid）：非 Guid 主键、没有 Id 属性、仓储未注册一律
+    /// <c>false</c> 并记 Error，不抛</returns>
     Task<bool> CheckDataPermissionAsync<TEntity>(Guid userId, Guid entityId, DataAuthOperation operation)
         where TEntity : class;
 
     /// <summary>
-    /// 通过实体类型名称检查数据权限（非泛型版本，用于 Admin API）
+    /// 通过实体类型名称检查数据权限（非泛型版本，用于 Admin API）：解析到 CLR 类型后与
+    /// <see cref="CheckDataPermissionAsync{TEntity}"/> 同一判定 —— 那一行是否落在用户的过滤范围内。
     /// </summary>
     /// <param name="userId">用户ID</param>
-    /// <param name="entityTypeName">实体类型名称</param>
+    /// <param name="entityTypeName">实体类型名称（CLR 全名）</param>
     /// <param name="entityId">实体ID</param>
     /// <param name="operation">操作类型</param>
-    /// <returns>是否有权限</returns>
+    /// <returns>该行是否在用户的数据范围内；类型未登记 404，登记了但本部署解析不到 CLR 类型 501，
+    /// 实体主键不是 Guid 也 501（入参是 Guid，这次判定做不了）</returns>
     Task<Result<bool>> CheckDataPermissionByTypeNameAsync(Guid userId, string entityTypeName, Guid entityId, DataAuthOperation operation);
 
     #endregion

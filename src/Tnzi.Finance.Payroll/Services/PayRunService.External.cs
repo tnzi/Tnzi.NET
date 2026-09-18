@@ -159,6 +159,16 @@ public partial class PayRunService
                     return Result.Failure<PayRun>($"Salary component '{extLine.ComponentCode}' is not registered; seed the component (or country pack) before ingesting.", 400);
 
                 var amount = Math.Round(extLine.Amount, decimals, MidpointRounding.AwayFromZero);
+                // 与计算器、一次性输入同一口径：只有备注项允许为负。这条曾在本路径缺席 ——
+                // 一个负的扣减项骗得过所有只看合计的守卫（净额仍正、无 Error、按科目聚合后仍正），
+                // 干净地过账并进入此后每一期的 YTD 基数。摄取是一次请求，直接 400 而不是记 CalculationError。
+                if (PayrollAmountRules.IsNegativeMonetary(component.Type, amount))
+                {
+                    return Result.Failure<PayRun>(
+                        $"Line amounts cannot be negative for an earning, deduction or employer-contribution component (employee '{employeeCode}', component '{component.Code}', amount {amount}).",
+                        400);
+                }
+
                 payslip.Lines.Add(new PayslipLine
                 {
                     Sequence = sequence++,
@@ -184,7 +194,8 @@ public partial class PayRunService
             payslip.EmployerCost = employerCost;
             payslip.NetPay = gross - deductions;
             if (payslip.NetPay < 0)
-                payslip.CalculationError = $"Net pay is negative ({payslip.NetPay}); ingested deductions exceed earnings.";
+                payslip.CalculationError = PayslipFieldLimits.ClampCalculationError(
+                    $"Net pay is negative ({payslip.NetPay}); ingested deductions exceed earnings.");
 
             run.Payslips.Add(payslip);
             payslips.Add(payslip);

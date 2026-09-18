@@ -8,36 +8,36 @@ public class AgentResolver : IAgentResolver
     private readonly IAgentFactory _agentFactory;
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IRepository<Agent, Guid> _agentRepository;
-    private readonly IToolRegistry _toolRegistry;
+    private readonly IUserToolPermissionResolver _permissionResolver;
     private readonly IPromptTemplateEngine _templateEngine;
     private readonly IAgentVersionRouter _versionRouter;
     private readonly IAgentGrantService _grantService;
-    private readonly IPermissionChecker? _permissionChecker;
     private readonly IWorkspaceAgentProvider? _workspaceAgentProvider;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<AgentResolver> _logger;
 
     public AgentResolver(
         IAgentFactory agentFactory,
         IOptionsMonitor<AIOptions> options,
         IRepository<Agent, Guid> agentRepository,
-        IToolRegistry toolRegistry,
+        IUserToolPermissionResolver permissionResolver,
         IPromptTemplateEngine templateEngine,
         IAgentVersionRouter versionRouter,
         IAgentGrantService grantService,
         ILogger<AgentResolver> logger,
-        IPermissionChecker? permissionChecker = null,
-        IWorkspaceAgentProvider? workspaceAgentProvider = null)
+        IWorkspaceAgentProvider? workspaceAgentProvider = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _agentFactory = Check.NotNull(agentFactory);
         _options = Check.NotNull(options);
         _agentRepository = Check.NotNull(agentRepository);
-        _toolRegistry = Check.NotNull(toolRegistry);
+        _permissionResolver = Check.NotNull(permissionResolver);
         _templateEngine = Check.NotNull(templateEngine);
         _versionRouter = Check.NotNull(versionRouter);
         _grantService = Check.NotNull(grantService);
         _logger = Check.NotNull(logger);
-        _permissionChecker = permissionChecker;
         _workspaceAgentProvider = workspaceAgentProvider;
+        _executionContextAccessor = executionContextAccessor;
     }
 
     /// <inheritdoc />
@@ -66,15 +66,18 @@ public class AgentResolver : IAgentResolver
                         var wsExecutionMode = ParseExecutionMode(wsAgent.ExecutionMode);
                         // wsAgent.Temperature is float? but the factory takes double? - widen safely.
                         var wsTemperature = wsAgent.Temperature.HasValue ? (double?)wsAgent.Temperature.Value : null;
+                        // 工作区 agent 与 DB agent 过同一道 RequiredPermissions 门：frontmatter 里的工具组
+                        // 是文件作者写的，不是调用者的授权；传 null 会让 sandbox / task / a2a 对任何调用者放行。
+                        var wsUserPermissions = await _permissionResolver.ResolveAsync(wsAgent.ToolGroups, null, ct);
                         var wsExecutor = await _agentFactory.CreateAgentAsync(
                             wsProvider, wsModel, wsInstructions, wsAgent.Name,
                             wsAgent.ToolGroups, wsTemperature, wsAgent.MaxTokens,
-                            options: null, ct: ct);
+                            options: null, userPermissions: wsUserPermissions, ct: ct);
                         // Provide CreationParameters so SkillConstraintMiddleware can rebuild
                         // the executor when a skill triggers a model/provider override.
                         var wsCreationParams = new AgentCreationParameters(
                             wsInstructions, wsAgent.Name, wsAgent.ToolGroups,
-                            wsTemperature, wsAgent.MaxTokens, UserPermissions: null);
+                            wsTemperature, wsAgent.MaxTokens, wsUserPermissions);
                         return AgentResolution.Success(
                             wsExecutor, wsProvider, wsModel, agentId,
                             agentConfiguration: null,
@@ -91,8 +94,12 @@ public class AgentResolver : IAgentResolver
                 return AgentResolution.Failure(defaultProvider, model, agentId, ErrorCodes.AgentDisabled);
             }
 
-            // A/B 测试路由：可能替换为不同版本的配置
-            var routeResult = await _versionRouter.RouteAsync(entity, ct);
+            // 钉住版本（评估）：加载该版本快照，不再 A/B 分流；否则走 A/B 测试路由（可能替换为不同版本的配置）。
+            // 版本号随 AgentRunRequest 走，经执行上下文读取（ResolveAgentAsync 的签名不再加参数）。
+            var pinnedVersion = _executionContextAccessor?.CurrentRequest?.AgentVersionNumber;
+            var routeResult = pinnedVersion.HasValue
+                ? await _versionRouter.RouteToVersionAsync(entity, pinnedVersion.Value, ct)
+                : await _versionRouter.RouteAsync(entity, ct);
             entity = routeResult.Agent;
 
             // 资源授权（junction grant）是工具组/单工具/技能/知识库的唯一权威来源（JSON 列已删除）。
@@ -110,7 +117,7 @@ public class AgentResolver : IAgentResolver
             var knowledgeBaseIds = NullIfEmpty(grants.KnowledgeBaseIds);
             var skillSlugs = NullIfEmpty(grants.SkillSlugs);
 
-            var userPermissions = await ResolveUserPermissionsAsync(entityToolGroups, ct, entityToolNames);
+            var userPermissions = await _permissionResolver.ResolveAsync(entityToolGroups, entityToolNames, ct);
 
             // 渲染 Agent Instructions 模板变量（{{date}}, {{user.name}} 等）
             var renderedInstructions = _templateEngine.Render(
@@ -143,7 +150,7 @@ public class AgentResolver : IAgentResolver
         {
             var adHocGroups = hasToolGroups ? toolGroups : null;
             var adHocNames = hasToolNames ? toolNames : null;
-            var userPermissions = await ResolveUserPermissionsAsync(adHocGroups, ct, adHocNames);
+            var userPermissions = await _permissionResolver.ResolveAsync(adHocGroups, adHocNames, ct);
             var executor = await _agentFactory.CreateAgentAsync(defaultProvider, model, null, null, adHocGroups, options: null, userPermissions: userPermissions, toolNames: adHocNames, ct: ct);
             return AgentResolution.Success(executor, defaultProvider, model, null);
         }
@@ -226,45 +233,6 @@ public class AgentResolver : IAgentResolver
         return Enum.TryParse<AgentExecutionMode>(raw.Trim(), ignoreCase: true, out var mode)
             ? mode
             : AgentExecutionMode.Single;
-    }
-
-    /// <summary>
-    /// 解析当前用户已授权的工具权限集合（汇总工具组 + 单工具两路声明的权限要求）。
-    /// </summary>
-    private async Task<IEnumerable<string>?> ResolveUserPermissionsAsync(IEnumerable<string>? toolGroups, CancellationToken ct, IEnumerable<string>? toolNames = null)
-    {
-        if (toolGroups == null && toolNames == null) return null;
-
-        if (_permissionChecker == null) return null;
-
-        // 收集工具组 + 单工具两路声明的权限要求（按工具名去重，再展开权限）
-        var requiredPermissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (toolGroups != null)
-        {
-            foreach (var t in _toolRegistry.GetToolsByGroups(toolGroups))
-                foreach (var p in t.RequiredPermissions)
-                    requiredPermissions.Add(p);
-        }
-        if (toolNames != null)
-        {
-            foreach (var t in _toolRegistry.GetToolsByNames(toolNames))
-                foreach (var p in t.RequiredPermissions)
-                    requiredPermissions.Add(p);
-        }
-
-        if (requiredPermissions.Count == 0) return null;
-
-        // 逐一检查权限，构建已授权集合
-        var grantedPermissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var permission in requiredPermissions)
-        {
-            if (await _permissionChecker.IsGrantedAsync(permission))
-            {
-                grantedPermissions.Add(permission);
-            }
-        }
-
-        return grantedPermissions;
     }
 
     /// <summary>

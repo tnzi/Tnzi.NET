@@ -81,7 +81,9 @@ public class DockerSandboxProvider : ISandboxProvider
                 deniedCommandPrefixes: dockerOpts.DeniedCommandPrefixes,
                 commandAnalyzer: _commandAnalyzer,
                 deniedPatterns: dockerOpts.DeniedPatterns,
-                maxFileSize: options.MaxFileSizeBytes);
+                maxFileSize: options.MaxFileSizeBytes,
+                // 容器侧路径视图的换根依据：Binds 把这个目录挂在 /workspace。
+                hostWorkspacePath: options.WorkspacePath);
         }
         catch
         {
@@ -175,6 +177,8 @@ public class DockerSandboxProvider : ISandboxProvider
             Env = envList,
             HostConfig = new
             {
+                // 挂载源必须是绝对路径（相对路径会被 Engine 当成卷名或直接拒绝）：
+                // VirtualPathTranslator 在构造时就把 DataRoot 归一化成了绝对路径，线程目录随之绝对。
                 Binds = new[] { $"{options.WorkspacePath}:/workspace" },
                 NanoCPUs = nanoCpus,
                 Memory = memoryBytes,

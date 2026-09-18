@@ -1,3 +1,7 @@
+// 文件级 using：Tnzi.AspNetCore.Options 与本模块的 Tnzi.SignalR.Options 都有 RateLimitOptions，
+// 进 GlobalUsings 会让别的文件产生歧义；这里只要租户 claim 名那一个常量。
+using Tnzi.AspNetCore.Options;
+
 
 namespace Tnzi.SignalR.Hubs;
 
@@ -12,6 +16,12 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     /// <c>Context.Items</c>，供同一条连接后续的 Hub 实例复用。
     /// </summary>
     private const string ConnectionManagerItemKey = "Tnzi.SignalR.ConnectionManager";
+
+    /// <summary>
+    /// 连接级标记：这条连接已经为「事件总线解析不到」记过一次 Warning。
+    /// 连接与断开两端共用，避免同一条连接刷两行一样的话。
+    /// </summary>
+    private const string EventBusWarnedItemKey = "Tnzi.SignalR.EventBusWarned";
 
     private readonly IConnectionManager? _injectedConnectionManager;
     private readonly IPermissionChecker? _permissionChecker;
@@ -46,8 +56,8 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     /// 不出现在 admin 的在线用户/连接查询里、不计入 <c>MaxConnectionsPerUser</c>、
     /// 强制断开对它们无效 —— 而连接本身一切正常，没有任何报错或日志。
     ///
-    /// 解析结果同时写进 <c>Context.Items</c>：Hub 实例每次调用都是新的，而断开时
-    /// 请求作用域未必还可用，那时只能靠连接级的这一份。
+    /// 解析结果同时写进 <c>Context.Items</c>：Hub 实例每次调用都是新的，缓存一份省得
+    /// 每次调用重新解析。
     /// </summary>
     private IConnectionManager? ConnectionManager
     {
@@ -89,6 +99,18 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
                 return userId;
             }
             return null;
+        }
+    }
+
+    /// <summary>
+    /// 当前连接主体的租户（<c>tenant_id</c> claim，与 <c>HttpContextCurrentUser.TenantId</c> 同源）；没有 claim 为 null。
+    /// </summary>
+    protected Guid? CurrentTenantId
+    {
+        get
+        {
+            var claim = Context.User?.FindFirst(TenantResolverOptions.DefaultClaimType);
+            return claim != null && Guid.TryParse(claim.Value, out var tenantId) ? tenantId : null;
         }
     }
 
@@ -189,8 +211,15 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
         // 将用户添加到用户组并记录连接
         if (CurrentUserId.HasValue)
         {
-            var groupName = $"User_{CurrentUserId.Value}";
+            var groupName = HubGroupNames.ForUser(CurrentUserId.Value);
             await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+
+            // ★ 带租户 claim 的连接同时进租户组：「发给整个租户」的推送投递到它，而不是 Clients.All。
+            //   没有 claim 的连接不进任何租户组（关闭方向：按租户推送时收不到，而不是收到所有租户的）。
+            if (CurrentTenantId is { } tenantId)
+            {
+                await Groups.AddToGroupAsync(Context.ConnectionId, HubGroupNames.ForTenant(tenantId));
+            }
 
             // 连接管理记录为辅助操作，不应影响核心连接生命周期
             var connectionManager = ConnectionManager;
@@ -228,8 +257,13 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
         // 从用户组移除并清理连接记录
         if (CurrentUserId.HasValue)
         {
-            var groupName = $"User_{CurrentUserId.Value}";
+            var groupName = HubGroupNames.ForUser(CurrentUserId.Value);
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+
+            if (CurrentTenantId is { } tenantId)
+            {
+                await Groups.RemoveFromGroupAsync(Context.ConnectionId, HubGroupNames.ForTenant(tenantId));
+            }
 
             // 连接管理清理为辅助操作，不应影响核心断开生命周期
             var connectionManager = ConnectionManager;
@@ -331,21 +365,43 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     }
 
     /// <summary>
-    /// 从连接的请求服务里延迟解析一个可选服务。
+    /// 延迟解析一个可选服务。
     ///
     /// Hub 的构造发生在 DI 之外（无参构造是允许的），而这些能力都是可选的：解析不到就
-    /// 少一项辅助功能，不该让连接失败。请求作用域在连接生命周期末尾可能已经不可用，
-    /// 所以吞掉解析异常是刻意的 —— 调用方按 null 处理。
+    /// 少一项辅助功能，不该让连接失败。
+    ///
+    /// ★ 来源顺序：先是 <see cref="HubInvocationServicesFilter"/> 放进 <c>Context.Items</c>
+    /// 的 Hub 激活作用域（三种传输都有，且在本次回调返回前不会被释放），其次才是
+    /// <c>HttpContext.RequestServices</c>。后者在长轮询下靠不住：SignalR 给长轮询连接的是
+    /// 一份克隆的 <c>HttpContext</c>，它的作用域随连接释放而释放，而
+    /// <see cref="OnDisconnectedAsync"/> 在那之后才跑 —— 只从它解析的话，断开事件与
+    /// 中断表注销在长轮询下一律静默丢失。吞掉解析异常是刻意的，调用方按 null 处理。
     /// </summary>
     private TService? GetRequestService<TService>() where TService : class
     {
+        var items = Context?.Items;
+        if (items != null
+            && items.TryGetValue(HubInvocationServicesFilter.ItemKey, out var exposed)
+            && exposed is IServiceProvider invocationServices)
+        {
+            var fromInvocation = TryGetService<TService>(invocationServices);
+            if (fromInvocation != null) return fromInvocation;
+        }
+
+        return TryGetService<TService>(Context?.GetHttpContext()?.RequestServices);
+    }
+
+    private static TService? TryGetService<TService>(IServiceProvider? services) where TService : class
+    {
+        if (services == null) return null;
+
         try
         {
-            return Context?.GetHttpContext()?.RequestServices?.GetService<TService>();
+            return services.GetService<TService>();
         }
         catch (ObjectDisposedException)
         {
-            // 连接已经结束，请求作用域被释放
+            // 作用域已被释放（长轮询断开时的 HttpContext 克隆体就是这个形状）
             return null;
         }
         catch (InvalidOperationException)
@@ -356,15 +412,33 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     }
 
     /// <summary>
-    /// 获取日志记录器（从 Hub 上下文的请求服务中延迟解析）
+    /// 获取日志记录器（延迟解析）
     /// </summary>
     private ILogger? GetLogger() =>
         GetRequestService<ILoggerFactory>()?.CreateLogger(GetType());
 
     /// <summary>
-    /// 获取事件总线（从 Hub 上下文的请求服务中延迟解析）
+    /// 获取事件总线（延迟解析）。
+    ///
+    /// 解析不到时按连接记一次 Warning：此前「事件总线模块未加载」「作用域已释放」
+    /// 「一切正常」三种情况在日志里一模一样，连接事件掉了没有任何症状。
     /// </summary>
-    private IEventBus? GetEventBus() => GetRequestService<IEventBus>();
+    private IEventBus? GetEventBus()
+    {
+        var eventBus = GetRequestService<IEventBus>();
+        if (eventBus != null) return eventBus;
+
+        var items = Context?.Items;
+        if (items != null && !items.ContainsKey(EventBusWarnedItemKey))
+        {
+            items[EventBusWarnedItemKey] = true;
+            GetLogger()?.LogWarning(
+                "IEventBus could not be resolved for connection {ConnectionId} on {HubName}; connection events will not be published for it",
+                Context?.ConnectionId, GetType().Name);
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// 将用户添加到指定组 (SignalR group + ConnectionManager tracking)
@@ -420,13 +494,13 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
 
     /// <summary>
     /// Get the typed client proxy for a specific user (by user ID).
-    /// Uses the convention-based user group "User_{userId}" to target all of a user's connections.
+    /// Uses the convention-based user group (<see cref="HubGroupNames.ForUser"/>) to target all of a user's connections.
     /// </summary>
     /// <param name="userId">Target user ID</param>
     /// <returns>Typed client proxy for the user</returns>
     protected TClient UserClient(Guid userId)
     {
-        var groupName = $"User_{userId}";
+        var groupName = HubGroupNames.ForUser(userId);
         return Clients.Group(groupName);
     }
 

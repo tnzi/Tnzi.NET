@@ -18,21 +18,34 @@ public class FeatureService : ApplicationService, IFeatureService
     private readonly IRepository<FeatureValue, Guid> _valueRepository;
     private readonly IFeatureManager _featureManager;
     private readonly IReadOnlyList<IFeatureValueProvider> _providers;
+    private readonly ICurrentTenant? _currentTenant;
 
     /// <summary>
     /// Initialize FeatureService
     /// </summary>
+    /// <param name="serviceProvider">Service provider.</param>
+    /// <param name="definitionRepository">Feature definition repository.</param>
+    /// <param name="valueRepository">Feature value repository.</param>
+    /// <param name="featureManager">Feature manager.</param>
+    /// <param name="providers">Registered feature value providers.</param>
+    /// <param name="currentTenant">
+    /// Current tenant accessor; the admin surface is scoped by the caller's tenant (see
+    /// <see cref="CallerTenantId"/>). Absent (unit tests, hosts without it) the caller's tenant
+    /// falls back to the current user's claim.
+    /// </param>
     public FeatureService(
         IServiceProvider serviceProvider,
         IRepository<FeatureDefinition, Guid> definitionRepository,
         IRepository<FeatureValue, Guid> valueRepository,
         IFeatureManager featureManager,
-        IEnumerable<IFeatureValueProvider> providers)
+        IEnumerable<IFeatureValueProvider> providers,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _definitionRepository = Check.NotNull(definitionRepository);
         _valueRepository = Check.NotNull(valueRepository);
         _featureManager = Check.NotNull(featureManager);
+        _currentTenant = currentTenant;
         Check.NotNull(providers);
         // Same order the runtime evaluates them in (FeatureChecker), so inheritance shown to
         // the admin follows the same chain.
@@ -275,7 +288,45 @@ public class FeatureService : ApplicationService, IFeatureService
                 ErrorCodes.FeatureValueProviderKeyNotAllowed);
         }
 
+        // ★ 租户归属由身份决定，不由客户端参数决定：租户内的调用者点名别的键（通常是别的租户 id）
+        // 返回 403 而不是静默改写成本租户。宿主（无租户）可点名任意键。
+        var tenantId = CallerTenantId;
+        if (tenantId != null && !provider.IsKeyAccessibleTo(tenantId, key))
+        {
+            return Fail<ValueScope>(
+                "Feature values of another tenant are not accessible",
+                403,
+                ErrorCodes.FeatureValueScopeForbidden);
+        }
+
         return Ok(new ValueScope(provider, key));
+    }
+
+    /// <summary>
+    /// 调用者所属租户（字符串形式，与 <see cref="FeatureValue.ProviderKey"/> 同口径）；宿主 / 单租户部署为 null。
+    /// 与 <see cref="TenantFeatureValueProvider"/> 同源：先看 <see cref="ICurrentTenant"/>，退回当前用户的租户。
+    /// </summary>
+    private string? CallerTenantId => (_currentTenant?.Id ?? CurrentUser?.TenantId)?.ToString();
+
+    /// <summary>
+    /// 按 id 的删除是否对调用者可见：别的租户的行等同于不存在（404，不泄露存在性）。
+    /// </summary>
+    /// <remarks>
+    /// 行的 provider 仍注册时由它裁决（<see cref="IFeatureValueProvider.IsKeyAccessibleTo"/>）；
+    /// 已注销 provider 的遗留行没人替它的键作证，失败关闭：有键的行只有键等于本租户才可见。
+    /// </remarks>
+    private bool CanAccess(FeatureValue value)
+    {
+        var tenantId = CallerTenantId;
+        if (tenantId == null)
+        {
+            return true;
+        }
+
+        var provider = _providers.FirstOrDefault(p => string.Equals(p.Name, value.ProviderName, StringComparison.OrdinalIgnoreCase));
+        return provider != null
+            ? provider.IsKeyAccessibleTo(tenantId, value.ProviderKey)
+            : value.ProviderKey == null || string.Equals(value.ProviderKey, tenantId, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Re-type a failed result without losing message, status or error code.</summary>
@@ -418,7 +469,7 @@ public class FeatureService : ApplicationService, IFeatureService
             .Include(v => v.FeatureDefinition)
             .FirstOrDefaultAsync();
 
-        if (entity == null)
+        if (entity == null || !CanAccess(entity))
         {
             return Fail("Feature value not found", 404, ErrorCodes.FeatureValueNotFound);
         }

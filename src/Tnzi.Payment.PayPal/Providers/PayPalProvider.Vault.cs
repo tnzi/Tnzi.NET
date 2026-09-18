@@ -171,11 +171,18 @@ public partial class PayPalProvider
             }
 
             // 归属校验：凭据上带的商户侧客户标识必须就是当前用户。
-            // PayPal 只在我们创建时写了它才会回传，所以只在有值时判定——
-            // 有值而不匹配是明确的越权信号，必须拒绝；没有值只能说明信息不足，不能据此放行或拒绝。
+            // 本系统铸的每一枚凭据都带 merchant_customer_id（CreateSetupSessionAsync 写的），没带的只可能是
+            // 同一商户名下、绕过本系统流程铸出来的凭据 —— 本系统无从证明它属于调用者，与「属于别人」同样拒绝。
+            // ★ 缺失不等于放行：此前这里只在有值时判定，与 Stripe 侧「customer 没有 UserId 元数据 ⇒ 403」方向相反。
             var merchantCustomerId = token.Customer?.MerchantCustomerId;
-            if (!string.IsNullOrWhiteSpace(merchantCustomerId)
-                && !string.Equals(merchantCustomerId, input.UserId.ToString(), StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(merchantCustomerId))
+            {
+                _logger.LogWarning(
+                    "PayPal vault token {Token} carries no merchant_customer_id, so it was not created for this user by this system; binding rejected.", token.Id);
+                return Result.Failure<PaymentProviderPaymentMethodResult>(ErrorCodes.PaymentMethodBindingFailed, 403);
+            }
+
+            if (!string.Equals(merchantCustomerId, input.UserId.ToString(), StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning(
                     "PayPal vault token {Token} belongs to another user; binding rejected.", token.Id);

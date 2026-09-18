@@ -396,9 +396,12 @@ public enum UserRolesChangeType
 /// </summary>
 /// <remarks>
 /// <para>
-/// ★ <strong>框架不替你发这封信。</strong>与 <see cref="PasswordResetRequestedEvent"/> 同一惯例：
-/// 邀请邮件的措辞、模板、抬头、从哪个邮箱发出、走邮件还是走企业微信，
-/// 都是消费应用的事。订阅这个事件，用 <see cref="AcceptUrl"/> 自己发。
+/// ★ <strong>邮件那一版框架替你发</strong>，与 <see cref="PasswordResetRequestedEvent"/> 同一惯例：
+/// 同时加载了 Identity 与 Notification 时，<c>Tnzi.Hosting</c> 的 <c>UserInvitedEventHandler</c>
+/// 用 <c>UserInvited</c> 模板把 <see cref="AcceptUrl"/> 发到 <see cref="Email"/>（要换措辞就改那个模板；
+/// 链接不是绝对地址时它拒发并抛异常，先配 <c>Identity:Invitation:AcceptUrlTemplate</c> 或前端 origin <c>System:FrontendUrl</c>）。
+/// 要走短信 / 企业微信 / 钉钉，或换掉整封信，才需要订阅这个事件自己发 ——
+/// 注册了自己的处理器<strong>不会</strong>让框架的那个停下，两个都会跑，把框架的换掉要在 DI 里移除它。
 /// </para>
 /// <para>
 /// ★★ <see cref="AcceptUrl"/> 里含着令牌明文，而库里只有它的哈希 ——
@@ -431,6 +434,6 @@ public class UserInvitedEvent : EventBase
     /// <summary>是否为重发（首次发出为 false）。文案通常要区分。</summary>
     public bool IsResend { get; set; }
 
-    /// <summary>站点名，取自 <c>App:SiteName</c>，供邮件模板使用。</summary>
+    /// <summary>站点名，经 <c>SiteNameResolver</c> 取自 <c>System:SiteName</c>（旧键 <c>App:SiteName</c>），供邮件模板使用；两个键都没配时为 null。</summary>
     public string? SiteName { get; set; }
 }

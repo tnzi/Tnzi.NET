@@ -203,3 +203,103 @@ public class RedisDistributedLockTests
         Assert.False(handle.IsAcquired);
     }
 }
+
+public class RedisDistributedLockLostSignalTests
+{
+    private static RedisResult Ok(long value) => RedisResult.Create((RedisValue)value, ResultType.Integer);
+
+    private static (Mock<IConnectionMultiplexer> Mux, Mock<IDatabase> Db) BuildMux()
+    {
+        var db = new Mock<IDatabase>();
+        db.Setup(d => d.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
+            .ReturnsAsync(true);
+        var mux = new Mock<IConnectionMultiplexer>();
+        mux.Setup(m => m.GetDatabase(It.IsAny<int>(), It.IsAny<object>())).Returns(db.Object);
+        return (mux, db);
+    }
+
+    /// <summary>
+    /// 看门狗判定锁丢失时，<see cref="IDistributedLockHandle.Lost"/> 必须取消：
+    /// 一个只在获取瞬间为 true 的布尔量没有人会在临界区中途回头看，续租监测等于从未影响过任何行为。
+    /// </summary>
+    [Fact]
+    public async Task Lost_IsCancelled_WhenRenewalFails()
+    {
+        var (mux, db) = BuildMux();
+        db.Setup(d => d.ScriptEvaluateAsync(It.IsAny<string>(), It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), It.IsAny<CommandFlags>()))
+            .Returns((string script, RedisKey[] _, RedisValue[] __, CommandFlags ___) =>
+                Task.FromResult(script.Contains("pexpire") ? Ok(0) : Ok(1)));
+        var sut = new RedisDistributedLock(mux.Object, new LockOptions { DefaultExpirySeconds = 3, EnableAutoRenewal = true });
+
+        await using var handle = await sut.AcquireAsync("r");
+        var lost = handle!.Lost;
+        Assert.False(lost.IsCancellationRequested);
+
+        var signalled = new TaskCompletionSource();
+        using var registration = lost.Register(() => signalled.TrySetResult());
+
+        // 续租间隔 = max(1s, expiry/3) = 1s；首次续租返回 0 即判丢失
+        await signalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(lost.IsCancellationRequested);
+        Assert.False(handle.IsAcquired);
+    }
+
+    /// <summary>
+    /// 续租循环本身抛异常（Redis 不可达）与「脚本返回 0」是同一件事：都要取消 Lost。
+    /// </summary>
+    [Fact]
+    public async Task Lost_IsCancelled_WhenRenewalThrows()
+    {
+        var (mux, db) = BuildMux();
+        db.Setup(d => d.ScriptEvaluateAsync(It.IsAny<string>(), It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), It.IsAny<CommandFlags>()))
+            .Returns((string script, RedisKey[] _, RedisValue[] __, CommandFlags ___) =>
+                script.Contains("pexpire")
+                    ? Task.FromException<RedisResult>(new InvalidOperationException("redis down"))
+                    : Task.FromResult(Ok(1)));
+        var sut = new RedisDistributedLock(mux.Object, new LockOptions { DefaultExpirySeconds = 3, EnableAutoRenewal = true });
+
+        await using var handle = await sut.AcquireAsync("r");
+        var signalled = new TaskCompletionSource();
+        using var registration = handle!.Lost.Register(() => signalled.TrySetResult());
+
+        await signalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(handle.Lost.IsCancellationRequested);
+    }
+
+    /// <summary>
+    /// 正常释放不是丢失：Lost 不得在 Dispose 时取消，否则把「干完了」与「被抢了」混成一个信号。
+    /// </summary>
+    [Fact]
+    public async Task Lost_IsNotCancelled_ByDispose()
+    {
+        var (mux, db) = BuildMux();
+        db.Setup(d => d.ScriptEvaluateAsync(It.IsAny<string>(), It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync(Ok(1));
+        var sut = new RedisDistributedLock(mux.Object, new LockOptions { DefaultExpirySeconds = 3, EnableAutoRenewal = true });
+
+        var handle = await sut.AcquireAsync("r");
+        var lost = handle!.Lost;
+        await handle.DisposeAsync();
+
+        Assert.False(lost.IsCancellationRequested);
+        Assert.False(handle.IsAcquired);
+    }
+
+    /// <summary>
+    /// 关闭续租 = 固定过期语义，没有看门狗也就没有丢失检测：Lost 永不取消，而不是抛异常。
+    /// </summary>
+    [Fact]
+    public async Task Lost_NeverFires_WhenAutoRenewalIsDisabled()
+    {
+        var (mux, db) = BuildMux();
+        db.Setup(d => d.ScriptEvaluateAsync(It.IsAny<string>(), It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync(Ok(1));
+        var sut = new RedisDistributedLock(mux.Object, new LockOptions { EnableAutoRenewal = false });
+
+        await using var handle = await sut.AcquireAsync("r");
+
+        Assert.False(handle!.Lost.CanBeCanceled);
+    }
+}

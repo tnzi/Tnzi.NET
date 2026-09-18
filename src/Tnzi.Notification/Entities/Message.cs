@@ -113,6 +113,16 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public string? TemplateName { get; set; }
 
     /// <summary>
+    /// 服务商键：这条消息由该渠道上哪一个具名发送器投递；<see langword="null"/> = 默认发送器。
+    /// </summary>
+    /// <remarks>
+    /// 必须落库而不是只留在请求里：排队、定时、重试、重启续发都从这条记录出发，同一条消息的
+    /// 每一次投递尝试都要走同一家。创建时由调用方显式指定，或由 <c>INotificationProviderSelector</c>
+    /// 按业务规则选出；两者都经 <c>NotificationProviderKeys.Normalize</c> 收口，「默认」只有 <see langword="null"/> 一种写法。
+    /// </remarks>
+    public string? ProviderKey { get; set; }
+
+    /// <summary>
     /// Scheduled send time (null = send immediately or as queued)
     /// When set, notification will not be sent until this time
     /// </summary>

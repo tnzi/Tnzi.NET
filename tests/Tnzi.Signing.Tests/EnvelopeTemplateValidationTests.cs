@@ -1,7 +1,12 @@
+using Moq;
 using Tnzi.EFCore;
+using Tnzi.Results;
 using Tnzi.Signing.Dtos;
 using Tnzi.Signing.Entities;
 using Tnzi.Signing.Metadata;
+using Tnzi.Storage;
+using Tnzi.Storage.Entities;
+using Tnzi.Storage.Services;
 using Tnzi.TestBase;
 
 namespace Tnzi.Signing.Tests;
@@ -11,7 +16,7 @@ namespace Tnzi.Signing.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 签署请求直接拿模板的 <c>RenderedPdfFileId</c> 当底稿 —— <c>EnvelopeService</c> 只对
+/// 签署请求拿模板的 <c>RenderedPdfFileId</c> 当底稿（发出时再把发起方的值烧上去）—— <c>EnvelopeService</c> 只对
 /// Composed 模板逐份现排版。所以一个只给了原件、没给渲染稿的上传型模板会**保存成功**，
 /// 然后建出来的每一份请求都带着一个空的文档引用走完整个流程，直到有人去签才发现没有东西可签。
 /// </para>
@@ -25,7 +30,26 @@ public class EnvelopeTemplateValidationTests : IntegratedTestBase<SigningRaceDbC
         ServiceProvider,
         new EFCoreRepository<SigningRaceDbContext, EnvelopeTemplate, Guid>(DbContext, serviceProvider: ServiceProvider),
         new EFCoreRepository<SigningRaceDbContext, Field, Guid>(DbContext, serviceProvider: ServiceProvider),
-        new EFCoreRepository<SigningRaceDbContext, Envelope, Guid>(DbContext, serviceProvider: ServiceProvider));
+        new EFCoreRepository<SigningRaceDbContext, Envelope, Guid>(DbContext, serviceProvider: ServiceProvider),
+        PermissiveFileAccess(),
+        AnyPdfRecord());
+
+    /// <summary>一律放行的归属探针：这一组关心的是表单校验，归属那道门在 <c>EnvelopeTemplateFileAccessTests</c>（真实 Storage 栈）。</summary>
+    private static IFileReadAccessProbe PermissiveFileAccess()
+    {
+        var probe = new Mock<IFileReadAccessProbe>();
+        probe.Setup(p => p.CanReadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        return probe.Object;
+    }
+
+    /// <summary>任何 id 都是一份 PDF 记录。</summary>
+    private static IFileStorageService AnyPdfRecord()
+    {
+        var files = new Mock<IFileStorageService>();
+        files.Setup(f => f.GetRecordAsync(It.IsAny<Guid>()))
+            .ReturnsAsync((Guid id) => Result.Success(new FileRecord { Id = id, FileName = "contract.pdf", ContentType = "application/pdf" }));
+        return files.Object;
+    }
 
     private static CreateEnvelopeTemplateDto Uploaded(Guid? source, Guid? rendered) => new()
     {
@@ -77,6 +101,74 @@ public class EnvelopeTemplateValidationTests : IntegratedTestBase<SigningRaceDbC
         Assert.True(result.Succeeded);
         Assert.Equal(fileId, result.Data!.SourceFileId);
         Assert.Equal(fileId, result.Data.RenderedPdfFileId);
+    }
+
+    private static TemplateFieldInputDto Field(SigningFieldType type, string? recipientRole) => new()
+    {
+        Key = "sig",
+        Label = "Signature",
+        Type = type,
+        RecipientRole = recipientRole,
+        PlacementMode = FieldPlacementMode.Absolute,
+        Page = 1,
+        X = 0.1m,
+        Y = 0.8m,
+        W = 0.3m,
+        H = 0.05m,
+    };
+
+    private static CreateEnvelopeTemplateDto UploadedWith(TemplateFieldInputDto field)
+    {
+        var fileId = Guid.NewGuid();
+        var dto = Uploaded(source: fileId, rendered: fileId);
+        dto.Fields = [field];
+        return dto;
+    }
+
+    /// <summary>
+    /// 签名类字段必须说清谁来签。没有角色的签名字段不属于任何收件人的「我的字段」：
+    /// 没人被要求交图，密封时按角色找不到图就静默跳过，成品没有签名却照常出证书、归档。
+    /// </summary>
+    [Theory]
+    [InlineData(SigningFieldType.Signature, null)]
+    [InlineData(SigningFieldType.Signature, "")]
+    [InlineData(SigningFieldType.Signature, "   ")]
+    [InlineData(SigningFieldType.Initials, null)]
+    [InlineData(SigningFieldType.Initials, "")]
+    public async Task A_signature_field_without_a_recipient_role_is_refused(SigningFieldType type, string? role)
+    {
+        var result = await Service.CreateAsync(UploadedWith(Field(type, role)));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Contains("sig", result.Message);
+        Assert.Contains("recipient role", result.Message, StringComparison.OrdinalIgnoreCase);
+
+        DbContext.ChangeTracker.Clear();
+        Assert.Empty(DbContext.Set<EnvelopeTemplate>().ToList());
+    }
+
+    [Theory]
+    [InlineData(SigningFieldType.Signature)]
+    [InlineData(SigningFieldType.Initials)]
+    public async Task A_signature_field_with_a_recipient_role_is_accepted(SigningFieldType type)
+    {
+        var result = await Service.CreateAsync(UploadedWith(Field(type, "Client")));
+
+        Assert.True(result.Succeeded, result.Message);
+    }
+
+    /// <summary>发起方预填是文本字段的合法选择 —— 这条规则只管签名类字段。</summary>
+    [Theory]
+    [InlineData(SigningFieldType.Text)]
+    [InlineData(SigningFieldType.Date)]
+    [InlineData(SigningFieldType.Number)]
+    [InlineData(SigningFieldType.Checkbox)]
+    public async Task A_text_field_without_a_recipient_role_is_still_allowed(SigningFieldType type)
+    {
+        var result = await Service.CreateAsync(UploadedWith(Field(type, null)));
+
+        Assert.True(result.Succeeded, result.Message);
     }
 
     [Fact]

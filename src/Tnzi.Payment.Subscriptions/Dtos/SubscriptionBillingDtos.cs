@@ -77,6 +77,12 @@ public class SubscriptionPaymentContext
     public Guid? ChangeId { get; set; }
 
     /// <summary>
+    /// 付款人（<c>Payment.UserId</c>）。状态机只认订阅主自己的支付：元数据是路由键不是凭据，
+    /// 缺了这一项等于任何人拿自己的支付单加一段自填的 ExtraData 就能推进别人的订阅。
+    /// </summary>
+    public Guid? PayerUserId { get; set; }
+
+    /// <summary>
     /// 支付交易流水号
     /// </summary>
     public string? PaymentTradeNo { get; set; }

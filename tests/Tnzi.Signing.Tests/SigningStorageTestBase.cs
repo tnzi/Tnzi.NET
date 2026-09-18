@@ -6,6 +6,7 @@ using Moq;
 using Tnzi.Documents.Models;
 using Tnzi.Documents.Services;
 using Tnzi.EFCore;
+using Tnzi.MultiTenancy;
 using Tnzi.Security.Authorization;
 using Tnzi.Security.Claims;
 using Tnzi.Signing.Dtos;
@@ -70,6 +71,9 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
 
     protected InMemoryFileStorage Bucket { get; } = new();
     protected CountingStamper Stamper { get; } = new();
+
+    /// <summary>领域侧插进来的合并变量 provider；默认一个都没有。</summary>
+    protected virtual IEnumerable<IMergeSourceProvider> MergeProviders => [];
     protected StorageOptions StorageOptions { get; } = new()
     {
         AutoGenerateThumbnail = false,
@@ -81,8 +85,23 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
     {
         private int _stamps;
 
+        /// <summary>置位后下一次盖章抛异常（模拟一次瞬时的密封失败），然后自动复位。</summary>
+        public bool FailNext { get; set; }
+
+        /// <summary>每一次盖章收到的请求，按先后顺序（发出前的预填、密封各是一次）。</summary>
+        public List<PdfStampRequest> Requests { get; } = [];
+
         public byte[] Stamp(byte[] pdf, PdfStampRequest request)
-            => [.. pdf, .. BitConverter.GetBytes(Interlocked.Increment(ref _stamps))];
+        {
+            if (FailNext)
+            {
+                FailNext = false;
+                throw new InvalidOperationException("Simulated stamping failure.");
+            }
+
+            Requests.Add(request);
+            return [.. pdf, .. BitConverter.GetBytes(Interlocked.Increment(ref _stamps))];
+        }
 
         public byte[] Create(PdfStampRequest request) => [0x25, 0x50, 0x44, 0x46];
     }
@@ -102,19 +121,24 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             FileAccessGrantContext grants,
             FileStorageService files,
             FileAccessAuthorizer authorizer,
-            EnvelopeService envelopes)
+            EnvelopeService envelopes,
+            EnvelopeTemplateService templates)
         {
             _scope = scope;
             Grants = grants;
             Files = files;
             Authorizer = authorizer;
             Envelopes = envelopes;
+            Templates = templates;
         }
 
         public FileAccessGrantContext Grants { get; }
         public FileStorageService Files { get; }
         public FileAccessAuthorizer Authorizer { get; }
         public EnvelopeService Envelopes { get; }
+
+        /// <summary>模板服务，带真实的 <see cref="FileReadAccessProbe"/>（写入侧的归属探针）。</summary>
+        public EnvelopeTemplateService Templates { get; }
 
         public void Dispose() => _scope.Dispose();
     }
@@ -156,7 +180,8 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             new NoPublicFields(),
             new Mock<IFileUrlSigner>().Object,
             sp,
-            new UploadGuard(options.Object));
+            new UploadGuard(options.Object),
+            new FileThumbnailGenerator(Bucket, options.Object));
 
         var envelopes = new EnvelopeService(
             sp,
@@ -165,14 +190,23 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             new EFCoreRepository<SigningStorageDbContext, FieldValue, Guid>(db, null, sp),
             new EFCoreRepository<SigningStorageDbContext, EnvelopeTemplate, Guid>(db, null, sp),
             new EFCoreRepository<SigningStorageDbContext, Field, Guid>(db, null, sp),
-            new MergeSourceRegistry([], []),
+            new MergeSourceRegistry(MergeProviders, []),
             new SigningSealer(Stamper, new Mock<IPdfInspector>().Object, files, NullLogger<SigningSealer>.Instance),
             new SigningCertificateBuilder(Stamper, files, NullLogger<SigningCertificateBuilder>.Instance),
             new ComposedDocumentRenderer(Stamper),
             files,
-            grants);
+            grants,
+            sp.GetRequiredService<ICurrentTenant>());
 
-        return new Request(scope, grants, files, authorizer, envelopes);
+        var templates = new EnvelopeTemplateService(
+            sp,
+            new EFCoreRepository<SigningStorageDbContext, EnvelopeTemplate, Guid>(db, null, sp),
+            new EFCoreRepository<SigningStorageDbContext, Field, Guid>(db, null, sp),
+            new EFCoreRepository<SigningStorageDbContext, Envelope, Guid>(db, null, sp),
+            new FileReadAccessProbe(fileRecords, authorizer),
+            files);
+
+        return new Request(scope, grants, files, authorizer, envelopes, templates);
     }
 
     /// <summary>存一份文件。存是不经读取判定的（新建不是读）；CreatorId 取自当前用户（匿名时为空）。</summary>
@@ -184,11 +218,16 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
         return saved.Data!.Id;
     }
 
-    /// <summary>建一份单签署人、已发出的请求，返回渲染稿 id、请求 id 与那个人的令牌。</summary>
-    protected async Task<(Guid RenderedId, Guid RequestId, string Token)> ArrangeSentEnvelopeAsync(
-        IReadOnlyList<Field>? fields = null)
+    /// <summary>直接写库造一份 Uploaded 模板（不经模板服务的入口校验），返回模板 id 与渲染稿 id。</summary>
+    /// <param name="fields">模板字段。</param>
+    /// <param name="renderedFileName">
+    /// 渲染稿的文件名（决定 Storage 记下的 Content-Type）。模板行直接写库、不经模板服务的入口校验，
+    /// 所以这里能造出一份「渲染稿不是 PDF」的存量模板 —— 那正是收件人面要拒绝的形态。
+    /// </param>
+    protected async Task<(Guid TemplateId, Guid RenderedId)> ArrangeTemplateAsync(
+        IReadOnlyList<Field>? fields = null, string renderedFileName = "contract.pdf")
     {
-        var renderedId = await StoreAsync("contract.pdf", RenderedPdf);
+        var renderedId = await StoreAsync(renderedFileName, RenderedPdf);
 
         var template = new EnvelopeTemplate
         {
@@ -209,14 +248,34 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             await DbContext.SaveChangesAsync();
         }
 
+        return (template.Id, renderedId);
+    }
+
+    /// <summary>默认的单个收件人：角色 Client。</summary>
+    protected static List<CreateSignerDto> SingleClient() => [new CreateSignerDto { Role = "Client", Name = "Alice" }];
+
+    /// <summary>建一份已发出的请求，返回渲染稿 id、请求 id 与各收件人的令牌（按收件人顺序）。</summary>
+    /// <param name="fields">模板字段。</param>
+    /// <param name="renderedFileName">见 <see cref="ArrangeTemplateAsync"/>。</param>
+    /// <param name="recipients">收件人；默认一个 Client。</param>
+    /// <param name="prefilledValues">发起方预填。</param>
+    protected async Task<(Guid RenderedId, Guid RequestId, IReadOnlyList<string> Tokens)> ArrangeSentEnvelopeWithTokensAsync(
+        IReadOnlyList<Field>? fields = null,
+        string renderedFileName = "contract.pdf",
+        List<CreateSignerDto>? recipients = null,
+        Dictionary<string, string?>? prefilledValues = null)
+    {
+        var (templateId, renderedId) = await ArrangeTemplateAsync(fields, renderedFileName);
+
         Guid requestId;
         using (var create = BeginRequest())
         {
             var created = await create.Envelopes.CreateAsync(new CreateEnvelopeDto
             {
-                TemplateId = template.Id,
+                TemplateId = templateId,
                 Title = "Engagement Letter",
-                Recipients = [new CreateSignerDto { Role = "Client", Name = "Alice" }],
+                Recipients = recipients ?? SingleClient(),
+                PrefilledValues = prefilledValues,
             });
             created.Succeeded.ShouldBeTrue(created.Message);
             requestId = created.Data!.Id;
@@ -225,7 +284,15 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
         using var send = BeginRequest();
         var sent = await send.Envelopes.SendAsync(requestId);
         sent.Succeeded.ShouldBeTrue(sent.Message);
-        return (renderedId, requestId, sent.Data!.Single().Token);
+        return (renderedId, requestId, sent.Data!.Select(l => l.Token).ToList());
+    }
+
+    /// <summary>建一份单签署人、已发出的请求，返回渲染稿 id、请求 id 与那个人的令牌。</summary>
+    protected async Task<(Guid RenderedId, Guid RequestId, string Token)> ArrangeSentEnvelopeAsync(
+        IReadOnlyList<Field>? fields = null, string renderedFileName = "contract.pdf")
+    {
+        var (renderedId, requestId, tokens) = await ArrangeSentEnvelopeWithTokensAsync(fields, renderedFileName);
+        return (renderedId, requestId, tokens.Single());
     }
 
     protected static async Task<byte[]> ReadAllAsync(Stream stream)

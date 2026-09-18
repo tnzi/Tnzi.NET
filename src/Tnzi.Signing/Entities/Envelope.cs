@@ -45,7 +45,10 @@ public class Envelope : FullAuditedEntity<Guid>, IMultiTenant, IConcurrencyStamp
     /// <summary>发出时模板与字段的冻结副本（JSON）。</summary>
     public string TemplateSnapshotJson { get; set; } = string.Empty;
 
-    /// <summary>发出时的 PDF：合并变量已烧进去，签名框还空着。</summary>
+    /// <summary>
+    /// 签署人看到的 PDF：发出时（<c>SendAsync</c>）把发起方负责的字段值烧进去、签名框还空着。
+    /// 发出前是模板的渲染稿（Composed 模板在发起时已逐份排版）；没有任何可烧的值时发出后仍是它。
+    /// </summary>
     [FileField]
     public Guid? RenderedPdfFileId { get; set; }
 

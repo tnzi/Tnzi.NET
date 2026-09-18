@@ -40,7 +40,9 @@ public class AiMiddlewareOrderingTests
     }
 
     /// <summary>
-    /// 验证 22 个中间件槽位全部定义
+    /// 验证 22 个中间件槽位全部定义（2026-09-12 删掉 SubAgentLimit=550：它在历史消息里找一个
+    /// 不存在的工具名，从未生效；子 Agent 的开关 / 并发 / 超时改由 SubAgentExecutionService 执行；
+    /// 同日加入 ThreadResolution=40：线程必须在 ThreadData / Sandbox 之前解析，否则新会话首轮没有沙箱）
     /// </summary>
     [Fact]
     public void OrderConstants_Has22Slots()
@@ -53,6 +55,7 @@ public class AiMiddlewareOrderingTests
     /// 验证已知的关键顺序约束
     /// </summary>
     [Theory]
+    [InlineData(nameof(AiMiddlewareOrders.ThreadResolution), nameof(AiMiddlewareOrders.ThreadData))]
     [InlineData(nameof(AiMiddlewareOrders.ThreadData), nameof(AiMiddlewareOrders.Sandbox))]
     [InlineData(nameof(AiMiddlewareOrders.Sandbox), nameof(AiMiddlewareOrders.FileUpload))]
     [InlineData(nameof(AiMiddlewareOrders.InputGuardrail), nameof(AiMiddlewareOrders.Quota))]

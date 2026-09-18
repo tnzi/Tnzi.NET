@@ -12,7 +12,9 @@ public class RequestValidationOptions
 
     /// <summary>
     /// 获取或设置 时间戳验证窗口（秒），默认 300 秒（5 分钟）
-    /// 请求时间戳与服务器时间的差值不能超过此值
+    /// 请求时间戳与服务器时间的差值不能超过此值。
+    /// ★ 与 <see cref="NonceExpirationSeconds"/> 有约束关系：一条请求在其时间戳前后各 W 秒内都合法，
+    /// 所以 <c>RequireNonce</c> 时 NonceExpirationSeconds 必须 ≥ 2 × 本值（启动校验强制）。
     /// </summary>
     public int TimestampWindowSeconds { get; set; } = 300;
 
@@ -33,6 +35,8 @@ public class RequestValidationOptions
 
     /// <summary>
     /// 获取或设置 Nonce 过期时间（秒），默认 600 秒（10 分钟）
+    /// ★ 必须 ≥ 2 × <see cref="TimestampWindowSeconds"/>，否则 nonce 忘掉之后时间戳仍在窗口内，
+    /// 抓到的签名请求可以原样重放；调大时间戳窗口时要一起调它。
     /// </summary>
     public int NonceExpirationSeconds { get; set; } = 600;
 

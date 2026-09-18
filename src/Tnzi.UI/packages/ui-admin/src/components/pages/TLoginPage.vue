@@ -32,6 +32,7 @@ import { TThemeSchemaSwitch } from '@tnzi/ui'
 import { TLangSwitch } from '@tnzi/ui'
 import LoginWaves from './login/LoginWaves.vue'
 import LoginBrandPanel from './login/LoginBrandPanel.vue'
+import { useAdminClient } from '../../plugin/client'
 import {
   provideLoginContext,
   type PendingActionChallenge,
@@ -47,6 +48,7 @@ import {
   type TwoFactorChallenge,
   type LoginCaptchaData,
 } from '@tnzi/ui'
+import type { SessionEndReason } from '@tnzi/core/state'
 
 interface Props {
   /** Active module. Defaults to `'pwd-login'`. */
@@ -121,6 +123,22 @@ interface Props {
    * back to the `#content` slot, then the built-in form body.
    */
   contentComponent?: Component
+  /**
+   * Why the previous session ended (core's `auth.sessionEndReason`), rendered
+   * as a notice above the active module. `'security'` is the one message the
+   * user has no other way to receive: the backend revoked the session because
+   * the credentials looked stolen. `LoginView` reads it off the wired runtime;
+   * a consumer mounting this shell by hand passes it explicitly.
+   */
+  sessionEndReason?: SessionEndReason | null
+  /**
+   * Resolves an API-relative path against the API base, handed to the modules'
+   * `<TCaptcha>` for providers whose widget fetches its own challenge (Altcha).
+   * Defaults to the client `createTnziUiAdmin({ client })` injected, so the
+   * built-in route needs nothing; a shell mounted by hand in an app without
+   * that client passes `(u) => http.resolveUrl(u)`.
+   */
+  resolveUrl?: (url: string) => string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -145,9 +163,17 @@ const props = withDefaults(defineProps<Props>(), {
   features: () => DEFAULT_LOGIN_FEATURES,
   asideComponent: undefined,
   contentComponent: undefined,
+  sessionEndReason: null,
+  resolveUrl: undefined,
 })
 
 const theme = useTheme()
+
+// The API base for the captcha widget's own fetch (Altcha). Read from the injected
+// admin client so the built-in login route cannot forget it; optional because a
+// hand-mounted shell (tests, an app that passed no client) may have none.
+const adminClient = useAdminClient(false)
+const resolveUrl = props.resolveUrl ?? (adminClient ? (url: string) => adminClient.resolveUrl(url) : undefined)
 
 function t(key: string, fallback?: string): string {
   if (props.translate) return props.translate(key, fallback)
@@ -229,6 +255,27 @@ const splitHeadingSub = computed(() => {
 const waveHeading = computed(() =>
   qrMode.value ? t('admin.login.qr.title', 'QR Code Login') : activeLabel.value,
 )
+
+// ---- session-end notice ----------------------------------------------------
+// Rendered in both layouts, above the module. The security case gets the
+// warning tone: it is the only signal the legitimate user gets that their
+// credentials are in use elsewhere, so it must not read like a routine expiry.
+const sessionNotice = computed<{ text: string; tone: 'warning' | 'info' } | null>(() => {
+  switch (props.sessionEndReason) {
+    case 'security':
+      return {
+        tone: 'warning',
+        text: t(
+          'admin.login.sessionEndedForSecurity',
+          'Your session was ended for security reasons. Please sign in again.',
+        ),
+      }
+    case 'expired':
+      return { tone: 'info', text: t('admin.login.sessionExpired', 'Your session expired. Please sign in again.') }
+    default:
+      return null
+  }
+})
 
 // Phase I.7.5 - outstanding 2FA challenge state. PwdLogin / CodeLogin
 // callbacks push into this via `helpers.setTwoFactorRequired(...)`, and
@@ -324,6 +371,7 @@ const loginContext: LoginContext = {
   pendingAction,
   pendingCaptcha,
   helpers,
+  resolveUrl,
 }
 provideLoginContext(loginContext)
 </script>
@@ -371,6 +419,15 @@ provideLoginContext(loginContext)
         </header>
         <main class="pt-24px">
           <h3 data-test="t-login-page-module-label" class="m-0 text-18px text-primary font-500">{{ waveHeading }}</h3>
+          <p
+            v-if="sessionNotice"
+            data-test="t-login-page-notice"
+            class="t-login__notice"
+            :class="`t-login__notice--${sessionNotice.tone}`"
+            role="status"
+          >
+            {{ sessionNotice.text }}
+          </p>
           <div class="pt-24px">
             <div v-if="qrMode && qrComponent" class="t-login__qr" data-test="t-login-page-qr-panel">
               <div class="t-login__qr-frame">
@@ -437,6 +494,15 @@ provideLoginContext(loginContext)
             <h2 data-test="t-login-page-module-label" class="t-login__form-title">{{ splitHeading }}</h2>
             <p v-if="splitHeadingSub" class="t-login__form-sub">{{ splitHeadingSub }}</p>
           </div>
+          <p
+            v-if="sessionNotice"
+            data-test="t-login-page-notice"
+            class="t-login__notice"
+            :class="`t-login__notice--${sessionNotice.tone}`"
+            role="status"
+          >
+            {{ sessionNotice.text }}
+          </p>
           <div v-if="qrMode && qrComponent" class="t-login__qr" data-test="t-login-page-qr-panel">
             <div class="t-login__qr-frame">
               <component :is="qrComponent" />
@@ -452,6 +518,29 @@ provideLoginContext(loginContext)
 </template>
 
 <style scoped>
+/* ---------------- session-end notice (both layouts) ---------------- */
+.t-login__notice {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid transparent;
+}
+.t-login__notice--warning {
+  color: var(--tnzi-warning, #b45309);
+  background: rgb(var(--tnzi-warning-rgb, 245 158 11) / 0.1);
+  border-color: rgb(var(--tnzi-warning-rgb, 245 158 11) / 0.35);
+}
+.t-login__notice--info {
+  color: var(--tnzi-text-secondary, #4b5563);
+  background: rgb(var(--tnzi-primary-rgb, 99 102 241) / 0.06);
+  border-color: rgb(var(--tnzi-primary-rgb, 99 102 241) / 0.2);
+}
+.t-login--split .t-login__notice {
+  margin-bottom: 4px;
+}
+
 /* ---------------- wave layout ---------------- */
 .t-login--wave .t-login__card {
   position: relative;

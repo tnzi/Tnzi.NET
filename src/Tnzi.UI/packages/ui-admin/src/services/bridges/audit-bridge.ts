@@ -16,10 +16,13 @@
  *   Both sub-contracts delegate to the same API; the split reflects different
  *   page views (log-centric vs operation-centric column sets) not different endpoints.
  *
- *   logs.exportCsv/exportJson: direct Blob downloads via client.download
- *   (POST with AuditOperationQueryDto body; backend returns UTF-8 BOM CSV /
- *   JSON file with ApiResult envelope on failure). Trigger the browser save
- *   with downloadBlob from @tnzi/core/utils.
+ *   logs/operations.exportCsv/exportJson: direct Blob downloads via
+ *   client.download (POST with AuditOperationQueryDto body; backend returns
+ *   UTF-8 BOM CSV / JSON file, or an ApiResult envelope on failure - which the
+ *   bridge REJECTS with the server message, e.g. the AUDIT_EXPORT_TOO_LARGE
+ *   "narrow the filter" refusal). Trigger the browser save with downloadBlob
+ *   from @tnzi/core/utils. The Logs / Operations pages expose both through
+ *   TAuditTimeline's export menu, scoped to the active filter.
  */
 import {
   useAdminAuditApi,
@@ -35,7 +38,7 @@ import {
   type RecordAccessUserStatDto,
 } from '@tnzi/core/services/audit'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminAuditApi>[0]
 
@@ -62,6 +65,10 @@ export interface AuditBridge {
   operations: BridgeCrudContract<AuditOperationDto> & {
     /** Full detail by id - includes entityEntries/propertyEntries (list rows do not). */
     detail(id: string): Promise<AuditOperationDto>
+    /** Export the write-operations view as CSV; `isWriteOperation: true` is forced like `fetch`. */
+    exportCsv(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
+    /** Export the write-operations view as JSON; `isWriteOperation: true` is forced like `fetch`. */
+    exportJson(query?: Partial<AuditOperationQueryDto>): Promise<Blob>
   }
   /**
    * Record-level read trail (optional backend capability, off by default).
@@ -111,7 +118,7 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   if (!auditApi) {
     return {
       logs: { ...unavailable<AuditBridge['logs']>(), detail: noFetch as never, exportCsv: noFetch as never, exportJson: noFetch as never },
-      operations: { ...unavailable<AuditBridge['operations']>(), detail: noFetch as never },
+      operations: { ...unavailable<AuditBridge['operations']>(), detail: noFetch as never, exportCsv: noFetch as never, exportJson: noFetch as never },
       recordAccess: buildRecordAccess(recordAccessApi),
       destruction: buildDestruction(destructionApi),
     }
@@ -146,6 +153,16 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   const detail = async (id: string): Promise<AuditOperationDto> =>
     unwrap<AuditOperationDto>(await api.getById(id))
 
+  // Exports go through `unwrapOk`: `client.download` RESOLVES the backend's
+  // refusal envelope (400 AUDIT_EXPORT_TOO_LARGE "narrow the filter", 403), and a
+  // bare unwrap turned it into `undefined` - the page then had nothing to show
+  // and the message written for the operator never reached one. `extra` is
+  // spread last for the same reason as in fetchAudit.
+  const exportCsv = async (query: Partial<AuditOperationQueryDto> | undefined, extra?: Partial<AuditOperationQueryDto>): Promise<Blob> =>
+    unwrapOk<Blob>(await api.exportCsv({ ...(query ?? {}), ...extra } as AuditOperationQueryDto))
+  const exportJson = async (query: Partial<AuditOperationQueryDto> | undefined, extra?: Partial<AuditOperationQueryDto>): Promise<Blob> =>
+    unwrapOk<Blob>(await api.exportJson({ ...(query ?? {}), ...extra } as AuditOperationQueryDto))
+
   const logs: AuditBridge['logs'] = {
     // Request-level full view - no implicit filter.
     fetch: (query) => fetchAudit(query),
@@ -153,8 +170,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,
-    exportCsv: async (query) => unwrap<Blob>(await api.exportCsv((query ?? {}) as AuditOperationQueryDto)),
-    exportJson: async (query) => unwrap<Blob>(await api.exportJson((query ?? {}) as AuditOperationQueryDto)),
+    exportCsv: (query) => exportCsv(query),
+    exportJson: (query) => exportJson(query),
   }
 
   const operations: AuditBridge['operations'] = {
@@ -164,6 +181,8 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
     create: readOnlyReject,
     update: readOnlyReject,
     delete: readOnlyReject,
+    exportCsv: (query) => exportCsv(query, { isWriteOperation: true }),
+    exportJson: (query) => exportJson(query, { isWriteOperation: true }),
   }
 
   return {
@@ -271,6 +290,7 @@ function buildDestruction(
 export { AuditResultType, EntityChangeType } from '@tnzi/core/services/audit'
 export type {
   AuditOperationDto,
+  AuditOperationQueryDto,
   AuditEntityEntryDto,
   AuditPropertyEntryDto,
   DataDestructionDto,

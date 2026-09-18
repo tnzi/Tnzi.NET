@@ -3,6 +3,7 @@ import type { SelectOption as NaiveSelectOption } from 'naive-ui'
 import { createFinanceBridge, CashFlowActivity, type AccountTreeDto } from '../../services/bridges/finance-bridge'
 import type { PayrollBridge, SalaryComponentDto } from '../../services/bridges/payroll-bridge'
 import { useAdminClient } from '../../plugin/client'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 
 export type SelectOption = NaiveSelectOption
 
@@ -39,21 +40,23 @@ export function createPayrollOptionSources(bridge: PayrollBridge) {
     }
   }
 
+  // All three page until the server runs out: the backend clamps pageSize to
+  // 100 silently, so the former `pageSize: 200 / 500` calls stopped at the
+  // 100th structure / component / employee with no error anywhere.
   const structures = lazy<SelectOption>(async () => {
-    const page = await bridge.structures.fetch({ pageIndex: 1, pageSize: 200, filters: { isActive: true } })
-    return page.items.map((s) => ({ label: s.name, value: s.id }))
+    const rows = await fetchAllPages((q) => bridge.structures.fetch(q), { filters: { isActive: true } })
+    return rows.map((s) => ({ label: s.name, value: s.id }))
   })
 
   // Full active-component list (structure line editor needs code/name/type).
-  const components = lazy<SalaryComponentDto>(async () => {
-    const page = await bridge.components.fetch({ pageIndex: 1, pageSize: 500, filters: { isActive: true } })
-    return page.items
-  })
+  const components = lazy<SalaryComponentDto>(async () =>
+    fetchAllPages((q) => bridge.components.fetch(q), { filters: { isActive: true } }),
+  )
 
   // 一次性输入的录入面要按人选：只列在册员工，后端会再核他在不在这个批次里。
   const employees = lazy<SelectOption>(async () => {
-    const page = await bridge.employees.fetch({ pageIndex: 1, pageSize: 500, filters: { isActive: true } })
-    return page.items.map((e) => ({ label: `${e.code} · ${e.name}`, value: e.id }))
+    const rows = await fetchAllPages((q) => bridge.employees.fetch(q), { filters: { isActive: true } })
+    return rows.map((e) => ({ label: `${e.code} · ${e.name}`, value: e.id }))
   })
 
   const cashAccounts = lazy<SelectOption>(async () => {

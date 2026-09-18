@@ -101,6 +101,17 @@ describe('payroll-bridge', () => {
     expect(client.post).toHaveBeenCalledWith('/admin/payroll/country-packs/US/seed')
   })
 
+  it('employees.create / update and components.create reject with the server message on a failed envelope', async () => {
+    const client = mockClient()
+    const refused = { data: null, succeeded: false, success: false, code: 400, message: 'Employee number already exists' }
+    client.post.mockResolvedValue(refused)
+    client.put.mockResolvedValue(refused)
+    const bridge = createPayrollBridge({ client })
+    await expect(bridge.employees.create({ employeeNumber: 'E1' } as never)).rejects.toThrow('Employee number already exists')
+    await expect(bridge.employees.update('x1', { employeeNumber: 'E1' } as never)).rejects.toThrow('Employee number already exists')
+    await expect(bridge.components.create({ code: 'BASE' } as never)).rejects.toThrow('Employee number already exists')
+  })
+
   it('a client-less bridge returns stubs that reject on call', async () => {
     const bridge = createPayrollBridge()
     await expect(bridge.employees.fetch({ pageIndex: 1, pageSize: 20 })).rejects.toThrow()

@@ -1,10 +1,14 @@
 <template>
-  <!-- Reset the naive theme to the GLOBAL mode. NModal teleports to <body> but
-       naive forwards the content area's inner "Card / List" theme through
-       provide/inject across the Teleport, so without this an overlay opened
-       from a dark-card page would render dark under global light mode. `abstract`
-       = renderless (no wrapper DOM to break layout). See useOverlayTheme. -->
-  <NConfigProvider abstract :theme="overlayTheme" :theme-overrides="overlayOverrides">
+  <!-- The overlay provider (renderless): resets the naive theme to the GLOBAL
+       mode - NModal teleports to <body> but naive forwards the content area's
+       inner "Card / List" theme through provide/inject across the Teleport, so
+       without it an overlay opened from a dark-card page would render dark
+       under global light mode - and defaults every button and form control in
+       the slots to `small` (naive's own dialogs render their buttons small,
+       and a body that scrolls at 65vh has no height to spend on medium
+       padding). One component for both, shared with TDrawerShell and with
+       hand-rolled overlays, so the three cannot drift. See TOverlayTheme. -->
+  <TOverlayTheme>
     <NModal
       :show="show"
       preset="card"
@@ -74,14 +78,14 @@
       </div>
     </template>
     </NModal>
-  </NConfigProvider>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch, type CSSProperties } from 'vue'
-import { NConfigProvider, NModal, NSpin } from 'naive-ui'
+import { NModal, NSpin } from 'naive-ui'
 import { useBreakpoint } from '../../headless/theme/useBreakpoints'
-import { useOverlayTheme, useOverlayThemeOverrides } from '../../headless/theme/useOverlayTheme'
+import TOverlayTheme from './TOverlayTheme.vue'
 
 interface Props {
   /** Open state (controlled). */
@@ -98,6 +102,11 @@ interface Props {
    * (12/16/12px) - the admin-compact chrome. naive's own default is `medium`
    * (19/24/20px), which reads as too roomy for dense admin dialogs. Bump to
    * `medium`/`large` for content-heavy modals.
+   *
+   * This is the CARD's padding only. The buttons and form controls inside the
+   * slots have their own default (`small`, see `useOverlayComponentOptions`),
+   * which this prop does not touch: a `size="large"` card still gets small
+   * controls unless its NForm / controls say otherwise.
    */
   size?: 'small' | 'medium' | 'large' | 'huge'
   /**
@@ -125,15 +134,18 @@ interface Props {
   loading?: boolean
   /**
    * Where the modal sits vertically.
-   *   - `'top'` (default) - anchored a fixed distance below the viewport top.
+   *   - `'top'` (default) - above centre: a third of the free space above the
+   *     card and two thirds below (the optical centre), never less than an
+   *     even split once the card reaches its viewport bound.
    *   - `'center'` - naive's own behaviour (centred by `margin: auto`).
    *
    * Top is the default because a modal's height is rarely known when it opens:
    * a form behind `v-if="record"` renders empty, then grows by hundreds of
-   * pixels once the data lands. Centred, that growth moves the header UP by
-   * half the delta - measured at 254px on a 10-field form - so the title and
-   * the close button jump out from under the pointer. Anchored, the header
-   * stays put and the dialog only grows downward.
+   * pixels once the data lands, and the placement follows the height. Centred,
+   * that growth moves the header UP by half the delta - measured at 254px on a
+   * 10-field form - so the title and the close button jump out from under the
+   * pointer. Biased upward, the header moves by a third of it (the same form:
+   * 124px), and not at all once the card is close to its bound.
    */
   align?: 'top' | 'center'
   /**
@@ -173,8 +185,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const bp = useBreakpoint()
-const overlayTheme = useOverlayTheme()
-const overlayOverrides = useOverlayThemeOverrides()
 
 // Suppress naive's default first-focusable auto-focus on phones: it would grab
 // the first input/search box on open and pop the soft keyboard, covering half
@@ -194,17 +204,21 @@ const isFullscreen = computed<boolean>(() => {
 })
 
 /**
- * Distance from the viewport top to the card when `align="top"`. Keeps a short
- * dialog off the very top edge on a tall screen without pushing a tall one off
- * the bottom of a short one.
+ * Headroom the card's bound reserves above it when `align="top"`. Together
+ * with `VIEWPORT_GUTTER` it fixes the slack a card at its bound has left
+ * (`anchor + gutter`), which the stylesheet then splits evenly - so it decides
+ * how much mask shows around the tallest dialogs, not where a short one sits
+ * (that is the 1:2 split in the stylesheet). It is also the top margin a
+ * browser without `:has()` falls back to. `min(10vh, 88px)` keeps that
+ * headroom proportionate on a short screen.
  */
 const TOP_ANCHOR = 'min(10vh, 88px)'
 /** Breathing room kept clear between the card and the viewport edge below it. */
 const VIEWPORT_GUTTER = '16px'
 
 /**
- * Whether the card is placed against the top anchor. Fullscreen is excluded
- * because there the card IS the viewport, so there is nothing to anchor - and
+ * Whether the card takes the `align="top"` placement. Fullscreen is excluded
+ * because there the card IS the viewport, so there is nothing to place - and
  * the marker class this drives puts the shell's placement rules on naive's
  * layout container, which fullscreen takes the card out of (`position: fixed`).
  */
@@ -413,50 +427,66 @@ onBeforeUnmount(stopObserving)
 <!-- These target the teleported modal root, so they can't be scoped. NModal
      merges our class onto the card element itself (`.n-card.n-modal`). -->
 <style>
-/* The top anchor is a MAXIMUM distance, not a fixed one. Held fixed, a card
-   that has grown to its bound sits under the full anchor with only the gutter
-   left beneath it - 88 above against 16 below on a 1000px viewport - and reads
-   as a dialog that slipped downward rather than one that was placed. The
-   further a dialog grows, the more lopsided it gets, so it is the tall ones
-   people work in longest that look wrong.
-   These two spacers make the offset `min(anchor, slack / 2)` without measuring
-   anything: both claim an equal share of whatever the card leaves over, and the
-   top one is capped at the anchor, so flexbox freezes it there and hands the
-   remainder to the bottom one. A dialog with room to spare - the top spacer
-   hits its cap, the bottom one takes the rest, and the placement is exactly
-   what it was before. A dialog at its bound - neither reaches the cap and the
-   two come out equal. Being pure layout, it also re-balances on a window
-   resize, which a number computed at open would not.
-   The cost is that a dialog which GROWS past `viewport - 2 * anchor` (its data
-   landing) glides up by at most (anchor - gutter) / 2 - 36px at 1000px, 28 at
-   720 - instead of holding its top edge perfectly still. That is the same
-   movement centring causes, minus an order of magnitude: centring moved a
-   measured 10-field form 254px, which is why `align="top"` exists at all. Any
-   placement that answers "balanced at the bound" is a function of the card
-   height, so some movement is inherent; this is the smallest version of it.
+/* Where the card sits: a third of the slack above it, two thirds below - the
+   optical centre - but never less than half the slack its bound leaves, so a
+   card AT the bound splits that evenly.
+   Two spacers make this `max(slack / 3, (anchor + gutter) / 2)` without
+   measuring anything: the top one claims one share of whatever the card leaves
+   over, the bottom one two, and the top one has a floor of half the minimum
+   slack. Flexbox clamps a spacer that would fall under its floor and hands the
+   rest to the other one. Being pure layout, it re-balances on a window resize,
+   which a number computed at open would not.
+   Measured in Chromium (card / above / below):
+     221.6px card, 1205px viewport   327.8 / 655.6   (a third; was 88 / 895)
+     306.6px card, 1000 / 768 / 600  231 / 154 / 98 above, always a third
+     card at its bound, 1000 / 720   52 / 52 and 44 / 44 (unchanged)
+     861.6px card, 1000px            52 / 86.4   (floor binding, see below)
+   This replaced a fixed anchor of min(10vh, 88px), under which a short dialog
+   on a tall screen hugged the top with most of the screen empty beneath it -
+   88 above against 895 below on the first row above - which consumers read as
+   "every small dialog sits too high".
+   The cost is header movement while a dialog grows after opening (its data
+   landing behind `v-if`). Any placement that is a function of the card height
+   moves the card when the height changes; the fixed anchor did not move it at
+   all, and centring moved it by half the growth - measured at 254px on a
+   10-field form, the reason `align="top"` exists. This rule moves the header
+   up by a THIRD of the growth, until the card is within 1.5x the minimum slack
+   of its bound (slack under 156px at 1000px), after which the floor binds and
+   the header holds still. Measured: the same 10-field form (221.6 -> 593.6 on
+   894px) moves its header 124px, where centring would move it 186; the floor
+   to the bound on 1000px moves it 207; a small step (224.6 -> 306.6) moves it
+   27; growth entirely inside the floor's range moves it 0. That is the
+   trade-off the ratio buys: a third of the growth for a third of the slack.
    `:has()` scopes the rules to OUR modal - the container belongs to naive and
    is shared with every other modal in the app. Where `:has()` is missing the
-   whole block drops out and the inline margins keep the previous placement. */
+   whole block drops out and the inline margins place the card at the anchor,
+   which is the placement this component shipped with before the spacers. */
 /* naive's container is a flex ROW, where spacers would sit beside the card
-   rather than above and below it. The column switch is also what keeps a SHORT
-   dialog at the top: with the margins cleared below, naive's own
-   `align-self: center` takes over in a row and centres it - measured at 1000px,
-   a 435.6px card goes to 282 above / 282 below instead of 88 / 476. So losing
-   this line turns `align="top"` into `align="center"`, silently and only for
-   dialogs that were placed correctly before. */
+   rather than above and below it. The column switch is also what keeps the
+   1:2 split: with the margins cleared below, naive's own `align-self: center`
+   takes over in a row and centres the card - measured at 1000px, a 429.6px
+   card goes to 285 above / 285 below instead of 190 / 380. So losing this line
+   turns `align="top"` into `align="center"`, silently. */
 .n-modal-scroll-content:has(> .t-modal-shell--top) {
   flex-direction: column;
 }
 .n-modal-scroll-content:has(> .t-modal-shell--top)::before,
 .n-modal-scroll-content:has(> .t-modal-shell--top)::after {
   content: '';
-  flex: 1 1 0%;
 }
-/* Keep in step with `TOP_ANCHOR` in the script (gated by a test): a custom
-   property cannot carry it here, because it would have to travel from the card
-   to the card's own sibling, and custom properties only inherit downward. */
+/* One share above, two below: the optical centre. The floor is half of the
+   slack the card's bound leaves (`100dvh - anchor - gutter` of card means
+   `anchor + gutter` of slack), so a card AT its bound splits that slack
+   evenly, and the two terms have to be the script's `TOP_ANCHOR` and
+   `VIEWPORT_GUTTER` verbatim (gated by a test): a custom property cannot carry
+   them here, because it would have to travel from the card to the card's own
+   sibling, and custom properties only inherit downward. */
 .n-modal-scroll-content:has(> .t-modal-shell--top)::before {
-  max-height: min(10vh, 88px);
+  flex: 1 1 0%;
+  min-height: calc((min(10vh, 88px) + 16px) / 2);
+}
+.n-modal-scroll-content:has(> .t-modal-shell--top)::after {
+  flex: 2 1 0%;
 }
 /* The spacers own the placement now, so the fallback margins have to go.
    `margin-top` is the one that bites: a fixed margin is part of the card's

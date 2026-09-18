@@ -1,4 +1,7 @@
 
+using Microsoft.Extensions.Hosting;
+using Tnzi.Data.Snows;
+
 namespace Tnzi.Modules;
 
 /// <summary>
@@ -7,10 +10,23 @@ namespace Tnzi.Modules;
 /// </summary>
 public class CoreServicesModule : TnziCoreModule
 {
+    /// <summary>
+    /// 未配置机器码时非生产环境使用的默认值（与此前 <c>IdHelper.NextId</c> 的静默回退值相同，单机行为不变）。
+    /// </summary>
+    private const ushort DevelopmentDefaultWorkerId = 1;
+
     public override int LoadOrder => 0;
+
+    /// <summary>
+    /// 本次启动解析到的机器码；<c>null</c> = 未配置（用的是 <see cref="DevelopmentDefaultWorkerId"/>）。
+    /// 在 Configure 阶段定下、在初始化阶段按环境决定失败方向（那时才有 logger 与宿主环境）。
+    /// </summary>
+    private WorkerIdResolution? _workerIdResolution;
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
+        context.Services.AddTnziOptions<IdGenerationOptions, IdGenerationOptionsValidator>(context.Configuration);
+
         // LLM 提供商注册表与轻量调用默认值 —— 绑定 AI 配置节的最小投影，
         // 使消费应用不加载 Tnzi.AI 模块也能用 IAiUtility（见 OpenAiCompatibleAiUtility）。
         context.Services.AddTnziOptions<AiProviderRegistryOptions, AiProviderRegistryOptionsValidator>(context.Configuration);
@@ -36,7 +52,81 @@ public class CoreServicesModule : TnziCoreModule
         // 注册 TimeProvider（用于审计时间戳，支持可测试性）
         context.Services.TryAddSingleton(TimeProvider.System);
 
+        ConfigureIdGeneration(context.Configuration);
         ConfigureAiUtility(context);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 按 <c>IdGeneration</c> 配置节初始化进程级雪花生成器。
+    /// </summary>
+    /// <remarks>
+    /// ★ 放在 Configure 阶段而不是初始化阶段：<see cref="IdHelper"/> 是静态的，EF 的 SaveChanges、
+    /// Payment 的单号生成都直接调 <c>IdHelper.NextId()</c>，必须在任何服务跑起来之前定下机器码。
+    /// 此前全仓没有任何入口设置 WorkerId，多实例部署每个副本都静默用 1 —— 同一毫秒内产出相同的 long。
+    /// 这里直接绑定配置节而不是解析 <c>IOptions</c>：还没有 ServiceProvider。
+    /// 未配置时先按默认值初始化，让非生产环境零配置可跑；是否拦下由 <see cref="OnApplicationInitializationAsync"/>
+    /// 拿到宿主环境后决定。
+    /// </remarks>
+    private void ConfigureIdGeneration(IConfiguration configuration)
+    {
+        var options = configuration.GetSection(ConfigSectionResolver.Resolve(typeof(IdGenerationOptions))).Get<IdGenerationOptions>()
+            ?? new IdGenerationOptions();
+
+        var validation = new IdGenerationOptionsValidator().Validate(null, options);
+        if (validation.Failed)
+        {
+            throw new ConfigurationException("IdGeneration", $"Invalid IdGeneration configuration: {validation.FailureMessage}");
+        }
+
+        _workerIdResolution = WorkerIdResolver.Resolve(options, Environment.MachineName);
+
+        IdHelper.SetIdGenerator(new IdGeneratorOptions
+        {
+            WorkerId = _workerIdResolution?.WorkerId ?? DevelopmentDefaultWorkerId,
+            WorkerIdBitLength = options.WorkerIdBitLength,
+            SeqBitLength = options.SeqBitLength,
+        });
+    }
+
+    /// <summary>
+    /// 机器码的失败方向：未配置时 Production 启动即失败并指名要配的键，其它环境记 Warning。
+    /// </summary>
+    /// <remarks>
+    /// 环境判据是宿主的 <see cref="IHostEnvironment"/>（<c>ApplicationInitializationContext.Environment</c>
+    /// 或 DI 里的注册），不是 <c>ServiceConfigurationContext.EnvironmentName</c>：后者对拿不到环境变量的
+    /// 裸配置一律答「Production」，会把每一个用 ServiceCollection 装模块图的单元测试都拦死。
+    /// 拿不到宿主环境 = 不是托管应用，答不出「是不是生产」⇒ 只警告不拦。真实部署总有 IHostEnvironment。
+    /// </remarks>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var logger = context.ServiceProvider.GetService<ILogger<CoreServicesModule>>();
+
+        if (_workerIdResolution != null)
+        {
+            logger?.LogInformation("Snowflake WorkerId {WorkerId} resolved from {Source}.",
+                _workerIdResolution.WorkerId, _workerIdResolution.Source);
+            return Task.CompletedTask;
+        }
+
+        IHostEnvironment? environment = context.Environment ?? context.ServiceProvider.GetService<IHostEnvironment>();
+        if (environment?.IsProduction() == true)
+        {
+            throw new ConfigurationException(
+                "IdGeneration:WorkerId",
+                "Snowflake WorkerId is not configured. Every running instance must generate ids with a distinct " +
+                "WorkerId, otherwise two instances produce identical long ids within the same millisecond " +
+                "(primary-key conflicts, duplicated trade/invoice numbers). Set IdGeneration:WorkerId to a value " +
+                "unique per instance (for example via the IdGeneration__WorkerId environment variable), or set " +
+                "IdGeneration:WorkerIdFromHostname=true when the hostname carries a stable ordinal (StatefulSet pods).");
+        }
+
+        logger?.LogWarning(
+            "Snowflake WorkerId is not configured; using the default WorkerId {WorkerId}. This is only safe for a " +
+            "single instance. Set IdGeneration:WorkerId (or IdGeneration:WorkerIdFromHostname) before running " +
+            "more than one instance; Production refuses to start without it.",
+            DevelopmentDefaultWorkerId);
 
         return Task.CompletedTask;
     }

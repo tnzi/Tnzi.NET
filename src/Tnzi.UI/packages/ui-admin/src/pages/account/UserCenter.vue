@@ -10,6 +10,11 @@
     active section component. Reached via the avatar dropdown; hidden from menus.
   -->
   <div class="t-user-center">
+    <!-- Re-authentication for the [RequireStepUp] self-service writes. The
+         bridge below runs those calls through `stepUp.verify`, so a challenge
+         from the backend opens this prompt and the call is replayed once the
+         user has confirmed; the sections never see the challenge. -->
+    <TStepUpModal :prompt="stepUp" />
     <TDetailHost :state="pageDetail" layout="side" :sections="sections" :back="false" :translate="t">
       <!-- Slim header: avatar + name + roles -->
       <template #title>
@@ -55,7 +60,9 @@ import { computed, defineAsyncComponent, onMounted, provide, type Component } fr
 import { useRouter } from 'vue-router'
 import { NButton, NSpin, NTag } from 'naive-ui'
 import { TSvgIcon, TAvatar } from '@tnzi/ui'
+import { StepUpPromptController } from '@tnzi/core/services/identity'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
+import TStepUpModal from '../../components/auth/TStepUpModal.vue'
 import { useDetail, type DetailSection } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safe-message'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
@@ -77,7 +84,10 @@ import LinkedSection from './sections/LinkedSection.vue'
 import DangerSection from './sections/DangerSection.vue'
 
 const client = useAdminClient()
-const bridge = createIdentityBridge({ client })
+// One prompt per page; `TStepUpModal` above renders it. Discovery of which
+// methods to offer (passkey / authenticator / SMS / email) is the controller's.
+const stepUp = new StepUpPromptController({ client })
+const bridge = createIdentityBridge({ client, stepUp: (scope) => stepUp.verify(scope) })
 const storageBridge = createStorageBridge({ client })
 const message = useSafeMessage()
 const router = useRouter()

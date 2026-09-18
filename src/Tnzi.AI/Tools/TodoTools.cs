@@ -4,7 +4,7 @@ namespace Tnzi.AI.Tools;
 /// Todo 任务追踪工具 - AI Agent 用于在 Plan Mode 下追踪任务进度
 /// </summary>
 [AIToolGroup("todo")]
-public class TodoTools
+public class TodoTools : IAIToolProvider
 {
     /// <summary>
     /// 持久化互斥：按实例（TodoTools 注册为 Scoped ⇒ 每请求一个）而非进程全局。
@@ -26,7 +26,7 @@ public class TodoTools
     /// Use this to track progress on multi-step tasks.
     /// </summary>
     [AIFunction("write_todos",
-        Description = "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.",
+        "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.",
         IsConcurrencySafe = true)]
     public string WriteTodos(
         [Description("Complete list of todo items with status (Pending/InProgress/Completed/Skipped)")] List<TodoItemDto> items)

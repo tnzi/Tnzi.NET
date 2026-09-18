@@ -5,6 +5,9 @@ namespace Tnzi.Signing.Services.Internal;
 /// <summary>密封结果：成品文件 id 与它的哈希锚点。</summary>
 public sealed record SealResult(Guid FileId, string Sha256, string FileName);
 
+/// <summary>预填结果：烧好值的渲染稿（没有可烧的值时 <see cref="FileId"/> 为 null）与烧进去的字段键。</summary>
+public sealed record PrefillResult(Guid? FileId, IReadOnlyList<string> Keys);
+
 /// <summary>
 /// 把收集齐的字段值盖到渲染稿上、压平、算哈希、存成成品。
 /// </summary>
@@ -42,6 +45,69 @@ public sealed class SigningSealer
     }
 
     /// <summary>
+    /// 发出前把发起方负责的字段值（合并变量 / 预填）烧进一份本信封自有的渲染稿。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 签署人在签的时候要看得见将被密封的内容。收件人载荷只含本人角色的字段，发起方字段不在其中；
+    /// 若这些值等到密封才盖，签署人签的是一份价格处空白的文档，成品上却有价格 —— 哈希与证书据此生成。
+    /// 所以发出那一刻就把它们盖到一份新文件上，快照记下烧进去的键（<see cref="SigningSnapshot.PrefilledKeys"/>），
+    /// 密封时跳过。没有任何可烧的值时不生成文件（<see cref="PrefillResult.FileId"/> 为 null），信封照旧引用模板的渲染稿。
+    /// </para>
+    /// </remarks>
+    public async Task<Result<PrefillResult>> PrefillAsync(
+        Envelope request,
+        SigningSnapshot snapshot,
+        IReadOnlyDictionary<string, string?> values,
+        CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(request);
+        Check.NotNull(snapshot);
+        Check.NotNull(values);
+
+        var senderFields = snapshot.Fields
+            .Where(f => !f.IsSignatureLike && string.IsNullOrWhiteSpace(f.RecipientRole))
+            .Where(f => !string.IsNullOrEmpty(values.GetValueOrDefault(f.Key)))
+            .ToList();
+        if (senderFields.Count == 0)
+            return Result<PrefillResult>.Success(new PrefillResult(null, []));
+
+        if (request.RenderedPdfFileId is not { } renderedId)
+            return Result<PrefillResult>.Failure("This request has no rendered document to prefill.", 409);
+
+        var source = await ReadAsync(renderedId, cancellationToken);
+        if (source is null)
+            return Result<PrefillResult>.Failure("The rendered document could not be read.", 404);
+
+        var stamps = new List<PdfStamp>();
+        foreach (var field in senderFields)
+        {
+            if (TextStampFor(source, field, values[field.Key]!) is { } stamp)
+                stamps.Add(stamp);
+        }
+
+        byte[] prefilled;
+        try
+        {
+            prefilled = _stamper.Stamp(source, new PdfStampRequest { Stamps = stamps });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Prefilling signing request {RequestId} failed while stamping.", request.Id);
+            return Result<PrefillResult>.Failure("The document could not be rendered.", 500);
+        }
+
+        using var output = new MemoryStream(prefilled, writable: false);
+        var saved = await _files.SaveAsync(BuildFileName(request.Title, "-draft"), output);
+        if (!saved.Succeeded || saved.Data is null)
+            return Result<PrefillResult>.Failure("The rendered document could not be stored.", 500);
+
+        // 记的是「盖了哪些键」而不是「盖成功了几个」：找不到锚的字段也算烧过 ——
+        // 密封时再搜一遍同样找不到，只会多一行同样的 Warning。
+        return Result<PrefillResult>.Success(new PrefillResult(saved.Data.Id, senderFields.Select(f => f.Key).ToList()));
+    }
+
+    /// <summary>
     /// 密封一份请求：取渲染稿 → 盖上所有值与签名 → 压平 → 算 SHA-256 → 存文件。
     /// </summary>
     public async Task<Result<SealResult>> SealAsync(
@@ -60,17 +126,9 @@ public sealed class SigningSealer
         if (request.RenderedPdfFileId is not { } renderedId)
             return Result<SealResult>.Failure("This request has no rendered document to seal.", 409);
 
-        var pdfResult = await _files.GetAsync(renderedId);
-        if (!pdfResult.Succeeded || pdfResult.Data is null)
+        var source = await ReadAsync(renderedId, cancellationToken);
+        if (source is null)
             return Result<SealResult>.Failure("The rendered document could not be read.", 404);
-
-        byte[] source;
-        await using (var stream = pdfResult.Data)
-        {
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer, cancellationToken);
-            source = buffer.ToArray();
-        }
 
         var stamps = BuildStamps(source, snapshot, values, recipients);
 
@@ -87,7 +145,7 @@ public sealed class SigningSealer
         }
 
         var hash = Convert.ToHexStringLower(SHA256.HashData(sealed_));
-        var fileName = BuildFileName(request.Title);
+        var fileName = BuildFileName(request.Title, "-signed");
 
         using var output = new MemoryStream(sealed_, writable: false);
         var saved = await _files.SaveAsync(fileName, output);
@@ -97,7 +155,19 @@ public sealed class SigningSealer
         return Result<SealResult>.Success(new SealResult(saved.Data.Id, hash, fileName));
     }
 
-    /// <summary>把每个字段的取值翻译成一次盖章。</summary>
+    private async Task<byte[]?> ReadAsync(Guid fileId, CancellationToken cancellationToken)
+    {
+        var pdfResult = await _files.GetAsync(fileId);
+        if (!pdfResult.Succeeded || pdfResult.Data is null)
+            return null;
+
+        await using var stream = pdfResult.Data;
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        return buffer.ToArray();
+    }
+
+    /// <summary>把每个字段的取值翻译成一次盖章。发出时已烧进渲染稿的键跳过。</summary>
     private List<PdfStamp> BuildStamps(
         byte[] source,
         SigningSnapshot snapshot,
@@ -112,14 +182,19 @@ public sealed class SigningSealer
             .GroupBy(r => r.Role, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().SignatureImage!, StringComparer.OrdinalIgnoreCase);
 
+        var prefilled = new HashSet<string>(snapshot.PrefilledKeys, StringComparer.Ordinal);
+
         foreach (var field in snapshot.Fields)
         {
+            // 发出时已经在纸面上了（PrefillAsync）；再盖一次就是双重盖章。
+            if (prefilled.Contains(field.Key)) continue;
+
             if (ResolvePlacement(source, field) is not { } placement) continue;
             var (page, target) = placement;
 
             if (field.IsSignatureLike)
             {
-                if (field.RecipientRole is { } role && signatureByRole.TryGetValue(role, out var image))
+                if (field.RecipientRole is { Length: > 0 } role && signatureByRole.TryGetValue(role, out var image))
                 {
                     stamps.Add(new PdfImageStamp
                     {
@@ -129,24 +204,42 @@ public sealed class SigningSealer
                         PreserveAspectRatio = true,
                     });
                 }
+                else
+                {
+                    // 一个签名字段没有图可盖：角色为空（建模板那侧现在拦了，旧快照不经那道门），
+                    // 或者那个角色的人没有交图。成品会少一个签名而外观完整，这一行是唯一的症状。
+                    _logger.LogWarning(
+                        "Signature field {FieldKey} (role {Role}) has no signature image to stamp; the field was left blank.",
+                        field.Key, field.RecipientRole ?? "<none>");
+                }
                 continue;
             }
 
             if (!values.TryGetValue(field.Key, out var value) || string.IsNullOrEmpty(value))
                 continue;
 
-            stamps.Add(new PdfTextStamp
-            {
-                PageNumber = page,
-                Rect = target,
-                Text = field.Type == SigningFieldType.Checkbox ? RenderCheckbox(value) : value,
-                FontSize = (double)(field.FontSize ?? 10m),
-                Alignment = PdfStampAlignment.CenterLeft,
-            });
+            stamps.Add(TextStamp(page, target, field, value));
         }
 
         return stamps;
     }
+
+    /// <summary>一个文本字段的取值 → 一次文本盖章；落点解析不出（锚找不到）时为 null。</summary>
+    private PdfTextStamp? TextStampFor(byte[] source, SnapshotField field, string value)
+    {
+        if (ResolvePlacement(source, field) is not { } placement) return null;
+        var (page, target) = placement;
+        return TextStamp(page, target, field, value);
+    }
+
+    private static PdfTextStamp TextStamp(int page, NormalizedRect target, SnapshotField field, string value) => new()
+    {
+        PageNumber = page,
+        Rect = target,
+        Text = field.Type == SigningFieldType.Checkbox ? RenderCheckbox(value) : value,
+        FontSize = (double)(field.FontSize ?? 10m),
+        Alignment = PdfStampAlignment.CenterLeft,
+    };
 
     /// <summary>
     /// 解析字段落点（页码 + 矩形）。<see cref="FieldPlacementMode.Anchor"/> 时按锚文本现搜。
@@ -188,8 +281,8 @@ public sealed class SigningSealer
     private static string RenderCheckbox(string value)
         => value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1" ? "X" : string.Empty;
 
-    /// <summary>成品文件名：标题 + 后缀，非法字符换成下划线。</summary>
-    private static string BuildFileName(string title)
+    /// <summary>文件名：标题 + 后缀（<c>-draft</c> 渲染稿 / <c>-signed</c> 成品），非法字符换成下划线。</summary>
+    private static string BuildFileName(string title, string suffix)
     {
         var safe = string.IsNullOrWhiteSpace(title) ? "document" : title.Trim();
         foreach (var c in Path.GetInvalidFileNameChars())
@@ -197,6 +290,6 @@ public sealed class SigningSealer
 
         // 文件名长度在各文件系统上限不同，留出后缀余量。
         if (safe.Length > 120) safe = safe[..120];
-        return $"{safe}-signed.pdf";
+        return $"{safe}{suffix}.pdf";
     }
 }

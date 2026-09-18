@@ -23,8 +23,11 @@
  */
 import { Icon } from '@iconify/vue'
 import TMessageResponse from './TMessageResponse.vue'
+import TMessageAttachments from './TMessageAttachments.vue'
 import TReasoningStage from '../reasoning/TReasoningStage.vue'
+import TToolCallDisplay from '../reasoning/TToolCallDisplay.vue'
 import { useAiI18n } from '../../i18n/index'
+import { formatCompactNumber } from '../../utils/format'
 import type { ChatMessage } from '../../headless/useChat'
 
 withDefaults(
@@ -38,12 +41,18 @@ withDefaults(
     copied?: boolean
     /** Render the action row under assistant turns. */
     showActions?: boolean
+    /** Render the tool-call cards the turn reports (`message.toolCalls`). */
+    showToolCalls?: boolean
+    /** Render the token line under the answer (`message.usage`). */
+    showUsage?: boolean
   }>(),
   {
     agentName: 'Assistant',
     agentLabel: '',
     copied: false,
     showActions: true,
+    showToolCalls: true,
+    showUsage: false,
   },
 )
 
@@ -58,12 +67,16 @@ const t = useAiI18n()
 
 <template>
   <div class="t-thread-message" :class="`t-thread-message--${message.role}`">
-    <div
-      v-if="message.role === 'user'"
-      class="t-thread-message__bubble t-thread-message__bubble--user"
-    >
-      {{ message.content }}
-    </div>
+    <template v-if="message.role === 'user'">
+      <TMessageAttachments
+        v-if="message.attachments?.length"
+        :attachments="message.attachments"
+        class="t-thread-message__attachments"
+      />
+      <div v-if="message.content" class="t-thread-message__bubble t-thread-message__bubble--user">
+        {{ message.content }}
+      </div>
+    </template>
 
     <template v-else>
       <slot name="role" :message="message">
@@ -88,7 +101,23 @@ const t = useAiI18n()
         {{ message.reasoning }}
       </TReasoningStage>
 
-      <div v-if="message.status === 'error'" class="t-thread-message__error">
+      <div v-if="showToolCalls && message.toolCalls?.length" class="t-thread-message__tools">
+        <TToolCallDisplay
+          v-for="(tc, i) in message.toolCalls"
+          :key="`${tc.name}:${i}`"
+          :tool-call="tc"
+        />
+      </div>
+
+      <!-- Whatever text arrived stays visible; a failure is said UNDER it rather
+           than replacing it, so a stream that died halfway keeps its half. -->
+      <TMessageResponse
+        v-if="message.content || message.status !== 'error'"
+        class="t-thread-message__body"
+        :content="message.content"
+        :streaming="message.isStreaming ?? false"
+      />
+      <div v-if="message.status === 'error'" class="t-thread-message__error" role="alert">
         <Icon icon="lucide:circle-alert" class="t-thread-message__error-icon" />
         <span>{{ message.error || t.chat.errorGeneric }}</span>
         <button
@@ -100,17 +129,16 @@ const t = useAiI18n()
           {{ t.common.retry }}
         </button>
       </div>
-      <template v-else>
-        <TMessageResponse
-          class="t-thread-message__body"
-          :content="message.content"
-          :streaming="message.isStreaming ?? false"
-        />
-        <div v-if="message.status === 'stopped'" class="t-thread-message__stopped">
-          <span class="t-thread-message__stopped-mark" aria-hidden="true" />
-          {{ t.chat.generationStopped }}
-        </div>
-      </template>
+      <div v-else-if="message.status === 'stopped'" class="t-thread-message__stopped">
+        <span class="t-thread-message__stopped-mark" aria-hidden="true" />
+        {{ t.chat.generationStopped }}
+      </div>
+
+      <div v-if="showUsage && message.usage && !message.isStreaming" class="t-thread-message__usage">
+        <span>{{ t.token.input }} {{ formatCompactNumber(message.usage.inputTokens) }}</span>
+        <span aria-hidden="true">·</span>
+        <span>{{ t.token.output }} {{ formatCompactNumber(message.usage.outputTokens) }}</span>
+      </div>
 
       <div
         v-if="showActions && !message.isStreaming"
@@ -164,6 +192,7 @@ const t = useAiI18n()
   gap: 8px;
 }
 .t-thread-message--user { align-items: flex-end; }
+.t-thread-message__attachments { max-width: 75%; justify-content: flex-end; }
 .t-thread-message__bubble--user {
   padding: 10px 16px;
   background: var(--tnzi-ai-surface);
@@ -221,6 +250,19 @@ const t = useAiI18n()
   line-height: 1.6;
   word-break: break-word;
   color: var(--tnzi-ai-text);
+}
+.t-thread-message__tools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.t-thread-message__usage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--tnzi-ai-text-tertiary);
+  user-select: none;
 }
 .t-thread-message__error {
   display: flex;

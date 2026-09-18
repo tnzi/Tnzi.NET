@@ -54,6 +54,7 @@ Tnzi.EFCore.Encryption.IFieldEncryptor.Decrypt(string! ciphertext, string! purpo
 Tnzi.EFCore.Encryption.IFieldEncryptor.Encrypt(string! plaintext, string! purpose) -> string!
 Tnzi.EFCore.Encryption.IFieldEncryptor.IsEncrypted(string! value) -> bool
 Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions
+Tnzi.EFCore.Services.EfCoreDbMigrator.EfCoreDbMigrator(System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Services.EfCoreDbMigrator!>! logger) -> void
 override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentNumbering.DocumentSequence!>! builder) -> void
 override Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator.ValidateOptions(Tnzi.EFCore.Encryption.FieldEncryptionOptions! options, System.Collections.Generic.List<string!>! errors) -> void
 override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
@@ -69,12 +70,13 @@ static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! col
 static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
 virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Discard(TEntity! entity) -> void
 *REMOVED*Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Dapper.DapperService!>? logger = null) -> void
-Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider) -> void
+Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Tnzi.Data.IUnitOfWorkManager? unitOfWorkManager = null, Tnzi.Data.IUnitOfWork? unitOfWork = null) -> void
 Tnzi.EFCore.Outbox.EfCoreEventStore.MarkAsDeadLetterAsync(System.Guid eventId, string! error, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 *REMOVED*Tnzi.EFCore.Options.DataAuthOptions
 *REMOVED*Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.get -> bool
 *REMOVED*Tnzi.EFCore.Options.DataAuthOptions.AutoApplyDataAuth.set -> void
 *REMOVED*Tnzi.EFCore.Options.DataAuthOptions.DataAuthOptions() -> void
+*REMOVED*Tnzi.EFCore.Services.EfCoreDbMigrator.EfCoreDbMigrator(System.IServiceProvider! serviceProvider, Tnzi.EFCore.IEntityManager! entityManager, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Services.EfCoreDbMigrator!>! logger) -> void
 Tnzi.EFCore.IndexFilter
 Tnzi.EFCore.IndexFilter.And(Tnzi.EFCore.IndexFilter! other) -> Tnzi.EFCore.IndexFilter!
 Tnzi.EFCore.IndexFilter.AndNotDeleted() -> Tnzi.EFCore.IndexFilter!
@@ -90,7 +92,43 @@ static Tnzi.EFCore.IndexFilter.NotNull(string! columnName) -> Tnzi.EFCore.IndexF
 static Tnzi.EFCore.IndexFilter.Null(string! columnName) -> Tnzi.EFCore.IndexFilter!
 static Tnzi.EFCore.IndexFilter.Raw(System.Func<Tnzi.EFCore.DatabaseProvider, string!>! sql) -> Tnzi.EFCore.IndexFilter!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrue(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
-Tnzi.EFCore.DesignTimeMultiTenancy
-static Tnzi.EFCore.DesignTimeMultiTenancy.Enabled.get -> bool?
-static Tnzi.EFCore.DesignTimeMultiTenancy.Enabled.set -> void
-static Tnzi.EFCore.DesignTimeMultiTenancy.Resolve(bool? injected) -> bool
+Tnzi.EFCore.Internal.DbContextCollaborators
+static Tnzi.EFCore.Internal.DbContextCollaborators.Resolve<TService>(TService? injected, Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions! options) -> TService?
+Tnzi.EFCore.Internal.IAuditPropertyContext
+Tnzi.EFCore.Internal.IAuditPropertyContext.CurrentTenant.get -> Tnzi.MultiTenancy.ICurrentTenant?
+Tnzi.EFCore.Internal.IAuditPropertyContext.CurrentUser.get -> Tnzi.Security.Claims.ICurrentUser!
+Tnzi.EFCore.Internal.IAuditPropertyContext.TimeProvider.get -> System.TimeProvider?
+Tnzi.EFCore.Internal.IQueryFilterContext
+Tnzi.EFCore.Internal.IQueryFilterContext.CurrentTenantId.get -> System.Guid?
+Tnzi.EFCore.Internal.IQueryFilterContext.IsMultiTenantFilterEnabled.get -> bool
+Tnzi.EFCore.Internal.IQueryFilterContext.IsSoftDeleteFilterEnabled.get -> bool
+Tnzi.EFCore.Internal.MultiTenancySwitch
+static Tnzi.EFCore.Internal.MultiTenancySwitch.Resolve(bool? injected, Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions! options) -> bool
+Tnzi.EFCore.Internal.QueryFilterHelper
+static Tnzi.EFCore.Internal.QueryFilterHelper.ApplyCombinedFilter(Tnzi.EFCore.Internal.IQueryFilterContext! filterContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, System.Type! entityType) -> void
+static Tnzi.EFCore.Internal.QueryFilterHelper.ApplyMultiTenantFilter(Tnzi.EFCore.Internal.IQueryFilterContext! filterContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, System.Type! entityType) -> void
+static Tnzi.EFCore.Internal.QueryFilterHelper.ApplySoftDeleteFilter(Tnzi.EFCore.Internal.IQueryFilterContext! filterContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, System.Type! entityType) -> void
+static Tnzi.EFCore.Internal.QueryFilterHelper.ConfigureQueryFilters(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, bool multiTenancyEnabled) -> void
+static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureQueryFilters(Microsoft.EntityFrameworkCore.DbContext! dbContext, Microsoft.EntityFrameworkCore.ModelBuilder! modelBuilder, bool multiTenancyEnabled) -> void
+Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions
+static Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions.UseTnziMultiTenancy(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! optionsBuilder, bool enabled) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder!
+static Tnzi.EFCore.MultiTenancyOptionsBuilderExtensions.UseTnziMultiTenancy<TDbContext>(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>! optionsBuilder, bool enabled) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>!
+Tnzi.EFCore.MultiTenancyOptionsExtension
+Tnzi.EFCore.MultiTenancyOptionsExtension.ApplyServices(Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> void
+Tnzi.EFCore.MultiTenancyOptionsExtension.Enabled.get -> bool
+Tnzi.EFCore.MultiTenancyOptionsExtension.Info.get -> Microsoft.EntityFrameworkCore.Infrastructure.DbContextOptionsExtensionInfo!
+Tnzi.EFCore.MultiTenancyOptionsExtension.MultiTenancyOptionsExtension(bool enabled) -> void
+Tnzi.EFCore.MultiTenancyOptionsExtension.Validate(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptions! options) -> void
+static Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled.get -> bool
+static Tnzi.EFCore.Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled.set -> void
+Tnzi.EFCore.RegisteredDbContext
+Tnzi.EFCore.RegisteredDbContext.DbContextType.get -> System.Type!
+Tnzi.EFCore.RegisteredDbContext.IsPrimary.get -> bool
+Tnzi.EFCore.RegisteredDbContext.RegisteredDbContext(System.Type! dbContextType, bool isPrimary) -> void
+*REMOVED*static Tnzi.EFCore.Dapper.DapperBulkOperations.BulkInsertAsync<T>(System.Data.IDbConnection! connection, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! provider, Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Data.IDbTransaction? transaction = null, int batchSize = 1000, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperBulkOperations.BulkInsertAsync<T>(System.Data.IDbConnection! connection, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! provider, Microsoft.EntityFrameworkCore.DbContext! dbContext, System.Collections.Generic.IEnumerable<T!>! entities, string? tableName = null, System.Data.IDbTransaction? transaction = null, int batchSize = 1000, bool includeKey = true, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+static Tnzi.EFCore.Dapper.DapperBulkOperations.CalculateRowsPerBatch(int requestedBatchSize, int parametersPerRow, int maxParametersPerCommand) -> int
+Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.MaxParametersPerCommand.get -> int
+Tnzi.EFCore.Dapper.Providers.SqlServerProvider.MaxParametersPerCommand.get -> int
+static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchSoftDeleteByAsync<T>(this System.Linq.IQueryable<T!>! query, System.Guid? deleterId, System.DateTime deletionTime, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
+Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.NewId() -> TKey

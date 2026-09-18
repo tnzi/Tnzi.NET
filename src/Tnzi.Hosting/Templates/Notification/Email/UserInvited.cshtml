@@ -1,0 +1,80 @@
+---
+subject: "You're invited"
+layout: DefaultEmail
+description: Invitation email sent when an administrator invites someone to create an account
+metadata:
+  type: Email
+  version: "1.0"
+---
+@{
+    var isResend = Model.IsResend == true;
+    var expiresInDays = Model.ExpiresInDays ?? 7;
+    var dayWord = expiresInDays == 1 ? "day" : "days";
+}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="greeting ink" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a2e; line-height: 1.35; padding-bottom: 14px;">
+            @if (isResend)
+            {
+                <text>Your invitation link, again</text>
+            }
+            else
+            {
+                <text>You're invited</text>
+            }
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; font-size: 16px; line-height: 1.65; color: #4a5568;">
+            @if (isResend)
+            {
+                <text>Hi @(Model.UserName ?? "there"), here is a fresh link to accept your invitation. Your username is <strong>@Model.UserName</strong>.</text>
+            }
+            else
+            {
+                <text>Hi @(Model.UserName ?? "there"), an account has been created for you. Accept the invitation to set your password. Your username is <strong>@Model.UserName</strong>.</text>
+            }
+        </td>
+    </tr>
+</table>
+
+<!-- CTA -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" class="btn" style="margin: 26px 0 0 0;">
+    <tr>
+        <td bgcolor="#0f3460" style="border-radius: 8px;">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="@Model.AcceptUrl" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="16%" fillcolor="#0f3460" stroke="false">
+            <w:anchorlock/>
+            <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Accept invitation</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-->
+            <a href="@Model.AcceptUrl" target="_blank" style="display: inline-block; padding: 14px 28px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px; background-color: #0f3460; text-align: center;">Accept invitation</a>
+            <!--<![endif]-->
+        </td>
+    </tr>
+</table>
+
+<!-- Expiry + copyable link -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 22px;">
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #4a5568; padding-bottom: 10px;">
+            The link expires in @expiresInDays @dayWord.
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-faint" style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #8b929b;">
+            Or paste this into your browser:<br>
+            <a href="@Model.AcceptUrl" style="color: #6b7280; text-decoration: underline; word-break: break-all;">@Model.AcceptUrl</a>
+        </td>
+    </tr>
+</table>
+
+<!-- Reassurance -->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 22px;">
+    <tr>
+        <td class="ink-faint" style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #8b929b;">
+            Not expecting this? Ignore this email - no account will be activated.
+        </td>
+    </tr>
+</table>

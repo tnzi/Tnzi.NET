@@ -126,41 +126,10 @@ public class TemplateFileService : ITemplateFileService
     }
 
     /// <summary>
-    /// 模板根列表：搜索根逐个拼上 <c>TemplateRootPath</c>。
-    /// <c>TemplateRootPath</c> 本身是绝对路径时它就是唯一的根。
+    /// 模板根列表（主根 → <c>AdditionalSearchPaths</c> 逐项原样 → 开发期源码目录），
+    /// 与布局加载、布局扫描共用 <see cref="TemplatePathHelper.BuildTemplateRoots"/> 这一份语义。
     /// </summary>
-    private List<string> BuildTemplateRoots()
-    {
-        var templateRoot = string.IsNullOrWhiteSpace(_options.TemplateRootPath) ? "Templates" : _options.TemplateRootPath;
-
-        if (Path.IsPathRooted(templateRoot))
-        {
-            return new List<string> { Path.GetFullPath(templateRoot) };
-        }
-
-        var roots = new List<string>();
-        foreach (var searchRoot in BuildSearchRoots(_options, _serviceProvider))
-        {
-            if (string.IsNullOrWhiteSpace(searchRoot))
-                continue;
-
-            string combined;
-            try
-            {
-                combined = Path.GetFullPath(Path.Combine(searchRoot, templateRoot));
-            }
-            catch (Exception ex) when (ex is ArgumentException or PathTooLongException)
-            {
-                _logger?.LogDebug(ex, "Skipping invalid template search root: {Root}", searchRoot);
-                continue;
-            }
-
-            if (!roots.Contains(combined, StringComparer.OrdinalIgnoreCase))
-                roots.Add(combined);
-        }
-
-        return roots;
-    }
+    private List<string> BuildTemplateRoots() => TemplatePathHelper.BuildTemplateRoots(_options, _serviceProvider);
 
     /// <summary>
     /// 把调用方给的路径解析成模板根内的绝对路径。

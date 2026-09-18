@@ -15,23 +15,35 @@
  */
 import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, TCaptcha } from '@tnzi/ui'
 import { useFormRules } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
 import { useCaptcha } from '@tnzi/ui'
 import { useLoginAccountField } from '@tnzi/ui'
 import { detectAccountType } from '../../../headless/account-type'
 import { useLoginContext } from '@tnzi/ui'
+import { isScriptCaptchaProvider } from '@tnzi/core/services/captcha'
 
 defineOptions({ name: 'ResetPwd' })
 
-const { translate, toggleLoginModule, callbacks, ui, features } = useLoginContext()
+const { translate, toggleLoginModule, callbacks, ui, features, resolveUrl } = useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
 const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useLoginAccountField(
   translate,
   () => features.codeChannels,
+)
+
+// The password-recovery captcha (always shown when enabled) gates the send-code
+// step: that endpoint spends a real SMS / email per call and used to be the one
+// send endpoint without any captcha at all. Same visibility rule as register.
+const captchaRef = ref<InstanceType<typeof TCaptcha> | null>(null)
+const captchaToken = ref('')
+const showCaptcha = computed(
+  () =>
+    features.captchaOnPasswordRecovery &&
+    (isScriptCaptchaProvider(features.captcha?.enabled ? features.captcha.provider : null) || !!callbacks.getCaptcha),
 )
 
 interface FormModel {
@@ -70,15 +82,27 @@ async function handleSendCode(): Promise<void> {
     )
     return
   }
+  let token: string | undefined
+  if (showCaptcha.value) {
+    try {
+      token = await captchaRef.value?.execute()
+    } catch {
+      submitError.value = translate('admin.login.captcha.required', 'Please complete the captcha.')
+      return
+    }
+  }
   submitError.value = ''
   try {
     await getCaptcha(async () => {
-      await sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'reset-pwd' })
+      await sendCode({ account: model.account, type: detectAccountType(model.account), purpose: 'reset-pwd', captchaToken: token })
     })
   } catch (err) {
-    // Surface backend rejections (e.g. 429 "sent too frequently") in the UI -
-    // getCaptcha re-throws so the countdown never starts on failure.
+    // Surface backend rejections (e.g. 429 "sent too frequently" / rejected captcha)
+    // in the UI - getCaptcha re-throws so the countdown never starts on failure.
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Request failed')
+  } finally {
+    // Captcha tokens are single-use - reset so a resend works either way.
+    if (showCaptcha.value) captchaRef.value?.reset()
   }
 }
 
@@ -109,6 +133,18 @@ async function handleSubmit(): Promise<void> {
   <NForm ref="formRef" :model="model" :rules="rules" size="large" :show-label="ui.labeled" :show-require-mark="false" label-placement="top" @keyup.enter="handleSubmit">
     <NFormItem path="account" :label="accountLabel">
       <NInput v-model:value="model.account" :placeholder="accountPlaceholder" />
+    </NFormItem>
+    <NFormItem v-if="showCaptcha" :label="translate('admin.login.captcha.label', 'Captcha')">
+      <TCaptcha
+        ref="captchaRef"
+        v-model:token="captchaToken"
+        purpose="password-recovery"
+        :config="features.captcha"
+        :load-image="callbacks.getCaptcha"
+        :resolve-url="resolveUrl"
+        :placeholder="translate('admin.login.captcha.placeholder', 'Enter the characters shown')"
+        :refresh-title="translate('admin.login.captcha.refresh', 'Refresh captcha')"
+      />
     </NFormItem>
     <NFormItem path="code" :label="translate('admin.login.labels.code', 'Verification code')">
       <div class="w-full flex-y-center gap-16px">

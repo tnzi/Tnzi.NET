@@ -29,6 +29,10 @@ public class SensitiveSelfServiceEndpointTests
     {
         // 拆除两步验证的四条
         { nameof(DefaultUserProfileController.DisableTwoFactor), StepUpScopes.TwoFactorManage },
+        // 登记验证器的两条：setup 会重置密钥，enable 把一枚新密钥变成正式的第二因子 ——
+        // 「换掉」第二因子与「摘掉」它后果同量级，判据是动作的后果而不是端点名里有没有 disable。
+        { nameof(DefaultUserProfileController.GetTotpSetup), StepUpScopes.TwoFactorManage },
+        { nameof(DefaultUserProfileController.EnableTotp), StepUpScopes.TwoFactorManage },
         { nameof(DefaultUserProfileController.SuspendTwoFactor), StepUpScopes.TwoFactorManage },
         { nameof(DefaultUserProfileController.DisableTotp), StepUpScopes.TwoFactorManage },
         { nameof(DefaultUserProfileController.DisableTwoFactorMethod), StepUpScopes.TwoFactorManage },
@@ -39,6 +43,9 @@ public class SensitiveSelfServiceEndpointTests
         // 而这两个字段正是账号的恢复路径。
         { nameof(DefaultUserProfileController.ConfirmChangeEmail), StepUpScopes.ContactChange },
         { nameof(DefaultUserProfileController.ConfirmChangePhone), StepUpScopes.ContactChange },
+        // 新增一种登录方式：绑定的第三方身份在改密与撤销全部会话之后照样能登录，
+        // 与「换掉第二因子」后果同量级 —— 判据仍是后果，不是端点名。
+        { nameof(DefaultUserProfileController.IssueLinkToken), StepUpScopes.LoginMethodManage },
     };
 
     [Theory]
@@ -72,7 +79,7 @@ public class SensitiveSelfServiceEndpointTests
     [Fact]
     public void Scopes_AreDistinctPerActionGroup()
     {
-        var scopes = new[] { StepUpScopes.TwoFactorManage, StepUpScopes.AccountDestroy, StepUpScopes.ContactChange };
+        var scopes = new[] { StepUpScopes.TwoFactorManage, StepUpScopes.AccountDestroy, StepUpScopes.ContactChange, StepUpScopes.LoginMethodManage };
         scopes.Distinct(StringComparer.Ordinal).Count().ShouldBe(scopes.Length);
     }
 }

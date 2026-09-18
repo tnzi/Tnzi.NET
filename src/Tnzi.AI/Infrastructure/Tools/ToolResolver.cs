@@ -10,7 +10,7 @@ public interface IToolResolver
     /// 解析并合并工具列表（C# 工具 + OpenAPI 工具 + MCP 工具，按名称去重）
     /// </summary>
     /// <param name="toolGroups">工具组列表（为空时仅合并 MCP 工具）</param>
-    /// <param name="userPermissions">用户权限列表（为空时不过滤权限，返回所有工具）</param>
+    /// <param name="userPermissions">用户权限集合（<c>null</c> 时不过滤；空集表示用户没有任何权限，门控工具全部排除）</param>
     /// <param name="toolNames">单个工具名称列表（per-tool 授权/请求覆盖；在工具组之外额外解析，按名称去重合并；权限仍门控）</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>合并后的工具列表，无工具时返回 null</returns>
@@ -32,6 +32,7 @@ public class ToolResolver : IToolResolver, IDisposable
     private readonly IShellCommandAnalyzer? _shellCommandAnalyzer;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly IEventBus? _eventBus;
+    private readonly IOptionsMonitor<SubAgentOptions>? _subAgentOptions;
     private readonly ILogger<ApprovalToolWrapper>? _approvalLogger;
     private readonly ILogger _toolAdapterLogger;
     private readonly ILogger<ToolResolver> _logger;
@@ -57,7 +58,8 @@ public class ToolResolver : IToolResolver, IDisposable
         IToolPermissionEvaluator? permissionEvaluator = null,
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        IOptionsMonitor<SubAgentOptions>? subAgentOptions = null)
     {
         _toolRegistry = Check.NotNull(toolRegistry);
         _mcpToolProvider = Check.NotNull(mcpToolProvider);
@@ -70,6 +72,7 @@ public class ToolResolver : IToolResolver, IDisposable
         _shellCommandAnalyzer = shellCommandAnalyzer;
         _executionContextAccessor = executionContextAccessor;
         _eventBus = eventBus;
+        _subAgentOptions = subAgentOptions;
         _approvalLogger = lf.CreateLogger<ApprovalToolWrapper>();
         _toolAdapterLogger = lf.CreateLogger(typeof(ToolAdapter).FullName!);
         _logger = Check.NotNull(logger);
@@ -176,7 +179,47 @@ public class ToolResolver : IToolResolver, IDisposable
             }
         }
 
+        ApplySubAgentToolLists(merged);
+
         return merged.Count > 0 ? merged : null;
+    }
+
+    /// <summary>
+    /// 在合并之后按 <see cref="SubAgentOptions"/> 的三份名单裁剪，C# / OpenAPI / MCP 工具一视同仁：
+    /// <c>GlobalDisallowedTools</c> 对所有 Agent 生效；<c>SubAgentDisallowedTools</c> 只对子 Agent
+    /// （<see cref="ContextPropertyKeys.IsSubAgent"/>）生效；<c>AsyncAgentAllowedTools</c> 非空时是后台运行
+    /// （请求标了 <see cref="AgentRunRequest.IsBackground"/>，或带 ParentRunId 的树内子调用）的白名单。
+    /// 名单为空 = 不裁剪，与引入读者之前逐字相同。
+    /// 中间件经 <c>AdditionalTools</c> 注入的工具不经过这里（同「中间件注入的工具绕开权限评估器」）。
+    /// </summary>
+    private void ApplySubAgentToolLists(List<AITool> merged)
+    {
+        var options = _subAgentOptions?.CurrentValue;
+        if (options is null || merged.Count == 0)
+        {
+            return;
+        }
+
+        var isSubAgent = _executionContextAccessor?.Properties.TryGetValue(ContextPropertyKeys.IsSubAgent, out var flag) == true
+                         && flag is true;
+        // 根 spawn 没有 ParentRunId 却同样是后台运行：只认 ParentRunId 会让管理端端点与未开追踪的聊天里
+        // spawn 出来的运行整体逃过白名单
+        var currentRequest = _executionContextAccessor?.CurrentRequest;
+        var isBackgroundRun = currentRequest is { IsBackground: true } || currentRequest?.ParentRunId.HasValue == true;
+
+        var removed = merged.RemoveAll(t =>
+            t.Name is null
+                ? false
+                : options.GlobalDisallowedTools.Contains(t.Name, StringComparer.OrdinalIgnoreCase)
+                  || (isSubAgent && options.SubAgentDisallowedTools.Contains(t.Name, StringComparer.OrdinalIgnoreCase))
+                  || (isBackgroundRun && options.AsyncAgentAllowedTools.Count > 0
+                      && !options.AsyncAgentAllowedTools.Contains(t.Name, StringComparer.OrdinalIgnoreCase)));
+
+        if (removed > 0)
+        {
+            _logger.LogDebug("Removed {Count} tool(s) by AI:SubAgent tool lists (isSubAgent={IsSubAgent}, isBackgroundRun={IsBackgroundRun})",
+                removed, isSubAgent, isBackgroundRun);
+        }
     }
 
     /// <summary>

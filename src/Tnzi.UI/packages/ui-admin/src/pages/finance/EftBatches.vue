@@ -164,6 +164,7 @@ import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { type RowAction } from '../../headless/row-actions'
 import {
@@ -218,8 +219,9 @@ const bankAccountOptions = ref<{ label: string; value: string }[]>([])
 
 async function loadBankAccounts() {
   try {
-    const page = await bridge.bankAccounts.fetch({ pageIndex: 1, pageSize: 100 })
-    bankAccountOptions.value = page.items.map((a: BankAccountDto) => ({ label: a.name, value: a.id }))
+    // Every bank account, not the first clamped page (pageSize is clamped to 100 silently).
+    const accounts = await fetchAllPages((q) => bridge.bankAccounts.fetch(q))
+    bankAccountOptions.value = accounts.map((a: BankAccountDto) => ({ label: a.name, value: a.id }))
   } catch {
     bankAccountOptions.value = []
   }
@@ -232,6 +234,12 @@ const crud = useCrudPage<EftBatchRow>({
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.eftBatches.fetch(q),
+  // The page never opens this engine's overlay (no create/edit form here; the
+  // read-only drawer below is its own useDetail on `?detail=`), so it must not
+  // claim the key: two engines reconciling one key wipe a refreshed / shared
+  // `?detail=view:<id>` whose record is off the loaded page, and the drawer
+  // closes with no error (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
+  detailUrl: false,
 })
 
 // ── Payable queue ───────────────────────────────────────────────

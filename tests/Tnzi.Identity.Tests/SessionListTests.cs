@@ -35,7 +35,7 @@ public class SessionListTests
                 .Returns(_userRepositoryMock.Object);
         }
 
-        return new DatabaseSessionService(_repositoryMock.Object, _serviceProviderMock.Object);
+        return new DatabaseSessionService(_repositoryMock.Object, _serviceProviderMock.Object, UnscopedUserTenantScope.Create());
     }
 
     private void SetupSessionQueryable(List<UserSession> sessions)

@@ -153,5 +153,13 @@ public enum SubscriptionChangeStatus
     /// <summary>
     /// 已取消
     /// </summary>
-    Cancelled = 2
+    Cancelled = 2,
+
+    /// <summary>
+    /// 等补差款：立即生效的升级已发起收款、尚未确认到账。
+    /// 与 <see cref="Pending"/> 刻意分开：到期结算扫描只取 Pending，
+    /// 等钱的变更不会因为 EffectiveDate 已到就被当成「到期变更」免费应用。
+    /// 收款确认 → Applied；支付失败 / 过期 / 订阅终止 → Cancelled。
+    /// </summary>
+    AwaitingPayment = 3
 }

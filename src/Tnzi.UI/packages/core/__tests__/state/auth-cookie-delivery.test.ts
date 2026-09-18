@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AuthStateManager } from '../../src/state/auth';
 import { createMemoryStorageAdapter } from '../../src/adapters/storage';
 import type { StorageAdapter } from '../../src/adapters/storage';
+import type { HttpClient } from '../../src/http/http';
 import { isSessionEndedForSecurity, REFRESH_TOKEN_REUSED } from '../../src/services/identity/session-security';
 
 /**
@@ -59,6 +60,18 @@ describe('AuthStateManager - cookie token delivery', () => {
       ...overrides,
     });
   }
+
+  /**
+   * Anything outside the manager that issues a session (the invitation
+   * acceptance page builds its own `useInvitationApi`) has to know the
+   * delivery mode to pass `withCredentials`; the constructor option was
+   * otherwise private to the manager.
+   */
+  it('exposes the delivery mode', () => {
+    expect(createAuth().cookieDelivery).toBe(true);
+    expect(createAuth({ tokenDelivery: 'bearer' }).cookieDelivery).toBe(false);
+    expect(createAuth({ tokenDelivery: undefined }).cookieDelivery).toBe(false);
+  });
 
   it('refreshes without holding a refresh token, and sends an empty body', async () => {
     post.mockResolvedValue(tokenEnvelope);
@@ -146,6 +159,118 @@ describe('AuthStateManager - cookie token delivery', () => {
     await expect(auth.refreshAccessToken()).rejects.toThrow();
 
     expect(auth.error).toBe('Session expired, please login again');
+  });
+
+  it('★ a security-ended session keeps its message across the cookie boot path', async () => {
+    // `_restoreFromCookie` clears quietly on the ordinary "no cookie" boot. It
+    // must not wipe the one message the user needs to see: that their
+    // credentials were replayed from somewhere else.
+    post.mockResolvedValue({
+      succeeded: false,
+      code: 401,
+      errorCode: REFRESH_TOKEN_REUSED,
+      message: 'Invalid or expired refresh token',
+    });
+    const auth = createAuth();
+
+    await auth.restoreAuth();
+
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.error).toContain('security');
+  });
+
+  it('boot with no cookie leaves no stale "session expired" message behind', async () => {
+    post.mockResolvedValue({ succeeded: false, code: 400, message: 'Invalid or expired refresh token' });
+    const auth = createAuth();
+
+    await auth.restoreAuth();
+
+    expect(auth.error).toBeNull();
+  });
+
+  it('logout with an expired access token refreshes from the cookie first', async () => {
+    const auth = createAuth();
+    auth.isAuthenticated = true;
+    auth.accessToken = 'expired-access';
+    auth.tokenExpiry = new Date(Date.now() - 1000);
+    post.mockImplementation(async (url: string) =>
+      url.includes('/auth/refresh-token')
+        ? tokenEnvelope
+        : { succeeded: true, code: 200 },
+    );
+
+    await auth.logout();
+
+    const urls = post.mock.calls.map((c) => String(c[0]));
+    expect(urls[0]).toContain('/auth/refresh-token');
+    expect(post.mock.calls[0][1]).toEqual({});
+    expect(urls[1]).toContain('/auth/logout');
+    expect(httpClient.setAccessToken).toHaveBeenCalledWith('fresh-access');
+    expect(auth.isAuthenticated).toBe(false);
+  });
+});
+
+/**
+ * 每一个能把 `TokenResultDto` 带回来的端点都必须带 credentials：cookie 模式下刷新令牌
+ * 走 `Set-Cookie`，跨源 fetch 不带 `include` 浏览器会直接丢掉那枚 cookie ——
+ * 登录看起来成功，十几分钟后第一次刷新就「会话过期」。
+ */
+describe('cookie-aware token-issuing endpoints', () => {
+  it('every token-issuing auth endpoint is posted with withCredentials', async () => {
+    const post = vi.fn().mockResolvedValue({ succeeded: true, code: 200, data: {} });
+    const client = { post, get: vi.fn() } as unknown as HttpClient;
+    const { useAuthApi, useInvitationApi } = await import('../../src/services/identity/api');
+    const auth = useAuthApi(client, { withCredentials: true });
+    const invitation = useInvitationApi(client, { withCredentials: true });
+
+    const calls: Array<[string, () => unknown]> = [
+      ['loginWithRefreshToken', () => auth.loginWithRefreshToken({ userName: 'a', password: 'b' })],
+      ['refreshToken', () => auth.refreshToken({})],
+      ['register', () => auth.register({ userName: 'a', password: 'b' } as never)],
+      ['logout', () => auth.logout()],
+      ['codeLogin', () => auth.codeLogin({ account: 'a', code: '1' } as never)],
+      ['verifyTwoFactor', () => auth.verifyTwoFactor({ tempToken: 't', code: '1' } as never)],
+      ['completePasskeyAssertion', () => auth.completePasskeyAssertion({ stateId: 's', credentialJson: '{}' })],
+      ['completePendingPasswordChange', () => auth.completePendingPasswordChange({ tempToken: 't', newPassword: 'p' } as never)],
+      ['completePendingTotpEnrollment', () => auth.completePendingTotpEnrollment({ tempToken: 't', code: '1' } as never)],
+      ['completePendingEmailConfirmation', () => auth.completePendingEmailConfirmation({ tempToken: 't', code: '1' } as never)],
+      ['invitation.accept', () => invitation.accept({ token: 't', password: 'p' } as never)],
+    ];
+
+    for (const [name, call] of calls) {
+      post.mockClear();
+      await call();
+      const options = post.mock.calls[0]?.[2] as { withCredentials?: boolean; skipAuthRefresh?: boolean } | undefined;
+      expect(options?.withCredentials, `${name} must send credentials`).toBe(true);
+      expect(options?.skipAuthRefresh, `${name} is an auth-flow request`).toBe(true);
+    }
+  });
+
+  it('signInWithPasskey forwards the auth api options to the completing call', async () => {
+    const publicKeyCredential = {
+      parseCreationOptionsFromJSON: vi.fn((json: unknown) => json),
+      parseRequestOptionsFromJSON: vi.fn((json: unknown) => json),
+    };
+    const navigatorStub = {
+      credentials: { create: vi.fn(), get: vi.fn(() => Promise.resolve({ toJSON: () => ({ id: 'c' }) })) },
+    };
+    vi.stubGlobal('PublicKeyCredential', publicKeyCredential);
+    vi.stubGlobal('navigator', navigatorStub);
+    vi.stubGlobal('window', { PublicKeyCredential: publicKeyCredential, navigator: navigatorStub });
+    try {
+      const post = vi.fn(async (url: string) =>
+        url.includes('assert/begin')
+          ? { succeeded: true, code: 200, data: { optionsJson: '{}', stateId: 's' } }
+          : { succeeded: true, code: 200, data: { accessToken: 'a', refreshToken: '', expiresIn: 1 } },
+      );
+      const { signInWithPasskey } = await import('../../src/services/identity/passkey');
+      await signInWithPasskey({ post, get: vi.fn() } as unknown as HttpClient, undefined, { withCredentials: true });
+
+      const complete = post.mock.calls.find(([url]) => String(url).includes('assert/complete'));
+      expect(complete?.[2]).toEqual(expect.objectContaining({ withCredentials: true, skipAuthRefresh: true }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

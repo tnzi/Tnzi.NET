@@ -21,7 +21,7 @@ public class DefaultAgentRunAdminControllerTests
     public async Task GetState_DelegatesToRuntimeControlService()
     {
         var runId = Guid.NewGuid();
-        _runtimeControlService.Setup(x => x.GetStateAsync(runId, It.IsAny<CancellationToken>()))
+        _runtimeControlService.Setup(x => x.GetStateAsync(runId, AgentRunAccessScope.Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new AgentRunControlStateDto
             {
                 RunId = runId,
@@ -63,7 +63,7 @@ public class DefaultAgentRunAdminControllerTests
     public async Task Wait_DelegatesToRuntimeControlService()
     {
         var runId = Guid.NewGuid();
-        _runtimeControlService.Setup(x => x.WaitAsync(runId, It.IsAny<WaitAgentRunInput>(), It.IsAny<CancellationToken>()))
+        _runtimeControlService.Setup(x => x.WaitAsync(runId, It.IsAny<WaitAgentRunInput>(), AgentRunAccessScope.Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new AgentRunWaitResultDto
             {
                 State = new AgentRunControlStateDto
@@ -86,7 +86,7 @@ public class DefaultAgentRunAdminControllerTests
     public async Task SendInput_DelegatesToRuntimeControlService()
     {
         var runId = Guid.NewGuid();
-        _runtimeControlService.Setup(x => x.SendInputAsync(runId, It.IsAny<SendAgentRunInput>(), It.IsAny<CancellationToken>()))
+        _runtimeControlService.Setup(x => x.SendInputAsync(runId, It.IsAny<SendAgentRunInput>(), AgentRunAccessScope.Tenant, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Result.Success(new AgentRunControlStateDto
             {
                 RunId = runId,

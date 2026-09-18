@@ -83,6 +83,76 @@ public partial class WorkflowService
         });
     }
 
+    /// <summary>
+    /// 条件边 / 循环引用的步骤必须存在；路由类节点（router / conditional / review）没有条件边时其 <c>RouteTo</c>
+    /// 会被引擎静默丢弃、所有分支照跑 —— 那正是本 DTO 存在之前每一条 API 工作流的形态，所以要报出来。
+    /// </summary>
+    private static void ValidateGraphConfiguration(
+        WorkflowDefinition entity, List<WorkflowStepDto> steps, HashSet<string> stepIds, WorkflowValidationResultDto result)
+    {
+        var configuration = TryDeserializeConfiguration(entity.Configuration);
+        if (!string.IsNullOrWhiteSpace(entity.Configuration) && configuration is null)
+        {
+            result.IsValid = false;
+            result.Errors.Add("Invalid graph configuration JSON.");
+            return;
+        }
+
+        var edgeSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edge in configuration?.ConditionalEdges ?? [])
+        {
+            edgeSources.Add(edge.FromNodeId);
+            if (!stepIds.Contains(edge.FromNodeId))
+            {
+                result.IsValid = false;
+                result.Errors.Add($"Conditional edge starts at non-existent step '{edge.FromNodeId}'.");
+            }
+
+            foreach (var (routeKey, target) in edge.Routes)
+            {
+                if (!stepIds.Contains(target))
+                {
+                    result.IsValid = false;
+                    result.Errors.Add($"Conditional edge from '{edge.FromNodeId}' routes '{routeKey}' to non-existent step '{target}'.");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(edge.DefaultTarget) && !stepIds.Contains(edge.DefaultTarget))
+            {
+                result.IsValid = false;
+                result.Errors.Add($"Conditional edge from '{edge.FromNodeId}' has non-existent default target '{edge.DefaultTarget}'.");
+            }
+        }
+
+        foreach (var (loopId, loop) in configuration?.Loops ?? [])
+        {
+            foreach (var nodeId in loop.NodeIds.Where(n => !stepIds.Contains(n)))
+            {
+                result.IsValid = false;
+                result.Errors.Add($"Loop '{loopId}' references non-existent step '{nodeId}'.");
+            }
+
+            if (loop.MaxIterations < 1)
+            {
+                result.IsValid = false;
+                result.Errors.Add($"Loop '{loopId}' must allow at least one iteration.");
+            }
+        }
+
+        foreach (var step in steps)
+        {
+            var nodeType = WorkflowStepNodeType.Get(step);
+            var routes = nodeType is not null
+                && (string.Equals(nodeType, WorkflowNodeTypes.Router, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(nodeType, WorkflowNodeTypes.Conditional, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(nodeType, WorkflowNodeTypes.Review, StringComparison.OrdinalIgnoreCase));
+            if (routes && !edgeSources.Contains(step.StepId!))
+            {
+                result.Warnings.Add($"Step '{step.StepId}' ({nodeType}) returns a route but has no conditional edge; its route is ignored and every dependent branch runs.");
+            }
+        }
+    }
+
     public async Task<Result<WorkflowValidationResultDto>> ValidateAsync(Guid workflowId)
     {
         var entity = await _repository.GetAsync(workflowId);
@@ -147,6 +217,22 @@ public partial class WorkflowService
                 }
             }
         }
+
+        // Check node types against the registered IWorkflowNode set. A typo (or a kind whose
+        // sub-module is not loaded) otherwise surfaces only at run time, as an exception from
+        // WorkflowNodeExecutor.ResolveNode; an absent key legitimately means "agent".
+        var registeredNodeTypes = new HashSet<string>(_workflowNodes.Select(n => n.NodeType), StringComparer.OrdinalIgnoreCase);
+        foreach (var step in steps)
+        {
+            var nodeType = WorkflowStepNodeType.Get(step);
+            if (nodeType != null && !registeredNodeTypes.Contains(nodeType))
+            {
+                result.IsValid = false;
+                result.Errors.Add($"Step '{step.StepId}' uses unknown node type '{nodeType}'. Registered node types: {string.Join(", ", registeredNodeTypes.Order(StringComparer.OrdinalIgnoreCase))}.");
+            }
+        }
+
+        ValidateGraphConfiguration(entity, steps, stepIds, result);
 
         // Simple cycle detection (topological sort)
         if (entity.ExecutionMode == WorkflowExecutionMode.Dag)

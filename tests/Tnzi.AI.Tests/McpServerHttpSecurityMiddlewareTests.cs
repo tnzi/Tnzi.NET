@@ -31,12 +31,6 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
-            {
-                Enabled = true,
-                RequireAuthentication = true,
-                AllowedApiKeys = ["secret"]
-            }),
             security);
 
         var context = new DefaultHttpContext();
@@ -73,23 +67,19 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
-            {
-                Enabled = true,
-                RequireAuthentication = true,
-                AllowedApiKeys = ["secret"]
-            }),
             security);
 
         var context = new DefaultHttpContext();
         context.Request.Headers[McpServerSecurityMiddleware.ApiKeyHeaderName] = "secret";
-        context.Request.Headers[McpServerSecurityMiddleware.TenantHeaderName] = "tenant-a";
+        context.Request.Headers["X-Tenant-Id"] = "tenant-a";
         context.Response.Body = new MemoryStream();
 
         await middleware.InvokeAsync(context);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        context.Items[McpServerSecurityMiddleware.TenantHeaderName].ShouldBe("tenant-a");
+        // 客户端自报的租户头不进 Items：下游没有任何东西该读到它
+        context.Items.ContainsKey("X-Tenant-Id").ShouldBeFalse();
+        context.Items[McpServerSecurityMiddleware.CallerHashItemKey].ShouldBe(security.BuildClientKey(context, "secret"));
         called.ShouldBeTrue();
     }
 
@@ -107,7 +97,6 @@ public class McpServerHttpSecurityMiddlewareTests
                 Enabled = true,
                 RequireAuthentication = true,
                 AllowedApiKeys = ["secret"],
-                RateLimitPerTenant = true,
                 AllowApiKeyInQuery = true
             }),
             NullLogger<McpServerSecurityMiddleware>.Instance,
@@ -122,14 +111,6 @@ public class McpServerHttpSecurityMiddlewareTests
 
         var middleware = new McpServerHttpSecurityMiddleware(
             next,
-            new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
-            {
-                Enabled = true,
-                RequireAuthentication = true,
-                AllowedApiKeys = ["secret"],
-                RateLimitPerTenant = true,
-                AllowApiKeyInQuery = true
-            }),
             security);
 
         var context = new DefaultHttpContext();
@@ -139,9 +120,66 @@ public class McpServerHttpSecurityMiddlewareTests
         await middleware.InvokeAsync(context);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        // Query-string tenant extraction was removed (untrusted, log/cache-prone);
-        // only the X-Tenant-Id header is honored as a rate-limit partition hint.
-        context.Items[McpServerSecurityMiddleware.TenantHeaderName].ShouldBeNull();
+        // 租户提取整条删除：query 与 header 都不再进入限流键或 Items
+        context.Items.ContainsKey("X-Tenant-Id").ShouldBeFalse();
         called.ShouldBeTrue();
+    }
+    [Fact]
+    public async Task InvokeAsync_RunScopedCredential_StoresCallerScopeInItems()
+    {
+        // 凭据校验完不能丢：下游 McpServerHost 按 Items 里的调用面过滤 tools/list、拒绝越界的 tools/call
+        var credential = new RunScopedCredential
+        {
+            RunId = Guid.NewGuid(), AgentId = Guid.NewGuid(), TenantId = Guid.NewGuid(), AllowedToolNames = ["create_ticket"]
+        };
+        var validator = new Mock<IRunScopedCredentialValidator>();
+        validator.Setup(v => v.ValidateAsync("tnzi-run_x", It.IsAny<CancellationToken>())).ReturnsAsync(credential);
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => validator.Object);
+        using var serviceProvider = services.BuildServiceProvider();
+
+        var options = new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
+        {
+            Enabled = true, RequireAuthentication = true, AllowedApiKeys = ["secret"]
+        });
+        var security = new McpServerSecurityMiddleware(options, NullLogger<McpServerSecurityMiddleware>.Instance, serviceProvider);
+        var middleware = new McpServerHttpSecurityMiddleware(_ => Task.CompletedTask, security);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Authorization = "Bearer tnzi-run_x";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        var scope = context.Items[McpServerSecurityMiddleware.CallerScopeItemKey].ShouldBeOfType<McpCallerScope>();
+        scope.IsRunScoped.ShouldBeTrue();
+        scope.TenantId.ShouldBe(credential.TenantId);
+        scope.AllowsTool("create_ticket").ShouldBeTrue();
+        scope.AllowsTool("agent-b").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_StaticApiKey_StoresUnrestrictedScope()
+    {
+        var services = new ServiceCollection();
+        using var serviceProvider = services.BuildServiceProvider();
+        var options = new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
+        {
+            Enabled = true, RequireAuthentication = true, AllowedApiKeys = ["secret"]
+        });
+        var security = new McpServerSecurityMiddleware(options, NullLogger<McpServerSecurityMiddleware>.Instance, serviceProvider);
+        var middleware = new McpServerHttpSecurityMiddleware(_ => Task.CompletedTask, security);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers[McpServerSecurityMiddleware.ApiKeyHeaderName] = "secret";
+        context.Response.Body = new MemoryStream();
+
+        await middleware.InvokeAsync(context);
+
+        var scope = context.Items[McpServerSecurityMiddleware.CallerScopeItemKey].ShouldBeOfType<McpCallerScope>();
+        scope.IsRunScoped.ShouldBeFalse();
+        scope.AllowsTool("anything").ShouldBeTrue();
     }
 }

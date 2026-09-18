@@ -140,13 +140,27 @@ public class OutboxRelayBackgroundService : BackgroundService
         // timeout: null 表示立即返回。抢不到说明另一个实例正在中继本轮 —— 跳过就好，
         // 下一个轮询周期会再来；排队等锁只会让所有实例挤在同一时刻醒来。
         await using var handle = await distributedLock.AcquireAsync(RelayLockKey, timeout: null, stoppingToken);
-        if (handle is null || !handle.IsAcquired)
+        if (handle is null)
         {
             _logger.LogDebug("Outbox relay skipped this cycle: another instance holds the relay lock");
             return;
         }
 
-        await RelayBatchAsync(eventStore, scope.ServiceProvider, stoppingToken);
+        // ★ 锁在批次中途丢失（续租失败、Redis 抖动、键被逐出）= 另一个实例随时会抢到锁并读到
+        // 同一批未标记的事件。此时唯一正确的动作是停手：把这一批跑完只会让每条事件投递两次，
+        // 而那正是这把锁存在的唯一理由。只在获取瞬间读一次 IsAcquired 发现不了这件事 ——
+        // 那一刻它恒为 true。
+        using var relayCancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, handle.Lost);
+        try
+        {
+            await RelayBatchAsync(eventStore, scope.ServiceProvider, relayCancellation.Token);
+        }
+        catch (OperationCanceledException) when (handle.Lost.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Outbox relay stopped mid-batch because the relay lock was lost (renewal failed or the key expired). "
+                + "Events not yet marked as processed will be relayed again; integration event consumers must be idempotent.");
+        }
     }
 
     private async Task RelayBatchAsync(IEventStore eventStore, IServiceProvider services,
@@ -190,6 +204,11 @@ public class OutboxRelayBackgroundService : BackgroundService
             materialized = MaterializeEvent(storedEvent);
             await PublishStoredEventAsync(materialized.Value, integrationEventBus, eventBus, stoppingToken);
             await eventStore.MarkAsProcessedAsync(storedEvent.EventId, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 中继被叫停（进程关闭或锁丢失）不是这条事件的失败：不计失败次数、不推向死信，原样留给下一轮
+            throw;
         }
         catch (Exception ex)
         {

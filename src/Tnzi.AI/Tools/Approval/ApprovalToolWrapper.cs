@@ -364,6 +364,10 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
     {
         context.ServerName = GetAdditionalPropertyString(function, "mcp.server");
 
+        // 属性 / MCP 注解来源的破坏性标记与 shell 命令分析 OR 合并：
+        // 评估器「破坏性工具无显式 allow 即拒绝」与 IsDestructiveOnly 规则此前只对 shell 片段生效
+        context.IsDestructive |= IsDeclaredDestructive(function);
+
         if (string.IsNullOrWhiteSpace(context.ServerName)
             && context.ToolGroup != null
             && context.ToolGroup.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
@@ -567,6 +571,37 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         }
 
         return ConvertToString(value);
+    }
+
+    /// <summary>
+    /// 工具自己声明的破坏性：C# 工具经 <see cref="ToolMetadataKeys.Destructive"/>（<c>ToolAdapter</c> 写入），
+    /// MCP 工具经 <c>destructiveHint</c> 注解。
+    /// </summary>
+    /// <remarks>
+    /// MCP 规范说「未声明时客户端应假定为 true」，这里<b>刻意只认显式的 true</b>：绝大多数 MCP 服务器不写注解，
+    /// 把未声明当破坏性会让零规则部署里每一个 MCP 工具都被「破坏性工具需显式 allow」拒掉 —— 那不是收紧一道门，
+    /// 是把整个 MCP 集成关掉。要按规范从严，写一条 <c>ToolGroup = "mcp:*"</c> 的 Ask / Deny 规则即可。
+    /// </remarks>
+    internal static bool IsDeclaredDestructive(AIFunction function)
+    {
+        if (function.AdditionalProperties != null
+            && function.AdditionalProperties.TryGetValue(ToolMetadataKeys.Destructive, out var declared)
+            && declared != null)
+        {
+            return TryConvertToBool(declared);
+        }
+
+        // ★ 经 GetService 而不是类型判断：OAuth 服务器的工具先被 McpAuthRecoveryToolWrapper（DelegatingAIFunction）
+        //   包过一层才到这里，`function is McpClientTool` 只看得见最外层，服务器显式标 destructiveHint 的工具
+        //   会按非破坏性默认放行，而同一个工具在不配 OAuth 的服务器上被拒。DelegatingAIFunction.GetService
+        //   逐层下探到内层，包装几层都拿得到底下那个 McpClientTool。
+        if (function.GetService<McpClientTool>() is { } mcpTool)
+        {
+            var annotations = mcpTool.ProtocolTool.Annotations;
+            return annotations?.DestructiveHint == true && annotations.ReadOnlyHint != true;
+        }
+
+        return false;
     }
 
     private static string? GetAdditionalPropertyString(AIFunction function, string key)

@@ -5,25 +5,29 @@ namespace Tnzi.Storage.Services;
 /// </summary>
 public class FilePreviewService : ApplicationService, IFilePreviewService
 {
-    private readonly IFileStorage _storage;
+    private readonly IFileStorageService _fileStorageService;
     private readonly IDocumentConverter? _documentConverter;
 
     /// <summary>
     /// 初始化 <see cref="FilePreviewService"/> 类型的新实例。
     /// </summary>
-    /// <param name="storage">云存储服务。</param>
+    /// <param name="fileStorageService">
+    /// 文件存储服务。预览的字节经它的 <see cref="IFileStorageService.GetForPreviewAsync"/> 取 ——
+    /// 而不是直接找 provider —— 这样 <c>FileAccessedEvent</c> 的发布点只有一处，预览才会以
+    /// <c>FileAccessType.Preview</c> 出现在审计里（此前这条路径一条事件都不发）。
+    /// </param>
     /// <param name="serviceProvider">服务提供者。</param>
     /// <param name="documentConverter">
     /// Office 转 PDF 转换器；来自可选包 <c>Tnzi.Documents</c>，没加载时为 null，
     /// 此时 Office 文档维持「不支持预览」。
     /// </param>
     public FilePreviewService(
-        IFileStorage storage,
+        IFileStorageService fileStorageService,
         IServiceProvider serviceProvider,
         IDocumentConverter? documentConverter = null)
         : base(serviceProvider)
     {
-        _storage = Check.NotNull(storage);
+        _fileStorageService = Check.NotNull(fileStorageService);
         _documentConverter = documentConverter;
     }
 
@@ -84,22 +88,34 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
     /// </summary>
     /// <param name="fileRecord">文件记录</param>
     /// <returns>预览URL</returns>
-    public async Task<string> GetPreviewUrlAsync(FileRecord fileRecord)
+    /// <remarks>
+    /// 一律回 API 路由，图片也不例外。此前图片走 <c>IFileStorage.GetUrlAsync(path)</c>：不带过期的
+    /// S3 / Azure 返回的是 <c>base + key</c> —— 一条永久、无签名、一经发出就再不过问
+    /// <see cref="IFileAccessAuthorizer"/> 的链接（公开桶上就是一份永久副本），本地 provider 没配
+    /// <c>UrlPrefix</c> 时甚至回的是相对键而不是 URL；两种形态都把 <c>FileRecordDto</c> 刻意不外露的
+    /// 存储键交了出去。需要直连对象存储的调用方走 <c>presigned-url</c>（有 TTL 上限、有 <c>[SensitiveEndpoint]</c>）。
+    /// <para>
+    /// 两条 API 路由按类型分：浏览器能直接显示的类型（<see cref="FileTypeHelper.IsInlineRenderable"/>）回
+    /// <c>/api/files/{id}/preview</c> —— 匿名可达（公开文件 / <c>?sig=</c>）、每次都过授权器、带缓存头，
+    /// <c>&lt;img src&gt;</c> 在 Bearer 交付模式下拼上 <c>sig</c> 就能加载；其余类型（Office 转 PDF、SVG 等）回
+    /// <c>/api/files/preview/{id}/preview?type=…</c>，那个控制器是类级 <c>[ApiAuthorize]</c>，登录才可达，
+    /// 也只有它会做转换。
+    /// </para>
+    /// </remarks>
+    public Task<string> GetPreviewUrlAsync(FileRecord fileRecord)
     {
         if (fileRecord == null || string.IsNullOrEmpty(fileRecord.Path))
-            return string.Empty;
+            return Task.FromResult(string.Empty);
 
-        // 对于图片，直接返回URL
-        if (FileTypeHelper.IsImage(fileRecord.Extension))
-        {
-            return await _storage.GetUrlAsync(fileRecord.Path);
-        }
+        // 路由对应 DefaultStorageController：[Route("files")] + [HttpGet("{id:guid}/preview")]，
+        // 与它内联的判据同一个（不在白名单里的类型那条路由会按附件发出，装不进 <img>）。
+        if (FileTypeHelper.IsInlineRenderable(fileRecord.ContentType))
+            return Task.FromResult($"/api/files/{fileRecord.Id}/preview");
 
-        // 对于其他类型，返回预览 API URL。
         // 路由对应 DefaultStoragePreviewController：[Route("files/preview")] + [HttpGet("{id:guid}/preview")]，
         // 框架自动加 "api/" 前缀，故完整路径为 /api/files/preview/{id}/preview。
         var previewType = GetPreviewType(fileRecord);
-        return $"/api/files/preview/{fileRecord.Id}/preview?type={previewType}";
+        return Task.FromResult($"/api/files/preview/{fileRecord.Id}/preview?type={previewType}");
     }
 
     /// <summary>
@@ -147,28 +163,14 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
 
         var extension = fileRecord.Extension;
 
-        // 对于图片，直接返回原文件流
-        if (FileTypeHelper.IsImage(extension))
+        // 图片 / PDF / 文本 / 视频 / 音频：浏览器能直接显示，原样返回文件流
+        if (FileTypeHelper.IsImage(extension)
+            || FileTypeHelper.IsPdf(extension)
+            || FileTypeHelper.IsText(extension)
+            || FileTypeHelper.IsVideo(extension)
+            || FileTypeHelper.IsAudio(extension))
         {
-            return await _storage.DownloadAsync(fileRecord.Path!);
-        }
-
-        // 对于PDF，直接返回原文件流（浏览器可以预览）
-        if (FileTypeHelper.IsPdf(extension))
-        {
-            return await _storage.DownloadAsync(fileRecord.Path!);
-        }
-
-        // 对于文本文件，直接返回原文件流
-        if (FileTypeHelper.IsText(extension))
-        {
-            return await _storage.DownloadAsync(fileRecord.Path!);
-        }
-
-        // 对于视频和音频，返回原文件流（浏览器可播放）
-        if (FileTypeHelper.IsVideo(extension) || FileTypeHelper.IsAudio(extension))
-        {
-            return await _storage.DownloadAsync(fileRecord.Path!);
+            return await OpenForPreviewAsync(fileRecord);
         }
 
         // 对于 Office 文档，转成 PDF 后返回（浏览器可预览）
@@ -197,7 +199,7 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
     /// </remarks>
     private async Task<Stream> ConvertOfficeToPdfAsync(FileRecord fileRecord, string extension)
     {
-        await using var source = await _storage.DownloadAsync(fileRecord.Path!);
+        await using var source = await OpenForPreviewAsync(fileRecord);
         using var buffer = new MemoryStream();
         await source.CopyToAsync(buffer);
 
@@ -205,6 +207,21 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
 
         // 返回的流交给调用方（控制器 File(...)）dispose，与本方法其它分支一致。
         return new MemoryStream(pdf);
+    }
+
+    /// <summary>
+    /// 经存储服务取预览字节。调用方（控制器）已经用 <c>GetRecordAsync</c> 授权过一次，这里再过一次是
+    /// 取流路径自带的；失败只剩「记录刚被删 / 权限刚被收回」这类竞态，按 404 抛出。
+    /// </summary>
+    private async Task<Stream> OpenForPreviewAsync(FileRecord fileRecord)
+    {
+        var result = await _fileStorageService.GetForPreviewAsync(fileRecord.Id);
+        if (!result.Succeeded)
+        {
+            throw new ResourceNotFoundException("File", fileRecord.Id);
+        }
+
+        return result.Data!;
     }
 }
 

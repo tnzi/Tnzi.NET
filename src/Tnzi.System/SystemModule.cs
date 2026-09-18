@@ -36,6 +36,9 @@ public class SystemModule : TnziApplicationModule
         // 注册配置加密选项（显式嵌套 section）
         context.Services.AddTnziOptions<SettingEncryptionOptions, SettingEncryptionOptionsValidator>(configuration, "System:Encryption");
 
+        // 访问日志采集开关（System:AccessLog，默认关闭）
+        context.Services.AddTnziOptions<AccessLogOptions, AccessLogOptionsValidator>(configuration);
+
         return Task.CompletedTask;
     }
 
@@ -79,10 +82,20 @@ public class SystemModule : TnziApplicationModule
         services.AddScoped<IAccessLogService, AccessLogService>();
 
         // 注册访问日志异步处理
-        var accessLogSender = new AccessLogSender();
-        services.AddSingleton<IAccessLogSender>(accessLogSender);
-        services.AddSingleton<IAccessLogConsumer>(accessLogSender);
+        // 发送者要读队列容量并记「队列满、丢了多少条」的日志，故经 DI 构造而不是 new 出来。
+        services.AddSingleton<AccessLogSender>();
+        services.AddSingleton<IAccessLogSender>(sp => sp.GetRequiredService<AccessLogSender>());
+        services.AddSingleton<IAccessLogConsumer>(sp => sp.GetRequiredService<AccessLogSender>());
         services.AddHostedService<AccessLogBackgroundService>();
+
+        // ★ Sys_AccessLog 的生产者。此前这张表没有任何生产者：8 个查询端点、后台富化、管理页与仪表盘 KPI
+        // 全围着一张恒空的表，唯一的写入口是要 system.accessLog.create 的管理端手工 POST。
+        // 中间件无条件挂上、按 System:AccessLog:Enabled（默认 false）逐请求热判：关着时是一次判断即放行，
+        // 而开关做成热读让部署不必为了开采集重启。
+        // ★ 挂在 AspNetCore 管线的「认证之后、限流与授权之前」插入点，而不是在 OnApplicationInitializationAsync 里
+        // 追加：追加只能落在授权之后，那里只看得见通过了认证、限流与授权的请求 —— 401 / 403 / 429 由授权与限流
+        // 中间件就地写出、不再调用下游，于是最该被记下来的「谁被拒绝了」一条都记不到，错误统计与 Top 错误端点整体失真。
+        services.AddRequestPipelineMiddleware<AccessLogMiddleware>(RequestPipelineStage.AfterAuthentication);
 
         // SettingConfigurationSource: 把 host builder 阶段注册的 source 暴露成 DI singleton，
         // 让 OnApplicationInitializationAsync 拿同一实例 attach IServiceProvider + 触发首次 reload。

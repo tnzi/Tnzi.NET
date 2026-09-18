@@ -367,9 +367,13 @@ export function useAdminCliRunApi(client: HttpClient) {
     /** Cancel a run - a running one has its whole process tree terminated */
     cancel: (id: string) => client.post<void>(`/admin/ai/cli-runs/${id}/cancel`),
 
-    /** SSE stream URL. Pass the last received sequence to resume precisely. */
+    /**
+     * SSE stream URL, resolved against the client's baseUrl so it can be
+     * handed to `streamCliRun` (which fetches it verbatim). Pass the last
+     * received sequence to resume precisely.
+     */
     streamUrl: (id: string, fromSequence = 0) =>
-      `/admin/ai/cli-runs/${id}/stream?fromSequence=${fromSequence}`,
+      client.resolveUrl(`/admin/ai/cli-runs/${id}/stream`, { fromSequence }),
   };
 }
 
@@ -389,8 +393,8 @@ export function useCliRunApi(client: HttpClient) {
     /** Cancel one of your own runs */
     cancel: (id: string) => client.post<void>(`/ai/cli-runs/${id}/cancel`),
 
-    /** SSE stream URL */
+    /** SSE stream URL, resolved against the client's baseUrl (see the admin twin). */
     streamUrl: (id: string, fromSequence = 0) =>
-      `/ai/cli-runs/${id}/stream?fromSequence=${fromSequence}`,
+      client.resolveUrl(`/ai/cli-runs/${id}/stream`, { fromSequence }),
   };
 }

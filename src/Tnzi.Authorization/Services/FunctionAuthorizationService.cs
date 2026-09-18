@@ -209,6 +209,80 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
+    /// 一次解析 N 个用户对同一个码的授予（常数次查询）。与逐个
+    /// <see cref="CheckPermissionAsync"/> 逐用户一致：超管旁路 → 用户级 deny 优先 →
+    /// 用户直授 / 角色授权（仅启用且未退役的功能）；码大小写不敏感。
+    /// </summary>
+    /// <remarks>
+    /// 调用方是「按用户名单过滤」的场景（IM 通讯录 / 群成员候选 / 广播受众）。
+    /// 逐个判定每人至少一次无缓存的角色查询，名单一长就是 O(N) 次往返；这里改成
+    /// 一次角色名查询（超管）+ 一次功能定位 + 一次角色授权 + 一次用户授权 + 一次角色 Id 查询。
+    /// 刻意不经每用户权限缓存：缓存按用户分片，批量场景下命中率与代价都不划算。
+    /// </remarks>
+    public async Task<IReadOnlySet<Guid>> FilterGrantedAsync(IReadOnlyCollection<Guid> userIds, string permissionName)
+    {
+        var granted = new HashSet<Guid>();
+        if (userIds == null || userIds.Count == 0 || string.IsNullOrEmpty(permissionName))
+            return granted;
+
+        var ids = userIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) return granted;
+
+        // 1. 超管旁路：一次角色名查询覆盖整份名单。
+        var superRoles = _options?.Value.SuperAdminRoles;
+        if (superRoles is { Count: > 0 } && _userRoleService != null)
+        {
+            var superSet = new HashSet<string>(superRoles, StringComparer.OrdinalIgnoreCase);
+            var roleNamesByUser = await _userRoleService.GetUserRolesAsync(ids)
+                ?? new Dictionary<Guid, IEnumerable<string>>();
+            foreach (var (userId, roleNames) in roleNamesByUser)
+            {
+                if (roleNames.Any(superSet.Contains)) granted.Add(userId);
+            }
+        }
+
+        var remaining = ids.Where(id => !granted.Contains(id)).ToList();
+        if (remaining.Count == 0) return granted;
+
+        // 2. 码 → 启用且未退役的功能（大小写不敏感，与单查一致）。
+        var code = permissionName.ToLower();
+        var functionIds = await _moduleFunctionRepository
+            .Where(f => f.IsEnabled && !f.IsRetired && f.Code.ToLower() == code)
+            .Select(f => f.Id)
+            .ToListAsync();
+        if (functionIds.Count == 0) return granted;
+
+        // 3. 用户直授 / 用户级 deny（deny 优先，与 GetExplicitUserPermissionNamesAsync 的 EXCEPT 一致）。
+        var userRows = await _userFunctionRepository
+            .Where(uf => remaining.Contains(uf.UserId) && functionIds.Contains(uf.FunctionId) && uf.IsEnabled)
+            .Select(uf => new { uf.UserId, uf.IsGranted })
+            .ToListAsync();
+        var denied = userRows.Where(r => !r.IsGranted).Select(r => r.UserId).ToHashSet();
+        var allowedDirectly = userRows.Where(r => r.IsGranted).Select(r => r.UserId).ToHashSet();
+
+        // 4. 授予该功能的角色 → 名单里谁持有这些角色。
+        var grantingRoleIds = (await _roleFunctionRepository
+            .Where(rf => functionIds.Contains(rf.FunctionId) && rf.IsEnabled)
+            .Select(rf => rf.RoleId)
+            .ToListAsync()).ToHashSet();
+        var roleIdsByUser = grantingRoleIds.Count > 0 && _userRoleService != null
+            ? await _userRoleService.GetUserRoleIdsAsync(remaining) ?? new Dictionary<Guid, IEnumerable<Guid>>()
+            : new Dictionary<Guid, IEnumerable<Guid>>();
+
+        foreach (var userId in remaining)
+        {
+            if (denied.Contains(userId)) continue;
+            if (allowedDirectly.Contains(userId)
+                || (roleIdsByUser.TryGetValue(userId, out var roleIds) && roleIds.Any(grantingRoleIds.Contains)))
+            {
+                granted.Add(userId);
+            }
+        }
+
+        return granted;
+    }
+
+    /// <summary>
     /// 批量检查用户是否有多个权限
     /// 一次性获取用户权限并检查，比多次调用 CheckPermissionAsync 性能更好
     /// </summary>
@@ -442,16 +516,18 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// 获取模块的功能列表（管理面）。
     /// </summary>
     /// <remarks>
-    /// 这里<b>刻意不</b>过滤 <c>IsRetired</c>：退役行不参与权限解析、也不出现在分配矩阵里，
-    /// 但管理页必须看得见它，否则「授权明明还在、却不生效」没有任何可查之处。
-    /// DTO 带 <c>IsRetired</c> 供前端渲染置灰的退役标。
+    /// 这里<b>刻意不</b>过滤 <c>IsRetired</c> 与 <c>IsEnabled</c>：休眠行（退役或停用）不参与权限解析、
+    /// 也不出现在分配矩阵里，但管理页必须看得见它 —— 退役行不可见则「授权明明还在、却不生效」没有任何可查之处；
+    /// 停用行不可见则「启用」按钮没有宿主，停用在 UI 上变成单向操作，恢复只能拿着 guid 直调端点或改库。
+    /// DTO 带 <c>IsRetired</c> / <c>IsEnabled</c> 供前端渲染置灰的退役标与停用徽标。
+    /// 生效判据只在权限解析、超管/业务管理员目录与矩阵写路径上。
     /// </remarks>
     /// <param name="moduleId">模块ID</param>
     /// <returns>功能列表</returns>
     public async Task<Result<IEnumerable<ModuleFunction>>> GetModuleFunctionsAsync(Guid moduleId)
     {
         var functions = await _moduleFunctionRepository
-            .Where(f => f.ModuleId == moduleId && f.IsEnabled)
+            .Where(f => f.ModuleId == moduleId)
             .OrderBy(f => f.Order)
             .ToListAsync();
         return Ok((IEnumerable<ModuleFunction>)functions);

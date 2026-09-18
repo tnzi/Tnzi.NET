@@ -28,6 +28,9 @@ const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // Owned by @tnzi/ui - the doc says so explicitly at the end of section 0.
   TDescriptions: '@tnzi/ui',
   TSchemaForm: '@tnzi/ui',
+  // Named in the overlay-density rule for its `size` default (unset, so a
+  // TForm inside a shell resolves to small). Owned by @tnzi/ui.
+  TForm: '@tnzi/ui',
   // The ⓘ + popover primitive TDetailSection renders for `hintMode="popover"`.
   // Named in the doc to explain what the mode produces, not as an admin import.
   THint: '@tnzi/ui',
@@ -38,6 +41,11 @@ const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // keyboard half. Owned by @tnzi/ui, named there so both reorder surfaces are
   // findable from one place.
   TAttachmentWall: '@tnzi/ui',
+  // The two artifact iframes C16 cites as the history of the sandbox rule
+  // (07-26 fixed one, 09-12 fixed the other). Owned by @tnzi/ui-ai; the doc
+  // names them to explain why the cross-package iframe gate exists.
+  TArtifactPanel: '@tnzi/ui-ai',
+  TArtifactPreview: '@tnzi/ui-ai',
   // Admin shell internals assembled by defineAdminApp; named in the doc only to
   // describe framework behaviour, never as something a consumer imports.
   TAdminContent: 'shell internal',
@@ -50,6 +58,10 @@ const NOT_PACKAGE_ROOT_EXPORTS: Record<string, string> = {
   // own shell.
   TDesktopHost: 'shell internal',
   TDesktopWindowNav: 'shell internal',
+  // The window host that mounts a whole page inside a desktop window; the
+  // overlay-density rule names it to say why TOverlayTheme cannot carry the
+  // small-control default (it would shrink the page, not an overlay).
+  TDesktopWindowHost: 'shell internal',
   // Internal section wrapper of the built-in User Center page.
   TUserCenterSection: 'page internal',
 }
@@ -456,6 +468,23 @@ describe('package public surface', () => {
       // wholesale reintroduces no cross-package clash.
       expect('TStatCard' in pkg).toBe(true)
       expect(pkg.TStatCard).toBe(pkg.TKpiCard)
+    })
+  })
+
+  describe('bridge plumbing reaches the package root', () => {
+    // The bridge rule says "every write goes through `unwrapOk`", and the docs say the
+    // helper is root-exported from `@tnzi/ui-admin`. Until 2026-09-12 the root exported
+    // only the unchecked `unwrapResult`, so a consumer who read the rule could not follow
+    // it from this package - the factories and the asserting helpers must ship together.
+    it.each(['unwrapOk', 'unwrapUnchecked', 'ensureOk', 'unwrapResult', 'defineCrudBridge', 'defineChildBridge'])(
+      '%s is exported from the package root',
+      (name) => {
+        expect(typeof (pkg as Record<string, unknown>)[name]).toBe('function')
+      },
+    )
+
+    it('unwrapOk from the root asserts the envelope', () => {
+      expect(() => pkg.unwrapOk({ succeeded: false, success: false, code: 409, data: null, message: 'nope' })).toThrow('nope')
     })
   })
 })

@@ -123,6 +123,8 @@ public class PaymentSubscriptionsModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ExpireOverdueSubscriptions>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ApplyDuePlanChanges>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.SendRenewalReminders>();
+        // 多租户开启时后台循环按租户逐个跑：只用试用、一笔支付都没有的租户不在父模块的来源里，这里补上
+        context.Services.AddScoped<IPaymentTenantSource, SubscriptionTenantSource>();
 
         // 订阅域自己的 6 个日志型事件处理器。
         context.Services.AddEventHandler<SubscriptionCreatedEvent, SubscriptionCreatedEventHandler>();

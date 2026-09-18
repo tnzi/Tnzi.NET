@@ -86,7 +86,8 @@ const stubs = {
 }
 
 interface RecurringVm {
-  rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean }>
+  rowActions: Array<{ key: string; label: string; confirm?: string; show?: (row: Record<string, unknown>) => boolean }>
+  tp: (key: string) => string
   previewSchedule: (model: Record<string, unknown>) => Promise<void>
   previewDates: string[]
   runDue: () => Promise<void>
@@ -104,6 +105,26 @@ describe('Finance Recurring page', () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The row actions are declared as i18n keys and rendered through the page
+   * translator, which prepends `admin.modules.finance.recurring.` itself. A key
+   * that already carries the namespace misses the dictionary and is humanised:
+   * "End Confirm" in the popconfirm and English labels in every locale. Resolve
+   * the declared keys through the page's own translator, not just their `show`.
+   */
+  it('row action labels and the end confirm resolve to their dictionary strings', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as RecurringVm
+    const byKey = Object.fromEntries(vm.rowActions.map((a) => [a.key, a]))
+    expect(vm.tp(byKey.end!.confirm!)).toContain('stops generating')
+    expect(vm.tp(byKey.run!.label)).toBe('Run now')
+    expect(vm.tp(byKey.pause!.label)).toBe('Pause')
+    expect(vm.tp(byKey.resume!.label)).toBe('Resume')
+    expect(vm.tp(byKey.history!.label)).toBe('History')
+    expect(vm.tp(byKey.end!.label)).toBe('End')
   })
 
   /** Pause/resume are mutually exclusive; a spent template offers neither. */

@@ -90,6 +90,61 @@ public class PayRunExternalAndYtdTests : PayrollIntegrationTestBase
         result.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// 外部摄取与计算器、一次性输入两条写入路径同一口径：收入 / 扣减 / 雇主承担项不得为负。
+    /// </summary>
+    /// <remarks>
+    /// 一个负的扣减项就是一次没人申报的加薪：Deduction = -500 让 NetPay = gross + 500，
+    /// 而所有守卫都只看合计（NetPay 仍为正、无 CalculationError、过账引擎按科目聚合后仍为正），
+    /// 于是它干净地过账、并被 Ytd() 折进此后每一期的法定上限基数。
+    /// </remarks>
+    [Fact]
+    public async Task External_NegativeDeductionLine_IsRejected()
+    {
+        await SeedBasicComponentAsync();
+        await CreateEmployeeAsync("EMP1", "One");
+        var dto = Ingest("prov-neg-ded", "EMP1");
+        dto.Payslips[0].Lines.Add(new ExternalPayslipLineDto { ComponentCode = "TAX", Amount = -500m });
+
+        var result = await IngestAsync(dto);
+
+        result.Succeeded.ShouldBeFalse("a negative deduction is an unreported raise");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("EMP1");
+        result.Message!.ShouldContain("TAX");
+        (await CountAsync<PayRun>(_ => true)).ShouldBe(0, "the ingest is a request, not a batch calculation: nothing is stored");
+    }
+
+    [Fact]
+    public async Task External_NegativeEarningLine_IsRejected()
+    {
+        await SeedBasicComponentAsync();
+        await CreateEmployeeAsync("EMP1", "One");
+        var dto = Ingest("prov-neg-earn", "EMP1");
+        dto.Payslips[0].Lines[0].Amount = -1000m;
+
+        var result = await IngestAsync(dto);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("BASIC");
+    }
+
+    [Fact]
+    public async Task External_NegativeInformationalLine_IsAccepted()
+    {
+        await SeedBasicComponentAsync();
+        await CreateComponentAsync("CREDIT", SalaryComponentType.Informational, formula: null);
+        await CreateEmployeeAsync("EMP1", "One");
+        var dto = Ingest("prov-neg-info", "EMP1");
+        dto.Payslips[0].Lines.Add(new ExternalPayslipLineDto { ComponentCode = "CREDIT", Amount = -42m });
+
+        var result = await IngestAsync(dto);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.NetTotal.ShouldBe(900m, "an informational line never enters a total");
+    }
+
     [Fact]
     public async Task OpeningBalance_Ingested_NotPosted()
     {
@@ -184,6 +239,79 @@ public class PayRunExternalAndYtdTests : PayrollIntegrationTestBase
         calc2.Succeeded.ShouldBeTrue(calc2.Message);
         calc2.Data!.GrossTotal.ShouldBe(2000m);
     }
+
+    /// <summary>
+    /// 摄取错了的期初累计要能撤回：删掉之后 Ytd() 不再含它。
+    /// </summary>
+    /// <remarks>
+    /// 被保护的缺陷：摄取批次直接落 Calculated，而删除只认 Draft、作废只认 Posted 及之后、
+    /// 过账对 OpeningBalance 一律 409、同 ProviderRunId 再摄取只返回既有批次 —— 年中上线时多录一个零，
+    /// 此后每一期的 CPP/EI 上限都按错误基数算，只能直连 SQL 修库。
+    /// </remarks>
+    [Fact]
+    public async Task Delete_OpeningBalanceRun_RemovesItFromYtd()
+    {
+        await SeedCoaAsync();
+        var basic = await ComponentWithAccountsAsync("BASIC", SalaryComponentType.Earning, "BASE", expenseAccountCode: "5300");
+        var prior = await ComponentWithAccountsAsync("PRIOR", SalaryComponentType.Earning, "Ytd('BASIC')", expenseAccountCode: "5300");
+        var structure = await CreateStructureAsync("Ytd",
+            new SalaryStructureLineInputDto { ComponentId = basic, Sequence = 1 },
+            new SalaryStructureLineInputDto { ComponentId = prior, Sequence = 2 });
+        structure.Succeeded.ShouldBeTrue(structure.Message);
+        var emp = await CreateEmployeeAsync("EMP1", "One");
+        await AssignAsync(emp.Id, structure.Data!.Id, 1000m, new DateTime(2026, 1, 1));
+
+        var opening = OpeningBalance("open-wrong", basicAmount: 50000m); // 本想录 5000
+        var ingested = await IngestAsync(opening);
+        ingested.Succeeded.ShouldBeTrue(ingested.Message);
+        ingested.Data!.Status.ShouldBe(PayRunStatus.Calculated);
+
+        var deleted = await InScopeAsync<IPayRunService, Result>(s => s.DeleteAsync(ingested.Data.Id));
+        deleted.Succeeded.ShouldBeTrue(deleted.Message);
+
+        var run = await CreateRunAsync(new DateTime(2026, 6, 1), new DateTime(2026, 6, 30), new DateTime(2026, 6, 30));
+        var calc = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run));
+        calc.Succeeded.ShouldBeTrue(calc.Message);
+        calc.Data!.GrossTotal.ShouldBe(1000m, "the deleted opening balance must not feed Ytd()");
+    }
+
+    /// <summary>
+    /// 删掉之后同一个 ProviderRunId 可以重新摄取（唯一索引带 IsDeleted=false 过滤）—— 这就是更正路径。
+    /// </summary>
+    [Fact]
+    public async Task Delete_ThenReingestSameProviderRunId_CreatesANewRun()
+    {
+        await SeedBasicComponentAsync();
+        await CreateEmployeeAsync("EMP1", "One");
+
+        var first = await IngestAsync(Ingest("open-redo", "EMP1", PayRunSource.OpeningBalance));
+        first.Succeeded.ShouldBeTrue(first.Message);
+        (await InScopeAsync<IPayRunService, Result>(s => s.DeleteAsync(first.Data!.Id))).Succeeded.ShouldBeTrue();
+
+        var second = await IngestAsync(Ingest("open-redo", "EMP1", PayRunSource.OpeningBalance));
+        second.Succeeded.ShouldBeTrue(second.Message);
+        second.Data!.Id.ShouldNotBe(first.Data!.Id);
+        second.Data.Status.ShouldBe(PayRunStatus.Calculated);
+    }
+
+    private static ExternalPayRunIngestDto OpeningBalance(string providerRunId, decimal basicAmount)
+        => new()
+        {
+            ProviderRunId = providerRunId,
+            Source = PayRunSource.OpeningBalance,
+            PeriodStart = new DateTime(2026, 1, 1),
+            PeriodEnd = new DateTime(2026, 5, 31),
+            PayDate = new DateTime(2026, 5, 31),
+            Frequency = PayFrequency.Monthly,
+            Payslips = new List<ExternalPayslipDto>
+            {
+                new()
+                {
+                    EmployeeCode = "EMP1",
+                    Lines = new List<ExternalPayslipLineDto> { new() { ComponentCode = "BASIC", Amount = basicAmount } }
+                }
+            }
+        };
 
     [Fact]
     public async Task Ytd_IncludesOpeningBalanceRun()

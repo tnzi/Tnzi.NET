@@ -49,13 +49,20 @@ export * from './presets/index'
 // into any consumer that wanted one display component.
 export * from './components/widgets/index'
 
-// Bridge plumbing - envelope helpers (`ensureOk` / `unwrapResult`, re-exported
-// from @tnzi/core) + the CRUD query/result adapters, surfaced at the package
-// root so consumer bridges import the whole set from `@tnzi/ui-admin` instead
-// of copying `services/_mappers` (which is otherwise not on the public surface).
-// `CrudPageQuery` / `CrudPageResult` already reach the root via `./headless`.
+// Bridge plumbing - envelope helpers (`ensureOk` / `unwrapOk` / `unwrapUnchecked`,
+// re-exported from @tnzi/core) + the CRUD query/result adapters, surfaced at the
+// package root so consumer bridges import the whole set from `@tnzi/ui-admin`
+// instead of copying `services/_mappers` (which is otherwise not on the public
+// surface). `CrudPageQuery` / `CrudPageResult` already reach the root via `./headless`.
+//
+// ★ `unwrapOk` is the helper the bridge rule tells consumers to use on every write;
+// until 2026-09-12 this root exported only `unwrapResult` (the unchecked one), so a
+// consumer who read the rule could not follow it without a second import from
+// `@tnzi/core`. `unwrapResult` stays as core's deprecated alias of `unwrapUnchecked`.
 export {
   ensureOk,
+  unwrapOk,
+  unwrapUnchecked,
   unwrapResult,
   mapQueryToListRequest,
   mapResultToCrud,

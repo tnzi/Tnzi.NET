@@ -134,6 +134,7 @@ import TRowActions from '../../components/crud/TRowActions.vue'
 import RecipientsEditor from './components/RecipientsEditor.vue'
 import RequestDetail from './components/RequestDetail.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import type { RowAction } from '../../headless/row-actions'
 import { createSigningBridge } from '../../services/bridges/signing-bridge'
@@ -204,6 +205,21 @@ const rowActions: RowAction<EnvelopeListDto>[] = [
     onClick: (row) => void sendRequest(row),
   },
   {
+    // Everyone signed but the seal step failed (a transient storage or
+    // stamping error): the request sits in InProgress with every recipient
+    // Signed and nobody able to re-submit. Sealing again is the recovery.
+    key: 'seal',
+    label: 'actions.seal',
+    type: 'primary',
+    confirm: 'actions.sealConfirm',
+    show: (row) =>
+      can('signing.request.update') &&
+      row.status === EnvelopeStatus.InProgress &&
+      row.recipientCount > 0 &&
+      row.signedCount === row.recipientCount,
+    onClick: (row) => void sealRequest(row),
+  },
+  {
     key: 'void',
     label: 'actions.void',
     type: 'error',
@@ -247,6 +263,17 @@ async function copy(token: string): Promise<void> {
   }
 }
 
+async function sealRequest(row: EnvelopeListDto): Promise<void> {
+  if (!row.id) return
+  try {
+    await bridge.requests.seal(String(row.id))
+    message.success(t('actions.sealSuccess'))
+    await crud.refresh()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 async function voidRequest(row: EnvelopeListDto): Promise<void> {
   if (!row.id) return
   try {
@@ -274,13 +301,9 @@ const templateOptions = ref<{ label: string; value: string }[]>([])
 
 async function loadTemplateOptions(): Promise<void> {
   try {
-    const page = await bridge.templates.fetch({
-      pageIndex: 1,
-      pageSize: 200,
-      searchText: '',
-      filters: { isActive: true },
-    })
-    templateOptions.value = (page.items ?? []).map((tpl) => ({
+    // Every active template, not the first clamped page (pageSize is clamped to 100 silently).
+    const templates = await fetchAllPages((q) => bridge.templates.fetch(q), { filters: { isActive: true } })
+    templateOptions.value = templates.map((tpl) => ({
       label: tpl.category ? `${tpl.category} / ${tpl.name}` : tpl.name,
       value: String(tpl.id),
     }))

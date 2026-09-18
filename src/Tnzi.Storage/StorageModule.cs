@@ -77,6 +77,10 @@ public class StorageModule : TnziApplicationModule
         // 拥有业务记录的模块不必引用本程序集就能问。
         services.TryAddScoped<IFileReadAccessProbe, FileReadAccessProbe>();
 
+        // 系统身份的字节读取：拿着 FileId 的后台（通知派发、定时任务）没有当前用户，
+        // 走不了 IFileStorageService.GetAsync 那条「这个人读」的路。契约同样在核心。
+        services.TryAddScoped<IFileContentReader, FileContentReader>();
+
         // 访问令牌签名器(单例:密钥构造时解析一次)。让私密文件能被 <img src> 渲染 ——
         // 浏览器发起的资源请求带不了 Authorization 头。
         services.TryAddSingleton<IFileUrlSigner, FileUrlSigner>();
@@ -105,6 +109,11 @@ public class StorageModule : TnziApplicationModule
         // 而其中两条已经搬进了子模块 —— 各自 new 就意味着两个程序集各抄一份，那正是它们
         // 当初漂开的原因。Scoped：净化器由消费方注册，生命周期未知，单例会形成 captive dependency。
         services.AddScoped<UploadGuard>();
+
+        // 缩略图生成器：位图与 PDF 首页两条出图路径 + 「此刻画不画得出来」的判定，四条写路径与存量回填共用。
+        // PDF 一侧可选注入核心契约 IPdfRasterizer（实现在可选包 Tnzi.Documents，本模块不引用它）：
+        // 没加载时为 null，PDF 与此前一样没有缩略图。TryAdd：要给视频截帧或换出图规则的消费方整体替换。
+        services.TryAddScoped<IFileThumbnailGenerator, FileThumbnailGenerator>();
 
         // 注册文件预览服务
         services.AddScoped<IFilePreviewService, FilePreviewService>();

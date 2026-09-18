@@ -26,9 +26,10 @@ namespace Tnzi.Notification.Push;
 /// </para>
 /// <para>
 /// <b>缺席时的行为</b>由父模块决定，见 <c>NotificationModule.PostConfigureServicesAsync</c>：
-/// 没配 <c>Notification:PushSender</c> 时仍是既有的 <c>NullPushSender</c>（开发期不真发）；
-/// <b>配了却没加载本模块</b>时是 <c>UnconfiguredPushSender</c>，每次调用失败并指名要加载哪个包。
-/// 后者是刻意的：一个配置好推送却静默报「已发送」的部署，症状要几周后才出现。
+/// 什么都没配时仍是既有的 <c>NullPushSender</c>（开发期不真发）；
+/// <b>配了却没加载本模块</b>时是 <c>UnconfiguredPushSender</c>，每次调用失败并指名要加载哪个包；
+/// <b>只配了具名节没配默认节</b>时默认那一格同样是 <c>UnconfiguredPushSender</c>（提示指向配置），
+/// 加没加载本模块都一样。后两者是刻意的：一个配置好推送却静默报「已发送」的部署，症状要几周后才出现。
 /// </para>
 /// </remarks>
 [DependsOn(typeof(NotificationModule))]
@@ -45,15 +46,31 @@ public class NotificationPushModule : TnziApplicationModule
     {
         // 普通 Configure 阶段注册即可胜出：父模块的回退在 PostConfigure 阶段用 TryAdd 补位，
         // 那一步跑在所有模块的 Configure 之后，看到已有注册就不再插手。
+        // ★ 分档按父模块定的规则走，加载了本包并不改变它：
+        //   什么都没配 = 这个部署不发推送 → NullPushSender（只用主题广播的部署也会加载本包，不能因此失败）；
+        //   只配了具名节没配默认节 = 显然要推送，没带键的消息不能落进报成功的空实现 → 失败并指向配置
+        //   （与邮件 / 短信同一分档；这里包已加载，提示说的是配置不是包）。
         context.Services.AddScoped<IPushSender>(sp =>
         {
             var options = sp.GetRequiredService<IOptions<NotificationOptions>>().Value;
-            var logger = sp.GetRequiredService<ILogger<PushSender>>();
-            // IPushDeviceService 用 GetService 而不是构造参数注入：PushSender 的构造签名
-            // 是 (options, logger) 的公开形状，消费方可能自己 new 它（测试里就有）。
-            // 拿不到时投递照常，只是死令牌不会被退役 —— 那是可降级的，投递本身不受影响。
-            return new PushSender(options, logger, sp.GetService<IPushDeviceService>());
+            if (options.PushSender != null)
+                return NewPushSender(sp, options.PushSender, providerKey: null);
+
+            if (options.PushSenders.Count > 0)
+                return UnconfiguredPushSender.ForMissingDefault(sp.GetRequiredService<ILogger<UnconfiguredPushSender>>());
+
+            return new NullPushSender(sp.GetRequiredService<ILogger<NullPushSender>>());
         });
+
+        // 具名推送节：每个键一个 PushSender，各自引导一个以键命名的 FirebaseApp。
+        foreach (var key in NotificationProviderProfiles.NamedKeys(context.Configuration, "PushSenders"))
+        {
+            context.Services.AddKeyedScoped<IPushSender>(key, (sp, _) =>
+            {
+                var options = sp.GetRequiredService<IOptions<NotificationOptions>>().Value;
+                return NewPushSender(sp, NotificationProviderProfiles.Get(options.PushSenders, key, "PushSenders"), key);
+            });
+        }
 
         context.Services.AddScoped<IPushDeviceService, PushDeviceService>();
 
@@ -61,5 +78,13 @@ public class NotificationPushModule : TnziApplicationModule
         context.Services.AddTransient<IPermissionDefinitionProvider, NotificationPushPermissions>();
 
         return Task.CompletedTask;
+    }
+
+    private static IPushSender NewPushSender(IServiceProvider sp, PushSenderOptions profile, string? providerKey)
+    {
+        // IPushDeviceService 用 GetService 而不是构造参数注入：PushSender 的构造签名
+        // 是 (options, logger) 的公开形状，消费方可能自己 new 它（测试里就有）。
+        // 拿不到时投递照常，只是死令牌不会被退役 —— 那是可降级的，投递本身不受影响。
+        return new PushSender(profile, sp.GetRequiredService<ILogger<PushSender>>(), sp.GetService<IPushDeviceService>(), providerKey);
     }
 }

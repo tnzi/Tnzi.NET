@@ -201,6 +201,48 @@ public class PermissionRetirementIntegrationTests : IntegratedTestBase<Authoriza
         Assert.False(function!.IsRetired);
     }
 
+    /// <summary>Define 一进来就抛的 provider —— 消费方 provider 里一次空引用就是这个形状。</summary>
+    private sealed class ThrowingProvider : IPermissionDefinitionProvider
+    {
+        public void Define(IPermissionDefinitionContext context)
+            => throw new InvalidOperationException("consumer provider bug");
+    }
+
+    /// <summary>
+    /// ★某个 provider 抛异常 ⇒ 本轮收集不完整，孤儿判定<b>整体跳过</b>：
+    /// 「这次没声明」不等于「这个部署不再有这个码」，它可能只是那个 provider 今天坏了。
+    /// 其它 provider 的声明照常 upsert。
+    /// </summary>
+    [Fact]
+    public async Task ThrowingProvider_DoesNotRetireCodesDeclaredInEarlierRuns()
+    {
+        var (functionId, _) = await SeedAndGrantAsync();
+
+        await CreateSeeder().SeedAsync([new ThrowingProvider(), new SilentProvider()]);
+
+        var functions = ServiceProvider.GetRequiredService<IRepository<ModuleFunction, Guid>>();
+        var function = await functions.GetAsync(functionId);
+        Assert.NotNull(function);
+        Assert.False(function!.IsRetired);
+        // 没抛的那个 provider 照常入库。
+        Assert.NotNull(await functions.FirstOrDefaultAsync(f => f.Code == "demo.other.view"));
+    }
+
+    /// <summary>Delete 模式下同一场景：授权行必须还在 —— 这条路上删掉的授权是回不来的。</summary>
+    [Fact]
+    public async Task ThrowingProvider_DeleteMode_KeepsTheRowAndItsGrants()
+    {
+        var (functionId, grantId) = await SeedAndGrantAsync();
+        _authOptions.PermissionRetirement = Tnzi.Authorization.Options.PermissionRetirementMode.Delete;
+
+        await CreateSeeder().SeedAsync([new ThrowingProvider(), new SilentProvider()]);
+
+        var functions = await ServiceProvider.GetRequiredService<IRepository<ModuleFunction, Guid>>()
+            .ToListAsync(f => f.Id == functionId);
+        Assert.Single(functions);
+        Assert.NotNull(await ServiceProvider.GetRequiredService<IRepository<RoleFunction, Guid>>().GetAsync(grantId));
+    }
+
     /// <summary>
     /// 退役期间它必须不再授权：留着行的前提是它不能继续生效。
     /// </summary>

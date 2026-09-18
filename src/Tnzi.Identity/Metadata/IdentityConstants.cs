@@ -19,6 +19,11 @@ public static class IdentityConstants
     public const string TablePrefix = "Identity";
 
     /// <summary>
+    /// 本模块内置的图形验证码在 <c>AspNetCore:Captcha:Provider</c> 里的名字。
+    /// </summary>
+    public const string ImageCaptchaProvider = "image";
+
+    /// <summary>
     /// Token提供者类型常量
     /// </summary>
     public static class TokenProvider

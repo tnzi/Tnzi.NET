@@ -12,6 +12,13 @@ import { createPinia, setActivePinia } from 'pinia'
  * activate/deactivate toggle through the bridge. Assertions are driven entirely
  * by the mock data below.
  */
+// naive's message handle, captured so a test can read what the page toasts.
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn() }))
+vi.mock('naive-ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('naive-ui')>()),
+  useMessage: () => toast,
+}))
+
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
@@ -243,6 +250,19 @@ describe('Skills page (production-grade card grid)', () => {
     expect(vm.crud.formModal.mode.value).toBe('view')
     expect(getBySlug).toHaveBeenCalledWith('write-blog-post')
     expect(vm.detailContent.content).toContain('Full SKILL.md body')
+  })
+
+  // The bridge throws the server's reason on a refused export (403, module
+  // disabled); the page's catch dropped the error and toasted the generic
+  // "export failed", so the reason never reached the operator.
+  it('doExport toasts the server reason when the export is refused', async () => {
+    exportSkills.mockRejectedValueOnce(new Error('Skills export is disabled by policy'))
+    toast.error.mockClear()
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { doExport: () => Promise<void> }
+    await vm.doExport()
+    expect(toast.error).toHaveBeenCalledWith('Skills export is disabled by policy')
   })
 
   it('openPopular loads the most-activated ranking', async () => {

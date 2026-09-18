@@ -105,6 +105,11 @@ public class PaymentBillingModule : TnziApplicationModule
 
         context.Services.AddScoped<IPaymentInvoiceService, PaymentInvoiceService>();
 
+        // 发票产物在存储侧多半是无主的（webhook / 后台生成，CreatorId 为 null）：这一条让归属用户与
+        // 持 payment.invoice.view 的人读得到它 —— 下载自己的发票、重发时通知模块按探针问「读得到吗」都靠它。
+        // 契约在核心，不加载 Storage 时没人来问，注册无害。
+        context.Services.AddScoped<IFileReferenceAccessResolver, InvoiceFileReferenceAccessResolver>();
+
         // 支付完成 → 自动开票。父模块在同一个事件上已经挂了两个处理器（记日志 + 订阅计费回流），
         // 这里是第三个：事件总线按 IEnumerable<IEventHandler<TEvent>> 解析，互不覆盖。
         context.Services.AddEventHandler<PaymentCompletedEvent, InvoiceIssuingHandler>();

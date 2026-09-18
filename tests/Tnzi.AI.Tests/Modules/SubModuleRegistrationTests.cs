@@ -6,7 +6,9 @@ using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Server;
 using Tnzi.AI.Sandbox;
 using Tnzi.AI.Sandbox.Middleware;
+using Tnzi.AI.Sandbox.Services;
 using Tnzi.AI.Sandbox.Tools;
+using Tnzi.AI.Tests.Sandbox;
 using Tnzi.Modules;
 
 namespace Tnzi.AI.Tests.Modules;
@@ -238,6 +240,51 @@ public class SubModuleRegistrationTests
             "ThreadDataMiddleware should be registered as IAiMiddleware");
         middlewares.ShouldContain(d => d.ImplementationType == typeof(SandboxMiddleware),
             "SandboxMiddleware should be registered as IAiMiddleware");
+    }
+
+    /// <summary>
+    /// 描述符扫描看不见接线：SandboxMiddleware 现在要一个 IThreadDataProvisioner，注册漏掉一行时
+    /// 描述符里两个中间件都在、而运行期第一次解析 IEnumerable&lt;IAiMiddleware&gt; 就炸。这里真的解析一次。
+    /// </summary>
+    [Fact]
+    public void SandboxModule_MiddlewaresResolveFromTheContainer_WithTheProvisionerWired()
+    {
+        var services = ConfigureSandboxModule();
+        // AIModule 平时提供的两项：执行上下文通道与宿主环境
+        services.AddSingleton<IAgentExecutionContextAccessor, AgentExecutionContextAccessor>();
+        services.AddSingleton<IHostEnvironment>(new SandboxTestSupport.TestHostEnvironment { ContentRootPath = Path.GetTempPath() });
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var middlewares = scope.ServiceProvider.GetRequiredService<IEnumerable<IAiMiddleware>>().ToList();
+
+        middlewares.ShouldContain(m => m is SandboxMiddleware);
+        middlewares.ShouldContain(m => m is ThreadDataMiddleware);
+        scope.ServiceProvider.GetRequiredService<IThreadDataProvisioner>().ShouldBeOfType<ThreadDataProvisioner>();
+    }
+
+    /// <summary>
+    /// 验证器现在带两个可选依赖（IHostEnvironment / ILoggerFactory）：容器必须能把它建出来并跑一次校验，
+    /// 否则 ValidateOnStart 在真实宿主上第一次取 Options 就炸。
+    /// </summary>
+    [Fact]
+    public async Task SandboxModule_OptionsValidator_ResolvesFromTheContainer_AndValidates()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IHostEnvironment>(new SandboxTestSupport.TestHostEnvironment { ContentRootPath = Path.GetTempPath() });
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AI:Sandbox:DataRoot"] = Path.Combine(Path.GetTempPath(), "inside") })
+            .Build();
+        var context = new ServiceConfigurationContext(services, config);
+        await new AISandboxModule().PreConfigureServicesAsync(context);
+
+        await using var provider = services.BuildServiceProvider();
+
+        var validator = provider.GetRequiredService<IValidateOptions<SandboxModuleOptions>>();
+        validator.ShouldBeOfType<SandboxModuleOptionsValidator>();
+        validator.Validate(null, provider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value).Succeeded.ShouldBeTrue();
     }
 
     // =========================================================================

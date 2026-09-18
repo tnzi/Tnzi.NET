@@ -20,7 +20,7 @@ import {
   type PresenceOverviewQueryDto,
   type BroadcastLogDto,
 } from '@tnzi/core/services/chat'
-import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest } from '../_mappers'
+import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest, unwrapOk } from '../_mappers'
 import type { CrudPageQuery, CrudPageResult } from '../types'
 
 type HttpClient = Parameters<typeof useChatBroadcastApi>[0]
@@ -65,11 +65,15 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
 
   return {
     broadcast: broadcastApi
-      ? async (dto) => unwrap<number>(await broadcastApi.broadcast(dto))
+      ? async (dto) => unwrapOk<number>(await broadcastApi.broadcast(dto))
       : noClient('broadcast'),
 
+    // The Overview page's only failure channel is the catch around these two
+    // calls. A refused envelope (403 for a role that lacks chat.session.view)
+    // must reject here: resolved to `null` it renders as blank KPIs and an empty
+    // presence table, indistinguishable from "no conversations yet".
     statistics: adminApi
-      ? async () => unwrap(await adminApi.getStatistics())
+      ? async () => unwrapOk(await adminApi.getStatistics())
       : noClient('statistics'),
 
     conversations: {
@@ -96,7 +100,7 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
       : noClient('deleteMessage'),
 
     presence: adminApi
-      ? async (query) => unwrap(await adminApi.getPresenceOverview(query))
+      ? async (query) => unwrapOk(await adminApi.getPresenceOverview(query))
       : noClient('presence'),
 
     broadcasts: adminApi

@@ -1,8 +1,10 @@
 <template>
-  <!-- Reset the naive theme to the GLOBAL mode (see TModalShell / useOverlayTheme):
-       an overlay opened from a dark-card page must not inherit the content area's
-       inner dark theme through the Teleport. `abstract` = renderless. -->
-  <NConfigProvider abstract :theme="overlayTheme" :theme-overrides="overlayOverrides">
+  <!-- The overlay provider (renderless, see TModalShell / TOverlayTheme): an
+       overlay opened from a dark-card page must not inherit the content area's
+       inner dark theme through the Teleport, and every button / form control
+       in the slots defaults to `small` unless it, its NForm / NFormItem, or
+       the app's root componentOptions says otherwise. -->
+  <TOverlayTheme>
     <NDrawer
       :show="show"
       :width="effectiveWidth"
@@ -29,14 +31,14 @@
       </template>
     </NDrawerContent>
     </NDrawer>
-  </NConfigProvider>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NConfigProvider, NDrawer, NDrawerContent } from 'naive-ui'
+import { NDrawer, NDrawerContent } from 'naive-ui'
 import { useBreakpoint } from '../../headless/theme/useBreakpoints'
-import { useOverlayTheme, useOverlayThemeOverrides } from '../../headless/theme/useOverlayTheme'
+import TOverlayTheme from './TOverlayTheme.vue'
 
 interface Props {
   /** Open state (controlled). */
@@ -70,8 +72,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const bp = useBreakpoint()
-const overlayTheme = useOverlayTheme()
-const overlayOverrides = useOverlayThemeOverrides()
 
 // naive's NDrawer does NOT clamp width to the viewport, so a fixed 560/640/…/
 // 1080px right drawer overflows a 375px phone and pushes ~40% of its content off

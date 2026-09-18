@@ -297,10 +297,15 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
     }
 
     /// <summary>
-    /// Scan the configured search roots for filesystem-backed layouts under
-    /// `Layouts/{module}/.../*.cshtml`. The layout root mirrors the template
-    /// root convention - both honour the same TemplateOptions paths.
+    /// 扫描每个模板根下的文件布局：<c>{templateRoot}/Layouts/{category…}/_{name}{ext}</c>，
+    /// 与 <see cref="LoadLayoutFromFileSystemAsync"/> 的定位口径逐字相同。
     /// </summary>
+    /// <remarks>
+    /// ★ 此前扫的是 <c>&lt;searchRoot&gt;/Layouts</c>（连 <c>TemplateRootPath</c> 都没拼），且把第一级目录当模块、
+    /// 文件名不去下划线 —— 与加载路径是两套口径，管理端从来列不出任何文件布局。文件布局的路径里没有模块段
+    /// （任何模块都能用），所以这里不按 <c>request.Module</c> 过滤，<c>Module</c> 留空；
+    /// 同名去重仍按「先命中的根优先」。
+    /// </remarks>
     private List<LayoutInfoDto> ScanFileSystemLayouts(QueryLayoutRequest request)
     {
         var results = new List<LayoutInfoDto>();
@@ -308,39 +313,34 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
             return results;
         try
         {
-            // Layouts conventionally live under a sibling `Layouts/` directory
-            // (TemplateOptions doesn't ship a separate LayoutRootPath - the
-            // current convention reuses the template root extended with the
-            // "Layouts" subfolder).
             var extension = _templateOptions.TemplateExtension ?? ".cshtml";
-            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
             var keyword = request.Keyword?.ToLowerInvariant();
-            foreach (var searchRoot in searchRoots)
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var templateRoot in TemplatePathHelper.BuildTemplateRoots(_templateOptions, ServiceProvider))
             {
-                var layoutsRoot = Path.Combine(searchRoot, "Layouts");
+                var layoutsRoot = Path.Combine(templateRoot, "Layouts");
                 if (!Directory.Exists(layoutsRoot)) continue;
                 foreach (var path in Directory.EnumerateFiles(layoutsRoot, "*" + extension, SearchOption.AllDirectories))
                 {
                     var relPath = Path.GetRelativePath(layoutsRoot, path);
                     var parts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                    if (parts.Length < 2) continue;
-                    var fileModule = parts[0];
-                    var fileCategory = parts.Length >= 3
-                        ? string.Join('/', parts.Skip(1).Take(parts.Length - 2))
+                    var fileCategory = parts.Length >= 2
+                        ? string.Join('/', parts.Take(parts.Length - 1))
                         : string.Empty;
-                    var fileName = Path.GetFileNameWithoutExtension(parts[^1]);
-                    if (!string.IsNullOrWhiteSpace(request.Module) && !string.Equals(fileModule, request.Module, StringComparison.OrdinalIgnoreCase))
-                        continue;
+                    var rawName = Path.GetFileNameWithoutExtension(parts[^1]);
+                    var fileName = rawName.StartsWith('_') ? rawName[1..] : rawName;
                     if (!string.IsNullOrWhiteSpace(request.Category) && !string.Equals(fileCategory, request.Category, StringComparison.OrdinalIgnoreCase))
                         continue;
                     if (!string.IsNullOrWhiteSpace(keyword) && !fileName.ToLowerInvariant().Contains(keyword))
+                        continue;
+                    if (!seen.Add($"{fileCategory}::{fileName}"))
                         continue;
                     var fi = new FileInfo(path);
                     results.Add(new LayoutInfoDto
                     {
                         Id = Guid.Empty,
                         LayoutName = fileName,
-                        Module = fileModule,
+                        Module = string.Empty,
                         Category = fileCategory,
                         IsActive = true,
                         IsDefault = false,
@@ -397,18 +397,18 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
 
         try
         {
-            var templateRoot = _templateOptions.TemplateRootPath ?? "Templates";
             var extension = _templateOptions.TemplateExtension ?? ".cshtml";
 
             // 布局文件通常以下划线开头：_Default.cshtml, _EmailDefault.cshtml
             var layoutFileName = layoutName.StartsWith("_") ? layoutName : $"_{layoutName}";
 
+            // 相对模板根的路径（模板根列表已含 TemplateRootPath，这里不再拼它）
             var relativePath = string.IsNullOrWhiteSpace(category)
-                ? Path.Combine(templateRoot, "Layouts", $"{layoutFileName}{extension}")
-                : Path.Combine(templateRoot, "Layouts", category, $"{layoutFileName}{extension}");
+                ? Path.Combine("Layouts", $"{layoutFileName}{extension}")
+                : Path.Combine("Layouts", category, $"{layoutFileName}{extension}");
 
-            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
-            var foundPath = TemplatePathHelper.FindFileInSearchRoots(relativePath, searchRoots);
+            var templateRoots = TemplatePathHelper.BuildTemplateRoots(_templateOptions, ServiceProvider);
+            var foundPath = TemplatePathHelper.FindFileInSearchRoots(relativePath, templateRoots);
 
             if (foundPath == null)
                 return null;
@@ -465,13 +465,13 @@ public class LayoutStoreService : ApplicationService, ILayoutStoreService
 
         try
         {
-            var templateRoot = _templateOptions.TemplateRootPath ?? "Templates";
             var extension = _templateOptions.TemplateExtension ?? ".cshtml";
 
-            var relativePath = Path.Combine(templateRoot, "Layouts", category, $"_Default{extension}");
+            // 相对模板根的路径（模板根列表已含 TemplateRootPath，这里不再拼它）
+            var relativePath = Path.Combine("Layouts", category, $"_Default{extension}");
 
-            var searchRoots = BuildSearchRoots(_templateOptions, ServiceProvider);
-            var foundPath = TemplatePathHelper.FindFileInSearchRoots(relativePath, searchRoots);
+            var templateRoots = TemplatePathHelper.BuildTemplateRoots(_templateOptions, ServiceProvider);
+            var foundPath = TemplatePathHelper.FindFileInSearchRoots(relativePath, templateRoots);
 
             if (foundPath == null)
                 return null;

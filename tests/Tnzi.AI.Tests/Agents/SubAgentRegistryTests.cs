@@ -1,3 +1,5 @@
+using Tnzi.AI.Sandbox.Tools;
+
 namespace Tnzi.AI.Tests.Agents;
 
 public class SubAgentRegistryTests
@@ -50,16 +52,36 @@ public class SubAgentRegistryTests
         var researcher = _registry.Get("researcher");
         researcher.ShouldNotBeNull();
         researcher.MaxTurns.ShouldBe(30);
-        researcher.ToolGroups.ShouldContain("web-search");
-        researcher.ToolGroups.ShouldContain("file");
+        researcher.ToolGroups.ShouldContain("websearch");
     }
 
     [Fact]
-    public void Get_GeneralPurpose_HasExcludedToolGroups()
+    public void Get_GeneralPurpose_ExcludesOrchestrationToolGroups()
     {
         var gp = _registry.Get("general-purpose");
         gp.ShouldNotBeNull();
-        gp.ExcludedToolGroups.Count.ShouldBeGreaterThan(0);
+        gp.ExcludedToolGroups.ShouldBe(["task", "clarification", "artifact"], ignoreOrder: true);
+    }
+
+    /// <summary>
+    /// 内置类型引用的每个组名都必须是扫描器真的能登记出来的组：未知组名在注册表里静默解析为零个工具。
+    /// 此前 general-purpose 写的是 default / file / code / web-search，researcher 写的是 web-search / file，
+    /// 排除清单写的是 present-files —— 五个名字没有一个存在过。
+    /// </summary>
+    [Fact]
+    public void BuiltInTypes_ReferenceOnlyToolGroupsTheScannerRegisters()
+    {
+        var scanner = new ToolScanner(NullLogger<ToolScanner>.Instance);
+        var registeredGroups = new[] { typeof(AIModule).Assembly, typeof(SandboxTools).Assembly }
+            .SelectMany(scanner.ScanAssembly)
+            .Select(t => t.GroupName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var definition in _registry.GetAll())
+        {
+            definition.ToolGroups.ShouldBeSubsetOf(registeredGroups, $"{definition.Name}.ToolGroups");
+            definition.ExcludedToolGroups.ShouldBeSubsetOf(registeredGroups, $"{definition.Name}.ExcludedToolGroups");
+        }
     }
 
     [Fact]

@@ -15,6 +15,8 @@
  * Most changes need neither: a new response field is simply ignored by clients that predate it.
  */
 
+import { createAdapterSingleton } from '../adapters/singleton';
+
 /** Request header through which a client declares the capabilities it understands. */
 export const CAPABILITY_HEADER = 'X-Tnzi-Capabilities';
 
@@ -35,8 +37,19 @@ export function isValidCapabilityName(name: string): boolean {
  *
  * Empty by default: the framework declares nothing until a real cross-version capability exists.
  * Applications add theirs with {@link declareClientCapability}.
+ *
+ * Parked on the globalThis registry, not in a module constant. This package is built with
+ * `splitting: false`, so this module is inlined once per tsup entry: an app declares through
+ * `@tnzi/core/http`, while the `HttpClient` it builds with `createTnziClient` reads through
+ * `@tnzi/core/state`. With a plain module-level `Set` those were two Sets - the second always
+ * empty - so the header never left the process and the server resolved `None` with no error
+ * on either side. `__tests__/http/capabilities-cross-entry.test.ts` probes the built output.
  */
-const declared = new Set<string>();
+const declaredSlot = createAdapterSingleton<Set<string>>('client-capabilities', () => new Set());
+
+function declared(): Set<string> {
+  return declaredSlot.use();
+}
 
 /**
  * Declare a capability this client understands.
@@ -51,12 +64,12 @@ export function declareClientCapability(name: string): void {
         `version suffix, e.g. 'chat-draft-restore-v1'.`
     );
   }
-  declared.add(name);
+  declared().add(name);
 }
 
 /** Capability names this client declared, sorted. */
 export function getClientCapabilities(): string[] {
-  return [...declared].sort();
+  return [...declared()].sort();
 }
 
 /**
@@ -66,14 +79,14 @@ export function getClientCapabilities(): string[] {
  * (currently universal) case where no capability has been declared.
  */
 export function buildCapabilityHeaderValue(): string | undefined {
-  return declared.size === 0 ? undefined : getClientCapabilities().join(',');
+  return declared().size === 0 ? undefined : getClientCapabilities().join(',');
 }
 
 /**
  * Reset the declaration. Intended for tests - production code declares once at startup.
  */
 export function resetClientCapabilities(): void {
-  declared.clear();
+  declared().clear();
 }
 
 /**

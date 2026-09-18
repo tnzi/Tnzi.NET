@@ -65,6 +65,10 @@ public class AISandboxModule : TnziApplicationModule
         // Stateless (reads the singleton AsyncLocal accessor live) → Singleton.
         context.Services.AddSingleton<ISandboxAccessor, SandboxAccessor>();
 
+        // Thread directory provisioning (directories + per-thread skill copies). Runs
+        // inside the sandbox environment on first use, never at middleware entry.
+        context.Services.AddScoped<IThreadDataProvisioner, ThreadDataProvisioner>();
+
         // Middlewares
         context.Services.AddScoped<IAiMiddleware, ThreadDataMiddleware>();
         context.Services.AddScoped<IAiMiddleware, SandboxMiddleware>();
@@ -75,7 +79,7 @@ public class AISandboxModule : TnziApplicationModule
         return Task.CompletedTask;
     }
 
-    public override async Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
     {
         var logger = context.ServiceProvider.GetRequiredService<ILogger<AISandboxModule>>();
         var options = context.ServiceProvider.GetRequiredService<IOptions<SandboxModuleOptions>>().Value;
@@ -91,14 +95,7 @@ public class AISandboxModule : TnziApplicationModule
             logger.LogInformation("Sandbox is disabled (AI:Sandbox:Enabled=false); sandbox tools were not registered");
         }
 
-        // Populate the shared skill resource root once at startup so that
-        // ThreadDataMiddleware can symlink each thread to it rather than
-        // copying every skill's files for every new thread.
-        var skillStore = context.ServiceProvider.GetService<ISkillStore>();
-        if (skillStore != null && options.Enabled && !string.IsNullOrWhiteSpace(options.DataRoot))
-        {
-            await SharedSkillExtractor.ExtractAsync(skillStore, options.DataRoot, logger);
-        }
+        return Task.CompletedTask;
     }
 
     private static void RegisterDockerHttpClient(ServiceConfigurationContext context)

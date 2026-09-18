@@ -25,16 +25,6 @@ public class HistoryOptions
 public class HistoryStoreOptions
 {
     /// <summary>
-    /// 是否启用历史存储（通过 ConversationContext 持久化）
-    /// </summary>
-    /// <remarks>
-    /// 启用后，消息历史将通过 ConversationContext 机制管理，
-    /// 而非在 Service 层手动持久化。默认关闭以保持向后兼容。
-    /// 注意：当前无运行时消费者，故不作为可热配字段暴露。
-    /// </remarks>
-    public bool Enabled { get; set; } = false;
-
-    /// <summary>
     /// 从存储加载的最大消息数量（防止长对话一次性加载全部历史）
     /// </summary>
     /// <remarks>

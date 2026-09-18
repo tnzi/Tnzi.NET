@@ -1,4 +1,6 @@
-﻿namespace Tnzi.AI.Tests.Tools;
+﻿using ModelContextProtocol.Client;
+
+namespace Tnzi.AI.Tests.Tools;
 
 public class ApprovalToolWrapperTests
 {
@@ -179,6 +181,156 @@ public class ApprovalToolWrapperTests
         var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
 
         result.ShouldBe("Tool call rejected: approval handler is not configured.");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AttributeDestructiveTool_NoRules_IsDenied()
+    {
+        // [AIFunction(IsDestructive = true)] 经 ToolAdapter 写进 AdditionalProperties["tnzi.destructive"]；
+        // 评估器「破坏性工具无显式 allow 即拒绝」的默认此前只对 shell 命令分析生效，delete_memory 这类
+        // 属性标记的 C# 工具零规则下直接执行，而管理端 evaluate 对同一个工具答 Deny。
+        var inner = AIFunctionFactory.Create(
+            () => "should-not-run",
+            new AIFunctionFactoryOptions
+            {
+                Name = "delete_memory",
+                Description = "Delete a memory entry",
+                AdditionalProperties = new Dictionary<string, object?> { [ToolMetadataKeys.Destructive] = true }
+            });
+
+        var approvalHandler = new Mock<IToolApprovalHandler>(MockBehavior.Strict);
+        var wrapper = new ApprovalToolWrapper(
+            inner,
+            approvalHandler.Object,
+            new ToolApprovalOptions(),
+            new ToolPermissionEvaluator([]));
+
+        var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+
+        result.ShouldBe("Tool call rejected: Destructive tool requires explicit allow");
+        approvalHandler.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task InvokeAsync_IsDestructiveOnlyRule_MatchesAttributeDestructiveTool()
+    {
+        var inner = AIFunctionFactory.Create(
+            () => "should-not-run",
+            new AIFunctionFactoryOptions
+            {
+                Name = "delete_memory",
+                Description = "Delete a memory entry",
+                AdditionalProperties = new Dictionary<string, object?> { [ToolMetadataKeys.Destructive] = true }
+            });
+
+        var approvalHandler = new Mock<IToolApprovalHandler>(MockBehavior.Strict);
+        var evaluator = new ToolPermissionEvaluator(
+        [
+            new ToolPermissionRule
+            {
+                ToolPattern = "*",
+                IsDestructiveOnly = true,
+                Behavior = PermissionBehavior.Deny,
+                Reason = "No destructive tools in this session"
+            }
+        ]);
+
+        var wrapper = new ApprovalToolWrapper(inner, approvalHandler.Object, new ToolApprovalOptions(), evaluator);
+
+        var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+
+        result.ShouldBe("Tool call rejected: No destructive tools in this session");
+        approvalHandler.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void IsDeclaredDestructive_McpDestructiveHint_ReadThroughDelegatingWrapper()
+    {
+        // OAuth 服务器的 McpClientTool 先经 McpAuthRecoveryToolWrapper（DelegatingAIFunction）再进审批包装：
+        // 按具体类型判断只看得见最外层的包装，服务器显式标 destructiveHint: true 的工具跑在非破坏性默认下，
+        // 而同一个工具在不带 OAuth 的服务器上被拒 —— 同一条注解按有没有配 OAuth 给出两个答案。
+        var mcpTool = new McpClientTool(
+            new FakeMcpClient(),
+            new ModelContextProtocol.Protocol.Tool
+            {
+                Name = "drop_table",
+                Annotations = new ModelContextProtocol.Protocol.ToolAnnotations { DestructiveHint = true }
+            },
+            serializerOptions: null);
+
+        ApprovalToolWrapper.IsDeclaredDestructive(mcpTool).ShouldBeTrue("the bare McpClientTool is the baseline");
+        ApprovalToolWrapper.IsDeclaredDestructive(new PassThroughFunction(mcpTool))
+            .ShouldBeTrue("one delegating wrapper (the OAuth recovery wrapper's shape) must not hide the hint");
+        ApprovalToolWrapper.IsDeclaredDestructive(new PassThroughFunction(new PassThroughFunction(mcpTool)))
+            .ShouldBeTrue("nor a chain of them");
+    }
+
+    [Fact]
+    public void IsDeclaredDestructive_McpReadOnlyHint_StaysFalseThroughWrapper()
+    {
+        var mcpTool = new McpClientTool(
+            new FakeMcpClient(),
+            new ModelContextProtocol.Protocol.Tool
+            {
+                Name = "list_tables",
+                Annotations = new ModelContextProtocol.Protocol.ToolAnnotations { DestructiveHint = true, ReadOnlyHint = true }
+            },
+            serializerOptions: null);
+
+        ApprovalToolWrapper.IsDeclaredDestructive(new PassThroughFunction(mcpTool)).ShouldBeFalse();
+    }
+
+    private sealed class PassThroughFunction(AIFunction inner) : DelegatingAIFunction(inner);
+
+    /// <summary>只为构造 <see cref="McpClientTool"/>：这里的测试从不调用它。</summary>
+#pragma warning disable MCPEXP002 // 受保护的 McpClient() 构造函数标为评估期 API；测试替身只能从它派生
+    private sealed class FakeMcpClient : McpClient
+#pragma warning restore MCPEXP002
+    {
+        public override string? SessionId => null;
+        public override string? NegotiatedProtocolVersion => null;
+        public override ModelContextProtocol.Protocol.ServerCapabilities ServerCapabilities => new();
+        public override ModelContextProtocol.Protocol.Implementation ServerInfo => new() { Name = "fake", Version = "0" };
+        public override string? ServerInstructions => null;
+        public override Task<ClientCompletionDetails> Completion => new TaskCompletionSource<ClientCompletionDetails>().Task;
+
+        public override ValueTask<IDictionary<string, ModelContextProtocol.Protocol.InputResponse>> ResolveInputRequestsAsync(IDictionary<string, ModelContextProtocol.Protocol.InputRequest> inputRequests, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public override Task<ModelContextProtocol.Protocol.JsonRpcResponse> SendRequestAsync(ModelContextProtocol.Protocol.JsonRpcRequest request, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public override Task SendMessageAsync(ModelContextProtocol.Protocol.JsonRpcMessage message, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public override IAsyncDisposable RegisterNotificationHandler(string method, Func<ModelContextProtocol.Protocol.JsonRpcNotification, CancellationToken, ValueTask> handler)
+            => throw new NotSupportedException();
+
+        public override ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
+    public async Task InvokeAsync_NonDestructiveTool_NoRules_StillAllowed()
+    {
+        var inner = AIFunctionFactory.Create(
+            () => "ran",
+            new AIFunctionFactoryOptions
+            {
+                Name = "read_memory",
+                AdditionalProperties = new Dictionary<string, object?> { [ToolMetadataKeys.Destructive] = false }
+            });
+
+        var wrapper = new ApprovalToolWrapper(inner, approvalHandler: null, new ToolApprovalOptions(), new ToolPermissionEvaluator([]));
+
+        var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+
+        var text = result switch
+        {
+            JsonElement json => json.GetString(),
+            string value => value,
+            _ => result?.ToString()
+        };
+        text.ShouldBe("ran");
     }
 
     [Fact]

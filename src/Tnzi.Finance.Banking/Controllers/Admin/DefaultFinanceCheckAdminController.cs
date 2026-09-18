@@ -79,10 +79,14 @@ public class DefaultFinanceCheckAdminController : ApiAdminControllerBase
     /// 预览支票（零副作用：不分配支票号、不写登记簿、不动账）
     /// </summary>
     /// <remarks>
-    /// 只读语义，故跟随类级 <c>finance.check.view</c> 门（无写码）。POST 仅因为入参是一组付款单 id。
+    /// 虽不写库，但它渲染的是<b>完整票面</b>（「所见即将打」是刻意设计）：对白纸票纸的档案，
+    /// 磁码行用的是解密后的真账号 —— 水印挡得住人眼，挡不住读票机，产物与 <c>{id}/render</c>
+    /// 同属可流通级，故同样走写码 <c>finance.check.create</c>；样张与校准页才是 view 级的
+    /// （它们永不接触账号）。POST 仅因为入参是一组付款单 id。
     /// 呈现端可把返回的文档直接塞进 iframe 做所见即所得预览。
     /// </remarks>
     [HttpPost("preview")]
+    [ApiAuthorize(PermissionName = "finance.check.create")]
     public virtual async Task<IActionResult> Preview([FromBody] PreviewChecksDto request)
     {
         var result = await _service.PreviewAsync(request);

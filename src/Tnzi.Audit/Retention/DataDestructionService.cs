@@ -1,6 +1,8 @@
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Security.Cryptography;
+using AuditErrorCodes = Tnzi.Audit.Metadata.ErrorCodes;
+using CoreErrorCodes = Tnzi.Exceptions.ErrorCodes;
 
 namespace Tnzi.Audit.Retention;
 
@@ -39,6 +41,12 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     /// </remarks>
     private const int CertificateWriteAttempts = 3;
 
+    /// <summary>
+    /// 一轮销毁的互斥键。定时轮与手动 <c>POST admin/data-destruction/run</c> 都经 <see cref="RunAsync"/> 抢它：
+    /// 锁只挂在后台服务上时，最容易被点的那个入口恰好不受互斥，正是制造链尾撞车的地方。
+    /// </summary>
+    internal const string RunLockKey = "Tnzi:Audit:DataDestruction";
+
     private static readonly MethodInfo ExecutePolicyMethod =
         typeof(DataDestructionService).GetMethod(
             nameof(ExecutePolicyAsync),
@@ -58,6 +66,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     private readonly IEncryptionKeyStateProvider? _keyStateProvider;
     private readonly ICurrentTenant _currentTenant;
     private readonly bool _multiTenancyEnabled;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
+    private readonly IDistributedLock? _distributedLock;
 
     /// <summary>
     /// 初始化 <see cref="DataDestructionService"/>。
@@ -76,6 +86,10 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     /// 必须注册自己的实现，否则证明里这一栏永远是错的——见 <see cref="IEncryptionKeyStateProvider"/>。
     /// </param>
     /// <param name="multiTenancyOptions">多租户开关；未启用时整库视为单一逻辑租户。</param>
+    /// <param name="distributedLock">
+    /// 一轮销毁的互斥。可选：没有实现时退化为无互斥（单实例部署正确；多实例的告警由后台服务在启动时记）。
+    /// 有实现时 <see cref="RunAsync"/> 抢不到锁返回 409 而不是撞链尾。
+    /// </param>
     public DataDestructionService(
         IServiceProvider serviceProvider,
         IRepository<AuditDataDestruction, Guid> repository,
@@ -85,7 +99,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         IDataDestroyer destroyer,
         ICurrentTenant currentTenant,
         IEncryptionKeyStateProvider? keyStateProvider = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        IDistributedLock? distributedLock = null)
         : base(serviceProvider)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
@@ -97,11 +112,40 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         _currentTenant = Check.NotNull(currentTenant);
         _keyStateProvider = keyStateProvider;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _multiTenancyOptions = multiTenancyOptions;
+        _distributedLock = distributedLock;
+    }
+
+    /// <summary>
+    /// 证书查询面的起点：调用者有租户则只看本租户签发的证书，宿主看全部（与另外两张审计表同一口径，
+    /// 见 <see cref="CallerTenantScope"/>）。多租户关闭时 <c>TenantId</c> 被 Ignore，谓词一行不加。
+    /// 链校验刻意不走这里：全局单链要整条读才验得了。
+    /// </summary>
+    private IQueryable<AuditDataDestruction> ScopedCertificates()
+    {
+        var scope = CallerTenantScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser);
+        if (!scope.IsPinned)
+        {
+            return _repository.AsQueryable();
+        }
+
+        var tenantId = scope.TenantId;
+        return _repository.Where(e => e.TenantId == tenantId);
     }
 
     /// <inheritdoc />
     public async Task<Result<DataDestructionRunDto>> RunAsync(CancellationToken cancellationToken = default)
     {
+        // 与 DELETE admin/audit-operations/expired 同一口径：保留期销毁是部署级的合规动作，
+        // 跑起来会遍历全部租户（ForEachTenantAsync）且不可逆，不是租户能替宿主做的事。
+        // 租户内的调用者 403，一条策略都不跑；定时触发的作用域没有用户也没有租户，不受影响。
+        if (CallerTenantScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser).IsPinned)
+        {
+            return Fail<DataDestructionRunDto>(
+                "Running data destruction is a host-level operation and is not available from inside a tenant",
+                403, CoreErrorCodes.FORBIDDEN);
+        }
+
         var options = _options.CurrentValue;
         var run = new DataDestructionRunDto { IsDryRun = options.DryRun };
 
@@ -132,10 +176,47 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
                 409);
         }
 
-        foreach (var policy in policies)
+        // ★ 互斥在这里而不只在后台服务里：手动 Run 撞上定时轮（或两个管理员同时点）是链尾争用最现成的入口。
+        // timeout: null = 立即返回；抢不到就是「另一轮正在跑」，答 409 让调用方稍后再来，
+        // 而不是两边各自销毁、各自出证明、其中一份必然写着 0 条。
+        IDistributedLockHandle? handle = null;
+        if (_distributedLock is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            run.Policies.Add(await RunPolicySafelyAsync(policy, options, cancellationToken));
+            handle = await _distributedLock.AcquireAsync(RunLockKey, timeout: null, cancellationToken);
+            if (handle is null || !handle.IsAcquired)
+            {
+                // 专用错误码而不是泛用的 DATA_CONFLICT：后台服务只把「另一轮正在跑」当作跳过，
+                // 而同名策略与锁中途丢失同样答 409，按状态码判会把配置错误也降成 Debug。
+                return Fail<DataDestructionRunDto>(
+                    "Another data destruction run is in progress. Try again after it finishes.",
+                    409, AuditErrorCodes.AuditDestructionRunInProgress);
+            }
+        }
+
+        await using (handle)
+        {
+            // ★ 锁在这一轮中途丢失（续租失败、Redis 抖动、键被逐出）= 另一个实例随时会抢到锁并从头再扫一遍：
+            // 两份证明、其中一份写着 0 条 —— 正是互斥要防的那件事。丢锁即停手，剩下的策略留给下一轮；
+            // 只在获取瞬间读一次 IsAcquired 发现不了这件事，那一刻它恒为 true。
+            using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, handle?.Lost ?? CancellationToken.None);
+            try
+            {
+                foreach (var policy in policies)
+                {
+                    runCancellation.Token.ThrowIfCancellationRequested();
+                    run.Policies.Add(await RunPolicySafelyAsync(policy, options, runCancellation.Token));
+                }
+            }
+            catch (OperationCanceledException) when (handle is { Lost.IsCancellationRequested: true } && !cancellationToken.IsCancellationRequested)
+            {
+                Logger.LogWarning(
+                    "Data destruction stopped mid-run because the distributed lock was lost (renewal failed or the key expired). "
+                    + "Policies not yet run will be picked up by the next cycle.");
+                return Fail<DataDestructionRunDto>(
+                    "The data destruction run stopped because the distributed lock was lost; the remaining policies will run in the next cycle.",
+                    409, CoreErrorCodes.DATA_CONFLICT);
+            }
         }
 
         return Ok(run);
@@ -179,7 +260,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     {
         Check.NotNull(query);
 
-        var queryable = _repository.AsQueryable();
+        var queryable = ScopedCertificates();
 
         if (!string.IsNullOrWhiteSpace(query.PolicyName))
         {
@@ -263,8 +344,9 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     /// </para>
     /// <para>
     /// 做法与 <c>Tnzi.Storage</c> 的文件清理一致：先跨租户取出有到期数据的租户清单，
-    /// 再逐个 <c>ICurrentTenant.Change</c> 切进去执行——切进去之后，
-    /// 该租户的过滤器在 <c>IgnoreQueryFilters</c> 之外仍由显式条件兜住。
+    /// 再逐个 <c>ICurrentTenant.Change</c> 切进去执行——切进去之后，租户过滤器已随
+    /// <c>IgnoreQueryFilters</c> 一起被关掉，<see cref="ExecutePolicyAsync{TEntity}"/> 按当前租户
+    /// 补显式条件兜住，证书也记在该租户名下。
     /// </para>
     /// <para>
     /// 未启用多租户时整库是单一逻辑租户，直接跑一次，零额外查询。
@@ -386,6 +468,16 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             query = query.Where(typed.Scope);
         }
 
+        // ★ IgnoreQueryFilters 把软删除与租户两个过滤器一起关掉了（EF 只有一个合成表达式），
+        // ForEachTenantAsync 切进某个租户后这里必须自己补上租户条件 —— 没有它，第一个租户那一轮
+        // 就把所有租户的到期行一并销毁，证书全记在第一个租户名下，后面的租户读到「0 条」什么也不出。
+        // 以多租户开关为闸门：关闭时 IMultiTenant 实体的 TenantId 被 Ignore，引用它会在翻译时抛异常。
+        if (_multiTenancyEnabled && typeof(IMultiTenant).IsAssignableFrom(typeof(TEntity)))
+        {
+            var tenantId = _currentTenant.Id;
+            query = query.Where(e => ((IMultiTenant)e).TenantId == tenantId);
+        }
+
         var candidates = await query
             .Where(BuildExpiredPredicate(typed.Timestamp, cutoff))
             .Take(options.BatchSize)
@@ -500,8 +592,11 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
                 IsDryRun = options.DryRun,
                 ExecutedByUserId = CurrentUser?.Id,
                 // 同 AuditRecordAccess：本表不实现 IMultiTenant，租户归属手工带上。
-                // 定时触发时当前用户为空，此处自然为 null——见类注释里的多租户说明。
-                TenantId = CurrentUser?.TenantId,
+                // ★ 记的是被销毁数据所属的租户（ForEachTenantAsync 里 _currentTenant.Change 切进去的那个），
+                // 不是触发者的租户：证书是销毁的唯一证据，要让数据被销毁的那个租户按 query 看得到它。
+                // 此前写 CurrentUser?.TenantId —— 定时 / 宿主触发时给每个租户的证书都写 null，
+                // 受害租户的证书视图永远是空的。不带租户维度的实体在循环外，读到的是环境租户（宿主为 null）。
+                TenantId = _currentTenant.Id,
                 PreviousHash = tail?.Hash ?? string.Empty,
                 CreationTime = DateTime.UtcNow
             };
@@ -509,11 +604,25 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
 
             try
             {
-                await _repository.InsertAsync(entry);
+                await _repository.InsertAsync(entry, cancellationToken);
+
+                // ★ 显式 flush，与 RecordAccessAuditor 同一理由：宿主开了环境事务（EnableGlobalUnitOfWork）时
+                // 仓储会推迟保存，同一次 Run 里多条策略 / 多个租户各自读到库里的同一条链尾、算出同一个 Sequence，
+                // 唯一索引在提交时才拒绝，整批一起炸；flush 经工作单元进行，仍在调用方事务内，
+                // EF 在显式事务内保存前自动建保存点。没有事务时 InsertAsync 已经落库，这一步是空操作。
+                await _repository.SaveChangesAsync(cancellationToken);
                 return entry.Id;
             }
-            catch (Exception ex) when (attempt < attempts && ex is DbUpdateException or InvalidOperationException)
+            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException)
             {
+                // ★ 失败的实体仍以 Added 留在变更跟踪器里：不丢弃，下一次重试的 SaveChanges 会把它一起重放、
+                // 再撞一次同一条索引 —— 这条重试循环因此从未成功过（与 9cd60440 修 RecordAccessAuditor 时的形态逐字相同），
+                // 而 DestroyAsync 早已执行完，「数据已销毁而证明没落库」就从窄窗口变成一撞必现。
+                _repository.Discard(entry);
+
+                if (attempt >= attempts)
+                    break;
+
                 LogInformation(
                     "Destruction certificate chain conflict at sequence {Sequence}, retrying ({Attempt}/{Total}).",
                     entry.Sequence, attempt, attempts);

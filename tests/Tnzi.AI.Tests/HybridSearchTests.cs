@@ -1,4 +1,4 @@
-
+using Tnzi.AI.Rag.Dtos;
 namespace Tnzi.AI.Tests;
 
 /// <summary>
@@ -262,6 +262,87 @@ public class HybridSearchTests
     }
 
     [Fact]
+    public async Task SearchAsync_WithKbFilter_ScopesBothPaths_AndIncludesGraphResults()
+    {
+        // agent 路径带着知识库范围进来：向量与关键词两路都必须按库检索，图谱片段也只在这些库里找
+        var kbId = Guid.NewGuid();
+        var docId = Guid.NewGuid();
+        var graph = new Mock<IGraphSearchService>();
+        graph
+            .Setup(g => g.SearchAsync("query", kbId, It.IsAny<GraphSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<GraphSearchResult> { new("Acme", "Organization", [], 0.8, "Acme acquired Foo") });
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions(), graph.Object);
+
+        var queryVector = new[] { 0.1f };
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), kbId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>
+            {
+                new() { Id = Guid.NewGuid(), Content = "Vector hit", DocumentId = docId, KnowledgeBaseId = kbId, Score = 0.9 }
+            });
+        mocks.Keyword
+            .Setup(k => k.SearchAsync("query", It.IsAny<int>(), kbId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>());
+        mocks.Reranker
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, List<VectorSearchResult> fused, int topK, CancellationToken _) => fused.Take(topK).ToList());
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeDocument> { new() { Id = docId, FileName = "doc.md", KnowledgeBaseId = kbId } }.BuildMock());
+
+        var results = (await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbId] }, maxResults: 5)).ToList();
+
+        results.Count.ShouldBe(2);
+        results.ShouldContain(r => r.Text == "Vector hit" && r.SourceName == "doc.md" && (string)r.Metadata!["searchType"]! == "hybrid");
+        results.ShouldContain(r => r.Text == "Acme acquired Foo" && (string)r.Metadata!["searchType"]! == "graph");
+        // 两路都没有走 search-all
+        mocks.VectorStore.Verify(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), null, It.IsAny<CancellationToken>()), Times.Never);
+        mocks.Keyword.Verify(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithParentRetrievalEnabled_ExpandsToParentWindow()
+    {
+        var docId = Guid.NewGuid();
+        var parent = new Mock<IParentDocumentRetriever>();
+        parent
+            .Setup(p => p.RetrieveAsync(It.IsAny<IReadOnlyList<RetrievalResult>>(), It.IsAny<ParentRetrievalOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ParentDocumentResult>
+            {
+                new() { DocumentId = docId, StartChunkIndex = 1, EndChunkIndex = 3, MergedContent = "wider window", Score = 0.9, DocumentName = "doc.md" }
+            });
+        var options = new AIRagOptions { ParentDocumentRetrieval = new ParentDocumentRetrievalOptions { Enabled = true } };
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(options, parentDocumentRetriever: parent.Object);
+
+        var queryVector = new[] { 0.1f };
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(queryVector));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>
+            {
+                new() { Id = Guid.NewGuid(), Content = "small chunk", DocumentId = docId, KnowledgeBaseId = Guid.NewGuid(), ChunkIndex = 2, Score = 0.9 }
+            });
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>());
+        mocks.Reranker
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, List<VectorSearchResult> fused, int topK, CancellationToken _) => fused.Take(topK).ToList());
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeDocument> { new() { Id = docId, FileName = "doc.md" } }.BuildMock());
+
+        var results = (await service.SearchAsync("query", maxResults: 5)).ToList();
+
+        var only = results.ShouldHaveSingleItem();
+        only.Text.ShouldBe("wider window");
+        only.Metadata!["searchType"].ShouldBe("parent_document");
+    }
+
+    [Fact]
     public async Task SearchAsync_ExceptionThrown_ReturnsEmptyGracefully()
     {
         var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
@@ -376,7 +457,10 @@ public class HybridSearchTests
     /// <summary>
     /// 创建 HybridSearchService 并返回其底层 mock，便于端到端配置/断言
     /// </summary>
-    private static (HybridSearchService Service, HybridMocks Mocks) CreateHybridSearchServiceWithMocks(AIRagOptions options)
+    private static (HybridSearchService Service, HybridMocks Mocks) CreateHybridSearchServiceWithMocks(
+        AIRagOptions options,
+        IGraphSearchService? graphSearchService = null,
+        IParentDocumentRetriever? parentDocumentRetriever = null)
     {
         var serviceProviderMock = new Mock<IServiceProvider>();
         serviceProviderMock.Setup(sp => sp.GetService(typeof(ILoggerFactory)))
@@ -398,7 +482,9 @@ public class HybridSearchTests
             mocks.Embedding.Object,
             mocks.Reranker.Object,
             mocks.DocRepo.Object,
-            new StaticOptionsMonitor<AIRagOptions>(options));
+            new StaticOptionsMonitor<AIRagOptions>(options),
+            graphSearchService,
+            parentDocumentRetriever);
 
         return (service, mocks);
     }

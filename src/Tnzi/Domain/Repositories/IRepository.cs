@@ -87,4 +87,29 @@ public interface IRepository<TEntity, TKey> : IRepository<TEntity>, IReadOnlyRep
     /// 部分更新实体
     /// </summary>
     Task UpdateAsync(TKey id, Action<TEntity> updateAction, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 预先生成一枚 Id，规则与保存时的自动生成<b>同源</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 给「保存之前就要知道 Id」的写路径用（拿 Id 拼路径 / 编码 / 关联记录），
+    /// 而不是各自 <c>SequentialGuid.NewGuid()</c>：那样发出的是固定一种排列，
+    /// 与保存时按数据库 provider 选的排列不同，消费方注册的自定义生成器也被绕过。
+    /// </para>
+    /// <para>
+    /// 默认实现只认 <see cref="Guid"/>（Sequential GUID，默认排列）与 <see cref="long"/>（Snowflake），
+    /// 其它键类型抛 <see cref="NotSupportedException"/>；EF Core 仓储按 provider 与已注册的生成器覆盖它。
+    /// </para>
+    /// </remarks>
+    TKey NewId()
+    {
+        object? id = typeof(TKey) == typeof(Guid) ? SequentialGuid.NewGuid()
+            : typeof(TKey) == typeof(long) ? Data.Snows.IdHelper.NextId()
+            : null;
+
+        return id is TKey key
+            ? key
+            : throw new NotSupportedException($"No id generator is available for key type {typeof(TKey).Name} of {typeof(TEntity).Name}.");
+    }
 }

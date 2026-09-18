@@ -54,6 +54,19 @@ public class AspNetCoreOptionsValidator : OptionsValidatorBase<AspNetCoreOptions
             {
                 errors.Add("RequestValidation.NonceExpirationSeconds must be greater than 0.");
             }
+
+            // 两个各自合法的值叠加会打开重放窗口：时间戳判定是 |服务器时间 − 请求时间| ≤ W，
+            // 一条抓到的请求在其时间戳前后各 W 秒内都合法（跨度 2W），而 nonce 只记 E 秒。
+            // E < 2W 时首次使用后 E 秒到 T+W 之间重放，nonce 已忘、时间戳仍在窗口内、签名逐字相同。
+            // 默认 300/600 恰好落在边界上，所以从没暴露；只有组合才错的项按本仓惯例启动就报
+            //（同 ValidateTrustedProxies 的理由）。
+            if (options.RequestValidation.RequireNonce &&
+                options.RequestValidation.NonceExpirationSeconds < 2L * options.RequestValidation.TimestampWindowSeconds)
+            {
+                errors.Add(
+                    "RequestValidation.NonceExpirationSeconds must be at least twice RequestValidation.TimestampWindowSeconds; "
+                    + "otherwise a signed request can be replayed after its nonce expires while its timestamp is still inside the window.");
+            }
         }
 
         // 验证限流配置

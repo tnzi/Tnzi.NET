@@ -41,6 +41,9 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
         if (otp.MaxAttempts <= 0)
             errors.Add("Otp.MaxAttempts must be greater than 0.");
 
+        if (otp.RetentionHours < 0)
+            errors.Add("Otp.RetentionHours cannot be negative (0 keeps expired codes forever).");
+
         // 验证密码策略
         var pwd = options.PasswordPolicy;
         if (pwd.MinLength < 4)
@@ -73,9 +76,22 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
         if (captcha.CaptchaFailThreshold < 0)
             errors.Add("Captcha.CaptchaFailThreshold cannot be negative.");
 
+        // 提供商配置已迁到 AspNetCore:Captcha。旧键在这里从未被读过，静默接受等于让部署方以为自己配好了 reCAPTCHA
+        // 而实际出的还是文字图；只能启动即失败并指路。
+        if (!string.IsNullOrWhiteSpace(captcha.Provider))
+            errors.Add("Captcha.Provider has moved: configure the captcha provider under AspNetCore:Captcha:Provider (recaptcha / recaptcha-v3 / hcaptcha / turnstile / altcha / image) and remove Identity:Captcha:Provider.");
+        if (!string.IsNullOrWhiteSpace(captcha.SiteKey))
+            errors.Add("Captcha.SiteKey has moved to AspNetCore:Captcha:SiteKey; remove Identity:Captcha:SiteKey.");
+        if (!string.IsNullOrWhiteSpace(captcha.SecretKey))
+            errors.Add("Captcha.SecretKey has moved to AspNetCore:Captcha:SecretKey; remove Identity:Captcha:SecretKey.");
+
         // 验证密码找回配置
         var recovery = options.Recovery;
         if (recovery.ResetTokenExpirationMinutes <= 0)
             errors.Add("Recovery.ResetTokenExpirationMinutes must be greater than 0.");
+
+        // 验证第三方登录配置
+        if (options.OAuth.LinkTokenLifetimeMinutes <= 0)
+            errors.Add("OAuth.LinkTokenLifetimeMinutes must be greater than 0.");
     }
 }

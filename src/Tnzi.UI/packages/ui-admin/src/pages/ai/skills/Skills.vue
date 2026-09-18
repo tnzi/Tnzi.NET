@@ -497,8 +497,10 @@ async function doExport(): Promise<void> {
     const blob = new Blob([JSON.stringify(skills, null, 2)], { type: 'application/json' })
     downloadBlob(blob, `skills-export-${new Date().toISOString().slice(0, 10)}.json`)
     message?.success(t('importExport.exportSuccess', { count: skills.length }))
-  } catch {
-    message?.error(t('importExport.exportFailed'))
+  } catch (e) {
+    // The bridge throws the server's reason on a refused export (403, module
+    // disabled); show it rather than the generic line.
+    message?.error(e instanceof Error && e.message ? e.message : t('importExport.exportFailed'))
   } finally {
     exporting.value = false
   }

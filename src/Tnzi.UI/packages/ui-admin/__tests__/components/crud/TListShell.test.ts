@@ -3,6 +3,12 @@ import { mount } from '@vue/test-utils'
 import { ref, computed } from 'vue'
 import TListShell from '../../../src/components/crud/TListShell.vue'
 
+const downloadBlob = vi.fn()
+vi.mock('@tnzi/core/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tnzi/core/utils')>()),
+  downloadBlob: (...args: unknown[]) => downloadBlob(...args),
+}))
+
 vi.mock('../../../src/headless/useBreakpoint', () => ({
   useBreakpoint: () => ({
     width: ref(1280),
@@ -334,5 +340,58 @@ describe('TListShell toolbar - icon-only buttons + trailing order', () => {
       global: { stubs: trailingStubs },
     })
     expect(wrapper.find('.t-crud-toolbar__columns').exists()).toBe(false)
+  })
+
+  // Export: `useCrudPage.exportAll` runs the bridge through runWithErrorHandling,
+  // which toasts and RE-THROWS. The shell must neither download around a
+  // rejected export nor let the rejection escape the click handler (nothing else
+  // is listening for it), and must download when a Blob comes back.
+  describe('export', () => {
+    function exportButton(wrapper: ReturnType<typeof mount>) {
+      const button = wrapper.findAll('button').find((b) => b.text().toLowerCase().includes('export'))
+      expect(button, 'export button').toBeDefined()
+      return button!
+    }
+
+    it('downloads the Blob exportAll resolves', async () => {
+      downloadBlob.mockClear()
+      const blob = new Blob(['id\n1'], { type: 'text/csv' })
+      const state = makeState({ exportAll: vi.fn(async () => blob) })
+      const wrapper = mount(TListShell, { props: { state: state as any, showExport: true, title: 'Users' }, slots: { renderer: '<div/>' }, global: { stubs } })
+      await exportButton(wrapper).trigger('click')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(downloadBlob).toHaveBeenCalledWith(blob, 'Users.csv')
+    })
+
+    // Import goes through the same runWithErrorHandling (toast + re-throw);
+    // the picker's change handler fired it with `void`, so a rejected CSV
+    // import surfaced a second time as an unhandled rejection.
+    it('a rejected import settles the picker handler instead of escaping it', async () => {
+      const state = makeState({ importFile: vi.fn(async () => { throw new Error('Column "email" is required') }) })
+      const wrapper = mount(TListShell, {
+        props: { state: state as any, showImport: true },
+        slots: { renderer: '<div/>' },
+        global: { stubs },
+      })
+      const file = new File(['a,b'], 'rows.csv', { type: 'text/csv' })
+      const vm = wrapper.vm as unknown as { importPicked: (f: File) => Promise<void> }
+      await expect(vm.importPicked(file)).resolves.toBeUndefined()
+      expect(state.importFile).toHaveBeenCalledWith(file)
+    })
+
+    it('a rejected export downloads nothing and does not escape the click handler', async () => {
+      downloadBlob.mockClear()
+      const state = makeState({ exportAll: vi.fn(async () => { throw new Error('12000 rows matched; narrow the filter') }) })
+      const errorHandler = vi.fn()
+      const wrapper = mount(TListShell, {
+        props: { state: state as any, showExport: true },
+        slots: { renderer: '<div/>' },
+        global: { stubs, config: { errorHandler } },
+      })
+      await exportButton(wrapper).trigger('click')
+      await new Promise((r) => setTimeout(r, 0))
+      expect(downloadBlob).not.toHaveBeenCalled()
+      expect(errorHandler).not.toHaveBeenCalled()
+    })
   })
 })

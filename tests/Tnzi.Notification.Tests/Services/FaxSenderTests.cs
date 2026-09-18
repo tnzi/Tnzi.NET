@@ -289,7 +289,7 @@ public class FaxSenderTests
             FaxSender = new FaxSenderOptions { GatewayDomain = Gateway }
         };
         IFaxSender sender = new EmailToFaxSender(
-            options, new NullEmailSender(NullLogger<NullEmailSender>.Instance), NullLogger<EmailToFaxSender>.Instance);
+            options.FaxSender!, new NullEmailSender(NullLogger<NullEmailSender>.Instance), NullLogger<EmailToFaxSender>.Instance);
 
         var result = await sender.SendPdfAsync("9055551234", Pdf(), "letter.pdf");
 
@@ -321,7 +321,7 @@ public class FaxSenderTests
             .Callback<EmailMessage, CancellationToken>((message, _) => sent.Value = message)
             .ReturnsAsync(SendResult.CreateSuccess("api-id"));
 
-        IFaxSender sender = new EmailToFaxSender(options, emailSender.Object, NullLogger<EmailToFaxSender>.Instance);
+        IFaxSender sender = new EmailToFaxSender(options.FaxSender!, emailSender.Object, NullLogger<EmailToFaxSender>.Instance);
 
         var result = await sender.SendPdfAsync("9055551234", Pdf(), "letter.pdf");
 
@@ -375,6 +375,6 @@ public class FaxSenderTests
             .Callback<EmailMessage, CancellationToken>((message, _) => sent.Value = message)
             .ReturnsAsync(SendResult.CreateSuccess("email-id"));
 
-        return (new EmailToFaxSender(options, emailSender.Object, NullLogger<EmailToFaxSender>.Instance), sent);
+        return (new EmailToFaxSender(options.FaxSender!, emailSender.Object, NullLogger<EmailToFaxSender>.Instance), sent);
     }
 }

@@ -1,4 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
+using Tnzi.AspNetCore.Options;
+using Tnzi.MultiTenancy;
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -212,5 +214,43 @@ public class JwtTokenServiceTests
             .ToList();
         sessionValues.ShouldContain(realSession.ToString());
         sessionValues.ShouldNotContain(forgedSession);
+    }
+
+    /// <summary>
+    /// 租户 claim 名只从 <see cref="TenantResolverOptions.DefaultClaimType"/> 出：签发方写它，
+    /// <c>HttpContextCurrentUser.TenantId</c> 与 <c>TnziHub</c> 读它。这里钉的是签发方那一半。
+    /// </summary>
+    [Fact]
+    public void GenerateToken_WithMultiTenancy_WritesTheTenantClaimUnderTheSharedConstant()
+    {
+        var identityOptions = new IdentityOptions();
+        identityOptions.Jwt.SecretKey = "test-secret-key-at-least-32-chars-long-1234567890!!";
+        var service = new JwtTokenService(
+            Microsoft.Extensions.Options.Options.Create(identityOptions),
+            Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions { Enabled = true }),
+            new Mock<IServiceProvider>().Object,
+            null);
+        var tenantId = Guid.NewGuid();
+        var user = new User { Id = Guid.NewGuid(), UserName = "tenant-user", TenantId = tenantId };
+
+        var claims = Decode(service.GenerateToken(user, ["user"]));
+
+        claims.ShouldContain(c => c.Type == TenantResolverOptions.DefaultClaimType && c.Value == tenantId.ToString());
+    }
+
+    /// <summary>
+    /// 「三处必须同一个字符串，所以只从这里出」—— 那句话写在常量上，而签发方曾照样硬编码 <c>"tenant_id"</c>。
+    /// 门禁：<c>src/</c> 里这个字面量只允许出现在定义常量的那个文件里。
+    /// </summary>
+    [Fact]
+    public void TenantClaimLiteral_OnlyAppearsWhereTheConstantIsDefined()
+    {
+        var offenders = RepoScan.EnumerateFiles("src", "*.cs")
+            .Where(file => !string.Equals(Path.GetFileName(file), "TenantResolverOptions.cs", StringComparison.OrdinalIgnoreCase))
+            .Where(file => File.ReadAllText(file).Contains("\"tenant_id\"", StringComparison.Ordinal))
+            .Select(Path.GetFileName)
+            .ToList();
+
+        offenders.ShouldBeEmpty("the tenant claim name must be TenantResolverOptions.DefaultClaimType everywhere it is written or read");
     }
 }

@@ -114,6 +114,40 @@ public class MasterDataUsageTests : OfferIntegrationTestBase
     }
 
     /// <summary>
+    /// 科目也是要约行引用的主数据：一个只被报价单行指着、还没被过账用过的科目在核心的分录检查里
+    /// 是干净的，删掉后转发票那一步才撞上「科目不存在」。与 Recurring 回答的 <c>Account</c> 同一契约。
+    /// </summary>
+    [Fact]
+    public async Task AccountOnAnOfferLine_CannotBeDeleted()
+    {
+        await SeedCoaAsync();
+        var customer = await CustomerAsync("Northwind Traders");
+        var created = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.CreateAsync(new CreateAccountDto
+        {
+            Code = "4190",
+            Name = "Project revenue",
+            RootType = AccountRootType.Income,
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var draft = await InScopeAsync<IEstimateService, Result<EstimateDto>>(s => s.CreateDraftAsync(new CreateEstimateDto
+        {
+            CustomerId = customer,
+            DocDate = DateTime.UtcNow.Date,
+            Currency = "USD",
+            Lines = [new CreateOfferLineDto { AccountId = created.Data!.Id, Quantity = 1, UnitPrice = 500m }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        var deleted = await InScopeAsync<IChartOfAccountsService, Result>(s => s.DeleteAsync(created.Data!.Id));
+
+        deleted.Succeeded.ShouldBeFalse("an open estimate line posts to this account when converted");
+        deleted.Code.ShouldBe(409);
+        deleted.Message.ShouldNotBeNull();
+        deleted.Message.ShouldContain("estimate or purchase-order lines");
+    }
+
+    /// <summary>
     /// 没被任何要约单据引用时照旧放行：本契约回答的是事实，不是"一律拒绝"。
     /// </summary>
     [Fact]

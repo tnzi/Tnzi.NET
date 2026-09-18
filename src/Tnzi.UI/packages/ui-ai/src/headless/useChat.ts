@@ -61,6 +61,10 @@ export interface TokenUsage {
 export interface ToolCallInfo {
   name: string;
   durationMs?: number | null;
+  /** Outcome as the backend reports it (`ToolCallDetail`). Absent while pending. */
+  isSuccess?: boolean | null;
+  /** Error message when `isSuccess` is false. */
+  error?: string | null;
   input?: string | null;
   output?: string | null;
 }
@@ -95,7 +99,8 @@ export interface ChatMessage {
   parentId?: string | null;
   /** Feedback rating (true = positive, false = negative, null = none). */
   feedbackRating?: boolean | null;
-  /** Lifecycle status - 'error'/'stopped' render dedicated UI in TChatApp/ChatMessage. */
+  /** Lifecycle status. 'error' / 'stopped' render dedicated UI in both message
+   *  renderers (TThreadMessage and TChatMessage); both built-in transports write it. */
   status?: 'streaming' | 'done' | 'stopped' | 'error';
   /** Error message shown when status === 'error'. */
   error?: string | null;
@@ -132,7 +137,8 @@ export interface UseChatReturn {
   messageCount: ComputedRef<number>;
   /** Send a user message. */
   send: (content: string, files?: MessageAttachment[]) => void;
-  /** Regenerate (re-request) a specific assistant message. */
+  /** Re-ask the question behind an assistant message: truncates the thread to
+   *  before that question, then sends it again (one user turn, no duplicate). */
   regenerate: (messageId: string) => void;
   /** Abort the current streaming request. */
   abort: () => void;
@@ -230,10 +236,6 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     }
   }
 
-  function removeMessage(id: string): void {
-    messages.value = messages.value.filter((msg) => msg.id !== id);
-  }
-
   function appendDelta(id: string, field: 'content' | 'reasoning', delta: string): void {
     if (delta === '') return;
     messages.value = messages.value.map((msg) => {
@@ -292,26 +294,41 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
     options.onStreamStart?.();
   }
 
+  /**
+   * Re-ask the question that produced `messageId`.
+   *
+   * The thread is truncated to just BEFORE the preceding user turn and that
+   * turn is sent again, so the list reads [..., user, assistant placeholder]
+   * with exactly one copy of the question. Removing only the assistant row
+   * and then calling `send()` used to append a second identical user bubble,
+   * and a consumer persisting through `onStreamStart` stored the duplicate
+   * turn server-side as well. Everything after the target is dropped too: a
+   * regenerated answer invalidates the turns that were built on the old one.
+   *
+   * Ignored while a turn is streaming: an earlier answer's action stays
+   * clickable then, and truncating would drop the streaming placeholder
+   * under a transport that is still writing to it (`send()` would then
+   * no-op on `isStreaming`, leaving the composer locked).
+   */
   function regenerate(messageId: string): void {
+    if (isStreaming.value) return;
     const idx = messages.value.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
     const target = messages.value[idx];
     if (target?.role !== 'assistant') return;
 
     // Find the preceding user message
-    let userMessage: ChatMessage | null = null;
+    let userIdx = -1;
     for (let i = idx - 1; i >= 0; i--) {
       if (messages.value[i]?.role === 'user') {
-        userMessage = messages.value[i] ?? null;
+        userIdx = i;
         break;
       }
     }
+    const userMessage = userIdx === -1 ? null : messages.value[userIdx];
     if (!userMessage) return;
 
-    // Remove the old assistant message
-    removeMessage(messageId);
-
-    // Re-send with the same content
+    messages.value = messages.value.slice(0, userIdx);
     send(userMessage.content, userMessage.attachments ?? undefined);
   }
 

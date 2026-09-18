@@ -1,3 +1,5 @@
+using Moq;
+using Tnzi.Storage;
 
 namespace Tnzi.Finance.Tests.Integration;
 
@@ -29,13 +31,81 @@ public class ReceiptCaptureTests : FinanceIntegrationTestBase
     }
 
     private ReceiptCaptureService BuildServiceWithExtractor(IServiceProvider sp, IReceiptExtractor? extractor)
+        => BuildService(sp, extractor, sp.GetRequiredService<IFileReadAccessProbe>());
+
+    private ReceiptCaptureService BuildService(IServiceProvider sp, IReceiptExtractor? extractor, IFileReadAccessProbe? probe)
         => new(
             sp,
             sp.GetRequiredService<IRepository<Receipt, Guid>>(),
             sp.GetRequiredService<IReadOnlyRepository<Vendor, Guid>>(),
             sp.GetRequiredService<IExpenseService>(),
             sp.GetRequiredService<IBillService>(),
-            extractor);
+            extractor,
+            probe);
+
+    private static IFileReadAccessProbe Answering(bool canRead)
+    {
+        var probe = new Mock<IFileReadAccessProbe>();
+        probe.Setup(p => p.CanReadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(canRead);
+        return probe.Object;
+    }
+
+    private async Task<int> ReceiptRowsAsync()
+    {
+        var page = await InScopeAsync<IReceiptCaptureService, Result<IPagedList<ReceiptDto>>>(
+            s => s.GetPagedAsync(new ReceiptQueryDto { PageIndex = 1, PageSize = 50 }));
+        page.Succeeded.ShouldBeTrue(page.Message);
+        return page.Data!.Items.Count;
+    }
+
+    // ── 登记前的归属探针（IFileReadAccessProbe） ───────────────────────────
+    //
+    // Receipt.FileId 是 [FileField]，落库即登记 FileReference；ReceiptFileReferenceAccessResolver 对它只问
+    // finance.receipt.view。不问「这个人本来就读得到这份文件吗」，任何持 finance.receipt.create 的人
+    // 把任意 fileId 登记成收据，就把那份文件变成了自己永久可读的（再 extract 一次还会把它送给模型）。
+
+    [Fact]
+    public async Task Create_FileCallerCannotRead_Returns403_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildService(scope.ServiceProvider, extractor: null, Answering(canRead: false));
+
+        var result = await service.CreateAsync(new CreateReceiptDto { FileId = Guid.NewGuid(), FileName = "receipt.pdf" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        (await ReceiptRowsAsync()).ShouldBe(0);
+    }
+
+    /// <summary>存储模块缺席时拒绝，不是跳过：「跳过校验」与「校验通过」在接口上完全一致。</summary>
+    [Fact]
+    public async Task Create_WithoutStorageProbe_Returns501()
+    {
+        await SeedCoaAsync();
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildService(scope.ServiceProvider, extractor: null, probe: null);
+
+        var result = await service.CreateAsync(new CreateReceiptDto { FileId = Guid.NewGuid(), FileName = "receipt.pdf" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(501);
+        result.Message!.ShouldContain("Tnzi.Storage");
+        (await ReceiptRowsAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Create_FileCallerCanRead_Succeeds()
+    {
+        await SeedCoaAsync();
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildService(scope.ServiceProvider, extractor: null, Answering(canRead: true));
+
+        var result = await service.CreateAsync(new CreateReceiptDto { FileId = Guid.NewGuid(), FileName = "receipt.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        (await ReceiptRowsAsync()).ShouldBe(1);
+    }
 
     [Fact]
     public async Task Extract_NoExtractor_Returns501()

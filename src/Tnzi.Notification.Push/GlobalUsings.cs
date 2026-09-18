@@ -23,6 +23,7 @@ global using Tnzi.Exceptions;
 global using Tnzi.Mapster;
 global using Tnzi.Modules;
 global using Tnzi.Notification.Dtos;
+global using Tnzi.Notification.Metadata;
 global using Tnzi.Notification.Options;
 global using Tnzi.Notification.Push.Dtos;
 global using Tnzi.Notification.Push.Entities;

@@ -54,12 +54,16 @@ public class PromptCachingMiddlewareTests
                 Enabled = enabled,
                 CacheStaticDynamicBoundary = cacheStaticDynamicBoundary,
                 CacheSystemPrompt = cacheSystemPrompt,
-                CacheFirstNMessages = cacheFirstNMessages,
-                SnapshotToolSchemas = false
+                CacheFirstNMessages = cacheFirstNMessages
             }
         };
         return opts;
     }
+
+
+    /// <summary>断言经 SDK 键写在内容块上的断点（<c>AIContent.AdditionalProperties["anthropic:cache_control"]</c>）。</summary>
+    private static bool HasCacheBreakpoint(ChatMessage message)
+        => message.Contents.Any(c => c.AdditionalProperties?.ContainsKey("anthropic:cache_control") == true);
 
     #endregion
 
@@ -118,7 +122,7 @@ public class PromptCachingMiddlewareTests
         // OpenAI: marks context but does not inject cache_control on messages
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
         // cache_control should NOT be set (Anthropic-specific)
-        systemMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
+        HasCacheBreakpoint(systemMsg).ShouldBeFalse();
     }
 
     // -------------------------------------------------------------------------
@@ -138,11 +142,7 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        var cacheControl = systemMsg.AdditionalProperties["cache_control"] as Dictionary<string, string>;
-        cacheControl.ShouldNotBeNull();
-        cacheControl!["type"].ShouldBe("ephemeral");
+        HasCacheBreakpoint(systemMsg).ShouldBeTrue();
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
-        systemMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
+        HasCacheBreakpoint(systemMsg).ShouldBeFalse();
     }
 
     // -------------------------------------------------------------------------
@@ -179,11 +179,8 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         // CacheFirstNMessages=2: cache_control should be on the 2nd user/assistant message (index 1)
-        userMsg1.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-        assistantMsg1.AdditionalProperties.ShouldNotBeNull();
-        assistantMsg1.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        var cc = assistantMsg1.AdditionalProperties["cache_control"] as Dictionary<string, string>;
-        cc!["type"].ShouldBe("ephemeral");
+        HasCacheBreakpoint(userMsg1).ShouldBeFalse();
+        HasCacheBreakpoint(assistantMsg1).ShouldBeTrue();
     }
 
     // -------------------------------------------------------------------------
@@ -203,8 +200,7 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         // Should use effectiveProvider = anthropic → cache_control applied
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(systemMsg).ShouldBeTrue();
     }
 
     // -------------------------------------------------------------------------
@@ -250,8 +246,7 @@ public class PromptCachingMiddlewareTests
         }
 
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(systemMsg).ShouldBeTrue();
         chunks.Count.ShouldBe(1);
     }
 
@@ -270,8 +265,7 @@ public class PromptCachingMiddlewareTests
                 PromptCaching = new PromptCachingOptions
                 {
                     Enabled = true,
-                    CacheStaticDynamicBoundary = true,
-                    SnapshotToolSchemas = false
+                    CacheStaticDynamicBoundary = true
                 }
             };
         });
@@ -297,23 +291,17 @@ public class PromptCachingMiddlewareTests
         context.Properties["PromptCachingEnabled"].ShouldBe(true);
 
         // Breakpoint 1 (static): Instructions 系统消息应有 cache_control
-        instructionsMsg.AdditionalProperties.ShouldNotBeNull();
-        instructionsMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        var staticCc = instructionsMsg.AdditionalProperties["cache_control"] as Dictionary<string, string>;
-        staticCc!["type"].ShouldBe("ephemeral");
+        HasCacheBreakpoint(instructionsMsg).ShouldBeTrue();
 
         // Breakpoint 2 (dynamic): 最后一条动态消息（memoryMsg）应有 cache_control
-        memoryMsg.AdditionalProperties.ShouldNotBeNull();
-        memoryMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        var dynamicCc = memoryMsg.AdditionalProperties["cache_control"] as Dictionary<string, string>;
-        dynamicCc!["type"].ShouldBe("ephemeral");
+        HasCacheBreakpoint(memoryMsg).ShouldBeTrue();
 
         // 非最后一条动态消息不应有 cache_control（只标记最后一条）
-        userProfileMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-        soulMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
+        HasCacheBreakpoint(userProfileMsg).ShouldBeFalse();
+        HasCacheBreakpoint(soulMsg).ShouldBeFalse();
 
         // User message 不应有 cache_control
-        userMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
+        HasCacheBreakpoint(userMsg).ShouldBeFalse();
 
         // 验证断点计数
         context.Properties["PromptCachingBreakpoints"].ShouldBe(2);
@@ -330,8 +318,7 @@ public class PromptCachingMiddlewareTests
                 PromptCaching = new PromptCachingOptions
                 {
                     Enabled = true,
-                    CacheStaticDynamicBoundary = true,
-                    SnapshotToolSchemas = false
+                    CacheStaticDynamicBoundary = true
                 }
             };
         });
@@ -345,8 +332,7 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         // 只有静态断点
-        instructionsMsg.AdditionalProperties.ShouldNotBeNull();
-        instructionsMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(instructionsMsg).ShouldBeTrue();
 
         context.Properties["PromptCachingBreakpoints"].ShouldBe(1);
     }
@@ -362,8 +348,7 @@ public class PromptCachingMiddlewareTests
                 PromptCaching = new PromptCachingOptions
                 {
                     Enabled = true,
-                    CacheStaticDynamicBoundary = true,
-                    SnapshotToolSchemas = false
+                    CacheStaticDynamicBoundary = true
                 }
             };
         });
@@ -377,121 +362,9 @@ public class PromptCachingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
 
         // 只有动态断点
-        memoryMsg.AdditionalProperties.ShouldNotBeNull();
-        memoryMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(memoryMsg).ShouldBeTrue();
 
         context.Properties["PromptCachingBreakpoints"].ShouldBe(1);
-    }
-
-    // -------------------------------------------------------------------------
-    // Task 20: Tool schema snapshot caching
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public async Task ToolSchemaSnapshot_CachesFirstBuild()
-    {
-        var middleware = CreateMiddleware(o =>
-        {
-            o.Providers[AnthropicProvider] = new ProviderOptions
-            {
-                Enabled = true,
-                PromptCaching = new PromptCachingOptions
-                {
-                    Enabled = true,
-                    SnapshotToolSchemas = true
-                }
-            };
-        });
-
-        // 第一次调用：使用 tool_a 和 tool_b
-        var context1 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        var toolA = AIFunctionFactory.Create(() => "a", "tool_a", "Tool A");
-        var toolB = AIFunctionFactory.Create(() => "b", "tool_b", "Tool B");
-        context1.AdditionalTools.Add(toolA);
-        context1.AdditionalTools.Add(toolB);
-
-        await middleware.InvokeAsync(context1, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        // 验证第一次调用的工具被使用
-        context1.AdditionalTools.Count.ShouldBe(2);
-
-        // 第二次调用：使用不同的工具（模拟配置变更）
-        var context2 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        var toolC = AIFunctionFactory.Create(() => "c", "tool_c", "Tool C");
-        context2.AdditionalTools.Add(toolC);
-
-        await middleware.InvokeAsync(context2, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        // 第二次调用应使用第一次的快照（2 个工具），而不是新的（1 个工具）
-        context2.AdditionalTools.Count.ShouldBe(2);
-    }
-
-    [Fact]
-    public async Task ToolSchemaSnapshot_Disabled_DoesNotCacheTools()
-    {
-        var middleware = CreateMiddleware(o =>
-        {
-            o.Providers[AnthropicProvider] = new ProviderOptions
-            {
-                Enabled = true,
-                PromptCaching = new PromptCachingOptions
-                {
-                    Enabled = true,
-                    SnapshotToolSchemas = false
-                }
-            };
-        });
-
-        // 第一次调用
-        var context1 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        context1.AdditionalTools.Add(AIFunctionFactory.Create(() => "a", "tool_a", "Tool A"));
-        context1.AdditionalTools.Add(AIFunctionFactory.Create(() => "b", "tool_b", "Tool B"));
-
-        await middleware.InvokeAsync(context1, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-        context1.AdditionalTools.Count.ShouldBe(2);
-
-        // 第二次调用：使用不同工具
-        var context2 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        context2.AdditionalTools.Add(AIFunctionFactory.Create(() => "c", "tool_c", "Tool C"));
-
-        await middleware.InvokeAsync(context2, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        // SnapshotToolSchemas=false: 不缓存，使用当前工具（1 个）
-        context2.AdditionalTools.Count.ShouldBe(1);
-    }
-
-    [Fact]
-    public async Task ToolSchemaSnapshot_StreamingPath_CachesFirstBuild()
-    {
-        var middleware = CreateMiddleware(o =>
-        {
-            o.Providers[AnthropicProvider] = new ProviderOptions
-            {
-                Enabled = true,
-                PromptCaching = new PromptCachingOptions
-                {
-                    Enabled = true,
-                    SnapshotToolSchemas = true
-                }
-            };
-        });
-
-        // 第一次调用（流式）
-        var context1 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        context1.AdditionalTools.Add(AIFunctionFactory.Create(() => "a", "tool_a", "Tool A"));
-
-        await foreach (var _ in middleware.InvokeStreamingAsync(context1, (ctx, ct) => CreateChunkStream())) { }
-        context1.AdditionalTools.Count.ShouldBe(1);
-
-        // 第二次调用（非流式）: 应复用流式路径建立的快照
-        var context2 = CreateContext(provider: AnthropicProvider, messages: [new ChatMessage(ChatRole.System, "System")]);
-        context2.AdditionalTools.Add(AIFunctionFactory.Create(() => "x", "tool_x", "Tool X"));
-        context2.AdditionalTools.Add(AIFunctionFactory.Create(() => "y", "tool_y", "Tool Y"));
-
-        await middleware.InvokeAsync(context2, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        // 使用第一次快照（1 个工具）
-        context2.AdditionalTools.Count.ShouldBe(1);
     }
 
     private static async IAsyncEnumerable<AgentStreamChunk> CreateChunkStream()

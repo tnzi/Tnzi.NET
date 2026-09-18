@@ -61,13 +61,6 @@ public class HealthChecksOptions
     public int TimeoutSeconds { get; set; } = 10;
 
     /// <summary>
-    /// 详细输出响应缓存时长（秒）
-    /// 避免高频健康检查请求导致的性能开销
-    /// 默认：10秒
-    /// </summary>
-    public int CacheDurationSeconds { get; set; } = 10;
-
-    /// <summary>
     /// 是否启用缓存健康检查（内存缓存）
     /// 默认：true
     /// </summary>

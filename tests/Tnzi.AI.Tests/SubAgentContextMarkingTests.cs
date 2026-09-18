@@ -52,6 +52,26 @@ public class SubAgentContextMarkingTests
     }
 
     [Fact]
+    public async Task Runtime_RunAsync_BackgroundRootRun_MarksTheRunAsSubAgent()
+    {
+        // SpawnAsync 起的每一个运行都是子 Agent 运行，包括没有父运行的根 spawn：
+        // 只认 ParentRunId 会让未开追踪的聊天里 spawn 出来的运行逃过 SubAgentDisallowedTools 与 IsSubAgentOnly 规则
+        var harness = new RuntimeHarness();
+
+        await harness.Runtime.RunAsync(new AgentRunRequest
+        {
+            WorkflowId = Guid.NewGuid(),
+            UserMessage = "do the thing",
+            IsBackground = true,
+            SubAgentName = "researcher"
+        });
+
+        harness.Observed.ShouldNotBeNull();
+        harness.Observed!.GetValueOrDefault(ContextPropertyKeys.IsSubAgent).ShouldBe(true);
+        harness.Observed.GetValueOrDefault(ContextPropertyKeys.SubAgentName).ShouldBe("researcher");
+    }
+
+    [Fact]
     public async Task Runtime_RunStreamingAsync_WithParentRunId_MarksTheRunAsSubAgent()
     {
         var harness = new RuntimeHarness(streaming: true);
@@ -95,7 +115,7 @@ public class SubAgentContextMarkingTests
             });
 
         var registry = new Mock<ISubAgentRegistry>();
-        registry.Setup(x => x.Get("researcher")).Returns(
+        registry.Setup(x => x.GetForTenant("researcher", It.IsAny<string>())).Returns(
             new SubAgentTypeDefinition("researcher", "Researches things", [], [], 10));
 
         var services = new ServiceCollection();

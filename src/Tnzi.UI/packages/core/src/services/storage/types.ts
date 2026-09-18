@@ -358,6 +358,31 @@ export interface StorageStatisticsDto {
 export type FileStorageStatisticsDto = StorageStatisticsDto;
 
 /**
+ * Body of `POST /admin/files/backfill-thumbnails`. Mirrors
+ * `Tnzi.Storage/Dtos/StorageDtos.cs` ThumbnailBackfillRequest. Both fields are
+ * optional: an empty body scans every file that has no thumbnail, 100 at a time.
+ */
+export interface ThumbnailBackfillRequest {
+  /** Only these files; null / omitted = every candidate. */
+  fileIds?: string[] | null;
+  /** Files handled per call (rendering is serial). Default 100. */
+  maxFiles?: number;
+}
+
+/**
+ * Result of one backfill batch. Loop until `generated` is 0, NOT until
+ * `remaining` is 0: a file that cannot be drawn (an encrypted PDF) stays a
+ * candidate forever and is listed in `failedFileIds` every time.
+ */
+export interface ThumbnailBackfillResult {
+  scanned: number;
+  generated: number;
+  failed: number;
+  remaining: number;
+  failedFileIds: string[];
+}
+
+/**
  * User storage usage statistics
  * Aligned with backend UserStorageUsage DTO
  */

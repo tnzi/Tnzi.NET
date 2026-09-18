@@ -19,7 +19,7 @@
  * Fires `send(text, files)` on the built-in send button (when there is text
  * or at least one attachment) or on Enter without Shift (IME-safe).
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { formatFileSize } from '@tnzi/core/utils'
 import { useAiI18n, formatAiMessage } from '../../i18n/index'
@@ -45,7 +45,9 @@ const props = withDefaults(
     composerActions?: ReadonlyArray<ComposerAction>
     /** Built-in voice (speech-to-text) mic button. Default true. */
     enableVoice?: boolean
-    /** Built-in attachment button + drag/paste. Default false. */
+    /** Built-in attachment button + drag/paste. Default false. When off,
+     *  paste and drop are inert too - not just the button hidden - so no
+     *  chip can appear that the transport would then have to drop. */
     enableAttachments?: boolean
     /** Accepted file types. */
     accept?: string
@@ -109,8 +111,18 @@ const {
   onDragLeave,
 } = useComposerAttachments({
   maxFileSize: props.maxFileSize,
+  enabled: () => props.enableAttachments,
   onReject: (list) => emit('attachments-rejected', list),
 })
+
+// Turning attachments off with chips already collected must not leave them
+// to be sent on the next Enter.
+watch(
+  () => props.enableAttachments,
+  (enabled) => {
+    if (!enabled) clearFiles()
+  },
+)
 
 const rejectedMessage = computed(() =>
   rejected.value.length === 0

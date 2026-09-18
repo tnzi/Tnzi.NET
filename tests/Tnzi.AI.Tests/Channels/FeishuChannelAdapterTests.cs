@@ -94,7 +94,8 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+        // 配置了 EncryptKey 的飞书应用推送的 body 是密文信封，签名算在信封上
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
         var headers = BuildValidHeaders(body, TestEncryptKey);
 
         await adapter.HandleEventAsync(body, headers);
@@ -113,7 +114,7 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
         var headers = BuildValidHeaders(body, TestEncryptKey);
         headers["X-Lark-Signature"] = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -129,7 +130,7 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
         // Sign using a DIFFERENT key to simulate forged request
         var headers = BuildValidHeaders(body, "attacker-key");
 
@@ -145,7 +146,7 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
         // 10 minutes ago - exceeds 5 minute window
         var staleTimestamp = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() - 600).ToString();
         var nonce = "abc123";
@@ -170,7 +171,7 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
         var headers = BuildValidHeaders(body, TestEncryptKey);
         headers.Remove("X-Lark-Signature");
 
@@ -187,14 +188,91 @@ public class FeishuChannelAdapterTests
         var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
         var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
 
-        var originalBody = SerializeTextMessage("oc_chat_1", "ou_user_1", "original");
+        var originalBody = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "original"), TestEncryptKey);
         var headers = BuildValidHeaders(originalBody, TestEncryptKey);
 
-        var tamperedBody = SerializeTextMessage("oc_chat_1", "ou_user_1", "tampered");
+        var tamperedBody = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "tampered"), TestEncryptKey);
         await adapter.HandleEventAsync(tamperedBody, headers);
 
         var consumed = await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100));
         consumed.ShouldBeNull();
+    }
+
+    // =====================================================================
+    // 密文信封：配置了 Encrypt Key 的飞书应用推送的每个 body 都是 {"encrypt":"..."}，
+    // 此前适配器要求 EncryptKey（验签）却只会解析明文 —— 唯一能过验签的形状是它解析不了的形状。
+    // =====================================================================
+
+    [Fact]
+    public async Task ProcessWebhook_EncryptedChallenge_DecryptsAndEchoes()
+    {
+        var adapter = CreateAdapter(encryptKey: TestEncryptKey);
+        var plaintext = JsonSerializer.Serialize(new { type = "url_verification", challenge = "lark-challenge", token = "vtok" });
+        var body = FeishuTestCrypto.Envelope(plaintext, TestEncryptKey);
+
+        var result = await adapter.ProcessWebhookAsync(body, FeishuTestCrypto.SignedHeaders(body, TestEncryptKey));
+
+        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
+        result.ChallengeResponse!.ShouldContain("lark-challenge");
+    }
+
+    [Fact]
+    public async Task ProcessWebhook_EncryptedTextEvent_PublishesInbound()
+    {
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
+
+        var result = await adapter.ProcessWebhookAsync(body, FeishuTestCrypto.SignedHeaders(body, TestEncryptKey));
+
+        result.Outcome.ShouldBe(WebhookOutcome.Accepted);
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.ChatId.ShouldBe("oc_chat_1");
+        received.UserId.ShouldBe("ou_user_1");
+        received.Text.ShouldBe("hello");
+    }
+
+    [Fact]
+    public async Task ProcessWebhook_PlaintextBodyWithKeyConfigured_Rejected()
+    {
+        // 配置了 EncryptKey 就意味着飞书那边开了加密：一个签名正确的明文 body 不是飞书会发出的东西，
+        // 只能是有人拿着密钥在伪造 —— 失败关闭。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
+        var body = SerializeTextMessage("oc_chat_1", "ou_user_1", "hello");
+
+        var result = await adapter.ProcessWebhookAsync(body, FeishuTestCrypto.SignedHeaders(body, TestEncryptKey));
+
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ProcessWebhook_EncryptedBody_BadSignature_Rejected()
+    {
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), TestEncryptKey);
+
+        var result = await adapter.ProcessWebhookAsync(body, FeishuTestCrypto.SignedHeaders(body, "attacker-key"));
+
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ProcessWebhook_EncryptedUnderDifferentKey_Rejected()
+    {
+        // 签名对但密文解不开（另一把密钥加的）：解密失败一律拒绝，绝不把垃圾字节当事件解析
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, encryptKey: TestEncryptKey);
+        var body = FeishuTestCrypto.Envelope(SerializeTextMessage("oc_chat_1", "ou_user_1", "hello"), "another-key");
+
+        var result = await adapter.ProcessWebhookAsync(body, FeishuTestCrypto.SignedHeaders(body, TestEncryptKey));
+
+        result.Outcome.ShouldBe(WebhookOutcome.Rejected);
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
     }
 
     [Fact]

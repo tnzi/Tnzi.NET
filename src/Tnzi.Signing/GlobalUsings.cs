@@ -28,6 +28,7 @@ global using Tnzi.Geometry;
 global using Tnzi.Mapster;
 global using Tnzi.Json;
 global using Tnzi.Modules;
+global using Tnzi.MultiTenancy;
 global using Tnzi.Results;
 global using Tnzi.Security;
 global using Tnzi.Security.Authorization;
@@ -35,6 +36,7 @@ global using Tnzi.Security.Authorization;
 // .Services 是为了 IFileStorageService。两者缺一不可 —— 根下的类型不会因为
 // 导入了子命名空间就可解析。
 global using Tnzi.Storage;
+global using Tnzi.Storage.Helpers;
 global using Tnzi.Storage.Services;
 global using Tnzi.Utilities;
 

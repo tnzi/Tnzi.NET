@@ -6,6 +6,13 @@ namespace Tnzi.AspNetCore.Mvc.Filters;
 /// 当用户在 Controller 或 Action 方法上标记 [UnitOfWork] 特性时，该方法中的所有操作都会被包含在一个事务中
 /// 任何异常都会自动回滚
 /// </summary>
+/// <remarks>
+/// ★ <c>[UnitOfWork(IsDisabled = true)]</c> 也会让 MVC 运行本过滤器：特性是一个
+/// <c>ServiceFilterAttribute</c>，标了就解析、解析了就运行。所以「禁用」必须在<b>这里</b>被读到并让路 ——
+/// 全局过滤器 <c>UnitOfWorkFilter</c> 读它只能让自己跳过，管不到这个实例。
+/// 此前本过滤器一处都不读它，于是标着「已禁用」的 action 在两种模式下都照样启用事务（2026-09-12 修复）。
+/// 规则与全局过滤器一致：端点元数据里任何一份 <c>IsDisabled</c> 都算禁用（方法级禁用压过类级启用）。
+/// </remarks>
 internal class UnitOfWorkActionFilter : IAsyncActionFilter
 {
     private readonly IServiceProvider _serviceProvider;
@@ -22,6 +29,19 @@ internal class UnitOfWorkActionFilter : IAsyncActionFilter
     /// </summary>
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
+        // [UnitOfWork(IsDisabled = true)]：特性本身把我们带进了管线，禁用要由我们自己兑现。
+        var isDisabled = context.ActionDescriptor.EndpointMetadata
+            .OfType<UnitOfWorkAttribute>()
+            .Any(attr => attr.IsDisabled);
+
+        if (isDisabled)
+        {
+            _logger?.LogDebug("Unit of work disabled by attribute for action {Controller}.{Action}",
+                context.RouteData.Values["controller"], context.RouteData.Values["action"]);
+            await next();
+            return;
+        }
+
         // 获取 UnitOfWork 服务（优先使用 UnitOfWorkManager）
         var unitOfWorkManager = _serviceProvider.GetService<IUnitOfWorkManager>();
         var unitOfWork = unitOfWorkManager == null ? _serviceProvider.GetService<IUnitOfWork>() : null;

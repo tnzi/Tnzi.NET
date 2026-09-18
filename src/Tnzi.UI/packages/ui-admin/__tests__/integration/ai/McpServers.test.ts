@@ -59,7 +59,6 @@ const getStatus = vi.fn(async () => ({
   transport: 'http',
   endpoint: '/mcp',
   requireAuthentication: true,
-  rateLimitPerTenant: true,
   rateLimitPerMinute: 60,
   exposedAgentCount: 1,
   customToolCount: 3,

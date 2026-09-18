@@ -77,6 +77,7 @@ import type {
   UserDetailDto,
   CreateUserDetailDto,
   UserLoginDto,
+  OAuthLinkTokenDto,
   ChangeEmailDto,
   ChangePhoneNumberDto,
   SendChangeVerificationCodeDto,
@@ -161,11 +162,22 @@ export interface AuthApiOptions {
   withCredentials?: boolean;
 }
 
-export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
-  // Auth endpoints that set, read, or clear the refresh-token cookie.
-  const cookieAware = options.withCredentials
+/**
+ * Request options for an endpoint that sets, reads or clears the refresh-token
+ * cookie. Every endpoint whose response can carry a `TokenResultDto` must use
+ * this - in cookie mode the refresh token travels as `Set-Cookie`, and a
+ * cross-origin fetch without `credentials: 'include'` makes the browser drop
+ * it on the floor: sign-in looks fine, and the first refresh a few minutes
+ * later says "session expired".
+ */
+function cookieAwareOptions(options: AuthApiOptions) {
+  return options.withCredentials
     ? { skipAuthRefresh: true, withCredentials: true }
     : { skipAuthRefresh: true };
+}
+
+export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
+  const cookieAware = cookieAwareOptions(options);
 
   return {
     /**
@@ -219,13 +231,17 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
         `${AUTH_BASE}/pending-actions/${encodeURIComponent(tempToken)}`,
       ),
 
+    // The three `completePending*` calls issue the session (`PendingActionResultDto.token`),
+    // so they are cookie-aware like login. Anonymous otherwise: a 401 here means
+    // the temp token is bad, not that a session expired.
+
     /** Discharge "must change the password first". */
     completePendingPasswordChange: (data: CompletePasswordChangeDto) =>
-      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/change-password`, data),
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/change-password`, data, cookieAware),
 
     /** Discharge "must enrol an authenticator first". */
     completePendingTotpEnrollment: (data: CompletePendingActionCodeDto) =>
-      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/enroll-totp`, data),
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/enroll-totp`, data, cookieAware),
 
     /** Send the code for "must confirm the email first". The address comes from the account. */
     sendPendingActionEmailCode: (tempToken: string) =>
@@ -235,7 +251,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
 
     /** Discharge "must confirm the email first". */
     completePendingEmailConfirmation: (data: CompletePendingActionCodeDto) =>
-      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/confirm-email`, data),
+      client.post<PendingActionResultDto>(`${AUTH_BASE}/pending-actions/confirm-email`, data, cookieAware),
 
     /** Reset password by token */
     resetPassword: (data: ResetPasswordDto) =>
@@ -245,13 +261,13 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
     resendEmailConfirmation: (data: ResendEmailConfirmationDto) =>
       client.post<string>(`${AUTH_BASE}/resend-email-confirmation`, data),
 
-    /** Get captcha image (binary) */
-    getCaptcha: (purpose: 'login' | 'register') =>
-      client.download(`${AUTH_BASE}/captcha/${purpose}`),
+    /** Get the built-in image captcha (binary PNG, id in the X-Captcha-Id header). Any valid purpose name. */
+    getCaptcha: (purpose: string) =>
+      client.download(`${AUTH_BASE}/captcha/${encodeURIComponent(purpose)}`),
 
-    /** Get captcha JSON (base64) */
-    getCaptchaJson: (purpose: 'login' | 'register') =>
-      client.get<CaptchaDto>(`${AUTH_BASE}/captcha/${purpose}/json`),
+    /** Get the built-in image captcha as JSON (base64). Any valid purpose name (login / register / password-recovery / yours). */
+    getCaptchaJson: (purpose: string) =>
+      client.get<CaptchaDto>(`${AUTH_BASE}/captcha/${encodeURIComponent(purpose)}/json`),
 
     /** Evaluate password strength */
     evaluatePasswordStrength: (password: string) =>
@@ -349,7 +365,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
      * with the existing 2FA flow in that case.
      */
     completePasskeyAssertion: (data: PasskeyCompleteDto) =>
-      client.post<TokenResultDto>(`${AUTH_BASE}/passkey/assert/complete`, data, { skipAuthRefresh: true }),
+      client.post<TokenResultDto>(`${AUTH_BASE}/passkey/assert/complete`, data, cookieAware),
 
     /** List the current user's registered passkeys. */
     getPasskeyCredentials: () =>
@@ -365,6 +381,12 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
     // person is here right now. The server answers those endpoints with
     // `IDENTITY_STEP_UP_REQUIRED`; verify here, then retry the original call
     // unchanged. Prefer the `stepUp` helper in `services/identity/step-up`.
+    //
+    // All three are `skipAuthRefresh`: a failed verification answers 401 (the
+    // backend deliberately says the same thing for a wrong code and a foreign
+    // passkey). Left to the client's default 401 handling, one mistyped code
+    // would refresh the session, automatically re-submit the SAME wrong code
+    // (a second failure server-side) and then sign the user out.
 
     /**
      * Re-authenticate with a passkey.
@@ -374,7 +396,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
      * challenge flow would be one more piece of state to keep in sync.
      */
     stepUpWithPasskey: (data: StepUpPasskeyDto) =>
-      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/passkey`, data),
+      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/passkey`, data, { skipAuthRefresh: true }),
 
     /**
      * Re-authenticate with a two-factor code.
@@ -383,7 +405,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
      * where passkeys are not available, not as the easier of two options.
      */
     stepUpWithCode: (data: StepUpCodeDto) =>
-      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/code`, data),
+      client.post<StepUpGrantDto>(`${AUTH_BASE}/step-up/code`, data, { skipAuthRefresh: true }),
 
     /**
      * Send a step-up-only verification code to the signed-in user's confirmed
@@ -396,7 +418,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
      * recipient would hand that decision to a possibly-hijacked session.
      */
     stepUpSendCode: (data: SendStepUpCodeDto) =>
-      client.post<string | null>(`${AUTH_BASE}/step-up/send-code`, data),
+      client.post<string | null>(`${AUTH_BASE}/step-up/send-code`, data, { skipAuthRefresh: true }),
   };
 }
 
@@ -409,11 +431,24 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
  * @param client HTTP client (supplies the configured baseUrl).
  * @param provider Provider key (lowercase, e.g. `'github'`, `'google'`).
  * @param returnUrl Optional URL to return to once the flow completes.
+ * @param linkToken Optional link token from `useProfileApi().issueOAuthLinkToken`.
+ *   With it the flow *links* the provider to the signed-in account instead of
+ *   logging in: the callback issues no tokens and creates no account. Without
+ *   it, an already-signed-in user hitting this URL runs the anonymous login
+ *   flow, which creates a fresh account when the provider's email differs.
  */
-export function oauthLoginUrl(client: HttpClient, provider: string, returnUrl?: string): string {
+export function oauthLoginUrl(
+  client: HttpClient,
+  provider: string,
+  returnUrl?: string,
+  linkToken?: string,
+): string {
+  const query: Record<string, string> = {};
+  if (returnUrl) query.returnUrl = returnUrl;
+  if (linkToken) query.linkToken = linkToken;
   return client.resolveUrl(
     `${AUTH_BASE}/oauth/${provider}/login`,
-    returnUrl ? { returnUrl } : undefined,
+    Object.keys(query).length ? query : undefined,
   );
 }
 
@@ -462,6 +497,14 @@ export function useProfileApi(client: HttpClient) {
     /** Get linked OAuth accounts */
     getLinkedAccounts: () =>
       client.get<UserLoginDto[]>(`${PROFILE_BASE}/linked-accounts`),
+
+    /**
+     * Issue a one-time link token, then navigate to
+     * `oauthLoginUrl(client, provider, returnUrl, token.token)` to link the
+     * provider to the current account. See {@link OAuthLinkTokenDto}.
+     */
+    issueOAuthLinkToken: (provider: string) =>
+      client.post<OAuthLinkTokenDto>(`${PROFILE_BASE}/linked-accounts/${encodeURIComponent(provider)}/link-token`),
 
     /** Unlink an OAuth account */
     unlinkAccount: (provider: string) =>
@@ -706,8 +749,13 @@ export function useAdminInvitationApi(client: HttpClient) {
 /**
  * Invitation acceptance (invitee side). Both endpoints are anonymous - whoever holds
  * the token has, by definition, no account to sign in with yet.
+ *
+ * `accept` issues the session (`AcceptInvitationResultDto.token`), so it takes
+ * the same {@link AuthApiOptions} as `useAuthApi` and must be built with
+ * `withCredentials` in a cross-origin cookie-mode deployment.
  */
-export function useInvitationApi(client: HttpClient) {
+export function useInvitationApi(client: HttpClient, options: AuthApiOptions = {}) {
+  const cookieAware = cookieAwareOptions(options);
   return {
     /** Read what to show on the acceptance page. Does not consume the token. */
     preview: (token: string) =>
@@ -720,7 +768,7 @@ export function useInvitationApi(client: HttpClient) {
      * usable - render `remainingSteps` and let the user come back to the same link.
      */
     accept: (data: AcceptInvitationDto) =>
-      client.post<AcceptInvitationResultDto>(`${INVITATION_BASE}/accept`, data),
+      client.post<AcceptInvitationResultDto>(`${INVITATION_BASE}/accept`, data, cookieAware),
   };
 }
 

@@ -252,16 +252,9 @@ const sessionRules = ref<PermissionRuleItemDto[]>([])
 // fetch returns the full list (no server paging) sorted the way the evaluator
 // resolves conflicts: Priority desc, then Scope weight desc.
 const persistedColumns = buildPersistedColumns(t)
-// The schema-form `required` flag is visual only (TSchemaForm generates no
-// validation rule and useCrudPage.submit never calls validate), so guard the
-// tool pattern here - a blank pattern would match far too broadly. The thrown
-// error is surfaced as a toast by runWithErrorHandling, which re-throws and so
-// keeps the modal open for correction (mirrors the old save-button disable).
-function ensureToolPattern(data: Partial<PersistedPermissionRuleDto>): void {
-  if (!String(data.toolPattern ?? '').trim()) {
-    throw new Error(t('form.toolPatternRequired'))
-  }
-}
+// A blank tool pattern would match far too broadly; the schema declares it
+// `required` and the form modal validates that before `submit` runs, so no
+// page-level guard is needed here.
 
 const crud = useCrudPage<PersistedPermissionRuleDto>({
   pageId: 'ai.permissions',
@@ -284,14 +277,10 @@ const crud = useCrudPage<PersistedPermissionRuleDto>({
       hasNextPage: false,
     }
   },
-  createData: (data) => {
-    ensureToolPattern(data)
-    return bridge.createPersistedRule(data as CreatePersistedPermissionRuleDto) as Promise<PersistedPermissionRuleDto>
-  },
-  updateData: (id, data) => {
-    ensureToolPattern(data)
-    return bridge.updatePersistedRule(String(id), data as CreatePersistedPermissionRuleDto) as Promise<PersistedPermissionRuleDto>
-  },
+  createData: (data) =>
+    bridge.createPersistedRule(data as CreatePersistedPermissionRuleDto) as Promise<PersistedPermissionRuleDto>,
+  updateData: (id, data) =>
+    bridge.updatePersistedRule(String(id), data as CreatePersistedPermissionRuleDto) as Promise<PersistedPermissionRuleDto>,
   deleteData: (ids) => Promise.all(ids.map((id) => bridge.deletePersistedRule(String(id)))).then(() => undefined),
 })
 

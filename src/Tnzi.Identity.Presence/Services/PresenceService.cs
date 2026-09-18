@@ -4,16 +4,25 @@ public class PresenceService : ApplicationService, IPresenceService
 {
     private readonly IRepository<UserPresence, Guid> _repository;
     private readonly IOptionsSnapshot<PresenceOptions> _options;
+    private readonly IUserTenantScopeProvider _scope;
     private readonly IConnectionManager? _connectionManager;
 
+    /// <summary>初始化一个 <see cref="PresenceService"/> 类型的新实例。</summary>
+    /// <remarks>
+    /// <paramref name="scope"/>（当前请求的用户范围，Identity 核心无条件注册）★ 必需而不是可选：多租户下 presence 行
+    /// 受租户过滤器管、连接判定（<see cref="IConnectionManager"/>）不分租户，少了这一道，别家租户的 id 会走
+    /// 「查不到行默认 Online」再被连接管理器证实 —— 而「没裁剪」在返回值里看不出来。
+    /// </remarks>
     public PresenceService(
         IServiceProvider serviceProvider,
         IRepository<UserPresence, Guid> repository,
         IOptionsSnapshot<PresenceOptions> options,
+        IUserTenantScopeProvider scope,
         IConnectionManager? connectionManager = null) : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _options = Check.NotNull(options);
+        _scope = Check.NotNull(scope);
         _connectionManager = connectionManager;
     }
 
@@ -51,7 +60,13 @@ public class PresenceService : ApplicationService, IPresenceService
     public async Task<IReadOnlyList<UserPresenceDto>> ResolveEffectiveAsync(IReadOnlyCollection<Guid> userIds)
     {
         if (userIds == null || userIds.Count == 0) return Array.Empty<UserPresenceDto>();
-        var idSet = userIds.Distinct().ToHashSet();
+
+        // ★ 先按当前租户收窄（多租户未开启 / 无已认证主体时原样放行、不查库）。别家租户的 id 从结果里**省略**，
+        //   不是回 Offline：让调用方分得清「不在目录里」与「离线」。此前不收窄：对方的 Invisible 行被租户过滤器
+        //   藏掉 → 走下面「查不到行默认 Online」→ 连接管理器不分租户答 true → 对别的租户显示为在线，
+        //   越是想隐身的人越被暴露；GET /presence?userIds= 也成了跨租户在线探针。收窄之后连接管理器只被问范围内的 id。
+        var idSet = (await _scope.FilterAsync(userIds)).ToHashSet();
+        if (idSet.Count == 0) return Array.Empty<UserPresenceDto>();
         var records = (await _repository.ToListAsync(p => idSet.Contains(p.UserId)))
             .ToDictionary(p => p.UserId);
         var opt = _options.Value;

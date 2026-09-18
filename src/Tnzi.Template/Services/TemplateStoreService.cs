@@ -11,6 +11,24 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
     private readonly IRepository<TemplateEntity, Guid> _repository;
     private readonly ITemplateFileService? _templateFileService;
 
+    /// <summary>
+    /// 导出/导入的 JSON 形态：属性 camelCase，枚举按成员名（<c>"type": "Sms"</c>）。
+    /// 导入同时认数字（<c>JsonStringEnumConverter</c> 默认 allowIntegerValues），与 HTTP 层的 wire 契约同口径。
+    /// </summary>
+    private static readonly JsonSerializerOptions ExportJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static readonly JsonSerializerOptions ImportJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public TemplateStoreService(
         IRepository<TemplateEntity, Guid> repository,
         IServiceProvider serviceProvider,
@@ -81,6 +99,8 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             SubjectTemplate = templateInfo.SubjectTemplate ?? string.Empty,
             ContentTemplate = templateInfo.ContentTemplate ?? string.Empty,
             DefaultLayoutName = templateInfo.DefaultLayoutName,
+            // 文件自述的类型要到达实体：渲染服务按它决定短信正文不做 HTML 编码
+            Type = templateInfo.Type ?? TemplateType.Generic,
             IsActive = true,
             // 顶层 description 优先；老写法把描述写在 metadata: 块里，继续认
             Description = templateInfo.Description
@@ -117,6 +137,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         }
 
         var template = request.MapTo<TemplateEntity>();
+        template.Type = request.Type ?? TemplateType.Generic;
         await _repository.InsertAsync(template, cancellationToken);
         LogInformation("Template created: {TemplateName}, Module: {Module}, Category: {Category}", template.TemplateName, template.Module, template.Category);
         return Ok(template.MapTo<TemplateDto>(), "Template created successfully");
@@ -153,7 +174,11 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             }
         }
 
+        // 类型是编码开关（Sms = 纯文本正文）。请求没提它就保留库里的值：管理端表单、脚本化的
+        // 局部更新都可能不带这个字段，映射成默认值等于把一份短信模板静默改回 HTML 编码。
+        var effectiveType = request.Type ?? existing.Type;
         request.MapTo(existing);
+        existing.Type = effectiveType;
         // Service-managed revision counter: bumped on every successful update
         // so consumers can detect concurrent edits. Intentionally NOT part of
         // UpdateTemplateRequest - callers cannot overwrite it.
@@ -327,7 +352,8 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
                 Module = file.Module ?? string.Empty,
                 Category = file.Category ?? string.Empty,
                 Version = 1,
-                Type = TemplateType.Email,
+                // 与 ToEntity 的渲染路径投影同一个默认值：列表显示的类型必须是渲染用的那一个
+                Type = file.Type ?? TemplateType.Generic,
                 IsActive = true,
                 Description = file.Description,
                 Source = "FileSystem",
@@ -386,16 +412,13 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             SubjectTemplate = t.SubjectTemplate,
             ContentTemplate = t.ContentTemplate,
             DefaultLayoutName = t.DefaultLayoutName,
+            Type = t.Type,
             IsActive = t.IsActive,
             Description = t.Description,
             Metadata = t.Metadata
         }).ToList();
 
-        var json = JsonSerializer.Serialize(entries, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+        var json = JsonSerializer.Serialize(entries, ExportJsonOptions);
 
         LogInformation("Exported {Count} templates (module: {Module}, category: {Category})", entries.Count, module ?? "all", category ?? "all");
         return Ok(json, $"Exported {entries.Count} templates");
@@ -408,11 +431,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
         List<TemplateExportEntry>? entries;
         try
         {
-            entries = JsonSerializer.Deserialize<List<TemplateExportEntry>>(json, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                PropertyNameCaseInsensitive = true
-            });
+            entries = JsonSerializer.Deserialize<List<TemplateExportEntry>>(json, ImportJsonOptions);
         }
         catch (JsonException ex)
         {
@@ -448,6 +467,8 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
                     existing.SubjectTemplate = entry.SubjectTemplate;
                     existing.ContentTemplate = entry.ContentTemplate;
                     existing.DefaultLayoutName = entry.DefaultLayoutName;
+                    // 机制诞生前导出的文件没有 type：覆盖时保留库里的值，不把 Sms 改回 Generic
+                    existing.Type = entry.Type ?? existing.Type;
                     existing.IsActive = entry.IsActive;
                     existing.Description = entry.Description;
                     existing.Metadata = entry.Metadata;
@@ -469,6 +490,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
                 SubjectTemplate = entry.SubjectTemplate,
                 ContentTemplate = entry.ContentTemplate,
                 DefaultLayoutName = entry.DefaultLayoutName,
+                Type = entry.Type ?? TemplateType.Generic,
                 IsActive = entry.IsActive,
                 Description = entry.Description,
                 Metadata = entry.Metadata
@@ -520,6 +542,7 @@ public class TemplateStoreService : ApplicationService, ITemplateStoreService
             SubjectTemplate = source.SubjectTemplate,
             ContentTemplate = source.ContentTemplate,
             DefaultLayoutName = source.DefaultLayoutName,
+            Type = source.Type,
             IsActive = source.IsActive,
             Description = $"Cloned from '{source.TemplateName}'",
             Metadata = source.Metadata

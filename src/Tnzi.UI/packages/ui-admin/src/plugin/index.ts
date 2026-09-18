@@ -233,6 +233,7 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
 export { TnziUiAdminResolver } from './resolver'
 export { registerBrandIcon, type BrandIconData } from './brand-icon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
+export { TNZI_ADMIN_RUNTIME_KEY, useAdminRuntime } from './runtime'
 export { defineAdminApp, normalizeBasePath } from './defineAdminApp'
 export { createAdminApp } from './createAdminApp'
 export type { CreateAdminAppOptions, AdminAppHandle } from './createAdminApp'

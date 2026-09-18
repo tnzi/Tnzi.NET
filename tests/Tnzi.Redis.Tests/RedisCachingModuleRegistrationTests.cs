@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.Caching;
-using Tnzi.Locking;
 using Tnzi.Modules;
 
 namespace Tnzi.Redis.Tests;

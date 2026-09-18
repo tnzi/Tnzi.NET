@@ -10,6 +10,15 @@ public class HangfireOptionsValidator : OptionsValidatorBase<HangfireOptions>
     /// </summary>
     protected override void ValidateOptions(HangfireOptions options, List<string> errors)
     {
+        // 关掉的模块不配置任何存储与中间件，下面的规则对它没有意义。
+        // ★ 模块 init 先解析 IOptions.Value（触发本验证器）再看 Enabled，
+        //   少了这一行，Hangfire:Enabled=false 这个文档写的逃生口照样起不来（2026-09-12 修复；
+        //   与 PerformanceOptionsValidator / HealthChecksOptionsValidator 同形）。
+        if (!options.Enabled)
+        {
+            return;
+        }
+
         // 验证存储类型和连接字符串
         if (options.StorageType != StorageType.Memory)
         {
@@ -34,9 +43,9 @@ public class HangfireOptionsValidator : OptionsValidatorBase<HangfireOptions>
 
             if (options.Dashboard.Enabled && !options.Dashboard.EnableAuthorization)
             {
-                // Dashboard 开启但未启用授权时，任何人都可访问 /hangfire 查看和操作后台任务
-                // 这是一个安全风险，在生产环境中强烈建议启用授权
-                errors.Add("Hangfire.Dashboard.EnableAuthorization should be true when Dashboard is enabled. "
+                // Dashboard 开启但未启用授权时，任何人都可访问 /hangfire 查看和操作后台任务。
+                // 这是硬错误不是建议；Dashboard 因此默认关闭（opt-in），开它就得带授权。
+                errors.Add("Hangfire.Dashboard.EnableAuthorization must be true when Dashboard is enabled. "
                     + "Set EnableAuthorization=true and configure AllowedRoles to restrict Dashboard access.");
             }
 

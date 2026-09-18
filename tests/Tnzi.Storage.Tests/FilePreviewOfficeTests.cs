@@ -1,4 +1,4 @@
-using Tnzi.Documents;
+using Tnzi.Results;
 
 namespace Tnzi.Storage.Tests;
 
@@ -28,7 +28,7 @@ public class FilePreviewOfficeTests
         Path = DocxPath,
     };
 
-    private static FilePreviewService CreateSut(IDocumentConverter? converter, Mock<IFileStorage>? storage = null)
+    private static FilePreviewService CreateSut(IDocumentConverter? converter, Mock<IFileStorageService>? storage = null)
     {
         var serviceProvider = new Mock<IServiceProvider>();
         var loggerFactory = new Mock<ILoggerFactory>();
@@ -36,9 +36,18 @@ public class FilePreviewOfficeTests
         serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
         return new FilePreviewService(
-            (storage ?? new Mock<IFileStorage>()).Object,
+            (storage ?? new Mock<IFileStorageService>()).Object,
             serviceProvider.Object,
             converter);
+    }
+
+    /// <summary>预览字节经 <c>IFileStorageService.GetForPreviewAsync</c> 取（那是访问事件唯一的发布点）。</summary>
+    private static Mock<IFileStorageService> StorageServing(byte[] bytes)
+    {
+        var storage = new Mock<IFileStorageService>();
+        storage.Setup(s => s.GetForPreviewAsync(It.IsAny<Guid>()))
+            .ReturnsAsync(() => Result.Success<Stream>(new MemoryStream(bytes)));
+        return storage;
     }
 
     // ---------- 没有转换器：行为必须与改动前逐字一致 ----------
@@ -91,9 +100,7 @@ public class FilePreviewOfficeTests
     public async Task WithConverter_PreviewStreamIsTheConvertedPdf()
     {
         var pdf = "%PDF-1.7 converted"u8.ToArray();
-        var storage = new Mock<IFileStorage>();
-        storage.Setup(s => s.DownloadAsync(DocxPath))
-            .ReturnsAsync(() => new MemoryStream("original docx bytes"u8.ToArray()));
+        var storage = StorageServing("original docx bytes"u8.ToArray());
 
         var sut = CreateSut(new StubConverter(pdf), storage);
 
@@ -108,15 +115,15 @@ public class FilePreviewOfficeTests
     public async Task WithConverter_TheOriginalIsDownloadedAndHandedToTheConverter()
     {
         var original = "original docx bytes"u8.ToArray();
-        var storage = new Mock<IFileStorage>();
-        storage.Setup(s => s.DownloadAsync(DocxPath)).ReturnsAsync(() => new MemoryStream(original));
+        var storage = StorageServing(original);
         var converter = new StubConverter();
+        var record = DocxRecord();
 
         var sut = CreateSut(converter, storage);
-        await using var _ = await sut.GeneratePreviewAsync(DocxRecord());
+        await using var _ = await sut.GeneratePreviewAsync(record);
 
         Assert.Equal(original, converter.LastSource);
-        storage.Verify(s => s.DownloadAsync(DocxPath), Times.Once);
+        storage.Verify(s => s.GetForPreviewAsync(record.Id), Times.Once);
     }
 
     // ---------- DI 解析：整套「可选注入」方案的地基 ----------
@@ -130,7 +137,7 @@ public class FilePreviewOfficeTests
         //   单测照样全绿，而任何一个没加载可选包的应用一请求预览就崩。
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(Mock.Of<IFileStorage>());
+        services.AddSingleton(Mock.Of<IFileStorageService>());
         services.AddScoped<IFilePreviewService, FilePreviewService>();
 
         using var provider = services.BuildServiceProvider();
@@ -147,7 +154,7 @@ public class FilePreviewOfficeTests
         // 反向：注册了实现时它确实被注进去了（而不是默认值把注册盖掉）。
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(Mock.Of<IFileStorage>());
+        services.AddSingleton(Mock.Of<IFileStorageService>());
         services.AddSingleton<IDocumentConverter>(new StubConverter());
         services.AddScoped<IFilePreviewService, FilePreviewService>();
 

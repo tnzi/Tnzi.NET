@@ -13,6 +13,15 @@ public interface IDatabaseProvider
     string DatabaseType { get; }
 
     /// <summary>
+    /// 单条命令可携带的参数上限。批量操作按「每批参数总数」而不是「每批行数」封顶。
+    /// </summary>
+    /// <remarks>
+    /// 默认 65535（PostgreSQL / MySQL 的协议上限）。SQL Server 每命令 2100 个，
+    /// 每行 N 列的批量插入 1000 行一批在 N ≥ 3 时就会越界。
+    /// </remarks>
+    int MaxParametersPerCommand => 65535;
+
+    /// <summary>
     /// 转义标识符（表名、列名等）
     /// </summary>
     /// <param name="identifier">标识符</param>

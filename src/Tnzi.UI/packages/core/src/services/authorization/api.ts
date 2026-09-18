@@ -34,6 +34,10 @@ import type {
   UpdateEntityRoleDto,
   PermissionComparisonDto,
   CloneRolePermissionsRequest,
+  BatchAssignFunctionsRequest,
+  RolePermissionExportDto,
+  PermissionImportResultDto,
+  SetUserFunctionsInScopeRequest,
   AccessProfileDto,
   DualControlRequestDto,
   DualControlQueryDto,
@@ -173,6 +177,32 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
         sourceRoleId,
       } satisfies CloneRolePermissionsRequest),
 
+    /** Whether the role holds a direct grant on the function (role grants only, no user-level rows). */
+    hasFunction: (roleId: string, functionId: string) =>
+      client.get<boolean>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/has-function/${functionId}`),
+
+    /** Grant the same functions to several roles in one call (additive, like `assignFunctions`). */
+    batchAssignFunctions: (roleIds: string[], functionIds: string[]) =>
+      client.post<void>(`${ROLE_FUNCTIONS_BASE}/batch/assign`, {
+        roleIds,
+        functionIds,
+      } satisfies BatchAssignFunctionsRequest),
+
+    /**
+     * Export the role's permissions as a code-based document that can be
+     * imported into another role or another deployment.
+     */
+    exportRolePermissions: (roleId: string) =>
+      client.get<RolePermissionExportDto>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/export`),
+
+    /**
+     * Import a permission document into the role (additive). Codes the target
+     * deployment has not declared come back in `notFound` instead of failing
+     * the whole import.
+     */
+    importRolePermissions: (roleId: string, data: RolePermissionExportDto) =>
+      client.post<PermissionImportResultDto>(`${ROLE_FUNCTIONS_BASE}/role/${roleId}/import`, data),
+
     /**
      * Role names configured as super administrators
      * (`Authorization:SuperAdminRoles`). Their members bypass every
@@ -217,12 +247,31 @@ export function useAdminUserFunctionApi(client: HttpClient) {
       client.post<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/remove`, { functionIds }),
 
     /**
-     * Set (overwrite) the user's direct-grant set. Every id must be a function
-     * currently in effect (404 otherwise, naming the codes); rows on retired /
-     * disabled functions are preserved rather than overwritten.
+     * Set (overwrite) the user's ENTIRE direct-grant set. Every id must be a
+     * function currently in effect (404 otherwise, naming the codes); rows on
+     * retired / disabled functions are preserved rather than overwritten.
+     *
+     * Only correct for a caller that holds the whole function catalogue (the
+     * framework's own authorization page). A caller rendering a sub-matrix of
+     * its own codes must use {@link setFunctionsInScope}: saving a sub-matrix
+     * through this method silently deletes every direct grant outside it, with
+     * a 200 and no event difference.
      */
     setFunctions: (userId: string, functionIds: string[]) =>
       client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set`, { functionIds }),
+
+    /**
+     * Bounded override of the user's direct-grant set: only rows inside
+     * `scopeFunctionIds` are touched, everything outside the slice is kept.
+     * `functionIds` must be a subset of the slice (400 otherwise, naming the
+     * ids); an empty `functionIds` clears the slice, not the whole set. See
+     * docs/modules/authorization.md 有界覆盖（切片写入）.
+     */
+    setFunctionsInScope: (userId: string, scopeFunctionIds: string[], functionIds: string[]) =>
+      client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set-in-scope`, {
+        scopeFunctionIds,
+        functionIds,
+      } satisfies SetUserFunctionsInScopeRequest),
 
     /** Clear every direct grant from a user */
     clearFunctions: (userId: string) =>
@@ -233,12 +282,25 @@ export function useAdminUserFunctionApi(client: HttpClient) {
       client.get<string[]>(`${USER_FUNCTIONS_BASE}/user/${userId}/denied-function-ids`),
 
     /**
-     * Set (overwrite) the user's deny set - each denied code is removed from
-     * the user's effective permissions no matter which role granted it.
-     * Pass an empty list to clear all denies.
+     * Set (overwrite) the user's ENTIRE deny set - each denied code is removed
+     * from the user's effective permissions no matter which role granted it.
+     * Pass an empty list to clear all denies. Same whole-set caveat as
+     * {@link setFunctions}: a sub-matrix caller must use
+     * {@link setDeniedFunctionsInScope}.
      */
     setDeniedFunctions: (userId: string, functionIds: string[]) =>
       client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set-denied`, { functionIds }),
+
+    /**
+     * Bounded override of the user's deny set: only deny rows inside
+     * `scopeFunctionIds` are touched, rows outside the slice are kept.
+     * `functionIds` must be a subset of the slice (400 otherwise).
+     */
+    setDeniedFunctionsInScope: (userId: string, scopeFunctionIds: string[], functionIds: string[]) =>
+      client.put<void>(`${USER_FUNCTIONS_BASE}/user/${userId}/set-denied-in-scope`, {
+        scopeFunctionIds,
+        functionIds,
+      } satisfies SetUserFunctionsInScopeRequest),
   }
 }
 

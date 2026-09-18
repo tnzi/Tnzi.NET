@@ -3,6 +3,9 @@ export * from './row-actions'
 export * from './useBatchActions'
 export * from './useFormModal'
 export * from './useCrudPage'
+// Pickers that need the WHOLE set: the backend clamps pageSize to 100 silently, so a
+// single large page is never the answer (2026-09-12).
+export * from './fetchAllPages'
 export * from './permission-gates'
 export * from './useChildCollection'
 export * from './defineEnumMeta'
@@ -64,7 +67,7 @@ export * from './useOverlayTheme'
 // An app replacing the login route component (`defineAdminApp({ loginComponent })`)
 // has to re-derive all of this otherwise: which auth modules the backend
 // actually enabled, how to label the account field for the enabled channels,
-// the send-code countdown, the image-captcha challenge, and the OAuth buttons.
+// the send-code countdown, the captcha challenge, and the OAuth buttons.
 // The shell ⇄ module contract for the login page. Lives here (not under
 // pages/login/) because the three hooks below build on it, and a headless layer
 // must not depend on the page layer.
@@ -109,8 +112,6 @@ export {
   useCaptcha,
   type UseCaptchaOptions,
   type UseCaptchaReturn,
-  useLoginCaptcha,
-  type UseLoginCaptchaReturn,
   buildOAuthProviders,
 } from '@tnzi/ui'
 export * from './account-type'

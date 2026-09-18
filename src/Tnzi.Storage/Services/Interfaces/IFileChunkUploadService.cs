@@ -21,8 +21,14 @@ public interface IFileChunkUploadService
     Task<Result<FileChunkDto>> UploadChunkAsync(Guid uploadSessionId, int chunkIndex, Stream chunkStream, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 完成分块上传
+    /// 完成分块上传：合并分片、过上传闸门、落一条 <see cref="FileRecord"/>。
     /// </summary>
+    /// <param name="uploadSessionId">上传会话 id；必须是当前用户开的、未完成、未取消、未过期的会话</param>
+    /// <param name="isTemporary">
+    /// 与 <see cref="IFileStorageService.SaveAsync"/> 同一口径：<c>true</c> 落成临时记录
+    /// （<c>IsTemporary = true</c>、引用计数从 0 起，由临时清理回收），<c>false</c> 落成正式记录（引用计数从 1 起）。
+    /// </param>
+    /// <param name="cancellationToken">取消令牌</param>
     Task<Result<FileRecord>> CompleteChunkedUploadAsync(Guid uploadSessionId, bool isTemporary = false, CancellationToken cancellationToken = default);
 
     /// <summary>

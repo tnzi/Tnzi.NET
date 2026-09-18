@@ -37,6 +37,14 @@ public class AgentRunRequest
     /// </summary>
     public List<string>? ToolNames { get; init; }
 
+    /// <summary>
+    /// 本请求的 <see cref="ToolGroups"/> / <see cref="ToolNames"/> 由进程内代码选定（应用代码、管理员模板），
+    /// 不受面向 HTTP 的 <c>AI:AdHocTools</c> 允许列表约束。
+    /// ★ 只能由进程内调用方置 true，<b>绝不映射任何 HTTP 请求体</b>：<c>ChatRequestDto</c> 没有这个字段，
+    /// 面向客户端的服务构造请求时保持默认 false，无 AgentId 的请求自选的组必须逐个在允许列表里，否则 403。
+    /// </summary>
+    public bool TrustedToolSelection { get; init; }
+
     /// <summary>Workflow 定义 ID（若指定则走 Workflow 模式）</summary>
     public Guid? WorkflowId { get; init; }
 
@@ -48,6 +56,17 @@ public class AgentRunRequest
 
     /// <summary>复用已有 Run 记录（后台启动场景）</summary>
     public Guid? ExistingRunId { get; init; }
+
+    /// <summary>
+    /// 本请求是 <c>ISubAgentExecutionService.SpawnAsync</c> 起的后台运行。
+    /// </summary>
+    /// <remarks>
+    /// 「后台运行」的判据必须来自请求本身，且不能是 <see cref="ParentRunId"/>：管理端 spawn 端点与
+    /// 未开运行追踪的聊天里的 <c>spawn_agent</c> 起的都是没有父运行的根 spawn，按 ParentRunId 认
+    /// 会让它们逃过 <c>AsyncAgentAllowedTools</c> 白名单与子 Agent 标记。
+    /// ★ 只由进程内的 spawn 路径置 true，<b>绝不映射任何 HTTP 请求体</b>（与 <see cref="TrustedToolSelection"/> 同一纪律）。
+    /// </remarks>
+    public bool IsBackground { get; init; }
 
     /// <summary>父级 Run ID（子 Agent / workflow 子调用）</summary>
     public Guid? ParentRunId { get; init; }
@@ -67,6 +86,18 @@ public class AgentRunRequest
 
     /// <summary>当前用户 ID（用于配额检查等）</summary>
     public Guid? UserId { get; init; }
+
+    /// <summary>
+    /// 钉住的 Agent 版本号：解析时加载该版本的配置快照（含快照里的资源授权）而不是活行，也不再经 A/B 路由。
+    /// 只由框架内部路径（评估）设置，**刻意不映射任何 HTTP 请求体**：版本快照里的工具授权可能比活行宽。
+    /// </summary>
+    public int? AgentVersionNumber { get; init; }
+
+    /// <summary>
+    /// 临时运行：ThreadResolutionMiddleware 与 HistoryMiddleware 都不建线程，History 不读历史、不落库。
+    /// 评估用例逐条跑在评估者名下，不该给每个用例留下一条 AgentThread（也不该各开一份 ThreadData / 沙箱）。
+    /// </summary>
+    public bool Ephemeral { get; init; }
 
     /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
     public ReasoningEffort? ReasoningEffort { get; init; }

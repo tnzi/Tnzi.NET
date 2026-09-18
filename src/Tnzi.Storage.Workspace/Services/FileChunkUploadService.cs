@@ -270,7 +270,10 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 var storageKey = StorageKeyHelper.NewKey(extension);
                 var filePath = await _storage.UploadAsync(storageKey, content, contentType);
 
-                // 创建文件记录
+                // 创建文件记录。生命周期标记与直传 SaveAsync 同一口径：
+                // 临时文件 IsTemporary = true 且引用计数从 0 起，正式文件从 1 起。
+                // ★ 此前 isTemporary 形参从未被读取（整条纵切都在传它），记录一律落成正式文件、
+                //   请求「临时」的也永远不会被临时清理回收。
                 var fileRecord = new FileRecord
                 {
                     FileName = storageKey,
@@ -281,10 +284,21 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                     Md5Hash = md5Hash,
                     Provider = _storage.ProviderName,
                     ContentType = contentType,
-                    ReferenceCount = 0
+                    IsTemporary = isTemporary,
+                    ReferenceCount = isTemporary ? 0 : 1
                 };
 
-                await _fileRepository.InsertAsync(fileRecord, cancellationToken);
+                try
+                {
+                    await _fileRepository.InsertAsync(fileRecord, cancellationToken);
+                }
+                catch
+                {
+                    // 合并后的对象已交给 provider、记录没落成：删掉它（孤儿回收按 FileRecord 枚举，
+                    // 看不见它）。分片与会话原样保留，客户端可以再 complete 一次。
+                    await DiscardMergedObjectAsync(filePath);
+                    throw;
+                }
 
                 // 标记会话为已完成
                 session.IsCompleted = true;
@@ -401,6 +415,22 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
     /// 查进度也放行（只读，DTO 上本就带着 <c>ExpiresAt</c>）。
     /// </remarks>
     private static bool IsExpired(FileUploadSession session) => session.ExpiresAt <= DateTime.UtcNow;
+
+    /// <summary>
+    /// 删掉一个交给了 provider 却没有任何记录指向的合并对象。删除失败只记日志：调用方正在把原异常抛出去，
+    /// 不能让收拾现场的异常把它盖掉。
+    /// </summary>
+    private async Task DiscardMergedObjectAsync(string path)
+    {
+        try
+        {
+            await _storage.DeleteAsync(path);
+        }
+        catch (Exception ex)
+        {
+            LogWarning("Failed to discard merged object {Path} after an aborted chunked upload completion: {Error}", path, ex.Message);
+        }
+    }
 
     /// <summary>
     /// 投影为对外 DTO。除 <c>TenantId</c> 外与实体逐字段一致 —— 这两个端点此前直接把实体

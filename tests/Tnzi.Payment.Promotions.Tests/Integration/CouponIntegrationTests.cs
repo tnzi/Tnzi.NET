@@ -326,6 +326,94 @@ public class CouponIntegrationTests : PromotionsIntegrationTestBase
     }
 
     /// <summary>
+    /// ★★ 经服务铸出的通用码默认<b>每人一张</b>。此前 <c>PerUserLimit</c> 对通用码恒为 null 且没有任何设值入口，
+    /// 注释援引的「促销自身的 per-user 上限」只管核销不管领取 —— 拿到一张 quantity=1000 的活动码，
+    /// 一个人脚本化反复兑换就能把整批名额兑到自己名下，其余用户一律 REDEMPTION_CODE_LIMIT_REACHED，
+    /// 账面「已兑 1000/1000」看不出异常。上面那条 <c>Redeem_RespectsPerUserLimit</c> 是直接 Seed 出
+    /// PerUserLimit=1 的实体，服务层此前造不出那个状态，那段守卫在生产上是死代码。
+    /// </summary>
+    [Fact]
+    public async Task Redeem_GeneralCodeCreatedThroughTheService_DefaultsToOnePerUser()
+    {
+        var promotion = await SeedPromotionAsync(totalLimit: null, perUserLimit: null, isPublic: false);
+        var minted = await InScopeAsync<ICouponIssuanceService, Result<string>>(
+            svc => svc.CreateRedemptionCodeAsync(promotion.Id, 10));
+        minted.Succeeded.ShouldBeTrue(minted.Message);
+
+        var user = Guid.NewGuid();
+        var first = await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(minted.Data!, user));
+        var second = await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(minted.Data!, user));
+
+        first.Succeeded.ShouldBeTrue(first.Message);
+        second.Succeeded.ShouldBeFalse("同一个人把通用码兑了第二次");
+        second.Message.ShouldBe(ErrorCodes.RedemptionCodeUserLimitReached);
+
+        var stored = await FindRedemptionCodeAsync(minted.Data!);
+        stored.PerUserLimit.ShouldBe(1);
+        stored.RedeemedQuantity.ShouldBe(1);
+
+        // 别人照常领得到：上限是按人的，不是按码的
+        var other = await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(minted.Data!, Guid.NewGuid()));
+        other.Succeeded.ShouldBeTrue(other.Message);
+    }
+
+    /// <summary>显式给的每人上限原样落库；唯一码不管传什么都是 1。</summary>
+    [Fact]
+    public async Task CreateRedemptionCode_HonoursExplicitPerUserLimit()
+    {
+        var promotion = await SeedPromotionAsync(totalLimit: null, perUserLimit: null, isPublic: false);
+
+        var general = await InScopeAsync<ICouponIssuanceService, Result<string>>(
+            svc => svc.CreateRedemptionCodeAsync(promotion.Id, 10, perUserLimit: 3));
+        var unique = await InScopeAsync<ICouponIssuanceService, Result<string>>(
+            svc => svc.CreateRedemptionCodeAsync(promotion.Id, 1, perUserLimit: 3));
+
+        (await FindRedemptionCodeAsync(general.Data!)).PerUserLimit.ShouldBe(3);
+        (await FindRedemptionCodeAsync(unique.Data!)).PerUserLimit.ShouldBe(1);
+
+        var user = Guid.NewGuid();
+        for (var i = 0; i < 3; i++)
+            (await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(general.Data!, user))).Succeeded.ShouldBeTrue();
+        var fourth = await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(general.Data!, user));
+        fourth.Message.ShouldBe(ErrorCodes.RedemptionCodeUserLimitReached);
+    }
+
+    /// <summary>
+    /// 「不限」必须显式要（传 0），且真的是不限 —— 那是一个写在 docs 里的、后果明确的决定，不是缺省。
+    /// </summary>
+    [Fact]
+    public async Task CreateRedemptionCode_ZeroMeansExplicitlyUnlimited()
+    {
+        var promotion = await SeedPromotionAsync(totalLimit: null, perUserLimit: null, isPublic: false);
+        var minted = await InScopeAsync<ICouponIssuanceService, Result<string>>(
+            svc => svc.CreateRedemptionCodeAsync(promotion.Id, 5, perUserLimit: 0));
+
+        (await FindRedemptionCodeAsync(minted.Data!)).PerUserLimit.ShouldBeNull();
+
+        var user = Guid.NewGuid();
+        for (var i = 0; i < 5; i++)
+            (await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(svc => svc.RedeemAsync(minted.Data!, user))).Succeeded.ShouldBeTrue();
+    }
+
+    /// <summary>兑换码是一个可以换钱的不记名凭证：字母表与长度固定，来源是密码学随机数（12 位 32 字符字母表 ≈ 60 bit）。</summary>
+    [Fact]
+    public void GenerateCode_UsesTheFixedAlphabetAndLength()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var codes = Enumerable.Range(0, 200).Select(_ => RedemptionCode.GenerateCode()).ToList();
+
+        codes.ShouldAllBe(c => c.Length == 12 && c.All(alphabet.Contains));
+        codes.Distinct().Count().ShouldBe(codes.Count);
+    }
+
+    private async Task<RedemptionCode> FindRedemptionCodeAsync(string code)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRepository<RedemptionCode, Guid>>();
+        return (await repo.FirstOrDefaultAsync(r => r.Code == code)).ShouldNotBeNull();
+    }
+
+    /// <summary>
     /// 兑换码总量用尽后不能再兑（CAS 生效）
     /// </summary>
     [Fact]
@@ -406,6 +494,31 @@ public class CouponIntegrationTests : PromotionsIntegrationTestBase
 
         holderCoupons.Data!.ShouldContain(c => c.Id == privatePromotion.Id && c.IsHeld);
         strangerCoupons.Data!.ShouldNotContain(c => c.Id == privatePromotion.Id);
+    }
+
+    /// <summary>
+    /// ★ 没装续费包（探针缺席）时，首单预检对<b>所有人</b>答「可用」—— 与核销守卫同一条判据、同一个事实：
+    /// 没有订阅表就没有人订阅过。此前预检按「用没用过首单券」另起一套判据，用过一张的人被界面藏掉入口，
+    /// 而核销本会放行。
+    /// </summary>
+    [Fact]
+    public async Task CanUseFirstSubscriptionDiscount_WithoutTheProbe_AgreesWithTheValidator_EvenAfterAFirstOrderCoupon()
+    {
+        var promotion = await SeedPromotionAsync(totalLimit: null, perUserLimit: null, firstSubscriptionOnly: true);
+        var userId = Guid.NewGuid();
+        await SeedAsync(new CouponUsage
+        {
+            CouponId = promotion.Id,
+            UserId = userId,
+            BusinessOrderNo = "ORD-EARLIER",
+            DiscountAmount = 10m
+        });
+
+        var precheck = await InScopeAsync<ICouponWalletService, Result<bool>>(
+            svc => svc.CanUseFirstSubscriptionDiscountAsync(userId));
+
+        precheck.Succeeded.ShouldBeTrue(precheck.Message);
+        precheck.Data.ShouldBeTrue("探针缺席时核销守卫不拒绝任何人，预检却把入口藏掉了");
     }
 
     private async Task<Promotion> ReloadPromotionAsync()

@@ -28,10 +28,7 @@ public class PushSenderTokenLoggingTests
     public async Task A_delivery_attempt_does_not_write_the_raw_token_into_the_log()
     {
         var logger = new CapturingLogger<PushSender>();
-        var options = new NotificationOptions
-        {
-            PushSender = new PushSenderOptions { Provider = "apns" }
-        };
+        var options = new PushSenderOptions { Provider = "apns" };
 
         await new PushSender(options, logger).SendToAsync(Token, "Title", "Body");
 

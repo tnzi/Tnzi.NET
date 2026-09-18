@@ -83,7 +83,8 @@ interface KpiSpec {
   title: string
   icon: string
   gradient: { start: string; end: string }
-  load: () => Promise<number>
+  /** Resolve the number, or `null` to drop the tile after loading (nothing meaningful to show). */
+  load: () => Promise<number | null>
 }
 
 const { reload } = useWidgetData(async () => {
@@ -115,7 +116,14 @@ const { reload } = useWidgetData(async () => {
       key: 'access-logs', permission: 'system.accessLog.view', module: 'system',
       title: 'admin.modules.dashboard.kpi.accessLogs', icon: 'mdi:chart-areaspline',
       gradient: { start: '#865ec0', end: '#5144b4' },
-      load: async () => (await systemBridge.accessLogs.fetch(emptyQuery)).totalCount ?? 0,
+      // Access-log capture is opt-in on the backend (System:AccessLog:Enabled,
+      // default off). A host that is not capturing and has nothing recorded
+      // DROPS the tile: a permanent 0 reads as "nobody visited", not "off".
+      load: async () => {
+        const stats = await systemBridge.accessLogs.statistics()
+        if (!stats.captureEnabled && (stats.totalRequests ?? 0) === 0) return null
+        return stats.totalRequests ?? 0
+      },
     },
     {
       key: 'ai-requests', permission: 'ai.usage.view', module: 'ai',
@@ -134,15 +142,19 @@ const { reload } = useWidgetData(async () => {
     (s) => canSee(s.permission) && moduleAvailability.canActivate(s.module),
   )
   const results = await Promise.allSettled(visible.map((s) => s.load()))
-  dynamicKpis.value = visible.map((s, i) => {
+  dynamicKpis.value = visible.flatMap((s, i) => {
     const r = results[i]
-    return {
+    // A fulfilled `null` means the tile asked to be dropped (nothing meaningful
+    // to show); a rejection still degrades to 0 so one failed bridge doesn't
+    // blank the strip.
+    if (r && r.status === 'fulfilled' && r.value === null) return []
+    return [{
       key: s.key,
       title: s.title,
-      value: r && r.status === 'fulfilled' ? r.value : 0,
+      value: r && r.status === 'fulfilled' ? (r.value ?? 0) : 0,
       icon: s.icon,
       gradient: s.gradient,
-    }
+    }]
   })
 })
 

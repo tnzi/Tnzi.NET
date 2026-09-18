@@ -27,9 +27,12 @@ public static class ForwardedHeadersOptionsBuilder
 
         var built = new ForwardedHeadersOptions
         {
+            // X-Forwarded-Prefix 与其余三个头是同一批：受信代理给的前缀写进 Request.PathBase，
+            // 未受信的连接一律忽略。它曾经绕过这道判定被单独采信（见 AspNetCoreModule 的中间件注释）。
             ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
                                Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto |
-                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost,
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost |
+                               Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedPrefix,
             ForwardLimit = trusted.ForwardLimit
         };
 

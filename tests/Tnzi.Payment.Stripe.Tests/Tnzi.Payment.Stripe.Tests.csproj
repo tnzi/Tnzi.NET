@@ -5,6 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- friend 测试项目须以同一 snk 签名，才能看到 Tnzi.Payment.Stripe 的 internal 成员
+         （StripeClientFactory.Use：把一个走桩 HttpClient 的 StripeClient 塞进工厂，让绑卡归属校验不触网也测得到） -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>

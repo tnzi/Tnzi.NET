@@ -59,6 +59,45 @@ public class CliRunTokenServiceTests : IntegratedTestBase<CliQueueDbContext>
     }
 
     [Fact]
+    public async Task Validate_CarriesTheConfiguredAllowedTools()
+    {
+        // 调用面必须由凭据自带：MCP server 据此过滤 tools/list、拒绝越界 tools/call。
+        var run = await SeedRunAsync(CliRunStatus.Running);
+        var options = new Mock<IOptionsMonitor<CliAgentOptions>>();
+        options.Setup(o => o.CurrentValue).Returns(new CliAgentOptions
+        {
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = ["create_ticket", " add_comment "] }
+        });
+        var service = new CliRunTokenService(
+            ServiceProvider.GetRequiredService<IRepository<CliRun, Guid>>(),
+            NullLogger<CliRunTokenService>.Instance,
+            options.Object);
+        var token = await service.IssueAsync(run, TimeSpan.FromHours(1), CancellationToken.None);
+
+        var credential = await service.ValidateAsync(token);
+
+        credential.ShouldNotBeNull();
+        credential!.AllowedToolNames.ShouldBe(["create_ticket", "add_comment"]);
+        credential.AllowsTool("Create_Ticket").ShouldBeTrue();
+        credential.AllowsTool("agent-b").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Validate_WithoutConfiguration_AllowsNoTool()
+    {
+        // 没配就是关闭的那一边：凭据有效，但一个工具都不许调
+        var run = await SeedRunAsync(CliRunStatus.Running);
+        var service = ServiceProvider.GetRequiredService<CliRunTokenService>();
+        var token = await service.IssueAsync(run, TimeSpan.FromHours(1), CancellationToken.None);
+
+        var credential = await service.ValidateAsync(token);
+
+        credential.ShouldNotBeNull();
+        credential!.AllowedToolNames.ShouldBeEmpty();
+        credential.AllowsTool("*").ShouldBeFalse();
+    }
+
+    [Fact]
     public async Task Validate_RejectsATokenWhoseRunHasFinished()
     {
         // 运行结束后凭据必须立刻失效，哪怕名义上还没到期 ——

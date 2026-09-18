@@ -34,7 +34,6 @@ global using Tnzi.AI.Skills.Middleware;
 global using Tnzi.AI.Skills.Models;
 global using Tnzi.AI.Skills.Services;
 global using Tnzi.AI.Tools;
-global using Tnzi.AI.Tools.Models;
 global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;

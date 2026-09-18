@@ -81,6 +81,10 @@ public class DbContextConfiguration
     /// <param name="configuration">配置对象（可选，用于环境变量和占位符展开）</param>
     /// <param name="logger">日志记录器（可选）</param>
     /// <returns>展开并合并连接池配置后的连接字符串</returns>
+    /// <exception cref="InvalidOperationException">
+    /// 展开后仍有占位符没解析出来。带字面量 <c>${VAR}</c> 的连接串没有任何正确用途，唯一的下游症状是一条
+    /// 认证失败而日志里没有一句指向占位符，所以在这里直接拒绝并指名变量（失败方向关闭）。
+    /// </exception>
     public string GetEffectiveConnectionString(IConfiguration? configuration = null, ILogger? logger = null)
     {
         var expandedConnectionString = ConnectionString;
@@ -91,6 +95,15 @@ public class DbContextConfiguration
         if (ConnectionStringExpander.ContainsPlaceholders(expandedConnectionString))
         {
             expandedConnectionString = ConnectionStringExpander.Expand(expandedConnectionString, configuration, logger);
+
+            var unresolved = ConnectionStringExpander.GetPlaceholderVariables(expandedConnectionString);
+            if (unresolved.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Connection string for DbContext '{Name}' still contains unresolved placeholder(s): {string.Join(", ", unresolved)}. " +
+                    "Set the corresponding environment variable or configuration value; a connection string with a literal placeholder cannot be used. " +
+                    "Design-time commands that never open a connection (migrations add / migrations script) accept any value for the variable.");
+            }
         }
 
         // 应用连接池配置
@@ -105,10 +118,20 @@ public class DbContextConfiguration
     /// <summary>
     /// 获取 DbContext 类型（内部使用，带缓存）
     /// </summary>
+    /// <remarks>
+    /// <c>DbContextType</c> 为空时回退到启动期按 <c>Name</c> 自动发现的结果（若已发现）。
+    /// 启动期的回填只写在 <c>EFCoreModule</c> 自己那份绑定实例上，其它地方重新绑定配置拿到的是一份
+    /// <c>DbContextType</c> 仍为空的新实例 —— 没有这条回退，它们会把「只写 Name」的配置读成「没有上下文」。
+    /// 只查缓存不触发扫描：发现该在启动期发生一次，这里不该悄悄再来一次。
+    /// </remarks>
     internal Type? GetDbContextType()
     {
         if (string.IsNullOrEmpty(DbContextType))
-            return null;
+        {
+            return !string.IsNullOrEmpty(Name) && _autoDiscoveryCache.TryGetValue(Name, out var discovered)
+                ? discovered
+                : null;
+        }
 
         // 从缓存获取
         return _typeCache.GetOrAdd(DbContextType, _ => ResolveDbContextType(DbContextType));

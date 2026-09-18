@@ -35,15 +35,6 @@ public class MiddlewareChainIntegrationTests
         mw.Order.ShouldBe(AiMiddlewareOrders.ToolErrorRecovery);
     }
 
-    [Fact]
-    public void SubAgentLimitMiddleware_Order_IsCorrect()
-    {
-        var mw = new SubAgentLimitMiddleware(
-            new StaticOptionsMonitor<SubAgentOptions>(new SubAgentOptions()),
-            NullLogger<SubAgentLimitMiddleware>.Instance);
-        mw.Order.ShouldBe(AiMiddlewareOrders.SubAgentLimit);
-    }
-
     #endregion
 
     #region 中间件管道 - 端到端执行
@@ -123,7 +114,6 @@ public class MiddlewareChainIntegrationTests
             typeof(ToolGuardrailMiddleware),
             typeof(LoopDetectionMiddleware),
             typeof(ToolErrorRecoveryMiddleware),
-            typeof(SubAgentLimitMiddleware),
             typeof(SummarizationMiddleware),
             typeof(FileUploadMiddleware),
             typeof(TodoMiddleware),

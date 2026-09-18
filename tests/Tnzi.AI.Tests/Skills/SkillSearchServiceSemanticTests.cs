@@ -259,4 +259,36 @@ public class SkillSearchServiceSemanticTests
             e => e.GenerateEmbeddingAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    /// <summary>
+    /// 嵌入缓存是全进程共享的 <c>IMemoryCache</c>，任何人给它设了 <c>SizeLimit</c>
+    /// （核心的 <c>Caching:MemorySizeLimit</c>）之后，不带 <c>Size</c> 的写入会抛
+    /// <c>InvalidOperationException</c>。抛点在查询嵌入已经生成<b>之后</b>，外层 catch 只记 Debug
+    /// 并退回关键词结果 —— 每次语义搜索先付一次嵌入费再静默失败，语义回退从未生效且零症状。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_WithASizeLimitedCache_StillReturnsSemanticResultsAndCachesTheQuery()
+    {
+        var embeddingMock = CreateHighSimilarityEmbeddingService();
+        using var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 100 });
+        var service = new SkillSearchService(
+            logger: NullLogger<SkillSearchService>.Instance,
+            embeddingService: embeddingMock.Object,
+            embeddingCache: cache);
+
+        var candidates = BuildSemanticOnlyCandidates();
+
+        var first = await service.SearchAsync(candidates, "xyz", maxResults: 5);
+        var second = await service.SearchAsync(candidates, "xyz", maxResults: 5);
+
+        first.ShouldNotBeEmpty();
+        second.ShouldNotBeEmpty();
+        // 查询串一次、候选一次：第二次搜索两边都命中缓存
+        embeddingMock.Verify(
+            e => e.GenerateEmbeddingAsync("xyz", null, It.IsAny<CancellationToken>()),
+            Times.Once);
+        embeddingMock.Verify(
+            e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), null, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
 }

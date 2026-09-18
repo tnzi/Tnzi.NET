@@ -35,6 +35,7 @@ global using Tnzi.Finance.Banking.Services.Internal;
 global using Tnzi.Template;
 global using Tnzi.Template.Entities;
 global using Tnzi.Template.Exceptions;
+global using Tnzi.Template.Models;
 global using Tnzi.Template.Services;
 
 // Tnzi.Finance.Documents

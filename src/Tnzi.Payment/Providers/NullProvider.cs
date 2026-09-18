@@ -141,6 +141,14 @@ public class NullProvider : IPaymentProvider
 
     public bool SupportsPaymentMethodStorage => true;
 
+    public bool SupportsPaymentCancellation => true;
+
+    public Task<Result> CancelPaymentAsync(string tradeNo)
+    {
+        _logger.LogInformation("Null payment voided (test mode). TradeNo: {TradeNo}", tradeNo);
+        return Task.FromResult(Result.Success());
+    }
+
     public Task<Result<PaymentProviderSetupResult>> CreateSetupSessionAsync(PaymentProviderSetupDto input)
     {
         return Task.FromResult(Result.Success(new PaymentProviderSetupResult

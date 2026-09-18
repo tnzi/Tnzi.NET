@@ -103,6 +103,43 @@ describe('Finance Bills page', () => {
   // The vendor work surface hands off with `?entry=new&party=<id>`. `new` is
   // useDetail's create token - spelling it `create` silently opens nothing,
   // which typecheck and a push-payload assertion both wave through.
+  /**
+   * The pay-bills dialog builds its picker from the server-paged bills list,
+   * which clamps `pageSize` to 100 silently. Two single pages of 100 meant a
+   * vendor-heavy tenant could not allocate a payment to bills past the 100th
+   * per status: the row simply was not listed, no error anywhere - the shape
+   * every other finance picker was cured of with `fetchAllPages`.
+   */
+  it('the pay-bills picker loads every open bill past the server page clamp', async () => {
+    const posted = Array.from({ length: 130 }, (_, i) => ({
+      id: `p${i + 1}`, number: `BILL-P${i + 1}`, status: 'Posted', docDate: '2026-07-01', currency: 'USD', total: 10, appliedTotal: 0,
+    }))
+    const partial = Array.from({ length: 105 }, (_, i) => ({
+      id: `q${i + 1}`, number: `BILL-Q${i + 1}`, status: 'PartiallyPaid', docDate: '2026-07-01', currency: 'USD', total: 10, appliedTotal: 4,
+    }))
+    fetchList.mockImplementation(async (query: { pageIndex: number; pageSize: number; filters?: { status?: string } }) => {
+      const rows = query.filters?.status === 'Posted' ? posted : query.filters?.status === 'PartiallyPaid' ? partial : []
+      const size = Math.min(query.pageSize, 100)
+      const start = (query.pageIndex - 1) * size
+      const items = rows.slice(start, start + size)
+      const totalPages = Math.ceil(rows.length / size)
+      return { items, totalCount: rows.length, pageIndex: query.pageIndex, pageSize: size, totalPages, hasPreviousPage: query.pageIndex > 1, hasNextPage: query.pageIndex < totalPages }
+    })
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { payDetail: { open: (a: string) => Promise<void> }; openBills: { id: string }[] }
+    await vm.payDetail.open('create')
+    await flushPromises()
+    await flushPromises()
+
+    expect(vm.openBills).toHaveLength(235)
+    expect(vm.openBills.some((b) => b.id === 'p130')).toBe(true)
+    expect(vm.openBills.some((b) => b.id === 'q105')).toBe(true)
+    fetchList.mockReset()
+    fetchList.mockImplementation(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 }))
+  })
+
   it('opens a pre-filled draft from a vendor hand-off', async () => {
     routeQuery.current = { entry: 'new', party: 'p9' }
     const wrapper = mount(Page, { global: { stubs } })

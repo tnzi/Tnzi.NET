@@ -248,9 +248,11 @@ public class DiscordChannelAdapterTests
 
         await adapter.HandleEventAsync(json);
 
+        // message_reference.channel_id 是频道 id 不是消息 id，拿它当 message_reference.message_id 回复必错；
+        // 线程频道里 channel_id 本身就是线程，回复引用只需要这条消息自己的 id。
         var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
         received.ShouldNotBeNull();
-        received.ThreadTs.ShouldBe("T001");
+        received.ThreadTs.ShouldBe("msg002");
     }
 
     [Fact]
@@ -433,6 +435,145 @@ public class DiscordChannelAdapterTests
         capturedBody.ShouldNotBeNull();
         capturedBody.ShouldContain("message_reference");
         capturedBody.ShouldContain("msg001");
+    }
+
+    // =====================================================================
+    // Interactions（Discord 签过名的 HTTP 回调唯一会投递的形状）
+    // =====================================================================
+
+    [Fact]
+    public async Task HandleEventAsync_ApplicationCommand_StringOption_PublishesChat()
+    {
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C001", guild_id = "G1",
+            member = new { user = new { id = "U001" } },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "Hello world" } } }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.ChatId.ShouldBe("C001");
+        received.UserId.ShouldBe("U001");
+        received.Text.ShouldBe("Hello world");
+        received.Type.ShouldBe(InboundMessageType.Chat);
+        received.Metadata.ShouldNotBeNull();
+        received.Metadata[DiscordInteractionMetadata.Token].ShouldBe("itok");
+        received.Metadata[DiscordInteractionMetadata.ApplicationId].ShouldBe("app1");
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ApplicationCommand_NoOptions_PublishesSlashCommand()
+    {
+        // /new /status /help 这类无参数斜杠命令 → 按 "/{name}" 走命令路由
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C001",
+            user = new { id = "U001" },
+            data = new { name = "new", type = 1 }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.Text.ShouldBe("/new");
+        received.Type.ShouldBe(InboundMessageType.Command);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ApplicationCommand_NonAllowedGuild_Ignored()
+    {
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, allowedGuilds: ["G999"]);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "C001", guild_id = "G1",
+            member = new { user = new { id = "U001" } },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "hi" } } }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInteractionToken_PatchesOriginalThenFollowsUp()
+    {
+        var requests = new List<(HttpMethod Method, string Url, string Body)>();
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) =>
+                requests.Add((req.Method, req.RequestUri!.ToString(), req.Content!.ReadAsStringAsync().Result)))
+            .ReturnsAsync(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+
+        var adapter = CreateAdapter(handler: handler, maxMessageLength: 10);
+        var message = new OutboundMessage(
+            ChannelName: "discord", ChatId: "C001", ThreadId: Guid.NewGuid(),
+            Text: "0123456789abcdef",
+            Metadata: new Dictionary<string, object>
+            {
+                [DiscordInteractionMetadata.Token] = "itok",
+                [DiscordInteractionMetadata.ApplicationId] = "app1"
+            });
+
+        await adapter.SendAsync(message);
+
+        requests.Count.ShouldBe(2);
+        requests[0].Method.ShouldBe(HttpMethod.Patch);
+        requests[0].Url.ShouldEndWith("/webhooks/app1/itok/messages/@original");
+        requests[0].Body.ShouldContain("0123456789");
+        requests[1].Method.ShouldBe(HttpMethod.Post);
+        requests[1].Url.ShouldEndWith("/webhooks/app1/itok");
+        requests[1].Body.ShouldContain("abcdef");
+    }
+
+    [Fact]
+    public async Task SendAsync_WithInteractionToken_FirstChunkRetryStaysAPatch()
+    {
+        // 第一块的 PATCH 瞬时失败一次：重试必须还是 PATCH @original。此前「是不是第一块」在发送前就翻转，
+        // 重试变成 POST follow-up，用户看到答案是一条后续消息，原来的斜杠命令停在 "thinking..." 直到令牌过期。
+        var requests = new List<(HttpMethod Method, string Url)>();
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>("SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .Callback<HttpRequestMessage, CancellationToken>((req, _) => requests.Add((req.Method, req.RequestUri!.ToString())))
+            .ReturnsAsync(() => requests.Count == 1
+                ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{}") }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") });
+
+        var adapter = CreateAdapter(handler: handler, maxMessageLength: 10, maxRetries: 1);
+        var message = new OutboundMessage(
+            ChannelName: "discord", ChatId: "C001", ThreadId: Guid.NewGuid(),
+            Text: "0123456789abcdef",
+            Metadata: new Dictionary<string, object>
+            {
+                [DiscordInteractionMetadata.Token] = "itok",
+                [DiscordInteractionMetadata.ApplicationId] = "app1"
+            });
+
+        await adapter.SendAsync(message);
+
+        requests.Count.ShouldBe(3);
+        requests[0].Method.ShouldBe(HttpMethod.Patch);
+        requests[1].Method.ShouldBe(HttpMethod.Patch, "the retried first chunk must still edit @original");
+        requests[1].Url.ShouldEndWith("/messages/@original");
+        requests[2].Method.ShouldBe(HttpMethod.Post);
     }
 
     [Fact]

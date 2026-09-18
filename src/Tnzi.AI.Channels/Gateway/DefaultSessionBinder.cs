@@ -65,8 +65,8 @@ public class DefaultSessionBinder : ISessionBinder
             }
         }
 
-        // 无匹配 - 使用默认配置
-        var defaultAgentId = options.DefaultAgentId ?? Guid.Empty;
+        // 无匹配 - 先用调用方给的兜底（渠道默认 Agent），再落到 Gateway 默认配置
+        var defaultAgentId = context.FallbackAgentId ?? options.DefaultAgentId ?? Guid.Empty;
         return BuildBinding(defaultAgentId, options.DefaultScope, context);
     }
 

@@ -20,7 +20,19 @@ public interface IFileStorageService
     /// 因此**不必**依赖每个调用方都记得传这个参数。
     /// </param>
     Task<Result<FileRecord>> SaveAsync(string fileName, Stream stream, bool isTemporary = false, bool isPublic = false);
+    /// <summary>
+    /// 获取文件流（下载语义：发布 <c>FileAccessType.Download</c> 的 <c>FileAccessedEvent</c>）。
+    /// </summary>
     Task<Result<Stream>> GetAsync(Guid id);
+    /// <summary>
+    /// 为预览取文件流：授权与 <see cref="GetAsync"/> 逐字相同，只是发布的访问类型是
+    /// <c>FileAccessType.Preview</c>，让挂在 <c>FileAccessedEvent</c> 上的审计 / 配额能把「看过」
+    /// 与「下载过」分开。两条预览路由都经它取字节，发布点只在这里一处。
+    /// </summary>
+    /// <remarks>
+    /// 默认实现回退到 <see cref="GetAsync"/>（记成 Download）—— 自定义实现没覆盖时行为与此前一致。
+    /// </remarks>
+    Task<Result<Stream>> GetForPreviewAsync(Guid id) => GetAsync(id);
     /// <summary>
     /// 获取文件流（支持 Range 请求，用于断点续传）
     /// </summary>
@@ -79,11 +91,20 @@ public interface IFileStorageService
     // Presigned URL
     /// <summary>
     /// Generate a presigned URL for temporary public access to a file (download or upload).
-    /// Cloud providers (S3, R2, Azure) support this natively; LocalStorage returns a controller-based URL.
+    /// Cloud providers (S3, R2, Azure) support this natively; for GET, LocalStorage falls back to a
+    /// signed controller URL. The URL bypasses this API once minted, so the gate matches the credential:
+    /// GET is a read credential of the same family as an access token, so it requires
+    /// <see cref="IFileAccessAuthorizer.CanMintAccessTokenAsync"/> (the read verdict minus request-level
+    /// credentials: a ?sig= token or a share grant must not be tradeable for a longer-lived URL); PUT (which
+    /// lets its holder overwrite the object's bytes without the upload guard) requires
+    /// <see cref="IFileAccessAuthorizer.CanWriteAsync"/>.
+    /// Both refusals answer 404 like every other file operation.
     /// </summary>
     /// <param name="id">File ID</param>
     /// <param name="expiresInSeconds">URL expiration in seconds (default 3600 = 1 hour)</param>
-    /// <param name="httpMethod">HTTP method: GET for download, PUT for direct upload (default GET)</param>
+    /// <param name="httpMethod">HTTP method: GET for download, PUT for direct upload (default GET).
+    /// Case-insensitive; anything else is a 400. PUT on a provider without native presigning is a 501
+    /// rather than a read-only fallback link.</param>
     /// <returns>Presigned URL string</returns>
     Task<Result<string>> GetPresignedUrlAsync(Guid id, int expiresInSeconds = 3600, string httpMethod = "GET");
 
@@ -163,6 +184,23 @@ public interface IFileStorageService
     /// 只升不降：本方法从不把文件改回私密，故对私密文件库无风险。
     /// </summary>
     Task<Result<int>> SyncPublicFlagsFromReferencesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 为没有缩略图的存量记录补画缩略图（位图 + PDF 首页；后者需加载可选包 <c>Tnzi.Documents</c>）。
+    ///
+    /// 用途是**加载了 PDF 光栅化之后的一次性回填** —— 缩略图只在写入时生成，升级前存进来的 PDF
+    /// 不会自己长出一张。幂等：已有缩略图的记录不动；画不出来的记录仍是候选，下次调用还会再试。
+    /// </summary>
+    /// <param name="fileIds">只处理这些文件；null 或空表示扫描全部候选。</param>
+    /// <param name="maxFiles">一次最多处理多少条；0 表示不限。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <remarks>
+    /// 默认实现返回 501，让自定义实现不必为此升级；框架自己的实现在 <c>FileStorageService</c>。
+    /// </remarks>
+    Task<Result<ThumbnailBackfillResult>> BackfillThumbnailsAsync(
+        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<ThumbnailBackfillResult>.Failure(
+            "Thumbnail backfill is not supported by this IFileStorageService implementation.", 501));
 
     // Signed access (browser-renderable private files)
 

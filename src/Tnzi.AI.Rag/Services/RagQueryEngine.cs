@@ -12,6 +12,7 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
     private readonly IRagRetriever _retriever;
     private readonly IAiUtility _aiUtility;
     private readonly IRagAccessAuthorizer _authorizer;
+    private readonly AIRagOptions _ragOptions;
 
     /// <summary>
     /// RAG 回答的输出上限。<c>IAiUtility</c> 的全局默认是为标题生成这类极短输出定的，
@@ -24,11 +25,13 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
         IServiceProvider serviceProvider,
         IRagRetriever retriever,
         IAiUtility aiUtility,
-        IRagAccessAuthorizer authorizer) : base(serviceProvider)
+        IRagAccessAuthorizer authorizer,
+        IOptionsSnapshot<AIRagOptions> ragOptions) : base(serviceProvider)
     {
         _retriever = Check.NotNull(retriever);
         _aiUtility = Check.NotNull(aiUtility);
         _authorizer = Check.NotNull(authorizer);
+        _ragOptions = Check.NotNull(ragOptions).Value;
     }
 
     /// <inheritdoc />
@@ -49,11 +52,12 @@ public class RagQueryEngine : ApplicationService, IRagQueryEngine
             return Fail<RagQueryResult>(authorized.Message ?? "Access denied", authorized.Code ?? 403, authorized.ErrorCode);
         }
 
-        // 1. 检索相关文档
+        // 1. 检索相关文档。TopK 静默 clamp 到 MaxTopK（不用 [Range] 打 400：既有客户端可选传 topK）——
+        //    此前只有管理端搜索 clamp，用户端一次 topK=2000000 就把整库分块拼进一条 prompt。
         var retrievalOptions = new RagRetrievalOptions
         {
             KnowledgeBaseIds = authorized.Data!.ToList(),
-            TopK = request.TopK,
+            TopK = Math.Clamp(request.TopK, 1, _ragOptions.MaxTopK),
             MinRelevance = request.MinRelevance
         };
 

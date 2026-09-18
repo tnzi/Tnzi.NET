@@ -1,5 +1,4 @@
 using Tnzi.Domain.Entities;
-using Tnzi.Notification.Metadata;
 using Tnzi.Notification.Services.Internal;
 
 namespace Tnzi.Notification.Tests.Integration;
@@ -91,6 +90,8 @@ public class InFlightBatchTests : IntegrationTestBase
         services.AddScoped<INotificationOptOutService, NotificationOptOutService>();
         services.AddScoped<INotificationPreferenceService, NotificationPreferenceService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<INotificationProviderResolver, NotificationProviderResolver>();
+        services.AddScoped<INotificationProviderSelector, DefaultNotificationProviderSelector>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

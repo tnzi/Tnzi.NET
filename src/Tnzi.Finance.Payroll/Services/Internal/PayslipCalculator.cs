@@ -215,7 +215,8 @@ public sealed class PayslipCalculator
             BaseAmount = assignment.BaseAmount,
             PeriodDays = periodDays,
             WorkedDays = 0m,
-            CalculationError = $"Salary structure '{assignment.StructureId}' assigned to this employee no longer exists."
+            CalculationError = PayslipFieldLimits.ClampCalculationError(
+                $"Salary structure '{assignment.StructureId}' assigned to this employee no longer exists.")
         };
 
     private async Task<Payslip> ComputeOneAsync(
@@ -349,7 +350,7 @@ public sealed class PayslipCalculator
                 // 备注项参与不了任何合计，所以负数在它身上产生不了荒谬的净额，
                 // 而具名中间量（抵免、冲回）本来就是带符号的。其余三类仍必须为正：
                 // 一个负的扣减项就是一次没人申报的加薪。
-                if (amount < 0 && component.Type != SalaryComponentType.Informational)
+                if (PayrollAmountRules.IsNegativeMonetary(component.Type, amount))
                 {
                     error = $"Component '{component.Code}' produced a negative amount ({amount}).";
                     break;
@@ -414,7 +415,9 @@ public sealed class PayslipCalculator
             TotalDeductions = deductions,
             EmployerCost = employerCost,
             NetPay = netPay,
-            CalculationError = error
+            // ★ 收敛到列宽：孤儿清单 / 钩子消息 / 裹着公式原文的求值失败都没有上界，
+            // 原样赋值会让记录错误这一步自己抛插入异常，整批 500（SQLite 看不见）。
+            CalculationError = PayslipFieldLimits.ClampCalculationError(error)
         };
         foreach (var line in context.Lines)
             payslip.Lines.Add(line);
@@ -570,11 +573,12 @@ public sealed class PayslipCalculator
         IReadOnlyDictionary<Guid, SalaryComponent> components)
     {
         var orphans = new List<string>();
+        var orphanCount = 0;
         foreach (var (componentId, amount) in employeeInputs)
         {
             if (!components.TryGetValue(componentId, out var component))
             {
-                orphans.Add($"{amount} (component {componentId} no longer exists)");
+                Describe($"{amount} (component {componentId} no longer exists)");
                 continue;
             }
 
@@ -589,13 +593,28 @@ public sealed class PayslipCalculator
                 PayRunInputBindingStatus.PinnedAmount => "the structure line pins a fixed amount that takes precedence over the formula",
                 _ => $"the effective formula no longer calls {PayrollFormulaFunctions.Input}()"
             };
-            orphans.Add($"{component.Code} ({amount}): {reason}");
+            Describe($"{component.Code} ({amount}): {reason}");
         }
 
-        return orphans.Count == 0
-            ? null
-            : "One-time inputs entered for this pay run would be ignored - " + string.Join("; ", orphans) +
-              ". Fix the salary structure or remove the inputs, then recalculate.";
+        if (orphanCount == 0)
+            return null;
+
+        // 只逐笔列前几笔，其余汇总：这条消息要落进 1000 字符的列，逐笔罗列会在第 7 笔中间被切断，
+        // 操作员既不知道还有几笔也不知道最后那笔是谁。
+        var listed = string.Join("; ", orphans);
+        var summary = orphanCount > orphans.Count
+            ? $"{listed}; and {orphanCount - orphans.Count} more"
+            : listed;
+
+        return "One-time inputs entered for this pay run would be ignored - " + summary +
+               ". Fix the salary structure or remove the inputs, then recalculate.";
+
+        void Describe(string text)
+        {
+            orphanCount++;
+            if (orphans.Count < PayslipFieldLimits.OrphanedInputsListed)
+                orphans.Add(text);
+        }
     }
 
     private async Task<DateTime> ResolveYtdWindowStartAsync(DateTime payDate, CancellationToken cancellationToken)

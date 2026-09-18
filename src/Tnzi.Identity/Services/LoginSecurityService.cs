@@ -1,4 +1,4 @@
-namespace Tnzi.Identity.Services;
+﻿namespace Tnzi.Identity.Services;
 
 /// <summary>
 /// 登录安全服务实现
@@ -15,20 +15,37 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     private readonly IRepository<LoginLog, Guid>? _loginLogRepository;
     private readonly UserManager<User>? _userManager;
     private readonly IOptionsMonitor<IdentityOptions>? _identityOptionsMonitor;
+    private readonly IUserTenantScopeProvider _scope;
 
     private AccountSecurityOptions SecurityOptions =>
         _identityOptionsMonitor?.CurrentValue.AccountSecurity ?? new AccountSecurityOptions();
 
+    /// <summary>
+    /// 初始化一个 <see cref="LoginSecurityService"/>。<c>scope</c>（当前请求能碰到哪些用户）必填：
+    /// <c>LoginLog</c> 没有 <c>TenantId</c>，全局过滤器管不到它，管理端按用户读的最近登录 / 常用 IP /
+    /// 异常检测与总览 / 频繁失败都要按用户表的租户裁剪。登录链路上的检测没有已认证主体，不受裁剪。
+    /// </summary>
     public LoginSecurityService(
         IServiceProvider serviceProvider,
+        IUserTenantScopeProvider scope,
         IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IRepository<LoginLog, Guid>? loginLogRepository = null,
         UserManager<User>? userManager = null)
         : base(serviceProvider)
     {
+        _scope = Check.NotNull(scope);
         _identityOptionsMonitor = identityOptions;
         _loginLogRepository = loginLogRepository;
         _userManager = userManager;
+    }
+
+    /// <summary>
+    /// 把「当前租户范围」加到日志查询上（口径同 <c>LoginLogService</c>：无归属的行只有全局管理员看得到）。
+    /// </summary>
+    private IQueryable<LoginLog> WhereInScope(IQueryable<LoginLog> query)
+    {
+        var ids = _scope.InScopeUserIds();
+        return ids == null ? query : query.Where(l => l.UserId != null && ids.Contains(l.UserId.Value));
     }
 
     /// <inheritdoc />
@@ -41,6 +58,13 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         }
 
         if (_loginLogRepository == null)
+        {
+            return AbnormalLoginResult.Normal();
+        }
+
+        // 管理端对别家租户的账号跑检测，得到的是「正常」而不是对方的登录史；
+        // 登录链路上的调用没有已认证主体，范围不裁剪，检测照常。
+        if (!await _scope.ContainsAsync(userId))
         {
             return AbnormalLoginResult.Normal();
         }
@@ -144,7 +168,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     /// <inheritdoc />
     public async Task<IEnumerable<LoginLogDto>> GetRecentLoginsAsync(Guid userId, int count = 10)
     {
-        if (_loginLogRepository == null)
+        if (_loginLogRepository == null || !await _scope.ContainsAsync(userId))
         {
             return Enumerable.Empty<LoginLogDto>();
         }
@@ -162,7 +186,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     /// <inheritdoc />
     public async Task<IEnumerable<string>> GetFrequentIpAddressesAsync(Guid userId)
     {
-        if (_loginLogRepository == null)
+        if (_loginLogRepository == null || !await _scope.ContainsAsync(userId))
         {
             return Enumerable.Empty<string>();
         }
@@ -211,8 +235,9 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         }
 
         var since = DateTime.UtcNow.AddHours(-hours);
+        var scopedLogs = WhereInScope(_loginLogRepository.AsQueryable());
 
-        var logs = await _loginLogRepository
+        var logs = await scopedLogs
             .Where(l => l.CreationTime >= since)
             .GroupBy(l => l.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
@@ -223,13 +248,13 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         var failedCount = totalAttempts - successCount;
 
         // 统计不同用户和IP
-        var distinctUsers = await _loginLogRepository
+        var distinctUsers = await scopedLogs
             .Where(l => l.CreationTime >= since && l.UserId != null)
             .Select(l => l.UserId)
             .Distinct()
             .CountAsync();
 
-        var distinctIps = await _loginLogRepository
+        var distinctIps = await scopedLogs
             .Where(l => l.CreationTime >= since && !string.IsNullOrEmpty(l.IpAddress))
             .Select(l => l.IpAddress)
             .Distinct()
@@ -239,8 +264,10 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         var lockedOutUsers = 0;
         if (_userManager != null)
         {
-            lockedOutUsers = await _userManager.Users
-                .Where(u => u.LockoutEnd != null && u.LockoutEnd > DateTimeOffset.UtcNow)
+            // 「现在」先取成局部变量：EF 不把 DateTimeOffset.UtcNow 当参数而 SQLite 没有它的翻译（同 UserService.GetStatisticsAsync）。
+            var now = DateTimeOffset.UtcNow;
+            lockedOutUsers = await _scope.Current.Apply(_userManager.Users)
+                .Where(u => u.LockoutEnd != null && u.LockoutEnd > now)
                 .CountAsync();
         }
 
@@ -268,7 +295,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         var since = DateTime.UtcNow.AddHours(-hours);
 
         // 查询有频繁失败的用户
-        var failedGroups = await _loginLogRepository
+        var failedGroups = await WhereInScope(_loginLogRepository.AsQueryable())
             .Where(l => l.CreationTime >= since && l.Status == LoginStatus.Failed && l.UserId != null)
             .GroupBy(l => l.UserId)
             .Select(g => new

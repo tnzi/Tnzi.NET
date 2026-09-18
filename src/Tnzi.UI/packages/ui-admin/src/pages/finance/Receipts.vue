@@ -157,8 +157,12 @@ const crud = useCrudPage<ReceiptRow>({
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.receipts.fetch(q),
-  loadDetailById: (id) => bridge.receipts.getById(String(id)),
   deleteData: (ids) => Promise.all(ids.map((id) => bridge.receipts.delete(String(id)))).then(() => undefined),
+  // The page never opens this engine's overlay (the detail drawer below is its
+  // own useDetail on `?detail=`, with its own loader), so it must not claim the
+  // key: two engines reconciling one key double-load every deep link and the
+  // dev build warns on every mount (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
+  detailUrl: false,
 })
 
 void sources.ensureVendors()

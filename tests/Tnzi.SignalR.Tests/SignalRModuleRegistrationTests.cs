@@ -1,3 +1,5 @@
+using System.Reflection;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.Modules;
@@ -72,5 +74,27 @@ public class SignalRModuleRegistrationTests
             ["SignalR:RateLimit:Enabled"] = "true",
         });
         on.GetService<IRateLimitService>().ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// 激活作用域过滤器必须排在过滤器链最前：<c>TnziHub</c> 的可选服务全靠它暴露的
+    /// 作用域，排在别人后面就意味着连接期那半截（授权过滤器之前）看不见它。
+    /// 它没有依赖，按实例注册 —— 顺便让顺序可以直接断言（<c>AddFilter&lt;T&gt;</c>
+    /// 登记的是一个工厂，看不出类型）。
+    /// </summary>
+    [Fact]
+    public void InvocationServicesFilterIsTheFirstHubFilter()
+    {
+        using var provider = BuildServices();
+
+        var hubOptions = provider.GetRequiredService<IOptions<Microsoft.AspNetCore.SignalR.HubOptions>>().Value;
+
+        // HubOptions.HubFilters 是 internal（只经 AddFilter 扩展写入），顺序只能这样读出来
+        var filters = typeof(Microsoft.AspNetCore.SignalR.HubOptions)
+            .GetProperty("HubFilters", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(hubOptions) as IEnumerable<IHubFilter>;
+
+        filters.ShouldNotBeNull();
+        filters.First().ShouldBeOfType<HubInvocationServicesFilter>();
     }
 }

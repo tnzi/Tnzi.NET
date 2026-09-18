@@ -46,10 +46,7 @@ public class OAuthService : ApplicationService, IOAuthService
     public async Task<Result<OAuthCallbackResultDto>> HandleOAuthCallbackAsync(string provider, ClaimsPrincipal principal)
     {
         // 从 Claims 中提取用户信息（支持多平台：Google, Microsoft, Facebook, Twitter, GitHub）
-        var providerKey = principal.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? principal.FindFirstValue("sub")
-            ?? principal.FindFirstValue("id")
-            ?? principal.FindFirstValue("user_id");
+        var providerKey = ExtractProviderKey(principal);
 
         if (string.IsNullOrEmpty(providerKey))
         {
@@ -73,11 +70,7 @@ public class OAuthService : ApplicationService, IOAuthService
             ?? principal.FindFirstValue("last_name");
 
         // 提取显示名/昵称（支持多平台）
-        var displayName = principal.FindFirstValue("display_name")
-            ?? principal.FindFirstValue(ClaimTypes.Name)
-            ?? principal.FindFirstValue("name")
-            ?? principal.FindFirstValue("login")       // GitHub 使用 login
-            ?? principal.FindFirstValue("screen_name"); // Twitter 使用 screen_name
+        var displayName = ExtractDisplayName(principal);
 
         // 提取头像（支持多平台）
         var avatarUrl = principal.FindFirstValue("picture")
@@ -132,8 +125,8 @@ public class OAuthService : ApplicationService, IOAuthService
 
         // ★ 地址没被证实，但本地确实有人用着它 —— 这时**既不认领也不新建**：
         //   新建会撞上 RequireUniqueEmail 而以一个看不懂的 400 收场，而认领正是要防的那件事。
-        //   出路是让本人用常规方式登录一次，再从个人中心主动绑定（linked-accounts 端点已存在）：
-        //   那时「他是不是账号主人」已经被证明过了，绑定就是安全的。
+        //   出路是让本人用常规方式登录一次，再从个人中心主动绑定（先取 linked-accounts/{provider}/link-token，
+        //   再带 linkToken 发起 OAuth，回调走 LinkExternalLoginAsync）：那时「他是不是账号主人」已经被证明过了，绑定就是安全的。
         if (!emailVerified && !string.IsNullOrEmpty(email) && await _userManager.FindByEmailAsync(email) != null)
         {
             LogWarning(
@@ -238,6 +231,36 @@ public class OAuthService : ApplicationService, IOAuthService
     }
 
 
+    public async Task<Result> LinkExternalLoginAsync(Guid userId, string provider, ClaimsPrincipal principal)
+    {
+        Check.NotNull(principal);
+
+        var providerKey = ExtractProviderKey(principal);
+        if (string.IsNullOrEmpty(providerKey))
+        {
+            return Fail("Provider key not found in claims", 400, ErrorCodes.IDENTITY_OAUTH_ERROR);
+        }
+
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // ★ 这个外部身份已经属于别人 → 409，两边都不动。这正是登录流程的「按 provider key 直接登录」分支
+        //   在绑定语义下的反面：登录时它是「就是这个人」，绑定时它是「这个身份不是你的」。
+        var owner = await _userManager.FindByLoginAsync(provider, providerKey);
+        if (owner != null && owner.Id != userId)
+        {
+            LogWarning("Refused to link {Provider} to user {UserId}: the external account is already linked to another user.", provider, userId);
+            return Fail("This external account is already linked to another user.", 409, ErrorCodes.DATA_CONFLICT);
+        }
+
+        // 与登录流程同一组 claim 取显示名；不取邮箱 —— 绑定不按邮箱认领任何东西。
+        var displayName = ExtractDisplayName(principal);
+        return await LinkOAuthAccountAsync(userId, provider, providerKey, displayName);
+    }
+
     public async Task<Result> LinkOAuthAccountAsync(Guid userId, string provider, string providerKey, string? displayName = null)
     {
         var user = await _userManager.FindByGuidAsync(userId);
@@ -298,6 +321,21 @@ public class OAuthService : ApplicationService, IOAuthService
     }
 
     #region Private Methods
+
+    /// <summary>提供商侧的用户标识（支持多平台：Google, Microsoft, Facebook, Twitter, GitHub）。</summary>
+    private static string? ExtractProviderKey(ClaimsPrincipal principal)
+        => principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? principal.FindFirstValue("sub")
+            ?? principal.FindFirstValue("id")
+            ?? principal.FindFirstValue("user_id");
+
+    /// <summary>显示名 / 昵称（GitHub 用 login，Twitter 用 screen_name）。</summary>
+    private static string? ExtractDisplayName(ClaimsPrincipal principal)
+        => principal.FindFirstValue("display_name")
+            ?? principal.FindFirstValue(ClaimTypes.Name)
+            ?? principal.FindFirstValue("name")
+            ?? principal.FindFirstValue("login")
+            ?? principal.FindFirstValue("screen_name");
 
     /// <summary>
     /// 生成TokenResult并保存RefreshToken，发布登录事件，返回OAuth回调结果

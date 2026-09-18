@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { parseFlags, hasFlag, flagNames, formatFlags } from '../../src/utils/flags';
+import { PendingUserActions } from '../../src/services/identity/types';
 
-/** Mirrors the backend `PendingUserActions`, composites included. */
-enum Owed {
-  None = 0,
-  InvitationPending = 1 << 0,
-  ChangePassword = 1 << 8,
-  EnrollTotp = 1 << 9,
-  ConfirmEmail = 1 << 10,
-}
+/**
+ * The real table, not a copy of it: the backend names two composites
+ * (`Blocking`, `Obligations`) and serialises an exact match as that single
+ * name, so a table without them parses `"Obligations"` to 0 and every
+ * obligation badge is skipped. A hand-written fixture cannot catch that.
+ */
+const Owed = PendingUserActions;
 
 /** A separate fixture for the composite case, which the real enum also has. */
 enum WithComposite {
@@ -49,6 +49,12 @@ describe('parseFlags', () => {
     expect(parseFlags('AB', WithComposite)).toBe(3);
   });
 
+  it('reads the named composites the backend actually sends for PendingUserActions', () => {
+    const allObligations = Owed.ChangePassword | Owed.EnrollTotp | Owed.ConfirmEmail;
+    expect(parseFlags('Obligations', Owed)).toBe(allObligations);
+    expect(parseFlags('Blocking', Owed)).toBe(Owed.InvitationPending);
+  });
+
   // A server that grows a flag must not break every older client at once.
   it('ignores a name it does not know, keeping the ones it does', () => {
     expect(parseFlags('InvitationPending, SomethingNewer', Owed)).toBe(Owed.InvitationPending);
@@ -81,6 +87,14 @@ describe('hasFlag', () => {
 
   it('a composite flag matches when any of its bits are set', () => {
     expect(hasFlag('A', WithComposite.AB, WithComposite)).toBe(true);
+  });
+
+  it('"Obligations" on the wire resolves every obligation bit, "Blocking" the invitation', () => {
+    expect(hasFlag('Obligations', Owed.ChangePassword, Owed)).toBe(true);
+    expect(hasFlag('Obligations', Owed.EnrollTotp, Owed)).toBe(true);
+    expect(hasFlag('Obligations', Owed.ConfirmEmail, Owed)).toBe(true);
+    expect(hasFlag('Obligations', Owed.InvitationPending, Owed)).toBe(false);
+    expect(hasFlag('Blocking', Owed.InvitationPending, Owed)).toBe(true);
   });
 });
 

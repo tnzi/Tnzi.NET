@@ -1,11 +1,11 @@
-using Tnzi.AI.Sandbox.Middleware;
+using Tnzi.AI.Sandbox.Services;
 using Tnzi.AI.Sandbox.Tools;
 
 namespace Tnzi.AI.Tests.Sandbox;
 
 /// <summary>
 /// Skills → Sandbox 端到端集成测试。
-/// 验证完整链路：加载内置技能 → 提取 Resources → Sandbox 执行脚本。
+/// 验证完整链路：加载内置技能 → 沙箱首次使用时提取 Resources → Sandbox 执行脚本。
 /// </summary>
 public class SkillSandboxPipelineTests : IAsyncLifetime
 {
@@ -69,7 +69,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
     }
 
     // -------------------------------------------------------------------------
-    // 2. ThreadDataMiddleware 提取技能资源到线程目录
+    // 2. ThreadDataProvisioner 提取技能资源到线程目录（沙箱首次被用到时）
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -77,30 +77,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
     {
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        // 模拟 middleware 的 SetupThreadDataAsync
-        var threadDir = translator.GetThreadDirectory(_threadId);
-        translator.EnsureThreadDirectories(_threadId);
-
-        // 手动调用提取逻辑（通过 middleware pipeline 模拟）
-        var context = CreateFakeMiddlewareContext(_threadId);
-        var callCount = 0;
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-        {
-            callCount++;
-            return Task.FromResult(new AgentRunResult { Response = "ok" });
-        });
-
-        callCount.ShouldBe(1, "next() should be called once");
-
-        // 验证 ThreadData 被设置
-        context.Properties.ShouldContainKey(SandboxPropertyKeys.ThreadData);
-        var state = (ThreadDataState)context.Properties[SandboxPropertyKeys.ThreadData];
+        var state = await ProvisionAsync(translator, store);
         state.SkillsPath.ShouldNotBeNullOrWhiteSpace();
 
         // 验证 skills/ 目录有提取的文件
@@ -121,20 +98,9 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
     {
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        translator.EnsureThreadDirectories(_threadId);
+        await ProvisionAsync(translator, store);
 
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        var context = CreateFakeMiddlewareContext(_threadId);
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "ok" }));
-
-        var state = (ThreadDataState)context.Properties[SandboxPropertyKeys.ThreadData];
-        var scriptPath = Path.Combine(state.SkillsPath, "data-analysis", "scripts", "analyze.py");
+        var scriptPath = Path.Combine(translator.GetThreadDirectory(_threadId), "skills", "data-analysis", "scripts", "analyze.py");
         File.Exists(scriptPath).ShouldBeTrue($"data-analysis/scripts/analyze.py should be extracted to {scriptPath}");
 
         var content = await File.ReadAllTextAsync(scriptPath);
@@ -151,17 +117,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         // 1. 提取技能资源
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        translator.EnsureThreadDirectories(_threadId);
-
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        var context = CreateFakeMiddlewareContext(_threadId);
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "ok" }));
+        await ProvisionAsync(translator, store);
 
         // 2. 创建 sandbox + tools（workspace 设为线程根目录，以便访问 skills/ 子目录）
         var threadDir = translator.GetThreadDirectory(_threadId);
@@ -181,17 +137,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         // 提取
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        translator.EnsureThreadDirectories(_threadId);
-
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        var context = CreateFakeMiddlewareContext(_threadId);
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "ok" }));
+        await ProvisionAsync(translator, store);
 
         // ls skills/（workspace 设为线程根目录）
         var threadDir = translator.GetThreadDirectory(_threadId);
@@ -210,17 +156,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         // 提取
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        translator.EnsureThreadDirectories(_threadId);
-
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        var context = CreateFakeMiddlewareContext(_threadId);
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "ok" }));
+        await ProvisionAsync(translator, store);
 
         // 用 bash cat 读取技能脚本（验证 /mnt/skills 路径被正确翻译）
         var threadDir = translator.GetThreadDirectory(_threadId);
@@ -240,17 +176,7 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         // 提取
         var store = CreateStorePointingToBuiltIn();
         var translator = new VirtualPathTranslator(_tempRoot);
-        translator.EnsureThreadDirectories(_threadId);
-
-        var middleware = new ThreadDataMiddleware(
-            Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions { LazyDirectoryCreation = false }),
-            translator,
-            NullLogger<ThreadDataMiddleware>.Instance,
-            store);
-
-        var context = CreateFakeMiddlewareContext(_threadId);
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "ok" }));
+        await ProvisionAsync(translator, store);
 
         // 写一个简单的测试脚本到 workspace 并执行
         var threadDir = translator.GetThreadDirectory(_threadId);
@@ -274,6 +200,46 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         var result = await tools.BashAsync(command);
         var json = JsonSerializer.Serialize(result);
         json.ShouldContain("skill-pipeline-ok");
+    }
+
+    // -------------------------------------------------------------------------
+    // 3b. skills/ 必须是线程目录里的真目录，不能是指向线程目录之外的链接
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 2026-09-04 起围栏会解析符号链接再判定，于是任何把 <c>skills/</c> 链到线程目录之外
+    /// （例如启动时提取的共享根 <c>{DataRoot}/_skills</c>）的接线，都会让 <c>read_file</c> / <c>ls</c>
+    /// 在 <c>/mnt/skills</c> 上报 "Path traversal detected"。这里先摆好一个"启动时已提取"的共享根，
+    /// 逼出旧的链接分支：修复后接线一律逐线程复制，共享根只是一个无关的旁路目录。
+    /// </summary>
+    [Fact]
+    public async Task ReadFile_AndLs_OnSkills_SucceedEvenWhenASharedRootExists()
+    {
+        var store = CreateStorePointingToBuiltIn();
+        var translator = new VirtualPathTranslator(_tempRoot);
+        translator.EnsureThreadDirectories(_threadId);
+
+        // 模拟启动时的共享提取：共享根 + 标记文件 + 一份技能脚本。
+        var sharedRoot = Path.Combine(_tempRoot, "_skills");
+        Directory.CreateDirectory(Path.Combine(sharedRoot, "data-analysis", "scripts"));
+        await File.WriteAllTextAsync(Path.Combine(sharedRoot, "data-analysis", "scripts", "analyze.py"), "import duckdb");
+        await File.WriteAllTextAsync(Path.Combine(sharedRoot, ".extracted"), "1 skills");
+
+        var state = await ProvisionAsync(translator, store);
+        new DirectoryInfo(state.SkillsPath).LinkTarget.ShouldBeNull(
+            "skills/ must be a real directory inside the thread directory, never a link that leaves it");
+
+        var threadDir = translator.GetThreadDirectory(_threadId);
+        await using var sandbox = new LocalSandbox("test", threadDir, TimeSpan.FromSeconds(10), 4096);
+        var tools = CreateTools(translator, sandbox);
+
+        var read = JsonSerializer.Serialize(await tools.ReadFileAsync("/mnt/skills/data-analysis/scripts/analyze.py"));
+        read.ShouldNotContain("Path traversal");
+        read.ToLower().ShouldContain("duckdb");
+
+        var listed = JsonSerializer.Serialize(await tools.ListDirectoryAsync("/mnt/skills"));
+        listed.ShouldNotContain("Path traversal");
+        listed.ShouldContain("data-analysis");
     }
 
     // -------------------------------------------------------------------------
@@ -358,22 +324,19 @@ public class SkillSandboxPipelineTests : IAsyncLifetime
         return new SandboxTools(translator, NullLogger<SandboxTools>.Instance, accessor);
     }
 
-    private static AiMiddlewareContext CreateFakeMiddlewareContext(Guid threadId)
+    /// <summary>
+    /// 布置线程目录（含技能资源复制）；生产里由 SandboxMiddleware 发布的环境在沙箱首次被用到时做同一件事。
+    /// </summary>
+    private async Task<ThreadDataState> ProvisionAsync(VirtualPathTranslator translator, ISkillStore store)
     {
-        return new AiMiddlewareContext
-        {
-            Request = new AgentRunRequest
-            {
-                UserMessage = "test",
-                ThreadId = threadId
-            },
-            Agent = AgentResolution.Success(
-                agent: null!,
-                provider: "TestProvider",
-                model: "test-model",
-                agentId: null),
-            ServiceProvider = new ServiceCollection().BuildServiceProvider(),
-            Messages = []
-        };
+        var options = new SandboxModuleOptions { LazyDirectoryCreation = false, DataRoot = _tempRoot };
+        var provisioner = new ThreadDataProvisioner(
+            Microsoft.Extensions.Options.Options.Create(options),
+            translator,
+            NullLogger<ThreadDataProvisioner>.Instance,
+            store);
+        var state = ThreadDataState.FromThreadDirectory(translator.GetThreadDirectory(_threadId));
+        await provisioner.ProvisionAsync(_threadId, state);
+        return state;
     }
 }

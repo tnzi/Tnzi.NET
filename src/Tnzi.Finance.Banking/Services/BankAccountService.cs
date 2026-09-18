@@ -88,6 +88,10 @@ public class BankAccountService : ApplicationService, IBankAccountService
         if (!routingResult.Succeeded)
             return Fail<BankAccountDto>(routingResult.Message!, routingResult.Code ?? 400);
 
+        var originatorResult = BankNumberHelper.ValidateEftOriginatorId(input.Scheme, input.EftOriginatorId?.Trim());
+        if (!originatorResult.Succeeded)
+            return Fail<BankAccountDto>(originatorResult.Message!, originatorResult.Code ?? 400);
+
         var hasExisting = await _bankAccountRepository.AnyAsync(b => b.AccountId == input.AccountId, cancellationToken);
         if (hasExisting)
             return Fail<BankAccountDto>("A bank account is already configured for this ledger account.", 409);
@@ -147,6 +151,10 @@ public class BankAccountService : ApplicationService, IBankAccountService
         var routingResult = BankNumberHelper.ValidateRouting(input.Scheme, input.RoutingNumber, input.InstitutionNumber, input.TransitNumber);
         if (!routingResult.Succeeded)
             return Fail<BankAccountDto>(routingResult.Message!, routingResult.Code ?? 400);
+
+        var originatorResult = BankNumberHelper.ValidateEftOriginatorId(input.Scheme, input.EftOriginatorId?.Trim());
+        if (!originatorResult.Succeeded)
+            return Fail<BankAccountDto>(originatorResult.Message!, originatorResult.Code ?? 400);
 
         var currency = string.IsNullOrWhiteSpace(input.Currency) ? null : input.Currency.Trim().ToUpperInvariant();
         // 若科目限定币种，档案币种须兼容（挂载科目不可变，此处只校验币种）
@@ -248,7 +256,7 @@ public class BankAccountService : ApplicationService, IBankAccountService
         var trimmed = plaintext.Trim();
         // 长度上限来自 EFT 文件的定宽账号字段（CPA-005 的 Originator Account Number 只有 12 位）。
         // 出款方这侧被截断的后果是整份报文从一个不存在的户头扣款 —— 与收款方那侧同样不能静默发生。
-        var lengthResult = BankNumberHelper.ValidateAccountNumberLength(entity.Scheme, trimmed);
+        var lengthResult = BankNumberHelper.ValidateAccountNumber(entity.Scheme, trimmed);
         if (!lengthResult.Succeeded)
             return lengthResult;
         // AAD 绑定到本档案的资金科目，密文无法被搬到另一档案复用。

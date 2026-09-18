@@ -98,7 +98,7 @@ public class ReturnUrlValidatorTests
 
     [Fact]
     public void ResolveAllowedOrigins_FallsBackToFrontendUrl()
-        // 绝大多数部署不必单独配这一项：App:FrontendUrl 本来就指着前端所在的源。
+        // 绝大多数部署不必单独配这一项：前端 origin（System:FrontendUrl）本来就指着前端所在的源。
         => ReturnUrlValidator.ResolveAllowedOrigins([], "https://b.example")
             .ShouldBe(["https://b.example"]);
 

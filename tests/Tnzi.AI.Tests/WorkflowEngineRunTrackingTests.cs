@@ -242,6 +242,78 @@ public class WorkflowEngineRunTrackingTests
         createdRuns[0].Status.ShouldBe(AgentRunStatus.Cancelled);
     }
 
+    /// <summary>
+    /// The engine applies exactly one signal type (cancel). Anything else it finds in the mailbox
+    /// used to be acknowledged and dropped in silence; it is still acknowledged (nothing will ever
+    /// apply it and leaving it would pin PendingSignalCount forever) but now with a Warning that
+    /// names the signal, so a discarded input is at least visible in the logs.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_SignalTypeTheEngineDoesNotApply_IsAcknowledgedWithAWarning_NotSilently()
+    {
+        var createdRuns = new List<AgentRun>();
+        var createdNodes = new List<AgentRunNode>();
+        var updatedNodes = new List<AgentRunNode>();
+        var runStore = CreateRunStore(createdRuns, createdNodes, updatedNodes);
+
+        var acknowledged = new List<string>();
+        var mailbox = new Mock<IWorkflowExecutionMailbox>();
+        mailbox.SetupSequence(x => x.GetPendingSignalsAsync("workflow-run-stray-signal", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new WorkflowExecutionSignal
+                {
+                    SignalId = "input-1",
+                    Type = WorkflowExecutionSignalTypes.ResumeInput,
+                    StepId = "step-2",
+                    NodeInput = new AgentRunNodeInput { Input = new WorkflowExecutionInput { Message = "hello" } }
+                }
+            ])
+            .ReturnsAsync([]);
+        mailbox.Setup(x => x.AcknowledgeSignalsAsync("workflow-run-stray-signal", It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, IEnumerable<string>, CancellationToken>((_, ids, _) => acknowledged.AddRange(ids))
+            .Returns(Task.CompletedTask);
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(runStore.Object);
+        services.AddSingleton(mailbox.Object);
+        services.AddScoped<IWorkflowNode, FixedNode>();
+        services.AddScoped<WorkflowNodeExecutor>();
+        var serviceProvider = services.BuildServiceProvider();
+
+        var logger = new CapturingEngineLogger();
+        var engine = new WorkflowEngine(logger);
+
+        var graph = new WorkflowGraph(
+        [
+            new WorkflowStepDto { StepId = "step-1", Configuration = new Dictionary<string, string> { ["nodeType"] = "fixed-test" } },
+            new WorkflowStepDto { StepId = "step-2", DependsOn = ["step-1"], Configuration = new Dictionary<string, string> { ["nodeType"] = "fixed-test" } }
+        ]);
+
+        var result = await engine.ExecuteAsync(graph, "input", serviceProvider, new WorkflowExecutionOptions
+        {
+            ExecutionId = "workflow-run-stray-signal"
+        });
+
+        result.Cancelled.ShouldBeFalse();
+        result.HasFailure.ShouldBeFalse();
+        acknowledged.ShouldBe(["input-1"]);
+        logger.Entries.ShouldContain(e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("input-1")
+            && e.Message.Contains(WorkflowExecutionSignalTypes.ResumeInput)
+            && e.Message.Contains("workflow-run-stray-signal"));
+    }
+
+    private sealed class CapturingEngineLogger : ILogger<WorkflowEngine>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     private static Mock<IRunStore> CreateRunStore(
         List<AgentRun> createdRuns,
         List<AgentRunNode> createdNodes,

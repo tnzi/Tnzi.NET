@@ -8,6 +8,12 @@ public class SqlServerProvider : IDatabaseProvider
 {
     public string DatabaseType => "SqlServer";
 
+    /// <summary>
+    /// SQL Server 每命令 2100 个参数，其中 sp_executesql 自己占两个（语句文本与参数声明），
+    /// 留给用户参数的是 2098。
+    /// </summary>
+    public int MaxParametersPerCommand => 2098;
+
     public string EscapeIdentifier(string identifier)
     {
         return $"[{identifier}]";

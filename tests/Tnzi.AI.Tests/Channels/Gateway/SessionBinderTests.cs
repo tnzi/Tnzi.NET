@@ -190,6 +190,46 @@ public class SessionBinderTests
         binding.AgentId.ShouldBe(explicitId);
     }
 
+    [Fact]
+    public void Resolve_NoRule_FallbackAgentId_BeatsGatewayDefault()
+    {
+        // Arrange - 无规则命中；调用方给了兜底 Agent（渠道默认值）
+        var fallbackId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+        var binder = new DefaultSessionBinder([], CreateOptions());
+        var context = new SessionBindingContext
+        {
+            Channel = "telegram", ChatId = "chat-1", UserId = "user-1", FallbackAgentId = fallbackId
+        };
+
+        // Act
+        var binding = binder.Resolve(context);
+
+        // Assert
+        binding.AgentId.ShouldBe(fallbackId);
+    }
+
+    [Fact]
+    public void Resolve_MatchingRule_BeatsFallbackAgentId()
+    {
+        // Arrange - 兜底 Agent 只在无规则命中时生效，规则先于它
+        var fallbackId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+        var rules = new List<SessionBindingRule>
+        {
+            new() { Channel = "telegram", AgentId = RuleAgentId, Scope = SessionScope.Global, Priority = 1, IsEnabled = true }
+        };
+        var binder = new DefaultSessionBinder(rules, CreateOptions());
+        var context = new SessionBindingContext
+        {
+            Channel = "telegram", ChatId = "chat-1", UserId = "user-1", FallbackAgentId = fallbackId
+        };
+
+        // Act
+        var binding = binder.Resolve(context);
+
+        // Assert
+        binding.AgentId.ShouldBe(RuleAgentId);
+    }
+
     [Theory]
     [InlineData(SessionScope.Global, "agent:{0}:global")]
     [InlineData(SessionScope.PerPeer, "agent:{0}:peer:user-1")]

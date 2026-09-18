@@ -9,7 +9,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
     private readonly UserManager<User> _userManager;
     private readonly IOptionsMonitor<IdentityOptions> _identityOptionsMonitor;
     private readonly IEventBus? _eventBus;
-    private readonly ICaptchaService? _captchaService;
+    private readonly ICaptchaVerifier? _captchaVerifier;
     private readonly ITwoFactorService? _twoFactorService;
     private readonly IAuthTokenService? _authTokenService;
     private readonly IPasswordService? _passwordService;
@@ -27,7 +27,6 @@ public class RegistrationService : ApplicationService, IRegistrationService
         IOptionsMonitor<IdentityOptions> identityOptions,
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
-        ICaptchaService? captchaService = null,
         ITwoFactorService? twoFactorService = null,
         IAuthTokenService? authTokenService = null,
         IUserDetailService? userDetailService = null,
@@ -36,13 +35,14 @@ public class RegistrationService : ApplicationService, IRegistrationService
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         ILoginSessionCoordinator? loginSessionCoordinator = null,
         ILoginGuardEvaluator? loginGuardEvaluator = null,
-        IPasswordService? passwordService = null)
+        IPasswordService? passwordService = null,
+        ICaptchaVerifier? captchaVerifier = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
         _identityOptionsMonitor = Check.NotNull(identityOptions);
         _eventBus = eventBus;
-        _captchaService = captchaService;
+        _captchaVerifier = captchaVerifier;
         _twoFactorService = twoFactorService;
         _authTokenService = authTokenService;
         _passwordService = passwordService;
@@ -67,13 +67,13 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<TokenResult>("Self-registration is not enabled", 400);
         }
 
-        // 验证码校验（如果启用）
+        // 人机验证（如果启用）。错误码与发码端点同一个，前端据此重置控件。
         if (captchaOptions.EnableCaptchaOnRegister)
         {
-            var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "register");
+            var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.Register);
             if (!captchaValid)
             {
-                return Fail<TokenResult>("Invalid or expired captcha", 400);
+                return Fail<TokenResult>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, CaptchaChallenge());
             }
         }
 
@@ -250,14 +250,14 @@ public class RegistrationService : ApplicationService, IRegistrationService
         var captchaOptions = IdentityOptions.Captcha;
         var otpOptions = IdentityOptions.Otp;
 
-        // 图形验证码校验(启用注册验证码时,发送短信/邮箱验证码前必须先过图形验证码,
+        // 人机验证(启用注册验证码时,发送短信/邮箱验证码前必须先过,
         // 防机器人刷发码接口造成短信/邮件费用;web admin 的注册走此快速注册流)。
         if (captchaOptions.EnableCaptchaOnRegister)
         {
-            var captchaValid = await VerifyCaptchaAsync(input.CaptchaId, input.CaptchaCode, "register");
+            var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.Register);
             if (!captchaValid)
             {
-                return Fail<string>("Invalid or expired captcha", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED);
+                return Fail<string>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, CaptchaChallenge());
             }
         }
 
@@ -528,12 +528,28 @@ public class RegistrationService : ApplicationService, IRegistrationService
         return Result<string>.Success("Password set successfully");
     }
 
-    private async Task<bool> VerifyCaptchaAsync(string? captchaId, string? captchaCode, string purpose)
+    /// <summary>
+    /// 校验一次提交的人机验证（同 <c>AuthService.VerifyCaptchaAsync</c>）。
+    /// ★ 验证器缺席时拒绝：流程开关已经要求验证码，「没人能校验」不等于「校验通过」。
+    /// </summary>
+    private async Task<bool> VerifyCaptchaAsync(ICaptchaSubmission input, string purpose)
     {
-        if (_captchaService == null) return true;
-        if (string.IsNullOrEmpty(captchaId) || string.IsNullOrEmpty(captchaCode)) return false;
-        return await _captchaService.VerifyAsync(captchaId, captchaCode, purpose);
+        if (_captchaVerifier == null)
+        {
+            Logger.LogError("Captcha is required for {Purpose} but ICaptchaVerifier is not registered; rejecting.", purpose);
+            return false;
+        }
+
+        var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), purpose);
+        return verification.Passed;
     }
+
+    /// <summary>
+    /// 拒绝时随响应带上生效的提供商名，前端据此决定刷新图形验证码还是重置第三方控件。
+    /// 注册这几条路径都是「常显」控件（每次发码都要新解一次），所以不像登录那样顺带出一道新题。
+    /// </summary>
+    private CaptchaDto CaptchaChallenge()
+        => new() { Provider = _captchaVerifier?.ProviderName ?? ImageCaptchaProvider.ProviderName };
 
     /// <inheritdoc />
     public async Task<Result<string>> GenerateEmailConfirmationTokenAsync(Guid userId)
@@ -616,6 +632,17 @@ public class RegistrationService : ApplicationService, IRegistrationService
     /// <inheritdoc />
     public async Task<Result<string>> ResendEmailConfirmationAsync(ResendEmailConfirmationDto input)
     {
+        // 人机验证：与注册发码同一个开关。重发确认邮件每次调用都真的发一封信，此前它不受任何验证码开关管辖。
+        // 放在查用户之前：注定被拒的请求不该先消耗一次用户查询，更不该让「有没有这个账号」影响回答的时机。
+        if (IdentityOptions.Captcha.EnableCaptchaOnRegister)
+        {
+            var captchaValid = await VerifyCaptchaAsync(input, CaptchaPurpose.Register);
+            if (!captchaValid)
+            {
+                return Fail<string>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, CaptchaChallenge());
+            }
+        }
+
         // 查找用户
         User? user = null;
 

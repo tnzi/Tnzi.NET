@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { NModal, NButton, NSpin, NSpace } from 'naive-ui'
+import TOverlayTheme from '../overlay/TOverlayTheme.vue'
 import type CropperJs from 'cropperjs'
 import { useI18n } from '@tnzi/core/adapters/i18n'
 
@@ -350,7 +351,10 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
       </svg>
     </button>
 
-    <!-- Cropper modal -->
+    <!-- Cropper modal. Hand-rolled (the shell cannot forward `after-enter`,
+         which the cropper needs to size itself), so it wears the overlay
+         provider explicitly - global theme + the small control default. -->
+    <TOverlayTheme>
     <NModal v-model:show="cropperModalOpen" :mask-closable="false" @after-enter="onCropperModalEntered">
       <div class="t-image-upload__cropper-dialog">
         <div class="t-image-upload__cropper-container">
@@ -369,6 +373,7 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
         </NSpace>
       </div>
     </NModal>
+    </TOverlayTheme>
   </div>
 </template>
 

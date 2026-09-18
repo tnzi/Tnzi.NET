@@ -3,8 +3,10 @@ using Tnzi.AI.Tools.Models;
 namespace Tnzi.AI.Tests.Skills;
 
 /// <summary>
-/// Per-skill AllowedTools injection tests - validates that SkillConstraintMiddleware
-/// injects individually whitelisted tools into AdditionalTools when not already present.
+/// Per-skill AllowedTools semantics on <see cref="SkillConstraintMiddleware"/>: a whitelist only ever
+/// NARROWS the tools the agent already has. It never pulls tools out of the global registry into the
+/// agent - that path bypassed ToolDefinition.RequiredPermissions and approval wrapping, and any user
+/// able to author a User-scope skill could have handed an agent admin-only tools by naming them.
 /// </summary>
 public class PerSkillAllowedToolsTests
 {
@@ -28,20 +30,33 @@ public class PerSkillAllowedToolsTests
         MethodInfo = typeof(DummyToolProvider).GetMethod(nameof(DummyToolProvider.TestTool))!
     };
 
+    private static AITool MakeAiTool(string name)
+    {
+        var mock = new Mock<AITool>();
+        mock.Setup(t => t.Name).Returns(name);
+        return mock.Object;
+    }
+
+    private static IAgentExecutor MakeAgent(params string[] toolNames)
+    {
+        var mock = new Mock<IAgentExecutor>();
+        mock.Setup(a => a.Name).Returns("agent");
+        mock.Setup(a => a.Tools).Returns(toolNames.Select(MakeAiTool).ToList());
+        return mock.Object;
+    }
+
     private static AiMiddlewareContext CreateContext(
-        List<SkillDefinition> activeSkills,
         List<AITool>? existingTools = null,
+        IAgentExecutor? agent = null,
         IServiceProvider? serviceProvider = null)
     {
         var sp = serviceProvider ?? CreateServiceProvider();
         var context = new AiMiddlewareContext
         {
             Request = new AgentRunRequest { UserMessage = "test" },
-            Agent = new AgentResolution { ExecutionMode = AgentExecutionMode.Single },
+            Agent = new AgentResolution { ExecutionMode = AgentExecutionMode.Single, Agent = agent },
             ServiceProvider = sp
         };
-
-        context.Properties["ActiveSkills"] = activeSkills;
 
         if (existingTools != null)
             context.AdditionalTools.AddRange(existingTools);
@@ -52,6 +67,7 @@ public class PerSkillAllowedToolsTests
     private static IServiceProvider CreateServiceProvider()
     {
         var services = new ServiceCollection();
+        // The provider IS resolvable: if the middleware still injected by name it would succeed here.
         services.AddSingleton<DummyToolProvider>();
         return services.BuildServiceProvider();
     }
@@ -65,247 +81,162 @@ public class PerSkillAllowedToolsTests
 
     private static SkillConstraintMiddleware CreateMiddleware(
         Mock<IToolRegistry> toolRegistry,
+        IEnumerable<SkillDefinition> activeSkills,
         ISkillConstraintEnforcer? enforcer = null)
     {
+        var tracker = new SkillActivationTracker();
+        foreach (var skill in activeSkills)
+            tracker.Activate(skill);
+
         return new SkillConstraintMiddleware(
             enforcer ?? new SkillConstraintEnforcer(),
             toolRegistry.Object,
+            tracker,
             Mock.Of<ILogger<SkillConstraintMiddleware>>());
     }
+
+    private static Task<AgentRunResult> Next(AiMiddlewareContext ctx, CancellationToken ct)
+        => Task.FromResult(new AgentRunResult { Response = "done" });
 
     #endregion
 
     [Fact]
-    public async Task InvokeAsync_SkillWithAllowedTools_InjectsToolsIntoAdditionalTools()
+    public async Task AllowedTools_DoesNotInjectToolsOutsideAgentToolSet()
     {
-        // Arrange: skill declares AllowedTools with "test-tool"
-        var skill = new SkillDefinition
-        {
-            Slug = "my-skill",
-            Name = "My Skill",
-            Priority = 1,
-            AllowedTools = ["test-tool"]
-        };
-
-        var toolDef = MakeToolDef("test-tool", "shell");
-        var registry = CreateToolRegistry(toolDef);
-        var middleware = CreateMiddleware(registry);
-
-        var context = CreateContext([skill]);
+        // Arrange: the skill names a registry tool the agent was never configured with.
+        // The registry knows it and its provider resolves from DI, so the old injection path would add it.
+        var skill = new SkillDefinition { Slug = "my-skill", Name = "My Skill", Priority = 1, AllowedTools = ["execute_command"] };
+        var registry = CreateToolRegistry(MakeToolDef("execute_command", "shell"));
+        var middleware = CreateMiddleware(registry, [skill]);
+        var context = CreateContext(agent: MakeAgent("read_file"));
 
         // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
+        await middleware.InvokeAsync(context, Next);
 
-        // Assert: the tool should be injected
-        context.AdditionalTools.ShouldContain(t => t.Name == "TestTool" || t.Name == "test-tool" || t.Name != null);
-        context.AdditionalTools.Count.ShouldBeGreaterThan(0);
+        // Assert: nothing was pulled in from the registry
+        context.AdditionalTools.ShouldBeEmpty();
+        context.ExcludedToolNames.ShouldNotContain("execute_command");
     }
 
     [Fact]
-    public async Task InvokeAsync_SkillWithAllowedTools_DoesNotDuplicateExistingTools()
+    public async Task AllowedTools_KeepsWhitelistedTool_RemovesOtherGroupedTools()
     {
-        // Arrange: skill declares AllowedTools with "test-tool", which is already in AdditionalTools
-        var skill = new SkillDefinition
-        {
-            Slug = "my-skill",
-            Name = "My Skill",
-            Priority = 1,
-            AllowedTools = ["test-tool"]
-        };
+        var skill = new SkillDefinition { Slug = "s", Name = "S", AllowedTools = ["test-tool"] };
+        var registry = CreateToolRegistry(MakeToolDef("test-tool", "shell"), MakeToolDef("other-tool", "shell"));
+        var middleware = CreateMiddleware(registry, [skill]);
 
-        var toolDef = MakeToolDef("test-tool", "shell");
-        var registry = CreateToolRegistry(toolDef);
-        var middleware = CreateMiddleware(registry);
+        var context = CreateContext(
+            existingTools: [MakeAiTool("test-tool"), MakeAiTool("other-tool")],
+            agent: MakeAgent("test-tool", "other-tool"));
 
-        // Pre-populate AdditionalTools with a tool named "test-tool"
-        var existingTool = AIFunctionFactory.Create(
-            () => "existing",
-            name: "test-tool",
-            description: "Existing tool");
+        await middleware.InvokeAsync(context, Next);
 
-        var context = CreateContext([skill], [existingTool]);
-        var initialCount = context.AdditionalTools.Count;
-
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: should not add a duplicate
-        context.AdditionalTools.Count(t => string.Equals(t.Name, "test-tool", StringComparison.OrdinalIgnoreCase))
-            .ShouldBe(1);
+        context.AdditionalTools.Select(t => t.Name).ShouldBe(["test-tool"]);
+        context.ExcludedToolNames.ShouldBe(["other-tool"]);
     }
 
     [Fact]
-    public async Task InvokeAsync_SkillWithNoAllowedTools_DoesNotInjectAnything()
+    public async Task AllowedTools_UngroupedToolsAreNotSubjectToTheWhitelist()
     {
-        // Arrange: skill without AllowedTools
-        var skill = new SkillDefinition
-        {
-            Slug = "my-skill",
-            Name = "My Skill",
-            Priority = 1,
-            AllowedTools = null
-        };
+        // MCP / OpenAPI / dynamic tools are not in the registry: a whitelist cannot speak about them.
+        var skill = new SkillDefinition { Slug = "s", Name = "S", AllowedTools = ["test-tool"] };
+        var registry = CreateToolRegistry(MakeToolDef("test-tool", "shell"));
+        var middleware = CreateMiddleware(registry, [skill]);
 
-        var registry = CreateToolRegistry();
-        var middleware = CreateMiddleware(registry);
+        var context = CreateContext(existingTools: [MakeAiTool("mcp_dynamic")], agent: MakeAgent("mcp_dynamic"));
 
-        var context = CreateContext([skill]);
+        await middleware.InvokeAsync(context, Next);
 
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: no tools injected
-        context.AdditionalTools.Count.ShouldBe(0);
+        context.AdditionalTools.Select(t => t.Name).ShouldBe(["mcp_dynamic"]);
+        context.ExcludedToolNames.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task InvokeAsync_SkillWithAllowedTools_UnknownTool_DoesNotFail()
+    public async Task SkillWithNoAllowedTools_DoesNotRestrictAnything()
     {
-        // Arrange: skill references a tool that doesn't exist in registry
-        var skill = new SkillDefinition
-        {
-            Slug = "my-skill",
-            Name = "My Skill",
-            Priority = 1,
-            AllowedTools = ["nonexistent-tool"]
-        };
+        var skill = new SkillDefinition { Slug = "s", Name = "S", AllowedTools = null };
+        var registry = CreateToolRegistry(MakeToolDef("test-tool", "shell"));
+        var middleware = CreateMiddleware(registry, [skill]);
 
-        var registry = CreateToolRegistry(); // empty registry
-        var middleware = CreateMiddleware(registry);
+        var context = CreateContext(existingTools: [MakeAiTool("test-tool")], agent: MakeAgent("test-tool"));
 
-        var context = CreateContext([skill]);
+        await middleware.InvokeAsync(context, Next);
 
-        // Act - should not throw
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: no tools injected (tool not found)
-        context.AdditionalTools.Count.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_MultipleSkillsWithDisjointAllowedTools_IntersectionIsEmpty_InjectsNothing()
-    {
-        // Arrange: two skills with DISJOINT whitelists. AllowedTools semantics are
-        // INTERSECTION (most-restrictive-wins): the agent must satisfy every active
-        // skill's whitelist, so two disjoint whitelists permit no common tool.
-        var skill1 = new SkillDefinition
-        {
-            Slug = "skill-1",
-            Name = "Skill 1",
-            Priority = 2,
-            AllowedTools = ["tool-a"]
-        };
-        var skill2 = new SkillDefinition
-        {
-            Slug = "skill-2",
-            Name = "Skill 2",
-            Priority = 1,
-            AllowedTools = ["tool-b"]
-        };
-
-        var toolA = MakeToolDef("tool-a", "group1");
-        var toolB = new ToolDefinition
-        {
-            Name = "tool-b",
-            GroupName = "group2",
-            ProviderType = typeof(DummyToolProvider),
-            MethodInfo = typeof(DummyToolProvider).GetMethod(nameof(DummyToolProvider.AnotherTool))!
-        };
-
-        var registry = CreateToolRegistry(toolA, toolB);
-        var middleware = CreateMiddleware(registry);
-
-        var context = CreateContext([skill1, skill2]);
-
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: intersection of {tool-a} ∩ {tool-b} = ∅ → nothing injected.
-        context.AdditionalTools.Count.ShouldBe(0);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_MultipleSkillsWithOverlappingAllowedTools_InjectsCommonTool()
-    {
-        // Arrange: two skills whose whitelists overlap on "tool-a". The intersection
-        // keeps only the common tool.
-        var skill1 = new SkillDefinition
-        {
-            Slug = "skill-1",
-            Name = "Skill 1",
-            Priority = 2,
-            AllowedTools = ["tool-a", "tool-b"]
-        };
-        var skill2 = new SkillDefinition
-        {
-            Slug = "skill-2",
-            Name = "Skill 2",
-            Priority = 1,
-            AllowedTools = ["tool-a"]
-        };
-
-        var toolA = MakeToolDef("tool-a", "group1");
-        var toolB = new ToolDefinition
-        {
-            Name = "tool-b",
-            GroupName = "group2",
-            ProviderType = typeof(DummyToolProvider),
-            MethodInfo = typeof(DummyToolProvider).GetMethod(nameof(DummyToolProvider.AnotherTool))!
-        };
-
-        var registry = CreateToolRegistry(toolA, toolB);
-        var middleware = CreateMiddleware(registry);
-
-        var context = CreateContext([skill1, skill2]);
-
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: {tool-a, tool-b} ∩ {tool-a} = {tool-a} → only the common tool injected.
         context.AdditionalTools.Count.ShouldBe(1);
-        context.AdditionalTools.ShouldContain(t =>
-            string.Equals(t.Name, "tool-a", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(t.Name, "TestTool", StringComparison.OrdinalIgnoreCase));
+        context.ExcludedToolNames.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task InvokeAsync_OneSkillWhitelistsOneSkillDoesNot_DoesNotCollapseIntersection()
+    public async Task MultipleSkillsWithDisjointAllowedTools_IntersectionIsEmpty_RemovesEveryGroupedTool()
     {
-        // Arrange: skill1 declares a whitelist, skill2 declares none. A skill with no
-        // AllowedTools imposes NO individual-tool restriction and must NOT collapse the
-        // intersection - so skill1's whitelist still applies in full.
-        var skill1 = new SkillDefinition
+        // AllowedTools semantics are INTERSECTION (most-restrictive-wins): two disjoint whitelists
+        // permit no common tool, so every grouped tool the agent has is withheld.
+        var skill1 = new SkillDefinition { Slug = "skill-1", Name = "Skill 1", Priority = 2, AllowedTools = ["tool-a"] };
+        var skill2 = new SkillDefinition { Slug = "skill-2", Name = "Skill 2", Priority = 1, AllowedTools = ["tool-b"] };
+        var registry = CreateToolRegistry(MakeToolDef("tool-a", "group1"), MakeToolDef("tool-b", "group2"));
+        var middleware = CreateMiddleware(registry, [skill1, skill2]);
+
+        var context = CreateContext(agent: MakeAgent("tool-a", "tool-b"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["tool-a", "tool-b"], ignoreOrder: true);
+        context.AdditionalTools.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task MultipleSkillsWithOverlappingAllowedTools_KeepsOnlyTheCommonTool()
+    {
+        var skill1 = new SkillDefinition { Slug = "skill-1", Name = "Skill 1", Priority = 2, AllowedTools = ["tool-a", "tool-b"] };
+        var skill2 = new SkillDefinition { Slug = "skill-2", Name = "Skill 2", Priority = 1, AllowedTools = ["tool-a"] };
+        var registry = CreateToolRegistry(MakeToolDef("tool-a", "group1"), MakeToolDef("tool-b", "group2"));
+        var middleware = CreateMiddleware(registry, [skill1, skill2]);
+
+        var context = CreateContext(agent: MakeAgent("tool-a", "tool-b"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["tool-b"]);
+    }
+
+    [Fact]
+    public async Task OneSkillWhitelistsOneSkillDoesNot_DoesNotCollapseIntersection()
+    {
+        // A skill with no whitelist imposes no individual-tool restriction and must not
+        // collapse the intersection to empty.
+        var whitelisting = new SkillDefinition { Slug = "skill-1", Name = "Skill 1", Priority = 2, AllowedTools = ["tool-a"] };
+        var neutral = new SkillDefinition { Slug = "skill-2", Name = "Skill 2", Priority = 1, AllowedTools = null };
+        var registry = CreateToolRegistry(MakeToolDef("tool-a", "group1"), MakeToolDef("tool-b", "group2"));
+        var middleware = CreateMiddleware(registry, [whitelisting, neutral]);
+
+        var context = CreateContext(agent: MakeAgent("tool-a", "tool-b"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["tool-b"]);
+    }
+
+    [Fact]
+    public async Task AllowedToolGroups_PlusAllowedTools_KeepsGroupMembersAndTheSupplementaryTool()
+    {
+        // Documented example: allowed-tool-groups: Git + allowed-tools: custom_lint → all git tools
+        // plus custom_lint survive; everything else grouped is withheld.
+        var skill = new SkillDefinition
         {
-            Slug = "skill-1",
-            Name = "Skill 1",
-            Priority = 2,
-            AllowedTools = ["tool-a"]
+            Slug = "audit", Name = "Audit",
+            AllowedToolGroups = ["git"],
+            AllowedTools = ["custom_lint"],
+            DeniedTools = ["git_push"]
         };
-        var skill2 = new SkillDefinition
-        {
-            Slug = "skill-2",
-            Name = "Skill 2",
-            Priority = 1,
-            AllowedTools = null // no individual-tool restriction
-        };
+        var registry = CreateToolRegistry(
+            MakeToolDef("git_diff", "git"), MakeToolDef("git_push", "git"),
+            MakeToolDef("custom_lint", "lint"), MakeToolDef("bash", "shell"));
+        var middleware = CreateMiddleware(registry, [skill]);
 
-        var toolA = MakeToolDef("tool-a", "group1");
-        var registry = CreateToolRegistry(toolA);
-        var middleware = CreateMiddleware(registry);
+        var context = CreateContext(agent: MakeAgent("git_diff", "git_push", "custom_lint", "bash"));
 
-        var context = CreateContext([skill1, skill2]);
+        await middleware.InvokeAsync(context, Next);
 
-        // Act
-        await middleware.InvokeAsync(context, (ctx, ct) =>
-            Task.FromResult(new AgentRunResult { Response = "done" }));
-
-        // Assert: skill1's {tool-a} survives (skill2 contributes no restriction).
-        context.AdditionalTools.Count.ShouldBe(1);
+        context.ExcludedToolNames.ShouldBe(["git_push", "bash"], ignoreOrder: true);
     }
 }

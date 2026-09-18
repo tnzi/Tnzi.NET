@@ -30,18 +30,14 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
   }),
 }))
 
+// Unpaged `roles.getAll`, not the paged `fetch` (which the server clamps to 100 rows).
+const rolesFetch = vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 }))
+const rolesGetAll = vi.fn(async () => [
+  { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
+])
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
-    roles: {
-      fetch: vi.fn(async () => ({
-        items: [
-          { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
-        ],
-        totalCount: 1,
-        pageIndex: 1,
-        pageSize: 500,
-      })),
-    },
+    roles: { fetch: rolesFetch, getAll: rolesGetAll },
     users: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     tenants: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     organizations: { getTree: vi.fn() },
@@ -71,5 +67,13 @@ describe('EntityRoles page (Tier 3: data-permission matrix)', () => {
     // in a teleported popover only when the trigger is opened.
     expect(wrapper.find('.t-entity-role-page__toolbar').exists()).toBe(true)
     expect(wrapper.find('.n-base-selection').exists()).toBe(true)
+  })
+
+  it('loads the role columns from the unpaged endpoint, never the clamped paged one', async () => {
+    mount(EntityRoles)
+    await nextTick()
+    await new Promise(r => setTimeout(r, 100))
+    expect(rolesGetAll).toHaveBeenCalled()
+    expect(rolesFetch).not.toHaveBeenCalled()
   })
 })

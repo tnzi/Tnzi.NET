@@ -48,4 +48,11 @@ public class WorkflowExecutionOptions
     /// </summary>
     [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
     public Dictionary<string, object>? ResumeData { get; set; }
+
+    /// <summary>
+    /// 按步骤的恢复数据：同一层里多个节点各自被批准（或各自拿到输入）后，一次恢复把每个节点的
+    /// 结论都带上。优先于 <see cref="ResumeStepId"/> / <see cref="ResumeData"/> 这一对；键不区分大小写。
+    /// </summary>
+    [ExperimentalApi(Reason = "Generic workflow interrupt is in preview")]
+    public Dictionary<string, Dictionary<string, object>>? ResumeDataByStep { get; set; }
 }

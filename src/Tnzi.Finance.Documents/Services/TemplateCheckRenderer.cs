@@ -67,7 +67,7 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
         try
         {
             var rendered = await _renderService.RenderByNameAsync(
-                templateName, CheckTemplates.Module, model, CheckTemplates.Category, cancellationToken: cancellationToken);
+                templateName, CheckTemplates.Module, model, CheckTemplates.Category, outputKind: TemplateOutputKind.Html, cancellationToken: cancellationToken);
 
             if (!rendered.Succeeded || rendered.Data == null)
             {

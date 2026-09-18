@@ -227,6 +227,61 @@ public class OAuthServiceTests
         _userLoginServiceMock.Verify(x => x.RecordLoginAsync(userId, provider, providerKey, displayName), Times.Once);
     }
 
+    /// <summary>
+    /// ★★ 个人中心「绑定第三方账号」的服务层：只给<b>当前账号</b>加一条外部登录，不签发令牌、不新建账号。
+    /// 此前前端把绑定做成「已登录态重走一遍 OAuth 登录」，而回调从头到尾不读当前用户 ——
+    /// 邮箱不一致时凭空建出一个孤儿账号并永久占住该 provider key。
+    /// </summary>
+    [Fact]
+    public async Task LinkExternalLoginAsync_LinksToTheGivenUser_AndCreatesNoAccount()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "me", Email = "me@corp.example" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.FindByLoginAsync("github", "gh_123")).ReturnsAsync((User?)null);
+        _userManagerMock.Setup(x => x.AddLoginAsync(user, It.IsAny<UserLoginInfo>())).ReturnsAsync(IdentityResult.Success);
+
+        // 第三方邮箱与本站不同：那是登录流程里新建账号的分支，绑定流程绝不能走到它。
+        var result = await _oauthService.LinkExternalLoginAsync(userId, "github", PrincipalFor("gh_123", "me@personal.example"));
+
+        Assert.True(result.Succeeded, result.Message);
+        _userManagerMock.Verify(x => x.AddLoginAsync(user, It.Is<UserLoginInfo>(l => l.LoginProvider == "github" && l.ProviderKey == "gh_123")), Times.Once);
+        _userManagerMock.Verify(x => x.CreateAsync(It.IsAny<User>()), Times.Never);
+        _authServiceMock.Verify(x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>(), It.IsAny<TwoFactorType?>()), Times.Never);
+    }
+
+    /// <summary>provider key 已属于另一个账号 → 409，且不动任何一边。</summary>
+    [Fact]
+    public async Task LinkExternalLoginAsync_WhenTheProviderKeyBelongsToSomeoneElse_Returns409()
+    {
+        var userId = Guid.NewGuid();
+        var someoneElse = new User { Id = Guid.NewGuid(), UserName = "other" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(new User { Id = userId, UserName = "me" });
+        _userManagerMock.Setup(x => x.FindByLoginAsync("github", "gh_123")).ReturnsAsync(someoneElse);
+
+        var result = await _oauthService.LinkExternalLoginAsync(userId, "github", PrincipalFor("gh_123"));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        _userManagerMock.Verify(x => x.AddLoginAsync(It.IsAny<User>(), It.IsAny<UserLoginInfo>()), Times.Never);
+    }
+
+    /// <summary>已经绑在本人账号上 → 幂等成功。</summary>
+    [Fact]
+    public async Task LinkExternalLoginAsync_WhenAlreadyLinkedToTheSameUser_IsIdempotent()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "me" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.FindByLoginAsync("github", "gh_123")).ReturnsAsync(user);
+        _userLoginServiceMock.Setup(x => x.HasLoginAsync(userId, "github", "gh_123")).ReturnsAsync(true);
+
+        var result = await _oauthService.LinkExternalLoginAsync(userId, "github", PrincipalFor("gh_123"));
+
+        Assert.True(result.Succeeded);
+        _userManagerMock.Verify(x => x.AddLoginAsync(It.IsAny<User>(), It.IsAny<UserLoginInfo>()), Times.Never);
+    }
+
     [Fact]
     public async Task UnlinkOAuthAccountAsync_WithValidInput_UnlinksAccount()
     {

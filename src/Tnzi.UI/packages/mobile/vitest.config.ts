@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
   // SFCs are mounted in the component tests, so the vue plugin is required.
@@ -7,6 +8,13 @@ export default defineConfig({
   // dist) rather than an alias to source, so these tests exercise the same
   // entry points consumers get.
   plugins: [vue()],
+  resolve: {
+    alias: {
+      // plugin.ts imports the UnoCSS virtual module; the atomic CSS is a build
+      // artefact (see uno.config.ts), so tests that install the plugin get a stub.
+      'virtual:uno.css': fileURLToPath(new URL('./__tests__/stubs/uno.css', import.meta.url)),
+    },
+  },
   test: {
     globals: true,
     environment: 'happy-dom',

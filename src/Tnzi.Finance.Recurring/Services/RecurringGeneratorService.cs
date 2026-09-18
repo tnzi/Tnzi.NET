@@ -8,8 +8,8 @@ namespace Tnzi.Finance.Recurring.Services;
 /// <list type="number">
 /// <item><b>幂等</b> —— 每一期先写 <see cref="RecurringRun"/> 再造单据，唯一索引兜住
 ///   重跑与并发。给客户重复开一张发票是要打电话道歉的事故。</item>
-/// <item><b>一期失败不拖累其它期</b> —— 每期一个独立事务；第三期的科目被停用，
-///   不该让前两期一起回滚，也不该让第四期不再尝试。</item>
+/// <item><b>一期失败不拖累其它期</b> —— 每期一个独立 DI 作用域与独立事务，物理上够不到调用方的
+///   环境事务；第三期的科目被停用，不该让前两期一起回滚，也不该让第四期不再尝试。</item>
 /// <item><b>失败留痕</b> —— 失败同样落记录（不占幂等键，下次重试）。悄悄跳过的
 ///   那一期，没有人会发现。</item>
 /// </list>
@@ -18,7 +18,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
 {
     private readonly IRepository<RecurringDocument, Guid> _repository;
     private readonly IRepository<RecurringRun, Guid> _runRepository;
-    private readonly RecurringDocumentBuilder _builder;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IRecurrenceSchedule _schedule;
     private readonly RecurringOptions _options;
 
@@ -26,21 +26,24 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         IServiceProvider serviceProvider,
         IRepository<RecurringDocument, Guid> repository,
         IRepository<RecurringRun, Guid> runRepository,
-        RecurringDocumentBuilder builder,
+        IServiceScopeFactory scopeFactory,
         IRecurrenceSchedule schedule,
         IOptionsSnapshot<RecurringOptions> options)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _runRepository = Check.NotNull(runRepository);
-        _builder = Check.NotNull(builder);
+        _scopeFactory = Check.NotNull(scopeFactory);
         _schedule = Check.NotNull(schedule);
         _options = Check.NotNull(options).Value;
     }
 
     public async Task<Result<RecurringSweepResultDto>> RunDueAsync(DateTime? asOf = null, CancellationToken cancellationToken = default)
     {
-        var today = (asOf ?? DateTime.UtcNow).ToUtcDate();
+        var resolved = ResolveAsOf(asOf);
+        if (!resolved.Succeeded)
+            return Fail<RecurringSweepResultDto>(resolved.Message!, resolved.Code ?? 400);
+        var today = resolved.Data;
 
         var due = await _repository
             .Where(e => e.Status == RecurringStatus.Active && e.NextRunDate <= today)
@@ -75,7 +78,10 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     public async Task<Result<RecurringSweepResultDto>> RunOneAsync(
         Guid recurringDocumentId, DateTime? asOf = null, CancellationToken cancellationToken = default)
     {
-        var today = (asOf ?? DateTime.UtcNow).ToUtcDate();
+        var resolved = ResolveAsOf(asOf);
+        if (!resolved.Succeeded)
+            return Fail<RecurringSweepResultDto>(resolved.Message!, resolved.Code ?? 400);
+        var today = resolved.Data;
 
         var template = await _repository
             .Where(e => e.Id == recurringDocumentId)
@@ -89,7 +95,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         // 排期在未来但有失败期次待补时，「立即运行」应当去补它 —— 那正是把科目改回来
         // 之后操作员会做的动作，而此时日历上确实没有到期的东西。
         if (template.NextRunDate > today
-            && (await ResolveRetriesAsync(template, [], cancellationToken)).Count == 0)
+            && (await ResolveRetriesAsync(template, cancellationToken)).Count == 0)
         {
             return Fail<RecurringSweepResultDto>($"Nothing is due yet; the next run is {template.NextRunDate:yyyy-MM-dd}.", 409);
         }
@@ -97,14 +103,49 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         return await SweepAsync([template], today, cancellationToken);
     }
 
+    /// <summary>
+    /// 扫描的「今天」。缺省取注入时钟；显式给的日期不得落在未来（留一天时区余量）。
+    /// </summary>
+    /// <remarks>
+    /// ★ <c>asOf</c> 的正当用途是回补过去，未来值没有任何业务含义 —— 而一次
+    /// <c>run-due?asOf=2099-01-01</c>（或运维脚本把年份打错）会对每一条 Active 模板生成
+    /// <see cref="RecurringOptions.MaxCatchUpPerRun"/> 张日期落在未来的单据（AutoPost 部署直接进总账）、
+    /// 把排期推进两年，且没有任何撤销路径。与 <c>LedgerLockService</c> 的封账日守卫同一口径：
+    /// 这是最容易被手滑打成错误年份的那种输入。
+    /// </remarks>
+    private Result<DateTime> ResolveAsOf(DateTime? asOf)
+    {
+        var now = TimeProvider.GetUtcNow().UtcDateTime.ToUtcDate();
+        if (asOf == null)
+            return Result.Success(now);
+
+        var requested = asOf.Value.ToUtcDate();
+        if (requested > now.AddDays(1))
+            return Result.Failure<DateTime>("The as-of date cannot be more than one day in the future.", 400);
+
+        return Result.Success(requested);
+    }
+
     private async Task<Result<RecurringSweepResultDto>> SweepAsync(
         List<RecurringDocument> templates, DateTime today, CancellationToken cancellationToken)
     {
         var result = new RecurringSweepResultDto { TemplatesDue = templates.Count };
 
+        if (UnitOfWorkManager?.IsEnabledTransaction == true)
+        {
+            // 每期在自己的作用域里提交，所以调用方的事务回滚**不会**撤销已生成的单据 ——
+            // 但它也管不住已经生成的东西。说出来，免得有人以为「外层回滚 = 什么都没发生」。
+            Logger?.LogWarning(
+                "Recurring sweep is running inside an ambient unit of work (depth {Depth}); each period commits in its own scope and will not be rolled back with the caller.",
+                UnitOfWorkManager.TransactionDepth);
+        }
+
         foreach (var template in templates)
         {
-            var periods = ResolvePeriods(template, today, out var skipped);
+            // 失败过的期次先补（它们是更早的义务），且**占用次数额度**：一份「只开一期」的订阅，
+            // 第一期失败、第二期到期时若两张都生成，客户就收到两张发票。
+            var retries = await ResolveRetriesAsync(template, cancellationToken);
+            var periods = ResolvePeriods(template, today, reserved: retries.Count, out var skipped, out var nextRunDate);
 
             foreach (var period in skipped)
             {
@@ -115,9 +156,6 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
                     result.Runs.Add(run);
                 }
             }
-
-            // 失败过的期次先补：排期无条件往前推，日历此后不会再扫到它们。
-            var retries = await ResolveRetriesAsync(template, periods, cancellationToken);
 
             foreach (var period in retries.Concat(periods))
             {
@@ -132,7 +170,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
                     result.Failed++;
             }
 
-            await AdvanceAsync(template, today, cancellationToken);
+            await AdvanceAsync(template, today, nextRunDate, cancellationToken);
         }
 
         return Ok(result);
@@ -150,12 +188,21 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     /// 被策略排除的期次照样以 <see cref="RecurringRunStatus.Skipped"/> 留痕：跳过是
     /// 一个决定，不是什么都没发生。
     /// </remarks>
-    private List<DateTime> ResolvePeriods(RecurringDocument template, DateTime today, out List<DateTime> skipped)
+    /// <param name="template">模板</param>
+    /// <param name="today">扫描的「今天」</param>
+    /// <param name="reserved">本轮已被重试占去的次数额度</param>
+    /// <param name="skipped">被补齐策略排除、要留痕的期次</param>
+    /// <param name="nextRunDate">
+    /// ★ 第一个<b>没有</b>被本轮消费的期次 —— 排期推进必须落在这里而不是另走一遍日历：
+    /// 两处各自走一遍，步数差一就丢一期（曾经就是：生成 P1..P24 而排期推到 P26，P25 既无 Generated 也无
+    /// Skipped 行，重试只捡 Failed 行，于是永久消失且零症状）。上限绑定时它落在今天之前，下一轮接着补。
+    /// </param>
+    private List<DateTime> ResolvePeriods(RecurringDocument template, DateTime today, int reserved, out List<DateTime> skipped, out DateTime nextRunDate)
     {
         var all = new List<DateTime>();
         var cursor = template.NextRunDate;
         var remaining = template.MaxOccurrences.HasValue
-            ? Math.Max(0, template.MaxOccurrences.Value - template.OccurrenceCount)
+            ? Math.Max(0, template.MaxOccurrences.Value - template.OccurrenceCount - reserved)
             : int.MaxValue;
 
         while (cursor <= today && all.Count < _options.MaxCatchUpPerRun && all.Count < remaining)
@@ -166,6 +213,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             cursor = _schedule.Next(cursor, template.Frequency, template.Interval, template.AnchorDay);
         }
 
+        nextRunDate = cursor;
         skipped = [];
         if (all.Count <= 1)
             return all;
@@ -192,11 +240,20 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     /// 已经有非失败记录的期次（生成过、或被补齐策略跳过）算办完了，不再碰。
     /// 尝试次数到 <see cref="RecurringOptions.MaxFailedRetries"/> 即停：一条永远失败的
     /// 模板不该每轮都往记录表里多写一行。
+    /// <para>
+    /// ★ 重试同样受 <c>MaxOccurrences</c> 与 <c>EndDate</c> 约束：它们是「再开一次」，不是「白送一次」。
+    /// 落在 <c>NextRunDate</c> 之后的失败期次交给到期走查（那是它自己的路），这里只捡排期已经推过的。
+    /// </para>
     /// </remarks>
-    private async Task<List<DateTime>> ResolveRetriesAsync(
-        RecurringDocument template, List<DateTime> due, CancellationToken cancellationToken)
+    private async Task<List<DateTime>> ResolveRetriesAsync(RecurringDocument template, CancellationToken cancellationToken)
     {
         if (_options.MaxFailedRetries <= 1)
+            return [];
+
+        var remaining = template.MaxOccurrences.HasValue
+            ? Math.Max(0, template.MaxOccurrences.Value - template.OccurrenceCount)
+            : int.MaxValue;
+        if (remaining == 0)
             return [];
 
         var attempts = await _runRepository
@@ -213,15 +270,15 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             .Select(r => r.PeriodDate)
             .ToListAsync(cancellationToken);
         var settledSet = settled.ToHashSet();
-        var dueSet = due.ToHashSet();
 
         return [.. attempts
             .Where(a => a.Count < _options.MaxFailedRetries
                         && !settledSet.Contains(a.Period)
-                        && !dueSet.Contains(a.Period))
+                        && a.Period < template.NextRunDate
+                        && (!template.EndDate.HasValue || a.Period <= template.EndDate.Value))
             .Select(a => a.Period)
             .OrderBy(d => d)
-            .Take(_options.MaxCatchUpPerRun)];
+            .Take(Math.Min(_options.MaxCatchUpPerRun, remaining))];
     }
 
     private static List<DateTime> Split(List<DateTime> all, bool keepLast, out List<DateTime> skipped)
@@ -240,10 +297,21 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     /// 造出一期。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// **先写记录再造单据**：记录的插入撞上唯一索引，说明这一期已经有人做过了，
     /// 此时单据尚未产生，退出即可。反过来（先造后记）在两个实例并发时会各造一张。
-    ///
-    /// 每期一个独立事务 —— 一期失败不该回滚已经成立的其它期。
+    /// </para>
+    /// <para>
+    /// ★★ **每期一个独立 DI 作用域**，在它自己的 DbContext 与工作单元里提交 —— 不是本服务作用域里的
+    /// <c>ExecuteInUnitOfWorkAsync</c>。后者在调用方已经开着事务时（宿主 <c>EnableGlobalUnitOfWork</c>、
+    /// 或消费方在自己的 UoW 里调 <c>RunDueAsync</c>）是<b>嵌套</b>的：内层「提交」只 flush，而内层异常回滚会把
+    /// 环境事务整个撤销。于是第三期失败会让前两期已生成的发票与幂等行一并消失，异常被吞、循环继续，
+    /// 此后的写入落在自动提交模式下正常持久化，响应仍报告前两期「已生成」并带着它们的真实编号 ——
+    /// 一份报告成功的静默数据丢失。手法与后台扫描的「每租户一个作用域」相同；租户经静态 AsyncLocal 流入新作用域。
+    /// </para>
+    /// <para>
+    /// 失败留痕与跳过留痕仍写在本服务作用域（它们要与调用方一起提交或回滚，那是调用方的事）。
+    /// </para>
     /// </remarks>
     private async Task<RecurringRunDto?> GeneratePeriodAsync(
         RecurringDocument template, DateTime period, CancellationToken cancellationToken)
@@ -256,17 +324,23 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             Status = RecurringRunStatus.Generated,
         };
 
+        // 作用域随本期结束而释放：插入失败的 Added 实体连同它的跟踪器一起消失，不会被谁重放。
+        using var scope = _scopeFactory.CreateScope();
+        var runRepository = scope.ServiceProvider.GetRequiredService<IRepository<RecurringRun, Guid>>();
+        var builder = scope.ServiceProvider.GetRequiredService<RecurringDocumentBuilder>();
+        var unitOfWork = scope.ServiceProvider.GetService<IUnitOfWorkManager>();
+
         try
         {
-            return await ExecuteInUnitOfWorkAsync(async ct =>
+            return await RunInOwnTransactionAsync(unitOfWork, async ct =>
             {
-                await _runRepository.InsertAsync(run, ct);
-                await _runRepository.SaveChangesAsync(ct);
+                await runRepository.InsertAsync(run, ct);
+                await runRepository.SaveChangesAsync(ct);
 
-                var built = await _builder.BuildAsync(template, period, autoPost, ct);
+                var built = await builder.BuildAsync(template, period, autoPost, ct);
                 if (!built.Succeeded)
                 {
-                    // 造单据失败 -> 整个事务回滚（连同刚插入的记录），失败留痕在事务外补写。
+                    // 造单据失败 -> 本期事务回滚（连同刚插入的记录），失败留痕在事务外补写。
                     throw new RecurringAbortException(Result.Failure(built.Message!, built.Code ?? 400));
                 }
 
@@ -274,20 +348,18 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
                 run.DocId = built.Data.DocId;
                 run.DocNumber = built.Data.Number;
                 run.Posted = built.Data.Posted;
-                await _runRepository.UpdateAsync(run, ct);
+                await runRepository.UpdateAsync(run, ct);
 
                 return ToDto(run, template.Name);
             }, cancellationToken);
         }
         catch (RecurringAbortException ex)
         {
-            UndoFailedInsert(run);
             return await RecordFailureAsync(template, period, ex.Result.Message ?? "Generation failed.", cancellationToken);
         }
         catch (Exception ex) when (IsDuplicatePeriod(ex))
         {
             // 这一期已经有人做过了（重跑或并发）。这正是幂等键该起的作用，不是错误。
-            UndoFailedInsert(run);
             Logger?.LogInformation(
                 "Recurring template {TemplateId} period {Period:yyyy-MM-dd} was already generated; skipping.",
                 template.Id, period);
@@ -295,14 +367,38 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         }
         catch (Exception ex)
         {
-            UndoFailedInsert(run);
             Logger?.LogError(ex, "Recurring template {TemplateId} failed for period {Period:yyyy-MM-dd}.", template.Id, period);
             return await RecordFailureAsync(template, period, ex.Message, cancellationToken);
         }
     }
 
     /// <summary>
-    /// 撤销一条<b>插入失败</b>的生成记录。
+    /// 在<b>给定作用域的</b>工作单元里跑一段写入：成功提交、异常回滚后重抛。
+    /// 形状与 <c>ApplicationService.ExecuteInUnitOfWorkAsync</c> 相同，区别只在管理器来自本期自己的作用域 ——
+    /// 那正是让它够不到调用方环境事务的全部理由。
+    /// </summary>
+    private static async Task<TResult> RunInOwnTransactionAsync<TResult>(
+        IUnitOfWorkManager? unitOfWork, Func<CancellationToken, Task<TResult>> func, CancellationToken cancellationToken)
+    {
+        if (unitOfWork == null)
+            return await func(cancellationToken);
+
+        unitOfWork.EnableTransaction();
+        try
+        {
+            var result = await func(cancellationToken);
+            await unitOfWork.CommitTransactionAsync(cancellationToken);
+            return result;
+        }
+        catch
+        {
+            await unitOfWork.RollbackTransactionAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 撤销一条<b>插入失败</b>的生成记录（跳过留痕与失败留痕这两处本作用域内的写入）。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -310,6 +406,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     /// 后续 <c>SaveChanges</c> 重放。而下一个 <c>SaveChanges</c> 就是 <see cref="AdvanceAsync"/>
     /// 的模板更新 —— 它只接住 <c>DbUpdateConcurrencyException</c>，于是重放出来的
     /// <c>DbUpdateException</c> 会冲出 <see cref="SweepAsync"/>，把本轮<b>剩下的模板全部弄死</b>。
+    /// 生成本身自 2026-09-12 起在每期自己的作用域里做，那条路径的失败实体随作用域释放而消失，不再经这里。
     /// </para>
     /// <para>
     /// 触发它的不是什么异常情形，而是本模块设计上的<b>正常</b>路径：
@@ -395,17 +492,18 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     ///
     /// 到达结束日或次数上限时置 Ended：一条已经不会再产出任何东西的模板，还挂在
     /// "运行中"里只会让人每个月都要重新判断一次它是不是坏了。
+    ///
+    /// ★ 新的 <c>NextRunDate</c> 是 <see cref="ResolvePeriods"/> 交出来的「第一个没被本轮消费的期次」，
+    /// 不在这里另走一遍日历 —— 两处各走一遍、步数差一就丢一期。补齐上限绑定时它落在今天之前，
+    /// 下一轮从那里接着补，没有哪一期会既无 Generated 也无 Skipped 行。
     /// </remarks>
-    private async Task AdvanceAsync(RecurringDocument template, DateTime today, CancellationToken cancellationToken)
+    private async Task AdvanceAsync(RecurringDocument template, DateTime today, DateTime nextRunDate, CancellationToken cancellationToken)
     {
         var tracked = await _repository.GetAsync(template.Id, cancellationToken);
         if (tracked == null)
             return;
 
-        var next = tracked.NextRunDate;
-        var guard = 0;
-        while (next <= today && guard++ < _options.MaxCatchUpPerRun + 1)
-            next = _schedule.Next(next, tracked.Frequency, tracked.Interval, tracked.AnchorDay);
+        var next = nextRunDate;
 
         var generated = await _runRepository
             .Where(r => r.RecurringDocumentId == tracked.Id && r.Status == RecurringRunStatus.Generated)

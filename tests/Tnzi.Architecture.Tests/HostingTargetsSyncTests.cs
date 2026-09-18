@@ -122,4 +122,45 @@ public class HostingTargetsSyncTests
             "以下包的 targets 规则条件与模块自身的令牌对不上，消费方写对令牌也引用不到：\n  "
             + string.Join("\n  ", unmatched));
     }
+
+    private static string PropsPath() =>
+        Path.Combine(RepoRoot.Locate(), "src", "Tnzi.Hosting", "build", "Tnzi.Hosting.props");
+
+    /// <summary>
+    /// ★ 签入的 <c>Tnzi.Hosting.props</c> 里 <c>TnziVersion</c> 的默认值只能是令牌 <c>__TNZI_VERSION__</c>，
+    /// 由 <c>Tnzi.Hosting.csproj</c> 在打包时替换成包版本。
+    /// </summary>
+    /// <remarks>
+    /// 它曾硬编码 <c>0.1.2</c>（2026-03-08 写下，当时的版本号），此后半年没人动过：没设 <c>TnziVersion</c> 的
+    /// NuGet 消费方（脚手架产物就是）拿到 <c>Tnzi.Hosting *</c> = 最新，而 <c>TnziModules</c> 展开的每个包
+    /// 解析成「最低的 ≥ 0.1.2」—— 最新的核心配上半年前的模块程序集，restore 不报错、AssemblyVersion 钉在
+    /// Major.Minor 也不报错，只是静默地跑旧代码。仓库里没有任何 NuGet 消费方，此前唯一的门禁只读 targets 不读 props。
+    /// </remarks>
+    [Fact]
+    public void PropsDefault_IsATokenSubstitutedAtPackTime_NotAHardCodedVersion()
+    {
+        var text = File.ReadAllText(PropsPath());
+
+        var defaultValue = Regex.Match(text, @"<TnziVersion Condition=""'\$\(TnziVersion\)' == ''"">(?<value>[^<]+)</TnziVersion>");
+        defaultValue.Success.ShouldBeTrue("src/Tnzi.Hosting/build/Tnzi.Hosting.props 必须给 TnziVersion 一个仅在未设置时生效的默认值");
+        defaultValue.Groups["value"].Value.ShouldBe("__TNZI_VERSION__",
+            "TnziVersion 的默认值必须是打包时替换的令牌，不能是写死的版本号：写死的数字从不随 build/version.props 走");
+
+        Regex.IsMatch(text, @"\d+\.\d+\.\d+").ShouldBeFalse("props 里不得出现任何硬编码的版本号字面量");
+    }
+
+    /// <summary>
+    /// csproj 必须真的把令牌替换掉并把生成的文件打进 <c>build\</c>：门禁只守签入文件时，替换那一步漏了照样全绿。
+    /// 打出来的包里到底是什么，由 <c>build/nuget-pack.ps1</c> 与发布工作流在打包后拆包核对。
+    /// </summary>
+    [Fact]
+    public void HostingCsproj_GeneratesThePropsFromTheTemplateAtPackTime()
+    {
+        var csproj = File.ReadAllText(Path.Combine(RepoRoot.Locate(), "src", "Tnzi.Hosting", "Tnzi.Hosting.csproj"));
+
+        csproj.ShouldContain("__TNZI_VERSION__", customMessage: "csproj 必须替换 props 模板里的令牌");
+        csproj.ShouldContain("$(PackageVersion)", customMessage: "替换值必须是包版本，让它随 build/version.props 与 --version-suffix 走");
+        Regex.IsMatch(csproj, @"<None\s+Include=""build\\Tnzi\.Hosting\.props""[^>]*Pack=""true""")
+            .ShouldBeFalse("签入的模板文件不能原样打进包里，打进去的必须是替换后的那份");
+    }
 }

@@ -20,6 +20,7 @@ public class DefaultUserProfileController : ApiControllerBase
     protected readonly IUserDetailService? UserDetailService;
     protected readonly IOAuthService? OAuthService;
     protected readonly ISessionRevocationService? SessionRevocation;
+    protected readonly IOAuthLinkTokenService? OAuthLinkTokens;
 
     /// <summary>
     /// 初始化用户个人资料控制器
@@ -33,7 +34,8 @@ public class DefaultUserProfileController : ApiControllerBase
         ILoginLogService? loginLogService = null,
         IUserDetailService? userDetailService = null,
         IOAuthService? oAuthService = null,
-        ISessionRevocationService? sessionRevocation = null)
+        ISessionRevocationService? sessionRevocation = null,
+        IOAuthLinkTokenService? oauthLinkTokens = null)
     {
         UserService = Check.NotNull(userService);
         PasswordService = Check.NotNull(passwordService);
@@ -44,6 +46,7 @@ public class DefaultUserProfileController : ApiControllerBase
         UserDetailService = userDetailService;
         OAuthService = oAuthService;
         SessionRevocation = sessionRevocation;
+        OAuthLinkTokens = oauthLinkTokens;
     }
 
     /// <summary>
@@ -229,6 +232,40 @@ public class DefaultUserProfileController : ApiControllerBase
     }
 
     /// <summary>
+    /// 为当前用户签发一枚「绑定第三方账号」的一次性令牌（5 分钟，见 <c>Identity:OAuth:LinkTokenLifetimeMinutes</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 绑定为什么要先来这里：OAuth 的发起与回调都是匿名的整页跳转，请求上没有 bearer，回调里连「谁在绑定」
+    /// 都无从知道。此前前端直接重走登录流程，第三方邮箱与本站不同时后端凭空建出一个孤儿账号。
+    /// 前端拿到令牌后把它作为 <c>linkToken</c> 查询参数跳到 <c>GET auth/oauth/{provider}/login</c>，
+    /// 回调消费它并把外部登录挂到本账号上，不签发令牌、不新建账号。
+    /// </para>
+    /// <para>
+    /// ★ 标 <c>[RequireStepUp]</c>：这是给账号新增一种登录方式。绑上去的外部身份在改密、撤销全部会话之后照样能登录，
+    /// 一枚被盗访问令牌借它换来的是永久的密码因子绕过 —— 与登记验证器同量级，判据是后果不是端点名。
+    /// 令牌本身只有 5 分钟寿命，而绑定的后果是永久的，所以确认挂在签发这一步而不是匿名回调上。
+    /// </para>
+    /// </remarks>
+    [HttpPost("linked-accounts/{provider}/link-token")]
+    [RequireStepUp(StepUpScopes.LoginMethodManage)]
+    public virtual async Task<ApiResult<OAuthLinkTokenDto>> IssueLinkToken(string provider)
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized<OAuthLinkTokenDto>("User not authenticated");
+        }
+
+        if (OAuthLinkTokens == null)
+        {
+            return Error<OAuthLinkTokenDto>("OAuth link service is not available", 503);
+        }
+
+        var result = await OAuthLinkTokens.IssueAsync(CurrentUser.Id.Value, provider);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 解除关联第三方登录账户
     /// </summary>
     [HttpDelete("linked-accounts/{provider}")]
@@ -357,7 +394,12 @@ public class DefaultUserProfileController : ApiControllerBase
     /// <summary>
     /// 获取 TOTP 设置信息（生成密钥和二维码 URI）
     /// </summary>
+    /// <remarks>
+    /// ★ 与拆除两步验证的那几条同一个二次确认范围：setup 会重置验证器密钥、enable 把新密钥变成正式的
+    /// 第二因子 —— 「换掉」第二因子与「摘掉」它后果同量级。服务层另外拒绝对已启用验证器的账号重置密钥（409）。
+    /// </remarks>
     [HttpPost("two-factor/totp/setup")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult<TotpSetupDto>> GetTotpSetup()
     {
         if (CurrentUser?.Id == null)
@@ -378,6 +420,7 @@ public class DefaultUserProfileController : ApiControllerBase
     /// 启用 TOTP（验证用户输入的 code 后启用）
     /// </summary>
     [HttpPost("two-factor/totp/enable")]
+    [RequireStepUp(StepUpScopes.TwoFactorManage)]
     public virtual async Task<ApiResult> EnableTotp([FromBody] EnableTotpDto input)
     {
         if (CurrentUser?.Id == null)

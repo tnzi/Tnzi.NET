@@ -127,6 +127,12 @@ public partial class PaymentService
         {
             try
             {
+                // 与手工关单同一条规则：先让渠道侧失效（或确认它已付 / 已死），再改本地状态。
+                // 已在渠道侧付掉的记成功而不是过期；渠道不可达的留到下一轮。
+                var channel = await EnsureChannelSideNotPayableAsync(payment, cancellationToken);
+                if (!channel.Succeeded)
+                    continue;
+
                 // CAS：并发回调可能正在把这笔支付置成功，条件更新保证不会把已付订单标记过期
                 var affected = await _paymentRepository.AsQueryable()
                     .Where(p => p.Id == payment.Id
@@ -150,6 +156,8 @@ public partial class PaymentService
                         TradeNo = payment.TradeNo,
                         BusinessOrderNo = payment.BusinessOrderNo,
                         BusinessType = payment.BusinessType,
+                        UserId = payment.UserId,
+                        TenantId = payment.TenantId,
                         ExpiredTime = now,
                         ExtraData = payment.ExtraData
                     });

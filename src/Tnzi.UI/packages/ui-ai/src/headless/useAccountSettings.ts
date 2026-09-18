@@ -19,16 +19,30 @@
  */
 import { ref, computed, type Ref, type ComputedRef } from 'vue';
 import type { HttpClient } from '@tnzi/core/http';
-import { useProfileApi } from '@tnzi/core/services/identity';
+import {
+  useProfileApi,
+  withStepUp,
+  readSessionIdClaim,
+  StepUpPromptController,
+} from '@tnzi/core/services/identity';
 import type {
   UserDto,
   TwoFactorStatusDto,
   TotpSetupDto,
   UserSessionDto,
+  StepUpGrantDto,
 } from '@tnzi/core/services/identity';
 
 export interface UseAccountSettingsOptions {
   client?: HttpClient | null;
+  /**
+   * Step-up verifier for the writes the backend marks `[RequireStepUp]`
+   * (two-factor changes, contact-change confirmation). Called with the scope
+   * the server asked for; resolve a grant to replay the write once, `null` to
+   * give up. Defaults to a built-in `StepUpPromptController` exposed as
+   * `stepUp`, which `TStepUpPrompt` renders inline in the settings pages.
+   */
+  stepUp?: (scope: string) => Promise<StepUpGrantDto | null>;
 }
 
 /** Editable profile fields, held apart from server state so the form is free. */
@@ -44,11 +58,26 @@ export interface UseAccountSettingsReturn {
   readonly twoFactor: Ref<TwoFactorStatusDto | null>;
   readonly totpSetup: Ref<TotpSetupDto | null>;
   readonly sessions: Ref<readonly UserSessionDto[]>;
+  /**
+   * The id of the session this tab is signed in with, read off the access
+   * token's `session_id` claim; null when it cannot be told (no token, an
+   * opaque token, a deployment without session-bound tokens). The list from
+   * the backend carries no such marker itself.
+   */
+  readonly currentSessionId: ComputedRef<string | null>;
+  /** `sessions` minus the current one. Everything when the current one is unknown. */
+  readonly otherSessions: ComputedRef<readonly UserSessionDto[]>;
   readonly loading: Ref<boolean>;
   readonly busy: Ref<boolean>;
   readonly error: Ref<string | null>;
   readonly available: ComputedRef<boolean>;
   readonly dirty: ComputedRef<boolean>;
+  /**
+   * The built-in re-authentication prompt (null without a client, or when the
+   * caller supplied its own `stepUp` verifier). Render it with `TStepUpPrompt`;
+   * a challenged write opens it and waits for the user.
+   */
+  readonly stepUp: StepUpPromptController | null;
 
   load: () => Promise<void>;
   loadSessions: () => Promise<void>;
@@ -65,6 +94,12 @@ export interface UseAccountSettingsReturn {
   suspendTwoFactor: () => Promise<boolean>;
   resumeTwoFactor: () => Promise<boolean>;
 
+  /**
+   * Whether a listed session is the one this tab is using. False when it
+   * cannot be told - a caller must then keep its own safeguards (a
+   * confirmation) rather than treat "unknown" as "not mine".
+   */
+  isCurrentSession: (session: UserSessionDto) => boolean;
   revokeSession: (sessionId: string) => Promise<boolean>;
   /**
    * Signs out every OTHER device; this tab stays signed in.
@@ -96,6 +131,9 @@ export function useAccountSettings(
 ): UseAccountSettingsReturn {
   const client = options.client ?? null;
   const api = client ? useProfileApi(client) : null;
+  const stepUpPrompt = client && !options.stepUp ? new StepUpPromptController({ client }) : null;
+  const verifyStepUp =
+    options.stepUp ?? (stepUpPrompt ? (scope: string) => stepUpPrompt.verify(scope) : null);
 
   const profile = ref<UserDto | null>(null);
   const draft = ref<AccountDraft>({ ...EMPTY });
@@ -107,6 +145,18 @@ export function useAccountSettings(
   const error = ref<string | null>(null);
 
   const available = computed(() => api !== null);
+  /* Re-read per evaluation rather than cached: a refresh rotates the token
+     but keeps the session, and a re-login changes both. Depending on
+     `sessions` makes it re-evaluate whenever the list does. */
+  const currentSessionId = computed(() => {
+    void sessions.value;
+    return readSessionIdClaim(client?.getAccessToken());
+  });
+  function isCurrentSession(session: UserSessionDto): boolean {
+    const current = currentSessionId.value;
+    return current !== null && session.id.toLowerCase() === current.toLowerCase();
+  }
+  const otherSessions = computed(() => sessions.value.filter((s) => !isCurrentSession(s)));
   const dirty = computed(() => {
     const base = toDraft(profile.value);
     return (
@@ -117,13 +167,16 @@ export function useAccountSettings(
   });
 
   /** Every write funnels through here so the busy flag and the "writes never
-   *  swallow" rule are stated once instead of nine times. */
+   *  swallow" rule are stated once instead of nine times - and so the step-up
+   *  loop is too: a `[RequireStepUp]` challenge opens the prompt, and the
+   *  write is replayed once the user has verified. Cancelling leaves the
+   *  challenge as the visible failure rather than a silent no-op. */
   async function write(run: () => Promise<{ succeeded?: boolean; message?: string } | void>): Promise<boolean> {
     if (!api) return false;
     busy.value = true;
     error.value = null;
     try {
-      const result = await run();
+      const result = verifyStepUp ? await withStepUp(run, verifyStepUp) : await run();
       if (result && result.succeeded === false) {
         error.value = result.message || 'Request failed';
         return false;
@@ -250,15 +303,10 @@ export function useAccountSettings(
   }
 
   /**
-   * Revokes every session **including this one** - the caller is signed out of
-   * the tab they are sitting in.
-   *
-   * There is deliberately no "revoke the others" here: `UserSessionDto` carries
-   * no marker for the current session, so the caller cannot be excluded, and
-   * guessing at it (newest row, matching user agent) would sometimes kill the
-   * wrong one and leave the attacker's session alive. The UI names this
-   * "sign out everywhere" and warns, rather than promising a distinction the
-   * data cannot make.
+   * Default: every OTHER device; the backend identifies the caller's session
+   * from the token's session claim and excludes it. `includeCurrent = true`
+   * ends this session too - the caller must then clear local auth themselves,
+   * because nothing here knows about routing or the auth store.
    */
   async function revokeAllSessions(includeCurrent = false): Promise<boolean> {
     const ok = await write(() => api!.revokeAllSessions(includeCurrent));
@@ -300,11 +348,14 @@ export function useAccountSettings(
     twoFactor,
     totpSetup,
     sessions,
+    currentSessionId,
+    otherSessions,
     loading,
     busy,
     error,
     available,
     dirty,
+    stepUp: stepUpPrompt,
     load,
     loadSessions,
     saveProfile,
@@ -315,6 +366,7 @@ export function useAccountSettings(
     disableTotp,
     suspendTwoFactor,
     resumeTwoFactor,
+    isCurrentSession,
     revokeSession,
     revokeAllSessions,
     sendEmailChangeCode,

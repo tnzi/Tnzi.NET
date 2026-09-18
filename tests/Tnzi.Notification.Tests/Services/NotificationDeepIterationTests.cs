@@ -1,5 +1,4 @@
 using MockQueryable;
-using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 
 namespace Tnzi.Notification.Tests.Services;
@@ -49,10 +48,8 @@ public class NotificationDeepIterationTests
 
         _notificationService = new NotificationService(
             _repositoryMock.Object,
-            emailSenderMock.Object,
-            smsSenderMock.Object,
-            pushSenderMock.Object,
-            new Mock<IFaxSender>().Object,
+            new FixedProviderResolver(emailSenderMock.Object, smsSenderMock.Object, pushSenderMock.Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
             _unitOfWorkMock.Object,
             optionsMock.Object,
             serviceProviderMock.Object,

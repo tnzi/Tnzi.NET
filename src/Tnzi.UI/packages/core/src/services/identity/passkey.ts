@@ -14,6 +14,7 @@
 
 import type { HttpClient } from '../../http/http';
 import { useAuthApi } from './api';
+import type { AuthApiOptions } from './api';
 import type { PasskeyCredentialDto, TokenResultDto } from './types';
 
 /**
@@ -96,16 +97,23 @@ export async function registerPasskey(
  * two-factor enabled - passkey sign-in goes through the same issuance path as
  * password login, so continue with the existing 2FA flow rather than treating
  * that as a passkey error.
+ *
+ * @param options Forwarded to `useAuthApi`. The completing call issues the
+ *   session, so a cross-origin cookie-mode deployment must pass
+ *   `{ withCredentials: true }` here exactly as it does for password login -
+ *   otherwise the browser drops the refresh cookie and the session dies at
+ *   its first refresh.
  */
 export async function signInWithPasskey(
   client: HttpClient,
   userName?: string,
+  options: AuthApiOptions = {},
 ): Promise<TokenResultDto | null> {
   if (!isPasskeySupported()) {
     throw new PasskeyUnsupportedError();
   }
 
-  const api = useAuthApi(client);
+  const api = useAuthApi(client, options);
   const begun = ensureData(await api.beginPasskeyAssertion(userName ? { userName } : undefined));
 
   const requestOptions = PublicKeyCredential.parseRequestOptionsFromJSON(

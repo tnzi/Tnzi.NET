@@ -5,7 +5,12 @@
        teleports to body with its own mask, so we just constrain width
        via inline style). `card-style` is unreliable across Naive UI
        versions - `style` on NModal is applied to the inner content
-       container (which IS the NCard when preset='card'). -->
+       container (which IS the NCard when preset='card').
+       TOverlayTheme: the overlay provider (global mode + small controls) -
+       rendered at shell level this never inherited a content-area theme, so
+       what it takes from the provider is the control density every other
+       overlay has. -->
+  <TOverlayTheme>
   <NModal
     :show="show"
     :mask-closable="true"
@@ -68,11 +73,13 @@
       </div>
     </div>
   </NModal>
+  </TOverlayTheme>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { NModal, NInput, NEmpty } from 'naive-ui'
+import { TOverlayTheme } from '@tnzi/ui'
 import { useAdminRouteStore, type AdminMenuItem } from '../../stores/useAdminRouteStore'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 

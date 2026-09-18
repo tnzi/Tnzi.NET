@@ -80,6 +80,7 @@ vi.mock('../../../src/services/bridges/permission-bridge', () => ({
 }))
 
 import ToolPermissions from '../../../src/pages/ai/permissions/ToolPermissions.vue'
+import { persistedFormSchema } from '../../../src/pages/ai/permissions/tool-permissions-config'
 
 const stubs = {
   DataTable: { name: 'DataTable', props: ['data'], template: '<div class="n-data-table-stub" />' },
@@ -268,17 +269,13 @@ describe('ToolPermissions page', () => {
     expect(getPersistedRules).toHaveBeenCalledTimes(2)
   })
 
-  it('rejects a blank tool pattern before calling createPersistedRule', async () => {
-    const wrapper = mount(ToolPermissions, { global: { stubs } })
-    await flushPromises()
-    const vm = wrapper.vm as unknown as Vm
-    vm.crud.openCreate()
-    await flushPromises()
-    // Leave toolPattern blank - the page guards (schema-form `required` is
-    // visual only) so a blank-pattern rule never reaches the backend.
-    await expect(vm.crud.submit()).rejects.toThrow()
-    await flushPromises()
-    expect(createPersistedRule).not.toHaveBeenCalled()
+  // A blank pattern would match far too broadly. The block now lives in the
+  // form modal's host (`TFormModal` validates every slotted `TSchemaForm`
+  // before emitting submit - see components/crud/form-modal-required.test.ts),
+  // so the page only has to declare the field required.
+  it('declares the tool pattern required, so the modal blocks a blank one', () => {
+    const field = persistedFormSchema.find((f) => f.key === 'toolPattern')
+    expect(field?.required).toBe(true)
   })
 
   it('editing a rule calls updatePersistedRule then refreshes', async () => {

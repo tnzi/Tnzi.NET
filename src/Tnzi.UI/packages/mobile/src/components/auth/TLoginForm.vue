@@ -5,6 +5,12 @@ import type { OAuthSocialProvider } from '@tnzi/core/types/shared-ui';
 import { useLoginForm } from '../../headless/useLoginForm';
 
 interface ILoginFormProps {
+  /**
+   * Render a "remember me" checkbox and forward its value in `submit`.
+   * Off by default: nothing in the framework reads the flag (the core
+   * AuthStateManager persists the session the same way either way), so it is
+   * a consumer-owned opt-in until session-scoped token persistence exists.
+   */
   showRememberMe?: boolean;
   showForgotPassword?: boolean;
   showSocialLogin?: boolean;
@@ -22,6 +28,12 @@ interface ILoginFormProps {
   onRefreshCaptcha?: () => void;
   captchaLabel?: string;
   captchaPlaceholder?: string;
+  /**
+   * Token from a consumer-rendered captcha widget (Turnstile / hCaptcha /
+   * reCAPTCHA / Altcha via `useCaptchaWidget`), rendered through the `#captcha`
+   * slot. Forwarded as `captchaToken`; wins over the picture's id + code.
+   */
+  captchaToken?: string;
 }
 
 interface ILoginFormEmits {
@@ -32,6 +44,8 @@ interface ILoginFormEmits {
       rememberMe?: boolean;
       captchaId?: string;
       captchaCode?: string;
+      /** Unified captcha token (`{captchaId}:{code}` for the picture, the widget's token otherwise). */
+      captchaToken?: string;
     }
   ];
   forgotPassword: [];
@@ -41,7 +55,7 @@ interface ILoginFormEmits {
 const { t } = useI18n();
 
 const props = withDefaults(defineProps<ILoginFormProps>(), {
-  showRememberMe: true,
+  showRememberMe: false,
   showForgotPassword: true,
   showSocialLogin: false,
   socialProviders: () => [],
@@ -56,6 +70,7 @@ const props = withDefaults(defineProps<ILoginFormProps>(), {
   captchaUrl: '',
   captchaLabel: '',
   captchaPlaceholder: '',
+  captchaToken: '',
 });
 
 const emit = defineEmits<ILoginFormEmits>();
@@ -71,6 +86,9 @@ const form = useLoginForm({
   get captchaId() {
     return props.captchaId;
   },
+  get captchaToken() {
+    return props.captchaToken;
+  },
   onSubmit: async (credentials) => {
     emit('submit', {
       userName: credentials.userName,
@@ -78,6 +96,7 @@ const form = useLoginForm({
       rememberMe: props.showRememberMe ? credentials.rememberMe : undefined,
       captchaId: props.showCaptcha ? props.captchaId : undefined,
       captchaCode: props.showCaptcha ? credentials.captchaCode : undefined,
+      captchaToken: props.captchaToken || (props.showCaptcha ? credentials.captchaToken : undefined),
     });
   },
   onForgotPassword: () => emit('forgotPassword'),
@@ -94,6 +113,11 @@ const usernameRules = computed(() => [
 ]);
 const passwordRules = computed(() => [
   { required: true, message: t('auth.pleaseEnter', { field: props.passwordLabel || t('auth.password') }) },
+]);
+// useLoginForm.validate() rejects a blank captcha whenever `showCaptcha` is on;
+// the rule makes that refusal visible instead of a submit that does nothing.
+const captchaRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') }) },
 ]);
 
 const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProviders']>[number]) => {
@@ -125,9 +149,11 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
       <van-field
         v-if="props.showCaptcha"
         v-model="captchaCode"
+        name="captchaCode"
         :label="props.captchaLabel || t('auth.verificationCode')"
         :placeholder="props.captchaPlaceholder || t('auth.enterVerificationCode')"
         :disabled="isDisabled"
+        :rules="captchaRules"
       >
         <template #button>
           <img
@@ -139,6 +165,11 @@ const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProvider
           />
         </template>
       </van-field>
+
+      <!-- A provider widget the consumer renders (Turnstile / hCaptcha / reCAPTCHA / Altcha). -->
+      <div v-if="$slots.captcha" class="mb-3 px-4">
+        <slot name="captcha" />
+      </div>
 
       <div v-if="props.showRememberMe || props.showForgotPassword" class="mb-3 flex items-center justify-between px-4 text-sm">
         <van-checkbox v-if="props.showRememberMe" v-model="rememberMe" :disabled="isDisabled">

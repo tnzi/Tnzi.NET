@@ -246,6 +246,9 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
             ContentHash = contentHash
         };
         await _docRepository.InsertAsync(doc, ct);
+        // 显式 flush：无 UoW 时 InsertAsync 已落库（幂等）；有 UoW 时把 INSERT 送进事务，
+        // 让下面绕过变更跟踪器的 ExecuteUpdateAsync 匹配得到这一行。
+        await _docRepository.SaveChangesAsync(ct);
 
         // 异步摄取：有 BackgroundJobManager 时入队后台任务，否则同步执行（回退兼容）
         if (_backgroundJobManager != null)
@@ -254,15 +257,30 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
             using var ms = new MemoryStream();
             await content.CopyToAsync(ms, ct);
 
-            _backgroundJobManager.Enqueue(new DocumentIngestionJobArgs
+            var jobArgs = new DocumentIngestionJobArgs
             {
                 KnowledgeBaseId = kbId,
                 DocumentId = doc.Id,
                 FileContent = ms.ToArray(),
                 FileName = fileName
-            });
+            };
 
-            Logger.LogInformation("Enqueued background ingestion for document {DocId} ({FileName})", doc.Id, fileName);
+            // Hangfire 的 Enqueue 不随本地事务：环境 UoW 里 INSERT 要到提交才对别的连接可见，
+            // worker 抢在提交前跑起来就查不到行。事务中一律延迟到提交后入队（同 PublishEventAsync）。
+            if (UnitOfWorkManager?.IsEnabledTransaction == true && PostCommitActionQueue != null)
+            {
+                PostCommitActionQueue.Enqueue(_ =>
+                {
+                    _backgroundJobManager.Enqueue(jobArgs);
+                    return Task.CompletedTask;
+                });
+                Logger.LogInformation("Deferred background ingestion enqueue for document {DocId} ({FileName}) until the unit of work commits", doc.Id, fileName);
+            }
+            else
+            {
+                _backgroundJobManager.Enqueue(jobArgs);
+                Logger.LogInformation("Enqueued background ingestion for document {DocId} ({FileName})", doc.Id, fileName);
+            }
 
             return Ok(new DocumentUploadResultDto
             {
@@ -276,10 +294,18 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         // 同步回退路径（无 Hangfire 模块时）
         var ingestResult = await _ingestionService.IngestAsync(kbId, doc.Id, content, fileName, ct);
 
+        // 终态用条件 ExecuteUpdateAsync 落库（与 DocumentIngestionBackgroundJob 同一原语），不靠"末尾 SaveChanges"：
+        // ★ 此前这里只改了内存里的 doc.Status 并留下一段注释说 UoW 末尾会顺手写进去 —— 那只在开了环境事务时成立；
+        // 框架默认 EnableGlobalUnitOfWork=false，InsertAsync 早已立即落库，之后再没有任何 SaveChanges，
+        // 于是响应说 Completed/N，行永远停在 Processing/0：去重永不命中、删除按 0 扣计数。
         if (ingestResult.Succeeded)
         {
-            doc.Status = DocumentStatus.Completed;
-            doc.ChunkCount = ingestResult.ChunkCount;
+            await _docRepository.AsQueryable()
+                .Where(d => d.Id == doc.Id && d.Status == DocumentStatus.Processing)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.Status, DocumentStatus.Completed)
+                    .SetProperty(d => d.ChunkCount, ingestResult.ChunkCount)
+                    .SetProperty(d => d.ErrorMessage, (string?)null), ct);
 
             // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
             await _kbRepository.AsQueryable()
@@ -287,18 +313,21 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(k => k.DocumentCount, k => k.DocumentCount + 1)
                     .SetProperty(k => k.ChunkCount, k => k.ChunkCount + ingestResult.ChunkCount), ct);
+
+            doc.Status = DocumentStatus.Completed;
+            doc.ChunkCount = ingestResult.ChunkCount;
         }
         else
         {
+            await _docRepository.AsQueryable()
+                .Where(d => d.Id == doc.Id && d.Status == DocumentStatus.Processing)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.Status, DocumentStatus.Failed)
+                    .SetProperty(d => d.ErrorMessage, ingestResult.ErrorMessage), ct);
+
             doc.Status = DocumentStatus.Failed;
             doc.ErrorMessage = ingestResult.ErrorMessage;
         }
-
-        // doc 仍处于 Added 状态（InsertAsync 在 UnitOfWork 内延迟提交至 action 末尾），
-        // 上面对 Status/ChunkCount/ErrorMessage 的修改会随末尾 SaveChanges 直接写入 INSERT。
-        // 切勿在此调用 UpdateAsync(doc) —— 会把 ChangeTracker 状态从 Added 翻成 Modified，
-        // 致 SaveChanges 对尚未 INSERT 的行发 UPDATE → "affected 0 rows" 乐观并发异常
-        // （同 AgentThreadService Phase 1.5 InsertAsync-then-Update 教训）。
 
         return Ok(new DocumentUploadResultDto
         {

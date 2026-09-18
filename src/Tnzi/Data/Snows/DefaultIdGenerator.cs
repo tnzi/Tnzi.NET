@@ -34,8 +34,12 @@ public class DefaultIdGenerator : IIdGenerator
             throw new InfrastructureException("IdGenerator", "error: WorkerIdBitLength + SeqBitLength <= 22");
         }
 
+        // 0 不是机器码：SnowWorkerM1 此前把 0 替换成 DateTime.Now.Millisecond（0-999），6 位字段装不下 ⇒ 溢进时间戳位、
+        // 与别的机器码在若干 tick 之后的 id 空间重叠，且每次重启都换一个值。IdGeneratorOptions.WorkerId 默认就是 0，
+        // 所以直接调 IdHelper.SetIdGenerator(new IdGeneratorOptions()) 的脚本会静默拿到这种机器码 —— 在这里拒绝，
+        // 与配置路径的 IdGenerationOptionsValidator 同一判据（那条守不住不经配置的公开 API 调用方）。
         var maxWorkerIdNumber = Math.Pow(2, options.WorkerIdBitLength) - 1;
-        if (options.WorkerId < 0 || options.WorkerId > maxWorkerIdNumber)
+        if (options.WorkerId < 1 || options.WorkerId > maxWorkerIdNumber)
         {
             throw new InfrastructureException("IdGenerator", "WorkerId error. (range:[1, " + maxWorkerIdNumber + "]");
         }

@@ -71,6 +71,9 @@ internal static class TestHelpers
 
         var services = new ServiceCollection();
         services.AddSingleton(grantService.Object);
+        // 子 agent 加载器经它算 userPermissions；空注册表里没有门控工具 ⇒ 返回 null（不门控），与此前行为相同。
+        services.AddSingleton<IUserToolPermissionResolver>(
+            new UserToolPermissionResolver(new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>()), Mock.Of<ILogger<UserToolPermissionResolver>>()));
         return services.BuildServiceProvider();
     }
 }

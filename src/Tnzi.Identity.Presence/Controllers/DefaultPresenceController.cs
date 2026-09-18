@@ -32,9 +32,11 @@ public class DefaultPresenceController : ApiControllerBase
     /// </summary>
     /// <remarks>
     /// Intentional open-directory design (not an oversight): presence is readable by any
-    /// authenticated user, matching Slack/Teams-style internal directories. Users who want privacy
-    /// set <c>Invisible</c>, which resolves to <c>Offline</c> for everyone else. Do NOT add a
-    /// per-user authorization restriction here.
+    /// authenticated user <b>of the same directory</b>, matching Slack/Teams-style internal directories.
+    /// Users who want privacy set <c>Invisible</c>, which resolves to <c>Offline</c> for everyone else.
+    /// Do NOT add a per-user authorization restriction here. The directory boundary is the tenant:
+    /// with multi-tenancy on, <c>IPresenceService.ResolveEffectiveAsync</c> narrows the ids to the
+    /// caller's tenant (via <c>IUserTenantScopeProvider</c>) and omits the rest from the result.
     /// </remarks>
     [HttpGet]
     public virtual async Task<ApiResult<IReadOnlyList<UserPresenceDto>>> Get([FromQuery] Guid[] userIds)

@@ -54,7 +54,11 @@ public interface IToolRegistry
     /// 根据权限过滤工具
     /// </summary>
     /// <param name="groupNames">工具组名称列表</param>
-    /// <param name="userPermissions">用户权限列表</param>
+    /// <param name="userPermissions">
+    /// 用户持有的权限集合。<c>null</c> = 调用方明确放弃门控（系统 / 内部路径，返回全部工具）；
+    /// <b>空集 = 该用户一条权限都没有</b>，凡声明了 <see cref="ToolDefinition.RequiredPermissions"/>
+    /// 的工具一律排除。两者绝不能混同：把空集当「不过滤」会让零权限用户拿到比持部分权限的用户更多的工具。
+    /// </param>
     /// <returns>用户有权限访问的工具列表</returns>
     IReadOnlyList<ToolDefinition> GetToolsByGroupsWithPermissions(
         IEnumerable<string> groupNames,
@@ -69,6 +73,11 @@ public interface IToolRegistry
     /// (a grant is an allow-list of WHICH tools; permissions still gate access).
     /// 默认实现遍历 <see cref="GetAllTools"/> 按名称匹配，保持现有实现兼容。
     /// </summary>
+    /// <param name="toolNames">工具名称列表（未知名称跳过）</param>
+    /// <param name="userPermissions">
+    /// 用户持有的权限集合；语义与 <see cref="GetToolsByGroupsWithPermissions"/> 相同：
+    /// <c>null</c> 不过滤，空集排除全部门控工具。
+    /// </param>
     IReadOnlyList<ToolDefinition> GetToolsByNames(
         IEnumerable<string> toolNames,
         IEnumerable<string>? userPermissions = null)
@@ -82,7 +91,8 @@ public interface IToolRegistry
 
         var matched = GetAllTools().Where(t => nameSet.Contains(t.Name));
 
-        if (permissionsSet == null || permissionsSet.Count == 0)
+        // 只有 null 表示放弃门控；空集是「没有任何权限」，必须走过滤
+        if (permissionsSet == null)
         {
             return matched.ToList();
         }

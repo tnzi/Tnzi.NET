@@ -7,6 +7,7 @@ public static class AgentTraceEventTypes
 {
     public const string Error = "error";
     public const string RunCompleted = "run_completed";
+    public const string RunCancelled = "run_cancelled";
     public const string RunRejected = "run_rejected";
     public const string RunResumed = "run_resumed";
     public const string StreamCompleted = "stream_completed";

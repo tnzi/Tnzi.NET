@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using CoreErrorCodes = Tnzi.Exceptions.ErrorCodes;
 
 namespace Tnzi.Audit.Services;
 
@@ -21,18 +22,48 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
 {
     private readonly IRepository<AuditRecordAccess, Guid> _repository;
     private readonly IOptionsMonitor<RecordAccessAuditOptions> _options;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
 
     /// <summary>
     /// 初始化 <see cref="RecordAccessAuditor"/>。
     /// </summary>
+    /// <param name="repository">记录级读审计仓储。</param>
+    /// <param name="options">记录级读审计选项（热读）。</param>
+    /// <param name="serviceProvider">服务提供程序。</param>
+    /// <param name="currentTenant">当前租户访问器；查询面按调用者的租户收口（见 <see cref="CallerTenantScope"/>）。</param>
+    /// <param name="multiTenancyOptions">多租户开关；关闭时 <c>TenantId</c> 列不存在，谓词一行不加。</param>
     public RecordAccessAuditor(
         IRepository<AuditRecordAccess, Guid> repository,
         IOptionsMonitor<RecordAccessAuditOptions> options,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _options = Check.NotNull(options);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
+    }
+
+    /// <summary>调用者的租户作用域（每次现算）。</summary>
+    private CallerTenantScope TenantScope => CallerTenantScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser);
+
+    /// <summary>
+    /// 查询面的起点：调用者有租户则钉在本租户，宿主看全部。
+    /// 写入面（登记 / 配额 / 链尾）刻意不走这里 —— 那三处按用户定位，且不该被任何过滤器挡住。
+    /// </summary>
+    private IQueryable<AuditRecordAccess> ScopedAccesses()
+    {
+        var scope = TenantScope;
+        if (!scope.IsPinned)
+        {
+            return _repository.AsQueryable();
+        }
+
+        var tenantId = scope.TenantId;
+        return _repository.Where(e => e.TenantId == tenantId);
     }
 
     /// <inheritdoc />
@@ -130,10 +161,19 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
             return Ok();
         }
 
+        // 链要整条读才验得了，所以不按租户过滤行；但别租户用户的链对租户内的调用者等同于不存在
+        //（404，不泄露存在性）。链上混有别租户 / 无租户行（切换过租户的用户、多租户开启前的旧行）
+        // 时同样拒绝：失败关闭，宿主照常能验。
         var entries = await _repository.AsQueryable()
             .Where(e => e.UserId == userId)
             .OrderBy(e => e.Sequence)
             .ToListAsync(cancellationToken);
+
+        var scope = TenantScope;
+        if (scope.IsPinned && entries.Any(e => !scope.CanAccess(e.TenantId)))
+        {
+            return Fail($"Audit chain not found for user {userId}.", 404, CoreErrorCodes.RESOURCE_NOT_FOUND);
+        }
 
         var expectedPrevious = string.Empty;
         foreach (var entry in entries)
@@ -168,7 +208,7 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
                 [], query.PageIndex, query.PageSize, 0));
         }
 
-        var queryable = ApplyFilters(_repository.AsQueryable(), query);
+        var queryable = ApplyFilters(ScopedAccesses(), query);
 
         // 按时间倒序：最近一次访问排在最前，这是查「谁刚看过」时想要的顺序。
         var paged = await queryable.OrderByDescending(e => e.CreationTime)
@@ -198,7 +238,7 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
             return Fail<List<RecordAccessUserStatDto>>("topN must be greater than zero.", 400);
         }
 
-        var queryable = _repository.AsQueryable();
+        var queryable = ScopedAccesses();
 
         if (startTime.HasValue)
         {

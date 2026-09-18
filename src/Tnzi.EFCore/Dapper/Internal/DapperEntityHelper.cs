@@ -23,8 +23,10 @@ public static class DapperEntityHelper
     // 缓存主键信息：Key = (EntityType.FullName, DbContextType.FullName) -> (ColumnName, PropertyName)
     private static readonly ConcurrentDictionary<(string EntityType, string DbContextType), ColumnMapping> _keyColumnCache = new();
 
-    // 缓存列映射列表：Key = (EntityType.FullName, DbContextType.FullName, ExcludeKey) -> ColumnMappings
-    private static readonly ConcurrentDictionary<(string EntityType, string DbContextType, bool ExcludeKey), List<ColumnMapping>> _columnMappingsCache = new();
+    // 缓存列映射列表：Key = (EntityType.FullName, DbContextType.FullName, MultiTenancyEnabled, ExcludeKey) -> ColumnMappings
+    // ★ 多租户开关进键：同一个上下文类型按开关建出两份模型（关闭时 IMultiTenant.TenantId 被 Ignore），
+    //   与 EF 自己的 MultiTenancyModelCacheKeyFactory 同口径；只按类型缓存会把另一份模型的列表拿去拼 SQL。
+    private static readonly ConcurrentDictionary<(string EntityType, string DbContextType, bool MultiTenancyEnabled, bool ExcludeKey), List<ColumnMapping>> _columnMappingsCache = new();
 
     /// <summary>
     /// 从 DbContext 获取实体的表名
@@ -141,7 +143,8 @@ public static class DapperEntityHelper
     /// </summary>
     public static List<ColumnMapping> GetColumnMappings(Type entityType, DbContext dbContext, bool excludeKey = true)
     {
-        var cacheKey = (entityType.FullName ?? entityType.Name, dbContext.GetType().FullName ?? dbContext.GetType().Name, excludeKey);
+        var multiTenancyEnabled = dbContext is IMultiTenancySwitchProvider provider && provider.IsMultiTenancyEnabled;
+        var cacheKey = (entityType.FullName ?? entityType.Name, dbContext.GetType().FullName ?? dbContext.GetType().Name, multiTenancyEnabled, excludeKey);
 
         return _columnMappingsCache.GetOrAdd(cacheKey, _ =>
         {

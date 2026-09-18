@@ -43,6 +43,31 @@ describe('audit-bridge', () => {
     expect(auditApi.exportJson).toHaveBeenCalledWith({})
   })
 
+  // `client.download` resolves the refusal envelope the backend sends for an
+  // oversized export (400 AUDIT_EXPORT_TOO_LARGE, "narrow the filter"); a bare
+  // unwrap hands `undefined` back and the page has nothing to show.
+  it('logs.exportCsv / exportJson reject with the server message on a failed envelope', async () => {
+    const auditApi = mockAuditApi()
+    const refused = {
+      succeeded: false, success: false, code: 400, data: undefined,
+      errorCode: 'AUDIT_EXPORT_TOO_LARGE', message: '12000 rows matched; narrow the filter to at most 10000',
+    }
+    auditApi.exportCsv = vi.fn(async () => refused)
+    auditApi.exportJson = vi.fn(async () => refused)
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    await expect(bridge.logs.exportCsv({ httpMethod: 'POST' })).rejects.toThrow(/narrow the filter/)
+    await expect(bridge.logs.exportJson()).rejects.toThrow(/narrow the filter/)
+  })
+
+  it('operations.exportCsv / exportJson force isWriteOperation like operations.fetch', async () => {
+    const auditApi = mockAuditApi()
+    const bridge = createAuditBridge({ auditApi: auditApi as never })
+    await bridge.operations.exportCsv({ userId: 'u1', isWriteOperation: false })
+    await bridge.operations.exportJson()
+    expect(auditApi.exportCsv).toHaveBeenCalledWith({ userId: 'u1', isWriteOperation: true })
+    expect(auditApi.exportJson).toHaveBeenCalledWith({ isWriteOperation: true })
+  })
+
   it('logs.detail / operations.detail unwrap getById (entity-level change tree)', async () => {
     const auditApi = mockAuditApi()
     const full = {

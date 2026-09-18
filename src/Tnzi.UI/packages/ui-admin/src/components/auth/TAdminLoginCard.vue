@@ -19,7 +19,6 @@ import {
   NFormItem,
   NInput,
   NButton,
-  NCheckbox,
   NTabs,
   NTab,
   NDivider,
@@ -38,7 +37,6 @@ export interface LoginPayload {
   method: 'pwd' | 'code'
   userName: string
   password: string
-  remember: boolean
 }
 
 export type TAdminLoginCardVariant = 'page' | 'standalone'
@@ -86,7 +84,6 @@ const form = reactive<LoginPayload>({
   method: 'pwd',
   userName: props.defaultUserName,
   password: props.defaultPassword,
-  remember: true,
 })
 
 function t(key: string, fallback?: string): string {
@@ -225,12 +222,8 @@ function fillDemo(account: DemoAccount): void {
             </div>
           </NFormItem>
 
-          <div class="t-admin-login__row">
-            <NCheckbox v-model:checked="form.remember">
-              {{ t('admin.login.rememberMe', 'Remember me') }}
-            </NCheckbox>
+          <div v-if="$slots['forgot-link']" class="t-admin-login__row">
             <a
-              v-if="$slots['forgot-link']"
               class="t-admin-login__forgot"
               href="#"
               @click.prevent
@@ -356,7 +349,7 @@ function fillDemo(account: DemoAccount): void {
 .t-admin-login__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   margin: 4px 0 16px;
 }
 .t-admin-login__forgot {

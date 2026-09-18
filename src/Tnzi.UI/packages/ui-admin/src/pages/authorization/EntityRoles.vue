@@ -213,15 +213,11 @@ async function loadEntities(): Promise<void> {
 
 async function loadRoles(): Promise<void> {
   try {
-    const result = await idBridge.roles.fetch({
-      pageIndex: 1,
-      pageSize: 500,
-      sortField: 'name',
-      sortOrder: 'asc' as const,
-      searchText: '',
-      filters: {},
-    })
-    roles.value = result.items
+    // The unpaged endpoint: the paged one clamps pageSize to 100 silently, so
+    // the former `pageSize: 500` call left roles 101+ out of the matrix.
+    const all = await idBridge.roles.getAll()
+    roles.value = [...all]
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
       .filter((r): r is RoleDto & { id: string; name: string } => !!(r.id && r.name))
       .map((r) => ({
         id: r.id,

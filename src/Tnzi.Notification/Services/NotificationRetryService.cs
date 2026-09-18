@@ -82,11 +82,10 @@ public class NotificationRetryService : ApplicationService, INotificationRetrySe
             var delay = TimeSpan.FromSeconds(delaySeconds);
             LogInformation("Retrying notification {NotificationId} via queue with {DelaySeconds}s delay (attempt {RetryCount}/{MaxRetryCount})",
                 messageId, delaySeconds, notification.RetryCount + 1, notification.MaxRetryCount);
-            await _queueService.EnqueueWithDelayAsync((sp, ct) =>
-            {
-                var svc = sp.GetRequiredService<INotificationService>();
-                return svc.SendAsync(messageId, ct);
-            }, delay);
+            // 租户直接取自这一行：它是在当前租户的过滤器下加载出来的，带着它进队列，
+            // 延迟到期后的那个新作用域才查得到它（见 NotificationWorkItem）。
+            await _queueService.EnqueueWithDelayAsync(
+                NotificationWorkItem.SendMessage(messageId, notification.TenantId), delay);
         }
         else
         {

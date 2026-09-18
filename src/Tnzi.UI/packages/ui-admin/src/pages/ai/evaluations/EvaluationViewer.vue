@@ -492,6 +492,7 @@ import type { EChartsOption } from 'echarts'
 import { useSafeMessage } from '../../_shared/safe-message'
 import { useFormModal, type UseFormModalReturn } from '../../../headless/useFormModal'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
+import { fetchAllPages } from '../../../headless/fetchAllPages'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import TFormModal from '../../../components/crud/TFormModal.vue'
@@ -559,15 +560,8 @@ async function loadAgents(): Promise<void> {
   if (agents.value.length || agentsLoading.value) return
   agentsLoading.value = true
   try {
-    const result = await bridge.agents.fetch({
-      pageIndex: 1,
-      pageSize: 100,
-      sortField: 'name',
-      sortOrder: 'asc',
-      searchText: '',
-      filters: {},
-    })
-    agents.value = result.items
+    // Every agent, not the first clamped page (pageSize is clamped to 100 silently).
+    agents.value = await fetchAllPages((q) => bridge.agents.fetch(q), { sortField: 'name', sortOrder: 'asc' })
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {

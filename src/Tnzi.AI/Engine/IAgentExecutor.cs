@@ -38,4 +38,11 @@ public interface IAgentExecutor
     /// 默认实现返回 <c>this</c>（不支持工具合并的执行器优雅降级：运行继续、仅缺少额外工具）。
     /// </summary>
     IAgentExecutor WithAdditionalTools(IEnumerable<AITool> additionalTools) => this;
+
+    /// <summary>
+    /// 创建一个去掉指定名称工具的新执行器（不修改原实例）。运行时在技能约束要求隐藏某些工具时调用。
+    /// 默认实现返回 <c>this</c>（不支持过滤的执行器优雅降级：模型仍看得到那些工具，
+    /// 但工具执行管线里的约束中间件照样拒绝调用，安全边界不依赖本方法）。
+    /// </summary>
+    IAgentExecutor WithoutTools(IEnumerable<string> toolNames) => this;
 }

@@ -9,6 +9,7 @@ public sealed class RecordingFileStorage : IFileStorage
 {
     private readonly IFileStorage _inner;
     private readonly List<string> _keys = [];
+    private readonly List<string> _uploadedPaths = [];
 
     public RecordingFileStorage(IFileStorage inner)
     {
@@ -18,12 +19,17 @@ public sealed class RecordingFileStorage : IFileStorage
     /// <summary>按调用顺序记下的全部上传键。</summary>
     public IReadOnlyList<string> UploadedKeys => _keys;
 
+    /// <summary>provider 为每次上传返回的路径（与父测试项目的同名类同形）。</summary>
+    public IReadOnlyList<string> UploadedPaths => _uploadedPaths;
+
     public string ProviderName => _inner.ProviderName;
 
-    public Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
+    public async Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
     {
         _keys.Add(fileName);
-        return _inner.UploadAsync(fileName, stream, contentType);
+        var path = await _inner.UploadAsync(fileName, stream, contentType);
+        _uploadedPaths.Add(path);
+        return path;
     }
 
     public Task<Stream> DownloadAsync(string filePath) => _inner.DownloadAsync(filePath);

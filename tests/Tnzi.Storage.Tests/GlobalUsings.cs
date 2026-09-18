@@ -15,6 +15,7 @@ global using System.Security.Cryptography;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.Domain.Repositories;
+global using Tnzi.Documents;
 global using Tnzi.TestBase;
 global using Tnzi.Storage.Dtos;
 global using Tnzi.Storage.Entities;

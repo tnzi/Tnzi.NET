@@ -31,7 +31,18 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
             return;
         }
 
-        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底
+        // 不再吞异常：发送失败应冒泡给事件总线，由其错误隔离 + 重试 + DLQ 兜底。
+        // 这句对 Result 形态的失败同样成立：CreateAndSendAsync 对业务失败不抛而是返回 Fail，
+        // 由 NotificationDispatch.SendOrThrowAsync 把它变成异常（见该类的注释）。
+
+        // 没有验证码就没有可发的东西：发一封「Your verification code is 」比不发更糟
+        // （用户拿到一封没有码的信而日志记「sent」）。发不出去就别发。
+        if (string.IsNullOrWhiteSpace(@event.Code))
+        {
+            throw new TnziException(
+                $"Two-factor code for user {@event.UserId} cannot be delivered: the event carries no code.");
+        }
+
         var appName = await GetAppNameAsync();
 
         // 根据类型发送
@@ -106,7 +117,7 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
             ]
         };
 
-        await _notificationService.CreateAndSendAsync(request, cancellationToken);
+        await NotificationDispatch.SendOrThrowAsync(_notificationService, request, "two-factor code email", cancellationToken);
     }
 
     /// <summary>
@@ -141,6 +152,6 @@ public class TwoFactorCodeSentEventHandler : IEventHandler<TwoFactorCodeSentEven
             ]
         };
 
-        await _notificationService.CreateAndSendAsync(request, cancellationToken);
+        await NotificationDispatch.SendOrThrowAsync(_notificationService, request, "two-factor code SMS", cancellationToken);
     }
 }

@@ -132,7 +132,11 @@ describe('TModalShell', () => {
   // half the delta (measured: 254px on a 10-field form). These three guards are
   // what let a consumer drop a form in without hand-sizing the dialog.
 
-  it('anchors the card near the top so growth only extends downward', () => {
+  // These inline margins are the FALLBACK placement: the stylesheet's spacer
+  // pair (see "Placement" below) owns it wherever `:has()` is supported and
+  // clears them there. A browser without `:has()` gets the card pinned at the
+  // anchor, which is the placement this component shipped with first.
+  it('writes the anchored fallback placement for browsers without :has()', () => {
     const w = mount(TModalShell, { props: { show: true }, global: { stubs } })
     const style = w.findComponent(modalStub).props('style') as Record<string, string>
     expect(style.marginTop).toBe('min(10vh, 88px)')
@@ -179,18 +183,19 @@ describe('TModalShell', () => {
     expect(w.find('.t-modal-shell__scroll').attributes('style')).toContain('max-height: 95vh')
   })
 
-  // -- Placement once the card is at that bound ------------------------------
-  // The bound made the anchor lopsided: a card at it sits under the full
-  // min(10vh, 88px) with only the 16px gutter beneath, which reads as a dialog
-  // that slipped down rather than one that was placed, and the taller the
-  // dialog the worse it looks. The stylesheet turns the anchor into a MAXIMUM
-  // with a pair of flex spacers around the card - the top one capped, both
-  // claiming an equal share of the leftover - so the offset is
-  // `min(anchor, slack / 2)`. Measured in Chromium at 1000px: a card at the
-  // bound went from 88 above / 16 below to 52 / 52, while a 763.6px one (not at
-  // the bound) stayed at 88 above to the pixel. That machinery is CSS and
-  // invisible from here; what the component owns is the marker class it hangs
-  // off, and the anchor value the two sides have to agree on.
+  // -- Placement -------------------------------------------------------------
+  // Where the card sits is a division of the slack around it, done by a pair
+  // of flex spacers in the stylesheet: one share above, two below (the optical
+  // centre), and the top one floored at half the slack the bound leaves, so a
+  // card AT its bound splits that evenly. Measured in Chromium: a 221.6px card
+  // on a 1205px viewport sits 327.8 above / 655.6 below (a fixed anchor put it
+  // at 88 / 895, which consumers read as "every small dialog sits too high");
+  // a card at its bound sits 52 / 52 on 1000px and 44 / 44 on 720. The cost is
+  // that a dialog growing after it opens moves its header up by a third of the
+  // growth (124px on the 10-field form that centring moved 254px) until the
+  // floor binds, then not at all. That machinery is CSS and invisible from
+  // here; what the component owns is the marker class it hangs off, and the
+  // two values the floor and the bound have to agree on.
 
   it('marks the card as top-anchored so the placement rules can reach it', () => {
     const w = mount(TModalShell, { props: { show: true }, global: { stubs } })
@@ -213,20 +218,26 @@ describe('TModalShell', () => {
     expect(w.find('.n-modal-stub').classes()).not.toContain('t-modal-shell--top')
   })
 
-  it('places the top-anchored card with a capped spacer pair', () => {
+  /** Every declaration block the given spacer pseudo-element owns, joined. */
+  function spacerRules(source: string, pseudo: '::before' | '::after'): string {
+    const re = new RegExp(`:has\\(> \\.t-modal-shell--top\\)${pseudo}\\s*\\{([^}]*)\\}`, 'g')
+    return [...source.matchAll(re)].map((m) => m[1]).join('\n')
+  }
+
+  it('places the top-aligned card with a 1:2 spacer pair', () => {
     const source = readSource()
     // The container is naive's, and it is a flex ROW. Spacers only stack above
     // and below the card once it is a column - and with the margins cleared,
     // a row hands the placement to naive's own `align-self: center`, i.e.
     // `align="top"` silently becomes `align="center"` (measured at 1000px: a
-    // short dialog at 282 above / 282 below instead of 88 / 476).
+    // 429.6px dialog at 285 above / 285 below instead of 190 / 380).
     const container = /:has\(> \.t-modal-shell--top\)\s*\{([^}]*)\}/.exec(source)?.[1]
     expect(container).toMatch(/flex-direction:\s*column/)
-    const pair
-      = /:has\(> \.t-modal-shell--top\)::before,\s*[^{]*::after\s*\{([^}]*)\}/.exec(source)?.[1]
-    // Equal shares of the leftover: that is what makes the two ends match once
-    // the cap stops applying.
-    expect(pair).toMatch(/flex:\s*1 1 0%/)
+    // One share above, two below. Both on a zero basis, or the shares would be
+    // taken from what is left after the spacers' own size rather than from the
+    // whole slack.
+    expect(spacerRules(source, '::before')).toMatch(/flex:\s*1 1 0%/)
+    expect(spacerRules(source, '::after')).toMatch(/flex:\s*2 1 0%/)
     // The spacers are added to the fallback margins, not substituted for them,
     // so those have to be cleared where the spacers apply. `margin-top` is the
     // half that bites (measured at 1000px: 96 above / 8 below, lower than the
@@ -240,17 +251,23 @@ describe('TModalShell', () => {
     expect(reset).toMatch(/margin-bottom:\s*0 !important/)
   })
 
-  // The cap and the fallback margin are the same distance, but they live on
-  // opposite sides of the SFC and cannot share a custom property: the spacer is
-  // the card's sibling, and custom properties only inherit downward. Drift
-  // between them would be silent - the card would simply settle a few pixels
-  // off the anchor it advertises.
-  it('caps the top spacer at exactly the anchor the script writes', () => {
+  // The floor under the top spacer is half of the slack the card's bound
+  // leaves, and the bound is written by the script from two constants; the
+  // floor lives on the other side of the SFC and cannot share them through a
+  // custom property (the spacer is the card's sibling, and custom properties
+  // only inherit downward). Drift between them would be silent: a card at its
+  // bound would simply stop splitting its slack evenly.
+  it('floors the top spacer at half the slack the script leaves at the bound', () => {
     const source = readSource()
     const anchor = /const TOP_ANCHOR = '([^']+)'/.exec(source)?.[1]
-    const cap = /::before\s*\{\s*max-height:\s*([^;]+);/.exec(source)?.[1]
+    const gutter = /const VIEWPORT_GUTTER = '([^']+)'/.exec(source)?.[1]
     expect(anchor).toBe('min(10vh, 88px)')
-    expect(cap).toBe(anchor)
+    expect(gutter).toBe('16px')
+    const floor = /min-height:\s*([^;]+);/.exec(spacerRules(source, '::before'))?.[1]
+    expect(floor).toBe(`calc((${anchor} + ${gutter}) / 2)`)
+    // And no cap: the cap is what put a short dialog 88px from the top of a
+    // 1205px screen.
+    expect(spacerRules(source, '::before')).not.toMatch(/max-height/)
   })
 
   it('leaves the height to the fullscreen rules when fullscreen', () => {

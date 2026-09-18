@@ -2,7 +2,7 @@ namespace Tnzi.Authorization.Security;
 
 /// <summary>
 /// Runs <see cref="AuthorizationModule.RunStartupTasksAsync"/> (permission-catalogue
-/// seed + <c>PermissionManager.RefreshAsync</c> + built-in super-admin role seed +
+/// seed + built-in super-admin role seed +
 /// first-super-admin bootstrap + role-existence diagnostics) AFTER database migrations,
 /// via the framework's post-migration startup pipeline.
 /// </summary>

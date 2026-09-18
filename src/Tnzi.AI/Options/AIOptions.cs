@@ -82,6 +82,12 @@ public class AIOptions
     public BuiltInToolsOptions BuiltInTools { get; set; } = new();
 
     /// <summary>
+    /// 无 AgentId 的请求自选工具（HTTP 聊天体的 <c>toolGroups</c>）的服务端允许列表。
+    /// 默认两张表都为空 = 客户端自选一律 403（失败关闭）。
+    /// </summary>
+    public AdHocToolsOptions AdHocTools { get; set; } = new();
+
+    /// <summary>
     /// 配额默认值配置
     /// </summary>
     public QuotaOptions Quota { get; set; } = new();

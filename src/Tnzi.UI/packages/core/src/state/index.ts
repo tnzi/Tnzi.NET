@@ -9,7 +9,14 @@
  */
 
 // 状态管理器
-export { AuthStateManager, createInitialAuthState } from './auth';
+export {
+  AuthStateManager,
+  createInitialAuthState,
+  sessionEndReasonOf,
+  SESSION_ENDED_FOR_SECURITY_MESSAGE,
+  SESSION_EXPIRED_MESSAGE,
+} from './auth';
+export type { SessionEndReason } from './auth';
 export { UserStateManager, createInitialUserState } from './user';
 export { AppStateManager, createInitialAppState } from './app';
 

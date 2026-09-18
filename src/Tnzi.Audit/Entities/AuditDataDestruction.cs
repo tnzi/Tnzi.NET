@@ -115,6 +115,6 @@ public class AuditDataDestruction : CreationAuditedEntity<Guid>
     /// <summary>本条哈希，覆盖链上一条的哈希与本条的全部关键字段。</summary>
     public string Hash { get; set; } = string.Empty;
 
-    /// <summary>租户 ID（未启用多租户时不映射为列）。</summary>
+    /// <summary>被销毁数据所属的租户（不是触发者的租户；无租户维度的实体为 null。未启用多租户时不映射为列）。</summary>
     public Guid? TenantId { get; set; }
 }

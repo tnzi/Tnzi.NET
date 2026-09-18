@@ -2340,7 +2340,8 @@ export interface CreateRecurringDocumentDto {
 }
 
 export interface UpdateRecurringDocumentDto extends Omit<CreateRecurringDocumentDto, 'kind'> {
-  concurrencyStamp: string;
+  /** Stamp returned by GET; the server answers 409 when it no longer matches. Omit to skip the client-side check. */
+  concurrencyStamp?: string;
 }
 
 export interface RecurringDocumentQueryDto extends PagedQueryDto {

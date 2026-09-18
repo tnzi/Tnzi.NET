@@ -41,6 +41,13 @@ public class SubscriptionChange : CreationAuditedEntity<Guid>, IMultiTenant
     public SubscriptionChangeStatus Status { get; set; }
 
     /// <summary>
+    /// 补差款待支付单的流水号（<c>Payment.TradeNo</c>）：只有「需补差且未绑卡」的立即升级才有。
+    /// 变更被取消（用户反悔 / 续费或试用转正把它所属的周期结束掉）时凭它关单，
+    /// 否则那张单敞着，付了就是一笔无处生效的孤儿付款。
+    /// </summary>
+    public string? PaymentTradeNo { get; set; }
+
+    /// <summary>
     /// 租户ID
     /// </summary>
     public Guid? TenantId { get; set; }

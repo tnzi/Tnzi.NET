@@ -76,11 +76,45 @@ public class RunStore : IRunStore
             .ToListAsync(cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<List<AgentRun>> ListByOwnerAsync(Guid? ownerUserId, AgentRunStatus? status, int maxResults, CancellationToken cancellationToken = default)
+    {
+        var query = _runRepository.AsQueryable().Where(r => r.CreatorId == ownerUserId);
+
+        if (status.HasValue)
+        {
+            query = query.Where(r => r.Status == status.Value);
+        }
+
+        return await query
+            .OrderByDescending(r => r.CreationTime)
+            .Take(maxResults)
+            .ToListAsync(cancellationToken);
+    }
+
     /// <summary>统计指定根 Run 下的后代数量（不含根自身）</summary>
     public async Task<int> CountDescendantsAsync(Guid rootRunId, CancellationToken cancellationToken = default)
     {
         return await _runRepository.AsQueryable()
             .CountAsync(r => r.RootRunId == rootRunId && r.Id != rootRunId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountActiveDescendantsAsync(Guid rootRunId, CancellationToken cancellationToken = default)
+    {
+        return await _runRepository.AsQueryable()
+            .CountAsync(r => r.RootRunId == rootRunId && r.Id != rootRunId
+                             && (r.Status == AgentRunStatus.Pending || r.Status == AgentRunStatus.Running),
+                cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<int> CountActiveRootRunsByOwnerAsync(Guid? ownerUserId, CancellationToken cancellationToken = default)
+    {
+        return await _runRepository.AsQueryable()
+            .CountAsync(r => r.CreatorId == ownerUserId && r.ParentRunId == null
+                             && (r.Status == AgentRunStatus.Pending || r.Status == AgentRunStatus.Running),
+                cancellationToken);
     }
 
     /// <summary>获取指定 Run 的父 Run ID（仅 Id + ParentRunId 字段）</summary>

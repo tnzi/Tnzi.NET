@@ -1,5 +1,4 @@
 using Tnzi.Audit.Tests.TestSupport;
-using Tnzi.Data;
 
 namespace Tnzi.Audit.Tests.Integration;
 

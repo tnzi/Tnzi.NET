@@ -157,6 +157,6 @@ public class DataAuthPackageAbsenceTests
         // 非空洞守卫 + 「只少了这一块」的证据。
         serviceTypeNames.ShouldContain(nameof(IUserFunctionService));
         serviceTypeNames.ShouldContain(nameof(IDualControlService));
-        serviceTypeNames.ShouldContain(nameof(IPermissionManager));
+        serviceTypeNames.ShouldContain(nameof(Tnzi.Security.Authorization.IPermissionChecker));
     }
 }

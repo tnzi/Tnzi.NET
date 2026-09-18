@@ -50,7 +50,8 @@ public class ResumeDownloadUploadTests
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
-            new UploadGuard(optionsMonitor.Object));
+            new UploadGuard(optionsMonitor.Object),
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
     }
 
     #region 断点下载测试

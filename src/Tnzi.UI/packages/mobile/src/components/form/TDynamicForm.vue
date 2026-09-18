@@ -69,6 +69,20 @@ const toVanFieldType = (type: string): 'text' | 'number' | 'password' | 'textare
   return 'text';
 };
 
+const getArrayValue = (key: string): unknown[] => {
+  const value = formData.value[key];
+  return Array.isArray(value) ? value : [];
+};
+
+/**
+ * The value a slot-rendered field (radio / checkbox / switch / file) hands to
+ * van-field for validation only; the control inside `#input` renders it. Vant
+ * types the prop as string | number, but its required rule reads any value and
+ * counts `false` and `[]` as missing, which is exactly what a consent switch and
+ * an empty upload need. Not `getInputValue`: that stringifies `false` to 'false'.
+ */
+const getValidationValue = (key: string) => formData.value[key] as string | number | undefined;
+
 const updateField = (key: string, value: unknown) => form.updateField({ key }, value);
 
 const handleSubmit = () => form.handleSubmit();
@@ -123,9 +137,14 @@ const rangeMessage = (min?: number, max?: number) => {
 /**
  * Field rules derived from the contract.
  *
+ * `required` applies to every type: Vant's required rule reads an empty string,
+ * null / undefined, an empty array (file, multi-checkbox) and `false` as
+ * missing, so on a switch or checkbox it means "must be on" (a consent gate).
  * `min` / `max` are read as numeric bounds for `number` fields, as a file count
- * for `file` fields (applied as the uploader's max-count, not as a rule), and as
- * text length everywhere else.
+ * for `file` fields (applied as the uploader's max-count, not as a rule), as a
+ * selection count for a checkbox group (a checkbox with `options` holds an
+ * array; the text-length rule would measure the joined string), and as text
+ * length everywhere else.
  */
 const fieldRules = (field: IDynamicFormField): FieldRule[] => {
   const rules: FieldRule[] = [];
@@ -147,6 +166,20 @@ const fieldRules = (field: IDynamicFormField): FieldRule[] => {
       },
       message: rangeMessage(field.min, field.max),
     });
+  } else if (hasBound && field.type === 'checkbox' && field.options?.length) {
+    const count = (value: unknown) => (Array.isArray(value) ? value.length : 0);
+    if (field.min != null) {
+      rules.push({
+        validator: (value: unknown) => count(value) >= field.min!,
+        message: t('form.minSelected', { min: field.min }),
+      });
+    }
+    if (field.max != null) {
+      rules.push({
+        validator: (value: unknown) => count(value) <= field.max!,
+        message: t('form.maxSelected', { max: field.max }),
+      });
+    }
   } else if (hasBound && field.type !== 'file') {
     if (field.min != null) {
       rules.push({
@@ -263,6 +296,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
           :required="field.required"
           :rules="fieldRules(field)"
           :disabled="props.disabled || field.disabled"
+          v-bind="field.props"
           @update:model-value="updateField(field.key, $event)"
         />
 
@@ -278,6 +312,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
           :required="field.required"
           :rules="fieldRules(field)"
           :disabled="props.disabled || field.disabled"
+          v-bind="field.props"
           @update:model-value="updateField(field.key, $event)"
         />
 
@@ -293,6 +328,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
             :required="field.required"
             :rules="fieldRules(field)"
             :disabled="props.disabled || field.disabled"
+            v-bind="field.props"
             @click="openPopup(field)"
           />
           <van-popup v-model:show="popupVisible[field.key]" round position="bottom">
@@ -304,12 +340,22 @@ const getFileList = (key: string): UploaderFileListItem[] => {
           </van-popup>
         </template>
 
-        <!-- radio -> van-radio-group -->
-        <van-field v-else-if="field.type === 'radio'" :label="field.label" :required="field.required">
+        <!-- radio -> van-radio-group. The field carries name / model-value / rules
+             so van-form validates it like any other: a slot-rendered control
+             without them gets the asterisk and nothing else. -->
+        <van-field
+          v-else-if="field.type === 'radio'"
+          :name="field.key"
+          :model-value="getValidationValue(field.key)"
+          :label="field.label"
+          :required="field.required"
+          :rules="fieldRules(field)"
+        >
           <template #input>
             <van-radio-group
               :model-value="formData[field.key]"
               direction="horizontal"
+              v-bind="field.props"
               @update:model-value="updateField(field.key, $event)"
             >
               <van-radio
@@ -324,23 +370,57 @@ const getFileList = (key: string): UploaderFileListItem[] => {
           </template>
         </van-field>
 
-        <!-- checkbox (single boolean) -->
-        <van-field v-else-if="field.type === 'checkbox'" :label="field.label" :required="field.required">
+        <!-- checkbox: a group over `options` (array value), else a single boolean -->
+        <van-field
+          v-else-if="field.type === 'checkbox'"
+          :name="field.key"
+          :model-value="getValidationValue(field.key)"
+          :label="field.label"
+          :required="field.required"
+          :rules="fieldRules(field)"
+        >
           <template #input>
+            <van-checkbox-group
+              v-if="field.options?.length"
+              :model-value="getArrayValue(field.key)"
+              direction="horizontal"
+              :disabled="props.disabled || field.disabled"
+              v-bind="field.props"
+              @update:model-value="updateField(field.key, $event)"
+            >
+              <van-checkbox
+                v-for="opt in field.options"
+                :key="String(opt.value)"
+                :name="opt.value"
+                shape="square"
+              >
+                {{ opt.label }}
+              </van-checkbox>
+            </van-checkbox-group>
             <van-checkbox
+              v-else
               :model-value="!!formData[field.key]"
               :disabled="props.disabled || field.disabled"
+              v-bind="field.props"
               @update:model-value="updateField(field.key, $event)"
             />
           </template>
         </van-field>
 
         <!-- switch -->
-        <van-field v-else-if="field.type === 'switch'" :label="field.label" :required="field.required">
+        <van-field
+          v-else-if="field.type === 'switch'"
+          :name="field.key"
+          :model-value="getValidationValue(field.key)"
+          :label="field.label"
+          :required="field.required"
+          :rules="fieldRules(field)"
+        >
           <template #input>
             <van-switch
               :model-value="!!formData[field.key]"
               :disabled="props.disabled || field.disabled"
+              v-bind="field.props"
               @update:model-value="updateField(field.key, $event)"
             />
           </template>
@@ -358,6 +438,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
             :required="field.required"
             :rules="fieldRules(field)"
             :disabled="props.disabled || field.disabled"
+            v-bind="field.props"
             @click="openPopup(field)"
           />
           <van-popup v-model:show="popupVisible[field.key]" round position="bottom">
@@ -383,6 +464,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
             :required="field.required"
             :rules="fieldRules(field)"
             :disabled="props.disabled || field.disabled"
+            v-bind="field.props"
             @click="openPopup(field)"
           />
           <van-popup v-model:show="popupVisible[field.key]" round position="bottom">
@@ -407,8 +489,11 @@ const getFileList = (key: string): UploaderFileListItem[] => {
         <!-- file -> van-uploader -->
         <van-field
           v-else-if="field.type === 'file'"
+          :name="field.key"
+          :model-value="getValidationValue(field.key)"
           :label="field.label"
           :required="field.required"
+          :rules="fieldRules(field)"
           :disabled="props.disabled || field.disabled"
         >
           <template #input>
@@ -416,6 +501,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
               :model-value="getFileList(field.key)"
               :max-count="field.max"
               :disabled="props.disabled || field.disabled"
+              v-bind="field.props"
               @update:model-value="updateField(field.key, $event)"
             />
           </template>

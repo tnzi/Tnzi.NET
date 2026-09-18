@@ -19,6 +19,14 @@ public class CrudAppServiceTests
     {
         public string Name { get; set; } = string.Empty;
         public int Tenant { get; set; }
+        public string PasswordHash { get; set; } = string.Empty;
+        public decimal Salary { get; set; }
+        public TestOwner? Owner { get; set; }
+    }
+
+    public class TestOwner
+    {
+        public string Secret { get; set; } = string.Empty;
     }
 
     public class TestDto
@@ -263,5 +271,98 @@ public class CrudAppServiceTests
         repo.Verify(r => r.GetPagedListAsync(
             It.IsAny<Expression<Func<TestEntity, bool>>>(), It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Once);
         repo.Verify(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task QueryAsync_FilterOnNavigationProperty_Returns400()
+    {
+        // 请求来源的 Filter 不得走到实体的导航属性上：持 .view 者否则可按 Owner.Secret 逐字符二分
+        var (service, repo) = CreateService();
+        var query = new PagedQuery { Filter = FilterGroup.And().WhereStartsWith("Owner.Secret", "a") };
+
+        var result = await service.QueryAsync(query);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Contains("Owner.Secret", result.Message);
+        Assert.DoesNotContain(nameof(TestEntity), result.Message);
+        repo.Verify(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+        repo.Verify(r => r.GetPagedListAsync(
+            It.IsAny<Expression<Func<TestEntity, bool>>>(), It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task QueryAsync_FilterOnRootScalarTheDtoNeverProjects_Returns400()
+    {
+        // 口令哈希 / 薪资是根实体上的标量列而 DTO 从不投影它们：默认策略必须按 DTO 的形状收窄，
+        // 否则 Filter.Rules[0].Field=PasswordHash&Operator=StartsWith 仍能对隐藏列逐字符二分
+        var (service, repo) = CreateService();
+
+        foreach (var hidden in new[] { "PasswordHash", "salary", "Tenant" })
+        {
+            var result = await service.QueryAsync(new PagedQuery { Filter = FilterGroup.And().WhereGreaterThan(hidden, 1) });
+
+            Assert.Equal(400, result.Code);
+            Assert.Contains(hidden, result.Message);
+            Assert.DoesNotContain(nameof(TestEntity), result.Message);
+        }
+
+        repo.Verify(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task QueryAsync_OrderByRootScalarTheDtoNeverProjects_Returns400()
+    {
+        // 排序是同一个预言机的弱形态：按 Salary 排序就把薪资的相对次序交了出去
+        var (service, repo) = CreateService();
+
+        var result = await service.QueryAsync(new PagedQuery { OrderBy = "Name ASC, Salary DESC" });
+
+        Assert.Equal(400, result.Code);
+        Assert.Contains("Salary", result.Message);
+        Assert.DoesNotContain("Name", result.Message);
+        Assert.DoesNotContain(nameof(TestEntity), result.Message);
+        repo.Verify(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task QueryAsync_OrderByProjectedField_StillApplied()
+    {
+        var (service, repo) = CreateService();
+        IPagedList<TestEntity> page = new PagedList<TestEntity>([], 1, 10, 0);
+        repo.Setup(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>())).ReturnsAsync(page);
+
+        var result = await service.QueryAsync(new PagedQuery { OrderBy = "name desc, Id" });
+
+        Assert.True(result.Succeeded);
+        repo.Verify(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task QueryAsync_FilterOnUnknownField_Returns400WithoutTypeName()
+    {
+        var (service, _) = CreateService();
+        var query = new PagedQuery { Filter = FilterGroup.And().WhereIsNotNull("NoSuchColumn") };
+
+        var result = await service.QueryAsync(query);
+
+        Assert.Equal(400, result.Code);
+        Assert.DoesNotContain(nameof(TestEntity), result.Message);
+    }
+
+    [Fact]
+    public async Task QueryAsync_FilterOnRootScalar_StillApplied()
+    {
+        var (service, repo) = CreateService();
+        IPagedList<TestEntity> page = new PagedList<TestEntity>([], 1, 10, 0);
+        repo.Setup(r => r.GetPagedListAsync(It.IsAny<PagedQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(page);
+        var query = new PagedQuery { Filter = FilterGroup.And().WhereEqual("name", "a") };
+
+        var result = await service.QueryAsync(query);
+
+        Assert.True(result.Succeeded);
+        repo.Verify(r => r.GetPagedListAsync(
+            It.Is<PagedQuery>(q => ReferenceEquals(q, query) && q.Filter!.HasFilters), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

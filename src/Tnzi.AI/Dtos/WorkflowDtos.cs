@@ -17,6 +17,8 @@ public class WorkflowDefinitionDto
     public WorkflowExecutionMode ExecutionMode { get; set; } = WorkflowExecutionMode.Sequential;
     /// <summary>Whether enabled</summary>
     public bool IsEnabled { get; set; }
+    /// <summary>Graph configuration (conditional edges + loops); null when the workflow has none</summary>
+    public WorkflowGraphConfigurationDto? Configuration { get; set; }
     /// <summary>Creation time</summary>
     public DateTime CreationTime { get; set; }
     /// <summary>Last modification time</summary>
@@ -46,6 +48,9 @@ public class CreateWorkflowDefinitionDto
 
     /// <summary>Whether enabled</summary>
     public bool IsEnabled { get; set; } = true;
+
+    /// <summary>Graph configuration (conditional edges + loops); optional</summary>
+    public WorkflowGraphConfigurationDto? Configuration { get; set; }
 }
 
 /// <summary>
@@ -69,6 +74,63 @@ public class UpdateWorkflowDefinitionDto
 
     /// <summary>Whether enabled</summary>
     public bool? IsEnabled { get; set; }
+
+    /// <summary>
+    /// Graph configuration (conditional edges + loops). Null = leave untouched;
+    /// an object with no edges and no loops clears the stored configuration.
+    /// </summary>
+    public WorkflowGraphConfigurationDto? Configuration { get; set; }
+}
+
+/// <summary>
+/// 工作流图配置：条件边与循环。持久化为 <c>WorkflowDefinition.Configuration</c>（JSON），
+/// 执行时由 DAG 引擎读取（`RouterNode` / `ConditionalNode` / `ReviewNode` 的 <c>RouteTo</c> 只经条件边生效）。
+/// ★ 2026-09-12 之前没有任何 DTO / 端点 / 编辑器能写这一列：经 API 建的工作流里 Router 节点付一次 LLM 分类调用，
+/// 返回的路由被引擎在「无条件边」处直接丢弃，所有分支都沿静态 DependsOn 跑完。
+/// </summary>
+public class WorkflowGraphConfigurationDto
+{
+    /// <summary>Conditional edges keyed by their source step</summary>
+    public List<WorkflowConditionalEdgeDto>? ConditionalEdges { get; set; }
+
+    /// <summary>Loops keyed by loop id</summary>
+    public Dictionary<string, WorkflowLoopDto>? Loops { get; set; }
+
+    /// <summary>True when neither edges nor loops are present (an update carrying this clears the stored configuration)</summary>
+    public bool IsEmpty => ConditionalEdges is not { Count: > 0 } && Loops is not { Count: > 0 };
+}
+
+/// <summary>
+/// 条件边：源步骤的输出（或节点返回的 <c>RouteTo</c> 路由键）决定下一步走哪个目标；未选中的分支被标记为跳过。
+/// </summary>
+public class WorkflowConditionalEdgeDto
+{
+    /// <summary>Source step id</summary>
+    [Required]
+    public string FromNodeId { get; set; } = null!;
+
+    /// <summary>Route key → target step id</summary>
+    [Required]
+    public Dictionary<string, string> Routes { get; set; } = null!;
+
+    /// <summary>Target step when no route matches</summary>
+    public string? DefaultTarget { get; set; }
+
+    /// <summary>How the output is matched when the node returned no explicit route: OutputContains (default) | OutputEquals | JsonPath</summary>
+    public string? ConditionType { get; set; }
+}
+
+/// <summary>
+/// 循环：一组步骤在终止信号出现前反复执行，最多 <see cref="MaxIterations"/> 轮。
+/// </summary>
+public class WorkflowLoopDto
+{
+    /// <summary>Step ids that belong to the loop</summary>
+    [Required]
+    public List<string> NodeIds { get; set; } = null!;
+
+    /// <summary>Maximum iterations (default 5)</summary>
+    public int MaxIterations { get; set; } = 5;
 }
 
 /// <summary>

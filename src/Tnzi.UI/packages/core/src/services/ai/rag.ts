@@ -155,11 +155,13 @@ export function useRagApi(client: HttpClient) {
       client.post(`${base}/chat`, data),
 
     /**
-     * SSE stream URL for RAG chat. The backend route is `POST rag/chat/stream`;
-     * the old `${base}/stream` pointed at nothing.
+     * SSE stream URL for RAG chat, resolved against the client's baseUrl so a
+     * raw `fetch` of it reaches the API and not the SPA root. The backend
+     * route is `POST rag/chat/stream`; the old `${base}/stream` pointed at
+     * nothing.
      */
     getStreamUrl: () =>
-      `${base}/chat/stream`,
+      client.resolveUrl(`${base}/chat/stream`),
   };
 }
 

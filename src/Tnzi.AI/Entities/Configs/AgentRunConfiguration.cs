@@ -16,6 +16,9 @@ public class AgentRunConfiguration : EntityTypeConfigurationBase<AgentRun, Guid>
         builder.Property(e => e.OutputSummary)
             .HasMaxLength(2000);
 
+        // 请求快照：完整用户消息 + 工具选择 + 子 Agent 标记等，长度无上界，不设 MaxLength（各库映射为长文本）
+        builder.Property(e => e.RequestSnapshot);
+
         builder.Property(e => e.WorkflowExecutionId)
             .HasMaxLength(64);
 

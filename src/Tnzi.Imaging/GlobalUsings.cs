@@ -27,6 +27,8 @@ global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
+global using Tnzi.AspNetCore.Security;
+global using Tnzi.AspNetCore.Dtos;
 global using Tnzi.Imaging.Extensions;
 global using Tnzi.Imaging.Metadata;
 global using Tnzi.Imaging.Dtos;

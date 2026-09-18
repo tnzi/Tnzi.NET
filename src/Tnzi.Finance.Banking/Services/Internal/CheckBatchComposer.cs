@@ -112,7 +112,62 @@ public class CheckBatchComposer
     }
 
     /// <summary>
-    /// 解析一批待开票付款单：存在性 / 队列资格 / 同一银行账户 / 空白票纸可打 / 未重复开票，
+    /// 一笔付款单能不能挂上一张支票：Posted + Outbound + <c>PaymentMethod == Check</c> + 有出款科目。
+    /// </summary>
+    /// <remarks>
+    /// ★ 付款方式必须在写路径上自己判，不能靠「队列只列 Check 付款」：print / preview / registerManual
+    /// 的入参都是请求体里的付款单 id，从不经过队列。少了这条，一笔 BankTransfer 付款（可能已装进
+    /// EFT 批次并交给银行）会被开成或登记成一张可流通支票 —— 同一笔钱付两次，而两侧登记各自看起来
+    /// 完全正常；且随后的参考号回写会把付款单的电汇确认号覆盖成支票号。
+    /// 与 <c>EftService.CreateBatchAsync</c> 拒非 BankTransfer 付款对称。<br/>
+    /// 三个开票入口只允许有这一份判据：各写一份的话，下一个新入口照样会漏（2026-09-12 手工登记正是这样漏的）。
+    /// </remarks>
+    public static Result ValidateCheckEligibility(PaymentEntry payment)
+    {
+        Check.NotNull(payment);
+        var label = payment.Number ?? payment.Id.ToString();
+        if (payment.Status != FinanceDocumentStatus.Posted || payment.Direction != PaymentDirection.Outbound)
+            return Result.Failure($"Payment '{label}' is not a posted outbound payment.", 400);
+        if (string.IsNullOrWhiteSpace(payment.PaymentMethod) || !string.Equals(payment.PaymentMethod, PaymentMethods.Check, StringComparison.OrdinalIgnoreCase))
+            return Result.Failure($"Payment '{label}' is not a check payment.", 400);
+        if (payment.DepositToAccountId == null)
+            return Result.Failure($"Payment '{label}' has no funding account.", 400);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// 手工登记一张挂在付款单上的票之前的解析：付款单存在（404）/ 开票资格（400）/
+    /// 出款科目就是所选银行档案挂的科目（400）/ 尚无 Issued 票（409）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="ResolveBatchAsync"/> 是同一组判据的单笔形态；登记簿一侧的写入
+    /// （占号 + 参考号回写）由 <c>CheckService</c> 在同一个 UoW 内完成，这里只回答「能不能」。
+    /// 「已有 Issued 票」答 409 而不是 400：与打印路径同一个码，换票的正路是 Reprint。
+    /// </remarks>
+    public async Task<Result> ResolveManualCheckPaymentAsync(Guid paymentEntryId, BankAccount bank, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(bank);
+        var payment = await _paymentRepository.AsNoTracking().FirstOrDefaultAsync(p => p.Id == paymentEntryId, cancellationToken);
+        if (payment == null)
+            return Result.Failure("Payment not found.", 404);
+
+        var eligible = ValidateCheckEligibility(payment);
+        if (!eligible.Succeeded)
+            return eligible;
+
+        if (payment.DepositToAccountId != bank.AccountId)
+            return Result.Failure($"Payment '{payment.Number ?? payment.Id.ToString()}' is not funded from the selected bank account.", 400);
+
+        var alreadyIssued = await _checkRepository.AsNoTracking().AnyAsync(
+            c => c.Status == CheckStatus.Issued && c.PaymentEntryId == paymentEntryId, cancellationToken);
+        if (alreadyIssued)
+            return Result.Failure("This payment already has an issued check. Use reprint instead.", 409);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// 解析一批待开票付款单：存在性 / 队列资格（Posted Outbound Check）/ 同一银行账户 / 空白票纸可打 / 未重复开票，
     /// 并带出银行档案、稳定排序后的付款单与收款人档案。
     /// </summary>
     public async Task<Result<CheckBatchContext>> ResolveBatchAsync(List<Guid>? paymentEntryIds, string operation, CancellationToken cancellationToken = default)
@@ -127,13 +182,12 @@ public class CheckBatchComposer
         if (payments.Count != ids.Count)
             return Result<CheckBatchContext>.Failure("One or more payments were not found.", 404);
 
-        // 校验队列资格：均为 Posted Outbound Check
+        // 校验队列资格：均为 Posted Outbound Check（判据本身在 ValidateCheckEligibility，与手工登记共用）。
         foreach (var p in payments)
         {
-            if (p.Status != FinanceDocumentStatus.Posted || p.Direction != PaymentDirection.Outbound)
-                return Result<CheckBatchContext>.Failure($"Payment '{p.Number ?? p.Id.ToString()}' is not a posted outbound payment.", 400);
-            if (p.DepositToAccountId == null)
-                return Result<CheckBatchContext>.Failure($"Payment '{p.Number ?? p.Id.ToString()}' has no funding account.", 400);
+            var eligible = ValidateCheckEligibility(p);
+            if (!eligible.Succeeded)
+                return Result<CheckBatchContext>.Failure(eligible.Message!, eligible.Code ?? 400);
         }
 
         // 均须解析到同一银行账户档案（单份文档共享版式/偏移/MICR）

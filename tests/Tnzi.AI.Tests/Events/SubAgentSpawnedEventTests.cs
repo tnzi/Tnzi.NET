@@ -83,7 +83,7 @@ public class SubAgentSpawnedEventTests
             .Returns(Task.CompletedTask);
 
         var registry = new Mock<ISubAgentRegistry>();
-        registry.Setup(x => x.Get(subAgentType))
+        registry.Setup(x => x.GetForTenant(subAgentType, It.IsAny<string>()))
             .Returns(new SubAgentTypeDefinition(
                 Name: subAgentType,
                 Description: "Research tasks",

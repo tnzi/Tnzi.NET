@@ -166,6 +166,10 @@ public class SubscriptionServiceTests
             .ReturnsAsync(subscription);
         _subscriptionRepositoryMock.Setup(r => r.UpdateAsync(It.IsAny<Subscription>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        // 续费 / 试用转正成功会去找仍在等补差款的变更；这里的订阅没有
+        _changeRepositoryMock.Setup(r => r.ToListAsync(
+                It.IsAny<Expression<Func<SubscriptionChange, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
     }
 
     [Fact]
@@ -179,6 +183,7 @@ public class SubscriptionServiceTests
             Status = SubscriptionStatus.Pending,
             CycleType = BillingCycleType.Month,
             CycleValue = 1,
+            OriginalPrice = 50m,
             UserId = Guid.NewGuid()
         };
         SetupSubscription(subscription);
@@ -189,6 +194,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.Initial,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             Amount = 50m
         });
 
@@ -210,6 +216,7 @@ public class SubscriptionServiceTests
             Status = SubscriptionStatus.PastDue,
             CycleType = BillingCycleType.Month,
             CycleValue = 1,
+            OriginalPrice = 30m,
             NextBillingTime = DateTime.UtcNow.AddDays(-2),
             RenewalRetryCount = 2,
             PastDueSince = DateTime.UtcNow.AddDays(-2),
@@ -223,6 +230,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.Renewal,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             Amount = 30m
         });
 
@@ -245,6 +253,7 @@ public class SubscriptionServiceTests
             Status = SubscriptionStatus.Trial,
             CycleType = BillingCycleType.Month,
             CycleValue = 1,
+            OriginalPrice = 20m,
             TrialEndTime = DateTime.UtcNow.AddDays(-1),
             UserId = Guid.NewGuid()
         };
@@ -256,6 +265,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.TrialConversion,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             Amount = 20m
         });
 
@@ -289,6 +299,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.Renewal,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             PaymentTradeNo = "PAY-ORPHAN",
             Amount = 30m
         });
@@ -323,6 +334,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.Renewal,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             PaymentTradeNo = "PAY-DUP",
             Amount = 30m
         });
@@ -373,6 +385,7 @@ public class SubscriptionServiceTests
             Purpose = SubscriptionBillingPurpose.Renewal,
             SubscriptionId = subscription.Id,
             SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
             FailReason = "card_declined"
         });
 
@@ -401,12 +414,198 @@ public class SubscriptionServiceTests
         {
             Purpose = SubscriptionBillingPurpose.Initial,
             SubscriptionId = subscription.Id,
-            SubscriptionNo = subscription.SubscriptionNo
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId
         });
 
         // Assert
         result.Succeeded.ShouldBeTrue();
         subscription.Status.ShouldBe(SubscriptionStatus.Pending);
+    }
+
+    // ───────── 元数据只是路由键：付款人与金额都要核 ─────────
+
+    /// <summary>
+    /// 别人的支付（哪怕元数据完整）不得推进这条订阅：否则任何人拿自己的 0.5 元支付单
+    /// 加一段自填的 ExtraData 就能激活 / 续期任意价位的订阅。
+    /// </summary>
+    [Fact]
+    public async Task ApplyPaymentCompletedAsync_FromAnotherUser_IsRejectedAndLeavesTheSubscriptionAlone()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-STRANGER",
+            Status = SubscriptionStatus.Pending,
+            CycleType = BillingCycleType.Month,
+            CycleValue = 1,
+            OriginalPrice = 99m,
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Initial,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = Guid.NewGuid(),
+            Amount = 99m
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Message.ShouldBe(ErrorCodes.SubscriptionPaymentOwnerMismatch);
+        subscription.Status.ShouldBe(SubscriptionStatus.Pending);
+        subscription.PaidAmount.ShouldBe(0m);
+        _subscriptionRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<Subscription>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>付款人未知（null）同样拒绝：失败方向关闭。</summary>
+    [Fact]
+    public async Task ApplyPaymentCompletedAsync_WithoutAPayer_IsRejected()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-NOPAYER",
+            Status = SubscriptionStatus.Pending,
+            OriginalPrice = 99m,
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Initial,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            Amount = 99m
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        subscription.Status.ShouldBe(SubscriptionStatus.Pending);
+    }
+
+    /// <summary>付款人对了但钱不够（0.5 元买 99 元的计划）：不激活。</summary>
+    [Fact]
+    public async Task ApplyPaymentCompletedAsync_BelowThePlanPrice_IsRejected()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-CHEAP",
+            Status = SubscriptionStatus.Pending,
+            CycleType = BillingCycleType.Month,
+            CycleValue = 1,
+            OriginalPrice = 99m,
+            Currency = "USD",
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Initial,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
+            Amount = 0.5m,
+            Currency = "USD"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Message.ShouldBe(ErrorCodes.SubscriptionPaymentAmountTooLow);
+        subscription.Status.ShouldBe(SubscriptionStatus.Pending);
+    }
+
+    /// <summary>首付按「标价 − 券折扣」收，下界要把折扣算进去，否则合法的折扣首付会被拒。</summary>
+    [Fact]
+    public async Task ApplyPaymentCompletedAsync_Initial_AcceptsTheDiscountedPrice()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-DISC",
+            Status = SubscriptionStatus.Pending,
+            CycleType = BillingCycleType.Month,
+            CycleValue = 1,
+            OriginalPrice = 99m,
+            DiscountAmount = 20m,
+            Currency = "USD",
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Initial,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
+            Amount = 79m,
+            Currency = "USD"
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        subscription.Status.ShouldBe(SubscriptionStatus.Active);
+    }
+
+    /// <summary>99 JPY 不是 99 USD：币种对不上一律拒绝。</summary>
+    [Fact]
+    public async Task ApplyPaymentCompletedAsync_InAnotherCurrency_IsRejected()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-JPY",
+            Status = SubscriptionStatus.Pending,
+            OriginalPrice = 99m,
+            Currency = "USD",
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Initial,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = subscription.UserId,
+            Amount = 99m,
+            Currency = "JPY"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Message.ShouldBe(ErrorCodes.SubscriptionPaymentAmountTooLow);
+    }
+
+    /// <summary>
+    /// 拿受害者的订阅号建一张不付的单，等它过期：失败回流不得把别人的订阅打成 PastDue。
+    /// </summary>
+    [Fact]
+    public async Task ApplyPaymentFailedAsync_FromAStranger_DoesNotPushTheSubscriptionPastDue()
+    {
+        var subscription = new Subscription
+        {
+            Id = Guid.NewGuid(),
+            SubscriptionNo = "SUB-VICTIM",
+            Status = SubscriptionStatus.Active,
+            UserId = Guid.NewGuid()
+        };
+        SetupSubscription(subscription);
+
+        var result = await _service.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Renewal,
+            SubscriptionId = subscription.Id,
+            SubscriptionNo = subscription.SubscriptionNo,
+            PayerUserId = Guid.NewGuid(),
+            FailReason = "Payment order expired"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        subscription.Status.ShouldBe(SubscriptionStatus.Active);
+        subscription.RenewalRetryCount.ShouldBe(0);
     }
 
     #endregion

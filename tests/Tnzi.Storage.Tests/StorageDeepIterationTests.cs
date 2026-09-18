@@ -56,7 +56,8 @@ public class StorageDeepIterationTests
             TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
-            new UploadGuard(optionsMonitor.Object));
+            new UploadGuard(optionsMonitor.Object),
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
     }
 
     #region File Integrity Verification Tests

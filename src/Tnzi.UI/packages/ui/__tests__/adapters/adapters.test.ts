@@ -256,6 +256,41 @@ describe('adapters/dialog', () => {
     expect(await createDialogAdapter().prompt('x')).toBeNull()
     spy.mockRestore()
   })
+
+  // Esc and a mask click close a naive dialog without calling onClose (that hook is the
+  // X button only); the one hook naive fires on every close path is onAfterLeave.
+  it('confirm resolves false when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    expect(await createDialogAdapter(api as any).confirm('esc')).toBe(false)
+  })
+
+  it('alert resolves when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.info.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    await expect(createDialogAdapter(api as any).alert('esc')).resolves.toBeUndefined()
+  })
+
+  it('prompt resolves null when the dialog leaves without any button being pressed', async () => {
+    const api = mockApi()
+    api.create.mockImplementation((opts: any) => { opts.onAfterLeave() })
+    expect(await createDialogAdapter(api as any).prompt('esc')).toBeNull()
+  })
+
+  it('a button answer is not overwritten by the leave that follows it', async () => {
+    const api = mockApi()
+    api.warning.mockImplementation((opts: any) => {
+      opts.onPositiveClick()
+      opts.onAfterLeave()
+    })
+    expect(await createDialogAdapter(api as any).confirm('ok then leave')).toBe(true)
+
+    api.create.mockImplementation((opts: any) => {
+      opts.onPositiveClick()
+      opts.onAfterLeave()
+    })
+    expect(await createDialogAdapter(api as any).prompt('p', { content: 'typed' } as any)).toBe('typed')
+  })
 })
 
 describe('adapters/create-ui-adapter', () => {

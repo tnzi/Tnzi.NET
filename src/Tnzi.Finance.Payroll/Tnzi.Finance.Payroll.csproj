@@ -15,4 +15,10 @@
     <PackageReference Include="NCalc" Version="7.1.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 测试要读 internal 的列宽常量（PayslipFieldLimits）：SQLite 不检查 varchar 宽度，
+         「装得进 1000 字符的列」只能靠长度断言看见，而那个数字必须与实体配置同源。 -->
+    <InternalsVisibleTo Include="Tnzi.Finance.Payroll.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

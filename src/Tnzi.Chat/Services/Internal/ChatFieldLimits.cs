@@ -42,6 +42,18 @@ internal static class ChatFieldLimits
     internal const int MemberNote = 100;
 
     /// <summary>
+    /// 附件文件名（<c>ChatMessage.FileName</c>）。调用方原样给出，客户端可任意构造 ——
+    /// 09-04 那批长度校验唯一漏掉的用户可控字符串。
+    /// </summary>
+    internal const int FileName = 512;
+
+    /// <summary>附件文件引用（<c>ChatMessage.FileId</c>）。写入前要求能解析成 <c>Guid</c>，故天然有界。</summary>
+    internal const int FileId = 256;
+
+    /// <summary>广播审计的来源标签（<c>BroadcastLog.Source</c>），由调用模块填。</summary>
+    internal const int BroadcastSource = 128;
+
+    /// <summary>
     /// 越界时给出一条面向用户的说明，合法时返回 <see langword="null"/>。
     /// </summary>
     /// <param name="value">**即将落库的那个值**（该 Trim 的先 Trim）。</param>

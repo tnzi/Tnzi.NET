@@ -24,11 +24,16 @@ public partial class DefaultAuthController
     /// </summary>
     /// <param name="provider">OAuth提供者名称（不区分大小写，支持 Google、Microsoft、Facebook、Twitter、GitHub）</param>
     /// <param name="returnUrl">登录成功后的回调地址（可选，前端页面URL）</param>
+    /// <param name="linkToken">
+    /// 个人中心「绑定第三方账号」签发的一次性令牌（<c>POST users/profile/linked-accounts/{provider}/link-token</c>）。
+    /// 带上它，这次流程就是<b>绑定</b>而不是登录：回调把外部登录挂到签发令牌的账号上，不签发令牌、不新建账号。
+    /// 无效 / 过期 / 提供商不符一律 400，当场拒绝而不是让用户走完同意页才失败。
+    /// </param>
     /// <returns>重定向到第三方登录页面</returns>
     [HttpGet("oauth/{provider:regex((?i)google|microsoft|facebook|twitter|github)}/login")]
     [AllowAnonymous]
     [ApiExplorerSettings(GroupName = "auth")]
-    public virtual async Task<IActionResult> OAuthLogin(string provider, [FromQuery] string? returnUrl = null)
+    public virtual async Task<IActionResult> OAuthLogin(string provider, [FromQuery] string? returnUrl = null, [FromQuery] string? linkToken = null)
     {
         // 验证 Provider 是否已配置
         var schemeProvider = HttpContext.RequestServices.GetRequiredService<IAuthenticationSchemeProvider>();
@@ -72,9 +77,28 @@ public partial class DefaultAuthController
             properties.Items["returnUrl"] = returnUrl;
         }
 
+        // ★ 绑定令牌：这里只校验不消费（用户可能在同意页放弃），写进 Items 经 Identity.External cookie
+        //   签名往返到回调，回调再消费。整页跳转没有 bearer，这枚令牌是「谁在绑定」的唯一来源。
+        if (!string.IsNullOrEmpty(linkToken))
+        {
+            var peek = OAuthLinkTokens == null
+                ? Result<Guid>.Failure("OAuth link service is not available", 400)
+                : await OAuthLinkTokens.PeekAsync(linkToken, provider);
+            if (!peek.Succeeded)
+            {
+                Logger.LogWarning("Rejected an OAuth link attempt for {Provider} with an invalid link token.", provider);
+                return new BadRequestObjectResult(BadRequest<string>(peek.Message ?? "Invalid or expired link token"));
+            }
+
+            properties.Items[LinkTokenItemKey] = linkToken;
+        }
+
         // 发起 Challenge，重定向到第三方登录页面
         return Challenge(properties, scheme.Name);
     }
+
+    /// <summary><c>AuthenticationProperties.Items</c> 里承载绑定令牌的键。</summary>
+    private const string LinkTokenItemKey = "linkToken";
 
     /// <summary>
     /// OAuth回调处理端点（OAuth 中间件完成认证后重定向到这里）
@@ -126,6 +150,14 @@ public partial class DefaultAuthController
             var claimsPrincipal = new ClaimsPrincipal(
                 new ClaimsIdentity(claims, authenticateResult.Principal.Identity?.AuthenticationType));
 
+            // ★ 绑定流程：令牌在，就只做「把外部身份挂到签发者账号上」——不签发令牌、不新建账号、不按邮箱认领。
+            //   这条分支必须在 HandleOAuthCallbackAsync 之前：那条路的兜底是新建账号并签发令牌。
+            var linkToken = authenticateResult.Properties?.Items.TryGetValue(LinkTokenItemKey, out var lt) == true ? lt : null;
+            if (!string.IsNullOrEmpty(linkToken))
+            {
+                return await CompleteLinkAsync(provider.ToLowerInvariant(), linkToken, claimsPrincipal, returnUrl);
+            }
+
             // 处理OAuth回调
             var result = await OAuthService.HandleOAuthCallbackAsync(provider.ToLowerInvariant(), claimsPrincipal);
 
@@ -166,13 +198,47 @@ public partial class DefaultAuthController
     }
 
     /// <summary>
+    /// 绑定流程的回调落地：消费绑定令牌 → 把外部登录挂到签发者账号上 → 回调页只跳回 returnUrl，不带任何令牌。
+    /// </summary>
+    private async Task<IActionResult> CompleteLinkAsync(string provider, string linkToken, ClaimsPrincipal principal, string? returnUrl)
+    {
+        var consumed = OAuthLinkTokens == null
+            ? Result<Guid>.Failure("OAuth link service is not available", 400)
+            : await OAuthLinkTokens.ConsumeAsync(linkToken, provider);
+        if (!consumed.Succeeded)
+        {
+            return Content(GenerateOAuthErrorHtml(consumed.Message ?? "Invalid or expired link token"), "text/html; charset=utf-8");
+        }
+
+        var linked = await OAuthService!.LinkExternalLoginAsync(consumed.Data, provider, principal);
+
+        await HttpContext.SignOutAsync("Identity.External");
+
+        if (!linked.Succeeded)
+        {
+            // 带错误码的失败（provider key 已属他人 → 409）走结构化回调页，与登录挑战同一条路；前端按 errorCode 分支。
+            var failure = new OAuthCallbackResultDto
+            {
+                Success = false,
+                ErrorMessage = linked.Message,
+                ErrorCode = linked.ErrorCode ?? ErrorCodes.IDENTITY_OAUTH_ERROR,
+                LinkedProvider = provider,
+            };
+            return Content(GenerateOAuthCallbackHtml(failure, returnUrl), "text/html; charset=utf-8");
+        }
+
+        var success = new OAuthCallbackResultDto { Success = true, LinkedProvider = provider };
+        return Content(GenerateOAuthCallbackHtml(success, returnUrl), "text/html; charset=utf-8");
+    }
+
+    /// <summary>
     /// 实际生效的 returnUrl 白名单：<c>Identity:OAuth:AllowedReturnOrigins</c> 优先，
-    /// 未配置时回退 <c>App:FrontendUrl</c>，两者皆空则只放行站内相对路径。
+    /// 未配置时回退前端 origin（<see cref="FrontendUrlResolver"/>），两者皆空则只放行站内相对路径。
     /// </summary>
     protected IReadOnlyCollection<string> AllowedReturnOrigins
         => ReturnUrlValidator.ResolveAllowedOrigins(
             IdentityOptions?.CurrentValue?.OAuth?.AllowedReturnOrigins,
-            Configuration?["App:FrontendUrl"]);
+            FrontendUrlResolver.Resolve(Configuration, Logger));
 
     /// <summary>
     /// 规范化 OAuth 提供者名称（首字母大写）

@@ -66,6 +66,24 @@ export const en = {
     languageHint: 'Interface language.',
     theme: 'Theme',
     themeHint: 'Follow the system or pick one.',
+    /* TStepUpPrompt - re-authentication for [RequireStepUp] account writes. */
+    stepUpTitle: 'Confirm it is you',
+    stepUpIntro: 'This action requires you to verify it is really you before it goes ahead.',
+    stepUpMethodPasskey: 'Use a passkey',
+    stepUpMethodTotp: 'Authenticator app code',
+    stepUpMethodSms: 'Send a code by SMS',
+    stepUpMethodEmail: 'Send a code by email',
+    stepUpNoMethods:
+      'No verification method is available for this account. Add a passkey, or verify your email address or phone number, then try again.',
+    stepUpCodeHintTotp: 'Enter the code from your authenticator app.',
+    /** {to} = masked address the code went to. */
+    stepUpCodeSentTo: 'We sent a code to {to}.',
+    stepUpCodeSent: 'We sent you a code.',
+    stepUpCodePlaceholder: 'Verification code',
+    stepUpBack: 'Use another method',
+    stepUpResend: 'Resend code',
+    stepUpCancel: 'Cancel',
+    stepUpVerify: 'Verify',
   },
   views: {
     agents: 'Agents',

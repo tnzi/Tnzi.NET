@@ -6,9 +6,16 @@ namespace Tnzi.Finance.Banking.Services;
 /// 收据采集服务
 /// </summary>
 /// <remarks>
+/// <para>
 /// <see cref="IReceiptExtractor"/> 可选注入：消费应用未注册实现时为 null，
 /// <see cref="ExtractAsync"/> 返回 501 引导。转换委托既有 <c>IExpenseService</c>/<c>IBillService.CreateDraftAsync</c>，
 /// 产出止步草稿；并发双 convert 由 <see cref="Receipt.ConcurrencyStamp"/> 挡 409。
+/// </para>
+/// <para>
+/// <see cref="IFileReadAccessProbe"/> 可选注入（契约在核心 <c>Tnzi</c> 程序集，实现随 <c>Tnzi.Storage</c> 注册，
+/// 本模块仍零 Storage 引用）：登记收据前问一句「这个人本来就读得到这份文件吗」。未加载 Storage 时为 null，
+/// <see cref="CreateAsync"/> 答 501 而不是跳过 —— 「跳过校验」与「校验通过」在接口上完全一致。
+/// </para>
 /// </remarks>
 public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
 {
@@ -19,6 +26,7 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
     private readonly IExpenseService _expenseService;
     private readonly IBillService _billService;
     private readonly IReceiptExtractor? _extractor;
+    private readonly IFileReadAccessProbe? _fileAccess;
 
     public ReceiptCaptureService(
         IServiceProvider serviceProvider,
@@ -26,7 +34,8 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         IReadOnlyRepository<Vendor, Guid> vendorRepository,
         IExpenseService expenseService,
         IBillService billService,
-        IReceiptExtractor? extractor = null)
+        IReceiptExtractor? extractor = null,
+        IFileReadAccessProbe? fileAccess = null)
         : base(serviceProvider)
     {
         _receiptRepository = Check.NotNull(receiptRepository);
@@ -34,6 +43,7 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         _expenseService = Check.NotNull(expenseService);
         _billService = Check.NotNull(billService);
         _extractor = extractor;
+        _fileAccess = fileAccess;
     }
 
     public async Task<Result<IPagedList<ReceiptDto>>> GetPagedAsync(ReceiptQueryDto query, CancellationToken cancellationToken = default)
@@ -80,6 +90,17 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         var invalid = ReceiptFieldLimits.ValidateUserInput(input.FileName, vendorName: null, input.Currency, reference: null);
         if (invalid != null)
             return Fail<ReceiptDto>(invalid, 400);
+
+        // ★★★ 登记一个文件 id = 把那份文件**发布**给所有持 finance.receipt.view 的人：FileId 是 [FileField]，
+        // 落库即登记一条 FileReference，而 ReceiptFileReferenceAccessResolver 只问那一个权限码。
+        // 不问一句归属，持 finance.receipt.create 的人把任意 fileId 登记成收据，那份文件就成了他永久可读的，
+        // 再 extract 一次还会把它整个送给模型。判据是「这个人本来就读得到它吗」，不认请求级凭据
+        // （分享链接 / 签名 URL），见 IFileReadAccessProbe。存储模块缺席时拒绝而不是跳过（501：不是暂时性故障）。
+        // 「读不到」与「不存在」同一句话：分开回答会让这个端点变成文件 id 的存在性探针。
+        if (_fileAccess == null)
+            return Fail<ReceiptDto>("Receipt capture needs the storage module. Load Tnzi.Storage.", 501);
+        if (!await _fileAccess.CanReadAsync(input.FileId, cancellationToken))
+            return Fail<ReceiptDto>("That file cannot be attached to a receipt.", 403);
 
         var receipt = new Receipt
         {

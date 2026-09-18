@@ -96,6 +96,11 @@ export interface PaymentDetailDto extends PaymentDto {
  */
 export interface CreatePaymentDto {
   businessOrderNo: string;
+  /**
+   * `Subscription` is refused here (400 `PAYMENT_BUSINESS_TYPE_SYSTEM_ONLY`): subscription
+   * payments are issued by the server when a subscription is created or upgraded, and their
+   * metadata drives the subscription state machine. Pay the order returned by those calls instead.
+   */
   businessType: BusinessType;
   amount: number;
   currency?: string;
@@ -320,6 +325,8 @@ export interface SubscriptionChangeDto {
   status: SubscriptionChangeStatus;
   /** Present when a top-up is due and no card is on file - open the checkout with it. */
   payment?: PaymentOrderResultDto | null;
+  /** Trade number of the top-up order; persisted on the change, so it is also present when the change is read back later. */
+  paymentTradeNo?: string | null;
   creationTime: Date | string;
 }
 
@@ -796,15 +803,11 @@ export interface RedeemCodeDto {
 export interface CreateRedemptionCodeDto {
   promotionId: string;
   quantity: number;
-}
-
-/**
- * Apply coupon request (legacy compatibility)
- */
-export interface ApplyCouponDto {
-  code: string;
-  amount: number;
-  businessType: BusinessType;
+  /**
+   * How many times one user may redeem this code. Omitted = 1; 0 = explicitly
+   * unlimited (a single user can then take the whole batch). Unique codes are always 1.
+   */
+  perUserLimit?: number;
 }
 
 /**
@@ -826,20 +829,6 @@ export interface CouponDto extends AuditedEntity<string> {
   isEnabled: boolean;
   isActive?: boolean;
   applicableBusinessTypes?: BusinessType[];
-}
-
-/**
- * Coupon validation DTO (legacy compatibility)
- */
-export interface CouponValidationDto {
-  isValid: boolean;
-  couponCode?: string;
-  couponId?: string;
-  couponName?: string;
-  discountAmount: number;
-  message?: string;
-  errorMessage?: string;
-  promotion?: CouponDto | null;
 }
 
 // ============================================

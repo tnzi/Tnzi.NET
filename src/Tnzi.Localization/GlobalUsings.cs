@@ -18,6 +18,7 @@ global using Tnzi.Localization.Dtos;
 global using Tnzi.Localization.Json;
 global using Tnzi.Localization.Options;
 global using Tnzi.Localization.Resources;
+global using Tnzi.Localization.Resx;
 global using Tnzi.Localization.Services;
 global using Tnzi.Modules;
 global using Tnzi.Options;

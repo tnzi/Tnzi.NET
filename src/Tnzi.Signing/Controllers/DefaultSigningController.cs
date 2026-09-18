@@ -39,9 +39,19 @@ public class DefaultSigningController : ApiControllerBase
     /// <c>?download=true</c> 时按附件下载。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 收件人凭令牌而不是凭 <c>files/{id}/download</c> 取字节：那条路对匿名一律 404，
     /// 而令牌才是这个人的全部身份。判定仍在服务层（令牌校验写请求级授予），
     /// 本方法只负责把结果按文件送出去。
+    /// </para>
+    /// <para>
+    /// ★ <b>只有可展示的类型才内联</b>（<see cref="FileTypeHelper.IsInlineRenderable"/>），其余一律带文件名
+    /// ⇒ <c>Content-Disposition: attachment</c> + <c>Content-Security-Policy: sandbox</c>，与
+    /// <c>files/{id}/preview</c> 同形。声明的 Content-Type 来自上传者给的文件名（<c>.html → text/html</c>），
+    /// 而本端点匿名可达：不加这道闸，一个模板管理员传一个 <c>payload.html</c> 当渲染稿，收件人打开签署链接，
+    /// 脚本就跑在 API 的源上。服务层已只放行 PDF，这里是响应形态上的纵深；消费方整体替换本控制器时请沿用。
+    /// <c>nosniff</c> 对两个分支都加：声明的类型就是最终类型。
+    /// </para>
     /// </remarks>
     [HttpGet("{token}/document")]
     public virtual async Task<IActionResult> GetDocument(
@@ -51,9 +61,18 @@ public class DefaultSigningController : ApiControllerBase
         if (!result.Succeeded || result.Data is null)
             return new NotFoundResult();
 
+        var document = result.Data;
+        Response.Headers.XContentTypeOptions = "nosniff";
+
+        if (!FileTypeHelper.IsInlineRenderable(document.ContentType))
+        {
+            Response.Headers.ContentSecurityPolicy = "sandbox";
+            return File(document.Content, document.ContentType, document.FileName);
+        }
+
         return download
-            ? File(result.Data.Content, result.Data.ContentType, result.Data.FileName)
-            : File(result.Data.Content, result.Data.ContentType);
+            ? File(document.Content, document.ContentType, document.FileName)
+            : File(document.Content, document.ContentType);
     }
 
     /// <summary>提交本人负责的字段与签名。</summary>

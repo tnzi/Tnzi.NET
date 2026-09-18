@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
+import { composeImageCaptchaToken } from '@tnzi/core/services/captcha';
 import type { OAuthSocialProvider } from '@tnzi/core/types/shared-ui';
 import { useRegisterForm } from '../../headless/useRegisterForm';
 
@@ -25,6 +26,12 @@ interface IRegisterFormProps {
   onRefreshCaptcha?: () => void;
   captchaLabel?: string;
   captchaPlaceholder?: string;
+  /**
+   * Token from a consumer-rendered captcha widget (Turnstile / hCaptcha /
+   * reCAPTCHA / Altcha via `useCaptchaWidget`), rendered through the `#captcha`
+   * slot. Forwarded as `captchaToken`; wins over the picture's id + code.
+   */
+  captchaToken?: string;
   /** Minimum password length enforced by the field rules (default: 6) */
   passwordMinLength?: number;
 }
@@ -40,6 +47,8 @@ interface IRegisterFormEmits {
       phoneNumber?: string;
       captchaId?: string;
       captchaCode?: string;
+      /** Unified captcha token (`{captchaId}:{code}` for the picture, the widget's token otherwise). */
+      captchaToken?: string;
     }
   ];
   login: [];
@@ -61,6 +70,7 @@ const props = withDefaults(defineProps<IRegisterFormProps>(), {
   captchaUrl: '',
   captchaLabel: '',
   captchaPlaceholder: '',
+  captchaToken: '',
   passwordMinLength: 6,
 });
 
@@ -82,7 +92,8 @@ const form = useRegisterForm({
   },
   onSubmit: (data) => {
     // The terms gate is an invariant of the component, not just a disabled
-    // button: implicit form submission must not slip past it either.
+    // button: implicit form submission must not slip past it either. (The
+    // captcha needs no such gate: its Vant rule runs before van-form emits submit.)
     if (!agreedToTerms.value) return;
     emit('submit', {
       email: data.email,
@@ -91,6 +102,8 @@ const form = useRegisterForm({
       phoneNumber: props.showPhone ? data.phoneNumber : undefined,
       captchaId: props.showCaptcha ? props.captchaId : undefined,
       captchaCode: props.showCaptcha ? captchaCode.value : undefined,
+      captchaToken:
+        props.captchaToken || (props.showCaptcha ? composeImageCaptchaToken(props.captchaId, captchaCode.value) : undefined),
     });
   },
   onLogin: () => emit('login'),
@@ -122,6 +135,9 @@ const passwordRules = computed(() => [
 const confirmPasswordRules = computed(() => [
   { required: true, message: t('auth.pleaseConfirm', { field: t('auth.password') }) },
   { validator: (val: string) => val === password.value, message: t('auth.passwordMismatch') },
+]);
+const captchaRules = computed(() => [
+  { required: true, message: t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') }) },
 ]);
 
 const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProviders']>[number]) => {
@@ -175,9 +191,11 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
       <van-field
         v-if="props.showCaptcha"
         v-model="captchaCode"
+        name="captchaCode"
         :label="props.captchaLabel || t('auth.verificationCode')"
         :placeholder="props.captchaPlaceholder || t('auth.enterVerificationCode')"
         :disabled="isDisabled"
+        :rules="captchaRules"
       >
         <template #button>
           <img
@@ -189,6 +207,11 @@ const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProvi
           />
         </template>
       </van-field>
+
+      <!-- A provider widget the consumer renders (Turnstile / hCaptcha / reCAPTCHA / Altcha). -->
+      <div v-if="$slots.captcha" class="mb-3 px-4">
+        <slot name="captcha" />
+      </div>
 
       <div v-if="props.showLoginLink" class="px-4 pb-2 pt-1 text-center text-sm">
         <span class="text-van-muted">{{ t('auth.hasAccount') }}</span>

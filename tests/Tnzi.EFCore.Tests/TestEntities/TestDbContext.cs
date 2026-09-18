@@ -55,6 +55,11 @@ public class TestDbContext : TnziDbContext<TestDbContext>
     /// </summary>
     public DbSet<TestEntityWithIntId> TestEntitiesWithIntId { get; set; } = null!;
 
+    /// <summary>
+    /// 完整审计 + 并发戳实体
+    /// </summary>
+    public DbSet<TestAuditedDocument> AuditedDocuments { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -111,6 +116,13 @@ public class TestDbContext : TnziDbContext<TestDbContext>
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Price).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<TestAuditedDocument>(entity =>
+        {
+            entity.ToTable("TestAuditedDocuments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(100);
         });
 
         // 确保查询过滤器在所有实体配置之后应用

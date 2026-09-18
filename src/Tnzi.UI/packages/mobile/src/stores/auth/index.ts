@@ -2,7 +2,9 @@
  * @tnzi/mobile/stores/auth
  *
  * Authentication store - thin Pinia wrapper delegating to core AuthStateManager.
- * All business logic lives in AuthStateManager; this store only proxies reactive state.
+ * All business logic lives in AuthStateManager; this store only proxies reactive state
+ * (including `sessionEndReason`, the manager's classification of why the last
+ * session ended, so a login page need not import the classifier from core).
  */
 
 import { computed } from 'vue';
@@ -10,7 +12,7 @@ import { defineStore } from 'pinia';
 import { AuthStateManager } from '@tnzi/core/state';
 import type { StateDeps } from '@tnzi/core/state';
 import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
-import type { LoginDto, LoginResultDto, UserProfile, UpdateUserDto } from '@tnzi/core/services/identity';
+import type { LoginDto, LoginResultDto, UserProfile, UpdateProfileDto } from '@tnzi/core/services/identity';
 import { getStoreHttpClient, getStoreStorage } from '../factory';
 
 // ============================================
@@ -45,6 +47,12 @@ export const useAuthStore = defineStore('auth', () => {
   const roles = computed(() => getManager().roles);
   const isRefreshing = computed(() => getManager().isRefreshing);
   const error = computed(() => getManager().error);
+  /**
+   * Why the previous session ended (`'security'` for a revocation the user
+   * should be told about, `'expired'` for a plain expiry), or null. A login
+   * page reads this instead of classifying the raw `error` string itself.
+   */
+  const sessionEndReason = computed(() => getManager().sessionEndReason);
 
   // --- Getters ---
   const isLoggedIn = computed(() => getManager().isLoggedIn);
@@ -79,7 +87,12 @@ export const useAuthStore = defineStore('auth', () => {
     return getManager().fetchUserProfile();
   }
 
-  async function updateProfile(data: UpdateUserDto): Promise<UserProfile> {
+  /**
+   * Self-service profile edit. Typed as `UpdateProfileDto`, which deliberately
+   * has no roleIds / organizationId / email / phoneNumber: the endpoint drops
+   * them, so a wider type would let a caller "save" a change that never lands.
+   */
+  async function updateProfile(data: UpdateProfileDto): Promise<UserProfile> {
     return getManager().updateProfile(data);
   }
 
@@ -106,7 +119,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     // State
     isAuthenticated, accessToken, refreshToken, tokenExpiry,
-    user, permissions, roles, isRefreshing, error,
+    user, permissions, roles, isRefreshing, error, sessionEndReason,
     // Getters
     isLoggedIn, userName, displayName, avatar,
     userRoles, userPermissions, isTokenExpired, tokenExpiresIn,
@@ -142,6 +155,7 @@ export function useAuth() {
     permissions: computed(() => store.userPermissions),
     isLoading: computed(() => store.isRefreshing),
     error: computed(() => store.error),
+    sessionEndReason: computed(() => store.sessionEndReason),
 
     // Computed helpers
     isLoggedIn: computed(() => store.isLoggedIn),

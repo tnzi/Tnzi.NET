@@ -55,9 +55,14 @@ public class StepUpService : ApplicationService, IStepUpService
             return false;
         }
 
+        // ★★ 记录按 (用户, 范围, 会话) 命中，不只按用户：同一用户的另一条会话（被盗令牌）不能搭
+        //   本人这次确认的便车 —— step-up 的威胁模型正是「终端已易手」，只绑用户等于挡的不是它。
+        //   没有会话 claim 的部署（未启用会话 / 遗留令牌）两边都是 Guid.Empty，与绑定之前逐字相同。
+        var sessionId = CurrentSessionId();
         var tokens = await _authTokenService.GetUserTokensAsync(userId.Value, TokenLoginProvider);
         var entry = tokens.FirstOrDefault(t =>
             string.Equals(t.Name, Normalize(scope), StringComparison.Ordinal)
+            && t.SessionId == sessionId
             && !t.IsUsed
             && (t.ExpiresAt == null || t.ExpiresAt > DateTime.UtcNow));
 
@@ -153,7 +158,8 @@ public class StepUpService : ApplicationService, IStepUpService
     }
 
     /// <summary>
-    /// 记下一次确认。同一用户同一范围只保留最新的一条（唯一索引使然，也是想要的语义）。
+    /// 记下一次确认。同一用户同一范围<b>同一会话</b>只保留最新的一条（唯一索引含 SessionId，也是想要的语义）。
+    /// 绑定会话的顺带好处：会话被撤销时按 SessionId 删令牌，会把这条确认记录一并收走。
     /// </summary>
     private async Task<Result<StepUpGrantDto>> GrantAsync(Guid userId, string scope)
     {
@@ -168,7 +174,8 @@ public class StepUpService : ApplicationService, IStepUpService
             TokenLoginProvider,
             normalized,
             OneTimeToken.Hash(OneTimeToken.Create()),
-            expiresAt);
+            expiresAt,
+            CurrentSessionId());
 
         LogInformation("Step-up granted to user {UserId} for scope {Scope} until {ExpiresAt:o}.", userId, normalized, expiresAt);
 
@@ -205,4 +212,11 @@ public class StepUpService : ApplicationService, IStepUpService
 
     /// <summary>范围名归一化：去空白 + 转小写，免得 <c>Tip.Download</c> 与 <c>tip.download</c> 算成两个。</summary>
     private static string Normalize(string scope) => scope.Trim().ToLowerInvariant();
+
+    /// <summary>当前主体的 <c>session_id</c> claim；取不到（未启用会话 / 遗留令牌）为 <see cref="Guid.Empty"/>。</summary>
+    private Guid CurrentSessionId()
+    {
+        var raw = CurrentUser?.FindClaim(IdentityConstants.ClaimTypeNames.SessionId);
+        return !string.IsNullOrEmpty(raw) && Guid.TryParse(raw, out var sid) ? sid : Guid.Empty;
+    }
 }

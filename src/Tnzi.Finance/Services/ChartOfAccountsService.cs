@@ -12,18 +12,24 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
 
     private readonly IRepository<Account, Guid> _accountRepository;
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
+    private readonly IReadOnlyRepository<Item, Guid> _itemRepository;
     private readonly BalanceSummaryReader _balanceReader;
+    private readonly IEnumerable<IMasterDataUsageProvider> _usageProviders;
 
     public ChartOfAccountsService(
         IServiceProvider serviceProvider,
         IRepository<Account, Guid> accountRepository,
         IReadOnlyRepository<JournalLine, Guid> lineRepository,
-        BalanceSummaryReader balanceReader)
+        IReadOnlyRepository<Item, Guid> itemRepository,
+        BalanceSummaryReader balanceReader,
+        IEnumerable<IMasterDataUsageProvider>? usageProviders = null)
         : base(serviceProvider)
     {
         _accountRepository = Check.NotNull(accountRepository);
         _lineRepository = Check.NotNull(lineRepository);
+        _itemRepository = Check.NotNull(itemRepository);
         _balanceReader = Check.NotNull(balanceReader);
+        _usageProviders = usageProviders ?? Enumerable.Empty<IMasterDataUsageProvider>();
     }
 
     public async Task<Result<AccountDto>> GetAsync(Guid id, CancellationToken cancellationToken = default)
@@ -194,6 +200,20 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
 
         if (await _lineRepository.AnyAsync(l => l.AccountId == id, cancellationToken))
             return Fail("Cannot delete an account that has journal lines.", 409);
+
+        // 目录项按收入 / 费用科目解析单据行的科目：一个还没被过账用过的科目在上面那条检查里是
+        // 干净的，删掉后下一张带该目录项的单据就解析到一条被软删的科目。目录项住在核心自己的表里，
+        // 直接查而不经契约。
+        if (await _itemRepository.AnyAsync(i => i.IncomeAccountId == id || i.ExpenseAccountId == id, cancellationToken))
+            return Fail("Cannot delete an account referenced by an item's income or expense account. Edit the item first.", 409);
+
+        // 分录之外还有谁要往这个科目上写？周期性模板每期都会（Tnzi.Finance.Recurring）、
+        // 要约行转单时会（Tnzi.Finance.Offers）、薪资组件每次过账工资都会（Tnzi.Finance.Payroll）；
+        // 它们都住在子模块里，经契约提问，未注册实现 = 无人在用。
+        var usage = await MasterDataUsageAsker.AskAsync(
+            _usageProviders, FinanceMasterDataKind.Account, id, cancellationToken);
+        if (usage != null)
+            return Fail(usage.Detail, 409);
 
         await _accountRepository.DeleteAsync(account, cancellationToken);
         return Ok();

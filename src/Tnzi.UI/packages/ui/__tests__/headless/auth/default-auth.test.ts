@@ -122,6 +122,71 @@ describe('buildDefaultLoginCallbacks - code login', () => {
       expect.objectContaining({ email: 'someone@example.com', captchaId: 'cid', captchaCode: 'ABCD' }),
     );
   });
+
+  it('carries the unified captcha token into every send-code flow, including password recovery', async () => {
+    // All three endpoints spend a real SMS / email per call; password recovery
+    // was the one that used to be sent without any captcha at all.
+    const { runtime, authApi } = makeRuntime();
+    const send = buildDefaultLoginCallbacks(runtime).sendCode!;
+
+    await send({ account: 'someone@example.com', type: 'email', purpose: 'code-login', captchaToken: 't1' });
+    await send({ account: 'someone@example.com', type: 'email', purpose: 'reset-pwd', captchaToken: 't2' });
+    await send({ account: 'someone@example.com', type: 'email', purpose: 'register', captchaToken: 't3' });
+
+    expect(authApi.sendCodeLoginCode).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 't1' }));
+    expect(authApi.sendPasswordRecoveryCode).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 't2' }));
+    expect(authApi.sendQuickRegisterCode).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 't3' }));
+  });
+});
+
+describe('buildDefaultLoginCallbacks - password login captcha challenge', () => {
+  it('reveals a non-image provider challenge with just the provider name', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: vi.fn().mockResolvedValue({
+        succeeded: false,
+        errorCode: 'IDENTITY_CAPTCHA_REQUIRED',
+        errorDetails: { provider: 'turnstile' },
+      }),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'u', password: 'p' }, helpers);
+
+    expect(helpers.setCaptchaRequired).toHaveBeenCalledWith({
+      provider: 'turnstile',
+      captchaId: undefined,
+      imageBase64: undefined,
+      expirationSeconds: undefined,
+    });
+  });
+
+  it('still understands a pre-provider backend that only sends the picture', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: vi.fn().mockResolvedValue({
+        succeeded: false,
+        errorCode: 'IDENTITY_CAPTCHA_REQUIRED',
+        errorDetails: { captchaId: 'cid', imageBase64: 'AAAA', expirationSeconds: 300 },
+      }),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'u', password: 'p' }, helpers);
+
+    expect(helpers.setCaptchaRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'image', captchaId: 'cid', imageBase64: 'AAAA' }),
+    );
+  });
+
+  it('sends the unified token on the password login call', async () => {
+    const loginWithRefreshToken = vi.fn().mockResolvedValue({ succeeded: false, message: 'nope' });
+    const { runtime } = makeRuntime({ loginWithRefreshToken });
+
+    await expect(
+      buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'u', password: 'p', captchaToken: 'tok' }, makeHelpers()),
+    ).rejects.toThrow('nope');
+
+    expect(loginWithRefreshToken).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 'tok' }));
+  });
 });
 
 /**

@@ -43,6 +43,14 @@ function resolveApi(dialogApi?: NaiveDialogApi): NaiveDialogApi | undefined {
  * const dialogApi = useDialog();
  * setDialogAdapter(createDialogAdapter(dialogApi));
  * ```
+ *
+ * Every close path settles the promise. Naive only calls `onClose` for the X button;
+ * Esc (`closeOnEsc`, default on) and a mask click (`maskClosable`, default on) hide
+ * the dialog without it, so each call also listens to `onAfterLeave`, the one hook
+ * naive fires after any close, and treats a dialog that left without an answer as
+ * cancelled: `confirm` resolves false, `alert` resolves, `prompt` resolves null.
+ * A promise settles once, so the answer given by a button is never overwritten by
+ * the leave that follows it.
  */
 export function createDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdapter {
   return {
@@ -63,6 +71,7 @@ export function createDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdapter {
           onPositiveClick: () => resolve(true),
           onNegativeClick: () => resolve(false),
           onClose: () => resolve(false),
+          onAfterLeave: () => resolve(false),
         });
       });
     },
@@ -82,6 +91,7 @@ export function createDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdapter {
           positiveText: options?.confirmText ?? 'OK',
           onPositiveClick: () => resolve(),
           onClose: () => resolve(),
+          onAfterLeave: () => resolve(),
         });
       });
     },
@@ -114,6 +124,7 @@ export function createDialogAdapter(dialogApi?: NaiveDialogApi): DialogAdapter {
           onPositiveClick: () => resolve(inputValue.value),
           onNegativeClick: () => resolve(null),
           onClose: () => resolve(null),
+          onAfterLeave: () => resolve(null),
         });
       });
     },

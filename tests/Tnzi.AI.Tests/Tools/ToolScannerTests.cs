@@ -1,3 +1,4 @@
+using Tnzi.AI.Permissions;
 using Tnzi.AI.Tools.Attributes;
 using Tnzi.AI.Tools.Models;
 
@@ -104,9 +105,75 @@ public class ToolScannerTests
         tools.ShouldNotContain(t => t.Name == "graceful_toolAsync");
     }
 
+    [Fact]
+    public void ScanAssembly_GroupLevelRequiredPermissions_ApplyToEveryToolAndMergeWithMethodLevel()
+    {
+        // 组级声明覆盖整组：敏感工具组（task / sandbox / a2a）一条声明门住全部方法，
+        // 逐方法声明会在新增方法时漏掉一条而毫无症状
+        var tools = _scanner.ScanAssembly(typeof(TestGatedToolGroup).Assembly)
+            .Where(t => t.GroupName == "test-gated").ToList();
+
+        tools.Count.ShouldBe(2);
+        tools.First(t => t.Name == "gated_plain").RequiredPermissions
+            .ShouldBe(["ai.tools.test"]);
+        tools.First(t => t.Name == "gated_extra").RequiredPermissions
+            .ShouldBe(["ai.tools.test", "ai.tools.extra"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void SensitiveBuiltInToolGroups_DeclareRequiredPermissions()
+    {
+        // 子 Agent 生命周期（task）与远端 agent 调用（a2a）能读/取消别人的运行、能向外打请求，
+        // 必须由权限码门住，否则 RequiredPermissions 门控对框架自带的每个工具都是空转
+        var tools = _scanner.ScanAssembly(typeof(A2ATools).Assembly).ToList();
+
+        tools.Where(t => t.GroupName == "a2a").ShouldNotBeEmpty();
+        tools.Where(t => t.GroupName == "a2a").ShouldAllBe(t => t.RequiredPermissions.Contains(AIToolPermissions.A2A));
+
+        // task 组必须真的经扫描器进注册表（此前四个提供者类只带特性不带 IAIToolProvider，
+        // 扫描器按「接口 AND 特性」过滤，整组从未登记；旧用例改读特性自我安慰，恰好把这条漏洞盖住）
+        tools.Where(t => t.GroupName == "task").ShouldNotBeEmpty();
+        tools.Where(t => t.GroupName == "task").ShouldAllBe(t => t.RequiredPermissions.Contains(AIToolPermissions.Task));
+    }
+
+    /// <summary>
+    /// 框架自带的四个「模型侧协议」工具组（task / todo / clarification / artifact）必须经扫描器可达：
+    /// TodoMiddleware 等 write_todos、ClarificationMiddleware 等 ask_clarification、
+    /// SubAgentRegistry 排除 task、ai.tools.task 权限码门 task —— 它们都以「这些工具在注册表里」为前提。
+    /// </summary>
+    [Fact]
+    public void ScanAssembly_FrameworkAssembly_RegistersProtocolToolGroups()
+    {
+        var tools = _scanner.ScanAssembly(typeof(AIModule).Assembly).ToList();
+
+        new[] { "task", "todo", "clarification", "artifact" }
+            .ShouldBeSubsetOf(tools.Select(t => t.GroupName).Distinct());
+
+        new[]
+            {
+                "spawn_agent", "list_agent_runs", "get_agent_run", "send_agent_input", "wait_agent", "kill_agent",
+                "list_sub_agent_types", "write_todos", "ask_clarification", "present_files"
+            }
+            .ShouldBeSubsetOf(tools.Select(t => t.Name));
+
+        // 无权限码的三组只写属性包 / IAgentArtifactService，不需要门；task 整组受 ai.tools.task 门控
+        tools.Where(t => t.GroupName is "todo" or "clarification" or "artifact")
+            .ShouldAllBe(t => t.RequiredPermissions.Count == 0);
+    }
+
     #endregion
 
     #region 测试用工具组
+
+    [AIToolGroup("test-gated", RequiredPermissions = "ai.tools.test")]
+    private class TestGatedToolGroup : IAIToolProvider
+    {
+        [AIFunction("gated_plain", "Inherits the group permission")]
+        public Task<string> GatedPlainAsync() => Task.FromResult("ok");
+
+        [AIFunction("gated_extra", "Group permission plus its own", RequiredPermissions = "ai.tools.extra")]
+        public Task<string> GatedExtraAsync() => Task.FromResult("ok");
+    }
 
     [AIToolGroup("test-safety", "Test Safety Tools", "Tools for testing safety metadata")]
     private class TestSafetyToolGroup : IAIToolProvider

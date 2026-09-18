@@ -189,6 +189,52 @@ public class CliAgentOptionsValidatorTests
     }
 
     [Fact]
+    public void Enabled_WriteBackWithoutAllowedTools_Fails()
+    {
+        // 回写面是一个安全决定：启用回写而不写 AllowedTools 必须在启动期被拒，
+        // 而不是运行期让每一枚凭据静默拿到整个 MCP 面（或静默一个都调不了）。
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions { Enabled = true, McpEndpoint = "https://api.example.com/mcp" }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:AllowedTools"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackWithOnlyBlankAllowedTools_Fails()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = [" ", ""] }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:AllowedTools"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackWithWildcard_Passes()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = ["*"] }
+        };
+
+        Validate(options).ShouldNotContain(e => e.Contains("AllowedTools"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackDisabled_DoesNotRequireAllowedTools()
+    {
+        var options = new CliAgentOptions { Enabled = true, WriteBack = new CliWriteBackOptions { Enabled = false } };
+
+        Validate(options).ShouldNotContain(e => e.Contains("AllowedTools"));
+    }
+
+    [Fact]
     public void Enabled_RejectsArtifactPatternWithPathSeparator()
     {
         // 一条 "../.." 就能把回收器变成删库工具。

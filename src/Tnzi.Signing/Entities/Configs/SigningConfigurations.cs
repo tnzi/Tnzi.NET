@@ -82,11 +82,11 @@ public class SignerConfiguration : EntityTypeConfigurationBase<Signer, Guid>
         builder.Property(r => r.Name).IsRequired().HasMaxLength(160);
         builder.Property(r => r.Email).HasMaxLength(256);
         builder.Property(r => r.TokenHash).HasMaxLength(64);
-        builder.Property(r => r.DeclineReason).HasMaxLength(1000);
         builder.Property(r => r.SignerIp).HasMaxLength(64);
-        builder.Property(r => r.SignerUserAgent).HasMaxLength(512);
-        // 匿名端点收进来的两个自由文本字段：列上限与 SubmitAsync 的前置校验取同一个常量
+        // 匿名端点收进来的自由文本：列上限与服务侧的校验 / 截断取同一个常量
         // （无上限的匿名可写列是存储滥用面，见 SigningLimits）。
+        builder.Property(r => r.DeclineReason).HasMaxLength(SigningLimits.MaxDeclineReasonLength);
+        builder.Property(r => r.SignerUserAgent).HasMaxLength(SigningLimits.MaxSignerUserAgentLength);
         builder.Property(r => r.SignatureImage).HasMaxLength(SigningLimits.MaxSignatureImageLength);
         builder.Property(r => r.ConsentText).HasMaxLength(SigningLimits.MaxConsentTextLength);
 
@@ -116,6 +116,8 @@ public class FieldValueConfiguration : EntityTypeConfigurationBase<FieldValue, G
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(v => v.FieldKey).IsRequired().HasMaxLength(80);
+        // 匿名收件人写入、又会被画进成品的值：上限见 SigningLimits。
+        builder.Property(v => v.Value).HasMaxLength(SigningLimits.MaxFieldValueLength);
 
         builder.HasOne(v => v.Request)
             .WithMany(r => r.FieldValues)

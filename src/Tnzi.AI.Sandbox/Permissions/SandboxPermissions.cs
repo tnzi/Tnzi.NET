@@ -21,5 +21,7 @@ public class SandboxPermissions : IPermissionDefinitionProvider
         // core module and every AI sub-module declare it with the same arguments.
         context.AddGroup("ai", "AI");
         context.AddPermission("ai.sandbox.view", "View Sandbox", parentName: "ai", category: PermissionCategory.Technical);
+        // 沙箱工具组（bash / 文件读写）的使用权：与「能看沙箱管理面」是两种能力
+        context.AddPermission(AIToolPermissions.Sandbox, "Use Sandbox Tools", parentName: "ai", category: PermissionCategory.Technical);
     }
 }

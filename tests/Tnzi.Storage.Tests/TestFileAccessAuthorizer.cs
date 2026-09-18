@@ -11,12 +11,14 @@ public sealed class TestFileAccessAuthorizer : IFileAccessAuthorizer
 {
     private readonly bool _canRead;
     private readonly bool _canWrite;
+    private readonly bool _canMint;
     private readonly HashSet<Guid>? _readableIds;
 
-    public TestFileAccessAuthorizer(bool canRead = true, bool canWrite = true)
+    public TestFileAccessAuthorizer(bool canRead = true, bool canWrite = true, bool? canMint = null)
     {
         _canRead = canRead;
         _canWrite = canWrite;
+        _canMint = canMint ?? canRead;
     }
 
     private TestFileAccessAuthorizer(HashSet<Guid> readableIds)
@@ -24,6 +26,7 @@ public sealed class TestFileAccessAuthorizer : IFileAccessAuthorizer
         _readableIds = readableIds;
         _canRead = false;
         _canWrite = false;
+        _canMint = false;
     }
 
     /// <summary>只放行指定文件的读,用于验证批量路径逐个判定而不是一刀切。</summary>
@@ -38,9 +41,18 @@ public sealed class TestFileAccessAuthorizer : IFileAccessAuthorizer
     /// <summary>全拒,用于验证读路径确实被挡住。</summary>
     public static TestFileAccessAuthorizer DenyAll() => new(canRead: false, canWrite: false);
 
+    /// <summary>
+    /// 读得了、签发不了 —— 真实实现里持一条请求级凭据(<c>?sig=</c> 令牌 / 分享授予)的调用方
+    /// 就是这个形状。用于验证签发路径问的是签发判据而不是读取判据。
+    /// </summary>
+    public static TestFileAccessAuthorizer ReadableButNotMintable() => new(canRead: true, canWrite: false, canMint: false);
+
     public Task<bool> CanReadAsync(FileRecord record, CancellationToken cancellationToken = default)
         => Task.FromResult(_readableIds?.Contains(record.Id) ?? _canRead);
 
     public Task<bool> CanWriteAsync(FileRecord record, CancellationToken cancellationToken = default)
         => Task.FromResult(_canWrite);
+
+    public Task<bool> CanMintAccessTokenAsync(FileRecord record, CancellationToken cancellationToken = default)
+        => Task.FromResult(_readableIds?.Contains(record.Id) ?? _canMint);
 }

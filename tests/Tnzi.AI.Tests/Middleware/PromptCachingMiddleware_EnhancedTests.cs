@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// PromptCachingMiddleware 增强功能测试 - 3-tier caching + OAuth guard
+/// PromptCachingMiddleware 增强功能测试 - 3-tier caching
 /// </summary>
 public class PromptCachingMiddleware_EnhancedTests
 {
@@ -50,6 +50,13 @@ public class PromptCachingMiddleware_EnhancedTests
     // Tier 2b: CacheRecentUserMessages
     // -------------------------------------------------------------------------
 
+    /// <summary>断言经 SDK 键写在内容块上的断点（<c>AIContent.AdditionalProperties["anthropic:cache_control"]</c>）。</summary>
+    private static bool HasCacheBreakpoint(ChatMessage message)
+        => message.Contents.Any(c => c.AdditionalProperties?.ContainsKey("anthropic:cache_control") == true);
+
+    private static bool HasToolCacheBreakpoint(AITool tool)
+        => tool.AdditionalProperties.TryGetValue("CacheControl", out var v) && v is Anthropic.Models.Messages.CacheControlEphemeral;
+
     [Fact]
     public async Task CacheRecentUserMessages_SetsCacheControl()
     {
@@ -72,15 +79,13 @@ public class PromptCachingMiddleware_EnhancedTests
         await middleware.InvokeAsync(context, NextDelegate);
 
         // CacheRecentUserMessages=2: last 2 user messages (userMsg2, userMsg3) should have cache_control
-        userMsg1.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-        userMsg2.AdditionalProperties.ShouldNotBeNull();
-        userMsg2.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        userMsg3.AdditionalProperties.ShouldNotBeNull();
-        userMsg3.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(userMsg1).ShouldBeFalse();
+        HasCacheBreakpoint(userMsg2).ShouldBeTrue();
+        HasCacheBreakpoint(userMsg3).ShouldBeTrue();
 
         // Assistant messages should not have cache_control from this tier
-        assistantMsg1.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-        assistantMsg2.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
+        HasCacheBreakpoint(assistantMsg1).ShouldBeFalse();
+        HasCacheBreakpoint(assistantMsg2).ShouldBeFalse();
     }
 
     [Fact]
@@ -102,10 +107,8 @@ public class PromptCachingMiddleware_EnhancedTests
         await middleware.InvokeAsync(context, NextDelegate);
 
         // 只有 2 条用户消息，全部应被缓存
-        userMsg1.AdditionalProperties.ShouldNotBeNull();
-        userMsg1.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-        userMsg2.AdditionalProperties.ShouldNotBeNull();
-        userMsg2.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(userMsg1).ShouldBeTrue();
+        HasCacheBreakpoint(userMsg2).ShouldBeTrue();
     }
 
     // -------------------------------------------------------------------------
@@ -113,7 +116,7 @@ public class PromptCachingMiddleware_EnhancedTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task CacheToolDefinitions_SetsCacheLastToolDefinitionProperty()
+    public async Task CacheToolDefinitions_MarksLastToolWithCacheControl()
     {
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
@@ -128,12 +131,14 @@ public class PromptCachingMiddleware_EnhancedTests
 
         await middleware.InvokeAsync(context, NextDelegate);
 
-        context.Properties.ContainsKey("CacheLastToolDefinition").ShouldBeTrue();
-        context.Properties["CacheLastToolDefinition"].ShouldBe(true);
+        context.AdditionalTools.Count.ShouldBe(1);
+        HasToolCacheBreakpoint(context.AdditionalTools[0]).ShouldBeTrue();
+        // the wrapper must stay a callable function with the same name
+        context.AdditionalTools[0].Name.ShouldBe("tool_a");
     }
 
     [Fact]
-    public async Task CacheToolDefinitions_NoTools_DoesNotSetProperty()
+    public async Task CacheToolDefinitions_NoTools_MarksNothing()
     {
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
@@ -148,11 +153,11 @@ public class PromptCachingMiddleware_EnhancedTests
 
         await middleware.InvokeAsync(context, NextDelegate);
 
-        context.Properties.ContainsKey("CacheLastToolDefinition").ShouldBeFalse();
+        context.AdditionalTools.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task CacheToolDefinitions_Disabled_DoesNotSetProperty()
+    public async Task CacheToolDefinitions_Disabled_MarksNothing()
     {
         var middleware = CreateMiddleware(new PromptCachingOptions
         {
@@ -167,77 +172,7 @@ public class PromptCachingMiddleware_EnhancedTests
 
         await middleware.InvokeAsync(context, NextDelegate);
 
-        context.Properties.ContainsKey("CacheLastToolDefinition").ShouldBeFalse();
-    }
-
-    // -------------------------------------------------------------------------
-    // OAuth Guard: DisableOnOAuthToken
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public async Task DisableOnOAuthToken_SkipsCaching()
-    {
-        var middleware = CreateMiddleware(new PromptCachingOptions
-        {
-            Enabled = true,
-            CacheSystemPrompt = true,
-            DisableOnOAuthToken = true
-        });
-
-        var systemMsg = new ChatMessage(ChatRole.System, "System prompt");
-        var context = CreateContext([systemMsg]);
-        context.Properties["OAuthTokenDetected"] = true;
-
-        await middleware.InvokeAsync(context, NextDelegate);
-
-        // PromptCachingEnabled should NOT be set
-        context.Properties.ContainsKey("PromptCachingEnabled").ShouldBeFalse();
-        // System message should NOT have cache_control
-        systemMsg.AdditionalProperties?.ContainsKey("cache_control").ShouldNotBe(true);
-    }
-
-    [Fact]
-    public async Task DisableOnOAuthToken_Disabled_AllowsCaching()
-    {
-        var middleware = CreateMiddleware(new PromptCachingOptions
-        {
-            Enabled = true,
-            CacheSystemPrompt = true,
-            DisableOnOAuthToken = false // 明确禁用 OAuth guard
-        });
-
-        var systemMsg = new ChatMessage(ChatRole.System, "System prompt");
-        var context = CreateContext([systemMsg]);
-        context.Properties["OAuthTokenDetected"] = true;
-
-        await middleware.InvokeAsync(context, NextDelegate);
-
-        // DisableOnOAuthToken=false: caching should still work
-        context.Properties["PromptCachingEnabled"].ShouldBe(true);
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task DisableOnOAuthToken_NoOAuthToken_AllowsCaching()
-    {
-        var middleware = CreateMiddleware(new PromptCachingOptions
-        {
-            Enabled = true,
-            CacheSystemPrompt = true,
-            DisableOnOAuthToken = true
-        });
-
-        var systemMsg = new ChatMessage(ChatRole.System, "System prompt");
-        var context = CreateContext([systemMsg]);
-        // No OAuthTokenDetected property set
-
-        await middleware.InvokeAsync(context, NextDelegate);
-
-        // No OAuth token: caching should work normally
-        context.Properties["PromptCachingEnabled"].ShouldBe(true);
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasToolCacheBreakpoint(context.AdditionalTools[0]).ShouldBeFalse();
     }
 
     // -------------------------------------------------------------------------
@@ -269,18 +204,15 @@ public class PromptCachingMiddleware_EnhancedTests
         await middleware.InvokeAsync(context, NextDelegate);
 
         // Tier 1: system message cached
-        systemMsg.AdditionalProperties.ShouldNotBeNull();
-        systemMsg.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(systemMsg).ShouldBeTrue();
 
         // Tier 2a: CacheFirstNMessages=2 → 2nd message (assistantMsg1) has breakpoint
-        assistantMsg1.AdditionalProperties.ShouldNotBeNull();
-        assistantMsg1.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(assistantMsg1).ShouldBeTrue();
 
         // Tier 2b: CacheRecentUserMessages=1 → last user message (userMsg3) has breakpoint
-        userMsg3.AdditionalProperties.ShouldNotBeNull();
-        userMsg3.AdditionalProperties!.ContainsKey("cache_control").ShouldBeTrue();
+        HasCacheBreakpoint(userMsg3).ShouldBeTrue();
 
-        // Tier 3: tool definitions marked
-        context.Properties["CacheLastToolDefinition"].ShouldBe(true);
+        // Tier 3: last tool definition marked
+        HasToolCacheBreakpoint(context.AdditionalTools[^1]).ShouldBeTrue();
     }
 }

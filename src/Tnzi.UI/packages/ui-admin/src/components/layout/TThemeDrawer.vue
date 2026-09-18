@@ -19,7 +19,7 @@ import {
   useMessage,
 } from 'naive-ui'
 import { Icon } from '@iconify/vue'
-import { useTheme, THint, type ThemeContext, type ThemeColors } from '@tnzi/ui'
+import { useTheme, THint, TOverlayTheme, type ThemeContext, type ThemeColors } from '@tnzi/ui'
 import { DEFAULT_DESKTOP_VIBRANCY,
   useAdminThemeStore,
   VALID_SURFACE_STYLES,
@@ -541,6 +541,10 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
 </script>
 
 <template>
+  <!-- The overlay provider: the drawer already sizes most of its controls
+       `small` by hand; the provider makes that the default for the rest (the
+       bare switches) and for anything added later. -->
+  <TOverlayTheme>
   <NDrawer
     :show="show"
     :width="drawerWidth"
@@ -1478,6 +1482,7 @@ defineExpose({ resetAll, applySnapshot, close, buildSnapshot })
       </template>
     </NDrawerContent>
   </NDrawer>
+  </TOverlayTheme>
 </template>
 
 <style scoped>

@@ -10,10 +10,12 @@ public class BankTransactionConfiguration : EntityTypeConfigurationBase<BankTran
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
-        builder.Property(e => e.Description).HasMaxLength(512);
-        builder.Property(e => e.Payee).HasMaxLength(256);
-        builder.Property(e => e.Reference).HasMaxLength(128);
-        builder.Property(e => e.ExternalId).HasMaxLength(256).IsRequired();
+        // 列宽常量与 BankTransactionFieldLimits 共用：摄取器按它们归一化，两处不可能漂移
+        // （各写一份数字的话，漂移的症状是导入到一半 500 而不是编译失败）。
+        builder.Property(e => e.Description).HasMaxLength(BankTransactionFieldLimits.DescriptionMaxLength);
+        builder.Property(e => e.Payee).HasMaxLength(BankTransactionFieldLimits.PayeeMaxLength);
+        builder.Property(e => e.Reference).HasMaxLength(BankTransactionFieldLimits.ReferenceMaxLength);
+        builder.Property(e => e.ExternalId).HasMaxLength(BankTransactionFieldLimits.ExternalIdMaxLength).IsRequired();
         builder.Property(e => e.MatchRule).HasMaxLength(32);
         builder.Property(e => e.CreatedDocType).HasMaxLength(32);
         builder.Property(e => e.Amount).HasMoneyPrecision();

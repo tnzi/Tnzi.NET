@@ -19,6 +19,12 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// </summary>
     private readonly UploadGuard _guard;
 
+    /// <summary>
+    /// 缩略图生成器：位图与 PDF 首页两条出图路径、以及「这种文件此刻画不画得出来」的判定都在它那里。
+    /// 四条会产出缩略图的写路径与存量回填共用同一份。
+    /// </summary>
+    private readonly IFileThumbnailGenerator _thumbnails;
+
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
     public FileStorageService(
@@ -30,7 +36,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IPublicFileFieldResolver publicFieldResolver,
         IFileUrlSigner urlSigner,
         IServiceProvider serviceProvider,
-        UploadGuard guard)
+        UploadGuard guard,
+        IFileThumbnailGenerator thumbnails)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -43,10 +50,38 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // 两道闸门（体积/扩展名 + 净化管线）收在 UploadGuard 里，由容器给同一份，
         // 三条写路径共用，避免各抄一遍后逐条漂移。
         _guard = Check.NotNull(guard);
+        _thumbnails = Check.NotNull(thumbnails);
     }
 
+    /// <summary>
+    /// 上传时要不要为这个扩展名自动画缩略图：总开关开着，且生成器此刻画得出这种文件。
+    /// </summary>
+    private bool ShouldAutoGenerateThumbnail(string? extension)
+        => Options.AutoGenerateThumbnail && _thumbnails.CanGenerate(extension);
 
     public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
+    {
+        var uploaded = new List<string>();
+        try
+        {
+            return await SaveCoreAsync(originalFileName, stream, isTemporary, isPublic, uploaded);
+        }
+        catch
+        {
+            // 对象已经交给 provider、记录却没落成（InsertAsync / 缩略图抛了）：不收拾就是一个
+            // 任何清理都看不见的孤儿对象 —— 孤儿回收按 FileRecord 枚举，而这里根本没有记录。
+            await DiscardUploadedObjectsAsync(uploaded);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 单文件保存的主体。<paramref name="uploadedObjects"/> 收集本次调用交给 provider 的每一个对象键
+    /// （正文、缩略图、按原键重传），供调用方在中途失败时删掉 —— <see cref="SaveManyAsync"/> 作废整批时
+    /// 靠它知道哪些对象是这一批写进去的。
+    /// </summary>
+    private async Task<Result<FileRecord>> SaveCoreAsync(
+        string originalFileName, Stream stream, bool isTemporary, bool isPublic, List<string> uploadedObjects)
     {
         var validation = ValidateFileName<FileRecord>(originalFileName);
         if (validation != null)
@@ -83,7 +118,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             stream.Position = 0;
 
             // 检查是否已存在相同MD5的文件
-            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream, isPublic);
+            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream, isTemporary, isPublic, uploadedObjects);
             if (existingResult != null)
             {
                 return existingResult;
@@ -100,13 +135,16 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         // 1. 上传文件到存储
         var filePath = await _storage.UploadAsync(fileName, stream, contentType);
+        uploadedObjects.Add(filePath);
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
-        // 2. 如果是图片，生成缩略图
+        // 2. 位图与 PDF（后者需可选包 Tnzi.Documents）生成缩略图；画不出来只是没有图，不影响保存
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
+        if (ShouldAutoGenerateThumbnail(extension))
         {
-            thumbnailPath = await GenerateThumbnailAsync(filePath, fileName);
+            thumbnailPath = await _thumbnails.GenerateAsync(filePath, fileName, extension, size);
+            if (thumbnailPath != null)
+                uploadedObjects.Add(thumbnailPath);
         }
 
         // 3. 保存数据库记录
@@ -135,7 +173,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(fileRecord, "File saved successfully");
     }
 
-    public async Task<Result<Stream>> GetAsync(Guid id)
+    public Task<Result<Stream>> GetAsync(Guid id)
+        => GetContentAsync(id, FileAccessType.Download);
+
+    public Task<Result<Stream>> GetForPreviewAsync(Guid id)
+        => GetContentAsync(id, FileAccessType.Preview);
+
+    /// <summary>
+    /// 下载与预览共用的取流路径：授权、取字节、发一条带访问类型的 <see cref="FileAccessedEvent"/>。
+    /// 访问类型只在这里被写入 —— 两条预览路由此前一条记成 Download、一条什么都不发，
+    /// 正是因为各自另起了取流的路子。
+    /// </summary>
+    private async Task<Result<Stream>> GetContentAsync(Guid id, FileAccessType accessType)
     {
         var record = await _repository.GetAsync(id);
         var check = await EnsureReadableAsync<Stream>(record);
@@ -146,7 +195,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<Stream>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         var stream = await _storage.DownloadAsync(GetSafePath(record!.Path));
-        await PublishFileAccessedEventAsync(id, FileAccessType.Download);
+        await PublishFileAccessedEventAsync(id, accessType);
         return Ok(stream);
     }
 
@@ -263,8 +312,29 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (validation != null)
             return validation;
 
+        var extension = Path.GetExtension(fileName);
+        var contentType = FileTypeHelper.GetContentType(extension);
+
+        // 与 SaveAsync 同一道闸门、同一个位置（去重与哈希之前）：这是 IFileStorageService 上的公开写路径，
+        // 消费方经它直存字节时同样把内容交给了 provider。
+        await using var sanitized = await _guard.RunAsync(fileName, extension, contentType, stream);
+        if (sanitized.IsRejected)
+        {
+            return Fail<FileRecord>(sanitized.Reason!, 400);
+        }
+
+        if (!ReferenceEquals(sanitized.Content, stream))
+        {
+            // 净化器改写了内容：调用方给的哈希描述的是一份永远不会落库的字节。去重与落库都按净化后的
+            // 哈希走，而不是当成「哈希不符」拒掉 —— 后者会让每一个剥元数据的部署都存不进图片。
+            stream = sanitized.Content;
+            md5Hash = await HashHelper.GetMd5Async(stream);
+            stream.Position = 0;
+        }
+
         // 检查是否已存在相同MD5的文件
-        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream);
+        // 这条路径建的是正式记录（ReferenceCount 从 1 起），复用时也按正式持有者对待。
+        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream, isTemporary: false);
         if (existingResult != null)
         {
             return existingResult;
@@ -278,9 +348,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        var extension = Path.GetExtension(fileName);
         var newFileName = StorageKeyHelper.NewKey(extension);
-        var contentType = FileTypeHelper.GetContentType(extension);
 
         // 与 SaveAsync 同理：长度在交给 provider 之前取。
         var knownSize = TryGetStreamLength(stream);
@@ -288,9 +356,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
         string? thumbnailPath = null;
-        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
+        if (ShouldAutoGenerateThumbnail(extension))
         {
-            thumbnailPath = await GenerateThumbnailAsync(filePath, newFileName);
+            thumbnailPath = await _thumbnails.GenerateAsync(filePath, newFileName, extension, size);
         }
 
         var fileRecord = new FileRecord
@@ -312,23 +380,130 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(fileRecord, "File saved successfully");
     }
 
+    /// <summary>
+    /// 批量保存：一次意图，要么整批落库，要么一条记录、一个对象都不留。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 此前它在工作单元里逐个 <c>SaveAsync</c>，第一条失败就 <b>return Fail</b> —— 而
+    /// <see cref="ApplicationService.ExecuteInUnitOfWorkAsync{TResult}"/> 只在<b>异常</b>时回滚，正常返回的失败结果
+    /// 照样提交：<c>[a.png, b.png, evil.exe]</c> 回 400，前两条却以 <c>ReferenceCount = 1</c> 的正式记录留了下来 ——
+    /// 孤儿回收永远不收它们，错误响应里也没有它们的 id，重试整批又经 MD5 去重把计数再加一。
+    /// 镜像形态：provider 在第三条上抛异常，行回滚了，前两条的字节却留在桶里、没有任何记录指向。
+    /// </para>
+    /// <para>
+    /// 现在分三层：①便宜的闸门（文件名 / 流 / 体积 / 扩展名）先整批过一遍，一条不合规整批拒绝，此时一个字节都没写；
+    /// ②逐条保存跑在工作单元里，中途失败以异常离开让工作单元回滚，再把失败结果翻译回 <c>Result</c>；
+    /// ③本批交给 provider 的对象逐个删掉（去重命中的既有记录**不在其列**：它的对象不是这批写的，计数由回滚退回）。
+    /// 行的原子性依赖工作单元（<c>EFCoreModule</c> 必定注册它，本模块 <c>[DependsOn]</c> 它）；
+    /// 没有工作单元管理器时只能收拾对象并记一条警告。
+    /// </para>
+    /// </remarks>
     public async Task<Result<IEnumerable<FileRecord>>> SaveManyAsync(IEnumerable<(string fileName, Stream stream)> files, bool isPublic = false)
     {
-        return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
+        Check.NotNull(files);
+        var batch = files.ToList();
+
+        foreach (var (fileName, stream) in batch)
         {
-            var records = new List<FileRecord>();
-            foreach (var (fileName, stream) in files)
+            var validation = ValidateFileName<IEnumerable<FileRecord>>(fileName)
+                ?? ValidateStream<IEnumerable<FileRecord>>(stream)
+                ?? ValidateFile<IEnumerable<FileRecord>>(fileName, stream);
+            if (validation != null)
+                return validation;
+        }
+
+        var uploaded = new List<string>();
+        var saved = new List<FileRecord>();
+        try
+        {
+            return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
             {
-                var result = await SaveAsync(fileName, stream, isTemporary: false, isPublic: isPublic);
-                if (!result.Succeeded)
+                foreach (var (fileName, stream) in batch)
                 {
-                    return Fail<IEnumerable<FileRecord>>(result.Message ?? "Failed to save file", result.Code ?? 500, result.ErrorCode);
+                    var result = await SaveCoreAsync(fileName, stream, isTemporary: false, isPublic, uploaded);
+                    if (!result.Succeeded)
+                    {
+                        // 以异常离开工作单元才会回滚；失败结果在下面的 catch 里翻译回 Result。
+                        throw new BatchSaveAbortedException(result);
+                    }
+                    saved.Add(result.Data!);
                 }
-                records.Add(result.Data!);
+                LogInformation("Batch saved {Count} files", saved.Count);
+                return Ok((IEnumerable<FileRecord>)saved.ToList(), $"Batch saved {saved.Count} files");
+            });
+        }
+        catch (BatchSaveAbortedException ex)
+        {
+            await AbandonBatchAsync(saved, uploaded);
+            return Fail<IEnumerable<FileRecord>>(ex.Failure.Message ?? "Failed to save file", ex.Failure.Code ?? 500, ex.Failure.ErrorCode);
+        }
+        catch
+        {
+            await AbandonBatchAsync(saved, uploaded);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 作废一批保存：把回滚前挂在变更跟踪器上的实体摘掉（否则同一作用域里下一次 SaveChanges 会把它们原样重放，
+    /// 同 <see cref="IRepository{TEntity}.Discard"/> 的理由），再删掉本批交给 provider 的对象。
+    /// </summary>
+    /// <remarks>
+    /// 没有 <c>IUnitOfWorkManager</c> 时 <c>ExecuteInUnitOfWorkAsync</c> 直接执行委托、仓储逐条立即提交：
+    /// 失败之前的记录**已经在库里**，摘不掉也回滚不了。那些记录的对象必须留下 —— 删掉等于把「孤儿但自洽的记录」
+    /// 变成「记录在、字节没了」（下载 500），比原来更糟；只删没落成记录的那一条交给 provider 的对象。
+    /// </remarks>
+    private async Task AbandonBatchAsync(List<FileRecord> saved, List<string> uploaded)
+    {
+        foreach (var record in saved)
+        {
+            _repository.Discard(record);
+        }
+
+        if (UnitOfWorkManager == null && saved.Count > 0)
+        {
+            LogWarning(
+                "SaveManyAsync aborted without a unit of work manager: {Count} record(s) saved before the failure were already committed and are kept together with their objects.",
+                saved.Count);
+
+            var committedObjects = saved
+                .SelectMany(r => new[] { r.Path, r.ThumbnailPath })
+                .Where(p => !string.IsNullOrEmpty(p))
+                .ToHashSet(StringComparer.Ordinal);
+            uploaded.RemoveAll(committedObjects.Contains);
+        }
+
+        await DiscardUploadedObjectsAsync(uploaded);
+    }
+
+    /// <summary>
+    /// 删掉一批已交给 provider、却不会有记录指向的对象。删除失败只记日志：这里已经在收拾一次失败了。
+    /// </summary>
+    private async Task DiscardUploadedObjectsAsync(List<string> uploaded)
+    {
+        foreach (var path in uploaded)
+        {
+            try
+            {
+                await _storage.DeleteAsync(GetSafePath(path));
             }
-            LogInformation("Batch saved {Count} files", records.Count);
-            return Ok((IEnumerable<FileRecord>)records, $"Batch saved {records.Count} files");
-        });
+            catch (Exception ex)
+            {
+                LogWarning("Failed to discard uploaded object {Path} after an aborted save: {Error}", path, ex.Message);
+            }
+        }
+
+        uploaded.Clear();
+    }
+
+    /// <summary>
+    /// 批量保存中途某一条以失败结果返回：用异常把它带出工作单元（只有异常才回滚），在外层翻译回 <c>Result</c>。
+    /// 不是给调用方看的，永远在 <see cref="SaveManyAsync"/> 内部被接住。
+    /// </summary>
+    private sealed class BatchSaveAbortedException(Result<FileRecord> failure) : Exception(failure.Message)
+    {
+        public Result<FileRecord> Failure { get; } = failure;
     }
 
     public async Task<Result> DeleteManyAsync(IEnumerable<Guid> ids)
@@ -397,39 +572,53 @@ public class FileStorageService : ApplicationService, IFileStorageService
         var extension = sourceFile.Extension;
         var copyFileName = StorageKeyHelper.NewKey(extension);
 
-        // Prefer provider-native server-side copy (S3/R2/Azure) to avoid streaming large files
-        // through the application; fall back to download + upload when unsupported (Local/InMemory).
-        var newFilePath = await _storage.CopyAsync(GetSafePath(sourceFile.Path), copyFileName);
-        if (string.IsNullOrEmpty(newFilePath))
+        // 与 SaveAsync 同一形状：副本（与它的缩略图）已交给 provider、记录却没落成时，删掉它们 ——
+        // 孤儿回收按 FileRecord 枚举，看不见没有记录的对象。原件不在这份清单里。
+        var uploaded = new List<string>();
+        try
         {
-            using var sourceStream = await _storage.DownloadAsync(GetSafePath(sourceFile.Path));
-            newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
+            // Prefer provider-native server-side copy (S3/R2/Azure) to avoid streaming large files
+            // through the application; fall back to download + upload when unsupported (Local/InMemory).
+            var newFilePath = await _storage.CopyAsync(GetSafePath(sourceFile.Path), copyFileName);
+            if (string.IsNullOrEmpty(newFilePath))
+            {
+                using var sourceStream = await _storage.DownloadAsync(GetSafePath(sourceFile.Path));
+                newFilePath = await _storage.UploadAsync(copyFileName, sourceStream, sourceFile.ContentType);
+            }
+            uploaded.Add(newFilePath);
+
+            string? thumbnailPath = null;
+            if (ShouldAutoGenerateThumbnail(extension))
+            {
+                thumbnailPath = await _thumbnails.GenerateAsync(newFilePath, copyFileName, extension, sourceFile.Size, cancellationToken);
+                if (thumbnailPath != null)
+                    uploaded.Add(thumbnailPath);
+            }
+
+            var newFileRecord = new FileRecord
+            {
+                FileName = copyFileName,
+                OriginalName = newFileName ?? sourceFile.OriginalName,
+                Extension = extension,
+                Size = sourceFile.Size,
+                Path = newFilePath,
+                Md5Hash = sourceFile.Md5Hash, // 复制文件内容相同，直接复用 MD5
+                Provider = sourceFile.Provider,
+                ContentType = sourceFile.ContentType,
+                ThumbnailPath = thumbnailPath,
+                ReferenceCount = 0
+            };
+
+            await _repository.InsertAsync(newFileRecord, cancellationToken);
+
+            LogInformation("File copied: {SourceFileId} -> {NewFileId}, FileName: {FileName}", sourceFileId, newFileRecord.Id, newFileName ?? sourceFile.OriginalName);
+            return Ok(newFileRecord, "File copied successfully");
         }
-
-        string? thumbnailPath = null;
-        if (FileTypeHelper.IsThumbnailable(extension) && Options.AutoGenerateThumbnail)
+        catch
         {
-            thumbnailPath = await GenerateThumbnailAsync(newFilePath, copyFileName);
+            await DiscardUploadedObjectsAsync(uploaded);
+            throw;
         }
-
-        var newFileRecord = new FileRecord
-        {
-            FileName = copyFileName,
-            OriginalName = newFileName ?? sourceFile.OriginalName,
-            Extension = extension,
-            Size = sourceFile.Size,
-            Path = newFilePath,
-            Md5Hash = sourceFile.Md5Hash, // 复制文件内容相同，直接复用 MD5
-            Provider = sourceFile.Provider,
-            ContentType = sourceFile.ContentType,
-            ThumbnailPath = thumbnailPath,
-            ReferenceCount = 0
-        };
-
-        await _repository.InsertAsync(newFileRecord, cancellationToken);
-
-        LogInformation("File copied: {SourceFileId} -> {NewFileId}, FileName: {FileName}", sourceFileId, newFileRecord.Id, newFileName ?? sourceFile.OriginalName);
-        return Ok(newFileRecord, "File copied successfully");
     }
 
     public async Task<Result<FileStorageStatistics>> GetStatisticsAsync()
@@ -708,7 +897,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
                     ReferenceCount = 0
                 };
 
-                await _repository.InsertAsync(zipRecord, cancellationToken);
+                try
+                {
+                    await _repository.InsertAsync(zipRecord, cancellationToken);
+                }
+                catch
+                {
+                    // 压缩包已交给 provider、记录没落成：与 SaveAsync 同一形状，删掉它，
+                    // 否则是一个孤儿回收看不见的对象（它按 FileRecord 枚举）。
+                    await DiscardUploadedObjectsAsync([zipPath]);
+                    throw;
+                }
+
                 LogInformation("Files compressed: {Count} files -> {ZipFileName}", fileIdList.Count, zipName);
                 return Ok(zipRecord, $"Compressed {fileIdList.Count} files successfully");
             }
@@ -805,24 +1005,40 @@ public class FileStorageService : ApplicationService, IFileStorageService
                                 400, ErrorCodes.VALIDATION_ERROR);
                         }
 
-                        tempStream.Position = 0;
-                        var md5Hash = await HashHelper.GetMd5Async(tempStream);
-                        tempStream.Position = 0;
-
                         var entryExtension = Path.GetExtension(entry.Name);
                         var contentType = FileTypeHelper.GetContentType(entryExtension);
+
+                        // 净化管线：解出来的每一条都是一次独立的写入，必须过与直传同一份闸门，位置同样在
+                        // 算 MD5 与交给 provider 之前。此前这里只过扩展名白名单 —— 注册了病毒扫描器的部署，
+                        // 上传一个干净的 zip 再解压，包里每一条都绕过扫描器落进对象存储。被拒的条目沿用
+                        // 「跳过该条、不作废整包」的取舍。
+                        tempStream.Position = 0;
+                        await using var sanitized = await _guard.RunAsync(entry.Name, entryExtension, contentType, tempStream);
+                        if (sanitized.IsRejected)
+                        {
+                            LogWarning(
+                                "Skipped zip entry {EntryName} from {FileId}: rejected by the upload sanitizer ({Reason}).",
+                                entry.Name, fileId, sanitized.Reason);
+                            continue;
+                        }
+
+                        var content = sanitized.Content;
+                        var storedSize = TryGetStreamLength(content) ?? entrySize;
+                        content.Position = 0;
+                        var md5Hash = await HashHelper.GetMd5Async(content);
+                        content.Position = 0;
 
                         // ★ 键由服务端生成：条目名是上传者写进压缩包里的，同 CompressAsync 的理由。
                         //   条目名只进 OriginalName。
                         var entryKey = StorageKeyHelper.NewKey(entryExtension);
-                        var extractedPath = await _storage.UploadAsync(entryKey, tempStream, contentType);
+                        var extractedPath = await _storage.UploadAsync(entryKey, content, contentType);
 
                         extractedFiles.Add(new FileRecord
                         {
                             FileName = entryKey,
                             OriginalName = entry.Name,
                             Extension = entryExtension,
-                            Size = entrySize,
+                            Size = storedSize,
                             Path = extractedPath,
                             Md5Hash = md5Hash,
                             Provider = _storage.ProviderName,
@@ -851,10 +1067,29 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (expiresInSeconds <= 0)
             return Fail<string>("ExpiresInSeconds must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
 
+        // 动词决定签出的是哪一种凭据，所以先把它钉死：未知动词不能落到「当 GET 处理」——
+        // provider 对非 PUT 一律签读 URL，一个拼错的动词会安静地拿到与请求不符的东西。
+        var verb = NormalizePresignedVerb(httpMethod);
+        if (verb == null)
+            return Fail<string>("HttpMethod must be GET or PUT", 400, ErrorCodes.VALIDATION_ERROR);
+
         var record = await _repository.GetAsync(id);
-        // A presigned URL bypasses this API entirely once minted, so the caller
-        // must be allowed to read the file before one is issued.
-        var check = await EnsureReadableAsync<string>(record);
+        // A presigned URL bypasses this API entirely once minted, so the gate has to
+        // match the credential being issued: a GET URL is a read credential of the same
+        // family as an access token (no Authorization header, dies only by expiry, and
+        // the cloud lifetime is not even capped by SignedUrlTtlSeconds), so it needs the
+        // *mint* verdict - the read verdict minus request-level credentials. Otherwise a
+        // holder of a 10-minute ?sig= render token or a capped share link could trade it
+        // here for a week-long cloud URL, or (local fallback) for a fresh signed link that
+        // feeds back into this same endpoint forever. A PUT URL lets its holder overwrite
+        // the object's bytes without the upload guard or the .update code ever running,
+        // so it needs CanWrite.
+        // ★ Both used to check CanRead only - any storage.file.view holder could mint
+        //   a direct-upload URL for any file on S3/R2/Azure, and any request-credential
+        //   holder could renew itself through the GET branch.
+        var check = verb == PresignedPutVerb
+            ? await EnsureWritableAsync<string>(record)
+            : await EnsureMintableAsync<string>(record);
         if (check != null)
             return check;
 
@@ -862,12 +1097,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<string>("File path is empty", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         // Try provider-level presigned URL first (S3, R2, Azure)
-        var presignedUrl = await _storage.GetPresignedUrlAsync(record.Path, expiresInSeconds, httpMethod);
+        var presignedUrl = await _storage.GetPresignedUrlAsync(record.Path, expiresInSeconds, verb);
         if (!string.IsNullOrEmpty(presignedUrl))
         {
-            LogInformation("Presigned URL generated for file {FileId}, method: {HttpMethod}, expires: {ExpiresIn}s", id, httpMethod, expiresInSeconds);
+            LogInformation("Presigned URL generated for file {FileId}, method: {HttpMethod}, expires: {ExpiresIn}s", id, verb, expiresInSeconds);
             return Ok<string>(presignedUrl);
         }
+
+        // 下面的回退是一条**只读**链接。把它当作 PUT 的答案交出去就是「要写凭据、拿到读凭据、
+        // 状态 200」：调用方拿去上传会失败在一个与它的请求无关的地方。
+        if (verb == PresignedPutVerb)
+            return Fail<string>("Direct-upload presigned URLs are not supported by the current storage provider", 501);
 
         // 本地存储没有对象存储那套预签名。此前这里回一个裸的控制器 URL —— 对私密文件
         // 那是个**打不开的链接**(匿名请求拿不到)。改为带上签名令牌,语义与云端预签名对齐:
@@ -1166,6 +1406,62 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(records.Count, $"{records.Count} files marked publicly readable");
     }
 
+    public async Task<Result<ThumbnailBackfillResult>> BackfillThumbnailsAsync(
+        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, CancellationToken cancellationToken = default)
+    {
+        var result = new ThumbnailBackfillResult();
+
+        // 候选 = 没有缩略图 + 有对象 + 扩展名是生成器**此刻**画得出的。最后一条按扩展名列表进 SQL 而不是
+        // 取回全表再问 CanGenerate：没有缩略图的记录里绝大多数是 .txt / .zip / .docx，本来就画不出来。
+        var supported = _thumbnails.SupportedExtensions.ToList();
+        if (supported.Count == 0)
+        {
+            return Ok(result, "No thumbnail source is available on this host");
+        }
+
+        var query = _repository.AsQueryable()
+            .Where(f => f.ThumbnailPath == null && f.Path != null && supported.Contains(f.Extension.ToLower()));
+
+        if (fileIds is { Count: > 0 })
+        {
+            var ids = fileIds.ToList();
+            query = query.Where(f => ids.Contains(f.Id));
+        }
+
+        var total = await query.CountAsync(cancellationToken);
+        var ordered = query.OrderBy(f => f.CreationTime);
+        var batch = maxFiles > 0
+            ? await ordered.Take(maxFiles).ToListAsync(cancellationToken)
+            : await ordered.ToListAsync(cancellationToken);
+
+        result.Scanned = batch.Count;
+
+        foreach (var record in batch)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var thumbnailPath = await _thumbnails.GenerateAsync(record.Path!, record.FileName, record.Extension, record.Size, cancellationToken);
+            if (thumbnailPath == null)
+            {
+                // 画不出来的原因已经在生成器里记了日志；它仍是候选，下一次调用还会再试 ——
+                // 所以调用方按 Generated 归零而不是 Remaining 归零停手。
+                result.Failed++;
+                result.FailedFileIds.Add(record.Id);
+                continue;
+            }
+
+            record.ThumbnailPath = thumbnailPath;
+            await _repository.UpdateAsync(record, cancellationToken);
+            result.Generated++;
+        }
+
+        result.Remaining = total - result.Generated;
+
+        LogInformation("Thumbnail backfill: {Scanned} scanned, {Generated} generated, {Failed} failed, {Remaining} still without a thumbnail",
+            result.Scanned, result.Generated, result.Failed, result.Remaining);
+        return Ok(result, $"{result.Generated} thumbnails generated");
+    }
+
     public async Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(tag))
@@ -1247,9 +1543,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
         => _guard.Validate<T>(fileName, TryGetStreamLength(stream));
 
     /// <summary>
-    /// 尝试通过 MD5 获取已存在的文件
+    /// 尝试通过 MD5 获取已存在的文件。
     /// </summary>
-    private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(string md5Hash, string originalFileName, Stream stream, bool isPublic = false)
+    /// <remarks>
+    /// <paramref name="isTemporary"/> 是本次上传的形态，不是命中记录的形态。一条由临时上传创建的记录
+    /// （<c>IsTemporary = true</c>，计数 = 正式引用行数）被一次**正式**上传复用后，就有了一个不留引用行的
+    /// 隐式持有者 —— 那正是正式记录的形状，所以记录随之转正（<c>IsTemporary = false</c>）。
+    /// 不转正的话，「只重算临时记录」的 <c>SyncAllReferenceCountsAsync</c> 会按引用行把它归零，
+    /// 默认开启的孤儿回收随后物理删除正式上传者的文件。
+    /// </remarks>
+    private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(
+        string md5Hash, string originalFileName, Stream stream, bool isTemporary, bool isPublic = false, List<string>? uploadedObjects = null)
     {
         var match = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
         if (match == null)
@@ -1274,6 +1578,12 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return null;
         }
 
+        if (!isTemporary && existing.IsTemporary)
+        {
+            LogInformation("Temporary record {FileId} reused by a permanent upload; marking it permanent", existing.Id);
+            existing.IsTemporary = false;
+        }
+
         var fileExists = await _storage.ExistsAsync(GetSafePath(existing.Path));
         if (fileExists)
         {
@@ -1290,50 +1600,23 @@ public class FileStorageService : ApplicationService, IFileStorageService
             var existingContentType = FileTypeHelper.GetContentType(existing.Extension ?? Path.GetExtension(originalFileName));
             stream.Position = 0;
             var newFilePath = await _storage.UploadAsync(existing.FileName, stream, existingContentType);
+            uploadedObjects?.Add(newFilePath);
 
             existing.Path = newFilePath;
             existing.ReferenceCount++;
 
-            if (FileTypeHelper.IsThumbnailable(existing.Extension ?? "") && Options.AutoGenerateThumbnail)
+            if (ShouldAutoGenerateThumbnail(existing.Extension))
             {
                 // 缩略图是从 newFilePath 回读生成的，不碰 stream。上传之后这个流可能已经
                 // 被 provider 关掉，回退它的位置只会白白抛 ObjectDisposedException。
-                existing.ThumbnailPath = await GenerateThumbnailAsync(newFilePath, existing.FileName);
+                existing.ThumbnailPath = await _thumbnails.GenerateAsync(newFilePath, existing.FileName, existing.Extension, existing.Size);
+                if (existing.ThumbnailPath != null)
+                    uploadedObjects?.Add(existing.ThumbnailPath);
             }
 
             await _repository.UpdateAsync(existing);
             LogInformation("File re-uploaded and record updated: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
             return Ok(existing, "File re-uploaded (was missing)");
-        }
-    }
-
-    private async Task<string?> GenerateThumbnailAsync(string originalPath, string fileName)
-    {
-        try
-        {
-            using var originalStream = await _storage.DownloadAsync(originalPath);
-
-            // 经解码闸门：先读文件头判尺寸再解码。压缩字节数与解码后的内存没有关系 ——
-            // 一个 200KB 的 PNG 可以声明 50000×50000，直接 Load 就是一次 OOM，
-            // 而上传大小限制对它毫无作用。上限见 Imaging:MaxDecodePixels。
-            using var image = await ImageDecodeGuard.LoadAsync(originalStream);
-            var thumbnailSize = Options.ThumbnailSize;
-            var thumbnail = image.GenerateSquareThumbnail(Math.Max(thumbnailSize.Width, thumbnailSize.Height));
-
-            using var thumbnailStream = new MemoryStream();
-            var quality = Options.ImageCompressionQuality;
-            await thumbnail.SaveAsJpegAsync(thumbnailStream, new JpegEncoder { Quality = quality });
-            thumbnailStream.Position = 0;
-
-            var thumbnailFileName = StorageKeyHelper.ThumbnailKey(fileName);
-            var thumbnailPath = await _storage.UploadAsync(thumbnailFileName, thumbnailStream, "image/jpeg");
-
-            return thumbnailPath;
-        }
-        catch (Exception ex)
-        {
-            LogError("Error generating thumbnail for {OriginalPath}: {Error}", originalPath, ex.Message);
-            return null;
         }
     }
 
@@ -1418,6 +1701,23 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return null;
 
         return Fail<T>("File record not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+    }
+
+    private const string PresignedGetVerb = "GET";
+    private const string PresignedPutVerb = "PUT";
+
+    /// <summary>
+    /// 预签名 URL 只有两种动词：GET（读凭据）与 PUT（写凭据）。返回规范化的大写形态，
+    /// 其它一律 <c>null</c>。provider 各自做的是不区分大小写的比较，但判据、日志与
+    /// 交给 provider 的必须是同一个形态。
+    /// </summary>
+    private static string? NormalizePresignedVerb(string? httpMethod)
+    {
+        if (string.Equals(httpMethod, PresignedGetVerb, StringComparison.OrdinalIgnoreCase))
+            return PresignedGetVerb;
+        if (string.Equals(httpMethod, PresignedPutVerb, StringComparison.OrdinalIgnoreCase))
+            return PresignedPutVerb;
+        return null;
     }
 
     private static string GetSafePath(string? path)

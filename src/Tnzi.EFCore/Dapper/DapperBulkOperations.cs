@@ -12,14 +12,33 @@ public static class DapperBulkOperations
     /// <summary>
     /// 批量插入（使用数据库特定的批量插入语法）
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 主键默认<b>写入</b>：框架实体的 Id 一律在应用侧生成（Sequential GUID / Snowflake），库里没有默认值，
+    /// 不带主键的 INSERT 对 Guid 键是整批 NOT NULL 违例、对 long 键是库里另发一套 Id 而调用方手里的实体
+    /// 与之对不上。键仍是默认值的实体在插入前按 SaveChanges 同一套规则生成 Id；框架不生成的键类型
+    /// （如 int）为默认值时抛出而不是交给库分配。真要用数据库自增键，显式传 <paramref name="includeKey"/> = false。
+    /// </para>
+    /// <para>
+    /// 审计列与租户列按 <c>SaveChanges</c> 新增分支同一套规则填充：<c>CreationTime</c> 仍为默认值、
+    /// <c>CreatorId</c> / <c>TenantId</c> 仍为 null 时从上下文的当前用户 / 当前租户取值，
+    /// <c>ConcurrencyStamp</c> 总是换新；调用方已经赋的值保留。本路径绕过变更跟踪器，
+    /// 文件引用追踪、领域事件、软删转换都<b>不会</b>发生。
+    /// </para>
+    /// <para>
+    /// 批大小按「参数总数」封顶（<see cref="IDatabaseProvider.MaxParametersPerCommand"/>），
+    /// 不是按行数：SQL Server 每命令 2100 个参数，每行 N 列 1000 行一批在 N ≥ 3 时就越界。
+    /// </para>
+    /// </remarks>
     /// <typeparam name="T">实体类型</typeparam>
     /// <param name="connection">数据库连接</param>
     /// <param name="provider">数据库提供者（负责标识符转义与方言差异）</param>
-    /// <param name="dbContext">用于解析实体到表/列映射的上下文</param>
+    /// <param name="dbContext">用于解析实体到表/列映射的上下文（审计协作者也取自它）</param>
     /// <param name="entities">待插入实体</param>
     /// <param name="tableName">目标表名；为空时从映射解析</param>
     /// <param name="transaction">外部事务；为空则由连接自行处理</param>
-    /// <param name="batchSize">每批处理的实体数量，默认 1000</param>
+    /// <param name="batchSize">每批处理的实体数量上限，默认 1000；实际每批行数还会按参数总数封顶</param>
+    /// <param name="includeKey">是否写入主键列；默认 true。仅数据库自增键的表才传 false</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>受影响的行数</returns>
     public static async Task<int> BulkInsertAsync<T>(
@@ -30,6 +49,7 @@ public static class DapperBulkOperations
         string? tableName = null,
         IDbTransaction? transaction = null,
         int batchSize = DefaultBatchSize,
+        bool includeKey = true,
         CancellationToken cancellationToken = default) where T : class
     {
         Check.NotNull(connection);
@@ -46,8 +66,7 @@ public static class DapperBulkOperations
         SqlIdentifierHelper.ThrowIfInvalidIdentifier(tableName, nameof(tableName));
         var escapedTable = provider.EscapeIdentifier(tableName);
 
-        // 获取列映射（排除主键，因为主键可能是自动生成的）
-        var mappings = DapperEntityHelper.GetColumnMappings<T>(dbContext, excludeKey: true);
+        var mappings = DapperEntityHelper.GetColumnMappings<T>(dbContext, excludeKey: !includeKey);
         if (mappings.Count == 0)
             throw new InvalidOperationException($"No properties found for type {typeof(T).Name}");
 
@@ -57,11 +76,21 @@ public static class DapperBulkOperations
             SqlIdentifierHelper.ThrowIfInvalidIdentifier(mapping.ColumnName, "column");
         }
 
+        if (includeKey)
+        {
+            EnsureKeysAssigned(dbContext, entityList);
+        }
+
+        // 创建审计与租户列按 SaveChanges 新增分支同一套规则填充（协作者取自上下文自身）。
+        // 这条路径绕过变更跟踪器，不填就是一批 CreationTime 0001-01-01、TenantId 为 null 的行安静落库。
+        AuditPropertyHelper.ApplyCreationAudit(dbContext, entityList);
+
         // 预缓存 PropertyInfo
         var propertyInfos = CachePropertyInfos<T>(mappings);
 
         var totalInserted = 0;
-        var batches = entityList.Chunk(batchSize > 0 ? batchSize : DefaultBatchSize);
+        var rowsPerBatch = CalculateRowsPerBatch(batchSize, mappings.Count, provider.MaxParametersPerCommand);
+        var batches = entityList.Chunk(rowsPerBatch);
 
         foreach (var batch in batches)
         {
@@ -94,6 +123,11 @@ public static class DapperBulkOperations
     /// <summary>
     /// 批量更新（使用数据库特定的批量更新语法）
     /// </summary>
+    /// <remarks>
+    /// 修改审计（<c>LastModificationTime</c> / <c>LastModifierId</c> / 换 <c>ConcurrencyStamp</c>）按
+    /// <c>SaveChanges</c> 修改分支同一套规则填充；其余非主键列从实体逐字写入，
+    /// 所以创建审计列要带着原值传进来（从库里读出来再改，不要 <c>new</c> 一个只填业务字段的实体）。
+    /// </remarks>
     /// <typeparam name="T">实体类型</typeparam>
     /// <param name="connection">数据库连接</param>
     /// <param name="provider">数据库提供者（负责标识符转义与方言差异）</param>
@@ -152,12 +186,16 @@ public static class DapperBulkOperations
         var keyPropertyInfo = typeof(T).GetProperty(keyMapping.PropertyName, BindingFlags.Public | BindingFlags.Instance)
             ?? throw new InvalidOperationException($"Cannot find key property '{keyMapping.PropertyName}' on type {typeof(T).Name}");
 
+        // 修改审计按 SaveChanges 修改分支同一套规则填充（修改人 / 修改时间 / 换并发戳）。
+        AuditPropertyHelper.ApplyModificationAudit(dbContext, entityList);
+
         // 预缓存 PropertyInfo
         var propertyInfos = CachePropertyInfos<T>(mappings);
 
         var columnNames = mappings.Select(m => m.ColumnName).ToList();
         var totalUpdated = 0;
-        var batches = entityList.Chunk(batchSize > 0 ? batchSize : DefaultBatchSize);
+        var rowsPerBatch = CalculateRowsPerBatch(batchSize, mappings.Count + 1, provider.MaxParametersPerCommand);
+        var batches = entityList.Chunk(rowsPerBatch);
 
         foreach (var batch in batches)
         {
@@ -221,8 +259,10 @@ public static class DapperBulkOperations
             return GenerateBulkUpdateSqlUsingInsertOnDuplicate(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount);
         }
 
-        // 其他数据库回退到 UPDATE ... FROM
-        return GenerateBulkUpdateSqlUsingFrom(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount);
+        // 其他数据库回退到 UPDATE ... FROM，行值表放进 CTE：
+        // 派生表带列别名（AS v(a, b)）是 SQL Server / PostgreSQL 的写法，SQLite 不认，
+        // 而 WITH v(a, b) AS (VALUES ...) 三家都认。
+        return GenerateBulkUpdateSqlUsingFrom(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount, valuesAsCte: true);
     }
 
     /// <summary>
@@ -234,13 +274,15 @@ public static class DapperBulkOperations
     /// <param name="keyColumn">未转义的原始主键列名（用于参数名）</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
     /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
+    /// <param name="valuesAsCte">行值表写成 <c>WITH v(...) AS (VALUES ...)</c> 而不是带列别名的派生表（回退方言）</param>
     private static string GenerateBulkUpdateSqlUsingFrom(
         IDatabaseProvider provider,
         string escapedTable,
         string escapedKey,
         string keyColumn,
         List<string> columnNames,
-        int entityCount)
+        int entityCount,
+        bool valuesAsCte = false)
     {
         var escapedColumns = columnNames.Select(p => provider.EscapeIdentifier(p)).ToList();
         var keyAlias = "key_val";
@@ -265,10 +307,20 @@ public static class DapperBulkOperations
             ? $"{escapedTable}.{col} = v.{escapedColumnAliases[i]}"
             : $"{col} = v.{escapedColumnAliases[i]}").ToList();
 
-        var sql = $@"
+        var aliasList = $"{escapedKeyAlias}, {string.Join(", ", escapedColumnAliases)}";
+        var valuesClause = $"VALUES {string.Join(", ", valuesParts)}";
+
+        var sql = valuesAsCte
+            ? $@"
+WITH v({aliasList}) AS ({valuesClause})
 UPDATE {escapedTable}
 SET {string.Join(", ", setClauses)}
-FROM (VALUES {string.Join(", ", valuesParts)}) AS v({escapedKeyAlias}, {string.Join(", ", escapedColumnAliases)})
+FROM v
+WHERE {escapedTable}.{escapedKey} = v.{escapedKeyAlias}"
+            : $@"
+UPDATE {escapedTable}
+SET {string.Join(", ", setClauses)}
+FROM ({valuesClause}) AS v({aliasList})
 WHERE {escapedTable}.{escapedKey} = v.{escapedKeyAlias}";
 
         return sql.Trim();
@@ -361,7 +413,8 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
         var escapedKey = provider.EscapeIdentifier(keyColumn);
 
         var totalDeleted = 0;
-        var batches = keyList.Chunk(batchSize > 0 ? batchSize : DefaultBatchSize);
+        var keysPerBatch = CalculateRowsPerBatch(batchSize, 1, provider.MaxParametersPerCommand);
+        var batches = keyList.Chunk(keysPerBatch);
 
         foreach (var batch in batches)
         {
@@ -396,6 +449,70 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
 
         var valuesClause = string.Join(", ", valuesList);
         return $"INSERT INTO {escapedTable} ({columns}) VALUES {valuesClause}";
+    }
+
+    /// <summary>
+    /// 计算每批的行数：调用方请求的批大小与「参数上限 ÷ 每行参数数」取小。
+    /// </summary>
+    /// <param name="requestedBatchSize">调用方请求的每批行数；非正数取默认 1000</param>
+    /// <param name="parametersPerRow">每行占用的参数个数</param>
+    /// <param name="maxParametersPerCommand">数据库单条命令的参数上限（见 <see cref="IDatabaseProvider.MaxParametersPerCommand"/>）</param>
+    /// <exception cref="InvalidOperationException">单行参数数已超过上限，任何分批都装不下</exception>
+    public static int CalculateRowsPerBatch(int requestedBatchSize, int parametersPerRow, int maxParametersPerCommand)
+    {
+        var requested = requestedBatchSize > 0 ? requestedBatchSize : DefaultBatchSize;
+        if (parametersPerRow <= 0 || maxParametersPerCommand <= 0)
+        {
+            return requested;
+        }
+
+        var rowsWithinLimit = maxParametersPerCommand / parametersPerRow;
+        if (rowsWithinLimit < 1)
+        {
+            throw new InvalidOperationException(
+                $"A single row needs {parametersPerRow} parameters, which exceeds the {maxParametersPerCommand} parameters the database accepts per command.");
+        }
+
+        return Math.Min(requested, rowsWithinLimit);
+    }
+
+    /// <summary>
+    /// 主键仍为默认值的实体在插入前按 SaveChanges 同一套规则生成 Id；生成不了的类型抛出。
+    /// 复合主键不生成，任一键属性为默认值即拒绝。
+    /// </summary>
+    private static void EnsureKeysAssigned<T>(DbContext dbContext, List<T> entities) where T : class
+    {
+        var entityType = dbContext.Model.FindEntityType(typeof(T))
+            ?? throw new InvalidOperationException($"Entity type {typeof(T).Name} is not registered in DbContext {dbContext.GetType().Name}");
+        var keyProperties = entityType.FindPrimaryKey()?.Properties
+            ?? throw new InvalidOperationException($"Entity type {typeof(T).Name} does not have a primary key");
+
+        var keyAccessors = keyProperties
+            .Select(p => typeof(T).GetProperty(p.Name, BindingFlags.Public | BindingFlags.Instance)
+                ?? throw new InvalidOperationException($"Cannot find key property '{p.Name}' on type {typeof(T).Name}"))
+            .ToList();
+        var canGenerate = keyAccessors.Count == 1 && keyAccessors[0].CanWrite;
+
+        for (var i = 0; i < entities.Count; i++)
+        {
+            foreach (var key in keyAccessors)
+            {
+                if (!IdGenerationHelper.IsDefaultValue(key.GetValue(entities[i]), key.PropertyType))
+                {
+                    continue;
+                }
+
+                var generated = canGenerate ? IdGenerationHelper.GenerateId(dbContext, typeof(T), key.PropertyType) : null;
+                if (generated == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Entity {typeof(T).Name} at index {i} has a default value for key '{key.Name}' ({key.PropertyType.Name}) and the framework cannot generate one. " +
+                        "Assign the key before calling BulkInsertAsync, or pass includeKey: false if the database generates it.");
+                }
+
+                key.SetValue(entities[i], generated);
+            }
+        }
     }
 
     /// <summary>

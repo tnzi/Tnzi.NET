@@ -4,18 +4,7 @@ import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TRelativeTime } from '@tnzi/ui'
 import { hasFlag, type Flags } from '@tnzi/core/utils'
-
-/**
- * 待办位。与后端 `PendingUserActions` 一一对应（值是位，线上传的是成员名）。
- * 低位阻断登录、高位是登录后必须先办完的义务，判定一律用按位与。
- */
-const PendingUserActions = {
-  None: 0,
-  InvitationPending: 1 << 0,
-  ChangePassword: 1 << 8,
-  EnrollTotp: 1 << 9,
-  ConfirmEmail: 1 << 10,
-} as const
+import { PendingUserActions } from '@tnzi/core/services/identity'
 
 /**
  * User search fields - align with backend `UserListQueryDto`:

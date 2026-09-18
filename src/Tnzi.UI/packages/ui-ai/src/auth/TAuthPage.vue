@@ -36,24 +36,20 @@
  * consumer wires whichever i18n it has. Without one, the English fallbacks
  * below render - which is what makes the page usable before any wiring.
  */
-import { computed, ref, watch, nextTick } from 'vue';
+import { computed, watch, nextTick } from 'vue';
 import { Icon } from '@iconify/vue';
+import type { SessionEndReason } from '@tnzi/core/state';
+import { useCaptchaWidget } from '@tnzi/core/services/captcha';
 import {
   DEFAULT_LOGIN_FEATURES,
   type LoginCallbacks,
   type LoginFeatures,
   type LoginThirdPartyProvider,
-  type PendingActionChallenge,
-  type TwoFactorChallenge,
-  type TwoFactorMethodName,
-  type LoginCaptchaData,
   type Translate,
 } from '@tnzi/ui';
+import { useAuthPage } from '../headless/useAuthPage';
 import TAuthField from './TAuthField.vue';
 import TAuthProviderButton from './TAuthProviderButton.vue';
-
-/** Which pane fills the column. `identify` is always the entry point. */
-type AuthStep = 'identify' | 'password' | 'code' | 'register' | 'two-factor';
 
 const props = withDefaults(
   defineProps<{
@@ -80,6 +76,20 @@ const props = withDefaults(
     footnote?: string;
     /** Busy flag for the whole page (consumer-driven, e.g. during redirect). */
     loading?: boolean;
+    /**
+     * Why the previous session ended (`runtime.auth.sessionEndReason`),
+     * rendered as a notice above the pane. `'security'` means the backend
+     * revoked the session because the credentials looked stolen - the one
+     * message the user has no other way to receive, so it gets the warning
+     * tone rather than the routine "expired" one.
+     */
+    sessionEndReason?: SessionEndReason | null;
+    /**
+     * Turns the captcha config's relative challenge URL into an absolute one
+     * (Altcha fetches its challenge itself). `TAuthRoute` passes
+     * `runtime.http.resolveUrl`; leave unset when the API lives at the page origin.
+     */
+    resolveUrl?: (url: string) => string;
   }>(),
   {
     brandName: '',
@@ -94,6 +104,8 @@ const props = withDefaults(
     privacyHref: '',
     footnote: '',
     loading: false,
+    sessionEndReason: null,
+    resolveUrl: undefined,
   },
 );
 
@@ -109,26 +121,64 @@ const t: Translate = (key, fallback) =>
 
 const features = computed<LoginFeatures>(() => props.features ?? DEFAULT_LOGIN_FEATURES);
 
-// -- Step machine ------------------------------------------------------------
-const step = ref<AuthStep>('identify');
-const account = ref('');
-const password = ref('');
-const code = ref('');
-const submitting = ref(false);
-const error = ref('');
-const notice = ref('');
+async function focusFirstField(): Promise<void> {
+  await nextTick();
+  const el = document.querySelector<HTMLInputElement>('.t-auth__pane input:not([disabled])');
+  el?.focus();
+}
 
-/** Detected from what the user typed - drives the backend's channel split. */
-const accountType = computed<'email' | 'phone' | undefined>(() => {
-  const value = account.value.trim();
-  if (!value) return undefined;
-  if (value.includes('@')) return 'email';
-  if (/^\+?[\d\s-]{6,}$/.test(value)) return 'phone';
-  return undefined;
+// A provider-rendered captcha (Turnstile / hCaptcha / reCAPTCHA / Altcha) for
+// the password pane. Mounts into `captchaContainer` only while the backend has
+// revealed a non-image challenge; the built-in picture is rendered inline below.
+const captchaWidget = useCaptchaWidget({
+  config: () => (captcha.value && !captchaIsImage.value ? features.value.captcha : null),
+  purpose: 'login',
+  client: props.resolveUrl ? { resolveUrl: props.resolveUrl } : undefined,
+  translate: t,
+});
+const captchaContainer = captchaWidget.container;
+
+// The state machine and every submit handler live in `useAuthPage` (unit
+// tested there); this file is markup and copy.
+const {
+  step,
+  account,
+  password,
+  code,
+  captchaCode,
+  error,
+  notice,
+  busy,
+  canContinue,
+  challenge,
+  twoFactorMethod,
+  otherTwoFactorMethods,
+  captcha,
+  captchaIsImage,
+  reset,
+  backToIdentify,
+  onContinue,
+  onPasswordSubmit,
+  onCodeSubmit,
+  onRegisterSubmit,
+  onTwoFactorSubmit,
+  switchTo,
+  useTwoFactorMethod,
+} = useAuthPage({
+  callbacks: () => props.callbacks,
+  features: () => features.value,
+  translate: t,
+  loading: () => props.loading,
+  onAuthenticated: () => emit('authenticated'),
+  focusFirstField,
+  executeCaptcha: () => captchaWidget.execute(),
 });
 
-const busy = computed(() => submitting.value || props.loading);
-const canContinue = computed(() => account.value.trim().length > 0 && !busy.value);
+// A rejected submit leaves the challenge on screen; the widget's token was
+// consumed by the attempt, so it has to be solved again.
+watch(error, (message) => {
+  if (message && captcha.value && !captchaIsImage.value) captchaWidget.reset();
+});
 
 /** Placeholder + label follow what the deployment actually accepts. */
 const identifierLabel = computed(() => {
@@ -138,202 +188,6 @@ const identifierLabel = computed(() => {
   if (id.userName && !id.email && !id.phone) return t('auth.identifier.userName', 'Username');
   return t('auth.identifier.email', 'Email address');
 });
-
-function reset(): void {
-  error.value = '';
-  notice.value = '';
-}
-
-function backToIdentify(): void {
-  reset();
-  password.value = '';
-  code.value = '';
-  step.value = 'identify';
-}
-
-/**
- * `Continue` does NOT ask the backend whether the account exists - no endpoint
- * offers that, and one that did would be an account-enumeration oracle. It
- * moves to the password pane, which also carries the routes to the code and
- * register flows. That keeps the first screen to a single field while leaving
- * every enabled path one tap away.
- */
-async function onContinue(): Promise<void> {
-  if (!canContinue.value) return;
-  reset();
-  if (features.value.passwordLogin) {
-    step.value = 'password';
-  } else if (features.value.codeLogin) {
-    await sendCode('code-login');
-    step.value = 'code';
-  } else {
-    error.value = t('auth.errors.noMethod', 'Sign-in is not available right now.');
-  }
-  await focusFirstField();
-}
-
-async function focusFirstField(): Promise<void> {
-  await nextTick();
-  const el = document.querySelector<HTMLInputElement>('.t-auth__pane input:not([disabled])');
-  el?.focus();
-}
-
-function describeError(e: unknown): string {
-  if (e instanceof Error && e.message) return e.message;
-  return t('auth.errors.generic', 'Something went wrong. Please try again.');
-}
-
-// -- Two-factor --------------------------------------------------------------
-const challenge = ref<TwoFactorChallenge | null>(null);
-const twoFactorMethod = ref<TwoFactorMethodName | undefined>(undefined);
-const captcha = ref<LoginCaptchaData | null>(null);
-const captchaCode = ref('');
-
-/**
- * The account owes something before it can be used (forced password change,
- * authenticator enrolment, email confirmation).
- *
- * ★ This shell has no module for discharging those - that flow lives in
- * `@tnzi/ui-admin`'s `PendingActions` page, and a product built on this shell
- * should route to its own equivalent. What matters here is that we do NOT
- * pretend the sign-in succeeded: the backend answered with a challenge, not a
- * token, so `authenticated` must not be emitted and the user must be told why.
- * Silently swallowing it is how "a correct password with nowhere to go" happens.
- */
-const pendingAction = ref<PendingActionChallenge | null>(null);
-
-const helpers = {
-  setTwoFactorRequired: (next: TwoFactorChallenge) => {
-    challenge.value = next;
-    twoFactorMethod.value = next.method;
-    step.value = 'two-factor';
-    void focusFirstField();
-  },
-  clearTwoFactor: () => {
-    challenge.value = null;
-  },
-  setPendingActionRequired: (next: PendingActionChallenge) => {
-    pendingAction.value = next;
-    error.value = t(
-      'auth.errors.pendingActions',
-      'Your account must complete a required action before signing in: {actions}.',
-    ).replace('{actions}', next.requiredActions.join(', '));
-  },
-  clearPendingAction: () => {
-    pendingAction.value = null;
-  },
-  setCaptchaRequired: (next: LoginCaptchaData) => {
-    captcha.value = next;
-    captchaCode.value = '';
-  },
-  clearCaptcha: () => {
-    captcha.value = null;
-    captchaCode.value = '';
-  },
-};
-
-// -- Submissions -------------------------------------------------------------
-async function run(fn: () => Promise<void>): Promise<void> {
-  if (busy.value) return;
-  reset();
-  submitting.value = true;
-  try {
-    await fn();
-  } catch (e) {
-    error.value = describeError(e);
-  } finally {
-    submitting.value = false;
-  }
-}
-
-function onPasswordSubmit(): void {
-  const call = props.callbacks.pwdLogin;
-  if (!call) {
-    error.value = t('auth.errors.notConfigured', 'Password sign-in is not configured.');
-    return;
-  }
-  void run(async () => {
-    await call(
-      {
-        // `userName` carries whatever identifier the user typed - the backend
-        // resolves username / email / phone from the one field (the admin page
-        // feeds it the same way). No `type` here: unlike the code flows, the
-        // password endpoint does not split the identifier by channel.
-        userName: account.value.trim(),
-        password: password.value,
-        remember: true,
-        captchaId: captcha.value?.captchaId,
-        captchaCode: captchaCode.value || undefined,
-      },
-      helpers,
-    );
-    // A pending two-factor challenge means the callback moved us on already;
-    // a pending action means the account is not usable yet (see `pendingAction`).
-    if (step.value !== 'two-factor' && !pendingAction.value) emit('authenticated');
-  });
-}
-
-async function sendCode(purpose: 'code-login' | 'register' | 'reset-pwd'): Promise<void> {
-  const call = props.callbacks.sendCode;
-  if (!call) throw new Error(t('auth.errors.notConfigured', 'This flow is not configured.'));
-  await call({ account: account.value.trim(), type: accountType.value, purpose });
-  notice.value = t('auth.notice.codeSent', 'Verification code sent.');
-}
-
-function onCodeSubmit(): void {
-  const call = props.callbacks.codeLogin;
-  if (!call) {
-    error.value = t('auth.errors.notConfigured', 'Code sign-in is not configured.');
-    return;
-  }
-  void run(async () => {
-    await call({ account: account.value.trim(), code: code.value, type: accountType.value }, helpers);
-    if (step.value !== 'two-factor' && !pendingAction.value) emit('authenticated');
-  });
-}
-
-function onRegisterSubmit(): void {
-  const call = props.callbacks.register;
-  if (!call) {
-    error.value = t('auth.errors.notConfigured', 'Sign-up is not configured.');
-    return;
-  }
-  void run(async () => {
-    await call({
-      account: account.value.trim(),
-      code: code.value,
-      password: password.value,
-      type: accountType.value,
-    });
-    emit('authenticated');
-  });
-}
-
-function onTwoFactorSubmit(): void {
-  const call = props.callbacks.verifyTwoFactor;
-  if (!call) {
-    error.value = t('auth.errors.notConfigured', 'Two-factor verification is not configured.');
-    return;
-  }
-  void run(async () => {
-    await call({
-      challengeId: challenge.value?.challengeId,
-      code: code.value,
-      method: twoFactorMethod.value,
-    });
-    emit('authenticated');
-  });
-}
-
-async function switchTo(next: AuthStep): Promise<void> {
-  reset();
-  code.value = '';
-  password.value = '';
-  if (next === 'code') await run(() => sendCode('code-login'));
-  if (next === 'register') await run(() => sendCode('register'));
-  step.value = next;
-  await focusFirstField();
-}
 
 // Typing anywhere clears a stale message: leaving "Incorrect password" on
 // screen while the user edits it reads as if the new attempt already failed.
@@ -351,27 +205,27 @@ watch([account, password, code, captchaCode], (next, prev) => {
 const headingText = computed(
   () => props.heading || t('auth.heading', 'Sign in or sign up'),
 );
-const subheadingText = computed(() => props.subheading || '');
 
-const otherTwoFactorMethods = computed(() =>
-  (challenge.value?.methods ?? []).filter((m) => m !== twoFactorMethod.value),
-);
-
-async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
-  twoFactorMethod.value = method;
-  code.value = '';
-  const resend = props.callbacks.resendTwoFactor;
-  if (method !== 'totp' && resend) {
-    await run(async () => {
-      const result = await resend({ challengeId: challenge.value?.challengeId, method });
-      const masked = result && 'maskedAddress' in result ? result.maskedAddress : undefined;
-      notice.value = masked
-        ? t('auth.notice.codeSentTo', 'Verification code sent to {to}.').replace('{to}', masked)
-        : t('auth.notice.codeSent', 'Verification code sent.');
-    });
+const sessionNotice = computed<{ text: string; tone: 'warning' | 'info' } | null>(() => {
+  switch (props.sessionEndReason) {
+    case 'security':
+      return {
+        tone: 'warning',
+        text: t(
+          'auth.notice.sessionEndedForSecurity',
+          'Your session was ended for security reasons. Please sign in again.',
+        ),
+      };
+    case 'expired':
+      return {
+        tone: 'info',
+        text: t('auth.notice.sessionExpired', 'Your session expired. Please sign in again.'),
+      };
+    default:
+      return null;
   }
-  await focusFirstField();
-}
+});
+const subheadingText = computed(() => props.subheading || '');
 </script>
 
 <template>
@@ -386,6 +240,16 @@ async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
 
       <h1 class="t-auth__heading">{{ headingText }}</h1>
       <h2 v-if="subheadingText" class="t-auth__subheading">{{ subheadingText }}</h2>
+
+      <p
+        v-if="sessionNotice"
+        data-test="t-auth-session-notice"
+        class="t-auth__session-notice"
+        :class="`t-auth__session-notice--${sessionNotice.tone}`"
+        role="status"
+      >
+        {{ sessionNotice.text }}
+      </p>
 
       <!-- Step: identify -->
       <div v-if="step === 'identify'" class="t-auth__pane">
@@ -436,8 +300,8 @@ async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
           :disabled="busy"
           @submit="onPasswordSubmit"
         />
-        <div v-if="captcha" class="t-auth__captcha">
-          <img :src="captcha.imageBase64" :alt="t('auth.captcha.alt', 'Captcha')" />
+        <div v-if="captcha && captchaIsImage" class="t-auth__captcha">
+          <img :src="`data:image/png;base64,${captcha.imageBase64 ?? ''}`" :alt="t('auth.captcha.alt', 'Captcha')" />
           <TAuthField
             v-model="captchaCode"
             :placeholder="t('auth.captcha.placeholder', 'Captcha')"
@@ -445,6 +309,10 @@ async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
             :disabled="busy"
             @submit="onPasswordSubmit"
           />
+        </div>
+        <div v-else-if="captcha" class="t-auth__captcha t-auth__captcha--widget">
+          <div ref="captchaContainer" />
+          <p v-if="captchaWidget.error.value" class="t-auth__captcha-error">{{ captchaWidget.error.value }}</p>
         </div>
         <button type="button" class="t-auth__primary" :disabled="busy" @click="onPasswordSubmit">
           {{ t('auth.signIn', 'Sign in') }}
@@ -726,6 +594,18 @@ async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
   min-width: 0;
 }
 
+/* Provider widgets (Turnstile / hCaptcha / reCAPTCHA / Altcha) bring their own box. */
+.t-auth__captcha--widget {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.t-auth__captcha-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tnzi-ai-danger, #d03050);
+}
+
 .t-auth__links {
   display: flex;
   flex-wrap: wrap;
@@ -771,6 +651,23 @@ async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
   line-height: 18px;
   text-align: center;
   color: var(--tnzi-ai-text-secondary);
+}
+
+.t-auth__session-notice {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--tnzi-ai-border);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: center;
+  color: var(--tnzi-ai-text-secondary);
+}
+
+.t-auth__session-notice--warning {
+  color: var(--tnzi-ai-warning);
+  border-color: color-mix(in srgb, var(--tnzi-ai-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--tnzi-ai-warning) 10%, transparent);
 }
 
 .t-auth__legal {

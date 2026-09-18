@@ -8,7 +8,7 @@ namespace Tnzi.AI.Events.Handlers;
 /// 1. AgentThreadMessage（消息记录）
 /// 2. AgentRunTrace + AgentRunNode + AgentRun（运行记录及追踪）
 /// 3. AgentArtifact（产物记录）
-/// 4. UsageLog（使用日志）
+/// 4. UsageLog（使用日志）：只解除 ThreadId 引用，账目行保留（预算聚合与用量分析的事实来源）
 /// 各仓储均为可选注入，缺失时对应步骤跳过（软依赖）。
 /// 级联删除是持久化副作用，本处理器不吞异常：任何一步失败均让异常冒泡给事件总线
 /// （LocalEventBus 已统一做错误隔离、LogError、重试与死信队列）。各删除按 ThreadId
@@ -98,12 +98,16 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
                 .ExecuteDeleteAsync(ct);
         }
 
-        // 4. 删除使用日志
+        // 4. 解除使用日志对线程的引用，账目保留。
+        //    UsageLog 是租户 / Agent 预算聚合与用量分析的事实来源（按 CreationTime 聚合 EstimatedCostUsd），
+        //    线程本身只是软删；随线程硬删账目 = 用户删掉自己的线程就让本期花费缩水、预算门重新放行、
+        //    成本报表出现「负增长」且无法追溯。这里只把 ThreadId 置空，token / cost / provider /
+        //    model / agent / tenant / 时间一律不动。
         if (_usageLogRepository != null)
         {
             await _usageLogRepository.AsQueryable()
                 .Where(log => log.ThreadId == threadId)
-                .ExecuteDeleteAsync(ct);
+                .ExecuteUpdateAsync(setters => setters.SetProperty(log => log.ThreadId, (Guid?)null), ct);
         }
 
         _logger.LogInformation("Cascade cleanup completed for thread {ThreadId}", evt.ThreadId);

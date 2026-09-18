@@ -17,6 +17,8 @@ import type {
   FileRecordDto,
   FileQueryDto,
   FileStorageStatisticsDto,
+  ThumbnailBackfillRequest,
+  ThumbnailBackfillResult,
   FileUploadSessionDto,
   FileChunkDto,
   FileUploadProgressDto,
@@ -304,6 +306,14 @@ export function useAdminFileApi(client: HttpClient) {
     getStatistics: () =>
       client.get<FileStorageStatisticsDto>(`${ADMIN_BASE}/statistics`),
 
+    /**
+     * Draw thumbnails for stored files that have none: bitmaps, and the first
+     * page of PDFs when the host loads Tnzi.Documents. Idempotent, one batch per
+     * call; loop until `generated` is 0 (see ThumbnailBackfillResult).
+     */
+    backfillThumbnails: (data?: ThumbnailBackfillRequest) =>
+      client.post<ThumbnailBackfillResult>(`${ADMIN_BASE}/backfill-thumbnails`, data ?? {}),
+
     /** Batch delete files */
     batchDelete: (ids: string[]) =>
       client.delete<void>(`${ADMIN_BASE}/batch`, { body: ids }),
@@ -334,15 +344,25 @@ export function useAdminFileApi(client: HttpClient) {
     getReferenceStatistics: (entityType?: string) =>
       client.get<FileReferenceStatisticsDto>(`${ADMIN_BASE}/references/statistics`, { params: { entityType } }),
 
-    /** Sync reference count for a file */
+    /**
+     * Rebuild the reference count of a **temporary** file from its reference rows.
+     * Permanent uploads (and MD5-reused files) carry implicit holders that are not
+     * recorded as reference rows, so the server refuses them with 400.
+     */
     syncReferenceCount: (id: string) =>
       client.post<number>(`${ADMIN_BASE}/${id}/sync-reference-count`),
 
-    /** Sync all reference counts */
+    /**
+     * Rebuild the reference counts of **all temporary files** from their reference rows.
+     * Returns the number of records changed; permanent records are never touched.
+     */
     syncAllReferenceCounts: () =>
       client.post<number>(`${ADMIN_BASE}/sync-all-reference-counts`),
 
-    /** Validate reference count for a file */
+    /**
+     * Validate a file's reference count: temporary files must match their reference rows exactly,
+     * permanent files must be at least the reference row count.
+     */
     validateReferenceCount: (id: string) =>
       client.get<boolean>(`${ADMIN_BASE}/${id}/validate-reference-count`),
 
@@ -368,9 +388,13 @@ export function useAdminFileApi(client: HttpClient) {
 
     // ---- Presigned URLs (admin) ----
 
-    /** Generate a presigned URL (admin, supports httpMethod parameter) */
-    getPresignedUrl: (id: string, expiresInSeconds: number = 3600, httpMethod: string = 'GET') =>
-      client.get<string>(`${ADMIN_BASE}/${id}/presigned-url`, { params: { expiresInSeconds, httpMethod } }),
+    /**
+     * Generate a presigned download URL (admin). Read credential only: the server
+     * fixes the verb to GET, so there is no `httpMethod` parameter any more - a
+     * direct-upload (PUT) URL is a write credential and is not issued by this endpoint.
+     */
+    getPresignedUrl: (id: string, expiresInSeconds: number = 3600) =>
+      client.get<string>(`${ADMIN_BASE}/${id}/presigned-url`, { params: { expiresInSeconds } }),
 
     // ---- Integrity verification ----
 

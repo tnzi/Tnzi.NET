@@ -115,6 +115,21 @@ public class LedgerPostingService : ApplicationService, ILedgerPostingService
         return await _journalEntryService.ReverseAsync(journalEntryId, input ?? new ReverseJournalEntryDto(), cancellationToken);
     }
 
+    public async Task<Result<JournalEntryDto>> ReverseOnBehalfOfDocumentAsync(Guid journalEntryId, string sourceType, ReverseJournalEntryDto? input = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrWhiteSpace(sourceType);
+
+        // 通道是 internal 的显式实现：消费方整体换掉 IJournalEntryService 时这里拿不到它，
+        // 宁可 501 也不退回 ReverseAsync —— 那会把替换实现自己的门一并跳过。
+        if (_journalEntryService is not IDocumentReversalChannel channel)
+        {
+            return Fail<JournalEntryDto>(
+                "The registered IJournalEntryService does not support document-initiated reversal.", 501);
+        }
+
+        return await channel.ReverseOnBehalfOfDocumentAsync(journalEntryId, sourceType.Trim(), input ?? new ReverseJournalEntryDto(), cancellationToken);
+    }
+
     public async Task<Result<ReversibilityDto>> GetReversibilityAsync(Guid journalEntryId, CancellationToken cancellationToken = default)
     {
         var entry = await _entryRepository.AsNoTracking()

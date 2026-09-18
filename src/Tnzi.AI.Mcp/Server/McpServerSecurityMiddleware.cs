@@ -6,7 +6,6 @@ namespace Tnzi.AI.Mcp.Server;
 public class McpServerSecurityMiddleware
 {
     public const string ApiKeyHeaderName = "X-Api-Key";
-    public const string TenantHeaderName = "X-Tenant-Id";
 
     /// <summary>
     /// HttpContext.Items key under which the hashed caller key (16-char hex) is stored by
@@ -14,6 +13,13 @@ public class McpServerSecurityMiddleware
     /// associate usage records with the caller without touching the raw API key.
     /// </summary>
     public const string CallerHashItemKey = "mcp-caller-hash";
+
+    /// <summary>
+    /// HttpContext.Items key under which the <see cref="McpCallerScope"/> of the authenticated
+    /// caller is stored by <see cref="McpServerHttpSecurityMiddleware"/>. <see cref="McpServerHost"/>
+    /// filters <c>tools/list</c> and refuses out-of-scope <c>tools/call</c> by it.
+    /// </summary>
+    public const string CallerScopeItemKey = "mcp-caller-scope";
 
     private readonly IOptionsMonitor<McpServerOptions> _options;
     private readonly IServiceProvider _serviceProvider;
@@ -36,6 +42,7 @@ public class McpServerSecurityMiddleware
 
     /// <summary>
     /// 验证调用方：静态 API Key，或（若已注册）<b>运行范围</b>凭据。
+    /// 返回调用面（静态 key 不受限；运行范围凭据只许它点名的工具），拒绝时返回 <c>null</c>。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -47,37 +54,41 @@ public class McpServerSecurityMiddleware
     /// <para>
     /// 顺序上先试静态 key：那是纯内存的常数时间比较，而运行范围凭据要查一次库。
     /// </para>
+    /// <para>
+    /// ★ 凭据校验完<b>必须交出去</b>：此前这里只记一行 Debug 日志就返回 true，之后运行范围调用方与静态 key
+    /// 无从分辨 —— 全部 agent、全部消费方自定义工具都可调，契约写的「上限是该 Agent 自身的权限」没有一处在执行。
+    /// </para>
     /// </remarks>
-    public async Task<bool> ValidateCallerAsync(string? apiKey, CancellationToken cancellationToken = default)
+    public async Task<McpCallerScope?> ValidateCallerAsync(string? apiKey, CancellationToken cancellationToken = default)
     {
         if (ValidateApiKey(apiKey))
         {
-            return true;
+            return McpCallerScope.Unrestricted;
         }
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return false;
+            return null;
         }
 
         using var scope = _serviceProvider.CreateScope();
         var validator = scope.ServiceProvider.GetService<IRunScopedCredentialValidator>();
         if (validator is null)
         {
-            return false;
+            return null;
         }
 
         var credential = await validator.ValidateAsync(apiKey, cancellationToken);
         if (credential is null)
         {
-            return false;
+            return null;
         }
 
         _logger.LogDebug(
-            "MCP Server accepted a run-scoped credential for run {RunId} (agent {AgentId})",
-            credential.RunId, credential.AgentId);
+            "MCP Server accepted a run-scoped credential for run {RunId} (agent {AgentId}, {ToolCount} allowed tools)",
+            credential.RunId, credential.AgentId, credential.AllowedToolNames.Count);
 
-        return true;
+        return new McpCallerScope(credential);
     }
 
     /// <summary>
@@ -190,55 +201,28 @@ public class McpServerSecurityMiddleware
     }
 
     /// <summary>
-    /// 从 HTTP 请求中提取租户标识（仅读取 <c>X-Tenant-Id</c> 请求头，不读取 query string）。
-    /// <para>
-    /// <b>UNTRUSTED partition hint.</b> The value is self-reported by the client and is
-    /// NOT validated against any tenant store. It is used ONLY to partition rate-limit
-    /// buckets (see <see cref="BuildClientKey"/>) and as an analytics dimension - it MUST
-    /// NEVER be used for data isolation or authorization decisions.
-    /// </para>
-    /// <para>
-    /// Query-string extraction (<c>?tenantId=</c>/<c>?tenant=</c>) was deliberately removed:
-    /// query values leak into access logs/proxies and made it trivial to spoof another
-    /// tenant's rate-limit partition via a crafted URL.
-    /// </para>
+    /// 构建 HTTP 请求的限流键：<b>只按调用方分区</b>（API Key 的 SHA-256 前 16 位十六进制，
+    /// 无 key 时退到来源地址，再退到 <c>anonymous</c>）。
     /// </summary>
-    public string? ExtractTenantId(HttpRequest request)
-    {
-        Check.NotNull(request);
-
-        if (request.Headers.TryGetValue(TenantHeaderName, out var tenantValues))
-        {
-            var tenantId = tenantValues.FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(tenantId))
-            {
-                return tenantId;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// 构建 HTTP 请求的限流键。
-    /// </summary>
+    /// <remarks>
+    /// ★ 限流键绝不能含任何客户端可控输入：分区的那一方就是被限流的那一方。此前键的第一段是
+    /// 客户端自报的 <c>X-Tenant-Id</c> 头（<c>RateLimitPerTenant</c> 默认开），于是一把 key 每个请求换一个
+    /// 头值就换来一个满额的 600/分钟桶，限流形同虚设；再往上，两分钟内填满
+    /// <c>RateLimitTrackingMaxEntries</c> 个新桶就能让所有别的客户端的首个请求（以及既有客户端首次碰的
+    /// 每个工具桶）一律 429。06-10 删掉 query 提取时写的「客户端不得污染分区」，请求头做的是同一件事。
+    /// 租户不是这里能校验的东西：可信的租户来源是经过校验的凭据，不是请求头。
+    /// </remarks>
     public string BuildClientKey(HttpContext context, string? apiKey)
     {
         Check.NotNull(context);
-
-        var tenantSegment = _options.CurrentValue.RateLimitPerTenant
-            ? ExtractTenantId(context.Request) ?? "public"
-            : "shared";
 
         // 有 API key 就按 key 分区；没有才退到来源地址。
         // 走 GetClientIp 使其受 AspNetCoreOptions.CollectClientIpAddress 约束：
         // 声明不采集地址的部署，匿名调用方会一起落到 "anonymous" 这个全局桶上——
         // 总量仍有上限，但单个调用方能占满它。需要真正分区的部署应当要求 API key。
-        var callerSegment = !string.IsNullOrWhiteSpace(apiKey)
+        return !string.IsNullOrWhiteSpace(apiKey)
             ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16]
             : context.Request.GetClientIp() ?? "anonymous";
-
-        return $"{tenantSegment}:{callerSegment}";
     }
 
     /// <summary>

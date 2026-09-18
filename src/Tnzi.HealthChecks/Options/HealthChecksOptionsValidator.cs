@@ -31,12 +31,6 @@ public class HealthChecksOptionsValidator : OptionsValidatorBase<HealthChecksOpt
         {
             errors.Add("HealthChecks.TimeoutSeconds must be greater than 0.");
         }
-
-        // 验证缓存时长
-        if (options.CacheDurationSeconds < 0)
-        {
-            errors.Add("HealthChecks.CacheDurationSeconds must be greater than or equal to 0.");
-        }
     }
 
     /// <summary>

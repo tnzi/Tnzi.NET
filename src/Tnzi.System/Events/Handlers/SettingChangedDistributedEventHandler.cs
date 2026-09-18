@@ -25,7 +25,7 @@ public class SettingChangedDistributedEventHandler : IEventHandler<SettingChange
 
     public async Task HandleAsync(SettingChangedIntegrationEvent @event, CancellationToken cancellationToken = default)
     {
-        if (@event.OriginInstanceId == SettingChangedIntegrationEvent.LocalInstanceId)
+        if (@event.OriginInstanceId == TnziInstance.Id)
             return;
 
         _logger.LogDebug("Applying distributed setting change for '{Key}' from instance {Origin}", @event.Key, @event.OriginInstanceId);

@@ -9,11 +9,37 @@ import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
 const t = useAiI18n();
 
-const props = defineProps<{
-  src?: string;
-  srcdoc?: string;
-  logs?: Array<{ level: 'log' | 'warn' | 'error'; message: string; timestamp?: string }>;
-}>();
+const props = withDefaults(
+  defineProps<{
+    src?: string;
+    srcdoc?: string;
+    logs?: Array<{ level: 'log' | 'warn' | 'error'; message: string; timestamp?: string }>;
+    /**
+     * Iframe `sandbox` attribute, applied to both the `srcdoc` and the `src`
+     * frame.
+     *
+     * Defaults to `allow-scripts allow-forms allow-popups` and deliberately
+     * omits `allow-same-origin` - same rule and same reason as
+     * `TArtifactPanel`: this component previews untrusted, model-generated
+     * HTML, and `allow-scripts` + `allow-same-origin` together void the
+     * sandbox (the framed document runs on the host's origin, so it can read
+     * the host's storage - the bearer token by default - call the API as the
+     * user, and strip its own `sandbox` attribute).
+     *
+     * Only opt back in when the previewed content is first-party and
+     * genuinely needs same-origin access:
+     * `:iframe-sandbox="'allow-scripts allow-same-origin'"`.
+     *
+     * An empty string renders `sandbox=""` (every restriction applied). To
+     * remove the attribute entirely and run the frame unsandboxed, pass
+     * `null` explicitly.
+     */
+    iframeSandbox?: string | null;
+  }>(),
+  {
+    iframeSandbox: 'allow-scripts allow-forms allow-popups',
+  },
+);
 
 const localUrl = ref(props.src ?? '');
 const consoleOpen = ref(false);
@@ -53,8 +79,8 @@ const logLevelClass: Record<string, string> = {
       </NTooltip>
     </div>
     <div class="relative flex-1 min-h-0">
-      <iframe v-if="srcdoc" :srcdoc="srcdoc" class="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation" />
-      <iframe v-else-if="localUrl" :src="localUrl" class="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation" />
+      <iframe v-if="srcdoc" :srcdoc="srcdoc" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
+      <iframe v-else-if="localUrl" :src="localUrl" class="h-full w-full border-0" :sandbox="iframeSandbox ?? undefined" />
       <div v-else class="flex h-full items-center justify-center text-sm text-tnzi-muted">{{ t.artifact.noPreview }}</div>
     </div>
     <div v-if="logs?.length">

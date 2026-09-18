@@ -11,7 +11,7 @@ public class CaptchaService : ApplicationService, ICaptchaService
     private readonly ValidateCoder _validateCoder;
     private const int DefaultExpirationSeconds = 300; // 5分钟
     private const int DefaultCodeLength = 4;
-    private const int FailureRecordExpirationMinutes = 30; // 失败记录保留30分钟
+    private const int FailureRecordExpirationMinutes = 30; // 失败记录保留 30 分钟（固定窗口，自第一次失败起算）
 
     public CaptchaService(
         IOptionsSnapshot<IdentityOptions> identityOptions,
@@ -86,9 +86,14 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (_cache == null || string.IsNullOrEmpty(identifier))
             return;
 
+        // ★ 原子递增，不是读-改-写：并发的失败登录同时读到 k、各写 k+1，最终计数远小于实际次数，
+        //   「N 次失败后要验证码」的闸门就能被并发喷洒推迟。
+        //   ★ 窗口是固定的不是滑动的：这个 IncrementAsync 重载只在键不存在时设过期，之后的递增不再延长它
+        //   （见 ICache.IncrementAsync 的说明）—— 第一次失败起算 30 分钟，之后的失败不把窗口往后推。
+        //   此前的 SetAsync 是每次失败都重设 30 分钟的滑动窗口；改成原子递增时窗口语义随之改变，
+        //   对「N 次失败后要验证码」这道闸门没有影响（阈值只看计数），但推理它时不要按滑动窗口来。
         var cacheKey = CacheKeys.WithTenant(CacheKeys.Identity.LoginFailure(identifier), CurrentUser?.TenantId);
-        var currentCount = await _cache.GetAsync<int?>(cacheKey) ?? 0;
-        await _cache.SetAsync(cacheKey, currentCount + 1, TimeSpan.FromMinutes(FailureRecordExpirationMinutes));
+        await _cache.IncrementAsync(cacheKey, 1, TimeSpan.FromMinutes(FailureRecordExpirationMinutes));
     }
 
     /// <inheritdoc />
@@ -97,8 +102,11 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (_cache == null || string.IsNullOrEmpty(identifier))
             return 0;
 
+        // 计数一律经 GetCounterAsync 读：IncrementAsync 存的是 long，GetAsync<int?> 在内存缓存下必然落空并读成 0
+        // （见 ICache.GetCounterAsync 的注释），那会让闸门永不触发。
         var cacheKey = CacheKeys.WithTenant(CacheKeys.Identity.LoginFailure(identifier), CurrentUser?.TenantId);
-        return await _cache.GetAsync<int?>(cacheKey) ?? 0;
+        var count = await _cache.GetCounterAsync(cacheKey);
+        return count > int.MaxValue ? int.MaxValue : (int)count;
     }
 
     /// <inheritdoc />

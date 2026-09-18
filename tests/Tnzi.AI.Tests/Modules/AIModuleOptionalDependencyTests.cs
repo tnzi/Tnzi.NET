@@ -34,6 +34,8 @@ public class AIModuleOptionalDependencyTests
         services.AddScoped<IAgentFactory>(_ => Mock.Of<IAgentFactory>());
         services.AddScoped<IRunStore>(_ => Mock.Of<IRunStore>());
         services.AddScoped<ITraceStore>(_ => Mock.Of<ITraceStore>());
+        // AgentRuntime 续跑预检要它（可选依赖，但注册了就得能解析）
+        services.AddScoped<IAgentThreadService>(_ => Mock.Of<IAgentThreadService>());
 
         var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {

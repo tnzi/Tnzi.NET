@@ -7,7 +7,7 @@ import {
   extractData,
   ensureOk,
 } from '../../src/http/response';
-import { createFailedApiResult } from '../../src/errors/api-error';
+import { createFailedApiResult, HttpError } from '../../src/errors/api-error';
 
 describe('normalizeApiResult', () => {
   it('normalizes a camelCase envelope', () => {
@@ -104,5 +104,34 @@ describe('unwrapData / extractData / ensureOk', () => {
     expect(() => ensureOk(createFailedApiResult({ message: 'refused' }))).toThrow('refused');
     expect(() => ensureOk({ succeeded: true })).not.toThrow();
     expect(() => ensureOk(undefined)).not.toThrow();
+  });
+
+  it('ensureOk throws an HttpError that keeps errorCode and errorDetails', () => {
+    // Every ui-admin bridge funnels failures through here. A bare Error keeps
+    // only the message, so a step-up challenge (or any other code-keyed
+    // failure) becomes unrecognisable on that whole path.
+    let thrown: unknown;
+    try {
+      ensureOk(
+        createFailedApiResult({
+          message: 'This action requires re-authentication',
+          code: 401,
+          errorCode: 'IDENTITY_STEP_UP_REQUIRED',
+          details: { scope: 'tip.download' },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(HttpError);
+    const httpError = thrown as HttpError;
+    expect(httpError.message).toBe('This action requires re-authentication');
+    expect(httpError.statusCode).toBe(401);
+    expect(httpError.errorCode).toBe('IDENTITY_STEP_UP_REQUIRED');
+    expect(httpError.details).toEqual({ scope: 'tip.download' });
+  });
+
+  it('ensureOk uses the fallback message when the envelope carries none', () => {
+    expect(() => ensureOk({ succeeded: false }, 'Save failed')).toThrow('Save failed');
   });
 });

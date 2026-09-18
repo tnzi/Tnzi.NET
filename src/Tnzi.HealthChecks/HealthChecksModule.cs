@@ -29,11 +29,6 @@ public class HealthChecksModule : TnziFrameworkModule
         WriteIndented = true
     };
 
-    /// <summary>
-    /// 详细输出响应缓存
-    /// </summary>
-    private static readonly HealthCheckResponseCache ResponseCache = new();
-
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
     {
         // 注册配置选项并启用启动时验证
@@ -172,9 +167,6 @@ public class HealthChecksModule : TnziFrameworkModule
             return Task.CompletedTask;
         }
 
-        // 初始化响应缓存时长
-        ResponseCache.SetDuration(options.CacheDurationSeconds);
-
         // 完整健康检查端点
         var healthCheckOptions = new HealthCheckOptions();
         if (options.DetailedOutput)
@@ -203,32 +195,26 @@ public class HealthChecksModule : TnziFrameworkModule
     }
 
     /// <summary>
-    /// 输出详细的健康检查结果（JSON 格式），支持响应缓存
+    /// 输出详细的健康检查结果（JSON 格式）。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// ★ 异常消息与检查项 <c>data</c> 只在 <see cref="HealthChecksOptions.ExposeErrorDetails"/>
     /// 打开时才输出。此前它们随详细输出一起、默认发给<b>匿名</b>调用方：一次数据库连接失败
     /// 会把连接串片段送出去，而文档承诺的「仅在非生产环境」在源码里没有任何东西去兑现。
+    /// </para>
+    /// <para>
+    /// ★ <b>这里绝不能碰 <c>Response.StatusCode</c>，也不能缓存。</b>ASP.NET Core 的 HealthCheckMiddleware
+    /// 先跑完全部检查、按结果设好状态码、最后才调本方法：此前挂在这里的「响应缓存」命中时
+    /// 一点工作都没省（检查早就跑完了），却把刚算出来的 503 改写成上一轮缓存的 200 ——
+    /// 就绪探针在最长 CacheDurationSeconds 内继续说「好」，编排器继续把流量送进依赖已挂的实例
+    /// （2026-09-12 删除）。缓存的是答案不是工作，而探针恰恰不能答旧答案。
+    /// </para>
     /// </remarks>
-    private static async Task WriteDetailedResponseAsync(HttpContext context, HealthReport report, bool exposeErrorDetails)
+    private static Task WriteDetailedResponseAsync(HttpContext context, HealthReport report, bool exposeErrorDetails)
     {
         context.Response.ContentType = "application/json";
-
-        // 尝试使用缓存响应（包含状态码，确保缓存窗口内状态一致）
-        var cached = ResponseCache.TryGetCachedResponse();
-        if (cached != null)
-        {
-            context.Response.StatusCode = cached.Value.StatusCode;
-            await context.Response.WriteAsync(cached.Value.Response);
-            return;
-        }
-
-        var response = BuildDetailedPayload(report, exposeErrorDetails);
-
-        // 更新缓存（含当前状态码）
-        ResponseCache.UpdateCache(response, context.Response.StatusCode);
-
-        await context.Response.WriteAsync(response);
+        return context.Response.WriteAsync(BuildDetailedPayload(report, exposeErrorDetails));
     }
 
     /// <summary>
@@ -256,59 +242,5 @@ public class HealthChecksModule : TnziFrameworkModule
         };
 
         return JsonSerializer.Serialize(result, DetailedResponseJsonOptions);
-    }
-
-    /// <summary>
-    /// 健康检查响应缓存
-    /// 通过缓存序列化后的 JSON 响应来降低高频健康检查请求的开销
-    /// </summary>
-    private sealed class HealthCheckResponseCache
-    {
-        private string? _cachedResponse;
-        private int _cachedStatusCode;
-        private DateTimeOffset _cacheExpiry;
-        private int _cacheDurationSeconds;
-        private readonly object _lock = new();
-
-        /// <summary>
-        /// 设置缓存时长
-        /// </summary>
-        public void SetDuration(int cacheDurationSeconds)
-        {
-            _cacheDurationSeconds = cacheDurationSeconds;
-        }
-
-        /// <summary>
-        /// 尝试获取缓存的响应（含状态码）
-        /// </summary>
-        /// <returns>缓存的 JSON 响应字符串和状态码，如果缓存过期或未设置则返回 null</returns>
-        public (string Response, int StatusCode)? TryGetCachedResponse()
-        {
-            if (_cacheDurationSeconds <= 0) return null;
-
-            lock (_lock)
-            {
-                if (_cachedResponse != null && DateTimeOffset.UtcNow < _cacheExpiry)
-                {
-                    return (_cachedResponse, _cachedStatusCode);
-                }
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// 更新缓存响应（含状态码）
-        /// </summary>
-        public void UpdateCache(string response, int statusCode)
-        {
-            if (_cacheDurationSeconds <= 0) return;
-
-            lock (_lock)
-            {
-                _cachedResponse = response;
-                _cachedStatusCode = statusCode;
-                _cacheExpiry = DateTimeOffset.UtcNow.AddSeconds(_cacheDurationSeconds);
-            }
-        }
     }
 }

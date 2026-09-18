@@ -66,7 +66,7 @@ public partial class ProviderService
                 continue;
             }
 
-            probe = new ModelProbe(name, InferProviderType(name), opts.BaseUrl, opts.ApiKey, opts.DefaultModel);
+            probe = new ModelProbe(name, InferProviderType(name, opts.ProviderType), opts.BaseUrl, opts.ApiKey, opts.DefaultModel);
             return true;
         }
 
@@ -97,7 +97,7 @@ public partial class ProviderService
             {
                 Id = GetConfigurationProviderId(name),
                 Name = name,
-                ProviderType = InferProviderType(name),
+                ProviderType = InferProviderType(name, opts.ProviderType),
                 Endpoint = opts.BaseUrl,
                 DefaultModel = opts.DefaultModel,
                 Priority = 0,
@@ -133,12 +133,15 @@ public partial class ProviderService
     }
 
     /// <summary>
-    /// 从配置字典 key（provider 名称）推断展示用 ProviderType。
-    /// 配置条目没有显式类型字段 - ChatClientFactory 按名称精确匹配 IChatClientProvider，
-    /// 未命中时回退 OpenAI 兼容协议，此处的启发式与该行为保持一致。
+    /// 展示用 ProviderType：配置条目显式写了 <c>ProviderType</c> 就用它（工厂也按它选协议），
+    /// 否则从 provider 名称推断。推断值只用于展示 —— 工厂对没写 ProviderType 的条目仍按名称精确匹配
+    /// IChatClientProvider、未命中回退 OpenAI 兼容，一个叫 "my-claude" 的配置条目在这里显示 Anthropic、
+    /// 运行时却走 OpenAI 兼容协议；要让它走原生协议，写 <c>AI:Providers:my-claude:ProviderType = Anthropic</c>。
     /// </summary>
-    private static string InferProviderType(string providerName)
+    private static string InferProviderType(string providerName, string? declaredType = null)
     {
+        if (!string.IsNullOrWhiteSpace(declaredType)) return declaredType;
+
         var name = providerName.ToLowerInvariant();
         if (name.Contains("anthropic") || name.Contains("claude")) return "Anthropic";
         if (name.Contains("azure")) return "AzureOpenAI";

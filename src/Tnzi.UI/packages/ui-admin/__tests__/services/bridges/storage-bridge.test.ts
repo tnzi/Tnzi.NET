@@ -71,6 +71,16 @@ function mockStorageApi() {
 }
 
 describe('storage-bridge', () => {
+  it('cleanup.trigger and files.initUpload reject with the server message on a failed envelope', async () => {
+    const refused = (message: string) => ({ succeeded: false, success: false, code: 400, data: null, message })
+    const fileApi = { ...mockFileApi(), cleanupTemporary: vi.fn(async () => refused('cleanup refused')) }
+    const storageApi = { ...mockStorageApi(), initiateChunkedUpload: vi.fn(async () => refused('quota exceeded')) }
+    const bridge = createStorageBridge({ fileApi: fileApi as never, storageApi: storageApi as never })
+    await expect(bridge.cleanup.trigger(24)).rejects.toThrow('cleanup refused')
+    // Before: `(undefined as { id: string }).id` - a TypeError that hid the quota message.
+    await expect(bridge.files.initUpload({ name: 'f', size: 10, chunkCount: 1 })).rejects.toThrow('quota exceeded')
+  })
+
   it('exposes files / chunks / versions sub-contracts', () => {
     const bridge = createStorageBridge({
       fileApi: mockFileApi() as never,

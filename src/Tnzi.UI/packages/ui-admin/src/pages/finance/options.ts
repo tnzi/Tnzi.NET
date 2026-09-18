@@ -1,6 +1,7 @@
 import { ref, type Ref } from 'vue'
 import type { SelectOption as NaiveSelectOption } from 'naive-ui'
 import { CashFlowActivity, type AccountTreeDto, type FinanceBridge, type TaxRateDto } from '../../services/bridges/finance-bridge'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 
 /** naive-ui 的 SelectOption 别名（保证 NSelect :options 直接可绑）。 */
 export type SelectOption = NaiveSelectOption
@@ -95,19 +96,24 @@ export function createFinanceOptionSources(bridge: FinanceBridge) {
     return options
   })
 
+  // Parties and items page until the server runs out: the backend clamps
+  // pageSize to 100 silently, so the former single `pageSize: 200` call gave
+  // a tenant with 150 active customers a select that stopped at the 100th
+  // name with no error anywhere. The editors render a static filterable
+  // NSelect over this list; it has to be the whole active set.
   const customers = lazy<SelectOption>(async () => {
-    const page = await bridge.customers.fetch({ pageIndex: 1, pageSize: 200, filters: { isActive: true } })
-    return page.items.map((c) => ({ label: c.name, value: c.id }))
+    const rows = await fetchAllPages((q) => bridge.customers.fetch(q), { filters: { isActive: true } })
+    return rows.map((c) => ({ label: c.name, value: c.id }))
   })
 
   const vendors = lazy<SelectOption>(async () => {
-    const page = await bridge.vendors.fetch({ pageIndex: 1, pageSize: 200, filters: { isActive: true } })
-    return page.items.map((v) => ({ label: v.name, value: v.id }))
+    const rows = await fetchAllPages((q) => bridge.vendors.fetch(q), { filters: { isActive: true } })
+    return rows.map((v) => ({ label: v.name, value: v.id }))
   })
 
   const items = lazy<SelectOption>(async () => {
-    const page = await bridge.items.fetch({ pageIndex: 1, pageSize: 200, filters: { isActive: true } })
-    return page.items.map((i) => ({ label: i.code ? `${i.code} ${i.name}` : i.name, value: i.id }))
+    const rows = await fetchAllPages((q) => bridge.items.fetch(q), { filters: { isActive: true } })
+    return rows.map((i) => ({ label: i.code ? `${i.code} ${i.name}` : i.name, value: i.id }))
   })
 
   const taxCodes = lazy<SelectOption>(async () => {

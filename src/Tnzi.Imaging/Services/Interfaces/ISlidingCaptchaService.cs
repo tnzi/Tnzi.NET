@@ -9,9 +9,13 @@ public interface ISlidingCaptchaService
     /// 生成滑动验证码拼图
     /// </summary>
     /// <param name="options">可选的自定义配置</param>
+    /// <param name="purpose">
+    /// 本次拼图要保护的用途（例如 <c>login</c> / <c>contact</c>）。写进令牌，验证通过后签出的通行令牌只能用于同一用途；
+    /// 不给则通行令牌不绑用途。
+    /// </param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>验证码拼图数据</returns>
-    Task<Result<SlidingCaptchaDto>> GenerateAsync(SlidingCaptchaOptions? options = null, CancellationToken cancellationToken = default);
+    Task<Result<SlidingCaptchaDto>> GenerateAsync(SlidingCaptchaOptions? options = null, string? purpose = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 验证用户滑动结果
@@ -24,12 +28,22 @@ public interface ISlidingCaptchaService
     /// 仅当令牌里没有记录容差时才采用此入参。
     /// </param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>验证结果</returns>
+    /// <returns>验证结果；通过时带一枚一次性通行令牌（<see cref="SlidingCaptchaVerifyResult.PassToken"/>）</returns>
     Task<Result<SlidingCaptchaVerifyResult>> VerifyAsync(string token, int userX, int tolerance = 5, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 核销一枚通行令牌（一次性）。通行令牌在生成时绑了用途的，用途不符即失败。
+    /// </summary>
+    /// <param name="passToken">验证通过时签出的通行令牌</param>
+    /// <param name="purpose">受保护端点声明的用途</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>令牌有效且用途匹配返回 true；不存在、已用过、过期或用途不符返回 false</returns>
+    Task<bool> RedeemPassTokenAsync(string passToken, string purpose, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 基于失败历史自适应难度生成验证码。
     /// </summary>
+    /// <param name="purpose">同 <see cref="GenerateAsync"/> 的 purpose。</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>自适应难度的验证码拼图数据</returns>
     /// <remarks>
@@ -39,5 +53,5 @@ public interface ISlidingCaptchaService
     /// 因此这里<b>不留参数</b> —— 让那件事在类型上不可能发生，而不是写在文档里叮嘱。
     /// 取不到客户端 IP 时按"没有失败历史"处理（与此前不传 clientId 的行为相同）。
     /// </remarks>
-    Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(CancellationToken cancellationToken = default);
+    Task<Result<SlidingCaptchaDto>> GenerateAdaptiveAsync(string? purpose = null, CancellationToken cancellationToken = default);
 }

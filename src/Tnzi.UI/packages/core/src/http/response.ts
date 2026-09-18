@@ -5,24 +5,77 @@
 import type { ApiResult, PagedList } from '../types/index';
 import { HttpError, getApiResultErrorMessage } from '../errors/api-error';
 
+const ENVELOPE_KEYS = ['code', 'Code', 'succeeded', 'Succeeded', 'success', 'Success'] as const;
+
+function isEnvelope(raw: Record<string, unknown>): boolean {
+  return ENVELOPE_KEYS.some((key) => key in raw);
+}
+
+function isSuccessStatus(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
+/**
+ * A failed result derived from the HTTP status for a body that is not an
+ * envelope: ProblemDetails (`title` / `detail`), a gateway error page
+ * (`message`), a consumer action's `BadRequest(new { error })`.
+ */
+function failedFromStatus<T>(httpStatus: number, raw: Record<string, unknown> | null): ApiResult<T> {
+  const text = raw
+    ? [raw.message, raw.Message, raw.title, raw.Title, raw.detail, raw.Detail].find(
+        (v): v is string => typeof v === 'string' && v.length > 0
+      )
+    : undefined;
+  return {
+    succeeded: false,
+    success: false,
+    code: httpStatus,
+    message: text ?? `HTTP ${httpStatus}`,
+    errorCode: [raw?.errorCode, raw?.ErrorCode, raw?.type].find(
+      (v): v is string => typeof v === 'string'
+    ),
+    errorDetails: raw ?? undefined,
+  };
+}
+
 /**
  * Normalize API response from backend.
  *
  * The backend serializes with `JsonNamingPolicy.CamelCase`. This function also
  * handles PascalCase keys for backward compatibility with older endpoints.
+ *
+ * @param httpStatus The response's HTTP status, when the caller has one. A body
+ *   that carries envelope fields (`code` / `succeeded` / `success`) wins over
+ *   it, as it always has. A body WITHOUT them on a non-2xx status becomes a
+ *   failed result with that status - ProblemDetails, an API gateway's JSON
+ *   error page, a consumer controller's `BadRequest(obj)` all look like this.
+ *   Before this parameter existed such a response normalised to
+ *   `succeeded: true, code: 200, data: undefined`, so a rejected write reported
+ *   success and a gateway 401 bypassed the refresh cycle. Omit it and the body
+ *   is all there is (older callers, already-parsed payloads).
  */
-export function normalizeApiResult<T>(raw: Record<string, unknown> | null | undefined): ApiResult<T> {
+export function normalizeApiResult<T>(
+  raw: Record<string, unknown> | null | undefined,
+  httpStatus?: number
+): ApiResult<T> {
+  const statusFails = httpStatus !== undefined && !isSuccessStatus(httpStatus);
+
   // A body that is not an object is not an envelope: `null`, a bare scalar, a
   // raw string. That is still perfectly valid JSON, so reporting it as a parse
   // failure (what dereferencing `raw.code` used to produce) is wrong - carry
-  // the body through as the payload instead.
+  // the body through as the payload instead, unless the status says otherwise.
   if (raw === null || raw === undefined || typeof raw !== 'object') {
+    if (statusFails) return failedFromStatus<T>(httpStatus, null);
     return {
       succeeded: true,
       success: true,
       code: 200,
       data: (raw ?? undefined) as T,
     };
+  }
+
+  if (statusFails && !isEnvelope(raw)) {
+    return failedFromStatus<T>(httpStatus, raw);
   }
 
   const code = (raw.code ?? raw.Code ?? 200) as number;
@@ -109,6 +162,12 @@ export function unwrapData<T>(result: ApiResult<T>): T {
  * payload on success (void endpoints return no body) - it only reads the
  * success flag. Non-envelope values (already-unwrapped `T`, `undefined`) pass
  * through silently.
+ *
+ * What it throws is an {@link HttpError} (an `Error` subclass with the same
+ * message), so the envelope's `errorCode` / `errorDetails` / status survive
+ * the throw. A bare `Error(message)` here made every code-keyed failure - a
+ * step-up challenge, a session-security code - unrecognisable on the bridge
+ * path, which is the path every admin page takes.
  */
 export function ensureOk(result: unknown, fallbackMessage = 'Request failed'): void {
   if (
@@ -116,9 +175,18 @@ export function ensureOk(result: unknown, fallbackMessage = 'Request failed'): v
     typeof result === 'object' &&
     ('succeeded' in (result as object) || 'success' in (result as object))
   ) {
-    const envelope = result as { succeeded?: boolean; success?: boolean; message?: string | null };
+    const envelope = result as Partial<ApiResult<unknown>> & { message?: string | null };
     const ok = envelope.succeeded ?? envelope.success;
-    if (!ok) throw new Error(envelope.message || fallbackMessage);
+    if (!ok) {
+      throw new HttpError({
+        succeeded: false,
+        success: false,
+        code: envelope.code ?? 400,
+        message: envelope.message || fallbackMessage,
+        errorCode: envelope.errorCode,
+        errorDetails: envelope.errorDetails,
+      });
+    }
   }
 }
 

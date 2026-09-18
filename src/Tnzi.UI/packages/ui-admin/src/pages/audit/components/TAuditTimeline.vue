@@ -42,6 +42,15 @@
       <NButton v-if="hasActiveFilter" size="small" tertiary @click="resetFilters">
         {{ t('filters.reset') }}
       </NButton>
+      <!-- Export the ACTIVE filter (never one page of it). The backend refuses
+           an oversized export with "narrow the filter"; that reason surfaces
+           through the same toast as a failed load. -->
+      <NDropdown v-if="exportOptions.length" trigger="click" :options="exportOptions" @select="onExportSelect">
+        <NButton size="small" tertiary :loading="exporting">
+          <template #icon><TSvgIcon icon="mdi:download-outline" :size="14" /></template>
+          {{ t('actions.export') }}
+        </NButton>
+      </NDropdown>
       <span class="t-audit-timeline__count">{{ t('summary', { n: total }) }}</span>
     </div>
 
@@ -187,11 +196,12 @@
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, ref, onMounted } from 'vue'
 import {
-  NButton, NInput, NSelect, NDatePicker, NSpin, NTimeline, NTimelineItem,
+  NButton, NDropdown, NInput, NSelect, NDatePicker, NSpin, NTimeline, NTimelineItem,
   NTag, NDescriptions, NDescriptionsItem,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDate, formatDateOnly, formatDateTime } from '@tnzi/core'
+import { downloadBlob } from '@tnzi/core/utils'
 import { TEmpty } from '@tnzi/ui'
 import TUserSelector from '../../../components/forms/TUserSelector.vue'
 import { TDrawerShell } from '../../../components/overlay'
@@ -200,7 +210,7 @@ import { useSafeMessage } from '../../_shared/safe-message'
 // 0.2.72+ (B4): Re-routed through the bridge so the page stays clean
 // under the `no-restricted-imports` guard against direct
 // `@tnzi/core/services/*` value imports from `pages/**`.
-import type { AuditOperationDto } from '../../../services/bridges/audit-bridge'
+import type { AuditOperationDto, AuditOperationQueryDto } from '../../../services/bridges/audit-bridge'
 import { AuditResultType, EntityChangeType } from '../../../services/bridges/audit-bridge'
 import { createIdentityBridge } from '../../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../../plugin/client'
@@ -217,6 +227,15 @@ interface Props {
    * entity-level change tree (entityEntries → propertyEntries) can render.
    */
   fetchDetail?: (id: string) => Promise<AuditOperationDto>
+  /**
+   * Bridge exporters (`logs` / `operations` `.exportCsv` / `.exportJson`). When
+   * either is provided the toolbar shows an Export menu that sends the ACTIVE
+   * filter - not the current page - and writes the returned Blob. The bridge
+   * rejects a refused export with the server's reason (row cap: "narrow the
+   * filter"), which lands in the same toast as a failed load.
+   */
+  exportCsv?: (query: Partial<AuditOperationQueryDto>) => Promise<Blob>
+  exportJson?: (query: Partial<AuditOperationQueryDto>) => Promise<Blob>
   /** translate helper from the parent page (interpolation-aware). */
   translate: (key: string, params?: Record<string, unknown>) => string
 }
@@ -327,20 +346,54 @@ function typeFor(item: AuditOperationDto): 'success' | 'error' | 'default' | 'wa
   return 'info'
 }
 
-function buildQuery(): CrudPageQuery {
-  const filt: Record<string, unknown> = { ...filters.value }
+/** The active filter as backend `AuditOperationQueryDto` fields - shared by the list query and the export. */
+function buildFilter(): Partial<AuditOperationQueryDto> {
+  const filt: Partial<AuditOperationQueryDto> = { ...filters.value }
   if (dateRange.value) {
     // Backend `AuditOperationQueryDto.StartDate` / `EndDate`.
     filt.startDate = new Date(dateRange.value[0]).toISOString()
     filt.endDate = new Date(dateRange.value[1]).toISOString()
   }
+  return filt
+}
+
+function buildQuery(): CrudPageQuery {
   return {
     pageIndex: pageIndex.value,
     pageSize,
     sortField: 'startTime',
     sortOrder: 'desc' as const,
     searchText: '',
-    filters: filt,
+    filters: buildFilter() as Record<string, unknown>,
+  }
+}
+
+// ── Export ──────────────────────────────────────────────────────────────
+type ExportFormat = 'csv' | 'json'
+const exporting = ref(false)
+const exportOptions = computed(() => {
+  const out: Array<{ key: ExportFormat; label: string }> = []
+  if (props.exportCsv) out.push({ key: 'csv', label: t('export.csv') })
+  if (props.exportJson) out.push({ key: 'json', label: t('export.json') })
+  return out
+})
+
+async function onExportSelect(key: string): Promise<void> {
+  const format = key as ExportFormat
+  const exporter = format === 'csv' ? props.exportCsv : props.exportJson
+  if (!exporter || exporting.value) return
+  exporting.value = true
+  try {
+    // The whole filtered set, never one page of it: the export carries no
+    // pageIndex / pageSize. The backend refuses a set above its row cap with
+    // a message that names the count and asks to narrow the filter.
+    const blob = await exporter(buildFilter())
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    downloadBlob(blob, `audit-${props.pageId.replace(/^audit\./, '')}-${stamp}.${format}`)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    exporting.value = false
   }
 }
 

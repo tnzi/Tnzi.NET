@@ -490,11 +490,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     getVersion: async (id, version) =>
       unwrap<AgentVersionDto>(await agentApi.getVersion(String(id), version)),
     rollbackToVersion: async (id, version) =>
-      unwrap<AgentDto>(await agentApi.rollbackToVersion(String(id), version)),
+      unwrapOk<AgentDto>(await agentApi.rollbackToVersion(String(id), version)),
     validate: async (id) => unwrap<AgentValidationResultDto>(await agentApi.validate(String(id))),
     getHealth: async () => unwrap<AgentHealthSummaryDto>(await agentApi.getHealth()),
     configureAbTest: async (id, data) =>
-      unwrap<AgentDto>(await agentApi.configureAbTest(String(id), data)),
+      unwrapOk<AgentDto>(await agentApi.configureAbTest(String(id), data)),
     stopAbTest: async (id) => unwrapOk<AgentDto>(await agentApi.stopAbTest(String(id))),
     getToolGroups: async () => unwrap<ToolGroupDto[]>(await agentApi.getToolGroups()),
     getMemory: async (id, query) =>
@@ -526,7 +526,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
     getDetail: async (id, messageLimit) =>
       unwrap<AgentThreadDetailDto>(await threadApi.getDetail(String(id), messageLimit)),
-    exportJson: async (id) => unwrap<ThreadExportDto>(await threadApi.exportJson(String(id))),
+    exportJson: async (id) => unwrapOk<ThreadExportDto>(await threadApi.exportJson(String(id))),
     getExportMarkdownUrl: (id) => threadApi.getExportMarkdownUrl(String(id)),
   }
 
@@ -661,7 +661,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       return Array.isArray(items) ? items : []
     },
     exportSkills: async (scope?: SkillScope) => {
-      const items = unwrap<SkillExportDto[] | undefined>(await skillApi.export(scope))
+      const items = unwrapOk<SkillExportDto[] | undefined>(await skillApi.export(scope))
       return Array.isArray(items) ? items : []
     },
     importSkills: async (data: SkillImportRequestDto) =>
@@ -674,9 +674,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       const items = unwrap<SkillCategoryDto[] | undefined>(await skillCategoryApi!.getTree())
       return Array.isArray(items) ? items : []
     },
-    create: async (data) => unwrap<SkillCategoryDto>(await skillCategoryApi!.create(data)),
+    create: async (data) => unwrapOk<SkillCategoryDto>(await skillCategoryApi!.create(data)),
     update: async (id, data) =>
-      unwrap<SkillCategoryDto>(await skillCategoryApi!.update(String(id), data)),
+      unwrapOk<SkillCategoryDto>(await skillCategoryApi!.update(String(id), data)),
     delete: async (id) => {
       ensureOk(await skillCategoryApi!.delete(String(id)))
     },
@@ -707,7 +707,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       for (const id of ids) ensureOk(await providerApi.delete(String(id)))
     },
     test: async (id: string): Promise<{ ok: boolean; latency: number; error?: string }> => {
-      const result = unwrap<ProviderTestResultDto>(await providerApi.test(String(id)))
+      // Read-only probe, but the result type is non-optional: on a refused envelope
+      // bare unwrap handed back undefined and the next line read `.success` off it.
+      const result = unwrapOk<ProviderTestResultDto>(await providerApi.test(String(id)))
       return {
         ok: result.success,
         latency: result.latencyMs,
@@ -851,7 +853,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       for (const id of ids) ensureOk(await kbApi.delete(String(id)))
     },
     getById: async (id) => unwrap<KnowledgeBaseDto>(await kbApi.getById(String(id))),
-    reindex: async (id) => unwrap<ReindexResultDto>(await kbApi.reindex(String(id))),
+    reindex: async (id) => unwrapOk<ReindexResultDto>(await kbApi.reindex(String(id))),
     getDocuments: async (kbId, query) =>
       unwrap<PagedList<KnowledgeDocumentDto>>(await kbApi.getDocuments(String(kbId), query)),
     getDocumentStatus: async (kbId, docId) =>
@@ -893,7 +895,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       for (const id of ids) ensureOk(await mcpApi.delete(String(id)))
     },
     test: async (id: string): Promise<{ ok: boolean; latency: number; error?: string }> => {
-      const result = unwrap<McpServerTestResultDto>(await mcpApi.test(String(id)))
+      const result = unwrapOk<McpServerTestResultDto>(await mcpApi.test(String(id)))
       return {
         ok: result.success,
         latency: result.latencyMs,
@@ -937,7 +939,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       )
       return Array.isArray(items) ? items : []
     },
-    cleanup: async (retentionDays) => unwrap<number>(await mcpAnalyticsApi!.cleanup(retentionDays)),
+    cleanup: async (retentionDays) => unwrapOk<number>(await mcpAnalyticsApi!.cleanup(retentionDays)),
   }
 
   // ---- quota --------------------------------------------------------------

@@ -52,8 +52,11 @@ public class DocumentIngestionBackgroundJob : TenantAwareBackgroundJob<DocumentI
         var doc = await _docRepository.GetAsync(args.DocumentId, cancellationToken);
         if (doc == null)
         {
-            _logger.LogWarning("Document {DocumentId} not found, skipping ingestion", args.DocumentId);
-            return;
+            // 抛出而不是返回：返回会让 Hangfire 把这次运行记成成功、永不重试，文档永远停在 Processing。
+            // 入队已延迟到提交后，这里查不到行只剩两种可能：复制延迟 / 文档已被删除 —— 前者重试就好，
+            // 后者重试耗尽后落进失败队列，比一条 Warning 日志显眼。
+            _logger.LogWarning("Document {DocumentId} not found; failing the job so the scheduler retries", args.DocumentId);
+            throw new InvalidOperationException($"Document {args.DocumentId} was not found; the row may not be committed yet.");
         }
 
         try

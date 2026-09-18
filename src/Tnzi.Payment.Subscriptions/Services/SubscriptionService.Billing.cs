@@ -103,8 +103,15 @@ public partial class SubscriptionService
                 }
                 else
                 {
-                    // 试用转正扣款；成功 → 转为 Active；失败 → PastDue
-                    await ChargeSubscriptionAsync(subscription, SubscriptionBillingPurpose.TrialConversion, subscription.Plan.Price, cancellationToken);
+                    // ★ 与续费扫描同形：先结算到期的待生效变更，再按新生效的计划扣款。
+                    // 试用期内提出的降级到期日就是试用截止日，而这一刻正是试用截止。顺序反过来，
+                    // 第一个付费周期跑在新计划上、却按旧计划的价格收（降级多收、约定升级少收），
+                    // 随后第六条扫描把计划换掉，账单与订阅详情页对不上且没有任何日志能看出来。
+                    var effectivePlan = await ApplyDuePlanChangeForSubscriptionAsync(subscription.Id, now, cancellationToken)
+                        ?? subscription.Plan;
+
+                    // 试用转正扣款（计划现价 − 试用折扣）；成功 → 转为 Active；失败 → PastDue
+                    await ChargeTrialConversionAsync(subscription, effectivePlan, now, cancellationToken);
                 }
 
                 processed++;
@@ -276,6 +283,22 @@ public partial class SubscriptionService
             return Ok();
         }
 
+        // ★ 不信任计费元数据本身：它只是路由键。真正推进状态机之前，付款人必须就是订阅主，
+        // 且到账金额不得低于这一次该收的下界 —— 否则任何人拿自己的 0.5 元支付单加一段自填的
+        // ExtraData 就能激活 / 续期任意价位的订阅。失败方向关闭：不改订阅行，只记 Warning。
+        var trust = VerifyPaymentBelongsToSubscription(subscription, context);
+        if (!trust.Succeeded)
+            return trust;
+
+        var floor = await ResolveAmountFloorAsync(subscription, context, cancellationToken);
+        if (floor.HasValue && context.Amount + CurrencyInfo.FromMinorUnits(1, subscription.Currency) < floor.Value)
+        {
+            Logger.LogWarning(
+                "Ignoring {Purpose} payment {TradeNo} for subscription {SubscriptionNo}: paid {Paid} is below the expected {Expected} {Currency}.",
+                context.Purpose, context.PaymentTradeNo, subscription.SubscriptionNo, context.Amount, floor.Value, subscription.Currency);
+            return Fail(ErrorCodes.SubscriptionPaymentAmountTooLow, 400);
+        }
+
         // 终态防复活：取消与在途扣款竞态时，已取消/过期的订阅不应被支付完成"复活"并继续扣款。
         // 仅放过 Initial（订阅尚处 Pending，本就等待首付激活）。
         if (context.Purpose != SubscriptionBillingPurpose.Initial
@@ -286,14 +309,7 @@ public partial class SubscriptionService
                 context.Purpose, subscription.SubscriptionNo, subscription.Status, context.PaymentTradeNo);
 
             if (context.Purpose == SubscriptionBillingPurpose.Proration && context.ChangeId.HasValue)
-            {
-                var pendingChange = await _changeRepository.FirstOrDefaultAsync(c => c.Id == context.ChangeId.Value, cancellationToken);
-                if (pendingChange is { Status: SubscriptionChangeStatus.Pending })
-                {
-                    pendingChange.Status = SubscriptionChangeStatus.Cancelled;
-                    await _changeRepository.UpdateAsync(pendingChange, cancellationToken);
-                }
-            }
+                await CancelAwaitingChangeAsync(context.ChangeId.Value, cancellationToken);
 
             subscription.BillingLockedUntil = null;
             await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
@@ -322,16 +338,14 @@ public partial class SubscriptionService
                 subscription.Status = SubscriptionStatus.Active;
                 subscription.PaidAmount = context.Amount;
                 ResetDunning(subscription);
+                await CancelAwaitingChangesForEndedPeriodAsync(subscription.Id, cancellationToken);
                 await PublishRenewedAsync(subscription, context);
                 break;
             }
 
             case SubscriptionBillingPurpose.TrialConversion:
-                subscription.Status = SubscriptionStatus.Active;
-                subscription.TrialConvertedTime = now;
-                subscription.NextBillingTime = CalculateNextBillingTime(now, subscription.CycleType, subscription.CycleValue);
-                subscription.PaidAmount = context.Amount;
-                ResetDunning(subscription);
+                MarkTrialConverted(subscription, now, context.Amount);
+                await CancelAwaitingChangesForEndedPeriodAsync(subscription.Id, cancellationToken);
                 await PublishTrialConvertedAsync(subscription, context);
                 break;
 
@@ -360,6 +374,12 @@ public partial class SubscriptionService
         if (subscription == null)
             return Fail(ErrorCodes.SubscriptionNotFound, 404);
 
+        // 失败回流同样只认订阅主自己的支付：否则拿受害者的 SubscriptionNo 建一张不付的单，
+        // 等它过期就能零成本把别人的订阅打成 PastDue，三次之后直接过期。
+        var trust = VerifyPaymentBelongsToSubscription(subscription, context);
+        if (!trust.Succeeded)
+            return trust;
+
         var now = DateTime.UtcNow;
         var shouldNotify = false;
 
@@ -378,14 +398,7 @@ public partial class SubscriptionService
 
             case SubscriptionBillingPurpose.Proration:
                 if (context.ChangeId.HasValue)
-                {
-                    var change = await _changeRepository.FirstOrDefaultAsync(c => c.Id == context.ChangeId.Value, cancellationToken);
-                    if (change is { Status: SubscriptionChangeStatus.Pending })
-                    {
-                        change.Status = SubscriptionChangeStatus.Cancelled;
-                        await _changeRepository.UpdateAsync(change, cancellationToken);
-                    }
-                }
+                    await CancelAwaitingChangeAsync(context.ChangeId.Value, cancellationToken);
                 break;
 
             case SubscriptionBillingPurpose.Initial:
@@ -429,13 +442,79 @@ public partial class SubscriptionService
         if (!await TryClaimAsync(subscription.Id, now, now.AddMinutes(PaymentOptions.BillingLockMinutes), cancellationToken))
             return;
 
-        var purpose = subscription.TrialEndTime != null && subscription.TrialConvertedTime == null
-            ? SubscriptionBillingPurpose.TrialConversion
-            : SubscriptionBillingPurpose.Renewal;
-
         // 计划显式传入而不是挂到导航属性上：订阅实体随后可能被保存，
         // 挂一个游离的计划会让 EF 把它当新计划插入
-        await ChargeSubscriptionAsync(subscription, purpose, plan.Price, cancellationToken, plan);
+        if (subscription.TrialEndTime != null && subscription.TrialConvertedTime == null)
+            await ChargeTrialConversionAsync(subscription, plan, now, cancellationToken);
+        else
+            await ChargeSubscriptionAsync(subscription, SubscriptionBillingPurpose.Renewal, plan.Price, cancellationToken, plan);
+    }
+
+    /// <summary>
+    /// 试用转正的应收额：生效计划的现价减去开通试用时快照的折扣（<see cref="Subscription.DiscountAmount"/>），不低于 0。
+    /// 折扣是给这次试用的承诺而不是给某个计划的，到期变更换了计划照样从新计划的价格上减；
+    /// 与回流侧 <see cref="ResolveAmountFloorAsync"/> 对 TrialConversion 的下界同一公式。
+    /// </summary>
+    private static decimal ResolveTrialConversionAmount(Subscription subscription, SubscriptionPlan plan)
+        => Math.Max(0m, plan.Price - subscription.DiscountAmount);
+
+    /// <summary>
+    /// 这条订阅的下一次扣款是不是一次免费的试用转正（尚未转正的试用，且折扣抵满生效计划的价格）：
+    /// 走 <see cref="ChargeTrialConversionAsync"/> 的免费路径，不需要支付方式。
+    /// </summary>
+    private static bool IsChargeFreeTrialConversion(Subscription subscription, SubscriptionPlan? plan)
+        => subscription.TrialEndTime != null
+            && subscription.TrialConvertedTime == null
+            && plan != null
+            && ResolveTrialConversionAmount(subscription, plan) == 0m;
+
+    /// <summary>
+    /// 试用转正：应收额大于 0 走 off-session 扣款，回流后转正；折扣抵满全价时直接免费转正 ——
+    /// 渠道拒绝 0 元单且不产生任何支付事件，照常去扣会让订阅带着计费锁卡在 Trial 被每轮扫描无限重扫。
+    /// </summary>
+    private async Task ChargeTrialConversionAsync(Subscription subscription, SubscriptionPlan plan, DateTime now, CancellationToken cancellationToken)
+    {
+        var amount = ResolveTrialConversionAmount(subscription, plan);
+        if (amount > 0)
+        {
+            await ChargeSubscriptionAsync(subscription, SubscriptionBillingPurpose.TrialConversion, amount, cancellationToken, plan);
+            return;
+        }
+
+        var tracked = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscription.Id, cancellationToken);
+        if (tracked == null)
+            return;
+
+        MarkTrialConverted(tracked, now, paidAmount: 0m);
+        tracked.BillingLockedUntil = null;
+        await _subscriptionRepository.UpdateAsync(tracked, cancellationToken);
+        await CancelAwaitingChangesForEndedPeriodAsync(tracked.Id, cancellationToken);
+
+        Logger.LogInformation(
+            "Trial converted without a charge: the trial discount covers the full price. SubscriptionNo: {SubscriptionNo}",
+            tracked.SubscriptionNo);
+
+        await PublishTrialConvertedAsync(tracked, new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.TrialConversion,
+            SubscriptionId = tracked.Id,
+            SubscriptionNo = tracked.SubscriptionNo,
+            PayerUserId = tracked.UserId,
+            Amount = 0m,
+            Currency = tracked.Currency
+        });
+    }
+
+    /// <summary>
+    /// 把订阅从 Trial 推进到 Active：付费周期从此刻起算。付款回流与免费转正共用这一段。
+    /// </summary>
+    private static void MarkTrialConverted(Subscription subscription, DateTime now, decimal paidAmount)
+    {
+        subscription.Status = SubscriptionStatus.Active;
+        subscription.TrialConvertedTime = now;
+        subscription.NextBillingTime = CalculateNextBillingTime(now, subscription.CycleType, subscription.CycleValue);
+        subscription.PaidAmount = paidAmount;
+        ResetDunning(subscription);
     }
 
     /// <summary>
@@ -455,6 +534,7 @@ public partial class SubscriptionService
                 Purpose = purpose,
                 SubscriptionId = subscription.Id,
                 SubscriptionNo = subscription.SubscriptionNo,
+                PayerUserId = subscription.UserId,
                 FailReason = ErrorCodes.SubscriptionPaymentMethodMissing
             }, cancellationToken);
             return;
@@ -472,6 +552,7 @@ public partial class SubscriptionService
                 Purpose = purpose,
                 SubscriptionId = subscription.Id,
                 SubscriptionNo = subscription.SubscriptionNo,
+                PayerUserId = subscription.UserId,
                 FailReason = ErrorCodes.PaymentOffSessionNotSupported
             }, cancellationToken);
             return;
@@ -502,9 +583,14 @@ public partial class SubscriptionService
 
     /// <summary>
     /// 升级补差价收款：有已保存支付方式则 off-session 即时扣款，否则生成待支付订单由用户完成；
-    /// 两种路径均在支付完成事件回流后应用计划变更（见 ApplyProrationChangeAsync）
+    /// 两种路径均在支付完成事件回流后应用计划变更（见 ApplyProrationChangeAsync）。
     /// </summary>
-    private async Task<PaymentOrderResultDto?> ChargeOrCreateProrationPaymentAsync(
+    /// <returns>
+    /// 成功时 <c>Data</c> 是回传给前端的待支付单（off-session 当场扣成功时为 null）；
+    /// 失败时带着渠道 / 建单的失败原因。★ 此前 off-session 的返回值被直接丢弃：渠道拒付时
+    /// 调用方照样答 200，而变更停在等钱的状态里。
+    /// </returns>
+    private async Task<Result<PaymentOrderResultDto?>> ChargeOrCreateProrationPaymentAsync(
         Subscription subscription, SubscriptionPlan currentPlan, SubscriptionPlan newPlan, Guid changeId, decimal amount, CancellationToken cancellationToken)
     {
         var meta = new SubscriptionBillingMetadata
@@ -517,7 +603,7 @@ public partial class SubscriptionService
 
         if (!string.IsNullOrWhiteSpace(subscription.PaymentMethodToken))
         {
-            await _paymentService.ChargeOffSessionAsync(new OffSessionChargeDto
+            var charged = await _paymentService.ChargeOffSessionAsync(new OffSessionChargeDto
             {
                 BusinessOrderNo = subscription.SubscriptionNo,
                 BusinessType = BusinessType.Subscription,
@@ -533,10 +619,13 @@ public partial class SubscriptionService
                 ExtraData = meta.ToExtraData()
             }, cancellationToken);
 
-            return null;
+            return charged.Succeeded
+                ? Result.Success<PaymentOrderResultDto?>(null)
+                : Result.Failure<PaymentOrderResultDto?>(charged.Message ?? ErrorCodes.PaymentOffSessionChargeFailed, charged.Code ?? 400);
         }
 
-        // 未绑卡：生成待支付单并把凭据回传，否则用户拿不到任何可付款的入口
+        // 未绑卡：生成待支付单并把凭据回传，否则用户拿不到任何可付款的入口。
+        // 计费元数据经系统通道写入：用户面的 POST /payments 不接受 BusinessType.Subscription
         var payment = await _paymentService.CreatePaymentAsync(new CreatePaymentDto
         {
             BusinessOrderNo = subscription.SubscriptionNo,
@@ -545,10 +634,13 @@ public partial class SubscriptionService
             Currency = newPlan.Currency,
             ChannelCode = subscription.ChannelCode,
             Description = description,
-            ExtraData = meta.ToExtraData()
+            ExtraData = meta.ToExtraData(),
+            IsSystemInitiated = true
         }, cancellationToken);
 
-        return payment.Succeeded ? payment.Data : null;
+        return payment.Succeeded
+            ? Result.Success<PaymentOrderResultDto?>(payment.Data)
+            : Result.Failure<PaymentOrderResultDto?>(payment.Message ?? ErrorCodes.PaymentCreationFailed, payment.Code ?? 400);
     }
 
     /// <summary>
@@ -568,6 +660,9 @@ public partial class SubscriptionService
         subscription.NextBillingTime = null;
         await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
 
+        // 过期结束的也是一个周期：等补差款的变更随周期一起失效，连待付单一起关（与续费 / 立即取消同形）
+        await CancelAwaitingChangesForEndedPeriodAsync(subscription.Id, cancellationToken);
+
         if (EventBus != null)
         {
             await EventBus.PublishAsync(new SubscriptionExpiredEvent
@@ -583,20 +678,40 @@ public partial class SubscriptionService
     }
 
     /// <summary>
-    /// 升级补差付款确认后应用计划变更
+    /// 升级补差付款确认后应用计划变更。
     /// </summary>
+    /// <remarks>
+    /// <para>只接受 <see cref="SubscriptionChangeStatus.AwaitingPayment"/>：补差单只会为等钱的变更而建，
+    /// 一条 <c>Pending</c>（到期结算）的变更不该被任何一笔支付提前应用。</para>
+    /// <para>★ 不动 <c>NextBillingTime</c>。补差按「剩余比例 × 差价」只覆盖本期剩下的那一段，
+    /// 这里若把时钟重置成「现在 + 整周期」，用户付 diff×r 却拿到从现在起完整的一个新周期，
+    /// 每次立即升级都少收 新价×(1−r)。锚点留在原处，到期由续费按新价收。</para>
+    /// </remarks>
     private async Task ApplyProrationChangeAsync(Subscription subscription, SubscriptionPaymentContext context, DateTime now, CancellationToken cancellationToken)
     {
         if (!context.ChangeId.HasValue)
             return;
 
         var change = await _changeRepository.FirstOrDefaultAsync(c => c.Id == context.ChangeId.Value, cancellationToken);
-        if (change is not { Status: SubscriptionChangeStatus.Pending })
+        if (change is not { Status: SubscriptionChangeStatus.AwaitingPayment })
+        {
+            // 用户在付款前取消了变更、或支付单过期后又被付掉：钱收到了但没有东西可以生效
+            Logger.LogWarning(
+                "Proration payment {TradeNo} for subscription {SubscriptionNo} references change {ChangeId} in status {Status}; nothing applied, orphan payment may require refund.",
+                context.PaymentTradeNo, subscription.SubscriptionNo, context.ChangeId, change?.Status);
             return;
+        }
 
         var newPlan = await _planRepository.FirstOrDefaultAsync(p => p.Id == change.ToPlanId, cancellationToken);
         if (newPlan == null)
+        {
+            change.Status = SubscriptionChangeStatus.Cancelled;
+            await _changeRepository.UpdateAsync(change, cancellationToken);
+            Logger.LogWarning(
+                "Proration payment {TradeNo} for subscription {SubscriptionNo}: target plan {PlanId} no longer exists; change cancelled, orphan payment may require refund.",
+                context.PaymentTradeNo, subscription.SubscriptionNo, change.ToPlanId);
             return;
+        }
 
         subscription.PlanId = newPlan.Id;
         // 不设 Plan 导航（游离实体会被 EF 当新计划 INSERT）
@@ -605,7 +720,6 @@ public partial class SubscriptionService
         subscription.CycleValue = newPlan.CycleValue;
         subscription.OriginalPrice = newPlan.Price;
         subscription.Currency = newPlan.Currency;
-        subscription.NextBillingTime = CalculateNextBillingTime(now, newPlan.CycleType, newPlan.CycleValue);
 
         change.Status = SubscriptionChangeStatus.Applied;
         await _changeRepository.UpdateAsync(change, cancellationToken);
@@ -625,6 +739,64 @@ public partial class SubscriptionService
                 ChangeType = change.ChangeType,
                 AppliedTime = now
             });
+        }
+    }
+
+    /// <summary>
+    /// 把一条等补差款的变更置为取消（支付失败 / 过期 / 订阅已终止）。条件更新，幂等。
+    /// </summary>
+    private Task CancelAwaitingChangeAsync(Guid changeId, CancellationToken cancellationToken)
+        => _changeRepository.AsQueryable()
+            .Where(c => c.Id == changeId && c.Status == SubscriptionChangeStatus.AwaitingPayment)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SubscriptionChangeStatus.Cancelled), cancellationToken);
+
+    /// <summary>
+    /// 付款人必须就是订阅主。三条合法路径的付款人都等于订阅主：首付与补差单在本人请求内建
+    /// （<c>Payment.UserId = CurrentUser.Id</c>），off-session 显式传 <c>subscription.UserId</c>。
+    /// </summary>
+    private Result VerifyPaymentBelongsToSubscription(Subscription subscription, SubscriptionPaymentContext context)
+    {
+        if (context.PayerUserId == subscription.UserId)
+            return Ok();
+
+        Logger.LogWarning(
+            "Ignoring {Purpose} payment {TradeNo} for subscription {SubscriptionNo}: payer {Payer} is not the subscriber {Owner}.",
+            context.Purpose, context.PaymentTradeNo, subscription.SubscriptionNo, context.PayerUserId, subscription.UserId);
+        return Fail(ErrorCodes.SubscriptionPaymentOwnerMismatch, 403);
+    }
+
+    /// <summary>
+    /// 这一次该收的下界（净额，税在其上）。算不出来（变更记录不存在）返回 null，由后续分支自行处理。
+    /// </summary>
+    private async Task<decimal?> ResolveAmountFloorAsync(Subscription subscription, SubscriptionPaymentContext context, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(context.Currency)
+            && !string.Equals(context.Currency, subscription.Currency, StringComparison.OrdinalIgnoreCase))
+        {
+            // 币种对不上直接把下界抬到不可能满足：99 JPY 不是 99 USD
+            return decimal.MaxValue;
+        }
+
+        // 计划价可能在订阅存续期间被运营调低：续费按计划的现价扣，下界也得跟着现价走，
+        // 否则每一笔按新价扣成的续费都会被这里当成少付而拒绝。取两者中较低的那个，
+        // 攻击者两个值都改不了，守卫并不因此变松。
+        var plan = await _planRepository.FirstOrDefaultAsync(p => p.Id == subscription.PlanId, cancellationToken);
+        var listPrice = Math.Min(subscription.OriginalPrice, plan?.Price ?? subscription.OriginalPrice);
+
+        switch (context.Purpose)
+        {
+            case SubscriptionBillingPurpose.Initial:
+            case SubscriptionBillingPurpose.TrialConversion:
+                return listPrice - subscription.DiscountAmount;
+            case SubscriptionBillingPurpose.Renewal:
+                return listPrice;
+            case SubscriptionBillingPurpose.Proration:
+                if (!context.ChangeId.HasValue)
+                    return null;
+                var change = await _changeRepository.FirstOrDefaultAsync(c => c.Id == context.ChangeId.Value, cancellationToken);
+                return change?.ProratedAmount;
+            default:
+                return null;
         }
     }
 

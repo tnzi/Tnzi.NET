@@ -423,6 +423,57 @@ public class BatchIntegrityResult
 }
 
 /// <summary>
+/// 缩略图回填请求（<c>POST admin/files/backfill-thumbnails</c>）。
+/// </summary>
+public class ThumbnailBackfillRequest
+{
+    /// <summary>
+    /// 只处理这些文件；为空或不给表示扫描全部没有缩略图的记录。
+    /// </summary>
+    public List<Guid>? FileIds { get; set; }
+
+    /// <summary>
+    /// 一次最多处理多少条，默认 100；0 表示不限（几百份 PDF 会串行渲染几十秒，慎用）。
+    /// </summary>
+    public int MaxFiles { get; set; } = 100;
+}
+
+/// <summary>
+/// 缩略图回填结果。
+/// </summary>
+/// <remarks>
+/// 画不出来的记录（有口令、损坏、超限）仍然没有缩略图，下一次调用还会再试；所以循环调用时按
+/// <see cref="Generated"/> 归零停手，而不是等 <see cref="Remaining"/> 归零 —— 后者在存在画不出来的文件时永远不会归零。
+/// </remarks>
+public class ThumbnailBackfillResult
+{
+    /// <summary>
+    /// 本批检查的记录数（没有缩略图、且此刻画得出来的那些，按 MaxFiles 截断）。
+    /// </summary>
+    public int Scanned { get; set; }
+
+    /// <summary>
+    /// 成功画出并写回的记录数。
+    /// </summary>
+    public int Generated { get; set; }
+
+    /// <summary>
+    /// 画不出来的记录数（原因在服务端日志里）。
+    /// </summary>
+    public int Failed { get; set; }
+
+    /// <summary>
+    /// 本批之后仍没有缩略图的候选记录数（含本批画不出来的）。
+    /// </summary>
+    public int Remaining { get; set; }
+
+    /// <summary>
+    /// 本批画不出来的文件 id。
+    /// </summary>
+    public List<Guid> FailedFileIds { get; set; } = [];
+}
+
+/// <summary>
 /// Set file tags request
 /// </summary>
 public class SetFileTagsRequest

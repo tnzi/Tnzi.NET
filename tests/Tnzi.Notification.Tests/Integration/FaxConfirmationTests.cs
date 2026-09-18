@@ -1,7 +1,6 @@
 using Tnzi.Domain.Entities;
 using Tnzi.EventBus;
 using Tnzi.Notification.Events;
-using Tnzi.Notification.Metadata;
 
 namespace Tnzi.Notification.Tests.Integration;
 

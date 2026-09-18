@@ -63,12 +63,15 @@ public class RedemptionCode : AuditedEntity<Guid>, IMultiTenant
     public string? Remarks { get; set; }
 
     /// <summary>
-    /// 生成兑换码
+    /// 生成兑换码。
     /// </summary>
+    /// <remarks>
+    /// 兑换码是一个能换钱的不记名凭证，来源必须是密码学随机数：此前用 <c>Random.Shared</c>，
+    /// 拿到几个已发出的码就有可能推出同一批里其余的。32 字符字母表（去掉 0/O/1/I）× 12 位 ≈ 60 bit。
+    /// </remarks>
     public static string GenerateCode(int length = 12)
     {
         const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-        return new string(Enumerable.Repeat(chars, length)
-            .Select(s => s[Random.Shared.Next(s.Length)]).ToArray());
+        return RandomNumberGenerator.GetString(chars, length);
     }
 }

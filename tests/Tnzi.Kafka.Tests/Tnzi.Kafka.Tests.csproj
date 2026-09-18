@@ -3,6 +3,9 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Signed so Tnzi.Kafka's InternalsVisibleTo (strong-named) grants access to BuildConsumerConfig. -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

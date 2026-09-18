@@ -65,7 +65,8 @@ public class RabbitMQEventBusTests : IDisposable
             _mockLogger.Object,
             _serviceProvider,
             _options,
-            exchangeName);
+            exchangeName,
+            new DistributedConsumerIdentity("tests"));
     }
 
     public void Dispose()
@@ -355,7 +356,7 @@ public class RabbitMQEventBusTests : IDisposable
         bus.Subscribe<TestEvent, TestEventHandler>();
 
         _mockChannel.Verify(c => c.BasicConsumeAsync(
-                $"Tnzi.Events.{typeof(TestEvent).FullName}",
+                $"tests.{typeof(TestEvent).FullName}",
                 false, It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(),
                 It.IsAny<IDictionary<string, object?>>(), It.IsAny<IAsyncBasicConsumer>(), It.IsAny<CancellationToken>()),
             Times.Once,

@@ -15,7 +15,13 @@ public enum KafkaConsumeOutcome
     DeadLetter,
 
     /// <summary>重试耗尽且未启用死信：不提交偏移量，等待重投（at-least-once，绝不静默丢弃）。</summary>
-    RedeliverWithoutCommit
+    RedeliverWithoutCommit,
+
+    /// <summary>
+    /// 广播事件重投一次后仍失败：提交偏移量并丢弃。只对广播出现 —— 广播不进死信（过期的广播重放出来是有害的），
+    /// 也不保留偏移量等重投（广播组按实例、随实例退出而废弃，等的是一个永远不会回来的消费者）。
+    /// </summary>
+    Drop
 }
 
 /// <summary>
@@ -32,11 +38,20 @@ public static class KafkaConsumeDecider
     /// <param name="attemptsMade">已完成的处理尝试次数（首轮后为 1）。</param>
     /// <param name="maxRetries">允许的额外重试次数。</param>
     /// <param name="deadLetterEnabled">是否启用死信投递。</param>
-    public static KafkaConsumeOutcome Decide(int failureCount, int attemptsMade, int maxRetries, bool deadLetterEnabled)
+    /// <param name="isBroadcast">
+    /// 是否广播订阅（<c>IBroadcastIntegrationEvent</c>）。广播与 RabbitMQ 侧同一契约：无论重试预算与死信开关，
+    /// 只重试一次，再失败即 <see cref="KafkaConsumeOutcome.Drop"/>。
+    /// </param>
+    public static KafkaConsumeOutcome Decide(int failureCount, int attemptsMade, int maxRetries, bool deadLetterEnabled, bool isBroadcast = false)
     {
         if (failureCount <= 0)
         {
             return KafkaConsumeOutcome.Commit;
+        }
+
+        if (isBroadcast)
+        {
+            return attemptsMade <= 1 ? KafkaConsumeOutcome.Retry : KafkaConsumeOutcome.Drop;
         }
 
         if (attemptsMade <= maxRetries)

@@ -10,6 +10,7 @@
 import {
   useAdminUserApi,
   useAdminInvitationApi,
+  useInvitationApi,
   useAdminRoleApi,
   useAdminTenantApi,
   useAdminLoginLogApi,
@@ -19,11 +20,16 @@ import {
   useAuthApi,
   oauthLoginUrl,
   registerPasskey as runPasskeyRegistration,
+  withStepUp,
+  type StepUpGrantDto,
   type PasskeyCredentialDto,
   type AuthConfigDto,
   type UserListItemDto,
   type CreateInvitationDto,
   type InvitationDto,
+  type InvitationPreviewDto,
+  type AcceptInvitationDto,
+  type AcceptInvitationResultDto,
   type CreateUserDto,
   type UpdateProfileDto,
   type UpdateUserDto,
@@ -52,6 +58,7 @@ import {
   type ChangePasswordDto,
   type TwoFactorStatusDto,
   type UserLoginDto,
+  type OAuthLinkTokenDto,
   type DeactivateAccountDto,
   type PersonalDataExportDto,
   type LoginHistoryQueryDto,
@@ -74,6 +81,13 @@ type HttpClient = Parameters<typeof useAdminUserApi>[0]
 export interface IdentityBridgeDeps {
   /** Production path: provide an HttpClient and the bridge builds all APIs internally. */
   client?: HttpClient
+  /**
+   * Cookie token delivery (`runtime.auth.cookieDelivery`). `invitationAcceptance.accept`
+   * issues a session, so in cookie mode it must carry credentials or a cross-origin
+   * SPA drops the refresh cookie the response sets. Every other token-issuing call
+   * is wired by `createTnziClient`; this one is built here and has to be told.
+   */
+  withCredentials?: boolean
   /** Test path: inject mock APIs directly. If provided, `client` is ignored for that API. */
   userApi?: ReturnType<typeof useAdminUserApi>
   roleApi?: ReturnType<typeof useAdminRoleApi>
@@ -84,6 +98,18 @@ export interface IdentityBridgeDeps {
   profileApi?: ReturnType<typeof useProfileApi>
   authApi?: ReturnType<typeof useAuthApi>
   invitationApi?: ReturnType<typeof useAdminInvitationApi>
+  /**
+   * Step-up verifier for the self-service `me.*` writes the backend marks
+   * `[RequireStepUp]` (two-factor changes, contact-change confirmation,
+   * deactivate / delete). Called with the scope the server asked for; resolve
+   * a grant to replay the call once, `null` to give up (the original challenge
+   * is then rethrown, so the caller sees "not done" rather than a silent no-op).
+   *
+   * Wired by the User Center shell from a `StepUpPromptController` + the
+   * `TStepUpModal` it renders. Without it a challenge surfaces exactly as
+   * before: an `HttpError` carrying `IDENTITY_STEP_UP_REQUIRED`.
+   */
+  stepUp?: (scope: string) => Promise<StepUpGrantDto | null>
 }
 
 // Re-export core's OrganizationDto for bridge consumers.
@@ -122,6 +148,27 @@ export interface IdentityBridge {
     resend(userId: string, lifetimeHours?: number): Promise<InvitationDto>
     /** Revoke: deletes the not-yet-accepted account, which invalidates its link. */
     revoke(userId: string): Promise<void>
+  }
+  /**
+   * The invitee's half (`/accept-invitation?token=`). Anonymous: the person
+   * holding the link has, by definition, no account to sign in with yet, so
+   * this is built straight off the HttpClient like `publicUnsubscribe`.
+   */
+  invitationAcceptance: {
+    /**
+     * What the link would activate, masked. `null` for every unusable link
+     * (expired, revoked, already accepted, malformed) and for a dead network:
+     * one situation to the invitee, and telling them apart would tell a prober
+     * which tokens are real.
+     */
+    preview(token: string): Promise<InvitationPreviewDto | null>
+    /**
+     * Accept. Rejects on a refused envelope (weak password, dead link) with the
+     * server's message; resolves `completed: false` + `remainingSteps` when the
+     * app's acceptance handler wants more (the token is kept, the same link
+     * works again).
+     */
+    accept(data: AcceptInvitationDto): Promise<AcceptInvitationResultDto>
   }
   users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> & {
     /**
@@ -244,12 +291,13 @@ export interface IdentityBridge {
   getAuthConfig(): Promise<AuthConfigDto | null>
   /**
    * Deployment-prefix-aware URL for starting an OAuth flow with a given
-   * provider (`GET /auth/oauth/{provider}/login`). When the user is already
-   * authenticated, hitting this endpoint links the provider to their account -
-   * so the User Center's "link a new account" affordance navigates here.
-   * Returns '' when no client is wired.
+   * provider (`GET /auth/oauth/{provider}/login`). The endpoint is anonymous
+   * and the navigation carries no bearer, so "already signed in" is invisible
+   * to it: linking a provider to the current account needs a `linkToken` from
+   * `me.issueOAuthLinkToken` - with it the callback links instead of logging
+   * in. Returns '' when no client is wired.
    */
-  oauthLoginUrl(provider: string, returnUrl?: string): string
+  oauthLoginUrl(provider: string, returnUrl?: string, linkToken?: string): string
   /**
    * Current-user self-service section ("me"). Wires the
    * `DefaultUserProfileController` endpoints (`/users/profile/*`) used by
@@ -278,6 +326,13 @@ export interface IdentityBridge {
     /** 2FA + linked OAuth accounts. */
     getTwoFactorStatus(): Promise<TwoFactorStatusDto>
     getLinkedAccounts(): Promise<UserLoginDto[]>
+    /**
+     * One-time token that turns the next OAuth start into a *link* for the
+     * signed-in account; pass its `token` as the third argument of
+     * `oauthLoginUrl`. Without it the anonymous login flow runs and creates a
+     * fresh account when the provider's email differs from ours.
+     */
+    issueOAuthLinkToken(provider: string): Promise<OAuthLinkTokenDto>
     unlinkAccount(provider: string): Promise<void>
     /** Past login attempts. */
     getLoginHistory(params?: LoginHistoryQueryDto): Promise<LoginLogDto[]>
@@ -403,6 +458,15 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const missing = <T>(label: string): Promise<T> =>
     Promise.reject(new Error(`identity-bridge: ${label} requires an HttpClient or explicit api mock`))
 
+  // Helper: run a `[RequireStepUp]` write through core's challenge -> verify ->
+  // replay-once loop when a verifier is wired. `withStepUp` recognises the
+  // thrown `HttpError` `ensureOk` produces (it checks `errorCode`, not the
+  // status, so an expired session is never mistaken for a challenge). The set
+  // of guarded methods mirrors `DefaultUserProfileController`'s attributes and
+  // is pinned by `__tests__/services/bridges/identity-bridge-step-up.test.ts`.
+  const stepUpGuarded = <T>(run: () => Promise<T>): Promise<T> =>
+    deps.stepUp ? withStepUp(run, deps.stepUp) : run()
+
   const invitationApi =
     deps.invitationApi ?? (deps.client ? useAdminInvitationApi(deps.client) : null)
 
@@ -418,6 +482,26 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     revoke: async (userId) => {
       if (!invitationApi) return missing<void>('invitations.revoke')
       ensureOk(await invitationApi.revoke(userId))
+    },
+  }
+
+  // ★ Anonymous: built straight off the HttpClient, no admin api factory.
+  const acceptanceApi = deps.client
+    ? useInvitationApi(deps.client, { withCredentials: deps.withCredentials })
+    : null
+  const invitationAcceptance: IdentityBridge['invitationAcceptance'] = {
+    preview: async (token) => {
+      if (!acceptanceApi) return null
+      try {
+        const res = await acceptanceApi.preview(token)
+        return res.succeeded ? (res.data ?? null) : null
+      } catch {
+        return null
+      }
+    },
+    accept: async (data) => {
+      if (!acceptanceApi) return missing<AcceptInvitationResultDto>('invitationAcceptance.accept')
+      return unwrapOk(await acceptanceApi.accept(data)) as AcceptInvitationResultDto
     },
   }
 
@@ -437,7 +521,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
       ensureOk(await userApi.deleteMany(ids))
     },
     export: async (q) =>
-      unwrap<Blob>(await userApi.exportCsv(mapQuery(q) as unknown as UserListQueryDto)),
+      unwrapOk<Blob>(await userApi.exportCsv(mapQuery(q) as unknown as UserListQueryDto)),
     import: async (file) => {
       ensureOk(await userApi.importCsv(file))
     },
@@ -500,7 +584,10 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     delete: async (ids) => {
       ensureOk(await roleApi.deleteMany(ids))
     },
-    getAll: async () => unwrap(await roleApi.getAll()) as RoleDto[],
+    // Non-optional read: the matrices spread the result, so a refusal must
+    // throw the server's reason rather than unwrap to a `null` that spreads
+    // into "null is not iterable".
+    getAll: async () => unwrapOk(await roleApi.getAll()) as RoleDto[],
     getDetail: async (id) => unwrap(await roleApi.getDetail(id)) as RoleDetailDto,
     getUsersInRole: async (id, params) =>
       toCrudResult(
@@ -604,7 +691,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           ensureOk(await sessionApi.revokeAllSessions(userId, excludeSessionId ?? null))
         },
         cleanExpired: async (inactiveMinutes) =>
-          unwrap(await sessionApi.cleanExpired(inactiveMinutes)) as number,
+          unwrapOk(await sessionApi.cleanExpired(inactiveMinutes)) as number,
       }
     : {
         list: () => missing('sessions.list'),
@@ -637,51 +724,80 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           unwrap(await profileApi.getTwoFactorStatus()) as TwoFactorStatusDto,
         getLinkedAccounts: async () =>
           unwrap(await profileApi.getLinkedAccounts()) as UserLoginDto[],
+        // Adds a permanent login method (the linked identity survives a
+        // password change and a revoke-all), so the backend gates it with
+        // [RequireStepUp] like the 2FA writes below.
+        issueOAuthLinkToken: async (provider) =>
+          stepUpGuarded(async () =>
+            unwrapOk(await profileApi.issueOAuthLinkToken(provider)) as OAuthLinkTokenDto,
+          ),
         unlinkAccount: async (provider) => {
           ensureOk(await profileApi.unlinkAccount(provider))
         },
         getLoginHistory: async (params) =>
           unwrap(await profileApi.getLoginHistory(params)) as LoginLogDto[],
         deactivate: async (data) => {
-          ensureOk(await profileApi.deactivateAccount(data))
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.deactivateAccount(data))
+          })
         },
         deleteAccount: async () => {
-          ensureOk(await profileApi.deleteAccount())
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.deleteAccount())
+          })
         },
         exportPersonalData: async () =>
-          unwrap(await profileApi.exportPersonalData()) as PersonalDataExportDto,
+          unwrapOk(await profileApi.exportPersonalData()) as PersonalDataExportDto,
         sendChangeEmailCode: async (data) => {
           ensureOk(await profileApi.sendChangeEmailCode(data))
         },
         confirmChangeEmail: async (data) => {
-          ensureOk(await profileApi.confirmChangeEmail(data))
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.confirmChangeEmail(data))
+          })
         },
         sendChangePhoneCode: async (data) => {
           ensureOk(await profileApi.sendChangePhoneCode(data))
         },
         confirmChangePhone: async (data) => {
-          ensureOk(await profileApi.confirmChangePhone(data))
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.confirmChangePhone(data))
+          })
         },
         enableTwoFactor: async (data) =>
           unwrapOk(await profileApi.enableTwoFactor(data)) as string,
         disableTwoFactor: async () => {
-          ensureOk(await profileApi.disableTwoFactor())
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.disableTwoFactor())
+          })
         },
         suspendTwoFactor: async () => {
-          ensureOk(await profileApi.suspendTwoFactor())
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.suspendTwoFactor())
+          })
         },
         resumeTwoFactor: async () => {
           ensureOk(await profileApi.resumeTwoFactor())
         },
-        getTotpSetup: async () => unwrap(await profileApi.getTotpSetup()) as TotpSetupDto,
+        // POSTs `two-factor/totp/setup` (resets the authenticator key) despite the
+        // `get` name; with TOTP disabled the backend refuses with a 400 that must
+        // reach the user, not surface as a TypeError on `.sharedKey`.
+        getTotpSetup: async () =>
+          stepUpGuarded(async () => unwrapOk<TotpSetupDto>(await profileApi.getTotpSetup())),
         enableTotp: async (data) => {
-          ensureOk(await profileApi.enableTotp(data))
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.enableTotp(data))
+          })
         },
         disableTotp: async () => {
-          ensureOk(await profileApi.disableTotp())
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.disableTotp())
+          })
         },
         disableTwoFactorMethod: async (type) => {
-          ensureOk(await profileApi.disableTwoFactorMethod({ type }))
+          await stepUpGuarded(async () => {
+            ensureOk(await profileApi.disableTwoFactorMethod({ type }))
+          })
         },
         setPreferredTwoFactor: async (type) => {
           ensureOk(await profileApi.setPreferredTwoFactor({ type }))
@@ -717,6 +833,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         revokeAllSessions: (_includeCurrent?: boolean) => missing('me.revokeAllSessions'),
         getTwoFactorStatus: () => missing('me.getTwoFactorStatus'),
         getLinkedAccounts: () => missing('me.getLinkedAccounts'),
+        issueOAuthLinkToken: () => missing('me.issueOAuthLinkToken'),
         unlinkAccount: () => missing('me.unlinkAccount'),
         getLoginHistory: () => missing('me.getLoginHistory'),
         deactivate: () => missing('me.deactivate'),
@@ -751,12 +868,13 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     }
   }
 
-  const buildOauthLoginUrl = (provider: string, returnUrl?: string): string =>
-    deps.client ? oauthLoginUrl(deps.client, provider, returnUrl) : ''
+  const buildOauthLoginUrl = (provider: string, returnUrl?: string, linkToken?: string): string =>
+    deps.client ? oauthLoginUrl(deps.client, provider, returnUrl, linkToken) : ''
 
   return {
     users,
     invitations,
+    invitationAcceptance,
     roles,
     tenants,
     organizations,

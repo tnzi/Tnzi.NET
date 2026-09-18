@@ -12,6 +12,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     // Scoped 服务：IOptionsSnapshot 每请求重算，AccountSecurity.SessionTimeoutMinutes 随请求热更新。
     private readonly IOptionsSnapshot<IdentityOptions>? _identityOptions;
     private readonly IRepository<UserSession, Guid>? _repository;
+    private readonly IUserTenantScopeProvider _scope;
     private readonly IDistributedLock? _distributedLock;
     private readonly IEventBus? _eventBus;
 
@@ -32,10 +33,15 @@ public class DistributedSessionService : ApplicationService, ISessionService
     // 用户会话索引过期时间
     private static readonly TimeSpan UserSessionsIndexExpiration = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// 初始化一个 <see cref="DistributedSessionService"/>。<c>scope</c>（当前请求能碰到哪些用户）
+    /// 的口径与 <see cref="DatabaseSessionService"/> 相同，必填的理由也相同。
+    /// </summary>
     public DistributedSessionService(
         IDistributedCache cache,
         IOptions<SessionOptions> sessionOptions,
         IServiceProvider serviceProvider,
+        IUserTenantScopeProvider scope,
         IRepository<UserSession, Guid>? repository = null,
         IDistributedLock? distributedLock = null,
         IOptionsSnapshot<IdentityOptions>? identityOptions = null,
@@ -44,6 +50,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     {
         _cache = Check.NotNull(cache);
         _sessionOptions = Check.NotNull(sessionOptions).Value;
+        _scope = Check.NotNull(scope);
         _identityOptions = identityOptions;
         _repository = repository;
         _distributedLock = distributedLock;
@@ -149,6 +156,11 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<UserSessionDto>>> GetUserSessionsAsync(Guid userId, bool includeRevoked = false)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail<IEnumerable<UserSessionDto>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var sessionIds = await GetUserSessionsIndexAsync(userId);
         if (!sessionIds.Any())
         {
@@ -200,7 +212,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         // 启用数据库审计日志时降级到数据库查询。
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
-            var queryable = _repository.AsQueryable()
+            var queryable = WhereInScope(_repository.AsQueryable())
                 .WhereIf(us => us.UserId == query.UserId!.Value, query.UserId.HasValue)
                 .WhereIf(us => !us.IsRevoked, !query.IncludeRevoked)
                 .OrderByDescending(us => us.LastActivityTime)
@@ -242,7 +254,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RevokeSessionAsync(Guid sessionId)
     {
-        var sessionData = await GetSessionDataAsync(sessionId);
+        var sessionData = await GetScopedSessionDataAsync(sessionId);
         if (sessionData == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -279,6 +291,11 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> RevokeAllSessionsAsync(Guid userId, Guid? excludeSessionId = null)
     {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var sessionIds = await GetUserSessionsIndexAsync(userId);
 
         // 过滤掉要排除的会话ID
@@ -343,7 +360,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     /// <inheritdoc />
     public async Task<Result> UpdateActivityTimeAsync(Guid sessionId)
     {
-        var sessionData = await GetSessionDataAsync(sessionId);
+        var sessionData = await GetScopedSessionDataAsync(sessionId);
         if (sessionData == null)
         {
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
@@ -398,6 +415,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
+    /// <remarks>裁剪口径与 <see cref="DatabaseSessionService.CleanInactiveSessionsAsync"/> 相同：整表扫不经任何 id，范围只能在这里加。</remarks>
     public async Task<Result<IReadOnlyCollection<Guid>>> CleanInactiveSessionsAsync(TimeSpan inactiveThreshold)
     {
         // Redis 会话使用 TTL 自动过期，无法高效遍历所有会话
@@ -406,8 +424,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         {
             var cutoffTime = DateTime.UtcNow - inactiveThreshold;
 
-            var expiredSessions = await _repository
-                .Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime)
+            var expiredSessions = await WhereInScope(_repository.Where(us => !us.IsRevoked && us.LastActivityTime < cutoffTime))
                 .ToListAsync();
 
             if (expiredSessions.Count == 0)
@@ -439,7 +456,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         // Redis 无法高效遍历所有会话，降级到数据库查询
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
-            var activeSessions = _repository.Where(us => !us.IsRevoked);
+            var activeSessions = WhereInScope(_repository.Where(us => !us.IsRevoked));
 
             var activeSessionCount = await activeSessions.CountAsync();
             var onlineUserCount = await activeSessions.Select(us => us.UserId).Distinct().CountAsync();
@@ -479,8 +496,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
         // efficiently, so we fall back to the DB audit log when present.
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
-            var aggregates = await _repository
-                .Where(us => !us.IsRevoked)
+            var aggregates = await WhereInScope(_repository.Where(us => !us.IsRevoked))
                 .GroupBy(us => us.UserId)
                 .Select(g => new
                 {
@@ -528,6 +544,29 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
         LogWarning("Active user list is not available in Redis mode without KeepDatabaseAuditLog enabled.");
         return Ok<IEnumerable<ActiveUserSummaryDto>>(Array.Empty<ActiveUserSummaryDto>());
+    }
+
+    /// <summary>
+    /// 把「当前租户范围」加到数据库审计表的查询上（全局列表 / 统计 / 活跃用户都降级到它）。
+    /// </summary>
+    private IQueryable<UserSession> WhereInScope(IQueryable<UserSession> query)
+    {
+        var ids = _scope.InScopeUserIds();
+        return ids == null ? query : query.Where(us => ids.Contains(us.UserId));
+    }
+
+    /// <summary>
+    /// 按 id 取会话数据，且只取其主人在范围内的：不在范围内与不存在同样返回 <c>null</c>。
+    /// </summary>
+    private async Task<SessionData?> GetScopedSessionDataAsync(Guid sessionId)
+    {
+        var sessionData = await GetSessionDataAsync(sessionId);
+        if (sessionData == null)
+        {
+            return null;
+        }
+
+        return await _scope.ContainsAsync(sessionData.UserId) ? sessionData : null;
     }
 
     #region Redis 操作辅助方法

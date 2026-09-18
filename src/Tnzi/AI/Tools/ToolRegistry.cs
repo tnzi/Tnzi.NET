@@ -193,7 +193,7 @@ public class ToolRegistry : IToolRegistry
     /// 根据权限过滤工具
     /// </summary>
     /// <param name="groupNames">工具组名称列表</param>
-    /// <param name="userPermissions">用户权限列表</param>
+    /// <param name="userPermissions">用户权限集合：<c>null</c> 不过滤，空集排除全部门控工具（见接口注释）</param>
     /// <returns>用户有权限访问的工具列表</returns>
     public IReadOnlyList<ToolDefinition> GetToolsByGroupsWithPermissions(
         IEnumerable<string> groupNames,
@@ -202,8 +202,9 @@ public class ToolRegistry : IToolRegistry
         var allTools = GetToolsByGroups(groupNames);
         var permissionsSet = userPermissions != null ? new HashSet<string>(userPermissions, StringComparer.OrdinalIgnoreCase) : null;
 
-        // 如果没有提供权限列表，返回所有工具
-        if (permissionsSet == null || permissionsSet.Count == 0)
+        // 只有 null 表示调用方放弃门控。空集是「用户一条权限都没有」，此前与 null 同等对待，
+        // 结果是零权限用户拿到全部门控工具（AgentResolver 对这种用户算出的正是空集）。
+        if (permissionsSet == null)
         {
             return allTools;
         }
@@ -251,8 +252,8 @@ public class ToolRegistry : IToolRegistry
             if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
             if (!_toolsByName.TryGetValue(name, out var tool)) continue; // 未知名称跳过
 
-            // 权限门控：无权限要求或用户拥有全部必需权限时放行
-            if (permissionsSet == null || permissionsSet.Count == 0
+            // 权限门控：调用方放弃门控（null）、无权限要求或用户拥有全部必需权限时放行；空集不放行门控工具
+            if (permissionsSet == null
                 || tool.RequiredPermissions.Count == 0
                 || tool.RequiredPermissions.All(permissionsSet.Contains))
             {

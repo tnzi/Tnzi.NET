@@ -219,6 +219,7 @@ import { TModalShell } from '@tnzi/ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDetail } from '../../headless/useDetail'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { type RowAction } from '../../headless/row-actions'
 import {
@@ -265,8 +266,9 @@ const bankAccountOptions = ref<{ label: string; value: string }[]>([])
 
 async function loadBankAccounts() {
   try {
-    const page = await bridge.bankAccounts.fetch({ pageIndex: 1, pageSize: 100 })
-    bankAccountOptions.value = page.items.map((a: BankAccountDto) => ({ label: a.name, value: a.id }))
+    // Every bank account, not the first clamped page (pageSize is clamped to 100 silently).
+    const accounts = await fetchAllPages((q) => bridge.bankAccounts.fetch(q))
+    bankAccountOptions.value = accounts.map((a: BankAccountDto) => ({ label: a.name, value: a.id }))
   } catch {
     bankAccountOptions.value = []
   }

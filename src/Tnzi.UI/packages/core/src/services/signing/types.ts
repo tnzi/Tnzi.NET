@@ -222,6 +222,14 @@ export interface IssuedSigningLink {
   name: string;
   email?: string | null;
   token: string;
+  /**
+   * Tenant the request belongs to (null when multi-tenancy is off). The
+   * anonymous recipient endpoints resolve the tenant from the token by
+   * themselves, so a signing page does not need to pass it; it is here so a
+   * multi-tenant host can scope its own, non-signing requests to the same
+   * tenant.
+   */
+  tenantId?: string | null;
 }
 
 // ── Recipient side (anonymous, token-bearing) ───────────────────────────────
@@ -235,7 +243,18 @@ export interface SigningPacketDto {
   /** False while earlier signers in a sequential request are still pending. */
   isMyTurn: boolean;
   fields: RecipientFieldDto[];
-  /** Preview PDF - the working render, or the sealed document once complete. */
+  /**
+   * Fields the sender filled in (merge variables / prefilled values), already
+   * burned into the document at send time. Read-only: what the signer sees on
+   * the page is what gets sealed. Sender fields without a value are omitted.
+   */
+  prefilledFields: RecipientFieldDto[];
+  /**
+   * Preview PDF - the working render, or the sealed document once complete.
+   * Null once the request is declined or expired (fields come back empty too):
+   * the packet is status-only so a signing page can say "this request was
+   * cancelled". A voided request revokes its links and answers 404 instead.
+   */
   documentFileId?: string | null;
   expiresAt: string;
 }

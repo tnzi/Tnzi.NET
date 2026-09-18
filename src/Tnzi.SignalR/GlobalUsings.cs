@@ -37,3 +37,4 @@ global using Tnzi.SignalR.Services;
 global using Tnzi.Utilities;
 global using Tnzi.EventBus;
 global using Tnzi.SignalR.Permissions;
+global using Tnzi.SignalR.Metadata;

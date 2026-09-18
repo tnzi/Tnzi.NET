@@ -85,15 +85,54 @@ public class OutboxRelayMultiInstanceTests
         Assert.Empty(logger.Warnings);
     }
 
+    /// <summary>
+    /// 锁在批次中途丢失（续租失败、Redis 抖动、键被逐出）时中继必须停手：另一个实例随时会抢到锁并读到
+    /// 同一批未标记的事件，把这一批跑完只会让每条事件投递两次 —— 正是这把锁存在的唯一理由。
+    /// 此前句柄的丢失信号没有任何读者：<c>IsAcquired</c> 只在获取瞬间被读一次，那时恒为 true。
+    /// </summary>
+    [Fact]
+    public async Task Relay_StopsMidBatch_WhenLockIsLost()
+    {
+        var store = new FakeEventStore();
+        for (var i = 0; i < 3; i++)
+        {
+            store.Seed(new StoredEvent
+            {
+                EventId = Guid.NewGuid(),
+                EventType = typeof(OutboxRelayDeadLetterTests.RelayTestEvent).AssemblyQualifiedName!,
+                EventData = "{}"
+            });
+        }
+
+        var lostSource = new CancellationTokenSource();
+        var lockThatGetsLost = new FakeDistributedLock(grantsLock: true, lost: lostSource.Token);
+        // 第一条发布成功的瞬间锁丢失：之后的两条不得再中继
+        var bus = new LossTriggeringEventBus(onFirstPublish: lostSource.Cancel);
+        // 轮询间隔拉长，使「第一轮结束后」的断言只看到一轮：第二轮会照常把剩下两条中继掉
+        var service = CreateService(store, lockThatGetsLost, out _, bus, pollingIntervalSeconds: 30);
+
+        await service.StartAsync(CancellationToken.None);
+        await WaitForAsync(() => lockThatGetsLost.ReleaseCount >= 1, "the first relay cycle to finish");
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Single(store.ProcessedIds);
+        Assert.Equal(1, bus.PublishCount);
+        // 停手是因为锁丢了，不是因为投递失败：不得把没跑到的事件记成失败
+        Assert.Empty(store.FailedIds);
+    }
+
     #region Helpers
 
     private static OutboxRelayBackgroundService CreateService(
-        IEventStore store, IDistributedLock? distributedLock, out RecordingLogger logger)
+        IEventStore store, IDistributedLock? distributedLock, out RecordingLogger logger, IEventBus? eventBus = null,
+        int pollingIntervalSeconds = 1)
     {
         var services = new ServiceCollection();
         services.AddSingleton(store);
         if (distributedLock is not null)
             services.AddSingleton(distributedLock);
+        if (eventBus is not null)
+            services.AddSingleton(eventBus);
 
         var provider = services.BuildServiceProvider();
         logger = new RecordingLogger();
@@ -101,7 +140,7 @@ public class OutboxRelayMultiInstanceTests
         var options = Microsoft.Extensions.Options.Options.Create(new OutboxOptions
         {
             Enabled = true,
-            PollingIntervalSeconds = 1,
+            PollingIntervalSeconds = pollingIntervalSeconds,
             BatchSize = 10
         });
 
@@ -123,25 +162,49 @@ public class OutboxRelayMultiInstanceTests
 
     private sealed class FakeEventStore : IEventStore
     {
+        private readonly Dictionary<Guid, StoredEvent> _rows = [];
+        private readonly List<Guid> _processed = [];
+        private readonly List<Guid> _failed = [];
         private int _unprocessedQueries;
 
         public int UnprocessedQueries => Volatile.Read(ref _unprocessedQueries);
+        public IReadOnlyList<Guid> ProcessedIds { get { lock (_rows) return _processed.ToArray(); } }
+        public IReadOnlyList<Guid> FailedIds { get { lock (_rows) return _failed.ToArray(); } }
+
+        public void Seed(StoredEvent storedEvent)
+        {
+            lock (_rows) _rows[storedEvent.EventId] = storedEvent;
+        }
 
         public Task<IEnumerable<StoredEvent>> GetUnprocessedEventsAsync(
             int count = 100, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _unprocessedQueries);
-            return Task.FromResult(Enumerable.Empty<StoredEvent>());
+            lock (_rows)
+            {
+                return Task.FromResult<IEnumerable<StoredEvent>>(
+                    _rows.Values.Where(r => !r.IsProcessed).Take(count).ToList());
+            }
         }
 
         public Task SaveEventAsync(IEvent @event, string eventType, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
         public Task MarkAsProcessedAsync(Guid eventId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            lock (_rows)
+            {
+                if (_rows.TryGetValue(eventId, out var row)) row.IsProcessed = true;
+                _processed.Add(eventId);
+            }
+            return Task.CompletedTask;
+        }
 
         public Task MarkAsFailedAsync(Guid eventId, string error, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            lock (_rows) _failed.Add(eventId);
+            return Task.CompletedTask;
+        }
 
         public Task<StoredEvent?> GetEventAsync(Guid eventId, CancellationToken cancellationToken = default)
             => Task.FromResult<StoredEvent?>(null);
@@ -153,7 +216,7 @@ public class OutboxRelayMultiInstanceTests
             => Task.FromResult(0);
     }
 
-    private sealed class FakeDistributedLock(bool grantsLock) : IDistributedLock
+    private sealed class FakeDistributedLock(bool grantsLock, CancellationToken lost = default) : IDistributedLock
     {
         private int _acquireAttempts;
         private int _releaseCount;
@@ -166,7 +229,7 @@ public class OutboxRelayMultiInstanceTests
         {
             Interlocked.Increment(ref _acquireAttempts);
             IDistributedLockHandle? handle = grantsLock
-                ? new FakeLockHandle(key, () => Interlocked.Increment(ref _releaseCount))
+                ? new FakeLockHandle(key, () => Interlocked.Increment(ref _releaseCount), lost)
                 : null;
 
             return Task.FromResult(handle);
@@ -177,10 +240,11 @@ public class OutboxRelayMultiInstanceTests
             => throw new NotSupportedException("The relay uses AcquireAsync with a null timeout.");
     }
 
-    private sealed class FakeLockHandle(string key, Action onRelease) : IDistributedLockHandle
+    private sealed class FakeLockHandle(string key, Action onRelease, CancellationToken lost) : IDistributedLockHandle
     {
         public string Key { get; } = key;
-        public bool IsAcquired => true;
+        public bool IsAcquired => !lost.IsCancellationRequested;
+        public CancellationToken Lost => lost;
         public Task<bool> ExtendAsync(TimeSpan extension) => Task.FromResult(true);
 
         public ValueTask DisposeAsync()
@@ -188,6 +252,44 @@ public class OutboxRelayMultiInstanceTests
             onRelease();
             return ValueTask.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// 第一次发布时触发一个动作（用例里是「让锁丢失」），之后只计数。
+    /// </summary>
+    private sealed class LossTriggeringEventBus(Action onFirstPublish) : IEventBus
+    {
+        private int _publishCount;
+
+        public int PublishCount => Volatile.Read(ref _publishCount);
+
+        public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+            where TEvent : class, IEvent
+        {
+            if (Interlocked.Increment(ref _publishCount) == 1) onFirstPublish();
+            return Task.CompletedTask;
+        }
+
+        public Task PublishDelayedAsync<TEvent>(TEvent @event, TimeSpan delay, CancellationToken cancellationToken = default)
+            where TEvent : class, IEvent
+            => throw new NotSupportedException();
+
+        public bool HasHandlers<TEvent>() where TEvent : class, IEvent => false;
+
+        public int GetHandlerCount<TEvent>() where TEvent : class, IEvent => 0;
+
+        public void Subscribe<TEvent, THandler>()
+            where TEvent : class, IEvent
+            where THandler : class, IEventHandler<TEvent>
+            => throw new NotSupportedException();
+
+        public void Unsubscribe<TEvent, THandler>()
+            where TEvent : class, IEvent
+            where THandler : class, IEventHandler<TEvent>
+            => throw new NotSupportedException();
+
+        public void UnsubscribeAll<TEvent>() where TEvent : class, IEvent
+            => throw new NotSupportedException();
     }
 
     private sealed class RecordingLogger : ILogger<OutboxRelayBackgroundService>

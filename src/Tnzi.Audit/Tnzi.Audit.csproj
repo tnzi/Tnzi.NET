@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 后台服务的单轮驱动等纯内部协作成员为 internal，仅对本模块的测试项目开放。 -->
+    <InternalsVisibleTo Include="Tnzi.Audit.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
   </ItemGroup>

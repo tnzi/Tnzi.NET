@@ -9,38 +9,38 @@ namespace Tnzi.Notification.Push.Services;
 /// </summary>
 public class PushSender : IPushSender
 {
-    private readonly NotificationOptions _options;
+    private readonly PushSenderOptions _options;
+    private readonly string? _providerKey;
     private readonly ILogger<PushSender> _logger;
     private static readonly object _firebaseInitLock = new object();
-    private static volatile bool _firebaseInitialized = false;
 
     private readonly IPushDeviceService? _deviceService;
 
     /// <summary>
     /// 初始化一个 <see cref="PushSender"/>。
     /// </summary>
-    /// <param name="options">通知配置。</param>
+    /// <param name="options">这一个发送器的推送配置（默认的 <c>Notification:PushSender</c> 或具名的 <c>PushSenders:{key}</c> 一节）。</param>
     /// <param name="logger">日志。</param>
     /// <param name="deviceService">
     /// 设备注册表，用于在网关判定令牌永久失效时退役它。<b>可空</b>：
     /// 只用主题广播、或自己管理令牌的应用不需要它，缺席时投递行为完全不变，
     /// 只是死令牌不会被自动清理。
     /// </param>
-    public PushSender(NotificationOptions options, ILogger<PushSender> logger, IPushDeviceService? deviceService = null)
+    /// <param name="providerKey">
+    /// 服务商键；<see langword="null"/> = 默认发送器。★ 它决定的是用<b>哪一个</b> <c>FirebaseApp</c>：
+    /// 默认发送器用 SDK 的默认实例（宿主已自行引导过的也认），具名发送器各用一个以键命名的实例 ——
+    /// 两个 Firebase 项目不能共用一个 <c>FirebaseApp</c>，谁先引导谁的凭据就是全部人的凭据。
+    /// </param>
+    public PushSender(PushSenderOptions options, ILogger<PushSender> logger, IPushDeviceService? deviceService = null, string? providerKey = null)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
         _deviceService = deviceService;
+        _providerKey = NotificationProviderKeys.Normalize(providerKey);
     }
 
     public async Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
     {
-        if (_options.PushSender == null)
-        {
-            _logger.LogWarning("Push sender options not configured");
-            return SendResult.CreateFailure("Push sender options not configured");
-        }
-
         // ★ 主题地址填错了位置，就地说清楚，不要交给 FCM 去回一句「不是合法的注册令牌」。
         // 这条守的是通知管线那个入口：RecipientChannelDispatcher 对 NotificationType.Push
         // 一律走本方法（Recipient.Address 就是设备令牌），而主题投递刻意**不在**那条管线上
@@ -61,7 +61,7 @@ public class PushSender : IPushSender
 
         try
         {
-            switch (_options.PushSender.Provider.ToLower())
+            switch (_options.Provider.ToLower())
             {
                 case "fcm":
                 case "firebase":
@@ -69,8 +69,8 @@ public class PushSender : IPushSender
                 case "apns":
                     return await SendViaApnsAsync(deviceToken, title, body, cancellationToken);
                 default:
-                    _logger.LogWarning("Unknown Push provider: {Provider}", _options.PushSender.Provider);
-                    return SendResult.CreateFailure($"Unknown Push provider: {_options.PushSender.Provider}");
+                    _logger.LogWarning("Unknown Push provider: {Provider}", _options.Provider);
+                    return SendResult.CreateFailure($"Unknown Push provider: {_options.Provider}");
             }
         }
         catch (Exception ex)
@@ -82,17 +82,14 @@ public class PushSender : IPushSender
 
     private async Task<SendResult> SendViaFcmAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
     {
-        if (_options.PushSender == null)
-            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
-
-        if (string.IsNullOrWhiteSpace(_options.PushSender.FirebaseProjectId))
+        if (string.IsNullOrWhiteSpace(_options.FirebaseProjectId))
             throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
 
-        var projectId = _options.PushSender.FirebaseProjectId!;
+        var projectId = _options.FirebaseProjectId!;
 
         try
         {
-            EnsureFirebaseInitialized(projectId);
+            var app = EnsureFirebaseInitialized(projectId);
 
             var message = new FirebaseAdmin.Messaging.Message
             {
@@ -113,7 +110,7 @@ public class PushSender : IPushSender
                 }
             };
 
-            var response = await FirebaseMessaging.DefaultInstance.SendAsync(message, cancellationToken);
+            var response = await FirebaseMessaging.GetMessaging(app).SendAsync(message, cancellationToken);
 
             _logger.LogInformation("Push notification sent via FCM to {DeviceToken}, Message ID: {MessageId}",
                 PushTokenMask.Of(deviceToken), response);
@@ -211,12 +208,6 @@ public class PushSender : IPushSender
     /// </remarks>
     public async Task<SendResult> SendToTopicAsync(string topic, string title, string body, CancellationToken cancellationToken = default)
     {
-        if (_options.PushSender == null)
-        {
-            _logger.LogWarning("Push sender options not configured");
-            return SendResult.CreateFailure("Push sender options not configured");
-        }
-
         if (!FcmTopicName.TryValidate(topic, out var topicFailure))
         {
             _logger.LogWarning("Push topic delivery refused: {Reason}", topicFailure);
@@ -225,7 +216,7 @@ public class PushSender : IPushSender
 
         try
         {
-            switch (_options.PushSender.Provider.ToLower())
+            switch (_options.Provider.ToLower())
             {
                 case "fcm":
                 case "firebase":
@@ -243,8 +234,8 @@ public class PushSender : IPushSender
                         + "The apns provider addresses individual devices only; APNs has no client-subscribed topics. "
                         + "Set Notification:PushSender:Provider to 'fcm' - FCM forwards to APNs for iOS devices.");
                 default:
-                    _logger.LogWarning("Unknown Push provider: {Provider}", _options.PushSender.Provider);
-                    return SendResult.CreateFailure($"Unknown Push provider: {_options.PushSender.Provider}");
+                    _logger.LogWarning("Unknown Push provider: {Provider}", _options.Provider);
+                    return SendResult.CreateFailure($"Unknown Push provider: {_options.Provider}");
             }
         }
         catch (Exception ex)
@@ -256,17 +247,14 @@ public class PushSender : IPushSender
 
     private async Task<SendResult> SendViaFcmTopicAsync(string topic, string title, string body, CancellationToken cancellationToken)
     {
-        if (_options.PushSender == null)
-            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
-
-        if (string.IsNullOrWhiteSpace(_options.PushSender.FirebaseProjectId))
+        if (string.IsNullOrWhiteSpace(_options.FirebaseProjectId))
             throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
 
-        var projectId = _options.PushSender.FirebaseProjectId!;
+        var projectId = _options.FirebaseProjectId!;
 
         try
         {
-            EnsureFirebaseInitialized(projectId);
+            var app = EnsureFirebaseInitialized(projectId);
 
             var message = new FirebaseAdmin.Messaging.Message
             {
@@ -281,7 +269,7 @@ public class PushSender : IPushSender
                 }
             };
 
-            var response = await FirebaseMessaging.DefaultInstance.SendAsync(message, cancellationToken);
+            var response = await FirebaseMessaging.GetMessaging(app).SendAsync(message, cancellationToken);
 
             _logger.LogInformation("Push notification sent via FCM to topic {Topic}, Message ID: {MessageId}",
                 topic, response);
@@ -303,70 +291,72 @@ public class PushSender : IPushSender
     }
 
     /// <summary>
-    /// 进程内只引导一次 Firebase Admin SDK。
+    /// 取这一个发送器要用的 <see cref="FirebaseApp"/>，进程内每个服务商键只引导一次。
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ★ <b>两条投递路径必须共用这一处。</b><c>FirebaseApp</c> 是<b>进程级单例</b>：
-    /// 谁先 <c>Create</c>，之后所有 <c>FirebaseMessaging.DefaultInstance</c> 用的就是谁的凭据，
-    /// 而第二次 <c>Create</c> 既不报错也不会换掉第一份。按令牌发和按主题发若各引导一次，
-    /// 用的是哪份凭据就取决于哪条路径先被调到 —— 那是一个随请求时序变化、且没有任何日志的差异。
+    /// ★ <b><see cref="FirebaseApp"/> 是进程级的、按名字登记的单例。</b>同名只能 <c>Create</c> 一次，
+    /// 之后拿到的永远是第一份凭据。按令牌发和按主题发若各引导一次，用的是哪份凭据就取决于
+    /// 哪条路径先被调到 —— 那是一个随请求时序变化、且没有任何日志的差异。两条路径因此共用这一处。
     /// </para>
     /// <para>
-    /// 双重检查锁定：<c>_firebaseInitialized</c> 是 <c>volatile</c>，同时还问
-    /// <c>FirebaseApp.DefaultInstance</c>，好让宿主或消费方已自行引导过的场景不被重复引导。
+    /// ★ <b>具名发送器各用一个以键命名的实例</b>（<c>tnzi:{key}</c>），默认发送器用 SDK 的默认实例。
+    /// 两个 Firebase 项目共用一个 <c>FirebaseApp</c> 是做不到的：第二份配置会被安静地忽略，
+    /// 推送从另一个项目发出，客户端收不到而服务端记的是成功。默认发送器沿用默认实例，是为了
+    /// 宿主或消费方已自行引导过 <c>FirebaseApp.DefaultInstance</c> 的场景不被重复引导。
+    /// </para>
+    /// <para>
+    /// 双重检查锁定：先无锁查一次登记表，没有再进锁创建。<see cref="FirebaseApp.GetInstance(string)"/>
+    /// 查不到返回 <see langword="null"/> 而不是抛，所以查询本身是廉价的。
     /// </para>
     /// </remarks>
-    private void EnsureFirebaseInitialized(string projectId)
+    private FirebaseApp EnsureFirebaseInitialized(string projectId)
     {
-        if (_options.PushSender == null)
-            throw new ConfigurationException("Notification:PushSender", "Push sender options not configured.");
-
-        if (_firebaseInitialized || FirebaseApp.DefaultInstance != null)
-            return;
+        var existing = FindFirebaseApp();
+        if (existing != null)
+            return existing;
 
         lock (_firebaseInitLock)
         {
             // 双重检查，避免在锁内重复初始化
-            if (_firebaseInitialized || FirebaseApp.DefaultInstance != null)
-                return;
+            existing = FindFirebaseApp();
+            if (existing != null)
+                return existing;
 
             // 走 CredentialFactory 而不是已弃用的 GoogleCredential.FromJson/FromFile：
             // 后者按 JSON 内容动态挑凭据类型，Google 因安全风险弃用了它。这里的配置项
             // 语义就是「服务账号 JSON」，显式指定 ServiceAccountCredential 也让配置放错时
             // 在启动阶段报清楚，而不是拿一个错误类型的凭据去调 FCM 才失败。
-            if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJson))
+            var appOptions = new AppOptions { ProjectId = projectId };
+
+            if (!string.IsNullOrWhiteSpace(_options.FirebaseServiceAccountJson))
             {
                 // 从JSON字符串初始化
-                FirebaseApp.Create(new AppOptions
-                {
-                    Credential = CredentialFactory
-                        .FromJson<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJson)
-                        .ToGoogleCredential(),
-                    ProjectId = projectId
-                });
+                appOptions.Credential = CredentialFactory
+                    .FromJson<ServiceAccountCredential>(_options.FirebaseServiceAccountJson)
+                    .ToGoogleCredential();
             }
-            else if (!string.IsNullOrWhiteSpace(_options.PushSender.FirebaseServiceAccountJsonPath))
+            else if (!string.IsNullOrWhiteSpace(_options.FirebaseServiceAccountJsonPath))
             {
                 // 从文件路径初始化
-                FirebaseApp.Create(new AppOptions
-                {
-                    Credential = CredentialFactory
-                        .FromFile<ServiceAccountCredential>(_options.PushSender.FirebaseServiceAccountJsonPath)
-                        .ToGoogleCredential(),
-                    ProjectId = projectId
-                });
+                appOptions.Credential = CredentialFactory
+                    .FromFile<ServiceAccountCredential>(_options.FirebaseServiceAccountJsonPath)
+                    .ToGoogleCredential();
             }
-            else
-            {
-                // 尝试使用默认凭据（例如环境变量GOOGLE_APPLICATION_CREDENTIALS）
-                FirebaseApp.Create(new AppOptions
-                {
-                    ProjectId = projectId
-                });
-            }
+            // 否则交给默认凭据（例如环境变量 GOOGLE_APPLICATION_CREDENTIALS）
 
-            _firebaseInitialized = true;
+            return _providerKey == null
+                ? FirebaseApp.Create(appOptions)
+                : FirebaseApp.Create(appOptions, NamedAppName(_providerKey));
         }
     }
+
+    /// <summary>这一个发送器的 <see cref="FirebaseApp"/> 若已引导则返回它，否则 <see langword="null"/>。</summary>
+    private FirebaseApp? FindFirebaseApp()
+        => _providerKey == null ? FirebaseApp.DefaultInstance : FirebaseApp.GetInstance(NamedAppName(_providerKey));
+
+    /// <summary>
+    /// 具名发送器的 <see cref="FirebaseApp"/> 名字。带前缀是为了不与宿主自己按别的名字引导的实例撞名。
+    /// </summary>
+    internal static string NamedAppName(string providerKey) => $"tnzi:{providerKey}";
 }

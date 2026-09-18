@@ -44,7 +44,20 @@ public class CliAgentOptionsValidator : OptionsValidatorBase<CliAgentOptions>
             errors.Add("AI:Cli:TerminateGrace cannot be negative.");
 
         ValidateCustomProviders(options, errors);
+        ValidateWriteBack(options.WriteBack, errors);
         ValidateGc(options.Gc, errors);
+    }
+
+    private static void ValidateWriteBack(CliWriteBackOptions writeBack, List<string> errors)
+    {
+        if (!writeBack.Enabled)
+        {
+            return;
+        }
+
+        // 回写面是安全决定：没写就是没决定，而「没决定 = 全部」是最危险的那种缺省。
+        if (writeBack.AllowedTools.Count == 0 || writeBack.AllowedTools.All(string.IsNullOrWhiteSpace))
+            errors.Add("AI:Cli:WriteBack:AllowedTools must list the MCP tools a run-scoped credential may call (use [\"*\"] to allow every exposed tool) when WriteBack is enabled.");
     }
 
     private static void ValidateCustomProviders(CliAgentOptions options, List<string> errors)

@@ -106,7 +106,7 @@ public class DefaultPromotionAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "payment.promotion.create")]
     public virtual async Task<ApiResult<string>> CreateRedemptionCode([FromBody] CreateRedemptionCodeDto request)
     {
-        var result = await _couponIssuanceService.CreateRedemptionCodeAsync(request.PromotionId, request.Quantity);
+        var result = await _couponIssuanceService.CreateRedemptionCodeAsync(request.PromotionId, request.Quantity, request.PerUserLimit);
         return result.ToApiResult();
     }
 

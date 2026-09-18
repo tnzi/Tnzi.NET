@@ -135,7 +135,8 @@ public class RateLimitRule
 
     /// <summary>
     /// 获取或设置 白名单标识列表（可选）
-    /// 如果请求的标识在此列表中，则不受限流限制
+    /// 条目可以是来源地址也可以是用户 ID；请求带的两个标识（已登录用户的 ID、来源地址）任一命中即不受限流限制。
+    /// <see cref="RateLimitOptions.ByUser"/> 接管已登录请求时，<see cref="RateLimitOptions.ByIp"/> 的白名单里的地址仍然生效。
     /// </summary>
     public string[]? Whitelist { get; set; }
 }

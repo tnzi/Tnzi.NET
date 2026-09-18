@@ -4,7 +4,7 @@ namespace Tnzi.AI.Tools;
 /// 产出物管理工具 - AI Agent 用于标记和呈现文件产物
 /// </summary>
 [AIToolGroup("artifact")]
-public class ArtifactTools
+public class ArtifactTools : IAIToolProvider
 {
     private readonly IAgentArtifactService _artifactService;
     private readonly IAgentExecutionContextAccessor _contextAccessor;
@@ -51,7 +51,7 @@ public class ArtifactTools
     /// 将文件标记为本次运行的产出物，使用户可以预览和下载
     /// </summary>
     [AIFunction("present_files",
-        Description = "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).",
+        "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).",
         IsConcurrencySafe = true)]
     public async Task<string> PresentFilesAsync(
         [Description("List of virtual file paths to present")] List<string> paths,
@@ -66,8 +66,12 @@ public class ArtifactTools
         if (threadId == Guid.Empty)
             return "Error: No active thread context. Cannot register artifacts.";
 
-        // RunId 不一定存在（非 EnableRunTracking 模式），使用 Guid.Empty 作为占位
-        var runId = Guid.Empty;
+        // 运行追踪开着时 AgentRuntime 把 CurrentRunId 放进属性包，产物挂到这次运行上；
+        // 非 EnableRunTracking 模式没有运行行，Guid.Empty 作占位（GetByRunAsync 按此语义查线程全部产物）
+        var runId = _contextAccessor.Properties?.TryGetValue(ContextPropertyKeys.CurrentRunId, out var currentRunId) == true
+            && currentRunId is Guid trackedRunId
+            ? trackedRunId
+            : Guid.Empty;
 
         var presented = new List<string>();
         var errors = new List<string>();

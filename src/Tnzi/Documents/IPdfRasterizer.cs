@@ -20,7 +20,15 @@ namespace Tnzi.Documents;
 /// <b>与 <see cref="IDocumentImageRenderer"/> 的分工</b>：那个把<b>源文档</b>（HTML / Office）
 /// 的首页渲染成缩略图，走的是 headless 浏览器，明确<b>不支持 <c>.pdf</c></b>
 /// —— 浏览器打开 PDF 渲染出来的是查看器界面而不是页面。本接口才是「PDF → 像素」，
-/// 而且按页索引取、按分辨率取，服务的是机读（找码、OCR、比对）而不是给人看缩略图。
+/// 按页索引取、按分辨率取。
+/// </para>
+/// <para>
+/// <b>两类消费者，默认值只偏向其中一类。</b><see cref="PdfRasterRequest"/> 的默认值（200 dpi、灰度、PNG）
+/// 服务的是机读（找码、OCR、比对）；给人看的缩略图<b>同样是本接口的正当用途</b>，只是要自己改请求：
+/// 彩色（<c>Grayscale = false</c>）、更低的 dpi，再把 PNG 交给 <c>Tnzi.Imaging</c> 缩放、编码。
+/// 「要缩略图拿渲染前的 HTML 出」那条建议只对框架<b>自己</b>生成的 PDF 成立 —— 用户上传的 PDF 没有 HTML 可拿，
+/// 首页像素只能从这里来。第一个这样的消费者是 <c>Tnzi.Storage</c>（2026-09-14 起为上传的 PDF 出首页缩略图，
+/// 可选注入本契约，没加载实现包时 PDF 就没有缩略图）。
 /// </para>
 /// <para>
 /// ★ <b>必须对扫描件与传真件成立，不只是对框架自己生成的 PDF。</b>入站传真是 CCITT G4 编码，

@@ -38,6 +38,30 @@ public class EvaluationCase
     public string? ExpectedOutput { get; set; }
 
     /// <summary>
+    /// 被评估的 Agent（为空则跑默认提供商的裸模型，不带任何 Agent 配置）
+    /// </summary>
+    /// <remarks>
+    /// 评估器必须真的跑这个 Agent：此前这四个字段不存在，AgentId / VersionNumber 只写进评估运行记录，
+    /// 用例跑的是默认提供商的裸模型，通过率与版本对比对目标 Agent 毫无意义。
+    /// </remarks>
+    public Guid? AgentId { get; set; }
+
+    /// <summary>
+    /// 钉住的 Agent 版本号（空则跑当前配置）；评估器据此加载该版本的配置快照执行
+    /// </summary>
+    public int? VersionNumber { get; set; }
+
+    /// <summary>
+    /// 提供商覆盖（可选）
+    /// </summary>
+    public string? Provider { get; set; }
+
+    /// <summary>
+    /// 模型覆盖（可选）
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>
     /// 扩展元数据
     /// </summary>
     public Dictionary<string, object?> Metadata { get; set; } = new();

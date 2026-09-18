@@ -52,6 +52,9 @@ public class ToolScanner : IToolScanner
             .Select(a => a.Slug)
             .ToList();
 
+        // 组级权限要求：整组每个工具都带上，再与方法级声明取并集
+        var groupPermissions = SplitList(groupAttr.RequiredPermissions);
+
         // 查找所有标记了 [AIFunction] 的公共实例方法
         var methods = providerType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Where(m => m.GetCustomAttribute<AIFunctionAttribute>() != null);
@@ -85,9 +88,9 @@ public class ToolScanner : IToolScanner
                 ProviderType = providerType,
                 MethodInfo = method,
                 Version = funcAttr.Version,
-                RequiredPermissions = funcAttr.RequiredPermissions != null
-                    ? funcAttr.RequiredPermissions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    : [],
+                RequiredPermissions = groupPermissions
+                    .Union(SplitList(funcAttr.RequiredPermissions), StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
                 Category = funcAttr.Category,
                 RequiresSkillSlugs = allSlugs,
                 // 安全元数据（fail-closed: 默认最严格）
@@ -111,4 +114,7 @@ public class ToolScanner : IToolScanner
 
         return tools;
     }
+
+    private static string[] SplitList(string? commaSeparated) =>
+        commaSeparated?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
 }

@@ -112,10 +112,11 @@ public class EFCoreModule : TnziInfrastructureModule
         services.AddScoped<Dapper.DapperExecutorFactory>();
 
         // 读取 Outbox 配置，决定是否启用
-        var outboxOptions = configuration.GetSection("EFCore:Outbox").Get<OutboxOptions>() ?? new OutboxOptions();
+        var outboxOptions = configuration.GetSection(ConfigSectionResolver.Resolve(typeof(OutboxOptions))).Get<OutboxOptions>() ?? new OutboxOptions();
 
         // 同步静态标志，控制 OutboxMessage 实体是否参与 DbContext 模型构建
         // 必须在 EntityManager.Initialize() 之前设置（Initialize 在 OnApplicationInitializationAsync 中调用）
+        // 设计期（dotnet ef）不经过这里：DesignTimeDbContextFactoryBase 从 appsettings 读同一节写同一个开关。
         Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled = outboxOptions.Enabled;
 
         if (outboxOptions.Enabled)
@@ -132,8 +133,15 @@ public class EFCoreModule : TnziInfrastructureModule
         var discoveryService = new Services.DbContextDiscoveryService();
         var registrar = new Services.DbContextRegistrar();
 
+        // 此阶段拿不到 DI 的 ILogger：诊断先进缓冲，OnApplicationInitializationAsync 拿到 ILoggerFactory 后回放。
+        // 此前这两处传 null，重试×UoW 冲突告警 / [PRIMARY] / 自动发现结果从未打印过。
+        var discoveryLogger = new StartupDiagnosticsLogger(typeof(Services.DbContextDiscoveryService).FullName!);
+        var registrarLogger = new StartupDiagnosticsLogger(typeof(Services.DbContextRegistrar).FullName!);
+        services.AddSingleton(discoveryLogger);
+        services.AddSingleton(registrarLogger);
+
         // 从配置文件发现 DbContext（无论 AutoDiscoverDbContexts 是 true 还是 false）
-        var result = discoveryService.DiscoverDbContexts(options, logger: null);
+        var result = discoveryService.DiscoverDbContexts(options, discoveryLogger);
 
         if (options.AutoDiscoverDbContexts)
         {
@@ -193,8 +201,7 @@ public class EFCoreModule : TnziInfrastructureModule
             }
         }
         // 手动模式（AutoDiscoverDbContexts = false）：有有效配置就注册（见下方），
-        // 配置缺失或无效时不抛异常，允许应用在代码中完全手动注册。
-        // 此阶段没有 logger 可用，无效配置的错误会在实际使用 DbContext 时暴露。
+        // 配置缺失或无效时不抛异常，允许应用在代码中完全手动注册；无效配置的告警随启动期缓冲回放。
 
         // 如果从配置文件发现了有效的 DbContext，则注册它们
         // 这适用于两种模式：
@@ -202,7 +209,7 @@ public class EFCoreModule : TnziInfrastructureModule
         // 2. AutoDiscoverDbContexts = false：如果有有效配置则注册，否则跳过（允许手动注册）
         if (result.Success && result.PrimaryConfiguration != null)
         {
-            registrar.RegisterDbContexts(services, result, configuration, logger: null);
+            registrar.RegisterDbContexts(services, result, configuration, registrarLogger);
         }
 
         // 使用新服务自动注册 DataSeeders
@@ -221,6 +228,8 @@ public class EFCoreModule : TnziInfrastructureModule
     {
         var serviceProvider = context.ServiceProvider;
 
+        ReplayStartupDiagnostics(serviceProvider);
+
         // 初始化 EntityManager
         var entityManager = serviceProvider.GetRequiredService<IEntityManager>();
         entityManager.Initialize();
@@ -230,6 +239,61 @@ public class EFCoreModule : TnziInfrastructureModule
             "EntityManager initialized with {Count} discovered entities. Repository registration must be completed during ConfigureServicesAsync.",
             entityManager.GetAllEntityTypes().Length);
 
+        VerifyMultiTenancySwitch(serviceProvider);
+
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 把 ConfigureServices 阶段缓冲的 DbContext 发现 / 注册诊断回放到真正的日志系统。
+    /// 没有配置日志（拿不到 ILoggerFactory）时无处可放，缓冲原样丢弃。
+    /// </summary>
+    private static void ReplayStartupDiagnostics(IServiceProvider serviceProvider)
+    {
+        var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+        if (loggerFactory == null)
+        {
+            return;
+        }
+
+        foreach (var startupLogger in serviceProvider.GetServices<StartupDiagnosticsLogger>())
+        {
+            startupLogger.ReplayTo(loggerFactory);
+        }
+    }
+
+    /// <summary>
+    /// 核对每个登记的 DbContext 读到的多租户开关与配置一致；不一致即拒绝启动。
+    /// </summary>
+    /// <remarks>
+    /// 不一致意味着设计期（按配置生成的迁移）与运行期模型必然分叉：迁移建了 TenantId 列与
+    /// (TenantId, …) 唯一索引，运行期却不写该列 —— PostgreSQL / SQLite 下 NULL 互不相等，
+    /// 那条唯一约束对每一行都成立，重复数据静默写入。失败方向是关闭：宁可不启动。
+    /// 能走到不一致的只有一种形状：DbContext 显式转发了一份与配置不同的 IOptions&lt;MultiTenancyOptions&gt;。
+    /// </remarks>
+    private static void VerifyMultiTenancySwitch(IServiceProvider serviceProvider)
+    {
+        var expected = serviceProvider.GetService<IOptions<MultiTenancyOptions>>()?.Value.Enabled ?? false;
+
+        using var scope = serviceProvider.CreateScope();
+        var checkedTypes = new HashSet<Type>();
+        foreach (var registered in scope.ServiceProvider.GetServices<RegisteredDbContext>())
+        {
+            if (!checkedTypes.Add(registered.DbContextType)
+                || scope.ServiceProvider.GetService(registered.DbContextType) is not IMultiTenancySwitchProvider provider)
+            {
+                continue;
+            }
+
+            if (provider.IsMultiTenancyEnabled != expected)
+            {
+                throw new InvalidOperationException(
+                    $"DbContext '{registered.DbContextType.FullName}' resolved IsMultiTenancyEnabled={provider.IsMultiTenancyEnabled} " +
+                    $"but configuration 'MultiTenancy:Enabled' is {expected}. The migrations generated at design time follow the " +
+                    "configuration, so the runtime model would diverge from them (TenantId columns and (TenantId, ...) unique indexes " +
+                    "present in one and absent in the other). Remove the IOptions<MultiTenancyOptions> value the DbContext forwards " +
+                    "to its base constructor, or make it agree with the configuration.");
+            }
+        }
     }
 }

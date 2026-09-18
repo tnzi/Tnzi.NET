@@ -9,5 +9,6 @@
  */
 export { default as TAccountSettings } from './TAccountSettings.vue';
 export { default as TSecuritySettings } from './TSecuritySettings.vue';
+export { default as TStepUpPrompt } from './TStepUpPrompt.vue';
 export { default as TPersonalizationSettings } from './TPersonalizationSettings.vue';
 export { default as TUsageSettings } from './TUsageSettings.vue';

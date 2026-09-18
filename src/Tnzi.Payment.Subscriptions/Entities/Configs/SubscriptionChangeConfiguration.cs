@@ -5,6 +5,7 @@ public class SubscriptionChangeConfiguration : EntityTypeConfigurationBase<Subsc
     public override void Configure(EntityTypeBuilder<SubscriptionChange> builder)
     {
         builder.Property(c => c.ProratedAmount).HasMoneyPrecision();
+        builder.Property(c => c.PaymentTradeNo).HasMaxLength(64);
 
         builder.HasOne(c => c.Subscription)
             .WithMany()

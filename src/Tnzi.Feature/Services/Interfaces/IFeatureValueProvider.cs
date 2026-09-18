@@ -47,6 +47,25 @@ public interface IFeatureValueProvider
     string? InactiveReason => null;
 
     /// <summary>
+    /// Whether a caller bound to tenant <paramref name="callerTenantId"/> may read or write the
+    /// values stored under <paramref name="providerKey"/>. Host callers (no tenant) are never
+    /// asked; they may address any key.
+    /// </summary>
+    /// <remarks>
+    /// The admin API scopes feature values by the caller's <b>identity</b>, not by the key the
+    /// client sends: <c>FeatureValue</c> does not implement <c>IMultiTenant</c> (the tenant lives
+    /// inside <c>ProviderKey</c>), so the global tenant filter cannot do this. The default rule is
+    /// fail-closed: a keyless provider is deployment-wide and always accessible; a keyed provider
+    /// treats its key as a tenant id, so a tenant-bound caller only reaches its own tenant's
+    /// values. A provider whose keys are something else (departments inside a tenant, ...)
+    /// overrides this to say which keys the caller owns.
+    /// </remarks>
+    /// <param name="callerTenantId">The caller's tenant id, as persisted in <c>ProviderKey</c> (string form).</param>
+    /// <param name="providerKey">The normalized provider key being addressed; <c>null</c> for a keyless provider.</param>
+    bool IsKeyAccessibleTo(string callerTenantId, string? providerKey)
+        => !RequiresKey || string.Equals(providerKey, callerTenantId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Get the feature value for the current context, or null if not set
     /// </summary>
     /// <param name="featureName">Feature name</param>

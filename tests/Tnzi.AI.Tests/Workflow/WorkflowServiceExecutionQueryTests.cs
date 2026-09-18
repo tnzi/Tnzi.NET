@@ -108,6 +108,7 @@ public class WorkflowServiceExecutionQueryTests
         Mock.Of<IQuotaService>(),
         Mock.Of<IWorkflowCheckpointStore>(),
         new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>()),
+        _serviceProvider.GetServices<IWorkflowNode>(),
         _serviceProvider);
 
     private void SetupQueryable(List<WorkflowExecution> data)

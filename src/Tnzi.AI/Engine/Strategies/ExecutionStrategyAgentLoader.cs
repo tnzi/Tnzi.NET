@@ -25,10 +25,16 @@ public static class ExecutionStrategyAgentLoader
         // delivers them through AgentResolution, not the factory). Honoring skill/KB scoping for child agents
         // would require routing them through the middleware pipeline - a larger change, out of scope here.
         // Today child agents in strategy execution honor tool grants only (groups + per-tool names).
+
+        // 子 agent 与主路径过同一道 RequiredPermissions 门。grant 是 agent 作者授予 agent 的，不是调用者持有的权限；
+        // 不传 userPermissions（null）等于放弃门控 —— 一个没有 ai.tools.sandbox 的用户对着 Router 父 agent 说话，
+        // 被授予 sandbox 组的子 agent 就带着宿主 shell 替他跑。
+        var permissionResolver = context.ServiceProvider.GetRequiredService<IUserToolPermissionResolver>();
+        var userPermissions = await permissionResolver.ResolveAsync(toolGroups, toolNames, ct);
         return await context.AgentFactory.CreateAgentAsync(
             entity.Provider, entity.Model, entity.Instructions, entity.Name,
             toolGroups, entity.Temperature, entity.MaxTokens,
-            toolNames: toolNames, agentId: entity.Id, ct: ct);
+            userPermissions: userPermissions, toolNames: toolNames, agentId: entity.Id, ct: ct);
     }
 
     public static string GetLatestUserQuestion(List<ChatMessage> messages)

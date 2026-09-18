@@ -1,6 +1,3 @@
-
-using Tnzi.Notification.Metadata;
-
 namespace Tnzi.Notification.Tests.Integration;
 
 /// <summary>

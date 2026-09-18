@@ -55,8 +55,9 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddScoped<IDualControlService, DualControlService>();
         services.AddSingleton<FunctionAuthCache>();
 
-        // 注册权限管理器和权限检查器
-        services.AddSingleton<IPermissionManager, PermissionManager>();
+        // 注册权限检查器。
+        // 这里曾经还有一个 IPermissionManager 单例（provider + DB 的内存快照），但运行时判定
+        // 全部走 IFunctionAuthorizationService 读库，那个快照全仓零读者，2026-09-12 删除。
         services.AddScoped<Tnzi.Security.Authorization.IPermissionChecker, PermissionChecker>();
 
         // Provider→DB seeder: walks every IPermissionDefinitionProvider on
@@ -72,7 +73,7 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddScoped<SuperAdminBootstrapper>();
 
         // Post-migration startup task: runs the permission-catalogue seed +
-        // PermissionManager.RefreshAsync + built-in role seed + super-admin
+        // built-in role seed + super-admin
         // bootstrap AFTER database migrations (this used to run in module init,
         // which executes BEFORE migrations and silently failed on an empty DB,
         // needing a second boot). Not an IDataSeeder, so it always runs (not
@@ -124,7 +125,7 @@ public class AuthorizationModule : TnziApplicationModule
     }
 
     /// <summary>
-    /// Post-migration startup work: permission-catalogue seed + <c>PermissionManager.RefreshAsync</c>
+    /// Post-migration startup work: permission-catalogue seed
     /// + built-in super-admin role seed + first-super-admin bootstrap + role-existence
     /// diagnostics. Runs via <see cref="AuthorizationStartupTask"/> (an
     /// <see cref="IPostMigrationStartupTask"/>) AFTER database migrations - this used to
@@ -133,10 +134,10 @@ public class AuthorizationModule : TnziApplicationModule
     /// </summary>
     internal static async Task RunStartupTasksAsync(IServiceProvider serviceProvider)
     {
-        // Seed BEFORE PermissionManager.RefreshAsync so the manager's
-        // snapshot picks up provider-declared permissions on the SAME
-        // run they're introduced - without seeding first they'd be
-        // missing until the next restart (manager loads from DB).
+        // The seed is what makes provider-declared codes exist at all: every
+        // runtime check reads Auth_ModuleFunction (there is no in-memory
+        // snapshot), so a code that did not get seeded cannot be granted and
+        // cannot be resolved until a later boot seeds it.
         await using (var seedScope = serviceProvider.CreateAsyncScope())
         {
             var providers = seedScope.ServiceProvider.GetServices<IPermissionDefinitionProvider>().ToList();
@@ -164,19 +165,20 @@ public class AuthorizationModule : TnziApplicationModule
                 }
                 catch (Exception ex)
                 {
-                    // Auxiliary step - startup must not block on it. The
-                    // worst case is provider permissions stay invisible to
-                    // admin UI; the runtime check still works because
-                    // PermissionManager has the in-memory snapshot.
+                    // Startup must not block on it, but be honest about the
+                    // cost: codes introduced by this deployment have no
+                    // Auth_ModuleFunction row until a later boot seeds them,
+                    // so they cannot be assigned in the admin UI and every
+                    // [ApiAuthorize] check on them denies non-super-admins
+                    // (deny-by-default). Rows seeded on earlier boots are
+                    // untouched; super admins short-circuit before any table
+                    // is read.
                     var seedLogger = seedScope.ServiceProvider.GetRequiredService<ILogger<AuthorizationModule>>();
                     seedLogger.LogError(ex,
-                        "PermissionDbSeeder failed; provider-declared permissions may not appear in admin UI until the next restart.");
+                        "PermissionDbSeeder failed; permissions declared by this deployment but not yet seeded cannot be assigned or granted until the next successful startup.");
                 }
             }
         }
-
-        var permissionManager = serviceProvider.GetRequiredService<IPermissionManager>();
-        await permissionManager.RefreshAsync();
 
         var optionsSnapshot = serviceProvider
             .GetRequiredService<IOptions<Tnzi.Authorization.Options.AuthorizationOptions>>().Value;

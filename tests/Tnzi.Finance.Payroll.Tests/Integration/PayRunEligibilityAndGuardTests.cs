@@ -91,11 +91,27 @@ public class PayRunEligibilityAndGuardTests : PayrollIntegrationTestBase
     public async Task Delete_DraftRun_Succeeds()
     {
         await StandardScenarioAsync();
-        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
-        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(runId))).Succeeded.ShouldBeTrue();
-        // 计算后回到可删？ 不——只有 Draft 可删。这里验证 Draft 删除路径：新建一个未计算的 run
         var draftId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
         var del = await InScopeAsync<IPayRunService, Result>(s => s.DeleteAsync(draftId));
         del.Succeeded.ShouldBeTrue(del.Message);
+    }
+
+    /// <summary>
+    /// 已计算但未过账的批次同样可删：它没有任何凭证，删掉是安全的；而不让删，
+    /// 摄取错了的 OpeningBalance / 带错的 External 批次就没有任何退出路径。
+    /// </summary>
+    [Fact]
+    public async Task Delete_CalculatedRun_Succeeds_AndTakesItsPayslipsWithIt()
+    {
+        await StandardScenarioAsync();
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(runId))).Succeeded.ShouldBeTrue();
+        (await CountAsync<Payslip>(p => p.PayRunId == runId)).ShouldBe(1);
+
+        var del = await InScopeAsync<IPayRunService, Result>(s => s.DeleteAsync(runId));
+        del.Succeeded.ShouldBeTrue(del.Message);
+
+        (await ReloadAsync<PayRun>(runId)).ShouldBeNull();
+        (await CountAsync<Payslip>(p => p.PayRunId == runId)).ShouldBe(0);
     }
 }

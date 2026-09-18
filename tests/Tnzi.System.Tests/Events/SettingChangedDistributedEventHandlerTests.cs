@@ -1,3 +1,4 @@
+using Tnzi.EventBus;
 using Tnzi.System.Events;
 using Tnzi.System.Events.Handlers;
 using Tnzi.System.Hubs;
@@ -38,6 +39,18 @@ public class SettingChangedDistributedEventHandlerTests
         push.Verify(p => p.PushToAllAsync("Settings.Changed", It.IsAny<object[]>()), Times.Once);
     }
 
+    /// <summary>
+    /// 配置变更必须以<b>广播</b>语义订阅：每个实例都要 reload 自己的缓存与 IConfiguration。
+    /// 按普通集成事件订阅时同一服务的 N 个实例共用一条队列，代理只投给其中一个 ——
+    /// 其余实例继续用旧值直到重启，而界面与日志全都显示成功。
+    /// </summary>
+    [Fact]
+    public void SettingChangedIntegrationEvent_IsABroadcastEvent()
+    {
+        typeof(IBroadcastIntegrationEvent).IsAssignableFrom(typeof(SettingChangedIntegrationEvent)).ShouldBeTrue();
+        DistributedConsumerIdentity.IsBroadcast(typeof(SettingChangedIntegrationEvent)).ShouldBeTrue();
+    }
+
     [Fact]
     public async Task Own_Instance_Loopback_Is_Skipped()
     {
@@ -49,7 +62,7 @@ public class SettingChangedDistributedEventHandlerTests
         {
             Key = "Chat:AllowInvisible",
             Scope = SettingScope.Global,
-            OriginInstanceId = SettingChangedIntegrationEvent.LocalInstanceId, // 本实例发布的回环
+            OriginInstanceId = TnziInstance.Id, // 本实例发布的回环
         });
 
         cache.Verify(c => c.RemoveAsync(It.IsAny<string>()), Times.Never);

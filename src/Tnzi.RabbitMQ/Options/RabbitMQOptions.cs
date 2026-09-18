@@ -23,10 +23,30 @@ public class RabbitMQOptions
     public bool AutoSubscribe { get; set; } = true;
 
     /// <summary>
-    /// 消费者预取数量（默认: 10）
-    /// 控制消费者同时处理的消息数量上限
+    /// 消费者预取数量（默认: 10）：每个消费者 Channel 上<b>未确认</b>消息的上限（<c>basic.qos</c>）。
     /// </summary>
+    /// <remarks>
+    /// 它限制的是代理往客户端推了多少条还没 ACK 的消息，不是「同时处理」的条数 ——
+    /// 同时处理多少条由 <see cref="ConsumerDispatchConcurrency"/> 决定。预取 10 条而派发并发度为 1，
+    /// 其余 9 条只是躺在客户端缓冲里等前一条的回调返回。
+    /// </remarks>
     public ushort PrefetchCount { get; set; } = 10;
+
+    /// <summary>
+    /// 每个消费者 Channel 的派发并发度（默认: <see langword="null"/> = 跟随 <see cref="PrefetchCount"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// RabbitMQ.Client 7 的默认值是 1：同一 Channel 上的投递串行派发，派发器等上一条的回调返回才取下一条。
+    /// 重试退避的 <c>Task.Delay</c>（默认 1s / 2s / 4s，上限 30s）就跑在回调里 —— 一条失败消息按指数退避
+    /// 阻塞该事件类型的<b>全部</b>消费，包括与它毫不相干的消息；下游短暂不可用时吞吐掉到大约每个退避间隔一条。
+    /// </para>
+    /// <para>
+    /// 并发度大于 1 时同一队列内的处理顺序不再有保证 —— 本模块从未承诺过顺序（at-least-once、处理器必须幂等），
+    /// 需要严格顺序的事件类型自己设成 1。只作用于消费者 Channel，发布 Channel 不受影响。
+    /// </para>
+    /// </remarks>
+    public ushort? ConsumerDispatchConcurrency { get; set; }
 
     /// <summary>
     /// 消息最大重试次数（默认: 3）

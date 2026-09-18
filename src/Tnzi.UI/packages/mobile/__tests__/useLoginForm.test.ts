@@ -78,7 +78,28 @@ describe('useLoginForm', () => {
       rememberMe: true,
       captchaId: 'cid',
       captchaCode: 'abc',
+      // The unified token the backend accepts for any provider: the picture's id:code.
+      captchaToken: 'cid:abc',
     })
+  })
+
+  it('a widget token from the consumer wins over the picture pair', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { fields, submit } = useLoginForm({ onSubmit, captchaId: 'cid', captchaToken: 'turnstile-token' })
+    fields.username.value = 'alice'
+    fields.password.value = 'secret'
+    fields.captchaCode.value = 'abc'
+    await submit()
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 'turnstile-token' }))
+  })
+
+  it('no captcha at all sends no token', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { fields, submit } = useLoginForm({ onSubmit })
+    fields.username.value = 'alice'
+    fields.password.value = 'secret'
+    await submit()
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: undefined }))
   })
 
   it('submit does not call onSubmit if invalid', async () => {

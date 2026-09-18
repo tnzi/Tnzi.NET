@@ -90,21 +90,31 @@ public static class MvcExtensions
     }
 
     /// <summary>
-    /// 获取第一个验证错误
+    /// 验证失败信封 message 的兜底文本：ModelState 无效、却没有一条错误带可读消息时才用到
+    /// （绑定失败只设了 Exception 而 Message 为空就是这种情形）。
+    /// </summary>
+    private const string DefaultValidationMessage = "Validation failed";
+
+    /// <summary>
+    /// 获取第一个验证错误（第一条带可读消息的错误：ErrorMessage 为空时退到 Exception.Message）
     /// </summary>
     /// <param name="modelState">模型状态字典</param>
-    /// <returns>第一个错误消息</returns>
+    /// <returns>第一个错误消息；一条可读的都没有时为 null</returns>
     public static string? FirstError(this ModelStateDictionary modelState)
     {
         Check.NotNull(modelState);
 
         foreach (var state in modelState.Values)
         {
-            if (state != null && state.Errors.Count > 0)
+            if (state == null)
             {
-                var error = state.Errors[0];
+                continue;
+            }
+
+            foreach (var error in state.Errors)
+            {
                 var errorText = error.ErrorMessage;
-                
+
                 if (string.IsNullOrWhiteSpace(errorText) && error.Exception != null)
                 {
                     errorText = error.Exception.Message;
@@ -118,6 +128,24 @@ public static class MvcExtensions
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 验证失败信封的 message：第一条字段错误原文（同 <see cref="FirstError"/>），
+    /// 一条可读的都没有时退回 "Validation failed"。
+    /// </summary>
+    /// <remarks>
+    /// 全局 <c>ModelStateValidationFilter</c> 与 <c>ApiControllerBase.ValidationError()</c> 都从这里取 message，
+    /// 两条路径对同一份 ModelState 给出逐字相同的答案。消费方的错误提示通常只显示 message、不读
+    /// errorDetails —— 此前过滤器一律回固定的 "Validation failed"，用户看到的提示里没有任何字段名可据以行动。
+    /// 刻意不带字段键前缀（<c>Directory.People[0].FirstName:</c> 是属性路径，给开发者看的）：
+    /// DataAnnotations 的默认消息本身就点名字段，自定义 ErrorMessage 是 DTO 作者写给人读的，字段键留在 errorDetails 里。
+    /// </remarks>
+    /// <param name="modelState">模型状态字典</param>
+    /// <returns>信封 message，恒非空</returns>
+    public static string ValidationMessage(this ModelStateDictionary modelState)
+    {
+        return modelState.FirstError() ?? DefaultValidationMessage;
     }
 
     /// <summary>

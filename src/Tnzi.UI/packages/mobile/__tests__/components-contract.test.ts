@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import Vant, { Tabbar } from 'vant'
 import type { Component } from 'vue'
+import { createTnziMobile } from '../src/plugin'
 import TLoginForm from '../src/components/auth/TLoginForm.vue'
 import TRegisterForm from '../src/components/auth/TRegisterForm.vue'
 import TPasswordReset from '../src/components/auth/TPasswordReset.vue'
@@ -105,9 +106,27 @@ describe('auth forms wired to the headless layer', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
+    // No "remember me" by default: nothing in the framework reads the flag
+    // (AuthStateManager persists the session the same way either way), so a
+    // ticked box that changes nothing is a consumer-owned opt-in, not a default.
+    expect(wrapper.find('.van-checkbox').exists()).toBe(false)
     expect(wrapper.emitted('submit')?.[0]).toEqual([
-      { userName: 'alice', password: 'secret', rememberMe: false, captchaId: undefined, captchaCode: undefined },
+      { userName: 'alice', password: 'secret', rememberMe: undefined, captchaId: undefined, captchaCode: undefined },
     ])
+  })
+
+  it('TLoginForm forwards the remember-me choice only when the consumer opts in', async () => {
+    const wrapper = mount(TLoginForm, { props: { showRememberMe: true }, global })
+    expect(wrapper.find('.van-checkbox').exists()).toBe(true)
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('alice')
+    await inputs[1]!.setValue('secret')
+    await wrapper.find('.van-checkbox').trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ userName: 'alice', rememberMe: true })
   })
 
   it('TLoginForm shows a translated message instead of a hardcoded one', async () => {
@@ -146,6 +165,71 @@ describe('auth forms wired to the headless layer', () => {
     expect(wrapper.emitted('submit')).toBeUndefined()
   })
 
+  // The headless composables refuse an incomplete submit and write `errors`,
+  // but nothing in the SFCs rendered those, so a tap on Submit with a blank
+  // field did nothing visible. Every field the composable checks must carry a
+  // Vant rule so the refusal is shown where the user is looking.
+  it('TPasswordReset shows a message for every blank required field instead of doing nothing', async () => {
+    const wrapper = mount(TPasswordReset, { global })
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    const messages = wrapper.findAll('.van-field__error-message').map((el) => el.text())
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        'Please enter Email',
+        'Please enter Verification Code',
+        'Please enter New Password',
+      ]),
+    )
+  })
+
+  it('TPasswordReset submits once every required field is filled', async () => {
+    const wrapper = mount(TPasswordReset, { global })
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('alice@example.com')
+    await inputs[1]!.setValue('123456')
+    await inputs[2]!.setValue('secret1')
+    await inputs[3]!.setValue('secret1')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')?.[0]).toEqual([
+      { email: 'alice@example.com', code: '123456', password: 'secret1' },
+    ])
+  })
+
+  it('TLoginForm with a captcha shows a message when the captcha is blank', async () => {
+    const wrapper = mount(TLoginForm, { props: { showCaptcha: true, captchaId: 'c1' }, global })
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('alice')
+    await inputs[1]!.setValue('secret')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('Please enter Verification Code')
+  })
+
+  it('TRegisterForm with a captcha shows a message when the captcha is blank', async () => {
+    const wrapper = mount(TRegisterForm, { props: { showUsername: false, showCaptcha: true, captchaId: 'c1' }, global })
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('alice@example.com')
+    await inputs[1]!.setValue('secret1')
+    await inputs[2]!.setValue('secret1')
+    await wrapper.find('.van-checkbox').trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('Please enter Verification Code')
+  })
+
   it('TPasswordReset runs the resend countdown from usePasswordReset', async () => {
     const wrapper = mount(TPasswordReset, { props: { countdownSeconds: 30 }, global })
 
@@ -155,5 +239,29 @@ describe('auth forms wired to the headless layer', () => {
 
     expect(wrapper.emitted('sendCode')?.[0]).toEqual(['alice@example.com'])
     expect(wrapper.text()).toContain('30s')
+  })
+})
+
+describe('plugin install', () => {
+  // The T* templates use <van-*> global tags. A consumer who follows the README
+  // installs only createTnziMobile(); if that did not register Vant, every
+  // component rendered as unknown custom elements with no <input> inside.
+  it('registers Vant so a T* component works with the plugin alone', () => {
+    const wrapper = mount(TLoginForm, { global: { plugins: [createTnziMobile()] } })
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(wrapper.findAll('input').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does not re-install Vant when the consumer already did', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const wrapper = mount(TLoginForm, { global: { plugins: [Vant, createTnziMobile()] } })
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(warn.mock.calls.map((c) => String(c[0]))).not.toContainEqual(expect.stringContaining('already been applied'))
+    warn.mockRestore()
+  })
+
+  it('leaves Vant alone when component registration is switched off', () => {
+    const wrapper = mount(TLoginForm, { global: { plugins: [createTnziMobile({ registerComponents: false })] } })
+    expect(wrapper.find('form').exists()).toBe(false)
   })
 })

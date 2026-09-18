@@ -27,26 +27,31 @@ internal static class IdGenerationHelper
         var currentId = idProperty.GetValue(entry.Entity);
         if (IsDefaultValue(currentId, idProperty.PropertyType))
         {
-            var idGenerator = GetEntityIdGenerator(dbContext);
-            object? newId;
-
-            if (idGenerator != null)
-            {
-                newId = idGenerator.GenerateId(entityType, idProperty.PropertyType);
-            }
-            else
-            {
-                var guidType = GetSequentialGuidTypeForDatabase(dbContext);
-                newId = idProperty.PropertyType switch
-                {
-                    Type t when t == typeof(Guid) || t == typeof(Guid?) => SequentialGuid.NewGuid(guidType),
-                    Type t when t == typeof(long) => IdHelper.NextId(),
-                    _ => null
-                };
-            }
-
+            var newId = GenerateId(dbContext, entityType, idProperty.PropertyType);
             if (newId != null) idProperty.SetValue(entry.Entity, newId);
         }
+    }
+
+    /// <summary>
+    /// 按与 SaveChanges 同一套规则生成一个 Id：注册了 <see cref="IEntityIdGenerator"/> 则交给它，
+    /// 否则 Guid 走 Sequential GUID（按 provider 选排列）、long 走 Snowflake；其它类型返回 null。
+    /// 绕过变更跟踪器的写入路径（Dapper 批量插入）也从这里取 Id，两条路径的 Id 形态一致。
+    /// </summary>
+    public static object? GenerateId(DbContext dbContext, Type entityType, Type idType)
+    {
+        var idGenerator = GetEntityIdGenerator(dbContext);
+        if (idGenerator != null)
+        {
+            return idGenerator.GenerateId(entityType, idType);
+        }
+
+        var guidType = GetSequentialGuidTypeForDatabase(dbContext);
+        return idType switch
+        {
+            Type t when t == typeof(Guid) || t == typeof(Guid?) => SequentialGuid.NewGuid(guidType),
+            Type t when t == typeof(long) => IdHelper.NextId(),
+            _ => null
+        };
     }
 
     private static SequentialGuid.SequentialGuidType GetSequentialGuidTypeForDatabase(DbContext dbContext)
@@ -107,7 +112,7 @@ internal static class IdGenerationHelper
         return null;
     }
 
-    private static bool IsDefaultValue(object? value, Type type)
+    public static bool IsDefaultValue(object? value, Type type)
     {
         if (value == null) return true;
         if (!type.IsValueType) return false;

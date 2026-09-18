@@ -270,7 +270,7 @@ defineAdminApp({
 
 5 modules are wired by `/login/:module(…)?` — `pwd-login`, `code-login`,
 `register`, `reset-pwd`, `2fa-challenge`. Helpers
-(`helpers.setTwoFactorRequired(...)`, `helpers.setCaptchaImage(...)`)
+(`helpers.setTwoFactorRequired(...)`, `helpers.setCaptchaRequired(...)`)
 let pages drive UI state from auth callbacks.
 
 ### Workbench / dashboard widgets
@@ -316,7 +316,7 @@ The theme drawer offers a fifth layout, `desktop`: an icon grid (one tile per to
 | Subpath | Exports |
 |---|---|
 | `@tnzi/ui-admin` | `defineAdminApp`, `createTnziUiAdmin`, `useAdminClient`, `vPermission`, `installDirectives`, `fetchAdminManifest`, `TAdminAppRoot` |
-| `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`), display + utility re-exports from `@tnzi/ui` |
+| `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TStepUpModal`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`), display + utility re-exports from `@tnzi/ui` |
 | `@tnzi/ui-admin/headless` | `useCrudPage`, `useFormRules`, `useNaiveForm`, `useAdminModuleManifest`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, ... |
 | `@tnzi/ui-admin/stores` | `useAdminThemeStore`, `useAdminAuthStore`, `useAdminAppStore`, `useAdminRouteStore`, `useAdminTabStore`, `useAdminBreadcrumbStore` |
 | `@tnzi/ui-admin/router` | `defaultAdminRoutes` (filtered/overridable via `defineAdminApp`) |

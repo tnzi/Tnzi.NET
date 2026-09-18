@@ -58,6 +58,10 @@ public class KafkaEventBusModule : TnziInfrastructureModule
 
         bootstrapServers = ConnectionStringExpander.Expand(bootstrapServers, configuration);
 
+        // 消费者身份：EventBus:ConsumerGroup（缺省入口程序集名）+ 本进程实例 ID。
+        // 消费者组以它开头，同一代理上的两个服务才各成一组，而不是同组竞争消费
+        var consumerIdentity = DistributedConsumerIdentity.FromOptions(eventBusOptions);
+
         // 注册Kafka生产者
         services.AddSingleton<IProducer<string, string>>(provider =>
         {
@@ -83,7 +87,7 @@ public class KafkaEventBusModule : TnziInfrastructureModule
             var logger = provider.GetRequiredService<ILogger<KafkaEventBus>>();
             var options = provider.GetService<IOptions<KafkaOptions>>()?.Value ?? new KafkaOptions();
 
-            return new KafkaEventBus(producer, logger, provider, options, bootstrapServers);
+            return new KafkaEventBus(producer, logger, provider, options, bootstrapServers, consumerIdentity);
         });
 
         // 注册 IDistributedEventBus 和 IIntegrationEventBus 接口,指向同一实例

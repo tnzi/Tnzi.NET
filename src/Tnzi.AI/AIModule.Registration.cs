@@ -49,6 +49,8 @@ public partial class AIModule
         // 可选子模块回退实现：允许不加载子模块时仍能解析核心服务
         services.TryAddScoped<IWorkflowService, NoOpWorkflowService>();
         services.TryAddScoped<ISkillLoadTracker, NoOpSkillLoadTracker>();
+        // 不是回退而是完整实现（内存集合 + 线程元数据往返），无子模块依赖；TryAdd 允许应用替换。
+        services.TryAddScoped<ISkillActivationTracker, SkillActivationTracker>();
 
         // Workflow 子接口转发 - NoOpWorkflowService 已实现 IWorkflowService
         //（继承 IWorkflowExecutionControlService + IWorkflowExecutionQueryService），
@@ -176,6 +178,7 @@ public partial class AIModule
             // circuit for a client that will never be resolved.
             if (providerChild.GetValue("Enabled", defaultValue: true) == false) continue;
 
+            ResilientHttpClientNames.Register(providerName);
             services.AddHttpClient(ResilientHttpClientNames.For(providerName))
                 .AddStandardResilienceHandler(ConfigureAiResilience);
         }
@@ -208,9 +211,11 @@ public partial class AIModule
         services.AddSingleton<IChatClientProvider, AnthropicChatClientProvider>();
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
 
-        // Multi-model provider message processors - 扩展点，用于处理特定提供商的消息格式差异。
+        // Multi-model provider message processors - 处理特定提供商的消息格式差异。
         // ThinkTagChatMessageProcessorBase 处理 <think> 标签（MiniMax/Kimi/GLM 共用），DeepSeek/Gemini 为预留直通。
-        // 应用代码可通过 IEnumerable<IChatMessageProcessor> 注入并按 ProviderName 匹配使用。
+        // ChatClientFactory 注入 IEnumerable<IChatMessageProcessor>，按 ChatMessageProcessorSelector（条目名 /
+        // ProviderType / 端点主机 / 模型前缀）选出处理器，以 MessageProcessingChatClient 包在 SDK 客户端外面。
+        // 2026-09-12 前这五条注册零调用方，文档承诺的 <think> 自动处理在生产路径不存在。
         services.AddSingleton<IChatMessageProcessor, DeepSeekChatMessageProcessor>();
         services.AddSingleton<IChatMessageProcessor, GeminiChatMessageProcessor>();
         services.AddSingleton<IChatMessageProcessor, MiniMaxChatMessageProcessor>();
@@ -254,14 +259,16 @@ public partial class AIModule
         // Web 搜索提供者（DuckDuckGo 默认实现，TryAdd: 用户可替换为商业 API）
         services.TryAddSingleton<IWebSearchProvider, DuckDuckGoSearchProvider>();
 
-        // 注册 Agent 解析器
+        // 注册 Agent 解析器与工具权限解析器（主路径与 Handoff/Router/AgentAsTools 子 agent 共用同一道门）
+        services.AddScoped<IUserToolPermissionResolver, UserToolPermissionResolver>();
         services.AddScoped<IAgentResolver, AgentResolver>();
     }
 
     private static void RegisterConversationMemoryAndContext(IServiceCollection services)
     {
-        // 注册对话存储和记忆存储（使用 TryAdd，允许 Agent 模块替换）
-        services.TryAddScoped<IConversationStore, DatabaseConversationStore>();
+        // 注册记忆存储（使用 TryAdd，允许应用模块替换）。
+        // 对话历史不在这里：HistoryMiddleware 经 IAgentThreadInternalService 持久化，不可替换
+        // （此前的 IConversationStore / DatabaseConversationStore 零调用方，2026-09-12 删除）。
         services.TryAddScoped<IMemoryStore, DatabaseMemoryStore>();
         services.TryAddScoped<IMemoryConsolidator, LlmMemoryConsolidator>();
         services.TryAddScoped<IMemorySideQuery, MemorySideQuery>();
@@ -363,6 +370,8 @@ public partial class AIModule
         AddAiMiddleware<PromptCachingMiddleware>(services);
         AddAiMiddleware<QuotaMiddleware>(services);
         AddAiMiddleware<InputGuardrailMiddleware>(services);
+        // 线程解析（40）先于 Sandbox 子模块的 ThreadData（50）/ Sandbox（55）：新会话首轮也要有沙箱
+        AddAiMiddleware<ThreadResolutionMiddleware>(services);
         AddAiMiddleware<HistoryMiddleware>(services);
 
         // Scoped because the constructor consumes Scoped IContextProviderContributor instances
@@ -377,7 +386,6 @@ public partial class AIModule
         AddAiMiddlewareSingleton<LoopDetectionMiddleware>(services);
         AddToolMiddleware<ToolErrorRecoveryMiddleware>(services);
 
-        AddAiMiddleware<SubAgentLimitMiddleware>(services);
 
         AddAiMiddleware<SummarizationMiddleware>(services);
         AddAiMiddleware<FileUploadMiddleware>(services);

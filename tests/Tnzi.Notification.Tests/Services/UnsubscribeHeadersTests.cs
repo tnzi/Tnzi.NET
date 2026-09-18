@@ -166,6 +166,6 @@ public class MailKitHeaderWritingTests
 
     private void InvokeAddHeaders(MimeKit.MimeMessage message, IReadOnlyDictionary<string, string> headers)
         => new MailKitEmailSender(
-                _options, new Mock<IHttpClientFactory>().Object, new Mock<ILogger<MailKitEmailSender>>().Object)
+                _options.MailSender!, new Mock<IHttpClientFactory>().Object, new Mock<ILogger<MailKitEmailSender>>().Object)
             .AddHeaders(message, headers);
 }

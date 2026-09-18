@@ -13,7 +13,7 @@ public interface IModuleManagementService
     Task<Result<IEnumerable<FunctionModule>>> GetModuleTreeAsync();
 
     /// <summary>
-    /// 获取模块的功能列表
+    /// 获取模块的功能列表（管理面：含停用与退役行，生效判据由调用方按 <c>IsEnabled</c> / <c>IsRetired</c> 自行渲染）
     /// </summary>
     /// <param name="moduleId">模块ID</param>
     /// <returns>功能列表</returns>

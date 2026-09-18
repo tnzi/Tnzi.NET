@@ -1,3 +1,5 @@
+using Tnzi.AI.Tools.Models;
+using Tnzi.Security.Authorization;
 
 namespace Tnzi.AI.Tests.Workspace;
 
@@ -20,21 +22,28 @@ public class AgentResolverWorkspaceTests
         // No grants seeded by default → empty projection → resolver read-fallback to entity JSON columns.
         _grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentGrantsProjection());
+
+        // 注册表里没有任何工具声明权限：解析器每次都要问它「有哪些门控工具」，Moq 对 IReadOnlyList 默认答 null。
+        _toolRegistry.Setup(r => r.GetToolsByGroups(It.IsAny<IEnumerable<string>>())).Returns([]);
+        _toolRegistry.Setup(r => r.GetToolsByNames(It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>?>())).Returns([]);
     }
+
+    private IPermissionChecker? _permissionChecker;
+    private IAgentExecutionContextAccessor? _executionContextAccessor;
 
     private AgentResolver CreateResolver(AIOptions? options = null)
     {
+        var permissionChecker = _permissionChecker;
         var opts = new StaticOptionsMonitor<AIOptions>(options ?? new AIOptions());
         return new AgentResolver(
             _agentFactory.Object,
             opts,
             _agentRepository.Object,
-            _toolRegistry.Object,
+            new UserToolPermissionResolver(_toolRegistry.Object, Mock.Of<ILogger<UserToolPermissionResolver>>(), permissionChecker, _executionContextAccessor),
             _templateEngine.Object,
             _versionRouter.Object,
             _grantService.Object,
             _logger.Object,
-            permissionChecker: null,
             workspaceAgentProvider: _workspaceProvider.Object);
     }
 
@@ -515,5 +524,112 @@ public class AgentResolverWorkspaceTests
 
         result.IsSuccess.ShouldBeTrue();
         result.PersonaContent.ShouldBe(personaBody);
+    }
+
+    /// <summary>
+    /// 工作区 agent 与 DB agent 必须过同一道 RequiredPermissions 门：此前工作区分支从不调用权限解析、
+    /// 直接以 UserPermissions: null 建执行器，frontmatter 列了 sandbox 组的 AGENT.md 对任何调用者都放行 bash。
+    /// </summary>
+    [Fact]
+    public async Task ResolveAgentAsync_WorkspaceAgentWithGatedGroup_UserHoldsNothing_PassesEmptySetNotNull()
+    {
+        var agentId = Guid.NewGuid();
+        _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync((Agent?)null);
+        _workspaceProvider.Setup(w => w.LoadAsync(It.IsAny<string>(), agentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkspaceAgentDefinition
+            {
+                AgentId = agentId.ToString(),
+                Name = "ws-sandbox",
+                Provider = "OpenAI",
+                Model = "gpt-4o",
+                Instructions = "Run things.",
+                ToolGroups = ["sandbox"]
+            });
+
+        var gated = new ToolDefinition
+        {
+            Name = "run_shell",
+            GroupName = "sandbox",
+            ProviderType = typeof(object),
+            MethodInfo = typeof(object).GetMethod(nameof(ToString))!,
+            RequiredPermissions = ["ai.tools.sandbox"]
+        };
+        _toolRegistry.Setup(r => r.GetToolsByGroups(It.IsAny<IEnumerable<string>>())).Returns([gated]);
+        var checker = new Mock<IPermissionChecker>();
+        checker.Setup(p => p.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(false);
+        _permissionChecker = checker.Object;
+
+        IEnumerable<string>? captured = ["sentinel"];
+        _agentFactory.Setup(f => f.CreateAgentAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, userPermissions, _, _, _) => captured = userPermissions?.ToList())
+            .ReturnsAsync(new AgentExecutor(new Mock<IChatClient>().Object, new AgentExecutorOptions()));
+
+        var result = await CreateResolver().ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+
+        result.IsSuccess.ShouldBeTrue();
+        captured.ShouldNotBeNull();
+        captured.ShouldBeEmpty();
+        // 技能触发重建时沿用的参数也必须带同一份权限集，否则重建后的执行器又回到不门控。
+        result.CreationParameters.ShouldNotBeNull();
+        result.CreationParameters.UserPermissions.ShouldNotBeNull();
+        result.CreationParameters.UserPermissions.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAgentAsync_WorkspaceAgentWithGatedGroup_UserHoldsPermission_PassesGrantedSubset()
+    {
+        var agentId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        _agentRepository.Setup(r => r.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync((Agent?)null);
+        _workspaceProvider.Setup(w => w.LoadAsync(It.IsAny<string>(), agentId.ToString(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WorkspaceAgentDefinition
+            {
+                AgentId = agentId.ToString(),
+                Name = "ws-sandbox",
+                Provider = "OpenAI",
+                Model = "gpt-4o",
+                Instructions = "Run things.",
+                ToolGroups = ["sandbox"]
+            });
+        _toolRegistry.Setup(r => r.GetToolsByGroups(It.IsAny<IEnumerable<string>>())).Returns(
+        [
+            new ToolDefinition
+            {
+                Name = "run_shell",
+                GroupName = "sandbox",
+                ProviderType = typeof(object),
+                MethodInfo = typeof(object).GetMethod(nameof(ToString))!,
+                RequiredPermissions = ["ai.tools.sandbox"]
+            }
+        ]);
+        var checker = new Mock<IPermissionChecker>();
+        checker.Setup(p => p.IsGrantedAsync(It.IsAny<string>())).ReturnsAsync(false);
+        checker.Setup(p => p.IsGrantedAsync(userId, "ai.tools.sandbox")).ReturnsAsync(true);
+        _permissionChecker = checker.Object;
+        _executionContextAccessor = new AgentExecutionContextAccessor
+        {
+            CurrentRequest = new AgentRunRequest { UserMessage = "hi", UserId = userId }
+        };
+
+        IEnumerable<string>? captured = null;
+        _agentFactory.Setup(f => f.CreateAgentAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<IEnumerable<string>?>(), It.IsAny<double?>(), It.IsAny<int?>(),
+                It.IsAny<AgentExecutorOptions?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<IEnumerable<string>?>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string?, string?, string?, string?, IEnumerable<string>?, double?, int?, AgentExecutorOptions?, IEnumerable<string>?, IEnumerable<string>?, Guid?, CancellationToken>(
+                (_, _, _, _, _, _, _, _, userPermissions, _, _, _) => captured = userPermissions?.ToList())
+            .ReturnsAsync(new AgentExecutor(new Mock<IChatClient>().Object, new AgentExecutorOptions()));
+
+        var result = await CreateResolver().ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
+
+        result.IsSuccess.ShouldBeTrue();
+        captured.ShouldBe(["ai.tools.sandbox"]);
+        result.CreationParameters!.UserPermissions.ShouldBe(["ai.tools.sandbox"]);
     }
 }

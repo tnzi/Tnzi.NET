@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createApp, defineComponent, h, ref, nextTick } from 'vue'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
@@ -18,6 +18,18 @@ function themeProvide() {
   const ctx = createThemeContext(mergeThemeSettings({}))
   return { [THEME_CONTEXT_KEY as unknown as symbol]: ctx }
 }
+
+/**
+ * A script-provider captcha inserts the vendor script into <head>; happy-dom refuses to fetch it
+ * and logs a DOMException. These tests only look at the rendered shell, so swallow the insertion.
+ */
+function swallowProviderScripts() {
+  vi.spyOn(document.head, 'appendChild').mockImplementation((node) => node)
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('TExceptionPage', () => {
   it('renders 404 preset by default', () => {
@@ -309,22 +321,71 @@ describe('TLoginPage', () => {
 
   it('PwdLogin reveals the captcha field only when the backend demands one', async () => {
     const ctx = makeLoginContext({
-      callbacks: { pwdLogin: vi.fn(), getCaptcha: vi.fn(async () => ({ captchaId: 'c', imageBase64: 'IMG' })) },
+      callbacks: { pwdLogin: vi.fn(), getCaptcha: vi.fn(async () => ({ provider: 'image', captchaId: 'c', imageBase64: 'IMG' })) },
     })
     const wrapper = mount(PwdLogin, {
       global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
     })
-    // Adaptive: hidden until the backend pushes a captcha.
-    expect(wrapper.find('.t-login-captcha').exists()).toBe(false)
-    ctx.pendingCaptcha.value = { captchaId: 'c', imageBase64: 'IMG' }
+    // Adaptive: hidden until the backend pushes a challenge.
+    expect(wrapper.find('.t-captcha').exists()).toBe(false)
+    ctx.pendingCaptcha.value = { provider: 'image', captchaId: 'c', imageBase64: 'IMG' }
     await nextTick()
-    const field = wrapper.find('.t-login-captcha')
+    await flushPromises()
+    const field = wrapper.find('.t-captcha')
     expect(field.exists()).toBe(true)
+    expect(field.attributes('data-provider')).toBe('image')
     expect(field.find('img').attributes('src')).toContain('IMG')
   })
 
+  it('PwdLogin renders the provider widget slot when the deployment runs a script provider', async () => {
+    swallowProviderScripts()
+    const ctx = makeLoginContext({
+      callbacks: { pwdLogin: vi.fn() },
+      features: {
+        ...DEFAULT_LOGIN_FEATURES,
+        captchaOnLogin: true,
+        captcha: { enabled: true, provider: 'turnstile', siteKey: 'site', scriptUrl: 'https://cdn.example/t.js' },
+      },
+    })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    ctx.pendingCaptcha.value = { provider: 'turnstile' }
+    await nextTick()
+    const field = wrapper.find('.t-captcha')
+    expect(field.exists()).toBe(true)
+    expect(field.attributes('data-provider')).toBe('turnstile')
+    // No picture / code input for a widget provider - the script renders into the container.
+    expect(field.find('img').exists()).toBe(false)
+    expect(field.find('.t-captcha__widget').exists()).toBe(true)
+  })
+
+  it('★ PwdLogin hands the context resolveUrl to the Altcha widget: the challenge is fetched from the API base, not the page', async () => {
+    if (!customElements.get('altcha-widget')) customElements.define('altcha-widget', class extends HTMLElement {})
+    const resolveUrl = vi.fn((url: string) => `/api${url}`)
+    const ctx = makeLoginContext({
+      callbacks: { pwdLogin: vi.fn() },
+      features: {
+        ...DEFAULT_LOGIN_FEATURES,
+        captchaOnLogin: true,
+        captcha: { enabled: true, provider: 'altcha', scriptUrl: 'https://cdn.example/altcha.js', challengeUrl: 'captcha/altcha/challenge?purpose={purpose}' },
+      },
+      resolveUrl,
+    })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    ctx.pendingCaptcha.value = { provider: 'altcha' }
+    await nextTick()
+    await flushPromises()
+
+    expect(resolveUrl).toHaveBeenCalledWith('/captcha/altcha/challenge?purpose=login')
+    expect(wrapper.find('altcha-widget').attributes('challengeurl')).toBe('/api/captcha/altcha/challenge?purpose=login')
+    expect(wrapper.find('.t-captcha__error').exists()).toBe(false)
+  })
+
   it('Register shows the captcha up-front when enabled + fetchable', async () => {
-    const getCaptcha = vi.fn(async () => ({ captchaId: 'c', imageBase64: 'REGIMG' }))
+    const getCaptcha = vi.fn(async () => ({ provider: 'image', captchaId: 'c', imageBase64: 'REGIMG' }))
     const ctx = makeLoginContext({
       callbacks: { sendCode: vi.fn(), register: vi.fn(), getCaptcha },
       features: { ...DEFAULT_LOGIN_FEATURES, captchaOnRegister: true },
@@ -332,9 +393,67 @@ describe('TLoginPage', () => {
     const wrapper = mount(Register, {
       global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
     })
-    await flushPromises() // the immediate watch fetches on mount
+    await flushPromises() // TCaptcha fetches the picture on mount
     expect(getCaptcha).toHaveBeenCalledWith('register')
-    expect(wrapper.find('.t-login-captcha').exists()).toBe(true)
+    expect(wrapper.find('.t-captcha').exists()).toBe(true)
+  })
+
+  it('Register hides the image captcha when nothing can load it, but shows a script provider anyway', () => {
+    swallowProviderScripts()
+    const noLoader = mount(Register, {
+      global: {
+        provide: {
+          ...themeProvide(),
+          [LOGIN_CONTEXT_KEY as unknown as symbol]: makeLoginContext({
+            callbacks: { sendCode: vi.fn(), register: vi.fn() },
+            features: { ...DEFAULT_LOGIN_FEATURES, captchaOnRegister: true },
+          }),
+        },
+      },
+    })
+    expect(noLoader.find('.t-captcha').exists()).toBe(false)
+
+    const script = mount(Register, {
+      global: {
+        provide: {
+          ...themeProvide(),
+          [LOGIN_CONTEXT_KEY as unknown as symbol]: makeLoginContext({
+            callbacks: { sendCode: vi.fn(), register: vi.fn() },
+            features: {
+              ...DEFAULT_LOGIN_FEATURES,
+              captchaOnRegister: true,
+              captcha: { enabled: true, provider: 'altcha', scriptUrl: 'https://cdn.example/altcha.js', challengeUrl: 'captcha/altcha/challenge?purpose={purpose}' },
+            },
+          }),
+        },
+      },
+    })
+    expect(script.find('.t-captcha').attributes('data-provider')).toBe('altcha')
+  })
+
+  it('★ Register resolves the Altcha challenge URL for its own purpose through the context', async () => {
+    if (!customElements.get('altcha-widget')) customElements.define('altcha-widget', class extends HTMLElement {})
+    const resolveUrl = vi.fn((url: string) => `/api${url}`)
+    const wrapper = mount(Register, {
+      global: {
+        provide: {
+          ...themeProvide(),
+          [LOGIN_CONTEXT_KEY as unknown as symbol]: makeLoginContext({
+            callbacks: { sendCode: vi.fn(), register: vi.fn() },
+            features: {
+              ...DEFAULT_LOGIN_FEATURES,
+              captchaOnRegister: true,
+              captcha: { enabled: true, provider: 'altcha', scriptUrl: 'https://cdn.example/altcha.js', challengeUrl: 'captcha/altcha/challenge?purpose={purpose}' },
+            },
+            resolveUrl,
+          }),
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(resolveUrl).toHaveBeenCalledWith('/captcha/altcha/challenge?purpose=register')
+    expect(wrapper.find('altcha-widget').attributes('challengeurl')).toBe('/api/captcha/altcha/challenge?purpose=register')
   })
 
   it('Register hides the captcha when the register captcha is off', () => {
@@ -345,7 +464,7 @@ describe('TLoginPage', () => {
     const wrapper = mount(Register, {
       global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
     })
-    expect(wrapper.find('.t-login-captcha').exists()).toBe(false)
+    expect(wrapper.find('.t-captcha').exists()).toBe(false)
   })
 })
 

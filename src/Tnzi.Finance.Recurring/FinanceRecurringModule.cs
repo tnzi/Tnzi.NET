@@ -51,6 +51,10 @@ public class FinanceRecurringModule : TnziApplicationModule
         context.Services.AddScoped<IRecurringDocumentService, RecurringDocumentService>();
         context.Services.AddScoped<IRecurringGeneratorService, RecurringGeneratorService>();
 
+        // 模板也是主数据的引用者：核心的客户 / 供应商 / 目录项 / 科目删除守卫经这个契约问到本模块。
+        // 缺席时守卫只认会计单据 —— 删掉只被模板引用的客户会成功，此后每一期都静默失败。
+        context.Services.AddScoped<IMasterDataUsageProvider, RecurringMasterDataUsageProvider>();
+
         context.Services.AddHostedService<RecurringGenerationBackgroundService>();
 
         return Task.CompletedTask;

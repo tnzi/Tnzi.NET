@@ -11,3 +11,5 @@ export type {
   ReadonlyLayout,
 } from './TSchemaForm'
 export { default as TImageUpload } from './TImageUpload.vue'
+export { default as TImageCaptcha } from './TImageCaptcha.vue'
+export { default as TCaptcha } from './TCaptcha.vue'

@@ -45,6 +45,32 @@ public interface IIntegrationEvent : IEvent
 }
 
 /// <summary>
+/// 广播集成事件：<b>每个实例都要收到一份</b>，而不是同一服务的 N 个实例里只有一个收到。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 普通 <see cref="IIntegrationEvent"/> 的消费语义是<b>工作队列</b>：同一个消费者组（同一服务的所有实例）
+/// 共用一条持久队列 / 一个消费者组，每条消息只投给其中一个实例 —— 这是「订单创建了，谁来处理都行」
+/// 的形状。但「配置改了，每个实例都要 reload 自己的缓存」不是：那件事必须在每个进程里各做一次。
+/// 分布式总线按这个标记为每个实例建一条<b>独占、自动删除、不持久</b>的队列（RabbitMQ）或一个
+/// 带实例 ID 的消费者组（Kafka），发布方不需要做任何事。
+/// </para>
+/// <para>
+/// <b>代价</b>：广播不保证送达。实例下线期间发出的广播不会在它回来后补投（那条队列随连接一起消失了；
+/// Kafka 侧新组从 <c>Latest</c> 开始），处理失败也只在原队列上重投一次而不进死信 ——
+/// 一条过期的广播重放出来是有害的（见 <c>docs/coding-standards/events.md</c>「过期即无价值、重放有害」）。
+/// 因此广播事件的处理器必须容忍丢失：它只能是一个叫醒信号，状态本身要能在下一次读取时自愈。
+/// </para>
+/// <para>
+/// 发布方自己的实例同样会收到一份（回环）。需要跳过时在事件里带上 <c>TnziInstance.Id</c> 比对。
+/// </para>
+/// </remarks>
+[StableApi(Since = "0.1.0")]
+public interface IBroadcastIntegrationEvent : IIntegrationEvent
+{
+}
+
+/// <summary>
 /// 事件处理器接口
 /// </summary>
 /// <typeparam name="TEvent">事件类型</typeparam>

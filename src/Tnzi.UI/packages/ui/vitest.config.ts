@@ -20,6 +20,7 @@ export default defineConfig({
       { find: '@tnzi/core/http/http', replacement: resolve(import.meta.dirname, '../core/src/http/http.ts') },
       { find: '@tnzi/core/state', replacement: resolve(import.meta.dirname, '../core/src/state/index.ts') },
       { find: '@tnzi/core/services/identity', replacement: resolve(import.meta.dirname, '../core/src/services/identity/index.ts') },
+      { find: '@tnzi/core/services/captcha', replacement: resolve(import.meta.dirname, '../core/src/services/captcha/index.ts') },
       // General alias last - only matches exact '@tnzi/core' import
       { find: '@tnzi/core', replacement: resolve(import.meta.dirname, '../core/src/index.ts') },
     ],

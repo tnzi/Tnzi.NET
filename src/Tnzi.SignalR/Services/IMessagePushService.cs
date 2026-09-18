@@ -4,6 +4,12 @@ namespace Tnzi.SignalR.Services;
 /// SignalR消息推送服务接口
 /// 用于向客户端推送消息的通用接口
 /// </summary>
+/// <remarks>
+/// 按用户推送（<see cref="PushToUserAsync"/> / <see cref="PushToUsersAsync"/>）投递到
+/// <see cref="HubGroupNames.ForUser"/> 组，由 SignalR 维护并经 Redis Backplane 跨实例转发；
+/// 不依赖进程内的 <see cref="IConnectionManager"/>。前提是目标 Hub 继承
+/// <c>TnziHub</c>（连接建立时加入该组）。
+/// </remarks>
 public interface IMessagePushService
 {
     /// <summary>

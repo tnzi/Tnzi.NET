@@ -112,4 +112,44 @@ describe('useComposerAttachments', () => {
     c.onDragLeave({ currentTarget: parent, relatedTarget: null } as unknown as DragEvent);
     expect(c.isDragOver.value).toBe(false);
   });
+  /**
+   * `TThreadComposer` gated only the paperclip on `enableAttachments`; paste
+   * and drop still produced chips, so a consumer that turned attachments off
+   * because its transport could not send them still collected files that
+   * vanished on Send. The gate lives here so every entry point shares it.
+   */
+  describe('enabled gate', () => {
+    const dropEvent = (files: File[]) =>
+      ({ preventDefault() {}, dataTransfer: { files } }) as unknown as DragEvent;
+    const pasteEvent = (files: File[]) =>
+      ({
+        clipboardData: { items: files.map((f) => ({ type: f.type, getAsFile: () => f })) },
+      }) as unknown as ClipboardEvent;
+
+    it('paste, drop, drag-over and addFiles are inert when disabled', () => {
+      const c = useComposerAttachments({ enabled: () => false });
+      c.onPaste(pasteEvent([makeFile('shot.png', 10, 'image/png')]));
+      c.onDrop(dropEvent([makeFile('a.txt', 10)]));
+      c.addFiles([makeFile('b.txt', 10)]);
+      c.onDragOver({ preventDefault() {} } as unknown as DragEvent);
+      expect(c.files.value).toHaveLength(0);
+      expect(c.isDragOver.value).toBe(false);
+    });
+
+    it('the gate is read live, so a prop flip takes effect', () => {
+      let enabled = false;
+      const c = useComposerAttachments({ enabled: () => enabled });
+      c.onPaste(pasteEvent([makeFile('shot.png', 10, 'image/png')]));
+      expect(c.files.value).toHaveLength(0);
+      enabled = true;
+      c.onPaste(pasteEvent([makeFile('shot.png', 10, 'image/png')]));
+      expect(c.files.value).toHaveLength(1);
+    });
+
+    it('defaults to enabled', () => {
+      const c = useComposerAttachments();
+      c.onDrop(dropEvent([makeFile('a.txt', 10)]));
+      expect(c.files.value).toHaveLength(1);
+    });
+  });
 });

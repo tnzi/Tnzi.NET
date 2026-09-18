@@ -16,7 +16,7 @@
     <template v-if="$slots.actions" #actions><slot name="actions" :data="state.data.value" :action="state.action.value" /></template>
     <template v-if="$slots.extra" #extra><slot name="extra" :data="state.data.value" /></template>
     <template v-if="$slots['nav-header']" #nav-header><slot name="nav-header" /></template>
-    <template v-if="$slots.footer" #footer><slot name="footer" :submit="state.submit" :close="state.close" /></template>
+    <template v-if="$slots.footer" #footer><slot name="footer" :submit="submit" :close="state.close" /></template>
     <template #default="{ section, sectionIcon }">
       <slot :data="state.data.value" :action="state.action.value" :section="section" :section-icon="sectionIcon" />
     </template>
@@ -49,9 +49,9 @@
       </template>
     </TDetailLayout>
     <template v-if="footer" #footer>
-      <slot name="footer" :submit="state.submit" :close="state.close">
+      <slot name="footer" :submit="submit" :close="state.close">
         <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
-        <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="state.submit">{{ t('admin.common.confirm') }}</NButton>
+        <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="submit">{{ t('admin.common.confirm') }}</NButton>
       </slot>
     </template>
   </TDrawerShell>
@@ -79,10 +79,10 @@
       </template>
     </TDetailLayout>
     <template v-if="footer" #footer>
-      <slot name="footer" :submit="state.submit" :close="state.close">
+      <slot name="footer" :submit="submit" :close="state.close">
         <div class="t-detail-host__footer">
           <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
-          <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="state.submit">{{ t('admin.common.confirm') }}</NButton>
+          <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="submit">{{ t('admin.common.confirm') }}</NButton>
         </div>
       </slot>
     </template>
@@ -93,6 +93,7 @@
 import { computed, useSlots } from 'vue'
 import { NButton } from 'naive-ui'
 import { TModalShell, TDrawerShell, TSvgIcon } from '@tnzi/ui'
+import { provideFormHost } from '@tnzi/ui/headless'
 import TDetailLayout from './TDetailLayout.vue'
 import { useRetainedFormState } from '../../headless/useFormModal'
 import type { UseDetailReturn, DetailSection, DetailLayout } from '../../headless/useDetail'
@@ -187,6 +188,16 @@ function t(key: string): string {
 // transition, and a page-mode detail that never opens the form never sets
 // `visible`, which is what the retained pair is gated on.
 const rendered = useRetainedFormState(props.state.form)
+
+// The host owns Confirm in every mode, so it owns the form host: the
+// `TSchemaForm`s in its slot register here and are validated before
+// `state.submit` runs. The `#footer` slot receives this gated call, not the
+// raw `state.submit`, so a page-supplied footer gets the same block.
+const formHost = provideFormHost()
+async function submit(): Promise<void> {
+  if (!(await formHost.validate())) return
+  await props.state.submit()
+}
 
 const slots = useSlots()
 

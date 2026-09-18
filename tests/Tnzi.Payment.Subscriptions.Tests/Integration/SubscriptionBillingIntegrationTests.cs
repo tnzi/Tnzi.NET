@@ -218,15 +218,17 @@ public class SubscriptionBillingIntegrationTests : SubscriptionsIntegrationTestB
     }
 
     /// <summary>
-    /// 立即取消后再恢复：必须清掉 EndTime 并把计费时间拨回未来，
-    /// 否则下一轮过期扫描会立刻把刚恢复的订阅再次过期掉。
+    /// 立即取消后再恢复：清掉 EndTime / CancelTime，但「已付到何时」必须原样保留 ——
+    /// 剩 5 天取消、恢复之后仍然剩 5 天。此前取消把 NextBillingTime 清空、恢复对 null
+    /// 一律从现在起算一个新周期且不扣款，于是「取消再恢复」= 白送一个完整周期，可无限重复；
+    /// 这条用例原先只断言 NextBillingTime 在未来，恰好把那个行为钉成了预期。
     /// </summary>
     [Fact]
-    public async Task ResumeAfterImmediateCancel_ClearsEndTimeAndMovesBillingForward()
+    public async Task ResumeAfterImmediateCancel_KeepsThePaidThroughDate()
     {
         var plan = await SeedPlanAsync(30m);
-        var sub = await SeedSubscriptionAsync(plan.Id, "SUB-RESUME", SubscriptionStatus.Active,
-            DateTime.UtcNow.AddDays(5), "pm_test");
+        var paidThrough = DateTime.UtcNow.AddDays(5);
+        var sub = await SeedSubscriptionAsync(plan.Id, "SUB-RESUME", SubscriptionStatus.Active, paidThrough, "pm_test");
 
         var cancelled = await InScopeAsync<ISubscriptionService, Result>(
             svc => svc.CancelSubscriptionAsync(sub.Id, new Dtos.CancelSubscriptionDto { Immediate = true }));
@@ -235,6 +237,7 @@ public class SubscriptionBillingIntegrationTests : SubscriptionsIntegrationTestB
         var afterCancel = await ReloadAsync<Subscription>(sub.Id);
         afterCancel!.Status.ShouldBe(SubscriptionStatus.Cancelled);
         afterCancel.EndTime.ShouldNotBeNull();
+        afterCancel.NextBillingTime!.Value.ShouldBe(paidThrough, TimeSpan.FromSeconds(1));
 
         var resumed = await InScopeAsync<ISubscriptionService, Result>(
             svc => svc.ResumeSubscriptionAsync(sub.Id));
@@ -244,11 +247,92 @@ public class SubscriptionBillingIntegrationTests : SubscriptionsIntegrationTestB
         afterResume!.Status.ShouldBe(SubscriptionStatus.Active);
         afterResume.EndTime.ShouldBeNull();
         afterResume.CancelTime.ShouldBeNull();
-        afterResume.NextBillingTime!.Value.ShouldBeGreaterThan(DateTime.UtcNow);
+        afterResume.NextBillingTime!.Value.ShouldBe(paidThrough, TimeSpan.FromSeconds(1));
+        // 恢复不是一次收款
+        (await ReloadPaymentByOrderNoAsync("SUB-RESUME")).ShouldBeNull();
 
         // 恢复后不应被过期扫描重新过期
         await InScopeAsync<ISubscriptionService, Result<int>>(svc => svc.ExpireOverdueSubscriptionsAsync());
         (await ReloadAsync<Subscription>(sub.Id))!.Status.ShouldBe(SubscriptionStatus.Active);
+    }
+
+    /// <summary>
+    /// 取消时已付的那一期早就走完了：恢复不能凭空开一个新周期，而是当场按新的一期扣款；
+    /// 扣款成功才推进计费时间，失败就落 PastDue 走催款 —— 没有付款事实就没有延长。
+    /// </summary>
+    [Fact]
+    public async Task ResumeAfterImmediateCancel_WhenThePeriodAlreadyElapsed_ChargesInsteadOfGrantingAFreeCycle()
+    {
+        var plan = await SeedPlanAsync(30m);
+        var sub = await SeedSubscriptionAsync(plan.Id, "SUB-RESUME-DUE", SubscriptionStatus.Active,
+            DateTime.UtcNow.AddDays(2), "pm_test");
+
+        (await InScopeAsync<ISubscriptionService, Result>(
+            svc => svc.CancelSubscriptionAsync(sub.Id, new Dtos.CancelSubscriptionDto { Immediate = true }))).Succeeded.ShouldBeTrue();
+
+        // 取消之后过了一段时间，已付的那一期走完了
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
+            var entity = ctx.Set<Subscription>().First(s => s.Id == sub.Id);
+            entity.NextBillingTime = DateTime.UtcNow.AddDays(-3);
+            await ctx.SaveChangesAsync();
+        }
+
+        (await InScopeAsync<ISubscriptionService, Result>(svc => svc.ResumeSubscriptionAsync(sub.Id))).Succeeded.ShouldBeTrue();
+
+        var payment = await ReloadPaymentByOrderNoAsync("SUB-RESUME-DUE");
+        payment.ShouldNotBeNull();
+        payment!.Status.ShouldBe(PaymentStatus.Succeeded);
+        payment.PayableAmount.ShouldBe(30m);
+
+        var afterResume = await ReloadAsync<Subscription>(sub.Id);
+        afterResume!.Status.ShouldBe(SubscriptionStatus.Active);
+        afterResume.NextBillingTime!.Value.ShouldBeGreaterThan(DateTime.UtcNow.AddDays(20));
+    }
+
+    /// <summary>同上，但没有支付方式：恢复不得把计费时间拨到未来，订阅落 PastDue 等用户绑卡。</summary>
+    [Fact]
+    public async Task ResumeAfterImmediateCancel_WhenThePeriodElapsedAndNoCardIsOnFile_DoesNotExtend()
+    {
+        var plan = await SeedPlanAsync(30m);
+        var sub = await SeedSubscriptionAsync(plan.Id, "SUB-RESUME-NOPM", SubscriptionStatus.Active,
+            DateTime.UtcNow.AddDays(-3), paymentMethodToken: null);
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
+            var entity = ctx.Set<Subscription>().First(s => s.Id == sub.Id);
+            entity.Status = SubscriptionStatus.Cancelled;
+            entity.AutoRenew = false;
+            entity.EndTime = DateTime.UtcNow.AddDays(-1);
+            await ctx.SaveChangesAsync();
+        }
+
+        (await InScopeAsync<ISubscriptionService, Result>(svc => svc.ResumeSubscriptionAsync(sub.Id))).Succeeded.ShouldBeTrue();
+
+        var afterResume = await ReloadAsync<Subscription>(sub.Id);
+        afterResume!.Status.ShouldBe(SubscriptionStatus.PastDue);
+        afterResume.NextBillingTime!.Value.ShouldBeLessThanOrEqualTo(DateTime.UtcNow);
+        (await ReloadPaymentByOrderNoAsync("SUB-RESUME-NOPM")).ShouldBeNull();
+    }
+
+    /// <summary>反复取消再恢复，已付到的日期一步都不该往后挪。</summary>
+    [Fact]
+    public async Task CancelThenResumeRepeatedly_NeverExtendsThePaidThroughDate()
+    {
+        var plan = await SeedPlanAsync(30m);
+        var paidThrough = DateTime.UtcNow.AddDays(1);
+        var sub = await SeedSubscriptionAsync(plan.Id, "SUB-RESUME-LOOP", SubscriptionStatus.Active, paidThrough, "pm_test");
+
+        for (var i = 0; i < 3; i++)
+        {
+            (await InScopeAsync<ISubscriptionService, Result>(
+                svc => svc.CancelSubscriptionAsync(sub.Id, new Dtos.CancelSubscriptionDto { Immediate = true }))).Succeeded.ShouldBeTrue();
+            (await InScopeAsync<ISubscriptionService, Result>(svc => svc.ResumeSubscriptionAsync(sub.Id))).Succeeded.ShouldBeTrue();
+        }
+
+        (await ReloadAsync<Subscription>(sub.Id))!.NextBillingTime!.Value.ShouldBe(paidThrough, TimeSpan.FromSeconds(1));
+        (await ReloadPaymentByOrderNoAsync("SUB-RESUME-LOOP")).ShouldBeNull();
     }
 
     /// <summary>

@@ -12,10 +12,13 @@ public class PushFallbackTests
 {
     private static IPushSender Resolve(NotificationOptions options)
     {
-        // 复刻 NotificationModule.PostConfigureServicesAsync 的选择逻辑。
-        return options.PushSender != null
-            ? new UnconfiguredPushSender(new Mock<ILogger<UnconfiguredPushSender>>().Object)
-            : new NullPushSender(new Mock<ILogger<NullPushSender>>().Object);
+        // 复刻 NotificationModule.PostConfigureServicesAsync 的三档选择逻辑；真实接线由 NamedSenderWiringTests 守着。
+        var logger = new Mock<ILogger<UnconfiguredPushSender>>().Object;
+        if (options.PushSender != null)
+            return new UnconfiguredPushSender(logger);
+        if (options.PushSenders.Count > 0)
+            return UnconfiguredPushSender.ForMissingDefault(logger);
+        return new NullPushSender(new Mock<ILogger<NullPushSender>>().Object);
     }
 
     /// <summary>没配推送：沿用旧行为，报成功。</summary>

@@ -70,9 +70,10 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         IPublicFileFieldResolver? publicFieldResolver = null,
         IFileAccessAuthorizer? authorizer = null,
         IFileAccessGrantContext? grantContext = null,
-        IEnumerable<IUploadSanitizer>? sanitizers = null)
+        IEnumerable<IUploadSanitizer>? sanitizers = null,
+        IPdfRasterizer? pdfRasterizer = null)
     {
-        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers);
+        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers, pdfRasterizer);
     }
 
     /// <summary>
@@ -91,7 +92,8 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         IPublicFileFieldResolver? publicFieldResolver = null,
         IFileAccessAuthorizer? authorizer = null,
         IFileAccessGrantContext? grantContext = null,
-        IEnumerable<IUploadSanitizer>? sanitizers = null)
+        IEnumerable<IUploadSanitizer>? sanitizers = null,
+        IPdfRasterizer? pdfRasterizer = null)
     {
         var effective = options ?? StorageOptions;
         var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
@@ -107,7 +109,9 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             publicFieldResolver ?? TestPublicFileFieldResolver.Empty(),
             new TestFileUrlSigner(),
             ServiceProvider,
-            CreateUploadGuard(effective, sanitizers));
+            CreateUploadGuard(effective, sanitizers),
+            // 缩略图生成器与生产同一个实现；PDF 光栅化器按用例给（默认 null = 没加载 Tnzi.Documents 的现场）。
+            new FileThumbnailGenerator(storage, optionsMonitor.Object, NullLogger<FileThumbnailGenerator>.Instance, pdfRasterizer));
     }
 
     protected FileReferenceProcessor CreateReferenceProcessor(StorageOptions? options = null)

@@ -9,9 +9,16 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
     {
         // Providers 声明为非空且带默认实例，配置绑定不会把它置 null；多余的 != null 检查会让
         // 编译器把后续读取标记为「可能为 null」（CS8602）。
-        var hasProviders = options.Providers.Count > 0;
+        //
+        // ★判据是「有没有已启用的提供商」，与核心的 AiProviderRegistryOptionsValidator 同源，不是「字典非空」：
+        // 配置绑定合并所有配置源，同机器为别的应用设的用户级环境变量 AI__Providers__<Name>__ApiKey
+        // 会让每个应用的字典非空，条目 Enabled 停在默认 false。只在 admin 登记提供商（DB Provider）
+        // 或只用 quota / thread 能力的应用，配置里没有任何 Enabled=true 的条目，DefaultProvider 默认
+        // "OpenAI" 找不到 → ValidateOnStart 让宿主起不来，而那个变量应用自己改不掉。
+        // 没有已启用 provider 时 DefaultProvider 指向谁都解析不出东西，校验它没有运行时后果。
+        var hasProviders = options.Providers.Values.Any(provider => provider.Enabled);
 
-        // 允许零 provider 配置（AI 功能降级为不可用，但模块正常加载），
+        // 允许零已启用 provider 配置（AI 功能降级为不可用，但模块正常加载），
         // 但仍需继续校验 Permissions / MCP / Guardrails 等其他子模块。
         if (hasProviders)
         {
@@ -21,7 +28,11 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             }
             else if (!options.Providers.ContainsKey(options.DefaultProvider))
             {
-                errors.Add($"DefaultProvider '{options.DefaultProvider}' is not found in Providers");
+                errors.Add(
+                    $"DefaultProvider '{options.DefaultProvider}' is not found in Providers " +
+                    $"(configured providers: {string.Join(", ", options.Providers.Keys)}). " +
+                    "AI:Providers merges every configuration source, including environment variables " +
+                    "named AI__Providers__<Name>__<Field>.");
             }
             else if (!options.Providers[options.DefaultProvider].Enabled)
             {
@@ -31,6 +42,8 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 
         ValidatePermissionRules(options.Permissions, errors);
         ValidateMemoryOptions(options.ContextProviders?.Memory, errors);
+        ValidateAdHocTools(options.AdHocTools, errors);
+        ValidateCostTracking(options.CostTracking, errors);
 
         // ToolCacheSeconds 与部署配置的服务器清单无关（它是 [RuntimeSetting]，服务器只经数据库
         // 注册表提供时依然生效），因此不能锁在 Servers != null 分支里。
@@ -184,6 +197,20 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
                 errors.Add($"Provider '{providerName}' TimeoutSeconds must be between 1 and 600");
             }
 
+            // 验证 Prompt Caching：Anthropic 每请求最多 4 个 cache_control 块，中间件按价值封顶；
+            // 一个永远兑现不了的「最近 N 条」配置直接拒绝，而不是每次请求都安静地少给
+            if (providerOptions.PromptCaching is { } caching)
+            {
+                if (caching.CacheFirstNMessages < 0)
+                {
+                    errors.Add($"Provider '{providerName}' PromptCaching.CacheFirstNMessages cannot be negative");
+                }
+                if (caching.CacheRecentUserMessages < 0 || caching.CacheRecentUserMessages > PromptCachingMiddleware.MaxAnthropicBreakpoints)
+                {
+                    errors.Add($"Provider '{providerName}' PromptCaching.CacheRecentUserMessages must be between 0 and {PromptCachingMiddleware.MaxAnthropicBreakpoints} (Anthropic allows at most {PromptCachingMiddleware.MaxAnthropicBreakpoints} cache breakpoints per request)");
+                }
+            }
+
             // 验证 Models 别名字典（如有）
             if (providerOptions.Models != null)
             {
@@ -307,6 +334,76 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             && memory.ProjectSnapshotScopePrefix.Length > 64)
         {
             errors.Add("AI:ContextProviders:Memory:ProjectSnapshotScopePrefix is too long.");
+        }
+    }
+
+    /// <summary>
+    /// 成本追踪开着时，每条费率都得是真的费率。
+    /// </summary>
+    /// <remarks>
+    /// 一条 Input 与 Output 同时为 0 的费率没有合法用途（免费模型应当不配，计算器答 null 而不是 $0），
+    /// 却正是「键名写错」的唯一症状：绑定器对未知键静默忽略，<c>ModelCostRate</c> 被建出来但字段全 0，
+    /// 每条用量都记成 $0（非 null），<c>BudgetService</c> 的 Indeterminate 判据只认 null，预算永不触发，
+    /// 界面显示「已启用、$0 / 上限」。docs/modules/ai.md 的 Budget 示例就这样写了几个月。
+    /// 启动即拒而不是 warning：没有任何部署需要一条 0/0 的费率。
+    /// </remarks>
+    private static void ValidateCostTracking(CostTrackingOptions? costTracking, List<string> errors)
+    {
+        if (costTracking is not { Enabled: true })
+        {
+            return;
+        }
+
+        if (costTracking.DefaultCostRate != null)
+        {
+            ValidateCostRate("AI:CostTracking:DefaultCostRate", costTracking.DefaultCostRate, errors);
+        }
+
+        foreach (var (provider, models) in costTracking.ModelCosts)
+        {
+            foreach (var (model, rate) in models)
+            {
+                ValidateCostRate($"AI:CostTracking:ModelCosts:{provider}:{model}", rate, errors);
+            }
+        }
+    }
+
+    private static void ValidateCostRate(string path, ModelCostRate rate, List<string> errors)
+    {
+        if (rate.InputCostPer1MTokens < 0 || rate.OutputCostPer1MTokens < 0 || rate.CachedInputCostPer1MTokens < 0)
+        {
+            errors.Add($"{path}: InputCostPer1MTokens, OutputCostPer1MTokens and CachedInputCostPer1MTokens cannot be negative.");
+            return;
+        }
+
+        if (rate.InputCostPer1MTokens == 0 && rate.OutputCostPer1MTokens == 0)
+        {
+            errors.Add(
+                $"{path}: InputCostPer1MTokens and OutputCostPer1MTokens are both 0. " +
+                "The rate keys are InputCostPer1MTokens / OutputCostPer1MTokens (USD per million tokens); " +
+                "a zero rate usually means the key names did not bind. " +
+                "A model name containing ':' (an Ollama tag such as qwen3:8b) cannot be a configuration key at all, " +
+                "because ':' is the configuration path separator; price such models through the provider's \"*\" wildcard entry. " +
+                "Remove the entry for a free model instead of configuring 0.");
+        }
+    }
+
+    private static void ValidateAdHocTools(AdHocToolsOptions? adHocTools, List<string> errors)
+    {
+        if (adHocTools is null)
+        {
+            errors.Add("AdHocTools cannot be null");
+            return;
+        }
+
+        if (adHocTools.AllowedGroups is null || adHocTools.AllowedGroups.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("AdHocTools.AllowedGroups cannot be null or contain blank entries");
+        }
+
+        if (adHocTools.AllowedTools is null || adHocTools.AllowedTools.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("AdHocTools.AllowedTools cannot be null or contain blank entries");
         }
     }
 }

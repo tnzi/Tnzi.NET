@@ -8,6 +8,11 @@
  * readonly view-mode (as inputs or as a description list), and an injected
  * `translate` function for i18n.
  *
+ * `required` fields validate: the component exposes `validate()` /
+ * `restoreValidation()` and registers with a {@link FormHost} when one is
+ * provided above it, so the container that owns the submit button can check
+ * every slotted form before it saves.
+ *
  * Sunk from `@tnzi/ui-admin/pages/_shared/form-schema.ts` in 0.2.x so
  * site / chat / mobile and any consumer can use the same form-builder
  * shape. The companion CSS (`.t-form-schema--compact`) lives in
@@ -16,7 +21,10 @@
  */
 import { computed, defineComponent, h, type PropType, type VNode, type VNodeChild } from 'vue'
 import { NForm, NFormItem, NInput, NInputNumber, NSwitch, NSelect, NDatePicker, NTag } from 'naive-ui'
+import type { FormInst, FormItemRule } from 'naive-ui'
+import { useI18n } from '@tnzi/core/adapters/i18n'
 import { useBreakpoints } from '../../headless/theme/useBreakpoints'
+import { useFormHostRegistration } from '../../headless/form/form-host'
 import TDescriptions, { type DescriptionItem } from '../display/TDescriptions.vue'
 import TSvgIcon from '../display/TSvgIcon.vue'
 import { EMPTY_DASH, isEmptyValue } from '../../utils/placeholders'
@@ -50,6 +58,15 @@ export interface FormSchemaItem {
   // its editor based on other model values (e.g. SettingValueType-aware
   // value editor: text/number/switch/textarea per sibling enum).
   typeFn?: (model: Record<string, unknown>) => FormSchemaFieldType
+  /**
+   * Marks the field and makes it a validation rule: {@link TSchemaForm}'s
+   * exposed `validate()` (and a {@link FormHost} above it) rejects while the
+   * value is `null` / `undefined` / blank / an empty array. `0` and `false` are
+   * values, so on a `switch` this only draws the mark - a required boolean has
+   * no missing state. The message is the core catalog's `form.required` in the
+   * active locale (not routed through `translate`: page translators humanise
+   * a miss instead of returning empty, which would turn the key into a label).
+   */
   required?: boolean
   placeholder?: string
   /** Optional i18n key for the placeholder. */
@@ -203,7 +220,42 @@ const TSchemaForm = defineComponent({
     fieldRenderers: { type: Object as PropType<Record<string, FieldRenderer>>, default: undefined },
     minColumnWidth: { type: Number, default: 240 },
   },
-  setup(props: Props) {
+  setup(props: Props, { expose }) {
+    const i18n = useI18n()
+    // One NForm per block (sections render a form each); keyed so a block that
+    // leaves the tree drops out of validation instead of lingering as a stale ref.
+    const forms = new Map<string, FormInst>()
+    function formRef(key: string) {
+      return (inst: unknown) => {
+        if (inst) forms.set(key, inst as FormInst)
+        else forms.delete(key)
+      }
+    }
+
+    /**
+     * Runs every block's rules. Resolves false when any field fails; naive
+     * shows the messages inline. A readonly form has nothing to check.
+     */
+    async function validate(): Promise<boolean> {
+      if (props.readonly) return true
+      const results = await Promise.all(
+        [...forms.values()].map((form) =>
+          form.validate().then(
+            () => true,
+            () => false,
+          ),
+        ),
+      )
+      return results.every(Boolean)
+    }
+
+    function restoreValidation(): void {
+      for (const form of forms.values()) form.restoreValidation()
+    }
+
+    expose({ validate, restoreValidation })
+    useFormHostRegistration({ validate })
+
     // 手机端（<768px）强制单列：`:columns="2"` 等多列表单在窄屏会把每个
     // 字段挤成一条缝（消费方 BankFeed/Receipts 等）。塌成单列后每个字段
     // 都能占满整行。`useBreakpoints()` 已处理 SSR/无 window 场景——`isSm`
@@ -232,6 +284,22 @@ const TSchemaForm = defineComponent({
 
     function effectiveTypeOf(item: FormSchemaItem): FormSchemaFieldType {
       return item.typeFn ? item.typeFn(props.model) : item.type
+    }
+
+    /**
+     * The rule behind `required`. A custom validator rather than async-validator's
+     * own `required`: that one also type-checks the value as a string by default,
+     * which would fail a number field holding a perfectly good 0.
+     */
+    function requiredRule(item: FormSchemaItem): FormItemRule | undefined {
+      if (!item.required || props.readonly) return undefined
+      if (effectiveTypeOf(item) === 'switch') return undefined
+      const message = i18n.t('form.required')
+      return {
+        required: true,
+        trigger: ['blur', 'input', 'change'],
+        validator: (_rule, value) => (isEmptyValue(value) ? new Error(message) : true),
+      }
     }
 
     function renderField(item: FormSchemaItem) {
@@ -423,7 +491,7 @@ const TSchemaForm = defineComponent({
       return out
     })
 
-    function renderFormBlock(items: FormSchemaItem[], cols: number | 'auto'): VNode {
+    function renderFormBlock(items: FormSchemaItem[], cols: number | 'auto', blockKey: string): VNode {
       const formChildren = items.map((item) => {
         const spanStyle = fieldSpanStyle(item, cols)
         const hint = tr(item.hintKey, item.hint ?? '')
@@ -433,6 +501,7 @@ const TSchemaForm = defineComponent({
             label: tr(item.labelKey, item.label),
             path: item.key,
             required: item.required,
+            rule: requiredRule(item),
             key: item.key,
             style: spanStyle,
           },
@@ -450,6 +519,10 @@ const TSchemaForm = defineComponent({
       return h(
         NForm,
         {
+          ref: formRef(blockKey),
+          // `model` feeds naive's rule engine; the fields themselves still read
+          // and write the shared bag through `renderField`.
+          model: props.model,
           // The marker class drives compact spacing via ./form-schema.css.
           // Applied unconditionally so single-column forms benefit too - the
           // pre-refactor naive-ui defaults (24px feedback block, 8px label
@@ -521,7 +594,7 @@ const TSchemaForm = defineComponent({
         const cols = resolveCols()
         return useDescriptions
           ? renderDescriptionBlock(only.items, cols)
-          : renderFormBlock(only.items, cols)
+          : renderFormBlock(only.items, cols, '__lead__')
       }
 
       return h(
@@ -532,7 +605,11 @@ const TSchemaForm = defineComponent({
             block.section ? renderSectionHead(block.section) : null,
             useDescriptions
               ? renderDescriptionBlock(block.items, resolveCols(block.section?.columns))
-              : renderFormBlock(block.items, resolveCols(block.section?.columns)),
+              : renderFormBlock(
+                  block.items,
+                  resolveCols(block.section?.columns),
+                  block.section?.key ?? '__lead__',
+                ),
           ]),
         ),
       )

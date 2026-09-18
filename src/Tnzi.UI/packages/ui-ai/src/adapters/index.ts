@@ -21,7 +21,7 @@
  * `useChatThreads`), per this package's transport rule.
  */
 import type { AgentThreadDto, ThreadMessageDto } from '@tnzi/core/services/ai';
-import type { ChatMessage } from '../headless/useChat';
+import type { ChatMessage, ToolCallInfo, TokenUsage } from '../headless/useChat';
 import type { ThreadItem } from '../components/chat/TThreadList.vue';
 
 /** Roles the message components know how to render. */
@@ -41,19 +41,61 @@ export function toMessageRole(role: string | null | undefined): ChatMessage['rol
 }
 
 /**
+ * Lower-case the first letter of every key, recursively.
+ *
+ * ★ The persisted `toolCalls` / `usage` columns were written by the backend's
+ * history middleware with System.Text.Json's DEFAULT options - PascalCase
+ * (`{"InputTokens":…}`, `[{"Name":…,"DurationMs":…}]`) - while the SSE stream
+ * and every frontend type are camelCase. Rows in that shape exist in every
+ * database that has ever run the AI module, so the adapter reads both
+ * spellings instead of asking for a data migration. camelCase input passes
+ * through unchanged.
+ */
+function camelizeKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(camelizeKeys);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, v]) => [
+      key.charAt(0).toLowerCase() + key.slice(1),
+      camelizeKeys(v),
+    ]),
+  );
+}
+
+/**
  * `ThreadMessageDto.toolCalls` / `.usage` are JSON **strings** on the wire while
  * `ChatMessage` wants objects. Parse defensively: a message that cannot be
  * fully understood should still render its text, not vanish or throw. Returns
  * `null` for anything unusable, which is also what "absent" looks like.
  */
-function parseJsonField<T>(raw: string | null | undefined): T | null {
+function parseJsonField(raw: string | null | undefined): unknown {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as T) : null;
+    return parsed && typeof parsed === 'object' ? camelizeKeys(parsed) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Only entries with a name survive: `TToolCallDisplay` derives its label from
+ * `name`, and an entry without one would render a card with nothing on it (or
+ * throw on `.replace`). Anything that is not an object is dropped the same way.
+ */
+function toToolCalls(raw: string | null | undefined): ToolCallInfo[] | null {
+  const parsed = parseJsonField(raw);
+  if (!Array.isArray(parsed)) return null;
+  const calls = parsed.filter(
+    (c): c is ToolCallInfo =>
+      !!c && typeof c === 'object' && typeof (c as { name?: unknown }).name === 'string',
+  );
+  return calls;
+}
+
+function toUsage(raw: string | null | undefined): TokenUsage | null {
+  const parsed = parseJsonField(raw);
+  return parsed && !Array.isArray(parsed) ? (parsed as TokenUsage) : null;
 }
 
 /**
@@ -66,7 +108,9 @@ function parseJsonField<T>(raw: string | null | undefined): T | null {
  * meant a conversation looked complete while it was streaming and then lost its
  * tool-call blocks and token counts the moment the thread was reopened - the
  * kind of gap nobody reports as a bug because it reads as "the history is just
- * shorter".
+ * shorter". And carrying them through was not enough on its own: the stored
+ * JSON is PascalCase (see `camelizeKeys`), so the first version of this
+ * mapping parsed keys nothing downstream read.
  */
 export function toChatMessage(
   message: Pick<ThreadMessageDto, 'id' | 'role' | 'content' | 'creationTime'> &
@@ -78,8 +122,8 @@ export function toChatMessage(
     content: message.content,
     createdAt: message.creationTime,
     feedbackRating: message.feedbackRating ?? null,
-    toolCalls: parseJsonField<ChatMessage['toolCalls']>(message.toolCalls) ?? null,
-    usage: parseJsonField<ChatMessage['usage']>(message.usage) ?? null,
+    toolCalls: toToolCalls(message.toolCalls),
+    usage: toUsage(message.usage),
   };
 }
 

@@ -149,6 +149,16 @@ export function translatePageKey(pageNs: string, key: string): string {
   const hit = find(full)
   if (hit !== undefined) return hit
 
+  // A key that already carries its own page namespace (`finance.recurring.actions.end`
+  // handed to the `finance.recurring` translator) would be prefixed twice above and
+  // miss. Resolve it once-prefixed instead of humanising: the slip is easy to make,
+  // nothing errors, and the humanised result reads as plausible English ("End
+  // Confirm") so only a non-English user or the confirm text gives it away.
+  if (pageNs && normalised.startsWith(`${pageNs}.`)) {
+    const repaired = find(`admin.modules.${normalised}`)
+    if (repaired !== undefined) return repaired
+  }
+
   // Shared dictionary fallback for `columns.xxx` / `form.xxx` keys - lets a
   // single global label cover every page that surfaces the same field name
   // (column.key). Page-scoped entries always take precedence above; this

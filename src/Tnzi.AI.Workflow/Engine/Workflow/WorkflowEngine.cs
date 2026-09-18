@@ -45,6 +45,10 @@ public class WorkflowEngine
         var checkpointStore = options?.CheckpointStore;
         var interruptHandler = options?.InterruptHandler;
 
+        // 执行期间持续给 WorkflowExecution 行发心跳（所有模式、与检查点无关），否则看门狗会把一次
+        // 跑得久的执行当成崩溃回收。只在调用方给了 ExecutionId（即有行可保活）时启动；释放即停。
+        await using var heartbeat = WorkflowExecutionHeartbeatLoop.Start(serviceProvider, options?.ExecutionId, _logger, cancellationToken);
+
         // 复杂工作流默认启用 Run tracking：条件边、循环、检查点/HITL 都需要可观测的运行实例
         var hasConditionalEdges = graph.ConditionalEdges.Count > 0;
         var hasLoops = graph.Loops.Count > 0;
@@ -74,6 +78,7 @@ public class WorkflowEngine
         var cancelled = false;
         var awaitingApproval = false;
         string? awaitingApprovalStepId = null;
+        var awaitingApprovalStepIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         WorkflowInterrupt? awaitingInterrupt = null;
         DateTime? checkpointCreatedAt = null;
 
@@ -142,13 +147,7 @@ public class WorkflowEngine
                     await runStore!.UpdateNodeAsync(nodeRecord, cancellationToken);
                 }
 
-                Dictionary<string, object>? resumeData = null;
-                if (options?.ResumeStepId != null
-                    && string.Equals(options.ResumeStepId, stepId, StringComparison.OrdinalIgnoreCase)
-                    && options.ResumeData != null)
-                {
-                    resumeData = options.ResumeData;
-                }
+                var resumeData = ResolveResumeData(options, stepId);
 
                 prepared.Add(new NodePreparation(step, stepId, nodeRecord, resumeData, Skipped: false, SkippedResult: null));
             }
@@ -180,7 +179,15 @@ public class WorkflowEngine
 
             foreach (var (stepId, nodeRecord, result, skipped) in results)
             {
-                completed.Add(stepId);
+                // ★ 被中断的节点没有执行过，不能算完成：它的输出只是执行器的 `[Awaiting ...]` 占位符。
+                // 此前它被一并写进检查点的 CompletedStepIds，恢复时 GetReadyNodes 直接跳过它，
+                // ResumeData 永远送不到节点手里 —— 人工输入被丢弃、审批节点把截断的占位符转给下游，
+                // 而 Resume / ResumeWithInput 都报 Completed。留在 completed 之外，恢复时它会重新就绪。
+                var interrupted = result.AwaitingInterrupt != null;
+                if (!interrupted)
+                {
+                    completed.Add(stepId);
+                }
 
                 // 节点级错误策略：在失败时决定输出内容与是否中止
                 var step = prepared.First(p => string.Equals(p.StepId, stepId, StringComparison.OrdinalIgnoreCase)).Step;
@@ -252,35 +259,59 @@ public class WorkflowEngine
                      await UpdateRunNodeAsync(runStore, nodeRecord, nodeStatus, effectiveResult, result.Error, cancellationToken);
                  }
 
-                // 处理节点级审批暂停和通用中断
-                (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt, checkpointCreatedAt) =
-                    await HandleApprovalInterruptAsync(
-                        effectiveResult, stepId, failed, awaitingApproval, awaitingApprovalStepId, awaitingInterrupt,
-                        checkpointStore, executionId, state, completed, checkpointCreatedAt, cancellationToken);
+                // 记录节点级审批暂停和通用中断（检查点在整层结果处理完之后统一写一次）
+                (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt) =
+                    RecordInterrupt(effectiveResult, stepId, failed, awaitingApproval, awaitingApprovalStepId,
+                        awaitingApprovalStepIds, awaitingInterrupt, checkpointStore);
 
-                // 处理条件边路由
-                if (!skipped && !failed)
+                // 处理条件边路由（被中断的节点还没有真实输出，路由与循环等它恢复执行后再算）
+                if (!skipped && !failed && !interrupted)
                 {
                     await HandleConditionalEdgeAsync(graph, stepId, effectiveResult, state, completed, runStore, run, nodeOrderIndex, cancellationToken);
                 }
 
                 // 处理循环
-                if (!skipped && !failed)
+                if (!skipped && !failed && !interrupted)
                 {
                     HandleLoop(graph, stepId, state, completed, loopIterations);
                 }
             }
 
-            // 如果有节点请求审批暂停或通用中断，跳出主循环
-            if (awaitingApproval || awaitingInterrupt != null) break;
+            // ★ 暂停检查点在整层结果都折进 completed / state 之后才写，且一次写全：此前它在处理
+            // 第一个被中断的结果时就写掉了，同层随后完成的兄弟节点不在里面，恢复时被重跑重计费；
+            // 第二个审批节点也因「已经在等审批」被跳过，永远进不了 StepsAwaitingApproval。
+            if (awaitingApproval || awaitingInterrupt != null)
+            {
+                if (checkpointStore != null)
+                {
+                    checkpointCreatedAt ??= DateTime.UtcNow;
+                    if (awaitingApproval)
+                    {
+                        await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
+                            WorkflowExecutionStatus.AwaitingApproval, awaitingApprovalStepIds, checkpointCreatedAt, cancellationToken);
+                    }
+                    else
+                    {
+                        await SaveCheckpointWithInterruptAsync(checkpointStore, executionId, state, completed,
+                            awaitingInterrupt!, checkpointCreatedAt, cancellationToken);
+                    }
+                }
+
+                break;
+            }
 
             // 只有 Fail 策略（默认）会把 failed 置 true；Skip/Continue 吸收失败，不置位也不中止。
             if (failed) break;
 
-            // HITL：检查本层是否有步骤需要人工审批
+            // HITL：检查本层是否有步骤需要人工审批。
+            // nodeType=approval 的节点自己就是闸门（经 CheckInterruptAsync 暂停、恢复时按 ResumeData 出结果），
+            // 可视化编辑器会给它同时打上 RequiresApproval；这里排除它，否则恢复执行后又被 run-then-gate
+            // 拦一次，同一个节点要审批两遍。
             if (!failed)
             {
-                var approvalNodes = readyNodes.Where(s => s.RequiresApproval).ToList();
+                var approvalNodes = readyNodes
+                    .Where(s => s.RequiresApproval && !IsApprovalNodeType(s))
+                    .ToList();
                 foreach (var approvalNode in approvalNodes)
                 {
                     var approvalStepId = approvalNode.StepId!;
@@ -321,21 +352,24 @@ public class WorkflowEngine
                     else if (checkpointStore != null)
                     {
                         awaitingApproval = true;
-                        awaitingApprovalStepId = approvalStepId;
+                        awaitingApprovalStepId ??= approvalStepId;
+                        awaitingApprovalStepIds.Add(approvalStepId);
                         await UpdateRunNodeAsync(runStore, run?.Nodes.FirstOrDefault(n =>
                             string.Equals(n.NodeName, approvalStepId, StringComparison.OrdinalIgnoreCase)),
                             AgentRunNodeStatus.AwaitingApproval,
                             new WorkflowNodeResult { Output = state.GetOutput(approvalStepId) ?? string.Empty, AwaitingApproval = true },
                             null,
                             cancellationToken);
-                        checkpointCreatedAt ??= DateTime.UtcNow;
-                        await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                            WorkflowExecutionStatus.AwaitingApproval, [approvalStepId], checkpointCreatedAt, cancellationToken);
-                        break;
                     }
                 }
 
-                if (awaitingApproval) break;
+                if (awaitingApproval)
+                {
+                    checkpointCreatedAt ??= DateTime.UtcNow;
+                    await SaveCheckpointAsync(checkpointStore!, executionId, state, completed,
+                        WorkflowExecutionStatus.AwaitingApproval, awaitingApprovalStepIds, checkpointCreatedAt, cancellationToken);
+                    break;
+                }
             }
 
             // 每层完成后保存检查点
@@ -374,69 +408,86 @@ public class WorkflowEngine
     /// <summary>
     /// 处理节点级审批暂停和通用中断
     /// </summary>
-    private async Task<(bool awaitingApproval, string? awaitingApprovalStepId, WorkflowInterrupt? awaitingInterrupt, DateTime? checkpointCreatedAt)>
-        HandleApprovalInterruptAsync(
+    /// <summary>
+    /// 恢复时交给节点的 ResumeData：按步骤的映射优先，其次是单步的 ResumeStepId/ResumeData 对。
+    /// 同一层里多个审批节点各自被批准后，一次恢复要把每个节点的结论都带上。
+    /// </summary>
+    private static Dictionary<string, object>? ResolveResumeData(WorkflowExecutionOptions? options, string stepId)
+    {
+        if (options == null) return null;
+
+        if (options.ResumeDataByStep != null && options.ResumeDataByStep.TryGetValue(stepId, out var perStep))
+        {
+            return perStep;
+        }
+
+        return options.ResumeStepId != null
+               && string.Equals(options.ResumeStepId, stepId, StringComparison.OrdinalIgnoreCase)
+            ? options.ResumeData
+            : null;
+    }
+
+    /// <summary>
+    /// 记录一个节点结果携带的暂停请求。只记不写：本层所有结果处理完后，调用方按累计的
+    /// 审批集合 / 首个通用中断写一次检查点。审批型（含 <see cref="InterruptType.Approval"/>
+    /// 的通用中断）全部进 <paramref name="awaitingApprovalStepIds"/>；其它类型只保留第一个，
+    /// 后面的节点不在 completed 里，恢复后会再次中断。
+    /// </summary>
+    private static (bool awaitingApproval, string? awaitingApprovalStepId, WorkflowInterrupt? awaitingInterrupt)
+        RecordInterrupt(
             WorkflowNodeResult result,
             string stepId,
             bool failed,
             bool awaitingApproval,
             string? awaitingApprovalStepId,
+            HashSet<string> awaitingApprovalStepIds,
             WorkflowInterrupt? awaitingInterrupt,
-            IWorkflowCheckpointStore? checkpointStore,
-            string executionId,
-            WorkflowState state,
-            HashSet<string> completed,
-            DateTime? checkpointCreatedAt,
-            CancellationToken cancellationToken)
+            IWorkflowCheckpointStore? checkpointStore)
     {
-        // 处理节点级审批暂停（ApprovalNode 返回 AwaitingApproval=true）
-        if (result.AwaitingApproval && !failed)
+        if (failed)
+        {
+            return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt);
+        }
+
+        // 节点级审批暂停（ApprovalNode 返回 AwaitingApproval=true）
+        if (result.AwaitingApproval)
         {
             awaitingApproval = true;
-            awaitingApprovalStepId = stepId;
-            if (checkpointStore != null)
-            {
-                checkpointCreatedAt ??= DateTime.UtcNow;
-                await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                    WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
-            }
+            awaitingApprovalStepId ??= stepId;
+            awaitingApprovalStepIds.Add(stepId);
+            return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt);
         }
 
-        // 处理通用中断（CheckInterruptAsync 返回 AwaitingInterrupt）
-        if (result.AwaitingInterrupt != null && !failed && !awaitingApproval)
+        if (result.AwaitingInterrupt == null)
         {
-            // Runtime backstop for interrupt/HITL nodes. The static HasHitlNode entry guard
-            // only catches declared approval nodes (RequiresApproval / nodeType=approval);
-            // a custom node can raise an interrupt via CheckInterruptAsync without those
-            // markers. Any interrupt needs a checkpoint store to persist resumable state, and
-            // non-DAG modes have none, so setting an awaiting state here would break with no
-            // way to resume (silent hang). Fail fast instead.
-            if (checkpointStore == null)
-            {
-                throw new BusinessException(
-                    "Interrupt/HITL nodes require DAG execution mode",
-                    ErrorCodes.WorkflowExecutionInvalidState, 400);
-            }
-
-            awaitingInterrupt = result.AwaitingInterrupt;
-            checkpointCreatedAt ??= DateTime.UtcNow;
-
-            // Approval 类型中断保持向后兼容（checkpointStore 已由上方守卫保证非 null）
-            if (awaitingInterrupt.Type == InterruptType.Approval)
-            {
-                awaitingApproval = true;
-                awaitingApprovalStepId = stepId;
-                await SaveCheckpointAsync(checkpointStore, executionId, state, completed,
-                    WorkflowExecutionStatus.AwaitingApproval, [stepId], checkpointCreatedAt, cancellationToken);
-            }
-            else
-            {
-                await SaveCheckpointWithInterruptAsync(checkpointStore, executionId, state, completed,
-                    awaitingInterrupt, checkpointCreatedAt, cancellationToken);
-            }
+            return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt);
         }
 
-        return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt, checkpointCreatedAt);
+        // Runtime backstop for interrupt/HITL nodes. The static HasHitlNode entry guard
+        // only catches declared approval nodes (RequiresApproval / nodeType=approval);
+        // a custom node can raise an interrupt via CheckInterruptAsync without those
+        // markers. Any interrupt needs a checkpoint store to persist resumable state, and
+        // non-DAG modes have none, so setting an awaiting state here would break with no
+        // way to resume (silent hang). Fail fast instead.
+        if (checkpointStore == null)
+        {
+            throw new BusinessException(
+                "Interrupt/HITL nodes require DAG execution mode",
+                ErrorCodes.WorkflowExecutionInvalidState, 400);
+        }
+
+        // 审批型通用中断同时置两个标志（结果对象向后兼容地暴露 AwaitingInterrupt），
+        // 检查点与运行状态以 awaitingApproval 为准。
+        if (result.AwaitingInterrupt.Type == InterruptType.Approval)
+        {
+            awaitingApproval = true;
+            awaitingApprovalStepId ??= stepId;
+            awaitingApprovalStepIds.Add(stepId);
+        }
+
+        awaitingInterrupt ??= result.AwaitingInterrupt;
+
+        return (awaitingApproval, awaitingApprovalStepId, awaitingInterrupt);
     }
 
     /// <summary>
@@ -480,13 +531,20 @@ public class WorkflowEngine
             runStore ??= serviceProvider.GetService<IRunStore>();
             if (runStore != null)
             {
+                // 中断分两种等待：审批型等 approve/reject，其余（HumanInput / ExternalEvent）等
+                // ResumeWithInputAsync。行上的状态必须与执行的 AwaitingApproval / AwaitingInput 同口径
+                // （与 WorkflowDelegator.MapStatus 一致）：此前一律写 AwaitingApproval，于是首次
+                // HumanInput 中断后 send_agent_input 被按行状态判成"未在等输入"而 409，
+                // 而读执行状态的 GetState 同时报 canSendInput=true。
                 run.Status = failed
                     ? AgentRunStatus.Failed
                     : cancelled
                         ? AgentRunStatus.Cancelled
-                        : awaitingApproval || awaitingInterrupt != null
+                        : awaitingApproval
                             ? AgentRunStatus.AwaitingApproval
-                            : AgentRunStatus.Completed;
+                            : awaitingInterrupt != null
+                                ? AgentRunStatus.RequiresClarification
+                                : AgentRunStatus.Completed;
                 run.TotalInputTokens = totalInputTokens;
                 run.TotalOutputTokens = totalOutputTokens;
                 run.OutputSummary = stepResults.LastOrDefault(r => !r.Skipped)?.Output;
@@ -542,10 +600,14 @@ public class WorkflowEngine
         var outputText = result.Output.Text;
         string? targetNodeId = null;
 
-        // 优先使用节点结果中的 RouteTo
+        // 优先使用节点结果中的 RouteTo。Router / Conditional / Review 节点给的是<b>路由键</b>（"accept" / "technical"），
+        // 要经边的 Routes 表翻成目标节点；代码优先的节点也可以直接给目标节点 id。两者都不是时落到 DefaultTarget ——
+        // 此前把路由键当节点 id 用：选中集合里是一个不存在的节点，随后所有真实分支被一起标成跳过。
         if (result.RouteTo != null)
         {
-            targetNodeId = result.RouteTo;
+            targetNodeId = edge.Routes.TryGetValue(result.RouteTo, out var mappedTarget)
+                ? mappedTarget
+                : graph.GetNode(result.RouteTo) != null ? result.RouteTo : null;
         }
         else
         {
@@ -813,23 +875,14 @@ public class WorkflowEngine
 
     private static bool RequiresHumanApproval(WorkflowStepDto step)
     {
-        if (step.RequiresApproval) return true;
-        return step.Configuration != null
-            && step.Configuration.TryGetValue("nodeType", out var nodeType)
-            && string.Equals(nodeType, WorkflowNodeTypes.Approval, StringComparison.OrdinalIgnoreCase);
+        return step.RequiresApproval || IsApprovalNodeType(step);
     }
+
+    private static bool IsApprovalNodeType(WorkflowStepDto step)
+        => string.Equals(GetNodeType(step), WorkflowNodeTypes.Approval, StringComparison.OrdinalIgnoreCase);
 
     private static string GetNodeType(WorkflowStepDto step)
-    {
-        if (step.Configuration != null
-            && step.Configuration.TryGetValue("nodeType", out var nodeType)
-            && !string.IsNullOrWhiteSpace(nodeType))
-        {
-            return nodeType;
-        }
-
-        return WorkflowNodeTypes.Agent;
-    }
+        => WorkflowStepNodeType.Get(step) ?? WorkflowNodeTypes.Agent;
 
     // Node input summary uses the shared WorkflowNodeHelper.BuildStepInput (single
     // canonical implementation, also consumed by AgentNode) to avoid triplicated logic.
@@ -1025,8 +1078,15 @@ public class WorkflowEngine
         await store.SaveCheckpointAsync(checkpoint, ct);
     }
 
+    /// <summary>
+    /// 从邮箱拉取待处理信号并应用。★ 引擎只应用 <see cref="WorkflowExecutionSignalTypes.Cancel"/>；
+    /// 其它类型（含 <see cref="WorkflowExecutionSignalTypes.ResumeInput"/>）没有应用路径 ——
+    /// 人工输入到达节点的唯一通道是服务层的 ResumeWithInput（<c>ResumeStepId</c>/<c>ResumeData</c>）。
+    /// 这类信号仍会被确认（留着只会把 PendingSignalCount 钉死，永远没人来应用它），但**记 Warning 指名**，
+    /// 此前是无声确认并丢弃。
+    /// </summary>
     [ExperimentalApi(Reason = "Workflow mailbox and signals are in preview")]
-    private static async Task<WorkflowSignalProcessingResult> ApplyPendingSignalsAsync(
+    private async Task<WorkflowSignalProcessingResult> ApplyPendingSignalsAsync(
         string executionId,
         IServiceProvider serviceProvider,
         IWorkflowCheckpointStore? checkpointStore,
@@ -1059,7 +1119,14 @@ public class WorkflowEngine
                     cancelled = true;
                     consumedIds.Add(signal.SignalId);
                     break;
-                case WorkflowExecutionSignalTypes.ResumeInput:
+                default:
+                    _logger.LogWarning(
+                        "Workflow execution '{ExecutionId}' discarded signal '{SignalId}' of type '{SignalType}' (step: {StepId}): the engine applies only '{CancelType}' signals; deliver input through ResumeWithInput instead.",
+                        executionId,
+                        signal.SignalId,
+                        signal.Type,
+                        signal.StepId,
+                        WorkflowExecutionSignalTypes.Cancel);
                     consumedIds.Add(signal.SignalId);
                     break;
             }
@@ -1170,10 +1237,16 @@ public class WorkflowEngineResult
     /// <summary>
     /// 根据执行结果推导状态文本（用于 DTO 层）
     /// </summary>
-    public string StatusText => AwaitingInterrupt != null
-        ? nameof(WorkflowExecutionStatus.AwaitingInput)
-        : AwaitingApproval
-            ? nameof(WorkflowExecutionStatus.AwaitingApproval)
+    /// <remarks>
+    /// ★ 审批优先于通用中断：<c>InterruptType.Approval</c> 的中断会同时置位 <see cref="AwaitingApproval"/>
+    /// 与 <see cref="AwaitingInterrupt"/>，而检查点存的是 <c>AwaitingApproval</c>。此前这里先看中断，
+    /// 于是 nodeType=approval 的执行经服务层落库成 <c>AwaitingInput</c>，随后 <c>ApproveStepAsync</c>
+    /// 以"不在审批中"拒绝（400）—— 文档里的 approve → resume 流程对审批节点从来走不通。
+    /// </remarks>
+    public string StatusText => AwaitingApproval
+        ? nameof(WorkflowExecutionStatus.AwaitingApproval)
+        : AwaitingInterrupt != null
+            ? nameof(WorkflowExecutionStatus.AwaitingInput)
             : Cancelled
                 ? nameof(WorkflowExecutionStatus.Cancelled)
             : HasFailure

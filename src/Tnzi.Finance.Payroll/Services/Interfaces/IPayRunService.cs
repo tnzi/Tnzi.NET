@@ -22,7 +22,11 @@ public interface IPayRunService
     /// <summary>更新发薪批次草稿（仅 Draft 态）</summary>
     Task<Result<PayRunDto>> UpdateAsync(Guid id, UpdatePayRunDto input, CancellationToken cancellationToken = default);
 
-    /// <summary>删除发薪批次草稿（仅 Draft 态；payslips 级联删除）</summary>
+    /// <summary>
+    /// 删除发薪批次（Draft 或 Calculated 态；payslips 与一次性输入随之删除）。
+    /// Calculated 态没有任何凭证，删除是安全的 —— 这也是摄取错了的 External / OpeningBalance 批次
+    /// 唯一的退出路径（删掉之后同一 ProviderRunId 可以重新摄取）。已过账的批次只能作废。
+    /// </summary>
     Task<Result> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>计算/重算（Draft|Calculated → Calculated；旧 payslips 重建，Error 不炸整批）</summary>

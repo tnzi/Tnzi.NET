@@ -1,5 +1,16 @@
 <Project>
+  <!--
+    Default TnziVersion for consumers that rely on <TnziModules> without setting it themselves.
+
+    In the checked-in template the value below is a placeholder token; Tnzi.Hosting.csproj replaces
+    it with the package version at pack time and ships the substituted copy under build\ (the
+    template itself is never packed; HostingTargetsSyncTests keeps it that way). The default
+    therefore always equals the Tnzi.Hosting package that imported it, so every Tnzi.* package
+    expanded from <TnziModules> resolves to the same version as the core. A hard-coded number here
+    once pinned consumers to modules from months before the core they restored, with no restore
+    warning.
+  -->
   <PropertyGroup>
-    <TnziVersion Condition="'$(TnziVersion)' == ''">0.1.2</TnziVersion>
+    <TnziVersion Condition="'$(TnziVersion)' == ''">__TNZI_VERSION__</TnziVersion>
   </PropertyGroup>
 </Project>

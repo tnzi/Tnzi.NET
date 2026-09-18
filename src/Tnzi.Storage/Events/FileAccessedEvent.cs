@@ -14,6 +14,12 @@ public class FileAccessedEvent : EventBase
     /// Access type
     /// </summary>
     public FileAccessType AccessType { get; set; }
+
+    /// <summary>
+    /// The historical version whose content was read (<c>GET files/{id}/versions/{version}/download</c>),
+    /// or <c>null</c> when the file's current content was accessed.
+    /// </summary>
+    public int? Version { get; set; }
 }
 
 /// <summary>

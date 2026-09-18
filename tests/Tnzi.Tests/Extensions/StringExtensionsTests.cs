@@ -236,6 +236,86 @@ public class StringExtensionsTests
         Assert.Equal(expected, result);
     }
 
+    [Fact]
+    public void IsEmail_OverLength_ReturnsFalse()
+    {
+        // RFC 5321 上限 254；超长直接拒绝，不进正则
+        var local = new string('a', 250);
+        Assert.False((local + "@example.com").IsEmail());
+        Assert.True((new string('a', 240) + "@example.com").IsEmail());
+    }
+
+    [Fact]
+    public void IsEmail_PathologicalDots_ReturnsFalseWithinBudget()
+    {
+        var input = "a@" + string.Concat(Enumerable.Repeat("a.", 120)) + "!";
+
+        var sw = Stopwatch.StartNew();
+        var result = input.IsEmail();
+        sw.Stop();
+
+        Assert.False(result);
+        Assert.True(sw.ElapsedMilliseconds < 200, $"took {sw.ElapsedMilliseconds}ms");
+    }
+
+    [Theory]
+    [InlineData("(415) 555-2671")]
+    [InlineData("415-555-2671")]
+    [InlineData("415.555.2671")]
+    [InlineData("4155552671")]
+    [InlineData("5552671")]
+    [InlineData("+1 415.555.2671 x12")]
+    [InlineData("+1 (415) 555-2671 ext 123")]
+    [InlineData("+1-415-555-2671")]
+    [InlineData("415 555 2671 extension 4")]
+    [InlineData("(415) 555-2671#12")]
+    public void IsPhoneNumber_ValidShapes_StillMatch(string input)
+    {
+        Assert.True(input.IsPhoneNumber());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("abc")]
+    [InlineData("115-555-2671")]
+    [InlineData("415-555-267")]
+    [InlineData("+44 20 7946 0958")]
+    [InlineData("415-555-2671 x")]
+    public void IsPhoneNumber_InvalidShapes_Rejected(string input)
+    {
+        Assert.False(input.IsPhoneNumber());
+    }
+
+    [Theory]
+    [InlineData("13800138000", true)]
+    [InlineData("23800138000", false)]
+    [InlineData("1380013800", false)]
+    public void IsPhoneNumber_LooseMode_ElevenDigitsStartingWithOne(string input, bool expected)
+    {
+        Assert.Equal(expected, input.IsPhoneNumber(isRestrict: false));
+    }
+
+    [Fact]
+    public void IsPhoneNumber_PathologicalWhitespace_ReturnsFalseWithinBudget()
+    {
+        // 三层相邻的可选空白量词：无长度闸门与线性引擎时，失败输入按 N^2 到 N^3 回溯
+        var input = "+1" + new string(' ', 20000) + "!";
+
+        var sw = Stopwatch.StartNew();
+        var result = input.IsPhoneNumber();
+        sw.Stop();
+
+        Assert.False(result);
+        Assert.True(sw.ElapsedMilliseconds < 200, $"took {sw.ElapsedMilliseconds}ms");
+    }
+
+    [Fact]
+    public void IsPhoneNumber_OverLength_ReturnsFalse()
+    {
+        Assert.False(("+1 (415) 555-2671 extension " + new string('1', 40)).IsPhoneNumber());
+        Assert.True("+1 (415) 555-2671 extension 12345".IsPhoneNumber());
+    }
+
 
 
     [Theory]

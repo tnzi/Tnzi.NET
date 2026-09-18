@@ -11,6 +11,10 @@
  *      runtime, including the two-factor hand-off.
  *   3. **Where to go afterwards** - honours `?redirect=` so a deep link
  *      survives being bounced through sign-in.
+ *   4. **Why the user is here** - `runtime.auth.sessionEndReason`, when the
+ *      previous session was ended by the backend. The security case is the
+ *      one moment a person can learn their credentials are in use elsewhere;
+ *      core keeps it alive across the unauthorized signal for this page.
  *
  * `defineChatApp()` mounts this automatically. Register it by hand only if you
  * assemble your own router.
@@ -75,6 +79,13 @@ const providers = ref<LoginThirdPartyProvider[]>([]);
 const callbacks = buildDefaultLoginCallbacks(props.runtime);
 
 /**
+ * Snapshotted at setup, not a computed: the value lives in core's single
+ * `auth.error` slot and anything that runs `clearAuth()` afterwards would blank
+ * a computed while the user is still reading the notice.
+ */
+const sessionEndReason = props.runtime.auth.sessionEndReason ?? null;
+
+/**
  * A failed config fetch leaves the defaults in place rather than blanking the
  * page: the backend rejects anything it has actually disabled, so the worst
  * case is one wasted attempt - against a sign-in page that renders nothing.
@@ -114,6 +125,8 @@ function onOauth(provider: LoginThirdPartyProvider): void {
     :terms-href="termsHref"
     :privacy-href="privacyHref"
     :footnote="footnote"
+    :session-end-reason="sessionEndReason"
+    :resolve-url="(url: string) => runtime.http.resolveUrl(url)"
     @authenticated="onAuthenticated"
     @oauth="onOauth"
   >

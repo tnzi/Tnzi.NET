@@ -1,4 +1,3 @@
-using Tnzi.Notification.Metadata;
 using Message = Tnzi.Notification.Entities.Message;
 
 namespace Tnzi.Notification.Tests.Services;
@@ -37,10 +36,8 @@ public class NotificationEnhancementTests
 
         _service = new NotificationService(
             _repositoryMock.Object,
-            new Mock<IEmailSender>().Object,
-            new Mock<ISmsSender>().Object,
-            new Mock<IPushSender>().Object,
-            new Mock<IFaxSender>().Object,
+            new FixedProviderResolver(new Mock<IEmailSender>().Object, new Mock<ISmsSender>().Object, new Mock<IPushSender>().Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
             _unitOfWorkMock.Object,
             optionsMock.Object,
             serviceProviderMock.Object,

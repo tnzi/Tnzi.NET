@@ -21,6 +21,12 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
     /// </summary>
     private readonly IFileAccessGrantContext _grants;
 
+    /// <summary>
+    /// 当前租户。匿名收件人没有租户上下文，令牌解析得出后把这次请求切进那一行的租户（见收件人面）。
+    /// <c>Tnzi.EFCore</c> 注册它，本模块 <c>[DependsOn(EFCoreModule)]</c>，故是必需依赖。
+    /// </summary>
+    private readonly ICurrentTenant _currentTenant;
+
     public EnvelopeService(
         IServiceProvider serviceProvider,
         IRepository<Envelope, Guid> requests,
@@ -33,7 +39,8 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         SigningCertificateBuilder certificates,
         ComposedDocumentRenderer composer,
         IFileStorageService files,
-        IFileAccessGrantContext grants)
+        IFileAccessGrantContext grants,
+        ICurrentTenant currentTenant)
         : base(serviceProvider)
     {
         _requests = Check.NotNull(requests);
@@ -47,6 +54,7 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         _composer = Check.NotNull(composer);
         _files = Check.NotNull(files);
         _grants = Check.NotNull(grants);
+        _currentTenant = Check.NotNull(currentTenant);
     }
 
     /// <inheritdoc />
@@ -55,6 +63,10 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         Check.NotNull(input);
         if (input.Recipients is not { Count: > 0 })
             return Fail<EnvelopeDto>("At least one recipient is required.", 400);
+
+        var roleCheck = CheckRecipientRoles(input.Recipients);
+        if (roleCheck != null)
+            return Fail<EnvelopeDto>(roleCheck.Message!, roleCheck.Code ?? 400);
 
         var template = await _templates.GetAsync(input.TemplateId, cancellationToken);
         if (template == null)
@@ -87,6 +99,16 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
             TemplateName = template.Name,
             Fields = templateFields.OrderBy(f => f.SortOrder).Select(SnapshotField.From).ToList(),
         };
+
+        var coverage = CheckFieldRoleCoverage(snapshot, input.Recipients);
+        if (coverage != null)
+            return Fail<EnvelopeDto>(coverage.Message!, coverage.Code ?? 400);
+
+        // 合并变量与预填在落库、排版之前就解析并过上限：越界是 400 不是写列时的数据库异常。
+        var initialValues = await ResolveInitialValuesAsync(snapshot, input, cancellationToken);
+        var lengthCheck = CheckInitialValueLengths(snapshot, initialValues);
+        if (lengthCheck != null)
+            return Fail<EnvelopeDto>(lengthCheck.Message!, lengthCheck.Code ?? 400);
 
         var title = string.IsNullOrWhiteSpace(input.Title) ? template.Name : input.Title.Trim();
         var renderedPdfFileId = template.RenderedPdfFileId;
@@ -128,7 +150,7 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
             await _recipients.InsertAsync(new Signer
             {
                 RequestId = request.Id,
-                Role = r.Role,
+                Role = r.Role.Trim(),
                 Name = r.Name,
                 Email = r.Email,
                 Order = order++,
@@ -139,7 +161,7 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
             }, cancellationToken: cancellationToken);
         }
 
-        await StoreValuesAsync(request.Id, await ResolveInitialValuesAsync(request, snapshot, input, cancellationToken), null, cancellationToken);
+        await StoreValuesAsync(request.Id, initialValues, null, cancellationToken);
         await FlushAsync(cancellationToken);
 
         return await GetAsync(request.Id, cancellationToken);
@@ -203,6 +225,65 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         return Result<(Guid, SigningSnapshot)>.Success((saved.Data.Id, updated));
     }
 
+    /// <summary>
+    /// 一角色一人。
+    /// </summary>
+    /// <remarks>
+    /// 签名图与字段值都按<b>角色</b>寻址：密封器按 <c>Role</c> 分组取签名（同角色只取第一张），
+    /// 字段值按键存（同角色第二人的提交覆盖第一人）。放两个人进同一个角色，成品上只会有一个人的签名、
+    /// 字段值是后交的那一份，而完成证书给两个人各写一行 Signed —— 成品与证据链矛盾，且没有任何日志。
+    /// 要支持同角色多人，签名与字段值都得改按收件人寻址（快照与 FieldValue 的唯一键都要变），
+    /// 在那之前这条是显式契约。角色也是 <c>Signer.Role</c> 的必填列，空白在这里拦而不是等数据库报错。
+    /// </remarks>
+    private static Result? CheckRecipientRoles(IEnumerable<CreateSignerDto> recipients)
+    {
+        var roles = recipients.Select(r => r.Role?.Trim() ?? string.Empty).ToList();
+        if (roles.Any(string.IsNullOrEmpty))
+            return Result.Failure("Every recipient needs a role.", 400);
+
+        var duplicate = roles
+            .GroupBy(r => r, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+        if (duplicate != null)
+        {
+            return Result.Failure(
+                $"Recipient role '{duplicate.Key}' is used more than once; each role must map to exactly one recipient.", 400);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 字段指名的角色必须真的有人持有。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="CheckRecipientRoles"/> 是同一条契约的另一面：那边保证收件人之间角色不撞，这边保证字段指向的角色
+    /// 在收件人里。少了这一步，一个拼错的角色（<c>Cient</c>）或模板里多出来的角色（<c>Witness</c>）会让那个签名字段
+    /// 不在任何人的份内 —— <c>SubmitAsync</c> 只对本人角色的字段要签名，密封器对找不到签名的字段只记一行 Warning，
+    /// 于是一份签名位空白的成品照样被密封、算哈希、出完成证书。
+    /// 签名类字段无论必填与否都要有人（没人签的签名框就是成品上的一块空白）；必填字段也要；
+    /// 非必填的非签名字段留白是它自己的选择，与非必填的发起方字段同一口径。角色为空的字段是发起方字段，不指向任何人。
+    /// </remarks>
+    private static Result? CheckFieldRoleCoverage(SigningSnapshot snapshot, IEnumerable<CreateSignerDto> recipients)
+    {
+        var held = recipients
+            .Select(r => r.Role.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var uncovered = snapshot.Fields
+            .Where(f => f.IsSignatureLike || f.Required)
+            .Where(f => f.RecipientRole is { } role && !string.IsNullOrWhiteSpace(role) && !held.Contains(role.Trim()))
+            .Select(f => $"'{f.Key}' (role '{f.RecipientRole!.Trim()}')")
+            .ToList();
+        if (uncovered.Count > 0)
+        {
+            return Result.Failure(
+                $"These fields are addressed to roles no recipient holds: {string.Join(", ", uncovered)}.", 400);
+        }
+
+        return null;
+    }
+
     private static string SafeName(string title)
     {
         var safe = string.IsNullOrWhiteSpace(title) ? "document" : title.Trim();
@@ -213,7 +294,6 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
 
     /// <summary>合并变量 + 发起方预填，合成初始取值。</summary>
     private async Task<Dictionary<string, string?>> ResolveInitialValuesAsync(
-        Envelope request,
         SigningSnapshot snapshot,
         CreateEnvelopeDto input,
         CancellationToken cancellationToken)
@@ -222,15 +302,15 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
 
         // 宿主记录的合并变量。provider 未注册或宿主为空都不是错误 ——
         // 一份独立文档本来就没有可合并的记录。
-        var provider = _registry.FindProvider(request.HostEntityType);
-        if (provider != null && request.HostEntityId is { } hostId)
+        var provider = _registry.FindProvider(input.HostEntityType);
+        if (provider != null && input.HostEntityId is { } hostId)
         {
             var resolved = await provider.ResolveAsync(hostId, cancellationToken);
             foreach (var field in snapshot.Fields)
             {
                 if (field.Binding is not { Length: > 0 } binding) continue;
                 // ★ provider 省略某个键 = "这份记录没有这个信息"，与"值是空串"不同。
-                //   这里也照此处理：不写进去，好让必填校验能在发出前拦下它。
+                //   这里也照此处理：不写进去，好让 SendAsync 的必填校验能在发出前拦下它。
                 if (resolved.TryGetValue(binding, out var v) && v != null)
                     values[field.Key] = Convert.ToString(v, CultureInfo.InvariantCulture);
             }
@@ -241,6 +321,31 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
             values[key] = value;
 
         return values;
+    }
+
+    /// <summary>
+    /// 发起方那侧的取值也受 <see cref="SigningLimits.MaxFieldValueLength"/> 约束。
+    /// </summary>
+    /// <remarks>
+    /// 列上限是为匿名提交加的，但列不认来源：合并变量与预填写的是同一列，SQLite 看不见宽度而
+    /// SQL Server / PostgreSQL 会把越界变成 <c>DbUpdateException</c>（500）。这里按字段指名 400，
+    /// 与 <c>SubmitAsync</c> 同一句话；刻意不截断 —— 悄悄截掉一段条款比拒绝更糟。
+    /// 预填的键可能不对应任何快照字段，拿不到标签时用键指名。
+    /// </remarks>
+    private static Result? CheckInitialValueLengths(SigningSnapshot snapshot, IReadOnlyDictionary<string, string?> values)
+    {
+        var labels = snapshot.Fields.ToDictionary(f => f.Key, f => f.Label, StringComparer.Ordinal);
+        var tooLong = values
+            .Where(kv => kv.Value is { Length: > SigningLimits.MaxFieldValueLength })
+            .Select(kv => labels.TryGetValue(kv.Key, out var label) && !string.IsNullOrWhiteSpace(label) ? label : kv.Key)
+            .ToList();
+        if (tooLong.Count > 0)
+        {
+            return Result.Failure(
+                $"The value of '{string.Join("', '", tooLong)}' is too long (maximum {SigningLimits.MaxFieldValueLength} characters).", 400);
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -258,6 +363,46 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         if (recipients.Count == 0)
             return Fail<IReadOnlyList<IssuedSigningLink>>("This request has no recipients.", 409);
 
+        var snapshot = SigningSnapshot.FromJson(request.TemplateSnapshotJson);
+        if (snapshot == null)
+            return Fail<IReadOnlyList<IssuedSigningLink>>("This request's template snapshot cannot be read.", 409);
+
+        // ★ 发起方负责的必填字段（角色为空：值来自合并变量或预填）在这里拦，因为别处拦不到：
+        //   SubmitAsync 的必填校验只看收件人自己角色的字段，而这类字段永远不在任何人的 mine 里。
+        //   provider 按契约省略解析不出的键，CreateAsync 照此不写值 —— 那个「省略」存在的全部理由
+        //   就是让这一步能拦下一份不完整的合并，否则缺值的合同会照常发出、签完，密封时该处留白。
+        var values = await LoadValuesAsync(requestId, cancellationToken);
+        var missing = snapshot.Fields
+            .Where(f => f.Required && !f.IsSignatureLike && string.IsNullOrWhiteSpace(f.RecipientRole))
+            .Where(f => string.IsNullOrWhiteSpace(values.GetValueOrDefault(f.Key)))
+            .Select(f => f.Label)
+            .ToList();
+        if (missing.Count > 0)
+        {
+            return Fail<IReadOnlyList<IssuedSigningLink>>(
+                $"These required fields have no value yet: {string.Join(", ", missing)}.", 409);
+        }
+
+        // ★ 渲染合并稿：把发起方负责的字段值烧进一份本信封自有的渲染稿。签署人在签的时候要看得见
+        //   将被密封的内容 —— 收件人载荷只含本人角色的字段，这些值若等到密封才盖，签的是一份
+        //   价格处空白的文档而成品上有价格。Uploaded 与 Composed 同一处理（Composed 的正文 {{var}}
+        //   早在排版时就在纸面上，[[field]] 绑定字段与 Uploaded 是同一套机制）。
+        //   读模板渲染稿要授予：调用方是管理端（控制器门 signing.request.update），与重新密封同一理由。
+        GrantDocumentAccess(request);
+        var prefill = await _sealer.PrefillAsync(request, snapshot, values, cancellationToken);
+        if (!prefill.Succeeded || prefill.Data is null)
+        {
+            // 失败就不发：发一份「文档里没有价格、成品上有」的信封正是这一步要防的事。
+            return Fail<IReadOnlyList<IssuedSigningLink>>(
+                prefill.Message ?? "The document could not be rendered.", prefill.Code ?? 500);
+        }
+        if (prefill.Data.FileId is { } prefilledId)
+        {
+            request.RenderedPdfFileId = prefilledId;
+            request.TemplateSnapshotJson = (snapshot with { PrefilledKeys = prefill.Data.Keys }).ToJson();
+            _grants.Grant(prefilledId);
+        }
+
         var issued = new List<IssuedSigningLink>(recipients.Count);
         foreach (var recipient in recipients)
         {
@@ -272,7 +417,7 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
 
             await _recipients.UpdateAsync(recipient, cancellationToken: cancellationToken);
             // ★ 明文只在这一刻存在于内存里；库里从此只有哈希。
-            issued.Add(new IssuedSigningLink(recipient.Id, recipient.Name, recipient.Email, token));
+            issued.Add(new IssuedSigningLink(recipient.Id, recipient.Name, recipient.Email, token, request.TenantId));
         }
 
         request.Status = EnvelopeStatus.Sent;
@@ -297,6 +442,17 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
 
         request.Status = EnvelopeStatus.Voided;
         await _requests.UpdateAsync(request, cancellationToken: cancellationToken);
+
+        // ★ 作废是真的吊销：清掉每个收件人的令牌哈希，链接从此解析不出（404）。
+        //   只改状态的话，一份发错人的请求收不回来 —— 持链接者仍能取件、取文档。
+        //   与「草稿阶段 TokenHash 为 null」同一不变量：没有可用的签署链接就是 null。
+        foreach (var recipient in await LoadRecipientsAsync(requestId, cancellationToken))
+        {
+            if (recipient.TokenHash is null) continue;
+            recipient.TokenHash = null;
+            await _recipients.UpdateAsync(recipient, cancellationToken: cancellationToken);
+        }
+
         await FlushAsync(cancellationToken);
         return Ok();
     }
@@ -431,12 +587,63 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
         }
 
         // 全签完 → 密封。
+        await SealAndArchiveAsync(request, snapshot, recipients, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<EnvelopeDto>> SealAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var request = await _requests.GetAsync(requestId, cancellationToken);
+        if (request == null)
+            return Fail<EnvelopeDto>("Signing request not found.", 404);
+
+        if (request.Status == EnvelopeStatus.Completed || request.FinalPdfFileId is not null)
+        {
+            // 哈希只算一次：已密封的请求再密封一遍，就是让「这份 PDF 就是当初签的那份」失去意义。
+            return Fail<EnvelopeDto>("This request has already been sealed.", 409);
+        }
+        if (request.Status != EnvelopeStatus.InProgress)
+            return Fail<EnvelopeDto>("Only a request whose recipients have all signed can be sealed.", 409);
+
+        var recipients = await LoadRecipientsAsync(requestId, cancellationToken);
+        if (recipients.Count == 0 || recipients.Any(r => r.Status != SigningRecipientStatus.Signed))
+            return Fail<EnvelopeDto>("Not every recipient has signed yet.", 409);
+
+        var snapshot = SigningSnapshot.FromJson(request.TemplateSnapshotJson);
+        if (snapshot == null)
+            return Fail<EnvelopeDto>("This request's template snapshot cannot be read.", 409);
+
+        // 密封要读渲染稿。调用方是管理端（控制器门是 signing.request.update），而请求名下的文件
+        // 本就按 signing.request.view 放行（SigningFileReferenceAccessResolver）；这里的授予让服务层
+        // 不依赖那个解析器有没有登记，且与最后一位收件人那次提交里的密封走同一条路。
+        GrantDocumentAccess(request);
+
+        if (!await SealAndArchiveAsync(request, snapshot, recipients, cancellationToken))
+            return Fail<EnvelopeDto>("The document could not be sealed. See the server log for the cause.", 500);
+
+        return await GetAsync(requestId, cancellationToken);
+    }
+
+    /// <summary>
+    /// 密封的后半段：抢占 → 盖章压平算哈希存成品 → 完成证书 → 交宿主归档。返回是否密封成功。
+    /// </summary>
+    /// <remarks>
+    /// 两个调用方：最后一位收件人的那次提交（<see cref="AdvanceAsync"/>），以及管理端的重新密封
+    /// （<see cref="SealAsync"/>）—— 后者存在的理由是前者可能因为一次瞬时故障（存储超时、盖章异常）失败，
+    /// 而那时收件人已全部 Signed、不能重交，没有这条路就只剩作废重发。
+    /// </remarks>
+    private async Task<bool> SealAndArchiveAsync(
+        Envelope request,
+        SigningSnapshot snapshot,
+        IReadOnlyList<Signer> recipients,
+        CancellationToken cancellationToken)
+    {
         // ★ 先抢占密封权。并行签署时最后两位可能同时走到这里：收件人查询走 AsNoTracking，
         //   两边读到的都是刚落库的真值"全签完"，于是各密封一次 —— 两份成品、两个哈希，
         //   而先交给宿主归档的那一份不是最后记在请求上的那一份。抢占放在密封**之前**，
         //   输的一方连成品都不会生成，因此不留孤儿文件、也不会把自己那份塞给宿主。
         if (!await TryClaimSealAsync(request, cancellationToken))
-            return;
+            return request.Status == EnvelopeStatus.Completed;
 
         var values = await LoadValuesAsync(request.Id, cancellationToken);
         var sealResult = await _sealer.SealAsync(request, snapshot, values, recipients, cancellationToken);
@@ -449,7 +656,7 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
             request.Status = EnvelopeStatus.InProgress;
             await _requests.UpdateAsync(request, cancellationToken: cancellationToken);
             await FlushAsync(cancellationToken);
-            return;
+            return false;
         }
 
         request.FinalPdfFileId = sealResult.Data.FileId;
@@ -499,6 +706,8 @@ public partial class EnvelopeService : ApplicationService, IEnvelopeService
                 Logger.LogError(ex, "Attaching sealed document for request {RequestId} to its host failed.", request.Id);
             }
         }
+
+        return true;
     }
 
     /// <summary>

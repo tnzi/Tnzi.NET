@@ -508,7 +508,8 @@ const rowActions: RowAction<PayRunRow>[] = [
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('payroll.run.update') && isCalculated(row) && (row.errorCount ?? 0) === 0, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.runs.post(String(row.id ?? '')), 'postSuccess') },
   { key: 'pay', label: 'actions.pay', type: 'info', show: (row) => can('payroll.run.update') && isPayable(row), onClick: (row) => void openPay(row) },
   { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('payroll.run.update') && isVoidable(row), confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.runs.voidRun(String(row.id ?? '')), 'voidSuccess') },
-  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => crud.canDelete && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.runs.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
+  // Calculated 也可删（后端同口径）：摄取批次直接落 Calculated，这是摄取错了的 OpeningBalance / External 唯一的退出路径
+  { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => crud.canDelete && (isDraft(row) || isCalculated(row)), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.runs.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]
 </script>
 

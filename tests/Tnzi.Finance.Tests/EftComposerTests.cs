@@ -309,6 +309,71 @@ public class EftComposerTests
         result.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// 出款方 Originator ID 超过定宽字段 → 拒绝而不截断。
+    /// </summary>
+    /// <remarks>
+    /// 它是标识符不是自由文本：截出来的是<b>另一串语法合法的 originator id</b>，整份报文被接收行
+    /// 拒收或归到另一家名下，而录入 / 装批 / 生成 / 下载每一步 200。与账号超长同一类失效。
+    /// NACHA 侧此前唯一的 fail-fast 只数<b>数字</b>位数（Immediate Origin 9 位），
+    /// 一个 'AB-123456789'（12 字符、9 位数字）照样过关、再被截成 'AB-1234567' 写进 Company Identification。
+    /// </remarks>
+    [Fact]
+    public void Cpa005_OriginatorIdLongerThanTheField_IsRejected()
+    {
+        var request = Cpa005Request();
+        request.OriginatorId = "CPA00123456789"; // 14 字符，字段宽 10
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeFalse("超长 originator id 必须被拒绝而不是截成另一个 id");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("originator id");
+    }
+
+    [Fact]
+    public void Nacha_OriginatorIdLongerThanTheField_IsRejected()
+    {
+        var request = NachaRequest();
+        request.OriginatorId = "AB-123456789"; // 12 字符但只有 9 位数字：数字位数守卫不会先响
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("originator id");
+    }
+
+    /// <summary>恰好 10 位照常写入 —— 上限是 &gt; 不是 &gt;=。</summary>
+    [Fact]
+    public void Nacha_OriginatorIdExactlyTheFieldWidth_IsAccepted()
+    {
+        var request = NachaRequest();
+        request.OriginatorId = "AB12345678";
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.Content.Split('\n')[1].Substring(40, 10).ShouldBe("AB12345678"); // Batch Header Company Identification
+    }
+
+    /// <summary>
+    /// CPA-005 出款方账号为空 → 拒绝出文件。此前定宽写入器把空串补成 12 个空格：
+    /// 一份语法合法、Originator / Return Account Number 都是空白的报文。
+    /// </summary>
+    [Fact]
+    public void Cpa005_EmptyOriginatorAccountNumber_IsRejected()
+    {
+        var request = Cpa005Request();
+        request.OriginatorAccountNumber = "";
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeFalse("an empty originator account must not become twelve spaces in the file");
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("originating account");
+    }
+
     /// <summary>分行号缺一半也不行 —— 补零补出来的是另一家分行。</summary>
     [Fact]
     public void Cpa005_OriginatorTransitMissing_IsRejected()

@@ -39,13 +39,12 @@ public class DbContextRegistrar : IDbContextRegistrar
                     config.Name);
             }
 
-            // 创建配置选项的 Action
-            // 使用 GetEffectiveConnectionString() 获取合并连接池配置和环境变量展开后的连接字符串
+            // 在注册时（启动期）就展开连接字符串，而不是留到 DbContext 解析时：
+            // 占位符解析不出来要在启动期拒绝（GetEffectiveConnectionString 抛出），展开日志也要进启动期缓冲
+            // 被回放 —— 留在闭包里，两者都发生在首次解析 DbContext 时，那时缓冲早已回放完毕、失败也晚了一步。
+            var effectiveConnectionString = config.GetEffectiveConnectionString(configuration, logger);
             Action<DbContextOptionsBuilder> optionsAction = builder =>
-            {
-                var effectiveConnectionString = config.GetEffectiveConnectionString(configuration, logger);
                 DatabaseProviderFactory.Configure(builder, effectiveConnectionString, config.Provider, providerOptions);
-            };
 
             // 调用 AddTnziDbContext，传递 isPrimary 参数
             addMethod.Invoke(null, new object[] { services, optionsAction, isPrimary });

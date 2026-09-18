@@ -402,7 +402,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
 
     initUpload: async (fileMeta: { name: string; size: number; chunkCount: number }): Promise<{ uploadId: string }> => {
-      const session = unwrap(
+      const session = unwrapOk(
         await storageApi.initiateChunkedUpload({
           fileName: fileMeta.name,
           totalSize: fileMeta.size,
@@ -657,7 +657,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
       return Array.isArray(items) ? items : []
     },
     trigger: async (olderThanHours?: number): Promise<number> =>
-      unwrap<number>(await fileApi.cleanupTemporary(olderThanHours)),
+      unwrapOk<number>(await fileApi.cleanupTemporary(olderThanHours)),
   }
 
   // ---- preview (user-facing controller) ----

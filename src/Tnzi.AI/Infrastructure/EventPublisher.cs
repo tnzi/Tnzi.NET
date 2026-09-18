@@ -93,6 +93,30 @@ public class EventPublisher : IEventPublisher
         }
     }
 
+    public async Task PublishRunCancelledEventAsync(AgentRunRequest request, AgentRun? run, string reason,
+        long durationMs, bool isStreaming)
+    {
+        if (!_eventBusAvailable) return;
+
+        try
+        {
+            await _eventBus!.PublishAsync(new AgentRunCancelledEvent
+            {
+                RunId = run?.Id,
+                AgentId = request.AgentId,
+                UserId = request.UserId,
+                ThreadId = request.ThreadId,
+                Reason = reason,
+                DurationMs = durationMs,
+                IsStreaming = isStreaming
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to publish AgentRunCancelledEvent");
+        }
+    }
+
     public async Task HandleNewThreadTitleAsync(AgentRunRequest request, AgentRunResult result)
     {
         if (!request.ThreadId.HasValue) return;

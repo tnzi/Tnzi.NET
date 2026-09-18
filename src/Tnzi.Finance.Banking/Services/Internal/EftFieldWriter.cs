@@ -3,17 +3,31 @@ namespace Tnzi.Finance.Banking.Services.Internal;
 /// <summary>
 /// 定长记录字段写入工具（EFT 文件组装）
 /// </summary>
+/// <remarks>
+/// ★ <b>度量单位是字节，不是 char</b>。NACHA 与 CPA-005 都是 ASCII 定位格式，接收行按字节偏移解析；
+/// 此前按 UTF-16 字符数补齐与校验、文件却按 UTF-8 输出 —— 一个「é」占 1 个 char / 2 个字节，
+/// 收款人叫 "Café Bélanger" 的那条记录就比规定宽两个字节，其后每个字段全部错位，
+/// 装批 / 生成 / 下载每一步 200，失败发生在银行侧且与真正原因无关；而 <see cref="Fixed"/> 这条
+/// 正是为抓布局错位而设的不变量，却因为数错了单位一个也抓不到。
+/// 于是：自由文本一律折叠成 ASCII（重音去掉、没有等价物的换 '?'），标识符类字段（账号）
+/// 出现非 ASCII 则拒绝而不是折叠（折叠出来的是另一个语法合法的账号），
+/// <see cref="Fixed"/> 按 ASCII 字节校验，<c>EftService</c> 再按 ASCII 编码输出作第二道闸。
+/// 与「截断哪一端」那条判据同族：<b>度量哪个单位</b>。
+/// </remarks>
 internal static class EftFieldWriter
 {
+    private const char Replacement = '?';
+
     /// <summary>
-    /// 左对齐文本，右补空格（超长截断）。
+    /// 左对齐文本，右补空格（超长截断），输出恒为 ASCII。
     /// 先剥除嵌入的控制字符（换行/回车/制表等，替换为空格）：记录以 \n 连接且严格按位解析，
     /// 数据字段（PayeeName=Vendor.Name / 解密账号明文 / OriginatorName）内的 \n/\r 会把一条定宽记录
     /// 截成两行、错位其后所有字段 → 整文件被 ODFI 拒收，而长度不变式（<see cref="Fixed"/>）测不出（\n 单字符）。
+    /// 再把非 ASCII 折叠掉：重音字母取其基字母（é → e），没有 ASCII 等价物的（Ø、emoji）换成 '?'。
     /// </summary>
     public static string Text(string? value, int width)
     {
-        var v = Sanitize(value);
+        var v = ToAscii(Sanitize(value));
         if (v.Length > width)
             v = v[..width];
         return v.PadRight(width);
@@ -41,10 +55,38 @@ internal static class EftFieldWriter
     public static string AccountField(string? value, int width, string subject)
     {
         var v = Sanitize(value);
+        // 非 ASCII 不折叠：折叠后是另一个语法合法的账号，与截断同一类失效。
+        if (!IsAscii(v))
+            throw new BusinessException(
+                $"The bank account number for {subject} contains characters outside the ASCII range that an EFT file cannot carry; "
+                + "correct the account number on file instead.");
         if (v.Length > width)
             throw new BusinessException(
                 $"The bank account number for {subject} is {v.Length} characters and does not fit the {width}-character account field. "
                 + "A truncated account number can address a different account; correct the account number on file instead.");
+        return v.PadRight(width);
+    }
+
+    /// <summary>
+    /// 写入标识符字段（originator id 这一类）：超长 <b>fail-fast</b> 而不是截断，非 ASCII 同样拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="AccountField"/> 同一判据：截断一个标识符得到的是<b>另一串语法合法的标识符</b>，
+    /// 整份报文被接收行拒收或归到另一家名下，而录入 / 装批 / 生成 / 下载每一步 200。
+    /// 与账号的差别只在消息 —— 标识符不是秘密，可以进错误消息帮操作员对照。
+    /// </remarks>
+    /// <param name="value">标识符。</param>
+    /// <param name="width">目标字段宽度。</param>
+    /// <param name="subject">出错时指名是哪个字段（如 "EFT originator id" / "CPA-005 originator"）。</param>
+    public static string IdentifierField(string? value, int width, string subject)
+    {
+        var v = Sanitize(value);
+        if (!IsAscii(v))
+            throw new BusinessException($"The {subject} contains characters outside the ASCII range that an EFT file cannot carry.");
+        if (v.Length > width)
+            throw new BusinessException(
+                $"The {subject} is {v.Length} characters and does not fit the {width}-character field. "
+                + "A truncated identifier is a different identifier; correct it on the bank account profile instead.");
         return v.PadRight(width);
     }
 
@@ -57,6 +99,45 @@ internal static class EftFieldWriter
         for (var i = 0; i < value.Length; i++)
             buffer[i] = char.IsControl(value[i]) ? ' ' : value[i];
         return new string(buffer).Trim();
+    }
+
+    /// <summary>
+    /// 折叠成 ASCII：先做 NFD 分解并丢掉组合用变音符（é → e），仍在 ASCII 之外的码位
+    /// （不可分解的字母、emoji —— 一个代理对算一个字符）换成 '?'。
+    /// </summary>
+    private static string ToAscii(string value)
+    {
+        if (IsAscii(value))
+            return value;
+
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (var rune in decomposed.EnumerateRunes())
+        {
+            if (rune.Value <= 0x7F)
+            {
+                builder.Append((char)rune.Value);
+                continue;
+            }
+            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.NonSpacingMark)
+                continue;
+            builder.Append(Replacement);
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// 每个字符都在 ASCII 范围内。internal：录入侧（<c>BankNumberHelper</c>）与文件写入器
+    /// 必须用同一个判据 —— 两边各写一份，漂移的症状就是「录入通过、生成时才拒」。
+    /// </summary>
+    internal static bool IsAscii(string value)
+    {
+        foreach (var c in value)
+        {
+            if (c > 0x7F)
+                return false;
+        }
+        return true;
     }
 
     /// <summary>右对齐数值，左补零（超长保留低位）。</summary>
@@ -122,10 +203,13 @@ internal static class EftFieldWriter
     /// <summary>CPA-005 儒略日期（0YYDDD，6 位）。</summary>
     public static string Julian(DateTime date) => $"0{date:yy}{date.DayOfYear:D3}";
 
-    /// <summary>校验记录长度（组装不变量，越界抛以暴露布局错误）。</summary>
+    /// <summary>校验记录长度（组装不变量，越界抛以暴露布局错误）。按 ASCII 字节度量：
+    /// 记录里若还残留非 ASCII 字符，写出的字节数就与 char 数不同，接收行按字节解析会错位。</summary>
     public static string Fixed(string record, int width)
     {
-        if (record.Length != width)
+        if (!IsAscii(record))
+            throw new BusinessException("EFT record contains characters outside the ASCII range; the file would be misaligned on the receiving side.");
+        if (Encoding.ASCII.GetByteCount(record) != width)
             throw new BusinessException($"EFT record length {record.Length} does not match the required {width}.");
         return record;
     }

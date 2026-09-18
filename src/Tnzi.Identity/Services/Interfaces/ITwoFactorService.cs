@@ -155,24 +155,30 @@ public interface ITwoFactorService
     Task<Result<string?>> SendCodeToUserAsync(Guid userId, TwoFactorType type, VerificationCodePurpose purpose);
 
     /// <summary>
-    /// 基于地址验证验证码（不标记为已使用，由调用方决定）
-    /// </summary>
-    /// <param name="address">接收地址（邮箱或手机号）</param>
-    /// <param name="code">验证码</param>
-    /// <param name="type">验证方式</param>
-    /// <param name="purpose">用途；必须与发码时给出的用途一致，否则视为无效码。</param>
-    /// <returns>是否验证成功</returns>
-    Task<Result> VerifyCodeByAddressAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose);
-
-    /// <summary>
     /// 基于地址验证验证码并标记为已使用
     /// </summary>
+    /// <remarks>
+    /// ★ 这是按地址验码的<b>唯一</b>入口。此前还有一条「只验证、不标记已用」的 <c>VerifyCodeByAddressAsync</c>，
+    /// 它是三条验码路径里唯一没有失败计数 / 锁定的一条 —— 消费方一用就是无限次尝试的六位数预言机。
+    /// 零调用方、零测试，已删除；每条 <c>Verify*</c> 方法都过闸门由 <c>TwoFactorBruteForceTests</c> 按反射守着。
+    /// </remarks>
     /// <param name="address">接收地址（邮箱或手机号）</param>
     /// <param name="code">验证码</param>
     /// <param name="type">验证方式</param>
     /// <param name="purpose">用途；必须与发码时给出的用途一致，否则视为无效码。</param>
     /// <returns>验证成功时返回关联的 UserId（可能为空）</returns>
     Task<Result<Guid?>> VerifyCodeByAddressAndMarkUsedAsync(string address, string code, TwoFactorType type, VerificationCodePurpose purpose);
+
+    /// <summary>
+    /// 删除过期超过 <c>Identity:Otp:RetentionHours</c> 的验证码行（已用与未用一并删）。供会话维护后台任务调用。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这张表存的是明文码 + 收件地址 + 用途，验码窗口只有 <c>ExpirationMinutes</c>，过期之后对任何流程都没有意义。
+    /// 此前没有任何路径删它（只有关闭 2FA 时删该用户的未用码），为清理而建的 <c>ExpiresAt</c> 索引零消费者。
+    /// <c>RetentionHours = 0</c> 时不清理，返回 0。
+    /// </remarks>
+    /// <returns>删除的行数</returns>
+    Task<int> CleanExpiredCodesAsync(CancellationToken cancellationToken = default);
 
     #endregion
 }

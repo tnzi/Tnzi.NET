@@ -57,6 +57,28 @@ public class UserRoleService : ApplicationService, IUserRoleService
     }
 
     /// <summary>
+    /// 批量获取多个用户的角色ID集合（一条 IN 查询）
+    /// </summary>
+    /// <param name="userIds">用户ID集合</param>
+    /// <returns>用户ID与角色ID集合的字典（无角色的用户不出现）</returns>
+    public async Task<IDictionary<Guid, IEnumerable<Guid>>> GetUserRoleIdsAsync(IEnumerable<Guid> userIds)
+    {
+        var idList = userIds.Distinct().ToList();
+        if (idList.Count == 0)
+        {
+            return new Dictionary<Guid, IEnumerable<Guid>>();
+        }
+
+        var userRoles = await _dbContext.Set<UserRole>()
+            .Where(ur => idList.Contains(ur.UserId))
+            .Select(ur => new { ur.UserId, ur.RoleId })
+            .ToListAsync();
+
+        return userRoles.GroupBy(ur => ur.UserId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.RoleId).AsEnumerable());
+    }
+
+    /// <summary>
     /// 获取角色的用户ID集合
     /// 用于权限缓存失效时批量清除用户缓存
     /// </summary>

@@ -32,7 +32,7 @@ createApp(App)
 </template>
 ```
 
-- 提供 Vue 插件（安装 Vant + 默认样式 + core 集成适配器）
+- 提供 Vue 插件：注册 `T*` 组件与 Vant 全局组件（组件模板用的是 `<van-*>` 全局标签，插件会 `app.use(Vant)`，已自行安装过则跳过）+ 默认样式 + core 集成适配器。`registerComponents: false` 时两者都不注册，Vant 也要自己装
 - 对外导出 `T*` 业务组件与常用 Vant 组件别名（`VButton`、`VCard` 等）
 - 提供移动端视口 Hook（`useMobileViewport`）
 - 按 `@tnzi/core/types/shared-ui` 的 UI 契约类型实现移动端 `T*` 组件

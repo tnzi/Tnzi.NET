@@ -40,6 +40,13 @@ public class SlidingCaptchaVerifyResult
     /// 验证消息
     /// </summary>
     public string? Message { get; set; }
+
+    /// <summary>
+    /// 通行令牌（只在 <see cref="Success"/> 为 true 时有值，一次性，5 分钟）。
+    /// 客户端把它作为 <c>captchaToken</c> 交给受保护的端点，服务端经 <c>sliding</c> 提供商核销。
+    /// ★ 没有它时「滑块验证通过」只有浏览器自己知道 —— 受保护端点无从分辨这次提交前有没有真的滑过。
+    /// </summary>
+    public string? PassToken { get; set; }
 }
 
 /// <summary>

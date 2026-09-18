@@ -51,6 +51,11 @@ public class PayrollModule : TnziApplicationModule
         context.Services.AddScoped<PayslipCalculator>();
         context.Services.AddScoped<PayrollPostingHelper>();
         context.Services.AddScoped<IPayRunService, PayRunService>();
+        // 发薪凭证只能经批次作废撤销：把 PayRun / PayRun.Payment 交给核心总账冲销端点的拒绝清单
+        // （VoidAsync 自己走 ReverseOnBehalfOfDocumentAsync，不会被这份清单拦住）
+        context.Services.AddSingleton<IDocumentProjectedSourceTypeProvider, PayrollDocumentProjectedSourceTypeProvider>();
+        // 薪资组件的费用 / 负债科目：核心删科目前经契约问「还有谁要往它上面写」
+        context.Services.AddScoped<IMasterDataUsageProvider, PayrollMasterDataUsageProvider>();
 
         // Country pack（框架不内置 pack；消费方注册的 IPayrollCountryPack 经 IEnumerable 收集）
         context.Services.AddScoped<ICountryPackService, CountryPackService>();

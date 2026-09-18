@@ -231,7 +231,14 @@ export default [
     // manifest (`@tnzi/*/icons`, 3.19 kB gzip), which no consumer downloads
     // unless it opts into bundling icons - but this budget counts `import()`
     // too, which is exactly what it is for.
-    limit: '635 kB',
+    // 635 -> 645 kB (2026-09-12). Measured 638.68 kB at the head of the
+    // audit-backlog branch before the step-up UI landed (the day's fixes had
+    // already crossed the line without anyone re-ratcheting), then 640.58 kB
+    // with `TStepUpModal` + the core `StepUpPromptController` + its two locale
+    // blocks. The re-authentication prompt is new capability, not creep: it
+    // is what turns a `[RequireStepUp]` challenge from a dead-end toast into
+    // a completed action.
+    limit: '645 kB',
     gzip: true,
   },
 ]

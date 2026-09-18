@@ -145,19 +145,12 @@ public class FileCleanupMultiTenantTests : IDisposable
             Path = path,
             Provider = _storage.ProviderName,
             ContentType = "text/plain",
-            ReferenceCount = 1, // 先插入为 1，避免 EF HasDefaultValue(1) 把 CLR 默认 0 当成"未设置"
+            // 直接以目标计数插入：0 能落库是 FileRecordConfiguration 的哨兵保证的。
+            ReferenceCount = referenceCount,
             CreationTime = DateTime.UtcNow.AddHours(-agedHours)
         };
         _db.FileRecords.Add(record);
         await _db.SaveChangesAsync();
-
-        // 通过一次 UPDATE 显式写入目标 ReferenceCount（0 才能精确落库）
-        if (referenceCount != 1)
-        {
-            record.ReferenceCount = referenceCount;
-            _db.FileRecords.Update(record);
-            await _db.SaveChangesAsync();
-        }
 
         _db.ChangeTracker.Clear();
         return record;

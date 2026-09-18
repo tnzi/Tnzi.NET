@@ -1,6 +1,13 @@
 <template>
   <TContentPage :title="t('title')" :translate="t" card scroll="fill">
-    <TAuditTimeline page-id="audit.operations" :fetch="bridge.operations.fetch" :fetch-detail="bridge.operations.detail" :translate="t" />
+    <TAuditTimeline
+      page-id="audit.operations"
+      :fetch="bridge.operations.fetch"
+      :fetch-detail="bridge.operations.detail"
+      :export-csv="bridge.operations.exportCsv"
+      :export-json="bridge.operations.exportJson"
+      :translate="t"
+    />
   </TContentPage>
 </template>
 

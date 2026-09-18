@@ -4,8 +4,10 @@ namespace Tnzi.Chat.Tests.Services;
 
 /// <summary>
 /// 打开聊天访问门（chat.use 白名单）的测试基座：注册 <see cref="IFunctionAuthorizationService"/>
-/// （在场信号）+ 一个仅对 <see cref="DeniedUserId"/> 拒绝 chat.use 的 <see cref="IPermissionChecker"/>，
-/// 使 <c>ChatAccessService.GateActive</c> 为真、判定走 mock。
+/// （在场信号 + 批量判定 <c>FilterGrantedAsync</c>）+ 一个仅对 <see cref="DeniedUserId"/> 拒绝
+/// chat.use 的 <see cref="IPermissionChecker"/>（单查 <c>CanUseAsync</c>），使
+/// <c>ChatAccessService.GateActive</c> 为真、两条判定路径都走 mock 且口径一致。
+/// ★ Moq 不执行默认接口成员，所以批量方法必须显式 Setup，否则它返回 null。
 /// </summary>
 public abstract class ChatAccessGatedTestBase : Integration.IntegrationTestBase
 {
@@ -20,6 +22,9 @@ public abstract class ChatAccessGatedTestBase : Integration.IntegrationTestBase
         var funcAuth = new Mock<IFunctionAuthorizationService>();
         funcAuth.Setup(f => f.GetSuperAdminUserIdsAsync())
             .ReturnsAsync((IReadOnlySet<Guid>)new HashSet<Guid>());
+        funcAuth.Setup(f => f.FilterGrantedAsync(It.IsAny<IReadOnlyCollection<Guid>>(), ChatAccessService.UsePermission))
+            .ReturnsAsync((IReadOnlyCollection<Guid> ids, string _) =>
+                (IReadOnlySet<Guid>)ids.Where(id => id != DeniedUserId).ToHashSet());
         services.AddScoped(_ => funcAuth.Object);
 
         var checker = new Mock<IPermissionChecker>();

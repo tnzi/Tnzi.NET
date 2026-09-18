@@ -7,16 +7,29 @@ public class AccessLogService : ApplicationService, IAccessLogService
 {
     private readonly IRepository<AccessLog, Guid> _accessLogRepository;
     private readonly IAccessLogSender _accessLogSender;
+    private readonly IOptionsMonitor<AccessLogOptions>? _accessLogOptions;
 
+    /// <summary>初始化一个 <see cref="AccessLogService"/> 实例。</summary>
+    /// <param name="serviceProvider">服务提供程序。</param>
+    /// <param name="accessLogRepository">访问日志仓储。</param>
+    /// <param name="accessLogSender">后台队列。</param>
+    /// <param name="accessLogOptions">
+    /// 采集开关（<c>System:AccessLog</c>），只用来在统计结果里如实报出「这个部署有没有在采集」。
+    /// 可选：拿不到时按未采集报。
+    /// </param>
     public AccessLogService(
         IServiceProvider serviceProvider,
         IRepository<AccessLog, Guid> accessLogRepository,
-        IAccessLogSender accessLogSender)
+        IAccessLogSender accessLogSender,
+        IOptionsMonitor<AccessLogOptions>? accessLogOptions = null)
         : base(serviceProvider)
     {
         _accessLogRepository = Check.NotNull(accessLogRepository);
         _accessLogSender = Check.NotNull(accessLogSender);
+        _accessLogOptions = accessLogOptions;
     }
+
+    private bool CaptureEnabled => _accessLogOptions?.CurrentValue.Enabled ?? false;
 
     /// <inheritdoc />
     public async Task<Result> LogAccessAsync(AccessLogDto log)
@@ -114,7 +127,7 @@ public class AccessLogService : ApplicationService, IAccessLogService
 
         // 检查是否有数据
         if (!await query.AnyAsync())
-            return Ok(new AccessLogStatisticsDto());
+            return Ok(new AccessLogStatisticsDto { CaptureEnabled = CaptureEnabled });
 
         // 使用单次聚合查询
         var stats = await query.GroupBy(o => 1).Select(g => new
@@ -127,10 +140,11 @@ public class AccessLogService : ApplicationService, IAccessLogService
         }).FirstOrDefaultAsync();
 
         if (stats == null)
-            return Ok(new AccessLogStatisticsDto());
+            return Ok(new AccessLogStatisticsDto { CaptureEnabled = CaptureEnabled });
 
         var statistics = new AccessLogStatisticsDto
         {
+            CaptureEnabled = CaptureEnabled,
             TotalRequests = stats.TotalRequests,
             UniqueUsers = stats.UniqueUsers,
             SuccessRequests = stats.SuccessRequests,

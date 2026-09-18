@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- 强命名以匹配 Tnzi.Finance.Payroll 的 InternalsVisibleTo 公钥声明（friend 程序集必须同钥） -->
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\..\build\Tnzi.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
 
   <ItemGroup>

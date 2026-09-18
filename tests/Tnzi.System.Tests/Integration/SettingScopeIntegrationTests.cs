@@ -210,6 +210,195 @@ public class SettingScopeIntegrationTests : IntegratedTestBase<SettingScopeInteg
         (await service.GetSettingByIdAsync(own.Id)).Succeeded.ShouldBeTrue();
     }
 
+    // ---- 写路径：创建与按作用域设值必须过同一道租户判定 ----
+    // 09-04 那轮收口的是列表与按 id 的读 / 改 / 删；创建这条路漏了：租户 A 的管理员
+    // POST admin/settings {scope: Tenant, scopeId: <B>} 会在租户 B 下植入一行，
+    // TenantSettingProvider（优先级 200）随即对 B 的每个请求返回攻击者的值，
+    // 而两边的读取面都看不见它（A 按 id 读是 404，B 的列表只有自己的行）。
+
+    private static CreateSettingDto NewSetting(SettingScope scope, string? scopeId) => new()
+    {
+        Key = "Planted.Key",
+        Value = "attacker",
+        Group = "A",
+        Scope = scope,
+        ScopeId = scopeId
+    };
+
+    private Task<Setting?> PlantedRow() =>
+        DbContext.Set<Setting>().AsNoTracking().SingleOrDefaultAsync(s => s.Key == "Planted.Key");
+
+    [Fact]
+    public async Task Create_TenantCallerNamingAnotherTenant_Returns403_AndWritesNothing()
+    {
+        var service = CreateService(TenantA);
+
+        var result = await service.CreateSettingAsync(NewSetting(SettingScope.Tenant, TenantB.ToString()));
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        (await PlantedRow()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Create_TenantCallerWithoutScopeId_IsPinnedToTheCallersTenant()
+    {
+        // 缺省不是改写：没点名租户的 Tenant 行落在调用者自己的租户下。
+        var service = CreateService(TenantA);
+
+        var result = await service.CreateSettingAsync(NewSetting(SettingScope.Tenant, null));
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ScopeId.ShouldBe(TenantA.ToString());
+        (await PlantedRow())!.ScopeId.ShouldBe(TenantA.ToString());
+    }
+
+    [Fact]
+    public async Task Create_TenantCaller_UserScopeOfAnotherUser_Returns403()
+    {
+        // User 行没有租户列，System 模块也核验不了目标用户属于哪个租户：租户内的调用者
+        // 只能给自己写 User 作用域（失败关闭），给任何别人写都拒绝 —— UserSettingProvider
+        // 的优先级最高（300），一行就能盖掉那个用户的全部分层配置。
+        var service = CreateService(TenantA);
+
+        var other = await service.CreateSettingAsync(NewSetting(SettingScope.User, UserX.ToString()));
+        other.Succeeded.ShouldBeFalse();
+        other.Code.ShouldBe(403);
+        (await PlantedRow()).ShouldBeNull();
+
+        var self = await service.CreateSettingAsync(NewSetting(SettingScope.User, TestHelper.DefaultTestUserId.ToString()));
+        self.Succeeded.ShouldBeTrue(self.Message);
+        (await PlantedRow())!.ScopeId.ShouldBe(TestHelper.DefaultTestUserId.ToString());
+    }
+
+    [Fact]
+    public async Task Create_TenantCaller_GlobalScope_StillAllowed()
+    {
+        // 与 09-04 的口径一致：Global 行不属于任何租户，租户内照样能建（改 / 删也放行）。
+        var service = CreateService(TenantA);
+
+        var result = await service.CreateSettingAsync(NewSetting(SettingScope.Global, null));
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+    }
+
+    [Fact]
+    public async Task Create_HostCaller_CanNameAnyTenantOrUser()
+    {
+        var service = CreateService(null);
+
+        var tenant = await service.CreateSettingAsync(NewSetting(SettingScope.Tenant, TenantB.ToString()));
+        tenant.Succeeded.ShouldBeTrue(tenant.Message);
+        tenant.Data!.ScopeId.ShouldBe(TenantB.ToString());
+
+        var user = await service.CreateSettingAsync(new CreateSettingDto
+        {
+            Key = "Planted.User", Value = "v", Group = "A", Scope = SettingScope.User, ScopeId = UserY.ToString()
+        });
+        user.Succeeded.ShouldBeTrue(user.Message);
+    }
+
+    [Fact]
+    public async Task ScopedSetSetting_TenantCallerNamingAnotherTenant_Returns403_AndWritesNothing()
+    {
+        var service = CreateService(TenantA);
+
+        var result = await service.SetSettingAsync("Planted.Key", "attacker", SettingScope.Tenant, TenantB.ToString());
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        (await PlantedRow()).ShouldBeNull();
+        // 既有的 B 行也没被碰
+        (await DbContext.Set<Setting>().AsNoTracking()
+            .SingleAsync(s => s.Key == "Site.Title" && s.ScopeId == TenantB.ToString())).Value.ShouldBe($"Tenant:{TenantB}");
+    }
+
+    [Fact]
+    public async Task ScopedSetSetting_TenantCallerWithoutScopeId_IsPinnedToTheCallersTenant()
+    {
+        var service = CreateService(TenantA);
+
+        var result = await service.SetSettingAsync("Planted.Key", "v", SettingScope.Tenant, null);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        (await PlantedRow())!.ScopeId.ShouldBe(TenantA.ToString());
+    }
+
+    [Fact]
+    public async Task ScopedSetSetting_TenantCaller_UserScopeOfAnotherUser_Returns403()
+    {
+        var service = CreateService(TenantA);
+
+        var result = await service.SetSettingAsync("Ui.Theme", "attacker", SettingScope.User, UserX.ToString());
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        (await DbContext.Set<Setting>().AsNoTracking()
+            .SingleAsync(s => s.Key == "Ui.Theme" && s.ScopeId == UserX.ToString())).Value.ShouldBe($"User:{UserX}");
+    }
+
+    // ---- 按 id 的改 / 删：User 行要过与创建相同的本人判定 ----
+    // 创建与按作用域设值拒绝给别人写 User 行，但同一行的 id 经列表可查
+    // （GET admin/settings?scope=User&scopeId=<victim>），拿到 id 后 PUT / DELETE 仍然放行，
+    // 「只允许写自己的用户」这条规则就只对受害者从没设过的键成立。
+
+    private Task<Setting> UserRow(Guid userId) =>
+        DbContext.Set<Setting>().AsNoTracking().SingleAsync(s => s.Scope == SettingScope.User && s.ScopeId == userId.ToString());
+
+    [Fact]
+    public async Task UpdateById_TenantCaller_UserRowOfAnotherUser_Returns403_AndLeavesTheRow()
+    {
+        var service = CreateService(TenantA);
+        var victim = await UserRow(UserX);
+
+        var result = await service.UpdateSettingAsync(victim.Id, new UpdateSettingDto { Value = "attacker" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        (await UserRow(UserX)).Value.ShouldBe($"User:{UserX}");
+    }
+
+    [Fact]
+    public async Task DeleteById_TenantCaller_UserRowOfAnotherUser_Returns403_AndLeavesTheRow()
+    {
+        var service = CreateService(TenantA);
+        var victim = await UserRow(UserX);
+
+        (await service.DeleteSettingAsync(victim.Id)).Code.ShouldBe(403);
+        (await service.DeleteSettingsAsync([victim.Id])).Code.ShouldBe(403);
+
+        (await UserRow(UserX)).Value.ShouldBe($"User:{UserX}");
+    }
+
+    [Fact]
+    public async Task UpdateAndDeleteById_TenantCaller_OwnUserRow_Succeeds()
+    {
+        var service = CreateService(TenantA);
+        (await service.CreateSettingAsync(NewSetting(SettingScope.User, TestHelper.DefaultTestUserId.ToString()))).Succeeded.ShouldBeTrue();
+        var own = await UserRow(TestHelper.DefaultTestUserId);
+
+        var updated = await service.UpdateSettingAsync(own.Id, new UpdateSettingDto { Value = "mine" });
+        updated.Succeeded.ShouldBeTrue(updated.Message);
+        (await UserRow(TestHelper.DefaultTestUserId)).Value.ShouldBe("mine");
+
+        var deleted = await service.DeleteSettingAsync(own.Id);
+        deleted.Succeeded.ShouldBeTrue(deleted.Message);
+        (await PlantedRow()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateAndDeleteById_HostCaller_AnyUserRow_Succeeds()
+    {
+        var service = CreateService(null);
+        var row = await UserRow(UserY);
+
+        var updated = await service.UpdateSettingAsync(row.Id, new UpdateSettingDto { Value = "host" });
+        updated.Succeeded.ShouldBeTrue(updated.Message);
+
+        var deleted = await service.DeleteSettingAsync(row.Id);
+        deleted.Succeeded.ShouldBeTrue(deleted.Message);
+    }
+
     [Fact]
     public async Task ScopedSetSetting_RefusesToOverwriteAnEncryptedRowWithPlaintext()
     {

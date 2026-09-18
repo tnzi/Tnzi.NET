@@ -175,12 +175,20 @@ public class BankFeedService : ApplicationService, IBankFeedService
             return Ok(new BankSuggestResultDto());
 
         var autoConfirm = _options.BankFeedAutoConfirmExactMatches;
-        // 同一科目至多一张 Draft 对账，而自动确认与 AutoApply 规则都要它 —— 查一次共用
-        var draft = await _reconRepository.AsNoTracking()
+        // 同一科目至多一张 Draft 对账，而自动确认与 AutoApply 规则都要它 —— 查一次共用。
+        // ★ tracked 加载：自动确认往它里面插勾选行，与 ConfirmMatchAsync 同一口径，事务内要
+        // 轮换它的并发戳以与 CompleteAsync 互斥（勾选行自己没有并发令牌）。AsNoTracking 读出来的
+        // 实例根本参与不了戳校验 —— 于是「读到 Draft → 并发完成 → 把行插进已完成对账」在这条
+        // 分支上曾是畅通的，而两个请求都 200。
+        var draft = await _reconRepository.AsQueryable(true)
             .FirstOrDefaultAsync(r => r.AccountId == accountId && r.Status == ReconciliationStatus.Draft, cancellationToken);
 
         var summary = new BankSuggestResultDto { Evaluated = pending.Count };
         var assigned = new HashSet<Guid>();
+
+        // 自动确认的匹配在事务提交之后逐条发事件（与 ConfirmMatchAsync 同序：先提交再发布），
+        // 订阅方看到的自动确认与手工确认长得一样。
+        var autoConfirmed = new List<BankTransactionMatchedEvent>();
 
         // 自动入账的清单在事务内收集、事务外执行，理由见下方 ApplyRuleAsync。
         var autoApply = new List<(Guid TxnId, BankRuleMatch Rule)>();
@@ -256,6 +264,14 @@ public class BankFeedService : ApplicationService, IBankFeedService
 
                         assigned.Add(suggestion.JournalLineId);
                         summary.AutoConfirmed++;
+                        autoConfirmed.Add(new BankTransactionMatchedEvent
+                        {
+                            BankTransactionId = txn.Id,
+                            AccountId = txn.AccountId,
+                            JournalLineId = suggestion.JournalLineId,
+                            ReconciliationLineId = line.Id,
+                            TenantId = txn.TenantId
+                        });
                     }
                     else
                     {
@@ -267,6 +283,12 @@ public class BankFeedService : ApplicationService, IBankFeedService
                     }
                 }
 
+                // 触碰父对账行以轮换其并发戳（WHERE stamp=old）：若对账已被并发 CompleteAsync 完成，
+                // 此更新影响 0 行 → DbUpdateConcurrencyException → 整批回滚 + 409。
+                // 一批只轮换一次就够；没有自动确认时不碰它（纯建议不改对账，不该把它变成写动作）。
+                if (draft != null && summary.AutoConfirmed > 0)
+                    await _reconRepository.UpdateAsync(draft, ct);
+
                 return Result.Success();
             }, cancellationToken);
         }
@@ -274,6 +296,13 @@ public class BankFeedService : ApplicationService, IBankFeedService
         {
             return Fail<BankSuggestResultDto>("A suggested line was cleared concurrently. Reload and retry.", 409);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail<BankSuggestResultDto>("The draft reconciliation was completed by another operation. Reload and retry.", 409);
+        }
+
+        foreach (var matched in autoConfirmed)
+            await PublishEventAsync(matched, cancellationToken);
 
         // ★自动入账在建议事务**提交之后**逐条执行。
         // 它内部要建单、过账、确认匹配，每一步都自带工作单元；嵌进上面那个批量事务里，

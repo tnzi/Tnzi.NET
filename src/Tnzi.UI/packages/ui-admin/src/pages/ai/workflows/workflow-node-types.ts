@@ -1,16 +1,21 @@
 /**
  * Workflow node-type catalog used by the visual editor.
  *
- * The backend stores node type in `WorkflowStepDto.configuration['__nodeType']`
- * (lowercase, matching `WorkflowNodeTypes` constants in Tnzi.AI). We keep the
- * catalog static so the editor can show a typed property panel + icon + color
- * coding without round-tripping a schema endpoint.
+ * The node kind is the backend's runtime contract: `WorkflowNodeExecutor`
+ * resolves the `IWorkflowNode` implementation from
+ * `WorkflowStepDto.configuration['nodeType']` (lowercase, matching the
+ * `WorkflowNodeTypes` constants in Tnzi.AI) and falls back to the agent node
+ * when the key is absent. The editor therefore writes that exact key: a step
+ * whose kind lives under any other key looks fine in the editor and runs as a
+ * plain agent call. (Until 2026-09-12 the editor wrote `__nodeType`, which no
+ * backend commit ever read; `normalizeStepConfiguration` migrates it on load.)
  *
  * The editor also persists canvas positions on the same `configuration` bag
- * under `__x` / `__y` so the layout survives save/load. Both are stripped on
- * the wire by the backend graph builder (`CloneStep` removes `__originalIndex`
- * - we reuse that pattern for `__x` / `__y` / `__nodeType` so they remain
- * UI-only hints that don't leak into the runtime).
+ * under `__x` / `__y` so the layout survives save/load. Those two really are
+ * UI-only hints: the backend tolerates extra keys and never reads them.
+ *
+ * The catalog is static so the editor can show a typed property panel + icon
+ * + color coding without round-tripping a schema endpoint.
  */
 export type WorkflowNodeKind =
   | 'agent'
@@ -192,10 +197,45 @@ export function getNodeTypeMeta(kind: string | undefined | null): WorkflowNodeTy
   return byKind.get(key) ?? byKind.get('agent')!
 }
 
-/** Stored under WorkflowStepDto.configuration. UI-only - stripped on save? No
- * - backend tolerates extra keys (CloneStep just removes `__originalIndex`).
- * We keep these prefixed with `__` so they're visually distinct from
- * user-defined config keys. */
-export const NODE_TYPE_KEY = '__nodeType'
+/**
+ * The configuration key the backend resolves the node implementation from.
+ * Not `__`-prefixed on purpose: it is a runtime contract, not a UI hint.
+ */
+export const NODE_TYPE_KEY = 'nodeType'
+
+/**
+ * Key the editor wrote before 2026-09-12. Never read by the backend, so every
+ * kind chosen in the editor executed as an agent node. Read-only here: loading
+ * a definition migrates it to `NODE_TYPE_KEY` and drops it, so the next save
+ * heals the stored definition.
+ */
+export const LEGACY_NODE_TYPE_KEY = '__nodeType'
+
+/** Canvas position hints. UI-only; the backend tolerates and ignores them. */
 export const POS_X_KEY = '__x'
 export const POS_Y_KEY = '__y'
+
+/**
+ * Normalize a step's configuration bag on load: copy a legacy `__nodeType`
+ * into `nodeType` when the latter is absent and drop the legacy key. Returns
+ * a new object; the input is not mutated.
+ */
+export function normalizeStepConfiguration(
+  configuration: Record<string, string> | null | undefined,
+): Record<string, string> {
+  const { [LEGACY_NODE_TYPE_KEY]: legacy, ...rest } = configuration ?? {}
+  const current = rest[NODE_TYPE_KEY]
+  if ((current === undefined || current === null || current === '') && legacy) {
+    return { ...rest, [NODE_TYPE_KEY]: legacy }
+  }
+  return rest
+}
+
+/** Resolve the editor kind of a step from its `nodeType`; unknown / absent = agent. */
+export function getStepKind(
+  step: { configuration?: Record<string, string> | null } | null | undefined,
+): WorkflowNodeKind {
+  if (!step) return 'agent'
+  const raw = step.configuration?.[NODE_TYPE_KEY]
+  return getNodeTypeMeta(raw ?? 'agent').kind
+}

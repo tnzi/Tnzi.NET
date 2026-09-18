@@ -14,6 +14,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
     private readonly IQuotaService _quotaService;
     private readonly IWorkflowCheckpointStore _checkpointStore;
     private readonly WorkflowEngine _workflowEngine;
+    private readonly IEnumerable<IWorkflowNode> _workflowNodes;
 
     public WorkflowService(
         IRepository<WorkflowDefinition, Guid> repository,
@@ -25,6 +26,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         IQuotaService quotaService,
         IWorkflowCheckpointStore checkpointStore,
         WorkflowEngine workflowEngine,
+        IEnumerable<IWorkflowNode> workflowNodes,
         IServiceProvider serviceProvider)
         : base(serviceProvider)
     {
@@ -37,6 +39,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         _quotaService = Check.NotNull(quotaService);
         _checkpointStore = Check.NotNull(checkpointStore);
         _workflowEngine = Check.NotNull(workflowEngine);
+        _workflowNodes = Check.NotNull(workflowNodes);
     }
 
     public async Task<Result<WorkflowDefinitionDto>> CreateAsync(CreateWorkflowDefinitionDto input)
@@ -55,6 +58,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             ExecutionMode = input.ExecutionMode,
             IsEnabled = input.IsEnabled,
             Steps = JsonSerializer.Serialize(input.Steps ?? new List<WorkflowStepDto>(), TnziJsonDefaults.Options),
+            Configuration = SerializeConfiguration(input.Configuration)
         };
         await _repository.InsertAsync(entity);
         return Ok(MapToDto(entity));
@@ -75,9 +79,85 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         if (input.Steps != null) entity.Steps = JsonSerializer.Serialize(input.Steps, TnziJsonDefaults.Options);
         if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
         if (input.IsEnabled.HasValue) entity.IsEnabled = input.IsEnabled.Value;
+        // null = 不动；空对象 = 清空（Update DTO 的 null 已经是「未提供」，清空需要一个显式形态）
+        if (input.Configuration != null) entity.Configuration = SerializeConfiguration(input.Configuration);
 
         await _repository.UpdateAsync(entity);
         return Ok(MapToDto(entity));
+    }
+
+    /// <summary>
+    /// 把 DTO 序列化成 <c>WorkflowDefinition.Configuration</c> 的存储形态 —— 与 <see cref="BuildWorkflowGraph"/>
+    /// 读的 <see cref="WorkflowGraphConfiguration"/> 同一份 JSON 形状（枚举按名字）。空配置存 null。
+    /// </summary>
+    private static string? SerializeConfiguration(WorkflowGraphConfigurationDto? configuration)
+    {
+        if (configuration is null || configuration.IsEmpty)
+        {
+            return null;
+        }
+
+        var stored = new WorkflowGraphConfiguration
+        {
+            ConditionalEdges = configuration.ConditionalEdges?.Select(e => new ConditionalEdge
+            {
+                FromNodeId = e.FromNodeId,
+                Routes = new Dictionary<string, string>(e.Routes ?? [], StringComparer.OrdinalIgnoreCase),
+                DefaultTarget = e.DefaultTarget,
+                ConditionType = ParseConditionType(e.ConditionType)
+            }).ToList(),
+            Loops = configuration.Loops?.ToDictionary(
+                kv => kv.Key,
+                kv => new LoopDefinition { NodeIds = kv.Value.NodeIds ?? [], MaxIterations = kv.Value.MaxIterations },
+                StringComparer.OrdinalIgnoreCase)
+        };
+
+        return JsonSerializer.Serialize(stored, TnziJsonDefaults.Options);
+    }
+
+    private static EdgeConditionType ParseConditionType(string? conditionType)
+        => Enum.TryParse<EdgeConditionType>(conditionType, ignoreCase: true, out var parsed) ? parsed : EdgeConditionType.OutputContains;
+
+    /// <summary>存储形态 → DTO；解析不了的历史脏数据按「无配置」返回，不让读取整体失败。</summary>
+    private static WorkflowGraphConfigurationDto? DeserializeConfiguration(string? configuration)
+    {
+        var stored = TryDeserializeConfiguration(configuration);
+        if (stored is null || (stored.ConditionalEdges is not { Count: > 0 } && stored.Loops is not { Count: > 0 }))
+        {
+            return null;
+        }
+
+        return new WorkflowGraphConfigurationDto
+        {
+            ConditionalEdges = stored.ConditionalEdges?.Select(e => new WorkflowConditionalEdgeDto
+            {
+                FromNodeId = e.FromNodeId,
+                Routes = new Dictionary<string, string>(e.Routes, StringComparer.OrdinalIgnoreCase),
+                DefaultTarget = e.DefaultTarget,
+                ConditionType = e.ConditionType.ToString()
+            }).ToList(),
+            Loops = stored.Loops?.ToDictionary(
+                kv => kv.Key,
+                kv => new WorkflowLoopDto { NodeIds = [.. kv.Value.NodeIds], MaxIterations = kv.Value.MaxIterations },
+                StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    private static WorkflowGraphConfiguration? TryDeserializeConfiguration(string? configuration)
+    {
+        if (string.IsNullOrWhiteSpace(configuration))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<WorkflowGraphConfiguration>(configuration, TnziJsonDefaults.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private async Task CreateVersionSnapshotAsync(WorkflowDefinition entity, string? changeDescription = null)
@@ -87,15 +167,19 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             .Where(v => v.WorkflowDefinitionId == entity.Id)
             .MaxAsync(v => (int?)v.VersionNumber) ?? 0;
 
-        // 序列化当前定义的完整快照
+        // 序列化当前定义的完整快照。
+        // ★ Steps / Configuration 在实体上是"装着 JSON 的字符串"，必须先解析成 JSON 值再放进快照：
+        // 直接把字符串塞进匿名对象会被序列化成一个 JSON 字符串 token（`"steps":"[{\"stepId\"...}]"`），
+        // 而 RestoreVersionAsync 用 GetRawText() 取回时拿到的是带引号带转义的字面量 ——
+        // 恢复返回 200，此后每个读取定义的路径都抛 JsonException，行被写坏而调用点毫无症状。
         var snapshot = JsonSerializer.Serialize(new
         {
             entity.Name,
             entity.Description,
-            entity.Steps,
+            Steps = ParseJsonElementOrNull(entity.Steps),
             ExecutionMode = entity.ExecutionMode.ToString(),
             entity.IsEnabled,
-            entity.Configuration
+            Configuration = ParseJsonElementOrNull(entity.Configuration)
         }, TnziJsonDefaults.Options);
 
         var version = new WorkflowDefinitionVersion
@@ -108,6 +192,28 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
 
         await _versionRepository.InsertAsync(version);
         Logger.LogInformation("Workflow version created: WorkflowId={WorkflowId}, Version={Version}", entity.Id, version.VersionNumber);
+    }
+
+    /// <summary>
+    /// 把实体上的 JSON 字符串列解析成 <see cref="JsonElement"/> 以便嵌进快照。空白视为 null；
+    /// 解析不了的内容（历史脏数据）退回原样字符串，让快照仍能建出来而不是让更新整体失败。
+    /// </summary>
+    private static object? ParseJsonElementOrNull(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
     }
 
     public async Task<Result> DeleteAsync(Guid id)
@@ -175,6 +281,7 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             Steps = string.IsNullOrWhiteSpace(entity.Steps)
                 ? new List<WorkflowStepDto>()
                 : JsonSerializer.Deserialize<List<WorkflowStepDto>>(entity.Steps, TnziJsonDefaults.Options) ?? new(),
+            Configuration = DeserializeConfiguration(entity.Configuration),
         };
     }
 
@@ -232,6 +339,8 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
             ? new Dictionary<string, string>(step.Configuration, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         configuration["__originalIndex"] = originalIndex.ToString(CultureInfo.InvariantCulture);
+        // 旧编辑器写的 __nodeType 折成 nodeType：已保存的定义不必重新保存就按真实类型运行。
+        WorkflowStepNodeType.Normalize(configuration);
 
         return new WorkflowStepDto
         {

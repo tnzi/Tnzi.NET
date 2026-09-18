@@ -65,6 +65,15 @@ export function useAdminSigningApi(client: HttpClient) {
     voidRequest: (id: string) =>
       client.post<void>(`${ADMIN_REQUEST_BASE}/${id}/void`),
 
+    /**
+     * Seal a request whose recipients have all signed but whose sealing
+     * failed (it sits in InProgress). A recovery action for transient
+     * failures; an already sealed request is refused (the hash is computed
+     * exactly once).
+     */
+    sealRequest: (id: string) =>
+      client.post<EnvelopeDto>(`${ADMIN_REQUEST_BASE}/${id}/seal`),
+
     // ── Templates ───────────────────────────────────────────────────────────
 
     /** List templates (paged). */

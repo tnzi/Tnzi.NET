@@ -231,15 +231,31 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
         return Ok(statistics);
     }
 
+    // ------------------------------------------------------------------
+    // 引用计数的同步与校验
+    //
+    // ReferenceCount 混着两种引用：显式的 Storage_Reference 行，与**隐式**的持有者 ——
+    // 正式上传（IsTemporary = false）从 1 起、MD5 复用每命中一次 +1，这两种都不产生引用行。
+    // 所以「按引用行重算」只对临时记录成立：正式记录的隐式持有者数从引用行上根本读不出来，
+    // 按引用行重算等于把每一条未绑定的正式上传与 MD5 共享文件归零，默认开启的孤儿回收随后
+    // 物理删除它们（或任一持有者的 DeleteAsync 当场删掉别人仍在用的文件）。
+    // 因此：同步只碰临时记录，正式记录一律不动；校验对正式记录只要求「不低于引用行数」——
+    // 那是唯一能确定的不一致（解绑一次就会把还在用的文件删掉）。
+    // ------------------------------------------------------------------
+
+    private const string PermanentRecordCannotBeSynced =
+        "Reference counts can only be rebuilt for temporary files. A permanent upload (or an MD5-reused file) carries implicit holders that are not recorded as reference rows, so recomputing it from reference rows would zero it and hand it to orphan cleanup.";
+
     public async Task<Result<int>> SyncReferenceCountAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
-        var actualCount = await _referenceRepository.AsQueryable()
-            .CountAsync(r => r.FileId == fileId && !r.IsTemporary, cancellationToken);
-
         var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
         if (fileRecord == null)
             return Fail<int>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
+        if (!fileRecord.IsTemporary)
+            return Fail<int>(PermanentRecordCannotBeSynced, 400, ErrorCodes.VALIDATION_ERROR);
+
+        var actualCount = await CountPermanentReferenceRowsAsync(fileId, cancellationToken);
         fileRecord.ReferenceCount = actualCount;
         await _repository.UpdateAsync(fileRecord, cancellationToken);
 
@@ -250,55 +266,41 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
     {
         var syncedCount = await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
-            // 一次查询获取所有文件的实际引用计数
-            var referenceCounts = await _referenceRepository.AsQueryable()
-                .Where(r => !r.IsTemporary)
-                .GroupBy(r => r.FileId)
-                .Select(g => new { FileId = g.Key, Count = g.Count() })
-                .ToListAsync(cancellationToken);
-
-            var countDict = referenceCounts.ToDictionary(x => x.FileId, x => x.Count);
-
-            // 一次查询加载所有文件记录
-            var allFiles = await _repository.ToListAsync(cancellationToken: cancellationToken);
-
-            // 筛选出引用计数不匹配的记录
-            var mismatchedFiles = allFiles.Where(f =>
-            {
-                var actualCount = countDict.GetValueOrDefault(f.Id, 0);
-                return f.ReferenceCount != actualCount;
-            }).ToList();
-
-            // 批量更新
-            foreach (var file in mismatchedFiles)
-            {
-                file.ReferenceCount = countDict.GetValueOrDefault(file.Id, 0);
-            }
-
-            if (mismatchedFiles.Count > 0)
-            {
-                await _repository.UpdateManyAsync(mismatchedFiles, cancellationToken);
-            }
-
-            return mismatchedFiles.Count;
+            // 只重算临时记录；正式记录（未绑定的正式上传 / MD5 共享文件）带隐式引用，
+            // 从引用行上重建不出来，一律跳过。集合更新一条 SQL 完成，不把整张表拉进内存。
+            var references = _referenceRepository.AsQueryable();
+            return await _repository.AsQueryable()
+                .Where(f => f.IsTemporary
+                    && f.ReferenceCount != references.Count(r => r.FileId == f.Id && !r.IsTemporary))
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(
+                        f => f.ReferenceCount,
+                        f => references.Count(r => r.FileId == f.Id && !r.IsTemporary)),
+                    cancellationToken);
         }, cancellationToken);
 
-        LogInformation("Synced reference counts for {Count} files", syncedCount);
+        LogInformation("Synced reference counts for {Count} temporary files; permanent records were left untouched", syncedCount);
         return Ok(syncedCount);
     }
 
     public async Task<Result<bool>> ValidateReferenceCountAsync(Guid fileId, CancellationToken cancellationToken = default)
     {
-        var actualCount = await _referenceRepository.AsQueryable()
-            .CountAsync(r => r.FileId == fileId && !r.IsTemporary, cancellationToken);
-
         var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
         if (fileRecord == null)
             return Fail<bool>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
-        var isValid = fileRecord.ReferenceCount == actualCount;
+        var actualCount = await CountPermanentReferenceRowsAsync(fileId, cancellationToken);
+
+        // 临时记录：计数完全由引用行决定。正式记录：隐式持有者数未知，只有低于引用行数才是确定的不一致。
+        var isValid = fileRecord.IsTemporary
+            ? fileRecord.ReferenceCount == actualCount
+            : fileRecord.ReferenceCount >= actualCount;
         return Ok(isValid);
     }
+
+    private Task<int> CountPermanentReferenceRowsAsync(Guid fileId, CancellationToken cancellationToken)
+        => _referenceRepository.AsQueryable()
+            .CountAsync(r => r.FileId == fileId && !r.IsTemporary, cancellationToken);
 
     public async Task<Result<int>> CleanupTemporaryFilesAsync(TimeSpan? olderThan = null)
     {

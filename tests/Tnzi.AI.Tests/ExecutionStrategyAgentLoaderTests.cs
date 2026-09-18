@@ -60,6 +60,8 @@ public class ExecutionStrategyAgentLoaderTests : IDisposable
         // The context.ServiceProvider must resolve IAgentGrantService (the loader fetches it via GetRequiredService).
         _serviceProvider = new ServiceCollection()
             .AddSingleton<IAgentGrantService>(_grantService)
+            .AddSingleton<IUserToolPermissionResolver>(
+                new UserToolPermissionResolver(new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>()), Mock.Of<ILogger<UserToolPermissionResolver>>()))
             .BuildServiceProvider();
 
         // Factory stub captures the toolGroups / toolNames arguments and returns a throwaway executor.

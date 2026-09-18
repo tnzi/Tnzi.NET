@@ -38,7 +38,6 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
             Enabled = options.Enabled,
             Endpoint = options.Endpoint,
             RequireAuthentication = options.RequireAuthentication,
-            RateLimitPerTenant = options.RateLimitPerTenant,
             RateLimitPerMinute = options.RateLimitPerMinute,
             ExposedAgentCount = _mcpServerHost.GetExposedAgentIds().Count,
             CustomToolCount = _mcpServerHost.GetCustomToolNames().Count,

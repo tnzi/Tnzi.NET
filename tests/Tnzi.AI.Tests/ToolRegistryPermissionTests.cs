@@ -239,12 +239,11 @@ public class ToolRegistryPermissionTests
             agentFactory.Object,
             aiOptions,
             agentRepository.Object,
-            toolRegistry,
+            new UserToolPermissionResolver(toolRegistry, Mock.Of<ILogger<UserToolPermissionResolver>>(), permissionChecker.Object),
             new SimplePromptTemplateEngine(),
             versionRouter.Object,
             grantService.Object,
-            Mock.Of<ILogger<AgentResolver>>(),
-            permissionChecker: permissionChecker.Object);
+            Mock.Of<ILogger<AgentResolver>>());
 
         var resolution = await resolver.ResolveAgentAsync(agentId, null, null, null, CancellationToken.None);
 

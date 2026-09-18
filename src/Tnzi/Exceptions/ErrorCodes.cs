@@ -33,6 +33,13 @@ public static class ErrorCodes
     public const string SERVICE_TIMEOUT = "SERVICE_TIMEOUT";
     public const string RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED";
 
+    // ==================== 人机验证错误码 ====================
+    /// <summary>
+    /// 端点要求人机验证而请求没有带有效令牌（<c>[RequireCaptcha]</c> 与消费方自己调 <c>ICaptchaVerifier</c> 时用）。
+    /// Identity 的登录 / 注册流程沿用 <see cref="IDENTITY_CAPTCHA_REQUIRED"/>，那一条随响应附带一道新题。
+    /// </summary>
+    public const string CAPTCHA_REQUIRED = "CAPTCHA_REQUIRED";
+
     // ==================== 配置相关错误码 ====================
     public const string CONFIGURATION_ERROR = "CONFIGURATION_ERROR";
     public const string CONFIGURATION_MISSING = "CONFIGURATION_MISSING";

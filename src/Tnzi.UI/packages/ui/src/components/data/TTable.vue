@@ -5,6 +5,7 @@
     :row-key="resolvedRowKey"
     :loading="loading"
     :pagination="naivePagination"
+    :remote="pagination !== false"
     :bordered="bordered"
     :striped="striped"
     :size="size"
@@ -115,7 +116,10 @@ const naiveColumns = computed<DataTableColumn[]>(() => {
       minWidth: col.minWidth,
       align: col.align,
       fixed: col.fixed,
-      sorter: col.sortable || (props.sortable && col.sortable !== false) ? 'default' : undefined,
+      // `true` marks the column as sortable without letting naive sort locally: the
+      // order is a request forwarded through the `sort` emit and reflected back via
+      // `sortBy` / `sortOrder`, the same way pages are.
+      sorter: col.sortable || (props.sortable && col.sortable !== false) ? true : undefined,
       render: col.render
         ? (row: object, index: number) => col.render!(row as Record<string, unknown>, index)
         : undefined,
@@ -163,6 +167,10 @@ const naiveColumns = computed<DataTableColumn[]>(() => {
   return result
 })
 
+// `IPaginationConfig.total` is the record count of the whole result set, so the rows in
+// `data` are one page of it. NDataTable must run in `remote` mode for that: without it
+// naive clamps the current page to what fits in `data` and reports `data.length` as the
+// item count, so the pager never leaves page 1.
 const naivePagination = computed<PaginationProps | false>(() => {
   if (props.pagination === false) return false
 

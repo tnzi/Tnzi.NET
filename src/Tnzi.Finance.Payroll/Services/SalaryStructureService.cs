@@ -153,8 +153,6 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
             return Fail("Line sequences must be unique.");
         if (input.Lines.Select(l => l.ComponentId).Distinct().Count() != input.Lines.Count)
             return Fail("A component can appear at most once per structure.");
-        if (input.Lines.Any(l => l.AmountOverride is < 0))
-            return Fail("AmountOverride cannot be negative.");
 
         var componentIds = input.Lines.Select(l => l.ComponentId).ToList();
         var components = await _componentRepository.AsNoTracking()
@@ -182,6 +180,9 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
                 return Fail($"Salary component '{line.ComponentId}' not found.", 404);
             if (!component.IsActive)
                 return Fail($"Salary component '{component.Code}' is inactive and cannot be added to a structure.");
+            // 钉死额的符号规则与 DefaultAmount / 一次性输入同一份判据：备注项是具名中间量，天然带符号。
+            if (line.AmountOverride is { } amountOverride && PayrollAmountRules.IsNegativeMonetary(component.Type, amountOverride))
+                return Fail($"AmountOverride cannot be negative for component '{component.Code}' ({component.Type}).");
 
             var formula = string.IsNullOrWhiteSpace(line.FormulaOverride) ? component.Formula : line.FormulaOverride;
             var condition = string.IsNullOrWhiteSpace(line.ConditionOverride) ? component.Condition : line.ConditionOverride;

@@ -22,6 +22,34 @@ public interface IFunctionAuthorizationService
     Task<IEnumerable<string>> GetUserPermissionNamesAsync(Guid userId);
 
     /// <summary>
+    /// 一次解析多个用户对同一个权限的授予，返回**持有**该权限的用户 Id 子集。
+    /// 语义与逐个 <see cref="CheckPermissionAsync"/> 完全一致（超管旁路、deny-by-default、
+    /// 用户级 deny 优先、大小写不敏感），只是把 N 次往返压成常数次。
+    /// </summary>
+    /// <remarks>
+    /// 面向「按用户名单过滤」的调用方：IM 通讯录 / 群成员候选 / 广播受众 / 会话列表。
+    /// 这些名单可以很长，而单次判定的成本是至少一次角色查询 —— 逐个循环会把一个
+    /// 请求放大成 O(N) 次 DB 往返。默认实现就是那个循环（不打断既有实现），
+    /// 真实实现应改写成批量查询。<c>Guid.Empty</c> 与重复 id 会被忽略；空名单或空权限名返回空集。
+    /// </remarks>
+    /// <param name="userIds">用户 Id 名单</param>
+    /// <param name="permissionName">权限名称</param>
+    async Task<IReadOnlySet<Guid>> FilterGrantedAsync(IReadOnlyCollection<Guid> userIds, string permissionName)
+    {
+        var granted = new HashSet<Guid>();
+        if (userIds == null || userIds.Count == 0 || string.IsNullOrEmpty(permissionName))
+            return granted;
+
+        foreach (var userId in userIds.Where(id => id != Guid.Empty).Distinct())
+        {
+            if (await CheckPermissionAsync(userId, permissionName))
+                granted.Add(userId);
+        }
+
+        return granted;
+    }
+
+    /// <summary>
     /// 用户是否为超级管理员（绕过一切权限检查、可支配全部角色）。
     /// 默认实现返回 false：没有超管概念的实现把所有用户当普通用户。
     /// </summary>

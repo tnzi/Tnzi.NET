@@ -162,4 +162,25 @@ public class SalaryComponentServiceTests : PayrollIntegrationTestBase
         found.ShouldNotBeNull();
         found.Id.ShouldBe(created.Id);
     }
+
+    /// <summary>默认额的符号规则与计算器 / 一次性输入 / 钉死额同一份判据：备注项可负，其余三类不可。</summary>
+    [Theory]
+    [InlineData(SalaryComponentType.Earning, false)]
+    [InlineData(SalaryComponentType.Deduction, false)]
+    [InlineData(SalaryComponentType.EmployerContribution, false)]
+    [InlineData(SalaryComponentType.Informational, true)]
+    public async Task Create_NegativeDefaultAmount_FollowsTheComponentSignRule(SalaryComponentType type, bool accepted)
+    {
+        var result = await InScopeAsync<ISalaryComponentService, Result<SalaryComponentDto>>(s => s.CreateAsync(new CreateSalaryComponentDto
+        {
+            Code = "SIGNED",
+            Name = "Signed",
+            Type = type,
+            DefaultAmount = -10m
+        }));
+
+        result.Succeeded.ShouldBe(accepted, result.Message);
+        if (!accepted)
+            result.Code.ShouldBe(400);
+    }
 }

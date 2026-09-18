@@ -21,6 +21,7 @@ global using Tnzi.EFCore;
 global using Tnzi.Mapster;
 global using Tnzi.Notification.Dtos;
 global using Tnzi.Notification.Entities;
+global using Tnzi.Notification.Metadata;
 global using Tnzi.Notification.Options;
 global using Tnzi.Notification.Services;
 global using Tnzi.Results;

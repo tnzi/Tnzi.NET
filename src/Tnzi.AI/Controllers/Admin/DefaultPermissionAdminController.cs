@@ -11,16 +11,19 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
 {
     protected readonly IToolPermissionEvaluator PermissionEvaluator;
     protected readonly IToolPermissionRuleService PermissionRuleService;
+    protected readonly IToolRegistry? ToolRegistry;
 
     /// <summary>
     /// 初始化权限管理控制器
     /// </summary>
     public DefaultPermissionAdminController(
         IToolPermissionEvaluator permissionEvaluator,
-        IToolPermissionRuleService permissionRuleService)
+        IToolPermissionRuleService permissionRuleService,
+        IToolRegistry? toolRegistry = null)
     {
         PermissionEvaluator = Check.NotNull(permissionEvaluator);
         PermissionRuleService = Check.NotNull(permissionRuleService);
+        ToolRegistry = toolRegistry;
     }
 
     /// <summary>
@@ -77,7 +80,9 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
             WorkflowExecutionId = request.WorkflowExecutionId,
             WorkflowNodeName = request.WorkflowNodeName,
             ShellCommand = request.ShellCommand,
-            IsDestructive = request.IsDestructive,
+            // 与运行时同源：ApprovalToolWrapper 把工具声明的 IsDestructive 与 shell 分析 OR 合并，
+            // 试算也把注册表里的声明 OR 进来，否则 delete_memory 在这里答 Deny、运行时却直接执行
+            IsDestructive = request.IsDestructive || IsRegisteredAsDestructive(request.ToolName),
             UserId = request.UserId,
             Arguments = request.Arguments ?? new Dictionary<string, object?>()
         };
@@ -145,5 +150,16 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     {
         var result = await PermissionRuleService.DeleteAsync(id, HttpContext.RequestAborted);
         return result.ToApiResult();
+    }
+
+    /// <summary>注册表里该工具是否经 <c>[AIFunction(IsDestructive = true)]</c> 声明为破坏性；没有注册表或查不到时按未声明</summary>
+    private bool IsRegisteredAsDestructive(string? toolName)
+    {
+        if (ToolRegistry == null || string.IsNullOrWhiteSpace(toolName))
+        {
+            return false;
+        }
+
+        return ToolRegistry.GetToolsByNames([toolName]).Any(t => t.IsDestructive);
     }
 }

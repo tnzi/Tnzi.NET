@@ -1,5 +1,6 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from '@tnzi/core/adapters/i18n'
+import { composeImageCaptchaToken } from '@tnzi/core/services/captcha'
 
 export interface LoginCredentials {
   userName: string
@@ -7,11 +8,20 @@ export interface LoginCredentials {
   rememberMe: boolean
   captchaId?: string
   captchaCode: string
+  /**
+   * The captcha token to submit as `captchaToken` (any provider). Composed as
+   * `{captchaId}:{code}` for the built-in picture, or taken verbatim from
+   * `captchaToken` when the consumer renders a provider widget
+   * (`useCaptchaWidget` from `@tnzi/core/services/captcha`).
+   */
+  captchaToken?: string
 }
 
 export interface UseLoginFormOptions {
   showCaptcha?: boolean
   captchaId?: string
+  /** Token produced by a consumer-rendered provider widget; wins over the picture's id + code. */
+  captchaToken?: string
   onSubmit?: (credentials: LoginCredentials) => Promise<void>
   onForgotPassword?: () => void
   onRefreshCaptcha?: () => void
@@ -76,6 +86,7 @@ export function useLoginForm(options: UseLoginFormOptions = {}): UseLoginFormRet
         rememberMe: rememberMe.value,
         captchaId: options.captchaId,
         captchaCode: captchaCode.value,
+        captchaToken: options.captchaToken || composeImageCaptchaToken(options.captchaId, captchaCode.value),
       })
     } catch (err) {
       errors.value = { _form: err instanceof Error ? err.message : String(err) }

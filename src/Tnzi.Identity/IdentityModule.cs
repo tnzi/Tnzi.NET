@@ -58,9 +58,10 @@ public class IdentityModule : TnziApplicationModule
         context.Services.AddDataProtection();
 
         // 注册登录日志和令牌服务
-        var loginLogSender = new LoginLogSender();
-        context.Services.AddSingleton<ILoginLogSender>(loginLogSender);
-        context.Services.AddSingleton<ILoginLogConsumer>(loginLogSender);
+        // 发送者要记「队列满、丢了多少条」的日志，故经 DI 拿 ILogger 而不是 new 出来。
+        context.Services.AddSingleton<LoginLogSender>();
+        context.Services.AddSingleton<ILoginLogSender>(sp => sp.GetRequiredService<LoginLogSender>());
+        context.Services.AddSingleton<ILoginLogConsumer>(sp => sp.GetRequiredService<LoginLogSender>());
         context.Services.AddHostedService<LoginLogBackgroundService>();
         context.Services.AddScoped<LoginLogService>();
         context.Services.AddScoped<ILoginLogService>(sp => sp.GetRequiredService<LoginLogService>());
@@ -85,8 +86,14 @@ public class IdentityModule : TnziApplicationModule
         // 注册用户登录记录服务
         context.Services.AddScoped<IUserLoginService, UserLoginService>();
 
+        // 当前请求能碰到哪些用户（多租户裁剪口径见 UserTenantScope）。User 没有全局租户过滤器，
+        // 会话 / 登录日志 / 登录安全 / 邀请这些只拿用户 id 的服务经它裁剪自己的管理端。
+        context.Services.AddScoped<IUserTenantScopeProvider, UserTenantScopeProvider>();
+
         // 注册用户管理服务
         context.Services.AddScoped<IUserService, UserService>();
+        // 存量修复：把旧版「启用」关掉的登录失败锁定重新武装起来（迁移之后、每次启动、幂等）。
+        context.Services.AddTransient<IPostMigrationStartupTask, LockoutProtectionRepairStartupTask>();
 
         // 注册角色管理服务
         context.Services.AddScoped<IRoleService, RoleService>();
@@ -113,6 +120,8 @@ public class IdentityModule : TnziApplicationModule
 
         // 注册OAuth服务
         context.Services.AddScoped<IOAuthService, OAuthService>();
+        // 个人中心「绑定第三方账号」的一次性令牌：把「当前用户是谁」带过匿名的 OAuth 发起与回调两次整页跳转。
+        context.Services.AddScoped<IOAuthLinkTokenService, OAuthLinkTokenService>();
 
         // 注册用户详情服务
         context.Services.AddScoped<IUserDetailService, UserDetailService>();
@@ -142,8 +151,8 @@ public class IdentityModule : TnziApplicationModule
 
         // ★★★ 内置守卫：账号已开好但本人还没接受邀请。与上面那条同理同源，
         // 但**不能合并**：邀请状态是一个只有「接受邀请」能改的独立字段，
-        // 而账号锁定会被 UserService.EnableAsync 清掉（连同 LockoutEnabled），
-        // 那一刻 IsLockedOutAsync 恒为 false，上面那道守卫就不再拦任何东西了。
+        // 而「启用」与「解锁」本来就是清掉 LockoutEnd —— 管理员对一个未接受邀请的账号
+        // 点一下「启用」，上面那道守卫就如其所愿地放行了。
         // 详见 PendingActionsLoginGuard 的注释。
         context.Services.AddScoped<ILoginGuard, PendingActionsLoginGuard>();
 
@@ -158,8 +167,10 @@ public class IdentityModule : TnziApplicationModule
         context.Services.AddEventHandler<UserLoggedOutEvent, UserLoggedOutEventHandler>();
         context.Services.AddEventHandler<UserLoginFailedEvent, UserLoginFailedEventHandler>();
 
-        // 注册验证码服务
+        // 注册验证码服务 + 把内置图形验证码登记成一家 ICaptchaProvider（名字 image）。
+        // 登记的是能力：选不选它由 AspNetCore:Captcha:Provider 决定（没配时见 PostConfigure 的默认补位）。
         context.Services.TryAddScoped<ICaptchaService, CaptchaService>();
+        context.Services.AddCaptchaProvider<ImageCaptchaProvider>();
 
         // 注册页面生成服务
         context.Services.AddScoped<IIdentityPageService, IdentityPageService>();
@@ -358,6 +369,11 @@ public class IdentityModule : TnziApplicationModule
         // 在 Configure 阶段注册会让消费方的实现被静默挡在门外，而调用照样成功。
         context.Services.TryAddScoped<IOAuthEmailVerificationPolicy, DefaultOAuthEmailVerificationPolicy>();
 
+        // 人机验证提供商的默认值：本模块加载而部署没配 AspNetCore:Captcha:Provider 时补成内置图形验证码。
+        // 这保住了拆分前的行为（开了登录 / 注册验证码就出文字图），也让 [RequireCaptcha] 在加载了 Identity 的
+        // 部署里零配置可用。PostConfigure 回调在所有 Configure 绑定之后跑，appsettings 里写了值的一律不动。
+        context.Services.PostConfigure<CaptchaVerifierOptions>(o => o.Provider ??= ImageCaptchaProvider.ProviderName);
+
         return Task.CompletedTask;
     }
 
@@ -401,7 +417,8 @@ public class IdentityModule : TnziApplicationModule
                         "Falling back to database storage. To use Redis sessions, add the RedisCachingModule to your dependencies.");
 
                     var repository = provider.GetRequiredService<IRepository<UserSession, Guid>>();
-                    return new DatabaseSessionService(repository, provider);
+                    var scope = provider.GetRequiredService<IUserTenantScopeProvider>();
+                    return new DatabaseSessionService(repository, provider, scope);
                 });
             }
         }

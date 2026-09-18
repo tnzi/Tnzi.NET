@@ -5,10 +5,16 @@ import { nextTick } from 'vue'
 import AccessLogs from '../../../src/pages/system/AccessLogs.vue'
 
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
+// Capture is opt-in on the backend; the page probes `statistics()` for
+// `captureEnabled` to explain an empty table. Swappable per test.
+const { statistics } = vi.hoisted(() => ({
+  statistics: { impl: async (): Promise<{ captureEnabled: boolean }> => ({ captureEnabled: true }) },
+}))
 vi.mock('../../../src/services/bridges/system-bridge', () => ({
   createSystemBridge: () => ({
     settings: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     accessLogs: {
+      statistics: () => statistics.impl(),
       fetch: vi.fn(async () => ({
         items: [
           { id: 'a1', path: '/api/users', method: 'GET', statusCode: 200, responseTime: 42, ipAddress: '127.0.0.1', userName: 'admin', creationTime: '2026-01-01T00:00:00Z' },
@@ -41,6 +47,7 @@ const stubs = {
   Drawer: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
   DrawerContent: { template: '<div><slot /></div>' },
   VueDraggable: { template: '<div><slot /></div>' },
+  Alert: { template: '<div class="alert"><slot /></div>' },
 }
 
 describe('AccessLogs page (Phase 3.15)', () => {
@@ -59,5 +66,29 @@ describe('AccessLogs page (Phase 3.15)', () => {
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
     expect(wrapper.find('.t-crud-page__create').exists()).toBe(false)
+  })
+
+  it('explains an empty table when the deployment is not capturing', async () => {
+    statistics.impl = async () => ({ captureEnabled: false })
+    const wrapper = mount(AccessLogs, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(wrapper.find('.access-logs__capture-off').exists()).toBe(true)
+    statistics.impl = async () => ({ captureEnabled: true })
+  })
+
+  it('shows no banner while capturing, nor when the probe fails', async () => {
+    statistics.impl = async () => ({ captureEnabled: true })
+    let wrapper = mount(AccessLogs, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(wrapper.find('.access-logs__capture-off').exists()).toBe(false)
+
+    statistics.impl = async () => { throw new Error('forbidden') }
+    wrapper = mount(AccessLogs, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 10))
+    expect(wrapper.find('.access-logs__capture-off').exists()).toBe(false)
+    statistics.impl = async () => ({ captureEnabled: true })
   })
 })

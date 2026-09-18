@@ -80,13 +80,8 @@ public abstract class ExceptionHandlerBase
     /// </summary>
     protected int GetHttpStatusCode(Exception exception)
     {
-        return exception switch
-        {
-            BusinessException businessException => businessException.HttpStatusCode,
-            InfrastructureException => 503, // Service Unavailable
-            TnziException => 500,
-            _ => 500
-        };
+        // 与 ExceptionHttpStatusCode 同一张表：观测类中间件在响应写出之前也按它折算。
+        return ExceptionHttpStatusCode.Resolve(exception);
     }
 
     /// <summary>

@@ -219,7 +219,9 @@ public partial class AIModule : TnziApplicationModule
             var subAgentRegistry = serviceProvider.GetRequiredService<ISubAgentRegistry>();
             using var subAgentScope = serviceProvider.CreateScope();
             var subAgentTypeRepo = subAgentScope.ServiceProvider.GetRequiredService<IRepository<SubAgentType, Guid>>();
-            await subAgentRegistry.LoadFromStoreAsync(subAgentTypeRepo);
+            // 根作用域没有租户，过滤器只放行 TenantId 为 null 的行；关掉它一次读全部租户，按 TenantId 分桶
+            using var tenantFilterScope = subAgentScope.ServiceProvider.GetService<IDataFilterManager>()?.Disable<IMultiTenantFilter>();
+            await subAgentRegistry.LoadAllTenantsFromStoreAsync(subAgentTypeRepo);
             logger.LogDebug("Sub-agent type definitions loaded from database.");
         }
         catch (Exception ex)

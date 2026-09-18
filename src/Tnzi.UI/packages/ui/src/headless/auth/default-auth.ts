@@ -14,7 +14,7 @@
 import { TwoFactorType } from '@tnzi/core/services/identity'
 import type { PendingActionResultDto } from '@tnzi/core/services/identity'
 import type { TnziClient } from '@tnzi/core/state'
-import type { LoginCallbackHelpers, LoginCallbacks, PendingActionOutcome } from './useLoginContext'
+import type { LoginCallbackHelpers, LoginCallbacks, LoginCaptchaData, PendingActionOutcome } from './useLoginContext'
 
 /**
  * The wired core runtime the framework drives the default auth flow from. This
@@ -56,6 +56,27 @@ export function codeChannelFields(account: string, type?: 'phone' | 'email') {
  * always false and only the literal ever matched. Core's enum is a string enum
  * now, matching the wire, so one comparison is enough.
  */
+/**
+ * Read the captcha challenge out of an `IDENTITY_CAPTCHA_REQUIRED` envelope.
+ * Returns null when the details carry nothing renderable (older backend).
+ */
+export function readCaptchaChallenge(details: unknown): LoginCaptchaData | null {
+  const c = (details ?? {}) as {
+    provider?: string | null
+    captchaId?: string | null
+    imageBase64?: string | null
+    expirationSeconds?: number | null
+  }
+  if (c.provider) {
+    return { provider: c.provider, captchaId: c.captchaId, imageBase64: c.imageBase64, expirationSeconds: c.expirationSeconds }
+  }
+  // Pre-provider backends: an inline picture without a provider name is the image captcha.
+  if (c.captchaId && c.imageBase64) {
+    return { provider: 'image', captchaId: c.captchaId, imageBase64: c.imageBase64, expirationSeconds: c.expirationSeconds }
+  }
+  return null
+}
+
 function twoFactorMethod(v: unknown): 'totp' | 'sms' | 'email' {
   if (v === TwoFactorType.Email) return 'email'
   if (v === TwoFactorType.Sms) return 'sms'
@@ -228,26 +249,19 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     // account the backend replies 403 `2FA_REQUIRED` with a temp token +
     // enabled method types; we hand that to the login shell (which switches to
     // the `two-factor` module) instead of failing.
-    pwdLogin: async ({ userName, password, captchaId, captchaCode }, helpers) => {
-      const res = await authApi.loginWithRefreshToken({ userName, password, captchaId, captchaCode })
+    pwdLogin: async ({ userName, password, captchaToken, captchaId, captchaCode }, helpers) => {
+      const res = await authApi.loginWithRefreshToken({ userName, password, captchaToken, captchaId, captchaCode })
       // Adaptive login captcha: after repeated failures the backend replies
-      // `IDENTITY_CAPTCHA_REQUIRED` with a fresh picture in `errorDetails`. Reveal
-      // the captcha field seeded with it (PwdLogin watches `pendingCaptcha`).
+      // `IDENTITY_CAPTCHA_REQUIRED` with the challenge in `errorDetails` - a fresh
+      // picture for the `image` provider, just the provider name for the others.
+      // Reveal the captcha field seeded with it (PwdLogin watches `pendingCaptcha`).
       if (!res.succeeded && res.errorCode === 'IDENTITY_CAPTCHA_REQUIRED') {
-        const c = (res.errorDetails ?? {}) as {
-          captchaId?: string
-          imageBase64?: string
-          expirationSeconds?: number
-        }
-        if (c.captchaId && c.imageBase64) {
-          helpers.setCaptchaRequired({
-            captchaId: c.captchaId,
-            imageBase64: c.imageBase64,
-            expirationSeconds: c.expirationSeconds,
-          })
+        const challenge = readCaptchaChallenge(res.errorDetails)
+        if (challenge) {
+          helpers.setCaptchaRequired(challenge)
           return
         }
-        // No inline captcha (cache unavailable / older backend) → surface the message.
+        // No usable challenge (older backend) → surface the message.
         throw new Error(res.message ?? 'Captcha verification is required')
       }
       if (await offerTwoFactorChallenge(res, userName, helpers)) return
@@ -258,31 +272,34 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       helpers.clearCaptcha()
       await establishSession(res.data)
     },
-    // Fetch a fresh image captcha for the given flow (login / register). Used by
-    // the register form up-front and by the login captcha field's refresh button.
+    // Fetch a fresh built-in image captcha for the given purpose. Used by the
+    // always-shown fields up-front and by the refresh button; script providers
+    // never call it.
     getCaptcha: async (purpose) => {
       const res = await authApi.getCaptchaJson(purpose)
       if (!res.succeeded || !res.data) throw new Error(res.message ?? 'Failed to load captcha')
       return {
+        provider: res.data.provider ?? 'image',
         captchaId: res.data.captchaId,
         imageBase64: res.data.imageBase64,
         expirationSeconds: res.data.expirationSeconds,
       }
     },
     // Send a verification code for code-login / password-recovery / register.
-    // Both the register and the code-login flows carry the image-captcha: those
-    // two endpoints each spend a real SMS / email per call, and the backend
-    // gates them on `EnableCaptchaOnRegister` / `EnableCaptchaOnLogin`.
-    sendCode: async ({ account, type, purpose, captchaId, captchaCode }) => {
+    // All three carry the captcha token: each endpoint spends a real SMS / email
+    // per call, and the backend gates them on `EnableCaptchaOnLogin` /
+    // `EnableCaptchaOnPasswordRecovery` / `EnableCaptchaOnRegister`.
+    sendCode: async ({ account, type, purpose, captchaToken, captchaId, captchaCode }) => {
       const f = codeChannelFields(account, type)
       const res =
         purpose === 'code-login'
-          ? await authApi.sendCodeLoginCode({ ...f, captchaId, captchaCode })
+          ? await authApi.sendCodeLoginCode({ ...f, captchaToken, captchaId, captchaCode })
           : purpose === 'reset-pwd'
-            ? await authApi.sendPasswordRecoveryCode(f)
+            ? await authApi.sendPasswordRecoveryCode({ ...f, captchaToken, captchaId, captchaCode })
             : await authApi.sendQuickRegisterCode({
                 email: f.email,
                 phoneNumber: f.phoneNumber,
+                captchaToken,
                 captchaId,
                 captchaCode,
               })

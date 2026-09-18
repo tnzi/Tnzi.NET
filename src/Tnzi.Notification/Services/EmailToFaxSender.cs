@@ -20,12 +20,21 @@ namespace Tnzi.Notification.Services;
 /// </remarks>
 public class EmailToFaxSender : IFaxSender
 {
-    private readonly NotificationOptions _options;
+    private readonly FaxSenderOptions _options;
     private readonly IEmailSender _emailSender;
     private readonly ILogger<EmailToFaxSender> _logger;
 
     /// <summary>初始化一个 <see cref="EmailToFaxSender"/> 实例。</summary>
-    public EmailToFaxSender(NotificationOptions options, IEmailSender emailSender, ILogger<EmailToFaxSender> logger)
+    /// <param name="options">
+    /// 这一个发送器的传真配置：默认发送器是 <c>Notification:FaxSender</c>，具名发送器是
+    /// <c>Notification:FaxSenders:{key}</c> 里的一节。
+    /// </param>
+    /// <param name="emailSender">
+    /// 承载它的邮件发送器 —— 由 <see cref="FaxSenderOptions.EmailProviderKey"/> 决定是默认的还是某个具名的，
+    /// 模块注册时已经解析好，这里只管用。
+    /// </param>
+    /// <param name="logger">日志。</param>
+    public EmailToFaxSender(FaxSenderOptions options, IEmailSender emailSender, ILogger<EmailToFaxSender> logger)
     {
         _options = Check.NotNull(options);
         _emailSender = Check.NotNull(emailSender);
@@ -35,8 +44,8 @@ public class EmailToFaxSender : IFaxSender
     /// <inheritdoc />
     public async Task<SendResult> SendToAsync(string faxNumber, EmailAttachment document, string? subject = null, CancellationToken cancellationToken = default)
     {
-        var fax = _options.FaxSender;
-        if (fax == null || !fax.Enabled || string.IsNullOrWhiteSpace(fax.GatewayDomain))
+        var fax = _options;
+        if (!fax.Enabled || string.IsNullOrWhiteSpace(fax.GatewayDomain))
         {
             _logger.LogWarning("Fax sender options not configured");
             return SendResult.CreateFailure("Fax sender options not configured: set Notification:FaxSender:GatewayDomain and leave Enabled at true.");

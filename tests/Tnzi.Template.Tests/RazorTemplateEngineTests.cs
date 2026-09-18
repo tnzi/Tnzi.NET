@@ -228,15 +228,82 @@ public class RazorTemplateEngineTests : IDisposable
         // 模板被缓存，但不同模型应该产生不同结果
     }
 
+    /// <summary>
+    /// ClearCache 清掉本引擎放进共享 IMemoryCache 的条目，而不碰别人的。
+    /// </summary>
     [Fact]
-    public void ClearCache_ClearsAllCachedTemplates()
+    public async Task ClearCache_EvictsOnlyTheEnginesOwnEntries()
     {
-        // Act - 应该不抛出异常
-        _engine.ClearCache();
+        _cache.Set("someone-else", "keep me", new MemoryCacheEntryOptions { Size = 1 });
+        await _engine.RenderAsync("Hello @Model.Name!", new { Name = "World" });
+        Assert.Equal(2, ((MemoryCache)_cache).Count);
 
-        // Assert - 无异常表示成功
-        Assert.True(true);
+        _engine.ClearCache();
+        await LetEvictionsLand();
+
+        Assert.Equal(1, ((MemoryCache)_cache).Count);
+        Assert.True(_cache.TryGetValue("someone-else", out _));
     }
+
+    /// <summary>
+    /// 同一模板被并发首次渲染（两次 miss、两次编译、后落地的顶替先落地的）之后，ClearCache 仍必须清掉它。
+    /// </summary>
+    /// <remarks>
+    /// <b>被保护的缺陷</b>：引擎曾用一个按键名维护的集合记住自己放进共享缓存的键，
+    /// 被顶替条目的 <c>Replaced</c> 回调按键名摘掉它 —— 回调在线程池上异步派发，落在新条目登记之后，
+    /// 于是活着的新条目从候选集里消失，<c>ClearCache</c> 再也清不到它（热重载路径的
+    /// <c>Remove</c> 后重建同键是同一形态）。与核心 <c>MemoryCacheService</c> 09-12 修掉的是同一个缺陷。
+    /// </remarks>
+    [Fact]
+    public async Task ClearCache_AfterConcurrentFirstRenders_EvictsTheCompiledTemplate()
+    {
+        const string template = "Concurrent: @Model.Value";
+        var model = new { Value = "x" };
+
+        await Task.WhenAll(_engine.RenderAsync(template, model), _engine.RenderAsync(template, model));
+        await LetEvictionsLand();
+        // 两次并发首渲染最终只留一个条目（后落地的顶替先落地的）
+        Assert.Equal(1, ((MemoryCache)_cache).Count);
+
+        _engine.ClearCache();
+        await LetEvictionsLand();
+
+        Assert.Equal(0, ((MemoryCache)_cache).Count);
+    }
+
+    /// <summary>
+    /// 热重载下文件改动会 <c>Remove</c> 旧条目再重建同键；重建出来的条目 ClearCache 也必须清得到。
+    /// </summary>
+    [Fact]
+    public async Task ClearCache_AfterHotReloadRebuiltAnEntry_EvictsIt()
+    {
+        var hotReloadOptions = Microsoft.Extensions.Options.Options.Create(new TemplateOptions
+        {
+            TemplateRootPath = _tempDir,
+            EnableCache = true,
+            EnableHotReload = true,
+            TemplateExtension = ".cshtml"
+        });
+        var hotReloadEngine = new RazorTemplateEngine(hotReloadOptions, _loggerMock.Object, _cache);
+        var templatePath = Path.Combine(_tempDir, "clear_after_reload.cshtml");
+        await File.WriteAllTextAsync(templatePath, "Original: @Model.Value");
+        var model = new { Value = "x" };
+
+        await hotReloadEngine.RenderFromFileAsync("clear_after_reload", model);
+        await Task.Delay(100);
+        await File.WriteAllTextAsync(templatePath, "Updated: @Model.Value");
+        Assert.Equal("Updated: x", await hotReloadEngine.RenderFromFileAsync("clear_after_reload", model));
+        await LetEvictionsLand();
+        Assert.True(((MemoryCache)_cache).Count > 0);
+
+        hotReloadEngine.ClearCache();
+        await LetEvictionsLand();
+
+        Assert.Equal(0, ((MemoryCache)_cache).Count);
+    }
+
+    /// <summary>MemoryCache 的驱逐回调与令牌驱逐都在线程池上异步派发，断言前等它们跑完。</summary>
+    private static Task LetEvictionsLand() => Task.Delay(150);
 
     #endregion
 

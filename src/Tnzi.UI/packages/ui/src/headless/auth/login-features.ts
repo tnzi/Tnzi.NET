@@ -28,6 +28,9 @@ export function mapAuthConfig(c: AuthConfigDto): LoginFeatures {
     codeChannels: { sms: c.codeLoginViaSms, email: c.codeLoginViaEmail },
     captchaOnLogin: c.enableCaptchaOnLogin,
     captchaOnRegister: c.enableCaptchaOnRegister,
+    captchaOnPasswordRecovery: c.enableCaptchaOnPasswordRecovery ?? false,
+    // Older backends ship no `captcha` block: null = "render the built-in image captcha".
+    captcha: c.captcha ?? null,
   }
 }
 
@@ -46,6 +49,8 @@ export function mergeFeatures(base: LoginFeatures, override?: PartialLoginFeatur
     codeChannels: { ...base.codeChannels, ...override?.codeChannels },
     captchaOnLogin: override?.captchaOnLogin ?? base.captchaOnLogin,
     captchaOnRegister: override?.captchaOnRegister ?? base.captchaOnRegister,
+    captchaOnPasswordRecovery: override?.captchaOnPasswordRecovery ?? base.captchaOnPasswordRecovery,
+    captcha: override?.captcha !== undefined ? override.captcha : base.captcha,
   }
 }
 

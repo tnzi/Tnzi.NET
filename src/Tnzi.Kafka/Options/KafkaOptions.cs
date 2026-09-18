@@ -84,8 +84,13 @@ public class KafkaConsumerOptions
     public AutoOffsetReset AutoOffsetReset { get; set; } = AutoOffsetReset.Earliest;
 
     /// <summary>
-    /// 是否启用自动提交（默认: false，使用手动提交）
+    /// 是否启用自动提交（默认: false，使用手动提交）。<b>验证器拒绝 true</b>。
     /// </summary>
+    /// <remarks>
+    /// 整套失败处置（重试期间不提交、死信关闭时保留偏移量等重投、毒消息 Seek 回原地卡住分区）都依赖
+    /// 偏移量只由本模块在处理器成功后提交。自动提交会让客户端在后台按周期越过它们把位置提交出去 ——
+    /// 静默丢消息，而配置、日志看起来都正常。保留这个键只为了让「配了 true」在启动期失败并说明原因。
+    /// </remarks>
     public bool EnableAutoCommit { get; set; }
 
     /// <summary>

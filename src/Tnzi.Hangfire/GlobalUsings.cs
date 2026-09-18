@@ -8,6 +8,7 @@ global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
+global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;

@@ -200,12 +200,8 @@ public class WorkflowNodeExecutor
     {
         var registeredNodes = _serviceProvider.GetServices<IWorkflowNode>().ToList();
 
-        // 检查步骤是否有配置中的 nodeType（通过 Configuration 字典传递）
-        string? nodeType = null;
-        if (step.Configuration != null && step.Configuration.TryGetValue("nodeType", out var nt))
-        {
-            nodeType = nt;
-        }
+        // 节点类型键的读取集中在 WorkflowStepNodeType（含旧编辑器键的回退）
+        var nodeType = WorkflowStepNodeType.Get(step);
 
         if (nodeType != null)
         {

@@ -131,17 +131,35 @@ public class CaptchaServiceTests
         var identifier = "testuser";
         var cacheKey = Tnzi.Caching.CacheKeys.Identity.LoginFailure(identifier);
 
-        _cacheMock.Setup(x => x.GetAsync<int?>(cacheKey))
-            .ReturnsAsync(2);
-
-        _cacheMock.Setup(x => x.SetAsync(cacheKey, 3, It.IsAny<TimeSpan>()))
-            .Returns(Task.CompletedTask);
+        _cacheMock.Setup(x => x.IncrementAsync(cacheKey, 1, It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
 
         // Act
         await _captchaService.RecordLoginFailureAsync(identifier);
 
-        // Assert
-        _cacheMock.Verify(x => x.SetAsync(cacheKey, 3, It.IsAny<TimeSpan>()), Times.Once);
+        // Assert: 原子递增，不是读-改-写。
+        _cacheMock.Verify(x => x.IncrementAsync(cacheKey, 1, It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once);
+        _cacheMock.Verify(x => x.SetAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★ 此前是 <c>GetAsync&lt;int?&gt;</c> 再 <c>SetAsync(n + 1)</c>：并发的失败登录同时读到 k、各写 k+1，
+    /// 最终计数远小于实际次数，「N 次失败后要验证码」的闸门可被并发喷洒推迟。
+    /// 用真实的 <see cref="MemoryCacheService"/>（有锁的原子递增）而不是 mock：这条要证明的是计数不丢。
+    /// </summary>
+    [Fact]
+    public async Task RecordLoginFailure_Concurrent_CountIsExact()
+    {
+        var cache = new MemoryCacheService(
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            new Mock<ILogger<MemoryCacheService>>().Object,
+            Microsoft.Extensions.Options.Options.Create(new CachingOptions()));
+        var service = new CaptchaService(_identityOptionsMock.Object, _serviceProviderMock.Object, cache);
+        const int attempts = 50;
+
+        await Task.WhenAll(Enumerable.Range(0, attempts).Select(_ => Task.Run(() => service.RecordLoginFailureAsync("sprayed"))));
+
+        Assert.Equal(attempts, await service.GetLoginFailureCountAsync("sprayed"));
     }
 
     [Fact]
@@ -151,7 +169,7 @@ public class CaptchaServiceTests
         var identifier = "testuser";
         var cacheKey = Tnzi.Caching.CacheKeys.Identity.LoginFailure(identifier);
 
-        _cacheMock.Setup(x => x.GetAsync<int?>(cacheKey))
+        _cacheMock.Setup(x => x.GetCounterAsync(cacheKey, It.IsAny<CancellationToken>()))
             .ReturnsAsync(5);
 
         // Act
@@ -192,7 +210,7 @@ public class CaptchaServiceTests
 
         var service = new CaptchaService(_identityOptionsMock.Object, _serviceProviderMock.Object, _cacheMock.Object);
 
-        _cacheMock.Setup(x => x.GetAsync<int?>(cacheKey))
+        _cacheMock.Setup(x => x.GetCounterAsync(cacheKey, It.IsAny<CancellationToken>()))
             .ReturnsAsync(5); // 超过阈值
 
         // Act
@@ -216,7 +234,7 @@ public class CaptchaServiceTests
 
         var service = new CaptchaService(_identityOptionsMock.Object, _serviceProviderMock.Object, _cacheMock.Object);
 
-        _cacheMock.Setup(x => x.GetAsync<int?>(cacheKey))
+        _cacheMock.Setup(x => x.GetCounterAsync(cacheKey, It.IsAny<CancellationToken>()))
             .ReturnsAsync(1); // 低于阈值
 
         // Act

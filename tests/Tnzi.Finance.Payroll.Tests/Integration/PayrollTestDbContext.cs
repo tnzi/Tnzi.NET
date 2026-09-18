@@ -34,6 +34,8 @@ public class PayrollTestDbContext : TnziDbContext<PayrollTestDbContext>
 
         // Finance 总账栈（过账/付款/作废经 ILedgerPostingService）
         modelBuilder.ApplyConfiguration(new AccountConfiguration());
+        // ChartOfAccountsService 删科目前查目录项的收入 / 费用科目引用，模型里必须有这张表
+        modelBuilder.ApplyConfiguration(new ItemConfiguration());
         modelBuilder.ApplyConfiguration(new JournalEntryConfiguration());
         modelBuilder.ApplyConfiguration(new JournalLineConfiguration());
         modelBuilder.ApplyConfiguration(new FiscalYearConfiguration());

@@ -6,21 +6,28 @@ namespace Tnzi.AI.Infrastructure;
 [ExperimentalApi(Reason = "Agent evaluation is in preview")]
 public class DefaultAgentEvaluator : IAgentEvaluator
 {
-    private readonly IChatService _chatService;
+    private readonly IAgentDispatchFacade _runtime;
     private readonly IRepository<EvaluationRun, Guid> _repository;
     private readonly IAiUtility _aiUtility;
     private readonly ILogger<DefaultAgentEvaluator> _logger;
+    private readonly ICurrentUser? _currentUser;
 
+    /// <remarks>
+    /// 走 <see cref="IAgentDispatchFacade"/> 而不是 <c>IChatService</c>：评估要钉住 Agent 版本、要不留线程，
+    /// 这两件事都不该暴露在公开的 <c>ChatRequestDto</c> 上（版本快照里的工具授权可能比活行宽）。
+    /// </remarks>
     public DefaultAgentEvaluator(
-        IChatService chatService,
+        IAgentDispatchFacade runtime,
         IRepository<EvaluationRun, Guid> repository,
         IAiUtility aiUtility,
-        ILogger<DefaultAgentEvaluator> logger)
+        ILogger<DefaultAgentEvaluator> logger,
+        ICurrentUser? currentUser = null)
     {
-        _chatService = Check.NotNull(chatService);
+        _runtime = Check.NotNull(runtime);
         _repository = Check.NotNull(repository);
         _aiUtility = Check.NotNull(aiUtility);
         _logger = Check.NotNull(logger);
+        _currentUser = currentUser;
     }
 
     /// <inheritdoc />
@@ -32,15 +39,26 @@ public class DefaultAgentEvaluator : IAgentEvaluator
 
         try
         {
-            // 发送输入到 ChatService
-            var request = new ChatRequestDto { Message = evaluationCase.Input };
-            var chatResult = await _chatService.ChatAsync(request, ct);
+            // 跑被评估的那个 Agent（含钉住的版本），临时运行不留线程。
+            // 此前这里是一条只有 Message 的裸聊天：AgentId 只写进运行记录，用例跑的是默认提供商的裸模型。
+            var request = new AgentRunRequest
+            {
+                OperationType = AIOperationType.Evaluation,
+                AgentId = evaluationCase.AgentId,
+                AgentVersionNumber = evaluationCase.VersionNumber,
+                Provider = evaluationCase.Provider,
+                Model = evaluationCase.Model,
+                UserMessage = evaluationCase.Input,
+                UserId = _currentUser?.Id,
+                Ephemeral = true
+            };
+            var runResult = await _runtime.RunAsync(request, ct);
 
             stopwatch.Stop();
 
-            var actualOutput = chatResult.Succeeded
-                ? chatResult.Data?.Content ?? string.Empty
-                : string.Empty;
+            var actualOutput = AgentStreamMapper.TryMapFailure(runResult, ErrorCodes.AgentRunFailed, out _, out _)
+                ? string.Empty
+                : runResult.Response;
 
             // 评估结果（有期望输出且非精确匹配时用 LLM-as-judge 语义评分）
             var (passed, score, reason) = await EvaluateOutputAsync(
@@ -79,7 +97,9 @@ public class DefaultAgentEvaluator : IAgentEvaluator
         Check.NotNullOrEmpty(cases);
 
         var totalStopwatch = Stopwatch.StartNew();
-        var agentId = Guid.Empty; // 默认 Agent ID（无指定 Agent 场景）
+        // 运行记录归到用例指定的 Agent（全部用例同一个才算）；无指定 Agent 场景用 Guid.Empty
+        var agentIds = cases.Select(c => c.AgentId).Distinct().ToList();
+        var agentId = agentIds.Count == 1 ? agentIds[0] ?? Guid.Empty : Guid.Empty;
 
         // 创建评估运行记录
         var run = new EvaluationRun

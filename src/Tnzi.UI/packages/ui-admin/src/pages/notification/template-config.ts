@@ -3,6 +3,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import { TSourceBadge } from '@tnzi/ui'
+import { templateTypeOptions } from '../_shared/template-type'
 
 /**
  * Aligned with backend TemplateInfoDto (Tnzi.Template).
@@ -60,6 +61,8 @@ export const notificationTemplateColumns: ColumnDef<NotificationTemplateRow>[] =
 export const notificationTemplateFormSchema: FormSchemaItem[] = [
   { key: 'templateName', labelKey: 'form.templateName', label: 'Template Name', type: 'text', required: true },
   { key: 'category', labelKey: 'form.category', label: 'Category', type: 'text', required: true },
+  // Sms is the plain-text switch server-side; an SMS template saved without it ships HTML entities in the link
+  { key: 'type', labelKey: 'form.type', label: 'Type', type: 'select', options: templateTypeOptions },
   { key: 'description', labelKey: 'form.description', label: 'Description', type: 'textarea' },
   { key: 'defaultLayoutName', labelKey: 'form.defaultLayoutName', label: 'Default Layout', type: 'text' },
   { key: 'subjectTemplate', labelKey: 'form.subjectTemplate', label: 'Subject Template', type: 'text' },

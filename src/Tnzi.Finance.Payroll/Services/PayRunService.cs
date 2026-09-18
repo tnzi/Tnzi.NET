@@ -150,11 +150,19 @@ public partial class PayRunService : ApplicationService, IPayRunService
         var run = await _runRepo.GetAsync(id, cancellationToken);
         if (run == null)
             return Fail("Pay run not found.", 404);
-        if (run.Status != PayRunStatus.Draft)
-            return Fail("Only a draft pay run can be deleted. Void a posted run instead.", 409);
+        // ★ Calculated 也可删：它还没有任何凭证，删掉是安全的。而只认 Draft 会让摄取批次
+        // （BuildExternalRun 直接落 Calculated）没有任何退出路径 —— 删不了、作废只认 Posted、
+        // 过账对 OpeningBalance 一律 409、同 ProviderRunId 再摄取只返回既有批次；年中上线多录一个零，
+        // 此后每一期的法定上限都按错误基数算，只能直连 SQL 修库。
+        if (run.Status is not (PayRunStatus.Draft or PayRunStatus.Calculated))
+            return Fail("Only a draft or calculated pay run can be deleted. Void a posted run instead.", 409);
 
         var payslips = await _payslipRepo.AsQueryable(true).Include(p => p.Lines)
             .Where(p => p.PayRunId == id).ToListAsync(cancellationToken);
+        // 防御：Calculated 态本不可能持有凭证（JournalEntryId 只在 PostAsync 赋值），
+        // 但删掉一张挂着凭证的工资单会让那张凭证的来历无从查起，所以按事实而不是按状态判。
+        if (payslips.Any(p => p.JournalEntryId.HasValue || p.PaymentJournalEntryId.HasValue))
+            return Fail("This pay run has journal entries and cannot be deleted. Void it instead.", 409);
         var inputs = await _inputRepo.AsQueryable(true)
             .Where(i => i.PayRunId == id).ToListAsync(cancellationToken);
 
@@ -451,7 +459,8 @@ public partial class PayRunService : ApplicationService, IPayRunService
             {
                 foreach (var entry in toReverse)
                 {
-                    var reversed = await _ledgerPosting.ReverseAsync(entry.Id, null, ct);
+                    // 代表批次发起：普通 ReverseAsync 与总账端点是同一道门，会把 PayRun 凭证拒掉
+                    var reversed = await _ledgerPosting.ReverseOnBehalfOfDocumentAsync(entry.Id, entry.SourceType!, null, ct);
                     if (!reversed.Succeeded)
                         throw new PayrollUnitOfWorkAbortException(Result.Failure(reversed.Message ?? "Reversal failed.", reversed.Code ?? 400));
                     reversalIds.Add(reversed.Data!.Id);

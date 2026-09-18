@@ -472,6 +472,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             Mock.Of<IQuotaService>(),
             checkpointStore.Object,
             serviceProvider.GetRequiredService<WorkflowEngine>(),
+            serviceProvider.GetServices<IWorkflowNode>(),
             serviceProvider);
     }
 

@@ -41,8 +41,15 @@ public class WelcomePagePathBaseTests
     {
         // 配置里没有任何 PathBase —— 子路径只存在于运行时（这里用 X-Forwarded-Prefix
         // 模拟；IIS 子应用下由 ANCM 设置，形态相同）。用配置值拼链接的实现在这里必红。
+        // X-Forwarded-Prefix 只从受信代理采信（2026-09-12 起与 For/Proto/Host 同一道判定），
+        // 所以要声明信任。TestServer 的连接没有来源地址，内建中间件对无地址的连接不做受信
+        // 判定，这里的声明因此不承重；受信与否的用例在 Http/ForwardedPrefixTests 里钉了地址。
         await RunAsync(
-            settings: new Dictionary<string, string?> { ["AspNetCore:EnableForwardedHeaders"] = "true" },
+            settings: new Dictionary<string, string?>
+            {
+                ["AspNetCore:EnableForwardedHeaders"] = "true",
+                ["AspNetCore:TrustedProxies:TrustAllProxies"] = "true"
+            },
             requestPath: "/",
             forwardedPrefix: "/api",
             assertAsync: async response =>

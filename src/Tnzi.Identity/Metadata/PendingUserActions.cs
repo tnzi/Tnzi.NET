@@ -47,9 +47,8 @@ public enum PendingUserActions
     /// <para>
     /// ★★★ <strong>这是安全边界，不能用账号锁定代劳。</strong>邀请创建的账号确实会同时被
     /// 置上锁定，但那只是搭便车（让既有的「活跃用户」口径自动排除它）；
-    /// <c>UserService.EnableAsync</c> 会执行 <c>SetLockoutEnabledAsync(user, false)</c>，
-    /// 而 <c>UserManager.IsLockedOutAsync</c> 内含 <c>LockoutEnabled</c> 前置判断 ——
-    /// 管理员对一个未接受邀请的账号点一下「启用」，锁定守卫就恒放行了，
+    /// 「启用」与「解锁」本来就是清掉 <c>LockoutEnd</c> ——
+    /// 管理员对一个未接受邀请的账号点一下「启用」，锁定守卫就如其所愿地放行了，
     /// 而那个账号没有密码、没有二次验证、角色却已按管理员的意思预设好。
     /// </para>
     /// <para>

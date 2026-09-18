@@ -73,6 +73,16 @@ public class ChatOptions
     public bool EnableFileMessages { get; set; } = true;
 
     /// <summary>
+    /// 联系人档案（<c>GET chat/contacts/{userId}/profile</c>）是否带出邮箱与电话。
+    /// 这是一个开放目录：持 <c>chat.use</c> 的任何用户都能查任意用户的档案，不是每个部署都接受
+    /// 「同事的手机号对全员可见」。关闭后投影里不含 Email / Phone（本人自己写的 Bio 照旧）。
+    /// 默认开启，保持既有行为。
+    /// </summary>
+    [RuntimeSetting(Label = "Expose Contact Details", I18n = "admin.modules.system.settings.fields.chatExposeContactDetails",
+        Type = SettingFieldType.Boolean)]
+    public bool ExposeContactDetails { get; set; } = true;
+
+    /// <summary>
     /// 联系人目录/搜索单页返回上限。
     /// </summary>
     [RuntimeSetting(Label = "Contact Search Limit", I18n = "admin.modules.system.settings.fields.chatContactSearchLimit",

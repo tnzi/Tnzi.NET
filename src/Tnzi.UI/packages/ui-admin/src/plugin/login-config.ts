@@ -16,7 +16,7 @@
  *   login: {
  *     brand: 'MyApp Admin',
  *     callbacks: {
- *       pwdLogin: async ({ userName, password, remember }) => { … },
+ *       pwdLogin: async ({ userName, password }) => { … },
  *     },
  *     demoAccounts: [
  *       { key: 'admin', label: 'Admin', userName: 'admin', password: 'Admin@123456' },

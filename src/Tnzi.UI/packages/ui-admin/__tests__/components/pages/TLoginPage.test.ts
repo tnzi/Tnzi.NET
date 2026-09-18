@@ -60,6 +60,8 @@ vi.mock('@tnzi/ui', () => ({
 }))
 
 import TLoginPage from '../../../src/components/pages/TLoginPage.vue'
+import { TNZI_ADMIN_CLIENT_KEY } from '../../../src/plugin/client'
+import { provideLoginContext } from '@tnzi/ui'
 import type { Component } from 'vue'
 
 /** Minimal valid props for TLoginPage - all modules required. */
@@ -151,6 +153,90 @@ describe('TLoginPage toolbar visibility', () => {
       expect(wrapper.find('[data-testid="theme-switch"]').exists()).toBe(false)
       expect(wrapper.find('[data-testid="lang-switch"]').exists()).toBe(false)
       expect(wrapper.find('.custom-toolbar').exists()).toBe(true)
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // session-end notice (core's `auth.sessionEndReason`, read by LoginView)
+  // -----------------------------------------------------------------------
+  describe('session-end notice', () => {
+    it.each(['wave', 'split'] as const)('%s: renders nothing when no session ended', (layout) => {
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), layout },
+      })
+      expect(wrapper.find('[data-test="t-login-page-notice"]').exists()).toBe(false)
+    })
+
+    it.each(['wave', 'split'] as const)(
+      '%s: ★ "security" shows the warning the user has no other way to learn',
+      (layout) => {
+        const wrapper = mount(TLoginPage, {
+          props: { moduleComponents: makeModuleComponents(), layout, sessionEndReason: 'security' },
+        })
+        const notice = wrapper.find('[data-test="t-login-page-notice"]')
+        expect(notice.exists()).toBe(true)
+        expect(notice.attributes('role')).toBe('status')
+        expect(notice.text()).toMatch(/security reasons/i)
+        expect(notice.classes()).toContain('t-login__notice--warning')
+      },
+    )
+
+    it('"expired" shows the routine message in the softer style', () => {
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), sessionEndReason: 'expired' },
+      })
+      const notice = wrapper.find('[data-test="t-login-page-notice"]')
+      expect(notice.text()).toMatch(/session expired/i)
+      expect(notice.classes()).toContain('t-login__notice--info')
+      expect(notice.classes()).not.toContain('t-login__notice--warning')
+    })
+
+    it('copy goes through translate() so the consumer can localise it', () => {
+      const translate = (key: string, fallback?: string) =>
+        key === 'admin.login.sessionEndedForSecurity' ? 'LOCALISED' : (fallback ?? key)
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), sessionEndReason: 'security', translate },
+      })
+      expect(wrapper.find('[data-test="t-login-page-notice"]').text()).toBe('LOCALISED')
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // captcha challenge URL resolver (Altcha fetches its own challenge; the
+  // template is API-relative and must be resolved against the API base)
+  // -----------------------------------------------------------------------
+  describe('resolveUrl in the login context', () => {
+    function providedContext(): { resolveUrl?: (url: string) => string } {
+      const calls = vi.mocked(provideLoginContext).mock.calls
+      return calls[calls.length - 1]![0] as { resolveUrl?: (url: string) => string }
+    }
+
+    it('★ defaults to the admin client createTnziUiAdmin({ client }) injected, so the built-in route cannot forget it', () => {
+      const client = { resolveUrl: vi.fn((url: string) => `/api${url}`) }
+      mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents() },
+        global: { provide: { [TNZI_ADMIN_CLIENT_KEY as unknown as symbol]: client } },
+      })
+      const ctx = providedContext()
+      expect(ctx.resolveUrl).toBeTypeOf('function')
+      expect(ctx.resolveUrl!('/captcha/altcha/challenge?purpose=login')).toBe('/api/captcha/altcha/challenge?purpose=login')
+      expect(client.resolveUrl).toHaveBeenCalledWith('/captcha/altcha/challenge?purpose=login')
+    })
+
+    it('an explicit resolveUrl prop wins over the injected client', () => {
+      const client = { resolveUrl: vi.fn((url: string) => `/api${url}`) }
+      const resolveUrl = (url: string) => `https://api.example${url}`
+      mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), resolveUrl },
+        global: { provide: { [TNZI_ADMIN_CLIENT_KEY as unknown as symbol]: client } },
+      })
+      expect(providedContext().resolveUrl).toBe(resolveUrl)
+      expect(client.resolveUrl).not.toHaveBeenCalled()
+    })
+
+    it('is left undefined when neither is available (the field then reports the missing client)', () => {
+      mount(TLoginPage, { props: { moduleComponents: makeModuleComponents() } })
+      expect(providedContext().resolveUrl).toBeUndefined()
     })
   })
 })

@@ -1,3 +1,5 @@
+using Tnzi.Storage.Helpers;
+
 namespace Tnzi.Storage.Tests.Integration;
 
 /// <summary>
@@ -110,17 +112,18 @@ public class StorageQueryDeleteCopyTests : StorageIntegrationTestBase
     // ==================== T11: Preview URL route ====================
 
     [Fact]
-    public async Task GetPreviewUrlAsync_NonImage_UsesPluralFilesRoute()
+    public async Task GetPreviewUrlAsync_NonInlineType_UsesThePreviewControllerRoute()
     {
-        var preview = new FilePreviewService(Storage, ServiceProvider);
+        // 需要转换（Office → PDF）或不在内联白名单里的类型，只有预览控制器那条路由会处理。
+        var preview = new FilePreviewService(CreateStorageService(), ServiceProvider);
         var record = new FileRecord
         {
             Id = Guid.NewGuid(),
-            FileName = "doc.pdf",
-            OriginalName = "doc.pdf",
-            Extension = ".pdf",
-            Path = "2026/06/20/doc.pdf",
-            ContentType = "application/pdf"
+            FileName = "doc.docx",
+            OriginalName = "doc.docx",
+            Extension = ".docx",
+            Path = "2026/06/20/doc.docx",
+            ContentType = FileTypeHelper.GetContentType(".docx")
         };
 
         var url = await preview.GetPreviewUrlAsync(record);
@@ -128,7 +131,77 @@ public class StorageQueryDeleteCopyTests : StorageIntegrationTestBase
         // Must point at the real registered route: /api/files/preview/{id}/preview (plural "files").
         Assert.DoesNotContain("/api/file/preview", url);
         Assert.StartsWith($"/api/files/preview/{record.Id}/preview", url);
-        Assert.Contains("type=pdf", url);
+        Assert.Contains("type=", url);
+    }
+
+    [Theory]
+    [InlineData("photo.png", "image/png")]
+    [InlineData("doc.pdf", "application/pdf")]
+    [InlineData("clip.mp4", "video/mp4")]
+    public async Task GetPreviewUrlAsync_InlineRenderableType_UsesTheSignableFilesPreviewRoute(string name, string contentType)
+    {
+        // 浏览器能直接显示的类型走 files/{id}/preview：那条路由匿名可达（公开文件 / ?sig=）、
+        // 带缓存头，<img src> / <video src> 在 Bearer 交付模式下拼上 sig 就能加载。
+        // 预览控制器的路由是类级 [ApiAuthorize]，登录才可达，装不进一个 <img> 标签。
+        var preview = new FilePreviewService(CreateStorageService(), ServiceProvider);
+        var record = new FileRecord
+        {
+            Id = Guid.NewGuid(),
+            FileName = name,
+            OriginalName = name,
+            Extension = Path.GetExtension(name),
+            Path = $"2026/09/12/{name}",
+            ContentType = contentType
+        };
+
+        var url = await preview.GetPreviewUrlAsync(record);
+
+        Assert.Equal($"/api/files/{record.Id}/preview", url);
+    }
+
+    [Fact]
+    public async Task GetPreviewUrlAsync_Image_NeverReturnsTheStorageKey()
+    {
+        // 图片此前直接回 provider 的裸 URL：S3/Azure 不带过期就是 base + key（永久、无签名、
+        // 一经发出 IFileAccessAuthorizer 再也不过问），本地无 UrlPrefix 时干脆回一个相对键 ——
+        // 而 FileRecordDto 的契约是 Path 绝不外露。预览 URL 必须和其它类型一样走 API 路由。
+        var storage = new Mock<IFileStorage>(MockBehavior.Strict);
+        var preview = new FilePreviewService(CreateStorageService(storage.Object), ServiceProvider);
+        var record = new FileRecord
+        {
+            Id = Guid.NewGuid(),
+            FileName = "photo.png",
+            OriginalName = "photo.png",
+            Extension = ".png",
+            Path = "2026/09/12/9c1f-secret-key.png",
+            ContentType = "image/png"
+        };
+
+        var url = await preview.GetPreviewUrlAsync(record);
+
+        Assert.StartsWith("/api/files/", url);
+        Assert.DoesNotContain(record.Path, url);
+        storage.Verify(s => s.GetUrlAsync(It.IsAny<string>(), It.IsAny<int?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetPreviewUrlAsync_Svg_StaysOnThePreviewControllerRoute()
+    {
+        // SVG 不在内联白名单里（files/{id}/preview 会按附件发出），预览控制器按种类给固定的 image/png。
+        var preview = new FilePreviewService(CreateStorageService(), ServiceProvider);
+        var record = new FileRecord
+        {
+            Id = Guid.NewGuid(),
+            FileName = "logo.svg",
+            OriginalName = "logo.svg",
+            Extension = ".svg",
+            Path = "2026/09/12/logo.svg",
+            ContentType = "image/svg+xml"
+        };
+
+        var url = await preview.GetPreviewUrlAsync(record);
+
+        Assert.StartsWith($"/api/files/preview/{record.Id}/preview", url);
     }
 
     // ==================== T12: Delete physical consistency ====================

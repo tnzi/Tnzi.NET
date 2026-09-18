@@ -180,6 +180,7 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { useDocumentBatch } from './useDocumentBatch'
 import { useDetail } from '../../headless/useDetail'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import type { RowAction } from '../../headless/row-actions'
 import TPartySelect from '../../components/finance/TPartySelect.vue'
@@ -397,13 +398,15 @@ watch(
     Object.keys(payAllocations).forEach((k) => delete payAllocations[k])
     openBills.value = []
     try {
-      // Open bills = Posted or PartiallyPaid with outstanding > 0
-      // (two status-filtered pages; admin-scale cap of 100 each).
+      // Open bills = Posted or PartiallyPaid with outstanding > 0. Both status
+      // sets are paged through to the end: the server clamps a page to 100
+      // silently, and a single page per status left bills 101+ out of the
+      // picker with no error anywhere (a money-moving path).
       const [posted, partial] = await Promise.all([
-        bridge.bills.fetch({ pageIndex: 1, pageSize: 100, filters: { status: FinanceDocumentStatus.Posted } }),
-        bridge.bills.fetch({ pageIndex: 1, pageSize: 100, filters: { status: FinanceDocumentStatus.PartiallyPaid } }),
+        fetchAllPages((q) => bridge.bills.fetch(q), { filters: { status: FinanceDocumentStatus.Posted } }),
+        fetchAllPages((q) => bridge.bills.fetch(q), { filters: { status: FinanceDocumentStatus.PartiallyPaid } }),
       ])
-      openBills.value = [...posted.items, ...partial.items]
+      openBills.value = [...posted, ...partial]
         .map((b) => ({
           id: String(b.id),
           number: b.number ?? null,

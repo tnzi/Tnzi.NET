@@ -11,3 +11,5 @@ export * from './passkey';
 export * from './step-up';
 export * from './session-security';
 
+export * from './step-up-prompt';
+export * from './session-claims';

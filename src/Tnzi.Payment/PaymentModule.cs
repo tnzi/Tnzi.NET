@@ -130,6 +130,9 @@ public class PaymentModule : TnziApplicationModule
         // 订阅侧的五条扫描由 Tnzi.Payment.Subscriptions 经 IPaymentScheduledScan 贡献，
         // 不加载它就是少五条扫描，这两条照跑。
         context.Services.AddHostedService<PaymentBackgroundService>();
+        // 多租户开启时后台循环按租户逐个跑；本模块贡献「有未终结支付 / 在途退款的租户」，
+        // 可选域与消费方各自再贡献（IEnumerable 并集）
+        context.Services.AddScoped<IPaymentTenantSource, PaymentTenantSource>();
 
         // 注册事件处理器
         context.Services.AddEventHandler<PaymentCompletedEvent, PaymentCompletedEventHandler>();

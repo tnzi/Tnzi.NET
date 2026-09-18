@@ -63,6 +63,16 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     component: () => import('../pages/notification/UnsubscribePage.vue'),
     meta: { requiresAuth: false, title: 'Unsubscribe' },
   },
+  {
+    // 邀请链接的收件人页面。同 /share/:token 与 /unsubscribe 的理由：被邀请的人
+    // 还没有可登录的账号（每条签发路径都拒绝 InvitationPending），挂在登录壳后面就
+    // 永远到不了。路径字面量是后端 DefaultInvitationUrlGenerator 默认链接
+    // `{System:FrontendUrl}/accept-invitation?token=` 的另一半；令牌走查询串，理由同退订。
+    path: '/accept-invitation',
+    name: 'accept-invitation',
+    component: () => import('../pages/identity/AcceptInvitationPage.vue'),
+    meta: { requiresAuth: false, title: 'Accept invitation' },
+  },
   // Exception pages - top-level (so `applyBasePath` prefixes them uniformly with
   // every other route) and `requiresAuth: false` so the permission / module
   // guards can redirect INTO them without the auth guard bouncing back. Each
@@ -536,7 +546,13 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             component: () => import('../pages/audit/Logs.vue'),
             meta: {
               title: 'tnzi.admin.modules.audit.logs.title',
-              permission: 'audit.log.view',
+              // The Logs view reads the same audit-operations endpoints as
+              // Operations, and the controller enforces `audit.operation.view`
+              // on all of them. `audit.log.view` is declared but enforced by
+              // no controller: gating the page on it let a role reach a page
+              // whose every request 403'd, and kept a role holding the
+              // enforced code out of it.
+              permission: 'audit.operation.view',
               keepAlive: true,
             },
           },
@@ -637,7 +653,12 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             component: () => import('../pages/chat/Overview.vue'),
             meta: {
               title: 'tnzi.admin.modules.chat.overview.title',
-              permission: 'chat.view',
+              // The page reads GET admin/chat/statistics + admin/chat/presence,
+              // both behind the controller-level `chat.session.view`. `chat.view`
+              // is the menu-group gate and is enforced by no controller: gating
+              // the leaf with it let a role holding only the group code open a
+              // page whose every request answers 403.
+              permission: 'chat.session.view',
             },
           },
           {
@@ -1267,7 +1288,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             component: () => import('../pages/ai/workflows/WorkflowRunViewer.vue'),
             meta: {
               title: 'tnzi.admin.modules.ai.workflowRuns.title',
-              permission: 'ai.workflowRun.view',
+              // Runs are served by the workflow admin controller, class-gated
+              // on `ai.workflow.view`; `ai.workflowRun.view` is declared only.
+              permission: 'ai.workflow.view',
               keepAlive: true,
             },
           },

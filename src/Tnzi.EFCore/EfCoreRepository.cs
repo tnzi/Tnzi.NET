@@ -839,8 +839,8 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     }
 
     /// <summary>
-    /// 执行软删除：通过 ExecuteUpdateAsync 在数据库层批量设置审计字段
-    /// 根据实体实现的接口组合动态构建 SetProperty 调用链
+    /// 执行软删除：通过 ExecuteUpdateAsync 在数据库层批量设置审计字段。
+    /// SetProperty 链在 <see cref="SoftDeleteSetters"/> 里按接口组合拼装，与 <c>BatchSoftDeleteAsync</c> 共用。
     /// </summary>
     protected virtual async Task ExecuteSoftDeleteAsync(IQueryable<TEntity> query, CancellationToken cancellationToken)
     {
@@ -852,34 +852,7 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         var tp = _serviceProvider?.GetService<TimeProvider>() ?? TimeProvider.System;
         var now = tp.GetUtcNow().UtcDateTime;
 
-        var hasDeleter = typeof(IHasDeleter).IsAssignableFrom(typeof(TEntity));
-        var hasModTime = typeof(IHasModificationTime).IsAssignableFrom(typeof(TEntity));
-        var hasModifier = typeof(IHasModifier).IsAssignableFrom(typeof(TEntity));
-        var hasConcurrency = typeof(IConcurrencyStamp).IsAssignableFrom(typeof(TEntity));
-
-        // 构建统一的 SetProperty 调用链，消除组合爆炸
-        await query.ExecuteUpdateAsync(s =>
-        {
-            s.SetProperty(e => ((ISoftDelete)e).IsDeleted, true);
-
-            if (hasDeleter)
-            {
-                s.SetProperty(e => ((IHasDeleter)e).DeleterId, userId);
-                s.SetProperty(e => ((IHasDeleter)e).DeletionTime, now);
-            }
-            if (hasModTime)
-            {
-                s.SetProperty(e => ((IHasModificationTime)e).LastModificationTime, (DateTime?)now);
-            }
-            if (hasModifier)
-            {
-                s.SetProperty(e => ((IHasModifier)e).LastModifierId, userId);
-            }
-            if (hasConcurrency)
-            {
-                s.SetProperty(e => ((IConcurrencyStamp)e).ConcurrencyStamp, Guid.NewGuid().ToString("N"));
-            }
-        }, cancellationToken);
+        await query.ExecuteUpdateAsync(s => SoftDeleteSetters.Apply(s, userId, now), cancellationToken);
     }
 
     public virtual async Task DeleteAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken = default)
@@ -942,6 +915,19 @@ public class EFCoreRepository<TDbContext, TEntity, TKey> : EFCoreRepository<TDbC
         ILogger<EFCoreRepository<TDbContext, TEntity>>? logger = null) 
         : base(dbContext, options, serviceProvider, logger)
     {
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 与 <c>SaveChanges</c> 同一套规则（<see cref="IdGenerationHelper.GenerateId"/>）：
+    /// 注册了 <see cref="IEntityIdGenerator"/> 交给它，否则 Guid 按 provider 选 Sequential GUID 的排列、long 走 Snowflake。
+    /// </remarks>
+    public TKey NewId()
+    {
+        var id = IdGenerationHelper.GenerateId(DbContext, typeof(TEntity), typeof(TKey));
+        return id is TKey key
+            ? key
+            : throw new NotSupportedException($"No id generator is available for key type {typeof(TKey).Name} of {typeof(TEntity).Name}.");
     }
 
     /// <summary>

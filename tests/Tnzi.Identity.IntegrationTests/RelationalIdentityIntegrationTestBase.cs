@@ -5,7 +5,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mapster;
 using MapsterMapper;
 using Tnzi.Caching;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Tnzi.EFCore;
+using Tnzi.EFCore.Internal;
 using Tnzi.EventBus;
 using Tnzi.Identity.Services;
 using Tnzi.Mapster;
@@ -26,7 +28,14 @@ public abstract class RelationalIdentityIntegrationTestBase : IDisposable
     protected Mock<ILoginLogSender> LoginLogSenderMock { get; } = new();
     protected ICache Cache { get; }
 
-    protected RelationalIdentityIntegrationTestBase(Action<Tnzi.Identity.Options.IdentityOptions>? configureIdentity = null)
+    /// <param name="configureIdentity">追加的身份选项。</param>
+    /// <param name="configureServices">
+    /// 在容器构建之前追加注册（例如把多租户打开：DbContext 的模型按 <c>MultiTenancyOptions</c> 决定
+    /// 要不要映射 <c>User.TenantId</c>，所以必须在这里、不能在测试里事后改）。
+    /// </param>
+    protected RelationalIdentityIntegrationTestBase(
+        Action<Tnzi.Identity.Options.IdentityOptions>? configureIdentity = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
@@ -46,6 +55,9 @@ public abstract class RelationalIdentityIntegrationTestBase : IDisposable
         {
             options.UseSqlite(_connection);
             options.EnableSensitiveDataLogging();
+            // EF 按 DbContext 类型缓存模型；单租户与多租户的两组测试类共用同一个类型，
+            // 并行跑时谁先建模谁赢。生产装配走的正是这个键工厂，测试里也要同一把钥匙。
+            options.ReplaceService<IModelCacheKeyFactory, MultiTenancyModelCacheKeyFactory>();
         });
         services.AddDataProtection();
 
@@ -90,6 +102,7 @@ public abstract class RelationalIdentityIntegrationTestBase : IDisposable
         services.AddSingleton<ICache, MemoryCacheService>();
         services.AddSingleton(EventBusMock.Object);
         services.AddSingleton(LoginLogSenderMock.Object);
+        configureServices?.Invoke(services);
 
         ServiceProvider = services.BuildServiceProvider();
         DbContext = ServiceProvider.GetRequiredService<TestIdentityDbContext>();

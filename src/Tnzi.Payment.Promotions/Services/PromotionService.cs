@@ -224,6 +224,16 @@ public class PromotionService : ApplicationService, IPromotionService
         });
     }
 
+    public async Task<bool> IsFirstSubscriptionEligibleAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        // 判据向续费域提问，本模块不认识订阅表。
+        // 没有回答者 = 这台宿主没有订阅 = 没有人是老订户，于是对所有人成立。
+        if (_subscriptionHistory == null)
+            return true;
+
+        return !await _subscriptionHistory.HasAnySubscriptionAsync(userId, cancellationToken);
+    }
+
     public async Task<Result<DiscountCalculationResultDto>> CalculateDiscountAsync(CouponApplyContext context, CancellationToken cancellationToken = default)
     {
         Check.NotNull(context);
@@ -371,15 +381,10 @@ public class PromotionService : ApplicationService, IPromotionService
                 return ErrorCodes.CouponUsageLimitReached;
         }
 
-        // 「仅限首次订阅」：判据向续费域提问，本模块不认识订阅表。
-        // 没有回答者 = 这台宿主没有订阅 = 没有人是老订户，于是这一条不拒绝任何人。
-        if (promotion.FirstSubscriptionOnly && _subscriptionHistory != null)
-        {
-            var hasSubscription = await _subscriptionHistory.HasAnySubscriptionAsync(context.UserId, cancellationToken);
-
-            if (hasSubscription)
-                return ErrorCodes.CouponFirstSubscriptionOnly;
-        }
+        // 「仅限首次订阅」：与预检端点共用同一个判定（IsFirstSubscriptionEligibleAsync），
+        // 两边不得各写一份 —— 上一次分开写时预检与核销回答的是两个问题。
+        if (promotion.FirstSubscriptionOnly && !await IsFirstSubscriptionEligibleAsync(context.UserId, cancellationToken))
+            return ErrorCodes.CouponFirstSubscriptionOnly;
 
         // 非公开促销必须先通过兑换码领取，否则任何人猜到码就能用
         if (!promotion.IsPublic)

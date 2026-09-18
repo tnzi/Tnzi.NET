@@ -154,6 +154,46 @@ public class SubscriptionsModuleContractTests
     }
 
     /// <summary>
+    /// 每一个端点都住在控制器模板之下：方法级模板不得以 <c>~/</c> 或 <c>/</c> 开头。
+    /// </summary>
+    /// <remarks>
+    /// ★ <c>api</c> 前缀由 <c>RoutePrefixConvention</c> 只写进<b>控制器</b>选择器；ASP.NET Core 组合模板时，
+    /// 方法级模板一旦以 <c>~/</c> 或 <c>/</c> 开头就整条覆盖控制器模板，于是那个端点逃出了前缀。
+    /// 「取消待生效计划变更」此前正是这样：真实地址 <c>/subscription-changes/{id}/cancel</c> 没有 <c>/api</c>，
+    /// 而 <c>@tnzi/core</c> 的客户端 baseUrl 带着它，调用必 404 —— 文档却把它列在 <c>api/subscriptions</c> 的表里。
+    /// </remarks>
+    [Theory]
+    [InlineData(typeof(Controllers.DefaultSubscriptionController))]
+    [InlineData(typeof(Controllers.DefaultSubscriptionAdminController))]
+    public void NoEndpointEscapesTheControllerTemplate(Type controller)
+    {
+        var absolute = controller
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .SelectMany(m => m.GetCustomAttributes(typeof(HttpMethodAttribute), false)
+                .Cast<HttpMethodAttribute>()
+                .Select(a => (Action: m.Name, a.Template)))
+            .Where(t => t.Template != null
+                        && (t.Template.StartsWith("~/", StringComparison.Ordinal) || t.Template.StartsWith('/')))
+            .ToList();
+
+        absolute.ShouldBeEmpty(string.Join(", ", absolute.Select(t => $"{t.Action}: {t.Template}")));
+    }
+
+    /// <summary>取消待生效变更的最终路由是 <c>subscriptions/changes/{id}/cancel</c>，与 <c>@tnzi/core</c> 调的地址一致。</summary>
+    [Fact]
+    public void CancelPendingChange_LivesUnderTheSubscriptionsTemplate()
+    {
+        var template = typeof(Controllers.DefaultSubscriptionController)
+            .GetMethod(nameof(Controllers.DefaultSubscriptionController.CancelPendingChange))!
+            .GetCustomAttributes(typeof(HttpPostAttribute), false)
+            .Cast<HttpPostAttribute>()
+            .Single()
+            .Template;
+
+        template.ShouldBe("changes/{id:guid}/cancel");
+    }
+
+    /// <summary>
     /// 管理端每一个<b>写</b>端点都仍带方法级权限码，读端点只吃类级 <c>.view</c>。
     /// </summary>
     /// <remarks>
@@ -229,6 +269,7 @@ public class SubscriptionsModuleContractTests
         ((int)SubscriptionChangeStatus.Pending).ShouldBe(0);
         ((int)SubscriptionChangeStatus.Applied).ShouldBe(1);
         ((int)SubscriptionChangeStatus.Cancelled).ShouldBe(2);
+        ((int)SubscriptionChangeStatus.AwaitingPayment).ShouldBe(3);
     }
 
     // ───────────────────────── 装配 ─────────────────────────

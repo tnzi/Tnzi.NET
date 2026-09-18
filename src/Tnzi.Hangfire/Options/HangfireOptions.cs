@@ -65,9 +65,14 @@ public enum StorageType
 public class DashboardConfigOptions
 {
     /// <summary>
-    /// 是否启用 Dashboard（默认: true）
+    /// 是否启用 Dashboard（默认: false，opt-in）
     /// </summary>
-    public bool Enabled { get; set; } = true;
+    /// <remarks>
+    /// ★ 曾默认 true，而验证器把「开着 Dashboard 却没开授权」判成硬错误 —— 出厂默认自己就通不过验证，
+    /// 只写 <c>[DependsOn(typeof(HangfireModule))]</c> 不配任何节的应用启动即崩（2026-09-12 修复）。
+    /// 开 Dashboard 必须同时配 <see cref="EnableAuthorization"/> 与 <see cref="AllowedRoles"/>。
+    /// </remarks>
+    public bool Enabled { get; set; } = false;
 
     /// <summary>
     /// Dashboard 路径（默认: /hangfire）
@@ -75,7 +80,7 @@ public class DashboardConfigOptions
     public string Path { get; set; } = "/hangfire";
 
     /// <summary>
-    /// 是否启用授权（默认: false，生产环境应启用）
+    /// 是否启用授权（默认: false；<see cref="Enabled"/> 为 true 时必须为 true，启动校验强制）
     /// </summary>
     public bool EnableAuthorization { get; set; } = false;
 

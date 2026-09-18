@@ -14,21 +14,20 @@
  * `type` is auto-detected per submit. On success the page returns to
  * `pwd-login` (the consumer's `register` callback may also navigate elsewhere).
  */
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { NForm, NFormItem, NInput, NButton, NSpace, type FormRules } from 'naive-ui'
-import { TSvgIcon } from '@tnzi/ui'
+import { TSvgIcon, TCaptcha } from '@tnzi/ui'
 import { useFormRules } from '@tnzi/ui'
 import { useNaiveForm } from '../../../headless/useNaiveForm'
 import { useCaptcha } from '@tnzi/ui'
-import { useLoginCaptcha } from '@tnzi/ui'
 import { useLoginAccountField } from '@tnzi/ui'
 import { detectAccountType } from '../../../headless/account-type'
 import { useLoginContext } from '@tnzi/ui'
-import TLoginCaptcha from './TLoginCaptcha.vue'
+import { isScriptCaptchaProvider } from '@tnzi/core/services/captcha'
 
 defineOptions({ name: 'Register' })
 
-const { translate, toggleLoginModule, callbacks, ui, features } = useLoginContext()
+const { translate, toggleLoginModule, callbacks, ui, features, resolveUrl } = useLoginContext()
 const { rules: r } = useFormRules(translate)
 const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
@@ -37,26 +36,15 @@ const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder 
   () => features.codeChannels,
 )
 
-// Register image captcha (always-shown when enabled) - gates the send-code step
-// so bots can't spam the SMS/email code endpoint. Fetched up-front and refreshed
-// after each send (verifying consumes it). Only shown when the backend enabled
-// it AND the consumer wired `callbacks.getCaptcha` (so we never show an
-// unfetchable field).
-const {
-  captchaId,
-  imageBase64: captchaImage,
-  code: captchaCode,
-  loading: captchaLoading,
-  canRefresh: captchaCanRefresh,
-  load: loadCaptcha,
-} = useLoginCaptcha('register')
-const showCaptcha = computed(() => features.captchaOnRegister && captchaCanRefresh)
-watch(
-  showCaptcha,
-  (v) => {
-    if (v && !captchaImage.value) void loadCaptcha()
-  },
-  { immediate: true },
+// The captcha (always shown when enabled) gates the send-code step so bots
+// can't spam the SMS / email endpoint. `TCaptcha` renders whichever provider
+// the deployment runs (`features.captcha`). Only shown when the backend enabled
+// it AND we can actually produce a token: a script provider needs nothing from
+// the consumer, the built-in picture needs `callbacks.getCaptcha` wired.
+const captchaRef = ref<InstanceType<typeof TCaptcha> | null>(null)
+const captchaToken = ref('')
+const showCaptcha = computed(
+  () => features.captchaOnRegister && (isScriptCaptchaProvider(features.captcha?.enabled ? features.captcha.provider : null) || !!callbacks.getCaptcha),
 )
 
 interface FormModel {
@@ -95,10 +83,16 @@ async function handleSendCode(): Promise<void> {
     )
     return
   }
-  // The register captcha (when enabled) must be solved before the OTP is sent.
-  if (showCaptcha.value && !captchaCode.value.trim()) {
-    submitError.value = translate('admin.login.captcha.required', 'Please enter the captcha.')
-    return
+  // The captcha (when enabled) must be solved before the OTP is sent. `execute()`
+  // is what makes the invisible providers (reCAPTCHA v3) produce a token at all.
+  let token: string | undefined
+  if (showCaptcha.value) {
+    try {
+      token = await captchaRef.value?.execute()
+    } catch {
+      submitError.value = translate('admin.login.captcha.required', 'Please complete the captcha.')
+      return
+    }
   }
   submitError.value = ''
   try {
@@ -107,8 +101,7 @@ async function handleSendCode(): Promise<void> {
         account: model.account,
         type: detectAccountType(model.account),
         purpose: 'register',
-        captchaId: showCaptcha.value ? captchaId.value : undefined,
-        captchaCode: showCaptcha.value ? captchaCode.value.trim() : undefined,
+        captchaToken: token,
       })
     })
   } catch (err) {
@@ -116,9 +109,9 @@ async function handleSendCode(): Promise<void> {
     // in the UI - getCaptcha re-throws so the countdown never starts on failure.
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Request failed')
   } finally {
-    // The captcha is one-time-use (verifying consumes it) - refresh so a resend
-    // works whether the send succeeded or the captcha was rejected.
-    if (showCaptcha.value) void loadCaptcha()
+    // Captcha tokens are single-use (verifying consumes them) - reset so a resend
+    // works whether the send succeeded or the token was rejected.
+    if (showCaptcha.value) captchaRef.value?.reset()
   }
 }
 
@@ -153,14 +146,15 @@ async function handleSubmit(): Promise<void> {
       <NInput v-model:value="model.account" :placeholder="accountPlaceholder" />
     </NFormItem>
     <NFormItem v-if="showCaptcha" :label="translate('admin.login.captcha.label', 'Captcha')">
-      <TLoginCaptcha
-        v-model="captchaCode"
-        :image="captchaImage"
-        :loading="captchaLoading"
-        :refreshable="captchaCanRefresh"
+      <TCaptcha
+        ref="captchaRef"
+        v-model:token="captchaToken"
+        purpose="register"
+        :config="features.captcha"
+        :load-image="callbacks.getCaptcha"
+        :resolve-url="resolveUrl"
         :placeholder="translate('admin.login.captcha.placeholder', 'Enter the characters shown')"
         :refresh-title="translate('admin.login.captcha.refresh', 'Refresh captcha')"
-        @refresh="loadCaptcha"
       />
     </NFormItem>
     <NFormItem path="code" :label="translate('admin.login.labels.code', 'Verification code')">

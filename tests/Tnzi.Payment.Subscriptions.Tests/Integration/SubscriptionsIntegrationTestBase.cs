@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Tnzi.Domain.Entities;
 using Tnzi.EventBus;
 using Tnzi.Mapster;
+using Tnzi.Security.Claims;
 
 namespace Tnzi.Payment.Subscriptions.Tests.Integration;
 
@@ -25,10 +26,28 @@ public abstract class SubscriptionsIntegrationTestBase : IntegratedTestBase<Subs
         MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
     }
 
+    /// <summary>
+    /// 是否以多租户开启的形态搭环境。默认关闭（与绝大多数用例一致）；
+    /// 开启时 DbContext 真的带 <c>TenantId</c> 列与租户过滤器，并换上真的 <c>CurrentTenant</c>
+    /// （基类给的是 <c>Id</c> 恒为 null 的 mock，<c>Change</c> 什么也不做）。
+    /// </summary>
+    protected virtual bool MultiTenancyEnabled => false;
+
     protected override void ConfigureServices(IServiceCollection services)
     {
         // 选项：开启测试渠道，关闭退款审批（便于直接走退款执行）
         services.AddOptions();
+        services.Configure<MultiTenancyOptions>(o => o.Enabled = MultiTenancyEnabled);
+        if (MultiTenancyEnabled)
+        {
+            services.AddScoped<ICurrentTenant, CurrentTenant>();
+            // 换成另一个 CLR 类型：EF 按类型缓存模型，否则会沿用别的测试类建好的「无 TenantId 列」模型
+            services.AddScoped<SubscriptionsTestDbContext>(sp => new MultiTenantSubscriptionsTestDbContext(
+                sp.GetRequiredService<DbContextOptions<SubscriptionsTestDbContext>>(),
+                sp.GetRequiredService<ICurrentUser>(),
+                sp.GetRequiredService<ICurrentTenant>(),
+                sp.GetRequiredService<IOptions<MultiTenancyOptions>>()));
+        }
         services.Configure<PaymentOptions>(o =>
         {
             o.AllowTestProvider = true;
@@ -88,6 +107,16 @@ public abstract class SubscriptionsIntegrationTestBase : IntegratedTestBase<Subs
         services.AddScoped<IStoredPaymentMethodBindingSink, SubscriptionBindingSink>();
         services.AddScoped<ISubscriptionHistoryProbe, SubscriptionHistoryProbe>();
         services.AddScoped<IPaymentStatisticsContributor, SubscriptionStatisticsContributor>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.RenewDueSubscriptions>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ConvertDueTrials>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ResumeDuePausedSubscriptions>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ExpireOverdueSubscriptions>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ApplyDuePlanChanges>();
+        services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.SendRenewalReminders>();
+
+        // 后台循环按租户逐个跑时的两个租户来源（父模块一个、本模块一个）
+        services.AddScoped<IPaymentTenantSource, PaymentTenantSource>();
+        services.AddScoped<IPaymentTenantSource, SubscriptionTenantSource>();
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

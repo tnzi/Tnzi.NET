@@ -42,6 +42,46 @@ public class ArtifactToolsTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// 运行追踪开着时属性包里有 CurrentRunId：产物必须挂在这次运行上，
+    /// 否则 GetByRunAsync(runId) 永远查不到 present_files 登记的文件。
+    /// </summary>
+    [Fact]
+    public async Task PresentFiles_WithTrackedRun_RecordsTheRunId()
+    {
+        var runId = Guid.NewGuid();
+        var accessor = new AgentExecutionContextAccessor { CurrentRequest = new AgentRunRequest { ThreadId = Guid.NewGuid() } };
+        accessor.Properties[ContextPropertyKeys.CurrentRunId] = runId;
+        _artifactService
+            .Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new AgentArtifactDto()));
+        var tools = new ArtifactTools(_artifactService.Object, accessor);
+
+        await tools.PresentFilesAsync(["/mnt/outputs/report.md"]);
+
+        _artifactService.Verify(s => s.CreateAsync(
+            runId, It.IsAny<Guid>(), "/mnt/outputs/report.md", "report.md", "text/markdown", null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PresentFiles_WithoutTrackedRun_UsesEmptyRunId()
+    {
+        var accessor = new AgentExecutionContextAccessor { CurrentRequest = new AgentRunRequest { ThreadId = Guid.NewGuid() } };
+        _artifactService
+            .Setup(s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success(new AgentArtifactDto()));
+        var tools = new ArtifactTools(_artifactService.Object, accessor);
+
+        await tools.PresentFilesAsync(["/mnt/outputs/report.md"]);
+
+        _artifactService.Verify(s => s.CreateAsync(
+            Guid.Empty, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task PresentFiles_EmptyList_ReturnsMessage()
     {

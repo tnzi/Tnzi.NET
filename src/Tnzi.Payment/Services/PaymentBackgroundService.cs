@@ -6,27 +6,39 @@ namespace Tnzi.Payment.Services;
 /// 再跑一遍各可选域经 <see cref="IPaymentScheduledScan"/> 贡献进来的扫描。
 /// </summary>
 /// <remarks>
+/// <para>
 /// ★ <b>解析必须在 try 之内</b>：拆分前三个服务是在一轮开始时一次性
 /// <c>GetRequiredService</c> 出来的，三个解析都在 <c>try</c> 之外、却被最外层那个
 /// 「记一条 Error 就等下一轮」的 <c>catch (Exception)</c> 罩着 —— 于是只要**任何一个**
 /// 服务解析不出来，这一轮的**全部**扫描都不执行，包括与它毫不相干的两条。
 /// 症状是「后台任务安静地什么都不做」，日志里只有一句看不出因果的解析异常。
 /// 这是一个独立于拆包就该修的缺陷；拆包只是让它从「理论上」变成「必然」。
+/// </para>
+/// <para>
+/// ★ <b>多租户开启时按租户逐个跑。</b>后台 scope 没有请求上下文，当前租户为空，全局过滤器成了
+/// <c>TenantId IS NULL</c>：八条扫描每一轮都 <c>Processed 0</c>，零 Warning —— 过期单不关、券不还、
+/// 续费不发生、逾期不过期。每一条扫描的推进都是带过滤器的条件更新，租户不对就安静地影响 0 行，
+/// 所以不能靠扫描自己 <c>IgnoreQueryFilters</c>，必须整轮切进那个租户。要扫哪些租户由
+/// <see cref="IPaymentTenantSource"/> 贡献（并集，宁可多扫不可漏扫）；未开启多租户时一遍跑完，行为不变。
+/// </para>
 /// </remarks>
 public class PaymentBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<PaymentBackgroundService> _logger;
     private readonly IOptionsMonitor<PaymentOptions> _options;
+    private readonly bool _multiTenancyEnabled;
 
     public PaymentBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<PaymentBackgroundService> logger,
-        IOptionsMonitor<PaymentOptions> options)
+        IOptionsMonitor<PaymentOptions> options,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options);
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,7 +52,7 @@ public class PaymentBackgroundService : BackgroundService
         {
             try
             {
-                await ExecuteTasksAsync(stoppingToken);
+                await RunOnceAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -59,11 +71,61 @@ public class PaymentBackgroundService : BackgroundService
         _logger.LogInformation("PaymentBackgroundService stopped");
     }
 
-    private async Task ExecuteTasksAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// 跑一轮全部扫描（多租户开启时对每个租户各跑一遍）。公开是为了能被手工触发与被测试直接驱动，
+    /// 不必等 <see cref="ExecuteAsync"/> 的启动延迟与轮询间隔。
+    /// </summary>
+    public async Task RunOnceAsync(CancellationToken cancellationToken = default)
+    {
+        if (!_multiTenancyEnabled)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            await RunAllScansAsync(scope.ServiceProvider, cancellationToken);
+            return;
+        }
+
+        foreach (var tenantId in await CollectTenantIdsAsync(cancellationToken))
+        {
+            // 每个租户一个 scope：一个 DbContext 的变更跟踪里不混两个租户的实体
+            using var scope = _serviceProvider.CreateScope();
+            var currentTenant = scope.ServiceProvider.GetService<ICurrentTenant>();
+            using (currentTenant?.Change(tenantId))
+            {
+                await RunAllScansAsync(scope.ServiceProvider, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 汇总各来源报出的租户（并集）。来源本身解析不出来或查询失败都只记 Error，不掀掉整轮：
+    /// 剩下的来源照常贡献，最差是这一轮少扫一批租户，下一轮再来。
+    /// </summary>
+    private async Task<IReadOnlyList<Guid?>> CollectTenantIdsAsync(CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
-        var services = scope.ServiceProvider;
+        var tenantIds = new HashSet<Guid?>();
 
+        foreach (var source in scope.ServiceProvider.GetServices<IPaymentTenantSource>())
+        {
+            try
+            {
+                foreach (var tenantId in await source.GetTenantIdsAsync(cancellationToken))
+                    tenantIds.Add(tenantId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Payment tenant source {Source} failed; its tenants are skipped this round", source.GetType().Name);
+            }
+        }
+
+        if (tenantIds.Count == 0)
+            _logger.LogDebug("Multi-tenancy is enabled and no tenant has pending payment work this round");
+
+        return tenantIds.ToList();
+    }
+
+    private async Task RunAllScansAsync(IServiceProvider services, CancellationToken cancellationToken)
+    {
         // 每个扫描独立隔离：任一环节失败（含**服务解析失败**）不影响其余扫描本轮执行。
         await RunScanAsync("close expired payments",
             () => services.GetRequiredService<IPaymentService>().CloseExpiredPaymentsAsync(cancellationToken));

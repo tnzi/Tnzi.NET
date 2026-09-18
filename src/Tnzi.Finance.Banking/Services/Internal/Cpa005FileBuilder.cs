@@ -17,6 +17,10 @@ internal static class Cpa005FileBuilder
     /// <summary>Payee / Originator Account Number 字段宽度。
     /// <see cref="BankNumberHelper.MaxAccountNumberLength"/> 直接引用它当录入上限（理由同 NACHA 侧）。</summary>
     internal const int AccountNumberWidth = 12;
+
+    /// <summary>Originator ID 字段宽度（A/C/Z 记录）。<see cref="BankNumberHelper.MaxEftOriginatorIdLength"/>
+    /// 直接引用它当录入上限（理由同账号宽度）。</summary>
+    internal const int OriginatorIdWidth = 10;
     private const string CreditTransactionType = "450"; // 直存/一般 credit
 
     public static string Build(EftComposeRequest request)
@@ -32,11 +36,15 @@ internal static class Cpa005FileBuilder
         if (!BankNumberHelper.HasTransferRouting(BankNumberScheme.CaEft, null, request.OriginatorInstitutionNumber, request.OriginatorTransitNumber))
             throw new BusinessException("A CPA-005 file requires the originator's 3-digit institution number and 5-digit transit number.");
 
-        var originatorId = EftFieldWriter.Text(request.OriginatorId, 10);
+        // 标识符不截断：截出来的是另一个语法合法的 originator id（与账号同一类失效）
+        var originatorId = EftFieldWriter.IdentifierField(request.OriginatorId, OriginatorIdWidth, "CPA-005 originator id");
         var fcn = EftFieldWriter.Num(request.FileCreationNumber, 4);
         // CPA-005 电子路由号格式 = "0" + 机构号(3) + 分行号(5)（机构在前），与纸质支票 MICR 的
         // 分行-机构顺序（见 MicrLineComposer CA 分支）相反。定长错位会导致整个文件被接收行拒收。
         var originTransit = "0" + EftFieldWriter.Digits(request.OriginatorInstitutionNumber, 3) + EftFieldWriter.Digits(request.OriginatorTransitNumber, 5);
+        // 出款方账号为空 → 定宽写入器会补成 12 个空格：一份语法合法、Originator / Return Account 都空白的报文。
+        if (string.IsNullOrWhiteSpace(request.OriginatorAccountNumber))
+            throw new BusinessException("A CPA-005 file requires the originating account number; the bank account profile has none on file (or it cannot be decrypted).");
         var originAccount = EftFieldWriter.AccountField(request.OriginatorAccountNumber, AccountNumberWidth, "the originating account");
         var shortName = EftFieldWriter.Text(request.OriginatorName, 15);
         var longName = EftFieldWriter.Text(request.OriginatorName, 30);

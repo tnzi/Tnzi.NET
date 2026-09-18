@@ -1,7 +1,7 @@
 /**
  * `defineCrudBridge` / `defineChildBridge` - factories for the ubiquitous
  * "plain REST resource" bridge shape so consumer apps declare an endpoint base
- * instead of hand-writing the same `unwrapResult(await client.post(...))` /
+ * instead of hand-writing the same `unwrapOk(await client.post(...))` /
  * `ensureOk(await client.delete(...))` plumbing for every resource.
  *
  * The framework's own built-in bridges wrap structured `useXxxApi(client)`
@@ -12,9 +12,20 @@
  *
  * The result already satisfies `BridgeCrudContract<TDto>` so it plugs straight
  * into `useCrudPage({ fetchData: bridge.fetch, createData: bridge.create, ... })`.
+ *
+ * ★ Every method throws when the server answers with a failed envelope - writes
+ * AND reads. `HttpClient` resolves a business refusal (400/409 + `succeeded:false`)
+ * instead of rejecting, and the unchecked unwrap turned that into `undefined`.
+ * On a write, `useCrudPage.submit` only routes *thrown* errors to the error path,
+ * so a refused create resolved `undefined` and was announced as "created" with
+ * the form closed and the input gone (live in consumer apps until 2026-09-12).
+ * On a read, the declared return type is `TDto`, not `TDto | undefined`; handing
+ * back `undefined` only moves the failure to a later `TypeError` that no longer
+ * carries the server's reason. So the rule here is one rule, not two: a failed
+ * envelope rejects with the server message, at the call that received it.
  */
 import type { HttpClient } from '@tnzi/core'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult } from './_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapOk } from './_mappers'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from './types'
 
 interface PagedEnvelope<T> {
@@ -65,13 +76,13 @@ export function defineCrudBridge<
   return {
     async fetch(query: CrudPageQuery): Promise<CrudPageResult<TDto>> {
       const env = await client.post<PagedEnvelope<TDto>>(`${base}/${queryPath}`, mapQueryToListRequest(query))
-      return pagedResult(unwrapResult<PagedEnvelope<TDto>>(env))
+      return pagedResult(unwrapOk<PagedEnvelope<TDto>>(env))
     },
     async create(data: TCreateDto): Promise<TDto> {
-      return unwrapResult<TDto>(await client.post<TDto>(base, createBody(data)))
+      return unwrapOk<TDto>(await client.post<TDto>(base, createBody(data)))
     },
     async update(id: TId, data: TUpdateDto): Promise<TDto> {
-      return unwrapResult<TDto>(await client.put<TDto>(`${base}/${id}`, updateBody(id, data)))
+      return unwrapOk<TDto>(await client.put<TDto>(`${base}/${id}`, updateBody(id, data)))
     },
     async delete(ids: TId[]): Promise<void> {
       if (deleteMode === 'single') {
@@ -83,15 +94,15 @@ export function defineCrudBridge<
       }
     },
     async getDetail(id: TId): Promise<TDto> {
-      return unwrapResult<TDto>(await client.get<TDto>(`${base}/${id}`))
+      return unwrapOk<TDto>(await client.get<TDto>(`${base}/${id}`))
     },
     async listAll(): Promise<TDto[]> {
-      return unwrapResult<TDto[]>(await client.get<TDto[]>(base))
+      return unwrapOk<TDto[]>(await client.get<TDto[]>(base))
     },
     async save(id: TId | null, data: TCreateDto | TUpdateDto): Promise<TDto> {
       return id
-        ? unwrapResult<TDto>(await client.put<TDto>(`${base}/${id}`, updateBody(id, data as TUpdateDto)))
-        : unwrapResult<TDto>(await client.post<TDto>(base, createBody(data as TCreateDto)))
+        ? unwrapOk<TDto>(await client.put<TDto>(`${base}/${id}`, updateBody(id, data as TUpdateDto)))
+        : unwrapOk<TDto>(await client.post<TDto>(base, createBody(data as TCreateDto)))
     },
   }
 }
@@ -117,13 +128,13 @@ export function defineChildBridge<TDto>(
 ): ChildBridge<TDto> {
   return {
     async byParent(parentId: string): Promise<TDto[]> {
-      return unwrapResult<TDto[]>(await client.get<TDto[]>(`${base}/${parentSegment}/${parentId}`))
+      return unwrapOk<TDto[]>(await client.get<TDto[]>(`${base}/${parentSegment}/${parentId}`))
     },
     async create(data: unknown): Promise<TDto> {
-      return unwrapResult<TDto>(await client.post<TDto>(base, data))
+      return unwrapOk<TDto>(await client.post<TDto>(base, data))
     },
     async update(id: string, data: unknown): Promise<TDto> {
-      return unwrapResult<TDto>(await client.put<TDto>(`${base}/${id}`, data))
+      return unwrapOk<TDto>(await client.put<TDto>(`${base}/${id}`, data))
     },
     async delete(id: string): Promise<void> {
       ensureOk(await client.delete<void>(`${base}/${id}`))

@@ -120,7 +120,11 @@ public class AcceptInvitationDto
 /// <summary>
 /// 接受邀请的结果。
 /// </summary>
-public class AcceptInvitationResultDto
+/// <remarks>
+/// 实现 <see cref="IRefreshTokenCarrier"/> 并转发给嵌套的 <see cref="Token"/>，理由见
+/// <see cref="PendingActionResultDto"/>：cookie 模式下的交付过滤器只看最外层载荷的形状。
+/// </remarks>
+public class AcceptInvitationResultDto : IRefreshTokenCarrier
 {
     /// <summary>是否已全部完成。为 false 时账号仍未激活，见 <see cref="RemainingSteps"/>。</summary>
     public bool Completed { get; set; }
@@ -135,4 +139,13 @@ public class AcceptInvitationResultDto
     /// <c>Identity:Invitation:SignInAfterAccept</c> 为 false 时为 null。
     /// </summary>
     public TokenResult? Token { get; set; }
+
+    /// <inheritdoc />
+    string? IRefreshTokenCarrier.ReadRefreshToken() => ((IRefreshTokenCarrier?)Token)?.ReadRefreshToken();
+
+    /// <inheritdoc />
+    int? IRefreshTokenCarrier.ReadRefreshTokenLifetimeSeconds() => ((IRefreshTokenCarrier?)Token)?.ReadRefreshTokenLifetimeSeconds();
+
+    /// <inheritdoc />
+    void IRefreshTokenCarrier.ClearRefreshToken() => ((IRefreshTokenCarrier?)Token)?.ClearRefreshToken();
 }

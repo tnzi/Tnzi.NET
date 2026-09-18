@@ -15,6 +15,7 @@ public class MessageConfiguration : EntityTypeConfigurationBase<Message, Guid>
         builder.Property(n => n.FailureReason).HasMaxLength(NotificationFieldLimits.FailureReasonMaxLength);
         builder.Property(n => n.Category).IsRequired().HasMaxLength(100).HasDefaultValue("General");
         builder.Property(n => n.TemplateName).HasMaxLength(200);
+        builder.Property(n => n.ProviderKey).HasMaxLength(NotificationProviderKeys.MaxLength);
         builder.Property(n => n.TotalRecipientCount).HasDefaultValue(0);
         builder.Property(n => n.SuccessCount).HasDefaultValue(0);
         builder.Property(n => n.FailureCount).HasDefaultValue(0);

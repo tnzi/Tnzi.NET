@@ -138,9 +138,12 @@ public class ChannelManager : IChannelManager
         {
             case "/new" or "/start":
             {
+                // ★ 线程要为「绑定规则解析出的 Agent」建，不是渠道默认 Agent：下一条消息经 Gateway 命中规则 Agent B
+                //   时会拿到这条线程，而线程归属 A 会被 AgentThreadService 以「Agent 不匹配」拒绝 —— 规则在管理端
+                //   显示启用，这个 peer 却被静默改道。Telegram 客户端首次接触会自动发 /start，所以不是边角。
                 var createResult = await threadService.CreateAsync(new CreateAgentThreadDto
                 {
-                    AgentId = _options.DefaultAgentId,
+                    AgentId = ResolveBoundAgentId(message, scopedProvider),
                     Title = $"Channel: {message.ChannelName}"
                 });
 
@@ -152,9 +155,7 @@ public class ChannelManager : IChannelManager
 
                 var threadId = createResult.Data!.Id;
                 await threadStore.SetThreadIdAsync(message.ChannelName, message.ChatId, threadId, message.TopicId, message.UserId);
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, threadId,
-                    "New conversation started. How can I help you?"));
+                await _bus.PublishOutboundAsync(Reply(message, threadId, "New conversation started. How can I help you?"));
                 break;
             }
             case "/status":
@@ -163,8 +164,7 @@ public class ChannelManager : IChannelManager
                 var statusText = threadId != null
                     ? $"Active thread: {threadId:N}"
                     : "No active conversation. Send /new to start one.";
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, threadId ?? Guid.Empty, statusText));
+                await _bus.PublishOutboundAsync(Reply(message, threadId ?? Guid.Empty, statusText));
                 break;
             }
             case "/models":
@@ -185,8 +185,7 @@ public class ChannelManager : IChannelManager
                 {
                     modelsText = "Model information is not available.";
                 }
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, Guid.Empty, modelsText));
+                await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, modelsText));
                 break;
             }
             case "/memory":
@@ -208,21 +207,17 @@ public class ChannelManager : IChannelManager
                         ? "No active conversation. Send /new to start one."
                         : "Memory service is not available.";
                 }
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, threadId ?? Guid.Empty, memoryText));
+                await _bus.PublishOutboundAsync(Reply(message, threadId ?? Guid.Empty, memoryText));
                 break;
             }
             case "/help":
             {
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, Guid.Empty,
-                    "Commands:\n/new - Start a new conversation\n/status - Show current thread\n/models - List available AI models\n/memory - Show memory entries\n/help - Show this message"));
+                await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, "Commands:\n/new - Start a new conversation\n/status - Show current thread\n/models - List available AI models\n/memory - Show memory entries\n/help - Show this message"));
                 break;
             }
             default:
             {
-                await _bus.PublishOutboundAsync(new OutboundMessage(
-                    message.ChannelName, message.ChatId, Guid.Empty,
+                await _bus.PublishOutboundAsync(Reply(message, Guid.Empty,
                     $"Unknown command: {message.Text}. Send /help for available commands."));
                 break;
             }
@@ -235,13 +230,20 @@ public class ChannelManager : IChannelManager
         IAgentRuntime runtime,
         CancellationToken ct)
     {
-        // 优先尝试通过 Gateway 处理（统一路由 + 会话绑定）
-        if (await TryHandleChatViaGatewayAsync(message, ct))
+        // 装了 Gateway 就只走 Gateway（统一路由 + 会话绑定）。它失败时**不**回退到直连 Runtime：
+        // 直连路径按渠道默认 Agent 跑，等于把一个规则绑定的 peer 静默改道到别的 Agent，还把同一条消息跑第二遍；
+        // 失败要告诉用户，回退只属于没装 Gateway 的部署。
+        var handledByGateway = await TryHandleChatViaGatewayAsync(message, ct);
+        if (handledByGateway != null)
         {
+            if (handledByGateway == false)
+            {
+                await PublishErrorReplyAsync(message, "An error occurred while processing your message. Please try again.");
+            }
             return;
         }
 
-        // 回退到直接 IAgentRuntime 调用
+        // 没装 Gateway：直接 IAgentRuntime 调用
         var threadId = await threadStore.GetThreadIdAsync(message.ChannelName, message.ChatId, message.TopicId);
 
         var request = new AgentRunRequest
@@ -264,23 +266,21 @@ public class ChannelManager : IChannelManager
         // Outbound goes to a real person in an IM client: send the deliverable, not the
         // running commentary. Identical to Response on the non-streaming path used here,
         // and correct on its own terms if this ever moves to streaming.
-        await _bus.PublishOutboundAsync(new OutboundMessage(
-            message.ChannelName, message.ChatId, actualThreadId,
-            result.EffectiveDeliverable,
-            IsFinal: true));
+        await _bus.PublishOutboundAsync(Reply(message, actualThreadId, result.EffectiveDeliverable));
     }
 
     /// <summary>
-    /// 尝试通过 Gateway 处理聊天消息，成功返回 true，失败或不可用返回 false（回退到直接 Runtime）
+    /// 尝试通过 Gateway 处理聊天消息：没装 Gateway 返回 null（调用方走直连 Runtime），
+    /// 处理成功返回 true，Gateway 报错或抛异常返回 false（调用方回一条错误，不改道）。
     /// </summary>
-    private async Task<bool> TryHandleChatViaGatewayAsync(InboundMessage message, CancellationToken ct)
+    private async Task<bool?> TryHandleChatViaGatewayAsync(InboundMessage message, CancellationToken ct)
     {
+        using var scope = _scopeFactory.CreateScope();
+        var gateway = scope.ServiceProvider.GetService<IGateway>();
+        if (gateway == null) return null;
+
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var gateway = scope.ServiceProvider.GetService<IGateway>();
-            if (gateway == null) return false;
-
             var request = new GatewayRequest
             {
                 Channel = message.ChannelName,
@@ -288,7 +288,9 @@ public class ChannelManager : IChannelManager
                 UserId = message.UserId ?? "unknown",
                 TopicId = message.TopicId,
                 UserMessage = message.Text,
-                AgentId = _options.DefaultAgentId,
+                // 渠道默认 Agent 是兜底不是显式目标：填进 AgentId 会短路 Gateway 的全部绑定规则
+                //（配置 + 数据库），让「slack 频道 X → Agent B」这类规则对 IM 流量静默失效。
+                FallbackAgentId = _options.DefaultAgentId,
                 // 按消息来源渠道解析归属租户，供 Gateway 做绑定规则租户分区 + 处理作用域租户上下文
                 TenantId = ResolveChannelTenantId(message.ChannelName)
             };
@@ -297,25 +299,49 @@ public class ChannelManager : IChannelManager
 
             if (!response.Success)
             {
-                _logger.LogWarning("Gateway returned error for {Channel}:{ChatId}: {Error}, falling back to direct runtime",
+                _logger.LogWarning("Gateway returned error for {Channel}:{ChatId}: {Error}",
                     message.ChannelName, message.ChatId, response.Error);
                 return false;
             }
 
             var threadId = response.ThreadId ?? Guid.Empty;
-            await _bus.PublishOutboundAsync(new OutboundMessage(
-                message.ChannelName, message.ChatId, threadId,
-                response.Response ?? string.Empty,
-                IsFinal: true));
+            await _bus.PublishOutboundAsync(Reply(message, threadId, response.Response ?? string.Empty));
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Gateway processing failed for {Channel}:{ChatId}, falling back to direct runtime",
+            _logger.LogWarning(ex, "Gateway processing failed for {Channel}:{ChatId}",
                 message.ChannelName, message.ChatId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// 这个 peer 的消息会被路由到哪个 Agent：与 <see cref="IGateway"/> 用同一个 <see cref="ISessionBinder"/>、
+    /// 同一份上下文（显式 Agent 为空、渠道默认为兜底、租户取自来源渠道）解析；没装绑定器（也就没装 Gateway）
+    /// 时才是渠道默认 Agent。<c>Guid.Empty</c>（什么都没配）返回 null，建出无 Agent 的线程，与直连路径同形。
+    /// </summary>
+    private Guid? ResolveBoundAgentId(InboundMessage message, IServiceProvider scopedProvider)
+    {
+        var binder = scopedProvider.GetService<ISessionBinder>();
+        if (binder == null)
+        {
+            return _options.DefaultAgentId;
+        }
+
+        var binding = binder.Resolve(new SessionBindingContext
+        {
+            Channel = message.ChannelName,
+            ChatId = message.ChatId,
+            UserId = message.UserId ?? "unknown",
+            TopicId = message.TopicId,
+            ExplicitAgentId = null,
+            FallbackAgentId = _options.DefaultAgentId,
+            TenantId = ResolveChannelTenantId(message.ChannelName)
+        });
+
+        return binding.AgentId == Guid.Empty ? null : binding.AgentId;
     }
 
     /// <summary>
@@ -333,12 +359,20 @@ public class ChannelManager : IChannelManager
             ? scopedProvider.GetService<ICurrentTenant>()?.Change(tenantId)
             : null;
 
+    /// <summary>
+    /// 构造对某条入站消息的回复：把入站的线程指针（<c>ThreadTs</c> / <c>TopicId</c>）与平台元数据原样带回，
+    /// 使回复落在提问所在的 Slack 线程 / Telegram 论坛话题 / Discord 交互里。
+    /// 所有出站回复都必须经此构造 —— 直接 <c>new OutboundMessage(...)</c> 会把回复投到频道顶层或 General。
+    /// </summary>
+    private static OutboundMessage Reply(InboundMessage source, Guid threadId, string text, bool isFinal = true)
+        => new(source.ChannelName, source.ChatId, threadId, text,
+            IsFinal: isFinal, ThreadTs: source.ThreadTs, Metadata: source.Metadata, TopicId: source.TopicId);
+
     private async Task PublishErrorReplyAsync(InboundMessage message, string errorText)
     {
         try
         {
-            await _bus.PublishOutboundAsync(new OutboundMessage(
-                message.ChannelName, message.ChatId, Guid.Empty, errorText));
+            await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, errorText));
         }
         catch (Exception ex)
         {

@@ -48,6 +48,7 @@ public abstract class PayrollIntegrationTestBase : IntegratedTestBase<PayrollTes
         AddRepo<PayRunInput>(services);
         AddRepo<Vendor>(services);
         AddRepo<Account>(services);
+        AddRepo<Item>(services);
         AddRepo<JournalEntry>(services);
         AddRepo<JournalLine>(services);
         AddRepo<FiscalYear>(services);
@@ -101,6 +102,7 @@ public abstract class PayrollIntegrationTestBase : IntegratedTestBase<PayrollTes
         services.AddScoped<PayrollPostingHelper>();
         services.AddScoped<IPayRunService, PayRunService>();
         services.AddScoped<ICountryPackService, CountryPackService>();
+        services.AddScoped<IMasterDataUsageProvider, PayrollMasterDataUsageProvider>();
 
         ConfigureExtraServices(services);
     }

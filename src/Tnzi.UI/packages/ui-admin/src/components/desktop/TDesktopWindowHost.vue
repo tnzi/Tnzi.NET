@@ -181,8 +181,11 @@ const blockerCopy = computed(() => {
        surface. Naive's config provider crosses that boundary through
        provide/inject, so without this reset the window inherits whatever theme
        the content area computed for itself - the "light app, dark cards inside
-       the window" failure `useOverlayTheme` exists to prevent. -->
-  <TOverlayTheme>
+       the window" failure `useOverlayTheme` exists to prevent.
+       `:dense="false"`: only the theme reset is wanted. What renders in here
+       is a PAGE, and a page keeps the page-level control sizes; the `small`
+       default TOverlayTheme otherwise applies is for dialogs and drawers. -->
+  <TOverlayTheme :dense="false">
     <div class="t-desktop-window-host">
       <component :is="pageComponent" v-if="pageComponent" v-bind="pageProps" />
       <NResult

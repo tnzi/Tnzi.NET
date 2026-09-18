@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AuthStateManager, createInitialAuthState } from '../../src/state/auth';
+import {
+  AuthStateManager,
+  createInitialAuthState,
+  sessionEndReasonOf,
+  SESSION_ENDED_FOR_SECURITY_MESSAGE,
+  SESSION_EXPIRED_MESSAGE,
+} from '../../src/state/auth';
 import type { StateDeps } from '../../src/state/types';
 import type { HttpClient } from '../../src/http/http';
 import type { StorageAdapter } from '../../src/adapters/storage';
@@ -542,6 +548,313 @@ describe('AuthStateManager', () => {
       };
       auth.permissions = [];
       expect(auth.userPermissions).toEqual(['view']);
+    });
+  });
+
+  // ------------------------------------------
+  // login(): a challenge is a third answer, not a failure message
+  // ------------------------------------------
+
+  describe('login challenge envelopes', () => {
+    beforeEach(() => {
+      authApiMocks.loginWithRefreshToken.mockReset();
+    });
+
+    it.each([
+      ['2FA_REQUIRED', { tempToken: 't-2fa', supportedTypes: ['Totp'] }],
+      ['IDENTITY_PENDING_ACTIONS_REQUIRED', { tempToken: 't-pending', actions: ['ChangePassword'] }],
+      ['IDENTITY_CAPTCHA_REQUIRED', { captchaId: 'c1', imageBase64: 'AAAA' }],
+    ])('rejects with an HttpError carrying %s and its details', async (errorCode, errorDetails) => {
+      authApiMocks.loginWithRefreshToken.mockResolvedValue({
+        succeeded: false,
+        code: 403,
+        message: 'Challenge',
+        errorCode,
+        errorDetails,
+      });
+
+      await expect(auth.login({ userName: 'alice', password: 'pw' })).rejects.toMatchObject({
+        name: 'HttpError',
+        statusCode: 403,
+        errorCode,
+        details: errorDetails,
+      });
+      // Message-based callers keep working: HttpError is still an Error.
+      await expect(auth.login({ userName: 'alice', password: 'pw' })).rejects.toThrow('Challenge');
+      expect(auth.error).toBe('Challenge');
+      expect(auth.isAuthenticated).toBe(false);
+    });
+  });
+
+  // ------------------------------------------
+  // logout(): revocation must not depend on the access token still being alive
+  // ------------------------------------------
+
+  describe('logout with an expired access token', () => {
+    const onLogout = vi.fn();
+
+    function seedExpiredSession(manager: AuthStateManager): void {
+      manager.isAuthenticated = true;
+      manager.accessToken = 'expired-access';
+      manager.refreshToken = 'live-refresh';
+      manager.tokenExpiry = new Date(Date.now() - 60_000);
+    }
+
+    beforeEach(() => {
+      authApiMocks.refreshToken.mockReset();
+      authApiMocks.logout.mockReset();
+      onLogout.mockReset();
+    });
+
+    it('refreshes first, then revokes with the new token', async () => {
+      const localDeps = createDeps({ onLogout });
+      const localAuth = new AuthStateManager(localDeps);
+      seedExpiredSession(localAuth);
+      const order: string[] = [];
+      authApiMocks.refreshToken.mockImplementation(async () => {
+        order.push('refresh');
+        return { succeeded: true, code: 200, data: { accessToken: 'fresh-access', refreshToken: 'fresh-refresh', expiresIn: 3600 } };
+      });
+      authApiMocks.logout.mockImplementation(async () => {
+        order.push(`logout:${localDeps.httpClient.getAccessToken()}`);
+        return { succeeded: true, code: 200 };
+      });
+      (localDeps.httpClient.setAccessToken as ReturnType<typeof vi.fn>).mockImplementation((t: string | null) => {
+        (localDeps.httpClient.getAccessToken as ReturnType<typeof vi.fn>).mockReturnValue(t);
+      });
+
+      await localAuth.logout();
+
+      expect(order).toEqual(['refresh', 'logout:fresh-access']);
+      expect(authApiMocks.refreshToken).toHaveBeenCalledWith({ refreshToken: 'live-refresh' });
+      expect(localAuth.isAuthenticated).toBe(false);
+      expect(localAuth.accessToken).toBeNull();
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
+
+    it('still clears locally when the refresh also fails', async () => {
+      const localAuth = new AuthStateManager(createDeps({ onLogout }));
+      seedExpiredSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400 });
+      authApiMocks.logout.mockResolvedValue({ succeeded: false, code: 401 });
+
+      await localAuth.logout();
+
+      expect(localAuth.isAuthenticated).toBe(false);
+      expect(localAuth.accessToken).toBeNull();
+      expect(localAuth.error).toBeNull();
+      expect(onLogout).toHaveBeenCalledTimes(1);
+    });
+
+    it('presents a refused refresh token once, not again after the logout 401', async () => {
+      // The reactive retry exists for the case where the client-side expiry was
+      // wrong and the proactive refresh never ran. When it DID run and the server
+      // refused the token, the logout 401 is the expected consequence - asking
+      // again with the same dead token is a wasted round trip, and the backend's
+      // replay detection may log a plain sign-out as a copied token.
+      const localAuth = new AuthStateManager(createDeps({ onLogout }));
+      seedExpiredSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400 });
+      authApiMocks.logout.mockResolvedValue({ succeeded: false, code: 401 });
+
+      await localAuth.logout();
+
+      expect(authApiMocks.refreshToken).toHaveBeenCalledTimes(1);
+      expect(authApiMocks.logout).toHaveBeenCalledTimes(1);
+      expect(localAuth.isAuthenticated).toBe(false);
+    });
+
+    it('does not refresh when the token is still live', async () => {
+      const localAuth = new AuthStateManager(createDeps({ onLogout }));
+      localAuth.isAuthenticated = true;
+      localAuth.accessToken = 'live-access';
+      localAuth.refreshToken = 'live-refresh';
+      localAuth.tokenExpiry = new Date(Date.now() + 3600_000);
+      authApiMocks.logout.mockResolvedValue({ succeeded: true, code: 200 });
+
+      await localAuth.logout();
+
+      expect(authApiMocks.refreshToken).not.toHaveBeenCalled();
+      expect(authApiMocks.logout).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers from a 401 the client-side expiry did not predict (clock skew)', async () => {
+      const localAuth = new AuthStateManager(createDeps({ onLogout }));
+      localAuth.isAuthenticated = true;
+      localAuth.accessToken = 'server-says-expired';
+      localAuth.refreshToken = 'live-refresh';
+      localAuth.tokenExpiry = new Date(Date.now() + 3600_000);
+      authApiMocks.logout
+        .mockResolvedValueOnce({ succeeded: false, code: 401 })
+        .mockResolvedValueOnce({ succeeded: true, code: 200 });
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: true,
+        code: 200,
+        data: { accessToken: 'fresh-access', refreshToken: 'fresh-refresh', expiresIn: 3600 },
+      });
+
+      await localAuth.logout();
+
+      expect(authApiMocks.refreshToken).toHaveBeenCalledTimes(1);
+      expect(authApiMocks.logout).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ------------------------------------------
+  // refresh failure classification: rejected token vs could-not-ask
+  // ------------------------------------------
+
+  describe('refresh transport failures keep the persisted tokens', () => {
+    function seedPersisted(manager: AuthStateManager, storage: StorageAdapter): void {
+      manager.isAuthenticated = true;
+      manager.accessToken = 'stale-access';
+      manager.refreshToken = 'maybe-alive-refresh';
+      storage.set('tnzi:auth:token', 'stale-access');
+      storage.set('tnzi:auth:refresh', 'maybe-alive-refresh');
+    }
+
+    beforeEach(() => {
+      authApiMocks.refreshToken.mockReset();
+    });
+
+    it.each([
+      ['client timeout', { succeeded: false, code: 408, errorCode: 'REQUEST_TIMEOUT', message: 'timed out' }],
+      ['rate limited', { succeeded: false, code: 429, message: 'Too many requests' }],
+      ['proxy 503', { succeeded: false, code: 503, message: 'HTTP 503 Service Unavailable' }],
+      ['network error', { succeeded: false, code: 500, message: 'Failed to fetch' }],
+    ])('%s: rejects but leaves storage, error and router untouched', async (_label, envelope) => {
+      const storage = createMockStorage();
+      const push = vi.fn();
+      const onLogout = vi.fn();
+      const localAuth = new AuthStateManager(
+        createDeps({ storage, onLogout, router: { push } as unknown as StateDeps['router'] }),
+      );
+      seedPersisted(localAuth, storage);
+      authApiMocks.refreshToken.mockResolvedValue(envelope);
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(storage.get('tnzi:auth:refresh')).toBe('maybe-alive-refresh');
+      expect(storage.get('tnzi:auth:token')).toBe('stale-access');
+      expect(localAuth.error).toBeNull();
+      expect(push).not.toHaveBeenCalled();
+      expect(onLogout).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['expired / invalid', { succeeded: false, code: 400, message: 'Invalid or expired refresh token' }],
+      ['replayed (security)', { succeeded: false, code: 401, errorCode: 'IDENTITY_REFRESH_TOKEN_REUSED' }],
+    ])('%s: the server rejected the token, so everything is cleared', async (_label, envelope) => {
+      const storage = createMockStorage();
+      const push = vi.fn();
+      const localAuth = new AuthStateManager(
+        createDeps({ storage, router: { push } as unknown as StateDeps['router'] }),
+      );
+      seedPersisted(localAuth, storage);
+      authApiMocks.refreshToken.mockResolvedValue(envelope);
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(storage.get('tnzi:auth:refresh')).toBeNull();
+      expect(localAuth.isAuthenticated).toBe(false);
+      expect(localAuth.error).toMatch(/session/i);
+      expect(push).toHaveBeenCalledWith('/login');
+    });
+
+    it('restoreAuth while offline keeps the persisted tokens for the next boot', async () => {
+      const storage = createMockStorage();
+      storage.set('tnzi:auth:token', 'stored-access');
+      storage.set('tnzi:auth:refresh', 'stored-refresh');
+      const localAuth = new AuthStateManager(createDeps({ storage }));
+      profileApiMocks.get.mockReset();
+      profileApiMocks.get.mockResolvedValue({ succeeded: false, code: 500, message: 'Failed to fetch' });
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 500, message: 'Failed to fetch' });
+
+      await localAuth.restoreAuth();
+
+      expect(localAuth.isAuthenticated).toBe(false);
+      expect(localAuth.accessToken).toBeNull();
+      expect(storage.get('tnzi:auth:token')).toBe('stored-access');
+      expect(storage.get('tnzi:auth:refresh')).toBe('stored-refresh');
+    });
+  });
+
+  // ------------------------------------------
+  // sessionEndReason - the login page's typed view of `error`
+  // ------------------------------------------
+
+  describe('sessionEndReason', () => {
+    function seedSession(manager: AuthStateManager): void {
+      manager.isAuthenticated = true;
+      manager.accessToken = 'stale-access';
+      manager.refreshToken = 'dead-refresh';
+    }
+
+    beforeEach(() => {
+      authApiMocks.refreshToken.mockReset();
+    });
+
+    it('is null on a fresh manager and after an unrelated error', () => {
+      expect(auth.sessionEndReason).toBeNull();
+      auth.setError('Invalid user name or password');
+      expect(auth.sessionEndReason).toBeNull();
+    });
+
+    it('is "expired" after the server rejected the refresh token', async () => {
+      const localAuth = new AuthStateManager(createDeps());
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: false,
+        code: 400,
+        message: 'Invalid or expired refresh token',
+      });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(localAuth.sessionEndReason).toBe('expired');
+    });
+
+    it('★ is "security" when the session was ended for a security reason', async () => {
+      // This is the one moment the legitimate user can learn that their
+      // credentials are in use elsewhere; a login page keyed on the raw string
+      // would have to know core's English copy to tell the two apart.
+      const localAuth = new AuthStateManager(createDeps());
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: false,
+        code: 401,
+        errorCode: 'IDENTITY_REFRESH_TOKEN_REUSED',
+        message: 'Invalid or expired refresh token',
+      });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(localAuth.sessionEndReason).toBe('security');
+    });
+
+    it('clears once a login attempt starts', async () => {
+      const localAuth = new AuthStateManager(createDeps());
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({ succeeded: false, code: 400, message: 'dead' });
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+      expect(localAuth.sessionEndReason).toBe('expired');
+
+      authApiMocks.loginWithRefreshToken.mockResolvedValue({
+        succeeded: false,
+        code: 400,
+        message: 'Invalid user name or password',
+      });
+      await expect(localAuth.login({ userName: 'a', password: 'b' })).rejects.toThrow();
+
+      expect(localAuth.sessionEndReason).toBeNull();
+    });
+
+    it('sessionEndReasonOf classifies only the two session messages', () => {
+      expect(sessionEndReasonOf(SESSION_ENDED_FOR_SECURITY_MESSAGE)).toBe('security');
+      expect(sessionEndReasonOf(SESSION_EXPIRED_MESSAGE)).toBe('expired');
+      expect(sessionEndReasonOf('Session expired')).toBeNull();
+      expect(sessionEndReasonOf(null)).toBeNull();
+      expect(sessionEndReasonOf(undefined)).toBeNull();
     });
   });
 });

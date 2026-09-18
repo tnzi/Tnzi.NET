@@ -18,7 +18,7 @@ public class LoginLogServiceTests
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
-        _loginLogService = new LoginLogService(_repositoryMock.Object, _senderMock.Object, _serviceProviderMock.Object);
+        _loginLogService = new LoginLogService(_repositoryMock.Object, _senderMock.Object, _serviceProviderMock.Object, UnscopedUserTenantScope.Create());
     }
 
     [Fact]

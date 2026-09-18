@@ -6,6 +6,7 @@ using Tnzi.Domain.Entities;
 using Tnzi.EventBus;
 using Tnzi.Finance.Services.Internal;
 using Tnzi.Mapster;
+using Tnzi.Storage;
 
 namespace Tnzi.Finance.Tests.Integration;
 
@@ -112,6 +113,12 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
         services.AddSingleton<IEventBus>(sp =>
             new LocalEventBus(sp, sp.GetRequiredService<ILogger<LocalEventBus>>()));
 
+        // 写入侧的文件归属校验（IFileReadAccessProbe，实现随 Tnzi.Storage 注册；Finance 只认核心契约）。
+        // 这里默认放行：本套用例绝大多数关心的是别的事，而没有它每一条带文件的登记
+        // （单据附件 / 收据）都会答 501。关心这道校验本身的用例自己换掉它
+        // （见 DocumentAttachmentGuardTests / ReceiptCaptureTests）。
+        services.AddScoped(_ => PermissiveFileAccess());
+
         // 财务服务
         services.AddScoped<IDocumentNumberService, DocumentNumberService>();
         services.AddScoped<IChartOfAccountsService, ChartOfAccountsService>();
@@ -204,6 +211,14 @@ public abstract class FinanceIntegrationTestBase : IntegratedTestBase<FinanceTes
 
         // P3「输出与摄取」- 块 4 收据采集（IReceiptExtractor 桩由测试按需注入）
         services.AddScoped<IReceiptCaptureService, ReceiptCaptureService>();
+    }
+
+    /// <summary>一律放行的文件归属探针。</summary>
+    private static IFileReadAccessProbe PermissiveFileAccess()
+    {
+        var probe = new Mock<IFileReadAccessProbe>();
+        probe.Setup(p => p.CanReadAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        return probe.Object;
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>

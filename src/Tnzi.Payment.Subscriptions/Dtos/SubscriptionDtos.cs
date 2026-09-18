@@ -441,6 +441,11 @@ public class SubscriptionChangeDto
     public PaymentOrderResultDto? Payment { get; set; }
 
     /// <summary>
+    /// 补差款待支付单的流水号；与 <see cref="Payment"/> 不同，它持久化在变更行上，之后再查这条变更也拿得到。
+    /// </summary>
+    public string? PaymentTradeNo { get; set; }
+
+    /// <summary>
     /// 创建时间
     /// </summary>
     public DateTime CreationTime { get; set; }

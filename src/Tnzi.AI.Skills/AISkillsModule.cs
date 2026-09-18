@@ -31,8 +31,8 @@ public class AISkillsModule : TnziApplicationModule
         services.AddScoped<ISkillLoadTracker, SkillLoadTracker>();
         services.AddSingleton<FileSystemSkillStore>();
         // Expose FileSystemSkillStore as the default ISkillStore so that
-        // singleton consumers (AISandboxModule startup, ThreadDataMiddleware
-        // optional injection) can resolve it. DatabaseSkillStore is scoped
+        // consumers taking it as an optional dependency (the sandbox module's
+        // ThreadDataProvisioner) can resolve it. DatabaseSkillStore is scoped
         // and not suitable as a singleton default.
         services.AddSingleton<ISkillStore>(sp => sp.GetRequiredService<FileSystemSkillStore>());
         // AIModule 的 NoOp 回退在 PostConfigure 阶段才 TryAdd（见 AIModule.PostConfigureServicesAsync），
@@ -49,9 +49,11 @@ public class AISkillsModule : TnziApplicationModule
         // 注册事件处理器
         services.AddEventHandler<SkillActivatedEvent, SkillActivatedEventHandler>();
 
-        // 注册技能约束中间件
+        // 注册技能约束中间件：450 号 AI 中间件在轮次开始时收窄模型可见的工具列表，
+        // 工具执行中间件在每一次工具调用前拦截 —— 后者才是安全边界（激活当轮即生效）。
         services.AddScoped<SkillConstraintMiddleware>();
         services.AddScoped<IAiMiddleware>(sp => sp.GetRequiredService<SkillConstraintMiddleware>());
+        services.AddScoped<IToolExecutionMiddleware, SkillConstraintToolMiddleware>();
 
         return Task.CompletedTask;
     }

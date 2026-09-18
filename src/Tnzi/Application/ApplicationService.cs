@@ -126,6 +126,14 @@ public abstract class ApplicationService : IApplicationService
     /// </summary>
     protected async Task PublishEventAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
+        Check.NotNull(@event);
+
+        // 在路由之前、从调用方自己的作用域捕获环境租户：这里的 ICurrentTenant 就是业务代码用的那个实例，
+        // 连 Change() 的临时覆盖都看得见。集成事件的三条去向（Outbox / 分布式总线 / 本地兜底）
+        // 里只有本地总线自己会捕获，另外两条原样序列化 —— 不在这里补，线上 JSON 的 TenantId 恒为 null，
+        // 另一实例的处理器就跑在 null 租户作用域里
+        EventTenantContext.Capture(@event, ServiceProvider);
+
         // 集成事件路由(优先级):Outbox(事务一致投递) > 分布式总线(事务中延迟到提交后) > 本地总线兜底
         if (@event is IIntegrationEvent)
         {
@@ -248,12 +256,24 @@ public abstract class ApplicationService : IApplicationService
     }
 
     /// <summary>
-    /// 检查权限
+    /// 检查当前用户是否拥有指定权限，无权限则抛出异常
+    /// 如果权限检查器不可用（Authorization 模块未加载），同样抛出 ForbiddenException ——
+    /// 与 <see cref="RequireAnyPermissionAsync"/> / <see cref="RequireAllPermissionsAsync"/> 及 deny-by-default 口径一致。
+    /// 此前检查器为 null 时直接返回：按文档写 <c>await CheckPermissionAsync("x")</c> 的消费方，
+    /// 一旦应用没加载 Authorization，受保护的逻辑就在 200 与零日志下照常执行。
     /// </summary>
+    /// <param name="permissionName">权限名称</param>
+    /// <exception cref="ForbiddenException">当权限检查器不可用或用户不拥有该权限时抛出</exception>
     protected virtual async Task CheckPermissionAsync(string permissionName)
     {
-        if (PermissionChecker != null)
-            await PermissionChecker.CheckAsync(permissionName);
+        if (PermissionChecker == null)
+        {
+            throw new ForbiddenException(
+                "Permission checker is not available. Please ensure the Authorization module is loaded.",
+                ErrorCodes.FORBIDDEN);
+        }
+
+        await PermissionChecker.CheckAsync(permissionName);
     }
 
     /// <summary>

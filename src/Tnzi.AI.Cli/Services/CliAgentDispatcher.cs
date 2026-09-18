@@ -9,6 +9,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
     private readonly IRepository<CliRunMessage, Guid> _messageRepository;
     private readonly IRepository<CliAgentBinding, Guid> _bindingRepository;
     private readonly IRepository<Entities.CliRuntime, Guid> _runtimeRepository;
+    private readonly IRepository<AgentThread, Guid> _threadRepository;
     private readonly CliRunSignalHub _signalHub;
     private readonly CliRunCancellationRegistry _cancellationRegistry;
     private readonly IOptionsMonitor<CliAgentOptions> _options;
@@ -20,6 +21,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         IRepository<CliRunMessage, Guid> messageRepository,
         IRepository<CliAgentBinding, Guid> bindingRepository,
         IRepository<Entities.CliRuntime, Guid> runtimeRepository,
+        IRepository<AgentThread, Guid> threadRepository,
         CliRunSignalHub signalHub,
         CliRunCancellationRegistry cancellationRegistry,
         IOptionsMonitor<CliAgentOptions> options,
@@ -31,6 +33,7 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         _messageRepository = Check.NotNull(messageRepository);
         _bindingRepository = Check.NotNull(bindingRepository);
         _runtimeRepository = Check.NotNull(runtimeRepository);
+        _threadRepository = Check.NotNull(threadRepository);
         _signalHub = Check.NotNull(signalHub);
         _cancellationRegistry = Check.NotNull(cancellationRegistry);
         _options = Check.NotNull(options);
@@ -63,6 +66,13 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
                 "The bound external CLI runtime is unavailable.", 409, ErrorCodes.CliRuntimeNotFound);
         }
 
+        var currentUserId = CurrentUser?.Id;
+        if (request.ThreadId is { } requestedThreadId
+            && !await OwnsThreadAsync(requestedThreadId, request.AgentId, currentUserId, cancellationToken))
+        {
+            return Fail<Guid>("Thread not found.", 404, ErrorCodes.ThreadNotFound);
+        }
+
         // 排队前先问预算：让调用方当场知道，而不是排完队再失败。
         // 这不是唯一的门 —— 队列可能积压很久，真正的执法在认领之后（见 CliRunExecutor）。
         var budget = await CheckBudgetAsync(request, cancellationToken);
@@ -75,13 +85,16 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
         // 同一 Agent + 同一 Thread 的上一轮会话 ID 是本轮的续接指针。找不到就是新会话。
         // PerRun 每轮换目录，CLI 在新目录里找不到上一轮的会话存档 —— 明知必被拒还发
         // --resume，只会白跑一次重试并让用户为同一个问题付两次钱。
+        // 续接指针只从**自己派出的**上一轮取：线程归属上面已核过，这里是第二道门 ——
+        // 一条线程若曾被别人的运行写过会话指针，那个指针也不该被接上。
         var canResume = binding.WorkDirectoryMode != CliWorkDirectoryMode.PerRun;
 
         var previousSessionId = canResume && request.ThreadId is { } threadId
             ? await _runRepository.AsQueryable()
                 .Where(r => r.ThreadId == threadId
                             && r.AgentId == request.AgentId
-                            && r.ProviderSessionId != null)
+                            && r.ProviderSessionId != null
+                            && (currentUserId == null || r.CreatorId == currentUserId))
                 .OrderByDescending(r => r.CreationTime)
                 .Select(r => r.ProviderSessionId)
                 .FirstOrDefaultAsync(cancellationToken)
@@ -250,6 +263,50 @@ public class CliAgentDispatcher : ApplicationService, ICliAgentDispatcher
 
         var checker = PermissionChecker;
         return checker is not null && await checker.IsGrantedAsync(CliPermissions.CliRunView);
+    }
+
+    /// <summary>
+    /// 调用方给的 ThreadId 是不是它自己的、绑在这个 Agent 上的线程。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <b>为什么这里必须自己核，而不是信门面</b>：<c>EnqueueAsync</c> 是用户端控制器
+    /// （<c>POST ai/cli-runs</c>）直接调用的入口，请求体里的 ThreadId 原样进来。在补上这一条之前，
+    /// 任何持有 <c>ai.agent.execute</c> 的用户只要拿到别人的线程 id，派出的运行就会
+    /// <b>续接受害者的 CLI 会话</b>（<c>--resume</c> 受害者的 ProviderSessionId）、
+    /// <b>跑在受害者的每线程工作区里</b>（PerThread 模式按 ThreadId 定目录），
+    /// 而运行的 <c>CreatorId</c> 是攻击者自己，所以输出他能原样读走。
+    /// 与 <c>a6f0bc93</c>（AI 客户端可指定任意 ThreadId）是同一形态，只是换到了外部路径。
+    /// </para>
+    /// <para>
+    /// 判据逐字沿 <c>AgentThreadService.GetOrCreateThreadAsync</c>：线程存在、<c>AgentId</c> 相符、
+    /// 已认证用户还要 <c>CreatorId</c> 相符（无主线程对任何已认证用户都不可用）。
+    /// 没有当前用户（后台派发、IM 网关）时不做归属判定，与内建路径一致。
+    /// 拒绝一律按 404 出：区分「不存在」与「不是你的」等于告诉试探者哪些 id 是真的。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> OwnsThreadAsync(Guid threadId, Guid agentId, Guid? currentUserId, CancellationToken cancellationToken)
+    {
+        var thread = await _threadRepository.AsQueryable()
+            .Where(t => t.Id == threadId)
+            .Select(t => new { t.AgentId, t.CreatorId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (thread is null || thread.AgentId != agentId)
+        {
+            Logger.LogWarning("CLI run rejected: thread {ThreadId} is missing or not bound to agent {AgentId}", threadId, agentId);
+            return false;
+        }
+
+        if (currentUserId.HasValue && thread.CreatorId != currentUserId)
+        {
+            Logger.LogWarning(
+                "CLI run rejected: thread {ThreadId} belongs to {CreatorId}, not to {CurrentUserId}",
+                threadId, thread.CreatorId, currentUserId);
+            return false;
+        }
+
+        return true;
     }
 
     /// <inheritdoc />

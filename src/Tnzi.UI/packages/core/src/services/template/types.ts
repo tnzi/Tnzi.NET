@@ -5,7 +5,7 @@
 
 import type { AuditedEntity } from '../../types/entities';
 import type { SortedPagedQueryDto } from '../../types/pagination';
-import type { TemplateVariableType } from './metadata';
+import type { TemplateType, TemplateVariableType } from './metadata';
 
 export type { TemplateVariableType };
 
@@ -22,6 +22,8 @@ export interface TemplateInfoDto extends AuditedEntity<string> {
   module: string;
   category: string;
   defaultLayoutName?: string | null;
+  /** Rendering surface; `Sms` bodies render as plain text, everything else as HTML. */
+  type?: TemplateType;
   isActive: boolean;
   description?: string | null;
   /** Origin of this row - "Database" | "FileSystem". */
@@ -47,6 +49,8 @@ export interface TemplateEntityDto extends AuditedEntity<string> {
   subjectTemplate: string;
   contentTemplate: string;
   defaultLayoutName?: string | null;
+  /** Rendering surface; `Sms` bodies render as plain text, everything else as HTML. */
+  type?: TemplateType;
   isActive: boolean;
   description?: string | null;
   metadata?: string | null;
@@ -79,6 +83,8 @@ export interface CreateTemplateDto {
   subjectTemplate?: string;
   contentTemplate: string;
   defaultLayoutName?: string;
+  /** Rendering surface. Omitted = Generic (HTML-encoded body). */
+  type?: TemplateType;
   isActive?: boolean;
   description?: string;
   metadata?: string;
@@ -95,6 +101,8 @@ export interface UpdateTemplateDto {
   subjectTemplate?: string;
   contentTemplate: string;
   defaultLayoutName?: string;
+  /** Rendering surface. Omitted = keep the stored type (the server never resets it to Generic). */
+  type?: TemplateType;
   isActive?: boolean;
   description?: string;
   metadata?: string;

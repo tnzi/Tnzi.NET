@@ -4,6 +4,13 @@ namespace Tnzi.Hangfire;
 /// Hangfire 后台任务调度模块
 /// 配置路径：Hangfire
 /// </summary>
+/// <remarks>
+/// ★ <c>[OptionalDependsOn(typeof(AspNetCoreModule))]</c> 只为<b>排序</b>：本模块是 Infrastructure（绝对序 150），
+/// AspNetCore 是 Framework（200），没有这条边时 <c>UseHangfireDashboard</c> 会排在 <c>UseAuthentication()</c>
+/// 之前，角色过滤器看到的永远是匿名主体，配好角色的管理员也拿 401（2026-09-12 修复）。
+/// 用 Optional 而不是硬依赖：非 web 宿主（Worker）加载本模块不该被迫拉进整个 AspNetCore 模块。
+/// </remarks>
+[OptionalDependsOn(typeof(AspNetCoreModule))]
 public class HangfireModule : TnziInfrastructureModule
 {
     /// <summary>
@@ -176,25 +183,17 @@ public class HangfireModule : TnziInfrastructureModule
             return Task.CompletedTask;
         }
 
-        // 配置 Dashboard
+        // 配置 Dashboard。验证器保证：开着 Dashboard 就一定带授权与非空角色表，这里不再有「无授权」分支。
+        // ★ 挂在认证之后（见类注释的 OptionalDependsOn）：过滤器读的是 HttpContext.User。
         if (options.Dashboard.Enabled)
         {
-            var dashboardOptions = new DashboardOptions();
-
-            // 配置授权（如果需要）
-            if (options.Dashboard.EnableAuthorization && options.Dashboard.AllowedRoles.Count > 0)
+            var dashboardOptions = new DashboardOptions
             {
-                // 使用基于角色的授权
-                dashboardOptions.Authorization = new[]
-                {
+                Authorization =
+                [
                     new DashboardRoleAuthorizationFilter(options.Dashboard.AllowedRoles.ToArray())
-                };
-            }
-            else
-            {
-                var logger = context.ServiceProvider.GetService<ILogger<HangfireModule>>();
-                logger?.LogWarning("Hangfire Dashboard authorization is disabled. Consider enabling it in production.");
-            }
+                ]
+            };
 
             app.UseHangfireDashboard(options.Dashboard.Path, dashboardOptions);
         }

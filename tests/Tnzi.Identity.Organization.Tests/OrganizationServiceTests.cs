@@ -26,6 +26,8 @@ public class OrganizationServiceTests
         MapperExtensions.SetMapper(mapper);
 
         _organizationRepositoryMock = new Mock<IRepository<Organization, Guid>>();
+        // Moq 不执行默认接口成员：不设它，NewId() 返回 Guid.Empty，服务会拒绝（默认 Id 就是当初「路径段不是实体 Id」那个缺陷）。
+        _organizationRepositoryMock.Setup(x => x.NewId()).Returns(() => Guid.NewGuid());
         _dbContextMock = new Mock<Microsoft.EntityFrameworkCore.DbContext>();
         _eventBusMock = new Mock<IEventBus>();
         _currentUserMock = new Mock<ICurrentUser>();

@@ -7,6 +7,7 @@ using Tnzi.MultiTenancy;
 
 namespace Tnzi.Hangfire.Tests;
 
+[Collection(JobStorageCollection.Name)]
 public class HangfireModuleTests
 {
     [Fact]

@@ -92,6 +92,47 @@ public class JournalReversalSourceGuardTests : FinanceIntegrationTestBase
     }
 
     /// <summary>
+    /// 一个 <see cref="IDocumentProjectedSourceTypeProvider"/> 都没注册时，清单就是核心那七种 —— 缺省只增不减。
+    /// </summary>
+    /// <remarks>
+    /// 子模块（Payroll）经 provider 贡献自己的令牌；本测试项目刻意不加载 Payroll，
+    /// 所以这里守的是「没有 provider 的部署与引入契约之前逐字一致」。
+    /// </remarks>
+    [Fact]
+    public void DocumentProjectedSourceTypes_WithoutProviders_StaysAtTheCoreSeven()
+    {
+        ServiceProvider.GetServices<IDocumentProjectedSourceTypeProvider>().ShouldBeEmpty();
+
+        using var scope = ServiceProvider.CreateScope();
+        var service = (JournalEntryService)scope.ServiceProvider.GetRequiredService<IJournalEntryService>();
+
+        service.DocumentProjectedSourceTypes.ShouldBe(JournalEntryService.CoreDocumentProjectedSourceTypes, ignoreOrder: true);
+        JournalEntryService.CoreDocumentProjectedSourceTypes.Count.ShouldBe(7);
+    }
+
+    /// <summary>
+    /// 注册了 provider 之后，贡献的令牌与核心的取并集；代表单据发起的冲销对同一来源放行。
+    /// </summary>
+    [Fact]
+    public async Task ReverseOnBehalfOfDocument_SkipsTheGateOnlyForTheSameSourceType()
+    {
+        await SeedCoaAsync();
+        var posted = await PostLedgerAsync(SimpleSale(60m, new DateTime(2026, 5, 9), sourceId: "custom-1"));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+
+        // 与凭证来源不同的单据代表自己发起 → 409，凭证原样
+        var wrongDocument = await InScopeAsync<ILedgerPostingService, Result<JournalEntryDto>>(
+            s => s.ReverseOnBehalfOfDocumentAsync(posted.Data!.Id, FinanceSourceTypes.Invoice));
+        wrongDocument.Succeeded.ShouldBeFalse();
+        wrongDocument.Code.ShouldBe(409);
+
+        var same = await InScopeAsync<ILedgerPostingService, Result<JournalEntryDto>>(
+            s => s.ReverseOnBehalfOfDocumentAsync(posted.Data!.Id, posted.Data!.SourceType!));
+        same.Succeeded.ShouldBeTrue(same.Message);
+        same.Data!.ReversalOfEntryId.ShouldBe(posted.Data!.Id);
+    }
+
+    /// <summary>
     /// 冲销漏斗自己拒绝已被冲销过的凭证 —— 纵深防御，不依赖任何上游记得检查。
     /// </summary>
     /// <remarks>

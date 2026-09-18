@@ -38,5 +38,11 @@ internal static class TestDispatchFacade
 
         public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
             => throw new NotSupportedException();
+
+        public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }

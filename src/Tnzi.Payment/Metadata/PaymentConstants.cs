@@ -69,11 +69,6 @@ public static class PaymentConstants
     public const int DefaultTrialDays = 7;
 
     /// <summary>
-    /// 最大试用折扣百分比
-    /// </summary>
-    public const int MaxTrialDiscountPercent = 100;
-
-    /// <summary>
     /// 订阅续费提前提醒天数
     /// </summary>
     public const int SubscriptionRenewalReminderDays = 7;

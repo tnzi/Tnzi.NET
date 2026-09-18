@@ -174,7 +174,12 @@ public class PermissionCataloguePactTests
         // 只有这两个：注册与刷新是用户端动作（客户端拿到令牌自己上报），admin 没有代人
         // 注册设备的场景 —— 给了 create，写出来的行不对应任何一台真实设备，推送会一直
         // 失败而没人知道为什么。复用核心声明的 notification 组，故组数不变。
-        codes.Count.ShouldBe(304);
+        // 2026-09-12：工具组权限 3 码（ai.tools.task / ai.tools.a2a 由 AIPermissions 声明，
+        // ai.tools.sandbox 随 Tnzi.AI.Sandbox 走），全部 Technical，复用既有 ai 组。
+        // 它们不是新的管理端点，而是 [AIToolGroup(RequiredPermissions)] 引用的码：此前框架自带的
+        // 工具一个都没声明 RequiredPermissions，AgentResolver 的权限门控对内建工具整体空转，
+        // 任何登录用户在聊天体里自填 toolGroups:["sandbox"] 就能拿到宿主上的 bash。
+        codes.Count.ShouldBe(307);
         context.Groups.Count.ShouldBe(13);
     }
 
@@ -365,7 +370,9 @@ public class PermissionCataloguePactTests
         // 2026-08-23：storage.chunk.view / storage.version.view 退役，101 → 99 ——
         // 它们坐在要求 storage.file.view 的类级门下面，表达不了任何更窄的访问，
         // 只能藏菜单而 API 照样通（把装饰当权限展示）。
-        technical.Count.ShouldBe(99);
+        // 2026-09-12：工具组权限 3 码（ai.tools.task / a2a / sandbox）Technical，99 → 102 ——
+        // 「谁能让模型起子 Agent / 打远端 agent / 在沙箱里跑 bash」是运维面的能力授权。
+        technical.Count.ShouldBe(102);
     }
 
     [Theory]

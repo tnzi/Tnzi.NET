@@ -102,9 +102,11 @@ public class SubscriptionsPackageAbsenceTests
     /// 「这个用户能不能用首单优惠」的端点在没有探针时回 <c>true</c> —— 同一个事实的另一面。
     /// </summary>
     /// <remarks>
-    /// 这条走的是本模块自己的判据（有没有用过标了 <c>FirstSubscriptionOnly</c> 的券），
-    /// 与探针无关，所以缺席续费包时它照常工作。写下来是为了钉住「缺席 = 少一项能力」：
-    /// 券包端点不会因为没装续费包而失败或改变语义。
+    /// 预检与核销守卫共用 <c>IPromotionService.IsFirstSubscriptionEligibleAsync</c> 这一个判定，
+    /// 探针缺席时它对所有人成立，所以缺席续费包时券包端点照常工作、不失败。
+    /// 券包契约上不出现探针类型：探针是折扣服务内部向续费域提的问题，不是券包的形参。
+    /// （此前预检另查「用没用过首单券」，与核销的判据分叉，两个方向都会答错；
+    /// 缺席场景的行为由 <c>CouponIntegrationTests</c> 里的同名用例守着。）
     /// </remarks>
     [Fact]
     public void TheFirstSubscriptionCheckIsOnTheWalletContract_NotTheProbe()

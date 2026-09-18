@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
-using Tnzi.SignalR.Filters;
 using Tnzi.SignalR.Tests.TestDoubles;
 
 namespace Tnzi.SignalR.Tests.Filters;

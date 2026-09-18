@@ -8,6 +8,7 @@
  */
 
 import type { ChatStreamEvent, ChatRequestDto } from './types';
+import { StreamRequestError } from './stream-request-error';
 
 /** Options for streaming chat */
 export interface ChatStreamOptions {
@@ -33,6 +34,25 @@ export interface ChatStreamOptions {
   onError?: (error: Error | ChatStreamEvent) => void;
   /** AbortSignal to cancel the stream */
   signal?: AbortSignal;
+}
+
+/**
+ * The chat streaming endpoint answered with a non-2xx status before any frame.
+ *
+ * Carries the HTTP status so a caller can tell an expired bearer token (401)
+ * apart from a server failure without parsing the message: `streamChat` is a
+ * raw `fetch`, not an `HttpClient` request, so the client's 401
+ * refresh-and-retry never sees it - the caller has to run that dance itself
+ * (see `HttpClient.refreshAccessToken` / `reportUnauthorized`).
+ *
+ * A subclass of {@link StreamRequestError}, which `streamCliRun` raises directly:
+ * a consumer that serves both feeds can branch on the base class once.
+ */
+export class ChatStreamRequestError extends StreamRequestError {
+  constructor(status: number, detail: string) {
+    super(status, detail);
+    this.name = 'ChatStreamRequestError';
+  }
 }
 
 /** Result returned after the stream completes */
@@ -97,7 +117,7 @@ export async function streamChat(options: ChatStreamOptions): Promise<ChatStream
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => response.statusText);
-      const error = new Error(`Stream request failed: ${response.status} ${errorText}`);
+      const error = new ChatStreamRequestError(response.status, errorText);
       result.error = error;
       options.onError?.(error);
       return result;

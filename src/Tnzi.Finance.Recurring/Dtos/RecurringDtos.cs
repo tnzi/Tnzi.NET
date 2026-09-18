@@ -125,7 +125,12 @@ public class UpdateRecurringDocumentDto
     public bool? AutoPost { get; set; }
 
     public List<CreateRecurringLineDto> Lines { get; set; } = null!;
-    public string ConcurrencyStamp { get; set; } = null!;
+
+    /// <summary>
+    /// GET 返回的并发戳。带上它，服务端会在保存前比对：与当前值不一致即 409，
+    /// 先前那位编辑者的改动原样保留。留空 = 不做客户端侧比对（只剩同一请求内 load→save 窗口的保护）。
+    /// </summary>
+    public string? ConcurrencyStamp { get; set; }
 }
 
 /// <summary>

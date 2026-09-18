@@ -8,6 +8,7 @@ import { TimeoutError } from '../errors/network-error';
 import { useLogger } from '../adapters/logger';
 import { normalizeApiResult } from './response';
 import { buildCapabilityHeaderValue, CAPABILITY_HEADER } from './capabilities';
+import { DEFAULT_AUTH_CHALLENGE_CODES } from './auth-challenge';
 import type { HttpResponseContext, HttpResponseMiddleware } from './middleware';
 
 /**
@@ -89,6 +90,16 @@ export interface HttpClientConfig {
    * a single network call instead of making redundant requests.
    */
   deduplicateGets?: boolean;
+  /**
+   * Error codes that turn a 401 into an auth *challenge* instead of session
+   * expiry: the envelope is returned to the caller as-is, with no token
+   * refresh and no `onUnauthorized`. Defaults to the framework's step-up code
+   * (`IDENTITY_STEP_UP_REQUIRED`). A step-up 401 that entered the refresh path
+   * would rotate the refresh token for nothing, replay the request into the
+   * same challenge and then sign the user out - the feature could never
+   * complete.
+   */
+  authChallengeCodes?: string[];
 }
 
 /**
@@ -106,6 +117,9 @@ interface RequestConfig {
   /** Auth-flow request: return 401 as-is, no refresh-retry, no onUnauthorized. */
   skipAuthRefresh?: boolean;
 }
+
+/** Options accepted by {@link HttpClient.download}. */
+export type DownloadOptions = RequestOptions & { method?: 'GET' | 'POST' };
 
 /** Default HTTP status codes that are safe to retry */
 const DEFAULT_RETRYABLE_STATUSES = [408, 429, 500, 502, 503, 504];
@@ -227,22 +241,10 @@ export class HttpClient {
     options?: UploadOptions
   ): Promise<ApiResult<T>> {
     const result = await this.executeUpload<T>(url, formData, options);
-    if (result.code !== 401 || options?.skipAuthRefresh) {
+    if (!this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)) {
       return result;
     }
-
-    const refreshResult = await this.tryRefreshAndRetry<T>(() =>
-      this.executeUpload<T>(url, formData, options)
-    );
-    if (refreshResult && refreshResult.code !== 401) {
-      return refreshResult;
-    }
-    // Refresh "succeeded" but the retry still 401'd (revoked session): notify
-    // here, exactly like the JSON path does.
-    if (refreshResult?.code === 401) {
-      this.notifyUnauthorized();
-    }
-    return refreshResult ?? result;
+    return this.recoverUnauthorized(result, () => this.executeUpload<T>(url, formData, options));
   }
 
   /**
@@ -360,8 +362,25 @@ export class HttpClient {
    *
    * Defaults to GET; pass `method: 'POST'` with `body` for export endpoints
    * that take a query payload (e.g. filtered CSV exports).
+   *
+   * Downloads take the same 401 path as JSON requests and uploads: refresh
+   * once (sharing the client-wide refresh mutex), retry, and fall through to
+   * `onUnauthorized` when that fails. A page left open past the access-token
+   * lifetime whose first action is an export used to get a bare
+   * "Download failed: 401" with no refresh and no redirect.
    */
-  async download(url: string, options?: RequestOptions & { method?: 'GET' | 'POST' }): Promise<ApiResult<Blob>> {
+  async download(url: string, options?: DownloadOptions): Promise<ApiResult<Blob>> {
+    const result = await this.executeDownload(url, options);
+    if (!this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)) {
+      return result;
+    }
+    return this.recoverUnauthorized(result, () => this.executeDownload(url, options));
+  }
+
+  /**
+   * Perform a single download (no retry, no 401 handling).
+   */
+  private async executeDownload(url: string, options?: DownloadOptions): Promise<ApiResult<Blob>> {
     const timeoutMs = options?.timeout ?? 0;
     const timeout = this.createTimeoutSignal(timeoutMs, options?.signal);
     const method = options?.method ?? 'GET';
@@ -382,27 +401,7 @@ export class HttpClient {
       });
 
       if (!response.ok) {
-        // Failed downloads carry the server's ApiResult envelope (or plain text);
-        // surface its message so actionable guidance (e.g. "narrow the date
-        // range") reaches the caller instead of a bare status line.
-        let message = `Download failed: ${response.status} ${response.statusText}`;
-        try {
-          const text = await response.text();
-          if (text) {
-            try {
-              const body = JSON.parse(text) as { message?: string };
-              if (body?.message) message = body.message;
-            } catch {
-              message = text.slice(0, 500);
-            }
-          }
-        } catch {
-          // keep the generic message when the body is unreadable
-        }
-        return createFailedApiResult<Blob>({
-          message,
-          code: response.status,
-        });
+        return this.readFailedDownload(response);
       }
 
       const blob = await response.blob();
@@ -514,24 +513,8 @@ export class HttpClient {
       // refresh, and never for auth-flow requests themselves: the refresh
       // and logout calls issued during a refresh cycle would otherwise
       // re-enter the refresh mutex and deadlock until its timeout).
-      if (lastResult.code === 401 && !isRetryAfterRefresh && !config.skipAuthRefresh) {
-        const refreshResult = await this.tryRefreshAndRetry<T>(() =>
-          this.executeWithRetry<T>(config, true)
-        );
-        if (refreshResult && refreshResult.code !== 401) {
-          return refreshResult;
-        }
-        // Either refresh threw (refreshTokenFn rejected → tryRefreshAndRetry
-        // already called notifyUnauthorized), or refresh "succeeded" but the
-        // retry still 401'd (stale token / backend revoked session).
-        // In the second case we must notify here too - otherwise the only
-        // signal the consumer's session-expired handler ever sees is the
-        // first scenario, and a backend-side revoke would leave the user
-        // stuck on an API-error loop without redirect.
-        if (refreshResult?.code === 401) {
-          this.notifyUnauthorized();
-        }
-        return refreshResult ?? lastResult;
+      if (!isRetryAfterRefresh && this.shouldRecoverUnauthorized(lastResult, config.skipAuthRefresh)) {
+        return this.recoverUnauthorized(lastResult, () => this.executeWithRetry<T>(config, true));
       }
 
       // Check if we should retry on other status codes
@@ -548,11 +531,127 @@ export class HttpClient {
   }
 
   /**
+   * Whether a result is a 401 the client should try to recover from by
+   * refreshing the token. Three things opt out:
+   * - the request is part of the auth flow itself (`skipAuthRefresh`), so a
+   *   401 means "bad credentials" / "session already dead";
+   * - the 401 is an auth *challenge* ({@link HttpClientConfig.authChallengeCodes}),
+   *   where the session is fine and the caller has to answer the challenge;
+   * - it is not a 401 at all.
+   */
+  private shouldRecoverUnauthorized(result: ApiResult<unknown>, skipAuthRefresh?: boolean): boolean {
+    return result.code === 401 && !skipAuthRefresh && !this.isAuthChallenge(result);
+  }
+
+  /** Whether a failed envelope carries one of the configured challenge codes. */
+  private isAuthChallenge(result: ApiResult<unknown>): boolean {
+    if (!result.errorCode) {
+      return false;
+    }
+    const codes = this.config.authChallengeCodes ?? DEFAULT_AUTH_CHALLENGE_CODES;
+    return codes.includes(result.errorCode);
+  }
+
+  /**
+   * The 401 tail shared by JSON requests, uploads and downloads: refresh once
+   * (through the client-wide mutex), retry, and notify the unauthorized
+   * handlers when the retry is still rejected.
+   *
+   * Either refresh threw (`refreshTokenFn` rejected, and `tryRefreshAndRetry`
+   * already notified), or refresh "succeeded" but the retry still 401'd (stale
+   * token / backend revoked the session). The second case must notify here
+   * too - otherwise the only signal the consumer's session-expired handler
+   * ever sees is the first scenario, and a backend-side revoke would leave the
+   * user stuck on an API-error loop without a redirect.
+   */
+  private async recoverUnauthorized<T>(
+    original: ApiResult<T>,
+    retry: () => Promise<ApiResult<T>>,
+  ): Promise<ApiResult<T>> {
+    const retried = await this.tryRefreshAndRetry<T>(retry);
+    if (retried && retried.code !== 401) {
+      return retried;
+    }
+    // A challenge on the retry is the endpoint's answer to a now-valid
+    // session (expired token on a step-up endpoint), not a revoked one.
+    if (retried?.code === 401 && !this.isAuthChallenge(retried)) {
+      this.notifyUnauthorized();
+    }
+    return retried ?? original;
+  }
+
+  /**
+   * Turn a failed download response into a full envelope.
+   *
+   * Failed downloads carry the server's ApiResult envelope (or plain text).
+   * Everything on it is kept - `message` so actionable guidance ("narrow the
+   * date range") reaches the caller instead of a bare status line, and
+   * `errorCode` / `errorDetails` so a step-up challenge on a protected
+   * download is recognisable as one.
+   */
+  private async readFailedDownload(response: Response): Promise<ApiResult<Blob>> {
+    const fallback = `Download failed: ${response.status} ${response.statusText}`;
+    let text = '';
+    try {
+      text = await response.text();
+    } catch {
+      // keep the generic message when the body is unreadable
+    }
+    if (!text) {
+      return createFailedApiResult<Blob>({ message: fallback, code: response.status });
+    }
+    try {
+      const raw = JSON.parse(text) as unknown;
+      if (raw && typeof raw === 'object') {
+        // With the status: a non-envelope body (ProblemDetails, a gateway
+        // page) then yields its title / detail instead of the generic line.
+        const envelope = normalizeApiResult<never>(raw as Record<string, unknown>, response.status);
+        return createFailedApiResult<Blob>({
+          message: envelope.message || fallback,
+          code: response.status,
+          errorCode: envelope.errorCode,
+          details: envelope.errorDetails,
+        });
+      }
+      return createFailedApiResult<Blob>({ message: fallback, code: response.status });
+    } catch {
+      return createFailedApiResult<Blob>({ message: text.slice(0, 500), code: response.status });
+    }
+  }
+
+  /**
    * Try to refresh the token, then run `retry` with the new one.
    * Uses mutex pattern: concurrent 401s share the same refresh promise.
    * Returns the retry result on success, or null if refresh is not available or failed.
    */
   private async tryRefreshAndRetry<T>(retry: () => Promise<ApiResult<T>>): Promise<ApiResult<T> | null> {
+    const newToken = await this.refreshAccessToken();
+    // Refresh unavailable, failed, or timed out - waiters fall back to the
+    // original 401 result (executeWithRetry returns `lastResult` on null).
+    if (newToken === null) {
+      return null;
+    }
+    // Retry the original request once with the new token
+    return await retry();
+  }
+
+  /**
+   * Refresh the access token through the same mutex the 401 retry path uses,
+   * and store the result on the client.
+   *
+   * For transports that bypass `request()` - an SSE stream is a raw `fetch`
+   * that copies the bearer token out of this client - so they can join the
+   * auth cycle instead of re-implementing it: on a 401 from such a transport,
+   * call this, retry once with the returned token, and call
+   * {@link reportUnauthorized} if the retry still fails.
+   *
+   * Concurrent callers (including JSON requests retrying their own 401) share
+   * one `refreshTokenFn()` call. Resolves to the new token, or `null` when no
+   * `refreshTokenFn` is configured or the refresh failed / timed out - in
+   * which case the unauthorized handlers have already been notified, exactly
+   * as they are for a JSON request whose refresh fails.
+   */
+  async refreshAccessToken(): Promise<string | null> {
     if (!this.config.refreshTokenFn) {
       this.notifyUnauthorized();
       return null;
@@ -568,18 +667,26 @@ export class HttpClient {
       }
       const newToken = await this._refreshPromise;
       this.setAccessToken(newToken);
-
-      // Retry the original request once with new token
-      return await retry();
+      return newToken;
     } catch {
-      // Refresh failed, threw, or timed out - waiters fall back to the
-      // original 401 result (executeWithRetry returns `lastResult` on null).
+      // Refresh failed, threw, or timed out.
       this.notifyUnauthorized();
       return null;
     } finally {
       // Reset the mutex so subsequent requests can attempt a fresh refresh.
       this._refreshPromise = null;
     }
+  }
+
+  /**
+   * Report an unrecoverable 401 seen by a transport that bypasses `request()`
+   * (a refreshed token was still rejected by an SSE stream, for one), so the
+   * config-level `onUnauthorized` and every {@link addUnauthorizedListener}
+   * subscriber fire exactly as they do for a JSON request. Deduplicated per
+   * auth cycle like the built-in path.
+   */
+  reportUnauthorized(): void {
+    this.notifyUnauthorized();
   }
 
   /**
@@ -682,7 +789,10 @@ export class HttpClient {
 
       let data: ApiResult<T>;
       try {
-        data = normalizeApiResult<T>(await response.json());
+        // The status goes along with the body: a 4xx/5xx whose JSON body is
+        // not an envelope (ProblemDetails, a gateway error page) must not
+        // normalise to success just because it parsed.
+        data = normalizeApiResult<T>(await response.json(), response.status);
       } catch (parseError) {
         // An abort during body read (timeout or caller cancellation) is not
         // a JSON problem - rethrow and let the outer catch classify it.
