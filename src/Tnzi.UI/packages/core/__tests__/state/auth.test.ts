@@ -5,6 +5,7 @@ import {
   sessionEndReasonOf,
   SESSION_ENDED_FOR_SECURITY_MESSAGE,
   SESSION_EXPIRED_MESSAGE,
+  SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE,
 } from '../../src/state/auth';
 import type { StateDeps } from '../../src/state/types';
 import type { HttpClient } from '../../src/http/http';
@@ -832,6 +833,24 @@ describe('AuthStateManager', () => {
       expect(localAuth.sessionEndReason).toBe('security');
     });
 
+    it('★ is "ipNotAllowed" when the sign-in IP allow-list refused the refresh', async () => {
+      // Signing in again only works from another network; "session expired"
+      // would send the user back to a password form that keeps refusing them.
+      const localAuth = new AuthStateManager(createDeps());
+      seedSession(localAuth);
+      authApiMocks.refreshToken.mockResolvedValue({
+        succeeded: false,
+        code: 403,
+        errorCode: 'IDENTITY_SIGN_IN_IP_NOT_ALLOWED',
+        message: 'Your current network is not on the list.',
+      });
+
+      await expect(localAuth.refreshAccessToken()).rejects.toThrow();
+
+      expect(localAuth.sessionEndReason).toBe('ipNotAllowed');
+      expect(localAuth.error).toBe(SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE);
+    });
+
     it('clears once a login attempt starts', async () => {
       const localAuth = new AuthStateManager(createDeps());
       seedSession(localAuth);
@@ -849,8 +868,9 @@ describe('AuthStateManager', () => {
       expect(localAuth.sessionEndReason).toBeNull();
     });
 
-    it('sessionEndReasonOf classifies only the two session messages', () => {
+    it('sessionEndReasonOf classifies only the session messages', () => {
       expect(sessionEndReasonOf(SESSION_ENDED_FOR_SECURITY_MESSAGE)).toBe('security');
+      expect(sessionEndReasonOf(SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE)).toBe('ipNotAllowed');
       expect(sessionEndReasonOf(SESSION_EXPIRED_MESSAGE)).toBe('expired');
       expect(sessionEndReasonOf('Session expired')).toBeNull();
       expect(sessionEndReasonOf(null)).toBeNull();

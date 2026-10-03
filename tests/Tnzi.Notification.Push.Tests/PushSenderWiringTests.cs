@@ -1,3 +1,4 @@
+using FirebaseAdmin.Messaging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Tnzi.Modules;
@@ -91,6 +92,51 @@ public class PushSenderWiringTests
     {
         PushSender.NamedAppName("ops").ShouldBe("tnzi:ops");
         PushSender.NamedAppName("ops").ShouldNotBe(PushSender.NamedAppName("marketing"));
+    }
+
+    /// <summary>
+    /// ★ 两个不同的 Firebase 项目并存时，<c>SenderIdMismatch</c> 不退役令牌：注册表不记令牌属于哪个项目，
+    /// 用项目 B 的发送器发给用户的全部令牌，项目 A 的令牌必然回它，而那一行是项目 A 推送的唯一地址。
+    /// </summary>
+    [Fact]
+    public void TwoFirebaseProjects_SenderIdMismatchDoesNotRetireTheToken()
+    {
+        using var provider = BuildProvider(DefaultAndNamed);
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredKeyedService<IPushSender>("ops").ShouldBeOfType<PushSender>()
+            .SenderIdMismatchIsConclusive.ShouldBeFalse();
+        scope.ServiceProvider.GetRequiredService<IPushSender>().ShouldBeOfType<PushSender>()
+            .SenderIdMismatchIsConclusive.ShouldBeFalse();
+    }
+
+    /// <summary>只有一个项目（哪怕配了多个键指向它）时，<c>SenderIdMismatch</c> 照旧确证令牌已死。</summary>
+    [Fact]
+    public void OneFirebaseProject_UnderSeveralKeys_SenderIdMismatchStillRetires()
+    {
+        using var provider = BuildProvider(new Dictionary<string, string?>
+        {
+            ["Notification:PushSender:FirebaseProjectId"] = "main-project",
+            ["Notification:PushSender:FirebaseServiceAccountJson"] = "{}",
+            ["Notification:PushSenders:ops:FirebaseProjectId"] = "MAIN-PROJECT",
+            ["Notification:PushSenders:ops:FirebaseServiceAccountJson"] = "{}",
+        });
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredKeyedService<IPushSender>("ops").ShouldBeOfType<PushSender>()
+            .SenderIdMismatchIsConclusive.ShouldBeTrue();
+    }
+
+    /// <summary>错误码判定：<c>Unregistered</c> 恒退役，<c>SenderIdMismatch</c> 看部署，<c>InvalidArgument</c> 恒不退役。</summary>
+    [Theory]
+    [InlineData(MessagingErrorCode.Unregistered, true, true)]
+    [InlineData(MessagingErrorCode.Unregistered, false, true)]
+    [InlineData(MessagingErrorCode.SenderIdMismatch, true, true)]
+    [InlineData(MessagingErrorCode.SenderIdMismatch, false, false)]
+    [InlineData(MessagingErrorCode.InvalidArgument, true, false)]
+    public void TokenDeathVerdict(MessagingErrorCode code, bool senderIdMismatchIsConclusive, bool expected)
+    {
+        PushSender.IsTokenPermanentlyDead(code, senderIdMismatchIsConclusive).ShouldBe(expected);
     }
 
     private static ServiceProvider BuildProvider(Dictionary<string, string?> settings)

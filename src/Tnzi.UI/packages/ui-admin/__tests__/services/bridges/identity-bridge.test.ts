@@ -123,6 +123,23 @@ describe('identity-bridge', () => {
   // with a 400. The `get` prefix keeps it out of the write gate's verb list, and on
   // bare unwrap the refusal surfaced as `Cannot read properties of undefined
   // (reading 'sharedKey')` instead of the server's reason.
+  // The two-factor panels render from these reads. On bare unwrap a refused
+  // envelope (503 with two-factor switched off, 403) resolved to `null`, the
+  // panel emitted `loaded` with it and the host crashed on `status.methods`.
+  it('two-factor status and sign-in policy reads reject with the server message on a failed envelope', async () => {
+    const refused = { succeeded: false, success: false, code: 503, data: null, message: 'Two-factor authentication is disabled' }
+    const profileApi = { getTwoFactorStatus: vi.fn(async () => refused) }
+    const userSecurityApi = {
+      getTwoFactorStatus: vi.fn(async () => refused),
+      getSignInPolicy: vi.fn(async () => ({ ...refused, code: 403, message: 'Forbidden' })),
+    }
+    const bridge = makeBridge({ profileApi, userSecurityApi })
+
+    await expect(bridge.me.getTwoFactorStatus()).rejects.toThrow('Two-factor authentication is disabled')
+    await expect(bridge.userSecurity.getTwoFactorStatus('u1')).rejects.toThrow('Two-factor authentication is disabled')
+    await expect(bridge.userSecurity.getSignInPolicy('u1')).rejects.toThrow('Forbidden')
+  })
+
   it('me.getTotpSetup rejects with the server message on a failed envelope', async () => {
     const profileApi = {
       getTotpSetup: vi.fn(async () => ({

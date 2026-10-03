@@ -4,6 +4,12 @@ namespace Tnzi.Storage.Events.Handlers;
 /// 文件删除请求事件处理器
 /// 仅负责删除物理文件（数据库记录由服务层处理）
 /// </summary>
+/// <remarks>
+/// ★ 删除失败必须以异常离开：事件总线的重试与死信只在处理器抛出时才会发生。整体吞掉再记一条日志，
+/// 等于告诉总线「处理成功」—— 而对「只剩对象、没有记录指向」的那一类删除（例如换版本后的旧缩略图），
+/// 没有任何清理任务能再找到它，一次瞬时故障就是一个永久孤儿对象。
+/// 两个对象都会先各试一次再抛，免得正文删失败连带缩略图一次都没试；provider 的删除是幂等的，重试整条事件是安全的。
+/// </remarks>
 public class FileDeleteRequestedEventHandler : IEventHandler<FileDeleteRequestedEvent>
 {
     private readonly IFileStorage _storage;
@@ -19,46 +25,34 @@ public class FileDeleteRequestedEventHandler : IEventHandler<FileDeleteRequested
 
     public async Task HandleAsync(FileDeleteRequestedEvent @event, CancellationToken cancellationToken = default)
     {
-        try
+        _logger.LogInformation("Start deleting physical file: {FileId}, Path: {FilePath}",
+            @event.FileId, @event.FilePath);
+
+        List<Exception>? failures = null;
+
+        foreach (var path in new[] { @event.FilePath, @event.ThumbnailPath })
         {
-            _logger.LogInformation("Start deleting physical file: {FileId}, Path: {FilePath}",
-                @event.FileId, @event.FilePath);
+            if (string.IsNullOrEmpty(path))
+                continue;
 
-            // 删除物理文件
-            if (!string.IsNullOrEmpty(@event.FilePath))
+            try
             {
-                try
-                {
-                    await _storage.DeleteAsync(@event.FilePath);
-                    _logger.LogDebug("Physical file deleted: {FilePath}", @event.FilePath);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to delete physical file: {FilePath}", @event.FilePath);
-                }
+                await _storage.DeleteAsync(path);
+                _logger.LogDebug("Stored object deleted: {Path}", path);
             }
-
-            // 删除缩略图
-            if (!string.IsNullOrEmpty(@event.ThumbnailPath))
+            catch (Exception ex)
             {
-                try
-                {
-                    await _storage.DeleteAsync(@event.ThumbnailPath);
-                    _logger.LogDebug("Thumbnail deleted: {ThumbnailPath}", @event.ThumbnailPath);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to delete thumbnail: {ThumbnailPath}", @event.ThumbnailPath);
-                }
+                (failures ??= []).Add(ex);
             }
-
-            _logger.LogInformation("Physical file deletion completed: {FileId}", @event.FileId);
         }
-        catch (Exception ex)
+
+        if (failures is { Count: > 0 })
         {
-            _logger.LogError(ex, "Error occurred while deleting physical file: {FileId}", @event.FileId);
-            // 失败的删除将由定期清理任务处理，不抛出异常
+            throw new AggregateException(
+                $"Failed to delete {failures.Count} stored object(s) of file {@event.FileId}; the event bus retries the deletion.",
+                failures);
         }
+
+        _logger.LogInformation("Physical file deletion completed: {FileId}", @event.FileId);
     }
 }
-

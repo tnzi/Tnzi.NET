@@ -1,3 +1,5 @@
+using System.Text;
+
 
 namespace Tnzi.AspNetCore.Tests.Middleware;
 
@@ -723,7 +725,7 @@ public class ExceptionHandlingMiddlewareTests
             next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
 
         var context = CreateHttpContext();
-        var bodyBytes = "{\"token\":\"secret-payload-123\"}"u8.ToArray();
+        var bodyBytes = "{\"note\":\"secret-payload-123\"}"u8.ToArray();
         context.Request.Method = "POST";
         context.Request.Body = new MemoryStream(bodyBytes);
         context.Request.ContentLength = bodyBytes.Length;
@@ -755,7 +757,7 @@ public class ExceptionHandlingMiddlewareTests
             next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
 
         var context = CreateHttpContext();
-        var bodyBytes = "{\"token\":\"secret-payload-123\"}"u8.ToArray();
+        var bodyBytes = "{\"note\":\"secret-payload-123\"}"u8.ToArray();
         context.Request.Method = "POST";
         context.Request.Body = new MemoryStream(bodyBytes);
         context.Request.ContentLength = bodyBytes.Length;
@@ -772,6 +774,173 @@ public class ExceptionHandlingMiddlewareTests
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
+    }
+
+    [Theory]
+    [InlineData("multipart/form-data; boundary=----x", 64L)]
+    [InlineData("application/octet-stream", 64L)]
+    [InlineData("application/json", 8L * 1024 + 1)]
+    [InlineData("application/json", null)]
+    public async Task InvokeAsync_ABodyTheGateRefuses_IsNeverBufferedNorLogged(string contentType, long? contentLength)
+    {
+        // 缓冲只能在下游读体之前开，而 EnableBuffering 会把整条体复制一份（超过 30 KB 落盘）。
+        // 开着 LogRequestBody 时此前对每个请求无条件开：只为出错时看 8 KB，每次 multipart 上传都被整条落盘。
+        // 文件上传 / 二进制 / 超过上界 / 没有 Content-Length（读发生在消费之后，事后设不了上界）的体
+        // 都不缓冲 —— 它们本来就不会被记进日志。
+        RequestDelegate next = _ => throw new Exception("boom");
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var original = new ForwardOnlyStream("{\"note\":\"secret-payload-123\"}"u8.ToArray());
+        context.Request.Method = "POST";
+        context.Request.ContentType = contentType;
+        context.Request.ContentLength = contentLength;
+        context.Request.Body = original;
+
+        await middleware.InvokeAsync(context);
+
+        // 不可定位的流被 EnableBuffering 换掉即等于整条落盘一份；没被换掉才是「没缓冲」。
+        Assert.Same(original, context.Request.Body);
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("application/json; charset=utf-8")]
+    [InlineData("text/plain")]
+    [InlineData("application/x-www-form-urlencoded")]
+    public async Task InvokeAsync_ATextBodyUnderTheCap_IsBufferedAndCapturedFromAForwardOnlyStream(string contentType)
+    {
+        // 防锈：闸门只挡该挡的。Kestrel 给的体是不可定位的，文本型且没超上界的照旧缓冲并记进日志。
+        RequestDelegate next = async ctx =>
+        {
+            // 下游先把体消费掉（模型绑定就是这样），异常之后仍要能回读。
+            using var reader = new StreamReader(ctx.Request.Body, leaveOpen: true);
+            await reader.ReadToEndAsync();
+            throw new Exception("boom");
+        };
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = "{\"note\":\"secret-payload-123\"}"u8.ToArray();
+        context.Request.Method = "POST";
+        context.Request.ContentType = contentType;
+        context.Request.ContentLength = bodyBytes.Length;
+        context.Request.Body = new ForwardOnlyStream(bodyBytes);
+
+        await middleware.InvokeAsync(context);
+
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("application/json", "{\"userName\":\"alice\",\"password\":\"hunter2-plaintext\"}")]
+    [InlineData("application/x-www-form-urlencoded", "userName=alice&password=hunter2-plaintext")]
+    public async Task InvokeAsync_CapturedBody_IsRedactedBeforeItReachesTheLog(string contentType, string body)
+    {
+        // 这个开关可以热开，异常最常见的现场正是登录、改密这类带凭据的请求：记下来的体必须先脱敏。
+        RequestDelegate next = _ => throw new Exception("boom");
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = Encoding.UTF8.GetBytes(body);
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/account/profile";
+        context.Request.ContentType = contentType;
+        context.Request.ContentLength = bodyBytes.Length;
+        context.Request.Body = new MemoryStream(bodyBytes);
+
+        await middleware.InvokeAsync(context);
+
+        // 体确实被记了（非敏感字段还在），只是密码不在里面。
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("alice")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+        _loggerMock.Verify(
+            x => x.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("hunter2-plaintext")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("/api/auth/login")]
+    [InlineData("/connect/token")]
+    public async Task InvokeAsync_AuthenticationEndpoints_AreNeverCaptured(string path)
+    {
+        // 认证端点上「哪个字段是凭据」按字段名猜不全（嵌套细节对象、自定义字段名），与请求日志一样整条不采。
+        RequestDelegate next = _ => throw new Exception("boom");
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = "{\"note\":\"secret-payload-123\"}"u8.ToArray();
+        var original = new ForwardOnlyStream(bodyBytes);
+        context.Request.Method = "POST";
+        context.Request.Path = path;
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = bodyBytes.Length;
+        context.Request.Body = original;
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Same(original, context.Request.Body);
+        _loggerMock.Verify(
+            x => x.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    /// <summary>不可定位的请求体：Kestrel 给的就是这种。被 EnableBuffering 换掉即等于整条落盘一份。</summary>
+    private sealed class ForwardOnlyStream(byte[] bytes) : Stream
+    {
+        private readonly MemoryStream _inner = new(bytes);
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
 

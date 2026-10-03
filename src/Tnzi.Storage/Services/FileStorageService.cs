@@ -299,6 +299,21 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
     public async Task<Result<FileRecord>> GetOrCreateByMd5Async(string md5Hash, string fileName, Stream stream)
     {
+        var uploaded = new List<string>();
+        try
+        {
+            return await GetOrCreateByMd5CoreAsync(md5Hash, fileName, stream, uploaded);
+        }
+        catch
+        {
+            // 与 SaveAsync 同理：正文与缩略图都已交给 provider、记录却没落成，不收拾就是孤儿回收看不见的对象。
+            await DiscardUploadedObjectsAsync(uploaded);
+            throw;
+        }
+    }
+
+    private async Task<Result<FileRecord>> GetOrCreateByMd5CoreAsync(string md5Hash, string fileName, Stream stream, List<string> uploadedObjects)
+    {
         // 入参校验必须先于去重查询：命中"记录存在但物理文件缺失"分支时会回读 stream 重传，
         // 若此时 stream/fileName 非法会抛 NullReferenceException 而不是返回 400。
         var validation = ValidateFileName<FileRecord>(fileName);
@@ -334,7 +349,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         // 检查是否已存在相同MD5的文件
         // 这条路径建的是正式记录（ReferenceCount 从 1 起），复用时也按正式持有者对待。
-        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream, isTemporary: false);
+        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream, isTemporary: false, uploadedObjects: uploadedObjects);
         if (existingResult != null)
         {
             return existingResult;
@@ -353,12 +368,15 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // 与 SaveAsync 同理：长度在交给 provider 之前取。
         var knownSize = TryGetStreamLength(stream);
         var filePath = await _storage.UploadAsync(newFileName, stream, contentType);
+        uploadedObjects.Add(filePath);
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
         string? thumbnailPath = null;
         if (ShouldAutoGenerateThumbnail(extension))
         {
             thumbnailPath = await _thumbnails.GenerateAsync(filePath, newFileName, extension, size);
+            if (thumbnailPath != null)
+                uploadedObjects.Add(thumbnailPath);
         }
 
         var fileRecord = new FileRecord
@@ -1224,8 +1242,8 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
     public async Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default)
     {
-        if (top <= 0)
-            return Fail<IEnumerable<UserStorageUsage>>("Top must be greater than 0", 400, ErrorCodes.VALIDATION_ERROR);
+        if (top is <= 0 or > StorageQueryLimits.MaxTopUsers)
+            return Fail<IEnumerable<UserStorageUsage>>($"Top must be between 1 and {StorageQueryLimits.MaxTopUsers}", 400, ErrorCodes.VALIDATION_ERROR);
 
         var usages = await _repository.AsQueryable()
             .Where(f => f.CreatorId != null)
@@ -1253,21 +1271,38 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(result);
     }
 
-    public async Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, CancellationToken cancellationToken = default)
+    public async Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, Guid? after = null, CancellationToken cancellationToken = default)
     {
-        var query = _repository.AsQueryable().OrderBy(f => f.CreationTime);
-        var files = maxFiles > 0
-            ? await query.Take(maxFiles).ToListAsync(cancellationToken)
-            : await query.ToListAsync(cancellationToken);
+        // 跑在请求路径上、每个文件要整份读出来算哈希：批量必须有上界，「0 = 全部」不再接受。
+        if (maxFiles is <= 0 or > StorageQueryLimits.MaxIntegrityBatch)
+            return Fail<BatchIntegrityResult>($"MaxFiles must be between 1 and {StorageQueryLimits.MaxIntegrityBatch}", 400, ErrorCodes.VALIDATION_ERROR);
 
-        var batch = new BatchIntegrityResult { TotalChecked = files.Count };
+        // 按 id 游标推进：每次都取「最老的前 N 条」会让第 N+1 条之后的文件永远轮不到。
+        var query = _repository.AsQueryable();
+        if (after is { } cursor)
+            query = query.Where(f => f.Id.CompareTo(cursor) > 0);
+
+        // 多取一条只为判断后面还有没有，免得调用方为确认「到头了」多跑一趟空批。
+        var files = await query.OrderBy(f => f.Id).Take(maxFiles + 1).ToListAsync(cancellationToken);
+        var hasMore = files.Count > maxFiles;
+        if (hasMore)
+            files.RemoveAt(files.Count - 1);
+
+        var batch = new BatchIntegrityResult();
+        var lastChecked = after;
 
         foreach (var file in files)
         {
             if (cancellationToken.IsCancellationRequested)
+            {
+                // 中途取消：游标停在最后检查过的那一条，续跑不漏也不重。
+                hasMore = true;
                 break;
+            }
 
             var result = await VerifySingleFileIntegrityAsync(file, cancellationToken);
+            batch.TotalChecked++;
+            lastChecked = file.Id;
             switch (result.Status)
             {
                 case FileIntegrityStatus.Healthy:
@@ -1287,6 +1322,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
                     break;
             }
         }
+
+        // 一条都没检查就被取消时游标落在 Guid.Empty：它在每一种库的排序里都排最前，等价于「从头开始」，
+        // 而 null 会被读成「已经扫到末尾」。
+        batch.NextCursor = hasMore ? lastChecked ?? Guid.Empty : null;
 
         LogInformation("Batch integrity check: {Total} checked, {Healthy} healthy, {Missing} missing, {Corrupted} corrupted, {Errors} errors",
             batch.TotalChecked, batch.Healthy, batch.Missing, batch.Corrupted, batch.Errors);
@@ -1407,8 +1446,13 @@ public class FileStorageService : ApplicationService, IFileStorageService
     }
 
     public async Task<Result<ThumbnailBackfillResult>> BackfillThumbnailsAsync(
-        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, CancellationToken cancellationToken = default)
+        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, Guid? after = null, CancellationToken cancellationToken = default)
     {
+        // 串行渲染跑在请求路径上：一批必须有上界，「0 = 全部」不再接受。
+        if (maxFiles is <= 0 or > StorageQueryLimits.MaxThumbnailBackfillBatch)
+            return Fail<ThumbnailBackfillResult>(
+                $"MaxFiles must be between 1 and {StorageQueryLimits.MaxThumbnailBackfillBatch}", 400, ErrorCodes.VALIDATION_ERROR);
+
         var result = new ThumbnailBackfillResult();
 
         // 候选 = 没有缩略图 + 有对象 + 扩展名是生成器**此刻**画得出的。最后一条按扩展名列表进 SQL 而不是
@@ -1429,10 +1473,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
         }
 
         var total = await query.CountAsync(cancellationToken);
-        var ordered = query.OrderBy(f => f.CreationTime);
-        var batch = maxFiles > 0
-            ? await ordered.Take(maxFiles).ToListAsync(cancellationToken)
-            : await ordered.ToListAsync(cancellationToken);
+
+        // ★ 按 id 游标推进，而不是每次取「最老的前 N 条候选」：画不出来的记录（有口令 / 损坏）仍是候选，
+        // 最老的 N 份恰好都画不出来时，每次调用扫的都是同一批、Generated 恒为 0，其后的几千份永远轮不到。
+        if (after is { } cursor)
+            query = query.Where(f => f.Id.CompareTo(cursor) > 0);
+
+        // 多取一条只为判断后面还有没有。
+        var batch = await query.OrderBy(f => f.Id).Take(maxFiles + 1).ToListAsync(cancellationToken);
+        var hasMore = batch.Count > maxFiles;
+        if (hasMore)
+            batch.RemoveAt(batch.Count - 1);
 
         result.Scanned = batch.Count;
 
@@ -1443,19 +1494,18 @@ public class FileStorageService : ApplicationService, IFileStorageService
             var thumbnailPath = await _thumbnails.GenerateAsync(record.Path!, record.FileName, record.Extension, record.Size, cancellationToken);
             if (thumbnailPath == null)
             {
-                // 画不出来的原因已经在生成器里记了日志；它仍是候选，下一次调用还会再试 ——
-                // 所以调用方按 Generated 归零而不是 Remaining 归零停手。
+                // 画不出来的原因已经在生成器里记了日志；它仍是候选，下一轮（游标从头开始）还会再试。
                 result.Failed++;
                 result.FailedFileIds.Add(record.Id);
                 continue;
             }
 
-            record.ThumbnailPath = thumbnailPath;
-            await _repository.UpdateAsync(record, cancellationToken);
-            result.Generated++;
+            if (await SetThumbnailPathIfMissingAsync(record.Id, thumbnailPath, cancellationToken))
+                result.Generated++;
         }
 
         result.Remaining = total - result.Generated;
+        result.NextCursor = hasMore ? batch[^1].Id : null;
 
         LogInformation("Thumbnail backfill: {Scanned} scanned, {Generated} generated, {Failed} failed, {Remaining} still without a thumbnail",
             result.Scanned, result.Generated, result.Failed, result.Remaining);
@@ -1467,11 +1517,21 @@ public class FileStorageService : ApplicationService, IFileStorageService
         if (string.IsNullOrWhiteSpace(tag))
             return Fail<IPagedList<FileRecord>>("Tag cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
 
-        var normalizedTag = tag.Trim().ToLower();
+        // 与框架分页查询同一套归一：页码从 1 起、页大小有默认值与上限。负数页码会变成负数 Skip，
+        // 不设上限的页大小让一次请求读遍全表。
+        if (pageIndex < 1)
+            pageIndex = 1;
+        if (pageSize < 1)
+            pageSize = DefaultTagPageSize;
+        else if (pageSize > StorageQueryLimits.MaxPageSize)
+            pageSize = StorageQueryLimits.MaxPageSize;
 
-        // Use LIKE query for comma-separated tags column
+        // 精确匹配在 SQL 里做完再分页：Tags 是 SetTagsList 写下的「逗号分隔、逐项去空白」形态，
+        // 两端补上逗号后按 ",tag," 查就是整项匹配。先按子串分页、再在内存里精确过滤会让
+        // total 把 "invoice" 查 "voice" 这类子串命中也算进去，而页面上又被滤掉 —— 总数偏大、页是短的。
+        var needle = "," + tag.Trim().ToLower() + ",";
         var query = _repository.AsQueryable()
-            .Where(f => f.Tags != null && f.Tags.ToLower().Contains(normalizedTag))
+            .Where(f => f.Tags != null && ("," + f.Tags.ToLower() + ",").Contains(needle))
             .OrderByDescending(f => f.CreationTime);
 
         var total = await query.CountAsync(cancellationToken);
@@ -1480,14 +1540,44 @@ public class FileStorageService : ApplicationService, IFileStorageService
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        // Post-filter: exact tag match (not substring match)
-        items = items.Where(f => f.GetTagsList().Any(t => t.Equals(tag.Trim(), StringComparison.OrdinalIgnoreCase))).ToList();
-
         IPagedList<FileRecord> pagedList = new PagedList<FileRecord>(items, pageIndex, pageSize, total);
         return Ok(pagedList);
     }
 
     #region Private Methods
+
+    /// <summary>按标签查询时调用方没给页大小（或给了非正数）用的页大小。</summary>
+    private const int DefaultTagPageSize = 20;
+
+    /// <summary>
+    /// 把刚画好的缩略图写回记录：只写 <see cref="FileRecord.ThumbnailPath"/> 一列，且只在它仍为空时写。
+    /// 没写进去（记录在渲染期间被删了，或别的写路径先给了它一张不同的图）就删掉刚上传的对象，返回 false。
+    /// </summary>
+    /// <remarks>
+    /// ★ 不能把渲染前读出来的整行写回去：回填一批要跑几十秒，候选是 NoTracking 读出来的，
+    /// 整行 Update 会把这段时间里别的请求对同一行的改动一起覆盖掉 —— 最要命的是临时文件被绑定
+    /// （<c>ReferenceCount 0→1</c>、<c>IsTemporary→false</c>）之后又被写回旧值，孤儿清理随后删掉一个
+    /// 正被引用的文件。<see cref="FileRecord"/> 没有并发令牌，EF 不会替我们发现这种覆盖。
+    /// </remarks>
+    private async Task<bool> SetThumbnailPathIfMissingAsync(Guid fileId, string thumbnailPath, CancellationToken cancellationToken)
+    {
+        // 裸 SQL 不经 SaveChanges：若调用方开着工作单元，先让物理事务开启，这条更新才会加入它。
+        await _repository.EnsureTransactionStartedAsync(cancellationToken);
+        var updated = await _repository.AsQueryable()
+            .Where(f => f.Id == fileId && f.ThumbnailPath == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(f => f.ThumbnailPath, thumbnailPath), cancellationToken);
+        if (updated > 0)
+            return true;
+
+        var current = await _repository.AsQueryable()
+            .Where(f => f.Id == fileId)
+            .Select(f => f.ThumbnailPath)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.Equals(current, thumbnailPath, StringComparison.Ordinal))
+            await DiscardUploadedObjectsAsync([thumbnailPath]);
+
+        return false;
+    }
 
     /// <summary>
     /// 取流的字节长度；流不可 seek（网络流）或已被关闭时返回 null，而不是抛异常。

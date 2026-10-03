@@ -63,39 +63,9 @@
   min-height: 0;
 }
 
-/* In-body sub-heading (password / 2FA blocks within the Security section). */
-.t-uc-sub-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--tnzi-base-text);
-}
-
-/* A sub-group within a section (e.g. Password / Two-factor inside Security).
-   When a section holds MULTIPLE sub-groups, each is titled with an uppercase,
-   letter-spaced, muted group header (settings-panel convention). */
-.t-uc-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.t-uc-group-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 24px;
-}
-.t-uc-group-title__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--tnzi-base-text-muted, #888);
-}
+/* Titled blocks inside a section (password / two-factor / passkeys, "link a
+   new account") are `TDetailBlock`, the same chrome the user detail page's
+   sign-in security section draws; nothing here styles a block header. */
 
 /* Compact three-across password grid (current / new / confirm on one row). */
 .t-uc-pw-grid {
@@ -192,11 +162,6 @@
 .t-uc-row:last-child {
   border-bottom: none;
 }
-/* Sub-item shown but not usable (e.g. 2FA master switch off): dim it so the row
-   reads as "available but currently unavailable" while its controls stay disabled. */
-.t-uc-row--disabled {
-  opacity: 0.55;
-}
 .t-uc-row-label {
   font-weight: 500;
   font-size: 13px;
@@ -285,18 +250,4 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 4px;
-}
-
-/* TOTP setup dialog: secret + QR. */
-.t-uc-totp-secret {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--tnzi-font-mono, monospace);
-  font-size: 13px;
-  padding: 8px 12px;
-  background: var(--tnzi-layout-bg);
-  border-radius: var(--tnzi-admin-radius-sm, 3px);
-  word-break: break-all;
 }

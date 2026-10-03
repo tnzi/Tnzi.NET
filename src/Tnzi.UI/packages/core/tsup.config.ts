@@ -36,6 +36,9 @@ export default defineConfig({
         // 一个 createTnziAuthGuard，把 107 个 admin 端点带进了纯对话应用）。
         "guards/index": "src/guards/index.ts",
 
+        // 发版自愈（分块加载失败恢复 + 新版本检测），只依赖浏览器 API。
+        "app-update/index": "src/app-update/index.ts",
+
         // 业务服务
         "services/ai/index": "src/services/ai/index.ts",
         "services/authorization/index": "src/services/authorization/index.ts",

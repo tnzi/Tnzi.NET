@@ -76,21 +76,16 @@ public class RegistrationServiceTests
         var userId = Guid.NewGuid();
         var input = new RegisterDto
         {
-            UserName = "testuser",
             Email = "test@example.com",
             Password = "Password123!"
         };
-        var user = new User
-        {
-            Id = userId,
-            UserName = input.UserName,
-            Email = input.Email
-        };
+        User? created = null;
 
         _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>(), input.Password))
             .ReturnsAsync((User u, string p) =>
             {
                 u.Id = userId; // 设置用户ID
+                created = u;
                 return IdentityResult.Success;
             });
 
@@ -106,6 +101,24 @@ public class RegistrationServiceTests
         Assert.True(result.Data.RequireEmailConfirmation); // 需要邮箱确认
         Assert.Equal(input.Email, result.Data.Email);
         Assert.Equal(userId, result.Data.UserId);
+        Assert.Equal(input.Email, created!.UserName); // 默认用邮箱作用户名
+    }
+
+    [Fact]
+    public async Task RegisterAsync_WithUserNameDifferentFromEmail_IsRejectedByDefault()
+    {
+        var input = new RegisterDto
+        {
+            UserName = "testuser",
+            Email = "test@example.com",
+            Password = "Password123!"
+        };
+
+        var result = await _registrationService.RegisterAsync(input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _userManagerMock.Verify(x => x.CreateAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
@@ -205,6 +218,24 @@ public class RegistrationServiceTests
         Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
         _userManagerMock.Verify(x => x.FindByEmailAsync(It.IsAny<string>()), Times.Never);
         _eventBusMock.Verify(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.EmailConfirmationResentEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>「未启用，放行」不是「校验通过」：注册验证码开着而验证器报告没有生效的提供商时拒绝。</summary>
+    [Fact]
+    public async Task ResendEmailConfirmation_WhenRegisterCaptchaIsOnButTheVerifierReportsNotEnabled_Rejects()
+    {
+        _identityOptionsMock.Setup(x => x.CurrentValue).Returns(new IdentityOptions
+        {
+            Captcha = new CaptchaOptions { EnableCaptchaOnRegister = true }
+        });
+        _captchaVerifierMock.Setup(x => x.VerifyAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.NotEnabled());
+
+        var result = await _registrationService.ResendEmailConfirmationAsync(new ResendEmailConfirmationDto { Email = "pending@example.com", CaptchaToken = "widget-token" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        _userManagerMock.Verify(x => x.FindByEmailAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
@@ -383,6 +414,20 @@ public class RegistrationServiceTests
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
         Assert.Equal(userId, result.Data.UserId);
+    }
+
+    [Fact]
+    public async Task QuickRegisterAsync_WithUserNameDifferentFromEmail_IsRejectedBeforeTheCodeIsConsumed()
+    {
+        var input = new QuickRegisterDto { Email = "test@example.com", UserName = "someone-else", Code = "123456" };
+
+        var result = await _registrationService.QuickRegisterAsync(input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _twoFactorServiceMock.Verify(
+            x => x.VerifyCodeByAddressAndMarkUsedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()),
+            Times.Never);
     }
 
     [Fact]

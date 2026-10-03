@@ -1,5 +1,6 @@
 <template>
   <TTabsPage
+    v-model:section="activeSection"
     :sections="sections"
     :title="title"
     icon="mdi:bank-transfer-out"
@@ -60,10 +61,39 @@
         :all-columns="columns"
         :title="batchesTitle"
         :search-fields="searchFields"
-    :row-actions="rowActions"
+        :row-actions="rowActions"
         :translate="t"
         :show-header="false"
-      />
+        :detail-width="720"
+        :detail-title="detailTitle"
+      >
+        <!-- Batch detail (header + lines), deep-linkable as ?detail=view:<id>.
+             `onView` loads the full record: list rows do not carry the lines. -->
+        <template #detail>
+          <div v-if="viewed" class="fin-eft__detail">
+            <NDescriptions :column="2" size="small" label-placement="left" bordered>
+              <NDescriptionsItem :label="t('detail.number')">{{ viewed.number ?? t('draftLabel') }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.account')">{{ viewed.bankAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.format')">{{ t(formatLabel(viewed.format)) }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.currency')">{{ viewed.currency }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.effectiveDate')">{{ fmtDate(viewed.effectiveDate) }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.fileCreationNumber')">{{ viewed.fileCreationNumber ?? EMPTY_DASH }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.count')">{{ viewed.totalCount }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.amount')">{{ fmtMoney(viewed.totalAmount, viewed.currency) }}</NDescriptionsItem>
+            </NDescriptions>
+            <TResponsiveTable
+              :columns="lineColumns"
+              :data="viewed.lines"
+              :row-key="(r: EftBatchLineDto) => r.id"
+              size="small"
+              mobile="scroll"
+              :pagination="false"
+              :bordered="false"
+              :empty-text="t('detail.noLines')"
+            />
+          </div>
+        </template>
+      </TCrudPage>
     </template>
 
     <template #overlays>
@@ -87,32 +117,6 @@
             </NButton>
           </div>
         </NForm>
-      </TDetailHost>
-
-      <!-- Batch detail (header + lines). -->
-      <TDetailHost :state="detail" :title="t('detail.title')" :width="720" :footer="false" :translate="t">
-        <div v-if="detail.data.value" class="fin-eft__detail">
-          <NDescriptions :column="2" size="small" label-placement="left" bordered>
-            <NDescriptionsItem :label="t('detail.number')">{{ detail.data.value.number ?? t('draftLabel') }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.account')">{{ detail.data.value.bankAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.format')">{{ t(formatLabel(detail.data.value.format)) }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.currency')">{{ detail.data.value.currency }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.effectiveDate')">{{ fmtDate(detail.data.value.effectiveDate) }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.fileCreationNumber')">{{ detail.data.value.fileCreationNumber ?? EMPTY_DASH }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.count')">{{ detail.data.value.totalCount }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.amount')">{{ fmtMoney(detail.data.value.totalAmount, detail.data.value.currency) }}</NDescriptionsItem>
-          </NDescriptions>
-          <TResponsiveTable
-            :columns="lineColumns"
-            :data="detail.data.value.lines"
-            :row-key="(r: EftBatchLineDto) => r.id"
-            size="small"
-            mobile="scroll"
-            :pagination="false"
-            :bordered="false"
-            :empty-text="t('detail.noLines')"
-          />
-        </div>
       </TDetailHost>
 
       <!-- Void reason. -->
@@ -152,7 +156,7 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { NAlert, NButton, NCheckbox, NSelect, NInput, NDatePicker, NDescriptions, NDescriptionsItem, NForm, NFormItem } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { downloadBlob, formatDateTime } from '@tnzi/core'
@@ -172,7 +176,6 @@ import {
   EftBatchStatus,
   EftFileFormat,
   type BankAccountDto,
-  type EftBatchDto,
   type EftBatchLineDto,
   type EftQueueItemDto,
 } from '../../services/bridges/finance-bridge'
@@ -180,6 +183,7 @@ import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { fmtMoney, tsToIsoDate, fmtDate } from './money'
+import { useViewedRecord } from './viewed-record'
 import { buildEftSearchFields, buildEftBatchColumns, buildEftQueueColumns, buildEftLineColumns, EFT_FORMAT_LABEL, type EftBatchRow } from './eft-batch-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -228,19 +232,34 @@ async function loadBankAccounts() {
 }
 void loadBankAccounts()
 
-// ── Batches list ────────────────────────────────────────────────
+// ── Batches list + detail drawer ────────────────────────────────
+// The full batch behind the read-only drawer (list rows carry no lines).
+const viewing = useViewedRecord((id) => bridge.eftBatches.getById(id), (error) => message.error(error))
+const viewed = viewing.record
+const detailTitle = () => t('detail.title')
+
 const crud = useCrudPage<EftBatchRow>({
   pageId: 'finance.eftBatches',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.eftBatches.fetch(q),
-  // The page never opens this engine's overlay (no create/edit form here; the
-  // read-only drawer below is its own useDetail on `?detail=`), so it must not
-  // claim the key: two engines reconciling one key wipe a refreshed / shared
-  // `?detail=view:<id>` whose record is off the loaded page, and the drawer
-  // closes with no error (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
-  detailUrl: false,
+  // The read-only drawer is this engine's own view (`#detail`), deep-linked as
+  // `?detail=view:<id>`; a cold link to a batch off the loaded page resolves here.
+  loadDetailById: (id) => bridge.eftBatches.getById(id),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
+
+// The drawer lives in the Batches tab, whose pane is only mounted while it is
+// active. A view opened from a link that does not also carry `?section=batches`
+// switches there so the drawer has somewhere to render.
+const activeSection = ref('queue')
+watch(
+  () => crud.formModal.visible.value && crud.formModal.mode.value === 'view',
+  (open) => {
+    if (open) activeSection.value = 'batches'
+  },
+  { immediate: true },
+)
 
 // ── Payable queue ───────────────────────────────────────────────
 const queueRows = ref<EftQueueItemDto[]>([])
@@ -311,9 +330,6 @@ async function submitCreate() {
   }
 }
 
-// ── Detail drawer ───────────────────────────────────────────────
-const detail = useDetail<EftBatchDto>({ mode: 'drawer', url: 'detail', loadData: (id) => bridge.eftBatches.getById(String(id)) })
-
 // ── Generate / download / void ──────────────────────────────────
 async function generate(row: EftBatchRow) {
   const id = String(row.id ?? '')
@@ -381,7 +397,7 @@ const rowActions: RowAction<EftBatchRow>[] = [
   {
     key: 'detail',
     label: 'actions.detail',
-    onClick: (r) => void detail.open('view', String(r.id ?? '')),
+    onClick: (r) => crud.openView(r),
   },
   {
     key: 'generate',

@@ -83,9 +83,16 @@ public class AltchaOptions
     public string? HmacKey { get; set; }
 
     /// <summary>
-    /// 随机数上界，决定客户端要算多少次哈希。默认 100000（现代浏览器约一秒内）。
+    /// 随机数上界，决定客户端要算多少次哈希。默认 100000（现代浏览器约一秒内），
+    /// 不得超过 <see cref="MaxNumberUpperBound"/>。
     /// </summary>
     public int MaxNumber { get; set; } = 100_000;
+
+    /// <summary>
+    /// <see cref="MaxNumber"/> 的上限（一千万）。再往上客户端要算几十秒到几分钟，已经不是验证码而是拒绝服务；
+    /// 出题时还要取 <c>MaxNumber + 1</c> 作随机数上界，<see cref="int.MaxValue"/> 会溢出成负数。
+    /// </summary>
+    public const int MaxNumberUpperBound = 10_000_000;
 
     /// <summary>挑战有效期秒数，过期后即便解对也拒绝。默认 300。</summary>
     public int ExpiresSeconds { get; set; } = 300;

@@ -68,6 +68,86 @@ public class ThreadDataProvisionerTests : IDisposable
         Assert.Null(new DirectoryInfo(state.SkillsPath).LinkTarget);
     }
 
+    /// <summary>
+    /// 同一线程两次运行并发首次用到沙箱：接线必须串行，后到的一方看到哨兵就不再复制。此前两边同时写 skills/，
+    /// 一方撞上文件占用失败后递归删掉整个 skills/，另一方随后写下哨兵 —— 技能资源永久缺失。
+    /// </summary>
+    [Fact]
+    public async Task Provision_ConcurrentFirstUseOfTheSameThread_WiresExactlyOnce()
+    {
+        var options = SandboxOptions(_root);
+        var store = new GatedSkillStore();
+        var state = State(options);
+
+        var first = CreateProvisioner(options, store).ProvisionAsync(_threadId, state);
+        await store.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = CreateProvisioner(options, store).ProvisionAsync(_threadId, state);
+
+        // 给第二次足够的时间闯进技能仓库（若没有串行，它此刻就在里面）。
+        await Task.Delay(300);
+        Assert.Equal(1, store.Concurrent);
+
+        store.Release();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, store.MaxConcurrent);
+        Assert.Equal(1, store.Calls);
+        Assert.True(File.Exists(Path.Combine(state.SkillsPath, "gated", "scripts", "run.py")));
+        Assert.True(File.Exists(Path.Combine(state.ThreadDirectory, ".skills_wired")));
+    }
+
+    private sealed class GatedSkillStore : ISkillStore
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _concurrent;
+        private int _maxConcurrent;
+        private int _calls;
+
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Concurrent => Volatile.Read(ref _concurrent);
+        public int MaxConcurrent => Volatile.Read(ref _maxConcurrent);
+        public int Calls => Volatile.Read(ref _calls);
+
+        public void Release() => _gate.TrySetResult();
+
+        public async Task<List<SkillDefinition>> GetAllAsync(CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref _calls);
+            var now = Interlocked.Increment(ref _concurrent);
+            InterlockedMax(ref _maxConcurrent, now);
+            Entered.TrySetResult();
+            try
+            {
+                await _gate.Task;
+                return
+                [
+                    new SkillDefinition
+                    {
+                        Slug = "gated",
+                        Name = "Gated",
+                        Resources = new Dictionary<string, string> { ["scripts/run.py"] = "print('hi')" }
+                    }
+                ];
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _concurrent);
+            }
+        }
+
+        public Task<SkillDefinition?> GetBySlugAsync(string slug, CancellationToken ct = default)
+            => Task.FromResult<SkillDefinition?>(null);
+
+        private static void InterlockedMax(ref int target, int value)
+        {
+            int current;
+            while ((current = Volatile.Read(ref target)) < value
+                   && Interlocked.CompareExchange(ref target, value, current) != current)
+            {
+            }
+        }
+    }
+
     [Fact]
     public async Task Provision_MarkerWithRealDirectory_DoesNotCopyAgain()
     {

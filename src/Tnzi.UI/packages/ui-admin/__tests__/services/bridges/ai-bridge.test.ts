@@ -92,7 +92,20 @@ function mockWorkflowApi() {
     batchDisable: vi.fn(),
     getStats: vi.fn(),
     validate: vi.fn(),
+    getExecutionStats: vi.fn(),
+    getVersions: vi.fn(),
+    getVersion: vi.fn(),
+    restoreVersion: vi.fn(),
+    cancelExecution: vi.fn(),
+    getPendingInterrupt: vi.fn(),
+    resumeWithInput: vi.fn(),
+    getPendingSignals: vi.fn(),
   }
+}
+
+/** The envelope a refused request resolves to (HttpClient does not reject on 4xx/5xx). */
+function refused(code: number, message: string) {
+  return { succeeded: false, success: false, code, data: null, message }
 }
 
 function mockSkillApi() {
@@ -452,6 +465,79 @@ describe('ai-bridge', () => {
     const result = await bridge.workflowRuns.getDetail('exec-1')
     expect(workflowApi.getExecutionDetail).toHaveBeenCalledWith('exec-1')
     expect(result.id).toBe('exec-1')
+  })
+
+  describe('workflow versions / execution control / stats', () => {
+    function setup() {
+      const workflowApi = mockWorkflowApi()
+      const bridge = createAiBridge({ workflowApi: workflowApi as never, client: {} as never })
+      return { workflowApi, bridge }
+    }
+
+    it('getVersions / getVersion unwrap the envelope', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.getVersions.mockResolvedValueOnce(ok([{ id: 'v', versionNumber: 2 }]) as never)
+      workflowApi.getVersion.mockResolvedValueOnce(ok({ id: 'v', versionNumber: 2, definition: '{}' }) as never)
+      expect(await bridge.workflows.getVersions('wf1')).toEqual([{ id: 'v', versionNumber: 2 }])
+      expect(workflowApi.getVersions).toHaveBeenCalledWith('wf1')
+      expect((await bridge.workflows.getVersion('wf1', 2)).definition).toBe('{}')
+      expect(workflowApi.getVersion).toHaveBeenCalledWith('wf1', 2)
+    })
+
+    it('a refused history read throws instead of reading as an empty history', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.getVersions.mockResolvedValueOnce(refused(404, 'Workflow not found') as never)
+      await expect(bridge.workflows.getVersions('wf1')).rejects.toThrow('Workflow not found')
+    })
+
+    it('restoreVersion posts the trimmed note and throws on refusal', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.restoreVersion.mockResolvedValueOnce(ok(null) as never)
+      await bridge.workflows.restoreVersion('wf1', 3, '  back  ')
+      expect(workflowApi.restoreVersion).toHaveBeenCalledWith('wf1', 3, { changeDescription: 'back' })
+
+      workflowApi.restoreVersion.mockResolvedValueOnce(refused(500, 'Workflow version snapshot is not restorable') as never)
+      await expect(bridge.workflows.restoreVersion('wf1', 3)).rejects.toThrow(/not restorable/)
+      expect(workflowApi.restoreVersion).toHaveBeenLastCalledWith('wf1', 3, undefined)
+    })
+
+    it('a refused stats read throws instead of reading as zero runs', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.getExecutionStats.mockResolvedValueOnce(refused(403, 'Forbidden') as never)
+      await expect(bridge.workflows.getExecutionStats('wf1')).rejects.toThrow('Forbidden')
+    })
+
+    it('cancel sends the reason as feedback and throws on refusal', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.cancelExecution.mockResolvedValueOnce(ok(null) as never)
+      await bridge.workflowRuns.cancel('exec-1', 'stop it')
+      expect(workflowApi.cancelExecution).toHaveBeenCalledWith('exec-1', { feedback: 'stop it' })
+
+      workflowApi.cancelExecution.mockResolvedValueOnce(refused(400, 'already in a terminal state') as never)
+      await expect(bridge.workflowRuns.cancel('exec-1')).rejects.toThrow(/terminal state/)
+    })
+
+    it('resumeWithInput posts { stepId, input } and throws on refusal', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.resumeWithInput.mockResolvedValueOnce(ok({ status: 'Completed', output: 'done' }) as never)
+      const result = await bridge.workflowRuns.resumeWithInput('exec-1', 'gate', { approved: true })
+      expect(workflowApi.resumeWithInput).toHaveBeenCalledWith('exec-1', { stepId: 'gate', input: { approved: true } })
+      expect(result.status).toBe('Completed')
+
+      workflowApi.resumeWithInput.mockResolvedValueOnce(refused(409, 'already being resumed') as never)
+      await expect(bridge.workflowRuns.resumeWithInput('exec-1', 'gate', {})).rejects.toThrow(/already being resumed/)
+    })
+
+    it('getInterrupt / getSignals throw when the read is refused', async () => {
+      const { workflowApi, bridge } = setup()
+      workflowApi.getPendingInterrupt.mockResolvedValueOnce(refused(404, 'No pending interrupt') as never)
+      await expect(bridge.workflowRuns.getInterrupt('exec-1')).rejects.toThrow('No pending interrupt')
+      workflowApi.getPendingSignals.mockResolvedValueOnce(refused(501, 'Workflow mailbox is not available') as never)
+      await expect(bridge.workflowRuns.getSignals('exec-1')).rejects.toThrow(/mailbox/)
+
+      workflowApi.getPendingSignals.mockResolvedValueOnce(ok([{ signalId: 's', type: 'cancel', createdAt: 'x' }]) as never)
+      expect(await bridge.workflowRuns.getSignals('exec-1')).toHaveLength(1)
+    })
   })
 
   it('skills.activate maps to batchEnable with the single id', async () => {

@@ -37,7 +37,7 @@ const template = source.slice(source.indexOf('<template>'), source.lastIndexOf('
 describe('TSecuritySettings - active sessions safeguards', () => {
   it('labels the current session row', () => {
     expect(template).toMatch(/controller\.isCurrentSession\(session\)/);
-    expect(template).toMatch(/This device/);
+    expect(template).toMatch(/\{\{ t\.securitySettings\.thisDevice \}\}/);
   });
 
   it('renders no Revoke button on the current session row', () => {

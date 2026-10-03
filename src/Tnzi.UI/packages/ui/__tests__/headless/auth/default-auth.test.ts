@@ -257,3 +257,93 @@ describe('buildDefaultLoginCallbacks - pending actions', () => {
     expect(helpers.setTwoFactorRequired).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The initial SMS / email delivery of a second-factor challenge can fail (rate
+ * limit, provider outage). The challenge is still real, but the form must not
+ * claim a code was sent: the failure reaches it as `codeSendError`.
+ */
+describe('buildDefaultLoginCallbacks - failed initial 2FA code delivery', () => {
+  const challenged = () =>
+    vi.fn().mockResolvedValue({
+      succeeded: false,
+      errorCode: '2FA_REQUIRED',
+      errorDetails: { tempToken: 'tmp-3', supportedTypes: [TwoFactorType.Email] },
+    });
+
+  it('reports a failed envelope instead of a masked address', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: challenged(),
+      sendTwoFactorCode: vi.fn().mockResolvedValue({ succeeded: false, message: 'Too many codes requested' }),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'someone', password: 'pw' }, helpers);
+
+    expect(helpers.setTwoFactorRequired).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'email', codeSendError: 'Too many codes requested', maskedAddress: undefined }),
+    );
+  });
+
+  it('reports a thrown send (network) the same way', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: challenged(),
+      sendTwoFactorCode: vi.fn().mockRejectedValue(new Error('Network Error')),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'someone', password: 'pw' }, helpers);
+
+    expect(helpers.setTwoFactorRequired).toHaveBeenCalledWith(expect.objectContaining({ codeSendError: 'Network Error' }));
+  });
+
+  it('carries no error when the send succeeded', async () => {
+    const { runtime } = makeRuntime({ loginWithRefreshToken: challenged() });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'someone', password: 'pw' }, helpers);
+
+    const challenge = (helpers.setTwoFactorRequired as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(challenge.maskedAddress).toBe('a***@example.com');
+    expect(challenge).not.toHaveProperty('codeSendError');
+  });
+});
+
+/**
+ * A second-factor or pending-action answer to the password form means the
+ * password and the captcha sent with it were accepted. The captcha is spent;
+ * left on screen, the form reads it as rejected and asks for another.
+ */
+describe('buildDefaultLoginCallbacks - password login clears a spent captcha', () => {
+  it('on a 2FA challenge', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: vi.fn().mockResolvedValue({
+        succeeded: false,
+        errorCode: '2FA_REQUIRED',
+        errorDetails: { tempToken: 'tmp-4', supportedTypes: [TwoFactorType.Totp] },
+      }),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'someone', password: 'pw', captchaToken: 'c:1' }, helpers);
+
+    expect(helpers.setTwoFactorRequired).toHaveBeenCalled();
+    expect(helpers.clearCaptcha).toHaveBeenCalled();
+  });
+
+  it('on a pending-action challenge', async () => {
+    const { runtime } = makeRuntime({
+      loginWithRefreshToken: vi.fn().mockResolvedValue({
+        succeeded: false,
+        errorCode: 'IDENTITY_PENDING_ACTIONS_REQUIRED',
+        errorDetails: { tempToken: 'tmp-5', requiredActions: ['ChangePassword'] },
+      }),
+    });
+    const helpers = makeHelpers();
+
+    await buildDefaultLoginCallbacks(runtime).pwdLogin!({ userName: 'someone', password: 'pw', captchaToken: 'c:1' }, helpers);
+
+    expect(helpers.setPendingActionRequired).toHaveBeenCalled();
+    expect(helpers.clearCaptcha).toHaveBeenCalled();
+  });
+});

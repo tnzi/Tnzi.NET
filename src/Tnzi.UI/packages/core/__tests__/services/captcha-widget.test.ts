@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { nextTick, ref } from 'vue';
+import { effectScope, nextTick, ref } from 'vue';
 import { CaptchaWidgetError, mountCaptchaWidget, toRecaptchaAction } from '../../src/services/captcha/widget';
 import { toFetchableChallengeUrl, useCaptchaWidget } from '../../src/services/captcha/useCaptchaWidget';
 import type { CaptchaClientConfigDto } from '../../src/services/captcha/types';
@@ -328,6 +328,79 @@ describe('useCaptchaWidget', () => {
 
     expect(el.querySelector('altcha-widget')!.getAttribute('challengeurl')).toBe('https://api.example/api/captcha/altcha/challenge?purpose=contact');
     scripts.restore();
+  });
+});
+
+/**
+ * A mount can be torn down while its provider script is still loading: the
+ * container leaves the page (v-if), or the owning component unmounts. The
+ * late mount must not install a widget nobody will ever destroy.
+ */
+describe('useCaptchaWidget - teardown while the script is loading', () => {
+  /**
+   * A Turnstile global that only appears once its script "loads": inserted
+   * scripts are held until `loadAll()`, which installs the global and fires the
+   * `onload=` callback the way the real script would. (With the global already
+   * present the loader skips the script and the mount completes at once.)
+   */
+  function holdScripts() {
+    const fake = fakeHostedGlobal('turnstile');
+    delete (globalThis as unknown as Record<string, unknown>).turnstile;
+    const pending: HTMLScriptElement[] = [];
+    vi.spyOn(document.head, 'appendChild').mockImplementation((node: Node) => {
+      pending.push(node as HTMLScriptElement);
+      return node;
+    });
+    return {
+      ...fake,
+      loadAll: () => {
+        (globalThis as unknown as Record<string, unknown>).turnstile = fake.api;
+        for (const script of pending.splice(0)) {
+          const cb = new URL(script.src).searchParams.get('onload');
+          (cb ? (globalThis as unknown as Record<string, () => void>)[cb] : undefined)?.();
+        }
+      },
+    };
+  }
+
+  it('does not keep a widget whose container went away mid-load', async () => {
+    const scripts = holdScripts();
+    const { api, rendered } = scripts;
+    const cfg = ref<CaptchaClientConfigDto | null>(config({ scriptUrl: 'https://cdn.example/turnstile-a.js?render=explicit' }));
+    const w = useCaptchaWidget({ config: cfg, purpose: 'login' });
+
+    w.container.value = document.createElement('div');
+    await nextTick();
+    expect(rendered.length).toBe(0); // still loading
+    w.container.value = null;
+    await nextTick();
+    scripts.loadAll();
+    await vi.waitFor(() => expect(rendered.length).toBe(1));
+    await Promise.resolve();
+
+    expect(w.ready.value).toBe(false);
+    expect(api.remove).toHaveBeenCalled();
+    await expect(w.execute()).rejects.toThrow();
+  });
+
+  it('does not keep a widget after its scope was disposed mid-load', async () => {
+    const scripts = holdScripts();
+    const { api, rendered } = scripts;
+    const scope = effectScope();
+    const w = scope.run(() =>
+      useCaptchaWidget({ config: ref<CaptchaClientConfigDto | null>(config({ scriptUrl: 'https://cdn.example/turnstile-b.js?render=explicit' })), purpose: 'login' }),
+    )!;
+
+    w.container.value = document.createElement('div');
+    await nextTick();
+    expect(rendered.length).toBe(0); // still loading
+    scope.stop();
+    scripts.loadAll();
+    await vi.waitFor(() => expect(rendered.length).toBe(1));
+    await Promise.resolve();
+
+    expect(w.ready.value).toBe(false);
+    expect(api.remove).toHaveBeenCalled();
   });
 });
 

@@ -520,6 +520,12 @@ public partial class SubscriptionService
     /// <summary>
     /// 对订阅发起 off-session 扣款（无已保存支付方式则直接降级 PastDue）
     /// </summary>
+    /// <remarks>
+    /// ★ <b>每一条路径都必须让订阅离开「带着计费锁停在原地」</b>：扫描按 <c>NextBillingTime</c> 升序取前一页，
+    /// 一条既不推进也不降级的订阅永远排在队首，这样的行攒满一页，全体续费就此停摆 —— 而扫描照样报「已处理」。
+    /// 所以：应收为 0 走免扣款续期；扣款在建单之前就被拒绝（没有支付事件会回流）时在这里走失败分支；
+    /// 建单之后的失败由 <c>PaymentFailedEvent</c> 回流收口，这里不再重复计数。
+    /// </remarks>
     private async Task ChargeSubscriptionAsync(
         Subscription subscription,
         SubscriptionBillingPurpose purpose,
@@ -527,6 +533,12 @@ public partial class SubscriptionService
         CancellationToken cancellationToken,
         SubscriptionPlan? plan = null)
     {
+        if (amount <= 0m && purpose == SubscriptionBillingPurpose.Renewal)
+        {
+            await RenewWithoutChargeAsync(subscription.Id, cancellationToken);
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(subscription.PaymentMethodToken))
         {
             await ApplyPaymentFailedAsync(new SubscriptionPaymentContext
@@ -564,7 +576,7 @@ public partial class SubscriptionService
             SubscriptionId = subscription.Id
         };
 
-        await _paymentService.ChargeOffSessionAsync(new OffSessionChargeDto
+        var charged = await _paymentService.ChargeOffSessionAsync(new OffSessionChargeDto
         {
             BusinessOrderNo = subscription.SubscriptionNo,
             BusinessType = BusinessType.Subscription,
@@ -579,6 +591,68 @@ public partial class SubscriptionService
             CustomerEmail = subscription.CustomerEmail,
             ExtraData = meta.ToExtraData()
         }, cancellationToken);
+
+        if (charged.Succeeded)
+            return;
+
+        if (charged.ErrorCode == ErrorCodes.PaymentOffSessionNotAttempted)
+        {
+            // 建单之前就被拒绝（典型是计税失败）：没有支付记录，也不会有事件回流。
+            Logger.LogWarning(
+                "Off-session {Purpose} charge for {SubscriptionNo} was rejected before a payment was created: {Reason}",
+                purpose, subscription.SubscriptionNo, charged.Message);
+            await ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+            {
+                Purpose = purpose,
+                SubscriptionId = subscription.Id,
+                SubscriptionNo = subscription.SubscriptionNo,
+                PayerUserId = subscription.UserId,
+                FailReason = charged.Message ?? ErrorCodes.PaymentOffSessionChargeFailed
+            }, cancellationToken);
+            return;
+        }
+
+        // 建单之后的失败：PaymentFailedEvent 已经（或将在提交后）把订阅降级，这里只留痕。
+        Logger.LogWarning(
+            "Off-session {Purpose} charge for {SubscriptionNo} failed; the payment-failed event carries it from here. Reason: {Reason}",
+            purpose, subscription.SubscriptionNo, charged.Message);
+    }
+
+    /// <summary>
+    /// 应收为 0 的续费：不扣款，直接按付款回流的同一条规则推进一个周期。
+    /// </summary>
+    /// <remarks>
+    /// 0 元计划是合法的（价格只拒负数），而支付侧拒绝 0 元单且不产生任何事件。照常去扣，
+    /// 订阅会带着计费锁停在到期那一刻被每轮扫描重扫。与试用折扣抵满全价时的免费转正同一形态。
+    /// </remarks>
+    private async Task RenewWithoutChargeAsync(Guid subscriptionId, CancellationToken cancellationToken)
+    {
+        var tracked = await _subscriptionRepository.FirstOrDefaultAsync(s => s.Id == subscriptionId, cancellationToken);
+        if (tracked == null)
+            return;
+
+        var now = DateTime.UtcNow;
+        var basis = tracked.NextBillingTime ?? now;
+        if (basis < now) basis = now;
+        tracked.NextBillingTime = CalculateNextBillingTime(basis, tracked.CycleType, tracked.CycleValue);
+        tracked.Status = SubscriptionStatus.Active;
+        tracked.PaidAmount = 0m;
+        ResetDunning(tracked);
+        tracked.BillingLockedUntil = null;
+        await _subscriptionRepository.UpdateAsync(tracked, cancellationToken);
+        await CancelAwaitingChangesForEndedPeriodAsync(tracked.Id, cancellationToken);
+
+        Logger.LogInformation("Renewed without a charge: the plan price is zero. SubscriptionNo: {SubscriptionNo}", tracked.SubscriptionNo);
+
+        await PublishRenewedAsync(tracked, new SubscriptionPaymentContext
+        {
+            Purpose = SubscriptionBillingPurpose.Renewal,
+            SubscriptionId = tracked.Id,
+            SubscriptionNo = tracked.SubscriptionNo,
+            PayerUserId = tracked.UserId,
+            Amount = 0m,
+            Currency = tracked.Currency
+        });
     }
 
     /// <summary>

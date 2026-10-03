@@ -54,6 +54,7 @@ Tnzi.EFCore.Encryption.IFieldEncryptor.Decrypt(string! ciphertext, string! purpo
 Tnzi.EFCore.Encryption.IFieldEncryptor.Encrypt(string! plaintext, string! purpose) -> string!
 Tnzi.EFCore.Encryption.IFieldEncryptor.IsEncrypted(string! value) -> bool
 Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions
+Tnzi.EFCore.ModelWarningOptionsBuilderExtensions
 Tnzi.EFCore.Services.EfCoreDbMigrator.EfCoreDbMigrator(System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Services.EfCoreDbMigrator!>! logger) -> void
 override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<Tnzi.EFCore.DocumentNumbering.DocumentSequence!>! builder) -> void
 override Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator.ValidateOptions(Tnzi.EFCore.Encryption.FieldEncryptionOptions! options, System.Collections.Generic.List<string!>! errors) -> void
@@ -68,6 +69,8 @@ static Tnzi.EFCore.IndexFilterFactory.GetColumnNull(string! columnName, Tnzi.EFC
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnTrueAndIsDeletedFalse(string! columnName, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.Internal.TnziDbContextHelper.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
+static Tnzi.EFCore.ModelWarningOptionsBuilderExtensions.UseTnziModelWarningPolicy(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder! optionsBuilder) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder!
+static Tnzi.EFCore.ModelWarningOptionsBuilderExtensions.UseTnziModelWarningPolicy<TDbContext>(this Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>! optionsBuilder) -> Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TDbContext!>!
 virtual Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity>.Discard(TEntity! entity) -> void
 *REMOVED*Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Dapper.DapperService!>? logger = null) -> void
 Tnzi.EFCore.Dapper.DapperService.DapperService(Microsoft.EntityFrameworkCore.DbContext! dbContext, Tnzi.EFCore.Dapper.Providers.IDatabaseProvider! databaseProvider, Tnzi.Data.IUnitOfWorkManager? unitOfWorkManager = null, Tnzi.Data.IUnitOfWork? unitOfWork = null) -> void

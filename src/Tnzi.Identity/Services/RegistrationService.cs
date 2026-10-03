@@ -83,8 +83,15 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<TokenResult>("Email is required", 400);
         }
 
-        // 用户名默认策略：如果没有提供用户名，使用邮箱作为用户名
-        var userName = input.UserName;
+        // 用户名：UseEmailAsUserName 开启（默认）时就是邮箱；关闭时取用户给的，
+        // 没给且 DefaultUserNameFromEmail 开启则退回邮箱（此时两者同样绑在一起，改邮箱会跟随）
+        var resolvedUserName = UserNamePolicy.ResolveForNewAccount(input.UserName, input.Email, IdentityOptions.SignIn.UseEmailAsUserName);
+        if (!resolvedUserName.Succeeded)
+        {
+            return Fail<TokenResult>(resolvedUserName.Message!, resolvedUserName.Code ?? 400, resolvedUserName.ErrorCode);
+        }
+
+        var userName = resolvedUserName.Data;
         if (string.IsNullOrWhiteSpace(userName) && registrationOptions.DefaultUserNameFromEmail)
         {
             userName = input.Email;
@@ -92,7 +99,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         if (string.IsNullOrWhiteSpace(userName))
         {
-            return Fail<TokenResult>("Username is required. Either provide a username or enable DefaultUserNameFromEmail option.", 400);
+            return Fail<TokenResult>("Username is required.", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var user = new User
@@ -343,6 +350,13 @@ public class RegistrationService : ApplicationService, IRegistrationService
             return Fail<QuickRegisterResultDto>("Email or phone number is required", 400);
         }
 
+        // 用户名规则在核销验证码之前判：被拒时那枚码还能用，不必重新收一次
+        var resolvedUserName = UserNamePolicy.ResolveForNewAccount(input.UserName, input.Email, IdentityOptions.SignIn.UseEmailAsUserName);
+        if (!resolvedUserName.Succeeded)
+        {
+            return Fail<QuickRegisterResultDto>(resolvedUserName.Message!, resolvedUserName.Code ?? 400, resolvedUserName.ErrorCode);
+        }
+
         if (string.IsNullOrEmpty(input.Code))
         {
             return Fail<QuickRegisterResultDto>("Verification code is required", 400);
@@ -386,7 +400,7 @@ public class RegistrationService : ApplicationService, IRegistrationService
             }
         }
 
-        var userName = input.UserName;
+        var userName = resolvedUserName.Data;
         if (string.IsNullOrEmpty(userName))
         {
             userName = isEmailRequest ? input.Email : input.PhoneNumber;
@@ -541,6 +555,14 @@ public class RegistrationService : ApplicationService, IRegistrationService
         }
 
         var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), purpose);
+        // ★ 「未启用，放行」不是「校验通过」：走到这里说明流程开关已经要求验证码，而验证器报告没有生效的提供商。
+        //   放行会让「开了验证码」变成装饰，响应、日志全部正常 —— 与验证器缺席同一条原则。
+        if (verification.Skipped)
+        {
+            Logger.LogError("Captcha is required for {Purpose} but no captcha provider is enabled; rejecting.", purpose);
+            return false;
+        }
+
         return verification.Passed;
     }
 

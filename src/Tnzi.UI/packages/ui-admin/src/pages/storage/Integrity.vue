@@ -1,7 +1,9 @@
 <template>
   <!--
     Integrity - file-integrity verification dashboard (TContentPage, no back).
-    A "Verify" button triggers `integrity.batchVerify(maxFiles)`; results land
+    A "Verify" button triggers `integrity.batchVerify(maxFiles)` from the first
+    file id; while the result carries a `nextCursor`, "Next batch" continues
+    from there (the backend caps one batch at 500). Results land
     in a KPI strip (TotalChecked / Healthy / Missing+Corrupted / Errors) and a
     problem-files table (the backend only returns problematic rows in
     `problems`). Single-file verify lives on the Files page row actions
@@ -13,15 +15,18 @@
         v-model:value="maxFiles"
         size="small"
         :min="1"
-        :max="10000"
+        :max="MAX_BATCH"
         :step="100"
         class="w-130px"
       />
       <!-- Read-only diagnostic (matches the ungated backend endpoint) -
            no permission gate beyond the page's own storage.file.view. -->
-      <NButton size="small" type="primary" :loading="loading" @click="runVerify">
+      <NButton size="small" type="primary" :loading="loading" @click="runVerify(null)">
         <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
         {{ t('actions.verify') }}
+      </NButton>
+      <NButton v-if="result?.nextCursor" size="small" :loading="loading" @click="runVerify(result.nextCursor)">
+        {{ t('actions.verifyNext') }}
       </NButton>
     </template>
 
@@ -66,6 +71,9 @@ const t = makePageTranslator('storage.integrity')
 const message = useSafeMessage()
 const bridge = createStorageBridge({ client: useAdminClient() })
 
+/** Backend bound on one batch (`maxFiles` outside 1-500 is a 400). */
+const MAX_BATCH = 500
+
 const maxFiles = ref(100)
 const loading = ref(false)
 const result = ref<BatchIntegrityResultDto | null>(null)
@@ -76,10 +84,10 @@ const problemCount = computed(() =>
 
 const problemColumns = buildProblemColumns(t)
 
-async function runVerify(): Promise<void> {
+async function runVerify(after: string | null): Promise<void> {
   loading.value = true
   try {
-    result.value = await bridge.integrity.batchVerify(maxFiles.value ?? 100)
+    result.value = await bridge.integrity.batchVerify(maxFiles.value ?? 100, after)
     message.success(t('actions.verifyDone'))
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))

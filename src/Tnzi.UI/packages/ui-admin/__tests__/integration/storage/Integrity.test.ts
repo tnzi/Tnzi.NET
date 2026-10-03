@@ -41,6 +41,26 @@ describe('Integrity page', () => {
     await btn!.trigger('click')
     await flushPromises()
     expect(batchVerify).toHaveBeenCalledTimes(1)
+    expect(batchVerify).toHaveBeenLastCalledWith(100, null)
     expect(wrapper.text()).toContain('gone.png')
+    // No cursor on the result: the walk is complete, so no "Next batch".
+    expect(wrapper.findAll('button').some((b) => b.text().includes('Next batch'))).toBe(false)
+  })
+
+  it('continues from the returned cursor when the walk is not finished', async () => {
+    batchVerify.mockResolvedValueOnce({
+      totalChecked: 100, healthy: 100, missing: 0, corrupted: 0, errors: 0, problems: [],
+      nextCursor: 'cursor-1',
+    } as never)
+    const wrapper = mount(Integrity)
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text().includes('Verify'))!.trigger('click')
+    await flushPromises()
+
+    const next = wrapper.findAll('button').find((b) => b.text().includes('Next batch'))
+    expect(next).toBeTruthy()
+    await next!.trigger('click')
+    await flushPromises()
+    expect(batchVerify).toHaveBeenLastCalledWith(100, 'cursor-1')
   })
 })

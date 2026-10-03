@@ -6,6 +6,16 @@ namespace Tnzi.AspNetCore.Security;
 /// </summary>
 public class CaptchaVerifier : ICaptchaVerifier
 {
+    /// <summary>
+    /// 令牌长度上限（字符）。超过的一律拒绝，不交给提供商。
+    /// </summary>
+    /// <remarks>
+    /// 令牌是匿名端点上完全由客户端决定的输入，托管型提供商会把它原样转发给外部验证服务。
+    /// 已知提供商的令牌都在几 KB 以内（reCAPTCHA / Turnstile 约 2 KB，hCaptcha 稍长，Altcha 载荷几百字节），
+    /// 8 KB 给足余量；再长的只可能是构造出来的，没必要让它出站、进缓存键或进日志。
+    /// </remarks>
+    public const int MaxTokenLength = 8 * 1024;
+
     private readonly CaptchaVerifierOptions _options;
     private readonly IReadOnlyList<ICaptchaProvider> _providers;
     private readonly IScopedContext? _scopedContext;
@@ -54,6 +64,13 @@ public class CaptchaVerifier : ICaptchaVerifier
         {
             _logger.LogDebug("Captcha token missing for purpose {Purpose}.", purpose);
             return CaptchaVerification.Fail(provider.Name, CaptchaFailure.MissingToken);
+        }
+
+        if (token.Length > MaxTokenLength)
+        {
+            _logger.LogInformation("Captcha token for purpose {Purpose} is {Length} characters, above the {Max} limit; rejecting without contacting {Provider}.",
+                purpose, token.Length, MaxTokenLength, provider.Name);
+            return CaptchaVerification.Fail(provider.Name, CaptchaFailure.Rejected, "Token too long");
         }
 
         var request = new CaptchaVerificationRequest(token, purpose, _scopedContext?.ClientIpAddress);

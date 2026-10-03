@@ -31,6 +31,12 @@ namespace Tnzi.AI.Sandbox.Services;
 /// 只信哨兵会让恰好这些线程永远被围栏拦在外面（运维删掉残留的 <c>_skills/</c> 之后还是一条悬空链接）。
 /// 所以哨兵只在 <c>skills/</c> 是真目录时才算数；链接一律 unlink（绝不跟进）后重新复制。
 /// </para>
+/// <para>
+/// ★ 同一线程的接线在进程内串行：同一线程的两次运行并发首次用到沙箱时，两边都没看到哨兵、同时往 <c>skills/</c>
+/// 里写同名文件，一方撞上文件占用失败，按「半途失败清掉重来」把整个 <c>skills/</c> 递归删掉，而另一方随后写下哨兵
+/// —— 此后哨兵在、目录却是空的，技能资源永久缺失。串行之后，后到的一方进锁再看哨兵就直接返回，失败清理也只会删掉
+/// 自己写了一半的目录。多个进程共用同一个 DataRoot 时不在这把锁的范围内。
+/// </para>
 /// </remarks>
 public sealed class ThreadDataProvisioner : IThreadDataProvisioner
 {
@@ -39,6 +45,9 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
     /// 只在整包复制成功后写，半途失败下次进入重试。
     /// </summary>
     public const string SkillsWiredMarker = ".skills_wired";
+
+    // 按线程目录分条带的进程内锁：条带数固定，不随线程数增长（按线程建锁会一直攒下去）；不同线程偶尔落到同一条带只是多等一次。
+    private static readonly SemaphoreSlim[] WiringLocks = Enumerable.Range(0, 64).Select(_ => new SemaphoreSlim(1, 1)).ToArray();
 
     private readonly IOptions<SandboxModuleOptions> _options;
     private readonly IVirtualPathTranslator _translator;
@@ -82,18 +91,38 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
 
         var skillsPath = state.SkillsPath;
         var marker = Path.Combine(state.ThreadDirectory, SkillsWiredMarker);
-        if (File.Exists(marker) && IsRealDirectory(skillsPath)) return;
+        if (IsWired(marker, skillsPath)) return;
 
-        if (IsLink(skillsPath))
+        var wiringLock = WiringLockFor(state.ThreadDirectory);
+        await wiringLock.WaitAsync(ct);
+        try
         {
-            RemoveLink(skillsPath);
-            _logger.LogInformation("Replaced legacy skills symlink at {Path} with a per-thread copy", skillsPath);
-        }
+            // 进锁后再看一次：等锁期间另一次运行可能已经接好线了。
+            if (IsWired(marker, skillsPath)) return;
 
-        if (await CopyAllSkillResourcesAsync(skillsPath, ct))
-        {
-            await File.WriteAllTextAsync(marker, $"copied at {DateTime.UtcNow:O}", ct);
+            if (IsLink(skillsPath))
+            {
+                RemoveLink(skillsPath);
+                _logger.LogInformation("Replaced legacy skills symlink at {Path} with a per-thread copy", skillsPath);
+            }
+
+            if (await CopyAllSkillResourcesAsync(skillsPath, ct))
+            {
+                await File.WriteAllTextAsync(marker, $"copied at {DateTime.UtcNow:O}", ct);
+            }
         }
+        finally
+        {
+            wiringLock.Release();
+        }
+    }
+
+    private static bool IsWired(string marker, string skillsPath) => File.Exists(marker) && IsRealDirectory(skillsPath);
+
+    private static SemaphoreSlim WiringLockFor(string threadDirectory)
+    {
+        var key = OperatingSystem.IsWindows() ? threadDirectory.ToUpperInvariant() : threadDirectory;
+        return WiringLocks[(StringComparer.Ordinal.GetHashCode(key) & int.MaxValue) % WiringLocks.Length];
     }
 
     private static bool IsRealDirectory(string path) => Directory.Exists(path) && !IsLink(path);
@@ -159,10 +188,18 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
         catch (Exception ex)
         {
             // Failed extraction: remove the partial directory so the next request retries.
-            try { if (Directory.Exists(skillsPath)) Directory.Delete(skillsPath, recursive: true); }
-            catch { /* best effort cleanup */ }
-
             _logger.LogWarning(ex, "Failed to extract skill resources to {Path}", skillsPath);
+
+            try
+            {
+                if (Directory.Exists(skillsPath)) Directory.Delete(skillsPath, recursive: true);
+            }
+            catch (Exception cleanupEx) when (cleanupEx is IOException or UnauthorizedAccessException)
+            {
+                // 清不掉的半截目录不挡下次重试（没有哨兵就会重新复制、逐个覆盖），但要留痕：它会一直占着磁盘。
+                _logger.LogWarning(cleanupEx, "Failed to remove the partially copied skills directory {Path}", skillsPath);
+            }
+
             return false;
         }
     }

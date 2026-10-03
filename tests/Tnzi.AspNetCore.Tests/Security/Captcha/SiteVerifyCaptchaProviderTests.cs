@@ -115,7 +115,10 @@ public class SiteVerifyCaptchaProviderTests
     [Theory]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData(HttpStatusCode.BadGateway)]
-    public async Task Non2xx_IsVerifierUnavailable_NotRejected(HttpStatusCode status)
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.RequestTimeout)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task TransientNon2xx_IsVerifierUnavailable_NotRejected(HttpStatusCode status)
     {
         var (provider, handler) = Create(SiteVerifyCaptchaDescriptor.Turnstile);
         handler.Respond = _ => Task.FromResult(new HttpResponseMessage(status));
@@ -123,6 +126,26 @@ public class SiteVerifyCaptchaProviderTests
         var result = await provider.VerifyAsync(Request());
 
         Assert.Equal(CaptchaFailure.VerifierUnavailable, result.Failure);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.NotFound)]
+    [InlineData(HttpStatusCode.RequestEntityTooLarge)]
+    [InlineData(HttpStatusCode.Found)]
+    public async Task OtherNon2xx_IsRejected_SoTheAllowPolicyCannotRescueIt(HttpStatusCode status)
+    {
+        // 4xx 说的是「这个请求本身不对」：若它算「不可达」，OnVerifierUnavailable=Allow 下
+        // 一枚构造出来让验证服务回 400 的令牌（例如超长）就等于通行证。
+        var (provider, handler) = Create(SiteVerifyCaptchaDescriptor.Turnstile);
+        handler.Respond = _ => Task.FromResult(new HttpResponseMessage(status));
+
+        var result = await provider.VerifyAsync(Request());
+
+        Assert.False(result.Passed);
+        Assert.Equal(CaptchaFailure.Rejected, result.Failure);
     }
 
     [Fact]

@@ -38,6 +38,26 @@ public class CliProcessLaunchException : InfrastructureException
 }
 
 /// <summary>
+/// provider 的部署配置要求了一项它不支持的能力（例如对不能重定向配置目录的 CLI 要求专用配置目录）。
+/// </summary>
+/// <remarks>
+/// 启动期校验器已经拦过一次；运行期再抛是因为配置可以热更新。宁可让运行失败，
+/// 也不以「未隔离」的状态悄悄跑起来 —— 部署方选了隔离，就是不接受不隔离。
+/// </remarks>
+public class CliProviderConfigurationException : InfrastructureException
+{
+    /// <summary>provider 键。</summary>
+    public string ProviderKey { get; }
+
+    /// <summary>初始化异常。</summary>
+    public CliProviderConfigurationException(string providerKey, string message)
+        : base("CliAgent", message, isRetryable: false)
+    {
+        ProviderKey = providerKey;
+    }
+}
+
+/// <summary>
 /// provider 声明的协议在本版本没有适配器实现。
 /// </summary>
 public class CliProtocolNotImplementedException : InfrastructureException

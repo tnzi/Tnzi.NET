@@ -13,8 +13,11 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// Mutable per test: a cold deep link is a mount with `?detail=view:<id>` already in the URL.
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {}, params: {}, path: '/admin/finance/deposits', fullPath: '/admin/finance/deposits', hash: '', name: 'finance.deposits', meta: {} }),
+  useRoute: () => ({ query: routeState.query, params: {}, path: '/admin/finance/deposits', fullPath: '/admin/finance/deposits', hash: '', name: 'finance.deposits', meta: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }))
 
@@ -39,7 +42,16 @@ const undeposited = vi.fn(async () => [
 
 const depositSection = {
   fetch: fetchDeposits,
-  getById: vi.fn(async () => null),
+  // `d9` is not on the loaded page: only the by-id load can resolve it, and only
+  // the full record carries the lines.
+  getById: vi.fn(async (id: string) =>
+    id === 'd9'
+      ? {
+          id: 'd9', number: 'DEP-000009', status: 'Posted', fromAccountName: '1130 Undeposited Funds', toAccountName: '1120 Bank Account',
+          depositDate: '2026-03-28', currency: 'USD', amount: 700, lines: [{ id: 'dl1', paymentNumber: 'PMT-009', amount: 700 }],
+        }
+      : null,
+  ),
   createDraft: vi.fn(),
   updateDraft: vi.fn(),
   deleteDraft: vi.fn(),
@@ -123,6 +135,27 @@ describe('Finance Deposits page', () => {
     depositSection.deleteDraft.mockClear()
     depositSection.post.mockClear()
     depositSection.voidDoc.mockClear()
+    depositSection.getById.mockClear()
+    routeState.query = {}
+  })
+
+  it('restores a shared ?detail=view:<id> for a deposit that is not on the loaded page', async () => {
+    routeState.query = { detail: 'view:d9' }
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as DepositVm & {
+      crud: { formModal: { visible: { value: boolean }; mode: { value: string | null } } }
+      viewed: { id: string; lines: unknown[] } | null
+      activeSection: string
+    }
+    expect(depositSection.getById).toHaveBeenCalledWith('d9')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(vm.viewed?.lines).toHaveLength(1)
+    // The drawer lives in the Deposits tab; a link without `?section=` must land there.
+    expect(vm.activeSection).toBe('deposits')
+    expect(wrapper.text() + document.body.textContent).toContain('DEP-000009')
   })
 
   it('mounts, loads deposits, and defaults the source account to Undeposited Funds', async () => {

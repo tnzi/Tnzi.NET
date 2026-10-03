@@ -32,7 +32,7 @@
 import { addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
-/** Every Iconify name `@tnzi/ui-admin` and its @tnzi dependencies can render (563 names, 6 collections). */
+/** Every Iconify name `@tnzi/ui-admin` and its @tnzi dependencies can render (564 names, 6 collections). */
 export const tnziIconNames: readonly string[] = [
   'line-md:menu-fold-left',
   'line-md:menu-fold-right',
@@ -178,6 +178,7 @@ export const tnziIconNames: readonly string[] = [
   'mdi:arrow-up-bold',
   'mdi:auto-fix',
   'mdi:autorenew',
+  'mdi:backup-restore',
   'mdi:bank-check',
   'mdi:bank-outline',
   'mdi:bank-plus',
@@ -536,8 +537,8 @@ export const tnziIconNames: readonly string[] = [
   'mdi:source-branch',
   'mdi:speedometer',
   'mdi:star',
-  'mdi:star-outline',
   'mdi:stethoscope',
+  'mdi:stop-circle-outline',
   'mdi:swap-horizontal',
   'mdi:table',
   'mdi:tablet',

@@ -16,10 +16,13 @@ namespace Tnzi.Tests.Architecture;
 ///   而同项目另外 12 个一级目录都遵守此规则。）</item>
 /// </list>
 ///
-/// ★**刻意不检查二级及以下目录**：那些是**开发期分类目录**，按 R3 不产生子命名空间。
-/// <c>Data/Filtering/</c>、<c>Extensions/Primitives/</c>、<c>Controllers/Admin/</c> 里的文件
-/// 仍属父命名空间 —— 命名空间是消费方的**导入单位**，不该让消费方为「我们怎么分文件」
-/// 多写 N 行 using。
+/// 另守 R3 里消费方真正会导入的那一处：<b><c>Services/Interfaces/</c> 不产生子命名空间</b>
+/// （<see cref="ServiceInterfaces_StayInTheServicesNamespace"/>）。接口是消费方注入的类型，
+/// 多一层 <c>.Interfaces</c> 就是每个消费方多写一行 using。
+///
+/// ★**其余二级目录不检查**：<c>Entities/Configs/</c> 与 <c>Controllers/Admin/</c> 的既成惯例是
+/// 目录即子命名空间（<c>.Entities.Configs</c>、<c>.Controllers.Admin</c>），两种写法并存且都合法，
+/// 详见 naming.md 的 R3。
 ///
 /// 扫描范围见 <see cref="ScanRoots"/>（<c>src/</c> 与 <c>tools/</c>），
 /// 由 <see cref="Scan_CoversEveryRoot"/> 守着「扫描面没塌」。
@@ -90,6 +93,40 @@ public class NamespaceConventionTests
         Assert.True(violations.Count == 0,
             "以下文件违反 R2（一级目录 = 一个命名空间单元）。要么把命名空间改对，\n"
             + "要么把文件移到与其命名空间相符的目录：\n  "
+            + string.Join("\n  ", violations));
+    }
+
+    [Fact]
+    public void ServiceInterfaces_StayInTheServicesNamespace()
+    {
+        var repoRoot = RepoRoot.Locate();
+
+        var scanned = 0;
+        var violations = new List<string>();
+
+        foreach (var (proj, file, rel, ns) in EnumerateDeclarations(repoRoot))
+        {
+            if (RegisteredExceptions.ContainsKey(rel)) continue;
+
+            var segments = rel.Split('/');
+            // {root} / {Proj} / Services / Interfaces / File.cs
+            if (segments.Length != 5 || segments[2] != "Services" || segments[3] != "Interfaces") continue;
+
+            scanned++;
+            var expected = $"{proj}.Services";
+            if (ns != expected)
+            {
+                violations.Add($"{rel}\n      声明 {ns}，应为 {expected}");
+            }
+        }
+
+        // 找不到违规即通过的断言，要先证明它真的看到了文件：目录改名或扫描坏掉时这里当场红，
+        // 而不是一片绿。
+        Assert.True(scanned > 0, "一个 Services/Interfaces/ 下的文件都没扫到，是扫描坏了而不是没有违规");
+
+        Assert.True(violations.Count == 0,
+            "以下服务接口声明了子命名空间（违反 R3）。接口是消费方注入的类型，\n"
+            + "它必须与实现同在 {Module}.Services，否则每个消费方都要多写一行 using：\n  "
             + string.Join("\n  ", violations));
     }
 

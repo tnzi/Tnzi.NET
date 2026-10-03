@@ -127,6 +127,30 @@ public class SpaNotFoundTests
     }
 
     [Fact]
+    public async Task TheAppShell_IsServedUncached()
+    {
+        // 外壳引用的是带 hash 的分块名。浏览器若缓存了它，发版后刷新拿到的仍是旧外壳，
+        // 旧外壳指向的分块已被部署删掉，前端的发版检测与分块恢复刷新多少次都回不到新版本。
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/orders/42";
+        context.Response.Body = new MemoryStream();
+
+        var middleware = new SPANotFoundMiddleware(
+            ctx =>
+            {
+                ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            },
+            Microsoft.Extensions.Options.Options.Create(new AspNetCoreOptions()),
+            new StubEnvironment(new StubFileProvider("index.html", IndexHtml)),
+            NullLogger<SPANotFoundMiddleware>.Instance);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal("no-cache", context.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
     public async Task WithoutAnAppShell_TheNotFoundStands()
     {
         // wwwroot 里没有 index.html 时，唯一诚实的答案是保留 404。

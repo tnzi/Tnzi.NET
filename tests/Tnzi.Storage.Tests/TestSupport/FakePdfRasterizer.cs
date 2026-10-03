@@ -28,6 +28,9 @@ public sealed class FakePdfRasterizer : IPdfRasterizer
     /// <summary>设了就在渲染时抛：模拟有口令 / 损坏 / 原生库炸掉。</summary>
     public Exception? ThrowOnRender { get; set; }
 
+    /// <summary>按文件内容决定抛不抛：模拟一批里只有某几份有口令。</summary>
+    public Func<byte[], Exception?>? ThrowFor { get; set; }
+
     /// <summary>设了就在读页数时抛。</summary>
     public Exception? ThrowOnPageCount { get; set; }
 
@@ -57,6 +60,14 @@ public sealed class FakePdfRasterizer : IPdfRasterizer
         return Task.FromResult(PageCount);
     }
 
+    /// <summary>
+    /// 设了就在渲染开始时同步阻塞到它被 Set：模拟 PDFium 在进程级锁里跑一份首页极复杂的文件（取消不掉）。
+    /// </summary>
+    public ManualResetEventSlim? BlockRenderUntil { get; set; }
+
+    /// <summary>渲染开始时调用：模拟渲染进行的那几十秒里别的请求对同一条记录的改动。</summary>
+    public Action? OnRender { get; set; }
+
     public async Task<DocumentImage> RenderPageAsync(byte[] source, int pageIndex, PdfRasterRequest? request = null, CancellationToken ct = default)
     {
         RenderCalls++;
@@ -64,8 +75,19 @@ public sealed class FakePdfRasterizer : IPdfRasterizer
         LastRequest = request ?? new PdfRasterRequest();
         LastSourceLength = source.Length;
 
+        BlockRenderUntil?.Wait(CancellationToken.None);
+        OnRender?.Invoke();
+
+        // 与真实实现同形：渲染自己先读页数，越界页索引抛 ArgumentOutOfRangeException。
+        var pageCount = await GetPageCountAsync(source, ct);
+        if (pageIndex >= pageCount)
+            throw new ArgumentOutOfRangeException(nameof(pageIndex), pageIndex, $"The document has {pageCount} page(s).");
+
         if (ThrowOnRender is not null)
             throw ThrowOnRender;
+
+        if (ThrowFor?.Invoke(source) is { } perFile)
+            throw perFile;
 
         // 左上角一块深色：缩略图里还认得出来它在左上角 → 证明没有被裁掉、也没有被翻转。
         using var page = new Image<Rgba32>(PageWidth, PageHeight, new Rgba32(255, 255, 255));

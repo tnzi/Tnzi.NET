@@ -29,6 +29,8 @@
     <!-- 启动期存量修复任务等纯内部协作类为 internal，仅对本模块的两个测试项目开放。 -->
     <InternalsVisibleTo Include="Tnzi.Identity.Tests, PublicKey=$(TnziPublicKey)" />
     <InternalsVisibleTo Include="Tnzi.Identity.IntegrationTests, PublicKey=$(TnziPublicKey)" />
+    <!-- 组织子模块改的是同一张 User 表，须与父模块走同一道超管目标护栏（SuperAdminTargetGuard）。 -->
+    <InternalsVisibleTo Include="Tnzi.Identity.Organization, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
   <ItemGroup>

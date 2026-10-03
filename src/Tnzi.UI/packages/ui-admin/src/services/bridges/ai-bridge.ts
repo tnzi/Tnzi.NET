@@ -18,8 +18,11 @@
  *   4. workflows       → useAdminWorkflowApi.getList/create/update/delete + clone + validate
  *                        + publish (publish wraps batchEnable - IsEnabled IS the framework
  *                        publish semantic; see docs/modules/ai.md Workflow section)
+ *                        + versions (getVersions/getVersion/restoreVersion) + getExecutionStats
  *   5. workflowRuns    → useAdminWorkflowApi.getExecutions/getExecutionDetail (NO separate
- *                        useAdminWorkflowRunApi exists in core); tail() rejects
+ *                        useAdminWorkflowRunApi exists in core) + cancel / getInterrupt /
+ *                        resumeWithInput / getSignals, all keyed by the execution's business
+ *                        `executionId` (never the row `id`); tail() rejects
  *   6. skills          → useAdminSkillApi.getPaged/create/update/delete + batchEnable/Disable
  *                        re-exposed as activate(id)/deactivate(id) for plan compatibility
  *   7. providers       → ENTITY-DRIVEN CRUD: useAdminProviderApi.{getList,create,update,delete,test}
@@ -83,6 +86,10 @@ import {
   type WorkflowStatsDto,
   type WorkflowStepApprovalDto,
   type RunWorkflowRequestDto,
+  type WorkflowDefinitionVersionDto,
+  type WorkflowExecutionStatsDto,
+  type WorkflowInterruptDto,
+  type WorkflowExecutionSignalDto,
   type SkillSummaryDto,
   type SkillDetailDto,
   type CreateSkillDto,
@@ -282,6 +289,14 @@ export interface AiBridge {
     batchEnable(ids: string[]): Promise<number>
     /** Batch disable workflows. */
     batchDisable(ids: string[]): Promise<number>
+    /** Per-workflow execution statistics; throws when the backend refuses. */
+    getExecutionStats(id: string): Promise<WorkflowExecutionStatsDto>
+    /** Version history, newest first (no definition body). */
+    getVersions(id: string): Promise<WorkflowDefinitionVersionDto[]>
+    /** One version with its full definition snapshot. */
+    getVersion(id: string, versionNumber: number): Promise<WorkflowDefinitionVersionDto>
+    /** Restore a version (the current definition is snapshotted first). */
+    restoreVersion(id: string, versionNumber: number, changeDescription?: string): Promise<void>
   }
   workflowRuns: Pick<BridgeCrudContract<WorkflowExecutionSummaryDto>, 'fetch'> & {
     tail(id: string): Promise<ReadableStream<Uint8Array>>
@@ -295,6 +310,17 @@ export interface AiBridge {
     approveStep(executionId: string, stepId: string, comment?: string): Promise<void>
     /** Reject a step (`reason` required by backend). */
     rejectStep(executionId: string, stepId: string, reason: string): Promise<void>
+    /**
+     * Cancel an execution. Paused / awaiting executions are cancelled at once;
+     * a running one gets a cancel signal queued (see `currentWaitReason`).
+     */
+    cancel(executionId: string, reason?: string): Promise<void>
+    /** Pending human-in-the-loop interrupt; throws when there is none or the read is refused. */
+    getInterrupt(executionId: string): Promise<WorkflowInterruptDto>
+    /** Answer the pending interrupt and resume the execution. */
+    resumeWithInput(executionId: string, stepId: string, input: Record<string, unknown>): Promise<WorkflowExecutionResultDto>
+    /** Pending mailbox signals; throws when the backend refuses (e.g. 501 without a mailbox). */
+    getSignals(executionId: string): Promise<WorkflowExecutionSignalDto[]>
   }
   skills: BridgeCrudContract<SkillSummaryDto, CreateSkillDto, UpdateSkillDto> & {
     activate(id: string): Promise<void>
@@ -591,6 +617,20 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrapOk<number>(await workflowApi.batchEnable(ids.map(String))),
     batchDisable: async (ids: string[]) =>
       unwrapOk<number>(await workflowApi.batchDisable(ids.map(String))),
+    // The reads below go through unwrapOk too: a refused read (404 / 403 / 501)
+    // must surface as an error, not as an empty history or all-zero stats.
+    getExecutionStats: async (id: string) =>
+      unwrapOk<WorkflowExecutionStatsDto>(await workflowApi.getExecutionStats(String(id))),
+    getVersions: async (id: string) => {
+      const items = unwrapOk<WorkflowDefinitionVersionDto[] | null>(await workflowApi.getVersions(String(id)))
+      return Array.isArray(items) ? items : []
+    },
+    getVersion: async (id: string, versionNumber: number) =>
+      unwrapOk<WorkflowDefinitionVersionDto>(await workflowApi.getVersion(String(id), versionNumber)),
+    restoreVersion: async (id: string, versionNumber: number, changeDescription?: string) => {
+      const body = changeDescription?.trim() ? { changeDescription: changeDescription.trim() } : undefined
+      unwrapOk<unknown>(await workflowApi.restoreVersion(String(id), versionNumber, body))
+    },
   }
 
   // ---- workflowRuns -------------------------------------------------------
@@ -621,6 +661,18 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     rejectStep: async (executionId: string, stepId: string, reason: string) => {
       const body: WorkflowStepApprovalDto = { feedback: reason }
       ensureOk(await workflowApi.rejectStep(executionId, stepId, body))
+    },
+    cancel: async (executionId: string, reason?: string) => {
+      const body: WorkflowStepApprovalDto | undefined = reason?.trim() ? { feedback: reason.trim() } : undefined
+      unwrapOk<unknown>(await workflowApi.cancelExecution(executionId, body))
+    },
+    getInterrupt: async (executionId: string) =>
+      unwrapOk<WorkflowInterruptDto>(await workflowApi.getPendingInterrupt(executionId)),
+    resumeWithInput: async (executionId: string, stepId: string, input: Record<string, unknown>) =>
+      unwrapOk<WorkflowExecutionResultDto>(await workflowApi.resumeWithInput(executionId, { stepId, input })),
+    getSignals: async (executionId: string) => {
+      const items = unwrapOk<WorkflowExecutionSignalDto[] | null>(await workflowApi.getPendingSignals(executionId))
+      return Array.isArray(items) ? items : []
     },
   }
 

@@ -392,6 +392,40 @@ describe('UserCenter (section-registry shell)', () => {
       expect(offersChange(wrapper, EMAIL)).toBe(false)
       expect(offersChange(wrapper, PHONE)).toBe(true)
     })
+
+    /**
+     * The code sent to the new address is `Identity:Otp:CodeLength` digits
+     * (4-8), reported by `/auth/config` as `otpCodeLength`. The field's copy
+     * says how many digits to expect instead of a hard-coded "6-digit".
+     */
+    async function codePlaceholderAfterSend(): Promise<string | null> {
+      const wrapper = mountUserCenter()
+      await flushPromises()
+      await identityRow(wrapper, EMAIL).find('button').trigger('click')
+      await flushPromises()
+      const target = document.body.querySelector<HTMLInputElement>('input[placeholder="new@email.com"]')
+      expect(target, 'change-email modal rendered').not.toBeNull()
+      target!.value = 'new@b.com'
+      target!.dispatchEvent(new Event('input'))
+      await flushPromises()
+      const send = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Send code')
+      expect(send, 'send-code button rendered').toBeTruthy()
+      send!.click()
+      await flushPromises()
+      expect(me.sendChangeEmailCode).toHaveBeenCalledTimes(1)
+      const placeholders = [...document.body.querySelectorAll('input')].map((i) => i.getAttribute('placeholder'))
+      wrapper.unmount()
+      return placeholders.find((p) => p?.includes('-digit code')) ?? null
+    }
+
+    it('the change-contact code field states the deployment code length (8 when configured)', async () => {
+      getAuthConfig.mockResolvedValueOnce({ allowEmailLogin: true, allowSmsLogin: true, oAuthProviders: [], otpCodeLength: 8 } as never)
+      expect(await codePlaceholderAfterSend()).toBe('Enter the 8-digit code')
+    })
+
+    it('the change-contact code field says 6 digits when the backend does not report a length', async () => {
+      expect(await codePlaceholderAfterSend()).toBe('Enter the 6-digit code')
+    })
   })
 
   it('switches the active section (Profile → Security) and renders the target body', async () => {
@@ -416,7 +450,12 @@ describe('UserCenter (section-registry shell)', () => {
     await flushPromises()
   }
 
-  it('2FA (disabled): per-method rows are shown but disabled until the master switch is on', async () => {
+  // The two-factor block is `TTwoFactorPanel` in self mode, wired to the page's
+  // bridge. Its decisions are locked in the panel's own tests; what is checked
+  // here is that the section mounts it against `me.*` and that the shell's
+  // English copy reaches it.
+
+  it('2FA (nothing set up): every method is listed with its first step, no master switch', async () => {
     // Wire returns per-method state with PascalCase string types.
     me.getTwoFactorStatus.mockResolvedValue({
       isEnabled: false,
@@ -431,30 +470,25 @@ describe('UserCenter (section-registry shell)', () => {
     const wrapper = mountUserCenter()
     await openSecurity(wrapper)
 
-    // Disabled → the method rows are VISIBLE (so the user can see what's
-    // available) but their controls render disabled until 2FA is turned on.
-    const before = wrapper.text()
-    expect(before).toContain('Text message (SMS)')
-    expect(before).toContain('Authenticator app')
-    // The SMS/email method switches render disabled (the master switch does not).
-    expect(wrapper.findAll('.n-switch--disabled').length).toBeGreaterThanOrEqual(1)
-
-    // Flip the header master switch on → the rows become interactive.
-    const sw = wrapper.find('.n-switch')
-    expect(sw.exists()).toBe(true)
-    await sw.trigger('click')
-    await flushPromises()
-
-    const text = wrapper.text()
-    // SMS and Email each get their own row (distinct labels), TOTP has Set up.
+    const panel = wrapper.find('.t-2fa')
+    expect(panel.exists()).toBe(true)
+    const text = panel.text()
+    expect(text).toContain('Not set up')
+    expect(text).toContain('Authenticator app (TOTP)')
     expect(text).toContain('Text message (SMS)')
     expect(text).toContain('Email code')
-    expect(text).toContain('Set up')
-    // Addresses are verified in this fixture → no method switch stays disabled.
-    expect(wrapper.findAll('.n-switch--disabled').length).toBe(0)
+    // Rows are live straight away: enabling the first one turns two-factor on.
+    const labels = panel.findAll('button').map((b) => b.text())
+    expect(labels).toContain('Set up')
+    expect(labels.filter((l) => l === 'Enable')).toHaveLength(2)
+    expect(panel.find('.n-switch').exists()).toBe(false)
+
+    await panel.findAll('button').find((b) => b.text() === 'Enable')!.trigger('click')
+    await flushPromises()
+    expect(me.enableTwoFactor).toHaveBeenCalledWith({ type: 'Sms' })
   })
 
-  it('2FA (TOTP channel disabled): authenticator row is hidden even after turning 2FA on', async () => {
+  it('2FA (TOTP channel disabled): the authenticator row is absent', async () => {
     // Deployment turned EnableTotp off → backend omits TOTP from `methods`.
     me.getTwoFactorStatus.mockResolvedValue({
       isEnabled: false,
@@ -468,18 +502,13 @@ describe('UserCenter (section-registry shell)', () => {
     const wrapper = mountUserCenter()
     await openSecurity(wrapper)
 
-    const sw = wrapper.find('.n-switch')
-    await sw.trigger('click')
-    await flushPromises()
-
-    const text = wrapper.text()
-    // SMS / Email rows still render, but the authenticator (TOTP) row is gone.
+    const text = wrapper.find('.t-2fa').text()
     expect(text).toContain('Text message (SMS)')
     expect(text).toContain('Email code')
     expect(text).not.toContain('Authenticator app')
   })
 
-  it('2FA (enabled: TOTP + SMS): master switch on, per-method rows with TOTP disable + preferred star', async () => {
+  it('2FA (enabled: TOTP + SMS): state tag on, enabled rows carry Preferred / Set as preferred / Disable', async () => {
     me.getTwoFactorStatus.mockResolvedValue({
       isEnabled: true,
       supportedTypes: ['Sms', 'Totp'],
@@ -493,22 +522,17 @@ describe('UserCenter (section-registry shell)', () => {
     const wrapper = mountUserCenter()
     await openSecurity(wrapper)
 
-    // Master switch reflects the aggregate enabled flag (naive marks it active).
-    const sw = wrapper.find('.n-switch')
-    expect(sw.exists()).toBe(true)
-    expect(sw.classes()).toContain('n-switch--active')
-
-    const text = wrapper.text()
-    expect(text).toContain('Text message (SMS)') // SMS row present
-    expect(text).toContain('Authenticator app') // TOTP row
-    expect(text).toContain('Enabled') // TOTP enabled tag
-    expect(text).toContain('Disable') // TOTP individual remove
-    // Two methods enabled → both an enable switch (SMS) and star affordances render.
-    // Master + SMS switches = at least 2 switches present.
-    expect(wrapper.findAll('.n-switch').length).toBeGreaterThanOrEqual(2)
+    const panel = wrapper.find('.t-2fa')
+    expect(panel.find('.t-detail-block__title .n-tag').text()).toBe('On')
+    const cards = panel.findAll('.t-item-card')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].text()).toContain('Authenticator app (TOTP)')
+    expect(cards[0].text()).toContain('Preferred')
+    expect(cards[0].findAll('button').map((b) => b.text())).toEqual(['Disable'])
+    expect(cards[1].findAll('button').map((b) => b.text())).toEqual(['Set as preferred', 'Disable'])
   })
 
-  it('2FA (active → master off): suspends (keeps config), never destructively disables', async () => {
+  it('2FA (active → Turn off): suspends (keeps config), never destructively disables', async () => {
     me.getTwoFactorStatus.mockResolvedValue({
       isEnabled: true,
       supportedTypes: ['Totp'],
@@ -519,17 +543,18 @@ describe('UserCenter (section-registry shell)', () => {
     const wrapper = mountUserCenter()
     await openSecurity(wrapper)
 
-    // Turn the master switch OFF → must SUSPEND (preserve), not wipe.
-    const sw = wrapper.find('.n-switch')
-    expect(sw.classes()).toContain('n-switch--active')
-    await sw.trigger('click')
+    // "Turn off" sits behind a confirmation; answer it on the component.
+    const confirm = wrapper
+      .findAllComponents({ name: 'Popconfirm' })
+      .find((c) => c.text().includes('Turn off'))!
+    confirm.vm.$emit('positive-click')
     await flushPromises()
 
     expect(me.suspendTwoFactor).toHaveBeenCalledTimes(1)
     expect(me.disableTwoFactor).not.toHaveBeenCalled()
   })
 
-  it('2FA (suspended → master on): resumes the saved config; shows the "saved" hint', async () => {
+  it('2FA (suspended → Turn back on): resumes the saved config; the tag says the methods are kept', async () => {
     // Suspended state: master off (isEnabled=false) but a method stays configured.
     me.getTwoFactorStatus.mockResolvedValue({
       isEnabled: false,
@@ -541,16 +566,11 @@ describe('UserCenter (section-registry shell)', () => {
     const wrapper = mountUserCenter()
     await openSecurity(wrapper)
 
-    // Suspended hint reassures the config is kept; method rows stay visible but
-    // disabled (master off) so the user sees the preserved setup.
-    expect(wrapper.text()).toContain('Your configured methods are saved')
+    const panel = wrapper.find('.t-2fa')
+    expect(panel.find('.t-detail-block__title .n-tag').text()).toBe('Off (methods kept)')
 
-    // Turn the master switch ON → RESUME (not a fresh setup).
-    const sw = wrapper.find('.n-switch')
-    expect(sw.classes()).not.toContain('n-switch--active')
-    await sw.trigger('click')
+    await panel.findAll('button').find((b) => b.text() === 'Turn back on')!.trigger('click')
     await flushPromises()
-
     expect(me.resumeTwoFactor).toHaveBeenCalledTimes(1)
   })
 })

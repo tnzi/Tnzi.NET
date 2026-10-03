@@ -35,10 +35,56 @@ public static class CliWorkspaceLayout
     /// <summary>身份哨兵里的固定标识。</summary>
     public const string ManagedBy = "tnzi-external-agent";
 
-    /// <summary>回退用的默认工作区根目录。</summary>
-    public static string DefaultWorkspacesRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Tnzi", "agent-workspaces");
+    /// <summary>
+    /// 专用配置目录的默认父目录名（<c>{WorkspacesRoot}/.cli-config/{provider}</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 以点开头是契约：回收器跳过工作区根与租户层下所有点开头的目录。专用配置目录里是登录态与会话存档，
+    /// 按运行目录的规矩回收它，等于每 72 小时把 CLI 登出一次、清空所有线程的续接指针。
+    /// </remarks>
+    public const string ConfigDirectoryName = ".cli-config";
+
+    /// <summary>用户分区目录名前缀（<c>u-{userId}</c>），回收器据此识别出多一层的目录。</summary>
+    public const string UserPartitionPrefix = "u-";
+
+    /// <summary>没有登录用户的运行所在的分区名。</summary>
+    public const string AnonymousUserPartition = UserPartitionPrefix + "anonymous";
+
+    /// <summary>用户分区目录名。</summary>
+    public static string UserPartition(Guid? userId)
+        => userId is { } id ? UserPartitionPrefix + id.ToString("N") : AnonymousUserPartition;
+
+    /// <summary>生效的工作区根目录：配置值，否则 <see cref="DefaultWorkspacesRoot"/>。</summary>
+    public static string ResolveWorkspacesRoot(CliAgentOptions options)
+        => string.IsNullOrWhiteSpace(options.WorkspacesRoot) ? DefaultWorkspacesRoot : options.WorkspacesRoot;
+
+    /// <summary>
+    /// provider 的专用配置目录：显式配置值，否则 <c>{WorkspacesRoot}/.cli-config/{Key}</c>。
+    /// </summary>
+    public static string ResolveConfigDirectory(CliProviderDescriptor provider, CliAgentOptions options)
+        => string.IsNullOrWhiteSpace(provider.ConfigDirectory)
+            ? Path.Combine(ResolveWorkspacesRoot(options), ConfigDirectoryName, provider.Key)
+            : provider.ConfigDirectory;
+
+    /// <summary>
+    /// 回退用的默认工作区根目录 <c>{LocalApplicationData}/Tnzi/agent-workspaces</c>；宿主没有用户数据目录时为空串
+    /// （启用本模块时 <see cref="CliAgentOptionsValidator"/> 据此拒绝启动）。
+    /// </summary>
+    public static string DefaultWorkspacesRoot { get; } = ResolveDefaultWorkspacesRoot(Environment.GetFolderPath);
+
+    /// <remarks>
+    /// ★ 两条不变量：①必须 <see cref="Environment.SpecialFolderOption.DoNotVerify"/>，默认的 <c>None</c> 在 Unix 上
+    /// 对尚不存在的目录返回空串（macOS 与新建账号上 <c>~/.local/share</c> 往往还没建）；②解析不出时返回空串而不是
+    /// 拼出 <c>Tnzi/agent-workspaces</c> 这样的相对路径 —— 那会让外部 agent 的工作区静默落进进程当前目录，
+    /// 通常就是部署目录。
+    /// </remarks>
+    internal static string ResolveDefaultWorkspacesRoot(Func<Environment.SpecialFolder, Environment.SpecialFolderOption, string> getFolderPath)
+    {
+        var localAppData = getFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        return string.IsNullOrWhiteSpace(localAppData)
+            ? string.Empty
+            : Path.Combine(localAppData, "Tnzi", "agent-workspaces");
+    }
 }
 
 /// <summary>

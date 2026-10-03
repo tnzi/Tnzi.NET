@@ -1,4 +1,6 @@
-﻿namespace Tnzi.Payment.Promotions.Services;
+﻿using ConflictException = Tnzi.Exceptions.ConflictException;
+
+namespace Tnzi.Payment.Promotions.Services;
 
 /// <summary>
 /// 优惠券服务实现：同时回答父模块的支付流程与本模块自己的券包 / 发券两个面。
@@ -94,15 +96,25 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             if (existingUsage != null)
                 return Ok(existingUsage.MapTo<CouponUsageDto>());
 
-            // 不可叠加：同一业务单号上已用过其它券
-            if (!stackable)
-            {
-                var orderHasOtherCoupon = await _couponUsageRepository.AnyAsync(
-                    c => c.BusinessOrderNo == context.BusinessOrderNo && c.UserId == context.UserId, ct);
+            // 不可叠加是**双向**的：单上已有券而这张不可叠加，拒绝；单上已有一张不可叠加的券，
+            // 不论这张可不可叠加也拒绝 —— 只判前者时，先用不可叠加的 A、再用可叠加的 B，A 的承诺就破了。
+            // 「单上已有」= 未释放的核销记录（释放即删行）。按用户 + 单号划定：业务单号由消费方给出、不保证跨用户唯一。
+            var orderCoupons = await _couponUsageRepository.AsNoTracking()
+                .Where(c => c.BusinessOrderNo == context.BusinessOrderNo && c.UserId == context.UserId)
+                .Select(c => new { c.OrderSlot, c.Coupon!.Stackable })
+                .ToListAsync(ct);
 
-                if (orderHasOtherCoupon)
-                    return Fail<CouponUsageDto>(ErrorCodes.CouponAlreadyUsedByUser, 400);
+            if (orderCoupons.Count > 0 && (!stackable || orderCoupons.Any(c => !c.Stackable)))
+            {
+                return Fail<CouponUsageDto>(
+                    "This coupon cannot be combined with the coupon already applied to this order.",
+                    400, ErrorCodes.CouponNotStackable);
             }
+
+            // 上面的判定是先读后写，并发的两笔核销（不同的券，促销行锁管不到）互相看不见对方未提交的行。
+            // 槽位与判定出自同一次读：两笔读到同一个券集合就算出同一个槽位，
+            // (UserId, BusinessOrderNo, OrderSlot) 唯一索引只放一笔过去（见 CouponUsage.OrderSlot）。
+            var orderSlot = (orderCoupons.Max(c => c.OrderSlot) ?? -1) + 1;
 
             // ★ 原子递增总使用次数放在所有写入之前（带总量上限 CAS，防止并发超发）。
             // ExecuteInUnitOfWorkAsync 只在**抛异常**时回滚：返回失败 Result 照样提交。
@@ -160,10 +172,24 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
                 OrderId = context.OrderId,
                 BusinessOrderNo = context.BusinessOrderNo,
                 DiscountAmount = discountAmount,
-                UserCouponId = claimedCouponId
+                UserCouponId = claimedCouponId,
+                OrderSlot = orderSlot
             };
 
             await _couponUsageRepository.InsertAsync(couponUsage, ct);
+
+            // 当场刷出去，让唯一索引的冲突在这里而不是在调用方提交时浮出来。
+            // 冲突只能抛异常：撞约束之后事务已不可用（PostgreSQL 直接中止它），而且上面的总用量递增与持券抢占
+            // 都要一起撤掉 —— 返回失败 Result 会照样提交。
+            try
+            {
+                await FlushAsync(ct);
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation() && ex.Entries.Any(e => e.Entity is CouponUsage))
+            {
+                throw new ConflictException(
+                    "The coupons on this order changed while this coupon was being applied. Please retry.");
+            }
 
             if (claimedCouponId != null)
             {
@@ -333,8 +359,14 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
 
             var now = DateTime.UtcNow;
 
+            // ★ 按规范形态比对：码由 RedemptionCode.GenerateCode 生成，恒为大写且不含空白与连字符，
+            // 而用户照着海报 / 短信敲进来的常是小写、带空格或按四位一组加了连字符。按原样 == 比对时，
+            // 结果取决于数据库排序规则（SQL Server / MySQL 默认不区分大小写能兑到，PostgreSQL / SQLite 答 404），
+            // 同一个码换一个库就兑不出来。原样写法也比一次，照顾消费方直接写进表里的自定义码。
+            var trimmed = code.Trim();
+            var normalized = NormalizeRedemptionCode(code);
             var redemptionCode = await _redemptionCodeRepository.FirstOrDefaultAsync(
-                r => r.Code == code, ct);
+                r => r.Code == normalized || r.Code == trimmed, ct);
 
             if (redemptionCode == null)
                 return Fail<UserCouponDto>(ErrorCodes.RedemptionCodeNotFound, 404);
@@ -495,6 +527,10 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         // 用过一张但订阅从没建成的人被答成「不可用」而核销放行 —— 预检不能单独多一条或少一条规则。
         return Ok(await _promotionService.IsFirstSubscriptionEligibleAsync(userId, cancellationToken));
     }
+
+    /// <summary>兑换码的规范形态：去掉空白与连字符后转大写（生成的码只由大写字母与数字组成）。</summary>
+    internal static string NormalizeRedemptionCode(string code)
+        => new string(code.Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray()).ToUpperInvariant();
 
     /// <summary>唯一码恒 1；通用码 null → 1、0 → 不限（存 null）、正数原样。</summary>
     private static int? ResolvePerUserLimit(RedemptionCodeType type, int? requested)

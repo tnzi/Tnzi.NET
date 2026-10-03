@@ -32,7 +32,7 @@
  * row, which meant investigating one account was a sequence of modals that
  * could never be seen together. A row now opens the user.
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -45,7 +45,7 @@ import { PendingUserActions } from '@tnzi/core/services/identity'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import TFormSchemaRenderer from '../_shared/form-schema'
-import { userColumns, userSearchFields, userFormSchema } from './user-config'
+import { userColumns, userSearchFields, createUserFormSchema } from './user-config'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
 
 interface UserListItem {
@@ -104,6 +104,18 @@ const crud = useCrudPage<UserListItem>({
 })
 
 const rowKey = (row: unknown) => (row as UserListItem).id
+
+/**
+ * 用户名是否就是邮箱（`Identity:SignIn:UseEmailAsUserName`）。探测未回或失败时按「否」处理：
+ * 表单多出一个用户名输入框，填错了服务端会明确拒绝；反过来按「是」藏掉它，
+ * 在关掉该开关的部署上就再也建不出账号。
+ */
+const useEmailAsUserName = ref(false)
+onMounted(async () => {
+  const authConfig = await bridge.getAuthConfig()
+  useEmailAsUserName.value = authConfig?.useEmailAsUserName ?? false
+})
+const userFormSchema = computed(() => createUserFormSchema({ useEmailAsUserName: useEmailAsUserName.value }))
 
 const t = makePageTranslator('identity.users')
 const message = useSafeMessage()

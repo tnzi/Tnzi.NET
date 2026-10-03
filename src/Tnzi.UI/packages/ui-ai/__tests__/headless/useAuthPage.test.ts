@@ -128,6 +128,75 @@ describe('useAuthPage', () => {
       await auth.onTwoFactorSubmit();
       expect(onAuthenticated).toHaveBeenCalledTimes(1);
     });
+
+    // A security key is a ceremony, not a code: its own leg, its own outcome.
+    it('the passkey leg reports authenticated when the ceremony completes', async () => {
+      const verifyTwoFactorWithPasskey = vi.fn(async () => true);
+      const { auth, onAuthenticated } = page({ verifyTwoFactorWithPasskey } as LoginCallbacks);
+      auth.step.value = 'two-factor';
+      auth.twoFactorMethod.value = 'passkey';
+
+      await auth.onTwoFactorPasskey();
+
+      expect(verifyTwoFactorWithPasskey.mock.calls[0]?.[1]).toBeDefined();
+      expect(onAuthenticated).toHaveBeenCalledTimes(1);
+    });
+
+    it('a closed system dialog leaves the passkey step open and reports nothing', async () => {
+      const verifyTwoFactorWithPasskey = vi.fn(async () => false);
+      const { auth, onAuthenticated } = page({ verifyTwoFactorWithPasskey } as LoginCallbacks);
+      auth.step.value = 'two-factor';
+      auth.twoFactorMethod.value = 'passkey';
+
+      await auth.onTwoFactorPasskey();
+
+      expect(onAuthenticated).not.toHaveBeenCalled();
+      expect(auth.error.value).toBe('');
+      expect(auth.step.value).toBe('two-factor');
+    });
+
+    it('switching to the passkey sends nothing, and the passkey is offered only when wired', async () => {
+      vi.stubGlobal('PublicKeyCredential', { parseCreationOptionsFromJSON: vi.fn(), parseRequestOptionsFromJSON: vi.fn() });
+      const resendTwoFactor = vi.fn(async () => ({ maskedAddress: 'a***@x' }));
+      const { auth } = page({ resendTwoFactor, verifyTwoFactorWithPasskey: vi.fn(async () => true) } as LoginCallbacks);
+      auth.challenge.value = { challengeId: 't', method: 'email', methods: ['email', 'passkey'] };
+      auth.twoFactorMethod.value = 'email';
+      expect(auth.otherTwoFactorMethods.value).toEqual(['passkey']);
+
+      await auth.useTwoFactorMethod('passkey');
+
+      expect(resendTwoFactor).not.toHaveBeenCalled();
+      expect(auth.twoFactorMethod.value).toBe('passkey');
+
+      const { auth: unwired } = page({ resendTwoFactor } as LoginCallbacks);
+      unwired.challenge.value = { challengeId: 't', method: 'email', methods: ['email', 'passkey'] };
+      unwired.twoFactorMethod.value = 'email';
+      expect(unwired.otherTwoFactorMethods.value).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+
+    it('does not offer a wired passkey in a browser that cannot run the ceremony', () => {
+      vi.stubGlobal('PublicKeyCredential', undefined);
+      const { auth } = page({ verifyTwoFactorWithPasskey: vi.fn(async () => true) } as LoginCallbacks);
+      auth.challenge.value = { challengeId: 't', method: 'email', methods: ['email', 'passkey'] };
+      auth.twoFactorMethod.value = 'email';
+
+      expect(auth.otherTwoFactorMethods.value).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+
+    it('shows why the initial code could not be delivered instead of a silent prompt', async () => {
+      const pwdLogin = vi.fn(async (_p, helpers) => {
+        helpers.setTwoFactorRequired({ challengeId: 'c1', method: 'email', methods: ['email'], codeSendError: 'Too many codes requested' });
+      });
+      const { auth, onAuthenticated } = page({ pwdLogin } as LoginCallbacks);
+      auth.account.value = 'me@example.com';
+      await auth.onPasswordSubmit();
+
+      expect(auth.step.value).toBe('two-factor');
+      expect(auth.error.value).toBe('Too many codes requested');
+      expect(onAuthenticated).not.toHaveBeenCalled();
+    });
   });
 
   /**

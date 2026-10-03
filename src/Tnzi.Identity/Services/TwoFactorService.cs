@@ -12,6 +12,7 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     private readonly UserManager<User> _userManager;
     private readonly IEventBus? _eventBus;
     private readonly OtpOptions _otpOptions;
+    private readonly PasskeyOptions _passkeyOptions;
     private readonly ICache? _cache;
 
     public TwoFactorService(
@@ -28,6 +29,7 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         _eventBus = eventBus;
         // Scoped 服务：IOptionsSnapshot 每请求重算，构造期捕获 Otp 即随请求热更新。
         _otpOptions = identityOptions?.Value.Otp ?? new OtpOptions();
+        _passkeyOptions = identityOptions?.Value.Passkey ?? new PasskeyOptions();
         _cache = cache;
     }
 
@@ -105,6 +107,13 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // Passkey 不是验证码：第二步是一次 WebAuthn 断言，走 IPasskeyService.VerifyAssertionAsync。
+        // 落到这里说明调用方把它当成了输码方式，直接拒绝，别让它掉进下面的地址分支。
+        if (type == TwoFactorType.Passkey)
+        {
+            return Fail("A passkey is verified by assertion, not by a code", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // TOTP 验证：直接走 UserManager 内置验证，不查数据库。
         // ⚠ TOTP 码由时间与共享密钥派生，不存在「这枚码是为哪个用途发的」——
         // purpose 对它无从约束，这是 TOTP 的固有性质。需要按用途隔离的场景请用 SMS/Email。
@@ -160,13 +169,25 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         // 全部关闭:清空每种方式 flag + 首选 + 重置 authenticator key,聚合置 false。
-        await _userManager.ResetAuthenticatorKeyAsync(user);
+        // Passkey 只清开关不删凭据:凭据是登录 / 二次确认的凭据,归「通行密钥」管;
+        // 这里关掉的是「拿它当第二因子」。
+        var keyReset = await _userManager.ResetAuthenticatorKeyAsync(user);
+        if (!keyReset.Succeeded)
+        {
+            return SaveFailed(keyReset);
+        }
+
         user.SmsTwoFactorEnabled = false;
         user.EmailTwoFactorEnabled = false;
         user.AuthenticatorTwoFactorEnabled = false;
+        user.PasskeyTwoFactorEnabled = false;
         user.PreferredTwoFactorType = null;
         user.TwoFactorEnabled = false;
-        await _userManager.UpdateAsync(user);
+        var saved = await _userManager.UpdateAsync(user);
+        if (!saved.Succeeded)
+        {
+            return SaveFailed(saved);
+        }
 
         // 清理未使用的验证码
         var unusedCodes = await _repository
@@ -193,11 +214,19 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
 
         // 先迁移旧用户(把 legacy 单标志展开为 per-method flag),再暂停 —— 这样暂停
         // 也把"当前可用方式"固化下来,恢复时能原样带回。
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+        {
+            return SaveFailed(materialized);
+        }
 
         // 只关总开关:登录不再挑战,但保留每种方式 flag + TOTP key + 首选。恢复即原样生效。
         user.TwoFactorEnabled = false;
-        await _userManager.UpdateAsync(user);
+        var saved = await _userManager.UpdateAsync(user);
+        if (!saved.Succeeded)
+        {
+            return SaveFailed(saved);
+        }
 
         LogInformation("2FA suspended (config preserved) for user {UserId}", userId);
         return Ok();
@@ -224,7 +253,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         {
             user.PreferredTwoFactorType = PickPreferred(explicitSet);
         }
-        await _userManager.UpdateAsync(user);
+        var saved = await _userManager.UpdateAsync(user);
+        if (!saved.Succeeded)
+        {
+            return SaveFailed(saved);
+        }
 
         LogInformation("2FA resumed for user {UserId}", userId);
         return Ok();
@@ -239,7 +272,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+        {
+            return SaveFailed(materialized);
+        }
 
         switch (type)
         {
@@ -251,14 +288,28 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
                 break;
             case TwoFactorType.Totp:
                 // 移除 authenticator key(使 TOTP 彻底失效,再次启用需重新设置)。
-                await _userManager.ResetAuthenticatorKeyAsync(user);
+                var keyReset = await _userManager.ResetAuthenticatorKeyAsync(user);
+                if (!keyReset.Succeeded)
+                {
+                    return SaveFailed(keyReset);
+                }
+
                 user.AuthenticatorTwoFactorEnabled = false;
+                break;
+            case TwoFactorType.Passkey:
+                // 只关「当第二因子」的开关;凭据留着,它们还是登录与二次确认的凭据。
+                user.PasskeyTwoFactorEnabled = false;
                 break;
             default:
                 return Fail("Invalid two-factor type", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        await SyncAndSaveAsync(user);
+        var synced = await SyncAndSaveAsync(user);
+        if (!synced.Succeeded)
+        {
+            return SaveFailed(synced);
+        }
+
         LogInformation("2FA method {Type} disabled for user {UserId}", type, userId);
         return Ok();
     }
@@ -272,7 +323,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+        {
+            return SaveFailed(materialized);
+        }
 
         // 首选方式必须是当前已启用的方式。
         if (!ExplicitEnabled(user).Contains(type))
@@ -281,7 +336,12 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         user.PreferredTwoFactorType = type;
-        await _userManager.UpdateAsync(user);
+        var saved = await _userManager.UpdateAsync(user);
+        if (!saved.Succeeded)
+        {
+            return SaveFailed(saved);
+        }
+
         LogInformation("Preferred 2FA method set to {Type} for user {UserId}", type, userId);
         return Ok();
     }
@@ -322,6 +382,8 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             TwoFactorType.Sms => CanConfigureSms(user),
             TwoFactorType.Email => CanConfigureEmail(user),
             TwoFactorType.Totp => CanConfigureTotp() && await IsTotpConfiguredAsync(user),
+            // 最后一枚凭据被删掉、或部署关了渠道 ⇒ 登录不再提供它,别把人停在没人能完成的第二步。
+            TwoFactorType.Passkey => await CanConfigurePasskeyAsync(user),
             _ => false,
         };
 
@@ -334,25 +396,32 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         }
 
         // 一次性把旧用户(单一 TwoFactorEnabled 标志)迁移为按方式 flag,之后所有读写
-        // 都以显式 flag 为准。
-        await MaterializeAsync(user);
+        // 都以显式 flag 为准。读路径上迁移没能落库不挡读：内存里的 flag 已按迁移后的口径展开，
+        // 报出的状态是对的；下一次写会再迁移一次，而写路径会把失败报出来。
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+        {
+            LogWarning("Two-factor settings of user {UserId} could not be migrated: {Errors}", userId, materialized.FormatErrors());
+        }
 
         var configurable = await ComputeConfigurableAsync(user); // 可开启/配置的方式(TOTP 恒可设置)
         var enabled = ExplicitEnabled(user);                     // 迁移后显式 flag 即权威
         var preferred = user.PreferredTwoFactorType;
 
-        // 每种方式一行:可配置、已启用、或"部署已开启该渠道但用户地址未验证"三种情况都展示,
-        // 后者以 RequiresAddress=true 提示用户先去验证手机/邮箱(避免"开了全局配置却在列表看
-        // 不到该方式"的困惑)。顺序 TOTP → 短信 → 邮箱。
+        // 每种方式一行:可配置、已启用、或"部署已开启该渠道但用户还差一步"三种情况都展示,
+        // 后者以 RequiresAddress=true 提示用户先去验证手机/邮箱、或先登记一枚 passkey
+        // (避免"开了全局配置却在列表看不到该方式"的困惑)。顺序 TOTP → Passkey → 短信 → 邮箱。
         var methods = new List<TwoFactorMethodDto>();
-        foreach (var t in new[] { TwoFactorType.Totp, TwoFactorType.Sms, TwoFactorType.Email })
+        foreach (var t in new[] { TwoFactorType.Totp, TwoFactorType.Passkey, TwoFactorType.Sms, TwoFactorType.Email })
         {
             var isConfigurable = configurable.Contains(t);
             var isEnabled = enabled.Contains(t);
-            // 渠道在部署层是否开启:三种方式均看运行时 OtpOptions(TOTP 与短信/邮箱对称,可整体关闭)。
+            // 渠道在部署层是否开启:四种方式均看运行时 OtpOptions(可整体关闭);
+            // passkey 还叠着 WebAuthn 接线本身的开关,接线没开这一行根本不出现。
             var channelOn = (t == TwoFactorType.Totp && _otpOptions.EnableTotp)
                 || (t == TwoFactorType.Sms && _otpOptions.EnableSms)
-                || (t == TwoFactorType.Email && _otpOptions.EnableEmail);
+                || (t == TwoFactorType.Email && _otpOptions.EnableEmail)
+                || (t == TwoFactorType.Passkey && IsPasskeyChannelOn());
             if (isConfigurable || isEnabled || channelOn)
             {
                 methods.Add(new TwoFactorMethodDto
@@ -390,7 +459,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail<string>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+        {
+            return SaveFailed<string>(materialized);
+        }
 
         // 按方式启用:地址已验证即可开启该渠道(信任账号已确认的手机/邮箱)。
         // TOTP 必须走 totp/setup + totp/enable(需验证一次性码),不在此处启用。
@@ -408,11 +481,23 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
                 break;
             case TwoFactorType.Totp:
                 return Fail<string>("Use the authenticator setup flow (totp/setup then totp/enable) to enable TOTP", 400, ErrorCodes.VALIDATION_ERROR);
+            case TwoFactorType.Passkey:
+                // 凭据在「通行密钥」里登记,这里只是把登记好的拿来当第二因子。
+                // 没有凭据就开这个开关,登录会停在一个没人能完成的第二步。
+                if (!await CanConfigurePasskeyAsync(user))
+                    return Fail<string>("Passkey two-factor is disabled or no passkey is registered for this account", 400, ErrorCodes.VALIDATION_ERROR);
+                user.PasskeyTwoFactorEnabled = true;
+                break;
             default:
                 return Fail<string>("Invalid two-factor type", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        await SyncAndSaveAsync(user);
+        var synced = await SyncAndSaveAsync(user);
+        if (!synced.Succeeded)
+        {
+            return SaveFailed<string>(synced);
+        }
+
         LogInformation("2FA method {Type} enabled for user {UserId}", input.Type, userId);
         return Ok<string>("Two-factor method enabled successfully");
     }
@@ -428,7 +513,9 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail<TotpSetupDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
 
         // 在重置 key 之前先迁移旧用户状态,避免新生成的未验证 key 被 legacy 回退误判为已启用。
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+            return SaveFailed<TotpSetupDto>(materialized);
 
         // ★★ 已启用验证器的账号不许再登记：下一行会无条件重置密钥，于是一枚被盗的访问令牌
         //   借这条路能把受害者的第二因子**换成攻击者自己的**（而不只是摘掉），受害者手里的
@@ -437,8 +524,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         if (user.AuthenticatorTwoFactorEnabled)
             return Fail<TotpSetupDto>("An authenticator is already enabled. Disable it before enrolling a new one.", 409, ErrorCodes.DATA_CONFLICT);
 
-        // 重置并获取 authenticator key
-        await _userManager.ResetAuthenticatorKeyAsync(user);
+        // 重置并获取 authenticator key。重置没落库时不能把密钥交出去：用户扫进验证器的是一枚库里没有的密钥，
+        // 下一步 totp/enable 必然失败，而症状是「验证码不对」。
+        var keyReset = await _userManager.ResetAuthenticatorKeyAsync(user);
+        if (!keyReset.Succeeded)
+            return SaveFailed<TotpSetupDto>(keyReset);
         var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
         if (string.IsNullOrEmpty(unformattedKey))
             return Fail<TotpSetupDto>("Failed to generate authenticator key", 500);
@@ -471,9 +561,14 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             return Fail("Invalid verification code", 400, ErrorCodes.VALIDATION_ERROR);
 
         // 迁移旧用户其它方式,再启用 TOTP(不覆盖已启用的短信/邮箱)。
-        await MaterializeAsync(user);
+        var materialized = await MaterializeAsync(user);
+        if (!materialized.Succeeded)
+            return SaveFailed(materialized);
+
         user.AuthenticatorTwoFactorEnabled = true;
-        await SyncAndSaveAsync(user);
+        var synced = await SyncAndSaveAsync(user);
+        if (!synced.Succeeded)
+            return SaveFailed(synced);
 
         LogInformation("TOTP enabled for user {UserId}", userId);
         return Ok();
@@ -497,6 +592,26 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     private bool CanConfigureEmail(User user)
         => _otpOptions.EnableEmail && !string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed;
 
+    /// <summary>
+    /// passkey 渠道是否开着:两个开关都要开 —— <c>Otp.EnablePasskey</c>(能不能当第二因子)叠在
+    /// <c>Passkey.Enabled</c>(WebAuthn 接线本身)之上,接线没开时前者开了也没有断言可做。
+    /// </summary>
+    private bool IsPasskeyChannelOn()
+        => _otpOptions.EnablePasskey && _passkeyOptions.Enabled;
+
+    /// <summary>
+    /// passkey 方式是否可配置:渠道开着,且账号至少登记了一枚凭据。
+    /// </summary>
+    /// <remarks>
+    /// 渠道关着时<strong>不碰凭据存储</strong>:没接 passkey 的部署一次都不该为此查表。
+    /// </remarks>
+    private async Task<bool> CanConfigurePasskeyAsync(User user)
+    {
+        if (!IsPasskeyChannelOn()) return false;
+        var passkeys = await _userManager.GetPasskeysAsync(user);
+        return passkeys is { Count: > 0 };
+    }
+
     private async Task<bool> IsTotpConfiguredAsync(User user)
         => !string.IsNullOrEmpty(await _userManager.GetAuthenticatorKeyAsync(user));
 
@@ -507,20 +622,25 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         if (user.SmsTwoFactorEnabled) set.Add(TwoFactorType.Sms);
         if (user.EmailTwoFactorEnabled) set.Add(TwoFactorType.Email);
         if (user.AuthenticatorTwoFactorEnabled) set.Add(TwoFactorType.Totp);
+        if (user.PasskeyTwoFactorEnabled) set.Add(TwoFactorType.Passkey);
         return set;
     }
 
-    /// <summary>用户"可开启/配置"的方式集合(TOTP 需部署开启 EnableTotp;短信/邮箱需地址已验证)。</summary>
-    private Task<HashSet<TwoFactorType>> ComputeConfigurableAsync(User user)
+    /// <summary>用户"可开启/配置"的方式集合(TOTP 需部署开启 EnableTotp;短信/邮箱需地址已验证;passkey 需渠道开着且已登记凭据)。</summary>
+    private async Task<HashSet<TwoFactorType>> ComputeConfigurableAsync(User user)
     {
         var set = new HashSet<TwoFactorType>();
         if (CanConfigureTotp()) set.Add(TwoFactorType.Totp);
         if (CanConfigureSms(user)) set.Add(TwoFactorType.Sms);
         if (CanConfigureEmail(user)) set.Add(TwoFactorType.Email);
-        return Task.FromResult(set);
+        if (await CanConfigurePasskeyAsync(user)) set.Add(TwoFactorType.Passkey);
+        return set;
     }
 
-    /// <summary>旧用户(2FA 开着但无按方式 flag)登录时实际可用的方式 = 已配置的方式。</summary>
+    /// <summary>
+    /// 旧用户(2FA 开着但无按方式 flag)登录时实际可用的方式 = 已配置的方式。
+    /// 刻意不含 passkey:那是本模型之后才有的方式,登记过 passkey 的旧用户从没表示过要拿它当第二因子。
+    /// </summary>
     private async Task<HashSet<TwoFactorType>> ComputeLegacyEnabledAsync(User user)
     {
         var set = new HashSet<TwoFactorType>();
@@ -534,11 +654,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     /// 一次性把旧用户迁移到按方式模型:若 2FA 开着却无任何按方式 flag,则把 flag
     /// 设为当前已配置的方式并持久化。之后该用户完全走显式 flag。幂等;2FA 关闭时 no-op。
     /// </summary>
-    private async Task MaterializeAsync(User user)
+    private async Task<IdentityResult> MaterializeAsync(User user)
     {
         if (ExplicitEnabled(user).Count > 0 || !user.TwoFactorEnabled)
         {
-            return;
+            return IdentityResult.Success;
         }
 
         var legacy = await ComputeLegacyEnabledAsync(user);
@@ -549,14 +669,14 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         {
             user.PreferredTwoFactorType = PickPreferred(legacy);
         }
-        await _userManager.UpdateAsync(user);
+        return await _userManager.UpdateAsync(user);
     }
 
     /// <summary>
     /// 同步聚合的 TwoFactorEnabled(= 任一方式启用) + 校正首选方式,并持久化。
     /// 首选若指向已禁用的方式则改为剩余启用方式中的首选;无首选但有启用方式则默认设一个。
     /// </summary>
-    private async Task SyncAndSaveAsync(User user)
+    private async Task<IdentityResult> SyncAndSaveAsync(User user)
     {
         var explicitSet = ExplicitEnabled(user);
         var any = explicitSet.Count > 0;
@@ -571,20 +691,44 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             user.PreferredTwoFactorType = PickPreferred(explicitSet);
         }
 
-        await _userManager.UpdateAsync(user);
+        return await _userManager.UpdateAsync(user);
     }
 
-    /// <summary>按固定优先级(TOTP &gt; 邮箱 &gt; 短信)从集合中选一个默认首选。</summary>
+    /// <summary>
+    /// 账号行没写进去时的回答。
+    /// </summary>
+    /// <remarks>
+    /// ★ <see cref="UserManager{TUser}.UpdateAsync"/> 先跑全部 <c>IUserValidator</c> 再落库。存量账号过不了
+    /// 当前规则（用户名 / 邮箱早已不合新校验器）或并发戳冲突时它返回失败而一个字都没写；
+    /// 不看返回值，启用 / 禁用第二因子就答 200 而库里原样 —— 用户以为开了 2FA，登录照旧不挑战。
+    /// </remarks>
+    private Result SaveFailed(IdentityResult result)
+        => Fail($"Failed to save two-factor settings: {result.FormatErrors()}", 500, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+
+    /// <inheritdoc cref="SaveFailed(IdentityResult)"/>
+    private Result<T> SaveFailed<T>(IdentityResult result)
+        => Fail<T>($"Failed to save two-factor settings: {result.FormatErrors()}", 500, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
+
+    /// <summary>
+    /// 无首选时的固定优先级:passkey &gt; TOTP &gt; 邮箱 &gt; 短信 —— 按抗钓鱼强度排,
+    /// 也是登录挑战里首选之外的展示顺序。
+    /// </summary>
+    private static readonly TwoFactorType[] StrengthOrder =
+    [
+        TwoFactorType.Passkey, TwoFactorType.Totp, TwoFactorType.Email, TwoFactorType.Sms,
+    ];
+
+    /// <summary>按 <see cref="StrengthOrder"/> 从集合中选一个默认首选。</summary>
     private static TwoFactorType? PickPreferred(HashSet<TwoFactorType> set)
     {
-        foreach (var t in new[] { TwoFactorType.Totp, TwoFactorType.Email, TwoFactorType.Sms })
+        foreach (var t in StrengthOrder)
         {
             if (set.Contains(t)) return t;
         }
         return null;
     }
 
-    /// <summary>把集合排为列表:首选置顶,其余按 TOTP &gt; 邮箱 &gt; 短信。</summary>
+    /// <summary>把集合排为列表:首选置顶,其余按 <see cref="StrengthOrder"/>。</summary>
     private static List<TwoFactorType> OrderByPreferred(HashSet<TwoFactorType> set, TwoFactorType? preferred)
     {
         var ordered = new List<TwoFactorType>();
@@ -592,7 +736,7 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         {
             ordered.Add(preferred.Value);
         }
-        foreach (var t in new[] { TwoFactorType.Totp, TwoFactorType.Email, TwoFactorType.Sms })
+        foreach (var t in StrengthOrder)
         {
             if (set.Contains(t) && !ordered.Contains(t)) ordered.Add(t);
         }

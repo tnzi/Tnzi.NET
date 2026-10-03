@@ -54,6 +54,53 @@ describe('useAdminTabStore', () => {
     expect(store.tabs).toHaveLength(0)
   })
 
+  // ── claimForUser: tabs belong to the user they were opened by ───────────────
+  it('claimForUser drops tabs, pins included, saved under a different user', () => {
+    const store = useAdminTabStore()
+    store.claimForUser('user-a')
+    store.addTab(sampleRoute('users', 'Users'))
+    store.addTab(sampleRoute('system.diagnostics', 'Diagnostics'))
+    store.fixTab('users')
+    store.claimForUser('user-b')
+    expect(store.tabs).toHaveLength(0)
+    expect(store.fixedTabIds).toEqual([])
+    expect(store.activeTabId).toBe('')
+    expect(store.ownerId).toBe('user-b')
+  })
+
+  it('claimForUser keeps the tabs of the same user (e.g. a reload)', () => {
+    const store = useAdminTabStore()
+    store.claimForUser('user-a')
+    store.addTab(sampleRoute('users', 'Users'))
+    store.claimForUser('user-a')
+    expect(store.tabs.map((t) => t.id)).toEqual(['users'])
+  })
+
+  it('claimForUser adopts unclaimed tabs (first sign-in on this browser)', () => {
+    const store = useAdminTabStore()
+    store.addTab(sampleRoute('dashboard', 'Dashboard'))
+    store.claimForUser('user-a')
+    expect(store.tabs.map((t) => t.id)).toEqual(['dashboard'])
+    expect(store.ownerId).toBe('user-a')
+  })
+
+  it('claimForUser ignores an unresolved (empty) user id', () => {
+    const store = useAdminTabStore()
+    store.claimForUser('user-a')
+    store.addTab(sampleRoute('users', 'Users'))
+    store.claimForUser('')
+    expect(store.tabs).toHaveLength(1)
+    expect(store.ownerId).toBe('user-a')
+  })
+
+  it('addTab refuses the public recipient pages rendered outside the shell', () => {
+    const store = useAdminTabStore()
+    for (const name of ['share-link', 'unsubscribe', 'accept-invitation']) {
+      store.addTab(sampleRoute(name, name))
+    }
+    expect(store.tabs).toHaveLength(0)
+  })
+
   // ── pruneTabs: drop tabs the current user can no longer open ────────────────
   it('pruneTabs removes tabs whose route name is denied and re-points active', () => {
     const store = useAdminTabStore()

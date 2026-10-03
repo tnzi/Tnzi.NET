@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Tnzi.Json;
 using TnziIdentityOptions = Tnzi.Identity.Options.IdentityOptions;
@@ -28,8 +27,10 @@ public class PasskeyServiceTests
         // ★★ 这条是整个 passkey 接线的核心约束。走 SignInManager.PasskeySignInAsync
         // 或自己拼一个 token，都会绕过登录守卫（IP 白名单）与会话协调器（多设备策略），
         // 而那两样正是框架花了两轮修出来的东西。
+        // satisfiedFactor = Passkey：这次登录已经证明过这枚 passkey，账号若把 passkey 也设成第二因子，
+        // 再问一次问的是同一件事；别的因子（TOTP / 短信）照常挑战。与邮箱验证码登录扣掉 Email 同一条规则。
         fixture.AuthService.Verify(
-            x => x.IssueTokenAsync(fixture.User, LoginMethod.Passkey),
+            x => x.IssueTokenAsync(fixture.User, LoginMethod.Passkey, TwoFactorType.Passkey),
             Times.Once);
     }
 
@@ -42,7 +43,7 @@ public class PasskeyServiceTests
 
         // 登录守卫拒绝（IP 不在白名单）时，passkey 这条路径必须跟着被拒。
         fixture.AuthService
-            .Setup(x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>()))
+            .Setup(x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>(), It.IsAny<TwoFactorType?>()))
             .ReturnsAsync(Result<TokenResult>.Failure("Invalid username or password", 400, "VALIDATION_ERROR"));
 
         var result = await fixture.Service.CompleteAssertionAsync(
@@ -98,7 +99,7 @@ public class PasskeyServiceTests
         Assert.False(result.Succeeded);
         // 没有挑战就不该去问运行时要不要放行。
         fixture.AuthService.Verify(
-            x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>()), Times.Never);
+            x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>(), It.IsAny<TwoFactorType?>()), Times.Never);
     }
 
     [Fact]
@@ -132,6 +133,61 @@ public class PasskeyServiceTests
         Assert.Equal(401, result.Code);
     }
 
+    // ---------------------------------------------------------------- 二次确认
+
+    [Fact]
+    public async Task BeginRegistration_ForASignedInUser_RequiresStepUp()
+    {
+        // 已登录、没带注册令牌 = 给自己的账号新增一种登录方式。一枚被盗访问令牌借它换来的是
+        // 永久的密码因子绕过（改密、撤销全部会话之后 passkey 照样能登录），与 link-token 同一判据。
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.GivenCreationOptionsAreProduced();
+        fixture.GivenStepUpIsNotSatisfied();
+
+        var result = await fixture.Service.BeginRegistrationAsync();
+
+        Assert.False(result.Succeeded);
+        // 与 StepUpFilter 逐字同形：默认 401 + 专用错误码 + { scope }，前端的 withStepUp 才认得它。
+        Assert.Equal(401, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_STEP_UP_REQUIRED, result.ErrorCode);
+        Assert.Equal(StepUpScopes.LoginMethodManage, ScopeOf(result.ErrorDetails));
+        fixture.StepUp.Verify(x => x.IsSatisfiedAsync(StepUpScopes.LoginMethodManage, It.IsAny<CancellationToken>()), Times.Once);
+        // 没过确认就不该签发挑战：签了等于把 complete 那一半交出去了。
+        fixture.Handler.Verify(x => x.MakeCreationOptionsAsync(It.IsAny<PasskeyUserEntity>(), It.IsAny<HttpContext>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task BeginRegistration_ForASignedInUser_ProceedsOnceStepUpIsSatisfied()
+    {
+        // 防锈：确认过了就照常签发，否则上一条只证明「一律拒绝」也能通过。
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.GivenCreationOptionsAreProduced();
+
+        var result = await fixture.Service.BeginRegistrationAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data!.StateId);
+    }
+
+    [Fact]
+    public async Task BeginRegistration_WithAnEnrollmentToken_DoesNotAskForStepUp()
+    {
+        // 持令牌的人（邀请、账号恢复）本来就没有会话可供二次确认；令牌本身就是凭据。
+        var fixture = new Fixture();
+        fixture.GivenCreationOptionsAreProduced();
+        fixture.GivenStepUpIsNotSatisfied();
+
+        var result = await fixture.Service.BeginRegistrationAsync(Fixture.KnownEnrollmentToken);
+
+        Assert.True(result.Succeeded);
+        fixture.StepUp.Verify(x => x.IsSatisfiedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static string? ScopeOf(object? errorDetails)
+        => errorDetails?.GetType().GetProperty("scope")?.GetValue(errorDetails) as string;
+
     [Fact]
     public async Task BeginAssertion_ShouldNotRevealWhetherTheUserExists()
     {
@@ -145,6 +201,120 @@ public class PasskeyServiceTests
         // 就等于交出一个用户名枚举预言机。
         Assert.True(known.Succeeded);
         Assert.True(unknown.Succeeded);
+    }
+
+    /// <summary>
+    /// 两步验证的第二步与二次确认都在服务端已经知道是谁的情况下发起：选项必须带上这个人的凭据。
+    /// </summary>
+    /// <remarks>
+    /// ★ 对硬件安全密钥这是必需的：YubiKey 按默认的 <c>residentKey: discouraged</c> 登记出来的凭据
+    /// 不可发现，空的 <c>allowCredentials</c>（可发现凭据流程）根本找不到它 —— 症状是「系统弹窗说没有可用的密钥」。
+    /// </remarks>
+    [Fact]
+    public async Task BeginAssertionForUser_ShouldBuildTheOptionsAroundThatUsersCredentials()
+    {
+        var fixture = new Fixture();
+        fixture.GivenRequestOptionsAreProduced();
+
+        var result = await fixture.Service.BeginAssertionForUserAsync(fixture.User.Id);
+
+        Assert.True(result.Succeeded);
+        fixture.Handler.Verify(x => x.MakeRequestOptionsAsync(fixture.User, It.IsAny<HttpContext>()), Times.Once);
+    }
+
+    /// <summary>已登录、没报用户名 = 「证明还是我」（二次确认）：同样要带上本人的凭据，理由同上。</summary>
+    [Fact]
+    public async Task BeginAssertion_WhenSignedInWithoutAUserName_UsesTheCurrentUser()
+    {
+        var fixture = new Fixture();
+        fixture.GivenRequestOptionsAreProduced();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+
+        var result = await fixture.Service.BeginAssertionAsync(new PasskeyAssertionBeginDto());
+
+        Assert.True(result.Succeeded);
+        fixture.Handler.Verify(x => x.MakeRequestOptionsAsync(fixture.User, It.IsAny<HttpContext>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 最后一枚凭据没了，「拿 passkey 当第二因子」的开关必须跟着关：否则登录挑战会把它过滤掉，
+    /// 而它若是唯一方式，账号就等于没开 2FA 而状态页还写着开着。
+    /// </summary>
+    [Fact]
+    public async Task DeleteCredential_WhenTheLastOneGoes_TurnsPasskeyTwoFactorOff()
+    {
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.User.PasskeyTwoFactorEnabled = true;
+        var credentialId = fixture.GivenOneRegisteredCredential();
+        fixture.UserManager.Setup(x => x.RemovePasskeyAsync(fixture.User, It.IsAny<byte[]>()))
+            .Callback(() => fixture.GivenNoRegisteredCredential())
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await fixture.Service.DeleteCredentialAsync(credentialId);
+
+        Assert.True(result.Succeeded);
+        fixture.TwoFactor.Verify(x => x.DisableTwoFactorMethodAsync(fixture.User.Id, TwoFactorType.Passkey), Times.Once);
+    }
+
+    /// <summary>
+    /// 删掉最后一枚凭据会拆掉「passkey 当第二因子」，与 <c>two-factor/method/disable</c> 同一后果，
+    /// 必须过同一道 <see cref="StepUpScopes.TwoFactorManage"/> 二次确认：否则被盗访问令牌一次 DELETE 就绕开了它。
+    /// </summary>
+    [Fact]
+    public async Task DeleteCredential_WhenItWouldTearDownPasskeyTwoFactor_RequiresStepUp()
+    {
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.User.PasskeyTwoFactorEnabled = true;
+        var credentialId = fixture.GivenOneRegisteredCredential();
+        fixture.GivenStepUpIsNotSatisfied();
+
+        var result = await fixture.Service.DeleteCredentialAsync(credentialId);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(401, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_STEP_UP_REQUIRED, result.ErrorCode);
+        Assert.Equal(StepUpScopes.TwoFactorManage, ScopeOf(result.ErrorDetails));
+        fixture.UserManager.Verify(x => x.RemovePasskeyAsync(It.IsAny<User>(), It.IsAny<byte[]>()), Times.Never);
+        fixture.TwoFactor.Verify(x => x.DisableTwoFactorMethodAsync(It.IsAny<Guid>(), It.IsAny<TwoFactorType>()), Times.Never);
+    }
+
+    /// <summary>删的不是最后一枚、或 passkey 本就不是第二因子：什么都不拆，不该要确认。</summary>
+    [Theory]
+    [InlineData(true, 2)]
+    [InlineData(false, -1)]
+    public async Task DeleteCredential_ThatDoesNotTouchTwoFactor_DoesNotAskForStepUp(bool passkeyTwoFactor, int registered)
+    {
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.User.PasskeyTwoFactorEnabled = passkeyTwoFactor;
+        var credentialId = fixture.GivenOneRegisteredCredential(remainingAfterRemoval: registered);
+        fixture.UserManager.Setup(x => x.RemovePasskeyAsync(fixture.User, It.IsAny<byte[]>()))
+            .ReturnsAsync(IdentityResult.Success);
+        fixture.GivenStepUpIsNotSatisfied();
+
+        var result = await fixture.Service.DeleteCredentialAsync(credentialId);
+
+        Assert.True(result.Succeeded);
+        fixture.StepUp.Verify(x => x.IsSatisfiedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>还有别的凭据时开关留着：删一把备用钥匙不该关掉整扇门。</summary>
+    [Fact]
+    public async Task DeleteCredential_WhenOthersRemain_LeavesPasskeyTwoFactorOn()
+    {
+        var fixture = new Fixture();
+        fixture.GivenCurrentUserIsTheFixtureUser();
+        fixture.User.PasskeyTwoFactorEnabled = true;
+        var credentialId = fixture.GivenOneRegisteredCredential(remainingAfterRemoval: 1);
+        fixture.UserManager.Setup(x => x.RemovePasskeyAsync(fixture.User, It.IsAny<byte[]>()))
+            .ReturnsAsync(IdentityResult.Success);
+
+        var result = await fixture.Service.DeleteCredentialAsync(credentialId);
+
+        Assert.True(result.Succeeded);
+        fixture.TwoFactor.Verify(x => x.DisableTwoFactorMethodAsync(It.IsAny<Guid>(), It.IsAny<TwoFactorType>()), Times.Never);
     }
 
     /// <summary>
@@ -199,6 +369,12 @@ public class PasskeyServiceTests
 
         public Mock<IPasskeyHandler<User>> Handler { get; } = new();
 
+        /// <summary>默认已确认：只有专门验二次确认的用例才把它翻成未确认。</summary>
+        public Mock<IStepUpService> StepUp { get; } = new();
+
+        /// <summary>删掉最后一枚凭据时被叫去关「passkey 当第二因子」的那一个。</summary>
+        public Mock<ITwoFactorService> TwoFactor { get; } = new();
+
         public User User { get; } = new() { Id = Guid.NewGuid(), UserName = KnownUserName };
 
         private readonly ICache _cache;
@@ -214,7 +390,7 @@ public class PasskeyServiceTests
             UserManager.Setup(x => x.AddOrUpdatePasskeyAsync(It.IsAny<User>(), It.IsAny<UserPasskeyInfo>()))
                 .ReturnsAsync(IdentityResult.Success);
 
-            AuthService.Setup(x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>()))
+            AuthService.Setup(x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>(), It.IsAny<TwoFactorType?>()))
                 .ReturnsAsync(Result<TokenResult>.Success(new TokenResult { AccessToken = "issued-through-shared-exit" }));
 
             var memoryCache = new MemoryCacheService(
@@ -233,18 +409,56 @@ public class PasskeyServiceTests
             var httpContextAccessor = new Mock<IHttpContextAccessor>();
             httpContextAccessor.Setup(x => x.HttpContext).Returns(new DefaultHttpContext());
 
+            StepUp.Setup(x => x.IsSatisfiedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+            EnrollmentTokens.Setup(x => x.ValidateAsync(KnownEnrollmentToken))
+                .ReturnsAsync(Result<Guid>.Success(User.Id));
+
             Service = new PasskeyService(
                 BuildServiceProvider(),
                 Handler.Object,
                 UserManager.Object,
                 AuthService.Object,
-                new Mock<IPasskeyEnrollmentTokenService>().Object,
+                EnrollmentTokens.Object,
                 httpContextAccessor.Object,
                 _cache,
                 identityOptions.Object);
         }
 
+        public const string KnownEnrollmentToken = "enrollment-token";
+
+        public Mock<IPasskeyEnrollmentTokenService> EnrollmentTokens { get; } = new();
+
+        public void GivenStepUpIsNotSatisfied()
+            => StepUp.Setup(x => x.IsSatisfiedAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        public void GivenCreationOptionsAreProduced()
+            => Handler.Setup(x => x.MakeCreationOptionsAsync(It.IsAny<PasskeyUserEntity>(), It.IsAny<HttpContext>()))
+                .ReturnsAsync(new PasskeyCreationOptionsResult
+                {
+                    CreationOptionsJson = "{\"challenge\":\"x\"}",
+                    AttestationState = "attestation-state"
+                });
+
         public void GivenCurrentUserIsTheFixtureUser() => _currentUser.Setup(x => x.Id).Returns(User.Id);
+
+        /// <summary>
+        /// 账号名下有一枚凭据；返回它的 base64url 标识。<paramref name="remainingAfterRemoval"/>
+        /// 是删除之后 <c>GetPasskeysAsync</c> 还报出多少枚（默认还是这一枚，由删除用例的 Callback 改成 0）。
+        /// </summary>
+        public string GivenOneRegisteredCredential(int remainingAfterRemoval = -1)
+        {
+            var info = CreatePasskeyInfo();
+            UserManager.Setup(x => x.GetPasskeyAsync(User, It.IsAny<byte[]>())).ReturnsAsync(info);
+            var remaining = remainingAfterRemoval < 0
+                ? new List<UserPasskeyInfo> { info }
+                : Enumerable.Range(0, remainingAfterRemoval).Select(_ => CreatePasskeyInfo()).ToList();
+            UserManager.Setup(x => x.GetPasskeysAsync(User)).ReturnsAsync(remaining);
+            return Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(info.CredentialId);
+        }
+
+        public void GivenNoRegisteredCredential()
+            => UserManager.Setup(x => x.GetPasskeysAsync(User)).ReturnsAsync(new List<UserPasskeyInfo>());
 
         public void GivenAssertionSucceeds()
             => Handler.Setup(x => x.PerformAssertionAsync(It.IsAny<PasskeyAssertionContext>()))
@@ -338,6 +552,10 @@ public class PasskeyServiceTests
             var serviceProvider = new Mock<IServiceProvider>();
             serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
             serviceProvider.Setup(x => x.GetService(typeof(ICurrentUser))).Returns(_currentUser.Object);
+            // 服务在调用点解析 IStepUpService（StepUpService 反向依赖 IPasskeyService，构造注入会成环）。
+            serviceProvider.Setup(x => x.GetService(typeof(IStepUpService))).Returns(() => StepUp.Object);
+            serviceProvider.Setup(x => x.GetService(typeof(ITwoFactorService))).Returns(() => TwoFactor.Object);
+            TwoFactor.Setup(x => x.DisableTwoFactorMethodAsync(It.IsAny<Guid>(), It.IsAny<TwoFactorType>())).ReturnsAsync(Result.Success());
             return serviceProvider.Object;
         }
     }

@@ -97,6 +97,36 @@ public class SandboxDataRootOptionsTests
         result.FailureMessage.ShouldContain("LocalApplicationData");
     }
 
+    /// <summary>
+    /// 默认的 <c>SpecialFolderOption.None</c> 在 Unix 上对尚不存在的目录返回空串，正常宿主（macOS、新建账号）会被当成
+    /// 「没有用户数据目录」拒绝启动。夹具只在 <c>DoNotVerify</c> 下回答路径，模拟那种宿主。
+    /// </summary>
+    [Fact]
+    public void DefaultDataRoot_DoesNotRequireTheDataDirectoryToExistYet()
+    {
+        var notYetCreated = Path.Combine(Path.GetTempPath(), $"no-such-dir-{Guid.NewGuid():N}");
+
+        var root = SandboxModuleOptions.ResolveDefaultDataRoot((folder, option) =>
+            option == Environment.SpecialFolderOption.DoNotVerify ? notYetCreated : string.Empty);
+
+        root.ShouldBe(Path.Combine(notYetCreated, "Tnzi", "ai-threads"));
+    }
+
+    [Fact]
+    public void DefaultDataRoot_UnresolvableHost_IsEmpty_NotARelativePath()
+    {
+        SandboxModuleOptions.ResolveDefaultDataRoot((_, _) => string.Empty).ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public void Validator_EmptyDataRoot_WithSandboxDisabled_DoesNotBlockStartup()
+    {
+        var options = new SandboxModuleOptions { DataRoot = string.Empty, Enabled = false };
+
+        new SandboxModuleOptionsValidator().Validate(null, options).Succeeded
+            .ShouldBeTrue("a disabled sandbox never reads DataRoot, so an unresolvable default must not stop the host");
+    }
+
     [Theory]
     [InlineData("app", true)]
     [InlineData("app/threads", true)]

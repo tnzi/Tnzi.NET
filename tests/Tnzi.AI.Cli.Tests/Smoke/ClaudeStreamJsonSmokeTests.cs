@@ -97,6 +97,32 @@ public class ClaudeStreamJsonSmokeTests
             $"exit={outcome.ExitCode}, stderr tail was: {outcome.StderrTail}");
     }
 
+    /// <summary>
+    /// The sign-in check behind the fallback token must read a boolean from the real CLI.
+    /// </summary>
+    /// <remarks>
+    /// If the status command changes shape, the probe answers "unknown" and the fallback
+    /// token gets injected on every run, silently overriding a perfectly good local sign-in.
+    /// </remarks>
+    [SmokeFact(ProviderKey)]
+    public async Task AuthStatus_ReportsABooleanSignInState()
+    {
+        var provider = CliBuiltInProviders.All[ProviderKey];
+        var probe = new CliAuthStatusProbe(NullLogger<CliAuthStatusProbe>.Instance);
+
+        var signedIn = await probe.IsSignedInAsync(new CliProcessSpec
+        {
+            ExecutablePath = CliSmokeGate.ResolveExecutable(ProviderKey)!,
+            Arguments = provider.AuthStatusArgs,
+            WorkingDirectory = Path.GetTempPath()
+        }, CancellationToken.None);
+
+        signedIn.ShouldNotBeNull();
+    }
+
+    private static CliLaunchEnvironmentComposer Composer()
+        => new(new CliAuthStatusProbe(NullLogger<CliAuthStatusProbe>.Instance), NullLogger<CliLaunchEnvironmentComposer>.Instance);
+
     /// <summary>Drive one real turn end to end and hand back what it produced.</summary>
     /// <remarks>
     /// The adapter is stateful and one-shot, so <c>GetResult</c> is called here on the
@@ -117,6 +143,11 @@ public class ClaudeStreamJsonSmokeTests
 
         try
         {
+            // Compose the launch the way the executor does, so the deployment-default
+            // isolation arguments are part of what the real CLI has to accept.
+            var launchEnvironment = await Composer().ComposeAsync(
+                provider, executablePath, workDirectory, new CliAgentOptions { Enabled = true }, CancellationToken.None);
+
             var context = new CliAgentLaunchContext
             {
                 Provider = provider,
@@ -124,7 +155,9 @@ public class ClaudeStreamJsonSmokeTests
                 Prompt = prompt,
                 WorkingDirectory = workDirectory,
                 ResumeSessionId = resumeSessionId,
-                ResumeExpected = resumeSessionId is not null
+                ResumeExpected = resumeSessionId is not null,
+                ExtraArgs = launchEnvironment.Args,
+                Environment = launchEnvironment.Environment
             };
 
             var adapter = new StreamJsonAdapter(NullLogger<StreamJsonAdapter>.Instance);

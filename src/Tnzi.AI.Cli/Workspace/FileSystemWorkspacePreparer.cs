@@ -155,12 +155,8 @@ public class FileSystemWorkspacePreparer : ICliWorkspacePreparer
 
     private string BuildRunRoot(CliRunContext context)
     {
-        var root = _options.CurrentValue.WorkspacesRoot;
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            root = CliWorkspaceLayout.DefaultWorkspacesRoot;
-        }
-
+        var options = _options.CurrentValue;
+        var root = CliWorkspaceLayout.ResolveWorkspacesRoot(options);
         var tenantSegment = context.TenantId?.ToString("N") ?? "host";
 
         // 目录的划分粒度就是「连续性」本身：编码 CLI 按 cwd 存会话存档，所以同一个 cwd
@@ -173,7 +169,9 @@ public class FileSystemWorkspacePreparer : ICliWorkspacePreparer
             ? context.ThreadId?.ToString("N") ?? context.RunId.ToString("N")
             : context.RunId.ToString("N");
 
-        return Path.Combine(root, tenantSegment, scopeSegment);
+        return options.PartitionWorkspacesByUser
+            ? Path.Combine(root, tenantSegment, CliWorkspaceLayout.UserPartition(context.UserId), scopeSegment)
+            : Path.Combine(root, tenantSegment, scopeSegment);
     }
 
     private static async Task WriteRunMarkerAsync(

@@ -112,13 +112,17 @@ public readonly record struct LoginGuardResult
     public static LoginGuardResult Allow() => new(true, null, 0, null, null);
 
     /// <summary>
-    /// 拒绝，且对外与「用户名或密码错误」完全同形（400 + 同一文案），不泄露口令是否正确。
+    /// 拒绝，且对外与「用户名或密码错误」完全同形（同一状态码、同一文案、同一错误码），不泄露口令是否正确。
     /// 这是守卫拒绝的**推荐**形态，理由见 <see cref="LoginGuardResult"/> 的备注。
     /// </summary>
+    /// <remarks>
+    /// 三个字段取自 <see cref="InvalidCredentialsResponse"/>，密码路径也从那里取：任何一个字段
+    /// 与密码路径不同（此前是错误码），响应就可区分，守卫就退化成口令预言机。
+    /// </remarks>
     /// <param name="auditReason">写进登录失败事件的真实原因（不返回给客户端）</param>
     public static LoginGuardResult DenyAsInvalidCredentials(string auditReason)
-        => new(false, "Invalid username or password", 400, ErrorCodes.IDENTITY_INVALID_PASSWORD,
-               Check.NotNullOrWhiteSpace(auditReason));
+        => new(false, InvalidCredentialsResponse.Message, InvalidCredentialsResponse.StatusCode,
+               InvalidCredentialsResponse.ErrorCode, Check.NotNullOrWhiteSpace(auditReason));
 
     /// <summary>
     /// 拒绝并如实告知原因。<b>会泄露「口令正确」这一事实</b>（守卫跑在密码校验之后），

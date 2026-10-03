@@ -43,4 +43,10 @@ public interface ISandbox : IAsyncDisposable
     /// <param name="hostPath">宿主侧的物理路径。</param>
     /// <returns>沙箱内寻址用的路径。</returns>
     string MapPath(string hostPath) => hostPath;
+
+    /// <summary>
+    /// <see cref="ExecuteCommandAsync"/> 交给哪种 shell 执行，决定 bash 工具怎样给换进命令里的路径加引号。
+    /// 默认 POSIX；在 Windows 宿主上直接调 <c>cmd.exe</c> 的实现返回 <see cref="SandboxShellDialect.Cmd"/>。
+    /// </summary>
+    SandboxShellDialect ShellDialect => SandboxShellDialect.Posix;
 }

@@ -5,6 +5,7 @@ import {
   useAdminMcpToolAnalyticsApi,
   useArtifactApi,
   useUserProfileApi,
+  useAdminWorkflowApi,
 } from '../../src/services/ai/api';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,63 @@ describe('AI API Wrappers', () => {
       const input = { displayName: 'Alice', role: 'developer' };
       await api.update(input);
       expect(client.put).toHaveBeenCalledWith('/user-profile', input);
+    });
+  });
+
+  // ==========================================
+  // useAdminWorkflowApi: versions, execution control, stats
+  // ==========================================
+
+  describe('useAdminWorkflowApi (versions / execution control / stats)', () => {
+    it('should call GET /admin/workflows/{id}/versions for getVersions', async () => {
+      const api = useAdminWorkflowApi(client);
+      await api.getVersions('wf-1');
+      expect(client.get).toHaveBeenCalledWith('/admin/workflows/wf-1/versions');
+    });
+
+    it('should call GET /admin/workflows/{id}/versions/{n} for getVersion', async () => {
+      const api = useAdminWorkflowApi(client);
+      await api.getVersion('wf-1', 3);
+      expect(client.get).toHaveBeenCalledWith('/admin/workflows/wf-1/versions/3');
+    });
+
+    it('should call POST /admin/workflows/{id}/versions/{n}/restore for restoreVersion', async () => {
+      const api = useAdminWorkflowApi(client);
+      const body = { changeDescription: 'rollback' };
+      await api.restoreVersion('wf-1', 3, body);
+      expect(client.post).toHaveBeenCalledWith('/admin/workflows/wf-1/versions/3/restore', body);
+    });
+
+    it('should call GET /admin/workflows/{id}/execution-stats for getExecutionStats', async () => {
+      const api = useAdminWorkflowApi(client);
+      await api.getExecutionStats('wf-1');
+      expect(client.get).toHaveBeenCalledWith('/admin/workflows/wf-1/execution-stats');
+    });
+
+    it('should call POST /admin/workflows/executions/{id}/cancel for cancelExecution', async () => {
+      const api = useAdminWorkflowApi(client);
+      const body = { feedback: 'stop' };
+      await api.cancelExecution('exec-1', body);
+      expect(client.post).toHaveBeenCalledWith('/admin/workflows/executions/exec-1/cancel', body);
+    });
+
+    it('should call GET /admin/workflows/executions/{id}/interrupt for getPendingInterrupt', async () => {
+      const api = useAdminWorkflowApi(client);
+      await api.getPendingInterrupt('exec-1');
+      expect(client.get).toHaveBeenCalledWith('/admin/workflows/executions/exec-1/interrupt');
+    });
+
+    it('should call POST /admin/workflows/executions/{id}/resume-with-input for resumeWithInput', async () => {
+      const api = useAdminWorkflowApi(client);
+      const body = { stepId: 's1', input: { approved: true } };
+      await api.resumeWithInput('exec-1', body);
+      expect(client.post).toHaveBeenCalledWith('/admin/workflows/executions/exec-1/resume-with-input', body);
+    });
+
+    it('should call GET /admin/workflows/executions/{id}/signals for getPendingSignals', async () => {
+      const api = useAdminWorkflowApi(client);
+      await api.getPendingSignals('exec-1');
+      expect(client.get).toHaveBeenCalledWith('/admin/workflows/executions/exec-1/signals');
     });
   });
 });

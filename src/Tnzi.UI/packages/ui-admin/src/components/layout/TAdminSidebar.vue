@@ -12,6 +12,8 @@ import { TSvgIcon } from '@tnzi/ui'
 import TSystemLogo from '../utility/TSystemLogo.vue'
 import TSidebarSettingsFooter from './TSidebarSettingsFooter.vue'
 import { navBadgeExtra, navBadgeIcon } from './nav-badge'
+import { captionGroups, DEFAULT_MENU_GROUP_STYLE, type AdminMenuGroupStyle, type SidebarMenuOption } from './menu-groups'
+import { useAdminShellConfig } from '../../plugin/shell-config'
 import { translatePageKey } from '../../i18n/translate'
 
 /**
@@ -83,6 +85,12 @@ interface Props {
    * consumer-provided `footer` slot fully replaces it.
    */
   showSettingsEntry?: boolean
+  /**
+   * How first-level entries with children render: captioned sections or
+   * collapsible submenus. Defaults to the app-wide choice
+   * (`defineAdminApp({ shell: { menuGroups } })`), which defaults to `caption`.
+   */
+  groupStyle?: AdminMenuGroupStyle
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -98,6 +106,7 @@ const props = withDefaults(defineProps<Props>(), {
   lightSurface: false,
   items: undefined,
   showSettingsEntry: true,
+  groupStyle: undefined,
 })
 
 const emit = defineEmits<{
@@ -106,6 +115,10 @@ const emit = defineEmits<{
 
 const routeStore = useAdminRouteStore()
 const appStore = useAdminAppStore()
+const shellConfig = useAdminShellConfig()
+const groupStyle = computed<AdminMenuGroupStyle>(
+  () => props.groupStyle ?? shellConfig.menuGroups ?? DEFAULT_MENU_GROUP_STYLE,
+)
 
 // Phase I.7.6: drive NMenu's active state from the *current vue-router route
 // name* - previously this was wired to `tabStore.activeTabId`, which only
@@ -209,7 +222,7 @@ const sourceMenus = computed<AdminMenuItem[]>(
   () => props.items ?? routeStore.menus,
 )
 
-const menuOptions = computed<MenuOption[]>(() => {
+const menuOptions = computed<SidebarMenuOption[]>(() => {
   if (props.mode === 'vertical-mix') {
     // Phase G fix: include the icon in the rail's NMenu options. The
     // previous `{key, label}` shape silently dropped icons, so the
@@ -227,7 +240,8 @@ const menuOptions = computed<MenuOption[]>(() => {
       return opt
     })
   }
-  return sourceMenus.value.map(toOption)
+  const options = sourceMenus.value.map(toOption)
+  return groupStyle.value === 'caption' ? captionGroups(options) : options
 })
 
 const menuIndex = computed(() => {
@@ -414,7 +428,10 @@ watch(() => appStore.siderCollapse, () => void nextTick(updateScrollShadows))
 }
 
 .t-admin-sidebar__body :deep(.n-menu) {
-  --n-item-height: 44px;
+  /* Row height is a consumer token (styles/variables.css): this rule is
+     scoped, so an override has to land on the token, not on `--n-item-height`
+     here. The vertical-mix rail below sets its own 60px. */
+  --n-item-height: var(--tnzi-admin-menu-item-height, 40px);
   --n-item-icon-size: 18px;
   --n-item-text-color-hover: var(--tnzi-primary);
   --n-item-text-color-active: var(--tnzi-primary);

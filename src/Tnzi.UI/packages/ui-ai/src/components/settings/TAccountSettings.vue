@@ -19,10 +19,13 @@ import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
 import TStepUpPrompt from './TStepUpPrompt.vue'
 import type { UseAccountSettingsReturn } from '../../headless/useAccountSettings'
+import { useAiI18n } from '../../i18n'
 
 const props = defineProps<{
   controller: UseAccountSettingsReturn
 }>()
+
+const t = useAiI18n()
 
 // See TPersonalizationSettings: a local binding so `vue/no-mutating-props`
 // does not read "write through the controller's draft ref" as "reassign a prop".
@@ -39,14 +42,16 @@ const changing = ref<'email' | 'phone' | null>(null)
 const changeTarget = ref('')
 const changeCode = ref('')
 const codeSent = ref(false)
-const changeDone = ref('')
+// Which change just completed. Kept as the field, not the sentence, so the
+// confirmation follows a language switch made while it is on screen.
+const changeDone = ref<'email' | 'phone' | null>(null)
 
 function openChange(which: 'email' | 'phone'): void {
   changing.value = which
   changeTarget.value = ''
   changeCode.value = ''
   codeSent.value = false
-  changeDone.value = ''
+  changeDone.value = null
 }
 
 function cancelChange(): void {
@@ -66,7 +71,7 @@ async function confirmChange(): Promise<void> {
     ? await props.controller.confirmEmailChange(changeTarget.value, changeCode.value)
     : await props.controller.confirmPhoneChange(changeTarget.value, changeCode.value)
   if (ok) {
-    changeDone.value = which === 'email' ? 'Email updated.' : 'Phone updated.'
+    changeDone.value = which
     changing.value = null
   }
 }
@@ -101,8 +106,8 @@ async function onChangePassword(): Promise<void> {
        email / phone change). See TSecuritySettings for the same mount. -->
   <TStepUpPrompt v-if="controller.stepUp" :prompt="controller.stepUp" />
 
-  <TSettingGroup title="Profile" :separator="false">
-    <TSettingRow label="Display name" description="How you appear in this product.">
+  <TSettingGroup :title="t.accountSettings.profileTitle" :separator="false">
+    <TSettingRow :label="t.accountSettings.displayName" :description="t.accountSettings.displayNameHint">
       <NInput
         v-model:value="draft.nickname"
         class="t-settings-field__control"
@@ -111,24 +116,24 @@ async function onChangePassword(): Promise<void> {
       />
     </TSettingRow>
 
-    <TSettingRow label="Email" description="A code is sent to the new address to prove you own it.">
+    <TSettingRow :label="t.accountSettings.email" :description="t.accountSettings.emailHint">
       <span class="t-account__contact">
         <span class="t-settings-field__readonly">
-          {{ draft.email || 'Not set' }}
+          {{ draft.email || t.accountSettings.notSet }}
         </span>
         <NButton size="tiny" :disabled="controller.busy.value" @click="openChange('email')">
-          Change
+          {{ t.accountSettings.change }}
         </NButton>
       </span>
     </TSettingRow>
 
-    <TSettingRow label="Phone" description="A code is sent to the new number to prove you own it.">
+    <TSettingRow :label="t.accountSettings.phone" :description="t.accountSettings.phoneHint">
       <span class="t-account__contact">
         <span class="t-settings-field__readonly">
-          {{ draft.phoneNumber || 'Not set' }}
+          {{ draft.phoneNumber || t.accountSettings.notSet }}
         </span>
         <NButton size="tiny" :disabled="controller.busy.value" @click="openChange('phone')">
-          Change
+          {{ t.accountSettings.change }}
         </NButton>
       </span>
     </TSettingRow>
@@ -138,8 +143,8 @@ async function onChangePassword(): Promise<void> {
          address changed when all they proved is they can type. -->
     <TSettingRow
       v-if="changing"
-      :label="changing === 'email' ? 'New email' : 'New phone'"
-      :description="codeSent ? 'Enter the code we just sent there.' : 'We will send a verification code to it.'"
+      :label="changing === 'email' ? t.accountSettings.newEmail : t.accountSettings.newPhone"
+      :description="codeSent ? t.accountSettings.codeSentHint : t.accountSettings.willSendHint"
       stacked
     >
       <div class="t-account__change">
@@ -148,17 +153,17 @@ async function onChangePassword(): Promise<void> {
           class="t-settings-field__control"
           size="small"
           :disabled="codeSent"
-          :placeholder="changing === 'email' ? 'name@example.com' : 'Phone number'"
+          :placeholder="changing === 'email' ? t.accountSettings.emailPlaceholder : t.accountSettings.phonePlaceholder"
         />
         <NInput
           v-if="codeSent"
           v-model:value="changeCode"
           class="t-settings-field__control"
           size="small"
-          placeholder="Verification code"
+          :placeholder="t.accountSettings.codePlaceholder"
         />
         <div class="t-settings-field__actions">
-          <NButton size="small" @click="cancelChange">Cancel</NButton>
+          <NButton size="small" @click="cancelChange">{{ t.accountSettings.cancel }}</NButton>
           <NButton
             v-if="!codeSent"
             size="small"
@@ -167,7 +172,7 @@ async function onChangePassword(): Promise<void> {
             :disabled="!changeTarget.trim()"
             @click="sendCode"
           >
-            Send code
+            {{ t.accountSettings.sendCode }}
           </NButton>
           <NButton
             v-else
@@ -177,13 +182,15 @@ async function onChangePassword(): Promise<void> {
             :disabled="!changeCode.trim()"
             @click="confirmChange"
           >
-            Confirm
+            {{ t.accountSettings.confirm }}
           </NButton>
         </div>
       </div>
     </TSettingRow>
 
-    <p v-if="changeDone" class="t-settings-field__hint">{{ changeDone }}</p>
+    <p v-if="changeDone" class="t-settings-field__hint">
+      {{ changeDone === 'email' ? t.accountSettings.emailUpdated : t.accountSettings.phoneUpdated }}
+    </p>
 
     <p v-if="controller.error.value" class="t-settings-field__error" role="alert">
       {{ controller.error.value }}
@@ -195,7 +202,7 @@ async function onChangePassword(): Promise<void> {
         :disabled="!controller.dirty.value || controller.busy.value"
         @click="controller.resetDraft()"
       >
-        Reset
+        {{ t.accountSettings.reset }}
       </NButton>
       <NButton
         size="small"
@@ -204,13 +211,13 @@ async function onChangePassword(): Promise<void> {
         :disabled="!controller.dirty.value"
         @click="controller.saveProfile()"
       >
-        Save
+        {{ t.accountSettings.save }}
       </NButton>
     </div>
   </TSettingGroup>
 
-  <TSettingGroup title="Password">
-    <TSettingRow label="Current password">
+  <TSettingGroup :title="t.accountSettings.passwordTitle">
+    <TSettingRow :label="t.accountSettings.currentPassword">
       <NInput
         v-model:value="currentPassword"
         class="t-settings-field__control"
@@ -219,7 +226,7 @@ async function onChangePassword(): Promise<void> {
         size="small"
       />
     </TSettingRow>
-    <TSettingRow label="New password">
+    <TSettingRow :label="t.accountSettings.newPassword">
       <NInput
         v-model:value="newPassword"
         class="t-settings-field__control"
@@ -228,7 +235,7 @@ async function onChangePassword(): Promise<void> {
         size="small"
       />
     </TSettingRow>
-    <TSettingRow label="Confirm new password">
+    <TSettingRow :label="t.accountSettings.confirmPassword">
       <NInput
         v-model:value="confirmPassword"
         class="t-settings-field__control"
@@ -239,9 +246,9 @@ async function onChangePassword(): Promise<void> {
     </TSettingRow>
 
     <p v-if="mismatch" class="t-settings-field__error" role="alert">
-      The two new passwords do not match.
+      {{ t.accountSettings.passwordMismatch }}
     </p>
-    <p v-else-if="passwordDone" class="t-settings-field__hint">Password updated.</p>
+    <p v-else-if="passwordDone" class="t-settings-field__hint">{{ t.accountSettings.passwordUpdated }}</p>
 
     <div class="t-settings-field__actions">
       <NButton
@@ -251,7 +258,7 @@ async function onChangePassword(): Promise<void> {
         :disabled="!currentPassword || !newPassword"
         @click="onChangePassword"
       >
-        Update password
+        {{ t.accountSettings.updatePassword }}
       </NButton>
     </div>
   </TSettingGroup>

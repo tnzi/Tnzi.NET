@@ -36,6 +36,8 @@ import { routeToWindowInput, useAdminDesktopStore } from '../../stores/useAdminD
 import { useAdminMenuContext } from '../../headless/useAdminMenuContext'
 import { useAdminShellLayout } from '../../headless/useAdminShellLayout'
 import { provideAdminShellActions } from '../../headless/admin-shell-actions'
+import { captionGroups, DEFAULT_MENU_GROUP_STYLE, type SidebarMenuOption } from './menu-groups'
+import { useAdminShellConfig } from '../../plugin/shell-config'
 
 interface SiderConfig {
   visible?: boolean
@@ -408,9 +410,14 @@ function mixChildToOption(item: AdminMenuItem): MenuOption {
   return option
 }
 
-const mixChildOptions = computed<MenuOption[]>(() =>
-  mixChildren.value.map(mixChildToOption),
-)
+// The vertical-mix child menu follows the app's menu-group choice like every
+// other sider: with `caption` a module's sub-groups are headings over flat
+// rows rather than submenus.
+const shellConfig = useAdminShellConfig()
+const mixChildOptions = computed<SidebarMenuOption[]>(() => {
+  const options = mixChildren.value.map(mixChildToOption)
+  return (shellConfig.menuGroups ?? DEFAULT_MENU_GROUP_STYLE) === 'caption' ? captionGroups(options) : options
+})
 
 // Phase G - vertical-mix drawer NMenu auto-expands the ancestor path of
 // the current route so a freshly-rendered drawer doesn't hide the active

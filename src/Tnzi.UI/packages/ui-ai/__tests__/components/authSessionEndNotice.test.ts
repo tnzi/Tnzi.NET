@@ -9,7 +9,7 @@
  * user landed on an empty identifier field with no idea their credentials were
  * in use elsewhere.
  *
- * SFCs have no mount coverage in this package (no Vue plugin in vitest), so
+ * Most SFCs have no mount coverage in this package (only `TAuthPage.mount.test.ts` mounts one), so
  * the contract is checked on the source: `TAuthRoute` must forward the
  * runtime's reason and `TAuthPage` must render it with a status role.
  */
@@ -51,6 +51,12 @@ describe('TAuthPage renders the session-end reason', () => {
     expect(page).toMatch(/auth\.notice\.sessionEndedForSecurity/);
     expect(page).toMatch(/ended for security reasons/i);
     expect(page).toMatch(/auth\.notice\.sessionExpired/);
+  });
+
+  it('renders the IP allow-list refusal with its own translate key', () => {
+    expect(page).toMatch(/case 'ipNotAllowed'/);
+    expect(page).toMatch(/auth\.notice\.sessionEndedIpNotAllowed/);
+    expect(page).toMatch(/allowed network/i);
   });
 
   it('marks the security case visually, not just textually', () => {

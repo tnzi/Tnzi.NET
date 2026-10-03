@@ -15,10 +15,14 @@
  *                     dedicated preview route lives on the generic template
  *                     controller and takes content + model, not a template id.
  *   - subscriptions → NotificationPreference-backed (2026-04-14 unstub).
+ *   - optOuts       → address-keyed suppression list (read / hand-register /
+ *                     revoke; no update - the (address, channel, category)
+ *                     triple IS the row's identity).
  */
 import {
   useAdminNotificationApi,
   useAdminNotificationPreferenceApi,
+  useAdminNotificationOptOutApi,
   useAdminNotificationTemplateApi,
   useUnsubscribeApi,
   useAdminPushDeviceApi,
@@ -28,6 +32,9 @@ import {
   type NotificationPreferenceDto,
   type NotificationPreferenceQueryDto,
   type SetNotificationPreferenceDto,
+  type OptOutDto,
+  type OptOutQueryDto,
+  type CreateOptOutDto,
   type DeliveryReportDto,
   type DevicePlatform,
   type PushDeviceDto,
@@ -53,6 +60,7 @@ export interface NotificationBridgeDeps {
   /** Test path: inject mock API directly. */
   notificationApi?: ReturnType<typeof useAdminNotificationApi>
   preferenceApi?: ReturnType<typeof useAdminNotificationPreferenceApi>
+  optOutApi?: ReturnType<typeof useAdminNotificationOptOutApi>
   templateApi?: ReturnType<typeof useAdminNotificationTemplateApi>
   deviceApi?: ReturnType<typeof useAdminPushDeviceApi>
 }
@@ -142,6 +150,21 @@ export interface NotificationBridge {
   subscriptions: BridgeCrudContract<NotificationPreferenceDto>
 
   /**
+   * Address-keyed suppression list, backed by /admin/notification-opt-outs.
+   *
+   * ★ Not the same thing as `subscriptions`: a preference is a user's choice,
+   * an opt-out is an address that said no (one-click link, provider complaint,
+   * a phone call). Delivery honours both; this contract exists so a compliance
+   * question ("when did this address opt out, on which channel") and an undo
+   * request ("I clicked by mistake") can be answered from the admin shell.
+   *
+   * ★ Read + create + delete. `update` rejects: the (address, channel,
+   * category) triple is the row's identity, so "editing" one is deleting it
+   * and registering another - two auditable actions, not one silent rewrite.
+   */
+  optOuts: BridgeCrudContract<OptOutDto>
+
+  /**
    * Push device registry, backed by /admin/notification-devices.
    *
    * ★ Read + delete only. Registration is a **client** action - the device
@@ -162,6 +185,7 @@ const backendGapReject = (name: string) => (): Promise<never> =>
 export function createNotificationBridge(deps: NotificationBridgeDeps = {}): NotificationBridge {
   const notificationApi = deps.notificationApi ?? (deps.client ? useAdminNotificationApi(deps.client) : null)
   const preferenceApi = deps.preferenceApi ?? (deps.client ? useAdminNotificationPreferenceApi(deps.client) : null)
+  const optOutApi = deps.optOutApi ?? (deps.client ? useAdminNotificationOptOutApi(deps.client) : null)
   const templateApi = deps.templateApi ?? (deps.client ? useAdminNotificationTemplateApi(deps.client) : null)
   const deviceApi = deps.deviceApi ?? (deps.client ? useAdminPushDeviceApi(deps.client) : null)
 
@@ -191,6 +215,12 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         create: backendGapReject('subscriptions.create'),
         update: backendGapReject('subscriptions.update'),
         delete: backendGapReject('subscriptions.delete'),
+      },
+      optOuts: {
+        fetch: backendGapReject('optOuts.fetch'),
+        create: backendGapReject('optOuts.create'),
+        update: backendGapReject('optOuts.update'),
+        delete: backendGapReject('optOuts.delete'),
       },
       devices: {
         fetch: backendGapReject('devices.fetch'),
@@ -439,6 +469,63 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         delete: backendGapReject('subscriptions.delete - no preferenceApi provided'),
       }
 
+  // Opt-outs -> /admin/notification-opt-outs. Filters come straight from the
+  // page's filter bar; the address filter is a contains-match on the
+  // normalised address, so an operator can paste it in any casing.
+  const optOuts: BridgeCrudContract<OptOutDto> = optOutApi
+    ? {
+        fetch: async (query: CrudPageQuery): Promise<CrudPageResult<OptOutDto>> => {
+          const filters = (query.filters ?? {}) as Record<string, unknown>
+          const orderBy = query.sortField
+            ? `${query.sortField}${query.sortOrder === 'desc' ? ' desc' : ''}`
+            : undefined
+          const search = query.searchText?.trim()
+          const params: OptOutQueryDto = {
+            pageIndex: query.pageIndex,
+            pageSize: query.pageSize,
+            orderBy,
+            // The search box is the address filter: it is the one thing an
+            // operator always has in hand when they come to this page.
+            address: typeof filters.address === 'string' && filters.address ? filters.address : search || undefined,
+            channel: typeof filters.channel === 'string' && filters.channel ? (filters.channel as NotificationType) : undefined,
+            category: typeof filters.category === 'string' && filters.category ? filters.category : undefined,
+            from: typeof filters.from === 'string' ? filters.from : undefined,
+            to: typeof filters.to === 'string' ? filters.to : undefined,
+          }
+          const result = unwrap<{ items: OptOutDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+            await optOutApi.getPagedList(params),
+          )
+          return pagedResult({
+            items: result.items ?? [],
+            totalCount: result.totalCount ?? 0,
+            pageIndex: result.pageIndex ?? query.pageIndex,
+            pageSize: result.pageSize ?? query.pageSize,
+          })
+        },
+        create: async (data) => {
+          const input = data as unknown as CreateOptOutDto
+          return unwrapOk(await optOutApi.create({
+            address: input.address,
+            channel: input.channel,
+            category: input.category || undefined,
+            reason: input.reason || undefined,
+          })) as OptOutDto
+        },
+        // See the contract docs: the triple is the identity, there is nothing to edit.
+        update: backendGapReject('optOuts.update - an opt-out row has no editable fields; revoke and register instead'),
+        delete: async (ids) => {
+          for (const id of ids) {
+            ensureOk(await optOutApi.delete(String(id)))
+          }
+        },
+      }
+    : {
+        fetch: backendGapReject('optOuts.fetch - no optOutApi provided') as never,
+        create: backendGapReject('optOuts.create - no optOutApi provided'),
+        update: backendGapReject('optOuts.update - no optOutApi provided'),
+        delete: backendGapReject('optOuts.delete - no optOutApi provided'),
+      }
+
   // ★ Anonymous: built straight off the HttpClient, no admin api factory.
   // The recipient of a bulk message is often not a user of this system at all.
   const unsubscribeApi = deps.client ? useUnsubscribeApi(deps.client) : null
@@ -517,5 +604,5 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         delete: backendGapReject('devices.delete'),
       }
 
-  return { messages, templates, subscriptions, devices, publicUnsubscribe }
+  return { messages, templates, subscriptions, optOuts, devices, publicUnsubscribe }
 }

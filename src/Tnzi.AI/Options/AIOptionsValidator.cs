@@ -5,6 +5,9 @@ namespace Tnzi.AI.Options;
 /// </summary>
 public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 {
+    /// <summary><c>AI:Providers:*:TimeoutSeconds</c> 允许的上限。</summary>
+    internal const int MaxProviderTimeoutSeconds = 600;
+
     protected override void ValidateOptions(AIOptions options, List<string> errors)
     {
         // Providers 声明为非空且带默认实例，配置绑定不会把它置 null；多余的 != null 检查会让
@@ -192,9 +195,9 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
 
             // 验证 TimeoutSeconds（可空：未设置时跳过，显式设置时校验范围）
             if (providerOptions.TimeoutSeconds.HasValue &&
-                (providerOptions.TimeoutSeconds.Value <= 0 || providerOptions.TimeoutSeconds.Value > 600))
+                (providerOptions.TimeoutSeconds.Value <= 0 || providerOptions.TimeoutSeconds.Value > MaxProviderTimeoutSeconds))
             {
-                errors.Add($"Provider '{providerName}' TimeoutSeconds must be between 1 and 600");
+                errors.Add($"Provider '{providerName}' TimeoutSeconds must be between 1 and {MaxProviderTimeoutSeconds}");
             }
 
             // 验证 Prompt Caching：Anthropic 每请求最多 4 个 cache_control 块，中间件按价值封顶；

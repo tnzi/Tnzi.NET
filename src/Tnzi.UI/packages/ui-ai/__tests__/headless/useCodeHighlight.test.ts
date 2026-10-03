@@ -170,3 +170,29 @@ describe('useCodeHighlight', () => {
     scope.stop();
   });
 });
+
+describe('useCodeHighlight - debounceMs', () => {
+  it('runs the first pass at once and a burst of later changes as one pass', async () => {
+    vi.useFakeTimers();
+    try {
+      const code = ref('a');
+      const scope = effectScope();
+      scope.run(() => useCodeHighlight(code, 'text', { debounceMs: 150 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pending.map((c) => c.code)).toEqual(['a']);
+
+      for (const next of ['ab', 'abc', 'abcd']) {
+        code.value = next;
+        await nextTick();
+        await vi.advanceTimersByTimeAsync(50);
+      }
+      expect(pending.map((c) => c.code)).toEqual(['a']);
+
+      await vi.advanceTimersByTimeAsync(150);
+      expect(pending.map((c) => c.code)).toEqual(['a', 'abcd']);
+      scope.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

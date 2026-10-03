@@ -156,6 +156,16 @@ public class IdentityModule : TnziApplicationModule
         // 详见 PendingActionsLoginGuard 的注释。
         context.Services.AddScoped<ILoginGuard, PendingActionsLoginGuard>();
 
+        // ★ 内置守卫：按账号的登录 IP 允许列表。没有策略行的账号（绝大多数）一次索引未命中即放行；
+        //   开了列表的账号只能从列表内地址签发令牌（含刷新），拒绝时对外与「密码错误」同形。
+        //   读写在 IUserSignInPolicyService，执行在这里 —— 两边解析列表用同一个 SignInIpAllowList。
+        context.Services.AddScoped<ILoginGuard, IpAllowListLoginGuard>();
+        context.Services.AddScoped<IUserSignInPolicyService, UserSignInPolicyService>();
+
+        // 管理端对另一个账号的二次验证控制（挂起 / 恢复 / 开关方式 / 首选 / 重置）。
+        // 只包一层租户范围检查再交给 ITwoFactorService；替人登记身份验证器在这一层就被拒绝。
+        context.Services.AddScoped<IUserTwoFactorAdminService, UserTwoFactorAdminService>();
+
         // 注册会话维护后台服务（定期清理过期/失活会话，避免幽灵会话累积影响并发计数）
         context.Services.AddHostedService<SessionMaintenanceBackgroundService>();
 
@@ -372,7 +382,15 @@ public class IdentityModule : TnziApplicationModule
         // 人机验证提供商的默认值：本模块加载而部署没配 AspNetCore:Captcha:Provider 时补成内置图形验证码。
         // 这保住了拆分前的行为（开了登录 / 注册验证码就出文字图），也让 [RequireCaptcha] 在加载了 Identity 的
         // 部署里零配置可用。PostConfigure 回调在所有 Configure 绑定之后跑，appsettings 里写了值的一律不动。
-        context.Services.PostConfigure<CaptchaVerifierOptions>(o => o.Provider ??= ImageCaptchaProvider.ProviderName);
+        // ★ 空白串同样算没配：验证器按 IsNullOrWhiteSpace 判未启用，只补 null 的话 "Provider": ""（模板变量没填、
+        //   环境变量置空）会让验证器整体失效，而身份流程的验证码开关照样开着。
+        context.Services.PostConfigure<CaptchaVerifierOptions>(o =>
+        {
+            if (string.IsNullOrWhiteSpace(o.Provider))
+            {
+                o.Provider = ImageCaptchaProvider.ProviderName;
+            }
+        });
 
         return Task.CompletedTask;
     }
@@ -511,6 +529,8 @@ public static class IdentityExtensions
 
             })
             .AddTnziPasskeyOptions(configuration)
+            // 用户名与邮箱跨字段唯一：登录按「用户名 → 邮箱」解析，任一输入串只能落到一个账号上
+            .AddUserValidator<CrossFieldIdentifierValidator>()
             .AddEntityFrameworkStores<TDbContext>()
             .AddDefaultTokenProviders();
     }
@@ -542,6 +562,20 @@ public static class IdentityExtensions
             // passkey 从"双因子"退化成"单因子"。
             options.UserVerificationRequirement =
                 passkeySection.GetValue("RequireUserVerification", true) ? "required" : "preferred";
+
+            // 两项都只影响之后的登记。留空时不赋值，让运行时按自己的默认走（resident key 为 discouraged、
+            // 认证器两类都允许）；硬件安全密钥的取舍写在 PasskeyOptions 上。
+            var residentKey = passkeySection.GetValue<string?>("ResidentKey");
+            if (!string.IsNullOrWhiteSpace(residentKey))
+            {
+                options.ResidentKeyRequirement = residentKey;
+            }
+
+            var attachment = passkeySection.GetValue<string?>("AuthenticatorAttachment");
+            if (!string.IsNullOrWhiteSpace(attachment))
+            {
+                options.AuthenticatorAttachment = attachment;
+            }
 
             // ★ 同一个 ChallengeTimeoutSeconds 要同时喂给两侧。浏览器那侧（AuthenticatorTimeout）
             // 决定系统弹窗等多久，服务端那侧决定缓存里的挑战状态活多久（PasskeyService.StoreStateAsync）。

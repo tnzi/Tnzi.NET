@@ -14,6 +14,7 @@ export {
   createInitialAuthState,
   sessionEndReasonOf,
   SESSION_ENDED_FOR_SECURITY_MESSAGE,
+  SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE,
   SESSION_EXPIRED_MESSAGE,
 } from './auth';
 export type { SessionEndReason } from './auth';

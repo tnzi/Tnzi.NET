@@ -145,11 +145,20 @@
               >
                 {{ t('actions.edit') }}
               </NButton>
-              <NPopconfirm v-if="!item.isReadOnly && crud.canDelete" @positive-click="removeOne(item)">
+              <NPopconfirm
+                v-if="!item.isReadOnly && crud.canDelete"
+                @update:show="(show) => onDeleteConfirmShow(item, show)"
+                @positive-click="removeOne(item)"
+              >
                 <template #trigger>
                   <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
                 </template>
                 {{ t('deleteConfirm') }}
+                <AgentGrantUsage
+                  variant="confirm"
+                  :state="deleteUsage.state.value"
+                  @retry="deleteUsage.load('skill', item.slug)"
+                />
               </NPopconfirm>
               <NButton v-else-if="crud.canDelete" size="small" type="error" ghost disabled>
                 {{ t('actions.delete') }}
@@ -214,6 +223,11 @@
             <div v-if="detailContent.whenToUse" class="ai-skills-detail__section">
               <h3>{{ t('detail.whenToUse') }}</h3>
               <pre class="ai-skills-detail__body">{{ detailContent.whenToUse }}</pre>
+            </div>
+
+            <div class="ai-skills-detail__section">
+              <h3>{{ tUsage('title') }}</h3>
+              <AgentGrantUsage :state="viewUsage.state.value" @retry="viewUsage.load('skill', viewed.slug)" />
             </div>
 
             <div class="ai-skills-detail__section">
@@ -293,9 +307,12 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
+import { createAgentGrantBridge } from '../../../services/bridges/agent-grant-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
-import { translatePageKey, interpolate } from '../../_shared/translate'
+import { translatePageKey, interpolate, makePageTranslator } from '../../_shared/translate'
+import AgentGrantUsage from '../_shared/AgentGrantUsage.vue'
+import { useAgentGrantUsage } from '../_shared/useAgentGrantUsage'
 import {
   skillColumns,
   skillFormSchema,
@@ -327,6 +344,19 @@ const message = (() => {
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
+
+// --- agents that depend on a skill ------------------------------------------
+// Read where the operator decides: the view drawer (record) and the delete
+// confirmation. Two independent states so opening one never repaints the other.
+const tUsage = makePageTranslator('ai.grantUsage')
+const grantBridge = createAgentGrantBridge({ client: useAdminClient() })
+const viewUsage = useAgentGrantUsage(grantBridge)
+const deleteUsage = useAgentGrantUsage(grantBridge)
+
+function onDeleteConfirmShow(item: SkillSummaryDto, show: boolean): void {
+  if (show) void deleteUsage.load('skill', item.slug)
+  else deleteUsage.reset()
+}
 
 // --- card-source scope badge helpers (config-driven, both ordinal + name) ---
 const scopeKey = (scope: unknown) => scopeLabelKey(scope)
@@ -443,6 +473,7 @@ const detailLoading = ref(false)
 const detailContent = ref<{ content: string; whenToUse: string }>({ content: '', whenToUse: '' })
 
 async function loadSkillContent(row: SkillSummaryDto): Promise<void> {
+  void viewUsage.load('skill', row.slug)
   detailContent.value = { content: '', whenToUse: row.whenToUse ?? '' }
   detailLoading.value = true
   try {

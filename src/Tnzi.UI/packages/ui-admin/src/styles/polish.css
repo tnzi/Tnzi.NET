@@ -814,6 +814,103 @@ body *::-webkit-scrollbar-thumb:active {
   white-space: nowrap;
 }
 
+/* ── Sidebar menus: tighter rows, captioned sections ─────────────────────
+   Every vertical navigation menu the shell renders: the full sidebar (which
+   also serves the collapsed rail, the hybrid child sider and the mobile
+   drawer) and the vertical-mix child sider. Lives here because the rules
+   target naive's own menu DOM, which scoped styles cannot reach across two
+   components without repeating themselves.
+
+   Rows: naive spaces every row and submenu 6px apart, which at 40px rows
+   reads as a list of separate buttons. 2px keeps the rows one column.
+
+   Sections: `defineAdminApp({ shell: { menuGroups: 'caption' } })` (the
+   default, see components/layout/menu-groups.ts) renders first-level groups
+   as naive `group` headings. naive styles those as a 36px muted row in the
+   item's own type size; a section heading over a column of 40px rows wants
+   to be a label between clusters, not a row itself: small caps, tracked,
+   18px tall on a 6px margin (a 9.5px caption does not need a row's worth of
+   height, and four sections over a dozen rows still have to fit a
+   laptop-height sider), with no band behind it - the caption is the small
+   type alone.
+
+   Colour: the sider's ink at 45%. naive's group colour (#AAA on the inverted
+   sider) sits right next to the 75% white of the item labels and reads as
+   one more row; an accent colour reads as one more accent in a column that
+   already has one; 45% sits clearly under the labels on both tones. The ink
+   follows the sider: on a light sider it is the menu's own text colour
+   (`--n-item-text-color`, which the surface-light variant already points at
+   the custom sider text colour when one is set); on the inverted sider it
+   is white, or the custom sider text colour - not the label colour, which
+   naive pre-dims to 75% and would land the caption at 34%.
+
+   Both are consumer hooks: `--tnzi-admin-menu-section-fg` replaces the
+   colour outright, `--tnzi-admin-menu-section-bg` (transparent by default,
+   see variables.css) puts a band back. They are only ever read here, never
+   redefined per sider tone on the element, so a `:root` value from the
+   consumer wins. The first caption sits directly under the logo bar. */
+.t-admin-sidebar__body .n-menu .n-menu-item,
+.t-admin-sidebar__body .n-menu .n-submenu,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item,
+.t-admin-shell__sub-sider-body .n-menu .n-submenu {
+  margin-top: 2px;
+}
+.t-admin-sidebar__body .n-menu .n-menu-item-group-title,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item-group-title {
+  height: 18px;
+  margin-top: 6px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--tnzi-admin-menu-section-fg, color-mix(in srgb, var(--n-item-text-color) 45%, transparent));
+  background: var(--tnzi-admin-menu-section-bg, transparent);
+}
+.t-admin-sidebar--inverted .t-admin-sidebar__body .n-menu .n-menu-item-group-title,
+.t-admin-shell__sub-sider--inverted .t-admin-shell__sub-sider-body .n-menu .n-menu-item-group-title {
+  color: var(--tnzi-admin-menu-section-fg, color-mix(in srgb, var(--tnzi-admin-sider-fg, #fff) 45%, transparent));
+}
+.t-admin-sidebar__body .n-menu .n-menu-item-group:first-child .n-menu-item-group-title,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item-group:first-child .n-menu-item-group-title {
+  margin-top: 0;
+}
+/* A section's rows sit on the same left edge as the heading and as the rows
+   outside any section: the heading is not a parent to indent under, it is a
+   label between clusters. naive indents a group's children half a level
+   (inline `padding-left`, hence !important), which staggered the glyph column
+   of every captioned menu by 9px. One level in from there for a submenu a
+   section still contains. Both menus render with `:indent="18"`. The
+   collapsed rail is left to naive: there the inline padding is what centres
+   the glyph in the 64px column. */
+.t-admin-sidebar__body .n-menu:not(.n-menu--collapsed) .n-menu-item-group > div > .n-menu-item > .n-menu-item-content,
+.t-admin-sidebar__body .n-menu:not(.n-menu--collapsed) .n-menu-item-group > div > .n-submenu > .n-menu-item > .n-menu-item-content,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item-group > div > .n-menu-item > .n-menu-item-content,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item-group > div > .n-submenu > .n-menu-item > .n-menu-item-content {
+  padding-left: 18px !important;
+}
+.t-admin-sidebar__body .n-menu:not(.n-menu--collapsed) .n-menu-item-group .n-submenu-children .n-menu-item-content,
+.t-admin-shell__sub-sider-body .n-menu .n-menu-item-group .n-submenu-children .n-menu-item-content {
+  padding-left: 36px !important;
+}
+/* The collapsed rail (64px) cannot fit a heading. Keep the section boundary
+   as a short rule between the icon clusters instead; the first section has
+   nothing above it to separate from. */
+.t-admin-sidebar__body .n-menu--collapsed .n-menu-item-group-title {
+  height: 0;
+  margin: 9px 18px 5px;
+  padding: 0 !important;
+  font-size: 0;
+  background: none;
+  border-top: 1px solid var(--tnzi-border);
+}
+.t-admin-sidebar__body .n-menu--collapsed .n-menu-item-group:first-child .n-menu-item-group-title {
+  margin: 0;
+  border-top: 0;
+}
+
 /* ── The detail-layout tab label ──
  *
  * `TDetailLayout`'s `tabs` strip renders one label per `DetailSection`, with

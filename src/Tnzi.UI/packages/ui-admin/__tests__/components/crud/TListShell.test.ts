@@ -395,3 +395,111 @@ describe('TListShell toolbar - icon-only buttons + trailing order', () => {
     })
   })
 })
+
+// ── Header off (list embedded in a tab): search lives in the toolbar ───────
+// The standard for multi-tab pages turns the list's own header off, so the
+// search entry points move into the list card. On phones they must be the same
+// icon toggles + downward panel the header path gives, because the side drawer
+// is desktop-only: without them a phone has no way to open the filters.
+describe('TListShell - header off (embedded in a tab)', () => {
+  afterEach(() => { delete (globalThis as Record<string, unknown>).__bpNarrow })
+
+  const drawerStubs = {
+    ...stubs,
+    Drawer: { name: 'Drawer', props: ['show'], template: '<div v-if="show" class="n-drawer-stub"><slot/></div>' },
+    DrawerContent: { name: 'DrawerContent', template: '<div><slot/><slot name="footer"/></div>' },
+  }
+  const fields = [{ key: 'name', label: 'Name', type: 'text' }] as any
+
+  function mountEmbedded() {
+    return mount(TListShell, {
+      props: { state: makeState() as any, showHeader: false, searchFields: fields },
+      slots: { renderer: '<div class="body-marker" />' },
+      global: { stubs: drawerStubs },
+    })
+  }
+
+  it('phone: shows the icon toggles in the toolbar instead of the inline keyword row', () => {
+    ;(globalThis as any).__bpNarrow = true
+    const wrapper = mountEmbedded()
+    const toolbar = wrapper.find('.t-list-shell__toolbar')
+    expect(toolbar.find('.t-list-shell__search-icon').exists()).toBe(true)
+    expect(toolbar.find('.t-list-shell__adv-toggle').exists()).toBe(true)
+    // The desktop row (keyword input + Search + Advanced) would overflow 375px.
+    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(false)
+  })
+
+  it('phone: Advanced expands the one-column form inside the list card, never the drawer', async () => {
+    ;(globalThis as any).__bpNarrow = true
+    const wrapper = mountEmbedded()
+    wrapper.findComponent('.t-list-shell__adv-toggle').vm.$emit('click')
+    await wrapper.vm.$nextTick()
+    const panel = wrapper.find('.t-list-shell__list-card .t-list-shell__mobile-search')
+    expect(panel.exists()).toBe(true)
+    expect(panel.classes()).toContain('t-list-shell__mobile-search--toolbar')
+    expect(panel.find('.t-crud-search-advanced').exists()).toBe(true)
+    expect(wrapper.find('.n-drawer-stub').exists()).toBe(false)
+    // Panel sits between the toolbar and the list body.
+    const html = wrapper.html()
+    expect(html.indexOf('t-list-shell__toolbar')).toBeLessThan(html.indexOf('t-list-shell__mobile-search'))
+    expect(html.indexOf('t-list-shell__mobile-search')).toBeLessThan(html.indexOf('body-marker'))
+  })
+
+  it('phone: the search toggle expands the keyword panel and collapses it again', async () => {
+    ;(globalThis as any).__bpNarrow = true
+    const wrapper = mountEmbedded()
+    wrapper.findComponent('.t-list-shell__search-icon').vm.$emit('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.t-list-shell__mobile-field').exists()).toBe(true)
+    wrapper.findComponent('.t-list-shell__search-icon').vm.$emit('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.t-list-shell__mobile-search').exists()).toBe(false)
+  })
+
+  it('desktop: keeps the inline keyword row and the right drawer', async () => {
+    ;(globalThis as any).__bpNarrow = false
+    const wrapper = mountEmbedded()
+    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell__search-icon').exists()).toBe(false)
+    const adv = wrapper.findAll('button').find((b) => b.text().includes('admin.crud.advancedSearch'))
+    expect(adv, 'toolbar Advanced button').toBeDefined()
+    await adv!.trigger('click')
+    expect(wrapper.find('.n-drawer-stub').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell__mobile-search').exists()).toBe(false)
+  })
+
+  it('header on: the phone panel stays in the header card, not the list card', async () => {
+    ;(globalThis as any).__bpNarrow = true
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, searchFields: fields },
+      slots: { renderer: '<div/>' },
+      global: { stubs: drawerStubs },
+    })
+    wrapper.findComponent('.t-list-shell__adv-toggle').vm.$emit('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.t-list-shell__header-card .t-list-shell__mobile-search').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell__list-card .t-list-shell__mobile-search').exists()).toBe(false)
+    expect(wrapper.find('.t-list-shell__toolbar .t-list-shell__search-icon').exists()).toBe(false)
+  })
+})
+
+// Every `admin.crud.*` key the shell renders must exist in both bundled
+// dictionaries: a miss renders the humanised key, which in zh-cn reads as an
+// untranslated English word (the toolbar once rendered "Advanced" this way).
+describe('TListShell - translation keys', () => {
+  it('uses only admin.crud keys present in en and zh-cn', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const { en } = await import('../../../src/locales/en')
+    const { zhCn } = await import('../../../src/locales/zh-cn')
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../src/components/crud/TListShell.vue'), 'utf8')
+    const keys = [...new Set([...src.matchAll(/t\('admin\.crud\.([\w.]+)'\)/g)].map((m) => m[1]))]
+    expect(keys.length).toBeGreaterThan(5)
+    const lookup = (dict: Record<string, unknown>, key: string) =>
+      key.split('.').reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], dict)
+    for (const key of keys) {
+      expect(typeof lookup(en.admin.crud as Record<string, unknown>, key), `en admin.crud.${key}`).toBe('string')
+      expect(typeof lookup(zhCn.admin.crud as Record<string, unknown>, key), `zh-cn admin.crud.${key}`).toBe('string')
+    }
+  })
+})

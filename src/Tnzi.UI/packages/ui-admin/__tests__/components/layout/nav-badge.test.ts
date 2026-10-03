@@ -197,7 +197,7 @@ describe('the inline chip rule', () => {
 
   it('sets vertical-align, so it sits on the label line instead of above it', () => {
     // The bug was inheriting `<sup>`'s UA `vertical-align: super`.
-    expect(block).toMatch(/vertical-align:\s*(?!super)\S+/)
+    expect(block).toMatch(/vertical-align:\s*(?!super\b)\S+/)
   })
 
   it('carries its own leading gap, so it is not glued to the label', () => {

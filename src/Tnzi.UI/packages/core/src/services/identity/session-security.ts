@@ -28,6 +28,22 @@ export const REFRESH_TOKEN_REUSED = 'IDENTITY_REFRESH_TOKEN_REUSED';
  */
 export const SESSION_BINDING_MISMATCH = 'IDENTITY_SESSION_BINDING_MISMATCH';
 
+/**
+ * A refresh was refused because the client's current address is not on the
+ * account's sign-in IP allow-list (the allow-list was tightened, or the user
+ * moved to another network). The backend revokes the session.
+ *
+ * Not a security-ended session: nothing looked stolen. It deserves its own
+ * notice because the only useful thing to tell the user is "sign in again from
+ * an allowed network" - a routine "session expired" sends them back to a
+ * password form that will keep refusing a correct password.
+ *
+ * Only the refresh path carries this code. A password sign-in refused by the
+ * same allow-list answers exactly like a wrong password (the guard runs after
+ * the password check, so anything else would confirm the password).
+ */
+export const SIGN_IN_IP_NOT_ALLOWED = 'IDENTITY_SIGN_IN_IP_NOT_ALLOWED';
+
 /** Every code that means "ended for a security reason", not "expired". */
 export const SESSION_SECURITY_CODES: readonly string[] = [
   REFRESH_TOKEN_REUSED,
@@ -45,6 +61,15 @@ export const SESSION_SECURITY_CODES: readonly string[] = [
 export function isSessionEndedForSecurity(value: unknown): boolean {
   const code = readErrorCode(value);
   return code != null && SESSION_SECURITY_CODES.includes(code);
+}
+
+/**
+ * Whether a failure means the session ended because the current network is
+ * not on the account's sign-in IP allow-list. Accepts the same two shapes as
+ * {@link isSessionEndedForSecurity}.
+ */
+export function isSignInIpNotAllowed(value: unknown): boolean {
+  return readErrorCode(value) === SIGN_IN_IP_NOT_ALLOWED;
 }
 
 function readErrorCode(value: unknown): string | undefined {

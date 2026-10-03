@@ -69,6 +69,23 @@ public class CaptchaVerifierOptionsValidatorTests
             f => f.Contains("VerifyUrl", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData(AltchaOptions.MaxNumberUpperBound + 1)]
+    [InlineData(int.MaxValue)]
+    public void AltchaMaxNumber_HasAnUpperBound(int maxNumber)
+    {
+        // 出题时取 MaxNumber + 1 作随机数上界：int.MaxValue 溢出成负数，出题端点每次都抛。
+        Assert.Contains(Validate(new CaptchaVerifierOptions { Altcha = { MaxNumber = maxNumber } }).Failures!,
+            f => f.Contains("Altcha.MaxNumber", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AltchaMaxNumber_AtTheUpperBound_IsAccepted()
+    {
+        var result = Validate(new CaptchaVerifierOptions { Altcha = { MaxNumber = AltchaOptions.MaxNumberUpperBound } });
+        Assert.DoesNotContain(result.Failures ?? [], f => f.Contains("Altcha.MaxNumber", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void TimeoutAndAltchaNumbers_MustBePositive()
     {

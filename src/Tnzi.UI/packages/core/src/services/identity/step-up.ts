@@ -14,6 +14,7 @@
 import type { HttpClient } from '../../http/http';
 import { STEP_UP_REQUIRED } from '../../http/auth-challenge';
 import { useAuthApi } from './api';
+import { runCeremony } from './ceremony';
 import { isPasskeySupported, PasskeyUnsupportedError } from './passkey';
 import type { StepUpGrantDto, TwoFactorType } from './types';
 
@@ -98,9 +99,9 @@ export async function stepUpWithPasskey(
     JSON.parse(begun.optionsJson),
   );
 
-  const credential = (await navigator.credentials.get({
-    publicKey: requestOptions,
-  })) as PublicKeyCredential | null;
+  const credential = (await runCeremony(() =>
+    navigator.credentials.get({ publicKey: requestOptions }),
+  )) as PublicKeyCredential | null;
 
   if (!credential) {
     return null;

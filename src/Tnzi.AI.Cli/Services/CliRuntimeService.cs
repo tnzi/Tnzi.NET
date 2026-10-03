@@ -3,6 +3,11 @@ namespace Tnzi.AI.Cli.Services;
 /// <summary>
 /// 外部运行时注册表的真实实现。
 /// </summary>
+/// <remarks>
+/// 运行时是宿主级资源（见 <see cref="Entities.CliRuntime"/>）：读取对所有租户开放（租户要能选它来绑定），
+/// 写入（探测 / 改状态 / 删除）只允许宿主上下文。一个租户管理员把运行时设成 Disabled 或删掉，
+/// 停掉的是同一台机器上所有租户的外部执行；探测则是在宿主机上拉起进程。
+/// </remarks>
 public class CliRuntimeService : ApplicationService, ICliRuntimeService
 {
     private readonly IRepository<Entities.CliRuntime, Guid> _repository;
@@ -11,6 +16,8 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
     private readonly ICliProtocolAdapterFactory _adapterFactory;
     private readonly ICliExecutableResolver _executableResolver;
     private readonly IOptionsMonitor<CliAgentOptions> _options;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
     private readonly string _hostId = Environment.MachineName;
 
     /// <summary>初始化运行时注册表服务。</summary>
@@ -21,7 +28,9 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         ICliProtocolAdapterFactory adapterFactory,
         ICliExecutableResolver executableResolver,
         IOptionsMonitor<CliAgentOptions> options,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -30,6 +39,8 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         _adapterFactory = Check.NotNull(adapterFactory);
         _executableResolver = Check.NotNull(executableResolver);
         _options = Check.NotNull(options);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
     }
 
     /// <inheritdoc />
@@ -58,6 +69,11 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         {
             return Fail<CliRuntimeProbeResultDto>(
                 "External CLI agent execution is disabled (AI:Cli:Enabled=false).", 501, ErrorCodes.CliDisabled);
+        }
+
+        if (IsTenantCaller())
+        {
+            return Fail<CliRuntimeProbeResultDto>(HostManagedMessage, 403, ErrorCodes.CliRuntimeHostManaged);
         }
 
         var result = new CliRuntimeProbeResultDto();
@@ -125,6 +141,11 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
     {
         Check.NotNull(input);
 
+        if (IsTenantCaller())
+        {
+            return Fail<CliRuntimeDto>(HostManagedMessage, 403, ErrorCodes.CliRuntimeHostManaged);
+        }
+
         var runtime = await _repository.AsQueryable(withTracking: true)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
 
@@ -166,6 +187,11 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
     /// <inheritdoc />
     public async Task<Result> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        if (IsTenantCaller())
+        {
+            return Fail(HostManagedMessage, 403, ErrorCodes.CliRuntimeHostManaged);
+        }
+
         var runtime = await _repository.GetAsync(id, cancellationToken);
         if (runtime is null)
         {
@@ -174,7 +200,12 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
 
         // 有 Agent 绑在上面就不能删：删掉会让那些 Agent 在下一次运行时才发现自己
         // 指向了一个不存在的运行时，而那时报的错离真正的原因已经很远了。
-        var boundAgents = await _bindingRepository.CountAsync(b => b.CliRuntimeId == id, cancellationToken);
+        // 绑定按租户隔离而运行时不是：这里必须数<b>所有租户</b>的绑定，否则宿主（租户为 null）
+        // 只数得到无租户的绑定，会把租户正在用的运行时删掉。摘掉全局过滤器后手工补回软删条件。
+        var boundAgents = await _bindingRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .CountAsync(b => !b.IsDeleted && b.CliRuntimeId == id, cancellationToken);
+
         if (boundAgents > 0)
         {
             return Fail(
@@ -208,6 +239,17 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
 
         return Task.FromResult(Ok(options));
     }
+
+    private const string HostManagedMessage =
+        "External CLI runtimes are host-level resources shared by all tenants; only the host can probe, change or delete them.";
+
+    /// <summary>
+    /// 调用者是否被钉在某个租户上。多租户关闭时恒为 false（单租户部署行为不变）；
+    /// 租户由身份决定：<see cref="ICurrentTenant"/> 优先，退回当前用户的租户 claim，与全局过滤器同源。
+    /// </summary>
+    private bool IsTenantCaller()
+        => (_multiTenancyOptions?.Value.Enabled ?? false)
+           && (_currentTenant?.Id ?? CurrentUser?.TenantId) is not null;
 
     private async Task MarkOfflineAsync(string providerKey, CancellationToken cancellationToken)
     {

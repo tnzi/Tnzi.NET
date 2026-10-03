@@ -82,7 +82,7 @@ public class InvitationTenantScopeIntegrationTests : RelationalIdentityIntegrati
     private async Task<(Guid InviteeId, string TokenHash)> InviteInTenantBAsync()
     {
         ActAs(Guid.NewGuid(), TenantB);
-        var invited = await _invitations.InviteAsync(new CreateInvitationDto { UserName = "invitee-b", Email = "invitee-b@example.com" });
+        var invited = await _invitations.InviteAsync(new CreateInvitationDto { Email = "invitee-b@example.com" });
         Assert.True(invited.Succeeded, invited.Message);
         var tokenHash = await InvitationTokenOfAsync(invited.Data!.UserId);
         Assert.NotNull(tokenHash);

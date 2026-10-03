@@ -61,6 +61,10 @@ public class SPANotFoundMiddleware
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength = shell.Length;
+        // 外壳引用的是带 hash 的分块名，必须每次重新验证：缓存住旧外壳，发版后刷新回来的
+        // 仍是指向已删分块的那一份，前端的发版检测与分块恢复因此永远回不到新版本。
+        // 带 hash 的分块本身可以长期缓存，那是静态文件中间件的事，这里不管。
+        context.Response.Headers.CacheControl = "no-cache";
 
         await using var stream = shell.CreateReadStream();
         await stream.CopyToAsync(context.Response.Body, context.RequestAborted);

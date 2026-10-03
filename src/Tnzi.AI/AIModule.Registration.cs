@@ -152,17 +152,48 @@ public partial class AIModule
     // Thinking injection / reasoning extraction run inside the OpenAI SDK pipeline
     // (ThinkingRequestPolicy), not as DelegatingHandlers - the latter don't compose
     // with HttpClientPipelineTransport.
-    private static void ConfigureAiResilience(HttpStandardResilienceOptions options)
+    //
+    // ★ 超时由提供商的 TimeoutSeconds 决定，管线不另设更短的一道。标准管线默认每次尝试 10 秒、总计 30 秒：
+    // 一次 20 秒的非流式补全会在第 10 秒被掐断并重试（每次都可能计费），30 秒整体失败，而配置写的是 300、
+    // 核心的 IAiUtility 默认实现也按 300 生效 —— 同一份配置、加载 Tnzi.AI 前后两种结果。
+    // 所以每次尝试的超时取该提供商的 TimeoutSeconds（未配 = 100 秒，与 HttpClient 默认 Timeout、OpenAI SDK 默认
+    // NetworkTimeout 同值）；各 provider 创建客户端时设的 HttpClient.Timeout 也是这个值，仍是实际约束。
+    internal static readonly TimeSpan DefaultProviderAttemptTimeout = TimeSpan.FromSeconds(100);
+
+    // 回退管线服务运行期才出现的提供商（热重载新增的配置项、只存在于数据库的提供商），注册时读不到它们的
+    // TimeoutSeconds，于是取允许的上限，由各自 HttpClient.Timeout（= 该提供商的 TimeoutSeconds）约束。
+    internal static readonly TimeSpan FallbackAttemptTimeout = TimeSpan.FromSeconds(AIOptionsValidator.MaxProviderTimeoutSeconds);
+
+    internal static void ConfigureAiResilience(HttpStandardResilienceOptions options, TimeSpan attemptTimeout)
     {
-        options.Retry.MaxRetryAttempts = 3;
+        const int maxRetryAttempts = 3;
+        var maxRetryDelay = TimeSpan.FromSeconds(10);
+        options.Retry.MaxRetryAttempts = maxRetryAttempts;
         options.Retry.Delay = TimeSpan.FromSeconds(1);
-        options.Retry.MaxDelay = TimeSpan.FromSeconds(10);
+        options.Retry.MaxDelay = maxRetryDelay;
+
+        options.AttemptTimeout.Timeout = attemptTimeout;
+        // 总超时要容得下全部尝试与退避，否则它会先于每次尝试的超时把请求掐断（Polly 也要求它大于单次尝试）。
+        options.TotalRequestTimeout.Timeout =
+            attemptTimeout * (maxRetryAttempts + 1) + maxRetryDelay * maxRetryAttempts;
 
         // SamplingDuration must be >= 2 * AttemptTimeout (Polly invariant).
         options.CircuitBreaker.FailureRatio = 0.5;
-        options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromTicks(Math.Max(TimeSpan.FromSeconds(30).Ticks, attemptTimeout.Ticks * 2));
         options.CircuitBreaker.MinimumThroughput = 5;
         options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+    }
+
+    /// <summary>
+    /// 静态配置的提供商每次尝试的超时：<c>TimeoutSeconds</c>（合法范围内）或 <see cref="DefaultProviderAttemptTimeout"/>。
+    /// 取的是启动时的值；运行期调大 <c>TimeoutSeconds</c> 要重启才对管线生效。
+    /// </summary>
+    internal static TimeSpan ResolveProviderAttemptTimeout(IConfigurationSection providerSection)
+    {
+        var seconds = providerSection.GetValue<int?>("TimeoutSeconds");
+        return seconds is > 0 and <= AIOptionsValidator.MaxProviderTimeoutSeconds
+            ? TimeSpan.FromSeconds(seconds.Value)
+            : DefaultProviderAttemptTimeout;
     }
 
     private static void ConfigureHttpClients(ServiceConfigurationContext context, IServiceCollection services)
@@ -179,15 +210,16 @@ public partial class AIModule
             if (providerChild.GetValue("Enabled", defaultValue: true) == false) continue;
 
             ResilientHttpClientNames.Register(providerName);
+            var attemptTimeout = ResolveProviderAttemptTimeout(providerChild);
             services.AddHttpClient(ResilientHttpClientNames.For(providerName))
-                .AddStandardResilienceHandler(ConfigureAiResilience);
+                .AddStandardResilienceHandler(options => ConfigureAiResilience(options, attemptTimeout));
         }
 
         // Fallback client - shared pipeline for providers added dynamically at runtime
         // (not listed in AI:Providers). Same-name circuit state is shared across them;
         // static configuration is the recommended production setup.
         services.AddHttpClient(ResilientHttpClientNames.Fallback)
-            .AddStandardResilienceHandler(ConfigureAiResilience);
+            .AddStandardResilienceHandler(options => ConfigureAiResilience(options, FallbackAttemptTimeout));
 
         // A2A 客户端 - 禁用自动重定向以防止 SSRF 通过 302 Location 绕过 EgressGuard
         services.AddHttpClient("Tnzi.AI.A2A")

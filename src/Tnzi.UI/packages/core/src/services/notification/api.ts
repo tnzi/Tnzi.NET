@@ -22,6 +22,9 @@ import type {
   NotificationPreferenceQueryDto,
   SetNotificationPreferenceDto,
   UnsubscribePreviewDto,
+  OptOutDto,
+  OptOutQueryDto,
+  CreateOptOutDto,
   AnonymousDeviceRegistrationDto,
   PushDeviceDto,
   PushDeviceQueryDto,
@@ -39,6 +42,7 @@ import type {
 
 const ADMIN_BASE = '/admin/notifications';
 const PREFERENCES_BASE = '/admin/notification-preferences';
+const OPT_OUTS_BASE = '/admin/notification-opt-outs';
 const TEMPLATES_BASE = '/admin/notification-templates';
 const USER_BASE = '/notifications';
 const UNSUBSCRIBE_BASE = '/notifications/unsubscribe';
@@ -216,6 +220,33 @@ export function useAdminNotificationPreferenceApi(client: HttpClient) {
     /** Reset a user's preferences to platform defaults */
     resetToDefault: (userId: string) =>
       client.post<void>(`${PREFERENCES_BASE}/user/${userId}/reset`),
+  };
+}
+
+/**
+ * Admin opt-out (suppression list) API.
+ * Backend: DefaultNotificationOptOutAdminController.
+ *
+ * Distinct from preferences: a preference is a USER's choice per channel and
+ * category, an opt-out is an ADDRESS that said no (one-click link, provider
+ * complaint, phone call). Delivery honours both; the admin page for this one
+ * exists so a compliance question ("when did this address opt out, on which
+ * channel") and an undo request ("I clicked by mistake") can actually be
+ * answered.
+ */
+export function useAdminNotificationOptOutApi(client: HttpClient) {
+  return {
+    /** Paged suppression list with address / channel / category / window filters */
+    getPagedList: (query?: OptOutQueryDto) =>
+      client.get<PagedList<OptOutDto>>(OPT_OUTS_BASE, { params: query }),
+
+    /** Hand-register an opt-out. Idempotent on (address, channel, category). */
+    create: (data: CreateOptOutDto) =>
+      client.post<OptOutDto>(OPT_OUTS_BASE, data),
+
+    /** Revoke one opt-out by row id; the address receives again from the next send on */
+    delete: (id: string) =>
+      client.delete<void>(`${OPT_OUTS_BASE}/${id}`),
   };
 }
 

@@ -185,7 +185,10 @@
           />
         </NFormItem>
         <NFormItem v-if="changeModal.step === 'confirm'" :label="t('changeModal.code')" required>
-          <NInput v-model:value="changeModal.code" :placeholder="t('changeModal.codePlaceholder')" />
+          <NInput
+            v-model:value="changeModal.code"
+            :placeholder="t('changeModal.codePlaceholder', { length: otpCodeLength })"
+          />
         </NFormItem>
         <p class="t-uc-hint">{{ t('changeModal.hint') }}</p>
       </NForm>
@@ -220,7 +223,7 @@
 import { computed, defineAsyncComponent, reactive, ref, watch, type Component } from 'vue'
 import { NButton, NDatePicker, NForm, NFormItem, NInput, NSelect } from 'naive-ui'
 import { TImageUpload } from '@tnzi/ui'
-import type { UserDto, UpdateUserDto } from '@tnzi/core/services/identity'
+import { resolveOtpCodeLength, type UserDto, type UpdateUserDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
 import { TModalShell } from '@tnzi/ui'
 import { vModule } from '../../../directives/vModule'
@@ -269,6 +272,12 @@ const savingAvatar = ref(false)
 
 const showField = (f: UserCenterProfileField) => !ctx.isFieldHidden(f)
 const readonly = (f: UserCenterReadonlyField) => ctx.isFieldReadonly(f)
+
+// The confirmation code goes to the new address and is `Identity:Otp:CodeLength`
+// digits (4-8), reported by the `/auth/config` probe the shell already ran. It
+// only words the placeholder: the field stays uncapped, so a failed probe
+// (which reads as 6) cannot stop an 8-digit code from being typed.
+const otpCodeLength = computed(() => resolveOtpCodeLength(ctx.authConfig.value))
 
 /** Self-service rebinding of the login email / phone. Backend channel
  *  capability AND app policy - see the template comment on the identity rows.

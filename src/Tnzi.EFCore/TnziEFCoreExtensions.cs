@@ -34,6 +34,10 @@ public static class TnziEFCoreExtensions
             var multiTenancy = serviceProvider.GetService<IOptions<MultiTenancyOptions>>();
             options.UseTnziMultiTenancy(multiTenancy?.Value.Enabled ?? false);
 
+            // 框架对 EF 模型警告的立场（必需导航指向软删主体是结构性的，不逐实体报）。
+            // 排在消费方配置之后：他们对该事件显式配置过的行为一律保留。
+            options.UseTnziModelWarningPolicy();
+
             // 添加慢查询拦截器（如果已注册）
             var interceptor = serviceProvider.GetService<Interceptors.SlowQueryLoggingInterceptor>();
             if (interceptor != null)

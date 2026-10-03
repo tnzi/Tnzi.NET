@@ -21,6 +21,8 @@ public class UserService : ApplicationService, IUserService
     private readonly bool _multiTenancyEnabled;
     private readonly IFunctionAuthorizationService? _functionAuthorization;
     private readonly ISessionRevocationService? _sessionRevocation;
+    private readonly IReadOnlyList<IUserUsageProvider> _usageProviders;
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptions;
 
     public UserService(
         UserManager<User> userManager,
@@ -37,7 +39,9 @@ public class UserService : ApplicationService, IUserService
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         IFunctionAuthorizationService? functionAuthorization = null,
-        ISessionRevocationService? sessionRevocation = null)
+        ISessionRevocationService? sessionRevocation = null,
+        IEnumerable<IUserUsageProvider>? usageProviders = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -53,6 +57,64 @@ public class UserService : ApplicationService, IUserService
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _functionAuthorization = functionAuthorization;
         _sessionRevocation = sessionRevocation;
+        _usageProviders = usageProviders?.ToList() ?? [];
+        _identityOptions = identityOptions;
+    }
+
+    /// <summary>
+    /// 用邮箱作用户名的开关。未注入选项时取选项类的默认值（开启），与未配置的部署同一口径：
+    /// 不能因为少了一个可选形参就换成另一套规则。
+    /// </summary>
+    private bool UseEmailAsUserName => (_identityOptions?.CurrentValue ?? new IdentityOptions()).SignIn.UseEmailAsUserName;
+
+    /// <summary>
+    /// 删除之前问一圈「这个账号还有别的记录以它为主体吗」。任一 <see cref="IUserUsageProvider"/>
+    /// 答「在用」即返回 409，且此时**一个字节都还没改**。
+    /// </summary>
+    /// <remarks>
+    /// 消费应用的员工档案 / 警员台账 / 薪酬主数据都以可空 <c>UserId</c> 松引用账号且刻意不建外键，
+    /// 所以数据库既不会级联也不会拒绝；没有这一问，框架自带的删除端点会把它们留成指向已删账号的
+    /// 悬空行，而列表、状态、接口返回全都正常。无实现时返回 null，删除路径与引入本检查之前逐字相同。
+    /// </remarks>
+    private async Task<Result?> RefuseIfInUseAsync(User user)
+    {
+        foreach (var provider in _usageProviders)
+        {
+            var usage = await provider.FindUsageAsync(user.Id);
+            if (usage == null)
+            {
+                continue;
+            }
+
+            LogInformation(
+                "Refused to delete user {UserId} ({UserName}): still in use per {Provider}: {Detail}",
+                user.Id, user.UserName ?? string.Empty, provider.GetType().Name, usage.Detail);
+            return Fail(
+                $"User '{user.UserName}' cannot be deleted: {usage.Detail}",
+                409,
+                ErrorCodes.IDENTITY_USER_IN_USE);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 账号已经删掉、会话已撤销之后的通知。拿这个账号当主体的领域记录从这里善后。
+    /// </summary>
+    private async Task PublishUserDeletedAsync(User user)
+    {
+        if (EventBus == null)
+        {
+            return;
+        }
+
+        await EventBus.PublishAsync(new UserDeletedEvent
+        {
+            UserId = user.Id,
+            UserName = user.UserName ?? string.Empty,
+            DeletionTime = DateTime.UtcNow,
+            DeletedBy = (_currentUser ?? CurrentUser)?.Id
+        }, cancellationToken: default);
     }
 
     /// <summary>
@@ -183,6 +245,10 @@ public class UserService : ApplicationService, IUserService
         return null;
     }
 
+    /// <summary>调用者（非超管）要对一个超管账号动手时为 true，判据见 <see cref="SuperAdminTargetGuard"/>。</summary>
+    private Task<bool> IsSuperAdminTargetForbiddenAsync(Guid targetUserId)
+        => SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, targetUserId);
+
     public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
     {
         var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
@@ -191,7 +257,22 @@ public class UserService : ApplicationService, IUserService
             return Fail<UserDto>(organizationCheck.Message!, organizationCheck.Code ?? 400, organizationCheck.ErrorCode);
         }
 
+        var userName = UserNamePolicy.ResolveForNewAccount(input.UserName, input.Email, UseEmailAsUserName);
+        if (!userName.Succeeded)
+        {
+            return Fail<UserDto>(userName.Message!, userName.Code ?? 400, userName.ErrorCode);
+        }
+        if (string.IsNullOrEmpty(userName.Data))
+        {
+            // 两种部署缺的不是同一件事：用邮箱当用户名时，给了邮箱就不需要用户名；否则邮箱给没给都得有用户名。
+            return Fail<UserDto>(
+                UseEmailAsUserName ? "Username is required when the account has no email address." : "Username is required.",
+                400,
+                ErrorCodes.VALIDATION_ERROR);
+        }
+
         var user = input.MapTo<User>();
+        user.UserName = userName.Data;
         if (_multiTenancyEnabled && user.TenantId == null)
         {
             user.TenantId = ResolveNewUserTenantId();
@@ -266,6 +347,11 @@ public class UserService : ApplicationService, IUserService
             return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail<UserDto>(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
         if (!organizationCheck.Succeeded)
         {
@@ -289,7 +375,7 @@ public class UserService : ApplicationService, IUserService
         if (!string.IsNullOrWhiteSpace(input.Email)
             && !string.Equals(input.Email, user.Email, StringComparison.OrdinalIgnoreCase))
         {
-            var emailResult = await _userManager.SetEmailAsync(user, input.Email);
+            var emailResult = await _userManager.SetEmailWithUserNameAsync(user, input.Email);
             if (!emailResult.Succeeded)
             {
                 return Fail<UserDto>(
@@ -404,6 +490,17 @@ public class UserService : ApplicationService, IUserService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        var inUse = await RefuseIfInUseAsync(user);
+        if (inUse != null)
+        {
+            return inUse;
+        }
+
         // Snapshot current role IDs BEFORE deletion so the cache-invalidation
         // event has the full removed list. We map role-names → IDs via
         // RoleManager - `UserManager.GetRolesAsync` returns names only.
@@ -447,6 +544,8 @@ public class UserService : ApplicationService, IUserService
             addedRoleIds: new List<Guid>(),
             removedRoleIds: roleIdsBeforeDelete,
             changeType: UserRolesChangeType.UserDeleted);
+
+        await PublishUserDeletedAsync(user);
 
         return Ok("User deleted successfully");
     }
@@ -629,6 +728,11 @@ public class UserService : ApplicationService, IUserService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // ★★★ 未接受邀请的账号不能被「启用」放出来。这不是多余的守卫：启用就是清掉
         //   LockoutEnd，LockedAccountLoginGuard 从此放行；若邀请状态也被这里一并清掉，
         //   一个没有密码、没有二次验证、角色却已预设好的账号就对全部登录路径敞开了
@@ -680,6 +784,11 @@ public class UserService : ApplicationService, IUserService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 禁用用户：锁定到未来某个时间（如100年后）
         var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
         if (!locked.Succeeded)
@@ -722,6 +831,11 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         var lockoutEndDate = lockoutEnd ?? DateTimeOffset.UtcNow.AddDays(DefaultLockoutDays);
@@ -767,6 +881,11 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await IsSuperAdminTargetForbiddenAsync(id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         var cleared = await ClearLockoutAsync(user);
@@ -831,6 +950,12 @@ public class UserService : ApplicationService, IUserService
         var inputList = inputs.ToList();
         var results = new List<UserListItemDto>();
 
+        // 批量更新逐个提交、不是事务：超管目标必须在动第一个之前整批问完，拒绝就一个都不动。
+        if (await SuperAdminTargetGuard.IsAnyForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, inputList.Select(x => x.Id)))
+        {
+            return Fail<IEnumerable<UserListItemDto>>(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 由于UserManager.UpdateAsync需要逐个处理（验证、事件触发等），
         // 我们仍然需要循环调用，但可以优化后续的数据库操作
         foreach (var (id, dto) in inputList)
@@ -862,6 +987,24 @@ public class UserService : ApplicationService, IUserService
         // 批量查找用户（使用一次查询而不是循环）；范围外的 id 与不存在的 id 同样落不进来。
         var users = await Scope.Apply(_userRepository.Where(u => idList.Contains(u.Id)))
             .ToListAsync();
+
+        // 超管目标与下面的「被认领」同理：整批问完，含一个就整批拒绝，一个都不删。
+        if (await SuperAdminTargetGuard.IsAnyForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, users.Select(u => u.Id)))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // ★ 整批先问完再动手。批量删除不是事务（UserManager 逐个提交），一旦第二个人被
+        //   领域记录认领而第一个人已经删了，既没有回滚，返回值也说不清删掉了谁。
+        //   先问一圈，被认领的一个都不动，操作员拿到的是「谁挡住了」而不是半批结果。
+        foreach (var user in users)
+        {
+            var inUse = await RefuseIfInUseAsync(user);
+            if (inUse != null)
+            {
+                return inUse;
+            }
+        }
 
         // 批量删除（使用UserManager的DeleteAsync，因为它会触发相关事件和清理）
         // 注意：UserManager没有批量删除方法，所以仍然需要循环
@@ -905,6 +1048,8 @@ public class UserService : ApplicationService, IUserService
                 addedRoleIds: new List<Guid>(),
                 removedRoleIds: roleIdsBeforeDelete,
                 changeType: UserRolesChangeType.UserDeleted);
+
+            await PublishUserDeletedAsync(user);
         }
 
         LogInformation("Batch deleted {Count} users", users.Count);
@@ -917,6 +1062,11 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await IsSuperAdminTargetForbiddenAsync(userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         var idList = roleIds.ToList();
@@ -963,6 +1113,11 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await IsSuperAdminTargetForbiddenAsync(userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         var idList = roleIds.ToList();
@@ -1133,8 +1288,8 @@ public class UserService : ApplicationService, IUserService
 
         var oldEmail = user.Email;
 
-        // 使用 UserManager 设置邮箱（会处理 NormalizedEmail）
-        var setResult = await _userManager.SetEmailAsync(user, newEmail);
+        // 经 UserManager 设置邮箱（会处理 NormalizedEmail）；用户名绑在旧邮箱上的一起跟过去
+        var setResult = await _userManager.SetEmailWithUserNameAsync(user, newEmail);
         if (!setResult.Succeeded)
         {
             return Fail($"Failed to change email: {setResult.FormatErrors()}", 400, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
@@ -1224,6 +1379,11 @@ public class UserService : ApplicationService, IUserService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await IsSuperAdminTargetForbiddenAsync(userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         if (confirmEmail == true && string.IsNullOrWhiteSpace(user.Email))
@@ -1474,6 +1634,14 @@ public class UserService : ApplicationService, IUserService
 
         var userName = user.UserName ?? string.Empty;
 
+        // 自助注销同样要问领域记录：员工名册上的人自己把登录注销掉，名册照样指着一个已删账号。
+        // 拒绝时那句说明会指路去找管理员，而不是留下一条谁都看不出来的悬空行。
+        var inUse = await RefuseIfInUseAsync(user);
+        if (inUse != null)
+        {
+            return inUse;
+        }
+
         // 先锁定再软删：锁定写不进去时账号不能已经被标成删除 ——
         // 此前是先在内存里置 IsDeleted 再调 Set*Async（它们各自 SaveChanges，会把软删标记一并带出去），
         // 于是一次失败的注销留下的是一条已软删、却没锁的行。
@@ -1508,6 +1676,9 @@ public class UserService : ApplicationService, IUserService
                 DeletedTime = DateTime.UtcNow
             }, cancellationToken: default);
         }
+
+        // 领域记录只需订阅一个「账号没了」的事件，不必区分是管理员删的还是本人注销的。
+        await PublishUserDeletedAsync(user);
 
         // 清除缓存
         if (_cache != null)
@@ -1642,8 +1813,17 @@ public class UserService : ApplicationService, IUserService
         var phoneIdx = Array.IndexOf(header, "phonenumber");
         var passwordIdx = Array.IndexOf(header, "password");
 
-        if (userNameIdx < 0 || emailIdx < 0 || passwordIdx < 0)
-            return Fail<UserImportResult>("CSV header must contain at least: UserName, Email, Password", 400, ErrorCodes.VALIDATION_ERROR);
+        // 用邮箱作用户名时 UserName 列可省：每行的用户名就是那一行的邮箱
+        var useEmailAsUserName = UseEmailAsUserName;
+        if (emailIdx < 0 || passwordIdx < 0 || (userNameIdx < 0 && !useEmailAsUserName))
+        {
+            return Fail<UserImportResult>(
+                useEmailAsUserName
+                    ? "CSV header must contain at least: Email, Password"
+                    : "CSV header must contain at least: UserName, Email, Password",
+                400,
+                ErrorCodes.VALIDATION_ERROR);
+        }
 
         var result = new UserImportResult { TotalRows = lines.Count - 1 };
 
@@ -1661,16 +1841,25 @@ public class UserService : ApplicationService, IUserService
                     continue;
                 }
 
-                var userName = fields[userNameIdx].Trim();
+                var requestedUserName = userNameIdx >= 0 ? fields[userNameIdx].Trim() : null;
                 var email = fields[emailIdx].Trim();
                 var password = fields[passwordIdx].Trim();
 
-                if (string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+                if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
                 {
-                    result.Errors[rowNumber] = "UserName, Email, and Password are required";
+                    result.Errors[rowNumber] = "Email and Password are required";
                     result.FailedCount++;
                     continue;
                 }
+
+                var resolvedUserName = UserNamePolicy.ResolveForNewAccount(requestedUserName, email, useEmailAsUserName);
+                if (!resolvedUserName.Succeeded || string.IsNullOrEmpty(resolvedUserName.Data))
+                {
+                    result.Errors[rowNumber] = resolvedUserName.Succeeded ? "UserName is required" : resolvedUserName.Message!;
+                    result.FailedCount++;
+                    continue;
+                }
+                var userName = resolvedUserName.Data;
 
                 // Check if user already exists
                 var existingUser = await _userManager.FindByEmailAsync(email);

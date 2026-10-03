@@ -19,6 +19,10 @@ namespace Tnzi.AspNetCore.Mvc.Filters;
 /// （自适应阈值、失败计数、拒绝时随响应附一道新题），特性给不了这些。消费方自己的联系表单、
 /// 匿名投稿、评论这类端点才是它的用途。
 /// </para>
+/// <para>
+/// 类与 action 上同时挂（或基类挂、派生 action 再挂）时<b>只验一次，按离 action 最近的那个用途</b>：
+/// 令牌是一次性的，验两次等于第二次必判重放、端点永久 400。
+/// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
 public sealed class RequireCaptchaAttribute : Attribute, IFilterFactory, IOrderedFilter
@@ -29,10 +33,22 @@ public sealed class RequireCaptchaAttribute : Attribute, IFilterFactory, IOrdere
     /// <summary>
     /// 初始化特性。
     /// </summary>
-    /// <param name="purpose">端点用途，例如 <c>contact</c> / <c>comment</c>；小写字母、数字与连字符。</param>
+    /// <param name="purpose">端点用途，例如 <c>contact</c> / <c>comment</c>；小写字母开头，小写字母、数字与连字符，至多 32 位。</param>
+    /// <exception cref="ArgumentException">用途不符合 <see cref="CaptchaPurpose"/> 的形态。</exception>
     public RequireCaptchaAttribute(string purpose)
     {
-        Purpose = Check.NotNullOrWhiteSpace(purpose);
+        Check.NotNullOrWhiteSpace(purpose);
+
+        // 出题端点只认合法形态的用途：一个写成 contact_form 的端点永远领不到题，而启动与编译都不报错。
+        // 在这里抛，MVC 建 action 描述符时（即启动期）就失败，并指名是哪个用途。
+        if (!CaptchaPurpose.IsValid(purpose))
+        {
+            throw new ArgumentException(
+                $"Captcha purpose '{purpose}' is invalid: it must start with a lowercase letter and contain only lowercase letters, digits and hyphens (at most 32 characters).",
+                nameof(purpose));
+        }
+
+        Purpose = purpose;
     }
 
     /// <summary>端点用途。</summary>

@@ -76,6 +76,8 @@ public class CaptchaServiceTests
 
         _cacheMock.Setup(x => x.RemoveAsync(cacheKey))
             .Returns(Task.CompletedTask);
+        _cacheMock.Setup(x => x.TrySetAsync(cacheKey + ":consumed", true, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _captchaService.VerifyAsync(captchaId, captchaCode, purpose);
@@ -83,6 +85,44 @@ public class CaptchaServiceTests
         // Assert
         Assert.True(result);
         _cacheMock.Verify(x => x.RemoveAsync(cacheKey), Times.Once);
+    }
+
+    /// <summary>
+    /// ★ 先读、再删、后判定之间没有原子性：并发请求都能在任何一个删掉之前读到同一张验证码。
+    /// 这里让缓存对每个读者都还给出码（即「都读在删之前」），只有第一个占得住消费标记 —— 第二个必须失败。
+    /// </summary>
+    [Fact]
+    public async Task VerifyAsync_WhenAConcurrentRequestAlreadyClaimedTheCaptcha_ReturnsFalse()
+    {
+        var captchaId = Guid.NewGuid().ToString("N");
+        var cacheKey = Tnzi.Caching.CacheKeys.Identity.Captcha("login", captchaId);
+        _cacheMock.Setup(x => x.GetAsync<string>(cacheKey)).ReturnsAsync("abcd");
+        _cacheMock.SetupSequence(x => x.TrySetAsync(cacheKey + ":consumed", true, It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+
+        var first = await _captchaService.VerifyAsync(captchaId, "ABCD", "login");
+        var second = await _captchaService.VerifyAsync(captchaId, "ABCD", "login");
+
+        Assert.True(first);
+        Assert.False(second);
+    }
+
+    /// <summary>真实内存缓存上并发喷洒同一张验证码：恰好一个请求通过。</summary>
+    [Fact]
+    public async Task VerifyAsync_Concurrent_OnlyOneRequestPasses()
+    {
+        var cache = new MemoryCacheService(
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            new Mock<ILogger<MemoryCacheService>>().Object,
+            Microsoft.Extensions.Options.Options.Create(new CachingOptions()));
+        var service = new CaptchaService(_identityOptionsMock.Object, _serviceProviderMock.Object, cache);
+        var captchaId = Guid.NewGuid().ToString("N");
+        await cache.SetAsync(Tnzi.Caching.CacheKeys.Identity.Captcha("login", captchaId), "abcd", TimeSpan.FromMinutes(5));
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 50).Select(_ => Task.Run(() => service.VerifyAsync(captchaId, "ABCD", "login"))));
+
+        Assert.Equal(1, results.Count(passed => passed));
     }
 
     [Fact]

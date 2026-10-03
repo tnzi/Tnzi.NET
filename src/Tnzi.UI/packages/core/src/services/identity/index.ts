@@ -7,6 +7,7 @@
 export * from './metadata';
 export * from './types';
 export * from './api';
+export * from './code-length';
 export * from './passkey';
 export * from './step-up';
 export * from './session-security';

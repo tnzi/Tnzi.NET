@@ -7,8 +7,9 @@
  */
 
 import { NButton } from 'naive-ui';
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue';
+import { computed, ref, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
+import { useCodeHighlight } from '../../headless/useCodeHighlight';
 
 const props = withDefaults(defineProps<{
   code: string;
@@ -21,35 +22,19 @@ const props = withDefaults(defineProps<{
   showLineNumbers: false,
 });
 
-const highlightedHtml = ref('');
-const isLoaded = ref(false);
+// Re-highlights on a change of the code or the language and drops a pass a
+// newer input has superseded, so a late Shiki result never replaces a newer
+// one. Debounced because streamed code changes on every token.
+const { html: highlightedHtml, error: highlightError } = useCodeHighlight(
+  () => props.code,
+  () => props.language || 'text',
+  { debounceMs: 150 },
+);
+// Shiki unavailable (or the grammar failed): the plain fallback below.
+const isLoaded = computed(() => !highlightError.value);
 const isCopied = ref(false);
 
 let copyTimeout: ReturnType<typeof setTimeout> | null = null;
-let highlightDebounce: ReturnType<typeof setTimeout> | null = null;
-
-async function highlight(): Promise<void> {
-  if (!props.code) {
-    highlightedHtml.value = '';
-    return;
-  }
-
-  try {
-    const { codeToHtml } = await import('shiki');
-    const html = await codeToHtml(props.code, {
-      lang: props.language || 'text',
-      themes: {
-        light: 'github-light',
-        dark: 'github-dark',
-      },
-    });
-    highlightedHtml.value = html;
-    isLoaded.value = true;
-  } catch {
-    // shiki load failed - keep fallback
-    isLoaded.value = false;
-  }
-}
 
 function handleCopy(): void {
   navigator.clipboard.writeText(props.code).catch(() => {
@@ -63,16 +48,8 @@ function handleCopy(): void {
   }, 2000);
 }
 
-onMounted(highlight);
-
-watch(() => [props.code, props.language], () => {
-  if (highlightDebounce) clearTimeout(highlightDebounce);
-  highlightDebounce = setTimeout(highlight, 150);
-});
-
 onBeforeUnmount(() => {
   if (copyTimeout) clearTimeout(copyTimeout);
-  if (highlightDebounce) clearTimeout(highlightDebounce);
 });
 </script>
 

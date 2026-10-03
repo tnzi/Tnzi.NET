@@ -29,10 +29,11 @@ import { NCard } from 'naive-ui'
 import { useTheme, getPaletteColorByNumber, mixColor } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { TThemeSchemaSwitch } from '@tnzi/ui'
-import { TLangSwitch } from '@tnzi/ui'
+import { TLangSwitch, type LangOption } from '@tnzi/ui'
 import LoginWaves from './login/LoginWaves.vue'
 import LoginBrandPanel from './login/LoginBrandPanel.vue'
 import { useAdminClient } from '../../plugin/client'
+import { useAdminLocale } from '../../headless/useAdminLocale'
 import {
   provideLoginContext,
   type PendingActionChallenge,
@@ -99,7 +100,8 @@ interface Props {
   transitionName?: string
   /**
    * Show the language switcher (`TLangSwitch`) in the toolbar.
-   * Defaults to **false** - many deployments are single-locale.
+   * Defaults to **false** - many deployments are single-locale. Even when on,
+   * the switcher stays hidden while the application offers a single locale.
    */
   showLangSwitch?: boolean
   /**
@@ -127,7 +129,9 @@ interface Props {
    * Why the previous session ended (core's `auth.sessionEndReason`), rendered
    * as a notice above the active module. `'security'` is the one message the
    * user has no other way to receive: the backend revoked the session because
-   * the credentials looked stolen. `LoginView` reads it off the wired runtime;
+   * the credentials looked stolen. `'ipNotAllowed'` means the refresh was
+   * refused by the account's sign-in IP allow-list, so signing in again only
+   * works from another network. `LoginView` reads it off the wired runtime;
    * a consumer mounting this shell by hand passes it explicitly.
    */
   sessionEndReason?: SessionEndReason | null
@@ -201,6 +205,18 @@ const activeComponent = computed(() => props.moduleComponents[props.module])
 
 const isDark = computed(() => theme.resolvedMode.value === 'dark')
 
+/**
+ * The language switcher reads and writes the same source as the header
+ * switcher after sign-in: the persisted admin app store, through the locale
+ * registry. `TLangSwitch` is presentational, so without this binding it opens,
+ * lists its own default languages and changes nothing.
+ */
+const locales = useAdminLocale()
+const langSwitchVisible = computed(() => props.showLangSwitch && locales.hasChoice.value)
+const langOptions = computed<LangOption[]>(() =>
+  locales.options.value.map((l) => ({ label: l.label, value: l.code })),
+)
+
 // Soybean's bg recipe: mixColor('#ffffff', themeColor, dark ? 0.5 : 0.2).
 // In dark mode soybean additionally substitutes `themeColor` with the 600-step
 // palette tint of the primary so the wash stays distinguishable from background.
@@ -268,6 +284,14 @@ const sessionNotice = computed<{ text: string; tone: 'warning' | 'info' } | null
         text: t(
           'admin.login.sessionEndedForSecurity',
           'Your session was ended for security reasons. Please sign in again.',
+        ),
+      }
+    case 'ipNotAllowed':
+      return {
+        tone: 'warning',
+        text: t(
+          'admin.login.sessionEndedIpNotAllowed',
+          'Your current network is not on the list of addresses this account may sign in from. Sign in again from an allowed network.',
         ),
       }
     case 'expired':
@@ -413,7 +437,14 @@ provideLoginContext(loginContext)
           <div data-test="t-login-page-toolbar" class="i-flex-col items-end gap-1">
             <slot name="toolbar">
               <TThemeSchemaSwitch v-if="showThemeSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
-              <TLangSwitch v-if="showLangSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
+              <TLangSwitch
+                v-if="langSwitchVisible"
+                :value="locales.current.value"
+                :options="langOptions"
+                :translate="t"
+                class="text-20px lt-sm:text-18px"
+                @update:value="locales.setLocale"
+              />
             </slot>
           </div>
         </header>
@@ -472,7 +503,14 @@ provideLoginContext(loginContext)
     >
       <slot name="toolbar">
         <TThemeSchemaSwitch v-if="showThemeSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
-        <TLangSwitch v-if="showLangSwitch" :translate="t" class="text-20px lt-sm:text-18px" />
+        <TLangSwitch
+          v-if="langSwitchVisible"
+          :value="locales.current.value"
+          :options="langOptions"
+          :translate="t"
+          class="text-20px lt-sm:text-18px"
+          @update:value="locales.setLocale"
+        />
       </slot>
     </div>
     <div class="t-login__pane">

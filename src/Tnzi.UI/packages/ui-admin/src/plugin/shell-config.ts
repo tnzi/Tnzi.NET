@@ -3,7 +3,7 @@
  * (the frame around the pages), as opposed to the per-page configs
  * (`dashboard`, `settings`, `userCenter`) that configure one route.
  *
- * Today it carries exactly one thing: the host's own chrome actions.
+ * It carries the host's own chrome actions and the sidebar's menu-group style.
  *
  * ## Why this exists
  *
@@ -53,6 +53,7 @@
  */
 import type { App, InjectionKey } from 'vue'
 import { inject } from 'vue'
+import type { AdminMenuGroupStyle } from '../components/layout/menu-groups'
 
 /**
  * One host-contributed action in the admin chrome.
@@ -104,6 +105,15 @@ export interface AdminShellConfig {
    * nothing and changes nothing.
    */
   actions?: AdminChromeAction[]
+  /**
+   * How the sidebars render a menu entry that has children at their first
+   * level. `caption` (default): a small heading with the children listed flat
+   * beneath it, the whole menu visible at once. `submenu`: a collapsible
+   * submenu the user opens and closes. Applies to every vertical sider (the
+   * full sidebar, the vertical-mix and hybrid child siders, the mobile
+   * drawer); the horizontal top menu keeps its dropdowns either way.
+   */
+  menuGroups?: AdminMenuGroupStyle
 }
 
 export const ADMIN_SHELL_CONFIG_KEY: InjectionKey<AdminShellConfig> = Symbol(

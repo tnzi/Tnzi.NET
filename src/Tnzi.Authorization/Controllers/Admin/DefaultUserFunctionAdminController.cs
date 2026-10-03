@@ -162,4 +162,17 @@ public class DefaultUserFunctionAdminController : ApiAdminControllerBase
         var result = await UserFunctionService.SetUserDeniedFunctionsAsync(userId, request.FunctionIds);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// 用户的权限全景：目录 + 按角色的基线 + 用户级 allow / deny 覆盖 + 最终生效集，一次读出
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="scope">可选的码前缀（如 <c>catalog.</c>），只看目录的一个切片</param>
+    /// <returns>权限全景</returns>
+    [HttpGet("user/{userId:guid}/picture")]
+    public virtual async Task<ApiResult<UserPermissionPictureDto>> GetUserPermissionPicture(Guid userId, [FromQuery] string? scope = null)
+    {
+        var result = await UserFunctionService.GetUserPermissionPictureAsync(userId, scope);
+        return result.ToApiResult();
+    }
 }

@@ -64,8 +64,15 @@ const budget = (name, path, limit) => ({ name, path, limit, gzip: true })
 // useFormHost / useFormHostRegistration) that lets the container owning the
 // Save button validate slotted TSchemaForms; it is shipped weight, not churn.
 // 17 kB keeps the usual ~8% headroom above the measurement.
+//
+// `index` re-measured 2026-09-21 at 78.27 kB against 77.8 kB at HEAD (both
+// built the same way) and raised 78 -> 80 kB. The 0.47 kB is the passkey
+// second-factor leg of the default login callbacks (`verifyTwoFactorWithPasskey`
+// in `headless/auth/default-auth.ts`) and the ceremony it pulls from core.
+// 0.2 kB of headroom was a tripwire, not a budget: it would have fired for
+// whichever change landed next rather than for the one that filled it.
 export default [
-  budget('index (whole package barrel)', 'dist/index.js', '78 kB'),
+  budget('index (whole package barrel)', 'dist/index.js', '80 kB'),
   budget('components barrel (61 SFCs; naive-ui external)', 'dist/components.js', '59 kB'),
   budget('stores barrel', 'dist/stores.js', '14 kB'),
   budget('headless barrel (incl. the login stack)', 'dist/headless.js', '17 kB'),

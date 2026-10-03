@@ -231,6 +231,7 @@ public class CliRunExecutorCancellationTests : IntegratedTestBase<CliBudgetDbCon
             Mock.Of<ICliMcpConfigComposer>(),
             new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
             executables.Object,
+            new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
             Mock.Of<IAgentGrantService>(),
             Mock.Of<ISkillService>(),
             new CliRunSignalHub(),

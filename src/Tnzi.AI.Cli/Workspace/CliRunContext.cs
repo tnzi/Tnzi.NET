@@ -44,6 +44,12 @@ public sealed record CliRunContext
     /// </remarks>
     public Guid? ThreadId { get; init; }
 
+    /// <summary>
+    /// 派出这次运行的用户（运行记录的 <c>CreatorId</c>）；没有登录用户时为 null。
+    /// 开启 <see cref="CliAgentOptions.PartitionWorkspacesByUser"/> 时决定用户分区目录。
+    /// </summary>
+    public Guid? UserId { get; init; }
+
     /// <summary>provider 描述（决定记忆文件名与 skills 目录）。</summary>
     public required CliProviderDescriptor Provider { get; init; }
 

@@ -85,6 +85,15 @@ const provider = computed<string>(() => {
 const isImage = computed(() => provider.value === 'image')
 const isScript = computed(() => isScriptCaptchaProvider(provider.value))
 const isUnsupported = computed(() => !isImage.value && !isScript.value)
+/**
+ * A script provider named only by the seed (the backend demanded "turnstile")
+ * with no usable `config` to render it from (none passed, disabled, or for
+ * another provider). The widget has nothing to mount, so without this the
+ * field is an empty box the user cannot solve and nothing says why.
+ */
+const isScriptUnconfigured = computed(
+  () => isScript.value && !(props.config?.enabled && props.config.provider === provider.value),
+)
 
 // ── image provider ──────────────────────────────────────────────────────────
 const captchaId = ref('')
@@ -150,11 +159,24 @@ const widget = useCaptchaWidget({
 /** Bound by `ref="container"` in the template: the element the script widget renders into. */
 const container = widget.container
 
+// Set by `reset()` when it clears a live token, so the watcher below can tell
+// the caller's own reset from the provider expiring the token: `expired` means
+// "the user has to act again", which a reset the caller just asked for is not.
+let resetClearsToken = false
+
 watch(widget.token, (value, previous) => {
   if (!isScript.value) return
   token.value = value
-  if (value) emit('solved', value)
-  else if (previous) emit('expired')
+  if (value) {
+    emit('solved', value)
+    return
+  }
+  if (!previous) return
+  if (resetClearsToken) {
+    resetClearsToken = false
+    return
+  }
+  emit('expired')
 })
 
 watch(widget.error, (message) => {
@@ -170,6 +192,7 @@ function reset(): void {
     if (props.loadImage) void refreshImage()
     return
   }
+  resetClearsToken = !!widget.token.value
   widget.reset()
   token.value = ''
 }
@@ -186,12 +209,17 @@ async function execute(): Promise<string> {
     return value
   }
   if (isUnsupported.value) throw new Error(t('auth.captchaUnsupported', { provider: provider.value }))
+  if (isScriptUnconfigured.value) throw new Error(t('auth.captchaNotConfigured', { provider: provider.value }))
   const value = await widget.execute()
   token.value = value
   return value
 }
 
-const errorMessage = computed(() => (isImage.value ? imageError.value : widget.error.value))
+const errorMessage = computed(() => {
+  if (isImage.value) return imageError.value
+  if (isScriptUnconfigured.value) return t('auth.captchaNotConfigured', { provider: provider.value })
+  return widget.error.value
+})
 
 defineExpose({ reset, execute, provider, isImage })
 </script>

@@ -165,13 +165,17 @@ async function handleSubmit(): Promise<void> {
     )
     if (pendingCaptcha.value && hadCaptcha) {
       submitError.value = translate('admin.login.captcha.invalid', 'Captcha verification failed, please try again.')
-      // Tokens are single-use: the widget must be solved again (image: a fresh picture).
-      captchaRef.value?.reset()
     }
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : translate('admin.login.errorGeneric', 'Login failed')
   } finally {
     submitting.value = false
+    // Tokens are single-use and the backend spends one on every attempt it
+    // checks, including one that then fails on the password. Whenever the
+    // captcha is still on screen after an attempt that carried a token, it
+    // must be solved again (image: a fresh picture), or the next submit is
+    // refused as a captcha failure whatever the user typed.
+    if (hadCaptcha && pendingCaptcha.value) captchaRef.value?.reset()
   }
 }
 

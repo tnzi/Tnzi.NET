@@ -1,3 +1,5 @@
+using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
+
 ﻿
 namespace Tnzi.Identity.Tests;
 
@@ -69,22 +71,8 @@ public partial class UserServiceTests
         var userId = Guid.NewGuid();
         var input = new CreateUserDto
         {
-            UserName = "testuser",
             Email = "test@example.com",
             Password = "Password123!"
-        };
-        var user = new User
-        {
-            Id = userId,
-            UserName = input.UserName,
-            Email = input.Email
-        };
-
-        var createdUser = new User
-        {
-            Id = userId,
-            UserName = input.UserName,
-            Email = input.Email
         };
 
         _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>(), input.Password))
@@ -106,8 +94,30 @@ public partial class UserServiceTests
         // Assert
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
-        Assert.Equal(input.UserName, result.Data.UserName);
+        Assert.Equal(input.Email, result.Data.UserName);
         Assert.Equal(input.Email, result.Data.Email);
+    }
+
+    /// <summary>
+    /// 不用邮箱当用户名的部署里，给了邮箱不给用户名缺的就是用户名；「没有邮箱时才需要」这句话与事实不符。
+    /// </summary>
+    [Theory]
+    [InlineData(false, "Username is required.")]
+    [InlineData(true, "Username is required when the account has no email address.")]
+    public async Task CreateAsync_WithoutAUserName_SaysWhatIsActuallyMissing(bool useEmailAsUserName, string expected)
+    {
+        var options = new Mock<IOptionsMonitor<IdentityOptions>>();
+        var identityOptions = new IdentityOptions();
+        identityOptions.SignIn.UseEmailAsUserName = useEmailAsUserName;
+        options.SetupGet(o => o.CurrentValue).Returns(identityOptions);
+        var service = new UserService(
+            _userManagerMock.Object, _roleManagerMock.Object, _userRepositoryMock.Object, _serviceProviderMock.Object,
+            identityOptions: options.Object);
+
+        var result = await service.CreateAsync(new CreateUserDto { Email = useEmailAsUserName ? null : "someone@example.com", Password = "Password123!" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(expected, result.Message);
     }
 
     [Fact]

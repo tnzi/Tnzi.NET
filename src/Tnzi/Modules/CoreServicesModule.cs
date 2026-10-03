@@ -149,25 +149,11 @@ public class CoreServicesModule : TnziCoreModule
         var services = context.Services;
         services.AddHttpClient();
 
-        // 每个配置的提供商一个命名 HttpClient，使连接池按提供商隔离。
-        foreach (var providerChild in context.Configuration.GetSection("AI:Providers").GetChildren())
-        {
-            var providerName = providerChild.Key;
-            if (string.IsNullOrWhiteSpace(providerName))
-            {
-                continue;
-            }
-
-            if (!providerChild.GetValue("Enabled", defaultValue: true))
-            {
-                continue;
-            }
-
-            services.AddHttpClient(AiUtilityHttpClientNames.For(providerName));
-        }
-
-        // 运行时新增的提供商（不在配置清单里）共用的兜底客户端。
-        services.AddHttpClient(AiUtilityHttpClientNames.Fallback);
+        // 每个提供商一个命名 HttpClient（AiUtilityHttpClientNames.For），连接池按提供商隔离；兜底、自带提供商各一个。
+        // 这些名字全部关掉 HttpClient.Timeout，把超时交给实现的每次尝试超时：默认的 100 秒会先于 TimeoutSeconds 到达，
+        // 配置 300 秒的提供商会被静默截在 100 秒。按名字规则配置而不是按启动时的清单逐个注册，热重载新增的提供商同样适用。
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, AiUtilityHttpClientTimeoutConfigurator>());
 
         services.TryAddScoped<IAiUtility, OpenAiCompatibleAiUtility>();
     }

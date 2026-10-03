@@ -1,7 +1,17 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { HttpError } from '@tnzi/core/errors'
 import { createIdentityBridge } from '../../../src/services/bridges/identity-bridge'
+
+// The passkey ceremony lives in core (it drives navigator.credentials); the
+// bridge only wraps it. Stub the ceremony so the guard around it can be
+// exercised without a browser.
+const passkeyCeremony = vi.hoisted(() => vi.fn())
+vi.mock('@tnzi/core/services/identity', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  registerPasskey: passkeyCeremony,
+}))
 
 /**
  * Step-up on the self-service `me.*` writes.
@@ -117,6 +127,28 @@ describe('identity-bridge step-up loop', () => {
     expect(stepUp).toHaveBeenCalledTimes(1)
   })
 
+  it('★ registerPasskey: a challenge on the begin leg verifies once and replays the whole ceremony', async () => {
+    // The backend challenges the signed-in `register/begin` leg in the service
+    // layer (the route is anonymous for enrollment tokens). Core rethrows that
+    // as an HttpError with the code, which is what the guard keys on.
+    const challenge = new HttpError({
+      ...challengeEnvelope('identity.loginmethod.manage'),
+      data: undefined,
+    })
+    passkeyCeremony
+      .mockRejectedValueOnce(challenge)
+      .mockResolvedValueOnce({ credentialId: 'cred-1', deviceName: 'YubiKey' })
+    const stepUp = vi.fn(async () => ({ ...GRANT, scope: 'identity.loginmethod.manage' }))
+    const client = {} as never
+    const bridge = createIdentityBridge({ ...minimalApis(), client, stepUp })
+
+    await expect(bridge.me.registerPasskey('YubiKey')).resolves.toEqual({ credentialId: 'cred-1', deviceName: 'YubiKey' })
+
+    expect(stepUp).toHaveBeenCalledWith('identity.loginmethod.manage')
+    expect(passkeyCeremony).toHaveBeenCalledTimes(2)
+    expect(passkeyCeremony).toHaveBeenNthCalledWith(2, client, { deviceName: 'YubiKey' })
+  })
+
   it('confirmChangeEmail replays with the same payload, so the code just typed is not wasted', async () => {
     const profileApi = challengedOnce('confirmChangeEmail', 'identity.contact.change')
     const stepUp = vi.fn(async () => GRANT)
@@ -132,7 +164,8 @@ describe('identity-bridge step-up loop', () => {
 
 /**
  * Convention gate: every `me.*` method that maps to a `[RequireStepUp]`
- * endpoint on `DefaultUserProfileController` must route through the guard.
+ * endpoint on `DefaultUserProfileController` (or to the one service-layer
+ * challenge on passkey registration) must route through the guard.
  * A new gated endpoint added to the backend without its bridge method being
  * listed here is the exact regression this claim was about, so the list is
  * explicit rather than derived.
@@ -155,6 +188,14 @@ describe('identity-bridge step-up coverage (source scan)', () => {
     'confirmChangeEmail', // POST change-email/confirm
     'confirmChangePhone', // POST change-phone/confirm
     'issueOAuthLinkToken', // POST linked-accounts/{provider}/link-token
+    // Not an attribute on the backend: the route is anonymous for enrollment
+    // tokens, so the signed-in `register/begin` leg is challenged in the
+    // service layer (PasskeyService.BeginRegistrationAsync). Same scope as
+    // linking an OAuth account - it adds a login method to the account.
+    'registerPasskey', // POST auth/passkey/register/begin (service-layer step-up)
+    // Service-layer too: only removing the last key that backs passkey two-factor
+    // is challenged, because that one delete turns the method off.
+    'removePasskey', // DELETE auth/passkey/credentials/{id} (service-layer step-up)
   ]
 
   function isGuarded(text: string, method: string): boolean {

@@ -174,8 +174,22 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         return Ok((IEnumerable<StatusStatisticsDto>)statistics);
     }
 
+    /// <summary><see cref="GetFailedNotificationsAsync"/> 未给或给了非正数时返回的条数。</summary>
+    internal const int DefaultFailedTop = 100;
+
+    /// <summary>
+    /// <see cref="GetFailedNotificationsAsync"/> 一次最多返回的条数。
+    /// </summary>
+    /// <remarks>
+    /// 每条消息连同它的全部收件人与附件一起加载：<c>top=1000000</c> 在一个大批次失败过的库上就是把整张表
+    /// 连带两张子表读进内存再序列化出去，一次 GET 放倒一个进程。超出按上限截断（与分页 DTO 的 PageSize 同一口径）。
+    /// </remarks>
+    internal const int MaxFailedTop = 200;
+
     public async Task<Result<IEnumerable<NotificationInfo>>> GetFailedNotificationsAsync(DateTime? startDate = null, DateTime? endDate = null, int top = 100, CancellationToken cancellationToken = default)
     {
+        top = top <= 0 ? DefaultFailedTop : Math.Min(top, MaxFailedTop);
+
         var query = _notificationRepository
             .AsQueryable()
             .Where(n => n.Status == NotificationStatus.Failed);

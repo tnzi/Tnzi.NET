@@ -1,3 +1,5 @@
+using Tnzi.Audit.Tests.TestSupport;
+
 
 namespace Tnzi.Audit.Tests.Integration;
 
@@ -206,6 +208,106 @@ public class DatabaseAuditStoreIntegrationTests : IntegrationTestBase
         // Assert
         deletedCount.ShouldBe(0);
         DbContext.AuditOperations.Count().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task DeleteExpiredAsync_DeletesInPrimaryKeyBatchesOfBatchSize_AndCascadesTheEntries()
+    {
+        // 一条谓词 DELETE 在积压一年的表上撞命令超时、整条回滚、每天重来一次；分批让每条语句都短。
+        var now = DateTime.UtcNow;
+        var expired = Enumerable.Range(0, 5).Select(i => new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = $"Old{i}",
+            ResultType = AuditResultType.Success,
+            CreationTime = now.AddDays(-200 + i),
+            StartTime = now.AddDays(-200 + i),
+            Elapsed = 1,
+            EntityEntries = [new AuditEntityEntry { Id = Guid.NewGuid(), EntityTypeName = "E" }]
+        }).ToList();
+        var recent = new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = "Recent",
+            ResultType = AuditResultType.Success,
+            CreationTime = now,
+            StartTime = now,
+            Elapsed = 1
+        };
+        await DbContext.AuditOperations.AddRangeAsync([.. expired, recent]);
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var repository = new CountingDeleteRepository(DbContext, ServiceProvider);
+        var store = new DatabaseAuditStore(
+            repository,
+            ServiceProvider.GetRequiredService<IRepository<AuditEntityEntry, Guid>>(),
+            new StaticOptionsMonitor<AuditOptions>(new AuditOptions { BatchSize = 2 }));
+
+        var deleted = await store.DeleteExpiredAsync(days: 90);
+
+        deleted.ShouldBe(5);
+        repository.PredicateDeletes.ShouldBe(3); // 2 + 2 + 1
+        DbContext.ChangeTracker.Clear();
+        DbContext.AuditOperations.Select(o => o.FunctionName).ToList().ShouldBe(["Recent"]);
+        DbContext.AuditEntityEntries.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task DeleteExpiredAsync_JudgesExpiryByTheIndexedStartTime()
+    {
+        // CreationTime 没有索引，按它判过期每一批都是全表扫描；StartTime 有索引，两者只差采集队列的几秒。
+        var now = DateTime.UtcNow;
+        await DbContext.AuditOperations.AddAsync(new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = "StartedLongAgo",
+            ResultType = AuditResultType.Success,
+            CreationTime = now,
+            StartTime = now.AddDays(-100),
+            Elapsed = 1
+        });
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var deleted = await _store.DeleteExpiredAsync(days: 90);
+
+        deleted.ShouldBe(1);
+        DbContext.AuditOperations.Count().ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task DeleteExpiredAsync_HonoursCancellation()
+    {
+        await DbContext.AuditOperations.AddAsync(new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = "Old",
+            ResultType = AuditResultType.Success,
+            CreationTime = DateTime.UtcNow.AddDays(-100),
+            StartTime = DateTime.UtcNow.AddDays(-100),
+            Elapsed = 1
+        });
+        await DbContext.SaveChangesAsync();
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => _store.DeleteExpiredAsync(90, cancelled.Token));
+        DbContext.ChangeTracker.Clear();
+        DbContext.AuditOperations.Count().ShouldBe(1);
+    }
+
+    private sealed class CountingDeleteRepository(AuditTestDbContext dbContext, IServiceProvider serviceProvider)
+        : EFCoreRepository<AuditTestDbContext, AuditOperation, Guid>(dbContext, serviceProvider: serviceProvider)
+    {
+        public int PredicateDeletes { get; private set; }
+
+        public override Task DeleteAsync(System.Linq.Expressions.Expression<Func<AuditOperation, bool>> predicate, CancellationToken cancellationToken = default)
+        {
+            PredicateDeletes++;
+            return base.DeleteAsync(predicate, cancellationToken);
+        }
     }
 
     #endregion

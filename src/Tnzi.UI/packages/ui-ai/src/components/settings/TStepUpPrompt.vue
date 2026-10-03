@@ -16,7 +16,7 @@
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NInput } from 'naive-ui'
-import type { StepUpMethod, StepUpPromptController } from '@tnzi/core/services/identity'
+import { DEFAULT_OTP_CODE_LENGTH, type StepUpMethod, type StepUpPromptController } from '@tnzi/core/services/identity'
 import { useAiI18n, formatAiMessage } from '../../i18n'
 
 const props = defineProps<{
@@ -34,6 +34,9 @@ onBeforeUnmount(() => {
 })
 
 const code = ref('')
+// Digits for the method in progress: 6 for the authenticator app, the
+// deployment's `otpCodeLength` (4-8) for an emailed / texted code.
+const codeLength = computed(() => props.prompt.codeLength ?? DEFAULT_OTP_CODE_LENGTH)
 
 // Fresh entry whenever the prompt (re)opens or the method changes.
 watch(
@@ -101,7 +104,7 @@ async function submit(): Promise<void> {
         v-model:value="code"
         class="t-settings-field__control"
         size="small"
-        :maxlength="8"
+        :maxlength="codeLength"
         :disabled="prompt.busy"
         :status="prompt.error ? 'error' : undefined"
         :placeholder="t.settings.stepUpCodePlaceholder"

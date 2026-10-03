@@ -47,6 +47,7 @@ import {
   buildDefaultLoginCallbacks,
   type ThemeContext,
   type AdminAuthRuntime,
+  type LoginCallbackHelpers,
 } from '@tnzi/ui'
 import { useAdminFunctionAuthorizationApi } from '@tnzi/core/services/authorization'
 import { createIdentityBridge } from '../services/bridges/identity-bridge'
@@ -98,6 +99,7 @@ import { useGlobalTheme } from '../headless/useGlobalTheme'
 import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearance-presets'
 import { fetchAdminShellSignal } from '../services/admin-shell-modules'
 import { resetAllFileUrlResolvers } from '../services/file-url-resolver'
+import { installAdminAppUpdate, type AdminAppUpdateConfig } from './app-update-config'
 
 export interface DefineAdminAppOptions {
   /**
@@ -575,6 +577,26 @@ export interface DefineAdminAppOptions {
   forbiddenComponent?: Component
 
   /**
+   * Recovery for tabs left open across a deployment. On by default.
+   *
+   * - A lazy route whose chunk no longer exists (the deployment replaced
+   *   `assets/`) loads the navigation target in full instead of leaving the
+   *   click dead or the page blank.
+   * - The shell HTML is re-fetched when the tab returns to the foreground and
+   *   every few minutes; when its entry script differs, the next route
+   *   navigation loads the new version. Nothing reloads under the user while
+   *   they stay on a page, so an unsaved form is never lost.
+   *
+   * `{ mode: 'prompt' }` asks with the built-in dialog instead (pass `prompt`
+   * to supply your own); `{ mode: 'notify' }` only calls `onUpdateAvailable`.
+   * `false` turns the whole mechanism off. Inert on the Vite dev server.
+   *
+   * The server must send the shell with `Cache-Control: no-cache`, or a
+   * reload can land on a cached copy of the old one.
+   */
+  appUpdate?: AdminAppUpdateConfig
+
+  /**
    * Extra options forwarded to `createTnziUiAdmin()`. Mostly: pass a custom
    * `globalSearchShortcut`, or set `installPersistedstate: false` if you
    * already installed the pinia plugin yourself.
@@ -851,6 +873,36 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
    * own `myId` are correct the moment the user lands on the shell. This is what
    * makes the login flow "框架自洽" - see `loadPermissions`.
    */
+  /** A copy of `helpers` that also tells `onChallenge` whenever the callback raises a challenge. */
+  function observeChallenges(helpers: LoginCallbackHelpers, onChallenge: () => void): LoginCallbackHelpers {
+    return {
+      ...helpers,
+      setTwoFactorRequired: (challenge) => {
+        onChallenge()
+        helpers.setTwoFactorRequired(challenge)
+      },
+      setPendingActionRequired: (challenge) => {
+        onChallenge()
+        helpers.setPendingActionRequired(challenge)
+      },
+      setCaptchaRequired: (challenge) => {
+        onChallenge()
+        helpers.setCaptchaRequired(challenge)
+      },
+    }
+  }
+
+  /**
+   * Whether a login callback's own result means "signed in". `false` is a
+   * dismissed passkey ceremony; `{ completed: false }` a pending action with
+   * more still owed. Anything else (`void`, `true`, a completed outcome) did.
+   */
+  function reportsSession(result: unknown): boolean {
+    if (result === false) return false
+    if (typeof result === 'object' && result !== null && (result as { completed?: unknown }).completed === false) return false
+    return true
+  }
+
   function wrapLoginCallbacks(
     login: AdminLoginConfig | undefined,
     router?: Router,
@@ -957,36 +1009,49 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
         }
       }
     }
-    const pwd = cbs.pwdLogin
-    const code = cbs.codeLogin
-    const verify = cbs.verifyTwoFactor
+    // Every callback that can end with a session established runs the same
+    // post-login flow (permissions + redirect) as a direct password login. The
+    // list is explicit, and it must be complete: a callback the wrapper does
+    // not know about leaves the user parked on the login page with a session
+    // already in hand - the two-factor module with no challenge left in it
+    // (which reads as an authenticator prompt for an account that has none),
+    // or the pending-actions module with nothing owed.
+    //
+    // ★ The flow runs only when the callback itself says a session was
+    // established, read from what each of them already reports:
+    //   - it raised a challenge through `helpers` (second factor, pending
+    //     action, captcha): no session, whatever it returned;
+    //   - it resolved `false` (a passkey ceremony the user dismissed): none;
+    //   - it resolved an outcome with `completed: false` (a pending action with
+    //     more still owed): none.
+    // `hasSession()` alone cannot tell: for a consumer without the runtime it
+    // is always true, and redirecting to the dashboard from a challenge sends
+    // an account with no session into the auth guard. The payload travels
+    // untouched and the result goes back to the caller; `helpers` is passed on
+    // as an observing copy, so the backend's post-2FA obligations still reach
+    // the shell.
+    const withAfter = <A extends unknown[], R>(fn: ((...args: A) => Promise<R>) | undefined) =>
+      fn
+        ? async (...args: A): Promise<R> => {
+            let challenged = false
+            const helpers = args[1] as LoginCallbackHelpers | undefined
+            const forwarded = (
+              helpers ? [args[0], observeChallenges(helpers, () => { challenged = true }), ...args.slice(2)] : args
+            ) as A
+            const result = await fn(...forwarded)
+            if (!challenged && reportsSession(result)) await after()
+            return result
+          }
+        : undefined
     const callbacks: NonNullable<AdminLoginConfig['callbacks']> = {
       ...cbs,
-      pwdLogin: pwd
-        ? async (payload, helpers) => {
-            await pwd(payload, helpers)
-            await after()
-          }
-        : undefined,
-      codeLogin: code
-        ? async (payload, helpers) => {
-            await code(payload, helpers)
-            await after()
-          }
-        : undefined,
-      // After 2FA verification the session is established → run the same
-      // post-login flow (permissions + redirect) as a direct login. `helpers`
-      // must travel too: the backend asks for obligations (a forced password
-      // change) AFTER 2FA, and the shared callback reports them only through
-      // `helpers.setPendingActionRequired` - without it a correct code was
-      // answered with "Verification failed". `after()` no-ops without a
-      // session, so the pending-action path does not redirect.
-      verifyTwoFactor: verify
-        ? async (payload, helpers) => {
-            await verify(payload, helpers)
-            await after()
-          }
-        : undefined,
+      pwdLogin: withAfter(cbs.pwdLogin),
+      codeLogin: withAfter(cbs.codeLogin),
+      verifyTwoFactor: withAfter(cbs.verifyTwoFactor),
+      verifyTwoFactorWithPasskey: withAfter(cbs.verifyTwoFactorWithPasskey),
+      completePasswordChange: withAfter(cbs.completePasswordChange),
+      completeTotpEnrollment: withAfter(cbs.completeTotpEnrollment),
+      completeEmailConfirmation: withAfter(cbs.completeEmailConfirmation),
     }
     return { ...wrapped, callbacks }
   }
@@ -1099,6 +1164,11 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     if (options.runtime) {
       provideAdminRuntime(app, options.runtime)
     }
+
+    // Recovery for tabs that outlive a deployment (stale chunks, old version).
+    // Installed once per page; a consumer that already called
+    // `installAppUpdate` itself keeps its own instance.
+    installAdminAppUpdate(options.appUpdate, router)
 
     // Attach the soybean-style route progress bar if a router is provided.
     // Idempotent - safe if the consumer already called useRouteProgress.
@@ -1436,7 +1506,12 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // let tab housekeeping break the identity load.
     try {
       const routeStore = useAdminRouteStore()
-      useAdminTabStore().pruneTabs(routeStore.deniedRouteNames)
+      const tabStore = useAdminTabStore()
+      // Tabs saved under another account are dropped outright - a user switch
+      // without a sign-out (accepting an invitation while someone else is
+      // signed in) must not carry the previous user's tabs over.
+      tabStore.claimForUser(userId)
+      tabStore.pruneTabs(routeStore.deniedRouteNames)
     } catch {
       // ignore - tabs are cosmetic; the navigation guard still blocks access
     }

@@ -12,6 +12,12 @@ public class AuditOptionsValidator : OptionsValidatorBase<AuditOptions>
             AddError(errors, nameof(options.RetentionDays), "RetentionDays must be greater than 0.");
         }
 
+        if (options.AutoPurgeIntervalHours is <= 0 or > AuditOptions.MaxAutoPurgeIntervalHours)
+        {
+            AddError(errors, nameof(options.AutoPurgeIntervalHours),
+                $"AutoPurgeIntervalHours must be between 1 and {AuditOptions.MaxAutoPurgeIntervalHours}.");
+        }
+
         if (options.BatchSize is <= 0 or > 1000)
         {
             AddError(errors, nameof(options.BatchSize), "BatchSize must be between 1 and 1000.");

@@ -25,6 +25,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
     private readonly ICache? _cache;
     private readonly UserManager<User>? _userManager;
     private readonly bool _multiTenancyEnabled;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
     /// <summary>
     /// 初始化一个<see cref="OrganizationService"/>类型的新实例
@@ -38,7 +39,8 @@ public class OrganizationService : ApplicationService, IOrganizationService
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         ICache? cache = null,
-        UserManager<User>? userManager = null)
+        UserManager<User>? userManager = null,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
         _organizationRepository = Check.NotNull(organizationRepository);
@@ -49,6 +51,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         _cache = cache;
         _userManager = userManager;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _functionAuthorization = functionAuthorization;
     }
 
     /// <summary>
@@ -876,6 +879,12 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // 改超管的组织归属与 PUT admin/users/{id} 改 OrganizationId 是同一件事，同一道护栏。
+        if (await SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         // 验证组织是否存在
         var organizationResult = await GetByIdAsync(organizationId);
         if (!organizationResult.Succeeded)
@@ -934,6 +943,12 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // 改超管的组织归属与 PUT admin/users/{id} 改 OrganizationId 是同一件事，同一道护栏。
+        if (await SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var oldOrganizationId = user.OrganizationId;
         user.OrganizationId = null;
         var result = await _userManager.UpdateAsync(user);
@@ -967,6 +982,12 @@ public class OrganizationService : ApplicationService, IOrganizationService
         return Ok();
     }
 
+    /// <summary><see cref="SearchAsync"/> 未给或给了非正数时返回的条数。</summary>
+    internal const int DefaultSearchResults = 20;
+
+    /// <summary><see cref="SearchAsync"/> 一次最多返回的条数。</summary>
+    internal const int MaxSearchResults = 100;
+
     /// <summary>
     /// 根据名称或代码模糊搜索组织
     /// </summary>
@@ -976,6 +997,10 @@ public class OrganizationService : ApplicationService, IOrganizationService
         {
             return Ok<IEnumerable<OrganizationDto>>(Enumerable.Empty<OrganizationDto>());
         }
+
+        // 这是给选择器用的联想搜索，不是导出：非正数按默认条数，超出上限按上限截断（与分页 DTO 的 PageSize 同一口径），
+        // 否则一个 maxResults=int.MaxValue 加单字母关键字就是整张组织表。
+        maxResults = maxResults <= 0 ? DefaultSearchResults : Math.Min(maxResults, MaxSearchResults);
 
         var lowerKeyword = keyword.ToLower();
 

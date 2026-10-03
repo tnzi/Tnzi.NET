@@ -1,7 +1,12 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using System.Text.RegularExpressions;
+using Tnzi.Identity.Entities;
 using Tnzi.Modules;
 
 namespace Tnzi.Architecture.Tests;
@@ -56,19 +61,21 @@ public partial class ServiceLifetimeArchitectureTests
     /// 夹具本身解析不出来、且<b>已知无害</b>的依赖类型。清单之外的任何一个都算缺陷。
     /// </summary>
     /// <remarks>
-    /// 这三类都由「真实宿主有、合成夹具没有」造成，与消费方无关：
+    /// 这两类都由「真实宿主有、合成夹具没有」造成，与消费方无关：
     /// <list type="bullet">
-    /// <item><c>UserManager/RoleManager/IPasskeyHandler</c> —— ASP.NET Core Identity 的运行时对象，
-    /// 需要一个真正的 Identity DbContext 实例，本夹具的 DbContext 不是。</item>
     /// <item><c>IRepository&lt;RAG 实体&gt;</c> —— 那些实体属于夹具未注册的 DbContext。</item>
     /// <item><c>ITnziApplication</c> —— 由 <c>TnziApp</c> 在真实启动流程中创建，裸 builder 里没有。</item>
     /// </list>
+    /// <para>
+    /// <c>UserManager / RoleManager / IPasskeyHandler</c>（ASP.NET Core Identity 的运行时对象，要一个真正的
+    /// Identity DbContext）此前也在这张清单上。它们现在由 <see cref="FillIdentityRuntimeGaps"/> 用替身补齐 ——
+    /// 不是为了少列三行，而是因为<b>解析在缺口处就停</b>：<c>ValidateOnBuild</c> 按构造参数顺序建调用点，
+    /// 撞到解析不了的形参立刻抛「Unable to resolve」，藏在后面的依赖环永远走不到（2026-09-20 的
+    /// <c>PasskeyService -&gt; IStepUpService -&gt; IPasskeyService</c> 环正是这样被三条断言同时放过的）。
+    /// </para>
     /// </remarks>
     private static readonly string[] KnownFixtureGaps =
     [
-        "Microsoft.AspNetCore.Identity.IPasskeyHandler`1[Tnzi.Identity.Entities.User]",
-        "Microsoft.AspNetCore.Identity.RoleManager`1[Tnzi.Identity.Entities.Role]",
-        "Microsoft.AspNetCore.Identity.UserManager`1[Tnzi.Identity.Entities.User]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.DocumentChunk,System.Guid]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.KnowledgeBase,System.Guid]",
         "Tnzi.Domain.Repositories.IRepository`2[Tnzi.AI.Rag.Entities.KnowledgeGraphNode,System.Guid]",
@@ -128,6 +135,36 @@ public partial class ServiceLifetimeArchitectureTests
     private static partial Regex MissingServiceTypeRegex();
 
     /// <summary>
+    /// 全模块图里不得有构造依赖环。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这是 <c>ValidateOnBuild</c> 会报的第三类失败，此前两条断言各按自己的关键词过滤，环的消息
+    /// （<c>A circular dependency was detected</c>）从两张网之间漏过去 —— 门禁绿着，而任何加载了
+    /// 那两个服务的应用**启动即失败**。2026-09-20 实发：给 <c>PasskeyService</c> 构造注入 <c>IStepUpService</c>，
+    /// 而 <c>StepUpService</c> 早已依赖 <c>IPasskeyService</c>；单测两侧都是替身看不见环，
+    /// 本项目 57 条全绿，参考消费方一起就崩在容器构建上。
+    /// </para>
+    /// <para>
+    /// 修法是在调用点解析其中一侧（<c>ApplicationService.GetRequiredService&lt;T&gt;()</c>）或拆出更小的契约，
+    /// 而不是关掉 <c>ValidateOnBuild</c>。
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task NoModule_IntroducesAConstructorDependencyCycle()
+    {
+        var (modules, messages) = await ValidateAllModulesAsync();
+
+        var cycles = messages
+            .Where(m => m.Contains("circular dependency", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.True(cycles.Count == 0,
+            $"{modules.Count} 个模块的服务图里存在构造依赖环，加载它们的应用在默认 ValidateOnBuild 下启动即失败：\n"
+            + string.Join("\n", cycles));
+    }
+
+    /// <summary>
     /// 把全模块图装进一个真实宿主并跑一次容器校验，返回模块列表与校验错误消息。
     /// </summary>
     private static async Task<(IReadOnlyList<IModuleDescriptor> Modules, IReadOnlyList<string> Messages)>
@@ -169,12 +206,36 @@ public partial class ServiceLifetimeArchitectureTests
         Assert.True(phaseFailures.Count == 0,
             "模块配置阶段抛异常，本门禁的覆盖面已经不完整：\n" + string.Join("\n", phaseFailures));
 
+        FillIdentityRuntimeGaps(builder.Services);
+
         var exception = Record.Exception(() => builder.Build());
         var messages = (exception as AggregateException)?.InnerExceptions
             .Select(e => e.Message)
             .ToList() ?? [];
 
         return (modules, messages);
+    }
+
+    /// <summary>
+    /// 用替身补齐 ASP.NET Core Identity 的四个运行时对象，让依赖它们的服务（`PasskeyService` /
+    /// `StepUpService` / `UserService` …）的整条构造链都能被 <c>ValidateOnBuild</c> 走完。
+    /// </summary>
+    /// <remarks>
+    /// 只 <c>TryAdd</c>：哪天夹具有了真正的 Identity DbContext、模块自己注册了它们，这里就自动让位。
+    /// 替身是工厂注册的，容器不会去检查它们自己的构造依赖 —— 要的正是「这一格已填上」这个事实。
+    /// </remarks>
+    private static void FillIdentityRuntimeGaps(IServiceCollection services)
+    {
+        services.TryAddSingleton(_ => Mock.Of<IPasskeyHandler<User>>());
+        services.TryAddScoped(_ => new Mock<UserManager<User>>(
+            Mock.Of<IUserStore<User>>(), null!, null!, null!, null!, null!, null!, null!, null!).Object);
+        services.TryAddScoped(_ => new Mock<RoleManager<Role>>(
+            Mock.Of<IRoleStore<Role>>(), null!, null!, null!, null!).Object);
+        services.TryAddScoped(sp => new Mock<SignInManager<User>>(
+            sp.GetRequiredService<UserManager<User>>(),
+            Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>(),
+            Mock.Of<IUserClaimsPrincipalFactory<User>>(),
+            null!, null!, null!, null!).Object);
     }
 
     private static async Task RunPhaseAsync(

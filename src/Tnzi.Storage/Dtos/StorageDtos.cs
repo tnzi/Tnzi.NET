@@ -420,6 +420,33 @@ public class BatchIntegrityResult
     /// Details of problematic files (missing/corrupted/error only)
     /// </summary>
     public List<FileIntegrityResult> Problems { get; set; } = new();
+
+    /// <summary>
+    /// 下一批的游标：把它原样作为 <c>after</c> 传回去继续扫描；<c>null</c> 表示已经扫到末尾。
+    /// </summary>
+    /// <remarks>
+    /// 扫描按文件 id 推进而不是每次从最老的文件取前 N 条 —— 后者让「前 N 条之后」的文件永远轮不到。
+    /// </remarks>
+    public Guid? NextCursor { get; set; }
+}
+
+/// <summary>
+/// 管理端批量 / 排行类查询的上限。这些操作跑在请求路径上，调用方给的数量必须有上界：
+/// 「0 = 全部」或一个很大的数会让一次请求读遍全表（完整性校验还要逐个哈希每个对象）。
+/// </summary>
+public static class StorageQueryLimits
+{
+    /// <summary>缩略图回填一批最多处理的文件数（渲染串行，一份 PDF 约零点几秒）。</summary>
+    public const int MaxThumbnailBackfillBatch = 500;
+
+    /// <summary>批量完整性校验一批最多检查的文件数（每个文件要整份读出来算 MD5）。</summary>
+    public const int MaxIntegrityBatch = 500;
+
+    /// <summary>存储用量排行最多返回的用户数。</summary>
+    public const int MaxTopUsers = 100;
+
+    /// <summary>按标签查询的最大页大小（超出按此截断，与框架分页查询的默认上限一致）。</summary>
+    public const int MaxPageSize = 100;
 }
 
 /// <summary>
@@ -433,20 +460,32 @@ public class ThumbnailBackfillRequest
     public List<Guid>? FileIds { get; set; }
 
     /// <summary>
-    /// 一次最多处理多少条，默认 100；0 表示不限（几百份 PDF 会串行渲染几十秒，慎用）。
+    /// 一次最多处理多少条，默认 100，取值 1 到 <see cref="StorageQueryLimits.MaxThumbnailBackfillBatch"/>。
     /// </summary>
     public int MaxFiles { get; set; } = 100;
+
+    /// <summary>
+    /// 从哪里继续：上一批结果里的 <see cref="ThumbnailBackfillResult.NextCursor"/>；不给表示从头开始。
+    /// </summary>
+    public Guid? After { get; set; }
 }
 
 /// <summary>
 /// 缩略图回填结果。
 /// </summary>
 /// <remarks>
-/// 画不出来的记录（有口令、损坏、超限）仍然没有缩略图，下一次调用还会再试；所以循环调用时按
-/// <see cref="Generated"/> 归零停手，而不是等 <see cref="Remaining"/> 归零 —— 后者在存在画不出来的文件时永远不会归零。
+/// 循环调用时把 <see cref="NextCursor"/> 作为下一次的 <c>After</c> 传回去，直到它为 <c>null</c>。
+/// 画不出来的记录（有口令、损坏、超限）仍然没有缩略图，但游标越过它们继续往后走 ——
+/// 按 <see cref="Generated"/> 归零停手会在「一整批都画不出来」时提前停下，而那一批之后的文件永远轮不到；
+/// 按 <see cref="Remaining"/> 归零停手在存在画不出来的文件时永远停不下来。
 /// </remarks>
 public class ThumbnailBackfillResult
 {
+    /// <summary>
+    /// 下一批的游标；<c>null</c> 表示候选已经扫到末尾（本轮回填结束）。
+    /// </summary>
+    public Guid? NextCursor { get; set; }
+
     /// <summary>
     /// 本批检查的记录数（没有缩略图、且此刻画得出来的那些，按 MaxFiles 截断）。
     /// </summary>

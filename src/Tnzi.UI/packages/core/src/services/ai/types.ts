@@ -1469,9 +1469,14 @@ export interface WorkflowExecutionSummaryDto {
   status: WorkflowExecutionStatus;
   completedStepCount: number;
   awaitingApprovalCount: number;
+  startedAt?: string | null;
+  durationMs?: number | null;
   creationTime: string;
   completedTime?: string | null;
   updatedTime: string;
+  pendingSignalCount?: number;
+  /** Why the execution is waiting; `cancel_requested` after a cancel was queued for a running execution */
+  currentWaitReason?: string | null;
 }
 
 /** Workflow execution detail */
@@ -1511,6 +1516,84 @@ export interface WorkflowStreamEventDto {
   stepResults?: WorkflowStepResultDto[] | null;
   isDone: boolean;
   errorMessage?: string | null;
+}
+
+/**
+ * Workflow definition version: a snapshot of the definition taken before each
+ * update (and before each restore). `definition` is only populated by the
+ * single-version read; the history list leaves it out.
+ */
+export interface WorkflowDefinitionVersionDto {
+  id: string;
+  workflowDefinitionId: string;
+  versionNumber: number;
+  changeDescription?: string | null;
+  /** Full definition snapshot as a JSON string (name, description, steps, executionMode, isEnabled, configuration) */
+  definition?: string | null;
+  creationTime: string;
+}
+
+/** Restore a workflow to an earlier version */
+export interface RestoreWorkflowVersionRequestDto {
+  /** Note recorded on the snapshot of the current definition taken before the restore */
+  changeDescription?: string | null;
+}
+
+/** Per-workflow execution statistics (duration analysis) */
+export interface WorkflowExecutionStatsDto {
+  workflowId: string;
+  totalExecutions: number;
+  avgDurationMs?: number | null;
+  minDurationMs?: number | null;
+  maxDurationMs?: number | null;
+  p95DurationMs?: number | null;
+  /** 0.0 to 1.0 */
+  successRate: number;
+}
+
+/** Pending human-in-the-loop interrupt of a workflow execution */
+export interface WorkflowInterruptDto {
+  stepId: string;
+  reason: string;
+  /** Approval | HumanInput | ExternalEvent */
+  type: string;
+  /** Requested input fields: key to a free-form description of the expected value */
+  requestedInput?: Record<string, unknown> | null;
+  timeoutSeconds?: number | null;
+  executionId: string;
+}
+
+/** Resume an interrupted workflow execution with external input */
+export interface ResumeWorkflowInputDto {
+  /** Must match the pending interrupt's step id */
+  stepId: string;
+  input: Record<string, unknown>;
+}
+
+/** Input payload carried by a workflow execution signal */
+export interface WorkflowExecutionInputDto {
+  message?: string | null;
+  data?: Record<string, unknown> | null;
+  submittedAt: string;
+}
+
+/** Node-level input carried by a workflow execution signal */
+export interface AgentRunNodeInputDto {
+  nodeKey?: string | null;
+  nodeName?: string | null;
+  inputKind?: string | null;
+  input: WorkflowExecutionInputDto;
+}
+
+/** Pending signal in a workflow execution's mailbox (e.g. a requested cancel) */
+export interface WorkflowExecutionSignalDto {
+  signalId: string;
+  /** `cancel` | `resume_input` */
+  type: string;
+  stepId?: string | null;
+  nodeInput?: AgentRunNodeInputDto | null;
+  reason?: string | null;
+  createdAt: string;
 }
 
 // ============================================

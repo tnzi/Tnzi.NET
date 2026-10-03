@@ -241,6 +241,8 @@ export type { CreateAdminAppOptions, AdminAppHandle } from './createAdminApp'
 export { buildDefaultLoginCallbacks, codeChannelFields, type AdminAuthRuntime } from '@tnzi/ui'
 export { installDirectives, vPermission, vModule } from '../directives'
 export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
+export { confirmAdminAppUpdate } from './app-update-config'
+export type { AdminAppUpdateConfig } from './app-update-config'
 export {
   ADMIN_LOGIN_CONFIG_KEY,
   provideAdminLoginConfig,

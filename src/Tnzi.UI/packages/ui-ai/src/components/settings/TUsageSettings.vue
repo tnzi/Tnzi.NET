@@ -21,10 +21,13 @@ import {
   isUnlimited,
   type UseAiUsageReturn,
 } from '../../headless/useAiUsage'
+import { useAiI18n, formatAiMessage } from '../../i18n'
 
 const props = defineProps<{
   controller: UseAiUsageReturn
 }>()
+
+const t = useAiI18n()
 
 onMounted(() => {
   void props.controller.load()
@@ -43,19 +46,29 @@ const meterStatus = computed<'success' | 'warning' | 'error'>(() => {
 const q = computed(() => props.controller.quota.value)
 const dailyUnlimited = computed(() => isUnlimited(q.value?.dailyTokenLimit))
 const monthlyUnlimited = computed(() => isUnlimited(q.value?.monthlyTokenLimit))
+
+/* An unlimited quota is described as a bare count; a limited one as a share of
+   its budget. */
+function usageLine(used: number | undefined, limit: number | undefined, unlimited: boolean): string {
+  return unlimited
+    ? formatAiMessage(t.value.usageSettings.used, { used: formatTokens(used) })
+    : formatAiMessage(t.value.usageSettings.usedOfLimit, { used: formatTokens(used), limit: formatTokens(limit) })
+}
+
+function tokenCount(count: number | undefined): string {
+  return formatAiMessage(t.value.usageSettings.tokens, { count: formatTokens(count) })
+}
 </script>
 
 <template>
-  <TSettingGroup title="Token usage" :separator="false">
+  <TSettingGroup :title="t.usageSettings.title" :separator="false">
     <template v-if="controller.enabled.value && q">
       <!-- An unlimited quota gets a count, not a meter: a bar measures how
            much of a budget is gone, and there is no budget to be part-way
            through. -->
       <TSettingRow
-        label="Today"
-        :description="dailyUnlimited
-          ? `${formatTokens(q.currentDailyUsage)} tokens used`
-          : `${formatTokens(q.currentDailyUsage)} of ${formatTokens(q.dailyTokenLimit)} tokens used`"
+        :label="t.usageSettings.today"
+        :description="usageLine(q.currentDailyUsage, q.dailyTokenLimit, dailyUnlimited)"
         :stacked="!dailyUnlimited"
       >
         <NProgress
@@ -65,14 +78,12 @@ const monthlyUnlimited = computed(() => isUnlimited(q.value?.monthlyTokenLimit))
           :status="meterStatus"
           :height="8"
         />
-        <span v-else class="t-settings-field__readonly">No daily limit</span>
+        <span v-else class="t-settings-field__readonly">{{ t.usageSettings.noDailyLimit }}</span>
       </TSettingRow>
 
       <TSettingRow
-        label="This month"
-        :description="monthlyUnlimited
-          ? `${formatTokens(q.currentMonthlyUsage)} tokens used`
-          : `${formatTokens(q.currentMonthlyUsage)} of ${formatTokens(q.monthlyTokenLimit)} tokens used`"
+        :label="t.usageSettings.thisMonth"
+        :description="usageLine(q.currentMonthlyUsage, q.monthlyTokenLimit, monthlyUnlimited)"
         :stacked="!monthlyUnlimited"
       >
         <NProgress
@@ -82,27 +93,27 @@ const monthlyUnlimited = computed(() => isUnlimited(q.value?.monthlyTokenLimit))
           :status="meterStatus"
           :height="8"
         />
-        <span v-else class="t-settings-field__readonly">No monthly limit</span>
+        <span v-else class="t-settings-field__readonly">{{ t.usageSettings.noMonthlyLimit }}</span>
       </TSettingRow>
 
-      <TSettingRow v-if="!dailyUnlimited" label="Remaining today">
+      <TSettingRow v-if="!dailyUnlimited" :label="t.usageSettings.remainingToday">
         <span class="t-settings-field__readonly">
-          {{ formatTokens(q.remainingDailyQuota) }} tokens
+          {{ tokenCount(q.remainingDailyQuota) }}
         </span>
       </TSettingRow>
 
-      <TSettingRow v-if="!monthlyUnlimited" label="Remaining this month">
+      <TSettingRow v-if="!monthlyUnlimited" :label="t.usageSettings.remainingThisMonth">
         <span class="t-settings-field__readonly">
-          {{ formatTokens(q.remainingMonthlyQuota) }} tokens
+          {{ tokenCount(q.remainingMonthlyQuota) }}
         </span>
       </TSettingRow>
     </template>
 
-    <p v-else-if="controller.loading.value" class="t-settings-field__hint">Loading…</p>
+    <p v-else-if="controller.loading.value" class="t-settings-field__hint">{{ t.usageSettings.loading }}</p>
 
     <!-- Not an error: this deployment does not meter usage. -->
     <p v-else class="t-settings-field__hint">
-      No usage limit is in force on this deployment.
+      {{ t.usageSettings.noLimit }}
     </p>
   </TSettingGroup>
 </template>

@@ -17,8 +17,8 @@ public class CaptchaVerifierOptionsValidator : OptionsValidatorBase<CaptchaVerif
         if (options.TimeoutSeconds <= 0)
             errors.Add("TimeoutSeconds must be greater than 0.");
 
-        if (options.Altcha.MaxNumber <= 0)
-            errors.Add("Altcha.MaxNumber must be greater than 0.");
+        if (options.Altcha.MaxNumber is <= 0 or > AltchaOptions.MaxNumberUpperBound)
+            errors.Add($"Altcha.MaxNumber must be between 1 and {AltchaOptions.MaxNumberUpperBound}.");
 
         if (options.Altcha.ExpiresSeconds <= 0)
             errors.Add("Altcha.ExpiresSeconds must be greater than 0.");

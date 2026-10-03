@@ -13,7 +13,9 @@
  */
 
 import type { HttpClient } from '../../http/http';
+import { ensureOk } from '../../http/response';
 import { useAuthApi } from './api';
+import { runCeremony } from './ceremony';
 import type { AuthApiOptions } from './api';
 import type { PasskeyCredentialDto, TokenResultDto } from './types';
 
@@ -43,6 +45,52 @@ export class PasskeyUnsupportedError extends Error {
   }
 }
 
+/** The part of a created credential and of `navigator` that {@link defaultPasskeyName} reads. */
+export interface PasskeyNameSource {
+  /** `PublicKeyCredential.authenticatorAttachment`: `cross-platform` is a roaming key. */
+  authenticatorAttachment?: string | null;
+}
+export interface PasskeyNamePlatformSource {
+  userAgentData?: { platform?: string } | null;
+  userAgent?: string;
+}
+
+/**
+ * The label a credential is stored under when the caller gives none.
+ *
+ * A key list where every entry reads "Unnamed" cannot answer the one question
+ * it exists for - which of these is the one I lost - so a name is derived from
+ * what the ceremony already knows: a roaming authenticator (YubiKey and other
+ * FIDO2 keys) is a "Security key"; the device's own authenticator is named
+ * after the platform it was created on ("Windows passkey", "iPhone passkey").
+ * Coarse on purpose: the user can tell two of them apart by date, and the
+ * stored value never leaves the account's own settings.
+ */
+export function defaultPasskeyName(
+  credential: PasskeyNameSource,
+  nav: PasskeyNamePlatformSource | undefined = typeof navigator === 'undefined' ? undefined : navigator,
+): string {
+  if (credential.authenticatorAttachment === 'cross-platform') {
+    return 'Security key';
+  }
+  const platform = platformLabel(nav);
+  return platform ? `${platform} passkey` : 'Passkey';
+}
+
+function platformLabel(nav: PasskeyNamePlatformSource | undefined): string | null {
+  const hint = nav?.userAgentData?.platform ?? '';
+  const ua = nav?.userAgent ?? '';
+  const probe = `${hint} ${ua}`;
+  if (/iPhone/i.test(probe)) return 'iPhone';
+  if (/iPad/i.test(probe)) return 'iPad';
+  if (/Android/i.test(probe)) return 'Android';
+  if (/Windows/i.test(probe)) return 'Windows';
+  if (/Mac/i.test(probe)) return 'Mac';
+  if (/CrOS|Chrome OS/i.test(probe)) return 'Chromebook';
+  if (/Linux/i.test(probe)) return 'Linux';
+  return null;
+}
+
 /**
  * Register a passkey for the current user, or for the user an enrollment token
  * points at.
@@ -50,6 +98,12 @@ export class PasskeyUnsupportedError extends Error {
  * @returns The stored credential, or `null` when the user dismissed the system
  *   dialog. Dismissal is a normal outcome, not an error - do not surface it as
  *   a failure.
+ *
+ * With `Identity:StepUp` enabled the server answers the signed-in (no
+ * enrollment token) `begin` leg with `IDENTITY_STEP_UP_REQUIRED`: adding a
+ * login method to your own account needs a fresh proof that it is you. The
+ * challenge is thrown as an `HttpError` carrying that code, so wrapping the
+ * call in `withStepUp` verifies once and replays the whole ceremony.
  */
 export async function registerPasskey(
   client: HttpClient,
@@ -66,9 +120,9 @@ export async function registerPasskey(
     JSON.parse(begun.optionsJson),
   );
 
-  const credential = (await navigator.credentials.create({
-    publicKey: creationOptions,
-  })) as PublicKeyCredential | null;
+  const credential = (await runCeremony(() =>
+    navigator.credentials.create({ publicKey: creationOptions }),
+  )) as PublicKeyCredential | null;
 
   if (!credential) {
     return null;
@@ -78,7 +132,7 @@ export async function registerPasskey(
     {
       stateId: begun.stateId,
       credentialJson: JSON.stringify(credential.toJSON()),
-      deviceName: options.deviceName,
+      deviceName: options.deviceName ?? defaultPasskeyName(credential),
     },
     options.enrollmentToken,
   );
@@ -120,9 +174,9 @@ export async function signInWithPasskey(
     JSON.parse(begun.optionsJson),
   );
 
-  const credential = (await navigator.credentials.get({
-    publicKey: requestOptions,
-  })) as PublicKeyCredential | null;
+  const credential = (await runCeremony(() =>
+    navigator.credentials.get({ publicKey: requestOptions }),
+  )) as PublicKeyCredential | null;
 
   if (!credential) {
     return null;
@@ -137,14 +191,81 @@ export async function signInWithPasskey(
 }
 
 /**
+ * Complete a two-factor challenge with a passkey / security key.
+ *
+ * The account was identified by the first step of the login (password, code,
+ * OAuth) and is named by `tempToken`; the server builds the assertion options
+ * around that account's registered credentials, so a hardware key holding a
+ * non-discoverable credential works here even though a username-less sign-in
+ * could not find it.
+ *
+ * @returns The token result, or `null` when the user dismissed the system
+ *   dialog. Dismissal is a normal outcome - the challenge stays open and the
+ *   user may pick another method.
+ *
+ * @param options Forwarded to `useAuthApi`; the completing call issues the
+ *   session, so pass `{ withCredentials: true }` exactly as for password login
+ *   in a cross-origin cookie-mode deployment.
+ */
+export async function verifyTwoFactorWithPasskey(
+  client: HttpClient,
+  tempToken: string,
+  options: AuthApiOptions = {},
+): Promise<TokenResultDto | null> {
+  return runTwoFactorPasskeyCeremony(useAuthApi(client, options), tempToken);
+}
+
+/**
+ * The same ceremony over an auth API the caller already holds, so a runtime
+ * that built its `authApi` with the deployment's token-delivery mode (cookie
+ * or bearer) does not have to know those options a second time.
+ */
+export async function runTwoFactorPasskeyCeremony(
+  api: Pick<ReturnType<typeof useAuthApi>, 'beginTwoFactorPasskey' | 'completeTwoFactorPasskey'>,
+  tempToken: string,
+): Promise<TokenResultDto | null> {
+  if (!isPasskeySupported()) {
+    throw new PasskeyUnsupportedError();
+  }
+
+  const begun = ensureData(await api.beginTwoFactorPasskey({ tempToken }));
+
+  const requestOptions = PublicKeyCredential.parseRequestOptionsFromJSON(
+    JSON.parse(begun.optionsJson),
+  );
+
+  const credential = (await runCeremony(() =>
+    navigator.credentials.get({ publicKey: requestOptions }),
+  )) as PublicKeyCredential | null;
+
+  if (!credential) {
+    return null;
+  }
+
+  const completed = await api.completeTwoFactorPasskey({
+    tempToken,
+    stateId: begun.stateId,
+    credentialJson: JSON.stringify(credential.toJSON()),
+  });
+
+  return ensureData(completed);
+}
+
+/**
  * Unwrap an envelope, throwing on failure.
  *
  * The ceremony is a chain: a failed `begin` must not fall through to
  * `navigator.credentials`, where it would surface as an opaque browser error
  * instead of the server's actual message.
+ *
+ * A failed envelope is rethrown through `ensureOk`, i.e. as an `HttpError`
+ * that keeps `errorCode` / `errorDetails`. A bare `Error(message)` here made
+ * the step-up challenge on `register/begin` unrecognisable to `withStepUp`:
+ * the user saw "This action requires re-authentication" with no way forward.
  */
 function ensureData<T>(result: { succeeded?: boolean; data?: T; message?: string }): T {
-  if (result?.succeeded !== true || result.data == null) {
+  ensureOk(result, 'Passkey request failed');
+  if (result?.data == null) {
     throw new Error(result?.message || 'Passkey request failed');
   }
 

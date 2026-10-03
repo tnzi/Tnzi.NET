@@ -74,6 +74,19 @@ public class RequestBodyLoggingTests
     }
 
     [Fact]
+    public async Task AFormEncodedRequestBody_HasItsCredentialsRedacted()
+    {
+        // 表单体不是 JSON，按 JSON 脱敏会原样返回；它必须按键脱敏（两种命名写法都要挡住）。
+        var options = new RequestTrackingOptions { LogRequestBody = true };
+
+        var entry = await LogOfAsync("userName=alice&password=hunter2&client_secret=s3cr3t", options, "application/x-www-form-urlencoded");
+
+        Assert.Contains("userName=alice", entry.RequestBody);
+        Assert.DoesNotContain("hunter2", entry.RequestBody);
+        Assert.DoesNotContain("s3cr3t", entry.RequestBody);
+    }
+
+    [Fact]
     public async Task ALongRequestBody_IsStillTruncated()
     {
         // 脱敏顺序改对了，截断这件事不能跟着丢 —— 否则日志会被整条请求体撑爆。

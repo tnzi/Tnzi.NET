@@ -176,6 +176,35 @@ describe('TStepUpModal', () => {
     expect(prompt.submitCode).not.toHaveBeenCalled()
   })
 
+  /**
+   * ★ An emailed / texted code is `Identity:Otp:CodeLength` digits (4-8). With
+   * the boxes fixed at 6 a deployment configured for 8 made step-up
+   * impossible: the code did not fit and the auto-submit fired on a prefix.
+   * The controller knows the length per method; the modal renders it.
+   */
+  it('★ sizes the code entry from the controller: 8 digits for an emailed code on an 8-digit deployment', async () => {
+    const prompt = fakePrompt({ stage: 'code', method: 'email', sentTo: 'a***@example.com', codeLength: 8 })
+    const wrapper = mountModal(prompt)
+    const verify = () => wrapper.find('[data-test="t-step-up-verify"]')
+
+    await wrapper.find('[data-test="otp"]').setValue('123456')
+    await flushPromises()
+    expect(prompt.submitCode).not.toHaveBeenCalled()
+    expect(verify().attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="otp"]').setValue('12345678')
+    await flushPromises()
+    expect(prompt.submitCode).toHaveBeenCalledWith('12345678')
+  })
+
+  it('defaults to 6 digits when the controller does not say', async () => {
+    const prompt = fakePrompt({ stage: 'code', method: 'email' })
+    const wrapper = mountModal(prompt)
+    await wrapper.find('[data-test="otp"]').setValue('123456')
+    await flushPromises()
+    expect(prompt.submitCode).toHaveBeenCalledWith('123456')
+  })
+
   it('★ stays on the code entry while the code is being verified (stage busy, method set)', () => {
     // Keyed on `method`, not `stage`: a submit flips the stage to `busy` and a
     // stage-keyed view would snap back to the chooser mid-request, which reads

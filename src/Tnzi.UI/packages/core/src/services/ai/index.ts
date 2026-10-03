@@ -89,3 +89,12 @@ export type {
 
 export { streamCliRun, lastCliRunSequence } from './cli-stream';
 export type { CliRunStreamOptions, CliRunStreamResult } from './cli-stream';
+
+// Agent resource grants (admin/agents/grants): per-grant enable / delete + reverse lookups
+export { useAdminAgentGrantApi } from './grant';
+export type {
+  AgentGrantResourceType,
+  AgentGrantDto,
+  AgentGrantListDto,
+  AgentGrantUsageDto,
+} from './grant';

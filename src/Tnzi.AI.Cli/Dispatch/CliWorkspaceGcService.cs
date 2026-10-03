@@ -65,12 +65,15 @@ public class CliWorkspaceGcService : BackgroundService
         }
     }
 
-    private void Collect(CliAgentOptions options)
+    /// <remarks>
+    /// 目录形状有两种并存：<c>{tenant}/{run}</c> 与按用户分区的 <c>{tenant}/u-{user}/{run}</c>。
+    /// 按目录名前缀而不是按当前开关识别分区层 —— 开关切换之后，旧形状的目录照样要被回收，
+    /// 而把一个分区目录当成运行目录，会因为它没有回收元数据被判成孤儿、连同其下全部运行一起删掉。
+    /// 点开头的目录（专用配置目录）一律不碰。
+    /// </remarks>
+    internal void Collect(CliAgentOptions options)
     {
-        var root = string.IsNullOrWhiteSpace(options.WorkspacesRoot)
-            ? CliWorkspaceLayout.DefaultWorkspacesRoot
-            : options.WorkspacesRoot;
-
+        var root = CliWorkspaceLayout.ResolveWorkspacesRoot(options);
         if (!Directory.Exists(root))
         {
             return;
@@ -81,14 +84,30 @@ public class CliWorkspaceGcService : BackgroundService
             .Where(p => !p.Contains('/') && !p.Contains('\\'))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var tenantDirectory in Directory.EnumerateDirectories(root))
+        foreach (var tenantDirectory in EnumerateManagedDirectories(root))
         {
-            foreach (var runDirectory in Directory.EnumerateDirectories(tenantDirectory))
+            foreach (var child in EnumerateManagedDirectories(tenantDirectory))
             {
-                CollectRunDirectory(runDirectory, options, artifactNames, now);
+                if (!Path.GetFileName(child).StartsWith(CliWorkspaceLayout.UserPartitionPrefix, StringComparison.Ordinal))
+                {
+                    CollectRunDirectory(child, options, artifactNames, now);
+                    continue;
+                }
+
+                foreach (var runDirectory in EnumerateManagedDirectories(child))
+                {
+                    CollectRunDirectory(runDirectory, options, artifactNames, now);
+                }
+
+                TryDeleteIfEmpty(child);
             }
         }
     }
+
+    private static IEnumerable<string> EnumerateManagedDirectories(string directory)
+        => Directory.EnumerateDirectories(directory)
+            .Where(d => !Path.GetFileName(d).StartsWith('.'))
+            .ToList();
 
     private void CollectRunDirectory(
         string runDirectory, CliAgentOptions options, HashSet<string> artifactNames, DateTime now)
@@ -186,6 +205,22 @@ public class CliWorkspaceGcService : BackgroundService
         catch (Exception ex) when (ex is JsonException or IOException)
         {
             return null;
+        }
+    }
+
+    private void TryDeleteIfEmpty(string path)
+    {
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 与一次正在这个分区里布置的运行赛跑，下一轮再说。
+            _logger.LogDebug(ex, "Could not remove empty user partition {Path}", path);
         }
     }
 

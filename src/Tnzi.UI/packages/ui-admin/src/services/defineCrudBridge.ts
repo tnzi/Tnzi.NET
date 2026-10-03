@@ -1,3 +1,4 @@
+// contract-scan-exempt-file: every path here is `${base}/...` with `base` supplied by the consumer app at runtime.
 /**
  * `defineCrudBridge` / `defineChildBridge` - factories for the ubiquitous
  * "plain REST resource" bridge shape so consumer apps declare an endpoint base

@@ -10,6 +10,7 @@ import zhCN from 'vant/es/locale/lang/zh-CN';
 import enUS from 'vant/es/locale/lang/en-US';
 import { provideI18n } from '@tnzi/core/adapters/i18n';
 import { setActiveUiAdapter, setActiveRuntimeAdapter } from '@tnzi/core/adapters';
+import { installAppUpdate, type AppUpdateOptions, type AppUpdateRouter } from '@tnzi/core/app-update';
 import { registerAllComponents } from './components/register';
 import { createVantUiAdapter } from './adapters/create-ui-adapter';
 import { createVantRuntimeAdapter } from './adapters/create-runtime-adapter';
@@ -38,6 +39,27 @@ export interface TnziMobileOptions {
   router?: VantRuntimeAdapterOptions['router'];
   /** Whether to register core adapters (default: true) */
   registerAdapters?: boolean;
+  /**
+   * Recovery for pages left open across a deployment. On by default: a lazy
+   * route whose chunk the deployment removed loads the target in full, and a
+   * new build is picked up on the next route navigation. Mobile webviews hold
+   * on to a page far longer than desktop tabs, so this matters more here.
+   * Needs `router` for both behaviours to reach routing; without it only
+   * non-route lazy chunks are recovered. `false` turns it off. Inert on the
+   * Vite dev server. See `@tnzi/core/app-update`.
+   */
+  appUpdate?: false | Omit<AppUpdateOptions, 'router'>;
+}
+
+/** The `router` option is typed loosely; only a real vue-router can drive navigation recovery. */
+function asAppUpdateRouter(router: unknown): AppUpdateRouter | undefined {
+  const candidate = router as Partial<AppUpdateRouter> | undefined;
+  return candidate &&
+    typeof candidate.beforeEach === 'function' &&
+    typeof candidate.onError === 'function' &&
+    typeof candidate.resolve === 'function'
+    ? (candidate as AppUpdateRouter)
+    : undefined;
 }
 
 /**
@@ -53,6 +75,7 @@ export function createTnziMobile(options: TnziMobileOptions = {}): Plugin {
     registerComponents = true,
     router,
     registerAdapters = true,
+    appUpdate,
   } = options;
 
   return {
@@ -82,6 +105,10 @@ export function createTnziMobile(options: TnziMobileOptions = {}): Plugin {
       // Keep @tnzi/core's `t()` on the same locale as Vant's own strings,
       // otherwise components mix translated Vant chrome with untranslated labels.
       provideI18n(app, locale);
+
+      if (appUpdate !== false) {
+        installAppUpdate({ ...appUpdate, router: asAppUpdateRouter(router) });
+      }
     },
   };
 }

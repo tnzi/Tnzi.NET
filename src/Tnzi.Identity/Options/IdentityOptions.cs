@@ -166,10 +166,31 @@ public class JwtOptions
 public class TnziSignInOptions
 {
     /// <summary>
-    /// 是否使用邮箱作为用户名（默认 true）
+    /// 是否使用邮箱作为用户名（默认 <c>true</c>）。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 开启时，<b>每一条</b>建号入口（自助注册、快速注册、验证码自动注册、第三方登录、管理端建号、
+    /// 邀请、CSV 导入）在账号有邮箱时都把用户名定为邮箱；调用方传一个与邮箱不同的用户名会得到 400，
+    /// 不会被悄悄改写或悄悄收下。没有邮箱的账号（只有手机号、第三方不给邮箱）退回手机号或生成值。
+    /// </para>
+    /// <para>
+    /// 关闭时用户名是独立的登录名（工号、昵称式账号），建号时必填（自助注册另有
+    /// <see cref="RegistrationOptions.DefaultUserNameFromEmail"/> 兜底）；但带 <c>@</c> 的用户名
+    /// 仍必须是账号自己的邮箱。
+    /// </para>
+    /// <para>
+    /// ★ 改邮箱时用户名跟不跟<b>不看这个开关</b>，看值：用户名等于旧邮箱的账号一起改，
+    /// 独立用户名的账号不动。于是中途切换开关的部署里，两种账号各自保持自己的语义。
+    /// </para>
+    /// <para>
+    /// ★ 刻意<b>不</b>做成「开启时要求 <see cref="RequireUniqueEmail"/>」的选项校验：本项是可热改的
+    /// 运行时设置，一次保存就能让整个 <c>IdentityOptions</c> 解析抛异常、全部认证失效。
+    /// 开启时用户名唯一本身就让邮箱唯一（同一邮箱的第二个账号会撞上用户名重复）。
+    /// </para>
+    /// </remarks>
     [RuntimeSetting(Label = "Use Email As Username", I18n = "admin.modules.system.settings.fields.signInUseEmailAsUserName", Type = SettingFieldType.Boolean, Subsection = "Sign-in",
-        Description = "Treat the email address as the username during sign-in and self-registration")]
+        Description = "New accounts that have an email address get it as their username, on every creation path; a different username is rejected. Turn off to let applications use independent usernames (staff numbers, handles). Either way, a username that equals the account's email follows the email when it changes.")]
     public bool UseEmailAsUserName { get; set; } = true;
 
     /// <summary>
@@ -268,10 +289,11 @@ public class RegistrationOptions
     public bool EnableQuickRegisterSms { get; set; } = false;
 
     /// <summary>
-    /// 是否默认使用邮箱作为用户名（当未提供用户名时）
+    /// 自助注册没填用户名时是否退回邮箱。只在 <see cref="TnziSignInOptions.UseEmailAsUserName"/>
+    /// 关闭时有意义（开启时用户名总是邮箱）。
     /// </summary>
     [RuntimeSetting(Label = "Default Username From Email", I18n = "admin.modules.system.settings.fields.registrationDefaultUserNameFromEmail", Type = SettingFieldType.Boolean, Subsection = "Registration",
-        Description = "When no username is supplied, derive it from the email address")]
+        Description = "Self-registration only, and only when 'Use Email As Username' is off: if no username is supplied, use the email address")]
     public bool DefaultUserNameFromEmail { get; set; } = true;
 
     /// <summary>
@@ -399,6 +421,23 @@ public class OtpOptions
     [RuntimeSetting(Label = "Enable Authenticator (TOTP)", I18n = "admin.modules.system.settings.fields.otpEnableTotp", Type = SettingFieldType.Boolean,
         Description = "Enable authenticator app (TOTP) two-factor. Turn off for deployments that do not use TOTP: the User Center hides it and setup is rejected. Unlike SMS/email, TOTP has no passwordless code-login, it is a second factor only.")]
     public bool EnableTotp { get; set; } = true;
+
+    /// <summary>
+    /// 是否允许把 passkey / 安全密钥（YubiKey 这类 FIDO2 硬件密钥，或平台认证器）当作两步验证的第二因子。默认关闭。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="EnableSms"/> / <see cref="EnableEmail"/> / <see cref="EnableTotp"/> 同一形状的渠道开关：
+    /// 关着时个人中心与管理端都不列出这种方式，启用入口被拒绝，已启用它的账号登录时也不再提供它。
+    /// </para>
+    /// <para>
+    /// ★ 它<strong>叠在</strong> <c>Identity:Passkey:Enabled</c> 之上：那一个是 WebAuthn 接线本身（登记、断言、二次确认），
+    /// 这一个只决定「登记好的 passkey 能不能拿来当第二因子」。接线没开，这里开了也不生效。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Enable Passkey / Security Key", I18n = "admin.modules.system.settings.fields.otpEnablePasskey", Type = SettingFieldType.Boolean,
+        Description = "Allow a registered passkey or security key (YubiKey and other FIDO2 keys, or the device's own authenticator) as a two-factor method. Requires Identity:Passkey:Enabled; the User Center and the admin page list it only when both are on.")]
+    public bool EnablePasskey { get; set; } = false;
 
     /// <summary>
     /// 过期验证码在表里保留多少小时后由会话维护任务删除。默认 24；<c>0</c> 表示永不清理（须显式配置）。
@@ -707,6 +746,24 @@ public class AccountSecurityOptions
     [RuntimeSetting(Label = "Medium Risk Threshold", I18n = "admin.modules.system.settings.fields.accountSecurityMediumRiskThreshold", Type = SettingFieldType.Int, Min = 0, Max = 100, Subsection = "Risk Scoring",
         Description = "Risk score at or above which a notification is sent")]
     public int MediumRiskThreshold { get; set; } = 30;
+
+    /// <summary>
+    /// 持有其中任一角色的账号<b>不受</b>自己的登录 IP 允许列表约束（角色名，不区分大小写）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 允许列表是按账号开的（<c>admin/user-security/{userId}/sign-in-policy</c>），默认没有任何账号
+    /// 受限。这一项回答的是「谁永远不该被它锁在外面」：通常填技术超管所在的那个角色 ——
+    /// 一套部署要留一个无论从哪里都进得来的入口，否则把恢复账号的允许列表配错一次，
+    /// 剩下的就只有改库。
+    /// </para>
+    /// <para>
+    /// 默认空，即没有豁免。<b>刻意不预填任何角色名</b>：身份模块不知道哪个角色是超管
+    /// （那是授权模块的 <c>Authorization:SuperAdminRoles</c>），照抄一个猜测的名字，
+    /// 猜对了是静默豁免、猜错了是静默不豁免，两个方向都没有症状。
+    /// </para>
+    /// </remarks>
+    public string[] IpAllowListExemptRoles { get; set; } = [];
 }
 
 /// <summary>

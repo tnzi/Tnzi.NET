@@ -23,5 +23,8 @@ public class NotificationPermissions : IPermissionDefinitionProvider
         // Preferences are per-user upserts - no standalone create.
         context.AddCrudPermissions("notification.subscription", "Subscriptions", parentName: "notification", actions: CrudActions.View | CrudActions.Update | CrudActions.Delete);
         context.AddCrudPermissions("notification.template", "Notification Templates", parentName: "notification");
+        // Opt-outs are keyed by address, not user, and the one-click link writes them
+        // itself; the admin surface only reads, hand-registers and revokes - no update.
+        context.AddCrudPermissions("notification.optOut", "Opt-outs", parentName: "notification", actions: CrudActions.View | CrudActions.Create | CrudActions.Delete);
     }
 }

@@ -1,3 +1,5 @@
+using Tnzi.Audit.Tests.TestSupport;
+
 
 namespace Tnzi.Audit.Tests.Services;
 
@@ -17,7 +19,8 @@ public class DatabaseAuditStoreTests
 
         _store = new DatabaseAuditStore(
             _operationRepositoryMock.Object,
-            _entityEntryRepositoryMock.Object);
+            _entityEntryRepositoryMock.Object,
+            new StaticOptionsMonitor<AuditOptions>(new AuditOptions()));
     }
 
     #region Constructor Tests
@@ -28,7 +31,8 @@ public class DatabaseAuditStoreTests
         // Act & Assert
         Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
             null!,
-            _entityEntryRepositoryMock.Object));
+            _entityEntryRepositoryMock.Object,
+            new StaticOptionsMonitor<AuditOptions>(new AuditOptions())));
     }
 
     [Fact]
@@ -37,6 +41,16 @@ public class DatabaseAuditStoreTests
         // Act & Assert
         Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
             _operationRepositoryMock.Object,
+            null!,
+            new StaticOptionsMonitor<AuditOptions>(new AuditOptions())));
+    }
+
+    [Fact]
+    public void Constructor_Should_Throw_When_Options_Is_Null()
+    {
+        Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
+            _operationRepositoryMock.Object,
+            _entityEntryRepositoryMock.Object,
             null!));
     }
 

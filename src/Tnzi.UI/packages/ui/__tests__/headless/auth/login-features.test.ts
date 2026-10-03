@@ -69,6 +69,17 @@ describe('mapAuthConfig', () => {
     expect(mapped.captcha).toBeNull()
     expect(mapped.captchaOnPasswordRecovery).toBe(false)
   })
+
+  it('carries the delivered-code length (an 8-digit deployment gets 8 cells)', () => {
+    expect(mapAuthConfig({ ...fullConfig, otpCodeLength: 8 }).otpCodeLength).toBe(8)
+    expect(mapAuthConfig({ ...fullConfig, otpCodeLength: 4 }).otpCodeLength).toBe(4)
+  })
+
+  it('defaults the code length to 6 for a backend that does not report it', () => {
+    const legacy = { ...fullConfig } as Record<string, unknown>
+    delete legacy.otpCodeLength
+    expect(mapAuthConfig(legacy as never).otpCodeLength).toBe(6)
+  })
 })
 
 describe('mergeFeatures', () => {
@@ -100,6 +111,13 @@ describe('mergeFeatures', () => {
     expect(mergeFeatures(DEFAULT_LOGIN_FEATURES, { captcha: cfg }).captcha).toEqual(cfg)
     // An explicit null override clears a base config (a consumer forcing the image captcha).
     expect(mergeFeatures({ ...DEFAULT_LOGIN_FEATURES, captcha: cfg }, { captcha: null }).captcha).toBeNull()
+  })
+
+  it('code length: 6 by default, backend value kept, consumer override wins', () => {
+    expect(DEFAULT_LOGIN_FEATURES.otpCodeLength).toBe(6)
+    const fromBackend = { ...DEFAULT_LOGIN_FEATURES, otpCodeLength: 8 }
+    expect(mergeFeatures(fromBackend, { register: false }).otpCodeLength).toBe(8)
+    expect(mergeFeatures(fromBackend, { otpCodeLength: 4 }).otpCodeLength).toBe(4)
   })
 })
 

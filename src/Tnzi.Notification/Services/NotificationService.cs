@@ -779,6 +779,9 @@ public class NotificationService : ApplicationService, INotificationService
             if (explicitKey != null && NotificationProviderKeys.Describe(explicitKey) is { } shapeError)
                 return Fail<string?>(shapeError, 400, ErrorCodes.NOTIFICATION_ERROR);
 
+            if (ProviderConfigurationError(request.Type, explicitKey) is { } explicitConfigError)
+                return Fail<string?>(explicitConfigError, 500, ErrorCodes.NOTIFICATION_ERROR);
+
             if (!_providers.IsRegistered(request.Type, explicitKey))
                 return Fail<string?>(NotificationProviderProfiles.NotRegisteredMessage(request.Type, explicitKey), 400, ErrorCodes.NOTIFICATION_ERROR);
 
@@ -805,6 +808,9 @@ public class NotificationService : ApplicationService, INotificationService
                 $"{_providerSelector.GetType().Name} selected an invalid provider key: {selectedShapeError}",
                 500, ErrorCodes.NOTIFICATION_ERROR);
 
+        if (ProviderConfigurationError(request.Type, selectedKey) is { } selectedConfigError)
+            return Fail<string?>(selectedConfigError, 500, ErrorCodes.NOTIFICATION_ERROR);
+
         if (!_providers.IsRegistered(request.Type, selectedKey))
             return Fail<string?>(
                 $"{_providerSelector.GetType().Name} selected a provider that is not registered. "
@@ -812,6 +818,30 @@ public class NotificationService : ApplicationService, INotificationService
                 500, ErrorCodes.NOTIFICATION_ERROR);
 
         return Ok<string?>(selectedKey);
+    }
+
+    /// <summary>
+    /// 这个键上的发送器是否因为<b>部署配置</b>而构造不出来；构造得出来（或根本没注册）返回 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 发送器工厂可以抛 <see cref="ConfigurationException"/>：传真节的 <c>EmailProviderKey</c> 指向一个不存在的
+    /// 邮件发送器时就是这样（刻意不退回默认发送器，见 <see cref="FaxSenderOptions.EmailProviderKey"/>）。
+    /// 这一问在创建路径上，任由它穿出去就是一次 500 异常而不是一个 <see cref="Result"/> 失败 ——
+    /// 调用方拿不到那句指向配置项的原因。原因是部署的配置而不是请求，所以是 500 而不是 400。
+    /// </remarks>
+    private string? ProviderConfigurationError(NotificationType type, string? providerKey)
+    {
+        try
+        {
+            _providers.IsRegistered(type, providerKey);
+            return null;
+        }
+        catch (ConfigurationException ex)
+        {
+            Logger.LogError(ex, "The {Channel} sender for provider {ProviderKey} cannot be constructed from its configuration.",
+                type, providerKey ?? NotificationProviderKeys.Default);
+            return ex.ConfigurationKey is { } key ? $"{ex.Message} (configuration: {key})" : ex.Message;
+        }
     }
 
     /// <summary>渲染后的消息内容：主题、正文与消息分类。</summary>

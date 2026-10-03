@@ -118,6 +118,12 @@ import type {
   WorkflowStepApprovalDto,
   WorkflowStatsDto,
   WorkflowValidationResultDto,
+  WorkflowDefinitionVersionDto,
+  RestoreWorkflowVersionRequestDto,
+  WorkflowExecutionStatsDto,
+  WorkflowInterruptDto,
+  ResumeWorkflowInputDto,
+  WorkflowExecutionSignalDto,
   // MCP
   McpServerStatusDto,
   McpToolInfoDto,
@@ -760,6 +766,26 @@ export function useAdminWorkflowApi(client: HttpClient) {
     rejectStep: (executionId: string, stepId: string, data: WorkflowStepApprovalDto) =>
       client.post<void>(`${base}/executions/${executionId}/steps/${stepId}/reject`, data),
 
+    /**
+     * Cancel an execution. A paused / awaiting execution is cancelled at once;
+     * a running one gets a cancel signal queued in its mailbox (the engine
+     * stops at its next checkpoint). `feedback` becomes the signal's reason.
+     */
+    cancelExecution: (executionId: string, data?: WorkflowStepApprovalDto) =>
+      client.post<void>(`${base}/executions/${executionId}/cancel`, data),
+
+    /** Pending human-in-the-loop interrupt (404 when the execution is not awaiting input) */
+    getPendingInterrupt: (executionId: string) =>
+      client.get<WorkflowInterruptDto>(`${base}/executions/${executionId}/interrupt`),
+
+    /** Resume an execution awaiting input with the operator's answer */
+    resumeWithInput: (executionId: string, data: ResumeWorkflowInputDto) =>
+      client.post<WorkflowExecutionResultDto>(`${base}/executions/${executionId}/resume-with-input`, data),
+
+    /** Pending signals in the execution's mailbox (501 when no mailbox is registered) */
+    getPendingSignals: (executionId: string) =>
+      client.get<WorkflowExecutionSignalDto[]>(`${base}/executions/${executionId}/signals`),
+
     /** Get execution history (paged) */
     getExecutions: (queryParams?: WorkflowExecutionQueryDto) =>
       client.get<PagedList<WorkflowExecutionSummaryDto>>(`${base}/executions`, queryParams ? { params: queryParams } : undefined),
@@ -790,6 +816,24 @@ export function useAdminWorkflowApi(client: HttpClient) {
     /** Validate workflow definition */
     validate: (id: string) =>
       client.post<WorkflowValidationResultDto>(`${base}/${id}/validate`),
+
+    /** Per-workflow execution statistics (count, success rate, duration percentiles) */
+    getExecutionStats: (id: string) =>
+      client.get<WorkflowExecutionStatsDto>(`${base}/${id}/execution-stats`),
+
+    // --- Versions ---
+
+    /** Version history, newest first (snapshots without the definition body) */
+    getVersions: (id: string) =>
+      client.get<WorkflowDefinitionVersionDto[]>(`${base}/${id}/versions`),
+
+    /** One version including its full definition snapshot */
+    getVersion: (id: string, versionNumber: number) =>
+      client.get<WorkflowDefinitionVersionDto>(`${base}/${id}/versions/${versionNumber}`),
+
+    /** Restore a version; the current definition is snapshotted first */
+    restoreVersion: (id: string, versionNumber: number, data?: RestoreWorkflowVersionRequestDto) =>
+      client.post<void>(`${base}/${id}/versions/${versionNumber}/restore`, data),
   };
 }
 

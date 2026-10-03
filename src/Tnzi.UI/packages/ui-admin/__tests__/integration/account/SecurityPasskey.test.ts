@@ -198,6 +198,27 @@ describe('SecuritySection - passkeys', () => {
     expect(me.getPasskeys).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * When the deployment offers a key as the second step, the two-factor row
+   * carries the inventory and the standalone block must not double it.
+   */
+  it('yields to the two-factor row when the deployment offers a key as the second step', async () => {
+    me.getTwoFactorStatus.mockResolvedValueOnce({
+      isEnabled: false,
+      supportedTypes: [],
+      isTotpEnabled: false,
+      methods: [{ type: 'Passkey', available: true, enabled: false, isPreferred: false }],
+    } as never)
+
+    const wrapper = mountSecurity()
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('Add a passkey')
+    expect(wrapper.text()).toContain('Security key / passkey')
+    // The row listed them instead.
+    expect(wrapper.find('.t-2fa__keys').text()).toContain('My iPhone')
+  })
+
   it('removes a credential and reloads', async () => {
     const wrapper = mountSecurity()
     await flushPromises()

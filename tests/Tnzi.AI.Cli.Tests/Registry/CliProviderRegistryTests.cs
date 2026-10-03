@@ -143,6 +143,32 @@ public class CliProviderRegistryTests
     [Fact]
     public void Find_IsCaseInsensitive()
         => Registry(new CliAgentOptions()).Find("CLAUDE").ShouldNotBeNull();
+
+    [Fact]
+    public void ProviderOverride_CarriesIsolationSettings()
+    {
+        var options = new CliAgentOptions
+        {
+            Providers =
+            {
+                ["claude"] = new CliProviderOptions
+                {
+                    UserConfigIsolation = CliUserConfigIsolation.Inherit,
+                    ConfigDirectory = "/srv/claude-home"
+                }
+            }
+        };
+
+        var claude = Registry(options).Find("claude")!;
+
+        claude.UserConfigIsolation.ShouldBe(CliUserConfigIsolation.Inherit);
+        claude.ConfigDirectory.ShouldBe("/srv/claude-home");
+        claude.ConfigDirectoryEnvironmentVariable.ShouldBe("CLAUDE_CONFIG_DIR");
+    }
+
+    [Fact]
+    public void BuiltInProvider_DefaultsToExcludingUserSettings()
+        => Registry(new CliAgentOptions()).Find("claude")!.UserConfigIsolation.ShouldBe(CliUserConfigIsolation.ExcludeUserSettings);
 }
 
 /// <summary>
@@ -158,6 +184,44 @@ public class CliAgentOptionsValidatorTests
             .GetMethod("ValidateOptions", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         method.Invoke(validator, [options, errors]);
         return errors;
+    }
+
+    [Fact]
+    public void DefaultWorkspacesRoot_DoesNotRequireTheDataDirectoryToExistYet()
+    {
+        // 默认的 SpecialFolderOption.None 在 Unix 上对尚不存在的目录返回空串，夹具只在 DoNotVerify 下回答路径。
+        var notYetCreated = Path.Combine(Path.GetTempPath(), $"no-such-dir-{Guid.NewGuid():N}");
+
+        var root = CliWorkspaceLayout.ResolveDefaultWorkspacesRoot((_, option) =>
+            option == Environment.SpecialFolderOption.DoNotVerify ? notYetCreated : string.Empty);
+
+        root.ShouldBe(Path.Combine(notYetCreated, "Tnzi", "agent-workspaces"));
+    }
+
+    [Fact]
+    public void DefaultWorkspacesRoot_UnresolvableHost_IsEmpty_NotARelativePath()
+    {
+        // 拼出 "Tnzi/agent-workspaces" 这样的相对路径会让工作区静默落进进程当前目录。
+        CliWorkspaceLayout.ResolveDefaultWorkspacesRoot((_, _) => string.Empty).ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public void Enabled_WithoutWorkspacesRoot_OnAHostWithoutADataDirectory_Fails()
+    {
+        var errors = new List<string>();
+        CliAgentOptionsValidator.ValidateWorkspacesRoot(new CliAgentOptions { Enabled = true }, defaultWorkspacesRoot: string.Empty, errors);
+
+        errors.ShouldHaveSingleItem().ShouldContain("AI:Cli:WorkspacesRoot");
+    }
+
+    [Fact]
+    public void Enabled_WithExplicitWorkspacesRoot_OnAHostWithoutADataDirectory_Passes()
+    {
+        var errors = new List<string>();
+        var options = new CliAgentOptions { Enabled = true, WorkspacesRoot = Path.Combine(Path.GetTempPath(), "ws") };
+        CliAgentOptionsValidator.ValidateWorkspacesRoot(options, defaultWorkspacesRoot: string.Empty, errors);
+
+        errors.ShouldBeEmpty();
     }
 
     [Fact]
@@ -265,5 +329,86 @@ public class CliAgentOptionsValidatorTests
         };
 
         Validate(options).ShouldContain(e => e.Contains("VendorAppServer"));
+    }
+
+    [Fact]
+    public void Enabled_RejectsIsolatedConfigDirectoryOnAProviderThatCannotRelocateIt()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            Providers = { ["kimi"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory } }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("IsolatedConfigDirectory"));
+    }
+
+    [Fact]
+    public void Enabled_RejectsFallbackTokenOnAProviderWithoutATokenVariable()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            Providers = { ["kimi"] = new CliProviderOptions { FallbackAuthToken = "token" } }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("FallbackAuthToken"));
+    }
+
+    [Fact]
+    public void Enabled_RejectsARelativeConfigDirectory()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            Providers = { ["claude"] = new CliProviderOptions { ConfigDirectory = "relative/home" } }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("ConfigDirectory must be an absolute path"));
+    }
+
+    [Fact]
+    public void Enabled_AcceptsClaudeWithIsolationAndFallbackToken()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            Providers =
+            {
+                ["claude"] = new CliProviderOptions
+                {
+                    UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory,
+                    FallbackAuthToken = "token"
+                }
+            }
+        };
+
+        Validate(options).ShouldBeEmpty();
+    }
+
+    /// <summary>自定义 provider 声明了能力就能用；没声明就与内置的 ACP 项一样被拒。</summary>
+    [Fact]
+    public void Enabled_JudgesCustomProvidersByWhatTheyDeclare()
+    {
+        var declared = new CliCustomProviderOptions
+        {
+            Key = "forked-claude",
+            DefaultExecutable = "forked",
+            Protocol = CliAgentProtocol.StreamJson,
+            ConfigDirectoryEnvironmentVariable = "FORKED_CONFIG_DIR",
+            AuthTokenEnvironmentVariable = "FORKED_TOKEN",
+            UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory,
+            FallbackAuthToken = "token"
+        };
+        var undeclared = new CliCustomProviderOptions
+        {
+            Key = "bare",
+            DefaultExecutable = "bare",
+            UserConfigIsolation = CliUserConfigIsolation.IsolatedConfigDirectory
+        };
+
+        Validate(new CliAgentOptions { Enabled = true, CustomProviders = [declared] }).ShouldBeEmpty();
+        Validate(new CliAgentOptions { Enabled = true, CustomProviders = [undeclared] })
+            .ShouldContain(e => e.Contains("'bare'"));
     }
 }

@@ -29,6 +29,7 @@
 import { watchEffect, type App, type Component } from 'vue';
 import type { Router, RouteRecordRaw } from 'vue-router';
 import { createTnziAuthGuard } from '@tnzi/core/guards';
+import { installAppUpdate, type AppUpdateOptions } from '@tnzi/core/app-update';
 import {
   THEME_CONTEXT_KEY,
   createThemeContext,
@@ -89,6 +90,14 @@ export interface DefineChatAppOptions {
    * a theme context of its own.
    */
   theme?: Partial<ThemeSettings> | false;
+  /**
+   * Recovery for tabs left open across a deployment. On by default: a lazy
+   * route whose chunk the deployment removed loads the target in full instead
+   * of failing, and a new build is picked up on the next route navigation, so
+   * a half-typed message is never reloaded away. `false` turns it off. Inert on
+   * the Vite dev server. See `@tnzi/core/app-update`.
+   */
+  appUpdate?: false | Omit<AppUpdateOptions, 'router'>;
 }
 
 export interface DefineChatAppResult {
@@ -160,6 +169,11 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
       watchEffect(() => {
         injectCssVars(buildCssVars(context.settings.value.colors, context.resolvedMode.value));
       });
+    }
+
+    // Independent of the auth guard: a stale tab breaks the same way signed in or not.
+    if (options.appUpdate !== false) {
+      installAppUpdate({ ...options.appUpdate, router });
     }
 
     if (options.guard === false) return;

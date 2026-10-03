@@ -58,4 +58,14 @@ public class ProviderOptions : AiProviderOptions
     /// Common values: GPT-4.1 (1M), Claude Sonnet 4 (200K), GPT-4o (128K), DeepSeek-R1 (64K), GPT-4.1-mini (128K).
     /// </remarks>
     public int? ContextWindowSize { get; set; }
+
+    /// <summary>
+    /// 覆盖 <c>OpenAIChatClientProvider</c> 取用的命名 HttpClient；为空时按 <see cref="AiProviderOptions.Name"/>
+    /// 取带 Polly 管线的客户端（<c>ResilientHttpClientNames</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 只供程序内构造的一次性条目用（<c>AiUtilityService</c> 的调用方自带提供商）。刻意 <c>internal</c>：
+    /// 配置绑定只认公开属性，配置文件与数据库条目不可能设置它。
+    /// </remarks>
+    internal string? HttpClientName { get; set; }
 }

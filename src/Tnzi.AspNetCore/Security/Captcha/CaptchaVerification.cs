@@ -32,7 +32,8 @@ public enum CaptchaFailure
     LowScore,
 
     /// <summary>
-    /// 验证服务不可达（网络错误、超时、非 2xx）。默认按拒绝处理，
+    /// 验证服务不可达（网络错误、超时、HTTP 5xx / 408 / 429）。其余非 2xx 是请求本身被拒，
+    /// 归 <see cref="Rejected"/>，不受放行策略影响。默认按拒绝处理，
     /// 见 <see cref="CaptchaUnavailablePolicy"/>。
     /// </summary>
     VerifierUnavailable,

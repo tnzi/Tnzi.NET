@@ -16,6 +16,11 @@ public static class ErrorCodes
     public const string AgentDisabled = "AI_AGENT_DISABLED";
 
     /// <summary>
+    /// The agent is a host-level shared definition (synced from YAML): tenants can resolve and list it but not modify or delete it.
+    /// </summary>
+    public const string AgentSharedDefinitionReadOnly = "AI_AGENT_SHARED_DEFINITION_READ_ONLY";
+
+    /// <summary>
     /// Workflow not found.
     /// </summary>
     public const string WorkflowNotFound = "AI_WORKFLOW_NOT_FOUND";
@@ -359,6 +364,11 @@ public static class ErrorCodes
     /// External CLI runtime registration not found.
     /// </summary>
     public const string CliRuntimeNotFound = "AI_CLI_RUNTIME_NOT_FOUND";
+
+    /// <summary>
+    /// External CLI runtimes are host-level resources: a tenant-scoped caller may read them but not probe, change or delete them.
+    /// </summary>
+    public const string CliRuntimeHostManaged = "AI_CLI_RUNTIME_HOST_MANAGED";
 
     /// <summary>
     /// The agent has no external CLI runtime binding.

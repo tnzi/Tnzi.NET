@@ -1,3 +1,5 @@
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using Tnzi.EFCore;
 
 namespace Tnzi.Storage.Tests.Integration;
@@ -58,6 +60,42 @@ public class WriteAbortCleanupTests : StorageIntegrationTestBase
         Assert.False(await Storage.ExistsAsync(zip));
         Assert.True(await Storage.ExistsAsync(a.Path!));
         Assert.True(await Storage.ExistsAsync(b.Path!));
+    }
+
+    [Fact]
+    public async Task GetOrCreateByMd5Async_InsertThrows_DeletesTheObjectAndItsThumbnail()
+    {
+        // 这条公开写路径此前既不收集上传的对象、也不收拾：正文与缩略图都成了孤儿回收看不见的对象。
+        var options = Options();
+        options.AutoGenerateThumbnail = true;
+        var recorder = new RecordingFileStorage(Storage);
+        var service = new FileStorageService(
+            new ThrowingInsertRepository(DbContext, ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
+            recorder,
+            new StaticOptionsMonitor<StorageOptions>(options),
+            TestFileAccessAuthorizer.AllowAll(),
+            TestPublicFileFieldResolver.Empty(),
+            new TestFileUrlSigner(),
+            ServiceProvider,
+            CreateUploadGuard(options),
+            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(options)));
+        var png = TinyPng();
+        var md5 = Convert.ToHexString(MD5.HashData(png)).ToLowerInvariant();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetOrCreateByMd5Async(md5, "a.png", new MemoryStream(png)));
+
+        Assert.Equal(2, recorder.UploadedPaths.Count); // 正文 + 缩略图
+        foreach (var path in recorder.UploadedPaths)
+            Assert.False(await Storage.ExistsAsync(path), path);
+    }
+
+    private static byte[] TinyPng()
+    {
+        using var image = new Image<Rgba32>(8, 8);
+        using var buffer = new MemoryStream();
+        image.SaveAsPng(buffer);
+        return buffer.ToArray();
     }
 
     private sealed class ThrowingInsertRepository(StorageTestDbContext dbContext, IServiceProvider serviceProvider)

@@ -95,6 +95,23 @@ public class AltchaCaptchaProviderTests
     }
 
     [Fact]
+    public async Task ReplayStoreFailure_IsStillRejected_ButNotReportedAsAReplay()
+    {
+        // 某些缓存实现把故障吞成 TrySet=false：那时既不是重放，也不能放行（记不下一次性标记就防不了重放）。
+        var cache = new Mock<ICache>();
+        cache.Setup(c => c.TrySetAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        cache.Setup(c => c.ExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var provider = Create(cache: cache.Object);
+        var challenge = provider.CreateChallenge("login");
+
+        var result = await provider.VerifyAsync(new CaptchaVerificationRequest(Payload(challenge, Solve(challenge)), "login", null));
+
+        Assert.False(result.Passed);
+        Assert.Equal(CaptchaFailure.Rejected, result.Failure);
+        Assert.Equal("Replay store unavailable", result.Detail);
+    }
+
+    [Fact]
     public async Task WrongPurpose_IsActionMismatch()
     {
         var provider = Create();

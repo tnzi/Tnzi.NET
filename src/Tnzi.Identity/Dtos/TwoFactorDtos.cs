@@ -74,6 +74,34 @@ public class TwoFactorChallengeDto
 }
 
 /// <summary>
+/// 用 passkey 完成两步验证：第一步，请求断言选项。
+/// </summary>
+/// <remarks>
+/// 临时令牌指明是谁在登录，选项里的 <c>allowCredentials</c> 就是那个账号登记过的凭据，
+/// 所以 YubiKey 这类不存可发现凭据的安全密钥也能用。
+/// </remarks>
+public class TwoFactorPasskeyBeginDto
+{
+    /// <summary>
+    /// 登录挑战返回的临时令牌。
+    /// </summary>
+    [Required]
+    public string TempToken { get; set; } = null!;
+}
+
+/// <summary>
+/// 用 passkey 完成两步验证：第二步，把浏览器断言交回来换令牌。
+/// </summary>
+public class TwoFactorPasskeyCompleteDto : PasskeyCompleteDto
+{
+    /// <summary>
+    /// 登录挑战返回的临时令牌（与第一步同一枚）。
+    /// </summary>
+    [Required]
+    public string TempToken { get; set; } = null!;
+}
+
+/// <summary>
 /// 验证2FA并登录请求DTO
 /// </summary>
 public class VerifyTwoFactorDto

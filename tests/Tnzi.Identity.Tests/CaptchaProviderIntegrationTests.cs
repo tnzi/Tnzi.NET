@@ -1,3 +1,5 @@
+using Tnzi.AspNetCore.Options;
+using Tnzi.Modules;
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -176,6 +178,56 @@ public class CaptchaProviderIntegrationTests
 
         Assert.True(result.Succeeded);
         f.Verifier.Verify(x => x.VerifyAsync("good", CaptchaPurpose.PasswordRecovery, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 「未启用，放行」不是「校验通过」：开关要求验证码而验证器报告没有生效的提供商时拒绝。
+    /// </summary>
+    [Fact]
+    public async Task ForgotPassword_WhenCaptchaIsOnButTheVerifierReportsNotEnabled_FailsClosed()
+    {
+        var f = new PasswordFixture(captchaOnRecovery: true);
+        f.Verifier.Setup(x => x.VerifyAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.NotEnabled());
+
+        var result = await f.Service.ForgotPasswordAsync(new ForgotPasswordDto { Email = "a@example.com", CaptchaToken = "anything" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_CAPTCHA_REQUIRED, result.ErrorCode);
+        f.UserManager.Verify(x => x.FindByEmailAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 验证器按 <c>IsNullOrWhiteSpace</c> 判未启用。只补 null 的话 <c>"Provider": ""</c> 会让验证器整体失效，
+    /// 而身份流程的验证码开关照样开着 —— 空白串必须同样补成内置图形验证码。
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task IdentityModule_FillsAnUnsetOrBlankCaptchaProviderWithTheImageCaptcha(string? configured)
+    {
+        var provider = await ResolveCaptchaOptionsAsync(configured);
+
+        Assert.Equal(ImageCaptchaProvider.ProviderName, provider);
+    }
+
+    [Fact]
+    public async Task IdentityModule_LeavesAConfiguredCaptchaProviderAlone()
+    {
+        Assert.Equal("turnstile", await ResolveCaptchaOptionsAsync("turnstile"));
+    }
+
+    private static async Task<string?> ResolveCaptchaOptionsAsync(string? configured)
+    {
+        var services = new ServiceCollection();
+        services.Configure<CaptchaVerifierOptions>(o => o.Provider = configured);
+        var context = new ServiceConfigurationContext(services, new ConfigurationBuilder().Build());
+
+        await new IdentityModule().PostConfigureServicesAsync(context);
+
+        using var sp = services.BuildServiceProvider();
+        return sp.GetRequiredService<IOptions<CaptchaVerifierOptions>>().Value.Provider;
     }
 
     [Fact]

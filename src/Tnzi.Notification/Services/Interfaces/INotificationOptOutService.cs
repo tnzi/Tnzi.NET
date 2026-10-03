@@ -79,6 +79,34 @@ public interface INotificationOptOutService
     /// 校验并解析一键退订令牌。无效返回 <c>null</c>。
     /// </summary>
     UnsubscribeTokenPayload? ResolveUnsubscribeToken(string token);
+
+    /// <summary>
+    /// 管理端分页读取退订名单。
+    /// </summary>
+    /// <remarks>
+    /// 这一面存在的理由：登记完拿不出来等于没登记。合规问询问的是「这个地址何时经哪个渠道退订」
+    /// 「导出抑制名单」，客户来电说的是「我误点了请恢复」—— 没有读取面，这些一个都答不了。
+    /// 多租户由 <c>OptOut</c> 的 <c>IMultiTenant</c> 过滤器约束，租户管理员只看得到自己租户的行。
+    /// </remarks>
+    Task<Result<IPagedList<OptOutDto>>> GetPagedListAsync(OptOutQueryDto query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 管理端手工登记一条退订（服务商投诉转来、客户来电、导入的黑名单）。幂等：已存在则原样返回那一条。
+    /// </summary>
+    /// <remarks>
+    /// <c>Source</c> 记为 <c>admin:{操作者 id}</c>：事后要能回答「这条是谁加的」，
+    /// 一键链接的记录写的是 <c>one-click link</c>，两种来源在名单上要分得开。
+    /// </remarks>
+    Task<Result<OptOutDto>> RegisterAsync(CreateOptOutDto input, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 管理端按 id 撤销一条退订（客户来电说误点了）。不存在答 404。
+    /// </summary>
+    /// <remarks>
+    /// 按 id 而不是按 (地址, 渠道, 分类)：操作者是在列表里点的那一行，不该让他再把三元组抄一遍。
+    /// 收件人自己的撤销走 <see cref="OptInAsync"/>（持签名令牌）。
+    /// </remarks>
+    Task<Result> RemoveAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 /// <summary>一键退订令牌承载的内容。</summary>

@@ -89,6 +89,39 @@ public sealed record CliProviderDescriptor
     /// <summary>该 provider 是否必须内联投递 system prompt（无原生记忆文件时）。</summary>
     public bool RequiresInlineSystemPrompt { get; init; }
 
+    /// <summary>
+    /// 查询登录状态的参数，输出须为含 <c>loggedIn</c> 布尔字段的 JSON（claude：<c>auth status --json</c>）。
+    /// 空 = 无从查询，配置了兜底令牌时一律注入。
+    /// </summary>
+    public IReadOnlyList<string> AuthStatusArgs { get; init; } = [];
+
+    /// <summary>
+    /// 兜底令牌经由的环境变量名（claude：<c>CLAUDE_CODE_OAUTH_TOKEN</c>，由 <c>claude setup-token</c> 生成）。
+    /// 空 = 该 provider 不支持令牌兜底。
+    /// </summary>
+    public string? AuthTokenEnvironmentVariable { get; init; }
+
+    /// <summary>
+    /// <see cref="CliUserConfigIsolation.ExcludeUserSettings"/> 对应的启动参数
+    /// （claude：<c>--setting-sources project,local</c>）。空 = 该档对本 provider 不生效。
+    /// </summary>
+    public IReadOnlyList<string> ExcludeUserSettingsArgs { get; init; } = [];
+
+    /// <summary>
+    /// 重定向整个配置目录的环境变量名（claude：<c>CLAUDE_CONFIG_DIR</c>）。
+    /// 空 = 不支持 <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/>。
+    /// </summary>
+    public string? ConfigDirectoryEnvironmentVariable { get; init; }
+
+    /// <summary>部署级的个人配置隔离档位。</summary>
+    public CliUserConfigIsolation UserConfigIsolation { get; init; } = CliUserConfigIsolation.ExcludeUserSettings;
+
+    /// <summary>
+    /// <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/> 时的专用配置目录（绝对路径）。
+    /// 空 = <c>{WorkspacesRoot}/.cli-config/{Key}</c>。
+    /// </summary>
+    public string? ConfigDirectory { get; init; }
+
     /// <summary>本 provider 是否在当前部署启用（由 Options 合并时填充）。</summary>
     public bool Enabled { get; init; } = true;
 

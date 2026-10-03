@@ -114,6 +114,8 @@ public class StorageModule : TnziApplicationModule
         // PDF 一侧可选注入核心契约 IPdfRasterizer（实现在可选包 Tnzi.Documents，本模块不引用它）：
         // 没加载时为 null，PDF 与此前一样没有缩略图。TryAdd：要给视频截帧或换出图规则的消费方整体替换。
         services.TryAddScoped<IFileThumbnailGenerator, FileThumbnailGenerator>();
+        // PDF 渲染闸门必须是进程级单例：生成器是 Scoped，各自一个闸门就等于没有闸门。
+        services.TryAddSingleton<PdfThumbnailRenderGate>();
 
         // 注册文件预览服务
         services.AddScoped<IFilePreviewService, FilePreviewService>();

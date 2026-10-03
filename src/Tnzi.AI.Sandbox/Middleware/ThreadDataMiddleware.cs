@@ -13,17 +13,24 @@ namespace Tnzi.AI.Sandbox.Middleware;
 /// 下游读这份布局的除了 <see cref="SandboxMiddleware"/>，还有核心的 <c>FileUploadMiddleware</c>（60），
 /// 它按 <see cref="ThreadDataState.UploadsPath"/> 检查已上传的文件是否在磁盘上；只读不建目录，所以路径够用。
 /// </para>
+/// <para>
+/// <c>AI:Sandbox:Enabled=false</c> 时直通、不发布布局：关掉的沙箱没有任何工具能读到线程目录，
+/// 而宿主解析不出默认 <c>DataRoot</c> 时连路径都算不出来（验证器对关掉的沙箱放行空 DataRoot）。
+/// 所以翻译器按需解析，关掉时一次都不碰它。
+/// </para>
 /// </remarks>
 public class ThreadDataMiddleware : IAiMiddleware
 {
-    private readonly IVirtualPathTranslator _translator;
+    private readonly IOptions<SandboxModuleOptions> _options;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ThreadDataMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.ThreadData;
 
-    public ThreadDataMiddleware(IVirtualPathTranslator translator, ILogger<ThreadDataMiddleware> logger)
+    public ThreadDataMiddleware(IOptions<SandboxModuleOptions> options, IServiceProvider serviceProvider, ILogger<ThreadDataMiddleware> logger)
     {
-        _translator = Check.NotNull(translator);
+        _options = Check.NotNull(options);
+        _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
     }
 
@@ -36,7 +43,7 @@ public class ThreadDataMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         PublishThreadData(context);
         await foreach (var chunk in next(context, cancellationToken))
@@ -49,10 +56,13 @@ public class ThreadDataMiddleware : IAiMiddleware
     /// </summary>
     private void PublishThreadData(AiMiddlewareContext context)
     {
+        if (!_options.Value.Enabled) return;
+
         var threadId = context.Request.ThreadId;
         if (threadId is null) return;
 
-        var state = ThreadDataState.FromThreadDirectory(_translator.GetThreadDirectory(threadId.Value));
+        var translator = _serviceProvider.GetRequiredService<IVirtualPathTranslator>();
+        var state = ThreadDataState.FromThreadDirectory(translator.GetThreadDirectory(threadId.Value));
         context.Properties[SandboxPropertyKeys.ThreadData] = state;
         _logger.LogDebug("Thread data layout published for {ThreadId} at {ThreadDirectory}", threadId, state.ThreadDirectory);
     }

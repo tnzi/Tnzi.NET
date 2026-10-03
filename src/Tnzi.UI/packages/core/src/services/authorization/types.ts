@@ -351,3 +351,54 @@ export interface DualControlQueryDto {
 export interface DualControlDecisionDto {
   comment?: string;
 }
+
+// ─── User permission picture ─────────────────────────────────────────────────
+
+/** One role in a {@link UserPermissionPictureDto}, with the codes it contributes. */
+export interface UserPermissionPictureRoleDto {
+  id: string;
+  name: string;
+  /** Codes this role grants (within the picture's scope). */
+  granted: string[];
+}
+
+/** One catalogue entry in a {@link UserPermissionPictureDto}. */
+export interface UserPermissionPictureItemDto {
+  id: string;
+  code: string;
+  name: string;
+  moduleId: string;
+  moduleCode: string;
+  moduleName: string;
+  category: PermissionCategory;
+}
+
+/**
+ * One account's permission picture, read in a single call: the catalogue, the
+ * role baseline (per role), the user-level allow / deny overrides and the
+ * resolved effective set. Resolution matches the runtime check:
+ * `effective = (roleGranted ∪ allowed) − denied`; for a super admin `effective`
+ * is the whole (scoped) catalogue and the override rows have no effect.
+ *
+ * The question an administrator opens the permissions page with is "why, and
+ * what do I change", which a flat effective list cannot answer; this payload
+ * replaces the four round trips (modules, functions per module, role baseline,
+ * user overrides) every consumer used to stitch together on the client.
+ */
+export interface UserPermissionPictureDto {
+  userId: string;
+  isSuperAdmin: boolean;
+  /** Code prefix the picture was narrowed to; null means the whole catalogue. */
+  scope?: string | null;
+  roles: UserPermissionPictureRoleDto[];
+  /** Live catalogue entries (within scope), in module order then function order. */
+  catalogue: UserPermissionPictureItemDto[];
+  /** Codes granted through any role (the baseline). */
+  roleGranted: string[];
+  /** Codes granted to this user directly. */
+  allowed: string[];
+  /** Codes denied to this user directly, whichever role granted them. */
+  denied: string[];
+  /** Codes in effect. */
+  effective: string[];
+}

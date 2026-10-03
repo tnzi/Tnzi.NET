@@ -21,6 +21,9 @@ public class LocalSandbox : ISandbox
 
     public string Id { get; }
 
+    /// <summary>Windows 上经 <c>cmd.exe /c</c> 执行，其余平台经 <c>/bin/bash -c</c>（见 <see cref="ExecuteCommandAsync"/>）。</summary>
+    public SandboxShellDialect ShellDialect => OperatingSystem.IsWindows() ? SandboxShellDialect.Cmd : SandboxShellDialect.Posix;
+
     public LocalSandbox(string id, string workspacePath, TimeSpan commandTimeout,
         long maxOutputSize, IEnumerable<string>? deniedCommands = null,
         IEnumerable<string>? environmentBlacklist = null,
@@ -62,8 +65,17 @@ public class LocalSandbox : ISandbox
             UseShellExecute = false,
             CreateNoWindow = true
         };
-        psi.ArgumentList.Add(isWindows ? "/c" : "-c");
-        psi.ArgumentList.Add(command);
+        if (isWindows)
+        {
+            // cmd.exe 不认 ArgumentList 生成的 \" 转义：命令里任何一个双引号（包括 bash 工具给含空格的路径加的引号）
+            // 都会原样变成 \" 交给 cmd，路径就断了。/s /c "..." 让 cmd 只剥掉最外层那对引号、其余逐字执行。
+            psi.Arguments = $"/d /s /c \"{command}\"";
+        }
+        else
+        {
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add(command);
+        }
 
         foreach (var key in _environmentBlacklist)
         {

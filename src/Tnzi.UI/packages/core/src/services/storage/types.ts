@@ -365,14 +365,17 @@ export type FileStorageStatisticsDto = StorageStatisticsDto;
 export interface ThumbnailBackfillRequest {
   /** Only these files; null / omitted = every candidate. */
   fileIds?: string[] | null;
-  /** Files handled per call (rendering is serial). Default 100. */
+  /** Files handled per call (rendering is serial). 1-500, default 100. */
   maxFiles?: number;
+  /** Resume after this file id: the previous batch's `nextCursor`. Omit to start over. */
+  after?: string | null;
 }
 
 /**
- * Result of one backfill batch. Loop until `generated` is 0, NOT until
- * `remaining` is 0: a file that cannot be drawn (an encrypted PDF) stays a
- * candidate forever and is listed in `failedFileIds` every time.
+ * Result of one backfill batch. Pass `nextCursor` back as `after` and loop
+ * until it is null. Candidates are walked by file id, so a file that cannot be
+ * drawn (an encrypted PDF) is reported in `failedFileIds` once per walk and no
+ * longer holds back the files behind it.
  */
 export interface ThumbnailBackfillResult {
   scanned: number;
@@ -380,6 +383,8 @@ export interface ThumbnailBackfillResult {
   failed: number;
   remaining: number;
   failedFileIds: string[];
+  /** Where the next batch starts; null when the walk is complete. */
+  nextCursor?: string | null;
 }
 
 /**
@@ -429,6 +434,8 @@ export interface BatchIntegrityResultDto {
   corrupted: number;
   errors: number;
   problems: FileIntegrityResultDto[];
+  /** Pass back as `after` for the next batch; null when every file has been checked. */
+  nextCursor?: string | null;
 }
 
 // ============================================

@@ -25,10 +25,57 @@ public class AuditOptions
         Description = "Capture entity-level changes (added/modified/deleted entities with property old/new values) for each audited operation; sensitive fields are redacted")]
     public bool EnableEntityAudit { get; set; } = true;
 
-    /// <summary>审计数据保留天数</summary>
+    /// <summary>
+    /// 操作审计（<c>Audit_Operation</c> 及其级联的实体 / 属性条目）的保留天数。
+    /// </summary>
+    /// <remarks>
+    /// 这是日志表的容量管理，不是合规销毁（那是 <c>Audit:DataDestruction</c>，管的是业务数据且要出证明）。
+    /// 它是手动清理端点 <c>DELETE admin/audit-operations/expired</c> 的缺省参数；
+    /// 只有 <see cref="AutoPurgeEnabled"/> 打开时，<see cref="AuditRetentionBackgroundService"/> 才会按它自动删。
+    /// 配置中心里它挂在「Retention」组下，此前没有说明，操作者会自然读成「超过 N 天自动删」——
+    /// 而那件事默认并不发生，所以 Description 必须把两种语义都写出来。
+    /// </remarks>
     [RuntimeSetting(Label = "Retention Days", I18n = "admin.modules.system.settings.fields.retentionDays",
-        Type = SettingFieldType.Int, Min = 1)]
+        Type = SettingFieldType.Int, Min = 1,
+        Description = "Audit operations older than this many days are removed by the manual purge endpoint (DELETE admin/audit-operations/expired) and, when Automatic Purge is on, by the scheduled purge. Nothing is removed on its own while Automatic Purge is off")]
     public int RetentionDays { get; set; } = 90;
+
+    /// <summary>
+    /// 是否按 <see cref="RetentionDays"/> 定时自动清理过期的操作审计。默认 <c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 刻意默认关闭：升级后凭空开始删审计历史不是任何部署方签过字的事。开着的部署由
+    /// <see cref="AuditRetentionBackgroundService"/> 每 <see cref="AutoPurgeIntervalHours"/> 小时删一次，
+    /// 多实例经 <c>IDistributedLock</c> 互斥（无实现时各实例各删各的，结果幂等只是多几条日志）。
+    /// </para>
+    /// <para>
+    /// 热读：后台服务每轮都看这个值，配置中心里关掉即从下一轮起停止删除，不必重启。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Automatic Purge", I18n = "admin.modules.system.settings.fields.auditAutoPurgeEnabled",
+        Type = SettingFieldType.Boolean,
+        Description = "Remove audit operations older than Retention Days on a schedule (every Audit:AutoPurgeIntervalHours hours, default 24). Off by default so an upgrade never starts deleting audit history on its own; the manual purge endpoint works either way")]
+    public bool AutoPurgeEnabled { get; set; }
+
+    /// <summary>
+    /// 两次自动清理之间的间隔小时数。默认 <c>24</c>，取值 1 到 <see cref="MaxAutoPurgeIntervalHours"/>。
+    /// </summary>
+    /// <remarks>
+    /// 保留期以天为量级，没有必要扫得更勤；这个值只影响「到期后多久被删掉」的延迟上界。
+    /// 不是热设置（改了要重启）：它决定的是后台循环的睡眠时长，而不是删不删。
+    /// </remarks>
+    public int AutoPurgeIntervalHours { get; set; } = 24;
+
+    /// <summary>
+    /// <see cref="AutoPurgeIntervalHours"/> 的上限：30 天。
+    /// </summary>
+    /// <remarks>
+    /// 不是品味：<c>Task.Delay</c> 能等的最长时间约 49 天，越过它后台循环会在第一轮之后抛
+    /// <c>ArgumentOutOfRangeException</c>，而未处理的后台服务异常默认把整个宿主停掉 —— 一个写大了的配置项
+    /// 变成启动一分钟后的宕机。校验器在启动时就挡下它；30 天本身也远超任何合理的扫描间隔。
+    /// </remarks>
+    public const int MaxAutoPurgeIntervalHours = 24 * 30;
 
     /// <summary>批量处理大小</summary>
     public int BatchSize { get; set; } = 100;

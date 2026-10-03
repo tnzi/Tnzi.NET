@@ -7,17 +7,30 @@ public class AgentVersionRouter : IAgentVersionRouter
 {
     private readonly IRepository<AgentVersion, Guid> _versionRepository;
     private readonly ICurrentUser? _currentUser;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
     private readonly ILogger<AgentVersionRouter> _logger;
 
     public AgentVersionRouter(
         IRepository<AgentVersion, Guid> versionRepository,
         ILogger<AgentVersionRouter> logger,
-        ICurrentUser? currentUser = null)
+        ICurrentUser? currentUser = null,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         _versionRepository = Check.NotNull(versionRepository);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
     }
+
+    /// <summary>
+    /// 版本快照的可见集合：租户调用者解析宿主级共享 Agent（YAML 定义）时，要看得见宿主为它建的版本，
+    /// 否则 A/B 与钉版本在租户里一律静默退回当前配置。
+    /// </summary>
+    private IQueryable<AgentVersion> VisibleVersions
+        => SharedAgentScope.Resolve(_multiTenancyOptions, _currentTenant, _currentUser).ApplyToAgentChildren(_versionRepository);
 
     /// <inheritdoc />
     public async Task<AgentVersionRouteResult> RouteAsync(Agent agent, CancellationToken ct)
@@ -51,7 +64,7 @@ public class AgentVersionRouter : IAgentVersionRouter
         var selectedVariant = useVariantB ? "B" : "A";
 
         // 加载选中版本的配置快照
-        var versionEntity = await _versionRepository
+        var versionEntity = await VisibleVersions
             .Where(v => v.AgentId == agent.Id && v.Version == selectedVersion)
             .FirstOrDefaultAsync(ct);
 
@@ -98,7 +111,7 @@ public class AgentVersionRouter : IAgentVersionRouter
     {
         Check.NotNull(agent);
 
-        var versionEntity = await _versionRepository
+        var versionEntity = await VisibleVersions
             .Where(v => v.AgentId == agent.Id && v.Version == version)
             .FirstOrDefaultAsync(ct);
 

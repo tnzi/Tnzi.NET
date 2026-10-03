@@ -15,6 +15,7 @@ public class PushSender : IPushSender
     private static readonly object _firebaseInitLock = new object();
 
     private readonly IPushDeviceService? _deviceService;
+    private readonly bool _senderIdMismatchIsConclusive;
 
     /// <summary>
     /// 初始化一个 <see cref="PushSender"/>。
@@ -31,13 +32,23 @@ public class PushSender : IPushSender
     /// 默认发送器用 SDK 的默认实例（宿主已自行引导过的也认），具名发送器各用一个以键命名的实例 ——
     /// 两个 Firebase 项目不能共用一个 <c>FirebaseApp</c>，谁先引导谁的凭据就是全部人的凭据。
     /// </param>
-    public PushSender(PushSenderOptions options, ILogger<PushSender> logger, IPushDeviceService? deviceService = null, string? providerKey = null)
+    /// <param name="senderIdMismatchIsConclusive">
+    /// FCM 回 <c>SenderIdMismatch</c> 时能否据此退役令牌。★ 只有部署里<b>只有一个</b> Firebase 项目时才成立：
+    /// 注册表不记令牌属于哪个项目，多项目部署下用项目 B 的发送器发给用户的全部令牌，项目 A 的令牌
+    /// 必然回 <c>SenderIdMismatch</c> —— 那只说明「这个发送器发不到它」，不说明「谁都发不到它」，
+    /// 按它退役会让项目 A 的推送永久到不了那台设备而零症状。模块按已配置的不同项目数决定这个值。
+    /// </param>
+    public PushSender(PushSenderOptions options, ILogger<PushSender> logger, IPushDeviceService? deviceService = null, string? providerKey = null, bool senderIdMismatchIsConclusive = true)
     {
         _options = Check.NotNull(options);
         _logger = Check.NotNull(logger);
         _deviceService = deviceService;
         _providerKey = NotificationProviderKeys.Normalize(providerKey);
+        _senderIdMismatchIsConclusive = senderIdMismatchIsConclusive;
     }
+
+    /// <summary>FCM 回 <c>SenderIdMismatch</c> 时是否退役令牌（见构造参数说明）。</summary>
+    internal bool SenderIdMismatchIsConclusive => _senderIdMismatchIsConclusive;
 
     public async Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
     {
@@ -124,7 +135,7 @@ public class PushSender : IPushSender
                 return SendResult.CreateFailure("FCM returned empty message ID");
             }
         }
-        catch (FirebaseMessagingException ex) when (IsTokenPermanentlyDead(ex))
+        catch (FirebaseMessagingException ex) when (IsTokenPermanentlyDead(ex.MessagingErrorCode, _senderIdMismatchIsConclusive))
         {
             // ★ 这是这张表唯一能得知令牌已死的时机。FCM 不会主动通知，卸载了 App 的
             // 客户端也不会回来注销 —— 不在这里退役，注册表就只增不减，而 admin 的
@@ -152,15 +163,18 @@ public class PushSender : IPushSender
     /// <list type="bullet">
     /// <item><c>Unregistered</c> —— 应用已卸载，或令牌已被轮换掉。</item>
     /// <item><c>SenderIdMismatch</c> —— 令牌属于另一个 Firebase 项目，用本部署的凭据
-    ///   永远发不到它。</item>
+    ///   永远发不到它。★ <b>仅当部署只有一个 Firebase 项目时</b>
+    ///   （<paramref name="senderIdMismatchIsConclusive"/>）：多项目部署下它只说明令牌属于另一个
+    ///   已配置的项目，而那个项目的推送还要靠这一行。</item>
     /// </list>
     /// <c>InvalidArgument</c> 看着也像「令牌不对」，但 FCM 同样用它表示<b>消息本身</b>
     /// 不合法（字段越界、载荷过大之类）。按它退役等于:一次消息构造错误会把
     /// <b>这一批全部收件人的设备</b>从注册表里删光，而日志上只是一串投递失败。
     /// 少删是可恢复的（下次投递还会再判一次），多删不是。
     /// </remarks>
-    internal static bool IsTokenPermanentlyDead(FirebaseMessagingException ex)
-        => ex.MessagingErrorCode is MessagingErrorCode.Unregistered or MessagingErrorCode.SenderIdMismatch;
+    internal static bool IsTokenPermanentlyDead(MessagingErrorCode? errorCode, bool senderIdMismatchIsConclusive)
+        => errorCode == MessagingErrorCode.Unregistered
+           || (senderIdMismatchIsConclusive && errorCode == MessagingErrorCode.SenderIdMismatch);
 
     /// <summary>
     /// 退役一个已死的令牌。<b>失败不改变这次投递的结论</b>。

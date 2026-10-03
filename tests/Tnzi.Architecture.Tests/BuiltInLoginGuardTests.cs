@@ -81,6 +81,59 @@ public class BuiltInLoginGuardTests
             + "Verification-code login is the shortest one: receiving a single email is enough.");
     }
 
+    /// <summary>
+    /// 登录 IP 允许列表的执行端同样必须是注册进容器的内置守卫。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这一条的失效形态比前两条更隐蔽：策略服务照常保存列表、管理端照常显示「已启用」、
+    /// <c>IpAllowListLoginGuardTests</c> 照常全绿 —— 而每一个地址都能签发令牌。
+    /// 一个自报正常、实际什么都不拦的控制。消费方此前在自己仓里守着这一行
+    /// （注释掉那行注册的变异测试）；守卫进了框架之后他们守不到了 ——
+    /// 消费方的测试改不了框架源码。框架不守，就没人守。
+    /// </remarks>
+    [Fact]
+    public void IdentityModule_RegistersTheIpAllowListGuard()
+    {
+        var graph = ArchitectureModuleGraph.Load();
+        AssertFixtureIsSound(graph);
+
+        Assert.True(
+            graph.ServiceMap.TryGetValue(typeof(IdentityModule), out var identityServices),
+            "IdentityModule registered no services at all - the fixture, not the guard, is what broke.");
+
+        var registered = identityServices!.Any(d =>
+            d.ServiceType == typeof(ILoginGuard)
+            && d.ImplementationType == typeof(IpAllowListLoginGuard));
+
+        Assert.True(registered,
+            "IdentityModule no longer registers IpAllowListLoginGuard. Without it sign-in IP allow-lists are "
+            + "still saved and still reported as enabled by the admin endpoints, while every address signs in - "
+            + "a control that reports itself as working and enforces nothing.");
+    }
+
+    /// <summary>
+    /// 求值器本身也要在容器里：它是全部签发路径的唯一共同调用点，
+    /// 缺席时 <c>AuthService</c> 的可选参数为 null、守卫链直接放行，上面三条守卫一条都不会被问到。
+    /// </summary>
+    [Fact]
+    public void IdentityModule_RegistersTheGuardEvaluator()
+    {
+        var graph = ArchitectureModuleGraph.Load();
+        AssertFixtureIsSound(graph);
+
+        Assert.True(
+            graph.ServiceMap.TryGetValue(typeof(IdentityModule), out var identityServices),
+            "IdentityModule registered no services at all - the fixture, not the evaluator, is what broke.");
+
+        var registered = identityServices!.Any(d =>
+            d.ServiceType == typeof(ILoginGuardEvaluator)
+            && d.ImplementationType == typeof(LoginGuardEvaluator));
+
+        Assert.True(registered,
+            "IdentityModule no longer registers ILoginGuardEvaluator; every token-issuing path treats the guard "
+            + "chain as empty and none of the built-in guards is ever consulted.");
+    }
+
     // 「排在消费方守卫之前」那条断言在 Tnzi.Identity.Tests 里（那边能方便地构造 UserManager），
     // 这里只管注册这一件事 —— 本项目的价值是真实全模块图，不是重复单模块能做的事。
 

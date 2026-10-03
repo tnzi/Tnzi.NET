@@ -9,11 +9,16 @@ public partial class PaymentService
     {
         Check.NotNull(request);
 
+        // ★ 建单之前的每一种拒绝都带 ErrorCode = PaymentOffSessionNotAttempted：此时没有支付记录，
+        // 不会有任何支付事件回流，依赖事件推进状态机的调用方（订阅续费）必须自己收口这次失败；
+        // 建单之后的失败则由 ApplyFailedAsync 发出 PaymentFailedEvent，调用方再收口一次就是重复计数。
+        const string notAttempted = ErrorCodes.PaymentOffSessionNotAttempted;
+
         if (request.Amount <= 0)
-            return Fail<PaymentDto>(ErrorCodes.PaymentInvalidAmount, 400);
+            return Fail<PaymentDto>(ErrorCodes.PaymentInvalidAmount, 400, notAttempted);
 
         if (string.IsNullOrWhiteSpace(request.PaymentMethodToken))
-            return Fail<PaymentDto>(ErrorCodes.SubscriptionPaymentMethodMissing, 400);
+            return Fail<PaymentDto>(ErrorCodes.SubscriptionPaymentMethodMissing, 400, notAttempted);
 
         var channelCode = string.IsNullOrWhiteSpace(request.ChannelCode)
             ? PaymentOptions.DefaultChannelCode
@@ -21,10 +26,10 @@ public partial class PaymentService
 
         var provider = _paymentProviderFactory.GetProvider(channelCode);
         if (provider == null)
-            return Fail<PaymentDto>(ErrorCodes.PaymentChannelNotSupported, 400);
+            return Fail<PaymentDto>(ErrorCodes.PaymentChannelNotSupported, 400, notAttempted);
 
         if (!provider.SupportsOffSessionCharge)
-            return Fail<PaymentDto>(ErrorCodes.PaymentOffSessionNotSupported, 400);
+            return Fail<PaymentDto>(ErrorCodes.PaymentOffSessionNotSupported, 400, notAttempted);
 
         var currency = ResolveCurrency(request.Currency, channelCode);
 
@@ -37,7 +42,7 @@ public partial class PaymentService
         }, cancellationToken);
 
         if (!tax.Succeeded || tax.Data == null)
-            return Fail<PaymentDto>(tax.Message ?? ErrorCodes.PaymentCreationFailed, tax.Code ?? 400);
+            return Fail<PaymentDto>(tax.Message ?? ErrorCodes.PaymentCreationFailed, tax.Code ?? 400, notAttempted);
 
         var payableAmount = tax.Data.PayableAmount;
 

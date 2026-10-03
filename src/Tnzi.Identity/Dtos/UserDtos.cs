@@ -55,8 +55,11 @@ public class UserDto : UserListItemDto
 /// </summary>
 public class CreateUserDto
 {
-    [Required]
-    public string UserName { get; set; } = null!;
+    /// <summary>
+    /// 登录用户名。<c>Identity:SignIn:UseEmailAsUserName</c> 开启（默认）且给了邮箱时<b>省略</b>，
+    /// 用户名就是邮箱；给一个不同的值会被拒绝。关闭该开关或只有手机号时必填。
+    /// </summary>
+    public string? UserName { get; set; }
 
     /// <summary>
     /// 初始密码。<b>可以为空</b>，此时创建出的账号没有密码。

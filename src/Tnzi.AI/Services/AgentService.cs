@@ -20,19 +20,55 @@ public class AgentService : ApplicationService, IAgentService
     /// </summary>
     private readonly IAgentDispatchFacade _runtime;
     private readonly IAgentGrantService _grantService;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
 
     public AgentService(
         IRepository<Agent, Guid> repository,
         IRepository<AgentVersion, Guid> versionRepository,
         IAgentDispatchFacade runtime,
         IAgentGrantService grantService,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _versionRepository = Check.NotNull(versionRepository);
         _runtime = Check.NotNull(runtime);
         _grantService = Check.NotNull(grantService);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
+    }
+
+    private const string SharedDefinitionReadOnlyMessage =
+        "This agent is a shared definition managed by the host (synced from YAML). Tenants can use or clone it but not modify or delete it.";
+
+    /// <summary>调用者对宿主级共享 Agent 定义的可见性（每次现算：租户上下文可在请求内被切换）。</summary>
+    private SharedAgentScope SharedScope => SharedAgentScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser);
+
+    /// <summary>读取路径：本租户的 Agent，外加（租户调用者）宿主级共享定义。</summary>
+    private async Task<Agent?> FindVisibleAsync(Guid id)
+    {
+        var scope = SharedScope;
+        return scope.IsTenantCaller
+            ? await scope.Apply(_repository.AsQueryable()).FirstOrDefaultAsync(a => a.Id == id)
+            : await _repository.GetAsync(id);
+    }
+
+    /// <summary>
+    /// 写入路径找不到行时的失败：租户对着共享定义写 → 403（它在列表里看得见，报 404 会让人以为数据丢了）；
+    /// 其余 → 404。写入本身只作用于全局过滤器放行的行，共享定义永远走不到写入。
+    /// </summary>
+    private async Task<(int Status, string Message, string Code)> WriteMissFailureAsync(Guid id)
+    {
+        var scope = SharedScope;
+        if (scope.IsTenantCaller && await scope.Apply(_repository.AsQueryable()).AnyAsync(a => a.Id == id))
+        {
+            return (403, SharedDefinitionReadOnlyMessage, ErrorCodes.AgentSharedDefinitionReadOnly);
+        }
+
+        return (404, "Agent not found", ErrorCodes.AgentNotFound);
     }
 
     public async Task<Result<AgentDto>> CreateAsync(CreateAgentDto input)
@@ -64,7 +100,11 @@ public class AgentService : ApplicationService, IAgentService
     {
         Check.NotNull(input);
         var entity = await _repository.GetAsync(id);
-        if (entity == null) return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+        if (entity == null)
+        {
+            var (status, message, code) = await WriteMissFailureAsync(id);
+            return Fail<AgentDto>(message, status, code);
+        }
 
         // Create version snapshot before applying changes
         await CreateVersionSnapshotAsync(entity, input.ChangeNote);
@@ -111,21 +151,26 @@ public class AgentService : ApplicationService, IAgentService
     public async Task<Result> DeleteAsync(Guid id)
     {
         var entity = await _repository.GetAsync(id);
-        if (entity == null) return Fail("Agent not found", 404, ErrorCodes.AgentNotFound);
+        if (entity == null)
+        {
+            var (status, message, code) = await WriteMissFailureAsync(id);
+            return Fail(message, status, code);
+        }
         await _repository.DeleteAsync(entity);
         return Ok();
     }
 
     public async Task<Result<AgentDto>> GetByIdAsync(Guid id)
     {
-        var entity = await _repository.GetAsync(id);
+        var entity = await FindVisibleAsync(id);
         if (entity == null) return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
         return Ok(await MapToDtoAsync(entity));
     }
 
     public async Task<Result<AgentDto>> CloneAsync(Guid id, string? newName = null)
     {
-        var source = await _repository.GetAsync(id);
+        // 克隆是对源的读取：租户可以把共享定义克隆成自己的 Agent 再改（克隆体是本租户的普通 Agent）。
+        var source = await FindVisibleAsync(id);
         if (source == null) return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
 
         var clone = new Agent
@@ -203,7 +248,10 @@ public class AgentService : ApplicationService, IAgentService
     {
         var agent = await _repository.GetAsync(agentId);
         if (agent == null)
-            return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+        {
+            var (status, message, code) = await WriteMissFailureAsync(agentId);
+            return Fail<AgentDto>(message, status, code);
+        }
 
         var versionEntity = await _versionRepository
             .Where(v => v.AgentId == agentId && v.Version == version)
@@ -261,7 +309,8 @@ public class AgentService : ApplicationService, IAgentService
 
     public async Task<Result<IPagedList<AgentDto>>> GetListAsync(AgentListQueryDto query)
     {
-        var queryable = _repository
+        // 租户调用者额外看得见宿主级共享定义（YAML Agent）；单租户 / 宿主原样。
+        var queryable = SharedScope.Apply(_repository.AsQueryable())
             .WhereIf(a => a.Name.ToLower().Contains(query.Keyword!.ToLower()) || (a.Description != null && a.Description.ToLower().Contains(query.Keyword!.ToLower())),
                 !string.IsNullOrWhiteSpace(query.Keyword))
             .WhereIf(a => a.Provider == query.Provider, !string.IsNullOrWhiteSpace(query.Provider))
@@ -479,7 +528,10 @@ public class AgentService : ApplicationService, IAgentService
 
         var agent = await _repository.GetAsync(agentId);
         if (agent == null)
-            return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+        {
+            var (status, message, code) = await WriteMissFailureAsync(agentId);
+            return Fail<AgentDto>(message, status, code);
+        }
 
         if (input.VersionA == input.VersionB)
             return Fail<AgentDto>("Version A and B must be different", 400, ErrorCodes.InvalidContent);
@@ -515,7 +567,10 @@ public class AgentService : ApplicationService, IAgentService
     {
         var agent = await _repository.GetAsync(agentId);
         if (agent == null)
-            return Fail<AgentDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
+        {
+            var (status, message, code) = await WriteMissFailureAsync(agentId);
+            return Fail<AgentDto>(message, status, code);
+        }
 
         // 移除 A/B 测试配置
         agent.Configuration = AgentVersionRouter.MergeAbTestConfig(agent.Configuration, null);

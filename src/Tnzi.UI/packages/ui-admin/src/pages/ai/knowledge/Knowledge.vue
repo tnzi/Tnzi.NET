@@ -48,11 +48,20 @@
             <NButton v-if="crud.canUpdate" size="small" ghost @click="crud.openEdit(item)">
               {{ t('actions.edit') }}
             </NButton>
-            <NPopconfirm v-if="crud.canDelete" @positive-click="removeOne(item)">
+            <NPopconfirm
+              v-if="crud.canDelete"
+              @update:show="(show) => onDeleteConfirmShow(item, show)"
+              @positive-click="removeOne(item)"
+            >
               <template #trigger>
                 <NButton size="small" type="error" ghost>{{ t('actions.delete') }}</NButton>
               </template>
               {{ t('deleteConfirm') }}
+              <AgentGrantUsage
+                variant="confirm"
+                :state="deleteUsage.state.value"
+                @retry="deleteUsage.load('knowledge', item.id)"
+              />
             </NPopconfirm>
           </template>
         </TEntityCard>
@@ -161,6 +170,11 @@
               {{ t('search.noResults') }}
             </div>
           </NTabPane>
+
+          <!-- (C) Agents that hold an active grant for this knowledge base ---- -->
+          <NTabPane name="agents" :tab="tUsage('title')">
+            <AgentGrantUsage :state="viewUsage.state.value" @retry="loadViewUsage" />
+          </NTabPane>
         </NTabs>
       </template>
     </TDetailHost>
@@ -192,9 +206,12 @@ import { useDetail } from '../../../headless/useDetail'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import type { RowAction } from '../../../headless/row-actions'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
+import { createAgentGrantBridge } from '../../../services/bridges/agent-grant-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { makePageTranslator } from '../../_shared/translate'
+import AgentGrantUsage from '../_shared/AgentGrantUsage.vue'
+import { useAgentGrantUsage } from '../_shared/useAgentGrantUsage'
 import {
   knowledgeCreateFormSchema,
   knowledgeEditFormSchema,
@@ -237,6 +254,24 @@ async function removeOne(item: KnowledgeBaseDto): Promise<void> {
   await crud.handleDelete([item.id])
 }
 
+// --- agents that depend on a knowledge base ----------------------------------
+// Shown in the manage drawer (Agents tab) and inside the delete confirmation.
+// Separate states: the drawer and a card's confirm can both be on screen.
+const tUsage = makePageTranslator('ai.grantUsage')
+const grantBridge = createAgentGrantBridge({ client: useAdminClient() })
+const viewUsage = useAgentGrantUsage(grantBridge)
+const deleteUsage = useAgentGrantUsage(grantBridge)
+
+function onDeleteConfirmShow(item: KnowledgeBaseDto, show: boolean): void {
+  if (show) void deleteUsage.load('knowledge', item.id)
+  else deleteUsage.reset()
+}
+
+function loadViewUsage(): void {
+  const kb = manageDetail.data.value
+  if (kb) void viewUsage.load('knowledge', kb.id)
+}
+
 // --- reindex ---------------------------------------------------------------
 const reindexBusyId = ref<string | null>(null)
 
@@ -268,7 +303,7 @@ const manageDetail = useDetail<KnowledgeBaseDto>({
 })
 const managed = computed(() => manageDetail.data.value)
 const manageVisible = manageDetail.visible
-const manageTab = ref<'documents' | 'search'>('documents')
+const manageTab = ref<'documents' | 'search' | 'agents'>('documents')
 
 const documents = ref<KnowledgeDocumentDto[]>([])
 const documentsLoading = ref(false)
@@ -285,7 +320,14 @@ watch(() => manageDetail.data.value, async (kb) => {
   uploadStatus.value = null
   searchResults.value = []
   searchedOnce.value = false
+  viewUsage.reset()
   await loadDocuments()
+})
+
+// The Agents tab loads on open (and reloads on every re-open) rather than with
+// the drawer: most visits are about documents.
+watch(manageTab, (tab) => {
+  if (tab === 'agents') loadViewUsage()
 })
 
 async function loadDocuments(): Promise<void> {

@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using System.Reflection;
-using Tnzi.AspNetCore.Extensions;
 using Tnzi.AspNetCore.Models;
 using Tnzi.Identity.Mvc;
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;

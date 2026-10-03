@@ -76,10 +76,13 @@ public class OpenAIChatClientProvider : IChatClientProvider
                 clientOptions.Endpoint = endpoint;
             }
 
-            var httpClient = _httpClientFactory.CreateClient(ResilientHttpClientNames.For(options.Name));
+            var httpClient = _httpClientFactory.CreateClient(options.HttpClientName ?? ResilientHttpClientNames.For(options.Name));
             if (options.TimeoutSeconds.HasValue)
             {
-                httpClient.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);
+                var timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);
+                httpClient.Timeout = timeout;
+                // SDK 管线自带每次尝试 100 秒的网络超时，不跟着改的话 TimeoutSeconds 超过 100 会被它静默截断。
+                clientOptions.NetworkTimeout = timeout;
             }
             clientOptions.Transport = new HttpClientPipelineTransport(httpClient);
 

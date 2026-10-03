@@ -81,6 +81,7 @@ export default {
     captchaRequired: 'Please complete the captcha',
     captchaInvalid: 'Captcha verification failed, please try again',
     captchaUnsupported: 'This captcha provider ({provider}) has no built-in widget',
+    captchaNotConfigured: 'The {provider} captcha is required but its configuration was not loaded',
     orLoginWith: 'Or login with',
     orRegisterWith: 'Or register with',
     agreeTerms: 'I agree to the Terms of Service and Privacy Policy',

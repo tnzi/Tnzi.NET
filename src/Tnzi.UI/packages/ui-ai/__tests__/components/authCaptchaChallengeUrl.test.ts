@@ -9,7 +9,7 @@
  * demanded. `TAuthRoute` must therefore hand `runtime.http.resolveUrl` to `TAuthPage`,
  * and `TAuthPage` must pass it to `useCaptchaWidget` as the `client`.
  *
- * SFCs have no mount coverage in this package (no Vue plugin in vitest), so the
+ * Most SFCs have no mount coverage in this package (only `TAuthPage.mount.test.ts` mounts one), so the
  * contract is checked on the source, as `authSessionEndNotice.test.ts` does.
  */
 import { describe, it, expect } from 'vitest';

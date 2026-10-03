@@ -348,7 +348,7 @@ vi.mock('../../src/services/bridges/chat-bridge', () => ({
   }),
 }))
 vi.mock('../../src/services/bridges/notification-bridge', () => ({
-  createNotificationBridge: () => ({ messages: mkCrud(), templates: mkCrud(), subscriptions: mkCrud() }),
+  createNotificationBridge: () => ({ messages: mkCrud(), templates: mkCrud(), subscriptions: mkCrud(), optOuts: mkCrud() }),
 }))
 vi.mock('../../src/services/bridges/template-bridge', () => ({
   createTemplateBridge: () => ({ templates: mkCrud(), layouts: mkCrud() }),
@@ -463,6 +463,7 @@ import PayrollEmployees from '../../src/pages/payroll/Employees.vue'
 import NotificationTemplates from '../../src/pages/notification/Templates.vue'
 import NotificationMessages from '../../src/pages/notification/Messages.vue'
 import NotificationSubscriptions from '../../src/pages/notification/Subscriptions.vue'
+import NotificationOptOuts from '../../src/pages/notification/OptOuts.vue'
 import Layouts from '../../src/pages/template/Layouts.vue'
 import Templates from '../../src/pages/template/Templates.vue'
 import Users from '../../src/pages/identity/Users.vue'
@@ -597,7 +598,7 @@ const PAGES: Array<[string, any]> = [
   ['FinanceChecks', FinanceChecks], ['FinanceEftBatches', FinanceEftBatches], ['FinanceReceipts', FinanceReceipts],
   ['PayrollEmployees', PayrollEmployees],
   ['NotificationTemplates', NotificationTemplates], ['NotificationMessages', NotificationMessages],
-  ['NotificationSubscriptions', NotificationSubscriptions],
+  ['NotificationSubscriptions', NotificationSubscriptions], ['NotificationOptOuts', NotificationOptOuts],
   ['Layouts', Layouts], ['Templates', Templates],
   // Signing
   ['SigningRequests', SigningRequests], ['SigningTemplates', SigningTemplates],

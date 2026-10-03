@@ -27,6 +27,7 @@ public interface IAuditStore
     /// 删除过期审计数据
     /// </summary>
     /// <param name="days">保留天数</param>
+    /// <param name="cancellationToken">取消令牌；实现应在批与批之间响应它，已删掉的批次不回滚。</param>
     /// <returns>删除的记录数</returns>
-    Task<int> DeleteExpiredAsync(int days);
+    Task<int> DeleteExpiredAsync(int days, CancellationToken cancellationToken = default);
 }

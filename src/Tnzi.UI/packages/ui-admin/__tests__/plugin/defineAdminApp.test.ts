@@ -399,6 +399,22 @@ describe('defineAdminApp', () => {
     expect(useAdminAuthStore().isSuperUser).toBe(false)
   })
 
+  it('loadPermissions drops tabs opened by a different user (user switch without sign-out)', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    useAdminRouteStore().setAuthRoutes([
+      { name: 'identity.users', path: '/admin/identity/users', meta: { title: 'Users', permission: 'user.view' } },
+    ])
+    const tabStore = useAdminTabStore()
+    await loadPermissions({ id: 'user-a', roles: ['Admin'], permissions: ['user.view'] })
+    tabStore.addTab({ name: 'identity.users', path: '/admin/identity/users', fullPath: '/admin/identity/users', query: {}, params: {}, meta: { title: 'Users' } })
+
+    // Account B signs in (e.g. by accepting an invitation) - even a tab B is
+    // allowed to open came from A's session and must not be shown.
+    await loadPermissions({ id: 'user-b', roles: ['Admin'], permissions: ['user.view'] })
+    expect(tabStore.tabs).toEqual([])
+    expect(tabStore.ownerId).toBe('user-b')
+  })
+
   it('loadPermissions leaves the store untouched when it resolves neither identity nor permissions', async () => {
     // dummyClient answers every request with data:null - the exact shape of
     // an expired-token background refresh (profile 401, access-profile 401).
@@ -945,6 +961,58 @@ describe('defineAdminApp', () => {
       expect(router.replace).not.toHaveBeenCalled()
     })
 
+    /**
+     * ★ The passkey leg establishes the session exactly like a code, but the
+     * wrapper only knew the code leg: after a successful key ceremony nothing
+     * loaded permissions or left the login page, so the shell stayed on the
+     * two-factor module with no challenge - which renders as "enter the code
+     * from your authenticator app" for an account that has no authenticator.
+     */
+    it('verifyTwoFactorWithPasskey runs the post-login flow once the key has signed the user in', async () => {
+      const runtime = makeRuntime()
+      const verifyTwoFactorWithPasskey = vi.fn(async () => {
+        await runtime.auth.applyTokenSession({ accessToken: 'at', refreshToken: 'rt' } as never)
+        return true
+      })
+      const { cfg, router } = installWithRuntime(runtime, { callbacks: { verifyTwoFactorWithPasskey } })
+
+      const done = await cfg.callbacks!.verifyTwoFactorWithPasskey!({ challengeId: 'tt' })
+
+      // The wrapper hands the ceremony's own answer back to the challenge view.
+      expect(done).toBe(true)
+      expect(router.replace).toHaveBeenCalledWith({ name: 'dashboard' })
+    })
+
+    it('verifyTwoFactorWithPasskey does not redirect when the user closed the system dialog', async () => {
+      const runtime = makeRuntime()
+      const verifyTwoFactorWithPasskey = vi.fn(async () => false)
+      const { cfg, router } = installWithRuntime(runtime, { callbacks: { verifyTwoFactorWithPasskey } })
+
+      const done = await cfg.callbacks!.verifyTwoFactorWithPasskey!({ challengeId: 'tt' })
+
+      expect(done).toBe(false)
+      expect(router.replace).not.toHaveBeenCalled()
+    })
+
+    /** Same family: discharging the last pending action issues the session. */
+    it('a pending-action completion that issues the session runs the post-login flow; one with more owed does not', async () => {
+      const runtime = makeRuntime()
+      const completePasswordChange = vi.fn(async () => {
+        await runtime.auth.applyTokenSession({ accessToken: 'at', refreshToken: 'rt' } as never)
+        return { completed: true, remainingActions: [] }
+      })
+      const completeTotpEnrollment = vi.fn(async () => ({ completed: false, remainingActions: ['ConfirmEmail'] }))
+      const { cfg, router } = installWithRuntime(runtime, { callbacks: { completePasswordChange, completeTotpEnrollment } })
+
+      const partial = await cfg.callbacks!.completeTotpEnrollment!({ tempToken: 'pt', code: '123456' })
+      expect(partial.remainingActions).toEqual(['ConfirmEmail'])
+      expect(router.replace).not.toHaveBeenCalled()
+
+      const outcome = await cfg.callbacks!.completePasswordChange!({ tempToken: 'pt', newPassword: 'N3w!pass' })
+      expect(outcome.completed).toBe(true)
+      expect(router.replace).toHaveBeenCalledWith({ name: 'dashboard' })
+    })
+
     it('verifyTwoFactor honours a switched method (email) over the challenge default', async () => {
       const runtime = makeRuntime()
       runtime.authApi.loginWithRefreshToken = vi.fn(async () => ({
@@ -1082,6 +1150,96 @@ describe('defineAdminApp', () => {
 
     it('throws when neither client nor runtime is supplied', () => {
       expect(() => defineAdminApp({} as never)).toThrow(/requires either .client. .* or .runtime./)
+    })
+  })
+
+  /**
+   * A consumer without the runtime manages its own session, so the wrapper
+   * cannot ask for an access token: only the callback's own report says
+   * whether it signed the user in. Redirecting on a challenge sends an account
+   * with no session to the dashboard, where the auth guard bounces it.
+   */
+  describe('post-login flow without the runtime', () => {
+    function installWithCallbacks(callbacks: NonNullable<AdminLoginConfig['callbacks']>) {
+      const app = createApp({ render: () => h('div') })
+      const pinia = createPinia()
+      app.use(pinia)
+      setActivePinia(pinia)
+      const router = {
+        beforeEach: vi.fn(),
+        afterEach: vi.fn(),
+        onError: vi.fn(),
+        replace: vi.fn(),
+        currentRoute: { value: { name: 'login', path: '/admin/login', fullPath: '/admin/login', query: {} } },
+      } as unknown as Router
+      defineAdminApp({ client: dummyClient, login: { callbacks } }).install(app, pinia, router)
+      const cfg = app._context.provides[ADMIN_LOGIN_CONFIG_KEY as unknown as string | symbol] as AdminLoginConfig
+      return { cfg: cfg.callbacks!, router }
+    }
+
+    function helpers() {
+      return {
+        setTwoFactorRequired: vi.fn(),
+        clearTwoFactor: vi.fn(),
+        setPendingActionRequired: vi.fn(),
+        clearPendingAction: vi.fn(),
+        setCaptchaRequired: vi.fn(),
+        clearCaptcha: vi.fn(),
+      }
+    }
+
+    it('redirects after a password login that returned without a challenge', async () => {
+      const { cfg, router } = installWithCallbacks({ pwdLogin: vi.fn(async () => undefined) })
+      await cfg.pwdLogin!({ userName: 'a', password: 'p' }, helpers())
+      expect(router.replace).toHaveBeenCalledWith({ name: 'dashboard' })
+    })
+
+    it('stays put when the password login raised a second-factor challenge', async () => {
+      const h = helpers()
+      const { cfg, router } = installWithCallbacks({
+        pwdLogin: vi.fn(async (_p, hp) => {
+          hp.setTwoFactorRequired({ challengeId: 't', method: 'totp' })
+        }),
+      })
+      await cfg.pwdLogin!({ userName: 'a', password: 'p' }, h)
+      // The challenge still reaches the shell through the observing copy.
+      expect(h.setTwoFactorRequired).toHaveBeenCalledWith({ challengeId: 't', method: 'totp' })
+      expect(router.replace).not.toHaveBeenCalled()
+    })
+
+    it('stays put on a captcha demand and on a pending action', async () => {
+      const { cfg, router } = installWithCallbacks({
+        pwdLogin: vi.fn(async (_p, hp) => {
+          hp.setCaptchaRequired({ provider: 'image', captchaId: 'c', imageBase64: 'I' })
+        }),
+        codeLogin: vi.fn(async (_p, hp) => {
+          hp.setPendingActionRequired({ tempToken: 't', requiredActions: ['ChangePassword'] })
+        }),
+      })
+      await cfg.pwdLogin!({ userName: 'a', password: 'p' }, helpers())
+      await cfg.codeLogin!({ account: 'a', code: '1', type: 'email' } as never, helpers())
+      expect(router.replace).not.toHaveBeenCalled()
+    })
+
+    it('stays put for a dismissed passkey dialog and a pending action with more owed', async () => {
+      const { cfg, router } = installWithCallbacks({
+        verifyTwoFactorWithPasskey: vi.fn(async () => false),
+        completeTotpEnrollment: vi.fn(async () => ({ completed: false, remainingActions: ['ConfirmEmail'] })),
+      })
+      expect(await cfg.verifyTwoFactorWithPasskey!({ challengeId: 't' }, helpers())).toBe(false)
+      await cfg.completeTotpEnrollment!({ tempToken: 't', code: '123456' }, helpers())
+      expect(router.replace).not.toHaveBeenCalled()
+    })
+
+    it('stays put when a passkey completion answered with a pending action instead of a session', async () => {
+      const { cfg, router } = installWithCallbacks({
+        verifyTwoFactorWithPasskey: vi.fn(async (_p, hp) => {
+          hp!.setPendingActionRequired({ tempToken: 't', requiredActions: ['ChangePassword'] })
+          return true
+        }),
+      })
+      await cfg.verifyTwoFactorWithPasskey!({ challengeId: 't' }, helpers())
+      expect(router.replace).not.toHaveBeenCalled()
     })
   })
 

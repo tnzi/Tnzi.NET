@@ -679,9 +679,31 @@ public class DataAuthService : ApplicationService, IDataAuthService
                 400, ErrorCodes.VALIDATION_ERROR);
         }
 
+        // 操作可改：改成的那一档若已有一条规则，就是同一 (实体, 角色, 操作) 的第二条 —— 与创建同一条 409。
+        if (request.Operation != entityRole.Operation)
+        {
+            var taken = await _entityRoleRepository
+                .Where(er => er.Id != id
+                    && er.EntityInfoId == entityRole.EntityInfoId
+                    && er.RoleId == entityRole.RoleId
+                    && er.Operation == request.Operation)
+                .AnyAsync();
+            if (taken)
+                return Fail<EntityRole>(DuplicateEntityRoleMessage, 409, ErrorCodes.VALIDATION_ERROR);
+        }
+
         request.MapTo(entityRole);
 
-        await _entityRoleRepository.UpdateAsync(entityRole);
+        try
+        {
+            await _entityRoleRepository.UpdateAsync(entityRole);
+            await _entityRoleRepository.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            _entityRoleRepository.Discard(entityRole);
+            return Fail<EntityRole>(DuplicateEntityRoleMessage, 409, ErrorCodes.VALIDATION_ERROR);
+        }
 
         // 清除缓存
         await ClearAllDataFilterCacheAsync();
@@ -732,7 +754,7 @@ public class DataAuthService : ApplicationService, IDataAuthService
 
         if (exists)
         {
-            return Fail<EntityRole>("EntityRole with same EntityInfo, Role and Operation already exists", 409, ErrorCodes.VALIDATION_ERROR);
+            return Fail<EntityRole>(DuplicateEntityRoleMessage, 409, ErrorCodes.VALIDATION_ERROR);
         }
 
         // Fail-fast on a bad Filter so the admin sees the error in the form,
@@ -749,7 +771,19 @@ public class DataAuthService : ApplicationService, IDataAuthService
         var entityRole = request.MapTo<EntityRole>();
         entityRole.IsEnabled = true;
 
-        await _entityRoleRepository.InsertAsync(entityRole);
+        // 并发的两次创建都会通过上面的判重；唯一索引挡下第二次时答 409 而不是 500。
+        // 显式 flush：事务延迟保存时违例推迟到提交才抛，这里接不住；
+        // 必须 Discard：失败的实体留在变更跟踪器里会被同一作用域的下一次保存重放。
+        try
+        {
+            await _entityRoleRepository.InsertAsync(entityRole);
+            await _entityRoleRepository.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            _entityRoleRepository.Discard(entityRole);
+            return Fail<EntityRole>(DuplicateEntityRoleMessage, 409, ErrorCodes.VALIDATION_ERROR);
+        }
 
         // 清除缓存
         await ClearAllDataFilterCacheAsync();
@@ -807,7 +841,22 @@ public class DataAuthService : ApplicationService, IDataAuthService
 
         if (rolesToCreate.Count > 0)
         {
-            await _entityRoleRepository.InsertManyAsync(rolesToCreate);
+            try
+            {
+                await _entityRoleRepository.InsertManyAsync(rolesToCreate);
+                await _entityRoleRepository.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+            {
+                // 判重之后另一个请求插入了其中某条：整批不落（插入是一次保存），让调用方重试 ——
+                // 重试时判重会跳过已存在的那几条。
+                foreach (var role in rolesToCreate)
+                    _entityRoleRepository.Discard(role);
+                return Fail<IEnumerable<EntityRole>>(
+                    "Another request created one of these entity roles concurrently; retry to create the rest.",
+                    409, ErrorCodes.VALIDATION_ERROR);
+            }
+
             // 清除缓存
             await ClearAllDataFilterCacheAsync();
         }
@@ -819,6 +868,8 @@ public class DataAuthService : ApplicationService, IDataAuthService
     #endregion
 
     #region Private Methods
+
+    private const string DuplicateEntityRoleMessage = "EntityRole with same EntityInfo, Role and Operation already exists";
 
     /// <summary>
     /// 把 <see cref="EntityInfo.TypeName"/>（CLR 全名：命名空间 + 类型名，<b>不带程序集</b>，与

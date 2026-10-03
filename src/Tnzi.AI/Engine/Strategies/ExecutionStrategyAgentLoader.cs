@@ -4,7 +4,11 @@ public static class ExecutionStrategyAgentLoader
 {
     public static async Task<IAgentExecutor?> ResolveAgentAsync(Guid agentId, ExecutionStrategyContext context, CancellationToken ct)
     {
-        var entity = await context.AgentRepository.GetAsync(agentId, ct);
+        // 子 / 目标 Agent 与主路径同一条可见性：租户调用者也解析得到宿主级共享定义。
+        var scope = SharedAgentScope.Resolve(context.ServiceProvider);
+        var entity = scope.IsTenantCaller
+            ? await scope.Apply(context.AgentRepository.AsQueryable()).FirstOrDefaultAsync(a => a.Id == agentId, ct)
+            : await context.AgentRepository.GetAsync(agentId, ct);
         if (entity == null || !entity.IsEnabled) return null;
 
         // Tool grants are owned by the junction (the entity no longer carries JSON resource columns).

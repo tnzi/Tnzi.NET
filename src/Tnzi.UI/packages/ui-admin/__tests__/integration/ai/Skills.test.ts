@@ -119,6 +119,12 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   }),
 }))
 
+// Reverse lookup "which agents use this skill" (admin/agents/grants/reverse/skill).
+const usedBy = vi.fn(async (): Promise<unknown[]> => [])
+vi.mock('../../../src/services/bridges/agent-grant-bridge', () => ({
+  createAgentGrantBridge: () => ({ usedBy, listForAgent: vi.fn(), setEnabled: vi.fn(), remove: vi.fn() }),
+}))
+
 import Skills from '../../../src/pages/ai/skills/Skills.vue'
 
 const stubs = {
@@ -276,5 +282,80 @@ describe('Skills page (production-grade card grid)', () => {
     await flushPromises()
     expect(getPopular).toHaveBeenCalledTimes(1)
     expect(vm.popularSkills.map((p) => p.slug)).toEqual(['write-blog-post', 'review-pr'])
+  })
+})
+
+describe('Skills page - agents that depend on a skill', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    usedBy.mockReset()
+    usedBy.mockResolvedValue([])
+  })
+
+  type ViewVm = { crud: { openView: (s: { slug: string; name: string }) => void } }
+
+  it('the view drawer lists the agents holding an active grant', async () => {
+    usedBy.mockResolvedValue([
+      { agentId: 'a1', agentName: 'Blog Writer', agentIsEnabled: true },
+      { agentId: 'a2', agentName: 'Old Bot', agentIsEnabled: false },
+    ])
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.vm as unknown as ViewVm).crud.openView({ slug: 'write-blog-post', name: 'Write Blog Post' })
+    await flushPromises()
+
+    expect(usedBy).toHaveBeenCalledWith('skill', 'write-blog-post')
+    const drawer = wrapper.find('.n-drawer-stub')
+    expect(drawer.text()).toContain('Agents with an active grant: 2')
+    expect(drawer.text()).toContain('Blog Writer')
+    expect(drawer.text()).toContain('agent disabled')
+  })
+
+  it('a refused lookup reads as a failure with a retry, never as "no agents"', async () => {
+    usedBy.mockRejectedValueOnce(new Error('Permission denied'))
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.vm as unknown as ViewVm).crud.openView({ slug: 'write-blog-post', name: 'Write Blog Post' })
+    await flushPromises()
+
+    const drawer = wrapper.find('.n-drawer-stub')
+    expect(drawer.text()).toContain('Could not check which agents use this: Permission denied')
+    expect(drawer.text()).not.toContain('No agent has an active grant')
+    expect(drawer.find('[role="alert"]').exists()).toBe(true)
+
+    // (The Button stub re-emits click on top of the native one, so count retries loosely.)
+    await drawer.find('.t-grant-usage__retry').trigger('click')
+    await flushPromises()
+    expect(usedBy.mock.calls.length).toBeGreaterThan(1)
+    expect(usedBy).toHaveBeenLastCalledWith('skill', 'write-blog-post')
+    expect(wrapper.find('.n-drawer-stub').text()).toContain('No agent has an active grant for this.')
+  })
+
+  it('opening the delete confirmation names the agents that lose the skill', async () => {
+    usedBy.mockResolvedValue([{ agentId: 'a1', agentName: 'Blog Writer', agentIsEnabled: true }])
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+
+    // Only the DB-backed skill is deletable; the file-source one has no confirm.
+    const confirms = wrapper.findAllComponents({ name: 'Popconfirm' })
+    expect(confirms).toHaveLength(1)
+    confirms[0]!.vm.$emit('update:show', true)
+    await flushPromises()
+
+    expect(usedBy).toHaveBeenCalledWith('skill', 'write-blog-post')
+    expect(confirms[0]!.text()).toContain('1 agent(s) have an active grant for this')
+    expect(confirms[0]!.text()).toContain('Blog Writer')
+  })
+
+  it('a failed check inside the delete confirmation warns instead of implying nobody depends on it', async () => {
+    usedBy.mockRejectedValueOnce(new Error('timeout'))
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const confirm = wrapper.findAllComponents({ name: 'Popconfirm' })[0]!
+    confirm.vm.$emit('update:show', true)
+    await flushPromises()
+
+    expect(confirm.text()).toContain('Could not check which agents use this (timeout)')
+    expect(confirm.text()).not.toContain('No agent has an active grant')
   })
 })

@@ -25,6 +25,7 @@ global using Tnzi.Data.Filtering;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
+global using Tnzi.EFCore.Extensions;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.Exceptions;
 global using Tnzi.Identity.Services;

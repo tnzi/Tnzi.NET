@@ -11,8 +11,11 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// Mutable per test: a cold deep link is a mount with `?detail=view:<id>` already in the URL.
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {}, params: {}, path: '/admin/finance/eft-batches', fullPath: '/admin/finance/eft-batches', hash: '', name: 'finance.eftBatches', meta: {} }),
+  useRoute: () => ({ query: routeState.query, params: {}, path: '/admin/finance/eft-batches', fullPath: '/admin/finance/eft-batches', hash: '', name: 'finance.eftBatches', meta: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }))
 
@@ -32,7 +35,15 @@ const queue = vi.fn(async () => [
 const eftSection = {
   queue,
   fetch: fetchBatches,
-  getById: vi.fn(async () => null),
+  // `eb9` is not on the loaded page: only the by-id load can resolve it. The
+  // list rows carry no lines; the full record does.
+  getById: vi.fn(async (id: string) =>
+    id === 'eb9'
+      ? { id: 'eb9', number: 'EFT-0009', status: 'Generated', bankAccountName: 'Operating', format: 'Nacha', currency: 'USD', effectiveDate: '2026-03-12', totalCount: 1, totalAmount: 75, lines: [{ id: 'l1', payeeName: 'Initech', amount: 75 }] }
+      : id === 'eb1'
+        ? { id: 'eb1', number: 'EFT-0001', status: 'Draft', bankAccountName: 'Operating', format: 'Nacha', currency: 'USD', effectiveDate: '2026-03-10', totalCount: 2, totalAmount: 500, lines: [] }
+        : null,
+  ),
   create: vi.fn(),
   generate: vi.fn(),
   voidBatch: vi.fn(),
@@ -71,7 +82,10 @@ const stubs = {
 }
 
 interface EftVm {
-  rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean }>
+  rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean; onClick: (row: Record<string, unknown>) => void }>
+  crud: { formModal: { visible: { value: boolean }; mode: { value: string | null } } }
+  viewed: { id: string; number: string; lines: unknown[] } | null
+  activeSection: string
 }
 
 describe('Finance EftBatches page', () => {
@@ -79,6 +93,37 @@ describe('Finance EftBatches page', () => {
     setActivePinia(createPinia())
     fetchBatches.mockClear()
     queue.mockClear()
+    eftSection.getById.mockClear()
+    routeState.query = {}
+  })
+
+  it('opens a batch in the list engine\'s own view drawer, loading the full record', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as EftVm
+    vm.rowActions.find((a) => a.key === 'detail')!.onClick({ id: 'eb1', number: 'EFT-0001', status: 'Draft' })
+    await flushPromises()
+
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(eftSection.getById).toHaveBeenCalledWith('eb1')
+    expect(vm.viewed?.id).toBe('eb1')
+  })
+
+  it('restores a shared ?detail=view:<id> for a batch that is not on the loaded page', async () => {
+    routeState.query = { detail: 'view:eb9' }
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as EftVm
+    expect(eftSection.getById).toHaveBeenCalledWith('eb9')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(vm.viewed?.lines).toHaveLength(1)
+    // The drawer lives in the Batches tab; a link without `?section=` must land there.
+    expect(vm.activeSection).toBe('batches')
+    expect(wrapper.text() + document.body.textContent).toContain('EFT-0009')
   })
 
   it('mounts and loads batches + queue', async () => {

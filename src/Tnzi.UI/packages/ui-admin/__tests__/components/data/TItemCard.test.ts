@@ -82,6 +82,31 @@ describe('TItemCard', () => {
     })
   })
 
+  describe('footer band', () => {
+    it('renders under the row, and only when given', () => {
+      expect(mountCard().find('.t-item-card__footer').exists()).toBe(false)
+
+      const w = mountCard({}, { footer: () => h('ul', { class: 'keys' }, 'two keys') })
+
+      expect(w.classes()).toContain('t-item-card--with-footer')
+      expect(w.find('.t-item-card__footer ul.keys').text()).toBe('two keys')
+    })
+
+    it('keeps its own controls from opening the card, like the operations', async () => {
+      const onRemove = vi.fn()
+      const w = mountCard(
+        { clickable: true },
+        { footer: () => h('button', { class: 'rm', onClick: onRemove }, 'Remove') },
+      )
+
+      await w.find('button.rm').trigger('click')
+      press(w.find('button.rm').element, 'Enter')
+
+      expect(onRemove).toHaveBeenCalledTimes(1)
+      expect(w.emitted('click')).toBeUndefined()
+    })
+  })
+
   describe('selection checkbox shields the card', () => {
     it('does not open the card when Space toggles the checkbox, and the toggle still fires', () => {
       const w = mountCard({ clickable: true, selectable: true })

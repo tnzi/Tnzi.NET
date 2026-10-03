@@ -34,6 +34,18 @@ describe('useLoadingBar', () => {
     rand.mockRestore()
   })
 
+  it('a start() right after finish() is not hidden by the earlier finish', () => {
+    // Two quick navigations: the first one's hide timeout must not end the second's bar.
+    const { visible, start, finish } = useLoadingBar()
+    start()
+    finish()
+    vi.advanceTimersByTime(100)
+    start()
+    vi.advanceTimersByTime(200)
+
+    expect(visible.value).toBe(true)
+  })
+
   it('start() is idempotent - calling again clears prior timer and resets progress', () => {
     const { progress, start } = useLoadingBar()
     start()

@@ -14,6 +14,9 @@ public class AgentResolver : IAgentResolver
     private readonly IAgentGrantService _grantService;
     private readonly IWorkspaceAgentProvider? _workspaceAgentProvider;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly ICurrentUser? _currentUser;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
     private readonly ILogger<AgentResolver> _logger;
 
     public AgentResolver(
@@ -26,7 +29,10 @@ public class AgentResolver : IAgentResolver
         IAgentGrantService grantService,
         ILogger<AgentResolver> logger,
         IWorkspaceAgentProvider? workspaceAgentProvider = null,
-        IAgentExecutionContextAccessor? executionContextAccessor = null)
+        IAgentExecutionContextAccessor? executionContextAccessor = null,
+        ICurrentTenant? currentTenant = null,
+        ICurrentUser? currentUser = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         _agentFactory = Check.NotNull(agentFactory);
         _options = Check.NotNull(options);
@@ -38,6 +44,9 @@ public class AgentResolver : IAgentResolver
         _logger = Check.NotNull(logger);
         _workspaceAgentProvider = workspaceAgentProvider;
         _executionContextAccessor = executionContextAccessor;
+        _currentTenant = currentTenant;
+        _currentUser = currentUser;
+        _multiTenancyOptions = multiTenancyOptions;
     }
 
     /// <inheritdoc />
@@ -48,7 +57,11 @@ public class AgentResolver : IAgentResolver
         // 1. 优先使用 AgentId（加载已定义的 Agent）
         if (agentId.HasValue)
         {
-            var entity = await _agentRepository.GetAsync(agentId.Value, ct);
+            // 租户调用者还要解析得到宿主级共享定义（YAML Agent，TenantId 为 null）；单租户 / 宿主原样。
+            var scope = SharedAgentScope.Resolve(_multiTenancyOptions, _currentTenant, _currentUser);
+            var entity = scope.IsTenantCaller
+                ? await scope.Apply(_agentRepository.AsQueryable()).FirstOrDefaultAsync(a => a.Id == agentId.Value, ct)
+                : await _agentRepository.GetAsync(agentId.Value, ct);
             if (entity == null)
             {
                 // Try workspace fallback before returning failure

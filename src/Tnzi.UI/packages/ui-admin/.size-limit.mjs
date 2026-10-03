@@ -89,7 +89,28 @@ export default [
     // file keeps recording. (Both builds also carried unrelated uncommitted work
     // sitting in the same tree, so the drift figure is an upper bound on what is
     // actually on main.) Headroom is back to ~1.3%.
-    limit: '205 kB',
+    //
+    // 205 -> 210 on 2026-09-20, measured at 207.18 kB. Built both ways: with the
+    // one barrel change of that day reverted (`UserSecuritySection` no longer
+    // exported from `pages/index.ts`) the shell measures 204.62 kB, so the
+    // section accounts for 2.56 kB and the tree was green before it. The cost
+    // is deliberate: the sign-in security section is now hostable from a
+    // consumer's own persona page, which puts it on the static graph like
+    // `Users` and the login modules - the price of "import and mount" without a
+    // second entry point. Headroom is back to ~1.3%.
+    //
+    // 210 -> 215 on 2026-09-20 (pt3), measured at 209.07 kB against 207.18 kB
+    // at HEAD, both built the same way. The 1.89 kB is `TTwoFactorPanel`: the
+    // two-factor method list shared by the User Center and the user detail
+    // page, exported from the root so a consumer account page can host it, and
+    // with it the core `StepUpPromptController` + `TStepUpModal` it mounts when
+    // no host bridge is passed. Its authenticator-enrolment modal (naive's QR
+    // encoder) is behind an `import()` and measured at 0.86 kB of that figure -
+    // esbuild inlines it here, a browser fetches it on the first "Set up". Left
+    // counted rather than externalised: an ignore entry for 0.86 kB is more
+    // config than the weight is worth. 0.93 kB of headroom is a tripwire, not a
+    // budget, hence the step.
+    limit: '215 kB',
     gzip: true,
   },
   {
@@ -112,9 +133,13 @@ export default [
     // the English the backend already sends as the fallback. They exist because
     // zh-cn's type is derived from en's, so en has to be complete. Breaking that
     // coupling would return ~10 kB gzip to English consumers.
+    // 68 -> 70 kB (2026-09-21), measured 67.66 kB: the passkey / security-key
+    // strings (a fourth two-factor method: panel row, login-page prompt and
+    // switcher entry, settings-centre field + description). 0.34 kB of headroom
+    // had turned the budget into a tripwire again.
     name: 'locale pack - en (fetched only when the active locale is en)',
     path: 'dist/locales/en.js',
-    limit: '68 kB',
+    limit: '70 kB',
     gzip: true,
   },
   {
@@ -127,9 +152,10 @@ export default [
     // 67 -> 81 kB (2026-08-31), same cause as en above: the 204 settings-centre
     // descriptions (+26 kB of source in commit 310a6545). zh-cn carries more
     // bytes per entry than en because CJK is 3 bytes per character in UTF-8.
+    // 81 -> 84 kB (2026-09-21), measured 80.58 kB, same strings as en above.
     name: 'locale pack - zh-cn (fetched only when the active locale is zh-cn)',
     path: 'dist/locales/zh-cn.js',
-    limit: '81 kB',
+    limit: '84 kB',
     gzip: true,
   },
   {
@@ -169,7 +195,16 @@ export default [
   {
     name: 'pages subpath (built-in page components + translate helpers)',
     path: 'dist/pages.js',
-    limit: '60 kB',
+    // 60 -> 65 kB on 2026-09-20 (pt3), measured at 62.09 kB against 58.61 kB at
+    // HEAD. `UserSecuritySection` (exported here since the day before) now
+    // renders its two-factor half through `TTwoFactorPanel`, and the one
+    // component carries both modes: the 3.48 kB is the panel plus the
+    // self-service pieces the admin mode never opens - the step-up controller
+    // and modal, and the authenticator-enrolment modal. One panel that reads
+    // the same in the User Center and on the user detail page is the point;
+    // splitting it per mode to save ~2 kB on a subpath would give the two
+    // hosts two components to keep in step.
+    limit: '65 kB',
     gzip: true,
   },
   {
@@ -238,7 +273,21 @@ export default [
     // blocks. The re-authentication prompt is new capability, not creep: it
     // is what turns a `[RequireStepUp]` challenge from a dead-end toast into
     // a completed action.
-    limit: '645 kB',
+    // 645 -> 652 kB (2026-09-20). Measured 647.73 kB with the user detail
+    // page's sign-in security section (`UserSecuritySection`: another account's
+    // two-factor methods and its sign-in IP allow-list), its bridge contract,
+    // the core `useAdminUserSecurityApi` / `getPermissionPicture` clients and
+    // the two locale blocks, on top of the opt-out list page that landed the
+    // same day. Both are new admin surfaces for backend capability that had no
+    // page; nothing existing grew.
+    // 652 -> 665 kB (2026-09-27). Measured 661.9 kB after four admin surfaces
+    // for backend capability that had no page: the workflow version history
+    // drawer, human-input resume panel and run controls; agent grant switches
+    // and the "used by agents" lookups on skills / knowledge / tools; the core
+    // workflow and grant clients; and their locale blocks. All of it sits
+    // behind route-level `import()` (shell stayed at 211.6 kB), which is why it
+    // only shows up here.
+    limit: '665 kB',
     gzip: true,
   },
 ]

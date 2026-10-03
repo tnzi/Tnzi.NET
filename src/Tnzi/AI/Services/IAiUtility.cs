@@ -48,12 +48,15 @@ public interface IAiUtility
     /// <param name="userMessage">用户消息</param>
     /// <param name="options">单次调用覆盖选项</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>AI 回复文本；未配置提供商或调用失败时返回 <see langword="null"/></returns>
+    /// <returns>AI 回复文本；未配置提供商（或自带的提供商不合法）或调用失败时返回 <see langword="null"/></returns>
     /// <remarks>
-    /// ⚠️ <b>输出长度上限默认只有 100 个 token</b>（<c>AI:Utility:MaxTokens</c>）——
-    /// 这个默认值是为框架内部的标题生成、分类这类极短输出定的。要一段完整的回答，
-    /// <b>必须</b>调高该配置，或用 <see cref="Options.AiUtilityCallOptions.MaxTokens"/> 单次覆盖，
-    /// 否则回答会被<b>静默截断</b>（不报错、不抛异常，只是话没说完）。
+    /// ⚠️ <b>输出长度有上限</b>：默认 4096 个 token（<c>AI:Utility:MaxTokens</c>）。超过上限的回答会被<b>静默截断</b>
+    /// （不报错、不抛异常，只是话没说完）；需要更长的输出时调高该配置，或用
+    /// <see cref="Options.AiUtilityCallOptions.MaxTokens"/> 单次覆盖。标题生成、分类这类极短输出的调用点自己传小值。
+    /// <para>
+    /// 凭据不在配置里时，用 <see cref="Options.AiUtilityCallOptions.Provider"/> 随本次调用传入提供商，
+    /// 完全绕过 <c>AI:Providers</c>；所有实现都必须遵守它（不缓存、不记录其密钥）。
+    /// </para>
     /// </remarks>
     Task<string?> ExecuteAsync(
         string systemPrompt,

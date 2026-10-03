@@ -53,6 +53,31 @@ public class CaptchaVerifierTests
     }
 
     [Fact]
+    public async Task OversizedToken_IsRejectedWithoutAskingTheProvider_EvenUnderTheAllowPolicy()
+    {
+        // 令牌完全由匿名客户端决定；超长的只可能是构造出来的，不该出站到验证服务。
+        var provider = Provider("turnstile", CaptchaVerification.Fail("turnstile", CaptchaFailure.VerifierUnavailable, "HTTP 503"));
+        var verifier = Create(new CaptchaVerifierOptions { Provider = "turnstile", OnVerifierUnavailable = CaptchaUnavailablePolicy.Allow }, [provider.Object]);
+
+        var result = await verifier.VerifyAsync(new string('a', CaptchaVerifier.MaxTokenLength + 1), "login");
+
+        Assert.False(result.Passed);
+        Assert.Equal(CaptchaFailure.Rejected, result.Failure);
+        provider.Verify(x => x.VerifyAsync(It.IsAny<CaptchaVerificationRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TokenAtTheLengthLimit_IsStillHandedToTheProvider()
+    {
+        var provider = Provider("turnstile");
+        var verifier = Create(new CaptchaVerifierOptions { Provider = "turnstile" }, [provider.Object]);
+
+        var result = await verifier.VerifyAsync(new string('a', CaptchaVerifier.MaxTokenLength), "login");
+
+        Assert.True(result.Passed);
+    }
+
+    [Fact]
     public async Task DispatchesToTheConfiguredProvider_CaseInsensitively_WithPurposeAndClientIp()
     {
         CaptchaVerificationRequest? seen = null;

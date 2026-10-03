@@ -83,6 +83,39 @@ public class PaymentWithCouponIntegrationTests : PromotionsIntegrationTestBase
         created.Succeeded.ShouldBeFalse();
         created.Message.ShouldBe(ErrorCodes.CouponNotFound);
     }
+
+    /// <summary>
+    /// 券不可叠加而拒绝建单时，错误码要穿过支付层原样带给调用方 ——
+    /// 只剩消息与状态码，客户端就分不清「这张券不能与已用的券同单」和别的 400。
+    /// </summary>
+    [Fact]
+    public async Task CreatePayment_WhenTheOrderAlreadyCarriesANonStackableCoupon_FailsWithTheStackingErrorCode()
+    {
+        await SeedAsync(
+            NewPromotion("SOLO", stackable: false),
+            NewPromotion("EXTRA", stackable: true));
+
+        (await CreateAsync(NewOrder(orderNo: "ORDER-STACK", couponCode: "SOLO"))).Succeeded.ShouldBeTrue();
+
+        var second = await CreateAsync(NewOrder(orderNo: "ORDER-STACK", couponCode: "EXTRA"));
+
+        second.Succeeded.ShouldBeFalse();
+        second.ErrorCode.ShouldBe(ErrorCodes.CouponNotStackable);
+    }
+
+    private static Promotion NewPromotion(string code, bool stackable) => new()
+    {
+        PromotionCode = code,
+        Name = code,
+        IsActive = true,
+        IsPublic = true,
+        StartTime = DateTime.UtcNow.AddDays(-1),
+        DiscountType = DiscountType.Fixed,
+        DiscountValue = 5m,
+        Currency = "USD",
+        Stackable = stackable,
+        UsedCount = 0
+    };
     /// <summary>
     /// 支付过期时归还已核销的优惠券，否则用户付款没成还白丢一张券
     /// </summary>

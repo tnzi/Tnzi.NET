@@ -23,13 +23,15 @@ public class SandboxModuleOptionsValidator : OptionsValidatorBase<SandboxModuleO
         else if (!SupportedProviders.Contains(options.Provider))
             errors.Add($"Provider '{options.Provider}' is not supported. Valid values: local, docker, kubernetes.");
 
-        if (string.IsNullOrWhiteSpace(options.DataRoot))
+        // 关掉的沙箱不读 DataRoot（工具不注册、两个中间件直通），一个用不到的路径不该有能力阻塞应用启动。
+        if (options.Enabled && string.IsNullOrWhiteSpace(options.DataRoot))
         {
-            // 默认值只在宿主解析不出用户数据目录时才为空（IIS 未加载用户配置文件、没有 HOME 的服务账号）。
+            // 默认值只在宿主解析不出用户数据目录时才为空（没有 HOME 的服务账号、IIS 未加载用户配置文件）。
             // 刻意不退回相对路径：那会把线程数据写回部署目录，正是默认值刚离开的地方。
             errors.Add(
-                "DataRoot must not be empty. No per-user data directory (LocalApplicationData) is available on this host, " +
-                "so the default could not be resolved; set AI:Sandbox:DataRoot to an absolute path outside the application directory.");
+                "DataRoot must not be empty. The default location could not be resolved because this host exposes no per-user " +
+                "data directory (LocalApplicationData: HOME / XDG_DATA_HOME on Linux and macOS, the user profile on Windows). " +
+                "Set AI:Sandbox:DataRoot to an absolute path outside the application directory, or set AI:Sandbox:Enabled=false.");
         }
     }
 

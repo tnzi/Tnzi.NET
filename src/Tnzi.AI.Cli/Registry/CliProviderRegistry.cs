@@ -77,7 +77,13 @@ public class CliProviderRegistry : ICliProviderRegistry
                 Enabled = custom.Enabled,
                 ExecutablePathOverride = custom.ExecutablePath,
                 DefaultModel = custom.DefaultModel,
-                ExtraArgs = custom.ExtraArgs.ToList()
+                ExtraArgs = custom.ExtraArgs.ToList(),
+                AuthStatusArgs = custom.AuthStatusArgs.ToList(),
+                AuthTokenEnvironmentVariable = custom.AuthTokenEnvironmentVariable,
+                ExcludeUserSettingsArgs = custom.ExcludeUserSettingsArgs.ToList(),
+                ConfigDirectoryEnvironmentVariable = custom.ConfigDirectoryEnvironmentVariable,
+                UserConfigIsolation = custom.UserConfigIsolation,
+                ConfigDirectory = custom.ConfigDirectory
             };
         }
 
@@ -96,7 +102,9 @@ public class CliProviderRegistry : ICliProviderRegistry
             Enabled = overrides.Enabled,
             ExecutablePathOverride = overrides.ExecutablePath,
             DefaultModel = overrides.DefaultModel,
-            ExtraArgs = overrides.ExtraArgs.ToList()
+            ExtraArgs = overrides.ExtraArgs.ToList(),
+            UserConfigIsolation = overrides.UserConfigIsolation,
+            ConfigDirectory = overrides.ConfigDirectory
         };
     }
 

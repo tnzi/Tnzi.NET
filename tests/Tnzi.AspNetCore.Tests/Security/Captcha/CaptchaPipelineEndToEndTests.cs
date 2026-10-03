@@ -164,6 +164,38 @@ public class CaptchaPipelineEndToEndTests
     }
 
     [Fact]
+    public async Task StackedGates_OnClassAndAction_VerifyOnce_UnderTheActionsPurpose()
+    {
+        // 类级与方法级都挂 [RequireCaptcha]：MVC 会给同一个 action 建两个过滤器实例。
+        var settings = BaseSettings();
+        settings["AspNetCore:Captcha:Provider"] = "altcha";
+        settings["AspNetCore:Captcha:Altcha:HmacKey"] = HmacKey;
+        settings["AspNetCore:Captcha:Altcha:MaxNumber"] = "500";
+
+        var (app, _) = await StartAsync(settings);
+        try
+        {
+            var client = app.GetTestClient();
+
+            // 同一用途叠两层：第二层若再验一次，一次性令牌必判重放。
+            var same = Solve(await client.GetFromJsonAsync<JsonElement>("/api/captcha/altcha/challenge?purpose=contact"));
+            var sameResponse = await client.PostAsync("/api/e2e/captcha-stacked/same", JsonBody(new { message = "hi", captchaToken = same }));
+            Assert.Equal(HttpStatusCode.OK, sameResponse.StatusCode);
+
+            // 用途不同：按离 action 最近的（方法级 comment）验，类级 contact 让位。
+            var comment = Solve(await client.GetFromJsonAsync<JsonElement>("/api/captcha/altcha/challenge?purpose=comment"));
+            var commentResponse = await client.PostAsync("/api/e2e/captcha-stacked/comment", JsonBody(new { message = "hi", captchaToken = comment }));
+            Assert.Equal(HttpStatusCode.OK, commentResponse.StatusCode);
+
+            // 外层用途的令牌在这里不算数。
+            var contact = Solve(await client.GetFromJsonAsync<JsonElement>("/api/captcha/altcha/challenge?purpose=contact"));
+            var wrong = await client.PostAsync("/api/e2e/captcha-stacked/comment", JsonBody(new { message = "hi", captchaToken = contact }));
+            Assert.Equal(HttpStatusCode.BadRequest, wrong.StatusCode);
+        }
+        finally { await StopAsync(app); }
+    }
+
+    [Fact]
     public async Task AltchaChallengeEndpoint_Is404WhenAltchaIsNotTheActiveProvider()
     {
         var settings = BaseSettings();
@@ -304,4 +336,20 @@ public sealed class CaptchaE2EController : ApiControllerBase
     [HttpPost("contact")]
     [RequireCaptcha("contact")]
     public ApiResult<string> Contact([FromBody] ContactInput input) => Ok($"received: {input.Message}", "Success");
+}
+
+/// <summary>类级与方法级叠着挂 [RequireCaptcha] 的端点。</summary>
+[ApiController]
+[Route("e2e/captcha-stacked")]
+[AllowAnonymous]
+[RequireCaptcha("contact")]
+public sealed class CaptchaStackedE2EController : ApiControllerBase
+{
+    [HttpPost("same")]
+    [RequireCaptcha("contact")]
+    public ApiResult<string> Same([FromBody] CaptchaE2EController.ContactInput input) => Ok($"received: {input.Message}", "Success");
+
+    [HttpPost("comment")]
+    [RequireCaptcha("comment")]
+    public ApiResult<string> Comment([FromBody] CaptchaE2EController.ContactInput input) => Ok($"received: {input.Message}", "Success");
 }

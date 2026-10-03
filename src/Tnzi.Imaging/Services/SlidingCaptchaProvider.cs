@@ -6,7 +6,8 @@ namespace Tnzi.Imaging.Services;
 /// <remarks>
 /// 在此之前滑块是一个孤立控件：<c>/captcha/sliding/verify</c> 只回 <c>{ Success }</c>，受保护端点无从分辨
 /// 这次提交前有没有真的滑过。现在验证通过签一枚一次性通行令牌，客户端把它作为 <c>captchaToken</c> 交给
-/// 受保护端点，由本提供商核销。出题端点带 <c>?purpose=</c> 时通行令牌绑用途。
+/// 受保护端点，由本提供商核销。出题必须带 <c>?purpose=</c>：通行令牌绑在该用途上，
+/// 不带用途签出的通行令牌不被任何受保护端点接受。
 /// 框架不带滑块的前端组件（模板匹配找缺口对机器不是难题，它的价值是交互体验不是防护力），消费方按需自建。
 /// </remarks>
 public class SlidingCaptchaProvider : ICaptchaProvider

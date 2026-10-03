@@ -73,15 +73,37 @@ public class LoginGuardTests
     [Fact]
     public void DenyAsInvalidCredentials_IsIndistinguishableFromAWrongPassword()
     {
-        // ValidateLoginAndGetUserAsync 对密码错误返回的正是 400 + 这句文案。
+        // ValidateLoginAndGetUserAsync 对密码错误返回的正是这三个字段（见 InvalidCredentialsResponse）。
         // 两者一旦可区分，守卫就退化成口令预言机。
         var result = LoginGuardResult.DenyAsInvalidCredentials("ip not allowed");
 
         Assert.False(result.Allowed);
-        Assert.Equal(400, result.Code);
-        Assert.Equal("Invalid username or password", result.Message);
+        Assert.Equal(InvalidCredentialsResponse.StatusCode, result.Code);
+        Assert.Equal(InvalidCredentialsResponse.Message, result.Message);
+        Assert.Equal(InvalidCredentialsResponse.ErrorCode, result.ErrorCode);
         // 真实原因只进审计，不进响应。
         Assert.Equal("ip not allowed", result.AuditReason);
+    }
+
+    [Fact]
+    public async Task LoginAsync_GuardDenialAndWrongPassword_RenderToTheSameEnvelope()
+    {
+        // ★ 同一个账号、同一个端点，三种失败必须逐字节同形：密码错误、用户不存在、守卫拒绝。
+        //   此前文案与状态码相同而 errorCode 不同（守卫带 IDENTITY_INVALID_PASSWORD、密码错误为 null），
+        //   于是对一个开了 IP 允许列表的账号，从任意地址按 errorCode 就能枚举出正确密码。
+        //   这里走真实的 AuthService.LoginAsync，再经控制器同一条 ToApiResult() 渲染成信封，
+        //   任何一侧多一个字段、改一个值都会让比较变红。
+        var wrongPassword = await new LoginFixture(guardResult: null).WithWrongPassword().LoginAsync();
+        var unknownUser = await new LoginFixture(guardResult: null).WithUnknownUser().LoginAsync();
+        var guardDenied = await new LoginFixture(LoginGuardResult.DenyAsInvalidCredentials("ip not allowed")).LoginAsync();
+
+        Assert.False(wrongPassword.Succeeded);
+        Assert.False(unknownUser.Succeeded);
+        Assert.False(guardDenied.Succeeded);
+
+        var wrongPasswordEnvelope = JsonSerializer.Serialize(wrongPassword.ToApiResult());
+        Assert.Equal(wrongPasswordEnvelope, JsonSerializer.Serialize(guardDenied.ToApiResult()));
+        Assert.Equal(wrongPasswordEnvelope, JsonSerializer.Serialize(unknownUser.ToApiResult()));
     }
 
     [Fact]
@@ -221,6 +243,7 @@ public class LoginGuardTests
         public Mock<ITwoFactorService> TwoFactorService { get; } = new();
 
         private readonly Mock<UserManager<User>> _userManager;
+        private readonly Mock<SignInManager<User>> _signInManager;
         private readonly AuthService _authService;
         private readonly User _user = new()
         {
@@ -235,7 +258,7 @@ public class LoginGuardTests
             var store = new Mock<IUserStore<User>>();
             _userManager = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
-            var signInManager = new Mock<SignInManager<User>>(
+            _signInManager = new Mock<SignInManager<User>>(
                 _userManager.Object,
                 new Mock<IHttpContextAccessor>().Object,
                 new Mock<IUserClaimsPrincipalFactory<User>>().Object,
@@ -264,7 +287,7 @@ public class LoginGuardTests
             _userManager.Setup(x => x.FindByNameAsync(Username)).ReturnsAsync(_user);
             _userManager.Setup(x => x.GetTwoFactorEnabledAsync(_user)).ReturnsAsync(false);
             _userManager.Setup(x => x.GetRolesAsync(_user)).ReturnsAsync(new List<string> { "User" });
-            signInManager.Setup(x => x.CheckPasswordSignInAsync(_user, Password, It.IsAny<bool>()))
+            _signInManager.Setup(x => x.CheckPasswordSignInAsync(_user, Password, It.IsAny<bool>()))
                 .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
 
             var passwordPolicy = new Mock<IPasswordPolicyService>();
@@ -290,7 +313,7 @@ public class LoginGuardTests
 
             _authService = new AuthService(
                 _userManager.Object,
-                signInManager.Object,
+                _signInManager.Object,
                 TokenService.Object,
                 identityOptions.Object,
                 serviceProvider.Object,
@@ -307,6 +330,21 @@ public class LoginGuardTests
 
         public void EnableTwoFactor()
             => _userManager.Setup(x => x.GetTwoFactorEnabledAsync(_user)).ReturnsAsync(true);
+
+        /// <summary>密码校验失败（SignInManager 答 Failed），守卫链根本走不到。</summary>
+        public LoginFixture WithWrongPassword()
+        {
+            _signInManager.Setup(x => x.CheckPasswordSignInAsync(_user, Password, It.IsAny<bool>()))
+                .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Failed);
+            return this;
+        }
+
+        /// <summary>用户名查不到，密码校验都没发生。</summary>
+        public LoginFixture WithUnknownUser()
+        {
+            _userManager.Setup(x => x.FindByNameAsync(Username)).ReturnsAsync((User?)null);
+            return this;
+        }
 
         public Task<Result<string>> LoginAsync()
             => _authService.LoginAsync(new LoginDto { UserName = Username, Password = Password });

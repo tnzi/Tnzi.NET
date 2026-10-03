@@ -11,6 +11,10 @@ namespace Tnzi.AI.Channels.Gateway;
 /// 配置规则（<c>GatewayOptions.BindingRules</c>）均为部署级全局规则，匹配任意上下文。
 /// 后台缓存在无当前租户的全新作用域里加载全部 DB 规则（临时禁用多租户过滤器），
 /// 隔离改在匹配时强制——缓存为服务器内部数据，不对外暴露。
+/// <para>
+/// 查库失败时沿用上一次成功加载的数据库规则，并在 <see cref="FailureRetryInterval"/> 后重试（而不是整个 TTL）：
+/// 把「查不到」缓存成「没有规则」，会让一次数据库抖动在整个 TTL 周期内把所有数据库路由规则静默换成默认 Agent。
+/// </para>
 /// </remarks>
 public class DefaultSessionBinder : ISessionBinder
 {
@@ -18,17 +22,25 @@ public class DefaultSessionBinder : ISessionBinder
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly TimeSpan _cacheTtl;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<DefaultSessionBinder> _logger;
+
+    /// <summary>查库失败后多久重试。不取更短：数据库挂着时每次 Resolve 都会同步等一次失败的查询。</summary>
+    internal static readonly TimeSpan FailureRetryInterval = TimeSpan.FromSeconds(30);
 
     // 缓存：合并后的（配置 + 数据库）规则，按优先级降序、来源（配置优先）排序。
     private readonly object _cacheLock = new();
     private List<SessionBindingRule>? _mergedRulesCache;
+    private List<SessionBindingRule>? _lastLoadedDbRules;
     private DateTimeOffset _cacheExpiresAt = DateTimeOffset.MinValue;
 
     public DefaultSessionBinder(
         IReadOnlyList<SessionBindingRule> rules,
         IOptionsMonitor<GatewayOptions> options,
         IServiceScopeFactory? scopeFactory = null,
-        TimeSpan? cacheTtl = null)
+        TimeSpan? cacheTtl = null,
+        ILogger<DefaultSessionBinder>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         Check.NotNull(rules);
         Check.NotNull(options);
@@ -38,6 +50,8 @@ public class DefaultSessionBinder : ISessionBinder
         _scopeFactory = scopeFactory;
         // 默认 5 分钟 TTL - 避免每次 Resolve 查库，同时让 admin 写入后较快生效。
         _cacheTtl = cacheTtl ?? TimeSpan.FromMinutes(5);
+        _logger = logger ?? NullLogger<DefaultSessionBinder>.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -76,7 +90,7 @@ public class DefaultSessionBinder : ISessionBinder
     /// </summary>
     private IReadOnlyList<SessionBindingRule> GetMergedRules()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         lock (_cacheLock)
         {
@@ -85,7 +99,14 @@ public class DefaultSessionBinder : ISessionBinder
                 return _mergedRulesCache;
             }
 
-            var dbRules = LoadDbRules();
+            var loaded = LoadDbRules();
+            var loadFailed = loaded is null;
+            if (!loadFailed)
+            {
+                _lastLoadedDbRules = loaded;
+            }
+
+            var dbRules = loaded ?? _lastLoadedDbRules ?? [];
 
             // 合并：配置规则在前（同优先级胜出），数据库规则在后；统一按优先级降序稳定排序。
             // OrderByDescending 是稳定排序 → 同 Priority 下保持"配置先于数据库"的相对顺序。
@@ -95,16 +116,20 @@ public class DefaultSessionBinder : ISessionBinder
                 .ToList();
 
             _mergedRulesCache = merged;
-            _cacheExpiresAt = now.Add(_cacheTtl);
+            _cacheExpiresAt = now.Add(loadFailed && FailureRetryInterval < _cacheTtl ? FailureRetryInterval : _cacheTtl);
             return merged;
         }
     }
 
     /// <summary>
     /// 从数据库加载启用的绑定规则（通过新作用域解析 scoped 仓储，因为绑定器是 Singleton）。
-    /// 任何失败都降级为"无数据库规则"，绝不让绑定不可用。
+    /// 没有仓储 = 确实没有数据库规则（空列表）；查询失败返回 <see langword="null"/>，由调用方沿用上一次的结果，
+    /// 绝不让绑定不可用。
     /// </summary>
-    private List<SessionBindingRule> LoadDbRules()
+    /// <remarks>
+    /// 同步阻塞：<see cref="ISessionBinder.Resolve"/> 是同步签名，此查询每 TTL 周期（失败时每个重试间隔）最多一次。
+    /// </remarks>
+    private List<SessionBindingRule>? LoadDbRules()
     {
         if (_scopeFactory == null)
         {
@@ -124,7 +149,6 @@ public class DefaultSessionBinder : ISessionBinder
             // 多租户全局过滤器会变成 e.TenantId == null，从而隐藏所有带租户的规则。
             // 在此临时禁用多租户过滤器，把所有租户的规则一并加载进缓存；
             // 真正的隔离由 MatchesRule 在匹配时按 context.TenantId 强制（缓存是服务器内部数据）。
-            // 同步阻塞：Resolve 是同步签名，且此查询每 TTL 周期最多一次。
             var filterManager = scope.ServiceProvider.GetService<IDataFilterManager>();
             if (filterManager != null)
             {
@@ -137,10 +161,12 @@ public class DefaultSessionBinder : ISessionBinder
             // 没有过滤器管理器（极少见）→ 直接查询；多租户开启时只会拿到 null 租户规则。
             return repository.ToListAsync(r => r.IsEnabled).GetAwaiter().GetResult();
         }
-        catch
+        catch (Exception ex)
         {
-            // 数据库不可用/仓储未注册 - 降级为仅配置规则。
-            return [];
+            _logger.LogWarning(ex,
+                "Failed to load session binding rules from the database; keeping the previously loaded rules and retrying in {RetryInterval}",
+                FailureRetryInterval);
+            return null;
         }
     }
 

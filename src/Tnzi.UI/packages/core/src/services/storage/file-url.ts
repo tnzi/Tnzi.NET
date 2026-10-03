@@ -89,8 +89,15 @@ export function createFileUrlResolver(
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   function urlFor(fileId: string, kind: FileUrlKind): string {
-    const suffix = kind === 'preview' ? 'preview' : kind === 'thumbnail' ? 'thumbnail' : 'download';
-    return client.resolveUrl(`/files/${fileId}/${suffix}`);
+    // One literal path per kind so the frontend/backend contract check can see each endpoint.
+    switch (kind) {
+      case 'preview':
+        return client.resolveUrl(`/files/${fileId}/preview`);
+      case 'thumbnail':
+        return client.resolveUrl(`/files/${fileId}/thumbnail`);
+      default:
+        return client.resolveUrl(`/files/${fileId}/download`);
+    }
   }
 
   function cachedToken(fileId: string): string | null {

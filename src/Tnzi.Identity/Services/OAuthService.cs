@@ -162,7 +162,7 @@ public class OAuthService : ApplicationService, IOAuthService
             // 所有值都无效时的后备方案：使用 GUID
             baseUserName = $"user_{Guid.NewGuid():N}";
         }
-        var finalUserName = await UserNameGenerator.GenerateUniqueAsync(baseUserName, async (name) => await _userManager.FindByNameAsync(name) != null);
+        var finalUserName = await UserNameGenerator.GenerateUniqueAsync(baseUserName, async (name) => await _userManager.FindByNameAsync(name) != null, email);
 
         // 创建用户（不设置密码）
         var newUser = new User

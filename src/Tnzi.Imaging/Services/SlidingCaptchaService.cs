@@ -14,7 +14,14 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     private const string CacheKeyPrefix = "SlidingCaptcha:";
     private const string FailureCacheKeyPrefix = "captcha:failures:";
     private const string PassTokenCacheKeyPrefix = "SlidingCaptcha:pass:";
+    private const string ConsumedCacheKeyPrefix = "SlidingCaptcha:consumed:";
     private const int PassTokenExpirationMinutes = 5;
+
+    /// <summary>
+    /// 「已消费」标记的保留时长。它只需活得比数据键久：数据键删掉之后本就查不到，
+    /// 标记挡的是删之前就已读到数据的那批并发请求。取出题有效期的上限（校验器限定 ≤ 60 分钟）。
+    /// </summary>
+    private static readonly TimeSpan ConsumedMarkerLifetime = TimeSpan.FromMinutes(60);
 
     /// <summary>
     /// 失败计数的保留窗口（分钟）：超过这个时间没有新的失败即视为重新开始
@@ -58,7 +65,13 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             return Ok(new SlidingCaptchaVerifyResult { Success = false, Message = "Token expired or invalid" });
         }
 
-        // 立即删除（一次性使用，防止 TOCTOU）
+        // 一次性：「读到数据」不等于「拿到了这道题」。并发的几十个请求可以都在删除之前读到它，
+        // 各自用不同的 X 去撞 —— 先读后删挡不住穷举。原子的「不存在才写」只让一个请求胜出。
+        if (!await TryConsumeAsync(token, cancellationToken))
+        {
+            return Ok(new SlidingCaptchaVerifyResult { Success = false, Message = "Token expired or invalid" });
+        }
+
         await _cache.RemoveAsync(cacheKey, cancellationToken);
 
         // 容差由生成时的服务端决策说话：自适应难度调紧的容差、以及配置里的
@@ -119,11 +132,18 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             return false;
         }
 
-        // 先删再判（一次性）：用途不符的那一次也把令牌烧掉，拿一枚令牌逐个用途试是不允许的。
+        // 原子地认领（一次性）：同一枚通行令牌并发打 N 个受保护请求，只有一个能过。
+        // 用途不符的那一次也把令牌烧掉，拿一枚令牌逐个用途试是不允许的。
+        if (!await TryConsumeAsync(passToken, cancellationToken))
+        {
+            return false;
+        }
+
         await _cache.RemoveAsync(key, cancellationToken);
 
-        // 生成时没绑用途的通行令牌任何用途都收；绑了就必须一致。
-        return pass.Purpose == null || string.Equals(pass.Purpose, purpose, StringComparison.OrdinalIgnoreCase);
+        // 核销方总是带着用途来的，所以令牌必须绑了同一个用途。出题时不带用途签出的令牌一律不收：
+        // 否则用途绑定由客户端决定要不要 —— 省掉 ?purpose= 就得到一枚哪儿都能用的令牌。
+        return pass.Purpose != null && string.Equals(pass.Purpose, purpose, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc />
@@ -525,6 +545,30 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
         if (_cache == null) return;
         var key = $"{FailureCacheKeyPrefix}{clientId}";
         await _cache.RemoveAsync(key, cancellationToken);
+    }
+
+    /// <summary>
+    /// 原子地把一枚拼图令牌或通行令牌标成「已消费」；只有第一个调用者拿到 true。
+    /// </summary>
+    /// <remarks>
+    /// 两种令牌都是服务端生成的 32 位十六进制 GUID，共用一个标记前缀不会撞。
+    /// 缓存故障时（部分实现把异常吞成 false）一律按「没认领到」处理：记不下标记就无从保证一次性，宁可拒绝。
+    /// </remarks>
+    private async Task<bool> TryConsumeAsync(string token, CancellationToken cancellationToken)
+    {
+        var markerKey = $"{ConsumedCacheKeyPrefix}{token}";
+        if (await _cache!.TrySetAsync(markerKey, true, ConsumedMarkerLifetime, cancellationToken))
+        {
+            return true;
+        }
+
+        if (!await _cache.ExistsAsync(markerKey, cancellationToken))
+        {
+            // 标记既没写进去、也不在：不是并发的另一个请求抢先，而是缓存本身在失败。
+            Logger.LogError("Sliding captcha could not record the one-time marker; the cache appears to be failing. Rejecting the attempt.");
+        }
+
+        return false;
     }
 
     private static string GetCacheKey(string token) => $"{CacheKeyPrefix}{token}";

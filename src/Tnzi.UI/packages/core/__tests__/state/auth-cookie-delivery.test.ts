@@ -3,7 +3,12 @@ import { AuthStateManager } from '../../src/state/auth';
 import { createMemoryStorageAdapter } from '../../src/adapters/storage';
 import type { StorageAdapter } from '../../src/adapters/storage';
 import type { HttpClient } from '../../src/http/http';
-import { isSessionEndedForSecurity, REFRESH_TOKEN_REUSED } from '../../src/services/identity/session-security';
+import {
+  isSessionEndedForSecurity,
+  isSignInIpNotAllowed,
+  REFRESH_TOKEN_REUSED,
+  SIGN_IN_IP_NOT_ALLOWED,
+} from '../../src/services/identity/session-security';
 
 /**
  * Cookie token delivery.
@@ -53,7 +58,6 @@ describe('AuthStateManager - cookie token delivery', () => {
 
   function createAuth(overrides: Record<string, unknown> = {}) {
     return new AuthStateManager({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       httpClient: httpClient as any,
       storage,
       tokenDelivery: 'cookie',
@@ -179,6 +183,21 @@ describe('AuthStateManager - cookie token delivery', () => {
     expect(auth.error).toContain('security');
   });
 
+  it('an allow-list refusal keeps its reason across the cookie boot path', async () => {
+    post.mockResolvedValue({
+      succeeded: false,
+      code: 403,
+      errorCode: SIGN_IN_IP_NOT_ALLOWED,
+      message: 'Your current network is not on the list.',
+    });
+    const auth = createAuth();
+
+    await auth.restoreAuth();
+
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.sessionEndReason).toBe('ipNotAllowed');
+  });
+
   it('boot with no cookie leaves no stale "session expired" message behind', async () => {
     post.mockResolvedValue({ succeeded: false, code: 400, message: 'Invalid or expired refresh token' });
     const auth = createAuth();
@@ -277,7 +296,6 @@ describe('cookie-aware token-issuing endpoints', () => {
 describe('bearer delivery stays unchanged', () => {
   it('still requires a locally held refresh token', async () => {
     const auth = new AuthStateManager({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       httpClient: { post: vi.fn(), get: vi.fn(), setAccessToken: vi.fn() } as any,
       storage: createMemoryStorageAdapter(),
     });
@@ -293,7 +311,6 @@ describe('bearer delivery stays unchanged', () => {
       data: { accessToken: 'a', refreshToken: 'r', expiresIn: 3600 },
     });
     const auth = new AuthStateManager({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       httpClient: { post, get: vi.fn(), setAccessToken: vi.fn() } as any,
       storage,
     });
@@ -322,7 +339,6 @@ describe('multi-tab refresh', () => {
       data: { accessToken: 'a2', refreshToken: 'r3', expiresIn: 3600 },
     });
     const auth = new AuthStateManager({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       httpClient: { post, get: vi.fn(), setAccessToken: vi.fn() } as any,
       storage,
     });
@@ -345,7 +361,6 @@ describe('multi-tab refresh', () => {
       data: { accessToken: 'a2', refreshToken: 'r2', expiresIn: 3600 },
     });
     const auth = new AuthStateManager({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       httpClient: { post, get: vi.fn(), setAccessToken: vi.fn() } as any,
       storage,
     });
@@ -357,6 +372,15 @@ describe('multi-tab refresh', () => {
   });
 });
 
+describe('isSignInIpNotAllowed', () => {
+  it('matches both the envelope and the thrown-error shape, and nothing else', () => {
+    expect(isSignInIpNotAllowed({ errorCode: SIGN_IN_IP_NOT_ALLOWED })).toBe(true);
+    expect(isSignInIpNotAllowed({ cause: { errorCode: SIGN_IN_IP_NOT_ALLOWED } })).toBe(true);
+    expect(isSignInIpNotAllowed({ errorCode: REFRESH_TOKEN_REUSED })).toBe(false);
+    expect(isSignInIpNotAllowed(null)).toBe(false);
+  });
+});
+
 describe('isSessionEndedForSecurity', () => {
   it('matches both the envelope and the thrown-error shape', () => {
     expect(isSessionEndedForSecurity({ errorCode: REFRESH_TOKEN_REUSED })).toBe(true);
@@ -365,6 +389,7 @@ describe('isSessionEndedForSecurity', () => {
 
   it('does not fire on an ordinary expiry', () => {
     expect(isSessionEndedForSecurity({ errorCode: 'IDENTITY_SESSION_REVOKED' })).toBe(false);
+    expect(isSessionEndedForSecurity({ errorCode: SIGN_IN_IP_NOT_ALLOWED })).toBe(false);
     expect(isSessionEndedForSecurity(null)).toBe(false);
     expect(isSessionEndedForSecurity('nope')).toBe(false);
   });

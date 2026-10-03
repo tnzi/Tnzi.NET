@@ -85,6 +85,7 @@ export function toFetchableChallengeUrl(
       `The captcha challenge URL "${path}" is relative to the API root; pass the HttpClient (\`client\`) so it can be resolved against the API base.`,
     );
   }
+  // contract-scan-exempt: the challenge path is a template the backend publishes in `GET captcha/config`.
   return client.resolveUrl(path);
 }
 
@@ -105,6 +106,11 @@ export function useCaptchaWidget(options: UseCaptchaWidgetOptions): UseCaptchaWi
   }
 
   function teardown(): void {
+    // Invalidates any mount still waiting on its script: a teardown that
+    // leaves the sequence alone lets that mount finish into a container that
+    // has since left the page (or into a disposed scope), where the widget is
+    // rendered, holds the provider's resources, and is never destroyed.
+    mountSeq += 1;
     handle.value?.destroy();
     handle.value = null;
     ready.value = false;

@@ -21,7 +21,9 @@ import { EMPTY_DASH } from '../../utils/placeholders'
 import { ref } from 'vue'
 import { NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
+import { useAdminDiagnosticsApi } from '@tnzi/core/services/diagnostics'
 import { useAdminClient } from '../../plugin/client'
+import { unwrapOk } from '../../services/_mappers'
 import { useWidgetData } from '../../headless/useWidgetData'
 import { translatePageKey } from '../../i18n/translate'
 
@@ -33,14 +35,8 @@ interface HealthSnapshot {
   endpoint: string
 }
 
-interface ExceptionSummaryDto {
-  totalCount?: number
-  uniqueExceptionCount?: number
-  windowMinutes?: number
-}
-
 const data = ref<HealthSnapshot | null>(null)
-const client = useAdminClient()
+const diagnostics = useAdminDiagnosticsApi(useAdminClient())
 
 function classifyStatus(errors: number): HealthSnapshot['status'] {
   if (errors === 0) return 'ok'
@@ -49,17 +45,12 @@ function classifyStatus(errors: number): HealthSnapshot['status'] {
 }
 
 useWidgetData(async () => {
-  // The diagnostics endpoint returns either a raw `ExceptionSummaryDto`
-  // or an `ApiResult<ExceptionSummaryDto>` envelope depending on the
-  // pipeline filter chain. Accept both shapes.
+  // `HttpClient` resolves a refused request (403, module missing) with a failed
+  // envelope instead of rejecting; `unwrapOk` turns that into a throw, so a
+  // caller who may not read diagnostics is never shown a healthy system.
   let errors = 0
   try {
-    const res = await client.get<ExceptionSummaryDto | { data?: ExceptionSummaryDto }>(
-      '/admin/diagnostics/exceptions/summary?minutes=60',
-    )
-    const summary = (res && typeof res === 'object' && 'data' in res && res.data
-      ? res.data
-      : res) as ExceptionSummaryDto | undefined
+    const summary = unwrapOk(await diagnostics.getExceptionSummary(60))
     errors = summary?.totalCount ?? 0
   } catch {
     // Module not loaded or permission denied - fall back to "unknown",

@@ -74,11 +74,19 @@ public class CaptchaService : ApplicationService, ICaptchaService
         if (string.IsNullOrEmpty(storedCode))
             return false;
 
+        // ★ 一次性由「占住消费标记」保证，不是由后面那次删除保证。先读、再删、后判定三步之间没有原子性：
+        //   同一个 id:code 并发放进 N 个请求，N 个都能在任何一个删掉之前读到它，于是一张验证码开了 N 次门。
+        //   TrySetAsync 在 Redis 上是 SET NX、在内存缓存上持锁，只有第一个请求占得住；其余一律按已用过处理。
+        //   标记的寿命与验证码本身一致，过期后这个 id 本来也查不到了。
+        var claimed = await _cache.TrySetAsync(ConsumedKey(cacheKey), true, TimeSpan.FromSeconds(DefaultExpirationSeconds));
+
         // 验证后删除（一次性使用）
         await _cache.RemoveAsync(cacheKey);
 
-        return string.Equals(storedCode, captchaCode, StringComparison.OrdinalIgnoreCase);
+        return claimed && string.Equals(storedCode, captchaCode, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string ConsumedKey(string captchaCacheKey) => $"{captchaCacheKey}:consumed";
 
     /// <inheritdoc />
     public async Task RecordLoginFailureAsync(string identifier)

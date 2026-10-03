@@ -24,20 +24,20 @@
          nothing renders when the deployment has no OAuth providers. -->
     <template v-if="linkableProviders.length">
       <NDivider />
-      <h4 class="t-uc-sub-title">{{ t('linked.linkTitle') }}</h4>
-      <p class="t-uc-hint">{{ t('linked.linkHint') }}</p>
-      <div class="t-uc-link-providers">
-        <NButton
-          v-for="p in linkableProviders"
-          :key="p.provider"
-          size="small"
-          tertiary
-          @click="void linkProvider(p.provider)"
-        >
-          <template #icon><TSvgIcon icon="mdi:link-variant" :size="14" /></template>
-          {{ p.displayName || p.provider }}
-        </NButton>
-      </div>
+      <TDetailBlock icon="mdi:link-variant" :title="t('linked.linkTitle')" :hint="t('linked.linkHint')">
+        <div class="t-uc-link-providers">
+          <NButton
+            v-for="p in linkableProviders"
+            :key="p.provider"
+            size="small"
+            tertiary
+            @click="void linkProvider(p.provider)"
+          >
+            <template #icon><TSvgIcon icon="mdi:link-variant" :size="14" /></template>
+            {{ p.displayName || p.provider }}
+          </NButton>
+        </div>
+      </TDetailBlock>
     </template>
   </TUserCenterSection>
 </template>
@@ -48,6 +48,7 @@ import { NButton, NDivider, NPopconfirm, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import type { UserLoginDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
+import TDetailBlock from '../../../components/detail/TDetailBlock.vue'
 import { createGuardedLoader } from '../guarded-loader'
 import { useUserCenterContext } from '../user-center-context'
 

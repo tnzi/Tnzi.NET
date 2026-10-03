@@ -157,7 +157,7 @@ public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentComplete
             return;
 
         _logger.LogDebug("Applying subscription payment-completed. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
-        await _subscriptionService.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
+        var applied = await _subscriptionService.ApplyPaymentCompletedAsync(new SubscriptionPaymentContext
         {
             Purpose = meta.Purpose,
             SubscriptionId = meta.SubscriptionId,
@@ -168,6 +168,16 @@ public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentComplete
             Amount = eventData.Amount,
             Currency = eventData.Currency
         }, cancellationToken);
+
+        // ★ 钱已经到账而订阅没有推进（找不到订阅、付款人不是订阅主、金额低于下界）：这是一笔要人工核对 / 退款的收款。
+        // 状态机返回的是 Result 不是异常，丢掉它 = 这件事零痕迹。重试帮不了这几种原因，所以记 Error 而不是抛。
+        if (!applied.Succeeded)
+        {
+            _logger.LogError(
+                "Payment {TradeNo} ({Amount} {Currency}) for subscription {SubscriptionNo} was received but not applied ({Purpose}): {Reason}. "
+                + "The payment may need manual reconciliation or a refund.",
+                eventData.TradeNo, eventData.Amount, eventData.Currency, eventData.BusinessOrderNo, meta.Purpose, applied.Message);
+        }
     }
 }
 
@@ -198,7 +208,7 @@ public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent
             return;
 
         _logger.LogDebug("Applying subscription payment-failed. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
-        await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+        var applied = await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
         {
             Purpose = meta.Purpose,
             SubscriptionId = meta.SubscriptionId,
@@ -208,6 +218,13 @@ public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent
             PaymentTradeNo = eventData.TradeNo,
             FailReason = eventData.FailReason
         }, cancellationToken);
+
+        if (!applied.Succeeded)
+        {
+            _logger.LogWarning(
+                "Failed payment {TradeNo} for subscription {SubscriptionNo} was not applied ({Purpose}): {Reason}",
+                eventData.TradeNo, eventData.BusinessOrderNo, meta.Purpose, applied.Message);
+        }
     }
 }
 
@@ -238,7 +255,7 @@ public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEve
             return;
 
         _logger.LogDebug("Applying subscription payment-expired. TradeNo: {TradeNo}, Purpose: {Purpose}", eventData.TradeNo, meta.Purpose);
-        await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
+        var applied = await _subscriptionService.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
         {
             Purpose = meta.Purpose,
             SubscriptionId = meta.SubscriptionId,
@@ -248,6 +265,13 @@ public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEve
             PaymentTradeNo = eventData.TradeNo,
             FailReason = "Payment order expired"
         }, cancellationToken);
+
+        if (!applied.Succeeded)
+        {
+            _logger.LogWarning(
+                "Expired payment {TradeNo} for subscription {SubscriptionNo} was not applied ({Purpose}): {Reason}",
+                eventData.TradeNo, eventData.BusinessOrderNo, meta.Purpose, applied.Message);
+        }
     }
 }
 

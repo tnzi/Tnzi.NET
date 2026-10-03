@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Tnzi.Architecture.Tests;
 
 /// <summary>
-/// 从 <c>@tnzi/core</c> 的 <c>services/*/api.ts</c> 里读出「前端实际会请求哪些端点」。
+/// 从五个 <c>@tnzi/*</c> 包的源码里读出「前端实际会请求哪些端点」。
 /// </summary>
 /// <remarks>
 /// <para>
@@ -107,6 +107,22 @@ internal static class FrontendApiScanner
     };
 
     /// <summary>
+    /// <c>HttpClient</c> 上不带请求路径的方法（令牌存取、会话事件）。
+    /// </summary>
+    /// <remarks>
+    /// 显式列出而不是「不在 <see cref="VerbMap"/> 里就跳过」：那样新加一个发请求的方法会被静默放过。
+    /// 这里只放确实不接收路径的成员，与 <c>packages/core/src/http/http.ts</c> 的 <c>HttpClient</c> 对照。
+    /// </remarks>
+    private static readonly HashSet<string> NonRequestMethods = new(StringComparer.Ordinal)
+    {
+        "getAccessToken",
+        "setAccessToken",
+        "refreshAccessToken",
+        "reportUnauthorized",
+        "addUnauthorizedListener",
+    };
+
+    /// <summary>
     /// 动词无法从调用点静态确定的方法 → 该方法可接受的动词集合。
     /// </summary>
     /// <remarks>
@@ -150,26 +166,53 @@ internal static class FrontendApiScanner
     internal sealed record ScanResult(
         IReadOnlyList<Call> Calls,
         IReadOnlyList<string> Unparsed,
-        int TotalCallSites);
+        int TotalCallSites,
+        IReadOnlyList<string> Exempt,
+        int FilesScanned);
 
-    /// <summary>扫 <c>packages/core/src/services/*/api.ts</c>。</summary>
+    /// <summary>
+    /// 被扫描的前端包（<c>src/Tnzi.UI/packages/{name}/src</c>）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 第一版只扫 <c>core/src/services/*/api.ts</c>。而 core 的 AI 域按能力拆成了
+    /// <c>rag.ts</c> / <c>cli.ts</c> / <c>permission.ts</c> / <c>channels.ts</c> / <c>sandbox.ts</c> /
+    /// <c>sub-agent-type.ts</c> / <c>task.ts</c>，ui-admin 也有直接发请求的 service 与组件 ——
+    /// 那 140 多个调用点从来不受对账约束，门禁照样绿。文件名不是契约，调用点才是，
+    /// 所以按「包里所有非测试源文件」扫。
+    /// </remarks>
+    internal static readonly string[] Packages = ["core", "ui", "ui-admin", "ui-ai", "mobile"];
+
+    /// <summary>
+    /// 豁免标记：请求路径在运行期才确定（例如由后端下发的模板、由消费方传入的资源前缀），静态对账无从下手。
+    /// </summary>
+    /// <remarks>
+    /// 写在调用点所在行或上一行：<c>// contract-scan-exempt: &lt;理由&gt;</c>；整份文件都是这类调用点时，
+    /// 在文件任意位置写 <c>// contract-scan-exempt-file: &lt;理由&gt;</c>。<b>理由必填</b>（正则要求冒号后有字），
+    /// 豁免的调用点逐条列在 <see cref="ScanResult.Exempt"/> 里，不是悄悄消失。
+    /// </remarks>
+    private static readonly Regex ExemptLine = new(@"contract-scan-exempt:\s*\S", RegexOptions.Compiled);
+
+    private static readonly Regex ExemptFile = new(@"contract-scan-exempt-file:\s*\S", RegexOptions.Compiled);
+
+    /// <summary>扫五个前端包 <c>src/</c> 下全部非测试的 <c>.ts</c> / <c>.vue</c>。</summary>
     public static ScanResult Scan(string repoRoot)
     {
-        var servicesDir = Path.Combine(
-            repoRoot, "src", "Tnzi.UI", "packages", "core", "src", "services");
-
         var calls = new List<Call>();
         var unparsed = new List<string>();
+        var exempt = new List<string>();
         var total = 0;
+        var filesScanned = 0;
 
-        if (!Directory.Exists(servicesDir))
-            return new ScanResult(calls, unparsed, total);
-
-        foreach (var file in Directory.GetFiles(servicesDir, "api.ts", SearchOption.AllDirectories)
-                     .OrderBy(f => f, StringComparer.Ordinal))
+        foreach (var file in SourceFiles(repoRoot))
         {
-            var text = File.ReadAllText(file);
+            filesScanned++;
+            var original = File.ReadAllText(file);
             var relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+            var fileExempt = ExemptFile.IsMatch(original);
+            var originalLines = original.Split('\n');
+
+            // 注释里的 `client.upload (` 之类不是调用点；抹成空格而不是删掉，行号与偏移都不变。
+            var text = BlankComments(original);
 
             var constDefs = ConstDef.Matches(text)
                 .Select(m => (Pos: m.Index, Name: m.Groups[1].Value, Value: m.Groups[2].Value))
@@ -181,10 +224,22 @@ internal static class FrontendApiScanner
 
             foreach (Match call in ClientCall.Matches(text))
             {
-                total++;
                 var method = call.Groups[1].Value;
                 var line = LineOf(text, call.Index);
                 var where = $"{relative}:{line} client.{method}";
+
+                if (fileExempt
+                    || ExemptLine.IsMatch(originalLines[line - 1])
+                    || (line >= 2 && ExemptLine.IsMatch(originalLines[line - 2])))
+                {
+                    exempt.Add(where);
+                    continue;
+                }
+
+                if (NonRequestMethods.Contains(method))
+                    continue;
+
+                total++;
 
                 if (!VerbMap.ContainsKey(method))
                 {
@@ -216,7 +271,84 @@ internal static class FrontendApiScanner
             }
         }
 
-        return new ScanResult(calls, unparsed, total);
+        return new ScanResult(calls, unparsed, total, exempt, filesScanned);
+    }
+
+    private static IEnumerable<string> SourceFiles(string repoRoot)
+    {
+        foreach (var package in Packages)
+        {
+            var srcDir = Path.Combine(repoRoot, "src", "Tnzi.UI", "packages", package, "src");
+            if (!Directory.Exists(srcDir))
+                continue;
+
+            var files = Directory.EnumerateFiles(srcDir, "*.*", SearchOption.AllDirectories)
+                .Where(f => f.EndsWith(".ts", StringComparison.Ordinal) || f.EndsWith(".vue", StringComparison.Ordinal))
+                .Where(f => !f.EndsWith(".d.ts", StringComparison.Ordinal)
+                            && !f.EndsWith(".test.ts", StringComparison.Ordinal)
+                            && !f.EndsWith(".spec.ts", StringComparison.Ordinal))
+                .Where(f => !f.Replace('\\', '/').Contains("/__tests__/", StringComparison.Ordinal))
+                .OrderBy(f => f, StringComparer.Ordinal);
+
+            foreach (var file in files)
+                yield return file;
+        }
+    }
+
+    /// <summary>
+    /// 把 <c>//</c> 行注释与 <c>/* */</c> 块注释抹成空格（换行保留），字符串与模板字面量原样跳过。
+    /// </summary>
+    /// <remarks>
+    /// 字符串外遇到反斜杠时连同下一个字符一起跳过：正则字面量 <c>/^https?:\/\//i</c> 里的 <c>\/\/</c>
+    /// 否则会被读成行注释的开头。模板里的 <c>${…}</c> 嵌套不单独跟踪 —— 内层反引号成对出现，
+    /// 开合次数仍然配平，只是中间一小段被当成代码扫，而那里不会有注释。
+    /// </remarks>
+    internal static string BlankComments(string text)
+    {
+        var chars = text.ToCharArray();
+        var i = 0;
+        while (i < chars.Length)
+        {
+            var c = chars[i];
+            if (c is '\'' or '"' or '`')
+            {
+                // 引号字符串不跨行：.vue 模板正文里的撇号（don't）只吞到行尾，不会一路吞掉后面的代码。
+                i++;
+                while (i < chars.Length && chars[i] != c && (c == '`' || chars[i] != '\n'))
+                    i += chars[i] == '\\' ? 2 : 1;
+                i++;
+            }
+            else if (c == '\\')
+            {
+                i += 2;
+            }
+            else if (c == '/' && i + 1 < chars.Length && chars[i + 1] == '/')
+            {
+                while (i < chars.Length && chars[i] != '\n')
+                    chars[i++] = ' ';
+            }
+            else if (c == '/' && i + 1 < chars.Length && chars[i + 1] == '*')
+            {
+                while (i < chars.Length && !(chars[i] == '*' && i + 1 < chars.Length && chars[i + 1] == '/'))
+                {
+                    if (chars[i] != '\n')
+                        chars[i] = ' ';
+                    i++;
+                }
+
+                if (i < chars.Length)
+                {
+                    chars[i++] = ' ';
+                    chars[i++] = ' ';
+                }
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        return new string(chars);
     }
 
     private static readonly IReadOnlyDictionary<string, string> EmptyBinding =

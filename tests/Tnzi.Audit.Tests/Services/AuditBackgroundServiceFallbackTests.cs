@@ -51,7 +51,7 @@ public class AuditBackgroundServiceFallbackTests
 
         public Task SaveEntityEntriesAsync(IEnumerable<AuditEntityEntry> entries) => Task.CompletedTask;
 
-        public Task<int> DeleteExpiredAsync(int days) => Task.FromResult(0);
+        public Task<int> DeleteExpiredAsync(int days, CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 
     private static AuditOperation Operation(string functionName) => new()

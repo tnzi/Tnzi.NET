@@ -1,7 +1,11 @@
 ﻿import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
 import { resolve } from 'path';
 
 export default defineConfig({
+  // SFCs are compiled so a page can actually be mounted (TAuthPage); most
+  // tests still target the headless layer.
+  plugins: [vue()],
   resolve: {
     alias: {
       '@': resolve(import.meta.dirname, 'src'),

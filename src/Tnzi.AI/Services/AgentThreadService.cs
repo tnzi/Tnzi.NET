@@ -10,6 +10,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     private readonly IRepository<AgentThreadEntity, Guid> _repository;
     private readonly IRepository<AgentThreadMessage, Guid> _messageRepository;
     private readonly IRepository<Agent, Guid> _agentRepository;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
 
     /// <summary>
     /// 按 threadId 的消息写入互斥锁，防止并发写入产生相同 Order
@@ -20,12 +22,28 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         IRepository<AgentThreadEntity, Guid> repository,
         IRepository<AgentThreadMessage, Guid> messageRepository,
         IRepository<Agent, Guid> agentRepository,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _messageRepository = Check.NotNull(messageRepository);
         _agentRepository = Check.NotNull(agentRepository);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
+    }
+
+    /// <summary>
+    /// 按 Id 找调用者可用的 Agent：本租户的，外加（租户调用者）宿主级共享定义 ——
+    /// 与 <c>AgentResolver</c> 同一条可见性，否则租户能解析共享 Agent 却建不出它的会话线程。
+    /// </summary>
+    private async Task<Agent?> FindVisibleAgentAsync(Guid agentId, CancellationToken ct = default)
+    {
+        var scope = SharedAgentScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser);
+        return scope.IsTenantCaller
+            ? await scope.Apply(_agentRepository.AsQueryable()).FirstOrDefaultAsync(a => a.Id == agentId, ct)
+            : await _agentRepository.GetAsync(agentId, ct);
     }
 
     public async Task<Result<AgentThreadDto>> CreateAsync(CreateAgentThreadDto input)
@@ -34,7 +52,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         Agent? agent = null;
         if (input.AgentId.HasValue)
         {
-            agent = await _agentRepository.GetAsync(input.AgentId.Value);
+            agent = await FindVisibleAgentAsync(input.AgentId.Value);
             if (agent == null)
             {
                 return Fail<AgentThreadDto>("Agent not found", 404, ErrorCodes.AgentNotFound);
@@ -75,7 +93,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
 
         if (entity.AgentId.HasValue)
         {
-            var agent = await _agentRepository.GetAsync(entity.AgentId.Value);
+            var agent = await FindVisibleAgentAsync(entity.AgentId.Value);
             dto.AgentName = agent?.Name;
         }
 
@@ -242,7 +260,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // 仅当提供 agentId 时验证 Agent 存在
         if (agentId.HasValue)
         {
-            var agentDef = await _agentRepository.GetAsync(agentId.Value, ct);
+            var agentDef = await FindVisibleAgentAsync(agentId.Value, ct);
             if (agentDef == null)
             {
                 throw new BusinessException("Agent not found", ErrorCodes.AgentNotFound, 404);

@@ -80,8 +80,18 @@ public class SiteVerifyCaptchaProvider : ICaptchaProvider
             using var response = await client.PostAsync(verifyUrl, content, timeout.Token);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Captcha provider {Provider} verify endpoint answered HTTP {StatusCode}.", Name, (int)response.StatusCode);
-                return CaptchaVerification.Fail(Name, CaptchaFailure.VerifierUnavailable, $"HTTP {(int)response.StatusCode}");
+                var status = (int)response.StatusCode;
+                if (IsTransientStatus(response.StatusCode))
+                {
+                    _logger.LogWarning("Captcha provider {Provider} verify endpoint answered HTTP {StatusCode}.", Name, status);
+                    return CaptchaVerification.Fail(Name, CaptchaFailure.VerifierUnavailable, $"HTTP {status}");
+                }
+
+                // 其余非 2xx（4xx、3xx）说的是「这个请求本身不对」：地址配错、参数被拒、令牌畸形。
+                // 它不是服务宕机，不能落进 OnVerifierUnavailable=Allow 的放行口 —— 否则一枚构造出来
+                // 让验证服务回 400 的令牌就等于通行证。
+                _logger.LogError("Captcha provider {Provider} verify endpoint rejected the request with HTTP {StatusCode}; check VerifyUrl and keys.", Name, status);
+                return CaptchaVerification.Fail(Name, CaptchaFailure.Rejected, $"HTTP {status}");
             }
 
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
@@ -118,6 +128,15 @@ public class SiteVerifyCaptchaProvider : ICaptchaProvider
 
         var verification = new SiteVerifyOutcome(payload.Hostname, _descriptor.ReportsAction ? payload.Action : null, _descriptor.ReportsScore ? payload.Score : null);
         return ApplyPolicies(request, verification);
+    }
+
+    /// <summary>
+    /// 只有这些状态码算「验证服务暂时不可用」：5xx、408（超时）、429（限流）。
+    /// </summary>
+    internal static bool IsTransientStatus(HttpStatusCode statusCode)
+    {
+        var code = (int)statusCode;
+        return code >= 500 || statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests;
     }
 
     private CaptchaVerification ApplyPolicies(CaptchaVerificationRequest request, SiteVerifyOutcome outcome)

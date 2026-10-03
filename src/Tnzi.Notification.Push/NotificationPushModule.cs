@@ -85,6 +85,26 @@ public class NotificationPushModule : TnziApplicationModule
         // IPushDeviceService 用 GetService 而不是构造参数注入：PushSender 的构造签名
         // 是 (options, logger) 的公开形状，消费方可能自己 new 它（测试里就有）。
         // 拿不到时投递照常，只是死令牌不会被退役 —— 那是可降级的，投递本身不受影响。
-        return new PushSender(profile, sp.GetRequiredService<ILogger<PushSender>>(), sp.GetService<IPushDeviceService>(), providerKey);
+        var options = sp.GetRequiredService<IOptions<NotificationOptions>>().Value;
+        return new PushSender(profile, sp.GetRequiredService<ILogger<PushSender>>(), sp.GetService<IPushDeviceService>(), providerKey,
+            senderIdMismatchIsConclusive: CountFirebaseProjects(options) <= 1);
+    }
+
+    /// <summary>
+    /// 部署里配置了几个不同的 Firebase 项目（默认节 + 全部具名节，按项目 ID 去重）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 按项目 ID 而不是按节数：两个键指向同一个项目时令牌仍只属于一个项目，<c>SenderIdMismatch</c>
+    /// 照样确证令牌已死；只有两个<b>不同</b>项目并存时，它才可能只是「令牌属于另一个项目」。
+    /// </remarks>
+    internal static int CountFirebaseProjects(NotificationOptions options)
+    {
+        var profiles = options.PushSenders.Values.Append(options.PushSender).OfType<PushSenderOptions>();
+        return profiles
+            .Where(p => p.Provider.Equals("fcm", StringComparison.OrdinalIgnoreCase) || p.Provider.Equals("firebase", StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.FirebaseProjectId.Trim())
+            .Where(id => id.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
     }
 }

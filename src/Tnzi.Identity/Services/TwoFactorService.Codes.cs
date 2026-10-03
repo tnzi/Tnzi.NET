@@ -20,9 +20,9 @@ public partial class TwoFactorService
     /// <inheritdoc />
     public async Task<Result> SendCodeByAddressAsync(string address, TwoFactorType type, VerificationCodePurpose purpose, Guid? userId = null)
     {
-        if (type == TwoFactorType.Totp)
+        if (type is TwoFactorType.Totp or TwoFactorType.Passkey)
         {
-            return Fail("TOTP does not require sending verification codes", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail($"{type} does not require sending verification codes", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         // ★ Unknown 只属于加列迁移之前的历史行，验码时永不匹配 —— 用它发码等于发一枚
@@ -147,9 +147,9 @@ public partial class TwoFactorService
             return Fail<string?>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        if (type == TwoFactorType.Totp)
+        if (type is TwoFactorType.Totp or TwoFactorType.Passkey)
         {
-            return Fail<string?>("TOTP does not require sending verification codes", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<string?>($"{type} does not require sending verification codes", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         // ★ 要求地址**已验证**，而不是「填了就行」：往一个未经证实的地址发码，

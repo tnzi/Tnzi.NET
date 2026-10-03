@@ -1,5 +1,6 @@
 <template>
   <TTabsPage
+    v-model:section="activeSection"
     :sections="sections"
     :title="title"
     icon="mdi:bank-plus"
@@ -83,7 +84,38 @@
         :row-actions="rowActions"
         :translate="t"
         :show-header="false"
-      />
+        :detail-width="720"
+        :detail-title="detailTitle"
+      >
+        <!-- Deposit detail (header + lines), deep-linkable as ?detail=view:<id>.
+             `onView` loads the full record: list rows do not carry the lines. -->
+        <template #detail>
+          <div v-if="viewed" class="fin-dep__detail">
+            <NDescriptions :column="2" size="small" label-placement="left" bordered>
+              <NDescriptionsItem :label="t('detail.number')">{{ viewed.number ?? t('draftLabel') }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.date')">{{ fmtDate(viewed.depositDate) }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.from')">{{ viewed.fromAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.to')">{{ viewed.toAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.currency')">{{ viewed.currency }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.amount')">
+                {{ fmtMoney(viewed.amount, viewed.currency) }}
+              </NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.reference')">{{ viewed.reference ?? EMPTY_DASH }}</NDescriptionsItem>
+              <NDescriptionsItem :label="t('detail.memo')">{{ viewed.memo ?? EMPTY_DASH }}</NDescriptionsItem>
+            </NDescriptions>
+            <TResponsiveTable
+              :columns="lineColumns"
+              :data="viewed.lines"
+              :row-key="(r: DepositLineDto) => r.id"
+              size="small"
+              mobile="scroll"
+              :pagination="false"
+              :bordered="false"
+              :empty-text="t('detail.noLines')"
+            />
+          </div>
+        </template>
+      </TCrudPage>
     </template>
 
     <template #overlays>
@@ -174,34 +206,6 @@
           </div>
         </NForm>
       </TDetailHost>
-
-      <!-- Deposit detail (header + lines). -->
-      <TDetailHost :state="detail" :title="t('detail.title')" :width="720" :footer="false" :translate="t">
-        <div v-if="detail.data.value" class="fin-dep__detail">
-          <NDescriptions :column="2" size="small" label-placement="left" bordered>
-            <NDescriptionsItem :label="t('detail.number')">{{ detail.data.value.number ?? t('draftLabel') }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.date')">{{ fmtDate(detail.data.value.depositDate) }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.from')">{{ detail.data.value.fromAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.to')">{{ detail.data.value.toAccountName ?? EMPTY_DASH }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.currency')">{{ detail.data.value.currency }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.amount')">
-              {{ fmtMoney(detail.data.value.amount, detail.data.value.currency) }}
-            </NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.reference')">{{ detail.data.value.reference ?? EMPTY_DASH }}</NDescriptionsItem>
-            <NDescriptionsItem :label="t('detail.memo')">{{ detail.data.value.memo ?? EMPTY_DASH }}</NDescriptionsItem>
-          </NDescriptions>
-          <TResponsiveTable
-            :columns="lineColumns"
-            :data="detail.data.value.lines"
-            :row-key="(r: DepositLineDto) => r.id"
-            size="small"
-            mobile="scroll"
-            :pagination="false"
-            :bordered="false"
-            :empty-text="t('detail.noLines')"
-          />
-        </div>
-      </TDetailHost>
     </template>
   </TTabsPage>
 </template>
@@ -226,7 +230,6 @@ import {
   createFinanceBridge,
   FinanceDocumentStatus,
   type CreateDepositFundsLineDto,
-  type DepositDto,
   type DepositLineDto,
   type UndepositedReceiptDto,
 } from '../../services/bridges/finance-bridge'
@@ -234,6 +237,7 @@ import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
+import { useViewedRecord } from './viewed-record'
 import { fmtMoney, fmtDate, tsToIsoDate } from './money'
 import {
   buildDepositColumns,
@@ -379,20 +383,35 @@ watch(
   { immediate: true },
 )
 
-// ── Deposits list ───────────────────────────────────────────────
+// ── Deposits list + detail drawer ───────────────────────────────
+// The full deposit behind the read-only drawer (list rows carry no lines).
+const viewing = useViewedRecord((id) => bridge.deposits.getById(id), (error) => message.error(error))
+const viewed = viewing.record
+const detailTitle = () => t('detail.title')
+
 const crud = useCrudPage<DepositRow>({
   pageId: 'finance.deposits',
   permission: 'finance.document',
   columns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.deposits.fetch(q),
-  // The page never opens this engine's overlay (no create/edit form here; the
-  // read-only drawer below is its own useDetail on `?detail=`), so it must not
-  // claim the key: two engines reconciling one key wipe a refreshed / shared
-  // `?detail=view:<id>` whose record is off the loaded page, and the drawer
-  // closes with no error (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
-  detailUrl: false,
+  // The read-only drawer is this engine's own view (`#detail`), deep-linked as
+  // `?detail=view:<id>`; a cold link to a deposit off the loaded page resolves here.
+  loadDetailById: (id) => bridge.deposits.getById(id),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
+
+// The drawer lives in the Deposits tab, whose pane is only mounted while it is
+// active. A view opened from a link that does not also carry `?section=deposits`
+// switches there so the drawer has somewhere to render.
+const activeSection = ref('queue')
+watch(
+  () => crud.formModal.visible.value && crud.formModal.mode.value === 'view',
+  (open) => {
+    if (open) activeSection.value = 'deposits'
+  },
+  { immediate: true },
+)
 
 // ── Record deposit ──────────────────────────────────────────────
 interface FundsLineForm {
@@ -501,9 +520,6 @@ async function submitCreate() {
   }
 }
 
-// ── Detail drawer ───────────────────────────────────────────────
-const detail = useDetail<DepositDto>({ mode: 'drawer', url: 'detail', loadData: (id) => bridge.deposits.getById(String(id)) })
-
 // ── Post / void / delete ────────────────────────────────────────
 async function run(action: () => Promise<unknown>, successKey: string) {
   try {
@@ -520,7 +536,7 @@ const isDraft = (r: DepositRow) => r.status === FinanceDocumentStatus.Draft
 const isPosted = (r: DepositRow) => r.status === FinanceDocumentStatus.Posted
 
 const rowActions: RowAction<DepositRow>[] = [
-  { key: 'detail', label: 'actions.detail', onClick: (r) => void detail.open('view', String(r.id ?? '')) },
+  { key: 'detail', label: 'actions.detail', onClick: (r) => crud.openView(r) },
   {
     key: 'post',
     label: 'actions.post',

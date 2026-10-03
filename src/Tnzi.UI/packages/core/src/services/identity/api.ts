@@ -34,6 +34,8 @@ import type {
   SendTwoFactorCodeDto,
   TwoFactorChallengeDto,
   VerifyTwoFactorDto,
+  TwoFactorPasskeyBeginDto,
+  TwoFactorPasskeyCompleteDto,
   PasskeyOptionsDto,
   PasskeyCompleteDto,
   PasskeyCredentialDto,
@@ -122,6 +124,9 @@ import type {
   SendStepUpCodeDto,
   StepUpCodeDto,
   StepUpPasskeyDto,
+  // Admin user security
+  UserSignInPolicyDto,
+  SetIpAllowListDto,
 } from './types';
 
 // Route constants aligned with backend controllers
@@ -133,6 +138,7 @@ const ADMIN_ORG_BASE = '/admin/organizations';
 const ADMIN_SESSION_BASE = '/admin/sessions';
 const ADMIN_LOGIN_LOG_BASE = '/admin/login-logs';
 const ADMIN_LOGIN_SECURITY_BASE = '/admin/login-security';
+const ADMIN_USER_SECURITY_BASE = '/admin/user-security';
 const ADMIN_USER_DETAIL_BASE = '/admin/user-details';
 const ADMIN_TENANT_BASE = '/admin/tenants';
 const ADMIN_INVITATION_BASE = '/admin/invitations';
@@ -316,6 +322,19 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
     /** Verify 2FA and login */
     verifyTwoFactor: (data: VerifyTwoFactorDto) =>
       client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa`, data, cookieAware),
+
+    /**
+     * Passkey as the second factor, first leg: assertion options bound to the
+     * account the temp token names (its own credentials in `allowCredentials`,
+     * which a YubiKey needs). Prefer the `verifyTwoFactorWithPasskey` helper in
+     * `services/identity/passkey` over calling the two legs directly.
+     */
+    beginTwoFactorPasskey: (data: TwoFactorPasskeyBeginDto) =>
+      client.post<PasskeyOptionsDto>(`${AUTH_BASE}/verify-2fa/passkey/begin`, data),
+
+    /** Passkey as the second factor, second leg: verifies the assertion and signs in. */
+    completeTwoFactorPasskey: (data: TwoFactorPasskeyCompleteDto) =>
+      client.post<TokenResultDto>(`${AUTH_BASE}/verify-2fa/passkey/complete`, data, cookieAware),
 
     // -- Passkey (WebAuthn) --
     // Two-step by nature: begin produces browser options plus an opaque state
@@ -1035,6 +1054,59 @@ export function useAdminLoginSecurityApi(client: HttpClient) {
     /** Detect abnormal login risk for a user */
     detectAbnormalLogin: (userId: string, params?: { ipAddress?: string; userAgent?: string }) =>
       client.post<AbnormalLoginResultDto>(`${ADMIN_LOGIN_SECURITY_BASE}/user/${userId}/detect-abnormal`, null, { params }),
+  };
+}
+
+// ============================================
+// Admin User Security API (DefaultUserSecurityAdminController)
+// ============================================
+
+/**
+ * Sign-in security of another account: its two-factor methods and its sign-in IP allow-list.
+ *
+ * Reads ride `user.view`; every write rides `user.security`, a grant separate from `user.update`
+ * (editing a phone number is not the same job as removing someone's second factor).
+ * Management can suspend, resume, disable, reset and pick the preferred method, and can enable the
+ * code-based methods (SMS / email) on an already-verified address; it can never enrol an
+ * authenticator app for someone else, that stays self-service in the user centre.
+ */
+export function useAdminUserSecurityApi(client: HttpClient) {
+  return {
+    /** Per-method two-factor state of the account. */
+    getTwoFactorStatus: (userId: string) =>
+      client.get<TwoFactorStatusDto>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor`),
+
+    /** Master switch off; configured methods are kept and `resume` restores them as they were. */
+    suspendTwoFactor: (userId: string) =>
+      client.post<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/suspend`),
+
+    /** Master switch back on. */
+    resumeTwoFactor: (userId: string) =>
+      client.post<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/resume`),
+
+    /** Turn on a code-based method (SMS / email). The authenticator is refused here. */
+    enableTwoFactorMethod: (userId: string, data: TwoFactorMethodRequestDto) =>
+      client.post<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/methods/enable`, data),
+
+    /** Turn one method off, leaving the others alone. */
+    disableTwoFactorMethod: (userId: string, data: TwoFactorMethodRequestDto) =>
+      client.post<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/methods/disable`, data),
+
+    /** Choose the method offered first at sign-in; it has to be on already. */
+    setPreferredTwoFactor: (userId: string, data: TwoFactorMethodRequestDto) =>
+      client.put<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/preferred`, data),
+
+    /** Clear everything, authenticator key included. For a lost device: the holder enrols again. */
+    resetTwoFactor: (userId: string) =>
+      client.post<void>(`${ADMIN_USER_SECURITY_BASE}/${userId}/two-factor/reset`),
+
+    /** The account's sign-in policy (IP allow-list). No row reads as all-off, not as 404. */
+    getSignInPolicy: (userId: string) =>
+      client.get<UserSignInPolicyDto>(`${ADMIN_USER_SECURITY_BASE}/${userId}/sign-in-policy`),
+
+    /** Rewrite the sign-in IP allow-list. */
+    setIpAllowList: (userId: string, data: SetIpAllowListDto) =>
+      client.put<UserSignInPolicyDto>(`${ADMIN_USER_SECURITY_BASE}/${userId}/sign-in-policy/ip-allow-list`, data),
   };
 }
 

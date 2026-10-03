@@ -84,6 +84,13 @@ public static class ErrorCodes
     public const string PaymentOffSessionChargeFailed = "PAYMENT_OFFSESSION_CHARGE_FAILED";
 
     /// <summary>
+    /// off-session 扣款在建单之前就被拒绝（金额、支付方式、渠道、计税）：没有支付记录，
+    /// 因此<b>不会</b>有任何支付完成 / 失败事件回流。作为 <c>Result.ErrorCode</c> 返回，
+    /// 调用方据此判断失败要不要由自己收口（见 <c>IPaymentService.ChargeOffSessionAsync</c>）。
+    /// </summary>
+    public const string PaymentOffSessionNotAttempted = "PAYMENT_OFFSESSION_NOT_ATTEMPTED";
+
+    /// <summary>
     /// 测试渠道（Null）未启用（需开启 Payment:AllowTestProvider）
     /// </summary>
     public const string PaymentTestProviderDisabled = "PAYMENT_TEST_PROVIDER_DISABLED";
@@ -446,6 +453,11 @@ public static class ErrorCodes
     /// 试用期开通不产生首期支付，无法使用优惠券
     /// </summary>
     public const string CouponNotApplicableToTrial = "COUPON_NOT_APPLICABLE_TO_TRIAL";
+
+    /// <summary>
+    /// 与同一业务单号上已生效的券不可叠加（当前券不可叠加而单上已有券，或单上已有一张不可叠加的券）
+    /// </summary>
+    public const string CouponNotStackable = "COUPON_NOT_STACKABLE";
 
     #endregion
 

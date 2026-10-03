@@ -173,6 +173,7 @@ public class CliBudgetGateTests : IntegratedTestBase<CliBudgetDbContext>
             Mock.Of<ICliMcpConfigComposer>(),
             new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
             Mock.Of<ICliExecutableResolver>(),
+            new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
             Mock.Of<IAgentGrantService>(),
             Mock.Of<ISkillService>(),
             new CliRunSignalHub(),

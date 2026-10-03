@@ -52,10 +52,12 @@ public class TwoFactorServiceTests
     }
 
     /// <summary>Build a service whose OtpOptions snapshot is the supplied instance.</summary>
-    private TwoFactorService CreateServiceWithOtp(OtpOptions otp)
+    private TwoFactorService CreateServiceWithOtp(OtpOptions otp, bool passkeyWiringOn = false)
     {
         var optionsMock = new Mock<IOptionsSnapshot<IdentityOptions>>();
-        optionsMock.Setup(x => x.Value).Returns(new IdentityOptions { Otp = otp });
+        var options = new IdentityOptions { Otp = otp };
+        options.Passkey.Enabled = passkeyWiringOn;
+        optionsMock.Setup(x => x.Value).Returns(options);
         return new TwoFactorService(
             _repositoryMock.Object,
             _userManagerMock.Object,
@@ -63,6 +65,19 @@ public class TwoFactorServiceTests
             _eventBusMock.Object,
             optionsMock.Object);
     }
+
+    /// <summary>The passkey channel fully on: Otp.EnablePasskey AND the WebAuthn wiring itself.</summary>
+    private TwoFactorService CreateServiceWithPasskeyChannel()
+        => CreateServiceWithOtp(new OtpOptions { EnableEmail = true, EnableSms = false, EnableTotp = true, EnablePasskey = true }, passkeyWiringOn: true);
+
+    private static UserPasskeyInfo APasskey() => new(
+        credentialId: [1, 2, 3], publicKey: [4, 5, 6], createdAt: DateTimeOffset.UtcNow, signCount: 1,
+        transports: ["usb"], isUserVerified: true, isBackupEligible: false, isBackedUp: false,
+        attestationObject: [7], clientDataJson: [8]);
+
+    private void GivenPasskeys(User user, int count)
+        => _userManagerMock.Setup(x => x.GetPasskeysAsync(user))
+            .ReturnsAsync(Enumerable.Range(0, count).Select(_ => APasskey()).ToList());
 
     [Fact]
     public async Task SendSmsCodeAsync_WhenSmsDisabled_ReturnsFalse()
@@ -713,6 +728,241 @@ public class TwoFactorServiceTests
         var types = await service.GetEnabledTwoFactorTypesAsync(user);
 
         Assert.Empty(types);
+    }
+
+    #region Passkey / 安全密钥作为第四种方式
+
+    /// <summary>
+    /// 渠道开着（两个开关都开）且账号登记过凭据 ⇒ 可启用；没登记 ⇒ 列出来但要先去登记（RequiresAddress 的 passkey 语义）。
+    /// </summary>
+    [Fact]
+    public async Task GetTwoFactorStatusAsync_ListsPasskey_WhenBothSwitchesAreOn()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", Email = "u@example.com", EmailConfirmed = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        var service = CreateServiceWithPasskeyChannel();
+
+        GivenPasskeys(user, 0);
+        var without = (await service.GetTwoFactorStatusAsync(userId)).Data!.Methods.Single(m => m.Type == TwoFactorType.Passkey);
+        Assert.False(without.Available);
+        Assert.False(without.Enabled);
+        Assert.True(without.RequiresAddress); // "register a passkey first"
+
+        GivenPasskeys(user, 1);
+        var with = (await service.GetTwoFactorStatusAsync(userId)).Data!.Methods.Single(m => m.Type == TwoFactorType.Passkey);
+        Assert.True(with.Available);
+        Assert.False(with.RequiresAddress);
+    }
+
+    /// <summary>
+    /// ★ 只开 Otp.EnablePasskey 而没开 WebAuthn 接线 ⇒ 这一行根本不出现，也绝不查凭据存储：
+    /// 没接 passkey 的部署一次都不该为此查表。
+    /// </summary>
+    [Fact]
+    public async Task GetTwoFactorStatusAsync_OmitsPasskey_UnlessTheWiringIsOnToo()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", Email = "u@example.com", EmailConfirmed = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        var wiringOff = CreateServiceWithOtp(new OtpOptions { EnableEmail = true, EnablePasskey = true }, passkeyWiringOn: false);
+        var channelOff = CreateServiceWithOtp(new OtpOptions { EnableEmail = true, EnablePasskey = false }, passkeyWiringOn: true);
+
+        Assert.DoesNotContain((await wiringOff.GetTwoFactorStatusAsync(userId)).Data!.Methods, m => m.Type == TwoFactorType.Passkey);
+        Assert.DoesNotContain((await channelOff.GetTwoFactorStatusAsync(userId)).Data!.Methods, m => m.Type == TwoFactorType.Passkey);
+        _userManagerMock.Verify(x => x.GetPasskeysAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EnableTwoFactorAsync_Passkey_RequiresARegisteredCredential()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        var service = CreateServiceWithPasskeyChannel();
+
+        GivenPasskeys(user, 0);
+        var refused = await service.EnableTwoFactorAsync(userId, new EnableTwoFactorDto { Type = TwoFactorType.Passkey });
+        Assert.False(refused.Succeeded);
+        Assert.Equal(400, refused.Code);
+        Assert.False(user.PasskeyTwoFactorEnabled);
+
+        GivenPasskeys(user, 1);
+        var enabled = await service.EnableTwoFactorAsync(userId, new EnableTwoFactorDto { Type = TwoFactorType.Passkey });
+        Assert.True(enabled.Succeeded);
+        Assert.True(user.PasskeyTwoFactorEnabled);
+        Assert.True(user.TwoFactorEnabled);
+        Assert.Equal(TwoFactorType.Passkey, user.PreferredTwoFactorType);
+    }
+
+    /// <summary>
+    /// 无首选时 passkey 排最前（按抗钓鱼强度排，它比验证器 App 强）；用户自己选过的首选则原样保留。
+    /// </summary>
+    [Fact]
+    public async Task EnableTwoFactorAsync_Passkey_IsPickedFirst_UnlessTheUserAlreadyChose()
+    {
+        var service = CreateServiceWithPasskeyChannel();
+
+        // No preference on record: strength order picks the passkey, and the challenge lists it first.
+        var undecidedId = Guid.NewGuid();
+        var undecided = new User { Id = undecidedId, UserName = "u1", AuthenticatorTwoFactorEnabled = true, TwoFactorEnabled = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(undecidedId.ToString())).ReturnsAsync(undecided);
+        _userManagerMock.Setup(x => x.GetAuthenticatorKeyAsync(undecided)).ReturnsAsync("KEY");
+        GivenPasskeys(undecided, 1);
+        await service.EnableTwoFactorAsync(undecidedId, new EnableTwoFactorDto { Type = TwoFactorType.Passkey });
+        Assert.Equal(TwoFactorType.Passkey, undecided.PreferredTwoFactorType);
+        Assert.Equal(new[] { TwoFactorType.Passkey, TwoFactorType.Totp }, await service.GetEnabledTwoFactorTypesAsync(undecided));
+
+        // A choice already made is not overridden by a stronger method arriving.
+        var decidedId = Guid.NewGuid();
+        var decided = new User { Id = decidedId, UserName = "u2", AuthenticatorTwoFactorEnabled = true, TwoFactorEnabled = true, PreferredTwoFactorType = TwoFactorType.Totp };
+        _userManagerMock.Setup(x => x.FindByIdAsync(decidedId.ToString())).ReturnsAsync(decided);
+        _userManagerMock.Setup(x => x.GetAuthenticatorKeyAsync(decided)).ReturnsAsync("KEY");
+        GivenPasskeys(decided, 1);
+        await service.EnableTwoFactorAsync(decidedId, new EnableTwoFactorDto { Type = TwoFactorType.Passkey });
+        Assert.Equal(TwoFactorType.Totp, decided.PreferredTwoFactorType);
+        Assert.Equal(new[] { TwoFactorType.Totp, TwoFactorType.Passkey }, await service.GetEnabledTwoFactorTypesAsync(decided));
+    }
+
+    /// <summary>停用只关开关，凭据留着：它们还是登录与二次确认的凭据。</summary>
+    [Fact]
+    public async Task DisableTwoFactorMethodAsync_Passkey_ClearsTheFlagButKeepsTheCredentials()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", PasskeyTwoFactorEnabled = true, TwoFactorEnabled = true, PreferredTwoFactorType = TwoFactorType.Passkey };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        var service = CreateServiceWithPasskeyChannel();
+
+        var result = await service.DisableTwoFactorMethodAsync(userId, TwoFactorType.Passkey);
+
+        Assert.True(result.Succeeded);
+        Assert.False(user.PasskeyTwoFactorEnabled);
+        Assert.False(user.TwoFactorEnabled);
+        Assert.Null(user.PreferredTwoFactorType);
+        _userManagerMock.Verify(x => x.RemovePasskeyAsync(It.IsAny<User>(), It.IsAny<byte[]>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DisableTwoFactorAsync_ResetsThePasskeyFlagToo()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", PasskeyTwoFactorEnabled = true, TwoFactorEnabled = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.ResetAuthenticatorKeyAsync(user)).ReturnsAsync(IdentityResult.Success);
+        // The repository IS an IQueryable; back it with an async-capable empty set for the code sweep.
+        var noCodes = new List<TwoFactorCode>().BuildMock();
+        var queryable = _repositoryMock.As<IQueryable<TwoFactorCode>>();
+        queryable.Setup(q => q.Provider).Returns(noCodes.Provider);
+        queryable.Setup(q => q.Expression).Returns(noCodes.Expression);
+        queryable.Setup(q => q.ElementType).Returns(noCodes.ElementType);
+        queryable.Setup(q => q.GetEnumerator()).Returns(() => noCodes.GetEnumerator());
+
+        await CreateServiceWithPasskeyChannel().DisableTwoFactorAsync(userId);
+
+        Assert.False(user.PasskeyTwoFactorEnabled);
+        Assert.False(user.TwoFactorEnabled);
+    }
+
+    /// <summary>
+    /// 开关开着但凭据已经删光（或部署关了渠道）⇒ 登录不再提供它，别把人停在没人能完成的第二步。
+    /// </summary>
+    [Fact]
+    public async Task GetEnabledTwoFactorTypesAsync_DropsPasskey_WhenNoCredentialRemains()
+    {
+        var user = new User { UserName = "u", PasskeyTwoFactorEnabled = true, EmailTwoFactorEnabled = true, Email = "u@example.com", EmailConfirmed = true, TwoFactorEnabled = true };
+        var service = CreateServiceWithPasskeyChannel();
+
+        GivenPasskeys(user, 1);
+        Assert.Contains(TwoFactorType.Passkey, await service.GetEnabledTwoFactorTypesAsync(user));
+
+        GivenPasskeys(user, 0);
+        Assert.Equal(new[] { TwoFactorType.Email }, await service.GetEnabledTwoFactorTypesAsync(user));
+    }
+
+    /// <summary>passkey 不是验证码：发码与验码两条路都要说清楚，而不是掉进地址分支去找一个不存在的地址。</summary>
+    [Fact]
+    public async Task Passkey_IsNeitherSentNorVerifiedAsACode()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", Email = "u@example.com", EmailConfirmed = true };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        var service = CreateServiceWithPasskeyChannel();
+
+        var sent = await service.SendCodeToUserAsync(userId, TwoFactorType.Passkey, VerificationCodePurpose.TwoFactor);
+        var verified = await service.VerifyCodeAsync(userId, "123456", TwoFactorType.Passkey, VerificationCodePurpose.TwoFactor);
+
+        Assert.False(sent.Succeeded);
+        Assert.Equal(400, sent.Code);
+        Assert.False(verified.Succeeded);
+        Assert.Equal(400, verified.Code);
+        _repositoryMock.Verify(x => x.InsertAsync(It.IsAny<TwoFactorCode>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
+    #endregion
+
+    #region 账号行写不进去
+
+    /// <summary>
+    /// <c>UserManager.UpdateAsync</c> 先跑全部用户校验器再落库。存量账号过不了当前规则时它返回失败而一个字都没写；
+    /// 服务不看返回值就会对「启用 / 禁用第二因子」答 200 而库里原样。
+    /// </summary>
+    [Theory]
+    [InlineData("enable")]
+    [InlineData("disable-all")]
+    [InlineData("disable-method")]
+    [InlineData("suspend")]
+    [InlineData("resume")]
+    [InlineData("preferred")]
+    public async Task Writes_WhenTheUserRowFailsValidation_ReportFailureInsteadOfSuccess(string operation)
+    {
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            UserName = "legacy",
+            Email = "legacy@example.com",
+            EmailConfirmed = true,
+            EmailTwoFactorEnabled = operation != "enable",
+            TwoFactorEnabled = operation != "enable",
+        };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.ResetAuthenticatorKeyAsync(user)).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.UpdateAsync(user))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityError { Code = "DuplicateUserName", Description = "Username is taken." }));
+
+        Result result = operation switch
+        {
+            "enable" => await _twoFactorService.EnableTwoFactorAsync(userId, new EnableTwoFactorDto { Type = TwoFactorType.Email }),
+            "disable-all" => await _twoFactorService.DisableTwoFactorAsync(userId),
+            "disable-method" => await _twoFactorService.DisableTwoFactorMethodAsync(userId, TwoFactorType.Email),
+            "suspend" => await _twoFactorService.SuspendTwoFactorAsync(userId),
+            "resume" => await _twoFactorService.ResumeTwoFactorAsync(userId),
+            "preferred" => await _twoFactorService.SetPreferredTwoFactorAsync(userId, TwoFactorType.Email),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_UPDATE_FAILED, result.ErrorCode);
+    }
+
+    /// <summary>重置验证器密钥没落库时不能把密钥交出去：扫进验证器的是一枚库里没有的密钥。</summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_WhenTheKeyResetIsNotSaved_DoesNotHandOutAKey()
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "u", Email = "u@example.com" };
+        var options = new OtpOptions { EnableTotp = true };
+        var service = CreateServiceWithOtp(options);
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.ResetAuthenticatorKeyAsync(user))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityError { Code = "DuplicateEmail", Description = "Email is taken." }));
+
+        var result = await service.GetTotpSetupInfoAsync(userId);
+
+        Assert.False(result.Succeeded);
+        _userManagerMock.Verify(x => x.GetAuthenticatorKeyAsync(It.IsAny<User>()), Times.Never);
     }
 
     #endregion

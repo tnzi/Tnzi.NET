@@ -19,7 +19,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NInputOtp, NSpin } from 'naive-ui'
 import { TModalShell, TSvgIcon } from '@tnzi/ui'
-import type { StepUpMethod, StepUpPromptController } from '@tnzi/core/services/identity'
+import { DEFAULT_OTP_CODE_LENGTH, type StepUpMethod, type StepUpPromptController } from '@tnzi/core/services/identity'
 import { humanise, translatePageKey } from '../../i18n/translate'
 
 interface Props {
@@ -27,13 +27,17 @@ interface Props {
   prompt: StepUpPromptController
   /** `(key, fallback?) => string`. Defaults to the bundled `admin.stepUp.*` entries. */
   translate?: (key: string, fallback?: string) => string
-  /** Digits in a verification code. Default 6 (the framework's OTP length). */
+  /**
+   * Force a digit count for every code method. Leave unset: the controller
+   * already knows it per method (`prompt.codeLength`: 6 for the authenticator
+   * app, the deployment's `otpCodeLength` for an emailed / texted code).
+   */
   codeLength?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   translate: undefined,
-  codeLength: 6,
+  codeLength: undefined,
 })
 
 // `verify()` settles only through this renderer's choose / submitCode /
@@ -101,6 +105,8 @@ const codeHint = computed(() => {
 
 const canResend = computed(() => props.prompt.method === 'sms' || props.prompt.method === 'email')
 const code = computed(() => otp.value.join(''))
+// An emailed code on a deployment configured for 8 digits does not fit 6 boxes.
+const codeLength = computed(() => props.codeLength ?? props.prompt.codeLength ?? DEFAULT_OTP_CODE_LENGTH)
 
 // Keyed on `method`, not `stage`: while a typed code is being verified the
 // stage is `busy` but the user is still in the code flow, and flipping back to
@@ -110,7 +116,7 @@ const inCodeFlow = computed(() => props.prompt.method !== null)
 const verifying = computed(() => inCodeFlow.value && props.prompt.stage === 'busy')
 
 async function submit(): Promise<void> {
-  if (code.value.length < props.codeLength) return
+  if (code.value.length < codeLength.value) return
   await props.prompt.submitCode(code.value)
   // A wrong code is reported by the controller; clear the boxes for a retry.
   if (props.prompt.error) otp.value = []

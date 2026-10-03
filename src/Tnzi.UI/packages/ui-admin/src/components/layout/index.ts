@@ -10,6 +10,9 @@
 // page containers (single content surface / tabbed sections).
 export { default as TPageHeader } from './TPageHeader.vue'
 export type { BackTarget } from './back-target'
+// The sidebar's menu-group style, chosen once per app via
+// `defineAdminApp({ shell: { menuGroups } })`; the type is what that option takes.
+export type { AdminMenuGroupStyle } from './menu-groups'
 // The content-page title tier. Exported so an app with a hand-rolled panel can
 // say `provide(TITLE_LEVEL, 'section')` once and have every page-tier component
 // inside it line up with a `TDetailSection`. See ./title-level.ts.

@@ -5,6 +5,7 @@
       't-item-card--clickable': clickable,
       't-item-card--selected': selected,
       't-item-card--muted': muted,
+      't-item-card--with-footer': $slots.footer,
     }"
     :role="clickable ? 'button' : undefined"
     :tabindex="clickable ? 0 : undefined"
@@ -86,6 +87,20 @@
     </div>
 
     <TSvgIcon v-else-if="clickable" icon="mdi:chevron-right" :size="18" class="t-item-card__chev" />
+
+    <!-- A full-width band under the row for what belongs to the record but not
+         to its title line: a nested list, a breakdown, a sub-form. It wraps
+         below whatever the row holds and, like the operations, keeps its own
+         controls from opening the card. -->
+    <div
+      v-if="$slots.footer"
+      class="t-item-card__footer"
+      @click.stop
+      @keydown.enter.stop
+      @keydown.space.stop
+    >
+      <slot name="footer" />
+    </div>
   </div>
 </template>
 
@@ -106,7 +121,9 @@
  *
  * Every visual part is also a slot, so a page can keep the chrome (click
  * target, selection, hover, keyboard access, refold rules) and replace any
- * single region without re-implementing the card.
+ * single region without re-implementing the card. `#footer` adds a full-width
+ * band under the row for what belongs to the record but not to its title line
+ * (a nested list, a breakdown); its controls are isolated like `#actions`.
  *
  * The doc comment lives here rather than above the root element on purpose: a
  * comment node at the top of `<template>` makes the component multi-root, which
@@ -197,6 +214,8 @@ defineSlots<{
   trailing?: () => unknown
   /** Row operations; clicks and Enter/Space are stopped from opening the card. */
   actions?: () => unknown
+  /** Full-width band under the row (a nested list, a breakdown); isolated like `actions`. */
+  footer?: () => unknown
 }>()
 
 function onActivate(event: MouseEvent): void {
@@ -251,6 +270,16 @@ function onKeydown(event: KeyboardEvent): void {
   text-decoration: line-through;
 }
 
+/* With a footer the card is two lines: the row, then the band. The row keeps
+   its own gap; the band sits a little closer. */
+.t-item-card--with-footer {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.t-item-card__footer {
+  flex: 1 0 100%;
+  min-width: 0;
+}
 .t-item-card__check {
   flex-shrink: 0;
 }

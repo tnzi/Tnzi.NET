@@ -73,14 +73,22 @@ export interface UserRow {
  * uses the admin form-schema's built-in masked `password` field renderer.
  * Role assignment is NOT here - it lives on the user's own page beside their
  * direct grants, where the roles can be shown with their descriptions.
+ *
+ * `useEmailAsUserName` mirrors `Identity:SignIn:UseEmailAsUserName` (from
+ * `/auth/config`). When it is on the server makes the email the username and
+ * rejects any other value, so the username field is dropped and the email
+ * becomes the required field instead.
  */
-export const userFormSchema: FormSchemaItem[] = [
-  { key: 'userName', labelKey: 'form.userName', label: 'User Name', type: 'text', required: true, visible: (m) => !m.id },
-  { key: 'password', labelKey: 'form.password', label: 'Password', type: 'password', required: true, visible: (m) => !m.id },
-  { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text' },
-  { key: 'phoneNumber', labelKey: 'form.phoneNumber', label: 'Phone Number', type: 'text' },
-  { key: 'nickname', labelKey: 'form.nickname', label: 'Nickname', type: 'text' },
-]
+export function createUserFormSchema(options: { useEmailAsUserName: boolean }): FormSchemaItem[] {
+  const { useEmailAsUserName } = options
+  return [
+    { key: 'userName', labelKey: 'form.userName', label: 'User Name', type: 'text', required: true, visible: (m) => !m.id && !useEmailAsUserName },
+    { key: 'password', labelKey: 'form.password', label: 'Password', type: 'password', required: true, visible: (m) => !m.id },
+    { key: 'email', labelKey: 'form.email', label: 'Email', type: 'text', required: useEmailAsUserName },
+    { key: 'phoneNumber', labelKey: 'form.phoneNumber', label: 'Phone Number', type: 'text' },
+    { key: 'nickname', labelKey: 'form.nickname', label: 'Nickname', type: 'text' },
+  ]
+}
 
 /**
  * The FULL profile, edited on the user's own page (`UserDetail.vue`).

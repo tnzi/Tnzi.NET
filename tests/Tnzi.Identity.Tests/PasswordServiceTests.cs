@@ -1,4 +1,5 @@
 ﻿
+using Tnzi.Security.Authorization;
 using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -299,6 +300,30 @@ public class PasswordServiceTests
         // ChangePasswordAsync 在密码错误时会抛出异常，但具体异常类型可能不同
         await Assert.ThrowsAnyAsync<Exception>(
             () => _passwordService.ChangePasswordAsync(userId, currentPassword, newPassword));
+    }
+
+    /// <summary>
+    /// 持 <c>user.update</c> 的普通管理员重置超管的密码，就是借一个比超管小的授权拿下超管账号。
+    /// </summary>
+    [Fact]
+    public async Task ResetPasswordByAdminAsync_OnASuperAdmin_ByANonSuperAdmin_IsForbidden()
+    {
+        var actorId = Guid.NewGuid();
+        var target = new User { Id = Guid.NewGuid(), UserName = "root" };
+        _currentUserMock.SetupGet(c => c.Id).Returns(actorId);
+        _userManagerMock.Setup(x => x.FindByIdAsync(target.Id.ToString())).ReturnsAsync(target);
+        var functionAuthorization = new Mock<IFunctionAuthorizationService>();
+        functionAuthorization.Setup(a => a.IsSuperAdminAsync(target.Id)).ReturnsAsync(true);
+        functionAuthorization.Setup(a => a.IsSuperAdminAsync(actorId)).ReturnsAsync(false);
+        var service = new PasswordService(
+            _userManagerMock.Object, _identityOptionsMock.Object, _serviceProviderMock.Object,
+            _eventBusMock.Object, _configurationMock.Object, _passwordPolicyServiceMock.Object, _currentUserMock.Object,
+            functionAuthorization: functionAuthorization.Object);
+
+        var result = await service.ResetPasswordByAdminAsync(target.Id, "NewPassword123!");
+
+        Assert.Equal(403, result.Code);
+        _userManagerMock.Verify(x => x.ResetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

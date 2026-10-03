@@ -42,6 +42,22 @@ public class PendingActionServiceTests
         Assert.True(fixture.User.HasPendingAction(PendingUserActions.ConfirmEmail));
     }
 
+    /// <summary>
+    /// 令牌的消费是条件更新：false 说明并发的另一个请求已经凭它签发过了，这一次不能再签。
+    /// </summary>
+    [Fact]
+    public async Task Complete_WhenTheTokenWasConsumedConcurrently_IssuesNothing()
+    {
+        var fixture = new Fixture(PendingUserActions.ChangePassword) { ConsumeLosesRace = true };
+
+        var result = await fixture.Service.CompleteChangePasswordAsync(
+            new CompletePasswordChangeDto { TempToken = fixture.TempToken, NewPassword = "P@ssw0rd!" });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_TOKEN_INVALID, result.ErrorCode);
+        Assert.False(fixture.Issued);
+    }
+
     [Fact]
     public async Task Complete_WhenNothingElseRemains_ConsumesTheTokenAndIssues()
     {
@@ -257,6 +273,11 @@ public class PendingActionServiceTests
 
         public bool TotpEnrollmentSucceeds { get; set; } = true;
 
+        /// <summary>模拟并发：另一个请求抢先消费了这枚令牌，条件更新答 false。</summary>
+        public bool ConsumeLosesRace { get; set; }
+
+        public bool Issued { get; private set; }
+
         /// <summary>
         /// 共享签发出口的回答。默认成功；置成挑战信封即可复现「2FA 已启用 + 欠义务」的账号。
         /// </summary>
@@ -303,7 +324,13 @@ public class PendingActionServiceTests
                     value == TempToken && !_entry.IsUsed ? _entry : null);
             authTokenService
                 .Setup(x => x.MarkTokenAsUsedAsync(_entry.Id))
-                .ReturnsAsync(() => { TokenConsumed = true; _entry.IsUsed = true; return true; });
+                .ReturnsAsync(() =>
+                {
+                    if (ConsumeLosesRace) return false;
+                    TokenConsumed = true;
+                    _entry.IsUsed = true;
+                    return true;
+                });
 
             var authService = new Mock<IAuthService>();
             authService
@@ -311,6 +338,7 @@ public class PendingActionServiceTests
                 .ReturnsAsync((User _, LoginMethod __, TwoFactorType? satisfied) =>
                 {
                     IssuedSatisfiedFactor = satisfied;
+                    Issued = true;
                     return IssueOutcome;
                 });
 

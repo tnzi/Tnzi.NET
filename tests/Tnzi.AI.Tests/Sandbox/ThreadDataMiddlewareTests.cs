@@ -60,6 +60,22 @@ public class ThreadDataMiddlewareTests : IDisposable
         Assert.False(Directory.Exists(_root));
     }
 
+    /// <summary>
+    /// 关掉的沙箱对空 DataRoot 放行（验证器），所以这里必须直通且一次都不解析翻译器 —— 否则每次带线程的运行都会
+    /// 在构造翻译器时抛出。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_SandboxDisabled_PassesThrough_WithoutResolvingTheTranslator()
+    {
+        var mw = CreateThreadDataMiddleware(new SandboxModuleOptions { DataRoot = string.Empty, Enabled = false });
+        var context = TestHelpers.CreateMinimalContext(threadId: Guid.NewGuid());
+
+        var result = await mw.InvokeAsync(context, (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
+
+        Assert.Equal("ok", result.Response);
+        Assert.False(context.Properties.ContainsKey(SandboxPropertyKeys.ThreadData));
+    }
+
     [Fact]
     public async Task InvokeAsync_UnresolvedThreadId_SkipsMiddleware()
     {

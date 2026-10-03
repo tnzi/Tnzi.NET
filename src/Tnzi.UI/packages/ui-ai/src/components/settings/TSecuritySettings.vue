@@ -20,10 +20,13 @@ import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
 import TStepUpPrompt from './TStepUpPrompt.vue'
 import type { UseAccountSettingsReturn } from '../../headless/useAccountSettings'
+import { useAiI18n } from '../../i18n'
 
 const props = defineProps<{
   controller: UseAccountSettingsReturn
 }>()
+
+const t = useAiI18n()
 
 onMounted(() => {
   void props.controller.load()
@@ -74,33 +77,33 @@ function formatWhen(value: Date | string | undefined | null): string {
        renders the prompt where the user can still see the row they acted on. -->
   <TStepUpPrompt v-if="controller.stepUp" :prompt="controller.stepUp" />
 
-  <TSettingGroup title="Two-factor authentication" :separator="false">
+  <TSettingGroup :title="t.securitySettings.twoFactorTitle" :separator="false">
     <TSettingRow
-      label="Authenticator app"
-      description="A six-digit code from an app such as 1Password or Google Authenticator."
+      :label="t.securitySettings.authenticator"
+      :description="t.securitySettings.authenticatorHint"
     >
       <span
         class="t-settings-field__pill"
         :class="{ 't-settings-field__pill--on': controller.twoFactor.value?.isTotpEnabled }"
       >
-        {{ controller.twoFactor.value?.isTotpEnabled ? 'On' : 'Off' }}
+        {{ controller.twoFactor.value?.isTotpEnabled ? t.securitySettings.on : t.securitySettings.off }}
       </span>
     </TSettingRow>
 
     <!-- Enrolment. The secret is shown as a QR plus its text form, because a
          phone that cannot scan still has to be able to enrol. -->
     <template v-if="!controller.twoFactor.value?.isTotpEnabled">
-      <TSettingRow v-if="controller.totpSetup.value" label="Scan this" stacked>
+      <TSettingRow v-if="controller.totpSetup.value" :label="t.securitySettings.scan" stacked>
         <div class="t-security__enrol">
           <NQrCode :value="controller.totpSetup.value.authenticatorUri" :size="152" />
           <div class="t-security__enrol-side">
-            <p class="t-settings-field__hint">Can't scan? Enter this key in your app:</p>
+            <p class="t-settings-field__hint">{{ t.securitySettings.cantScan }}</p>
             <code class="t-security__secret">{{ controller.totpSetup.value.sharedKey }}</code>
             <NInput
               v-model:value="totpCode"
               size="small"
               :maxlength="8"
-              placeholder="6-digit code"
+              :placeholder="t.securitySettings.codePlaceholder"
             />
           </div>
         </div>
@@ -118,7 +121,7 @@ function formatWhen(value: Date | string | undefined | null): string {
           :loading="controller.busy.value"
           @click="controller.beginTotp()"
         >
-          Set up
+          {{ t.securitySettings.setUp }}
         </NButton>
         <NButton
           v-else
@@ -128,7 +131,7 @@ function formatWhen(value: Date | string | undefined | null): string {
           :disabled="!totpCode.trim()"
           @click="onConfirmTotp"
         >
-          Turn on
+          {{ t.securitySettings.turnOn }}
         </NButton>
       </div>
     </template>
@@ -137,11 +140,11 @@ function formatWhen(value: Date | string | undefined | null): string {
     <template v-else>
       <TSettingRow
         v-if="controller.twoFactor.value?.isEnabled === false"
-        label="Currently paused"
-        description="Your authenticator is still enrolled. Resume to require codes again."
+        :label="t.securitySettings.paused"
+        :description="t.securitySettings.pausedHint"
       >
         <NButton size="small" :loading="controller.busy.value" @click="controller.resumeTwoFactor()">
-          Resume
+          {{ t.securitySettings.resume }}
         </NButton>
       </TSettingRow>
 
@@ -156,20 +159,20 @@ function formatWhen(value: Date | string | undefined | null): string {
           :loading="controller.busy.value"
           @click="controller.suspendTwoFactor()"
         >
-          Pause
+          {{ t.securitySettings.pause }}
         </NButton>
         <NButton size="small" type="error" ghost :loading="controller.busy.value" @click="controller.disableTotp()">
-          Remove authenticator
+          {{ t.securitySettings.remove }}
         </NButton>
       </div>
     </template>
   </TSettingGroup>
 
-  <TSettingGroup title="Active sessions">
+  <TSettingGroup :title="t.securitySettings.sessionsTitle">
     <TSettingRow
       v-for="session in controller.sessions.value"
       :key="session.id"
-      :label="session.deviceInfo || session.userAgent || 'Unknown device'"
+      :label="session.deviceInfo || session.userAgent || t.securitySettings.unknownDevice"
       :description="[session.ipAddress, formatWhen(session.lastActivityTime)].filter(Boolean).join(' · ')"
     >
       <!-- The row this tab is signed in with is labelled instead of revocable:
@@ -178,7 +181,7 @@ function formatWhen(value: Date | string | undefined | null): string {
         v-if="controller.isCurrentSession(session)"
         class="t-settings-field__pill t-settings-field__pill--on"
       >
-        This device
+        {{ t.securitySettings.thisDevice }}
       </span>
       <NButton
         v-if="!controller.isCurrentSession(session)"
@@ -187,12 +190,12 @@ function formatWhen(value: Date | string | undefined | null): string {
         :loading="controller.busy.value"
         @click="onRevokeSession(session.id)"
       >
-        {{ confirmingSessionId === session.id ? 'Sign out this device?' : 'Revoke' }}
+        {{ confirmingSessionId === session.id ? t.securitySettings.revokeConfirm : t.securitySettings.revoke }}
       </NButton>
     </TSettingRow>
 
     <p v-if="controller.sessions.value.length === 0" class="t-settings-field__hint">
-      No sessions recorded.
+      {{ t.securitySettings.noSessions }}
     </p>
 
     <div class="t-settings-field__actions">
@@ -212,7 +215,7 @@ function formatWhen(value: Date | string | undefined | null): string {
              "sign out everywhere" would pass `true` AND have to clear local
              auth / leave the page, which this component has no access to;
              that is a product decision, not a label. -->
-        {{ confirmingAllSessions ? 'Sign out every other device? You stay signed in here.' : 'Sign out other devices' }}
+        {{ confirmingAllSessions ? t.securitySettings.signOutOthersConfirm : t.securitySettings.signOutOthers }}
       </NButton>
     </div>
   </TSettingGroup>

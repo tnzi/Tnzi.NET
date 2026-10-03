@@ -13,6 +13,12 @@ public static class AiUtilityHttpClientNames
     /// <summary>未指定提供商时使用的客户端名。</summary>
     public const string Fallback = "Tnzi.AiUtility";
 
+    /// <summary>
+    /// 调用方自带提供商（<see cref="Options.AiUtilityCallOptions.Provider"/>）共用的客户端名。
+    /// </summary>
+    /// <remarks>用 <c>#</c> 而不是 <c>:</c> 分隔，任何配置提供商名经 <see cref="For"/> 都拼不出它。</remarks>
+    public const string Inline = Fallback + "#inline";
+
     /// <summary>返回指定提供商的命名客户端键。</summary>
     public static string For(string? providerName)
         => string.IsNullOrWhiteSpace(providerName) ? Fallback : $"{Fallback}:{providerName}";

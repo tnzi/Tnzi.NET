@@ -44,6 +44,15 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
         if (otp.RetentionHours < 0)
             errors.Add("Otp.RetentionHours cannot be negative (0 keeps expired codes forever).");
 
+        // 验证 passkey 配置：两个枚举字符串直接喂给 WebAuthn 选项，拼错的值浏览器会拒绝整份选项，
+        // 表现是「系统弹窗根本不出来」，在启动时说出来比让用户去猜强。
+        var passkey = options.Passkey;
+        if (passkey.ResidentKey is not null and not ("discouraged" or "preferred" or "required"))
+            errors.Add("Passkey.ResidentKey must be one of: discouraged, preferred, required.");
+
+        if (passkey.AuthenticatorAttachment is not null and not ("platform" or "cross-platform"))
+            errors.Add("Passkey.AuthenticatorAttachment must be one of: platform, cross-platform.");
+
         // 验证密码策略
         var pwd = options.PasswordPolicy;
         if (pwd.MinLength < 4)

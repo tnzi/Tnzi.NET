@@ -34,7 +34,7 @@ public class CliMultiTenantDbContext : TnziDbContext<CliMultiTenantDbContext>
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>CliRun</c> / <c>CliAgentBinding</c> / <c>CliRuntime</c> 都是 <c>MultiTenantAuditedEntity</c>，
+/// <c>CliRun</c> / <c>CliAgentBinding</c> 都是 <c>MultiTenantAuditedEntity</c>（<c>CliRuntime</c> 是宿主级资源，不按租户过滤），
 /// 多租户一开，全局过滤器就是 <c>TenantId == 当前租户</c>（严格等值）。认领、续租、回收、执行器加载、
 /// MCP 回写凭据校验全部跑在 <c>IServiceScopeFactory.CreateScope()</c> 出来的作用域里 ——
 /// 没有 HTTP 请求，没有 <c>ICurrentTenant</c>，当前租户恒为 null。
@@ -211,6 +211,7 @@ public class CliRunClaimMultiTenancyTests : IntegratedTestBase<CliMultiTenantDbC
             Mock.Of<ICliMcpConfigComposer>(),
             new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
             Mock.Of<ICliExecutableResolver>(),
+            new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
             Mock.Of<IAgentGrantService>(),
             Mock.Of<ISkillService>(),
             new CliRunSignalHub(),
@@ -260,8 +261,7 @@ public class CliRunClaimMultiTenancyTests : IntegratedTestBase<CliMultiTenantDbC
             ProviderKey = "claude",
             Name = "claude @ TEST-HOST",
             ExecutablePath = "/usr/bin/claude",
-            Status = CliRuntimeStatus.Online,
-            TenantId = TenantId
+            Status = CliRuntimeStatus.Online
         });
         await DbContext.SaveChangesAsync();
         DbContext.ChangeTracker.Clear();

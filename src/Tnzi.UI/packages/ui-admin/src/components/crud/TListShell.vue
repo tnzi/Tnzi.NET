@@ -1,5 +1,75 @@
 <template>
   <div class="t-list-shell" :class="`t-list-shell--${mode}`">
+    <!-- 手机端搜索开关与下展面板各定义一次：头部在时挂进头部卡，
+         头部关掉（tab 内嵌列表）时挂进列表卡工具栏，两条路径同一份表单与行为。 -->
+    <DefineMobileToggles>
+      <div class="t-list-shell__search t-list-shell__search--mobile">
+        <NButton
+          v-if="showDefaultSearch"
+          size="small"
+          :type="mobilePanel === 'keyword' ? 'primary' : 'default'"
+          :tertiary="mobilePanel !== 'keyword'"
+          circle
+          class="t-list-shell__search-icon"
+          :aria-label="t('admin.crud.search')"
+          @click="toggleMobilePanel('keyword')"
+        >
+          <template #icon><TSvgIcon icon="mdi:magnify" :size="18" /></template>
+        </NButton>
+        <NButton
+          v-if="hasAdvanced"
+          size="small"
+          :type="mobilePanel === 'advanced' ? 'primary' : 'default'"
+          :tertiary="mobilePanel !== 'advanced'"
+          class="t-list-shell__adv-toggle"
+          @click="toggleMobilePanel('advanced')"
+        >
+          <template #icon><TSvgIcon icon="mdi:filter-variant" :size="16" /></template>
+          {{ t('admin.crud.advancedSearch') }}
+        </NButton>
+      </div>
+    </DefineMobileToggles>
+    <DefineMobilePanel v-slot="{ inToolbar }">
+      <div class="t-list-shell__mobile-search" :class="{ 't-list-shell__mobile-search--toolbar': inToolbar }">
+        <template v-if="mobilePanel === 'keyword'">
+          <NInput
+            ref="mobileKeywordRef"
+            v-model:value="simpleQuery"
+            clearable
+            :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
+            class="t-list-shell__mobile-field"
+            @keydown.enter="onSimpleSearch"
+            @clear="onSimpleClear"
+          >
+            <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+          </NInput>
+          <div class="t-list-shell__mobile-actions">
+            <NButton type="primary" class="t-list-shell__mobile-submit" @click="onSimpleSearch">
+              {{ t('admin.crud.search') }}
+            </NButton>
+          </div>
+        </template>
+        <template v-else>
+          <TCrudSearchAdvanced
+            ref="mobileAdvRef"
+            :state="props.state"
+            :search-fields="searchFields"
+            :translate="translate"
+            hide-submit
+            labeled
+          />
+          <div class="t-list-shell__mobile-actions">
+            <NButton class="t-list-shell__mobile-reset" @click="onMobileAdvReset">
+              {{ t('admin.crud.reset') }}
+            </NButton>
+            <NButton type="primary" class="t-list-shell__mobile-submit" @click="onMobileAdvSearch">
+              {{ t('admin.crud.search') }}
+            </NButton>
+          </div>
+        </template>
+      </div>
+    </DefineMobilePanel>
+
     <!-- ── WHITE page-header card ──
          Left: icon + title + ⓘ help. Right (#actions): the keyword search
          (small) + Advanced toggle. The advanced grid drops below the bar,
@@ -59,77 +129,13 @@
           <!-- Phone: title stays left; the right shows a 🔍 toggle (+ an
                Advanced toggle when there are advanced fields). Tapping either
                expands its form downward inside this white card. -->
-          <div v-else class="t-list-shell__search t-list-shell__search--mobile">
-            <NButton
-              v-if="showDefaultSearch"
-              size="small"
-              :type="mobilePanel === 'keyword' ? 'primary' : 'default'"
-              :tertiary="mobilePanel !== 'keyword'"
-              circle
-              class="t-list-shell__search-icon"
-              :aria-label="t('admin.crud.search')"
-              @click="toggleMobilePanel('keyword')"
-            >
-              <template #icon><TSvgIcon icon="mdi:magnify" :size="18" /></template>
-            </NButton>
-            <NButton
-              v-if="hasAdvanced"
-              size="small"
-              :type="mobilePanel === 'advanced' ? 'primary' : 'default'"
-              :tertiary="mobilePanel !== 'advanced'"
-              class="t-list-shell__adv-toggle"
-              @click="toggleMobilePanel('advanced')"
-            >
-              <template #icon><TSvgIcon icon="mdi:filter-variant" :size="16" /></template>
-              {{ t('admin.crud.advancedSearch') }}
-            </NButton>
-          </div>
+          <ReuseMobileToggles v-else />
         </template>
       </TPageHeader>
 
       <!-- Phone downward-expanding search panel - one field per row, the
            action buttons pinned to the right of their own row. -->
-      <div
-        v-if="bp.isSm.value && mobilePanel !== 'none'"
-        class="t-list-shell__mobile-search"
-      >
-        <template v-if="mobilePanel === 'keyword'">
-          <NInput
-            ref="mobileKeywordRef"
-            v-model:value="simpleQuery"
-            clearable
-            :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
-            class="t-list-shell__mobile-field"
-            @keydown.enter="onSimpleSearch"
-            @clear="onSimpleClear"
-          >
-            <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-          </NInput>
-          <div class="t-list-shell__mobile-actions">
-            <NButton type="primary" class="t-list-shell__mobile-submit" @click="onSimpleSearch">
-              {{ t('admin.crud.search') }}
-            </NButton>
-          </div>
-        </template>
-        <template v-else>
-          <TCrudSearchAdvanced
-            ref="mobileAdvRef"
-            :state="props.state"
-            :search-fields="searchFields"
-            :translate="translate"
-            hide-submit
-            labeled
-          />
-          <div class="t-list-shell__mobile-actions">
-            <NButton class="t-list-shell__mobile-reset" @click="onMobileAdvReset">
-              {{ t('admin.crud.reset') }}
-            </NButton>
-            <NButton type="primary" class="t-list-shell__mobile-submit" @click="onMobileAdvSearch">
-              {{ t('admin.crud.search') }}
-            </NButton>
-          </div>
-        </template>
-      </div>
+      <ReuseMobilePanel v-if="bp.isSm.value && mobilePanel !== 'none'" :in-toolbar="false" />
 
       <!-- Desktop advanced drawer (phones use the inline panel above). -->
       <TCrudSearchDrawer
@@ -209,7 +215,10 @@
         <div class="t-list-shell__toolbar-left">
           <!-- 头部关掉时（tab 内嵌列表的标准用法）搜索入口补到工具栏里：
                否则 `searchFields` 会随头部一起消失，而那是框架承诺过的能力。 -->
-          <template v-if="showInlineSearch">
+          <!-- 手机上换成与头部同一套图标开关，表单在工具栏下方展开；
+               桌面仍是内联关键字框 + Advanced 抽屉。 -->
+          <ReuseMobileToggles v-if="showInlineSearch && bp.isSm.value" />
+          <template v-else-if="showInlineSearch">
             <NInput
               v-model:value="simpleQuery"
               clearable
@@ -224,7 +233,7 @@
             <NButton size="small" @click="onSimpleSearch">{{ t('admin.crud.search') }}</NButton>
             <NButton v-if="hasAdvanced" size="small" tertiary @click="advancedOpen = true">
               <template #icon><TSvgIcon icon="mdi:tune-variant" :size="16" /></template>
-              {{ t('admin.crud.advanced') }}
+              {{ t('admin.crud.advancedSearch') }}
             </NButton>
           </template>
           <slot name="toolbarLeft" />
@@ -269,6 +278,11 @@
           <slot name="toolbar" />
         </div>
       </div>
+
+      <ReuseMobilePanel
+        v-if="showInlineSearch && bp.isSm.value && mobilePanel !== 'none'"
+        :in-toolbar="true"
+      />
 
       <div class="t-list-shell__body">
         <slot name="renderer" />
@@ -360,6 +374,7 @@ import { useRetainedFormState } from '../../headless/useFormModal'
 import type { UseFormModalReturn, FormModalMode } from '../../headless/useFormModal'
 import type { FormSchemaItem } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { createReusableTemplate } from '@vueuse/core'
 
 export interface TListShellProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
@@ -440,6 +455,8 @@ defineSlots<{
 
 const bp = useBreakpoint()
 const slots = useSlots()
+const [DefineMobileToggles, ReuseMobileToggles] = createReusableTemplate()
+const [DefineMobilePanel, ReuseMobilePanel] = createReusableTemplate<{ inToolbar: boolean }>()
 
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
@@ -731,6 +748,8 @@ const modalTitle = computed(() => {
   padding-top: 12px;
   border-top: 1px solid var(--tnzi-border, #eef0f3);
 }
+/* 在列表卡里时由卡片内容的 gap 负责与工具栏的间距，不再叠一层 margin。 */
+.t-list-shell__mobile-search--toolbar { flex-shrink: 0; margin-top: 0; }
 .t-list-shell__mobile-field { width: 100%; }
 .t-list-shell__mobile-actions {
   display: flex;

@@ -65,8 +65,9 @@ public class FrontendBackendContractTests
     /// </summary>
     /// <remarks>
     /// 没有这条，上面那条门禁的覆盖面就是不可知的：解析器悄悄漏掉一批调用点，
-    /// 「没有孤儿」与「没检查」长得一模一样。api.ts 里新出现一种路径写法时，
-    /// 这里会先红，提示去扩展 <see cref="FrontendApiScanner"/>。
+    /// 「没有孤儿」与「没检查」长得一模一样。新出现一种路径写法时，
+    /// 这里会先红，提示去扩展 <see cref="FrontendApiScanner"/>；路径确实只能在运行期确定时，
+    /// 用 <c>contract-scan-exempt</c> 标记写明理由（见扫描器上的说明）。
     /// </remarks>
     [Fact]
     public void EveryClientCallSite_IsParseable()
@@ -80,7 +81,8 @@ public class FrontendBackendContractTests
                 $"{scan.Unparsed.Count}/{scan.TotalCallSites} 个 client.* 调用点解析不出请求路径，"
                 + "它们目前不受契约对账约束：\n  "
                 + string.Join("\n  ", scan.Unparsed)
-                + "\n\n扩展 FrontendApiScanner 支持这种写法，或把该调用点改成既有写法。");
+                + "\n\n扩展 FrontendApiScanner 支持这种写法，或把该调用点改成既有写法；"
+                + "路径只能在运行期确定时，在调用点上一行写 `// contract-scan-exempt: <理由>`。");
         }
 
         // 至少一条：工厂体内的调用点会按实参组数展开成多条（一个方法服务 8 种单据），
@@ -94,16 +96,26 @@ public class FrontendBackendContractTests
     /// <remarks>
     /// 用下界而不是 <c>ShouldNotBeEmpty</c>：正则一旦退化到只匹配几个调用点，
     /// 「所有前端调用都有对应端点」照样成立，整条门禁会安静失效。数字取当前实测的
-    /// 保守下界（前端 877 个调用点 / 18 个 api.ts，2026-09-04 起 19 个 / 后端 145 个控制器文件），
-    /// 正常增删只会让它更宽松。
+    /// 保守下界，正常增删只会让它更宽松。
+    /// <para>
+    /// ★ 2026-09-27 前扫描范围是 <c>core/src/services/*/api.ts</c>（877 个调用点），
+    /// 按能力拆出去的 7 个 AI api 文件与 ui-admin 里直接发请求的地方全在范围外；
+    /// 改为扫五个包的全部源文件后是 1000+ 个调用点、1000+ 个文件。文件数下界守的是
+    /// 「扫描范围被人又收窄回去」—— 调用点下界守不住它，因为 api.ts 一处就有 800 多个。
+    /// </para>
     /// </remarks>
     [Fact]
     public void ContractScan_CoversExpectedScale()
     {
         var repoRoot = RepoRoot.Locate();
         var scan = FrontendApiScanner.Scan(repoRoot);
-        scan.TotalCallSites.ShouldBeGreaterThanOrEqualTo(700,
+        scan.TotalCallSites.ShouldBeGreaterThanOrEqualTo(950,
             $"只扫到 {scan.TotalCallSites} 个前端 API 调用点，远少于预期 —— 是扫描坏了，不是调用真的变少了");
+        scan.FilesScanned.ShouldBeGreaterThanOrEqualTo(900,
+            $"只扫了 {scan.FilesScanned} 个前端源文件 —— 扫描范围被收窄了（应为五个包 src/ 下全部非测试 .ts/.vue）");
+        scan.Exempt.Count.ShouldBeLessThanOrEqualTo(30,
+            $"{scan.Exempt.Count} 个调用点被 contract-scan-exempt 豁免，豁免正在变成常态：\n  "
+            + string.Join("\n  ", scan.Exempt));
 
         var backend = BackendRoutes();
         // 实测 1078 条端点（145 个控制器类），下界取 900。
@@ -147,6 +159,38 @@ public class FrontendBackendContractTests
         backend.ShouldContain("POST /chat/stream");
         backend.ShouldNotContain("GET /chat/stream");
         IsOrphan(streaming, backend).ShouldBeFalse("resolveUrl 的动词放宽没生效");
+    }
+
+    /// <summary>
+    /// 注释里的 <c>client.x (</c> 不是调用点；字符串、模板、正则字面量里的 <c>//</c> 不是注释。
+    /// </summary>
+    /// <remarks>
+    /// 扫描范围扩到全部源文件后，文档注释里会写「用 <c>client.upload (multipart)</c> 而不是 client.post」这类话，
+    /// 不剥注释它们就成了解析不出的调用点；剥得过头则会把 <c>'https://…'</c> 后面的真实调用一起抹掉。
+    /// </remarks>
+    [Fact]
+    public void BlankComments_StripsCommentsButKeepsCodeAndLineNumbers()
+    {
+        const string source =
+            "// client.get('/in-line-comment')\n"
+            + "/* client.post('/in-block')\n   still block */ client.put('/after-block')\n"
+            // 撇号行必须排在 URL 行之前：错配的引号会让下一行 'https:' 的引号配对翻转，
+            // 于是 `//example.com'; client.get(...)` 被当成注释抹掉。
+            + "<p>don't</p>\n"
+            + "const url = 'https://example.com'; client.get('/after-url')\n"
+            + "const re = /^https?:\\/\\//i; client.delete('/after-regex')\n"
+            + "const t = `a // not a comment ${x}`; client.patch('/after-template')\n";
+
+        var blanked = FrontendApiScanner.BlankComments(source);
+
+        blanked.Length.ShouldBe(source.Length);
+        blanked.Count(c => c == '\n').ShouldBe(source.Count(c => c == '\n'));
+        blanked.ShouldNotContain("/in-line-comment");
+        blanked.ShouldNotContain("/in-block");
+        blanked.ShouldContain("client.put('/after-block')");
+        blanked.ShouldContain("client.get('/after-url')");
+        blanked.ShouldContain("client.delete('/after-regex')");
+        blanked.ShouldContain("`a // not a comment ${x}`");
     }
 
     private static bool IsOrphan(FrontendApiScanner.Call call, HashSet<string> backend)

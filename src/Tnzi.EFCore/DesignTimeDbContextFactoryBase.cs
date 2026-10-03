@@ -141,6 +141,7 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
         var optionsBuilder = new DbContextOptionsBuilder<TDbContext>();
         ConfigureOptionsByProvider(optionsBuilder, effectiveConnectionString, config.Provider);
         optionsBuilder.UseTnziMultiTenancy(multiTenancyEnabled);
+        optionsBuilder.UseTnziModelWarningPolicy();
 
         // Create design-time CurrentUser
         var currentUser = new DesignTimeCurrentUser();

@@ -97,6 +97,43 @@ public class AgentTaskServiceTests
     }
 
     // -------------------------------------------------------------------------
+    // SyncFromTodosAsync - 完整列表语义：列表里没有的删除
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SyncFromTodosAsync_DeletesTasksNoLongerInTheList()
+    {
+        var runId = Guid.NewGuid();
+        var kept = new AgentTask { Id = Guid.NewGuid(), RunId = runId, Title = "Keep", OrderIndex = 0 };
+        var removed = new AgentTask { Id = Guid.NewGuid(), RunId = runId, Title = "Dropped", OrderIndex = 1 };
+        _repository.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<AgentTask, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AgentTask> { kept, removed });
+
+        await CreateService().SyncFromTodosAsync(runId, [new() { Content = "Keep", Status = TodoStatus.Pending, Order = 0 }]);
+
+        _repository.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<AgentTask>>(tasks => tasks.Single() == removed),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncFromTodosAsync_EmptyList_DeletesEveryTaskOfTheRun()
+    {
+        var runId = Guid.NewGuid();
+        var a = new AgentTask { Id = Guid.NewGuid(), RunId = runId, OrderIndex = 0 };
+        var b = new AgentTask { Id = Guid.NewGuid(), RunId = runId, OrderIndex = 1 };
+        _repository.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<AgentTask, bool>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AgentTask> { a, b });
+
+        await CreateService().SyncFromTodosAsync(runId, []);
+
+        _repository.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<AgentTask>>(tasks => tasks.Count() == 2),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _repository.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<AgentTask>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // -------------------------------------------------------------------------
     // SyncFromTodosAsync - CompletedAt 设置
     // -------------------------------------------------------------------------
 

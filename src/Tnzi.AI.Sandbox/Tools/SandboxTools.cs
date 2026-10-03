@@ -97,16 +97,17 @@ public class SandboxTools : IAIToolProvider
 
     private async Task<object> ExecuteBashCoreAsync(ISandbox sandbox, Guid threadId, string command, CancellationToken ct)
     {
-        var translatedCommand = TranslatePathsInCommand(command, threadId);
+        var threadDir = _translator.GetThreadDirectory(threadId);
+        var mountTokens = SandboxCommandPaths.Find(command, sandbox.ShellDialect);
 
-        // Best-effort jail check for the Local provider: the translated command is
-        // handed verbatim to a host shell, so if a translated /mnt path resolves
-        // outside the thread directory (via `..` segments embedded in the virtual
-        // path) refuse the command rather than let it escape. This is NOT a true
-        // jail - it cannot reason about shell-constructed paths - but it closes the
-        // obvious `/mnt/workspace/../../../etc/passwd` style bypass. Runs before the
-        // quota reservation so an escaping command does not consume a quota slot.
-        if (!IsTranslatedCommandWithinThreadDir(translatedCommand, threadId))
+        // Best-effort jail check for the Local provider: the rewritten command is
+        // handed verbatim to a host shell, so if a /mnt path resolves outside the
+        // thread directory (via `..` segments in the same shell word) refuse the
+        // command rather than let it escape. This is NOT a true jail - it cannot
+        // reason about shell-constructed paths - but it closes the obvious
+        // `/mnt/workspace/../../../etc/passwd` style bypass. Runs before the quota
+        // reservation so an escaping command does not consume a quota slot.
+        if (!SandboxCommandPaths.AllWithin(mountTokens, threadDir))
         {
             const string escapeReason = "Command references a path outside the sandbox thread directory";
             _logger.LogWarning(
@@ -139,9 +140,11 @@ public class SandboxTools : IAIToolProvider
             }
         }
 
-        // 守卫过了才换根：Docker 的容器里没有宿主路径，每个以线程目录为根的 token 都换成
-        // 沙箱自己寻址的形态（Local 为恒等）。换根不放宽任何判定 —— 判定已经在上面做完了。
-        var sandboxCommand = MapThreadDirTokens(translatedCommand, threadId, sandbox);
+        // 守卫过了才换根：每个虚拟根换成沙箱自己寻址的形态（Docker 是容器里的 /workspace/{mount}，
+        // Local 是宿主物理路径），并按所在引号上下文加引号，含空格的根也作为一个词交给 shell。
+        // 换根不放宽任何判定 —— 判定已经在上面做完了。
+        var sandboxCommand = SandboxCommandPaths.Rewrite(
+            command, mountTokens, sandbox.ShellDialect, mount => sandbox.MapPath(Path.Combine(threadDir, mount)));
 
         var startedAt = DateTime.UtcNow;
         var stopwatch = Stopwatch.StartNew();
@@ -364,104 +367,4 @@ public class SandboxTools : IAIToolProvider
             ? value
             : string.Concat(value.AsSpan(0, MaxAuditOutputBytes), "...[truncated]");
     }
-
-    private string TranslatePathsInCommand(string command, Guid threadId)
-    {
-        var threadDir = _translator.GetThreadDirectory(threadId);
-        return command
-            .Replace("/mnt/workspace", Path.Combine(threadDir, "workspace"))
-            .Replace("/mnt/uploads", Path.Combine(threadDir, "uploads"))
-            .Replace("/mnt/outputs", Path.Combine(threadDir, "outputs"))
-            .Replace("/mnt/skills", Path.Combine(threadDir, "skills"));
-    }
-
-    /// <summary>
-    /// Best-effort guard: after naive /mnt → physical translation, scan the command
-    /// for path tokens rooted at the thread directory and confirm each still
-    /// resolves inside that directory once <c>..</c> segments collapse. Returns
-    /// <c>true</c> when no escaping token is found. This is intentionally
-    /// conservative (it inspects literal tokens only and cannot follow shell
-    /// constructs) - under the Local provider it is a hardening layer, not a jail.
-    /// </summary>
-    private bool IsTranslatedCommandWithinThreadDir(string translatedCommand, Guid threadId)
-    {
-        var normalizedThreadDir = Path.GetFullPath(_translator.GetThreadDirectory(threadId));
-        var comparison = HostPathComparison;
-
-        foreach (var (_, token) in EnumerateThreadDirTokens(translatedCommand, threadId))
-        {
-            string resolved;
-            try
-            {
-                resolved = Path.GetFullPath(token);
-            }
-            catch
-            {
-                // An unparseable token is suspicious - fail closed.
-                return false;
-            }
-
-            if (!resolved.Equals(normalizedThreadDir, comparison)
-                && !resolved.StartsWith(normalizedThreadDir + Path.DirectorySeparatorChar, comparison)
-                && !resolved.StartsWith(normalizedThreadDir + Path.AltDirectorySeparatorChar, comparison))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// 把命令里每个以线程目录为根的 token 换成 <see cref="ISandbox.MapPath"/> 给出的沙箱视图。
-    /// 只在 <see cref="IsTranslatedCommandWithinThreadDir"/> 放行之后调用：那时每个 token 都已确认在界内。
-    /// </summary>
-    private string MapThreadDirTokens(string translatedCommand, Guid threadId, ISandbox sandbox)
-    {
-        var builder = new StringBuilder(translatedCommand.Length);
-        var copied = 0;
-        foreach (var (index, token) in EnumerateThreadDirTokens(translatedCommand, threadId))
-        {
-            builder.Append(translatedCommand, copied, index - copied);
-            builder.Append(sandbox.MapPath(token));
-            copied = index + token.Length;
-        }
-
-        builder.Append(translatedCommand, copied, translatedCommand.Length - copied);
-        return builder.ToString();
-    }
-
-    /// <summary>
-    /// 按出现顺序枚举命令里以线程目录开头的路径 token（<c>(起始下标, token)</c>）。
-    /// </summary>
-    /// <remarks>
-    /// Search for the thread dir exactly as <see cref="TranslatePathsInCommand"/> emitted it, and slice
-    /// from each occurrence to the next shell-token boundary so a <c>..</c> escape embedded in the path
-    /// participates in normalization.
-    /// </remarks>
-    private IEnumerable<(int Index, string Token)> EnumerateThreadDirTokens(string translatedCommand, Guid threadId)
-    {
-        var rawThreadDir = _translator.GetThreadDirectory(threadId);
-        var searchStart = 0;
-        while (true)
-        {
-            var idx = translatedCommand.IndexOf(rawThreadDir, searchStart, HostPathComparison);
-            if (idx < 0)
-                yield break;
-
-            var end = idx;
-            while (end < translatedCommand.Length && !IsShellTokenBoundary(translatedCommand[end]))
-                end++;
-
-            yield return (idx, translatedCommand[idx..end]);
-            searchStart = end;
-        }
-    }
-
-    private static StringComparison HostPathComparison => OperatingSystem.IsWindows()
-        ? StringComparison.OrdinalIgnoreCase
-        : StringComparison.Ordinal;
-
-    private static bool IsShellTokenBoundary(char c)
-        => c is ' ' or '\t' or '\n' or '\r' or '"' or '\'' or '|' or '&' or ';' or '<' or '>' or '`';
 }

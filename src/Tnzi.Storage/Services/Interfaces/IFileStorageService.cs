@@ -120,7 +120,7 @@ public interface IFileStorageService
     /// <summary>
     /// Get storage usage ranked by top users (ordered by total size descending).
     /// </summary>
-    /// <param name="top">Number of top users to return (default 20)</param>
+    /// <param name="top">Number of top users to return (default 20, 1 to <see cref="StorageQueryLimits.MaxTopUsers"/>)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of user storage usages</returns>
     Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default);
@@ -132,11 +132,14 @@ public interface IFileStorageService
     Task<Result<FileIntegrityResult>> VerifyFileIntegrityAsync(Guid fileId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Batch verify integrity of all files (or a subset). Returns only problematic files in details.
+    /// Verify the integrity of one batch of files, in file-id order. Returns only problematic files in details.
+    /// Walk the whole store by passing each result's <see cref="BatchIntegrityResult.NextCursor"/> back as
+    /// <paramref name="after"/> until it comes back null.
     /// </summary>
-    /// <param name="maxFiles">Maximum number of files to check (default 100, 0 = all)</param>
+    /// <param name="maxFiles">Files to check in this batch (default 100, 1 to <see cref="StorageQueryLimits.MaxIntegrityBatch"/>)</param>
+    /// <param name="after">Continue after this cursor (the previous batch's <c>NextCursor</c>); null starts from the beginning</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, CancellationToken cancellationToken = default);
+    Task<Result<BatchIntegrityResult>> BatchVerifyIntegrityAsync(int maxFiles = 100, Guid? after = null, CancellationToken cancellationToken = default);
 
     // File tags
     /// <summary>
@@ -146,7 +149,8 @@ public interface IFileStorageService
     Task<Result<FileRecord>> SetFileTagsAsync(Guid fileId, List<string> tags, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Get files by tag (supports paging).
+    /// Get files carrying exactly this tag (case-insensitive), paged. A page index below 1 reads as 1;
+    /// a page size below 1 reads as 20 and one above <see cref="StorageQueryLimits.MaxPageSize"/> is capped.
     /// </summary>
     Task<Result<IPagedList<FileRecord>>> GetFilesByTagAsync(string tag, int pageIndex = 1, int pageSize = 20, CancellationToken cancellationToken = default);
 
@@ -189,16 +193,19 @@ public interface IFileStorageService
     /// 为没有缩略图的存量记录补画缩略图（位图 + PDF 首页；后者需加载可选包 <c>Tnzi.Documents</c>）。
     ///
     /// 用途是**加载了 PDF 光栅化之后的一次性回填** —— 缩略图只在写入时生成，升级前存进来的 PDF
-    /// 不会自己长出一张。幂等：已有缩略图的记录不动；画不出来的记录仍是候选，下次调用还会再试。
+    /// 不会自己长出一张。幂等：已有缩略图的记录不动；只写 <see cref="FileRecord.ThumbnailPath"/> 一列。
+    /// 按文件 id 游标推进：把结果的 <see cref="ThumbnailBackfillResult.NextCursor"/> 作为下一次的
+    /// <paramref name="after"/> 传回，直到它为 null。画不出来的记录仍是候选，下一轮（从头开始）还会再试。
     /// </summary>
     /// <param name="fileIds">只处理这些文件；null 或空表示扫描全部候选。</param>
-    /// <param name="maxFiles">一次最多处理多少条；0 表示不限。</param>
+    /// <param name="maxFiles">一次最多处理多少条，1 到 <see cref="StorageQueryLimits.MaxThumbnailBackfillBatch"/>。</param>
+    /// <param name="after">从这个游标之后继续；null 表示从头开始。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <remarks>
     /// 默认实现返回 501，让自定义实现不必为此升级；框架自己的实现在 <c>FileStorageService</c>。
     /// </remarks>
     Task<Result<ThumbnailBackfillResult>> BackfillThumbnailsAsync(
-        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, CancellationToken cancellationToken = default)
+        IReadOnlyCollection<Guid>? fileIds = null, int maxFiles = 100, Guid? after = null, CancellationToken cancellationToken = default)
         => Task.FromResult(Result<ThumbnailBackfillResult>.Failure(
             "Thumbnail backfill is not supported by this IFileStorageService implementation.", 501));
 

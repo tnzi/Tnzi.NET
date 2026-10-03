@@ -67,6 +67,8 @@ const mockGetById = vi.fn(async (id: string) => ({
   lastModificationTime: '2026-04-10T00:01:00Z',
 }))
 
+const mockGetExecutionStats = vi.fn()
+
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     workflows: {
@@ -76,6 +78,10 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       run: vi.fn(),
       publish: vi.fn(),
       unpublish: vi.fn(),
+      getExecutionStats: mockGetExecutionStats,
+      getVersions: vi.fn(async () => []),
+      getVersion: vi.fn(),
+      restoreVersion: vi.fn(),
     },
   }),
   // 0.2.72+ (B4): the bridge now re-exports `WorkflowExecutionMode`
@@ -98,6 +104,42 @@ describe('WorkflowEditor page (Phase J full editor)', () => {
     routeParams = { id: 'wf-1' }
     mockSteps = defaultSteps()
     mockGetById.mockClear()
+    mockGetExecutionStats.mockReset().mockResolvedValue({
+      workflowId: 'wf-1',
+      totalExecutions: 8,
+      successRate: 0.75,
+      avgDurationMs: 1500,
+      minDurationMs: 400,
+      maxDurationMs: 90_000,
+      p95DurationMs: 80_000,
+    })
+  })
+
+  it('shows the workflow execution stats in the metadata panel', async () => {
+    const wrapper = mount(WorkflowEditor)
+    await flushPromises()
+    expect(mockGetExecutionStats).toHaveBeenCalledWith('wf-1')
+    expect(wrapper.find('[data-test="wf-exec-stats-total"]').text()).toBe('8')
+    expect(wrapper.find('[data-test="wf-exec-stats-success"]').text()).toBe('75.0%')
+    expect(wrapper.find('[data-test="wf-exec-stats"]').text()).toContain('1.5 s')
+  })
+
+  it('shows a refused stats read as an error, not as zero runs', async () => {
+    mockGetExecutionStats.mockReset().mockRejectedValue(new Error('Forbidden'))
+    const wrapper = mount(WorkflowEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="wf-exec-stats-error"]').text()).toContain('Forbidden')
+    expect(wrapper.find('[data-test="wf-exec-stats-total"]').exists()).toBe(false)
+  })
+
+  it('reloads the definition after a version is restored', async () => {
+    const wrapper = mount(WorkflowEditor)
+    await flushPromises()
+    expect(mockGetById).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="wf-open-history"]').exists()).toBe(true)
+    wrapper.findComponent({ name: 'WorkflowVersionsDrawer' }).vm.$emit('restored', 1)
+    await flushPromises()
+    expect(mockGetById).toHaveBeenCalledTimes(2)
   })
 
   it('fetches workflow on mount and renders the canvas with derived nodes', async () => {

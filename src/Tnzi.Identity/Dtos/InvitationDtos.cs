@@ -4,16 +4,18 @@
 /// 发出一张邀请：开好账号、预设角色、签发一次性链接。
 /// </summary>
 /// <remarks>
-/// ★ <c>UserName</c> 是必填的，而且**由管理员决定**，不是被邀请人自己取。
+/// ★ 用户名<b>由管理员决定</b>，不是被邀请人自己取。
 /// 这与业界同类产品一致（AWS IAM Identity Center 的邀请邮件里直接印着
 /// <c>Your Username</c>）：内部系统的账号命名通常有规矩（工号、企业邮箱），
 /// 让新人自己取只会得到一堆需要事后纠正的名字。
 /// </remarks>
 public class CreateInvitationDto
 {
-    /// <summary>登录用户名。</summary>
-    [Required]
-    public string UserName { get; set; } = null!;
+    /// <summary>
+    /// 登录用户名。<c>Identity:SignIn:UseEmailAsUserName</c> 开启（默认）且给了邮箱时<b>省略</b>，
+    /// 用户名就是邮箱；给一个不同的值会被拒绝。关闭该开关或只有手机号时必填。
+    /// </summary>
+    public string? UserName { get; set; }
 
     /// <summary>邮箱。邀请链接默认发到这里。</summary>
     [EmailAddress]

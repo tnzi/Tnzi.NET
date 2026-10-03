@@ -93,11 +93,94 @@ function mockTemplateApi() {
 // ---------------------------------------------------------------------------
 
 describe('notification-bridge', () => {
-  it('exposes messages / templates / subscriptions sub-contracts', () => {
+  it('exposes messages / templates / subscriptions / optOuts sub-contracts', () => {
     const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never })
     expect(typeof bridge.messages.fetch).toBe('function')
     expect(typeof bridge.templates.fetch).toBe('function')
     expect(typeof bridge.subscriptions.fetch).toBe('function')
+    expect(typeof bridge.optOuts.fetch).toBe('function')
+  })
+
+  // ---- optOuts sub-contract (address-keyed suppression list) ----
+
+  function mockOptOutApi() {
+    return {
+      getPagedList: vi.fn(async () => ({
+        succeeded: true,
+        data: {
+          items: [
+            { id: 'o1', address: 'gone@example.com', channel: 'Email', category: null, source: 'one-click link', creationTime: '2026-09-01T00:00:00Z' },
+          ],
+          totalCount: 1, pageIndex: 1, pageSize: 20,
+        },
+      })),
+      create: vi.fn(async () => ({
+        succeeded: true,
+        data: { id: 'o2', address: 'complainer@example.com', channel: 'Email', category: null, source: 'admin:u1', creationTime: '2026-09-20T00:00:00Z' },
+      })),
+      delete: vi.fn(async () => ({ succeeded: true, data: null })),
+    }
+  }
+
+  it('optOuts.fetch maps the search box and filter bar onto the query dto', async () => {
+    const optOutApi = mockOptOutApi()
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: optOutApi as never })
+
+    const result = await bridge.optOuts.fetch({
+      pageIndex: 2, pageSize: 50, searchText: ' Alice ', filters: { channel: 'Sms', category: 'marketing' },
+    })
+
+    expect(optOutApi.getPagedList).toHaveBeenCalledWith(expect.objectContaining({
+      pageIndex: 2, pageSize: 50, address: 'Alice', channel: 'Sms', category: 'marketing',
+    }))
+    expect(result.items).toHaveLength(1)
+    expect(result.totalCount).toBe(1)
+  })
+
+  it('optOuts.fetch sends no address when neither the search box nor the filter has one', async () => {
+    const optOutApi = mockOptOutApi()
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: optOutApi as never })
+
+    await bridge.optOuts.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: { channel: '' } })
+
+    const params = (optOutApi.getPagedList.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(params.address).toBeUndefined()
+    expect(params.channel).toBeUndefined()
+  })
+
+  it('optOuts.create posts the registration and drops empty optional fields', async () => {
+    const optOutApi = mockOptOutApi()
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: optOutApi as never })
+
+    const created = await bridge.optOuts.create({ address: 'complainer@example.com', channel: 'Email', category: '', reason: '' })
+
+    expect(optOutApi.create).toHaveBeenCalledWith({ address: 'complainer@example.com', channel: 'Email', category: undefined, reason: undefined })
+    expect(created).toMatchObject({ id: 'o2', source: 'admin:u1' })
+  })
+
+  it('optOuts.create rejects when the API resolves a failure envelope (a refused registration is not a saved one)', async () => {
+    const optOutApi = mockOptOutApi()
+    optOutApi.create = vi.fn(async () => ({ succeeded: false, code: 400, data: null, message: 'An address is required to opt out.' })) as never
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: optOutApi as never })
+
+    await expect(bridge.optOuts.create({ address: ' ', channel: 'Email' })).rejects.toThrow('An address is required to opt out.')
+  })
+
+  it('optOuts.delete revokes each id and rejects on a failed envelope', async () => {
+    const optOutApi = mockOptOutApi()
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: optOutApi as never })
+
+    await bridge.optOuts.delete(['o1', 'o2'])
+    expect(optOutApi.delete).toHaveBeenCalledTimes(2)
+    expect(optOutApi.delete).toHaveBeenNthCalledWith(2, 'o2')
+
+    optOutApi.delete = vi.fn(async () => ({ succeeded: false, code: 404, data: null, message: 'Opt-out record not found.' })) as never
+    await expect(bridge.optOuts.delete(['missing'])).rejects.toThrow('Opt-out record not found.')
+  })
+
+  it('optOuts.update rejects: the (address, channel, category) triple is the row identity', async () => {
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, optOutApi: mockOptOutApi() as never })
+    await expect(bridge.optOuts.update('o1', {})).rejects.toThrow(/no editable fields/)
   })
 
   // ---- messages sub-contract ----

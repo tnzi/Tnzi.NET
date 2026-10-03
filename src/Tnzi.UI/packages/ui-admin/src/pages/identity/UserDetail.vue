@@ -89,6 +89,8 @@
             :t="t"
           />
 
+          <UserSecuritySection v-else-if="sec === 'security' && user" :user-id="id" />
+
           <UserSessionsSection
             v-else-if="sec === 'sessions' && user"
             :user-id="id"
@@ -145,6 +147,7 @@ import { TModalShell } from '@tnzi/ui'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import UserRolesSection from './sections/UserRolesSection.vue'
 import UserGrantsSection from './sections/UserGrantsSection.vue'
+import UserSecuritySection from './sections/UserSecuritySection.vue'
 import UserSessionsSection from './sections/UserSessionsSection.vue'
 import UserLoginLogsSection from './sections/UserLoginLogsSection.vue'
 import { userProfileSchema, userProfileSections } from './user-config'
@@ -277,6 +280,7 @@ const sections = computed(() => {
     list.push({ key: 'grants', label: t('detail.sections.grants'), icon: 'mdi:shield-key-outline', group: t('detail.groups.access') })
   }
   list.push(
+    { key: 'security', label: t('detail.sections.security'), icon: 'mdi:shield-lock-outline', group: t('detail.groups.access') },
     { key: 'sessions', label: t('detail.sections.sessions'), icon: 'mdi:devices', group: t('detail.groups.activity') },
     { key: 'loginLogs', label: t('detail.sections.loginLogs'), icon: 'mdi:history', group: t('detail.groups.activity') },
   )

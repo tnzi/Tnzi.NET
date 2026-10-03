@@ -185,8 +185,8 @@ public interface IPushDeviceService
     /// 退役一个已被推送网关判定为永久失效的令牌，返回删除的行数。
     /// </summary>
     /// <remarks>
-    /// ★ 由 <see cref="PushSender"/> 在 FCM 回 <c>Unregistered</c> / <c>SenderIdMismatch</c>
-    /// 时调用 —— 那是这张表<b>唯一</b>能得知令牌已死的时机：FCM 不会主动通知，
+    /// ★ 由 <see cref="PushSender"/> 在 FCM 回 <c>Unregistered</c>（以及只有一个 Firebase 项目的部署里的
+    /// <c>SenderIdMismatch</c>）时调用 —— 那是这张表<b>唯一</b>能得知令牌已死的时机：FCM 不会主动通知，
     /// 客户端卸载了 App 也不会来注销。不退役的话表只增不减，而 admin 的
     /// 「重试失败项」会对着死令牌一直重试。
     /// <para>

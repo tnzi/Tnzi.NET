@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { defaultAdminRoutes } from '../../src/router/routes'
+import { en } from '../../src/locales/en'
+import { zhCn } from '../../src/locales/zh-cn'
 
 /**
  * The backend's `DefaultInvitationUrlGenerator` builds the invite link as
@@ -23,4 +25,26 @@ describe('accept-invitation route', () => {
     const record = defaultAdminRoutes.find((r) => r.name === 'accept-invitation')
     expect(record?.meta?.requiresAuth).toBe(false)
   })
+})
+
+/**
+ * Public recipient pages carry a locale key as their title, like every other
+ * built-in route: a literal English string reads English under zh-cn.
+ */
+describe('public recipient route titles', () => {
+  const lookup = (dict: unknown, key: string): unknown =>
+    key
+      .replace(/^tnzi\./, '')
+      .split('.')
+      .reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], dict)
+
+  for (const name of ['accept-invitation', 'share-link', 'unsubscribe']) {
+    it(`${name} title is a key present in both bundled dictionaries`, () => {
+      const title = String(defaultAdminRoutes.find((r) => r.name === name)?.meta?.title ?? '')
+      expect(title).toMatch(/^tnzi\.admin\./)
+      expect(typeof lookup(en, title)).toBe('string')
+      expect(typeof lookup(zhCn, title)).toBe('string')
+      expect(lookup(zhCn, title)).not.toBe(lookup(en, title))
+    })
+  }
 })

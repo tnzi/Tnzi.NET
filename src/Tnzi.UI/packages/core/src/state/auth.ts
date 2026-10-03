@@ -9,7 +9,7 @@ import { reactive } from 'vue';
 import type { AuthState } from './types/auth';
 import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';
-import { isSessionEndedForSecurity } from '../services/identity/session-security';
+import { isSessionEndedForSecurity, isSignInIpNotAllowed } from '../services/identity/session-security';
 import { HttpError, isHttpError } from '../errors/api-error';
 import { useLogger } from '../adapters/logger';
 import type { StateDeps } from './types/deps';
@@ -72,6 +72,14 @@ function isRefreshRejection(error: unknown): boolean {
 export const SESSION_ENDED_FOR_SECURITY_MESSAGE =
   'Your session was ended for security reasons. Please sign in again.';
 export const SESSION_EXPIRED_MESSAGE = 'Session expired, please login again';
+/**
+ * The message a session refused at refresh by the account's sign-in IP
+ * allow-list leaves for the login page. Same reasoning as
+ * {@link SESSION_ENDED_FOR_SECURITY_MESSAGE}: login pages render their own
+ * translated copy off {@link sessionEndReasonOf}.
+ */
+export const SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE =
+  'Your current network is not on the list of addresses this account may sign in from. Sign in again from an allowed network.';
 
 /**
  * Why the previous session ended, as far as a login page needs to know.
@@ -79,20 +87,35 @@ export const SESSION_EXPIRED_MESSAGE = 'Session expired, please login again';
  * - `'security'`: the backend revoked the session because the credentials
  *   looked stolen (refresh-token replay, session binding mismatch). The one
  *   moment the legitimate user can learn their account is in use elsewhere.
+ * - `'ipNotAllowed'`: the refresh was refused because the current network is
+ *   not on the account's sign-in IP allow-list. Signing in again only works
+ *   from an allowed network, so the page has to say so.
  * - `'expired'`: the refresh token was rejected as expired / invalid. Routine.
  */
-export type SessionEndReason = 'security' | 'expired';
+export type SessionEndReason = 'security' | 'ipNotAllowed' | 'expired';
+
+/**
+ * The login-page message a refresh rejection leaves behind. Both the refresh
+ * that sees the rejection and the boot-restore cleanup derive it from the same
+ * place, so the two can never disagree about which reason a code maps to.
+ */
+function sessionEndMessageFor(rejection: unknown): string {
+  if (isSessionEndedForSecurity(rejection)) return SESSION_ENDED_FOR_SECURITY_MESSAGE;
+  if (isSignInIpNotAllowed(rejection)) return SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE;
+  return SESSION_EXPIRED_MESSAGE;
+}
 
 /**
  * Classify the manager's `error` into a {@link SessionEndReason}.
  *
  * `error` is a single string slot shared with login failures ("Invalid user
  * name or password"), so a login page cannot show every value in it as a
- * session notice. Only the two messages `_doRefreshToken` /
+ * session notice. Only the messages `_doRefreshToken` /
  * `_clearAfterFailedRestore` write are session ends; anything else is null.
  */
 export function sessionEndReasonOf(message: string | null | undefined): SessionEndReason | null {
   if (message === SESSION_ENDED_FOR_SECURITY_MESSAGE) return 'security';
+  if (message === SESSION_ENDED_IP_NOT_ALLOWED_MESSAGE) return 'ipNotAllowed';
   if (message === SESSION_EXPIRED_MESSAGE) return 'expired';
   return null;
 }
@@ -528,9 +551,7 @@ export class AuthStateManager {
       // only moment the legitimate user is told that their credentials are being
       // used from somewhere else. Rendering "session expired" for it discards
       // that signal entirely.
-      this.error = isSessionEndedForSecurity(error)
-        ? SESSION_ENDED_FOR_SECURITY_MESSAGE
-        : SESSION_EXPIRED_MESSAGE;
+      this.error = sessionEndMessageFor(error);
       try {
         await this.deps.onLogout?.();
       } catch {
@@ -737,7 +758,9 @@ export class AuthStateManager {
    * one message worth showing. A boot that fails because the session was
    * ended for a security reason must keep that message, or the user is bounced
    * to the login page with nothing to tell them their credentials are in use
-   * elsewhere. An ordinary expiry (or the plain "no cookie" boot) stays quiet,
+   * elsewhere; one refused by the account's sign-in IP allow-list keeps its
+   * message too, since signing in again only works from another network.
+   * An ordinary expiry (or the plain "no cookie" boot) stays quiet,
    * as before - `clearAuth()` resets `error`.
    *
    * `cause` is the failure that actually ended the session - callers pass the
@@ -747,9 +770,11 @@ export class AuthStateManager {
    * listener) can have quietly blanked it first.
    */
   private _clearAfterFailedRestore(cause: unknown): void {
-    const securityMessage = isSessionEndedForSecurity(cause) ? SESSION_ENDED_FOR_SECURITY_MESSAGE : null;
+    // An ordinary expiry stays quiet (null); the reasons the user has to act on
+    // - a security end, or a network outside the allow-list - keep their message.
+    const message = sessionEndMessageFor(cause);
     this.clearAuth();
-    this.error = securityMessage;
+    this.error = message === SESSION_EXPIRED_MESSAGE ? null : message;
   }
 
   // ============================================

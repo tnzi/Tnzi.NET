@@ -77,7 +77,12 @@ export interface UserProfile {
  * Create user request
  */
 export interface CreateUserDto {
-  userName: string;
+  /**
+   * Omit when the server runs with `Identity:SignIn:UseEmailAsUserName` (the default)
+   * and `email` is set: the username is the email, and a different value is rejected.
+   * Required otherwise.
+   */
+  userName?: string | null;
   password: string;
   email?: string | null;
   phoneNumber?: string | null;
@@ -550,6 +555,15 @@ export interface AuthConfigDto {
   enableCodeLogin: boolean;
   codeLoginViaSms: boolean;
   codeLoginViaEmail: boolean;
+  /**
+   * Digits in an email / SMS one-time code (`Identity:Otp:CodeLength`, 4-8,
+   * default 6; a runtime setting, read per request). Applies to every
+   * delivered code: code login, quick register, recovery, email / SMS
+   * two-factor, step-up, contact change. Authenticator (TOTP) codes are always
+   * 6 and do not follow it. Optional because older backends omit it; read it
+   * through `resolveOtpCodeLength()`, which defaults to 6.
+   */
+  otpCodeLength?: number;
   // Registration
   /** Any registration path is open (self-registration OR either quick-register channel). */
   enableRegistration: boolean;
@@ -896,16 +910,17 @@ export interface VerifyTwoFactorDto {
 export interface TwoFactorMethodDto {
   /** Method type. */
   type: TwoFactorType;
-  /** Can be configured/enabled (address confirmed for SMS/email; TOTP always). */
+  /** Can be configured/enabled (address confirmed for SMS/email; TOTP always;
+   *  Passkey once at least one passkey is registered). */
   available: boolean;
   /** Currently enabled. */
   enabled: boolean;
   /** Is the user's preferred method (shown first at login). */
   isPreferred: boolean;
-  /** The channel is enabled at the deployment level, but the user hasn't set up /
-   *  verified the matching address (phone / email) yet - so it can't be enabled
-   *  until they do. The UI shows the row disabled with a "verify your …" hint.
-   *  Always false for TOTP (no address needed). */
+  /** The channel is enabled at the deployment level, but the user still has to
+   *  set something up first: a verified phone / email for the code methods, a
+   *  registered passkey for Passkey. The UI shows the row muted with a hint
+   *  saying what. Always false for TOTP (nothing to set up beforehand). */
   requiresAddress?: boolean;
 }
 
@@ -1234,6 +1249,17 @@ export interface PasskeyAssertionBeginDto {
   userName?: string;
 }
 
+/** Passkey as the second factor, first leg: options for the challenged account. */
+export interface TwoFactorPasskeyBeginDto {
+  /** The temp token from the `2FA_REQUIRED` challenge. */
+  tempToken: string;
+}
+
+/** Passkey as the second factor, second leg: the assertion plus the same temp token. */
+export interface TwoFactorPasskeyCompleteDto extends PasskeyCompleteDto {
+  tempToken: string;
+}
+
 // ============================================
 // Step-up (re-authentication for one action)
 // ============================================
@@ -1384,7 +1410,8 @@ export interface PendingActionResultDto {
  * the person what their username is.
  */
 export interface CreateInvitationDto {
-  userName: string;
+  /** Same rule as `CreateUserDto.userName`: omit it to use the email when the server uses the email as the username. */
+  userName?: string | null;
   email?: string | null;
   phoneNumber?: string | null;
   roleIds?: string[] | null;
@@ -1441,4 +1468,39 @@ export interface AcceptInvitationResultDto {
   completed: boolean;
   remainingSteps?: string[] | null;
   token?: TokenResultDto | null;
+}
+
+// ============================================
+// Admin User Security (DefaultUserSecurityAdminController)
+// ============================================
+
+/**
+ * One account's sign-in policy: what, beyond the credential, must hold before a token is issued.
+ * Today that is the sign-in IP allow-list. An account with no policy row reads as all-off.
+ */
+export interface UserSignInPolicyDto {
+  userId: string;
+  /** When on, the account can only obtain tokens (refresh included) from an address on the list. */
+  ipAllowListEnabled: boolean;
+  /** The operator's text, verbatim: one exact address or CIDR range per line, `#` lines are comments. */
+  allowedIps?: string | null;
+  /** The usable entries parsed out of `allowedIps` (blank lines and comments dropped). */
+  entries: string[];
+  /**
+   * Roles the account holds that are exempt from the list by deployment configuration
+   * (`Identity:AccountSecurity:IpAllowListExemptRoles`). Non-empty means the list is shown
+   * as enabled but does not apply to this account.
+   */
+  exemptedByRoles: string[];
+  /** The calling administrator's own address, for an "add my address" helper. */
+  callerIpAddress?: string | null;
+}
+
+/**
+ * Rewrite an account's sign-in IP allow-list. Enabling requires at least one valid entry;
+ * any malformed entry rejects the whole write. Disabled and empty removes the policy row.
+ */
+export interface SetIpAllowListDto {
+  enabled: boolean;
+  allowedIps?: string | null;
 }

@@ -16,7 +16,7 @@ namespace Tnzi.Imaging.Tests;
 /// </remarks>
 public class SlidingCaptchaPassTokenTests
 {
-    private static (SlidingCaptchaService Service, ICache Cache) CreateService()
+    private static (SlidingCaptchaService Service, ICache Cache) CreateService(int readBarrier = 0)
     {
         var scopedContext = new Mock<IScopedContext>();
         scopedContext.Setup(c => c.ClientIpAddress).Returns("203.0.113.7");
@@ -31,9 +31,10 @@ public class SlidingCaptchaPassTokenTests
             Mock.Of<ILogger<MemoryCacheService>>(),
             Microsoft.Extensions.Options.Options.Create(new CachingOptions()),
             provider);
+        ICache effective = readBarrier > 0 ? BarrierCache.Wrap(cache, readBarrier) : cache;
 
         var options = Microsoft.Extensions.Options.Options.Create(new ImagingOptions());
-        return (new SlidingCaptchaService(provider, options, cache), cache);
+        return (new SlidingCaptchaService(provider, options, effective), effective);
     }
 
     /// <summary>生成一道题并直接读出正确答案（测试只关心令牌那一环，不关心图片）。</summary>
@@ -88,13 +89,60 @@ public class SlidingCaptchaPassTokenTests
     }
 
     [Fact]
-    public async Task PassToken_WithoutABoundPurpose_IsAcceptedForAnyPurpose()
+    public async Task PassToken_WithoutABoundPurpose_IsRefusedByEveryGate()
     {
+        // 核销方总是带着用途来的。若不绑用途的令牌哪儿都收，用途绑定就成了客户端的选项：
+        // 出题时省掉 ?purpose= 即得一枚万能令牌，「注册页的令牌在登录页一律拒绝」落空。
         var (service, cache) = CreateService();
         var (token, correctX) = await GenerateAsync(service, cache, purpose: null);
         var pass = (await service.VerifyAsync(token, correctX)).Data!.PassToken!;
 
-        Assert.True(await service.RedeemPassTokenAsync(pass, "contact"));
+        Assert.False(await service.RedeemPassTokenAsync(pass, "contact"));
+    }
+
+    [Fact]
+    public async Task ConcurrentVerifies_OfOnePuzzle_IssueAtMostOnePassToken()
+    {
+        // 同一道题并发 N 个不同 X 的提交：若它们都在删除之前读到答案，穷举一次就能命中。
+        // 这里全部带正确答案，读侧用屏障把 N 个请求卡在「都读到了」之后再放行 —— 一次性若只是先读后删，
+        // N 个都会拿到通行令牌。
+        const int attempts = 20;
+        var (service, cache) = CreateService(readBarrier: attempts);
+        var gate = (BarrierCache)(object)cache;
+        gate.Enabled = false;
+        var (token, correctX) = await GenerateAsync(service, cache, "login");
+        gate.Enabled = true;
+
+        var results = await RunConcurrentlyAsync(attempts, () => service.VerifyAsync(token, correctX));
+
+        Assert.Equal(1, results.Count(r => r.Data!.Success));
+        Assert.Equal(1, results.Count(r => r.Data!.PassToken != null));
+    }
+
+    [Fact]
+    public async Task ConcurrentRedeems_OfOnePassToken_SucceedAtMostOnce()
+    {
+        // 同一枚通行令牌并发打 N 个 [RequireCaptcha] 请求：只能有一个过。
+        const int attempts = 20;
+        var (service, cache) = CreateService(readBarrier: attempts);
+        var gate = (BarrierCache)(object)cache;
+        gate.Enabled = false;
+        var (token, correctX) = await GenerateAsync(service, cache, "login");
+        var pass = (await service.VerifyAsync(token, correctX)).Data!.PassToken!;
+        gate.Enabled = true;
+
+        var results = await RunConcurrentlyAsync(attempts, () => service.RedeemPassTokenAsync(pass, "login"));
+
+        Assert.Equal(1, results.Count(ok => ok));
+    }
+
+    private static async Task<T[]> RunConcurrentlyAsync<T>(int count, Func<Task<T>> attempt)
+    {
+        // 真线程：屏障是同步阻塞的，靠线程池慢慢扩容会让测试变慢甚至超时。
+        var tasks = Enumerable.Range(0, count)
+            .Select(_ => Task.Factory.StartNew(attempt, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap())
+            .ToArray();
+        return await Task.WhenAll(tasks);
     }
 
     [Theory]
@@ -125,5 +173,47 @@ public class SlidingCaptchaPassTokenTests
         Assert.False(second.Passed);
         Assert.Equal(CaptchaFailure.ExpiredOrReplayed, second.Failure);
         Assert.Contains("{purpose}", provider.GetClientConfig().ChallengeUrl, StringComparison.Ordinal);
+    }
+}
+
+/// <summary>
+/// 真实缓存的包装：只在「按拼图 / 通行令牌读数据」的那一步上设屏障，N 个并发调用者全部读到之后才一起放行。
+/// 这正是先读后删的窗口 —— 没有它，内存缓存的同步完成会让并发调用在测试里天然串行化。
+/// </summary>
+public class BarrierCache : System.Reflection.DispatchProxy
+{
+    private ICache _inner = null!;
+    private Barrier _barrier = null!;
+
+    /// <summary>关掉时不设屏障（准备阶段的单线程调用用）。</summary>
+    public bool Enabled { get; set; } = true;
+
+    public static ICache Wrap(ICache inner, int participants)
+    {
+        var proxy = Create<ICache, BarrierCache>();
+        var self = (BarrierCache)(object)proxy;
+        self._inner = inner;
+        self._barrier = new Barrier(participants);
+        return proxy;
+    }
+
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+    {
+        if (Enabled
+            && targetMethod!.Name == nameof(ICache.GetAsync)
+            && args?.Length > 0 && args[0] is string key
+            && key.StartsWith("SlidingCaptcha:", StringComparison.Ordinal))
+        {
+            Assert.True(_barrier.SignalAndWait(TimeSpan.FromSeconds(30)), "concurrent readers never all arrived");
+        }
+
+        try
+        {
+            return targetMethod!.Invoke(_inner, args);
+        }
+        catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException != null)
+        {
+            throw ex.InnerException;
+        }
     }
 }

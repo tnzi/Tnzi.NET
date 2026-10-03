@@ -73,6 +73,10 @@ public class AuditModule : TnziApplicationModule
         context.Services.AddScoped<IDataDestructionService, DataDestructionService>();
         context.Services.AddHostedService<DataDestructionBackgroundService>();
 
+        // 操作审计按 RetentionDays 的自动清理（容量管理，与上面的合规销毁不是一回事）。
+        // 始终注册：AutoPurgeEnabled 是热设置，服务在场才能在开关打开时开始删。默认关着一行都不删。
+        context.Services.AddHostedService<AuditRetentionBackgroundService>();
+
         // 注册异步审计发送者与消费者（单例）
         context.Services.AddSingleton<AuditSender>();
         context.Services.AddSingleton<IAuditSender>(sp => sp.GetRequiredService<AuditSender>());

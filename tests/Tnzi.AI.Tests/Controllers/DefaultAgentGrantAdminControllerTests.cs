@@ -16,18 +16,29 @@ public class DefaultAgentGrantAdminControllerTests
         _controller = new DefaultAgentGrantAdminController(_grantService.Object);
     }
 
+    private static AgentGrantUsageDto Usage(Guid id, string name = "Agent") => new() { AgentId = id, AgentName = name, AgentIsEnabled = true };
+
     [Fact]
-    public async Task ReverseTool_ReturnsAgentIds()
+    public async Task ReverseTool_ReturnsAgents()
     {
         var a = Guid.NewGuid();
         var b = Guid.NewGuid();
         _grantService.Setup(s => s.GetAgentsUsingToolAsync("fs", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { a, b });
+            .ReturnsAsync(new[] { Usage(a, "A"), Usage(b, "B") });
 
         var result = await _controller.ReverseByTool("fs");
 
         result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldBe(new[] { a, b }, ignoreOrder: true);
+        result.Data!.Select(x => x.AgentId).ShouldBe(new[] { a, b });
+    }
+
+    [Fact]
+    public async Task ReverseTool_BlankKey_Returns400()
+    {
+        var result = await _controller.ReverseByTool(" ");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
     }
 
     [Fact]
@@ -35,12 +46,12 @@ public class DefaultAgentGrantAdminControllerTests
     {
         var a = Guid.NewGuid();
         _grantService.Setup(s => s.GetAgentsUsingSkillAsync("writing", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { a });
+            .ReturnsAsync(new[] { Usage(a) });
 
         var result = await _controller.ReverseBySkill("writing");
 
         result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldBe(new[] { a });
+        result.Data!.Select(x => x.AgentId).ShouldBe(new[] { a });
     }
 
     [Fact]
@@ -49,12 +60,38 @@ public class DefaultAgentGrantAdminControllerTests
         var kbId = Guid.NewGuid();
         var a = Guid.NewGuid();
         _grantService.Setup(s => s.GetAgentsUsingKnowledgeAsync(kbId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { a });
+            .ReturnsAsync(new[] { Usage(a) });
 
         var result = await _controller.ReverseByKnowledge(kbId);
 
         result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldBe(new[] { a });
+        result.Data!.Select(x => x.AgentId).ShouldBe(new[] { a });
+    }
+
+    [Fact]
+    public async Task ListForAgent_ReturnsServiceList()
+    {
+        var agentId = Guid.NewGuid();
+        var list = new AgentGrantListDto { Skills = [new AgentGrantDto { Id = Guid.NewGuid(), Key = "writing", IsEnabled = false }] };
+        _grantService.Setup(s => s.ListGrantsAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(list);
+
+        var result = await _controller.ListForAgent(agentId);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBeSameAs(list);
+    }
+
+    [Fact]
+    public async Task Delete_Found_ReturnsOk_Missing_Returns404()
+    {
+        var grantId = Guid.NewGuid();
+        _grantService.Setup(s => s.DeleteGrantAsync(GrantResourceType.Skill, grantId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        (await _controller.Delete(GrantResourceType.Skill, grantId)).Succeeded.ShouldBeTrue();
+
+        var missing = await _controller.Delete(GrantResourceType.Tool, Guid.NewGuid());
+        missing.Succeeded.ShouldBeFalse();
+        missing.Code.ShouldBe(404);
     }
 
     [Fact]

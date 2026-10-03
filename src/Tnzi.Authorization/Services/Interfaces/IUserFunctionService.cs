@@ -136,4 +136,19 @@ public interface IUserFunctionService
     /// </summary>
     /// <param name="userId">用户ID</param>
     Task<Result> ClearUserFunctionsAsync(Guid userId);
+
+    /// <summary>
+    /// 一个账号的权限全景：目录、按角色的基线、用户级 allow / deny 覆盖、最终生效集。
+    /// </summary>
+    /// <param name="userId">用户ID</param>
+    /// <param name="scope">
+    /// 可选的码前缀（区分大小写按序号比较，如 <c>catalog.</c>）。给出时目录、基线、覆盖与生效集
+    /// 都只含以它开头的码；null 或空白表示整个目录。
+    /// </param>
+    /// <remarks>
+    /// 只读。解析语义与运行时检查同源（<c>(角色 ∪ 用户允许) − 用户拒绝</c>，超管 = 整个目录）。
+    /// 每个消费方此前各自从模块树、功能表、角色授权与用户覆盖四处拼这幅画面，
+    /// 拼错的方向是安静的；这里给一份权威的。
+    /// </remarks>
+    Task<Result<UserPermissionPictureDto>> GetUserPermissionPictureAsync(Guid userId, string? scope = null);
 }

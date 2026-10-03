@@ -19,6 +19,7 @@ import { NInput, NButton } from 'naive-ui'
 import TSettingGroup from '../layout/TSettingGroup.vue'
 import TSettingRow from '../layout/TSettingRow.vue'
 import type { UseAiPersonalizationReturn } from '../../headless/useAiPersonalization'
+import { useAiI18n } from '../../i18n'
 
 /* No group title: the dialog already renders the section label as the pane
    heading, and a group called "Personalization" under a pane called
@@ -27,6 +28,8 @@ import type { UseAiPersonalizationReturn } from '../../headless/useAiPersonaliza
 const props = defineProps<{
   controller: UseAiPersonalizationReturn
 }>()
+
+const t = useAiI18n()
 
 // The editable draft, lifted out of the controller so the template writes to a
 // local binding. `vue/no-mutating-props` cannot tell "writing through a
@@ -42,51 +45,51 @@ onMounted(() => {
 <template>
   <TSettingGroup :separator="false">
     <TSettingRow
-      label="What should the assistant call you?"
-      description="Used when it addresses you directly."
+      :label="t.personalizationSettings.name"
+      :description="t.personalizationSettings.nameHint"
     >
       <NInput
         v-model:value="draft.displayName"
         class="t-settings-field__control"
         size="small"
         :maxlength="64"
-        placeholder="Your preferred name"
+        :placeholder="t.personalizationSettings.namePlaceholder"
       />
     </TSettingRow>
 
-    <TSettingRow label="What do you do?" description="Helps it pitch answers at the right level.">
+    <TSettingRow :label="t.personalizationSettings.role" :description="t.personalizationSettings.roleHint">
       <NInput
         v-model:value="draft.role"
         class="t-settings-field__control"
         size="small"
         :maxlength="120"
-        placeholder="e.g. Backend engineer"
+        :placeholder="t.personalizationSettings.rolePlaceholder"
       />
     </TSettingRow>
 
     <TSettingRow
-      label="Preferred language"
-      description="What it should answer in unless you ask otherwise."
+      :label="t.personalizationSettings.language"
+      :description="t.personalizationSettings.languageHint"
     >
       <NInput
         v-model:value="draft.preferredLanguage"
         class="t-settings-field__control"
         size="small"
         :maxlength="40"
-        placeholder="e.g. English"
+        :placeholder="t.personalizationSettings.languagePlaceholder"
       />
     </TSettingRow>
 
     <TSettingRow
-      label="Anything else it should know"
-      description="Applied to every new conversation."
+      :label="t.personalizationSettings.content"
+      :description="t.personalizationSettings.contentHint"
       stacked
     >
       <NInput
         v-model:value="draft.content"
         type="textarea"
         :autosize="{ minRows: 5, maxRows: 14 }"
-        placeholder="Preferences, context about your work, how you like answers structured…"
+        :placeholder="t.personalizationSettings.contentPlaceholder"
       />
     </TSettingRow>
 
@@ -102,7 +105,7 @@ onMounted(() => {
         :disabled="!controller.dirty.value || controller.saving.value"
         @click="controller.reset()"
       >
-        Reset
+        {{ t.personalizationSettings.reset }}
       </NButton>
       <NButton
         size="small"
@@ -111,7 +114,7 @@ onMounted(() => {
         :disabled="!controller.dirty.value"
         @click="controller.save()"
       >
-        Save
+        {{ t.personalizationSettings.save }}
       </NButton>
     </div>
   </TSettingGroup>

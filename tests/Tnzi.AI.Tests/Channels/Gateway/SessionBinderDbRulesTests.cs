@@ -125,6 +125,68 @@ public class SessionBinderDbRulesTests
             It.IsAny<CancellationToken>()), Times.AtMostOnce);
     }
 
+    /// <summary>
+    /// 一次查库失败不能在整个 TTL 周期里把已加载的数据库规则换成「没有规则」：沿用上一次成功的结果。
+    /// </summary>
+    [Fact]
+    public void Resolve_DbFailureAfterASuccessfulLoad_KeepsThePreviousRules()
+    {
+        var dbRules = new List<SessionBindingRule>
+        {
+            new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
+        };
+        var (scopeFactory, repo) = CreateScopeFactory(dbRules);
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var clock = new SteppingClock();
+        var binder = new DefaultSessionBinder([], options, scopeFactory.Object, cacheTtl: TimeSpan.FromMinutes(5), timeProvider: clock);
+
+        binder.Resolve(Ctx()).AgentId.ShouldBe(DbAgentId);
+
+        repo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<SessionBindingRule, bool>>?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+        clock.Advance(TimeSpan.FromMinutes(6));
+
+        binder.Resolve(Ctx()).AgentId.ShouldBe(DbAgentId);
+    }
+
+    /// <summary>
+    /// 失败不按整个 TTL 缓存：重试间隔一过就重新查库，数据库恢复后规则立即回来。
+    /// </summary>
+    [Fact]
+    public void Resolve_DbFailure_IsRetriedAfterTheShortInterval_NotTheWholeTtl()
+    {
+        var (scopeFactory, repo) = CreateScopeFactory([]);
+        repo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<SessionBindingRule, bool>>?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = DefaultAgentId });
+        var clock = new SteppingClock();
+        var logger = new Mock<ILogger<DefaultSessionBinder>>();
+        logger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+        var binder = new DefaultSessionBinder([], options, scopeFactory.Object, cacheTtl: TimeSpan.FromMinutes(5), logger.Object, clock);
+
+        binder.Resolve(Ctx()).AgentId.ShouldBe(DefaultAgentId);
+        logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(),
+            It.IsAny<InvalidOperationException>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+
+        repo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<SessionBindingRule, bool>>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SessionBindingRule>
+            {
+                new() { Channel = "telegram", AgentId = DbAgentId, Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true }
+            });
+        clock.Advance(TimeSpan.FromSeconds(31)); // 重试间隔（30 秒）刚过，远未到 5 分钟的 TTL
+
+        binder.Resolve(Ctx()).AgentId.ShouldBe(DbAgentId);
+    }
+
+    private sealed class SteppingClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan delta) => _now += delta;
+    }
+
     [Fact]
     public void Resolve_NoScopeFactory_FallsBackToConfigOnly()
     {

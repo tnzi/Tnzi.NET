@@ -44,10 +44,15 @@ function hasOwnKeys(o?: object | null): boolean {
  * tab (e.g. carried over from an older build / a session-expiry bounce) would
  * otherwise linger in the bar. `addTab` refuses them and `afterHydrate` strips
  * any that were persisted before this guard existed. Consumers can flag their
- * own non-tab routes with `meta.hideInTab: true`.
+ * own non-tab routes with `meta.hideInTab: true`. The public recipient pages
+ * (share link, unsubscribe, invitation) belong here for the same reason: they
+ * render outside the shell, so a tab for one would lead out of the admin.
  */
 const NON_TAB_ROUTE_NAMES = new Set([
   'login',
+  'share-link',
+  'unsubscribe',
+  'accept-invitation',
   'forbidden',
   'not-found',
   'server-error',
@@ -115,6 +120,9 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   // and prevents pinned tabs from being closed (close button is hidden,
   // close-others / close-left / close-right skip them).
   const fixedTabIds = ref<string[]>([])
+  // Id of the signed-in user the persisted tabs belong to. Empty = not claimed
+  // yet (fresh store, or tabs persisted before this field existed).
+  const ownerId = ref<string>('')
 
   const allTabs = computed<AdminTab[]>(() => {
     return homeTab.value ? [homeTab.value, ...tabs.value] : [...tabs.value]
@@ -187,6 +195,29 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
       activeTabId.value =
         tabs.value[tabs.value.length - 1]?.id ?? (homeTab.value?.id ?? '')
     }
+  }
+
+  /**
+   * Bind the tabs to the signed-in user. Called by the framework once the
+   * user's identity is resolved. When the tabs were saved under a DIFFERENT
+   * user they are dropped, pinned ones included: a user switch without a
+   * sign-out (accepting an invitation in a browser another account is still
+   * signed into) must not show the next person the previous person's tabs.
+   * `pruneTabs` does not cover this - it only removes what the new user may
+   * not open, and what they may open still came from someone else's session.
+   *
+   * Unclaimed tabs (empty owner) are adopted rather than dropped: that is the
+   * normal state right after the first sign-in on this browser, where the tab
+   * for the landing page is added before the identity load finishes.
+   */
+  function claimForUser(userId: string): void {
+    if (!userId) return
+    if (ownerId.value && ownerId.value !== userId) {
+      tabs.value = []
+      fixedTabIds.value = []
+      activeTabId.value = homeTab.value?.id ?? ''
+    }
+    ownerId.value = userId
   }
 
   function removeTab(id: string): string | null {
@@ -266,9 +297,11 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     activeTabId,
     homeTab,
     fixedTabIds,
+    ownerId,
     allTabs,
     addTab,
     setHomeTab,
+    claimForUser,
     pruneTabs,
     removeTab,
     removeLeftTabs,
@@ -288,7 +321,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
 }, {
   persist: {
     key: 'tnzi-admin-tabs',
-    pick: ['tabs', 'activeTabId', 'fixedTabIds'],
+    pick: ['tabs', 'activeTabId', 'fixedTabIds', 'ownerId'],
     // Strip any auth / exception tabs that were persisted before the addTab
     // guard existed (a stale "Login" tab from an older build / a session-expiry
     // bounce). Hydration bypasses `addTab`, so this is the only place to catch

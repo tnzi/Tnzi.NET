@@ -12,4 +12,8 @@
     <ProjectReference Include="..\Tnzi.Audit\Tnzi.Audit.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.AI.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

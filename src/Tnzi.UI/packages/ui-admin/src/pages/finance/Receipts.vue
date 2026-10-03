@@ -6,6 +6,8 @@
     :title="title"
     :row-actions="rowActions"
     :translate="t"
+    :detail-width="620"
+    :detail-title="detailTitle"
   >
     <template #primary>
       <NButton v-if="canCreate" size="small" type="primary" :loading="uploading" @click="triggerUpload">
@@ -14,55 +16,56 @@
       </NButton>
       <input ref="fileInput" type="file" accept="image/*,application/pdf" class="fin-receipts__file" @change="onFileChange" />
     </template>
-  </TCrudPage>
 
-  <!-- Receipt detail (preview + extracted fields + extract / convert). -->
-  <TDetailHost :state="detail" :title="t('detail.title')" :width="620" :footer="false" :translate="t">
-    <div v-if="detail.data.value" class="fin-receipts__detail">
-      <div class="fin-receipts__preview">
-        <NImage :src="previewSrc" object-fit="contain" class="fin-receipts__preview-img" :alt="detail.data.value.originalFileName ?? ''" />
-        <a :href="downloadHref" target="_blank" rel="noopener" class="fin-receipts__file-link">
-          <TSvgIcon icon="mdi:file-outline" :size="14" />
-          {{ detail.data.value.originalFileName ?? t('detail.openFile') }}
-        </a>
-      </div>
+    <!-- Receipt detail (preview + extracted fields + extract / convert),
+         deep-linkable as ?detail=view:<id>. `onView` loads the full record. -->
+    <template #detail>
+      <div v-if="viewed" class="fin-receipts__detail">
+        <div class="fin-receipts__preview">
+          <NImage :src="previewSrc" object-fit="contain" class="fin-receipts__preview-img" :alt="viewed.originalFileName ?? ''" />
+          <a :href="downloadHref" target="_blank" rel="noopener" class="fin-receipts__file-link">
+            <TSvgIcon icon="mdi:file-outline" :size="14" />
+            {{ viewed.originalFileName ?? t('detail.openFile') }}
+          </a>
+        </div>
 
-      <div class="fin-receipts__status-row">
-        <TStatusBadge
-          :value="String(detail.data.value.status)"
-          :type="statusMeta(detail.data.value.status).type"
-          :label="t(statusMeta(detail.data.value.status).label)"
+        <div class="fin-receipts__status-row">
+          <TStatusBadge
+            :value="String(viewed.status)"
+            :type="statusMeta(viewed.status).type"
+            :label="t(statusMeta(viewed.status).label)"
+          />
+          <span v-if="viewed.confidence != null" class="fin-receipts__confidence">
+            {{ t('detail.confidence', { pct: String(Math.round((viewed.confidence ?? 0) * 100)) }) }}
+          </span>
+        </div>
+
+        <NAlert v-if="viewed.failReason" type="error" :bordered="false" class="fin-receipts__fail">
+          {{ viewed.failReason }}
+        </NAlert>
+
+        <TFormSchemaRenderer
+          :schema="receiptExtractionFormSchema"
+          :model="editModel"
+          :columns="2"
+          :readonly="isConverted"
+          :translate="t"
         />
-        <span v-if="detail.data.value.confidence != null" class="fin-receipts__confidence">
-          {{ t('detail.confidence', { pct: String(Math.round((detail.data.value.confidence ?? 0) * 100)) }) }}
-        </span>
+
+        <div v-if="!isConverted" class="fin-receipts__detail-actions">
+          <NButton size="small" :loading="extracting" @click="runExtract">
+            <template #icon><TSvgIcon icon="mdi:auto-fix" :size="16" /></template>
+            {{ t('detail.extract') }}
+          </NButton>
+          <NButton v-if="canUpdate" size="small" @click="saveExtraction">{{ t('detail.save') }}</NButton>
+          <NButton v-if="canConvert" size="small" type="primary" @click="openConvert">
+            {{ t('detail.convert') }}
+          </NButton>
+        </div>
+        <p v-else class="fin-receipts__hint">{{ t('detail.convertedHint') }}</p>
       </div>
-
-      <NAlert v-if="detail.data.value.failReason" type="error" :bordered="false" class="fin-receipts__fail">
-        {{ detail.data.value.failReason }}
-      </NAlert>
-
-      <TFormSchemaRenderer
-        :schema="receiptExtractionFormSchema"
-        :model="editModel"
-        :columns="2"
-        :readonly="isConverted"
-        :translate="t"
-      />
-
-      <div v-if="!isConverted" class="fin-receipts__detail-actions">
-        <NButton size="small" :loading="extracting" @click="runExtract">
-          <template #icon><TSvgIcon icon="mdi:auto-fix" :size="16" /></template>
-          {{ t('detail.extract') }}
-        </NButton>
-        <NButton v-if="canUpdate" size="small" @click="saveExtraction">{{ t('detail.save') }}</NButton>
-        <NButton v-if="canConvert" size="small" type="primary" @click="openConvert">
-          {{ t('detail.convert') }}
-        </NButton>
-      </div>
-      <p v-else class="fin-receipts__hint">{{ t('detail.convertedHint') }}</p>
-    </div>
-  </TDetailHost>
+    </template>
+  </TCrudPage>
 
   <!-- Convert to expense / bill draft. -->
   <TDetailHost :state="convertDetail" :title="t('convert.title')" :width="460" :footer="false" :translate="t">
@@ -118,7 +121,6 @@ import {
   createFinanceBridge,
   ReceiptStatus,
   ReceiptDocType,
-  type ReceiptDto,
 } from '../../services/bridges/finance-bridge'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useAdminClient } from '../../plugin/client'
@@ -127,6 +129,7 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
 import { tsToIsoDate } from './money'
+import { useViewedRecord } from './viewed-record'
 import { buildReceiptSearchFields, buildReceiptColumns, receiptExtractionFormSchema, RECEIPT_STATUS_META, type ReceiptRow } from './receipt-config'
 
 const client = useAdminClient()
@@ -151,6 +154,12 @@ function statusMeta(status?: ReceiptStatus | null) {
   return RECEIPT_STATUS_META[String(status ?? '')] ?? { type: 'default' as const, label: 'status.uploaded' }
 }
 
+// The full receipt behind the detail drawer: extraction fields, file, status as
+// the server has them now, not as the list page last saw them.
+const viewing = useViewedRecord((id) => bridge.receipts.getById(id), (error) => message.error(error))
+const viewed = viewing.record
+const detailTitle = () => t('detail.title')
+
 const crud = useCrudPage<ReceiptRow>({
   pageId: 'finance.receipts',
   permission: 'finance.receipt',
@@ -158,11 +167,10 @@ const crud = useCrudPage<ReceiptRow>({
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.receipts.fetch(q),
   deleteData: (ids) => Promise.all(ids.map((id) => bridge.receipts.delete(String(id)))).then(() => undefined),
-  // The page never opens this engine's overlay (the detail drawer below is its
-  // own useDetail on `?detail=`, with its own loader), so it must not claim the
-  // key: two engines reconciling one key double-load every deep link and the
-  // dev build warns on every mount (gate: __tests__/pages/crud-shells-distinct-detail-url.test.ts).
-  detailUrl: false,
+  // The detail drawer is this engine's own view (`#detail`), deep-linked as
+  // `?detail=view:<id>`; a cold link to a receipt off the loaded page resolves here.
+  loadDetailById: (id) => bridge.receipts.getById(id),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 void sources.ensureVendors()
@@ -195,24 +203,21 @@ async function onFileChange(e: Event) {
   }
 }
 
-// ── Detail drawer ───────────────────────────────────────────────
-const detail = useDetail<ReceiptDto>({ mode: 'drawer', url: 'detail', loadData: (id) => bridge.receipts.getById(String(id)) })
-
 const editModel = reactive<Record<string, unknown>>({})
-const isConverted = computed(() => detail.data.value?.status === ReceiptStatus.Converted)
+const isConverted = computed(() => viewed.value?.status === ReceiptStatus.Converted)
 // Receipt images are private: the person auditing a receipt is rarely the one
 // who photographed it, and an <img> / <a download> sends no Authorization
 // header. Both URLs therefore carry a short-lived signed token.
-const receiptFileId = computed(() => detail.data.value?.fileId ?? null)
+const receiptFileId = computed(() => viewed.value?.fileId ?? null)
 const { url: signedPreview } = useFileUrl(receiptFileId)
 const { url: signedDownload } = useFileUrl(receiptFileId, { kind: 'download' })
 const previewSrc = computed(() => signedPreview.value ?? '')
 const downloadHref = computed(() => signedDownload.value ?? '#')
 
 watch(
-  () => detail.data.value?.id,
+  () => viewed.value,
   () => {
-    const r = detail.data.value
+    const r = viewed.value
     if (!r) return
     editModel.vendorName = r.vendorName ?? null
     editModel.docDate = r.docDate ?? null
@@ -224,19 +229,15 @@ watch(
   },
 )
 
-function openReceipt(row: ReceiptRow) {
-  void detail.open('view', String(row.id ?? ''))
-}
-
 const extracting = ref(false)
 
 async function runExtract() {
-  const id = detail.data.value?.id
+  const id = viewed.value?.id
   if (!id) return
   extracting.value = true
   try {
     const updated = await bridge.receipts.extract(id)
-    detail.data.value = updated
+    viewed.value = updated
     message.success(t('detail.extractSuccess'))
     await crud.refresh()
   } catch (error) {
@@ -257,7 +258,7 @@ function docDateIso(v: unknown): string | null {
 }
 
 async function saveExtraction() {
-  const id = detail.data.value?.id
+  const id = viewed.value?.id
   if (!id) return
   try {
     const updated = await bridge.receipts.update(id, {
@@ -269,7 +270,7 @@ async function saveExtraction() {
       total: editModel.total != null ? Number(editModel.total) : null,
       reference: (editModel.reference as string | null) ?? null,
     })
-    detail.data.value = updated
+    viewed.value = updated
     message.success(t('detail.saveSuccess'))
     await crud.refresh()
   } catch (error) {
@@ -288,7 +289,7 @@ const convertForm = reactive<{
 const converting = ref(false)
 
 function openConvert() {
-  const r = detail.data.value
+  const r = viewed.value
   if (!r) return
   convertForm.docType = ReceiptDocType.Expense
   convertForm.vendorId = r.matchedVendorId ?? null
@@ -298,7 +299,7 @@ function openConvert() {
 }
 
 async function submitConvert() {
-  const id = detail.data.value?.id
+  const id = viewed.value?.id
   if (!id) return
   converting.value = true
   try {
@@ -310,7 +311,7 @@ async function submitConvert() {
     })
     message.success(t('convert.success'))
     convertDetail.close()
-    detail.close()
+    crud.formModal.close()
     await crud.refresh()
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
@@ -323,7 +324,7 @@ const rowActions: RowAction<ReceiptRow>[] = [
   {
     key: 'view',
     label: 'actions.view',
-    onClick: (r) => openReceipt(r),
+    onClick: (r) => crud.openView(r),
   },
   deleteAction(crud, { confirm: 'confirmDelete', show: (r: ReceiptRow) => r.status !== ReceiptStatus.Converted }),
 ]

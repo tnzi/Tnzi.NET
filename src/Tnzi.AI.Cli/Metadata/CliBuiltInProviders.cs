@@ -57,7 +57,14 @@ public static class CliBuiltInProviders
                 // "No conversation found with session ID: <id>"。注意 result 事件的
                 // subtype 是通用的 error_during_execution，**不能**用它判断。
                 ResumeRejectionDetectable = true,
-                BlockedArgs = StreamJsonBlockedArgs
+                BlockedArgs = StreamJsonBlockedArgs,
+                // 以下四项均实测（2.1）：auth status 看得见本进程环境里的 API key 与 OAuth 令牌，
+                // 也跟随 CLAUDE_CONFIG_DIR；--setting-sources 去掉 user 后个人 hooks / 插件 / 技能不再加载，
+                // 但个人全局 CLAUDE.md 仍会加载（它不算设置来源）。
+                AuthStatusArgs = ["auth", "status", "--json"],
+                AuthTokenEnvironmentVariable = "CLAUDE_CODE_OAUTH_TOKEN",
+                ExcludeUserSettingsArgs = ["--setting-sources", "project,local"],
+                ConfigDirectoryEnvironmentVariable = "CLAUDE_CONFIG_DIR"
             },
             new CliProviderDescriptor
             {

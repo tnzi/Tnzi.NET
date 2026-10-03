@@ -83,6 +83,16 @@ public static class ErrorCodes
     public const string IDENTITY_USER_CREATE_FAILED = "IDENTITY_USER_CREATE_FAILED";
     public const string IDENTITY_USER_UPDATE_FAILED = "IDENTITY_USER_UPDATE_FAILED";
     public const string IDENTITY_USER_DELETE_FAILED = "IDENTITY_USER_DELETE_FAILED";
+
+    /// <summary>
+    /// 账号仍被身份模块之外的记录当作主体（员工档案 / 警员台账 / 薪酬主数据……），删除被拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 由某个 <c>IUserUsageProvider</c> 回答「在用」触发，对应 HTTP 409；消息里写着是什么在用它、
+    /// 该先去哪里处理。与 <see cref="IDENTITY_USER_DELETE_FAILED"/>（存储层拒绝）分开，
+    /// 前端据此把它渲染成「先去办离职」而不是「删除出错」。
+    /// </remarks>
+    public const string IDENTITY_USER_IN_USE = "IDENTITY_USER_IN_USE";
     public const string IDENTITY_ROLE_ASSIGN_FAILED = "IDENTITY_ROLE_ASSIGN_FAILED";
     public const string IDENTITY_ROLE_REMOVE_FAILED = "IDENTITY_ROLE_REMOVE_FAILED";
     public const string IDENTITY_ORGANIZATION_ERROR = "IDENTITY_ORGANIZATION_ERROR";
@@ -128,6 +138,16 @@ public static class ErrorCodes
     /// 会话已撤销，需要重新认证。
     /// </summary>
     public const string IDENTITY_SESSION_BINDING_MISMATCH = "IDENTITY_SESSION_BINDING_MISMATCH";
+
+    /// <summary>
+    /// 刷新令牌时，当前客户端地址不在该账号的登录 IP 允许列表内。会话已撤销，需要从允许的网络重新登录。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>只用在刷新路径上</b>。密码登录被允许列表拒绝时必须与「密码错误」逐字节相同
+    /// （守卫在密码校验之后，任何可区分的回答都是口令预言机）；刷新的调用方已经持有一枚有效的刷新令牌，
+    /// 证明不了任何它不知道的东西，此时说出真实原因才让被拒的人知道该换网络而不是反复输密码。
+    /// </remarks>
+    public const string IDENTITY_SIGN_IN_IP_NOT_ALLOWED = "IDENTITY_SIGN_IN_IP_NOT_ALLOWED";
 
     public const string IDENTITY_CAPTCHA_REQUIRED = "IDENTITY_CAPTCHA_REQUIRED";
     public const string IDENTITY_STEP_UP_REQUIRED = "IDENTITY_STEP_UP_REQUIRED";

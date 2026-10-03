@@ -32,12 +32,13 @@ public interface ISlidingCaptchaService
     Task<Result<SlidingCaptchaVerifyResult>> VerifyAsync(string token, int userX, int tolerance = 5, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 核销一枚通行令牌（一次性）。通行令牌在生成时绑了用途的，用途不符即失败。
+    /// 核销一枚通行令牌（一次性，并发下也只有一次成功）。通行令牌必须在出题时绑了同一用途：
+    /// 用途不符、或出题时没带用途签出的令牌，一律失败。
     /// </summary>
     /// <param name="passToken">验证通过时签出的通行令牌</param>
     /// <param name="purpose">受保护端点声明的用途</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>令牌有效且用途匹配返回 true；不存在、已用过、过期或用途不符返回 false</returns>
+    /// <returns>令牌有效且用途匹配返回 true；不存在、已用过、过期、未绑用途或用途不符返回 false</returns>
     Task<bool> RedeemPassTokenAsync(string passToken, string purpose, CancellationToken cancellationToken = default);
 
     /// <summary>

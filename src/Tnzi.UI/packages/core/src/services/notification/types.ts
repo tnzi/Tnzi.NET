@@ -369,6 +369,72 @@ export interface SetNotificationPreferenceDto {
   maxFrequencyPerHour?: number;
 }
 
+// ─── Opt-outs (address-keyed suppression list) ──────────────────────────────
+
+/**
+ * One opt-out row as the admin surface reads it. Backend: OptOutDto.
+ *
+ * Keyed by ADDRESS, not user: a bulk recipient is often not a user of this
+ * system at all. `category: null` means the whole channel. The address is
+ * shown in full here (the operator answers "when did this address opt out"
+ * with it); only the recipient-facing landing page masks it.
+ */
+export interface OptOutDto {
+  id: string;
+  /** Normalised address (trimmed + lower-cased; fax numbers are digits only) */
+  address: string;
+  channel: NotificationType;
+  /** Notification category; null/undefined = every category on that channel */
+  category?: string | null;
+  /** "one-click link" / "one-click header" / "admin:{userId}" / consumer-defined */
+  source?: string | null;
+  reason?: string | null;
+  creationTime: string;
+}
+
+/**
+ * Paged query for GET /admin/notification-opt-outs. Backend: OptOutQueryDto.
+ */
+export interface OptOutQueryDto {
+  pageIndex?: number;
+  pageSize?: number;
+  orderBy?: string;
+  /**
+   * Contains-match on the normalised address (case-insensitive). With `channel`
+   * set, the value is normalised the way that channel's registrations are, so
+   * a fax number matches however it is written.
+   */
+  address?: string;
+  channel?: NotificationType;
+  /** Exact match; leave empty to see every category */
+  category?: string;
+  /**
+   * With `category` set, also list the channel-wide opt-outs (`category` null)
+   * on the same channel. A whole-channel opt-out suppresses every category, so
+   * a screen that shows one category cannot explain "why does this person not
+   * receive" without those rows. No effect without `category`; pair it with
+   * `channel`, otherwise the channel-wide rows of every channel come along.
+   */
+  includeChannelWide?: boolean;
+  /** Opt-out time lower bound (inclusive), ISO 8601 */
+  from?: string;
+  /** Opt-out time upper bound (inclusive), ISO 8601 */
+  to?: string;
+}
+
+/**
+ * Input for POST /admin/notification-opt-outs (hand-registered opt-out:
+ * provider complaint, phone call, imported blocklist). Backend: CreateOptOutDto.
+ * Idempotent: an existing (address, channel, category) row is returned as is.
+ */
+export interface CreateOptOutDto {
+  address: string;
+  channel: NotificationType;
+  /** Leave empty to opt the address out of the whole channel */
+  category?: string | null;
+  reason?: string | null;
+}
+
 /**
  * Platform a registered push device runs on.
  *

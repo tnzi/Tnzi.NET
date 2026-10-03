@@ -58,6 +58,12 @@ export enum TwoFactorType {
   /** TOTP (authenticator app). Configured/verified via the dedicated
    *  totp/setup + totp/enable endpoints, NOT the code-channel enable flow. */
   Totp = 'Totp',
+  /** Passkey / security key (WebAuthn assertion: a YubiKey-class FIDO2 key or
+   *  the device's own authenticator). Not a code: the second step is a
+   *  `navigator.credentials.get()` ceremony over `verify-2fa/passkey/*`; the
+   *  credential itself is registered under Passkeys, this only says whether
+   *  it is used as a second factor. */
+  Passkey = 'Passkey',
 }
 
 /**

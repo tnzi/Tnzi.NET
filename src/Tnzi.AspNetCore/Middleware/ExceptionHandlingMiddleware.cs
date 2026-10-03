@@ -48,13 +48,28 @@ public class ExceptionHandlingMiddleware
         _handlers.Sort((a, b) => b.Priority.CompareTo(a.Priority));
     }
 
+    /// <summary>
+    /// 异常诊断最多留存的请求体字节数，同时也是「要不要缓冲」的闸门。
+    /// </summary>
+    /// <remarks>
+    /// 这里的体是在异常<b>之后</b>回读的，所以缓冲只能在下游读它之前就开好；而 <c>EnableBuffering</c>
+    /// 会把整条体复制一份、超过 30 KB 溢出到临时文件。开着 <c>LogRequestBody</c> 时此前对每个请求
+    /// 无条件开缓冲：只为在出错时看 8 KB，每一次 multipart 上传都被完整落盘一遍。
+    /// 所以闸门在缓冲之前：Content-Type 不可采（文件上传、二进制、事件流）或声明的 Content-Length
+    /// 超过这个数的体，缓冲都不开 —— 它们本来就不会被记进日志。没有 Content-Length 的体也不缓冲：
+    /// 读发生在下游消费完之后，那时已经没有办法再给缓冲设上界了。
+    /// </remarks>
+    private const int MaxCapturedBodyBytes = 8 * 1024;
+
     public async Task InvokeAsync(HttpContext context)
     {
-        // 读取一次快照，保证 EnableBuffering 决策与 catch 中的读取一致
-        var logRequestBody = _options.CurrentValue.LogRequestBody;
+        // 读取一次快照，保证缓冲决策与 catch 中的读取一致
+        var captureRequestBody = _options.CurrentValue.LogRequestBody
+                                 && LoggedBodySanitizer.AllowsBodyCapture(context.Request.Path)
+                                 && ShouldBufferRequestBody(context.Request);
 
-        // 仅在开启时缓冲请求体，使其可在异常发生后被重新读取（关闭时零开销）
-        if (logRequestBody)
+        // 过了闸门才缓冲请求体，使其可在异常发生后被重新读取（关闭或不可采时零开销）
+        if (captureRequestBody)
         {
             context.Request.EnableBuffering();
         }
@@ -69,7 +84,7 @@ public class ExceptionHandlingMiddleware
             _exceptionStats?.RecordException(ex, context.TraceIdentifier);
 
             // 诊断：记录触发异常的请求体（可能含敏感数据，默认关闭）
-            if (logRequestBody)
+            if (captureRequestBody)
             {
                 await LogRequestBodyAsync(context, ex);
             }
@@ -91,30 +106,43 @@ public class ExceptionHandlingMiddleware
     }
 
     /// <summary>
-    /// 记录触发异常的请求体（仅在 LogRequestBody 开启时调用）。请求体已由 EnableBuffering 缓冲，
-    /// 读取后回退流位置；限制 8KB 上限。任何读取失败仅告警，绝不掩盖原始异常。
+    /// 这个请求的体值不值得为异常诊断缓冲一份：文本型 Content-Type，且声明了不超过
+    /// <see cref="MaxCapturedBodyBytes"/> 的 Content-Length。
+    /// </summary>
+    private static bool ShouldBufferRequestBody(HttpRequest request)
+    {
+        if (request.ContentLength is not { } declared || declared <= 0)
+        {
+            return false;
+        }
+
+        return declared <= MaxCapturedBodyBytes && BodyCapturePolicy.IsCapturable(request.ContentType);
+    }
+
+    /// <summary>
+    /// 记录触发异常的请求体（仅在 LogRequestBody 开启且过了 <see cref="ShouldBufferRequestBody"/> 时调用）。
+    /// 请求体已由 EnableBuffering 缓冲，有界回读后流位置放回 0。任何读取失败仅告警，绝不掩盖原始异常。
     /// </summary>
     private async Task LogRequestBodyAsync(HttpContext context, Exception exception)
     {
-        const int maxBytes = 8 * 1024;
         try
         {
             var request = context.Request;
-            if (request.ContentLength is null or 0 || !request.Body.CanSeek)
+            if (!request.Body.CanSeek)
             {
                 return;
             }
 
-            request.Body.Position = 0;
-            using var reader = new StreamReader(request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
-            var buffer = new char[maxBytes];
-            var read = await reader.ReadBlockAsync(buffer.AsMemory(0, maxBytes));
-            request.Body.Position = 0;
+            // 闸门按声明的 Content-Length 放行，这里按实际字节数再兜一次：超界返回 null，一个字节都不记。
+            var rawBody = await request.TryReadAsStringAsync(MaxCapturedBodyBytes, context.RequestAborted);
 
-            if (read > 0)
+            // 与请求日志同一道脱敏：这个开关可以热开，而异常最常见的现场恰恰是登录、改密这类带凭据的请求。
+            // 回读是完整的（超界已返回 null），所以 JSON 不会因截断变成非法串而被原样放过。
+            var body = LoggedBodySanitizer.Redact(rawBody, request.ContentType);
+            if (!string.IsNullOrEmpty(body))
             {
                 _logger.LogError(exception, "Unhandled exception processing {Method} {Path}. Request body ({Length} chars captured): {RequestBody}",
-                    request.Method, request.Path, read, new string(buffer, 0, read));
+                    request.Method, request.Path, body.Length, body);
             }
         }
         catch (Exception readEx)

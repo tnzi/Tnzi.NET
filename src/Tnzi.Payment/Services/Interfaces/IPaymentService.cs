@@ -54,6 +54,8 @@ public interface IPaymentService
     /// off-session 自动扣款（后台续费/试用转正调用）。
     /// 成功时落地一笔 Succeeded 支付并发布 <see cref="Events.PaymentCompletedEvent"/>；
     /// 失败时落地一笔 Failed 支付并发布 <see cref="Events.PaymentFailedEvent"/>，由订阅状态机据此推进/降级。
+    /// ★ 例外：建单之前就被拒绝（金额非正、无支付方式、渠道不可用或不支持、计税失败）时<b>没有支付记录也没有事件</b>，
+    /// 返回的失败带 <c>ErrorCode = </c><see cref="ErrorCodes.PaymentOffSessionNotAttempted"/>，调用方须自己收口。
     /// </summary>
     Task<Result<PaymentDto>> ChargeOffSessionAsync(OffSessionChargeDto request, CancellationToken cancellationToken = default);
 }

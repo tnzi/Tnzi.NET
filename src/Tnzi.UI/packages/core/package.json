@@ -72,6 +72,11 @@
       "import": "./dist/headless/index.js",
       "require": "./dist/headless/index.cjs"
     },
+    "./app-update": {
+      "types": "./dist/app-update/index.d.ts",
+      "import": "./dist/app-update/index.js",
+      "require": "./dist/app-update/index.cjs"
+    },
     "./guards": {
       "types": "./dist/guards/index.d.ts",
       "import": "./dist/guards/index.js",

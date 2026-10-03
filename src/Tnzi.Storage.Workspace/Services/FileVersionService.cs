@@ -218,7 +218,9 @@ public class FileVersionService : ApplicationService, IFileVersionService
     /// <summary>
     /// 行更新已落库之后，请求删除旧缩略图对象。走模块自己的约定 <see cref="FileDeleteRequestedEvent"/>
     /// （事务感知，提交之后才处理）；宿主没有事件总线时退回就地删除 —— 此时也已经在更新之后。
-    /// 删除失败只记日志：记录已不再指向它，清理任务会按孤儿对象再兜一次。
+    /// 走事件时，删除失败由处理器抛出、交给总线的重试与死信；就地删除失败只记日志。
+    /// ★ 记录已不再指向这个对象，孤儿清理是按 <see cref="FileRecord"/> 枚举的，找不到它 ——
+    /// 重试都失败之后它就是一个永久孤儿（占空间，不影响正确性）。要做到「必删」需要一张持久的待删对象表。
     /// </summary>
     private async Task RequestStaleThumbnailDeletionAsync(FileRecord fileRecord, string? stale, CancellationToken cancellationToken)
     {

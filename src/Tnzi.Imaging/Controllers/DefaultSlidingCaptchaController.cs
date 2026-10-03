@@ -19,7 +19,7 @@ public class DefaultSlidingCaptchaController : ApiControllerBase
     /// <summary>
     /// Generate a sliding captcha puzzle
     /// </summary>
-    /// <param name="purpose">Optional purpose the pass token issued on success is bound to (e.g. <c>login</c>).</param>
+    /// <param name="purpose">Purpose the pass token issued on success is bound to (e.g. <c>login</c>). Optional for the puzzle itself, but a pass token issued without one is refused by every protected endpoint.</param>
     [HttpPost("generate")]
     public virtual async Task<ApiResult<SlidingCaptchaDto>> Generate([FromQuery] string? purpose = null)
     {
@@ -48,7 +48,7 @@ public class DefaultSlidingCaptchaController : ApiControllerBase
     /// 而难度正是按它查失败次数的 —— 不传或每次换一个值就永远是最低难度，
     /// 填别人的值能把对方顶到最高。现在由服务端从当前请求派生。
     /// </remarks>
-    /// <param name="purpose">Optional purpose the pass token issued on success is bound to (e.g. <c>login</c>).</param>
+    /// <param name="purpose">Purpose the pass token issued on success is bound to (e.g. <c>login</c>). Optional for the puzzle itself, but a pass token issued without one is refused by every protected endpoint.</param>
     [HttpPost("generate-adaptive")]
     public virtual async Task<ApiResult<SlidingCaptchaDto>> GenerateAdaptive([FromQuery] string? purpose = null)
     {

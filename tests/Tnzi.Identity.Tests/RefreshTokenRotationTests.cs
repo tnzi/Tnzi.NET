@@ -22,6 +22,8 @@ public class RefreshTokenRotationTests
     private readonly Mock<ISessionRevocationService> _sessionRevocationMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<IOptionsMonitor<IdentityOptions>> _identityOptionsMock;
+    private readonly Mock<SignInManager<User>> _signInManagerMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly AuthService _authService;
 
     public RefreshTokenRotationTests()
@@ -35,7 +37,7 @@ public class RefreshTokenRotationTests
         var logger = new Mock<ILogger<SignInManager<User>>>();
         var schemes = new Mock<IAuthenticationSchemeProvider>();
         var confirmation = new Mock<IUserConfirmation<User>>();
-        var signInManager = new Mock<SignInManager<User>>(
+        _signInManagerMock = new Mock<SignInManager<User>>(
             _userManagerMock.Object, contextAccessor.Object, claimsFactory.Object,
             identityOptions.Object, logger.Object, schemes.Object, confirmation.Object);
 
@@ -57,7 +59,8 @@ public class RefreshTokenRotationTests
             }
         });
 
-        var serviceProvider = new Mock<IServiceProvider>();
+        _serviceProviderMock = new Mock<IServiceProvider>();
+        var serviceProvider = _serviceProviderMock;
         var loggerFactory = new Mock<ILoggerFactory>();
         loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
         serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
@@ -69,16 +72,19 @@ public class RefreshTokenRotationTests
             .ReturnsAsync(1);
 
         // 守卫链装真实求值器 + 内置守卫：刷新路径要不要过守卫，正是本组的一条用例。
-        var guardEvaluator = new LoginGuardEvaluator(
-            [new LockedAccountLoginGuard(_userManagerMock.Object)],
-            new Mock<ILogger<LoginGuardEvaluator>>().Object);
+        _authService = CreateAuthService(new LockedAccountLoginGuard(_userManagerMock.Object));
+    }
 
-        _authService = new AuthService(
+    private AuthService CreateAuthService(params ILoginGuard[] guards)
+    {
+        var guardEvaluator = new LoginGuardEvaluator(guards, new Mock<ILogger<LoginGuardEvaluator>>().Object);
+
+        return new AuthService(
             _userManagerMock.Object,
-            signInManager.Object,
+            _signInManagerMock.Object,
             _tokenServiceMock.Object,
             _identityOptionsMock.Object,
-            serviceProvider.Object,
+            _serviceProviderMock.Object,
             _eventBusMock.Object,
             authTokenService: _authTokenServiceMock.Object,
             sessionService: _sessionServiceMock.Object,
@@ -250,6 +256,36 @@ public class RefreshTokenRotationTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+        _authTokenServiceMock.Verify(
+            x => x.RotateRefreshTokenAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
+            Times.Never);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeSessionAsync(entry.SessionId, SessionRevocationReason.GuardDenied), Times.Once);
+    }
+
+    /// <summary>
+    /// 账号收紧了登录 IP 允许列表后，列表外那台设备的下一次刷新：会话照旧撤销，但回答的是专用错误码与真实原因，
+    /// 而不是「用户名或密码错误」—— 客户端据此告诉用户换网络，而不是让他对着正确的密码重试。
+    /// </summary>
+    [Fact]
+    public async Task Refresh_FromOutsideTheIpAllowList_ReturnsTheDedicatedCode_AndRevokesTheSession()
+    {
+        var (user, entry) = ArrangeCurrentToken("current");
+        var policy = new UserSignInPolicy { Id = Guid.NewGuid(), UserId = user.Id, IpAllowListEnabled = true, AllowedIps = "10.0.0.0/8" };
+        var policies = new Mock<IRepository<UserSignInPolicy, Guid>>();
+        policies.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(() => new List<UserSignInPolicy> { policy }.BuildMock());
+        var scopedContext = new Mock<IScopedContext>();
+        scopedContext.SetupGet(c => c.ClientIpAddress).Returns("203.0.113.5");
+        _serviceProviderMock.Setup(x => x.GetService(typeof(IScopedContext))).Returns(scopedContext.Object);
+        var guard = new IpAllowListLoginGuard(policies.Object, _userManagerMock.Object, _identityOptionsMock.Object);
+        var authService = CreateAuthService(new LockedAccountLoginGuard(_userManagerMock.Object), guard);
+
+        var result = await authService.RefreshTokenAsync("current");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_SIGN_IN_IP_NOT_ALLOWED, result.ErrorCode);
+        Assert.Equal(IpAllowListLoginGuard.RefreshDeniedMessage, result.Message);
         _authTokenServiceMock.Verify(
             x => x.RotateRefreshTokenAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
             Times.Never);

@@ -16,6 +16,7 @@ public class PasswordService : ApplicationService, IPasswordService
     private readonly ICurrentTenant? _currentTenant;
     private readonly ICaptchaVerifier? _captchaVerifier;
     private readonly bool _multiTenancyEnabled;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
     public PasswordService(
         UserManager<User> userManager,
@@ -28,9 +29,11 @@ public class PasswordService : ApplicationService, IPasswordService
         ISessionRevocationService? sessionRevocation = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
-        ICaptchaVerifier? captchaVerifier = null)
+        ICaptchaVerifier? captchaVerifier = null,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
+        _functionAuthorization = functionAuthorization;
         _userManager = Check.NotNull(userManager);
         // Scoped 服务：IOptionsSnapshot 每请求重算，Recovery 开关随请求热更新。
         _identityOptions = Check.NotNull(identityOptions).Value;
@@ -136,7 +139,13 @@ public class PasswordService : ApplicationService, IPasswordService
             }
 
             var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), CaptchaPurpose.PasswordRecovery);
-            if (!verification.Passed)
+            // 「未启用，放行」不是「校验通过」：开关已经要求验证码，没有生效的提供商就拒绝。
+            if (verification.Skipped)
+            {
+                Logger.LogError("Captcha is required for password recovery but no captcha provider is enabled; rejecting.");
+            }
+
+            if (!verification.Passed || verification.Skipped)
             {
                 return Fail<string>("Captcha verification is required", 400, ErrorCodes.IDENTITY_CAPTCHA_REQUIRED,
                     new CaptchaDto { Provider = _captchaVerifier.ProviderName ?? ImageCaptchaProvider.ProviderName });
@@ -387,6 +396,12 @@ public class PasswordService : ApplicationService, IPasswordService
         if (user == null)
         {
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 重置别人的密码 = 决定谁能以这个账号登录；非超管对超管做这件事就是拿下超管账号。
+        if (await SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         // 验证密码强度

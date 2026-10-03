@@ -12,6 +12,7 @@
  */
 import { inject, provide, reactive, ref, type InjectionKey, type Ref } from 'vue'
 import type { CaptchaClientConfigDto } from '@tnzi/core/services/captcha'
+import { DEFAULT_OTP_CODE_LENGTH } from '@tnzi/core/services/identity'
 
 export type LoginModule =
   | 'pwd-login'
@@ -28,8 +29,13 @@ export type LoginModule =
  * `requires2FA: true`. The `TwoFactorChallenge` module reads this to know
  * which user / method to verify against.
  */
-/** A 2FA delivery channel. */
-export type TwoFactorMethodName = 'totp' | 'sms' | 'email'
+/**
+ * A second-factor method. The first three deliver or derive a code the user
+ * types; `passkey` is a WebAuthn assertion (a security key or the device's own
+ * authenticator) and has no code at all - the challenge module runs the
+ * ceremony through `verifyTwoFactorWithPasskey` instead of showing OTP boxes.
+ */
+export type TwoFactorMethodName = 'totp' | 'sms' | 'email' | 'passkey'
 
 /**
  * A pending action the account owes before it can be used.
@@ -109,6 +115,12 @@ export interface TwoFactorChallenge {
    * preferred) or by `resendTwoFactor`'s return value; absent for TOTP.
    */
   maskedAddress?: string
+  /**
+   * Why the initial SMS / email code could not be delivered. Set instead of
+   * `maskedAddress` when that send failed: the challenge is still open, but the
+   * form must show this (and offer a resend) rather than a "code sent" hint.
+   */
+  codeSendError?: string
 }
 
 /** Result of a (re)send - carries the masked destination so the UI can show it. */
@@ -207,7 +219,10 @@ export interface SendCodePayload {
 export interface VerifyTwoFactorPayload {
   /** Challenge id returned by the original login response. */
   challengeId?: string
-  /** The 6-digit (or longer) code the user typed. */
+  /**
+   * The code the user typed: 6 digits for the authenticator app, otherwise
+   * `LoginFeatures.otpCodeLength` digits (a deployment setting, 4-8).
+   */
   code: string
   /** The method the user chose to verify with (when they switched methods).
    *  Omitted → the challenge's default/preferred method. */
@@ -309,6 +324,18 @@ export interface LoginCallbacks {
    */
   verifyTwoFactor?: (payload: VerifyTwoFactorPayload, helpers?: LoginCallbackHelpers) => Promise<void>
   /**
+   * Complete the challenge with a passkey / security key instead of a code.
+   * Runs the WebAuthn ceremony for the challenged account (`POST
+   * /auth/verify-2fa/passkey/begin` + `/complete`) and establishes the session.
+   * Resolves `false` when the user dismissed the system dialog - a normal
+   * outcome: the challenge stays open and they may pick another method. The
+   * challenge module offers the `passkey` method only when this is wired.
+   */
+  verifyTwoFactorWithPasskey?: (
+    payload: { challengeId?: string },
+    helpers?: LoginCallbackHelpers,
+  ) => Promise<boolean>
+  /**
    * Optionally (re)send the 2FA code (SMS / email channels). Maps to
    * `POST /auth/send-2fa-code`. Also called when the user switches TO an
    * SMS/email method so the first code is delivered. Hidden when not provided.
@@ -400,6 +427,13 @@ export interface LoginFeatures {
    * back to the built-in image captcha through `callbacks.getCaptcha`.
    */
   captcha: CaptchaClientConfigDto | null
+  /**
+   * Digits in an emailed / texted code (`GET /auth/config` -> `otpCodeLength`,
+   * the backend's `Identity:Otp:CodeLength`, 4-8). Every entry for a delivered
+   * code sizes itself from this; authenticator-app codes are always 6 and do
+   * not follow it. 6 when the backend is older and does not report it.
+   */
+  otpCodeLength: number
 }
 
 /**
@@ -420,6 +454,7 @@ export const DEFAULT_LOGIN_FEATURES: LoginFeatures = Object.freeze({
   captchaOnRegister: false,
   captchaOnPasswordRecovery: false,
   captcha: null,
+  otpCodeLength: DEFAULT_OTP_CODE_LENGTH,
 }) as LoginFeatures
 
 /**
@@ -438,6 +473,7 @@ export interface PartialLoginFeatures {
   captchaOnRegister?: boolean
   captchaOnPasswordRecovery?: boolean
   captcha?: CaptchaClientConfigDto | null
+  otpCodeLength?: number
 }
 
 /**

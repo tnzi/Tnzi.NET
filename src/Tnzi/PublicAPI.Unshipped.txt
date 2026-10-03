@@ -521,7 +521,7 @@ Tnzi.AI.Services.IAiUtility
 Tnzi.AI.Services.IAiUtility.ExecuteAsync(string! systemPrompt, string! userMessage, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
 Tnzi.AI.Services.OpenAiCompatibleAiUtility
 Tnzi.AI.Services.OpenAiCompatibleAiUtility.ExecuteAsync(string! systemPrompt, string! userMessage, Tnzi.AI.Options.AiUtilityCallOptions? options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string?>!
-Tnzi.AI.Services.OpenAiCompatibleAiUtility.OpenAiCompatibleAiUtility(System.Net.Http.IHttpClientFactory! httpClientFactory, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiProviderRegistryOptions!>! providers, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiUtilityOptions!>! utilityOptions, Microsoft.Extensions.Logging.ILogger<Tnzi.AI.Services.OpenAiCompatibleAiUtility!>? logger = null) -> void
+Tnzi.AI.Services.OpenAiCompatibleAiUtility.OpenAiCompatibleAiUtility(System.Net.Http.IHttpClientFactory! httpClientFactory, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiProviderRegistryOptions!>! providers, Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.AI.Options.AiUtilityOptions!>! utilityOptions, Microsoft.Extensions.Logging.ILogger<Tnzi.AI.Services.OpenAiCompatibleAiUtility!>? logger = null, System.TimeProvider? timeProvider = null) -> void
 Tnzi.Http.EgressGuard
 Tnzi.Domain.Entities.SortOrderPlan<TEntity>
 Tnzi.Domain.Entities.SortOrderPlan<TEntity>.Apply() -> System.Collections.Generic.IReadOnlyList<TEntity>!
@@ -725,3 +725,22 @@ const Tnzi.Settings.SiteNameResolver.PrimaryKey = "System:SiteName" -> string!
 static Tnzi.Settings.SiteNameResolver.Resolve(Microsoft.Extensions.Configuration.IConfiguration? configuration, Microsoft.Extensions.Logging.ILogger? logger = null) -> string?
 Tnzi.Settings.SiteNameResolver
 Tnzi.Domain.Repositories.IRepository<TEntity, TKey>.NewId() -> TKey
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_USER_IN_USE = "IDENTITY_USER_IN_USE" -> string!
+const Tnzi.AI.Services.AiUtilityHttpClientNames.Inline = "Tnzi.AiUtility#inline" -> string!
+override Tnzi.AI.Options.AiUtilityInlineProvider.ToString() -> string!
+Tnzi.AI.Options.AiUtilityCallOptions.Provider.get -> Tnzi.AI.Options.AiUtilityInlineProvider?
+Tnzi.AI.Options.AiUtilityCallOptions.Provider.init -> void
+Tnzi.AI.Options.AiUtilityInlineProvider
+Tnzi.AI.Options.AiUtilityInlineProvider.AiUtilityInlineProvider() -> void
+Tnzi.AI.Options.AiUtilityInlineProvider.ApiKey.get -> string!
+Tnzi.AI.Options.AiUtilityInlineProvider.ApiKey.init -> void
+Tnzi.AI.Options.AiUtilityInlineProvider.BaseUrl.get -> string!
+Tnzi.AI.Options.AiUtilityInlineProvider.BaseUrl.init -> void
+Tnzi.AI.Options.AiUtilityInlineProvider.DefaultModel.get -> string?
+Tnzi.AI.Options.AiUtilityInlineProvider.DefaultModel.init -> void
+Tnzi.AI.Options.AiUtilityInlineProvider.DescribeForLog() -> string!
+Tnzi.AI.Options.AiUtilityInlineProvider.GetValidationError() -> string?
+Tnzi.AI.Options.AiUtilityInlineProvider.Redact(string! text) -> string!
+Tnzi.AI.Options.AiUtilityInlineProvider.TimeoutSeconds.get -> int?
+Tnzi.AI.Options.AiUtilityInlineProvider.TimeoutSeconds.init -> void
+const Tnzi.Exceptions.ErrorCodes.IDENTITY_SIGN_IN_IP_NOT_ALLOWED = "IDENTITY_SIGN_IN_IP_NOT_ALLOWED" -> string!

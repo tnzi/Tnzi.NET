@@ -114,6 +114,9 @@ public class UserFunctionScopeFallbackTests
         public Task<Result<IEnumerable<ModuleFunction>>> GetUserFunctionsAsync(Guid userId) =>
             throw new NotSupportedException();
 
+        public Task<Result<UserPermissionPictureDto>> GetUserPermissionPictureAsync(Guid userId, string? scope = null) =>
+            throw new NotSupportedException();
+
         public Task<Result> AssignFunctionsToUserAsync(Guid userId, IEnumerable<Guid> functionIds) =>
             throw new NotSupportedException();
 

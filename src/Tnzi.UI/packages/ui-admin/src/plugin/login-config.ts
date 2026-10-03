@@ -150,7 +150,10 @@ export interface AdminLoginConfig {
   /**
    * Whether to show the language switcher (`TLangSwitch`) in the login
    * page toolbar. Defaults to **false** - many deployments are
-   * single-locale and the extra button adds visual noise.
+   * single-locale and the extra button adds visual noise. The switcher lists
+   * the registered `localeOptions` and writes the same persisted admin
+   * locale as the header switcher; it stays hidden while only one locale is
+   * registered.
    */
   showLangSwitch?: boolean
   /**

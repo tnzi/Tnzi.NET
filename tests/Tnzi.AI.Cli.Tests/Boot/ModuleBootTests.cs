@@ -60,6 +60,33 @@ public class ModuleBootTests
         provider.GetRequiredService<ICliWorkspacePreparer>().ShouldNotBeNull();
         provider.GetRequiredService<CliRunSignalHub>().ShouldNotBeNull();
         provider.GetRequiredService<CliRunCancellationRegistry>().ShouldNotBeNull();
+        provider.GetRequiredService<ICliAuthStatusProbe>().ShouldNotBeNull();
+        provider.GetRequiredService<ICliLaunchEnvironmentComposer>().ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// The executor needs repositories, so it cannot be resolved here; instead every
+    /// required constructor dependency must at least be registered. A collaborator added
+    /// to the constructor but not to the module fails the first claimed run, not startup.
+    /// </summary>
+    [Fact]
+    public async Task ModuleGraph_RegistersEveryRequiredExecutorDependency()
+    {
+        var (provider, services) = await ComposeAsync(enabled: true);
+        await using var _ = provider;
+
+        var constructor = typeof(CliRunExecutor).GetConstructors().ShouldHaveSingleItem();
+        var missing = constructor.GetParameters()
+            .Where(p => !p.HasDefaultValue)
+            .Select(p => p.ParameterType)
+            // Repositories come from the database module, which this boot deliberately omits.
+            .Where(type => !(type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IRepository<,>)))
+            .Where(type => !services.Any(d => d.ServiceType == type
+                || (type.IsGenericType && d.ServiceType == type.GetGenericTypeDefinition())))
+            .Select(type => type.Name)
+            .ToList();
+
+        missing.ShouldBeEmpty();
     }
 
     [Fact]

@@ -37,6 +37,25 @@ public interface IAuthService
     Task<Result<TokenResult>> VerifyTwoFactorAndLoginAsync(VerifyTwoFactorDto input);
 
     /// <summary>
+    /// 用 passkey 完成两步验证，第一步：按临时令牌指明的账号生成断言选项。
+    /// </summary>
+    /// <remarks>
+    /// 只在登录挑战确实提供了 <see cref="TwoFactorType.Passkey"/> 时给出选项；
+    /// 用户单独关掉的方式在这里也一样拒绝，与发码 / 验码两条路同一口径。
+    /// </remarks>
+    Task<Result<PasskeyOptionsDto>> BeginTwoFactorPasskeyAsync(TwoFactorPasskeyBeginDto input);
+
+    /// <summary>
+    /// 用 passkey 完成两步验证，第二步：校验断言并登录。
+    /// </summary>
+    /// <remarks>
+    /// ★ 断言证明的必须是临时令牌那个账号：拿别人的 passkey 也能得到一个成功的断言，
+    /// 少了这一比，任何持有自己 passkey 的人都能替一个猜对了密码的账号完成第二步。
+    /// 后半段与 <see cref="VerifyTwoFactorAndLoginAsync"/> 逐字相同：烧令牌 → 登录守卫 → 会话 → 令牌。
+    /// </remarks>
+    Task<Result<TokenResult>> VerifyTwoFactorWithPasskeyAndLoginAsync(TwoFactorPasskeyCompleteDto input);
+
+    /// <summary>
     /// 对一个<strong>身份已经校验通过</strong>的用户完成签发：登录守卫（含账号锁定 / 停用）→
     /// 2FA 判定 → 会话协调器 → 带 <c>session_id</c> 的令牌 → 登录成功事件。
     /// </summary>

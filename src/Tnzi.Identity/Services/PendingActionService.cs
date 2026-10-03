@@ -229,7 +229,12 @@ public class PendingActionService : ApplicationService, IPendingActionService
         }
 
         // 全清了，令牌到此为止。
-        await _authTokenService.MarkTokenAsUsedAsync(entry.Id);
+        // ★ 按返回值决定签不签：这是条件更新，false 说明并发的另一个请求已经凭同一枚令牌签发过了。
+        //   不看它，同一枚令牌并发打两次就建出两条会话。
+        if (!await _authTokenService.MarkTokenAsUsedAsync(entry.Id))
+        {
+            return InvalidToken<PendingActionResultDto>();
+        }
 
         LogInformation("User {UserId} completed every pending action.", user.Id);
 

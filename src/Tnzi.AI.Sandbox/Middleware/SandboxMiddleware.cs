@@ -70,7 +70,7 @@ public class SandboxMiddleware : IAiMiddleware
 
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(
         AiMiddlewareContext context, AiStreamingMiddlewareDelegate next,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (!_options.Value.Enabled)
         {

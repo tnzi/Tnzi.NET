@@ -28,64 +28,8 @@ public class RequestTrackingMiddleware
         "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs", "/hubs/*"
     ];
 
-    /// <summary>
-    /// 请求体 / 响应体的脱敏器。无状态，共用一个实例。
-    /// </summary>
-    private static readonly RequestBodyRedactor BodyRedactor = new();
-
-    /// <summary>
-    /// 无论开关如何，这些路径下的请求体与响应体一律不采集。
-    /// </summary>
-    /// <remarks>
-    /// ★★★ <strong>脱敏是按字段名做的，而认证端点上「哪个字段是凭据」并不总是猜得到。</strong>
-    /// 登录响应把令牌放在 <c>data.accessToken</c>（名单能盖住），但 OAuth 回调返回的是一整页
-    /// HTML、验证码相关端点返回的是图片的 base64、错误信封里还会带临时令牌的细节对象。
-    /// 与其逐个补名单，不如整条路径不采集 —— 这些端点的请求体与响应体<b>没有一个字段</b>
-    /// 是运维排障时非看不可的，而其中随便哪一个泄漏都等于账号失守。
-    /// </remarks>
-    private static readonly string[] BodyExcludedPathSegments =
-    [
-        "/auth/", "/connect/"
-    ];
-
-    /// <summary>这条请求的体是否允许采集。</summary>
-    private static bool AllowsBodyCapture(HttpContext context)
-    {
-        var path = context.Request.Path.Value;
-        if (string.IsNullOrEmpty(path))
-        {
-            return true;
-        }
-
-        // 尾部补一个 '/'，让 "/api/auth" 这种不带尾斜杠的写法也命中 "/auth/"。
-        var probe = path.EndsWith('/') ? path : path + "/";
-        foreach (var segment in BodyExcludedPathSegments)
-        {
-            if (probe.Contains(segment, StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// 按敏感字段名脱敏一段 JSON 体；不是合法 JSON 时原样返回。
-    /// </summary>
-    /// <remarks>
-    /// ★★★ <strong>此前这两个开关完全不脱敏。</strong>查询串有一套（见
-    /// <see cref="QueryStringRedactor.DefaultSensitiveKeys"/>），而请求体与响应体是
-    /// <c>RequestBody = requestBody</c> 直接赋值 —— 于是打开 <c>LogRequestBody</c>，
-    /// <c>POST auth/login</c> 的密码明文进日志；打开 <c>LogResponseBody</c>，
-    /// 登录响应里的访问令牌与刷新令牌进日志。两个开关都带 <c>[RuntimeSetting]</c>，
-    /// 在配置中心点一下就能打开，通常发生在排障当下、然后忘了关。
-    /// 名单与审计模块共用核心的那一份（<see cref="RequestBodyRedactor.DefaultSensitiveFields"/>）。
-    /// </remarks>
-    private static string? RedactBody(string? body)
-        => string.IsNullOrWhiteSpace(body)
-            ? body
-            : BodyRedactor.Redact(body, RequestBodyRedactor.DefaultSensitiveFields);
+    /// <summary>这条请求的体是否允许采集（认证端点整条不采，见 <see cref="LoggedBodySanitizer"/>）。</summary>
+    private static bool AllowsBodyCapture(HttpContext context) => LoggedBodySanitizer.AllowsBodyCapture(context.Request.Path);
 
     /// <summary>
     /// 把敏感参数的值替换成 <c>***</c>,其余原样保留。
@@ -150,7 +94,7 @@ public class RequestTrackingMiddleware
         var logLevel = trackingOptions.LogLevel;
         var isSlow = false;
 
-        // 认证端点整条不采集体（见 BodyExcludedPathSegments）。
+        // 认证端点整条不采集体（见 LoggedBodySanitizer.AllowsBodyCapture）。
         var allowsBodyCapture = AllowsBodyCapture(context);
 
         // 读取请求体（如果启用）
@@ -259,7 +203,7 @@ public class RequestTrackingMiddleware
 
         // ★ 先脱敏再截断，与响应体同序。反过来会把 JSON 截成非法串，
         // 脱敏器于是原样返回 —— 只有超过 MaxRequestBodyLength 的请求泄漏凭据。
-        return Truncate(RedactBody(rawBody) ?? string.Empty, options.MaxRequestBodyLength);
+        return Truncate(LoggedBodySanitizer.Redact(rawBody, request.ContentType) ?? string.Empty, options.MaxRequestBodyLength);
     }
 
     /// <summary>
@@ -279,7 +223,7 @@ public class RequestTrackingMiddleware
 
         var responseBodyText = Encoding.UTF8.GetString(capture.Captured.Span);
         // ★ 先截断再脱敏会把 JSON 截成非法串，脱敏器于是原样返回 —— 顺序不能反。
-        return Truncate(RedactBody(responseBodyText) ?? string.Empty, options.MaxResponseBodyLength);
+        return Truncate(LoggedBodySanitizer.Redact(responseBodyText, capture.ContentType) ?? string.Empty, options.MaxResponseBodyLength);
     }
 
     /// <summary>

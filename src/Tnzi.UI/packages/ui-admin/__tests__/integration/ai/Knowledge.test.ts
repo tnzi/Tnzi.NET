@@ -102,6 +102,12 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   }),
 }))
 
+// Reverse lookup "which agents use this knowledge base" (admin/agents/grants/reverse/knowledge).
+const usedBy = vi.fn(async (): Promise<unknown[]> => [])
+vi.mock('../../../src/services/bridges/agent-grant-bridge', () => ({
+  createAgentGrantBridge: () => ({ usedBy, listForAgent: vi.fn(), setEnabled: vi.fn(), remove: vi.fn() }),
+}))
+
 import Knowledge from '../../../src/pages/ai/knowledge/Knowledge.vue'
 
 const stubs = {
@@ -203,5 +209,64 @@ describe('Knowledge page (TCardPage card grid + document drawer)', () => {
     await vm.onReindex({ id: 'kb1' })
     await flushPromises()
     expect(reindexMock).toHaveBeenCalledWith('kb1')
+  })
+})
+
+describe('Knowledge page - agents that depend on a knowledge base', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    usedBy.mockReset()
+    usedBy.mockResolvedValue([])
+  })
+
+  type ManageVm = {
+    openManage: (row: { id: string; name: string }) => Promise<void>
+    manageTab: string
+  }
+
+  it('the Agents tab of the manage drawer loads the reverse lookup when opened', async () => {
+    usedBy.mockResolvedValue([{ agentId: 'a1', agentName: 'Support Bot', agentIsEnabled: true }])
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as ManageVm
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+    // Documents is the landing tab; the lookup waits until Agents is opened.
+    expect(usedBy).not.toHaveBeenCalled()
+
+    vm.manageTab = 'agents'
+    await flushPromises()
+    expect(usedBy).toHaveBeenCalledWith('knowledge', 'kb1')
+    expect(wrapper.text()).toContain('Agents with an active grant: 1')
+    expect(wrapper.text()).toContain('Support Bot')
+  })
+
+  it('a refused lookup in the Agents tab reads as a failure, not as zero agents', async () => {
+    usedBy.mockRejectedValue(new Error('Permission denied'))
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as ManageVm
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    vm.manageTab = 'agents'
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Could not check which agents use this: Permission denied')
+    expect(wrapper.text()).not.toContain('No agent has an active grant')
+  })
+
+  it('opening the delete confirmation names the dependent agents', async () => {
+    usedBy.mockResolvedValue([{ agentId: 'a1', agentName: 'Support Bot', agentIsEnabled: true }])
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const deleteConfirms = wrapper
+      .findAllComponents({ name: 'Popconfirm' })
+      .filter((c) => c.find('.t-grant-usage').exists())
+    expect(deleteConfirms).toHaveLength(2)
+
+    deleteConfirms[1]!.vm.$emit('update:show', true)
+    await flushPromises()
+    expect(usedBy).toHaveBeenCalledWith('knowledge', 'kb2')
+    expect(deleteConfirms[1]!.text()).toContain('1 agent(s) have an active grant for this')
+    expect(deleteConfirms[1]!.text()).toContain('Support Bot')
   })
 })

@@ -5,6 +5,9 @@ namespace Tnzi.AspNetCore.Mvc.Filters;
 /// </summary>
 public sealed class RequireCaptchaFilter : IAsyncActionFilter
 {
+    /// <summary>本请求已经过一次验证码闸门的标记（<see cref="HttpContext.Items"/> 键）。</summary>
+    private static readonly object VerifiedItemKey = new();
+
     private readonly string _purpose;
     private readonly ICaptchaVerifier _verifier;
     private readonly ILogger<RequireCaptchaFilter> _logger;
@@ -25,7 +28,9 @@ public sealed class RequireCaptchaFilter : IAsyncActionFilter
         Check.NotNull(context);
         Check.NotNull(next);
 
-        if (!_verifier.IsEnabled)
+        // 同一个 action 上可能叠着多个闸门（类级 + 方法级、基类 + 派生类）。令牌是一次性的，
+        // 验第二次必判重放 —— 所以只让离 action 最近的那个用途验，且一个请求至多验一次。
+        if (!_verifier.IsEnabled || !IsNearestGate(context) || context.HttpContext.Items.ContainsKey(VerifiedItemKey))
         {
             await next();
             return;
@@ -35,6 +40,7 @@ public sealed class RequireCaptchaFilter : IAsyncActionFilter
         var verification = await _verifier.VerifyAsync(token, _purpose, context.HttpContext.RequestAborted);
         if (verification.Passed)
         {
+            context.HttpContext.Items[VerifiedItemKey] = true;
             await next();
             return;
         }
@@ -49,6 +55,30 @@ public sealed class RequireCaptchaFilter : IAsyncActionFilter
             400,
             CAPTCHA_REQUIRED,
             new { provider = verification.Provider, failure = verification.Failure.ToString() }));
+    }
+
+    /// <summary>
+    /// 本过滤器的用途是否就是离 action 最近的那个 <see cref="RequireCaptchaAttribute"/> 的用途。
+    /// 作用域更外层、用途又不同的闸门让位，否则令牌会先按外层用途被核销，内层用途拿到的只剩重放。
+    /// </summary>
+    private bool IsNearestGate(ActionExecutingContext context)
+    {
+        RequireCaptchaAttribute? nearest = null;
+        var nearestScope = int.MinValue;
+        var descriptors = context.ActionDescriptor.FilterDescriptors;
+        if (descriptors != null)
+        {
+            foreach (var descriptor in descriptors)
+            {
+                if (descriptor.Filter is RequireCaptchaAttribute gate && descriptor.Scope >= nearestScope)
+                {
+                    nearest = gate;
+                    nearestScope = descriptor.Scope;
+                }
+            }
+        }
+
+        return nearest == null || string.Equals(nearest.Purpose, _purpose, StringComparison.Ordinal);
     }
 
     /// <summary>

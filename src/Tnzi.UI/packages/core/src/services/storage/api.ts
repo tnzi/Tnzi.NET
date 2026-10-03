@@ -309,7 +309,7 @@ export function useAdminFileApi(client: HttpClient) {
     /**
      * Draw thumbnails for stored files that have none: bitmaps, and the first
      * page of PDFs when the host loads Tnzi.Documents. Idempotent, one batch per
-     * call; loop until `generated` is 0 (see ThumbnailBackfillResult).
+     * call; pass `nextCursor` back as `after` until it is null (see ThumbnailBackfillResult).
      */
     backfillThumbnails: (data?: ThumbnailBackfillRequest) =>
       client.post<ThumbnailBackfillResult>(`${ADMIN_BASE}/backfill-thumbnails`, data ?? {}),
@@ -402,9 +402,14 @@ export function useAdminFileApi(client: HttpClient) {
     verifyFileIntegrity: (id: string) =>
       client.get<FileIntegrityResultDto>(`${ADMIN_BASE}/${id}/verify-integrity`),
 
-    /** Batch verify file integrity */
-    batchVerifyIntegrity: (maxFiles: number = 100) =>
-      client.post<BatchIntegrityResultDto>(`${ADMIN_BASE}/verify-integrity`, null, { params: { maxFiles } }),
+    /**
+     * Batch verify file integrity: `maxFiles` (1-500) files after `after`, by
+     * file id. Pass the result's `nextCursor` back as `after` to continue.
+     */
+    batchVerifyIntegrity: (maxFiles: number = 100, after?: string | null) =>
+      client.post<BatchIntegrityResultDto>(`${ADMIN_BASE}/verify-integrity`, null, {
+        params: after ? { maxFiles, after } : { maxFiles },
+      }),
 
     // ---- Share management ----
 

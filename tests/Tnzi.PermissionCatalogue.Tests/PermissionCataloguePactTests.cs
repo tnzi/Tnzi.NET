@@ -179,7 +179,12 @@ public class PermissionCataloguePactTests
         // 它们不是新的管理端点，而是 [AIToolGroup(RequiredPermissions)] 引用的码：此前框架自带的
         // 工具一个都没声明 RequiredPermissions，AgentResolver 的权限门控对内建工具整体空转，
         // 任何登录用户在聊天体里自填 toolGroups:["sandbox"] 就能拿到宿主上的 bash。
-        codes.Count.ShouldBe(307);
+        // 2026-09-20：退订名单管理面 3 码（notification.optOut view/create/delete）。没有 update：
+        // 一条退订记录的三元组就是它的身份，改了就是另一条；复用 notification 组，组数不变。
+        // 2026-09-20：账号登录安全管理 1 码（user.security，Business，复用 identity 组）。
+        // 管理端摘掉别人的第二因子 / 给别人设登录 IP 允许列表，与 user.update 分开授予：
+        // 改电话号码的岗位不该顺带拥有「让谁的登录少一道验证」。读仍走 user.view。
+        codes.Count.ShouldBe(311);
         context.Groups.Count.ShouldBe(13);
     }
 

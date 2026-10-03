@@ -49,6 +49,19 @@ export * from './presets/index'
 // into any consumer that wanted one display component.
 export * from './components/widgets/index'
 
+// Account security, hostable: an account's second factor as one list of
+// methods, for the signed-in account (`mode="self"`, the User Center's own
+// block) or for another account (`mode="admin"` + `userId`, the block inside
+// `UserSecuritySection`). Lives in `components/auth/` but, like the widgets, is
+// deliberately not in the `components/index.ts` barrel: it calls the identity
+// bridge, and `@tnzi/ui-admin/components` stays free of the service layer.
+export { default as TTwoFactorPanel } from './components/auth/TTwoFactorPanel.vue'
+export type { TwoFactorPanelMode } from './components/auth/TTwoFactorPanel.vue'
+// Its companion: one account's sign-in IP allow-list (`userId` only, reads
+// `user.security` itself). `UserSecurityBlocks` (pages) is the two of them
+// with the rule between; `UserSecuritySection` adds the section chrome.
+export { default as TSignInPolicyPanel } from './components/auth/TSignInPolicyPanel.vue'
+
 // Bridge plumbing - envelope helpers (`ensureOk` / `unwrapOk` / `unwrapUnchecked`,
 // re-exported from @tnzi/core) + the CRUD query/result adapters, surfaced at the
 // package root so consumer bridges import the whole set from `@tnzi/ui-admin`

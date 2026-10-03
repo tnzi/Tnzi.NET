@@ -244,12 +244,12 @@ public class PdfThumbnailTests : StorageIntegrationTestBase
 
         Assert.True(saved.Succeeded, saved.Message);
         Assert.Null(saved.Data!.ThumbnailPath);
-        Assert.Equal(0, rasterizer.RenderCalls);
     }
 
     [Fact]
-    public async Task SaveAsync_Pdf_ZeroPages_HasNoThumbnail_AndNeverRenders()
+    public async Task SaveAsync_Pdf_ZeroPages_HasNoThumbnail_AndSucceeds()
     {
+        // 零页由渲染器按越界页索引拒绝（真实实现同形），落进与「有口令」「损坏」同一条 Warning。
         var rasterizer = new FakePdfRasterizer { PageCount = 0 };
         var service = CreateStorageService(options: ThumbnailOptions(), pdfRasterizer: rasterizer);
 
@@ -257,7 +257,49 @@ public class PdfThumbnailTests : StorageIntegrationTestBase
 
         Assert.True(saved.Succeeded, saved.Message);
         Assert.Null(saved.Data!.ThumbnailPath);
-        Assert.Equal(0, rasterizer.RenderCalls);
+    }
+
+    [Fact]
+    public async Task SaveAsync_Pdf_AsksThePdfEngineOnlyInsideTheRender()
+    {
+        // 生成器不再单独问一次页数：那是又一次完整解析，而且是闸门之外、会在引擎锁上无限期等待的一次同步调用。
+        var rasterizer = new FakePdfRasterizer();
+        var service = CreateStorageService(options: ThumbnailOptions(), pdfRasterizer: rasterizer);
+
+        await service.SaveAsync("a.pdf", new MemoryStream(PdfBytes));
+
+        Assert.Equal(1, rasterizer.RenderCalls);
+        Assert.Equal(1, rasterizer.PageCountCalls); // 渲染器自己的那一次
+    }
+
+    [Fact]
+    public async Task SaveAsync_Pdf_RenderThatNeverFinishes_DoesNotHoldTheUpload_AndQueuedUploadsGiveUpToo()
+    {
+        // PDFium 的渲染同步、在进程级锁里、取消不掉。一份首页极复杂的 PDF 不能把上传挂上几分钟，
+        // 其它 PDF 上传也不能各占一个线程排队等它。
+        using var block = new ManualResetEventSlim(false);
+        var rasterizer = new FakePdfRasterizer { BlockRenderUntil = block };
+        var service = CreateStorageService(options: ThumbnailOptions(o => o.PdfThumbnail.RenderTimeoutSeconds = 1), pdfRasterizer: rasterizer);
+        try
+        {
+            // Task.Run：未修复时渲染在调用线程上同步阻塞，SaveAsync 连 Task 都返回不了，WaitAsync 就无从生效。
+            var first = await Task.Run(() => service.SaveAsync("slow.pdf", new MemoryStream(PdfBytes))).WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.True(first.Succeeded, first.Message);
+            Assert.Null(first.Data!.ThumbnailPath);
+            Assert.True(await Storage.ExistsAsync(first.Data.Path!));
+
+            // 被放弃的那次渲染还占着引擎：下一份在时限内拿不到位置，直接不画，也不再起一次渲染。
+            var second = await Task.Run(() => service.SaveAsync("next.pdf", new MemoryStream("%PDF-1.4 other"u8.ToArray()))).WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.True(second.Succeeded, second.Message);
+            Assert.Null(second.Data!.ThumbnailPath);
+            Assert.Equal(1, rasterizer.RenderCalls);
+        }
+        finally
+        {
+            block.Set();
+        }
     }
 
     [Fact]
@@ -434,6 +476,107 @@ public class PdfThumbnailTests : StorageIntegrationTestBase
         Assert.Equal(new[] { locked.Id }, result.Data.FailedFileIds);
         DbContext.ChangeTracker.Clear();
         Assert.Null(DbContext.FileRecords.Single(f => f.Id == locked.Id).ThumbnailPath);
+    }
+
+    [Fact]
+    public async Task BackfillThumbnailsAsync_CursorMovesPastFilesThatCannotBeDrawn_AndTheLoopEnds()
+    {
+        // 最老的一批都画不出来时，「每次取前 N 条候选」会反复扫同一批、Generated 恒为 0，其后的文件永远轮不到。
+        var locked = "%PDF-1.4 LOCKED"u8.ToArray();
+        var rasterizer = new FakePdfRasterizer
+        {
+            ThrowFor = source => source.AsSpan().IndexOf("LOCKED"u8) >= 0 ? new InvalidOperationException("password protected") : null
+        };
+        var service = CreateStorageService(options: ThumbnailOptions(), pdfRasterizer: rasterizer);
+        var lockedA = await CreateStoredFileAsync("locked-a.pdf", locked);
+        var lockedB = await CreateStoredFileAsync("locked-b.pdf", [.. locked, (byte)'2']);
+        var fine = await CreateStoredFileAsync("fine.pdf", PdfBytes);
+        DbContext.ChangeTracker.Clear();
+
+        Guid? cursor = null;
+        var calls = 0;
+        var failed = new List<Guid>();
+        do
+        {
+            var batch = await service.BackfillThumbnailsAsync(maxFiles: 1, after: cursor);
+            Assert.True(batch.Succeeded, batch.Message);
+            failed.AddRange(batch.Data!.FailedFileIds);
+            cursor = batch.Data.NextCursor;
+            calls++;
+        }
+        while (cursor != null && calls < 10);
+
+        Assert.Null(cursor);
+        Assert.Equal(3, calls);
+        Assert.Equal(new[] { lockedA.Id, lockedB.Id }.OrderBy(x => x), failed.OrderBy(x => x));
+        DbContext.ChangeTracker.Clear();
+        Assert.False(string.IsNullOrEmpty(DbContext.FileRecords.Single(f => f.Id == fine.Id).ThumbnailPath));
+    }
+
+    [Fact]
+    public async Task BackfillThumbnailsAsync_WritesOnlyTheThumbnailColumn_NotTheRowItReadBeforeRendering()
+    {
+        // 渲染期间另一请求把临时文件绑定了（ReferenceCount 0→1、IsTemporary→false）。
+        // 整行写回会把这两个字段改回旧值，孤儿清理随后删掉一个正被引用的文件。
+        var rasterizer = new FakePdfRasterizer();
+        var service = CreateStorageService(options: ThumbnailOptions(), pdfRasterizer: rasterizer);
+        var record = await CreateStoredFileAsync("temp.pdf", PdfBytes);
+        record.ReferenceCount = 0;
+        record.IsTemporary = true;
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        rasterizer.OnRender = () => DbContext.FileRecords
+            .Where(f => f.Id == record.Id)
+            .ExecuteUpdate(s => s.SetProperty(f => f.ReferenceCount, 1).SetProperty(f => f.IsTemporary, false));
+
+        var result = await service.BackfillThumbnailsAsync();
+
+        Assert.Equal(1, result.Data!.Generated);
+        DbContext.ChangeTracker.Clear();
+        var reloaded = DbContext.FileRecords.Single(f => f.Id == record.Id);
+        Assert.False(string.IsNullOrEmpty(reloaded.ThumbnailPath));
+        Assert.Equal(1, reloaded.ReferenceCount);
+        Assert.False(reloaded.IsTemporary);
+    }
+
+    [Fact]
+    public async Task BackfillThumbnailsAsync_RecordThatGotAThumbnailMeanwhile_KeepsIt_AndTheNewObjectIsDiscarded()
+    {
+        var recorder = new RecordingFileStorage(Storage);
+        var rasterizer = new FakePdfRasterizer();
+        var service = CreateStorageService(recorder, options: ThumbnailOptions(), pdfRasterizer: rasterizer);
+        var record = await CreateStoredFileAsync("a.pdf", PdfBytes);
+        DbContext.ChangeTracker.Clear();
+
+        rasterizer.OnRender = () => DbContext.FileRecords
+            .Where(f => f.Id == record.Id)
+            .ExecuteUpdate(s => s.SetProperty(f => f.ThumbnailPath, "thumb/other"));
+
+        var result = await service.BackfillThumbnailsAsync();
+
+        Assert.Equal(0, result.Data!.Generated);
+        DbContext.ChangeTracker.Clear();
+        Assert.Equal("thumb/other", DbContext.FileRecords.Single(f => f.Id == record.Id).ThumbnailPath);
+        var drawn = Assert.Single(recorder.UploadedPaths);
+        Assert.Contains(drawn, recorder.DeletedPaths);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(StorageQueryLimits.MaxThumbnailBackfillBatch + 1)]
+    public async Task BackfillThumbnailsAsync_BatchSizeOutOfRange_Is400(int maxFiles)
+    {
+        var rasterizer = new FakePdfRasterizer();
+        var service = CreateStorageService(options: ThumbnailOptions(), pdfRasterizer: rasterizer);
+        await CreateStoredFileAsync("a.pdf", PdfBytes);
+
+        var result = await service.BackfillThumbnailsAsync(maxFiles: maxFiles);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(0, rasterizer.RenderCalls);
     }
 
     [Fact]

@@ -21,7 +21,9 @@ internal static class SandboxTestSupport
             store);
 
     public static ThreadDataMiddleware CreateThreadDataMiddleware(SandboxModuleOptions options) =>
-        new(new VirtualPathTranslator(options.DataRoot), NullLogger<ThreadDataMiddleware>.Instance);
+        new(Microsoft.Extensions.Options.Options.Create(options),
+            new ServiceCollection().AddSingleton<IVirtualPathTranslator>(_ => new VirtualPathTranslator(options.DataRoot)).BuildServiceProvider(),
+            NullLogger<ThreadDataMiddleware>.Instance);
 
     public static SandboxMiddleware CreateSandboxMiddleware(
         SandboxModuleOptions options, ISandboxProvider provider, AgentExecutionContextAccessor accessor, ISkillStore? store = null) =>

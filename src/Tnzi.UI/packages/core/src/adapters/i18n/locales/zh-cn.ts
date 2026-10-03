@@ -81,6 +81,7 @@ export default {
     captchaRequired: '请完成人机验证',
     captchaInvalid: '人机验证未通过，请重试',
     captchaUnsupported: '该验证码提供商（{provider}）没有内置控件',
+    captchaNotConfigured: '需要完成 {provider} 验证码，但未加载到它的配置',
     orLoginWith: '或通过以下方式登录',
     orRegisterWith: '或通过以下方式注册',
     agreeTerms: '我同意服务条款和隐私政策',

@@ -250,6 +250,47 @@ describe('createTnziClient session-expiry chain', () => {
     expect(refreshCalls).toHaveLength(1);
   });
 
+  /**
+   * The account's sign-in IP allow-list refused the refresh. The reason has to
+   * survive the whole chain (refresh rejection -> onUnauthorized -> the
+   * session-expired listener) so the login page can say "sign in from an
+   * allowed network" instead of a routine "session expired".
+   */
+  it('★ a refresh refused by the sign-in IP allow-list leaves "ipNotAllowed" for the login page', async () => {
+    const storage = memStorage();
+    const { http, auth } = seededClient(storage);
+    const unauthorized = vi.fn();
+    http.addUnauthorizedListener(unauthorized);
+    stubFetch({
+      '/auth/refresh-token': () => jsonResponse({ succeeded: false, code: 403, errorCode: 'IDENTITY_SIGN_IN_IP_NOT_ALLOWED', message: 'Your current network is not on the list.' }, 403),
+      '/protected': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    await http.get('/protected');
+
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    expect(auth.isAuthenticated).toBe(false);
+    expect(storage.get('tnzi:auth:refresh')).toBeNull();
+    expect(auth.sessionEndReason).toBe('ipNotAllowed');
+  });
+
+  it('bearer boot keeps "ipNotAllowed" when the profile 401 drives a refresh the allow-list refuses', async () => {
+    const storage = memStorage();
+    storage.set('tnzi:auth:token', 'stale-access');
+    storage.set('tnzi:auth:refresh', 'r1');
+    const { auth } = createTnziClient({ baseUrl: '/api', storage, permissionsFetchFn: null });
+    stubFetch({
+      '/auth/refresh-token': () => jsonResponse({ succeeded: false, code: 403, errorCode: 'IDENTITY_SIGN_IN_IP_NOT_ALLOWED', message: 'Your current network is not on the list.' }, 403),
+      '/users/profile': () => jsonResponse({ succeeded: false, code: 401, errorCode: 'UNAUTHORIZED' }, 401),
+    });
+
+    await auth.restoreAuth();
+
+    expect(auth.isAuthenticated).toBe(false);
+    expect(storage.get('tnzi:auth:refresh')).toBeNull();
+    expect(auth.sessionEndReason).toBe('ipNotAllowed');
+  });
+
   it('bearer boot stays quiet on an ordinary expiry (rejected refresh without a security code)', async () => {
     const storage = memStorage();
     storage.set('tnzi:auth:token', 'stale-access');

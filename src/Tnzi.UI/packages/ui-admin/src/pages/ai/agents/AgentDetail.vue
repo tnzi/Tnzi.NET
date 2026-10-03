@@ -151,9 +151,19 @@
               :loading="toolGroupsLoading"
               :assigned="assignedToolItems"
               :available="availableToolItems"
+              :can-edit="can('ai.agent.update')"
+              :enabled-label="t('detail.grants.active')"
+              :disabled-tag="t('detail.grants.disabledTag')"
+              :busy-value="grantBusy"
+              :notice="grantsNotice"
               @assign="assignTool"
               @remove="removeTool"
-            />
+              @toggle="(key, on) => toggleGrant('toolGroups', key, on)"
+            >
+              <template #itemExtra="{ item }">
+                <AgentGrantUsageButton type="tool" :resource-key="item.value" />
+              </template>
+            </AgentResourcePicker>
 
             <!-- Knowledge - resource picker + retrieval test -->
             <AgentResourcePicker
@@ -172,9 +182,18 @@
               :loading="knowledgeBasesLoading"
               :assigned="assignedKbItems"
               :available="availableKbItems"
+              :can-edit="can('ai.agent.update')"
+              :enabled-label="t('detail.grants.active')"
+              :disabled-tag="t('detail.grants.disabledTag')"
+              :busy-value="grantBusy"
+              :notice="grantsNotice"
               @assign="assignKnowledge"
               @remove="removeKnowledge"
+              @toggle="(key, on) => toggleGrant('knowledgeBases', key, on)"
             >
+              <template #itemExtra="{ item }">
+                <AgentGrantUsageButton type="knowledge" :resource-key="item.value" />
+              </template>
               <template #prepend>
                 <div v-if="assignedKbItems.length" class="t-agent-detail__kb-test">
                   <div class="flex items-center gap-8px">
@@ -223,9 +242,19 @@
               :loading="skillsLoading"
               :assigned="assignedSkillItems"
               :available="availableSkillItems"
+              :can-edit="can('ai.agent.update')"
+              :enabled-label="t('detail.grants.active')"
+              :disabled-tag="t('detail.grants.disabledTag')"
+              :busy-value="grantBusy"
+              :notice="grantsNotice"
               @assign="assignSkill"
               @remove="removeSkill"
-            />
+              @toggle="(key, on) => toggleGrant('skills', key, on)"
+            >
+              <template #itemExtra="{ item }">
+                <AgentGrantUsageButton type="skill" :resource-key="item.value" />
+              </template>
+            </AgentResourcePicker>
 
             <!-- Recent Runs -->
             <TDetailSection v-else-if="section === 'runs'" :title="t('detail.panels.runs')" :icon="sectionIcon" max-width="none">
@@ -511,6 +540,13 @@ import {
   type CliRuntimeDto,
   type UpsertCliAgentBindingDto,
 } from '../../../services/bridges/cli-agent-bridge'
+import {
+  createAgentGrantBridge,
+  type AgentGrantDto,
+  type AgentGrantListDto,
+  type AgentGrantResourceType,
+} from '../../../services/bridges/agent-grant-bridge'
+import AgentGrantUsageButton from '../_shared/AgentGrantUsageButton.vue'
 import { useAdminClient } from '../../../plugin/client'
 import type {
   AgentDto, UpdateAgentDto, AgentRunDto,
@@ -522,6 +558,7 @@ const route = useRoute()
 const router = useRouter()
 const bridge = createAiBridge({ client: useAdminClient() })
 const cliBridge = createCliAgentBridge({ client: useAdminClient() })
+const grantBridge = createAgentGrantBridge({ client: useAdminClient() })
 const t = makePageTranslator('ai.agents')
 const { can } = usePermissionGuard()
 
@@ -739,17 +776,101 @@ async function persistResource(patch: UpdateAgentDto, okMsg: string): Promise<vo
   } catch (e) {
     toast('err', (e as Error).message ?? t('detail.saved'))
   }
+  await loadGrants(id)
+}
+
+// ---- Grant states (enable / disable in place) ------------------------------
+// The agent's list fields carry ENABLED grants only; the grant list adds the
+// disabled ones plus the grant ids the enable / delete endpoints address. An
+// agent update reconciles the enabled lists and leaves disabled grants alone,
+// so assigning or removing one resource never wipes a disabled neighbour.
+// When the grant list cannot be read, the sections fall back to the agent's
+// lists without switches (state unknown), and say so.
+const grants = ref<AgentGrantListDto | null>(null)
+const grantsError = ref<string | null>(null)
+const grantBusy = ref<string | null>(null)
+const grantsNotice = computed(() =>
+  grantsError.value ? t('detail.grants.unavailable', { message: grantsError.value }) : null,
+)
+
+async function loadGrants(id: string): Promise<void> {
+  try {
+    grants.value = await grantBridge.listForAgent(id)
+    grantsError.value = null
+  } catch (e) {
+    grants.value = null
+    grantsError.value = (e as Error).message || t('detail.grants.loadFailed')
+  }
+}
+
+type GrantedKind = 'toolGroups' | 'skills' | 'knowledgeBases'
+const GRANT_ROUTE_TYPE: Record<GrantedKind, AgentGrantResourceType> = {
+  toolGroups: 'tool',
+  skills: 'skill',
+  knowledgeBases: 'knowledge',
+}
+
+/** Assigned keys in display order with their state; `enabled` undefined = unknown. */
+function grantedEntries(kind: GrantedKind, enabledKeys: string[]): Array<{ key: string; enabled?: boolean }> {
+  const list = grants.value?.[kind]
+  if (!list) return enabledKeys.map((key) => ({ key }))
+  return list.map((g) => ({ key: g.key, enabled: g.isEnabled }))
+}
+
+function findGrant(kind: GrantedKind, key: string): AgentGrantDto | undefined {
+  return grants.value?.[kind].find((g) => g.key === key)
+}
+
+async function toggleGrant(kind: GrantedKind, key: string, enabled: boolean): Promise<void> {
+  const id = currentRouteId()
+  const grant = findGrant(kind, key)
+  if (!id || !grant || !can('ai.agent.update')) return
+  grantBusy.value = key
+  try {
+    await grantBridge.setEnabled(GRANT_ROUTE_TYPE[kind], grant.id, enabled)
+    toast('ok', enabled ? t('detail.grants.enabled') : t('detail.grants.disabled'))
+    // The agent's enabled lists (and with them the runtime view) changed too.
+    const refreshed = await bridge.agents.getById(id)
+    if (refreshed) agent.value = refreshed
+  } catch (e) {
+    toast('err', (e as Error).message || t('detail.grants.toggleFailed'))
+  } finally {
+    grantBusy.value = null
+  }
+  await loadGrants(id)
+}
+
+/**
+ * Remove an assigned resource. An active grant goes through the agent update
+ * (so the change is versioned like every other agent edit); a disabled grant is
+ * not in the agent's lists at all, so it is deleted by id.
+ */
+async function removeGranted(kind: GrantedKind, key: string, patch: UpdateAgentDto, okMsg: string): Promise<void> {
+  const grant = findGrant(kind, key)
+  if (!grant || grant.isEnabled) {
+    await persistResource(patch, okMsg)
+    return
+  }
+  const id = currentRouteId()
+  if (!id || !can('ai.agent.update')) return
+  try {
+    await grantBridge.remove(GRANT_ROUTE_TYPE[kind], grant.id)
+    toast('ok', okMsg)
+  } catch (e) {
+    toast('err', (e as Error).message || t('detail.grants.toggleFailed'))
+  }
+  await loadGrants(id)
 }
 
 // Skills
 const assignedSkillItems = computed<ResourcePickerItem[]>(() =>
-  (agent.value?.skillSlugs ?? []).map((slug) => {
+  grantedEntries('skills', agent.value?.skillSlugs ?? []).map(({ key: slug, enabled }) => {
     const s = skillList.value.find((x) => x.slug === slug)
-    return { value: slug, title: s?.name ?? slug, subtitle: slug, description: s?.description ?? undefined, tags: s?.tags }
+    return { value: slug, title: s?.name ?? slug, subtitle: slug, description: s?.description ?? undefined, tags: s?.tags, enabled }
   }),
 )
 const availableSkillItems = computed<ResourcePickerItem[]>(() => {
-  const used = new Set(agent.value?.skillSlugs ?? [])
+  const used = new Set(assignedSkillItems.value.map((i) => i.value))
   return skillList.value
     .filter((s) => !used.has(s.slug))
     .map((s) => ({ value: s.slug, title: s.name, subtitle: s.slug, description: s.description ?? undefined }))
@@ -757,22 +878,23 @@ const availableSkillItems = computed<ResourcePickerItem[]>(() => {
 const assignSkill = (slug: string) =>
   persistResource({ skillSlugs: [...(agent.value?.skillSlugs ?? []), slug] }, t('detail.skills.assigned'))
 const removeSkill = (slug: string) =>
-  persistResource({ skillSlugs: (agent.value?.skillSlugs ?? []).filter((x) => x !== slug) }, t('detail.skills.removed'))
+  removeGranted('skills', slug, { skillSlugs: (agent.value?.skillSlugs ?? []).filter((x) => x !== slug) }, t('detail.skills.removed'))
 
 // Tools (groups)
 const assignedToolItems = computed<ResourcePickerItem[]>(() =>
-  (agent.value?.toolGroups ?? []).map((name) => {
+  grantedEntries('toolGroups', agent.value?.toolGroups ?? []).map(({ key: name, enabled }) => {
     const g = toolGroupList.value.find((x) => x.name === name)
     return {
       value: name,
       title: name,
       subtitle: g ? `${g.toolCount} ${t('detail.tools.toolsSuffix')}` : undefined,
       description: g?.toolNames.join(', ') || undefined,
+      enabled,
     }
   }),
 )
 const availableToolItems = computed<ResourcePickerItem[]>(() => {
-  const used = new Set(agent.value?.toolGroups ?? [])
+  const used = new Set(assignedToolItems.value.map((i) => i.value))
   return toolGroupList.value
     .filter((g) => !used.has(g.name))
     .map((g) => ({ value: g.name, title: g.name, subtitle: `${g.toolCount} ${t('detail.tools.toolsSuffix')}`, description: g.toolNames.join(', ') || undefined }))
@@ -780,22 +902,23 @@ const availableToolItems = computed<ResourcePickerItem[]>(() => {
 const assignTool = (name: string) =>
   persistResource({ toolGroups: [...(agent.value?.toolGroups ?? []), name] }, t('detail.tools.assigned'))
 const removeTool = (name: string) =>
-  persistResource({ toolGroups: (agent.value?.toolGroups ?? []).filter((x) => x !== name) }, t('detail.tools.removed'))
+  removeGranted('toolGroups', name, { toolGroups: (agent.value?.toolGroups ?? []).filter((x) => x !== name) }, t('detail.tools.removed'))
 
 // Knowledge bases
 const assignedKbItems = computed<ResourcePickerItem[]>(() =>
-  (agent.value?.knowledgeBaseIds ?? []).map((id) => {
+  grantedEntries('knowledgeBases', agent.value?.knowledgeBaseIds ?? []).map(({ key: id, enabled }) => {
     const k = knowledgeBaseList.value.find((x) => x.id === id)
     return {
       value: id,
       title: k?.name ?? id,
       subtitle: k?.embeddingModel ?? undefined,
       meta: k ? `${k.documentCount ?? 0} ${t('detail.knowledge.docs')} · ${k.chunkCount ?? 0} ${t('detail.knowledge.chunks')}` : undefined,
+      enabled,
     }
   }),
 )
 const availableKbItems = computed<ResourcePickerItem[]>(() => {
-  const used = new Set(agent.value?.knowledgeBaseIds ?? [])
+  const used = new Set(assignedKbItems.value.map((i) => i.value))
   return knowledgeBaseList.value
     .filter((k) => !used.has(k.id))
     .map((k) => ({ value: k.id, title: k.name, subtitle: k.embeddingModel ?? undefined, description: k.description ?? undefined }))
@@ -803,7 +926,7 @@ const availableKbItems = computed<ResourcePickerItem[]>(() => {
 const assignKnowledge = (id: string) =>
   persistResource({ knowledgeBaseIds: [...(agent.value?.knowledgeBaseIds ?? []), id] }, t('detail.knowledge.assigned'))
 const removeKnowledge = (id: string) =>
-  persistResource({ knowledgeBaseIds: (agent.value?.knowledgeBaseIds ?? []).filter((x) => x !== id) }, t('detail.knowledge.removed'))
+  removeGranted('knowledgeBases', id, { knowledgeBaseIds: (agent.value?.knowledgeBaseIds ?? []).filter((x) => x !== id) }, t('detail.knowledge.removed'))
 
 // Knowledge retrieval test - exercise what this agent would retrieve from its
 // assigned knowledge bases (loops the per-KB search and merges by score).
@@ -856,11 +979,15 @@ const isDirty = computed(() => {
 async function loadAgent(id: string): Promise<void> {
   loading.value = true
   loadError.value = null
+  // Grant states load alongside the agent (every caller of loadAgent - mount,
+  // route change, rollback - may have changed them). loadGrants never throws.
+  const grantsLoad = loadGrants(id)
   try {
     // Exact lookup by id (GET /admin/agents/{id}). The old filtered-fetch
     // fallback was unreliable: AgentListQueryDto has no `id` filter, so it
     // returned the first agent rather than the requested one.
     const found = await bridge.agents.getById(id)
+    await grantsLoad
     if (!found) {
       loadError.value = t('detail.loadError')
       return

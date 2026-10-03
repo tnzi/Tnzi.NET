@@ -69,6 +69,8 @@ public class AICliModule : TnziApplicationModule
         services.AddSingleton<ICliProcessHost, LocalProcessHost>();
 
         services.AddSingleton<ICliExecutableResolver, CliExecutableResolver>();
+        services.AddSingleton<ICliAuthStatusProbe, CliAuthStatusProbe>();
+        services.AddSingleton<ICliLaunchEnvironmentComposer, CliLaunchEnvironmentComposer>();
         services.AddSingleton<ICliBriefComposer, CliBriefComposer>();
         services.AddSingleton<ICliMcpConfigComposer, CliMcpConfigComposer>();
 

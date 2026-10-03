@@ -155,4 +155,67 @@ public class RequireCaptchaFilterTests
     {
         Assert.ThrowsAny<ArgumentException>(() => new RequireCaptchaAttribute(" "));
     }
+
+    [Theory]
+    [InlineData("contact_form")]
+    [InlineData("Contact")]
+    [InlineData("1contact")]
+    [InlineData("contact form")]
+    public void Attribute_RejectsAPurposeTheChallengeEndpointsWouldRefuse(string purpose)
+    {
+        // 出题端点只认 CaptchaPurpose 形态；形态不对的用途让端点永远领不到题，必须在启动期（建描述符时）就失败。
+        var ex = Assert.Throws<ArgumentException>(() => new RequireCaptchaAttribute(purpose));
+        Assert.Contains(purpose, ex.Message, StringComparison.Ordinal);
+    }
+
+    private static ActionExecutingContext StackedContext(string headerToken, params (string Purpose, int Scope)[] gates)
+    {
+        var context = Context(headerToken: headerToken);
+        context.ActionDescriptor.FilterDescriptors = gates
+            .Select(g => new FilterDescriptor(new RequireCaptchaAttribute(g.Purpose), g.Scope))
+            .ToList();
+        return context;
+    }
+
+    [Fact]
+    public async Task StackedGates_WithTheSamePurpose_VerifyOnlyOnce()
+    {
+        // 类级与方法级同一用途：两个过滤器实例都会跑。令牌是一次性的，验第二次必判重放 → 端点永久 400。
+        var verifier = new Mock<ICaptchaVerifier>();
+        verifier.SetupGet(x => x.IsEnabled).Returns(true);
+        verifier.SetupSequence(x => x.VerifyAsync("hdr", "contact", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CaptchaVerification.Pass("altcha"))
+            .ReturnsAsync(CaptchaVerification.Fail("altcha", CaptchaFailure.ExpiredOrReplayed, "Replayed"));
+        var outer = new RequireCaptchaFilter("contact", verifier.Object, Mock.Of<ILogger<RequireCaptchaFilter>>());
+        var inner = new RequireCaptchaFilter("contact", verifier.Object, Mock.Of<ILogger<RequireCaptchaFilter>>());
+        var context = StackedContext("hdr", ("contact", FilterScope.Controller), ("contact", FilterScope.Action));
+        var (next, calls) = Next();
+
+        await outer.OnActionExecutionAsync(context, next);
+        await inner.OnActionExecutionAsync(context, next);
+
+        Assert.Null(context.Result);
+        Assert.Equal(2, calls());
+        verifier.Verify(x => x.VerifyAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StackedGates_WithDifferentPurposes_OnlyTheNearestVerifies()
+    {
+        var verifier = new Mock<ICaptchaVerifier>();
+        verifier.SetupGet(x => x.IsEnabled).Returns(true);
+        verifier.Setup(x => x.VerifyAsync("hdr", "comment", It.IsAny<CancellationToken>())).ReturnsAsync(CaptchaVerification.Pass("altcha"));
+        var outer = new RequireCaptchaFilter("contact", verifier.Object, Mock.Of<ILogger<RequireCaptchaFilter>>());
+        var inner = new RequireCaptchaFilter("comment", verifier.Object, Mock.Of<ILogger<RequireCaptchaFilter>>());
+        var context = StackedContext("hdr", ("contact", FilterScope.Controller), ("comment", FilterScope.Action));
+        var (next, calls) = Next();
+
+        await outer.OnActionExecutionAsync(context, next);
+        await inner.OnActionExecutionAsync(context, next);
+
+        Assert.Null(context.Result);
+        Assert.Equal(2, calls());
+        verifier.Verify(x => x.VerifyAsync(It.IsAny<string?>(), "contact", It.IsAny<CancellationToken>()), Times.Never);
+        verifier.Verify(x => x.VerifyAsync("hdr", "comment", It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

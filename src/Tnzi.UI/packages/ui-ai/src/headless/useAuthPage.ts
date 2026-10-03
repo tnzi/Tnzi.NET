@@ -23,6 +23,7 @@
  */
 import { computed, ref, type Ref, type ComputedRef } from 'vue';
 import { composeImageCaptchaToken } from '@tnzi/core/services/captcha';
+import { isPasskeySupported } from '@tnzi/core/services/identity';
 import type {
   LoginCallbacks,
   LoginFeatures,
@@ -84,6 +85,10 @@ export interface UseAuthPageReturn {
   onCodeSubmit: () => Promise<void>;
   onRegisterSubmit: () => Promise<void>;
   onTwoFactorSubmit: () => Promise<void>;
+  /** The passkey / security key leg of the challenge: a ceremony, not a code. */
+  onTwoFactorPasskey: () => Promise<void>;
+  /** Whether the passkey leg can be completed at all (the callback is wired). */
+  canUsePasskey: ComputedRef<boolean>;
   switchTo: (next: AuthStep) => Promise<void>;
   useTwoFactorMethod: (method: TwoFactorMethodName) => Promise<void>;
 }
@@ -147,6 +152,9 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
       challenge.value = next;
       twoFactorMethod.value = next.method;
       step.value = 'two-factor';
+      // The code the prompt refers to never went out: say so rather than
+      // leave the user waiting for it.
+      if (next.codeSendError) error.value = next.codeSendError;
       void options.focusFirstField?.();
     },
     clearTwoFactor: () => {
@@ -345,6 +353,22 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     });
   }
 
+  // Wired AND runnable: without the WebAuthn JSON bridges the ceremony can only fail.
+  const canUsePasskey = computed(() => !!options.callbacks().verifyTwoFactorWithPasskey && isPasskeySupported());
+
+  async function onTwoFactorPasskey(): Promise<void> {
+    const call = options.callbacks().verifyTwoFactorWithPasskey;
+    if (!call) {
+      error.value = t('auth.errors.notConfigured', 'Two-factor verification is not configured.');
+      return;
+    }
+    await run(async () => {
+      // `false` = the user closed the system dialog; the challenge stays open.
+      const done = await call({ challengeId: challenge.value?.challengeId }, helpers);
+      if (done && settledWithSession()) options.onAuthenticated();
+    });
+  }
+
   async function switchTo(next: AuthStep): Promise<void> {
     reset();
     code.value = '';
@@ -355,15 +379,20 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     await options.focusFirstField?.();
   }
 
+  // A passkey without its callback is not offered: a button that cannot
+  // complete is worse than no button.
   const otherTwoFactorMethods = computed(() =>
-    (challenge.value?.methods ?? []).filter((m) => m !== twoFactorMethod.value),
+    (challenge.value?.methods ?? []).filter(
+      (m) => m !== twoFactorMethod.value && (m !== 'passkey' || canUsePasskey.value),
+    ),
   );
 
   async function useTwoFactorMethod(method: TwoFactorMethodName): Promise<void> {
     twoFactorMethod.value = method;
     code.value = '';
     const resend = options.callbacks().resendTwoFactor;
-    if (method !== 'totp' && resend) {
+    // Only the code methods have something to deliver.
+    if ((method === 'sms' || method === 'email') && resend) {
       await run(async () => {
         const result = await resend({ challengeId: challenge.value?.challengeId, method });
         const masked = result && 'maskedAddress' in result ? result.maskedAddress : undefined;
@@ -400,6 +429,8 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     onCodeSubmit,
     onRegisterSubmit,
     onTwoFactorSubmit,
+    onTwoFactorPasskey,
+    canUsePasskey,
     switchTo,
     useTwoFactorMethod,
   };

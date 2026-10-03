@@ -27,14 +27,19 @@ public class SandboxModuleOptions
     /// <summary>
     /// 未显式配置 <see cref="DataRoot"/> 时的落点：<c>{LocalApplicationData}/Tnzi/ai-threads</c>，与
     /// <c>Tnzi.AI.Cli</c> 的工作区根 <c>{LocalApplicationData}/Tnzi/agent-workspaces</c> 同一父目录。
-    /// 宿主解析不出用户数据目录（IIS 未加载用户配置文件、没有 HOME 的服务账号）时为空串，
-    /// 由验证器拒绝启动并指名要配 <c>AI:Sandbox:DataRoot</c>；不再退回任何相对路径，那正是要离开的地方。
+    /// 宿主解析不出用户数据目录（没有 HOME 的服务账号、IIS 未加载用户配置文件）时为空串，
+    /// 沙箱启用时由验证器拒绝启动并指名要配 <c>AI:Sandbox:DataRoot</c>；不再退回任何相对路径，那正是要离开的地方。
     /// </summary>
-    public static string DefaultDataRoot { get; } = ResolveDefaultDataRoot();
+    public static string DefaultDataRoot { get; } = ResolveDefaultDataRoot(Environment.GetFolderPath);
 
-    private static string ResolveDefaultDataRoot()
+    /// <remarks>
+    /// ★ 必须 <see cref="Environment.SpecialFolderOption.DoNotVerify"/>：默认的 <c>None</c> 在 Unix 上对<b>尚不存在</b>的目录
+    /// 返回空串（macOS 与新建的 Linux 账号上 <c>~/.local/share</c> 往往还没建），于是一个完全正常的宿主被当成
+    /// 「解析不出用户数据目录」拒绝启动。目录不存在不是问题，沙箱第一次布置线程目录时会逐级建出来。
+    /// </remarks>
+    internal static string ResolveDefaultDataRoot(Func<Environment.SpecialFolder, Environment.SpecialFolderOption, string> getFolderPath)
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localAppData = getFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
         return string.IsNullOrWhiteSpace(localAppData)
             ? string.Empty
             : Path.Combine(localAppData, "Tnzi", "ai-threads");

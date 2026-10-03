@@ -16,6 +16,16 @@ public class CliAgentOptions
     /// </summary>
     public string? WorkspacesRoot { get; set; }
 
+    /// <summary>
+    /// 是否按派出运行的用户再分一层目录：<c>{root}/{tenant}/u-{userId}/{thread|run}</c>，
+    /// 没有登录用户的运行落在 <c>u-anonymous</c>。<b>默认 false</b>（<c>{root}/{tenant}/{thread|run}</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 编码 CLI 按工作目录存会话存档，所以切换这个开关会让既有线程换一个目录 ——
+    /// 那些线程的下一轮续接必被拒，框架按「续接被拒」处理：开新会话并告知上下文已丢失。
+    /// </remarks>
+    public bool PartitionWorkspacesByUser { get; set; }
+
     /// <summary>本进程最大并发外部运行数。</summary>
     public int MaxConcurrentRuns { get; set; } = 4;
 
@@ -73,6 +83,13 @@ public class CliAgentOptions
     /// 自定义 provider：让部署接入一个内置表里没有、但说已支持协议的 CLI，<b>不改代码</b>。
     /// </summary>
     public List<CliCustomProviderOptions> CustomProviders { get; set; } = [];
+
+    /// <summary>
+    /// 某个 provider 的部署级配置：<see cref="CustomProviders"/> 优先（它能整体替换内置项），其次 <see cref="Providers"/>。
+    /// </summary>
+    public CliProviderOptions? FindProviderOptions(string providerKey)
+        => CustomProviders.LastOrDefault(c => string.Equals(c.Key, providerKey, StringComparison.OrdinalIgnoreCase))
+           ?? Providers.GetValueOrDefault(providerKey);
 }
 
 /// <summary>
@@ -91,6 +108,29 @@ public class CliProviderOptions
 
     /// <summary>部署级默认追加参数，先于每 agent 的自定义参数。</summary>
     public List<string> ExtraArgs { get; set; } = [];
+
+    /// <summary>
+    /// 与宿主账号个人配置的隔离档位。<b>默认 <see cref="CliUserConfigIsolation.ExcludeUserSettings"/></b>：
+    /// 个人 hooks、插件、技能不进受管运行，登录态照用。
+    /// </summary>
+    public CliUserConfigIsolation UserConfigIsolation { get; set; } = CliUserConfigIsolation.ExcludeUserSettings;
+
+    /// <summary>
+    /// <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/> 时的专用配置目录（绝对路径）。
+    /// 空 = <c>{WorkspacesRoot}/.cli-config/{provider}</c>。
+    /// </summary>
+    public string? ConfigDirectory { get; set; }
+
+    /// <summary>
+    /// 兜底认证令牌（claude：<c>claude setup-token</c> 生成的长期令牌，走订阅额度）。
+    /// </summary>
+    /// <remarks>
+    /// <b>只在查不到本机登录态时注入</b>：每次启动前先以运行将要使用的同一份环境查一次登录状态，
+    /// 已登录（含白名单透传的 API key）就不注入 —— 令牌优先级高于本机登录，无条件注入会顶掉它。
+    /// 查询不可用或失败时视为未登录，照样注入。
+    /// <para>这是机密：放 user-secrets / 环境变量（<c>AI__Cli__Providers__claude__FallbackAuthToken</c>），不要写进 appsettings.json。</para>
+    /// </remarks>
+    public string? FallbackAuthToken { get; set; }
 }
 
 /// <summary>
@@ -121,6 +161,18 @@ public class CliCustomProviderOptions : CliProviderOptions
 
     /// <summary>启动骨架预览。</summary>
     public string? LaunchHeader { get; set; }
+
+    /// <summary>查询登录状态的参数（输出含 <c>loggedIn</c> 的 JSON）。空 = 无从查询。</summary>
+    public List<string> AuthStatusArgs { get; set; } = [];
+
+    /// <summary>兜底令牌经由的环境变量名。空 = 不支持 <see cref="CliProviderOptions.FallbackAuthToken"/>。</summary>
+    public string? AuthTokenEnvironmentVariable { get; set; }
+
+    /// <summary><see cref="CliUserConfigIsolation.ExcludeUserSettings"/> 对应的启动参数。空 = 该档不生效。</summary>
+    public List<string> ExcludeUserSettingsArgs { get; set; } = [];
+
+    /// <summary>重定向配置目录的环境变量名。空 = 不支持 <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/>。</summary>
+    public string? ConfigDirectoryEnvironmentVariable { get; set; }
 }
 
 /// <summary>

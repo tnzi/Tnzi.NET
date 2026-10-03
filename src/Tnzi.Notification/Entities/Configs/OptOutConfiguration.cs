@@ -32,6 +32,33 @@ public class OptOutConfiguration : EntityTypeConfigurationBase<OptOut, Guid>
         //   地址被记两次整渠道退订；而 OptInAsync 恢复订阅时只删它查到的那一行，
         //   于是页面说"已恢复"、人却依然收不到邮件。SQL Server 上同样的代码是对的，
         //   这正是这类缺陷最擅长的伪装。
+        // ★ 多租户时唯一性必须按租户划分：退订名单是租户自己的账本，发送前的判定与登记前的判重
+        //   都被租户过滤器限定在当前租户。全局唯一会让租户 B 看不见租户 A 的那一行、判重读到
+        //   「还没有」、插入撞约束 —— 收件人在 B 里怎么都退订不掉，而一键退订恰恰是法规要求必须生效的那条路。
+        //   TenantId 为 NULL 的行（宿主上下文登记的）在 PostgreSQL / SQLite 上不被含 TenantId 的索引
+        //   互相约束（NULL 互不相等，同上），所以按「有无租户」再各拆一对，宿主行照样一行一件事。
+        if (multiTenancyEnabled)
+        {
+            var tenantSet = IndexFilterFactory.GetColumnNotNull("TenantId");
+            var hostOnly = IndexFilterFactory.GetColumnNull("TenantId");
+            var categorySet = IndexFilterFactory.GetColumnNotNull("Category");
+            var allCategories = IndexFilterFactory.GetColumnNull("Category");
+
+            builder.HasIndex(o => new { o.TenantId, o.Address, o.Channel, o.Category }).IsUnique()
+                .HasFilter($"{tenantSet} AND {categorySet}")
+                .HasDatabaseName("IX_Notification_OptOut_Tenant_Address_Channel_Category");
+            builder.HasIndex(o => new { o.TenantId, o.Address, o.Channel }).IsUnique()
+                .HasFilter($"{tenantSet} AND {allCategories}")
+                .HasDatabaseName("IX_Notification_OptOut_Tenant_Address_Channel_AllCategories");
+            builder.HasIndex(o => new { o.Address, o.Channel, o.Category }).IsUnique()
+                .HasFilter($"{hostOnly} AND {categorySet}")
+                .HasDatabaseName("IX_Notification_OptOut_Host_Address_Channel_Category");
+            builder.HasIndex(o => new { o.Address, o.Channel }).IsUnique()
+                .HasFilter($"{hostOnly} AND {allCategories}")
+                .HasDatabaseName("IX_Notification_OptOut_Host_Address_Channel_AllCategories");
+            return;
+        }
+
         builder.HasIndex(o => new { o.Address, o.Channel, o.Category }).IsUnique()
             .HasFilter(IndexFilterFactory.GetColumnNotNull("Category"));
         builder.HasIndex(o => new { o.Address, o.Channel }).IsUnique()

@@ -120,6 +120,27 @@ public class UserDisabledEvent : EventBase
 }
 
 /// <summary>
+/// 用户已删除事件：账号已经从身份模块删掉、会话已撤销之后发布。
+/// </summary>
+/// <remarks>
+/// 给以这个账号为主体的领域记录（员工档案 / 警员台账 / 薪酬主数据……）一个善后的入口：
+/// 清缓存、把领域侧的「有登录」标记翻掉、写自己的审计。它们与 <c>User</c> 之间刻意没有外键，
+/// 所以数据库不会替它们做任何事。
+/// <br/><br/>
+/// ★ 这是「已经删了」的通知，不是「能不能删」的问询。想在删除之前拦下来的模块实现
+/// <see cref="Services.IUserUsageProvider"/>；那条路径拒绝时本事件不会发出。
+/// </remarks>
+public class UserDeletedEvent : EventBase
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public DateTime DeletionTime { get; set; }
+
+    /// <summary>执行删除的操作者；后台任务或无登录上下文时为 null。</summary>
+    public Guid? DeletedBy { get; set; }
+}
+
+/// <summary>
 /// 用户信息更新事件
 /// </summary>
 public class UserUpdatedEvent : EventBase

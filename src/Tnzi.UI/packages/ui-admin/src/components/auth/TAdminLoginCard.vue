@@ -216,7 +216,7 @@ function fillDemo(account: DemoAccount): void {
             <div class="t-admin-login__code-row">
               <NInput
                 v-model:value="form.password"
-                :placeholder="t('admin.login.codePlaceholder', 'Enter 6-digit code')"
+                :placeholder="t('admin.login.codePlaceholder', 'Enter verification code')"
               />
               <NButton tertiary type="primary">{{ codeBtnLabel }}</NButton>
             </div>

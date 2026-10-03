@@ -73,11 +73,15 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   // ── Audit sub-routes ────────────────────────────────────────────
   'audit.logs': 'mdi:clipboard-text-outline',
   'audit.operations': 'mdi:cog-refresh-outline',
+  'audit.recordAccess': 'mdi:account-eye-outline',
+  'audit.destruction': 'mdi:certificate-outline',
 
   // ── Notification sub-routes ─────────────────────────────────────
   'notification.templates': 'mdi:file-document-edit-outline',
   'notification.messages': 'mdi:email-outline',
   'notification.subscriptions': 'mdi:bell-ring-outline',
+  'notification.optOuts': 'mdi:email-off-outline',
+  'notification.devices': 'mdi:devices',
 
   // ── Chat sub-routes ─────────────────────────────────────────────
   'chat.overview': 'mdi:view-dashboard-outline',

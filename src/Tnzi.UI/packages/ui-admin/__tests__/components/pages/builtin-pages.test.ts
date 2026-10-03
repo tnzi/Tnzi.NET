@@ -337,6 +337,36 @@ describe('TLoginPage', () => {
     expect(field.find('img').attributes('src')).toContain('IMG')
   })
 
+  /**
+   * The backend spends the captcha token on every attempt it checks, including
+   * one that then fails on the password. Left as it was, the next submit
+   * carries a dead token and is refused as a captcha failure.
+   */
+  it('PwdLogin asks for a fresh captcha after a failed attempt that carried one', async () => {
+    const getCaptcha = vi.fn(async () => ({ provider: 'image', captchaId: 'c2', imageBase64: 'IMG2' }))
+    const pwdLogin = vi.fn(async () => {
+      throw new Error('Invalid username or password')
+    })
+    const ctx = makeLoginContext({
+      callbacks: { pwdLogin, getCaptcha },
+      demoAccounts: [{ key: 'demo', label: 'Demo', userName: 'someone', password: 'wrong' }],
+    })
+    const wrapper = mount(PwdLogin, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    ctx.pendingCaptcha.value = { provider: 'image', captchaId: 'c1', imageBase64: 'IMG1' }
+    await flushPromises()
+    await wrapper.find('.t-captcha input').setValue('ABCD')
+
+    await wrapper.findAll('button').find((b) => b.text() === 'Demo')!.trigger('click')
+    await flushPromises()
+
+    expect(pwdLogin).toHaveBeenCalledWith(expect.objectContaining({ captchaToken: 'c1:ABCD' }), expect.anything())
+    expect(wrapper.find('[role="alert"]').text()).toBe('Invalid username or password')
+    expect(getCaptcha).toHaveBeenCalledWith('login')
+    expect(wrapper.find('.t-captcha img').attributes('src')).toContain('IMG2')
+  })
+
   it('PwdLogin renders the provider widget slot when the deployment runs a script provider', async () => {
     swallowProviderScripts()
     const ctx = makeLoginContext({

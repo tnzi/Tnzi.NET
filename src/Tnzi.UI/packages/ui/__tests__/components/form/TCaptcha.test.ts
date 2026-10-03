@@ -162,3 +162,49 @@ describe('TCaptcha - script providers', () => {
     await expect((w.vm as unknown as { execute: () => Promise<string> }).execute()).rejects.toThrow(/sliding/)
   })
 })
+
+describe('TCaptcha - states a caller has to be able to tell apart', () => {
+  const config = { enabled: true, provider: 'turnstile', siteKey: 'site', scriptUrl: 'https://cdn.example/turnstile.js?render=explicit' }
+
+  /**
+   * The backend demanded a Turnstile challenge (seed) but the page has no
+   * provider config to render it from: an empty box nobody can solve. It has
+   * to say what is missing, and `execute()` has to refuse with the same reason.
+   */
+  it('reports a seeded script provider it has no config for, instead of rendering an empty box', async () => {
+    const w = mount(TCaptcha, { props: { purpose: 'login', seed: { provider: 'turnstile' }, config: null, token: '' } })
+    await flushPromises()
+
+    expect(w.attributes('data-provider')).toBe('turnstile')
+    expect(w.find('.t-captcha__error').text()).toContain('turnstile')
+    await expect((w.vm as unknown as { execute: () => Promise<string> }).execute()).rejects.toThrow(/turnstile/)
+  })
+
+  it('treats a disabled config as missing too', async () => {
+    const w = mount(TCaptcha, {
+      props: { purpose: 'login', seed: { provider: 'turnstile' }, config: { enabled: false, provider: 'turnstile' }, token: '' },
+    })
+    await flushPromises()
+
+    expect(w.find('.t-captcha__error').exists()).toBe(true)
+  })
+
+  it('emits expired when the provider expires the token, but not for a reset the caller asked for', async () => {
+    const { rendered } = fakeTurnstile()
+    const w = mount(TCaptcha, { props: { purpose: 'login', config, token: '' } })
+    await flushPromises()
+    const params = rendered[0]!.params
+
+    ;(params.callback as (t: string) => void)('tok-1')
+    await nextTick()
+    ;(w.vm as unknown as { reset: () => void }).reset()
+    await nextTick()
+    expect(w.emitted('expired')).toBeUndefined()
+
+    ;(params.callback as (t: string) => void)('tok-2')
+    await nextTick()
+    ;(params['expired-callback'] as () => void)()
+    await nextTick()
+    expect(w.emitted('expired')).toHaveLength(1)
+  })
+})

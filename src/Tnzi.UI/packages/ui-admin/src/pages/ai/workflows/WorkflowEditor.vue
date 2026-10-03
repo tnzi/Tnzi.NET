@@ -36,6 +36,10 @@
     </template>
 
     <template #actions>
+      <NButton size="small" tertiary :disabled="!workflow" data-test="wf-open-history" @click="openHistory">
+        <template #icon><TSvgIcon icon="mdi:history" :size="16" /></template>
+        {{ t('versions.open') }}
+      </NButton>
       <NButton size="small" tertiary :disabled="!workflow" @click="onValidate">
         <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
         {{ t('actions.validate') }}
@@ -375,6 +379,46 @@
             <div><span>{{ t('editor.stepsCount') }}:</span> {{ draft.steps?.length ?? 0 }}</div>
             <div><span>{{ t('columns.executionMode') }}:</span> {{ executionModeLabel }}</div>
           </div>
+
+          <!-- Execution stats: how this workflow has actually been running. -->
+          <NDivider class="!m-[12px_0]" />
+          <div class="t-wf-editor__exec-stats" data-test="wf-exec-stats">
+            <div class="t-wf-editor__exec-stats-head">
+              <span>{{ t('execStats.title') }}</span>
+              <NButton size="tiny" text :loading="execStatsLoading" :disabled="!workflow" @click="loadExecutionStats">
+                <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+              </NButton>
+            </div>
+            <NAlert v-if="execStatsError" type="error" :show-icon="false" data-test="wf-exec-stats-error">
+              {{ execStatsError }}
+            </NAlert>
+            <div v-else-if="execStats" class="t-wf-editor__exec-stats-grid">
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.total') }}</span>
+                <span class="t-wf-editor__exec-stat-value" data-test="wf-exec-stats-total">{{ execStats.totalExecutions }}</span>
+              </div>
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.successRate') }}</span>
+                <span class="t-wf-editor__exec-stat-value" data-test="wf-exec-stats-success">{{ successRateText }}</span>
+              </div>
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.avgDuration') }}</span>
+                <span class="t-wf-editor__exec-stat-value">{{ formatDurationMs(execStats.avgDurationMs) }}</span>
+              </div>
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.p95Duration') }}</span>
+                <span class="t-wf-editor__exec-stat-value">{{ formatDurationMs(execStats.p95DurationMs) }}</span>
+              </div>
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.minDuration') }}</span>
+                <span class="t-wf-editor__exec-stat-value">{{ formatDurationMs(execStats.minDurationMs) }}</span>
+              </div>
+              <div class="t-wf-editor__exec-stat">
+                <span class="t-wf-editor__exec-stat-label">{{ t('execStats.maxDuration') }}</span>
+                <span class="t-wf-editor__exec-stat-value">{{ formatDurationMs(execStats.maxDurationMs) }}</span>
+              </div>
+            </div>
+          </div>
         </NCard>
       </aside>
     </div>
@@ -425,6 +469,15 @@
           </template>
         </NModal>
         </TOverlayTheme>
+
+        <!-- Version history drawer + version snapshot modal (?history= / ?version= deep links) -->
+        <WorkflowVersionsDrawer
+          ref="versionsDrawer"
+          :workflow-id="workflowId"
+          :can-restore="can('ai.workflow.update')"
+          :dirty="dirty"
+          @restored="onVersionRestored"
+        />
 
         <!-- Validate result modal -->
         <TOverlayTheme>
@@ -502,6 +555,7 @@ import type {
   WorkflowStepDto,
   UpdateWorkflowDefinitionDto,
   WorkflowValidationResultDto,
+  WorkflowExecutionStatsDto,
 } from '@tnzi/core/services/ai'
 // 0.2.72+ (B4): enum value routed through ai-bridge so the page stays
 // clean under the `no-restricted-imports` guard.
@@ -512,6 +566,8 @@ import { WorkflowExecutionMode } from '../../../services/bridges/ai-bridge'
 // touching `@tnzi/ui-ai` at all paid for the whole canvas. This route component
 // is itself lazy-loaded, so the cost stays in its own chunk.
 import { Handle, Position, type NodeProps } from '@tnzi/ui-ai/workflow'
+import { EMPTY_DASH } from '../../../utils/placeholders'
+import WorkflowVersionsDrawer from './WorkflowVersionsDrawer.vue'
 
 // `@vue-flow/core` lives inside `@tnzi/ui-ai`'s dependency tree but isn't a
 // direct ui-admin dep, so the canvas inputs are typed structurally here. These
@@ -682,11 +738,60 @@ async function loadWorkflow(id: string): Promise<void> {
     stepsJsonError.value = ''
     dirty.value = false
     selectedStepId.value = null
+    void loadExecutionStats()
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
   } finally {
     loading.value = false
   }
+}
+
+// --- Execution stats ----------------------------------------------------------
+// A refused read shows the backend's message, never a row of zeros: "0 runs"
+// and "could not read the runs" must not look alike.
+const execStats = ref<WorkflowExecutionStatsDto | null>(null)
+const execStatsLoading = ref(false)
+const execStatsError = ref('')
+
+async function loadExecutionStats(): Promise<void> {
+  const id = workflowId.value
+  if (!id) return
+  execStatsLoading.value = true
+  execStatsError.value = ''
+  try {
+    const stats = await bridge.workflows.getExecutionStats(id)
+    if (workflowId.value === id) execStats.value = stats
+  } catch (err) {
+    execStats.value = null
+    execStatsError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    execStatsLoading.value = false
+  }
+}
+
+const successRateText = computed(() => {
+  const s = execStats.value
+  if (!s || s.totalExecutions === 0) return EMPTY_DASH
+  return `${(s.successRate * 100).toFixed(1)}%`
+})
+
+function formatDurationMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return EMPTY_DASH
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  return `${(ms / 60_000).toFixed(1)} min`
+}
+
+// --- Version history ----------------------------------------------------------
+const versionsDrawer = ref<InstanceType<typeof WorkflowVersionsDrawer> | null>(null)
+
+function openHistory(): void {
+  versionsDrawer.value?.open()
+}
+
+/** The server definition changed under the editor: reload it (drops the draft). */
+function onVersionRestored(): void {
+  if (workflowId.value) void loadWorkflow(workflowId.value)
 }
 
 watch(
@@ -1381,6 +1486,40 @@ void loadAgents()
 .t-wf-editor__stats span {
   color: var(--tnzi-base-text-muted);
   margin-right: 6px;
+}
+.t-wf-editor__exec-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.t-wf-editor__exec-stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+.t-wf-editor__exec-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.t-wf-editor__exec-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--tnzi-layout-bg);
+}
+.t-wf-editor__exec-stat-label {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+}
+.t-wf-editor__exec-stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .t-wf-editor__json-body {
   flex: 1;

@@ -33,6 +33,19 @@ public class AuthConfigDto
     /// <summary>验证码登录是否支持邮箱渠道</summary>
     public bool CodeLoginViaEmail { get; set; }
 
+    /// <summary>
+    /// 邮件 / 短信一次性验证码的位数（<c>Identity:Otp:CodeLength</c>，4-8，默认 6）。
+    /// </summary>
+    /// <remarks>
+    /// 覆盖所有经 <c>Otp.CodeLength</c> 生成的码：验证码登录、快速注册、找回密码、邮件 / 短信两步验证、
+    /// 敏感操作二次确认、换绑联系方式、确认邮箱。前端据此决定输入框的格数与提示文案 ——
+    /// 此前前端写死 6 格，部署一旦配成 8 位，用户收到的码根本敲不进去。
+    /// ★ <strong>身份验证器（TOTP）不跟随这一项</strong>：它按 RFC 6238 恒为 6 位（ASP.NET Core Identity
+    /// 的 authenticator 令牌提供器与下发的 <c>otpauth://</c> URI 都钉死 <c>digits=6</c>）。
+    /// 这是运行时设置，每次请求现读，改完不必重启。
+    /// </remarks>
+    public int OtpCodeLength { get; set; } = 6;
+
     // ── 注册（快速注册：验证码 + 账号） ──
 
     /// <summary>是否启用注册入口（邮箱或短信快速注册任一启用即为 true）</summary>

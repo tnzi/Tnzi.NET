@@ -2,6 +2,21 @@
 // Remaining pages (authorization/system/...) are rewritten incrementally in Phase 3.
 export { default as Users } from './identity/Users.vue'
 
+// Sign-in security of one account (second factor + sign-in IP allow-list),
+// hostable inside a consumer's own persona page (staff record, officer file,
+// customer account) with nothing but a `userId`. Self-contained on purpose:
+// it resolves its own strings and reads `user.security` itself, so a host
+// grants `user.view` (+ `user.security` for writes) and never has to expose
+// the framework Users page or the Roles / Sessions / Login-logs grants its
+// other sections need.
+export { default as UserSecuritySection } from './identity/sections/UserSecuritySection.vue'
+// The same two blocks without the section chrome, for a host whose record
+// page already has the section they belong in (an "Access" section with the
+// login window and the password reset): they go in under the host's own
+// blocks, inside the host's `TDetailSection`. One rule is drawn between the
+// two; the host draws what separates them from its own.
+export { default as UserSecurityBlocks } from './identity/sections/UserSecurityBlocks.vue'
+
 // Translation helpers - host apps build their own `t()` against the same
 // resolver the framework's pages use. Picks up consumer-supplied messages
 // registered via `useAdminAppStore.extendLocaleMessages`.

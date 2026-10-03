@@ -159,7 +159,8 @@ export interface StorageBridge {
   /** File-integrity verification - single + batch. */
   integrity: {
     verifyOne(fileId: string): Promise<FileIntegrityResultDto>
-    batchVerify(maxFiles?: number): Promise<BatchIntegrityResultDto>
+    /** One batch by file id; pass the previous result's `nextCursor` as `after` to continue. */
+    batchVerify(maxFiles?: number, after?: string | null): Promise<BatchIntegrityResultDto>
   }
   /** File tags - set per file + query files by a single tag. */
   tags: {
@@ -584,8 +585,8 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
   const integrity: StorageBridge['integrity'] = {
     verifyOne: async (fileId: string): Promise<FileIntegrityResultDto> =>
       unwrapOk<FileIntegrityResultDto>(await fileApi.verifyFileIntegrity(fileId)),
-    batchVerify: async (maxFiles = 100): Promise<BatchIntegrityResultDto> =>
-      unwrapOk<BatchIntegrityResultDto>(await fileApi.batchVerifyIntegrity(maxFiles)),
+    batchVerify: async (maxFiles = 100, after?: string | null): Promise<BatchIntegrityResultDto> =>
+      unwrapOk<BatchIntegrityResultDto>(await fileApi.batchVerifyIntegrity(maxFiles, after)),
   }
 
   // ---- tags ----

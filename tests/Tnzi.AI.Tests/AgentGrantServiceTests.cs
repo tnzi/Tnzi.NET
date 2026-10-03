@@ -187,7 +187,10 @@ public class AgentGrantServiceTests : IDisposable
 
         var agents = await _service.GetAgentsUsingToolAsync("fs");
 
-        agents.ShouldBe(new[] { agentA, agentB }, ignoreOrder: true);
+        // 按名称排序并带出名称 / 启用状态
+        agents.Select(a => a.AgentId).ShouldBe(new[] { agentA, agentB });
+        agents.Select(a => a.AgentName).ShouldBe(new[] { "A", "B" });
+        agents.ShouldAllBe(a => a.AgentIsEnabled);
     }
 
     [Fact]
@@ -203,7 +206,146 @@ public class AgentGrantServiceTests : IDisposable
 
         var agents = await _service.GetAgentsUsingKnowledgeAsync(kbId);
 
-        agents.ShouldBe(new[] { agentA });
+        agents.Select(a => a.AgentId).ShouldBe(new[] { agentA });
+    }
+
+    [Fact]
+    public async Task GetAgentsUsingSkill_SkipsDeletedAgents()
+    {
+        var live = await SeedAgentAsync("Live");
+        var gone = await SeedAgentAsync("Gone");
+        await _service.ReconcileSkillsAsync(live, new[] { "writing" });
+        await _service.ReconcileSkillsAsync(gone, new[] { "writing" });
+        _context.ChangeTracker.Clear();
+
+        // Agent 软删除不级联到 grant 行：遗留的 grant 不能被算作「在用」
+        var goneAgent = await _context.Set<Agent>().FirstAsync(a => a.Id == gone);
+        _context.Set<Agent>().Remove(goneAgent);
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+        (await _context.Set<AgentSkillGrant>().CountAsync(g => g.AgentId == gone)).ShouldBe(1);
+
+        var agents = await _service.GetAgentsUsingSkillAsync("writing");
+
+        agents.Select(a => a.AgentId).ShouldBe(new[] { live });
+    }
+
+    [Fact]
+    public async Task GetAgentsUsingTool_SameAgentViaGroupAndTool_ListedOnce()
+    {
+        var agentId = await SeedAgentAsync("Both");
+        _context.Set<AgentToolGrant>().AddRange(
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Group, ToolKey = "fs", IsEnabled = true },
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Tool, ToolKey = "fs", IsEnabled = true });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var agents = await _service.GetAgentsUsingToolAsync("fs");
+
+        agents.Count.ShouldBe(1);
+    }
+
+    // =====================================================================
+    // Governance list + disabled grants survive list reconcile + per-grant delete
+    // =====================================================================
+
+    [Fact]
+    public async Task ListGrants_IncludesDisabledGrants_WithIdsAndState()
+    {
+        var agentId = await SeedAgentAsync();
+        var kbId = Guid.NewGuid();
+        _context.Set<AgentToolGrant>().AddRange(
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Group, ToolKey = "fs", IsEnabled = true, Priority = 1 },
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Group, ToolKey = "shell", IsEnabled = false, Priority = 5 },
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Tool, ToolKey = "read_file", IsEnabled = true });
+        _context.Set<AgentSkillGrant>().Add(new AgentSkillGrant { AgentId = agentId, SkillSlug = "writing", IsEnabled = false });
+        _context.Set<AgentKnowledgeGrant>().Add(new AgentKnowledgeGrant { AgentId = agentId, KnowledgeBaseId = kbId, IsEnabled = true });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        var list = await _service.ListGrantsAsync(agentId);
+
+        list.ToolGroups.Select(g => (g.Key, g.IsEnabled)).ShouldBe(new[] { ("shell", false), ("fs", true) });
+        list.ToolGroups.ShouldAllBe(g => g.Id != Guid.Empty);
+        list.ToolNames.Select(g => g.Key).ShouldBe(new[] { "read_file" });
+        list.Skills.Single().IsEnabled.ShouldBeFalse();
+        list.KnowledgeBases.Single().Key.ShouldBe(kbId.ToString());
+    }
+
+    [Fact]
+    public async Task ReconcileSkills_DisabledGrantAbsentFromList_IsPreserved()
+    {
+        var agentId = await SeedAgentAsync();
+        await _service.ReconcileSkillsAsync(agentId, new[] { "writing", "research" });
+        _context.ChangeTracker.Clear();
+
+        var writingId = await _context.Set<AgentSkillGrant>()
+            .Where(g => g.AgentId == agentId && g.SkillSlug == "writing")
+            .Select(g => g.Id)
+            .FirstAsync();
+        _context.ChangeTracker.Clear();
+        (await _service.SetGrantEnabledAsync(GrantResourceType.Skill, writingId, enabled: false)).ShouldBeTrue();
+        _context.ChangeTracker.Clear();
+
+        // 客户端按 AgentDto（只含已启用条目）改列表：新增 planning。禁用的 writing 不在列表里，但不能因此被删
+        await _service.ReconcileSkillsAsync(agentId, new[] { "research", "planning" });
+        _context.ChangeTracker.Clear();
+
+        var list = await _service.ListGrantsAsync(agentId);
+        var writing = list.Skills.Single(g => g.Key == "writing");
+        writing.Id.ShouldBe(writingId);
+        writing.IsEnabled.ShouldBeFalse();
+        (await _service.GetGrantsAsync(agentId)).SkillSlugs.ShouldBe(new[] { "research", "planning" }, ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task ReconcileToolGroups_EmptyList_KeepsDisabledGrants()
+    {
+        var agentId = await SeedAgentAsync();
+        _context.Set<AgentToolGrant>().AddRange(
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Group, ToolKey = "fs", IsEnabled = true },
+            new AgentToolGrant { AgentId = agentId, GrantType = GrantType.Group, ToolKey = "shell", IsEnabled = false });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        await _service.ReconcileToolGroupsAsync(agentId, Array.Empty<string>());
+        _context.ChangeTracker.Clear();
+
+        var list = await _service.ListGrantsAsync(agentId);
+        list.ToolGroups.Select(g => g.Key).ShouldBe(new[] { "shell" });
+    }
+
+    [Fact]
+    public async Task ReconcileKnowledge_DisabledGrantAbsentFromList_IsPreserved()
+    {
+        var agentId = await SeedAgentAsync();
+        var kbKeep = Guid.NewGuid();
+        _context.Set<AgentKnowledgeGrant>().Add(new AgentKnowledgeGrant { AgentId = agentId, KnowledgeBaseId = kbKeep, IsEnabled = false });
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        await _service.ReconcileKnowledgeAsync(agentId, new[] { Guid.NewGuid() });
+        _context.ChangeTracker.Clear();
+
+        (await _service.ListGrantsAsync(agentId)).KnowledgeBases.Select(g => g.Key).ShouldContain(kbKeep.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteGrant_RemovesDisabledGrant_MissingReturnsFalse()
+    {
+        var agentId = await SeedAgentAsync();
+        var grant = new AgentSkillGrant { AgentId = agentId, SkillSlug = "writing", IsEnabled = false };
+        _context.Set<AgentSkillGrant>().Add(grant);
+        await _context.SaveChangesAsync();
+        _context.ChangeTracker.Clear();
+
+        (await _service.DeleteGrantAsync(GrantResourceType.Skill, grant.Id)).ShouldBeTrue();
+        _context.ChangeTracker.Clear();
+
+        (await _service.ListGrantsAsync(agentId)).Skills.ShouldBeEmpty();
+        // 类别不匹配 = 找不到（按 junction 实体寻址，不跨表猜）
+        (await _service.DeleteGrantAsync(GrantResourceType.Tool, grant.Id)).ShouldBeFalse();
+        (await _service.DeleteGrantAsync(GrantResourceType.Knowledge, Guid.NewGuid())).ShouldBeFalse();
     }
 
     // =====================================================================

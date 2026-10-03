@@ -21,6 +21,7 @@
 import { reactive } from 'vue';
 import type { HttpClient } from '../../http/http';
 import { useAuthApi, useProfileApi } from './api';
+import { codeLengthForMethod, DEFAULT_OTP_CODE_LENGTH, resolveOtpCodeLength } from './code-length';
 import { TwoFactorType } from './metadata';
 import { isPasskeySupported } from './passkey';
 import { sendStepUpCode, stepUpWithCode, stepUpWithPasskey } from './step-up';
@@ -48,6 +49,13 @@ export interface StepUpPromptOptions {
    * product that only allows passkeys for destructive actions, say).
    */
   discoverMethods?: () => Promise<StepUpMethod[]>;
+  /**
+   * Digits in an SMS / email code on this deployment. Defaults to reading
+   * `otpCodeLength` from `GET /auth/config` (anonymous, fetched alongside
+   * method discovery); a failed probe keeps the last known value (6 at
+   * first). Pass it when the app already holds the config.
+   */
+  loadOtpCodeLength?: () => Promise<number>;
 }
 
 const FALLBACK_MESSAGE = 'Step-up verification failed';
@@ -97,6 +105,13 @@ export async function discoverStepUpMethods(client: HttpClient): Promise<StepUpM
   return methods;
 }
 
+/** The deployment's SMS / email code length from `GET /auth/config` (6 when the field is absent). */
+async function fetchOtpCodeLength(client: HttpClient): Promise<number> {
+  const res = await useAuthApi(client).getConfig();
+  if (!res?.succeeded) throw new Error('auth config unavailable');
+  return resolveOtpCodeLength(res.data);
+}
+
 /** The two-factor channel a code method maps to. */
 function channelOf(method: StepUpMethod): TwoFactorType | null {
   switch (method) {
@@ -132,6 +147,12 @@ export class StepUpPromptController {
   sentTo: string | null = null;
   /** The last failure (server message), cleared on the next action. */
   error: string | null = null;
+  /**
+   * Digits in an SMS / email code on this deployment (`GET /auth/config` ->
+   * `otpCodeLength`). Refreshed every time a prompt opens, because it is a
+   * runtime setting; kept when a refresh fails.
+   */
+  otpCodeLength = DEFAULT_OTP_CODE_LENGTH;
 
   private _resolve: ((grant: StepUpGrantDto | null) => void) | null = null;
   /** Serialises overlapping `verify()` calls: one prompt at a time. */
@@ -152,6 +173,15 @@ export class StepUpPromptController {
   /** True while a request or ceremony is in flight. */
   get busy(): boolean {
     return this.stage === 'busy' || this.stage === 'loading';
+  }
+
+  /**
+   * Digits the code entry should take for the method in progress: 6 for the
+   * authenticator app (fixed by the standard), `otpCodeLength` for a code
+   * that was sent. Size the input from this, never from a constant.
+   */
+  get codeLength(): number {
+    return codeLengthForMethod(this.method, this.otpCodeLength);
   }
 
   /** Whether the account has any way to complete the prompt. */
@@ -278,16 +308,15 @@ export class StepUpPromptController {
 
   private async _discover(generation: number): Promise<void> {
     const discover = this.options.discoverMethods ?? (() => discoverStepUpMethods(this.options.client));
-    let methods: StepUpMethod[] = [];
-    try {
-      methods = await discover();
-    } catch {
-      methods = [];
-    }
+    const loadLength = this.options.loadOtpCodeLength ?? (() => fetchOtpCodeLength(this.options.client));
+    const [discovered, length] = await Promise.allSettled([discover(), loadLength()]);
     // The user may have cancelled (and a new prompt opened) while discovery
     // was in flight; a stale result must not land in the new one.
     if (this._isStale(generation) || this.stage !== 'loading') return;
-    this.methods = methods;
+    // A failed length probe keeps the last known value: the prompt must still
+    // open, and the code is verified by the server either way.
+    if (length.status === 'fulfilled') this.otpCodeLength = resolveOtpCodeLength(length.value);
+    this.methods = discovered.status === 'fulfilled' ? discovered.value : [];
     this.stage = 'choose';
   }
 

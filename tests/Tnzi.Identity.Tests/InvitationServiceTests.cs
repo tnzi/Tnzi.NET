@@ -1,5 +1,4 @@
 ﻿using System.Security.Cryptography;
-using System.Text.Json;
 using TnziIdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -401,11 +400,11 @@ public class InvitationServiceTests
                     CreatedUser = new User
                     {
                         Id = Guid.NewGuid(),
-                        UserName = input.UserName,
+                        UserName = input.UserName ?? input.Email,
                         Email = input.Email,
                         PhoneNumber = input.PhoneNumber,
                     };
-                    return Result<UserDto>.Success(new UserDto { Id = CreatedUser.Id, UserName = input.UserName });
+                    return Result<UserDto>.Success(new UserDto { Id = CreatedUser.Id, UserName = CreatedUser.UserName ?? string.Empty });
                 });
             userService
                 .Setup(x => x.DeleteAsync(It.IsAny<Guid>()))

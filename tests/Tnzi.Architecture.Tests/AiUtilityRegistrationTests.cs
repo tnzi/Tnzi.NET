@@ -93,6 +93,52 @@ public class AiUtilityRegistrationTests
         AssertSingleValidator<AiUtilityOptions>(graph);
     }
 
+    /// <summary>
+    /// 核心实现用到的命名客户端不能带 <see cref="HttpClient.Timeout"/>：超时由每次尝试的
+    /// <c>TimeoutSeconds</c> 决定，HttpClient 默认的 100 秒会把更长的配置静默截在 100 秒。
+    /// </summary>
+    /// <remarks>
+    /// 放在这个项目而不是 <c>Tnzi.Tests</c>：驱动 <c>CoreServicesModule</c> 会重设进程级的雪花生成器，
+    /// 与那边断言机器码的用例并行时会互相踩。本项目是独立进程。
+    /// </remarks>
+    [Fact]
+    public void AiUtilityHttpClients_HaveNoClientTimeout_SoTimeoutSecondsGoverns()
+    {
+        var coreOnly = ModuleTestHelper.LoadAndCollectServiceMap<CoreOnlyStartupModule>(new Dictionary<string, string?>
+        {
+            ["AI:DefaultProvider"] = "Slow",
+            ["AI:Providers:Slow:Enabled"] = "true",
+            ["AI:Providers:Slow:ApiKey"] = "sk-test",
+            ["AI:Providers:Slow:TimeoutSeconds"] = "300"
+        });
+        AssertNoConfigurationFailures(coreOnly);
+
+        IServiceCollection services = new ServiceCollection();
+        foreach (var descriptor in coreOnly.FinalServices)
+        {
+            services.Add(descriptor);
+        }
+        using var provider = services.BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        // "AddedAtRuntime" 不在启动时的配置里：热重载新增的提供商经 For() 拿到的名字同样不能带 100 秒的客户端超时。
+        var names = new[]
+        {
+            AiUtilityHttpClientNames.For("Slow"),
+            AiUtilityHttpClientNames.For("AddedAtRuntime"),
+            AiUtilityHttpClientNames.Fallback,
+            AiUtilityHttpClientNames.Inline
+        };
+        foreach (var name in names)
+        {
+            Assert.True(factory.CreateClient(name).Timeout == Timeout.InfiniteTimeSpan,
+                $"named client '{name}' must not carry an HttpClient.Timeout; it would cap TimeoutSeconds");
+        }
+
+        // 规则只覆盖本实现的名字，别人的客户端保持 HttpClient 默认值。
+        Assert.Equal(TimeSpan.FromSeconds(100), factory.CreateClient("SomeoneElse").Timeout);
+    }
+
     private static ServiceDescriptor SingleAiUtilityDescriptor(ModuleLoadResult result)
     {
         var registrations = result.FinalServices

@@ -51,7 +51,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     path: '/share/:token',
     name: 'share-link',
     component: () => import('../pages/share/SharePage.vue'),
-    meta: { requiresAuth: false, title: 'Shared file' },
+    meta: { requiresAuth: false, title: 'tnzi.admin.modules.storage.share.pageTitle' },
   },
   {
     // 退订链接的收件人页面。同 /share/:token 的理由：收件人未必是本系统的用户，
@@ -61,7 +61,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     path: '/unsubscribe',
     name: 'unsubscribe',
     component: () => import('../pages/notification/UnsubscribePage.vue'),
-    meta: { requiresAuth: false, title: 'Unsubscribe' },
+    meta: { requiresAuth: false, title: 'tnzi.admin.modules.notification.unsubscribe.pageTitle' },
   },
   {
     // 邀请链接的收件人页面。同 /share/:token 与 /unsubscribe 的理由：被邀请的人
@@ -71,7 +71,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
     path: '/accept-invitation',
     name: 'accept-invitation',
     component: () => import('../pages/identity/AcceptInvitationPage.vue'),
-    meta: { requiresAuth: false, title: 'Accept invitation' },
+    meta: { requiresAuth: false, title: 'tnzi.admin.modules.identity.acceptInvitation.pageTitle' },
   },
   // Exception pages - top-level (so `applyBasePath` prefixes them uniformly with
   // every other route) and `requiresAuth: false` so the permission / module
@@ -622,6 +622,18 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             meta: {
               title: 'tnzi.admin.modules.notification.subscriptions.title',
               permission: 'notification.subscription.view',
+              keepAlive: true,
+            },
+          },
+          {
+            // Address-keyed suppression list behind one-click unsubscribe.
+            // Distinct from subscriptions (a user's own preferences).
+            path: 'opt-outs',
+            name: 'notification.optOuts',
+            component: () => import('../pages/notification/OptOuts.vue'),
+            meta: {
+              title: 'tnzi.admin.modules.notification.optOuts.title',
+              permission: 'notification.optOut.view',
               keepAlive: true,
             },
           },

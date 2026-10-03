@@ -15,16 +15,28 @@ public class AgentTaskService : ApplicationService, IAgentTaskService
 
     public async Task SyncFromTodosAsync(Guid runId, List<TodoItemDto> todos, CancellationToken cancellationToken = default)
     {
-        Check.NotNullOrEmpty(todos);
+        Check.NotNull(todos);
 
-        // 获取该 RunId 的已有任务
+        // 获取该 RunId 的已有任务。同一序号出现多行（并发写入留下的）只认第一行，其余随下面的删除一起清掉。
         var existing = await _repository.ToListAsync(e => e.RunId == runId, cancellationToken);
-        var existingByOrder = existing.ToDictionary(e => e.OrderIndex);
+        var existingByOrder = existing
+            .GroupBy(e => e.OrderIndex)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // write_todos 给的是完整列表：同一序号给了多次以最后一次为准。
+        var incoming = todos
+            .GroupBy(t => t.Order)
+            .Select(g => g.Last())
+            .ToList();
+        var incomingOrders = incoming.Select(t => t.Order).ToHashSet();
 
         var toInsert = new List<AgentTask>();
         var modifiedTasks = new List<AgentTask>();
+        var toDelete = existing
+            .Where(e => !incomingOrders.Contains(e.OrderIndex) || !ReferenceEquals(existingByOrder[e.OrderIndex], e))
+            .ToList();
 
-        foreach (var todo in todos)
+        foreach (var todo in incoming)
         {
             var status = MapStatus(todo.Status);
 
@@ -65,6 +77,11 @@ public class AgentTaskService : ApplicationService, IAgentTaskService
         if (toInsert.Count > 0)
         {
             await _repository.InsertManyAsync(toInsert, cancellationToken);
+        }
+
+        if (toDelete.Count > 0)
+        {
+            await _repository.DeleteManyAsync(toDelete, cancellationToken);
         }
     }
 

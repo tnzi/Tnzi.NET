@@ -81,7 +81,9 @@ const props = withDefaults(
      * rendered as a notice above the pane. `'security'` means the backend
      * revoked the session because the credentials looked stolen - the one
      * message the user has no other way to receive, so it gets the warning
-     * tone rather than the routine "expired" one.
+     * tone rather than the routine "expired" one. `'ipNotAllowed'` means the
+     * refresh was refused by the account's sign-in IP allow-list: signing in
+     * again only works from another network, so it gets the warning tone too.
      */
     sessionEndReason?: SessionEndReason | null;
     /**
@@ -127,17 +129,6 @@ async function focusFirstField(): Promise<void> {
   el?.focus();
 }
 
-// A provider-rendered captcha (Turnstile / hCaptcha / reCAPTCHA / Altcha) for
-// the password pane. Mounts into `captchaContainer` only while the backend has
-// revealed a non-image challenge; the built-in picture is rendered inline below.
-const captchaWidget = useCaptchaWidget({
-  config: () => (captcha.value && !captchaIsImage.value ? features.value.captcha : null),
-  purpose: 'login',
-  client: props.resolveUrl ? { resolveUrl: props.resolveUrl } : undefined,
-  translate: t,
-});
-const captchaContainer = captchaWidget.container;
-
 // The state machine and every submit handler live in `useAuthPage` (unit
 // tested there); this file is markup and copy.
 const {
@@ -153,6 +144,7 @@ const {
   challenge,
   twoFactorMethod,
   otherTwoFactorMethods,
+  onTwoFactorPasskey,
   captcha,
   captchaIsImage,
   reset,
@@ -171,8 +163,25 @@ const {
   loading: () => props.loading,
   onAuthenticated: () => emit('authenticated'),
   focusFirstField,
+  // Resolved at submit time, after `captchaWidget` exists.
   executeCaptcha: () => captchaWidget.execute(),
 });
+
+// A provider-rendered captcha (Turnstile / hCaptcha / reCAPTCHA / Altcha) for
+// the password pane. Mounts into `captchaContainer` only while the backend has
+// revealed a non-image challenge; the built-in picture is rendered inline below.
+//
+// ★ Declared AFTER `useAuthPage`: the widget evaluates `config` synchronously
+// (its watcher is immediate), so reading `captcha` before that destructuring
+// is a temporal-dead-zone ReferenceError and the page never renders. The
+// reverse reference (`executeCaptcha` above) is fine: it only runs on submit.
+const captchaWidget = useCaptchaWidget({
+  config: () => (captcha.value && !captchaIsImage.value ? features.value.captcha : null),
+  purpose: 'login',
+  client: props.resolveUrl ? { resolveUrl: props.resolveUrl } : undefined,
+  translate: t,
+});
+const captchaContainer = captchaWidget.container;
 
 // A rejected submit leaves the challenge on screen; the widget's token was
 // consumed by the attempt, so it has to be solved again.
@@ -214,6 +223,14 @@ const sessionNotice = computed<{ text: string; tone: 'warning' | 'info' } | null
         text: t(
           'auth.notice.sessionEndedForSecurity',
           'Your session was ended for security reasons. Please sign in again.',
+        ),
+      };
+    case 'ipNotAllowed':
+      return {
+        tone: 'warning',
+        text: t(
+          'auth.notice.sessionEndedIpNotAllowed',
+          'Your current network is not on the list of addresses this account may sign in from. Sign in again from an allowed network.',
         ),
       };
     case 'expired':
@@ -391,26 +408,36 @@ const subheadingText = computed(() => props.subheading || '');
           {{
             twoFactorMethod === 'totp'
               ? t('auth.twoFactor.totp', 'Enter the code from your authenticator app.')
-              : challenge?.maskedAddress
-                ? t('auth.twoFactor.sentTo', 'Enter the code we sent to {to}.').replace(
-                    '{to}',
-                    challenge.maskedAddress,
-                  )
-                : t('auth.twoFactor.sent', 'Enter the verification code we sent you.')
+              : twoFactorMethod === 'passkey'
+                ? t('auth.twoFactor.passkey', 'Insert your security key or use your passkey to continue.')
+                : challenge?.maskedAddress
+                  ? t('auth.twoFactor.sentTo', 'Enter the code we sent to {to}.').replace(
+                      '{to}',
+                      challenge.maskedAddress,
+                    )
+                  : t('auth.twoFactor.sent', 'Enter the verification code we sent you.')
           }}
         </p>
-        <TAuthField
-          v-model="code"
-          :placeholder="t('auth.code.placeholder', 'Verification code')"
-          :aria-label="t('auth.code.label', 'Verification code')"
-          autocomplete="one-time-code"
-          inputmode="numeric"
-          :disabled="busy"
-          @submit="onTwoFactorSubmit"
-        />
-        <button type="button" class="t-auth__primary" :disabled="busy" @click="onTwoFactorSubmit">
-          {{ t('auth.verify', 'Verify') }}
-        </button>
+        <!-- A passkey is a ceremony, not a code: one button instead of the field. -->
+        <template v-if="twoFactorMethod === 'passkey'">
+          <button type="button" class="t-auth__primary" :disabled="busy" @click="onTwoFactorPasskey">
+            {{ t('auth.twoFactor.usePasskey', 'Use security key') }}
+          </button>
+        </template>
+        <template v-else>
+          <TAuthField
+            v-model="code"
+            :placeholder="t('auth.code.placeholder', 'Verification code')"
+            :aria-label="t('auth.code.label', 'Verification code')"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            :disabled="busy"
+            @submit="onTwoFactorSubmit"
+          />
+          <button type="button" class="t-auth__primary" :disabled="busy" @click="onTwoFactorSubmit">
+            {{ t('auth.verify', 'Verify') }}
+          </button>
+        </template>
         <div v-if="otherTwoFactorMethods.length" class="t-auth__links">
           <button
             v-for="m in otherTwoFactorMethods"

@@ -1,3 +1,6 @@
+using Role = Tnzi.Identity.Entities.Role;
+using User = Tnzi.Identity.Entities.User;
+
 namespace Tnzi.Authorization.Services;
 
 /// <summary>
@@ -15,22 +18,43 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     private readonly IRepository<ModuleFunction, Guid> _moduleFunctionRepository;
     private readonly IFunctionAuthorizationService _functionAuthorizationService;
     private readonly FunctionAuthCache? _functionAuthCache;
+    private readonly IRepository<RoleFunction, Guid>? _roleFunctionRepository;
+    private readonly IUserRoleService? _userRoleService;
+    private readonly IRepository<Role, Guid>? _roleRepository;
+    private readonly IRepository<User, Guid>? _userRepository;
+    private readonly IUserTenantScopeProvider? _userScope;
 
     /// <summary>
     /// 初始化一个<see cref="UserFunctionService"/>类型的新实例
     /// </summary>
+    /// <remarks>
+    /// 后三个可选依赖只被 <see cref="GetUserPermissionPictureAsync"/> 读：角色基线要角色授权表与
+    /// 「这个人有哪些角色」，角色名要角色表。缺席时全景里的角色部分为空、其余照常 ——
+    /// 与 <c>FunctionAuthorizationService</c> 对 <c>IUserRoleService</c> 的处理同形。
+    /// 最后两个同样只被全景读：目标账号不存在、或不在调用者的租户范围内时答 404。
+    /// </remarks>
     public UserFunctionService(
         IServiceProvider serviceProvider,
         IRepository<UserFunction, Guid> userFunctionRepository,
         IRepository<ModuleFunction, Guid> moduleFunctionRepository,
         IFunctionAuthorizationService functionAuthorizationService,
-        FunctionAuthCache? functionAuthCache = null)
+        FunctionAuthCache? functionAuthCache = null,
+        IRepository<RoleFunction, Guid>? roleFunctionRepository = null,
+        IUserRoleService? userRoleService = null,
+        IRepository<Role, Guid>? roleRepository = null,
+        IRepository<User, Guid>? userRepository = null,
+        IUserTenantScopeProvider? userScope = null)
         : base(serviceProvider)
     {
+        _userRepository = userRepository;
+        _userScope = userScope;
         _userFunctionRepository = Check.NotNull(userFunctionRepository);
         _moduleFunctionRepository = Check.NotNull(moduleFunctionRepository);
         _functionAuthorizationService = Check.NotNull(functionAuthorizationService);
         _functionAuthCache = functionAuthCache;
+        _roleFunctionRepository = roleFunctionRepository;
+        _userRoleService = userRoleService;
+        _roleRepository = roleRepository;
     }
 
     /// <inheritdoc />
@@ -410,6 +434,113 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         return notGrantable != null
             ? Fail(notGrantable, 404, ErrorCodes.RESOURCE_NOT_FOUND)
             : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<UserPermissionPictureDto>> GetUserPermissionPictureAsync(Guid userId, string? scope = null)
+    {
+        // ★ 先问「这个人在不在」：不存在的 id 答 200 空画面，界面会把它画成「一个什么权限都没有的账号」；
+        //   别家租户的 id 答 200 则把那个人的角色 id 与生效集交给了本租户的管理员（用户-角色关联表不按租户过滤）。
+        //   两者一律 404，与用户管理端「越出范围与不存在同一个回答」同口径。
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail<UserPermissionPictureDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var prefix = string.IsNullOrWhiteSpace(scope) ? null : scope.Trim();
+
+        // 目录：切片内、生效的功能，带模块信息。按模块序、功能序，界面直接按这个顺序分组渲染。
+        var catalogueQuery = LiveFunctions();
+        if (prefix != null)
+        {
+            catalogueQuery = catalogueQuery.Where(f => f.Code.StartsWith(prefix));
+        }
+
+        var catalogue = await catalogueQuery
+            .Where(f => f.FunctionModule.IsEnabled && !f.FunctionModule.IsRetired)
+            .OrderBy(f => f.FunctionModule.Order).ThenBy(f => f.Order)
+            .Select(f => new UserPermissionPictureItemDto
+            {
+                Id = f.Id,
+                Code = f.Code,
+                Name = f.Name,
+                ModuleId = f.ModuleId,
+                ModuleCode = f.FunctionModule.Code,
+                ModuleName = f.FunctionModule.Name,
+                Category = f.Category
+            })
+            .ToListAsync();
+
+        var codeById = catalogue.ToDictionary(item => item.Id, item => item.Code);
+        var catalogueIds = codeById.Keys.ToList();
+
+        // 角色基线：这个人有哪些角色，每个角色在切片内给了哪些码。
+        var roles = new List<UserPermissionPictureRoleDto>();
+        if (_userRoleService != null && _roleFunctionRepository != null && catalogueIds.Count > 0)
+        {
+            var roleIds = (await _userRoleService.GetUserRoleIdsAsync(userId)).Distinct().ToList();
+            if (roleIds.Count > 0)
+            {
+                var grants = await _roleFunctionRepository
+                    .Where(rf => roleIds.Contains(rf.RoleId) && rf.IsEnabled && catalogueIds.Contains(rf.FunctionId))
+                    .Select(rf => new { rf.RoleId, rf.FunctionId })
+                    .ToListAsync();
+                var names = _roleRepository != null
+                    ? await _roleRepository.Where(r => roleIds.Contains(r.Id))
+                        .Select(r => new { r.Id, r.Name })
+                        .ToDictionaryAsync(r => r.Id, r => r.Name ?? string.Empty)
+                    : new Dictionary<Guid, string>();
+
+                roles = roleIds.Select(roleId => new UserPermissionPictureRoleDto
+                {
+                    Id = roleId,
+                    Name = names.GetValueOrDefault(roleId, string.Empty),
+                    Granted = grants.Where(g => g.RoleId == roleId).Select(g => codeById[g.FunctionId]).Distinct().Order().ToList()
+                }).ToList();
+            }
+        }
+
+        // 用户级覆盖：只取切片内的行。休眠行（指向退役 / 禁用功能）不在目录里，自然也不在这里。
+        var overrides = catalogueIds.Count == 0
+            ? []
+            : await _userFunctionRepository
+                .Where(uf => uf.UserId == userId && uf.IsEnabled && catalogueIds.Contains(uf.FunctionId))
+                .Select(uf => new { uf.FunctionId, uf.IsGranted })
+                .ToListAsync();
+
+        var roleGranted = roles.SelectMany(r => r.Granted).Distinct().Order().ToList();
+        var allowed = overrides.Where(o => o.IsGranted).Select(o => codeById[o.FunctionId]).Distinct().Order().ToList();
+        var denied = overrides.Where(o => !o.IsGranted).Select(o => codeById[o.FunctionId]).Distinct().Order().ToList();
+
+        // 生效集与运行时检查同源：超管 = 整个目录；其余 = (角色 ∪ 允许) − 拒绝。
+        var isSuperAdmin = await _functionAuthorizationService.IsSuperAdminAsync(userId);
+        var effective = isSuperAdmin
+            ? catalogue.Select(item => item.Code).Distinct().Order().ToList()
+            : roleGranted.Union(allowed).Except(denied).Order().ToList();
+
+        return Ok(new UserPermissionPictureDto
+        {
+            UserId = userId,
+            IsSuperAdmin = isSuperAdmin,
+            Scope = prefix,
+            Roles = roles,
+            Catalogue = catalogue,
+            RoleGranted = roleGranted,
+            Allowed = allowed,
+            Denied = denied,
+            Effective = effective
+        });
+    }
+
+    /// <summary>目标账号存在且在调用者的租户范围内。两个依赖缺席时各自不判（Identity 未接线的宿主与单元测试）。</summary>
+    private async Task<bool> IsVisibleUserAsync(Guid userId)
+    {
+        if (_userScope != null && !await _userScope.ContainsAsync(userId))
+        {
+            return false;
+        }
+
+        return _userRepository == null || await _userRepository.AsQueryable().AnyAsync(u => u.Id == userId);
     }
 
     /// <summary>当前生效的功能（启用且未退役）—— 读路径与写路径共用的那一份判据。</summary>

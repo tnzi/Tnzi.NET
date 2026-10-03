@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Headers;
 using Tnzi.AI.Extensions;
 
 namespace Tnzi.Tests.AI;
@@ -518,6 +519,308 @@ public class OpenAiCompatibleAiUtilityTests
     }
 
     // ------------------------------------------------------------------
+    // 调用方自带提供商（AiUtilityCallOptions.Provider）
+    // ------------------------------------------------------------------
+
+    private const string InlineKey = "sk-inline-secret-0123456789";
+
+    private static AiUtilityInlineProvider Inline(
+        string baseUrl = "https://vendor.example.net/v1",
+        string apiKey = InlineKey,
+        string? defaultModel = "vendor-model",
+        int? timeoutSeconds = null)
+        => new() { BaseUrl = baseUrl, ApiKey = apiKey, DefaultModel = defaultModel, TimeoutSeconds = timeoutSeconds };
+
+    [Fact]
+    public async Task Inline_SendsToSuppliedBaseUrlWithSuppliedKeyAndModel_WithoutAnyConfiguredProvider()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, new AiProviderRegistryOptions());
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline(baseUrl: "https://vendor.example.net/v1/") });
+
+        Assert.Equal("ok", result);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://vendor.example.net/v1/chat/completions", request.Uri.ToString());
+        Assert.Equal("Bearer " + InlineKey, request.Authorization);
+        Assert.Equal("vendor-model", ModelOf(request));
+    }
+
+    [Fact]
+    public async Task Inline_TakesPrecedenceOverConfiguredProvider()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, Registry());
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("vendor.example.net", request.Uri.Host);
+        Assert.Equal("Bearer " + InlineKey, request.Authorization);
+    }
+
+    [Fact]
+    public async Task Inline_CallModelOverridesInlineDefaultModel()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, new AiProviderRegistryOptions());
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Model = "vendor-large", Provider = Inline() });
+
+        Assert.Equal("vendor-large", ModelOf(Assert.Single(handler.Requests)));
+    }
+
+    [Fact]
+    public async Task Inline_IgnoresUtilityModelAndConfiguredAliases()
+    {
+        // AI:Utility:Model 与别名字典是给配置提供商定的名字，发给另一家只会得到 model_not_found。
+        var handler = new RecordingHandler(Completion("ok"));
+        var registry = Registry(p => p.Models = new Dictionary<string, string> { ["fast"] = "configured-fast" });
+        var sut = CreateSut(handler, registry, new AiUtilityOptions { Model = "configured-utility-model" });
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Model = "fast", Provider = Inline() });
+
+        Assert.Equal(["vendor-model", "fast"], handler.Requests.Select(ModelOf));
+    }
+
+    [Fact]
+    public async Task Inline_UtilityDefaultsStillApplyForMaxTokensAndTemperature()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), new AiUtilityOptions { MaxTokens = 321, Temperature = 0.7 });
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        using var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+        Assert.Equal(321, body.RootElement.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(0.7, body.RootElement.GetProperty("temperature").GetDouble());
+    }
+
+    public static TheoryData<string, AiUtilityInlineProvider> InvalidInlineProviders => new()
+    {
+        { "blank BaseUrl", Inline(baseUrl: "") },
+        { "whitespace BaseUrl", Inline(baseUrl: "   ") },
+        { "ftp BaseUrl", Inline(baseUrl: "ftp://vendor.example.net/v1") },
+        { "relative BaseUrl", Inline(baseUrl: "vendor.example.net/v1") },
+        // 把密钥误填进地址栏：日志里不能因为回显地址而出现密钥
+        { "key typed into BaseUrl", Inline(baseUrl: InlineKey) },
+        { "blank ApiKey", Inline(apiKey: "") },
+        { "whitespace ApiKey", Inline(apiKey: "   ") },
+        { "zero timeout", Inline(timeoutSeconds: 0) },
+        { "timeout above 600", Inline(timeoutSeconds: 601) },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidInlineProviders))]
+    public async Task Inline_Invalid_ReturnsNullWithWarning_NoRequest_KeyNotLogged(string _, AiUtilityInlineProvider inline)
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, Registry(), logger: logger);
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = inline });
+
+        Assert.Null(result);
+        Assert.Empty(handler.Requests);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning);
+        logger.AssertNeverContains(InlineKey);
+    }
+
+    [Fact]
+    public async Task Inline_NoModelAnywhere_ReturnsNullWithWarning_NoRequest()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, Registry(), new AiUtilityOptions { Model = "configured-utility-model" }, logger);
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline(defaultModel: null) });
+
+        Assert.Null(result);
+        Assert.Empty(handler.Requests);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task Inline_FailureResponseEchoingTheKey_IsRedactedInLogs()
+    {
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent($"{{\"error\":\"Incorrect API key provided: {InlineKey}\"}}", Encoding.UTF8, "application/json")
+        });
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), logger: logger);
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        Assert.Null(result);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning
+            && e.Message.Contains("inline:vendor.example.net")
+            && e.Message.Contains("***"));
+        logger.AssertNeverContains(InlineKey);
+    }
+
+    [Fact]
+    public async Task Inline_TransportFailure_KeyNotLogged()
+    {
+        var handler = new RecordingHandler(() => throw new HttpRequestException($"connection refused while sending Bearer {InlineKey}"));
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), logger: logger);
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        Assert.Null(result);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Debug && e.Message.Contains("***"));
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("***"));
+        logger.AssertNeverContains(InlineKey);
+    }
+
+    [Fact]
+    public void Inline_ToString_DoesNotExposeTheKey()
+    {
+        var text = Inline().ToString();
+
+        Assert.DoesNotContain(InlineKey, text);
+        Assert.Contains("vendor.example.net", text);
+    }
+
+    [Fact]
+    public async Task Inline_GenerateTitleAsync_KeepsTheSuppliedProvider()
+    {
+        // GenerateTitleAsync 在调用方没给 MaxTokens 时会重建选项；重建时漏掉 Provider 会把请求发去配置提供商。
+        var handler = new RecordingHandler(Completion("A title"));
+        var sut = CreateSut(handler, Registry());
+
+        var title = await sut.GenerateTitleAsync("User: hi", options: new AiUtilityCallOptions { Provider = Inline() });
+
+        Assert.Equal("A title", title);
+        Assert.Equal("vendor.example.net", Assert.Single(handler.Requests).Uri.Host);
+    }
+
+    [Fact]
+    public async Task NoInlineProvider_ConfiguredPathUnchanged()
+    {
+        var handler = new RecordingHandler(Completion("ok"));
+        var sut = CreateSut(handler, Registry());
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Model = "explicit" });
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("https://api.example.com/v1/chat/completions", request.Uri.ToString());
+        Assert.Equal("Bearer sk-test-key", request.Authorization);
+        Assert.Equal("explicit", ModelOf(request));
+    }
+
+    // ------------------------------------------------------------------
+    // 每次尝试的超时由 TimeoutSeconds 决定（不被 HttpClient 默认的 100 秒截断）
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task Inline_TimeoutAbove100Seconds_IsNotCutAt100()
+    {
+        var time = new ManualTimeProvider();
+        var handler = new BlockingHandler();
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), timeProvider: time);
+        using var caller = new CancellationTokenSource();
+
+        var call = sut.ExecuteAsync("system", "user",
+            new AiUtilityCallOptions { Provider = Inline(timeoutSeconds: 150) }, caller.Token);
+        var attemptToken = await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        time.Advance(TimeSpan.FromSeconds(101));
+        Assert.False(attemptToken.IsCancellationRequested, "a 150 s timeout must still be running at 101 s");
+
+        time.Advance(TimeSpan.FromSeconds(50));
+        Assert.True(attemptToken.IsCancellationRequested, "the attempt must be cancelled once 150 s have passed");
+
+        caller.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call);
+    }
+
+    /// <summary>
+    /// 退避等待与 Retry-After 的日期换算都走注入的时钟：Retry-After 给的是「注入时钟的现在 + 8 秒」，
+    /// 等待必须恰好是 8 秒、且只在时钟推进过去之后才发第二次请求。
+    /// </summary>
+    [Fact]
+    public async Task RetryAfterDate_IsMeasuredAndWaitedOnTheInjectedClock()
+    {
+        var time = new ManualTimeProvider();
+        var retryAt = time.GetUtcNow() + TimeSpan.FromSeconds(8);
+        var handler = new RecordingHandler(
+            () =>
+            {
+                var busy = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                busy.Headers.RetryAfter = new RetryConditionHeaderValue(retryAt);
+                return busy;
+            },
+            () => Completion("after wait"));
+        var sut = CreateSut(handler, Registry(), timeProvider: time);
+
+        var call = sut.ExecuteAsync("system", "user");
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!RequestedEightSecondTimer(time) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+        Assert.True(RequestedEightSecondTimer(time), "the retry wait must be an 8 s timer on the injected clock");
+        Assert.Single(handler.Requests);
+
+        time.Advance(TimeSpan.FromSeconds(8));
+
+        Assert.Equal("after wait", await call.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal(2, handler.Requests.Count);
+
+        static bool RequestedEightSecondTimer(ManualTimeProvider clock)
+        {
+            lock (clock.RequestedDueTimes)
+            {
+                return clock.RequestedDueTimes.Contains(TimeSpan.FromSeconds(8));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task NoTimeoutSeconds_AttemptStillTimesOutAt100Seconds()
+    {
+        // 未设置 TimeoutSeconds 的部署此前实际生效的是 HttpClient 默认的 100 秒；客户端超时关掉后必须原样保留。
+        var time = new ManualTimeProvider();
+        var handler = new BlockingHandler();
+        var sut = CreateSut(handler, Registry(), timeProvider: time);
+        using var caller = new CancellationTokenSource();
+
+        var call = sut.ExecuteAsync("system", "user", cancellationToken: caller.Token);
+        var attemptToken = await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        time.Advance(TimeSpan.FromSeconds(99));
+        Assert.False(attemptToken.IsCancellationRequested);
+
+        time.Advance(TimeSpan.FromSeconds(2));
+        Assert.True(attemptToken.IsCancellationRequested);
+
+        caller.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => call);
+    }
+
+    [Fact]
+    public async Task Inline_UnexpectedExceptionEchoingTheKey_IsRedactedInLogs()
+    {
+        // 走 ExecuteAsync 的兜底 catch（非 HttpRequestException，不重试）：异常全文进日志前必须抹掉密钥。
+        var handler = new RecordingHandler(() => throw new InvalidOperationException($"proxy rejected Authorization: Bearer {InlineKey}"));
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), logger: logger);
+
+        var result = await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        Assert.Null(result);
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Warning
+            && e.Message.Contains(nameof(InvalidOperationException))
+            && e.Message.Contains("***"));
+        logger.AssertNeverContains(InlineKey);
+    }
+
+    // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
 
@@ -541,9 +844,11 @@ public class OpenAiCompatibleAiUtilityTests
     }
 
     private static OpenAiCompatibleAiUtility CreateSut(
-        RecordingHandler handler,
+        HttpMessageHandler handler,
         AiProviderRegistryOptions registry,
-        AiUtilityOptions? utility = null)
+        AiUtilityOptions? utility = null,
+        CapturingLogger? logger = null,
+        TimeProvider? timeProvider = null)
     {
         var services = new ServiceCollection();
         services.AddHttpClient(AiUtilityHttpClientNames.For(ProviderName))
@@ -552,13 +857,17 @@ public class OpenAiCompatibleAiUtilityTests
             .ConfigurePrimaryHttpMessageHandler(() => handler);
         services.AddHttpClient(AiUtilityHttpClientNames.Fallback)
             .ConfigurePrimaryHttpMessageHandler(() => handler);
+        services.AddHttpClient(AiUtilityHttpClientNames.Inline)
+            .ConfigurePrimaryHttpMessageHandler(() => handler);
 
         var provider = services.BuildServiceProvider();
 
         return new OpenAiCompatibleAiUtility(
             provider.GetRequiredService<IHttpClientFactory>(),
             new StaticOptionsMonitor<AiProviderRegistryOptions>(registry),
-            new StaticOptionsMonitor<AiUtilityOptions>(utility ?? new AiUtilityOptions()));
+            new StaticOptionsMonitor<AiUtilityOptions>(utility ?? new AiUtilityOptions()),
+            logger,
+            timeProvider);
     }
 
     private static string ModelOf(CapturedRequest request)
@@ -648,5 +957,127 @@ public class OpenAiCompatibleAiUtilityTests
         public T Get(string? name) => CurrentValue;
 
         public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
+
+    /// <summary>请求进来后一直挂着，直到本次尝试的令牌被取消；把那个令牌交给测试观察。</summary>
+    private sealed class BlockingHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource<CancellationToken> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult(cancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
+    }
+
+    /// <summary>手动推进的时钟：计时器只在 <see cref="Advance"/> 越过到期时刻时同步触发。</summary>
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private static readonly DateTimeOffset Epoch = new(2001, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        private readonly List<ManualTimer> _timers = [];
+        private TimeSpan _now;
+
+        /// <summary>每次创建计时器时请求的到期时长（按创建顺序）。</summary>
+        public List<TimeSpan> RequestedDueTimes { get; } = [];
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_timers)
+            {
+                return Epoch + _now;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            lock (RequestedDueTimes)
+            {
+                RequestedDueTimes.Add(dueTime);
+            }
+
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            lock (_timers)
+            {
+                _timers.Add(timer);
+            }
+            return timer;
+        }
+
+        public void Advance(TimeSpan delta)
+        {
+            List<ManualTimer> due;
+            lock (_timers)
+            {
+                _now += delta;
+                due = _timers.Where(t => t.DueAt is { } at && at <= _now).ToList();
+                foreach (var timer in due)
+                {
+                    timer.DueAt = null;
+                }
+            }
+
+            foreach (var timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class ManualTimer(ManualTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            public TimeSpan? DueAt { get; set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (owner._timers)
+                {
+                    DueAt = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
+                }
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose()
+            {
+                lock (owner._timers)
+                {
+                    DueAt = null;
+                    owner._timers.Remove(this);
+                }
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, string Message, string? Exception);
+
+    /// <summary>记下每一条日志的渲染文本与异常全文 —— 断言密钥不在任何一处。</summary>
+    private sealed class CapturingLogger : ILogger<OpenAiCompatibleAiUtility>
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add(new LogEntry(logLevel, formatter(state, exception), exception?.ToString()));
+
+        public void AssertNeverContains(string secret)
+        {
+            foreach (var entry in Entries)
+            {
+                Assert.DoesNotContain(secret, entry.Message);
+                Assert.DoesNotContain(secret, entry.Exception ?? string.Empty);
+            }
+        }
     }
 }

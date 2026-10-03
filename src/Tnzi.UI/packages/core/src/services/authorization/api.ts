@@ -38,6 +38,7 @@ import type {
   RolePermissionExportDto,
   PermissionImportResultDto,
   SetUserFunctionsInScopeRequest,
+  UserPermissionPictureDto,
   AccessProfileDto,
   DualControlRequestDto,
   DualControlQueryDto,
@@ -301,6 +302,17 @@ export function useAdminUserFunctionApi(client: HttpClient) {
         scopeFunctionIds,
         functionIds,
       } satisfies SetUserFunctionsInScopeRequest),
+
+    /**
+     * The user's permission picture in one call: catalogue, per-role baseline,
+     * direct allow / deny overrides and the resolved effective set. Pass a code
+     * prefix as `scope` (e.g. `catalog.`) to look at one slice of the catalogue,
+     * mirroring the bounded writes above.
+     */
+    getPermissionPicture: (userId: string, scope?: string) =>
+      client.get<UserPermissionPictureDto>(`${USER_FUNCTIONS_BASE}/user/${userId}/picture`, {
+        params: scope ? { scope } : undefined,
+      }),
   }
 }
 

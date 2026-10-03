@@ -56,6 +56,21 @@ public interface IPasskeyService
     Task<Result<PasskeyOptionsDto>> BeginAssertionAsync(PasskeyAssertionBeginDto input);
 
     /// <summary>
+    /// 为一个<strong>服务端已经认定</strong>的用户生成断言选项（两步验证的第二步、二次确认）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="BeginAssertionAsync"/> 的差别只在「谁」从哪来：那一个是匿名端点，用户名由调用方声称；
+    /// 这一个由持有临时令牌 / 会话的服务端流程指定，选项里的 <c>allowCredentials</c> 就是这个账号登记过的凭据。
+    /// </para>
+    /// <para>
+    /// ★ 这一点对硬件安全密钥是必需的：YubiKey 按默认的 <c>residentKey: discouraged</c> 登记出来的是
+    /// <strong>不可发现</strong>凭据，空的 <c>allowCredentials</c>（可发现凭据流程）根本找不到它。
+    /// </para>
+    /// </remarks>
+    Task<Result<PasskeyOptionsDto>> BeginAssertionForUserAsync(Guid userId);
+
+    /// <summary>
     /// 校验断言并签发令牌。匿名可访问。
     /// </summary>
     /// <remarks>

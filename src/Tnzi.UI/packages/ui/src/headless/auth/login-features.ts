@@ -5,7 +5,7 @@
  * testable and the "is this module reachable" rule is shared between the route
  * guard (`activeModule`) and the in-form entry buttons (`PwdLogin`).
  */
-import type { AuthConfigDto } from '@tnzi/core/services/identity'
+import { resolveOtpCodeLength, type AuthConfigDto } from '@tnzi/core/services/identity'
 import {
   type LoginCallbacks,
   type LoginFeatures,
@@ -31,6 +31,8 @@ export function mapAuthConfig(c: AuthConfigDto): LoginFeatures {
     captchaOnPasswordRecovery: c.enableCaptchaOnPasswordRecovery ?? false,
     // Older backends ship no `captcha` block: null = "render the built-in image captcha".
     captcha: c.captcha ?? null,
+    // Older backends omit it: 6, the length they generate.
+    otpCodeLength: resolveOtpCodeLength(c),
   }
 }
 
@@ -51,6 +53,7 @@ export function mergeFeatures(base: LoginFeatures, override?: PartialLoginFeatur
     captchaOnRegister: override?.captchaOnRegister ?? base.captchaOnRegister,
     captchaOnPasswordRecovery: override?.captchaOnPasswordRecovery ?? base.captchaOnPasswordRecovery,
     captcha: override?.captcha !== undefined ? override.captcha : base.captcha,
+    otpCodeLength: override?.otpCodeLength ?? base.otpCodeLength,
   }
 }
 

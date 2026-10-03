@@ -8,6 +8,9 @@ import { defineChatApp } from '../../src/plugin/defineChatApp';
 // headless layer), so stub the component; it plays no part in what is tested.
 vi.mock('../../src/auth/TAuthRoute.vue', () => ({ default: {} }));
 
+const installAppUpdate = vi.fn();
+vi.mock('@tnzi/core/app-update', () => ({ installAppUpdate: (o: unknown) => installAppUpdate(o) }));
+
 /**
  * Session expiry in a chat app.
  *
@@ -90,5 +93,23 @@ describe('defineChatApp session expiry', () => {
 
     defineChatApp({ runtime, home, theme: false, guard: false }).install(app, router);
     expect(http.addUnauthorizedListener).not.toHaveBeenCalled();
+  });
+});
+
+describe('defineChatApp app update', () => {
+  it('is on by default and receives the router, even with the guard off', () => {
+    installAppUpdate.mockClear();
+    const { runtime } = makeRuntime();
+    const { router } = makeRouter({ name: 'home', fullPath: '/' });
+    defineChatApp({ runtime, home, theme: false, guard: false, appUpdate: { checkInterval: 0 } }).install(app, router);
+    expect(installAppUpdate).toHaveBeenCalledWith({ checkInterval: 0, router });
+  });
+
+  it('can be switched off', () => {
+    installAppUpdate.mockClear();
+    const { runtime } = makeRuntime();
+    const { router } = makeRouter({ name: 'home', fullPath: '/' });
+    defineChatApp({ runtime, home, theme: false, appUpdate: false }).install(app, router);
+    expect(installAppUpdate).not.toHaveBeenCalled();
   });
 });

@@ -60,7 +60,8 @@ describe('useSettingsRealtime', () => {
     // The point of the getter form: a URL discovered later (backend shell
     // signal) still reaches the client. Evaluating at setup would freeze the
     // placeholder that was known then.
-    let discovered: string | undefined
+    // Deliberately assigned only AFTER setup: that is what the test checks.
+    let discovered: string | undefined = undefined
     const rt = useSettingsRealtime({
       hubUrl: () => discovered,
       getToken: () => '',

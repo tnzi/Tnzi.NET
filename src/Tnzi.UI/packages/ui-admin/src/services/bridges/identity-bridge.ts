@@ -16,6 +16,7 @@ import {
   useAdminLoginLogApi,
   useAdminOrganizationApi,
   useAdminSessionApi,
+  useAdminUserSecurityApi,
   useProfileApi,
   useAuthApi,
   oauthLoginUrl,
@@ -57,6 +58,8 @@ import {
   type CreateUserDetailDto,
   type ChangePasswordDto,
   type TwoFactorStatusDto,
+  type UserSignInPolicyDto,
+  type SetIpAllowListDto,
   type UserLoginDto,
   type OAuthLinkTokenDto,
   type DeactivateAccountDto,
@@ -95,6 +98,7 @@ export interface IdentityBridgeDeps {
   loginLogApi?: ReturnType<typeof useAdminLoginLogApi>
   organizationApi?: ReturnType<typeof useAdminOrganizationApi>
   sessionApi?: ReturnType<typeof useAdminSessionApi>
+  userSecurityApi?: ReturnType<typeof useAdminUserSecurityApi>
   profileApi?: ReturnType<typeof useProfileApi>
   authApi?: ReturnType<typeof useAuthApi>
   invitationApi?: ReturnType<typeof useAdminInvitationApi>
@@ -278,6 +282,29 @@ export interface IdentityBridge {
     /** Sweep sessions inactive for N minutes (defaults to backend policy). */
     cleanExpired(inactiveMinutes?: number): Promise<number>
   }
+  /**
+   * Sign-in security of ANOTHER account (`/admin/user-security`): its two-factor
+   * methods and its sign-in IP allow-list. Reads ride `user.view`, writes ride
+   * `user.security`. Management can drop, restore, reset and re-prioritise a
+   * second factor and enable the code-based methods on a verified address; it can
+   * never enrol an authenticator app for someone else, that stays self-service.
+   */
+  userSecurity: {
+    getTwoFactorStatus(userId: string): Promise<TwoFactorStatusDto>
+    /** Master switch off; every configured method is kept for `resumeTwoFactor`. */
+    suspendTwoFactor(userId: string): Promise<void>
+    resumeTwoFactor(userId: string): Promise<void>
+    /** SMS / email only; the backend refuses `Totp` here. */
+    enableTwoFactorMethod(userId: string, type: TwoFactorType): Promise<void>
+    disableTwoFactorMethod(userId: string, type: TwoFactorType): Promise<void>
+    setPreferredTwoFactor(userId: string, type: TwoFactorType): Promise<void>
+    /** Destructive: clears every method and the authenticator key. */
+    resetTwoFactor(userId: string): Promise<void>
+    /** No policy row reads as an all-off DTO, not as a failure. */
+    getSignInPolicy(userId: string): Promise<UserSignInPolicyDto>
+    /** Rewrite the allow-list; returns the stored policy. */
+    setIpAllowList(userId: string, data: SetIpAllowListDto): Promise<UserSignInPolicyDto>
+  }
   loginLogs: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>>
   }
@@ -437,6 +464,8 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     deps.organizationApi ?? (deps.client ? useAdminOrganizationApi(deps.client) : null)
   const sessionApi =
     deps.sessionApi ?? (deps.client ? useAdminSessionApi(deps.client) : null)
+  const userSecurityApi =
+    deps.userSecurityApi ?? (deps.client ? useAdminUserSecurityApi(deps.client) : null)
   // Self-service profile API for the personal-center page. Optional like
   // organizationApi/sessionApi - if neither a client nor a mock is wired,
   // the `me.*` methods fall back to rejecting promises with a helpful error.
@@ -462,8 +491,11 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   // replay-once loop when a verifier is wired. `withStepUp` recognises the
   // thrown `HttpError` `ensureOk` produces (it checks `errorCode`, not the
   // status, so an expired session is never mistaken for a challenge). The set
-  // of guarded methods mirrors `DefaultUserProfileController`'s attributes and
-  // is pinned by `__tests__/services/bridges/identity-bridge-step-up.test.ts`.
+  // of guarded methods mirrors `DefaultUserProfileController`'s attributes plus
+  // the one service-layer challenge (passkey `register/begin` for a signed-in
+  // user - the route is anonymous for enrollment tokens, so the check cannot be
+  // an attribute) and is pinned by
+  // `__tests__/services/bridges/identity-bridge-step-up.test.ts`.
   const stepUpGuarded = <T>(run: () => Promise<T>): Promise<T> =>
     deps.stepUp ? withStepUp(run, deps.stepUp) : run()
 
@@ -703,6 +735,48 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         cleanExpired: () => missing('sessions.cleanExpired'),
       }
 
+  const userSecurity: IdentityBridge['userSecurity'] = userSecurityApi
+    ? {
+        // Reads that a panel renders from: a refused envelope (503 with two-factor
+        // switched off, 403) must reject so the caller shows why, not resolve to
+        // `null` and fail later on `status.methods`.
+        getTwoFactorStatus: async (userId) =>
+          unwrapOk(await userSecurityApi.getTwoFactorStatus(userId)) as TwoFactorStatusDto,
+        suspendTwoFactor: async (userId) => {
+          ensureOk(await userSecurityApi.suspendTwoFactor(userId))
+        },
+        resumeTwoFactor: async (userId) => {
+          ensureOk(await userSecurityApi.resumeTwoFactor(userId))
+        },
+        enableTwoFactorMethod: async (userId, type) => {
+          ensureOk(await userSecurityApi.enableTwoFactorMethod(userId, { type }))
+        },
+        disableTwoFactorMethod: async (userId, type) => {
+          ensureOk(await userSecurityApi.disableTwoFactorMethod(userId, { type }))
+        },
+        setPreferredTwoFactor: async (userId, type) => {
+          ensureOk(await userSecurityApi.setPreferredTwoFactor(userId, { type }))
+        },
+        resetTwoFactor: async (userId) => {
+          ensureOk(await userSecurityApi.resetTwoFactor(userId))
+        },
+        getSignInPolicy: async (userId) =>
+          unwrapOk(await userSecurityApi.getSignInPolicy(userId)) as UserSignInPolicyDto,
+        setIpAllowList: async (userId, data) =>
+          unwrapOk(await userSecurityApi.setIpAllowList(userId, data)) as UserSignInPolicyDto,
+      }
+    : {
+        getTwoFactorStatus: () => missing('userSecurity.getTwoFactorStatus'),
+        suspendTwoFactor: () => missing('userSecurity.suspendTwoFactor'),
+        resumeTwoFactor: () => missing('userSecurity.resumeTwoFactor'),
+        enableTwoFactorMethod: () => missing('userSecurity.enableTwoFactorMethod'),
+        disableTwoFactorMethod: () => missing('userSecurity.disableTwoFactorMethod'),
+        setPreferredTwoFactor: () => missing('userSecurity.setPreferredTwoFactor'),
+        resetTwoFactor: () => missing('userSecurity.resetTwoFactor'),
+        getSignInPolicy: () => missing('userSecurity.getSignInPolicy'),
+        setIpAllowList: () => missing('userSecurity.setIpAllowList'),
+      }
+
   const me: IdentityBridge['me'] = profileApi
     ? {
         getProfile: async () => unwrap(await profileApi.get()) as UserDto,
@@ -720,8 +794,9 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         revokeAllSessions: async (includeCurrent?: boolean) => {
           ensureOk(await profileApi.revokeAllSessions(includeCurrent ?? false))
         },
+        // See `userSecurity.getTwoFactorStatus`: a refusal must reject, not resolve to `null`.
         getTwoFactorStatus: async () =>
-          unwrap(await profileApi.getTwoFactorStatus()) as TwoFactorStatusDto,
+          unwrapOk(await profileApi.getTwoFactorStatus()) as TwoFactorStatusDto,
         getLinkedAccounts: async () =>
           unwrap(await profileApi.getLinkedAccounts()) as UserLoginDto[],
         // Adds a permanent login method (the linked identity survives a
@@ -813,14 +888,24 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         // navigator.credentials -> serialise ceremony, so no consuming app has
         // to re-implement the same base64url plumbing. It needs the client
         // itself (not an api object) because it drives both request legs.
+        // Guarded: adding a login method to your own account is challenged on
+        // the `begin` leg (same scope as linking an OAuth account). The whole
+        // ceremony replays after verification, so the system dialog is only
+        // shown once the server has agreed to issue a challenge.
         registerPasskey: async (deviceName) =>
-          deps.client
-            ? runPasskeyRegistration(deps.client, { deviceName })
-            : missing<PasskeyCredentialDto | null>('me.registerPasskey'),
-        removePasskey: async (credentialId) => {
-          if (!authApi) return missing<void>('me.removePasskey')
-          ensureOk(await authApi.deletePasskeyCredential(credentialId))
-        },
+          stepUpGuarded(() =>
+            deps.client
+              ? runPasskeyRegistration(deps.client, { deviceName })
+              : missing<PasskeyCredentialDto | null>('me.registerPasskey'),
+          ),
+        // Guarded: removing the last key that backs passkey two-factor turns that
+        // method off, so the backend challenges it with the two-factor scope
+        // (any other key is removed without a challenge).
+        removePasskey: async (credentialId) =>
+          stepUpGuarded(async () => {
+            if (!authApi) return missing<void>('me.removePasskey')
+            ensureOk(await authApi.deletePasskeyCredential(credentialId))
+          }),
       }
     : {
         getProfile: () => missing('me.getProfile'),
@@ -879,6 +964,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     tenants,
     organizations,
     sessions,
+    userSecurity,
     loginLogs,
     me,
     getAuthConfig,

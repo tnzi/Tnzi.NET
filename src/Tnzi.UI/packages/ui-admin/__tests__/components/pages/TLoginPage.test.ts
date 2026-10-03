@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 
@@ -38,6 +38,8 @@ vi.mock('@tnzi/ui', () => ({
   }),
   TLangSwitch: defineComponent({
     name: 'TLangSwitch',
+    props: ['value', 'options', 'translate'],
+    emits: ['update:value', 'change'],
     render: () => h('span', { 'data-testid': 'lang-switch', class: 'stub-lang-switch' }),
   }),
   // The login stack moved from `../../headless/*` into `@tnzi/ui` on
@@ -63,6 +65,10 @@ import TLoginPage from '../../../src/components/pages/TLoginPage.vue'
 import { TNZI_ADMIN_CLIENT_KEY } from '../../../src/plugin/client'
 import { provideLoginContext } from '@tnzi/ui'
 import type { Component } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { nextTick } from 'vue'
+import { useAdminAppStore } from '../../../src/stores/useAdminAppStore'
+import { registerAdminLocales, resetAdminLocalesForTest } from '../../../src/i18n/locale-registry'
 
 /** Minimal valid props for TLoginPage - all modules required. */
 function makeModuleComponents(): Record<string, Component> {
@@ -191,6 +197,29 @@ describe('TLoginPage toolbar visibility', () => {
       expect(notice.classes()).not.toContain('t-login__notice--warning')
     })
 
+    it.each(['wave', 'split'] as const)(
+      '%s: ★ "ipNotAllowed" tells the user to sign in from an allowed network',
+      (layout) => {
+        const wrapper = mount(TLoginPage, {
+          props: { moduleComponents: makeModuleComponents(), layout, sessionEndReason: 'ipNotAllowed' },
+        })
+        const notice = wrapper.find('[data-test="t-login-page-notice"]')
+        expect(notice.exists()).toBe(true)
+        expect(notice.attributes('role')).toBe('status')
+        expect(notice.text()).toMatch(/allowed network/i)
+        expect(notice.classes()).toContain('t-login__notice--warning')
+      },
+    )
+
+    it('"ipNotAllowed" copy goes through its own translate key', () => {
+      const translate = (key: string, fallback?: string) =>
+        key === 'admin.login.sessionEndedIpNotAllowed' ? 'LOCALISED-IP' : (fallback ?? key)
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), sessionEndReason: 'ipNotAllowed', translate },
+      })
+      expect(wrapper.find('[data-test="t-login-page-notice"]').text()).toBe('LOCALISED-IP')
+    })
+
     it('copy goes through translate() so the consumer can localise it', () => {
       const translate = (key: string, fallback?: string) =>
         key === 'admin.login.sessionEndedForSecurity' ? 'LOCALISED' : (fallback ?? key)
@@ -238,5 +267,66 @@ describe('TLoginPage toolbar visibility', () => {
       mount(TLoginPage, { props: { moduleComponents: makeModuleComponents() } })
       expect(providedContext().resolveUrl).toBeUndefined()
     })
+  })
+})
+
+// The switcher is presentational (it only emits), so the page has to bind it to
+// the same locale source the header switcher uses after sign-in. Without that
+// binding it opened, listed its own defaults and changed nothing.
+describe('TLoginPage language switch wiring', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    resetAdminLocalesForTest()
+    registerAdminLocales([
+      { code: 'zh-cn', label: '简体中文' },
+      { code: 'en', label: 'English' },
+    ])
+  })
+  afterEach(() => resetAdminLocalesForTest())
+
+  for (const layout of ['wave', 'split'] as const) {
+    it(`${layout}: shows the admin locale and lists the registered localeOptions`, () => {
+      useAdminAppStore().setLocale('zh-cn')
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), layout, showLangSwitch: true },
+      })
+      const sw = wrapper.findComponent({ name: 'TLangSwitch' })
+      expect(sw.props('value')).toBe('zh-cn')
+      expect(sw.props('options')).toEqual([
+        { label: '简体中文', value: 'zh-cn' },
+        { label: 'English', value: 'en' },
+      ])
+    })
+
+    it(`${layout}: choosing a language switches the admin app store locale`, async () => {
+      const store = useAdminAppStore()
+      store.setLocale('zh-cn')
+      const wrapper = mount(TLoginPage, {
+        props: { moduleComponents: makeModuleComponents(), layout, showLangSwitch: true },
+      })
+      const sw = wrapper.findComponent({ name: 'TLangSwitch' })
+      sw.vm.$emit('update:value', 'en')
+      await nextTick()
+      expect(store.locale).toBe('en')
+      expect(wrapper.findComponent({ name: 'TLangSwitch' }).props('value')).toBe('en')
+    })
+  }
+
+  it('ignores a code the application does not offer', () => {
+    const store = useAdminAppStore()
+    store.setLocale('zh-cn')
+    const wrapper = mount(TLoginPage, {
+      props: { moduleComponents: makeModuleComponents(), showLangSwitch: true },
+    })
+    wrapper.findComponent({ name: 'TLangSwitch' }).vm.$emit('update:value', 'fr')
+    expect(store.locale).toBe('zh-cn')
+  })
+
+  it('stays hidden for a single-locale app even when showLangSwitch is on', () => {
+    registerAdminLocales([{ code: 'en', label: 'English' }])
+    const wrapper = mount(TLoginPage, {
+      props: { moduleComponents: makeModuleComponents(), showLangSwitch: true },
+    })
+    expect(wrapper.find('[data-testid="lang-switch"]').exists()).toBe(false)
   })
 })

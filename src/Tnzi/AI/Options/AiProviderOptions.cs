@@ -45,7 +45,7 @@ public class AiProviderOptions
     public string? DefaultModel { get; set; }
 
     /// <summary>
-    /// 请求超时时间（秒）。未设置时使用 HttpClient 默认值。
+    /// 每次尝试的请求超时（秒）。未设置时 100 秒。
     /// </summary>
     public int? TimeoutSeconds { get; set; }
 

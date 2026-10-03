@@ -56,4 +56,16 @@ public class AiUtilityCallOptions
     /// 覆盖温度参数
     /// </summary>
     public double? Temperature { get; init; }
+
+    /// <summary>
+    /// 本次调用自带的提供商。设置后<b>完全绕过</b> <c>AI:Providers</c>（不要求有任何已启用的配置提供商），
+    /// 未设置时行为与此前逐字相同。
+    /// </summary>
+    /// <remarks>
+    /// 模型按 <see cref="Model"/> → <see cref="AiUtilityInlineProvider.DefaultModel"/> 解析；
+    /// <see cref="MaxTokens"/> / <see cref="Temperature"/> 未设置时仍回退 <c>AI:Utility</c> 的默认值。
+    /// 提供商不合法时本次调用记 Warning 并返回 <see langword="null"/>，与配置提供商的失败形态相同。
+    /// <see cref="Services.IAiUtility.IsAvailable"/> 只描述配置提供商，自带提供商的调用方无需问它。
+    /// </remarks>
+    public AiUtilityInlineProvider? Provider { get; init; }
 }

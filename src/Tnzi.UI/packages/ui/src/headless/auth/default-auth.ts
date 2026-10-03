@@ -11,10 +11,16 @@
  * callback when it genuinely diverges from the standard flow.
  */
 
-import { TwoFactorType } from '@tnzi/core/services/identity'
+import { TwoFactorType, runTwoFactorPasskeyCeremony } from '@tnzi/core/services/identity'
 import type { PendingActionResultDto } from '@tnzi/core/services/identity'
 import type { TnziClient } from '@tnzi/core/state'
-import type { LoginCallbackHelpers, LoginCallbacks, LoginCaptchaData, PendingActionOutcome } from './useLoginContext'
+import type {
+  LoginCallbackHelpers,
+  LoginCallbacks,
+  LoginCaptchaData,
+  PendingActionOutcome,
+  TwoFactorMethodName,
+} from './useLoginContext'
 
 /**
  * The wired core runtime the framework drives the default auth flow from. This
@@ -77,23 +83,30 @@ export function readCaptchaChallenge(details: unknown): LoginCaptchaData | null 
   return null
 }
 
-function twoFactorMethod(v: unknown): 'totp' | 'sms' | 'email' {
+function twoFactorMethod(v: unknown): TwoFactorMethodName {
   if (v === TwoFactorType.Email) return 'email'
   if (v === TwoFactorType.Sms) return 'sms'
+  if (v === TwoFactorType.Passkey) return 'passkey'
   return 'totp'
 }
 /** Normalise a wire `TwoFactorType` value, defaulting to TOTP. */
 function twoFactorType(v: unknown): TwoFactorType {
   if (v === TwoFactorType.Email) return TwoFactorType.Email
   if (v === TwoFactorType.Sms) return TwoFactorType.Sms
+  if (v === TwoFactorType.Passkey) return TwoFactorType.Passkey
   return TwoFactorType.Totp
 }
 /** Map a challenge `method` string → the wire enum (null when absent). */
-function typeFromMethod(m?: 'totp' | 'sms' | 'email'): TwoFactorType | null {
+function typeFromMethod(m?: TwoFactorMethodName): TwoFactorType | null {
   if (m === 'email') return TwoFactorType.Email
   if (m === 'sms') return TwoFactorType.Sms
   if (m === 'totp') return TwoFactorType.Totp
+  if (m === 'passkey') return TwoFactorType.Passkey
   return null
+}
+/** Code methods deliver something; TOTP and passkey have nothing to send. */
+function isCodeDelivered(t: TwoFactorType): boolean {
+  return t === TwoFactorType.Sms || t === TwoFactorType.Email
 }
 
 export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCallbacks {
@@ -148,12 +161,26 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     pendingTwoFactor = { tempToken, type: first, userName: account }
     // All enabled methods → the challenge module renders a switcher when >1.
     const methods = [...new Set(types.map(twoFactorMethod))]
-    // SMS / email require a code to be delivered; TOTP is read from the app.
-    // Capture the masked destination so the challenge prompt can show it.
+    // SMS / email require a code to be delivered; TOTP is read from the app and
+    // a passkey is a ceremony. Capture the masked destination so the challenge
+    // prompt can show it.
     let maskedAddress: string | undefined
-    if (first !== TwoFactorType.Totp) {
-      const sent = await authApi.sendTwoFactorCode({ tempToken, type: first }).catch(() => undefined)
-      maskedAddress = sent?.data?.maskedAddress ?? undefined
+    let codeSendError: string | undefined
+    if (isCodeDelivered(first)) {
+      // A failed delivery must reach the challenge: the password was right and
+      // the challenge is real, but telling the user "a code has been sent" when
+      // none was leaves them waiting for a message that never comes. The
+      // challenge still opens (another method or a resend can complete it).
+      try {
+        const sent = await authApi.sendTwoFactorCode({ tempToken, type: first })
+        if (sent.succeeded) {
+          maskedAddress = sent.data?.maskedAddress ?? undefined
+        } else {
+          codeSendError = sent.message || 'Failed to send the verification code'
+        }
+      } catch (err) {
+        codeSendError = err instanceof Error && err.message ? err.message : 'Failed to send the verification code'
+      }
     }
     helpers.setTwoFactorRequired({
       challengeId: tempToken,
@@ -161,6 +188,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       method: twoFactorMethod(first),
       methods,
       maskedAddress,
+      ...(codeSendError ? { codeSendError } : {}),
     })
     return true
   }
@@ -264,8 +292,17 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
         // No usable challenge (older backend) → surface the message.
         throw new Error(res.message ?? 'Captcha verification is required')
       }
-      if (await offerTwoFactorChallenge(res, userName, helpers)) return
-      if (offerPendingActionChallenge(res, userName, helpers)) return
+      // A second-factor or pending-action challenge means the password (and any
+      // captcha sent with it) was accepted: the captcha is spent and must not
+      // stay on screen, where the form would read it as rejected.
+      if (await offerTwoFactorChallenge(res, userName, helpers)) {
+        helpers.clearCaptcha()
+        return
+      }
+      if (offerPendingActionChallenge(res, userName, helpers)) {
+        helpers.clearCaptcha()
+        return
+      }
       if (!res.succeeded || !res.data?.accessToken) {
         throw new Error(res.message ?? 'Login failed')
       }
@@ -379,6 +416,33 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
       pendingTwoFactor = null
       await establishSession(res.data)
     },
+    // The passkey leg of the same challenge: the ceremony runs against the
+    // account the temp token names, then the session is established exactly
+    // as after a code. A dismissed system dialog resolves false and leaves the
+    // challenge open.
+    verifyTwoFactorWithPasskey: async ({ challengeId }, helpers) => {
+      const tempToken = challengeId ?? pendingTwoFactor?.tempToken ?? ''
+      const data = await runTwoFactorPasskeyCeremony(authApi, tempToken).catch((err: unknown) => {
+        // The complete leg can answer with an obligation challenge instead of
+        // tokens; the helper throws it as an HttpError. Everything else is a
+        // real failure.
+        // (`HttpError` carries the envelope as `errorCode` + `details`.)
+        const e = (err ?? {}) as { errorCode?: string | null; details?: unknown }
+        const envelope = { succeeded: false, errorCode: e.errorCode, errorDetails: e.details }
+        if (helpers && offerPendingActionChallenge(envelope, pendingTwoFactor?.userName ?? '', helpers)) {
+          return undefined
+        }
+        throw err
+      })
+      if (data === undefined) {
+        pendingTwoFactor = null
+        return true
+      }
+      if (data === null) return false
+      pendingTwoFactor = null
+      await establishSession(data)
+      return true
+    },
     // Read what is owed, plus the material to discharge it (the TOTP key).
     describePendingActions: async (tempToken) => {
       const res = await authApi.describePendingActions(tempToken)
@@ -404,7 +468,7 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     // destination so the challenge prompt can show "Code sent to j***@…".
     resendTwoFactor: async ({ challengeId, method }) => {
       const type = typeFromMethod(method) ?? pendingTwoFactor?.type ?? TwoFactorType.Totp
-      if (type === TwoFactorType.Totp) return
+      if (!isCodeDelivered(type)) return
       const tempToken = challengeId ?? pendingTwoFactor?.tempToken ?? ''
       const res = await authApi.sendTwoFactorCode({ tempToken, type })
       if (!res.succeeded) throw new Error(res.message ?? 'Failed to resend the verification code')

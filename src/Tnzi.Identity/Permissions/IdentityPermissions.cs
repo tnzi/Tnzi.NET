@@ -20,6 +20,12 @@ public class IdentityPermissions : IPermissionDefinitionProvider
         context.AddGroup("identity", "Identity");
         context.AddPermission("identity.view", "View Identity", parentName: "identity");
         context.AddCrudPermissions("user", "Users", parentName: "identity");
+        // Sign-in security of another account (drop or restore a second factor,
+        // set a sign-in IP allow-list) is a separate grant from user.update:
+        // the role that edits phone numbers is not thereby the role that makes
+        // anyone's login require one step less. Reads stay on user.view.
+        context.AddPermission("user.security", "Manage User Sign-in Security",
+            "Control another account's two-factor methods and sign-in IP allow-list", parentName: "identity");
         context.AddCrudPermissions("role", "Roles", parentName: "identity");
         context.AddCrudPermissions("tenant", "Tenants", parentName: "identity", category: PermissionCategory.Technical);
         // organization.* moved to Tnzi.Identity.Organization's own provider with the

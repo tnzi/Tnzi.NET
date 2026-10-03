@@ -125,12 +125,25 @@
   --tnzi-admin-surface-light-active-bg: rgb(var(--tnzi-primary-rgb) / 0.1);
 
   /* Menu item visual states */
-  --tnzi-admin-menu-item-height: 44px;
+  /* Sidebar menu rows (the collapsed rail and the vertical-mix rail keep
+     their own heights). 40px: an 18px glyph with a 14px label sits
+     comfortably, and a captioned menu of four sections over a dozen rows
+     still fits a laptop-height sider. */
+  --tnzi-admin-menu-item-height: 40px;
   --tnzi-admin-menu-item-collapsed-height: 48px;
   --tnzi-admin-menu-item-hover-bg: rgb(var(--tnzi-primary-rgb) / 0.06);
   --tnzi-admin-menu-item-active-bg: rgb(var(--tnzi-primary-rgb) / 0.1);
   --tnzi-admin-menu-item-active-color: var(--tnzi-primary);
   --tnzi-admin-menu-item-indent: 12px;
+  /* The band behind a sidebar section caption. Transparent: the caption is
+     the small tracked type alone, a label between clusters rather than a
+     strip that reads as one more row. Set a translucent colour (e.g.
+     `rgb(0 0 0 / 0.22)` on a dark sider) to draw a band. The caption's
+     colour hook, `--tnzi-admin-menu-section-fg`, is deliberately not
+     declared here: its default is 45% of the sider's ink, which only the
+     sider itself knows (styles/polish.css reads it with that per-tone
+     fallback). Set it to replace the colour outright. */
+  --tnzi-admin-menu-section-bg: transparent;
 
   /* Overlay / mask */
   --tnzi-admin-overlay-bg: rgba(0, 0, 0, 0.45);

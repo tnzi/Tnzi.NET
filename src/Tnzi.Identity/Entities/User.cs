@@ -46,6 +46,15 @@ public class User : IdentityUser<Guid>, IEntity<Guid>, ISoftDelete, IHasCreation
     public bool AuthenticatorTwoFactorEnabled { get; set; }
 
     /// <summary>
+    /// 获取或设置 是否启用 passkey / 安全密钥 2FA(需至少登记一枚 passkey)
+    /// </summary>
+    /// <remarks>
+    /// 只是开关，不是凭据：凭据在 <c>UserPasskey</c>（运行时的 <c>IUserPasskeyStore</c>）里。
+    /// 最后一枚凭据被删掉时这个开关随之清掉，否则登录会停在一个没人能完成的第二步。
+    /// </remarks>
+    public bool PasskeyTwoFactorEnabled { get; set; }
+
+    /// <summary>
     /// 获取或设置 首选 2FA 方式(登录时默认展示;null 表示未指定,由系统按优先级选择)
     /// </summary>
     public TwoFactorType? PreferredTwoFactorType { get; set; }

@@ -215,6 +215,16 @@ describe('stepUpWithPasskey', () => {
     expect(await stepUpWithPasskey(client, 'tip.download')).toBeNull();
     expect(post).toHaveBeenCalledTimes(1);
   });
+
+  it('returns null when the browser rejects the ceremony with NotAllowedError (cancel / timeout)', async () => {
+    // What a real browser does on cancel: reject, not resolve null.
+    const { get } = givenBrowserSupportsPasskeys(null);
+    get.mockImplementation(() => Promise.reject(new DOMException('Not allowed', 'NotAllowedError')));
+    const post = vi.fn(() => ok({ optionsJson: '{}', stateId: 'state-1' }));
+
+    expect(await stepUpWithPasskey(createClient({ post }), 'tip.download')).toBeNull();
+    expect(post).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('withStepUp', () => {

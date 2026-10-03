@@ -1,5 +1,6 @@
 global using System.ComponentModel;
 global using System.Diagnostics;
+global using System.Runtime.CompilerServices;
 global using System.Security;
 global using System.Net.Http.Json;
 global using System.Text;

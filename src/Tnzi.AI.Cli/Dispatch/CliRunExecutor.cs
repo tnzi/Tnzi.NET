@@ -25,6 +25,7 @@ public class CliRunExecutor
     private readonly ICliMcpConfigComposer _mcpConfigComposer;
     private readonly CliRunTokenService _tokenService;
     private readonly ICliExecutableResolver _executableResolver;
+    private readonly ICliLaunchEnvironmentComposer _launchEnvironmentComposer;
     private readonly IAgentGrantService _grantService;
     private readonly ISkillService _skillService;
     private readonly CliRunSignalHub _signalHub;
@@ -50,6 +51,7 @@ public class CliRunExecutor
         ICliMcpConfigComposer mcpConfigComposer,
         CliRunTokenService tokenService,
         ICliExecutableResolver executableResolver,
+        ICliLaunchEnvironmentComposer launchEnvironmentComposer,
         IAgentGrantService grantService,
         ISkillService skillService,
         CliRunSignalHub signalHub,
@@ -73,6 +75,7 @@ public class CliRunExecutor
         _mcpConfigComposer = Check.NotNull(mcpConfigComposer);
         _tokenService = Check.NotNull(tokenService);
         _executableResolver = Check.NotNull(executableResolver);
+        _launchEnvironmentComposer = Check.NotNull(launchEnvironmentComposer);
         _grantService = Check.NotNull(grantService);
         _skillService = Check.NotNull(skillService);
         _signalHub = Check.NotNull(signalHub);
@@ -154,6 +157,10 @@ public class CliRunExecutor
             await FailAsync(run, CliRunFailureReason.LaunchFailed, ex.Message, cancellationToken);
         }
         catch (CliProtocolNotImplementedException ex)
+        {
+            await FailAsync(run, CliRunFailureReason.LaunchFailed, ex.Message, cancellationToken);
+        }
+        catch (CliProviderConfigurationException ex)
         {
             await FailAsync(run, CliRunFailureReason.LaunchFailed, ex.Message, cancellationToken);
         }
@@ -288,6 +295,7 @@ public class CliRunExecutor
             AgentId = run.AgentId,
             TenantId = run.TenantId,
             ThreadId = run.ThreadId,
+            UserId = run.CreatorId,
             Provider = setup.Provider,
             StableBrief = setup.Binding.InjectAgentInstructions
                 ? _briefComposer.Compose(setup.Agent, setup.Provider)
@@ -349,7 +357,9 @@ public class CliRunExecutor
         CliRun run, CliRunSetup setup, CliWorkspace workspace, CliAgentOptions options, CancellationToken cancellationToken)
     {
         var adapter = _adapterFactory.Create(setup.Provider.Protocol);
-        var launchContext = BuildLaunchContext(run, setup, workspace, options);
+        var launchEnvironment = await _launchEnvironmentComposer.ComposeAsync(
+            setup.Provider, setup.ExecutablePath, workspace.WorkDirectory, options, cancellationToken);
+        var launchContext = BuildLaunchContext(run, setup, workspace, launchEnvironment, options);
         var spec = adapter.BuildProcess(launchContext);
 
         var idle = ResolveIdleWatchdog(setup.Binding, options);
@@ -438,7 +448,7 @@ public class CliRunExecutor
     }
 
     private CliAgentLaunchContext BuildLaunchContext(
-        CliRun run, CliRunSetup setup, CliWorkspace workspace, CliAgentOptions options)
+        CliRun run, CliRunSetup setup, CliWorkspace workspace, CliLaunchEnvironment launchEnvironment, CliAgentOptions options)
     {
         var customArgs = ParseArgs(setup.Binding.CustomArgsJson);
 
@@ -462,8 +472,10 @@ public class CliRunExecutor
                 ? _briefComposer.Compose(setup.Agent, setup.Provider)
                 : null,
             McpConfigPath = workspace.McpConfigPath,
-            ExtraArgs = setup.Provider.ExtraArgs,
+            // 隔离参数排在部署级 ExtraArgs 之前：部署方要改写它时，写在后面的那个生效。
+            ExtraArgs = [.. launchEnvironment.Args, .. setup.Provider.ExtraArgs],
             CustomArgs = customArgs,
+            Environment = launchEnvironment.Environment,
             InheritAllHostEnvironment = options.InheritAllHostEnvironment,
             EnvironmentWhitelist = options.EnvironmentWhitelist,
             HandshakeTimeout = options.HandshakeTimeout,

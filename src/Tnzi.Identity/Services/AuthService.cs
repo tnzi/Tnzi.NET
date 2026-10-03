@@ -93,6 +93,8 @@ public class AuthService : ApplicationService, IAuthService
             EnableCodeLogin = signIn.AllowCodeLogin && (otp.EnableSms || otp.EnableEmail),
             CodeLoginViaSms = signIn.AllowCodeLogin && otp.EnableSms,
             CodeLoginViaEmail = signIn.AllowCodeLogin && otp.EnableEmail,
+            // 现读 IOptionsMonitor.CurrentValue：运行时改了位数，下一次请求就反映出来。
+            OtpCodeLength = otp.CodeLength,
 
             // ★ 三个开关的并集，而不是只看两个 quick-register 标志。
             // 漏掉 EnableSelfRegistration 会让「配置说开着、页面说关着」——
@@ -404,7 +406,7 @@ public class AuthService : ApplicationService, IAuthService
                 await _captchaService.RecordLoginFailureAsync(loginIdentifier);
             }
             await PublishLoginFailedEventAsync(null, input.UserName, "User not found", ipAddress, userAgent);
-            return Fail<(User, string)>("Invalid username or password", 400);
+            return Fail<(User, string)>(InvalidCredentialsResponse.Message, InvalidCredentialsResponse.StatusCode, InvalidCredentialsResponse.ErrorCode);
         }
 
         // 3. 密码验证（lockoutOnFailure 由配置决定）
@@ -416,7 +418,22 @@ public class AuthService : ApplicationService, IAuthService
                 await _captchaService.RecordLoginFailureAsync(loginIdentifier);
             }
             await PublishLoginFailedEventAsync(user.Id, user.UserName, signInResult.ToString(), ipAddress, userAgent);
-            return Fail<(User, string)>("Invalid username or password", 400);
+            return Fail<(User, string)>(InvalidCredentialsResponse.Message, InvalidCredentialsResponse.StatusCode, InvalidCredentialsResponse.ErrorCode);
+        }
+
+        // 4/5 之前：未确认邮箱 / 手机的回答（403 + 专用错误码）与「密码错误」可区分，而它只在密码校验通过之后给出。
+        //   对一个被登录守卫（IP 允许列表等）挡在外面的账号，这句话就是在证明密码是对的 —— 守卫「对外与密码错误
+        //   逐字同形」的不变量在这里被绕过。所以要说出这句话之前先过一遍守卫：守卫不放行就答它的（同形）回答。
+        //   只在确实要答「未确认」时才多跑这一遍，正常登录的守卫仍只在签发出口跑一次。
+        var unconfirmed = (registrationOptions.RequireConfirmedEmail && !user.EmailConfirmed)
+            || (registrationOptions.RequireConfirmedPhone && !user.PhoneNumberConfirmed);
+        if (unconfirmed)
+        {
+            var guardResult = await RunLoginGuardsAsync(user, LoginMethod.Password, loginIdentifier);
+            if (!guardResult.Allowed)
+            {
+                return Fail<(User, string)>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+            }
         }
 
         // 4. 邮箱确认检查
@@ -816,6 +833,10 @@ public class AuthService : ApplicationService, IAuthService
             sent = emailResult.Succeeded;
             maskedAddress = ContactAddressMasking.MaskEmail(user.Email);
         }
+        else if (input.Type == TwoFactorType.Passkey)
+        {
+            return Fail<TwoFactorChallengeDto>("A passkey has nothing to send; begin the passkey assertion instead", 400);
+        }
         else
         {
             return Fail<TwoFactorChallengeDto>("Invalid two-factor type", 400);
@@ -897,6 +918,12 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TokenResult>("The selected two-factor method is not enabled", 400);
         }
 
+        // Passkey 走 verify-2fa/passkey/*：这里收到它说明客户端把断言当成了验证码。
+        if (input.Type == TwoFactorType.Passkey)
+        {
+            return Fail<TokenResult>("A passkey is verified by assertion; use the passkey two-factor endpoints", 400);
+        }
+
         // 验证2FA验证码
         var isValid = await _twoFactorService.VerifyCodeAsync(userId, input.Code, input.Type, VerificationCodePurpose.TwoFactor);
         if (!isValid.Succeeded)
@@ -910,8 +937,112 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TokenResult>("Invalid verification code", 400);
         }
 
-        // 标记临时Token为已使用（核心业务逻辑，必须同步执行）
-        await _authTokenService.MarkTokenAsUsedAsync(tokenEntry.Id);
+        return await CompleteTwoFactorLoginAsync(user, tokenEntry, ipAddress, userAgent);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<PasskeyOptionsDto>> BeginTwoFactorPasskeyAsync(TwoFactorPasskeyBeginDto input)
+    {
+        Check.NotNull(input);
+
+        var challenged = await ResolveTwoFactorChallengeAsync(input.TempToken);
+        if (!challenged.Succeeded)
+        {
+            return Fail<PasskeyOptionsDto>(challenged.Message!, challenged.Code ?? 400, challenged.ErrorCode);
+        }
+
+        // ★ IPasskeyService 在调用点解析而不是构造注入：PasskeyService 自己依赖 IAuthService
+        //   （passkey 登录经 IssueTokenAsync 签发），构造注入会成环，ValidateOnBuild 让应用启动即失败。
+        return await GetRequiredService<IPasskeyService>().BeginAssertionForUserAsync(challenged.Data!.User.Id);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<TokenResult>> VerifyTwoFactorWithPasskeyAndLoginAsync(TwoFactorPasskeyCompleteDto input)
+    {
+        Check.NotNull(input);
+
+        var challenged = await ResolveTwoFactorChallengeAsync(input.TempToken);
+        if (!challenged.Succeeded)
+        {
+            return Fail<TokenResult>(challenged.Message!, challenged.Code ?? 400, challenged.ErrorCode);
+        }
+
+        var (user, tokenEntry) = challenged.Data!;
+        var ipAddress = ScopedContext?.ClientIpAddress;
+        var userAgent = ScopedContext?.UserAgent;
+
+        var assertion = await GetRequiredService<IPasskeyService>().VerifyAssertionAsync(input);
+        // ★★ 断言成功只说明「有一把登记过的 passkey 在场」。若它属于另一个账号，证明的是别人在场 ——
+        //   这里要证明的恰恰是「就是临时令牌那个账号的主人」。两种失败同一句话、同一份代价（锁定计数 + 烧令牌）：
+        //   区分「断言无效」与「passkey 不是你的」等于在帮人试探。
+        if (!assertion.Succeeded || assertion.Data != user.Id)
+        {
+            if (assertion.Succeeded)
+            {
+                LogWarning("Two-factor rejected: the passkey belongs to user {AssertedUserId} but the challenge belongs to {ChallengedUserId}.",
+                    assertion.Data, user.Id);
+            }
+            await RecordTwoFactorFailureAsync(user, tokenEntry.Id);
+            await PublishLoginFailedEventAsync(user.Id, user.UserName, "Invalid 2FA passkey", ipAddress, userAgent);
+            return Fail<TokenResult>("Invalid passkey", 401, ErrorCodes.UNAUTHORIZED);
+        }
+
+        return await CompleteTwoFactorLoginAsync(user, tokenEntry, ipAddress, userAgent);
+    }
+
+    /// <summary>
+    /// 两步验证的开头：临时令牌 → 账号，并确认登录挑战当下确实提供了 <see cref="TwoFactorType.Passkey"/>。
+    /// </summary>
+    /// <remarks>
+    /// 与发码 / 验码两条路同一口径：只接受「用户已启用 ∩ 部署开启的渠道」里的方式，
+    /// 否则持有临时令牌者可以绕过用户单独关掉的方式；最后一枚凭据被删掉后也在这里被挡下。
+    /// </remarks>
+    private async Task<Result<(User User, AuthToken Token)>> ResolveTwoFactorChallengeAsync(string tempToken)
+    {
+        if (_twoFactorService == null)
+        {
+            return Fail<(User, AuthToken)>("Two-factor service is not available", 500);
+        }
+
+        if (_authTokenService == null)
+        {
+            return Fail<(User, AuthToken)>("Token service is not available", 500);
+        }
+
+        var tokenEntry = await _authTokenService.FindTokenByValueAsync(IdentityConstants.TokenProvider.TwoFactor, IdentityConstants.TokenName.TempToken, tempToken);
+        if (tokenEntry == null)
+        {
+            return Fail<(User, AuthToken)>("Invalid or expired temporary token", 400);
+        }
+
+        var user = await _userManager.FindByGuidAsync(tokenEntry.UserId);
+        if (user == null)
+        {
+            return Fail<(User, AuthToken)>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
+        if (usableTypes is null || !usableTypes.Contains(TwoFactorType.Passkey))
+        {
+            await PublishLoginFailedEventAsync(user.Id, user.UserName, "2FA method not enabled", ScopedContext?.ClientIpAddress, ScopedContext?.UserAgent);
+            return Fail<(User, AuthToken)>("The selected two-factor method is not enabled", 400);
+        }
+
+        return Ok((user, tokenEntry));
+    }
+
+    /// <summary>
+    /// 两步验证通过之后的收尾，验证码与 passkey 两条路逐字共用：烧掉临时令牌 → 登录守卫 → 建立会话 → 签发令牌 → 登录事件。
+    /// </summary>
+    private async Task<Result<TokenResult>> CompleteTwoFactorLoginAsync(User user, AuthToken tokenEntry, string? ipAddress, string? userAgent)
+    {
+        // 标记临时Token为已使用（核心业务逻辑，必须同步执行）。
+        // ★ 必须按返回值决定放行：这是条件更新（WHERE IsUsed = false），false 说明并发的另一个请求
+        //   已经拿同一枚临时令牌完成了第二步。不看它，同一枚令牌 + 同一个验证码并发打两次就建出两条会话。
+        if (!await _authTokenService!.MarkTokenAsUsedAsync(tokenEntry.Id))
+        {
+            return Fail<TokenResult>("Invalid or expired temporary token", 400);
+        }
 
         // 凭据之外的准入策略。密码路径已经跑过一次，这里再跑是因为 2FA 是独立请求：
         // 中间可能换了网络，且 OAuth / 验证码登录并不经过密码路径。
@@ -1014,7 +1145,22 @@ public class AuthService : ApplicationService, IAuthService
             return;
         }
 
-        await _userManager.AccessFailedAsync(user);
+        // ★ AccessFailedAsync 经 UpdateAsync 落库，先跑全部用户校验器：存量账号过不了当前规则时计数一个字都没写，
+        //   锁定永远到不了阈值。这种账号的失败计数记不下来，就退到更硬的一条：这一次猜错直接烧掉临时令牌，
+        //   每一枚令牌只有一次机会，再猜得先重新过一遍密码。
+        var recorded = await _userManager.AccessFailedAsync(user);
+        if (!recorded.Succeeded)
+        {
+            if (_authTokenService != null)
+            {
+                await _authTokenService.MarkTokenAsUsedAsync(tempTokenId);
+            }
+
+            LogWarning(
+                "The two-factor failure of user {UserId} could not be recorded ({Errors}); the challenge token has been consumed instead.",
+                user.Id, recorded.FormatErrors());
+            return;
+        }
 
         if (await _userManager.IsLockedOutAsync(user) && _authTokenService != null)
         {
@@ -1189,6 +1335,14 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         var verification = await _captchaVerifier.VerifyAsync(ImageCaptchaToken.Resolve(input), purpose);
+        // ★ 「未启用，放行」不是「校验通过」：走到这里说明流程开关已经要求验证码，而验证器报告没有生效的提供商。
+        //   放行会让「开了验证码」变成装饰，响应、日志全部正常 —— 与验证器缺席同一条原则。
+        if (verification.Skipped)
+        {
+            Logger.LogError("Captcha is required for {Purpose} but no captcha provider is enabled; rejecting.", purpose);
+            return false;
+        }
+
         return verification.Passed;
     }
 
@@ -1682,7 +1836,7 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 生成唯一用户名（循环检查直到找到唯一用户名）
-        var userName = await UserNameGenerator.GenerateUniqueAsync(baseUserName, async (name) => await _userManager.FindByNameAsync(name) != null);
+        var userName = await UserNameGenerator.GenerateUniqueAsync(baseUserName, async (name) => await _userManager.FindByNameAsync(name) != null, email);
 
         // 创建用户（无密码）
         var user = new User

@@ -79,6 +79,21 @@ public class PasskeyService : ApplicationService, IPasskeyService
             return Fail<PasskeyOptionsDto>(userResult.Message!, userResult.Code ?? 401, userResult.ErrorCode);
         }
 
+        // ★ 已登录且没带注册令牌 = 给自己的账号新增一种登录方式，与 link-token 同一判据：绑上去的凭据在改密、
+        //   撤销全部会话之后照样能登录，一枚被盗访问令牌借它换来的是永久的密码因子绕过。判定在服务层而不是
+        //   [RequireStepUp]：路由是 [AllowAnonymous]（持令牌的人本来就没有会话可供二次确认），特性一挂就把那条路径打死；
+        //   而且本控制器可被消费方整体替换，挂在特性上的守卫会跟着一起消失。持令牌那一半不判：令牌本身就是凭据。
+        //   只判 begin 不判 complete：complete 要拿 begin 签发、绑定了用户的挑战句柄，没过这里就拿不到它；
+        //   两处都判会让 SingleUse 的确认在第二处被消费掉而必然失败。
+        // ★ IStepUpService 在调用点解析而不是构造注入：StepUpService 自己依赖 IPasskeyService（用 passkey 完成确认
+        //   走的是同一份断言校验），构造注入会形成 IPasskeyService -> IStepUpService -> IPasskeyService 的环，
+        //   ValidateOnBuild 让应用启动即失败（单测里两边都是替身，看不见这个环；真实 boot 才会炸）。
+        if (string.IsNullOrWhiteSpace(enrollmentToken)
+            && !await GetRequiredService<IStepUpService>().IsSatisfiedAsync(StepUpScopes.LoginMethodManage))
+        {
+            return StepUpRequired<PasskeyOptionsDto>(StepUpScopes.LoginMethodManage);
+        }
+
         var user = userResult.Data!;
         var httpContext = _httpContextAccessor.HttpContext;
         if (httpContext == null)
@@ -207,6 +222,12 @@ public class PasskeyService : ApplicationService, IPasskeyService
         {
             user = await _userManager.FindByNameAsync(input.UserName);
         }
+        else if (CurrentUser?.Id is { } currentId && currentId != Guid.Empty)
+        {
+            // 已登录且没报用户名 = 二次确认这类「证明还是我」的场景。带上本人的凭据列表，
+            // 否则空的 allowCredentials 只认可发现凭据，YubiKey 这类不可发现的安全密钥当场就找不到。
+            user = await _userManager.FindByGuidAsync(currentId);
+        }
 
         var requested = await _passkeyHandler.MakeRequestOptionsAsync(user, httpContext);
         if (requested.AssertionState == null)
@@ -225,6 +246,42 @@ public class PasskeyService : ApplicationService, IPasskeyService
     }
 
     /// <inheritdoc />
+    public async Task<Result<PasskeyOptionsDto>> BeginAssertionForUserAsync(Guid userId)
+    {
+        if (!Passkey.Enabled)
+        {
+            return Disabled<PasskeyOptionsDto>();
+        }
+
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext == null)
+        {
+            return Fail<PasskeyOptionsDto>("Passkey assertion requires an HTTP context", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var user = await _userManager.FindByGuidAsync(userId);
+        if (user == null)
+        {
+            return Fail<PasskeyOptionsDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        var requested = await _passkeyHandler.MakeRequestOptionsAsync(user, httpContext);
+        if (requested.AssertionState == null)
+        {
+            LogError("The passkey handler produced no assertion state.");
+            return Fail<PasskeyOptionsDto>("Failed to create passkey options", 500, ErrorCodes.INTERNAL_SERVER_ERROR);
+        }
+
+        var stateId = await StoreStateAsync(KindAssertion, requested.AssertionState, userId);
+
+        return Ok(new PasskeyOptionsDto
+        {
+            OptionsJson = requested.RequestOptionsJson,
+            StateId = stateId
+        });
+    }
+
+    /// <inheritdoc />
     public async Task<Result<TokenResult>> CompleteAssertionAsync(PasskeyCompleteDto input)
     {
         var assertion = await PerformAssertionAsync<TokenResult>(input);
@@ -234,7 +291,9 @@ public class PasskeyService : ApplicationService, IPasskeyService
         }
 
         // ★★ 与其余五条签发路径同一个出口：登录守卫 → 2FA 判定 → 会话协调器 → 带 session_id 的令牌。
-        return await _authService.IssueTokenAsync(assertion.Data!, LoginMethod.Passkey);
+        // satisfiedFactor 传 Passkey：这次登录已经证明过这枚 passkey，账号若把 passkey 也设成第二因子，
+        // 再问一次问的是同一件事（与邮箱验证码登录扣掉 Email 因子同一条规则）；别的因子（TOTP / 短信）照常挑战。
+        return await _authService.IssueTokenAsync(assertion.Data!, LoginMethod.Passkey, satisfiedFactor: TwoFactorType.Passkey);
     }
 
     /// <inheritdoc />
@@ -365,6 +424,21 @@ public class PasskeyService : ApplicationService, IPasskeyService
             return Fail("Passkey not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // ★ 删掉最后一枚凭据会顺带关掉「passkey 当第二因子」（见下），若它是唯一方式，账号的 2FA 就此整体关闭。
+        //   这与 two-factor/method/disable 是同一个后果，必须过同一道 TwoFactorManage 二次确认，
+        //   否则一枚被盗访问令牌一次 DELETE 就拆掉了第二因子。判定在服务层而不是控制器特性上：
+        //   只有这一种删除会拆 2FA，删一把备用钥匙不该被拦；而且控制器可被消费方整体替换。
+        //   step-up 未启用的部署 IsSatisfiedAsync 恒为 true，行为不变。
+        if (user.PasskeyTwoFactorEnabled)
+        {
+            var before = await _userManager.GetPasskeysAsync(user);
+            if (before is not { Count: > 1 }
+                && !await GetRequiredService<IStepUpService>().IsSatisfiedAsync(StepUpScopes.TwoFactorManage))
+            {
+                return StepUpRequired(StepUpScopes.TwoFactorManage);
+            }
+        }
+
         var result = await _userManager.RemovePasskeyAsync(user, rawId);
         if (!result.Succeeded)
         {
@@ -372,6 +446,24 @@ public class PasskeyService : ApplicationService, IPasskeyService
         }
 
         LogInformation("User {UserId} removed a passkey.", user.Id);
+
+        // ★ 最后一枚凭据没了而「拿 passkey 当第二因子」还开着,登录会停在一个没人能完成的第二步
+        //   (登录挑战会把它过滤掉,但若它是唯一方式,账号就等于没开 2FA 而状态页还写着开着)。
+        //   随手关掉这个开关并同步聚合;凭据没了的开关本来就没有意义。
+        //   ITwoFactorService 在调用点解析:它不依赖本服务,但保持与 IStepUpService 同一种取法,别再给依赖图添边。
+        if (user.PasskeyTwoFactorEnabled)
+        {
+            var remaining = await _userManager.GetPasskeysAsync(user);
+            if (remaining is not { Count: > 0 })
+            {
+                var disabled = await GetRequiredService<ITwoFactorService>().DisableTwoFactorMethodAsync(user.Id, TwoFactorType.Passkey);
+                if (!disabled.Succeeded)
+                {
+                    LogWarning("The last passkey of user {UserId} was removed but passkey two-factor could not be turned off: {Reason}", user.Id, disabled.Message);
+                }
+            }
+        }
+
         return Ok();
     }
 
@@ -409,6 +501,25 @@ public class PasskeyService : ApplicationService, IPasskeyService
         var userId = CurrentUser?.Id;
         return userId == null ? null : await _userManager.FindByIdAsync(userId.Value.ToString());
     }
+
+    /// <summary>
+    /// 与 <c>StepUpFilter</c> 逐字同形的二次确认挑战：同一状态码、同一错误码、同一 <c>{ scope }</c> 详情，
+    /// 前端的统一处理（<c>withStepUp</c>）才认得它并拉起确认交互后原样重试。
+    /// </summary>
+    private Result<T> StepUpRequired<T>(string scope)
+        => Fail<T>(
+            "This action requires re-authentication",
+            _options.CurrentValue.StepUp.ChallengeStatusCode,
+            ErrorCodes.IDENTITY_STEP_UP_REQUIRED,
+            new { scope });
+
+    /// <inheritdoc cref="StepUpRequired{T}(string)"/>
+    private Result StepUpRequired(string scope)
+        => Fail(
+            "This action requires re-authentication",
+            _options.CurrentValue.StepUp.ChallengeStatusCode,
+            ErrorCodes.IDENTITY_STEP_UP_REQUIRED,
+            new { scope });
 
     /// <summary>
     /// 把挑战状态存进服务端缓存，返回一个不透明句柄。

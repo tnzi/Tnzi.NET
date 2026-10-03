@@ -6,7 +6,8 @@ namespace Tnzi.AI.Services;
 public interface IAgentTaskService
 {
     /// <summary>
-    /// 从 TodoItemDto 列表同步到持久化 AgentTask（按 OrderIndex 匹配：新增或更新）
+    /// 用<b>完整的</b> TodoItemDto 列表覆盖这次运行的持久化 AgentTask：按 OrderIndex 匹配新增或更新，
+    /// 列表里已经没有的删除。空列表 = 这次运行的任务全部删除。
     /// </summary>
     Task SyncFromTodosAsync(Guid runId, List<TodoItemDto> todos, CancellationToken cancellationToken = default);
 

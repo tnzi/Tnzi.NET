@@ -65,6 +65,31 @@ public class PasskeyOptions
     public bool RequireUserVerification { get; set; } = true;
 
     /// <summary>
+    /// 登记时是否要求把凭据存进认证器（可发现凭据 / resident key）：<c>discouraged</c> / <c>preferred</c> / <c>required</c>。
+    /// 默认留空 = 运行时默认（<c>discouraged</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只影响<strong>之后</strong>登记的凭据。平台认证器（Windows Hello、iCloud 钥匙串）不管这里怎么写都存成可发现凭据；
+    /// 差别在硬件安全密钥：YubiKey 按 <c>discouraged</c> 登记出来的凭据<strong>不可发现</strong>，
+    /// 只有服务端已经知道是谁、把 <c>allowCredentials</c> 带上的流程（两步验证的第二步、二次确认、报了用户名的登录）才找得到它；
+    /// 登录页上「不输账号直接插密钥」要它是可发现凭据，那就得 <c>preferred</c> 或 <c>required</c>
+    /// （YubiKey 5 的可发现凭据有槽位上限，25 或 100 枚按型号）。
+    /// </para>
+    /// </remarks>
+    public string? ResidentKey { get; set; }
+
+    /// <summary>
+    /// 登记时允许哪一类认证器：<c>platform</c>（本机的指纹 / 面容 / PIN）或 <c>cross-platform</c>（漫游的硬件安全密钥）。
+    /// 默认留空 = 两类都允许。
+    /// </summary>
+    /// <remarks>
+    /// 只影响之后的登记，已登记的凭据不受影响。设成 <c>cross-platform</c> 即「必须用 YubiKey 这类硬件密钥」；
+    /// 框架不校验 attestation，所以这是<strong>唯一</strong>能把平台认证器挡在外面的开关。
+    /// </remarks>
+    public string? AuthenticatorAttachment { get; set; }
+
+    /// <summary>
     /// 注册令牌的默认有效期（分钟）。默认 1440（一天）。
     /// </summary>
     /// <remarks>

@@ -161,7 +161,7 @@ public partial class PaymentService : ApplicationService, IPaymentService
                 payment.Status = PaymentStatus.Failed;
                 payment.ChannelResponse = applied.Message;
                 await _paymentRepository.UpdateAsync(payment, cancellationToken);
-                return Fail<PaymentOrderResultDto>(applied.Message ?? ErrorCodes.CouponInvalid, applied.Code ?? 400);
+                return Fail<PaymentOrderResultDto>(applied.Message ?? ErrorCodes.CouponInvalid, applied.Code ?? 400, applied.ErrorCode);
             }
 
             couponUsageId = applied.Data.Id;

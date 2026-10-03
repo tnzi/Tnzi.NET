@@ -10,6 +10,7 @@ global using Microsoft.Extensions.Localization;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Logging.Abstractions;
 global using Microsoft.Extensions.Options;
+global using Microsoft.Extensions.Http;
 global using Polly;
 global using Polly.Registry;
 

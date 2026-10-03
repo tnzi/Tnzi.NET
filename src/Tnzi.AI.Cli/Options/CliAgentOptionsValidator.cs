@@ -43,7 +43,9 @@ public class CliAgentOptionsValidator : OptionsValidatorBase<CliAgentOptions>
         if (options.TerminateGrace < TimeSpan.Zero)
             errors.Add("AI:Cli:TerminateGrace cannot be negative.");
 
+        ValidateWorkspacesRoot(options, CliWorkspaceLayout.DefaultWorkspacesRoot, errors);
         ValidateCustomProviders(options, errors);
+        ValidateProviderAuthAndIsolation(options, errors);
         ValidateWriteBack(options.WriteBack, errors);
         ValidateGc(options.Gc, errors);
     }
@@ -58,6 +60,21 @@ public class CliAgentOptionsValidator : OptionsValidatorBase<CliAgentOptions>
         // 回写面是安全决定：没写就是没决定，而「没决定 = 全部」是最危险的那种缺省。
         if (writeBack.AllowedTools.Count == 0 || writeBack.AllowedTools.All(string.IsNullOrWhiteSpace))
             errors.Add("AI:Cli:WriteBack:AllowedTools must list the MCP tools a run-scoped credential may call (use [\"*\"] to allow every exposed tool) when WriteBack is enabled.");
+    }
+
+    /// <summary>
+    /// 没配 <see cref="CliAgentOptions.WorkspacesRoot"/> 且宿主解析不出默认根目录时拒绝启动：
+    /// 不退回相对路径，那会把每次运行的工作区写进进程当前目录（通常就是部署目录）。
+    /// </summary>
+    internal static void ValidateWorkspacesRoot(CliAgentOptions options, string defaultWorkspacesRoot, List<string> errors)
+    {
+        if (!string.IsNullOrWhiteSpace(options.WorkspacesRoot) || !string.IsNullOrWhiteSpace(defaultWorkspacesRoot))
+            return;
+
+        errors.Add(
+            "AI:Cli:WorkspacesRoot is not set and the default location could not be resolved because this host exposes no per-user " +
+            "data directory (LocalApplicationData: HOME / XDG_DATA_HOME on Linux and macOS, the user profile on Windows). " +
+            "Set AI:Cli:WorkspacesRoot to an absolute path outside the application directory.");
     }
 
     private static void ValidateCustomProviders(CliAgentOptions options, List<string> errors)
@@ -81,6 +98,47 @@ public class CliAgentOptionsValidator : OptionsValidatorBase<CliAgentOptions>
             // 在启动期说清楚，好过运行时收到一个 501。
             if (custom.Protocol == CliAgentProtocol.VendorAppServer)
                 errors.Add($"AI:Cli:CustomProviders['{custom.Key}'] uses VendorAppServer, which has no adapter implementation in this version.");
+        }
+    }
+
+    /// <summary>
+    /// 显式选了某个 provider 做不到的隔离或兜底认证时拒绝启动。
+    /// </summary>
+    /// <remarks>
+    /// 默认档 <see cref="CliUserConfigIsolation.ExcludeUserSettings"/> 对不支持的 provider 只是不加参数，不报错 ——
+    /// 它是缺省值，报错等于让每个用 ACP CLI 的部署都得先去关掉一个自己从没开过的东西。
+    /// 专用配置目录与兜底令牌则是部署方主动要的，做不到就该当场知道，而不是以「未隔离 / 没兜底」悄悄跑。
+    /// </remarks>
+    private static void ValidateProviderAuthAndIsolation(CliAgentOptions options, List<string> errors)
+    {
+        var entries = options.Providers
+            .Where(p => CliBuiltInProviders.All.ContainsKey(p.Key))
+            .Select(p => (p.Key, Options: p.Value,
+                ConfigVariable: CliBuiltInProviders.All[p.Key].ConfigDirectoryEnvironmentVariable,
+                TokenVariable: CliBuiltInProviders.All[p.Key].AuthTokenEnvironmentVariable))
+            .Where(e => !options.CustomProviders.Any(c => string.Equals(c.Key, e.Key, StringComparison.OrdinalIgnoreCase)))
+            .Concat(options.CustomProviders
+                .Where(c => !string.IsNullOrWhiteSpace(c.Key))
+                .Select(c => (c.Key, Options: (CliProviderOptions)c,
+                    ConfigVariable: c.ConfigDirectoryEnvironmentVariable,
+                    TokenVariable: c.AuthTokenEnvironmentVariable)));
+
+        foreach (var (key, provider, configVariable, tokenVariable) in entries)
+        {
+            if (!provider.Enabled)
+            {
+                continue;
+            }
+
+            if (provider.UserConfigIsolation == CliUserConfigIsolation.IsolatedConfigDirectory
+                && string.IsNullOrWhiteSpace(configVariable))
+                errors.Add($"AI:Cli provider '{key}' cannot relocate its configuration directory, so UserConfigIsolation=IsolatedConfigDirectory is not supported for it.");
+
+            if (!string.IsNullOrWhiteSpace(provider.ConfigDirectory) && !Path.IsPathFullyQualified(provider.ConfigDirectory))
+                errors.Add($"AI:Cli provider '{key}' ConfigDirectory must be an absolute path.");
+
+            if (!string.IsNullOrWhiteSpace(provider.FallbackAuthToken) && string.IsNullOrWhiteSpace(tokenVariable))
+                errors.Add($"AI:Cli provider '{key}' does not support FallbackAuthToken (no token environment variable is known for it).");
         }
     }
 

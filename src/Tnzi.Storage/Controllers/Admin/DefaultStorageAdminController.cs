@@ -205,12 +205,12 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Get top users by storage usage
+    /// Get top users by storage usage (top: 1 to 100)
     /// </summary>
     [HttpGet("usage/top-users")]
     public virtual async Task<ApiResult<IEnumerable<UserStorageUsage>>> GetTopUsersByStorage([FromQuery] int top = 20)
     {
-        var result = await FileStorageService.GetTopUsersByStorageAsync(top);
+        var result = await FileStorageService.GetTopUsersByStorageAsync(top, HttpContext.RequestAborted);
         return result.ToApiResult();
     }
 
@@ -256,11 +256,13 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     /// Batch verify integrity of files (returns only problematic files in
     /// details). READ-ONLY diagnostic - no method-level action code, matching
     /// the single-file verify above; the class-level .view gate suffices.
+    /// One batch of 1 to 500 files in file-id order; pass the result's
+    /// NextCursor back as `after` until it comes back null.
     /// </summary>
     [HttpPost("verify-integrity")]
-    public virtual async Task<ApiResult<BatchIntegrityResult>> BatchVerifyIntegrity([FromQuery] int maxFiles = 100)
+    public virtual async Task<ApiResult<BatchIntegrityResult>> BatchVerifyIntegrity([FromQuery] int maxFiles = 100, [FromQuery] Guid? after = null)
     {
-        var result = await FileStorageService.BatchVerifyIntegrityAsync(maxFiles);
+        var result = await FileStorageService.BatchVerifyIntegrityAsync(maxFiles, after, HttpContext.RequestAborted);
         return result.ToApiResult();
     }
 
@@ -326,7 +328,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     [HttpGet("by-tag/{tag}")]
     public virtual async Task<ApiResult<IPagedList<FileRecordDto>>> GetFilesByTag(string tag, [FromQuery] int pageIndex = 1, [FromQuery] int pageSize = 20)
     {
-        var result = await FileStorageService.GetFilesByTagAsync(tag, pageIndex, pageSize);
+        var result = await FileStorageService.GetFilesByTagAsync(tag, pageIndex, pageSize, HttpContext.RequestAborted);
         return result.Map(MapPaged).ToApiResult();
     }
 
@@ -396,9 +398,10 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
 
     /// <summary>
     /// 为没有缩略图的存量文件补画缩略图：位图与 PDF 首页（后者需加载可选包 <c>Tnzi.Documents</c>）。
-    /// 幂等：已有缩略图的记录不动。一次最多处理 <c>MaxFiles</c> 条（默认 100，串行渲染），
-    /// 循环调用直到 <c>Generated</c> 为 0；画不出来的记录留在 <c>FailedFileIds</c> 里，下次仍会再试。
-    /// 请求体可省略（= 扫描全部、默认批量）。
+    /// 幂等：已有缩略图的记录不动。一次最多处理 <c>MaxFiles</c> 条（默认 100，1 到 500，串行渲染），
+    /// 把结果的 <c>NextCursor</c> 作为下一次的 <c>After</c> 传回，循环到它为 null；
+    /// 画不出来的记录列在 <c>FailedFileIds</c> 里，游标越过它们继续，下一轮从头开始时再试。
+    /// 请求体可省略（= 从头扫描全部、默认批量）。
     /// </summary>
     [HttpPost("backfill-thumbnails")]
     [ApiAuthorize(PermissionName = "storage.file.update")]
@@ -406,7 +409,7 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] ThumbnailBackfillRequest? request = null)
     {
         request ??= new ThumbnailBackfillRequest();
-        var result = await FileStorageService.BackfillThumbnailsAsync(request.FileIds, request.MaxFiles);
+        var result = await FileStorageService.BackfillThumbnailsAsync(request.FileIds, request.MaxFiles, request.After, HttpContext.RequestAborted);
         return result.ToApiResult();
     }
 }

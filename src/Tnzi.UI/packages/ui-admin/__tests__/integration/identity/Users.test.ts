@@ -25,6 +25,7 @@ vi.mock('../../../src/services/bridges/identity-bridge', () => ({
     tenants: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     loginLogs: { fetch: vi.fn() },
     gdpr: { requestExport: vi.fn(), requestDeletion: vi.fn() },
+    getAuthConfig: vi.fn(async () => null),
   }),
 }))
 

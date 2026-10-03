@@ -131,9 +131,19 @@ public class AltchaCaptchaProvider : ICaptchaProvider
 
         // 一次性：把 challenge 记到过期为止。TrySet 是原子的「不存在才写」，两次并发提交只有一次能过。
         var ttl = TimeSpan.FromSeconds(expires - _clock.GetUtcNow().ToUnixTimeSeconds() + 1);
-        var fresh = await _cache.TrySetAsync(ReplayKey(payload.Challenge), true, ttl, cancellationToken);
+        var replayKey = ReplayKey(payload.Challenge);
+        var fresh = await _cache.TrySetAsync(replayKey, true, ttl, cancellationToken);
         if (!fresh)
-            return CaptchaVerification.Fail(Name, CaptchaFailure.ExpiredOrReplayed, "Replayed");
+        {
+            // TrySet 失败有两种原因：记号已在（真的重放），或缓存本身出了故障（部分实现把异常吞成 false）。
+            // 两种都拒绝 —— 记不下一次性标记就无从防重放；只是原因要报对，否则运维在缓存宕机时
+            // 看到的是一片「重放」，而不是「验证码因缓存故障全部失败」。
+            if (await ReplayMarkerExistsAsync(replayKey, cancellationToken))
+                return CaptchaVerification.Fail(Name, CaptchaFailure.ExpiredOrReplayed, "Replayed");
+
+            _logger.LogError("Altcha could not record the one-time marker for a solved challenge; the cache appears to be failing. Rejecting the request.");
+            return CaptchaVerification.Fail(Name, CaptchaFailure.Rejected, "Replay store unavailable");
+        }
 
         return CaptchaVerification.Pass(Name).WithReport(null, purpose, null);
     }
@@ -159,6 +169,19 @@ public class AltchaCaptchaProvider : ICaptchaProvider
     }
 
     private static string ReplayKey(string challenge) => $"captcha:altcha:used:{challenge}";
+
+    private async Task<bool> ReplayMarkerExistsAsync(string replayKey, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _cache.ExistsAsync(replayKey, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Altcha could not check the one-time marker after a failed write.");
+            return false;
+        }
+    }
 
     private static string Sha256Hex(string input)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input))).ToLowerInvariant();

@@ -11,8 +11,11 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), resolveUrl: (u: string) => u }),
 }))
 
+// Mutable per test: a cold deep link is a mount with `?detail=view:<id>` already in the URL.
+const routeState = vi.hoisted(() => ({ query: {} as Record<string, string> }))
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ query: {}, params: {}, path: '/admin/finance/receipts', fullPath: '/admin/finance/receipts', hash: '', name: 'finance.receipts', meta: {} }),
+  useRoute: () => ({ query: routeState.query, params: {}, path: '/admin/finance/receipts', fullPath: '/admin/finance/receipts', hash: '', name: 'finance.receipts', meta: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
 }))
 
@@ -42,7 +45,11 @@ const convert = vi.fn(async () => ({ docType: 'Expense', docId: 'exp1' }))
 
 const receiptsSection = {
   fetch: fetchList,
-  getById: vi.fn(async () => ({ id: 'rc1', fileId: 'file1', status: 'Extracted', vendorName: 'Acme', matchedVendorId: 'v1' })),
+  getById: vi.fn(async (id: string) =>
+    id === 'rc9'
+      ? { id: 'rc9', fileId: 'file9', originalFileName: 'lunch.jpg', status: 'Extracted', vendorName: 'Deli', total: 12, matchedVendorId: null }
+      : { id: 'rc1', fileId: 'file1', status: 'Extracted', vendorName: 'Acme', matchedVendorId: 'v1' },
+  ),
   create: createReceipt,
   extract: vi.fn(async () => ({ id: 'rc1', status: 'Extracted' })),
   update: vi.fn(async () => ({ id: 'rc1', status: 'Extracted' })),
@@ -85,7 +92,9 @@ const stubs = {
 interface ReceiptsVm {
   rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean }>
   convertForm: { docType: string; vendorId: string | null; accountId: string | null; paidFromAccountId: string | null }
-  detail: { data: { value: unknown } }
+  viewed: Record<string, unknown> | null
+  editModel: Record<string, unknown>
+  crud: { formModal: { visible: { value: boolean }; mode: { value: string | null } } }
   openConvert: () => void
   submitConvert: () => Promise<void>
 }
@@ -95,6 +104,23 @@ describe('Finance Receipts page', () => {
     setActivePinia(createPinia())
     fetchList.mockClear()
     convert.mockClear()
+    receiptsSection.getById.mockClear()
+    routeState.query = {}
+  })
+
+  it('restores a shared ?detail=view:<id> for a receipt that is not on the loaded page', async () => {
+    routeState.query = { detail: 'view:rc9' }
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as ReceiptsVm
+    expect(receiptsSection.getById).toHaveBeenCalledWith('rc9')
+    expect(vm.crud.formModal.visible.value).toBe(true)
+    expect(vm.crud.formModal.mode.value).toBe('view')
+    expect(vm.viewed?.id).toBe('rc9')
+    // The extraction form is seeded from the loaded record.
+    expect(vm.editModel.vendorName).toBe('Deli')
+    expect(wrapper.text() + document.body.textContent).toContain('lunch.jpg')
   })
 
   it('mounts and loads the receipt list', async () => {
@@ -118,7 +144,7 @@ describe('Finance Receipts page', () => {
     await flushPromises()
 
     const vm = wrapper.vm as unknown as ReceiptsVm
-    vm.detail.data.value = { id: 'rc1', status: 'Extracted', matchedVendorId: 'v1' }
+    vm.viewed = { id: 'rc1', status: 'Extracted', matchedVendorId: 'v1' }
     vm.openConvert()
     vm.convertForm.accountId = 'acc1'
     vm.convertForm.paidFromAccountId = 'cash1'

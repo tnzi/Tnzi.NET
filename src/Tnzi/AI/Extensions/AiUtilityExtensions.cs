@@ -44,6 +44,7 @@ public static class AiUtilityExtensions
             {
                 Model = options?.Model,
                 Temperature = options?.Temperature,
+                Provider = options?.Provider,
                 // 每个字符按最坏情况算一个 token，再留一点结构开销
                 MaxTokens = Math.Clamp(maxLength * 2, MinTitleMaxTokens, MaxTitleMaxTokens)
             };

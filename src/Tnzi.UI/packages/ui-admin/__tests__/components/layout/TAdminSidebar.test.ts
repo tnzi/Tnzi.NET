@@ -63,7 +63,7 @@ const menuStub = {
   emits: ['update:value'],
   template:
     '<ul class="n-menu-stub" :data-collapsed="collapsed" :data-value="value" :data-mode="mode">' +
-    '<li v-for="o in options" :key="o.key" :data-key="o.key" @click="$emit(\'update:value\', o.key)">{{ o.label }}</li>' +
+    '<li v-for="o in options" :key="o.key" :data-key="o.key" :data-type="o.type" :data-children="o.children ? o.children.length : 0" @click="$emit(\'update:value\', o.key)">{{ o.label }}</li>' +
     '</ul>',
 }
 
@@ -137,6 +137,62 @@ describe('TAdminSidebar', () => {
     expect(wrapper.find('[data-key="identity"]').exists()).toBe(true)
     // But child entries must not appear as options in the stub
     expect(wrapper.find('[data-key="identity.users"]').exists()).toBe(false)
+  })
+
+  /**
+   * A first-level entry with children is a captioned section by default (a
+   * naive `group`: heading + flat children), a collapsible submenu only when
+   * the app asks for it - per app through the shell config, per instance
+   * through the prop. Deeper levels are untouched either way.
+   */
+  describe('menu-group style', () => {
+    const optionOf = (w: ReturnType<typeof mountSidebar>, key: string) => w.find(`[data-key="${key}"]`)
+
+    it('renders first-level groups as captioned sections by default', () => {
+      useAdminRouteStore().setConstantRoutes(seedRoutes())
+      const w = mountSidebar()
+      expect(optionOf(w, 'identity').attributes('data-type')).toBe('group')
+      expect(optionOf(w, 'identity').attributes('data-children')).toBe('2')
+      expect(optionOf(w, 'system').attributes('data-type')).toBe('group')
+    })
+
+    it('renders them as submenus when the app chose so', () => {
+      useAdminRouteStore().setConstantRoutes(seedRoutes())
+      const w = mount(TAdminSidebar, {
+        global: {
+          stubs: { Menu: menuStub },
+          provide: { [ADMIN_SHELL_CONFIG_KEY as symbol]: { menuGroups: 'submenu' } },
+        },
+      })
+      expect(optionOf(w, 'identity').attributes('data-type')).toBeUndefined()
+      expect(optionOf(w, 'identity').attributes('data-children')).toBe('2')
+    })
+
+    it('lets the prop override the app-wide choice', () => {
+      useAdminRouteStore().setConstantRoutes(seedRoutes())
+      const w = mount(TAdminSidebar, {
+        props: { groupStyle: 'caption' },
+        global: {
+          stubs: { Menu: menuStub },
+          provide: { [ADMIN_SHELL_CONFIG_KEY as symbol]: { menuGroups: 'submenu' } },
+        },
+      })
+      expect(optionOf(w, 'identity').attributes('data-type')).toBe('group')
+    })
+
+    it('leaves a leaf alone and never captions the vertical-mix rail', () => {
+      const routeStore = useAdminRouteStore()
+      routeStore.setConstantRoutes([
+        ...seedRoutes(),
+        { name: 'dashboard', path: '/dashboard', meta: { title: 'Dashboard', order: 0 } },
+      ])
+      const w = mountSidebar()
+      expect(optionOf(w, 'dashboard').attributes('data-type')).toBeUndefined()
+
+      const rail = mountSidebar({ mode: 'vertical-mix' })
+      expect(optionOf(rail, 'identity').attributes('data-type')).toBeUndefined()
+      expect(optionOf(rail, 'identity').attributes('data-children')).toBe('0')
+    })
   })
 
   it('renders header and footer slots', () => {

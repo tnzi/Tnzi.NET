@@ -247,6 +247,17 @@ public class PdfThumbnailOptions
     /// 而缩略图只要它的第一页。这是「不画」不是「拒收」：文件照常存好、照常可下载，只是没有图。
     /// </remarks>
     public long MaxSourceBytes { get; set; } = 50L * 1024 * 1024;
+
+    /// <summary>
+    /// 获取或设置 一次 PDF 缩略图最多花多少秒（等渲染位置 + 渲染本身），默认 10，取值 1 到 300。
+    /// </summary>
+    /// <remarks>
+    /// 缩略图在上传请求里生成，PDF 渲染在整个进程里串行、且一旦开始就取消不掉。超过这个时限就放弃这张图：
+    /// 文件照常存好，只是没有缩略图（管理端回填以后可以再试）。被放弃的那次渲染仍会在后台跑完，
+    /// 在它跑完之前，其它 PDF 上传等不到渲染位置也会在这个时限内放弃 —— 上传本身不再被一份文件拖住。
+    /// 一份普通文档的首页在 100 dpi 下约零点几秒，10 秒是给慢机器与复杂首页留的余量。
+    /// </remarks>
+    public int RenderTimeoutSeconds { get; set; } = 10;
 }
 
 /// <summary>
@@ -551,6 +562,9 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
         if (options.PdfThumbnail.MaxSourceBytes < 0)
             errors.Add("PdfThumbnail.MaxSourceBytes cannot be negative (use 0 for no limit).");
+
+        if (options.PdfThumbnail.RenderTimeoutSeconds is < 1 or > 300)
+            errors.Add("PdfThumbnail.RenderTimeoutSeconds must be between 1 and 300.");
 
         if (options.SignedUrlTtlSeconds < 30 || options.SignedUrlTtlSeconds > 86400)
             errors.Add("SignedUrlTtlSeconds must be between 30 and 86400.");

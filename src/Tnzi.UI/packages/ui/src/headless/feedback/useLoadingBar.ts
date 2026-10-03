@@ -4,11 +4,19 @@ export function useLoadingBar() {
   const visible = ref(false)
   const progress = ref(0)
   let timer: ReturnType<typeof setInterval> | null = null
+  // The hide scheduled by `finish()`. Held so a `start()` inside its 250ms
+  // window cancels it: otherwise a quick second navigation shows the bar and
+  // the first one's timeout hides it mid-way.
+  let finishTimer: ReturnType<typeof setTimeout> | null = null
 
   function clear() {
     if (timer) {
       clearInterval(timer)
       timer = null
+    }
+    if (finishTimer) {
+      clearTimeout(finishTimer)
+      finishTimer = null
     }
   }
 
@@ -24,7 +32,8 @@ export function useLoadingBar() {
   function finish(): void {
     clear()
     progress.value = 100
-    setTimeout(() => {
+    finishTimer = setTimeout(() => {
+      finishTimer = null
       visible.value = false
       progress.value = 0
     }, 250)

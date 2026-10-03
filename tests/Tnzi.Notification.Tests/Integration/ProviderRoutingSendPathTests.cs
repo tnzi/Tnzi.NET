@@ -1,3 +1,4 @@
+using Tnzi.Exceptions;
 using Tnzi.Domain.Entities;
 using Tnzi.Notification.Extensions;
 
@@ -48,6 +49,9 @@ public class ProviderRoutingSendPathTests : IntegrationTestBase
         services.AddSingleton(_ => _defaultEmail.Object);
         // 具名发送器按消费方的写法注册：键在这里是大写，取的时候要按规范形态对上。
         services.AddNotificationSender<IEmailSender>("Marketing", _ => _marketingEmail.Object);
+        // 工厂按部署配置构造不出发送器（传真节的 EmailProviderKey 指向不存在的邮件发送器时就是这样）。
+        services.AddNotificationSender<IEmailSender>("misconfigured", _ => throw new ConfigurationException(
+            "Notification:FaxSender:EmailProviderKey", "Mail sender 'nope' is not registered."));
         services.AddSingleton(_ => new Mock<ISmsSender>().Object);
         services.AddSingleton(_ => new Mock<IPushSender>().Object);
         services.AddSingleton(_ => new Mock<IFaxSender>().Object);
@@ -220,6 +224,21 @@ public class ProviderRoutingSendPathTests : IntegrationTestBase
         created.Message.ShouldContain(nameof(StubSelector));
         created.Message.ShouldContain("postmark");
         VerifySent(_defaultEmail, Times.Never());
+    }
+
+    /// <summary>
+    /// ★ 发送器工厂因部署配置抛 <see cref="ConfigurationException"/>：创建返回一个 500 的 <see cref="Result"/> 失败、
+    /// 原因指向那个配置项，而不是让异常穿出服务变成一次无原因的 500；什么都没落库。
+    /// </summary>
+    [Fact]
+    public async Task AProviderThatCannotBeConstructed_FailsTheCreateWithTheConfigurationReason()
+    {
+        var created = await Service.CreateAsync(Request(providerKey: "misconfigured"));
+
+        created.Succeeded.ShouldBeFalse();
+        created.Code.ShouldBe(500);
+        created.Message!.ShouldContain("Notification:FaxSender:EmailProviderKey");
+        (await DbContext.Messages.AsNoTracking().CountAsync()).ShouldBe(0);
     }
 
     // ── 派发时键失效 ─────────────────────────────────────────────────────────

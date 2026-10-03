@@ -47,8 +47,8 @@
                 v-for="run in runs"
                 :key="run.id"
                 class="t-wf-run-page__run-item"
-                :class="{ 'is-active': run.id === selectedRunId }"
-                @click="selectRun(run.id)"
+                :class="{ 'is-active': run.executionId === selectedRunId }"
+                @click="selectRun(run.executionId)"
               >
                 <div class="t-wf-run-page__run-header">
                   <NTag size="small" :type="statusTypeFor(run.status)" :bordered="false">
@@ -56,7 +56,7 @@
                   </NTag>
                   <span class="t-wf-run-page__run-time">{{ formatTime(run.creationTime) }}</span>
                 </div>
-                <code class="t-wf-run-page__run-id">{{ shortId(run.id) }}</code>
+                <code class="t-wf-run-page__run-id">{{ shortId(run.executionId) }}</code>
                 <div class="t-wf-run-page__run-meta">
                   <span class="t-wf-run-page__wf-name">{{ workflowName(run.workflowDefinitionId) }}</span>
                   <span>{{ t('list.completed', { n: run.completedStepCount }) }}</span>
@@ -86,9 +86,31 @@
                       {{ statusLabel(detail.status) }}
                     </NTag>
                   </h3>
-                  <code class="t-wf-run-page__detail-id">{{ detail.id }}</code>
+                  <code class="t-wf-run-page__detail-id">{{ detail.executionId }}</code>
+                  <NTag
+                    v-if="cancelRequested"
+                    size="small"
+                    type="warning"
+                    :bordered="false"
+                    class="ml-8px"
+                    data-test="wf-run-cancel-requested"
+                  >
+                    {{ t('detail.cancelRequested') }}
+                  </NTag>
                 </div>
                 <NSpace size="small">
+                  <NPopconfirm
+                    v-if="canCancel"
+                    @positive-click="onCancel"
+                  >
+                    <template #trigger>
+                      <NButton size="small" type="error" ghost :loading="actionPending" data-test="wf-run-cancel">
+                        <template #icon><TSvgIcon icon="mdi:stop-circle-outline" :size="14" /></template>
+                        {{ t('detail.cancel') }}
+                      </NButton>
+                    </template>
+                    {{ cancelConfirmText }}
+                  </NPopconfirm>
                   <NPopconfirm
                     v-if="canResume"
                     @positive-click="onResume"
@@ -124,6 +146,37 @@
                 <pre>{{ detail.initialInput }}</pre>
               </details>
 
+              <WorkflowInterruptPanel
+                v-if="isAwaitingInput"
+                :key="`${detail.executionId}:${detail.updatedTime}`"
+                :execution-id="detail.executionId"
+                :can-execute="canExecute"
+                @resumed="afterAction"
+              />
+
+              <template v-if="!isTerminal">
+                <h4 class="t-wf-run-page__section-title t-wf-run-page__section-title--row">
+                  <span>{{ t('signals.title') }}</span>
+                  <NButton size="tiny" text :loading="signalsLoading" @click="loadSignals(detail.executionId)">
+                    <template #icon><TSvgIcon icon="mdi:refresh" :size="14" /></template>
+                  </NButton>
+                </h4>
+                <NAlert v-if="signalsError" type="error" :show-icon="false" data-test="wf-run-signals-error">
+                  {{ signalsError }}
+                </NAlert>
+                <div v-else-if="!signals.length" class="t-wf-run-page__muted" data-test="wf-run-signals-empty">
+                  {{ t('signals.empty') }}
+                </div>
+                <ul v-else class="t-wf-run-page__signals" data-test="wf-run-signals">
+                  <li v-for="sig in signals" :key="sig.signalId">
+                    <NTag size="small" :bordered="false">{{ signalTypeLabel(sig.type) }}</NTag>
+                    <code v-if="sig.stepId">{{ sig.stepId }}</code>
+                    <span v-if="sig.reason">{{ sig.reason }}</span>
+                    <span class="t-wf-run-page__muted">{{ formatTime(sig.createdAt, true) }}</span>
+                  </li>
+                </ul>
+              </template>
+
               <h4 class="t-wf-run-page__section-title">{{ t('detail.steps') }}</h4>
               <NTimeline size="medium">
                 <NTimelineItem
@@ -138,7 +191,7 @@
                     <pre>{{ step.output }}</pre>
                   </details>
                   <!-- Per-step approve / reject when the step is waiting. -->
-                  <div v-if="step.awaiting" class="t-wf-run-page__step-actions">
+                  <div v-if="step.awaiting && canExecute" class="t-wf-run-page__step-actions">
                     <NPopconfirm @positive-click="approveStep(step.id)">
                       <template #trigger>
                         <NButton size="tiny" type="success" ghost>
@@ -189,7 +242,7 @@ import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, reactive, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
-  NSpace, NButton, NSelect, NInput, NSpin, NTimeline, NTimelineItem, NTag, NPopconfirm,
+  NAlert, NSpace, NButton, NSelect, NInput, NSpin, NTimeline, NTimelineItem, NTag, NPopconfirm,
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'
@@ -199,17 +252,25 @@ import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
+import WorkflowInterruptPanel from './WorkflowInterruptPanel.vue'
 import type {
   WorkflowDefinitionDto,
   WorkflowExecutionDetailDto,
+  WorkflowExecutionSignalDto,
   WorkflowExecutionSummaryDto,
 } from '@tnzi/core/services/ai'
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const t = makePageTranslator('ai.workflowRuns')
 const route = useRoute()
+const { can } = usePermissionGuard()
 
 const message = useSafeMessage()
+
+// Every execution write (resume / approve / reject / cancel / resume-with-input)
+// is gated on the backend by `ai.workflow.execute`; the page hides them without it.
+const canExecute = computed(() => can('ai.workflow.execute'))
 
 interface Filters { status?: string; workflowDefinitionId?: string }
 const filters = reactive<Filters>({})
@@ -349,7 +410,21 @@ const stepTimeline = computed<StepRow[]>(() => {
   return out
 })
 
+const TERMINAL_STATUSES = new Set(['Completed', 'Failed', 'Cancelled'])
+const isTerminal = computed(() => !!detail.value && TERMINAL_STATUSES.has(String(detail.value.status)))
+const isAwaitingInput = computed(() => String(detail.value?.status ?? '') === 'AwaitingInput')
+
+/** A running execution only stops at its next checkpoint; until then the cancel is a queued signal. */
+const cancelRequested = computed(() => !isTerminal.value && detail.value?.currentWaitReason === 'cancel_requested')
+
+const canCancel = computed(() => canExecute.value && !!detail.value && !isTerminal.value && !cancelRequested.value)
+
+const cancelConfirmText = computed(() =>
+  String(detail.value?.status ?? '') === 'Running' ? t('detail.confirmCancelRunning') : t('detail.confirmCancel'),
+)
+
 const canResume = computed(() => {
+  if (!canExecute.value) return false
   if (!detail.value) return false
   // `WorkflowExecutionStatus` is a string enum whose values are the member
   // names the backend serializes, so a direct string compare matches the wire
@@ -392,6 +467,8 @@ async function loadDetail(id: string): Promise<void> {
     const result = await bridge.workflowRuns.getDetail(id)
     if (myToken !== detailFetchToken) return
     detail.value = result
+    if (!TERMINAL_STATUSES.has(String(result.status))) void loadSignals(result.executionId)
+    else signals.value = []
   } catch (e) {
     if (myToken !== detailFetchToken) return
     message.error(e instanceof Error ? e.message : String(e))
@@ -399,6 +476,35 @@ async function loadDetail(id: string): Promise<void> {
   } finally {
     if (myToken === detailFetchToken) detailLoading.value = false
   }
+}
+
+// --- Pending mailbox signals (queued cancel / resume input) -----------------
+// Read from the dedicated endpoint rather than the detail payload: the detail
+// quietly returns an empty list when no mailbox is registered, the endpoint
+// answers 501, and "no signals" must not stand in for "cannot tell".
+const signals = ref<WorkflowExecutionSignalDto[]>([])
+const signalsLoading = ref(false)
+const signalsError = ref('')
+
+async function loadSignals(executionId: string): Promise<void> {
+  signalsLoading.value = true
+  signalsError.value = ''
+  try {
+    const result = await bridge.workflowRuns.getSignals(executionId)
+    if (detail.value?.executionId === executionId) signals.value = result
+  } catch (e) {
+    if (detail.value?.executionId !== executionId) return
+    signals.value = []
+    signalsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    signalsLoading.value = false
+  }
+}
+
+function signalTypeLabel(type: string): string {
+  if (type === 'cancel') return t('signals.types.cancel')
+  if (type === 'resume_input') return t('signals.types.resumeInput')
+  return type
 }
 
 async function selectRun(id: string): Promise<void> {
@@ -421,15 +527,35 @@ function onFilterChange(): void {
   void refresh()
 }
 
-// --- Resume + approve/reject ------------------------------------------------
+// --- Resume + approve/reject + cancel -----------------------------------------
+/** Re-read the selected run and the list after any execution write. */
+async function afterAction(): Promise<void> {
+  if (selectedRunId.value) await loadDetail(selectedRunId.value)
+  await loadRuns(false)
+}
+
+async function onCancel(): Promise<void> {
+  if (!detail.value || !canExecute.value) return
+  const wasRunning = String(detail.value.status) === 'Running'
+  actionPending.value = true
+  try {
+    await bridge.workflowRuns.cancel(detail.value.executionId)
+    message.success(wasRunning ? t('detail.cancelQueued') : t('detail.cancelSuccess'))
+    await afterAction()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : t('detail.cancelError'))
+  } finally {
+    actionPending.value = false
+  }
+}
+
 async function onResume(): Promise<void> {
   if (!detail.value) return
   actionPending.value = true
   try {
-    await bridge.workflowRuns.resume(detail.value.id)
+    await bridge.workflowRuns.resume(detail.value.executionId)
     message.success(t('detail.resumeSuccess'))
-    await loadDetail(detail.value.id)
-    await loadRuns(false)
+    await afterAction()
   } catch (e) {
     message.error(e instanceof Error ? e.message : t('detail.resumeError'))
   } finally {
@@ -441,10 +567,9 @@ async function approveStep(stepId: string): Promise<void> {
   if (!detail.value) return
   actionPending.value = true
   try {
-    await bridge.workflowRuns.approveStep(detail.value.id, stepId)
+    await bridge.workflowRuns.approveStep(detail.value.executionId, stepId)
     message.success(t('detail.approveSuccess'))
-    await loadDetail(detail.value.id)
-    await loadRuns(false)
+    await afterAction()
   } catch (e) {
     message.error(e instanceof Error ? e.message : t('detail.approveError'))
   } finally {
@@ -461,11 +586,10 @@ async function rejectStep(stepId: string): Promise<void> {
   }
   actionPending.value = true
   try {
-    await bridge.workflowRuns.rejectStep(detail.value.id, stepId, reason)
+    await bridge.workflowRuns.rejectStep(detail.value.executionId, stepId, reason)
     message.success(t('detail.rejectSuccess'))
     rejectReasonByStep[stepId] = ''
-    await loadDetail(detail.value.id)
-    await loadRuns(false)
+    await afterAction()
   } catch (e) {
     message.error(e instanceof Error ? e.message : t('detail.rejectError'))
   } finally {
@@ -611,6 +735,30 @@ onMounted(() => {
   margin: 16px 0 8px;
   font-size: 14px;
   font-weight: 600;
+}
+.t-wf-run-page__section-title--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.t-wf-run-page__muted {
+  font-size: 12px;
+  color: var(--tnzi-base-text-muted);
+}
+.t-wf-run-page__signals {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.t-wf-run-page__signals li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .t-wf-run-page__step-actions {
   display: flex;

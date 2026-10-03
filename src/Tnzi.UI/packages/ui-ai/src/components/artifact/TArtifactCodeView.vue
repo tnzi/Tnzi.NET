@@ -4,9 +4,9 @@
  */
 
 import { NButton, NTooltip } from 'naive-ui';
-import { ref, watch, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
+import { useCodeHighlight } from '../../headless/useCodeHighlight';
 const t = useAiI18n();
 
 const props = defineProps<{
@@ -19,37 +19,14 @@ defineEmits<{
   download: [];
 }>();
 
-const highlightedHtml = ref('');
-
-// Fallback when shiki is unavailable. Escaping `<` alone is not enough: a
-// snippet containing `&lt;` would render as a real `<`, and this string is
-// bound with v-html so `>` and `"` need the same treatment.
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-async function highlight(): Promise<void> {
-  try {
-    const { codeToHtml } = await import('shiki');
-    highlightedHtml.value = await codeToHtml(props.code, {
-      lang: props.language ?? 'text',
-      themes: { light: 'github-light', dark: 'github-dark' },
-    });
-  } catch {
-    highlightedHtml.value = `<pre><code>${escapeHtml(props.code)}</code></pre>`;
-  }
-}
-
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-watch(() => props.code, () => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(highlight, 150);
-}, { immediate: true });
-
-onBeforeUnmount(() => {
-  if (debounceTimer) clearTimeout(debounceTimer);
-});
+// Re-highlights on a change of the code OR the language, and drops a pass a
+// newer input has superseded (switching artifacts mid-highlight otherwise
+// paints the previous one's code). Debounced for code that streams in.
+const { html: highlightedHtml } = useCodeHighlight(
+  () => props.code,
+  () => props.language ?? 'text',
+  { debounceMs: 150 },
+);
 
 async function copyCode(): Promise<void> {
   await navigator.clipboard.writeText(props.code);

@@ -107,6 +107,13 @@ export interface UseCodeHighlightOptions {
   themes?: MaybeRefOrGetter<{ light: CodeTheme; dark: CodeTheme }>
   /** Run the first highlight synchronously in the setup tick. Default `true`. */
   immediate?: boolean
+  /**
+   * Wait this many ms after an input change before highlighting, restarting
+   * the wait on every further change. For code that streams in token by token,
+   * where each change would otherwise start a Shiki pass. The first pass is
+   * never delayed. Default `0`.
+   */
+  debounceMs?: number
 }
 
 export interface UseCodeHighlightReturn {
@@ -131,6 +138,8 @@ export function useCodeHighlight(
   const html = shallowRef<string>('')
   const isLoading = ref(false)
   const error = ref<Error | null>(null)
+  const debounceMs = options.debounceMs ?? 0
+  let firstPass = true
 
   /* Watch source returns a tuple instead of a fresh object so Vue's
      shallow comparison can detect "no change": an object literal
@@ -158,6 +167,20 @@ export function useCodeHighlight(
       onWatcherCleanup(() => {
         superseded = true
       })
+
+      const delay = firstPass ? 0 : debounceMs
+      firstPass = false
+      if (delay > 0 && c) {
+        // A newer change cancels this wait (cleanup) and starts its own.
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, delay)
+          onWatcherCleanup(() => {
+            clearTimeout(timer)
+            resolve()
+          })
+        })
+        if (superseded) return
+      }
 
       if (!c) {
         html.value = ''

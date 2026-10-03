@@ -344,3 +344,5 @@ Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.SiteVerifyCaptchaProvider(Tnz
 Tnzi.AspNetCore.Security.SiteVerifyCaptchaProvider.VerifyAsync(Tnzi.AspNetCore.Security.CaptchaVerificationRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Tnzi.AspNetCore.Security.CaptchaVerification!>!
 virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetAltchaChallenge(string! purpose = "default") -> Microsoft.AspNetCore.Mvc.IActionResult!
 virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetConfig() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!>!
+const Tnzi.AspNetCore.Options.AltchaOptions.MaxNumberUpperBound = 10000000 -> int
+const Tnzi.AspNetCore.Security.CaptchaVerifier.MaxTokenLength = 8192 -> int

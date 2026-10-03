@@ -105,8 +105,13 @@ export default [
   // 2.5 kB against the 4.51 kB `locales` barrel). That fallback is pre-existing
   // behaviour carried over from when engine and dictionaries shared one file;
   // splitting them buys the *import graph* separation, not a smaller engine.
-  budget('i18n engine (bundles `en` as the fallback catalogue)', 'dist/i18n.js', '3 kB'),
-  budget('locales barrel', 'dist/locales.js', '6 kB'),
+  // 3 -> 4 kB and 6 -> 7.5 kB (2026-09-27): measured 3.78 / 7.12 kB after the
+  // four settings panels (account, security, personalization, usage) moved
+  // their user-facing text into the catalogues. Before that those strings
+  // were English literals in the SFCs, shipped in every locale; the growth is
+  // the text moving here, not new weight.
+  budget('i18n engine (bundles `en` as the fallback catalogue)', 'dist/i18n.js', '4 kB'),
+  budget('locales barrel', 'dist/locales.js', '7.5 kB'),
   // Tiny today. Budgeted anyway because a `utils` barrel is the easiest place
   // for something heavy to be dropped without anyone noticing.
   budget('utils barrel', 'dist/utils.js', '3 kB'),

@@ -133,6 +133,30 @@ public class CouponIntegrationTests : PromotionsIntegrationTestBase
         second.Succeeded.ShouldBeTrue(second.Message);
     }
 
+    /// <summary>
+    /// ★ 兑换码按规范形态比对：用户敲的小写、首尾空格、四位一组的连字符都兑得到，
+    /// 不随数据库排序规则变（PostgreSQL / SQLite 区分大小写，按原样比对在那里答 404）。
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public async Task Redeem_MatchesTheCodeHoweverTheUserTypedIt(bool lowerCase, bool padded, bool grouped)
+    {
+        var promotion = await SeedPromotionAsync(totalLimit: null, perUserLimit: null, isPublic: false);
+        var code = (await InScopeAsync<ICouponIssuanceService, Result<string>>(
+            s => s.CreateRedemptionCodeAsync(promotion.Id, 1))).Data!;
+
+        var typed = grouped ? string.Join("-", code.Chunk(4).Select(c => new string(c))) : code;
+        if (lowerCase) typed = typed.ToLowerInvariant();
+        if (padded) typed = $"  {typed} ";
+
+        var redeemed = await InScopeAsync<ICouponWalletService, Result<UserCouponDto>>(s => s.RedeemAsync(typed, Guid.NewGuid()));
+
+        redeemed.Succeeded.ShouldBeTrue(redeemed.Message);
+    }
+
     [Fact]
     public async Task ApplyCoupon_RespectsTotalUsageLimit()
     {

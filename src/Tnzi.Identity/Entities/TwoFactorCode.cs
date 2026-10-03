@@ -96,5 +96,15 @@ public enum TwoFactorType
     /// <summary>
     /// TOTP 时间验证码（Authenticator App）
     /// </summary>
-    Totp = 3
+    Totp = 3,
+
+    /// <summary>
+    /// Passkey / 安全密钥（WebAuthn 断言：YubiKey 这类 FIDO2 硬件密钥，或平台认证器）。
+    /// </summary>
+    /// <remarks>
+    /// 不是验证码：没有发码、没有输码，第二步是一次 <c>navigator.credentials.get()</c> 断言，
+    /// 由 <c>verify-2fa/passkey/begin</c> + <c>verify-2fa/passkey/complete</c> 完成。
+    /// 凭据本身在「通行密钥」里登记；这里只是「登录时是否拿它当第二因子」的开关。
+    /// </remarks>
+    Passkey = 4
 }
