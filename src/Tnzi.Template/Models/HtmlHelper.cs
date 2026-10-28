@@ -21,9 +21,9 @@ public class HtmlHelper
     }
 
     /// <summary>
-    /// HTML 编码
+    /// HTML 编码。与 <see cref="TemplateBase.HtmlEncode"/> 相同：产物写出时原样输出，不再被编码一次。
     /// </summary>
-    public string Encode(object? value)
+    public RawContent Encode(object? value)
     {
         return _template.HtmlEncode(value);
     }

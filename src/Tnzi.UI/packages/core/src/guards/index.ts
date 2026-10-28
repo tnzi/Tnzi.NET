@@ -16,7 +16,7 @@
  * @example
  * ```ts
  * import { createRouter } from 'vue-router'
- * import { createTnziAuthGuard } from '@tnzi/core'
+ * import { createTnziAuthGuard } from '@tnzi/core/guards'
  * import { auth } from './app' // 内部持有一个 AuthStateManager
  *
  * const router = createRouter({ ... })

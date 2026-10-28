@@ -56,7 +56,7 @@
         {{ t('grants.dirty', { added: allowAdded + denyAdded, removed: allowRemoved + denyRemoved }) }}
       </span>
       <NButton size="small" :disabled="!anyDirty" @click="reset">{{ t('admin.common.reset') }}</NButton>
-      <NButton size="small" type="primary" :loading="saving" :disabled="!anyDirty" @click="save">
+      <NButton size="small" type="primary" :loading="saving" :disabled="!anyDirty || !ready" @click="save">
         {{ t('admin.common.save') }}
       </NButton>
     </template>
@@ -133,25 +133,41 @@ const targetIsSuper = computed(() =>
   props.userRoleNames.some((name) => superRoleNames.value.has(name.toLowerCase())),
 )
 
+/**
+ * The user the allow and deny sets on screen were read for, set only when the
+ * whole load succeeded.
+ *
+ * Each Save writes a set back as the user's ENTIRE allow or deny list, so it may
+ * be saved only onto the user it was read for: sets shown while the read is out,
+ * after it failed (empty, plus whatever was ticked since) or delivered late for
+ * the user shown before would replace every direct grant, or lift every deny.
+ */
+const readFor = ref<string | null>(null)
+/** Bumped by every load: only the newest may fill the sets, `userId` can change mid-flight. */
+let loadSeq = 0
+const ready = computed(() => !loading.value && readFor.value === props.userId)
+
 async function load(): Promise<void> {
+  const seq = ++loadSeq
+  const userId = props.userId
   loading.value = true
+  readFor.value = null
+  allowIds.value = []
+  allowOriginal.value = new Set()
+  denyIds.value = []
+  denyOriginal.value = new Set()
   try {
-    const list = await bridge.functionModules.getAll()
+    // One read from the user-functions surface: this section is gated by
+    // `authorization.userFunction.view`, and `/admin/modules` would also demand
+    // the module management code.
+    const catalogue = await bridge.userFunctions.catalogue()
+    // 退役的码排除在分配矩阵之外（同 RoleFunctions.vue）：后端本就会拒绝授予它们，
+    // 呈现出来只会给出一个必然让整次保存 404 的勾选框。
     const next = new Map<string, ModuleFunctionDto[]>()
-    await Promise.all(
-      list.map(async (m) => {
-        try {
-          // 退役的码排除在分配矩阵之外（同 RoleFunctions.vue）：后端本就会拒绝授予它们，
-          // 呈现出来只会给出一个必然让整次保存 404 的勾选框。
-          const fns = await bridge.permissions.getByModule(m.id)
-          next.set(m.id, fns.filter((f) => !f.isRetired))
-        } catch {
-          // One unreadable module must not blank the whole matrix.
-          next.set(m.id, [])
-        }
-      }),
-    )
-    modules.value = list
+    for (const [moduleId, fns] of catalogue.functionsByModule) {
+      next.set(moduleId, fns.filter((f) => !f.isRetired))
+    }
+    modules.value = catalogue.modules
     functionsByModule.value = next
 
     try {
@@ -164,17 +180,20 @@ async function load(): Promise<void> {
     }
 
     const [ids, denied] = await Promise.all([
-      bridge.userFunctions.getAssignedIds(props.userId),
-      bridge.userFunctions.getDeniedIds(props.userId),
+      bridge.userFunctions.getAssignedIds(userId),
+      bridge.userFunctions.getDeniedIds(userId),
     ])
+    if (seq !== loadSeq) return
     allowIds.value = [...ids]
     allowOriginal.value = new Set(ids)
     denyIds.value = [...denied]
     denyOriginal.value = new Set(denied)
+    readFor.value = userId
   } catch (err) {
+    if (seq !== loadSeq) return
     message.error(err instanceof Error ? err.message : String(err))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 void load()
@@ -218,17 +237,22 @@ function reset(): void {
 }
 
 async function save(): Promise<void> {
+  // The disabled button is not the guard: each write replaces a whole set.
+  if (!ready.value || saving.value) return
+  const userId = props.userId
+  const deny = denyAdded.value + denyRemoved.value > 0 ? [...denyIds.value] : null
+  const allow = allowAdded.value + allowRemoved.value > 0 ? [...allowIds.value] : null
   saving.value = true
   try {
     // Save the deny set FIRST so a grant→deny move never passes through a
     // transient state where the code is granted and the deny is not yet stored.
-    if (denyAdded.value + denyRemoved.value > 0) {
-      await bridge.userFunctions.setDeniedForUser(props.userId, denyIds.value)
-      denyOriginal.value = new Set(denyIds.value)
+    if (deny) {
+      await bridge.userFunctions.setDeniedForUser(userId, deny)
+      if (readFor.value === userId) denyOriginal.value = new Set(deny)
     }
-    if (allowAdded.value + allowRemoved.value > 0) {
-      await bridge.userFunctions.setForUser(props.userId, allowIds.value)
-      allowOriginal.value = new Set(allowIds.value)
+    if (allow) {
+      await bridge.userFunctions.setForUser(userId, allow)
+      if (readFor.value === userId) allowOriginal.value = new Set(allow)
     }
     message.success(props.t('grants.success'))
   } catch (err) {

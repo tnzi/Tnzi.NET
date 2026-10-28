@@ -199,6 +199,17 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
     /// <summary>
     /// 连接建立时调用
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ SignalR 在 <c>OnConnectedAsync</c> 抛出时直接关闭连接，<b>不再调用</b> <see cref="OnDisconnectedAsync"/>（Hub 过滤器的断开回调同样不调）。
+    /// 所以这里一步失败，前面已做的登记（中断表、已加入的组）就地撤销再抛出，否则它们永远留着：
+    /// 中断表持有已关闭连接的 <see cref="HubCallerContext"/>。
+    /// </para>
+    /// <para>
+    /// 派生 Hub 要拒绝连接，在调用 <c>base.OnConnectedAsync()</c> <b>之前</b>抛出。在之后抛出时基类的登记已经完成而无人撤销：
+    /// 连接管理里留着这条连接（用户持续显示在线、占用 <c>MaxConnectionsPerUser</c> 的名额），中断表与组登记也一样。
+    /// </para>
+    /// </remarks>
     /// <returns>任务</returns>
     public override async Task OnConnectedAsync()
     {
@@ -206,41 +217,88 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
 
         // 登记到中断表。刻意**不**限于已登录用户：这张表按 connectionId 索引，
         // 匿名连接同样应该是可中断的。
-        GetRequestService<IHubConnectionAborter>()?.Register(Context.ConnectionId, Context);
+        var aborter = GetRequestService<IHubConnectionAborter>();
+        aborter?.Register(Context.ConnectionId, Context);
 
-        // 将用户添加到用户组并记录连接
-        if (CurrentUserId.HasValue)
+        if (!CurrentUserId.HasValue)
         {
-            var groupName = HubGroupNames.ForUser(CurrentUserId.Value);
-            await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+            return;
+        }
+
+        var userId = CurrentUserId.Value;
+        var joinedGroups = new List<string>(2);
+        try
+        {
+            // 将用户添加到用户组
+            var userGroup = HubGroupNames.ForUser(userId);
+            await Groups.AddToGroupAsync(Context.ConnectionId, userGroup);
+            joinedGroups.Add(userGroup);
 
             // ★ 带租户 claim 的连接同时进租户组：「发给整个租户」的推送投递到它，而不是 Clients.All。
             //   没有 claim 的连接不进任何租户组（关闭方向：按租户推送时收不到，而不是收到所有租户的）。
             if (CurrentTenantId is { } tenantId)
             {
-                await Groups.AddToGroupAsync(Context.ConnectionId, HubGroupNames.ForTenant(tenantId));
+                var tenantGroup = HubGroupNames.ForTenant(tenantId);
+                await Groups.AddToGroupAsync(Context.ConnectionId, tenantGroup);
+                joinedGroups.Add(tenantGroup);
             }
+        }
+        catch
+        {
+            // 配了 Redis backplane 时加组是一次 Redis 往返，Redis 故障会让它抛出
+            await UndoConnectRegistrationsAsync(aborter, joinedGroups);
+            throw;
+        }
 
-            // 连接管理记录为辅助操作，不应影响核心连接生命周期
-            var connectionManager = ConnectionManager;
-            if (connectionManager != null)
+        // 连接管理记录为辅助操作，不应影响核心连接生命周期
+        var connectionManager = ConnectionManager;
+        if (connectionManager != null)
+        {
+            try
             {
-                try
-                {
-                    // Build connection metadata from HttpContext
-                    var metadata = BuildConnectionMetadata();
-                    await connectionManager.AddConnectionAsync(CurrentUserId.Value, Context.ConnectionId, metadata);
+                // Build connection metadata from HttpContext
+                var metadata = BuildConnectionMetadata();
+                await connectionManager.AddConnectionAsync(userId, Context.ConnectionId, metadata);
 
-                    // Publish connection event (auxiliary, errors ignored)
-                    await PublishConnectionEventAsync();
-                }
-                catch (Exception ex)
+                // 框架自己的 User_ / Tenant_ 组同样登记到连接管理：管理端的组视图、
+                // 每条连接的组列与组成员端点读的是这份登记。断开时 RemoveConnectionAsync 一并清掉。
+                foreach (var group in joinedGroups)
                 {
-                    // 连接管理失败不应阻止用户连接
-                    GetLogger()?.LogWarning(ex,
-                        "Failed to track connection for user {UserId}. ConnectionId: {ConnectionId}",
-                        CurrentUserId.Value, Context.ConnectionId);
+                    await connectionManager.AddToGroupAsync(Context.ConnectionId, group);
                 }
+
+                // Publish connection event (auxiliary, errors ignored)
+                await PublishConnectionEventAsync();
+            }
+            catch (Exception ex)
+            {
+                // 连接管理失败不应阻止用户连接
+                GetLogger()?.LogWarning(ex,
+                    "Failed to track connection for user {UserId}. ConnectionId: {ConnectionId}",
+                    userId, Context.ConnectionId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 撤销 <see cref="OnConnectedAsync"/> 已做的登记。尽力而为：撤销本身失败只记 Warning，
+    /// 原始异常由调用方继续上抛。
+    /// </summary>
+    private async Task UndoConnectRegistrationsAsync(IHubConnectionAborter? aborter, IReadOnlyList<string> joinedGroups)
+    {
+        aborter?.Unregister(Context.ConnectionId);
+
+        foreach (var group in joinedGroups)
+        {
+            try
+            {
+                await Groups.RemoveFromGroupAsync(Context.ConnectionId, group);
+            }
+            catch (Exception ex)
+            {
+                GetLogger()?.LogWarning(ex,
+                    "Failed to leave group {GroupName} while rejecting connection {ConnectionId}",
+                    group, Context.ConnectionId);
             }
         }
     }
@@ -285,8 +343,38 @@ public abstract class TnziHub<TClient> : Hub<TClient> where TClient : class
                 }
             }
         }
+        else
+        {
+            await RemoveAnonymousGroupRegistrationsAsync();
+        }
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    /// <summary>
+    /// 匿名连接经 <see cref="AddToGroupAsync(string)"/> 登记过的组：没有用户 id，<c>RemoveConnectionAsync</c> 清不到它们，
+    /// 不在这里清掉的话，管理端的组成员里会一直留着已断开的连接。
+    /// </summary>
+    private async Task RemoveAnonymousGroupRegistrationsAsync()
+    {
+        var connectionManager = ConnectionManager;
+        if (connectionManager == null)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var group in await connectionManager.GetConnectionGroupsAsync(Context.ConnectionId))
+            {
+                await connectionManager.RemoveFromGroupAsync(Context.ConnectionId, group);
+            }
+        }
+        catch (Exception ex)
+        {
+            GetLogger()?.LogWarning(ex,
+                "Failed to remove tracked groups of anonymous connection {ConnectionId}", Context.ConnectionId);
+        }
     }
 
     /// <summary>

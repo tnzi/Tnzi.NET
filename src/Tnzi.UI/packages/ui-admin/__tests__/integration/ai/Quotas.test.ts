@@ -3,13 +3,8 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Quotas integration test - budget cost dashboard + per-user quota CRUD.
- *
- * Asserts:
- *  - the quota rules table still renders its rows;
- *  - the budget dashboard (getBudgetSummary) renders its KPI cards +
- *    per-agent breakdown;
- *  - the create form modal still opens.
+ * Usage-limits page: everyone's defaults, the users who used AI (each opens
+ * their own limits), and the tenant's cost budget.
  */
 const getBudgetSummary = vi.fn(async () => ({
   periodStart: '2026-04-01T00:00:00Z',
@@ -24,56 +19,68 @@ const getBudgetSummary = vi.fn(async () => ({
   ],
 }))
 
+const window = (window: 'Session' | 'Weekly', usedUsd: number, limitUsd: number | null, exceeded = false) => ({
+  window,
+  durationMinutes: window === 'Session' ? 300 : 10080,
+  limitUsd,
+  usedUsd,
+  usedPercent: limitUsd ? (usedUsd / limitUsd) * 100 : null,
+  startedAt: '2026-10-21T09:00:00Z',
+  resetsAt: '2026-10-21T14:00:00Z',
+  exceeded,
+  warningReached: exceeded,
+})
+
+const fetchUsers = vi.fn(async () => ({
+  items: [
+    { userId: '11111111-1111-1111-1111-111111111111', hasCustomPolicy: true, windows: [window('Session', 4, 10), window('Weekly', 20, 50)], lastUsedAt: '2026-10-21T10:00:00Z' },
+    { userId: '22222222-2222-2222-2222-222222222222', hasCustomPolicy: false, windows: [window('Session', 10.2, 10, true), window('Weekly', 30, null)], lastUsedAt: '2026-10-21T09:30:00Z' },
+  ],
+  totalCount: 2,
+  pageIndex: 1,
+  pageSize: 20,
+}))
+
+const getUser = vi.fn(async (userId: string) => ({
+  userId,
+  hasCustomPolicy: true,
+  policy: { sessionLimit: { mode: 'Limited', amountUsd: 10 }, weeklyLimit: { mode: 'Inherit', amountUsd: null }, allowedModels: null, defaultModel: null },
+  defaults: { sessionLimitUsd: 5, weeklyLimitUsd: 50, allowedModels: [], defaultModel: null },
+  effective: { sessionLimitUsd: 10, weeklyLimitUsd: 50, allowedModels: [], defaultModel: null },
+  catalog: [],
+  usage: { windows: [window('Session', 4, 10), window('Weekly', 20, 50)], warningThreshold: 0.8, checkedAt: '2026-10-21T10:00:00Z', lastUsedAt: '2026-10-21T10:00:00Z' },
+}))
+
+const getDefaults = vi.fn(async () => ({
+  policy: { sessionLimit: { mode: 'Inherit', amountUsd: null }, weeklyLimit: { mode: 'Inherit', amountUsd: null }, allowedModels: null, defaultModel: null },
+  configuration: { sessionLimitUsd: null, weeklyLimitUsd: null, allowedModels: [], defaultModel: null, sessionWindowMinutes: 300, weeklyWindowMinutes: 10080, warningThreshold: 0.8 },
+  effective: { sessionLimitUsd: null, weeklyLimitUsd: null, allowedModels: [], defaultModel: null },
+  catalog: [],
+}))
+
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
+  UsageLimitWindow: { Session: 'Session', Weekly: 'Weekly' },
   createAiBridge: () => ({
-    quota: {
-      fetch: vi.fn(async () => ({
-        items: [
-          {
-            id: 'q1',
-            userId: 'user-001',
-            dailyTokenLimit: 100000,
-            monthlyTokenLimit: 2000000,
-            currentDailyUsage: 5000,
-            currentMonthlyUsage: 50000,
-            remainingDailyQuota: 95000,
-            remainingMonthlyQuota: 1950000,
-            dailyUsagePercentage: 0.05,
-            monthlyUsagePercentage: 0.025,
-            lastResetDate: '2026-04-01T00:00:00Z',
-            isEnabled: true,
-            warningThreshold: 0.8,
-            criticalThreshold: 0.95,
-            warningLevel: 0,
-            creationTime: '2026-03-01T00:00:00Z',
-          },
-          {
-            id: 'q2',
-            userId: 'user-002',
-            dailyTokenLimit: 50000,
-            monthlyTokenLimit: 1000000,
-            currentDailyUsage: 45000,
-            currentMonthlyUsage: 800000,
-            remainingDailyQuota: 5000,
-            remainingMonthlyQuota: 200000,
-            dailyUsagePercentage: 0.9,
-            monthlyUsagePercentage: 0.8,
-            lastResetDate: '2026-04-01T00:00:00Z',
-            isEnabled: true,
-            warningThreshold: 0.8,
-            criticalThreshold: 0.95,
-            warningLevel: 1,
-            creationTime: '2026-03-01T00:00:00Z',
-          },
-        ],
-        totalCount: 2,
-        pageIndex: 1,
-        pageSize: 20,
-      })),
-      create: vi.fn(async (data: unknown) => ({ id: 'q3', ...(data as object) })),
-      update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
+    usageLimits: {
+      getDefaults,
+      saveDefaults: vi.fn(),
+      getUser,
+      saveUser: vi.fn(),
+      clearUser: vi.fn(),
+      resetUser: vi.fn(),
+      fetchUsers,
       getBudgetSummary,
+    },
+  }),
+}))
+vi.mock('../../../src/services/bridges/identity-bridge', () => ({
+  createIdentityBridge: () => ({
+    users: {
+      getById: vi.fn(async (id: string) => (id.startsWith('1111')
+        ? { id, userName: 'alice', email: 'alice@example.com' }
+        : { id, userName: 'bob', email: null })),
+      fetch: vi.fn(async () => ({ items: [], totalCount: 0 })),
     },
   }),
 }))
@@ -86,122 +93,70 @@ const stubs = {
     props: ['data', 'columns', 'loading'],
     template: '<div class="n-data-table-stub" :data-rows="data.length"></div>',
   },
-  Pagination: {
-    name: 'Pagination',
-    props: ['page', 'itemCount', 'pageSize'],
-    emits: ['update:page', 'update:pageSize'],
-    template: '<div class="n-pagination-stub"></div>',
-  },
-  Input: {
-    name: 'Input',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<input class="n-input-stub" :value="value" />',
-  },
-  InputNumber: {
-    name: 'InputNumber',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<input type="number" class="n-input-number-stub" :value="value" />',
-  },
-  Switch: {
-    name: 'Switch',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<button class="n-switch-stub" />',
-  },
-  Select: {
-    name: 'Select',
-    props: ['value', 'options'],
-    emits: ['update:value'],
-    template: '<select class="n-select-stub" />',
-  },
-  DatePicker: {
-    name: 'DatePicker',
-    props: ['value'],
-    emits: ['update:value'],
-    template: '<input type="date" class="n-date-picker-stub" />',
-  },
-  Button: {
-    name: 'Button',
-    template: '<button @click="$emit(\'click\')"><slot /></button>',
-  },
-  Modal: {
-    name: 'Modal',
-    props: ['show'],
-    emits: ['update:show'],
-    template: '<div v-if="show" class="n-modal-stub"><slot /><slot name="footer" /></div>',
-  },
-  Popover: {
-    name: 'Popover',
-    props: ['show'],
-    template: '<div><slot name="trigger" /><slot /></div>',
-  },
-  Card: {
-    name: 'Card',
-    props: ['title'],
-    template: '<div class="n-card-stub"><slot name="header-extra" /><slot /></div>',
-  },
-  Statistic: {
-    name: 'Statistic',
-    props: ['label'],
-    template: '<div class="n-statistic-stub"><span class="n-statistic-stub__label">{{ label }}</span><slot /></div>',
-  },
   Progress: {
     name: 'Progress',
     props: ['percentage', 'status'],
     template: '<div class="n-progress-stub" :data-percentage="percentage" :data-status="status"></div>',
   },
-  Tag: { name: 'Tag', template: '<span class="n-tag-stub"><slot /></span>' },
-  Checkbox: { name: 'Checkbox', template: '<input type="checkbox" />' },
-  Form: { name: 'Form', template: '<form><slot /></form>' },
-  FormItem: { name: 'FormItem', template: '<div class="form-item"><slot /></div>' },
-  VueDraggable: { name: 'VueDraggable', template: '<div><slot /></div>' },
 }
 
-describe('Quotas page (budget dashboard + quota CRUD)', () => {
+describe('Usage limits page', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    getBudgetSummary.mockClear()
+    vi.clearAllMocks()
   })
 
-  it('mounts, fetches quotas on mount, and renders one card per rule', async () => {
+  it('shows everyone\'s defaults with the configured windows', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    // Quota rules are now a card list (TCardPage) - one entity card per rule.
-    const cards = wrapper.findAll('.t-entity-card')
+    expect(getDefaults).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Defaults for everyone')
+    expect(wrapper.text()).toContain('Session window: 5 hours. Weekly window: 7 days.')
+  })
+
+  it('lists the users who used AI by name, with each window and their state', async () => {
+    const wrapper = mount(Quotas, { global: { stubs } })
+    await flushPromises()
+
+    expect(fetchUsers).toHaveBeenCalled()
+    const cards = wrapper.findAll('.t-item-card')
     expect(cards).toHaveLength(2)
-    expect(wrapper.text()).toContain('user-001'.slice(0, 8))
+    expect(cards[0]!.text()).toContain('alice (alice@example.com)')
+    expect(cards[0]!.text()).toContain('Own settings')
+    expect(cards[0]!.text()).toContain('$4.00 / $10.00')
+    expect(cards[1]!.text()).toContain('bob')
+    expect(cards[1]!.text()).toContain('At limit')
+    // The unlimited weekly window says so instead of drawing a bar.
+    expect(cards[1]!.text()).toContain('Unlimited')
+  })
+
+  it("opening a user shows that user's limits", async () => {
+    const wrapper = mount(Quotas, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.findAll('.t-item-card')[0]!.trigger('click')
+    await flushPromises()
+
+    expect(getUser).toHaveBeenCalledWith('11111111-1111-1111-1111-111111111111')
+    expect(document.body.textContent).toContain('Limits for this user')
   })
 
   it('renders the budget dashboard KPI cards from getBudgetSummary', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
     expect(getBudgetSummary).toHaveBeenCalled()
-    // KPI cards render their labels + the formatted spend/limit values.
     const text = wrapper.text()
     expect(text).toContain('$42.50')
     expect(text).toContain('$100.00')
     expect(text).toContain('42.5%')
-    // The usage KPI card renders a progress bar reflecting the 42.5% spend,
-    // coloured `warning` because the budget status is WarningThreshold (1).
-    // Multiple progress bars now render (the budget usage KPI + per-card usage
-    // bars in the rules list). The budget usage KPI bar is coloured `warning`
-    // because the budget status is WarningThreshold (1) - assert it is present.
     const progresses = wrapper.findAll('.n-progress-stub')
-    expect(progresses.length).toBeGreaterThan(0)
     expect(progresses.some((p) => p.attributes('data-status') === 'warning')).toBe(true)
-    // Only ONE data-table renders now: the per-agent budget breakdown (2 agents).
-    // The quota rules moved from a table to a card list, so there is no longer a
-    // second data-table for the rules.
     const tables = wrapper.findAll('.n-data-table-stub')
     expect(tables.length).toBe(1)
     expect(tables[0]?.attributes('data-rows')).toBe('2')
   })
 
   it('renders an unmeasurable budget as a warning, never as within budget', async () => {
-    // BudgetStatus.Indeterminate (3): the budget is on but nothing recorded a
-    // cost, so the 0 USD aggregate is "cannot be measured", not "nothing spent".
     getBudgetSummary.mockResolvedValueOnce({
       periodStart: '2026-04-01T00:00:00Z',
       periodEnd: '2026-04-30T23:59:59Z',
@@ -215,22 +170,22 @@ describe('Quotas page (budget dashboard + quota CRUD)', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Cannot be measured')
     expect(wrapper.text()).not.toContain('Within Budget')
-    const progresses = wrapper.findAll('.n-progress-stub')
-    expect(progresses.some((p) => p.attributes('data-status') === 'warning')).toBe(true)
   })
 
-  it('create button opens form modal in create mode', async () => {
+  // A refused or failed budget read is not a month with no spend.
+  it('★ a budget that could not be read shows the failure, never "Within Budget, $0.00"', async () => {
+    getBudgetSummary.mockRejectedValueOnce(new Error('Forbidden'))
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    // TCardPage's create button carries the shell class (not the TCrudPage one).
-    await wrapper.find('.t-list-shell__create').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('form').exists()).toBe(true)
+    const text = wrapper.text()
+    expect(text).not.toContain('Within Budget')
+    expect(wrapper.find('[data-test="budget-error"]').text()).toContain('Forbidden')
+    expect(text).toContain('Unavailable')
   })
 
-  it('page title contains "Quota Rules"', async () => {
+  it('page title is "Usage Limits"', async () => {
     const wrapper = mount(Quotas, { global: { stubs } })
     await flushPromises()
-    expect(wrapper.text()).toContain('Quota Rules')
+    expect(wrapper.text()).toContain('Usage Limits')
   })
 })

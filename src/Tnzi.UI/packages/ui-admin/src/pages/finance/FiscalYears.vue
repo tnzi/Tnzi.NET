@@ -31,6 +31,7 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { pagedResult } from '../../services/_mappers'
 import { buildFiscalYearColumns, fiscalYearFormSchema, type FiscalYearRow } from './fiscal-year-config'
+import { filterByKeyword } from '../../utils/keyword-filter'
 import { tsToIsoDate } from './money'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -61,7 +62,8 @@ const crud = useCrudPage<FiscalYearRow>({
   rowKey: (r) => String(r.id ?? ''),
   // The backend returns the full (small) list - wrap it as a single page.
   fetchData: async (q) => {
-    const items = await bridge.fiscalYears.list()
+    // The list endpoint takes no keyword: the search box filters the loaded years by name.
+    const items = filterByKeyword(await bridge.fiscalYears.list(), q.searchText, (r) => [r.name])
     return pagedResult({ items, totalCount: items.length, pageIndex: q.pageIndex, pageSize: Math.max(q.pageSize, items.length || 1) })
   },
   createData: (d) => bridge.fiscalYears.create(toPayload(d)),

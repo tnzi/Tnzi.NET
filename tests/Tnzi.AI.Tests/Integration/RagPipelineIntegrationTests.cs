@@ -9,9 +9,9 @@ namespace Tnzi.AI.Tests.Integration;
 /// <remarks>
 /// <para>使用 InMemoryVectorStore + 真实 FixedSizeChunkingStrategy + 确定性 Mock Embedding。</para>
 /// <para>
-/// 由于 DocumentIngestionService 通过 EF Core Repository 写入 DocumentChunk，
-/// 而 InMemoryVectorStore 维护独立的内存存储，测试通过拦截 Repository 的 InsertManyAsync
-/// 将 chunk 同步写入 InMemoryVectorStore，模拟 PgVectorStore 的真实行为。
+/// 分块表由替身仓储记录；向量存储里的数据只经生产代码写入：<see cref="InMemoryVectorStore"/> 不读分块表，
+/// 摄取在写完分块表之后对它逐块 <c>UpsertAsync</c>。★ 此前这里由测试在每次搜索前把记录到的分块手工同步进向量存储，
+/// 替生产代码补上了缺的那一步：<c>VectorStoreProvider=InMemory</c> 与自定义向量库在真实部署里摄取显示完成、检索恒为空。
 /// </para>
 /// </remarks>
 public class RagPipelineIntegrationTests : IDisposable
@@ -71,7 +71,7 @@ public class RagPipelineIntegrationTests : IDisposable
             .ReturnsAsync((string _, List<VectorSearchResult> results, int topK, CancellationToken _) =>
                 results.Take(topK).ToList());
 
-        // 配置 chunk repository - 拦截 InsertManyAsync 并同步到 InMemoryVectorStore
+        // 配置 chunk repository - 记录 InsertManyAsync 写入的分块
         SetupChunkRepository();
 
         // 配置 doc repository
@@ -88,7 +88,11 @@ public class RagPipelineIntegrationTests : IDisposable
             _chunkingStrategy,
             _embeddingServiceMock.Object,
             _chunkRepoMock.Object,
+            _vectorStore,
             _kbRepoMock.Object,
+            _docRepoMock.Object,
+            Mock.Of<IRepository<KnowledgeGraphNode, Guid>>(),
+            Mock.Of<IRepository<KnowledgeGraphEdge, Guid>>(),
             Mock.Of<IGraphExtractor>(),
             options,
             serviceProvider);
@@ -130,9 +134,6 @@ public class RagPipelineIntegrationTests : IDisposable
         // Assert - 摄取成功，产生了 chunk
         ingestResult.Succeeded.ShouldBeTrue();
         ingestResult.ChunkCount.ShouldBeGreaterThan(0);
-
-        // 同步 chunk 到 vector store
-        await SyncChunksToVectorStoreAsync();
 
         // 搜索
         var searchResult = await _knowledgeBaseService.SearchAsync(
@@ -178,8 +179,6 @@ public class RagPipelineIntegrationTests : IDisposable
 
         result1.Succeeded.ShouldBeTrue();
         result2.Succeeded.ShouldBeTrue();
-
-        await SyncChunksToVectorStoreAsync();
 
         // 搜索应同时返回两个文档的 chunk
         var searchResult = await _knowledgeBaseService.SearchAsync(
@@ -328,8 +327,6 @@ public class RagPipelineIntegrationTests : IDisposable
 
         resultA.Succeeded.ShouldBeTrue();
         resultB.Succeeded.ShouldBeTrue();
-
-        await SyncChunksToVectorStoreAsync();
 
         // Act - 搜索编程相关内容
         var searchResult = await _knowledgeBaseService.SearchAsync(
@@ -522,24 +519,6 @@ public class RagPipelineIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// 将 Repository 中记录的 chunk 同步到 InMemoryVectorStore
-    /// </summary>
-    private async Task SyncChunksToVectorStoreAsync()
-    {
-        foreach (var chunk in _insertedChunks)
-        {
-            await _vectorStore.UpsertAsync(
-                chunk.Id,
-                chunk.Embedding.ToArray(),
-                chunk.DocumentId,
-                chunk.KnowledgeBaseId,
-                chunk.Content,
-                chunk.ChunkIndex,
-                chunk.Metadata);
-        }
-    }
-
-    /// <summary>
     /// 配置 doc repository - 支持文档查询和插入
     /// </summary>
     private void SetupDocRepository()
@@ -563,6 +542,11 @@ public class RagPipelineIntegrationTests : IDisposable
         _docRepoMock
             .Setup(r => r.UpdateAsync(It.IsAny<KnowledgeDocument>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+
+        // 摄取末尾确认文档行仍在（删除与摄取并发时据此收尾）；这些用例直接摄取、不落文档行，一律视为在
+        _docRepoMock
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
     }
 
     private void UpdateDocRepoQueryable()

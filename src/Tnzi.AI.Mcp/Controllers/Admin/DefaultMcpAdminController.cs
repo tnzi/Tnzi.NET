@@ -74,17 +74,22 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
     /// <summary>
     /// 动态暴露 Agent 为 MCP 工具
     /// </summary>
+    /// <remarks>
+    /// Agent 必须对调用方可见且已启用（否则 404 / 400，不写入）。暴露只存在于本进程：重启后只有
+    /// <c>AI:McpServer:ExposedAgentIds</c> 里列出的会恢复，多实例之间也不共享。
+    /// </remarks>
     [HttpPost("agents/{agentId:guid}/expose")]
     [ApiAuthorize(PermissionName = "ai.mcpServer.update")]
-    public virtual ApiResult ExposeAgent(Guid agentId, [FromBody] McpToolExposureOptions? options = null)
-    {
-        _mcpServerHost.ExposeAgent(agentId, options);
-        return ApiResult.Ok();
-    }
+    public virtual async Task<ApiResult> ExposeAgent(
+        Guid agentId, [FromBody] McpToolExposureOptions? options = null, CancellationToken ct = default)
+        => (await _mcpServerHost.ExposeAgentAsync(agentId, options, ct)).ToApiResult();
 
     /// <summary>
     /// 移除已暴露的 Agent
     /// </summary>
+    /// <remarks>
+    /// 列在 <c>AI:McpServer:ExposedAgentIds</c> 里的 Agent，移除维持到进程重启，回执里会说明；永久下线要同时改配置。
+    /// </remarks>
     [HttpDelete("agents/{agentId:guid}")]
     [ApiAuthorize(PermissionName = "ai.mcpServer.update")]
     public virtual ApiResult RemoveAgent(Guid agentId)
@@ -93,6 +98,8 @@ public class DefaultMcpAdminController : ApiAdminControllerBase
         if (!removed)
             return ApiResult.Error("Agent not found in exposed list.", 404);
 
-        return ApiResult.Ok();
+        return _mcpServerHost.IsConfiguredAgent(agentId)
+            ? ApiResult.Ok("Removed until the next restart: this agent is listed in AI:McpServer:ExposedAgentIds, remove it there to stop exposing it for good.")
+            : ApiResult.Ok();
     }
 }

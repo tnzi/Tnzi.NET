@@ -180,8 +180,15 @@ public class DefaultPayrollPayRunAdminController : ApiAdminControllerBase
     /// <summary>
     /// 外部批次幂等摄取（External/OpeningBalance）
     /// </summary>
+    /// <remarks>
+    /// External 批次在 <c>Payroll:ExternalAutoPost</c>（默认 true）下摄取即过账（同一
+    /// <c>ProviderRunId</c> 再次摄取也会补投），而内部批次的计算/过账一律要 <c>payroll.run.update</c>；
+    /// OpeningBalance 不过账，但写下的 YTD 基数决定此后每一期的法定上限。两者都不是「只起草」，
+    /// 故叠加 <c>.update</c>（AND），一个端点一种授权。
+    /// </remarks>
     [HttpPost("external")]
     [ApiAuthorize(PermissionName = "payroll.run.create")]
+    [ApiAuthorize(PermissionName = "payroll.run.update")]
     public virtual async Task<ApiResult<PayRunDto>> CreateFromExternal([FromBody] ExternalPayRunIngestDto request)
     {
         var result = await _payRunService.CreateFromExternalAsync(request);

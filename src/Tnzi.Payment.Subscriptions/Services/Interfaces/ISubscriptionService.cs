@@ -41,14 +41,33 @@ public interface ISubscriptionService
     Task<Result> RetryBillingAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 当场补缴一条逾期欠费（PastDue）或已暂停服务（Suspended）的订阅：返回一张有人在场的收银台单（可做 3-D Secure），
+    /// 付款时同时留存这张卡。已有一张补缴单还能付时返回同一张单的凭据。需要能管理订阅所属的计费账户。
+    /// 对还没付首期的订阅（Pending）返回那张首期单的凭据，让放弃过一次收银台的管理者接着付完，而不是再开一条订阅；
+    /// 首期单已经不能付了（失败、过期、关闭）时答 400 <c>SUBSCRIPTION_CANNOT_PAY_NOW</c>，重新开通会先收口那条 Pending。
+    /// </summary>
+    Task<Result<SubscriptionPayNowResultDto>> PayNowAsync(Guid subscriptionId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 计费账户（在某个产品下）此刻的境况：有一条订阅正常即 Good；否则暂停服务 &gt; 欠费 &gt; 无。内部调用（门禁、提示）。
+    /// </summary>
+    Task<BillingStanding> GetStandingAsync(BillingAccountRef account, string? productCode = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 境况连同需要处理的那条订阅（逾期或已暂停：计划、欠款、截止日）。不判权限、不填 <c>CanView</c> / <c>CanManage</c>：
+    /// 那是 <see cref="ISubscriptionAccessGate.GetStandingAsync"/> 按调用者补上的。内部调用。
+    /// </summary>
+    Task<BillingStandingDto> GetStandingDetailAsync(BillingAccountRef account, string? productCode = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 获取订阅信息
     /// </summary>
     Task<Result<SubscriptionDto>> GetSubscriptionAsync(Guid id, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取用户订阅列表
+    /// 获取用户订阅列表（按创建时间倒序分页；<paramref name="query"/> 为 null 时取最新 100 条）
     /// </summary>
-    Task<Result<IPagedList<SubscriptionDto>>> GetUserSubscriptionsAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<SubscriptionDto>>> GetUserSubscriptionsAsync(Guid userId, PagedQueryDto? query = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 获取订阅列表
@@ -56,12 +75,17 @@ public interface ISubscriptionService
     Task<Result<IPagedList<SubscriptionDto>>> GetSubscriptionListAsync(SubscriptionQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取订阅计划列表
+    /// 获取订阅计划列表。<paramref name="includeTax"/> 为 true 时每个计划带上一期标价的计税结果（<see cref="SubscriptionPlanDto.Tax"/>）。
     /// </summary>
-    Task<Result<List<SubscriptionPlanDto>>> GetSubscriptionPlansAsync(bool activeOnly = true, string? productCode = null, CancellationToken cancellationToken = default);
+    Task<Result<List<SubscriptionPlanDto>>> GetSubscriptionPlansAsync(bool activeOnly = true, string? productCode = null, bool includeTax = false, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 创建订阅计划
+    /// 新建计划时表单的预填值（默认币种）
+    /// </summary>
+    Result<SubscriptionPlanDefaultsDto> GetPlanDefaults();
+
+    /// <summary>
+    /// 创建订阅计划。币种留空时取 <c>Payment:DefaultCurrency</c>。
     /// </summary>
     Task<Result<SubscriptionPlanDto>> CreatePlanAsync(SubscriptionPlanDto planDto, CancellationToken cancellationToken = default);
 

@@ -18,7 +18,10 @@
  *
  *   A. DERIVED - reads a `--tnzi-*` token so it follows the host theme. Only
  *      the accent family qualifies today: recolouring the brand should recolour
- *      the send button and focus ring, in this package as everywhere else.
+ *      the send button and focus ring, in this package as everywhere else -
+ *      and with them what goes ON the accent (`--tnzi-ai-on-accent`) and the
+ *      accent used AS text (`--tnzi-ai-accent-text`), which `@tnzi/ui`
+ *      recomputes for whatever colour the brand is.
  *
  *   B. IDENTITY - literal on purpose. The canvas / text / border / status
  *      colours are a warm palette (#f8f8f7 canvas, #34322d ink); `@tnzi/ui` is
@@ -62,6 +65,14 @@
   --tnzi-ai-accent-soft: rgb(var(--tnzi-primary-rgb) / 0.12);
   --tnzi-ai-accent-glow: rgb(var(--tnzi-primary-rgb) / 0.32);
 
+  /* The accent as a text or icon colour on this package's surfaces (a link, the
+     active row in the sidebar, a check mark). Never `--tnzi-ai-accent` itself:
+     a light brand colour (a yellow) is unreadable as text on a light canvas.
+     This is the same hue moved just far enough to read at 4.5:1 on every
+     surface from the canvas to the sidebar, in each mode (the `.dark` block
+     repoints it); an accent that already reads stays as it is. */
+  --tnzi-ai-accent-text: var(--tnzi-primary-text-on-light, var(--tnzi-ai-accent));
+
   /* Status colors */
   --tnzi-ai-success: #16a34a;
   --tnzi-ai-warning: #d97706;
@@ -70,8 +81,17 @@
   /* Hover wash behind a destructive row (sign out, delete). */
   --tnzi-ai-danger-soft: rgba(220, 38, 38, 0.08);
 
-  /* Foreground for text/icons sitting on an accent or status fill. */
-  --tnzi-ai-on-accent: #ffffff;
+  /* Foreground for text/icons sitting on an accent fill (send button, primary
+     buttons, the account avatar). White on a dark accent, a near-black ink on a
+     light one: `--tnzi-on-primary` is recomputed by the `@tnzi/ui` theme
+     whenever the brand colour changes. Mode-independent: the fill is the same
+     colour in both modes. */
+  --tnzi-ai-on-accent: var(--tnzi-on-primary, #ffffff);
+
+  /* Foreground on a status fill (a failed stage, a completed or failed
+     subtask badge). Separate from the accent's: the status colours do not
+     change with the brand, so what goes on them must not either. */
+  --tnzi-ai-on-status: #ffffff;
 
   /* High-contrast neutral fill for a primary action that must out-rank the
      brand accent around it (an "Upgrade" pill inside an account menu). Kept
@@ -84,6 +104,10 @@
      a fixed near-black chip disappears against the dark sidebar canvas. */
   --tnzi-ai-brand-mark-bg: linear-gradient(135deg, #1f1f1f 0%, #3a3a3a 100%);
   --tnzi-ai-brand-mark-fg: #ffffff;
+  /* Size of the glyph inside the 32px tile, in both places it is drawn. The
+     default suits a thin monogram; a mark that is meant to fill its tile (an
+     app-icon face) sets it larger. Same in both modes, so not repeated below. */
+  --tnzi-ai-brand-mark-glyph-size: 18px;
 
   /* Interaction overlays */
   --tnzi-ai-hover:    rgba(55, 53, 47, 0.04);
@@ -122,8 +146,14 @@
      `content-width` prop on TChatApp or by redefining this variable. */
   --tnzi-ai-content-width: 820px;
 
-  /* Scrollbars - applied ONLY inside .t-chat-app / .t-ai-scroll, never global * */
+  /* Scrollbars - applied ONLY to what ui-ai renders (.t-chat-app, .t-ai-scroll-scope,
+     .t-ai-scroll), never global * */
   --tnzi-ai-scrollbar-size:        8px;
+
+  /* Line height of multi-line code everywhere ui-ai shows it (message code
+     blocks, TCodeBlock, tool and CLI output, the artifact code views), so code
+     never reads looser in one place than another. */
+  --tnzi-ai-code-line-height: 1.5;
   --tnzi-ai-scrollbar-thumb:       rgba(0, 0, 0, 0.18);
   --tnzi-ai-scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
 
@@ -155,6 +185,11 @@
 
   /* Code blocks */
   --tnzi-ai-code-bg: #f3f3f1;
+  /* Code in a message: the frame of a fenced block (a shade lighter than the
+     canvas) and the colour of inline code (a muted red, so a code span reads
+     as code without a heavy box). */
+  --tnzi-ai-code-frame-bg:    rgba(255, 255, 255, 0.5);
+  --tnzi-ai-code-inline-text: #8e2626;
 
   /* Workflow node states - reuse the status palette so a failed node is the
    * same red as every other failure in the product. The handoff accent is
@@ -187,6 +222,7 @@
 
   --tnzi-ai-accent:      var(--tnzi-primary);
   --tnzi-ai-accent-soft: rgb(var(--tnzi-primary-rgb) / 0.18);
+  --tnzi-ai-accent-text: var(--tnzi-primary-text-on-dark, var(--tnzi-ai-accent));
 
   --tnzi-ai-success: #30d158;
   --tnzi-ai-warning: #f59e0b;
@@ -214,6 +250,8 @@
    * above without being restated here. */
   --tnzi-ai-chat-user-bg:   #2a2a28;
   --tnzi-ai-code-bg:        #121211;
+  --tnzi-ai-code-frame-bg:    rgba(255, 255, 255, 0.03);
+  --tnzi-ai-code-inline-text: #e8a0a0;
   --tnzi-ai-reasoning-bg:   color-mix(in srgb, var(--tnzi-ai-warning) 10%, transparent);
   --tnzi-ai-handoff-accent: #a78bfa;
 
@@ -295,28 +333,46 @@
 }
 
 /* ===========================================================================
- * Unified custom scrollbar - scoped to the ui-ai surface so it NEVER leaks
- * into the consumer's global `*` (unlike a raw global rule). Every scroll
- * container inside TChatApp (left nav, thread list, message area, settings,
- * command palette, artifact pane) inherits this automatically; standalone
- * scrollers can opt in with the `.t-ai-scroll` class.
+ * Unified custom scrollbar - scoped to what ui-ai renders, so it NEVER leaks
+ * into the consumer's global `*` (unlike a raw global rule). Three hooks:
+ *
+ *   .t-chat-app          the shell and everything inside it;
+ *   .t-ai-scroll-scope   an element and everything inside it: the root of each
+ *                        surface teleported out of the shell (settings dialog,
+ *                        command palette, action menu), so the consumer's own
+ *                        content in their slots matches, and the roots of
+ *                        rendered markup (markdown, highlighted code) whose
+ *                        scrolling `pre` the template cannot class;
+ *   .t-ai-scroll         this element: every scroll container ui-ai renders
+ *                        carries it, so a component used on its own, outside
+ *                        the shell, still has the thin bar.
+ *
+ * Gated by __tests__/conventions/thin-scrollbars.test.ts.
  * ========================================================================= */
 .t-chat-app,
 .t-chat-app *,
+.t-ai-scroll-scope,
+.t-ai-scroll-scope *,
 .t-ai-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18)) transparent;
 }
 .t-chat-app ::-webkit-scrollbar,
+.t-ai-scroll-scope::-webkit-scrollbar,
+.t-ai-scroll-scope ::-webkit-scrollbar,
 .t-ai-scroll::-webkit-scrollbar {
   width: var(--tnzi-ai-scrollbar-size, 8px);
   height: var(--tnzi-ai-scrollbar-size, 8px);
 }
 .t-chat-app ::-webkit-scrollbar-track,
+.t-ai-scroll-scope::-webkit-scrollbar-track,
+.t-ai-scroll-scope ::-webkit-scrollbar-track,
 .t-ai-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 .t-chat-app ::-webkit-scrollbar-thumb,
+.t-ai-scroll-scope::-webkit-scrollbar-thumb,
+.t-ai-scroll-scope ::-webkit-scrollbar-thumb,
 .t-ai-scroll::-webkit-scrollbar-thumb {
   background: var(--tnzi-ai-scrollbar-thumb, rgba(0, 0, 0, 0.18));
   border-radius: 999px;
@@ -324,11 +380,15 @@
   background-clip: padding-box;
 }
 .t-chat-app ::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll-scope::-webkit-scrollbar-thumb:hover,
+.t-ai-scroll-scope ::-webkit-scrollbar-thumb:hover,
 .t-ai-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--tnzi-ai-scrollbar-thumb-hover, rgba(0, 0, 0, 0.32));
   background-clip: padding-box;
 }
 .t-chat-app ::-webkit-scrollbar-corner,
+.t-ai-scroll-scope::-webkit-scrollbar-corner,
+.t-ai-scroll-scope ::-webkit-scrollbar-corner,
 .t-ai-scroll::-webkit-scrollbar-corner {
   background: transparent;
 }

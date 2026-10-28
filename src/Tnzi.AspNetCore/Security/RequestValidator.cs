@@ -43,15 +43,16 @@ public class RequestValidator : IRequestValidator
             return "Request timestamp validation failed. The request may be expired or the time is incorrect.";
         }
 
-        // 验证 Nonce（在签名验证之前，因为签名计算需要 Nonce）
+        // Nonce 先只查形态（有没有、长不长），不写缓存
+        string? nonce = null;
         if (_options.RequireNonce)
         {
-            var nonceError = await ValidateNonceAsync(context);
+            var nonceError = ReadNonce(context, out nonce);
             if (nonceError != null)
                 return nonceError;
         }
 
-        // 验证签名（需要读取请求体，放在最后以减少不必要的读取）
+        // 验证签名（签名串里已经含 Nonce，签名对了 Nonce 才可信）
         if (_options.RequireSignature)
         {
             var signatureError = await ValidateSignatureAsync(context);
@@ -59,8 +60,22 @@ public class RequestValidator : IRequestValidator
                 return signatureError;
         }
 
+        // 最后才登记 Nonce：本校验在认证与限流之前，先写缓存再验签意味着每个带随机 Nonce、签名乱填的未认证请求
+        // 都在缓存里留下一条至少 TTL 秒的记录，缓存随攻击者的带宽无界增长（配了容量上限时还会挤掉正常的 Nonce，重开重放窗口）
+        if (nonce != null)
+        {
+            var replayError = await RecordNonceAsync(nonce);
+            if (replayError != null)
+                return replayError;
+        }
+
         return null;
     }
+
+    /// <summary>
+    /// X-Nonce 允许的最大长度。Nonce 会整条成为缓存键，不设上限等于让调用方决定每个键多大。
+    /// </summary>
+    public const int MaxNonceLength = 128;
 
     /// <summary>
     /// 检查路径是否需要验证
@@ -194,16 +209,31 @@ public class RequestValidator : IRequestValidator
     }
 
     /// <summary>
-    /// 验证 Nonce
+    /// 读出 X-Nonce 并检查形态（存在、不超过 <see cref="MaxNonceLength"/>），不碰缓存。
     /// </summary>
-    private async Task<string?> ValidateNonceAsync(HttpContext context)
+    private string? ReadNonce(HttpContext context, out string? nonce)
     {
-        var nonceHeader = context.Request.Headers["X-Nonce"].FirstOrDefault();
-        if (string.IsNullOrEmpty(nonceHeader))
+        nonce = context.Request.Headers["X-Nonce"].FirstOrDefault();
+        if (string.IsNullOrEmpty(nonce))
         {
             return "Request missing X-Nonce header";
         }
 
+        if (nonce.Length > MaxNonceLength)
+        {
+            _logger.LogWarning("Request X-Nonce too long: {Length} characters", nonce.Length);
+            nonce = null;
+            return $"Request X-Nonce header must not exceed {MaxNonceLength} characters";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 登记 Nonce；已经用过则判为重放
+    /// </summary>
+    private async Task<string?> RecordNonceAsync(string nonceHeader)
+    {
         var cacheKey = $"RequestNonce:{nonceHeader}";
 
         // 使用原子操作尝试设置 Nonce。

@@ -3,14 +3,12 @@
  * Aligned with Tnzi.NET backend Payment module
  */
 
-import type { AuditedEntity } from '../../types/entities';
-import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination';
+import type { PagedQueryDto } from '../../types/pagination';
 import {
   PaymentStatus,
   PaymentMethod,
   BusinessType,
   RefundStatus,
-  CouponType,
   SubscriptionStatus,
   BillingCycleType,
   InvoiceStatus,
@@ -23,14 +21,15 @@ import {
   SubscriptionChangeStatus,
   UserCouponStatus,
   TrendGranularity,
+  BillingStanding,
 } from './metadata';
 
 export {
+  BillingStanding,
   PaymentStatus,
   PaymentMethod,
   BusinessType,
   RefundStatus,
-  CouponType,
   SubscriptionStatus,
   BillingCycleType,
   InvoiceStatus,
@@ -80,15 +79,21 @@ export interface PaymentDto {
   description?: string | null;
   expireTime?: Date | string | null;
   paidTime?: Date | string | null;
+  /** Billing account the payment was made for (`User` / `Installation` / `Tenant` / custom); null on older records. */
+  billingAccountType?: string | null;
+  billingAccountId?: string | null;
+  /** Card the payment was made with, when known (printed on receipts). */
+  paymentMethodBrand?: string | null;
+  paymentMethodLast4?: string | null;
+  /**
+   * Chargeback state: `None` | `WarningNeedsResponse` | `WarningUnderReview` | `WarningClosed` |
+   * `NeedsResponse` | `UnderReview` | `Won` | `Lost` | `Unknown` (Tnzi.Payment.Metadata.PaymentDisputeStatus).
+   */
+  disputeStatus?: string;
+  disputeId?: string | null;
+  disputeReason?: string | null;
+  disputeAmount?: number | null;
   creationTime: Date | string;
-}
-
-/**
- * Payment detail with refunds
- */
-export interface PaymentDetailDto extends PaymentDto {
-  refunds: RefundDto[];
-  logs: PaymentLogDto[];
 }
 
 /**
@@ -159,23 +164,25 @@ export interface ConfirmOfflinePaymentDto {
 }
 
 /**
- * Payment list query
+ * Payment list query - mirrors Tnzi.Payment.Dtos.PaymentQueryDto.
+ *
+ * The list is always newest first (creation time descending); the endpoint
+ * takes no sort parameters. `startTime` / `endTime` bound the creation time,
+ * and there is no amount-range or free-text filter.
  */
-export interface PaymentQueryDto extends SortedPagedQueryDto {
+export interface PaymentQueryDto extends PagedQueryDto {
   tradeNo?: string;
   externalTradeNo?: string;
   status?: PaymentStatus;
   businessType?: BusinessType;
   channelCode?: string;
   userId?: string;
-  minAmount?: number;
-  maxAmount?: number;
-  startDate?: Date | string;
-  endDate?: Date | string;
   startTime?: Date | string;
   endTime?: Date | string;
-  paymentNo?: string;
   businessOrderNo?: string;
+  /** Filter by billing account type (admin list); pair with `billingAccountId`. */
+  billingAccountType?: string;
+  billingAccountId?: string;
 }
 
 // ============================================
@@ -202,6 +209,11 @@ export interface RefundDto {
   approveTime?: Date | string | null;
   approveRemark?: string | null;
   completedTime?: Date | string | null;
+  /** Billing account of the refunded payment; null on older records. */
+  billingAccountType?: string | null;
+  billingAccountId?: string | null;
+  /** `Framework` (raised here) or `Channel` (made in the payment channel's dashboard, recorded from its webhook). */
+  origin?: 'Framework' | 'Channel';
   creationTime: Date | string;
 }
 
@@ -211,8 +223,8 @@ export interface RefundDto {
 export interface CreateRefundDto {
   tradeNo: string;
   refundAmount: number;
+  /** Stored on the refund; at most 500 characters. */
   reason: string;
-  remark?: string;
 }
 
 /**
@@ -224,6 +236,9 @@ export interface RefundQueryDto extends PagedQueryDto {
   status?: RefundStatus;
   startTime?: Date | string;
   endTime?: Date | string;
+  /** Filter by billing account type (admin list); pair with `billingAccountId`. */
+  billingAccountType?: string;
+  billingAccountId?: string;
 }
 
 /**
@@ -278,8 +293,97 @@ export interface SubscriptionDto {
   pausedAt?: Date | string | null;
   pausedUntil?: Date | string | null;
   pastDueSince?: Date | string | null;
+  /** When service was suspended (`status === Suspended`). */
+  suspendedAt?: Date | string | null;
+  /** Billing account the subscription belongs to (`User` / `Installation` / `Tenant` / custom). */
+  billingAccountType: string;
+  billingAccountId: string;
   renewalRetryCount: number;
   creationTime: Date | string;
+}
+
+/**
+ * Result of paying an overdue / suspended subscription on the spot.
+ * `payParams` is the channel client secret: hand it to Stripe.js `confirmPayment` (handles 3-D Secure).
+ */
+export interface SubscriptionPayNowResultDto {
+  subscriptionId: string;
+  tradeNo?: string | null;
+  payParams?: string | null;
+  payUrl?: string | null;
+  amount: number;
+  taxAmount: number;
+  currency: string;
+  expireTime?: Date | string | null;
+  channelCode: string;
+  /** Nothing to charge (free plan / fully discounted trial): the subscription was restored without a payment. */
+  settledWithoutPayment: boolean;
+}
+
+/**
+ * The billing account the current user acts for.
+ */
+export interface BillingAccountDto {
+  accountType: string;
+  accountId: string;
+  /** Whether the current user may pay, change subscriptions and cards for this account. */
+  canManage: boolean;
+  displayName?: string | null;
+  billingEmails: string[];
+  address?: string | null;
+  taxId?: string | null;
+}
+
+/**
+ * The current user's billing standing (`GET subscriptions/standing`).
+ *
+ * Any signed-in user may read it and the access gate never blocks it, so the
+ * shell can always learn why it is being refused. The subscription fields name
+ * the subscription that needs action and are all null when the caller may not
+ * see billing details (`canView === false`) or nothing needs action.
+ */
+export interface BillingStandingDto {
+  standing: BillingStanding;
+  /** May see billing details (in User scope: always true for the own account). */
+  canView: boolean;
+  /** May pay and change cards: decided by the server, never re-derived on the client. */
+  canManage: boolean;
+  /** Whether the server-side access gate is switched on. */
+  gateEnabled: boolean;
+  /**
+   * The gate does not apply to this user (platform super admin, a bypass
+   * permission, gate off, or no billing account behind the user). A suspended
+   * standing is then informational: the server will not refuse their requests.
+   */
+  isExempt: boolean;
+  subscriptionId?: string | null;
+  subscriptionNo?: string | null;
+  planName?: string | null;
+  status?: SubscriptionStatus | null;
+  pastDueSince?: Date | string | null;
+  /** When a past-due subscription will be suspended or expired. */
+  graceDeadline?: Date | string | null;
+  suspendedAt?: Date | string | null;
+  amountDue?: number | null;
+  currency?: string | null;
+}
+
+/**
+ * Update the current billing account's billing profile.
+ */
+export interface UpdateBillingAccountDto {
+  displayName?: string | null;
+  billingEmails?: string[] | null;
+  address?: string | null;
+  taxId?: string | null;
+}
+
+/**
+ * Browser-safe channel configuration (Stripe publishable key) for mounting the channel's payment UI.
+ */
+export interface PaymentClientConfigDto {
+  channelCode: string;
+  publishableKey?: string | null;
 }
 
 /**
@@ -294,7 +398,6 @@ export interface CreateSubscriptionDto {
   paymentMethodToken?: string;
   /** Existing stored payment method; falls back to the channel default when omitted. */
   paymentMethodId?: string;
-  extraData?: string;
 }
 
 /**
@@ -350,6 +453,9 @@ export interface SubscriptionQueryDto extends PagedQueryDto {
   status?: SubscriptionStatus;
   planId?: string;
   autoRenew?: boolean;
+  /** Filter by billing account type (admin list); pair with `billingAccountId`. */
+  billingAccountType?: string;
+  billingAccountId?: string;
 }
 
 /**
@@ -369,8 +475,56 @@ export interface SubscriptionPlanDto {
   trialDays: number;
   allowTrial: boolean;
   trialDiscount?: number | null;
+  /**
+   * Storage the plan includes, in bytes (1 GB = 2^30 bytes, see
+   * `STORAGE_BYTES_PER_GB`). Null: the plan does not meter storage - no
+   * sampling, no limit, no overage.
+   */
+  includedStorageBytes?: number | null;
+  /** Price per GB-month above the included storage, in the plan's currency. Null or 0: metered, not charged. */
+  storageOveragePricePerGbMonth?: number | null;
   sortOrder: number;
   isActive: boolean;
+  /**
+   * What one period's price comes to under the deployment's tax rules. Filled
+   * by the customer plan list only (`GET subscriptions/plans`); null on the
+   * admin list, and when the tax calculator could not answer.
+   */
+  tax?: SubscriptionPlanTaxDto | null;
+}
+
+/**
+ * What the admin plan create / update endpoints accept. `id` is absent on
+ * create: the server's `Guid` cannot bind an empty string, and one field that
+ * fails to bind makes the whole body fail ("The dto field is required.").
+ * A blank `currency` takes the deployment's `Payment:DefaultCurrency`.
+ */
+export type SubscriptionPlanWriteDto = Omit<SubscriptionPlanDto, 'id' | 'tax'> & { id?: string };
+
+/** Values a new plan form starts with (`GET admin/subscriptions/plans/defaults`). */
+export interface SubscriptionPlanDefaultsDto {
+  /** The deployment's default currency (`Payment:DefaultCurrency`). */
+  currency: string;
+}
+
+/** One period of a plan, taxed the way its first payment will be. */
+export interface SubscriptionPlanTaxDto {
+  /** The price already includes the tax (the payable amount equals the price). */
+  taxIncluded: boolean;
+  /** Tax for one period; 0 when no tax applies. */
+  taxAmount: number;
+  /** What one period charges: price plus tax, or the price when tax is included. */
+  payableAmount: number;
+  lines: TaxLineDto[];
+}
+
+/** One tax line, as printed on invoices and receipts (e.g. `HST`, 13, registration number). */
+export interface TaxLineDto {
+  name: string;
+  /** Percent (13 = 13%). */
+  rate: number;
+  amount: number;
+  registrationNumber?: string | null;
 }
 
 /**
@@ -506,6 +660,15 @@ export interface InvoiceDto {
   dueDate?: Date | string | null;
   paidDate?: Date | string | null;
   pdfFileUrl?: string | null;
+  /** How many times the invoice has been delivered (capped by the server). */
+  sendCount?: number;
+  lastSentTime?: Date | string | null;
+  /** Card the invoice / receipt was paid with, when known. */
+  paymentMethodBrand?: string | null;
+  paymentMethodLast4?: string | null;
+  /** Credit notes: the invoice they credit, and the refund they were issued for. */
+  originalInvoiceId?: string | null;
+  refundId?: string | null;
   notes?: string | null;
   lineItems: InvoiceLineItemDto[];
   creationTime: Date | string;
@@ -523,6 +686,11 @@ export interface InvoiceLineItemDto {
   taxRate: number;
   taxAmount: number;
   productCode?: string | null;
+  /** Service period the line covers (subscription payments). */
+  periodStart?: Date | string | null;
+  periodEnd?: Date | string | null;
+  /** What kind of line this is, when it is a special one (`STORAGE_OVERAGE_LINE_KIND`); empty for ordinary lines. */
+  kind?: string | null;
 }
 
 /**
@@ -542,7 +710,6 @@ export interface InvoiceQueryDto extends PagedQueryDto {
  */
 export interface CreateInvoiceDto {
   type?: InvoiceType;
-  paymentId?: string;
   /** Billing owner - required for manual invoices to appear under "my invoices". */
   userId?: string;
   /** Required for manual invoices; filled from the payment snapshot otherwise. */
@@ -810,47 +977,9 @@ export interface CreateRedemptionCodeDto {
   perUserLimit?: number;
 }
 
-/**
- * Coupon DTO (legacy compatibility for admin promotion listing)
- */
-export interface CouponDto extends AuditedEntity<string> {
-  promotionCode?: string;
-  code: string;
-  name: string;
-  type: CouponType;
-  value: number;
-  minAmount: number;
-  maxDiscount?: number | null;
-  startDate: Date | string;
-  endDate: Date | string;
-  totalCount: number;
-  usedCount: number;
-  perUserLimit: number;
-  isEnabled: boolean;
-  isActive?: boolean;
-  applicableBusinessTypes?: BusinessType[];
-}
-
 // ============================================
 // Payment Channel Types
 // ============================================
-
-/**
- * Payment channel DTO
- */
-export interface PaymentChannelDto {
-  code: string;
-  name: string;
-  type: string;
-  icon?: string | null;
-  isEnabled: boolean;
-  supportedMethods: PaymentMethod[];
-  supportedCurrencies: string[];
-  minAmount: number;
-  maxAmount: number;
-  feeRate: number;
-  feeFixed: number;
-}
 
 /**
  * Payment params DTO (for provider SDK/redirect integration)
@@ -860,25 +989,6 @@ export interface PaymentParamsDto {
   clientSecret?: string | null;
   orderId?: string | null;
   availableMethods: string[];
-}
-
-// ============================================
-// Payment Log Types
-// ============================================
-
-/**
- * Payment log DTO
- */
-export interface PaymentLogDto {
-  id: string;
-  paymentId: string;
-  action: string;
-  status: PaymentStatus;
-  message?: string | null;
-  requestData?: string | null;
-  responseData?: string | null;
-  createdAt: Date | string;
-  createdBy?: string | null;
 }
 
 // ============================================
@@ -892,11 +1002,18 @@ export interface PaymentStatisticsDto {
   startTime: Date | string;
   endTime: Date | string;
   totalRevenue: number;
+  /**
+   * Currency of the amounts: the one currency collected in the window, the
+   * deployment default when nothing was collected, `null` when currencies are
+   * mixed (the totals are then a plain sum and must not carry a symbol).
+   */
+  currency?: string | null;
   totalTransactions: number;
   successfulTransactions: number;
   failedTransactions: number;
   totalRefunds: number;
   refundCount: number;
+  /** Refunds per transaction as a percentage on a 0-100 scale (6 = 6%), not a fraction. */
   refundRate: number;
   /**
    * Active subscription count, or `null` when this deployment does not do
@@ -961,6 +1078,7 @@ export interface SubscriptionMetricsDto {
   trialSubscriptions: number;
   newSubscriptionsThisMonth: number;
   cancelledThisMonth: number;
+  /** This month's cancellations over last month's active subscriptions, as a percentage on a 0-100 scale. */
   churnRate: number;
   averageRevenuePerUser: number;
   planDistribution: PlanDistributionDto[];
@@ -1047,7 +1165,12 @@ export interface ReconciliationQueryDto {
  * Reconciliation export result DTO
  */
 export interface ReconciliationExportResultDto {
-  csvContent: string;
+  /**
+   * Null on the summary endpoint, which reports counts and totals without the file.
+   * The CSV download carries the same counts in the `X-Reconciliation-Total-Records`,
+   * `X-Reconciliation-Matched-Records` and `X-Reconciliation-Truncated` response headers.
+   */
+  csvContent?: string | null;
   fileName: string;
   /** Rows that matched the query window, before the export cap. */
   matchedRecords: number;
@@ -1058,4 +1181,43 @@ export interface ReconciliationExportResultDto {
   totalRevenue: number;
   totalRefunds: number;
   netRevenue: number;
+}
+
+/**
+ * The billing account's storage against its plan's allowance
+ * (`GET subscriptions/storage-usage`). Bytes are 1 GB = 2^30 bytes.
+ */
+export interface StorageUsageDto {
+  /**
+   * There is a storage reading to show: the subscription in force meters storage, or, with none in force,
+   * the product has a plan that does. False: every other field is empty.
+   */
+  metered: boolean;
+  /** The reading is for a subscription in force. False: not subscribed yet (or the first payment is unpaid); read against the plan on offer, nothing accrues. */
+  subscribed: boolean;
+  /** The server can measure storage (the storage module is loaded). False: metered but unmeasured, nothing is charged. */
+  usageAvailable: boolean;
+  subscriptionId?: string | null;
+  planName?: string | null;
+  /** The plan's allowance. Empty before subscribing when the product sells several plans (each card states its own). */
+  includedBytes?: number | null;
+  /** Current usage: today's daily sample, else a reading taken on demand (cached a few minutes); empty when storage cannot be measured. */
+  usedBytes?: number | null;
+  /** When the reading was taken (a daily sample reads as that day, 00:00 UTC). */
+  sampledOn?: Date | string | null;
+  periodStart?: Date | string | null;
+  /** Next billing date: the overage accrued in this period is charged with that renewal. */
+  periodEnd?: Date | string | null;
+  /** Days sampled so far this period. */
+  sampleDays: number;
+  /** Average of this period's samples so far. */
+  averageBytes?: number | null;
+  /** GB-months above the allowance at this period's average so far. */
+  overageQuantity: number;
+  /** Price per GB-month; empty when overage is not charged. */
+  overageUnitPrice?: number | null;
+  /** What the renewal would add for storage if this period ended now (before tax). Always 0 in a trial. */
+  accruedOverageAmount: number;
+  currency?: string | null;
+  inTrial: boolean;
 }

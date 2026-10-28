@@ -25,6 +25,10 @@ export const REFRESH_TOKEN_REUSED = 'IDENTITY_REFRESH_TOKEN_REUSED';
  * The request's client fingerprint no longer matches the one captured when the
  * session was created - the token is being presented from a different browser
  * or device.
+ *
+ * Reserved: the backend revokes the session on a mismatch but does not put this
+ * code on any response yet (the refresh that follows answers a plain "invalid
+ * refresh token"), so such a session currently ends as `'expired'`.
  */
 export const SESSION_BINDING_MISMATCH = 'IDENTITY_SESSION_BINDING_MISMATCH';
 

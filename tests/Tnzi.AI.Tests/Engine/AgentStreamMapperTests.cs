@@ -145,40 +145,57 @@ public class AgentStreamMapperTests
     }
 
     [Fact]
-    public void TryMapFailure_ConcurrencyConflict_MapsTo409AndKeepsTheRetryableCode()
+    public void TryMapFailure_UsageLimitReachedAfterTheTurnWasQueued_Is429_NotAnInternalError()
     {
-        // 服务层把预留并发冲突定为「可重试的 409」；FinishReason 只有 Error 一档，
-        // 没有错误码透传的话这里只能贴 500——「重试即可」在最后一跳被翻译成「内部错误」。
+        // 外部运行认领后才撞上用户的用量上限：运行以 Failed 结束，结束原因只有 Error 一档，
+        // 没有错误码透传的话这里只能贴 500——「过一阵再来」在最后一跳被翻译成「内部错误」。
         var result = new AgentRunResult
         {
             Response = string.Empty,
             FinishReason = FinishReasons.Error,
-            ErrorCode = ErrorCodes.QuotaConcurrencyConflict
+            ErrorCode = ErrorCodes.UsageLimitReached
         };
 
         var mapped = AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out var status, out var code);
 
         mapped.ShouldBeTrue();
-        status.ShouldBe(409);
-        code.ShouldBe(ErrorCodes.QuotaConcurrencyConflict);
+        status.ShouldBe(429);
+        code.ShouldBe(ErrorCodes.UsageLimitReached);
+    }
+
+    [Fact]
+    public void TryMapFailure_QuotaExceededFinish_KeepsTheUsageLimitCode()
+    {
+        // 预算耗尽与用量上限共用 quota_exceeded 这个结束原因，错误码把两者分开
+        var result = new AgentRunResult
+        {
+            Response = string.Empty,
+            FinishReason = FinishReasons.QuotaExceeded,
+            ErrorCode = ErrorCodes.UsageLimitReached
+        };
+
+        AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out var status, out var code).ShouldBeTrue();
+
+        status.ShouldBe(429);
+        code.ShouldBe(ErrorCodes.UsageLimitReached);
     }
 
     [Fact]
     public void TryMapFailure_ErrorWithSpecificCode_SurfacesThatCodeAt500()
     {
-        // 结果自带更具体的错误码（如配额记录缺失）时透传给客户端，而不是盖成通用码
+        // 结果自带更具体的错误码（如计量子系统失败）时透传给客户端，而不是盖成通用码
         var result = new AgentRunResult
         {
             Response = string.Empty,
             FinishReason = FinishReasons.Error,
-            ErrorCode = ErrorCodes.QuotaCheckFailed
+            ErrorCode = ErrorCodes.UsageLimitCheckFailed
         };
 
         var mapped = AgentStreamMapper.TryMapFailure(result, ErrorCodes.AgentRunFailed, out var status, out var code);
 
         mapped.ShouldBeTrue();
         status.ShouldBe(500);
-        code.ShouldBe(ErrorCodes.QuotaCheckFailed);
+        code.ShouldBe(ErrorCodes.UsageLimitCheckFailed);
     }
 
     [Fact]

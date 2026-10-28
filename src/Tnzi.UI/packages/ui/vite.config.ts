@@ -37,7 +37,7 @@ export default defineConfig({
       // `@import '@tnzi/ui/style.css'` keep resolving.
       cssFileName: 'style',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) =>
         id === 'vue'
         || id === 'naive-ui'
@@ -49,6 +49,14 @@ export default defineConfig({
         || id.startsWith('@vueuse/')
         || id.startsWith('@tnzi/core')
         || id.startsWith('@iconify/'),
+      // No cross-module constant inlining in this library build. With
+      // `preserveModules` it leaves the import of an inlined constant behind as
+      // a bare `import "../../utils/placeholders.js"`, which a consumer's
+      // bundler then has to drop with an "ignored bare import" warning, since
+      // package.json declares the module side-effect free. Inlining buys
+      // nothing here: consumers' bundlers inline constants themselves (measured
+      // 2026-10-17: the barrels come out 0.05 kB smaller without it).
+      optimization: { inlineConst: false },
       output: {
         preserveModules: true,
         preserveModulesRoot: resolve(import.meta.dirname, 'src'),

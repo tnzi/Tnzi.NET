@@ -144,26 +144,26 @@ public class CheckBatchComposer
     /// （占号 + 参考号回写）由 <c>CheckService</c> 在同一个 UoW 内完成，这里只回答「能不能」。
     /// 「已有 Issued 票」答 409 而不是 400：与打印路径同一个码，换票的正路是 Reprint。
     /// </remarks>
-    public async Task<Result> ResolveManualCheckPaymentAsync(Guid paymentEntryId, BankAccount bank, CancellationToken cancellationToken = default)
+    public async Task<Result<PaymentEntry>> ResolveManualCheckPaymentAsync(Guid paymentEntryId, BankAccount bank, CancellationToken cancellationToken = default)
     {
         Check.NotNull(bank);
         var payment = await _paymentRepository.AsNoTracking().FirstOrDefaultAsync(p => p.Id == paymentEntryId, cancellationToken);
         if (payment == null)
-            return Result.Failure("Payment not found.", 404);
+            return Result<PaymentEntry>.Failure("Payment not found.", 404);
 
         var eligible = ValidateCheckEligibility(payment);
         if (!eligible.Succeeded)
-            return eligible;
+            return Result<PaymentEntry>.Failure(eligible.Message!, eligible.Code ?? 400);
 
         if (payment.DepositToAccountId != bank.AccountId)
-            return Result.Failure($"Payment '{payment.Number ?? payment.Id.ToString()}' is not funded from the selected bank account.", 400);
+            return Result<PaymentEntry>.Failure($"Payment '{payment.Number ?? payment.Id.ToString()}' is not funded from the selected bank account.", 400);
 
         var alreadyIssued = await _checkRepository.AsNoTracking().AnyAsync(
             c => c.Status == CheckStatus.Issued && c.PaymentEntryId == paymentEntryId, cancellationToken);
         if (alreadyIssued)
-            return Result.Failure("This payment already has an issued check. Use reprint instead.", 409);
+            return Result<PaymentEntry>.Failure("This payment already has an issued check. Use reprint instead.", 409);
 
-        return Result.Success();
+        return Result<PaymentEntry>.Success(payment);
     }
 
     /// <summary>
@@ -242,6 +242,12 @@ public class CheckBatchComposer
             Reference = payment.Reference,
             StubLines = stubLines == null ? [] : [.. stubLines]
         };
+
+    /// <summary>
+    /// 按配置位数渲染支票号，与票面、MICR 串行号同一个形状（见 <see cref="CheckNumberFormat"/>）。
+    /// </summary>
+    public string FormatCheckNumber(long checkNumber)
+        => CheckNumberFormat.Format(checkNumber, _checkOptions.CheckNumberDigits);
 
     /// <summary>按渲染器自报的内容类型/扩展名落地文件（HTML 或 PDF）。</summary>
     public static CheckFileDto BuildFile(ICheckDocumentRenderer renderer, string baseName, byte[] content)

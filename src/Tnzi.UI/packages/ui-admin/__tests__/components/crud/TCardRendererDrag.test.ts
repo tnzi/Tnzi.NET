@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, computed, defineComponent, h } from 'vue'
 
@@ -225,5 +225,60 @@ describe('TCardRenderer drag-to-reorder', () => {
     state.items.value = [{ id: 9, name: 'Z' }]
     await flushPromises()
     expect(rendered(wrapper)).toEqual(['Z'])
+  })
+})
+
+/**
+ * Cards that open on click: releasing a drag must not open the card it moved, while a plain click still does.
+ */
+describe('TCardRenderer click after a drag', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  async function mountClickable() {
+    const opened = vi.fn()
+    const wrapper = mount(TCardRenderer, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      props: { state: makeState() as any, draggable: true },
+      slots: {
+        card: (params: { item: Row }) => h('div', { class: 'card-item', onClick: () => opened(params.item.id) }, params.item.name),
+      },
+    })
+    await flushPromises()
+    return { wrapper, opened }
+  }
+
+  it('a plain click reaches the card', async () => {
+    const { wrapper, opened } = await mountClickable()
+
+    await wrapper.findAll('.card-item')[1].trigger('click')
+
+    expect(opened).toHaveBeenCalledWith(2)
+  })
+
+  it('the click a released drag delivers is swallowed, and the next click goes through', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(10_000)
+    const { wrapper, opened } = await mountClickable()
+
+    drag.onStart?.()
+    await flushPromises()
+    drag.onEnd?.({ oldIndex: 0, newIndex: 0 })
+    await flushPromises()
+    await wrapper.findAll('.card-item')[0].trigger('click')
+    expect(opened).not.toHaveBeenCalled()
+
+    // Only the first click inside the window is the drag's own
+    await wrapper.findAll('.card-item')[0].trigger('click')
+    expect(opened).toHaveBeenCalledWith(1)
+
+    // A click long after a gesture is an ordinary click
+    drag.onStart?.()
+    await flushPromises()
+    drag.onEnd?.({ oldIndex: 0, newIndex: 0 })
+    await flushPromises()
+    now.mockReturnValue(20_000)
+    await wrapper.findAll('.card-item')[2].trigger('click')
+    expect(opened).toHaveBeenCalledWith(3)
   })
 })

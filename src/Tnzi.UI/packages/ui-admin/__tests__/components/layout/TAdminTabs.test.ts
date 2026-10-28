@@ -133,6 +133,34 @@ describe('TAdminTabs', () => {
     expect(removed).toBe('users')
   })
 
+  // The x and the context menu used to move only the highlight: the closed
+  // page stayed on screen under its URL. With the shell's navigator bound, the
+  // close puts the neighbour's page on screen.
+  it('★ closing the tab on screen puts its neighbour on screen', async () => {
+    const store = seed()
+    const shown: Array<string | null> = []
+    store.bindNavigation((tab) => shown.push(tab ? tab.fullPath : null))
+    const wrapper = mount(TAdminTabs, {
+      global: { stubs: { VueDraggable: draggableStub, Dropdown: dropdownStub } },
+    })
+    await wrapper.findAll('.t-admin-tabs__close')[0]!.trigger('click')
+    expect(shown).toEqual(['/roles'])
+    expect(store.activeTabId).toBe('roles')
+  })
+
+  it('★ Close all from the context menu puts the home tab on screen', async () => {
+    const store = seed()
+    const shown: Array<string | null> = []
+    store.bindNavigation((tab) => shown.push(tab ? tab.fullPath : null))
+    const wrapper = mount(TAdminTabs, {
+      global: { stubs: { VueDraggable: draggableStub, Dropdown: dropdownStub } },
+    })
+    await wrapper.findAll('.t-admin-tabs__tab')[2]!.trigger('contextmenu', { clientX: 1, clientY: 1 })
+    ;(wrapper.vm as unknown as { onContextSelect: (k: string) => void }).onContextSelect('close-all')
+    expect(shown).toEqual(['/'])
+    expect(store.tabs).toHaveLength(0)
+  })
+
   it('home tab has no close button', () => {
     seed()
     const wrapper = mount(TAdminTabs, {

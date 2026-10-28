@@ -58,6 +58,21 @@ public static class ErrorCodes
     public const string FeatureValueProviderKeyNotAllowed = "FEATURE_VALUE_PROVIDER_KEY_NOT_ALLOWED";
 
     /// <summary>
+    /// The provider key can never be matched by the provider (a tenant-scoped value whose key is not a tenant id).
+    /// </summary>
+    public const string FeatureValueProviderKeyInvalid = "FEATURE_VALUE_PROVIDER_KEY_INVALID";
+
+    /// <summary>
+    /// A text field is longer than its column (value, default value, name, ...).
+    /// </summary>
+    public const string FeatureFieldTooLong = "FEATURE_FIELD_TOO_LONG";
+
+    /// <summary>
+    /// A batch names the same feature definition more than once, so which value wins is ambiguous.
+    /// </summary>
+    public const string FeatureValueBatchDuplicate = "FEATURE_VALUE_BATCH_DUPLICATE";
+
+    /// <summary>
     /// The feature definition comes from code (<c>IFeatureDefinitionProvider</c>) and has no
     /// database row, so no value can be attached to it yet.
     /// </summary>

@@ -74,6 +74,16 @@ public class DefaultStorageController : ApiControllerBase
         "This capability requires the Tnzi.Storage.Workspace module, which this host has not loaded.";
 
     /// <summary>
+    /// 当前用户自己的存储配额：已用多少字节、可用多少（<c>allowanceBytes</c> 为 null 表示不限）。
+    /// </summary>
+    [HttpGet("quota")]
+    public virtual async Task<ApiResult<StorageQuotaDto>> GetMyQuota()
+    {
+        var result = await FileStorageService.GetMyStorageQuotaAsync(HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 根据 ID 获取文件
     /// </summary>
     [HttpGet("{id:guid}")]
@@ -107,8 +117,22 @@ public class DefaultStorageController : ApiControllerBase
     /// <c>[FileField(Public = true)]</c> 的实体字段时,框架会自行补上公开标记,
     /// 所以头像不会因为前端漏传这个参数而失效。
     /// </param>
+    /// <param name="isTemporary">
+    /// 这份文件的生命周期。不传（默认）= <b>临时上传</b>:先传后绑,只由 <c>[FileField]</c> 引用持有,
+    /// 没被任何实体字段引用的话,开启后台清理后过了 <c>Storage:Cleanup:OrphanFileRetentionHours</c> 就被回收
+    /// (头像、附件这类「先传、再把 id 写进业务记录」的用法)。
+    ///
+    /// 传 <c>false</c> = <b>正式记录</b>:上传本身就是持有者,没有任何引用也一直保留,直到被显式删除
+    /// (文件库这类「传上来就是为了留着」的用法)。与分片上传完成接口、批量上传的语义一致,不扩大任何暴露面:
+    /// 那两条路径本来就落正式记录。
+    ///
+    /// ★ 用户文件空间的上传不走这里,走 <c>POST storage/space/files</c>(<c>Tnzi.Storage.Workspace</c>):
+    /// 那条路径落正式记录、不做 MD5 去重(同一份字节存进两个目录是两个文件)、并在同一次请求里放进目标目录。
+    /// 正式上传在这里会按 MD5 复用调用者已有的相同记录,两次上传拿到同一个 id。
+    /// </param>
     [HttpPost("upload")]
-    public virtual async Task<ApiResult<FileRecordDto>> Upload(IFormFile file, [FromForm] bool isPublic = false)
+    [StorageUploadLimit]
+    public virtual async Task<ApiResult<FileRecordDto>> Upload(IFormFile file, [FromForm] bool isPublic = false, [FromForm] bool? isTemporary = null)
     {
         if (file == null || file.Length == 0)
         {
@@ -116,7 +140,7 @@ public class DefaultStorageController : ApiControllerBase
         }
 
         using var stream = file.OpenReadStream();
-        var result = await FileStorageService.SaveAsync(file.FileName, stream, isTemporary: true, isPublic: isPublic);
+        var result = await FileStorageService.SaveAsync(file.FileName, stream, isTemporary: isTemporary ?? true, isPublic: isPublic);
         return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 
@@ -124,6 +148,7 @@ public class DefaultStorageController : ApiControllerBase
     /// 批量上传
     /// </summary>
     [HttpPost("upload/batch")]
+    [StorageUploadLimit]
     public virtual async Task<ApiResult<IEnumerable<FileRecordDto>>> UploadMany(IEnumerable<IFormFile> files, [FromForm] bool isPublic = false)
     {
         if (files == null || !files.Any())
@@ -190,9 +215,13 @@ public class DefaultStorageController : ApiControllerBase
                 Response.StatusCode = 206;
                 Response.ContentLength = end - start + 1;
 
+                // ★ 不开 enableRangeProcessing：流里已经只有 [start, end] 这一段，206 与 Content-Range 也已手写。
+                //   开着它，执行器会把这一段当成整个文件，再按请求的 Range 头切一次：段流可 seek 时
+                //   （内置 InMemory、返回 MemoryStream 的自定义 provider）中段请求得 416、首段的总长被改写成段长、
+                //   跨段请求发出的是错位的字节。只有段流恰好不可 seek（Local / 云 provider 的网络流）时才看不出来。
                 return File(stream, record.ContentType ?? "application/octet-stream",
                     record.OriginalName ?? record.FileName,
-                    enableRangeProcessing: true);
+                    enableRangeProcessing: false);
             }
         }
 
@@ -222,6 +251,14 @@ public class DefaultStorageController : ApiControllerBase
         }
         var record = recordResult.Data!;
 
+        // 与 Preview 同一套缓存指令（按 IsPublic 分），ETag 由缩略图自己的键派生：304 在取字节之前返回，
+        // 文件管理器一页几十张缩略图，重新进入目录时不再逐张重走授权与 provider 下载。
+        var etag = ApplyThumbnailCacheHeaders(record);
+        if (etag != null && IfNoneMatchMatches(etag))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
         var thumbnailResult = await FileStorageService.GetThumbnailAsync(id);
         if (!thumbnailResult.Succeeded)
         {
@@ -229,6 +266,7 @@ public class DefaultStorageController : ApiControllerBase
         }
         var thumbnailStream = thumbnailResult.Data!;
 
+        Response.Headers.XContentTypeOptions = "nosniff";
         return File(thumbnailStream, "image/jpeg", $"thumb_{record.FileName}");
     }
 
@@ -323,6 +361,26 @@ public class DefaultStorageController : ApiControllerBase
     /// </remarks>
     protected virtual string? ApplyPreviewCacheHeaders(FileRecord record)
     {
+        ApplyFileCacheDirectives(record);
+        return ApplyEtag(PreviewEtagHelper.Compute(record));
+    }
+
+    /// <summary>
+    /// 按记录写缩略图响应的缓存指令与 <c>ETag</c>，返回本响应的 ETag（没有缩略图时为 null）。
+    /// </summary>
+    /// <remarks>
+    /// 缓存指令与 <see cref="ApplyPreviewCacheHeaders"/> 相同（理由见那里）。ETag 由记录 id 与缩略图的存储键派生
+    /// （<see cref="PreviewEtagHelper.ComputeThumbnail"/>）：每次生成缩略图都落在新键上，建版本 / 回填换掉缩略图后
+    /// 旧副本在第一次重验证时就被换掉；与预览的 ETag 不同值，两条路由的缓存互不冒用。
+    /// </remarks>
+    protected virtual string? ApplyThumbnailCacheHeaders(FileRecord record)
+    {
+        ApplyFileCacheDirectives(record);
+        return ApplyEtag(PreviewEtagHelper.ComputeThumbnail(record));
+    }
+
+    private void ApplyFileCacheDirectives(FileRecord record)
+    {
         if (record.IsPublic)
         {
             Response.Headers.CacheControl = $"public, max-age={PublicPreviewMaxAgeSeconds}";
@@ -333,8 +391,10 @@ public class DefaultStorageController : ApiControllerBase
             // Append 而不是赋值：CORS 中间件在到达控制器之前已经写了 Vary: Origin，覆盖会把它抹掉。
             Response.Headers.Append(HeaderNames.Vary, "Authorization");
         }
+    }
 
-        var etag = PreviewEtagHelper.Compute(record);
+    private string? ApplyEtag(string? etag)
+    {
         if (etag == null)
         {
             return null;
@@ -464,6 +524,7 @@ public class DefaultStorageController : ApiControllerBase
     /// 创建文件版本
     /// </summary>
     [HttpPost("{id:guid}/versions")]
+    [StorageUploadLimit]
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileVersionDto>> CreateVersion(
         Guid id,
@@ -538,8 +599,28 @@ public class DefaultStorageController : ApiControllerBase
         }
 
         var contentType = record.ContentType ?? "application/octet-stream";
-        var fileName = $"{record.OriginalName ?? record.FileName}.v{version}";
-        return File(contentResult.Data!, contentType, fileName);
+        return File(contentResult.Data!, contentType, VersionedFileName(record.OriginalName ?? record.FileName, version));
+    }
+
+    /// <summary>
+    /// 历史版本下载的文件名：版本号插在扩展名<b>之前</b>（<c>report.pdf</c> → <c>report.v2.pdf</c>）。
+    /// 此前拼在末尾（<c>report.pdf.v2</c>），下载下来的文件操作系统认不出类型、双击打不开。
+    /// </summary>
+    /// <remarks>
+    /// 规则刻意手写而不用 <see cref="Path.GetExtension(string)"/>：后者的分隔符随操作系统而变（Linux 上 <c>\</c>
+    /// 只是普通字符），而前端 <c>@tnzi/core</c> 的 <c>versionedFileName</c> 必须与这里逐字同一条规则，
+    /// 同一个版本经 Blob 下载与直接下载才落成同一个名字。规则：只看最后一个 <c>/</c> 或 <c>\</c> 之后那一段；
+    /// 扩展名从这段里最后一个点算起，但这个点既不能是这段的第一个字符（<c>.gitignore</c> 这类点文件），
+    /// 也不能是整个名字的最后一个字符（<c>notes.</c>）；没有扩展名就把版本号接在末尾。
+    /// </remarks>
+    protected static string VersionedFileName(string fileName, int version)
+    {
+        var separator = Math.Max(fileName.LastIndexOf('/'), fileName.LastIndexOf('\\'));
+        var dot = fileName.LastIndexOf('.');
+        var hasExtension = dot > separator + 1 && dot < fileName.Length - 1;
+        return hasExtension
+            ? $"{fileName[..dot]}.v{version}{fileName[dot..]}"
+            : $"{fileName}.v{version}";
     }
 
     /// <summary>
@@ -750,6 +831,7 @@ public class DefaultStorageController : ApiControllerBase
     /// 上传分块
     /// </summary>
     [HttpPost("upload/chunk/{uploadSessionId:guid}")]
+    [StorageUploadLimit]
     [ApiExplorerSettings(IgnoreApi = true)]
     public virtual async Task<ApiResult<FileChunkDto>> UploadChunk(
         Guid uploadSessionId,
@@ -783,7 +865,8 @@ public class DefaultStorageController : ApiControllerBase
 
         var result = await FileChunkUploadService.CompleteChunkedUploadAsync(
             uploadSessionId,
-            request?.IsTemporary ?? false);
+            request?.IsTemporary ?? false,
+            request?.FolderId);
         return result.Map(r => r.MapTo<FileRecordDto>()).ToApiResult();
     }
 

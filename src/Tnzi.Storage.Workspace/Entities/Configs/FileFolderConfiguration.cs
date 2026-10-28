@@ -36,12 +36,15 @@ public class FileFolderConfiguration : EntityTypeConfigurationBase<FileFolder, G
             .OnDelete(DeleteBehavior.Restrict);
 
         // Indexes
+        // ★ 路径按「所有者」唯一（CreatorId 就是目录的所有者，与 FileRecord 同一口径）：每个用户有自己的命名空间，
+        //   两个人都可以有 /Documents。此前是按租户唯一，用户 B 建不了 A 已有的 /Documents，那个 409 还顺带
+        //   告诉了 B 别人目录的名字。
         if (multiTenancyEnabled)
         {
             builder.HasIndex(e => new { e.TenantId, e.ParentId })
                 .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
-            builder.HasIndex(e => new { e.TenantId, e.Path })
+            builder.HasIndex(e => new { e.TenantId, e.CreatorId, e.Path })
                 .IsUnique()
                 .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         }
@@ -50,9 +53,12 @@ public class FileFolderConfiguration : EntityTypeConfigurationBase<FileFolder, G
             builder.HasIndex(e => e.ParentId)
                 .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
 
-            builder.HasIndex(e => e.Path)
+            builder.HasIndex(e => new { e.CreatorId, e.Path })
                 .IsUnique()
                 .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         }
+
+        // 还原一条回收站条目时按它找回同一次删除带走的整棵子树。
+        builder.HasIndex(e => e.RecycleBinEntryId);
     }
 }

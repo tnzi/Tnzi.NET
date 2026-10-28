@@ -87,7 +87,8 @@ public sealed class PayslipCalculator
         var periodEnd = run.PeriodEnd.ToUtcDate();
         var payDate = run.PayDate.ToUtcDate();
 
-        // 1. 圈选员工：在册 + 有覆盖期间的分配 + 未在期初前离职 + 结构过滤匹配
+        // 1. 圈选员工：在册 + 有覆盖期间的分配 + 未在期初前离职 + 未在期末后才入职 + 结构过滤匹配
+        //    + 结构的发薪频率与批次相同
         //
         // ★ 分页扫描而不是一次性 ToList。候选面是「全部在册员工」，与批次大小无关 ——
         // 周薪 800 人加月薪 200 人的公司跑一次月薪，候选 1000 而入选 200 ——
@@ -105,6 +106,9 @@ public sealed class PayslipCalculator
         // 判据在 PayRunEligibility ——「谁进这个批次」必须与一次性输入的录入端同口径，
         // 两处各写一份的话，漂移的症状是输入被收下、跑批时那个人不在批次里。
         var eligible = new List<(Employee Employee, SalaryAssignment Assignment)>();
+        // 结构 → 发薪频率（圈选判据要它）。跨页累积：结构是每租户几十条的配置数据，
+        // 各页的分配大多指向同一批结构，只为没见过的那几个发一次查询。
+        var structureFrequencies = new Dictionary<Guid, PayFrequency>();
         for (var skipped = 0; ; skipped += CandidatePageSize)
         {
             var page = await pagedQuery.Skip(skipped).Take(CandidatePageSize).ToListAsync(cancellationToken);
@@ -120,10 +124,29 @@ public sealed class PayslipCalculator
                 .GroupBy(a => a.EmployeeId)
                 .ToDictionary(g => g.Key, g => PayRunEligibility.PickEffective(g, periodEnd));
 
+            var unseenStructureIds = resolvedAssignment.Values
+                .Where(a => a != null && !structureFrequencies.ContainsKey(a.StructureId))
+                .Select(a => a!.StructureId)
+                .Distinct()
+                .ToList();
+            if (unseenStructureIds.Count > 0)
+            {
+                var frequencies = await _structureRepo.AsNoTracking()
+                    .Where(s => unseenStructureIds.Contains(s.Id))
+                    .Select(s => new { s.Id, s.Frequency })
+                    .ToListAsync(cancellationToken);
+                foreach (var f in frequencies)
+                    structureFrequencies[f.Id] = f.Frequency;
+            }
+
             foreach (var employee in page)
             {
                 resolvedAssignment.TryGetValue(employee.Id, out var assignment);
-                if (PayRunEligibility.Evaluate(run, employee, assignment) != PayRunEligibilityStatus.Eligible)
+                // 结构查不到（被删了）时频率为 null：不在圈选时排除，让下面把它报成错误工资单。
+                PayFrequency? structureFrequency = assignment != null && structureFrequencies.TryGetValue(assignment.StructureId, out var frequency)
+                    ? frequency
+                    : null;
+                if (PayRunEligibility.Evaluate(run, employee, assignment, structureFrequency) != PayRunEligibilityStatus.Eligible)
                     continue;
 
                 eligible.Add((employee, assignment!));
@@ -139,6 +162,15 @@ public sealed class PayslipCalculator
                 break;
         }
 
+        // ★ 出口核对的另一半：一次性输入录给了一个此刻不在批次里的人（停用 / 离职日回填到期初之前 /
+        // 分配换到别的结构或频率 / 批次的结构过滤被改）。逐人核对只覆盖被圈选的员工，这些输入没有任何一处
+        // 读到它，批次照常算完、照常过账，那笔已批准的金额安静消失。所以整次计算失败并点名：
+        // 不落占位工资单，因为那个人本就不该在这个批次里（落了反而让「删掉那笔输入」也删不动）。
+        var inputMap = await BuildInputMapAsync(run.Id, cancellationToken);
+        var stranded = await DescribeStrandedInputsAsync(run, eligible, inputMap, employeeFilter, cancellationToken);
+        if (stranded != null)
+            return Result.Failure<List<Payslip>>(stranded, 400);
+
         if (eligible.Count == 0)
             return Result.Success(new List<Payslip>());
 
@@ -151,8 +183,6 @@ public sealed class PayslipCalculator
             .Where(s => structureIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, cancellationToken);
 
-        var inputMap = await BuildInputMapAsync(run.Id, cancellationToken);
-
         // 组件预取覆盖"结构行引用的"∪"一次性输入引用的"——后者可能已经不在结构里了，
         // 而那正是要报出来的情况，报的时候得说得出组件编码。
         var componentIds = structures.Values
@@ -162,6 +192,20 @@ public sealed class PayslipCalculator
         var components = await _componentRepo.AsNoTracking()
             .Where(c => componentIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, cancellationToken);
+
+        // ★ 读 GROSS 的行排在最后一个收入行之前 = 对不完整的毛额计税，不报错也不留痕。
+        // 结构保存与组件更新都会拦，这里兜住规则之外落库的、以及规则生效之前就已存在的结构：
+        // 落 CalculationError，批次因此过不了账。每个结构只判一次。
+        // 同理兜住组件编码与钩子声明的外部变量撞名（钩子升级后新声明的名字，既有组件与结构不会被重新保存）。
+        var externalVariables = PayrollExternalVariables.Collect(_hooks);
+        var structureErrors = structures.Values.ToDictionary(
+            s => s.Id,
+            s =>
+            {
+                var specs = s.Lines.Select(SalaryStructureRules.ToSpec).ToList();
+                return SalaryStructureRules.DescribeGrossOrderViolation(specs, components, _evaluator)
+                    ?? SalaryStructureRules.DescribeExternalVariableCollision(specs, components, externalVariables);
+            });
 
         var bracketResolver = await BuildBracketResolverAsync(payDate, cancellationToken);
         var ytdMap = await BuildYtdMapAsync(run, employeeIds, payDate, cancellationToken);
@@ -189,7 +233,7 @@ public sealed class PayslipCalculator
                 : periodDays;
 
             var payslip = await ComputeOneAsync(
-                run, employee, assignment, structure, components,
+                run, employee, assignment, structure, structureErrors[structure.Id], components,
                 bracketResolver, ytdMap, inputMap, workedDays, periodDays, periodsPerYear, decimals, cancellationToken);
             payslips.Add(payslip);
         }
@@ -224,6 +268,7 @@ public sealed class PayslipCalculator
         Employee employee,
         SalaryAssignment assignment,
         SalaryStructure structure,
+        string? structureError,
         IReadOnlyDictionary<Guid, SalaryComponent> components,
         Func<string, decimal, decimal> bracketResolver,
         IReadOnlyDictionary<(Guid, string), decimal> ytdMap,
@@ -234,7 +279,7 @@ public sealed class PayslipCalculator
         int decimals,
         CancellationToken cancellationToken)
     {
-        string? error = null;
+        string? error = structureError;
 
         // 扩展属性是自由 JSON，且写入口不止管理端（country pack 播种、外部同步、直连 SQL）：
         // 解析失败只该让这一张工资单带错，不该把整批计算炸成 500（有 Error 的批次本就禁止过账）
@@ -246,7 +291,7 @@ public sealed class PayslipCalculator
         catch (Exception ex)
         {
             attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            error = $"Employee attributes could not be parsed: {ex.Message}";
+            error ??= $"Employee attributes could not be parsed: {ex.Message}";
         }
 
         var context = new PayslipCalculationContext(run, employee, structure, assignment.BaseAmount)
@@ -556,6 +601,78 @@ public sealed class PayslipCalculator
             ((Dictionary<Guid, decimal>)byComponent)[row.ComponentId] = row.Amount;
         }
         return map;
+    }
+
+    /// <summary>一条报错里最多点名几个员工（其余只报个数，错误消息要有上界）。</summary>
+    private const int MaxStrandedEmployeesNamed = 10;
+
+    /// <summary>
+    /// 本批次里录了一次性输入、却不在本次圈选范围内的员工，有则给出错误文案（null = 没有）。
+    /// </summary>
+    /// <remarks>
+    /// 只核对本次计算覆盖的范围：<paramref name="employeeFilter"/> 非空时（只重算某一张工资单），
+    /// 别人名下的输入不归这一次管，整批计算时再报。原因与录入端同源（<see cref="PayRunEligibility"/>）。
+    /// </remarks>
+    private async Task<string?> DescribeStrandedInputsAsync(
+        PayRun run,
+        IReadOnlyCollection<(Employee Employee, SalaryAssignment Assignment)> eligible,
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<Guid, decimal>> inputMap,
+        IReadOnlyCollection<Guid>? employeeFilter,
+        CancellationToken cancellationToken)
+    {
+        var selected = eligible.Select(x => x.Employee.Id).ToHashSet();
+        var strandedIds = inputMap.Keys
+            .Where(id => !selected.Contains(id) && (employeeFilter == null || employeeFilter.Contains(id)))
+            .ToList();
+        if (strandedIds.Count == 0)
+            return null;
+
+        var periodEnd = run.PeriodEnd.ToUtcDate();
+        var employees = await _employeeRepo.AsNoTracking()
+            .Where(e => strandedIds.Contains(e.Id))
+            .ToDictionaryAsync(e => e.Id, cancellationToken);
+        var assignments = await _assignmentRepo.AsNoTracking()
+            .Where(a => strandedIds.Contains(a.EmployeeId) && a.EffectiveFrom <= periodEnd)
+            .ToListAsync(cancellationToken);
+        var effective = assignments
+            .GroupBy(a => a.EmployeeId)
+            .ToDictionary(g => g.Key, g => PayRunEligibility.PickEffective(g, periodEnd));
+        var structureIds = effective.Values.Where(a => a != null).Select(a => a!.StructureId).Distinct().ToList();
+        var frequencies = await _structureRepo.AsNoTracking()
+            .Where(s => structureIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.Frequency, cancellationToken);
+
+        var described = strandedIds
+            .Select(id =>
+            {
+                var count = inputMap[id].Count;
+                if (!employees.TryGetValue(id, out var employee))
+                    return (Key: id.ToString(), Text: $"employee {id} no longer exists ({count} input(s))");
+
+                var assignment = effective.GetValueOrDefault(id);
+                PayFrequency? frequency = assignment != null && frequencies.TryGetValue(assignment.StructureId, out var f) ? f : null;
+                var reason = PayRunEligibility.Evaluate(run, employee, assignment, frequency) switch
+                {
+                    PayRunEligibilityStatus.Inactive => "inactive",
+                    PayRunEligibilityStatus.Terminated => "terminated before the period starts",
+                    PayRunEligibilityStatus.NotYetHired => "hired after the period ends",
+                    PayRunEligibilityStatus.NoAssignment => "no salary assignment effective in the period",
+                    PayRunEligibilityStatus.StructureMismatch => "assigned to a structure this run does not include",
+                    PayRunEligibilityStatus.FrequencyMismatch => "paid at a different frequency",
+                    _ => "not selected by this run"
+                };
+                return (Key: employee.Code, Text: $"'{employee.Code}' ({reason}, {count} input(s))");
+            })
+            .OrderBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => x.Text)
+            .ToList();
+
+        var named = string.Join("; ", described.Take(MaxStrandedEmployeesNamed));
+        if (described.Count > MaxStrandedEmployeesNamed)
+            named += $"; and {described.Count - MaxStrandedEmployeesNamed} more";
+
+        return "One-time inputs were approved for employees this pay run does not include, so their amounts would be dropped: "
+            + named + ". Delete those inputs or make the employees eligible again, then calculate.";
     }
 
     /// <summary>

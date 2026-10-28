@@ -14,7 +14,10 @@ public enum KafkaConsumeOutcome
     /// <summary>重试耗尽且启用死信：投递到 DLQ 主题后提交。</summary>
     DeadLetter,
 
-    /// <summary>重试耗尽且未启用死信：不提交偏移量，等待重投（at-least-once，绝不静默丢弃）。</summary>
+    /// <summary>
+    /// 重试耗尽且未启用死信：不提交偏移量，Seek 回这条消息让分区卡住，下个周期重读重试（at-least-once，绝不静默丢弃）。
+    /// 只「不提交」是不够的：同分区下一条消息的提交会把它一起越过。
+    /// </summary>
     RedeliverWithoutCommit,
 
     /// <summary>

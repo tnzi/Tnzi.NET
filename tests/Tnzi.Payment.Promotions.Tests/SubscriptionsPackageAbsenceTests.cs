@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Tnzi.Payment.Options;
 
 namespace Tnzi.Payment.Promotions.Tests;
 
@@ -59,6 +60,7 @@ public class SubscriptionsPackageAbsenceTests
             new Mock<IRepository<CouponUsage, Guid>>().Object,
             new Mock<IRepository<UserCoupon, Guid>>().Object,
             OptionsMonitorOver(new PromotionOptions()),
+            new Mock<IOptionsMonitor<PaymentOptions>>().Object,
             LoggingServiceProvider());
 
         service.ShouldNotBeNull();

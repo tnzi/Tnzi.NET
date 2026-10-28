@@ -40,6 +40,7 @@ public class ChatModule : TnziApplicationModule
         services.AddScoped<IFileReferenceAccessResolver, ChatFileReferenceAccessResolver>();
 
         services.AddEventHandler<ConversationMessageSentEvent, ChatSignalREventHandler>();
+        services.AddEventHandler<ConversationMessageRecalledEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationReadEvent, ChatSignalREventHandler>();
         services.AddEventHandler<ConversationChangedEvent, ChatSignalREventHandler>();
         // Presence 现由 Tnzi.Identity.Presence 拥有并发布 UserPresenceChangedEvent；

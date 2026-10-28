@@ -98,6 +98,11 @@ export function viewAction<T, TId extends string | number = string | number>(
  * Build the standard destructive "Delete" action (confirm + `state.handleDelete`).
  * Hidden per row when `state.canDelete` is false - same permission-reactive
  * `show` composition as {@link editAction}.
+ *
+ * A refused delete settles the action: `handleDelete` has already reported it
+ * (the toast, or the page's `onError`) before rethrowing, and the row action's
+ * result is fired and forgotten, so passing the rejection on only added an
+ * unhandled rejection to every refused delete.
  */
 export function deleteAction<T, TId extends string | number = string | number>(
   state: UseCrudPageReturn<T, TId>,
@@ -113,7 +118,11 @@ export function deleteAction<T, TId extends string | number = string | number>(
     onClick:
       opts.onClick ??
       (async (row) => {
-        await state.handleDelete([state.rowKey(row)])
+        try {
+          await state.handleDelete([state.rowKey(row)])
+        } catch {
+          // Already reported by handleDelete (see above).
+        }
       }),
   }
 }

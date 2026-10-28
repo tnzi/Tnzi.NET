@@ -21,7 +21,7 @@ public class PayslipConfiguration : EntityTypeConfigurationBase<Payslip, Guid>
 
         builder.Property(p => p.EmployeeCode).HasMaxLength(64).IsRequired();
         builder.Property(p => p.EmployeeName).HasMaxLength(200).IsRequired();
-        builder.Property(p => p.PaymentMethod).HasMaxLength(32);
+        builder.Property(p => p.PaymentMethod).HasMaxLength(PayrollFieldLimits.PaymentMethodMaxLength);
         // 列宽由 PayslipFieldLimits 持有：写入侧按同一个常量收敛，两处不可能漂移
         builder.Property(p => p.CalculationError).HasMaxLength(PayslipFieldLimits.CalculationErrorMaxLength);
         builder.Property(p => p.BaseAmount).HasMoneyPrecision();

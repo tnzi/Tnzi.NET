@@ -14,6 +14,12 @@ public interface ISkillRegistry
     /// <summary>搜索技能</summary>
     Task<IReadOnlyList<SkillDefinition>> SearchAsync(string query, int maxResults = 10, CancellationToken ct = default);
 
-    /// <summary>清除缓存</summary>
+    /// <summary>清除缓存（含文件技能：下一次读取会重新扫描磁盘与内置资源）</summary>
     void InvalidateCache();
+
+    /// <summary>
+    /// 数据库里的技能被写过之后调用：只丢掉本作用域已合并、已从数据库读过的结果，不重新扫描文件技能。
+    /// 默认实现退回 <see cref="InvalidateCache"/>。
+    /// </summary>
+    void InvalidateDatabaseSkills() => InvalidateCache();
 }

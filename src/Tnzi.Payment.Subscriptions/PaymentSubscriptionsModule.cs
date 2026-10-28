@@ -27,7 +27,7 @@ namespace Tnzi.Payment.Subscriptions;
 ///   在父模板上新铸会让继承父默认控制器的消费方把本模块的端点一并继承走）。</item>
 /// <item>支付、退款、促销、优惠券、回调、对账<b>一个字节不差</b>。一笔标着
 ///   <c>BusinessType.Subscription</c> 的支付照常收得成 —— 只是没有任何订阅状态机需要被推进。</item>
-/// <item>后台循环少五条扫描（续费 / 转正 / 恢复 / 过期 / 提醒），父模块自己那两条
+/// <item>后台循环少六条扫描（续费 / 转正 / 恢复 / 过期 / 到期计划变更 / 提醒），父模块自己那两条
 ///   （关闭过期支付、对账在途退款）照跑不误。</item>
 /// <item>管理端统计总览的<b>活跃订阅数变成 <c>null</c></b>（前端渲染「不适用」），
 ///   而不是一个与「所有订阅一夜之间全没了」无法区分的 0；整块订阅指标端点回 <b>501</b>
@@ -101,6 +101,8 @@ public class PaymentSubscriptionsModule : TnziApplicationModule
         // 嵌套属性），现在由本模块绑。运维手里的 appsettings.json 不需要改一个字符。
         // 五条校验也跟着搬（SubscriptionOptionsValidator，文案逐字不变）。
         context.Services.AddTnziOptions<SubscriptionOptions, SubscriptionOptionsValidator>(context.Configuration);
+        // 访问门禁：独立的配置节（Payment:Subscription:AccessGate），刻意不进配置中心：见 SubscriptionAccessGateOptions
+        context.Services.AddTnziOptions<SubscriptionAccessGateOptions, SubscriptionAccessGateOptionsValidator>(context.Configuration);
         return base.PreConfigureServicesAsync(context);
     }
 
@@ -111,18 +113,30 @@ public class PaymentSubscriptionsModule : TnziApplicationModule
         context.Services.AddTransient<IPermissionDefinitionProvider, PaymentSubscriptionsPermissions>();
 
         context.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+        context.Services.AddScoped<ISubscriptionStorageMeter, SubscriptionStorageMeter>();
+
+        // 服务暂停时的访问门禁（默认关闭）：判定服务 + 境况缓存 + 境况变化即失效缓存。
+        // HTTP 侧的中间件在 OnApplicationInitializationAsync 里挂；SignalR 侧是全局 Hub 过滤器，
+        // 排在 SignalR 模块自己的作用域 / 异常 / 授权过滤器之后（那个模块先加载，它的 Configure 先登记）。没有加载 SignalR 时这条配置什么都不做
+        context.Services.AddScoped<ISubscriptionAccessGate, SubscriptionAccessGate>();
+        context.Services.AddSingleton<SubscriptionStandingCache>();
+        context.Services.AddEventHandler<BillingAccountStandingChangedEvent, BillingStandingCacheInvalidationHandler>();
+        context.Services.Configure<HubOptions>(options => options.AddFilter<SubscriptionAccessGateHubFilter>());
 
         // 父模块四个扩展点的实现。★ 前两条是这条缝合线的红线：少了它们，
         //   缺席就从「少一项能力」变成「错行为」（绑卡不再同步 / 一张限首单的券变成无限制）。
         context.Services.AddScoped<IStoredPaymentMethodBindingSink, SubscriptionBindingSink>();
         context.Services.AddScoped<ISubscriptionHistoryProbe, SubscriptionHistoryProbe>();
         context.Services.AddScoped<IPaymentStatisticsContributor, SubscriptionStatisticsContributor>();
+        // 发票 / 收据上的订阅明细行（计划名 + 服务期）。开票模块经父模块的契约提问，两个子模块互不引用
+        context.Services.AddScoped<IPaymentLineDescriber, SubscriptionPaymentLineDescriber>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.RenewDueSubscriptions>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ConvertDueTrials>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ResumeDuePausedSubscriptions>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ExpireOverdueSubscriptions>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.ApplyDuePlanChanges>();
         context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.SendRenewalReminders>();
+        context.Services.AddScoped<IPaymentScheduledScan, SubscriptionScheduledScans.SampleStorageUsage>();
         // 多租户开启时后台循环按租户逐个跑：只用试用、一笔支付都没有的租户不在父模块的来源里，这里补上
         context.Services.AddScoped<IPaymentTenantSource, SubscriptionTenantSource>();
 
@@ -142,5 +156,16 @@ public class PaymentSubscriptionsModule : TnziApplicationModule
         context.Services.AddEventHandler<PaymentExpiredEvent, SubscriptionPaymentExpiredHandler>();
 
         return base.ConfigureServicesAsync(context);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 门禁中间件追加在这里，也就是 AspNetCore 模块固定管线（认证 → 限流 → 租户解析 → 授权）之后、端点执行之前。
+    /// 位置的理由写在 <see cref="SubscriptionAccessGateMiddleware"/> 上。无条件挂上，开关在每个请求里热判断。
+    /// </remarks>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        context.App?.UseMiddleware<SubscriptionAccessGateMiddleware>();
+        return base.OnApplicationInitializationAsync(context);
     }
 }

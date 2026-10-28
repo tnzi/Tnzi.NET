@@ -39,6 +39,44 @@ public class DefaultPermissionAdminControllerTests
         result.Data!.Behavior.ShouldBe(PermissionBehavior.Allow);
     }
 
+    /// <summary>
+    /// 带 CommandPrefix 的放行规则要求每个 shell 片段都命中：试算必须用运行时同一个分析器拆片段，
+    /// 否则这类规则在试算里永远不命中、运行时却命中；拆出的破坏性判断也要并进来。
+    /// </summary>
+    [Theory]
+    [InlineData("git status", PermissionBehavior.Allow)]
+    [InlineData("git status; rm -rf data", PermissionBehavior.Deny)]
+    [InlineData("echo hi\nrm -rf data", PermissionBehavior.Deny)]
+    public void Evaluate_ShellCommand_IsAnalyzedLikeTheRuntime(string command, PermissionBehavior expected)
+    {
+        var evaluator = new ToolPermissionEvaluator(
+        [
+            new ToolPermissionRule { ToolPattern = "bash", CommandPrefix = "git", Behavior = PermissionBehavior.Allow }
+        ]);
+        var controller = new DefaultPermissionAdminController(
+            evaluator, Mock.Of<IToolPermissionRuleService>(), toolRegistry: null, new ShellCommandAnalyzer());
+
+        var result = controller.Evaluate(new PermissionEvaluateRequestDto { ToolName = "bash", ShellCommand = command });
+
+        result.Data!.Behavior.ShouldBe(expected, command);
+    }
+
+    [Fact]
+    public void Evaluate_ScopedAllowForADestructiveCommand_MatchesLikeTheRuntime()
+    {
+        var evaluator = new ToolPermissionEvaluator(
+        [
+            new ToolPermissionRule { ToolPattern = "bash", CommandPrefix = "rm", Behavior = PermissionBehavior.Allow }
+        ]);
+        var controller = new DefaultPermissionAdminController(
+            evaluator, Mock.Of<IToolPermissionRuleService>(), toolRegistry: null, new ShellCommandAnalyzer());
+
+        var result = controller.Evaluate(new PermissionEvaluateRequestDto { ToolName = "bash", ShellCommand = "rm -rf build" });
+
+        result.Data!.Behavior.ShouldBe(PermissionBehavior.Allow);
+        result.Data.MatchedRulePattern.ShouldBe("bash");
+    }
+
     [Fact]
     public void Evaluate_WithoutRegistry_UsesBodyFlagOnly()
     {

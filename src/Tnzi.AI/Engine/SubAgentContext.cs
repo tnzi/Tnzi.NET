@@ -51,4 +51,21 @@ internal static class SubAgentContext
             accessor.Properties[ContextPropertyKeys.SubAgentName] = subAgentName;
         }
     }
+
+    /// <summary>
+    /// 解析出目标 Agent 后，把已标记的子 Agent 名称换成实体上的名称。
+    /// </summary>
+    /// <remarks>
+    /// Handoff / Router 必须在解析目标<b>之前</b>就 <see cref="Mark"/>（目标的工具名单在解析时定型），
+    /// 那时手里只有配置里的目标键；权限规则按 Agent 名称匹配，名称以解析出的实体为准。
+    /// </remarks>
+    internal static void Rename(IAgentExecutionContextAccessor? accessor, string? subAgentName)
+    {
+        if (accessor == null || string.IsNullOrWhiteSpace(subAgentName))
+        {
+            return;
+        }
+
+        accessor.Properties[ContextPropertyKeys.SubAgentName] = subAgentName;
+    }
 }

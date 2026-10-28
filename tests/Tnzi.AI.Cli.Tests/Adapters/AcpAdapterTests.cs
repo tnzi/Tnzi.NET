@@ -90,6 +90,24 @@ public class AcpAdapterTests
     }
 
     [Fact]
+    public async Task Run_WithAReasoningEffortOnTheBinding_SaysItIsNotApplied()
+    {
+        // 管理端对所有运行时都提供推理强度，ACP 一路没有地方投递它：照常运行，但不能静默丢掉。
+        var logger = new Mock<ILogger<AcpAdapter>>();
+        var transport = new FakeCliAgentTransport([], onWrite: Server());
+
+        await DrainAsync(new AcpAdapter(logger.Object), transport, Context() with { ThinkingLevel = "high" });
+
+        logger.Verify(l => l.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((state, _) => state != null && state.ToString()!.Contains("reasoning effort 'high' is not applied")),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        transport.Written.ShouldNotContain(w => w.Contains("high"), "nothing carries it to the runtime");
+    }
+
+    [Fact]
     public async Task Run_DrivesFullSessionLifecycle()
     {
         var transport = new FakeCliAgentTransport([], onWrite: Server(
@@ -202,6 +220,61 @@ public class AcpAdapterTests
         reply!.ShouldContain("\"optionId\":\"allow_once\"");
     }
 
+    /// <summary>
+    /// 权限档位落在应答上：按 <c>toolCall.kind</c> 放行或单次拒绝（不回 cancelled，那会中止整个 turn）。
+    /// </summary>
+    /// <remarks>与 stream-json 的实测映射对齐：改工作区放行编辑、拒绝执行命令；只读与先问我只放行读与搜索；没有 kind 的一律不放行。</remarks>
+    [Theory]
+    [InlineData(CliPermissionMode.Full, "execute", "allow_once")]
+    [InlineData(CliPermissionMode.EditWorkspace, "edit", "allow_once")]
+    [InlineData(CliPermissionMode.EditWorkspace, "execute", "deny")]
+    [InlineData(CliPermissionMode.EditWorkspace, "fetch", "deny")]
+    [InlineData(CliPermissionMode.ReadOnly, "read", "allow_once")]
+    [InlineData(CliPermissionMode.ReadOnly, "edit", "deny")]
+    [InlineData(CliPermissionMode.Ask, "delete", "deny")]
+    [InlineData(CliPermissionMode.ReadOnly, null, "deny")]
+    public async Task Run_PermissionMode_DecidesWhichToolRequestsAreApproved(CliPermissionMode mode, string? kind, string expectedOption)
+    {
+        var served = false;
+        var toolCall = kind is null ? """{"toolCallId":"t1"}""" : $$"""{"toolCallId":"t1","kind":"{{kind}}"}""";
+        var transport = new FakeCliAgentTransport([], onWrite: line =>
+        {
+            var responses = Server()(line).ToList();
+
+            using var document = JsonDocument.Parse(line);
+            if (!served && document.RootElement.TryGetProperty("method", out var m)
+                && m.GetString() == "initialize")
+            {
+                served = true;
+                responses.Add($$$"""
+                    {"jsonrpc":"2.0","id":"perm-m","method":"session/request_permission","params":{"toolCall":{{{toolCall}}},"options":[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"}]}}
+                    """.Trim());
+            }
+
+            return responses;
+        });
+
+        await DrainAsync(Adapter(), transport, Context() with { PermissionMode = mode });
+
+        var reply = transport.Written.FirstOrDefault(w => w.Contains("perm-m") && w.Contains("\"outcome\""));
+        reply.ShouldNotBeNull();
+        reply!.ShouldContain($"\"optionId\":\"{expectedOption}\"");
+    }
+
+    /// <summary>
+    /// 非全权档不带「一律自动批准」的启动开关：带着它 CLI 从不请求权限，档位落不到应答上。
+    /// </summary>
+    [Theory]
+    [InlineData("qoder", new[] { "--yolo", "--acp" }, new[] { "--acp" })]
+    [InlineData("grok", new[] { "agent", "--always-approve", "stdio" }, new[] { "agent", "stdio" })]
+    public void BuildProcess_ARestrictedMode_LeavesOutTheAutoApprovalSwitch(string providerKey, string[] full, string[] restricted)
+    {
+        var context = Context() with { Provider = CliBuiltInProviders.All[providerKey] };
+
+        Adapter().BuildProcess(context).Arguments.ShouldBe(full);
+        Adapter().BuildProcess(context with { PermissionMode = CliPermissionMode.ReadOnly }).Arguments.ShouldBe(restricted);
+    }
+
     [Fact]
     public async Task Run_WhenNoSafeOptionIsOffered_RepliesWithAProtocolErrorNotCancelled()
     {
@@ -281,5 +354,139 @@ public class AcpAdapterTests
 
         result.Status.ShouldBe(CliRunStatus.Failed);
         result.FailureReason.ShouldBe(CliRunFailureReason.AuthenticationFailed);
+    }
+    [Fact]
+    public async Task Run_CancelledWhileThePromptIsPending_HandsTheCancellationBackToTheExecutor()
+    {
+        // 生命周期任务吞掉取消、正常收尾时，事件流正常结束：执行器分不出「取消」与「跑完」，
+        // 用户取消与宿主停机都被记成 Completed，半句话成了交付物。取消必须以 OCE 交回去（与 stream-json 同一契约）。
+        var promptSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Server();
+        var transport = new FakeCliAgentTransport([], onWrite: line =>
+        {
+            if (line.Contains("\"session/prompt\"", StringComparison.Ordinal))
+            {
+                promptSent.TrySetResult();
+                return []; // 运行时还在干活，迟迟不答
+            }
+
+            return server(line);
+        });
+
+        using var cts = new CancellationTokenSource();
+        var adapter = Adapter();
+        var run = Task.Run(async () =>
+        {
+            await foreach (var _ in adapter.RunAsync(transport, Context(), cts.Token))
+            {
+            }
+        });
+
+        await promptSent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+
+    [Fact]
+    public async Task Run_CancelledAfterThePromptAnswered_CompletesWithTheAnswer()
+    {
+        // 回合已经答完才到的取消不算取消：记成取消（或打回队列重跑）会丢掉一份已经付过钱的完整答案
+        var answered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = Server(
+        [
+            """{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Done."}}}}"""
+        ]);
+        var transport = new FakeCliAgentTransport([], onWrite: line =>
+        {
+            var responses = server(line).ToList();
+            if (line.Contains("\"session/prompt\"", StringComparison.Ordinal))
+            {
+                answered.TrySetResult();
+            }
+
+            return responses;
+        });
+
+        using var cts = new CancellationTokenSource();
+        var adapter = Adapter();
+        var run = Task.Run(async () =>
+        {
+            await foreach (var _ in adapter.RunAsync(transport, Context(), cts.Token))
+            {
+            }
+        });
+
+        await answered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(500); // 响应已被读循环处理，适配器停在收尾窗口里
+        await cts.CancelAsync();
+
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = adapter.GetResult(new CliSessionOutcome { ExitCode = 0 });
+        result.Status.ShouldBe(CliRunStatus.Completed);
+        result.Output.ShouldBe("Done.");
+    }
+    [Fact]
+    public async Task Run_SessionNew_CarriesTheWriteBackServerInTheAcpShape()
+    {
+        // 回写通道（http + Authorization）对声明支持 http 的运行时原样送进 session/new：
+        // 请求头必须是 {name, value} 数组，对象形的请求头会让按 schema 校验的运行时拒掉整个会话
+        var config = new CliMcpConfigComposer(NullLogger<CliMcpConfigComposer>.Instance).Compose(
+            null, "run-token", new CliWriteBackOptions { Enabled = true, McpEndpoint = "https://host/mcp" }, LocalHosts.Create());
+        {
+            var server = Server();
+            var transport = new FakeCliAgentTransport([], onWrite: line =>
+            {
+                if (line.Contains("\"initialize\"", StringComparison.Ordinal))
+                {
+                    var id = JsonDocument.Parse(line).RootElement.GetProperty("id").GetRawText();
+                    return [Ok(id, """{"agentCapabilities":{"mcpCapabilities":{"http":true}}}""")];
+                }
+
+                return server(line);
+            });
+
+            // 路径指向执行目标上的文件（这里根本不存在）：适配器读的是随上下文来的内容，不碰文件系统
+            await DrainAsync(Adapter(), transport, Context() with { McpConfigPath = "/home/agent/ws/.tnzi/mcp.json", McpConfigJson = config });
+
+            var sessionNew = transport.Written
+                .Select(w => JsonDocument.Parse(w).RootElement)
+                .Single(e => e.TryGetProperty("method", out var m) && m.GetString() == "session/new");
+            var mcp = sessionNew.GetProperty("params").GetProperty("mcpServers").EnumerateArray().ShouldHaveSingleItem();
+            mcp.GetProperty("type").GetString().ShouldBe("http");
+            var header = mcp.GetProperty("headers").EnumerateArray().ShouldHaveSingleItem();
+            header.GetProperty("name").GetString().ShouldBe("Authorization");
+            header.GetProperty("value").GetString().ShouldBe("Bearer run-token");
+        }
+    }
+
+    [Fact]
+    public async Task Run_SessionNew_CarriesAHostProvidedStdioWriteBackEntry()
+    {
+        // 连不到平台地址的远程目标把回写通道写成驻留代理的中继命令：ACP 运行时要收到 stdio 形状（args / env 恒在），
+        // 且不受 mcpCapabilities 过滤（stdio 是 ACP 的基础能力）
+        var remote = new TestCliHost((_, _) => throw new InvalidOperationException("not started"), writeBackEntry: channel => new JsonObject
+        {
+            ["type"] = "stdio",
+            ["command"] = "/opt/agent/bin/agent",
+            ["args"] = new JsonArray("mcp-relay"),
+            ["env"] = new JsonObject { ["RELAY_TOKEN"] = channel.Token }
+        });
+        var config = new CliMcpConfigComposer(NullLogger<CliMcpConfigComposer>.Instance).Compose(
+            null, "run-token", new CliWriteBackOptions { Enabled = true, McpEndpoint = "https://host/mcp" }, remote);
+        var transport = new FakeCliAgentTransport([], onWrite: Server());
+
+        await DrainAsync(Adapter(), transport, Context() with { McpConfigJson = config });
+
+        var sessionNew = transport.Written
+            .Select(w => JsonDocument.Parse(w).RootElement)
+            .Single(e => e.TryGetProperty("method", out var m) && m.GetString() == "session/new");
+        var mcp = sessionNew.GetProperty("params").GetProperty("mcpServers").EnumerateArray().ShouldHaveSingleItem();
+        mcp.TryGetProperty("url", out _).ShouldBeFalse();
+        mcp.GetProperty("command").GetString().ShouldBe("/opt/agent/bin/agent");
+        mcp.GetProperty("args").EnumerateArray().Select(a => a.GetString()).ShouldBe(["mcp-relay"]);
+        var env = mcp.GetProperty("env").EnumerateArray().ShouldHaveSingleItem();
+        env.GetProperty("name").GetString().ShouldBe("RELAY_TOKEN");
+        env.GetProperty("value").GetString().ShouldBe("run-token");
     }
 }

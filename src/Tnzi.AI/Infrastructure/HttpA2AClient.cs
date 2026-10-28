@@ -6,7 +6,11 @@ namespace Tnzi.AI.Infrastructure;
 [ExperimentalApi(Reason = "A2A protocol is in preview")]
 public class HttpA2AClient : IA2AClient
 {
-    /// <summary>Named HttpClient registered in AIModule with AllowAutoRedirect = false.</summary>
+    /// <summary>
+    /// Named HttpClient registered in AIModule on <c>EgressGuardedConnector.CreateHandler()</c>: no automatic redirects,
+    /// no system proxy (through a proxy the connection goes to the proxy, so the connect-time check never sees the target),
+    /// and an egress check on every TCP connection.
+    /// </summary>
     internal const string HttpClientName = "Tnzi.AI.A2A";
 
     private readonly IHttpClientFactory _httpClientFactory;

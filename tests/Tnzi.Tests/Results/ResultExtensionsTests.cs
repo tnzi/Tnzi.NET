@@ -182,9 +182,26 @@ public class ResultExtensionsTests
 
         // Assert
         Assert.False(result.Succeeded);
-        Assert.Equal("Generic error", result.Message);
         Assert.Equal(500, result.Code);
         Assert.Equal(ErrorCodes.INTERNAL_SERVER_ERROR, result.ErrorCode);
+    }
+
+    [Fact]
+    public void FromException_WithGenericException_ShouldNotExposeTheMessageOrTheExceptionType()
+    {
+        // 与异常中间件在生产环境的口径一致：非框架异常只回固定文案，细节由调用方记日志
+        var exception = new InvalidOperationException("Cannot insert duplicate key in object 'dbo.Orders'");
+
+        var plain = ResultExtensions.FromException(exception);
+        var typed = ResultExtensions.FromException<string>(exception);
+
+        Assert.All(new Result[] { plain, typed }, result =>
+        {
+            Assert.False(result.Succeeded);
+            Assert.DoesNotContain("dbo.Orders", result.Message);
+            Assert.False(string.IsNullOrWhiteSpace(result.Message));
+            Assert.Null(result.ErrorDetails);
+        });
     }
 
 

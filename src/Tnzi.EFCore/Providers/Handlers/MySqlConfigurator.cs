@@ -8,6 +8,10 @@ namespace Tnzi.EFCore.Providers;
 /// </summary>
 public class MySqlConfigurator : DatabaseProviderConfiguratorBase
 {
+    // ServerVersion.AutoDetect 会开一条连接查一次服务器版本。配置器在每个作用域构建 DbContextOptions 时都会被调用，
+    // 不缓存就是每个请求多一次数据库往返。按连接串缓存成功结果；探测失败（库还没起来）不入缓存，下次再探。
+    private static readonly ConcurrentDictionary<(Type ServerVersionType, string ConnectionString), object> _serverVersions = new();
+
     public override DatabaseProvider Provider => DatabaseProvider.MySql;
 
     protected override string AssemblyName => "Pomelo.EntityFrameworkCore.MySql";
@@ -84,18 +88,21 @@ public class MySqlConfigurator : DatabaseProviderConfiguratorBase
                     "Please ensure your Pomelo.EntityFrameworkCore.MySql version is compatible.");
             }
 
-            var serverVersion = autoDetectMethod.Invoke(null, [connectionString]);
+            var serverVersion = _serverVersions.GetOrAdd(
+                (serverVersionType, connectionString),
+                key => autoDetectMethod.Invoke(null, [key.ConnectionString])
+                    ?? throw new InvalidOperationException("ServerVersion.AutoDetect returned null."));
 
             if (parameters.Length == 3)
             {
-                method.Invoke(null, [builder, connectionString, serverVersion!]);
+                method.Invoke(null, [builder, connectionString, serverVersion]);
             }
             else
             {
                 // 第四个参数是 Action<MySqlDbContextOptionsBuilder>：应用重试/超时选项
                 var optionsBuilderType = parameters[3].ParameterType.GetGenericArguments()[0];
                 var action = BuildProviderOptionsAction(optionsBuilderType, options, extraAction: null);
-                method.Invoke(null, [builder, connectionString, serverVersion!, action]);
+                method.Invoke(null, [builder, connectionString, serverVersion, action]);
             }
         }
         else if (parameters.Length == 2)

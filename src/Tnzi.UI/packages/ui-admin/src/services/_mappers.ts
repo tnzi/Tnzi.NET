@@ -18,6 +18,7 @@
 import { createPagedList, ensureOk, unwrapOk, unwrapUnchecked } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { CrudPageQuery, CrudPageResult } from './types'
+import { filterByKeyword } from '../utils/keyword-filter'
 
 // `unwrapOk` = ensureOk + unwrapUnchecked. Bridges use it on every WRITE so a
 // business refusal (400 + failed envelope) throws instead of resolving to
@@ -34,12 +35,13 @@ export function mapQueryToListRequest(query: CrudPageQuery): Record<string, unkn
     pageSize: query.pageSize,
     keyword: query.searchText || undefined,
     sortBy: query.sortField,
-    // The wire name is `sortDescending`, not `sortOrder`. No backend DTO
-    // declares a `SortOrder` string for direction (the `SortOrder` properties
-    // that do exist are integer display-order columns on entities), so the
-    // previous `sortOrder: 'asc' | 'desc'` was silently discarded on arrival
-    // and server-side sorting never worked. Omitted entirely when no direction
-    // is set, so the backend keeps its own default.
+    // `sortBy` + `sortDescending` is what the user list reads, the one admin
+    // list with server-side sorting. Most list endpoints take no sort
+    // parameters at all (fixed order), and the admin file query reads its
+    // direction as `sortOrder` / `descending` instead (see `FileQueryDto`), so
+    // a page that adds a sortable column has to map the direction for its own
+    // endpoint. Omitted entirely when no direction is set, so the backend keeps
+    // its own default.
     sortDescending: query.sortOrder ? query.sortOrder === 'desc' : undefined,
     ...query.filters,
   }
@@ -84,15 +86,29 @@ export function pagedResult<T>(input: {
   return createPagedList(input.items, input.totalCount, input.pageIndex, input.pageSize)
 }
 
+/** A row's own text values: what a keyword is matched against when no fields are named. */
+function ownTextValues(item: unknown): string[] {
+  if (item == null || typeof item !== 'object') return typeof item === 'string' ? [item] : []
+  return Object.values(item).filter((value): value is string => typeof value === 'string')
+}
+
 /**
  * Client-side pagination helper for APIs that return flat arrays (not paged lists).
  * Used by authorization and other bridges where the backend has no paged endpoint.
+ *
+ * `query.searchText` (trimmed, case-insensitive) filters the rows first.
+ * `fields` names the text it is matched against, normally what the page shows
+ * for a row; without it the row's own string values are searched. Property
+ * names, numbers, booleans and nested objects are never matched: a keyword
+ * such as "name" or "true" would otherwise keep every row.
  */
-export function pageArray<T>(items: T[], query: CrudPageQuery): PagedList<T> {
+export function pageArray<T>(
+  items: T[],
+  query: CrudPageQuery,
+  fields: (row: T) => ReadonlyArray<string | null | undefined> = ownTextValues,
+): PagedList<T> {
   const { pageIndex = 1, pageSize = 20, searchText } = query
-  const filtered = searchText
-    ? items.filter((item) => JSON.stringify(item).toLowerCase().includes(searchText.toLowerCase()))
-    : items
+  const filtered = filterByKeyword(items, searchText, fields)
   const start = (pageIndex - 1) * pageSize
   return createPagedList(
     filtered.slice(start, start + pageSize),
@@ -100,4 +116,24 @@ export function pageArray<T>(items: T[], query: CrudPageQuery): PagedList<T> {
     pageIndex,
     pageSize,
   )
+}
+
+/** The module is absent (its routes are not mapped) or switched off. */
+const MODULE_ABSENT_CODES = new Set([404, 501])
+
+/**
+ * A read of an optional module's endpoint: its data, or `absent` when the
+ * module is not available here (404 / 501). Every other failed envelope (a
+ * 400, a 403, a 5xx) throws with the server's reason, so a page can tell
+ * "this module is not loaded" from "this read was refused".
+ */
+export function readOrAbsent<T>(response: unknown, absent: T): T {
+  if (response == null) return absent
+  const envelope = response as { succeeded?: boolean; success?: boolean; code?: number; data?: T | null }
+  // A bare payload (an API that answers without the envelope) is the data itself.
+  if (typeof response !== 'object' || !('succeeded' in envelope || 'success' in envelope)) return response as T
+  if (envelope.succeeded ?? envelope.success) return envelope.data ?? absent
+  if (MODULE_ABSENT_CODES.has(Number(envelope.code))) return absent
+  ensureOk(response)
+  return absent
 }

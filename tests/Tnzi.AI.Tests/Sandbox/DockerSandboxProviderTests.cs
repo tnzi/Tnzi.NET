@@ -2,9 +2,17 @@ using System.Net;
 
 namespace Tnzi.AI.Tests.Sandbox;
 
-public class DockerSandboxProviderTests
+public class DockerSandboxProviderTests : IDisposable
 {
     private const string ContainerCreateResponse = """{"Id":"abc123def456","Warnings":[]}""";
+
+    // The provider creates the bind sources on the host, so every workspace path lives under a temp root.
+    private readonly string _root = Path.Combine(Path.GetTempPath(), $"tnzi-docker-provider-{Guid.NewGuid():N}");
+
+    public void Dispose()
+    {
+        try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { /* best effort */ }
+    }
 
     [Fact]
     public void Name_ReturnsDocker()
@@ -104,7 +112,7 @@ public class DockerSandboxProviderTests
         var sandbox1 = await provider.CreateAsync(new SandboxCreateOptions
         {
             ThreadId = Guid.NewGuid(),
-            WorkspacePath = "/tmp/test1"
+            WorkspacePath = Workspace("test1")
         });
 
         // Act & Assert: second should timeout
@@ -112,7 +120,7 @@ public class DockerSandboxProviderTests
             () => provider.CreateAsync(new SandboxCreateOptions
             {
                 ThreadId = Guid.NewGuid(),
-                WorkspacePath = "/tmp/test2"
+                WorkspacePath = Workspace("test2")
             }));
         ex.Message.ShouldContain("Maximum number of concurrent containers");
 
@@ -120,13 +128,12 @@ public class DockerSandboxProviderTests
     }
 
     [Fact]
-    public async Task DisposeAsync_StopsAndRemovesContainer()
+    public async Task DisposeAsync_ForceRemovesContainerWithoutAGracefulStop()
     {
         // Arrange
         var handler = new MockDockerHandler();
         handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
         handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
-        handler.SetupResponse("/containers/abc123def456/stop", HttpStatusCode.NoContent, "");
         handler.SetupResponse("/containers/abc123def456", HttpStatusCode.NoContent, "", HttpMethod.Delete);
 
         var provider = CreateProvider(handler);
@@ -135,29 +142,29 @@ public class DockerSandboxProviderTests
         // Act
         await provider.DisposeAsync(sandbox);
 
-        // Assert
-        handler.RequestLog.ShouldContain(r => r.Method == HttpMethod.Post && r.Url.Contains("/stop"));
-        handler.RequestLog.ShouldContain(r => r.Method == HttpMethod.Delete && r.Url.Contains("/containers/"));
+        // Assert: PID 1 ignores SIGTERM, so a graceful stop only ever waited out its timeout.
+        handler.RequestLog.ShouldNotContain(r => r.Url.Contains("/stop"));
+        handler.RequestLog.ShouldContain(r => r.Method == HttpMethod.Delete && r.Url.Contains("/containers/abc123def456?force=true"));
     }
 
     [Fact]
-    public async Task DisposeAsync_ContinuesCleanupWhenStopFails()
+    public async Task DisposeAsync_RemovalFails_StillReleasesTheSlot()
     {
         // Arrange
         var handler = new MockDockerHandler();
         handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
         handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
-        handler.SetupResponse("/containers/abc123def456/stop", HttpStatusCode.InternalServerError, "error");
-        handler.SetupResponse("/containers/abc123def456", HttpStatusCode.NoContent, "", HttpMethod.Delete);
+        handler.SetupResponse("/containers/abc123def456", HttpStatusCode.InternalServerError, "error", HttpMethod.Delete);
 
-        var provider = CreateProvider(handler);
+        var provider = CreateProvider(handler, opts => opts.Docker.MaxContainers = 1);
         var sandbox = await provider.CreateAsync(CreateSandboxOptions());
 
-        // Act - should not throw even though stop failed
+        // Act - should not throw even though the removal failed
         await provider.DisposeAsync(sandbox);
 
-        // Assert: remove was still called despite stop failure
-        handler.RequestLog.ShouldContain(r => r.Method == HttpMethod.Delete);
+        // Assert: the slot is free again
+        await using var next = await provider.CreateAsync(CreateSandboxOptions());
+        next.ShouldNotBeNull();
     }
 
     [Fact]
@@ -167,7 +174,6 @@ public class DockerSandboxProviderTests
         var handler = new MockDockerHandler();
         handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
         handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
-        handler.SetupResponse("/containers/abc123def456/stop", HttpStatusCode.NoContent, "");
         handler.SetupResponse("/containers/abc123def456", HttpStatusCode.NoContent, "", HttpMethod.Delete);
 
         var provider = CreateProvider(handler, opts => opts.Docker.MaxContainers = 1);
@@ -176,7 +182,7 @@ public class DockerSandboxProviderTests
         var sandbox1 = await provider.CreateAsync(new SandboxCreateOptions
         {
             ThreadId = Guid.NewGuid(),
-            WorkspacePath = "/tmp/test1"
+            WorkspacePath = Workspace("test1")
         });
         await provider.DisposeAsync(sandbox1);
 
@@ -184,7 +190,7 @@ public class DockerSandboxProviderTests
         var sandbox2 = await provider.CreateAsync(new SandboxCreateOptions
         {
             ThreadId = Guid.NewGuid(),
-            WorkspacePath = "/tmp/test2"
+            WorkspacePath = Workspace("test2")
         });
 
         sandbox2.ShouldNotBeNull();
@@ -213,27 +219,142 @@ public class DockerSandboxProviderTests
     }
 
     [Fact]
-    public async Task CreateAsync_MountsWorkspaceVolume()
+    public async Task CreateAsync_MountsTheThreadDirectoryAndEachMntPath()
     {
-        // Arrange
+        // Arrange: agents write /mnt/outputs/... into scripts and file contents, not only on the bash
+        // command line, so the virtual namespace has to exist inside the container.
         var handler = new MockDockerHandler();
         handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
         handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
 
         var provider = CreateProvider(handler);
+        var threadDir = Workspace("thread");
 
         // Act
         await using var sandbox = await provider.CreateAsync(new SandboxCreateOptions
         {
             ThreadId = Guid.NewGuid(),
-            WorkspacePath = "/home/user/workspace"
+            WorkspacePath = threadDir
         });
 
         // Assert
-        var createRequest = handler.RequestLog.First(r => r.Url.Contains("/containers/create"));
-        var body = createRequest.Body;
-        body.ShouldNotBeNull();
-        body.ShouldContain("/home/user/workspace:/workspace");
+        var binds = ExtractBinds(handler);
+        binds.ShouldContain($"{threadDir}:/workspace");
+        foreach (var mount in new[] { "workspace", "uploads", "outputs" })
+        {
+            binds.ShouldContain($"{Path.Combine(threadDir, mount)}:/mnt/{mount}");
+        }
+
+        // 技能副本归本进程所有，容器只读：两个入口都是只读挂载
+        binds.ShouldContain($"{Path.Combine(threadDir, "skills")}:/mnt/skills:ro");
+        binds.ShouldContain($"{Path.Combine(threadDir, "skills")}:/workspace/skills:ro");
+    }
+
+    [Fact]
+    public async Task CreateAsync_CreatesEveryBindSourceBeforeTheContainer()
+    {
+        // A missing bind source is created by the Docker daemon, as root: the non-root sandbox user
+        // could then never write into it.
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
+        var provider = CreateProvider(handler);
+        var threadDir = Workspace("lazy-thread");
+
+        await using var sandbox = await provider.CreateAsync(new SandboxCreateOptions
+        {
+            ThreadId = Guid.NewGuid(),
+            WorkspacePath = threadDir
+        });
+
+        foreach (var mount in new[] { "workspace", "uploads", "outputs", "skills" })
+        {
+            Directory.Exists(Path.Combine(threadDir, mount)).ShouldBeTrue(mount);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_NameHeldByAnOrphanOfThisThread_RemovesItAndRetries()
+    {
+        // A process that died while a run held the container left it running; the name is derived
+        // from the thread id, so every later sandbox of that thread hit 409 Conflict for good.
+        var threadId = Guid.NewGuid();
+        var handler = new MockDockerHandler();
+        handler.SetupResponseSequence("/containers/create", HttpMethod.Post,
+            (HttpStatusCode.Conflict, """{"message":"Conflict. The container name is already in use"}"""),
+            (HttpStatusCode.Created, ContainerCreateResponse));
+        handler.SetupResponse($"/containers/tnzi-sandbox-{threadId:N}/json", HttpStatusCode.OK,
+            OrphanInspect("orphan999", threadId), HttpMethod.Get);
+        handler.SetupResponse("/containers/orphan999", HttpStatusCode.NoContent, "", HttpMethod.Delete);
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
+        var provider = CreateProvider(handler);
+
+        await using var sandbox = await provider.CreateAsync(new SandboxCreateOptions
+        {
+            ThreadId = threadId,
+            WorkspacePath = Workspace("orphaned")
+        });
+
+        sandbox.ShouldNotBeNull();
+        handler.RequestLog.ShouldContain(r => r.Method == HttpMethod.Delete && r.Url.Contains("/containers/orphan999?force=true"));
+        handler.RequestLog.Count(r => r.Url.Contains("/containers/create")).ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task CreateAsync_NameHeldByAContainerThatIsNotThisThreadsSandbox_FailsWithoutRemovingIt()
+    {
+        var threadId = Guid.NewGuid();
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.Conflict, """{"message":"Conflict"}""");
+        handler.SetupResponse($"/containers/tnzi-sandbox-{threadId:N}/json", HttpStatusCode.OK,
+            """{"Id":"foreign1","Config":{"Labels":{"app":"something-else"}}}""", HttpMethod.Get);
+        var provider = CreateProvider(handler);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(new SandboxCreateOptions
+        {
+            ThreadId = threadId,
+            WorkspacePath = Workspace("foreign")
+        }));
+
+        ex.Message.ShouldContain($"tnzi-sandbox-{threadId:N}");
+        handler.RequestLog.ShouldNotContain(r => r.Method == HttpMethod.Delete);
+    }
+
+    [Fact]
+    public async Task CreateAsync_ThreadAlreadyHasASandboxInThisProcess_FailsWithoutTouchingDocker()
+    {
+        // The live container of a concurrent run in this process must never be taken for an orphan.
+        var threadId = Guid.NewGuid();
+        var handler = new MockDockerHandler();
+        handler.SetupResponse("/containers/create", HttpStatusCode.Created, ContainerCreateResponse);
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
+        var provider = CreateProvider(handler);
+        var options = new SandboxCreateOptions { ThreadId = threadId, WorkspacePath = Workspace("busy") };
+
+        await using var first = await provider.CreateAsync(options);
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(options));
+
+        ex.Message.ShouldContain("already");
+        handler.RequestLog.Count(r => r.Url.Contains("/containers/create")).ShouldBe(1);
+        handler.RequestLog.ShouldNotContain(r => r.Method == HttpMethod.Delete);
+    }
+
+    [Fact]
+    public async Task CreateAsync_FailedCreate_DoesNotLeaveTheThreadMarkedBusy()
+    {
+        var threadId = Guid.NewGuid();
+        var handler = new MockDockerHandler();
+        handler.SetupResponseSequence("/containers/create", HttpMethod.Post,
+            (HttpStatusCode.InternalServerError, "boom"),
+            (HttpStatusCode.Created, ContainerCreateResponse));
+        handler.SetupResponse("/containers/abc123def456/start", HttpStatusCode.NoContent, "");
+        var provider = CreateProvider(handler);
+        var options = new SandboxCreateOptions { ThreadId = threadId, WorkspacePath = Workspace("retry") };
+
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.CreateAsync(options));
+        await using var sandbox = await provider.CreateAsync(options);
+
+        sandbox.ShouldNotBeNull();
     }
 
     [Fact]
@@ -289,6 +410,26 @@ public class DockerSandboxProviderTests
 
     #region Helpers
 
+    private string Workspace(string name) => Path.Combine(_root, name);
+
+    private static string OrphanInspect(string id, Guid threadId) =>
+        JsonSerializer.Serialize(new
+        {
+            Id = id,
+            Config = new { Labels = new Dictionary<string, string> { ["tnzi.sandbox"] = "true", ["tnzi.sandbox.thread"] = threadId.ToString("N") } }
+        });
+
+    private static List<string> ExtractBinds(MockDockerHandler handler)
+    {
+        var createRequest = handler.RequestLog.First(r => r.Url.Contains("/containers/create"));
+        using var document = JsonDocument.Parse(createRequest.Body!);
+        var hostConfig = document.RootElement.EnumerateObject()
+            .First(p => string.Equals(p.Name, "HostConfig", StringComparison.OrdinalIgnoreCase)).Value;
+        var binds = hostConfig.EnumerateObject()
+            .First(p => string.Equals(p.Name, "Binds", StringComparison.OrdinalIgnoreCase)).Value;
+        return binds.EnumerateArray().Select(b => b.GetString()!).ToList();
+    }
+
     private static DockerSandboxProvider CreateProvider(MockDockerHandler? handler = null,
         Action<SandboxModuleOptions>? configure = null)
     {
@@ -311,10 +452,10 @@ public class DockerSandboxProviderTests
             NullLogger<DockerSandboxProvider>.Instance);
     }
 
-    private static SandboxCreateOptions CreateSandboxOptions() => new()
+    private SandboxCreateOptions CreateSandboxOptions() => new()
     {
         ThreadId = Guid.NewGuid(),
-        WorkspacePath = "/tmp/test-workspace"
+        WorkspacePath = Workspace($"thread-{Guid.NewGuid():N}")
     };
 
     #endregion

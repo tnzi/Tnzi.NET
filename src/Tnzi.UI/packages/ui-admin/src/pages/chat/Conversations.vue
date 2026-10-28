@@ -163,20 +163,30 @@ const MSG_PAGE = 20
 
 // Loaded by `onView` when the CRUD `view` open-state opens (row click or a
 // deep-link cold reload) - the drawer chrome + open-state are the engine's.
+// Only the conversation opened last may fill the drawer: opening A and then B
+// before A answers would otherwise put A's header, members and messages (and
+// the recall buttons that target them) under B.
+let conversationToken = 0
+
 async function loadConversation(id: string): Promise<void> {
+  const myToken = ++conversationToken
   detailLoading.value = true
   detail.value = null
   messages.value = []
   hasMoreMessages.value = false
   try {
-    detail.value = await bridge.conversations.detail(id)
+    const loaded = await bridge.conversations.detail(id)
+    if (myToken !== conversationToken) return
+    detail.value = loaded
     const thread = await bridge.conversations.messages(id, { limit: MSG_PAGE })
+    if (myToken !== conversationToken) return
     messages.value = thread.messages
     hasMoreMessages.value = thread.hasMore
   } catch (e) {
+    if (myToken !== conversationToken) return
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    detailLoading.value = false
+    if (myToken === conversationToken) detailLoading.value = false
   }
 }
 
@@ -184,12 +194,16 @@ async function loadConversation(id: string): Promise<void> {
 async function loadMoreMessages(): Promise<void> {
   const earliest = messages.value[0]
   if (!detail.value || !earliest) return
+  // An older page lands only in the conversation it was asked for.
+  const myToken = conversationToken
   loadingMore.value = true
   try {
     const thread = await bridge.conversations.messages(detail.value.id, { before: earliest.id, limit: MSG_PAGE })
+    if (myToken !== conversationToken) return
     messages.value = [...thread.messages, ...messages.value]
     hasMoreMessages.value = thread.hasMore
   } catch (e) {
+    if (myToken !== conversationToken) return
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
     loadingMore.value = false

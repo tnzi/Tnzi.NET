@@ -13,8 +13,7 @@
  *
  *   1. agents          → useAdminAgentApi.getList/create/update/delete (loop for many)
  *   2. threads         → useAdminThreadApi.getList/create/updateTitle/delete (no plain update)
- *   3. agentRuns       → useAdminAgentRunApi.getList/cancel; tail() rejects (SSE belongs in
- *                        page-level streaming via getRunStreamUrl on the agent api, not here)
+ *   3. agentRuns       → useAdminAgentRunApi.getList/getById/getRunTraces/cancel
  *   4. workflows       → useAdminWorkflowApi.getList/create/update/delete + clone + validate
  *                        + publish (publish wraps batchEnable - IsEnabled IS the framework
  *                        publish semantic; see docs/modules/ai.md Workflow section)
@@ -22,7 +21,7 @@
  *   5. workflowRuns    → useAdminWorkflowApi.getExecutions/getExecutionDetail (NO separate
  *                        useAdminWorkflowRunApi exists in core) + cancel / getInterrupt /
  *                        resumeWithInput / getSignals, all keyed by the execution's business
- *                        `executionId` (never the row `id`); tail() rejects
+ *                        `executionId` (never the row `id`)
  *   6. skills          → useAdminSkillApi.getPaged/create/update/delete + batchEnable/Disable
  *                        re-exposed as activate(id)/deactivate(id) for plan compatibility
  *   7. providers       → ENTITY-DRIVEN CRUD: useAdminProviderApi.{getList,create,update,delete,test}
@@ -42,15 +41,15 @@
  *                        with auth tokens encrypted via IDataProtectionProvider. Legacy hosting
  *                        endpoints (status, tools, agent exposure) remain on the same factory but
  *                        are unrelated to this CRUD surface.
- *  11. quota           → useAdminQuotaApi.{getList,getQuota,setQuota,resetQuota}; fetch() pages
- *                        via POST /admin/quotas/query (Phase 5 prereq)
+ *  11. usageLimits     → useAdminUsageLimitApi: everyone's defaults (get / save), one user's
+ *                        own settings (get / save / clear / reset windows), the metered-user
+ *                        list (POST /admin/ai/usage-limits/users/query) and the budget summary
  *  12. evaluations     → useAdminEvaluationApi.getList/getById/delete + create (POST /run) +
- *                        runBatch (POST /batch); update rejects, run(id) rejects (backend
- *                        creates+runs in one call - use create() instead)
+ *                        runBatch (POST /batch); no update (the backend creates and runs
+ *                        in one call)
  *
- *   Bridges that "reject not-implemented" follow the chat-bridge / notification-bridge stub
- *   pattern from Phase 3. Pages downstream MUST avoid wiring to those operations until the
- *   matching backend lands.
+ *   An operation the backend does not serve is left out of the contract (evaluations
+ *   has no update) rather than shipped as a member that always rejects.
  */
 import {
   useAdminAgentApi,
@@ -60,7 +59,7 @@ import {
   useAdminSkillApi,
   useAdminProviderApi,
   useAdminUsageAnalyticsApi,
-  useAdminQuotaApi,
+  useAdminUsageLimitApi,
   useAdminEvaluationApi,
   useAdminMcpApi,
   UsageGranularity,
@@ -81,9 +80,7 @@ import {
   type WorkflowExecutionSummaryDto,
   type WorkflowExecutionDetailDto,
   type WorkflowExecutionResultDto,
-  type WorkflowExecutionStatusDto,
   type WorkflowValidationResultDto,
-  type WorkflowStatsDto,
   type WorkflowStepApprovalDto,
   type RunWorkflowRequestDto,
   type WorkflowDefinitionVersionDto,
@@ -96,13 +93,10 @@ import {
   type UpdateSkillDto,
   type SkillQueryDto,
   type UsageSummaryDto,
-  type ProviderUsageDto,
+  type UsageSummaryQueryDto,
   type ModelUsageDto,
   type AgentUsageDto,
   type UsageTrendPointDto,
-  type UserQuotaDto,
-  type UserQuotaQueryDto,
-  type SetQuotaDto,
   type EvaluationRunDto,
   type EvaluationRunDetailDto,
   type EvaluationRunQueryDto,
@@ -137,7 +131,6 @@ import type {
   UpdateAgentMemoryDto,
   EvaluationTrendDto,
   VersionComparisonDto,
-  BudgetSummaryDto,
   AgentThreadDetailDto,
   ThreadExportDto,
   UsageLogDto,
@@ -151,15 +144,12 @@ import type {
   SkillImportResultDto,
   SkillScope,
   SkillCategoryDto,
-  CreateSkillCategoryDto,
-  UpdateSkillCategoryDto,
   McpServerStatusDto,
   McpToolInfoDto,
   McpToolExposureOptionsDto,
   McpToolStatsDto,
   McpToolPopularityDto,
   McpToolErrorDto,
-  ProviderDefaultModelDto,
   ProviderOptionDto,
   ProviderModelsDto,
   KnowledgeBaseDto,
@@ -176,6 +166,7 @@ import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery, unwrapOk } from '../_mappers'
+import { createUsageLimitBridge, type UsageLimitBridge } from './usage-limit-bridge'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminAgentApi>[0]
@@ -193,7 +184,7 @@ export interface AiBridgeDeps {
   usageApi?: ReturnType<typeof useAdminUsageAnalyticsApi>
   knowledgeBaseApi?: ReturnType<typeof useAdminKnowledgeBaseApi>
   mcpApi?: ReturnType<typeof useAdminMcpApi>
-  quotaApi?: ReturnType<typeof useAdminQuotaApi>
+  usageLimitApi?: ReturnType<typeof useAdminUsageLimitApi>
   evaluationApi?: ReturnType<typeof useAdminEvaluationApi>
 }
 
@@ -227,8 +218,6 @@ export interface AiBridge {
     clone(id: string, name?: string): Promise<AgentDto>
     /** Paged version-snapshot history. */
     getVersions(id: string, query?: AgentVersionQueryDto): Promise<PagedList<AgentVersionDto>>
-    /** Fetch a single version snapshot. */
-    getVersion(id: string, version: number): Promise<AgentVersionDto>
     /** Roll the agent back to a prior version snapshot. */
     rollbackToVersion(id: string, version: number): Promise<AgentDto>
     /** Validate the agent's configuration (provider/model/tools/handoff/skills). */
@@ -255,14 +244,18 @@ export interface AiBridge {
     getDetail(id: string, messageLimit?: number): Promise<AgentThreadDetailDto>
     /** Export a thread as a JSON payload. */
     exportJson(id: string): Promise<ThreadExportDto>
-    /** Resolve the markdown export URL (file download - caller opens it). */
-    getExportMarkdownUrl(id: string): string
+    /**
+     * Download a thread as a Markdown file (the caller saves the Blob). Throws with
+     * the server's reason when the export is refused.
+     */
+    exportMarkdown(id: string): Promise<Blob>
   }
   agentRuns: Pick<BridgeCrudContract<AgentRunDto>, 'fetch'> & {
+    /** One run by id (a deep-linked run need not be on the list's first page). */
+    getById(id: string): Promise<AgentRunDto>
     cancel(id: string): Promise<void>
     /** All trace events recorded for a run (drives the run monitor's trace panel via polling). */
     getTraces(id: string): Promise<AgentRunTraceDto[]>
-    tail(id: string): Promise<ReadableStream<Uint8Array>>
   }
   workflows: BridgeCrudContract<
     WorkflowDefinitionDto,
@@ -279,12 +272,8 @@ export interface AiBridge {
     unpublish(id: string): Promise<WorkflowDefinitionDto>
     /** Synchronously execute the workflow once. */
     run(id: string, input: string, userId?: string): Promise<WorkflowExecutionResultDto>
-    /** Resolve the SSE stream URL for `run/stream`. Caller opens EventSource. */
-    getRunStreamUrl(id: string): string
     /** Pre-run validation (step refs, cycles, agent refs). */
     validate(id: string): Promise<WorkflowValidationResultDto>
-    /** Workflow-wide statistics (definition counts + execution counts). */
-    getStats(): Promise<WorkflowStatsDto>
     /** Batch enable workflows. */
     batchEnable(ids: string[]): Promise<number>
     /** Batch disable workflows. */
@@ -299,11 +288,8 @@ export interface AiBridge {
     restoreVersion(id: string, versionNumber: number, changeDescription?: string): Promise<void>
   }
   workflowRuns: Pick<BridgeCrudContract<WorkflowExecutionSummaryDto>, 'fetch'> & {
-    tail(id: string): Promise<ReadableStream<Uint8Array>>
     /** Fetch the full execution detail (steps + outputs + pending approvals). */
     getDetail(executionId: string): Promise<WorkflowExecutionDetailDto>
-    /** Get current execution status (lighter than getDetail). */
-    getStatus(executionId: string): Promise<WorkflowExecutionStatusDto>
     /** Resume a paused execution. */
     resume(executionId: string): Promise<WorkflowExecutionResultDto>
     /** Approve a step waiting on human review. */
@@ -345,17 +331,10 @@ export interface AiBridge {
   /** Skill category tree (admin/ai/skill-categories). */
   skillCategories: {
     getTree(): Promise<SkillCategoryDto[]>
-    create(data: CreateSkillCategoryDto): Promise<SkillCategoryDto>
-    update(id: string, data: UpdateSkillCategoryDto): Promise<SkillCategoryDto>
-    delete(id: string): Promise<void>
     getSkills(categoryId: string): Promise<SkillSummaryDto[]>
   }
   providers: BridgeCrudContract<ProviderRow, CreateProviderDto, UpdateProviderDto> & {
     test(id: string): Promise<{ ok: boolean; latency: number; error?: string }>
-    /** Names of all enabled providers (config-driven). */
-    getProviders(): Promise<string[]>
-    /** Default model resolved for a provider name. */
-    getDefaultModel(providerName: string): Promise<ProviderDefaultModelDto>
     /** Enabled provider dropdown options (id + name + type + default model). */
     getOptions(): Promise<ProviderOptionDto[]>
     /** Models for a provider entity (live /v1/models + static fallback). */
@@ -374,8 +353,6 @@ export interface AiBridge {
     byDay(query: CrudPageQuery): Promise<UsageTrendPointDto[]>
     /** Paged usage log query (OperationType/provider/model/agent/success filters). */
     getLogs(query: CrudPageQuery): Promise<PagedList<UsageLogDto>>
-    /** Usage aggregated by provider. */
-    byProvider(query: CrudPageQuery): Promise<ProviderUsageDto[]>
     /** Per-agent feedback (good-rate + tag distribution). */
     feedbackStats(topN?: number): Promise<AgentFeedbackStatsDto[]>
     /** USD cost summary grouped by provider/model. */
@@ -386,8 +363,6 @@ export interface AiBridge {
     KnowledgeBaseCreateParams,
     KnowledgeBaseUpdateParams
   > & {
-    /** Fetch a single knowledge base by id. */
-    getById(id: string): Promise<KnowledgeBaseDto>
     /** Trigger full re-vectorization; returns chunk/document counts + duration. */
     reindex(id: string): Promise<ReindexResultDto>
     /** Paged document list for a knowledge base. */
@@ -423,12 +398,14 @@ export interface AiBridge {
     getToolErrors(toolName: string, top?: number): Promise<McpToolErrorDto[]>
     cleanup(retentionDays?: number): Promise<number>
   }
-  quota: BridgeCrudContract<UserQuotaDto, SetQuotaDto, SetQuotaDto> & {
-    /** USD cost budget summary for a tenant/time-range. */
-    getBudgetSummary(params?: { tenantId?: string; startTime?: string; endTime?: string }): Promise<BudgetSummaryDto>
-  }
-  evaluations: BridgeCrudContract<EvaluationRunDto, CreateEvaluationRunDto, Partial<EvaluationRunDto>> & {
-    run(id: string): Promise<{ runId: string }>
+  /**
+   * Usage limits (the 5-hour session window and the weekly window, in API-equivalent USD)
+   * and the models each user may pick: everyone's defaults, one user's own settings, the
+   * users who used AI, and the tenant's cost budget (see `usage-limit-bridge.ts`).
+   */
+  usageLimits: UsageLimitBridge
+  /** No update: a run is created and executed in one call and never edited. */
+  evaluations: Omit<BridgeCrudContract<EvaluationRunDto, CreateEvaluationRunDto>, 'update'> & {
     runBatch(data: BatchEvaluationDto): Promise<BatchEvaluationResultDto>
     /** Fetch an EvaluationRun with its full resultsJson (drives the diff drawer). */
     getDetail(id: string): Promise<EvaluationRunDetailDto>
@@ -448,8 +425,37 @@ function toCrudResult<T>(p: PagedList<T>): CrudPageResult<T> {
   return p
 }
 
-const notImplemented = (op: string) => () =>
-  Promise.reject(new Error(`ai-bridge: ${op} is not implemented - backend endpoint not available`))
+/**
+ * The usage dashboard's date range as the analytics endpoints bind it. They take
+ * non-nullable `DateTime`s, so a cleared picker went out as `''` and every call
+ * answered 400. A cleared start reads from the beginning, a cleared end up to now.
+ */
+const USAGE_OPEN_START = new Date(0).toISOString()
+function usageRange(filters: Record<string, unknown>): { startTime: string; endTime: string } {
+  const start = typeof filters.startTime === 'string' ? filters.startTime.trim() : ''
+  const end = typeof filters.endTime === 'string' ? filters.endTime.trim() : ''
+  return { startTime: start || USAGE_OPEN_START, endTime: end || new Date().toISOString() }
+}
+
+/**
+ * The dashboard's provider / model / agent narrowing, forwarded to every
+ * analytics call that takes it. Each panel used to receive a different subset
+ * (the summary dropped the agent, the trend and the by-agent breakdown dropped
+ * both), so the KPI cards, the trend and the breakdowns described different rows.
+ * Blank inputs are omitted: an empty agent id is not a Guid.
+ */
+function usageNarrowing(filters: Record<string, unknown>): { provider?: string; model?: string; agentId?: string } {
+  const pick = (value: unknown): string | undefined =>
+    typeof value === 'string' && value.trim() ? value.trim() : undefined
+  return { provider: pick(filters.provider), model: pick(filters.model), agentId: pick(filters.agentId) }
+}
+
+/** A single-skill switch that changed no row was refused (System scope, file source), not applied. */
+function requireSkillToggled(changed: number): void {
+  if (changed < 1) {
+    throw new Error('The skill was not changed. System-scope and file-source skills cannot be switched on or off here.')
+  }
+}
 
 // ---------------------------------------------------------------------------
 
@@ -464,7 +470,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const kbApi =
     deps.knowledgeBaseApi ?? (deps.client ? useAdminKnowledgeBaseApi(deps.client) : null)
   const mcpApi = deps.mcpApi ?? (deps.client ? useAdminMcpApi(deps.client) : null)
-  const quotaApi = deps.quotaApi ?? (deps.client ? useAdminQuotaApi(deps.client) : null)
+  const usageLimitApi = deps.usageLimitApi ?? (deps.client ? useAdminUsageLimitApi(deps.client) : null)
   const evaluationApi =
     deps.evaluationApi ?? (deps.client ? useAdminEvaluationApi(deps.client) : null)
   // New capability factories (client-derived; production always passes `client`).
@@ -484,13 +490,13 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     !usageApi ||
     !kbApi ||
     !mcpApi ||
-    !quotaApi ||
+    !usageLimitApi ||
     !evaluationApi
   ) {
     throw new Error(
       'createAiBridge: provide either `client` (HttpClient) or all 11 api deps ' +
         '(agentApi/agentRunApi/threadApi/workflowApi/skillApi/providerApi/usageApi/' +
-        'knowledgeBaseApi/mcpApi/quotaApi/evaluationApi)',
+        'knowledgeBaseApi/mcpApi/usageLimitApi/evaluationApi)',
     )
   }
 
@@ -498,7 +504,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const agents: AiBridge['agents'] = {
     fetch: async (q) =>
       toCrudResult(
-        unwrap<PagedList<AgentDto>>(await agentApi.getList(mapQuery(q) as unknown as AgentListQueryDto)),
+        unwrapOk<PagedList<AgentDto>>(await agentApi.getList(mapQuery(q) as unknown as AgentListQueryDto)),
       ),
     create: async (data) => unwrapOk<AgentDto>(await agentApi.create(data)),
     update: async (id, data) => unwrapOk<AgentDto>(await agentApi.update(String(id), data)),
@@ -509,22 +515,22 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       // deleted while they were still there.
       for (const id of ids) ensureOk(await agentApi.delete(String(id)))
     },
-    getById: async (id) => unwrap<AgentDto>(await agentApi.getById(String(id))),
+    // Single-record reads reject a refusal (404 / 403) with the server's reason;
+    // unchecked they resolved null and the page failed on a TypeError instead.
+    getById: async (id) => unwrapOk<AgentDto>(await agentApi.getById(String(id))),
     clone: async (id, name) => unwrapOk<AgentDto>(await agentApi.clone(String(id), name)),
     getVersions: async (id, query) =>
-      unwrap<PagedList<AgentVersionDto>>(await agentApi.getVersions(String(id), query)),
-    getVersion: async (id, version) =>
-      unwrap<AgentVersionDto>(await agentApi.getVersion(String(id), version)),
+      unwrapOk<PagedList<AgentVersionDto>>(await agentApi.getVersions(String(id), query)),
     rollbackToVersion: async (id, version) =>
       unwrapOk<AgentDto>(await agentApi.rollbackToVersion(String(id), version)),
-    validate: async (id) => unwrap<AgentValidationResultDto>(await agentApi.validate(String(id))),
+    validate: async (id) => unwrapOk<AgentValidationResultDto>(await agentApi.validate(String(id))),
     getHealth: async () => unwrap<AgentHealthSummaryDto>(await agentApi.getHealth()),
     configureAbTest: async (id, data) =>
       unwrapOk<AgentDto>(await agentApi.configureAbTest(String(id), data)),
     stopAbTest: async (id) => unwrapOk<AgentDto>(await agentApi.stopAbTest(String(id))),
-    getToolGroups: async () => unwrap<ToolGroupDto[]>(await agentApi.getToolGroups()),
+    getToolGroups: async () => unwrapOk<ToolGroupDto[]>(await agentApi.getToolGroups()) ?? [],
     getMemory: async (id, query) =>
-      unwrap<PagedList<AgentMemoryDto>>(await agentApi.getMemory(String(id), query)),
+      unwrapOk<PagedList<AgentMemoryDto>>(await agentApi.getMemory(String(id), query)),
     createMemory: async (id, data) =>
       unwrapOk<AgentMemoryDto>(await agentApi.createMemory(String(id), data)),
     updateMemory: async (id, memoryId, data) =>
@@ -538,7 +544,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const threads: AiBridge['threads'] = {
     fetch: async (q) =>
       toCrudResult(
-        unwrap<PagedList<AgentThreadDto>>(await threadApi.getList(
+        unwrapOk<PagedList<AgentThreadDto>>(await threadApi.getList(
           mapQuery(q) as unknown as ThreadListQueryDto,
         )),
       ),
@@ -551,34 +557,35 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       for (const id of ids) ensureOk(await threadApi.delete(String(id)))
     },
     getDetail: async (id, messageLimit) =>
-      unwrap<AgentThreadDetailDto>(await threadApi.getDetail(String(id), messageLimit)),
+      unwrapOk<AgentThreadDetailDto>(await threadApi.getDetail(String(id), messageLimit)),
     exportJson: async (id) => unwrapOk<ThreadExportDto>(await threadApi.exportJson(String(id))),
-    getExportMarkdownUrl: (id) => threadApi.getExportMarkdownUrl(String(id)),
+    exportMarkdown: async (id) => unwrapOk<Blob>(await threadApi.exportMarkdown(String(id))),
   }
 
   // ---- agentRuns ----------------------------------------------------------
   const agentRuns = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<AgentRunDto>> =>
       toCrudResult(
-        unwrap<PagedList<AgentRunDto>>(await agentRunApi.getList(
+        unwrapOk<PagedList<AgentRunDto>>(await agentRunApi.getList(
           mapQuery(q) as unknown as AgentRunQueryDto,
         )),
       ),
+    getById: async (id: string) => unwrapOk<AgentRunDto>(await agentRunApi.getById(id)),
     cancel: async (id: string) => {
       ensureOk(await agentRunApi.cancel(id))
     },
+    // A refused read rejects: "no trace events" is not what a 403 means.
     getTraces: async (id: string) => {
-      const items = unwrap<AgentRunTraceDto[] | undefined>(await agentRunApi.getRunTraces(id))
+      const items = unwrapOk<AgentRunTraceDto[] | undefined>(await agentRunApi.getRunTraces(id))
       return Array.isArray(items) ? items : []
     },
-    tail: notImplemented('agentRuns.tail') as () => Promise<ReadableStream<Uint8Array>>,
   }
 
   // ---- workflows ----------------------------------------------------------
   const workflows: AiBridge['workflows'] = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<WorkflowDefinitionDto>> =>
       toCrudResult(
-        unwrap<PagedList<WorkflowDefinitionDto>>(await workflowApi.getList(
+        unwrapOk<PagedList<WorkflowDefinitionDto>>(await workflowApi.getList(
           mapQuery(q) as unknown as WorkflowDefinitionQueryDto,
         )),
       ),
@@ -590,7 +597,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       ensureOk(await workflowApi.batchDelete(ids.map(String)))
     },
     getById: async (id: string) =>
-      unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
+      unwrapOk<WorkflowDefinitionDto>(await workflowApi.getById(String(id))),
     clone: async (id: string) =>
       unwrapOk<WorkflowDefinitionDto>(await workflowApi.clone(String(id))),
     // batchEnable is the current publish semantic - see docs/modules/ai.md Workflow section.
@@ -598,21 +605,18 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     // (Promise<WorkflowDefinitionDto>) is honoured for callers that want the updated entity.
     publish: async (id: string): Promise<WorkflowDefinitionDto> => {
       ensureOk(await workflowApi.batchEnable([String(id)]))
-      return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
+      return unwrapOk<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
     },
     unpublish: async (id: string): Promise<WorkflowDefinitionDto> => {
       ensureOk(await workflowApi.batchDisable([String(id)]))
-      return unwrap<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
+      return unwrapOk<WorkflowDefinitionDto>(await workflowApi.getById(String(id)))
     },
     run: async (id: string, input: string, userId?: string) => {
       const body: RunWorkflowRequestDto = { input, userId: userId ?? null }
       return unwrapOk<WorkflowExecutionResultDto>(await workflowApi.run(String(id), body))
     },
-    getRunStreamUrl: (id: string) => workflowApi.getRunStreamUrl(String(id)),
     validate: async (id: string) =>
-      unwrap<WorkflowValidationResultDto>(await workflowApi.validate(String(id))),
-    getStats: async () =>
-      unwrap<WorkflowStatsDto>(await workflowApi.getStats()),
+      unwrapOk<WorkflowValidationResultDto>(await workflowApi.validate(String(id))),
     batchEnable: async (ids: string[]) =>
       unwrapOk<number>(await workflowApi.batchEnable(ids.map(String))),
     batchDisable: async (ids: string[]) =>
@@ -642,16 +646,13 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         ...(q.filters ?? {}),
       }
       return toCrudResult(
-        unwrap<PagedList<WorkflowExecutionSummaryDto>>(await workflowApi.getExecutions(
+        unwrapOk<PagedList<WorkflowExecutionSummaryDto>>(await workflowApi.getExecutions(
           params as unknown as never,
         )),
       )
     },
-    tail: notImplemented('workflowRuns.tail') as () => Promise<ReadableStream<Uint8Array>>,
     getDetail: async (executionId: string): Promise<WorkflowExecutionDetailDto> =>
-      unwrap<WorkflowExecutionDetailDto>(await workflowApi.getExecutionDetail(executionId)),
-    getStatus: async (executionId: string) =>
-      unwrap<WorkflowExecutionStatusDto>(await workflowApi.getExecutionStatus(executionId)),
+      unwrapOk<WorkflowExecutionDetailDto>(await workflowApi.getExecutionDetail(executionId)),
     resume: async (executionId: string) =>
       unwrapOk<WorkflowExecutionResultDto>(await workflowApi.resumeExecution(executionId)),
     approveStep: async (executionId: string, stepId: string, comment?: string) => {
@@ -680,7 +681,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const skills = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<SkillSummaryDto>> =>
       toCrudResult(
-        unwrap<PagedList<SkillSummaryDto>>(await skillApi.getPaged(
+        unwrapOk<PagedList<SkillSummaryDto>>(await skillApi.getPaged(
           // Admin list always merges DB + file-source skills. Backend hides
           // file-source rows behind this opt-in flag because they're not
           // editable; the admin page distinguishes them via `isReadOnly` +
@@ -692,24 +693,33 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       unwrapOk<SkillSummaryDto>(await skillApi.create(data)),
     update: async (id: string, data: UpdateSkillDto) =>
       unwrapOk<SkillSummaryDto>(await skillApi.update(String(id), data)),
+    // The batch endpoints answer 200 with the number of rows they changed and
+    // silently skip rows they may not touch (System scope, a file-source row's
+    // empty id, another tenant's row). The count is the only signal, so a
+    // shortfall is a failure here, not a success.
     delete: async (ids: string[]) => {
-      ensureOk(await skillApi.batchDelete(ids.map(String)))
+      const deleted = unwrapOk<number>(await skillApi.batchDelete(ids.map(String)))
+      if (deleted < ids.length) {
+        throw new Error(`Only ${deleted} of ${ids.length} skills were deleted. System-scope and file-source skills cannot be deleted here.`)
+      }
     },
+    // Admin "activate" / "deactivate" map to the batch endpoints on a single id. Zero rows
+    // changed means the card was not a row this admin can switch; that is a failure, not a
+    // success toast.
     activate: async (id: string) => {
-      // Admin "activate" maps to batchEnable on a single id.
-      ensureOk(await skillApi.batchEnable([String(id)]))
+      requireSkillToggled(unwrapOk<number>(await skillApi.batchEnable([String(id)])))
     },
     deactivate: async (id: string) => {
-      ensureOk(await skillApi.batchDisable([String(id)]))
+      requireSkillToggled(unwrapOk<number>(await skillApi.batchDisable([String(id)])))
     },
-    getBySlug: async (slug: string) => unwrap<SkillDetailDto>(await skillApi.getBySlug(slug)),
+    getBySlug: async (slug: string) => unwrapOk<SkillDetailDto>(await skillApi.getBySlug(slug)),
     search: async (query: string, maxResults?: number) => {
-      const items = unwrap<SkillSummaryDto[] | undefined>(await skillApi.search(query, maxResults))
+      const items = unwrapOk<SkillSummaryDto[] | undefined>(await skillApi.search(query, maxResults))
       return Array.isArray(items) ? items : []
     },
     getUsageStats: async () => unwrap<SkillUsageStatsDto>(await skillApi.getUsageStats()),
     getPopular: async (topN?: number) => {
-      const items = unwrap<PopularSkillDto[] | undefined>(await skillApi.getPopular(topN))
+      const items = unwrapOk<PopularSkillDto[] | undefined>(await skillApi.getPopular(topN))
       return Array.isArray(items) ? items : []
     },
     exportSkills: async (scope?: SkillScope) => {
@@ -723,17 +733,11 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   // ---- skill categories ---------------------------------------------------
   const skillCategories: AiBridge['skillCategories'] = {
     getTree: async () => {
-      const items = unwrap<SkillCategoryDto[] | undefined>(await skillCategoryApi!.getTree())
+      const items = unwrapOk<SkillCategoryDto[] | undefined>(await skillCategoryApi!.getTree())
       return Array.isArray(items) ? items : []
     },
-    create: async (data) => unwrapOk<SkillCategoryDto>(await skillCategoryApi!.create(data)),
-    update: async (id, data) =>
-      unwrapOk<SkillCategoryDto>(await skillCategoryApi!.update(String(id), data)),
-    delete: async (id) => {
-      ensureOk(await skillCategoryApi!.delete(String(id)))
-    },
     getSkills: async (categoryId) => {
-      const items = unwrap<SkillSummaryDto[] | undefined>(
+      const items = unwrapOk<SkillSummaryDto[] | undefined>(
         await skillCategoryApi!.getSkillsByCategory(String(categoryId)),
       )
       return Array.isArray(items) ? items : []
@@ -747,7 +751,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   const providers = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<ProviderRow>> =>
       toCrudResult(
-        unwrap<PagedList<ProviderDto>>(
+        unwrapOk<PagedList<ProviderDto>>(
           await providerApi.getList(mapQuery(q) as unknown as ProviderQueryDto),
         ),
       ),
@@ -768,13 +772,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         error: result.success ? undefined : result.message ?? undefined,
       }
     },
-    getProviders: async () => {
-      const items = unwrap<string[] | undefined>(await providerApi.getProviders())
-      return Array.isArray(items) ? items : []
-    },
-    getDefaultModel: async (providerName: string) =>
-      unwrap<ProviderDefaultModelDto>(await providerApi.getDefaultModel(providerName)),
-    getOptions: async () => unwrap<ProviderOptionDto[]>(await providerApi.getOptions()),
+    // A refused read rejects (it needs ai.provider.view): unchecked it resolved
+    // null and the pickers reading `.length` / `.map` off it threw.
+    getOptions: async () => unwrapOk<ProviderOptionDto[] | null>(await providerApi.getOptions()) ?? [],
     listModels: async (id: string) => unwrap<ProviderModelsDto>(await providerApi.listModels(String(id))),
     reorder: async (ids: string[]): Promise<void> => {
       ensureOk(await providerApi.reorder({ ids }))
@@ -782,15 +782,15 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   }
 
   // ---- usage --------------------------------------------------------------
+  // Every analytics read goes through unwrapOk: the dashboard fans these out with
+  // Promise.allSettled and reports a rejected source in its error banner. A bare
+  // unwrap turned a refused read (403, 500, a timeout) into null, which the
+  // fallbacks below then rendered as zero usage and zero cost.
   const usage = {
     summary: async (q: CrudPageQuery): Promise<UsageSummary> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      const summary = unwrap<UsageSummaryDto | undefined>(await usageApi.getSummary({
-        startTime: String(filters.startTime ?? ''),
-        endTime: String(filters.endTime ?? ''),
-        provider: filters.provider as string | undefined,
-        model: filters.model as string | undefined,
-      } as unknown as never))
+      const query: UsageSummaryQueryDto = { ...usageRange(filters), ...usageNarrowing(filters) }
+      const summary = unwrapOk<UsageSummaryDto | undefined>(await usageApi.getSummary(query))
       return {
         totalTokens: summary?.totalTokens ?? 0,
         totalCostUsd: summary?.totalEstimatedCostUsd ?? 0,
@@ -799,80 +799,62 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     },
     byAgent: async (q: CrudPageQuery): Promise<AgentUsageDto[]> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      const items = unwrap<AgentUsageDto[] | undefined>(await usageApi.getByAgent(
-        String(filters.startTime ?? ''),
-        String(filters.endTime ?? ''),
+      const { startTime, endTime } = usageRange(filters)
+      const items = unwrapOk<AgentUsageDto[] | undefined>(await usageApi.getByAgent(
+        startTime,
+        endTime,
         (filters.topN as number | undefined) ?? 20,
+        usageNarrowing(filters),
       ))
       return Array.isArray(items) ? items : []
     },
     byModel: async (q: CrudPageQuery): Promise<ModelUsageDto[]> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      const items = unwrap<ModelUsageDto[] | undefined>(await usageApi.getByModel(
-        String(filters.startTime ?? ''),
-        String(filters.endTime ?? ''),
-        filters.provider as string | undefined,
-      ))
+      const { startTime, endTime } = usageRange(filters)
+      const { provider, agentId } = usageNarrowing(filters)
+      const items = unwrapOk<ModelUsageDto[] | undefined>(await usageApi.getByModel(startTime, endTime, provider, agentId))
       return Array.isArray(items) ? items : []
     },
     byDay: async (q: CrudPageQuery): Promise<UsageTrendPointDto[]> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
       // Backend enum is UsageGranularity { Daily=0, Weekly=1, Monthly=2 } - use
       // the canonical enum reference rather than a string literal so refactors
-      // on the enum are caught at type-check time. Also coalesce empty
-      // start/end times so an unconfigured dashboard probe doesn't bounce on
-      // DateTime binding before the user has picked a range.
-      const start = String(filters.startTime ?? '')
-      const end = String(filters.endTime ?? '')
-      if (!start || !end) return []
-      const items = unwrap<UsageTrendPointDto[] | undefined>(await usageApi.getTrend({
-        startTime: start,
-        endTime: end,
+      // on the enum are caught at type-check time.
+      const items = unwrapOk<UsageTrendPointDto[] | undefined>(await usageApi.getTrend({
+        ...usageRange(filters),
+        ...usageNarrowing(filters),
         granularity: UsageGranularity.Daily,
       }))
       return Array.isArray(items) ? items : []
     },
     getLogs: async (q: CrudPageQuery): Promise<PagedList<UsageLogDto>> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      return unwrap<PagedList<UsageLogDto>>(await usageApi.getLogs({
+      return unwrapOk<PagedList<UsageLogDto>>(await usageApi.getLogs({
         pageIndex: q.pageIndex ?? 1,
         pageSize: q.pageSize ?? 20,
-        startTime: (filters.startTime as string | undefined) ?? undefined,
-        endTime: (filters.endTime as string | undefined) ?? undefined,
-        provider: filters.provider as string | undefined,
-        model: filters.model as string | undefined,
+        startTime: (filters.startTime as string | undefined) || undefined,
+        endTime: (filters.endTime as string | undefined) || undefined,
         operationType: filters.operationType as string | undefined,
         isSuccess: filters.isSuccess as boolean | undefined,
-        agentId: filters.agentId as string | undefined,
+        ...usageNarrowing(filters),
       } as unknown as UsageLogQueryDto))
     },
-    byProvider: async (q: CrudPageQuery): Promise<ProviderUsageDto[]> => {
-      const filters = (q.filters ?? {}) as Record<string, unknown>
-      const items = unwrap<ProviderUsageDto[] | undefined>(await usageApi.getByProvider(
-        String(filters.startTime ?? ''),
-        String(filters.endTime ?? ''),
-      ))
-      return Array.isArray(items) ? items : []
-    },
     feedbackStats: async (topN?: number): Promise<AgentFeedbackStatsDto[]> => {
-      const items = unwrap<AgentFeedbackStatsDto[] | undefined>(await usageApi.getAgentFeedbackStats(topN))
+      const items = unwrapOk<AgentFeedbackStatsDto[] | undefined>(await usageApi.getAgentFeedbackStats(topN))
       return Array.isArray(items) ? items : []
     },
     costSummary: async (q: CrudPageQuery): Promise<CostSummaryDto> => {
       const filters = (q.filters ?? {}) as Record<string, unknown>
-      return unwrap<CostSummaryDto>(await usageApi.getCostSummary(
-        String(filters.startTime ?? ''),
-        String(filters.endTime ?? ''),
-        filters.provider as string | undefined,
-        filters.model as string | undefined,
-      ))
+      const { startTime, endTime } = usageRange(filters)
+      const { provider, model, agentId } = usageNarrowing(filters)
+      return unwrapOk<CostSummaryDto>(await usageApi.getCostSummary(startTime, endTime, provider, model, agentId))
     },
   }
 
   // ---- knowledge ----------------------------------------------------------
   const knowledge: AiBridge['knowledge'] = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<KnowledgeBaseDto>> => {
-      const result = unwrap<unknown>(await kbApi.getList({
+      const result = unwrapOk<unknown>(await kbApi.getList({
         pageIndex: q.pageIndex ?? 1,
         pageSize: q.pageSize ?? 20,
         keyword: q.searchText || undefined,
@@ -904,10 +886,9 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     delete: async (ids) => {
       for (const id of ids) ensureOk(await kbApi.delete(String(id)))
     },
-    getById: async (id) => unwrap<KnowledgeBaseDto>(await kbApi.getById(String(id))),
     reindex: async (id) => unwrapOk<ReindexResultDto>(await kbApi.reindex(String(id))),
     getDocuments: async (kbId, query) =>
-      unwrap<PagedList<KnowledgeDocumentDto>>(await kbApi.getDocuments(String(kbId), query)),
+      unwrapOk<PagedList<KnowledgeDocumentDto>>(await kbApi.getDocuments(String(kbId), query)),
     getDocumentStatus: async (kbId, docId) =>
       unwrap<KnowledgeDocumentDto>(await kbApi.getDocumentStatus(String(kbId), String(docId))),
     uploadDocument: async (kbId, file) =>
@@ -916,7 +897,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
       ensureOk(await kbApi.deleteDocument(String(kbId), String(docId)))
     },
     searchTest: async (kbId, data) => {
-      const items = unwrap<SearchResultDto[] | undefined>(await kbApi.searchTest(String(kbId), data))
+      const items = unwrapOk<SearchResultDto[] | undefined>(await kbApi.searchTest(String(kbId), data))
       return Array.isArray(items) ? items : []
     },
   }
@@ -937,7 +918,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
         transport: (filters.transport as string | undefined) ?? null,
         isEnabled: (filters.isEnabled as boolean | undefined) ?? null,
       }
-      return toCrudResult(unwrap<PagedList<McpServerRegistrationDto>>(await mcpApi.getList(query)))
+      return toCrudResult(unwrapOk<PagedList<McpServerRegistrationDto>>(await mcpApi.getList(query)))
     },
     create: async (data: CreateMcpServerRegistrationDto): Promise<McpServerRow> =>
       unwrapOk<McpServerRegistrationDto>(await mcpApi.create(data)),
@@ -957,14 +938,17 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   }
 
   // ---- mcp (Tnzi's own MCP server) ---------------------------------------
+  // The server reads reject a failed envelope: a 403 / 5xx read as an empty
+  // status or tool list described a disabled server with nothing exposed, and a
+  // 404 / 501 (sub-module not loaded) must reach the page so it can say so.
   const mcp: AiBridge['mcp'] = {
-    getStatus: async () => unwrap<McpServerStatusDto>(await mcpApi.getStatus()),
+    getStatus: async () => unwrapOk<McpServerStatusDto>(await mcpApi.getStatus()),
     getTools: async () => {
-      const items = unwrap<McpToolInfoDto[] | undefined>(await mcpApi.getTools())
+      const items = unwrapOk<McpToolInfoDto[] | undefined>(await mcpApi.getTools())
       return Array.isArray(items) ? items : []
     },
     getExposedAgents: async () => {
-      const items = unwrap<string[] | undefined>(await mcpApi.getExposedAgents())
+      const items = unwrapOk<string[] | undefined>(await mcpApi.getExposedAgents())
       return Array.isArray(items) ? items : []
     },
     exposeAgent: async (agentId, options) => {
@@ -978,15 +962,15 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
   // ---- mcp tool analytics -------------------------------------------------
   const mcpToolAnalytics: AiBridge['mcpToolAnalytics'] = {
     getToolStats: async (toolName, from, to) =>
-      unwrap<McpToolStatsDto>(await mcpAnalyticsApi!.getToolStats(toolName, from, to)),
+      unwrapOk<McpToolStatsDto>(await mcpAnalyticsApi!.getToolStats(toolName, from, to)),
     getMostUsedTools: async (top, from, to) => {
-      const items = unwrap<McpToolPopularityDto[] | undefined>(
+      const items = unwrapOk<McpToolPopularityDto[] | undefined>(
         await mcpAnalyticsApi!.getMostUsedTools(top, from, to),
       )
       return Array.isArray(items) ? items : []
     },
     getToolErrors: async (toolName, top) => {
-      const items = unwrap<McpToolErrorDto[] | undefined>(
+      const items = unwrapOk<McpToolErrorDto[] | undefined>(
         await mcpAnalyticsApi!.getToolErrors(toolName, top),
       )
       return Array.isArray(items) ? items : []
@@ -994,63 +978,29 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     cleanup: async (retentionDays) => unwrapOk<number>(await mcpAnalyticsApi!.cleanup(retentionDays)),
   }
 
-  // ---- quota --------------------------------------------------------------
-  const quota: AiBridge['quota'] = {
-    // Backend exposes a paged query at POST /admin/quotas/query (Phase 5 prereq).
-    fetch: async (q): Promise<CrudPageResult<UserQuotaDto>> => {
-      const filters = (q.filters ?? {}) as Record<string, unknown>
-      const pageIndex = q.pageIndex ?? 1
-      const pageSize = q.pageSize ?? 20
-      const query: UserQuotaQueryDto = {
-        pageIndex,
-        pageSize,
-        skip: (pageIndex - 1) * pageSize,
-        take: pageSize,
-        userId: (filters.userId as string | undefined) ?? null,
-        isEnabled: (filters.isEnabled as boolean | undefined) ?? null,
-      }
-      return toCrudResult(unwrap<PagedList<UserQuotaDto>>(await quotaApi.getList(query)))
-    },
-    create: async (data) => unwrapOk<UserQuotaDto>(await quotaApi.setQuota(data)),
-    update: async (_id, data) => unwrapOk<UserQuotaDto>(await quotaApi.setQuota(data)),
-    delete: notImplemented('quota.delete') as (ids: string[]) => Promise<void>,
-    getBudgetSummary: async (params) =>
-      unwrap<BudgetSummaryDto>(await quotaApi.getBudgetSummary(params)),
-  }
+  // ---- usage limits -------------------------------------------------------
+  const usageLimits = createUsageLimitBridge({ usageLimitApi })
 
   // ---- evaluations --------------------------------------------------------
-  const evaluations = {
+  const evaluations: AiBridge['evaluations'] = {
     fetch: async (q: CrudPageQuery): Promise<CrudPageResult<EvaluationRunDto>> =>
       toCrudResult(
-        unwrap<PagedList<EvaluationRunDto>>(await evaluationApi.getList(
+        unwrapOk<PagedList<EvaluationRunDto>>(await evaluationApi.getList(
           mapQuery(q) as unknown as EvaluationRunQueryDto,
         )),
       ),
     // Backend's "create" is create-and-run in one shot (POST /admin/ai/evaluations/run).
     create: async (data: CreateEvaluationRunDto): Promise<EvaluationRunDto> =>
       unwrapOk<EvaluationRunDetailDto>(await evaluationApi.create(data)),
-    update: notImplemented('evaluations.update') as (
-      id: string,
-      data: Partial<EvaluationRunDto>,
-    ) => Promise<EvaluationRunDto>,
     delete: async (ids: string[]) => {
       // See agents.delete: a failed delete resolves rather than rejects, so an
       // unchecked await reports success on a row that never went away.
       for (const id of ids) ensureOk(await evaluationApi.delete(String(id)))
     },
-    // run(id) of an existing evaluation is not supported - backend creates+runs in one
-    // call. Use create() to spawn a fresh run, or runBatch() for multi-target runs.
-    run: (_id: string): Promise<{ runId: string }> =>
-      Promise.reject(
-        new Error(
-          'evaluations.run(id) is not supported - backend creates and runs in one call. ' +
-            'Use evaluations.create(dto) instead.',
-        ),
-      ),
     runBatch: async (data: BatchEvaluationDto): Promise<BatchEvaluationResultDto> =>
       unwrapOk<BatchEvaluationResultDto>(await evaluationApi.runBatch(data)),
     getDetail: async (id: string): Promise<EvaluationRunDetailDto> =>
-      unwrap<EvaluationRunDetailDto>(await evaluationApi.getById(id)),
+      unwrapOk<EvaluationRunDetailDto>(await evaluationApi.getById(id)),
     getTrend: async (agentId: string, lastNRuns?: number) =>
       unwrap<EvaluationTrendDto>(await evaluationApi.getTrend(agentId, lastNRuns)),
     compareVersions: async (agentId: string, versionA: number, versionB: number) =>
@@ -1071,7 +1021,7 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
     mcpServers,
     mcp,
     mcpToolAnalytics,
-    quota,
+    usageLimits,
     evaluations,
   }
 }
@@ -1080,7 +1030,18 @@ export function createAiBridge(deps: AiBridgeDeps = {}): AiBridge {
 // values via the bridge surface and stay clean under the
 // `no-restricted-imports` guard against `@tnzi/core/services/*` value
 // imports from `pages/**`.
-export { WorkflowExecutionMode } from '@tnzi/core/services/ai'
+export { WorkflowExecutionMode, UsageLimitMode, UsageLimitWindow } from '@tnzi/core/services/ai'
+export type {
+  UsageLimitDefaultsDto,
+  UserUsageLimitsDto,
+  UserUsageSummaryDto,
+  SaveUsagePolicyDto,
+  UsagePolicyDto,
+  UsageLimitSettingDto,
+  UsageWindowStatusDto,
+  EffectiveUsagePolicyDto,
+  ChatModelDto,
+} from '@tnzi/core/services/ai'
 
 /**
  * Workspace-agent helper - used by the read-only `WorkspaceAgents`
@@ -1104,8 +1065,8 @@ export function createWorkspaceAgentsBridge(
   return {
     async list() {
       if (!api) return []
-      const resp = await api.listAgents()
-      return resp?.data ?? []
+      // A refused read rejects: "no workspace agents" is a statement about the disk.
+      return unwrapOk<WorkspaceAgentDto[] | null>(await api.listAgents()) ?? []
     },
   }
 }

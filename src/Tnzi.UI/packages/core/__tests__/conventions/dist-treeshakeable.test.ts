@@ -77,7 +77,7 @@ async function bundleAgainstDist(
       resolve: { alias },
       build: {
         lib: { entry: join(dir, 'entry.ts'), formats: ['es'], fileName: () => 'out.js' },
-        rollupOptions: { external: ['vue'] },
+        rolldownOptions: { external: ['vue'] },
         outDir: join(dir, 'out'),
         minify: false,
         write: true,

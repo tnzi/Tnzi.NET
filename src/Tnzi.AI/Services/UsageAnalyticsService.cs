@@ -101,9 +101,9 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
         return Ok(result);
     }
 
-    public async Task<Result<List<ModelUsageDto>>> GetUsageByModelAsync(DateTime startTime, DateTime endTime, string? provider = null)
+    public async Task<Result<List<ModelUsageDto>>> GetUsageByModelAsync(DateTime startTime, DateTime endTime, string? provider = null, Guid? agentId = null)
     {
-        var q = BuildBaseQuery(startTime, endTime, provider);
+        var q = BuildBaseQuery(startTime, endTime, provider, agentId: agentId);
 
         var result = await q
             .GroupBy(l => new { l.Provider, l.Model })
@@ -165,33 +165,43 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
         }
         else if (granularity == UsageGranularity.Weekly)
         {
-            // 按 Year+Week 分组（使用 DayOfYear/7 近似周号）
-            var raw = await q
-                .GroupBy(l => new { l.CreationTime.Year, Week = (l.CreationTime.DayOfYear - 1) / 7 })
+            // ISO 8601 周（周一起始，跨年周按 ISO 年标），与其它模块的趋势统计同一口径：
+            // 先在 SQL 里按自然日聚合，再在内存里经 TimeBucket 把日归到周。
+            // 此前按 DayOfYear/7 近似：每年末尾多出一个只有一两天的「W53」，周从元旦那天的星期几开始，
+            // 标签与别的模块同名却指向不同的七天。
+            var daily = await q
+                .GroupBy(l => new { l.CreationTime.Year, l.CreationTime.Month, l.CreationTime.Day })
                 .Select(g => new
                 {
-                    g.Key.Year, g.Key.Week,
+                    g.Key.Year, g.Key.Month, g.Key.Day,
                     TotalRequests = (long)g.Count(),
                     SuccessfulRequests = (long)g.Count(l => l.IsSuccess),
                     TotalInputTokens = g.Sum(l => (long)l.InputTokens),
                     TotalOutputTokens = g.Sum(l => (long)l.OutputTokens),
                     TotalTokens = g.Sum(l => (long)l.TotalTokens),
-                    AverageDurationMs = g.Average(l => (double)l.DurationMs)
+                    TotalDurationMs = g.Sum(l => l.DurationMs)
                 })
-                .OrderBy(p => p.Year).ThenBy(p => p.Week)
                 .ToListAsync();
 
-            points = raw.Select(g => new UsageTrendPointDto
-            {
-                Period = $"{g.Year}-W{(g.Week + 1):D2}",
-                PeriodStart = new DateTime(g.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(g.Week * 7),
-                TotalRequests = g.TotalRequests,
-                SuccessfulRequests = g.SuccessfulRequests,
-                TotalInputTokens = g.TotalInputTokens,
-                TotalOutputTokens = g.TotalOutputTokens,
-                TotalTokens = g.TotalTokens,
-                AverageDurationMs = g.AverageDurationMs
-            }).ToList();
+            points = daily
+                .GroupBy(d => TimeBucket.Start(new DateTime(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Utc), TrendInterval.Weekly))
+                .OrderBy(week => week.Key)
+                .Select(week =>
+                {
+                    var totalRequests = week.Sum(d => d.TotalRequests);
+                    return new UsageTrendPointDto
+                    {
+                        Period = TimeBucket.Label(week.Key, TrendInterval.Weekly),
+                        PeriodStart = week.Key,
+                        TotalRequests = totalRequests,
+                        SuccessfulRequests = week.Sum(d => d.SuccessfulRequests),
+                        TotalInputTokens = week.Sum(d => d.TotalInputTokens),
+                        TotalOutputTokens = week.Sum(d => d.TotalOutputTokens),
+                        TotalTokens = week.Sum(d => d.TotalTokens),
+                        AverageDurationMs = totalRequests > 0 ? (double)week.Sum(d => d.TotalDurationMs) / totalRequests : 0
+                    };
+                })
+                .ToList();
         }
         else // daily (default)
         {
@@ -226,9 +236,9 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
         return Ok(points);
     }
 
-    public async Task<Result<List<AgentUsageDto>>> GetUsageByAgentAsync(DateTime startTime, DateTime endTime, int topN = 20)
+    public async Task<Result<List<AgentUsageDto>>> GetUsageByAgentAsync(DateTime startTime, DateTime endTime, int topN = 20, string? provider = null, string? model = null, Guid? agentId = null)
     {
-        var agentStats = await BuildBaseQuery(startTime, endTime)
+        var agentStats = await BuildBaseQuery(startTime, endTime, provider, model, agentId)
             .Where(l => l.AgentId != null)
             .GroupBy(l => l.AgentId!.Value)
             .Select(g => new
@@ -239,7 +249,8 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
                 TotalInputTokens = g.Sum(l => (long)l.InputTokens),
                 TotalOutputTokens = g.Sum(l => (long)l.OutputTokens),
                 TotalTokens = g.Sum(l => (long)l.TotalTokens),
-                AverageDurationMs = g.Average(l => (double)l.DurationMs)
+                AverageDurationMs = g.Average(l => (double)l.DurationMs),
+                TotalEstimatedCostUsd = g.Sum(l => l.EstimatedCostUsd ?? 0m)
             })
             .OrderByDescending(a => a.TotalTokens)
             .Take(topN)
@@ -264,7 +275,8 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
             TotalOutputTokens = a.TotalOutputTokens,
             TotalTokens = a.TotalTokens,
             AverageDurationMs = a.AverageDurationMs,
-            SuccessRate = a.TotalRequests > 0 ? (double)a.SuccessfulRequests / a.TotalRequests : 0
+            SuccessRate = a.TotalRequests > 0 ? (double)a.SuccessfulRequests / a.TotalRequests : 0,
+            TotalEstimatedCostUsd = a.TotalEstimatedCostUsd
         }).ToList();
 
         return Ok(result);
@@ -355,9 +367,9 @@ public class UsageAnalyticsService : ApplicationService, IUsageAnalyticsService
         return Ok(result);
     }
 
-    public async Task<Result<CostSummaryDto>> GetCostSummaryAsync(DateTime startTime, DateTime endTime, string? provider = null, string? model = null)
+    public async Task<Result<CostSummaryDto>> GetCostSummaryAsync(DateTime startTime, DateTime endTime, string? provider = null, string? model = null, Guid? agentId = null)
     {
-        var q = BuildBaseQuery(startTime, endTime, provider, model)
+        var q = BuildBaseQuery(startTime, endTime, provider, model, agentId)
             .Where(l => l.EstimatedCostUsd != null);
 
         var total = await q.GroupBy(_ => 1).Select(g => new

@@ -142,17 +142,20 @@ public class WorkflowServiceCheckpointIntegrationTests
                     })
             });
 
-        WorkflowExecution? casUpdatedEntity = null;
+        // The status each update wrote, in order. Captured as values: the mock hands out one instance for every
+        // read, so a captured reference shows whatever the last update (the terminal one) wrote.
+        var updatedStatuses = new List<WorkflowExecutionStatus>();
         var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
         executionRepository.Setup(x => x.FirstOrDefaultAsync(It.IsAny<Expression<Func<WorkflowExecution, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WorkflowExecution
             {
                 ExecutionId = executionId,
                 WorkflowDefinitionId = workflowId,
-                InitialInput = "input"
+                InitialInput = "input",
+                Status = WorkflowExecutionStatus.Paused
             });
         executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
-            .Callback<WorkflowExecution, CancellationToken>((e, _) => casUpdatedEntity ??= e)
+            .Callback<WorkflowExecution, CancellationToken>((e, _) => updatedStatuses.Add(e.Status))
             .Returns(Task.CompletedTask);
 
         var checkpointStore = new Mock<IWorkflowCheckpointStore>();
@@ -177,10 +180,11 @@ public class WorkflowServiceCheckpointIntegrationTests
         result.Data.ExecutionId.ShouldBe(executionId);
         result.Data.Output.ShouldBe("Result A");
 
-        // CAS guard: the execution is flipped to Running via UpdateAsync BEFORE the engine runs.
-        executionRepository.Verify(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
-        casUpdatedEntity.ShouldNotBeNull();
-        casUpdatedEntity!.Status.ShouldBe(WorkflowExecutionStatus.Running);
+        // CAS guard: the execution is flipped to Running via UpdateAsync BEFORE the engine runs; the engine's
+        // outcome is written last.
+        updatedStatuses.ShouldNotBeEmpty();
+        updatedStatuses[0].ShouldBe(WorkflowExecutionStatus.Running);
+        updatedStatuses[^1].ShouldBe(WorkflowExecutionStatus.Completed);
     }
 
     [Fact]
@@ -215,7 +219,8 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = executionId,
                 WorkflowDefinitionId = workflowId,
-                InitialInput = "input"
+                InitialInput = "input",
+                Status = WorkflowExecutionStatus.Paused
             });
         // Simulate losing the optimistic-concurrency CAS: a concurrent Resume already
         // bumped the stamp, so this writer's pre-engine UpdateAsync throws.
@@ -277,7 +282,8 @@ public class WorkflowServiceCheckpointIntegrationTests
             {
                 ExecutionId = executionId,
                 WorkflowDefinitionId = workflowId,
-                InitialInput = "input"
+                InitialInput = "input",
+                Status = WorkflowExecutionStatus.Failed
             });
         executionRepository.Setup(x => x.UpdateAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -469,7 +475,7 @@ public class WorkflowServiceCheckpointIntegrationTests
             runRepository.Object,
             Mock.Of<IRepository<Agent, Guid>>(),
             usageLogService.Object,
-            Mock.Of<IQuotaService>(),
+            UsageLimitMocks.Allowing().Object,
             checkpointStore.Object,
             serviceProvider.GetRequiredService<WorkflowEngine>(),
             serviceProvider.GetServices<IWorkflowNode>(),

@@ -105,6 +105,11 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
     /// 删除过期日志
     /// 优化：直接执行删除操作，避免先Count再Delete的两次查询
     /// </summary>
+    /// <remarks>
+    /// ★★★ 与读路径同一个范围：物理删除比读更不能越界。此前这里是全类唯一一条不经 <see cref="WhereInScope"/> 的查询，
+    /// 租户管理员一次调用就删掉所有租户的过期日志，连同只有全局管理员看得到的无主失败尝试（暴力破解的证据）。
+    /// 裁剪时翻译成 <c>DELETE … WHERE UserId IN (SELECT …)</c>，无主行只有不裁剪的调用者删得到。
+    /// </remarks>
     public async Task<Result<int>> DeleteExpiredLogsAsync(int days = DefaultExpiredLogsDays)
     {
         // 验证days参数
@@ -116,9 +121,7 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
         var expireDate = DateTime.UtcNow.AddDays(-days);
 
         // 直接执行删除操作，使用ExecuteDeleteAsync获取受影响的行数
-        var count = await _repository
-            .AsQueryable()
-            .Where(ll => ll.CreationTime < expireDate)
+        var count = await WhereInScope(_repository.Where(ll => ll.CreationTime < expireDate))
             .ExecuteDeleteAsync();
 
         LogInformation("Deleted {Count} expired login logs (older than {Days} days)", count, days);
@@ -342,13 +345,20 @@ public class LoginLogService : ApplicationService, ILoginLogService, ILoginLogIn
             query = query.Where(ll => ll.Status == status);
         }
 
-        var logs = await query
+        // ★ 只取最近 MaxUserLoginLogs 条，在库里投影。此前整张表按用户读回再映射，没有任何上限：
+        //   对一个已知用户名持续猜密码的人，每一次失败都给受害者添一行，受害者（或管理员）打开登录历史时
+        //   整批物化，响应变慢、内存陡增。这里不改返回形状，所以不分页；要翻更早的记录用管理端的分页查询。
+        var dtos = await query
             .OrderByDescending(ll => ll.CreationTime)
+            .Take(MaxUserLoginLogs)
+            .ProjectTo<LoginLog, LoginLogDto>()
             .ToListAsync();
 
-        var dtos = logs.MapToList<LoginLogDto>();
         return Ok<IEnumerable<LoginLogDto>>(dtos);
     }
+
+    /// <summary>按用户读登录历史（个人中心与管理端的单用户视图）时最多返回的条数，最新的在前。</summary>
+    internal const int MaxUserLoginLogs = 200;
 
     /// <summary>
     /// 获取登录统计信息

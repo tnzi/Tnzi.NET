@@ -1,6 +1,8 @@
 using System.Net.WebSockets;
+using Tnzi.AI.Channels.Entities;
 using Tnzi.AI.Channels.Gateway;
 using Tnzi.AI.Channels.Gateway.Models;
+using Tnzi.AI.Channels.Options;
 
 namespace Tnzi.AI.Tests.Channels.Gateway;
 
@@ -330,6 +332,82 @@ public class GatewayWebSocketHardeningTests
         captured.ShouldNotBeNull();
         captured.ChatId.ShouldBe("real-user");
         captured.UserId.ShouldBe("real-user");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("real-user")]
+    public async Task HandleChatSend_ClientSuppliedChannel_IsIgnored_ChannelIsServerAssigned(string? userId)
+    {
+        // ★ channel 决定命中哪条绑定规则。原样采用客户端填的值，一个匿名 WS 客户端只要写
+        // "channel":"telegram" 就能跑到绑给 Telegram 的 Agent 上，绕开该渠道的验签与白名单。
+        GatewayRequest? captured = null;
+        var gatewayMock = new Mock<IGateway>();
+        gatewayMock
+            .Setup(g => g.ProcessStreamingAsync(It.IsAny<GatewayRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((GatewayRequest r, CancellationToken _) =>
+            {
+                captured = r;
+                return AsyncEmpty();
+            });
+
+        var handler = CreateHandler(CreatePresenceWith(0), maxConnectionsPerUser: 5, gateway: gatewayMock.Object);
+        var ws = new FakeWebSocket();
+        ws.EnqueueText(ChatSendFrameHead + " \"payload\": { \"text\": \"hello\", \"channel\": \"telegram\" } }");
+        ws.EnqueueClose();
+
+        await handler.HandleAsync(ws, userId, CancellationToken.None);
+
+        captured.ShouldNotBeNull();
+        captured.Channel.ShouldBe(GatewayWebSocketHandler.WebSocketChannel);
+    }
+
+    [Fact]
+    public async Task HandleChatSend_ClientSuppliedChannel_CannotReachAnotherChannelsBindingRule()
+    {
+        // 端到端：真实 Gateway + 绑定器。telegram 规则绑 Agent X，WS 默认 Agent 是 D；
+        // 不论客户端填什么 channel，跑起来的都必须是 D。
+        var telegramAgent = Guid.Parse("11111111-0000-0000-0000-000000000001");
+        var webDefaultAgent = Guid.Parse("22222222-0000-0000-0000-000000000002");
+        var options = new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { DefaultAgentId = webDefaultAgent });
+        var binder = new DefaultSessionBinder(
+            [new SessionBindingRule { Channel = "telegram", AgentId = telegramAgent, IsEnabled = true }],
+            options);
+
+        AgentRunRequest? ran = null;
+        var runtime = new Mock<IAgentRuntime>();
+        runtime
+            .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((AgentRunRequest r, CancellationToken _) =>
+            {
+                ran = r;
+                return AsyncNoChunks();
+            });
+
+        var services = new Mock<IServiceProvider>();
+        services.Setup(sp => sp.GetService(typeof(IAgentRuntime))).Returns(runtime.Object);
+        services.Setup(sp => sp.GetService(typeof(IChannelThreadStore))).Returns(new Mock<IChannelThreadStore>().Object);
+        var scope = new Mock<IServiceScope>();
+        scope.Setup(s => s.ServiceProvider).Returns(services.Object);
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
+
+        var gateway = new DefaultGateway(binder, scopeFactory.Object, options, NullLogger<DefaultGateway>.Instance);
+        var handler = CreateHandler(CreatePresenceWith(0), maxConnectionsPerUser: 5, gateway: gateway);
+        var ws = new FakeWebSocket();
+        ws.EnqueueText(ChatSendFrameHead + " \"payload\": { \"text\": \"hello\", \"channel\": \"telegram\" } }");
+        ws.EnqueueClose();
+
+        await handler.HandleAsync(ws, userId: null, CancellationToken.None);
+
+        ran.ShouldNotBeNull();
+        ran.AgentId.ShouldBe(webDefaultAgent);
+    }
+
+    private static async IAsyncEnumerable<AgentStreamChunk> AsyncNoChunks()
+    {
+        await Task.CompletedTask;
+        yield break;
     }
 
     private const string VictimSessionKey = "agent:abc:peer:victim-user";

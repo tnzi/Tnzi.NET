@@ -15,7 +15,7 @@
  * bundle EVEN IF `registerComponents: false` - that option only skips the runtime
  * `app.component()` calls, it does not tree-shake. For a minimal bundle, do NOT
  * rely on the plugin's global registration: use the on-demand `TnziUiResolver`
- * (`unplugin-vue-components`, covers every `T*` name) plus direct named imports,
+ * (`unplugin-vue-components`, covers every exported `T*` component) plus direct named imports,
  * so only the components you actually reference are bundled.
  */
 

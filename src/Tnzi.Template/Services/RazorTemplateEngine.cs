@@ -257,9 +257,15 @@ public class RazorTemplateEngine : ITemplateEngine
     /// <summary>
     /// 给本引擎的缓存条目统一设过期策略、大小与「代」令牌。
     /// </summary>
+    /// <remarks>
+    /// <c>CacheExpirationSeconds = 0</c>（校验器放行的值）= 不按时间过期，只在清空缓存或超出条目上限时离开。
+    /// ★ 不能把 0 原样交给 <see cref="ICacheEntry.SlidingExpiration"/>：它对 <c>&lt;= 0</c> 抛异常，
+    /// 应用照常启动，之后每一次渲染都失败。
+    /// </remarks>
     private void ConfigureCacheEntry(ICacheEntry entry)
     {
-        entry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
+        if (_options.CacheExpirationSeconds > 0)
+            entry.SlidingExpiration = TimeSpan.FromSeconds(_options.CacheExpirationSeconds);
         entry.Size = 1;  // 用于限制缓存大小
         entry.AddExpirationToken(new CancellationChangeToken(Volatile.Read(ref _cacheGeneration).Token));
     }
@@ -401,6 +407,10 @@ public class RazorTemplateEngine : ITemplateEngine
     /// </remarks>
     private async Task<string> GetOrReadTemplateBodyAsync(string fullPath, CancellationToken cancellationToken = default)
     {
+        // 关掉缓存就是不缓存：此前这里不看开关，改了磁盘上的模板，过期之前发出去的仍是旧正文。
+        if (!_options.EnableCache)
+            return FrontMatterExtractor.StripFrontMatter(await File.ReadAllTextAsync(fullPath, cancellationToken));
+
         var cacheKey = $"{CacheKeyPrefix}file:{fullPath}";
 
         // 热重载模式：快速检查缓存（避免进入回调，提高性能）

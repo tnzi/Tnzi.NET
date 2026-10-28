@@ -11,6 +11,9 @@ public class VerifyCodeServiceTests
     public VerifyCodeServiceTests()
     {
         _cacheMock = new Mock<ICache>();
+        // 一次性靠「已消费」标记：mock 默认回 false 会让每次验证都按已用过处理。
+        _cacheMock.Setup(c => c.TrySetAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<TimeSpan?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         _coder = new ValidateCoder();
         _service = new VerifyCodeService(_coder, _cacheMock.Object);
         _serviceWithoutCache = new VerifyCodeService(_coder);

@@ -93,6 +93,39 @@ describe('useSidebarState', () => {
 
     expect(mode.value).toBe('icon')
   })
+
+  // -------------------------------------------------------------------------
+  // Starting below the breakpoint (regression: the breakpoint watch reacted
+  // only to a CHANGE, so a phone opened with the persisted desktop mode, i.e.
+  // the drawer and its backdrop over the page; and every drawer open / close
+  // was persisted, so a later desktop load came back hidden.)
+  // -------------------------------------------------------------------------
+
+  it('starts hidden on a mobile viewport and restores the desktop mode when widened', async () => {
+    localStorage.setItem('test-sidebar', 'icon')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    const { mode } = useSidebarState({ mobileBreakpoint: 768, storageKey: 'test-sidebar' })
+    expect(mode.value).toBe('hidden')
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+
+    expect(mode.value).toBe('icon')
+  })
+
+  it('does not persist drawer opens and closes made on a mobile viewport', () => {
+    localStorage.setItem('test-sidebar', 'expanded')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 500 })
+    const { mode, setMode } = useSidebarState({ mobileBreakpoint: 768, storageKey: 'test-sidebar' })
+
+    setMode('expanded')
+    setMode('hidden')
+
+    expect(mode.value).toBe('hidden')
+    expect(localStorage.getItem('test-sidebar')).toBe('expanded')
+  })
+
   // -------------------------------------------------------------------------
   // Cleanup (regression: the resize listener was attached unconditionally but
   // only detached inside a component, so every scope-less call leaked one.)

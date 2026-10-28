@@ -89,13 +89,7 @@ public class OpenTelemetryModule : TnziInfrastructureModule
                 // ASP.NET Core 追踪
                 if (config.InstrumentAspNetCore)
                 {
-                    tracing.AddAspNetCoreInstrumentation(options =>
-                    {
-                        // 过滤 health check 和 swagger 请求
-                        options.Filter = ctx =>
-                            !ctx.Request.Path.StartsWithSegments("/health") &&
-                            !ctx.Request.Path.StartsWithSegments("/swagger");
-                    });
+                    tracing.AddAspNetCoreInstrumentation(ConfigureAspNetCoreTracing);
                 }
 
                 // HTTP Client 追踪
@@ -212,7 +206,7 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     {
         if (!string.IsNullOrEmpty(config.OtlpEndpoint))
         {
-            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config));
+            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config, OtlpSignal.Traces));
         }
 
         if (config.ExportToConsole)
@@ -228,7 +222,7 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     {
         if (!string.IsNullOrEmpty(config.OtlpEndpoint))
         {
-            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config));
+            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config, OtlpSignal.Metrics));
         }
 
         if (config.ExportToConsole)
@@ -244,7 +238,7 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     {
         if (!string.IsNullOrEmpty(config.OtlpEndpoint))
         {
-            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config));
+            builder.AddOtlpExporter(otlp => ApplyOtlpOptions(otlp, config, OtlpSignal.Logs));
         }
 
         if (config.ExportToConsole)
@@ -284,19 +278,90 @@ public class OpenTelemetryModule : TnziInfrastructureModule
     }
 
     /// <summary>
+    /// ASP.NET Core 服务端 span 的检测选项：不追踪 health check 与 swagger 请求，
+    /// <c>url.path</c> 里作为凭据的路由参数记为掩码。
+    /// </summary>
+    /// <remarks>
+    /// 框架自己的路由把凭据放在路径里（<c>signing/{token}</c>、<c>files/share/{token}</c>），
+    /// 而 <c>url.path</c> 随每个服务端 span 导出到采集器。
+    /// 检测库在请求开始时写入它，那时还没有路由值；响应回调在管线跑完之后调用，按路由值重写这一项，
+    /// 名单与请求日志、审计、访问日志同源（<see cref="QueryStringRedactor.DefaultSensitiveKeys"/>）。
+    /// </remarks>
+    internal static void ConfigureAspNetCoreTracing(AspNetCoreTraceInstrumentationOptions options)
+    {
+        options.Filter = ctx =>
+            !ctx.Request.Path.StartsWithSegments("/health") &&
+            !ctx.Request.Path.StartsWithSegments("/swagger");
+        options.EnrichWithHttpResponse = (activity, response) =>
+        {
+            if (activity.GetTagItem(UrlPathTag) is not string path)
+            {
+                return;
+            }
+
+            var redacted = RequestPathRedactor.Redact(path, response.HttpContext.Request.RouteValues, QueryStringRedactor.DefaultSensitiveKeys);
+            if (!ReferenceEquals(redacted, path))
+            {
+                activity.SetTag(UrlPathTag, redacted);
+            }
+        };
+    }
+
+    /// <summary>OpenTelemetry 语义约定里服务端 span 的请求路径属性。</summary>
+    private const string UrlPathTag = "url.path";
+
+    /// <summary>
     /// EF Core 检测选项：SQL 文本默认<b>不</b>随 span 出进程。
     /// </summary>
+    /// <remarks>
+    /// 检测库没有关掉 SQL 文本的开关（<c>SetDbStatementForText</c> 已被删除），每条文本命令都会写进
+    /// <c>db.query.text</c>（新约定）或 <c>db.statement</c>（旧约定）：认得出的 SQL 方言把字面量脱敏，
+    /// 认不出的方言原样写。<see cref="ApplyDbStatementPolicy"/> 在它之后按 <see cref="OpenTelemetryOptions.RecordDbStatementText"/> 收尾。
+    /// </remarks>
     internal static void ApplyEntityFrameworkOptions(EntityFrameworkInstrumentationOptions options, OpenTelemetryOptions config)
     {
-        options.SetDbStatementForText = config.RecordDbStatementText;
+        var record = config.RecordDbStatementText;
+        // 选项上只有一个回调：先跑已经配上的那个（例如应用自己加的标签），再收尾，策略总是最后说了算
+        var configured = options.EnrichWithIDbCommand;
+        options.EnrichWithIDbCommand = (activity, command) =>
+        {
+            configured?.Invoke(activity, command);
+            ApplyDbStatementPolicy(activity, command, record);
+        };
+    }
+
+    /// <summary>新旧两种语义约定下承载 SQL 文本的属性名。</summary>
+    internal static readonly string[] DbStatementTagNames = ["db.query.text", "db.statement"];
+
+    /// <summary>
+    /// 关：两种约定下的 SQL 文本属性都摘掉。开：写命令原文。这个开关是给排障用的，要的是能照着复现的那条 SQL，
+    /// 而不是字面量被替换成 <c>?</c> 的脱敏版本。只管文本命令：存储过程命令的这两个属性写的是过程名，
+    /// 不带数据，照旧保留。
+    /// </summary>
+    internal static void ApplyDbStatementPolicy(Activity activity, IDbCommand command, bool record)
+    {
+        if (command.CommandType != CommandType.Text)
+        {
+            return;
+        }
+
+        foreach (var tag in DbStatementTagNames)
+        {
+            if (activity.GetTagItem(tag) is null)
+            {
+                continue;
+            }
+
+            activity.SetTag(tag, record ? command.CommandText : null);
+        }
     }
 
     /// <summary>
-    /// 应用 OTLP 导出器公共配置：端点、协议、认证头、超时。
+    /// 应用 OTLP 导出器公共配置：端点（按信号）、协议、认证头、超时。
     /// </summary>
-    internal static void ApplyOtlpOptions(OtlpExporterOptions otlp, OpenTelemetryOptions config)
+    internal static void ApplyOtlpOptions(OtlpExporterOptions otlp, OpenTelemetryOptions config, OtlpSignal signal)
     {
-        otlp.Endpoint = new Uri(config.OtlpEndpoint!);
+        otlp.Endpoint = ResolveOtlpEndpoint(config.OtlpEndpoint!, config.UseGrpc, signal);
         otlp.Protocol = config.UseGrpc
             ? OtlpExportProtocol.Grpc
             : OtlpExportProtocol.HttpProtobuf;
@@ -310,4 +375,52 @@ public class OpenTelemetryModule : TnziInfrastructureModule
             otlp.Headers = headers;
         }
     }
+
+    /// <summary>
+    /// 一个信号实际投递的 OTLP 地址。gRPC 原样使用配置的端点；HTTP/protobuf 以它为基地址追加 <c>/v1/{signal}</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 导出器只在端点<b>没有</b>被显式设置时才替 HttpProtobuf 追加信号路径，而这里总是显式设置：此前填 OTLP/HTTP 的
+    /// 标准基地址（<c>http://collector:4318</c>）时三个信号都 POST 到根路径、被采集器拒绝，错误只进 OTel 内部的
+    /// EventSource；填 <c>.../v1/traces</c> 则指标与日志被投到 traces 的路径，HTTP 下没有一个值能让三个信号都到达。
+    /// 基地址可以带路径前缀（<c>https://host/otlp</c> 得到 <c>/otlp/v1/traces</c>）；已经以某个信号路径结尾的，先剥掉再按本信号追加，
+    /// 所以此前为 traces 填好的完整地址升级后三个信号都能到。
+    /// </remarks>
+    internal static Uri ResolveOtlpEndpoint(string endpoint, bool useGrpc, OtlpSignal signal)
+    {
+        var uri = new Uri(endpoint);
+        if (useGrpc)
+        {
+            return uri;
+        }
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        foreach (var known in Enum.GetValues<OtlpSignal>())
+        {
+            var suffix = "/v1/" + SignalPath(known);
+            if (path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                path = path[..^suffix.Length];
+                break;
+            }
+        }
+
+        return new UriBuilder(uri) { Path = $"{path}/v1/{SignalPath(signal)}" }.Uri;
+    }
+
+    private static string SignalPath(OtlpSignal signal) => signal switch
+    {
+        OtlpSignal.Traces => "traces",
+        OtlpSignal.Metrics => "metrics",
+        OtlpSignal.Logs => "logs",
+        _ => throw new ArgumentOutOfRangeException(nameof(signal), signal, null)
+    };
+}
+
+/// <summary>OTLP 的三个信号，决定 HTTP/protobuf 下各自投递的路径。</summary>
+internal enum OtlpSignal
+{
+    Traces,
+    Metrics,
+    Logs
 }

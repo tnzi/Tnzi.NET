@@ -27,7 +27,6 @@ public class PaymentCurrencyResolutionTests
 {
     private readonly Mock<IRepository<PaymentEntity, Guid>> _paymentRepositoryMock = new();
     private readonly Mock<IPaymentProviderFactory> _providerFactoryMock = new();
-    private readonly Mock<IPaymentProvider> _providerMock = new();
     private readonly Mock<IOptionsMonitor<PaymentOptions>> _optionsMock = new();
     private readonly PaymentService _service;
     private PaymentEntity? _inserted;
@@ -55,10 +54,8 @@ public class PaymentCurrencyResolutionTests
         var taxOptionsMock = new Mock<IOptionsMonitor<TaxOptions>>();
         taxOptionsMock.Setup(x => x.CurrentValue).Returns(new TaxOptions());
 
-        _providerFactoryMock.Setup(f => f.GetProvider(It.IsAny<string>())).Returns(_providerMock.Object);
-        _providerMock.Setup(p => p.IsSupported(It.IsAny<PaymentMethod>())).Returns(true);
-        _providerMock.Setup(p => p.CreatePaymentAsync(It.IsAny<PaymentProviderCreateDto>()))
-            .ReturnsAsync(Result.Success(new PaymentProviderOrderResult { TradeNo = "PAY123" }));
+        // 每个渠道代码一个渠道替身，带着自己的规范写法：建单存的是渠道的 ChannelCode，渠道币种也按它查
+        _providerFactoryMock.Setup(f => f.GetProvider(It.IsAny<string>())).Returns<string>(code => CreateProvider(code).Object);
 
         _paymentRepositoryMock
             .Setup(r => r.InsertAsync(It.IsAny<PaymentEntity>(), It.IsAny<CancellationToken>()))
@@ -74,7 +71,19 @@ public class PaymentCurrencyResolutionTests
             new DefaultPaymentTaxCalculator(taxOptionsMock.Object),
             new Mock<IPaymentMethodService>().Object,
             _optionsMock.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProviderMock.Object);
+    }
+
+    private static Mock<IPaymentProvider> CreateProvider(string channelCode)
+    {
+        var provider = new Mock<IPaymentProvider>();
+        provider.Setup(p => p.ChannelCode).Returns(channelCode);
+        provider.Setup(p => p.IsSupported(It.IsAny<PaymentMethod>())).Returns(true);
+        provider.Setup(p => p.CreatePaymentAsync(It.IsAny<PaymentProviderCreateDto>()))
+            .ReturnsAsync(Result.Success(new PaymentProviderOrderResult { TradeNo = "PAY123" }));
+        return provider;
     }
 
     /// <summary>

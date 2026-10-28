@@ -32,7 +32,8 @@ public class BroadcastServiceTests : Integration.IntegrationTestBase
 
         var key = $"system:{u1:N}";
         (await DbContext.Set<Conversation>().CountAsync(c => c.DirectKey == key)).ShouldBe(1);
-        var member = await DbContext.Set<ConversationMember>().FirstAsync(m => m.UserId == u1);
+        // 不跟踪地读：第二次广播在数据库端累加未读，共用的 DbContext 里跟踪着的是第一次插入时的实体。
+        var member = await DbContext.Set<ConversationMember>().AsNoTracking().FirstAsync(m => m.UserId == u1);
         member.UnreadCount.ShouldBe(2);
     }
 

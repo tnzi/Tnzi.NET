@@ -102,7 +102,7 @@ public class AdminWriteEndpointPermissionConventionTests
         "Tnzi.AI.Controllers.Admin.DefaultMcpClientAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultPermissionAdminController.Evaluate:POST",
         "Tnzi.AI.Controllers.Admin.DefaultProviderAdminController.GetList:POST",
-        "Tnzi.AI.Controllers.Admin.DefaultQuotaAdminController.GetList:POST",
+        "Tnzi.AI.Controllers.Admin.DefaultUsageLimitAdminController.GetUsers:POST",
         "Tnzi.AI.Controllers.Admin.DefaultThreadAdminController.GetList:POST",
         "Tnzi.AI.Controllers.Admin.DefaultUsageAnalyticsAdminController.GetSummary:POST",
         "Tnzi.AI.Controllers.Admin.DefaultUsageAnalyticsAdminController.GetLogs:POST",

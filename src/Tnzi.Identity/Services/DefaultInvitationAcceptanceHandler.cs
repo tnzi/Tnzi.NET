@@ -24,14 +24,19 @@ public class DefaultInvitationAcceptanceHandler : ApplicationService, IInvitatio
     public const string SetPasswordStep = "SetPassword";
 
     private readonly UserManager<User> _userManager;
+    private readonly IPasswordPolicyService? _passwordPolicyService;
 
     /// <summary>
     /// 初始化一个 <see cref="DefaultInvitationAcceptanceHandler"/> 类型的新实例。
     /// </summary>
-    public DefaultInvitationAcceptanceHandler(IServiceProvider serviceProvider, UserManager<User> userManager)
+    public DefaultInvitationAcceptanceHandler(
+        IServiceProvider serviceProvider,
+        UserManager<User> userManager,
+        IPasswordPolicyService? passwordPolicyService = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
+        _passwordPolicyService = passwordPolicyService;
     }
 
     /// <inheritdoc />
@@ -72,6 +77,14 @@ public class DefaultInvitationAcceptanceHandler : ApplicationService, IInvitatio
                 $"Failed to set password: {result.FormatErrors()}",
                 400,
                 ErrorCodes.IDENTITY_PASSWORD_TOO_WEAK);
+        }
+
+        // ★★ 记下「最近一次改密」：密码到期以密码历史最新的一行为参照，没有就回退到账号创建时间，
+        //   而邀请建号在发邀请那一刻、本人设密码在接受这一刻，中间可以隔几周（待接受期间可以一再重发）。
+        //   不写这一行，建号 85 天才接受的人在 90 天到期的部署里，刚设好的密码 5 天后就被判到期。
+        if (_passwordPolicyService != null && !string.IsNullOrEmpty(user.PasswordHash))
+        {
+            await _passwordPolicyService.SavePasswordHistoryAsync(user.Id, user.PasswordHash);
         }
 
         return Ok(InvitationAcceptOutcome.Done());

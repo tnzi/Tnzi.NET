@@ -53,7 +53,7 @@ describe('useChat', () => {
     expect(onStreamStart).toHaveBeenCalledOnce();
   });
 
-  it('should abort and mark streaming messages as done', () => {
+  it('should abort and mark streaming messages as stopped', () => {
     const onStreamEnd = vi.fn();
     const chat = useChat({ onStreamEnd });
     chat.send('Hello');
@@ -62,9 +62,12 @@ describe('useChat', () => {
     chat.abort();
     expect(chat.isStreaming.value).toBe(false);
     expect(onStreamEnd).toHaveBeenCalledOnce();
-    // Assistant message should no longer be streaming
+    // The cut-off answer carries the status the "Generation stopped" mark reads.
     const assistantMsg = chat.messages.value[1];
     expect(assistantMsg?.isStreaming).toBe(false);
+    expect(assistantMsg?.status).toBe('stopped');
+    // Settled rows are left as they were.
+    expect(chat.messages.value[0]?.status).toBeUndefined();
   });
 
   it('should clear thread state', () => {

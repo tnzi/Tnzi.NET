@@ -59,6 +59,7 @@ public class CustomerService : ApplicationService, ICustomerService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _customerRepository.Discard(customer); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<CustomerDto>($"Customer code '{customer.Code}' already exists.", 409);
         }
 

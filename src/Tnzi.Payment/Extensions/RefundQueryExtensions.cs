@@ -20,6 +20,12 @@ public static class RefundQueryExtensions
         if (query.Status.HasValue)
             queryable = queryable.Where(r => r.Status == query.Status.Value);
 
+        if (!string.IsNullOrEmpty(query.BillingAccountType))
+            queryable = queryable.Where(r => r.Payment!.BillingAccountType == query.BillingAccountType);
+
+        if (!string.IsNullOrEmpty(query.BillingAccountId))
+            queryable = queryable.Where(r => r.Payment!.BillingAccountId == query.BillingAccountId);
+
         if (query.StartTime.HasValue)
             queryable = queryable.Where(r => r.CreationTime >= query.StartTime.Value);
 

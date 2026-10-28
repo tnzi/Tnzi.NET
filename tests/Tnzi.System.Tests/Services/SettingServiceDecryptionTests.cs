@@ -1,5 +1,8 @@
 namespace Tnzi.System.Tests.Services;
 
+using Tnzi.MultiTenancy;
+using Tnzi.Security.Claims;
+
 /// <summary>
 /// <see cref="SettingService.GetSettingAsync(string, string?)"/> 对「读到了密文却解不开」的处置。
 /// </summary>
@@ -15,7 +18,7 @@ public class SettingServiceDecryptionTests
     private readonly Mock<IRepository<Setting, Guid>> _repository = new();
     private readonly Mock<ISettingEncryptor> _encryptor = new();
 
-    private SettingService CreateService(bool withEncryptor = true)
+    private SettingService CreateService(bool withEncryptor = true, IEnumerable<ISettingProvider>? providers = null)
     {
         var serviceProvider = new Mock<IServiceProvider>();
         serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(new LoggerFactory());
@@ -32,7 +35,7 @@ public class SettingServiceDecryptionTests
             applicationOptions.Object,
             Microsoft.Extensions.Options.Options.Create(new SettingEncryptionOptions { Enabled = true }),
             cache.Object,
-            Enumerable.Empty<ISettingProvider>(),
+            providers ?? Enumerable.Empty<ISettingProvider>(),
             Enumerable.Empty<ISettingDefinitionProvider>(),
             withEncryptor ? _encryptor.Object : null);
     }
@@ -114,6 +117,182 @@ public class SettingServiceDecryptionTests
         var service = CreateService();
 
         var result = await service.GetSettingAsync(Key, "fallback");
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe("fallback");
+    }
+
+    // ── 其余读取路径：同一个口径 ────────────────────────────────────────────
+
+    private const string Group = "Mail";
+    private static readonly Guid UserId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+    private static Setting GroupedEncryptedRow(string cipherText) => new()
+    {
+        Id = Guid.NewGuid(),
+        Key = Key,
+        Value = cipherText,
+        IsEncrypted = true,
+        Group = Group,
+        Scope = SettingScope.Global,
+    };
+
+    /// <summary>
+    /// 文档里加密值的「单点读取」入口。此前加密器缺席时答 <c>Ok(null)</c>：消费方读 API Key 拿到 null，
+    /// 表现为「未配置」而走默认或降级逻辑。
+    /// </summary>
+    [Fact]
+    public async Task GetDecrypted_without_an_encryptor_fails_instead_of_answering_null()
+    {
+        SeedRows(GroupedEncryptedRow("cipher"));
+
+        var result = await CreateService(withEncryptor: false).GetDecryptedAsync(Group, Key);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(500);
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_MISSING);
+    }
+
+    [Fact]
+    public async Task GetDecrypted_with_a_wrong_key_fails_with_a_result_not_an_exception()
+    {
+        SeedRows(GroupedEncryptedRow("garbage"));
+        _encryptor.Setup(e => e.Decrypt("garbage")).Throws(new CryptographicException("bad padding"));
+
+        var result = await CreateService().GetDecryptedAsync(Group, Key);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(500);
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_INVALID);
+    }
+
+    [Fact]
+    public async Task GetDecrypted_returns_the_plaintext()
+    {
+        SeedRows(GroupedEncryptedRow("cipher"));
+        _encryptor.Setup(e => e.Decrypt("cipher")).Returns("plain");
+
+        (await CreateService().GetDecryptedAsync(Group, Key)).Data.ShouldBe("plain");
+    }
+
+    [Fact]
+    public async Task A_scoped_read_without_an_encryptor_fails_instead_of_answering_null()
+    {
+        SeedRows(new Setting { Id = Guid.NewGuid(), Key = Key, Value = "cipher", IsEncrypted = true, Scope = SettingScope.User, ScopeId = UserId.ToString() });
+
+        var result = await CreateService(withEncryptor: false).GetSettingAsync(Key, SettingScope.User, UserId.ToString());
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_MISSING);
+    }
+
+    /// <summary>分层解析：用户级加密值 + 全局明文值。</summary>
+    private IEnumerable<ISettingProvider> LayeredProviders(bool withEncryptor)
+    {
+        SeedRows(
+            new Setting { Id = Guid.NewGuid(), Key = Key, Value = "user-cipher", IsEncrypted = true, Scope = SettingScope.User, ScopeId = UserId.ToString() },
+            new Setting { Id = Guid.NewGuid(), Key = Key, Value = "global-plain", Scope = SettingScope.Global });
+
+        var user = new Mock<ICurrentUser>();
+        user.SetupGet(u => u.Id).Returns(UserId);
+        var encryptor = withEncryptor ? _encryptor.Object : null;
+
+        return
+        [
+            new UserSettingProvider(_repository.Object, user.Object, encryptor),
+            new GlobalSettingProvider(_repository.Object, encryptor),
+        ];
+    }
+
+    /// <summary>
+    /// 此前用户级 provider 在加密器缺席时返回 null，解析链悄悄落到全局的另一个值上：调用方以为读到了这个用户的设置。
+    /// </summary>
+    [Fact]
+    public async Task Layered_resolution_does_not_fall_through_to_a_lower_scope_when_a_value_cannot_be_decrypted()
+    {
+        var service = CreateService(withEncryptor: false, providers: LayeredProviders(withEncryptor: false));
+
+        var result = await service.GetSettingValueAsync(Key, "fallback");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(500);
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_MISSING);
+    }
+
+    /// <summary>此前解密异常被整段 catch 吞掉、回默认值，与「没配」无从区分。</summary>
+    [Fact]
+    public async Task Layered_resolution_fails_instead_of_answering_the_default_when_decryption_fails()
+    {
+        _encryptor.Setup(e => e.Decrypt("user-cipher")).Throws(new CryptographicException("bad padding"));
+        var service = CreateService(providers: LayeredProviders(withEncryptor: true));
+
+        var result = await service.GetSettingValueAsync(Key, "fallback");
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_INVALID);
+    }
+
+    [Fact]
+    public async Task Layered_resolution_returns_the_decrypted_user_value()
+    {
+        _encryptor.Setup(e => e.Decrypt("user-cipher")).Returns("user-plain");
+        var service = CreateService(providers: LayeredProviders(withEncryptor: true));
+
+        (await service.GetSettingValueAsync(Key, "fallback")).Data.ShouldBe("user-plain");
+    }
+
+    /// <summary>
+    /// 全局级 provider 同一口径：它是链上最后一级，此前加密器缺席时返回 null，于是整条链答默认值，
+    /// 与「这个键没配」一模一样。
+    /// </summary>
+    [Fact]
+    public async Task Layered_resolution_fails_when_the_global_value_cannot_be_decrypted()
+    {
+        SeedRows(EncryptedRow("global-cipher"));
+        var service = CreateService(withEncryptor: false, providers: [new GlobalSettingProvider(_repository.Object)]);
+
+        var result = await service.GetSettingValueAsync(Key, "fallback");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(500);
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_MISSING);
+    }
+
+    /// <summary>租户级 provider：租户自己的加密值解不开时，不能悄悄落到全局的另一个值上。</summary>
+    [Fact]
+    public async Task Layered_resolution_does_not_fall_through_from_an_unreadable_tenant_value_to_the_global_one()
+    {
+        var tenantId = Guid.Parse("99999999-8888-7777-6666-555555555555");
+        SeedRows(
+            new Setting { Id = Guid.NewGuid(), Key = Key, Value = "tenant-cipher", IsEncrypted = true, Scope = SettingScope.Tenant, ScopeId = tenantId.ToString() },
+            new Setting { Id = Guid.NewGuid(), Key = Key, Value = "global-plain", Scope = SettingScope.Global });
+        var tenant = new Mock<ICurrentTenant>();
+        tenant.SetupGet(t => t.Id).Returns(tenantId);
+        var service = CreateService(withEncryptor: false, providers:
+        [
+            new TenantSettingProvider(_repository.Object, tenant.Object),
+            new GlobalSettingProvider(_repository.Object),
+        ]);
+
+        var result = await service.GetSettingValueAsync(Key, "fallback");
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.CONFIGURATION_MISSING);
+    }
+
+    /// <summary>「读不到」（库故障）仍沿用回默认值的既定取舍。</summary>
+    [Fact]
+    public async Task Layered_resolution_still_answers_the_default_when_the_store_cannot_be_read()
+    {
+        _repository.Setup(r => r.AsQueryable(It.IsAny<bool>())).Throws(new InvalidOperationException("database down"));
+        var user = new Mock<ICurrentUser>();
+        user.SetupGet(u => u.Id).Returns(UserId);
+        var service = CreateService(providers:
+        [
+            new UserSettingProvider(_repository.Object, user.Object, _encryptor.Object),
+        ]);
+
+        var result = await service.GetSettingValueAsync(Key, "fallback");
 
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe("fallback");

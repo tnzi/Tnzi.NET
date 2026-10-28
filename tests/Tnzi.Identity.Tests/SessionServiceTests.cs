@@ -84,34 +84,6 @@ public class SessionServiceTests
     }
 
     [Fact]
-    public async Task UpdateActivityTimeAsync_WithValidSessionId_UpdatesActivityTime()
-    {
-        // Arrange
-        var sessionId = Guid.NewGuid();
-        var oldTime = DateTime.UtcNow.AddHours(-1);
-        var session = new UserSession
-        {
-            Id = sessionId,
-            UserId = Guid.NewGuid(),
-            IsRevoked = false,
-            LastActivityTime = oldTime
-        };
-
-        _repositoryMock.Setup(x => x.GetAsync(sessionId))
-            .ReturnsAsync(session);
-
-        _repositoryMock.Setup(x => x.UpdateAsync(session))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        await _sessionService.UpdateActivityTimeAsync(sessionId);
-
-        // Assert
-        Assert.True(session.LastActivityTime > oldTime);
-        _repositoryMock.Verify(x => x.UpdateAsync(session), Times.Once);
-    }
-
-    [Fact]
     public async Task IsSessionValidAsync_WithActiveUnexpiredSession_ReturnsTrue()
     {
         var sessionId = Guid.NewGuid();
@@ -173,38 +145,6 @@ public class SessionServiceTests
         Assert.False(valid);
     }
 
-    [Fact]
-    public async Task RenewSessionAsync_ExtendsExpiryAndActivity()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new UserSession
-        {
-            Id = sessionId,
-            UserId = Guid.NewGuid(),
-            IsRevoked = false,
-            LastActivityTime = DateTime.UtcNow.AddHours(-2),
-            ExpiresAt = DateTime.UtcNow.AddHours(1)
-        };
-        _repositoryMock.Setup(x => x.GetAsync(sessionId)).ReturnsAsync(session);
-        _repositoryMock.Setup(x => x.UpdateAsync(session)).Returns(Task.CompletedTask);
-
-        var newExpiry = DateTime.UtcNow.AddDays(7);
-        await _sessionService.RenewSessionAsync(sessionId, newExpiry);
-
-        Assert.Equal(newExpiry, session.ExpiresAt);
-        Assert.True(session.LastActivityTime > DateTime.UtcNow.AddMinutes(-1));
-        _repositoryMock.Verify(x => x.UpdateAsync(session), Times.Once);
-    }
-
-    [Fact]
-    public async Task RenewSessionAsync_OnRevokedSession_DoesNothing()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new UserSession { Id = sessionId, IsRevoked = true };
-        _repositoryMock.Setup(x => x.GetAsync(sessionId)).ReturnsAsync(session);
-
-        await _sessionService.RenewSessionAsync(sessionId, DateTime.UtcNow.AddDays(7));
-
-        _repositoryMock.Verify(x => x.UpdateAsync(It.IsAny<UserSession>()), Times.Never);
-    }
+    // RenewSessionAsync / UpdateActivityTimeAsync 是带条件的 ExecuteUpdate（只在行未撤销时写），mock 仓储表达不了，
+    // 用例在 Tnzi.Identity.IntegrationTests 的 SessionRevocationRaceIntegrationTests 里跑真实关系型 provider。
 }

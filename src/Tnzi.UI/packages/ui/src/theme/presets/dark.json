@@ -8,7 +8,5 @@
     "warning": "#f2b443",
     "error": "#e06070"
   },
-  "mode": "dark",
-  "isInfoFollowPrimary": false,
-  "recommendColor": false
+  "mode": "dark"
 }

@@ -10,9 +10,9 @@ public class ExpenseConfiguration : EntityTypeConfigurationBase<Expense, Guid>
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Number).HasMaxLength(64);
-        builder.Property(e => e.Memo).HasMaxLength(500);
+        builder.Property(e => e.Memo).HasMaxLength(FinanceFieldLimits.MemoMaxLength);
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
-        builder.Property(e => e.PaymentMethod).HasMaxLength(32);
+        builder.Property(e => e.PaymentMethod).HasMaxLength(FinanceFieldLimits.PaymentMethodMaxLength);
         builder.Property(e => e.ExchangeRate).HasExchangeRatePrecision();
         builder.Property(e => e.SubTotal).HasMoneyPrecision();
         builder.Property(e => e.TaxTotal).HasMoneyPrecision();

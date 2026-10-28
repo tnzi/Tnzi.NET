@@ -37,10 +37,7 @@
                 v-for="run in runs"
                 :key="run.id"
                 class="t-run-monitor__list-row"
-                :class="[
-                  runStatusClass[String(run.status)] ?? '',
-                  { 'is-selected': run.id === selectedRunId },
-                ]"
+                :class="{ 'is-selected': run.id === selectedRunId }"
                 :data-run-id="run.id"
                 @click="selectRun(run.id)"
               >
@@ -64,7 +61,7 @@
             data-test="run-detail"
           >
             <div v-if="!selectedRun" class="t-run-monitor__placeholder">
-              {{ t('selectPrompt') }}
+              {{ linkError || t('selectPrompt') }}
             </div>
             <template v-else>
               <div class="t-run-monitor__meta">
@@ -84,7 +81,7 @@
                   {{ selectedRun.durationMs }}ms
                 </div>
                 <NButton
-                  v-if="isRunning(selectedRun)"
+                  v-if="isRunning(selectedRun) && can('ai.agentRun.execute')"
                   type="error"
                   ghost
                   size="small"
@@ -134,32 +131,43 @@ import { useRoute, useRouter } from 'vue-router'
 import { makePageTranslator } from '../../_shared/translate'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { NCard, NButton, NTag } from 'naive-ui'
 import type { StatusType } from '@tnzi/ui'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
-import { runStatusClass, type RunTraceEvent } from './agent-run-monitor-config'
+import type { RunTraceEvent } from './agent-run-monitor-config'
 import type { AgentRunDto, AgentRunTraceDto } from '@tnzi/core/services/ai'
 
 const route = useRoute()
 const router = useRouter()
+const { can } = usePermissionGuard()
 const bridge = createAiBridge({ client: useAdminClient() })
 
 // Locale keys live under `ai.runMonitor.monitor.*` (nested), so pin the page
 // namespace there - the page uses short keys like t('title')/t('back').
 const t = makePageTranslator('ai.runMonitor.monitor')
 
-// suppress unused - referenced in template via runStatusClass binding
-void runStatusClass
-
 const runs = ref<AgentRunDto[]>([])
 const listLoading = ref(false)
 const listError = ref<string | null>(null)
 
 const selectedRunId = ref<string | null>(null)
-const selectedRun = computed<AgentRunDto | null>(
-  () => runs.value.find((r) => r.id === selectedRunId.value) ?? null,
-)
+/**
+ * A linked run (`:runId`) that is not on the loaded page: the list holds the
+ * latest runs only, and a link to an older one has to be read on its own.
+ */
+const linkedRun = ref<AgentRunDto | null>(null)
+/** Why a linked run could not be read. Shown where its detail would be. */
+const linkError = ref<string | null>(null)
+
+/** A run by id, from the loaded page or the linked run read on its own. */
+function findRun(runId: string | null): AgentRunDto | null {
+  if (!runId) return null
+  return runs.value.find((r) => r.id === runId) ?? (linkedRun.value?.id === runId ? linkedRun.value : null)
+}
+
+const selectedRun = computed<AgentRunDto | null>(() => findRun(selectedRunId.value))
 
 const traceEvents = ref<RunTraceEvent[]>([])
 const streamError = ref<string | null>(null)
@@ -240,15 +248,31 @@ async function loadRuns() {
       filters: agentId.value ? { agentId: agentId.value } : {},
     })
     runs.value = result.items
-    // Auto-select a run if route has runId or first row otherwise
+    // Auto-select the linked run, reading it on its own when it is older than the page.
     const routeRunId = currentRouteRunId()
     if (routeRunId) {
+      await loadLinkedRun(routeRunId)
       selectRun(routeRunId)
     }
   } catch (e) {
     listError.value = (e as Error).message ?? 'Failed to load runs'
   } finally {
     listLoading.value = false
+  }
+}
+
+/** Read a linked run that the loaded page does not hold; no-op when it does. */
+async function loadLinkedRun(runId: string): Promise<void> {
+  linkError.value = null
+  if (runs.value.some((r) => r.id === runId)) {
+    linkedRun.value = null
+    return
+  }
+  try {
+    linkedRun.value = await bridge.agentRuns.getById(runId)
+  } catch (e) {
+    linkedRun.value = null
+    linkError.value = (e as Error).message || t('streamError')
   }
 }
 
@@ -301,6 +325,11 @@ async function refreshRunStatuses(): Promise<void> {
       filters: agentId.value ? { agentId: agentId.value } : {},
     })
     runs.value = result.items
+    // A linked run older than the page is refreshed on its own.
+    const linkedId = linkedRun.value?.id
+    if (linkedId && !result.items.some((r) => r.id === linkedId)) {
+      linkedRun.value = await bridge.agentRuns.getById(linkedId)
+    }
   } catch {
     // Keep the last-known list; the next tick retries.
   }
@@ -309,7 +338,7 @@ async function refreshRunStatuses(): Promise<void> {
 /** Start the 3s trace poll for a non-terminal run; no-op for terminal runs. */
 function scheduleTracePolling(runId: string): void {
   stopPolling()
-  const run = runs.value.find((r) => r.id === runId)
+  const run = findRun(runId)
   if (!run || !isRunning(run)) return
   pollTimer = setInterval(async () => {
     if (runId !== selectedRunId.value) {
@@ -318,7 +347,7 @@ function scheduleTracePolling(runId: string): void {
     }
     await loadTraces(runId)
     await refreshRunStatuses()
-    const current = runs.value.find((r) => r.id === runId)
+    const current = findRun(runId)
     if (!current || !isRunning(current)) stopPolling()
   }, POLL_INTERVAL_MS)
 }
@@ -368,6 +397,8 @@ watch(
   (next, prev) => {
     if (next === prev) return
     selectedRunId.value = null
+    linkedRun.value = null
+    linkError.value = null
     stopPolling()
     void loadRuns()
   },

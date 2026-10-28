@@ -144,6 +144,11 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
     {
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("Structure name is required.");
+        var tooLong = PayrollFieldLimits.FirstTooLong(
+            (input.Name.Trim(), PayrollFieldLimits.NameMaxLength, "structure name"),
+            (input.Description, PayrollFieldLimits.DescriptionMaxLength, "description"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
         if (!Enum.IsDefined(input.Frequency))
             return Fail("Frequency must be Monthly, SemiMonthly, BiWeekly or Weekly.");
         if (input.Lines == null || input.Lines.Count == 0)
@@ -159,87 +164,14 @@ public class SalaryStructureService : ApplicationService, ISalaryStructureServic
             .Where(c => componentIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, cancellationToken);
 
-        // GROSS 是按序累加的运行毛额（每 Earning 行算完才累加），引用 GROSS 的行若其后仍有 Earning 行，
-        // 读到的是不完整 GROSS（例:税行排在加班费行之前会对不含加班的毛额计税，静默少税）。
-        // 校验:任何引用 GROSS 的行,其序号必须 ≥ 最后一个 Earning 行的序号。
-        var orderedLines = input.Lines.OrderBy(l => l.Sequence).ToList();
-        var lastEarningSequence = orderedLines
-            .Where(l => components.TryGetValue(l.ComponentId, out var c) && c.Type == SalaryComponentType.Earning)
-            .Select(l => (int?)l.Sequence)
-            .LastOrDefault();
-
-        // 允许集从内置变量起步，随序号推进滚入已算组件的 Code；
-        // 再并进计算钩子**声明**会注入的外部变量（法定标量随辖区/生效日变化，值在跑批时现算，
-        // 但名字静态可知）——不并进来的话，运行期注入得再对也没有公式敢引用它。
-        var allowed = new HashSet<string>(PayrollFormulaVariables.All, StringComparer.Ordinal);
-        allowed.UnionWith(PayrollExternalVariables.Collect(_hooks));
-
-        foreach (var line in orderedLines)
-        {
-            if (!components.TryGetValue(line.ComponentId, out var component))
-                return Fail($"Salary component '{line.ComponentId}' not found.", 404);
-            if (!component.IsActive)
-                return Fail($"Salary component '{component.Code}' is inactive and cannot be added to a structure.");
-            // 钉死额的符号规则与 DefaultAmount / 一次性输入同一份判据：备注项是具名中间量，天然带符号。
-            if (line.AmountOverride is { } amountOverride && PayrollAmountRules.IsNegativeMonetary(component.Type, amountOverride))
-                return Fail($"AmountOverride cannot be negative for component '{component.Code}' ({component.Type}).");
-
-            var formula = string.IsNullOrWhiteSpace(line.FormulaOverride) ? component.Formula : line.FormulaOverride;
-            var condition = string.IsNullOrWhiteSpace(line.ConditionOverride) ? component.Condition : line.ConditionOverride;
-
-            var formulaCheck = ValidateExpression(formula, allowed, component.Code, "formula");
-            if (!formulaCheck.Succeeded)
-                return formulaCheck;
-
-            var conditionCheck = ValidateExpression(condition, allowed, component.Code, "condition");
-            if (!conditionCheck.Succeeded)
-                return conditionCheck;
-
-            if (lastEarningSequence.HasValue && line.Sequence < lastEarningSequence.Value
-                && (ReferencesGross(formula) || ReferencesGross(condition)))
-            {
-                return Fail($"Line {line.Sequence} (component '{component.Code}') references {PayrollFormulaVariables.Gross}, " +
-                    "but earning lines follow it at a higher sequence, so GROSS would be incomplete. " +
-                    "Place all earning lines before any line that reads GROSS.", 400);
-            }
-
-            allowed.Add(component.Code);
-        }
-
-        return Ok();
-    }
-
-    private bool ReferencesGross(string? expression)
-    {
-        if (string.IsNullOrWhiteSpace(expression))
-            return false;
-
-        var variables = _evaluator.GetVariables(expression);
-        return variables.Succeeded && variables.Data!.Contains(PayrollFormulaVariables.Gross);
-    }
-
-    private Result ValidateExpression(string? expression, IReadOnlySet<string> allowed, string componentCode, string kind)
-    {
-        if (string.IsNullOrWhiteSpace(expression))
-            return Ok();
-
-        var variables = _evaluator.GetVariables(expression);
-        if (!variables.Succeeded)
-            return Fail($"Invalid {kind} for component '{componentCode}': {variables.Message}", 400);
-
-        foreach (var variable in variables.Data!)
-        {
-            if (!allowed.Contains(variable))
-            {
-                return Fail(
-                    $"The {kind} for component '{componentCode}' references '{variable}', which is not a built-in variable, " +
-                    "the code of an earlier line, or a variable declared by a registered calculation hook. " +
-                    "Components can only reference components with a smaller sequence; to supply a value at run time, " +
-                    "declare the name in IPayslipCalculationHook.ProvidedVariables and set it in BeforeCalculateAsync.", 400);
-            }
-        }
-
-        return Ok();
+        // 逐行规则（钉死额符号、只引用更早序号的行、读 GROSS 的行排在最后一个收入行之后）
+        // 与组件更新回查、计算端兜底共用一份判据（SalaryStructureRules）。
+        return SalaryStructureRules.ValidateLines(
+            input.Lines.Select(SalaryStructureRules.ToSpec).ToList(),
+            components,
+            PayrollExternalVariables.Collect(_hooks),
+            _evaluator,
+            requireActiveComponents: true);
     }
 
     /// <summary>

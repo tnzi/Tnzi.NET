@@ -7,7 +7,7 @@ namespace Tnzi.Finance.Banking;
 /// <remarks>
 /// <b>为什么独立</b>：这一块带着 OFX/CSV 解析、MICR 磁码拼装、NACHA / CPA-005 定宽文件构建、
 /// 账号密文存储等一整套与记账无关的机制。**一个只做会计的消费方不该被迫拉入它们**，
-/// 也不该凭空多出七张表、二十多个端点和一组权限码。
+/// 也不该凭空多出一组表、二十多个端点和一组权限码。
 /// <br/><br/>
 /// <b>依赖方向</b>：本模块单向依赖 Finance 核心（建单委托 <c>IExpenseService</c> /
 /// <c>IPaymentEntryService</c> / <c>ITransferService</c>，过账走 <c>ILedgerPostingService</c>）。
@@ -17,7 +17,7 @@ namespace Tnzi.Finance.Banking;
 /// 与 <see cref="CheckNumberSearchContributor"/> 回答。未加载本模块时两个契约无实现，核心退回
 /// "无人持有 / 只搜自带项" —— 只会少拒绝、少搜到，不会放宽任何守卫。
 /// <br/><br/>
-/// <b>表前缀沿用 <c>Finance_</c></b>：拆的是程序集不是 schema，七张表的表名一字不变，因此
+/// <b>表前缀沿用 <c>Finance_</c></b>：拆的是程序集不是 schema，表名一字不变，因此
 /// <b>不产生任何迁移</b>。银行对账（<c>Reconciliation</c>）刻意留在核心：勾选行引用
 /// <c>JournalLine.Id</c>，对账是会计动作而不是银行集成。
 /// <br/><br/>
@@ -35,7 +35,7 @@ public class FinanceBankingModule : TnziApplicationModule
 
     /// <inheritdoc />
     /// <remarks>
-    /// 57：紧随 Finance(55) 与 Payroll/Ai(56) 之后，且**早于** <c>Tnzi.Finance.Documents</c>(58)
+    /// 57：紧随 Finance(55) 与 Payroll(56) 之后，且**早于** <c>Tnzi.Finance.Documents</c>(58)
     /// —— 后者的支票渲染器要在本模块的支票服务解析渲染契约之前完成注册。
     /// </remarks>
     public override int LoadOrder => 57;
@@ -54,7 +54,7 @@ public class FinanceBankingModule : TnziApplicationModule
     /// <inheritdoc />
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 权限码随模块走：不加载银行域的宿主不会 seed 这 23 个码
+        // 权限码随模块走：不加载银行域的宿主不会 seed 这些码
         context.Services.AddTransient<IPermissionDefinitionProvider, FinanceBankingPermissions>();
 
         // ── 块 0：基建（账号密文 + 银行账户档案 + 往来方 remit-to）──

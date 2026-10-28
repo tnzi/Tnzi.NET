@@ -15,7 +15,7 @@
         <TKpiCard :label="t('queue.kpiCount')" :value="eftQueueKpis.count" icon="mdi:bank-transfer" />
         <TKpiCard
           :label="t('queue.kpiTotal')"
-          :value="fmtMoney(eftQueueKpis.total, eftQueueKpis.currency)"
+          :value="fmtCurrencyTotals(eftQueueKpis.totals)"
           :animated="false"
           icon="mdi:cash-multiple"
         />
@@ -48,7 +48,7 @@
           mobile="scroll"
           :pagination="false"
           :bordered="false"
-          :empty-text="t('queue.empty')"
+          :empty-text="queueError || t('queue.empty')"
           @update:checked-row-keys="onCheckedChange"
         />
       </div>
@@ -56,11 +56,13 @@
 
     <!-- ── Batches ─────────────────────────────────────────────── -->
     <template #batches>
+      <!-- The batch list endpoint takes no keyword: no free-text box, the filters stay. -->
       <TCrudPage
         :state="crud"
         :all-columns="columns"
         :title="batchesTitle"
         :search-fields="searchFields"
+        :show-default-search="false"
         :row-actions="rowActions"
         :translate="t"
         :show-header="false"
@@ -104,6 +106,9 @@
           <NFormItem :label="t('create.account')" :show-feedback="false">
             <NSelect v-model:value="createForm.bankAccountId" :options="bankAccountOptions" :placeholder="t('create.account')" filterable />
           </NFormItem>
+          <NAlert v-if="bankAccountOptions.length === 0" type="warning" :bordered="false" class="fin-eft__account-warning">
+            {{ t('create.noMatchingAccount') }}
+          </NAlert>
           <NFormItem :label="t('create.format')" :show-feedback="false">
             <NSelect v-model:value="createForm.format" :options="formatOptions" :placeholder="t('create.format')" />
           </NFormItem>
@@ -182,7 +187,7 @@ import {
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
-import { fmtMoney, tsToIsoDate, fmtDate } from './money'
+import { fmtCurrencyTotals, fmtMoney, totalsByCurrency, tsToIsoDate, fmtDate } from './money'
 import { useViewedRecord } from './viewed-record'
 import { buildEftSearchFields, buildEftBatchColumns, buildEftQueueColumns, buildEftLineColumns, EFT_FORMAT_LABEL, type EftBatchRow } from './eft-batch-config'
 
@@ -219,15 +224,14 @@ function formatLabel(fmt?: EftFileFormat | null): string {
   return fmt ? (EFT_FORMAT_LABEL[String(fmt)] ?? '') : ''
 }
 // ── Bank account profile options (originating account) ──────────
-const bankAccountOptions = ref<{ label: string; value: string }[]>([])
+const bankAccounts = ref<BankAccountDto[]>([])
 
 async function loadBankAccounts() {
   try {
     // Every bank account, not the first clamped page (pageSize is clamped to 100 silently).
-    const accounts = await fetchAllPages((q) => bridge.bankAccounts.fetch(q))
-    bankAccountOptions.value = accounts.map((a: BankAccountDto) => ({ label: a.name, value: a.id }))
+    bankAccounts.value = await fetchAllPages((q) => bridge.bankAccounts.fetch(q))
   } catch {
-    bankAccountOptions.value = []
+    bankAccounts.value = []
   }
 }
 void loadBankAccounts()
@@ -264,23 +268,31 @@ watch(
 // ── Payable queue ───────────────────────────────────────────────
 const queueRows = ref<EftQueueItemDto[]>([])
 const queueLoading = ref(false)
+/** Why the queue could not be read; shown where the rows would be (empty = it was read). */
+const queueError = ref('')
 const checkedQueueKeys = ref<string[]>([])
 
 /**
  * 队列概览（标准 2）：数据源是**全量队列**（不分页），所以合计是真数字。
+ * 队列是全局的、按设计混币（NACHA 美元 + CPA-005 加元），所以按币种分别合计。
  */
 const eftQueueKpis = computed(() => ({
   count: queueRows.value.length,
-  total: queueRows.value.reduce((sum, r) => sum + (r.amount ?? 0), 0),
-  currency: queueRows.value[0]?.currency,
+  totals: totalsByCurrency(queueRows.value, (r) => r.amount, (r) => r.currency),
 }))
 
 async function loadQueue() {
   queueLoading.value = true
+  queueError.value = ''
   try {
     queueRows.value = await bridge.eftBatches.queue()
   } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
+    // What is on screen is the previous read: drop it rather than let it pass
+    // for the current queue (and keep the ticks inside what is visible).
+    queueRows.value = []
+    checkedQueueKeys.value = []
+    queueError.value = error instanceof Error ? error.message : String(error)
+    message.error(queueError.value)
   } finally {
     queueLoading.value = false
   }
@@ -290,6 +302,25 @@ void loadQueue()
 function onCheckedChange(keys: Array<string | number>) {
   checkedQueueKeys.value = keys.map(String)
 }
+
+/**
+ * Only the bank account a payment was paid from can send it: the ledger credited
+ * that funds account, so a file drawn on another account leaves both bank
+ * reconciliations off. The backend refuses the mismatch; offering only the
+ * profile on the selected payments' funds account keeps the operator from
+ * finding out after a click. Mixed funds accounts leave nothing to pick.
+ */
+const bankAccountOptions = computed(() => {
+  const selected = new Set(checkedQueueKeys.value)
+  const funding = new Set(
+    queueRows.value.filter((r) => selected.has(r.paymentEntryId)).map((r) => r.fundingAccountId ?? null),
+  )
+  if (funding.size !== 1) return []
+  const [accountId] = [...funding]
+  return bankAccounts.value
+    .filter((a) => accountId != null && a.accountId === accountId)
+    .map((a) => ({ label: a.name, value: a.id }))
+})
 
 // ── Create batch ────────────────────────────────────────────────
 const createDetail = useDetail<{ id: string }>({ mode: 'modal', url: 'create' })
@@ -302,7 +333,8 @@ const creating = ref(false)
 
 function openCreate() {
   if (checkedQueueKeys.value.length === 0) return
-  createForm.bankAccountId = null
+  // One funds account maps to at most one bank profile, so there is nothing to choose.
+  createForm.bankAccountId = bankAccountOptions.value.length === 1 ? (bankAccountOptions.value[0]?.value ?? null) : null
   createForm.format = EftFileFormat.Nacha
   createForm.effectiveDate = Date.now()
   void createDetail.open('create')
@@ -349,6 +381,9 @@ async function download(row: EftBatchRow) {
   try {
     const blob = await bridge.eftBatches.download(id)
     downloadBlob(blob, `${row.number ?? 'eft-batch'}.txt`)
+    // The batch now records the hand-out; the row has to know it, or a void
+    // right after this would not ask for the acknowledgement the backend requires.
+    void crud.refresh()
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   }
@@ -363,13 +398,26 @@ const voidHandedOutAt = ref<string | null>(null)
 const voidDownloadCount = ref(0)
 const voidAcknowledged = ref(false)
 
-function openVoid(row: EftBatchRow) {
-  voidTargetId.value = String(row.id ?? '')
+function applyHandOut(batch: { firstDownloadedTime?: string | null; downloadCount?: number | null }) {
+  voidHandedOutAt.value = batch.firstDownloadedTime ? formatDateTime(batch.firstDownloadedTime) : null
+  voidDownloadCount.value = batch.downloadCount ?? 0
+}
+
+async function openVoid(row: EftBatchRow) {
+  const id = String(row.id ?? '')
+  voidTargetId.value = id
   voidReason.value = null
-  voidHandedOutAt.value = row.firstDownloadedTime ? formatDateTime(row.firstDownloadedTime) : null
-  voidDownloadCount.value = row.downloadCount ?? 0
+  applyHandOut(row)
   voidAcknowledged.value = false
   void voidDetail.open('create')
+  // 行可能早于一次下载（本页的或别人的）：按批次的当前状态决定要不要显式确认，
+  // 与后端判 409 的依据一致。重读失败就沿用行上的答案，后端照样拦。
+  try {
+    const fresh = await bridge.eftBatches.getById(id)
+    if (fresh && voidTargetId.value === id) applyHandOut(fresh)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 async function submitVoid() {
@@ -382,7 +430,8 @@ async function submitVoid() {
     })
     message.success(t('voidModal.success'))
     voidDetail.close()
-    await crud.refresh()
+    // The batch's payments go back to the payable queue.
+    await Promise.all([crud.refresh(), loadQueue()])
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   } finally {
@@ -417,7 +466,7 @@ const rowActions: RowAction<EftBatchRow>[] = [
     label: 'actions.void',
     type: 'warning',
     show: (r) => canUpdate.value && (isDraft(r) || isGenerated(r)),
-    onClick: (r) => openVoid(r),
+    onClick: (r) => void openVoid(r),
   },
 ]
 </script>

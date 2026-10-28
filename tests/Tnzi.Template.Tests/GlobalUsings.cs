@@ -21,6 +21,7 @@ global using System.Threading.Tasks;
 global using Tnzi.Data;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
+global using Tnzi.Exceptions;
 global using Tnzi.Results;
 global using Tnzi.Security.Claims;
 global using Tnzi.Template.Controllers.Admin;

@@ -111,14 +111,11 @@ public class LoggingModule : TnziInfrastructureModule
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
         var configuration = context.Configuration;
+        // ★ 这里读到的就是生效配置，不按环境改写：管理端日志页（LogFileService）读的是同一份 IOptions，
+        // 两边才会对「哪个级别开着」说同一句话。此前开发环境会悄悄打开 Debug 文件 sink，但全局最低级别
+        // 仍是 Information，那个目录里一条 Debug 事件都没有，只是 Information 目录的副本。
+        // 要 Debug 文件就显式配 Logging:MinimumLevel=Debug 与 Logging:FileOutput:Debug:Enabled=true。
         var options = configuration.GetSection("Logging").Get<LoggingOptions>() ?? new LoggingOptions();
-
-        // 开发环境默认启用 Debug 日志
-        var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        if (env == "Development" && !options.FileOutput.Debug.Enabled)
-        {
-            options.FileOutput.Debug.Enabled = true;
-        }
 
         // 最低级别 + 来源级别覆盖 + Enricher。默认把 Microsoft.AspNetCore 压到 Warning:
         // 它的 Hosting 诊断会在 Information 级把 QueryString 原文写出去,而查询串里就有
@@ -359,18 +356,89 @@ public class LoggingModule : TnziInfrastructureModule
                     opts.MessageTemplate = options.RequestLogging.MessageTemplate;
                 }
 
-                // elapsed 参数单位为毫秒，SlowRequestThresholdSeconds 单位为秒，需转换
-                var slowThresholdMs = options.RequestLogging.SlowRequestThresholdSeconds * 1000;
                 opts.GetLevel = (httpContext, elapsed, ex) =>
-                    ex != null
-                        ? LogEventLevel.Error
-                        : elapsed > slowThresholdMs
-                            ? LogEventLevel.Warning
-                            : options.RequestLogging.Level;
+                    ResolveRequestLogLevel(httpContext, elapsed, ex, options.RequestLogging);
+
+                // 路径里作为凭据的路由参数（signing/{token}、files/share/{token}）换成掩码，
+                // 名单与请求跟踪、审计、访问日志同源。
+                // 这条请求完成事件默认开着、Information 级，写进 admin/logs 读的那份日志文件。
+                // 路由值在下游管线跑完后才有，而这个委托正是在那之后调用的。
+                opts.GetMessageTemplateProperties = (httpContext, requestPath, elapsedMs, statusCode) =>
+                [
+                    new LogEventProperty("RequestMethod", new ScalarValue(httpContext.Request.Method)),
+                    new LogEventProperty("RequestPath", new ScalarValue(
+                        RequestPathRedactor.Redact(requestPath, httpContext.Request.RouteValues, QueryStringRedactor.DefaultSensitiveKeys))),
+                    new LogEventProperty("StatusCode", new ScalarValue(statusCode)),
+                    new LogEventProperty("Elapsed", new ScalarValue(elapsedMs)),
+                ];
             });
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 请求完成摘要行的级别：失败记 Error，慢请求记 Warning，其余用配置的 <see cref="RequestLoggingOptions.Level"/>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 「失败」按响应状态码判，不只看 <paramref name="exception"/>：本中间件在 AspNetCore 的异常处理中间件
+    /// <b>外层</b>，下游抛出的异常在内层已被转成 500 响应，到这里 <paramref name="exception"/> 恒为 null；
+    /// 控制器以失败结果返回的 5xx 本来就没有异常。只看异常的话，5xx 请求按 Information 记录，
+    /// 按级别分目录排障时 Logs/Warning 与 Logs/Error 里看不到失败请求的路径与耗时。
+    /// Serilog.AspNetCore 自己的默认判定同样是「状态码大于 499 记 Error」，替换它时不能把这一条丢掉。
+    /// </para>
+    /// <para>
+    /// ★ 长连接不按耗时升级：WebSocket、SignalR Hub 连接（含 SSE / 长轮询传输）与 <c>text/event-stream</c> 响应
+    /// 的「耗时」是整条连接的存活时长，不是处理时长。按慢请求升级的话，每次断开都写一条 Warning，
+    /// 而真正慢的接口被淹没在里面。
+    /// </para>
+    /// </remarks>
+    /// <param name="httpContext">已完成的请求</param>
+    /// <param name="elapsedMs">耗时（毫秒）</param>
+    /// <param name="exception">穿过请求日志中间件的异常（通常为 null，见 remarks）</param>
+    /// <param name="options">请求日志配置</param>
+    /// <returns>摘要行的级别</returns>
+    public static LogEventLevel ResolveRequestLogLevel(HttpContext httpContext, double elapsedMs, Exception? exception, RequestLoggingOptions options)
+    {
+        Check.NotNull(httpContext);
+        Check.NotNull(options);
+
+        if (exception != null || httpContext.Response.StatusCode >= StatusCodes.Status500InternalServerError)
+        {
+            return LogEventLevel.Error;
+        }
+
+        // elapsedMs 单位为毫秒，SlowRequestThresholdSeconds 单位为秒
+        var slowThresholdMs = options.SlowRequestThresholdSeconds * 1000;
+        if (elapsedMs > slowThresholdMs && !IsLongLivedConnection(httpContext))
+        {
+            return LogEventLevel.Warning;
+        }
+
+        return options.Level;
+    }
+
+    /// <summary>
+    /// 请求是否是一条长连接：它的耗时是连接存活时长，不能当处理时长看。
+    /// </summary>
+    private static bool IsLongLivedConnection(HttpContext httpContext)
+    {
+        if (httpContext.WebSockets.IsWebSocketRequest)
+        {
+            return true;
+        }
+
+        // Hub 的连接端点（不是 negotiate）：WebSocket 之外的 SSE 与长轮询传输也走这里
+        var metadata = httpContext.GetEndpoint()?.Metadata;
+        if (metadata?.GetMetadata<HubMetadata>() != null && metadata.GetMetadata<NegotiateMetadata>() == null)
+        {
+            return true;
+        }
+
+        var contentType = httpContext.Response.ContentType;
+        return contentType != null
+            && contentType.StartsWith("text/event-stream", StringComparison.OrdinalIgnoreCase);
     }
 
     public override Task OnApplicationShutdownAsync(ApplicationShutdownContext context)

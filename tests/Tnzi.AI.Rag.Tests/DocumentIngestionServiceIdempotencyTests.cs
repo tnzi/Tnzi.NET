@@ -54,12 +54,19 @@ public class DocumentIngestionServiceIdempotencyTests
             .Returns(Task.CompletedTask);
 
         var sp = new ServiceCollection().AddLogging().BuildServiceProvider();
+        var docRepo = new Mock<IRepository<KnowledgeDocument, Guid>>();
+        docRepo.Setup(r => r.ExistsAsync(docId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
         var service = new DocumentIngestionService(
             [extractor.Object],
             chunking.Object,
             embedding.Object,
             chunkRepo.Object,
+            Mock.Of<IVectorStore>(v => v.UsesRagChunkTable),
             kbRepo.Object,
+            docRepo.Object,
+            Mock.Of<IRepository<KnowledgeGraphNode, Guid>>(),
+            Mock.Of<IRepository<KnowledgeGraphEdge, Guid>>(),
             graph.Object,
             options,
             sp);

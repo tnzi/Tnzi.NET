@@ -1,6 +1,8 @@
 using Tnzi.AI.Channels.Adapters.Feishu;
 using Tnzi.AI.Channels.Adapters.Telegram;
+using Tnzi.AI.Channels.Events.Handlers;
 using Tnzi.AI.Channels.Options;
+using Tnzi.AspNetCore.Options;
 using Tnzi.AI.Mcp;
 using Tnzi.AI.Mcp.Options;
 using Tnzi.AI.Mcp.Server;
@@ -349,6 +351,39 @@ public class SubModuleRegistrationTests
             .ShouldBeTrue("FeishuChannelAdapter should be exposed as IInboundWebhookAdapter");
     }
 
+    [Theory]
+    [InlineData(null, "/ws/gateway")]
+    [InlineData("/realtime/ai", "/realtime/ai")]
+    public void ChannelsModule_GatewayPath_AcceptsTheAccessTokenQueryParameter(string? configuredPath, string expectedPath)
+    {
+        // 浏览器的 WebSocket 握手带不了 Authorization 头：网关路径不登记进查询串令牌白名单，
+        // 浏览器客户端在网关上永远是匿名的，开了 RequireAuthentication 就一律 401
+        var services = ConfigureChannelsModule(enabled: true, gatewayPath: configuredPath);
+        var accepted = services.BuildServiceProvider().GetRequiredService<IOptions<QueryStringTokenOptions>>().Value;
+
+        accepted.AcceptsQueryToken(expectedPath).ShouldBeTrue();
+        accepted.AcceptsQueryToken("/hubs/chat").ShouldBeTrue("SignalR hubs keep accepting query tokens");
+        accepted.AcceptsQueryToken("/api/ai/agents").ShouldBeFalse("ordinary API paths only accept the Authorization header");
+    }
+
+    [Fact]
+    public void ChannelsModule_GatewayDisabled_DoesNotWidenQueryStringTokens()
+    {
+        var services = ConfigureChannelsModule(enabled: true, gatewayEnabled: false);
+        var accepted = services.BuildServiceProvider().GetRequiredService<IOptions<QueryStringTokenOptions>>().Value;
+
+        accepted.AcceptsQueryToken("/ws/gateway").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void ChannelsModule_Enabled_CleansUpThreadMappingsWhenAThreadIsDeleted()
+    {
+        var services = ConfigureChannelsModule(enabled: true);
+
+        services.Any(d => d.ImplementationType == typeof(ChannelThreadMappingCleanupHandler))
+            .ShouldBeTrue("deleting a thread must remove the channel mappings that point at it");
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -420,7 +455,8 @@ public class SubModuleRegistrationTests
     }
 
     private static ServiceCollection ConfigureChannelsModule(
-        bool enabled = false, bool telegramEnabled = false, bool feishuEnabled = false)
+        bool enabled = false, bool telegramEnabled = false, bool feishuEnabled = false,
+        bool gatewayEnabled = true, string? gatewayPath = null)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -434,8 +470,9 @@ public class SubModuleRegistrationTests
                 ["AI:Channels:Feishu:AppId"] = feishuEnabled ? "test-app" : null,
                 ["AI:Channels:Feishu:AppSecret"] = feishuEnabled ? "test-secret" : null,
                 ["AI:Channels:ThreadStore"] = "File",
-                ["AI:Channels:FileStorePath"] = Path.GetTempPath()
-            })
+                ["AI:Channels:FileStorePath"] = Path.GetTempPath(),
+                ["AI:Channels:Gateway:Enabled"] = gatewayEnabled.ToString()
+            }.Concat(gatewayPath is null ? [] : [KeyValuePair.Create("AI:Channels:Gateway:Path", (string?)gatewayPath)]))
             .Build();
 
         services.AddOptions<ChannelsModuleOptions>()

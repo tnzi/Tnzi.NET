@@ -14,6 +14,7 @@ global using Microsoft.Extensions.Options;
 
 global using Tnzi.Modules;
 global using Tnzi.Storage.Cloud.Providers;
+global using Tnzi.Storage.Helpers;
 global using Tnzi.Storage.Options;
 global using Tnzi.Storage.Providers;
 global using Tnzi.Utilities;

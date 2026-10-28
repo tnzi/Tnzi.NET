@@ -24,7 +24,8 @@ public class ChatFileReferenceAccessResolverTests : Integration.IntegrationTestB
         return new ChatFileReferenceAccessResolver(
             currentUser.Object,
             ServiceProvider.GetRequiredService<IRepository<ChatMessage, Guid>>(),
-            ServiceProvider.GetRequiredService<IRepository<ConversationMember, Guid>>());
+            ServiceProvider.GetRequiredService<IRepository<ConversationMember, Guid>>(),
+            ServiceProvider.GetRequiredService<IRepository<Conversation, Guid>>());
     }
 
     private static FileReferenceDescriptor MessageReference(Guid messageId, Guid fileId)

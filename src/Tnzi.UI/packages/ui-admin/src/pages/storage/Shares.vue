@@ -72,7 +72,9 @@ const rowActions: RowAction<FileShareSummaryDto>[] = [
     // 他就得自己去拼 `/share/<token>` —— 而拼错了才发现是在收件人那边。
     key: 'copy-link',
     label: 'actions.copyLink',
-    show: (row) => row.isEnabled === true && !row.isExpired && !row.isExhausted,
+    // Also not offered when the app left the recipient page out
+    // (`hidePublicPages`): there is no address to copy.
+    show: (row) => row.isEnabled === true && !row.isExpired && !row.isExhausted && router.hasRoute('share-link'),
     onClick: (row) => void copyLink(row),
   },
   {

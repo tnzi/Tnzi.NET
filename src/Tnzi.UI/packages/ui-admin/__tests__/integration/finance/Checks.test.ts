@@ -99,6 +99,53 @@ describe('Finance Checks page', () => {
     expect(queue).toHaveBeenCalledWith('ba1')
   })
 
+  it("a failed queue read drops the previous account's queue and says why", async () => {
+    // Left on screen, the previous account's rows read as this account's queue
+    // (and could be ticked and printed against it); an empty table alone reads
+    // as "nothing to print".
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as ChecksVm & { queueRows: unknown[] }
+    vm.queueAccountId = 'ba1'
+    await flushPromises()
+    expect(vm.queueRows).toHaveLength(1)
+
+    queue.mockRejectedValueOnce(new Error('The print queue is unavailable.'))
+    vm.queueAccountId = 'ba2'
+    await flushPromises()
+
+    expect(vm.queueRows).toEqual([])
+    const emptyTexts = wrapper.findAllComponents({ name: 'TResponsiveTable' }).map((t) => t.props('emptyText'))
+    expect(emptyTexts).toContain('The print queue is unavailable.')
+  })
+
+  it("★ switching bank accounts keeps the later account's queue when the earlier read answers last", async () => {
+    // Printing sends only the ticked payment ids, so a queue left over from the
+    // previous account would print that account's cheques while the operator
+    // has the selected account's stock in the printer.
+    const pending = new Map<string, (rows: unknown[]) => void>()
+    const hold = ((accountId: string) =>
+      new Promise((resolve) => { pending.set(accountId, resolve as (rows: unknown[]) => void) })) as never
+    queue.mockImplementationOnce(hold).mockImplementationOnce(hold)
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as ChecksVm & { queueRows: Array<{ paymentEntryId: string }>; queueLoading: boolean }
+
+    vm.queueAccountId = 'ba1'
+    await flushPromises()
+    vm.queueAccountId = 'ba2'
+    await flushPromises()
+
+    pending.get('ba2')!([{ paymentEntryId: 'p-of-ba2', bankAccountId: 'ba2', currency: 'USD', amount: 10 }])
+    await flushPromises()
+    pending.get('ba1')!([{ paymentEntryId: 'p-of-ba1', bankAccountId: 'ba1', currency: 'USD', amount: 20 }])
+    await flushPromises()
+
+    expect(vm.queueRows.map((r) => r.paymentEntryId)).toEqual(['p-of-ba2'])
+    expect(vm.queueLoading).toBe(false)
+    wrapper.unmount()
+  })
+
   it('gates void / reprint on issued checks', async () => {
     const wrapper = mount(Page, { global: { stubs } })
     await flushPromises()

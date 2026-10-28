@@ -6,7 +6,6 @@ namespace Tnzi.Audit.Services;
 public class DatabaseAuditStore : IAuditStore
 {
     private readonly IRepository<AuditOperation, Guid> _operationRepository;
-    private readonly IRepository<AuditEntityEntry, Guid> _entityEntryRepository;
     private readonly IOptionsMonitor<AuditOptions> _options;
 
     /// <summary>
@@ -14,11 +13,9 @@ public class DatabaseAuditStore : IAuditStore
     /// </summary>
     public DatabaseAuditStore(
         IRepository<AuditOperation, Guid> operationRepository,
-        IRepository<AuditEntityEntry, Guid> entityEntryRepository,
         IOptionsMonitor<AuditOptions> options)
     {
         _operationRepository = Check.NotNull(operationRepository);
-        _entityEntryRepository = Check.NotNull(entityEntryRepository);
         _options = Check.NotNull(options);
     }
 
@@ -39,18 +36,6 @@ public class DatabaseAuditStore : IAuditStore
         if (list.Count > 0)
         {
             await _operationRepository.InsertManyAsync(list);
-        }
-    }
-
-    /// <summary>
-    /// 保存实体变更记录
-    /// </summary>
-    public async Task SaveEntityEntriesAsync(IEnumerable<AuditEntityEntry> entries)
-    {
-        var list = entries.ToList();
-        if (list.Count > 0)
-        {
-            await _entityEntryRepository.InsertManyAsync(list);
         }
     }
 

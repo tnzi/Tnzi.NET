@@ -292,6 +292,9 @@ public class AgentRuntimeResumeTests
             ToolNames = ["bash"],
             TrustedToolSelection = true,
             SubAgentName = "bash",
+            SubAgentInstructions = "Execute commands in the sandbox.",
+            MaxToolIterations = 7,
+            ExcludedToolGroups = ["task"],
             IsBackground = true,
             PlanMode = true,
             ReasoningEffort = ReasoningEffort.High,
@@ -327,6 +330,10 @@ public class AgentRuntimeResumeTests
         rebuilt.ToolNames.ShouldBe(["bash"]);
         rebuilt.TrustedToolSelection.ShouldBeTrue();
         rebuilt.SubAgentName.ShouldBe("bash");
+        // 模板随运行起跑时的那一份走，续跑不回查（模板可能已被改、被删）
+        rebuilt.SubAgentInstructions.ShouldBe("Execute commands in the sandbox.");
+        rebuilt.MaxToolIterations.ShouldBe(7);
+        rebuilt.ExcludedToolGroups.ShouldBe(["task"]);
         rebuilt.IsBackground.ShouldBeTrue();
         rebuilt.PlanMode.ShouldBeTrue();
         rebuilt.ReasoningEffort.ShouldBe(ReasoningEffort.High);

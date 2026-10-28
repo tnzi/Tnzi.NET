@@ -64,6 +64,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 })
 
 import Page from '../../../src/pages/finance/Expenses.vue'
+import { applyDocumentSearch } from './document-search.helper'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -90,9 +91,45 @@ describe('Finance Expenses page', () => {
     listOnly.mockClear()
   })
 
+  // A draft update replaces the expense: the manual rate and a line's manual
+  // tax amount, neither shown by the editor, must survive an unrelated edit.
+  it('saving an edited draft sends back the rate and tax overrides the editor does not show', async () => {
+    docSection.getById.mockResolvedValueOnce({
+      id: 'e9', status: 'Draft', vendorId: null, paidFromAccountId: 'bank', paymentMethod: 'CreditCard', docDate: '2026-07-01', currency: 'USD', exchangeRate: 1.36, memo: null,
+      lines: [{ id: 'l1', lineNumber: 1, description: 'Fuel', accountId: 'a3', amount: 80, taxCodeId: 'hst', taxAmount: 9.2 }],
+    } as never)
+    docSection.updateDraft.mockClear().mockResolvedValueOnce({ id: 'e9' } as never)
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { openEdit: (row: { id: string }) => void }
+    vm.openEdit({ id: 'e9' })
+    await flushPromises()
+    const editorVm = wrapper.findComponent({ name: 'DocumentEditor' }).vm as unknown as { memo: string; save: (post: boolean) => Promise<void> }
+    editorVm.memo = 'Road trip'
+    await editorVm.save(false)
+
+    expect(docSection.updateDraft).toHaveBeenCalledWith('e9', expect.objectContaining({
+      memo: 'Road trip',
+      exchangeRate: 1.36,
+      lines: [expect.objectContaining({ accountId: 'a3', taxAmount: 9.2 })],
+    }))
+    wrapper.unmount()
+  })
+
   it('mounts and loads its data', async () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
+  })
+  // The list endpoint binds its filters by name: expenses filter by vendor (`vendorId`), and a
+  // key it does not declare is dropped without an error, so the list would
+  // claim to be filtered while showing every party. The date goes out as the
+  // picked calendar day; the picker's epoch number fails model binding.
+  it('the advanced search filters by the party key the list endpoint binds, and a calendar date', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const filters = await applyDocumentSearch(wrapper)
+    expect(filters).toEqual({ dateFrom: '2026-01-15', vendorId: 'party-1' })
   })
 })

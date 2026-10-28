@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { ref, h, nextTick } from 'vue'
 import { useFormHostRegistration } from '@tnzi/ui/headless'
 import TDetailHost from '../../../src/components/detail/TDetailHost.vue'
@@ -109,6 +109,65 @@ describe('TDetailHost', () => {
       expect(form.validate).toHaveBeenCalledTimes(1)
       expect(state.submit).not.toHaveBeenCalled()
     })
+  })
+
+  /** One save per Confirm, as in TFormModal: a double click saved twice. */
+  describe('one save per Confirm', () => {
+    it('★ a second Confirm while validation is pending does not submit again', async () => {
+      const state = makeState('modal')
+      state.submit = vi.fn(async () => {})
+      let release!: (valid: boolean) => void
+      const gate = new Promise<boolean>((resolve) => (release = resolve))
+      const validate = vi.fn(() => gate)
+      const component = {
+        setup() {
+          useFormHostRegistration({ validate })
+          return () => h('div')
+        },
+      }
+      const wrapper = mount(TDetailHost, {
+        props: { state: state as any, title: 'Edit', footer: true },
+        slots: { default: () => h(component) },
+        global: { stubs },
+      })
+      const confirm = wrapper.findAll('button').at(-1)!
+      await confirm.trigger('click')
+      await confirm.trigger('click')
+      release(true)
+      await flushPromises()
+      expect(state.submit).toHaveBeenCalledTimes(1)
+    })
+
+    for (const mode of ['modal', 'drawer'] as const) {
+      it(`★ ${mode} mode: Confirm is refused and shown loading while a save is in flight`, async () => {
+        const state = makeState(mode)
+        state.submit = vi.fn(async () => {})
+        const submitting = ref(false)
+        ;(state.form as Record<string, unknown>).submitting = submitting
+        const wrapper = mount(TDetailHost, {
+          props: { state: state as any, title: 'Edit', footer: true },
+          global: {
+            stubs: {
+              ...stubs,
+              Button: {
+                name: 'Button',
+                props: ['loading'],
+                template: '<button :data-loading="loading ? \'yes\' : \'no\'" @click="$emit(\'click\')"><slot /></button>',
+              },
+            },
+          },
+        })
+        const confirm = () => wrapper.findAll('button').at(-1)!
+        expect(confirm().attributes('data-loading')).toBe('no')
+
+        submitting.value = true
+        await nextTick()
+        expect(confirm().attributes('data-loading')).toBe('yes')
+        await confirm().trigger('click')
+        await flushPromises()
+        expect(state.submit).not.toHaveBeenCalled()
+      })
+    }
   })
 
   it('renders NModal in modal mode', () => {

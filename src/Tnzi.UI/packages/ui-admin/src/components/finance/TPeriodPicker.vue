@@ -55,7 +55,7 @@
  * switching back to a period report keeps a sensible window instead of an
  * empty picker.
  */
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NDatePicker, NSelect } from 'naive-ui'
 import {
   useFinancePeriod,
@@ -78,7 +78,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{ change: [] }>()
 
-const { period, preset, comparison, comparisonPeriod, setPreset, setRange } = useFinancePeriod()
+const { period, preset, comparison, comparisonPeriod, setPreset, setRange, rollovers } = useFinancePeriod()
 
 const FALLBACK: Record<string, string> = {
   presetLabel: 'Period',
@@ -161,6 +161,11 @@ const comparisonHint = computed(() => {
   if (!props.showComparison || !comparisonPeriod.value) return ''
   return formatAccountingDateRange(comparisonPeriod.value.from, comparisonPeriod.value.to)
 })
+
+// "Year to date" shown again on a later day has moved on its own; the page
+// re-runs what it shows exactly as if the user had picked the range, so the
+// numbers never sit on a range the picker no longer displays.
+watch(rollovers, () => emit('change'))
 </script>
 
 <style scoped>

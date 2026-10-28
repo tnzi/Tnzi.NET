@@ -1,3 +1,5 @@
+using TemplateEntity = Tnzi.Template.Entities.Template;
+
 namespace Tnzi.Finance.Documents.Services;
 
 /// <summary>
@@ -22,11 +24,17 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
 {
     private readonly ITemplateRenderService _renderService;
     private readonly ILogger<TemplateCheckRenderer> _logger;
+    private readonly IReadOnlyRepository<TemplateEntity, Guid>? _templateRepository;
 
-    public TemplateCheckRenderer(ITemplateRenderService renderService, ILogger<TemplateCheckRenderer> logger)
+    public TemplateCheckRenderer(
+        ITemplateRenderService renderService,
+        ILogger<TemplateCheckRenderer> logger,
+        IReadOnlyRepository<TemplateEntity, Guid>? templateRepository = null)
     {
         _renderService = Check.NotNull(renderService);
         _logger = Check.NotNull(logger);
+        // 只用来回答「当前作用域里有没有这一行」（出厂版式兜底的前提）；缺席则不兜底，行为与此前相同。
+        _templateRepository = templateRepository;
     }
 
     /// <inheritdoc />
@@ -69,6 +77,9 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
             var rendered = await _renderService.RenderByNameAsync(
                 templateName, CheckTemplates.Module, model, CheckTemplates.Category, outputKind: TemplateOutputKind.Html, cancellationToken: cancellationToken);
 
+            if (!rendered.Succeeded && rendered.Code == 404)
+                rendered = await RenderShippedBodyAsync(templateName, model, cancellationToken) ?? rendered;
+
             if (!rendered.Succeeded || rendered.Data == null)
             {
                 // 模板缺失/停用是配置问题，把模板坐标带进消息，运维不必翻日志。
@@ -81,8 +92,9 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
         }
         catch (TemplateException ex)
         {
-            // 模板是用户可编辑内容，编译/渲染失败必须落成可读的 Result 而非 500 堆栈，
+            // 模板是用户可编辑内容，失败必须落成可读的 Result 而非 500 堆栈，
             // 且要让 CheckService 的 UoW 走正常的中止回滚路径（回收支票号）。
+            // 编译/渲染失败由渲染服务以失败的 Result 返回（上面那一支）；这里兜住它仍会抛出的模板异常（越界路径）。
             _logger.LogError(ex, "Check template '{TemplateName}' failed to render.", templateName);
             return Result<byte[]>.Failure($"Check template '{templateName}' failed to render: {ex.Message}", 500);
         }
@@ -91,4 +103,49 @@ public class TemplateCheckRenderer : ICheckDocumentRenderer
     /// <inheritdoc />
     public Task<Result<byte[]>> RenderCalibrationAsync(CheckRenderRequest request, CancellationToken cancellationToken = default)
         => Task.FromResult(RenderCalibration(request));
+
+    /// <summary>
+    /// 出厂版式在当前作用域里<b>根本没有行</b>时，渲染程序集自带的正文；否则返回 null（保持原失败）。
+    /// </summary>
+    /// <remarks>
+    /// 出厂行由启动播种写成宿主行（<c>TenantId</c> 为空），而多租户的过滤器是严格等值，
+    /// 不兜底的话，多租户开启后每个租户的打印、预览、样张、重打全部 404。
+    /// <para>
+    /// ★ 判据是「没有行」而不是「渲染失败」：库里有一行但被<b>停用</b>，是有人特意关掉了这个版式，
+    /// 绕过它就等于让停用失效。租户自己建了同名行之后，那一行照常胜出（上面的按名渲染先命中它）。
+    /// 自建模板（不在出厂目录里）缺失是真实的配置错误，不兜底。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<RenderedTemplate>?> RenderShippedBodyAsync(string templateName, CheckDocumentModel model, CancellationToken cancellationToken)
+    {
+        var builtIn = BuiltInCheckTemplates.Find(templateName);
+        if (builtIn == null || _templateRepository == null)
+            return null;
+
+        var hasRow = await _templateRepository.AsNoTracking().AnyAsync(
+            t => t.TemplateName == builtIn.Name && t.Module == CheckTemplates.Module && t.Category == CheckTemplates.Category,
+            cancellationToken);
+        if (hasRow)
+            return null;
+
+        var content = BuiltInCheckTemplates.ReadContent(builtIn);
+        if (content == null)
+            return null;
+
+        _logger.LogDebug(
+            "No stored row for the built-in check template '{TemplateName}' in the current scope; rendering the body shipped with the assembly.",
+            builtIn.Name);
+
+        return await _renderService.RenderAsync(new TemplateEntity
+        {
+            TemplateName = builtIn.Name,
+            Module = CheckTemplates.Module,
+            Category = CheckTemplates.Category,
+            Type = TemplateType.Print,
+            ContentTemplate = content,
+            SubjectTemplate = string.Empty,
+            IsActive = true,
+            Description = builtIn.Description
+        }, model, outputKind: TemplateOutputKind.Html, cancellationToken: cancellationToken);
+    }
 }

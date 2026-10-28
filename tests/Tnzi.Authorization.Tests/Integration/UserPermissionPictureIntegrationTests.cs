@@ -259,4 +259,31 @@ public class UserPermissionPictureIntegrationTests : IntegratedTestBase<Authoriz
         picture.Denied.ShouldBeEmpty();
         picture.Effective.ShouldBeEmpty();
     }
+
+    /// <summary>
+    /// 模块停用不是生效判据（运行时只看功能自己的启用与退役）：停用模块下被单独启用的功能照样生效，
+    /// 全景必须照实列出它。此前全景额外过滤模块状态，Effective 缺这个码而 CheckPermissionAsync 答 true，
+    /// 访问审查者按全景会得出「此人无此权限」。
+    /// </summary>
+    [Fact]
+    public async Task Picture_AgreesWithTheRuntimeForAFunctionEnabledUnderADisabledModule()
+    {
+        var c = await SeedCatalogueAsync();
+        var catalog = await DbContext.FunctionModules.SingleAsync(m => m.Code == "catalog");
+        catalog.IsEnabled = false;
+        await DbContext.SaveChangesAsync();
+        _roleIdsByUser[TargetUserId] = [StaffRoleId];
+        await GrantRoleAsync(StaffRoleId, c.CatalogView);
+        var (service, auth) = GetServices();
+
+        var picture = (await service.GetUserPermissionPictureAsync(TargetUserId)).Data!;
+
+        (await auth.CheckPermissionAsync(TargetUserId, "catalog.product.view")).ShouldBeTrue();
+        picture.Catalogue.Select(i => i.Code).ShouldContain("catalog.product.view");
+        picture.Effective.ShouldBe(["catalog.product.view"]);
+        foreach (var item in picture.Catalogue)
+        {
+            (await auth.CheckPermissionAsync(TargetUserId, item.Code)).ShouldBe(picture.Effective.Contains(item.Code), item.Code);
+        }
+    }
 }

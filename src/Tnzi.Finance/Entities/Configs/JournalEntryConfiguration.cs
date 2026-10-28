@@ -10,7 +10,7 @@ public class JournalEntryConfiguration : EntityTypeConfigurationBase<JournalEntr
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Number).HasMaxLength(64);
-        builder.Property(e => e.Memo).HasMaxLength(500);
+        builder.Property(e => e.Memo).HasMaxLength(FinanceFieldLimits.MemoMaxLength);
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
         builder.Property(e => e.SourceType).HasMaxLength(64);
         builder.Property(e => e.SourceId).HasMaxLength(64);

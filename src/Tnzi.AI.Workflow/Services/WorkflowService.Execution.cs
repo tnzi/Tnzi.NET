@@ -10,8 +10,6 @@ public partial class WorkflowService
     public async Task<Result<WorkflowExecutionResultDto>> RunAsync(Guid workflowId, string input, Guid? userId = null, CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        const string provider = "Workflow";
-        const string fallbackErrorType = "workflow_unsuccessful";
         var workflowDef = await _repository.GetAsync(workflowId, ct);
         if (workflowDef == null) return Fail<WorkflowExecutionResultDto>("Workflow not found", 404, ErrorCodes.WorkflowNotFound);
         if (!workflowDef.IsEnabled) return Fail<WorkflowExecutionResultDto>("Workflow is disabled", 400, ErrorCodes.WorkflowDisabled);
@@ -25,25 +23,19 @@ public partial class WorkflowService
 
         string? executionId = null;
 
-        QuotaReservation? reservation = null;
+        UsageLimitReservation? reservation = null;
         if (userId.HasValue)
         {
-            var estimatedTokens = EstimateWorkflowTokens(workflowDef.Steps, input);
-            var reserveResult = await _quotaService.ReserveQuotaAsync(userId.Value, estimatedTokens, ct);
-            if (!reserveResult.Succeeded)
-            {
-                return Fail<WorkflowExecutionResultDto>(
-                    reserveResult.Message ?? "Quota reservation failed",
-                    reserveResult.Code ?? 500,
-                    reserveResult.Code == 429 ? ErrorCodes.QuotaExceeded : ErrorCodes.QuotaCheckFailed);
-            }
-            reservation = reserveResult.Data;
+            var begun = await _usageLimits.BeginAsync(userId.Value, ct);
+            if (!begun.Succeeded)
+                return UsageLimitFailure<WorkflowExecutionResultDto>(begun);
+            reservation = begun.Data;
         }
 
+        var usage = new WorkflowUsageMeter();
         try
         {
             WorkflowExecutionResultDto resultDto;
-            int actualInputTokens = 0, actualOutputTokens = 0;
             WorkflowEngineResult engineResult;
             WorkflowExecutionOptions options;
 
@@ -66,13 +58,7 @@ public partial class WorkflowService
                 };
 
             var graph = BuildWorkflowGraph(workflowDef);
-            engineResult = await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, ct);
-
-            if (engineResult.Usage != null)
-            {
-                actualInputTokens = engineResult.Usage.InputTokens;
-                actualOutputTokens = engineResult.Usage.OutputTokens;
-            }
+            engineResult = await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, usage, ct);
 
             resultDto = new WorkflowExecutionResultDto
             {
@@ -87,27 +73,10 @@ public partial class WorkflowService
             var executionStatus = MapExecutionStatus(engineResult.StatusText);
             await TryUpdateWorkflowExecutionStatusAsync(executionId, executionStatus, CancellationToken.None);
 
-            var actualTotalTokens = actualInputTokens + actualOutputTokens;
             var isSuccess = IsSuccessfulWorkflowStatus(executionStatus);
             var errorMessage = isSuccess ? null : BuildWorkflowFailureMessage(engineResult.StatusText, engineResult.FinalOutput);
-            await _usageLogService.LogUsageAsync(
-                AIOperationType.WorkflowRun,
-                provider,
-                workflowDef.Name,
-                actualInputTokens,
-                actualOutputTokens,
-                stopwatch.ElapsedMilliseconds,
-                isSuccess,
-                errorMessage,
-                ct: ct);
-            RecordWorkflowTelemetry(AIOperationType.WorkflowRun, workflowDef.Name, actualInputTokens, actualOutputTokens, stopwatch.Elapsed, isSuccess, isSuccess ? null : engineResult.StatusText ?? fallbackErrorType);
-
-            // 结算配额（使用实际 token 用量）
-            if (userId.HasValue && reservation != null)
-            {
-                try { await _quotaService.SettleQuotaAsync(userId.Value, reservation, actualTotalTokens, ct); }
-                catch (Exception settleEx) { Logger.LogError(settleEx, "Failed to settle workflow quota: WorkflowId={WorkflowId}", workflowId); }
-            }
+            await AccountWorkflowUsageAsync(AIOperationType.WorkflowRun, workflowDef.Name, userId, reservation, usage,
+                stopwatch.Elapsed, isSuccess, errorMessage, engineResult.StatusText ?? WorkflowUnsuccessfulErrorType);
 
             return Ok(resultDto);
         }
@@ -119,15 +88,11 @@ public partial class WorkflowService
             }
 
             Logger.LogError(ex, "Workflow execution failed: {WorkflowId}", workflowId);
-            await _usageLogService.LogUsageAsync(AIOperationType.WorkflowRun, provider, workflowDef.Name, 0, 0, stopwatch.ElapsedMilliseconds, false, ex.Message, ct: ct);
-            RecordWorkflowTelemetry(AIOperationType.WorkflowRun, workflowDef.Name, 0, 0, stopwatch.Elapsed, false, ex.GetType().Name);
 
-            // 释放预留配额（错误时按 0 结算，退回预留）
-            if (userId.HasValue && reservation != null)
-            {
-                try { await _quotaService.SettleQuotaAsync(userId.Value, reservation, 0, CancellationToken.None); }
-                catch (Exception settleEx) { Logger.LogError(settleEx, "Failed to release workflow quota reservation"); }
-            }
+            // Billed for what the finished nodes consumed, not 0: a run aborted by a client
+            // disconnect or a storage error has already paid the provider for those nodes.
+            await AccountWorkflowUsageAsync(AIOperationType.WorkflowRun, workflowDef.Name, userId, reservation, usage,
+                stopwatch.Elapsed, isSuccess: false, ex.Message, ex.GetType().Name);
 
             return Fail<WorkflowExecutionResultDto>("Workflow execution failed.", 500, ErrorCodes.WorkflowFailed);
         }
@@ -135,13 +100,29 @@ public partial class WorkflowService
 
     /// <summary>
     /// 流式运行工作流。
-    /// 当前统一由 WorkflowEngine 驱动，输出节点完成事件和最终汇总事件。
+    /// 当前统一由 WorkflowEngine 驱动：先发一个开始事件（带 ExecutionId、状态 <c>Running</c>），
+    /// 之后每个步骤完成时发一个步骤事件，最后是汇总事件。
     /// token 级流式尚未接入 WorkflowEngine，因此 Sequential/Parallel/DAG 目前都是步骤级流式。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 步骤事件在步骤完成时发出，不是跑完再回放。此前整条工作流跑完才产出第一个事件：长流程在
+    /// 反向代理的空闲超时下连响应头都等不到就被切断，请求取消让引擎中止、执行记成 Failed，而调用方
+    /// 选流式恰恰是为了长任务。
+    /// </para>
+    /// <para>
+    /// 引擎与消费者轮流走（见 <see cref="StreamingHandOff"/>）：消费者处理一个事件时引擎停在那个步骤后面，
+    /// 消费者要下一个事件时引擎才继续。两边共用请求作用域里的 DbContext，这样它永远不会被同时使用。
+    /// </para>
+    /// <para>
+    /// 执行的结局只取决于引擎与取消令牌，不取决于事件有没有送到：消费者提前停止枚举时，释放枚举器会
+    /// 等引擎不再与它轮流、自己跑完，执行照样按引擎的结论落库与记账。要中止执行，取消令牌（HTTP 端点里
+    /// 就是客户端断开）。
+    /// </para>
+    /// </remarks>
     public async IAsyncEnumerable<WorkflowExecutionResultDto> RunStreamingAsync(Guid workflowId, string input, Guid? userId = null, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        const string provider = "Workflow";
         var workflowDef = await _repository.GetAsync(workflowId, ct);
         if (workflowDef == null)
             throw new BusinessException("Workflow not found", ErrorCodes.WorkflowNotFound, 404);
@@ -152,28 +133,29 @@ public partial class WorkflowService
         if (HasHitlNode(workflowDef))
             throw new BusinessException("HITL nodes require DAG execution mode", ErrorCodes.WorkflowExecutionInvalidState, 400);
 
-        // 配额预留
-        QuotaReservation? reservation = null;
+        // 用量上限：开窗口（判上限）
+        UsageLimitReservation? reservation = null;
         if (userId.HasValue)
         {
-            var estimatedTokens = EstimateWorkflowTokens(workflowDef.Steps, input);
-            var reserveResult = await _quotaService.ReserveQuotaAsync(userId.Value, estimatedTokens, ct);
-            if (!reserveResult.Succeeded)
+            var begun = await _usageLimits.BeginAsync(userId.Value, ct);
+            if (!begun.Succeeded)
             {
-                throw new BusinessException(
-                    reserveResult.Message ?? "Quota reservation failed",
-                    reserveResult.Code == 429 ? ErrorCodes.QuotaExceeded : ErrorCodes.QuotaCheckFailed,
-                    reserveResult.Code ?? 500);
+                var failure = UsageLimitFailure<WorkflowExecutionResultDto>(begun);
+                throw new BusinessException(failure.Message!, failure.ErrorCode ?? ErrorCodes.UsageLimitCheckFailed, failure.Code ?? 500)
+                {
+                    ErrorDetails = failure.ErrorDetails
+                };
             }
-            reservation = reserveResult.Data;
+            reservation = begun.Data;
         }
 
-        int actualInputTokens = 0, actualOutputTokens = 0;
-        bool streamCompleted = false;
+        var usage = new WorkflowUsageMeter();
+        var engineFinished = false;
         var finalOutput = input;
         string? finalStatusOverride = null;
         string? executionId = null;
-        var aggregatedStepResults = new List<WorkflowStepResultDto>();
+        using var handOff = new StreamingHandOff();
+        Task<WorkflowEngineResult>? engineTask = null;
 
         try
         {
@@ -194,23 +176,36 @@ public partial class WorkflowService
                 };
 
             var graph = BuildWorkflowGraph(workflowDef);
-            var engineResult = await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, ct);
-            AggregateUsage(engineResult.Usage, ref actualInputTokens, ref actualOutputTokens);
-            aggregatedStepResults.AddRange(engineResult.StepResults);
-            finalOutput = engineResult.FinalOutput;
-            finalStatusOverride = engineResult.StatusText;
 
-            foreach (var stepResult in engineResult.StepResults)
+            // Started now, but it waits for the consumer's first request before doing anything.
+            engineTask = RunEngineAsync(graph, options);
+
+            // The run has started: the caller gets its execution id (to follow or cancel it) and the
+            // HTTP endpoint commits its headers now, not when the first node finishes.
+            yield return new WorkflowExecutionResultDto
+            {
+                ExecutionId = executionId,
+                Status = nameof(WorkflowExecutionStatus.Running)
+            };
+            handOff.ConsumerReady();
+
+            await foreach (var stepResult in handOff.Steps.ReadAllAsync(CancellationToken.None))
             {
                 yield return new WorkflowExecutionResultDto
                 {
                     ExecutionId = executionId,
-                    RunId = engineResult.RunId,
                     Output = stepResult.Output,
                     Status = $"Step '{stepResult.StepId}'" + (stepResult.Skipped ? " (skipped)" : string.Empty),
                     StepResults = [stepResult]
                 };
+                handOff.ConsumerReady();
             }
+
+            var engineResult = await engineTask;
+
+            // The run's outcome is the engine's, recorded before the summary is written: a consumer
+            // that disconnects now does not turn a finished run into a failed one.
+            await RecordEngineOutcomeAsync(engineResult);
 
             yield return new WorkflowExecutionResultDto
             {
@@ -218,69 +213,111 @@ public partial class WorkflowService
                 RunId = engineResult.RunId,
                 Output = finalOutput,
                 Status = finalStatusOverride ?? "Completed",
-                StepResults = aggregatedStepResults.Count > 0 ? aggregatedStepResults : null
+                StepResults = engineResult.StepResults.Count > 0 ? engineResult.StepResults : null
             };
-
-            // 更新执行状态（包括耗时计算）
-            await TryUpdateWorkflowExecutionStatusAsync(executionId, MapExecutionStatus(finalStatusOverride), CancellationToken.None);
-
-            streamCompleted = true;
         }
         finally
         {
-            // 使用 CancellationToken.None 防止客户端断连导致配额泄漏和数据丢失
-            var actualTotalTokens = actualInputTokens + actualOutputTokens;
-
-            try
+            // The consumer stopped asking for events while the engine was still running: the engine
+            // stops waiting for it and finishes on its own, and its outcome is recorded as on the
+            // normal path. A failure or a cancelled token surfaces here as an exception: Failed below.
+            if (engineTask != null && !engineFinished)
             {
-                var executionStatus = MapExecutionStatus(finalStatusOverride);
-                var isSuccess = streamCompleted && IsSuccessfulWorkflowStatus(executionStatus);
-                var errorMessage = isSuccess
-                    ? null
-                    : streamCompleted
-                        ? BuildWorkflowFailureMessage(finalStatusOverride, finalOutput)
-                        : "Workflow stream interrupted by exception";
-
-                await _usageLogService.LogUsageAsync(
-                    AIOperationType.WorkflowRunStreaming, provider, workflowDef.Name,
-                    actualInputTokens, actualOutputTokens, stopwatch.ElapsedMilliseconds,
-                    isSuccess,
-                    errorMessage: errorMessage,
-                    ct: CancellationToken.None);
-
-                RecordWorkflowTelemetry(
-                    AIOperationType.WorkflowRunStreaming,
-                    workflowDef.Name,
-                    actualInputTokens,
-                    actualOutputTokens,
-                    stopwatch.Elapsed,
-                    isSuccess,
-                    isSuccess ? null : streamCompleted ? finalStatusOverride ?? "workflow_unsuccessful" : "workflow_stream_interrupted");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "Failed to log workflow streaming usage: WorkflowId={WorkflowId}", workflowId);
-            }
-
-            if (userId.HasValue && reservation != null)
-            {
+                handOff.ConsumerGone();
                 try
                 {
-                    // 失败时按 0 结算（退回预留），成功时按实际用量结算
-                    var settleTokens = streamCompleted ? actualTotalTokens : 0;
-                    await _quotaService.SettleQuotaAsync(userId.Value, reservation, settleTokens, CancellationToken.None);
+                    await RecordEngineOutcomeAsync(await engineTask);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError(ex, "Failed to settle workflow streaming quota: WorkflowId={WorkflowId}", workflowId);
+                    Logger.LogWarning(ex, "Streaming workflow run {ExecutionId} ended without a result", executionId);
                 }
             }
 
-            if (!streamCompleted && !string.IsNullOrWhiteSpace(executionId))
+            // Billed for what the nodes consumed on every exit path, interrupted streams included:
+            // settling 0 refunded the whole reservation for nodes the provider had already billed.
+            var isSuccess = engineFinished && IsSuccessfulWorkflowStatus(MapExecutionStatus(finalStatusOverride));
+            var errorMessage = isSuccess
+                ? null
+                : engineFinished
+                    ? BuildWorkflowFailureMessage(finalStatusOverride, finalOutput)
+                    : "Workflow stream interrupted by exception";
+            await AccountWorkflowUsageAsync(AIOperationType.WorkflowRunStreaming, workflowDef.Name, userId, reservation, usage,
+                stopwatch.Elapsed, isSuccess, errorMessage,
+                engineFinished ? finalStatusOverride ?? WorkflowUnsuccessfulErrorType : "workflow_stream_interrupted");
+
+            if (!engineFinished && !string.IsNullOrWhiteSpace(executionId))
             {
                 await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Failed, CancellationToken.None);
             }
         }
+
+        async Task<WorkflowEngineResult> RunEngineAsync(WorkflowGraph graph, WorkflowExecutionOptions options)
+        {
+            try
+            {
+                await handOff.WaitForConsumerAsync(ct);
+                return await _workflowEngine.ExecuteAsync(graph, input, Check.NotNull(ServiceProvider), options, usage,
+                    handOff.HandOverAsync, ct);
+            }
+            finally
+            {
+                handOff.Complete();
+            }
+        }
+
+        async Task RecordEngineOutcomeAsync(WorkflowEngineResult engineResult)
+        {
+            finalOutput = engineResult.FinalOutput;
+            finalStatusOverride = engineResult.StatusText;
+            engineFinished = true;
+            await TryUpdateWorkflowExecutionStatusAsync(executionId!, MapExecutionStatus(finalStatusOverride), CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// The engine and the consumer of a streaming run take turns. The engine hands over each step as
+    /// it is recorded and then waits until the consumer asks for the next event; it also waits for the
+    /// consumer's first request before it starts. The consumer's code between two events therefore
+    /// never runs while the engine runs, and the request's DbContext, which both use, is never used
+    /// concurrently. Once the consumer has gone the engine no longer waits.
+    /// </summary>
+    private sealed class StreamingHandOff : IDisposable
+    {
+        private readonly Channel<WorkflowStepResultDto> _steps = Channel.CreateUnbounded<WorkflowStepResultDto>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        private readonly SemaphoreSlim _consumerReady = new(0);
+        private int _consumerGone;
+
+        /// <summary>Steps as the engine records them; completes when the engine stops.</summary>
+        public ChannelReader<WorkflowStepResultDto> Steps => _steps.Reader;
+
+        /// <summary>Engine side: publish a step, then wait for the consumer to ask for the next event.</summary>
+        public async Task HandOverAsync(WorkflowStepResultDto step, CancellationToken ct)
+        {
+            // A copy: the engine keeps its own result object and may still update it.
+            await _steps.Writer.WriteAsync(new WorkflowStepResultDto { StepId = step.StepId, Output = step.Output, Skipped = step.Skipped }, ct);
+            await WaitForConsumerAsync(ct);
+        }
+
+        /// <summary>Engine side: wait for the consumer's next request, unless it has gone.</summary>
+        public Task WaitForConsumerAsync(CancellationToken ct)
+            => Volatile.Read(ref _consumerGone) == 1 ? Task.CompletedTask : _consumerReady.WaitAsync(ct);
+
+        /// <summary>Engine side: no more steps.</summary>
+        public void Complete() => _steps.Writer.TryComplete();
+
+        /// <summary>Consumer side: the consumer asks for the next event.</summary>
+        public void ConsumerReady() => _consumerReady.Release();
+
+        /// <summary>Consumer side: the consumer will not ask again; the engine stops waiting for it.</summary>
+        public void ConsumerGone()
+        {
+            Volatile.Write(ref _consumerGone, 1);
+            _consumerReady.Release();
+        }
+
+        public void Dispose() => _consumerReady.Dispose();
     }
 
     /// <summary>
@@ -333,11 +370,73 @@ public partial class WorkflowService
         return false;
     }
 
-    private static void AggregateUsage(TokenUsageDto? usage, ref int actualInputTokens, ref int actualOutputTokens)
+    private const string WorkflowUsageProvider = "Workflow";
+    private const string WorkflowUnsuccessfulErrorType = "workflow_unsuccessful";
+
+    /// <summary>
+    /// The usage limit refused the run (429 <c>AI_USAGE_LIMIT_REACHED</c> with the window and reset time as the error details),
+    /// or the meter itself failed (its own status and code, never presented as a limit).
+    /// </summary>
+    private Result<T> UsageLimitFailure<T>(Result<UsageLimitReservation> begun)
     {
-        if (usage == null) return;
-        actualInputTokens += usage.InputTokens;
-        actualOutputTokens += usage.OutputTokens;
+        var reached = string.Equals(begun.ErrorCode, ErrorCodes.UsageLimitReached, StringComparison.Ordinal) || begun.Code == 429;
+        return reached
+            ? Fail<T>(begun.Message ?? "Usage limit reached.", 429, ErrorCodes.UsageLimitReached, begun.ErrorDetails)
+            : Fail<T>(begun.Message ?? "The usage limit could not be checked.", begun.Code ?? 500,
+                begun.ErrorCode ?? ErrorCodes.UsageLimitCheckFailed);
+    }
+
+    /// <summary>
+    /// Log, record and settle what one engine call consumed, with the tokens the meter counted.
+    /// </summary>
+    /// <remarks>
+    /// Called on every exit path of Run, RunStreaming, Resume and ResumeWithInput: success,
+    /// failure and cancellation alike. Nodes that finished before a client disconnect or a
+    /// storage error were billed by the provider, so settling 0 ("refund the reservation")
+    /// was a quota bypass and left the usage log short. The cost is estimated from the metered
+    /// tokens (the meter does not keep a per-model breakdown), so only a provider-wide or default
+    /// cost rate applies. Never throws and never observes the request token, which may be the
+    /// cancelled one.
+    /// </remarks>
+    private async Task AccountWorkflowUsageAsync(
+        string operationType,
+        string workflowName,
+        Guid? userId,
+        UsageLimitReservation? reservation,
+        WorkflowUsageMeter usage,
+        TimeSpan elapsed,
+        bool isSuccess,
+        string? errorMessage,
+        string? errorType)
+    {
+        try
+        {
+            await _usageLogService.LogUsageAsync(
+                operationType, WorkflowUsageProvider, workflowName,
+                usage.InputTokens, usage.OutputTokens, (long)elapsed.TotalMilliseconds,
+                isSuccess, errorMessage, ct: CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to log workflow usage: {Workflow} ({OperationType})", workflowName, operationType);
+        }
+
+        RecordWorkflowTelemetry(operationType, workflowName, usage.InputTokens, usage.OutputTokens, elapsed, isSuccess,
+            isSuccess ? null : errorType ?? WorkflowUnsuccessfulErrorType);
+
+        if (userId.HasValue && reservation != null)
+        {
+            try
+            {
+                var cost = _costCalculator?.CalculateCost(
+                    WorkflowUsageProvider, workflowName, usage.InputTokens, usage.OutputTokens, cachedInputTokens: 0, cacheWriteTokens: 0) ?? 0m;
+                await _usageLimits.SettleAsync(reservation, cost, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to record workflow usage: {Workflow} ({OperationType})", workflowName, operationType);
+            }
+        }
     }
 
     private static bool IsSuccessfulWorkflowStatus(WorkflowExecutionStatus status)
@@ -391,22 +490,13 @@ public partial class WorkflowService
             UpdatedTime = now
         }, ct);
 
-        return executionId;
-    }
+        // The execution row is process state, not part of the caller's unit of work. Inside an
+        // ambient transaction the insert would be deferred, and everything after it reads the row
+        // with a database query: the checkpoint store would insert a second row for the same
+        // ExecutionId (failing the request on the unique index at commit) and the terminal status
+        // would find nothing to update. The flush stays inside the transaction.
+        await _executionRepository.SaveChangesAsync(ct);
 
-    private static int EstimateWorkflowTokens(string? steps, string input)
-    {
-        var stepCount = 1;
-        if (!string.IsNullOrWhiteSpace(steps))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(steps);
-                if (doc.RootElement.ValueKind == JsonValueKind.Array)
-                    stepCount = Math.Max(1, doc.RootElement.GetArrayLength());
-            }
-            catch { /* 解析失败时退化为单步估算 */ }
-        }
-        return (input.Length / 4 + 2000) * stepCount;
+        return executionId;
     }
 }

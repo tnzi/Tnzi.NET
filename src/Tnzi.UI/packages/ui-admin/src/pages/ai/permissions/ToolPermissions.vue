@@ -26,11 +26,12 @@
          tab), matching the pre-migration layout. -->
     <template #kpis>
       <TKpiRow class="t-perm-page__kpis" cols="1 s:3">
+        <!-- A count nobody read is a placeholder, not a zero. -->
         <TKpiCard :label="t('kpi.persisted')" :value="persistedCount" />
-        <TKpiCard :label="t('kpi.session')" :value="sessionRules.length" />
+        <TKpiCard :label="t('kpi.session')" :value="rulesSnapshot ? sessionRules.length : null" />
         <TKpiCard
           :label="t('kpi.hasRules')"
-          :value="rulesSnapshot?.hasRules ? t('status.yes') : t('status.no')"
+          :value="rulesSnapshot ? (rulesSnapshot.hasRules ? t('status.yes') : t('status.no')) : null"
           :tone="rulesSnapshot?.hasRules ? 'success' : 'default'"
         />
       </TKpiRow>
@@ -66,7 +67,11 @@
 
     <!-- ─── Tab 2: Session Rules ───────────────────────────────── -->
     <template #session>
+      <NAlert v-if="snapshotError" type="error" :closable="false" data-test="perm-snapshot-error">
+        {{ snapshotError }}
+      </NAlert>
       <TResponsiveTable
+        v-else
         :columns="sessionColumns"
         :data="sessionRules"
         :loading="loading"
@@ -120,7 +125,10 @@
           </NForm>
         </NCard>
 
-        <NCard v-if="evalResult" :title="t('eval.result')" size="small" :bordered="false" class="t-perm-page__eval-result t-tab-card">
+        <NAlert v-if="evalError" type="error" :closable="false" data-test="perm-eval-error">
+          {{ evalError }}
+        </NAlert>
+        <NCard v-else-if="evalResult" :title="t('eval.result')" size="small" :bordered="false" class="t-perm-page__eval-result t-tab-card">
           <!-- Big, colour-coded decision badge - the headline verdict. -->
           <div class="t-perm-page__decision" :class="`t-perm-page__decision--${behaviorTone(evalResult.behavior)}`">
             <TSvgIcon :icon="behaviorIcon(evalResult.behavior)" :size="22" />
@@ -183,6 +191,7 @@
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
+  NAlert,
   NButton,
   NCard,
   NDivider,
@@ -202,6 +211,7 @@ import TKpiCard from '../../../components/data/TKpiCard.vue'
 import TTabsPage, { type TabSection } from '../../../components/layout/TTabsPage.vue'
 import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import TFormSchemaRenderer from '../../_shared/form-schema'
+import { filterByKeyword } from '../../../utils/keyword-filter'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../../headless/row-actions'
 import { useAdminClient } from '../../../plugin/client'
@@ -246,6 +256,8 @@ const tabs: TabSection[] = [
   { name: 'evaluate', label: t('tabs.evaluate') },
 ]
 const rulesSnapshot = ref<PermissionRulesDto | null>(null)
+/** Why the rule snapshot could not be read; the session tab and KPIs then show no figures. */
+const snapshotError = ref<string | null>(null)
 const sessionRules = ref<PermissionRuleItemDto[]>([])
 
 // ── Persisted rules (TCrudPage) ────────────────────────────────────────────
@@ -261,8 +273,12 @@ const crud = useCrudPage<PersistedPermissionRuleDto>({
   permission: 'ai.permissions',
   columns: persistedColumns,
   rowKey: (r) => r.id,
-  fetchData: async () => {
-    const items = [...(await bridge.getPersistedRules())].sort(
+  // The endpoint takes no keyword, so the search box filters the loaded rules.
+  fetchData: async (q) => {
+    const matched = filterByKeyword(await bridge.getPersistedRules(), q.searchText, (r) => [
+      r.toolPattern, r.toolGroup, r.commandPrefix, r.serverName, r.pathPrefix, r.reason, r.userId,
+    ])
+    const items = matched.sort(
       (a, b) => b.priority - a.priority || scopeWeight(b.scope) - scopeWeight(a.scope),
     )
     // All rules come back in one shot (no server paging) - return a complete
@@ -284,7 +300,7 @@ const crud = useCrudPage<PersistedPermissionRuleDto>({
   deleteData: (ids) => Promise.all(ids.map((id) => bridge.deletePersistedRule(String(id)))).then(() => undefined),
 })
 
-const persistedCount = computed(() => crud.total.value)
+const persistedCount = computed(() => (crud.error.value ? null : crud.total.value))
 const rowActions: RowAction<PersistedPermissionRuleDto>[] = [editAction(crud), deleteAction(crud)]
 
 // Seed create defaults when the modal opens (behavior=Allow, scope=System,
@@ -332,6 +348,8 @@ const sessionColumns: DataTableColumns<PermissionRuleItemDto> = [
 // ── Evaluate tab ──────────────────────────────────────────────────
 const evalLoading = ref(false)
 const evalResult = ref<PermissionEvaluateResultDto | null>(null)
+/** Why the last evaluation was refused (403, 5xx, a malformed request). */
+const evalError = ref<string | null>(null)
 const evalCtx = reactive<PermissionEvaluateRequestDto>({
   toolName: '',
   toolGroup: '',
@@ -345,6 +363,7 @@ const evalCtx = reactive<PermissionEvaluateRequestDto>({
 async function runEvaluate(): Promise<void> {
   if (!evalCtx.toolName) return
   evalLoading.value = true
+  evalError.value = null
   try {
     const req: PermissionEvaluateRequestDto = {
       toolName: evalCtx.toolName,
@@ -356,8 +375,9 @@ async function runEvaluate(): Promise<void> {
       isDestructive: evalCtx.isDestructive ?? false,
     }
     evalResult.value = await bridge.evaluate(req)
-  } catch {
+  } catch (error) {
     evalResult.value = null
+    evalError.value = error instanceof Error ? error.message : String(error)
   } finally {
     evalLoading.value = false
   }
@@ -365,13 +385,15 @@ async function runEvaluate(): Promise<void> {
 
 // ── Snapshot (session rules + hasRules KPI) ─────────────────────────
 async function refreshSnapshot(): Promise<void> {
+  snapshotError.value = null
   try {
     const snapshot = await bridge.getRules()
     rulesSnapshot.value = snapshot
     sessionRules.value = snapshot?.sessionRules ?? []
-  } catch {
+  } catch (error) {
     rulesSnapshot.value = null
     sessionRules.value = []
+    snapshotError.value = error instanceof Error ? error.message : String(error)
   }
 }
 

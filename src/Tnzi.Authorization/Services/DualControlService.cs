@@ -52,6 +52,27 @@ public class DualControlService : ApplicationService, IDualControlService
             return Fail<DualControlRequestDto>("Operation is required", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
+        // 列宽在服务层判：PostgreSQL 在保存时才拒（500），SQLite 根本不拒（落库的值超出约定的列宽）。
+        // 说明常常是发起人输入的理由，超长是 400 而不是服务器错误。
+        var lengthViolation = DescribeOverLength(input.Operation.Trim(), DualControlRequest.OperationMaxLength, "Operation")
+            ?? DescribeOverLength(input.TargetId, DualControlRequest.TargetIdMaxLength, "TargetId")
+            ?? DescribeOverLength(input.Description, DualControlRequest.DescriptionMaxLength, "Description");
+        if (lengthViolation != null)
+        {
+            return Fail<DualControlRequestDto>(lengthViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // 逐请求覆盖的有效期与配置默认值受同一个上限约束（见 MaxLifetimeMinutes）。只钳配置值时，
+        // 业务代码把用户填的有效期透传进来就能签出十年有效的许可；TimeSpan.MaxValue 之类更会在算到期时刻时抛出。
+        // 刻意不设下限：极短的有效期只会让许可很快作废，不越过任何安全边界。
+        if (input.Lifetime is { } requestedLifetime
+            && (requestedLifetime <= TimeSpan.Zero || requestedLifetime > TimeSpan.FromMinutes(MaxLifetimeMinutes)))
+        {
+            return Fail<DualControlRequestDto>(
+                $"Lifetime must be positive and at most {MaxLifetimeMinutes} minutes (30 days).",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var requesterId = CurrentUser?.Id;
         if (requesterId is null || requesterId == Guid.Empty)
         {
@@ -72,11 +93,6 @@ public class DualControlService : ApplicationService, IDualControlService
         // 而症状是「批准了却用不了」，没有任何东西会报错。
         var configured = Math.Clamp(_options.CurrentValue.DefaultLifetimeMinutes, MinLifetimeMinutes, MaxLifetimeMinutes);
         var lifetime = input.Lifetime ?? TimeSpan.FromMinutes(configured);
-
-        if (lifetime <= TimeSpan.Zero)
-        {
-            return Fail<DualControlRequestDto>("Lifetime must be positive", 400, ErrorCodes.VALIDATION_ERROR);
-        }
 
         var request = new DualControlRequest
         {
@@ -139,9 +155,28 @@ public class DualControlService : ApplicationService, IDualControlService
             return Fail("Only the requester can cancel this request", 403, ErrorCodes.FORBIDDEN);
         }
 
+        // 与 DecideAsync 同一条理由：撤回与审批人的决定可能并发，整行回写会让后落库的那个覆盖先到的。
+        var requesterId = request.RequesterId;
+        var now = DateTime.UtcNow;
+        var claimed = await _repository
+            .Where(r => r.Id == requestId && r.Status == DualControlStatus.Pending && r.RequesterId == requesterId)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(r => r.Status, DualControlStatus.Cancelled)
+                    .SetProperty(r => r.DecidedAt, now)
+                    .SetProperty(r => r.LastModificationTime, now)
+                    .SetProperty(r => r.LastModifierId, requesterId),
+                cancellationToken);
+
+        if (claimed == 0)
+        {
+            return Fail("Only a pending request can be cancelled", 409, ErrorCodes.BUSINESS_ERROR);
+        }
+
         request.Status = DualControlStatus.Cancelled;
-        request.DecidedAt = DateTime.UtcNow;
-        await _repository.UpdateAsync(request, cancellationToken: cancellationToken);
+        request.DecidedAt = now;
+        request.LastModificationTime = now;
+        request.LastModifierId = requesterId;
 
         return Ok();
     }
@@ -380,6 +415,13 @@ public class DualControlService : ApplicationService, IDualControlService
             return Fail<DualControlRequestDto>("Not authenticated", 401, ErrorCodes.UNAUTHORIZED);
         }
 
+        // 审批意见是审批人输入的文字，超长在这里答 400；交给下面的条件更新则是库里失败、500。
+        var commentViolation = DescribeOverLength(comment, DualControlRequest.DecisionCommentMaxLength, "Comment");
+        if (commentViolation != null)
+        {
+            return Fail<DualControlRequestDto>(commentViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var request = await _repository.GetAsync(requestId, cancellationToken);
         if (request == null)
         {
@@ -421,12 +463,37 @@ public class DualControlService : ApplicationService, IDualControlService
             return Fail<DualControlRequestDto>("This request has expired", 409, ErrorCodes.BUSINESS_ERROR);
         }
 
+        // ★★★ 抢占式决定，不是「读出来改一改再整行存回去」，与 ConsumeAsync 同一条理由。
+        // 两位审批人可能都读到 Pending、都通过上面全部校验；整行回写时后落库的那一个赢，
+        // 先到的批准被改写成拒绝（或反过来，一张被否决的许可被改写成可用），两条相反的决定事件先后发出。
+        // 整行回写还会把读时的 IsConsumed / ConsumedAt 一起写回去：许可已被执行，审计上却成了「从未使用」。
+        // 条件更新只改决定这几列，且只在库里此刻仍是 Pending 时生效。
+        // 它绕过保存拦截器，所以审计列在这里显式写。
+        var now = DateTime.UtcNow;
+        var claimed = await _repository
+            .Where(r => r.Id == requestId && r.Status == DualControlStatus.Pending && r.ExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(r => r.Status, decision)
+                    .SetProperty(r => r.ApproverId, approverId.Value)
+                    .SetProperty(r => r.DecidedAt, now)
+                    .SetProperty(r => r.DecisionComment, comment)
+                    .SetProperty(r => r.LastModificationTime, now)
+                    .SetProperty(r => r.LastModifierId, approverId.Value),
+                cancellationToken);
+
+        if (claimed == 0)
+        {
+            LogWarning("Dual-control request {RequestId} was decided or cancelled concurrently by another caller.", requestId);
+            return Fail<DualControlRequestDto>("This request is no longer pending", 409, ErrorCodes.BUSINESS_ERROR);
+        }
+
         request.Status = decision;
         request.ApproverId = approverId.Value;
-        request.DecidedAt = DateTime.UtcNow;
+        request.DecidedAt = now;
         request.DecisionComment = comment;
-
-        await _repository.UpdateAsync(request, cancellationToken: cancellationToken);
+        request.LastModificationTime = now;
+        request.LastModifierId = approverId.Value;
 
         await PublishEventAsync(new DualControlDecidedEvent
         {
@@ -531,4 +598,10 @@ public class DualControlService : ApplicationService, IDualControlService
     /// </summary>
     private Result<DualControlRequestDto> NotUsable()
         => Fail<DualControlRequestDto>("No usable approval for this action", 403, ErrorCodes.FORBIDDEN);
+
+    /// <summary>超出列宽时返回英文错误消息，否则 null。</summary>
+    private static string? DescribeOverLength(string? value, int maxLength, string field)
+        => value != null && value.Length > maxLength
+            ? $"{field} must be at most {maxLength} characters."
+            : null;
 }

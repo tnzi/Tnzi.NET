@@ -12,8 +12,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.S3" Version="4.0.102.2" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="AWSSDK.S3" Version="4.0.104.4" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.30.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- S3ObjectStore 是 S3 / R2 共用的对象操作，测试直接对它喂一个模拟的 IAmazonS3，离线验证错误映射。 -->
+    <InternalsVisibleTo Include="Tnzi.Storage.Cloud.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
 </Project>

@@ -97,12 +97,10 @@ public class ToolScanner : IToolScanner
                 IsReadOnly = funcAttr.IsReadOnly,
                 IsConcurrencySafe = funcAttr.IsConcurrencySafe,
                 IsDestructive = funcAttr.IsDestructive,
-                MaxResultSizeChars = funcAttr.MaxResultSizeChars,
                 SearchHint = funcAttr.SearchHint,
                 Aliases = funcAttr.Aliases != null
                     ? funcAttr.Aliases.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     : [],
-                Priority = funcAttr.Priority,
                 InterruptBehavior = funcAttr.InterruptBehavior
             };
 

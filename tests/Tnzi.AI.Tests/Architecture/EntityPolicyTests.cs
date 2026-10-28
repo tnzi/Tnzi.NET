@@ -128,6 +128,7 @@ public class EntityPolicyTests : IDisposable
         [typeof(AgentVersion)] = (true, false, false),
         [typeof(AgentTask)] = (true, false, false),
         [typeof(AgentArtifact)] = (true, false, false),
+        [typeof(AgentAttachment)] = (true, false, false),
         [typeof(AgentThread)] = (true, true, false),
         [typeof(AgentThreadMessage)] = (true, false, false),
         [typeof(AgentRun)] = (true, true, false),
@@ -137,7 +138,8 @@ public class EntityPolicyTests : IDisposable
         [typeof(MemoryEntry)] = (true, false, false),
         [typeof(EntityMemory)] = (true, false, false),
         [typeof(UsageLog)] = (true, false, false),
-        [typeof(UserQuota)] = (true, true, false),
+        [typeof(AiUsagePolicy)] = (true, false, false),
+        [typeof(AiUsageMeter)] = (true, false, false),
         [typeof(UserProfile)] = (true, false, false),
         [typeof(SubAgentType)] = (true, false, false),
         [typeof(ToolPermissionRuleEntity)] = (true, false, false),
@@ -343,11 +345,13 @@ internal sealed class EntityPolicyDbContext : TnziDbContext<EntityPolicyDbContex
         modelBuilder.ApplyConfiguration(new AgentRunTraceConfiguration());
         modelBuilder.ApplyConfiguration(new AgentVersionConfiguration());
         modelBuilder.ApplyConfiguration(new UsageLogConfiguration());
-        modelBuilder.ApplyConfiguration(new UserQuotaConfiguration());
+        modelBuilder.ApplyConfiguration(new AiUsagePolicyConfiguration());
+        modelBuilder.ApplyConfiguration(new AiUsageMeterConfiguration());
         modelBuilder.ApplyConfiguration(new MemoryEntryConfiguration());
         modelBuilder.ApplyConfiguration(new EntityMemoryConfiguration());
         modelBuilder.ApplyConfiguration(new UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new AgentArtifactConfiguration());
+        modelBuilder.ApplyConfiguration(new AgentAttachmentConfiguration());
         modelBuilder.ApplyConfiguration(new EvaluationRunConfiguration());
         modelBuilder.ApplyConfiguration(new ProviderConfiguration());
         modelBuilder.ApplyConfiguration(new SubAgentTypeConfiguration());

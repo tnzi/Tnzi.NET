@@ -12,12 +12,7 @@ public class EventBusOptions
     public string Type { get; set; } = "Local";
 
     /// <summary>
-    /// 获取或设置 是否启用事件持久化
-    /// </summary>
-    public bool EnablePersistence { get; set; } = false;
-
-    /// <summary>
-    /// 获取或设置 RabbitMQ连接字符串（当Type为RabbitMQ时使用）
+    /// 获取或设置 RabbitMQ连接字符串（当Type为RabbitMQ时使用；留空时 RabbitMQ 模块改读 ConnectionStrings:RabbitMQ）
     /// </summary>
     public string? RabbitMqConnectionString { get; set; }
 
@@ -27,14 +22,9 @@ public class EventBusOptions
     public string? RabbitMqExchangeName { get; set; }
 
     /// <summary>
-    /// 获取或设置 Kafka引导服务器（当Type为Kafka时使用）
+    /// 获取或设置 Kafka引导服务器（当Type为Kafka时使用；留空时 Kafka 模块依次改读 ConnectionStrings:Kafka、Kafka:BootstrapServers）
     /// </summary>
     public string? KafkaBootstrapServers { get; set; }
-
-    /// <summary>
-    /// 获取或设置 Kafka主题名称
-    /// </summary>
-    public string? KafkaTopicName { get; set; }
 
     /// <summary>
     /// 获取或设置 分布式订阅的消费者组名（= 这个服务的身份）。未配置时取入口程序集名。
@@ -49,8 +39,12 @@ public class EventBusOptions
     public string? ConsumerGroup { get; set; }
     
     /// <summary>
-    /// 获取或设置 本地事件总线的最大并发处理器数（默认10）
+    /// 获取或设置 本地事件总线全进程同时在执行的同步处理器上限（默认10）
     /// </summary>
+    /// <remarks>
+    /// 处理器里再发布的嵌套事件沿用外层已持有的名额，不再排队（否则外层处理器占满名额时嵌套发布永远等不到）；
+    /// 后台处理器不占名额，它们里面的再发布与顶层发布一样排队。
+    /// </remarks>
     public int MaxConcurrency { get; set; } = 10;
 
     /// <summary>
@@ -67,13 +61,10 @@ public class EventBusOptions
     /// <summary>
     /// 获取或设置 自动扫描是否排除框架程序集（以 "Tnzi" 开头，默认 true）。
     ///
-    /// 框架要求所有 Tnzi.* 程序集**手动注册** event handlers（参见
-    /// `Tnzi/CLAUDE.md` Module Patterns）。如果同时被 auto-scan 扫到，
-    /// EventBusModule (LoadOrder=110) 比应用模块 (LoadOrder >= 300) 先
-    /// 跑，IsAlreadyRegistered 检查时手动注册还未发生，handler 通过
-    /// `TryAddEnumerable` 注册一次；随后应用模块通过 `AddScoped` 又注册
-    /// 一次。结果同一 handler 在 DI 容器里出现两个 descriptor，每次事件
-    /// 发布触发两次执行 - 例如 `UserLoggedInEventHandler` 写两条登录日志。
+    /// 框架要求所有 Tnzi.* 程序集**手动注册** event handlers，其中一部分按配置
+    /// 有条件地注册；auto-scan 会把模块刻意没注册的那些也加进来。
+    /// （与手动注册重复的自动注册由 EventBusModule 在 PostConfigure 阶段撤下，
+    /// 同一 handler 不会因为两种注册并存而每次事件执行两遍。）
     ///
     /// 设为 false 可恢复旧行为（同时扫描框架与应用程序集）。仅当 consumer
     /// 显式指定了 `HandlerAssemblies` 时本选项不生效（认为是显式选择）。
@@ -81,8 +72,8 @@ public class EventBusOptions
     public bool ExcludeFrameworkAssemblies { get; set; } = true;
 
     /// <summary>
-    /// 获取或设置 自动注册的处理器默认生命周期（默认 Scoped）
-    /// 可通过 EventHandlerLifetimeAttribute 特性覆盖单个处理器的生命周期
+    /// 获取或设置 自动注册的处理器默认生命周期（默认 Scoped）。
+    /// 需要别的生命周期的处理器在模块里手动注册（手动注册的生命周期优先于自动注册）。
     /// </summary>
     public ServiceLifetime DefaultHandlerLifetime { get; set; } = ServiceLifetime.Scoped;
 

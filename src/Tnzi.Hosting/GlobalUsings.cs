@@ -16,6 +16,7 @@ global using Tnzi.Signing;
 global using Tnzi.Payment;
 global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Mvc.Conventions;
+global using Tnzi.AspNetCore.Options;
 global using Tnzi.Audit;
 global using Tnzi.Authorization;
 global using Tnzi.EventBus;

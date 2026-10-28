@@ -27,13 +27,8 @@ public class CachingOptions
     public string? RedisInstanceName { get; set; }
 
     /// <summary>
-    /// 获取或设置 是否启用缓存键生成器
-    /// </summary>
-    public bool EnableKeyGenerator { get; set; } = true;
-
-
-    /// <summary>
-    /// 获取或设置 内存缓存最大条目数（仅 Type=Memory 时生效）
+    /// 获取或设置 进程共享 <c>IMemoryCache</c> 的条目上限（与 <see cref="Type"/> 无关：
+    /// Redis 部署里别的模块写进共享内存缓存的条目同样受它约束）。
     /// 为 0 或 null 表示不限制。超出限制后按 LRU 策略驱逐条目。
     /// </summary>
     public long? MemorySizeLimit { get; set; }

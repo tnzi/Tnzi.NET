@@ -6,18 +6,15 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
 {
     private readonly TDbContext _dbContext;
     private readonly IServiceProvider _serviceProvider;
-    private readonly IEnumerable<IDataSeeder> _seeders;
     private readonly ILogger<EFCoreDbInitializer<TDbContext>> _logger;
 
     public EFCoreDbInitializer(
         TDbContext dbContext,
         IServiceProvider serviceProvider,
-        IEnumerable<IDataSeeder> seeders,
         ILogger<EFCoreDbInitializer<TDbContext>> logger)
     {
         _dbContext = Check.NotNull(dbContext);
         _serviceProvider = Check.NotNull(serviceProvider);
-        _seeders = Check.NotNull(seeders);
         _logger = Check.NotNull(logger);
     }
 
@@ -46,25 +43,10 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
             return;
         }
 
-        // 【性能优化】慢速路径：只有在没有迁移文件时才执行详细检查
-        // 检查数据库是否已存在（这个操作需要连接数据库，较慢）
-        _logger.LogDebug("No migrations found, checking database connection...");
-        var canConnect = await _dbContext.Database.CanConnectAsync(cancellationToken);
-
-        if (!canConnect)
-        {
-            // 数据库不存在，使用 EnsureCreated 创建
-            _logger.LogWarning("Database does not exist, creating using EnsureCreated. For production, use 'dotnet ef migrations add' first.");
-            await _dbContext.Database.EnsureCreatedAsync(cancellationToken);
-            return;
-        }
-
-        // 数据库存在但没有【待应用】迁移
-        // 检查是否有迁移历史记录（这个操作需要查询数据库，较慢）
+        // 慢速路径：没有待应用的迁移。先看历史表（库不存在时只答「没有」，不会去建库）
         var appliedMigrations = await _dbContext.Database.GetAppliedMigrationsAsync(cancellationToken);
-        var hasMigrationHistory = appliedMigrations.Any();
 
-        if (hasMigrationHistory)
+        if (appliedMigrations.Any())
         {
             // 区分两种 "history 非空" 场景，避免多 DbContext 共享历史表时的静默误判：
             var definedMigrations = _dbContext.Database.GetMigrations();
@@ -88,52 +70,17 @@ public class EFCoreDbInitializer<TDbContext> : IDbInitializer
             return;
         }
 
-        // 数据库存在但没有迁移历史，可能是用 EnsureCreated 创建的
-        // 为了支持根据最新实体更新表结构，我们需要使用 Migrations
-        _logger.LogWarning("Database exists but no migration history found. This database may have been created with EnsureCreated.");
-        _logger.LogInformation("Attempting to use Migrations to update database schema...");
-
-        try
-        {
-            // 尝试使用 MigrateAsync，即使没有迁移文件
-            // 如果数据库中没有 __EFMigrationsHistory 表，MigrateAsync 会抛出异常
-            await _dbContext.Database.MigrateAsync(cancellationToken);
-            _logger.LogInformation("Database schema updated successfully using Migrations.");
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("__EFMigrationsHistory", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("migration", StringComparison.OrdinalIgnoreCase))
-        {
-            // 没有迁移历史表，需要先创建初始迁移
-            _logger.LogWarning("No migration history found. To update database schema based on latest entities:");
-            _logger.LogWarning("1. Run: dotnet ef migrations add InitialCreate --context {DbContextName}", typeof(TDbContext).Name);
-            _logger.LogWarning("2. Run: dotnet ef database update --context {DbContextName}", typeof(TDbContext).Name);
-            _logger.LogWarning("Or run the application again after creating migrations.");
-
-            // 【性能优化】移除硬编码的表名检查，直接尝试 EnsureCreated
-            // EnsureCreated 在数据库已存在时不会创建缺失的表，但也不会报错
-            try
-            {
-                await _dbContext.Database.EnsureCreatedAsync(cancellationToken);
-                _logger.LogInformation("Schema ensured. If tables are missing, please create migrations to update the database schema.");
-            }
-            catch (Exception ensureEx)
-            {
-                _logger.LogError(ensureEx, "Failed to ensure schema. Please create and apply migrations manually.");
-                throw;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to migrate database. Please create and apply migrations manually.");
-            throw;
-        }
-    }
-
-    public async Task SeedAsync(CancellationToken cancellationToken = default)
-    {
-        foreach (var seeder in _seeders)
-        {
-            await seeder.SeedAsync(_serviceProvider, cancellationToken);
-        }
+        // 没有待应用、也没有已应用的迁移 = 本 context 没有任何迁移文件：只能按当前模型直接建表。
+        // EnsureCreated 本身幂等：库不存在则建库，库里一张表都没有则建表，已经有表则不动。
+        // ★ 不先问 CanConnect，也不先试 MigrateAsync。SQLite 打开连接即创建空文件，「能连上」恒为真，
+        //   于是此前从不走建表分支；而对一个没有任何迁移的 context 调 MigrateAsync 一张业务表都不建，
+        //   最多留下一张空的历史表，之后的 EnsureCreated 又因为「库里已经有表」什么都不做：
+        //   新库启动成功，第一条查询才报 no such table。
+        _logger.LogWarning(
+            "DbContext '{DbContextName}' has no migrations; creating its schema with EnsureCreated. " +
+            "For production, add migrations ('dotnet ef migrations add InitialCreate --context {DbContextName}') and apply them instead.",
+            typeof(TDbContext).Name, typeof(TDbContext).Name);
+        await _dbContext.Database.EnsureCreatedAsync(cancellationToken);
     }
 
     /// <summary>

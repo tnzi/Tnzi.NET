@@ -28,6 +28,11 @@ namespace Tnzi.Notification.Services;
 /// ★ <b>每一道都就地落库自己的标记</b>，不指望调用方：两条调用路径都有「过滤完什么都不剩 →
 /// 提前 return」的分支，不在这里保存，标记就只活在被跟踪的实体里、随请求一起消失。
 /// </para>
+/// <para>
+/// ★★ <b>落库只按属性保存，不把消息行整行写回</b>（不调 <c>UpdateAsync</c>）。过滤跑在发送方认领之后，
+/// 整行写回会把内存里的 <c>Status</c> 与 <c>IsDeleted</c> 一并写下去，盖掉这期间管理端做的取消与删除
+/// （理由与 <see cref="Internal.SendProgress"/> 相同）。标记都落在被跟踪的收件人上，保存一次就够。
+/// </para>
 /// </remarks>
 internal sealed class RecipientEligibility
 {
@@ -36,19 +41,22 @@ internal sealed class RecipientEligibility
     private readonly INotificationOptOutService _optOutService;
     private readonly INotificationPreferenceService _preferenceService;
     private readonly ILogger _logger;
+    private readonly TimeProvider _clock;
 
     public RecipientEligibility(
         IRepository<Message, Guid> notificationRepository,
         IUnitOfWork unitOfWork,
         INotificationOptOutService optOutService,
         INotificationPreferenceService preferenceService,
-        ILogger logger)
+        ILogger logger,
+        TimeProvider clock)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
         _unitOfWork = Check.NotNull(unitOfWork);
         _optOutService = Check.NotNull(optOutService);
         _preferenceService = Check.NotNull(preferenceService);
         _logger = Check.NotNull(logger);
+        _clock = Check.NotNull(clock);
     }
 
     /// <summary>
@@ -86,16 +94,18 @@ internal sealed class RecipientEligibility
         if (!QuietHoursRecipientFilter.ShouldConsultQuietHours(notification, candidates))
             return (candidates, 0);
 
-        var raw = await _preferenceService.GetQuietHoursAsync(
+        // ★ 带时区的那个读取口：只认 UTC 时刻的 GetQuietHoursAsync 跨夏令时切换会偏一个小时。
+        var windows = await _preferenceService.GetQuietHoursWindowsAsync(
             PreferenceRecipientFilter.UserIdsToCheck(candidates),
             notification.Type,
             cancellationToken);
 
-        if (raw.Count == 0)
+        if (windows.Count == 0)
             return (candidates, 0);
 
-        var windows = raw.ToDictionary(kv => kv.Key, kv => new QuietHoursWindow(kv.Value.Start, kv.Value.End));
-        var remaining = QuietHoursRecipientFilter.Apply(candidates, windows, DateTime.UtcNow, out var deferred);
+        // 判定时刻取自 TimeProvider：静默时段按时区解释之后，对错只在夏令时切换那一夜分得出来，
+        // 测试要能把「现在」钉在那一夜。
+        var remaining = QuietHoursRecipientFilter.Apply(candidates, windows, _clock.GetUtcNow().UtcDateTime, out var deferred);
 
         if (deferred.Count == 0)
             return (candidates, 0);
@@ -106,7 +116,6 @@ internal sealed class RecipientEligibility
 
         // ★ 就地落库，理由与另外三道逐字相同 —— 只是这一次落的不是「不发了」而是
         //   「什么时候再发」，而没有它，到期扫描根本看不见这些人。
-        await _notificationRepository.UpdateAsync(notification, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return (remaining, deferred.Count);
@@ -141,9 +150,7 @@ internal sealed class RecipientEligibility
 
             // ★ 就地落库，不指望调用方。「因退订而未发」是要拿去交差的记录，
             // 而两条调用路径都有「过滤完就什么都不剩 → 提前 return」的分支：
-            // SendAsync 那条只 UpdateAsync 不 SaveChanges，ResendToFailedRecipientsAsync
-            // 那条**两样都没有** —— 标记就只活在被跟踪的实体里，随请求一起消失。
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+            // 那些分支不会再保存一次，标记就只活在被跟踪的实体里，随请求一起消失。
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
@@ -185,7 +192,6 @@ internal sealed class RecipientEligibility
             // ★ 就地落库，理由与 ExcludeOptedOutAsync 逐字相同：两条调用路径都有
             // 「过滤完就什么都不剩 → 提前 return」的分支，不在这里落库标记就只活在
             // 被跟踪的实体里、随请求一起消失。
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
@@ -230,7 +236,6 @@ internal sealed class RecipientEligibility
 
             // ★ 就地落库，理由与另外两道过滤逐字相同：调用方两条路径都有「过滤完什么都不剩
             // → 提前 return」的分支，不在这里保存标记就只活在被跟踪的实体里。
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 

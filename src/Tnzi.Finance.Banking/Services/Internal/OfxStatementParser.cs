@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Tnzi.Finance.Banking.Services.Internal;
 
 /// <summary>
@@ -13,8 +11,8 @@ namespace Tnzi.Finance.Banking.Services.Internal;
 /// </remarks>
 internal static class OfxStatementParser
 {
-    private static readonly Regex StmtTrnBlock = new(
-        "<STMTTRN>(.*?)</STMTTRN>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+    private const string StmtTrnOpen = "<STMTTRN>";
+    private const string StmtTrnClose = "</STMTTRN>";
 
     /// <summary>
     /// 解析 OFX 文本；无法识别为 OFX 时抛 <see cref="BusinessException"/>（400）。
@@ -39,9 +37,8 @@ internal static class OfxStatementParser
             PeriodTo = ParseOfxDate(ReadTag(content, "DTEND"))
         };
 
-        foreach (Match match in StmtTrnBlock.Matches(content))
+        foreach (var block in StmtTrnBlocks(content))
         {
-            var block = match.Groups[1].Value;
             var date = ParseOfxDate(ReadTag(block, "DTPOSTED"));
             var amount = ParseDecimal(ReadTag(block, "TRNAMT"));
             if (date == null || amount == null)
@@ -62,6 +59,31 @@ internal static class OfxStatementParser
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 依次取出每个 <c>&lt;STMTTRN&gt;</c> 块的内容（开标签到其后最近的闭合标签，不分大小写）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 线性扫描而不是惰性正则 <c>&lt;STMTTRN&gt;(.*?)&lt;/STMTTRN&gt;</c>：正则对每个没有闭合的开标签都要
+    /// 扫到输入末尾才失败，耗时是「开标签数 × 输入长度」，一份由开标签堆成的 20 MB 文件能把请求线程压上几十分钟。
+    /// 这里遇到第一个找不到闭合的开标签就停：它后面的开标签也不可能再有闭合，所以结果与正则逐字相同。
+    /// </remarks>
+    private static IEnumerable<string> StmtTrnBlocks(string content)
+    {
+        var cursor = 0;
+        while (true)
+        {
+            var open = content.IndexOf(StmtTrnOpen, cursor, StringComparison.OrdinalIgnoreCase);
+            if (open < 0)
+                yield break;
+            var start = open + StmtTrnOpen.Length;
+            var close = content.IndexOf(StmtTrnClose, start, StringComparison.OrdinalIgnoreCase);
+            if (close < 0)
+                yield break;
+            yield return content[start..close];
+            cursor = close + StmtTrnClose.Length;
+        }
     }
 
     /// <summary>读取叶子标签的值（值 = 标签后到下一个 '&lt;' 为止，实体解码 + trim）</summary>

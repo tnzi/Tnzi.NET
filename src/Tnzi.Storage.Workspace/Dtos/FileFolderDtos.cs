@@ -36,6 +36,12 @@ public class FileFolderDto
     public string? Description { get; set; }
 
     /// <summary>
+    /// The user whose file space this folder belongs to (null for folders created without a signed-in user).
+    /// Paths are unique per owner, so two owners can both have <c>/Documents</c>.
+    /// </summary>
+    public Guid? OwnerId { get; set; }
+
+    /// <summary>
     /// Child folders (populated in tree queries)
     /// </summary>
     public List<FileFolderDto>? Children { get; set; }

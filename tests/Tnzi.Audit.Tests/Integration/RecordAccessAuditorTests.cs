@@ -275,4 +275,28 @@ public class RecordAccessAuditorTests : IntegrationTestBase
         Assert.False(result.Succeeded);
         Assert.Equal(400, result.Code);
     }
+
+    [Fact]
+    public async Task VerifyChain_PassesOnADatabaseThatStoresMicroseconds()
+    {
+        // ★ PostgreSQL / MySQL 只存到微秒，而 DateTime 是 100ns：写入时按内存里的值算哈希、校验时按读回来的值重算，
+        // 十条里九条会报「被篡改」。这里把每条的时间按微秒精度存一遍（正是那两种库会做的事），再校验。
+        // SQLite 原样存 7 位小数，测试库本身照不出这个问题。
+        var auditor = CreateAuditor(Enabled());
+        for (var i = 0; i < 5; i++)
+        {
+            await auditor.RecordAsync("Tip", $"tip-{i}");
+        }
+
+        foreach (var entry in await DbContext.Set<AuditRecordAccess>().ToListAsync())
+        {
+            entry.CreationTime = entry.CreationTime.AddTicks(-(entry.CreationTime.Ticks % TimeSpan.TicksPerMicrosecond));
+        }
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var result = await auditor.VerifyChainAsync(await CurrentChainOwnerAsync());
+
+        Assert.True(result.Succeeded, result.Message);
+    }
 }

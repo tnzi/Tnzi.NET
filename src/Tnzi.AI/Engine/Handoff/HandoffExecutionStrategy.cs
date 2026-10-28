@@ -57,6 +57,12 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 return BuildResult(response, handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
             }
 
+            // 转接过去的 Agent 是模型自己选的，不是这次请求最初面向的那一个，
+            // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效。
+            // 标记必须先于解析：目标的工具列表在解析时一次定型，ToolResolver 此刻读标记决定是否裁掉
+            // AI:SubAgent:SubAgentDisallowedTools；先解析后标记，这份名单对模型选出的首个目标一条也不生效。
+            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, handoffTarget);
+
             // 按 Guid 加载并创建目标 Agent
             var targetAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(targetAgentId, context, ct);
             if (targetAgent == null)
@@ -65,11 +71,8 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 return BuildResult(response, handoffPath, currentAgent.Name, totalInputTokens, totalOutputTokens);
             }
 
+            SubAgentContext.Rename(context.ExecutionContextAccessor, targetAgent.Name);
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, handoffTarget);
-
-            // 转接过去的 Agent 是模型自己选的，不是这次请求最初面向的那一个 ——
-            // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效
-            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
 
             // 保存当前 Agent 作为"上一个"（供下一跳回退用）
             previousAgentName = currentAgent.Name;
@@ -80,18 +83,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             handoffPath.Add(handoffTarget);
             currentAgent = targetAgent;
 
-            // 将前一个 Agent 的输出作为新 Agent 的上下文，确保包含用户原始问题
-            var userQuestion = ExecutionStrategyAgentLoader.GetLatestUserQuestion(messages);
-            currentMessages = messages.Count > 0
-                ?
-                [
-                    messages[0], // 保留原始用户消息
-                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-                ]
-                :
-                [
-                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-                ];
+            currentMessages = BuildHandoffMessages(messages, handoffPath[^2]);
         }
 
         context.Logger.LogWarning("Max handoffs ({MaxHandoffs}) reached", _config.MaxHandoffs);
@@ -122,7 +114,7 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             string? detectedHandoff = null;
             var agentWithHandoff = InjectHandoffTool(currentAgent, effectiveTargets.Keys, target => detectedHandoff = target);
 
-            // 流式执行：工具调用阶段缓冲，文本到达时决策
+            // 流式执行：工具调用阶段缓冲；转接工具一触发就决策，否则在第一个文本到达时释放缓冲
             var preTextBuffer = new List<AgentStreamChunk>();
             var handoffTriggered = false;
 
@@ -132,6 +124,14 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 {
                     // 还在工具调用阶段 - 缓冲（不发给用户）
                     preTextBuffer.Add(chunk);
+
+                    // 转接工具在本轮工具执行时就已触发：立刻中止，不让执行器再发起下一次 LLM 调用。
+                    // 那次调用的输出只会被丢弃，却照样计费，而且中途中止时量不到它的用量。
+                    if (detectedHandoff != null)
+                    {
+                        handoffTriggered = true;
+                        break;
+                    }
                     continue;
                 }
 
@@ -174,6 +174,8 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 yield break;
             }
 
+            // 同上：流式路径也要先标记再解析，否则同一份工具名单在流式与非流式下答案不一样
+            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, detectedHandoff);
             var targetAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(targetAgentId, context, ct);
             if (targetAgent == null)
             {
@@ -182,10 +184,8 @@ public class HandoffExecutionStrategy : IExecutionStrategy
                 yield break;
             }
 
+            SubAgentContext.Rename(context.ExecutionContextAccessor, targetAgent.Name);
             context.Logger.LogDebug("Handoff from '{Source}' to '{Target}'", currentAgent.Name, detectedHandoff);
-
-            // 同上：流式路径也要标记，否则同一条规则在流式与非流式下答案不一样
-            SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
 
             previousAgentName = currentAgent.Name;
             previousAgentId = effectiveTargets.TryGetValue(currentAgent.Name, out var currentId)
@@ -195,25 +195,39 @@ public class HandoffExecutionStrategy : IExecutionStrategy
             handoffPath.Add(detectedHandoff!);
             currentAgent = targetAgent;
 
+            // 丢弃的是转出方的工具调用 chunk，不是它的用量：那几次 LLM 调用照样计费
+            if (StreamUsage.Sum(preTextBuffer) is { } transferringUsage)
+            {
+                yield return new AgentStreamChunk { Usage = transferringUsage };
+            }
+
             // 发射 Agent 变更事件，通知前端新 Agent 开始
             yield return new AgentStreamChunk { AgentName = detectedHandoff! };
 
-            // 用原始用户消息 + handoff 上下文构建新消息列表，下一轮循环从目标 agent 流式执行
-            var userQuestion = ExecutionStrategyAgentLoader.GetLatestUserQuestion(messages);
-            currentMessages = messages.Count > 0
-                ?
-                [
-                    messages[0],
-                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-                ]
-                :
-                [
-                    new(ChatRole.System, $"[Handoff from {handoffPath[^2]}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools.")
-                ];
+            // 下一轮循环从目标 agent 流式执行，与非流式同一份消息
+            currentMessages = BuildHandoffMessages(messages, handoffPath[^2]);
         }
 
         // Max handoffs reached - yield error chunk
         yield return new AgentStreamChunk { Text = "Max handoff limit reached", FinishReason = FinishReasons.MaxHandoffs };
+    }
+
+    /// <summary>
+    /// 交给下一跳 Agent 的消息：本次运行的对话原样带过去（历史、用户画像、检索到的上下文、本轮用户输入），
+    /// 去掉转出方 Agent 的人格块，末尾附一条转接说明。流式与非流式共用。
+    /// </summary>
+    /// <remarks>
+    /// 此前取 <c>messages[0]</c> 当「原始用户消息」，而上下文注入把人格块与用户画像插在第 0 位、历史也插在前面：
+    /// 只有无人格、无画像、无历史的新线程上它才是用户消息。其余时候目标 Agent 收到的是转出方的人格
+    /// （以转出方的身份作答），或是几周前那条对话的第一句，最近的上下文一条不剩。
+    /// </remarks>
+    internal static List<ChatMessage> BuildHandoffMessages(List<ChatMessage> messages, string sourceAgentName)
+    {
+        var userQuestion = ExecutionStrategyAgentLoader.GetLatestUserQuestion(messages);
+        var handoffMessages = messages.Where(m => !ContextInjectionMiddleware.IsPersonaBlock(m)).ToList();
+        handoffMessages.Add(new ChatMessage(ChatRole.System,
+            $"[Handoff from {sourceAgentName}]: The user asked: \"{userQuestion}\". Answer this question directly using your tools."));
+        return handoffMessages;
     }
 
     /// <summary>

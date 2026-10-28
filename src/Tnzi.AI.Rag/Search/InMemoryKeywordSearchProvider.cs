@@ -52,7 +52,7 @@ public class InMemoryKeywordSearchProvider : IKeywordSearchProvider
         }
 
         var chunks = await chunksQuery
-            .Select(c => new { c.Id, c.Content, c.DocumentId, c.KnowledgeBaseId })
+            .Select(c => new { c.Id, c.Content, c.DocumentId, c.KnowledgeBaseId, c.ChunkIndex })
             .ToListAsync(ct);
 
         if (chunks.Count == 0)
@@ -119,6 +119,7 @@ public class InMemoryKeywordSearchProvider : IKeywordSearchProvider
                 Content = chunks[r.Index].Content,
                 DocumentId = chunks[r.Index].DocumentId,
                 KnowledgeBaseId = chunks[r.Index].KnowledgeBaseId,
+                ChunkIndex = chunks[r.Index].ChunkIndex,
                 Score = r.Score
             })
             .ToList();

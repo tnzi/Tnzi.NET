@@ -5,8 +5,32 @@ namespace Tnzi.Performance.Middleware;
 /// 性能分析中间件
 /// 收集请求性能指标，包括响应时间、请求/响应大小等
 /// </summary>
+/// <remarks>
+/// <para>
+/// ★ 挂载位置是 <see cref="RequestPipelineStage.AfterAuthentication"/>（认证之后、限流与授权之前），由 <see cref="PerformanceModule"/>
+/// 经 <c>AddRequestPipelineMiddleware</c> 登记。追加在授权之后的话，401 / 403 / 429 由授权与限流中间件就地写出、不再调用下游，
+/// 样本里只剩通过了的请求，故障期间的错误数与 P95 反而更好看。
+/// </para>
+/// <para>
+/// ★ 抛异常的请求同样计入样本，状态码按客户端将会收到的那个记（<see cref="ExceptionHttpStatusCode.Resolve(HttpContext, Exception)"/>：
+/// 业务异常是它自己的码，客户端断开是 499）。异常本身由外层的异常处理中间件统一记录，这里不再重复记一条 Error。
+/// </para>
+/// <para>
+/// ★ 长连接不计入：WebSocket、SignalR Hub 连接（含 SSE / 长轮询传输）与 <c>text/event-stream</c> 响应的「耗时」是连接存活时长，
+/// 计入的话慢请求列表、最大值与 P99 会被小时级的连接占满，真正慢的接口反而看不见。
+/// </para>
+/// <para>
+/// ★ 端点统计按路由模板分组（<see cref="PerformanceMetrics.Route"/>），不按原始路径：<c>/api/users/{id}</c> 不该按每个 id 拆成一行。
+/// 没有匹配端点的请求（扫描器、拼错的地址）一律归入 <see cref="UnmatchedRoute"/>，原始路径只保留在样本明细里。
+/// </para>
+/// </remarks>
 public class PerformanceMiddleware
 {
+    /// <summary>
+    /// 没有匹配到任何端点的请求共用的路由键。按原始路径分组的话，扫描器一个请求就能造出一个「端点」。
+    /// </summary>
+    public const string UnmatchedRoute = "(unmatched)";
+
     private readonly RequestDelegate _next;
     private readonly ILogger<PerformanceMiddleware> _logger;
     private readonly IPerformanceCollector _performanceCollector;
@@ -37,23 +61,13 @@ public class PerformanceMiddleware
         // 每请求读取最新配置快照（支持热更新）
         var options = _options.CurrentValue;
 
-        // 检查是否启用
-        if (!options.Enabled)
-        {
-            await _next(context);
-            return;
-        }
-
-        // 检查路径是否需要记录
-        if (!ShouldRecord(context, options))
+        if (!options.Enabled || !ShouldRecord(context, options) || context.IsLongLivedConnection())
         {
             await _next(context);
             return;
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var path = context.Request.Path.Value ?? string.Empty;
-        var method = context.Request.Method;
 
         // 记录请求大小
         long? requestSize = null;
@@ -63,71 +77,84 @@ public class PerformanceMiddleware
         }
 
         // 使用计数包装流代替 MemoryStream 缓冲，避免大响应导致 OOM
-        long? responseSize = null;
         CountingStream? countingStream = null;
-
         if (options.RecordResponseSize)
         {
             countingStream = new CountingStream(context.Response.Body);
             context.Response.Body = countingStream;
         }
 
+        Exception? failure = null;
         try
         {
             await _next(context);
-
-            // 计算响应时间
-            stopwatch.Stop();
-            var duration = stopwatch.Elapsed.TotalMilliseconds;
-
-            // 获取响应大小（直接从计数流读取，无需缓冲复制）
-            if (countingStream != null)
-            {
-                responseSize = countingStream.BytesWritten;
-                context.Response.Body = countingStream.InnerStream;
-            }
-
-            // 获取用户ID和请求ID
-            var currentUser = context.RequestServices.GetService<ICurrentUser>();
-            var userId = currentUser?.Id?.ToString();
-            var requestId = context.Items["RequestId"]?.ToString() ?? context.TraceIdentifier;
-
-            // 记录性能指标
-            var metrics = new PerformanceMetrics(
-                path,
-                method,
-                context.Response.StatusCode,
-                duration,
-                requestSize,
-                responseSize,
-                userId,
-                requestId,
-                DateTime.UtcNow);
-
-            _performanceCollector.Record(metrics);
-
-            // 如果是慢请求，记录警告日志
-            if (options.SlowRequestThresholdMs.HasValue && duration > options.SlowRequestThresholdMs)
-            {
-                _logger.LogWarning(
-                    "Slow request detected - Path: {Path}, Method: {Method}, Duration: {Duration}ms, StatusCode: {StatusCode}, RequestId: {RequestId}",
-                    path, method, duration, context.Response.StatusCode, requestId);
-            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
-                "Error in performance middleware - Path: {Path}, Method: {Method}",
-                path, method);
+            failure = ex;
             throw;
         }
         finally
         {
+            stopwatch.Stop();
+
             // 确保在异常路径下也恢复原始响应体
             if (countingStream != null)
             {
                 context.Response.Body = countingStream.InnerStream;
             }
+
+            // 长连接不进样本；事件流只有在响应写出之后才认得出来，所以写完再判一次
+            if (!context.IsLongLivedConnection())
+            {
+                TryRecord(context, options, stopwatch.Elapsed.TotalMilliseconds, requestSize, countingStream?.BytesWritten, failure);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 采样是旁路：它在 <c>finally</c> 里执行，自己出错不能顶掉下游正在上抛的异常，也不能让一个成功的请求失败。
+    /// </summary>
+    private void TryRecord(HttpContext context, PerformanceOptions options, double duration, long? requestSize, long? responseSize, Exception? failure)
+    {
+        try
+        {
+            Record(context, options, duration, requestSize, responseSize, failure);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record performance metrics for {Method} {Path}", context.Request.Method, context.GetRedactedPath());
+        }
+    }
+
+    private void Record(HttpContext context, PerformanceOptions options, double duration, long? requestSize, long? responseSize, Exception? failure)
+    {
+        // 记进指标与日志的路径：值命中敏感名单的路由参数（签署 / 分享链接的 {token}）换成掩码。
+        var path = context.GetRedactedPath();
+        var method = context.Request.Method;
+        var statusCode = failure is null ? context.Response.StatusCode : ExceptionHttpStatusCode.Resolve(context, failure);
+
+        var currentUser = context.RequestServices?.GetService<ICurrentUser>();
+        var userId = currentUser?.Id?.ToString();
+        var requestId = context.Items["RequestId"]?.ToString() ?? context.TraceIdentifier;
+
+        _performanceCollector.Record(new PerformanceMetrics(
+            path,
+            method,
+            statusCode,
+            duration,
+            requestSize,
+            responseSize,
+            userId,
+            requestId,
+            DateTime.UtcNow,
+            context.GetEndpointRouteTemplate() ?? UnmatchedRoute));
+
+        if (options.SlowRequestThresholdMs.HasValue && duration > options.SlowRequestThresholdMs)
+        {
+            _logger.LogWarning(
+                "Slow request detected - Path: {Path}, Method: {Method}, Duration: {Duration}ms, StatusCode: {StatusCode}, RequestId: {RequestId}",
+                path, method, duration, statusCode, requestId);
         }
     }
 

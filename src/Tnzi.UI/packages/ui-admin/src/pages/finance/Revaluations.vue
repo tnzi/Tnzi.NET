@@ -57,7 +57,7 @@
             </span>
             <div class="fin-reval__actions">
               <NButton size="small" @click="runDetail.close()">{{ t('run.cancel') }}</NButton>
-              <NButton size="small" type="primary" :loading="running" :disabled="running || !hasPostable" @click="execute">
+              <NButton size="small" type="primary" :loading="running" :disabled="running || !canExecute" @click="execute">
                 {{ t('run.execute') }}
               </NButton>
             </div>
@@ -120,14 +120,18 @@ const running = ref(false)
 // net is zero, offsetting per-account revaluations still post.
 const hasPostable = computed(() => (preview.value?.rows ?? []).some((r) => !r.skipReason && r.adjustment !== 0))
 
+// Execute posts exactly the checked accounts of the preview on screen. The
+// server reads a missing account list as "every eligible account", so an
+// emptied selection (someone unchecking every row to post none) must disable
+// Execute rather than be sent as "all".
+const canExecute = computed(() => hasPostable.value && selectedAccountIds.value.length > 0)
+
 // The footer total must match what Execute actually posts: the sum over the
-// CHECKED accounts (an empty selection means "all", mirroring execute's
-// `accountIds ?? null`), not the whole-preview total which would overstate a
+// CHECKED accounts, not the whole-preview total which would overstate a
 // partial selection.
 const displayedTotal = computed(() => {
   const p = preview.value
   if (!p) return 0
-  if (selectedAccountIds.value.length === 0) return p.totalAdjustment
   const set = new Set(selectedAccountIds.value)
   return p.rows.filter((r) => set.has(r.accountId)).reduce((sum, r) => sum + (r.adjustment ?? 0), 0)
 })
@@ -146,6 +150,13 @@ watch(
     selectedAccountIds.value = []
   },
 )
+
+// Execute posts as of the picker's date: a preview read for another date shows
+// amounts that run would not post, so a new date drops it until previewed again.
+watch(asOfTs, () => {
+  preview.value = null
+  selectedAccountIds.value = []
+})
 
 function onChecked(keys: Array<string | number>) {
   selectedAccountIds.value = keys.map(String)
@@ -166,13 +177,13 @@ async function doPreview() {
 }
 
 async function execute() {
-  if (running.value || !asOfTs.value) return
+  if (running.value || !asOfTs.value || !preview.value || !canExecute.value) return
   running.value = true
   try {
     const result = await bridge.revaluations.run({
       asOf: tsToIsoDate(asOfTs.value),
-      // Empty selection = revalue every eligible account; a subset restricts it.
-      accountIds: selectedAccountIds.value.length ? selectedAccountIds.value : null,
+      // Always the checked subset: an empty list would read as "every account".
+      accountIds: [...selectedAccountIds.value],
       memo: memo.value.trim() || null,
     })
     if (result.journalEntryId) message.success(t('run.success'))

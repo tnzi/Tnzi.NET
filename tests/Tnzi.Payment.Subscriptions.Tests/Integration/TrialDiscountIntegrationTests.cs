@@ -196,6 +196,70 @@ public class TrialDiscountIntegrationTests : SubscriptionsIntegrationTestBase
         retried.Message.ShouldBe(ErrorCodes.SubscriptionPaymentMethodMissing);
     }
 
+    /// <summary>
+    /// 转正扣款失败落到 PastDue 的试用，由续费扫描接着重试时仍是一次<b>转正</b>：按「现价 − 试用折扣」收、
+    /// 写下转正时间、发转正事件。此前续费扫描对它一律按续费全价扣，回流走续费分支，
+    /// 折扣丢了、<c>TrialConvertedTime</c> 永远为空，挂在转正事件上的授权逻辑也从不触发。
+    /// </summary>
+    [Fact]
+    public async Task APastDueTrialRetriedByTheRenewalScan_IsChargedAsATrialConversion()
+    {
+        var plan = await SeedPlanAsync("PRO-TD8", 30m, trialDiscount: 10m);
+        var sub = await SeedDueTrialAsync(plan, "SUB-TD8", discountAmount: 10m, paymentMethodToken: null);
+        await ConvertTrialsAsync();
+        (await ReloadAsync<Subscription>(sub.Id))!.Status.ShouldBe(SubscriptionStatus.PastDue);
+
+        // 用户在支付方式页绑了卡（不触发重试），且到了下一次自动重试的时间
+        await BindPaymentMethodAsync(sub.Id, "pm_recovered");
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
+            ctx.Set<Subscription>().First(s => s.Id == sub.Id).PastDueSince = DateTime.UtcNow.AddDays(-2);
+            await ctx.SaveChangesAsync();
+        }
+
+        await InScopeAsync<ISubscriptionService, Result<int>>(svc => svc.RenewExpiredSubscriptionsAsync());
+
+        var payment = await ReloadPaymentByOrderNoAsync("SUB-TD8");
+        payment.ShouldNotBeNull();
+        payment!.PayableAmount.ShouldBe(20m);
+        SubscriptionBillingMetadata.TryParse(payment.ExtraData)!.Purpose.ShouldBe(SubscriptionBillingPurpose.TrialConversion);
+
+        var reloaded = await ReloadAsync<Subscription>(sub.Id);
+        reloaded!.Status.ShouldBe(SubscriptionStatus.Active);
+        reloaded.TrialConvertedTime.ShouldNotBeNull();
+        reloaded.PaidAmount.ShouldBe(20m);
+    }
+
+    /// <summary>
+    /// 试用期里「到期后取消」再把自动续费打开：回到试用，到期由转正扫描按折扣价处理，
+    /// 而不是直接变成 Active、在试用截止时被续费扫描按全价扣。
+    /// </summary>
+    [Fact]
+    public async Task TurningAutoRenewBackOnDuringATrial_KeepsItATrial()
+    {
+        var plan = await SeedPlanAsync("PRO-TD9", 30m, trialDiscount: 10m);
+        var sub = await SeedDueTrialAsync(plan, "SUB-TD9", discountAmount: 10m);
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
+            var entity = ctx.Set<Subscription>().First(s => s.Id == sub.Id);
+            entity.TrialEndTime = DateTime.UtcNow.AddDays(3);
+            entity.NextBillingTime = entity.TrialEndTime;
+            await ctx.SaveChangesAsync();
+        }
+
+        (await InScopeAsync<ISubscriptionService, Result>(svc => svc.CancelSubscriptionAsync(
+            sub.Id, new CancelSubscriptionDto { Immediate = false }))).Succeeded.ShouldBeTrue();
+        (await ReloadAsync<Subscription>(sub.Id))!.Status.ShouldBe(SubscriptionStatus.PendingRenewal);
+
+        (await InScopeAsync<ISubscriptionService, Result>(svc => svc.UpdateAutoRenewAsync(sub.Id, true))).Succeeded.ShouldBeTrue();
+
+        var reloaded = await ReloadAsync<Subscription>(sub.Id);
+        reloaded!.Status.ShouldBe(SubscriptionStatus.Trial);
+        reloaded.AutoRenew.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task TrialConversion_AfterADuePlanChange_StillAppliesTheDiscount()
     {

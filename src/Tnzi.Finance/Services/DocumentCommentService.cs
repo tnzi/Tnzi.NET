@@ -88,6 +88,13 @@ public class DocumentCommentService : ApplicationService, IDocumentCommentServic
             Body = input.Body.Trim(),
         };
 
+        var tooLong = FinanceFieldLimits.FirstTooLong(
+            (comment.SourceType, FinanceFieldLimits.DocumentKeyMaxLength, "document type"),
+            (comment.SourceId, FinanceFieldLimits.DocumentKeyMaxLength, "document id"),
+            (comment.Body, FinanceFieldLimits.CommentBodyMaxLength, "comment"));
+        if (tooLong != null)
+            return Fail<DocumentCommentDto>(tooLong, 400);
+
         await _repository.InsertAsync(comment, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
 

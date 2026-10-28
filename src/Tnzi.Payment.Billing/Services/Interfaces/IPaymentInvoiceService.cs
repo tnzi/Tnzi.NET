@@ -16,9 +16,40 @@ public interface IPaymentInvoiceService
     Task<Result<PaymentInvoiceDto>> CreateManualAsync(CreatePaymentInvoiceDto request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 为一笔已成功的退款开贷项通知单，冲减这笔支付开出的那张票据（原票据不动）。按退款幂等；
+    /// 这笔支付没开过票时答 404（没有可冲减的东西）。
+    /// </summary>
+    Task<Result<PaymentInvoiceDto>> CreateCreditNoteAsync(CreateCreditNoteDto request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 发送发票
     /// </summary>
     Task<Result> SendAsync(Guid invoiceId, string? recipientEmail = null, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 首次发送（支付完成后的自动发送用）：只在发票从未发出过时发一封，已经发过（含正在发送）时什么也不做。
+    /// <c>Data</c> 表示这次是否真的发出。
+    /// </summary>
+    /// <remarks>
+    /// 默认实现先读后发，两次并发调用可能各发一封；框架实现以一条条件写认领首发名额，并发的两次至多发一封。
+    /// 自定义实现应提供同样的原子认领（分布式事件总线至少投递一次，同一事件可能被并发处理两次）。
+    /// </remarks>
+    async Task<Result<bool>> SendFirstAsync(Guid invoiceId, CancellationToken cancellationToken = default)
+    {
+        var invoice = await GetAsync(invoiceId, null, cancellationToken);
+        if (!invoice.Succeeded || invoice.Data == null)
+        {
+            return Result.Failure<bool>(invoice.Message ?? "Invoice not found.", invoice.Code ?? 404, invoice.ErrorCode, invoice.ErrorDetails);
+        }
+
+        if (invoice.Data.SendCount > 0 || invoice.Data.LastSentTime != null)
+            return Result.Success(false);
+
+        var sent = await SendAsync(invoiceId, null, null, cancellationToken);
+        return sent.Succeeded
+            ? Result.Success(true)
+            : Result.Failure<bool>(sent.Message ?? "Invoice delivery failed.", sent.Code ?? 500, sent.ErrorCode, sent.ErrorDetails);
+    }
 
     /// <summary>
     /// 生成PDF
@@ -26,7 +57,8 @@ public interface IPaymentInvoiceService
     Task<Result<string>> GeneratePdfAsync(Guid invoiceId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取PDF URL
+    /// 获取发票文件在 Storage 里的下载地址（站内相对路径，按登录会话鉴权：归属用户或持 <c>payment.invoice.view</c> 的人可读）。
+    /// 未加载 Storage 时恒为空串（本地回退没有 HTTP 可达的地址）。不是可外发的公开链接。
     /// </summary>
     Task<Result<string>> GetPdfUrlAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
@@ -41,7 +73,7 @@ public interface IPaymentInvoiceService
     Task<Result<InvoiceDocumentDto>> GetPdfContentAsync(Guid invoiceId, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 标记为已支付
+    /// 标记为已支付（已付或已作废的拒绝；备注追加进内部备注；已生成的发票文件随之作废，下次取用时重新生成）
     /// </summary>
     Task<Result> MarkAsPaidAsync(Guid invoiceId, MarkInvoicePaidDto request, CancellationToken cancellationToken = default);
 
@@ -61,7 +93,7 @@ public interface IPaymentInvoiceService
     Task<Result<IPagedList<PaymentInvoiceDto>>> GetListAsync(PaymentInvoiceQueryDto query, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取用户发票列表
+    /// 获取用户发票列表（按发票日期倒序分页；<paramref name="query"/> 为 null 时取最新 100 条）
     /// </summary>
-    Task<Result<IPagedList<PaymentInvoiceDto>>> GetUserInvoicesAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<PaymentInvoiceDto>>> GetUserInvoicesAsync(Guid userId, PagedQueryDto? query = null, CancellationToken cancellationToken = default);
 }

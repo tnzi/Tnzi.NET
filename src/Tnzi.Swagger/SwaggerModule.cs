@@ -67,13 +67,24 @@ public class SwaggerModule : TnziFrameworkModule
         var apiDescriptionProvider = context.ServiceProvider.GetRequiredService<IApiDescriptionGroupCollectionProvider>();
         var allGroups = DiscoverGroupNames(apiDescriptionProvider, defaultDoc.Name);
 
+        // 文档 JSON 由 Swashbuckle 的默认路由出（同一路由也出 YAML），与 UI 的 RoutePrefix 无关
         app.UseSwagger();
+
+        var documents = new List<(string Name, string Title)> { (defaultDoc.Name, defaultDoc.Title) };
+        documents.AddRange(allGroups.Select(groupName => (groupName, BuildGroupDocumentTitle(groupName))));
 
         if (options.UIProvider == UIProvider.Scalar && webApp != null)
         {
             webApp.MapScalarApiReference(options.RoutePrefix, o =>
             {
-                o.Title = defaultDoc.Title ?? "API Documentation";
+                o.Title = defaultDoc.Title;
+                // Scalar 默认去取 /openapi/{documentName}.json（Microsoft.AspNetCore.OpenApi 的路由），
+                // 本模块不出那个路由；相对地址由 Scalar 按站点根 + PathBase 解析，与 UI 挂在哪个前缀下无关
+                o.WithOpenApiRoutePattern(DocumentJsonRouteTemplate);
+                foreach (var (name, title) in documents)
+                {
+                    o.AddDocument(name, title, isDefault: name == defaultDoc.Name);
+                }
             });
         }
         else
@@ -83,14 +94,9 @@ public class SwaggerModule : TnziFrameworkModule
             {
                 c.RoutePrefix = options.RoutePrefix;
 
-                var defaultEndpoint = $"{defaultDoc.Name}/swagger.json";
-                c.SwaggerEndpoint(defaultEndpoint, defaultDoc.Title);
-
-                foreach (var groupName in allGroups)
+                foreach (var (name, title) in documents)
                 {
-                    var endpoint = $"{groupName}/swagger.json";
-                    var title = groupName.ToPascalCase() + " API";
-                    c.SwaggerEndpoint(endpoint, title);
+                    c.SwaggerEndpoint(BuildSwaggerUiDocumentUrl(options.RoutePrefix, name), title);
                 }
 
                 if (swaggerUIOptions.DisplayRequestDuration)
@@ -111,6 +117,33 @@ public class SwaggerModule : TnziFrameworkModule
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 文档 JSON 的路由：Swashbuckle 默认路由 <c>swagger/{documentName}/swagger.{json|yaml}</c> 的 JSON 形态
+    /// </summary>
+    internal const string DocumentJsonRouteTemplate = "swagger/{documentName}/swagger.json";
+
+    internal static string BuildGroupDocumentTitle(string groupName) => groupName.ToPascalCase() + " API";
+
+    /// <summary>
+    /// Swagger UI 页面（<c>{RoutePrefix}/index.html</c>）指向文档 JSON 的相对地址。
+    /// 相对地址才能在 PathBase 下照常工作；但它是相对 UI 页面解析的，
+    /// 而文档 JSON 的路由不随 RoutePrefix 变，所以前缀不是 <c>swagger</c> 时要先退出前缀目录
+    /// </summary>
+    internal static string BuildSwaggerUiDocumentUrl(string routePrefix, string documentName)
+    {
+        var pageDirectory = routePrefix.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var target = DocumentJsonRouteTemplate.Replace("{documentName}", documentName, StringComparison.Ordinal).Split('/');
+
+        var shared = 0;
+        while (shared < pageDirectory.Length && shared < target.Length - 1 &&
+               string.Equals(pageDirectory[shared], target[shared], StringComparison.Ordinal))
+        {
+            shared++;
+        }
+
+        return string.Concat(Enumerable.Repeat("../", pageDirectory.Length - shared)) + string.Join('/', target.Skip(shared));
     }
 
     internal static FrozenSet<string> DiscoverGroupNames(
@@ -245,7 +278,7 @@ internal sealed class ConfigureSwaggerGenOptions : IConfigureOptions<SwaggerGenO
         {
             options.SwaggerDoc(groupName, new OpenApiInfo
             {
-                Title = groupName.ToPascalCase() + " API",
+                Title = SwaggerModule.BuildGroupDocumentTitle(groupName),
                 Version = defaultDoc.Version,
                 Description = $"APIs for {groupName} group"
             });
@@ -309,15 +342,14 @@ internal sealed class ConfigureSwaggerGenOptions : IConfigureOptions<SwaggerGenO
                 Scheme = jwtAuth.SchemeName
             });
 
-            options.AddSecurityRequirement(doc =>
+            // 引用必须带上宿主文档：Microsoft.OpenApi 2.x 序列化时跳过解析不到的方案引用，
+            // 不带就输出 "security": [{}]（不需要任何凭据），Swagger UI 点了 Authorize 也不发 Authorization 头
+            options.AddSecurityRequirement(doc => new OpenApiSecurityRequirement
             {
-                return new OpenApiSecurityRequirement
                 {
-                    {
-                        new OpenApiSecuritySchemeReference(jwtAuth.SchemeName),
-                        new List<string>()
-                    }
-                };
+                    new OpenApiSecuritySchemeReference(jwtAuth.SchemeName, doc),
+                    new List<string>()
+                }
             });
         }
 

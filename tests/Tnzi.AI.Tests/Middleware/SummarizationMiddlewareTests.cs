@@ -435,6 +435,53 @@ public class SummarizationMiddlewareTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// 管线里本中间件（350）运行时 EffectiveProvider 还没人写（技能约束在 450 才写），
+    /// 窗口必须按 Agent 自己的提供商取，否则 provider 的 ContextWindowSize 永远不生效。
+    /// </summary>
+    [Fact]
+    public async Task ProviderContextWindow_NoEffectiveProvider_UsesTheAgentProvider()
+    {
+        var messages = Enumerable.Range(0, 80)
+            .Select(i => new ChatMessage(i % 2 == 0 ? ChatRole.User : ChatRole.Assistant, new string('x', 1500)))
+            .ToList();
+
+        var mockChatClient = new Mock<IChatClient>();
+        mockChatClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IList<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Agent provider window summary")));
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(x => x.GetChatClient("test", It.IsAny<string?>()))
+            .Returns(mockChatClient.Object);
+
+        var middleware = CreateMiddleware(o =>
+        {
+            o.Summarization.Enabled = true;
+            o.Summarization.Trigger.Type = SummarizationTriggerType.Fraction;
+            o.Summarization.Trigger.FractionThreshold = 0.8;
+            o.Summarization.ModelContextWindow = 128_000; // 全局默认：约 30K/128K → 不触发
+            o.Summarization.Keep.KeepLastMessages = 4;
+            o.Summarization.TrimTokensToSummarize = 1;
+            // CreateContext 的 Agent.Provider 是 "test"
+            o.Providers["test"] = new ProviderOptions { ContextWindowSize = 32_000 };
+        }, mockFactory.Object);
+
+        var context = CreateContext(messages: messages);
+        context.EffectiveProvider.ShouldBeNull();
+
+        List<ChatMessage>? capturedMessages = null;
+        await middleware.InvokeAsync(context, (ctx, ct) =>
+        {
+            capturedMessages = [.. ctx.Messages];
+            return Task.FromResult(new AgentRunResult { Response = "ok" });
+        });
+
+        capturedMessages.ShouldNotBeNull();
+        capturedMessages!.ShouldContain(m => m.Text != null && m.Text.Contains("[Conversation summary:"));
+    }
+
     [Fact]
     public async Task ProviderContextWindow_LargeGlobalDefault_NoSummarization()
     {

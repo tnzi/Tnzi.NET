@@ -20,7 +20,7 @@ public class SalaryAssignmentConfiguration : EntityTypeConfigurationBase<SalaryA
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(a => a.BaseAmount).HasMoneyPrecision();
-        builder.Property(a => a.Notes).HasMaxLength(2000);
+        builder.Property(a => a.Notes).HasMaxLength(PayrollFieldLimits.NotesMaxLength);
 
         if (multiTenancyEnabled)
         {

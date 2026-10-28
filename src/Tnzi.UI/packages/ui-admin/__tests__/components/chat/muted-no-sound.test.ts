@@ -13,6 +13,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { NewMessagePayload } from '@tnzi/core/services/chat'
+import TChatHost from '../../../src/components/chat/TChatHost.vue'
+
+// TChatHost is imported statically on purpose: the module graph behind it is
+// large, and a dynamic import inside a test paid its whole transform under that
+// test's timeout, which a machine busy with a parallel build could exceed.
+// Collection has no such timeout. The mounted host settles in a few
+// microtasks; the generous wait only absorbs a starved event loop.
+const MOUNT_SETTLE_TIMEOUT_MS = 10_000
 
 // ── Shared mutable captures ────────────────────────────────────────────────
 let capturedOnNewMessage: ((p: NewMessagePayload) => void) | undefined
@@ -108,12 +116,11 @@ describe('TChatHost - muted conversations do not play sound', () => {
   })
 
   async function mountAndWaitForInit() {
-    const TChatHost = (await import('../../../src/components/chat/TChatHost.vue')).default
     const wrapper = mount(TChatHost, {
       global: { ...globalConfig, plugins: [createPinia()] },
     })
     // Wait for onMounted (fetchConversations + realtime.start)
-    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled())
+    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled(), { timeout: MOUNT_SETTLE_TIMEOUT_MS })
     return wrapper
   }
 

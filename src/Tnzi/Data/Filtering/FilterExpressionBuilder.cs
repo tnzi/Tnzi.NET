@@ -1,3 +1,5 @@
+// 名字冲突消歧：System.ComponentModel.DataAnnotations 也有一个 ValidationException
+using ValidationException = Tnzi.Exceptions.ValidationException;
 
 namespace Tnzi.Data.Filtering;
 
@@ -36,7 +38,8 @@ public static class FilterExpressionBuilder
     }
 
     /// <summary>
-    /// 从 FilterGroup 构建表达式，字段先经 <paramref name="policy"/> 准入；不允许的字段抛 <see cref="FilterFieldException"/>（400）
+    /// 从 FilterGroup 构建表达式，字段先经 <paramref name="policy"/> 准入；不允许的字段抛 <see cref="FilterFieldException"/>（400），
+    /// 规则总数或分组层数超出策略上限抛 <see cref="ValidationException"/>（400）
     /// </summary>
     public static Expression<Func<T, bool>> Build<T>(FilterGroup? group, FilterFieldPolicy policy)
     {
@@ -49,13 +52,18 @@ public static class FilterExpressionBuilder
             return Expression.Lambda<Func<T, bool>>(Expression.Constant(true), param);
         }
 
+        var shapeViolation = FindShapeViolation(group, policy);
+        if (shapeViolation != null)
+            throw new ValidationException(shapeViolation);
+
         EnsureFieldsAllowed(typeof(T), group, policy);
         var body = BuildGroupExpression(param, group);
         return Expression.Lambda<Func<T, bool>>(body, param);
     }
 
     /// <summary>
-    /// 校验 <paramref name="group"/> 里每条规则（含嵌套分组）的字段是否被 <paramref name="policy"/> 允许；
+    /// 校验 <paramref name="group"/> 里每条规则（含嵌套分组）的字段是否被 <paramref name="policy"/> 允许，
+    /// 以及规则总数与分组层数是否在策略上限内；
     /// 失败时 <paramref name="error"/> 是可直接回给调用方的消息（不含实体类型名）
     /// </summary>
     public static bool TryValidateFields<T>(FilterGroup? group, FilterFieldPolicy policy, out string? error)
@@ -64,6 +72,10 @@ public static class FilterExpressionBuilder
         error = null;
         if (group == null || !group.HasFilters)
             return true;
+
+        error = FindShapeViolation(group, policy);
+        if (error != null)
+            return false;
 
         var rejected = FindRejectedField(typeof(T), group, policy);
         if (rejected == null)
@@ -96,6 +108,34 @@ public static class FilterExpressionBuilder
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 规则总数（含全部嵌套分组）与分组层数是否在 <paramref name="policy"/> 的上限内；超出时返回可直接回给调用方的消息
+    /// </summary>
+    private static string? FindShapeViolation(FilterGroup group, FilterFieldPolicy policy)
+    {
+        var ruleCount = 0;
+        return Visit(group, 1);
+
+        string? Visit(FilterGroup current, int depth)
+        {
+            if (depth > policy.MaxGroupDepth)
+                return $"Filter groups are nested too deeply; at most {policy.MaxGroupDepth} levels are allowed.";
+
+            ruleCount += current.Rules.Count;
+            if (ruleCount > policy.MaxRules)
+                return $"Filter has too many rules; at most {policy.MaxRules} are allowed.";
+
+            foreach (var subGroup in current.Groups)
+            {
+                var violation = Visit(subGroup, depth + 1);
+                if (violation != null)
+                    return violation;
+            }
+
+            return null;
+        }
     }
 
     private static void EnsureFieldsAllowed(Type rootType, FilterGroup group, FilterFieldPolicy policy)
@@ -140,38 +180,19 @@ public static class FilterExpressionBuilder
 
     /// <summary>
     /// Build a filter expression from a DTO instance decorated with [FilterProperty] attributes.
-    /// Null or default-valued properties are automatically skipped.
+    /// Properties that are not set are skipped: null, blank strings, and the default value of a
+    /// non-nullable value type. On a nullable property only null means "not set", so an explicit
+    /// <c>false</c> / <c>0</c> / zero-valued enum is a criterion.
     /// </summary>
     public static Expression<Func<TEntity, bool>> BuildFromDto<TEntity, TDto>(TDto dto, LogicalOperator logic = LogicalOperator.And)
         where TDto : class
     {
-        Check.NotNull(dto);
-
-        var metadata = GetFilterPropertyMetadata(typeof(TDto));
-        if (metadata.Length == 0)
-        {
-            var param = Expression.Parameter(typeof(TEntity), "e");
-            return Expression.Lambda<Func<TEntity, bool>>(Expression.Constant(true), param);
-        }
-
-        var group = new FilterGroup { Logic = logic };
-
-        foreach (var meta in metadata)
-        {
-            var value = meta.PropertyInfo.GetValue(dto);
-            if (value == null) continue;
-            if (IsDefaultValue(value, meta.PropertyInfo.PropertyType)) continue;
-            if (value is string str && string.IsNullOrWhiteSpace(str)) continue;
-
-            var entityField = meta.EntityProperty ?? meta.PropertyInfo.Name;
-            group.AddRule(entityField, meta.Operator, value);
-        }
-
-        return Build<TEntity>(group);
+        return Build<TEntity>(BuildGroupFromDto(dto, logic));
     }
 
     /// <summary>
-    /// Build a FilterGroup from a DTO instance decorated with [FilterProperty] attributes.
+    /// Build a FilterGroup from a DTO instance decorated with [FilterProperty] attributes, skipping
+    /// unset properties as <see cref="BuildFromDto{TEntity, TDto}"/> does.
     /// Useful when you need to further customize the filter before building the expression.
     /// </summary>
     public static FilterGroup BuildGroupFromDto<TDto>(TDto dto, LogicalOperator logic = LogicalOperator.And)
@@ -185,9 +206,7 @@ public static class FilterExpressionBuilder
         foreach (var meta in metadata)
         {
             var value = meta.PropertyInfo.GetValue(dto);
-            if (value == null) continue;
-            if (IsDefaultValue(value, meta.PropertyInfo.PropertyType)) continue;
-            if (value is string str && string.IsNullOrWhiteSpace(str)) continue;
+            if (IsUnset(value, meta.PropertyInfo.PropertyType)) continue;
 
             var entityField = meta.EntityProperty ?? meta.PropertyInfo.Name;
             group.AddRule(entityField, meta.Operator, value);
@@ -208,26 +227,33 @@ public static class FilterExpressionBuilder
                 var attr = prop.GetCustomAttribute<FilterPropertyAttribute>();
                 if (attr == null) continue;
 
-                result.Add(new FilterPropertyMetadata(prop, attr.EntityProperty, attr.Operator, attr.Logic));
+                result.Add(new FilterPropertyMetadata(prop, attr.EntityProperty, attr.Operator));
             }
 
             return result.ToArray();
         });
     }
 
-    private static bool IsDefaultValue(object value, Type propertyType)
+    /// <summary>
+    /// 属性没有给值：null、空白字符串、非可空值类型的默认值。可空类型只有 null 算没给值：
+    /// 否则 <c>bool? IsEnabled = false</c> 这样的条件会被丢掉、查回全部行。
+    /// </summary>
+    private static bool IsUnset(object? value, Type propertyType)
     {
-        var underlyingType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
-        if (!underlyingType.IsValueType) return false;
-        var defaultValue = Activator.CreateInstance(underlyingType);
-        return value.Equals(defaultValue);
+        if (value == null)
+            return true;
+        if (value is string str)
+            return string.IsNullOrWhiteSpace(str);
+        if (!propertyType.IsValueType || Nullable.GetUnderlyingType(propertyType) != null)
+            return false;
+
+        return value.Equals(Activator.CreateInstance(propertyType));
     }
 
     private sealed record FilterPropertyMetadata(
         PropertyInfo PropertyInfo,
         string? EntityProperty,
-        FilterOperator Operator,
-        LogicalOperator Logic);
+        FilterOperator Operator);
 
     /// <summary>
     /// 验证 FilterGroup 是否能正常转换为表达式
@@ -274,8 +300,29 @@ public static class FilterExpressionBuilder
 
         // 根据逻辑运算符合并表达式
         return group.Logic == LogicalOperator.And
-            ? expressions.Aggregate(Expression.AndAlso)
-            : expressions.Aggregate(Expression.OrElse);
+            ? CombineBalanced(expressions, Expression.AndAlso)
+            : CombineBalanced(expressions, Expression.OrElse);
+    }
+
+    /// <summary>
+    /// 按原顺序两两合并成平衡二叉树：深度是 log2(n) 而不是 n。左深链让一组 n 条规则变成 n 层深的表达式，
+    /// EF 的翻译与 SQL 生成按深度递归。AndAlso / OrElse 满足结合律，从左到右的短路顺序不变。
+    /// </summary>
+    private static Expression CombineBalanced(IReadOnlyList<Expression> expressions, Func<Expression, Expression, Expression> combine)
+    {
+        var level = expressions;
+        while (level.Count > 1)
+        {
+            var next = new List<Expression>((level.Count + 1) / 2);
+            for (var i = 0; i < level.Count; i += 2)
+            {
+                next.Add(i + 1 < level.Count ? combine(level[i], level[i + 1]) : level[i]);
+            }
+
+            level = next;
+        }
+
+        return level[0];
     }
 
     private static Expression BuildRuleExpression(ParameterExpression param, FilterRule rule)
@@ -357,9 +404,15 @@ public static class FilterExpressionBuilder
 
     private static object? ConvertValue(object? value, Type targetType)
     {
+        // 处理 System.Text.Json 反序列化产生的 JsonElement 类型（JSON 的 null 在这里变成 null，随后同一道检查）
+        if (value is JsonElement jsonElement)
+        {
+            value = ConvertJsonElement(jsonElement, targetType);
+        }
+
         if (value == null)
         {
-            // 对于值类型，null 无法赋值，抛异常
+            // 对于值类型，null 无法赋值，抛异常（In 的数组元素同样适用：否则 null 会被数组静默写成 0）
             if (targetType.IsValueType && Nullable.GetUnderlyingType(targetType) == null)
             {
                 throw new InvalidOperationException(
@@ -368,22 +421,18 @@ public static class FilterExpressionBuilder
             return null;
         }
 
-        // 处理 System.Text.Json 反序列化产生的 JsonElement 类型
-        if (value is JsonElement jsonElement)
+        var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        // 日期一律按 UTC 解释，且在「类型已匹配」的捷径之前处理：调用方直接给的 DateTime 也可能是 Local / Unspecified
+        if (underlyingType == typeof(DateTime))
         {
-            value = ConvertJsonElement(jsonElement, targetType);
-            if (value == null)
-            {
-                return null;
-            }
-            // 如果转换后类型已匹配，直接返回
-            if (value.GetType() == (Nullable.GetUnderlyingType(targetType) ?? targetType))
-            {
-                return value;
-            }
+            return ToUtcDateTime(value);
         }
 
-        var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (underlyingType == typeof(DateTimeOffset))
+        {
+            return ToUtcDateTimeOffset(value);
+        }
 
         if (value.GetType() == underlyingType)
         {
@@ -409,18 +458,6 @@ public static class FilterExpressionBuilder
             return Guid.Parse(guidStr);
         }
 
-        // 特殊处理 DateTime
-        if (underlyingType == typeof(DateTime) && value is string dateStr)
-        {
-            return DateTime.Parse(dateStr);
-        }
-
-        // 特殊处理 DateTimeOffset
-        if (underlyingType == typeof(DateTimeOffset) && value is string offsetStr)
-        {
-            return DateTimeOffset.Parse(offsetStr);
-        }
-
         // 特殊处理 TimeSpan
         if (underlyingType == typeof(TimeSpan) && value is string timeStr)
         {
@@ -430,30 +467,81 @@ public static class FilterExpressionBuilder
         return Convert.ChangeType(value, underlyingType);
     }
 
+    /// <summary>
+    /// 日期过滤值按 UTC 解释：带偏移的字符串换算到 UTC，不带偏移的视为 UTC；
+    /// 调用方给的 <c>Local</c> 换算到 UTC、<c>Unspecified</c> 标为 UTC。
+    /// </summary>
+    /// <remarks>
+    /// 框架按 UTC 存时间。<c>DateTime.Parse</c> 不带样式时，<c>"...Z"</c> 得到换算成本机时区的 <c>Local</c>、
+    /// 无偏移的得到 <c>Unspecified</c>：PostgreSQL 的 timestamptz 直接拒收这两种（查询执行期 500），
+    /// 其它库在非 UTC 主机上则把条件整体平移一个时区偏移、安静地返回错的行。
+    /// </remarks>
+    private static DateTime ToUtcDateTime(object value) => value switch
+    {
+        DateTime dateTime => NormalizeToUtc(dateTime),
+        DateTimeOffset offset => offset.UtcDateTime,
+        string text => ParseUtcDateTime(text),
+        _ => NormalizeToUtc((DateTime)Convert.ChangeType(value, typeof(DateTime), CultureInfo.InvariantCulture))
+    };
+
+    private static DateTimeOffset ToUtcDateTimeOffset(object value) => value switch
+    {
+        // Npgsql 写 timestamptz 只接受偏移为 0 的 DateTimeOffset；换成 UTC 不改变它表示的时刻
+        DateTimeOffset offset => offset.ToUniversalTime(),
+        DateTime dateTime => new DateTimeOffset(NormalizeToUtc(dateTime)),
+        string text => ParseUtcDateTimeOffset(text),
+        _ => ((DateTimeOffset)Convert.ChangeType(value, typeof(DateTimeOffset), CultureInfo.InvariantCulture)).ToUniversalTime()
+    };
+
+    private static DateTime NormalizeToUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+    };
+
+    private static DateTime ParseUtcDateTime(string value)
+        => DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+    private static DateTimeOffset ParseUtcDateTimeOffset(string value)
+        => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+
     private static Expression BuildArrayConstant(object? value, Type elementType)
     {
-        Check.NotNull(value);
-
-        var enumerable = value as System.Collections.IEnumerable;
-        if (enumerable == null)
-        {
-            throw new InvalidOperationException("Value for In/NotIn operator must be a collection.");
-        }
-
-        var list = new List<object?>();
-        foreach (var item in enumerable)
-        {
-            list.Add(ConvertValue(item, elementType));
-        }
+        var items = ReadCollectionValue(value);
 
         var arrayType = elementType.MakeArrayType();
-        var array = Array.CreateInstance(elementType, list.Count);
-        for (var i = 0; i < list.Count; i++)
+        var array = Array.CreateInstance(elementType, items.Count);
+        for (var i = 0; i < items.Count; i++)
         {
-            array.SetValue(list[i], i);
+            array.SetValue(ConvertValue(items[i], elementType), i);
         }
 
         return Expression.Constant(array, arrayType);
+    }
+
+    /// <summary>
+    /// 取出 In / NotIn 的候选值。
+    /// </summary>
+    /// <remarks>
+    /// ★ 从 JSON 来的值（行级数据授权落库的规则、<c>[FromBody] PagedQuery</c>、<c>ApplyFilterFromJson</c>）是
+    /// <see cref="JsonElement"/>：它是结构体、不实现 <see cref="System.Collections.IEnumerable"/>，
+    /// 只按 <c>IEnumerable</c> 判断时这三条入口上的 In / NotIn 一律被判「不是集合」而 400。
+    /// 字符串本身是 <c>IEnumerable&lt;char&gt;</c>，不排除的话 <c>In "abc"</c> 会按单个字符去匹配。
+    /// </remarks>
+    private static List<object?> ReadCollectionValue(object? value)
+    {
+        if (value is JsonElement { ValueKind: JsonValueKind.Array } jsonArray)
+        {
+            return jsonArray.EnumerateArray().Select(item => (object?)item).ToList();
+        }
+
+        if (value is System.Collections.IEnumerable enumerable and not string)
+        {
+            return enumerable.Cast<object?>().ToList();
+        }
+
+        throw new InvalidOperationException("Value for In/NotIn operator must be a collection.");
     }
 
     // 字符串方法表达式构建
@@ -518,7 +606,8 @@ public static class FilterExpressionBuilder
             JsonValueKind.False => false,
             JsonValueKind.String => ConvertJsonString(element.GetString()!, underlyingType),
             JsonValueKind.Number => ConvertJsonNumber(element, underlyingType),
-            JsonValueKind.Array => ConvertJsonArray(element, underlyingType),
+            // 数组只对 In / NotIn 有意义，它们在 ReadCollectionValue 里逐个元素转换，走不到这里
+            JsonValueKind.Array => throw new InvalidOperationException("An array value is only valid for the In and NotIn operators."),
             _ => element.GetRawText()
         };
     }
@@ -527,8 +616,8 @@ public static class FilterExpressionBuilder
     {
         if (targetType == typeof(string)) return value;
         if (targetType == typeof(Guid)) return Guid.Parse(value);
-        if (targetType == typeof(DateTime)) return DateTime.Parse(value);
-        if (targetType == typeof(DateTimeOffset)) return DateTimeOffset.Parse(value);
+        if (targetType == typeof(DateTime)) return ParseUtcDateTime(value);
+        if (targetType == typeof(DateTimeOffset)) return ParseUtcDateTimeOffset(value);
         if (targetType == typeof(TimeSpan)) return TimeSpan.Parse(value);
         if (targetType.IsEnum) return Enum.Parse(targetType, value, ignoreCase: true);
         return value;
@@ -545,23 +634,5 @@ public static class FilterExpressionBuilder
         if (targetType == typeof(byte) || targetType == typeof(byte?)) return element.GetByte();
         if (targetType.IsEnum) return Enum.ToObject(targetType, element.GetInt32());
         return element.GetDouble();
-    }
-
-    private static object ConvertJsonArray(JsonElement element, Type targetType)
-    {
-        var list = new List<object?>();
-        foreach (var item in element.EnumerateArray())
-        {
-            list.Add(item.ValueKind switch
-            {
-                JsonValueKind.String => item.GetString(),
-                JsonValueKind.Number => item.GetDouble(),
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                JsonValueKind.Null => null,
-                _ => item.GetRawText()
-            });
-        }
-        return list.ToArray();
     }
 }

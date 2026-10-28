@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NInput, NButton, NSpace } from 'naive-ui'
+import { isImeComposing } from '@tnzi/core/utils'
 
 interface Props {
   modelValue?: string
@@ -45,7 +46,9 @@ function handleReset(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Enter') {
+  // The Enter that commits an IME candidate finishes typing the keyword; the
+  // model still holds the text from before the composition at that point.
+  if (event.key === 'Enter' && !isImeComposing(event)) {
     handleSearch()
   }
 }

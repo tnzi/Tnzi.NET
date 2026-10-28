@@ -83,14 +83,14 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
                 LayoutName = effectiveLayoutName
             });
         }
-        catch (TemplateException)
+        catch (TemplateSecurityException)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogError(ex, "Failed to render template '{TemplateName}' in module '{Module}'", template.TemplateName, template.Module);
-            return Fail<RenderedTemplate>($"Failed to render template '{template.TemplateName}': {ex.Message}", 500, ErrorCodes.TEMPLATE_RENDER_ERROR);
+            return RenderFailure($"Failed to render template '{template.TemplateName}': {ex.Message}", ex);
         }
     }
 
@@ -133,16 +133,30 @@ public class TemplateRenderService : ApplicationService, ITemplateRenderService
                 Content = content
             });
         }
-        catch (TemplateException)
+        catch (TemplateSecurityException)
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogError(ex, "Failed to render template from string");
-            return Fail<RenderedTemplate>($"Failed to render template: {ex.Message}", 500, ErrorCodes.TEMPLATE_RENDER_ERROR);
+            return RenderFailure($"Failed to render template: {ex.Message}", ex);
         }
     }
+
+    /// <summary>
+    /// 把一次渲染失败落成失败的 <see cref="Result{T}"/>，错误码沿用引擎给的（编译失败 / 渲染失败）。
+    /// </summary>
+    /// <remarks>
+    /// 引擎把每一种失败都包成 <see cref="TemplateException"/> 的子类。此前这里对它原样重抛，返回 Result 的约定于是只覆盖
+    /// 「模板不存在」：调用方按约定写的退路（通知回落到原始主题与正文、发票回落到内置 HTML）只在模板缺失时生效，
+    /// 模板里一处空引用就让整个调用以异常结束。两类异常仍然抛出：<see cref="TemplateSecurityException"/>（越界路径，
+    /// 是调用方或配置的问题而不是模板内容的问题），以及调用方已取消的那一次（引擎把取消也包成了渲染异常，故按令牌判）。
+    /// </remarks>
+    private Result<RenderedTemplate> RenderFailure(string message, Exception ex)
+        => ex is TemplateException templateException
+            ? Fail<RenderedTemplate>(message, templateException.HttpStatusCode, templateException.Code)
+            : Fail<RenderedTemplate>(message, 500, ErrorCodes.TEMPLATE_RENDER_ERROR);
 
     /// <summary>
     /// 调用方没说出口时，按模板类型推导正文的输出类型：短信是纯文本，其余（邮件正文、页面、打印件、PDF、未指定）都是 HTML。

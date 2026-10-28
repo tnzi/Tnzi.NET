@@ -57,6 +57,14 @@ const props = withDefaults(
     brandName?: string;
     /** Iconify name rendered left of the wordmark. */
     brandIcon?: string;
+    /**
+     * The brand name as a drawn logotype (an iconify name), shown in place of
+     * the `brandName` text: 1em of the name's font size high, as wide as its
+     * aspect ratio makes it, centred in the line the text occupied (which
+     * keeps its height), `currentColor` following the theme. `brandName`
+     * stays what a screen reader hears.
+     */
+    brandWordmark?: string;
     /** Overrides the default "Sign in or sign up" heading. */
     heading?: string;
     /** Secondary line under the heading. */
@@ -96,6 +104,7 @@ const props = withDefaults(
   {
     brandName: '',
     brandIcon: '',
+    brandWordmark: '',
     heading: '',
     subheading: '',
     features: undefined,
@@ -141,6 +150,8 @@ const {
   notice,
   busy,
   canContinue,
+  offersCodeSignIn,
+  offersSignUp,
   challenge,
   twoFactorMethod,
   otherTwoFactorMethods,
@@ -248,10 +259,14 @@ const subheadingText = computed(() => props.subheading || '');
 <template>
   <main class="t-auth">
     <div class="t-auth__column">
-      <header v-if="brandName || brandIcon" class="t-auth__brand">
+      <header v-if="brandName || brandIcon || brandWordmark" class="t-auth__brand">
         <slot name="brand">
           <Icon v-if="brandIcon" class="t-auth__brand-mark" :icon="brandIcon" />
-          <span v-if="brandName" class="t-auth__brand-name">{{ brandName }}</span>
+          <span v-if="brandWordmark" class="t-auth__brand-name t-auth__brand-wordmark">
+            <Icon :icon="brandWordmark" class="t-auth__brand-wordmark-glyph" />
+            <span v-if="brandName" class="sr-only">{{ brandName }}</span>
+          </span>
+          <span v-else-if="brandName" class="t-auth__brand-name">{{ brandName }}</span>
         </slot>
       </header>
 
@@ -336,7 +351,7 @@ const subheadingText = computed(() => props.subheading || '');
         </button>
         <div class="t-auth__links">
           <button
-            v-if="features.codeLogin"
+            v-if="offersCodeSignIn"
             type="button"
             class="t-auth__link"
             :disabled="busy"
@@ -345,7 +360,7 @@ const subheadingText = computed(() => props.subheading || '');
             {{ t('auth.useCode', 'Use a verification code') }}
           </button>
           <button
-            v-if="features.register"
+            v-if="offersSignUp"
             type="button"
             class="t-auth__link"
             :disabled="busy"
@@ -522,6 +537,20 @@ const subheadingText = computed(() => props.subheading || '');
   letter-spacing: 0.02em;
 }
 
+/* Keeps the line the name's text occupied (`1lh`), so the heading below does
+   not move, and centres the wordmark in it: 1em high (the name's 15px), as
+   wide as its viewBox. */
+.t-auth__brand-wordmark {
+  display: flex;
+  align-items: center;
+  min-height: 1lh;
+}
+
+.t-auth__brand-wordmark-glyph {
+  display: block;
+  max-width: 100%;
+}
+
 .t-auth__heading {
   margin: 0;
   font-size: 24px;
@@ -646,7 +675,7 @@ const subheadingText = computed(() => props.subheading || '');
   padding: 0;
   font-size: 13px;
   font-family: inherit;
-  color: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-accent-text);
   cursor: pointer;
 }
 

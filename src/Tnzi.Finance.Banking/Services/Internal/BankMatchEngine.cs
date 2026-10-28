@@ -102,17 +102,7 @@ public class BankMatchEngine
     }
 
     /// <summary>
-    /// 对单条流水计算建议匹配（无命中返回 null）。
-    /// </summary>
-    public virtual async Task<BankMatchSuggestion?> SuggestAsync(BankTransaction txn, CancellationToken cancellationToken)
-    {
-        Check.NotNull(txn);
-        var candidates = await GetCandidatesAsync(txn.AccountId, txn.Amount, cancellationToken);
-        return Suggest(txn, candidates);
-    }
-
-    /// <summary>
-    /// 在已取回的候选集上计算建议匹配（纯函数，供批量路径复用）。
+    /// 在已取回的候选集上计算建议匹配（纯函数；候选按金额批量取回，避免逐条流水一次查询）。
     /// </summary>
     public BankMatchSuggestion? Suggest(BankTransaction txn, IReadOnlyList<BankMatchCandidate> candidates)
     {

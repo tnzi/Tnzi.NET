@@ -41,6 +41,32 @@
     <!-- 暂不开启 TreatWarningsAsErrors，待存量警告清零后再逐步收紧（见 .editorconfig 中按规则提级为 error 的少数高价值项） -->
   </PropertyGroup>
 
+  <!--
+    SixLabors.ImageSharp 3.1.12 的五条已披露漏洞（2026-10）。修复版带构建期授权校验，与
+    src/Tnzi.Imaging/Tnzi.Imaging.csproj 里写明的免授权约束冲突，所以不升级，改为逐条说明它在本仓
+    为什么不可达或已被缓解。只压这五条，不整体关 NU1902/NU1903：以后新披露的任何一条照常报出来。
+
+    这些理由由 tests/Tnzi.Imaging.Tests/ImageSharpAdvisoryGateTests 执行：src/ 里一旦出现让某条变得可达的调用，
+    那里就变红。取得 Six Labors 商业授权、升到修复版之后，连同这一组一起删掉。
+
+    只作用于本仓自己的构建。消费方经 NuGet 拿到 Tnzi.Imaging 时会在自己的构建里看到这五条，
+    要不要压由他们按自己的调用面决定（理由同样适用，前提是他们也不绕开这里的解码入口）。
+  -->
+  <ItemGroup>
+    <!-- BigTIFF IFD 条目数让解码器空转：可达（缩略图、图像编辑、QR 读取都按内容嗅探格式），已缓解。
+         ImageDecodeGuard 与 QrCodeReader 在把字节交给 ImageSharp 之前按文件头拒绝 BigTIFF。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
+    <!-- HistogramEqualization 处理器：src/ 里零调用。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" />
+    <!-- TIFF CCITT T4（Group 3）编码器越界写：src/ 从不编码 TIFF，输出只有 JPEG / PNG / WebP。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j9gm-c75j-xc9q" />
+    <!-- TIFF CCITT T6（Group 4）编码器越界写：同上。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-jjfr-hcj7-qf5w" />
+    <!-- ICC CLUT 按未校验的维度预分配：3.1 线只在读取 IccProfile.Entries 时解析，src/ 里零读取；
+         解码与重新编码都只搬运原始字节，不触发那次解析。 -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" />
+  </ItemGroup>
+
   <!-- Frontend project file visibility rules (Solution Explorer) -->
   <ItemGroup Condition="'$(ProjectType)' == 'Frontend'">
     <Content Include="**\*"

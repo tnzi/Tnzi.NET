@@ -65,8 +65,35 @@ public class CaptchaVerifierOptionsValidatorTests
     [Fact]
     public void VerifyUrl_MustBeAbsolute()
     {
-        Assert.Contains(Validate(new CaptchaVerifierOptions { VerifyUrl = "/relative" }).Failures!,
-            f => f.Contains("VerifyUrl", StringComparison.Ordinal));
+        var result = Validate(new CaptchaVerifierOptions { VerifyUrl = "/relative" });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, f => f.Contains("VerifyUrl", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// 绝对但不是 http(s) 的地址同样拒掉。Linux 上 <c>/relative</c> 本身就会被解析成 <c>file:///relative</c>，
+    /// 这里显式列出这种形态，让只查 <see cref="UriKind.Absolute"/> 的回归在任何系统上都变红。
+    /// </summary>
+    [Theory]
+    [InlineData("file:///relative")]
+    [InlineData("ftp://example.com/siteverify")]
+    public void VerifyUrl_MustUseHttpOrHttps(string verifyUrl)
+    {
+        var result = Validate(new CaptchaVerifierOptions { VerifyUrl = verifyUrl });
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, f => f.Contains("VerifyUrl", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("https://recaptcha.net/recaptcha/api/siteverify")]
+    [InlineData("http://captcha.internal:8080/siteverify")]
+    public void VerifyUrl_AbsoluteHttpOrHttps_IsAccepted(string verifyUrl)
+    {
+        var result = Validate(new CaptchaVerifierOptions { VerifyUrl = verifyUrl });
+
+        Assert.DoesNotContain(result.Failures ?? [], f => f.Contains("VerifyUrl", StringComparison.Ordinal));
     }
 
     [Theory]

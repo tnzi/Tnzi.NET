@@ -117,7 +117,9 @@ public interface ICheckService
     /// <item><see cref="ReprintAsync"/> = 纸<b>出来了但作废了</b>(打坏/串行/丢失),原票转 Void
     /// 并分配新号,形成 <c>ReplacedByCheckId</c> 重打链。</item>
     /// </list>
-    /// 内容取自登记簿快照（号/收款人/金额/币种/签发日）,摘要取自关联付款单,故与首次打印逐字一致。
+    /// 号/收款人/金额/币种/签发日取自登记簿快照，收款人地址、付款单号、摘要与存根附加行取自关联付款单与收款人档案，
+    /// 经与首次打印同一个票面构建器，故与首次打印一致。唯一的例外是参考号：首次打印后付款单参考号被回写成支票号，
+    /// 首打存根上的原值已不在库里，这时重出的存根不印参考号（它只是重复票号）。收款人地址取当前档案。
     /// <para>
     /// <b>内控说明</b>:本方法可被重复调用,理论上可产生多张同号纸质支票。这是刻意的——框架无从
     /// 得知浏览器/打印机那一侧到底出没出纸,写一个 <c>PrintedTime</c> 无论写不写都是在撒谎。
@@ -131,10 +133,14 @@ public interface ICheckService
     Task<Result<CheckFileDto>> GetCalibrationPdfAsync(Guid bankAccountId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 导出 positive-pay 已开票文件（CSV）：某银行账户在 [from, to]（按签发日）内的全部支票
-    /// （支票号 / 金额 / 签发日 / 收款人 / 签发或作废标志），供上送银行的支票防伪核对服务。
-    /// 未在此清单中的支票（伪造/篡改）与已作废的支票被银行拒付。
+    /// 导出 positive-pay 已开票文件（CSV）：某银行账户在 [from, to] 内签发的全部支票，加上在此期间
+    /// 作废 / 毁票的支票（保留原签发日）（支票号 / 金额 / 签发日 / 收款人 / 签发或作废标志），
+    /// 供上送银行的支票防伪核对服务。未在此清单中的支票（伪造/篡改）与已作废的支票被银行拒付。
     /// </summary>
+    /// <remarks>
+    /// 作废不改签发日，所以「期间内作废」必须单独圈进来：否则一张早先已上送为 Issued 的票在本期挂失重打，
+    /// 本期清单只有替换票，银行仍会兑现原票。
+    /// </remarks>
     Task<Result<string>> ExportPositivePayAsync(Guid bankAccountId, DateTime from, DateTime to, CancellationToken cancellationToken = default);
 
     /// <summary>作废某付款单关联的全部 Issued 票（付款作废事件联动）</summary>

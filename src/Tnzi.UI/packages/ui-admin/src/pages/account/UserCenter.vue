@@ -2,7 +2,7 @@
   <!--
     UserCenter - self-service personal center.
 
-    Section-registry-driven shell (the same shape as the Settings Center): six
+    Section-registry-driven shell (the same shape as the Settings Center): seven
     built-in sections live in a registry and are merged with the consumer's
     `defineAdminApp({ userCenter })` config (hide / regroup / override / append
     custom sections). A slim header (avatar + name + roles + refresh) sits over
@@ -78,6 +78,7 @@ import { DETAIL_ACTIVE_SECTION_ICON } from '../../components/detail/active-secti
 import { resolveUserCenterSections, type UserCenterBuiltInDef } from './resolve-sections'
 import ProfileSection from './sections/ProfileSection.vue'
 import SecuritySection from './sections/SecuritySection.vue'
+import NotificationsSection from './sections/NotificationsSection.vue'
 import SessionsSection from './sections/SessionsSection.vue'
 import HistorySection from './sections/HistorySection.vue'
 import LinkedSection from './sections/LinkedSection.vue'
@@ -123,10 +124,13 @@ provideUserCenterContext(ctx)
 
 // ── Built-in section registry ──────────────────────────────────────────────
 // Sections are grouped into three buckets in the left menu: Account
-// (profile/security), Activity (sessions/history), Advanced (linked/danger).
+// (profile/security/notifications), Activity (sessions/history), Advanced
+// (linked/danger). Notifications is bound to the Notification module and
+// disappears on a backend that never loaded it.
 const BUILTINS: UserCenterBuiltInDef[] = [
   { key: 'profile', component: ProfileSection, group: 'account', order: 10, icon: 'mdi:account-outline', labelKey: 'nav.profile' },
   { key: 'security', component: SecuritySection, group: 'account', order: 20, icon: 'mdi:shield-lock-outline', labelKey: 'nav.security' },
+  { key: 'notifications', component: NotificationsSection, group: 'account', order: 25, icon: 'mdi:bell-outline', labelKey: 'nav.notifications', module: 'notification' },
   { key: 'sessions', component: SessionsSection, group: 'activity', order: 30, icon: 'mdi:devices', labelKey: 'nav.sessions' },
   { key: 'history', component: HistorySection, group: 'activity', order: 40, icon: 'mdi:history', labelKey: 'nav.history' },
   { key: 'linked', component: LinkedSection, group: 'advanced', order: 50, icon: 'mdi:link-variant', labelKey: 'nav.linked' },

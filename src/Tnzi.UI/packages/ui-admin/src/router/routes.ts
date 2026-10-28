@@ -1,5 +1,6 @@
 import type { RouteRecordRaw } from 'vue-router'
 import AdminShellRoot from './AdminShellRoot.vue'
+import { LOGIN_MODULES } from './login-modules'
 
 /**
  * Default admin routes - Phase 3.38: all 28 module pages registered.
@@ -36,11 +37,13 @@ const ExceptionView = () => import('../pages/exception/ExceptionView.vue')
 
 export const defaultAdminRoutes: RouteRecordRaw[] = [
   {
-    // Soybean parity: `/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?`.
-    // The module param defaults to `pwd-login` inside the page component; the
-    // regex constraint rejects unknown values and routes them to a 404. Order
-    // matters - the path-param route must come before the bare `/login` redirect.
-    path: '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+    // `/login/:module(pwd-login|code-login|...)?`, the pattern built from the
+    // list the page reads (`LOGIN_MODULES`), so every module the page can
+    // switch to survives a reload. The module param defaults to `pwd-login`
+    // inside the page component; the pattern rejects unknown values and routes
+    // them to a 404. Order matters - the path-param route must come before the
+    // bare `/login` redirect.
+    path: `/login/:module(${LOGIN_MODULES.join('|')})?`,
     name: 'login',
     component: () => import('../pages/login/LoginView.vue'),
     meta: { requiresAuth: false, title: 'Login' },
@@ -66,8 +69,11 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
   {
     // 邀请链接的收件人页面。同 /share/:token 与 /unsubscribe 的理由：被邀请的人
     // 还没有可登录的账号（每条签发路径都拒绝 InvitationPending），挂在登录壳后面就
-    // 永远到不了。路径字面量是后端 DefaultInvitationUrlGenerator 默认链接
-    // `{System:FrontendUrl}/accept-invitation?token=` 的另一半；令牌走查询串，理由同退订。
+    // 永远到不了。★ 与其它顶层路由一样会被 applyBasePath 挂到 basePath 之下：默认
+    // basePath `/admin` 时实际地址是 `/admin/accept-invitation`，这正是后端
+    // DefaultInvitationUrlGenerator 默认链接 `{System:FrontendUrl}/admin/accept-invitation?token=`
+    // 的另一半。basePath 改成别的（`/`、`/console`）时，后端要配
+    // `Identity:Invitation:AcceptUrlTemplate` 指到这里。令牌走查询串，理由同退订。
     path: '/accept-invitation',
     name: 'accept-invitation',
     component: () => import('../pages/identity/AcceptInvitationPage.vue'),
@@ -638,9 +644,11 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
             },
           },
           {
-            // Push device registry. The permission code is seeded only by the
-            // optional Tnzi.Notification.Push module, so an email-only backend
-            // hides this menu entry on its own - no extra module gate needed.
+            // Push device registry, served by the optional Tnzi.Notification.Push
+            // module. Its permission code is declared only there, but that does
+            // not hide the entry from a super-admin, who passes every code: on
+            // an email-only backend the page then read a 404. The module gate
+            // hides it for everyone.
             path: 'devices',
             name: 'notification.devices',
             component: () => import('../pages/notification/Devices.vue'),
@@ -648,6 +656,7 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.notification.devices.title',
               permission: 'notification.pushDevice.view',
               keepAlive: true,
+              moduleGate: 'Notification.Push',
             },
           },
         ],
@@ -709,6 +718,19 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               // 订阅、开票、促销自 2026-08-29 起各自成包，未加载时整页消失而不是留一堆 404 死链。
               moduleGate: 'payment-subscriptions',
               title: 'tnzi.admin.modules.payment.subscriptions.title',
+              permission: 'payment.subscription.view',
+              keepAlive: true,
+            },
+          },
+          {
+            // 订阅计划目录（价格 / 周期 / 试用 / 排序）。与订阅列表同一个后端控制器与权限码：
+            // 读走类级 `.view`，写按钮由页面按 `.create` / `.update` / `.delete` 门控。
+            path: 'subscription-plans',
+            name: 'payment.subscriptionPlans',
+            component: () => import('../pages/payment/SubscriptionPlans.vue'),
+            meta: {
+              moduleGate: 'payment-subscriptions',
+              title: 'tnzi.admin.modules.payment.subscriptionPlans.title',
               permission: 'payment.subscription.view',
               keepAlive: true,
             },
@@ -1292,6 +1314,9 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               // A node graph is the one page here that genuinely wants the
               // whole desktop; the default `wide` crops the canvas.
               window: { preset: 'full' },
+              // Same endpoints as the list: a deep link into the editor on a
+              // host without Tnzi.AI.Workflow bounces instead of 404ing.
+              moduleGate: 'AI.Workflow',
             },
           },
           {
@@ -1302,8 +1327,10 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               title: 'tnzi.admin.modules.ai.workflowRuns.title',
               // Runs are served by the workflow admin controller, class-gated
               // on `ai.workflow.view`; `ai.workflowRun.view` is declared only.
+              // That controller ships in Tnzi.AI.Workflow, hence the gate.
               permission: 'ai.workflow.view',
               keepAlive: true,
+              moduleGate: 'AI.Workflow',
             },
           },
           {
@@ -1340,7 +1367,12 @@ export const defaultAdminRoutes: RouteRecordRaw[] = [
               // (OR), each tab's actions gated by its own code.
               permissions: ['ai.mcp.view', 'ai.mcpServer.view'],
               keepAlive: true,
-              moduleGate: 'AI.Mcp',
+              // No `moduleGate: 'AI.Mcp'`: the External Servers tab is the AI
+              // core client registry (`admin/mcp/client`), which every host
+              // loading Tnzi.AI serves. Gating the route on the optional server
+              // sub-module hid that registry from hosts that consume external
+              // MCP servers without exposing one. The page gates its two
+              // server-side tabs on `ai-mcp` itself.
             },
           },
           {

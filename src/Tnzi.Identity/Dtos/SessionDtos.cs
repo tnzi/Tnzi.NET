@@ -59,6 +59,17 @@ public class UserSessionDto
     public DateTime? AbsoluteExpiresAt { get; set; }
 
     /// <summary>
+    /// 委派会话的分组键；非 null 即这条会话由应用代码签发（<c>IAuthService.IssueDelegatedSessionAsync</c>），
+    /// 不是一次登录。普通会话为 null。
+    /// </summary>
+    public string? GroupKey { get; set; }
+
+    /// <summary>
+    /// 委派会话的显示名（应用签发时给的）；普通会话为 null。
+    /// </summary>
+    public string? Label { get; set; }
+
+    /// <summary>
     /// 是否已撤销
     /// </summary>
     public bool IsRevoked { get; set; }

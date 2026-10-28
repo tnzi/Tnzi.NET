@@ -135,6 +135,25 @@ public class RagModuleTests
             .ImplementationType.ShouldBe(typeof(FixedSizeChunkingStrategy));
     }
 
+    /// <summary>
+    /// 语义切块要调嵌入服务，而嵌入服务是 Scoped：策略注册成 Singleton，开发环境（作用域校验默认开启）启动即失败，
+    /// 生产环境则让单例从根作用域捕获一个嵌入服务，其按请求的配置快照只取一次就冻结。真的建一次容器、开着作用域校验解析它。
+    /// </summary>
+    [Fact]
+    public void Chunking_Semantic_ResolvesUnderScopeValidation()
+    {
+        var services = ConfigureModule(
+            vectorStoreProvider: null, hybridEnabled: false, chunkingStrategy: "Semantic",
+            postRegister: s => s.AddScoped(_ => Mock.Of<IEmbeddingService>()));
+
+        services.Single(d => d.ServiceType == typeof(IAsyncChunkingStrategy)).Lifetime.ShouldBe(ServiceLifetime.Scoped);
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<IAsyncChunkingStrategy>().ShouldBeOfType<SemanticChunkingStrategy>();
+    }
+
     [Fact]
     public void Chunking_UnknownValue_FallsBackToFixedSize()
     {

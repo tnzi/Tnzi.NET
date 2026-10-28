@@ -15,6 +15,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
     private readonly IRegistrationService? _registrationService;
     private readonly ILogger<UserRegisteredEventHandler> _logger;
     private readonly IConfiguration? _configuration;
+    private readonly AspNetCoreOptions _aspNetCoreOptions;
 
     public UserRegisteredEventHandler(
         INotificationService notificationService,
@@ -22,7 +23,8 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         ISettingService? settingService = null,
         IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IRegistrationService? registrationService = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IOptions<AspNetCoreOptions>? aspNetCoreOptions = null)
     {
         _notificationService = Check.NotNull(notificationService);
         _settingService = settingService;
@@ -30,6 +32,7 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
         _registrationService = registrationService;
         _logger = Check.NotNull(logger);
         _configuration = configuration;
+        _aspNetCoreOptions = aspNetCoreOptions?.Value ?? new AspNetCoreOptions();
     }
 
     public async Task HandleAsync(UserRegisteredEvent @event, CancellationToken cancellationToken = default)
@@ -132,8 +135,10 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
                 $"Failed to generate the email confirmation token for user {userId}: {tokenResult.Message}");
         }
 
-        // 确定 API 基础地址
-        var baseUrl = ResolveApiBaseUrl(apiBaseUrl, frontendUrl);
+        // 确定 API 基础地址：优先配置的 ApiBaseUrl，没有时从前端地址推（假设同源部署）
+        var baseUrl = !string.IsNullOrEmpty(apiBaseUrl)
+            ? apiBaseUrl
+            : ApiRootUrl.FromFrontendOrigin(frontendUrl, _aspNetCoreOptions);
         if (string.IsNullOrEmpty(baseUrl))
         {
             throw new TnziException(
@@ -141,8 +146,8 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
                 + $"set {ApplicationUrlSettingKeys.ApiBaseUrl} (or {ApplicationUrlSettingKeys.FrontendUrl}) so the confirmation link can be built.");
         }
 
-        // 构建确认链接
-        var confirmationUrl = $"{baseUrl}/auth/confirm-email?userId={userId}&token={tokenResult.Data}";
+        // 构建确认链接（端点挂在 API 前缀之下，见 ApiRootUrl）
+        var confirmationUrl = $"{ApiRootUrl.Compose(baseUrl, _aspNetCoreOptions)}/auth/confirm-email?userId={userId}&token={tokenResult.Data}";
 
         // 添加返回地址（如果有前端URL）
         if (!string.IsNullOrEmpty(frontendUrl))
@@ -152,34 +157,6 @@ public class UserRegisteredEventHandler : IEventHandler<UserRegisteredEvent>
 
         _logger.LogDebug("Generated email confirmation URL for user {UserId}", userId);
         return confirmationUrl;
-    }
-
-    /// <summary>
-    /// 解析 API 基础地址
-    /// </summary>
-    private static string ResolveApiBaseUrl(string apiBaseUrl, string frontendUrl)
-    {
-        // 优先使用配置的 API 基础地址
-        if (!string.IsNullOrEmpty(apiBaseUrl))
-        {
-            return apiBaseUrl;
-        }
-
-        // 如果没有配置，从前端 URL 提取（假设同源部署）
-        if (!string.IsNullOrEmpty(frontendUrl))
-        {
-            try
-            {
-                var uri = new Uri(frontendUrl);
-                return $"{uri.Scheme}://{uri.Authority}";
-            }
-            catch
-            {
-                return string.Empty;
-            }
-        }
-
-        return string.Empty;
     }
 
     /// <summary>

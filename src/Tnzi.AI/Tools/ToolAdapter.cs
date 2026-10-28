@@ -73,7 +73,8 @@ internal static class ToolAdapter
                     }
                 });
 
-            return aiFunction;
+            // AIFunctionFactory 不认 [AIParameter]：名称、描述、是否必需由这一层写进 schema 并按名称绑定
+            return AIParameterFunction.Apply(aiFunction, tool.MethodInfo);
         }
         catch (Exception ex)
         {

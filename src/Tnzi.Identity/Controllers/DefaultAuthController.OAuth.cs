@@ -125,8 +125,10 @@ public partial class DefaultAuthController
 
             if (!authenticateResult.Succeeded || authenticateResult.Principal == null)
             {
-                var errorMessage = authenticateResult.Failure?.Message ?? "OAuth authentication failed";
-                return Content(GenerateOAuthErrorHtml(errorMessage), "text/html; charset=utf-8");
+                // 认证处理器的失败原因只进服务端日志：它可能带着第三方令牌端点的响应头与响应体。
+                Logger.LogWarning("OAuth callback for {Provider} could not be authenticated: {Reason}",
+                    provider, authenticateResult.Failure?.Message ?? "no external principal");
+                return Content(GenerateOAuthErrorHtml(OAuthCallbackFailedMessage), "text/html; charset=utf-8");
             }
 
             // 获取 returnUrl。★ 这里**再校验一次**：这个值经 Identity.External cookie 往返了一圈，
@@ -140,17 +142,10 @@ public partial class DefaultAuthController
                 returnUrl = null;
             }
 
-            // 添加IP地址和UserAgent到Claims
-            var claims = authenticateResult.Principal.Claims.ToList();
-            // 走 GetClientIp：支持反向代理，且受 AspNetCoreOptions.CollectClientIpAddress 约束
-            // （该 claim 会流向登录日志，声明不采集地址的部署这里应当是空）。
-            claims.Add(new Claim("ip_address", HttpContext.Request.GetClientIp() ?? ""));
-            claims.Add(new Claim("user_agent", HttpContext.Request.Headers["User-Agent"].ToString()));
+            // 登录日志与异常登录检测里的来源地址和 UserAgent 取自请求上下文（IScopedContext），不经这个主体传递。
+            var claimsPrincipal = authenticateResult.Principal;
 
-            var claimsPrincipal = new ClaimsPrincipal(
-                new ClaimsIdentity(claims, authenticateResult.Principal.Identity?.AuthenticationType));
-
-            // ★ 绑定流程：令牌在，就只做「把外部身份挂到签发者账号上」——不签发令牌、不新建账号、不按邮箱认领。
+            // ★ 绑定流程：令牌在，就只做「把外部身份暂存到签发者账号名下」：不关联、不签发令牌、不新建账号、不按邮箱认领。
             //   这条分支必须在 HandleOAuthCallbackAsync 之前：那条路的兜底是新建账号并签发令牌。
             var linkToken = authenticateResult.Properties?.Items.TryGetValue(LinkTokenItemKey, out var lt) == true ? lt : null;
             if (!string.IsNullOrEmpty(linkToken))
@@ -193,42 +188,49 @@ public partial class DefaultAuthController
         }
         catch (Exception ex)
         {
-            return Content(GenerateOAuthErrorHtml($"OAuth callback error: {ex.Message}"), "text/html; charset=utf-8");
+            // 异常文本只进服务端日志。此前它被原样渲染进页面并 postMessage 给打开它的窗口，
+            // 数据库错误、类型名之类的内部细节因此直接摆在最终用户面前。
+            Logger.LogError(ex, "OAuth callback for {Provider} failed.", provider);
+            return Content(GenerateOAuthErrorHtml(OAuthCallbackFailedMessage), "text/html; charset=utf-8");
         }
     }
 
+    /// <summary>回调失败时给最终用户看的那句话；具体原因在服务端日志里。</summary>
+    private const string OAuthCallbackFailedMessage = "Sign-in could not be completed. Please try again.";
+
     /// <summary>
-    /// 绑定流程的回调落地：消费绑定令牌 → 把外部登录挂到签发者账号上 → 回调页只跳回 returnUrl，不带任何令牌。
+    /// 绑定流程的回调落地：消费绑定令牌 → 把外部身份<b>暂存</b>在签发者账号名下 → 回调页把一次性完成码交回浏览器。
     /// </summary>
+    /// <remarks>
+    /// ★★★ <b>这里不关联。</b>这个端点是匿名的，而绑定令牌只是一个能被当成链接发给任何人的 URL 参数：
+    /// 在这里直接关联，攻击者给自己签一枚令牌、把发起链接发给受害者，受害者的第三方身份就静默挂到了攻击者账号上，
+    /// 此后受害者「用第三方登录」登进的是攻击者的账号。关联留给完成端点
+    /// （<c>POST users/profile/linked-accounts/{provider}/complete</c>），那里要求当前登录的就是签发令牌的账号。
+    /// </remarks>
     private async Task<IActionResult> CompleteLinkAsync(string provider, string linkToken, ClaimsPrincipal principal, string? returnUrl)
     {
-        var consumed = OAuthLinkTokens == null
-            ? Result<Guid>.Failure("OAuth link service is not available", 400)
-            : await OAuthLinkTokens.ConsumeAsync(linkToken, provider);
+        if (OAuthLinkTokens == null)
+        {
+            return Content(GenerateOAuthErrorHtml("OAuth link service is not available"), "text/html; charset=utf-8");
+        }
+
+        var consumed = await OAuthLinkTokens.ConsumeAsync(linkToken, provider);
         if (!consumed.Succeeded)
         {
             return Content(GenerateOAuthErrorHtml(consumed.Message ?? "Invalid or expired link token"), "text/html; charset=utf-8");
         }
 
-        var linked = await OAuthService!.LinkExternalLoginAsync(consumed.Data, provider, principal);
+        var staged = await OAuthLinkTokens.StagePendingLinkAsync(consumed.Data, provider, principal);
 
         await HttpContext.SignOutAsync("Identity.External");
 
-        if (!linked.Succeeded)
+        if (!staged.Succeeded)
         {
-            // 带错误码的失败（provider key 已属他人 → 409）走结构化回调页，与登录挑战同一条路；前端按 errorCode 分支。
-            var failure = new OAuthCallbackResultDto
-            {
-                Success = false,
-                ErrorMessage = linked.Message,
-                ErrorCode = linked.ErrorCode ?? ErrorCodes.IDENTITY_OAUTH_ERROR,
-                LinkedProvider = provider,
-            };
-            return Content(GenerateOAuthCallbackHtml(failure, returnUrl), "text/html; charset=utf-8");
+            return Content(GenerateOAuthErrorHtml(staged.Message ?? "OAuth link could not be started"), "text/html; charset=utf-8");
         }
 
-        var success = new OAuthCallbackResultDto { Success = true, LinkedProvider = provider };
-        return Content(GenerateOAuthCallbackHtml(success, returnUrl), "text/html; charset=utf-8");
+        var pending = new OAuthCallbackResultDto { Success = true, LinkedProvider = provider, LinkCode = staged.Data };
+        return Content(GenerateOAuthCallbackHtml(pending, returnUrl), "text/html; charset=utf-8");
     }
 
     /// <summary>

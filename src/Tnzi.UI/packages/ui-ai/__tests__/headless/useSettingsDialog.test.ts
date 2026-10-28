@@ -182,4 +182,44 @@ describe('useSettingsDialog', () => {
       expect(currentSection.value?.id).toBe('appearance')
     })
   })
+
+  /* A narrow sheet shows the section list and one section as two screens. */
+  describe('narrow view', () => {
+    it('opens on the section list when shown plainly', () => {
+      const { narrowView, show } = useSettingsDialog({ sections: ref(makeSections()), initialSection: 'model' })
+      show()
+      expect(narrowView.value).toBe('sections')
+    })
+
+    it('opens on the section it was asked for', () => {
+      const { narrowView, activeSection, show } = useSettingsDialog({ sections: ref(makeSections()) })
+      show('language')
+      expect(narrowView.value).toBe('section')
+      expect(activeSection.value).toBe('language')
+    })
+
+    it('stays on the list when asked for a section that does not exist', () => {
+      const { narrowView, show } = useSettingsDialog({ sections: ref(makeSections()) })
+      show('missing')
+      expect(narrowView.value).toBe('sections')
+    })
+
+    it('moves to a section when one is picked, and back to the list', () => {
+      const { narrowView, show, setSection, showSections } = useSettingsDialog({ sections: ref(makeSections()) })
+      show()
+      setSection('about')
+      expect(narrowView.value).toBe('section')
+      showSections()
+      expect(narrowView.value).toBe('sections')
+    })
+
+    it('reopening plainly starts on the list again but keeps the selected section', () => {
+      const dialog = useSettingsDialog({ sections: ref(makeSections()) })
+      dialog.show('about')
+      dialog.hide()
+      dialog.show()
+      expect(dialog.narrowView.value).toBe('sections')
+      expect(dialog.activeSection.value).toBe('about')
+    })
+  })
 })

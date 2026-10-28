@@ -47,6 +47,16 @@ public class BankCheck : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
     /// <summary>作废原因</summary>
     public string? VoidReason { get; set; }
 
+    /// <summary>
+    /// 票据失效（作废 / 毁票）的时刻（UTC；仍有效的票为 null）。
+    /// </summary>
+    /// <remarks>
+    /// ★ positive-pay 清单靠它把「这一期里作废的旧票」报给银行：作废不改签发日，只按签发日圈选的话，
+    /// 一张早几天开出、今天挂失重打的票不会出现在今天的清单里，银行仍把它当有效票，被兑现就是付第二次。
+    /// 存量的失效行此列为 null，导出时回退到 <c>LastModificationTime</c>。
+    /// </remarks>
+    public DateTime? VoidedTime { get; set; }
+
     /// <summary>重打后的替代支票（原票作废时回链新票，形成重打链）</summary>
     public Guid? ReplacedByCheckId { get; set; }
 

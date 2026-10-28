@@ -66,7 +66,7 @@ public class RetryPathTests : IntegrationTestBase
     // ── 成功要抹掉上一次的失败说明 ───────────────────────────────────────────
 
     /// <summary>
-    /// ★★ 续发扫描直接调 <c>SendAsync</c>，它挑的收件人里包含 <c>Failed</c> 的那些 ——
+    /// ★★ 续发扫描认领之后走发送路径（<c>SendClaimedAsync</c>），它挑的收件人里包含 <c>Failed</c> 的那些：
     /// 而那些行带着上一次的失败说明。这一次成功了，说明必须消失。
     /// </summary>
     /// <remarks>
@@ -80,7 +80,7 @@ public class RetryPathTests : IntegrationTestBase
         var messageId = await SeedAsync(
             NotificationStatus.Sending, recipientStatus: NotificationStatus.Failed, failureReason: StaleReason);
 
-        var result = await ServiceProvider.GetRequiredService<INotificationService>().SendAsync(messageId);
+        var result = await ((NotificationService)ServiceProvider.GetRequiredService<INotificationService>()).SendClaimedAsync(messageId);
         result.Succeeded.ShouldBeTrue(result.Message);
 
         var recipient = await ReloadRecipientAsync(messageId);

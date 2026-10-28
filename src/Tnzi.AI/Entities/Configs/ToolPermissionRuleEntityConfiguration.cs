@@ -7,6 +7,8 @@ public class ToolPermissionRuleEntityConfiguration : EntityTypeConfigurationBase
 {
     public override void Configure(EntityTypeBuilder<ToolPermissionRuleEntity> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.ToolPattern)
             .HasMaxLength(200);
 
@@ -26,6 +28,9 @@ public class ToolPermissionRuleEntityConfiguration : EntityTypeConfigurationBase
             .HasMaxLength(500);
 
         // 索引：(TenantId, Scope, IsEnabled) 用于高效查询
-        builder.HasIndex(e => new { e.TenantId, e.Scope, e.IsEnabled });
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.Scope, e.IsEnabled });
+        }
     }
 }

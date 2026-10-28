@@ -198,6 +198,7 @@ export const persistedFormSchema: FormSchemaItem[] = [
     labelKey: 'form.behavior', label: 'Behavior',
     type: 'select',
     required: true,
+    hintKey: 'form.behaviorHint',
     // Option values are the enum MEMBER NAMES so an edit prefill matches the
     // wire form (JsonStringEnumConverter). The backend accepts strings on write.
     options: [

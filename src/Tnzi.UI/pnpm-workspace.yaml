@@ -5,11 +5,22 @@ packages:
 # Packages reference these via "catalog:" in dependencies/devDependencies.
 # peerDependencies keep their own hand-written (looser) ranges on purpose.
 catalog:
-  vue: ^3.5.41
-  vue-router: ^5.2.0
-  pinia: ^4.0.3
-  naive-ui: ^2.45.1
+  vue: ^3.5.44
+  vue-router: ^5.4.0
+  pinia: ^4.1.0
+  naive-ui: ^2.45.3
   echarts: ^6.1.0
-  '@vueuse/core': ^14.4.0
-  '@iconify/vue': ^5.0.1
-  '@iconify/utils': ^3.1.4
+  '@vueuse/core': ^15.0.0
+  '@iconify/vue': ^5.0.3
+  '@iconify/utils': ^3.1.7
+
+# 依赖自带的安装脚本：pnpm 11 起没有在这里表态的包直接让安装失败（strictDepBuilds），所以每个都要写明。
+# 全部是 false，与此前的行为一致（这些脚本从来没跑过，一切正常）：
+# - esbuild：postinstall 只是把平台二进制复制到更快的位置；不跑时经 optionalDependencies 里的平台包照常工作
+# - simple-git-hooks：根 package.json 的 prepare 脚本已经装钩子，它自己的 postinstall 是重复的一遍
+# - vue-demi：postinstall 只是在 Vue 2 / 3 之间切换入口文件，包里默认的就是 Vue 3 那份
+# 新出现一个带安装脚本的依赖时，安装会报 ERR_PNPM_IGNORED_BUILDS：先读它的脚本做什么，再决定写 true 还是 false。
+allowBuilds:
+  esbuild: false
+  simple-git-hooks: false
+  vue-demi: false

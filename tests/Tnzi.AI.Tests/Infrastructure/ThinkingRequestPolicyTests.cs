@@ -6,268 +6,222 @@ using System.Text;
 namespace Tnzi.AI.Tests.Infrastructure;
 
 /// <summary>
-/// ThinkingRequestPolicy 推理注入参数映射测试
+/// ThinkingRequestPolicy 推理参数注入：对真实的注入逻辑断言出站请求体。
 /// </summary>
-public class ThinkingRequestPolicyTests
+/// <remarks>
+/// 此前这里复刻了一份私有注入逻辑再对复刻品断言，于是 OpenAI 写成 Responses API 的 <c>reasoning</c> 对象
+/// （Chat Completions 的参数是顶层字符串 <c>reasoning_effort</c>）这类错误被测试原样锁住。
+/// </remarks>
+public class ThinkingRequestPolicyTests : IDisposable
 {
-    #region OpenAI Effort Mapping
+    public ThinkingRequestPolicyTests()
+    {
+        ThinkingRequestPolicy.RequestContext.Value = null;
+    }
+
+    public void Dispose()
+    {
+        ThinkingRequestPolicy.RequestContext.Value = null;
+    }
+
+    #region OpenAI
 
     [Theory]
     [InlineData(ReasoningEffort.Low, "low")]
     [InlineData(ReasoningEffort.Medium, "medium")]
     [InlineData(ReasoningEffort.High, "high")]
     [InlineData(ReasoningEffort.Max, "high")]
-    public void OpenAIEffortMapping_CorrectStringValues(ReasoningEffort effort, string expected)
+    public void OpenAIFormat_WritesTopLevelReasoningEffort(ReasoningEffort effort, string expected)
     {
-        var injected = InjectAndCapture("OpenAI", effort, null);
+        var body = Inject(ThinkingPayloadFormat.OpenAI, effort, model: "o4-mini");
 
-        injected.TryGetProperty("reasoning", out var reasoning).ShouldBeTrue();
-        reasoning.GetProperty("effort").GetString().ShouldBe(expected);
-        reasoning.GetProperty("summary").GetString().ShouldBe("auto");
+        body.GetProperty("reasoning_effort").GetString().ShouldBe(expected);
+        body.TryGetProperty("reasoning", out _).ShouldBeFalse();
     }
 
     [Fact]
-    public void OpenAIInjection_EnsuresReasoningObject()
+    public void OpenAIFormat_ReplacesAReasoningEffortTheSdkAlreadyWrote()
     {
-        var injected = InjectAndCapture("OpenAI", ReasoningEffort.High, null);
+        var body = Inject(ThinkingPayloadFormat.OpenAI, ReasoningEffort.Low, model: "o4-mini", extraJson: "\"reasoning_effort\":\"high\",");
 
-        injected.TryGetProperty("reasoning", out _).ShouldBeTrue();
+        body.GetProperty("reasoning_effort").GetString().ShouldBe("low");
     }
 
     #endregion
 
-    #region Gemini Effort Mapping
+    #region Gemini
 
     [Theory]
-    [InlineData(ReasoningEffort.Low, "minimal")]
-    [InlineData(ReasoningEffort.Medium, "low")]
-    [InlineData(ReasoningEffort.High, "medium")]
+    [InlineData(ReasoningEffort.Low, "low")]
+    [InlineData(ReasoningEffort.Medium, "medium")]
+    [InlineData(ReasoningEffort.High, "high")]
     [InlineData(ReasoningEffort.Max, "high")]
-    public void GeminiEffortMapping_CorrectStringValues(ReasoningEffort effort, string expected)
+    public void GeminiFormat_Gemini3_WritesThinkingLevelOnly(ReasoningEffort effort, string expected)
     {
-        var injected = InjectAndCapture("Gemini", effort, null);
+        var config = GeminiThinkingConfig(Inject(ThinkingPayloadFormat.Gemini, effort, model: "gemini-3-pro-preview", budgetTokens: 4096));
 
-        injected.TryGetProperty("extra_body", out var extraBody).ShouldBeTrue();
-        extraBody.GetProperty("google")
-                 .GetProperty("thinking_config")
-                 .GetProperty("thinking_level")
-                 .GetString()
-                 .ShouldBe(expected);
+        config.GetProperty("include_thoughts").GetBoolean().ShouldBeTrue();
+        config.GetProperty("thinking_level").GetString().ShouldBe(expected);
+        config.TryGetProperty("thinking_budget", out _).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(ReasoningEffort.Low, 1024)]
+    [InlineData(ReasoningEffort.Medium, 8192)]
+    [InlineData(ReasoningEffort.High, 24576)]
+    public void GeminiFormat_Gemini25_WritesThinkingBudgetOnly(ReasoningEffort effort, int expected)
+    {
+        var config = GeminiThinkingConfig(Inject(ThinkingPayloadFormat.Gemini, effort, model: "gemini-2.5-flash"));
+
+        config.GetProperty("thinking_budget").GetInt32().ShouldBe(expected);
+        config.TryGetProperty("thinking_level", out _).ShouldBeFalse();
     }
 
     [Fact]
-    public void GeminiInjection_WithBudgetTokens_IncludesBudget()
+    public void GeminiFormat_Gemini25_ExplicitBudgetWins()
     {
-        var injected = InjectAndCapture("Gemini", ReasoningEffort.High, budgetTokens: 4096);
+        var config = GeminiThinkingConfig(Inject(ThinkingPayloadFormat.Gemini, ReasoningEffort.High, model: "gemini-2.5-pro", budgetTokens: 4096));
 
-        var thinkingConfig = injected.GetProperty("extra_body")
-                                     .GetProperty("google")
-                                     .GetProperty("thinking_config");
-
-        thinkingConfig.GetProperty("include_thoughts").GetBoolean().ShouldBeTrue();
-        thinkingConfig.GetProperty("thinking_budget").GetInt32().ShouldBe(4096);
-    }
-
-    [Fact]
-    public void GeminiInjection_WithoutBudgetTokens_OmitsBudget()
-    {
-        var injected = InjectAndCapture("Gemini", ReasoningEffort.High, budgetTokens: null);
-
-        var thinkingConfig = injected.GetProperty("extra_body")
-                                     .GetProperty("google")
-                                     .GetProperty("thinking_config");
-
-        thinkingConfig.TryGetProperty("thinking_budget", out _).ShouldBeFalse();
-    }
-
-    [Fact]
-    public void GoogleProvider_TreatedSameAsGemini()
-    {
-        var injected = InjectAndCapture("Google", ReasoningEffort.High, null);
-
-        injected.TryGetProperty("extra_body", out _).ShouldBeTrue();
+        config.GetProperty("thinking_budget").GetInt32().ShouldBe(4096);
     }
 
     #endregion
 
-    #region Qwen Budget Mapping
+    #region Qwen
 
     [Theory]
     [InlineData(ReasoningEffort.Low, 512)]
     [InlineData(ReasoningEffort.Medium, 4096)]
     [InlineData(ReasoningEffort.High, 16384)]
     [InlineData(ReasoningEffort.Max, 32768)]
-    public void QwenBudgetMapping_CorrectTokenValues(ReasoningEffort effort, int expectedBudget)
+    public void QwenFormat_WritesEnableThinkingAndBudget(ReasoningEffort effort, int expectedBudget)
     {
-        var injected = InjectAndCapture("Qwen", effort, null);
+        var body = Inject(ThinkingPayloadFormat.Qwen, effort, model: "qwen3-max");
 
-        injected.GetProperty("enable_thinking").GetBoolean().ShouldBeTrue();
-        injected.GetProperty("thinking_budget").GetInt32().ShouldBe(expectedBudget);
+        body.GetProperty("enable_thinking").GetBoolean().ShouldBeTrue();
+        body.GetProperty("thinking_budget").GetInt32().ShouldBe(expectedBudget);
     }
 
     [Fact]
-    public void QwenInjection_WithExplicitBudget_OverridesDefault()
+    public void QwenFormat_ExplicitBudgetOverridesTheEffortDefault()
     {
-        var injected = InjectAndCapture("Qwen", ReasoningEffort.Low, budgetTokens: 8000);
+        var body = Inject(ThinkingPayloadFormat.Qwen, ReasoningEffort.Low, model: "qwen3-max", budgetTokens: 8000);
 
-        injected.GetProperty("thinking_budget").GetInt32().ShouldBe(8000);
-    }
-
-    [Fact]
-    public void DashScopeProvider_TreatedSameAsQwen()
-    {
-        var injected = InjectAndCapture("DashScope", ReasoningEffort.High, null);
-
-        injected.TryGetProperty("enable_thinking", out _).ShouldBeTrue();
+        body.GetProperty("thinking_budget").GetInt32().ShouldBe(8000);
     }
 
     #endregion
 
-    #region Anthropic Provider Skip
+    #region 不注入的形态
 
-    [Fact]
-    public void AnthropicProvider_SkipsInjection()
+    [Theory]
+    [InlineData(ThinkingPayloadFormat.None)]
+    [InlineData(ThinkingPayloadFormat.Anthropic)]
+    public void FormatsWithoutBodyInjection_LeaveTheBodyUntouched(ThinkingPayloadFormat format)
     {
-        const string originalJson = """{"model":"claude-3-7-sonnet","messages":[{"role":"user","content":"hi"}]}""";
-        using var message = CreateMessage(originalJson);
+        const string originalJson = """{"model":"kimi-k2","messages":[{"role":"user","content":"hi"}]}""";
 
-        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        RunPolicy(originalJson, new ThinkingRequestContext
         {
             Thinking = new ThinkingOptions { Effort = ReasoningEffort.High },
-            ProviderName = "Anthropic"
-        };
-        try
+            Format = format
+        }).ShouldBe(originalJson);
+    }
+
+    [Fact]
+    public void EffortNone_LeavesTheBodyUntouched()
+    {
+        const string originalJson = """{"model":"o4-mini","messages":[{"role":"user","content":"hi"}]}""";
+
+        RunPolicy(originalJson, new ThinkingRequestContext
         {
-            InvokeThinkingInjection(message);
-            ReadRequestContent(message.Request).ShouldBe(originalJson);
-        }
-        finally
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.None },
+            Format = ThinkingPayloadFormat.OpenAI
+        }).ShouldBe(originalJson);
+    }
+
+    [Fact]
+    public void DeepSeekFormat_BackfillsReasoningContentEvenWithThinkingOff()
+    {
+        const string json = """{"model":"deepseek-reasoner","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"ok"}]}""";
+
+        var body = JsonDocument.Parse(RunPolicy(json, new ThinkingRequestContext
         {
-            ThinkingRequestPolicy.RequestContext.Value = null;
-        }
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.None },
+            Format = ThinkingPayloadFormat.DeepSeek
+        })).RootElement;
+
+        body.GetProperty("messages")[1].GetProperty("reasoning_content").GetString().ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public void ContextWithoutFormat_FallsBackToTheEntryName()
+    {
+        // 直接设置上下文、不经过装饰器的调用方（只给了名字）仍按名字路由
+        const string json = """{"model":"gemini-2.5-flash","messages":[]}""";
+
+        var body = JsonDocument.Parse(RunPolicy(json, new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.Medium },
+            ProviderName = "Google"
+        })).RootElement;
+
+        body.TryGetProperty("extra_body", out _).ShouldBeTrue();
     }
 
     #endregion
 
-    #region ThinkingRequestContext
+    #region 格式识别
 
-    [Fact]
-    public void ThinkingRequestContext_RequiredThinking_MustBeSet()
+    [Theory]
+    [InlineData("OpenAI", "OpenAI", null, "o4-mini", ThinkingPayloadFormat.OpenAI)]
+    [InlineData("gemini-prod", "Gemini", null, "gemini-2.5-pro", ThinkingPayloadFormat.Gemini)]
+    [InlineData("proxy", "OpenAI", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3-pro-preview", ThinkingPayloadFormat.Gemini)]
+    [InlineData("tongyi", "OpenAI", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3-max", ThinkingPayloadFormat.Qwen)]
+    [InlineData("ds", "OpenAI", "https://api.deepseek.com", "deepseek-reasoner", ThinkingPayloadFormat.DeepSeek)]
+    [InlineData("Kimi", "OpenAI", "https://api.moonshot.cn/v1", "kimi-k2", ThinkingPayloadFormat.None)]
+    [InlineData("zhipu", "OpenAI", "https://open.bigmodel.cn/api/paas/v4", "glm-4.6", ThinkingPayloadFormat.None)]
+    [InlineData("mm", "OpenAI", null, "MiniMax-M2", ThinkingPayloadFormat.None)]
+    [InlineData("Anthropic", "Anthropic", null, "claude-sonnet-4", ThinkingPayloadFormat.Anthropic)]
+    public void Resolve_UsesTypeNameHostAndModel(string name, string type, string? baseUrl, string model, ThinkingPayloadFormat expected)
     {
-        var context = new ThinkingRequestContext
-        {
-            Thinking = new ThinkingOptions { Effort = ReasoningEffort.High },
-            ProviderName = "OpenAI"
-        };
+        var options = new ProviderOptions { Name = name, ProviderType = type, BaseUrl = baseUrl };
 
-        context.Thinking.Effort.ShouldBe(ReasoningEffort.High);
-        context.ProviderName.ShouldBe("OpenAI");
-    }
-
-    [Fact]
-    public void ThinkingRequestPolicy_AsyncLocal_InitiallyNull()
-    {
-        ThinkingRequestPolicy.RequestContext.Value.ShouldBeNull();
+        ThinkingPayloadFormats.Resolve(options, model).ShouldBe(expected);
     }
 
     #endregion
 
     #region Helper
 
-    /// <summary>
-    /// 执行注入逻辑并返回注入后的 JSON（通过复现 ThinkingRequestPolicy 的内部逻辑）。
-    /// DeepSeek 和 None effort 不应调用此方法。
-    /// </summary>
-    private static JsonElement InjectAndCapture(string providerName, ReasoningEffort effort, int? budgetTokens)
-    {
-        var thinking = new ThinkingOptions { Effort = effort, BudgetTokens = budgetTokens };
+    private static JsonElement GeminiThinkingConfig(JsonElement body)
+        => body.GetProperty("extra_body").GetProperty("google").GetProperty("thinking_config");
 
-        using var ms = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(ms))
+    private static JsonElement Inject(ThinkingPayloadFormat format, ReasoningEffort effort, string model, int? budgetTokens = null, string extraJson = "")
+    {
+        var json = $$"""{{{extraJson}}"model":"{{model}}","messages":[{"role":"user","content":"hi"}]}""";
+        var result = RunPolicy(json, new ThinkingRequestContext
         {
-            writer.WriteStartObject();
+            Thinking = new ThinkingOptions { Effort = effort, BudgetTokens = budgetTokens },
+            Format = format
+        });
+        return JsonDocument.Parse(result).RootElement.Clone();
+    }
 
-            if (IsGeminiProvider(providerName))
-                WriteGeminiThinking(writer, thinking);
-            else if (IsQwenProvider(providerName))
-                WriteQwenThinking(writer, thinking);
-            else
-                WriteOpenAIThinking(writer, thinking);
-
-            writer.WriteEndObject();
+    private static string RunPolicy(string json, ThinkingRequestContext context)
+    {
+        using var message = CreateMessage(json);
+        ThinkingRequestPolicy.RequestContext.Value = context;
+        try
+        {
+            ThinkingRequestPolicy.InjectThinkingParams(message);
+            return ReadRequestContent(message.Request);
         }
-
-        return JsonDocument.Parse(ms.ToArray()).RootElement.Clone();
+        finally
+        {
+            ThinkingRequestPolicy.RequestContext.Value = null;
+        }
     }
-
-    private static void WriteOpenAIThinking(Utf8JsonWriter writer, ThinkingOptions thinking)
-    {
-        writer.WritePropertyName("reasoning");
-        writer.WriteStartObject();
-        writer.WriteString("effort", MapOpenAIEffort(thinking.Effort));
-        writer.WriteString("summary", "auto");
-        writer.WriteEndObject();
-    }
-
-    private static void WriteGeminiThinking(Utf8JsonWriter writer, ThinkingOptions thinking)
-    {
-        writer.WritePropertyName("extra_body");
-        writer.WriteStartObject();
-        writer.WritePropertyName("google");
-        writer.WriteStartObject();
-        writer.WritePropertyName("thinking_config");
-        writer.WriteStartObject();
-        writer.WriteBoolean("include_thoughts", true);
-        writer.WriteString("thinking_level", MapGeminiEffort(thinking.Effort));
-        if (thinking.BudgetTokens.HasValue)
-            writer.WriteNumber("thinking_budget", thinking.BudgetTokens.Value);
-        writer.WriteEndObject();
-        writer.WriteEndObject();
-        writer.WriteEndObject();
-    }
-
-    private static void WriteQwenThinking(Utf8JsonWriter writer, ThinkingOptions thinking)
-    {
-        writer.WriteBoolean("enable_thinking", true);
-        var budget = thinking.BudgetTokens ?? MapQwenBudget(thinking.Effort);
-        writer.WriteNumber("thinking_budget", budget);
-    }
-
-    private static string MapOpenAIEffort(ReasoningEffort effort) => effort switch
-    {
-        ReasoningEffort.Low => "low",
-        ReasoningEffort.Medium => "medium",
-        ReasoningEffort.High => "high",
-        ReasoningEffort.Max => "high",
-        _ => "none"
-    };
-
-    private static string MapGeminiEffort(ReasoningEffort effort) => effort switch
-    {
-        ReasoningEffort.Low => "minimal",
-        ReasoningEffort.Medium => "low",
-        ReasoningEffort.High => "medium",
-        ReasoningEffort.Max => "high",
-        _ => "none"
-    };
-
-    private static int MapQwenBudget(ReasoningEffort effort) => effort switch
-    {
-        ReasoningEffort.Low => 512,
-        ReasoningEffort.Medium => 4096,
-        ReasoningEffort.High => 16384,
-        ReasoningEffort.Max => 32768,
-        _ => 0
-    };
-
-    private static bool IsGeminiProvider(string? p)
-        => string.Equals(p, "Gemini", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(p, "Google", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsQwenProvider(string? p)
-        => string.Equals(p, "Qwen", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(p, "DashScope", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(p, "Alibaba", StringComparison.OrdinalIgnoreCase);
 
     private static PipelineMessage CreateMessage(string json)
     {
@@ -284,16 +238,6 @@ public class ThinkingRequestPolicyTests
             binder: null,
             args: [request],
             culture: null)!;
-    }
-
-    private static void InvokeThinkingInjection(PipelineMessage message)
-    {
-        var method = typeof(ThinkingRequestPolicy).GetMethod(
-            "InjectThinkingParams",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        method.ShouldNotBeNull();
-        method.Invoke(null, [message]);
     }
 
     private static string ReadRequestContent(PipelineRequest request)

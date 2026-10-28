@@ -213,44 +213,70 @@ public class DependencyRegistrationService
         if (serviceTypes.Count == 0 && !_options.RegisterTypesWithoutInterfaces)
             return;
 
-        // 如果没有接口，注册自身
-        if (serviceTypes.Count == 0)
+        // 没有接口时注册自身；有接口时按 AddSelf 决定是否额外注册自身
+        var registerSelf = serviceTypes.Count == 0 || dependencyAttribute?.AddSelf == true;
+        var orderedServiceTypes = serviceTypes
+            .OrderBy(t => t.FullName ?? t.Name, StringComparer.Ordinal)
+            .ToList();
+        var exposedCount = orderedServiceTypes.Count + (registerSelf ? 1 : 0);
+
+        // 瞬态没有「同一实例」可言，只暴露一个服务时也无需共享：每个服务类型直接映射到实现类型
+        if (lifetime.Value == ServiceLifetime.Transient || exposedCount == 1)
         {
-            RegisterService(implementationType, implementationType, lifetime.Value, dependencyAttribute);
+            if (registerSelf)
+            {
+                RegisterService(implementationType, implementationType, lifetime.Value, dependencyAttribute);
+            }
+
+            foreach (var serviceType in orderedServiceTypes)
+            {
+                RegisterService(serviceType, implementationType, lifetime.Value, dependencyAttribute);
+            }
+
             return;
         }
 
-        // 如果要求注册自身
-        if (dependencyAttribute?.AddSelf == true)
+        // 单例 / 作用域且暴露多个服务：实例锚定在实现类型自身的注册上，每个接口都转发到它，
+        // 同一作用域内各接口拿到同一实例。
+        // ★ 锚点必须是实现类型，不能是「排第一的接口」：两个实现共享同一个首位接口时，
+        // 按接口解析取的是最后注册的那个实现，次要接口会被转发到别的类型（解析即 InvalidCastException，
+        // 或两类恰好互相实现对方接口时静默拿到错误实现）。
+        var anchor = new ServiceDescriptor(implementationType, implementationType, lifetime.Value);
+        if (registerSelf)
         {
-            RegisterService(implementationType, implementationType, lifetime.Value, dependencyAttribute);
+            AddServiceDescriptor(anchor, dependencyAttribute);
+        }
+        else
+        {
+            _services.TryAdd(anchor);
         }
 
-        // 注册接口
-        // 对接口进行排序：优先注册业务接口（非 Tnzi 命名空间），排除框架接口
-        var orderedServiceTypes = serviceTypes
-            .OrderBy(t => t.Namespace?.StartsWith("Tnzi") ?? false)  // Tnzi 命名空间的接口排在后面
-            .ThenBy(t => t.FullName ?? t.Name)
-            .ToList();
-
-        // 先注册第一个接口（主要接口，通常是业务接口）
-        var firstServiceType = orderedServiceTypes[0];
-        RegisterService(firstServiceType, implementationType, lifetime.Value, dependencyAttribute);
-
-        // 注册后续接口，使用第一个接口的实例（保证同一实现类的多个接口获得同一实例）
-        for (int i = 1; i < orderedServiceTypes.Count; i++)
+        var forwardFactory = CreateForwardFactory(implementationType);
+        foreach (var serviceType in orderedServiceTypes)
         {
-            var serviceType = orderedServiceTypes[i];
-            var descriptor = new ServiceDescriptor(
-                serviceType,
-                provider => provider.GetRequiredService(firstServiceType),
-                lifetime.Value);
-
-            // 后续接口使用 TryAdd，避免覆盖第一个接口的注册
-            // 注意：这里不使用 dependencyAttribute，因为第一个接口已经应用了
-            _services.TryAdd(descriptor);
+            var forward = new ServiceDescriptor(serviceType, forwardFactory, lifetime.Value);
+            AddServiceDescriptor(forward, dependencyAttribute);
         }
     }
+
+    private static readonly MethodInfo CreateTypedForwardMethod = typeof(DependencyRegistrationService)
+        .GetMethod(nameof(CreateTypedForward), BindingFlags.NonPublic | BindingFlags.Static)!;
+
+    /// <summary>
+    /// 转发到实现类型自身注册的工厂，委托的返回类型就是实现类型。
+    /// </summary>
+    /// <remarks>
+    /// ★ 委托类型是 <c>Func&lt;IServiceProvider, 实现类型&gt;</c> 而不是 <c>Func&lt;IServiceProvider, object&gt;</c>：
+    /// 容器对工厂描述符的「实现类型」就从委托类型的返回值读出来，<c>TryAddEnumerable</c> 靠它判断同一实现是否已登记。
+    /// 写成 <c>object</c> 时，事件总线的自动扫描（或任何模块）对同一实现再 <c>TryAddEnumerable</c> 一次会认不出、
+    /// 多加一条：一个同时处理两种事件、带生命周期标记的处理器类，每个事件执行两遍。
+    /// </remarks>
+    private static Func<IServiceProvider, object> CreateForwardFactory(Type implementationType)
+        => (Func<IServiceProvider, object>)CreateTypedForwardMethod.MakeGenericMethod(implementationType).Invoke(null, null)!;
+
+    private static Func<IServiceProvider, TImplementation> CreateTypedForward<TImplementation>()
+        where TImplementation : class
+        => provider => provider.GetRequiredService<TImplementation>();
 
     /// <summary>
     /// 获取服务生命周期
@@ -327,6 +353,12 @@ public class DependencyRegistrationService
             // 移除所有已注册的实现，然后添加新实现
             _services.RemoveAll(descriptor.ServiceType);
             _services.Add(descriptor);
+        }
+        else if (descriptor.ServiceType == descriptor.ImplementationType)
+        {
+            // 自身注册只可能有一个实现，多条描述符没有意义；
+            // 而 TryAddEnumerable 对「实现类型 = 服务类型」直接抛 ArgumentException（瞬态无接口类型曾因此启动即崩）
+            _services.TryAdd(descriptor);
         }
         else if (attribute?.TryAdd == true)
         {

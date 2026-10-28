@@ -10,6 +10,7 @@ global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 
+global using Tnzi.Extensions;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Results;
@@ -23,4 +24,5 @@ global using Tnzi.Payment.Providers;
 global using Tnzi.Payment.PayPal.Options;
 global using Tnzi.Payment.PayPal.Providers;
 global using System.Collections.Concurrent;
+global using System.Security.Cryptography;
 global using Tnzi.Payment.PayPal.Providers.Models;

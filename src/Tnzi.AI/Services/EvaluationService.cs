@@ -105,14 +105,26 @@ public class EvaluationService : ApplicationService, IEvaluationService
 
             return Ok(run.MapTo<EvaluationRunDetailDto>());
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 请求被取消（管理员关掉页面、网关超时）：行已落库为 Running，不收尾就永远停在 Running，
+            // 污染列表与趋势。按失败收尾（状态枚举没有「已取消」），落库不跟已取消的令牌，再把取消原样抛出。
+            stopwatch.Stop();
+            Logger.LogInformation("Evaluation run {RunId} was cancelled after {Elapsed}", run.Id, stopwatch.Elapsed);
+
+            run.Status = EvaluationRunStatus.Failed;
+            run.Duration = stopwatch.Elapsed;
+            await _repository.UpdateAsync(run, CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
         {
             stopwatch.Stop();
             Logger.LogError(ex, "Evaluation run {RunId} failed", run.Id);
 
             run.Status = EvaluationRunStatus.Failed;
             run.Duration = stopwatch.Elapsed;
-            await _repository.UpdateAsync(run, ct);
+            await _repository.UpdateAsync(run, CancellationToken.None);
 
             return Fail<EvaluationRunDetailDto>($"Evaluation run failed: {ex.Message}", 500);
         }
@@ -154,10 +166,25 @@ public class EvaluationService : ApplicationService, IEvaluationService
         var results = await Task.WhenAll(tasks);
         totalStopwatch.Stop();
 
-        var successResults = results
-            .Where(r => r.Succeeded && r.Data != null)
-            .Select(r => r.Data!)
-            .ToList();
+        // 失败的目标单独报出来：此前只留成功的那些，三个目标挂了一个，响应里只有两条、状态 200，
+        // 调用方分不清第三个是失败了还是根本没请求
+        var successResults = new List<EvaluationRunDetailDto>();
+        var failures = new List<BatchEvaluationFailureDto>();
+        for (var i = 0; i < results.Length; i++)
+        {
+            if (results[i].Succeeded && results[i].Data != null)
+            {
+                successResults.Add(results[i].Data!);
+                continue;
+            }
+
+            failures.Add(new BatchEvaluationFailureDto
+            {
+                AgentId = dto.Targets[i].AgentId,
+                VersionNumber = dto.Targets[i].VersionNumber,
+                Message = results[i].Message ?? "Evaluation run failed"
+            });
+        }
 
         Logger.LogInformation("Batch evaluation completed: {Success}/{Total} targets succeeded",
             successResults.Count, dto.Targets.Count);
@@ -165,6 +192,7 @@ public class EvaluationService : ApplicationService, IEvaluationService
         return Ok(new BatchEvaluationResultDto
         {
             Results = successResults,
+            Failures = failures,
             TotalDuration = totalStopwatch.Elapsed
         });
     }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { effectScope } from 'vue';
-import { useComposerAttachments } from '../../src/headless/useComposerAttachments';
+import { useComposerAttachments, isAcceptedFile } from '../../src/headless/useComposerAttachments';
 
 function makeFile(name: string, size: number, type = 'text/plain'): File {
   const file = new File(['x'], name, { type });
@@ -150,6 +150,70 @@ describe('useComposerAttachments', () => {
       const c = useComposerAttachments();
       c.onDrop(dropEvent([makeFile('a.txt', 10)]));
       expect(c.files.value).toHaveLength(1);
+    });
+  });
+
+  /**
+   * The picker applies `accept` itself; a drop, a paste or a host handing a
+   * file over does not. The composer checks it for every path so none of them
+   * can attach a file the picker would never have offered.
+   */
+  describe('accepted types', () => {
+    it('matches extensions, exact MIME types and wildcards, case-insensitively', () => {
+      const accept = '.PDF, image/*, text/csv';
+      expect(isAcceptedFile(makeFile('Report.pdf', 1, 'application/pdf'), accept)).toBe(true);
+      expect(isAcceptedFile(makeFile('shot.png', 1, 'image/png'), accept)).toBe(true);
+      expect(isAcceptedFile(makeFile('t.csv', 1, 'text/csv'), accept)).toBe(true);
+      expect(isAcceptedFile(makeFile('a.exe', 1, 'application/x-msdownload'), accept)).toBe(false);
+    });
+
+    it('a file without a MIME type can only match an extension, as in the browser picker', () => {
+      expect(isAcceptedFile(makeFile('notes.md', 1, ''), 'text/*')).toBe(false);
+      expect(isAcceptedFile(makeFile('notes.md', 1, ''), 'text/*,.md')).toBe(true);
+    });
+
+    it('an empty accept list takes every type', () => {
+      expect(isAcceptedFile(makeFile('a.exe', 1, 'application/x-msdownload'), '')).toBe(true);
+      expect(isAcceptedFile(makeFile('a.exe', 1, 'application/x-msdownload'), undefined)).toBe(true);
+    });
+
+    it('refuses a type outside the list with its own reason, ahead of the size check', () => {
+      const onReject = vi.fn();
+      const c = useComposerAttachments({ maxFileSize: 100, accept: () => '.pdf', onReject });
+
+      const result = c.addFiles([makeFile('ok.pdf', 10), makeFile('huge.exe', 500), makeFile('big.pdf', 500)]);
+
+      expect(c.files.value.map((f) => f.name)).toEqual(['ok.pdf']);
+      expect(result?.added.map((f) => f.name)).toEqual(['ok.pdf']);
+      expect(result?.rejected.map((r) => [r.file.name, r.reason])).toEqual([
+        ['huge.exe', 'unsupported-type'],
+        ['big.pdf', 'too-large'],
+      ]);
+      expect(onReject).toHaveBeenCalledTimes(1);
+    });
+
+    it('applies to a drop too, not only to addFiles', () => {
+      const c = useComposerAttachments({ accept: () => 'image/*' });
+      c.onDrop({ preventDefault() {}, dataTransfer: { files: [makeFile('a.txt', 1, 'text/plain')] } } as unknown as DragEvent);
+      expect(c.files.value).toHaveLength(0);
+      expect(c.rejected.value[0]?.reason).toBe('unsupported-type');
+    });
+
+    it('reads the list live, so a prop change takes effect', () => {
+      let accept = '.pdf';
+      const c = useComposerAttachments({ accept: () => accept });
+      c.addFiles([makeFile('a.txt', 1)]);
+      expect(c.files.value).toHaveLength(0);
+      accept = '.txt';
+      c.addFiles([makeFile('a.txt', 1)]);
+      expect(c.files.value).toHaveLength(1);
+    });
+
+    it('returns null when attachments are off: nothing was considered, so nothing was refused', () => {
+      const onReject = vi.fn();
+      const c = useComposerAttachments({ enabled: () => false, onReject });
+      expect(c.addFiles([makeFile('a.txt', 1)])).toBeNull();
+      expect(onReject).not.toHaveBeenCalled();
     });
   });
 });

@@ -124,13 +124,18 @@ public class PermissionDbSeeder
         {
             // context.Permissions is keyed case-sensitively; permission checks
             // are case-insensitive everywhere else, so match overrides the same way.
+            // A lookup, not a dictionary: two providers declaring case variants of
+            // one code must not throw here and abort the whole seed run.
             var declaredByCode = context.Permissions.Values
-                .ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
+                .ToLookup(p => p.Name, StringComparer.OrdinalIgnoreCase);
             foreach (var (code, category) in categoryOverrides)
             {
-                if (declaredByCode.TryGetValue(code, out var declared))
+                if (declaredByCode.Contains(code))
                 {
-                    declared.Category = category;
+                    foreach (var declared in declaredByCode[code])
+                    {
+                        declared.Category = category;
+                    }
                 }
                 else
                 {
@@ -144,7 +149,7 @@ public class PermissionDbSeeder
         // Pass 1: upsert modules (groups), top-down so parents exist before
         // children. We use a `code` lookup to map declarations to DB rows.
         var existingModules = await _moduleRepository.AsQueryable().ToListAsync(cancellationToken);
-        var moduleByCode = existingModules.ToDictionary(m => m.Code, StringComparer.OrdinalIgnoreCase);
+        var moduleByCode = IndexByCode(existingModules, m => m.Code, m => m.IsSystemManaged, m => m.CreationTime, "module", out _);
         var touched = 0;
 
         // Topologically sort group declarations: parents first.
@@ -199,16 +204,15 @@ public class PermissionDbSeeder
         // Pass 2: upsert functions. Lookup needs module reference, hence
         // (moduleCode, functionCode) tuple for uniqueness.
         var existingFunctions = await _functionRepository.AsQueryable().ToListAsync(cancellationToken);
-        var functionByCode = existingFunctions.ToDictionary(f => f.Code, StringComparer.OrdinalIgnoreCase);
+        var functionByCode = IndexByCode(existingFunctions, f => f.Code, f => f.IsSystemManaged, f => f.CreationTime, "permission", out var shadowedFunctions);
         foreach (var perm in context.Permissions.Values)
         {
-            // The group is the permission's parent module - fall back to
-            // ParentName for declarations made outside a group block.
-            var moduleCode = perm.Group?.Name ?? perm.ParentName;
+            // ParentName names the module (group) the permission belongs to.
+            var moduleCode = perm.ParentName;
             if (string.IsNullOrEmpty(moduleCode))
             {
                 _logger.LogWarning(
-                    "Permission {Name} declared without a module/group; skipping. Wrap it in context.AddGroup(...).AddPermission(...).",
+                    "Permission {Name} declared without a module/group; skipping. Declare it with context.AddPermission(..., parentName: <group name>).",
                     perm.Name);
                 continue;
             }
@@ -247,7 +251,9 @@ public class PermissionDbSeeder
                     Name = perm.DisplayName,
                     Description = perm.Description,
                     ModuleId = module.Id,
-                    IsEnabled = perm.IsEnabled,
+                    // 停用模块是级联操作（模块与其下全部功能一起停用），不是生效判据；
+                    // 停用期间新声明的码随模块一起停用，重新启用模块时被级联带起来。
+                    IsEnabled = perm.IsEnabled && module.IsEnabled,
                     Category = perm.Category,
                     IsSystemManaged = true,
                 };
@@ -334,7 +340,10 @@ public class PermissionDbSeeder
             // the module alive).
             var declaredGroupCodes = new HashSet<string>(
                 context.Groups.Values.Select(g => g.Name), StringComparer.OrdinalIgnoreCase);
-            var liveModuleIds = functionByCode.Values.Where(f => !f.IsRetired).Select(f => f.ModuleId).ToHashSet();
+            // Shadowed case-variant rows are still live rows in their module: count them,
+            // or a module holding only such a row would be retired from under it.
+            var liveModuleIds = functionByCode.Values.Concat(shadowedFunctions)
+                .Where(f => !f.IsRetired).Select(f => f.ModuleId).ToHashSet();
             var orphanModules = moduleByCode.Values
                 .Where(m => m.IsSystemManaged
                             && !m.IsRetired
@@ -368,6 +377,49 @@ public class PermissionDbSeeder
     }
 
     /// <summary>
+    /// Index existing rows by code, case-insensitively - the way every runtime
+    /// check matches codes.
+    /// </summary>
+    /// <remarks>
+    /// The database may hold two rows whose codes differ only by letter case: the
+    /// admin write paths compared codes case-sensitively (as do the unique indexes
+    /// on PostgreSQL and SQLite) until they were fixed, so such pairs can predate
+    /// the fix. A plain <c>ToDictionary</c> threw on them, the startup task logged
+    /// one error, and every later boot skipped the whole seed run: codes shipped by
+    /// newer deployments were never inserted (403 for every non-super admin) and
+    /// retirement stopped. Here each group keeps one row - the system-managed one,
+    /// else the oldest - and the others are reported for manual clean-up and left
+    /// untouched (<paramref name="shadowed"/>).
+    /// </remarks>
+    private Dictionary<string, T> IndexByCode<T>(
+        IReadOnlyCollection<T> rows,
+        Func<T, string> code,
+        Func<T, bool> isSystemManaged,
+        Func<T, DateTime> creationTime,
+        string kind,
+        out List<T> shadowed)
+    {
+        var index = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+        shadowed = [];
+        foreach (var group in rows.GroupBy(code, StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group
+                .OrderByDescending(isSystemManaged)
+                .ThenBy(creationTime)
+                .ToList();
+            index[group.Key] = ordered[0];
+            if (ordered.Count > 1)
+            {
+                shadowed.AddRange(ordered.Skip(1));
+                _logger.LogError(
+                    "PermissionDbSeeder: {Kind} codes {Codes} differ only by letter case and are matched as one code. Seeding keeps '{Kept}' and leaves the others untouched; move their grants to the kept row and delete them.",
+                    kind, string.Join(", ", ordered.Select(code)), code(ordered[0]));
+            }
+        }
+        return index;
+    }
+
+    /// <summary>
     /// Topological sort of permission groups so a child group's parent
     /// is always processed first. Groups whose <c>ParentName</c> doesn't
     /// resolve are emitted last with parentId=null (admin sees them at
@@ -375,7 +427,11 @@ public class PermissionDbSeeder
     /// </summary>
     private static List<PermissionGroupDefinition> TopoSortGroups(IEnumerable<PermissionGroupDefinition> groups)
     {
-        var byName = groups.ToDictionary(g => g.Name, StringComparer.OrdinalIgnoreCase);
+        // First declaration wins for case variants (the declarations are collapsed
+        // case-sensitively upstream); a ToDictionary here would throw and abort the run.
+        var byName = groups
+            .GroupBy(g => g.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<PermissionGroupDefinition>();
 

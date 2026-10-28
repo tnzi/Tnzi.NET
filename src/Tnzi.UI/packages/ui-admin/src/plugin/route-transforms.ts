@@ -236,6 +236,31 @@ export function appendUnderAdmin(
   })
 }
 
+/**
+ * The public recipient pages the route table ships: pages a person opens from
+ * a mailed link with no account (a shared file, an unsubscribe link, an
+ * invitation). Each one can be left out with `defineAdminApp({ hidePublicPages })`.
+ */
+export const PUBLIC_PAGE_ROUTE_NAMES = ['share-link', 'unsubscribe', 'accept-invitation'] as const
+
+/** A public recipient page, by route name. See {@link PUBLIC_PAGE_ROUTE_NAMES}. */
+export type AdminPublicPage = (typeof PUBLIC_PAGE_ROUTE_NAMES)[number]
+
+/**
+ * Leave the named public pages out of the table, for an app whose recipients
+ * open those links in another front end. Only these top-level pages can be
+ * removed this way: the admin shell, login and the exception pages are not
+ * optional.
+ */
+export function removePublicPages(
+  routes: RouteRecordRaw[],
+  hidden: readonly AdminPublicPage[],
+): RouteRecordRaw[] {
+  if (hidden.length === 0) return routes
+  const names = new Set<string>(hidden.filter((name) => (PUBLIC_PAGE_ROUTE_NAMES as readonly string[]).includes(name)))
+  return routes.filter((route) => typeof route.name !== 'string' || !names.has(route.name))
+}
+
 /** Replace placeholder login / forbidden components when consumer provides their own. */
 export function applyPlaceholders(
   routes: RouteRecordRaw[],

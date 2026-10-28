@@ -42,6 +42,7 @@ import {
   type DeepReadonly,
   type ComputedRef,
 } from 'vue';
+import type { ToolResultBlockDto, UsageLimitWindow } from '@tnzi/core/services/ai';
 import { scheduleFrame } from '../utils/scheduleFrame';
 
 // ---------------------------------------------------------------------------
@@ -60,13 +61,33 @@ export interface TokenUsage {
 
 export interface ToolCallInfo {
   name: string;
+  /**
+   * The call's id, when the backend reports one (external CLI agents). The
+   * start and the result of one call arrive as two events with the same id.
+   */
+  id?: string | null;
+  /**
+   * `running` / `completed` / `failed` when the backend reports it (external
+   * CLI agents). It beats `isSuccess`, which defaults to true on a call that
+   * has not finished yet.
+   */
+  status?: string | null;
   durationMs?: number | null;
   /** Outcome as the backend reports it (`ToolCallDetail`). Absent while pending. */
   isSuccess?: boolean | null;
   /** Error message when `isSuccess` is false. */
   error?: string | null;
-  input?: string | null;
+  /** The arguments as the agent sent them: a JSON value (usually an object), or text. */
+  input?: unknown;
   output?: string | null;
+  /**
+   * What the tool returned, block by block (external CLI agents): `text`, `image` (an
+   * `attachmentId`, read through the thread's attachment endpoint) and `file` (a file the
+   * tool handed over, by `name` and `uri`).
+   */
+  result?: ToolResultBlockDto[] | null;
+  /** How long the reply text was when the call happened (external CLI agents). */
+  textOffset?: number | null;
 }
 
 export interface MessageAttachment {
@@ -76,6 +97,10 @@ export interface MessageAttachment {
   fileName?: string | null;
   base64Data?: string | null;
   mediaType?: string | null;
+  /** A stored chat attachment, read through the thread's attachment endpoint. */
+  attachmentId?: string | null;
+  /** Size in bytes, when known. */
+  size?: number | null;
 }
 
 export interface ChatMessage {
@@ -100,10 +125,30 @@ export interface ChatMessage {
   /** Feedback rating (true = positive, false = negative, null = none). */
   feedbackRating?: boolean | null;
   /** Lifecycle status. 'error' / 'stopped' render dedicated UI in both message
-   *  renderers (TThreadMessage and TChatMessage); both built-in transports write it. */
-  status?: 'streaming' | 'done' | 'stopped' | 'error';
+   *  renderers (TThreadMessage and TChatMessage); both built-in transports write it.
+   *  'usage_limit': a usage limit stopped the reply. `errorCode` says whose:
+   *  `AI_USAGE_LIMIT_REACHED` is a limit this deployment set for the user,
+   *  `AI_CLI_USAGE_LIMIT` the external CLI's own account (TThreadMessage words
+   *  the two differently, with `usageLimitResetsAt` when known). */
+  status?: 'streaming' | 'done' | 'stopped' | 'error' | 'usage_limit';
   /** Error message shown when status === 'error'. */
   error?: string | null;
+  /**
+   * With status 'error' or 'usage_limit': the server's error code, when it gave one
+   * (`useChatThreads` fills it). Lets a renderer or `describeError` word the failure
+   * in the product's own copy.
+   */
+  errorCode?: string | null;
+  /** With status 'error': the error envelope's `errorDetails`, when the server gave them. */
+  errorDetails?: Record<string, unknown> | null;
+  /** With status 'usage_limit': when the limit resets (ISO), if the server knew. */
+  usageLimitResetsAt?: string | null;
+  /** With status 'usage_limit' and `AI_USAGE_LIMIT_REACHED`: the window at its limit, if the server said. */
+  usageLimitWindow?: UsageLimitWindow | null;
+  /** Position in the stored thread; absent on a message not stored yet. */
+  order?: number | null;
+  /** On a user message: the per-turn metadata it was sent with. */
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface UseChatOptions {
@@ -338,9 +383,11 @@ export function useChat(options: UseChatOptions = {}): UseChatReturn {
       abortController.value = null;
     }
 
-    // Mark any streaming messages as done
+    // Settle any streaming message as stopped: clearing the flag alone left a
+    // cut-off answer that read as complete, since the renderers key the
+    // "Generation stopped" mark off `status`.
     messages.value = messages.value.map((msg) =>
-      msg.isStreaming ? { ...msg, isStreaming: false } : msg,
+      msg.isStreaming ? { ...msg, isStreaming: false, status: 'stopped' } : msg,
     );
     isStreaming.value = false;
     options.onStreamEnd?.();

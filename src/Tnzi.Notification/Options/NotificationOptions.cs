@@ -81,12 +81,6 @@ public class NotificationOptions
     public int SendTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
-    /// 获取或设置 SMS 最大内容长度。
-    /// KEEP-STATIC：当前无运行时消费者（发送路径未接线截断/校验），暴露会造成"假热配"。
-    /// </summary>
-    public int SmsMaxContentLength { get; set; } = 1600;
-
-    /// <summary>
     /// 获取或设置 重试配置
     /// </summary>
     public RetryOptions Retry { get; set; } = new();
@@ -267,6 +261,12 @@ public class DispatchOptions
     /// <remarks>
     /// 群发不限速会触发服务商的滥用防护 —— 结果不是发得慢，是<b>整个账号被封</b>，
     /// 连正常的密码重置邮件一起停摆。设成服务商配额的一个保守分数。
+    /// <para>
+    /// 按<b>每一次投递</b>（每个收件人）计，每个发送账号（渠道 + 服务商键）各自一份，整个进程共用
+    /// （见 <c>NotificationSendPacer</c>）。所有发送路径都受它约束：创建并发送、排队、定时、重试、重发失败项、派发恢复。
+    /// 限速会拉长一次群发的耗时（五千人、每分钟 60 次 ≈ 83 分钟）；正在飞的批次在等待期间照样推进心跳，
+    /// 不会因此被判成卡住。
+    /// </para>
     /// </remarks>
     [RuntimeSetting(Label = "Rate Per Minute", I18n = "admin.modules.system.settings.fields.notificationRatePerMinute",
         Type = SettingFieldType.Int, Min = 0)]
@@ -285,13 +285,12 @@ public class DispatchOptions
 public class QueueOptions
 {
     /// <summary>
-    /// 获取或设置 是否启用队列
+    /// 获取或设置 队列容量（进程内队列，默认10000）
     /// </summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>
-    /// 获取或设置 队列容量（仅用于内存队列，默认10000）
-    /// </summary>
+    /// <remarks>
+    /// 队列只有这一种实现（<c>ChannelQueueService</c>，进程内），且总是启用：没有可以关掉它的开关，
+    /// 也没有可换的持久化后端。进程退出时丢掉的排队项由派发恢复扫描补发。
+    /// </remarks>
     public int QueueCapacity { get; set; } = 10000;
 }
 

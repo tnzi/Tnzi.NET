@@ -108,7 +108,7 @@ function mockAdminStatisticsApi() {
       failedTransactions: 5,
       totalRefunds: 500,
       refundCount: 3,
-      refundRate: 0.06,
+      refundRate: 6,
       activeSubscriptions: 20,
       channelDistribution: [],
     })),
@@ -166,6 +166,21 @@ describe('payment-bridge', () => {
     expect(adminStatisticsApi.getStatistics).toHaveBeenCalled()
     expect(stats.totalRevenue).toBe(10000)
     expect(stats.totalTransactions).toBe(50)
+  })
+
+  // A refusal that is not an envelope (a gateway 403, a 502 page) normalises to
+  // a failed result with no `data` key; the unchecked unwrap handed that object
+  // back as the statistics, and the page spread it over zeros.
+  it('orders.statistics rejects a refused read instead of resolving it as figures', async () => {
+    const adminStatisticsApi = mockAdminStatisticsApi()
+    adminStatisticsApi.getStatistics.mockResolvedValueOnce({ succeeded: false, success: false, code: 403, message: 'Forbidden' } as never)
+    const bridge = createPaymentBridge({
+      adminPaymentApi: mockAdminPaymentApi() as never,
+      adminRefundApi: mockAdminRefundApi() as never,
+      adminSubscriptionApi: mockAdminSubscriptionApi() as never,
+      adminStatisticsApi: adminStatisticsApi as never,
+    })
+    await expect(bridge.orders.statistics()).rejects.toThrow('Forbidden')
   })
 
   // orders/subscriptions/refunds are read-only ledgers - the contracts expose

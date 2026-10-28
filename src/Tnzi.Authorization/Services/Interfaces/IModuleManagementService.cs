@@ -33,6 +33,37 @@ public interface IModuleManagementService
     Task<Result<IEnumerable<FunctionModule>>> GetModulesAsync();
 
     /// <summary>
+    /// 权限目录：全部模块（平铺）连同各自的全部功能，一次读出。管理面口径，含停用与退役行。
+    /// </summary>
+    /// <remarks>
+    /// 角色授权、用户直授与权限目录三张管理页的共同数据源，由各自控制器在自己的类级门下暴露。
+    /// 默认实现按模块逐个取功能，且不标 <see cref="PermissionCatalogueModuleDto.IsBuiltIn"/>；
+    /// 框架的实现是两条查询并按运行中的模块图标出内置目录。
+    /// </remarks>
+    async Task<Result<IReadOnlyList<PermissionCatalogueModuleDto>>> GetPermissionCatalogueAsync()
+    {
+        var modules = await GetModulesAsync();
+        if (!modules.Succeeded || modules.Data is null)
+        {
+            return Result.Failure<IReadOnlyList<PermissionCatalogueModuleDto>>(modules.Message ?? "Failed to read the permission catalogue", modules.Code ?? 500, modules.ErrorCode);
+        }
+
+        var catalogue = new List<PermissionCatalogueModuleDto>();
+        foreach (var module in modules.Data)
+        {
+            var functions = await GetModuleFunctionsAsync(module.Id);
+            if (!functions.Succeeded || functions.Data is null)
+            {
+                return Result.Failure<IReadOnlyList<PermissionCatalogueModuleDto>>(functions.Message ?? "Failed to read the permission catalogue", functions.Code ?? 500, functions.ErrorCode);
+            }
+
+            catalogue.Add(PermissionCatalogueMapping.ToCatalogueModule(module, functions.Data, isBuiltIn: false));
+        }
+
+        return Result.Success<IReadOnlyList<PermissionCatalogueModuleDto>>(catalogue);
+    }
+
+    /// <summary>
     /// 创建模块
     /// </summary>
     /// <param name="request">模块信息</param>

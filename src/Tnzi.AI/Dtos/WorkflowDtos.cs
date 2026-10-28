@@ -174,7 +174,12 @@ public class WorkflowStepDto
     [Range(1, 3600)]
     public int? TimeoutSeconds { get; set; }
 
-    /// <summary>Whether this step requires human approval before downstream steps can proceed</summary>
+    /// <summary>
+    /// Whether this step requires human approval before downstream steps can proceed.
+    /// The step runs first and its output is what gets approved (run-then-gate); a step without a
+    /// <c>nodeType</c> therefore makes its agent call before the pause. For a pure approval gate that
+    /// runs nothing, set <c>Configuration["nodeType"] = "approval"</c> instead.
+    /// </summary>
     public bool RequiresApproval { get; set; }
 
     /// <summary>

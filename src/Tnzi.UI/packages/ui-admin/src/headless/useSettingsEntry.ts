@@ -75,7 +75,7 @@ export function useSettingsEntry(options?: { enabled?: () => boolean }): Setting
   const desktop = useAdminDesktopStore()
   const router = safeRouter()
   const route = safeRoute()
-  const { can, canAny, canAnySettings } = usePermissionGuard()
+  const { canReachRoute } = usePermissionGuard()
 
   /**
    * Mirrors `AdminShellRoot`'s rule rather than importing `useAdminShellLayout`,
@@ -90,36 +90,24 @@ export function useSettingsEntry(options?: { enabled?: () => boolean }): Setting
     if (!router || typeof router.resolve !== 'function') return null
     try {
       return (router.resolve({ name: 'settings' }).meta ?? {}) as {
-        permission?: unknown
-        permissions?: unknown
-        anySettingsPermission?: unknown
         title?: unknown
         icon?: unknown
-      }
+      } & Readonly<Record<string, unknown>>
     } catch {
       return null
     }
   })
 
   /**
-   * Same reachability the guard enforces, with the same fail-open semantics as
-   * the menu filter: the bundled route uses `meta.anySettingsPermission`, older
-   * custom routes a plain `permission` / `permissions`, and a route that
-   * declares none is public.
+   * The reachability the guard enforces (`canReachRoute`, same fail-open): the
+   * bundled route uses `meta.anySettingsPermission`, older custom routes a plain
+   * `permission` / `permissions`, and a route that declares none is public.
    */
   const available = computed<boolean>(() => {
     if (options?.enabled && !options.enabled()) return false
     if (typeof router?.hasRoute !== 'function' || !router.hasRoute('settings')) return false
     if (routeStore.unavailableRouteNames.has('settings')) return false
-    const meta = settingsMeta.value
-    if (!meta) return true
-    if (meta.anySettingsPermission === true) return canAnySettings()
-    if (typeof meta.permission === 'string' && meta.permission) return can(meta.permission)
-    if (Array.isArray(meta.permissions)) {
-      const plural = meta.permissions.filter((p): p is string => typeof p === 'string' && p !== '')
-      if (plural.length > 0) return canAny(plural)
-    }
-    return true
+    return canReachRoute(settingsMeta.value ?? undefined)
   })
 
   const label = computed(() => resolveLabel('admin.common.settings'))

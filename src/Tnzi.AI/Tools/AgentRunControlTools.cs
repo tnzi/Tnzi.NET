@@ -70,6 +70,9 @@ public class AgentRunControlTools : IAIToolProvider
         [Description("Polling interval in milliseconds")] int pollIntervalMs = 1000,
         CancellationToken cancellationToken = default)
     {
+        // 等待时长由调用方指定（服务端夹在 900 秒内），不占工具的执行超时：否则超过工具超时的等待
+        // 一律被截成「工具超时」，而不是按约定返回 TimedOut=true 与当前状态
+        using var suspended = ToolCallTimeout.Suspend();
         var result = await _controlService.WaitAsync(runId, new WaitAgentRunInput
         {
             TimeoutSeconds = timeoutSeconds,

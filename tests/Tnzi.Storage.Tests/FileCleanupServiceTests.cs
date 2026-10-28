@@ -40,6 +40,7 @@ public class FileCleanupServiceTests
             _mockCurrentTenant.Object,
             new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object,
+            new OrphanReferenceScanCursor(),
             multiTenancyOptions: null);
     }
 

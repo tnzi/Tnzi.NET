@@ -44,7 +44,8 @@ public class ArchiveAuthorizationTests
             new TestFileUrlSigner(),
             _serviceProvider.Object,
             new UploadGuard(monitor.Object),
-            new FileThumbnailGenerator(_storage.Object, monitor.Object));
+            new FileThumbnailGenerator(_storage.Object, monitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     private static FileRecord Record(Guid id) => new() { Id = id, FileName = $"{id}.pdf", OriginalName = $"{id}.pdf", Path = $"2026/01/01/{id}.pdf" };
@@ -111,5 +112,72 @@ public class ArchiveAuthorizationTests
         _storage.Verify(
             s => s.DownloadAsync(It.IsAny<string>()),
             Times.Never);
+    }
+
+    // ── 请求级凭据换不来一份归调用者所有的派生记录 ─────────────────────────────
+    // 复制 / 压缩 / 解压产出的记录 CreatorId 是调用者自己，活得比任何 ?sig= 渲染令牌与分享授予都久。
+    // 读得了（因为带着一条会过期的凭据）不等于可以把它换成一份永久属于自己、可随意下载、再签发、再分享的副本。
+
+    [Fact]
+    public async Task Copy_WithOnlyARequestLevelCredential_IsRefused()
+    {
+        var shared = Guid.NewGuid();
+        _files.Setup(r => r.GetAsync(shared, It.IsAny<CancellationToken>())).ReturnsAsync(Record(shared));
+
+        var sut = CreateSut(TestFileAccessAuthorizer.ReadableButNotMintable());
+
+        var result = await sut.CopyAsync(shared);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(404, result.Code);
+        _storage.Verify(s => s.CopyAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _storage.Verify(s => s.DownloadAsync(It.IsAny<string>()), Times.Never);
+        _files.Verify(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Copy_ByACallerWhoMayMintTokens_StillWorks()
+    {
+        // 正控制：收紧的只是请求级凭据那一条，所有者 / 权限码 / 引用判据照常能复制。
+        var mine = Guid.NewGuid();
+        _files.Setup(r => r.GetAsync(mine, It.IsAny<CancellationToken>())).ReturnsAsync(Record(mine));
+        _storage.Setup(s => s.CopyAsync(It.IsAny<string>(), It.IsAny<string>())).ReturnsAsync("2026/01/01/copy.pdf");
+
+        var sut = CreateSut(TestFileAccessAuthorizer.AllowAll());
+
+        var result = await sut.CopyAsync(mine);
+
+        Assert.True(result.Succeeded, result.Message);
+        _files.Verify(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Compress_WithOnlyARequestLevelCredential_PacksNothing()
+    {
+        var shared = Guid.NewGuid();
+        _files.Setup(r => r.GetAsync(shared, It.IsAny<CancellationToken>())).ReturnsAsync(Record(shared));
+
+        var sut = CreateSut(TestFileAccessAuthorizer.ReadableButNotMintable());
+
+        await sut.CompressAsync([shared], "bundle.zip");
+
+        _storage.Verify(s => s.DownloadAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Decompress_WithOnlyARequestLevelCredential_IsRefused()
+    {
+        var shared = Guid.NewGuid();
+        var archive = Record(shared);
+        archive.Extension = ".zip";
+        _files.Setup(r => r.GetAsync(shared, It.IsAny<CancellationToken>())).ReturnsAsync(archive);
+
+        var sut = CreateSut(TestFileAccessAuthorizer.ReadableButNotMintable());
+
+        var result = await sut.DecompressAsync(shared);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(404, result.Code);
+        _storage.Verify(s => s.DownloadAsync(It.IsAny<string>()), Times.Never);
     }
 }

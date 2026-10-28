@@ -25,7 +25,7 @@ public class PayRunInputConfiguration : EntityTypeConfigurationBase<PayRunInput,
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Property(i => i.Amount).HasMoneyPrecision();
-        builder.Property(i => i.Note).HasMaxLength(500);
+        builder.Property(i => i.Note).HasMaxLength(PayrollFieldLimits.InputNoteMaxLength);
 
         if (multiTenancyEnabled)
         {

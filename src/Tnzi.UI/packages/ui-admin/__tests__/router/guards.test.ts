@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import type { RouteLocationNormalized } from 'vue-router'
+import { createMemoryHistory, createRouter, type RouteLocationNormalized } from 'vue-router'
 import { createAuthGuard, createModuleGuard, createPermissionGuard } from '../../src/router/guards'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
@@ -134,18 +134,37 @@ describe('createPermissionGuard', () => {
     expect(result).toBe(true)
   })
 
-  it('adds tab to tabStore on successful navigation', async () => {
+  // The shell records tabs once a navigation has landed inside it. A guard runs
+  // before that: a tab added here outlived a navigation a later guard
+  // cancelled, and a public page rendered outside the shell got one too.
+  it('records no tab for the route it lets through', async () => {
     const auth = useAdminAuthStore()
     auth.isSuperUser = true
     const tabStore = useAdminTabStore()
-    const spy = vi.spyOn(tabStore, 'addTab')
     const guard = createPermissionGuard() as any
-    await guard(
-      fakeRoute('/admin/users', { title: 'Users' }, 'admin.users'),
-      fakeRoute('/'),
-      vi.fn(),
-    )
-    expect(spy).toHaveBeenCalled()
+    const result = await guard(fakeRoute('/admin/users', { title: 'Users' }, 'admin.users'), fakeRoute('/'))
+    expect(result).toBe(true)
+    expect(tabStore.tabs).toEqual([])
+  })
+
+  it('a navigation a later guard cancels leaves the tab bar as it was', async () => {
+    useAdminAuthStore().isSuperUser = true
+    const tabStore = useAdminTabStore()
+    const page = { render: () => null }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', name: 'home', component: page },
+        { path: '/admin/users', name: 'identity.users', component: page, meta: { title: 'Users' } },
+      ],
+    })
+    router.beforeEach(createPermissionGuard())
+    router.beforeEach((to) => to.name !== 'identity.users')
+    await router.push('/')
+    await router.push('/admin/users')
+    expect(router.currentRoute.value.name).toBe('home')
+    expect(tabStore.tabs).toEqual([])
+    expect(tabStore.activeTabId).toBe('')
   })
 
   it('redirects to forbidden when a role-gated route requires a role the user lacks', async () => {

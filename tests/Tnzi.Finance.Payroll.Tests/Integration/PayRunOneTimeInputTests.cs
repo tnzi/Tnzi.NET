@@ -433,6 +433,149 @@ public class PayRunOneTimeInputTests : PayrollIntegrationTestBase
         (await SinglePayslipAsync(run)).CalculationError.ShouldBeNull();
     }
 
+    // ---------- 出口再核：录入之后那个人不在批次里了 ----------
+
+    private async Task DeactivateAsync(Guid employeeId)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IRepository<Employee, Guid>>();
+        var employee = (await repo.FirstOrDefaultAsync(e => e.Id == employeeId))!;
+        employee.IsActive = false;
+        await repo.UpdateAsync(employee);
+        await repo.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// ★★ 已批准的一次性输入录给了一个之后不在批次里的人（停用 / 离职日回填 / 分配换了结构或频率 /
+    /// 批次的结构过滤被改）：计算必须失败并点名，而不是照常算完别人、让那笔钱安静消失。
+    /// </summary>
+    /// <remarks>
+    /// 逐人核对只覆盖被圈选的员工，不在批次里的那个人的输入没有任何一处读到它，
+    /// 批次照常算完、照常过账，正是这个功能要防的那一种失效。
+    /// </remarks>
+    [Fact]
+    public async Task OneTimeInput_ForAnEmployeeWhoLeftTheRun_FailsTheCalculationInsteadOfVanishing()
+    {
+        var (structureId, employeeId, bonusId, _) = await BonusScenarioAsync();
+        var other = await CreateEmployeeAsync("EMP2", "Two");
+        await AssignAsync(other.Id, structureId, 1000m, new DateTime(2026, 1, 1));
+        var run = await CreateJuneRunAsync();
+        (await SetInputAsync(run, employeeId, bonusId, 5000m, "approved")).Succeeded.ShouldBeTrue();
+
+        await DeactivateAsync(employeeId);
+        var calculated = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run));
+
+        calculated.Succeeded.ShouldBeFalse("EMP1 的 5,000 没人会读，批次不能就这样算完");
+        calculated.Code.ShouldBe(400);
+        calculated.Message!.ShouldContain("EMP1");
+        calculated.Message!.ShouldContain("inactive");
+        (await ReloadAsync<PayRun>(run))!.Status.ShouldBe(PayRunStatus.Draft);
+
+        // 出路：删掉那笔输入（或让他重新合格），之后照常计算。
+        var inputs = await InScopeAsync<IPayRunService, Result<List<PayRunInputDto>>>(s => s.GetInputsAsync(run));
+        (await InScopeAsync<IPayRunService, Result>(s => s.DeleteInputAsync(run, inputs.Data!.Single().Id))).Succeeded.ShouldBeTrue();
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// 只重算一个人（改出勤天数）时，不因为别人名下的孤儿输入而失败：核对只覆盖被重算的范围。
+    /// </summary>
+    [Fact]
+    public async Task RecalculatingOnePayslip_IsNotBlockedByAnotherEmployeesStrandedInput()
+    {
+        var (structureId, employeeId, bonusId, _) = await BonusScenarioAsync();
+        var other = await CreateEmployeeAsync("EMP2", "Two");
+        await AssignAsync(other.Id, structureId, 1000m, new DateTime(2026, 1, 1));
+        var run = await CreateJuneRunAsync();
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+        (await SetInputAsync(run, employeeId, bonusId, 5000m)).Succeeded.ShouldBeTrue();
+        await DeactivateAsync(employeeId);
+
+        var slips = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(run));
+        var otherSlip = slips.Data!.Single(p => p.EmployeeId == other.Id);
+        var updated = await InScopeAsync<IPayRunService, Result<PayslipDto>>(
+            s => s.UpdatePayslipInputsAsync(run, otherSlip.Id, new UpdatePayslipInputsDto { WorkedDays = 15m }));
+
+        updated.Succeeded.ShouldBeTrue(updated.Message);
+        // 整批重算则把 EMP1 的孤儿输入报出来。
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// ★ 已计算的批次里，录过输入的人之后不合格了：整批重算按上面那条拒绝并要求「删掉那些输入」，
+    /// 那么删除本身必须走得通。
+    /// </summary>
+    /// <remarks>
+    /// 删除会重算这个人那张工资单，而他已经不在圈选范围里：重算答「不再合格」（只剩这一笔时）
+    /// 或再报一次孤儿输入（还有别的输入时），删除随之回滚。于是删不掉、整批也算不了，
+    /// 唯一的出路成了先把人改回合格、删完再改回去。
+    /// </remarks>
+    [Fact]
+    public async Task DeletingTheStrandedInputs_OfAnEmployeeWhoLeftACalculatedRun_UnblocksTheRecalculation()
+    {
+        var (structureId, employeeId, bonusId, _) = await BonusScenarioAsync();
+        var other = await CreateEmployeeAsync("EMP2", "Two");
+        await AssignAsync(other.Id, structureId, 1000m, new DateTime(2026, 1, 1));
+        var run = await CreateJuneRunAsync();
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+        (await SetInputAsync(run, employeeId, bonusId, 5000m, "approved")).Succeeded.ShouldBeTrue();
+        await DeactivateAsync(employeeId);
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeFalse();
+
+        var inputs = await InScopeAsync<IPayRunService, Result<List<PayRunInputDto>>>(s => s.GetInputsAsync(run));
+        var deleted = await InScopeAsync<IPayRunService, Result>(s => s.DeleteInputAsync(run, inputs.Data!.Single().Id));
+
+        deleted.Succeeded.ShouldBeTrue(deleted.Message);
+        (await CountAsync<PayRunInput>(i => i.EmployeeId == employeeId)).ShouldBe(0);
+        var recalculated = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run));
+        recalculated.Succeeded.ShouldBeTrue(recalculated.Message);
+        var slips = await InScopeAsync<IPayRunService, Result<List<PayslipListDto>>>(s => s.GetPayslipsAsync(run));
+        slips.Data!.ShouldAllBe(p => p.EmployeeId == other.Id);
+    }
+
+    /// <summary>
+    /// 对照：人仍在批次里时，删除照常把他那张工资单重算回不含这笔输入的样子。
+    /// </summary>
+    [Fact]
+    public async Task DeletingAnInput_OfAnEmployeeStillInTheRun_StillRecalculatesThePayslip()
+    {
+        var (_, employeeId, bonusId, _) = await BonusScenarioAsync();
+        var run = await CreateJuneRunAsync();
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+        var baseline = (await SinglePayslipAsync(run)).GrossPay;
+        var set = await SetInputAsync(run, employeeId, bonusId, 5000m, "approved");
+        set.Succeeded.ShouldBeTrue(set.Message);
+        (await SinglePayslipAsync(run)).GrossPay.ShouldBe(baseline + 5000m);
+
+        (await InScopeAsync<IPayRunService, Result>(s => s.DeleteInputAsync(run, set.Data!.Id))).Succeeded.ShouldBeTrue();
+
+        (await SinglePayslipAsync(run)).GrossPay.ShouldBe(baseline);
+    }
+
+    /// <summary>
+    /// ★ 批次已计算之后才合格的员工（之后才拿到分配）：给他录输入必须 409，不能返回 200 而没有任何工资单带上它。
+    /// </summary>
+    [Fact]
+    public async Task OneTimeInput_ForAnEmployeeWithoutAPayslipInACalculatedRun_IsRejected()
+    {
+        var (structureId, _, bonusId, _) = await BonusScenarioAsync();
+        var run = await CreateJuneRunAsync();
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+
+        var newcomer = await CreateEmployeeAsync("EMP9", "Newcomer");
+        await AssignAsync(newcomer.Id, structureId, 1000m, new DateTime(2026, 1, 1));
+
+        var set = await SetInputAsync(run, newcomer.Id, bonusId, 750m, "signing bonus");
+
+        set.Succeeded.ShouldBeFalse("没有工资单会带上这笔钱");
+        set.Code.ShouldBe(409);
+        (await CountAsync<PayRunInput>(i => i.EmployeeId == newcomer.Id)).ShouldBe(0);
+
+        // 出路：整批重算把他圈进来，再录。
+        (await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(run))).Succeeded.ShouldBeTrue();
+        (await SetInputAsync(run, newcomer.Id, bonusId, 750m, "signing bonus")).Succeeded.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task DeletingADraftRun_TakesItsInputsWithIt()
     {

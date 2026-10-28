@@ -30,7 +30,7 @@ public class ThreadResolutionMiddlewareTests
     {
         var mock = new Mock<IAgentThreadInternalService>();
         mock.Setup(s => s.GetOrCreateThreadAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new ConversationContext(), resolved, isNew));
+            .ReturnsAsync((resolved, isNew));
         return mock;
     }
 

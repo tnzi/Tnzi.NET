@@ -13,17 +13,21 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
         builder.Property(i => i.DiscountAmount).HasMoneyPrecision();
         builder.Property(i => i.DueAmount).HasMoneyPrecision();
         builder.Property(i => i.PaidAmount).HasMoneyPrecision();
-        builder.Property(i => i.CustomerName).HasMaxLength(128);
+        builder.Property(i => i.CustomerName).HasMaxLength(Invoice.CustomerNameMaxLength);
         builder.Property(i => i.CustomerEmail).HasMaxLength(256);
-        builder.Property(i => i.CustomerCompany).HasMaxLength(256);
-        builder.Property(i => i.CustomerTaxId).HasMaxLength(64);
-        builder.Property(i => i.CustomerAddress).HasMaxLength(500);
+        builder.Property(i => i.CustomerCompany).HasMaxLength(Invoice.CustomerCompanyMaxLength);
+        builder.Property(i => i.CustomerTaxId).HasMaxLength(Invoice.CustomerTaxIdMaxLength);
+        builder.Property(i => i.CustomerAddress).HasMaxLength(Invoice.CustomerAddressMaxLength);
+        builder.Property(i => i.BillingAccountType).HasMaxLength(BillingAccountRef.TypeMaxLength);
+        builder.Property(i => i.BillingAccountId).HasMaxLength(BillingAccountRef.IdMaxLength);
         builder.Property(i => i.BillingAddress).HasMaxLength(500);
         builder.Property(i => i.TemplateName).HasMaxLength(64);
         builder.Property(i => i.Notes).HasMaxLength(1000);
         builder.Property(i => i.InternalNotes).HasMaxLength(1000);
         builder.Property(i => i.PdfFileUrl).HasMaxLength(512);
         builder.Property(i => i.PdfFilePath).HasMaxLength(512);
+        builder.Property(i => i.PaymentMethodBrand).HasMaxLength(32);
+        builder.Property(i => i.PaymentMethodLast4).HasMaxLength(8);
 
         builder.HasMany(i => i.LineItems)
             .WithOne(l => l.Invoice)
@@ -56,9 +60,14 @@ public class InvoiceConfiguration : EntityTypeConfigurationBase<Invoice, Guid>
         builder.HasIndex(i => i.InvoiceDate);
         builder.HasIndex(i => i.CustomerEmail);
         builder.HasIndex(i => i.UserId);
+        builder.HasIndex(i => new { i.BillingAccountType, i.BillingAccountId });
         // 一笔支付至多一张发票：幂等最终由数据库唯一约束兜底，
         // 应用层查重挡不住并发投递的同一个支付完成事件。
         builder.HasIndex(i => i.PaymentId).IsUnique()
             .HasFilter(IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(nameof(Invoice.PaymentId)));
+        // 一笔退款至多一张贷项通知单（同一个退款事件被重投或并发处理时由它兜底）
+        builder.HasIndex(i => i.RefundId).IsUnique()
+            .HasFilter(IndexFilterFactory.GetColumnNotNullAndIsDeletedFalse(nameof(Invoice.RefundId)));
+        builder.HasIndex(i => i.OriginalInvoiceId);
     }
 }

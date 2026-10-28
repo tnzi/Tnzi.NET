@@ -22,7 +22,10 @@ public class TelegramAdapterOptions
     /// <summary>Allowed user ID allowlist (empty = unrestricted).</summary>
     public List<long> AllowedUsers { get; set; } = [];
 
-    /// <summary>Long-polling timeout in seconds.</summary>
+    /// <summary>
+    /// Reserved; not read. The long-poll timeout is the one the Telegram.Bot receiver uses by default,
+    /// and this value was never passed to it.
+    /// </summary>
     public int PollingTimeoutSeconds { get; set; } = 30;
 
     /// <summary>Retry attempts.</summary>

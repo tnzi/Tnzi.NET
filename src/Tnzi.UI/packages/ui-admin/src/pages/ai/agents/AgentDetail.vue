@@ -80,11 +80,14 @@
                     :placeholder="t('detail.instructionsPlaceholder')"
                   />
                 </NFormItem>
+                <!-- Not clearable: an update cannot clear a stored number (null
+                     means "no change"), so an emptied input returns to the
+                     stored value when it loses focus. -->
                 <NFormItem :label="t('form.temperature')">
-                  <NInputNumber v-model:value="edit.temperature" :step="0.1" :min="0" :max="2" clearable class="w-140px" />
+                  <NInputNumber v-model:value="edit.temperature" :step="0.1" :min="0" :max="2" class="w-140px" @blur="restoreEmptiedNumber('temperature')" />
                 </NFormItem>
                 <NFormItem :label="t('form.maxTokens')">
-                  <NInputNumber v-model:value="edit.maxTokens" :min="0" clearable class="w-140px" />
+                  <NInputNumber v-model:value="edit.maxTokens" :min="0" class="w-140px" @blur="restoreEmptiedNumber('maxTokens')" />
                 </NFormItem>
 
                 <div class="t-agent-detail__subhead">{{ t('detail.basicInfo.capabilities') }}</div>
@@ -116,6 +119,7 @@
               :icon="sectionIcon"
               :persona="agent?.persona ?? null"
               :saving="personaSaving"
+              :can-edit="can('ai.agent.update')"
               @save="savePersona"
             />
 
@@ -130,6 +134,8 @@
               :loading="cliLoading"
               :saving="cliSaving"
               :can-edit="can('ai.cliBinding.update')"
+              :can-unbind="can('ai.cliBinding.delete')"
+              :load-error="cliLoadError"
               @save="saveCliBinding"
               @unbind="unbindCli"
             />
@@ -513,6 +519,7 @@
 <script setup lang="ts">
 import { formatDateTime } from '@tnzi/core'
 import { EMPTY_DASH } from '../../../utils/placeholders'
+import { formatJsonText } from '../../../utils/json-text'
 import { computed, h, reactive, ref, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -653,6 +660,8 @@ const cliBinding = ref<CliAgentBindingDto | null>(null)
 const cliRuntimes = ref<CliRuntimeDto[]>([])
 const cliLoading = ref(false)
 const cliLoaded = ref(false)
+/** Why the binding or the runtimes could not be read; the panel shows it instead of the form. */
+const cliLoadError = ref<string | null>(null)
 const cliSaving = ref(false)
 const recentRuns = ref<AgentRunDto[]>([])
 
@@ -709,7 +718,8 @@ interface EditState {
   description: string
   instructions: string
   provider: string
-  model: string
+  /** The select's clear button sets null; a loaded agent without a model hydrates to ''. */
+  model: string | null
   isEnabled: boolean
   temperature: number | null
   maxTokens: number | null
@@ -764,14 +774,50 @@ const modelSelectOptions = computed(() => modelList.value.map((m) => ({ label: m
 // Picker items are derived from the agent's stored assignment (source of truth,
 // updated in place on each assign/remove) joined against the loaded catalogs.
 
-async function persistResource(patch: UpdateAgentDto, okMsg: string): Promise<void> {
+/**
+ * Resource writes run one at a time. An assignment is a full-list replace of
+ * the agent's enabled list, so one built while another was still on its way
+ * started from the list before that other one landed: assigning A, B and C
+ * quickly sent [A], [B] and [C], the last to land won, and reconcile deleted
+ * the grants for the others. Queued, each write builds its patch from the lists
+ * the previous one left behind. The picker stays open on purpose (several
+ * items in a row is the normal use), so clicks are queued rather than refused.
+ */
+let resourceWrites: Promise<void> = Promise.resolve()
+
+function queueResourceWrite(write: () => Promise<void>): Promise<void> {
+  const run = resourceWrites.then(write)
+  resourceWrites = run.catch(() => undefined)
+  return run
+}
+
+/** `list` with `key` added, or null when it is already there (a repeated click). */
+function withKey(list: string[] | null | undefined, key: string): string[] | null {
+  const current = list ?? []
+  return current.includes(key) ? null : [...current, key]
+}
+
+/** `list` without `key`, or null when it is already gone. */
+function withoutKey(list: string[] | null | undefined, key: string): string[] | null {
+  const current = list ?? []
+  return current.includes(key) ? current.filter((x) => x !== key) : null
+}
+
+/**
+ * Persist one resource change. `buildPatch` runs when the write's turn comes,
+ * against the agent as it is then; null means there is nothing left to do.
+ */
+async function persistResource(buildPatch: () => UpdateAgentDto | null, okMsg: string): Promise<void> {
   if (!can('ai.agent.update')) return
   const id = currentRouteId()
   if (!id) return
+  const patch = buildPatch()
+  if (!patch) return
   try {
     const updated = await bridge.agents.update(id, patch)
+    // Only the resource lists changed. Re-hydrating the Basic Info form here
+    // threw away whatever the admin had typed there and not saved yet.
     agent.value = updated
-    hydrateEdit(updated)
     toast('ok', okMsg)
   } catch (e) {
     toast('err', (e as Error).message ?? t('detail.saved'))
@@ -821,7 +867,12 @@ function findGrant(kind: GrantedKind, key: string): AgentGrantDto | undefined {
   return grants.value?.[kind].find((g) => g.key === key)
 }
 
-async function toggleGrant(kind: GrantedKind, key: string, enabled: boolean): Promise<void> {
+function toggleGrant(kind: GrantedKind, key: string, enabled: boolean): Promise<void> {
+  // Queued with the assignments: it changes the agent's enabled lists too.
+  return queueResourceWrite(() => applyGrantToggle(kind, key, enabled))
+}
+
+async function applyGrantToggle(kind: GrantedKind, key: string, enabled: boolean): Promise<void> {
   const id = currentRouteId()
   const grant = findGrant(kind, key)
   if (!id || !grant || !can('ai.agent.update')) return
@@ -845,10 +896,14 @@ async function toggleGrant(kind: GrantedKind, key: string, enabled: boolean): Pr
  * (so the change is versioned like every other agent edit); a disabled grant is
  * not in the agent's lists at all, so it is deleted by id.
  */
-async function removeGranted(kind: GrantedKind, key: string, patch: UpdateAgentDto, okMsg: string): Promise<void> {
+function removeGranted(kind: GrantedKind, key: string, buildPatch: () => UpdateAgentDto | null, okMsg: string): Promise<void> {
+  return queueResourceWrite(() => applyRemoval(kind, key, buildPatch, okMsg))
+}
+
+async function applyRemoval(kind: GrantedKind, key: string, buildPatch: () => UpdateAgentDto | null, okMsg: string): Promise<void> {
   const grant = findGrant(kind, key)
   if (!grant || grant.isEnabled) {
-    await persistResource(patch, okMsg)
+    await persistResource(buildPatch, okMsg)
     return
   }
   const id = currentRouteId()
@@ -876,9 +931,17 @@ const availableSkillItems = computed<ResourcePickerItem[]>(() => {
     .map((s) => ({ value: s.slug, title: s.name, subtitle: s.slug, description: s.description ?? undefined }))
 })
 const assignSkill = (slug: string) =>
-  persistResource({ skillSlugs: [...(agent.value?.skillSlugs ?? []), slug] }, t('detail.skills.assigned'))
+  queueResourceWrite(() =>
+    persistResource(() => {
+      const skillSlugs = withKey(agent.value?.skillSlugs, slug)
+      return skillSlugs ? { skillSlugs } : null
+    }, t('detail.skills.assigned')),
+  )
 const removeSkill = (slug: string) =>
-  removeGranted('skills', slug, { skillSlugs: (agent.value?.skillSlugs ?? []).filter((x) => x !== slug) }, t('detail.skills.removed'))
+  removeGranted('skills', slug, () => {
+    const skillSlugs = withoutKey(agent.value?.skillSlugs, slug)
+    return skillSlugs ? { skillSlugs } : null
+  }, t('detail.skills.removed'))
 
 // Tools (groups)
 const assignedToolItems = computed<ResourcePickerItem[]>(() =>
@@ -900,9 +963,17 @@ const availableToolItems = computed<ResourcePickerItem[]>(() => {
     .map((g) => ({ value: g.name, title: g.name, subtitle: `${g.toolCount} ${t('detail.tools.toolsSuffix')}`, description: g.toolNames.join(', ') || undefined }))
 })
 const assignTool = (name: string) =>
-  persistResource({ toolGroups: [...(agent.value?.toolGroups ?? []), name] }, t('detail.tools.assigned'))
+  queueResourceWrite(() =>
+    persistResource(() => {
+      const toolGroups = withKey(agent.value?.toolGroups, name)
+      return toolGroups ? { toolGroups } : null
+    }, t('detail.tools.assigned')),
+  )
 const removeTool = (name: string) =>
-  removeGranted('toolGroups', name, { toolGroups: (agent.value?.toolGroups ?? []).filter((x) => x !== name) }, t('detail.tools.removed'))
+  removeGranted('toolGroups', name, () => {
+    const toolGroups = withoutKey(agent.value?.toolGroups, name)
+    return toolGroups ? { toolGroups } : null
+  }, t('detail.tools.removed'))
 
 // Knowledge bases
 const assignedKbItems = computed<ResourcePickerItem[]>(() =>
@@ -924,9 +995,17 @@ const availableKbItems = computed<ResourcePickerItem[]>(() => {
     .map((k) => ({ value: k.id, title: k.name, subtitle: k.embeddingModel ?? undefined, description: k.description ?? undefined }))
 })
 const assignKnowledge = (id: string) =>
-  persistResource({ knowledgeBaseIds: [...(agent.value?.knowledgeBaseIds ?? []), id] }, t('detail.knowledge.assigned'))
+  queueResourceWrite(() =>
+    persistResource(() => {
+      const knowledgeBaseIds = withKey(agent.value?.knowledgeBaseIds, id)
+      return knowledgeBaseIds ? { knowledgeBaseIds } : null
+    }, t('detail.knowledge.assigned')),
+  )
 const removeKnowledge = (id: string) =>
-  removeGranted('knowledgeBases', id, { knowledgeBaseIds: (agent.value?.knowledgeBaseIds ?? []).filter((x) => x !== id) }, t('detail.knowledge.removed'))
+  removeGranted('knowledgeBases', id, () => {
+    const knowledgeBaseIds = withoutKey(agent.value?.knowledgeBaseIds, id)
+    return knowledgeBaseIds ? { knowledgeBaseIds } : null
+  }, t('detail.knowledge.removed'))
 
 // Knowledge retrieval test - exercise what this agent would retrieve from its
 // assigned knowledge bases (loops the per-KB search and merges by score).
@@ -960,15 +1039,29 @@ function arraysDiffer(a: string[], b: string[]): boolean {
   return false
 }
 
+/**
+ * The model select's clear button sets null while a loaded agent without a
+ * model hydrates to ''. Both mean "no model": compare and send one form.
+ */
+function editedModel(): string {
+  return edit.model ?? ''
+}
+
+/** An update cannot clear a stored number, so an emptied one returns to the stored value. */
+function restoreEmptiedNumber(key: 'temperature' | 'maxTokens'): void {
+  if (edit[key] == null) edit[key] = original.value[key]
+}
+
 const isDirty = computed(() => {
   const keys: (keyof EditState)[] = [
-    'name', 'description', 'instructions', 'provider', 'model',
+    'name', 'description', 'instructions', 'provider',
     'isEnabled', 'temperature', 'maxTokens',
     'qualityTier', 'latencyTier', 'costTier',
   ]
   for (const k of keys) {
     if (edit[k] !== original.value[k]) return true
   }
+  if (editedModel() !== original.value.model) return true
   // Capability tag arrays: shallow ordered compare.
   return arraysDiffer(edit.domains, original.value.domains)
     || arraysDiffer(edit.roles, original.value.roles)
@@ -1184,8 +1277,11 @@ const memoryColumns = computed<DataTableColumns<AgentMemoryDto>>(() => [
 async function loadMemory(id: string): Promise<void> {
   memoryLoading.value = true
   try {
-    const result = await bridge.agents.getMemory(id, { pageIndex: 1, pageSize: 200, skip: 0, take: 200 })
-    memoryRows.value = result.items
+    // Every page: the server clamps a page to 100 rows without saying so, and
+    // runtime-written memories reach that quickly.
+    memoryRows.value = await fetchAllPages((q) =>
+      bridge.agents.getMemory(id, { pageIndex: q.pageIndex, pageSize: q.pageSize, skip: (q.pageIndex - 1) * q.pageSize, take: q.pageSize }),
+    )
     memoryLoaded.value = true
   } catch (e) {
     toast('err', (e as Error).message ?? t('detail.memory.loadError'))
@@ -1219,7 +1315,8 @@ async function saveMemory(): Promise<void> {
     if (memoryModal.id) {
       await bridge.agents.updateMemory(id, memoryModal.id, {
         content: memoryModal.content.trim(),
-        category: memoryModal.category.trim() || null,
+        // '' clears; null would read as "no change" and keep the old category.
+        category: memoryModal.category.trim(),
         importance: memoryModal.importance,
       })
     } else {
@@ -1256,8 +1353,11 @@ async function loadVersions(id: string): Promise<void> {
   versionsLoading.value = true
   versionsError.value = null
   try {
-    const result = await bridge.agents.getVersions(id, { pageIndex: 1, pageSize: 50, skip: 0, take: 50 })
-    versions.value = result.items ?? []
+    // Every page: each resource assignment snapshots a version, so a first
+    // page of 50 soon hid the versions an operator might roll back to.
+    versions.value = await fetchAllPages((q) =>
+      bridge.agents.getVersions(id, { pageIndex: q.pageIndex, pageSize: q.pageSize, skip: (q.pageIndex - 1) * q.pageSize, take: q.pageSize }),
+    )
     versionsLoaded.value = true
   } catch (e) {
     versionsError.value = (e as Error).message ?? t('detail.versions.loadError')
@@ -1278,7 +1378,10 @@ function toggleSnapshot(versionId: string): void {
 function formatSnapshot(snapshot: string | null | undefined): string {
   if (!snapshot) return ''
   try {
-    return JSON.stringify(JSON.parse(snapshot), null, 2)
+    // Validate, then re-indent the stored text: a parse round trip would show
+    // ids past 2^53 rounded, which is not what the snapshot holds.
+    JSON.parse(snapshot)
+    return formatJsonText(snapshot, { indent: 2, normalizeStrings: true })
   } catch {
     // Not JSON - show the raw stored snapshot verbatim.
     return snapshot
@@ -1380,16 +1483,19 @@ async function handleSave(): Promise<void> {
   try {
     // PATCH-style: only emit keys whose value differs from the loaded snapshot.
     // Persona is applied immediately via the Persona panel (not this save-bar).
+    // `null` means "no change" to the update, so an emptied text field goes out
+    // as '' (clear) - sending null reported "Saved" and kept the old value.
     const patch: UpdateAgentDto = {}
     const o = original.value
     if (edit.name !== o.name) patch.name = edit.name
-    if (edit.description !== o.description) patch.description = edit.description || null
-    if (edit.instructions !== o.instructions) patch.instructions = edit.instructions || null
+    if (edit.description !== o.description) patch.description = edit.description
+    if (edit.instructions !== o.instructions) patch.instructions = edit.instructions
     if (edit.provider !== o.provider) patch.provider = edit.provider
-    if (edit.model !== o.model) patch.model = edit.model || null
+    if (editedModel() !== o.model) patch.model = editedModel()
     if (edit.isEnabled !== o.isEnabled) patch.isEnabled = edit.isEnabled
-    if (edit.temperature !== o.temperature) patch.temperature = edit.temperature
-    if (edit.maxTokens !== o.maxTokens) patch.maxTokens = edit.maxTokens
+    // A number cannot be cleared (see restoreEmptiedNumber); null is never sent as a change.
+    if (edit.temperature != null && edit.temperature !== o.temperature) patch.temperature = edit.temperature
+    if (edit.maxTokens != null && edit.maxTokens !== o.maxTokens) patch.maxTokens = edit.maxTokens
     if (edit.qualityTier !== o.qualityTier) patch.qualityTier = edit.qualityTier
     if (edit.latencyTier !== o.latencyTier) patch.latencyTier = edit.latencyTier
     if (edit.costTier !== o.costTier) patch.costTier = edit.costTier
@@ -1410,11 +1516,15 @@ async function handleSave(): Promise<void> {
  * Load the agent's binding plus the runtimes it could bind to.
  *
  * Both reads tolerate the module being absent or switched off - the bridge maps
- * a 501 to an empty result, and the panel renders "no runtimes registered"
- * instead of an error toast.
+ * a 501/404 to an empty result, and the panel renders "no runtimes registered"
+ * instead of an error toast. Any other refusal (403, 5xx) is shown in place of
+ * the form: read as "no binding" it described a bound agent as built-in, and a
+ * save from there replaced the real binding with defaults. The section loads
+ * again the next time it is opened.
  */
 async function loadCliExecution(id: string): Promise<void> {
   cliLoading.value = true
+  cliLoadError.value = null
   try {
     const [binding, runtimes] = await Promise.all([
       cliBridge.bindings.get(id),
@@ -1423,6 +1533,8 @@ async function loadCliExecution(id: string): Promise<void> {
     cliBinding.value = binding
     cliRuntimes.value = runtimes
     cliLoaded.value = true
+  } catch (e) {
+    cliLoadError.value = e instanceof Error ? e.message : String(e)
   } finally {
     cliLoading.value = false
   }
@@ -1464,7 +1576,7 @@ async function savePersona(content: string): Promise<void> {
   // Info save-bar. Empty string clears the inline soul content.
   personaSaving.value = true
   try {
-    await persistResource({ persona: content }, t('detail.persona.saved'))
+    await persistResource(() => ({ persona: content }), t('detail.persona.saved'))
   } finally {
     personaSaving.value = false
   }
@@ -1548,6 +1660,7 @@ watch(() => route.params?.id, async (next, prev) => {
   cliBinding.value = null
   cliRuntimes.value = []
   cliLoaded.value = false
+  cliLoadError.value = null
   // `memoryLoaded` was missing from this reset - the same defect class the
   // comment above describes, just for a different section.
   memoryRows.value = []

@@ -169,7 +169,7 @@ public class AspNetCoreOptions
 
     /// <summary>
     /// 获取或设置 异常处理选项
-    /// 默认实例化以确保 EnableMetrics=true，让 DefaultDiagnosticsAdminController 在应用未显式配置时仍可用
+    /// 默认实例化以确保 EnableMetrics=true，让异常统计在应用未显式配置时也开着（诊断控制器的异常端点据此可用，关闭时答 501）
     /// </summary>
     public ExceptionHandlingOptions ExceptionHandling { get; set; } = new();
 
@@ -362,6 +362,20 @@ public class HttpEncryptOptions
     /// 获取或设置 是否启用
     /// </summary>
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// <see cref="MaxRequestBodyBytes"/> 的默认值：1 MB，与请求签名校验读请求体的上界相同。
+    /// </summary>
+    public const int DefaultMaxRequestBodyBytes = 1024 * 1024;
+
+    /// <summary>
+    /// 获取或设置 加密请求体（密文）允许的最大字节数，超过答 413。
+    /// </summary>
+    /// <remarks>
+    /// 解密发生在认证与限流之前，没有上界时任何带 <c>ClientPublicKey</c> 头的未认证调用方都能让服务端
+    /// 把接近 Kestrel 上限（默认约 30 MB）的体整条读成字符串。密文比明文大约三分之一，加密传大载荷的部署按需调高。
+    /// </remarks>
+    public int MaxRequestBodyBytes { get; set; } = DefaultMaxRequestBodyBytes;
 }
 
 /// <summary>

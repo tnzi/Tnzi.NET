@@ -65,7 +65,15 @@ public class DocumentIngestionBackgroundJob : TenantAwareBackgroundJob<DocumentI
             var ingestResult = await _ingestionService.IngestAsync(
                 args.KnowledgeBaseId, args.DocumentId, stream, args.FileName, cancellationToken);
 
-            if (ingestResult.Succeeded)
+            if (ingestResult.DocumentDeleted)
+            {
+                // 文档在摄取期间被删除：摄取服务已清掉本次写下的分块与图谱。没有行可回写、没有计数可动，
+                // 也不是失败（不抛、不重试），删除这件事已经完成了。
+                _logger.LogInformation(
+                    "Background ingestion stopped for document {DocumentId}: the document was deleted while it was being ingested",
+                    args.DocumentId);
+            }
+            else if (ingestResult.Succeeded)
             {
                 // 文档状态回写：条件 ExecuteUpdateAsync（仅当前仍为 Processing 时翻成 Completed），
                 // 立即提交、绕过 ChangeTracker，规避共享 DbContext 的 second-operation 竞态。
@@ -122,16 +130,21 @@ public class DocumentIngestionBackgroundJob : TenantAwareBackgroundJob<DocumentI
     }
 
     /// <summary>
-    /// 将文档标记为失败并持久化错误信息。
+    /// 将仍在处理中的文档标记为失败并持久化错误信息。
     /// 使用 <c>ExecuteUpdateAsync</c> 立即提交（绕过 ChangeTracker / 延迟 SaveChanges），
     /// 确保即便在异常路径下失败状态也能可靠落库。错误信息按列长度截断（列上限 2000）。
     /// </summary>
+    /// <remarks>
+    /// ★ 只改 <c>Processing</c> 的行：失败兜底包着成功分支里的两条终态写入，文档已经翻成 <c>Completed</c>
+    /// （分块在线、可被检索）之后，知识库计数那条语句遇上一次瞬时数据库错误，此前这里会把它改回 <c>Failed</c>，
+    /// 任务照常返回不再重试：文档显示失败而分块照样被检索到，上传去重（只认 Completed）对它失效，重新上传就重复写一遍块。
+    /// </remarks>
     private async Task MarkFailedAsync(Guid documentId, string? errorMessage, CancellationToken cancellationToken)
     {
-        var truncated = errorMessage is { Length: > 2000 } ? errorMessage[..2000] : errorMessage;
+        var truncated = errorMessage.FitToLength(2000);
 
         await _docRepository.AsQueryable()
-            .Where(d => d.Id == documentId)
+            .Where(d => d.Id == documentId && d.Status == DocumentStatus.Processing)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(d => d.Status, DocumentStatus.Failed)
                 .SetProperty(d => d.ErrorMessage, truncated), cancellationToken);

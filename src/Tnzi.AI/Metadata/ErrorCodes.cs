@@ -36,44 +36,31 @@ public static class ErrorCodes
     public const string ThreadNotFound = "AI_THREAD_NOT_FOUND";
 
     /// <summary>
-    /// Quota check failed.
-    /// </summary>
-    public const string QuotaCheckFailed = "AI_QUOTA_CHECK_FAILED";
-
-    /// <summary>
-    /// Quota exceeded (daily or monthly limit).
+    /// The AI cost budget (<c>AI:Budget</c>) is exhausted.
     /// </summary>
     public const string QuotaExceeded = "AI_QUOTA_EXCEEDED";
 
     /// <summary>
-    /// User quota not found.
+    /// The user has reached a usage limit (the 5-hour window or the weekly window). The error details carry the window
+    /// and when it resets (<c>UsageLimitDenialDto</c>). HTTP 429.
     /// </summary>
-    public const string QuotaNotFound = "AI_QUOTA_NOT_FOUND";
+    public const string UsageLimitReached = "AI_USAGE_LIMIT_REACHED";
 
     /// <summary>
-    /// Quota update failed.
+    /// The usage limit could not be checked or recorded (the meter itself failed). This is not a limit; the turn is not run.
     /// </summary>
-    public const string QuotaUpdateFailed = "AI_QUOTA_UPDATE_FAILED";
+    public const string UsageLimitCheckFailed = "AI_USAGE_LIMIT_CHECK_FAILED";
 
     /// <summary>
-    /// Quota get failed.
+    /// A usage policy could not be saved: an unknown model, a default model outside the allowed list, or a limited
+    /// setting without an amount. HTTP 400.
     /// </summary>
-    public const string QuotaGetFailed = "AI_QUOTA_GET_FAILED";
+    public const string UsagePolicyInvalid = "AI_USAGE_POLICY_INVALID";
 
     /// <summary>
-    /// Quota set failed.
+    /// The requested model is not one this user may use with this agent. HTTP 403.
     /// </summary>
-    public const string QuotaSetFailed = "AI_QUOTA_SET_FAILED";
-
-    /// <summary>
-    /// Quota reset failed.
-    /// </summary>
-    public const string QuotaResetFailed = "AI_QUOTA_RESET_FAILED";
-
-    /// <summary>
-    /// Quota concurrency conflict after max retries.
-    /// </summary>
-    public const string QuotaConcurrencyConflict = "AI_QUOTA_CONCURRENCY_CONFLICT";
+    public const string ModelNotAllowed = "AI_MODEL_NOT_ALLOWED";
 
     /// <summary>
     /// Agent run failed.
@@ -251,6 +238,11 @@ public static class ErrorCodes
     public const string FeedbackOnlyAssistant = "AI_FEEDBACK_ONLY_ASSISTANT";
 
     /// <summary>
+    /// A feedback tag is not one of <see cref="Dtos.FeedbackTags.All"/>.
+    /// </summary>
+    public const string FeedbackTagInvalid = "AI_FEEDBACK_TAG_INVALID";
+
+    /// <summary>
     /// Message not found in the specified thread.
     /// </summary>
     public const string MessageNotFound = "AI_MESSAGE_NOT_FOUND";
@@ -341,6 +333,11 @@ public static class ErrorCodes
     public const string SubAgentTypeNotFound = "AI_SUB_AGENT_TYPE_NOT_FOUND";
 
     /// <summary>
+    /// A sub-agent type with the same name already exists in this tenant.
+    /// </summary>
+    public const string SubAgentTypeAlreadyExists = "AI_SUB_AGENT_TYPE_ALREADY_EXISTS";
+
+    /// <summary>
     /// Sub-agent spawning is switched off (AI:SubAgent:Enabled = false).
     /// </summary>
     public const string SubAgentsDisabled = "AI_SUB_AGENTS_DISABLED";
@@ -371,6 +368,11 @@ public static class ErrorCodes
     public const string CliRuntimeHostManaged = "AI_CLI_RUNTIME_HOST_MANAGED";
 
     /// <summary>
+    /// The CLI version registered for the runtime is outside the range this deployment supports for that provider.
+    /// </summary>
+    public const string CliRuntimeVersionUnsupported = "AI_CLI_RUNTIME_VERSION_UNSUPPORTED";
+
+    /// <summary>
     /// The agent has no external CLI runtime binding.
     /// </summary>
     public const string CliBindingNotFound = "AI_CLI_BINDING_NOT_FOUND";
@@ -384,6 +386,31 @@ public static class ErrorCodes
     /// External CLI run is not in the expected state for the requested operation.
     /// </summary>
     public const string CliRunInvalidState = "AI_CLI_RUN_INVALID_STATE";
+
+    /// <summary>
+    /// The registered <c>ICliAgentDispatcher</c> implementation does not provide the system (no user context) cancellation.
+    /// </summary>
+    public const string CliSystemCancelNotSupported = "AI_CLI_SYSTEM_CANCEL_NOT_SUPPORTED";
+
+    /// <summary>
+    /// The permission request of an external CLI run does not exist (or the caller cannot see the run).
+    /// </summary>
+    public const string CliPermissionRequestNotFound = "AI_CLI_PERMISSION_REQUEST_NOT_FOUND";
+
+    /// <summary>
+    /// The permission request of an external CLI run has already been answered, timed out or ended with its run.
+    /// </summary>
+    public const string CliPermissionRequestClosed = "AI_CLI_PERMISSION_REQUEST_CLOSED";
+
+    /// <summary>
+    /// The answer names an option the permission request did not offer.
+    /// </summary>
+    public const string CliPermissionOptionInvalid = "AI_CLI_PERMISSION_OPTION_INVALID";
+
+    /// <summary>
+    /// The registered <c>ICliAgentDispatcher</c> implementation does not relay permission requests.
+    /// </summary>
+    public const string CliPermissionNotSupported = "AI_CLI_PERMISSION_NOT_SUPPORTED";
 
     /// <summary>
     /// The requested external agent provider is unknown or not enabled in this deployment.
@@ -405,4 +432,61 @@ public static class ErrorCodes
     /// is the more expensive of the two: an external run lasts minutes to hours.
     /// </remarks>
     public const string CliBudgetExceeded = "AI_CLI_BUDGET_EXCEEDED";
+
+    /// <summary>
+    /// An attachment is larger than <c>AI:Chat:Attachments:MaxBytes</c>.
+    /// </summary>
+    public const string AttachmentTooLarge = "AI_ATTACHMENT_TOO_LARGE";
+
+    /// <summary>
+    /// A message carries more attachments than <c>AI:Chat:Attachments:MaxCount</c>.
+    /// </summary>
+    public const string TooManyAttachments = "AI_TOO_MANY_ATTACHMENTS";
+
+    /// <summary>
+    /// Attachment not found, or not visible to the caller.
+    /// </summary>
+    public const string AttachmentNotFound = "AI_ATTACHMENT_NOT_FOUND";
+
+    /// <summary>
+    /// The chat agent policy does not let this user chat with the requested agent (or without one).
+    /// </summary>
+    public const string ChatAgentNotAllowed = "AI_CHAT_AGENT_NOT_ALLOWED";
+
+    /// <summary>
+    /// A consumer's turn handler refused a turn for an agent on an external CLI runtime without giving its own code.
+    /// </summary>
+    public const string CliTurnRefused = "AI_CLI_TURN_REFUSED";
+
+    /// <summary>
+    /// A consumer's turn handler threw while a turn for an agent on an external CLI runtime was being prepared;
+    /// the turn was not queued.
+    /// </summary>
+    public const string CliTurnHandlerFailed = "AI_CLI_TURN_HANDLER_FAILED";
+
+    /// <summary>
+    /// The thread has a run in progress, so its messages cannot be edited or regenerated until it ends or is cancelled.
+    /// </summary>
+    public const string ThreadRunInProgress = "AI_THREAD_RUN_IN_PROGRESS";
+
+    /// <summary>
+    /// The message to edit or regenerate from is not a user message of the thread.
+    /// </summary>
+    public const string MessageNotEditable = "AI_MESSAGE_NOT_EDITABLE";
+
+    /// <summary>
+    /// The thread has no run with this id, or the caller cannot see it.
+    /// </summary>
+    public const string ChatRunNotFound = "AI_CHAT_RUN_NOT_FOUND";
+
+    /// <summary>
+    /// The external CLI's account reached its usage limit (a subscription's session or weekly limit, or a spend cap).
+    /// The stream's error event and the run carry <c>usageLimitResetsAt</c> when the CLI reported when it resets.
+    /// </summary>
+    public const string CliUsageLimit = "AI_CLI_USAGE_LIMIT";
+
+    /// <summary>
+    /// A chat request's per-turn metadata is not valid (too many keys, a malformed key, or too large).
+    /// </summary>
+    public const string InvalidTurnMetadata = "AI_INVALID_TURN_METADATA";
 }

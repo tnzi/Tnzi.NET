@@ -12,9 +12,13 @@
 export class StreamRequestError extends Error {
   readonly status: number;
 
+  /** The response body as the server sent it (usually a JSON error envelope with a `message`). */
+  readonly detail: string;
+
   constructor(status: number, detail: string, label = 'Stream request') {
     super(`${label} failed: ${status} ${detail}`);
     this.name = 'StreamRequestError';
     this.status = status;
+    this.detail = detail;
   }
 }

@@ -7,6 +7,11 @@ namespace Tnzi.AI.Sandbox.Models;
 public record ThreadDataState(string ThreadDirectory, string WorkspacePath, string UploadsPath, string OutputsPath, string SkillsPath)
 {
     /// <summary>
+    /// 线程目录下的四个子目录名，也是 agent 看到的 <c>/mnt/{name}</c> 虚拟根。
+    /// </summary>
+    public static IReadOnlyList<string> MountNames { get; } = ["workspace", "uploads", "outputs", "skills"];
+
+    /// <summary>
     /// 按线程目录推出四个子目录的路径（与 <c>VirtualPathTranslator</c> 的 <c>/mnt/*</c> 子路径同名）。
     /// </summary>
     public static ThreadDataState FromThreadDirectory(string threadDirectory)

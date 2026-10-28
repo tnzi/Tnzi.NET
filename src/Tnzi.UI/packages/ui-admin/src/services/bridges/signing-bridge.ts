@@ -53,15 +53,17 @@ export interface SigningRequestContract extends BridgeCrudContract<EnvelopeListD
    * Issue the one-time signing links.
    *
    * ★ The returned tokens are plaintext and are returned exactly once. Show them
-   * to the operator or dispatch them immediately - re-sending invalidates the
-   * links already out there.
+   * to the operator or dispatch them immediately: only a draft can be sent, so
+   * a lost link cannot be re-issued.
    */
   send(id: string): Promise<IssuedSigningLink[]>
   /** Call off a request that has not completed. */
   void(id: string): Promise<void>
   /**
    * Seal a request whose recipients have all signed but whose sealing failed.
-   * The recovery for a transient storage / stamping failure; refused once sealed.
+   * The recovery for a transient storage / stamping failure. On a completed
+   * request it never re-seals: it only produces a missing completion
+   * certificate and hands the sealed document to its host record again.
    */
   seal(id: string): Promise<EnvelopeDto>
 }
@@ -114,7 +116,7 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
 
   async function fetchRequests(query: CrudPageQuery): Promise<CrudPageResult<EnvelopeListDto>> {
     const params = mapQueryToListRequest(query) as unknown as EnvelopeQueryDto
-    const result = unwrap<CrudPageResult<EnvelopeListDto>>(await a.getRequests(params))
+    const result = unwrapOk<CrudPageResult<EnvelopeListDto>>(await a.getRequests(params))
     return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,
@@ -145,7 +147,7 @@ export function createSigningBridge(deps: SigningBridgeDeps = {}): SigningBridge
 
   async function fetchTemplates(query: CrudPageQuery): Promise<CrudPageResult<EnvelopeTemplateListDto>> {
     const params = mapQueryToListRequest(query) as unknown as EnvelopeTemplateQueryDto
-    const result = unwrap<CrudPageResult<EnvelopeTemplateListDto>>(await a.getTemplates(params))
+    const result = unwrapOk<CrudPageResult<EnvelopeTemplateListDto>>(await a.getTemplates(params))
     return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,

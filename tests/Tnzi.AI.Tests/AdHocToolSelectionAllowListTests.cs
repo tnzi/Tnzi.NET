@@ -141,7 +141,7 @@ public class AdHocToolSelectionAllowListTests
             .Callback<AgentRunRequest, CancellationToken>((req, _) => captured = req)
             .ReturnsAsync(new AgentRunResult { Response = "ok", FinishReason = FinishReasons.Stop });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
         await client.ChatAsync("hi", Guid.NewGuid(), new AiClientOptions { ToolGroups = ["sandbox"] });
 
         captured.ShouldNotBeNull();

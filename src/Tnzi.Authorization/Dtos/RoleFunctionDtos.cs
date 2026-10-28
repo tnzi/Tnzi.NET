@@ -121,53 +121,6 @@ public class BatchAssignFunctionsRequest
 }
 
 /// <summary>
-/// Permission holder information (role that has a specific permission)
-/// </summary>
-public class PermissionRoleDto
-{
-    /// <summary>
-    /// Role ID
-    /// </summary>
-    public Guid RoleId { get; set; }
-
-    /// <summary>
-    /// Whether the role-function assignment is enabled
-    /// </summary>
-    public bool IsEnabled { get; set; }
-
-    /// <summary>
-    /// Function ID
-    /// </summary>
-    public Guid FunctionId { get; set; }
-
-    /// <summary>
-    /// Function code (permission name)
-    /// </summary>
-    public string FunctionCode { get; set; } = string.Empty;
-
-    /// <summary>
-    /// Function name
-    /// </summary>
-    public string FunctionName { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Permission user information (user that has a specific permission via role)
-/// </summary>
-public class PermissionUserDto
-{
-    /// <summary>
-    /// User ID
-    /// </summary>
-    public Guid UserId { get; set; }
-
-    /// <summary>
-    /// Role IDs through which the user has this permission
-    /// </summary>
-    public List<Guid> RoleIds { get; set; } = new();
-}
-
-/// <summary>
 /// Authorization statistics overview
 /// </summary>
 public class AuthorizationStatisticsDto
@@ -326,20 +279,4 @@ public class CloneRolePermissionsRequest
     /// Source role ID to clone from
     /// </summary>
     public Guid SourceRoleId { get; set; }
-}
-
-/// <summary>
-/// Request to compare two roles
-/// </summary>
-public class CompareRolesRequest
-{
-    /// <summary>
-    /// First role ID
-    /// </summary>
-    public Guid RoleId1 { get; set; }
-
-    /// <summary>
-    /// Second role ID
-    /// </summary>
-    public Guid RoleId2 { get; set; }
 }

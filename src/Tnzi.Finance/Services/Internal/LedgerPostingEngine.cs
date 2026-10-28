@@ -167,6 +167,8 @@ public sealed class LedgerPostingEngine
 
         entry.PostingDate = postingDate;
         entry.Currency = currency;
+        // 摘要多由「前缀 + 单据摘要」拼成，单据摘要本身就可以顶到列宽；收进列宽，否则一份合规的草稿永远过不了账。
+        entry.Memo = FinanceFieldLimits.FitJournalMemo(entry.Memo);
         for (var i = 0; i < lines.Count; i++)
         {
             lines[i].Debit = baseAmounts[i].Debit;
@@ -237,8 +239,7 @@ public sealed class LedgerPostingEngine
         // ★ 破坏是**完全静默**的：每张凭证内部各自平衡，试算平衡恒为 0；余额汇总忠实累加，
         // VerifyAsync 报「一致」。唯一能暴露它的是人工把 AR/AP 控制科目余额与账龄合计对一遍。
         //
-        // ReversalGuard 的注释曾写着「凭证状态不在这里判定 —— 上游各 VoidAsync 与 ReverseAsync
-        // 已经在做」，而七个上游里五个从来没做过。注释被当断言用了。
+        // ReversalGuard 只管期间、对账与账本外持有者；状态门只在这里，不在上游。
         if (original.Status != JournalEntryStatus.Posted)
         {
             return Result<JournalEntry>.Failure(
@@ -263,7 +264,7 @@ public sealed class LedgerPostingEngine
             Id = SequentialGuid.NewGuid(),
             Status = JournalEntryStatus.Posted,
             PostingDate = date,
-            Memo = memo ?? $"Reversal of {original.Number}",
+            Memo = FinanceFieldLimits.FitJournalMemo(memo ?? $"Reversal of {original.Number}"),
             Currency = original.Currency,
             ExchangeRate = original.ExchangeRate,
             SourceType = original.SourceType,

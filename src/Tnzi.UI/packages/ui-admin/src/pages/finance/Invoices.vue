@@ -134,7 +134,8 @@ import { FinanceDocToken } from './source-type'
 import { useSafeMessage } from '../_shared/safe-message'
 import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount, fmtDate } from './money'
+import { amountCell, fmtAmount, fmtDate, roundMoney } from './money'
+import { useViewedRecord } from './viewed-record'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './components/DocumentEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -154,15 +155,23 @@ const columns = buildDocumentColumns(t, 'customerName', { showApplied: true, sho
 // 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
 // TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
 const searchFields = buildDocumentSearchFields(td, {
-  renderParty: (model) =>
-    h(TPartySelect, {
-      modelValue: (model.partyId as string) ?? null,
-      bridge,
-      kind: 'customer',
-      size: 'small',
-      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
-    }),
+  party: {
+    key: 'customerId',
+    render: (model, key) =>
+      h(TPartySelect, {
+        modelValue: (model[key] as string) ?? null,
+        bridge,
+        kind: 'customer',
+        size: 'small',
+        'onUpdate:modelValue': (v: string | null) => (model[key] = v ?? undefined),
+      }),
+  },
 })
+
+// The full record behind the read-only drawer. Last-wins: a late answer for
+// the row opened before must not paint the drawer of the one open now.
+const viewing = useViewedRecord<InvoiceDto>((id) => bridge.invoices.getById(id), (error) => message.error(error))
+const viewed = viewing.record
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.invoices',
@@ -172,7 +181,7 @@ const crud = useCrudPage<FinanceDocRow>({
   fetchData: (q) => bridge.invoices.fetch(q),
   // Deep-link cold restore (?detail=view:<id>) hydrates even off-page rows.
   loadDetailById: (id) => bridge.invoices.getById(id),
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 const title = 'tnzi.admin.modules.finance.invoices.title'
@@ -184,17 +193,6 @@ function statusLabel(status?: FinanceDocumentStatus): string {
 }
 
 // ── Read-only detail ────────────────────────────────────────────
-const viewed = ref<InvoiceDto | null>(null)
-
-async function loadViewed(row: FinanceDocRow) {
-  viewed.value = null
-  try {
-    viewed.value = await bridge.invoices.getById(String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
 const lineColumns: DataTableColumns<InvoiceDto['lines'][number]> = [
   { key: 'lineNumber', title: '#', width: 48 },
   { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? EMPTY_DASH },
@@ -226,6 +224,7 @@ const editingEntry = computed<EditableDocument | null>(() => {
     docDate: d.docDate,
     dueDate: d.dueDate,
     currency: d.currency,
+    exchangeRate: d.exchangeRate,
     memo: d.memo,
     lines: d.lines,
   }
@@ -269,6 +268,8 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
     docDate: payload.docDate,
     dueDate: payload.dueDate,
     currency: payload.currency,
+    // Carried by the editor: the update replaces the draft, rate included.
+    exchangeRate: payload.exchangeRate,
     memo: payload.memo,
     lines: payload.lines.map((l) => ({
       itemId: l.itemId,
@@ -325,7 +326,7 @@ const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.
 /** 未清 = 已过账且还有余额没收回来。 */
 const isOpen = (row: FinanceDocRow) =>
   (row.status === FinanceDocumentStatus.Posted || row.status === FinanceDocumentStatus.PartiallyPaid)
-  && (row.total ?? 0) - (row.appliedTotal ?? 0) > 0
+  && roundMoney((row.total ?? 0) - (row.appliedTotal ?? 0)) > 0
 
 /**
  * 行内下游动作（标准 1「行内能直接发起下游动作，不用先进详情」）。

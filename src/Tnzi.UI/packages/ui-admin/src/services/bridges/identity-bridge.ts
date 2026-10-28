@@ -26,6 +26,7 @@ import {
   type PasskeyCredentialDto,
   type AuthConfigDto,
   type UserListItemDto,
+  type UserImportResult,
   type CreateInvitationDto,
   type InvitationDto,
   type InvitationPreviewDto,
@@ -77,6 +78,7 @@ import { createPagedList } from '@tnzi/core'
 import type { PagedList } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { ensureOk, unwrapResult as unwrap, mapQueryToListRequest as mapQuery, unwrapOk } from '../_mappers'
+import { toLocalDayBounds } from '../../utils/calendar-date'
 
 // HttpClient type derived from the factory signature so we don't need a separate import.
 type HttpClient = Parameters<typeof useAdminUserApi>[0]
@@ -136,9 +138,9 @@ export interface IdentityBridge {
    * Invitation-based onboarding: open an account with its roles preset, hand the
    * person a one-time link, let them set their own password.
    *
-   * ★ There is no `list` here on purpose. An invitation *is* a user account in the
-   * `Pending` state, so "who has not accepted yet" is `users.fetch` with an
-   * `invitationState` filter - a second list would only drift from the first.
+   * ★ There is no `list` here on purpose. An invitation *is* a user account that
+   * still owes `InvitationPending`, so "who has not accepted yet" is `users.fetch`
+   * with a `pendingAction` filter - a second list would only drift from the first.
    */
   invitations: {
     /**
@@ -174,7 +176,14 @@ export interface IdentityBridge {
      */
     accept(data: AcceptInvitationDto): Promise<AcceptInvitationResultDto>
   }
-  users: BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto> & {
+  users: Omit<BridgeCrudContract<UserListItemDto, CreateUserDto, UpdateUserDto>, 'import'> & {
+    /**
+     * CSV import (`POST /admin/users/import/csv`). Resolves with the per-row
+     * outcome: the server answers 200 even when every row was refused, so the
+     * caller must show `failedCount` / `skippedCount` / `errors` (row number to
+     * reason) or the admin never learns which accounts were not created.
+     */
+    import(file: File): Promise<UserImportResult>
     /**
      * Full record for ONE user (`GET /admin/users/{id}`). The list projection
      * (`UserListItemDto`) omits the profile fields the user detail page shows,
@@ -193,17 +202,17 @@ export interface IdentityBridge {
     resetPassword(id: string, newPassword: string): Promise<void>
     /**
      * Replace the user's role set. `roleIds` is the canonical target list -
-     * the bridge computes (add, remove) deltas against the user's current
-     * roles and issues two REST calls so the caller doesn't have to.
+     * the bridge computes (add, remove) deltas against `currentRoleIds` and
+     * issues at most two REST calls so the caller doesn't have to.
      *
-     * Pass `currentRoleIds` to avoid an extra lookup when the consumer
-     * already has the list (the role-assign modal does); omit it and the
-     * bridge derives the diff from `userApi.getList` filtered to that user.
+     * `currentRoleIds` is the set the caller read for this user (the role
+     * editor holds it). It is required: the bridge does not look it up, and a
+     * role missing from it is never removed.
      */
     setRoles(
       userId: string,
       roleIds: string[],
-      currentRoleIds?: string[],
+      currentRoleIds: string[],
     ): Promise<void>
     /** Direct admin endpoints - `setRoles` is usually preferred. */
     assignRoles(userId: string, roleIds: string[]): Promise<void>
@@ -321,8 +330,9 @@ export interface IdentityBridge {
    * provider (`GET /auth/oauth/{provider}/login`). The endpoint is anonymous
    * and the navigation carries no bearer, so "already signed in" is invisible
    * to it: linking a provider to the current account needs a `linkToken` from
-   * `me.issueOAuthLinkToken` - with it the callback links instead of logging
-   * in. Returns '' when no client is wired.
+   * `me.issueOAuthLinkToken` - with it the callback stages a link instead of
+   * logging in, and the page it returns to finishes it with
+   * `me.completeOAuthLink`. Returns '' when no client is wired.
    */
   oauthLoginUrl(provider: string, returnUrl?: string, linkToken?: string): string
   /**
@@ -360,14 +370,21 @@ export interface IdentityBridge {
      * fresh account when the provider's email differs from ours.
      */
     issueOAuthLinkToken(provider: string): Promise<OAuthLinkTokenDto>
+    /**
+     * Finish a link with the completion code the OAuth callback handed back on
+     * the return URL. The backend only links when the signed-in account is the
+     * one that issued the link token - a start link sent to someone else can
+     * never attach their identity to the sender's account.
+     */
+    completeOAuthLink(provider: string, code: string): Promise<void>
     unlinkAccount(provider: string): Promise<void>
     /** Past login attempts. */
     getLoginHistory(params?: LoginHistoryQueryDto): Promise<LoginLogDto[]>
     /** Soft disable (account can be re-enabled by an admin). */
     deactivate(data?: DeactivateAccountDto): Promise<void>
-    /** Soft delete (GDPR right-to-be-forgotten). */
+    /** Close the account: locked, soft-deleted, signed out everywhere. Profile and sign-in records are not erased. */
     deleteAccount(): Promise<void>
-    /** Download a full personal-data export bundle (GDPR portability). */
+    /** Download the account data export: account fields, roles, organisation, linked sign-in providers. */
     exportPersonalData(): Promise<PersonalDataExportDto>
     // -- Change email / phone (two-step verification) --
     /** Step 1: send a verification code to the *new* email address. */
@@ -411,6 +428,9 @@ export interface IdentityBridge {
   }
 }
 
+/** The `bool?` filters of `UserListQueryDto` (Users list and CSV export). */
+const USER_BOOL_FILTERS = ['isLockedOut', 'isEmailConfirmed'] as const
+
 /**
  * Coerce the named filter keys from the string values `'true'` / `'false'`
  * (emitted by the Users / LoginLogs search `NSelect`s, whose options bind
@@ -420,7 +440,7 @@ export interface IdentityBridge {
  * filter" rather than sending a blank value. Returns a shallow copy - the
  * incoming query object is never mutated.
  */
-function coerceBoolFilters(q: CrudPageQuery, keys: string[]): CrudPageQuery {
+function coerceBoolFilters(q: CrudPageQuery, keys: readonly string[]): CrudPageQuery {
   const filters: Record<string, unknown> = { ...q.filters }
   for (const key of keys) {
     const v = filters[key]
@@ -432,11 +452,11 @@ function coerceBoolFilters(q: CrudPageQuery, keys: string[]): CrudPageQuery {
 }
 
 function toCrudResult<T>(p: PagedList<T> | null | undefined): CrudPageResult<T> {
-  // Defensive: when the backend errors mid-bind (e.g. ASP.NET rejects an
-  // abstract `[FromQuery] PagedQueryDto` with 500 + empty body), the
-  // unwrap chain can land here with `undefined`. Return a well-formed
-  // empty page so the consumer's `result.items` / `result.totalCount`
-  // dereferences don't blow up with "Cannot read properties of undefined".
+  // The list reads feeding this go through `unwrapOk`, so a refused or failed
+  // read (403, 5xx) rejects with the server's reason before it gets here. An
+  // empty page used to stand in for it: Users showed "No data" for a 403 and
+  // the page's error state and retry never ran. What is left for the empty
+  // page below is a successful answer with no body.
   // 0.2.72+ (C4): both branches now hand back a full PagedList<T> via
   // `createPagedList` so totalPages / hasPreviousPage / hasNextPage are
   // always populated.
@@ -537,26 +557,25 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     },
   }
 
+  // The list and the CSV export bind the same `UserListQueryDto`, so they
+  // shape the query the same way; a key coerced on one path only makes the
+  // other answer 400 for a filter the screen shows as applied.
+  const toUserListQuery = (q: CrudPageQuery): UserListQueryDto =>
+    mapQuery(coerceBoolFilters(q, USER_BOOL_FILTERS)) as unknown as UserListQueryDto
+
   const users: IdentityBridge['users'] = {
     fetch: async (q) =>
-      toCrudResult(
-        unwrap<PagedList<UserListItemDto>>(
-          await userApi.getList(
-            mapQuery(coerceBoolFilters(q, ['isLockedOut', 'isEmailConfirmed'])) as unknown as UserListQueryDto,
-          ),
-        ),
-      ),
-    getById: async (id) => unwrap(await userApi.getById(id)) as UserDto,
+      toCrudResult(unwrapOk<PagedList<UserListItemDto>>(await userApi.getList(toUserListQuery(q)))),
+    // The user page renders from this: a refused / missing user must reject with
+    // the server's reason, not resolve to `null` and fail on its first field.
+    getById: async (id) => unwrapOk(await userApi.getById(id)) as UserDto,
     create: async (data) => unwrapOk(await userApi.create(data)) as UserListItemDto,
     update: async (id, data) => unwrapOk(await userApi.update(id, data)) as UserListItemDto,
     delete: async (ids) => {
       ensureOk(await userApi.deleteMany(ids))
     },
-    export: async (q) =>
-      unwrapOk<Blob>(await userApi.exportCsv(mapQuery(q) as unknown as UserListQueryDto)),
-    import: async (file) => {
-      ensureOk(await userApi.importCsv(file))
-    },
+    export: async (q) => unwrapOk<Blob>(await userApi.exportCsv(toUserListQuery(q))),
+    import: async (file) => unwrapOk<UserImportResult>(await userApi.importCsv(file)),
     enable: async (id) => {
       ensureOk(await userApi.enable(id))
     },
@@ -583,7 +602,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     setRoles: async (userId, roleIds, currentRoleIds) => {
       // Diff against the current set so we issue at most two REST calls
       // (one add, one remove) and never send the no-op overlap.
-      const current = new Set(currentRoleIds ?? [])
+      const current = new Set(currentRoleIds)
       const target = new Set(roleIds)
       const toAdd: string[] = []
       const toRemove: string[] = []
@@ -607,7 +626,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const roles: IdentityBridge['roles'] = {
     fetch: async (q) =>
       toCrudResult(
-        unwrap<PagedList<RoleDto>>(
+        unwrapOk<PagedList<RoleDto>>(
           await roleApi.getPagedList(mapQuery(q) as unknown as RoleListQueryDto),
         ),
       ),
@@ -623,7 +642,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
     getDetail: async (id) => unwrap(await roleApi.getDetail(id)) as RoleDetailDto,
     getUsersInRole: async (id, params) =>
       toCrudResult(
-        unwrap<PagedList<UserListItemDto>>(await roleApi.getUsersInRole(id, params)),
+        unwrapOk<PagedList<UserListItemDto>>(await roleApi.getUsersInRole(id, params)),
       ),
     getUserCount: async (id) => unwrap(await roleApi.getUserCount(id)) as number,
   }
@@ -631,7 +650,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const tenants: BridgeCrudContract<TenantDto, CreateTenantDto, UpdateTenantDto> = {
     fetch: async (q) =>
       toCrudResult(
-        unwrap<PagedList<TenantDto>>(
+        unwrapOk<PagedList<TenantDto>>(
           await tenantApi.getPagedList(mapQuery(q) as unknown as TenantQueryDto),
         ),
       ),
@@ -646,14 +665,23 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   }
 
   const loginLogs = {
-    fetch: async (q: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>> =>
-      toCrudResult(
-        unwrap<PagedList<LoginLogDto>>(
-          await loginLogApi.getList(
-            mapQuery(coerceBoolFilters(q, ['isSuccess'])) as unknown as LoginLogQueryDto,
-          ),
+    // Rejects a refused envelope (403 without `identity.loginLog.view`): an
+    // unchecked unwrap became an EMPTY page, which a sign-in history panel shows
+    // as "no sign-ins" - a false answer, not a missing one.
+    //
+    // The date filters arrive as picked calendar dates; the log is filtered by
+    // timestamp (`time >= start AND time <= end`), so they go out as the bounds
+    // of those local days. A bare date would end the range at midnight and a
+    // one-day range would match nothing.
+    fetch: async (q: CrudPageQuery): Promise<CrudPageResult<LoginLogDto>> => {
+      const query = coerceBoolFilters(q, ['isSuccess'])
+      const bounded = { ...query, filters: toLocalDayBounds(query.filters ?? {}, 'startDate', 'endDate') }
+      return toCrudResult(
+        unwrapOk<PagedList<LoginLogDto>>(
+          await loginLogApi.getList(mapQuery(bounded) as unknown as LoginLogQueryDto),
         ),
-      ),
+      )
+    },
   }
 
   const organizations: IdentityBridge['organizations'] = organizationApi
@@ -676,7 +704,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           unwrap(await organizationApi.search(keyword, maxResults)) as OrganizationDto[],
         getUsers: async (id, params) =>
           toCrudResult(
-            unwrap<PagedList<UserListItemDto>>(await organizationApi.getUsers(id, params)),
+            unwrapOk<PagedList<UserListItemDto>>(await organizationApi.getUsers(id, params)),
           ),
       }
     : {
@@ -694,7 +722,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
   const sessions: IdentityBridge['sessions'] = sessionApi
     ? {
         list: async (params) => {
-          const r = unwrap(
+          const r = unwrapOk(
             await sessionApi.getSessions({
               userId: params?.userId ?? undefined,
               includeRevoked: params?.includeRevoked,
@@ -711,8 +739,10 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
             r.pageSize ?? params?.pageSize ?? 20,
           )
         },
+        // Rejects a refused envelope (403 without `session.view`) so the panel
+        // shows why, instead of rendering from `null` and crashing.
         listForUser: async (userId, includeRevoked) =>
-          unwrap(await sessionApi.getUserSessions(userId, { includeRevoked })) as UserSessionDto[],
+          unwrapOk(await sessionApi.getUserSessions(userId, { includeRevoked })) as UserSessionDto[],
         statistics: async () => unwrap(await sessionApi.getStatistics()) as SessionStatisticsDto,
         activeUsers: async (top) =>
           unwrap(await sessionApi.getActiveUsers(top)) as ActiveUserSummaryDto[],
@@ -806,6 +836,11 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
           stepUpGuarded(async () =>
             unwrapOk(await profileApi.issueOAuthLinkToken(provider)) as OAuthLinkTokenDto,
           ),
+        // Not step-up gated: the confirmation sits on issuing the link token,
+        // and the code can only be redeemed by the account that issued it.
+        completeOAuthLink: async (provider, code) => {
+          ensureOk(await profileApi.completeOAuthLink(provider, code))
+        },
         unlinkAccount: async (provider) => {
           ensureOk(await profileApi.unlinkAccount(provider))
         },
@@ -919,6 +954,7 @@ export function createIdentityBridge(deps: IdentityBridgeDeps = {}): IdentityBri
         getTwoFactorStatus: () => missing('me.getTwoFactorStatus'),
         getLinkedAccounts: () => missing('me.getLinkedAccounts'),
         issueOAuthLinkToken: () => missing('me.issueOAuthLinkToken'),
+        completeOAuthLink: () => missing('me.completeOAuthLink'),
         unlinkAccount: () => missing('me.unlinkAccount'),
         getLoginHistory: () => missing('me.getLoginHistory'),
         deactivate: () => missing('me.deactivate'),

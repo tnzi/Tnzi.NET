@@ -206,17 +206,7 @@ public class AuthService : ApplicationService, IAuthService
         var roles = await GetRolesWithTenantContextAsync(user);
         var token = _tokenService.GenerateToken(user, roles, sessionId: ToSessionClaim(sessionResult.Data));
 
-        // 清除登录失败记录
-        if (_captchaService != null)
-        {
-            await _captchaService.ClearLoginFailureAsync(loginIdentifier);
-        }
-
-        // 发布登录成功事件
-        var ipAddress = ScopedContext?.ClientIpAddress;
-        var userAgent = ScopedContext?.UserAgent;
-        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.JWT);
-        await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
+        await OnSignInCompletedAsync(user, IdentityConstants.LoginProvider.JWT, loginIdentifier);
 
         return Result<string>.Success(token);
     }
@@ -272,17 +262,7 @@ public class AuthService : ApplicationService, IAuthService
         // 生成TokenResult并保存RefreshToken（access token 携带 session_id，刷新令牌绑定该会话）
         var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: true);
 
-        // 清除登录失败记录
-        if (_captchaService != null)
-        {
-            await _captchaService.ClearLoginFailureAsync(loginIdentifier);
-        }
-
-        // 发布登录成功事件
-        var ipAddress = ScopedContext?.ClientIpAddress;
-        var userAgent = ScopedContext?.UserAgent;
-        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.JWT);
-        await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
+        await OnSignInCompletedAsync(user, IdentityConstants.LoginProvider.JWT, loginIdentifier);
 
         return Result<TokenResult>.Success(tokenResult);
     }
@@ -346,22 +326,96 @@ public class AuthService : ApplicationService, IAuthService
         var tokenResult = await GenerateAndSaveTokenResultAsync(
             user, sessionResult.Data, enableRefreshToken: IdentityOptions.Jwt.EnableRefreshToken);
 
+        await OnSignInCompletedAsync(user, ResolveLoginProvider(method), loginIdentifier: null);
+
+        return Result<TokenResult>.Success(tokenResult);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<TokenResult>> IssueDelegatedSessionAsync(User user, DelegatedSessionRequest request)
+    {
+        Check.NotNull(user);
+        Check.NotNull(request);
+
+        var invalid = DelegatedSessionRules.Validate(request, DateTime.UtcNow);
+        if (invalid != null)
+        {
+            return Fail<TokenResult>(invalid, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (_loginSessionCoordinator == null || _sessionService == null)
+        {
+            // 没有会话就没有声明的落脚处、没有分组撤销、也没有每请求校验 —— 签不出一条守得住的委派会话。
+            return Fail<TokenResult>("Delegated sessions require a session service.", 501, ErrorCodes.CONFIGURATION_ERROR);
+        }
+
+        // 与 IssueTokenAsync 同一条守卫链：停用 / 锁定 / IP 允许列表照常拒绝。
+        var guardResult = await RunLoginGuardsAsync(user, LoginMethod.Delegated, loginIdentifier: null);
+        if (!guardResult.Allowed)
+        {
+            return Fail<TokenResult>(guardResult.Message!, guardResult.Code, guardResult.ErrorCode);
+        }
+
+        // ★ 不发二次验证挑战（理由见接口注释），但欠着的义务照样拦：便携客户端办不了改密码、绑验证器，
+        //   而签出去的会话就等于替本人跳过了它们。不带临时令牌 —— 这里没有人能接着办。
+        var obligations = user.GetOwedObligations();
+        if (obligations != PendingUserActions.None)
+        {
+            return Fail<TokenResult>(
+                "The account owes a required action; its owner must sign in to complete it first",
+                403,
+                ErrorCodes.IDENTITY_PENDING_ACTIONS_REQUIRED,
+                new { RequiredActions = obligations.ToActionNames() });
+        }
+
+        var sessionResult = await _loginSessionCoordinator.EstablishDelegatedAsync(user.Id, request);
+        if (!sessionResult.Succeeded)
+        {
+            return Fail<TokenResult>(
+                sessionResult.Message ?? "Delegated session rejected", sessionResult.Code ?? 500, sessionResult.ErrorCode, sessionResult.ErrorDetails);
+        }
+
+        var sessionId = sessionResult.Data;
+
+        // ★★ 建完立刻读回核对。刷新时声明全凭这一读带回令牌里，一个只实现了「写」的会话服务会让刷新出来的令牌
+        //   丢掉声明 —— 在应用那里就是一条不受任何限制的会话，而且到第一次刷新才发生。在这里就拦下。
+        var delegation = await _sessionService.GetDelegationAsync(sessionId);
+        if (delegation == null || !DelegatedSessionRules.Matches(delegation, request))
+        {
+            await RevokeSessionAsync(sessionId, SessionRevocationReason.DelegationRevoked);
+            LogError(
+                "The session service did not return the delegated session {SessionId} it had just created; the session was withdrawn.",
+                sessionId);
+            return Fail<TokenResult>(
+                "The configured session service does not persist delegated sessions.", 501, ErrorCodes.CONFIGURATION_ERROR);
+        }
+
+        var tokenResult = await GenerateAndSaveDelegatedTokenResultAsync(user, sessionId, delegation);
+
+        // 登录成功事件（登录日志）与异常登录检测照常；失败计数刻意不清（见接口注释）。
         var ipAddress = ScopedContext?.ClientIpAddress;
         var userAgent = ScopedContext?.UserAgent;
-        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, ResolveLoginProvider(method));
+        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, ResolveLoginProvider(LoginMethod.Delegated));
         await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
 
         return Result<TokenResult>.Success(tokenResult);
     }
 
     /// <summary>
-    /// 登录方式到登录日志里 provider 名的映射。
+    /// 登录方式到 <see cref="UserLoggedInEvent.LoginProvider"/> 的映射。
     /// </summary>
+    /// <remarks>
+    /// 只有密码登录（含办完待办之后的签发）落到 <see cref="IdentityConstants.LoginProvider.JWT"/>。
+    /// 此前 OAuth 与邀请也落在这里，订阅方按登录方式统计或风控时，第三方登录与邀请自动登录都读作密码登录。
+    /// </remarks>
     private static string ResolveLoginProvider(LoginMethod method) => method switch
     {
         LoginMethod.Passkey => IdentityConstants.LoginProvider.Passkey,
         LoginMethod.VerificationCode => IdentityConstants.LoginProvider.CodeLogin,
         LoginMethod.Registration => IdentityConstants.LoginProvider.Registration,
+        LoginMethod.OAuth => IdentityConstants.LoginProvider.OAuth,
+        LoginMethod.Invitation => IdentityConstants.LoginProvider.Invitation,
+        LoginMethod.Delegated => IdentityConstants.LoginProvider.Delegated,
         _ => IdentityConstants.LoginProvider.JWT
     };
 
@@ -551,8 +605,23 @@ public class AuthService : ApplicationService, IAuthService
     private async Task<Result<TokenResult>> RotateAndIssueAsync(User user, AuthToken tokenEntry, string presentedValue)
     {
         var jwtOptions = IdentityOptions.Jwt;
+        var now = DateTime.UtcNow;
+
+        // 委派会话：新令牌要带回同一组应用声明，两个寿命都夹在会话的绝对到期时间之内。
+        // 在轮换之前读：读不出来（声明存坏了会抛）时这一次刷新失败，而不是先轮换掉再签出一枚没有声明的令牌。
+        var delegation = await GetDelegationAsync(tokenEntry.SessionId);
+        if (delegation != null && delegation.AbsoluteExpiresAt <= now)
+        {
+            // 会话校验开着时上面已经拦下；关着时这里是最后一道，委派会话绝不续过它的到期时间。
+            return Fail<TokenResult>("Session has expired", 401, ErrorCodes.IDENTITY_SESSION_REVOKED);
+        }
+
         var newRefreshToken = _tokenService.GenerateRefreshToken();
-        var refreshExpiresAt = DateTime.UtcNow.AddDays(jwtOptions.RefreshTokenExpirationDays);
+        var refreshExpiresAt = now.AddDays(jwtOptions.RefreshTokenExpirationDays);
+        if (delegation != null)
+        {
+            refreshExpiresAt = SessionLifetime.ClampToAbsolute(refreshExpiresAt, delegation.AbsoluteExpiresAt);
+        }
 
         var rotated = await _authTokenService!.RotateRefreshTokenAsync(
             tokenEntry.Id, presentedValue, newRefreshToken, refreshExpiresAt);
@@ -564,11 +633,19 @@ public class AuthService : ApplicationService, IAuthService
             return await HandleRotatedRefreshTokenAsync(presentedValue);
         }
 
+        // 滑动续期会话：使活跃用户随刷新持续在线（会话硬过期跟随新刷新令牌生命周期，
+        // 但不会越过会话的绝对上限 —— 夹紧在 ISessionService.RenewSessionAsync 里做）。
+        if (delegation != null)
+        {
+            var (delegatedAccessToken, accessExpiresAt) = await CreateDelegatedAccessTokenAsync(user, tokenEntry.SessionId, delegation, now);
+            await _sessionService!.RenewSessionAsync(tokenEntry.SessionId, refreshExpiresAt);
+            return Result<TokenResult>.Success(
+                BuildDelegatedTokenResult(delegatedAccessToken, accessExpiresAt, newRefreshToken, refreshExpiresAt, now));
+        }
+
         var roles = await GetRolesWithTenantContextAsync(user);
         var accessToken = _tokenService.GenerateToken(user, roles, sessionId: ToSessionClaim(tokenEntry.SessionId));
 
-        // 滑动续期会话：使活跃用户随刷新持续在线（会话硬过期跟随新刷新令牌生命周期，
-        // 但不会越过会话的绝对上限 —— 夹紧在 ISessionService.RenewSessionAsync 里做）。
         if (tokenEntry.SessionId != Guid.Empty && _sessionService != null)
         {
             await _sessionService.RenewSessionAsync(tokenEntry.SessionId, refreshExpiresAt);
@@ -641,6 +718,24 @@ public class AuthService : ApplicationService, IAuthService
         if (string.IsNullOrEmpty(currentValue))
         {
             return InvalidRefreshToken();
+        }
+
+        // 委派会话的并发刷新同样要带回声明、受绝对到期时间约束（同 RotateAndIssueAsync）。
+        var delegation = await GetDelegationAsync(rotatedEntry.SessionId);
+        if (delegation != null)
+        {
+            var now = DateTime.UtcNow;
+            if (delegation.AbsoluteExpiresAt <= now)
+            {
+                return Fail<TokenResult>("Session has expired", 401, ErrorCodes.IDENTITY_SESSION_REVOKED);
+            }
+
+            var (delegatedAccessToken, accessExpiresAt) = await CreateDelegatedAccessTokenAsync(user, rotatedEntry.SessionId, delegation, now);
+            LogInformation(
+                "Concurrent refresh for session {SessionId} served from the rotation overlap window.",
+                rotatedEntry.SessionId);
+            return Result<TokenResult>.Success(
+                BuildDelegatedTokenResult(delegatedAccessToken, accessExpiresAt, currentValue, rotatedEntry.ExpiresAt, now));
         }
 
         var roles = await GetRolesWithTenantContextAsync(user);
@@ -745,21 +840,23 @@ public class AuthService : ApplicationService, IAuthService
         await _signInManager.SignOutAsync();
 
         // 只登出当前设备：从 access token 的 session_id claim 取当前会话，仅撤销它。
-        // 取不到会话（遗留令牌/未启用会话强制）时回退撤销该用户全部会话（旧行为）。
         // ★ 走撤销出口而不是直接调 ISessionService：登出必须连带删掉该会话的刷新令牌，
         // 否则「登出」在关掉 EnforceSessionValidation 的部署上只是清了客户端的状态。
+        //
+        // ★★ 取不到会话时什么都不撤销。此前这里回退成「撤销该用户全部会话」，而那一步碰不到发起登出的一方 ——
+        //   不带 session_id 的令牌本来就不受会话撤销约束，它的刷新令牌也没有绑定任何会话 ——
+        //   碰到的只有本人别的设备与应用签发的委派会话：一次登出把它们全部踢下线，自己却毫发无损。
+        //   要登出全部设备，走「登出其它设备」那个端点。
         var currentSessionId = ParseCurrentSessionId();
         if (currentSessionId.HasValue)
         {
             await RevokeSessionAsync(currentSessionId.Value, SessionRevocationReason.Logout);
         }
-        else if (_sessionRevocation != null)
+        else
         {
-            await _sessionRevocation.RevokeUserSessionsAsync(userId, SessionRevocationReason.Logout);
-        }
-        else if (_sessionService != null)
-        {
-            await _sessionService.RevokeAllSessionsAsync(userId);
+            LogWarning(
+                "Logout of user {UserId} could not tell which session it came from (the access token carries no session id); no session was revoked.",
+                userId);
         }
 
         if (_eventBus != null)
@@ -775,6 +872,31 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         return Result<string>.Success("Logout successfully");
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 除了当前这一代，也认刚被轮换掉的上一代：另一位用户的标签页正在刷新时，登出请求带上的可能还是轮换前的值，
+    /// 两个响应谁后到谁的 Set-Cookie 生效，按「查不到」清掉就可能抹掉对方刚拿到的新令牌。
+    /// </remarks>
+    public async Task<bool> IsRefreshTokenHeldByAnotherUserAsync(string? refreshToken, Guid userId)
+    {
+        if (string.IsNullOrEmpty(refreshToken) || _authTokenService == null)
+        {
+            return false;
+        }
+
+        var holder = await _authTokenService.FindTokenByValueAsync(
+                IdentityConstants.TokenProvider.JWT, IdentityConstants.TokenName.RefreshToken, refreshToken)
+            ?? await _authTokenService.FindTokenByPreviousValueAsync(
+                IdentityConstants.TokenProvider.JWT, IdentityConstants.TokenName.RefreshToken, refreshToken);
+
+        if (holder == null || (holder.ExpiresAt.HasValue && holder.ExpiresAt.Value < DateTime.UtcNow))
+        {
+            return false;
+        }
+
+        return holder.UserId != userId;
     }
 
     public async Task<Result<TwoFactorChallengeDto>> SendTwoFactorCodeAsync(SendTwoFactorCodeDto input)
@@ -803,10 +925,13 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TwoFactorChallengeDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // 只接受登录挑战实际提供的方式：挑战列表已按"用户已启用的方式 ∩ 部署开启的渠道"
-        // 过滤，此处复算并校验，否则持有临时令牌者可绕过用户单独关闭的某种方式。
-        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
-        if (usableTypes is { Count: > 0 } && !usableTypes.Contains(input.Type))
+        // 只接受登录挑战实际提供、且此刻仍然可用的方式（口径见 ResolveChallengeMethodsAsync）。
+        var usableTypes = await ResolveChallengeMethodsAsync(user, input.TempToken);
+        if (usableTypes == null)
+        {
+            return Fail<TwoFactorChallengeDto>("Invalid or expired temporary token", 400);
+        }
+        if (!usableTypes.Contains(input.Type))
         {
             return Fail<TwoFactorChallengeDto>("The selected two-factor method is not enabled", 400);
         }
@@ -847,25 +972,9 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TwoFactorChallengeDto>("Failed to send verification code", 500);
         }
 
-        // 回执里的可选方式与登录挑战保持同一口径（用户已启用 ∩ 部署开启的渠道），
-        // 否则前端会重新渲染出用户已单独关闭的方式（此前还漏掉 TOTP）。
-        // 解析不出方式时（无 2FA 服务）回退为"已验证地址"派生。
-        var supportedTypes = new List<TwoFactorType>();
-        if (usableTypes is { Count: > 0 })
-        {
-            supportedTypes.AddRange(usableTypes);
-        }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(user.PhoneNumber) && user.PhoneNumberConfirmed)
-            {
-                supportedTypes.Add(TwoFactorType.Sms);
-            }
-            if (!string.IsNullOrWhiteSpace(user.Email) && user.EmailConfirmed)
-            {
-                supportedTypes.Add(TwoFactorType.Email);
-            }
-        }
+        // 回执里的可选方式与登录挑战保持同一口径：挑战提供过、且此刻仍然可用的那些。
+        // 回填完整的「用户已启用」集合会把挑战扣掉的因子重新摆回登录页上。
+        var supportedTypes = usableTypes.ToList();
 
         // 回填 CodeSent + MaskedAddress，让登录页可显示"验证码已发送到 j•••@example.com"，
         // 消除用户"到底发没发"的疑虑（此前 DTO 有字段但从不填充 = 死字段）。
@@ -909,10 +1018,14 @@ public class AuthService : ApplicationService, IAuthService
         var ipAddress = ScopedContext?.ClientIpAddress;
         var userAgent = ScopedContext?.UserAgent;
 
-        // 与 SendTwoFactorCodeAsync 同款校验：只接受当前确实可用的方式，
-        // 使"单独关闭某方式"在验证环节也生效（挑战列表之外的方式一律拒绝）。
-        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
-        if (usableTypes is { Count: > 0 } && !usableTypes.Contains(input.Type))
+        // 与 SendTwoFactorCodeAsync 同款校验：只接受挑战提供过、且此刻仍然可用的方式
+        // （挑战列表之外的方式一律拒绝，包括验证码登录已经用掉、被扣出挑战的那个因子）。
+        var usableTypes = await ResolveChallengeMethodsAsync(user, input.TempToken);
+        if (usableTypes == null)
+        {
+            return Fail<TokenResult>("Invalid or expired temporary token", 400);
+        }
+        if (!usableTypes.Contains(input.Type))
         {
             await PublishLoginFailedEventAsync(userId, user.UserName, "2FA method not enabled", ipAddress, userAgent);
             return Fail<TokenResult>("The selected two-factor method is not enabled", 400);
@@ -937,7 +1050,7 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TokenResult>("Invalid verification code", 400);
         }
 
-        return await CompleteTwoFactorLoginAsync(user, tokenEntry, ipAddress, userAgent);
+        return await CompleteTwoFactorLoginAsync(user, tokenEntry);
     }
 
     /// <inheritdoc />
@@ -987,15 +1100,16 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<TokenResult>("Invalid passkey", 401, ErrorCodes.UNAUTHORIZED);
         }
 
-        return await CompleteTwoFactorLoginAsync(user, tokenEntry, ipAddress, userAgent);
+        return await CompleteTwoFactorLoginAsync(user, tokenEntry);
     }
 
     /// <summary>
     /// 两步验证的开头：临时令牌 → 账号，并确认登录挑战当下确实提供了 <see cref="TwoFactorType.Passkey"/>。
     /// </summary>
     /// <remarks>
-    /// 与发码 / 验码两条路同一口径：只接受「用户已启用 ∩ 部署开启的渠道」里的方式，
-    /// 否则持有临时令牌者可以绕过用户单独关掉的方式；最后一枚凭据被删掉后也在这里被挡下。
+    /// 与发码 / 验码两条路同一口径（<see cref="ResolveChallengeMethodsAsync"/>）：只接受挑战提供过、
+    /// 且此刻仍在「用户已启用 ∩ 部署开启的渠道」里的方式，否则持有临时令牌者可以绕过用户单独关掉的方式；
+    /// 最后一枚凭据被删掉后也在这里被挡下。
     /// </remarks>
     private async Task<Result<(User User, AuthToken Token)>> ResolveTwoFactorChallengeAsync(string tempToken)
     {
@@ -1021,8 +1135,12 @@ public class AuthService : ApplicationService, IAuthService
             return Fail<(User, AuthToken)>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        var usableTypes = await ResolveSupportedTwoFactorTypesAsync(user);
-        if (usableTypes is null || !usableTypes.Contains(TwoFactorType.Passkey))
+        var usableTypes = await ResolveChallengeMethodsAsync(user, tempToken);
+        if (usableTypes == null)
+        {
+            return Fail<(User, AuthToken)>("Invalid or expired temporary token", 400);
+        }
+        if (!usableTypes.Contains(TwoFactorType.Passkey))
         {
             await PublishLoginFailedEventAsync(user.Id, user.UserName, "2FA method not enabled", ScopedContext?.ClientIpAddress, ScopedContext?.UserAgent);
             return Fail<(User, AuthToken)>("The selected two-factor method is not enabled", 400);
@@ -1032,9 +1150,10 @@ public class AuthService : ApplicationService, IAuthService
     }
 
     /// <summary>
-    /// 两步验证通过之后的收尾，验证码与 passkey 两条路逐字共用：烧掉临时令牌 → 登录守卫 → 建立会话 → 签发令牌 → 登录事件。
+    /// 两步验证通过之后的收尾，验证码与 passkey 两条路逐字共用：烧掉临时令牌 → 登录守卫 → 建立会话 → 签发令牌 →
+    /// 签发完成的副作用（<see cref="OnSignInCompletedAsync"/>）。
     /// </summary>
-    private async Task<Result<TokenResult>> CompleteTwoFactorLoginAsync(User user, AuthToken tokenEntry, string? ipAddress, string? userAgent)
+    private async Task<Result<TokenResult>> CompleteTwoFactorLoginAsync(User user, AuthToken tokenEntry)
     {
         // 标记临时Token为已使用（核心业务逻辑，必须同步执行）。
         // ★ 必须按返回值决定放行：这是条件更新（WHERE IsUsed = false），false 说明并发的另一个请求
@@ -1063,8 +1182,9 @@ public class AuthService : ApplicationService, IAuthService
         // 生成TokenResult并保存RefreshToken
         var tokenResult = await GenerateAndSaveTokenResultAsync(user, sessionResult.Data, enableRefreshToken: true);
 
-        // 发布用户登录事件（由事件处理器处理日志记录）
-        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, IdentityConstants.LoginProvider.JWT);
+        // 登录失败记录（自适应验证码）的键与密码那一步同一口径：来源地址，取不到时退回用户名。
+        await OnSignInCompletedAsync(
+            user, IdentityConstants.LoginProvider.JWT, loginIdentifier: ScopedContext?.ClientIpAddress ?? user.UserName);
 
         return Result<TokenResult>.Success(tokenResult);
     }
@@ -1119,6 +1239,78 @@ public class AuthService : ApplicationService, IAuthService
                 : null
         };
     }
+
+    /// <summary>
+    /// 委派会话版的 <see cref="GenerateAndSaveTokenResultAsync"/>：access token 带应用声明，
+    /// access token 与刷新令牌的过期时间都夹在会话的绝对到期时间之内。
+    /// </summary>
+    private async Task<TokenResult> GenerateAndSaveDelegatedTokenResultAsync(User user, Guid sessionId, DelegatedSessionInfo delegation)
+    {
+        var jwtOptions = IdentityOptions.Jwt;
+        var now = DateTime.UtcNow;
+        var (accessToken, accessTokenExpiresAt) = await CreateDelegatedAccessTokenAsync(user, sessionId, delegation, now);
+
+        string? refreshToken = null;
+        DateTime? refreshTokenExpiresAt = null;
+        if (jwtOptions.EnableRefreshToken)
+        {
+            refreshToken = _tokenService.GenerateRefreshToken();
+            refreshTokenExpiresAt = SessionLifetime.ClampToAbsolute(
+                now.AddDays(jwtOptions.RefreshTokenExpirationDays), delegation.AbsoluteExpiresAt);
+
+            if (_authTokenService != null)
+            {
+                await _authTokenService.SaveTokenAsync(
+                    user.Id,
+                    IdentityConstants.TokenProvider.JWT,
+                    IdentityConstants.TokenName.RefreshToken,
+                    refreshToken,
+                    refreshTokenExpiresAt,
+                    sessionId);
+            }
+        }
+
+        return BuildDelegatedTokenResult(accessToken, accessTokenExpiresAt, refreshToken ?? string.Empty, refreshTokenExpiresAt, now);
+    }
+
+    /// <summary>
+    /// 签一枚委派会话的 access token：带应用声明，过期时间不晚于会话的绝对到期时间。
+    /// </summary>
+    private async Task<(string Token, DateTime ExpiresAt)> CreateDelegatedAccessTokenAsync(
+        User user, Guid sessionId, DelegatedSessionInfo delegation, DateTime now)
+    {
+        var roles = await GetRolesWithTenantContextAsync(user);
+        var expiresAt = SessionLifetime.ClampToAbsolute(
+            now.AddMinutes(IdentityOptions.Jwt.AccessTokenExpirationMinutes), delegation.AbsoluteExpiresAt);
+        var claims = delegation.Claims.Select(claim => new Claim(claim.Key, claim.Value)).ToList();
+
+        var token = _tokenService.GenerateToken(user, roles, claims, ToSessionClaim(sessionId), notAfter: expiresAt);
+        return (token, expiresAt);
+    }
+
+    /// <summary>委派会话的令牌结果：两个寿命都按夹过之后的真实到期时间报，而不是按部署配置。</summary>
+    private static TokenResult BuildDelegatedTokenResult(
+        string accessToken, DateTime accessTokenExpiresAt, string refreshToken, DateTime? refreshTokenExpiresAt, DateTime now) => new()
+    {
+        AccessToken = accessToken,
+        RefreshToken = refreshToken,
+        ExpiresAt = accessTokenExpiresAt,
+        ExpiresIn = SecondsUntil(accessTokenExpiresAt, now),
+        RefreshTokenExpiresIn = refreshTokenExpiresAt.HasValue && refreshToken.Length > 0
+            ? SecondsUntil(refreshTokenExpiresAt.Value, now)
+            : null
+    };
+
+    private static int SecondsUntil(DateTime moment, DateTime now)
+        => (int)Math.Max(0, Math.Floor((moment - now).TotalSeconds));
+
+    /// <summary>
+    /// 一条会话上的委派事实；普通会话（以及没有会话服务时）为 null。
+    /// </summary>
+    private async Task<DelegatedSessionInfo?> GetDelegationAsync(Guid sessionId)
+        => sessionId == Guid.Empty || _sessionService == null
+            ? null
+            : await _sessionService.GetDelegationAsync(sessionId);
 
     /// <summary>
     /// 记一次 2FA 验证失败：累加账号锁定计数，锁定之后连带作废本次挑战的临时令牌。
@@ -1237,7 +1429,9 @@ public class AuthService : ApplicationService, IAuthService
     /// </remarks>
     private async Task<Result<T>> HandlePendingActionsChallengeAsync<T>(User user, PendingUserActions obligations)
     {
-        var tempToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        // ★ URL 安全的字母表（OneTimeToken）：此前是标准 Base64，约一半的令牌含 '/'，而读待办的端点曾把它放在路径段里，
+        //   编码成 %2F 的那一半按哈希查不到，被要求改密 / 绑验证器 / 确认邮箱的用户随机地卡在「令牌无效」。
+        var tempToken = OneTimeToken.Create();
 
         await PersistPendingActionTokenAsync(user.Id, tempToken, DateTime.UtcNow.AddMinutes(10));
 
@@ -1462,10 +1656,39 @@ public class AuthService : ApplicationService, IAuthService
         return supportedTypes;
     }
 
+    /// <summary>
+    /// 第二步此刻能用哪些方式：挑战签发时提供的那份列表（随临时令牌带回来）∩ 此刻重算的可用集合。
+    /// 临时令牌读不出列表时返回 <c>null</c>，调用方按无效令牌拒绝。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>两半都要。</strong>只用重算的集合，挑战扣掉的因子会回来（邮箱验证码登录 → 第二步再选
+    /// Email ⇒ 两步验证退化成邮箱单因子）；只用挑战列表，用户在挑战之后关掉的方式还能把第二步走完。
+    /// </para>
+    /// <para>
+    /// ★ 交集为空就是空：不再有「重算为空则不校验」的放行分支。那一支此前让一个已经没有任何可用方式的账号
+    /// 可以用任意方式完成第二步。
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlySet<TwoFactorType>?> ResolveChallengeMethodsAsync(User user, string tempToken)
+    {
+        var offered = TwoFactorChallengeToken.ReadOffered(tempToken);
+        if (offered == null)
+        {
+            LogWarning("Rejected a two-factor step for user {UserId}: the temporary token carries no offered methods.", user.Id);
+            return null;
+        }
+
+        var usable = await ResolveSupportedTwoFactorTypesAsync(user);
+        return offered.Where(t => usable?.Contains(t) == true).ToHashSet();
+    }
+
     private async Task<Result<T>> Handle2FAChallengeAsync<T>(User user, List<TwoFactorType> supportedTypes)
     {
-        // 使用 CSPRNG 生成安全的临时令牌，防止可预测性攻击
-        var tempToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+        // 使用 CSPRNG 生成安全的临时令牌，防止可预测性攻击。
+        // ★ 本次挑战提供的方式随令牌一起签出（见 TwoFactorChallengeToken）：第二步的三个入口只认这份列表，
+        //   否则被扣掉的那个因子（验证码登录 / passkey 登录已经用掉的那个）会在第二步重新出现。
+        var tempToken = TwoFactorChallengeToken.Create(supportedTypes);
 
         // 2FA 挑战以"失败"信封返回(403 2FA_REQUIRED)，让前端停在登录页切到验证步骤。
         // 但在 EnableGlobalUnitOfWork 下，UnitOfWork 过滤器对非成功结果会**回滚整个请求
@@ -1476,6 +1699,69 @@ public class AuthService : ApplicationService, IAuthService
         await PersistTwoFactorTempTokenAsync(user.Id, tempToken, DateTime.UtcNow.AddMinutes(10));
 
         return Fail<T>("Two-factor authentication required", 403, ErrorCodes.IDENTITY_2FA_REQUIRED, new { TempToken = tempToken, SupportedTypes = supportedTypes });
+    }
+
+    /// <summary>
+    /// 一次签发<b>真正完成</b>之后的副作用：清零账号锁定的失败计数、清掉按登录名记的登录失败记录（自适应验证码）、
+    /// 发登录成功事件、跑异常登录检测。全部签发路径（密码登录两条、共享出口、两步验证的收尾）逐字共用这一份。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>收口成一个方法，是因为逐处各写一遍已经漏过一次。</strong>两步验证的收尾此前只发登录事件：
+    /// 不跑异常登录检测，于是开着 2FA 的账号（安全级别最高的那一批）从新 IP、新设备登录，部署方订阅的
+    /// <see cref="AbnormalLoginDetectedEvent"/> 一条都收不到；也不清登录失败记录。
+    /// </para>
+    /// <para>
+    /// ★★ <strong>失败计数必须在这里清，而且只能在这里清。</strong>ASP.NET Identity 的
+    /// <c>CheckPasswordSignInAsync</c> 对开着两步验证的账号不清计数，把这一步留给它自己的
+    /// <c>TwoFactorSignInAsync</c>，而本框架从不调用它；验证码登录、passkey、OAuth 根本不经过密码校验。
+    /// 于是隔几周输错一次密码或验证码，累计到上限就被锁，中间每一次登录都是成功的。
+    /// 不能提前到密码那一步：那时还欠着第二步，在那里清零等于每猜一轮第二因子之前先把计数归零。
+    /// </para>
+    /// <para>
+    /// ★★ <strong>自适应验证码的失败计数只清按登录名记的那一份。</strong>计数的键是来源地址，取不到地址时才退回登录名。
+    /// 来源地址是许多账号共享的：一次成功登录只证明这个人知道<b>自己的</b>密码，说明不了同一地址上针对别的账号的失败。
+    /// 此前成功登录清掉整个地址的计数，于是手里有任何一个有效账号的人每猜两次别人的密码就登一次自己的号，
+    /// 计数永远到不了阈值，验证码闸门对撞库形同虚设。按地址记的计数在它的固定窗口结束时自然过期。
+    /// </para>
+    /// </remarks>
+    /// <param name="user">刚签发完令牌的账号。</param>
+    /// <param name="provider">登录日志里的方式名。</param>
+    /// <param name="loginIdentifier">登录失败记录的键；为空时不清（这条路径不累加它），是来源地址时也不清（理由见上）。</param>
+    private async Task OnSignInCompletedAsync(User user, string provider, string? loginIdentifier)
+    {
+        await ResetAccessFailedCountAsync(user);
+
+        if (_captchaService != null && !string.IsNullOrEmpty(loginIdentifier)
+            && string.IsNullOrEmpty(ScopedContext?.ClientIpAddress))
+        {
+            await _captchaService.ClearLoginFailureAsync(loginIdentifier);
+        }
+
+        var ipAddress = ScopedContext?.ClientIpAddress;
+        var userAgent = ScopedContext?.UserAgent;
+        await PublishLoginSuccessEventAsync(user, ipAddress, userAgent, provider);
+        await CheckAndPublishAbnormalLoginAsync(user, ipAddress, userAgent);
+    }
+
+    /// <summary>
+    /// 签发完成后清零失败计数。计数本来就是 0 时不写库；写不进去（存量账号过不了当前的用户校验器）只告警：
+    /// 令牌已经签出去了，把一次成功的登录报成失败只会把凭据正确的人挡在外面。
+    /// </summary>
+    private async Task ResetAccessFailedCountAsync(User user)
+    {
+        if (!_userManager.SupportsUserLockout || await _userManager.GetAccessFailedCountAsync(user) == 0)
+        {
+            return;
+        }
+
+        var reset = await _userManager.ResetAccessFailedCountAsync(user);
+        if (!reset.Succeeded)
+        {
+            LogWarning(
+                "User {UserId} signed in but the failed-attempt count could not be reset ({Errors}); earlier failures still count towards lockout.",
+                user.Id, reset.FormatErrors());
+        }
     }
 
     private async Task PublishLoginSuccessEventAsync(User user, string? ipAddress, string? userAgent, string provider)
@@ -1615,17 +1901,10 @@ public class AuthService : ApplicationService, IAuthService
         }
 
         // 查找用户（可能不存在）
-        Guid? userId = null;
-        if (input.Type == TwoFactorType.Email)
-        {
-            var user = await _userManager.FindByEmailAsync(address);
-            userId = user?.Id;
-        }
-        else
-        {
-            var user = await _userManager.FindByPhoneNumberAsync(address);
-            userId = user?.Id;
-        }
+        var existingUser = input.Type == TwoFactorType.Email
+            ? await _userManager.FindByEmailAsync(address)
+            : await _userManager.FindByPhoneNumberAsync(address);
+        var userId = existingUser?.Id;
 
         // ★★★ 账号不存在、而且这一类快速注册也没开着：这枚码拿到 CodeLoginAsync 那边必然
         //   得到 404，所以发出去是**纯支出** —— 短信/邮件费用、发信人信誉，以及一封带着
@@ -1645,8 +1924,9 @@ public class AuthService : ApplicationService, IAuthService
             return Result<string>.Success(CodeLoginCodeSentMessage);
         }
 
-        // 发送验证码
-        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, VerificationCodePurpose.CodeLogin, userId);
+        // 发送验证码。账号存在时寄往它登记的地址（见 AddressOnRecord）；不存在时（快速注册开着）只有请求里这一个地址。
+        var deliverTo = existingUser != null ? AddressOnRecord(existingUser, input.Type) ?? address : address;
+        var result = await _twoFactorService.SendCodeByAddressAsync(deliverTo, input.Type, VerificationCodePurpose.CodeLogin, userId);
         if (!result.Succeeded)
         {
             return Fail<string>(result.Message ?? "Failed to send verification code", result.Code ?? 500);
@@ -1742,15 +2022,41 @@ public class AuthService : ApplicationService, IAuthService
         }
         else
         {
-            // 用户存在，验证码登录时自动确认邮箱/手机号
-            if (input.Type == TwoFactorType.Email && !user.EmailConfirmed)
+            var addressVerified = input.Type == TwoFactorType.Email ? user.EmailConfirmed : user.PhoneNumberConfirmed;
+            if (!addressVerified)
             {
-                user.EmailConfirmed = true;
-                await _userManager.UpdateAsync(user);
-            }
-            else if (input.Type == TwoFactorType.Sms && !user.PhoneNumberConfirmed)
-            {
-                user.PhoneNumberConfirmed = true;
+                // ★★★ 抢注再接管（pre-account hijacking）：账号上这个地址从没被验证过，说明当初填它的人
+                //   不一定是它的主人：第三方登录建号时资料邮箱按「未验证」落库（GitHub 的资料邮箱可以随便填），
+                //   不要求先验证邮箱的自助注册、管理员手填的联系方式都是这样来的。此时账号上若还有别的登录方式，
+                //   证明了地址的人登进去、再把地址替它确认掉，就是与抢注者共用一个账号，而对方的后门原样留着。
+                //   只有在「除了这个地址，没有任何别的方式能进这个账号」时，证明地址的人才是唯一的主人。
+                if (await HasAnotherSignInMethodAsync(user, input.Type))
+                {
+                    LogWarning(
+                        "Refused a code sign-in for user {UserId}: the {Channel} address was never verified on this account and the account has other sign-in methods.",
+                        user.Id, input.Type);
+                    await PublishLoginFailedEventAsync(user.Id, user.UserName, "Code sign-in to an unverified address", ipAddress, userAgent);
+
+                    return input.Type == TwoFactorType.Email
+                        ? Fail<CodeLoginResultDto>(
+                            "This email address has not been verified for its account, so it cannot be used to sign in with a code. Sign in another way and verify it first.",
+                            403,
+                            ErrorCodes.IDENTITY_EMAIL_NOT_CONFIRMED)
+                        : Fail<CodeLoginResultDto>(
+                            "This phone number has not been verified for its account, so it cannot be used to sign in with a code. Sign in another way and verify it first.",
+                            403);
+                }
+
+                // 账号别无它法可进：证明了地址的人就是唯一能进来的人，顺带把地址确认掉。
+                if (input.Type == TwoFactorType.Email)
+                {
+                    user.EmailConfirmed = true;
+                }
+                else
+                {
+                    user.PhoneNumberConfirmed = true;
+                }
+
                 await _userManager.UpdateAsync(user);
             }
         }
@@ -1814,6 +2120,52 @@ public class AuthService : ApplicationService, IAuthService
     }
 
     /// <summary>
+    /// 除了本次验证码证明的那个地址之外，这个账号还有没有别的登录方式。
+    /// </summary>
+    /// <remarks>
+    /// 密码、第三方登录、passkey，以及<b>另一个已验证的地址</b>（它的验证码登录同样是一种登录方式：
+    /// 账号已经有一个验证过的手机号时，它属于那个号码的主人，一个从没验证过的邮箱的持有者不该凭邮箱进来）。
+    /// 存储不支持某类凭据时那一类按「没有」计（<c>UserManager</c> 的对应方法在不支持时会抛异常）。
+    /// </remarks>
+    private async Task<bool> HasAnotherSignInMethodAsync(User user, TwoFactorType provenChannel)
+    {
+        if (!string.IsNullOrEmpty(user.PasswordHash))
+        {
+            return true;
+        }
+
+        var otherAddressVerified = provenChannel == TwoFactorType.Email
+            ? user.PhoneNumberConfirmed && !string.IsNullOrWhiteSpace(user.PhoneNumber)
+            : user.EmailConfirmed && !string.IsNullOrWhiteSpace(user.Email);
+        if (otherAddressVerified)
+        {
+            return true;
+        }
+
+        if (_userManager.SupportsUserLogin && await _userManager.GetLoginsAsync(user) is { Count: > 0 })
+        {
+            return true;
+        }
+
+        return _userManager.SupportsUserPasskey && await _userManager.GetPasskeysAsync(user) is { Count: > 0 };
+    }
+
+    /// <summary>
+    /// 账号上登记的、这一渠道的地址。按地址解析到账号之后，码一律寄往这里，而不是请求里的那个写法。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 账号解析按规范化与数据库排序规则比较，会把一个<b>不同的字符串</b>折到既有账号上：默认规范化把长 s（U+017F）
+    /// 大写成 S，不区分全角半角（SQL Server 默认）或忽略尾随空格的比较折得更多，消费方自己的规范化器还可能折掉点号与加号标签。
+    /// 码寄往请求里的写法，收件的就未必是账号的主人，而这枚码随后能登进这个账号、或重置它的密码。
+    /// 重发确认邮件早就是寄往 <c>user.Email</c> 的。
+    /// </remarks>
+    private static string? AddressOnRecord(User user, TwoFactorType type)
+    {
+        var onRecord = type == TwoFactorType.Email ? user.Email : user.PhoneNumber;
+        return string.IsNullOrWhiteSpace(onRecord) ? null : onRecord;
+    }
+
+    /// <summary>
     /// 通过验证码自动注册用户
     /// </summary>
     private async Task<Result<User>> AutoRegisterByCodeAsync(string? email, string? phoneNumber, TwoFactorType type)
@@ -1873,12 +2225,49 @@ public class AuthService : ApplicationService, IAuthService
     private const string RecoveryCodeSentMessage = "If the account exists, a verification code has been sent.";
 
     /// <summary>
+    /// 验证码找回密码对这个渠道开没开：发得出码（<c>Otp.Enable{Email,Sms}</c>）且允许拿它找回
+    /// （<c>Recovery.EnablePasswordResetBy{Email,Sms}</c>）。开着返回 <c>null</c>，否则返回 400。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 两个开关缺一不可。此前这条路径只看 OTP 渠道开关，于是为了短信两步验证 / 短信验证码登录打开
+    /// <c>Otp.EnableSms</c> 的部署，就静默地开放了短信找回密码：<c>Recovery.EnablePasswordResetBySms</c>（默认关）
+    /// 让 <c>/auth/config</c> 报 <c>recoveryViaSms = false</c>、登录页不显示入口，端点却照常重置密码。
+    /// 关掉 <c>EnablePasswordResetByEmail</c> 也只关掉了链接式找回。邮箱与短信以外的方式没有「发码找回」这回事，一律拒绝。
+    /// </remarks>
+    private Result<string>? RefuseClosedRecoveryChannel(TwoFactorType type)
+    {
+        var options = IdentityOptions;
+        var (channelOpen, recoveryOpen) = type switch
+        {
+            TwoFactorType.Email => (options.Otp.EnableEmail, options.Recovery.EnablePasswordResetByEmail),
+            TwoFactorType.Sms => (options.Otp.EnableSms, options.Recovery.EnablePasswordResetBySms),
+            _ => (false, false),
+        };
+
+        if (channelOpen && recoveryOpen)
+        {
+            return null;
+        }
+
+        return type switch
+        {
+            TwoFactorType.Email => Fail<string>("Password recovery by email is not enabled", 400, ErrorCodes.VALIDATION_ERROR),
+            TwoFactorType.Sms => Fail<string>("Password recovery by SMS is not enabled", 400, ErrorCodes.VALIDATION_ERROR),
+            _ => Fail<string>("Password recovery supports email and SMS codes only", 400, ErrorCodes.VALIDATION_ERROR),
+        };
+    }
+
+    /// <summary>
     /// 发送密码找回验证码
     /// </summary>
     public async Task<Result<string>> SendPasswordRecoveryCodeAsync(SendPasswordRecoveryCodeDto input)
     {
-        var otpOptions = IdentityOptions.Otp;
-        var recoveryOptions = IdentityOptions.Recovery;
+        // 渠道开关在人机验证之前：注定被拒的请求不该先消费掉用户手里那张验证码（与验证码登录的发码门同一顺序）。
+        var channelRefused = RefuseClosedRecoveryChannel(input.Type);
+        if (channelRefused != null)
+        {
+            return channelRefused;
+        }
 
         // 人机验证（启用找回密码验证码时，发出短信 / 邮件之前先过）。与验证码登录的发码门同形：无条件要求，
         // 这条路径没有「失败次数」可累计，而每次调用都真的产生费用。此前它不受任何验证码开关管辖。
@@ -1889,16 +2278,6 @@ public class AuthService : ApplicationService, IAuthService
             {
                 return await BuildCaptchaRequiredResultAsync<string>(CaptchaPurpose.PasswordRecovery);
             }
-        }
-
-        // 验证类型是否启用
-        if (input.Type == TwoFactorType.Email && !otpOptions.EnableEmail)
-        {
-            return Fail<string>("Email verification is not enabled", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-        if (input.Type == TwoFactorType.Sms && !otpOptions.EnableSms)
-        {
-            return Fail<string>("SMS verification is not enabled", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         // 验证输入
@@ -1958,8 +2337,9 @@ public class AuthService : ApplicationService, IAuthService
             return Result<string>.Success(RecoveryCodeSentMessage);
         }
 
-        // 发送验证码
-        var result = await _twoFactorService.SendCodeByAddressAsync(address, input.Type, VerificationCodePurpose.PasswordRecovery, user.Id);
+        // 发送验证码：寄往账号上登记的地址，不是请求里的写法（见 AddressOnRecord）。
+        var result = await _twoFactorService.SendCodeByAddressAsync(
+            AddressOnRecord(user, input.Type) ?? address, input.Type, VerificationCodePurpose.PasswordRecovery, user.Id);
         if (!result.Succeeded)
         {
             // 节流（429）等真实失败照常透出：那是本人也需要知道的信息，
@@ -1975,6 +2355,14 @@ public class AuthService : ApplicationService, IAuthService
     /// </summary>
     public async Task<Result<string>> ResetPasswordByCodeAsync(ResetPasswordByCodeDto input)
     {
+        // ★ 重置这一头同样要挡，且挡在验码之前：只挡发码的话，开关关掉之前已经发出去的码仍能完成重置
+        //   （与 AllowCodeLogin 两头都挡同一理由），挡在验码之后则会把那枚码白白消费掉。
+        var channelRefused = RefuseClosedRecoveryChannel(input.Type);
+        if (channelRefused != null)
+        {
+            return channelRefused;
+        }
+
         // 验证输入
         string address;
         if (input.Type == TwoFactorType.Email)

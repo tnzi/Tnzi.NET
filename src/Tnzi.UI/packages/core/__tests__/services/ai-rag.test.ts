@@ -66,35 +66,56 @@ describe('useRagApi', () => {
     });
   });
 
-  it('should call query with optional params', async () => {
+  // The server drops unknown keys without a word, so every key the client sends
+  // must be the backend RagQueryRequest / RagChatRequest property name. A
+  // relevance threshold sent as `threshold` was ignored and every query ran at
+  // the default 0.3; a chat sent as `message` was rejected with 400 because the
+  // required `query` was missing.
+  const queryRequestKeys = ['query', 'knowledgeBaseIds', 'topK', 'minRelevance', 'includeCitations'];
+  const chatRequestKeys = [...queryRequestKeys, 'threadId', 'agentId'];
+
+  it('should send query options under the backend property names', async () => {
     const api = useRagApi(client);
-    await api.query({ query: 'test', knowledgeBaseIds: ['kb1', 'kb2'], topK: 5, threshold: 0.8 });
-    expect(client.post).toHaveBeenCalledWith('/rag/query', {
+    await api.query({ query: 'test', knowledgeBaseIds: ['kb1', 'kb2'], topK: 5, minRelevance: 0.8, includeCitations: false });
+    const body = client.calls[0].data as Record<string, unknown>;
+    expect(body).toEqual({
       query: 'test',
       knowledgeBaseIds: ['kb1', 'kb2'],
       topK: 5,
-      threshold: 0.8,
+      minRelevance: 0.8,
+      includeCitations: false,
     });
+    expect(Object.keys(body).every((key) => queryRequestKeys.includes(key))).toBe(true);
+    expect(body).not.toHaveProperty('threshold');
   });
 
-  it('should call chat with correct params', async () => {
+  it('should send the chat question as query, never as message', async () => {
     const api = useRagApi(client);
-    await api.chat({ message: 'hello', knowledgeBaseIds: ['kb1'], threadId: 't1' });
-    expect(client.post).toHaveBeenCalledWith('/rag/chat', {
-      message: 'hello',
-      knowledgeBaseIds: ['kb1'],
-      threadId: 't1',
-    });
+    await api.chat({ query: 'hello', knowledgeBaseIds: ['kb1'], threadId: 't1', agentId: 'a1', topK: 3 });
+    const body = client.calls[0].data as Record<string, unknown>;
+    expect(client.calls[0].url).toBe('/rag/chat');
+    expect(body).toEqual({ query: 'hello', knowledgeBaseIds: ['kb1'], threadId: 't1', agentId: 'a1', topK: 3 });
+    expect(Object.keys(body).every((key) => chatRequestKeys.includes(key))).toBe(true);
+    expect(body).not.toHaveProperty('message');
   });
 
-  it('should call chat with optional topK', async () => {
+  it('should allow searching every user-queryable knowledge base', async () => {
     const api = useRagApi(client);
-    await api.chat({ message: 'hello', knowledgeBaseIds: ['kb1'], topK: 3 });
-    expect(client.post).toHaveBeenCalledWith('/rag/chat', {
-      message: 'hello',
-      knowledgeBaseIds: ['kb1'],
-      topK: 3,
+    await api.chat({ query: 'hello' });
+    expect(client.post).toHaveBeenCalledWith('/rag/chat', { query: 'hello' });
+  });
+
+  it('should hand back the backend result shape', async () => {
+    (client.post as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      succeeded: true,
+      code: 200,
+      data: { answer: 'A', citations: [{ text: 'c' }], threadId: 't9' },
     });
+    const api = useRagApi(client);
+    const result = await api.chat({ query: 'hello' });
+    expect(result.data?.answer).toBe('A');
+    expect(result.data?.threadId).toBe('t9');
+    expect(result.data?.citations[0].text).toBe('c');
   });
 
   it('should build the stream URL through the client baseUrl', () => {

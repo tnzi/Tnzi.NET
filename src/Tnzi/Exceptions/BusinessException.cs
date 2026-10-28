@@ -12,6 +12,16 @@ public class BusinessException : TnziException
     public int HttpStatusCode { get; }
 
     /// <summary>
+    /// 随错误一起交给客户端的结构化详情（响应信封的 <c>errorDetails</c>），例如「哪个上限到了、什么时候重置」。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="TnziException.ContextData"/> 不同：上下文数据是排障用的，可被 <c>IncludeContextData</c> 关掉；
+    /// 这里放的是客户端据以决定怎么展示的契约数据，总会输出。服务层的 <c>Result.ErrorDetails</c> 走到异常路径时放在这里，
+    /// 两条路径的响应形状一致。
+    /// </remarks>
+    public object? ErrorDetails { get; init; }
+
+    /// <summary>
     /// 初始化一个<see cref="BusinessException"/>类型的新实例
     /// </summary>
     /// <param name="message">错误消息</param>

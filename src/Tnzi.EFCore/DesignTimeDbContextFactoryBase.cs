@@ -51,6 +51,11 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
         Outbox.Configs.OutboxMessageConfiguration.OutboxEnabled =
             configuration.GetSection(ConfigSectionResolver.Resolve(typeof(OutboxOptions))).Get<OutboxOptions>()?.Enabled ?? false;
 
+        // ③ 字段加密形态:信封模式的密文更长,IsEncrypted() 放宽的列宽随之不同。
+        FieldEncryptionDesignTime.Mode =
+            configuration.GetSection(ConfigSectionResolver.Resolve(typeof(FieldEncryptionOptions))).Get<FieldEncryptionOptions>()?.Mode
+            ?? FieldEncryptionMode.Direct;
+
         // Read from Database configuration
         var databaseOptions = configuration.GetSection("Database").Get<DatabaseOptions>();
 
@@ -116,20 +121,12 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
                 $"Please add a configuration entry with DbContextType matching your DbContext type, or use Name='Default' for simplified configuration.");
         }
 
+        // Provider 未指定（默认值）时按展开后的连接字符串识别，与运行期注册共用同一处逻辑；
+        // 在应用连接池参数之前识别，池参数的写法按 provider 不同。
+        config.DetectProviderFromConnectionString(configuration);
+
         // Expand ${VAR} / $(VAR) placeholders in connection string (environment variables + configuration)
         var effectiveConnectionString = config.GetEffectiveConnectionString(configuration);
-
-        // 如果 Provider 未指定或为默认值，尝试自动检测（使用展开后的连接字符串）
-        if (config.Provider == DatabaseProvider.SqlServer && !string.IsNullOrWhiteSpace(effectiveConnectionString))
-        {
-            if (Internal.DatabaseProviderDetector.TryDetectFromConnectionString(effectiveConnectionString, out var detectedProvider, out _, null))
-            {
-                if (detectedProvider != DatabaseProvider.SqlServer)
-                {
-                    config.Provider = detectedProvider;
-                }
-            }
-        }
 
         // Scan TnziApplicationModule and set DesignTimeModuleContainer
         // This enables TableNamePrefixConfiguration to access module TableNamePrefix during migrations
@@ -143,11 +140,30 @@ public abstract class DesignTimeDbContextFactoryBase<TDbContext> : IDesignTimeDb
         optionsBuilder.UseTnziMultiTenancy(multiTenancyEnabled);
         optionsBuilder.UseTnziModelWarningPolicy();
 
+        // ★★ 主次决定未指定上下文的实体进不进这个模型。运行期从 AddTnziDbContext 的登记判定，
+        // 设计期没有应用容器，按与运行期配置发现同一条规则（PrimaryDbContext 指名的那一项，没指名就是第一项）判定后写在 options 上，
+        // 否则 dotnet ef 生成的迁移与运行期模型分叉。
+        var isPrimary = ReferenceEquals(config, FindPrimaryConfiguration(databaseOptions));
+        ((IDbContextOptionsBuilderInfrastructure)optionsBuilder).AddOrUpdateExtension(new Internal.DbContextRoleOptionsExtension(isPrimary));
+
         // Create design-time CurrentUser
         var currentUser = new DesignTimeCurrentUser();
 
         // Create DbContext instance
         return CreateDbContextInstance(optionsBuilder.Options, currentUser);
+    }
+
+    /// <summary>
+    /// 主上下文的配置项：<c>PrimaryDbContext</c> 指名的那一项（按 Name，不区分大小写），没指名或找不到时是第一项。
+    /// 与运行期 <c>DbContextDiscoveryService</c> 选主上下文的规则一致。
+    /// </summary>
+    private static DbContextConfiguration FindPrimaryConfiguration(DatabaseOptions databaseOptions)
+    {
+        var named = string.IsNullOrEmpty(databaseOptions.PrimaryDbContext)
+            ? null
+            : databaseOptions.DbContexts.FirstOrDefault(c =>
+                string.Equals(c.Name, databaseOptions.PrimaryDbContext, StringComparison.OrdinalIgnoreCase));
+        return named ?? databaseOptions.DbContexts[0];
     }
 
     /// <summary>

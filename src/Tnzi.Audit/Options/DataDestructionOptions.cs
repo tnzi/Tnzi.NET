@@ -40,7 +40,7 @@ public class DataDestructionOptions
     public bool DryRun { get; set; }
 
     /// <summary>
-    /// 两次扫描之间的间隔小时数。默认 <c>24</c>。
+    /// 两次扫描之间的间隔小时数。默认 <c>24</c>，取值 1 到 <see cref="MaxIntervalHours"/>。
     /// </summary>
     /// <remarks>
     /// 保留期以天为量级，没有必要扫得更勤。这个值只影响「到期后多久被销毁」的延迟上界。
@@ -48,11 +48,22 @@ public class DataDestructionOptions
     public int IntervalHours { get; set; } = 24;
 
     /// <summary>
+    /// <see cref="IntervalHours"/> 的上限：30 天。
+    /// </summary>
+    /// <remarks>
+    /// 理由与 <see cref="AuditOptions.MaxAutoPurgeIntervalHours"/> 相同：<c>Task.Delay</c> 能等的最长时间约 49 天，
+    /// 越过它后台循环在第一轮之后抛 <c>ArgumentOutOfRangeException</c>，未处理的后台服务异常默认停掉整个宿主。
+    /// 校验器在启动时挡下它。
+    /// </remarks>
+    public const int MaxIntervalHours = 24 * 30;
+
+    /// <summary>
     /// 单次扫描中每条策略最多销毁的记录数。默认 <c>500</c>。
     /// </summary>
     /// <remarks>
     /// 上限存在的理由是首次启用时可能有大量历史数据同时到期，
-    /// 一次性删几百万行会长时间持锁。剩下的会在下一个周期继续销毁。
+    /// 一次性删几百万行会长时间持锁。被诉讼保全的记录不占这个名额。
+    /// 还有剩余时后台服务在同一周期内接着跑下一轮（每个周期最多 20 轮），再剩下的留给下一个周期。
     /// </remarks>
     public int BatchSize { get; set; } = 500;
 

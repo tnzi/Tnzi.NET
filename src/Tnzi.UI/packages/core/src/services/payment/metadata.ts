@@ -194,6 +194,20 @@ export enum SubscriptionStatus {
   Cancelled = 'Cancelled',
   Expired = 'Expired',
   PastDue = 'PastDue',
+  /** Unpaid after the grace period with `GracePeriodEndAction = Suspend`; paying (pay-now) restores it. */
+  Suspended = 'Suspended',
+}
+
+/**
+ * Billing standing of an account - mirrors Tnzi.Payment.Subscriptions.Metadata.BillingStanding.
+ * `Warning` = a charge failed and the grace period is running (service continues);
+ * `Suspended` = the grace period ran out and the access gate refuses gated requests.
+ */
+export enum BillingStanding {
+  None = 'None',
+  Good = 'Good',
+  Warning = 'Warning',
+  Suspended = 'Suspended',
 }
 
 /**
@@ -217,6 +231,8 @@ export function getSubscriptionStatusLabel(status: SubscriptionStatus): string {
       return 'Expired';
     case SubscriptionStatus.PastDue:
       return 'Past Due';
+    case SubscriptionStatus.Suspended:
+      return 'Suspended';
     default:
       return 'Unknown';
   }
@@ -294,6 +310,8 @@ export enum InvoiceType {
   Standard = 'Standard',
   Vat = 'Vat',
   Receipt = 'Receipt',
+  /** Issued for a refund against the original invoice (`originalInvoiceId`). */
+  CreditNote = 'CreditNote',
 }
 
 /**
@@ -307,6 +325,8 @@ export function getInvoiceTypeLabel(type: InvoiceType): string {
       return 'VAT';
     case InvoiceType.Receipt:
       return 'Receipt';
+    case InvoiceType.CreditNote:
+      return 'Credit Note';
     default:
       return 'Unknown';
   }
@@ -426,28 +446,6 @@ export enum TrendGranularity {
 }
 
 /**
- * Coupon type (legacy compatibility for the admin promotion listing DTOs).
- */
-export enum CouponType {
-  Fixed = 1,
-  Percentage = 2,
-}
-
-/**
- * Get coupon type label
- */
-export function getCouponTypeLabel(type: CouponType): string {
-  switch (type) {
-    case CouponType.Fixed:
-      return 'Fixed Amount';
-    case CouponType.Percentage:
-      return 'Percentage';
-    default:
-      return 'Unknown';
-  }
-}
-
-/**
  * Currency codes
  */
 export enum Currency {
@@ -458,4 +456,37 @@ export enum Currency {
   JPY = 'JPY',
   HKD = 'HKD',
   TWD = 'TWD',
+}
+
+/**
+ * Bytes in one GB for plan storage allowances, usage and the storage overage
+ * line: 2^30, the same unit object storage bills in and `formatFileSize` shows.
+ */
+export const STORAGE_BYTES_PER_GB = 1073741824;
+
+/** `InvoiceLineItemDto.kind` of the storage overage line on a renewal receipt. */
+export const STORAGE_OVERAGE_LINE_KIND = 'storage-overage';
+
+/** Bytes → GB (2^30) for display and editing; null stays null. */
+export function bytesToGb(bytes: number | null | undefined): number | null {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return null;
+  return bytes / STORAGE_BYTES_PER_GB;
+}
+
+/** GB (2^30) → whole bytes; empty, negative or non-numeric input is null (no allowance set). */
+export function gbToBytes(gb: number | string | null | undefined): number | null {
+  if (gb === null || gb === undefined || gb === '') return null;
+  const value = typeof gb === 'number' ? gb : Number(gb);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * STORAGE_BYTES_PER_GB);
+}
+
+/**
+ * `250 GB`, `12.35 GB`: storage in the plan's unit (always GB, never MB or TB,
+ * so a usage figure and the allowance it is read against are the same unit).
+ */
+export function formatStorageGb(bytes: number | null | undefined, maximumFractionDigits = 2): string {
+  const gb = bytesToGb(bytes);
+  if (gb === null) return '';
+  return `${gb.toLocaleString(undefined, { maximumFractionDigits })} GB`;
 }

@@ -198,4 +198,67 @@ public class FunctionAuthorizationHandlerTests
         // Assert
         context.HasSucceeded.ShouldBeFalse();
     }
+
+    /// <summary>
+    /// 一个写端点带两道码（类级 .view + 方法级操作码）：一次批量判定，而不是每道码各走一遍
+    /// 超管判定（那是一次不经缓存的角色查询）。
+    /// </summary>
+    [Fact]
+    public async Task An_endpoint_with_two_permission_codes_is_checked_in_one_batch()
+    {
+        var userId = Guid.NewGuid();
+        var (handler, context) = ArrangeAuthenticated(userId, "catalog.product.view", "catalog.product.create");
+        _authorizationServiceMock
+            .Setup(x => x.CheckPermissionsAsync(userId, It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new Dictionary<string, bool> { ["catalog.product.view"] = true, ["catalog.product.create"] = true });
+
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.ShouldBeTrue();
+        _authorizationServiceMock.Verify(x => x.CheckPermissionsAsync(userId, It.IsAny<IEnumerable<string>>()), Times.Once());
+        _authorizationServiceMock.Verify(x => x.CheckPermissionAsync(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task An_endpoint_with_two_permission_codes_fails_when_either_is_missing()
+    {
+        var userId = Guid.NewGuid();
+        var (handler, context) = ArrangeAuthenticated(userId, "catalog.product.view", "catalog.product.create");
+        _authorizationServiceMock
+            .Setup(x => x.CheckPermissionsAsync(userId, It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(new Dictionary<string, bool> { ["catalog.product.view"] = true, ["catalog.product.create"] = false });
+
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.ShouldBeFalse();
+        context.HasFailed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task A_bare_requirement_beside_a_permission_code_still_needs_the_code()
+    {
+        // 基类的裸门（只要登录）与类级码同在一个端点上：裸门放行不等于整个端点放行。
+        var userId = Guid.NewGuid();
+        var (handler, context) = ArrangeAuthenticated(userId, null, "catalog.product.view");
+        _authorizationServiceMock
+            .Setup(x => x.CheckPermissionAsync(userId, "catalog.product.view"))
+            .ReturnsAsync(false);
+
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.ShouldBeFalse();
+    }
+
+    private (FunctionAuthorizationHandler Handler, AuthorizationHandlerContext Context) ArrangeAuthenticated(Guid userId, params string?[] permissionNames)
+    {
+        var handler = new FunctionAuthorizationHandler(_serviceProviderMock.Object, _currentUserMock.Object);
+        var requirements = permissionNames
+            .Select(name => name == null ? new FunctionAuthorizationRequirement() : new FunctionAuthorizationRequirement(name))
+            .ToArray();
+        var identity = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "testuser") }, "Test");
+        var context = new AuthorizationHandlerContext(requirements, new ClaimsPrincipal(identity), null);
+        _httpContextAccessorMock.Setup(x => x.HttpContext).Returns(new DefaultHttpContext());
+        _currentUserMock.Setup(x => x.Id).Returns(userId);
+        return (handler, context);
+    }
 }

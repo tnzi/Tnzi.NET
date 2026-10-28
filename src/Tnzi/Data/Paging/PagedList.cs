@@ -17,21 +17,58 @@ public interface IPagedList<T>
 /// <summary>
 /// 分页查询参数
 /// </summary>
+/// <remarks>
+/// <para>
+/// 页码与页长<b>只有一个事实源</b>：<see cref="Skip"/> / <see cref="Take"/> 与回报给调用方的
+/// <see cref="PageIndex"/> / <see cref="PageSize"/> 读的是同一对属性，默认值与上限由子类重写
+/// <see cref="DefaultPageIndex"/> / <see cref="DefaultPageSize"/> / <see cref="MaxPageSize"/> 决定。
+/// </para>
+/// <para>
+/// ★ 此前默认值与上限只在 <see cref="PagedQueryDto"/> 上，它用 <c>new</c> 隐藏这两个属性、只在 setter 里同步基类：
+/// 请求不带 <c>pageSize</c> 时 setter 不执行，<c>Take</c> 停在 10 而响应宣称 20，第 N 页跳过 (N-1)*10 行，
+/// 后一半记录永远翻不到；<c>MaxPageSize = 0</c>（不限制）的子类给 500 时基类又把它改回 10。
+/// </para>
+/// </remarks>
 public class PagedQuery
 {
-    private int _pageIndex = 1;
-    private int _pageSize = 10;
+    private int? _pageIndex;
+    private int? _pageSize;
 
+    /// <summary>
+    /// 默认页码（子类可重写）
+    /// </summary>
+    protected virtual int DefaultPageIndex => 1;
+
+    /// <summary>
+    /// 默认每页数量（子类可重写）
+    /// </summary>
+    protected virtual int DefaultPageSize => 10;
+
+    /// <summary>
+    /// 最大每页数量（子类可重写，0 表示不限制）。超过上限的请求被夹到上限，不报错。
+    /// </summary>
+    protected virtual int MaxPageSize => 100;
+
+    /// <summary>
+    /// 页码（从 1 开始；未提供或不大于 0 时取 <see cref="DefaultPageIndex"/>）
+    /// </summary>
     public int PageIndex
     {
-        get => _pageIndex;
-        set => _pageIndex = value > 0 ? value : 1;
+        get => _pageIndex ?? DefaultPageIndex;
+        set => _pageIndex = value > 0 ? value : null;
     }
 
+    /// <summary>
+    /// 每页数量（未提供或不大于 0 时取 <see cref="DefaultPageSize"/>；超过 <see cref="MaxPageSize"/> 时夹到上限）
+    /// </summary>
     public int PageSize
     {
-        get => _pageSize;
-        set => _pageSize = value > 0 && value <= 100 ? value : 10; // 最大100条
+        get
+        {
+            var size = _pageSize ?? DefaultPageSize;
+            return MaxPageSize > 0 && size > MaxPageSize ? MaxPageSize : size;
+        }
+        set => _pageSize = value > 0 ? value : null;
     }
 
     /// <summary>

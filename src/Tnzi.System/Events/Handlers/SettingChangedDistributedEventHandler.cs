@@ -31,6 +31,8 @@ public class SettingChangedDistributedEventHandler : IEventHandler<SettingChange
         _logger.LogDebug("Applying distributed setting change for '{Key}' from instance {Origin}", @event.Key, @event.OriginInstanceId);
 
         await _cache.RemoveAsync($"Setting:{@event.Key}");
+        if (AppearanceService.IsThemeSettingKey(@event.Key))
+            await _cache.RemoveAsync(AppearanceService.ConfiguredThemeKeysCacheKey);
 
         // 本地 handler 只消费 Key/Scope/IsRemoval（NewValue 不参与 reload/广播），可安全复用。
         await _localHandler.HandleAsync(new SettingChangedEvent

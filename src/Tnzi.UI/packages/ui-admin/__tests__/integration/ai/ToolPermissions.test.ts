@@ -131,6 +131,8 @@ type Vm = {
     openEdit: (row: Record<string, unknown>) => void
     submit: () => Promise<void>
     handleDelete: (ids: string[]) => Promise<void>
+    setSearch: (text: string) => void
+    refresh: () => Promise<void>
     formModal: { formData: { value: Record<string, unknown> | null } }
   }
   persistedCount: number
@@ -143,6 +145,8 @@ type Vm = {
   behaviorTone: (b: number) => string
   behaviorIcon: (b: number) => string
   runEvaluate: () => Promise<void>
+  evalError: string | null
+  snapshotError: string | null
 }
 
 describe('ToolPermissions page', () => {
@@ -303,5 +307,57 @@ describe('ToolPermissions page', () => {
     await flushPromises()
     expect(deletePersistedRule).toHaveBeenCalledWith('r-system')
     expect(getPersistedRules).toHaveBeenCalledTimes(2)
+  })
+
+  it('the search box filters the loaded rules: the endpoint takes no keyword', async () => {
+    const wrapper = mount(ToolPermissions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as Vm
+    vm.crud.setSearch('write')
+    await vm.crud.refresh()
+    expect(vm.crud.items.value.map((r) => r.id)).toEqual(['r-system'])
+  })
+
+  // A refused evaluation used to clear the result and say nothing: the admin
+  // could not tell "no decision" from "the request was refused".
+  it('a refused evaluation is reported, not shown as an empty result', async () => {
+    evaluate.mockRejectedValueOnce(new Error('Forbidden'))
+    const wrapper = mount(ToolPermissions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as Vm
+    vm.evalCtx.toolName = 'write_file'
+    await vm.runEvaluate()
+    await flushPromises()
+    expect(vm.evalResult).toBeNull()
+    expect(vm.evalError).toBe('Forbidden')
+    expect(wrapper.find('[data-test="perm-eval-error"]').exists()).toBe(true)
+  })
+
+  // A failed snapshot read showed "0 session rules" and "No active rules".
+  it('a failed snapshot read shows placeholders and the reason, not zero rules', async () => {
+    getRules.mockRejectedValueOnce(new Error('Service Unavailable'))
+    const wrapper = mount(ToolPermissions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as Vm
+    expect(vm.snapshotError).toBe('Service Unavailable')
+    const kpis = wrapper.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))
+    expect(kpis[1]).toBeNull()
+    expect(kpis[2]).toBeNull()
+    expect(wrapper.find('[data-test="perm-snapshot-error"]').exists()).toBe(true)
+  })
+
+  it('a failed persisted-rules read leaves the count on a placeholder', async () => {
+    // The list read is retried with backoff before the page shows its error.
+    vi.useFakeTimers()
+    try {
+      getPersistedRules.mockRejectedValue(new Error('Forbidden'))
+      const wrapper = mount(ToolPermissions, { global: { stubs } })
+      await vi.advanceTimersByTimeAsync(5000)
+      const kpis = wrapper.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))
+      expect(kpis[0]).toBeNull()
+    } finally {
+      getPersistedRules.mockImplementation(async () => persisted)
+      vi.useRealTimers()
+    }
   })
 })

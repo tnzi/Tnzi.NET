@@ -240,18 +240,59 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
     //    倒填过账或作废时点晚于 asOf 的边缘情形不追溯（罕见，RequireFiscalYearForPosting 默认 false）。
 
     public async Task<Result<AgingReportDto>> GetArAgingAsync(DateTime asOf, CancellationToken cancellationToken = default)
+        => Ok(await ComputeArAgingAsync(asOf.ToUtcDate(), partyId: null, cancellationToken));
+
+    public async Task<Result<AgingReportDto>> GetApAgingAsync(DateTime asOf, CancellationToken cancellationToken = default)
+        => Ok(await ComputeApAgingAsync(asOf.ToUtcDate(), partyId: null, cancellationToken));
+
+    /// <remarks>
+    /// 与全量账龄是**同一段计算**，只是每一条查询都带上往来方谓词，核销聚合也只取触及该往来方单据的那些。
+    /// ★ 此前往来方工作面（客户 / 供应商详情页、对账单）为了读一行，先算整本账的账龄：全部发票（含早已付清的）、
+    /// 全部贷项、全部收付款、全部核销分组，开销随账本寿命线性增长而不是随这个往来方的活动量，对账单还要算两遍。
+    /// </remarks>
+    public async Task<Result<AgingReportDto>> GetPartyAgingAsync(
+        FinancePartyType partyType, Guid partyId, DateTime asOf, CancellationToken cancellationToken = default)
+        => Ok(partyType == FinancePartyType.Customer
+            ? await ComputeArAgingAsync(asOf.ToUtcDate(), partyId, cancellationToken)
+            : await ComputeApAgingAsync(asOf.ToUtcDate(), partyId, cancellationToken));
+
+    /// <param name="asOfDate">时点（date-only）</param>
+    /// <param name="partyId">只算这一个客户（null = 全部客户）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task<AgingReportDto> ComputeArAgingAsync(DateTime asOfDate, Guid? partyId, CancellationToken cancellationToken)
     {
-        var asOfDate = asOf.ToUtcDate();
         var appliedCutoff = asOfDate.AddDays(1); // 含 asOf 当日记账的核销
 
-        var appliedToInvoice = await AppliedByTargetAsync(SettlementDocType.Invoice, appliedCutoff, cancellationToken);
-        var (appliedByPayment, appliedByCreditMemo) = await AppliedBySourceAsync(appliedCutoff, cancellationToken);
+        var invoiceQuery = _invoiceRepository.AsNoTracking()
+            .Where(i => i.JournalEntryId != null && i.Status != FinanceDocumentStatus.Voided && i.DocDate <= asOfDate);
+        var creditMemoQuery = _creditMemoRepository.AsNoTracking()
+            .Where(c => c.JournalEntryId != null && c.Status != FinanceDocumentStatus.Voided && c.DocDate <= asOfDate);
+        var paymentQuery = _paymentRepository.AsNoTracking()
+            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
+                     && p.Direction == PaymentDirection.Inbound && p.PartyType == FinancePartyType.Customer
+                     && p.DocDate <= asOfDate);
+
+        // 核销聚合的范围：全量时不设限；单个往来方时只取触及他名下单据的核销（数据库侧子查询）。
+        IQueryable<Guid>? partyInvoiceIds = null;
+        IQueryable<Guid>? partyPaymentIds = null;
+        IQueryable<Guid>? partyCreditMemoIds = null;
+        if (partyId is { } id)
+        {
+            invoiceQuery = invoiceQuery.Where(i => i.CustomerId == id);
+            creditMemoQuery = creditMemoQuery.Where(c => c.CustomerId == id);
+            paymentQuery = paymentQuery.Where(p => p.PartyId == id);
+            partyInvoiceIds = _invoiceRepository.AsNoTracking().Where(i => i.CustomerId == id).Select(i => i.Id);
+            partyPaymentIds = _paymentRepository.AsNoTracking().Where(p => p.PartyId == id).Select(p => p.Id);
+            partyCreditMemoIds = _creditMemoRepository.AsNoTracking().Where(c => c.CustomerId == id).Select(c => c.Id);
+        }
+
+        var appliedToInvoice = await AppliedByTargetAsync(SettlementDocType.Invoice, appliedCutoff, partyInvoiceIds, cancellationToken);
+        var (appliedByPayment, appliedByCreditMemo) = await AppliedBySourceAsync(appliedCutoff, partyPaymentIds, partyCreditMemoIds, cancellationToken);
 
         var items = new List<OpenAgingItem>();
 
         // 未清发票（正行）：本位币开口额 = (Total − 时点已核销) × 捕获汇率，按 DueDate 分桶
-        var invoices = await _invoiceRepository.AsNoTracking()
-            .Where(i => i.JournalEntryId != null && i.Status != FinanceDocumentStatus.Voided && i.DocDate <= asOfDate)
+        var invoices = await invoiceQuery
             .Select(i => new { i.Id, i.CustomerId, Due = i.DueDate ?? i.DocDate, i.Total, i.ExchangeRate })
             .ToListAsync(cancellationToken);
         foreach (var inv in invoices)
@@ -262,8 +303,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         }
 
         // 未核销贷项（负行=客户信用，归 Current）
-        var creditMemos = await _creditMemoRepository.AsNoTracking()
-            .Where(c => c.JournalEntryId != null && c.Status != FinanceDocumentStatus.Voided && c.DocDate <= asOfDate)
+        var creditMemos = await creditMemoQuery
             .Select(c => new { c.Id, c.CustomerId, c.Total, c.ExchangeRate })
             .ToListAsync(cancellationToken);
         foreach (var cm in creditMemos)
@@ -274,10 +314,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         }
 
         // 未核销收款（负行=预收/超收现金，归 Current）
-        var payments = await _paymentRepository.AsNoTracking()
-            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
-                     && p.Direction == PaymentDirection.Inbound && p.PartyType == FinancePartyType.Customer
-                     && p.DocDate <= asOfDate)
+        var payments = await paymentQuery
             .Select(p => new { p.Id, p.PartyId, p.Amount, p.ExchangeRate })
             .ToListAsync(cancellationToken);
         foreach (var pay in payments)
@@ -293,22 +330,41 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
             .Select(c => new { c.Id, c.Name })
             .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
 
-        return Ok(BuildAging(asOfDate, items, names));
+        return BuildAging(asOfDate, items, names);
     }
 
-    public async Task<Result<AgingReportDto>> GetApAgingAsync(DateTime asOf, CancellationToken cancellationToken = default)
+    /// <param name="asOfDate">时点（date-only）</param>
+    /// <param name="partyId">只算这一个供应商（null = 全部供应商）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task<AgingReportDto> ComputeApAgingAsync(DateTime asOfDate, Guid? partyId, CancellationToken cancellationToken)
     {
-        var asOfDate = asOf.ToUtcDate();
         var appliedCutoff = asOfDate.AddDays(1);
 
-        var appliedToBill = await AppliedByTargetAsync(SettlementDocType.Bill, appliedCutoff, cancellationToken);
-        var (appliedByPayment, _) = await AppliedBySourceAsync(appliedCutoff, cancellationToken);
+        var billQuery = _billRepository.AsNoTracking()
+            .Where(b => b.JournalEntryId != null && b.Status != FinanceDocumentStatus.Voided && b.DocDate <= asOfDate);
+        var paymentQuery = _paymentRepository.AsNoTracking()
+            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
+                     && p.Direction == PaymentDirection.Outbound && p.PartyType == FinancePartyType.Vendor
+                     && p.DocDate <= asOfDate);
+
+        IQueryable<Guid>? partyBillIds = null;
+        IQueryable<Guid>? partyPaymentIds = null;
+        if (partyId is { } id)
+        {
+            billQuery = billQuery.Where(b => b.VendorId == id);
+            paymentQuery = paymentQuery.Where(p => p.PartyId == id);
+            partyBillIds = _billRepository.AsNoTracking().Where(b => b.VendorId == id).Select(b => b.Id);
+            partyPaymentIds = _paymentRepository.AsNoTracking().Where(p => p.PartyId == id).Select(p => p.Id);
+        }
+
+        var appliedToBill = await AppliedByTargetAsync(SettlementDocType.Bill, appliedCutoff, partyBillIds, cancellationToken);
+        // 应付侧没有贷项源：单个往来方时只给收付款范围，贷项核销不参与聚合。
+        var (appliedByPayment, _) = await AppliedBySourceAsync(appliedCutoff, partyPaymentIds, creditMemoIds: null, cancellationToken);
 
         var items = new List<OpenAgingItem>();
 
         // 未清账单（正行）
-        var bills = await _billRepository.AsNoTracking()
-            .Where(b => b.JournalEntryId != null && b.Status != FinanceDocumentStatus.Voided && b.DocDate <= asOfDate)
+        var bills = await billQuery
             .Select(b => new { b.Id, b.VendorId, Due = b.DueDate ?? b.DocDate, b.Total, b.ExchangeRate })
             .ToListAsync(cancellationToken);
         foreach (var bill in bills)
@@ -319,10 +375,7 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         }
 
         // 未核销付款（负行=预付/超付现金，归 Current）
-        var payments = await _paymentRepository.AsNoTracking()
-            .Where(p => p.JournalEntryId != null && p.Status != FinanceDocumentStatus.Voided
-                     && p.Direction == PaymentDirection.Outbound && p.PartyType == FinancePartyType.Vendor
-                     && p.DocDate <= asOfDate)
+        var payments = await paymentQuery
             .Select(p => new { p.Id, p.PartyId, p.Amount, p.ExchangeRate })
             .ToListAsync(cancellationToken);
         foreach (var pay in payments)
@@ -338,22 +391,58 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
             .Select(v => new { v.Id, v.Name })
             .ToDictionaryAsync(v => v.Id, v => v.Name, cancellationToken);
 
-        return Ok(BuildAging(asOfDate, items, names));
+        return BuildAging(asOfDate, items, names);
     }
 
     /// <summary>时点已核销（按目标单据聚合）：application 记账时刻严格早于 appliedCutoff（= asOf 次日零点）</summary>
-    private async Task<Dictionary<Guid, decimal>> AppliedByTargetAsync(SettlementDocType targetType, DateTime appliedCutoff, CancellationToken cancellationToken)
-        => await _applicationRepository.AsNoTracking()
-            .Where(a => a.TargetType == targetType && a.CreationTime < appliedCutoff)
+    /// <param name="targetType">目标单据类型</param>
+    /// <param name="appliedCutoff">核销记账时刻的上界（不含）</param>
+    /// <param name="targetIds">只聚合这些目标单据（数据库侧子查询；null = 全部）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task<Dictionary<Guid, decimal>> AppliedByTargetAsync(
+        SettlementDocType targetType, DateTime appliedCutoff, IQueryable<Guid>? targetIds, CancellationToken cancellationToken)
+    {
+        var query = _applicationRepository.AsNoTracking()
+            .Where(a => a.TargetType == targetType && a.CreationTime < appliedCutoff);
+        if (targetIds != null)
+            query = query.Where(a => targetIds.Contains(a.TargetId));
+
+        return await query
             .GroupBy(a => a.TargetId)
             .Select(g => new { TargetId = g.Key, Applied = g.Sum(x => x.AppliedAmount) })
             .ToDictionaryAsync(x => x.TargetId, x => x.Applied, cancellationToken);
+    }
 
     /// <summary>时点已核销（按核销源聚合）：拆出收付款源与贷项源两张字典</summary>
-    private async Task<(Dictionary<Guid, decimal> ByPayment, Dictionary<Guid, decimal> ByCreditMemo)> AppliedBySourceAsync(DateTime appliedCutoff, CancellationToken cancellationToken)
+    /// <param name="appliedCutoff">核销记账时刻的上界（不含）</param>
+    /// <param name="paymentIds">只聚合这些收付款源（数据库侧子查询）</param>
+    /// <param name="creditMemoIds">只聚合这些贷项源（数据库侧子查询）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <remarks>
+    /// 两个范围都为 null = 全量。任一给出即进入限定模式：只聚合给出了范围的那几种源
+    /// （应付侧没有贷项源，只给收付款范围）。
+    /// </remarks>
+    private async Task<(Dictionary<Guid, decimal> ByPayment, Dictionary<Guid, decimal> ByCreditMemo)> AppliedBySourceAsync(
+        DateTime appliedCutoff, IQueryable<Guid>? paymentIds, IQueryable<Guid>? creditMemoIds, CancellationToken cancellationToken)
     {
-        var rows = await _applicationRepository.AsNoTracking()
-            .Where(a => a.CreationTime < appliedCutoff)
+        var query = _applicationRepository.AsNoTracking()
+            .Where(a => a.CreationTime < appliedCutoff);
+        if (paymentIds != null && creditMemoIds != null)
+        {
+            query = query.Where(a =>
+                (a.SourceType == SettlementDocType.PaymentEntry && paymentIds.Contains(a.SourceId))
+                || (a.SourceType == SettlementDocType.CreditMemo && creditMemoIds.Contains(a.SourceId)));
+        }
+        else if (paymentIds != null)
+        {
+            query = query.Where(a => a.SourceType == SettlementDocType.PaymentEntry && paymentIds.Contains(a.SourceId));
+        }
+        else if (creditMemoIds != null)
+        {
+            query = query.Where(a => a.SourceType == SettlementDocType.CreditMemo && creditMemoIds.Contains(a.SourceId));
+        }
+
+        var rows = await query
             .GroupBy(a => new { a.SourceType, a.SourceId })
             .Select(g => new { g.Key.SourceType, g.Key.SourceId, Applied = g.Sum(x => x.AppliedAmount) })
             .ToListAsync(cancellationToken);
@@ -418,14 +507,15 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
         var fromDate = from.ToUtcDate();
         var toExclusive = to.ToUtcDate().AddDays(1);
 
-        // 税维度行按（税率 × 科目角色）单次聚合：销项 = TaxPayable 角色科目贷方净额，
-        // 进项 = TaxReceivable 角色科目借方净额；其他科目上的税维度行不计入申报口径
+        // 税维度行按（税率 × 来源单据类型 × 科目角色）单次聚合，归类见 ClassifyTaxLine：
+        // 销项取贷方净额、进项取借方净额，归不进任一侧的税维度行不计入申报口径
         var sums = await PostedLines
             .Where(l => l.TaxRateId != null && l.PostingDate >= fromDate && l.PostingDate < toExclusive)
-            .GroupBy(l => new { l.TaxRateId, l.Account!.SystemRole })
+            .GroupBy(l => new { l.TaxRateId, l.JournalEntry!.SourceType, l.Account!.SystemRole })
             .Select(g => new
             {
                 g.Key.TaxRateId,
+                g.Key.SourceType,
                 g.Key.SystemRole,
                 Debit = g.Sum(l => l.Debit),
                 Credit = g.Sum(l => l.Credit)
@@ -454,9 +544,10 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
 
         foreach (var rateId in rateIds)
         {
-            var output = sums.Where(s => s.TaxRateId == rateId && s.SystemRole == AccountSystemRole.TaxPayable)
+            var ofRate = sums.Where(s => s.TaxRateId == rateId).ToList();
+            var output = ofRate.Where(s => ClassifyTaxLine(s.SourceType, s.SystemRole) == TaxLineSide.Output)
                 .Sum(s => s.Credit - s.Debit);
-            var input = sums.Where(s => s.TaxRateId == rateId && s.SystemRole == AccountSystemRole.TaxReceivable)
+            var input = ofRate.Where(s => ClassifyTaxLine(s.SourceType, s.SystemRole) == TaxLineSide.Input)
                 .Sum(s => s.Debit - s.Credit);
             if (output == 0 && input == 0)
                 continue;
@@ -482,6 +573,35 @@ public class FinancialReportService : ApplicationService, IFinancialReportServic
 
         return Ok(report);
     }
+
+    private enum TaxLineSide
+    {
+        None,
+        Output,
+        Input
+    }
+
+    /// <summary>
+    /// 一条税维度行算销项还是进项。
+    /// </summary>
+    /// <remarks>
+    /// ★ 本模块单据的税行按**来源单据类型**归类：发票 / 贷项是销项，账单 / 费用是进项（冲销沿用原来源类型，
+    /// 方向随之一致）。过账那一刻它们落在当时持有 TaxPayable / TaxReceivable 角色的科目上，所以对没有迁移过
+    /// 角色的数据，这与「按科目角色」逐分相同。区别只在角色迁移之后：科目表重组把税角色挪到新科目（受支持的操作），
+    /// 按科目**当前**角色归类会让旧期间的税行全部落空，重跑汇总与申报销项进项都是 0，且不出现任何「未归入」行。
+    /// 其余来源（手工凭证、消费方经 <c>ILedgerPostingService</c> 编程式过账）没有可依的单据类型，仍按科目当前角色归类。
+    /// </remarks>
+    private static TaxLineSide ClassifyTaxLine(string? sourceType, AccountSystemRole? role) => sourceType switch
+    {
+        FinanceSourceTypes.Invoice or FinanceSourceTypes.CreditMemo => TaxLineSide.Output,
+        FinanceSourceTypes.Bill or FinanceSourceTypes.Expense => TaxLineSide.Input,
+        _ => role switch
+        {
+            AccountSystemRole.TaxPayable => TaxLineSide.Output,
+            AccountSystemRole.TaxReceivable => TaxLineSide.Input,
+            _ => TaxLineSide.None
+        }
+    };
 
     public async Task<Result<CashFlowReportDto>> GetCashFlowAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
     {

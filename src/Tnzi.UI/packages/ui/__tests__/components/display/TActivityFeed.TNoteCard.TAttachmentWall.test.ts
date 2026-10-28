@@ -90,6 +90,34 @@ describe('TAttachmentWall', () => {
     const w = mount(TAttachmentWall, { props: { attachments: [{ url: 'javascript:alert(1)', name: 'x.pdf' }] } })
     expect(w.find('.t-attachment-wall__file').attributes('href')).toBe('#')
   })
+
+  // The URL parser drops leading C0 controls and every tab / newline before it
+  // reads the scheme, so a pattern match on the raw string misses these.
+  it.each([
+    ['\u0001javascript:alert(1)'],
+    ['java\tscript:alert(1)'],
+    ['java\nscript:alert(1)'],
+    [' JAVASCRIPT:alert(1)'],
+    ['vbscript:msgbox(1)'],
+    ['data:text/html,<script>alert(1)</script>'],
+    ['data:application/xhtml+xml,<x/>'],
+    ['file:///etc/passwd'],
+  ])('neutralises the unsafe file URL %j', (url) => {
+    const w = mount(TAttachmentWall, { props: { attachments: [{ url, name: 'x.pdf' }] } })
+    expect(w.find('.t-attachment-wall__file').attributes('href')).toBe('#')
+  })
+
+  it.each([
+    ['https://cdn.example.com/a.pdf'],
+    ['http://example.com/a.pdf'],
+    ['/files/a.pdf'],
+    ['files/a.pdf'],
+    ['blob:https://app.example.com/0b1c'],
+    ['data:image/png;base64,AAAA'],
+  ])('keeps the file URL %j', (url) => {
+    const w = mount(TAttachmentWall, { props: { attachments: [{ url, name: 'x.pdf' }] } })
+    expect(w.find('.t-attachment-wall__file').attributes('href')).toBe(url)
+  })
 })
 
 describe('TAttachmentWall - #tile slot (private files)', () => {

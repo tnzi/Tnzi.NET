@@ -1,11 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import Permissions from '../../../src/pages/authorization/Permissions.vue'
 
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
+}))
+
+// Shared across bridge instances: the page and the holders drawer body each
+// build their own bridge.
+const holdersRead = vi.hoisted(() => vi.fn())
+// The module-management read (`/admin/modules`, functionModule.view). The page
+// is gated by `authorization.permission.view` and must not depend on it.
+const moduleAdminGetAll = vi.hoisted(() => vi.fn(async () => {
+  throw new Error('403: authorization.functionModule.view')
 }))
 
 vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
@@ -15,11 +24,7 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
-      // Master-Detail page calls getAll() to populate the left tree.
-      getAll: vi.fn(async () => [
-        { id: 'm1', code: 'identity', name: 'Identity', order: 1, isEnabled: true },
-        { id: 'm2', code: 'order', name: 'Order', order: 2, isEnabled: true },
-      ]),
+      getAll: moduleAdminGetAll,
     },
     permissions: {
       fetch: vi.fn(async () => ({
@@ -38,11 +43,20 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
         pageSize: 500,
       })),
       getByModule: vi.fn(async () => []),
+      // Master-Detail page reads the catalogue behind its own code to populate the left tree.
+      catalogue: vi.fn(async () => ({
+        modules: [
+          { id: 'm1', code: 'identity', name: 'Identity', order: 1, isEnabled: true },
+          { id: 'm2', code: 'order', name: 'Order', order: 2, isEnabled: true },
+        ],
+        functionsByModule: new Map(),
+      })),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
       enable: vi.fn(),
       disable: vi.fn(),
+      holders: holdersRead,
     },
     roleFunctions: { fetch: vi.fn() },
     entityRoles: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
@@ -54,8 +68,14 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
 
+// Overlays render inline (no teleport) so the drawer body is inside the wrapper.
+const stubs = {
+  Drawer: { name: 'Drawer', props: ['show'], template: '<div v-if="show" class="drawer-stub"><slot /></div>' },
+  DrawerContent: { name: 'DrawerContent', template: '<div><slot name="header" /><slot /><slot name="footer" /></div>' },
+}
+
 async function mountLoaded() {
-  const wrapper = mount(Permissions)
+  const wrapper = mount(Permissions, { global: { stubs } })
   await nextTick()
   await new Promise((r) => setTimeout(r, 100))
   await nextTick()
@@ -63,7 +83,22 @@ async function mountLoaded() {
 }
 
 describe('Permissions page (grouped surface catalogue)', () => {
-  beforeEach(() => { setActivePinia(createPinia()) })
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    holdersRead.mockReset().mockResolvedValue({
+      functionId: 'p2',
+      code: 'user.create',
+      name: 'Create Users',
+      category: 'Business',
+      isEnabled: true,
+      isRetired: false,
+      isInEffect: true,
+      userNamesHidden: false,
+      roles: [{ id: 'r1', name: 'Root', state: 'SuperAdmin', memberCount: 1 }],
+      users: [{ id: 'u1', userName: 'erin', isSuperAdmin: true, isDirect: false, roles: [{ id: 'r1', name: 'Root' }] }],
+      deniedUsers: [],
+    })
+  })
 
   it('mounts the master-detail layout and loads modules + permissions', async () => {
     const wrapper = await mountLoaded()
@@ -112,5 +147,21 @@ describe('Permissions page (grouped surface catalogue)', () => {
     const rows = wrapper.findAll('.t-permission-page__row')
     expect(rows.length).toBe(2)
     expect(rows.map((r) => r.text()).join(' ')).toContain('session.view')
+  })
+
+  it('opens the holders of a code from its row', async () => {
+    const wrapper = await mountLoaded()
+    expect(wrapper.find('.drawer-stub').exists()).toBe(false)
+
+    const row = wrapper.findAll('.t-permission-page__row').find((r) => r.text().includes('user.create'))
+    const button = row!.findAll('button').find((b) => b.text() === 'Holders')
+    await button!.trigger('click')
+    await flushPromises()
+
+    expect(holdersRead).toHaveBeenCalledWith('user.create')
+    const drawer = wrapper.find('.drawer-stub')
+    expect(drawer.exists()).toBe(true)
+    expect(drawer.text()).toContain('erin')
+    expect(drawer.text()).toContain('Super admin (Root)')
   })
 })

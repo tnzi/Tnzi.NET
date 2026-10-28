@@ -34,6 +34,7 @@
         :autosize="multiline ? { minRows: 2, maxRows: 5 } : undefined"
         size="small"
         clearable
+        :maxlength="maxlength"
         :loading="loading"
         :placeholder="placeholder"
         @keydown="onKeydown"
@@ -62,8 +63,10 @@ const props = withDefaults(
     multiline?: boolean
     placeholder?: string
     loading?: boolean
+    /** The server's column width for this value; the box stops there. */
+    maxlength?: number
   }>(),
-  { editable: false, multiline: false, placeholder: '', loading: false },
+  { editable: false, multiline: false, placeholder: '', loading: false, maxlength: undefined },
 )
 
 const emit = defineEmits<{ save: [value: string] }>()

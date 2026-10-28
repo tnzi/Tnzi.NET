@@ -1,5 +1,6 @@
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import type { SkillSummaryDto } from '@tnzi/core/services/ai'
 
 /**
  * Skills page config (sibling of Skills.vue) - production-grade card page.
@@ -59,6 +60,21 @@ export function scopeLabelKey(scope: unknown): string {
   return map[String(scope)] ?? 'badge.scope.user'
 }
 
+/** True for a System-scope skill (numeric ordinal OR string name). */
+export function isSystemScope(scope: unknown): boolean {
+  return scopeLabelKey(scope) === 'badge.scope.system'
+}
+
+/**
+ * Whether the list's on/off switch and delete can change this skill. They go
+ * through the batch endpoints, which never touch a System-scope row and have
+ * no row behind a file-source skill (its id is empty): on those the server
+ * changes nothing and still answers 200.
+ */
+export function isListManaged(skill: { isReadOnly?: boolean | null; scope?: unknown }): boolean {
+  return !skill.isReadOnly && !isSystemScope(skill.scope)
+}
+
 /** Scope badge colour (naive NTag `type`). */
 export function scopeBadgeType(scope: unknown): 'warning' | 'info' | 'success' {
   const key = scopeLabelKey(scope)
@@ -66,6 +82,13 @@ export function scopeBadgeType(scope: unknown): 'warning' | 'info' | 'success' {
   if (key.endsWith('tenant')) return 'info'
   return 'success'
 }
+
+/** `CreateSkillDto` defaults, so the create form shows what an untouched field creates. */
+export const skillCreateDefaults = {
+  enabled: true,
+  scope: 'User',
+  priority: 0,
+} as Partial<SkillSummaryDto>
 
 /** Create/edit form schema - TFormSchemaRenderer. `content` IS the SKILL.md body. */
 export const skillFormSchema: FormSchemaItem[] = [
@@ -80,6 +103,21 @@ export const skillFormSchema: FormSchemaItem[] = [
   { key: 'author', labelKey: 'form.author', label: 'Author', type: 'text' },
   { key: 'enabled', labelKey: 'form.enabled', label: 'Enabled', type: 'switch' },
 ]
+
+/**
+ * Edit form: the create schema minus `slug` and `scope`. `UpdateSkillDto`
+ * carries neither, so an editable field there saved "successfully" and changed
+ * nothing. The page fills `content` from the stored SKILL.md before the form is
+ * usable (the list row has no body), and drops the field when it cannot.
+ */
+export const skillEditFormSchema: FormSchemaItem[] = skillFormSchema.filter(
+  (field) => field.key !== 'slug' && field.key !== 'scope',
+)
+
+/** {@link skillEditFormSchema} without the body, for when it could not be loaded. */
+export const skillEditFormSchemaWithoutContent: FormSchemaItem[] = skillEditFormSchema.filter(
+  (field) => field.key !== 'content',
+)
 
 // The keyword search lives in the page-header bar (drives `query.searchText`).
 // A single-field advanced-search schema duplicated it, so it was removed.

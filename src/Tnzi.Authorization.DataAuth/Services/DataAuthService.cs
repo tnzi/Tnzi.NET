@@ -13,6 +13,14 @@ public class DataAuthService : ApplicationService, IDataAuthService
     private readonly ICache? _cache;
     private readonly IMemoryCache? _memoryCache;
     private readonly IEntityManager? _entityManager;
+    private readonly bool _multiTenancyEnabled;
+    private readonly ICurrentTenant? _currentTenant;
+
+    /// <summary>
+    /// <see cref="EntityInfo"/> 是全部租户共用的一张表，租户上下文里的写入一律拒绝。
+    /// </summary>
+    private const string EntityRegistryIsHostManaged =
+        "The data-authorization entity registry is shared by every tenant and can only be changed outside a tenant context.";
 
     /// <summary>
     /// 数据过滤缓存前缀
@@ -28,6 +36,22 @@ public class DataAuthService : ApplicationService, IDataAuthService
     public const string EntityInfoVersionCacheKey = DataFilterCachePrefix + "EntityInfoVersion";
 
     /// <summary>
+    /// 每用户版本键的前缀（后接用户 id）。用户的角色成员一变就 bump 它，该用户的全部缓存表达式随之作废。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>不带租户段</b>：用户 id 全局唯一，而 bump 它的是 <c>UserRolesChangedEvent</c> 的处理器：
+    /// 它在提交后的独立作用域里跑，那里的「当前用户」不是被改的那个人（往往根本没有），
+    /// 按调用者的租户段拼键会 bump 到一个没人读的键上，被摘掉的角色在缓存里照样生效。
+    /// </remarks>
+    public const string UserVersionCacheKeyPrefix = DataFilterCachePrefix + "UserVersion:";
+
+    /// <summary>
+    /// 版本键自身的存活时间，自键首次创建起算（<see cref="ICache.IncrementAsync(string, long, TimeSpan, CancellationToken)"/> 的固定窗口）：
+    /// 远长于表达式缓存（15 分钟），过期回落为 0 时不会撞上仍在缓存里的旧版本。
+    /// </summary>
+    private static readonly TimeSpan VersionKeyExpiration = TimeSpan.FromDays(7);
+
+    /// <summary>
     /// 数据过滤缓存过期时间
     /// </summary>
     private static readonly TimeSpan DataFilterCacheExpiration = TimeSpan.FromMinutes(15);
@@ -39,6 +63,10 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <summary>
     /// 初始化一个<see cref="DataAuthService"/>类型的新实例
     /// </summary>
+    /// <remarks>
+    /// 最后两个只用来判定 <see cref="EntityInfo"/> 的写入是否发生在宿主上下文（见 <see cref="IsEntityRegistryWriteForbidden"/>）；
+    /// 多租户开关缺席按未开启处理，与数据库侧一致。
+    /// </remarks>
     public DataAuthService(
         IRepository<EntityInfo, Guid> entityInfoRepository,
         IRepository<EntityRole, Guid> entityRoleRepository,
@@ -46,7 +74,9 @@ public class DataAuthService : ApplicationService, IDataAuthService
         IUserRoleService? userRoleService = null,
         ICache? cache = null,
         IMemoryCache? memoryCache = null,
-        IEntityManager? entityManager = null)
+        IEntityManager? entityManager = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _entityInfoRepository = Check.NotNull(entityInfoRepository);
@@ -55,7 +85,21 @@ public class DataAuthService : ApplicationService, IDataAuthService
         _cache = cache;
         _memoryCache = memoryCache;
         _entityManager = entityManager;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _currentTenant = currentTenant;
     }
+
+    /// <summary>
+    /// 实体登记（<see cref="EntityInfo"/>，全局表）的写入是否被拒绝：多租户开启且请求带着租户上下文时拒绝。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 一次改动影响所有租户（尤其 <see cref="EntityInfo.IsDataAuthEnabled"/> 这个总开关：关掉它，
+    /// 每个租户在该实体上的行级规则同时失效），而写它的权限码与维护本租户 <see cref="EntityRole"/> 的是同一组，
+    /// 按租户授予。「当前租户为空 = 全局管理员」与用户管理端的 <see cref="UserTenantScope"/> 同一口径；
+    /// 没有已认证主体的调用（播种、后台任务）不在此列。多租户未开启时恒为 false，与此前逐字相同。
+    /// </remarks>
+    private bool IsEntityRegistryWriteForbidden()
+        => !UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, CurrentUser).IsUnrestricted;
 
     /// <summary>
     /// 获取实体的数据权限过滤条件（支持缓存）
@@ -74,10 +118,12 @@ public class DataAuthService : ApplicationService, IDataAuthService
         // 获取租户标识用于缓存隔离
         var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
 
-        // 获取全局版本和用户版本，实现秒级缓存失效；EntityInfo 版本跨租户（见 EntityInfoVersionCacheKey）
-        var globalVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion") : 0;
-        var userVersion = _cache != null ? await _cache.GetAsync<int>($"{DataFilterCachePrefix}{tenantSegment}:UserVersion:{userId}") : 0;
-        var entityInfoVersion = _cache != null ? await _cache.GetAsync<int>(EntityInfoVersionCacheKey) : 0;
+        // 获取全局版本和用户版本，实现秒级缓存失效；EntityInfo 版本跨租户（见 EntityInfoVersionCacheKey）。
+        // ★ 版本号是计数器（写入侧 IncrementAsync），读取一律经 GetCounterAsync：内存缓存里存的是 long，
+        // GetAsync<int> 读同一个键必然落空、恒为 0，bump 再多次缓存键也不变（见 ICache.GetCounterAsync）
+        var globalVersion = _cache != null ? await _cache.GetCounterAsync($"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion") : 0L;
+        var userVersion = _cache != null ? await _cache.GetCounterAsync(UserVersionCacheKeyPrefix + userId) : 0L;
+        var entityInfoVersion = _cache != null ? await _cache.GetCounterAsync(EntityInfoVersionCacheKey) : 0L;
 
         // 生成版本化缓存键（含租户隔离）
         var cacheKey = $"{DataFilterCachePrefix}{tenantSegment}:{globalVersion}:{userVersion}:{entityInfoVersion}:{userId}:{entityTypeName}:{(int)operation}";
@@ -187,45 +233,75 @@ public class DataAuthService : ApplicationService, IDataAuthService
     }
 
     /// <summary>
-    /// 清除用户的数据过滤缓存
+    /// 清除用户的数据过滤缓存（所有租户段、所有实体与操作）。
     /// </summary>
+    /// <remarks>角色成员变更由 <c>UserRolesChangedDataFilterCacheHandler</c> 自动走这一步，调用方不必手动调。</remarks>
     /// <param name="userId">用户ID</param>
-    public async Task ClearUserDataFilterCacheAsync(Guid userId)
+    public Task ClearUserDataFilterCacheAsync(Guid userId) => BumpUserVersionAsync(_cache, userId);
+
+    /// <summary>
+    /// 作废一个用户的全部缓存表达式：bump 他的版本号（见 <see cref="UserVersionCacheKeyPrefix"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 表达式缓存在每个实例的 <see cref="IMemoryCache"/> 里，版本号在 <see cref="ICache"/> 里；
+    /// 分布式缓存下 bump 一次，所有实例的下一次读都换到新键上。缓存服务未注册时无事可做（那时也没有版本可比）。
+    /// </remarks>
+    internal static async Task BumpUserVersionAsync(ICache? cache, Guid userId)
     {
-        if (_cache != null)
+        if (cache == null)
         {
-            var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
-            var key = $"{DataFilterCachePrefix}{tenantSegment}:UserVersion:{userId}";
-            var version = await _cache.GetAsync<int>(key);
-            await _cache.SetAsync(key, version + 1, TimeSpan.FromDays(7));
+            return;
         }
+
+        await BumpVersionAsync(cache, UserVersionCacheKeyPrefix + userId);
     }
 
     /// <summary>
     /// 清除所有数据过滤缓存（调用者所在租户段 —— EntityRole 写路径用）
     /// </summary>
-    public async Task ClearAllDataFilterCacheAsync()
+    public Task ClearAllDataFilterCacheAsync()
     {
-        if (_cache != null)
-        {
-            var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
-            var key = $"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion";
-            var version = await _cache.GetAsync<int>(key);
-            await _cache.SetAsync(key, version + 1, TimeSpan.FromDays(7));
-        }
+        var tenantSegment = CurrentUser?.TenantId?.ToString("N") ?? "global";
+        return BumpNowAndAfterCommitAsync($"{DataFilterCachePrefix}{tenantSegment}:GlobalVersion");
     }
 
     /// <summary>
     /// 作废<b>所有租户</b>的数据过滤缓存 —— EntityInfo 写路径用（全局表，见 <see cref="EntityInfoVersionCacheKey"/>）。
     /// </summary>
-    private async Task InvalidateEntityInfoCacheAsync()
+    private Task InvalidateEntityInfoCacheAsync() => BumpNowAndAfterCommitAsync(EntityInfoVersionCacheKey);
+
+    /// <summary>
+    /// 规则写路径的版本 bump：此刻 bump 一次，身处事务时提交后再 bump 一次。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 只在写入之后、提交之前 bump 一次不够：写入到提交才对别的连接可见，这之间另一个请求按新版本键未命中、
+    /// 读到提交前的旧规则、编译并缓存 15 分钟，之后再没有 bump 作废它。提交后再 bump 一次关掉这个窗口；
+    /// 不在事务里时写入已经自动提交，此刻那一次就是提交后的。
+    /// </remarks>
+    private async Task BumpNowAndAfterCommitAsync(string versionKey)
     {
-        if (_cache != null)
+        if (_cache == null)
         {
-            var version = await _cache.GetAsync<int>(EntityInfoVersionCacheKey);
-            await _cache.SetAsync(EntityInfoVersionCacheKey, version + 1, TimeSpan.FromDays(7));
+            return;
+        }
+
+        var cache = _cache;
+        await BumpVersionAsync(cache, versionKey);
+
+        if (UnitOfWorkManager?.IsEnabledTransaction == true && PostCommitActionQueue != null)
+        {
+            PostCommitActionQueue.Enqueue(_ => BumpVersionAsync(cache, versionKey));
         }
     }
+
+    /// <summary>版本号 +1。</summary>
+    /// <remarks>
+    /// ★ 原子递增，不是读后写：两次并发的规则写入各读到 N、都写回 N+1 时，期间按 N+1 编译并缓存的旧规则
+    /// 在缓存期内不再失效，收窄的行级范围延迟最多 15 分钟才生效。递增失败时 Redis 实现抛 <c>CacheWriteException</c>（计数器 fail-closed），
+    /// 与删除缓存同一语义：作废没成功，就不该让调用方以为规则变更已经生效。
+    /// </remarks>
+    private static Task BumpVersionAsync(ICache cache, string versionKey)
+        => cache.IncrementAsync(versionKey, 1, VersionKeyExpiration);
 
 
     /// <summary>
@@ -318,6 +394,13 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// </remarks>
     public async Task<Result<bool>> CheckDataPermissionByTypeNameAsync(Guid userId, string entityTypeName, Guid entityId, DataAuthOperation operation)
     {
+        // 漏传操作时它是 0：没有一条规则命中，判定恒为「不限制」，对谁都答 true 的检查比拒绝更糟。
+        var operationViolation = DescribeInvalidOperation(operation);
+        if (operationViolation != null)
+        {
+            return Fail<bool>(operationViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 查询 EntityInfo 确认实体类型已注册
         var entityInfoResult = await GetEntityInfoAsync(entityTypeName);
         if (!entityInfoResult.Succeeded || entityInfoResult.Data == null)
@@ -402,6 +485,16 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <returns>创建的实体信息</returns>
     public async Task<Result<EntityInfo>> CreateEntityInfoAsync(CreateEntityInfoRequest request)
     {
+        if (IsEntityRegistryWriteForbidden())
+        {
+            return Fail<EntityInfo>(EntityRegistryIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Fail<EntityInfo>(EntityInfoNameRequired, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 检查类型名称是否已存在
         var exists = await _entityInfoRepository
             .Where(ei => ei.TypeName == request.TypeName)
@@ -440,6 +533,25 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <returns>更新后的实体信息</returns>
     public async Task<Result<EntityInfo>> UpdateEntityInfoAsync(Guid id, UpdateEntityInfoRequest request)
     {
+        if (IsEntityRegistryWriteForbidden())
+        {
+            return Fail<EntityInfo>(EntityRegistryIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // 整体替换：名称与启用开关都必须给出。此前两者有缺省值（空串、true），只改显示名的调用
+        // 会把名称清空、把一个停用的实体悄悄重新启用（方向是收紧：该实体上的用户突然看不到行）。
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Fail<EntityInfo>(EntityInfoNameRequired, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (request.IsDataAuthEnabled is not { } isDataAuthEnabled)
+        {
+            return Fail<EntityInfo>(
+                "IsDataAuthEnabled is required: the update replaces the name, display name and the data-authorization switch together.",
+                400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var entityInfo = await _entityInfoRepository.FindAsync(id);
         if (entityInfo == null)
         {
@@ -447,12 +559,14 @@ public class DataAuthService : ApplicationService, IDataAuthService
         }
 
         var oldEnabled = entityInfo.IsDataAuthEnabled;
-        request.MapTo(entityInfo);
+        entityInfo.Name = request.Name;
+        entityInfo.DisplayName = request.DisplayName;
+        entityInfo.IsDataAuthEnabled = isDataAuthEnabled;
 
         await _entityInfoRepository.UpdateAsync(entityInfo);
 
         // 如果启用状态改变，清除缓存 —— 全局表，必须作废所有租户段
-        if (oldEnabled != request.IsDataAuthEnabled)
+        if (oldEnabled != isDataAuthEnabled)
         {
             await InvalidateEntityInfoCacheAsync();
         }
@@ -467,15 +581,22 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <param name="id">实体信息ID</param>
     public async Task<Result> DeleteEntityInfoAsync(Guid id)
     {
+        if (IsEntityRegistryWriteForbidden())
+        {
+            return Fail(EntityRegistryIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var entityInfo = await _entityInfoRepository.FindAsync(id);
         if (entityInfo == null)
         {
             return Fail("EntityInfo not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // 检查是否有关联的实体角色
-        var hasRoles = await _entityRoleRepository
-            .Where(er => er.EntityInfoId == id)
+        // 检查是否有关联的实体角色。登记是全局行，规则按租户：要跨租户数（绕开租户过滤器，软删照旧排除），
+        // 否则调用者看不见别家租户还挂在它上面的规则，删掉之后那些规则指向一行墓碑、整条行级授权静默失效。
+        var hasRoles = await _entityRoleRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(er => er.EntityInfoId == id && !er.IsDeleted)
             .AnyAsync();
 
         if (hasRoles)
@@ -653,6 +774,13 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <returns>更新后的实体角色</returns>
     public async Task<Result<EntityRole>> UpdateEntityRoleAsync(Guid id, UpdateEntityRoleRequest request)
     {
+        // 整体替换：漏传的操作是 0，写进去这条规则就永远不命中（见 DescribeInvalidOperation）。
+        var operationViolation = DescribeInvalidOperation(request.Operation);
+        if (operationViolation != null)
+        {
+            return Fail<EntityRole>(operationViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var entityRole = await _entityRoleRepository.FindAsync(id);
         if (entityRole == null)
         {
@@ -738,6 +866,12 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <returns>创建的实体角色</returns>
     public async Task<Result<EntityRole>> CreateEntityRoleAsync(CreateEntityRoleRequest request)
     {
+        var operationViolation = DescribeInvalidOperation(request.Operation);
+        if (operationViolation != null)
+        {
+            return Fail<EntityRole>(operationViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 验证实体信息存在
         var entityInfo = await _entityInfoRepository.FindAsync(request.EntityInfoId);
         if (entityInfo == null)
@@ -801,6 +935,12 @@ public class DataAuthService : ApplicationService, IDataAuthService
     /// <returns>创建的实体角色列表</returns>
     public async Task<Result<IEnumerable<EntityRole>>> BatchCreateEntityRolesAsync(BatchEntityRoleRequest request)
     {
+        var operationViolation = DescribeInvalidOperation(request.Operation);
+        if (operationViolation != null)
+        {
+            return Fail<IEnumerable<EntityRole>>(operationViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 验证实体信息存在
         var entityInfo = await _entityInfoRepository.FindAsync(request.EntityInfoId);
         if (entityInfo == null)
@@ -870,6 +1010,22 @@ public class DataAuthService : ApplicationService, IDataAuthService
     #region Private Methods
 
     private const string DuplicateEntityRoleMessage = "EntityRole with same EntityInfo, Role and Operation already exists";
+
+    private const string EntityInfoNameRequired = "EntityInfo.Name is required.";
+
+    /// <summary>
+    /// 操作类型必须是 <see cref="DataAuthOperation.Query"/> / <see cref="DataAuthOperation.Update"/> /
+    /// <see cref="DataAuthOperation.Delete"/> 的非空组合；合法时返回 null，否则返回英文错误消息。
+    /// </summary>
+    /// <remarks>
+    /// ★ 规则按位匹配（<c>(rule.Operation &amp; op) != 0</c>）：0 与未定义的位永远不命中。存进一条这样的规则，
+    /// 该角色在这个实体上就像没有规则（不限制），管理端却显示一条「有过滤器」的规则；拿它去 <c>check</c>，对谁都答 true。
+    /// 请求体漏传操作得到的就是 0，序列化器也接受任意整数。
+    /// </remarks>
+    private static string? DescribeInvalidOperation(DataAuthOperation operation)
+        => operation == 0 || (operation & ~DataAuthOperation.All) != 0
+            ? $"Operation must be a non-empty combination of Query, Update and Delete; got {(int)operation}."
+            : null;
 
     /// <summary>
     /// 把 <see cref="EntityInfo.TypeName"/>（CLR 全名：命名空间 + 类型名，<b>不带程序集</b>，与

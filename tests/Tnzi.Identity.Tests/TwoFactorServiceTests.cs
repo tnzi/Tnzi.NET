@@ -261,6 +261,95 @@ public class TwoFactorServiceTests
         Assert.Contains(" ", result.Data!.SharedKey);
     }
 
+    /// <summary>A user without an enabled authenticator whose stored key is <paramref name="storedKey"/>.</summary>
+    private User GivenAnAccountWithoutAnAuthenticator(string? storedKey, string keyAfterReset = "NEWKEYNEWKEYNEWK")
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "enrolling", Email = "enrolling@example.com" };
+        var current = storedKey;
+        _userManagerMock.Setup(x => x.FindByIdAsync(user.Id.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.GetAuthenticatorKeyAsync(user)).ReturnsAsync(() => current);
+        _userManagerMock.Setup(x => x.ResetAuthenticatorKeyAsync(user))
+            .Callback(() => current = keyAfterReset)
+            .ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.GetEmailAsync(user)).ReturnsAsync(user.Email);
+        return user;
+    }
+
+    /// <summary>
+    /// ★ 登录期待办的描述会被反复拉取：已有一枚尚未确认的密钥时原样交回，不换新的，
+    /// 否则用户已经扫进验证器的那一枚当场作废。
+    /// </summary>
+    [Fact]
+    public async Task GetOrCreateTotpSetupInfoAsync_WithAnUnconfirmedKey_HandsItBackWithoutResetting()
+    {
+        const string storedKey = "JBSWY3DPEHPK3PXP";
+        var user = GivenAnAccountWithoutAnAuthenticator(storedKey);
+
+        var result = await _twoFactorService.GetOrCreateTotpSetupInfoAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains(storedKey, result.Data!.AuthenticatorUri);
+        _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(user), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetOrCreateTotpSetupInfoAsync_WithoutAKey_GeneratesOne()
+    {
+        var user = GivenAnAccountWithoutAnAuthenticator(storedKey: null, keyAfterReset: "FRESHKEYFRESHKEY");
+
+        var result = await _twoFactorService.GetOrCreateTotpSetupInfoAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("FRESHKEYFRESHKEY", result.Data!.AuthenticatorUri);
+        _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(user), Times.Once);
+    }
+
+    /// <summary>对照：自助登记的入口照旧每次换一枚新的。</summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_WithAnUnconfirmedKey_StillIssuesAFreshOne()
+    {
+        var user = GivenAnAccountWithoutAnAuthenticator("JBSWY3DPEHPK3PXP", keyAfterReset: "FRESHKEYFRESHKEY");
+
+        var result = await _twoFactorService.GetTotpSetupInfoAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("FRESHKEYFRESHKEY", result.Data!.AuthenticatorUri);
+        _userManagerMock.Verify(x => x.ResetAuthenticatorKeyAsync(user), Times.Once);
+    }
+
+    /// <summary>
+    /// 验证器条目上的签发方是部署方配置的站点名。此前写死框架名，两个基于本框架的站点的条目分不清。
+    /// </summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_LabelsTheEntryWithTheConfiguredSiteName()
+    {
+        var user = GivenAnAccountWithoutAnAuthenticator(storedKey: null);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["System:SiteName"] = "Acme Portal" })
+            .Build();
+        var service = new TwoFactorService(
+            _repositoryMock.Object, _userManagerMock.Object, _serviceProviderMock.Object, _eventBusMock.Object,
+            _identityOptionsMock.Object, configuration: configuration);
+
+        var result = await service.GetTotpSetupInfoAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.StartsWith("otpauth://totp/Acme%20Portal:", result.Data!.AuthenticatorUri);
+        Assert.Contains("issuer=Acme%20Portal", result.Data.AuthenticatorUri);
+    }
+
+    /// <summary>对照：没配站点名时退回框架名，与此前一致。</summary>
+    [Fact]
+    public async Task GetTotpSetupInfoAsync_WithoutASiteName_FallsBackToTheFrameworkName()
+    {
+        var user = GivenAnAccountWithoutAnAuthenticator(storedKey: null);
+
+        var result = await _twoFactorService.GetTotpSetupInfoAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains("issuer=Tnzi", result.Data!.AuthenticatorUri);
+    }
+
     #endregion
 
     #region EnableTotpAsync

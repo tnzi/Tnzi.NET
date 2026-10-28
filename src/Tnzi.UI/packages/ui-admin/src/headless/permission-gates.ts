@@ -9,12 +9,14 @@ import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 
 /**
  * Per-action permission codes gating a surface's write affordances. An omitted
- * action stays ungated (visible whenever its data callback exists).
+ * action stays ungated (visible whenever its data callback exists). An action
+ * may name several codes: the user needs all of them, mirroring stacked backend
+ * `[ApiAuthorize]` gates, which are AND-ed.
  */
 export interface CrudActionPermissions {
-  create?: string
-  update?: string
-  delete?: string
+  create?: string | readonly string[]
+  update?: string | readonly string[]
+  delete?: string | readonly string[]
 }
 
 /** Expand a string prefix into the three write-action codes (`x` → `x.create` / `x.update` / `x.delete`). */
@@ -35,14 +37,15 @@ export function normalizeCrudPermission(
 /**
  * Reactive action-permission check with the sidebar's fail-open semantics: no
  * code declared / no active store (bare test mounts) / user not loaded yet /
- * super admin → allowed. The backend `[ApiAuthorize]` is the real wall.
+ * super admin whose bypass covers every code → allowed. Several codes → all of
+ * them are required. The backend `[ApiAuthorize]` is the real wall.
  */
-export function canAction(code: string | undefined): boolean {
-  if (!code) return true
+export function canAction(code: string | readonly string[] | undefined): boolean {
+  if (!code || code.length === 0) return true
   try {
     const auth = useAdminAuthStore()
-    if (auth.isSuperUser || auth.userInfo === null) return true
-    return auth.hasPermission(code)
+    if (auth.bypassesPermissionChecks || auth.userInfo === null) return true
+    return typeof code === 'string' ? auth.hasPermission(code) : code.every((c) => auth.hasPermission(c))
   } catch {
     return true
   }

@@ -9,8 +9,8 @@
       <NButton size="small" @click="refresh">{{ t('refresh') }}</NButton>
       <NButton size="small" data-test="open-trend" @click="openTrendDrawer">{{ t('scoreTrend') }}</NButton>
       <NButton size="small" data-test="open-compare" @click="openCompareDrawer">{{ t('versionCompare') }}</NButton>
-      <NButton size="small" data-test="open-batch" @click="openBatchDrawer">{{ t('runBatch') }}</NButton>
-      <NButton size="small" type="primary" @click="openNewRunModal">
+      <NButton v-if="canRun" size="small" data-test="open-batch" @click="openBatchDrawer">{{ t('runBatch') }}</NButton>
+      <NButton v-if="canRun" size="small" type="primary" data-test="open-new-run" @click="openNewRunModal">
         {{ t('newRun') }}
       </NButton>
     </template>
@@ -56,6 +56,11 @@
                 <div class="t-eval-page__run-time">{{ formatTime(run.creationTime) }}</div>
               </li>
             </ul>
+            <div v-if="hasMoreRuns" class="t-eval-page__more">
+              <NButton size="tiny" :loading="listLoading" data-test="eval-load-more" @click="loadMoreRuns">
+                {{ t('loadMore') }}
+              </NButton>
+            </div>
           </NSpin>
         </template>
 
@@ -247,8 +252,8 @@
             </div>
           </section>
 
-          <!-- Per-target results after the batch resolves. -->
-          <section v-if="batchResults.length" class="t-eval-page__section" data-test="batch-results">
+          <!-- Per-target results after the batch resolves (failed targets listed too). -->
+          <section v-if="batchResults.length || batchFailures.length" class="t-eval-page__section" data-test="batch-results">
             <header class="t-eval-page__section-head">
               <span>{{ t('batch.results') }}</span>
               <span class="t-eval-page__hint">{{ batchSummary }}</span>
@@ -275,6 +280,20 @@
                     score: r.averageScore.toFixed(2),
                   }) }}
                 </div>
+              </li>
+              <li
+                v-for="(f, i) in batchFailures"
+                :key="`failure-${f.agentId}-${i}`"
+                class="t-eval-page__result-item"
+                data-test="batch-failure"
+              >
+                <div class="t-eval-page__result-row">
+                  <NTag size="small" :type="statusTypeFor('Failed')" :bordered="false">
+                    {{ statusLabel('Failed') }}
+                  </NTag>
+                  <code>{{ agentLabel(f.agentId) }}</code>
+                </div>
+                <div class="t-eval-page__result-meta">{{ f.message }}</div>
               </li>
             </ul>
           </section>
@@ -493,6 +512,7 @@ import { useSafeMessage } from '../../_shared/safe-message'
 import { useFormModal, type UseFormModalReturn } from '../../../headless/useFormModal'
 import { useBreakpoint } from '../../../headless/useBreakpoint'
 import { fetchAllPages } from '../../../headless/fetchAllPages'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../../components/layout/TMasterDetailLayout.vue'
 import TFormModal from '../../../components/crud/TFormModal.vue'
@@ -500,6 +520,7 @@ import TChartPanel from '../../../components/display/TChartPanel.vue'
 import { TOverlayTheme } from '../../../components/overlay'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
+import { formatJsonText } from '../../../utils/json-text'
 import { makePageTranslator } from '../../_shared/translate'
 import type {
   AgentDto,
@@ -507,6 +528,7 @@ import type {
   EvaluationRunDto,
   EvaluationRunDetailDto,
   BatchEvaluationDto,
+  BatchEvaluationFailureDto,
   BatchEvaluationTargetDto,
   EvaluationCaseDto,
   EvaluationTrendPointDto,
@@ -534,12 +556,21 @@ interface CaseRow {
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const t = makePageTranslator('ai.evaluations')
+// Starting a run (single or batch) needs ai.evaluation.execute; the page itself
+// opens on ai.evaluation.view.
+const { can } = usePermissionGuard()
+const canRun = computed(() => can('ai.evaluation.execute'))
 
 const message = useSafeMessage()
 const { isSm } = useBreakpoint()
 
 const runs = ref<EvaluationRunDto[]>([])
 const listLoading = ref(false)
+/** Runs come a page at a time, newest first; older ones are a Load more away. */
+const RUN_PAGE_SIZE = 50
+const runPageIndex = ref(1)
+const runTotal = ref(0)
+const hasMoreRuns = computed(() => runs.value.length < runTotal.value)
 const leftId = ref<string | null>(null)
 const rightId = ref<string | null>(null)
 const leftDetail = ref<EvaluationRunDetailDto | null>(null)
@@ -598,6 +629,7 @@ const batchRunning = ref(false)
 const batchTargets = reactive<BatchTargetRow[]>([])
 const batchCases = reactive<CaseRow[]>([])
 const batchResults = ref<EvaluationRunDetailDto[]>([])
+const batchFailures = ref<BatchEvaluationFailureDto[]>([])
 
 function openBatchDrawer(): void {
   if (!batchTargets.length) batchTargets.push({ agentId: '', versionNumber: null })
@@ -645,7 +677,12 @@ async function runBatchEval(): Promise<void> {
     const dto: BatchEvaluationDto = { targets, cases }
     const result = await bridge.evaluations.runBatch(dto)
     batchResults.value = result.results ?? []
-    message.success(t('batch.success'))
+    batchFailures.value = result.failures ?? []
+    if (batchFailures.value.length) {
+      message.warning(t('batch.partialFailure', { count: batchFailures.value.length }))
+    } else {
+      message.success(t('batch.success'))
+    }
     await loadList()
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -790,30 +827,59 @@ const formatTime = (v?: string | Date | null): string => formatDateTime(v, { fal
 function formatJson(s: string | null | undefined): string {
   if (!s) return ''
   try {
-    return JSON.stringify(JSON.parse(s), null, 2)
+    // Re-indent, not re-serialise: a parse round trip rounds numbers past 2^53.
+    JSON.parse(s)
+    return formatJsonText(s, { indent: 2, normalizeStrings: true })
   } catch {
     return s
   }
 }
 
-async function loadList(): Promise<void> {
+// Only the latest list request writes the list: a Load more still on its way
+// when the list starts over would otherwise append a page of the old list.
+let listToken = 0
+
+/** Resolves false only when this request failed (a superseded one resolves true). */
+async function loadList(append = false): Promise<boolean> {
+  const myToken = ++listToken
+  if (!append) runPageIndex.value = 1
   listLoading.value = true
   try {
     const result = await bridge.evaluations.fetch({
-      pageIndex: 1,
-      pageSize: 50,
+      pageIndex: runPageIndex.value,
+      pageSize: RUN_PAGE_SIZE,
       sortField: 'creationTime',
       sortOrder: 'desc',
       searchText: '',
       filters: {},
     })
-    runs.value = result.items
+    if (myToken !== listToken) return true
+    if (append) {
+      // A run created since the first page shifts the pages by one: skip a repeat.
+      const seen = new Set(runs.value.map((r) => r.id))
+      runs.value = [...runs.value, ...result.items.filter((r) => !seen.has(r.id))]
+    } else {
+      runs.value = result.items
+    }
+    runTotal.value = result.totalCount
+    return true
   } catch (e) {
+    if (myToken !== listToken) return true
     message.error(e instanceof Error ? e.message : String(e))
-    runs.value = []
+    if (!append) runs.value = []
+    return false
   } finally {
-    listLoading.value = false
+    if (myToken === listToken) listLoading.value = false
   }
+}
+
+async function loadMoreRuns(): Promise<void> {
+  // One page at a time: a second click while the first is on its way would ask
+  // for the page after it and supersede it, so that page never showed.
+  if (listLoading.value) return
+  runPageIndex.value += 1
+  // A failed page is asked for again on retry instead of being skipped.
+  if (!(await loadList(true))) runPageIndex.value -= 1
 }
 
 // Click-to-pick: first click sets A, second sets B, third resets B then sets new B,
@@ -845,11 +911,15 @@ async function loadDetail(id: string): Promise<EvaluationRunDetailDto | null> {
   }
 }
 
+// A detail lands only if its run is still the one picked: a slower answer for
+// an earlier pick must not fill the column under the run picked after it.
 watch(leftId, async (id) => {
-  leftDetail.value = id ? await loadDetail(id) : null
+  const detail = id ? await loadDetail(id) : null
+  if (leftId.value === id) leftDetail.value = detail
 })
 watch(rightId, async (id) => {
-  rightDetail.value = id ? await loadDetail(id) : null
+  const detail = id ? await loadDetail(id) : null
+  if (rightId.value === id) rightDetail.value = detail
 })
 
 async function submitNewRun(): Promise<void> {
@@ -896,6 +966,7 @@ defineExpose({
   batchTargets,
   batchCases,
   runBatchEval,
+  batchFailures,
   // Trend surface.
   trendAgentId,
   trendLastN,
@@ -994,6 +1065,10 @@ defineExpose({
   padding: 0 4px;
 }
 .t-eval-page__placeholder,
+.t-eval-page__more {
+  text-align: center;
+  margin-top: 8px;
+}
 .t-eval-page__empty {
   color: var(--tnzi-base-text-muted);
   text-align: center;

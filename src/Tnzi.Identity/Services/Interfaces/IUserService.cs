@@ -8,7 +8,20 @@ public interface IUserService
     /// <summary>
     /// 创建用户
     /// </summary>
+    /// <remarks>
+    /// 账号建好（含角色与 <see cref="CreateUserDto.Nickname"/> 等资料栏）之后发布 <see cref="Events.UserRegisteredEvent"/>。
+    /// </remarks>
     Task<Result<UserDto>> CreateAsync(CreateUserDto input);
+
+    /// <summary>
+    /// 为一份邀请建号：重名、组织、角色校验与分配、资料写入都与 <see cref="CreateAsync"/> 走同一条路，
+    /// 只是<b>不发布</b> <see cref="Events.UserRegisteredEvent"/>。
+    /// </summary>
+    /// <remarks>
+    /// 被邀请的账号此刻没有密码、登录不进去，此时宣布「已注册」是假的：订阅者（例如欢迎邮件）会告诉对方
+    /// 「账号已可用」。注册事件由 <see cref="IInvitationService"/> 在接受邀请、账号真正可用的那一刻发布。
+    /// </remarks>
+    Task<Result<UserDto>> CreateForInvitationAsync(CreateUserDto input);
 
     /// <summary>
     /// 更新用户（管理端口径，可改角色与所属组织）
@@ -51,7 +64,7 @@ public interface IUserService
     Task<Result> DisableAsync(Guid id, string? reason = null);
 
     /// <summary>
-    /// 锁定用户
+    /// 锁定用户。<paramref name="lockoutEnd"/> 为 null 时锁到管理员解锁为止（一百年后，与停用同一个值）。
     /// </summary>
     Task<Result> LockAsync(Guid id, DateTimeOffset? lockoutEnd = null, string? reason = null);
 
@@ -135,13 +148,17 @@ public interface IUserService
     Task<Result> DeactivateAccountAsync(Guid userId, string? reason = null);
 
     /// <summary>
-    /// 用户自助删除账户（软删除，GDPR 合规）
+    /// 用户自助注销账户：锁定、把账号行标为软删除、撤销全部会话，发布 <see cref="Events.UserDeletedEvent"/>。
     /// </summary>
+    /// <remarks>
+    /// 不抹除资料（<c>UserDetail</c>）、第三方登录关联与登录日志：抹除与否是消费应用的合规决定，需要时订阅
+    /// <see cref="Events.UserDeletedEvent"/> 自行处理。
+    /// </remarks>
     /// <param name="userId">用户ID</param>
     Task<Result> DeleteAccountAsync(Guid userId);
 
     /// <summary>
-    /// 导出用户个人数据（GDPR 合规）
+    /// 导出用户自己的账号数据：账号字段、角色、所属组织名与已关联的第三方登录提供商（不含资料与登录历史）。
     /// </summary>
     /// <param name="userId">用户ID</param>
     Task<Result<PersonalDataExportDto>> ExportPersonalDataAsync(Guid userId);
@@ -149,7 +166,11 @@ public interface IUserService
     /// <summary>
     /// Export users as CSV string (admin operation)
     /// </summary>
-    /// <param name="query">Optional query filter (null = export all users)</param>
+    /// <remarks>
+    /// 筛选与排序与 <see cref="GetListAsync"/> 相同（分页参数被忽略，导出整个结果集）。
+    /// 命中行数超过导出上限（50000）时返回 400 <c>IDENTITY_USER_EXPORT_TOO_LARGE</c>，从不截断。
+    /// </remarks>
+    /// <param name="query">Optional query filter, the same one the list takes (null = export all users)</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>CSV formatted string</returns>
     Task<Result<string>> ExportUsersCsvAsync(UserListQueryDto? query = null, CancellationToken cancellationToken = default);

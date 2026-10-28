@@ -61,6 +61,7 @@ public class LedgerLockService : ApplicationService, ILedgerLockService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _repository.Discard(entity); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             // 并发首次设定：单行唯一索引兜底 get-or-create 的 check-then-act 竞态。
             return Fail<LedgerLockDto>("The ledger lock was changed concurrently. Reload and try again.", 409);
         }

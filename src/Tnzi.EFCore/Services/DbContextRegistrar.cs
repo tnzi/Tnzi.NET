@@ -42,6 +42,8 @@ public class DbContextRegistrar : IDbContextRegistrar
             // 在注册时（启动期）就展开连接字符串，而不是留到 DbContext 解析时：
             // 占位符解析不出来要在启动期拒绝（GetEffectiveConnectionString 抛出），展开日志也要进启动期缓冲
             // 被回放 —— 留在闭包里，两者都发生在首次解析 DbContext 时，那时缓冲早已回放完毕、失败也晚了一步。
+            // provider 识别要在展开之后、应用连接池参数之前（与设计期工厂同口径）。
+            config.DetectProviderFromConnectionString(configuration, logger);
             var effectiveConnectionString = config.GetEffectiveConnectionString(configuration, logger);
             Action<DbContextOptionsBuilder> optionsAction = builder =>
                 DatabaseProviderFactory.Configure(builder, effectiveConnectionString, config.Provider, providerOptions);

@@ -32,6 +32,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { NSelect, type SelectOption } from 'naive-ui'
+import { useDebounced } from '@tnzi/core/headless'
 import type { FinanceBridge } from '../../services/bridges/finance-bridge'
 
 const props = withDefaults(
@@ -71,7 +72,15 @@ const options = computed<SelectOption[]>(() => {
   return list
 })
 
+/**
+ * Only the latest request fills the list. A slower answer for the other kind
+ * (or for an older search) landing last offered customers on a vendor field,
+ * which is the wrong-party submit the direction flip below exists to prevent.
+ */
+let fetchSeq = 0
+
 async function fetchPage(searchText?: string) {
+  const seq = ++fetchSeq
   loading.value = true
   try {
     const source = resolvedKind.value === 'customer' ? props.bridge.customers : props.bridge.vendors
@@ -81,23 +90,21 @@ async function fetchPage(searchText?: string) {
       searchText,
       filters: { isActive: true },
     })
+    if (seq !== fetchSeq) return
     const next = page.items.map((p) => ({ label: p.name, value: p.id }))
     current.value = next
     const map = new Map(seen.value)
     for (const o of next) map.set(String(o.value), o)
     seen.value = map
   } catch {
-    current.value = []
+    if (seq === fetchSeq) current.value = []
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-function onSearch(text: string) {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => void fetchPage(text || undefined), 250)
-}
+// Dropped with the picker: a search still waiting when the form closes does not fire.
+const onSearch = useDebounced((text: string) => void fetchPage(text || undefined))
 
 onMounted(() => void fetchPage())
 // Flipping direction changes which list is authoritative; a stale customer id

@@ -24,8 +24,7 @@ public class NotificationEnhancementTests
         optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
-            SmsMaxContentLength = 140,
-            Queue = new QueueOptions { Enabled = true },
+            Queue = new QueueOptions(),
             Retry = new RetryOptions { RetryDelaySeconds = 1 }
         });
 
@@ -43,6 +42,7 @@ public class NotificationEnhancementTests
             serviceProviderMock.Object,
             PassThroughOptOut(),
             PassThroughPreferences(),
+            new Mock<IRepository<Recipient, Guid>>().Object,
             new Mock<INotificationQueueService>().Object);
     }
 
@@ -79,7 +79,7 @@ public class NotificationEnhancementTests
     [Fact]
     public async Task PreviewAsync_WithoutTemplate_ReturnsRawContent()
     {
-        var request = new CreateNotificationRequest
+        var request = new PreviewNotificationRequest
         {
             Type = NotificationType.Email,
             Subject = "Test Subject",
@@ -101,14 +101,63 @@ public class NotificationEnhancementTests
         result.Data.TemplateName.ShouldBeNull();
     }
 
-    [Fact]
-    public async Task PreviewAsync_EmptyRecipients_Returns400()
+    /// <summary>
+    /// 预览渲染的是内容，不需要收件人：管理端模板页按模板名 + 变量预览时没有任何地址可填。
+    /// 此前空的收件人列表答 400，那一页的预览从来没有工作过。
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreviewAsync_WithoutRecipients_RendersAndReportsZeroRecipients(bool sendEmptyList)
     {
-        var request = new CreateNotificationRequest
+        var request = new PreviewNotificationRequest
         {
             Subject = "Test",
             Content = "Content",
-            Recipients = []
+            Recipients = sendEmptyList ? [] : null
+        };
+
+        var result = await _service.PreviewAsync(request);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Content.ShouldBe("Content");
+        result.Data.RecipientCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// 预览回报的 <c>IsHtml</c> 是渲染时实际用的输出类型，不是入参的回显：<c>IsHtml</c> 默认 true，
+    /// 短信 / 推送的预览不带它时曾被当成 HTML 放进预览框，换行全部塌掉，而发出去的是纯文本。
+    /// </summary>
+    [Theory]
+    [InlineData(NotificationType.Sms, true, false)]
+    [InlineData(NotificationType.Push, true, false)]
+    [InlineData(NotificationType.Email, true, true)]
+    [InlineData(NotificationType.Email, false, false)]
+    public async Task PreviewAsync_ReportsTheOutputKindItRenderedWith(NotificationType type, bool requestIsHtml, bool expectedIsHtml)
+    {
+        var request = new PreviewNotificationRequest
+        {
+            Type = type,
+            Subject = "Code",
+            Content = "Your code is 123456.\nIt expires in 10 minutes.",
+            IsHtml = requestIsHtml
+        };
+
+        var result = await _service.PreviewAsync(request);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.IsHtml.ShouldBe(expectedIsHtml);
+    }
+
+    /// <summary>给了收件人就按创建时的同一条规则校验：预览通过、真发时才 400 是另一种不诚实。</summary>
+    [Fact]
+    public async Task PreviewAsync_WithABlankRecipientAddress_Returns400()
+    {
+        var request = new PreviewNotificationRequest
+        {
+            Subject = "Test",
+            Content = "Content",
+            Recipients = [new RecipientInput { Address = " " }]
         };
 
         var result = await _service.PreviewAsync(request);
@@ -117,10 +166,29 @@ public class NotificationEnhancementTests
         result.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// 只给模板名、不给主题与正文时，模板渲染不出来就如实失败，不回落成一份空白预览。
+    /// 这里没有模板渲染服务（Template 模块未加载）。
+    /// </summary>
+    [Fact]
+    public async Task PreviewAsync_TemplateOnly_WithoutTheTemplateModule_ReportsTheFailure()
+    {
+        var request = new PreviewNotificationRequest
+        {
+            Type = NotificationType.Email,
+            TemplateName = "welcome"
+        };
+
+        var result = await _service.PreviewAsync(request);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Message!.ShouldContain("welcome");
+    }
+
     [Fact]
     public async Task PreviewAsync_DefaultCategory_ReturnsGeneral()
     {
-        var request = new CreateNotificationRequest
+        var request = new PreviewNotificationRequest
         {
             Subject = "Test",
             Content = "Content",

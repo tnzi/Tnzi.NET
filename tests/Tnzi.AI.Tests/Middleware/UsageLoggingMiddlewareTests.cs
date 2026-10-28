@@ -258,6 +258,37 @@ public class UsageLoggingMiddlewareTests
     }
 
     [Fact]
+    public async Task InvokeStreamingAsync_SeveralUsageChunks_LogsTheirSum()
+    {
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量：UsageLog 与成本按全部调用之和记，不按最后一次
+        var usageLogService = new Mock<IUsageLogService>();
+        var middleware = CreateMiddleware(usageLogService);
+
+        var streamChunks = new[]
+        {
+            new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 100, OutputTokens = 10, CachedInputTokens = 40, CacheCreationTokens = 5 } },
+            new AgentStreamChunk { Text = "answer" },
+            new AgentStreamChunk { FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 200, OutputTokens = 20, CachedInputTokens = 60 } }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(CreateContext(), (ctx, ct) => streamChunks.ToAsyncEnumerable()))
+        {
+        }
+
+        usageLogService.Verify(x => x.LogUsageAsync(
+            AIOperationType.ChatStreaming,
+            TestProvider,
+            TestModel,
+            300, 30,
+            It.IsAny<long>(),
+            true,
+            null,
+            null, null,
+            100, 5,
+            CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
     public async Task InvokeStreamingAsync_FailureFinishReason_LogsUsageAsFailure()
     {
         var usageLogService = new Mock<IUsageLogService>();

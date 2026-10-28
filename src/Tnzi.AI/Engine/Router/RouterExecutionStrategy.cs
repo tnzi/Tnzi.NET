@@ -43,6 +43,11 @@ public class RouterExecutionStrategy : IExecutionStrategy
             return BuildResult(routerResponse, [agent.Name], agent.Name, promptTokens, completionTokens);
         }
 
+        // 被路由到的 Agent 是模型自己选的，不是这次请求最初面向的那一个，
+        // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效。
+        // 标记必须先于解析：目标的工具列表在解析时一次定型，ToolResolver 此刻读标记决定是否裁掉
+        // AI:SubAgent:SubAgentDisallowedTools；先解析后标记，这份名单对模型选出的目标一条也不生效。
+        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, routeTarget);
         var targetAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(targetAgentId, context, ct);
         if (targetAgent == null)
         {
@@ -50,9 +55,7 @@ public class RouterExecutionStrategy : IExecutionStrategy
             return BuildResult(routerResponse, [agent.Name], agent.Name, promptTokens, completionTokens);
         }
 
-        // 被路由到的 Agent 是模型自己选的，不是这次请求最初面向的那一个 ——
-        // 与子 Agent 同一个风险面，IsSubAgentOnly 的规则必须在这里也生效
-        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
+        SubAgentContext.Rename(context.ExecutionContextAccessor, targetAgent.Name);
 
         var delegatedMessages = BuildDelegatedMessages(messages, agent.Name, targetAgent.Name, routerResponse.Text);
         var targetResponse = await targetAgent.ExecuteAsync(delegatedMessages, ct);
@@ -106,6 +109,8 @@ public class RouterExecutionStrategy : IExecutionStrategy
             yield break;
         }
 
+        // 同上：流式路径也要先标记再解析，否则同一份工具名单在流式与非流式下答案不一样
+        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, detectedRoute);
         var targetAgent = await ExecutionStrategyAgentLoader.ResolveAgentAsync(targetAgentId, context, ct);
         if (targetAgent == null)
         {
@@ -114,10 +119,15 @@ public class RouterExecutionStrategy : IExecutionStrategy
             yield break;
         }
 
-        yield return new AgentStreamChunk { AgentName = targetAgent.Name };
+        SubAgentContext.Rename(context.ExecutionContextAccessor, targetAgent.Name);
 
-        // 同上：流式路径也要标记，否则同一条规则在流式与非流式下答案不一样
-        SubAgentContext.Mark(context.ExecutionContextAccessor, context.ServiceProvider, targetAgent.Name);
+        // 丢弃的是 router 的文本，不是它的用量：路由那次 LLM 调用照样计费
+        if (StreamUsage.Sum(preTextBuffer) is { } routerUsage)
+        {
+            yield return new AgentStreamChunk { Usage = routerUsage };
+        }
+
+        yield return new AgentStreamChunk { AgentName = targetAgent.Name };
 
         var delegatedMessages = BuildDelegatedMessages(messages, agent.Name, targetAgent.Name, null);
         await foreach (var chunk in targetAgent.ExecuteStreamingAsync(delegatedMessages, ct).WithCancellation(ct))
@@ -177,9 +187,12 @@ public class RouterExecutionStrategy : IExecutionStrategy
         return null;
     }
 
+    /// <remarks>
+    /// 路由 Agent 的人格块（Soul）属于路由者自己，不带给目标：目标收到它会以路由者的身份作答。
+    /// </remarks>
     private static List<ChatMessage> BuildDelegatedMessages(List<ChatMessage> messages, string routerName, string targetAgentName, string? routerResponse)
     {
-        var delegatedMessages = new List<ChatMessage>(messages)
+        var delegatedMessages = new List<ChatMessage>(messages.Where(m => !ContextInjectionMiddleware.IsPersonaBlock(m)))
         {
             new(ChatRole.System,
                 $"[Routed by {routerName}] The request has been assigned to '{targetAgentName}'. " +

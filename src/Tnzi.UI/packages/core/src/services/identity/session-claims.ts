@@ -37,6 +37,62 @@ export function readSessionIdClaim(accessToken: string | null | undefined): stri
   return typeof value === 'string' && value ? value : null;
 }
 
+/**
+ * Claim names the user id can travel under, in the order they are tried.
+ * `Tnzi.Identity` writes `ClaimTypes.NameIdentifier`, which the token handler's
+ * outbound map shortens to `nameid`; `sub` and the long URI cover a backend
+ * that issues standard claims or disables that map.
+ */
+const USER_ID_CLAIMS = [
+  'nameid',
+  'sub',
+  'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier',
+] as const;
+
+/**
+ * The user id the access token was issued to, or null when it cannot be told
+ * (no token, an opaque token, an unreadable payload).
+ *
+ * Like {@link readSessionIdClaim} this does not verify the signature. It is
+ * for comparing two tokens this page already holds (whether the session another
+ * tab left in shared storage belongs to the same person), never for granting
+ * anything. A caller must treat null as "unknown", not as a match.
+ */
+export function readUserIdClaim(accessToken: string | null | undefined): string | null {
+  if (!accessToken) return null;
+  const parts = accessToken.split('.');
+  if (parts.length !== 3) return null;
+
+  const payload = decodePayload(parts[1]!);
+  if (!payload) return null;
+
+  for (const claim of USER_ID_CLAIMS) {
+    const value = payload[claim];
+    if (typeof value === 'string' && value) return value;
+  }
+  return null;
+}
+
+/**
+ * When the access token expires, as epoch milliseconds read off its `exp`
+ * claim, or null when it cannot be told (no token, an opaque token, no `exp`).
+ *
+ * Like the other readers this verifies nothing. It exists for transports that
+ * copy the token out of the client instead of going through `request()` (a
+ * SignalR negotiate, for one): they can refresh first rather than present a
+ * token the server is bound to reject. A caller must treat null as "unknown",
+ * not as "expired".
+ */
+export function readExpiryClaim(accessToken: string | null | undefined): number | null {
+  if (!accessToken) return null;
+  const parts = accessToken.split('.');
+  if (parts.length !== 3) return null;
+
+  const payload = decodePayload(parts[1]!);
+  const exp = payload?.['exp'];
+  return typeof exp === 'number' && Number.isFinite(exp) ? exp * 1000 : null;
+}
+
 function decodePayload(segment: string): Record<string, unknown> | null {
   try {
     const base64 = segment.replace(/-/g, '+').replace(/_/g, '/');

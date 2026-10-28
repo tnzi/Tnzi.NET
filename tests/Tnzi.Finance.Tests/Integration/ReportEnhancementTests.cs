@@ -290,6 +290,92 @@ public class ReportEnhancementTests : FinanceIntegrationTestBase
         row.NetTax.ShouldBe(7m);
     }
 
+    /// <summary>
+    /// 科目表重组把税角色迁到新科目之后，旧期间的税务汇总（与据此生成的申报表）逐分不变。
+    /// </summary>
+    /// <remarks>
+    /// 被保护的缺陷：汇总按科目**当前**的系统角色归类税行。把 TaxPayable / TaxReceivable 迁到新科目
+    /// （受支持的操作）之后，历史税行全落在已不持角色的旧科目上，重跑旧期间销项、进项都是 0，
+    /// 且没有任何「未归入」提示，补报或更正申报静默出错。单据税行按来源单据类型归类，不随角色漂移。
+    /// </remarks>
+    [Fact]
+    public async Task TaxSummary_ForPastPeriods_IsUnchanged_WhenTheTaxRolesMoveToNewAccounts()
+    {
+        await SeedCoaAsync();
+        var customer = await InScopeAsync<ICustomerService, Result<CustomerDto>>(s => s.CreateAsync(new CreateCustomerDto { Name = "Role Move Customer" }));
+        var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "Role Move Vendor" }));
+        var (rateId, codeId) = await CreateTaxSetupAsync("Agency R", "GST 5", 5m);
+        var income = await AccountIdAsync("4100");
+        var opex = await AccountIdAsync("5200");
+
+        var invoice = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.CreateDraftAsync(new CreateInvoiceDto
+        {
+            CustomerId = customer.Data!.Id,
+            DocDate = new DateTime(2026, 3, 10),
+            Lines = [new CreateInvoiceLineDto { AccountId = income, Quantity = 2, UnitPrice = 100m, TaxCodeId = codeId }]
+        }));
+        (await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.PostAsync(invoice.Data!.Id))).Succeeded.ShouldBeTrue();
+        var bill = await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+        {
+            VendorId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 3, 12),
+            Lines = [new CreateBillLineDto { AccountId = opex, Quantity = 1, UnitPrice = 60m, TaxCodeId = codeId }]
+        }));
+        (await InScopeAsync<IBillService, Result<BillDto>>(s => s.PostAsync(bill.Data!.Id))).Succeeded.ShouldBeTrue();
+
+        async Task<TaxSummaryRowDto> MarchRowAsync()
+        {
+            var summary = await InScopeAsync<IFinancialReportService, Result<TaxSummaryReportDto>>(
+                s => s.GetTaxSummaryAsync(new DateTime(2026, 3, 1), new DateTime(2026, 3, 31)));
+            summary.Succeeded.ShouldBeTrue(summary.Message);
+            return summary.Data!.Rows.ShouldHaveSingleItem();
+        }
+
+        var before = await MarchRowAsync();
+        before.TaxRateId.ShouldBe(rateId);
+        before.OutputTax.ShouldBe(10m);
+        before.InputTax.ShouldBe(3m);
+
+        // 科目表重组：两个税角色各自迁到新科目（先从旧科目清掉，再挂到新科目上）。
+        await MoveRoleAsync("2200", AccountSystemRole.TaxPayable, "2210", "GST/HST Payable", AccountRootType.Liability, "2000");
+        await MoveRoleAsync("1300", AccountSystemRole.TaxReceivable, "1310", "GST/HST Recoverable", AccountRootType.Asset, "1000");
+
+        var after = await MarchRowAsync();
+        after.OutputTax.ShouldBe(before.OutputTax);
+        after.InputTax.ShouldBe(before.InputTax);
+        after.NetTax.ShouldBe(before.NetTax);
+    }
+
+    private async Task MoveRoleAsync(string oldCode, AccountSystemRole role, string newCode, string newName, AccountRootType rootType, string parentCode)
+    {
+        var oldId = await AccountIdAsync(oldCode);
+        var old = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.GetAsync(oldId));
+        old.Succeeded.ShouldBeTrue(old.Message);
+        var cleared = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.UpdateAsync(oldId, new UpdateAccountDto
+        {
+            Code = old.Data!.Code,
+            Name = old.Data.Name,
+            ParentId = old.Data.ParentId,
+            Currency = old.Data.Currency,
+            CashFlowActivity = old.Data.CashFlowActivity,
+            SystemRole = null,
+            IsActive = true
+        }));
+        cleared.Succeeded.ShouldBeTrue(cleared.Message);
+
+        var parentId = await AccountIdAsync(parentCode);
+        var created = await InScopeAsync<IChartOfAccountsService, Result<AccountDto>>(s => s.CreateAsync(new CreateAccountDto
+        {
+            Code = newCode,
+            Name = newName,
+            RootType = rootType,
+            ParentId = parentId,
+            SystemRole = role,
+            CashFlowActivity = CashFlowActivity.Operating
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+    }
+
     private static decimal LastCell(string csvLine)
         => decimal.Parse(csvLine[(csvLine.LastIndexOf(',') + 1)..], CultureInfo.InvariantCulture);
 }

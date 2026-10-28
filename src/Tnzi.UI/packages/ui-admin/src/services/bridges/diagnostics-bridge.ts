@@ -12,6 +12,12 @@
  * in-memory exception ring buffer) and is bundled with every HostingModule
  * app, so this bridge works on any stack that loads `Tnzi.AspNetCore`.
  *
+ * Every read rejects with the server's reason on a failed envelope (403, 404,
+ * 5xx): HttpClient resolves those instead of throwing, and an unchecked unwrap
+ * turned them into an empty answer. On this page an empty answer is a claim -
+ * "no sensitive endpoints are active", "no exceptions" - so a read that failed
+ * must not produce one. `?? []` only covers a successful answer with no body.
+ *
  * DTO types are re-exported below so existing page imports
  * (`import type { ModuleDiagnosticsDto } from '../../services/bridges/diagnostics-bridge'`)
  * keep resolving after the contract moved into `@tnzi/core`.
@@ -26,7 +32,7 @@ import {
   type SensitiveEndpointDto,
   type SensitiveEndpointReportDto,
 } from '@tnzi/core/services/diagnostics'
-import { ensureOk, unwrapResult as unwrap } from '../_mappers'
+import { ensureOk, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminDiagnosticsApi>[0]
 
@@ -91,24 +97,24 @@ export function createDiagnosticsBridge(deps: DiagnosticsBridgeDeps = {}): Diagn
   return {
     exceptions: {
       getSummary: async (minutes = 60) =>
-        unwrap<ExceptionSummaryDto>(await api.getExceptionSummary(minutes)),
+        unwrapOk<ExceptionSummaryDto>(await api.getExceptionSummary(minutes)),
       getRecent: async (count = 50) =>
-        unwrap<ExceptionEntryDto[]>(await api.getRecentExceptions(count)) ?? [],
+        unwrapOk<ExceptionEntryDto[]>(await api.getRecentExceptions(count)) ?? [],
       clear: async () => {
         ensureOk(await api.clearExceptions())
       },
     },
     controllers: {
       list: async () =>
-        unwrap<ControllerDiagnosticsResultDto>(await api.getControllers()),
+        unwrapOk<ControllerDiagnosticsResultDto>(await api.getControllers()),
     },
     modules: {
       list: async () =>
-        unwrap<ModuleDiagnosticsDto[]>(await api.getModules()) ?? [],
+        unwrapOk<ModuleDiagnosticsDto[]>(await api.getModules()) ?? [],
     },
     sensitiveEndpoints: {
       list: async () =>
-        unwrap<SensitiveEndpointReportDto>(await api.getSensitiveEndpoints()),
+        unwrapOk<SensitiveEndpointReportDto>(await api.getSensitiveEndpoints()),
     },
   }
 }

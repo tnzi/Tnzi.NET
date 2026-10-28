@@ -7,7 +7,7 @@ public class BankRuleConditionConfiguration : EntityTypeConfigurationBase<BankRu
 {
     public override void Configure(EntityTypeBuilder<BankRuleCondition> builder)
     {
-        builder.Property(e => e.Value).HasMaxLength(500).IsRequired();
+        builder.Property(e => e.Value).HasMaxLength(BankingFieldLimits.BankRuleConditionValueMaxLength).IsRequired();
 
         builder.HasIndex(e => e.BankRuleId);
     }

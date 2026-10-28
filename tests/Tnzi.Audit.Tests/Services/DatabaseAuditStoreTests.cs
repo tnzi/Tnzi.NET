@@ -9,17 +9,14 @@ namespace Tnzi.Audit.Tests.Services;
 public class DatabaseAuditStoreTests
 {
     private readonly Mock<IRepository<AuditOperation, Guid>> _operationRepositoryMock;
-    private readonly Mock<IRepository<AuditEntityEntry, Guid>> _entityEntryRepositoryMock;
     private readonly DatabaseAuditStore _store;
 
     public DatabaseAuditStoreTests()
     {
         _operationRepositoryMock = new Mock<IRepository<AuditOperation, Guid>>();
-        _entityEntryRepositoryMock = new Mock<IRepository<AuditEntityEntry, Guid>>();
 
         _store = new DatabaseAuditStore(
             _operationRepositoryMock.Object,
-            _entityEntryRepositoryMock.Object,
             new StaticOptionsMonitor<AuditOptions>(new AuditOptions()));
     }
 
@@ -31,17 +28,6 @@ public class DatabaseAuditStoreTests
         // Act & Assert
         Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
             null!,
-            _entityEntryRepositoryMock.Object,
-            new StaticOptionsMonitor<AuditOptions>(new AuditOptions())));
-    }
-
-    [Fact]
-    public void Constructor_Should_Throw_When_EntityEntryRepository_Is_Null()
-    {
-        // Act & Assert
-        Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
-            _operationRepositoryMock.Object,
-            null!,
             new StaticOptionsMonitor<AuditOptions>(new AuditOptions())));
     }
 
@@ -50,7 +36,6 @@ public class DatabaseAuditStoreTests
     {
         Should.Throw<ArgumentNullException>(() => new DatabaseAuditStore(
             _operationRepositoryMock.Object,
-            _entityEntryRepositoryMock.Object,
             null!));
     }
 
@@ -113,43 +98,6 @@ public class DatabaseAuditStoreTests
 
         // Assert
         _operationRepositoryMock.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<AuditOperation>>(), default), Times.Never);
-    }
-
-    #endregion
-
-    #region SaveEntityEntriesAsync Tests
-
-    [Fact]
-    public async Task SaveEntityEntriesAsync_Should_Insert_Entries()
-    {
-        // Arrange
-        var entries = new List<AuditEntityEntry>
-        {
-            new AuditEntityEntry { Id = Guid.NewGuid(), EntityTypeName = "Entity1" },
-            new AuditEntityEntry { Id = Guid.NewGuid(), EntityTypeName = "Entity2" }
-        };
-
-        _entityEntryRepositoryMock.Setup(r => r.InsertManyAsync(It.IsAny<IEnumerable<AuditEntityEntry>>(), default))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        await _store.SaveEntityEntriesAsync(entries);
-
-        // Assert
-        _entityEntryRepositoryMock.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<AuditEntityEntry>>(), default), Times.Once);
-    }
-
-    [Fact]
-    public async Task SaveEntityEntriesAsync_Should_Not_Insert_When_Empty()
-    {
-        // Arrange
-        var entries = new List<AuditEntityEntry>();
-
-        // Act
-        await _store.SaveEntityEntriesAsync(entries);
-
-        // Assert
-        _entityEntryRepositoryMock.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<AuditEntityEntry>>(), default), Times.Never);
     }
 
     #endregion

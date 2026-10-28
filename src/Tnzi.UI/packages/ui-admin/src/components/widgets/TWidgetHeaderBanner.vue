@@ -12,7 +12,7 @@ import { computed } from 'vue'
 import THeaderBanner from '../dashboard/THeaderBanner.vue'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { useAdminLoginConfig } from '../../plugin/login-config'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey, translatePageKey } from '../../i18n/translate'
 
 interface Props {
   /** Display name override - defaults to `loginConfig.user?.userName`. */
@@ -44,8 +44,7 @@ const resolvedUserName = computed(
     authStore.userInfo?.shortName ??
     authStore.userInfo?.username ??
     loginConfig.user?.userName ??
-    translatePageKey('', 'admin.banner.userFallback') ??
-    'there',
+    translateChromeKey('admin.banner.userFallback', 'there'),
 )
 
 function bannerTranslate(key: string): string {

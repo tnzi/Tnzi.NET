@@ -14,6 +14,20 @@ public class VectorTextSearchServiceTests
     private readonly Mock<IRepository<KnowledgeDocument, Guid>> _docRepoMock = new();
     private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
 
+    /// <summary>
+    /// agent 侧检索只在知识库范围内进行（没有范围恒答空，见 <see cref="AgentKnowledgeScopeFailClosedTests"/>），
+    /// 所以管线用例都带一个授权的知识库；它的嵌入配置是 "default" 哨兵，回落到 RAG 全局默认。
+    /// </summary>
+    private static readonly Guid ScopeKb = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+    public VectorTextSearchServiceTests()
+    {
+        _kbRepoMock.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<KnowledgeBase> { new() { Id = ScopeKb, Name = "scope", EmbeddingProvider = "default" } }.BuildMock());
+    }
+
+    private static TextSearchFilter Scoped() => new() { KnowledgeBaseIds = [ScopeKb] };
+
     private VectorTextSearchService CreateService(
         IQueryRewriter? queryRewriter = null,
         IRelevanceGrader? relevanceGrader = null,
@@ -102,7 +116,7 @@ public class VectorTextSearchServiceTests
             new() { Id = Guid.NewGuid(), Content = "small chunk", DocumentId = docId, KnowledgeBaseId = Guid.NewGuid(), ChunkIndex = 3, Score = 0.9 }
         };
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(vectorResults);
         _rerankerMock
             .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
@@ -126,7 +140,7 @@ public class VectorTextSearchServiceTests
         };
         var service = CreateService(ragOptions: options, parentDocumentRetriever: parent.Object);
 
-        var results = (await service.SearchAsync("query")).ToList();
+        var results = (await service.SearchAsync("query", Scoped())).ToList();
 
         var only = results.ShouldHaveSingleItem();
         only.Text.ShouldBe("wider window");
@@ -164,7 +178,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService();
 
-        var results = await service.SearchAsync("test query");
+        var results = await service.SearchAsync("test query", Scoped());
 
         results.ShouldBeEmpty();
     }
@@ -178,7 +192,7 @@ public class VectorTextSearchServiceTests
             .ReturnsAsync(Result<float[]>.Success(queryVector));
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<VectorSearchResult>());
 
         _rerankerMock
@@ -187,7 +201,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService();
 
-        var results = await service.SearchAsync("test query");
+        var results = await service.SearchAsync("test query", Scoped());
 
         results.ShouldBeEmpty();
     }
@@ -209,7 +223,7 @@ public class VectorTextSearchServiceTests
         };
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(vectorResults);
 
         _rerankerMock
@@ -225,7 +239,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService();
 
-        var results = (await service.SearchAsync("test query")).ToList();
+        var results = (await service.SearchAsync("test query", Scoped())).ToList();
 
         results.Count.ShouldBe(1);
         results[0].Text.ShouldBe("Chunk content");
@@ -253,13 +267,14 @@ public class VectorTextSearchServiceTests
         };
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(vectorResults);
 
         // Reranker 反转排序
         var reranked = new List<VectorSearchResult> { vectorResults[1], vectorResults[0] };
+        // 知识库范围内的检索把各库结果合并重排成一个新列表，按内容匹配而不是按引用
         _rerankerMock
-            .Setup(r => r.RerankAsync("search query", vectorResults, It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.RerankAsync("search query", It.Is<List<VectorSearchResult>>(l => l.SequenceEqual(vectorResults)), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reranked);
 
         var allDocIds = vectorResults.Select(r => r.DocumentId).Distinct().ToList();
@@ -268,11 +283,11 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService();
 
-        var results = (await service.SearchAsync("search query")).ToList();
+        var results = (await service.SearchAsync("search query", Scoped())).ToList();
 
         results.Count.ShouldBe(2);
         // 验证 reranker 被调用
-        _rerankerMock.Verify(r => r.RerankAsync("search query", vectorResults, It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
+        _rerankerMock.Verify(r => r.RerankAsync("search query", It.Is<List<VectorSearchResult>>(l => l.SequenceEqual(vectorResults)), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -289,7 +304,7 @@ public class VectorTextSearchServiceTests
             .ReturnsAsync(Result<float[]>.Success(queryVector));
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<VectorSearchResult>());
 
         _rerankerMock
@@ -298,7 +313,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService(queryRewriter: queryRewriterMock.Object);
 
-        await service.SearchAsync("user question");
+        await service.SearchAsync("user question", Scoped());
 
         // 验证嵌入使用改写后的查询
         _embeddingServiceMock.Verify(e => e.GenerateEmbeddingAsync("rewritten semantic query", It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -318,7 +333,7 @@ public class VectorTextSearchServiceTests
             .ReturnsAsync(Result<float[]>.Success(queryVector));
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<VectorSearchResult>());
 
         _rerankerMock
@@ -327,7 +342,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService(queryRewriter: queryRewriterMock.Object);
 
-        await service.SearchAsync("original query");
+        await service.SearchAsync("original query", Scoped());
 
         // 改写为空时应回退到原始查询
         _embeddingServiceMock.Verify(e => e.GenerateEmbeddingAsync("original query", It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -351,7 +366,7 @@ public class VectorTextSearchServiceTests
         };
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(vectorResults);
 
         _rerankerMock
@@ -374,7 +389,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService(relevanceGrader: relevanceGraderMock.Object);
 
-        var results = (await service.SearchAsync("query")).ToList();
+        var results = (await service.SearchAsync("query", Scoped())).ToList();
 
         // 只返回相关结果
         results.Count.ShouldBe(1);
@@ -396,7 +411,7 @@ public class VectorTextSearchServiceTests
         };
 
         _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
+            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), ScopeKb, It.IsAny<CancellationToken>()))
             .ReturnsAsync(vectorResults);
 
         _rerankerMock
@@ -423,7 +438,7 @@ public class VectorTextSearchServiceTests
 
         var service = CreateService(postProcessors: new[] { processor1.Object, processor2.Object });
 
-        await service.SearchAsync("test");
+        await service.SearchAsync("test", Scoped());
 
         // Order=10 的处理器应先执行
         executionOrder.Count.ShouldBe(2);
@@ -441,7 +456,7 @@ public class VectorTextSearchServiceTests
         var service = CreateService();
 
         // 不应抛出异常
-        var results = await service.SearchAsync("test query");
+        var results = await service.SearchAsync("test query", Scoped());
 
         results.ShouldBeEmpty();
     }
@@ -457,29 +472,21 @@ public class VectorTextSearchServiceTests
     }
 
     [Fact]
-    public async Task SearchAsync_NoKbScope_UsesDefaultEmbeddingProviderAndModel()
+    public async Task SearchAsync_NoKbScope_NeverEmbedsOrSearches()
     {
-        var queryVector = new float[] { 0.1f };
-        EmbeddingOptions? capturedOptions = null;
-
+        // 没有知识库范围（无 agent / agent 没有知识库授权）不再是 search-all：不生成向量、不查向量库
         _embeddingServiceMock
             .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
-            .Callback<string, EmbeddingOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
-            .ReturnsAsync(Result<float[]>.Success(queryVector));
-
-        _vectorStoreMock
-            .Setup(v => v.SearchAsync(queryVector, It.IsAny<int>(), null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<VectorSearchResult>());
+            .ReturnsAsync(Result<float[]>.Success(new float[] { 0.1f }));
         SetupPassthroughReranker();
 
         var service = CreateService();
 
-        await service.SearchAsync("query");
+        (await service.SearchAsync("query")).ShouldBeEmpty();
+        (await service.SearchAsync("query", new TextSearchFilter())).ShouldBeEmpty();
 
-        // 跨库搜索必须使用 RAG 全局默认 embedding 配置，而非回退到 AI 顶层 DefaultProvider
-        capturedOptions.ShouldNotBeNull();
-        capturedOptions!.Provider.ShouldBe("openai");
-        capturedOptions.Model.ShouldBe("text-embedding-3-small");
+        _embeddingServiceMock.Verify(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _vectorStoreMock.Verify(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

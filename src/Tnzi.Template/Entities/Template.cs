@@ -48,17 +48,21 @@ public class Template : MultiTenantAuditedEntity<Guid>
     public TemplateType Type { get; set; } = TemplateType.Generic;
 
     /// <summary>
-    /// Optional foreign key to a Template_Layout row whose content should be
-    /// used as the header wrapper when rendering. Nullable - when null, the
-    /// engine uses the DefaultLayoutName string lookup path or no header at all.
-    /// SetNull cascade preserves templates when the referenced layout is removed.
+    /// Optional reference to a Template_Layout row (FK, SetNull on layout delete), stored and returned as-is.
     /// </summary>
+    /// <remarks>
+    /// Not applied when rendering: <c>ITemplateRenderService</c> wraps content only with the layout named by
+    /// <see cref="DefaultLayoutName"/> or the caller's <c>layoutName</c> argument. Setting this field does not
+    /// add a header to the rendered output.
+    /// </remarks>
     public Guid? HeaderLayoutId { get; set; }
 
     /// <summary>
-    /// Optional foreign key to a Template_Layout row whose content should be
-    /// used as the footer wrapper when rendering. Nullable; SetNull cascade.
+    /// Optional reference to a Template_Layout row (FK, SetNull on layout delete), stored and returned as-is.
     /// </summary>
+    /// <remarks>
+    /// Not applied when rendering, see <see cref="HeaderLayoutId"/>.
+    /// </remarks>
     public Guid? FooterLayoutId { get; set; }
 
     /// <summary>

@@ -347,3 +347,118 @@ describe('buildDefaultLoginCallbacks - password login clears a spent captcha', (
     expect(helpers.clearCaptcha).toHaveBeenCalled();
   });
 });
+
+/**
+ * Quick registration is two calls: `quickRegister` creates the account (and
+ * spends the code), `setPassword` then sets the chosen password with the token
+ * the first call returned. The backend keeps that token alive when the password
+ * is refused (it is only consumed once a password is set), but the callback
+ * used to drop it. A refused password then left a passwordless account behind,
+ * and every retry re-ran `quickRegister` against a spent code and an account
+ * that now existed: "Email is already registered", with no way forward.
+ */
+describe('buildDefaultLoginCallbacks - quick registration', () => {
+  function registerRuntime() {
+    return makeRuntime({
+      quickRegister: vi.fn().mockResolvedValue({
+        succeeded: true,
+        data: { userId: 'user-1', userName: 'someone@example.com', requirePasswordSetup: true, setPasswordToken: 'set-token' },
+      }),
+      setPassword: vi.fn(),
+    });
+  }
+
+  it('finishes the password step on retry instead of registering the account again', async () => {
+    const { runtime, authApi } = registerRuntime();
+    (authApi.setPassword as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ succeeded: false, message: 'Passwords must have at least one lowercase letter.' })
+      .mockResolvedValueOnce({ succeeded: true });
+    const callbacks = buildDefaultLoginCallbacks(runtime);
+
+    await expect(
+      callbacks.register!({ account: 'someone@example.com', code: '123456', password: 'PASSWORD1', type: 'email' }),
+    ).rejects.toThrow('Passwords must have at least one lowercase letter.');
+
+    await callbacks.register!({ account: 'Someone@Example.com ', code: '123456', password: 'Password1', type: 'email' });
+
+    expect(authApi.quickRegister).toHaveBeenCalledTimes(1);
+    expect(authApi.setPassword).toHaveBeenCalledTimes(2);
+    expect(authApi.setPassword).toHaveBeenLastCalledWith({ userId: 'user-1', token: 'set-token', password: 'Password1' });
+  });
+
+  it('only finishes the password step for the code that created the account', async () => {
+    // The callbacks live as long as the app (the admin shell builds them once),
+    // so the pending step outlives the form. Somebody else at the same browser
+    // must not be able to type the address with any code and set the password
+    // of the account the first person just created.
+    const { runtime, authApi } = registerRuntime();
+    (authApi.setPassword as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ succeeded: false, message: 'Too weak' });
+    (authApi.quickRegister as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        succeeded: true,
+        data: { userId: 'user-1', userName: 'someone', requirePasswordSetup: true, setPasswordToken: 'set-token' },
+      })
+      .mockResolvedValueOnce({ succeeded: false, message: 'Invalid or expired verification code' });
+    const callbacks = buildDefaultLoginCallbacks(runtime);
+
+    await expect(
+      callbacks.register!({ account: 'someone@example.com', code: '123456', password: 'weak', type: 'email' }),
+    ).rejects.toThrow('Too weak');
+    await expect(
+      callbacks.register!({ account: 'someone@example.com', code: '000000', password: 'Attacker1', type: 'email' }),
+    ).rejects.toThrow('Invalid or expired verification code');
+
+    expect(authApi.setPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the pending step across repeated refusals', async () => {
+    const { runtime, authApi } = registerRuntime();
+    (authApi.setPassword as ReturnType<typeof vi.fn>).mockResolvedValue({ succeeded: false, message: 'Too weak' });
+    const callbacks = buildDefaultLoginCallbacks(runtime);
+    const submit = (password: string) =>
+      callbacks.register!({ account: '+14155552671', code: '123456', password, type: 'phone' });
+
+    await expect(submit('a')).rejects.toThrow('Too weak');
+    await expect(submit('b')).rejects.toThrow('Too weak');
+    // A transport failure is not an answer either: the token is still good.
+    (authApi.setPassword as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Network error'));
+    await expect(submit('c')).rejects.toThrow('Network error');
+
+    expect(authApi.quickRegister).toHaveBeenCalledTimes(1);
+    expect(authApi.setPassword).toHaveBeenCalledTimes(3);
+  });
+
+  it('tracks the pending step per address, and registers anew once it completed', async () => {
+    const { runtime, authApi } = registerRuntime();
+    (authApi.quickRegister as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        succeeded: true,
+        data: { userId: 'user-1', userName: 'someone', requirePasswordSetup: true, setPasswordToken: 'token-1' },
+      })
+      .mockResolvedValueOnce({
+        succeeded: true,
+        data: { userId: 'user-2', userName: 'other', requirePasswordSetup: true, setPasswordToken: 'token-2' },
+      });
+    (authApi.setPassword as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ succeeded: false, message: 'Too weak' })
+      .mockResolvedValue({ succeeded: true });
+    const callbacks = buildDefaultLoginCallbacks(runtime);
+    const submit = (account: string, code: string) =>
+      callbacks.register!({ account, code, password: 'Password1', type: 'email' });
+
+    await expect(submit('someone@example.com', '1')).rejects.toThrow('Too weak');
+    // A different address is a different registration...
+    await submit('other@example.com', '2');
+    expect(authApi.quickRegister).toHaveBeenCalledTimes(2);
+    expect(authApi.quickRegister).toHaveBeenLastCalledWith(expect.objectContaining({ email: 'other@example.com' }));
+
+    // ...and it does not lose the first one's password step.
+    await submit('someone@example.com', '1');
+    expect(authApi.quickRegister).toHaveBeenCalledTimes(2);
+    expect(authApi.setPassword).toHaveBeenLastCalledWith({ userId: 'user-1', token: 'token-1', password: 'Password1' });
+
+    // Completed: nothing is left to replay, a new submission registers anew.
+    await submit('someone@example.com', '3');
+    expect(authApi.quickRegister).toHaveBeenCalledTimes(3);
+  });
+});

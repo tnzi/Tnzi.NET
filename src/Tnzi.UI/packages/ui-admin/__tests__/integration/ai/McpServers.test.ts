@@ -13,6 +13,11 @@ import { createPinia, setActivePinia } from 'pinia'
  * stubs, assert mount fetches + getStatus call + external-server cards render +
  * switching to the analytics tab loads the popularity ranking.
  */
+const messageError = vi.hoisted(() => vi.fn())
+vi.mock('../../../src/pages/_shared/safe-message', () => ({
+  useSafeMessage: () => ({ success: vi.fn(), error: messageError, warning: vi.fn(), info: vi.fn() }),
+}))
+
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
@@ -128,6 +133,8 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
 }))
 
 import McpServers from '../../../src/pages/ai/mcp/McpServers.vue'
+import { defaultAdminRoutes } from '../../../src/router/routes'
+import { useAdminRouteStore, type AdminRouteRecord } from '../../../src/stores/useAdminRouteStore'
 
 const stubs = {
   Tabs: {
@@ -265,5 +272,115 @@ describe('McpServers page (three-tab MCP control surface)', () => {
     await flushPromises()
     expect(cleanup).toHaveBeenCalledWith(90)
     expect(getMostUsedTools).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unreadable agent list leaves the server status in place and says why the picker is empty', async () => {
+    // A holder of ai.mcpServer.view without ai.agent.view: only the agent list is refused.
+    agentFetch.mockRejectedValueOnce(Object.assign(new Error('Agents are not readable here'), { statusCode: 403 }))
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      status: { totalToolCount: number } | null
+      statusError: string | null
+      agentsError: string | null
+      exposedAgents: Array<{ agentId: string; name: string }>
+    }
+    expect(vm.statusError).toBeNull()
+    expect(vm.status?.totalToolCount).toBe(12)
+    expect(vm.agentsError).toBe('Agents are not readable here')
+    expect(wrapper.find('[data-test="mcp-agents-error"]').exists()).toBe(true)
+    // Exposed agents still listed, by id when the name cannot be read.
+    expect(vm.exposedAgents).toEqual([{ agentId: 'a1', name: 'a1' }])
+  })
+
+  it('a refused expose, remove or cleanup is reported with the server reason', async () => {
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      agentToExpose: string | null
+      onExposeAgent: () => Promise<void>
+      onRemoveAgent: (id: string) => Promise<void>
+      onCleanup: () => Promise<void>
+    }
+    messageError.mockClear()
+
+    exposeAgent.mockRejectedValueOnce(new Error('Agent is already exposed'))
+    vm.agentToExpose = 'a2'
+    await vm.onExposeAgent()
+    expect(messageError).toHaveBeenLastCalledWith('Agent is already exposed')
+    // The pick survives a refusal so the admin can retry it.
+    expect(vm.agentToExpose).toBe('a2')
+
+    removeAgent.mockRejectedValueOnce(new Error('Not allowed to remove'))
+    await vm.onRemoveAgent('a1')
+    expect(messageError).toHaveBeenLastCalledWith('Not allowed to remove')
+
+    cleanup.mockRejectedValueOnce(new Error('Cleanup refused'))
+    await vm.onCleanup()
+    expect(messageError).toHaveBeenLastCalledWith('Cleanup refused')
+    expect(messageError).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('McpServers on a host without the Tnzi.AI.Mcp server sub-module', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mcpServerFetch.mockClear()
+    getStatus.mockClear()
+    getMostUsedTools.mockClear()
+    agentFetch.mockClear()
+  })
+
+  it('keeps the route reachable: the external server registry is AI core', () => {
+    const store = useAdminRouteStore()
+    store.setAuthRoutes(defaultAdminRoutes as unknown as AdminRouteRecord[])
+    // Tnzi.AI loaded, Tnzi.AI.Mcp not.
+    store.setAvailableModules(new Set(['ai']))
+    expect(store.unavailableRouteNames.has('ai')).toBe(false)
+    expect(store.unavailableRouteNames.has('ai.mcp')).toBe(false)
+  })
+
+  it('serves External Servers and shows the not-loaded notice without calling the server endpoints', async () => {
+    useAdminRouteStore().setAvailableModules(new Set(['ai']))
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    expect(mcpServerFetch).toHaveBeenCalledTimes(1)
+    expect(getStatus).not.toHaveBeenCalled()
+    expect(getMostUsedTools).not.toHaveBeenCalled()
+    expect((wrapper.vm as unknown as { showModuleNotLoaded: boolean }).showModuleNotLoaded).toBe(true)
+  })
+
+  it('loads the server tabs once a pending module probe settles with the sub-module present', async () => {
+    const store = useAdminRouteStore()
+    store.setModuleSignalPending(true)
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    expect(getStatus).not.toHaveBeenCalled()
+
+    store.setAvailableModules(new Set(['ai', 'ai-mcp']))
+    store.setModuleSignalPending(false)
+    await flushPromises()
+    expect(getStatus).toHaveBeenCalledTimes(1)
+    expect(getMostUsedTools).toHaveBeenCalledTimes(1)
+    expect((wrapper.vm as unknown as { showModuleNotLoaded: boolean }).showModuleNotLoaded).toBe(false)
+  })
+
+  it('reads a 404 from the server endpoints (no module signal) as the sub-module being absent', async () => {
+    getStatus.mockRejectedValueOnce(Object.assign(new Error('Not Found'), { statusCode: 404 }))
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { showModuleNotLoaded: boolean; statusError: string | null }
+    expect(vm.showModuleNotLoaded).toBe(true)
+    expect(vm.statusError).toBeNull()
+  })
+
+  it('reports a refused status read instead of an empty server surface', async () => {
+    getStatus.mockRejectedValueOnce(Object.assign(new Error('Forbidden'), { statusCode: 403 }))
+    const wrapper = mount(McpServers, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { showModuleNotLoaded: boolean; statusError: string | null }
+    expect(vm.showModuleNotLoaded).toBe(false)
+    expect(vm.statusError).toBe('Forbidden')
+    expect(wrapper.find('[data-test="mcp-status-error"]').exists()).toBe(true)
   })
 })

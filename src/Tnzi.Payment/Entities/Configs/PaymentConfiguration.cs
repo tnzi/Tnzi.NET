@@ -12,6 +12,11 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.Property(p => p.ChannelCode).HasMaxLength(32).IsRequired();
         builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
         builder.Property(p => p.Description).HasMaxLength(500);
+        builder.Property(p => p.PaymentMethodBrand).HasMaxLength(32);
+        builder.Property(p => p.PaymentMethodLast4).HasMaxLength(8);
+        builder.Property(p => p.DisputeId).HasMaxLength(64);
+        builder.Property(p => p.DisputeReason).HasMaxLength(64);
+        builder.Property(p => p.DisputeAmount).HasMoneyPrecision();
         builder.Property(p => p.OriginalAmount).HasMoneyPrecision();
         builder.Property(p => p.PaidAmount).HasMoneyPrecision();
         builder.Property(p => p.DiscountAmount).HasMoneyPrecision();
@@ -20,6 +25,8 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.Property(p => p.ReservedRefundAmount).HasMoneyPrecision();
         builder.Property(p => p.CustomerName).HasMaxLength(256);
         builder.Property(p => p.CustomerEmail).HasMaxLength(256);
+        builder.Property(p => p.BillingAccountType).HasMaxLength(BillingAccountRef.TypeMaxLength);
+        builder.Property(p => p.BillingAccountId).HasMaxLength(BillingAccountRef.IdMaxLength);
         // ChannelResponse和ExtraData存储JSON数据，不指定类型以保持数据库兼容性
         // EF Core会根据数据库提供者自动选择合适的类型
 
@@ -50,6 +57,8 @@ public class PaymentConfiguration : EntityTypeConfigurationBase<Payment, Guid>
         builder.HasIndex(p => p.ChannelCode);
         builder.HasIndex(p => p.CreationTime);
         builder.HasIndex(p => p.UserId);
+        // 「这个账户的付款」：用户面列表与订阅的在途付款检查都按它过滤
+        builder.HasIndex(p => new { p.BillingAccountType, p.BillingAccountId });
         // 过期支付清扫：按状态 + 过期时间过滤
         builder.HasIndex(p => new { p.Status, p.ExpireTime });
     }

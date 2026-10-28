@@ -211,6 +211,61 @@ public class FeatureManagerTests
         result.Name.ShouldBe("Feature.CaseTest");
     }
 
+    private void SetupRepositoryFailure()
+        => _repositoryMock.Setup(r => r.AsQueryable(false)).Throws(new InvalidOperationException("database unavailable"));
+
+    /// <summary>
+    /// 快照过期那一刻恰好赶上数据库抖动：此前失败被当作一份「只有代码定义」的完整快照缓存一整个刷新间隔，
+    /// 期间每一个数据库定义的功能都不存在，[RequireFeature] 端点对所有人 403，数据库恢复了也一样。
+    /// </summary>
+    [Fact]
+    public async Task DatabaseFailureOnRefresh_KeepsTheLastLoadedDatabaseDefinitions()
+    {
+        SetupRepositoryQueryable(
+        [
+            new() { Name = "Feature.FromDb", ValueType = FeatureValueType.Boolean, IsEnabled = true, DefaultValue = "true" }
+        ]);
+        (await _manager.GetOrNullAsync("Feature.FromDb")).ShouldNotBeNull();
+
+        await _manager.InvalidateCacheAsync();
+        SetupRepositoryFailure();
+
+        var during = await _manager.GetOrNullAsync("Feature.FromDb");
+        during.ShouldNotBeNull();
+        during.DefaultValue.ShouldBe("true");
+    }
+
+    [Fact]
+    public async Task DatabaseFailure_IsRetried_InsteadOfBeingCachedAsAFullSnapshot()
+    {
+        // 刷新间隔配成 0（永不过期）：降级快照若被当作完整快照，就永远只剩代码定义。
+        _options.CacheRefreshIntervalMinutes = 0;
+        _manager.DegradedRetryInterval = TimeSpan.Zero;
+        SetupRepositoryFailure();
+
+        (await _manager.GetOrNullAsync("Feature.FromDb")).ShouldBeNull();
+
+        SetupRepositoryQueryable(
+        [
+            new() { Name = "Feature.FromDb", ValueType = FeatureValueType.Boolean, IsEnabled = true }
+        ]);
+
+        (await _manager.GetOrNullAsync("Feature.FromDb")).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task DegradedSnapshot_IsServedUntilTheRetryInterval_WithoutHammeringTheDatabase()
+    {
+        _manager.DegradedRetryInterval = TimeSpan.FromMinutes(5);
+        SetupRepositoryFailure();
+
+        await _manager.GetAllAsync();
+        await _manager.GetAllAsync();
+        await _manager.GetAllAsync();
+
+        _repositoryMock.Verify(r => r.AsQueryable(false), Times.Once);
+    }
+
     [Fact]
     public async Task GroupField_PreservedInRecord()
     {

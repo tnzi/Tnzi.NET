@@ -15,6 +15,6 @@ public enum StreamMode
     /// <summary>包含调试事件（中间件进出、上下文注入、Token 预算等）</summary>
     Debug = 4,
 
-    /// <summary>包含后续建议（在最终 chunk 中发送）</summary>
+    /// <summary>包含后续建议。框架的运行管线目前不生成建议，这个模式不产生任何事件</summary>
     Suggestion = 8
 }

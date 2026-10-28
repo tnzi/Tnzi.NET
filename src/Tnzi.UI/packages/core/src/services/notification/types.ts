@@ -3,7 +3,7 @@
  * Aligned with Tnzi.NET backend Notification module
  */
 
-import type { SortedPagedQueryDto } from '../../types/pagination';
+import type { PagedQueryDto } from '../../types/pagination';
 import {
   NotificationType,
   NotificationStatus,
@@ -98,10 +98,22 @@ export interface NotificationInfo {
   templateName?: string | null;
   /** Provider key the message is delivered through; `null` = the channel's default sender. */
   providerKey?: string | null;
+  /**
+   * Earliest send time (UTC). On a `Scheduled` message it is the scheduled
+   * time; on a `Pending` message it is when the message was queued or when its
+   * next retry is due; `null` on a `Pending` message means a draft that was
+   * created without being sent.
+   */
   scheduledTime?: string | null;
   /** Transactional message: exempt from the opt-out list. */
   isTransactional: boolean;
+  /**
+   * Populated by the detail endpoint only. Rows of the message list and the
+   * scheduled list always carry an empty array: read `successCount` /
+   * `totalRecipientCount` there, and the delivery report for who and why.
+   */
   recipients: RecipientOutput[];
+  /** Same as `recipients`: empty on list rows. */
   attachments: FileInfoDto[];
 }
 
@@ -149,10 +161,35 @@ export interface CreateNotificationRequest {
 }
 
 /**
- * Query notification request (admin)
- * Backend: QueryNotificationRequest extends PagedQueryDto
+ * Preview notification request: the rendering inputs, recipients optional.
+ * Backend: PreviewNotificationRequest
+ *
+ * Previewing a template needs no addresses, so unlike
+ * {@link CreateNotificationRequest} nothing here is required beyond the
+ * channel. Field names match the create request, so a full create request can
+ * be previewed as-is (extra fields are ignored). When only `templateName` is
+ * given and the template cannot be rendered, the preview fails with the reason
+ * instead of falling back to `subject` / `content`.
  */
-export interface QueryNotificationRequest extends SortedPagedQueryDto {
+export interface PreviewNotificationRequest {
+  type: NotificationType;
+  subject?: string;
+  content?: string;
+  isHtml?: boolean;
+  templateName?: string;
+  layoutName?: string;
+  templateVariables?: Record<string, unknown>;
+  category?: string;
+  /** Optional. When given, addresses are validated as on create and counted in `recipientCount`. */
+  recipients?: RecipientInput[];
+}
+
+/**
+ * Query notification request (admin)
+ * Backend: QueryNotificationRequest extends PagedQueryDto. Newest first; the
+ * endpoint takes no sort parameters.
+ */
+export interface QueryNotificationRequest extends PagedQueryDto {
   type?: NotificationType;
   status?: NotificationStatus;
   startTime?: string;
@@ -190,6 +227,11 @@ export interface DeliveryReportDto {
   pendingCount: number;
   readCount: number;
   successRate: number;
+  /**
+   * At most 200 rows: failures first, then recipients the framework held
+   * back (`Cancelled`), then the rest. The counts above always cover every
+   * recipient, so fewer rows than `totalRecipients` means the list is cut.
+   */
   recipients: RecipientOutput[];
 }
 
@@ -302,9 +344,10 @@ export interface UserNotificationDetail extends UserNotificationItem {
 
 /**
  * Query user notification request
- * Backend: QueryUserNotificationRequest extends PagedQueryDto
+ * Backend: QueryUserNotificationRequest extends PagedQueryDto. Newest first; the
+ * endpoint takes no sort parameters.
  */
-export interface QueryUserNotificationRequest extends SortedPagedQueryDto {
+export interface QueryUserNotificationRequest extends PagedQueryDto {
   type?: NotificationType;
   isRead?: boolean;
   category?: string;
@@ -335,10 +378,16 @@ export interface NotificationPreferenceDto {
   /** Notification category; null = global preference for the channel */
   category?: string;
   isEnabled: boolean;
-  /** Quiet hours start time (UTC, "HH:mm:ss") */
+  /** Quiet hours start, a wall-clock time in `quietHoursTimeZone` ("HH:mm:ss") */
   quietHoursStart?: string;
-  /** Quiet hours end time (UTC, "HH:mm:ss") */
+  /** Quiet hours end (exclusive), a wall-clock time in `quietHoursTimeZone` ("HH:mm:ss") */
   quietHoursEnd?: string;
+  /**
+   * IANA time zone the quiet hours are read in (e.g. "America/Toronto").
+   * null = the two times are UTC. The server evaluates the window in this
+   * zone, so it stays at the same local time across daylight-saving changes.
+   */
+  quietHoursTimeZone?: string | null;
   maxFrequencyPerHour?: number;
 }
 
@@ -357,15 +406,26 @@ export interface NotificationPreferenceQueryDto {
 }
 
 /**
- * Upsert input DTO for PUT /admin/notification-preferences/user/{userId}.
- * Backend: SetNotificationPreferenceDto.
+ * Upsert input DTO, keyed by (channel, category). Used by both
+ * PUT /admin/notification-preferences/user/{userId} and the self-service
+ * PUT /notification/preferences. Backend: SetNotificationPreferenceDto.
  */
 export interface SetNotificationPreferenceDto {
   channel: string;
   category?: string;
   isEnabled: boolean;
+  /** "HH:mm:ss"; set both quiet-hours times or neither (else 400) */
   quietHoursStart?: string;
   quietHoursEnd?: string;
+  /**
+   * IANA time zone id for the quiet hours, in its canonical spelling
+   * ("America/Toronto", which is what `Intl` reports). Empty/null = UTC.
+   * Stored as given: a non-canonical spelling ("america/toronto"), a Windows
+   * name ("Eastern Standard Time") or an id this server cannot resolve is
+   * rejected with 400 and errorCode `NOTIFICATION_INVALID_TIME_ZONE`.
+   * Start equal to end (a window that never applies) is rejected with 400 too.
+   */
+  quietHoursTimeZone?: string | null;
   maxFrequencyPerHour?: number;
 }
 
@@ -441,14 +501,16 @@ export interface CreateOptOutDto {
  * Does NOT pick a delivery route: all three go out through FCM (iOS via FCM's
  * APNs relay). It is for recognising and counting devices only.
  * Backend: DevicePlatform (Tnzi.Notification.Push).
+ *
+ * The values are the member names because that is what the server writes on
+ * every response (`"Android"`, not `1`). A numeric mirror made
+ * `device.platform === DevicePlatform.Ios` false for every row.
  */
-export const DevicePlatform = {
-  Android: 1,
-  Ios: 2,
-  Web: 3,
-} as const;
-
-export type DevicePlatform = (typeof DevicePlatform)[keyof typeof DevicePlatform];
+export enum DevicePlatform {
+  Android = 'Android',
+  Ios = 'Ios',
+  Web = 'Web',
+}
 
 /**
  * Input for POST /notifications/devices.

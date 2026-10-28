@@ -221,9 +221,17 @@ public partial class AIModule
         services.AddHttpClient(ResilientHttpClientNames.Fallback)
             .AddStandardResilienceHandler(options => ConfigureAiResilience(options, FallbackAttemptTimeout));
 
-        // A2A 客户端 - 禁用自动重定向以防止 SSRF 通过 302 Location 绕过 EgressGuard
-        services.AddHttpClient("Tnzi.AI.A2A")
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        // 租户自填端点 - 同一套弹性管线，外加不跟随重定向 + 不走系统代理 + 每条连接过 egress 检查
+        // （见 ResilientHttpClientNames.TenantEndpoint；经代理时连接的是代理，连接期检查看不到目标）
+        services.AddHttpClient(ResilientHttpClientNames.TenantEndpoint)
+            .ConfigurePrimaryHttpMessageHandler(() => EgressGuardedConnector.CreateHandler())
+            .AddStandardResilienceHandler(options => ConfigureAiResilience(options, FallbackAttemptTimeout));
+
+        // A2A 客户端 - 禁用自动重定向以防止 SSRF 通过 302 Location 绕过 EgressGuard；HttpA2AClient 发请求前的那次检查
+        // 与连接之间还会再解析一次 DNS（先答公网、再答内网的域名就能穿过去），所以连接本身也要过同一套检查。
+        // 同样不走系统代理：经代理时连接的是代理，连接期检查看不到目标，只能经代理出网的部署里 A2A 调用连不出去
+        services.AddHttpClient(HttpA2AClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(() => EgressGuardedConnector.CreateHandler());
 
         // OAuth 令牌请求专用 HttpClient（无重试/熔断，令牌端点自行处理错误）
         services.AddHttpClient("Tnzi.AI.OAuth");
@@ -276,6 +284,8 @@ public partial class AIModule
         services.AddSingleton<IMcpClientFactory, McpClientFactory>();
         services.AddSingleton<IMcpServerCatalog, McpServerCatalog>();
         services.AddSingleton<IMcpToolProvider, McpToolProvider>();
+        // 用户专属 MCP 服务器的断开入口；IUserMcpServerSource 由消费方注册（Singleton），不注册 = 没有用户专属服务器
+        services.TryAddSingleton<IUserMcpConnections, UserMcpConnections>();
         services.TryAddSingleton<IMcpResourceProvider, McpResourceProvider>();
         services.TryAddSingleton<IMcpPromptProvider, McpPromptProvider>();
 
@@ -326,9 +336,10 @@ public partial class AIModule
         services.AddSingleton<ICostCalculator, CostCalculator>();
         services.AddScoped<IUsageLogService, UsageLogService>();
         services.AddScoped<IUsageAnalyticsService, UsageAnalyticsService>();
-        services.AddScoped<QuotaService>();
-        services.AddScoped<IQuotaService>(sp => sp.GetRequiredService<QuotaService>());
-        services.TryAddScoped<IQuotaProvider>(sp => sp.GetRequiredService<QuotaService>());
+        // 按用户的用量上限（5 小时 / 每周，按 API 等价费用）与模型策略。按自己的规则（订阅套餐、角色）给上限的消费方
+        // 在自己的模块里再注册一次即可（后注册者胜）
+        services.AddScoped<IUsagePolicyService, UsagePolicyService>();
+        services.AddScoped<IUsageLimitService, UsageLimitService>();
 
         // Provider entity CRUD (Phase 5 backend prereq) - entity-driven provider management
         // with encrypted credential storage. IDataProtectionProvider 由 RegisterToolAndAgentInfrastructure
@@ -342,6 +353,7 @@ public partial class AIModule
         services.AddScoped<IAgentThreadService>(sp => sp.GetRequiredService<AgentThreadService>());
         services.AddScoped<IAgentThreadInternalService>(sp => sp.GetRequiredService<AgentThreadService>());
         services.AddScoped<IMessageFeedbackService, MessageFeedbackService>();
+        services.AddScoped<IAgentAttachmentService, AgentAttachmentService>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IEmbeddingService, EmbeddingService>();
         services.AddScoped<IStructuredOutputService, StructuredOutputService>();
@@ -446,6 +458,12 @@ public partial class AIModule
         // and the cancel signal path both see the same in-process registry.
         services.AddSingleton<ISubAgentRunCancellationRegistry, SubAgentRunCancellationRegistry>();
 
+        // 运行心跳 + 孤儿运行回收：执行运行的进程没了（重新部署、崩溃）时，行不会永远停在 Running、
+        // 一直占着 spawn 的并发上限
+        services.AddSingleton<IAgentRunHeartbeat, AgentRunHeartbeat>();
+        services.AddScoped<AgentRunRecoveryService>();
+        services.AddHostedService<AgentRunRecoveryHostedService>();
+
         // 注册 Run 管理服务（查询、取消、审批、重试、反馈）
         services.AddScoped<ISubAgentExecutionService, SubAgentExecutionService>();
         services.AddScoped<IAgentRunService, AgentRunService>();
@@ -474,6 +492,7 @@ public partial class AIModule
         services.TryAddScoped<TodoTools>();
         services.TryAddScoped<ArtifactTools>();
         services.TryAddScoped<AgentRunControlTools>();
+        services.TryAddScoped<WidgetTools>();
     }
 
     private static void RegisterUtilitiesWorkspaceAndEvents(IServiceCollection services)

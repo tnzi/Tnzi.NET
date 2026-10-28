@@ -205,6 +205,17 @@ public class DefaultStorageAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// Get a user's storage quota: bytes used (files plus what sub-modules keep for them, such as old versions)
+    /// and the allowance (null = unlimited)
+    /// </summary>
+    [HttpGet("quota/{userId:guid}")]
+    public virtual async Task<ApiResult<StorageQuotaDto>> GetUserQuota(Guid userId)
+    {
+        var result = await FileStorageService.GetStorageQuotaAsync(userId, HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// Get top users by storage usage (top: 1 to 100)
     /// </summary>
     [HttpGet("usage/top-users")]

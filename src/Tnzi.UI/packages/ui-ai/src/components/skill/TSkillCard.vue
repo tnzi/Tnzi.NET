@@ -66,7 +66,7 @@ defineEmits<{
 
 <style scoped>
 .t-skill-card { cursor: pointer; }
-.t-skill-card__icon { color: var(--tnzi-primary); }
+.t-skill-card__icon { color: var(--tnzi-ai-accent-text); }
 .t-skill-card__desc { color: var(--tnzi-base-text-muted); }
 .t-skill-card__badge-builtin {
   font-size: 10px;

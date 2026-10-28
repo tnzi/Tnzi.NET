@@ -98,6 +98,24 @@ public class AccessLogPipelinePlacementTests
         Assert.Equal(userId, log.UserId);
     }
 
+    /// <summary>
+    /// 路径里的令牌（签署链接、分享链接的 <c>{token}</c>）不得原样落进 <c>Sys_AccessLog.Path</c>：
+    /// 令牌本身就是能用的凭据，而访问日志表的读者远比令牌的主人多。
+    /// </summary>
+    [Fact]
+    public async Task ATokenInThePath_IsMaskedInTheRecordedPath()
+    {
+        const string token = "Zq3x-SECRET-LINK-TOKEN-0123456789abcdefABCDEF";
+        await using var host = await StartAsync();
+        host.Client.DefaultRequestHeaders.Add(UserHeader, Guid.NewGuid().ToString());
+
+        var response = await host.Client.GetAsync($"/api/e2e/access-log/links/{token}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var log = await host.WaitForCaptureAsync("/api/e2e/access-log/links/***");
+        Assert.DoesNotContain(token, log.Path);
+    }
+
     private static async Task<RunningHost> StartAsync(Dictionary<string, string?>? extraSettings = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
@@ -239,6 +257,14 @@ public sealed class AccessLogOpenController : ApiControllerBase
 {
     [HttpGet]
     public ApiResult<string> Get() => Ok("open", "Success");
+}
+
+[ApiController]
+[Route("e2e/access-log/links")]
+public sealed class AccessLogLinksController : ApiControllerBase
+{
+    [HttpGet("{token}")]
+    public ApiResult<string> Get(string token) => Ok("link", "Success");
 }
 
 [ApiController]

@@ -240,7 +240,7 @@ public class McpServerSecurityMiddlewareTests
         key.ShouldNotContain("super-secret-raw-key");
     }
 
-    // ─── CheckRateLimit - sliding window ─────────────────────────────────────
+    // ─── CheckRateLimit - fixed 60-second window per client ──────────────────
 
     [Fact]
     public void CheckRateLimit_UnderLimit_Allows_OverLimit_Rejects()
@@ -321,11 +321,74 @@ public class McpServerSecurityMiddlewareTests
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private static McpServerSecurityMiddleware CreateMiddleware(McpServerOptions options)
+    // ─── ValidateCallerAsync - run-scoped credentials ─────────────────────────
+
+    private static readonly Guid RunTenant = Guid.Parse("cccccccc-0000-0000-0000-000000000003");
+
+    /// <summary>
+    /// 关掉认证只放行没有凭据的请求：带着有效的运行范围凭据来的照样按凭据收窄（工具白名单、凭据租户）。
+    /// 此前关掉认证时任何 key 都直接答「不受限」，凭据不再被查。
+    /// </summary>
+    [Fact]
+    public async Task ValidateCaller_AuthDisabled_ARunScopedCredentialIsStillNarrowed()
+    {
+        var middleware = CreateMiddleware(new McpServerOptions { RequireAuthentication = false }, RunScopedValidator());
+
+        var scope = await middleware.ValidateCallerAsync("tnzi-run_valid");
+
+        scope.ShouldNotBeNull();
+        scope.IsRunScoped.ShouldBeTrue();
+        scope.TenantId.ShouldBe(RunTenant);
+        scope.AllowsTool("create_ticket").ShouldBeTrue();
+        scope.AllowsTool("delete_everything").ShouldBeFalse("the credential's tool list still applies");
+    }
+
+    [Fact]
+    public async Task ValidateCaller_AuthDisabled_NoKeyOrAnUnknownKey_IsUnrestricted()
+    {
+        var middleware = CreateMiddleware(new McpServerOptions { RequireAuthentication = false }, RunScopedValidator());
+
+        (await middleware.ValidateCallerAsync(null)).ShouldBe(McpCallerScope.Unrestricted);
+        (await middleware.ValidateCallerAsync("some-other-key")).ShouldBe(McpCallerScope.Unrestricted);
+    }
+
+    [Fact]
+    public async Task ValidateCaller_AuthRequired_StaticKeyIsUnrestricted_RunScopedIsNarrowed_UnknownIsRejected()
+    {
+        var middleware = CreateMiddleware(
+            new McpServerOptions { RequireAuthentication = true, AllowedApiKeys = ["static-key"] }, RunScopedValidator());
+
+        (await middleware.ValidateCallerAsync("static-key")).ShouldBe(McpCallerScope.Unrestricted);
+        (await middleware.ValidateCallerAsync("tnzi-run_valid"))!.IsRunScoped.ShouldBeTrue();
+        (await middleware.ValidateCallerAsync("some-other-key")).ShouldBeNull();
+        (await middleware.ValidateCallerAsync(null)).ShouldBeNull();
+    }
+
+    private static IServiceProvider RunScopedValidator()
+    {
+        var validator = new Mock<IRunScopedCredentialValidator>();
+        validator
+            .Setup(v => v.ValidateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string token, CancellationToken _) => token == "tnzi-run_valid"
+                ? new RunScopedCredential
+                {
+                    RunId = Guid.NewGuid(),
+                    AgentId = Guid.NewGuid(),
+                    TenantId = RunTenant,
+                    AllowedToolNames = ["create_ticket"]
+                }
+                : null);
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => validator.Object);
+        return services.BuildServiceProvider();
+    }
+
+    private static McpServerSecurityMiddleware CreateMiddleware(McpServerOptions options, IServiceProvider? services = null)
         => new(
             new StaticOptionsMonitor<McpServerOptions>(options),
             NullLogger<McpServerSecurityMiddleware>.Instance,
-            new ServiceCollection().BuildServiceProvider());
+            services ?? new ServiceCollection().BuildServiceProvider());
 
     private static string ExpectedHash(string apiKey)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16];

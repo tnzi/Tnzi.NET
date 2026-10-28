@@ -15,12 +15,16 @@
     @update:sorter="onSorterChange"
     @update:page="onPageChange"
     @update:page-size="onPageSizeChange"
-  />
+  >
+    <template v-if="emptyText" #empty>
+      <n-empty :description="emptyText" />
+    </template>
+  </n-data-table>
 </template>
 
 <script setup lang="ts">
 import { computed, h } from 'vue'
-import { NDataTable, NButton, NSpace } from 'naive-ui'
+import { NDataTable, NButton, NSpace, NEmpty } from 'naive-ui'
 import type { DataTableColumn, DataTableSortState, PaginationProps } from 'naive-ui'
 import { useI18n } from '@tnzi/core/adapters/i18n'
 import type { ITableColumn, IPaginationConfig } from '@tnzi/core/types/shared-ui'
@@ -49,6 +53,7 @@ interface Props {
   sortOrder?: 'asc' | 'desc'
   bordered?: boolean
   striped?: boolean
+  /** Shown when there are no rows. Unset, naive's localized empty state shows. */
   emptyText?: string
   size?: 'small' | 'medium' | 'large'
   rowActions?: {
@@ -68,14 +73,15 @@ const props = withDefaults(defineProps<Props>(), {
   sortOrder: undefined,
   bordered: true,
   striped: true,
-  emptyText: 'No data',
+  emptyText: undefined,
   size: 'medium',
   rowActions: undefined,
 })
 
 const emit = defineEmits<{
   'update:selectedKeys': [keys: string[]]
-  sort: [field: string, order: 'asc' | 'desc']
+  /** `order` is null when the user cleared the column's sort (naive's third click). */
+  sort: [field: string, order: 'asc' | 'desc' | null]
   pageChange: [pageIndex: number, pageSize: number]
   rowClick: [row: Record<string, unknown>, index: number]
   action: [actionKey: string, row: Record<string, unknown>, index: number]
@@ -203,7 +209,7 @@ function onSelectionChange(keys: Array<string | number>) {
 
 function onSorterChange(options: DataTableSortState | DataTableSortState[] | null) {
   if (!options || Array.isArray(options)) return
-  const order = options.order === 'ascend' ? 'asc' : 'desc'
+  const order = options.order === 'ascend' ? 'asc' : options.order === 'descend' ? 'desc' : null
   emit('sort', String(options.columnKey), order)
 }
 

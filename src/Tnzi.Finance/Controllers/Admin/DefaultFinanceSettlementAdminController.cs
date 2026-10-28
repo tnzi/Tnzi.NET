@@ -63,8 +63,14 @@ public class DefaultFinanceSettlementAdminController : ApiAdminControllerBase
     /// 批量结算（Pay Bills / Receive Payments）：一组未清单据 → 按（往来方 + 币种）
     /// 生成收付款单并过账 + 自动核销，整体一个事务
     /// </summary>
+    /// <remarks>
+    /// 建单（<c>.create</c>）之外它还<b>过账并核销</b>，而单据的 <c>{id}/post</c> 与本控制器的
+    /// <c>apply</c> 都要 <c>finance.document.update</c>。只挂 <c>.create</c> 时，只能起草的角色
+    /// 经这一个端点完成它在那两个端点上被拒绝的动作，故两个码叠加（AND）。
+    /// </remarks>
     [HttpPost("pay")]
     [ApiAuthorize(PermissionName = "finance.document.create")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<BatchPaymentResultDto>> Pay([FromBody] BatchPaymentDto request)
     {
         var result = await _settlementService.PayAsync(request);

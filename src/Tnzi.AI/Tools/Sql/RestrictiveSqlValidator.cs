@@ -165,7 +165,7 @@ public sealed partial class RestrictiveSqlValidator : ISqlValidator
         var upper = trimmed.ToUpperInvariant();
 
         if (!upper.StartsWith("SELECT", StringComparison.Ordinal) && !upper.StartsWith("WITH ", StringComparison.Ordinal))
-            return new SqlValidationResult(false, $"Only SELECT/WITH allowed; got: {trimmed[..Math.Min(20, trimmed.Length)]}");
+            return new SqlValidationResult(false, $"Only SELECT/WITH allowed; got: {trimmed.FitToLength(20)}");
 
         var trimEnd = trimmed.TrimEnd();
         var idx = trimEnd.IndexOf(';');

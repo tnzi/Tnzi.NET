@@ -21,6 +21,9 @@ public class AgentThreadMessageConfiguration : EntityTypeConfigurationBase<Agent
         builder.Property(e => e.Usage)
             .HasMaxLength(500);
 
+        builder.Property(e => e.Status)
+            .HasMaxLength(20);
+
         builder.HasOne(e => e.Thread)
             .WithMany(t => t.Messages)
             .HasForeignKey(e => e.ThreadId)

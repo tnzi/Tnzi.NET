@@ -185,7 +185,7 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
     }
 
     /// <summary>
-    /// 重算这条消息的成功/失败计数与状态。
+    /// 重算这条消息的成功/失败计数，消息已经发完时一并重算状态。
     /// </summary>
     /// <remarks>
     /// ★ 不重算的话，投递报告会自相矛盾：收件人是 <c>Failed</c>，而消息还写着"1/1 成功"。
@@ -193,6 +193,13 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
     /// 回执推翻的是"送到了"，不是"发出过"。发送路径上的那两处汇总看着与这里重复，
     /// 其实各有各的语义（一处要盖 <c>SentTime</c>、一处连全失败分支都刻意没有），
     /// 合并只会让三个不同的决定挤在一个带标志位的函数里。
+    /// <para>
+    /// ★★ <b>状态只在消息已经发完（<c>Sent</c> / <c>PartiallySent</c> / <c>Failed</c>）时重算。</b>此前这里无条件从两个计数推出状态：
+    /// 一次群发进行到一半（<c>Sending</c>，后面的人还是 <c>Pending</c>）、或者还有人排在静默时段之后（<c>Scheduled</c>）时，
+    /// 回执一来消息就被写成 <c>PartiallySent</c>：卡住批次那一遍只认 <c>Sending</c>、延后那一遍只认 <c>Scheduled</c>，
+    /// 剩下的人从此没人发；正在飞的发送循环也会把它当成「已不归这一轮」停下。没发完的消息由发送路径在收尾时自己算状态。
+    /// 重算是一条条件更新（从读到的状态改过去），读完之后被「重发失败项」认领走的消息不会被改回去。
+    /// </para>
     /// </remarks>
     private async Task<Message?> RecountAsync(Guid messageId, CancellationToken cancellationToken)
     {
@@ -204,17 +211,20 @@ public class FaxConfirmationService : ApplicationService, IFaxConfirmationServic
         if (message == null)
             return null;
 
+        // 计数由调用方那次保存按属性落库，不把消息行整行写回（理由见 MessageClaim）。
         message.SuccessCount = message.Recipients.Count(r => r.Status == NotificationStatus.Sent);
         message.FailureCount = message.Recipients.Count(r => r.Status == NotificationStatus.Failed);
 
-        if (message.FailureCount == 0)
-            message.Status = NotificationStatus.Sent;
-        else if (message.SuccessCount > 0)
-            message.Status = NotificationStatus.PartiallySent;
-        else
-            message.Status = NotificationStatus.Failed;
+        if (message.Status is NotificationStatus.Sent or NotificationStatus.PartiallySent or NotificationStatus.Failed)
+        {
+            var recounted = message.FailureCount == 0
+                ? NotificationStatus.Sent
+                : message.SuccessCount > 0 ? NotificationStatus.PartiallySent : NotificationStatus.Failed;
 
-        await _messageRepository.UpdateAsync(message, cancellationToken);
+            if (recounted != message.Status)
+                await MessageClaim.TryTransitionAsync(_messageRepository, message.Id, message.Status, recounted, cancellationToken);
+        }
+
         return message;
     }
 }

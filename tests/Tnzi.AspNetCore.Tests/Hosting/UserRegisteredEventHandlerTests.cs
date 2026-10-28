@@ -6,6 +6,8 @@ using Tnzi.Identity.Services;
 using Tnzi.Notification.Dtos;
 using Tnzi.Notification.Services;
 using Tnzi.Results;
+using Tnzi.System.Options;
+using Tnzi.System.Services;
 
 namespace Tnzi.AspNetCore.Tests.Hosting;
 
@@ -128,6 +130,79 @@ public class UserRegisteredEventHandlerTests
         var sent = Assert.Single(_sent);
         Assert.Equal("WelcomeEmail", sent.TemplateName);
         Assert.Equal(false, sent.TemplateVariables!["RequireEmailConfirmation"]);
+    }
+
+    // ---- 确认链接挂在 API 前缀之下 --------------------------------------------------
+    //
+    // 端点是 DefaultAuthController 的 auth/confirm-email，经 RoutePrefixConvention 挂在 ApiPathPrefix（默认 /api）之下。
+    // 此前链接是 {ApiBaseUrl}/auth/confirm-email：默认前缀下点开是 404，邮件照常发出，
+    // 开了 RequireConfirmedEmail 的部署里新用户永远确认不了、登不进去。
+
+    private static ISettingService SettingsWith(string? apiBaseUrl, string? frontendUrl)
+    {
+        var mock = new Mock<ISettingService>();
+        mock.Setup(s => s.GetAppNameAsync()).ReturnsAsync(Result<string>.Success("Acme"));
+        mock.Setup(s => s.GetApplicationOptions())
+            .Returns(new ApplicationOptions { ApiBaseUrl = apiBaseUrl, FrontendUrl = frontendUrl });
+        return mock.Object;
+    }
+
+    private async Task<string> ConfirmationUrlAsync(ISettingService settings, AspNetCoreOptions? aspNetCoreOptions)
+    {
+        var handler = new UserRegisteredEventHandler(
+            Notifications(),
+            NullLogger<UserRegisteredEventHandler>.Instance,
+            settingService: settings,
+            identityOptions: new StaticMonitor<IdentityOptions>(RequiringConfirmation(true)),
+            registrationService: RegistrationServiceReturning(Result<string>.Success("confirm-token")),
+            aspNetCoreOptions: aspNetCoreOptions == null ? null : Microsoft.Extensions.Options.Options.Create(aspNetCoreOptions));
+
+        await handler.HandleAsync(AnEvent());
+
+        return (string)Assert.Single(_sent).TemplateVariables!["ConfirmationUrl"];
+    }
+
+    [Theory]
+    [InlineData("/api", "https://api.example.com/api/auth/confirm-email?")]
+    [InlineData("", "https://api.example.com/auth/confirm-email?")]
+    public async Task TheConfirmationLink_SitsUnderTheConfiguredApiPathPrefix(string apiPathPrefix, string expectedStart)
+    {
+        var url = await ConfirmationUrlAsync(
+            SettingsWith(apiBaseUrl: "https://api.example.com", frontendUrl: null),
+            new AspNetCoreOptions { ApiPathPrefix = apiPathPrefix });
+
+        Assert.StartsWith(expectedStart, url);
+        Assert.Contains("token=confirm-token", url);
+    }
+
+    [Fact]
+    public async Task WithoutAspNetCoreOptions_TheFrameworkDefaultPrefixIsUsed()
+    {
+        var url = await ConfirmationUrlAsync(SettingsWith(apiBaseUrl: "https://api.example.com", frontendUrl: null), aspNetCoreOptions: null);
+
+        Assert.StartsWith("https://api.example.com/api/auth/confirm-email?", url);
+    }
+
+    [Fact]
+    public async Task AnApiBaseUrlThatAlreadyEndsWithThePrefix_IsNotPrefixedTwice()
+    {
+        var url = await ConfirmationUrlAsync(
+            SettingsWith(apiBaseUrl: "https://api.example.com/api", frontendUrl: null),
+            new AspNetCoreOptions { ApiPathPrefix = "/api" });
+
+        Assert.StartsWith("https://api.example.com/api/auth/confirm-email?", url);
+    }
+
+    [Fact]
+    public async Task TheFrontendOriginFallback_AddsThePathBaseAndThePrefix()
+    {
+        // 没配 ApiBaseUrl 时从前端地址推（同源部署）：origin + AspNetCore:PathBase + ApiPathPrefix。
+        var url = await ConfirmationUrlAsync(
+            SettingsWith(apiBaseUrl: null, frontendUrl: "https://app.example.com/portal"),
+            new AspNetCoreOptions { ApiPathPrefix = "/api", PathBase = "/backend" });
+
+        Assert.StartsWith("https://app.example.com/backend/api/auth/confirm-email?", url);
+        Assert.Contains("returnUrl=" + Uri.EscapeDataString("https://app.example.com/portal"), url);
     }
 
     [Fact]

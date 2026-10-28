@@ -175,12 +175,13 @@ public partial class WorkflowService
         if (!exists)
             return Fail<WorkflowExecutionStatsDto>("Workflow not found", 404, ErrorCodes.WorkflowNotFound);
 
-        var executions = await _executionRepository.AsQueryable()
-            .Where(e => e.WorkflowDefinitionId == workflowId)
-            .Select(e => new { e.Status, e.DurationMs })
-            .ToListAsync();
+        // 聚合在数据库里做：编辑器每次打开都会调它，而按聊天消息或定时触发的工作流执行历史没有上界。
+        // 此前把这条定义的全部执行读进内存再算。
+        var executions = _executionRepository.AsQueryable()
+            .Where(e => e.WorkflowDefinitionId == workflowId);
 
-        if (executions.Count == 0)
+        var totalExecutions = await executions.CountAsync();
+        if (totalExecutions == 0)
         {
             return Ok(new WorkflowExecutionStatsDto
             {
@@ -190,38 +191,41 @@ public partial class WorkflowService
             });
         }
 
-        var completedCount = executions.Count(e => e.Status == WorkflowExecutionStatus.Completed);
-        var durationsWithValue = executions
-            .Where(e => e.DurationMs.HasValue)
-            .Select(e => e.DurationMs!.Value)
-            .OrderBy(d => d)
-            .ToList();
+        var completedCount = await executions.CountAsync(e => e.Status == WorkflowExecutionStatus.Completed);
 
-        double? avgDuration = null;
-        long? minDuration = null;
-        long? maxDuration = null;
+        var durations = executions
+            .Where(e => e.DurationMs != null)
+            .Select(e => e.DurationMs!.Value);
+        var durationStats = await durations
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                Count = g.Count(),
+                // 先转 double：SQL Server 对 bigint 求 AVG 得到的是整数
+                Average = g.Average(d => (double)d),
+                Min = g.Min(),
+                Max = g.Max()
+            })
+            .FirstOrDefaultAsync();
+
         long? p95Duration = null;
-
-        if (durationsWithValue.Count > 0)
+        if (durationStats != null)
         {
-            avgDuration = durationsWithValue.Average();
-            minDuration = durationsWithValue[0];
-            maxDuration = durationsWithValue[^1];
-
             // P95: 取第 95 百分位索引
-            var p95Index = (int)Math.Ceiling(durationsWithValue.Count * 0.95) - 1;
-            p95Duration = durationsWithValue[Math.Clamp(p95Index, 0, durationsWithValue.Count - 1)];
+            var p95Index = Math.Clamp((int)Math.Ceiling(durationStats.Count * 0.95) - 1, 0, durationStats.Count - 1);
+            // 可空投影：两次查询之间行被删掉时答 null 而不是抛异常
+            p95Duration = await durations.OrderBy(d => d).Skip(p95Index).Select(d => (long?)d).FirstOrDefaultAsync();
         }
 
         return Ok(new WorkflowExecutionStatsDto
         {
             WorkflowId = workflowId,
-            TotalExecutions = executions.Count,
-            AvgDurationMs = avgDuration,
-            MinDurationMs = minDuration,
-            MaxDurationMs = maxDuration,
+            TotalExecutions = totalExecutions,
+            AvgDurationMs = durationStats?.Average,
+            MinDurationMs = durationStats?.Min,
+            MaxDurationMs = durationStats?.Max,
             P95DurationMs = p95Duration,
-            SuccessRate = executions.Count > 0 ? (double)completedCount / executions.Count : 0
+            SuccessRate = (double)completedCount / totalExecutions
         });
     }
 }

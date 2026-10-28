@@ -17,7 +17,7 @@ public class TwoFactorCodeConfiguration : EntityTypeConfigurationBase<TwoFactorC
             .HasMaxLength(10)
             .IsRequired();
         builder.Property(tfc => tfc.Address)
-            .HasMaxLength(256)
+            .HasMaxLength(TwoFactorCode.AddressMaxLength)
             .IsRequired();
 
         // 关系配置（UserId 可空，支持验证码登录场景）

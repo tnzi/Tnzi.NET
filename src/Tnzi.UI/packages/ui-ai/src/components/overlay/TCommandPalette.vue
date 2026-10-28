@@ -6,22 +6,24 @@
  * Consumer supplies an action list and v-model:open. Internally uses
  * useCommandPalette for filter/navigation state. Teleported to body.
  */
-import { onMounted, onBeforeUnmount, ref, watch, toRef } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch, toRef } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useFocusTrap } from '@tnzi/ui'
+import { isImeComposing } from '@tnzi/core/utils'
 import { useCommandPalette, type CommandAction } from '../../headless/useCommandPalette'
 import { useBodyScrollLock } from '../../headless/useBodyScrollLock'
+import { useAiI18n } from '../../i18n/index'
 
 const props = withDefaults(
   defineProps<{
     modelValue: boolean
     actions: readonly CommandAction[]
+    /** Search box placeholder. Defaults to the current locale's. */
     placeholder?: string
     hotkey?: readonly string[] | null
     maxResults?: number
   }>(),
   {
-    placeholder: 'Type a command or search…',
     hotkey: () => ['mod', 'k'],
     maxResults: 50,
   },
@@ -30,6 +32,9 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [open: boolean]
 }>()
+
+const t = useAiI18n()
+const placeholderText = computed(() => props.placeholder ?? t.value.palette.placeholder)
 
 const actionsRef = toRef(() => props.actions as readonly CommandAction[])
 const palette = useCommandPalette({ actions: actionsRef, maxResults: props.maxResults })
@@ -76,6 +81,9 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
   if (!palette.open.value) return
+  // While an IME is composing in the search box, the arrows walk its candidate
+  // list and Enter commits one: neither is a move or a pick here.
+  if (isImeComposing(event)) return
   // Escape is handled by useFocusTrap's onEscape.
   if (event.key === 'ArrowDown') {
     event.preventDefault()
@@ -102,10 +110,10 @@ onBeforeUnmount(() => {
     <transition name="t-cmdk-fade">
       <div
         v-if="palette.open.value"
-        class="t-cmdk-backdrop"
+        class="t-cmdk-backdrop t-ai-scroll-scope"
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        :aria-label="t.sidebar.commandPalette"
         @click.self="palette.hide()"
       >
         <div ref="dialogEl" class="t-cmdk">
@@ -116,22 +124,22 @@ onBeforeUnmount(() => {
               v-model="palette.query.value"
               type="text"
               class="t-cmdk__input"
-              :placeholder="placeholder"
+              :placeholder="placeholderText"
               autocomplete="off"
               spellcheck="false"
             />
-            <kbd class="t-cmdk__hint">Esc</kbd>
+            <kbd class="t-cmdk__hint">{{ t.palette.escHint }}</kbd>
             <button
               type="button"
               class="t-cmdk__close"
-              aria-label="Close"
+              :aria-label="t.common.close"
               @click="palette.hide()"
             >
               <Icon icon="lucide:x" />
             </button>
           </div>
 
-          <div class="t-cmdk__results" role="listbox">
+          <div class="t-cmdk__results t-ai-scroll" role="listbox">
             <div
               v-for="(action, idx) in palette.results.value"
               :key="action.id"
@@ -150,7 +158,7 @@ onBeforeUnmount(() => {
               <div v-if="action.category" class="t-cmdk__item-category">{{ action.category }}</div>
             </div>
             <div v-if="palette.results.value.length === 0" class="t-cmdk__empty">
-              No matching actions.
+              {{ t.palette.noResults }}
             </div>
           </div>
         </div>
@@ -160,16 +168,20 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* The backdrop covers the whole viewport; the palette is placed below the
+   page's top inset (`--tnzi-overlay-inset-top`, a frameless window's title
+   bar), like the content of every overlay of this package. */
 .t-cmdk-backdrop {
   position: fixed;
   inset: 0;
+  box-sizing: border-box;
   background: var(--tnzi-ai-backdrop, rgba(0, 0, 0, 0.6));
   backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
   -webkit-backdrop-filter: blur(var(--tnzi-ai-backdrop-blur, 4px));
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 15vh;
+  padding-top: calc(var(--tnzi-overlay-inset-top, 0px) + 15vh);
   z-index: 100;
 }
 .t-cmdk {
@@ -233,6 +245,7 @@ onBeforeUnmount(() => {
 .t-cmdk__results {
   max-height: 440px;
   overflow-y: auto;
+  position: relative;
   padding: 8px;
 }
 .t-cmdk__item {

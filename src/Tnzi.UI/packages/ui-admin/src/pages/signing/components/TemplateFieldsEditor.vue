@@ -156,6 +156,7 @@ import {
   FIELD_PLACEMENT_OPTIONS,
   SIGNING_FIELD_TYPE_OPTIONS,
 } from '../signing-config'
+import { fieldTypeLabel, placementLabel } from '../signing-labels'
 
 const props = defineProps<{
   modelValue?: TemplateFieldInputDto[] | null
@@ -171,8 +172,9 @@ const t = (key: string): string => props.translate(key)
 
 const rows = computed<TemplateFieldInputDto[]>(() => props.modelValue ?? [])
 
-const typeOptions = SIGNING_FIELD_TYPE_OPTIONS.map((v) => ({ label: v, value: v }))
-const placementOptions = FIELD_PLACEMENT_OPTIONS.map((v) => ({ label: v, value: v }))
+// Computed so the labels follow a locale switch.
+const typeOptions = computed(() => SIGNING_FIELD_TYPE_OPTIONS.map((v) => ({ label: fieldTypeLabel(v), value: v })))
+const placementOptions = computed(() => FIELD_PLACEMENT_OPTIONS.map((v) => ({ label: placementLabel(v), value: v })))
 
 function isSignatureLike(row: TemplateFieldInputDto): boolean {
   return row.type === SigningFieldType.Signature || row.type === SigningFieldType.Initials

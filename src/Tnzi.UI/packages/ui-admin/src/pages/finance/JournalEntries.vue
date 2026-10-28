@@ -61,6 +61,7 @@
       :account-options="accountOptions"
       :bridge="bridge"
       @saved="onSaved"
+      @drafted="onDrafted"
       @cancel="entryDetail.close()"
     />
   </TDetailHost>
@@ -86,7 +87,8 @@ import type { FormSchemaItem } from '../_shared/form-schema'
 import { useSafeMessage } from '../_shared/safe-message'
 import { buildJournalEntryColumns, ENTRY_STATUS_META, type JournalRow } from './journal-entry-config'
 import { amountCell, fmtAmount, fmtDate } from './money'
-import { financeSourceTypeLabel } from './source-type'
+import { useViewedRecord } from './viewed-record'
+import { financeSourceTypeLabel, isReversibleFromLedger } from './source-type'
 import JournalEntryEditor from './components/JournalEntryEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -95,6 +97,11 @@ const message = useSafeMessage()
 const { can } = usePermissionGuard()
 
 const journalEntryColumns = buildJournalEntryColumns(t)
+
+// The full record behind the read-only drawer. Last-wins: a late answer for
+// the row opened before must not paint the drawer of the one open now.
+const viewing = useViewedRecord<JournalEntryDto>((id) => bridge.journals.getById(id), (error) => message.error(error))
+const viewed = viewing.record
 
 const crud = useCrudPage<JournalRow>({
   pageId: 'finance.journals',
@@ -105,7 +112,7 @@ const crud = useCrudPage<JournalRow>({
   // Deep-link cold restore (?detail=view:<id>) hydrates even off-page rows.
   loadDetailById: (id) => bridge.journals.getById(id),
   // Read-only list - create/edit go through the dedicated line-editor overlay.
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 // Ledger filters - status is the primary bookkeeper hunt; the bridge maps filters.status → backend query.
@@ -131,17 +138,6 @@ function statusLabel(status?: JournalEntryStatus): string {
 }
 
 // ── Read-only detail (full entry with lines) ────────────────────
-const viewed = ref<JournalEntryDto | null>(null)
-
-async function loadViewed(row: JournalRow) {
-  viewed.value = null
-  try {
-    viewed.value = await bridge.journals.getById(String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
 const lineColumns: DataTableColumns<JournalLineDto> = [
   { key: 'lineNumber', title: '#', width: 48 },
   {
@@ -205,6 +201,13 @@ function onSaved() {
   void crud.refresh()
 }
 
+// A new entry's first save created a draft (it stays even when the post that
+// follows fails): show it as the record being edited, and list it.
+function onDrafted(entry: JournalEntryDto) {
+  void entryDetail.open('edit', entry)
+  void crud.refresh()
+}
+
 // ── Account options (leaf accounts, loaded on first editor open) ─
 const accountOptions = ref<Array<{ label: string; value: string }>>([])
 let accountOptionsLoaded = false
@@ -264,12 +267,14 @@ async function deleteEntry(row: JournalRow) {
 
 const isDraft = (row: JournalRow) => row.status === JournalEntryStatus.Draft
 const isPosted = (row: JournalRow) => row.status === JournalEntryStatus.Posted
+// A document's entry is undone by voiding the document; the ledger refuses it.
+const canReverse = (row: JournalRow) => isPosted(row) && isReversibleFromLedger(row.sourceType)
 
 const rowActions: RowAction<JournalRow>[] = [
   viewAction(crud),
   { key: 'edit', type: 'primary', show: (row) => can('finance.journal.update') && isDraft(row), onClick: openEdit },
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.journal.update') && isDraft(row), confirm: 'confirmPost', onClick: postEntry },
-  { key: 'reverse', label: 'actions.reverse', type: 'warning', show: (row) => can('finance.journal.update') && isPosted(row), confirm: 'confirmReverse', onClick: reverseEntry },
+  { key: 'reverse', label: 'actions.reverse', type: 'warning', show: (row) => can('finance.journal.update') && canReverse(row), confirm: 'confirmReverse', onClick: reverseEntry },
   { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.journal.delete') && isDraft(row), confirm: 'confirmDelete', onClick: deleteEntry },
 ]
 </script>

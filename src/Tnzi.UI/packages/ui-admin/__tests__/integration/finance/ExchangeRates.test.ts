@@ -61,6 +61,35 @@ describe('Finance ExchangeRates page', () => {
     expect(ratesFetch).toHaveBeenCalledTimes(1)
   })
 
+  // A rate is upserted by (from, to, date). Editing any of them saved a second
+  // rate and left the mistaken one in force for postings on its date. On edit
+  // they are shown, not edited; only the rate and its source change.
+  it('★ editing a rate shows its currency pair and date without letting them change', async () => {
+    const wrapper = mount(ExchangeRates, { global: { stubs } })
+    await flushPromises()
+    const crud = (wrapper.vm as unknown as { crud: { openEdit: (r: unknown) => void } }).crud
+
+    crud.openEdit({ id: 'r1', fromCurrency: 'EUR', toCurrency: 'USD', rate: 1.1, rateDate: '2026-01-01T00:00:00', source: 'Manual' })
+    await flushPromises()
+
+    const locked = wrapper.findAll('input')
+      .filter((i) => i.attributes('disabled') !== undefined)
+      .map((i) => (i.element as HTMLInputElement).value)
+    expect(locked).toEqual(['EUR', 'USD', 'Jan 1, 2026'])
+  })
+
+  it('a new rate takes its currency pair and date as input', async () => {
+    const wrapper = mount(ExchangeRates, { global: { stubs } })
+    await flushPromises()
+    const crud = (wrapper.vm as unknown as { crud: { openCreate: () => void } }).crud
+
+    crud.openCreate()
+    await flushPromises()
+
+    expect(wrapper.findAll('input').length).toBeGreaterThanOrEqual(4)
+    expect(wrapper.findAll('input').some((i) => i.attributes('disabled') !== undefined)).toBe(false)
+  })
+
   it('refresh-from-provider calls the bridge and refetches', async () => {
     const wrapper = mount(ExchangeRates, { global: { stubs } })
     await flushPromises()

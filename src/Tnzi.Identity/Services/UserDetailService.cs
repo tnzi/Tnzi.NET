@@ -9,29 +9,48 @@ namespace Tnzi.Identity.Services;
 /// <see cref="IFileReadAccessProbe"/> 可选注入（契约在核心 <c>Tnzi</c> 程序集，实现随 <c>Tnzi.Storage</c> 注册，
 /// 本模块不引用它）：把一个文件 id 写进 <see cref="UserDetail.AvatarId"/> 之前先问「这个人本来就读得到它吗」。
 /// 这是 <c>UserDetail</c> 唯一的写入口（自助资料 / 管理端 / OAuth 导入都经这里），门就设在这里。
+/// <para>
+/// 同一个理由，「这个账号归不归调用者管」也问在这里（<see cref="RejectForeignTargetAsync"/>）：
+/// 管理端 <c>admin/user-details</c> 直接调本服务，不经过 <c>UserService</c> 的租户裁剪与超管护栏。
+/// </para>
+/// <para>
+/// ★★★ <b>详情行归账号，不归请求的租户上下文</b>（<see cref="LiveDetails"/>、<see cref="ClaimForAccount"/>）。
+/// </para>
 /// </remarks>
 public class UserDetailService : ApplicationService, IUserDetailService
 {
     private readonly IRepository<UserDetail, Guid> _repository;
     private readonly UserManager<User> _userManager;
+    private readonly IUserTenantScopeProvider _scope;
     private readonly IFileReadAccessProbe? _fileAccess;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
     public UserDetailService(
         IRepository<UserDetail, Guid> repository,
         UserManager<User> userManager,
         IServiceProvider serviceProvider,
-        IFileReadAccessProbe? fileAccess = null)
+        IUserTenantScopeProvider scope,
+        IFileReadAccessProbe? fileAccess = null,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _userManager = Check.NotNull(userManager);
+        _scope = Check.NotNull(scope);
         _fileAccess = fileAccess;
+        _functionAuthorization = functionAuthorization;
     }
 
     public async Task<Result<UserDetailDto>> GetByUserIdAsync(Guid userId)
     {
+        // 查找不看租户过滤器（见 LiveDetails），归属改由范围判定把关；越界与没有这一行回答相同。
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail<UserDetailDto>("User detail not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
         // 不使用 AsNoTracking，以便在同一个请求中能读取到 ChangeTracker 中尚未提交的变更
-        var userDetail = await _repository
+        var userDetail = await LiveDetails()
             .Where(ud => ud.UserId == userId)
             .FirstOrDefaultAsync();
 
@@ -52,8 +71,15 @@ public class UserDetailService : ApplicationService, IUserDetailService
             return Ok((IDictionary<Guid, UserDetailDto>)new Dictionary<Guid, UserDetailDto>());
         }
 
-        var details = await _repository
-            .Where(ud => idList.Contains(ud.UserId))
+        // 与 GetByUserIdAsync 同一口径：先收窄到范围内的账号，再不看租户过滤器去取它们的行。
+        var inScope = (await _scope.FilterAsync(idList)).ToList();
+        if (inScope.Count == 0)
+        {
+            return Ok((IDictionary<Guid, UserDetailDto>)new Dictionary<Guid, UserDetailDto>());
+        }
+
+        var details = await LiveDetails()
+            .Where(ud => inScope.Contains(ud.UserId))
             .ToListAsync();
 
         var dict = details.ToDictionary(ud => ud.UserId, ud => ud.MapTo<UserDetailDto>());
@@ -62,6 +88,12 @@ public class UserDetailService : ApplicationService, IUserDetailService
 
     public async Task<Result<UserDetailDto>> CreateOrUpdateAsync(Guid userId, CreateUserDetailDto dto)
     {
+        var rejected = await RejectForeignTargetAsync(userId);
+        if (rejected != null)
+        {
+            return Fail<UserDetailDto>(rejected.Message!, rejected.Code ?? 403, rejected.ErrorCode);
+        }
+
         // 验证用户是否存在
         var user = await _userManager.FindByGuidAsync(userId);
         if (user == null)
@@ -69,8 +101,8 @@ public class UserDetailService : ApplicationService, IUserDetailService
             return Fail<UserDetailDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // 查找现有详情
-        var existingDetail = await _repository
+        // 查找现有详情（不看租户过滤器，理由见 LiveDetails）
+        var existingDetail = await LiveDetails()
             .Where(ud => ud.UserId == userId)
             .FirstOrDefaultAsync();
 
@@ -78,10 +110,16 @@ public class UserDetailService : ApplicationService, IUserDetailService
         if (denial != null)
             return denial;
 
+        // ★ 生日是纯日期：客户端发来的 YYYY-MM-DD 反序列化成 Kind=Unspecified，
+        //   PostgreSQL 的 timestamptz 列拒写（保存以 500 结束），按框架 date-only 口径落成那一天的 UTC 零点。
+        var birthday = dto.Birthday?.ToUtcDate();
+
         if (existingDetail != null)
         {
             // 更新现有详情
             dto.MapTo(existingDetail);
+            existingDetail.Birthday = birthday;
+            ClaimForAccount(existingDetail, user);
 
             await _repository.UpdateAsync(existingDetail);
 
@@ -94,12 +132,84 @@ public class UserDetailService : ApplicationService, IUserDetailService
             // 创建新详情
             var userDetail = dto.MapTo<UserDetail>();
             userDetail.UserId = userId;
+            userDetail.Birthday = birthday;
+            ClaimForAccount(userDetail, user);
 
             await _repository.InsertAsync(userDetail);
             var resultDto = userDetail.MapTo<UserDetailDto>();
             LogInformation("User detail created for user: {UserId}", userId);
             return Ok(resultDto);
         }
+    }
+
+    /// <summary>
+    /// 全部未删除的详情行，<b>不按环境租户过滤</b>。按账号取详情一律从这里出发。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ 账号表不是 <c>IMultiTenant</c>，而全局管理员（当前租户为空）按 <see cref="UserTenantScope"/> 本来就管得到
+    /// 每个租户的账号；详情却被严格等值的租户过滤器管着。按环境租户去找，全局管理员看到的是空资料，
+    /// 保存时找不到既有行、再插一行，撞上 <c>UserId</c> 唯一索引（500，而账号表那一半已经写下）；
+    /// 对方还没有详情时则种下一行 <c>TenantId = null</c>，对方在自己租户里从此读不到，自助资料每次 500。
+    /// </para>
+    /// <para>
+    /// 不看过滤器是安全的：<c>UserId</c> 上的唯一索引不分租户，一个账号至多一行；谁能碰这个账号由调用前的范围判定决定
+    /// （<see cref="RejectForeignTargetAsync"/> / <see cref="GetByUserIdAsync"/> / <see cref="GetDetailsByUserIdsAsync"/>，
+    /// 本人恒在范围内）。软删条件手工补回：<c>IgnoreQueryFilters</c> 是整体摘除。刻意不用
+    /// <c>IDataFilterManager.Disable</c>：它每次调用记一条跨租户 Warning，而这里每次读写资料都要走一遍。
+    /// </para>
+    /// </remarks>
+    private IQueryable<UserDetail> LiveDetails() => _repository.IgnoreQueryFilters().Where(ud => !ud.IsDeleted);
+
+    /// <summary>
+    /// 把详情行的租户号对齐到它所属的账号。账号没有租户（全局账号）时不动，交给审计填充按环境租户补齐，与此前相同。
+    /// </summary>
+    /// <remarks>
+    /// 新行不再打上「恰好在操作它的那个请求」的租户号；既有行若打错了（修复之前种下的），写一次就改回来，
+    /// 按租户过滤的其它读取方（聊天联系人、<c>IUserDisplayNameProvider</c> 的显示名）才看得见它。
+    /// </remarks>
+    private static void ClaimForAccount(UserDetail detail, User user)
+    {
+        if (user.TenantId is { } owner)
+        {
+            detail.TenantId = owner;
+        }
+    }
+
+    /// <summary>
+    /// 调用者能不能写这个账号的详情。<see langword="null"/> = 可以。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <c>admin/user-details</c> 的写端点直接调本服务，而 <c>PUT admin/users/{id}</c> 写的是同一组字段
+    /// （姓名 / 昵称 / 头像）、却在 <c>UserService</c> 里过了租户裁剪与超管护栏：同一件事两条路，只有一条有门。
+    /// </para>
+    /// <para>
+    /// ① <b>租户范围</b>：账号表不是 <c>IMultiTenant</c>，按 id 找人跨租户可达；<c>UserDetail</c> 却被严格等值的租户过滤器管着。
+    /// 外租户管理员写进来时看不见对方已有的那一行，于是插入一行打着自己租户号的详情：撞上 <c>UserId</c> 唯一索引（500），
+    /// 或者种下一行对方自己永远读不到的数据。越界与不存在同样答 404（理由见 <see cref="UserTenantScope"/>）。
+    /// </para>
+    /// <para>
+    /// ② <b>超管护栏</b>（<see cref="SuperAdminTargetGuard"/>）：普通管理员不能替超管改资料。
+    /// </para>
+    /// <para>
+    /// 两道都对其它调用方透明：本人恒在范围内、改自己不受护栏影响（自助资料）；没有已认证主体的调用不裁剪、
+    /// 没有调用者就没有护栏（OAuth / 注册时给新账号建详情）；<c>UserService.UpdateAsync</c> 已经各问过一次，这里再问只多一次查询。
+    /// </para>
+    /// </remarks>
+    private async Task<Result?> RejectForeignTargetAsync(Guid userId)
+    {
+        if (!await _scope.ContainsAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        if (await SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, CurrentUser?.Id, userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -151,7 +261,13 @@ public class UserDetailService : ApplicationService, IUserDetailService
 
     public async Task<Result> DeleteAsync(Guid userId)
     {
-        var userDetail = await _repository
+        var rejected = await RejectForeignTargetAsync(userId);
+        if (rejected != null)
+        {
+            return rejected;
+        }
+
+        var userDetail = await LiveDetails()
             .Where(ud => ud.UserId == userId)
             .FirstOrDefaultAsync();
 
@@ -172,17 +288,22 @@ public class UserDetailService : ApplicationService, IUserDetailService
             return Fail<UserDetailDto>("User not authenticated", 401, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        // 尝试获取详情，如果不存在则自动创建一个基础的
-        var userDetail = await _repository.FirstOrDefaultAsync(x => x.UserId == CurrentUser.Id.Value);
+        // 尝试获取详情，如果不存在则自动创建一个基础的（查找不看租户过滤器，理由见 LiveDetails）
+        var currentUserId = CurrentUser.Id.Value;
+        var userDetail = await LiveDetails().Where(x => x.UserId == currentUserId).FirstOrDefaultAsync();
         if (userDetail == null)
         {
-            var user = await _userManager.FindByGuidAsync(CurrentUser.Id.Value);
+            var user = await _userManager.FindByGuidAsync(currentUserId);
             userDetail = new UserDetail
             {
-                UserId = CurrentUser.Id.Value,
+                UserId = currentUserId,
                 // 使用用户名作为默认昵称
                 Nickname = user?.UserName
             };
+            if (user != null)
+            {
+                ClaimForAccount(userDetail, user);
+            }
 
             try
             {
@@ -195,7 +316,7 @@ public class UserDetailService : ApplicationService, IUserDetailService
                 if (ex.IsUniqueConstraintViolation())
                 {
                     // 并发创建冲突，重新查询
-                    userDetail = await _repository.FirstOrDefaultAsync(x => x.UserId == CurrentUser.Id.Value);
+                    userDetail = await LiveDetails().Where(x => x.UserId == currentUserId).FirstOrDefaultAsync();
                     if (userDetail == null)
                     {
                         // 如果重新查询仍然为空，说明是其他错误，重新抛出

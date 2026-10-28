@@ -180,10 +180,12 @@ public class LogFileService : ILogFileService
             : long.MaxValue;
         var scannedBytes = 0L;
         var stop = LogSearchTruncation.None;
+        var duplicates = new CrossLevelDuplicateFilter();
 
         foreach (var lv in levelsToScan)
         {
             if (stop != LogSearchTruncation.None) break;
+            duplicates.BeginLevel();
             var levelDir = Path.Combine(basePath, lv);
             if (!Directory.Exists(levelDir)) continue;
             var files = Directory.EnumerateFiles(levelDir, "log-*.txt", SearchOption.TopDirectoryOnly)
@@ -200,7 +202,17 @@ public class LogFileService : ILogFileService
                 if (fromUtc.HasValue && file.LastWriteTimeUtc < fromUtc.Value) continue;
                 if (toUtc.HasValue && file.LastWriteTimeUtc > toUtc.Value.AddDays(1)) continue;
                 var lineNumber = 0;
-                using var reader = new StreamReader(file.OpenRead(), Encoding.UTF8);
+                FileStream stream;
+                try
+                {
+                    stream = OpenForSharedRead(file.FullName);
+                }
+                catch (FileNotFoundException)
+                {
+                    // 枚举之后、打开之前被保留期清理删掉了：这个文件已经不存在，不是错误
+                    continue;
+                }
+                using var reader = new StreamReader(stream, Encoding.UTF8);
                 // 用 ReadLineAsync 返回 null 判定文件结束，而不是 reader.EndOfStream ——
                 // 后者会在异步方法里做一次同步阻塞读（CA2024）。
                 while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
@@ -222,7 +234,8 @@ public class LogFileService : ILogFileService
                         break;
                     }
                     // 内存比较用 OrdinalIgnoreCase，避免为每一行额外分配一份小写副本
-                    if (line.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                    if (line.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                        && !duplicates.IsCopyFromAnEarlierLevel(file.Name, line))
                     {
                         result.Hits.Add(new LogSearchHitDto
                         {
@@ -250,6 +263,44 @@ public class LogFileService : ILogFileService
     }
 
     // ---------- Helpers ----------
+
+    /// <summary>
+    /// 跨级别目录的重复命中过滤。级别目录是「≥ 该级别」：一条 Error 同时写在 Information、Warning、Error 三个目录的
+    /// 同名日期文件里，不指定级别的检索逐目录扫描时同一行会命中多次，挤占结果上限。
+    /// </summary>
+    /// <remarks>
+    /// 按（文件名, 行文本）计数而不是按集合去重：同一目录里两条逐字相同的行（同一毫秒、同一消息）是两次真实发生，
+    /// 都要留下；只有后扫的目录里不超过此前某个目录已出现次数的那几条才是副本。保留期较长的高级别目录里
+    /// 低级别目录已经清掉的那些天，此前没有出现过，照常计为命中。
+    /// </remarks>
+    private sealed class CrossLevelDuplicateFilter
+    {
+        private readonly Dictionary<(string FileName, string Line), int> _seenInEarlierLevels = [];
+        private Dictionary<(string FileName, string Line), int> _seenInCurrentLevel = [];
+
+        /// <summary>开始扫描下一个级别目录：把上一个目录的计数并进「此前各目录的最大出现次数」。</summary>
+        public void BeginLevel()
+        {
+            foreach (var (key, count) in _seenInCurrentLevel)
+            {
+                if (count > _seenInEarlierLevels.GetValueOrDefault(key))
+                {
+                    _seenInEarlierLevels[key] = count;
+                }
+            }
+
+            _seenInCurrentLevel = [];
+        }
+
+        /// <summary>这一行是不是此前某个级别目录里已经命中过的那一条的副本。</summary>
+        public bool IsCopyFromAnEarlierLevel(string fileName, string line)
+        {
+            var key = (fileName, line);
+            var occurrence = _seenInCurrentLevel.GetValueOrDefault(key) + 1;
+            _seenInCurrentLevel[key] = occurrence;
+            return occurrence <= _seenInEarlierLevels.GetValueOrDefault(key);
+        }
+    }
 
     private string ResolveBasePath()
     {
@@ -325,6 +376,17 @@ public class LogFileService : ILogFileService
     }
 
     /// <summary>
+    /// 以只读方式打开日志文件，同时容许别的句柄在写它、删它。
+    /// </summary>
+    /// <remarks>
+    /// ★ Serilog 的文件 sink（<c>shared: true</c>）常驻持有当天日志的写句柄、滚动与保留期清理会删文件。
+    /// <c>FileInfo.OpenRead</c> 只给 <c>FileShare.Read</c>，在 Windows 上对一个已有写句柄的文件必然共享冲突：
+    /// 搜索此前就是这样在最需要搜的当天日志上 500 的。读日志的每一条路径都必须经这里打开。
+    /// </remarks>
+    private static FileStream OpenForSharedRead(string path)
+        => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    /// <summary>
     /// Stream `count` lines from the end of the file without loading the
     /// whole file into memory. Strategy: seek to end, read chunks backwards,
     /// counting newlines, until N newlines (or file start) are found, then
@@ -333,7 +395,7 @@ public class LogFileService : ILogFileService
     private static async Task<List<string>> ReadLastLinesAsync(string path, int count, CancellationToken cancellationToken)
     {
         const int chunkSize = 8192;
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var stream = OpenForSharedRead(path);
         var length = stream.Length;
         if (length == 0) return new List<string>();
 

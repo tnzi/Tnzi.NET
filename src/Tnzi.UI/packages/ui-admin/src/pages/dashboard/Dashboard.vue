@@ -44,7 +44,7 @@ const widgets = computed<WidgetDef[]>(() => {
   const moduleVisible = all.filter(
     (w) => !w.module || moduleAvailability.canActivate(w.module),
   )
-  const bypass = authStore.isSuperUser || authStore.userInfo === null
+  const bypass = authStore.bypassesPermissionChecks || authStore.userInfo === null
   if (bypass) return moduleVisible
   return moduleVisible.filter((w) => !w.permission || authStore.hasPermission(w.permission))
 })

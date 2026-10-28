@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Tests.Middleware;
 
 /// <summary>
-/// QuotaMiddleware 单元测试
+/// QuotaMiddleware 单元测试：预算门 + 按用户的用量上限（一轮开始前开窗口判上限，跑完按实际费用结算）。
 /// </summary>
 public class QuotaMiddlewareTests
 {
@@ -11,20 +11,12 @@ public class QuotaMiddlewareTests
     #region Helper
 
     private static QuotaMiddleware CreateMiddleware(
-        Mock<IQuotaService>? quotaService = null,
-        Mock<ITokenEstimator>? tokenEstimator = null,
-        Mock<IEventBus>? eventBus = null,
-        Mock<IBudgetService>? budgetService = null)
+        Mock<IUsageLimitService>? usageLimits = null,
+        Mock<IBudgetService>? budgetService = null,
+        Mock<ICostCalculator>? costCalculator = null)
     {
-        var qs = quotaService ?? new Mock<IQuotaService>();
-        var te = tokenEstimator ?? new Mock<ITokenEstimator>();
+        var limits = usageLimits ?? UsageLimitMocks.Allowing();
         var bs = budgetService ?? new Mock<IBudgetService>();
-
-        // 默认 token 估算返回 100
-        if (tokenEstimator == null)
-        {
-            te.Setup(x => x.Estimate(It.IsAny<string>(), It.IsAny<int>())).Returns(100);
-        }
 
         // 默认预算检查通过
         if (budgetService == null)
@@ -34,11 +26,20 @@ public class QuotaMiddlewareTests
         }
 
         return new QuotaMiddleware(
-            qs.Object,
+            limits.Object,
             bs.Object,
-            te.Object,
             Mock.Of<ILogger<QuotaMiddleware>>(),
-            eventBus?.Object);
+            costCalculator?.Object);
+    }
+
+    /// <summary>按 (输入, 输出, 缓存读, 缓存写) 每百万 token 各 1 美元计价的计算器，便于断言结算金额。</summary>
+    private static Mock<ICostCalculator> FlatRateCalculator()
+    {
+        var calculator = new Mock<ICostCalculator>();
+        calculator
+            .Setup(c => c.CalculateCost(TestProvider, It.IsAny<string>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<long>(), It.IsAny<long>()))
+            .Returns((string _, string _, long input, long output, long _, long _) => (input + output) / 1_000_000m);
+        return calculator;
     }
 
     private static AiMiddlewareContext CreateContext(Guid? userId = null, string? userMessage = "Hello")
@@ -73,197 +74,149 @@ public class QuotaMiddlewareTests
     #region InvokeAsync
 
     [Fact]
-    public async Task InvokeAsync_QuotaAvailable_PassesThroughAndSettles()
+    public async Task InvokeAsync_UnderTheLimit_PassesThrough_AndSettlesTheTurnsCost()
     {
-        // Arrange
         var userId = Guid.NewGuid();
-        var reservation = new QuotaReservation { ReservedTokens = 100, ReservedAt = DateTime.UtcNow };
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Success(reservation));
-        quotaService.Setup(x => x.SettleQuotaAsync(userId, reservation, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Success());
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits, costCalculator: FlatRateCalculator());
 
-        var middleware = CreateMiddleware(quotaService: quotaService);
-        var context = CreateContext(userId);
-        var expectedResult = CreateSuccessResult();
+        var result = await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(CreateSuccessResult(1_000_000, 500_000)));
 
-        // Act
-        var result = await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(expectedResult));
-
-        // Assert
         result.Response.ShouldBe("ok");
-        quotaService.Verify(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Once);
-        quotaService.Verify(x => x.SettleQuotaAsync(userId, reservation, 80, It.IsAny<CancellationToken>()), Times.Once);
+        limits.Verify(x => x.BeginAsync(userId, It.IsAny<CancellationToken>()), Times.Once);
+        limits.Verify(x => x.SettleAsync(It.Is<UsageLimitReservation>(r => r.UserId == userId), 1.5m, CancellationToken.None), Times.Once);
     }
 
     [Fact]
-    public async Task InvokeAsync_QuotaExceeded_ReturnsQuotaExceededResult()
+    public async Task InvokeAsync_CostIncludesCacheReadsAndWrites()
     {
-        // Arrange
+        // API 等价费用含缓存读写：缓存的 token 各按各的价目进到计算器里，不是只算输入 + 输出
         var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        // 错误码是「是否真的超限」的判据（见 QuotaMiddleware.IsQuotaExceeded），
-        // 真实服务始终带码，测试也照真实形态给
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded));
-
-        var middleware = CreateMiddleware(quotaService: quotaService);
-        var context = CreateContext(userId);
-        var nextCalled = false;
-
-        // Act
-        var result = await middleware.InvokeAsync(context, (ctx, ct) =>
+        var calculator = new Mock<ICostCalculator>();
+        calculator.Setup(c => c.CalculateCost(TestProvider, TestModel, 1200L, 80L, 900L, 200L)).Returns(0.0123m);
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits, costCalculator: calculator);
+        var result = new AgentRunResult
         {
-            nextCalled = true;
-            return Task.FromResult(CreateSuccessResult());
-        });
+            Response = "ok",
+            Usage = new TokenUsageDto { InputTokens = 1200, OutputTokens = 80, CachedInputTokens = 900, CacheCreationTokens = 200 }
+        };
 
-        // Assert
-        nextCalled.ShouldBeFalse();
-        result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
-        result.Response.ShouldBe("Daily quota exceeded");
+        await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(result));
+
+        limits.Verify(x => x.SettleAsync(It.IsAny<UsageLimitReservation>(), 0.0123m, CancellationToken.None), Times.Once);
     }
 
-    [Theory]
-    [InlineData(ErrorCodes.QuotaCheckFailed)]
-    [InlineData(ErrorCodes.QuotaConcurrencyConflict)]
-    public async Task InvokeAsync_ReservationFailsForNonQuotaReason_DoesNotReportQuotaExceeded(string errorCode)
+    [Fact]
+    public async Task InvokeAsync_ModelWithoutACostRate_SettlesZero_ButStillSettles()
     {
-        // 配额记录缺失 / 并发冲突都不是「配额用完了」。贴成 quota_exceeded 会把排查方向
-        // 一路带到配额配置上去，而那里什么问题都没有。
+        // 量不出成本的一轮记 0：照样结算（窗口与「最后使用」照常更新），只是上限对它拦不住
         var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Quota record is unavailable.", 500, errorCode));
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits, costCalculator: new Mock<ICostCalculator>());
 
-        var eventBus = new Mock<IEventBus>();
-        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
-        var context = CreateContext(userId);
-        var nextCalled = false;
+        await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(CreateSuccessResult()));
 
-        var result = await middleware.InvokeAsync(context, (ctx, ct) =>
+        limits.Verify(x => x.SettleAsync(It.IsAny<UsageLimitReservation>(), 0m, CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_LimitReached_DoesNotRun_AndReturnsTheWindowAndResetTime()
+    {
+        var userId = Guid.NewGuid();
+        var resetsAt = new DateTime(2026, 10, 22, 3, 0, 0, DateTimeKind.Utc);
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(x => x.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UsageLimitMocks.Denial(UsageLimitWindow.Session, resetsAt));
+        var middleware = CreateMiddleware(limits);
+        var called = false;
+
+        var result = await middleware.InvokeAsync(CreateContext(userId), (_, _) =>
         {
-            nextCalled = true;
+            called = true;
             return Task.FromResult(CreateSuccessResult());
         });
 
-        nextCalled.ShouldBeFalse();
+        called.ShouldBeFalse();
+        result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
+        result.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+        result.UsageLimitWindow.ShouldBe(UsageLimitWindow.Session);
+        result.UsageLimitResetsAt.ShouldBe(resetsAt);
+        limits.Verify(x => x.SettleAsync(It.IsAny<UsageLimitReservation>(), It.IsAny<decimal>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ReplacedServiceAnswers429WithoutACode_IsStillAUsageLimit()
+    {
+        // IUsageLimitService 是可替换契约：自定义实现按 HTTP 语义返回 429 而不带框架错误码，照样判为用量上限
+        var userId = Guid.NewGuid();
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(x => x.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UsageLimitReservation>.Failure("Limit reached", 429));
+        var middleware = CreateMiddleware(limits);
+
+        var result = await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(CreateSuccessResult()));
+
+        result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
+        result.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_MeterFailure_IsAnError_NotAUsageLimit()
+    {
+        // 计量子系统自身失败不是「到上限了」：不跑（失败关闭），结束原因是 error，错误码原样带出
+        var userId = Guid.NewGuid();
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(x => x.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UsageLimitReservation>.Failure("The usage meter is unavailable.", 500, ErrorCodes.UsageLimitCheckFailed));
+        var middleware = CreateMiddleware(limits);
+
+        var result = await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(CreateSuccessResult()));
+
         result.FinishReason.ShouldBe(FinishReasons.Error);
-        result.FinishReason.ShouldNotBe(FinishReasons.QuotaExceeded);
-        result.Response.ShouldBe("Quota record is unavailable.");
-
-        // 服务层错误码必须带上结果：HTTP 边界靠它把并发冲突还原成可重试的 409
-        result.ErrorCode.ShouldBe(errorCode);
-
-        // QuotaExceededEvent 喂告警与用量分析，混进基础设施故障会让超限统计失真
-        eventBus.Verify(
-            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        result.ErrorCode.ShouldBe(ErrorCodes.UsageLimitCheckFailed);
     }
 
     [Fact]
-    public async Task InvokeAsync_ReplaceableService429WithoutErrorCode_TreatsAsQuotaExceeded()
+    public async Task InvokeAsync_BudgetExceeded_ShortCircuits_BeforeAnyWindowIsOpened()
     {
-        // IQuotaService 是可替换契约：自定义实现按 HTTP 语义返回 429 而不带框架错误码，
-        // 完全合法。只认框架常量会把这类超限贴成通用错误——429 丢了，告警事件也不发。
         var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Quota exceeded", 429));
+        var limits = UsageLimitMocks.Allowing();
+        var budget = new Mock<IBudgetService>();
+        budget.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BudgetCheckResult { IsAllowed = false, Status = BudgetStatus.BudgetExceeded, Reason = "Monthly budget exceeded" });
+        var middleware = CreateMiddleware(limits, budget);
 
-        var eventBus = new Mock<IEventBus>();
-        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
-        var context = CreateContext(userId);
-        var nextCalled = false;
+        var result = await middleware.InvokeAsync(CreateContext(userId), (_, _) => Task.FromResult(CreateSuccessResult()));
 
-        var result = await middleware.InvokeAsync(context, (ctx, ct) =>
-        {
-            nextCalled = true;
-            return Task.FromResult(CreateSuccessResult());
-        });
-
-        nextCalled.ShouldBeFalse();
         result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
-        result.ErrorCode.ShouldBe(ErrorCodes.QuotaExceeded);
-
-        eventBus.Verify(
-            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+        result.Response.ShouldBe("Monthly budget exceeded");
+        limits.Verify(x => x.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task InvokeStreamingAsync_ReservationFailsForNonQuotaReason_DoesNotReportQuotaExceeded()
+    public async Task InvokeAsync_NoUser_SkipsBothGates()
     {
-        var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>(
-                "Quota record is unavailable.", 500, ErrorCodes.QuotaCheckFailed));
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits);
 
-        var eventBus = new Mock<IEventBus>();
-        var middleware = CreateMiddleware(quotaService: quotaService, eventBus: eventBus);
-        var context = CreateContext(userId);
+        var result = await middleware.InvokeAsync(CreateContext(userId: null), (_, _) => Task.FromResult(CreateSuccessResult()));
 
-        var chunks = new List<AgentStreamChunk>();
-        await foreach (var chunk in middleware.InvokeStreamingAsync(context, (ctx, ct) => AsyncEnumerable.Empty<AgentStreamChunk>()))
-        {
-            chunks.Add(chunk);
-        }
-
-        chunks.Count.ShouldBe(1);
-        chunks[0].FinishReason.ShouldBe(FinishReasons.Error);
-        chunks[0].FinishReason.ShouldNotBe(FinishReasons.QuotaExceeded);
-
-        eventBus.Verify(
-            b => b.PublishAsync(It.IsAny<QuotaExceededEvent>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    [Fact]
-    public async Task InvokeAsync_NoUserId_SkipsQuotaCheckAndPassesThrough()
-    {
-        // Arrange
-        var quotaService = new Mock<IQuotaService>();
-        var middleware = CreateMiddleware(quotaService: quotaService);
-        var context = CreateContext(userId: null);
-        var expectedResult = CreateSuccessResult();
-
-        // Act
-        var result = await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(expectedResult));
-
-        // Assert
         result.Response.ShouldBe("ok");
-        quotaService.Verify(x => x.ReserveQuotaAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+        limits.Verify(x => x.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task InvokeAsync_NextThrows_SettlesWithEstimatedTokensAndRethrows()
+    public async Task InvokeAsync_DownstreamThrows_StillSettles()
     {
-        // Arrange
         var userId = Guid.NewGuid();
-        var reservation = new QuotaReservation { ReservedTokens = 100, ReservedAt = DateTime.UtcNow };
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Success(reservation));
-        quotaService.Setup(x => x.SettleQuotaAsync(userId, reservation, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Success());
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits);
 
-        var tokenEstimator = new Mock<ITokenEstimator>();
-        tokenEstimator.Setup(x => x.Estimate(It.IsAny<string>(), It.IsAny<int>())).Returns(200);
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            middleware.InvokeAsync(CreateContext(userId), (_, _) => throw new InvalidOperationException("boom")));
 
-        var middleware = CreateMiddleware(quotaService: quotaService, tokenEstimator: tokenEstimator);
-        var context = CreateContext(userId);
-
-        // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            await middleware.InvokeAsync(context, (ctx, ct) =>
-                throw new InvalidOperationException("downstream error"));
-        });
-
-        // 异常时使用预估值结算
-        quotaService.Verify(x => x.SettleQuotaAsync(userId, reservation, 200, CancellationToken.None), Times.Once);
+        limits.Verify(x => x.SettleAsync(It.Is<UsageLimitReservation>(r => r.UserId == userId), 0m, CancellationToken.None), Times.Once);
     }
 
     #endregion
@@ -271,28 +224,70 @@ public class QuotaMiddlewareTests
     #region InvokeStreamingAsync
 
     [Fact]
-    public async Task InvokeStreamingAsync_QuotaExceeded_YieldsQuotaExceededChunk()
+    public async Task InvokeStreamingAsync_LimitReached_YieldsOneErrorChunk_WithTheWindow_AndNoText()
     {
-        // Arrange
         var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(x => x.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result.Failure<QuotaReservation>("Monthly quota exceeded", 429, ErrorCodes.QuotaExceeded));
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(x => x.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UsageLimitMocks.Denial(UsageLimitWindow.Weekly));
+        var middleware = CreateMiddleware(limits);
 
-        var middleware = CreateMiddleware(quotaService: quotaService);
-        var context = CreateContext(userId);
-
-        // Act
         var chunks = new List<AgentStreamChunk>();
-        await foreach (var chunk in middleware.InvokeStreamingAsync(context, (ctx, ct) => AsyncEnumerable.Empty<AgentStreamChunk>()))
+        await foreach (var chunk in middleware.InvokeStreamingAsync(CreateContext(userId),
+                           (_, _) => new[] { new AgentStreamChunk { Text = "never" } }.ToAsyncEnumerable()))
         {
             chunks.Add(chunk);
         }
 
-        // Assert
-        chunks.Count.ShouldBe(1);
-        chunks[0].FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
-        chunks[0].Text.ShouldBe("Monthly quota exceeded");
+        var only = chunks.ShouldHaveSingleItem();
+        only.Text.ShouldBeNull();
+        only.Error.ShouldNotBeNullOrWhiteSpace();
+        only.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+        only.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
+        only.UsageLimitWindow.ShouldBe(UsageLimitWindow.Weekly);
+        only.UsageLimitResetsAt.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_SeveralUsageChunks_SettlesTheCostOfTheirSum()
+    {
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量：工具循环里有几次调用就有几个，结算的是总和而不是最后一个
+        var userId = Guid.NewGuid();
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits, costCalculator: FlatRateCalculator());
+        var upstream = new[]
+        {
+            new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 100_000, OutputTokens = 10_000 } },
+            new AgentStreamChunk { IsToolCall = true },
+            new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 200_000, OutputTokens = 20_000 } },
+            new AgentStreamChunk { Text = "done", FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 300_000, OutputTokens = 30_000 } }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(CreateContext(userId), (_, _) => upstream.ToAsyncEnumerable()))
+        {
+        }
+
+        limits.Verify(x => x.SettleAsync(It.IsAny<UsageLimitReservation>(), 0.66m, CancellationToken.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_CallerStopsEarly_SettlesWhatWasUsedSoFar()
+    {
+        var userId = Guid.NewGuid();
+        var limits = UsageLimitMocks.Allowing();
+        var middleware = CreateMiddleware(limits, costCalculator: FlatRateCalculator());
+        var upstream = new[]
+        {
+            new AgentStreamChunk { Text = "part", Usage = new TokenUsageDto { InputTokens = 400_000, OutputTokens = 100_000 } },
+            new AgentStreamChunk { Text = "never read" }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(CreateContext(userId), (_, _) => upstream.ToAsyncEnumerable()))
+        {
+            break;
+        }
+
+        limits.Verify(x => x.SettleAsync(It.IsAny<UsageLimitReservation>(), 0.5m, CancellationToken.None), Times.Once);
     }
 
     #endregion

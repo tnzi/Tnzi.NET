@@ -117,6 +117,21 @@ describe('resolveUserCenterSections', () => {
     expect(out.map((s) => s.key)).not.toContain('custom:billing')
   })
 
+  it('drops a module-bound built-in when its module is unavailable', () => {
+    const withModule: UserCenterBuiltInDef[] = [
+      ...BUILTINS,
+      { key: 'notifications', component: C('notifications'), group: 'account', order: 25, icon: 'i', labelKey: 'nav.notifications', module: 'notification' },
+    ]
+    const hasModule = (m: string) => m !== 'notification'
+    const hidden = resolveUserCenterSections(withModule, {}, { ...deps, hasModule })
+    expect(hidden.map((s) => s.key)).not.toContain('notifications')
+    // Built-ins without a module are never gated by it.
+    expect(hidden.map((s) => s.key)).toContain('profile')
+
+    const shown = resolveUserCenterSections(withModule, {}, deps)
+    expect(shown.map((s) => s.key)).toEqual(['profile', 'security', 'notifications', 'sessions', 'history', 'linked', 'danger'])
+  })
+
   it('reorders built-ins via sectionOrder', () => {
     const out = resolve({ sectionOrder: { danger: 5 } })
     expect(out[0]?.key).toBe('danger')

@@ -80,6 +80,26 @@ public class PasswordServiceTests
         Assert.True(result.Succeeded);
     }
 
+    /// <summary>
+    /// ★★ 重置链接寄往<b>账号上登记的邮箱</b>，不是请求里的写法：账号按规范化比较解析，
+    /// 一个不同的字符串（长 s 大写成 S，或不区分全角半角的排序规则）也会解析到这个账号，而链接能改它的密码。
+    /// </summary>
+    [Fact]
+    public async Task ForgotPasswordAsync_SendsTheLinkToTheAddressOnRecord()
+    {
+        var folded = (char)0x017F + "am@example.com";
+        var owner = new User { Id = Guid.NewGuid(), UserName = "sam", Email = "sam@example.com" };
+        _userManagerMock.Setup(x => x.FindByEmailAsync(folded)).ReturnsAsync(owner);
+        _userManagerMock.Setup(x => x.GeneratePasswordResetTokenAsync(owner)).ReturnsAsync("reset_token");
+
+        var result = await _passwordService.ForgotPasswordAsync(folded);
+
+        Assert.True(result.Succeeded);
+        _eventBusMock.Verify(
+            x => x.PublishAsync(It.Is<Tnzi.Identity.Events.PasswordResetRequestedEvent>(e => e.Email == owner.Email), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Fact]
     public async Task ForgotPasswordAsync_WithNonExistentEmail_ReturnsSuccessForSecurity()
     {
@@ -203,6 +223,39 @@ public class PasswordServiceTests
         Assert.True(result.Succeeded);
     }
 
+    /// <summary>
+    /// ★ 关掉邮件找回之后，已经发出、还在有效期内的重置链接也不能再改密码。
+    /// 只挡发链接的那一头，开关关掉之前寄出的链接照样能用（与验证码找回两头都挡同一理由）。
+    /// </summary>
+    [Fact]
+    public async Task ResetPasswordByTokenAsync_WhenEmailResetDisabled_IsRefusedBeforeTheTokenIsChecked()
+    {
+        var email = "test@example.com";
+        var user = new User { Id = Guid.NewGuid(), UserName = "testuser", Email = email };
+        _userManagerMock.Setup(x => x.FindByEmailAsync(email)).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.ResetPasswordAsync(user, It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(IdentityResult.Success);
+        _identityOptionsMock.Setup(x => x.Value).Returns(new IdentityOptions
+        {
+            Recovery = new RecoveryOptions { EnablePasswordResetByEmail = false }
+        });
+        var service = new PasswordService(
+            _userManagerMock.Object,
+            _identityOptionsMock.Object,
+            _serviceProviderMock.Object,
+            _eventBusMock.Object,
+            _configurationMock.Object,
+            _passwordPolicyServiceMock.Object,
+            _currentUserMock.Object);
+
+        var result = await service.ResetPasswordByTokenAsync(
+            email, WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes("issued_before_the_switch")), "NewPassword123!");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _userManagerMock.Verify(x => x.ResetPasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
     [Fact]
     public async Task ResetPasswordByTokenAsync_WithInvalidToken_ReturnsFailure()
     {
@@ -277,29 +330,96 @@ public class PasswordServiceTests
         _userManagerMock.Verify(x => x.ChangePasswordAsync(user, currentPassword, newPassword), Times.Once);
     }
 
+    /// <summary>
+    /// ★★ 「当前密码」校验就是一次密码猜测：猜错要记进与登录同一套的失败计数。
+    /// </summary>
+    /// <remarks>
+    /// <c>UserManager.ChangePasswordAsync</c> 答 PasswordMismatch 时既不动 <c>AccessFailedCount</c> 也不触发锁定
+    /// （那套记账在 <c>SignInManager</c> 里），于是这个端点此前是一台不限次的猜密码机：
+    /// 管理端变体对任何账号可用，自助变体对一枚被盗的会话可用。
+    /// </remarks>
     [Fact]
-    public async Task ChangePasswordAsync_WithInvalidCurrentPassword_ThrowsException()
+    public async Task ChangePasswordAsync_WithAWrongCurrentPassword_FailsAndCountsTheAttempt()
     {
-        // Arrange
-        var userId = Guid.NewGuid();
-        var currentPassword = "WrongPassword";
-        var newPassword = "NewPassword123!";
-        var user = new User
-        {
-            Id = userId,
-            UserName = "testuser"
-        };
+        var user = new User { Id = Guid.NewGuid(), UserName = "testuser" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(user.Id.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(false);
+        _userManagerMock.Setup(x => x.ChangePasswordAsync(user, "WrongPassword", "NewPassword123!"))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityErrorDescriber().PasswordMismatch()));
+        _userManagerMock.Setup(x => x.AccessFailedAsync(user)).ReturnsAsync(IdentityResult.Success);
 
-        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
-            .ReturnsAsync(user);
+        var result = await _passwordService.ChangePasswordAsync(user.Id, "WrongPassword", "NewPassword123!");
 
-        _userManagerMock.Setup(x => x.CheckPasswordAsync(user, currentPassword))
-            .ReturnsAsync(false);
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _userManagerMock.Verify(x => x.AccessFailedAsync(user), Times.Once);
+    }
 
-        // Act & Assert
-        // ChangePasswordAsync 在密码错误时会抛出异常，但具体异常类型可能不同
-        await Assert.ThrowsAnyAsync<Exception>(
-            () => _passwordService.ChangePasswordAsync(userId, currentPassword, newPassword));
+    /// <summary>
+    /// 锁定之后不再回答「当前密码对不对」：只计数不拦截的话，锁定只挡住了登录页，猜测照样在这里继续。
+    /// </summary>
+    [Fact]
+    public async Task ChangePasswordAsync_WhileTheAccountIsLockedOut_RefusesWithoutCheckingThePassword()
+    {
+        var user = new User { Id = Guid.NewGuid(), UserName = "testuser" };
+        _userManagerMock.Setup(x => x.FindByIdAsync(user.Id.ToString())).ReturnsAsync(user);
+        _userManagerMock.Setup(x => x.SupportsUserLockout).Returns(true);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+
+        var result = await _passwordService.ChangePasswordAsync(user.Id, "Guess123!", "NewPassword123!");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+        _userManagerMock.Verify(x => x.ChangePasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★★★ 管理端「修改密码」对超管是一个猜中即接管的入口：猜中当前密码的同时就把它换成了调用者选的值。
+    /// 同一权限码下的重置密码早就挂着超管护栏，这里要同样拦下，而且拦在校验密码之前（否则拒绝本身就泄露了答案）。
+    /// </summary>
+    [Fact]
+    public async Task ChangePasswordAsync_OnASuperAdmin_ByANonSuperAdmin_IsForbiddenBeforeThePasswordIsChecked()
+    {
+        var actorId = Guid.NewGuid();
+        var target = new User { Id = Guid.NewGuid(), UserName = "root" };
+        _currentUserMock.SetupGet(c => c.Id).Returns(actorId);
+        _userManagerMock.Setup(x => x.FindByIdAsync(target.Id.ToString())).ReturnsAsync(target);
+        var functionAuthorization = new Mock<IFunctionAuthorizationService>();
+        functionAuthorization.Setup(a => a.IsSuperAdminAsync(target.Id)).ReturnsAsync(true);
+        functionAuthorization.Setup(a => a.IsSuperAdminAsync(actorId)).ReturnsAsync(false);
+        var service = new PasswordService(
+            _userManagerMock.Object, _identityOptionsMock.Object, _serviceProviderMock.Object,
+            _eventBusMock.Object, _configurationMock.Object, _passwordPolicyServiceMock.Object, _currentUserMock.Object,
+            functionAuthorization: functionAuthorization.Object);
+
+        var result = await service.ChangePasswordAsync(target.Id, "Guess123!", "NewPassword123!");
+
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.FORBIDDEN, result.ErrorCode);
+        _userManagerMock.Verify(x => x.ChangePasswordAsync(It.IsAny<User>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _userManagerMock.Verify(x => x.CheckPasswordAsync(It.IsAny<User>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>对照：超管改自己的密码（自助路径走同一个方法）不受护栏影响。</summary>
+    [Fact]
+    public async Task ChangePasswordAsync_ForASuperAdminsOwnAccount_IsAllowed()
+    {
+        var target = new User { Id = Guid.NewGuid(), UserName = "root" };
+        _currentUserMock.SetupGet(c => c.Id).Returns(target.Id);
+        _userManagerMock.Setup(x => x.FindByIdAsync(target.Id.ToString())).ReturnsAsync(target);
+        _userManagerMock.Setup(x => x.ChangePasswordAsync(target, "Current123!", "NewPassword123!")).ReturnsAsync(IdentityResult.Success);
+        var functionAuthorization = new Mock<IFunctionAuthorizationService>();
+        functionAuthorization.Setup(a => a.IsSuperAdminAsync(It.IsAny<Guid>())).ReturnsAsync(true);
+        var service = new PasswordService(
+            _userManagerMock.Object, _identityOptionsMock.Object, _serviceProviderMock.Object,
+            _eventBusMock.Object, _configurationMock.Object, _passwordPolicyServiceMock.Object, _currentUserMock.Object,
+            functionAuthorization: functionAuthorization.Object);
+
+        var result = await service.ChangePasswordAsync(target.Id, "Current123!", "NewPassword123!");
+
+        Assert.True(result.Succeeded);
     }
 
     /// <summary>

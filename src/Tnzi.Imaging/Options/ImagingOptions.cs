@@ -28,8 +28,12 @@ public class ImagingOptions
 }
 
 /// <summary>
-/// 验证码图片外观配置
+/// 验证码图片外观配置：初始化 <see cref="Services.ValidateCoder"/> 单例，<c>IVerifyCodeService</c> 出的图用它。
 /// </summary>
+/// <remarks>
+/// 验证码长度与有效期不在这里：它们是 <c>IVerifyCodeService.GenerateAsync</c> 的参数，由调用方逐次给出。
+/// 这一节曾经带着 <c>ExpireMinutes</c> / <c>DefaultLength</c> 两个键，启动时校验、运行时没有任何读者。
+/// </remarks>
 public class CaptchaOptions
 {
     /// <summary>
@@ -76,14 +80,4 @@ public class CaptchaOptions
     /// 随机干扰线数量
     /// </summary>
     public int RandomLineCount { get; set; } = 2;
-
-    /// <summary>
-    /// 验证码默认过期时间（分钟）
-    /// </summary>
-    public int ExpireMinutes { get; set; } = 5;
-
-    /// <summary>
-    /// 验证码默认长度
-    /// </summary>
-    public int DefaultLength { get; set; } = 4;
 }

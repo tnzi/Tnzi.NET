@@ -335,7 +335,7 @@ public class UserAccountDeactivatedEvent : EventBase
 }
 
 /// <summary>
-/// 用户账户自助删除事件（GDPR 合规）
+/// 用户自助注销账户事件（账号行已软删除并锁定；资料与登录记录不由框架抹除）
 /// </summary>
 public class UserAccountDeletedEvent : EventBase
 {
@@ -345,7 +345,7 @@ public class UserAccountDeletedEvent : EventBase
 }
 
 /// <summary>
-/// 用户个人数据导出事件（GDPR 审计）
+/// 用户自助导出账号数据事件（审计用）
 /// </summary>
 public class PersonalDataExportedEvent : EventBase
 {
@@ -359,7 +359,7 @@ public class PersonalDataExportedEvent : EventBase
 /// </summary>
 /// <remarks>
 /// Published whenever a user's role membership changes (assign / remove /
-/// create-with-roles / delete). The Authorization module subscribes to this
+/// create-with-roles / user delete / role delete: one event per member of the deleted role). The Authorization module subscribes to this
 /// to invalidate its <c>FunctionAuthCache</c> per-user entry - without this
 /// signal the cache (30 min TTL) would let a revoked user retain elevated
 /// permissions for up to a TTL window.
@@ -409,6 +409,11 @@ public enum UserRolesChangeType
     CreatedWithRoles,
     /// <summary>User was deleted - all role memberships dropped.</summary>
     UserDeleted,
+    /// <summary>
+    /// A role was deleted - every member lost it. The membership rows cascade away with the role,
+    /// so this event is the only trace a cache or audit consumer gets of the change.
+    /// </summary>
+    RoleDeleted,
 }
 
 

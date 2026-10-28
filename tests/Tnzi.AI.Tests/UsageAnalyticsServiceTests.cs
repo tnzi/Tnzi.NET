@@ -90,6 +90,73 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
     }
 
     [Fact]
+    public async Task GetUsageTrendAsync_Weekly_UsesIsoWeeksStartingOnMonday()
+    {
+        // 2026-03-08 是周日、03-09 是周一：ISO 周在两天之间换周（此前按 DayOfYear/7 分在同一桶里）
+        await SeedLogsAsync([
+            Log(new DateTime(2026, 3, 8, 10, 0, 0, DateTimeKind.Utc), tokens: 100, durationMs: 100),
+            Log(new DateTime(2026, 3, 9, 10, 0, 0, DateTimeKind.Utc), tokens: 200, durationMs: 300),
+            Log(new DateTime(2026, 3, 10, 10, 0, 0, DateTimeKind.Utc), tokens: 300, durationMs: 500),
+        ]);
+
+        var result = await Service.GetUsageTrendAsync(new UsageTrendQueryDto
+        {
+            StartTime = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc),
+            EndTime = new DateTime(2026, 3, 31, 0, 0, 0, DateTimeKind.Utc),
+            Granularity = UsageGranularity.Weekly
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        var points = result.Data!;
+        points.Select(p => p.Period).ShouldBe(["2026-W10", "2026-W11"]);
+        points[0].PeriodStart.ShouldBe(new DateTime(2026, 3, 2, 0, 0, 0, DateTimeKind.Utc));
+        points[1].PeriodStart.ShouldBe(new DateTime(2026, 3, 9, 0, 0, 0, DateTimeKind.Utc));
+        points[1].TotalRequests.ShouldBe(2);
+        points[1].TotalTokens.ShouldBe(500);
+        // 周平均按请求数加权，不是两天日平均的平均
+        points[1].AverageDurationMs.ShouldBe(400);
+    }
+
+    [Fact]
+    public async Task GetUsageTrendAsync_Weekly_YearEndWeekSpansBothYears()
+    {
+        // ISO 2026 年有 53 周：W53 是 2026-12-28（周一）到 2027-01-03。此前 12-31 落进一个只有一天的「W53」，
+        // 01-01 进 2027 年的「W01」
+        await SeedLogsAsync([
+            Log(new DateTime(2026, 12, 31, 10, 0, 0, DateTimeKind.Utc), tokens: 100, durationMs: 100),
+            Log(new DateTime(2027, 1, 1, 10, 0, 0, DateTimeKind.Utc), tokens: 100, durationMs: 100),
+            // 2025-12-31 属于 ISO 2026 年第 1 周，不该出现一个只有一天的 2025 年第 53 周
+            Log(new DateTime(2025, 12, 31, 10, 0, 0, DateTimeKind.Utc), tokens: 100, durationMs: 100),
+        ]);
+
+        var result = await Service.GetUsageTrendAsync(new UsageTrendQueryDto
+        {
+            StartTime = new DateTime(2025, 12, 1, 0, 0, 0, DateTimeKind.Utc),
+            EndTime = new DateTime(2027, 1, 31, 0, 0, 0, DateTimeKind.Utc),
+            Granularity = UsageGranularity.Weekly
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        var points = result.Data!;
+        points.Select(p => p.Period).ShouldBe(["2026-W01", "2026-W53"]);
+        points[0].PeriodStart.ShouldBe(new DateTime(2025, 12, 29, 0, 0, 0, DateTimeKind.Utc));
+        points[1].PeriodStart.ShouldBe(new DateTime(2026, 12, 28, 0, 0, 0, DateTimeKind.Utc));
+        points[1].TotalRequests.ShouldBe(2);
+    }
+
+    private static UsageLog Log(DateTime at, long tokens, long durationMs) => new()
+    {
+        CreationTime = at,
+        InputTokens = (int)tokens,
+        OutputTokens = 0,
+        TotalTokens = (int)tokens,
+        DurationMs = durationMs,
+        IsSuccess = true,
+        Provider = "OpenAI",
+        Model = "gpt-4o"
+    };
+
+    [Fact]
     public async Task GetUsageTrendAsync_EmptyData_ReturnsEmptyList()
     {
         var result = await Service.GetUsageTrendAsync(new UsageTrendQueryDto
@@ -267,6 +334,95 @@ public class UsageAnalyticsServiceTests : AIAnalyticsTestBase
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldNotBeNull();
         result.Data.ShouldBeEmpty();
+    }
+
+    // The dashboard's by-agent pie is a cost share: the DTO carried the field but the
+    // aggregation never summed it, so every agent read $0 and the pie had nothing to draw.
+    [Fact]
+    public async Task GetUsageByAgentAsync_SumsEstimatedCostPerAgent()
+    {
+        var agentId1 = Guid.NewGuid();
+        var agentId2 = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await SeedAgentsAsync([
+            new() { Id = agentId1, Name = "CodeReviewer", Provider = "OpenAI" },
+            new() { Id = agentId2, Name = "Summarizer", Provider = "OpenAI" },
+        ]);
+        await SeedLogsAsync([
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 100, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o", EstimatedCostUsd = 0.25m },
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 100, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o", EstimatedCostUsd = 0.50m },
+            new() { CreationTime = now, AgentId = agentId2, TotalTokens = 50, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o", EstimatedCostUsd = null },
+        ]);
+
+        var result = await Service.GetUsageByAgentAsync(now.AddDays(-1), now.AddDays(1));
+
+        result.Data.ShouldNotBeNull();
+        result.Data.Single(a => a.AgentId == agentId1).TotalEstimatedCostUsd.ShouldBe(0.75m);
+        result.Data.Single(a => a.AgentId == agentId2).TotalEstimatedCostUsd.ShouldBe(0m);
+    }
+
+    // The dashboard filters by provider and agent; a breakdown that ignored them
+    // contradicted the KPIs and trend drawn from the same filters.
+    [Fact]
+    public async Task GetUsageByAgentAsync_AppliesProviderModelAndAgentFilters()
+    {
+        var agentId1 = Guid.NewGuid();
+        var agentId2 = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await SeedAgentsAsync([
+            new() { Id = agentId1, Name = "CodeReviewer", Provider = "OpenAI" },
+            new() { Id = agentId2, Name = "Summarizer", Provider = "OpenAI" },
+        ]);
+        await SeedLogsAsync([
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 100, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o" },
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 300, DurationMs = 10, IsSuccess = true, Provider = "Anthropic", Model = "claude" },
+            new() { CreationTime = now, AgentId = agentId2, TotalTokens = 200, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o-mini" },
+        ]);
+
+        var byProvider = await Service.GetUsageByAgentAsync(now.AddDays(-1), now.AddDays(1), provider: "OpenAI");
+        byProvider.Data!.Select(a => (a.AgentId, a.TotalTokens)).ShouldBe([(agentId2, 200L), (agentId1, 100L)]);
+
+        var byModel = await Service.GetUsageByAgentAsync(now.AddDays(-1), now.AddDays(1), model: "gpt-4o");
+        byModel.Data!.Select(a => a.AgentId).ShouldBe([agentId1]);
+
+        var byAgent = await Service.GetUsageByAgentAsync(now.AddDays(-1), now.AddDays(1), agentId: agentId1);
+        byAgent.Data!.Single().TotalTokens.ShouldBe(400);
+    }
+
+    #endregion
+
+    #region GetUsageByModelAsync / GetCostSummaryAsync
+
+    [Fact]
+    public async Task GetUsageByModelAsync_AppliesAgentFilter()
+    {
+        var agentId1 = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await SeedLogsAsync([
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 100, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o" },
+            new() { CreationTime = now, AgentId = Guid.NewGuid(), TotalTokens = 900, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o-mini" },
+        ]);
+
+        var result = await Service.GetUsageByModelAsync(now.AddDays(-1), now.AddDays(1), agentId: agentId1);
+
+        result.Data!.Select(m => (m.Model, m.TotalTokens)).ShouldBe([("gpt-4o", 100L)]);
+    }
+
+    [Fact]
+    public async Task GetCostSummaryAsync_AppliesAgentFilter()
+    {
+        var agentId1 = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await SeedLogsAsync([
+            new() { CreationTime = now, AgentId = agentId1, TotalTokens = 100, DurationMs = 10, IsSuccess = true, Provider = "OpenAI", Model = "gpt-4o", EstimatedCostUsd = 0.40m },
+            new() { CreationTime = now, AgentId = Guid.NewGuid(), TotalTokens = 900, DurationMs = 10, IsSuccess = true, Provider = "Anthropic", Model = "claude", EstimatedCostUsd = 2.00m },
+        ]);
+
+        var result = await Service.GetCostSummaryAsync(now.AddDays(-1), now.AddDays(1), agentId: agentId1);
+
+        result.Data!.TotalCostUsd.ShouldBe(0.40m);
+        result.Data.TotalRequests.ShouldBe(1);
+        result.Data.ByProvider.Select(p => p.Provider).ShouldBe(["OpenAI"]);
     }
 
     #endregion

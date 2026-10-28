@@ -13,6 +13,7 @@
         :schema="exchangeRateFormSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
         :readonly="mode === 'view'"
+        :field-renderers="fieldRenderers"
         :translate="t"
       />
     </template>
@@ -20,8 +21,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { NButton } from 'naive-ui'
+import { h, ref } from 'vue'
+import { NButton, NInput } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -29,11 +30,11 @@ import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import { createFinanceBridge, type UpsertExchangeRateDto } from '../../services/bridges/finance-bridge'
 import { useAdminClient } from '../../plugin/client'
-import TFormSchemaRenderer from '../_shared/form-schema'
+import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
-import { exchangeRateColumns, exchangeRateFormSchema, type RateRow } from './exchange-rate-config'
-import { tsToIsoDate } from './money'
+import { exchangeRateColumns, exchangeRateFormSchema, RATE_KEY_LOCKED_TYPE, type RateRow } from './exchange-rate-config'
+import { fmtDate, tsToIsoDate } from './money'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.rates')
@@ -70,6 +71,15 @@ const crud = useCrudPage<RateRow>({
   updateData: (_id, d) => bridge.rates.upsert(toPayload(d)),
   deleteData: (ids) => bridge.rates.delete(ids.map(String)),
 })
+
+// The rate's key (currency pair and date) on edit: shown, not edited.
+const fieldRenderers = {
+  [RATE_KEY_LOCKED_TYPE]: (ctx: FieldRenderContext) =>
+    h(NInput, {
+      value: ctx.item.key === 'rateDate' ? fmtDate(ctx.value as string | null) : String(ctx.value ?? ''),
+      disabled: true,
+    }),
+}
 
 const title = 'tnzi.admin.modules.finance.rates.title'
 const rowActions: RowAction<RateRow>[] = [editAction(crud), deleteAction(crud)]

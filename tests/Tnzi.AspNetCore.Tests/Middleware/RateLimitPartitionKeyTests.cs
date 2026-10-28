@@ -282,6 +282,38 @@ public class RateLimitPartitionKeyTests
         Assert.Single(service.Keys);
     }
 
+    [Theory]
+    // 双栈监听下 IPv4 客户端呈现为 IPv4 映射地址，白名单里写的是普通 IPv4
+    [InlineData("::ffff:10.0.0.5", "10.0.0.5")]
+    // 反过来：白名单照抄了日志里看到的映射形态
+    [InlineData("10.0.0.5", "::ffff:10.0.0.5")]
+    // 字面写法不同的同一个 IPv6 地址
+    [InlineData("2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0001")]
+    public async Task AWhitelistedAddress_MatchesWhateverFormTheConnectionReportsItIn(string remoteIp, string whitelisted)
+    {
+        var options = OptionsWith();
+        options.RateLimit!.ByIp = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = [whitelisted] };
+
+        var (nextCalled, _, service) = await RunAsync(options, remoteIp: remoteIp, count: 6);
+
+        Assert.True(nextCalled);
+        Assert.Empty(service.Keys);
+    }
+
+    [Fact]
+    public async Task ANativeIPv6Address_IsNotReadAsTheIPv4HostInItsLowBits()
+    {
+        // MapToIPv4 对原生 IPv6 不抛异常而是取低 32 位：::a00:5 的低 32 位就是 10.0.0.5。
+        // 归一化只能对 IPv4 映射地址做，否则任何低位凑巧相同的 IPv6 客户端都进了白名单。
+        var options = OptionsWith();
+        options.RateLimit!.ByIp = new RateLimitRule { Limit = 5, WindowSeconds = 60, Whitelist = ["10.0.0.5"] };
+
+        var (nextCalled, statusCode, _) = await RunAsync(options, remoteIp: "2001:db8::a00:5", count: 6);
+
+        Assert.False(nextCalled);
+        Assert.Equal(429, statusCode);
+    }
+
     // ---- 取不到分区键时的处置 -------------------------------------------------
 
     [Fact]

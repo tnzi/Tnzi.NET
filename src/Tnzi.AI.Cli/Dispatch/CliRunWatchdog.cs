@@ -26,6 +26,7 @@ public sealed class CliRunWatchdog : IDisposable
     private DateTime _lastEventAt;
     private DateTime? _pendingToolSince;
     private int _pendingToolCount;
+    private int _awaitingApproval;
     private CliRunFailureReason? _failure;
 
     /// <summary>初始化看门狗并开始计时。</summary>
@@ -83,6 +84,41 @@ public sealed class CliRunWatchdog : IDisposable
     }
 
     /// <summary>
+    /// 一个权限请求开始等使用方回答：在它有结局之前，空闲与工具看门狗不判死（CLI 停在那里等的是人，不是卡住了）。硬超时照常。
+    /// </summary>
+    public void BeginApprovalWait()
+    {
+        lock (_gate)
+        {
+            _awaitingApproval++;
+        }
+    }
+
+    /// <summary>
+    /// 一个权限请求有了结局。最后一个结束时空闲与工具计时从现在重新起算：等人的那段不算进 CLI 的停滞。
+    /// </summary>
+    public void EndApprovalWait()
+    {
+        lock (_gate)
+        {
+            if (_awaitingApproval == 0)
+            {
+                return;
+            }
+
+            _awaitingApproval--;
+            if (_awaitingApproval == 0)
+            {
+                _lastEventAt = DateTime.UtcNow;
+                if (_pendingToolSince is not null)
+                {
+                    _pendingToolSince = _lastEventAt;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// 检查是否应当判死。由执行循环定期调用。
     /// </summary>
     /// <returns>触发时返回 true 并已请求取消。</returns>
@@ -100,6 +136,12 @@ public sealed class CliRunWatchdog : IDisposable
             if (_hard is { } hard && now - _startedAt > hard)
             {
                 return Trip(CliRunFailureReason.HardTimeout);
+            }
+
+            // 在等使用方批准：CLI 没有输出是应该的
+            if (_awaitingApproval > 0)
+            {
+                return false;
             }
 
             // 有工具在跑时用工具阈值，此时"没有事件"是合理的（工具正在干活）。

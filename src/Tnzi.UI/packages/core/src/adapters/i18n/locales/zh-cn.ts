@@ -133,6 +133,7 @@ export default {
     uploading: '上传中...',
     uploadSuccess: '上传成功',
     uploadFailed: '上传失败',
+    cropFailed: '图片无法裁剪，请换一个文件再试。',
     fileSizeLimit: '文件大小超出限制',
     fileTypeLimit: '不支持的文件类型',
   },

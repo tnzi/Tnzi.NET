@@ -98,4 +98,39 @@ describe('Finance TaxReturns page', () => {
     expect((wrapper.vm as unknown as TaxVm).formOptions.length).toBe(0)
     expect(wrapper.find('.n-alert-stub').exists()).toBe(true)
   })
+
+  it('a failed forms read shows the reason, not the "load a country pack" advice', async () => {
+    // The advice is right only when the server answered "no forms"; after a 403
+    // or an outage it sends the operator off to install a pack that is there.
+    forms.mockRejectedValueOnce(new Error('Tax returns are unavailable right now.'))
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Tax returns are unavailable right now.')
+    expect(wrapper.text()).not.toContain('Load a country pack')
+  })
+
+  // What is copied goes into a portal's numeric fields: a refund as
+  // "($1,234.56)" is refused there, or read as an amount owing once the
+  // non-digits are stripped. Copy plain numbers with a leading minus.
+  it('★ copies plain numbers a portal field accepts', async () => {
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    getReturn.mockResolvedValueOnce({
+      formCode: 'GST34', formName: 'GST34', country: 'CA', periodFrom: '2026-07-01', periodTo: '2026-09-30', currency: 'CAD',
+      netTax: -1234.56,
+      lines: [
+        { line: '101', label: 'Sales and other revenue', amount: 12500, isCalculated: false },
+        { line: '108', label: 'Input tax credits', amount: 0.004, isCalculated: false },
+        { line: '109', label: 'Net tax', amount: -1234.56, isCalculated: true },
+      ],
+    })
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as TaxVm & { copyAll: () => Promise<void> }
+    await vm.load()
+    await vm.copyAll()
+
+    expect(writeText).toHaveBeenCalledWith('101\t12500.00\n108\t0.00\n109\t-1234.56')
+  })
 })

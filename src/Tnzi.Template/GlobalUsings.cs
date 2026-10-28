@@ -25,6 +25,7 @@ global using System.Text.Json.Serialization;
 global using System.Text.RegularExpressions;
 global using System.Threading;
 global using System.Threading.Tasks;
+global using Tnzi.Documents;
 global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;

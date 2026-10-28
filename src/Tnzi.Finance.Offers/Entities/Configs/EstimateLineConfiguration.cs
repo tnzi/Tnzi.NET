@@ -7,7 +7,7 @@ public class EstimateLineConfiguration : EntityTypeConfigurationBase<EstimateLin
 {
     public override void Configure(EntityTypeBuilder<EstimateLine> builder)
     {
-        builder.Property(e => e.Description).HasMaxLength(500);
+        builder.Property(e => e.Description).HasMaxLength(OfferFieldLimits.LineDescriptionMaxLength);
         builder.Property(e => e.Quantity).HasQuantityPrecision();
         builder.Property(e => e.UnitPrice).HasMoneyPrecision();
         builder.Property(e => e.Amount).HasMoneyPrecision();

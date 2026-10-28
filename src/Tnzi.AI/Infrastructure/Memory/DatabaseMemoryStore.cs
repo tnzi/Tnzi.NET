@@ -8,7 +8,7 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// 否则降级为纯关键词搜索（向后兼容）。
 /// 融合评分后叠加重要性权重 (Importance) 和时间衰减 (RecencyDecayRate)。
 /// </remarks>
-public partial class DatabaseMemoryStore : IMemoryStore
+public class DatabaseMemoryStore : IMemoryStore
 {
     private readonly IRepository<MemoryEntry, Guid> _repository;
     private readonly IUnitOfWorkManager? _unitOfWorkManager;
@@ -61,8 +61,23 @@ public partial class DatabaseMemoryStore : IMemoryStore
     {
         Check.NotNullOrWhiteSpace(scope);
         // 按结构化 AgentId 列检索（修复 AgentId 列只写不读的缺陷），与当前用户无关 → headless-safe。
-        return await ReadCoreAsync(
-            _repository.AsQueryable().Where(e => e.AgentId == agentId && e.Scope == scope), ct);
+        return await ReadCoreAsync(AgentBoundEntries(agentId, scope), ct);
+    }
+
+    /// <summary>
+    /// 绑定到该 Agent、类别名为 <paramref name="scope"/> 的记忆行。
+    /// </summary>
+    /// <remarks>
+    /// 本存储经 <see cref="MemoryScope"/> 写入 Agent-bound 记忆时，Scope 列存的是完整键
+    /// <c>agent-bound:{agentId}:{name}</c>（<see cref="MemoryScope.ToScopeKey"/>，管理端「Agent 记忆」新建的也是这一形状）；
+    /// 读取若只认类别名本身，写进去的每一条都读不回来，运行时注入里永远没有它们。
+    /// 两种形状都认：完整键是本存储自己的写法，裸类别名是直接按 AgentId 列写入的既有数据。
+    /// </remarks>
+    private IQueryable<MemoryEntry> AgentBoundEntries(Guid agentId, string scope)
+    {
+        var scopeKey = MemoryScope.ForAgent(agentId, scope).ToScopeKey();
+        return _repository.AsQueryable()
+            .Where(e => e.AgentId == agentId && (e.Scope == scopeKey || e.Scope == scope));
     }
 
     private async Task<string?> ReadCoreAsync(IQueryable<MemoryEntry> query, CancellationToken ct)
@@ -114,7 +129,11 @@ public partial class DatabaseMemoryStore : IMemoryStore
 
     private async Task WriteInternalAsync(string scope, string content, CancellationToken ct)
     {
-        // 删除该 scope 下所有旧条目
+        // 删除该 scope 下所有旧条目。
+        // ★ ExecuteDelete 是绕过变更跟踪器的裸 SQL，而工作单元的物理事务延迟到首次保存才开启：
+        //   不先把事务强开，删除以自动提交落库，外层工作单元回滚时新条目被撤销、旧条目却已经没了（这个范围的记忆被清空）。
+        //   没有工作单元时这一步什么都不做，删除照旧自动提交。
+        await _repository.EnsureTransactionStartedAsync(ct);
         await _repository.AsQueryable()
             .Where(e => e.Scope == scope)
             .ExecuteDeleteAsync(ct);
@@ -201,9 +220,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
     {
         Check.NotNullOrWhiteSpace(scope);
         // 按结构化 AgentId 列检索，与当前用户无关 → headless-safe。
-        return await SearchInternalAsync(
-            _repository.AsQueryable().Where(e => e.AgentId == agentId && e.Scope == scope),
-            query, maxResults, category: null, ct);
+        return await SearchInternalAsync(AgentBoundEntries(agentId, scope), query, maxResults, category: null, ct);
     }
 
     /// <summary>
@@ -401,6 +418,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
     {
         Check.NotNullOrWhiteSpace(scope);
 
+        // 裸 SQL 先加入调用方的事务（同 WriteInternalAsync）
+        await _repository.EnsureTransactionStartedAsync(ct);
         var count = await _repository.AsQueryable()
             .Where(e => e.Scope == scope)
             .ExecuteDeleteAsync(ct);
@@ -414,6 +433,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
     /// <summary>
     /// 按 ID 更新指定条目的内容
     /// </summary>
+    /// <exception cref="ResourceNotFoundException">条目不存在或不属于 <paramref name="scope"/>（例如来自共享或项目快照 scope）。</exception>
     public async Task UpdateEntryAsync(string scope, Guid entryId, string newContent, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(scope);
@@ -422,8 +442,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
         var entry = await _repository.GetAsync(entryId, ct);
         if (entry == null || entry.Scope != scope)
         {
-            _logger.LogWarning("UpdateEntryAsync: entry {Id} not found in scope {Scope}", entryId, scope);
-            return;
+            // 抛而不是静默返回：记忆工具据此回报失败，而不是对模型说「已更新」
+            throw new ResourceNotFoundException("Memory entry", entryId);
         }
 
         entry.Content = newContent;
@@ -436,6 +456,7 @@ public partial class DatabaseMemoryStore : IMemoryStore
     /// <summary>
     /// 按 ID 删除指定条目
     /// </summary>
+    /// <exception cref="ResourceNotFoundException">条目不存在或不属于 <paramref name="scope"/>（例如来自共享或项目快照 scope）。</exception>
     public async Task DeleteEntryAsync(string scope, Guid entryId, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(scope);
@@ -443,8 +464,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
         var entry = await _repository.GetAsync(entryId, ct);
         if (entry == null || entry.Scope != scope)
         {
-            _logger.LogWarning("DeleteEntryAsync: entry {Id} not found in scope {Scope}", entryId, scope);
-            return;
+            // 抛而不是静默返回：记忆工具据此回报失败，而不是对模型说「已删除」（用户要求忘掉的内容其实还在）
+            throw new ResourceNotFoundException("Memory entry", entryId);
         }
 
         await _repository.DeleteAsync(entry);
@@ -556,6 +577,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
     {
         // 删除旧条目：Agent-bound 范围按 (AgentId, Scope) 维度删除，
         // 避免误删共享同一 scope 字符串的其他 Agent 记忆；否则按 scope 字符串删除（原行为）。
+        // 裸 SQL 先加入调用方的事务（同另一个 WriteInternalAsync 重载）
+        await _repository.EnsureTransactionStartedAsync(ct);
         if (agentBoundId.HasValue)
         {
             await _repository.AsQueryable()
@@ -671,6 +694,8 @@ public partial class DatabaseMemoryStore : IMemoryStore
 
             if (idsToDelete.Count > 0)
             {
+                // 裸 SQL 先加入调用方的事务（同 WriteInternalAsync）：否则外层回滚撤销了新条目，被修剪掉的旧条目却回不来
+                await _repository.EnsureTransactionStartedAsync(ct);
                 await _repository.AsQueryable()
                     .Where(e => idsToDelete.Contains(e.Id))
                     .ExecuteDeleteAsync(ct);
@@ -727,52 +752,5 @@ public partial class DatabaseMemoryStore : IMemoryStore
         }
 
         return System.Numerics.Tensors.TensorPrimitives.CosineSimilarity(a, b);
-    }
-
-    // --- 静态辅助方法：去重 / 清洗 / 裁剪 ---
-
-    [GeneratedRegex(@"<uploaded_files>[\s\S]*?</uploaded_files>", RegexOptions.IgnoreCase)]
-    private static partial Regex UploadBlockRegex();
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex WhitespaceCollapseRegex();
-
-    /// <summary>
-    /// 正规化内容用于去重比较 - 折叠空白字符
-    /// </summary>
-    public static string NormalizeForDedup(string? content)
-    {
-        if (string.IsNullOrWhiteSpace(content)) return "";
-        return WhitespaceCollapseRegex().Replace(content.Trim(), " ");
-    }
-
-    /// <summary>
-    /// 清除 &lt;uploaded_files&gt; 块（避免将临时文件元数据持久化到记忆中）
-    /// </summary>
-    public static string ScrubUploadMentions(string content)
-    {
-        if (string.IsNullOrEmpty(content)) return content;
-        return UploadBlockRegex().Replace(content, "").Trim();
-    }
-
-    /// <summary>
-    /// 判断两段内容在空白正规化后是否重复
-    /// </summary>
-    public static bool IsDuplicate(string existing, string incoming)
-        => string.Equals(NormalizeForDedup(existing), NormalizeForDedup(incoming), StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 按置信度降序排序，裁剪低于阈值或超过 MaxFacts 的条目
-    /// </summary>
-    public static List<(string Content, double Confidence)> PruneByConfidence(
-        List<(string Content, double Confidence)> entries,
-        int maxFacts,
-        double confidenceThreshold)
-    {
-        return entries
-            .Where(e => e.Confidence >= confidenceThreshold)
-            .OrderByDescending(e => e.Confidence)
-            .Take(maxFacts)
-            .ToList();
     }
 }

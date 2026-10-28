@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
+import type { GlobalThemeOverrides } from 'naive-ui'
 import { buildNaiveThemeOverrides, resolveThemeMode } from '../../src/theme/naive-bridge'
-import { defaultThemeSettings } from '../../src/theme/settings'
+import { CONTRAST_TEXT_DARK } from '../../src/theme/palette'
+import { defaultThemeSettings, mergeThemeSettings } from '../../src/theme/settings'
 
 describe('buildNaiveThemeOverrides', () => {
   it('generates a common section with primary color', () => {
@@ -53,6 +55,51 @@ describe('buildNaiveThemeOverrides', () => {
     const snapshot = JSON.stringify(naiveOverrides)
     buildNaiveThemeOverrides(settings)
     expect(JSON.stringify(naiveOverrides)).toBe(snapshot)
+  })
+
+  describe('foreground on a primary fill', () => {
+    const withPrimary = (primary: string, naiveOverrides?: GlobalThemeOverrides) =>
+      buildNaiveThemeOverrides(mergeThemeSettings({ colors: { primary }, naiveOverrides }))
+
+    it('paints the ink on every primary fill naive draws when the primary is light', () => {
+      const overrides = withPrimary('#FFD217')
+      expect(overrides.Button).toMatchObject({
+        textColorPrimary: CONTRAST_TEXT_DARK,
+        textColorHoverPrimary: CONTRAST_TEXT_DARK,
+        textColorPressedPrimary: CONTRAST_TEXT_DARK,
+        textColorFocusPrimary: CONTRAST_TEXT_DARK,
+        textColorDisabledPrimary: CONTRAST_TEXT_DARK,
+      })
+      expect(overrides.Checkbox?.checkMarkColor).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.Tag?.textColorChecked).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.Calendar?.dateTextColorCurrent).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.DatePicker?.itemTextColorActive).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.Steps?.indicatorTextColorProcess).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.FloatButton?.textColorPrimary).toBe(CONTRAST_TEXT_DARK)
+    })
+
+    // naive's own choice (white in light mode, black in dark mode) stays for
+    // every primary white reads on, the default teal included.
+    it.each(['#0d9488', '#2563eb'])('leaves naive alone when white reads on the primary (%s)', (primary) => {
+      const overrides = withPrimary(primary)
+      expect(Object.keys(overrides)).toEqual(['common'])
+    })
+
+    it('lets a consumer key win inside a generated section and keeps the rest', () => {
+      const overrides = withPrimary('#FFD217', {
+        Button: { textColorPrimary: '#000000', heightMedium: '40px' },
+        Menu: { itemHeight: '50px' },
+      })
+      expect(overrides.Button?.textColorPrimary).toBe('#000000')
+      expect(overrides.Button?.heightMedium).toBe('40px')
+      expect(overrides.Button?.textColorHoverPrimary).toBe(CONTRAST_TEXT_DARK)
+      expect(overrides.Menu?.itemHeight).toBe('50px')
+    })
+
+    it('passes a consumer section through unchanged when the primary is dark', () => {
+      const overrides = withPrimary('#2563eb', { Button: { heightMedium: '40px' } })
+      expect(overrides.Button).toEqual({ heightMedium: '40px' })
+    })
   })
 })
 
@@ -112,5 +159,15 @@ describe('resolveThemeMode', () => {
     const result = resolveThemeMode('auto')
     expect(result).toEqual({ resolved: 'light' })
     expect(result.cleanup).toBeUndefined()
+  })
+
+  // Safari before 14 only has the deprecated addListener; resolving must not
+  // throw there (the theme context subscribes on every 'auto').
+  it('auto with onChange still resolves when the MediaQueryList has no addEventListener', () => {
+    vi.stubGlobal('window', {
+      matchMedia: vi.fn().mockReturnValue({ matches: true, addListener: vi.fn() }),
+    })
+    const result = resolveThemeMode('auto', vi.fn())
+    expect(result).toEqual({ resolved: 'dark' })
   })
 })

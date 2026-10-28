@@ -35,20 +35,12 @@ public class DefaultPresenceTracker : IPresenceTracker
             IsOnline: true,
             DateTimeOffset.UtcNow));
 
-        // 发布事件（fire-and-forget，不影响主流程）
-        try
+        PublishInBackground(new GatewayClientConnectedEvent
         {
-            _ = _eventBus?.PublishAsync(new GatewayClientConnectedEvent
-            {
-                ConnectionId = connection.ConnectionId,
-                UserId = connection.UserId,
-                ClientType = connection.ClientType
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish GatewayClientConnectedEvent for connectionId={ConnectionId}", connection.ConnectionId);
-        }
+            ConnectionId = connection.ConnectionId,
+            UserId = connection.UserId,
+            ClientType = connection.ClientType
+        }, connection.ConnectionId);
     }
 
     /// <inheritdoc />
@@ -68,19 +60,36 @@ public class DefaultPresenceTracker : IPresenceTracker
             IsOnline: false,
             DateTimeOffset.UtcNow));
 
-        // 发布事件（fire-and-forget，不影响主流程）
+        PublishInBackground(new GatewayClientDisconnectedEvent
+        {
+            ConnectionId = removed.ConnectionId,
+            Reason = "Connection removed"
+        }, removed.ConnectionId);
+    }
+
+    /// <summary>
+    /// 发布事件（fire-and-forget，不影响主流程）。追踪接口是同步的，等不了发布；
+    /// 但异步失败也要记下来：此前直接丢弃返回的任务，发布在异步阶段的失败没有任何痕迹。
+    /// </summary>
+    private void PublishInBackground<TEvent>(TEvent @event, string connectionId) where TEvent : class, IEvent
+    {
+        Task? publish;
         try
         {
-            _ = _eventBus?.PublishAsync(new GatewayClientDisconnectedEvent
-            {
-                ConnectionId = removed.ConnectionId,
-                Reason = "Connection removed"
-            });
+            publish = _eventBus?.PublishAsync(@event);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to publish GatewayClientDisconnectedEvent for connectionId={ConnectionId}", removed.ConnectionId);
+            _logger.LogWarning(ex, "Failed to publish {EventType} for connectionId={ConnectionId}", typeof(TEvent).Name, connectionId);
+            return;
         }
+
+        publish?.ContinueWith(
+            task => _logger.LogWarning(task.Exception, "Failed to publish {EventType} for connectionId={ConnectionId}",
+                typeof(TEvent).Name, connectionId),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
     }
 
     /// <inheritdoc />

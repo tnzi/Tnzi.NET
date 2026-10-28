@@ -339,6 +339,28 @@ public class PasskeyServiceTests
         Assert.True(result.Succeeded);
     }
 
+    /// <summary>
+    /// ★★ 一次仪式只能签出一条会话。挑战状态此前是「先读后删」：同一个 stateId 的两次并发提交都在任何一方删掉之前
+    /// 读到了状态，签名计数此时还没写回，两份断言都过得了，于是一次仪式签出两条会话。
+    /// 现在一次性由占住消费标记保证，删除慢一步也不影响。
+    /// </summary>
+    [Fact]
+    public async Task CompleteAssertion_TheSameChallengeTwice_IssuesOnce_EvenWhenTheRemovalLags()
+    {
+        var fixture = new Fixture(removalLagsBehindReads: true);
+        var stateId = await fixture.SeedAssertionStateAsync();
+        fixture.GivenAssertionSucceeds();
+
+        var first = await fixture.Service.CompleteAssertionAsync(new PasskeyCompleteDto { StateId = stateId, CredentialJson = "{}" });
+        var second = await fixture.Service.CompleteAssertionAsync(new PasskeyCompleteDto { StateId = stateId, CredentialJson = "{}" });
+
+        Assert.True(first.Succeeded);
+        Assert.False(second.Succeeded);
+        fixture.AuthService.Verify(
+            x => x.IssueTokenAsync(It.IsAny<User>(), It.IsAny<LoginMethod>(), It.IsAny<TwoFactorType?>()),
+            Times.Once);
+    }
+
     [Fact]
     public async Task AllEntryPoints_ShouldRefuseWhenDisabled()
     {
@@ -380,7 +402,7 @@ public class PasskeyServiceTests
         private readonly ICache _cache;
         private readonly Mock<ICurrentUser> _currentUser = new();
 
-        public Fixture(bool passkeyEnabled = true, bool serializingCache = false)
+        public Fixture(bool passkeyEnabled = true, bool serializingCache = false, bool removalLagsBehindReads = false)
         {
             var store = new Mock<IUserStore<User>>();
             UserManager = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
@@ -400,6 +422,10 @@ public class PasskeyServiceTests
                 Microsoft.Extensions.Options.Options.Create(new CachingOptions()));
 
             _cache = serializingCache ? new JsonRoundTripCache(memoryCache) : memoryCache;
+            if (removalLagsBehindReads)
+            {
+                _cache = new RemovalLagsBehindReadsCache(_cache);
+            }
 
             var identityOptions = new Mock<IOptionsMonitor<TnziIdentityOptions>>();
             var options = new TnziIdentityOptions();
@@ -513,7 +539,7 @@ public class PasskeyServiceTests
         /// 用 <c>TnziJsonDefaults.Options</c> 把值序列化再还原，模拟分布式缓存那条路径。
         /// </summary>
         /// <remarks>
-        /// 只实现 passkey 用到的三个成员，其余显式不支持 —— 一个假装什么都能干的桩，
+        /// 只实现 passkey 用到的四个成员，其余显式不支持：一个假装什么都能干的桩，
         /// 会在被用到新方法时静默返回 default，把缺陷伪装成通过。
         /// </remarks>
         private sealed class JsonRoundTripCache(ICache inner) : ICache
@@ -535,7 +561,37 @@ public class PasskeyServiceTests
             public Task<long> IncrementAsync(string key, long increment = 1, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task<long> IncrementAsync(string key, long increment, TimeSpan expiration, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task<long> DecrementAsync(string key, long decrement = 1, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-            public Task<bool> TrySetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<bool> TrySetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+                => inner.TrySetAsync(key, JsonSerializer.Serialize(value, TnziJsonDefaults.Options), expiration, cancellationToken);
+
+            public Task RemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<Dictionary<string, T?>> GetManyAsync<T>(IEnumerable<string> keys, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task SetManyAsync<T>(IEnumerable<KeyValuePair<string, T>> items, TimeSpan? expiration = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task RemoveManyAsync(IEnumerable<string> keys, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        }
+
+        /// <summary>
+        /// 删除一律不生效的缓存：模拟两个并发请求都在任何一方删掉挑战状态之前读到了它。
+        /// </summary>
+        private sealed class RemovalLagsBehindReadsCache(ICache inner) : ICache
+        {
+            public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) => inner.GetAsync<T>(key, cancellationToken);
+
+            public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+                => inner.SetAsync(key, value, expiration, cancellationToken);
+
+            public Task<bool> TrySetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+                => inner.TrySetAsync(key, value, expiration, cancellationToken);
+
+            public Task RemoveAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+            public Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<long> IncrementAsync(string key, long increment = 1, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<long> IncrementAsync(string key, long increment, TimeSpan expiration, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            public Task<long> DecrementAsync(string key, long decrement = 1, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task RemoveByPrefixAsync(string prefix, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
             public Task RemoveByTagAsync(string tag, CancellationToken cancellationToken = default) => throw new NotSupportedException();

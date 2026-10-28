@@ -2,8 +2,11 @@
 namespace Tnzi.Identity.Services;
 
 /// <summary>
-/// 用户登录记录服务实现
+/// 用户登录记录服务实现：第三方登录关联的只读查询。
 /// </summary>
+/// <remarks>
+/// 关联与解除关联经 <c>UserManager.AddLoginAsync</c> / <c>RemoveLoginAsync</c> 写入，它们写的就是这里读的那张表。
+/// </remarks>
 public class UserLoginService : ApplicationService, IUserLoginService
 {
     private readonly DbContext _dbContext;
@@ -15,39 +18,6 @@ public class UserLoginService : ApplicationService, IUserLoginService
         : base(serviceProvider)
     {
         _dbContext = Check.NotNull(dbContext);
-    }
-
-    /// <summary>
-    /// 记录用户登录
-    /// </summary>
-    public async Task RecordLoginAsync(Guid userId, string loginProvider, string providerKey, string? displayName = null)
-    {
-        // 检查是否已存在
-        var existing = await _dbContext.Set<UserLogin>()
-            .FirstOrDefaultAsync(ul => ul.UserId == userId
-                && ul.LoginProvider == loginProvider
-                && ul.ProviderKey == providerKey);
-
-        if (existing != null)
-        {
-            // 更新显示名称
-            existing.ProviderDisplayName = displayName;
-            _dbContext.Set<UserLogin>().Update(existing);
-        }
-        else
-        {
-            // 创建新记录
-            var userLogin = new UserLogin
-            {
-                UserId = userId,
-                LoginProvider = loginProvider,
-                ProviderKey = providerKey,
-                ProviderDisplayName = displayName
-            };
-            await _dbContext.Set<UserLogin>().AddAsync(userLogin);
-        }
-
-        await _dbContext.SaveChangesAsync();
     }
 
     /// <summary>
@@ -68,23 +38,6 @@ public class UserLoginService : ApplicationService, IUserLoginService
         });
 
         return Ok<IEnumerable<UserLoginDto>>(dtos);
-    }
-
-    /// <summary>
-    /// 删除用户登录记录
-    /// </summary>
-    public async Task RemoveLoginAsync(Guid userId, string loginProvider, string providerKey)
-    {
-        var login = await _dbContext.Set<UserLogin>()
-            .FirstOrDefaultAsync(ul => ul.UserId == userId
-                && ul.LoginProvider == loginProvider
-                && ul.ProviderKey == providerKey);
-
-        if (login != null)
-        {
-            _dbContext.Set<UserLogin>().Remove(login);
-            await _dbContext.SaveChangesAsync();
-        }
     }
 
     /// <summary>

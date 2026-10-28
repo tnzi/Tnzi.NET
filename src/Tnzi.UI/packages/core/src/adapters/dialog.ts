@@ -20,15 +20,27 @@ export interface DialogAdapter {
   prompt(message: string, options?: DialogOptions): Promise<string | null>;
 }
 
+/**
+ * Used until a UI package installs a real dialog (`setDialogAdapter` /
+ * `setActiveUiAdapter`).
+ *
+ * `confirm` never answers "yes" on the user's behalf. Callers put destructive
+ * or disruptive actions behind it (the app-update prompt reloads the page and
+ * discards unsaved input), and this fallback is reached in any app that simply
+ * never installed an adapter, not only in node. In a browser it asks through the
+ * native `window.confirm`; with no way to ask at all it answers "no".
+ */
 class ConsoleDialogAdapter implements DialogAdapter {
   async alert(message: string): Promise<void> {
     console.log(`[Alert] ${message}`);
   }
 
   async confirm(message: string): Promise<boolean> {
-    // In node environment, default to true
-    console.log(`[Confirm] ${message}`);
-    return true;
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return window.confirm(message) === true;
+    }
+    console.warn(`[Confirm] ${message} (no dialog adapter installed; answering no)`);
+    return false;
   }
 
   async prompt(message: string): Promise<string | null> {

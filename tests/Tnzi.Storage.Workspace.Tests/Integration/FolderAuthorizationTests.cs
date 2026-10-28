@@ -36,7 +36,7 @@ public class FolderAuthorizationTests : WorkspaceIntegrationTestBase
         return folder;
     }
 
-    private async Task<FileRecord> SeedFileAsync(Guid? folderId)
+    private async Task<FileRecord> SeedFileAsync(Guid? folderId, Guid? owner = null)
     {
         var record = new FileRecord
         {
@@ -48,7 +48,7 @@ public class FolderAuthorizationTests : WorkspaceIntegrationTestBase
             Size = 4,
             Path = "seed/report.pdf",
             FolderId = folderId,
-            CreatorId = Stranger,
+            CreatorId = owner ?? Stranger,
         };
 
         DbContext.FileRecords.Add(record);
@@ -104,13 +104,31 @@ public class FolderAuthorizationTests : WorkspaceIntegrationTestBase
     public async Task MoveFilesToFolder_StillMovesFilesTheCallerMayWrite()
     {
         var folder = (await CreateFolderService().CreateAsync(new CreateFileFolderDto { Name = "dest" })).Data!;
-        var record = await SeedFileAsync(null);
+        var record = await SeedFileAsync(null, TestHelper.DefaultTestUserId);
 
         var result = await CreateFolderService().MoveFilesToFolderAsync([record.Id], folder.Id);
 
         Assert.True(result.Succeeded);
         DbContext.ChangeTracker.Clear();
         Assert.Equal(folder.Id, DbContext.FileRecords.Single(f => f.Id == record.Id).FolderId);
+    }
+
+    /// <summary>
+    /// 能写别人的文件（管理员）也不能把它放进另一个人的目录：目录是按所有者分开的命名空间，
+    /// 放过去的文件在两个人的文件空间里都不会出现。
+    /// </summary>
+    [Fact]
+    public async Task MoveFilesToFolder_RefusesFilingSomeoneElsesFileIntoYourFolder()
+    {
+        var folder = (await CreateFolderService().CreateAsync(new CreateFileFolderDto { Name = "dest" })).Data!;
+        var record = await SeedFileAsync(null);
+
+        var result = await CreateFolderService().MoveFilesToFolderAsync([record.Id], folder.Id);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        DbContext.ChangeTracker.Clear();
+        Assert.Null(DbContext.FileRecords.Single(f => f.Id == record.Id).FolderId);
     }
 
     /// <summary>目标目录不属于你，也不能往里塞东西。</summary>

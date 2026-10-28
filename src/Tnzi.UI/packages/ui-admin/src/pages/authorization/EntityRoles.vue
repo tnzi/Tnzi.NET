@@ -134,11 +134,11 @@ import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import type {
+  AssignableRoleDto,
   EntityInfoDto,
   EntityRoleDto,
   DataAuthOperation,
 } from '@tnzi/core/services/authorization'
-import type { RoleDto } from '@tnzi/core/services/identity'
 import TTabsPage from '../../components/layout/TTabsPage.vue'
 
 interface Role { id: string; code: string; name: string }
@@ -213,12 +213,14 @@ async function loadEntities(): Promise<void> {
 
 async function loadRoles(): Promise<void> {
   try {
-    // The unpaged endpoint: the paged one clamps pageSize to 100 silently, so
-    // the former `pageSize: 500` call left roles 101+ out of the matrix.
-    const all = await idBridge.roles.getAll()
+    // Unpaged, and read from the data-auth surface itself: this page is gated by
+    // `authorization.entityRole.view`, and Identity's role list sits behind
+    // `role.view`, which a delegated data-rule admin need not hold.
+    // (A paged read would clamp to 100 rows and leave roles 101+ out.)
+    const all = await authBridge.entityRoles.roles()
     roles.value = [...all]
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-      .filter((r): r is RoleDto & { id: string; name: string } => !!(r.id && r.name))
+      .filter((r): r is AssignableRoleDto & { id: string; name: string } => !!(r.id && r.name))
       .map((r) => ({
         id: r.id,
         code: r.normalizedName ?? r.name,

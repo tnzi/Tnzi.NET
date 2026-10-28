@@ -1,3 +1,5 @@
+using PdfSharp.Drawing;
+using PdfSharp.Fonts;
 using Xunit.Abstractions;
 
 namespace Tnzi.Documents.Tests;
@@ -164,6 +166,61 @@ public class PdfSharpPdfStamperTests
         match.Box.Y.ShouldBe(target.Y, 0.04d);
     }
 
+    /// <summary>
+    /// 字体里没有字形的字符（默认的拉丁系系统 sans 里的中日韩文字）会被 PDFsharp 一声不响地画成 .notdef 方框：
+    /// 签署的成品带着方框、哈希与证书照常生成。盖章必须当场拒绝，并指出是哪个字符。
+    /// </summary>
+    [Fact]
+    public void Stamp_TextTheFontCannotDraw_IsRefusedInsteadOfPrintingBoxes()
+    {
+        if (!DocumentFontResolver.EnsureReady())
+        {
+            _output.WriteLine("Skipped: no system sans font is available on this machine.");
+            return;
+        }
+
+        var font = new XFont(DocumentFontResolver.FamilyName, 10d);
+        if (GlyphHelper.GlyphIndexFromCodePoint(0x5F20, font) != 0)
+        {
+            _output.WriteLine("Skipped: the resolved system font covers CJK, so there is nothing to refuse.");
+            return;
+        }
+
+        var pdf = TestPdfBuilder.Letter(new TestPdfBuilder.TextRun("contract", 72d, 700d));
+
+        var ex = Should.Throw<PdfDocumentException>(() => _stamper.Stamp(pdf, new PdfStampRequest
+        {
+            Stamps =
+            [
+                new PdfTextStamp { PageNumber = 1, Rect = new NormalizedRect(0.1d, 0.1d, 0.5d, 0.05d), Text = "Signer: 张三" }
+            ]
+        }));
+        ex.Message.ShouldContain("U+5F20");
+    }
+
+    [Fact]
+    public void Stamp_LatinTextWithAccentsAndInvisibleCharacters_IsNotRefused()
+    {
+        if (!DocumentFontResolver.EnsureReady())
+        {
+            _output.WriteLine("Skipped: no system sans font is available on this machine.");
+            return;
+        }
+
+        var pdf = TestPdfBuilder.Letter(new TestPdfBuilder.TextRun("contract", 72d, 700d));
+
+        // 重音字母、长破折号在拉丁系 sans 里都有字形；制表符与零宽空格不画任何东西，不该被当成缺字形。
+        var stamped = _stamper.Stamp(pdf, new PdfStampRequest
+        {
+            Stamps =
+            [
+                new PdfTextStamp { PageNumber = 1, Rect = new NormalizedRect(0.1d, 0.1d, 0.8d, 0.05d), Text = "Zoë Café—résumé\t​" }
+            ]
+        });
+
+        stamped.Length.ShouldBeGreaterThan(pdf.Length);
+    }
+
     [Fact]
     public void Stamp_TextAndImageOnAnAppendedPage_Works()
     {
@@ -269,5 +326,83 @@ public class PdfSharpPdfStamperTests
         // 「读要翻 Y、写不翻 Y」在新建这条路径上同样成立。
         hit.Box.Y.ShouldBe(target.Y, 0.03d);
         hit.Box.X.ShouldBe(target.X, 0.03d);
+    }
+
+    /// <summary>
+    /// 量出来的就是画出来的：调用方据此换行，量窄一点，那一行的尾巴就画到页外、看不见也不报错。
+    /// 读回成品里第一个字形的起点与最后一个字形的步进终点，两者之差必须等于量出的宽度。
+    /// </summary>
+    [Theory]
+    [InlineData(12d, false, false)]
+    [InlineData(16d, true, false)]
+    [InlineData(9d, false, true)]
+    public void MeasureTextWidth_EqualsTheWidthActuallyDrawn(double fontSize, bool bold, bool italic)
+    {
+        if (!DocumentFontResolver.EnsureReady())
+        {
+            _output.WriteLine("Skipped: no system sans font is available on this machine.");
+            return;
+        }
+
+        const string text = "WIDE CAPITALS, narrow lowercase & 0123456789";
+        var measured = _stamper.MeasureTextWidth(text, fontSize, bold, italic);
+
+        var pdf = _stamper.Create(new PdfStampRequest
+        {
+            AppendPages = [new PdfPageSpec { WidthPoints = 595d, HeightPoints = 842d }],
+            Stamps =
+            [
+                new PdfTextStamp
+                {
+                    PageNumber = 1,
+                    Rect = new NormalizedRect(0.1d, 0.1d, 0.8d, 0.05d),
+                    Text = text,
+                    FontSize = fontSize,
+                    Bold = bold,
+                    Italic = italic,
+                    Alignment = PdfStampAlignment.TopLeft
+                }
+            ]
+        });
+
+        using var document = UglyToad.PdfPig.PdfDocument.Open(pdf);
+        var letters = document.GetPage(1).Letters;
+        var drawn = letters.Max(letter => letter.EndBaseLine.X) - letters.Min(letter => letter.StartBaseLine.X);
+
+        _output.WriteLine($"measured {measured:F2} pt, drawn {drawn:F2} pt");
+        measured.ShouldBeGreaterThan(0d);
+        drawn.ShouldBe(measured, 0.5d);
+    }
+
+    /// <summary>字宽随字形而变：同样字符数，全大写比小写宽、粗体比常规宽。按字符数估宽度的做法正是在这里估窄的。</summary>
+    [Fact]
+    public void MeasureTextWidth_TracksGlyphWidths_NotCharacterCounts()
+    {
+        if (!DocumentFontResolver.EnsureReady())
+        {
+            _output.WriteLine("Skipped: no system sans font is available on this machine.");
+            return;
+        }
+
+        var lower = _stamper.MeasureTextWidth("limitation of liability", 10d);
+        var upper = _stamper.MeasureTextWidth("LIMITATION OF LIABILITY", 10d);
+        var upperBold = _stamper.MeasureTextWidth("LIMITATION OF LIABILITY", 10d, bold: true);
+
+        upper.ShouldBeGreaterThan(lower * 1.15d);
+        upperBold.ShouldBeGreaterThan(upper);
+    }
+
+    /// <summary>量与画对字号的默认取值一致（不大于 0 时按 10 pt），空串宽度为 0。</summary>
+    [Fact]
+    public void MeasureTextWidth_UsesTheSameDefaultFontSizeAsDrawing()
+    {
+        if (!DocumentFontResolver.EnsureReady())
+        {
+            _output.WriteLine("Skipped: no system sans font is available on this machine.");
+            return;
+        }
+
+        _stamper.MeasureTextWidth("Sample", 0d).ShouldBe(_stamper.MeasureTextWidth("Sample", 10d), 0.0001d);
+        _stamper.MeasureTextWidth(string.Empty, 12d).ShouldBe(0d);
     }
 }

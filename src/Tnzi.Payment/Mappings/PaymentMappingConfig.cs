@@ -12,7 +12,9 @@ public class PaymentMappingConfig : IMappingConfig
     {
         // 退款实体映射：映射关联的 TradeNo
         context.NewConfig<Refund, RefundDto>()
-            .Map(dest => dest.TradeNo, src => src.Payment != null ? src.Payment.TradeNo : null);
+            .Map(dest => dest.TradeNo, src => src.Payment != null ? src.Payment.TradeNo : null)
+            .Map(dest => dest.BillingAccountType, src => src.Payment != null ? src.Payment.BillingAccountType : null)
+            .Map(dest => dest.BillingAccountId, src => src.Payment != null ? src.Payment.BillingAccountId : null);
 
         // 订阅实体的映射随续费域搬去了可选子模块 Tnzi.Payment.Subscriptions
         // （SubscriptionMappingConfig，规则一字不变）。IMappingConfig 是按程序集发现的，

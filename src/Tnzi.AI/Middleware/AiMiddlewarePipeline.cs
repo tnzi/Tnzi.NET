@@ -70,22 +70,30 @@ public class AiMiddlewarePipeline
     /// <summary>
     /// 构建流式管道委托
     /// </summary>
+    /// <remarks>
+    /// 每一层（含核心执行器）返回的流都经 <see cref="ExecutionContextFlow.Bind{T}"/> 包装：
+    /// 内层迭代器的每一步都在外层开始枚举它那一刻的执行上下文里恢复，外层 before 段设置的
+    /// 当前请求、属性包与 AsyncLocal 才能跨 yield 一直对内层（直到执行器里的工具调用）可见。
+    /// </remarks>
     public AiStreamingMiddlewareDelegate BuildStreaming(AiStreamingMiddlewareDelegate coreExecutor)
     {
         Check.NotNull(coreExecutor);
 
         var ordered = GetSortedMiddlewares();
 
-        var next = coreExecutor;
+        var next = BindExecutionContext(coreExecutor);
         for (var i = ordered.Count - 1; i >= 0; i--)
         {
             var middleware = ordered[i];
             var currentNext = next;
-            next = (context, ct) => middleware.InvokeStreamingAsync(context, currentNext, ct);
+            next = BindExecutionContext((context, ct) => middleware.InvokeStreamingAsync(context, currentNext, ct));
         }
 
         return next;
     }
+
+    private static AiStreamingMiddlewareDelegate BindExecutionContext(AiStreamingMiddlewareDelegate stage)
+        => (context, ct) => ExecutionContextFlow.Bind(stage(context, ct));
 
     private List<IAiMiddleware>? _sortedCache;
 

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { createApp, nextTick } from 'vue'
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import {
   useAdminDesktopStore,
   clampToSurface,
@@ -370,5 +372,109 @@ describe('panel windows', () => {
     const s = useAdminDesktopStore()
     const { id } = s.openOrFocusRoute({ name: 'chat-panel', path: '', title: 'Messages', panel: 'chat' })
     expect(s.find(id)?.stack[0].panel).toBe('chat')
+  })
+})
+
+// Windows carry record names in their titles (`useTabTitle`) and record ids in
+// their stacks, and the desktop is persisted per browser. A window restored for
+// a different user showed that user the previous one's records.
+describe('desktop windows belong to the user who opened them', () => {
+  const KEY = 'tnzi-admin-desktop'
+  const customer = { name: 'crm.customer', path: '/admin/crm/customers/c-9', title: 'Jane Doe' }
+
+  /** A pinia wired the way `install()` wires it, so `persist` actually runs. */
+  function persistedPinia(): void {
+    const pinia = createPinia()
+    pinia.use(piniaPluginPersistedstate)
+    createApp({ render: () => null }).use(pinia)
+    setActivePinia(pinia)
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    persistedPinia()
+  })
+
+  it('★ claimForUser closes the windows saved under a different user', () => {
+    const s = useAdminDesktopStore()
+    s.claimForUser('user-a')
+    s.open(customer)
+    s.claimForUser('user-b')
+    expect(s.windows).toEqual([])
+    expect(s.activeId).toBeNull()
+    expect(s.ownerId).toBe('user-b')
+  })
+
+  it('claimForUser keeps the windows of the same user', () => {
+    const s = useAdminDesktopStore()
+    s.claimForUser('user-a')
+    const id = s.open(customer)
+    s.claimForUser('user-a')
+    expect(s.windows.map((w) => w.id)).toEqual([id])
+    expect(s.activeId).toBe(id)
+  })
+
+  it('claimForUser adopts windows opened in this page load before the identity arrived', () => {
+    const s = useAdminDesktopStore()
+    const id = s.open(customer)
+    s.claimForUser('user-a')
+    expect(s.windows.map((w) => w.id)).toEqual([id])
+    expect(s.ownerId).toBe('user-a')
+  })
+
+  it('claimForUser ignores an unresolved (empty) user id', () => {
+    const s = useAdminDesktopStore()
+    s.claimForUser('user-a')
+    s.open(customer)
+    s.claimForUser('')
+    expect(s.windows).toHaveLength(1)
+    expect(s.ownerId).toBe('user-a')
+  })
+
+  it('★ a reload restores the owner, so the next user does not inherit the windows', async () => {
+    const before = useAdminDesktopStore()
+    before.claimForUser('user-a')
+    before.open(customer)
+    await nextTick() // persistence runs as a pre-flush subscription
+    expect(localStorage.getItem(KEY) ?? '').toContain('Jane Doe')
+
+    persistedPinia() // the next page load on the same browser
+    const after = useAdminDesktopStore()
+    expect(after.windows).toHaveLength(1)
+    after.claimForUser('user-b')
+    expect(after.windows).toEqual([])
+  })
+
+  it('the same user gets the restored windows back after a reload', async () => {
+    const before = useAdminDesktopStore()
+    before.claimForUser('user-a')
+    before.open(customer)
+    await nextTick()
+
+    persistedPinia()
+    const after = useAdminDesktopStore()
+    after.claimForUser('user-a')
+    expect(after.windows.map((w) => w.title)).toEqual(['Jane Doe'])
+  })
+
+  it('★ windows restored without an owner are closed on the first claim, windows opened since are kept', () => {
+    // Written by a build that predates `ownerId`: nothing says whose they are.
+    localStorage.setItem(KEY, JSON.stringify({
+      windows: [makeWindow({ id: 'w1', title: 'Jane Doe' })],
+      activeId: 'w1',
+      seq: 1,
+      topZ: 1,
+      geometryMemory: {},
+    }))
+    persistedPinia()
+    const s = useAdminDesktopStore()
+    expect(s.windows).toHaveLength(1)
+    const fresh = s.open({ name: 'identity.users', path: '/admin/identity/users', title: 'Users' })
+
+    s.claimForUser('user-b')
+
+    expect(s.windows.map((w) => w.id)).toEqual([fresh])
+    expect(s.activeId).toBe(fresh)
+    expect(s.ownerId).toBe('user-b')
   })
 })

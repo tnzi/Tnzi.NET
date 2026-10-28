@@ -33,6 +33,20 @@
   --tnzi-primary-900: #15302d;
   --tnzi-primary-950: #12221f;
 
+  /* Readable companions of the primary, recomputed by `buildCssVars` whenever
+     the primary changes (a brand colour can be anything, light or dark):
+       --tnzi-on-primary            text / icons ON a primary fill: white, or a
+                                    near-black ink when white would not read
+       --tnzi-primary-text-on-light the primary as a text / icon colour on light
+       --tnzi-primary-text-on-dark  surfaces, and on dark ones (4.5:1 or better)
+       --tnzi-primary-text          whichever of the two the current mode needs
+     The first three are mode-independent values; the last is an alias the
+     `.dark` block below repoints, so the mode switch stays a class toggle. */
+  --tnzi-on-primary: #ffffff;
+  --tnzi-primary-text-on-light: #0a776e;
+  --tnzi-primary-text-on-dark: #0d9488;
+  --tnzi-primary-text: var(--tnzi-primary-text-on-light);
+
   /* Non-primary roles ship base+500+rgb only; createTnziUi() injects full ramps at runtime. */
 
   --tnzi-info: #2080f0;
@@ -247,6 +261,7 @@
 }
 
 .dark {
+  --tnzi-primary-text: var(--tnzi-primary-text-on-dark);
   --tnzi-base-text: rgb(224, 224, 224);
   --tnzi-base-text-muted: rgb(150, 150, 150);
   --tnzi-base-text-rgb: 224 224 224;

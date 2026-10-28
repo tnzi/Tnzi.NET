@@ -6,16 +6,24 @@ namespace Tnzi.AI.Infrastructure.Streaming;
 public static class StreamingResponseWriter
 {
     /// <summary>
-    /// 默认 JSON 序列化选项（camelCase + 忽略 null）。
+    /// 默认 JSON 序列化选项（camelCase + 忽略 null + 枚举按成员名）。
     /// ⚠️ 共享只读实例 —— 首次序列化后会被 .NET 冻结，<b>不要直接修改它的属性</b>
     /// （会抛 <see cref="InvalidOperationException"/>）。需要定制时请复制后再传入
     /// <see cref="WriteEventAsync{T}"/> 的 jsonOptions 参数：
     /// <c>new JsonSerializerOptions(StreamingResponseWriter.DefaultJsonOptions) { ... }</c>。
     /// </summary>
+    /// <remarks>
+    /// ★ 枚举必须按成员名写出：这是框架的 wire 契约（MVC 全局与 <c>TnziJsonDefaults</c> 都挂了
+    /// <see cref="JsonStringEnumConverter"/>），前端按成员名比较。流式端点绕过 MVC 自己序列化，
+    /// 少了这一条，同一个枚举在 REST 回放里是 <c>"Text"</c>、在实时流里是 <c>0</c>：
+    /// 外部 CLI 运行的事件流里 <c>type</c> 永远对不上，文本与思考从不累积、错误从不浮现，
+    /// 两端都不报错。
+    /// </remarks>
     public static readonly JsonSerializerOptions DefaultJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
     };
 
     /// <summary>
@@ -134,15 +142,79 @@ public static class StreamingResponseWriter
     }
 
     /// <summary>
+    /// 心跳默认间隔：低于常见反向代理 / 负载均衡的空闲断开阈值（nginx proxy_read_timeout、云负载均衡的空闲超时默认均为 60 秒）。
+    /// </summary>
+    public static readonly TimeSpan DefaultHeartbeatInterval = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// 推进枚举器；等待下一个事件期间每隔 <paramref name="interval"/> 写一次心跳。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 静默窗口出现在<b>等待</b>下一个事件时（工具执行、模型缓冲工具参数），心跳只能在这段等待里由计时器写出；
+    /// 事件刚写完紧跟一个心跳、或下一个事件到了再补一个，都盖不住这段空档。
+    /// </para>
+    /// <para>
+    /// 写入都在调用方这一条循环里顺序发生，心跳不会插进某个事件中间；同一时刻只有一个 <c>MoveNextAsync</c> 在途。
+    /// 心跳写失败（客户端已断开）时不再写心跳、继续等这一步结束：之后写事件会以同样的原因失败，交给调用方既有的错误路径；
+    /// 在这里抛出则会留下一个在途的 <c>MoveNextAsync</c>，调用方随后的排空会撞上「上一步还没结束」。
+    /// </para>
+    /// </remarks>
+    private static async ValueTask<bool> MoveNextWithHeartbeatAsync<T>(
+        IAsyncEnumerator<T> enumerator, HttpResponse response, StreamingFormat format, TimeSpan interval, CancellationToken ct)
+    {
+        var moveNext = enumerator.MoveNextAsync();
+        if (moveNext.IsCompleted || interval <= TimeSpan.Zero)
+        {
+            return await moveNext;
+        }
+
+        var pending = moveNext.AsTask();
+        using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var heartbeatsEnabled = true;
+        while (heartbeatsEnabled)
+        {
+            var tick = Task.Delay(interval, timerCts.Token);
+            if (await Task.WhenAny(pending, tick) == pending || tick.IsCanceled)
+            {
+                break;
+            }
+
+            try
+            {
+                await WriteHeartbeatAsync(response, format, ct);
+            }
+            catch (Exception)
+            {
+                // 写不出心跳 = 连接已断或请求已取消：下一次写事件会以同样的原因失败并走调用方的错误路径
+                heartbeatsEnabled = false;
+            }
+        }
+
+        timerCts.Cancel();
+        return await pending;
+    }
+
+    /// <summary>
     /// 完整的流式传输生命周期管理 - 封装 pre-stream、IsDone 早发、主循环、drain、dispose。
     /// Pre-stream 阶段（首事件获取前）异常不会被捕获，由 ASP.NET Core 异常处理器正常返回 HTTP 错误。
     /// </summary>
+    /// <param name="response">HTTP 响应</param>
+    /// <param name="stream">事件序列</param>
+    /// <param name="format">SSE 或 NDJSON</param>
+    /// <param name="ct">取消令牌</param>
+    /// <param name="heartbeatInterval">
+    /// 首个事件写出后，等待下一个事件期间的心跳间隔（默认 <see cref="DefaultHeartbeatInterval"/>）。
+    /// 首个事件之前不写心跳：那时响应头尚未提交，异常还要能以普通 HTTP 错误返回。
+    /// </param>
     public static async Task WriteFullStreamAsync(
         HttpResponse response,
         IAsyncEnumerable<StreamEvent> stream,
         StreamingFormat format,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        TimeSpan? heartbeatInterval = null)
     {
+        var interval = heartbeatInterval ?? DefaultHeartbeatInterval;
         var enumerator = stream.GetAsyncEnumerator(ct);
 
         try
@@ -167,10 +239,6 @@ public static class StreamingResponseWriter
 
         var firstEvent = enumerator.Current;
         await WriteEventAsync(response, firstEvent, format, ct);
-        if (firstEvent.IsToolCall)
-        {
-            await WriteHeartbeatAsync(response, format, ct);
-        }
 
         var streamDone = firstEvent.IsDone;
         if (streamDone)
@@ -182,14 +250,10 @@ public static class StreamingResponseWriter
         {
             try
             {
-                while (await enumerator.MoveNextAsync())
+                while (await MoveNextWithHeartbeatAsync(enumerator, response, format, interval, ct))
                 {
                     var evt = enumerator.Current;
                     await WriteEventAsync(response, evt, format, ct);
-                    if (evt.IsToolCall)
-                    {
-                        await WriteHeartbeatAsync(response, format, ct);
-                    }
 
                     if (evt.IsDone)
                     {
@@ -239,6 +303,18 @@ public static class StreamingResponseWriter
     /// </summary>
     /// <typeparam name="TSource">源事件类型</typeparam>
     /// <typeparam name="TOutput">输出事件类型（序列化到客户端）</typeparam>
+    /// <param name="response">要写入的响应</param>
+    /// <param name="stream">源事件序列</param>
+    /// <param name="mapper">源事件到输出事件的转换</param>
+    /// <param name="isDone">输出事件是否为终止事件</param>
+    /// <param name="errorFactory">流式阶段出错时写给客户端的错误事件</param>
+    /// <param name="format">流式格式</param>
+    /// <param name="ct">取消令牌</param>
+    /// <param name="heartbeatInterval">
+    /// 首个事件之后，等待下一个事件期间每隔这么久写一次心跳（SSE 注释行 / NDJSON 空行；默认 <see cref="DefaultHeartbeatInterval"/>），
+    /// 免得一次长时间无事件的等待被反向代理当成空闲连接切断。首个事件之前不写：那时响应头还没提交，
+    /// 枚举前段的异常仍要能作为普通 HTTP 错误返回。
+    /// </param>
     public static async Task WriteFullStreamAsync<TSource, TOutput>(
         HttpResponse response,
         IAsyncEnumerable<TSource> stream,
@@ -246,8 +322,10 @@ public static class StreamingResponseWriter
         Func<TOutput, bool> isDone,
         Func<Exception, TOutput> errorFactory,
         StreamingFormat format,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        TimeSpan? heartbeatInterval = null)
     {
+        var interval = heartbeatInterval ?? DefaultHeartbeatInterval;
         var enumerator = stream.GetAsyncEnumerator(ct);
 
         try
@@ -281,7 +359,7 @@ public static class StreamingResponseWriter
         {
             try
             {
-                while (await enumerator.MoveNextAsync())
+                while (await MoveNextWithHeartbeatAsync(enumerator, response, format, interval, ct))
                 {
                     var evt = mapper(enumerator.Current);
                     await WriteEventAsync(response, evt, format, ct);
@@ -328,11 +406,12 @@ public static class StreamingResponseWriter
     }
 
     /// <summary>
-    /// 写入流式事件序列，并在相邻事件间隔超过阈值时自动插入心跳信号，防止反向代理超时断连。
+    /// 写入流式事件序列；等待下一个事件期间每隔 <paramref name="heartbeatInterval"/>（默认 <see cref="DefaultHeartbeatInterval"/>）
+    /// 写一次心跳，防止反向代理在静默期断开连接。
     /// </summary>
     /// <remarks>
-    /// 心跳在相邻事件之间检测注入。若 LLM 完全无响应（不产生任何事件），
-    /// 应在 Agent 层设置超时（AgentExecutorOptions.ToolTimeoutSeconds）控制。
+    /// 与 <see cref="WriteFullStreamAsync(HttpResponse, IAsyncEnumerable{StreamEvent}, StreamingFormat, CancellationToken, TimeSpan?)"/>
+    /// 不同，这里不管响应头、不写终止信号、不捕获异常：调用方已经 <see cref="ConfigureResponse"/> 过、自己决定流怎么收尾时使用。
     /// </remarks>
     public static async Task WriteStreamWithHeartbeatAsync(
         HttpResponse response,
@@ -341,20 +420,11 @@ public static class StreamingResponseWriter
         TimeSpan? heartbeatInterval = null,
         CancellationToken ct = default)
     {
-        var interval = heartbeatInterval ?? TimeSpan.FromSeconds(15);
-        var lastWrite = DateTime.UtcNow;
-
-        await foreach (var evt in events.WithCancellation(ct))
+        var interval = heartbeatInterval ?? DefaultHeartbeatInterval;
+        await using var enumerator = events.GetAsyncEnumerator(ct);
+        while (await MoveNextWithHeartbeatAsync(enumerator, response, format, interval, ct))
         {
-            var now = DateTime.UtcNow;
-            if (now - lastWrite >= interval)
-            {
-                await WriteHeartbeatAsync(response, format, ct);
-                lastWrite = now;
-            }
-
-            await WriteEventAsync(response, evt, format, ct);
-            lastWrite = DateTime.UtcNow;
+            await WriteEventAsync(response, enumerator.Current, format, ct);
         }
     }
 }

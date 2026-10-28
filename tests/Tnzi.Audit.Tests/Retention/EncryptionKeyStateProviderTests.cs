@@ -72,6 +72,37 @@ public class EncryptionKeyStateProviderTests
     }
 
     [Fact]
+    public void WithAKeyFile_AKeyThatLivesOnlyInTheFileIsNotDestroyed()
+    {
+        // 主密钥放在密钥文件里时,配置的 Keys 是空的:只看 Keys 会把文件里的活密钥误判为已销毁,
+        // 并把这个错误固化进销毁证明的哈希链。
+        var path = Path.Combine(Path.GetTempPath(), "tnzi-audit-keyfile-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(path, "{ \"activeKeyId\": \"tip-2026\", \"keys\": { \"tip-2026\": \"" + Convert.ToBase64String(new byte[32]) + "\" } }");
+        try
+        {
+            using var container = BuildContainer(s =>
+            {
+                s.AddLogging();
+                s.AddSingleton<FieldEncryptionKeyRing>();
+                s.Configure<FieldEncryptionOptions>(o =>
+                {
+                    o.Enabled = true;
+                    o.KeyFile = path;
+                });
+            });
+            using var scope = container.CreateScope();
+            var provider = scope.ServiceProvider.GetRequiredService<IEncryptionKeyStateProvider>();
+
+            Assert.False(provider.IsDestroyed("tip-2026"));
+            Assert.True(provider.IsDestroyed("tip-2025"));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void AnEmptyKeyId_IsNeverClaimedDestroyed()
     {
         using var container = BuildContainer();

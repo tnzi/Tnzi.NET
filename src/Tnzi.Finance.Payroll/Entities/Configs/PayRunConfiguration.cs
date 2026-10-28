@@ -10,8 +10,8 @@ public class PayRunConfiguration : EntityTypeConfigurationBase<PayRun, Guid>
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(r => r.Number).HasMaxLength(64);
-        builder.Property(r => r.Memo).HasMaxLength(500);
-        builder.Property(r => r.ProviderRunId).HasMaxLength(128);
+        builder.Property(r => r.Memo).HasMaxLength(PayrollFieldLimits.MemoMaxLength);
+        builder.Property(r => r.ProviderRunId).HasMaxLength(PayrollFieldLimits.ProviderRunIdMaxLength);
         builder.Property(r => r.GrossTotal).HasMoneyPrecision();
         builder.Property(r => r.DeductionTotal).HasMoneyPrecision();
         builder.Property(r => r.EmployerCostTotal).HasMoneyPrecision();

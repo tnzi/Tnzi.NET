@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using Microsoft.Extensions.Options;
 
 namespace Tnzi.EFCore.Tests.Encryption;
 
@@ -23,11 +22,11 @@ public class FieldEncryptionTests
     }
 
     private static AesGcmFieldEncryptor CreateEncryptor(
-        out FieldEncryptionOptions options,
+        out MutableFieldEncryptionOptionsMonitor options,
         string activeKeyId = KeyA,
         params string[] extraKeyIds)
     {
-        options = new FieldEncryptionOptions
+        var initial = new FieldEncryptionOptions
         {
             Enabled = true,
             ActiveKeyId = activeKeyId,
@@ -36,12 +35,11 @@ public class FieldEncryptionTests
 
         foreach (var id in extraKeyIds)
         {
-            options.Keys[id] = NewKeyMaterial();
+            initial.Keys[id] = NewKeyMaterial();
         }
 
-        var captured = options;
-        var monitor = new TestOptionsMonitor(() => captured);
-        return new AesGcmFieldEncryptor(monitor);
+        options = new MutableFieldEncryptionOptionsMonitor(initial);
+        return new AesGcmFieldEncryptor(options);
     }
 
     [Fact]
@@ -111,7 +109,7 @@ public class FieldEncryptionTests
         var encryptor = CreateEncryptor(out var options);
         var cipher = encryptor.Encrypt("to be destroyed", "Demo.Tip.Body");
 
-        options.Keys.Clear();
+        options.Update(o => o.Keys.Clear());
 
         var ex = Assert.Throws<FieldEncryptionException>(
             () => encryptor.Decrypt(cipher, "Demo.Tip.Body"));
@@ -126,7 +124,7 @@ public class FieldEncryptionTests
         var underOldKey = encryptor.Encrypt("written before rotation", "Demo.Tip.Body");
 
         // 轮换：把活动密钥指向新的一把，旧密钥留在环里
-        options.ActiveKeyId = KeyB;
+        options.Update(o => o.ActiveKeyId = KeyB);
         var underNewKey = encryptor.Encrypt("written after rotation", "Demo.Tip.Body");
 
         Assert.StartsWith(KeyA + ":", underOldKey, StringComparison.Ordinal);
@@ -139,7 +137,7 @@ public class FieldEncryptionTests
     public void Encrypt_WithoutActiveKey_Throws()
     {
         var encryptor = CreateEncryptor(out var options);
-        options.ActiveKeyId = null;
+        options.Update(o => o.ActiveKeyId = null);
 
         var ex = Assert.Throws<FieldEncryptionException>(
             () => encryptor.Encrypt("value", "Demo.Tip.Body"));
@@ -206,18 +204,5 @@ public class FieldEncryptionTests
         var disabled = new FieldEncryptionOptions { Enabled = false };
 
         Assert.True(validator.Validate(null, disabled).Succeeded);
-    }
-
-    private sealed class TestOptionsMonitor : IOptionsMonitor<FieldEncryptionOptions>
-    {
-        private readonly Func<FieldEncryptionOptions> _factory;
-
-        public TestOptionsMonitor(Func<FieldEncryptionOptions> factory) => _factory = factory;
-
-        public FieldEncryptionOptions CurrentValue => _factory();
-
-        public FieldEncryptionOptions Get(string? name) => _factory();
-
-        public IDisposable? OnChange(Action<FieldEncryptionOptions, string?> listener) => null;
     }
 }

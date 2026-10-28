@@ -8,8 +8,9 @@ import {
   type UseColumnSettingsReturn,
 } from './useColumnSettings'
 import { useBatchActions, type UseBatchActionsReturn } from './useBatchActions'
-import type { UseFormModalReturn } from './useFormModal'
+import type { FormFooterSwitch, UseFormModalReturn } from './useFormModal'
 import { useDetail, type DetailMode } from './useDetail'
+import { getGlobalMessage } from '../utils/global-toast'
 import { normalizeCrudPermission, canAction, type CrudActionPermissions } from './permission-gates'
 import { translatePageKey } from '../i18n'
 
@@ -60,7 +61,7 @@ export type CrudPageResult<T> = PagedList<T>
  * Operation tag passed to `onError` so a single handler can disambiguate
  * which surface failed (e.g. tailor the message or only log writes).
  */
-export type CrudPageOp = 'fetch' | 'create' | 'update' | 'delete' | 'export' | 'import'
+export type CrudPageOp = 'fetch' | 'load' | 'create' | 'update' | 'delete' | 'export' | 'import'
 
 export interface UseCrudPageOptions<T, TId = string | number> {
   pageId: string
@@ -79,10 +80,17 @@ export interface UseCrudPageOptions<T, TId = string | number> {
   deleteData?: (ids: TId[]) => Promise<void>
   exportData?: (query: CrudPageQuery) => Promise<Blob>
   importData?: (file: File) => Promise<void>
+  /**
+   * The file types the import picker offers, as an `<input accept>` value
+   * (`'.csv'`). Name what `importData` reads: without it the picker offers
+   * `.csv,.xlsx,.json`, and a format the endpoint does not parse is read as
+   * text and refused row by row.
+   */
+  importAccept?: string
   onRefresh?: () => void
   /**
-   * Called whenever fetchData / createData / updateData / deleteData /
-   * exportData / importData rejects. The signature lets a page tailor
+   * Called whenever fetchData / loadEditRecord / createData / updateData /
+   * deleteData / exportData / importData rejects. The signature lets a page tailor
    * messaging per operation. Default behavior - when this is omitted -
    * is to surface the error via `window.$message.error(err.message)`.
    * `TAdminAppRoot` registers that handle automatically (via its internal
@@ -115,9 +123,31 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    */
   successToast?: boolean | Partial<Record<'create' | 'update' | 'delete', boolean>>
   /**
+   * Values a new record starts with: whatever the create request would end
+   * up with when the field is left out, so the form shows it.
+   *
+   * A switch the form does not seed renders OFF, but a request that omits the
+   * field gets the server's default, and for "enabled" / "active" flags that
+   * is ON: the operator saw "disabled" and created a live record. Every way
+   * into create gets them (the Create button, a seeded `openCreate`, a restored
+   * `?detail=new`); a seed passed to `openCreate` wins over a default.
+   */
+  createDefaults?: Partial<T>
+  /**
+   * A record flag such as "Active" shown as a switch at the left of the form modal's footer, opposite
+   * Cancel / Confirm, instead of as a form field; see {@link FormFooterSwitch}. Edit only by default.
+   */
+  formFooterSwitch?: FormFooterSwitch
+  /**
    * Retry attempts for `fetchData` on transient failures. Default `3` -
    * three retries with exponential backoff, then surface the error. Set
    * to `0` to disable retries.
+   *
+   * Transient means no HTTP status (network error, timeout, a thrown non-HTTP
+   * error), 408, 429 or 5xx. Any other 4xx (a 403 for a role without the
+   * list code, a 404 on a host without the endpoint, a 400 for a bad filter)
+   * is final and surfaces after the first request: asking again only repeats
+   * the answer.
    *
    * Only `fetchData` is retried. Write operations (create/update/delete/
    * import) are never retried because duplicate writes are worse than
@@ -157,6 +187,23 @@ export interface UseCrudPageOptions<T, TId = string | number> {
    * re-implementing open-state plumbing. Fires once per opened record.
    */
   onView?: (row: T) => void
+  /**
+   * Load the record an **edit** form opens on, for a list whose rows are not
+   * the whole record (a summary without the body, the tag ids, a nickname).
+   *
+   * Without it the form opens on the row, so every field the row does not
+   * carry shows empty and is saved empty: editing a post clears its body,
+   * editing a user clears their nickname. With it, `openEdit` (and so
+   * `editAction`) opens the form once this record has arrived, and a restored
+   * `?detail=edit:<id>`, which resolves from the loaded rows, swaps it in and
+   * holds the save button until it has.
+   *
+   * Return the shape the form edits; merge the row in when the detail DTO lacks
+   * list-only fields. A rejection goes through `onError` with op `'load'`
+   * and closes a form that is open on the incomplete row, so it cannot be
+   * saved.
+   */
+  loadEditRecord?: (row: T) => Promise<T>
   /**
    * Load the first page automatically on construction. Default `true` - the
    * hook fires `refresh()` once so pages no longer need the boilerplate
@@ -199,6 +246,8 @@ export interface UseCrudPageReturn<T, TId = string | number> {
   columnSettings: UseColumnSettingsReturn
   batchActions: UseBatchActionsReturn<TId>
   formModal: UseFormModalReturn<T>
+  /** The `formFooterSwitch` option, read by the list shell's form modal. */
+  formFooterSwitch?: FormFooterSwitch
   /**
    * The row-key extractor passed to {@link useCrudPage}. Re-exposed so
    * consumer components (notably `TCrudPage`) can default to it instead of
@@ -230,10 +279,23 @@ export interface UseCrudPageReturn<T, TId = string | number> {
   openCreate: (seed?: Partial<T> | MouseEvent) => void
   openEdit: (row: T) => void
   openView: (row: T) => void
+  /**
+   * Save the open form (create or update). While a save is in flight a second
+   * call is refused and resolves to `null` without writing; see
+   * {@link UseCrudPageReturn.submitting}.
+   */
   submit: () => Promise<T | null>
+  /**
+   * A `submit` is waiting on `createData` / `updateData`. The built-in Confirm
+   * buttons show it as their loading state; bind it in a custom form footer.
+   * (Same ref as `formModal.submitting`.)
+   */
+  submitting: Readonly<Ref<boolean>>
   handleDelete: (ids?: TId[]) => Promise<void>
   exportAll: () => Promise<Blob | null>
   importFile: (file: File) => Promise<void>
+  /** The `importAccept` option: what the import picker offers. */
+  importAccept?: string
   /**
    * Clear `error` without re-running `refresh()`. Use from `#error` slot
    * close buttons when the page wants to hide a stale alert without
@@ -241,26 +303,6 @@ export interface UseCrudPageReturn<T, TId = string | number> {
    */
   dismissError: () => void
   detailMode: Ref<DetailMode>
-}
-
-/**
- * Look up the global `window.$message` handle. `TAdminAppRoot` registers
- * it automatically from inside its provider stack; apps not using
- * `TAdminAppRoot` must register their own. The interface is duck-typed so
- * the helper stays decoupled from naive-ui's type surface and works in
- * test environments where the handle isn't registered.
- */
-interface ToastApi {
-  error: (content: string) => void
-  success?: (content: string) => void
-}
-function getGlobalMessage(): ToastApi | null {
-  if (typeof window === 'undefined') return null
-  const m = (window as unknown as { $message?: unknown }).$message
-  if (m && typeof (m as { error?: unknown }).error === 'function') {
-    return m as ToastApi
-  }
-  return null
 }
 
 /** i18n keys for the write-confirmation toasts, keyed by operation. */
@@ -424,6 +466,26 @@ export function useCrudPage<T, TId = string | number>(
   const formModal = detail.form
   const detailMode = detail.mode
 
+  // `createDefaults` must reach every way into create: `openCreate` below and
+  // the `?detail=new` restore inside useDetail, which opens on an empty record
+  // of its own (already, by the time this line runs, on a cold deep link:
+  // hence `immediate`). Both go through `formModal.open`, which sets the mode
+  // before the record; synchronous, so the form never renders without them.
+  const createDefaults = options.createDefaults
+  if (createDefaults) {
+    watch(
+      () => formModal.formData.value,
+      (record) => {
+        if (!record || formModal.mode.value !== 'create') return
+        const target = record as Record<string, unknown>
+        for (const [key, value] of Object.entries(createDefaults)) {
+          if (target[key] === undefined) target[key] = value
+        }
+      },
+      { flush: 'sync', immediate: true },
+    )
+  }
+
   // Fire `onView` whenever the detail opens (or restores via deep-link) in view
   // mode, keyed on the viewed record - so a page can lazy-load related data for
   // its read-only `#detail` drawer without touching open-state plumbing. Keyed
@@ -554,7 +616,56 @@ export function useCrudPage<T, TId = string | number>(
     formModal.open('create', { ...(safe ?? {}) } as T)
   }
 
+  // `loadEditRecord` bookkeeping: the form object the last load opened (so the
+  // watcher below does not load it again), and a sequence number so a slower,
+  // earlier load cannot replace the form a later one opened.
+  let loadedEditRecord: T | null = null
+  let editLoadSeq = 0
+
+  async function openEditOnLoadedRecord(row: T): Promise<void> {
+    const loader = options.loadEditRecord
+    if (!loader) return
+    const seq = ++editLoadSeq
+    const formBefore = formModal.formData.value
+    // Open on the row already (a restored deep link): keep it from being saved
+    // with the fields the row lacks while the full record is on its way.
+    const holdsOpenForm = formBefore !== null && formModal.mode.value === 'edit'
+    if (holdsOpenForm) formModal.submitting.value = true
+    try {
+      const record = await runWithErrorHandling('load', () => loader(row))
+      // A later edit, a close, or another form opened while this was loading.
+      if (seq !== editLoadSeq || formModal.formData.value !== formBefore) return
+      formModal.open('edit', record)
+      loadedEditRecord = formModal.formData.value
+    } catch {
+      // Already reported through onError / the toast. A form left open on the
+      // row would save its empty fields over the real ones.
+      if (seq === editLoadSeq && holdsOpenForm && formModal.formData.value === formBefore) formModal.close()
+    } finally {
+      if (holdsOpenForm) formModal.submitting.value = false
+    }
+  }
+
+  if (options.loadEditRecord) {
+    watch(
+      () => (formModal.visible.value && formModal.mode.value === 'edit' ? formModal.formData.value : null),
+      (record) => {
+        if (!record) {
+          // Closed, or another mode: whatever is still loading is for a form that is gone.
+          editLoadSeq++
+          loadedEditRecord = null
+          return
+        }
+        if (record !== loadedEditRecord) void openEditOnLoadedRecord(record as T)
+      },
+    )
+  }
+
   function openEdit(row: T): void {
+    if (options.loadEditRecord) {
+      void openEditOnLoadedRecord(row)
+      return
+    }
     formModal.open('edit', row)
   }
 
@@ -562,7 +673,32 @@ export function useCrudPage<T, TId = string | number>(
     formModal.open('view', row)
   }
 
+  /**
+   * Run one write with the form's in-flight flag raised. The flag is checked
+   * and set synchronously in `submit` (before its first await), so a second
+   * click, however fast, finds it raised. It comes down when the request
+   * answers either way: a failed save leaves the form open for a retry.
+   */
+  async function writeOnce<R>(fn: () => Promise<R>): Promise<R> {
+    formModal.submitting.value = true
+    try {
+      return await fn()
+    } finally {
+      formModal.submitting.value = false
+    }
+  }
+
+  /**
+   * Close the form the save was for. The operator may have closed it while the
+   * request was in flight and opened another record; closing whatever is open
+   * now would throw away a form they are halfway through.
+   */
+  function closeIfStillOpenOn(data: T): void {
+    if (formModal.formData.value === data) formModal.close()
+  }
+
   async function submit(): Promise<T | null> {
+    if (formModal.submitting.value) return null
     const mode = formModal.mode.value
     const data = formModal.formData.value
     if (mode === 'view' || !mode || !data) {
@@ -574,11 +710,11 @@ export function useCrudPage<T, TId = string | number>(
         formModal.close()
         return null
       }
-      const created = await runWithErrorHandling('create', () =>
-        options.createData!(data as Partial<T>),
+      const created = await writeOnce(() =>
+        runWithErrorHandling('create', () => options.createData!(data as Partial<T>)),
       )
       notifyWritten('create')
-      formModal.close()
+      closeIfStillOpenOn(data)
       await refresh()
       return created
     }
@@ -588,11 +724,11 @@ export function useCrudPage<T, TId = string | number>(
       return null
     }
     const id = options.rowKey(data as T)
-    const updated = await runWithErrorHandling('update', () =>
-      options.updateData!(id, data as Partial<T>),
+    const updated = await writeOnce(() =>
+      runWithErrorHandling('update', () => options.updateData!(id, data as Partial<T>)),
     )
     notifyWritten('update')
-    formModal.close()
+    closeIfStillOpenOn(data)
     await refresh()
     return updated
   }
@@ -601,7 +737,23 @@ export function useCrudPage<T, TId = string | number>(
     if (!options.deleteData) return
     const target = ids ?? batchActions.selectedIds.value
     if (target.length === 0) return
-    await runWithErrorHandling('delete', () => options.deleteData!(target))
+    const shownBefore = new Set(controller.items.map(options.rowKey))
+    try {
+      await runWithErrorHandling('delete', () => options.deleteData!(target))
+    } catch (error) {
+      // Most bridges delete a batch one id at a time and stop at the first
+      // refusal, so the rows before it are already gone. Reload so the list
+      // stops showing them, and unselect them: a retry that still names them
+      // fails at once on a 404 and never reaches the rest.
+      await refresh()
+      if (controller.status === 'success') {
+        const shownAfter = new Set(controller.items.map(options.rowKey))
+        for (const id of target) {
+          if (shownBefore.has(id) && !shownAfter.has(id)) batchActions.unselect(id)
+        }
+      }
+      throw error
+    }
     notifyWritten('delete')
     batchActions.clear()
     await refresh()
@@ -645,6 +797,7 @@ export function useCrudPage<T, TId = string | number>(
     columnSettings,
     batchActions,
     formModal,
+    formFooterSwitch: options.formFooterSwitch,
     rowKey: options.rowKey,
     get canCreate() {
       return canCreateRef.value
@@ -666,9 +819,11 @@ export function useCrudPage<T, TId = string | number>(
     openEdit,
     openView,
     submit,
+    submitting: formModal.submitting,
     handleDelete,
     exportAll,
     importFile,
+    importAccept: options.importAccept,
     dismissError,
     detailMode,
   }

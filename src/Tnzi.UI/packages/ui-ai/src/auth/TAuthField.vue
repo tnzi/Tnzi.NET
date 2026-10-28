@@ -24,10 +24,22 @@ withDefaults(
   },
 );
 
+import { isImeComposing } from '@tnzi/core/utils';
+
 const model = defineModel<string>({ default: '' });
 
 /** Enter submits - a one-field pane where Enter does nothing feels broken. */
 const emit = defineEmits<{ (e: 'submit'): void }>();
+
+/**
+ * Except the Enter that commits an IME candidate: `v-model` has not seen the
+ * composed text yet, so submitting then sends what was there before it.
+ */
+function onEnter(event: KeyboardEvent): void {
+  if (isImeComposing(event)) return;
+  event.preventDefault();
+  emit('submit');
+}
 </script>
 
 <template>
@@ -39,7 +51,7 @@ const emit = defineEmits<{ (e: 'submit'): void }>();
     :autocomplete="autocomplete"
     :inputmode="inputmode"
     :disabled="disabled"
-    @keydown.enter.prevent="emit('submit')"
+    @keydown.enter="onEnter"
   />
 </template>
 

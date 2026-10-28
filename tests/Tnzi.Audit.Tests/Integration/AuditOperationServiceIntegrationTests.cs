@@ -559,4 +559,54 @@ public class AuditOperationServiceIntegrationTests : IntegrationTestBase
     }
 
     #endregion
+
+    #region Time axis
+
+    /// <summary>
+    /// 读取面的时间轴是请求时刻（有索引的 <c>StartTime</c>），不是落库时刻（无索引的 <c>CreationTime</c>）。
+    /// 两者在采集队列积压时会分开：这里让一条十天前的请求晚到今天才落库，按日期范围找它必须找得到。
+    /// </summary>
+    [Fact]
+    public async Task ReadPaths_FilterAndSortOnTheRequestTime_NotTheInsertTime()
+    {
+        var now = DateTime.UtcNow;
+        var lateWrite = new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = "Queued.Write",
+            ResultType = AuditResultType.Success,
+            StartTime = now.AddDays(-10),
+            CreationTime = now,
+            Elapsed = 10
+        };
+        var recent = new AuditOperation
+        {
+            Id = Guid.NewGuid(),
+            FunctionName = "Recent.Write",
+            ResultType = AuditResultType.Success,
+            StartTime = now.AddDays(-1),
+            CreationTime = now.AddDays(-20),
+            Elapsed = 10
+        };
+        await DbContext.AuditOperations.AddRangeAsync(lateWrite, recent);
+        await DbContext.SaveChangesAsync();
+
+        var window = await _service.GetOperationsAsync(new AuditOperationQueryDto
+        {
+            StartDate = now.AddDays(-11),
+            EndDate = now.AddDays(-9),
+            PageIndex = 1,
+            PageSize = 10
+        });
+        window.Succeeded.ShouldBeTrue();
+        window.Data!.Items.Select(o => o.FunctionName).ShouldBe(["Queued.Write"]);
+
+        var all = await _service.GetOperationsAsync(new AuditOperationQueryDto { PageIndex = 1, PageSize = 10 });
+        all.Data!.Items.Select(o => o.FunctionName).ShouldBe(["Recent.Write", "Queued.Write"]);
+
+        var trend = await _service.GetAuditTrendAsync(now.AddDays(-11), now.AddDays(-9));
+        trend.Data!.Sum(p => p.TotalCount).ShouldBe(1);
+    }
+
+    #endregion
 }

@@ -33,14 +33,17 @@ public class DefaultModuleFunctionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 获取模块的功能列表
+    /// 权限目录：全部模块（平铺）连同各自的全部功能，含停用与退役行
     /// </summary>
-    /// <param name="moduleId">模块ID</param>
-    /// <returns>功能列表</returns>
-    [HttpGet("module/{moduleId:guid}")]
-    public virtual async Task<ApiResult<IEnumerable<ModuleFunction>>> GetByModuleId(Guid moduleId)
+    /// <remarks>
+    /// 权限目录页的数据源，挂在本控制器的 <c>authorization.permission.view</c> 门下：
+    /// 只管权限点的人不必再持有模块管理的 <c>authorization.functionModule.view</c> 才看得见模块树。
+    /// </remarks>
+    /// <returns>权限目录</returns>
+    [HttpGet("catalogue")]
+    public virtual async Task<ApiResult<IReadOnlyList<PermissionCatalogueModuleDto>>> GetCatalogue()
     {
-        var result = await ModuleManagementService.GetModuleFunctionsAsync(moduleId);
+        var result = await ModuleManagementService.GetPermissionCatalogueAsync();
         return result.ToApiResult();
     }
 

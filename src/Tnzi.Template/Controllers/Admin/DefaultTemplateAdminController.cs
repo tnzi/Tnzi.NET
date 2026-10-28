@@ -112,7 +112,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateEngine == null)
         {
-            return ApiResult<TemplateValidationResult>.Error("Template engine is not available", 503);
+            return ApiResult<TemplateValidationResult>.Error("Template engine is not available", 501);
         }
 
         var result = await TemplateEngine.ValidateAsync(request.Content);
@@ -147,6 +147,10 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "template.template.create")]
     public virtual async Task<ApiResult<TemplateImportResultDto>> Import([FromBody] TemplateImportRequest request)
     {
+        // 覆盖已有模板就是改写它们：还要 PUT 端点要求的那个码（理由见 ImportOverwriteGate）。
+        if (request.OverwriteExisting)
+            await ImportOverwriteGate.RequireAsync(Services, "template.template.update");
+
         var result = await TemplateStoreService.ImportTemplatesAsync(request.Json, request.OverwriteExisting);
         return result.ToApiResult();
     }
@@ -199,7 +203,7 @@ public class DefaultTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateEngine == null)
         {
-            return ApiResult<string>.Error("Template engine is not available", 503);
+            return ApiResult<string>.Error("Template engine is not available", 501);
         }
 
         var rendered = await TemplateEngine.RenderAsync(request.Content, request.Model);

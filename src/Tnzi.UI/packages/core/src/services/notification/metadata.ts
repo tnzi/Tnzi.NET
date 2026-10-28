@@ -80,7 +80,6 @@ export enum NotificationPriority {
   Low = 'Low',
   Normal = 'Normal',
   High = 'High',
-  Urgent = 'Urgent',
 }
 
 /**
@@ -94,23 +93,9 @@ export function getNotificationPriorityLabel(priority: NotificationPriority): st
       return 'Normal';
     case NotificationPriority.High:
       return 'High';
-    case NotificationPriority.Urgent:
-      return 'Urgent';
     default:
       return 'Unknown';
   }
-}
-
-/**
- * Recipient type
- */
-export enum RecipientType {
-  User = 1,
-  Email = 2,
-  Phone = 3,
-  Role = 4,
-  Organization = 5,
-  All = 6,
 }
 
 /**
@@ -140,10 +125,22 @@ export function getTrendIntervalLabel(interval: TrendInterval): string {
 }
 
 /**
- * Digest frequency
+ * Error code of the 400 a preference upsert answers when its
+ * `quietHoursTimeZone` is not a canonical IANA id this server can resolve.
+ * Backend: ErrorCodes.NOTIFICATION_INVALID_TIME_ZONE.
+ *
+ * A page can tell this refusal apart from any other and put it on the zone
+ * field: the zone usually came from the browser, so the person never typed it
+ * and a generic "save failed" would not tell them what to change.
  */
-export enum DigestFrequency {
-  None = 'none',
-  Daily = 'daily',
-  Weekly = 'weekly',
+export const NOTIFICATION_INVALID_TIME_ZONE = 'NOTIFICATION_INVALID_TIME_ZONE';
+
+/**
+ * Whether a failure (a thrown `HttpError` / `ApiError`, or a failed envelope)
+ * is the time-zone refusal above.
+ */
+export function isInvalidTimeZoneError(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const source = value as { errorCode?: unknown; cause?: { errorCode?: unknown } };
+  return (source.errorCode ?? source.cause?.errorCode) === NOTIFICATION_INVALID_TIME_ZONE;
 }

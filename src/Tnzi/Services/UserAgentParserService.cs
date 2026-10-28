@@ -17,8 +17,39 @@ public class UserAgentParserService : IUserAgentParserService
         public const string Desktop = "Desktop";
     }
 
-    private static readonly Regex BrowserRegex = new(@"(?<browser>Chrome|Firefox|Safari|Edge|Opera|IE|MSIE|Trident|Edg)[/\s]?(?<version>[\d.]+)?", RegexOptions.IgnoreCase);
-    private static readonly Regex OsRegex = new(@"(?<os>Windows|Mac OS X|Linux|Android|iOS|iPhone|iPad)[\s/]?(?<version>[\d._]+)?", RegexOptions.IgnoreCase);
+    private const RegexOptions TokenOptions = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+
+    /// <summary>精简 UA（Chrome 110 起的默认）把 Android 机型固定写成这个占位值。</summary>
+    private const string ReducedAndroidModel = "K";
+
+    /// <summary>
+    /// 浏览器令牌，按特异性排序，取第一个命中的。
+    /// </summary>
+    /// <remarks>
+    /// 不能按令牌在字符串里出现的位置取最左者：Chromium 系浏览器（Edge、Opera）的 UA 同时带着 <c>Chrome/</c> 与
+    /// <c>Safari/</c>，iOS 上的 Chrome / Firefox 带着 <c>Safari/</c>，而 <c>Edg/</c>、<c>OPR/</c>、<c>CriOS/</c>、<c>FxiOS/</c>
+    /// 都排在后面，最左匹配会把它们统统记成 Chrome 或 Safari。Safari 的 <c>Safari/x</c> 是 WebKit 构建号，
+    /// 真实版本在 <c>Version/x</c>。
+    /// </remarks>
+    private static readonly (Regex Token, string Name)[] BrowserTokens =
+    [
+        (new Regex(@"\b(?:Edg|EdgA|EdgiOS|Edge)/(?<version>[\d.]+)", TokenOptions), "Microsoft Edge"),
+        (new Regex(@"\b(?:OPR|Opera)[/\s](?<version>[\d.]+)", TokenOptions), "Opera"),
+        (new Regex(@"\bCriOS/(?<version>[\d.]+)", TokenOptions), "Chrome"),
+        (new Regex(@"\bFxiOS/(?<version>[\d.]+)", TokenOptions), "Firefox"),
+        (new Regex(@"\bFirefox/(?<version>[\d.]+)", TokenOptions), "Firefox"),
+        (new Regex(@"\b(?:Chrome|Chromium)/(?<version>[\d.]+)", TokenOptions), "Chrome"),
+        (new Regex(@"\bMSIE\s(?<version>[\d.]+)", TokenOptions), "Internet Explorer"),
+        (new Regex(@"\bTrident/[\d.]+.*?\brv:(?<version>[\d.]+)", TokenOptions), "Internet Explorer"),
+        (new Regex(@"\bVersion/(?<version>[\d.]+).*\bSafari/", TokenOptions), "Safari"),
+        (new Regex(@"\bSafari/(?<version>[\d.]+)", TokenOptions), "Safari"),
+    ];
+
+    private static readonly Regex OsRegex = new(@"(?<os>Windows NT|Windows|Mac OS X|Linux|Android|iOS|iPhone|iPad)[\s/]?(?<version>[\d._]+)?", RegexOptions.IgnoreCase);
+    private static readonly Regex AndroidPlatformRegex = new(@"\(([^)]*\bAndroid\b[^)]*)\)", TokenOptions);
+    private static readonly Regex AndroidVersionRegex = new(@"Android\s+([\d.]+)", TokenOptions);
+    private static readonly Regex LocaleSegmentRegex = new(@"^[a-z]{2}(?:[-_][a-z]{2,4})?$", TokenOptions);
+    private static readonly Regex BuildSuffixRegex = new(@"\s*Build/.*$", TokenOptions);
     private static readonly Regex MobileRegex = new(@"(Mobile|Android|iPhone|iPad|iPod|BlackBerry|Windows Phone)", RegexOptions.IgnoreCase);
     private static readonly Regex BotRegex = new(@"(bot|crawler|spider|scraper|indexer|fetcher)", RegexOptions.IgnoreCase);
 
@@ -63,11 +94,15 @@ public class UserAgentParserService : IUserAgentParserService
         }
 
         // 解析浏览器
-        var browserMatch = BrowserRegex.Match(userAgent);
-        if (browserMatch.Success)
+        foreach (var (token, name) in BrowserTokens)
         {
-            info.Browser = NormalizeBrowserName(browserMatch.Groups["browser"].Value);
-            info.BrowserVersion = browserMatch.Groups["version"].Value;
+            var browserMatch = token.Match(userAgent);
+            if (browserMatch.Success)
+            {
+                info.Browser = name;
+                info.BrowserVersion = browserMatch.Groups["version"].Value;
+                break;
+            }
         }
 
         // 解析操作系统
@@ -91,26 +126,13 @@ public class UserAgentParserService : IUserAgentParserService
     }
 
     /// <summary>
-    /// 规范化浏览器名称
-    /// </summary>
-    private string NormalizeBrowserName(string browser)
-    {
-        // 必须用 ToLowerInvariant：ToLower() 走当前区域，土耳其语等区域会把 "MSIE" 映射成 "msıe"，匹配落空
-        return browser.ToLowerInvariant() switch
-        {
-            "msie" or "trident" => "Internet Explorer",
-            "edg" => "Microsoft Edge",
-            _ => browser
-        };
-    }
-
-    /// <summary>
     /// 规范化操作系统名称
     /// </summary>
     private string NormalizeOsName(string os)
     {
         return os switch
         {
+            "Windows NT" => "Windows",
             "Mac OS X" => "macOS",
             "iPhone" or "iPad" => "iOS",
             _ => os
@@ -137,24 +159,11 @@ public class UserAgentParserService : IUserAgentParserService
         // Android设备
         if (userAgent.Contains("Android", StringComparison.OrdinalIgnoreCase))
         {
-            var androidMatch = Regex.Match(userAgent, @"Android\s+([\d.]+)");
-            if (androidMatch.Success)
-            {
-                info.OperatingSystem = "Android";
-                info.OperatingSystemVersion = androidMatch.Groups[1].Value;
-            }
-
-            // 提取设备型号
-            var deviceMatch = Regex.Match(userAgent, @"\(([^)]+)\)");
-            if (deviceMatch.Success)
-            {
-                var deviceInfo = deviceMatch.Groups[1].Value;
-                var parts = deviceInfo.Split(';');
-                if (parts.Length > 0)
-                {
-                    info.DeviceModel = parts[0].Trim();
-                }
-            }
+            // 平台段以 "Linux;" 开头，OsRegex 先命中的是 Linux
+            info.OperatingSystem = "Android";
+            var androidMatch = AndroidVersionRegex.Match(userAgent);
+            info.OperatingSystemVersion = androidMatch.Success ? androidMatch.Groups[1].Value : null;
+            info.DeviceModel = ParseAndroidModel(userAgent);
         }
 
         // iOS设备
@@ -170,6 +179,31 @@ public class UserAgentParserService : IUserAgentParserService
             info.DeviceModel = "iPad";
             ParseIosVersion(userAgent, info);
         }
+    }
+
+    /// <summary>
+    /// 从 Android 平台段取机型：<c>(Linux; Android 14; Pixel 8)</c> 里 Android 版本之后的那一段。
+    /// 跳过 WebView 标记 <c>wv</c>、加密强度 <c>U</c> 与老式 UA 的语言段（<c>ko-kr</c>），去掉 <c>Build/...</c> 后缀；
+    /// 精简 UA 的占位值 <c>K</c> 不是机型，返回 null。
+    /// </summary>
+    private static string? ParseAndroidModel(string userAgent)
+    {
+        var platform = AndroidPlatformRegex.Match(userAgent);
+        if (!platform.Success)
+            return null;
+
+        var segments = platform.Groups[1].Value.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var androidIndex = Array.FindIndex(segments, s => s.StartsWith("Android", StringComparison.OrdinalIgnoreCase));
+        foreach (var segment in segments.Skip(androidIndex + 1))
+        {
+            if (segment is "wv" or "U" || LocaleSegmentRegex.IsMatch(segment))
+                continue;
+
+            var model = BuildSuffixRegex.Replace(segment, string.Empty);
+            return model.Length == 0 || model == ReducedAndroidModel ? null : model;
+        }
+
+        return null;
     }
 
     /// <summary>

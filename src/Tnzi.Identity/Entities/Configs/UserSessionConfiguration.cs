@@ -14,6 +14,8 @@ public class UserSessionConfiguration : EntityTypeConfigurationBase<UserSession,
         builder.Property(us => us.DeviceInfo).HasMaxLength(256);
         builder.Property(us => us.IpAddress).HasMaxLength(50);
         builder.Property(us => us.UserAgent).HasMaxLength(512);
+        builder.Property(us => us.GroupKey).HasMaxLength(DelegatedSessionRules.MaxGroupKeyLength);
+        builder.Property(us => us.Label).HasMaxLength(DelegatedSessionRules.MaxLabelLength);
 
         // 关系配置
         builder.HasOne(us => us.User)

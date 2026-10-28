@@ -13,4 +13,10 @@ public static class ContextPropertyKeys
     public const string WorkflowExecutionId = "WorkflowExecutionId";
     public const string WorkflowNodeName = "WorkflowNodeName";
     public const string ParentSessionRules = "ParentSessionRules";
+
+    /// <summary>
+    /// 本次运行里 <c>save_memory</c> 成功写入过记忆（值为 <c>true</c>）。自动沉淀据此跳过这一轮，
+    /// 不再把模型刚亲手存下的内容重复提炼一遍。
+    /// </summary>
+    public const string MemorySavedThisRun = "MemorySavedThisRun";
 }

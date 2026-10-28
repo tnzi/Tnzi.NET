@@ -8,6 +8,7 @@ const safeMessageMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), wa
 const bridgeMock = vi.hoisted(() => ({
   cancel: vi.fn(async () => undefined),
   batchCancel: vi.fn(async () => 2),
+  send: vi.fn(async (_id: string) => undefined),
   getDeliveryReport: vi.fn(async () => ({
     messageId: 'm3',
     subject: 'Quarterly newsletter',
@@ -44,7 +45,7 @@ vi.mock('../../../src/services/bridges/notification-bridge', () => ({
       create: vi.fn(async () => { throw new Error('read-only') }),
       update: vi.fn(async () => { throw new Error('read-only') }),
       delete: vi.fn(async () => undefined),
-      send:   vi.fn(async () => undefined),
+      send:   bridgeMock.send,
       cancel: bridgeMock.cancel,
       batchCancel: bridgeMock.batchCancel,
       getDeliveryReport: bridgeMock.getDeliveryReport,
@@ -157,6 +158,44 @@ describe('Messages page (Phase 3.26)', () => {
     expect(safeMessageMock.error).toHaveBeenCalledWith('Notification has already been sent')
   })
 
+  // A resend the server refuses (the message was cancelled, a 403) used to stop
+  // the spinner and say nothing: it read as done.
+  it('★ a refused resend is said out loud', async () => {
+    bridgeMock.send.mockRejectedValueOnce(new Error('Notification was cancelled') as never)
+    safeMessageMock.error.mockClear()
+    const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
+    const wrapper = mount(Messages, { global: { stubs } })
+    await nextTick()
+
+    const vm = wrapper.vm as unknown as { resendMessage: (row: unknown) => Promise<void> }
+    await expect(vm.resendMessage({ id: 'm2', status: 'Failed' })).resolves.toBeUndefined()
+    expect(safeMessageMock.error).toHaveBeenCalledWith('Notification was cancelled')
+  })
+
+  // Batch resend goes one id at a time; the operator is told how many went and
+  // why the others did not, instead of nothing at all.
+  it('★ batch resend reports how many went and why the rest did not', async () => {
+    bridgeMock.send.mockReset()
+      .mockResolvedValueOnce(undefined as never)
+      .mockRejectedValueOnce(new Error('Forbidden') as never)
+    safeMessageMock.error.mockClear()
+    safeMessageMock.success.mockClear()
+    safeMessageMock.warning.mockClear()
+    const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
+    const wrapper = mount(Messages, { global: { stubs } })
+    await nextTick()
+
+    const vm = wrapper.vm as unknown as { batchResend: (ids: string[]) => Promise<void> }
+    await vm.batchResend(['m1', 'm2'])
+
+    expect(bridgeMock.send).toHaveBeenCalledTimes(2)
+    expect(safeMessageMock.success).not.toHaveBeenCalled()
+    expect(safeMessageMock.warning).toHaveBeenCalledTimes(1)
+    expect(String(safeMessageMock.warning.mock.calls[0]![0])).toMatch(/1\D+2/)
+    expect(safeMessageMock.error).toHaveBeenCalledWith('Forbidden')
+    bridgeMock.send.mockReset().mockResolvedValue(undefined as never)
+  })
+
   // A bulk send's counters answer "how many"; only the report answers
   // "which recipients, and why".
   it('loads the per-recipient delivery report when a send is opened', async () => {
@@ -209,6 +248,39 @@ describe('Messages page (Phase 3.26)', () => {
     await new Promise((r) => setTimeout(r, 10))
 
     expect(vm.report?.recipients[0].address).toBe('second@example.com')
+  })
+
+  // The server lists at most 200 recipients while its counts cover everyone, so
+  // whether the list was cut can only be told from totalRecipients. Judged from
+  // the rows received, a 5,000-recipient report would read as complete.
+  it('flags a cut report from totalRecipients, not from the rows it received', async () => {
+    bridgeMock.getDeliveryReport.mockResolvedValueOnce({
+      messageId: 'm3', subject: 'Quarterly newsletter', type: 'Email',
+      totalRecipients: 5000, sentCount: 4990, failedCount: 10, pendingCount: 0, readCount: 0, successRate: 99.8,
+      recipients: Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, address: `${i}@example.com`, status: 'Sent', isRead: false })),
+    } as never)
+    const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
+    const wrapper = mount(Messages, { global: { stubs } })
+    await nextTick()
+
+    const vm = wrapper.vm as unknown as {
+      loadReport: (row: unknown) => Promise<void>
+      reportTruncated: boolean
+      reportRows: unknown[]
+    }
+    await vm.loadReport({ id: 'm3' })
+    expect(vm.reportRows).toHaveLength(200)
+    expect(vm.reportTruncated).toBe(true)
+  })
+
+  it('does not flag a report that lists every recipient', async () => {
+    const { default: Messages } = await import('../../../src/pages/notification/Messages.vue')
+    const wrapper = mount(Messages, { global: { stubs } })
+    await nextTick()
+
+    const vm = wrapper.vm as unknown as { loadReport: (row: unknown) => Promise<void>; reportTruncated: boolean }
+    await vm.loadReport({ id: 'm3' })
+    expect(vm.reportTruncated).toBe(false)
   })
 
   // The rest of the drawer is still worth reading when the report is the part

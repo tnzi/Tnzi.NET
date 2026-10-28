@@ -45,4 +45,17 @@ public interface IAgentExecutor
     /// 但工具执行管线里的约束中间件照样拒绝调用，安全边界不依赖本方法）。
     /// </summary>
     IAgentExecutor WithoutTools(IEnumerable<string> toolNames) => this;
+
+    /// <summary>
+    /// 创建一个换用指定系统指令的新执行器（不修改原实例）。运行时用它给子 Agent 模板起的运行
+    /// （没有自己的 Agent，解析出来的执行器不带指令）装上模板的 Instructions。
+    /// 默认实现返回 <c>this</c>（不支持的自定义执行器上模板指令不生效，运行照常）。
+    /// </summary>
+    IAgentExecutor WithInstructions(string instructions) => this;
+
+    /// <summary>
+    /// 创建一个使用指定工具循环上限的新执行器（不修改原实例）。运行时用它把子 Agent 模板的 MaxTurns 落到这次运行上。
+    /// 默认实现返回 <c>this</c>（不支持的自定义执行器沿用自己的上限）。
+    /// </summary>
+    IAgentExecutor WithMaxToolIterations(int maxToolIterations) => this;
 }

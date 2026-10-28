@@ -43,29 +43,9 @@ public class PerformanceModule : TnziInfrastructureModule
         // 注册性能收集器
         context.Services.AddSingleton<IPerformanceCollector>(_ => new PerformanceCollector(config.MaxHistorySize));
 
-        return Task.CompletedTask;
-    }
-
-    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
-    {
-        var app = context.App;
-        if (app == null)
-        {
-            return Task.CompletedTask;
-        }
-
-        var config = context.ServiceProvider
-            .GetRequiredService<IOptions<PerformanceOptions>>()
-            .Value;
-
-        // 如果未启用，不注册中间件
-        if (!config.Enabled)
-        {
-            return Task.CompletedTask;
-        }
-
-        // 注册性能分析中间件（应该在请求追踪中间件之后）
-        app.UseMiddleware<PerformanceMiddleware>();
+        // ★ 挂在 AspNetCore 管线的「认证之后、限流与授权之前」插入点，而不是在 OnApplicationInitializationAsync 里追加：
+        // 追加只能落在授权之后，401 / 403 / 429 由授权与限流中间件就地写出、不再调用下游，样本里只剩通过了的请求。
+        context.Services.AddRequestPipelineMiddleware<PerformanceMiddleware>(RequestPipelineStage.AfterAuthentication);
 
         return Task.CompletedTask;
     }

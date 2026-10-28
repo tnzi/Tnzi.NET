@@ -27,7 +27,6 @@ public sealed class TextSearchProvider : IContextProvider
     private readonly TextSearchOptions _options;
     private readonly ILogger<TextSearchProvider> _logger;
     private readonly AITool[] _tools;
-    private readonly Queue<string> _recentMessagesText = new();
     private readonly IReadOnlyList<Guid>? _knowledgeBaseIds;
 
     /// <summary>
@@ -123,41 +122,12 @@ public sealed class TextSearchProvider : IContextProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 不需要跨轮状态：检索查询里的「最近消息」取自本轮交来的历史（见 <see cref="BuildSearchInput"/>）。
+    /// 框架按请求新建实例，记在实例上的上一轮消息永远读不到；同一实例被复用时又会与历史重复。
+    /// </remarks>
     public Task OnCompletedAsync(List<ChatMessage> messages, CancellationToken ct = default)
-    {
-        var limit = _options.RecentMessageMemoryLimit;
-        if (limit <= 0)
-        {
-            return Task.CompletedTask; // 记忆功能已禁用
-        }
-
-        // 收集要记忆的消息（只保留用户和助手消息）
-        var messagesToRemember = messages
-            .Where(m => m.Role == ChatRole.User || m.Role == ChatRole.Assistant)
-            .Where(m => !string.IsNullOrWhiteSpace(m.Text))
-            .Select(m => m.Text!)
-            .ToList();
-
-        // 如果当前消息超过限制，只保留最近的
-        if (messagesToRemember.Count > limit)
-        {
-            messagesToRemember = messagesToRemember.Skip(messagesToRemember.Count - limit).ToList();
-        }
-
-        // 添加到记忆队列
-        foreach (var message in messagesToRemember)
-        {
-            _recentMessagesText.Enqueue(message);
-        }
-
-        // 保持队列在限制内
-        while (_recentMessagesText.Count > limit)
-        {
-            _recentMessagesText.Dequeue();
-        }
-
-        return Task.CompletedTask;
-    }
+        => Task.CompletedTask;
 
     /// <summary>
     /// 供模型按需调用的搜索方法
@@ -179,43 +149,40 @@ public sealed class TextSearchProvider : IContextProvider
         return FormatResults(resultList);
     }
 
-    /// <summary>构建按 Agent 分配知识库范围过滤的检索条件（无分配时返回 null = 跨所有知识库）。</summary>
+    /// <summary>构建按 Agent 分配知识库范围过滤的检索条件（无分配时返回 null，RAG 实现据此答空而不是跨库检索）。</summary>
     private TextSearchFilter? BuildFilter()
         => _knowledgeBaseIds is { Count: > 0 }
             ? new TextSearchFilter { KnowledgeBaseIds = _knowledgeBaseIds.ToList() }
             : null;
 
     /// <summary>
-    /// 构建搜索输入文本
+    /// 构建搜索输入文本：以最新一条用户消息为准，前面最多带 <see cref="TextSearchOptions.RecentMessageMemoryLimit"/>
+    /// 条最近的用户 / 助手消息作上下文（追问「那欧盟客户呢？」要靠上一轮才知道在问什么）。
     /// </summary>
-    private string BuildSearchInput(IEnumerable<ChatMessage> requestMessages)
+    /// <remarks>
+    /// 传进来的是整段已加载的历史（最多 <c>History.Store.MaxLoadedMessages</c> 条）+ 本轮用户消息。
+    /// 整段拼起来当查询，检索会被旧话题带走，长线程还会超出嵌入模型的输入上限。
+    /// 没有用户消息（例如只有系统消息）时返回空串，不做检索。
+    /// </remarks>
+    private string BuildSearchInput(IReadOnlyList<ChatMessage> requestMessages)
     {
-        var sb = new StringBuilder();
-
-        // 添加最近记忆的消息
-        foreach (var text in _recentMessagesText)
+        var conversation = requestMessages
+            .Where(m => (m.Role == ChatRole.User || m.Role == ChatRole.Assistant) && !string.IsNullOrWhiteSpace(m.Text))
+            .ToList();
+        var currentIndex = conversation.FindLastIndex(m => m.Role == ChatRole.User);
+        if (currentIndex < 0)
         {
-            if (sb.Length > 0)
-            {
-                sb.Append('\n');
-            }
-            sb.Append(text);
+            return string.Empty;
         }
 
-        // 添加当前请求消息
-        foreach (var message in requestMessages)
-        {
-            if (!string.IsNullOrWhiteSpace(message.Text))
-            {
-                if (sb.Length > 0)
-                {
-                    sb.Append('\n');
-                }
-                sb.Append(message.Text);
-            }
-        }
+        var limit = Math.Max(0, _options.RecentMessageMemoryLimit);
+        var parts = conversation
+            .Take(currentIndex)
+            .Skip(Math.Max(0, currentIndex - limit))
+            .Select(m => m.Text)
+            .Append(conversation[currentIndex].Text);
 
-        return sb.ToString();
+        return string.Join('\n', parts);
     }
 
     /// <summary>

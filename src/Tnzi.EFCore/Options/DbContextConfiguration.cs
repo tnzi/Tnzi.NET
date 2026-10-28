@@ -116,6 +116,39 @@ public class DbContextConfiguration
     }
 
     /// <summary>
+    /// <see cref="Provider"/> 仍是默认值（SqlServer）时，按<b>展开占位符之后</b>的连接字符串识别 provider，
+    /// 识别出别的值即改用它。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 运行期注册与设计期工厂共用这一处，两边对同一份配置得出同一个 provider。此前运行期在未展开的串上识别：
+    /// <c>${PG_CONN}</c> 什么都认不出、留在 SqlServer，<c>UseSqlServer</c> 拿到 PostgreSQL 连接串首次连库即失败，
+    /// 而 <c>dotnet ef</c> 识别为 PostgreSQL、迁移照常生成。
+    /// 必须在 <see cref="GetEffectiveConnectionString"/> 之前调用：连接池参数的写法按 provider 不同。
+    /// 占位符解析不出来时识别不到任何东西、保持原值，随后由 <see cref="GetEffectiveConnectionString"/> 指名拒绝。
+    /// </remarks>
+    internal void DetectProviderFromConnectionString(IConfiguration? configuration, ILogger? logger = null)
+    {
+        if (Provider != DatabaseProvider.SqlServer || string.IsNullOrWhiteSpace(ConnectionString))
+        {
+            return;
+        }
+
+        // 不传 logger：占位符解析不出来的告警由随后的 GetEffectiveConnectionString 负责，这里不重复一遍。
+        var expanded = ConnectionStringExpander.ContainsPlaceholders(ConnectionString)
+            ? ConnectionStringExpander.Expand(ConnectionString, configuration)
+            : ConnectionString;
+
+        if (DatabaseProviderDetector.TryDetectFromConnectionString(expanded, out var detected, out _, logger)
+            && detected != DatabaseProvider.SqlServer)
+        {
+            Provider = detected;
+            logger?.LogInformation(
+                "Auto-detected Provider '{Provider}' from the expanded connection string for DbContext '{Name}' (was default SqlServer).",
+                detected, Name);
+        }
+    }
+
+    /// <summary>
     /// 获取 DbContext 类型（内部使用，带缓存）
     /// </summary>
     /// <remarks>

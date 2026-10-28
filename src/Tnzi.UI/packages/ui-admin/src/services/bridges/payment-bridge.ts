@@ -31,7 +31,7 @@ import {
   type CreateRefundDto,
 } from '@tnzi/core/services/payment'
 import type { CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
+import { ensureOk, mapQueryToListRequest, pagedResult, unwrapOk } from '../_mappers'
 
 type HttpClient = Parameters<typeof useAdminPaymentApi>[0]
 
@@ -142,7 +142,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   async function fetchOrders(query: CrudPageQuery): Promise<CrudPageResult<PaymentDto>> {
     const params = mapQueryToListRequest(query) as unknown as PaymentQueryDto
-    const result = unwrap<{ items: PaymentDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+    const result = unwrapOk<{ items: PaymentDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await pa.getList(params),
     )
     return pagedResult({
@@ -155,8 +155,11 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   const orders: PaymentOrderContract = {
     fetch: fetchOrders,
+    // Rejects a refused read: the unchecked unwrap resolved a non-envelope
+    // refusal (gateway 403, 502 page) as the statistics object itself, and the
+    // Orders KPI row spread it over zeros.
     statistics: async (query?: StatisticsQueryDto): Promise<PaymentStatisticsDto> => {
-      return unwrap<PaymentStatisticsDto>(await sta.getStatistics(query))
+      return unwrapOk<PaymentStatisticsDto>(await sta.getStatistics(query))
     },
     confirmOffline: async (tradeNo: string, data: ConfirmOfflinePaymentDto): Promise<PaymentDto> => {
       return unwrapOk<PaymentDto>(await pa.confirm(tradeNo, data))
@@ -165,7 +168,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   async function fetchSubscriptions(query: CrudPageQuery): Promise<CrudPageResult<SubscriptionDto>> {
     const params = mapQueryToListRequest(query) as unknown as SubscriptionQueryDto
-    const result = unwrap<{ items: SubscriptionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+    const result = unwrapOk<{ items: SubscriptionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await sa.getList(params),
     )
     return pagedResult({
@@ -197,7 +200,7 @@ export function createPaymentBridge(deps: PaymentBridgeDeps = {}): PaymentBridge
 
   async function fetchRefunds(query: CrudPageQuery): Promise<CrudPageResult<RefundDto>> {
     const params = mapQueryToListRequest(query) as unknown as RefundQueryDto
-    const result = unwrap<{ items: RefundDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+    const result = unwrapOk<{ items: RefundDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await ra.getList(params),
     )
     return pagedResult({

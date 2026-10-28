@@ -52,7 +52,7 @@ public class AgentResolver : IAgentResolver
     /// <inheritdoc />
     public async Task<AgentResolution> ResolveAgentAsync(Guid? agentId, string? provider, string? model, List<string>? toolGroups, CancellationToken ct, List<string>? toolNames = null)
     {
-        var defaultProvider = provider ?? _options.CurrentValue.DefaultProvider;
+        var defaultProvider = EffectiveProvider(provider);
 
         // 1. 优先使用 AgentId（加载已定义的 Agent）
         if (agentId.HasValue)
@@ -71,9 +71,12 @@ public class AgentResolver : IAgentResolver
                         _options.CurrentValue.Workspace.GlobalPath, agentId.Value.ToString(), ct);
                     if (wsAgent != null)
                     {
-                        var wsProvider = wsAgent.Provider ?? defaultProvider;
+                        var wsProvider = string.IsNullOrWhiteSpace(wsAgent.Provider) ? defaultProvider : wsAgent.Provider;
                         var wsModel = model ?? wsAgent.Model;
-                        var wsInstructions = wsAgent.Instructions ?? string.Empty;
+                        // 与数据库 Agent 同一次模板渲染（{{date}} / {{agent.name}} 等）
+                        var wsInstructions = _templateEngine.Render(
+                            wsAgent.Instructions ?? string.Empty,
+                            new Dictionary<string, string> { ["agent.name"] = wsAgent.Name });
                         // Honor workspace AGENT.md frontmatter `executionMode: Handoff|AgentAsTools|Router|Single`.
                         // Unknown / missing values fall back to Single (default for DB agents).
                         var wsExecutionMode = ParseExecutionMode(wsAgent.ExecutionMode);
@@ -139,8 +142,10 @@ public class AgentResolver : IAgentResolver
 
             // model param acts as an override (e.g. think-model auto-switch); fall back to entity default
             var effectiveModel = model ?? entity.Model;
+            // 解析结果报告实际使用的提供商：用量日志、配额归属与 ThinkingMiddleware 都按它认
+            var entityProvider = EffectiveProvider(entity.Provider);
             var executor = await _agentFactory.CreateAgentAsync(
-                entity.Provider,
+                entityProvider,
                 effectiveModel,
                 renderedInstructions,
                 entity.Name,
@@ -153,7 +158,7 @@ public class AgentResolver : IAgentResolver
                 agentId: entity.Id,
                 ct: ct);
             var creationParams = new AgentCreationParameters(renderedInstructions, entity.Name, entityToolGroups, entity.Temperature, entity.MaxTokens, userPermissions, entityToolNames);
-            return AgentResolution.Success(executor, entity.Provider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaContent: string.IsNullOrWhiteSpace(entity.Persona) ? null : entity.Persona, knowledgeBaseIds: knowledgeBaseIds, skillSlugs: skillSlugs);
+            return AgentResolution.Success(executor, entityProvider, effectiveModel, agentId, entity.Configuration, entity.ExecutionMode, creationParams, personaContent: string.IsNullOrWhiteSpace(entity.Persona) ? null : entity.Persona, knowledgeBaseIds: knowledgeBaseIds, skillSlugs: skillSlugs);
         }
 
         // 2. 使用 ToolGroups / ToolNames（无 AgentId 但有工具组或 per-request 单工具覆盖）
@@ -204,15 +209,21 @@ public class AgentResolver : IAgentResolver
                     contents.Add(BuildImageContent(imagePart));
                     break;
 
+                case DocumentContentPartDto documentPart:
+                    contents.Add(BuildDocumentContent(documentPart));
+                    break;
+
                 case FileContentPartDto filePart:
                     if (filePart.FileId == Guid.Empty)
                     {
                         throw new BusinessException("File content must have a valid FileId", ErrorCodes.InvalidContent, 400);
                     }
-                    // 文件引用暂以文本占位符表示（需要 Storage 模块集成后实现完整的文件内容加载）
-                    var fileName = filePart.FileName ?? filePart.FileId.ToString();
-                    contents.Add(new TextContent($"[File: {fileName} (ID: {filePart.FileId})]"));
-                    break;
+                    // ★ 默认解析器不加载文件内容，必须拒绝而不是放一行占位文本：此前给模型的只有
+                    // "[File: name (ID: ...)]"，模型看不到文件却照样作答（答非所问或编造），调用方与用户都以为文件已送达。
+                    // 要支持文件引用，替换 IAgentResolver 并在这里按调用者校验归属后读取内容。
+                    throw new BusinessException(
+                        "File content parts are not supported: send images as image parts and include document text in a text part.",
+                        ErrorCodes.UnsupportedMediaType, 501);
 
                 default:
                     _logger.LogWarning("Unknown content part type: {Type}", part.GetType().Name);
@@ -236,6 +247,13 @@ public class AgentResolver : IAgentResolver
         => list is { Count: > 0 } ? list : null;
 
     /// <summary>
+    /// 空白提供商名与未指定同义，解析为 AI:DefaultProvider。省略 provider 的 YAML 定义在库里存的是空串（列非空），
+    /// 原样传下去会让每次运行都以 "Provider '' ..." 失败。
+    /// </summary>
+    private string EffectiveProvider(string? provider)
+        => string.IsNullOrWhiteSpace(provider) ? _options.CurrentValue.DefaultProvider : provider;
+
+    /// <summary>
     /// Parse a workspace `executionMode` frontmatter value (case-insensitive) into the
     /// AgentExecutionMode enum. Unknown / empty values fall back to Single.
     /// </summary>
@@ -249,34 +267,103 @@ public class AgentResolver : IAgentResolver
     }
 
     /// <summary>
-    /// 从 ImageContentPartDto 构建 MEAI DataContent
+    /// 从 ImageContentPartDto 构建 MEAI 内容：内联数据（Base64 / data URI）是 <see cref="DataContent"/>，
+    /// http(s) 地址是 <see cref="UriContent"/>。
     /// </summary>
-    private static DataContent BuildImageContent(ImageContentPartDto imagePart)
+    /// <remarks>
+    /// <see cref="DataContent"/> 的 Uri 构造只收 data URI，http(s) 地址进去必抛 <see cref="ArgumentException"/>，
+    /// 此前按 DTO 契约传图片 URL 的请求一律以 500 收尾。<see cref="UriContent"/> 由提供商自己去取图，
+    /// 服务端不发起请求。构造器对非法媒体类型 / 畸形 data URI 抛的异常
+    /// 是调用方输入的问题，按 400 报回去。
+    /// </remarks>
+    private static AIContent BuildImageContent(ImageContentPartDto imagePart)
     {
-        if (!string.IsNullOrWhiteSpace(imagePart.Url))
+        var mediaType = imagePart.MediaType;
+        if (!string.IsNullOrWhiteSpace(mediaType) && !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
         {
-            if (!Uri.TryCreate(imagePart.Url, UriKind.Absolute, out var imageUri) ||
-                (imageUri.Scheme != Uri.UriSchemeHttp && imageUri.Scheme != Uri.UriSchemeHttps && !imageUri.Scheme.Equals("data", StringComparison.OrdinalIgnoreCase)))
-            {
-                throw new BusinessException("Invalid image URL: must be HTTP(S) or data URI", ErrorCodes.InvalidContent, 400);
-            }
-            return new DataContent(imageUri, imagePart.MediaType ?? "image/png");
+            throw new BusinessException("Invalid image media type: must be an image/* type", ErrorCodes.InvalidContent, 400);
         }
 
-        if (!string.IsNullOrWhiteSpace(imagePart.Base64Data))
+        try
         {
-            byte[] bytes;
-            try
+            if (!string.IsNullOrWhiteSpace(imagePart.Url))
             {
-                bytes = Convert.FromBase64String(imagePart.Base64Data);
+                if (!Uri.TryCreate(imagePart.Url, UriKind.Absolute, out var imageUri) ||
+                    (imageUri.Scheme != Uri.UriSchemeHttp && imageUri.Scheme != Uri.UriSchemeHttps && !imageUri.Scheme.Equals("data", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new BusinessException("Invalid image URL: must be HTTP(S) or data URI", ErrorCodes.InvalidContent, 400);
+                }
+
+                return imageUri.Scheme.Equals("data", StringComparison.OrdinalIgnoreCase)
+                    ? new DataContent(imageUri, mediaType ?? "image/png")
+                    : new UriContent(imageUri, mediaType ?? ImageWildcardMediaType);
             }
-            catch (FormatException)
+
+            if (!string.IsNullOrWhiteSpace(imagePart.Base64Data))
             {
-                throw new BusinessException("Invalid Base64 data in image content", ErrorCodes.InvalidContent, 400);
+                byte[] bytes;
+                try
+                {
+                    bytes = Convert.FromBase64String(imagePart.Base64Data);
+                }
+                catch (FormatException)
+                {
+                    throw new BusinessException("Invalid Base64 data in image content", ErrorCodes.InvalidContent, 400);
+                }
+                return new DataContent(bytes, mediaType ?? "image/png");
             }
-            return new DataContent(bytes, imagePart.MediaType ?? "image/png");
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            // 非法媒体类型抛 ArgumentException；畸形 data URI（例如 base64 段不合法）抛 UriFormatException
+            throw new BusinessException("Invalid image content: the URL or media type is malformed", ErrorCodes.InvalidContent, 400);
         }
 
         throw new BusinessException("Image content must have either Url or Base64Data", ErrorCodes.InvalidContent, 400);
     }
+
+    /// <summary>
+    /// 从 <see cref="DocumentContentPartDto"/> 构建 MEAI 数据内容。提供商是否接受 PDF 由提供商适配器决定：
+    /// 不接受的以调用错误结束，而不是被这里悄悄丢掉。
+    /// </summary>
+    private static AIContent BuildDocumentContent(DocumentContentPartDto documentPart)
+    {
+        var data = documentPart.Base64Data?.Trim() ?? string.Empty;
+        if (data.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            var comma = data.IndexOf(',');
+            data = comma < 0 ? string.Empty : data[(comma + 1)..];
+        }
+
+        if (string.IsNullOrWhiteSpace(data))
+        {
+            throw new BusinessException("Document content must have Base64Data", ErrorCodes.InvalidContent, 400);
+        }
+
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(data);
+        }
+        catch (FormatException)
+        {
+            throw new BusinessException("Invalid Base64 data in document content", ErrorCodes.InvalidContent, 400);
+        }
+
+        var mediaType = string.IsNullOrWhiteSpace(documentPart.MediaType) ? ChatAttachmentRules.PdfMediaType : documentPart.MediaType;
+        try
+        {
+            return new DataContent(bytes, mediaType) { Name = documentPart.FileName };
+        }
+        catch (ArgumentException)
+        {
+            throw new BusinessException("Invalid document media type", ErrorCodes.InvalidContent, 400);
+        }
+    }
+
+    /// <summary>
+    /// http(s) 图片未声明媒体类型时的取值：按扩展名推断不出（无扩展名的 CDN 地址很常见）时 MEAI 会落成
+    /// application/octet-stream，提供商适配器就不再把它当图片发出去。
+    /// </summary>
+    private const string ImageWildcardMediaType = "image/*";
 }

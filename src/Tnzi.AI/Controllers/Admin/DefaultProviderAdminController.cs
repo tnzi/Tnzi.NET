@@ -6,13 +6,13 @@ namespace Tnzi.AI.Controllers.Admin;
 /// <remarks>
 /// 提供两类端点：
 /// <list type="bullet">
-///   <item><c>GET /</c> 与 <c>GET /{providerName}/default-model</c> - 配置驱动的只读端点
-///         （向后兼容；底层走 IChatClientFactory，读取 appsettings 的 ProviderOptions）。</item>
-///   <item><c>POST /query</c> 等 <c>entities/*</c> 子路由 - 实体驱动 CRUD（Phase 5 backend prereq），
-///         写入数据库并对 API Key 进行加密存储。</item>
+///   <item><c>GET /</c> 与 <c>GET /{providerName}/default-model</c> - 经 IChatClientFactory 的只读端点。
+///         <c>GET /</c> 只列 appsettings 里已启用的 <c>AI:Providers</c> 条目，不含库里登记的 Provider；
+///         <c>default-model</c> 与 <c>GetChatClient</c> 同一口径（按调用方租户解析，库里的行可以覆写默认模型）。
+///         要同时看到库与配置两类来源，用 <c>GET options</c> 或 <c>POST query</c>。</item>
+///   <item><c>POST /query</c> 等 <c>entities/*</c> 子路由 - 实体驱动 CRUD，
+///         写入数据库并对 API Key 进行加密存储；列表与 options 合并数据库实体与只读的配置条目。</item>
 /// </list>
-/// 两类端点目前并存：未来若 IChatClientFactory 接入 Provider 实体表，配置驱动端点会自动
-/// 反映合并结果（数据库 + 配置）。
 /// </remarks>
 [DefaultController]
 [Route("admin/ai/providers")]

@@ -10,6 +10,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
     private readonly IFileStorage _storage;
     private readonly IFileAccessAuthorizer _accessAuthorizer;
     private readonly UploadGuard _guard;
+    private readonly IStorageQuotaService _quota;
 
     public FileVersionService(
         IRepository<FileVersion, Guid> versionRepository,
@@ -17,7 +18,8 @@ public class FileVersionService : ApplicationService, IFileVersionService
         IFileStorage storage,
         IFileAccessAuthorizer accessAuthorizer,
         IServiceProvider serviceProvider,
-        UploadGuard guard)
+        UploadGuard guard,
+        IStorageQuotaService quota)
         : base(serviceProvider)
     {
         _versionRepository = Check.NotNull(versionRepository);
@@ -25,12 +27,19 @@ public class FileVersionService : ApplicationService, IFileVersionService
         _storage = Check.NotNull(storage);
         _accessAuthorizer = Check.NotNull(accessAuthorizer);
         _guard = Check.NotNull(guard);
+        _quota = Check.NotNull(quota);
     }
 
     /// <summary>
     /// 载入文件记录并校验访问权限。不存在与不允许都返回 null,调用方一律以 404 回应,
     /// 不泄露该 id 上是否有文件。
     /// </summary>
+    /// <remarks>
+    /// ★ 读历史版本问的是<b>签发</b>判据(<see cref="IFileAccessAuthorizer.CanMintAccessTokenAsync"/>),
+    /// 不是读取判据:请求级凭据(<c>?sig=</c> 渲染令牌、分享授予)授予的是<b>当前这份内容</b>的一次读取,
+    /// 不是这个文件的全部历史。认了它们,一条发给别人看当前版本的链接就能取回每一个旧版本，
+    /// 包括已经被替换掉、脱敏之前的内容。
+    /// </remarks>
     private async Task<FileRecord?> LoadAuthorizedAsync(Guid fileId, bool forWrite, CancellationToken cancellationToken)
     {
         var fileRecord = await _fileRepository.GetAsync(fileId, cancellationToken);
@@ -39,7 +48,7 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
         var allowed = forWrite
             ? await _accessAuthorizer.CanWriteAsync(fileRecord, cancellationToken)
-            : await _accessAuthorizer.CanReadAsync(fileRecord, cancellationToken);
+            : await _accessAuthorizer.CanMintAccessTokenAsync(fileRecord, cancellationToken);
 
         return allowed ? fileRecord : null;
     }
@@ -89,42 +98,15 @@ public class FileVersionService : ApplicationService, IFileVersionService
 
         var content = sanitized.Content;
 
-        // 获取当前最大版本号
-        var maxVersion = await _versionRepository.AsQueryable()
-            .Where(v => v.FileId == fileId)
-            .Select(v => (int?)v.Version)
-            .MaxAsync(cancellationToken) ?? 0;
-
-        // 首次版本化时 maxVersion=0，v1 由下方逻辑创建（当前文件快照），v2 为新上传版本
-        var newVersion = maxVersion + 1;
-        if (newVersion < 2) newVersion = 2;
-
-        // 保存当前版本（如果还没有保存）
-        var currentVersion = await _versionRepository
-            .FirstOrDefaultAsync(v => v.FileId == fileId && v.IsCurrent, cancellationToken);
-
-        if (currentVersion == null)
+        // ★ 配额同样排在写第一行之前（理由同上一段）：旧版本的字节留着、新版本又是一份，记在文件所有者名下
+        //   （不是动手的人 —— 管理员替用户传的新版本照样占用户的空间）。量得出大小就在这里拦；
+        //   量不出来的（净化器交回的替换流不可 seek）等落盘之后按实际大小判，超了删掉刚写下的对象。
+        long? knownSize = content.CanSeek ? content.Length : null;
+        if (knownSize is { } declaredSize)
         {
-            // 保存当前文件为版本
-            currentVersion = new FileVersion
-            {
-                FileId = fileId,
-                Version = 1,
-                Path = fileRecord.Path ?? string.Empty,
-                Size = fileRecord.Size,
-                Md5Hash = fileRecord.Md5Hash,
-                Description = "Initial version",
-                IsCurrent = false,
-                CreationTime = fileRecord.CreationTime,
-                CreatorId = fileRecord.CreatorId
-            };
-            await _versionRepository.InsertAsync(currentVersion, cancellationToken);
-        }
-        else
-        {
-            // 将当前版本标记为非当前
-            currentVersion.IsCurrent = false;
-            await _versionRepository.UpdateAsync(currentVersion, cancellationToken);
+            var quotaCheck = await _quota.EnsureCapacityAsync<FileVersionDto>(fileRecord.CreatorId, declaredSize, cancellationToken);
+            if (quotaCheck != null)
+                return quotaCheck;
         }
 
         // 计算新版本的MD5（对**净化之后**的字节算，落库的哈希才与落库的内容一致）
@@ -132,15 +114,14 @@ public class FileVersionService : ApplicationService, IFileVersionService
         var md5Hash = await HashHelper.GetMd5Async(content);
         if (content.CanSeek) content.Position = 0;
 
-        // 上传新版本文件。长度必须在把流交给 provider **之前**取：上传之后这个流是否还可读
+        // 上传新版本文件。长度在把流交给 provider **之前**取（见上）：上传之后这个流是否还可读
         // 由 provider 决定（见 IFileStorage.UploadAsync 的流所有权约定）。
-        // ★ 量的是**净化之后**那份字节（净化器可以重编码）；净化器交回的替换流不保证可 seek，
-        //   量不出来就回问 provider，由它按已落盘的对象报大小 —— 与 FileStorageService
-        //   的 ResolveStoredSizeAsync 同一条兜底：大小是描述性字段，不该在文件已经存好之后
+        // ★ 量的是**净化之后**那份字节（净化器可以重编码）；量不出来就回问 provider，由它按已落盘的对象报大小 ——
+        //   与 FileStorageService 的 ResolveStoredSizeAsync 同一条兜底：大小是描述性字段，不该在文件已经存好之后
         //   把整次保存变成一次失败。
-        long? knownSize = content.CanSeek ? content.Length : null;
         // ★ 版本键也由服务端生成，**不**从 fileRecord.FileName 派生：2026-09-04 之前有三条写路径
         //   把调用方给的名字写进了 FileName，派生等于把那份污染再传一代（见 StorageKeyHelper）。
+        // ★ 对象先于任何版本行落下：配额要按真实大小判，判不过就只删一个对象，一行都没写。
         var versionFileName = StorageKeyHelper.NewKey(fileRecord.Extension);
         var filePath = await _storage.UploadAsync(versionFileName, content, fileRecord.ContentType);
 
@@ -149,6 +130,53 @@ public class FileVersionService : ApplicationService, IFileVersionService
         try
         {
             var size = await ResolveStoredSizeAsync(knownSize, filePath);
+            if (knownSize == null)
+            {
+                var quotaCheck = await _quota.EnsureCapacityAsync<FileVersionDto>(fileRecord.CreatorId, size, cancellationToken);
+                if (quotaCheck != null)
+                {
+                    await DiscardUploadedObjectAsync(filePath);
+                    return quotaCheck;
+                }
+            }
+
+            // 获取当前最大版本号
+            var maxVersion = await _versionRepository.AsQueryable()
+                .Where(v => v.FileId == fileId)
+                .Select(v => (int?)v.Version)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            // 首次版本化时 maxVersion=0，v1 由下方逻辑创建（当前文件快照），v2 为新上传版本
+            var newVersion = maxVersion + 1;
+            if (newVersion < 2) newVersion = 2;
+
+            // 保存当前版本（如果还没有保存）
+            var currentVersion = await _versionRepository
+                .FirstOrDefaultAsync(v => v.FileId == fileId && v.IsCurrent, cancellationToken);
+
+            if (currentVersion == null)
+            {
+                // 保存当前文件为版本
+                currentVersion = new FileVersion
+                {
+                    FileId = fileId,
+                    Version = 1,
+                    Path = fileRecord.Path ?? string.Empty,
+                    Size = fileRecord.Size,
+                    Md5Hash = fileRecord.Md5Hash,
+                    Description = "Initial version",
+                    IsCurrent = false,
+                    CreationTime = fileRecord.CreationTime,
+                    CreatorId = fileRecord.CreatorId
+                };
+                await _versionRepository.InsertAsync(currentVersion, cancellationToken);
+            }
+            else
+            {
+                // 将当前版本标记为非当前
+                currentVersion.IsCurrent = false;
+                await _versionRepository.UpdateAsync(currentVersion, cancellationToken);
+            }
 
             // 创建新版本记录
             var newVersionRecord = new FileVersion

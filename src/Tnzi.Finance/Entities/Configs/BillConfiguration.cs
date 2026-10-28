@@ -10,7 +10,7 @@ public class BillConfiguration : EntityTypeConfigurationBase<Bill, Guid>
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Number).HasMaxLength(64);
-        builder.Property(e => e.Memo).HasMaxLength(500);
+        builder.Property(e => e.Memo).HasMaxLength(FinanceFieldLimits.MemoMaxLength);
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
         builder.Property(e => e.ExchangeRate).HasExchangeRatePrecision();
         builder.Property(e => e.SubTotal).HasMoneyPrecision();

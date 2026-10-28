@@ -1,16 +1,21 @@
 namespace Tnzi.AI.Services;
 
 /// <summary>
-/// 嵌入式 AI 客户端实现 - 直接委托 IAgentRuntime + IAgentThreadService
+/// 嵌入式 AI 客户端实现 - 委托 IAgentDispatchFacade + IAgentThreadService
 /// </summary>
+/// <remarks>
+/// 经路由门面而不是直调 <see cref="IAgentRuntime"/>：与 HTTP 聊天同一个分支点，绑定了外部 CLI 运行时的 Agent
+/// 经嵌入式客户端调用时同样交给那个运行时。此前直调运行时，这类 Agent 会静默跑在内建引擎上，工具与模型都不同。
+/// 没有绑定时门面原样交给运行时，行为不变。
+/// </remarks>
 public class TnziAiClient : ITnziAiClient
 {
-    private readonly IAgentRuntime _runtime;
+    private readonly IAgentDispatchFacade _dispatchFacade;
     private readonly IAgentThreadService? _threadService;
 
-    public TnziAiClient(IAgentRuntime runtime, IAgentThreadService? threadService = null)
+    public TnziAiClient(IAgentDispatchFacade dispatchFacade, IAgentThreadService? threadService = null)
     {
-        _runtime = Check.NotNull(runtime);
+        _dispatchFacade = Check.NotNull(dispatchFacade);
         _threadService = threadService;
     }
 
@@ -21,7 +26,7 @@ public class TnziAiClient : ITnziAiClient
         Check.NotNullOrWhiteSpace(message);
 
         var request = BuildRequest(message, threadId, options);
-        var result = await _runtime.RunAsync(request, ct);
+        var result = await _dispatchFacade.RunAsync(request, ct);
         ThrowIfFailed(result);
 
         return new AiClientResponse
@@ -53,14 +58,23 @@ public class TnziAiClient : ITnziAiClient
 
         var request = BuildRequest(message, threadId, options);
 
-        await foreach (var chunk in _runtime.RunStreamingAsync(request, ct))
+        // chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径）；对外事件只在终止事件上给出累计值，
+        // 只带用量的 chunk 不单独成为事件
+        TokenUsageDto? totalUsage = null;
+        await foreach (var chunk in _dispatchFacade.RunStreamingAsync(request, ct))
         {
+            totalUsage = StreamUsage.Add(totalUsage, chunk.Usage);
+            if (StreamUsage.IsUsageOnly(chunk))
+            {
+                continue;
+            }
+
             yield return new AiClientStreamEvent
             {
                 Text = chunk.Text,
                 FinishReason = chunk.FinishReason,
                 Model = chunk.Model,
-                Usage = chunk.Usage,
+                Usage = chunk.FinishReason != null ? totalUsage : null,
                 IsToolCall = chunk.IsToolCall,
                 ToolCallNames = chunk.ToolCallNames,
                 ToolCalls = chunk.ToolCalls,

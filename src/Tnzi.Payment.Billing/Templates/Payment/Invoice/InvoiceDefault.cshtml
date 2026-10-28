@@ -10,9 +10,10 @@
         .invoice { max-width: 800px; margin: 0 auto; padding: 40px; }
         .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 2px solid #e5e7eb; }
         .company-info h1 { font-size: 22px; font-weight: 700; color: #111827; }
+        .company-info .logo { max-height: 56px; max-width: 220px; margin-bottom: 10px; display: block; }
         .company-info p { font-size: 13px; color: #6b7280; margin-top: 2px; }
         .invoice-title { text-align: right; }
-        .invoice-title h2 { font-size: 28px; font-weight: 700; color: #4f46e5; text-transform: uppercase; letter-spacing: 1px; }
+        .invoice-title h2 { font-size: 28px; font-weight: 700; color: @Model.AccentColor; text-transform: uppercase; letter-spacing: 1px; }
         .invoice-title p { font-size: 13px; color: #6b7280; margin-top: 4px; }
         .meta { display: flex; justify-content: space-between; margin-bottom: 32px; }
         .meta-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 8px; }
@@ -45,22 +46,34 @@
 <div class="invoice">
     <div class="header">
         <div class="company-info">
-            <h1>@Model.CompanyName</h1>
-            @if (!string.IsNullOrEmpty(Model.CompanyAddress))
+            @if (!string.IsNullOrEmpty(Model.Seller.LogoDataUri))
             {
-                <p>@Model.CompanyAddress</p>
+                <img class="logo" src="@Model.Seller.LogoDataUri" alt="" />
             }
-            @if (!string.IsNullOrEmpty(Model.CompanyEmail))
+            <h1>@Model.Seller.Name</h1>
+            @foreach (var addressLine in Model.Seller.AddressLines)
             {
-                <p>@Model.CompanyEmail</p>
+                <p>@addressLine</p>
             }
-            @if (!string.IsNullOrEmpty(Model.TaxId))
+            @if (!string.IsNullOrEmpty(Model.Seller.Phone))
             {
-                <p>Tax ID: @Model.TaxId</p>
+                <p>@Model.Seller.Phone</p>
+            }
+            @if (!string.IsNullOrEmpty(Model.Seller.Email))
+            {
+                <p>@Model.Seller.Email</p>
+            }
+            @if (!string.IsNullOrEmpty(Model.Seller.Website))
+            {
+                <p>@Model.Seller.Website</p>
+            }
+            @foreach (var registration in Model.Seller.TaxRegistrations)
+            {
+                <p>@registration.Label: @registration.Number</p>
             }
         </div>
         <div class="invoice-title">
-            <h2>Invoice</h2>
+            <h2>@Model.DocumentTitle</h2>
             <p>#@Model.Invoice.InvoiceNo</p>
             <p>
                 <span class="status-badge status-@Model.Invoice.Status.ToString().ToLower()">
@@ -82,13 +95,25 @@
             {
                 <p>@Model.Invoice.CustomerCompany</p>
             }
+            @if (!string.IsNullOrEmpty(Model.Invoice.CustomerAddress))
+            {
+                foreach (var customerAddressLine in ((string)Model.Invoice.CustomerAddress).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    <p>@customerAddressLine</p>
+                }
+            }
+            @if (!string.IsNullOrEmpty(Model.Invoice.CustomerTaxId))
+            {
+                <p>Tax ID: @Model.Invoice.CustomerTaxId</p>
+            }
         </div>
         <div class="meta-section" style="text-align: right;">
             <h3>Invoice Details</h3>
             <p>Date: <span class="value">@Model.Invoice.InvoiceDate.ToString("yyyy-MM-dd")</span></p>
-            @if (Model.Invoice.DueDate.HasValue)
+            @* 模型经引擎以动态对象传入：可空日期装箱后就是 DateTime，没有 HasValue / Value，按 null 判、强转后格式化 *@
+            @if (Model.Invoice.DueDate != null)
             {
-                <p>Due: <span class="value">@Model.Invoice.DueDate.Value.ToString("yyyy-MM-dd")</span></p>
+                <p>Due: <span class="value">@(((DateTime)Model.Invoice.DueDate).ToString("yyyy-MM-dd"))</span></p>
             }
             <p>Currency: <span class="value">@Model.Invoice.Currency</span></p>
         </div>
@@ -110,13 +135,17 @@
                 <tr>
                     <td class="description">
                         @item.Description
+                        @if (item.PeriodStart != null && item.PeriodEnd != null)
+                        {
+                            <br /><small style="color: #6b7280;">@(((DateTime)item.PeriodStart).ToString("MMM d, yyyy")) to @(((DateTime)item.PeriodEnd).ToString("MMM d, yyyy"))</small>
+                        }
                         @if (!string.IsNullOrEmpty(item.ProductCode))
                         {
                             <br /><small style="color: #9ca3af;">@item.ProductCode</small>
                         }
                     </td>
-                    <td class="right">@item.Quantity.ToString("N2")</td>
-                    <td class="right">@item.UnitPrice.ToString("N2")</td>
+                    <td class="right">@(((decimal)item.Quantity).ToString("#,##0.###"))</td>
+                    <td class="right">@(((decimal)item.UnitPrice).ToString("#,##0.00##"))</td>
                     <td class="right">
                         @if (item.TaxRate > 0)
                         {
@@ -147,7 +176,17 @@
                     <span>-@Model.Invoice.DiscountAmount.ToString("N2")</span>
                 </div>
             }
-            @if (Model.Invoice.TaxAmount > 0)
+            @if (Model.TaxLines.Count > 0)
+            {
+                @foreach (var tax in Model.TaxLines)
+                {
+                    <div class="totals-row">
+                        <span>@tax.Name @tax.Rate.ToString("0.##")%@(string.IsNullOrEmpty(tax.RegistrationNumber) ? "" : " (" + tax.RegistrationNumber + ")")</span>
+                        <span>@tax.Amount.ToString("N2")</span>
+                    </div>
+                }
+            }
+            else if (Model.Invoice.TaxAmount > 0)
             {
                 <div class="totals-row">
                     <span>Tax</span>

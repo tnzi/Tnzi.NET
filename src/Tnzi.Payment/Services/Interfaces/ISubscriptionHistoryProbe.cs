@@ -27,11 +27,16 @@ namespace Tnzi.Payment.Services;
 public interface ISubscriptionHistoryProbe
 {
     /// <summary>
-    /// 该用户名下是否存在（任何状态的）订阅记录。
+    /// 这个计费账户是否成为过订户：账户下有一条真正开始过的订阅（开过试用或付过订阅款），无论它现在是什么状态。
     /// </summary>
     /// <remarks>
-    /// 判据刻意包含已取消 / 已过期的订阅：拆分前就是无状态过滤的 <c>AnyAsync(s =&gt; s.UserId == …)</c>，
-    /// 语义是「他不是新客」而不是「他现在是订户」。
+    /// 判据刻意包含已取消 / 已过期的订阅：语义是「他不是新客」而不是「他现在是订户」。
+    /// 但从没开始过的订阅（待付首期、或没付首期就被取消的）不算：开通链路先落库订阅、再在建首期支付时核销券，
+    /// 把那一条算进来，首单券就对每个新用户都核销不掉。
+    /// <para>
+    /// ★ 按账户问，不按经办人问：机构账户下换一位管理者去开通，仍是同一个老客户，不该再拿一次首单折扣。
+    /// 默认的 User 范围下账户就是这个用户，与此前逐字相同。
+    /// </para>
     /// </remarks>
-    Task<bool> HasAnySubscriptionAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> HasAnySubscriptionAsync(BillingAccountRef account, CancellationToken cancellationToken = default);
 }

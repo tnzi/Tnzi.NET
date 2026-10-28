@@ -56,6 +56,8 @@ function mockStorageApi() {
     createVersion: vi.fn(async () => null),
     getVersions: vi.fn(async () => []),
     restoreVersion: vi.fn(async () => null),
+    downloadVersion: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: new Blob(['v']) })),
+    deleteVersion: vi.fn(async () => ({ succeeded: true, success: true, code: 200 })),
     createShare: vi.fn(async () => null),
     getShare: vi.fn(async () => null),
     revokeShare: vi.fn(async () => undefined),
@@ -131,6 +133,21 @@ describe('storage-bridge', () => {
     expect(url).not.toContain('/api/files')
   })
 
+  it('files.upload forwards a stated lifetime and leaves the server default alone otherwise', async () => {
+    const storageApi = mockStorageApi()
+    const bridge = createStorageBridge({
+      fileApi: mockFileApi() as never,
+      storageApi: storageApi as never,
+    })
+    const file = new File(['x'], 'contract.pdf')
+
+    await bridge.files.upload(file, { isTemporary: false })
+    expect(storageApi.upload).toHaveBeenLastCalledWith(file, { isTemporary: false })
+
+    await bridge.files.upload(file)
+    expect(storageApi.upload).toHaveBeenLastCalledWith(file, undefined)
+  })
+
   it('files.initUpload / uploadChunk / completeUpload delegate to storageApi', async () => {
     const storageApi = mockStorageApi()
     const bridge = createStorageBridge({
@@ -162,17 +179,103 @@ describe('storage-bridge', () => {
       .rejects.toThrow(/HttpClient.*required/)
   })
 
-  it('versions.restore reuses the user-side POST /files/{id}/versions/{v}/restore endpoint', async () => {
-    // Audit GET endpoint stays read-only, but the bridge now reuses the
-    // user-facing restore route so the admin UI's per-row "Restore" action
-    // actually works. With no HttpClient injected, the bridge surfaces a
-    // clear error instead of silently throwing the previous "read-only"
-    // message that misled the page.
-    const bridge = createStorageBridge({
-      fileApi: mockFileApi() as never,
-      storageApi: mockStorageApi() as never,
+  describe('versions (one file\'s history, through the user-side files/{id}/versions routes)', () => {
+    const refused = (code: number, message: string) => ({ succeeded: false, success: false, code, data: undefined, message })
+    const ok = <T>(data: T) => ({ succeeded: true, success: true, code: 200, data })
+
+    function bridgeWith(overrides: Record<string, unknown>) {
+      const storageApi = { ...mockStorageApi(), ...overrides }
+      return {
+        storageApi,
+        bridge: createStorageBridge({ fileApi: mockFileApi() as never, storageApi: storageApi as never }),
+      }
+    }
+
+    it('list returns the history for one file', async () => {
+      const history = [{ id: 'v2', fileId: 'f1', version: 2, size: 5, isCurrent: true, creationTime: '2026-10-03T00:00:00Z' }]
+      const { bridge, storageApi } = bridgeWith({ getVersions: vi.fn(async () => ok(history)) })
+      expect(await bridge.versions.list('f1')).toEqual(history)
+      expect(storageApi.getVersions).toHaveBeenCalledWith('f1')
     })
-    await expect(bridge.versions.restore('file-1', 2)).rejects.toThrow(/HttpClient.*required/)
+
+    it('list resolves to null on 501: the host never loaded Tnzi.Storage.Workspace', async () => {
+      const { bridge } = bridgeWith({
+        getVersions: vi.fn(async () => refused(501, 'This capability requires the Tnzi.Storage.Workspace module')),
+      })
+      expect(await bridge.versions.list('f1')).toBeNull()
+    })
+
+    it('list rejects with the server message on any other refusal', async () => {
+      const { bridge } = bridgeWith({ getVersions: vi.fn(async () => refused(404, 'File not found')) })
+      await expect(bridge.versions.list('f1')).rejects.toThrow('File not found')
+    })
+
+    it('upload sends the file and note, and rejects a refused upload instead of resolving null', async () => {
+      const file = new File(['x'], 'report.pdf')
+      const created = { id: 'v3', fileId: 'f1', version: 3 }
+      const { bridge, storageApi } = bridgeWith({ createVersion: vi.fn(async () => ok(created)) })
+      expect(await bridge.versions.upload('f1', file, 'note')).toEqual(created)
+      expect(storageApi.createVersion).toHaveBeenCalledWith('f1', file, 'note')
+
+      const { bridge: refusing } = bridgeWith({ createVersion: vi.fn(async () => refused(400, 'File type is not allowed')) })
+      await expect(refusing.versions.upload('f1', file)).rejects.toThrow('File type is not allowed')
+    })
+
+    it('restore posts through restoreVersion and rejects a refusal', async () => {
+      const { bridge, storageApi } = bridgeWith({ restoreVersion: vi.fn(async () => ok({ id: 'f1' })) })
+      await bridge.versions.restore('f1', 2)
+      expect(storageApi.restoreVersion).toHaveBeenCalledWith('f1', 2)
+
+      const { bridge: refusing } = bridgeWith({ restoreVersion: vi.fn(async () => refused(404, 'Version 9 not found')) })
+      await expect(refusing.versions.restore('f1', 9)).rejects.toThrow('Version 9 not found')
+    })
+
+    it('download resolves the Blob, and rejects a refused download rather than handing back undefined', async () => {
+      const blob = new Blob(['v2 bytes'])
+      const { bridge, storageApi } = bridgeWith({ downloadVersion: vi.fn(async () => ok(blob)) })
+      expect(await bridge.versions.download('f1', 2)).toBe(blob)
+      expect(storageApi.downloadVersion).toHaveBeenCalledWith('f1', 2)
+
+      const { bridge: refusing } = bridgeWith({ downloadVersion: vi.fn(async () => refused(404, 'Not Found')) })
+      await expect(refusing.versions.download('f1', 2)).rejects.toThrow('Not Found')
+    })
+
+    it('delete goes through deleteVersion and surfaces the refusal for the current version', async () => {
+      const { bridge, storageApi } = bridgeWith({})
+      await bridge.versions.delete('f1', 1)
+      expect(storageApi.deleteVersion).toHaveBeenCalledWith('f1', 1)
+
+      const { bridge: refusing } = bridgeWith({
+        deleteVersion: vi.fn(async () => refused(400, 'Cannot delete the current version')),
+      })
+      await expect(refusing.versions.delete('f1', 2)).rejects.toThrow('Cannot delete the current version')
+    })
+  })
+
+  it('files.get reads one record and rejects a refused read', async () => {
+    const record = { id: 'f1', originalName: 'contract.pdf' }
+    const storageApi = { ...mockStorageApi(), getById: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: record })) }
+    const bridge = createStorageBridge({ fileApi: mockFileApi() as never, storageApi: storageApi as never })
+    expect(await bridge.files.get('f1')).toEqual(record)
+
+    const denied = { ...mockStorageApi(), getById: vi.fn(async () => ({ succeeded: false, success: false, code: 404, message: 'File record not found' })) }
+    const refusing = createStorageBridge({ fileApi: mockFileApi() as never, storageApi: denied as never })
+    await expect(refusing.files.get('f1')).rejects.toThrow('File record not found')
+  })
+
+  it('metadata.get rejects a refused read instead of reporting the file has no metadata', async () => {
+    // The metadata modal saves its rows back as the WHOLE map: an empty map standing
+    // in for a failed read would let one added key erase every key the file has.
+    const ok = { ...mockFileApi(), getMetadata: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: { author: 'Ann' } })) }
+    const bridge = createStorageBridge({ fileApi: ok as never, storageApi: mockStorageApi() as never })
+    expect(await bridge.metadata.get('f1')).toEqual({ author: 'Ann' })
+
+    const none = { ...mockFileApi(), getMetadata: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: null })) }
+    expect(await createStorageBridge({ fileApi: none as never, storageApi: mockStorageApi() as never }).metadata.get('f1')).toEqual({})
+
+    const denied = { ...mockFileApi(), getMetadata: vi.fn(async () => ({ succeeded: false, success: false, code: 500, message: 'Metadata store unavailable' })) }
+    const refusing = createStorageBridge({ fileApi: denied as never, storageApi: mockStorageApi() as never })
+    await expect(refusing.metadata.get('f1')).rejects.toThrow('Metadata store unavailable')
   })
 
   it('chunks.fetch calls GET /admin/storage/audit/chunks with paging params', async () => {

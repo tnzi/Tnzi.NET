@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import Files from '../../../src/pages/storage/Files.vue'
+import { useAdminRouteStore } from '../../../src/stores/useAdminRouteStore'
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ meta: {}, query: {}, params: {} }),
@@ -25,19 +26,30 @@ const fetchFiles = vi.fn(async () => ({
   pageIndex: 1,
   pageSize: 20,
 }))
+// One record by id: what the drawer re-reads after a version changed the file's content.
+const getFile = vi.fn(async (id: string) => ({ id, originalName: `${id}.bin`, size: 4096 }))
+// The metadata modal reads the whole map and writes it back whole (PUT replaces).
+const getMetadata = vi.fn(async (_id: string): Promise<Record<string, string>> => ({}))
+const setMetadata = vi.fn(async (_id: string, _map: Record<string, string>) => ({}))
+// Upload paths: a small file goes up whole, a large one in chunks; both then move into the folder.
+const uploadFile = vi.fn(async (_file: File, _options?: { isTemporary?: boolean }) => ({ id: 'f-new', url: '/files/f-new' }))
+const moveTo = vi.fn(async (_ids: string[], _folderId: string | null) => undefined)
+const uploadChunk = vi.fn(async () => undefined)
+const completeUpload = vi.fn(async (_uploadId: string) => ({ id: 'f-big', url: '/files/f-big' }))
 
 vi.mock('../../../src/services/bridges/storage-bridge', () => ({
   createStorageBridge: () => ({
     files: {
       fetch: fetchFiles,
+      get: getFile,
       delete: vi.fn(async () => undefined),
       downloadUrl: vi.fn(() => '/api/files/f1/download'),
       previewUrl: vi.fn(() => '/api/files/f1/preview'),
-      upload: vi.fn(async () => ({ id: 'f-new', url: '/files/f-new' })),
-      moveTo: vi.fn(async () => undefined),
+      upload: uploadFile,
+      moveTo,
       initUpload: vi.fn(async () => ({ uploadId: 'sess-1' })),
-      uploadChunk: vi.fn(async () => undefined),
-      completeUpload: vi.fn(async () => ({ url: '/files/f-new' })),
+      uploadChunk,
+      completeUpload,
     },
     folders: {
       getTree, getById: vi.fn(), create: vi.fn(), update: vi.fn(),
@@ -45,7 +57,7 @@ vi.mock('../../../src/services/bridges/storage-bridge', () => ({
     },
     preview: { canPreview: vi.fn(async () => true), url: vi.fn(async () => '/x') },
     tags: { set: vi.fn(async () => ({})), byTag: vi.fn() },
-    metadata: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({})) },
+    metadata: { get: getMetadata, set: setMetadata },
     references: { byFile: vi.fn(async () => []), byEntity: vi.fn(async () => []) },
     integrity: { verifyOne: vi.fn(async () => ({ status: 'Healthy' })), batchVerify: vi.fn() },
   }),
@@ -99,6 +111,10 @@ describe('Files page - Finder file manager', () => {
     setActivePinia(createPinia())
     getTree.mockClear()
     fetchFiles.mockClear()
+    getFile.mockClear()
+    getMetadata.mockReset()
+    getMetadata.mockImplementation(async () => ({}))
+    setMetadata.mockClear()
     try {
       localStorage.removeItem('tnzi-admin:storage-view')
     } catch {
@@ -120,11 +136,334 @@ describe('Files page - Finder file manager', () => {
     expect(wrapper.find('.t-storage-file-page__tree').exists()).toBe(false)
   })
 
+  it('uploads library files as permanent records, not temporary uploads', async () => {
+    // Nothing references a library file, so a temporary upload would be removed by
+    // background cleanup once the retention period passes (chunked uploads were
+    // already permanent: a file's lifetime must not depend on its size).
+    const wrapper = mount(Files, { global: { stubs } })
+    await flush()
+    uploadFile.mockClear()
+
+    const file = new File(['x'], 'contract.pdf')
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flush()
+
+    expect(uploadFile).toHaveBeenCalledWith(file, { isTemporary: false })
+  })
+
   it('renders a breadcrumb with the root crumb', async () => {
     const wrapper = mount(Files, { global: { stubs } })
     await flush()
     expect(wrapper.find('.t-storage-file-page__breadcrumb').exists()).toBe(true)
     expect(wrapper.find('.t-storage-file-page__crumb').exists()).toBe(true)
+  })
+
+  describe('version history in the detail drawer', () => {
+    // The drawer host renders its body while open; the history component is a stub
+    // that records the file it was given and can emit `changed` like the real one.
+    const TDetailHost = {
+      props: ['state', 'title'],
+      template: '<div v-if="state.visible.value" class="detail-host"><slot /></div>',
+    }
+    const TFileVersionHistory = {
+      props: ['file', 'translate'],
+      emits: ['changed'],
+      template: '<div class="version-history" :data-file="file.id" @click="$emit(\'changed\', file.id)" />',
+    }
+    const drawerStubs = { ...stubs, TDetailHost, TFileVersionHistory }
+
+    async function openDrawer(row?: Record<string, unknown>) {
+      const wrapper = mount(Files, { global: { stubs: drawerStubs } })
+      await flush()
+      const vm = wrapper.vm as unknown as { openDetail: (row: unknown) => void }
+      const [first] = (await fetchFiles.mock.results[0].value).items
+      vm.openDetail(row ?? first)
+      await flush()
+      return wrapper
+    }
+
+    function drawerFile(wrapper: Awaited<ReturnType<typeof openDrawer>>) {
+      return wrapper.findComponent(TFileVersionHistory).props('file') as { id: string; size: number }
+    }
+
+    it('shows the opened file\'s version history when the workspace module is loaded', async () => {
+      useAdminRouteStore().setAvailableModules(new Set(['storage-workspace']))
+      const wrapper = await openDrawer()
+      expect(wrapper.find('.version-history').attributes('data-file')).toBe('f1')
+    })
+
+    it('leaves the section out when the host did not load Tnzi.Storage.Workspace', async () => {
+      useAdminRouteStore().setAvailableModules(new Set(['storage']))
+      const wrapper = await openDrawer()
+      expect(wrapper.find('.detail-host').exists()).toBe(true)
+      expect(wrapper.find('.version-history').exists()).toBe(false)
+    })
+
+    it('waits for the module probe before mounting it (it sends a request on mount)', async () => {
+      useAdminRouteStore().setModuleSignalPending(true)
+      const wrapper = await openDrawer()
+      expect(wrapper.find('.version-history').exists()).toBe(false)
+
+      useAdminRouteStore().setModuleSignalPending(false)
+      await flush()
+      expect(wrapper.find('.version-history').exists()).toBe(true)
+    })
+
+    it('re-reads the listing and the record when a version upload or restore changed the current content', async () => {
+      const wrapper = await openDrawer()
+      const before = fetchFiles.mock.calls.length
+
+      await wrapper.find('.version-history').trigger('click')
+      await flush()
+
+      expect(fetchFiles.mock.calls.length).toBe(before + 1)
+      expect(getFile).toHaveBeenCalledWith('f1')
+      // The drawer stays open on the same file, rebound to the fresh record (the new size).
+      expect(drawerFile(wrapper).id).toBe('f1')
+      expect(drawerFile(wrapper).size).toBe(4096)
+    })
+
+    it('refreshes a deep-linked drawer whose file is not on the current page', async () => {
+      // `?detail=view:<id>` can open a file the listing never loaded; looking it up in the
+      // page would find nothing and leave the old size on screen.
+      const wrapper = await openDrawer({ id: 'f9', originalName: 'elsewhere.pdf', size: 10, referenceCount: 1 })
+
+      await wrapper.find('.version-history').trigger('click')
+      await flush()
+
+      expect(getFile).toHaveBeenCalledWith('f9')
+      expect(drawerFile(wrapper).id).toBe('f9')
+      expect(drawerFile(wrapper).size).toBe(4096)
+    })
+
+    it('does not pull the drawer back when the user moved to another file meanwhile', async () => {
+      let release: (record: unknown) => void = () => {}
+      getFile.mockImplementationOnce((() => new Promise((r) => { release = r })) as never)
+      const wrapper = await openDrawer()
+
+      await wrapper.find('.version-history').trigger('click')
+      // While the record re-read is in flight, the user opens f2.
+      const vm = wrapper.vm as unknown as { openDetail: (row: unknown) => void }
+      const second = (await fetchFiles.mock.results[0].value).items[1]
+      vm.openDetail(second)
+      await flush()
+      release({ id: 'f1', originalName: 'photo.jpg', size: 4096 })
+      await flush()
+
+      expect(drawerFile(wrapper).id).toBe('f2')
+    })
+  })
+
+  describe('metadata modal (Save replaces the whole map)', () => {
+    // Renders the open overlay's body and footer; only one overlay is open at a time.
+    const TDetailHost = {
+      props: ['state', 'title'],
+      template:
+        '<div v-if="state.visible.value" class="detail-host"><slot /><div class="detail-footer"><slot name="footer" :close="state.close" /></div></div>',
+    }
+    // A disabled native button swallows the click, as NButton does.
+    const Button = {
+      props: ['disabled', 'loading'],
+      emits: ['click'],
+      template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
+    }
+    const metaStubs = { ...stubs, TDetailHost, Button }
+
+    type MetaVm = {
+      openMetadataModal: (row: unknown) => void
+      saveMetadata: () => Promise<void>
+      metadataDetail: { close: () => void }
+      metadataRows: Array<{ key: string; value: string }>
+    }
+
+    function deferred<T>() {
+      let resolve: (value: T) => void = () => {}
+      let reject: (reason: unknown) => void = () => {}
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res
+        reject = rej
+      })
+      return { promise, resolve, reject }
+    }
+
+    async function mountPage() {
+      const wrapper = mount(Files, { global: { stubs: metaStubs } })
+      await flush()
+      const items = (await fetchFiles.mock.results[0].value).items
+      return { wrapper, vm: wrapper.vm as unknown as MetaVm, first: items[0], second: items[1] }
+    }
+
+    function saveButton(wrapper: Awaited<ReturnType<typeof mountPage>>['wrapper']) {
+      const buttons = wrapper.findAll('.detail-footer button')
+      return buttons[buttons.length - 1]!
+    }
+
+    it('saves the map it read, with the user\'s edit, once the read has landed', async () => {
+      getMetadata.mockImplementation(async () => ({ author: 'Ann', dept: 'Legal' }))
+      const { wrapper, vm, first } = await mountPage()
+
+      vm.openMetadataModal(first)
+      await flush()
+      expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
+      vm.metadataRows[1]!.value = 'Finance'
+      await saveButton(wrapper).trigger('click')
+      await flush()
+
+      expect(setMetadata).toHaveBeenCalledWith('f1', { author: 'Ann', dept: 'Finance' })
+    })
+
+    it('offers no Save while the read is still in flight', async () => {
+      const pending = deferred<Record<string, string>>()
+      getMetadata.mockImplementation(() => pending.promise)
+      const { wrapper, vm, first } = await mountPage()
+
+      vm.openMetadataModal(first)
+      await flush()
+      expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+      await saveButton(wrapper).trigger('click')
+      await vm.saveMetadata()
+      expect(setMetadata).not.toHaveBeenCalled()
+
+      pending.resolve({ author: 'Ann' })
+      await flush()
+      expect(saveButton(wrapper).attributes('disabled')).toBeUndefined()
+    })
+
+    it('offers no Save after a failed read, says so instead of "no metadata", and can retry', async () => {
+      getMetadata.mockImplementationOnce(async () => {
+        throw new Error('Metadata service unavailable')
+      })
+      const { wrapper, vm, first } = await mountPage()
+
+      vm.openMetadataModal(first)
+      await flush()
+      expect(wrapper.find('.detail-host').text()).toContain('Metadata service unavailable')
+      expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+      // Adding a key and saving would otherwise PUT just that key and erase the rest.
+      await vm.saveMetadata()
+      expect(setMetadata).not.toHaveBeenCalled()
+
+      getMetadata.mockImplementation(async () => ({ author: 'Ann' }))
+      await wrapper.find('.metadata-load-error button').trigger('click')
+      await flush()
+      expect(wrapper.find('.metadata-load-error').exists()).toBe(false)
+      await saveButton(wrapper).trigger('click')
+      await flush()
+      expect(setMetadata).toHaveBeenCalledWith('f1', { author: 'Ann' })
+    })
+
+    it('never shows (or saves) a late answer for the file opened before', async () => {
+      const forFirst = deferred<Record<string, string>>()
+      const forSecond = deferred<Record<string, string>>()
+      getMetadata.mockImplementation((id: string) => (id === 'f1' ? forFirst.promise : forSecond.promise))
+      const { wrapper, vm, first, second } = await mountPage()
+
+      vm.openMetadataModal(first)
+      await flush()
+      vm.metadataDetail.close()
+      await flush()
+      vm.openMetadataModal(second)
+      await flush()
+
+      // The first file's answer lands while the second file's read is still out.
+      forFirst.resolve({ owner: 'from-f1' })
+      await flush()
+      expect(vm.metadataRows).toEqual([])
+      expect(saveButton(wrapper).attributes('disabled')).toBeDefined()
+
+      forSecond.resolve({ owner: 'from-f2' })
+      await flush()
+      await saveButton(wrapper).trigger('click')
+      await flush()
+      expect(setMetadata).toHaveBeenCalledTimes(1)
+      expect(setMetadata).toHaveBeenCalledWith('f2', { owner: 'from-f2' })
+    })
+
+    it('keeps the second file\'s rows when the first file\'s answer arrives after them', async () => {
+      const forFirst = deferred<Record<string, string>>()
+      getMetadata.mockImplementation((id: string) => (id === 'f1' ? forFirst.promise : Promise.resolve({ owner: 'from-f2' })))
+      const { wrapper, vm, first, second } = await mountPage()
+
+      vm.openMetadataModal(first)
+      await flush()
+      vm.metadataDetail.close()
+      await flush()
+      vm.openMetadataModal(second)
+      await flush()
+      forFirst.resolve({ owner: 'from-f1' })
+      await flush()
+
+      expect(vm.metadataRows).toEqual([{ key: 'owner', value: 'from-f2' }])
+      await saveButton(wrapper).trigger('click')
+      await flush()
+      expect(setMetadata).toHaveBeenCalledWith('f2', { owner: 'from-f2' })
+    })
+  })
+
+  // Clicking folder A then folder B: A's listing arriving last must not be shown
+  // under B's breadcrumb, where delete and move would act on files that are
+  // somewhere else.
+  it('★ shows the files of the folder opened last when an earlier listing answers late', async () => {
+    const wrapper = mount(Files, { global: { stubs } })
+    await flush()
+    const answers = new Map<string, (value: unknown) => void>()
+    const original = fetchFiles.getMockImplementation()!
+    fetchFiles.mockImplementation(((query: { filters?: { folderId?: string } }) =>
+      new Promise((resolve) => { answers.set(String(query.filters?.folderId), resolve) })) as never)
+    try {
+      const vm = wrapper.vm as unknown as { openFolder: (id: string) => void; files: Array<{ id: string }> }
+      vm.openFolder('A')
+      vm.openFolder('B')
+      await flush()
+
+      answers.get('B')!({ items: [{ id: 'in-B' }], totalCount: 1, pageIndex: 1, pageSize: 20 })
+      await flush()
+      answers.get('A')!({ items: [{ id: 'in-A' }], totalCount: 1, pageIndex: 1, pageSize: 20 })
+      await flush()
+
+      expect(vm.files.map((f) => f.id)).toEqual(['in-B'])
+    } finally {
+      fetchFiles.mockImplementation(original)
+    }
+  })
+
+  describe('uploading into a folder', () => {
+    // A stand-in for a large file: only `size` and `slice` are read on the chunked path.
+    const largeFile = (name: string): File =>
+      ({ name, size: 120 * 1024 * 1024, slice: () => new Blob(['x']) }) as unknown as File
+
+    beforeEach(() => {
+      uploadFile.mockClear()
+      moveTo.mockClear()
+      uploadChunk.mockClear()
+      completeUpload.mockClear()
+      useAdminRouteStore().setAvailableModules(new Set(['storage', 'storage-workspace']))
+    })
+
+    it('files a large (chunked) upload into the folder it was dropped on, like a small one', async () => {
+      const wrapper = mount(Files, { global: { stubs } })
+      await flush()
+      const vm = wrapper.vm as unknown as { uploadFiles: (list: File[], target: string | null) => Promise<void> }
+
+      await vm.uploadFiles([largeFile('contract.pdf')], 'd1')
+
+      expect(uploadChunk).toHaveBeenCalled()
+      expect(completeUpload).toHaveBeenCalledWith('sess-1')
+      expect(moveTo).toHaveBeenCalledWith(['f-big'], 'd1')
+    })
+
+    it('leaves a large upload at the root when it was made at the root', async () => {
+      const wrapper = mount(Files, { global: { stubs } })
+      await flush()
+      const vm = wrapper.vm as unknown as { uploadFiles: (list: File[], target: string | null) => Promise<void> }
+
+      await vm.uploadFiles([largeFile('contract.pdf')], null)
+
+      expect(completeUpload).toHaveBeenCalledWith('sess-1')
+      expect(moveTo).not.toHaveBeenCalled()
+    })
   })
 
   it('list view unifies folders + files as table rows (folders first)', async () => {

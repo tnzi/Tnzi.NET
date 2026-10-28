@@ -59,6 +59,7 @@ public class VendorService : ApplicationService, IVendorService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _vendorRepository.Discard(vendor); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<VendorDto>($"Vendor code '{vendor.Code}' already exists.", 409);
         }
 

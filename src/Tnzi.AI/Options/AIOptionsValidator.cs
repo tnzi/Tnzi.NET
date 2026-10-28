@@ -8,6 +8,9 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
     /// <summary><c>AI:Providers:*:TimeoutSeconds</c> 允许的上限。</summary>
     internal const int MaxProviderTimeoutSeconds = 600;
 
+    /// <summary>OpenAI 官方 API 的主机名；只有指向它的条目才校验「sk-」密钥形态。</summary>
+    private const string OfficialOpenAIHost = "api.openai.com";
+
     protected override void ValidateOptions(AIOptions options, List<string> errors)
     {
         // Providers 声明为非空且带默认实例，配置绑定不会把它置 null；多余的 != null 检查会让
@@ -178,7 +181,7 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
             }
 
             // 验证 API Key 格式
-            ValidateApiKeyFormat(providerName, apiKey, errors);
+            ValidateApiKeyFormat(providerName, providerOptions.BaseUrl, apiKey, errors);
 
             // 验证 BaseUrl：提供时校验格式；未提供时由具体 IChatClientProvider 实现决定（如内置 OpenAI provider 有默认 endpoint，自定义 provider 可能不需要）
             if (!string.IsNullOrWhiteSpace(providerOptions.BaseUrl))
@@ -231,11 +234,15 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
     /// <summary>
     /// 验证 API Key 格式
     /// </summary>
-    private static void ValidateApiKeyFormat(string providerName, string apiKey, List<string> errors)
+    /// <remarks>
+    /// 「sk-」前缀只是 OpenAI 官方端点的密钥形态。叫 OpenAI 的条目常常指向 OpenAI 兼容端点
+    /// （Ollama、vLLM、网关），那些密钥是任意字符串；按条目名套用这条规则会让宿主起不来。
+    /// </remarks>
+    private static void ValidateApiKeyFormat(string providerName, string? baseUrl, string apiKey, List<string> errors)
     {
         switch (providerName.ToLowerInvariant())
         {
-            case "openai":
+            case "openai" when TargetsOfficialOpenAIEndpoint(baseUrl):
                 ValidateOpenAIApiKey(apiKey, errors);
                 break;
             case "azureopenai":
@@ -246,6 +253,14 @@ public class AIOptionsValidator : OptionsValidatorBase<AIOptions>
                 break;
         }
     }
+
+    /// <summary>
+    /// 未配置 BaseUrl（走 SDK 默认端点）或显式指向 api.openai.com 时，才是 OpenAI 官方端点
+    /// </summary>
+    private static bool TargetsOfficialOpenAIEndpoint(string? baseUrl)
+        => string.IsNullOrWhiteSpace(baseUrl)
+            || (Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
+                && string.Equals(uri.Host, OfficialOpenAIHost, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// 验证 OpenAI API Key 格式

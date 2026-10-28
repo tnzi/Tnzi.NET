@@ -65,7 +65,7 @@ public class ApiVersionMiddleware
                 //   一条碰巧含有 /v/... 的普通路径会被误读成版本号 —— 为它拒绝整个请求，
                 //   代价比收益大。带一条 Warning，好过悄悄地按默认版本回答。
                 _logger.LogWarning(
-                    "Ignored a malformed API version on {Path}; falling back to the default version", context.Request.Path);
+                    "Ignored a malformed API version on {Path}; falling back to the default version", context.GetRedactedPath());
             }
             else if (!IsSupported(requested, apiVersionOptions))
             {

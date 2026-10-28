@@ -108,10 +108,12 @@ import {
   type MissingTranslationSummaryDto,
 } from '../../services/bridges/localization-bridge'
 import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safe-message'
 import TContentPage from '../../components/layout/TContentPage.vue'
 
 const bridge = createLocalizationBridge({ client: useAdminClient() })
 const t = makePageTranslator('system.localization')
+const message = useSafeMessage()
 
 const loading = ref(false)
 const summary = ref<MissingTranslationSummaryDto | null>(null)
@@ -200,14 +202,20 @@ async function downloadStubs(): Promise<void> {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  } catch { /* bridge swallows */ }
+  } catch (error) {
+    // The bridge throws the server's refusal; a failed export must not read as an empty download.
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 async function clearAll(): Promise<void> {
   try {
     await bridge.clearMissing()
     await refresh()
-  } catch { /* bridge swallows */ }
+  } catch (error) {
+    // The bridge throws the server's refusal; a failed clear must not read as done.
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 onMounted(() => { void refresh() })

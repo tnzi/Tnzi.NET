@@ -5,8 +5,15 @@ namespace Tnzi.AI.Workflow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 当工作流步骤设置了 <c>WorkflowStepDto.RequiresApproval</c> = true 时，
-/// 步骤完成后工作流将暂停并调用此处理器，等待人工审批结果。
+/// 只对设置了 <c>WorkflowStepDto.RequiresApproval</c> = true 的步骤生效：步骤执行完后引擎就地调用此处理器，
+/// 批准则继续，拒绝则结束本次执行。拒绝不暂停，也不写等待审批的检查点；配了
+/// <see cref="WorkflowExecutionOptions.CheckpointStore"/> 时，本层收尾仍以 <c>Failed</c> 状态落一次检查点，
+/// 被拒的步骤不计入已完成，恢复这次执行时它重新生成并再次送审。节点经 <c>CheckInterruptAsync</c> 发起的中断
+/// （审批节点、人工输入、外部事件）不经过它，一律保存检查点后暂停。
+/// </para>
+/// <para>
+/// 只经 <see cref="WorkflowExecutionOptions.InterruptHandler"/> 传给引擎时才被调用；在依赖注入容器里注册它没有效果，
+/// 工作流服务的运行与恢复不使用处理器，审批经检查点暂停、由审批端点放行。
 /// </para>
 /// <para>
 /// 实现者可通过 WebSocket、SignalR、轮询或外部审批系统来完成审批流程。

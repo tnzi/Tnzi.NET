@@ -11,6 +11,10 @@ namespace Tnzi.Identity.Extensions;
 internal static class ContactAddressMasking
 {
     /// <summary>邮箱脱敏：只保留首字符与域名（<c>alice@example.com</c> → <c>a***@example.com</c>）。</summary>
+    /// <remarks>
+    /// 首字符按码元取：本地部分以 emoji 等补充平面字符开头时一个都不露（<c>***@example.com</c>），
+    /// 而不是露出半个代理项，那在回执上是一个替换字符。
+    /// </remarks>
     public static string? MaskEmail(string? email)
     {
         if (string.IsNullOrWhiteSpace(email)) return null;
@@ -18,7 +22,7 @@ internal static class ContactAddressMasking
         if (at <= 0) return "***";
         var name = email[..at];
         var domain = email[at..]; // 含 '@'
-        var visible = name.Length <= 1 ? name : name[..1];
+        var visible = name.FitToLength(1);
         return $"{visible}***{domain}";
     }
 

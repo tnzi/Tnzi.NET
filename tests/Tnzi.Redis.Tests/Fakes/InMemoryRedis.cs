@@ -27,6 +27,9 @@ internal sealed class InMemoryRedis
     /// <summary>每个键被设置过几次 TTL —— 固定窗口语义要求同一窗口内只有一次。</summary>
     public Dictionary<string, int> ExpirySetCounts { get; } = new();
 
+    /// <summary>String 写入时带的 TTL（null = 不过期），按完整 Redis 键记录最近一次写入。</summary>
+    public Dictionary<string, TimeSpan?> StringTtls { get; } = new();
+
     public Mock<IConnectionMultiplexer> Multiplexer { get; }
     public Mock<IDatabase> Database { get; }
     public Mock<IServer> Server { get; }
@@ -39,10 +42,10 @@ internal sealed class InMemoryRedis
         // ---- String 写 ----
         Database
             .Setup(d => d.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
-            .Returns((RedisKey k, RedisValue v, TimeSpan? _, When when) => Task.FromResult(SetString(k, v, when)));
+            .Returns((RedisKey k, RedisValue v, TimeSpan? ttl, When when) => Task.FromResult(SetString(k, v, ttl, when)));
         Database
             .Setup(d => d.StringSet(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
-            .Returns((RedisKey k, RedisValue v, TimeSpan? _, When when) => SetString(k, v, when));
+            .Returns((RedisKey k, RedisValue v, TimeSpan? ttl, When when) => SetString(k, v, ttl, when));
 
         // ---- String 读 ----
         Database
@@ -144,12 +147,12 @@ internal sealed class InMemoryRedis
         var batch = new Mock<IBatch>(MockBehavior.Loose);
         batch
             .Setup(b => b.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
-            .Returns((RedisKey k, RedisValue v, TimeSpan? _, When when) => Task.FromResult(SetString(k, v, when)));
+            .Returns((RedisKey k, RedisValue v, TimeSpan? ttl, When when) => Task.FromResult(SetString(k, v, ttl, when)));
         batch.Setup(b => b.Execute());
         return batch;
     }
 
-    private bool SetString(RedisKey key, RedisValue value, When when)
+    private bool SetString(RedisKey key, RedisValue value, TimeSpan? ttl, When when)
     {
         lock (_gate)
         {
@@ -157,6 +160,7 @@ internal sealed class InMemoryRedis
             if (when == When.NotExists && Strings.ContainsKey(k))
                 return false;
             Strings[k] = value.ToString();
+            StringTtls[k] = ttl;
             return true;
         }
     }

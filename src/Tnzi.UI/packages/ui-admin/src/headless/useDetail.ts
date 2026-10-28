@@ -4,6 +4,8 @@ import { useFormModal, type FormModalMode, type UseFormModalReturn } from './use
 import { useSectionRoute } from './useSectionRoute'
 import { useQueryScope, tryRoute } from './query-scope'
 import { tryInjectDeepLinkConfig } from '../plugin/deep-link-config'
+import { translatePageKey } from '../i18n'
+import { getGlobalMessage } from '../utils/global-toast'
 
 // ── Dev-only duplicate-key guard ─────────────────────────────────────────────
 // Two engines on the SAME route claiming the SAME query key silently clobber
@@ -156,7 +158,17 @@ export interface UseDetailReturn<T> {
   activeSection: Ref<string | null>
   open: (action: DetailAction, payload?: T | string | number | null) => Promise<void>
   close: () => void
+  /**
+   * Persist through `submitData`, then close. While a save is in flight a
+   * second call returns without writing (see {@link UseDetailReturn.submitting}).
+   */
   submit: () => Promise<void>
+  /**
+   * A `submit` is waiting on `submitData`. `TDetailHost`'s Confirm shows it as
+   * its loading state; bind it in a custom `#footer`. (Same ref as
+   * `form.submitting`.)
+   */
+  submitting: Readonly<Ref<boolean>>
   setSection: (key: string) => void
   /**
    * The underlying form-modal primitive (`visible`/`mode`/`formData`/`open`/`close`).
@@ -169,6 +181,16 @@ export interface UseDetailReturn<T> {
 
 function isId(v: unknown): v is string | number {
   return typeof v === 'string' || typeof v === 'number'
+}
+
+/**
+ * Whether a record id read from the URL (`?detail=edit:<id>`) is one plain path
+ * segment. Loaders interpolate it into the API path (`${base}/${id}`), so an id
+ * with a separator or a dot segment (`../../roles/1`, `5/sessions`) would send
+ * the signed-in admin's request, and a later save, to a different resource.
+ */
+function isPathSegmentId(id: string): boolean {
+  return id !== '' && !/^(\.|%2e){1,2}$/i.test(id) && !/[/\\?#]/.test(id)
 }
 
 function tryGetRouter(): Router | undefined {
@@ -246,7 +268,14 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
         : () => toValue(options.sections)?.[0]?.key,
   })
 
-  async function loadIfNeeded(payload?: T | string | number | null): Promise<T | null> {
+  /**
+   * Bumped by every overlay `open()`: only the latest one may open the overlay.
+   * Edit on row A then on row B, with A's load answering last, would otherwise
+   * open A after the operator asked for B.
+   */
+  let openSeq = 0
+
+  async function loadIfNeeded(payload: T | string | number | null | undefined, seq: number): Promise<T | null> {
     if (payload == null) return null
     if (isId(payload)) {
       if (!loadData) return null
@@ -255,13 +284,24 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
       try {
         return await loadData(payload)
       } catch (e) {
-        error.value = e instanceof Error ? e : new Error(String(e))
+        if (seq === openSeq) error.value = e instanceof Error ? e : new Error(String(e))
         return null
       } finally {
-        loading.value = false
+        if (seq === openSeq) loading.value = false
       }
     }
     return payload
+  }
+
+  /**
+   * A record asked for by id could not be loaded. The overlay stays closed: an
+   * edit-or-create editor decides "new or existing" from the data's id, so an
+   * Edit click opened a blank "New" form whose save created a second record.
+   */
+  function reportUnloadable(): void {
+    const failure = error.value ?? new Error(translatePageKey('', 'admin.shared.toasts.recordNotFound'))
+    error.value = failure
+    getGlobalMessage()?.error(failure.message)
   }
 
   async function open(action: DetailAction, payload?: T | string | number | null): Promise<void> {
@@ -280,7 +320,13 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
       await router.push({ name: options.pageRoute.name, params, query: { action } })
       return
     }
-    const loaded = await loadIfNeeded(payload)
+    const seq = ++openSeq
+    const loaded = await loadIfNeeded(payload, seq)
+    if (seq !== openSeq) return
+    if (loaded == null && isId(payload) && loadData) {
+      reportUnloadable()
+      return
+    }
     form.open(action, loaded)
   }
 
@@ -293,9 +339,18 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
   }
 
   async function submit(): Promise<void> {
+    // One write per Confirm: the flag is checked and raised before the first
+    // await, so a double click finds it raised; it comes down when the request
+    // answers, success or failure.
+    if (form.submitting.value) return
     if (!form.formData.value || !form.mode.value) return
     if (options.submitData) {
-      await options.submitData(form.mode.value, form.formData.value)
+      form.submitting.value = true
+      try {
+        await options.submitData(form.mode.value, form.formData.value)
+      } finally {
+        form.submitting.value = false
+      }
     } else if (form.mode.value !== 'view') {
       // No persistence wired for an editable detail - do not fake success by
       // closing. Surfaces a misconfiguration instead of silently discarding.
@@ -339,6 +394,7 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
     const action = code.slice(0, i)
     const id = code.slice(i + 1)
     if (action !== 'edit' && action !== 'view') return null
+    if (!isPathSegmentId(id)) return null
     return { action, id }
   }
 
@@ -424,6 +480,7 @@ export function useDetail<T = unknown>(options: UseDetailOptions<T> = {}): UseDe
     open,
     close,
     submit,
+    submitting: form.submitting,
     setSection,
     form,
   }

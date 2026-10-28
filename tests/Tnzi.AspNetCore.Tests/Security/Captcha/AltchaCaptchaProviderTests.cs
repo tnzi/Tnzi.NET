@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Tnzi.TestBase;
 
 namespace Tnzi.AspNetCore.Tests.Security.Captcha;
 
@@ -219,6 +220,22 @@ public class AltchaCaptchaProviderTests
         Assert.Equal(AltchaCaptchaProvider.DefaultScriptUrl, config.ScriptUrl);
         Assert.Contains("{purpose}", config.ChallengeUrl, StringComparison.Ordinal);
         Assert.Null(config.SiteKey);
+    }
+
+    /// <summary>
+    /// 默认脚本与 <c>@tnzi/core</c> 用真控件跑测试的是同一个版本，且走 3.x 的 <c>dist/main/</c> 路径。
+    /// 此前地址只钉大版本、路径还是 2.x 的：jsDelivr 上是 404，而大版本浮动又会解析到 V1 挑战识别坏掉的 3.4.0。
+    /// </summary>
+    [Fact]
+    public void DefaultScriptUrl_IsTheWidgetVersionTheFrontendTestsDrive()
+    {
+        var corePackage = Path.Combine(RepoRoot.Locate(), "src", "Tnzi.UI", "packages", "core", "package.json");
+        using var manifest = JsonDocument.Parse(File.ReadAllText(corePackage));
+        var version = manifest.RootElement.GetProperty("devDependencies").GetProperty("altcha").GetString();
+
+        Assert.NotNull(version);
+        Assert.Matches(@"^\d+\.\d+\.\d+$", version); // 精确版本：范围写法会让测试与生产各自解析
+        Assert.Equal(AltchaCaptchaProvider.DefaultScriptUrl, $"https://cdn.jsdelivr.net/npm/altcha@{version}/dist/main/altcha.min.js");
     }
 
     [Fact]

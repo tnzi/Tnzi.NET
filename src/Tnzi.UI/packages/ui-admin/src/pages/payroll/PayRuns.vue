@@ -220,6 +220,7 @@ import { useSafeMessage } from '../_shared/safe-message'
 import { createPayrollOptionSources } from './options'
 import { enumKey } from './setup-config'
 import { amountCell, fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../finance/money'
+import { useViewedRecord } from '../finance/viewed-record'
 import {
   buildPayRunColumns,
   payRunFormSchema,
@@ -271,22 +272,32 @@ async function run(action: () => Promise<unknown>, successKey: string) {
 }
 
 // ── Run detail (#detail slot) ───────────────────────────────────
-const viewedRun = ref<PayRunDto | null>(null)
-const runPayslips = ref<PayslipListDto[]>([])
-const runInputs = ref<PayRunInputDto[]>([])
+// The run behind the drawer with its payslips and one-time inputs. Last-wins:
+// a late answer for the run opened before must not paint the drawer of the one
+// open now (the worked-days and input editors act on whatever run it holds).
+// A failed payslip / input read still shows the run, and says why.
+const viewing = useViewedRecord<{ run: PayRunDto; payslips: PayslipListDto[]; inputs: PayRunInputDto[] }>(
+  async (id) => {
+    const run = await bridge.runs.getById(id)
+    if (!run) return null
+    let payslips: PayslipListDto[] = []
+    let inputs: PayRunInputDto[] = []
+    try {
+      payslips = await bridge.runs.payslips(id)
+      inputs = await bridge.runs.inputs(id)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error))
+    }
+    return { run, payslips, inputs }
+  },
+  (error) => message.error(error),
+)
+const viewedRun = computed(() => viewing.record.value?.run ?? null)
+const runPayslips = computed(() => viewing.record.value?.payslips ?? [])
+const runInputs = computed(() => viewing.record.value?.inputs ?? [])
 
-async function loadRunDetail(row: PayRunRow) {
-  viewedRun.value = null
-  runPayslips.value = []
-  runInputs.value = []
-  const id = String(row.id ?? '')
-  try {
-    viewedRun.value = await bridge.runs.getById(id)
-    runPayslips.value = await bridge.runs.payslips(id)
-    runInputs.value = await bridge.runs.inputs(id)
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
+function loadRunDetail(row: Pick<PayRunRow, 'id'>): Promise<void> {
+  return viewing.load(String(row.id ?? ''))
 }
 
 const payslipColumns: DataTableColumns<PayslipListDto> = [
@@ -311,8 +322,12 @@ const workedDays = ref<number | null>(null)
 const recalculating = ref(false)
 
 const payslipTitle = computed(() => payslipDetail.data.value?.employeeName ?? t('payslip.title'))
+// 后端只对 Internal 批次按输入重算（摄取进来的批次没有公式可重跑）。
 const canEditInputs = computed(() =>
-  can('payroll.run.update') && viewedRun.value?.status === PayRunStatus.Calculated && !!payslipDetail.data.value,
+  can('payroll.run.update') &&
+  viewedRun.value?.source === PayRunSource.Internal &&
+  viewedRun.value?.status === PayRunStatus.Calculated &&
+  !!payslipDetail.data.value,
 )
 
 async function openPayslip(payslipId: string) {
@@ -500,12 +515,16 @@ const isDraft = (r: PayRunRow) => r.status === PayRunStatus.Draft
 const isCalculated = (r: PayRunRow) => r.status === PayRunStatus.Calculated
 const isPayable = (r: PayRunRow) => r.status === PayRunStatus.Posted || r.status === PayRunStatus.PartiallyPaid
 const isVoidable = (r: PayRunRow) => r.status === PayRunStatus.Posted || r.status === PayRunStatus.PartiallyPaid || r.status === PayRunStatus.Paid
+// 来源决定生命周期：只有 Internal 批次由本模块计算；OpeningBalance 只喂 YTD，永不过账。
+// 列表行不带 errorCount（只有完整批次带），有计算错误的批次过账时由后端拒绝并说明原因。
+const isInternal = (r: PayRunRow) => r.source === PayRunSource.Internal
+const isOpeningBalance = (r: PayRunRow) => r.source === PayRunSource.OpeningBalance
 
 const rowActions: RowAction<PayRunRow>[] = [
   viewAction(crud),
   { key: 'edit', show: (row) => crud.canUpdate && isDraft(row), onClick: (row) => crud.openEdit(toEditModel(row)) },
-  { key: 'calculate', label: 'actions.calculate', type: 'primary', show: (row) => can('payroll.run.update') && (isDraft(row) || isCalculated(row)), onClick: (row) => void run(() => bridge.runs.calculate(String(row.id ?? '')), 'calculateSuccess') },
-  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('payroll.run.update') && isCalculated(row) && (row.errorCount ?? 0) === 0, confirm: 'confirmPost', onClick: (row) => void run(() => bridge.runs.post(String(row.id ?? '')), 'postSuccess') },
+  { key: 'calculate', label: 'actions.calculate', type: 'primary', show: (row) => can('payroll.run.update') && isInternal(row) && (isDraft(row) || isCalculated(row)), onClick: (row) => void run(() => bridge.runs.calculate(String(row.id ?? '')), 'calculateSuccess') },
+  { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('payroll.run.update') && isCalculated(row) && !isOpeningBalance(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.runs.post(String(row.id ?? '')), 'postSuccess') },
   { key: 'pay', label: 'actions.pay', type: 'info', show: (row) => can('payroll.run.update') && isPayable(row), onClick: (row) => void openPay(row) },
   { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('payroll.run.update') && isVoidable(row), confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.runs.voidRun(String(row.id ?? '')), 'voidSuccess') },
   // Calculated 也可删（后端同口径）：摄取批次直接落 Calculated，这是摄取错了的 OpeningBalance / External 唯一的退出路径

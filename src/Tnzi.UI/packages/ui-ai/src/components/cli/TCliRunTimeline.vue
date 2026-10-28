@@ -90,7 +90,7 @@ function outputText(row: CliTimelineToolRow): string {
 </script>
 
 <template>
-  <div ref="containerRef" class="t-cli-timeline" :class="{ 't-cli-timeline--scroll': autoScroll }">
+  <div ref="containerRef" class="t-cli-timeline t-ai-scroll" :class="{ 't-cli-timeline--scroll': autoScroll }">
     <div v-for="row in rows" :key="row.key" class="t-cli-timeline__row">
       <!-- Assistant text -->
       <p v-if="row.kind === 'text'" class="t-cli-timeline__text whitespace-pre-wrap">
@@ -114,7 +114,7 @@ function outputText(row: CliTimelineToolRow): string {
         </div>
 
         <template v-if="row.output">
-          <pre class="t-cli-timeline__output"><code>{{ outputText(row) }}</code></pre>
+          <pre class="t-cli-timeline__output t-ai-scroll"><code>{{ outputText(row) }}</code></pre>
           <button
             v-if="isClamped(row) || expanded.has(row.key)"
             type="button"
@@ -160,6 +160,7 @@ function outputText(row: CliTimelineToolRow): string {
 }
 .t-cli-timeline--scroll {
   overflow-y: auto;
+  position: relative;
   /* Both bounds are load-bearing, for different parents. `min-height: 0` lets it
      shrink inside a flex column (flex items default to min-height: auto and would
      otherwise refuse to be smaller than their content). `max-height: 100%` bounds it
@@ -223,8 +224,9 @@ function outputText(row: CliTimelineToolRow): string {
   background-color: var(--tnzi-container-bg);
   border: 1px solid var(--tnzi-border);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: var(--tnzi-ai-code-line-height, 1.5);
   overflow-x: auto;
+  position: relative;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -235,7 +237,7 @@ function outputText(row: CliTimelineToolRow): string {
   padding: 0;
   cursor: pointer;
   font-size: 12px;
-  color: var(--tnzi-primary);
+  color: var(--tnzi-ai-accent-text);
 }
 .t-cli-timeline__notice {
   display: flex;

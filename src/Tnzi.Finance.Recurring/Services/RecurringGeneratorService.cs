@@ -129,7 +129,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     private async Task<Result<RecurringSweepResultDto>> SweepAsync(
         List<RecurringDocument> templates, DateTime today, CancellationToken cancellationToken)
     {
-        var result = new RecurringSweepResultDto { TemplatesDue = templates.Count };
+        var result = new RecurringSweepResultDto();
 
         if (UnitOfWorkManager?.IsEnabledTransaction == true)
         {
@@ -142,38 +142,105 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
 
         foreach (var template in templates)
         {
-            // 失败过的期次先补（它们是更早的义务），且**占用次数额度**：一份「只开一期」的订阅，
-            // 第一期失败、第二期到期时若两张都生成，客户就收到两张发票。
-            var retries = await ResolveRetriesAsync(template, cancellationToken);
-            var periods = ResolvePeriods(template, today, reserved: retries.Count, out var skipped, out var nextRunDate);
-
-            foreach (var period in skipped)
+            // 失败留痕要记在「本来该办的那一期」上：推进排期时模板实例会被改写。
+            var duePeriod = template.NextRunDate;
+            try
             {
-                var run = await RecordSkippedAsync(template, period, cancellationToken);
-                if (run != null)
+                if (await SweepTemplateAsync(template, today, result, cancellationToken))
+                    result.TemplatesDue++;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // ★ 一条模板的异常不拖累其它模板（第二条不变量的模板级对应）。排期实现抛异常
+                // （消费方的假日表越界、日期越过 9999 年）或某次写入失败，此前会冲出整轮扫描：
+                // HTTP 路径 500，后台循环里排在它后面的模板与租户每个周期都跳过，只留一行错误日志。
+                // 本作用域里这条模板残留的跟踪状态一并丢弃，否则会被下一条模板的 SaveChanges 重放。
+                _repository.Discard(template);
+                Logger?.LogError(ex,
+                    "Recurring template {TemplateId} could not be processed; continuing with the remaining templates.",
+                    template.Id);
+
+                result.TemplatesDue++;
+                var failed = await RecordTemplateFailureAsync(template, duePeriod, ex, cancellationToken);
+                if (failed != null)
                 {
-                    result.Skipped++;
-                    result.Runs.Add(run);
+                    result.Failed++;
+                    result.Runs.Add(failed);
                 }
             }
-
-            foreach (var period in retries.Concat(periods))
-            {
-                var run = await GeneratePeriodAsync(template, period, cancellationToken);
-                if (run == null)
-                    continue;
-
-                result.Runs.Add(run);
-                if (run.Status == RecurringRunStatus.Generated)
-                    result.Generated++;
-                else if (run.Status == RecurringRunStatus.Failed)
-                    result.Failed++;
-            }
-
-            await AdvanceAsync(template, today, nextRunDate, cancellationToken);
         }
 
         return Ok(result);
+    }
+
+    /// <summary>
+    /// 处理一条模板：补失败期次、留痕被补齐策略跳过的期次、生成到期期次、推进排期。
+    /// </summary>
+    /// <returns>这条模板本轮有没有事可做（处理了某一期，或排期 / 状态因此改变）</returns>
+    private async Task<bool> SweepTemplateAsync(
+        RecurringDocument template, DateTime today, RecurringSweepResultDto result, CancellationToken cancellationToken)
+    {
+        // 失败过的期次先补（它们是更早的义务），且**占用次数额度**：一份「只开一期」的订阅，
+        // 第一期失败、第二期到期时若两张都生成，客户就收到两张发票。
+        var retries = await ResolveRetriesAsync(template, cancellationToken);
+        var periods = ResolvePeriods(template, today, reserved: retries.Count, out var skipped, out var nextRunDate);
+
+        foreach (var period in skipped)
+        {
+            var run = await RecordSkippedAsync(template, period, cancellationToken);
+            if (run != null)
+            {
+                result.Skipped++;
+                result.Runs.Add(run);
+            }
+        }
+
+        foreach (var period in retries.Concat(periods))
+        {
+            var run = await GeneratePeriodAsync(template, period, cancellationToken);
+            if (run == null)
+                continue;
+
+            result.Runs.Add(run);
+            if (run.Status == RecurringRunStatus.Generated)
+                result.Generated++;
+            else if (run.Status == RecurringRunStatus.Failed)
+                result.Failed++;
+        }
+
+        var handledPeriods = retries.Count > 0 || periods.Count > 0 || skipped.Count > 0;
+        return await AdvanceAsync(template, today, nextRunDate, handledPeriods, cancellationToken);
+    }
+
+    /// <summary>
+    /// 模板级失败的留痕：记在它到期的那一期上，同一期至多 <see cref="RecurringOptions.MaxFailedRetries"/> 行。
+    /// </summary>
+    /// <remarks>
+    /// 排期没有推进，所以这条模板下一轮还会到期、还会再失败。不设上限的话一条坏模板每轮多写一行；
+    /// 到上限之后只记日志，已有的记录足够让人看见它坏了。留痕本身失败时同样只记日志：这里已经在异常路径上。
+    /// </remarks>
+    private async Task<RecurringRunDto?> RecordTemplateFailureAsync(
+        RecurringDocument template, DateTime duePeriod, Exception error, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var attempts = await _runRepository.CountAsync(
+                r => r.RecurringDocumentId == template.Id && r.PeriodDate == duePeriod && r.Status == RecurringRunStatus.Failed,
+                cancellationToken);
+            if (attempts >= Math.Max(1, _options.MaxFailedRetries))
+                return null;
+
+            return await RecordFailureAsync(template, duePeriod, $"The template could not be processed: {error.Message}", cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            Logger?.LogError(ex, "Could not record the failure of recurring template {TemplateId}.", template.Id);
+            return null;
+        }
     }
 
     /// <summary>
@@ -210,7 +277,19 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             if (template.EndDate.HasValue && cursor > template.EndDate.Value)
                 break;
             all.Add(cursor);
-            cursor = _schedule.Next(cursor, template.Frequency, template.Interval, template.AnchorDay);
+
+            var next = _schedule.Next(cursor, template.Frequency, template.Interval, RecurrenceAnchor.Effective(template));
+            if (next <= cursor)
+            {
+                // ★ 契约要求严格递增。不递增的实现（或间隔溢出让日期倒着走）若照常推进，
+                // 每轮会补出一批日期越来越早的单据。停在已消费的这一期：下一轮它撞幂等键什么也不做。
+                Logger?.LogError(
+                    "The recurrence schedule did not advance past {Period:yyyy-MM-dd} for template {TemplateId} (returned {Next:yyyy-MM-dd}); "
+                    + "its schedule is stuck until the IRecurrenceSchedule implementation or the template is fixed.",
+                    cursor, template.Id, next);
+                break;
+            }
+            cursor = next;
         }
 
         nextRunDate = cursor;
@@ -443,6 +522,12 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             UndoFailedInsert(run);
             return null;
         }
+        catch
+        {
+            // 其它失败交给模板级的兜底，但不能把插入失败的实体留在跟踪器里被下一条模板重放。
+            UndoFailedInsert(run);
+            throw;
+        }
     }
 
     /// <summary>
@@ -460,7 +545,7 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             RecurringDocumentId = template.Id,
             PeriodDate = period,
             Status = RecurringRunStatus.Failed,
-            FailReason = Truncate(reason, 1000),
+            FailReason = FitFailReason(reason),
         };
 
         try
@@ -492,16 +577,29 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     ///
     /// 到达结束日或次数上限时置 Ended：一条已经不会再产出任何东西的模板，还挂在
     /// "运行中"里只会让人每个月都要重新判断一次它是不是坏了。
+    /// ★ 但到达结束日时若结束日之内还有**可重试的失败期次**，先不置 Ended：重试只捡 Active 模板，
+    /// 「立即运行」与恢复也都拒绝 Ended，于是最后一期一失败就再也补不上，固定期限合同的最后一张发票
+    /// 永久缺失、只留一行 Failed。排期已经越过结束日，不会再产出新期次，只剩重试；
+    /// 失败期次办完或重试耗尽之后的那一轮再置 Ended。次数上限不受影响（它只数 Generated，
+    /// 失败的那一期本来就还没占名额）。
     ///
     /// ★ 新的 <c>NextRunDate</c> 是 <see cref="ResolvePeriods"/> 交出来的「第一个没被本轮消费的期次」，
     /// 不在这里另走一遍日历 —— 两处各走一遍、步数差一就丢一期。补齐上限绑定时它落在今天之前，
     /// 下一轮从那里接着补，没有哪一期会既无 Generated 也无 Skipped 行。
+    ///
+    /// ★ 本轮一期都没处理、且排期、次数、状态都不变时<b>不写</b>：失败过的模板此后每轮都会因为
+    /// 「还有失败期次」被捞进扫描（重试耗尽或已补上的也一样，失败行从不删除），无条件写回等于每个扫描周期
+    /// 重写一次模板：并发戳被换掉（开着编辑表单超过一个周期再保存就是 409）、<c>LastRunDate</c> 变成一次
+    /// 什么都没生成的扫描日、<c>LastModifierId</c> 被后台作用域写成 null。<c>LastRunDate</c> 只在本轮确实
+    /// 处理了某一期时才写。
     /// </remarks>
-    private async Task AdvanceAsync(RecurringDocument template, DateTime today, DateTime nextRunDate, CancellationToken cancellationToken)
+    /// <returns>是否有事可做（处理了某一期，或排期 / 次数 / 状态有变）</returns>
+    private async Task<bool> AdvanceAsync(
+        RecurringDocument template, DateTime today, DateTime nextRunDate, bool handledPeriods, CancellationToken cancellationToken)
     {
         var tracked = await _repository.GetAsync(template.Id, cancellationToken);
         if (tracked == null)
-            return;
+            return handledPeriods;
 
         var next = nextRunDate;
 
@@ -509,14 +607,22 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
             .Where(r => r.RecurringDocumentId == tracked.Id && r.Status == RecurringRunStatus.Generated)
             .CountAsync(cancellationToken);
 
+        // 先落新排期再判结束：ResolveRetriesAsync 按排期判定哪些失败期次已被越过、可以重试。
+        var previousNext = tracked.NextRunDate;
         tracked.NextRunDate = next;
-        tracked.OccurrenceCount = generated;
-        tracked.LastRunDate = today;
 
-        var reachedEnd = tracked.EndDate.HasValue && next > tracked.EndDate.Value;
+        var reachedEnd = tracked.EndDate.HasValue && next > tracked.EndDate.Value
+            && (await ResolveRetriesAsync(tracked, cancellationToken)).Count == 0;
         var reachedCap = tracked.MaxOccurrences.HasValue && generated >= tracked.MaxOccurrences.Value;
-        if (reachedEnd || reachedCap)
-            tracked.Status = RecurringStatus.Ended;
+        var status = reachedEnd || reachedCap ? RecurringStatus.Ended : tracked.Status;
+
+        if (!handledPeriods && previousNext == next && tracked.OccurrenceCount == generated && tracked.Status == status)
+            return false;
+
+        tracked.OccurrenceCount = generated;
+        tracked.Status = status;
+        if (handledPeriods)
+            tracked.LastRunDate = today;
 
         try
         {
@@ -524,13 +630,19 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
         }
         catch (DbUpdateConcurrencyException)
         {
-            // 另一个实例同时扫到了这条模板并先推进了排期（模板带并发标记，后写的那个必然撞上）。
-            // 赢家写的是同一份推进结果，单据本身由生成记录的唯一索引兜住，这里没有东西可补；
-            // 而抛出去会让本轮剩下的模板一个都跑不了，那正是"多实例安全"要避免的。
+            // 另一个实例同时扫到了这条模板并先推进了排期（模板带并发标记，后写的那个必然撞上），
+            // 或管理员在扫描进行中暂停 / 编辑了它。赢家的写入留在库里，单据本身由生成记录的唯一索引兜住，
+            // 这里没有东西可补；而抛出去会让本轮剩下的模板一个都跑不了，那正是"多实例安全"要避免的。
+            // ★ 过期的那份修改必须从跟踪器里摘掉：它仍是 Modified，本作用域里下一次 SaveChanges
+            // （下一条模板的跳过 / 失败留痕或推进）会把它重放、再撞一次并发戳，于是本轮剩下的模板
+            // 推进不了、失败行被丢掉，补齐策略为 LatestOnly / Skip 时还会冲出整轮扫描。
+            _repository.Discard(tracked);
             Logger?.LogInformation(
-                "Recurring template {TemplateId} was advanced concurrently by another instance; leaving the winner's schedule in place.",
+                "Recurring template {TemplateId} was changed concurrently (another instance or an administrator); leaving that change in place.",
                 tracked.Id);
         }
+
+        return true;
     }
 
     /// <summary>
@@ -543,8 +655,14 @@ public class RecurringGeneratorService : ApplicationService, IRecurringGenerator
     private static bool IsDuplicatePeriod(Exception ex)
         => ex is DbUpdateException dbEx && dbEx.IsUniqueConstraintViolation();
 
-    private static string Truncate(string text, int max)
-        => string.IsNullOrEmpty(text) || text.Length <= max ? text : text[..max];
+    /// <summary><see cref="RecurringRun.FailReason"/> 的列宽（见 <c>RecurringRunConfiguration</c>）。</summary>
+    internal const int FailReasonMaxLength = 1000;
+
+    /// <summary>
+    /// 失败原因收进列宽。截断点落在代理对中间时整个字符一起舍掉：孤立的高代理项会让严格 UTF-8 的驱动（Npgsql）
+    /// 拒绝写入，连失败留痕都写不进去，这一期在列表里就像从没跑过。
+    /// </summary>
+    internal static string FitFailReason(string reason) => reason.FitToLength(FailReasonMaxLength);
 
     private static RecurringRunDto ToDto(RecurringRun run, string? templateName) => new()
     {

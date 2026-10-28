@@ -39,6 +39,11 @@ public class BankDocumentDrafter
 
         var amount = Math.Abs(txn.Amount);
         var isInbound = txn.Amount > 0;
+        // 银行给的摘要（流水列宽 512）比单据摘要与行描述（500）宽：抄过去的那一份收进列宽，全文留在流水上。
+        // 单据服务对人填的超长值一律 400，原样交过去等于长摘要的流水永远建不了单（AutoApply 在无人值守时同样撞上），
+        // 而没有人改得短一条银行流水。
+        var memo = FinanceFieldLimits.Fit(txn.Description, FinanceFieldLimits.MemoMaxLength);
+        var lineDescription = FinanceFieldLimits.Fit(txn.Description, FinanceFieldLimits.LineDescriptionMaxLength);
 
         string docType;
         Guid docId;
@@ -46,6 +51,12 @@ public class BankDocumentDrafter
         {
             case BankFeedDocType.Expense:
             {
+                // ★ 费用单只有一个方向：贷资金科目、借费用科目（钱出去）。把一笔进账建成费用，
+                // 金额取绝对值后照样过账，账上银行少了 X，实际多了 X，差 2X 且没有任何报错；
+                // AutoApply 规则会在无人值守时这么干。所以在建任何东西之前就拒绝。
+                if (isInbound)
+                    return Result<BankDraftResult>.Failure(
+                        "An expense records money going out, but this transaction is a deposit. Record it as a payment entry or a transfer instead.", 400);
                 if (input.CounterAccountId == null)
                     return Result<BankDraftResult>.Failure("An expense account is required.", 400);
                 var expenseResult = await _expenseService.CreateDraftAsync(new CreateExpenseDto
@@ -54,10 +65,10 @@ public class BankDocumentDrafter
                     DocDate = txn.TxnDate,
                     Currency = txn.Currency,
                     PaymentMethod = input.PaymentMethod,
-                    Memo = txn.Description,
+                    Memo = memo,
                     Lines = new List<CreateExpenseLineDto>
                     {
-                        new() { AccountId = input.CounterAccountId.Value, Amount = amount, Description = txn.Description }
+                        new() { AccountId = input.CounterAccountId.Value, Amount = amount, Description = lineDescription }
                     }
                 }, cancellationToken);
                 if (!expenseResult.Succeeded)
@@ -81,7 +92,7 @@ public class BankDocumentDrafter
                     DepositToAccountId = txn.AccountId,
                     PaymentMethod = input.PaymentMethod,
                     Reference = txn.Reference,
-                    Memo = txn.Description
+                    Memo = memo
                 }, cancellationToken);
                 if (!paymentResult.Succeeded)
                     return Result<BankDraftResult>.Failure(paymentResult.Message!, paymentResult.Code ?? 400);
@@ -101,7 +112,7 @@ public class BankDocumentDrafter
                     Currency = txn.Currency,
                     Amount = amount,
                     Reference = txn.Reference,
-                    Memo = txn.Description
+                    Memo = memo
                 }, cancellationToken);
                 if (!transferResult.Succeeded)
                     return Result<BankDraftResult>.Failure(transferResult.Message!, transferResult.Code ?? 400);
@@ -114,6 +125,29 @@ public class BankDocumentDrafter
         }
 
         return Result<BankDraftResult>.Success(new BankDraftResult(docType, docId));
+    }
+
+    /// <summary>
+    /// 一张由流水建出的单据现在的状态；已不存在（被删）返回 <see langword="null"/>。
+    /// </summary>
+    public async Task<FinanceDocumentStatus?> GetStatusAsync(string docType, Guid docId, CancellationToken cancellationToken = default)
+    {
+        if (docType == FinanceSourceTypes.Expense)
+        {
+            var r = await _expenseService.GetAsync(docId, cancellationToken);
+            return r.Succeeded && r.Data != null ? r.Data.Status : null;
+        }
+        if (docType == FinanceSourceTypes.PaymentEntry)
+        {
+            var r = await _paymentEntryService.GetAsync(docId, cancellationToken);
+            return r.Succeeded && r.Data != null ? r.Data.Status : null;
+        }
+        if (docType == FinanceSourceTypes.Transfer)
+        {
+            var r = await _transferService.GetAsync(docId, cancellationToken);
+            return r.Succeeded && r.Data != null ? r.Data.Status : null;
+        }
+        return null;
     }
 
     /// <summary>把刚建出来的草稿单据过账（按来源令牌分派到对应单据服务）。</summary>

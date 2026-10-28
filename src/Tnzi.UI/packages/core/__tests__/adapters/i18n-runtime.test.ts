@@ -67,8 +67,7 @@ describe('i18n runtime', () => {
     expect(useI18n().t('common.home')).toBe('Home');
   });
 
-  it('setActiveI18nRuntime swaps the whole runtime and resetI18nRuntime restores the default one', () => {
-    const before = getActiveI18nRuntime();
+  it('setActiveI18nRuntime swaps the whole runtime and resetI18nRuntime restores a default one', () => {
     const custom = createI18nRuntime({ locale: 'zh-CN' });
 
     setActiveI18nRuntime(custom);
@@ -76,7 +75,17 @@ describe('i18n runtime', () => {
     expect(useI18n().t('common.home')).toBe('首页');
 
     resetI18nRuntime();
-    expect(getActiveI18nRuntime()).toBe(before);
+    expect(getActiveI18nRuntime()).not.toBe(custom);
+    expect(useI18n().t('common.home')).toBe('Home');
+  });
+
+  it('resetI18nRuntime alone undoes provideI18n on the default runtime', () => {
+    provideI18n(null, 'zh-CN');
+    expect(useI18n().t('common.home')).toBe('首页');
+
+    resetI18nRuntime();
+
+    expect(useI18n().t('common.home')).toBe('Home');
   });
 
   it('a custom runtime keeps its own context across provide / use / reset', () => {

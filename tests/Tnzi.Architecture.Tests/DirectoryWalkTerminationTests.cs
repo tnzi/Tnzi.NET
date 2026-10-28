@@ -78,6 +78,8 @@ public class DirectoryWalkTerminationTests
         "Tnzi.Architecture.Tests/IconManifestTests.cs",                  // src/Tnzi.UI/packages/{pkg}/src
         "Tnzi.Architecture.Tests/SourceScanner.cs",                      // src/{assembly}[/Controllers]
         "Tnzi.Architecture.Tests/WebsiteModuleCatalogTests.cs",          // website/src
+        "Tnzi.AI.Cli.Tests/Smoke/ClaudeLaunchProfileSmokeTests.cs",      // (temp) 自建 git 仓库删除前清只读属性
+        "Tnzi.AI.Cli.Tests/Workspace/WorkspacePreparerTests.cs",         // (temp) 自建的用户目录前后对比
         "Tnzi.Mcp.Tests/DocFreshnessSourceClassificationTests.cs",       // (temp) 自建临时目录的清理
         "Tnzi.Storage.Tests/StorageKeyCallSiteGateTests.cs",             // src/Tnzi.Storage{,.Workspace,.Cloud}
         "Tnzi.Tests/Architecture/CliAgentRedLineTests.cs",               // src/Tnzi.AI/Middleware、src/Tnzi.AI.Cli

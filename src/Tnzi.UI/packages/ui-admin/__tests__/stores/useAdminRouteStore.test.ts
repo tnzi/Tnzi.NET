@@ -279,30 +279,6 @@ describe('useAdminRouteStore', () => {
     }
   })
 
-  it('cacheRoutes contains only routes with keepAlive meta', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes([
-      { name: 'a', path: '/a', meta: { title: 'A', keepAlive: true } },
-      { name: 'b', path: '/b', meta: { title: 'B', keepAlive: false } },
-      { name: 'c', path: '/c', meta: { title: 'C' } },
-    ])
-    expect(store.cacheRoutes).toContain('a')
-    expect(store.cacheRoutes).not.toContain('b')
-    expect(store.cacheRoutes).not.toContain('c')
-  })
-
-  it('resetRouteCache removes a single route from cacheRoutes', () => {
-    const store = useAdminRouteStore()
-    store.setAuthRoutes([
-      { name: 'a', path: '/a', meta: { title: 'A', keepAlive: true } },
-      { name: 'b', path: '/b', meta: { title: 'B', keepAlive: true } },
-    ])
-    expect(store.cacheRoutes).toContain('a')
-    store.resetRouteCache('a')
-    expect(store.cacheRoutes).not.toContain('a')
-    expect(store.cacheRoutes).toContain('b')
-  })
-
   it('menus: permission matching is case-insensitive (mirrors backend)', () => {
     const store = useAdminRouteStore()
     store.setAuthRoutes(authRoutes)

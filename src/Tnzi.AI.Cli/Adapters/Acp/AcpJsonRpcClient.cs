@@ -22,6 +22,20 @@ internal sealed class AcpJsonRpcClient
     /// <summary>收到 <c>session/prompt</c> 响应时回调（用量与 stopReason）。</summary>
     public Action<JsonElement>? OnPromptResult { get; init; }
 
+    /// <summary>这次运行的权限档位：决定 <c>session/request_permission</c> 放行哪些工具。</summary>
+    public CliPermissionMode PermissionMode { get; init; } = CliPermissionMode.Full;
+
+    /// <summary>
+    /// true = 「先问我」档不自动放行的请求不当场应答，交给 <see cref="OnPermissionRequest"/>，等 <see cref="AnswerPermissionAsync"/>。
+    /// </summary>
+    public bool AsksForApproval { get; init; }
+
+    /// <summary>一个要使用方回答的 <c>session/request_permission</c>：键与请求的 params。</summary>
+    public Action<string, JsonElement>? OnPermissionRequest { get; init; }
+
+    /// <summary>等使用方回答的反向请求，按键（<c>acp:</c> + 原样的 JSON-RPC id）。</summary>
+    private readonly ConcurrentDictionary<string, PendingPermission> _pendingPermissions = new(StringComparer.Ordinal);
+
     public AcpJsonRpcClient(ICliAgentTransport transport, ILogger logger)
     {
         _transport = transport;
@@ -168,12 +182,30 @@ internal sealed class AcpJsonRpcClient
         if (method == "session/request_permission")
         {
             root.TryGetProperty("params", out var parameters);
-            var selection = AcpPermissionSelector.Select(parameters);
+
+            // 「先问我」：档位放行的（读、搜索）照常当场应答，其余的交给使用方，这里不应答。agent 停在这个工具调用上等，读循环照常往下读
+            if (AsksForApproval && PermissionMode == CliPermissionMode.Ask
+                && !AcpPermissionSelector.Permits(parameters, PermissionMode)
+                && AcpPermissionSelector.HasOptions(parameters))
+            {
+                var key = "acp:" + idElement.GetRawText();
+                _pendingPermissions[key] = new PendingPermission(idElement.GetRawText(), parameters.Clone());
+                OnPermissionRequest?.Invoke(key, parameters.Clone());
+                return;
+            }
+
+            var selection = AcpPermissionSelector.Select(parameters, PermissionMode);
             if (selection is { } optionId)
             {
                 if (AcpPermissionSelector.IsGrant(parameters, optionId))
                 {
                     _logger.LogDebug("[acp] Auto-approved permission request with option '{OptionId}'", optionId);
+                }
+                else if (!AcpPermissionSelector.Permits(parameters, PermissionMode))
+                {
+                    _logger.LogInformation(
+                        "[acp] Permission mode {Mode} does not allow this tool; selecting the single-use reject option '{OptionId}'",
+                        PermissionMode, optionId);
                 }
                 else
                 {
@@ -216,6 +248,53 @@ internal sealed class AcpJsonRpcClient
 
         await _transport.WriteLineAsync(envelope.ToJsonString(), cancellationToken);
     }
+
+    /// <summary>
+    /// 把使用方的回答写给 agent：选中的选项必须是请求给出的那些之一；没指定选项时允许挑单次允许（没有则永久允许），拒绝挑单次拒绝。
+    /// </summary>
+    /// <returns>键认得、写出了应答为 true；键不认识或已经应答过为 false。</returns>
+    public async Task<bool> AnswerPermissionAsync(string key, CliPermissionDecision decision, CancellationToken cancellationToken)
+    {
+        if (!_pendingPermissions.TryRemove(key, out var pending))
+        {
+            return false;
+        }
+
+        var envelope = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = JsonNode.Parse(pending.RawId)
+        };
+
+        var optionId = AcpPermissionSelector.SelectForDecision(pending.Parameters, decision.Allow, decision.OptionId);
+        if (optionId is not null)
+        {
+            envelope["result"] = new JsonObject
+            {
+                ["outcome"] = new JsonObject
+                {
+                    ["outcome"] = "selected",
+                    ["optionId"] = optionId
+                }
+            };
+        }
+        else
+        {
+            // 没有可选的拒绝项：回协议错误而不是 cancelled（那会中止整个 turn），也不编造一个 agent 没给过的 optionId
+            _logger.LogWarning("[acp] Permission request offered no option matching the answer; returning an error");
+            envelope["error"] = new JsonObject
+            {
+                ["code"] = -32603,
+                ["message"] = "the permission request was not allowed"
+            };
+        }
+
+        await _transport.WriteLineAsync(envelope.ToJsonString(), cancellationToken);
+        return true;
+    }
+
+    /// <summary>一个等使用方回答的反向请求。</summary>
+    private sealed record PendingPermission(string RawId, JsonElement Parameters);
 
     private static bool TryGetId(JsonElement element, out long id)
     {

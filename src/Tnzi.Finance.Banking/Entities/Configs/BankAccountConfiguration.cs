@@ -9,20 +9,20 @@ public class BankAccountConfiguration : EntityTypeConfigurationBase<BankAccount,
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.Name).HasMaxLength(128).IsRequired();
-        builder.Property(e => e.BankName).HasMaxLength(128);
+        builder.Property(e => e.Name).HasMaxLength(BankingFieldLimits.BankAccountNameMaxLength).IsRequired();
+        builder.Property(e => e.BankName).HasMaxLength(BankingFieldLimits.BankNameMaxLength);
         builder.Property(e => e.RoutingNumber).HasMaxLength(16);
         builder.Property(e => e.InstitutionNumber).HasMaxLength(8);
         builder.Property(e => e.TransitNumber).HasMaxLength(8);
         builder.Property(e => e.AccountNumberEncrypted).HasMaxLength(512);
         builder.Property(e => e.AccountNumberMasked).HasMaxLength(32);
-        builder.Property(e => e.Currency).HasMaxLength(8);
-        builder.Property(e => e.CheckTemplateName).HasMaxLength(200);
-        builder.Property(e => e.FeedProviderKey).HasMaxLength(64);
-        builder.Property(e => e.ExternalAccountId).HasMaxLength(128);
+        builder.Property(e => e.Currency).HasMaxLength(BankingFieldLimits.CurrencyMaxLength);
+        builder.Property(e => e.CheckTemplateName).HasMaxLength(BankingFieldLimits.CheckTemplateNameMaxLength);
+        builder.Property(e => e.FeedProviderKey).HasMaxLength(BankingFieldLimits.FeedProviderKeyMaxLength);
+        builder.Property(e => e.ExternalAccountId).HasMaxLength(BankingFieldLimits.ExternalAccountIdMaxLength);
         builder.Property(e => e.FeedCursor).HasMaxLength(256);
         builder.Property(e => e.EftOriginatorId).HasMaxLength(32);
-        builder.Property(e => e.EftOriginatorName).HasMaxLength(64);
+        builder.Property(e => e.EftOriginatorName).HasMaxLength(BankingFieldLimits.EftOriginatorNameMaxLength);
         builder.Property(e => e.OffsetXMm).HasMoneyPrecision();
         builder.Property(e => e.OffsetYMm).HasMoneyPrecision();
 

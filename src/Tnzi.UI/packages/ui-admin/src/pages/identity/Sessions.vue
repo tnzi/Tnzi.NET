@@ -204,7 +204,13 @@ function onPageSizeChange(size: number): void {
   void loadSessions()
 }
 
+// Last-wins: changing the user filter or the page while a read is in flight
+// must not let the earlier answer list another user's sessions (where Revoke
+// would act on them).
+let sessionsSeq = 0
+
 async function loadSessions(): Promise<void> {
+  const mine = ++sessionsSeq
   loading.value = true
   try {
     const page = await bridge.sessions.list({
@@ -213,14 +219,16 @@ async function loadSessions(): Promise<void> {
       pageIndex: pageIndex.value,
       pageSize: pageSize.value,
     })
+    if (mine !== sessionsSeq) return
     sessions.value = page.items
     totalCount.value = page.totalCount
   } catch (e) {
+    if (mine !== sessionsSeq) return
     message.error(e instanceof Error ? e.message : String(e))
     sessions.value = []
     totalCount.value = 0
   } finally {
-    loading.value = false
+    if (mine === sessionsSeq) loading.value = false
   }
 }
 

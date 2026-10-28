@@ -119,9 +119,9 @@ export function defaultQuickActions(): QuickAction[] {
       label: 'admin.widgets.quickActions.settings',
       to: { name: 'settings' },
       tone: 'warning',
-      // Settings Center is gated by system.parameter.view (Technical) - hidden
-      // from business admins so the tile doesn't just bounce to /403.
-      permission: 'system.parameter.view',
+      // No `permission`: the Settings route admits ANY per-group settings view
+      // code (or system.parameter.view), and the widget hides the tile with
+      // that route's own gate, exactly as the header gear does.
       module: 'system',
     },
   ]

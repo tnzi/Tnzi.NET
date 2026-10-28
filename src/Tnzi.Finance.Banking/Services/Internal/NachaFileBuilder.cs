@@ -31,13 +31,14 @@ internal static class NachaFileBuilder
         if (string.IsNullOrWhiteSpace(request.OriginatorRoutingNumber))
             throw new BusinessException("A NACHA batch requires the originator's 9-digit routing number.");
 
-        var odfi = new string(request.OriginatorRoutingNumber!.Where(char.IsDigit).ToArray());
+        // ASCII 数字（与录入同一判据）：存量的全角路由号在这里按「不是 9 位」点名拒绝，而不是在 long.Parse 上抛 500。
+        var odfi = new string(request.OriginatorRoutingNumber!.Where(char.IsAsciiDigit).ToArray());
         if (odfi.Length != 9)
             throw new BusinessException("The originator routing number must be exactly 9 digits for a NACHA file.");
         var odfi8 = odfi[..8];
 
         // Immediate Origin 字段容 9 位数字（EftFieldWriter.Digits 超长丢高位）；超 9 位则 fail-fast，不静默截断
-        var originDigits = new string((request.OriginatorId ?? string.Empty).Where(char.IsDigit).ToArray());
+        var originDigits = new string((request.OriginatorId ?? string.Empty).Where(char.IsAsciiDigit).ToArray());
         if (originDigits.Length > 9)
             throw new BusinessException("The originator id has more than 9 digits and would be truncated in the NACHA Immediate Origin field; use a valid 9-digit company id or ODFI routing number.");
 
@@ -52,7 +53,7 @@ internal static class NachaFileBuilder
         var trace = 1;
         foreach (var entry in request.Entries)
         {
-            var rdfi = new string((entry.RoutingNumber ?? string.Empty).Where(char.IsDigit).ToArray());
+            var rdfi = new string((entry.RoutingNumber ?? string.Empty).Where(char.IsAsciiDigit).ToArray());
             if (rdfi.Length != 9)
                 throw new BusinessException($"Payee '{entry.PayeeName}' has an invalid US routing number (must be 9 digits) for NACHA.");
             var rdfi8 = rdfi[..8];

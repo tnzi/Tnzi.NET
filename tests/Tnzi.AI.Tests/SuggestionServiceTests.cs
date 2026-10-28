@@ -16,7 +16,7 @@ public class SuggestionServiceTests
 
     private SuggestionService CreateService(SuggestionOptions? options = null)
     {
-        var opts = TestHelpers.CreateOptionsMonitor(options ?? new SuggestionOptions { AutoGenerate = true });
+        var opts = TestHelpers.CreateOptionsMonitor(options ?? new SuggestionOptions());
         return new SuggestionService(
             _aiUtility.Object,
             BuildScopeFactory(),

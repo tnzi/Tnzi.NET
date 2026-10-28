@@ -5,8 +5,8 @@ namespace Tnzi.Finance.Ai;
 /// module's receipt capture (<c>admin/finance/receipts/{id}/extract</c>) works out of the box.
 /// </summary>
 /// <remarks>
-/// Optional. The <see cref="IReceiptExtractor"/> contract and its 501 guide stay in Finance core (which
-/// keeps zero AI/Storage references - the contract passes a <c>FileId</c>, not a byte stream). Loading
+/// Optional. The <see cref="IReceiptExtractor"/> contract and its 501 guide live in <c>Tnzi.Finance.Banking</c>
+/// (which keeps zero AI/Storage references - the contract passes a <c>FileId</c>, not a byte stream). Loading
 /// this module binds the vision + PDF-text implementation; a consumer may still register its own
 /// <see cref="IReceiptExtractor"/> to override (the default is registered via <c>TryAddScoped</c>). No
 /// entities/tables, so no <c>TableNamePrefix</c> and <see cref="TnziCustomModule"/> is the right base.

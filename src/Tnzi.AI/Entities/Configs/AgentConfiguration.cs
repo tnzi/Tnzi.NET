@@ -42,15 +42,11 @@ public class AgentConfiguration : EntityTypeConfigurationBase<Agent, Guid>
         // v2.1 能力标签字段（JSON 值转换）
         // 注意：ToolGroups/SkillSlugs/KnowledgeBaseIds 不再是 Agent 列——已迁移到 junction grant。
         builder.Property(e => e.Domains)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasJsonListConversion()
             .HasMaxLength(2000);
 
         builder.Property(e => e.Roles)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasJsonListConversion()
             .HasMaxLength(2000);
 
         builder.Property(e => e.QualityTier)

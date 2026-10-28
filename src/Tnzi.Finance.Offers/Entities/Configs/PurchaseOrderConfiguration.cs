@@ -10,11 +10,11 @@ public class PurchaseOrderConfiguration : EntityTypeConfigurationBase<PurchaseOr
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.Number).HasMaxLength(64);
-        builder.Property(e => e.Memo).HasMaxLength(500);
-        builder.Property(e => e.InternalNote).HasMaxLength(1000);
-        builder.Property(e => e.ShipTo).HasMaxLength(500);
+        builder.Property(e => e.Memo).HasMaxLength(OfferFieldLimits.MemoMaxLength);
+        builder.Property(e => e.InternalNote).HasMaxLength(OfferFieldLimits.InternalNoteMaxLength);
+        builder.Property(e => e.ShipTo).HasMaxLength(OfferFieldLimits.ShipToMaxLength);
         builder.Property(e => e.ConvertedToDocType).HasMaxLength(64);
-        builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
+        builder.Property(e => e.Currency).HasMaxLength(OfferFieldLimits.CurrencyMaxLength).IsRequired();
         builder.Property(e => e.SubTotal).HasMoneyPrecision();
         builder.Property(e => e.TaxTotal).HasMoneyPrecision();
         builder.Property(e => e.Total).HasMoneyPrecision();

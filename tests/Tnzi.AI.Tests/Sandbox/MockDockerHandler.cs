@@ -8,6 +8,7 @@ namespace Tnzi.AI.Tests.Sandbox;
 internal sealed class MockDockerHandler : HttpMessageHandler
 {
     private readonly List<MockRoute> _routes = [];
+    private readonly List<MockSequence> _sequences = [];
     private TimeSpan _delay = TimeSpan.Zero;
     public List<RequestRecord> RequestLog { get; } = [];
 
@@ -16,11 +17,23 @@ internal sealed class MockDockerHandler : HttpMessageHandler
     private int _execExitCode;
     private bool _execFlowConfigured;
     private bool _execHangsAfterOutput;
+    private IReadOnlyList<(byte Stream, byte[] Payload)>? _execFrames;
+    private (HttpStatusCode Status, string Body)? _execInspect;
 
     public void SetupResponse(string pathContains, HttpStatusCode statusCode, string body,
         HttpMethod? method = null)
     {
         _routes.Add(new MockRoute(pathContains, statusCode, body, method));
+    }
+
+    /// <summary>
+    /// Answer successive matching requests with these responses in order; the last one repeats once
+    /// the sequence is used up. Takes precedence over <see cref="SetupResponse"/> routes.
+    /// </summary>
+    public void SetupResponseSequence(string pathContains, HttpMethod method,
+        params (HttpStatusCode Status, string Body)[] responses)
+    {
+        _sequences.Add(new MockSequence(pathContains, method, new Queue<(HttpStatusCode, string)>(responses)));
     }
 
     public void SetupDelay(TimeSpan delay)
@@ -50,6 +63,26 @@ internal sealed class MockDockerHandler : HttpMessageHandler
         _execHangsAfterOutput = true;
     }
 
+    /// <summary>
+    /// Configure the exec flow to replay these exact multiplexed frames. Docker cuts its
+    /// frames at arbitrary byte positions (one frame per read of the exec pipe), so a test
+    /// that needs a multi-byte character straddling two frames has to place the cut itself.
+    /// </summary>
+    public void SetupExecFlowWithFrames(int exitCode, params (byte Stream, byte[] Payload)[] frames)
+    {
+        SetupExecFlow(exitCode, stdout: "");
+        _execFrames = frames;
+    }
+
+    /// <summary>
+    /// Override the exec inspect (<c>/exec/{id}/json</c>) response, e.g. a daemon error or a
+    /// body whose <c>ExitCode</c> is null.
+    /// </summary>
+    public void SetupExecInspect(HttpStatusCode status, string body)
+    {
+        _execInspect = (status, body);
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
@@ -68,7 +101,9 @@ internal sealed class MockDockerHandler : HttpMessageHandler
         {
             if (url.Contains("/exec") && url.Contains("/start"))
             {
-                var content = BuildMultiplexedOutput(_execStdout, _execStderr);
+                var content = _execFrames is null
+                    ? BuildMultiplexedOutput(_execStdout, _execStderr)
+                    : BuildFrames(_execFrames);
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = _execHangsAfterOutput
@@ -79,6 +114,14 @@ internal sealed class MockDockerHandler : HttpMessageHandler
 
             if (url.Contains("/exec") && url.Contains("/json"))
             {
+                if (_execInspect is { } inspect)
+                {
+                    return new HttpResponseMessage(inspect.Status)
+                    {
+                        Content = new StringContent(inspect.Body)
+                    };
+                }
+
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent($$$"""{"ExitCode":{{{_execExitCode}}}}""")
@@ -92,6 +135,14 @@ internal sealed class MockDockerHandler : HttpMessageHandler
                     Content = new StringContent("""{"Id":"exec-test-001"}""")
                 };
             }
+        }
+
+        var sequence = _sequences.FirstOrDefault(s =>
+            url.Contains(s.PathContains, StringComparison.OrdinalIgnoreCase) && s.Method == request.Method);
+        if (sequence is not null)
+        {
+            var (status, body) = sequence.Responses.Count > 1 ? sequence.Responses.Dequeue() : sequence.Responses.Peek();
+            return new HttpResponseMessage(status) { Content = new StringContent(body) };
         }
 
         // Check explicit routes
@@ -142,6 +193,20 @@ internal sealed class MockDockerHandler : HttpMessageHandler
         return ms.ToArray();
     }
 
+    private static byte[] BuildFrames(IEnumerable<(byte Stream, byte[] Payload)> frames)
+    {
+        using var ms = new MemoryStream();
+        foreach (var (stream, payload) in frames)
+        {
+            ms.WriteByte(stream);
+            ms.Write(new byte[3]); // padding
+            ms.Write(BitConverter.GetBytes(System.Net.IPAddress.HostToNetworkOrder(payload.Length)));
+            ms.Write(payload);
+        }
+
+        return ms.ToArray();
+    }
+
     /// <summary>
     /// Replays a fixed prefix and then blocks forever, modelling a Docker exec stream
     /// whose command produced output and then stopped making progress.
@@ -184,4 +249,32 @@ internal sealed class MockDockerHandler : HttpMessageHandler
 
     public record RequestRecord(HttpMethod Method, string Url, string? Body);
     private record MockRoute(string PathContains, HttpStatusCode StatusCode, string Body, HttpMethod? Method);
+    private record MockSequence(string PathContains, HttpMethod Method, Queue<(HttpStatusCode Status, string Body)> Responses);
+
+    /// <summary>
+    /// Every exec-create request's <c>Cmd</c> argv, in the order Docker received them.
+    /// </summary>
+    public List<string[]> ExecCommands()
+    {
+        var commands = new List<string[]>();
+        foreach (var request in RequestLog.Where(r =>
+                     r.Method == HttpMethod.Post && r.Url.Contains("/exec")
+                     && !r.Url.Contains("/start") && !r.Url.Contains("/json")))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(request.Body!);
+            // Docker's Go decoder matches property names case-insensitively, so the test must too.
+            var cmd = document.RootElement.EnumerateObject()
+                .First(p => string.Equals(p.Name, "Cmd", StringComparison.OrdinalIgnoreCase));
+            commands.Add(cmd.Value.EnumerateArray().Select(e => e.GetString()!).ToArray());
+        }
+
+        return commands;
+    }
+
+    /// <summary>
+    /// The shell command each exec ran: the last argv entry. With an in-container timeout the
+    /// command travels as its own argument after the wrapper script; without one it is the
+    /// <c>sh -c</c> script itself.
+    /// </summary>
+    public List<string> ExecShellCommands() => ExecCommands().Select(argv => argv[^1]).ToList();
 }

@@ -104,6 +104,33 @@ describe('SharePage (share-link recipient)', () => {
     vi.unstubAllGlobals()
   })
 
+  it('Enter in the password box checks and downloads once', async () => {
+    // Enter in the form's only field submits the form, and the key then comes
+    // back up. Answering both checked the password twice and navigated to the
+    // download twice, which can spend two of a link's limited downloads.
+    getSharePreview.mockResolvedValue(ok({ fileName: 'payslip.pdf', size: 10, requirePassword: true }))
+    verifyShareAccess.mockResolvedValue({ succeeded: true, code: 200, data: true })
+    const location = { href: '' }
+    let navigations = 0
+    vi.stubGlobal('location', new Proxy(location, {
+      set(target, key, value) {
+        if (key === 'href') navigations += 1
+        return Reflect.set(target, key, value)
+      },
+    }))
+
+    const wrapper = await mountPage()
+    const input = wrapper.find('input')
+    await input.setValue('letmein')
+    await wrapper.find('form').trigger('submit')
+    await input.trigger('keyup', { key: 'Enter' })
+    await flushPromises()
+
+    expect(verifyShareAccess).toHaveBeenCalledTimes(1)
+    expect(navigations).toBe(1)
+    vi.unstubAllGlobals()
+  })
+
   it('checks the password through the quota-free endpoint, not the download URL', async () => {
     // ★ 拿下载端点探测会消耗一次访问配额，maxAccessCount = 1 的链接会在真正
     // 下载之前就用完。而且 HEAD 对 [HttpGet] 路由是 405 —— 实测过，那样每个

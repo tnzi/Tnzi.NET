@@ -26,6 +26,7 @@ namespace Tnzi.OpenTelemetry.Tests;
 /// 这里按真实加载顺序跑两个模块的 Configure，把导出器换成内存里的一个，记一条日志，数导出条数。
 /// </para>
 /// </remarks>
+[Collection(SerilogGlobalLoggerCollection.Name)]
 public class LogExportBridgeTests : IDisposable
 {
     private readonly Serilog.ILogger _previousLogger = Log.Logger;

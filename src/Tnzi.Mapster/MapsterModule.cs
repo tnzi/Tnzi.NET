@@ -4,6 +4,8 @@ namespace Tnzi.Mapster;
 public class MapsterModule : TnziInfrastructureModule
 {
     private int _mappingConfigCount;
+    private int _scannedAssemblyCount;
+    private readonly List<(string Assembly, string Error)> _typeLoadFailures = [];
 
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
@@ -11,19 +13,9 @@ public class MapsterModule : TnziInfrastructureModule
 
         // 优先使用模块程序集进行扫描（更精确，避免扫描无关的系统/第三方程序集）
         var assemblies = GetAssembliesForScanning(context.Services);
+        _scannedAssemblyCount = assemblies.Length;
         var mappingConfigTypes = assemblies
-            .SelectMany(a =>
-            {
-                try
-                {
-                    return a.GetTypes();
-                }
-                catch (ReflectionTypeLoadException)
-                {
-                    // 忽略无法加载的程序集
-                    return Array.Empty<Type>();
-                }
-            })
+            .SelectMany(a => GetLoadableTypes(a, _typeLoadFailures))
             .Where(t => typeof(IMappingConfig).IsAssignableFrom(t)
                 && !t.IsInterface
                 && !t.IsAbstract)
@@ -75,10 +67,21 @@ public class MapsterModule : TnziInfrastructureModule
         MapperExtensions.SetMapper(mapper, config);
 
         var logger = context.ServiceProvider.GetService<ILogger<MapsterModule>>();
-        logger?.LogInformation("MapperExtensions initialized with singleton IMapper instance.");
 
-        // 使用 ConfigureServicesAsync 阶段缓存的计数，避免重复扫描程序集
-        logger?.LogDebug("Loaded {Count} mapping configuration(s)", _mappingConfigCount);
+        // 使用 ConfigureServicesAsync 阶段缓存的计数，避免重复扫描程序集。
+        // Information 而不是 Debug：映射配置只在模块程序集里被发现，放错地方的配置表现为「0 个」，
+        // 而属性静默映射成默认值，这一行是唯一能看出来的地方。
+        logger?.LogInformation(
+            "MapperExtensions initialized; loaded {Count} mapping configuration(s) from {AssemblyCount} module assemblies",
+            _mappingConfigCount, _scannedAssemblyCount);
+
+        foreach (var failure in _typeLoadFailures)
+        {
+            logger?.LogWarning(
+                "Some types in {Assembly} could not be loaded while scanning for mapping configurations; " +
+                "mapping configurations among them are skipped. First loader error: {Error}",
+                failure.Assembly, failure.Error);
+        }
 
         // 验证所有映射配置，提前发现配置错误
         try
@@ -93,6 +96,28 @@ public class MapsterModule : TnziInfrastructureModule
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 程序集里能加载的类型。部分类型加载失败（引用了缺席的可选依赖）时保留其余类型，
+    /// 并把程序集名与第一条加载错误记进 <paramref name="failures"/>，由初始化阶段记 Warning。
+    /// </summary>
+    /// <remarks>
+    /// 此前整个程序集按「没有类型」处理且不留任何记录：一个类型引用了缺席的依赖，
+    /// 同一程序集里所有映射配置一起被跳过，改名属性与计算属性静默映射成默认值。
+    /// </remarks>
+    public static IReadOnlyList<Type> GetLoadableTypes(Assembly assembly, ICollection<(string Assembly, string Error)> failures)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            var firstError = ex.LoaderExceptions.FirstOrDefault(e => e != null)?.Message ?? ex.Message;
+            failures.Add((assembly.GetName().Name ?? assembly.FullName ?? "(unknown)", firstError));
+            return ex.Types.OfType<Type>().ToList();
+        }
     }
 
     /// <summary>

@@ -72,6 +72,10 @@ public class CreateEnvelopeTemplateDto
     /// <summary>渲染稿（PDF）。Uploaded 且原件已是 PDF 时与 <see cref="SourceFileId"/> 相同。</summary>
     public Guid? RenderedPdfFileId { get; set; }
 
+    /// <summary>
+    /// 页数。<see cref="TemplateSource.Composed"/> 模板用它校验绝对定位字段的页码；
+    /// <see cref="TemplateSource.Uploaded"/> 模板的页数取自渲染稿本身，这里的值被忽略。
+    /// </summary>
     public int PageCount { get; set; } = 1;
 
     public bool RequiresWetSignature { get; set; }
@@ -100,6 +104,11 @@ public class TemplateFieldInputDto
 
     public bool Required { get; set; }
     public FieldPlacementMode PlacementMode { get; set; }
+
+    /// <summary>
+    /// 锚文本（<see cref="FieldPlacementMode.Anchor"/> 用）：逐词按字面匹配，词与词之间允许有也允许没有空白，首尾空白去掉。
+    /// 上传型模板保存时必须在渲染稿里找得到。
+    /// </summary>
     public string? AnchorText { get; set; }
     public int Page { get; set; } = 1;
 

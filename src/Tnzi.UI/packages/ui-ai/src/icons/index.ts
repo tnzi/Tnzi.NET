@@ -23,16 +23,19 @@
  * bundleTnziIcons([lineMd, lucide, mdi, simpleIcons])
  * ```
  */
-import { addCollection, type IconifyJSON } from '@iconify/vue'
+import { _api, addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
-/** Every Iconify name `@tnzi/ui-ai` and its @tnzi dependencies can render (156 names, 4 collections). */
+/** Every Iconify name `@tnzi/ui-ai` and its @tnzi dependencies can render (164 names, 4 collections). */
 export const tnziIconNames: readonly string[] = [
   'line-md:menu-fold-left',
   'line-md:menu-fold-right',
   'lucide:alert-circle',
   'lucide:alert-triangle',
+  'lucide:archive',
+  'lucide:archive-restore',
   'lucide:arrow-down',
+  'lucide:arrow-left',
   'lucide:arrow-right',
   'lucide:arrow-up',
   'lucide:arrow-up-right',
@@ -61,20 +64,22 @@ export const tnziIconNames: readonly string[] = [
   'lucide:credit-card',
   'lucide:database',
   'lucide:download',
+  'lucide:ellipsis',
   'lucide:external-link',
   'lucide:file',
   'lucide:file-archive',
   'lucide:file-audio',
   'lucide:file-code',
   'lucide:file-code-2',
-  'lucide:file-spreadsheet',
   'lucide:file-text',
   'lucide:file-type',
   'lucide:file-video',
   'lucide:folder',
   'lucide:folder-open',
   'lucide:gauge',
+  'lucide:globe',
   'lucide:history',
+  'lucide:hourglass',
   'lucide:house',
   'lucide:image',
   'lucide:info',
@@ -95,7 +100,9 @@ export const tnziIconNames: readonly string[] = [
   'lucide:palette',
   'lucide:panel-left',
   'lucide:panel-left-open',
+  'lucide:panel-right',
   'lucide:paperclip',
+  'lucide:pencil',
   'lucide:play',
   'lucide:plug',
   'lucide:plus',
@@ -108,6 +115,7 @@ export const tnziIconNames: readonly string[] = [
   'lucide:settings',
   'lucide:settings-2',
   'lucide:shield-check',
+  'lucide:sliders-horizontal',
   'lucide:smartphone',
   'lucide:sparkles',
   'lucide:square',
@@ -298,4 +306,21 @@ export function bundleTnziIcons(collections: readonly IconifyJSON[]): TnziIconBu
   const { subsets, ...report } = selectTnziIcons(collections)
   for (const subset of subsets) addCollection(subset)
   return report
+}
+
+/**
+ * Stops `@iconify/vue` from asking the public Iconify API for an icon it does
+ * not have. Registering the framework's icons (above) makes them local; this
+ * makes that the only source: an icon nobody registered (the application's
+ * own, one named in data) renders blank instead of being fetched, so no icon
+ * request ever leaves the page. An application that cannot reach the network,
+ * or must not tell a third party what its users are looking at, wants both.
+ *
+ * Call it once, before mounting. Register the application's own icons the same
+ * way (`addCollection`); anything missed then shows up as a blank square in
+ * development rather than as a request in production. Only the default provider
+ * is affected: one added with `addAPIProvider` keeps working.
+ */
+export function disableRemoteIcons(): void {
+  _api.setAPIModule('', { prepare: () => [], send: () => {} })
 }

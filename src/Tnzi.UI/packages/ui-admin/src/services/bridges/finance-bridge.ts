@@ -201,7 +201,7 @@ import {
 } from '@tnzi/core/services/finance'
 import type { PagedList } from '@tnzi/core'
 import type { FinancePartyType, SettlementDocType } from '@tnzi/core/services/finance'
-import { ensureOk, unwrapResult as unwrap, pagedResult, unwrapOk } from '../_mappers'
+import { ensureOk, pagedResult, unwrapOk } from '../_mappers'
 
 // Re-export the DTO types under bridge names consumed by pages/configs.
 export type AccountDto = CoreAccountDto
@@ -741,12 +741,25 @@ export interface FinanceDocSection<TDto, TCreate> {
   voidDoc(id: string): Promise<TDto>
 }
 
-function toPaged<T>(result: { items?: T[]; totalCount?: number; pageIndex?: number; pageSize?: number }, query: FinancePagedQuery): FinancePagedResult<T> {
+/**
+ * Every read below goes through `unwrapOk`: `HttpClient` RESOLVES a refused or
+ * failed request (403, 404, 5xx, timeout) as an envelope with no data, and the
+ * unchecked unwrap turned that into `undefined`. Behind `?? []` it read as a
+ * real empty answer: "no open documents" on the apply panel, an empty deposit,
+ * cheque or EFT queue, a report that looks never run, a blank drawer, and the
+ * page's own error handling never ran. A failed read now rejects with the
+ * server's message; `?? []` / `toPaged` only cover a SUCCESSFUL answer with
+ * no body. (`checks.templates` swallows its own 501 on purpose, see there.)
+ */
+function toPaged<T>(
+  result: { items?: T[]; totalCount?: number; pageIndex?: number; pageSize?: number } | null | undefined,
+  query: FinancePagedQuery,
+): FinancePagedResult<T> {
   return pagedResult({
-    items: result.items ?? [],
-    totalCount: result.totalCount ?? 0,
-    pageIndex: result.pageIndex ?? query.pageIndex,
-    pageSize: result.pageSize ?? query.pageSize,
+    items: result?.items ?? [],
+    totalCount: result?.totalCount ?? 0,
+    pageIndex: result?.pageIndex ?? query.pageIndex,
+    pageSize: result?.pageSize ?? query.pageSize,
   })
 }
 
@@ -814,7 +827,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     return {
       fetch: async (query: FinancePagedQuery) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<TDto>>(
+        const result = unwrapOk<FinancePagedResult<TDto>>(
           (await api.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -850,7 +863,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     return {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<TDto> | null>(
+        const result = unwrapOk<FinancePagedResult<TDto> | null>(
           (await api.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -860,7 +873,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         )
         return toPaged(result ?? {}, query)
       },
-      getById: async (id) => unwrap<TDto | null>((await api.get(id)) as never),
+      getById: async (id) => unwrapOk<TDto | null>((await api.get(id)) as never),
       createDraft: async (data) => unwrapOk<TDto>((await api.createDraft(data)) as never),
       update: async (id, data) => unwrapOk<TDto>((await api.update(id, data)) as never),
       deleteDraft: async (id) => { ensureOk((await api.deleteDraft(id)) as never) },
@@ -885,7 +898,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     return {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<TDto>>(
+        const result = unwrapOk<FinancePagedResult<TDto>>(
           (await api.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -895,7 +908,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         )
         return toPaged(result, query)
       },
-      getById: async (id) => unwrap<TDto | null>((await api.get(id)) as never),
+      getById: async (id) => unwrapOk<TDto | null>((await api.get(id)) as never),
       createDraft: async (data) => unwrapOk<TDto>((await api.createDraft(data)) as never),
       updateDraft: async (id, data) => unwrapOk<TDto>((await api.updateDraft(id, data)) as never),
       deleteDraft: async (id) => {
@@ -914,7 +927,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     accounts: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<AccountDto>>(
+        const result = unwrapOk<FinancePagedResult<AccountDto>>(
           await accountApi.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -926,11 +939,11 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         return toPaged(result, query)
       },
       tree: async (includeInactive = false) =>
-        unwrap<AccountTreeDto[]>(await accountApi.getTree(includeInactive)) ?? [],
+        unwrapOk<AccountTreeDto[]>(await accountApi.getTree(includeInactive)) ?? [],
       balances: async (accountIds, asOf) =>
         accountIds.length === 0
           ? []
-          : unwrap<AccountBalanceDto[]>(await accountApi.getBalances({ accountIds, asOf: asOf ?? null })) ?? [],
+          : unwrapOk<AccountBalanceDto[]>(await accountApi.getBalances({ accountIds, asOf: asOf ?? null })) ?? [],
       create: async (data) => unwrapOk<AccountDto>(await accountApi.create(data)),
       update: async (id, data) => unwrapOk<AccountDto>(await accountApi.update(id, data)),
       delete: async (ids) => {
@@ -944,7 +957,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     journals: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<JournalEntryDto>>(
+        const result = unwrapOk<FinancePagedResult<JournalEntryDto>>(
           await journalApi.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -957,7 +970,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         )
         return toPaged(result, query)
       },
-      getById: async (id) => unwrap<JournalEntryDto | null>(await journalApi.get(id)),
+      getById: async (id) => unwrapOk<JournalEntryDto | null>(await journalApi.get(id)),
       createDraft: async (data) => unwrapOk<JournalEntryDto>(await journalApi.createDraft(data)),
       updateDraft: async (id, data) => unwrapOk<JournalEntryDto>(await journalApi.updateDraft(id, data)),
       deleteDraft: async (id) => {
@@ -970,7 +983,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     rates: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<ExchangeRateDto>>(
+        const result = unwrapOk<FinancePagedResult<ExchangeRateDto>>(
           await rateApi.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -990,7 +1003,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     },
 
     fiscalYears: {
-      list: async () => unwrap<FiscalYearDto[]>(await fiscalApi.getList()) ?? [],
+      list: async () => unwrapOk<FiscalYearDto[]>(await fiscalApi.getList()) ?? [],
       create: async (data) => unwrapOk<FiscalYearDto>(await fiscalApi.create(data)),
       close: async (id) => {
         ensureOk(await fiscalApi.close(id))
@@ -998,7 +1011,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       reopen: async (id) => {
         ensureOk(await fiscalApi.reopen(id))
       },
-      getClosingDate: async () => unwrap<LedgerLockDto>(await fiscalApi.getClosingDate()),
+      getClosingDate: async () => unwrapOk<LedgerLockDto>(await fiscalApi.getClosingDate()),
       setClosingDate: async (data) => unwrapOk<LedgerLockDto>(await fiscalApi.setClosingDate(data)),
       delete: async (ids) => {
         for (const id of ids) {
@@ -1009,21 +1022,21 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
 
     reports: {
       trialBalance: async (from, to) =>
-        unwrap<TrialBalanceReportDto>(await reportApi.getTrialBalance(from, to)),
+        unwrapOk<TrialBalanceReportDto>(await reportApi.getTrialBalance(from, to)),
       balanceSheet: async (asOf) =>
-        unwrap<BalanceSheetReportDto>(await reportApi.getBalanceSheet(asOf)),
+        unwrapOk<BalanceSheetReportDto>(await reportApi.getBalanceSheet(asOf)),
       profitAndLoss: async (from, to) =>
-        unwrap<ProfitAndLossReportDto>(await reportApi.getProfitAndLoss(from, to)),
+        unwrapOk<ProfitAndLossReportDto>(await reportApi.getProfitAndLoss(from, to)),
       generalLedger: async (accountId, from, to, pageIndex = 1, pageSize = 20, filter) =>
-        unwrap<GeneralLedgerReportDto>(
+        unwrapOk<GeneralLedgerReportDto>(
           await reportApi.getGeneralLedger(accountId, from, to, pageIndex, pageSize, filter),
         ),
-      arAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getArAging(asOf)),
-      apAging: async (asOf) => unwrap<AgingReportDto>(await reportApi.getApAging(asOf)),
+      arAging: async (asOf) => unwrapOk<AgingReportDto>(await reportApi.getArAging(asOf)),
+      apAging: async (asOf) => unwrapOk<AgingReportDto>(await reportApi.getApAging(asOf)),
       taxSummary: async (from, to) =>
-        unwrap<TaxSummaryReportDto>(await reportApi.getTaxSummary(from, to)),
+        unwrapOk<TaxSummaryReportDto>(await reportApi.getTaxSummary(from, to)),
       cashFlow: async (from, to) =>
-        unwrap<CashFlowReportDto>(await reportApi.getCashFlow(from, to)),
+        unwrapOk<CashFlowReportDto>(await reportApi.getCashFlow(from, to)),
       exportTrialBalanceCsv: async (from, to) =>
         unwrapOk<Blob>(await reportApi.exportTrialBalanceCsv(from, to)),
       exportBalanceSheetCsv: async (asOf) =>
@@ -1042,13 +1055,13 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
 
     customers: {
       ...crudSection<CustomerDto, CoreCreateCustomerDto, CoreUpdateCustomerDto>(customerApi),
-      get: async (id) => unwrap<CustomerDto>((await customerApi.get(id)) as never),
-      summary: async (id, params) => unwrap<PartyLedgerSummaryDto>((await customerApi.getSummary(id, params)) as never),
+      get: async (id) => unwrapOk<CustomerDto>((await customerApi.get(id)) as never),
+      summary: async (id, params) => unwrapOk<PartyLedgerSummaryDto>((await customerApi.getSummary(id, params)) as never),
       transactions: async (id, query) => {
         // An envelope can carry a null payload; `toPaged` would then read
         // `.items` off undefined and the page would report a type error
         // instead of "no transactions".
-        const result = unwrap<FinancePagedResult<PartyLedgerEntryDto> | null>(
+        const result = unwrapOk<FinancePagedResult<PartyLedgerEntryDto> | null>(
           (await customerApi.getTransactions(id, query)) as never,
         )
         return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
@@ -1056,13 +1069,13 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     },
     vendors: {
       ...crudSection<VendorDto, CoreCreateVendorDto, CoreUpdateVendorDto>(vendorApi),
-      get: async (id) => unwrap<VendorDto>((await vendorApi.get(id)) as never),
-      summary: async (id, params) => unwrap<PartyLedgerSummaryDto>((await vendorApi.getSummary(id, params)) as never),
+      get: async (id) => unwrapOk<VendorDto>((await vendorApi.get(id)) as never),
+      summary: async (id, params) => unwrapOk<PartyLedgerSummaryDto>((await vendorApi.getSummary(id, params)) as never),
       transactions: async (id, query) => {
         // An envelope can carry a null payload; `toPaged` would then read
         // `.items` off undefined and the page would report a type error
         // instead of "no transactions".
-        const result = unwrap<FinancePagedResult<PartyLedgerEntryDto> | null>(
+        const result = unwrapOk<FinancePagedResult<PartyLedgerEntryDto> | null>(
           (await vendorApi.getTransactions(id, query)) as never,
         )
         return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
@@ -1071,19 +1084,19 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     items: crudSection<ItemDto, CoreCreateItemDto, CoreUpdateItemDto>(itemApi),
 
     taxes: {
-      agencies: async () => unwrap<TaxAgencyDto[]>(await taxApi.getAgencies()) ?? [],
+      agencies: async () => unwrapOk<TaxAgencyDto[]>(await taxApi.getAgencies()) ?? [],
       createAgency: async (data) => unwrapOk<TaxAgencyDto>(await taxApi.createAgency(data)),
       updateAgency: async (id, data) => unwrapOk<TaxAgencyDto>(await taxApi.updateAgency(id, data)),
       deleteAgency: async (id) => {
         ensureOk(await taxApi.deleteAgency(id))
       },
-      rates: async (agencyId) => unwrap<TaxRateDto[]>(await taxApi.getRates(agencyId)) ?? [],
+      rates: async (agencyId) => unwrapOk<TaxRateDto[]>(await taxApi.getRates(agencyId)) ?? [],
       createRate: async (data) => unwrapOk<TaxRateDto>(await taxApi.createRate(data)),
       updateRate: async (id, data) => unwrapOk<TaxRateDto>(await taxApi.updateRate(id, data)),
       deleteRate: async (id) => {
         ensureOk(await taxApi.deleteRate(id))
       },
-      codes: async () => unwrap<TaxCodeDto[]>(await taxApi.getCodes()) ?? [],
+      codes: async () => unwrapOk<TaxCodeDto[]>(await taxApi.getCodes()) ?? [],
       createCode: async (data) => unwrapOk<TaxCodeDto>(await taxApi.createCode(data)),
       updateCode: async (id, data) => unwrapOk<TaxCodeDto>(await taxApi.updateCode(id, data)),
       deleteCode: async (id) => {
@@ -1092,19 +1105,19 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     },
 
     collaboration: {
-      attachments: async (docType, docId) => unwrap<DocumentAttachmentDto[] | null>((await collabApi.listAttachments(docType, docId)) as never) ?? [],
+      attachments: async (docType, docId) => unwrapOk<DocumentAttachmentDto[] | null>((await collabApi.listAttachments(docType, docId)) as never) ?? [],
       attach: async (docType, docId, data) => unwrapOk<DocumentAttachmentDto>((await collabApi.attach(docType, docId, data)) as never),
       removeAttachment: async (id) => { ensureOk((await collabApi.removeAttachment(id)) as never) },
       attachmentCounts: async (docType, docIds) =>
-        unwrap<Record<string, number> | null>((await collabApi.attachmentCounts(docType, docIds)) as never) ?? {},
-      comments: async (docType, docId) => unwrap<DocumentCommentDto[] | null>((await collabApi.listComments(docType, docId)) as never) ?? [],
+        unwrapOk<Record<string, number> | null>((await collabApi.attachmentCounts(docType, docIds)) as never) ?? {},
+      comments: async (docType, docId) => unwrapOk<DocumentCommentDto[] | null>((await collabApi.listComments(docType, docId)) as never) ?? [],
       postComment: async (docType, docId, body) => unwrapOk<DocumentCommentDto>((await collabApi.postComment(docType, docId, { body })) as never),
       deleteComment: async (id) => { ensureOk((await collabApi.deleteComment(id)) as never) },
     },
     bankRules: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<FinancePagedResult<BankRuleDto> | null>(
+        const result = unwrapOk<FinancePagedResult<BankRuleDto> | null>(
           (await bankRuleApi.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -1114,7 +1127,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         )
         return toPaged(result ?? {}, query)
       },
-      getById: async (id) => unwrap<BankRuleDto | null>((await bankRuleApi.get(id)) as never),
+      getById: async (id) => unwrapOk<BankRuleDto | null>((await bankRuleApi.get(id)) as never),
       create: async (data) => unwrapOk<BankRuleDto>((await bankRuleApi.create(data)) as never),
       update: async (id, data) => unwrapOk<BankRuleDto>((await bankRuleApi.update(id, data)) as never),
       delete: async (ids) => { for (const id of ids) ensureOk((await bankRuleApi.delete(id)) as never) },
@@ -1129,19 +1142,19 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       const api = useAdminFinanceStatementApi(client)
       return {
         get: async (partyType, partyId, query) =>
-          unwrap<CustomerStatementDto>((await api.get(partyType, partyId, query)) as never),
+          unwrapOk<CustomerStatementDto>((await api.get(partyType, partyId, query)) as never),
         download: async (partyType, partyId, query) =>
           unwrapOk<Blob>((await api.download(partyType, partyId, query)) as never),
         dunning: async (partyType, asOf) =>
-          unwrap<DunningCandidateDto[] | null>((await api.dunning(partyType, asOf)) as never) ?? [],
+          unwrapOk<DunningCandidateDto[] | null>((await api.dunning(partyType, asOf)) as never) ?? [],
       }
     })(),
     taxReturns: (() => {
       const api = useAdminFinanceTaxReturnApi(client)
       return {
-        forms: async () => unwrap<TaxReturnFormDto[] | null>((await api.forms()) as never) ?? [],
+        forms: async () => unwrapOk<TaxReturnFormDto[] | null>((await api.forms()) as never) ?? [],
         get: async (country, formCode, from, to) =>
-          unwrap<TaxReturnDto>((await api.get(country, formCode, from, to)) as never),
+          unwrapOk<TaxReturnDto>((await api.get(country, formCode, from, to)) as never),
       }
     })(),
     recurring: (() => {
@@ -1149,7 +1162,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         fetch: async (query) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<RecurringDocumentDto> | null>(
+          const result = unwrapOk<FinancePagedResult<RecurringDocumentDto> | null>(
             (await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1159,18 +1172,18 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result ?? {}, query)
         },
-        getById: async (id) => unwrap<RecurringDocumentDto | null>((await api.get(id)) as never),
+        getById: async (id) => unwrapOk<RecurringDocumentDto | null>((await api.get(id)) as never),
         create: async (data) => unwrapOk<RecurringDocumentDto>((await api.create(data)) as never),
         update: async (id, data) => unwrapOk<RecurringDocumentDto>((await api.update(id, data)) as never),
         delete: async (ids) => { for (const id of ids) ensureOk((await api.delete(id)) as never) },
         pause: async (id) => unwrapOk<RecurringDocumentDto>((await api.pause(id)) as never),
         resume: async (id) => unwrapOk<RecurringDocumentDto>((await api.resume(id)) as never),
         end: async (id) => unwrapOk<RecurringDocumentDto>((await api.end(id)) as never),
-        preview: async (id, count) => unwrap<RecurrencePreviewDto>((await api.preview(id, count)) as never),
+        preview: async (id, count) => unwrapOk<RecurrencePreviewDto>((await api.preview(id, count)) as never),
         previewSchedule: async (data, count) =>
-          unwrap<RecurrencePreviewDto>((await api.previewSchedule(data, count)) as never),
+          unwrapOk<RecurrencePreviewDto>((await api.previewSchedule(data, count)) as never),
         runs: async (query) => {
-          const result = unwrap<FinancePagedResult<RecurringRunDto> | null>((await api.runs(query)) as never)
+          const result = unwrapOk<FinancePagedResult<RecurringRunDto> | null>((await api.runs(query)) as never)
           return toPaged(result ?? {}, { pageIndex: query?.pageIndex ?? 1, pageSize: query?.pageSize ?? 20 })
         },
         run: async (id, asOf) => unwrapOk<RecurringSweepResultDto>((await api.run(id, asOf)) as never),
@@ -1191,7 +1204,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         ...docSection<DepositDto, CoreCreateDepositDto>(api),
         undeposited: async (query: CoreUndepositedReceiptQueryDto) =>
-          unwrap<UndepositedReceiptDto[]>((await api.getUndeposited(query)) as never) ?? [],
+          unwrapOk<UndepositedReceiptDto[]>((await api.getUndeposited(query)) as never) ?? [],
       }
     })(),
 
@@ -1200,7 +1213,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         fetch: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<ReconciliationDto>>(
+          const result = unwrapOk<FinancePagedResult<ReconciliationDto>>(
             (await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1209,13 +1222,15 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result, query)
         },
-        getById: async (id: string) => unwrap<ReconciliationDto | null>(await api.get(id)),
+        getById: async (id: string) => unwrapOk<ReconciliationDto | null>(await api.get(id)),
         create: async (data: CoreCreateReconciliationDto) => unwrapOk<ReconciliationDto>(await api.create(data)),
         update: async (id: string, data: CoreCreateReconciliationDto) => unwrapOk<ReconciliationDto>(await api.update(id, data)),
         delete: async (id: string) => {
           ensureOk(await api.delete(id))
         },
-        worksheet: async (id: string) => unwrap<ReconciliationWorksheetDto>(await api.getWorksheet(id)),
+        // Checked: the worksheet seeds a selection that Save writes back as the whole
+        // cleared set, so a refused read must not arrive as an empty worksheet.
+        worksheet: async (id: string) => unwrapOk<ReconciliationWorksheetDto>(await api.getWorksheet(id)),
         setLines: async (id: string, journalLineIds: string[]) =>
           unwrapOk<ReconciliationWorksheetDto>(await api.setLines(id, { journalLineIds })),
         complete: async (id: string) => unwrapOk<ReconciliationDto>(await api.complete(id)),
@@ -1225,16 +1240,16 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     revaluations: (() => {
       const api = useAdminFinanceRevaluationApi(client)
       return {
-        preview: async (data: RunRevaluationDto) => unwrap<RevaluationPreviewDto>(await api.preview(data)),
+        preview: async (data: RunRevaluationDto) => unwrapOk<RevaluationPreviewDto>(await api.preview(data)),
         run: async (data: RunRevaluationDto) => unwrapOk<RevaluationPreviewDto>(await api.run(data)),
       }
     })(),
 
     settlements: {
       applications: async (docType, docId) =>
-        unwrap<PaymentApplicationDto[]>(await settlementApi.getApplications(docType, docId)) ?? [],
+        unwrapOk<PaymentApplicationDto[]>(await settlementApi.getApplications(docType, docId)) ?? [],
       openDocuments: async (partyType, partyId) =>
-        unwrap<OpenDocumentDto[]>(await settlementApi.getOpenDocuments(partyType, partyId)) ?? [],
+        unwrapOk<OpenDocumentDto[]>(await settlementApi.getOpenDocuments(partyType, partyId)) ?? [],
       apply: async (data) => unwrapOk<PaymentApplicationDto[]>(await settlementApi.apply(data)),
       unapply: async (applicationId) => {
         ensureOk(await settlementApi.unapply(applicationId))
@@ -1246,10 +1261,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       const api = useAdminFinanceBankAccountApi(client)
       return {
         capabilities: async () =>
-          unwrap<BankAccountCapabilitiesDto>(await api.getCapabilities()),
+          unwrapOk<BankAccountCapabilitiesDto>(await api.getCapabilities()),
         fetch: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<BankAccountDto>>(
+          const result = unwrapOk<FinancePagedResult<BankAccountDto>>(
             await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1259,7 +1274,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result, query)
         },
-        getById: async (id: string) => unwrap<BankAccountDto | null>(await api.get(id)),
+        getById: async (id: string) => unwrapOk<BankAccountDto | null>(await api.get(id)),
         create: async (data: CoreCreateBankAccountDto) => unwrapOk<BankAccountDto>(await api.create(data)),
         update: async (id: string, data: CoreUpdateBankAccountDto) => unwrapOk<BankAccountDto>(await api.update(id, data)),
         setNextCheckNumber: async (id: string, nextCheckNumber: number) =>
@@ -1274,7 +1289,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       const api = useAdminFinancePartyBankAccountApi(client)
       return {
         byParty: async (partyType, partyId) =>
-          unwrap<PartyBankAccountDto[]>(await api.getByParty(partyType, partyId)) ?? [],
+          unwrapOk<PartyBankAccountDto[]>(await api.getByParty(partyType, partyId)) ?? [],
         save: async (data: CoreSavePartyBankAccountDto) => unwrapOk<PartyBankAccountDto>(await api.create(data)),
         update: async (id: string, data: CoreSavePartyBankAccountDto) => unwrapOk<PartyBankAccountDto>(await api.update(id, data)),
         setDefault: async (id: string) => unwrapOk<PartyBankAccountDto>(await api.setDefault(id)),
@@ -1289,7 +1304,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         transactions: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<BankTransactionDto>>(
+          const result = unwrapOk<FinancePagedResult<BankTransactionDto>>(
             await api.getTransactions({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1308,7 +1323,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
         pull: async (accountId) => unwrapOk<BankImportResultDto>(await api.pull({ accountId })),
         suggest: async (accountId) => unwrapOk<BankSuggestResultDto>(await api.suggest(accountId)),
         candidates: async (transactionId) =>
-          unwrap<BankMatchCandidateDto[]>(await api.getCandidates(transactionId)) ?? [],
+          unwrapOk<BankMatchCandidateDto[]>(await api.getCandidates(transactionId)) ?? [],
         confirm: async (transactionId, data) => unwrapOk<BankTransactionDto>(await api.confirm(transactionId, data)),
         unmatch: async (transactionId) => unwrapOk<BankTransactionDto>(await api.unmatch(transactionId)),
         exclude: async (transactionId) => unwrapOk<BankTransactionDto>(await api.exclude(transactionId)),
@@ -1317,7 +1332,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           unwrapOk<BankDocumentResultDto>(await api.createDocument(transactionId, data)),
         batches: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<BankImportBatchDto>>(
+          const result = unwrapOk<FinancePagedResult<BankImportBatchDto>>(
             await api.getBatches({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1336,10 +1351,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       const api = useAdminFinanceCheckApi(client)
       return {
         queue: async (bankAccountId?: string) =>
-          unwrap<CheckQueueItemDto[]>(await api.getQueue(bankAccountId)) ?? [],
+          unwrapOk<CheckQueueItemDto[]>(await api.getQueue(bankAccountId)) ?? [],
         fetch: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<BankCheckDto>>(
+          const result = unwrapOk<FinancePagedResult<BankCheckDto>>(
             await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1355,7 +1370,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           // fact, not an error the operator can act on here, so swallow it and
           // let the field fall back to free entry.
           try {
-            return unwrap<CheckTemplateDto[]>(await api.getTemplates()) ?? []
+            return unwrapOk<CheckTemplateDto[]>(await api.getTemplates()) ?? []
           } catch {
             return []
           }
@@ -1384,10 +1399,10 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
     eftBatches: (() => {
       const api = useAdminFinanceEftBatchApi(client)
       return {
-        queue: async () => unwrap<EftQueueItemDto[]>(await api.getQueue()) ?? [],
+        queue: async () => unwrapOk<EftQueueItemDto[]>(await api.getQueue()) ?? [],
         fetch: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<EftBatchDto>>(
+          const result = unwrapOk<FinancePagedResult<EftBatchDto>>(
             await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1398,7 +1413,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result, query)
         },
-        getById: async (id: string) => unwrap<EftBatchDto | null>(await api.get(id)),
+        getById: async (id: string) => unwrapOk<EftBatchDto | null>(await api.get(id)),
         create: async (data: CoreCreateEftBatchDto) => unwrapOk<EftBatchDto>(await api.create(data)),
         generate: async (id: string) => unwrapOk<EftBatchDto>(await api.generate(id)),
         voidBatch: async (id: string, data: CoreVoidEftBatchDto) => unwrapOk<EftBatchDto>(await api.void(id, data)),
@@ -1411,7 +1426,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
       return {
         fetch: async (query: FinancePagedQuery) => {
           const filters = query.filters ?? {}
-          const result = unwrap<FinancePagedResult<ReceiptDto>>(
+          const result = unwrapOk<FinancePagedResult<ReceiptDto>>(
             await api.getList({
               pageIndex: query.pageIndex,
               pageSize: query.pageSize,
@@ -1421,7 +1436,7 @@ export function createFinanceBridge(deps: FinanceBridgeDeps = {}): FinanceBridge
           )
           return toPaged(result, query)
         },
-        getById: async (id: string) => unwrap<ReceiptDto | null>(await api.get(id)),
+        getById: async (id: string) => unwrapOk<ReceiptDto | null>(await api.get(id)),
         create: async (data: CoreCreateReceiptDto) => unwrapOk<ReceiptDto>(await api.create(data)),
         extract: async (id: string) => unwrapOk<ReceiptDto>(await api.extract(id)),
         update: async (id: string, data: CoreUpdateReceiptExtractionDto) => unwrapOk<ReceiptDto>(await api.update(id, data)),

@@ -78,11 +78,14 @@ public class DocumentAttachmentService : ApplicationService, IDocumentAttachment
             return denial;
 
         // 内容类型白名单：空 = 不限（多数部署不想管这件事，那就别逼他们配）。
+        // ★ 配了就失败关闭：不报类型的登记不是「类型未知所以放行」，而是绕过了部署方显式要的这道门。
         var allowed = _options.AllowedAttachmentContentTypes;
-        if (allowed is { Length: > 0 } && !string.IsNullOrWhiteSpace(input.ContentType)
-            && !allowed.Any(a => string.Equals(a, input.ContentType, StringComparison.OrdinalIgnoreCase)))
+        if (allowed is { Length: > 0 })
         {
-            return Fail<DocumentAttachmentDto>($"Files of type '{input.ContentType}' cannot be attached here.", 400);
+            if (string.IsNullOrWhiteSpace(input.ContentType))
+                return Fail<DocumentAttachmentDto>("A content type is required to attach files here.", 400);
+            if (!allowed.Any(a => string.Equals(a, input.ContentType, StringComparison.OrdinalIgnoreCase)))
+                return Fail<DocumentAttachmentDto>($"Files of type '{input.ContentType}' cannot be attached here.", 400);
         }
 
         var count = await _repository.AsNoTracking().CountAsync(a => a.SourceType == type && a.SourceId == id, cancellationToken);
@@ -103,6 +106,13 @@ public class DocumentAttachmentService : ApplicationService, IDocumentAttachment
             FileSize = input.FileSize < 0 ? 0 : input.FileSize,
             Caption = string.IsNullOrWhiteSpace(input.Caption) ? null : input.Caption.Trim(),
         };
+
+        var tooLong = FinanceFieldLimits.FirstTooLong(
+            (attachment.FileName, FinanceFieldLimits.AttachmentFileNameMaxLength, "file name"),
+            (attachment.ContentType, FinanceFieldLimits.AttachmentContentTypeMaxLength, "content type"),
+            (attachment.Caption, FinanceFieldLimits.AttachmentCaptionMaxLength, "caption"));
+        if (tooLong != null)
+            return Fail<DocumentAttachmentDto>(tooLong, 400);
 
         await _repository.InsertAsync(attachment, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -190,6 +200,14 @@ public class DocumentAttachmentService : ApplicationService, IDocumentAttachment
         if (string.IsNullOrWhiteSpace(sourceId))
             return Fail<(string, string)>("A document id is required.", 400);
 
-        return Ok((sourceType.Trim(), sourceId.Trim()));
+        var type = sourceType.Trim();
+        var id = sourceId.Trim();
+        var tooLong = FinanceFieldLimits.FirstTooLong(
+            (type, FinanceFieldLimits.DocumentKeyMaxLength, "document type"),
+            (id, FinanceFieldLimits.DocumentKeyMaxLength, "document id"));
+        if (tooLong != null)
+            return Fail<(string, string)>(tooLong, 400);
+
+        return Ok((type, id));
     }
 }

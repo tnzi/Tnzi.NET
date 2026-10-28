@@ -4,14 +4,51 @@
  * Data query orchestrator - combines pagination + sort + selection for complete data query logic.
  */
 
-import { reactive } from 'vue';
+import { reactive, toRaw } from 'vue';
 import { PaginationController } from './pagination';
 import { SelectionController } from './selection';
 import { SortController } from './sort';
+import { HttpError } from '../errors/api-error';
 import type { PaginationOptions } from './pagination';
 import type { SelectionOptions } from './selection';
 import type { SortOptions, SortDirection } from './sort';
 import type { ApiResult, PagedList } from '../types/index';
+
+/**
+ * 4xx answers that are worth asking again: the server timed the request out
+ * (408) or asked the caller to slow down (429). Every other 4xx is the server's
+ * final word on this request (no permission, not found, invalid query), and
+ * repeating it only delays the error the operator needs to see.
+ */
+const RETRYABLE_CLIENT_STATUSES: ReadonlySet<number> = new Set([408, 429]);
+
+/**
+ * Whether a fetch failure is the server's final answer rather than a transient
+ * fault. Read structurally (`statusCode`, else a numeric `code`) instead of
+ * with `instanceof`: every `@tnzi/core` entry inlines its own copy of the error
+ * classes, so the class a bridge threw need not be the one imported here.
+ * A failure without a status (network error, timeout) stays retryable.
+ */
+function isPermanentFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { statusCode, code } = error as { statusCode?: unknown; code?: unknown };
+  const status = typeof statusCode === 'number' ? statusCode : typeof code === 'number' ? code : undefined;
+  return status !== undefined && status >= 400 && status < 500 && !RETRYABLE_CLIENT_STATUSES.has(status);
+}
+
+/**
+ * Copy plain objects and arrays so the stored default filter and the live
+ * filter never share a nested object. Other values (Date, class instances) are
+ * kept as they are: a filter holds data, and those are not mutated in place.
+ */
+function copyPlain<T>(value: T): T {
+  const raw = toRaw(value);
+  if (Array.isArray(raw)) return raw.map((item) => copyPlain(item)) as T;
+  if (raw !== null && typeof raw === 'object' && Object.getPrototypeOf(raw) === Object.prototype) {
+    return Object.fromEntries(Object.entries(raw).map(([key, item]) => [key, copyPlain(item)])) as T;
+  }
+  return raw;
+}
 
 // ============================================
 // Types
@@ -28,7 +65,15 @@ export type DataQueryStatus = 'idle' | 'loading' | 'success' | 'error';
  */
 export type DataQueryFetchResult<TItem> = ApiResult<PagedList<TItem>> | PagedList<TItem>;
 
-/** Retry policy for {@link DataQueryController.fetch}. */
+/**
+ * Retry policy for {@link DataQueryController.fetch}.
+ *
+ * Only transient failures are retried: a rejection or failed envelope without
+ * an HTTP status (network error, timeout, a thrown non-HTTP error), 408, 429
+ * and 5xx. Any other 4xx (400 / 401 / 403 / 404 / 409 / 422 ...) is the
+ * server's answer, and asking again only repeats it seconds later, so it
+ * surfaces after the first attempt.
+ */
 export interface DataQueryRetryOptions {
   /** Number of RETRIES after the first attempt. Default 0 (no retry). */
   attempts?: number;
@@ -50,7 +95,10 @@ export interface DataQueryOptions<TItem, TFilter extends object = Record<string,
   sort?: SortOptions;
   /** Selection options */
   selection?: SelectionOptions;
-  /** Initial filter values */
+  /**
+   * Initial filter values. Also what {@link DataQueryController.resetFilter}
+   * and {@link DataQueryController.reset} return to when called without one.
+   */
   defaultFilter?: TFilter;
   /**
    * Data fetch function (accepts query params and optional AbortSignal).
@@ -96,6 +144,11 @@ export interface DataQueryOptions<TItem, TFilter extends object = Record<string,
   /**
    * Retry policy for transient fetch failures. Default: no retry.
    *
+   * Only transient failures are retried: a rejection or failed envelope with
+   * no HTTP status (network error, timeout), a 5xx, a 408 or a 429. Any other
+   * 4xx (403 without the module's view permission, 404, a rejected query) is
+   * the server's final answer and is surfaced at once.
+   *
    * Only fetches are retried. There is deliberately no write-side equivalent:
    * a duplicated write is worse than a surfaced error.
    */
@@ -104,8 +157,12 @@ export interface DataQueryOptions<TItem, TFilter extends object = Record<string,
   /**
    * Override how the request payload is built from the current state.
    *
-   * Default is `{ ...pagination.toQuery(), ...sort.toQuery(), ...filter }`.
-   * Supply this when the backend contract names these fields differently.
+   * Default is `{ ...pagination.toQuery(), ...sort.toQuery(), ...filter }`,
+   * which sends the sort as `sortBy` + `sortDescending`. Supply this when the
+   * backend contract names these fields differently. An endpoint that binds
+   * the generic `PagedQuery` (as `CrudAdminControllerBase` does) reads only
+   * `orderBy` ("Name DESC") and ignores the default sort keys without an
+   * error, so it needs a `buildQuery` that emits `orderBy`.
    */
   buildQuery?: (context: DataQueryBuildContext<TFilter>) => Record<string, unknown>;
 
@@ -176,6 +233,7 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
   private readonly _retryDelayMs: number;
   private readonly _buildQuery: DataQueryOptions<TItem, TFilter>['buildQuery'];
   private readonly _onError: DataQueryOptions<TItem, TFilter>['onError'];
+  private readonly _defaultFilter: TFilter;
   private _abortController: AbortController | null = null;
 
   constructor(options: DataQueryOptions<TItem, TFilter>) {
@@ -183,7 +241,8 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
     this.status = 'idle';
     this.error = null;
     this.errorObject = null;
-    this.filter = (options.defaultFilter ?? {} as TFilter);
+    this._defaultFilter = copyPlain(options.defaultFilter ?? {} as TFilter);
+    this.filter = copyPlain(this._defaultFilter);
     this._fetchFn = options.fetchFn;
     this._rowKey = options.rowKey;
     this._resetPageOnSort = options.resetPageOnSort ?? true;
@@ -292,29 +351,52 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
     this.error = null;
     this.errorObject = null;
 
+    const signal = abortController.signal;
+    const requestedPage = this.pagination.pageIndex;
+    let corrected = false;
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this._retryAttempts; attempt++) {
       try {
-        const result = await this._fetchFn(this._toQuery(), abortController.signal);
+        const result = await this._fetchFn(this._toQuery(), signal);
 
-        if (abortController.signal.aborted) return false;
+        if (signal.aborted) return false;
 
         // Envelope or bare page: only the envelope carries `succeeded`.
+        let page: PagedList<TItem> | undefined;
         if (result && typeof result === 'object' && 'succeeded' in result) {
           const envelope = result as ApiResult<PagedList<TItem>>;
-          if (envelope.succeeded) {
-            this._applyPage(envelope.data);
-            return true;
-          }
-          lastError = new Error(envelope.message ?? 'Fetch failed');
+          // An HttpError, like the one a bridge throws for the same answer,
+          // so the status survives for the retry decision and for `errorObject`.
+          if (!envelope.succeeded) throw new HttpError({ ...envelope, message: envelope.message ?? 'Fetch failed' });
+          page = envelope.data;
         } else {
-          this._applyPage(result as PagedList<TItem>);
-          return true;
+          page = result as PagedList<TItem>;
         }
+
+        // The page asked for is past the end: the list shrank under it (the
+        // last row of the last page was deleted, an edit moved rows out of the
+        // filter) or a restored page number was never valid. The server does
+        // not clamp, so the answer is an empty page with the real total. Pull
+        // the index back inside the real page count and ask once more, so the
+        // rows shown match the page the pager shows; applying the empty answer
+        // would leave an empty table under a pager whose current page cannot
+        // be clicked to recover. At most once: a server whose totals keep
+        // disagreeing with its pages must not turn this into a loop. The
+        // corrective request gets the full retry budget of its own.
+        if (!corrected && this._isPastEnd(page, requestedPage)) {
+          corrected = true;
+          this.pagination.updateFromResponse(page?.totalCount ?? 0);
+          attempt = -1;
+          continue;
+        }
+
+        this._applyPage(page);
+        return true;
       } catch (e) {
-        if (abortController.signal.aborted) return false;
+        if (signal.aborted) return false;
         lastError = e instanceof Error ? e : new Error(String(e));
+        if (isPermanentFailure(e)) break;
       }
 
       if (attempt < this._retryAttempts) {
@@ -324,13 +406,20 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
         // A newer fetch may have started while we waited out the backoff.
         // Checked even with a zero delay: the retry loop yields on every
         // `await` above, so a supersede can land between attempts.
-        if (abortController.signal.aborted) return false;
+        if (signal.aborted) return false;
       }
     }
 
-    if (abortController.signal.aborted) return false;
+    if (signal.aborted) return false;
     this._applyError(lastError ?? new Error('Fetch failed'));
     return false;
+  }
+
+  /** Whether `page` answered a request for a page beyond the last one that has rows. */
+  private _isPastEnd(page: PagedList<TItem> | undefined, requestedPage: number): boolean {
+    const totalCount = page?.totalCount ?? 0;
+    if ((page?.items?.length ?? 0) > 0 || totalCount <= 0 || this.pagination.pageSize <= 0) return false;
+    return requestedPage > Math.ceil(totalCount / this.pagination.pageSize);
   }
 
   /** Change page and re-fetch */
@@ -362,9 +451,9 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
   /**
    * Set an explicit sort (field + direction) and re-fetch.
    *
-   * Unlike {@link changeSort}, which cycles asc → desc → none on repeat calls,
-   * this states the target outright - the shape a table header emits.
-   * Passing `null`/`undefined` for `field` clears the sort.
+   * Unlike {@link changeSort}, which toggles between asc and desc on repeat
+   * calls and never clears, this states the target outright - the shape a
+   * table header emits. Passing `null`/`undefined` for `field` clears the sort.
    */
   async setSort(field: string | null | undefined, direction: SortDirection = 'asc'): Promise<void> {
     if (field) {
@@ -385,9 +474,12 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
     await this.fetch();
   }
 
-  /** Reset filter and re-fetch */
+  /**
+   * Reset the filter and re-fetch. Without an argument the filter returns to
+   * the configured `defaultFilter` (a fresh copy), not to an empty object.
+   */
   async resetFilter(defaultFilter?: TFilter): Promise<void> {
-    this.filter = defaultFilter ?? {} as TFilter;
+    this.filter = defaultFilter ?? copyPlain(this._defaultFilter);
     this.pagination.goTo(1);
     this.selection.clear();
     await this.fetch();
@@ -399,7 +491,10 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
     await this.fetch();
   }
 
-  /** Full reset (pagination, sort, filter, selection) */
+  /**
+   * Full reset (pagination, sort, filter, selection). Without an argument the
+   * filter returns to the configured `defaultFilter` (a fresh copy).
+   */
   async reset(defaultFilter?: TFilter): Promise<void> {
     // Cancel any in-flight request
     this._abortController?.abort();
@@ -407,7 +502,7 @@ export class DataQueryController<TItem, TFilter extends object = Record<string, 
 
     this.pagination.reset();
     this.sort.clear();
-    this.filter = defaultFilter ?? {} as TFilter;
+    this.filter = defaultFilter ?? copyPlain(this._defaultFilter);
     this.selection.clear();
     this.items = [];
     this.status = 'idle';

@@ -38,18 +38,18 @@ internal static class AuditPropertyHelper
 
                 case EntityState.Modified:
                     ApplyModificationAudit(entry.Entity, currentUser, utcNow);
-                    // 直接把 IsDeleted 置 true 的软删除（不经仓储 DeleteAsync，实体停在 Modified）
-                    // 同样要留下删除人与删除时间。
-                    //
-                    // ★ 为什么必须在这里补：下面的 Deleted 分支是仓储删除路径，它把 EF 的删除
-                    //   转成软删并写 deleter/deletionTime。但代码也可以**直接赋值** IsDeleted = true
-                    //   —— `ChildCollectionSync.ReplaceChildren` 就是这么做的（它是纯内存操作，
-                    //   拿不到当前用户，本来也不该拿）。那条路径此前只走到上面几行，结果是一批
-                    //   「没有人、在没有时间删掉的」软删行：IsDeleted 为真，DeleterId 与
-                    //   DeletionTime 却是 null，而这正是事后追责时唯一想看的两列。
+                    // 实体停在 Modified 的软删除同样要留下删除人与删除时间：仓储 DeleteAsync /
+                    // DeleteManyAsync（先让条目被正确跟踪再翻 IsDeleted），以及直接赋值
+                    // IsDeleted = true 的代码，例如 `ChildCollectionSync.ReplaceChildren`
+                    // （它是纯内存操作，拿不到当前用户，本来也不该拿）。下面的 Deleted 分支只覆盖
+                    // DbContext.Remove 这一条路径。漏掉这里的结果是一批「没有人、在没有时间删掉的」
+                    // 软删行：IsDeleted 为真，DeleterId 与 DeletionTime 却是 null，
+                    // 而这正是事后追责时唯一想看的两列。
                     //
                     //   判据是**跃迁**（原值 false → 现值 true）而不是「现在为 true」：后者会在
                     //   每次修改一条已软删的行时反复覆盖删除人，把最初那次删除的痕迹抹掉。
+                    //   所以原值快照必须是「删除之前」：脱离跟踪的实例要先附加、再翻标志，
+                    //   先翻后附加则原值已是 true，这里判不出跃迁。
                     if (entry.Entity is ISoftDelete { IsDeleted: true } and IHasDeleter softDeletedInPlace
                         && WasNotDeletedBefore(entry))
                     {

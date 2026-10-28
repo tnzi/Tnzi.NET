@@ -7,6 +7,7 @@
  */
 
 import type { HttpClient } from '../../http/http';
+import type { PagedList, PagedQuery } from '../../types/pagination';
 
 // ---------------------------------------------------------------------------
 // Enums (mirror backend Tnzi.AI.Entities.AgentTaskStatus)
@@ -61,8 +62,12 @@ export function useAdminTaskApi(client: HttpClient) {
     getByRunId: (runId: string) =>
       client.get<AgentTaskDto[]>(base, { params: { runId } }),
 
-    /** Get tasks filtered by status */
-    getByStatus: (status: AgentTaskStatus) =>
-      client.get<AgentTaskDto[]>(`${base}/by-status`, { params: { status } }),
+    /**
+     * Get one page of the tasks in a status, oldest first. Paged because
+     * completed tasks keep accumulating with every run (server default page
+     * size 10, capped at 100).
+     */
+    getByStatus: (status: AgentTaskStatus, page?: Partial<PagedQuery>) =>
+      client.get<PagedList<AgentTaskDto>>(`${base}/by-status`, { params: { status, ...page } }),
   };
 }

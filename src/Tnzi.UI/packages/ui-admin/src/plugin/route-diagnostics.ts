@@ -1,5 +1,7 @@
 /**
- * Start-up diagnostics for consumer-supplied TOP-LEVEL routes (`rootRoutes`).
+ * Start-up diagnostics for consumer route options: TOP-LEVEL routes
+ * (`rootRoutes`), and the names given to `hideModules` / `showOnlyModules`
+ * (see `warnUnknownModuleNames`).
  *
  * A top-level route that never matches is valid TypeScript, so build, typecheck
  * and lint all pass on it. End-to-end smokes don't catch it either: they drive
@@ -18,6 +20,7 @@
  * unconditional warning costs nothing in production.
  */
 import type { RouteRecordRaw } from 'vue-router'
+import { normalizeName } from './route-transforms'
 
 const TAG = '[tnzi-admin]'
 
@@ -66,5 +69,43 @@ export function warnMisplacedTopLevelRoutes(
           `prefix-free: "${stripped}".`,
       )
     }
+  }
+}
+
+/**
+ * Warn about `hideModules` / `showOnlyModules` entries that match no module
+ * group.
+ *
+ * Both options compare against the route names of the groups directly under
+ * the admin root (`identity`, `ai`, `payroll`, ...), not against backend module
+ * names. An entry that matches none of them is valid TypeScript and changes
+ * nothing: `hideModules` hides nothing, and `showOnlyModules` drops the group
+ * the consumer meant to keep. Backend names are the likely miss: `AI.Skills`
+ * is a page inside the `ai` group (hide it with `hideRoutes`), and
+ * `Finance.Payroll` is the `payroll` group.
+ *
+ * @param routes the route table the option is applied to (before `addModules`)
+ * @param option which option the names came from, for the message
+ * @param names  the consumer's entries, as written
+ */
+export function warnUnknownModuleNames(
+  routes: RouteRecordRaw[],
+  option: 'hideModules' | 'showOnlyModules',
+  names: readonly string[],
+): void {
+  const groups = routes
+    .filter((route) => route.path === '/admin')
+    .flatMap((route) => route.children ?? [])
+    .map((child) => (typeof child.name === 'string' ? child.name : ''))
+    .filter((name) => name !== '')
+  const known = new Set(groups.map(normalizeName))
+  for (const name of names) {
+    if (known.has(normalizeName(name))) continue
+    console.warn(
+      `${TAG} ${option} entry "${name}" matches no module group, so it has no ` +
+        `effect. The option compares against the route names of the groups under ` +
+        `the admin root: ${groups.join(', ')}. A page inside a group is hidden ` +
+        `with hideRoutes instead.`,
+    )
   }
 }

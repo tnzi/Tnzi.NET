@@ -10,12 +10,12 @@ public class SalaryComponentConfiguration : EntityTypeConfigurationBase<SalaryCo
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(c => c.Code).HasMaxLength(64).IsRequired();
-        builder.Property(c => c.Name).HasMaxLength(200).IsRequired();
+        builder.Property(c => c.Name).HasMaxLength(PayrollFieldLimits.NameMaxLength).IsRequired();
         // 列宽与 PayrollOptionsValidator 的 FormulaMaxLength 上限（4000）对齐
         builder.Property(c => c.Formula).HasMaxLength(4000);
         builder.Property(c => c.Condition).HasMaxLength(4000);
         builder.Property(c => c.DefaultAmount).HasMoneyPrecision();
-        builder.Property(c => c.Description).HasMaxLength(500);
+        builder.Property(c => c.Description).HasMaxLength(PayrollFieldLimits.DescriptionMaxLength);
 
         if (multiTenancyEnabled)
         {

@@ -113,13 +113,13 @@ public class UserInvitedEventHandler : IEventHandler<UserInvitedEvent>
     /// <remarks>
     /// ★★★ <strong>按钮点不开的邮件不能发</strong>，与 <see cref="PasswordResetRequestedEventHandler"/> 同一条线。
     /// 默认的 <c>IInvitationUrlGenerator</c> 在 <c>Identity:Invitation:AcceptUrlTemplate</c> 与
-    /// 前端 origin（<c>System:FrontendUrl</c>，旧键 <c>App:FrontendUrl</c>）都没配时返回 <c>/accept-invitation?token=...</c> 这样一条相对路径；
+    /// 前端 origin（<c>System:FrontendUrl</c>，旧键 <c>App:FrontendUrl</c>）都没配时返回 <c>/admin/accept-invitation?token=...</c> 这样一条相对路径；
     /// 此前这里原样塞进模板照发：被邀请人收到一封排版漂亮的信，按钮与可复制链接都是相对路径，
     /// 没有任何邮件客户端打得开，而处理器记「sent」、服务层记「issued」，没有任何东西会再试一次。
     /// 这一步在发信之前，抛出去交给事件总线重试不会重复发信。
     /// <para>
     /// 只要求「绝对」不要求 http(s)：移动端深链（<c>acme-app://...</c>）是消费方合法的选择。
-    /// 显式排掉 <c>file</c>：Unix 上 <c>Uri</c> 会把 <c>/accept-invitation</c> 解析成绝对的 file URI，
+    /// 显式排掉 <c>file</c>：Unix 上 <c>Uri</c> 会把 <c>/admin/accept-invitation</c> 解析成绝对的 file URI，
     /// 那正是要拦下的形状。异常消息刻意不带链接本身 —— 令牌明文就在里面，而消息会进日志。
     /// </para>
     /// </remarks>

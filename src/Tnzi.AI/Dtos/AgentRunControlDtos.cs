@@ -137,11 +137,12 @@ public class SpawnAgentRunInput
     /// <summary>直接指定工具组</summary>
     public List<string>? ToolGroups { get; set; }
 
-    /// <summary>关联线程 ID</summary>
+    /// <summary>关联线程 ID（须属于发起人本人）</summary>
     public Guid? ThreadId { get; set; }
 
-    /// <summary>当前用户 ID</summary>
-    public Guid? UserId { get; set; }
+    // 刻意没有 UserId：发起人只能是调用者本人（父运行的发起人或当前登录用户）。
+    // 这个 DTO 直接绑定管理端 spawn 端点的请求体，带一个身份字段 = 任何持 ai.agentRun.execute 的人
+    // 都能点名别人，以对方的工具权限、线程与配额起后台运行。
 
     /// <summary>附加元数据</summary>
     public Dictionary<string, object>? Metadata { get; set; }

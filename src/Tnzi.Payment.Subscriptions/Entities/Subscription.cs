@@ -11,9 +11,23 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     public string SubscriptionNo { get; set; } = string.Empty;
 
     /// <summary>
-    /// 用户ID
+    /// 开通这条订阅的经办人。归属看 <see cref="BillingAccountType"/> / <see cref="BillingAccountId"/>。
     /// </summary>
     public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 这条订阅属于哪个计费账户：种类（见 <see cref="BillingAccountTypes"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 「同一账户同一产品只有一条有效订阅」、谁能取消 / 换卡 / 补缴、付款回流核对的付款方，都按账户算：
+    /// 单客户部署里任何一位管理者开通的就是整个机构的订阅，另一位管理者也能替它付款。
+    /// </remarks>
+    public string BillingAccountType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 计费账户 Id（与 <see cref="BillingAccountType"/> 成对）。
+    /// </summary>
+    public string BillingAccountId { get; set; } = string.Empty;
 
     /// <summary>
     /// 客户名称快照（后台续费/催款通知与开票使用，避免跨模块回查 Identity）
@@ -153,6 +167,20 @@ public class Subscription : MultiTenantAuditedEntity<Guid>
     /// 进入逾期欠费（PastDue）的时间，用于宽限期到期判定
     /// </summary>
     public DateTime? PastDueSince { get; set; }
+
+    /// <summary>
+    /// 进入暂停服务（<see cref="SubscriptionStatus.Suspended"/>）的时间；恢复后清空。
+    /// </summary>
+    public DateTime? SuspendedAt { get; set; }
+
+    /// <summary>
+    /// 仍可付款的那张补缴单的流水号（<c>POST subscriptions/{id}/pay-now</c> 建的）；付清 / 失败 / 过期后清空。
+    /// </summary>
+    /// <remarks>
+    /// 有它才能在管理者再点一次「立即付款」时把同一张单的付款凭据还给他，而不是再建一张：
+    /// 两张同时可付的补缴单，付掉两张就是同一期收两次（与 <see cref="SubscriptionChange.PaymentTradeNo"/> 同一个理由）。
+    /// </remarks>
+    public string? RecoveryPaymentTradeNo { get; set; }
 
     /// <summary>
     /// 后台计费抢占锁到期时间（多实例下原子 claim，避免重复扣款）

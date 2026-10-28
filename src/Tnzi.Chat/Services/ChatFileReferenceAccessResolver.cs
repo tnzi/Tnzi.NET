@@ -32,15 +32,18 @@ public class ChatFileReferenceAccessResolver : IFileReferenceAccessResolver
     private readonly ICurrentUser _currentUser;
     private readonly IRepository<ChatMessage, Guid> _messages;
     private readonly IRepository<ConversationMember, Guid> _members;
+    private readonly IRepository<Conversation, Guid> _conversations;
 
     public ChatFileReferenceAccessResolver(
         ICurrentUser currentUser,
         IRepository<ChatMessage, Guid> messages,
-        IRepository<ConversationMember, Guid> members)
+        IRepository<ConversationMember, Guid> members,
+        IRepository<Conversation, Guid> conversations)
     {
         _currentUser = Check.NotNull(currentUser);
         _messages = Check.NotNull(messages);
         _members = Check.NotNull(members);
+        _conversations = Check.NotNull(conversations);
     }
 
     public bool CanHandle(string entityType)
@@ -56,10 +59,13 @@ public class ChatFileReferenceAccessResolver : IFileReferenceAccessResolver
         if (conversationId is null)
             return false;
 
+        // 会话被解散 / 删除只软删会话行，成员行仍在册：存在性要一起判，否则删掉的会话里的文件照样下载得到。
+        var liveConversations = _conversations.AsQueryable();
         return await _members.AnyAsync(
             m => m.ConversationId == conversationId.Value
                  && m.UserId == userId.Value
-                 && m.RemovedAt == null,
+                 && m.RemovedAt == null
+                 && liveConversations.Any(c => c.Id == m.ConversationId),
             cancellationToken);
     }
 

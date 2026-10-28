@@ -333,6 +333,16 @@ public class PurchaseOrderService : ApplicationService, IPurchaseOrderService
 
     private async Task<Result> ApplyAsync(PurchaseOrder order, CreatePurchaseOrderDto input, CancellationToken cancellationToken)
     {
+        // 列宽在入口先查（缘由见 OfferFieldLimits）：超长答 400 并点名字段，而不是落库时一个不点名的 500。
+        var currency = _helper.NormalizeCurrency(input.Currency);
+        var tooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, OfferFieldLimits.MemoMaxLength, "memo"),
+            (input.InternalNote, OfferFieldLimits.InternalNoteMaxLength, "internal note"),
+            (input.ShipTo, OfferFieldLimits.ShipToMaxLength, "ship-to address"),
+            (currency, OfferFieldLimits.CurrencyMaxLength, "currency code"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
+
         if (!await _vendorRepository.AnyAsync(v => v.Id == input.VendorId, cancellationToken))
             return Fail("Vendor not found.", 404);
 
@@ -348,7 +358,7 @@ public class PurchaseOrderService : ApplicationService, IPurchaseOrderService
         order.VendorId = input.VendorId;
         order.DocDate = docDate;
         order.ExpectedDate = expected;
-        order.Currency = _helper.NormalizeCurrency(input.Currency);
+        order.Currency = currency;
         order.Memo = input.Memo;
         order.InternalNote = input.InternalNote;
         order.ShipTo = input.ShipTo;

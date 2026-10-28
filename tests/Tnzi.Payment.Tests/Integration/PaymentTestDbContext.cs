@@ -30,6 +30,7 @@ public class PaymentTestDbContext : TnziDbContext<PaymentTestDbContext>
         modelBuilder.ApplyConfiguration(new PaymentConfiguration());
         modelBuilder.ApplyConfiguration(new RefundConfiguration());
         modelBuilder.ApplyConfiguration(new StoredPaymentMethodConfiguration());
+        modelBuilder.ApplyConfiguration(new BillingAccountConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

@@ -4,6 +4,7 @@ import {
   LEGACY_NODE_TYPE_KEY,
   getStepKind,
   normalizeStepConfiguration,
+  usesConditionAsRouteExpression,
   workflowNodeTypes,
 } from '../../../src/pages/ai/workflows/workflow-node-types'
 
@@ -71,6 +72,29 @@ describe('workflow-node-types: node kind key contract', () => {
       expect(getStepKind({ configuration: {} })).toBe('agent')
       expect(getStepKind({ configuration: { nodeType: 'no-such-node' } })).toBe('agent')
       expect(getStepKind(null)).toBe('agent')
+    })
+  })
+
+  /**
+   * The editor offers a conditional node only the `condition` field. The engine
+   * gates every other node on that field (fail-closed), but a conditional node
+   * without `configuration.condition` reads it as its route expression, so the
+   * editor must label it as one.
+   */
+  describe('usesConditionAsRouteExpression', () => {
+    it('is the route expression of a conditional node without a configured one', () => {
+      expect(usesConditionAsRouteExpression({ configuration: { nodeType: 'conditional' } })).toBe(true)
+      expect(usesConditionAsRouteExpression({ configuration: { nodeType: 'conditional', condition: '  ' } })).toBe(true)
+    })
+
+    it('stays a gate when the conditional node configures its own expression', () => {
+      expect(usesConditionAsRouteExpression({ configuration: { nodeType: 'conditional', condition: 'accept' } })).toBe(false)
+    })
+
+    it('stays a gate on every other kind', () => {
+      expect(usesConditionAsRouteExpression({ configuration: { nodeType: 'router' } })).toBe(false)
+      expect(usesConditionAsRouteExpression({ configuration: {} })).toBe(false)
+      expect(usesConditionAsRouteExpression(null)).toBe(false)
     })
   })
 })

@@ -19,8 +19,10 @@ namespace Tnzi.EFCore.Internal;
 /// </para>
 /// <para>
 /// 手工 <c>new</c> 出来的上下文（设计期工厂、直接构造的测试）没有应用容器，答案仍是 <c>null</c>，
-/// 与既往行为逐字相同。解析发生在构造时：三者的默认实现都把状态放在静态 <c>AsyncLocal</c> 上
-/// （<c>CurrentTenant</c> / <c>DataFilterManager</c>），任一实例都读得到 <c>Change()</c> / <c>Disable()</c> 的覆盖。
+/// 与既往行为逐字相同。解析发生在构造时，两者的状态归属不同：
+/// <c>CurrentTenant</c> 的覆盖放在<b>静态</b> <c>AsyncLocal</c> 上，任一实例都读得到 <c>Change()</c>；
+/// <c>DataFilterManager</c> 的开关是<b>实例</b>状态（Scoped），<c>Disable()</c> 只对同一 DI 作用域解析出的上下文生效，
+/// 在 <c>Disable()</c> 块里新开作用域（每项一个作用域的后台循环）拿到的是另一个管理器，过滤器照常生效。
 /// </para>
 /// </remarks>
 public static class DbContextCollaborators

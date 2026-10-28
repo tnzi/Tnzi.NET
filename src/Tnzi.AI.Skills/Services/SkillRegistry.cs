@@ -67,24 +67,28 @@ public class SkillRegistry : ISkillRegistry
         SkillDefinition? fileResult = null;
         SkillDefinition? dbResult = null;
 
-        // FileSystem store: System scope + DataPath scoped skills
-        fileResult = await _fileStore.GetBySlugAsync(bareSlug, ct);
-        // 过滤：确保当前用户有权访问此技能
-        if (fileResult != null && !IsAccessible(fileResult, _currentTenant?.Id, _currentUser?.Id))
-            fileResult = null;
-        if (fileResult != null && scopeFilter.HasValue && fileResult.Scope != scopeFilter.Value)
-            fileResult = null;
+        // FileSystem store: System scope + DataPath scoped skills。同一个 slug 可以有多份：
+        // 先按可见性与作用域前缀过滤，再按列表合并的同一把尺子选（见 SkillPrecedence）。
+        // 此前取的是文件存储里第一个加载到的那份再做过滤 —— DataPath 里某个租户的同名技能先加载，
+        // 对它自己答的是租户版（列表里是系统版），对别的租户被过滤成 null（系统版明明在）。
+        var tenantId = _currentTenant?.Id;
+        var userId = _currentUser?.Id;
+        var fileSkills = await _fileStore.GetAllAsync(ct);
+        fileResult = SkillPrecedence.PickWinner(fileSkills.Where(s =>
+            string.Equals(s.Slug, bareSlug, StringComparison.OrdinalIgnoreCase)
+            && IsAccessible(s, tenantId, userId)
+            && (!scopeFilter.HasValue || s.Scope == scopeFilter.Value)));
 
-        // Database store: Tenant/User scope (already filtered internally)
+        // Database store: Tenant/User scope (already filtered internally); the scope prefix narrows it too
         if (scopeFilter is null or SkillScope.Tenant or SkillScope.User)
-            dbResult = _dbStore != null ? await _dbStore.GetBySlugAsync(bareSlug, ct) : null;
+            dbResult = _dbStore != null ? await _dbStore.GetBySlugAsync(bareSlug, scopeFilter, ct) : null;
 
         // If only one returned, use it
         if (fileResult == null) return dbResult;
         if (dbResult == null) return fileResult;
 
-        // Both returned - pick by scope priority (System=0 > Tenant=1 > User=2)
-        return fileResult.Scope <= dbResult.Scope ? fileResult : dbResult;
+        // Both returned - same rule as the list merge (file skills come first there): scope, then priority
+        return SkillPrecedence.Beats(dbResult, fileResult) ? dbResult : fileResult;
     }
 
     /// <inheritdoc/>
@@ -99,6 +103,18 @@ public class SkillRegistry : ISkillRegistry
     public void InvalidateCache()
     {
         _fileStore.InvalidateCache();
+        InvalidateDatabaseSkills();
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// 只丢掉本作用域里合并过的结果与数据库存储的请求内缓存。文件技能存储是单例、按 TTL 与配置变更失效，
+    /// 数据库里的写入改不了它。★ 此前每次数据库技能的增删改都顺带清空它，下一次读技能在一把锁下把内置资源与
+    /// 全部 SKILL.md 重新读一遍，任何登录用户反复改自己的技能就能让全进程一直重读磁盘。
+    /// </remarks>
+    public void InvalidateDatabaseSkills()
+    {
+        _dbStore?.ClearRequestCache();
         _mergedCache = null;
     }
 
@@ -117,18 +133,8 @@ public class SkillRegistry : ISkillRegistry
 
         foreach (var skill in skills)
         {
-            if (!result.TryGetValue(skill.Slug, out var existing))
-            {
-                result[skill.Slug] = skill;
-                continue;
-            }
-
-            // Prefer lower Scope ordinal (System=0 beats Tenant=1 beats User=2)
-            if (skill.Scope < existing.Scope)
-            {
-                result[skill.Slug] = skill;
-            }
-            else if (skill.Scope == existing.Scope && skill.Priority > existing.Priority)
+            // Prefer lower Scope ordinal (System=0 beats Tenant=1 beats User=2), then higher Priority
+            if (!result.TryGetValue(skill.Slug, out var existing) || SkillPrecedence.Beats(skill, existing))
             {
                 result[skill.Slug] = skill;
             }

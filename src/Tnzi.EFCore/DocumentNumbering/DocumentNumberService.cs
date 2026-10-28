@@ -75,8 +75,9 @@ public class DocumentNumberService : ApplicationService, IDocumentNumberService
             }
             catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
             {
-                // 撤销失败的插入，避免残留 Added 实体在事务提交时再次触发冲突
-                await _repository.DeleteAsync(seed, cancellationToken);
+                // 丢弃失败的插入，避免残留 Added 实体在事务提交时再次触发冲突。
+                // 用 Discard 而不是 DeleteAsync：只改变更跟踪状态、不产生 SQL，与实体是否软删无关
+                _repository.Discard(seed);
                 Logger.LogDebug("Concurrent initialization detected for sequence scope '{Scope}', retrying (attempt {Attempt}).", scope, attempt);
             }
         }

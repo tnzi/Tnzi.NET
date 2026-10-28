@@ -35,6 +35,7 @@ export interface AuditOperationDto {
   message?: string | null;
   exception?: string | null;
   requestParameters?: string | null;
+  requestBody?: string | null;
   responseResult?: string | null;
   creationTime: Date | string;
   entityEntries: AuditEntityEntryDto[];

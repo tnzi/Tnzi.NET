@@ -19,6 +19,12 @@ public class DefaultSlidingCaptchaController : ApiControllerBase
     /// <summary>
     /// Generate a sliding captcha puzzle
     /// </summary>
+    /// <remarks>
+    /// ★ 与 <c>generate-adaptive</c> 出同一种题（按失败历史调难度）。这是 <c>sliding</c> 提供商下发给客户端的出题地址；
+    /// 此前它出固定难度的题且不计失败，于是框架自己的接线里自适应难度从未生效，而客户端即便改用
+    /// <c>generate-adaptive</c>，攻击脚本只要调这里就永远拿到最低难度与等价的通行令牌。
+    /// 没有失败历史时出的题与配置完全一致。
+    /// </remarks>
     /// <param name="purpose">Purpose the pass token issued on success is bound to (e.g. <c>login</c>). Optional for the puzzle itself, but a pass token issued without one is refused by every protected endpoint.</param>
     [HttpPost("generate")]
     public virtual async Task<ApiResult<SlidingCaptchaDto>> Generate([FromQuery] string? purpose = null)
@@ -26,7 +32,7 @@ public class DefaultSlidingCaptchaController : ApiControllerBase
         if (purpose != null && !CaptchaPurpose.IsValid(purpose))
             return BadRequest<SlidingCaptchaDto>("Invalid captcha purpose.");
 
-        var result = await SlidingCaptchaService.GenerateAsync(purpose: purpose);
+        var result = await SlidingCaptchaService.GenerateAdaptiveAsync(purpose);
         return result.ToApiResult();
     }
 

@@ -219,6 +219,50 @@ public class AgentExecutorTests
         toolDetails[0].Error!.ShouldContain("InvalidOperationException");
     }
 
+    [Fact]
+    public async Task ExecuteStreamingAsync_ToolCallDetail_CarriesTheArgumentsAsSent()
+    {
+        // The client draws some tools from their arguments (show_widget's HTML), also after a reload:
+        // the engine records them on the detail, the same shape as the external CLI path.
+        var tool = AIFunctionFactory.Create((string title, string html) => "shown", "show_widget", "Shows a widget");
+
+        var firstUpdate = new ChatResponseUpdate
+        {
+            Contents = [new FunctionCallContent("call_1", "show_widget", new Dictionary<string, object?>
+            {
+                ["title"] = "Usage",
+                ["html"] = "<p>slider</p>"
+            })]
+        };
+        var secondUpdate = new ChatResponseUpdate
+        {
+            Role = ChatRole.Assistant,
+            FinishReason = ChatFinishReason.Stop,
+            Contents = [new TextContent("done")]
+        };
+
+        var mockClient = new Mock<IChatClient>();
+        mockClient.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(CreateStreamingResponse(firstUpdate, secondUpdate));
+
+        var executor = new AgentExecutor(mockClient.Object, new AgentExecutorOptions { Name = "TestAgent", Tools = [tool] });
+
+        var chunks = new List<AgentStreamChunk>();
+        await foreach (var chunk in executor.ExecuteStreamingAsync([new ChatMessage(ChatRole.User, "show it")]))
+        {
+            chunks.Add(chunk);
+        }
+
+        var detail = chunks.Last(c => c.ToolCalls is { Count: > 0 }).ToolCalls!.Single();
+        detail.IsSuccess.ShouldBeTrue();
+        detail.Input.ShouldNotBeNull();
+        detail.Input!.Value.GetProperty("title").GetString().ShouldBe("Usage");
+        detail.Input!.Value.GetProperty("html").GetString().ShouldBe("<p>slider</p>");
+    }
+
     // ── 回归锁定：系统提示最终形态必须与 13-tag 接缝删除前逐字节一致 ──────────
     // 删除前由 SystemPromptTemplateBuilder 装配（无 SectionProviders 的生产路径），
     // 快照为 "<instructions>\n{content}\n</instructions>"。

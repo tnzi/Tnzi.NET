@@ -417,6 +417,34 @@ public class PayRunLifecycleTests : PayrollIntegrationTestBase
         run.Data!.GrossTotal.ShouldBe(1500m); // 聚合快照同步
     }
 
+    /// <summary>
+    /// 列表行带着结构过滤与备注：管理端的编辑表单从列表行打开，
+    /// 而更新是整行覆盖：行里没有的字段会以 null 写回，批次随即圈进全部员工。
+    /// </summary>
+    [Fact]
+    public async Task List_CarriesTheStructureFilterAndMemo_SoAnEditFromTheListDoesNotClearThem()
+    {
+        var (structureId, _) = await StandardScenarioAsync();
+        var created = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CreateAsync(new CreatePayRunDto
+        {
+            PeriodStart = PeriodStart,
+            PeriodEnd = PeriodEnd,
+            PayDate = PayDate,
+            Frequency = PayFrequency.Monthly,
+            StructureId = structureId,
+            Memo = "Weekly crew only"
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var page = await InScopeAsync<IPayRunService, Result<IPagedList<PayRunListDto>>>(
+            s => s.GetPagedAsync(new PayRunQueryDto { PageIndex = 1, PageSize = 20 }));
+
+        page.Succeeded.ShouldBeTrue(page.Message);
+        var row = page.Data!.Items.Single(r => r.Id == created.Data!.Id);
+        row.StructureId.ShouldBe(structureId);
+        row.Memo.ShouldBe("Weekly crew only");
+    }
+
     private async Task<Guid> FirstStructureIdAsync()
     {
         using var scope = ServiceProvider.CreateScope();

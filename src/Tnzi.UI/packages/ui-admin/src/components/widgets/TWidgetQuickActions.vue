@@ -9,9 +9,9 @@
 import { computed } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
 import { TSvgIcon } from '@tnzi/ui'
-import { maybeTranslate, translatePageKey } from '../../i18n/translate'
-import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
+import { maybeTranslate, translateChromeKey } from '../../i18n/translate'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 
 export interface QuickAction {
   /** Stable key for the v-for list. */
@@ -31,10 +31,11 @@ export interface QuickAction {
    */
   tone?: 'primary' | 'info' | 'success' | 'warning' | 'error'
   /**
-   * Permission the action's destination requires. When set, the tile is hidden
-   * from users who lack it (super-user bypass + fail-open) so a business admin
-   * doesn't get a shortcut that only lands on a 403 (e.g. Settings →
-   * system.parameter.view). Omit for always-shown actions.
+   * Extra permission the tile requires. A `to` tile already hides when the
+   * destination route's own gate (`meta.permission` / `permissions` /
+   * `anySettingsPermission` / `roles`) would bounce the user to 403, so this is
+   * for an `onClick` action, or a tile narrower than its route. Super-user
+   * bypass + fail-open before permissions load, as everywhere.
    */
   permission?: string
   /**
@@ -61,21 +62,32 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const router = useRouter()
-const authStore = useAdminAuthStore()
 const moduleAvailability = useModuleAvailability()
+const { can, canReachRoute } = usePermissionGuard()
+
+/** The destination route's meta, or none when there is no router or no match. */
+function destinationMeta(action: QuickAction): Readonly<Record<string, unknown>> | undefined {
+  if (!action.to || typeof router?.resolve !== 'function') return undefined
+  try {
+    return router.resolve(action.to).meta
+  } catch {
+    return undefined
+  }
+}
 
 // Hide actions whose destination the user can't reach, on two orthogonal
 // dimensions: module availability (`module` - no super-user bypass; an
-// unloaded module's route bounces to /403 for everyone) and permissions
-// (`permission` - super-user bypass + fail-open before permissions load).
-const visibleActions = computed<QuickAction[]>(() => {
-  const moduleVisible = props.actions.filter(
-    (a) => !a.module || moduleAvailability.has(a.module),
-  )
-  const bypass = authStore.isSuperUser || authStore.userInfo === null
-  if (bypass) return moduleVisible
-  return moduleVisible.filter((a) => !a.permission || authStore.hasPermission(a.permission))
-})
+// unloaded module's route bounces to /403 for everyone) and permissions (the
+// destination route's gate plus the tile's own `permission` - super-user
+// bypass + fail-open before permissions load).
+const visibleActions = computed<QuickAction[]>(() =>
+  props.actions.filter(
+    (a) =>
+      (!a.module || moduleAvailability.has(a.module)) &&
+      (!a.permission || can(a.permission)) &&
+      canReachRoute(destinationMeta(a)),
+  ),
+)
 
 const gridStyle = computed(() => ({
   '--t-widget-actions-cols': String(props.cols),
@@ -99,7 +111,7 @@ async function handleClick(action: QuickAction): Promise<void> {
 <template>
   <div v-if="visibleActions.length === 0" class="t-widget-quick-actions__empty">
     <TSvgIcon icon="mdi:lock-outline" :size="24" />
-    <p>{{ translatePageKey('', 'admin.widgets.quickActions.empty') || 'No actions available for your permissions' }}</p>
+    <p>{{ translateChromeKey('admin.widgets.quickActions.empty', 'No actions available for your permissions') }}</p>
   </div>
   <div v-else class="t-widget-quick-actions" :style="gridStyle">
     <button

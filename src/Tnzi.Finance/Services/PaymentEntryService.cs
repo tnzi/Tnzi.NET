@@ -164,9 +164,11 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
             var fundsResult = await _helper.GetPostableAccountAsync(payment.DepositToAccountId.Value, cancellationToken);
             if (!fundsResult.Succeeded)
                 return Fail<PaymentEntryDto>($"Deposit account: {fundsResult.Message}", fundsResult.Code ?? 400);
-            if (fundsResult.Data!.Id == controlResult.Data!.Id)
-                return Fail<PaymentEntryDto>("The deposit/payment account must not be the AR/AP control account.", 400);
-            fundsAccountId = fundsResult.Data.Id;
+            // 过账时再判一次：草稿之后科目表可能被改过（角色挪到了这个科目上）
+            var controlCheck = FinanceDocumentHelper.RejectControlAccount(fundsResult.Data!, "Deposit account");
+            if (!controlCheck.Succeeded)
+                return Fail<PaymentEntryDto>(controlCheck.Message!, controlCheck.Code ?? 400);
+            fundsAccountId = fundsResult.Data!.Id;
         }
         else if (payment.Direction == PaymentDirection.Inbound && _options.PostToUndepositedFunds)
         {
@@ -385,7 +387,10 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            // 并发摄取同一来源：唯一索引兜底，返回赢家
+            // 并发摄取同一来源：唯一索引兜底，返回赢家。
+            // 失败的插入先从跟踪器里摘掉：留着它，本作用域里之后任何一次 SaveChanges
+            // （全局工作单元提交、调用方继续写入）都会把它再插一次，在无关的位置抛错。
+            _paymentRepository.Discard(payment);
             var winner = await _paymentRepository.FindAsync(
                 p => p.SourceType == sourceType && p.SourceId == sourceId, cancellationToken);
             return winner != null
@@ -400,6 +405,13 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
 
     private async Task<Result> ApplyDraftAsync(PaymentEntry payment, CreatePaymentEntryDto input, CancellationToken cancellationToken)
     {
+        var memoTooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"),
+            (input.Reference, FinanceFieldLimits.ReferenceMaxLength, "reference"),
+            (input.PaymentMethod, FinanceFieldLimits.PaymentMethodMaxLength, "payment method"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (input.Amount <= 0)
             return Fail("Payment amount must be greater than zero.");
 
@@ -412,6 +424,9 @@ public class PaymentEntryService : ApplicationService, IPaymentEntryService
             var fundsResult = await _helper.GetPostableAccountAsync(input.DepositToAccountId.Value, cancellationToken);
             if (!fundsResult.Succeeded)
                 return Fail($"Deposit account: {fundsResult.Message}", fundsResult.Code ?? 400);
+            var controlCheck = FinanceDocumentHelper.RejectControlAccount(fundsResult.Data!, "Deposit account");
+            if (!controlCheck.Succeeded)
+                return controlCheck;
         }
 
         payment.Direction = input.Direction;

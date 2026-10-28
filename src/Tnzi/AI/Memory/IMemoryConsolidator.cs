@@ -41,7 +41,7 @@ public enum MemoryAction
     Add,
     /// <summary>更新 - 新记忆更新/替代已有记忆</summary>
     Update,
-    /// <summary>删除 - 新记忆与已有记忆矛盾，应删除旧记忆</summary>
+    /// <summary>删除 - 新记忆与已有记忆矛盾：删除 <see cref="MemoryConsolidationResult.TargetEntryId"/> 指向的旧记忆，并写入新记忆</summary>
     Delete,
     /// <summary>无操作 - 新记忆与已有记忆重复</summary>
     Noop

@@ -54,6 +54,7 @@ import type {
   CreateInvitationDto,
   InvitationDto,
   InvitationPreviewDto,
+  PreviewInvitationDto,
   AcceptInvitationDto,
   AcceptInvitationResultDto,
   // User
@@ -80,6 +81,7 @@ import type {
   CreateUserDetailDto,
   UserLoginDto,
   OAuthLinkTokenDto,
+  CompleteOAuthLinkDto,
   ChangeEmailDto,
   ChangePhoneNumberDto,
   SendChangeVerificationCodeDto,
@@ -230,12 +232,12 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
      *
      * Call this with the `tempToken` from a 403 `IDENTITY_PENDING_ACTIONS_REQUIRED`
      * response. Does not consume the token. Anonymous: whoever gets here does not
-     * have an access token yet.
+     * have an access token yet. The token travels in the body, never in the URL:
+     * request and access logs record paths, and the token is enough to change the
+     * account's password for its ten-minute lifetime.
      */
     describePendingActions: (tempToken: string) =>
-      client.get<PendingActionChallengeDto>(
-        `${AUTH_BASE}/pending-actions/${encodeURIComponent(tempToken)}`,
-      ),
+      client.post<PendingActionChallengeDto>(`${AUTH_BASE}/pending-actions/describe`, { tempToken }),
 
     // The three `completePending*` calls issue the session (`PendingActionResultDto.token`),
     // so they are cookie-aware like login. Anonymous otherwise: a 401 here means
@@ -251,9 +253,7 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
 
     /** Send the code for "must confirm the email first". The address comes from the account. */
     sendPendingActionEmailCode: (tempToken: string) =>
-      client.post<void>(
-        `${AUTH_BASE}/pending-actions/${encodeURIComponent(tempToken)}/send-email-code`,
-      ),
+      client.post<void>(`${AUTH_BASE}/pending-actions/send-email-code`, { tempToken }),
 
     /** Discharge "must confirm the email first". */
     completePendingEmailConfirmation: (data: CompletePendingActionCodeDto) =>
@@ -267,11 +267,14 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
     resendEmailConfirmation: (data: ResendEmailConfirmationDto) =>
       client.post<string>(`${AUTH_BASE}/resend-email-confirmation`, data),
 
-    /** Get the built-in image captcha (binary PNG, id in the X-Captcha-Id header). Any valid purpose name. */
-    getCaptcha: (purpose: string) =>
-      client.download(`${AUTH_BASE}/captcha/${encodeURIComponent(purpose)}`),
-
-    /** Get the built-in image captcha as JSON (base64). Any valid purpose name (login / register / password-recovery / yours). */
+    /**
+     * Get the built-in image captcha: the picture (base64) and the `captchaId` to submit
+     * with the answer. Any valid purpose name (login / register / password-recovery / yours).
+     *
+     * There is deliberately no binary variant here: the PNG endpoint carries the id in a
+     * response header, which `client.download` does not return, so the answer could never
+     * be paired with its challenge.
+     */
     getCaptchaJson: (purpose: string) =>
       client.get<CaptchaDto>(`${AUTH_BASE}/captcha/${encodeURIComponent(purpose)}/json`),
 
@@ -452,9 +455,11 @@ export function useAuthApi(client: HttpClient, options: AuthApiOptions = {}) {
  * @param returnUrl Optional URL to return to once the flow completes.
  * @param linkToken Optional link token from `useProfileApi().issueOAuthLinkToken`.
  *   With it the flow *links* the provider to the signed-in account instead of
- *   logging in: the callback issues no tokens and creates no account. Without
- *   it, an already-signed-in user hitting this URL runs the anonymous login
- *   flow, which creates a fresh account when the provider's email differs.
+ *   logging in: the callback issues no tokens and creates no account, and hands
+ *   back a completion code that the returning page passes to
+ *   `useProfileApi().completeOAuthLink` (read it with {@link parseOAuthLinkCompletion}).
+ *   Without it, an already-signed-in user hitting this URL runs the anonymous
+ *   login flow, which creates a fresh account when the provider's email differs.
  */
 export function oauthLoginUrl(
   client: HttpClient,
@@ -469,6 +474,27 @@ export function oauthLoginUrl(
     `${AUTH_BASE}/oauth/${provider}/login`,
     Object.keys(query).length ? query : undefined,
   );
+}
+
+/** What a link callback handed back on the return URL's fragment. */
+export interface OAuthLinkCompletion {
+  /** Lower-cased provider being linked. */
+  provider: string;
+  /** One-time completion code for `useProfileApi().completeOAuthLink`. */
+  code: string;
+}
+
+/**
+ * Read the completion code a link callback put on the return URL's fragment
+ * (`#linkCode=…&linkedProvider=…`). Returns `null` when the fragment is not a
+ * link completion. Strip the fragment from the address bar once read: the code
+ * is single-use and has no business surviving a reload or a copied URL.
+ */
+export function parseOAuthLinkCompletion(hash: string): OAuthLinkCompletion | null {
+  const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
+  const code = params.get('linkCode');
+  const provider = params.get('linkedProvider');
+  return code && provider ? { provider, code } : null;
 }
 
 // ============================================
@@ -519,11 +545,22 @@ export function useProfileApi(client: HttpClient) {
 
     /**
      * Issue a one-time link token, then navigate to
-     * `oauthLoginUrl(client, provider, returnUrl, token.token)` to link the
-     * provider to the current account. See {@link OAuthLinkTokenDto}.
+     * `oauthLoginUrl(client, provider, returnUrl, token.token)` to start linking
+     * the provider to the current account. See {@link OAuthLinkTokenDto}.
      */
     issueOAuthLinkToken: (provider: string) =>
       client.post<OAuthLinkTokenDto>(`${PROFILE_BASE}/linked-accounts/${encodeURIComponent(provider)}/link-token`),
+
+    /**
+     * Finish linking with the completion code the OAuth callback handed back.
+     * Only the account that issued the link token can complete it; any other
+     * signed-in account gets the same 400 as an expired or used code.
+     */
+    completeOAuthLink: (provider: string, code: string) =>
+      client.post<void>(
+        `${PROFILE_BASE}/linked-accounts/${encodeURIComponent(provider)}/complete`,
+        { code } satisfies CompleteOAuthLinkDto,
+      ),
 
     /** Unlink an OAuth account */
     unlinkAccount: (provider: string) =>
@@ -716,7 +753,11 @@ export function useAdminUserApi(client: HttpClient) {
     confirmContact: (userId: string, data: ConfirmContactDto) =>
       client.post<void>(`${ADMIN_USER_BASE}/${userId}/confirm-contact`, data),
 
-    /** Get user statistics */
+    /**
+     * User statistics. Every count covers the same accounts: those the caller's
+     * tenant can see, not deleted, and in `organizationId` when given (so
+     * `usersByRole` is then the role's members in that organization).
+     */
     getStatistics: (params?: { organizationId?: string; roleId?: string }) =>
       client.get<UserStatisticsDto>(`${ADMIN_USER_BASE}/statistics`, { params }),
 
@@ -724,7 +765,10 @@ export function useAdminUserApi(client: HttpClient) {
     exportCsv: (data?: UserListQueryDto) =>
       client.download(`${ADMIN_USER_BASE}/export/csv`, { method: 'POST', body: data ?? {} }),
 
-    /** Import users from CSV file */
+    /**
+     * Import users from a CSV file. Answers 200 with the per-row outcome even when
+     * rows were refused: read `failedCount`, `skippedCount` and `errors`.
+     */
     importCsv: (file: File) =>
       client.upload<UserImportResult>(`${ADMIN_USER_BASE}/import/csv`, file),
   };
@@ -738,8 +782,9 @@ export function useAdminUserApi(client: HttpClient) {
  * Invitation management (admin side): open an account, send the link, resend, revoke.
  *
  * There is deliberately no "list invitations" endpoint - an invitation *is* an account
- * in the `Pending` state, so `useAdminUserApi().getList({ invitationState: 1 })` answers
- * "who has not accepted yet" without a second list to keep in sync.
+ * that still owes `InvitationPending`, so
+ * `useAdminUserApi().getList({ pendingAction: PendingUserActions.InvitationPending })`
+ * answers "who has not accepted yet" without a second list to keep in sync.
  */
 export function useAdminInvitationApi(client: HttpClient) {
   return {
@@ -776,9 +821,15 @@ export function useAdminInvitationApi(client: HttpClient) {
 export function useInvitationApi(client: HttpClient, options: AuthApiOptions = {}) {
   const cookieAware = cookieAwareOptions(options);
   return {
-    /** Read what to show on the acceptance page. Does not consume the token. */
+    /**
+     * Read what to show on the acceptance page. Does not consume the token.
+     *
+     * The token travels in the body, never in the URL: request paths are written to
+     * request and access logs, and an unconsumed token read from a log would let the
+     * reader accept the invitation first.
+     */
     preview: (token: string) =>
-      client.get<InvitationPreviewDto>(`${INVITATION_BASE}/${encodeURIComponent(token)}`),
+      client.post<InvitationPreviewDto>(`${INVITATION_BASE}/preview`, { token } satisfies PreviewInvitationDto),
 
     /**
      * Accept the invitation.
@@ -848,11 +899,6 @@ export function useAdminRoleApi(client: HttpClient) {
     /** Set role as default */
     setDefault: (id: string, isDefault: boolean) =>
       client.put<void>(`${ADMIN_ROLE_BASE}/${id}/default`, null, { params: { isDefault } }),
-
-    // Legacy alias
-    /** @deprecated Use getAll() or getPagedList() instead */
-    getList: (params?: RoleListQueryDto) =>
-      client.get<RoleDto[]>(ADMIN_ROLE_BASE, { params }),
   };
 }
 
@@ -937,11 +983,6 @@ export function useAdminOrganizationApi(client: HttpClient) {
     /** Get users in organization (paged) */
     getUsers: (id: string, params?: { pageIndex?: number; pageSize?: number; includeChildren?: boolean }) =>
       client.get<PagedList<UserListItemDto>>(`${ADMIN_ORG_BASE}/${id}/users`, { params }),
-
-    // Legacy alias
-    /** @deprecated Use getTree() instead */
-    getList: () =>
-      client.get<OrganizationTreeNodeDto[]>(`${ADMIN_ORG_BASE}/tree`),
   };
 }
 

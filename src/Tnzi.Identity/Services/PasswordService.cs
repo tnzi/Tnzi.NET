@@ -198,7 +198,9 @@ public class PasswordService : ApplicationService, IPasswordService
                 {
                     UserId = user.Id,
                     UserName = user.UserName ?? string.Empty,
-                    Email = email,
+                    // ★★ 寄往账号上登记的邮箱，不是请求里的写法：账号按规范化比较解析，一个不同的字符串
+                    //   （长 s 大写成 S、不区分全角半角的排序规则）也会解析到这个账号，而这条链接能改它的密码。
+                    Email = string.IsNullOrWhiteSpace(user.Email) ? email : user.Email,
                     ResetToken = encodedToken,
                     RequestTime = DateTime.UtcNow,
                     FrontendUrl = FrontendUrlResolver.Resolve(_configuration, Logger),
@@ -217,6 +219,13 @@ public class PasswordService : ApplicationService, IPasswordService
 
     public async Task<Result<string>> ResetPasswordByTokenAsync(string email, string token, string newPassword)
     {
+        // ★ 重置这一头与发链接那一头同一个开关：只挡发链接的话，开关关掉之前寄出、仍在有效期内的链接照样能改密码
+        //   （与验证码找回两头都挡同一理由）。重置令牌只由邮件找回签发，这个端点没有别的合法来源。
+        if (!_identityOptions.Recovery.EnablePasswordResetByEmail)
+        {
+            return Fail<string>("Password reset by email is not enabled", 400);
+        }
+
         var user = await _userManager.FindByEmailAsync(email);
         if (user == null)
         {
@@ -289,6 +298,23 @@ public class PasswordService : ApplicationService, IPasswordService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // ★★★ 管理端也走这里（admin/users/{id}/change-password）：猜中当前密码的同时就把它换成了调用者选的值，
+        //   对超管就是一个猜中即接管的入口。与同一权限码下的重置密码同一道护栏，且必须在校验密码之前：
+        //   先校验再拒绝，拒绝本身就成了「这次猜对了」的回答。自助路径（本人改自己）不受影响。
+        if (await SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, userId))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // ★★ 「当前密码」校验就是一次密码猜测，与登录共用同一套锁定：锁定中不再回答，猜错计入失败次数。
+        //   UserManager.ChangePasswordAsync 自己既不看锁定也不记失败（那套记账在 SignInManager 里），
+        //   不补上的话锁定只挡住了登录页，这个端点照样是一台不限次的猜密码机。
+        var lockoutApplies = _identityOptions.AccountSecurity.EnableLockout && _userManager.SupportsUserLockout;
+        if (lockoutApplies && await _userManager.IsLockedOutAsync(user))
+        {
+            return Fail("Account is locked", 403, ErrorCodes.IDENTITY_USER_LOCKED);
+        }
+
         // 验证密码强度
         if (_passwordPolicyService != null)
         {
@@ -309,6 +335,11 @@ public class PasswordService : ApplicationService, IPasswordService
         var result = await _userManager.ChangePasswordAsync(user, currentPassword, newPassword);
         if (!result.Succeeded)
         {
+            if (lockoutApplies && result.Errors.Any(e => e.Code == nameof(IdentityErrorDescriber.PasswordMismatch)))
+            {
+                await RecordWrongCurrentPasswordAsync(user);
+            }
+
             return Fail($"Failed to change password: {result.FormatErrors()}", 400, ErrorCodes.IDENTITY_PASSWORD_CHANGE_FAILED);
         }
 
@@ -336,6 +367,24 @@ public class PasswordService : ApplicationService, IPasswordService
 
         LogInformation("Password changed for user: {UserName} (ID: {UserId})", user.UserName ?? string.Empty, userId);
         return Ok();
+    }
+
+    /// <summary>
+    /// 记一次「当前密码」猜错：累加与登录同一套的失败计数，到阈值即锁定。
+    /// </summary>
+    /// <remarks>
+    /// 计数写不进去（<c>AccessFailedAsync</c> 经 <c>UpdateAsync</c> 落库，先跑全部用户校验器，存量账号可能过不了）
+    /// 只能记一条告警：这里没有临时令牌可烧，拒绝本身已经发生，而把这次请求报成 500 只会挡住本人。
+    /// </remarks>
+    private async Task RecordWrongCurrentPasswordAsync(User user)
+    {
+        var recorded = await _userManager.AccessFailedAsync(user);
+        if (!recorded.Succeeded)
+        {
+            LogWarning(
+                "A wrong current password for user {UserId} could not be counted towards lockout: {Errors}",
+                user.Id, recorded.FormatErrors());
+        }
     }
 
     /// <inheritdoc />

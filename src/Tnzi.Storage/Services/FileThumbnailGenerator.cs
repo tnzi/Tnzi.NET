@@ -6,7 +6,7 @@ namespace Tnzi.Storage.Services;
 /// 两条出图路径，两种形状，刻意不统一：
 /// </para>
 /// <list type="bullet">
-/// <item><b>位图</b>：<see cref="ImageDecodeGuard"/> 解码 → 中心裁剪成正方形 → 缩到
+/// <item><b>位图</b>：<see cref="ImageDecodeGuard"/> 解码（只解首帧，动画与多页文件的其余帧不碰）→ 中心裁剪成正方形 → 缩到
 /// <c>max(ThumbnailSize.Width, Height)</c> → JPEG。与 2026-09 之前 <c>FileStorageService.GenerateThumbnailAsync</c>
 /// 逐字相同 —— 头像、相册这类消费方靠的就是「缩略图是方的」。</item>
 /// <item><b>PDF</b>：可选注入的核心契约 <see cref="IPdfRasterizer"/> 渲染第 0 页（彩色、<c>Storage:PdfThumbnail:Dpi</c>）
@@ -90,10 +90,9 @@ public sealed class FileThumbnailGenerator : IFileThumbnailGenerator
     }
 
     /// <inheritdoc />
-    public async Task<string?> GenerateAsync(string originalPath, string originalKey, string? extension, long size, CancellationToken cancellationToken = default)
+    public async Task<string?> GenerateAsync(string originalPath, string? extension, long size, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrWhiteSpace(originalPath);
-        Check.NotNullOrWhiteSpace(originalKey);
 
         if (!CanGenerate(extension))
             return null;
@@ -111,7 +110,7 @@ public sealed class FileThumbnailGenerator : IFileThumbnailGenerator
             await thumbnail.SaveAsJpegAsync(thumbnailStream, new JpegEncoder { Quality = Options.ImageCompressionQuality }, cancellationToken);
             thumbnailStream.Position = 0;
 
-            var thumbnailKey = StorageKeyHelper.ThumbnailKey(originalKey);
+            var thumbnailKey = StorageKeyHelper.NewThumbnailKey();
             return await _storage.UploadAsync(thumbnailKey, thumbnailStream, "image/jpeg");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -132,7 +131,9 @@ public sealed class FileThumbnailGenerator : IFileThumbnailGenerator
         // 经解码闸门：先读文件头判尺寸再解码。压缩字节数与解码后的内存没有关系 ——
         // 一个 200KB 的 PNG 可以声明 50000×50000，直接 Load 就是一次 OOM，
         // 而上传大小限制对它毫无作用。上限见 Imaging:MaxDecodePixels。
-        using var image = await ImageDecodeGuard.LoadAsync(originalStream, cancellationToken: cancellationToken);
+        // ★ 只解首帧：缩略图只要一张静止画面，而 GIF / 动画 WebP / 多页 TIFF 的每一帧都是一整张画布，
+        //   全部解出来时帧数就是一个由上传者决定的乘数。
+        using var image = await ImageDecodeGuard.LoadFirstFrameAsync(originalStream, cancellationToken: cancellationToken);
         var thumbnailSize = Options.ThumbnailSize;
         return image.GenerateSquareThumbnail(Math.Max(thumbnailSize.Width, thumbnailSize.Height));
     }

@@ -30,7 +30,7 @@ public static class RuntimeSettingMetadataExtractor
             string? defaultValue = null;
             if (instance != null)
             {
-                try { defaultValue = p.GetValue(instance)?.ToString(); } catch { /* ignore */ }
+                try { defaultValue = FormatDefault(p.GetValue(instance)); } catch { /* ignore */ }
             }
             fields.Add(new SettingFieldDefinition
             {
@@ -65,6 +65,16 @@ public static class RuntimeSettingMetadataExtractor
             Fields = fields,
         };
     }
+
+    /// <summary>
+    /// 默认值按不变文化格式化，与写回路径（配置绑定、设置中心的校验）的解析口径一致。
+    /// 定义只构建一次并缓存，构建时的当前区域性是进程区域性或首个请求的界面语言：
+    /// 跟随它会把 0.3 缓存成 "0,3"，设置中心按数字解析失败、字段显示为空。
+    /// </summary>
+    private static string? FormatDefault(object? value)
+        => value is IFormattable formattable
+            ? formattable.ToString(null, CultureInfo.InvariantCulture)
+            : value?.ToString();
 
     /// <summary>
     /// 框架内置配置组来自 <c>Tnzi</c> / <c>Tnzi.*</c> 程序集；消费应用自有 <c>[RuntimeSetting]</c>

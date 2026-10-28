@@ -108,6 +108,71 @@ public class DocumentAttachmentGuardTests : FinanceIntegrationTestBase
         probe.VerifyNoOtherCalls();
     }
 
+    // ── 内容类型白名单 ─────────────────────────────────────────
+
+    private DocumentAttachmentService BuildServiceWithWhitelist(IServiceProvider sp, params string[] allowed)
+    {
+        var snapshot = new Mock<IOptionsSnapshot<FinanceOptions>>();
+        snapshot.Setup(o => o.Value).Returns(new FinanceOptions { AllowedAttachmentContentTypes = allowed });
+        return new DocumentAttachmentService(
+            sp,
+            sp.GetRequiredService<IRepository<DocumentAttachment, Guid>>(),
+            snapshot.Object,
+            Answering(canRead: true));
+    }
+
+    /// <summary>
+    /// 回归：配了白名单就失败关闭。不报内容类型的登记曾经整个跳过这道门：
+    /// 部署方为挡掉可执行文件配的白名单，对省略 <c>contentType</c> 的请求等于没配。
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("application/x-msdownload")]
+    public async Task Attach_WithWhitelist_RejectsMissingOrUnlistedContentType_AndWritesNothing(string? contentType)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildServiceWithWhitelist(scope.ServiceProvider, "application/pdf", "image/png");
+
+        var input = Attachment(Guid.NewGuid());
+        input.ContentType = contentType;
+        var result = await service.AttachAsync(Doc, "victim-doc", input);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        (await AttachmentRowsAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Attach_WithWhitelist_AcceptsListedContentType_CaseInsensitive()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildServiceWithWhitelist(scope.ServiceProvider, "application/pdf");
+
+        var input = Attachment(Guid.NewGuid());
+        input.ContentType = "Application/PDF";
+        var result = await service.AttachAsync(Doc, "victim-doc", input);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        (await AttachmentRowsAsync()).ShouldBe(1);
+    }
+
+    /// <summary>没配白名单 = 不限：省略内容类型照常挂得上（多数部署不管这件事）。</summary>
+    [Fact]
+    public async Task Attach_WithoutWhitelist_MissingContentTypeStillAccepted()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var service = BuildServiceWithWhitelist(scope.ServiceProvider);
+
+        var input = Attachment(Guid.NewGuid());
+        input.ContentType = null;
+        var result = await service.AttachAsync(Doc, "victim-doc", input);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        (await AttachmentRowsAsync()).ShouldBe(1);
+    }
+
     /// <summary>基类经 DI 注册的探针真的流到了服务里（可选构造参数没有被静默解析成 null）。</summary>
     [Fact]
     public async Task TheRegisteredProbe_IsWhatTheServiceAsks()

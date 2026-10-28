@@ -83,7 +83,7 @@ const { query: searchQuery, filtered } = useLocalSearch(
   outline-offset: -1px;
 }
 .t-agent-selector__icon {
-  color: var(--tnzi-primary);
+  color: var(--tnzi-ai-accent-text);
 }
 .t-agent-selector__desc {
   color: var(--tnzi-base-text-muted);

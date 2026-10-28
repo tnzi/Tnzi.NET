@@ -4,13 +4,15 @@
  * Component resolvers for unplugin-vue-components.
  */
 
-export interface TnziUiResolverOptions {
-  /** Component prefix (default: 'T') */
-  prefix?: string;
-}
+import { TNZI_UI_COMPONENT_NAMES } from './component-names';
 
 /**
  * Component resolver for unplugin-vue-components.
+ *
+ * Resolves only the components this package exports. unplugin-vue-components
+ * asks its resolvers in order and takes the first answer, so any other name
+ * (another `@tnzi/*` package's component, or the app's own `T*` component) is
+ * left to the resolvers after this one.
  *
  * ```ts
  * // vite.config.ts
@@ -26,19 +28,9 @@ export interface TnziUiResolverOptions {
  * });
  * ```
  */
-export function TnziUiResolver(options: TnziUiResolverOptions = {}) {
-  const prefix = options.prefix ?? 'T';
-
+export function TnziUiResolver() {
   return {
     type: 'component' as const,
-    resolve: (name: string) => {
-      if (name.startsWith(prefix)) {
-        return {
-          name,
-          from: '@tnzi/ui',
-        };
-      }
-      return undefined;
-    },
+    resolve: (name: string) => (TNZI_UI_COMPONENT_NAMES.has(name) ? { name, from: '@tnzi/ui' } : undefined),
   };
 }

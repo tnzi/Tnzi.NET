@@ -239,4 +239,59 @@ public class PerSkillAllowedToolsTests
 
         context.ExcludedToolNames.ShouldBe(["git_push", "bash"], ignoreOrder: true);
     }
+
+    [Fact]
+    public async Task GroupsOnlySkillPlusWhitelistOnlySkill_NeitherWidensTheOther()
+    {
+        // A alone allows the file group; B alone allows only web_search. Most restrictive means a tool must
+        // pass both: file tools fail B's whitelist and web_search falls outside A's groups. Merging the
+        // whitelist and the groups across skills instead let every file tool through again.
+        var groupsOnly = new SkillDefinition { Slug = "a", Name = "A", Priority = 2, AllowedToolGroups = ["file"] };
+        var whitelistOnly = new SkillDefinition { Slug = "b", Name = "B", Priority = 1, AllowedTools = ["web_search"] };
+        var registry = CreateToolRegistry(
+            MakeToolDef("file_read", "file"), MakeToolDef("file_write", "file"), MakeToolDef("web_search", "web"));
+        var middleware = CreateMiddleware(registry, [groupsOnly, whitelistOnly]);
+
+        var context = CreateContext(agent: MakeAgent("file_read", "file_write", "web_search"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["file_read", "file_write", "web_search"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task WhitelistOfOneSkill_DoesNotLetAToolPastAnotherSkillsGroups()
+    {
+        // A: groups [file] + whitelist [custom_lint]. B: groups [git]. custom_lint is outside B's groups and
+        // not on B's whitelist, so B alone denies it; together they must deny it as well.
+        var a = new SkillDefinition { Slug = "a", Name = "A", Priority = 2, AllowedToolGroups = ["file", "git"], AllowedTools = ["custom_lint"] };
+        var b = new SkillDefinition { Slug = "b", Name = "B", Priority = 1, AllowedToolGroups = ["git"] };
+        var registry = CreateToolRegistry(
+            MakeToolDef("git_diff", "git"), MakeToolDef("file_read", "file"), MakeToolDef("custom_lint", "lint"));
+        var middleware = CreateMiddleware(registry, [a, b]);
+
+        var context = CreateContext(agent: MakeAgent("git_diff", "file_read", "custom_lint"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["file_read", "custom_lint"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task EachSkillsWhitelistSupplementsOnlyItsOwnGroups()
+    {
+        // A: groups [file] + whitelist [web_search]. B: groups [web]. web_search passes A by its whitelist and
+        // B by its group, so it stays; file tools fail B; other web tools fail A.
+        var a = new SkillDefinition { Slug = "a", Name = "A", Priority = 2, AllowedToolGroups = ["file"], AllowedTools = ["web_search"] };
+        var b = new SkillDefinition { Slug = "b", Name = "B", Priority = 1, AllowedToolGroups = ["web"] };
+        var registry = CreateToolRegistry(
+            MakeToolDef("file_read", "file"), MakeToolDef("web_search", "web"), MakeToolDef("web_fetch", "web"));
+        var middleware = CreateMiddleware(registry, [a, b]);
+
+        var context = CreateContext(agent: MakeAgent("file_read", "web_search", "web_fetch"));
+
+        await middleware.InvokeAsync(context, Next);
+
+        context.ExcludedToolNames.ShouldBe(["file_read", "web_fetch"], ignoreOrder: true);
+    }
 }

@@ -127,7 +127,7 @@ public enum FinanceDocumentStatus
 /// 主数据种类（<see cref="Services.IMasterDataUsageProvider"/> 的寻址键）。
 /// </summary>
 /// <remarks>
-/// 只列**有删除守卫、且可能被会计内核之外的记录引用**的三类主数据。
+/// 只列**有删除守卫、且可能被会计内核之外的记录引用**的主数据。
 /// 跨模块契约的一部分，故按 docs/coding-standards/metadata.md 放在 Metadata/。
 /// 数值不参与持久化（只在进程内传递），但仍显式写出以免日后重排时被误当作无关紧要。
 /// </remarks>
@@ -143,7 +143,10 @@ public enum FinanceMasterDataKind
     Item = 3,
 
     /// <summary>会计科目（<c>ChartOfAccountsService.DeleteAsync</c> 在自己的分录行 / 子科目 / 角色检查之后提问）</summary>
-    Account = 4
+    Account = 4,
+
+    /// <summary>税码（<c>TaxService.DeleteCodeAsync</c> 在自己的单据行 / 往来方与目录项默认税码检查之后提问）</summary>
+    TaxCode = 5
 }
 
 /// <summary>

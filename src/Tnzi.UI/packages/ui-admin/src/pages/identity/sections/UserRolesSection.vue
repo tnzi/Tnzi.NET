@@ -1,7 +1,9 @@
 <template>
   <TDetailSection :title="t('detail.sections.roles')" :hint="t('actions.manageRolesHint')" max-width="none">
     <NSpin :show="loading">
-      <TEmpty v-if="!loading && !roles.length" :text="t('actions.noRolesAvailable')" size="small" />
+      <!-- "No roles" is a claim about the system: made only after a load that
+           succeeded, never as the leftover of one that failed. -->
+      <TEmpty v-if="!loading && !loadFailed && !roles.length" :text="t('actions.noRolesAvailable')" size="small" />
       <div v-else class="ur-grid">
         <label
           v-for="role in roles"
@@ -65,6 +67,7 @@ const message = useSafeMessage()
 
 const roles = ref<RoleDto[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 const saving = ref(false)
 const selected = ref<string[]>([])
 const original = ref<string[]>([])
@@ -81,8 +84,10 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     roles.value = await bridge.roles.getAll()
+    loadFailed.value = false
     syncSelection()
   } catch (err) {
+    loadFailed.value = true
     message.error(err instanceof Error ? err.message : String(err))
   } finally {
     loading.value = false

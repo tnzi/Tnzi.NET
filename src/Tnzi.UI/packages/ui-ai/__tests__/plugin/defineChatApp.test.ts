@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { App } from 'vue';
+import { nextTick, type App } from 'vue';
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui';
 import type { Router } from 'vue-router';
 import { defineChatApp } from '../../src/plugin/defineChatApp';
 
@@ -111,5 +112,38 @@ describe('defineChatApp app update', () => {
     const { router } = makeRouter({ name: 'home', fullPath: '/' });
     defineChatApp({ runtime, home, theme: false, appUpdate: false }).install(app, router);
     expect(installAppUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('defineChatApp theme', () => {
+  /**
+   * The provided context is the one writer of the `--tnzi-*` variables and the
+   * `dark` class: `TChatApp` sets its mode, and the mode-dependent tokens
+   * (base text, containers, borders) follow.
+   */
+  it('provides a theme context whose mode drives the mode-dependent tokens', async () => {
+    const provided = new Map<unknown, unknown>();
+    const themedApp = {
+      _context: { provides: {} },
+      provide: vi.fn((key: unknown, value: unknown) => provided.set(key, value)),
+    } as unknown as App;
+    const { runtime } = makeRuntime();
+    const { router } = makeRouter({ name: 'home', fullPath: '/' });
+    const root = document.documentElement;
+
+    defineChatApp({ runtime, home, guard: false, appUpdate: false, theme: { colors: { primary: '#ff0000' } } })
+      .install(themedApp, router);
+    const context = provided.get(THEME_CONTEXT_KEY) as ThemeContext;
+    expect(root.style.getPropertyValue('--tnzi-primary')).toBe('#ff0000');
+    expect(root.style.getPropertyValue('--tnzi-base-text')).toBe('rgb(51, 54, 57)');
+
+    context.setMode('dark');
+    await nextTick();
+    expect(root.classList.contains('dark')).toBe(true);
+    expect(root.style.getPropertyValue('--tnzi-base-text')).toBe('rgb(224, 224, 224)');
+    expect(root.style.getPropertyValue('--tnzi-primary')).toBe('#ff0000');
+
+    root.classList.remove('dark');
+    root.removeAttribute('style');
   });
 });

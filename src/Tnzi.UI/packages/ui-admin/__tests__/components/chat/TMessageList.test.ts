@@ -164,6 +164,19 @@ describe('TMessageBubble - rich system notification', () => {
     expect(link.attributes('href')).toBe('https://example.com/orders/1001')
   })
 
+  it('links only to web addresses: a script or data URL from the sender is not a link', () => {
+    // Vue does not sanitise `:href`, and a broadcast's link is whatever its
+    // sender typed (the server checks the length only).
+    for (const linkUrl of ['javascript:alert(1)', ' JavaScript:alert(1)', 'java\tscript:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,<script>1</script>']) {
+      const w = mountBubble({ ...richNotice, linkUrl })
+      expect(w.find('.t-bubble-notice__link').exists(), linkUrl).toBe(false)
+      expect(w.find('.t-bubble-notice__body').text()).toBe('Your order #1001 has shipped.')
+    }
+    for (const linkUrl of ['http://example.com/a', 'https://example.com/a', '/admin/orders/1001', 'orders/1001']) {
+      expect(mountBubble({ ...richNotice, linkUrl }).find('.t-bubble-notice__link').attributes('href')).toBe(linkUrl)
+    }
+  })
+
   it('omits title/link/category for a plain system notification', () => {
     const w = mountBubble({ ...richNotice, title: null, linkUrl: null, category: null })
     expect(w.find('.t-bubble-notice').exists()).toBe(true)

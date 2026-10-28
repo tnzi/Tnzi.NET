@@ -125,6 +125,42 @@ public class PreferenceSendPathTests : IntegrationTestBase
         VerifySent(Times.Once());
     }
 
+    /// <summary>
+    /// ★ 分类填空串（清空了的输入框）就是渠道级规则，不是一个名叫 "" 的分类。
+    /// </summary>
+    /// <remarks>
+    /// 渠道级判定只认 <c>Category == null</c> 的行。原样存下 "" 会多出一行谁也不读的规则：
+    /// 列表里显示「邮件已关闭」，邮件照发。
+    /// </remarks>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task ABlankCategory_SavesTheChannelWideRule(string blank)
+    {
+        await DisableAsync(channel: "Email", category: blank);
+        var messageId = await SeedMessageAsync(Alice, isTransactional: false);
+
+        await SendAsync(messageId);
+
+        VerifySent(Times.Never());
+        DbContext.ChangeTracker.Clear();
+        (await DbContext.Set<Preference>().AsNoTracking().SingleAsync(p => p.UserId == Alice))
+            .Category.ShouldBeNull();
+    }
+
+    /// <summary>空串分类与渠道级规则是同一行：再保存一次是更新，不是新增。</summary>
+    [Fact]
+    public async Task ABlankCategory_UpdatesTheExistingChannelWideRule()
+    {
+        await DisableAsync(channel: "Email");
+        await SetPreferenceAsync(channel: "Email", enabled: true, category: "");
+
+        DbContext.ChangeTracker.Clear();
+        var rows = await DbContext.Set<Preference>().AsNoTracking().Where(p => p.UserId == Alice).ToListAsync();
+        rows.Count.ShouldBe(1);
+        rows[0].IsEnabled.ShouldBeTrue();
+    }
+
     /// <summary>关掉别的渠道不影响邮件（偏好词汇比 NotificationType 宽，InApp 是合法取值）。</summary>
     [Fact]
     public async Task DisablingAnotherChannel_DoesNotBlockEmail()

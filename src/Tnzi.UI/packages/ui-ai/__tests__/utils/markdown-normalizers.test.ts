@@ -22,15 +22,38 @@ describe('normalizeCjkSpacing', () => {
     expect(normalizeCjkSpacing('HelloWorld你好')).toBe('HelloWorld 你好');
   });
 
-  it('converges after two passes', () => {
-    // The function adds spaces at CJK↔non-CJK boundaries.
-    // For typical inputs (single CJK block, single Latin block), it's idempotent.
-    // For multi-segment inputs (CJK+Latin+CJK), subsequent passes may add more spaces
-    // but the function always makes progress toward the intended spacing.
-    const input = '你好world世界';
-    const first = normalizeCjkSpacing(input);
-    // Verify first pass added the intended spaces
-    expect(first).toContain(' ');
+  it('spaces both sides of a Latin run inside CJK text', () => {
+    expect(normalizeCjkSpacing('你好world世界')).toBe('你好 world 世界');
+  });
+
+  it('spaces CJK text from digits', () => {
+    expect(normalizeCjkSpacing('共3条')).toBe('共 3 条');
+  });
+
+  it('is idempotent', () => {
+    for (const input of ['你好world世界', 'world 你好', 'Hello世界', '共3条']) {
+      const once = normalizeCjkSpacing(input);
+      expect(normalizeCjkSpacing(once)).toBe(once);
+    }
+  });
+
+  it('does not add a second space after an existing one', () => {
+    expect(normalizeCjkSpacing('world 你好')).toBe('world 你好');
+    expect(normalizeCjkSpacing('world\t你好')).toBe('world\t你好');
+  });
+
+  it('leaves CJK punctuation unspaced', () => {
+    expect(normalizeCjkSpacing('你好。世界')).toBe('你好。世界');
+    expect(normalizeCjkSpacing('你好，world')).toBe('你好，world');
+  });
+
+  it('leaves line breaks alone', () => {
+    expect(normalizeCjkSpacing('你好\nworld')).toBe('你好\nworld');
+  });
+
+  it('keeps markdown emphasis around CJK text intact', () => {
+    expect(normalizeCjkSpacing('**中文**text')).toBe('**中文**text');
+    expect(normalizeCjkSpacing('`代码`')).toBe('`代码`');
   });
 
   it('passes through plain Latin text unchanged', () => {

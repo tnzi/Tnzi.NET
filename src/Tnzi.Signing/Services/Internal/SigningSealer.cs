@@ -8,6 +8,9 @@ public sealed record SealResult(Guid FileId, string Sha256, string FileName);
 /// <summary>预填结果：烧好值的渲染稿（没有可烧的值时 <see cref="FileId"/> 为 null）与烧进去的字段键。</summary>
 public sealed record PrefillResult(Guid? FileId, IReadOnlyList<string> Keys);
 
+/// <summary>密封预检结果：文档的真实页数，以及锚文本在文档里找不到的字段键。</summary>
+public sealed record SealableDocument(int PageCount, IReadOnlyList<string> UnfoundAnchorKeys);
+
 /// <summary>
 /// 把收集齐的字段值盖到渲染稿上、压平、算哈希、存成成品。
 /// </summary>
@@ -79,11 +82,13 @@ public sealed class SigningSealer
         if (source is null)
             return Result<PrefillResult>.Failure("The rendered document could not be read.", 404);
 
+        var pages = ReadPageGeometry(source);
         var stamps = new List<PdfStamp>();
         foreach (var field in senderFields)
         {
-            if (TextStampFor(source, field, values[field.Key]!) is { } stamp)
-                stamps.Add(stamp);
+            if (ResolvePlacement(source, field) is not { } placement)
+                continue;
+            stamps.AddRange(TextStamps(placement.Page, placement.Rect, field, values[field.Key]!, pages));
         }
 
         byte[] prefilled;
@@ -145,7 +150,7 @@ public sealed class SigningSealer
         }
 
         var hash = Convert.ToHexStringLower(SHA256.HashData(sealed_));
-        var fileName = BuildFileName(request.Title, "-signed");
+        var fileName = SealedFileName(request.Title);
 
         using var output = new MemoryStream(sealed_, writable: false);
         var saved = await _files.SaveAsync(fileName, output);
@@ -175,6 +180,7 @@ public sealed class SigningSealer
         IReadOnlyList<Signer> recipients)
     {
         var stamps = new List<PdfStamp>();
+        var pages = ReadPageGeometry(source);
 
         // 签名图按角色取：字段声明的是"谁来签"，落笔的是那个人交上来的图。
         var signatureByRole = recipients
@@ -218,28 +224,118 @@ public sealed class SigningSealer
             if (!values.TryGetValue(field.Key, out var value) || string.IsNullOrEmpty(value))
                 continue;
 
-            stamps.Add(TextStamp(page, target, field, value));
+            stamps.AddRange(TextStamps(page, target, field, value, pages));
         }
 
         return stamps;
     }
 
-    /// <summary>一个文本字段的取值 → 一次文本盖章；落点解析不出（锚找不到）时为 null。</summary>
-    private PdfTextStamp? TextStampFor(byte[] source, SnapshotField field, string value)
+    /// <summary>字段没有指定字号时的字号（pt）。</summary>
+    private const double DefaultFontSize = 10d;
+
+    /// <summary>为了装进字段框而缩小字号时的下限（pt）：再小就读不出来了，宁可让多出的行越出框底。</summary>
+    private const double MinFontSize = 6d;
+
+    /// <summary>多行时的行距（字号的倍数）。</summary>
+    private const double LineSpacing = 1.2d;
+
+    /// <summary>每一步缩小多少（pt）。</summary>
+    private const double FontSizeStep = 0.5d;
+
+    /// <summary>
+    /// 一个文本字段的取值 → 一次或多次文本盖章：放得下就是框内一行，放不下就按框宽换行、必要时缩小字号。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ <see cref="IPdfStamper"/> 不换行也不裁剪，放不下的部分照样画出去：一段 150 字的地址在一个 268 pt 宽的框里
+    /// 会单行穿过相邻内容、越过页边，而 <c>FieldValue</c> 里存的是全文，密封的成品与记录下来的值对不上。
+    /// 值里自带的换行也没人管。所以这里按实测宽度（<see cref="PdfTextFitter"/>，与画字的是同一个实现）换行，
+    /// 行数乘行距超过框高时逐步缩小字号（字段字号是上限，不小于 <see cref="MinFontSize"/>），各行自框顶向下排。
+    /// 缩到下限仍放不下时照样全部画出（多出的行越出框底）：丢字比越界更糟，成品要能读出完整的值。
+    /// </para>
+    /// <para>
+    /// 一行放得下的值（绝大多数）保持原样：框内垂直居中靠左、字段字号，与此前的成品逐字一致。
+    /// 勾选框只画一个字符，不参与换行。读不出页面尺寸或量不了宽度（没有可用字体）时也退回单行，
+    /// 后者随后在盖章那一步以同一个原因失败，由调用方的失败处理接住。
+    /// </para>
+    /// </remarks>
+    private IReadOnlyList<PdfTextStamp> TextStamps(
+        int page, NormalizedRect target, SnapshotField field, string value, IReadOnlyList<PdfPageInfo>? pages)
     {
-        if (ResolvePlacement(source, field) is not { } placement) return null;
-        var (page, target) = placement;
-        return TextStamp(page, target, field, value);
+        var fontSize = field.FontSize is > 0 ? (double)field.FontSize.Value : DefaultFontSize;
+        if (field.Type == SigningFieldType.Checkbox)
+            return [Line(page, target, RenderCheckbox(value), fontSize)];
+
+        var geometry = pages?.FirstOrDefault(p => p.Number == page);
+        if (geometry is not { Width: > 0, Height: > 0 })
+            return [Line(page, target, value, fontSize)];
+
+        // 宽为 0 = 画到页面右边缘（与盖章实现的换算同一口径）；高为 0 = 不限高，只换行不缩小。
+        var boxWidth = (target.Width > 0 ? target.Width : 1d - target.X) * geometry.Width;
+        var boxHeight = target.Height > 0 ? target.Height * geometry.Height : double.PositiveInfinity;
+        if (boxWidth <= 0)
+            return [Line(page, target, value, fontSize)];
+
+        IReadOnlyList<string> lines;
+        try
+        {
+            var paragraphs = value.ReplaceLineEndings("\n").Split('\n');
+            if (paragraphs.Length == 1 && new PdfTextFitter(_stamper, fontSize).Fits(value, boxWidth))
+                return [Line(page, target, value, fontSize)];
+
+            while (true)
+            {
+                var fitter = new PdfTextFitter(_stamper, fontSize);
+                lines = paragraphs.SelectMany(p => fitter.Wrap(p, boxWidth)).ToList();
+                if (lines.Count * fontSize * LineSpacing <= boxHeight || fontSize <= MinFontSize)
+                    break;
+                fontSize = Math.Max(MinFontSize, fontSize - FontSizeStep);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Field {FieldKey} could not be measured for wrapping; it is stamped as a single line.", field.Key);
+            return [Line(page, target, value, fontSize)];
+        }
+
+        // 缩小之后一行就放下了：仍按单行的样子放在框内。
+        if (lines.Count == 1)
+            return [Line(page, target, lines[0], fontSize)];
+
+        var lineHeight = fontSize * LineSpacing / geometry.Height;
+        var stamps = new List<PdfTextStamp>(lines.Count);
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Length == 0) continue;
+            var rect = new NormalizedRect(target.X, target.Y + (i * lineHeight), target.Width, lineHeight);
+            stamps.Add(Line(page, rect, lines[i], fontSize));
+        }
+
+        return stamps;
     }
 
-    private static PdfTextStamp TextStamp(int page, NormalizedRect target, SnapshotField field, string value) => new()
+    private static PdfTextStamp Line(int page, NormalizedRect rect, string text, double fontSize) => new()
     {
         PageNumber = page,
-        Rect = target,
-        Text = field.Type == SigningFieldType.Checkbox ? RenderCheckbox(value) : value,
-        FontSize = (double)(field.FontSize ?? 10m),
+        Rect = rect,
+        Text = text,
+        FontSize = fontSize,
         Alignment = PdfStampAlignment.CenterLeft,
     };
+
+    /// <summary>每页的尺寸（pt），换行要用；读不出时为 null（文本字段退回单行，读不出的文档随后在盖章那一步失败）。</summary>
+    private IReadOnlyList<PdfPageInfo>? ReadPageGeometry(byte[] source)
+    {
+        try
+        {
+            return _inspector.GetInfo(source)?.Pages;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The page sizes of a document being stamped could not be read; text fields are stamped as single lines.");
+            return null;
+        }
+    }
 
     /// <summary>
     /// 解析字段落点（页码 + 矩形）。<see cref="FieldPlacementMode.Anchor"/> 时按锚文本现搜。
@@ -255,10 +351,7 @@ public sealed class SigningSealer
         if (string.IsNullOrWhiteSpace(field.AnchorText))
             return null;
 
-        // 锚文本按字面匹配（转义正则元字符）：锚是人写在文档里的一串字，
-        // 不是给用户的正则接口。
-        var matches = _inspector.FindTags(source, Regex.Escape(field.AnchorText));
-        var hit = matches.FirstOrDefault();
+        var hit = FindAnchor(source, field.AnchorText);
         if (hit is null)
         {
             // 找不到锚就跳过这个字段，而不是猜一个位置：一个盖错地方的签名
@@ -277,19 +370,126 @@ public sealed class SigningSealer
         return (hit.PageNumber, new NormalizedRect(hit.Box.X, hit.Box.Y, width, height));
     }
 
-    /// <summary>勾选框落的是字符，不是图 —— 省掉一份要随主题走的资源。</summary>
+    /// <summary>锚文本在文档里的第一处命中（按页码、再按位置）；找不到为 null。</summary>
+    private PdfTextMatch? FindAnchor(byte[] source, string anchorText)
+        => _inspector.FindTags(source, AnchorPattern(anchorText))
+            .OrderBy(m => m.PageNumber)
+            .ThenBy(m => m.Box.Y)
+            .ThenBy(m => m.Box.X)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// 锚文本 → 搜索用的正则：逐词按字面匹配（转义正则元字符），词与词之间允许任意空白，<b>也允许没有</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 锚是人写在文档里的一串字，不是给用户的正则接口，所以逐词转义。
+    /// </para>
+    /// <para>
+    /// ★ 词间不能要求空格：<see cref="IPdfInspector.FindTags"/> 匹配的是<b>字母级拼接</b>出来的文本，排版空隙不在文本里：
+    /// 很多 PDF 生成器用字距偏移而不是空格字形分词，一个折到下一行的词组两行之间也没有任何字符。
+    /// 曾经把整段锚文本原样转义（空格成了字面的 <c>"\ "</c>），于是「Client Signature」这样的多词锚在这类文档里永远找不到，
+    /// 密封时那个签名框被静默跳过，成品照样算哈希、出证书、归档。首尾空白同理不参与匹配。
+    /// </para>
+    /// </remarks>
+    internal static string AnchorPattern(string anchorText)
+    {
+        Check.NotNullOrWhiteSpace(anchorText);
+        var words = anchorText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(@"\s*", words.Select(Regex.Escape));
+    }
+
+    /// <summary>
+    /// 一份要拿来密封的文档的预检：读得出页数、盖章器改得动它、每个锚文本都找得到。
+    /// </summary>
+    /// <param name="pdf">文档字节。</param>
+    /// <param name="anchors">要找的锚：(字段键, 锚文本)。</param>
+    /// <returns>
+    /// 读不出或改不动时失败（400，说明原因）；否则给出真实页数与找不到锚的字段键。
+    /// </returns>
+    /// <remarks>
+    /// ★ 这几件事若等到密封才发现，那时每一位签署人都已经签完了：页码越界、文档不让改都会让盖章抛异常，
+    /// 请求退回 <c>InProgress</c>，而管理端重新密封是同一份文档、同一套落点，失败得一模一样，唯一的出路是作废、
+    /// 让每个人重签一遍。找不到锚则更糟：不报错，那个字段被静默跳过。所以在建模板（与发起请求）的那一刻就用
+    /// 密封时的同一个盖章器、同一套锚匹配试一遍。
+    /// 「改不动」最常见的是带所有者密码（禁止编辑）的表格：读取方能打开它，盖章方以修改模式打开时拒绝。
+    /// </remarks>
+    public Result<SealableDocument> InspectForSealing(byte[] pdf, IEnumerable<(string Key, string AnchorText)> anchors)
+    {
+        Check.NotNull(pdf);
+        Check.NotNull(anchors);
+
+        PdfInfo info;
+        try
+        {
+            info = _inspector.GetInfo(pdf);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "A document offered for signing could not be read as a PDF.");
+            return Result<SealableDocument>.Failure("The document is not a readable PDF.", 400);
+        }
+
+        if (info.Pages.Count == 0)
+            return Result<SealableDocument>.Failure("The document has no pages.", 400);
+
+        try
+        {
+            // 什么都不画：只问盖章器能不能以修改模式打开并写回它（密封走的正是这一步）。
+            _stamper.Stamp(pdf, new PdfStampRequest());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "A document offered for signing cannot be modified by the stamper.");
+            return Result<SealableDocument>.Failure(
+                "The document cannot be modified (it may be password protected or restricted against editing), "
+                + "so signatures could not be stamped onto it. Remove the restriction and upload it again.",
+                400);
+        }
+
+        var unfound = new List<string>();
+        foreach (var (key, anchorText) in anchors)
+        {
+            if (string.IsNullOrWhiteSpace(anchorText) || FindAnchor(pdf, anchorText) is null)
+                unfound.Add(key);
+        }
+
+        return Result<SealableDocument>.Success(new SealableDocument(info.Pages.Count, unfound));
+    }
+
+    /// <summary>
+    /// 在一份文档里找不到锚文本的锚定位字段（按快照顺序）。
+    /// </summary>
+    /// <remarks>与密封时的定位是同一套匹配（<see cref="AnchorPattern"/>）：这里说找得到，密封时就找得到。</remarks>
+    public IReadOnlyList<SnapshotField> FindUnplacedAnchors(byte[] pdf, IEnumerable<SnapshotField> fields)
+    {
+        Check.NotNull(pdf);
+        Check.NotNull(fields);
+
+        return fields
+            .Where(f => f.PlacementMode == FieldPlacementMode.Anchor)
+            .Where(f => string.IsNullOrWhiteSpace(f.AnchorText) || FindAnchor(pdf, f.AnchorText) is null)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 读一份请求名下的文档字节（调用方负责读取授予）；读不到为 null。
+    /// </summary>
+    public Task<byte[]?> ReadDocumentAsync(Guid fileId, CancellationToken cancellationToken = default)
+        => ReadAsync(fileId, cancellationToken);
+
+    /// <summary>
+    /// 勾选框落的是字符，不是图，省掉一份要随主题走的资源。判定与提交时的必填校验同一个（<see cref="SigningFieldValues.IsChecked"/>）。
+    /// </summary>
     private static string RenderCheckbox(string value)
-        => value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1" ? "X" : string.Empty;
+        => SigningFieldValues.IsChecked(value) ? "X" : string.Empty;
+
+    /// <summary>
+    /// 密封成品的文件名。只由标题决定（请求的标题创建后不再变），所以事后补做归档或证书时算得出与密封那一刻相同的名字。
+    /// </summary>
+    internal static string SealedFileName(string title) => BuildFileName(title, "-signed");
 
     /// <summary>文件名：标题 + 后缀（<c>-draft</c> 渲染稿 / <c>-signed</c> 成品），非法字符换成下划线。</summary>
     private static string BuildFileName(string title, string suffix)
-    {
-        var safe = string.IsNullOrWhiteSpace(title) ? "document" : title.Trim();
-        foreach (var c in Path.GetInvalidFileNameChars())
-            safe = safe.Replace(c, '_');
-
-        // 文件名长度在各文件系统上限不同，留出后缀余量。
-        if (safe.Length > 120) safe = safe[..120];
-        return $"{safe}{suffix}.pdf";
-    }
+        => $"{SigningLimits.FileNameStem(title, 120)}{suffix}.pdf";
 }

@@ -7,16 +7,18 @@ namespace Tnzi.AspNetCore.Middleware;
 /// </summary>
 /// <remarks>
 /// <para>
-/// 两个把体写进日志的地方共用这一份：请求日志（<see cref="RequestTrackingMiddleware"/>）与异常诊断
-/// （<see cref="ExceptionHandlingMiddleware"/>）。各写一份的结果是「一处脱敏、另一处明文」——
-/// 两个开关都能在配置中心热开，打开异常诊断后登录途中的一次异常就会把密码原样写进日志。
+/// 把体写进日志的地方共用这一份：请求日志（<see cref="RequestTrackingMiddleware"/>）、异常诊断
+/// （<see cref="ExceptionHandlingMiddleware"/>），以及审计模块的请求体采集（它按自己的敏感字段名单脱敏，
+/// 但「哪些路径一律不采」用的是这里的 <see cref="AllowsBodyCapture"/>）。各写一份的结果是「一处脱敏、另一处明文」：
+/// 这些开关都能在配置中心热开，打开异常诊断后登录途中的一次异常就会把密码原样写进日志。
 /// </para>
 /// <para>
 /// 脱敏按字段名做，覆盖 JSON 与表单编码两种形态；其余文本（XML、纯文本）无从按字段识别，原样保留，
 /// 这是 <c>LogRequestBody</c> 开关的已知代价。
 /// </para>
 /// </remarks>
-internal static class LoggedBodySanitizer
+[ExperimentalApi(Reason = "请求体采集的排除规则仍在演进，可能改为可配置的路径名单")]
+public static class LoggedBodySanitizer
 {
     private static readonly RequestBodyRedactor JsonRedactor = new();
 
@@ -43,12 +45,21 @@ internal static class LoggedBodySanitizer
             StringComparer.OrdinalIgnoreCase);
 
     /// <summary>这条请求的体是否允许采集。</summary>
+    /// <remarks>
+    /// 除了这里的认证路径，核心 <see cref="RequestBodyRedactor.IsSecretBodyPath"/> 认定的秘密材料端点
+    /// （第二因子、加密设置写入）同样不采集；那份名单审计也在用，所以放在核心。
+    /// </remarks>
     public static bool AllowsBodyCapture(PathString path)
     {
         var value = path.Value;
         if (string.IsNullOrEmpty(value))
         {
             return true;
+        }
+
+        if (RequestBodyRedactor.IsSecretBodyPath(value))
+        {
+            return false;
         }
 
         // 尾部补一个 '/'，让 "/api/auth" 这种不带尾斜杠的写法也命中 "/auth/"。

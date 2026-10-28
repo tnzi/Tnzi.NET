@@ -50,9 +50,9 @@ public class ArtifactTools : IAIToolProvider
     /// <summary>
     /// 将文件标记为本次运行的产出物，使用户可以预览和下载
     /// </summary>
+    /// <remarks>不标 IsConcurrencySafe：登记产物走请求作用域的 DbContext（先查后插），同一批的两个调用并行会撞上 EF 的并发检测。</remarks>
     [AIFunction("present_files",
-        "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).",
-        IsConcurrencySafe = true)]
+        "Present files as artifacts to the user. Call this when you have generated output files that the user should see or download. Provide virtual paths (e.g., /mnt/outputs/report.md).")]
     public async Task<string> PresentFilesAsync(
         [Description("List of virtual file paths to present")] List<string> paths,
         CancellationToken ct = default)

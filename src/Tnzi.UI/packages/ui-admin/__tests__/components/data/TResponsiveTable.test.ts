@@ -191,4 +191,36 @@ describe('TResponsiveTable', () => {
     await nextTick()
     expect(w.find('.t-responsive-table__pager').exists()).toBe(true)
   })
+
+  // Pages put a sentence in `empty-text` ("nothing to print", or the reason a
+  // read failed); the desktop table used to drop it and show the library's
+  // generic "No Data", so the sentence only ever reached phones.
+  describe('empty-text on the desktop table', () => {
+    it('shows the page\'s sentence when there are no rows', async () => {
+      setViewport(1280)
+      const w = mount(TResponsiveTable, { props: { columns, data: [], emptyText: 'The print queue is unavailable.' } })
+      await nextTick()
+      expect(w.find('.n-data-table').exists()).toBe(true)
+      expect(w.text()).toContain('The print queue is unavailable.')
+    })
+
+    it('keeps a page\'s own #empty slot over the sentence', async () => {
+      setViewport(1280)
+      const w = mount(TResponsiveTable, {
+        props: { columns, data: [], emptyText: 'unused' },
+        slots: { empty: '<p class="custom-empty">Custom</p>' },
+      })
+      await nextTick()
+      expect(w.find('.custom-empty').exists()).toBe(true)
+      expect(w.text()).not.toContain('unused')
+    })
+
+    it('leaves the library\'s own empty state alone when no sentence is given', async () => {
+      setViewport(1280)
+      const w = mount(TResponsiveTable, { props: { columns, data: [] } })
+      await nextTick()
+      expect(w.find('.n-data-table-empty').exists()).toBe(true)
+      expect(w.find('.t-empty').exists()).toBe(false)
+    })
+  })
 })

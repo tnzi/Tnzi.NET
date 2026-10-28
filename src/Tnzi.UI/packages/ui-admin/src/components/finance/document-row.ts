@@ -25,6 +25,8 @@ export interface FinanceDocRow {
   vendorId?: string | null
   partyId?: string | null
   currency?: string
+  /** Stored rate; on a draft 0 means "resolve at posting". */
+  exchangeRate?: number
   total?: number
   amount?: number
   appliedTotal?: number

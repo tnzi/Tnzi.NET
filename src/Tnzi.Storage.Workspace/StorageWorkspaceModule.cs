@@ -27,8 +27,8 @@ namespace Tnzi.Storage.Workspace;
 /// <item><c>FileRecord.FolderId</c> 这一列<b>留在父模块</b>并照常出现在每个 <c>FileRecordDto</c> 上：
 ///   写它的是本模块，读它的是父模块的查询。没有本模块时它恒为 null —— 少一个可用的过滤维度，
 ///   不是一个坏掉的字段。</item>
-/// <item>后台清理少跑「过期分片会话 + 残留分片」那一趟（本模块以
-///   <c>IStorageCleanupContributor</c> 身份挂进去）。父模块自己的三趟不受影响。</item>
+/// <item>后台清理少跑「过期分片会话 + 残留分片」与「已删除文件的版本与分享」两趟（本模块以
+///   <c>IStorageCleanupContributor</c> 身份挂进去；没有这些表也就没有可收的）。父模块自己的三趟不受影响。</item>
 /// <item>★ <b>一处已知的表里不一</b>：<c>ShareOptions</c> 这个类型按约定留在父模块
 ///   （它是 <c>StorageOptions.Share</c> 的嵌套属性，配置节路径 <c>Storage:Share</c> 不能变），
 ///   而配置中心的分组定义是从<b>已加载模块的程序集</b>扫出来的 —— 于是没有本模块的宿主，
@@ -68,9 +68,33 @@ public class StorageWorkspaceModule : TnziApplicationModule
         services.AddScoped<IFileVersionService, FileVersionService>();
         services.AddScoped<IFileChunkUploadService, FileChunkUploadService>();
 
+        // 用户自己的文件空间：浏览 / 搜索 / 写入，回收站，以及「一个文件此刻在不在回收站里」这一问
+        // （分享链接与归档都要问它）。
+        services.AddScoped<IFileSpaceService, FileSpaceService>();
+        services.AddScoped<IRecycleBinService, RecycleBinService>();
+        services.AddScoped<RecycleBinLookup>();
+
+        // 按用户的配额覆盖值。★ 配额来源在 Configure 阶段注册（AddScoped 而不是 TryAdd）：父模块的默认实现
+        // （只读默认值）是在它的 PostConfigure 里 TryAdd 补上的，这一份先到就是生效的那一份。
+        // 消费方要换成自己的规则（套餐、角色），在它的模块里 AddScoped / Replace 即可（它加载得更晚）。
+        services.AddScoped<IStorageAllowanceService, StorageAllowanceService>();
+        services.AddScoped<IStorageAllowanceProvider, StorageAllowanceProvider>();
+
+        // 历史版本占的字节计入所有者的配额：父模块只认识文件记录，看不见版本表。
+        services.AddScoped<IStorageUsageContributor, FileVersionUsageContributor>();
+
+        // 回收站过期条目的自动清除挂进父模块的后台清理。
+        services.AddScoped<IStorageCleanupContributor, RecycleBinCleanupContributor>();
+
         // 把「过期分片会话 + 残留分片」这一趟挂进父模块的后台清理。
         // 父模块的 FileCleanupService 以 IEnumerable<T> 注入贡献者，没有本模块时是空集合。
         services.AddScoped<IStorageCleanupContributor, ExpiredUploadSessionCleanupContributor>();
+
+        // 文件记录删除之后收掉它的历史版本（行 + 对象）与分享链接：删除时经事件即时收一次，
+        // 后台清理再兜一次（事件没能完成的、以及这条清理出现之前就已删除的文件）。
+        services.AddScoped<DeletedFileWorkspaceCleaner>();
+        services.AddEventHandler<FileRecordDeletedEvent, FileRecordDeletedEventHandler>();
+        services.AddScoped<IStorageCleanupContributor, DeletedFileWorkspaceCleanupContributor>();
 
         return Task.CompletedTask;
     }

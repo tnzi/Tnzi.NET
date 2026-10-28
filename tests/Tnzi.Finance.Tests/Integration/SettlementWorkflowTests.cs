@@ -189,6 +189,89 @@ public class SettlementWorkflowTests : FinanceIntegrationTestBase
         memoAfter.Data.Status.ShouldBe(FinanceDocumentStatus.Paid);
     }
 
+    private async Task<CreditMemoDto> PostCreditMemoAsync(Guid customerId, decimal amount)
+    {
+        var income = await AccountIdAsync("4100");
+        var draft = await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.CreateDraftAsync(new CreateCreditMemoDto
+        {
+            CustomerId = customerId,
+            DocDate = new DateTime(2026, 3, 5),
+            Lines = [new CreateCreditMemoLineDto { AccountId = income, Quantity = 1, UnitPrice = amount }]
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        var posted = await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        return posted.Data!;
+    }
+
+    /// <summary>
+    /// 全额核销的贷项（状态 Paid）照样能撤销核销。
+    /// </summary>
+    /// <remarks>
+    /// 被保护的缺陷：撤销核销第一步按「能不能作为源去核销」加载贷项，只认 Posted / PartiallyPaid，
+    /// 于是全额核销的贷项撤销时答 409「Only posted credit memos can be applied.」。贷项作废要求未核销，
+    /// 发票作废也要求未核销，三条路都堵死，核销错了发票只能手工做凭证，子账与总账从此对不上。
+    /// </remarks>
+    [Fact]
+    public async Task Unapply_FullyAppliedCreditMemo_RestoresBothDocuments_AndBothCanThenBeVoided()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Settle CM full");
+        var invoice = await PostInvoiceAsync(customer.Data!.Id, 100m);
+        var memo = await PostCreditMemoAsync(customer.Data.Id, 30m);
+
+        var applied = await ApplyAsync(SettlementDocType.CreditMemo, memo.Id, SettlementDocType.Invoice, invoice.Id, 30m);
+        applied.Succeeded.ShouldBeTrue(applied.Message);
+        (await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.GetAsync(memo.Id))).Data!.Status
+            .ShouldBe(FinanceDocumentStatus.Paid);
+
+        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data!.Single().Id));
+        unapply.Succeeded.ShouldBeTrue(unapply.Message);
+
+        var memoAfter = (await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.GetAsync(memo.Id))).Data!;
+        memoAfter.Status.ShouldBe(FinanceDocumentStatus.Posted);
+        memoAfter.AppliedTotal.ShouldBe(0m);
+        var invoiceAfter = (await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.GetAsync(invoice.Id))).Data!;
+        invoiceAfter.Status.ShouldBe(FinanceDocumentStatus.Posted);
+        invoiceAfter.AppliedTotal.ShouldBe(0m);
+
+        (await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.VoidAsync(memo.Id))).Succeeded.ShouldBeTrue();
+        (await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.VoidAsync(invoice.Id))).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Unapply_PartiallyAppliedCreditMemo_StillWorks()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Settle CM part");
+        var invoice = await PostInvoiceAsync(customer.Data!.Id, 100m);
+        var memo = await PostCreditMemoAsync(customer.Data.Id, 30m);
+
+        var applied = await ApplyAsync(SettlementDocType.CreditMemo, memo.Id, SettlementDocType.Invoice, invoice.Id, 10m);
+        applied.Succeeded.ShouldBeTrue(applied.Message);
+
+        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data!.Single().Id));
+        unapply.Succeeded.ShouldBeTrue(unapply.Message);
+        (await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.GetAsync(memo.Id))).Data!.AppliedTotal.ShouldBe(0m);
+    }
+
+    /// <summary>撤销放宽的只是撤销：已用完的贷项不能再作为源去核销。</summary>
+    [Fact]
+    public async Task Apply_FromAFullyAppliedCreditMemo_IsStillRejected()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Settle CM reuse");
+        var first = await PostInvoiceAsync(customer.Data!.Id, 100m);
+        var second = await PostInvoiceAsync(customer.Data.Id, 100m);
+        var memo = await PostCreditMemoAsync(customer.Data.Id, 30m);
+        (await ApplyAsync(SettlementDocType.CreditMemo, memo.Id, SettlementDocType.Invoice, first.Id, 30m)).Succeeded.ShouldBeTrue();
+
+        var again = await ApplyAsync(SettlementDocType.CreditMemo, memo.Id, SettlementDocType.Invoice, second.Id, 1m);
+
+        again.Succeeded.ShouldBeFalse();
+        again.Code.ShouldBe(409);
+    }
+
     [Fact]
     public async Task Apply_CurrencyMismatch_Rejected()
     {
@@ -242,6 +325,52 @@ public class SettlementWorkflowTests : FinanceIntegrationTestBase
 
         var fxAfter = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(fxEntryId!.Value));
         fxAfter.Data!.Status.ShouldBe(JournalEntryStatus.Reversed);
+    }
+
+    /// <summary>
+    /// 回归：realized FX 凭证的撤销路径是「撤销核销」，不是总账冲销。
+    /// </summary>
+    /// <remarks>
+    /// 核销还在时从总账冲销它，AR 控制科目多出一笔 -10，而发票仍是 Paid、收款仍全额核销，
+    /// 账龄合计 0、控制科目 -10，两边各自看起来都正常。撤销核销自己经冲销漏斗处理这张凭证，
+    /// 不走总账那道门，故把它拦在总账端点之外不会堵死任何既有流程。
+    /// </remarks>
+    [Fact]
+    public async Task RealizedFx_GlReverseRejected_WhileUnapplyStillReversesIt()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Settle FX gate");
+        var invoice = await PostInvoiceAsync(customer.Data!.Id, 100m, currency: "EUR", rate: 1.10m);
+        var payment = await PostInboundPaymentAsync(customer.Data.Id, 100m, currency: "EUR", rate: 1.20m);
+
+        var applied = await ApplyAsync(SettlementDocType.PaymentEntry, payment.Id, SettlementDocType.Invoice, invoice.Id, 100m);
+        applied.Succeeded.ShouldBeTrue(applied.Message);
+        var fxEntryId = applied.Data!.Single().RealizedFxJournalEntryId!.Value;
+
+        // 总账端点与编程式冲销是同一道门，都必须拒绝
+        var viaJournal = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(
+            s => s.ReverseAsync(fxEntryId, new ReverseJournalEntryDto()));
+        viaJournal.Succeeded.ShouldBeFalse();
+        viaJournal.Code.ShouldBe(409);
+        viaJournal.Message!.ShouldContain(FinanceSourceTypes.PaymentApplication);
+
+        var viaLedger = await InScopeAsync<ILedgerPostingService, Result<JournalEntryDto>>(s => s.ReverseAsync(fxEntryId));
+        viaLedger.Succeeded.ShouldBeFalse();
+        viaLedger.Code.ShouldBe(409);
+
+        // 拒绝路径零写入：FX 凭证仍 Posted、AR 控制科目仍与（已付清的）账龄一致为 0
+        (await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(fxEntryId)))
+            .Data!.Status.ShouldBe(JournalEntryStatus.Posted);
+        var arId = await AccountIdAsync("1200");
+        var tb = await InScopeAsync<IFinancialReportService, Result<TrialBalanceReportDto>>(
+            s => s.GetTrialBalanceAsync(new DateTime(2026, 1, 1), new DateTime(2026, 12, 31)));
+        (tb.Data!.Rows.SingleOrDefault(r => r.AccountId == arId)?.ClosingBalance ?? 0m).ShouldBe(0m);
+
+        // 撤销核销仍能冲销它
+        var unapply = await InScopeAsync<ISettlementService, Result>(s => s.UnapplyAsync(applied.Data!.Single().Id));
+        unapply.Succeeded.ShouldBeTrue(unapply.Message);
+        (await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(s => s.GetAsync(fxEntryId)))
+            .Data!.Status.ShouldBe(JournalEntryStatus.Reversed);
     }
 
     [Fact]

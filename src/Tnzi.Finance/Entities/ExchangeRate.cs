@@ -5,7 +5,7 @@ namespace Tnzi.Finance.Entities;
 /// </summary>
 /// <remarks>
 /// 查询语义：取"不晚于目标日期的最近一条"生效汇率；
-/// 无直接汇率时尝试反向汇率取倒数。
+/// 直接与反向两个方向各取一条，用日期较新者（反向取倒数），同日直接汇率优先。
 /// </remarks>
 public class ExchangeRate : MultiTenantAuditedEntity<Guid>
 {

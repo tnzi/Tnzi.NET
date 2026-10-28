@@ -208,22 +208,17 @@ public class AuthTokenService : ApplicationService, IAuthTokenService
     /// <summary>
     /// 清理过期的令牌
     /// </summary>
+    /// <remarks>
+    /// 一条集合删除，不把行读进内存：此前整批 <c>ToListAsync</c> 再逐行删，停机一段时间后的第一次维护
+    /// （或高流量部署上的任何一次）会把积压的刷新令牌、2FA 临时令牌、邀请令牌一次全部加载进一个 DbContext。
+    /// <c>AuthToken</c> 没有软删，集合删除与逐行删除结果相同；单条语句本身是原子的，不需要工作单元包着。
+    /// </remarks>
     public async Task<int> CleanExpiredTokensAsync()
     {
-        return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
-        {
-            var now = DateTime.UtcNow;
-            var expiredTokens = await _repository
-                .Where(ut => ut.ExpiresAt != null && ut.ExpiresAt < now)
-                .ToListAsync(cancellationToken);
-
-            if (expiredTokens.Count > 0)
-            {
-                await _repository.DeleteManyAsync(expiredTokens);
-            }
-
-            return expiredTokens.Count;
-        });
+        var now = DateTime.UtcNow;
+        return await _repository
+            .Where(ut => ut.ExpiresAt != null && ut.ExpiresAt < now)
+            .ExecuteDeleteAsync();
     }
 
     /// <summary>

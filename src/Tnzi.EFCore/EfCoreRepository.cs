@@ -17,9 +17,12 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     private readonly IUnitOfWork? _unitOfWork;
 
     /// <summary>
-    /// 实体属性名白名单缓存（用于 ApplyOrderBy 安全验证）
+    /// 可排序属性缓存（ApplyOrderBy 的白名单）：EF 模型里已映射的标量属性。
     /// </summary>
-    private static readonly ConcurrentDictionary<Type, HashSet<string>> _propertyNameCache = new();
+    /// <remarks>
+    /// 按 EF 实体类型而不是 CLR 类型缓存：同一 CLR 类型在不同模型里映射的列可以不同（多租户关闭时 <c>TenantId</c> 被忽略）。
+    /// </remarks>
+    private static readonly ConcurrentDictionary<IEntityType, FrozenDictionary<string, PropertyInfo>> _sortablePropertyCache = new();
 
     public EFCoreRepository(
         TDbContext dbContext, 
@@ -115,6 +118,9 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     /// 获取实体类型的批次大小
     /// 优先使用 BatchSizes 字典中配置的值，否则使用全局 BatchSize
     /// </summary>
+    /// <remarks>
+    /// 只用于带 <c>[FileField]</c> 的实体按条件硬删时分批加载（见 <see cref="EFCoreOptions.BatchSize"/>）。
+    /// </remarks>
     /// <returns>批次大小</returns>
     protected virtual int GetBatchSize()
     {
@@ -173,11 +179,10 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             return source.OrderBy(e => EF.Property<object>(e, "Id"));
         }
 
-        // 获取或构建属性名白名单
-        var allowedProperties = _propertyNameCache.GetOrAdd(typeof(TEntity), type =>
-            new HashSet<string>(
-                type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name),
-                StringComparer.OrdinalIgnoreCase));
+        // 白名单取自 EF 模型：只有已映射的标量属性能翻译成 ORDER BY。
+        // ★ 不能取 CLR 公开属性：DomainEvents、导航、[NotMapped] 计算属性都在里面，命中后 EF 执行时翻译失败，
+        //   一个客户端传来的 orderBy 就变成 500，而不是按本方法的意图被跳过。
+        var sortableProperties = GetSortableProperties();
 
         // 解析 orderBy 字符串并应用排序
         var parts = orderBy.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -189,8 +194,8 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             var propertyName = tokens[0];
             var descending = tokens.Length > 1 && tokens[1].Equals("DESC", StringComparison.OrdinalIgnoreCase);
 
-            // 白名单验证：跳过不存在的属性，防止注入
-            if (!allowedProperties.Contains(propertyName))
+            // 白名单验证：跳过不存在或未映射的属性，防止注入
+            if (!sortableProperties.TryGetValue(propertyName, out var propertyInfo))
             {
                 _logger?.LogWarning("ApplyOrderBy: Property '{PropertyName}' is not a valid property of {EntityType}, skipping",
                     propertyName, typeof(TEntity).Name);
@@ -198,7 +203,6 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             }
 
             var parameter = Expression.Parameter(typeof(TEntity), "e");
-            var propertyInfo = typeof(TEntity).GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)!;
             var property = Expression.Property(parameter, propertyInfo);
             var lambda = Expression.Lambda<Func<TEntity, object>>(Expression.Convert(property, typeof(object)), parameter);
 
@@ -214,6 +218,30 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
 
         // 如果所有属性都被跳过，回退到默认排序
         return orderedQuery ?? source.OrderBy(e => EF.Property<object>(e, "Id"));
+    }
+
+    private FrozenDictionary<string, PropertyInfo> GetSortableProperties()
+    {
+        var entityType = DbContext.Model.FindEntityType(typeof(TEntity));
+        if (entityType == null)
+        {
+            return FrozenDictionary<string, PropertyInfo>.Empty;
+        }
+
+        return _sortablePropertyCache.GetOrAdd(entityType, static type =>
+        {
+            var properties = new Dictionary<string, PropertyInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in type.GetProperties())
+            {
+                // 影子属性与只映射到字段的属性没有可供表达式访问的 CLR 属性
+                if (property.PropertyInfo is { } clrProperty && !property.IsShadowProperty())
+                {
+                    properties.TryAdd(property.Name, clrProperty);
+                }
+            }
+
+            return properties.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+        });
     }
 
     public IEnumerator<TEntity> GetEnumerator()
@@ -601,26 +629,10 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     {
         Check.NotNull(entities);
 
-        // 优化批量插入：如果实体数量较少，直接使用AddRangeAsync
-        // 如果数量较大，可以考虑分批处理以减少内存占用
-        var entityList = entities as ICollection<TEntity> ?? entities.ToList();
-        var batchSize = GetBatchSize();
+        // 一次 AddRange、一次保存。按块逐次 AddRange 与一次 AddRange 得到的跟踪状态完全相同，
+        // 发往数据库的命令分批由 provider 的 MaxBatchSize 决定，仓储里分块不省内存也不减往返。
+        await DbSet.AddRangeAsync(entities, cancellationToken);
 
-        // 对于大量实体（超过批次大小），分批处理
-        if (entityList.Count > batchSize)
-        {
-            var batches = entityList.Chunk(batchSize);
-
-            foreach (var batch in batches)
-            {
-                await DbSet.AddRangeAsync(batch, cancellationToken);
-            }
-        }
-        else
-        {
-            await DbSet.AddRangeAsync(entityList, cancellationToken);
-        }
-        
         // 批量操作：延迟保存（在方法结束时统一保存）
         if (ShouldSaveImmediately())
         {
@@ -633,6 +645,7 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         Check.NotNull(entity);
 
         var entry = DbContext.Entry(entity);
+        var reattached = false;
         if (entry.State == EntityState.Detached)
         {
             // 同一主键已被本 DbContext 跟踪时 Attach 会抛 identity conflict，
@@ -650,6 +663,7 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             }
 
             DbSet.Attach(entity);
+            reattached = true;
         }
 
         // 尚未持久化的新实体（Added）必须保持 Added：
@@ -658,6 +672,12 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         if (entry.State != EntityState.Added)
         {
             entry.State = EntityState.Modified;
+        }
+
+        // 脱离跟踪附加进来的实例原值即新值，文件字段的原值要从库里回读，引用增删才算得出来
+        if (reattached)
+        {
+            await FileFieldOriginalValues.RestoreAsync(entry, cancellationToken);
         }
 
         // 智能保存：如果应该立即保存，则保存更改
@@ -671,11 +691,11 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     {
         Check.NotNull(entities);
 
-        // 优化批量更新：对于大量实体，分批处理
         var entityList = entities as ICollection<TEntity> ?? entities.ToList();
 
         // 尚未持久化的新实体（Added）必须保持 Added，不能被 UpdateRange 降级为 Modified（见 UpdateAsync）
         var toUpdate = new List<TEntity>(entityList.Count);
+        var reattached = new List<TEntity>();
         foreach (var item in entityList)
         {
             var state = DbContext.Entry(item).State;
@@ -694,26 +714,22 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
                     TrackedDuplicateResolver.Merge(tracked!, item);
                     continue;
                 }
+
+                reattached.Add(item);
             }
 
             toUpdate.Add(item);
         }
 
-        var batchSize = GetBatchSize();
-
-        // 对于大量实体（超过批次大小），分批处理
-        if (toUpdate.Count > batchSize)
-        {
-            var batches = toUpdate.Chunk(batchSize);
-
-            foreach (var batch in batches)
-            {
-                DbSet.UpdateRange(batch);
-            }
-        }
-        else if (toUpdate.Count > 0)
+        if (toUpdate.Count > 0)
         {
             DbSet.UpdateRange(toUpdate);
+        }
+
+        // 与 UpdateAsync 同理：脱离跟踪附加进来的实例，文件字段原值从库里回读
+        foreach (var item in reattached)
+        {
+            await FileFieldOriginalValues.RestoreAsync(DbContext.Entry(item), cancellationToken);
         }
 
         // 批量操作：延迟保存（在方法结束时统一保存）
@@ -729,10 +745,8 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
     /// 于是它不再参与本 <c>DbContext</c> 后续的任何 <c>SaveChanges</c>。
     /// <para>
     /// ★ 刻意<b>不</b>复用 <see cref="DeleteAsync(TEntity, CancellationToken)"/>：那是业务删除 ——
-    /// 对软删实体会写 <c>IsDeleted = true</c> 然后走 <c>UpdateAsync</c>，而一个处于
-    /// <c>Added</c> 状态的实体在那条路径上会被<b>真的插进库里</b>（只是带着已删标记），
-    /// 也就是给一条从未成功过的插入凭空造出一行垃圾数据 —— 而软删实体的过滤唯一索引
-    /// 通常排除已删行，所以它甚至不会报错。
+    /// 对 <c>Added</c> 实体它同样不插入，但无事务时会立即 <c>SaveChanges</c>，把本作用域里别的挂起变更一并提交；
+    /// 错误恢复路径（catch 里撤销一条插入失败的实体）不该有这种副作用。
     /// </para>
     /// </remarks>
     public virtual void Discard(TEntity entity)
@@ -744,25 +758,29 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
             entry.State = EntityState.Detached;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// 软删实体与 <c>DbContext.Remove</c> 写出同样的行：<c>IsDeleted</c>、删除人、删除时间、修改审计与新并发戳，
+    /// 由 <c>SaveChanges</c> 的审计管线按「未删 → 已删」的跃迁写入（见 <see cref="MarkSoftDeletedAsync"/>）。
+    /// 尚未落库的新实体（<c>Added</c>）不论软删硬删一律不插入。
+    /// </remarks>
     public virtual async Task DeleteAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         Check.NotNull(entity);
 
-        if (entity is ISoftDelete softDelete)
+        if (entity is ISoftDelete)
         {
-            softDelete.IsDeleted = true;
-            await UpdateAsync(entity, cancellationToken);
-            // UpdateAsync 已经会保存，这里不需要再次保存
+            await MarkSoftDeletedAsync(entity, cancellationToken);
         }
         else
         {
-            DbSet.Remove(entity);
-            
-            // 智能保存：如果应该立即保存，则保存更改
-            if (ShouldSaveImmediately())
-            {
-                await DbContext.SaveChangesAsync(cancellationToken);
-            }
+            DbSet.Remove(ResolveTrackedInstance(entity));
+        }
+
+        // 智能保存：如果应该立即保存，则保存更改
+        if (ShouldSaveImmediately())
+        {
+            await DbContext.SaveChangesAsync(cancellationToken);
         }
     }
 
@@ -777,51 +795,94 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
 
         if (hasSoftDelete)
         {
-            // 软删除：批量更新IsDeleted标志
-            var softDeleteEntities = entityList.Cast<ISoftDelete>().ToList();
-            foreach (var entity in softDeleteEntities)
+            // 软删除：逐个走与 DeleteAsync 同一处理（跟踪状态、重复跟踪合并、Added 不插入）
+            foreach (var entity in entityList)
             {
-                entity.IsDeleted = true;
-            }
-
-            // 批量更新
-            var entitiesToUpdate = entityList.ToList();
-            var batchSize = GetBatchSize();
-            if (entitiesToUpdate.Count > batchSize)
-            {
-                var batches = entitiesToUpdate.Chunk(batchSize);
-                foreach (var batch in batches)
-                {
-                    DbSet.UpdateRange(batch);
-                }
-            }
-            else
-            {
-                DbSet.UpdateRange(entitiesToUpdate);
+                await MarkSoftDeletedAsync(entity, cancellationToken);
             }
         }
         else
         {
-            // 硬删除：直接移除
-            var batchSize = GetBatchSize();
-            if (entityList.Count > batchSize)
-            {
-                var batches = entityList.Chunk(batchSize);
-                foreach (var batch in batches)
-                {
-                    DbSet.RemoveRange(batch);
-                }
-            }
-            else
-            {
-                DbSet.RemoveRange(entityList);
-            }
+            // 硬删除：直接移除（同主键已被跟踪时移除已跟踪的那一条）
+            DbSet.RemoveRange(entityList.Select(ResolveTrackedInstance).ToList());
         }
-        
+
         // 批量操作：延迟保存（在方法结束时统一保存）
         if (ShouldSaveImmediately())
         {
             await DbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 脱离跟踪的实例若与本 DbContext 已跟踪的条目同主键，返回已跟踪的那个实例（对它操作才不会撞 identity conflict）；
+    /// 否则原样返回。
+    /// </summary>
+    private TEntity ResolveTrackedInstance(TEntity entity)
+    {
+        if (DbContext.Entry(entity).State != EntityState.Detached)
+        {
+            return entity;
+        }
+
+        return TrackedDuplicateResolver.Find(DbContext, entity)?.Entity ?? entity;
+    }
+
+    /// <summary>
+    /// 把一个软删实体标记为已删，让 <c>SaveChanges</c> 的审计管线写出删除人与删除时间。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 顺序是关键：<b>先让条目被正确跟踪，再翻 <c>IsDeleted</c></b>。审计管线的修改分支按原值 false → 现值 true
+    /// 的跃迁判定「刚刚被软删」才写删除人；仓储读方法默认 <c>AsNoTracking</c>，若先翻标志再附加，
+    /// 原值快照就已经是 true，删除人与删除时间一列不写。
+    /// </para>
+    /// <para>
+    /// 刻意不走 <c>DbSet.Remove</c> + <c>Deleted</c> 分支：<c>Deleted</c> 状态会触发 EF 对已跟踪依赖项的级联
+    /// （硬删子行、把可选外键置空），而软删的主行仍在库里，级联是错的。
+    /// </para>
+    /// <para>
+    /// 同主键已被跟踪时合并到已跟踪的那一条（与 <c>UpdateAsync</c> 同一处理）；尚未落库的新实体（<c>Added</c>）
+    /// 直接移出跟踪而不插入：它从未存在过，插一行带删除标记的记录只是凭空造出垃圾数据。
+    /// </para>
+    /// </remarks>
+    private async Task MarkSoftDeletedAsync(TEntity entity, CancellationToken cancellationToken)
+    {
+        var target = entity;
+        var entry = DbContext.Entry(entity);
+        var reattached = false;
+
+        if (entry.State == EntityState.Detached)
+        {
+            var tracked = TrackedDuplicateResolver.Find(DbContext, entity);
+            if (TrackedDuplicateResolver.CanMergeInto(tracked))
+            {
+                TrackedDuplicateResolver.Merge(tracked!, entity);
+                target = tracked!.Entity;
+                entry = tracked;
+            }
+            else
+            {
+                // 按实例当前（未删）的值附加：原值快照就是「删除之前」
+                DbSet.Attach(entity);
+                reattached = true;
+            }
+        }
+
+        ((ISoftDelete)entity).IsDeleted = true;
+
+        if (entry.State == EntityState.Added)
+        {
+            DbSet.Remove(target);
+            return;
+        }
+
+        ((ISoftDelete)target).IsDeleted = true;
+        entry.State = EntityState.Modified;
+
+        if (reattached)
+        {
+            await FileFieldOriginalValues.RestoreAsync(entry, cancellationToken);
         }
     }
 
@@ -868,29 +929,9 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
         else
         {
             // 硬删除安全性检查：如果实体包含 [FileField]，必须加载到内存删除以触发文件清理
-            // 分批加载和删除，避免一次性加载所有匹配实体到内存导致 OOM
             if (Internal.TypeHelper.HasFileFields(typeof(TEntity)))
             {
-                var batchSize = GetBatchSize();
-                while (true)
-                {
-                    var batch = await DbSet.Where(predicate)
-                        .Take(batchSize)
-                        .ToListAsync(cancellationToken)
-                        ;
-
-                    if (batch.Count == 0)
-                        break;
-
-                    // 直接使用 DbSet.RemoveRange 而非调用 DeleteManyAsync，
-                    // 避免子类 override 的 DeleteManyAsync 再次调用 DeleteAsync(predicate) 导致无限递归
-                    DbSet.RemoveRange(batch);
-
-                    if (ShouldSaveImmediately())
-                    {
-                        await DbContext.SaveChangesAsync(cancellationToken);
-                    }
-                }
+                await RemoveThroughChangeTrackerAsync(predicate, cancellationToken);
             }
             else
             {
@@ -898,6 +939,68 @@ public class EFCoreRepository<TDbContext, TEntity> : IRepository<TEntity>
                 await EnsureBulkSqlJoinsTransactionAsync(cancellationToken);
                 // 无文件字段，安全使用 ExecuteDeleteAsync 优化
                 await DbSet.Where(predicate).ExecuteDeleteAsync(cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 经变更跟踪硬删匹配的实体：带 <c>[FileField]</c> 的实体要这样删，文件引用才清理得到。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ 分批的前提是<b>每批删完真的离开了数据库</b>，下一轮同一条查询才取得到下一批。此前只在「立即保存」时保存：
+    /// 事务开着或关掉自动保存时行一直在库里，跟踪查询按主键身份解析回到同一批已标记 Deleted 的实例，循环永不结束。
+    /// 现在分三种情形：
+    /// </para>
+    /// <list type="bullet">
+    /// <item>立即保存：每批直接保存。</item>
+    /// <item>事务开着（自动保存未关）：每批经仓储的 <see cref="SaveChangesAsync"/> 保存。它路由到工作单元、在调用方的事务里落库，
+    /// 回滚照样撤销；与同一方法里 ExecuteDelete / ExecuteUpdate 的分支一样在事务内即时写库，内存按批有界。</item>
+    /// <item>其余（关掉自动保存，或子类让立即保存不成立而又没有事务）：仓储不替调用方保存，一次取出全部匹配实体标记删除。
+    /// 分批在这里省不了内存：标记删除的实体在调用方保存之前一直留在跟踪器里。</item>
+    /// </list>
+    /// <para>
+    /// 用 <c>DbSet.RemoveRange</c> 而非 <c>DeleteManyAsync</c>：避免子类覆写的 <c>DeleteManyAsync</c> 再调回
+    /// <c>DeleteAsync(predicate)</c> 无限递归。
+    /// </para>
+    /// </remarks>
+    private async Task RemoveThroughChangeTrackerAsync(Expression<Func<TEntity, bool>> predicate, CancellationToken cancellationToken)
+    {
+        var saveDirectly = ShouldSaveImmediately();
+        var flushThroughUnitOfWork = !saveDirectly && _autoSaveChanges && IsTransactionEnabled();
+
+        if (!saveDirectly && !flushThroughUnitOfWork)
+        {
+            DbSet.RemoveRange(await DbSet.Where(predicate).ToListAsync(cancellationToken));
+            return;
+        }
+
+        var batchSize = GetBatchSize();
+        while (true)
+        {
+            var batch = await DbSet.Where(predicate).Take(batchSize).ToListAsync(cancellationToken);
+            if (batch.Count == 0)
+            {
+                return;
+            }
+
+            // 兜底：本批全是已标记删除的实例 = 上一批保存之后这些行仍在库里（例如某个保存拦截器改写了删除），
+            // 再转一圈也不会有进展。
+            if (batch.TrueForAll(e => DbContext.Entry(e).State == EntityState.Deleted))
+            {
+                throw new InvalidOperationException(
+                    $"Deleting {typeof(TEntity).Name} by predicate made no progress: rows removed in the previous batch are still returned by the query.");
+            }
+
+            DbSet.RemoveRange(batch);
+
+            if (saveDirectly)
+            {
+                await DbContext.SaveChangesAsync(cancellationToken);
+            }
+            else
+            {
+                await SaveChangesAsync(cancellationToken);
             }
         }
     }
@@ -1006,13 +1109,34 @@ public class EFCoreRepository<TDbContext, TEntity, TKey> : EFCoreRepository<TDbC
             && Internal.TypeHelper.HasFileFields(typeof(TEntity));
         if (entityList.Count > 20 && !hasFileFields)
         {
-            var ids = entityList.Select(e => e.Id).ToList();
-            await DeleteAsync(e => ids.Contains(e.Id), cancellationToken);
-
-            // 同步内存状态（以防实体被追踪并在后续被使用）
+            // 数据库端批量 SQL 不经变更跟踪器，只交给它「脱离跟踪、且本上下文里没有同主键实例」的那些。
+            // 已被跟踪的（含新增未落库的）走变更跟踪器那条路径，否则内存与库各说各话：
+            // 新增的实体带着删除标记被插进库，已跟踪的实例带着旧并发戳在下一次保存撞冲突，
+            // 调用方挂在它们身上的修改被丢掉。
+            var viaTracker = new List<TEntity>();
+            var viaSql = new List<TEntity>();
             foreach (var entity in entityList)
             {
-                if (entity is ISoftDelete sd) sd.IsDeleted = true;
+                var tracked = DbContext.Entry(entity).State != EntityState.Detached
+                    || TrackedDuplicateResolver.Find(DbContext, entity) != null;
+                (tracked ? viaTracker : viaSql).Add(entity);
+            }
+
+            if (viaTracker.Count > 0)
+            {
+                await base.DeleteManyAsync(viaTracker, cancellationToken);
+            }
+
+            if (viaSql.Count > 0)
+            {
+                var ids = viaSql.Select(e => e.Id).ToList();
+                await DeleteAsync(e => ids.Contains(e.Id), cancellationToken);
+
+                // 同步调用方手里这些（未被跟踪的）实例的内存状态
+                foreach (var entity in viaSql)
+                {
+                    if (entity is ISoftDelete sd) sd.IsDeleted = true;
+                }
             }
         }
         else

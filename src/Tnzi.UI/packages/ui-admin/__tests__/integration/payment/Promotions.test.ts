@@ -225,35 +225,38 @@ describe('Promotions page (standard useCrudPage + TCrudPage)', () => {
     expect(mockGetList).toHaveBeenCalledTimes(2)
   })
 
-  it('active-filter change calls setFilters + triggers refetch', async () => {
+  it('the status filter "Valid" asks for promotions valid now, and refetches', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as { onActiveFilterChange: (v: string | null) => void }
-    vm.onActiveFilterChange('active')
+    vm.onActiveFilterChange('valid')
     await flushPromises()
     expect(mockGetList).toHaveBeenCalledTimes(2)
-    const secondCall = mockGetList.mock.calls[1][0] as { isActive: boolean | null }
-    expect(secondCall.isActive).toBe(true)
+    const secondCall = mockGetList.mock.calls[1][0] as { validNow?: boolean }
+    expect(secondCall.validNow).toBe(true)
   })
 
-  it('active-filter "inactive" passes isActive=false', async () => {
+  // The list endpoint answers one question, "valid right now" (enabled and
+  // inside its window). An "Inactive" option sent the same request as no filter
+  // and listed every promotion; "Active" was labelled as the enabled flag the
+  // list's badge shows, but hid enabled promotions outside their window.
+  it('★ offers only the filter the server can answer, labelled as the badge it matches', async () => {
+    const wrapper = mount(Promotions, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { activeFilterOptions: Array<{ value: string; label: string }> }
+    expect(vm.activeFilterOptions).toEqual([{ value: 'valid', label: 'Valid' }])
+  })
+
+  it('a cleared status filter asks for every promotion', async () => {
     const wrapper = mount(Promotions, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as { onActiveFilterChange: (v: string | null) => void }
-    vm.onActiveFilterChange('inactive')
+    vm.onActiveFilterChange('valid')
     await flushPromises()
-    const secondCall = mockGetList.mock.calls[1][0] as { isActive: boolean | null }
-    expect(secondCall.isActive).toBe(false)
-  })
-
-  it('active-filter null (cleared) passes isActive=null', async () => {
-    const wrapper = mount(Promotions, { global: { stubs } })
-    await flushPromises()
-    const vm = wrapper.vm as unknown as { onActiveFilterChange: (v: string | null) => void }
     vm.onActiveFilterChange(null)
     await flushPromises()
-    const secondCall = mockGetList.mock.calls[1][0] as { isActive: boolean | null }
-    expect(secondCall.isActive).toBe(null)
+    const lastCall = mockGetList.mock.calls.at(-1)![0] as { validNow?: boolean }
+    expect(lastCall.validNow).toBe(false)
   })
 
   it('submitting a create calls bridge.create and refreshes', async () => {

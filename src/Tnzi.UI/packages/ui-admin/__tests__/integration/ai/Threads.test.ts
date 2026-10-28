@@ -8,9 +8,15 @@ import { createPinia, setActivePinia } from 'pinia'
  * Edit / Delete), a message-transcript detail drawer, and JSON/Markdown export.
  *
  * The drawer's open flow calls bridge.threads.getDetail; Export JSON calls
- * bridge.threads.exportJson and downloads a Blob; Export MD opens the URL from
- * bridge.threads.getExportMarkdownUrl. All three sub-contracts are mocked.
+ * bridge.threads.exportJson and downloads a Blob; Export MD fetches the file
+ * through bridge.threads.exportMarkdown (never a bare link: the endpoint needs
+ * the bearer token) and downloads it. All three sub-contracts are mocked.
  */
+const messageError = vi.hoisted(() => vi.fn())
+vi.mock('../../../src/pages/_shared/safe-message', () => ({
+  useSafeMessage: () => ({ success: vi.fn(), error: messageError, warning: vi.fn(), info: vi.fn() }),
+}))
+
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
@@ -65,7 +71,7 @@ const exportJson = vi.fn(async (id: string) => ({
   messages: [],
 }))
 
-const getExportMarkdownUrl = vi.fn((id: string) => `/api/admin/ai/threads/${id}/export/markdown`)
+const exportMarkdown = vi.fn(async (_id: string) => new Blob(['# Billing question'], { type: 'text/markdown' }))
 const updateMock = vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) }))
 const deleteMock = vi.fn(async () => undefined)
 
@@ -77,7 +83,7 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       delete: deleteMock,
       getDetail,
       exportJson,
-      getExportMarkdownUrl,
+      exportMarkdown,
     },
   }),
 }))
@@ -123,7 +129,8 @@ describe('Threads page (TCrudPage table + message drawer)', () => {
     threadFetch.mockClear()
     getDetail.mockClear()
     exportJson.mockClear()
-    getExportMarkdownUrl.mockClear()
+    exportMarkdown.mockClear()
+    messageError.mockClear()
     updateMock.mockClear()
     deleteMock.mockClear()
   })
@@ -201,17 +208,43 @@ describe('Threads page (TCrudPage table + message drawer)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('exportMd resolves the markdown URL and triggers a download', async () => {
+  // The endpoint is an authenticated admin route. The anchor used to point at its
+  // URL, and a browser navigation carries no Authorization header: every export
+  // got a 401 (or saved the error body as thread-x.md) with no message at all.
+  it('★ exportMd downloads the file through the bridge and saves the Blob', async () => {
+    const createObjectURL = vi.fn((_blob: Blob) => 'blob:thread-t2')
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+    let saved: { href: string; download: string } | null = null
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved = { href: this.href, download: this.download }
+    })
+
+    const wrapper = mount(Threads, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { exportMd: (id: string) => Promise<void> }
+    await vm.exportMd('t2')
+    await flushPromises()
+
+    expect(exportMarkdown).toHaveBeenCalledWith('t2')
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(await (createObjectURL.mock.calls[0]![0] as Blob).text()).toBe('# Billing question')
+    expect(saved).toEqual({ href: 'blob:thread-t2', download: 'thread-t2.md' })
+
+    vi.unstubAllGlobals()
+  })
+
+  it('a refused markdown export reports the reason and saves nothing', async () => {
+    exportMarkdown.mockRejectedValueOnce(new Error('Thread not found'))
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
 
     const wrapper = mount(Threads, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as { exportMd: (id: string) => void }
-    vm.exportMd('t2')
+    const vm = wrapper.vm as unknown as { exportMd: (id: string) => Promise<void> }
+    await vm.exportMd('t1')
     await flushPromises()
 
-    expect(getExportMarkdownUrl).toHaveBeenCalledWith('t2')
-    expect(clickSpy).toHaveBeenCalledTimes(1)
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(messageError).toHaveBeenCalledWith('Thread not found')
   })
 
   it('edit submits a title-only update through the bridge', async () => {

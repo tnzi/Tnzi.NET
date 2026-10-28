@@ -8,9 +8,9 @@ public class FeatureValueConfiguration : EntityTypeConfigurationBase<FeatureValu
     public override void Configure(EntityTypeBuilder<FeatureValue> builder)
     {
         builder.Property(e => e.FeatureDefinitionId).IsRequired();
-        builder.Property(e => e.ProviderName).IsRequired().HasMaxLength(64);
-        builder.Property(e => e.ProviderKey).HasMaxLength(64);
-        builder.Property(e => e.Value).IsRequired().HasMaxLength(200);
+        builder.Property(e => e.ProviderName).IsRequired().HasMaxLength(FeatureFieldLimits.ProviderKey);
+        builder.Property(e => e.ProviderKey).HasMaxLength(FeatureFieldLimits.ProviderKey);
+        builder.Property(e => e.Value).IsRequired().HasMaxLength(FeatureFieldLimits.Value);
 
         // Unique index: one value per definition + provider + key
         builder.HasIndex(e => new { e.FeatureDefinitionId, e.ProviderName, e.ProviderKey }).IsUnique()

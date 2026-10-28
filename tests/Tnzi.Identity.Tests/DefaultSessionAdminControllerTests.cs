@@ -1,4 +1,5 @@
 using Tnzi.Identity.Controllers.Admin;
+using IdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
 
@@ -117,6 +118,48 @@ public class DefaultSessionAdminControllerTests
         result.Code.ShouldBe(400);
         _revocation.Verify(x => x.RevokeInactiveSessionsAsync(It.IsAny<TimeSpan>()), Times.Never);
         _sessionService.Verify(x => x.CleanExpiredSessionsAsync(It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    /// <summary>
+    /// ★ 不带阈值的清扫按会话策略走，与后台维护任务同一个阈值。
+    /// 端点曾默认 30 分钟，而管理端「清理过期会话」按钮从不传阈值、确认框写的是
+    /// 「按后端策略清扫」：默认配置下（刷新令牌 7 天、不设闲置超时）一点下去，
+    /// 半小时没发过请求的所有用户都被踢下线、刷新令牌被删。
+    /// </summary>
+    [Theory]
+    [InlineData(0, 7, 7 * 24 * 60)]
+    [InlineData(20, 7, 20)]
+    [InlineData(0, 30, 30 * 24 * 60)]
+    public async Task CleanExpired_WithoutAThreshold_UsesTheSessionPolicy(int idleTimeoutMinutes, int refreshTokenDays, int expectedMinutes)
+    {
+        var options = new IdentityOptions();
+        options.AccountSecurity.SessionTimeoutMinutes = idleTimeoutMinutes;
+        options.Jwt.RefreshTokenExpirationDays = refreshTokenDays;
+        var monitor = new Mock<IOptionsMonitor<IdentityOptions>>();
+        monitor.Setup(x => x.CurrentValue).Returns(options);
+        var controller = new DefaultSessionAdminController(_sessionService.Object, _revocation.Object, monitor.Object);
+        _revocation.Setup(x => x.RevokeInactiveSessionsAsync(TimeSpan.FromMinutes(expectedMinutes))).ReturnsAsync(4);
+
+        var result = await controller.CleanExpired();
+
+        result.Success.ShouldBeTrue();
+        result.Data.ShouldBe(4);
+        _revocation.Verify(x => x.RevokeInactiveSessionsAsync(TimeSpan.FromMinutes(expectedMinutes)), Times.Once);
+    }
+
+    /// <summary>
+    /// 子类只把前两个依赖传给基类时没有配置可读：按默认会话策略（刷新令牌 7 天）走，
+    /// 绝不退回到会把整站用户踢下线的半小时。
+    /// </summary>
+    [Fact]
+    public async Task CleanExpired_WithoutAThresholdOrOptions_UsesTheDefaultPolicy()
+    {
+        _revocation.Setup(x => x.RevokeInactiveSessionsAsync(TimeSpan.FromDays(7))).ReturnsAsync(1);
+
+        var result = await _controller.CleanExpired();
+
+        result.Success.ShouldBeTrue();
+        _revocation.Verify(x => x.RevokeInactiveSessionsAsync(TimeSpan.FromDays(7)), Times.Once);
     }
 
     /// <summary>

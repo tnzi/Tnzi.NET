@@ -53,9 +53,20 @@ public partial class TwoFactorService
             return Fail("Address is required", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
+        // ★★★ 投递用去掉首尾空白的原样写法，其余（存储、查询、节流）一律用规范形态：
+        //   同一个地址换个大小写不能换出一个新的节流桶（见 CanonicalAddress）。
+        var deliveryAddress = address.Trim();
+        var canonicalAddress = CanonicalAddress(deliveryAddress, type);
+
+        // 列宽之外的地址答 400：交给插入，PostgreSQL 上是 500，SQLite 上原样落库。
+        if (canonicalAddress.Length > TwoFactorCode.AddressMaxLength)
+        {
+            return Fail($"Address must be at most {TwoFactorCode.AddressMaxLength} characters", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 优先检查缓存。★ key 含 purpose：不同用途各自计时 —— 否则刚收到登录码的人
         // 会因为「发得太频繁」而换不了绑定邮箱，两件互不相干的事被同一个节流串在一起。
-        var resendCacheKey = $"2FA_Resend_Timestamp:{address}:{(int)type}:{(int)purpose}";
+        var resendCacheKey = $"2FA_Resend_Timestamp:{canonicalAddress}:{(int)type}:{(int)purpose}";
         if (_cache != null)
         {
             var lastSent = await _cache.GetAsync<DateTime?>(resendCacheKey);
@@ -70,7 +81,7 @@ public partial class TwoFactorService
         if (_cache == null)
         {
             var lastCode = await _repository
-                .Where(tfc => tfc.Address == address && tfc.Type == type && tfc.Purpose == purpose && !tfc.IsUsed)
+                .Where(tfc => tfc.Address == canonicalAddress && tfc.Type == type && tfc.Purpose == purpose && !tfc.IsUsed)
                 .OrderByDescending(tfc => tfc.CreationTime)
                 .FirstOrDefaultAsync();
 
@@ -92,7 +103,7 @@ public partial class TwoFactorService
             Code = code,
             Type = type,
             Purpose = purpose,
-            Address = address,
+            Address = canonicalAddress,
             ExpiresAt = expiresAt,
             IsUsed = false,
             CreationTime = DateTime.UtcNow
@@ -116,7 +127,7 @@ public partial class TwoFactorService
                 UserId = userId ?? Guid.Empty,
                 UserName = userName ?? string.Empty,
                 Type = type == TwoFactorType.Email ? IdentityConstants.TwoFactorTypeName.Email : IdentityConstants.TwoFactorTypeName.Sms,
-                Address = address,
+                Address = deliveryAddress,
                 Code = code,
                 ExpiresAt = expiresAt,
                 ExpirationMinutes = _otpOptions.ExpirationMinutes
@@ -180,10 +191,12 @@ public partial class TwoFactorService
 
         // ★ 与 TOTP 分支共用同一组 helper（见 TwoFactorService.FailureCacheKey）：
         // 两种方式给出不同的爆破成本是不可接受的 —— 用户看到的是同一个「两步验证」，
-        // 而「各写一遍、其中一份漏了」没有任何症状。
-        var cacheKey = FailureCacheKey(address, type, purpose);
+        // 而「各写一遍、其中一份漏了」没有任何症状。键用规范形态：同一个地址换个写法不是新的 5 次。
+        var canonicalAddress = CanonicalAddress(address, type);
+        var cacheKey = FailureCacheKey(canonicalAddress, type, purpose);
 
-        if (await IsFailureLockedOutAsync(cacheKey))
+        // 先占用一次尝试再验码：并发在途的请求每一个都被计入（见 TryReserveAttemptAsync）。
+        if (!await TryReserveAttemptAsync(cacheKey))
         {
             var lockedOut = TooManyAttempts();
             return Fail<Guid?>(lockedOut.Message!, lockedOut.Code ?? 429, lockedOut.ErrorCode);
@@ -192,26 +205,43 @@ public partial class TwoFactorService
         // 查找未使用且未过期的验证码。★ Purpose 进谓词：为别的流程发出的码在这里查不到，
         // 因此与「码不对」同一种结果 —— 用途不匹配不单独报错，否则等于告诉试探者
         // 「这枚码是真的，只是用错了地方」。
-        var twoFactorCode = await _repository
-            .Where(tfc => tfc.Address == address
-                && tfc.Code == code
+        // ★ 库里的比较只用来缩小候选，最终判定在内存里按序数比较规范形态：不区分大小写、忽略尾随空格、
+        //   忽略全角半角的排序规则会把另一种写法也判成相等，那种写法却有它自己的失败计数；让排序规则替我们
+        //   决定「哪些写法是同一个地址」，失败计数就又能被绕开。原样写法那一支只为规范化之前写入、仍在有效期内的码。
+        var trimmedAddress = address.Trim();
+        var trimmedCode = code.Trim();
+        var now = DateTime.UtcNow;
+        var candidates = await _repository
+            .Where(tfc => (tfc.Address == canonicalAddress || tfc.Address == trimmedAddress)
+                && tfc.Code == trimmedCode
                 && tfc.Type == type
                 && tfc.Purpose == purpose
                 && !tfc.IsUsed
-                && tfc.ExpiresAt > DateTime.UtcNow)
+                && tfc.ExpiresAt > now)
+            .AsNoTracking()
             .OrderByDescending(tfc => tfc.CreationTime)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        var twoFactorCode = candidates.FirstOrDefault(tfc =>
+            string.Equals(CanonicalAddress(tfc.Address, type), canonicalAddress, StringComparison.Ordinal)
+            && string.Equals(tfc.Code, trimmedCode, StringComparison.Ordinal));
 
         if (twoFactorCode == null)
         {
-            await RecordFailureAsync(cacheKey);
             return Fail<Guid?>("Invalid or expired verification code", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        // 标记为已使用
-        twoFactorCode.IsUsed = true;
-        twoFactorCode.UsedAt = DateTime.UtcNow;
-        await _repository.UpdateAsync(twoFactorCode);
+        // ★ 标记已用是条件更新（WHERE Id = @id AND IsUsed = 0），影响 0 行 = 并发的另一个请求已经用掉了它。
+        //   此前是读出实体、改字段、整行写回：两个同时拿着同一枚码的请求都读到「未使用」，都写回「已使用」，都成功。
+        var consumed = await _repository
+            .Where(tfc => tfc.Id == twoFactorCode.Id && !tfc.IsUsed)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(tfc => tfc.IsUsed, true)
+                .SetProperty(tfc => tfc.UsedAt, now));
+        if (consumed == 0)
+        {
+            return Fail<Guid?>("Invalid or expired verification code", 400, ErrorCodes.VALIDATION_ERROR);
+        }
 
         await ClearFailuresAsync(cacheKey);
 

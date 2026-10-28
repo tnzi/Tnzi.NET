@@ -68,7 +68,7 @@ public interface INotificationPreferenceService
     /// </summary>
     /// <remarks>
     /// ⚠️ <b>群发路径不要用它</b>：逐个问在一次千人群发上就是一千次往返。
-    /// 用 <see cref="GetQuietHoursAsync"/>，两者共用同一份判定。
+    /// 用 <see cref="GetQuietHoursWindowsAsync"/>，两者共用同一份判定（含时区与夏令时）。
     /// </remarks>
     Task<bool> IsInQuietHoursAsync(Guid userId, string channel, CancellationToken cancellationToken = default);
 
@@ -89,9 +89,40 @@ public interface INotificationPreferenceService
     /// ★ 两个时刻缺任一即视为<b>没设</b>：只有开始没有结束的窗口没有结束时刻可算，
     /// 而延后必须写得出「什么时候再发」。
     /// </para>
+    /// <para>
+    /// ★ 返回的是 <b>UTC 时刻</b>。设了时区的偏好按「包含现在的那一次、或紧随其后的下一次」
+    /// 换算，当天正确，跨过夏令时切换就不再正确；需要精确判定时用
+    /// <see cref="GetQuietHoursWindowsAsync"/>（发送路径用的就是它）。
+    /// </para>
+    /// <para>
+    /// ⚠️ 一天里的两个 UTC 时刻装不下长于 24 小时的窗口。秋季拨慢那一夜，一个将近一整天的窗口会被折叠：
+    /// 多伦多 22:00 至次日 21:59 在 2026-11-01 那一次实际长 24 小时 59 分，这里返回的却是
+    /// <c>(02:00, 02:59)</c>，按 UTC 读只有 59 分钟。只认 UTC 的调用方在那一天会放出本该延后的消息。
+    /// </para>
     /// </remarks>
     Task<IReadOnlyDictionary<Guid, (TimeOnly Start, TimeOnly End)>> GetQuietHoursAsync(
         IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 一次取回这一批人在该渠道上生效的静默时段，<b>带时区</b>。没设的人不出现在结果里。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="GetQuietHoursAsync"/> 同一份数据、同样的取舍（只看渠道级、缺一个时刻即视为没设），
+    /// 区别是窗口保留了偏好上的时区：<see cref="QuietHoursWindow.Contains"/> /
+    /// <see cref="QuietHoursWindow.EndsAfter"/> 按那个时区判定，夏令时切换前后都正确。
+    /// </para>
+    /// <para>
+    /// 默认实现把 <see cref="GetQuietHoursAsync"/> 的 UTC 时刻包成 UTC 窗口，
+    /// 所以自己实现了本接口、还没跟上时区的替换实现照常工作（只是不认时区）。
+    /// </para>
+    /// </remarks>
+    async Task<IReadOnlyDictionary<Guid, QuietHoursWindow>> GetQuietHoursWindowsAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default)
+    {
+        var utc = await GetQuietHoursAsync(userIds, channel, cancellationToken);
+        return utc.ToDictionary(kv => kv.Key, kv => new QuietHoursWindow(kv.Value.Start, kv.Value.End));
+    }
 
     /// <summary>
     /// 一次取回这一批人在该渠道上生效的每小时上限。<b>没设上限的人不出现在结果里</b>。

@@ -32,4 +32,22 @@ public class SessionBindingRuleDto
 
     /// <summary>是否启用</summary>
     public bool IsEnabled { get; set; }
+
+    /// <summary>
+    /// 规则来源：<see cref="SessionBindingRuleSources.Config"/>（<c>AI:Channels:Gateway:BindingRules</c>，
+    /// 不落库、<see cref="Id"/> 为 <see cref="Guid.Empty"/>、部署级全局）或 <see cref="SessionBindingRuleSources.Database"/>。
+    /// </summary>
+    public string Source { get; set; } = SessionBindingRuleSources.Database;
+}
+
+/// <summary>
+/// <see cref="SessionBindingRuleDto.Source"/> 的取值。
+/// </summary>
+public static class SessionBindingRuleSources
+{
+    /// <summary>来自配置 <c>AI:Channels:Gateway:BindingRules</c></summary>
+    public const string Config = "config";
+
+    /// <summary>来自数据库 <c>SessionBindingRule</c> 表</summary>
+    public const string Database = "database";
 }

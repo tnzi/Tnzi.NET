@@ -70,13 +70,24 @@ public class UnconfiguredPushSender : IPushSender
     /// <inheritdoc />
     public Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
     {
-        _logger.LogError("Push delivery to {DeviceToken} refused: {Guidance}", deviceToken, _guidance);
+        _logger.LogError("Push delivery to {DeviceToken} refused: {Guidance}", PushTokenMask.Of(deviceToken), _guidance);
         return Task.FromResult(SendResult.CreateFailure(_guidance));
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// 显式实现而不是沿用 <see cref="IPushSender.SendToTopicAsync"/> 的默认失败：那条默认体报的是
+    /// 显式实现，理由同 <see cref="SendToTopicAsync(string, string, string, CancellationToken)"/>：接口默认体对带链接或数据的内容
+    /// 报的是「这个实现不支持点击目标」，而这里真正的原因是包没加载或默认节没配，要说的是怎么修。
+    /// </remarks>
+    public Task<SendResult> SendToAsync(string deviceToken, PushContent content, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(content);
+        return SendToAsync(deviceToken, content.Title, content.Body, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 显式实现而不是沿用 <see cref="IPushSender.SendToTopicAsync(string, string, string, CancellationToken)"/> 的默认失败：那条默认体报的是
     /// 「这个实现不支持主题投递」，会把部署方引向「换一个支持主题的实现」；而这里真正的原因是
     /// <b>包没加载</b>，要说的是加载哪个包。两句话都失败，但只有一句能让人把它修好。
     /// </remarks>
@@ -84,5 +95,13 @@ public class UnconfiguredPushSender : IPushSender
     {
         _logger.LogError("Push delivery to topic {Topic} refused: {Guidance}", topic, _guidance);
         return Task.FromResult(SendResult.CreateFailure(_guidance));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>与三参数的主题方法同一个答案，理由同上。</remarks>
+    public Task<SendResult> SendToTopicAsync(string topic, PushContent content, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(content);
+        return SendToTopicAsync(topic, content.Title, content.Body, cancellationToken);
     }
 }

@@ -57,6 +57,7 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
 
         for (var attempt = 1; attempt <= SaveCheckpointMaxRetries; attempt++)
         {
+            WorkflowExecution? inserted = null;
             try
             {
                 var entity = await _repository.FirstOrDefaultAsync(e => e.ExecutionId == checkpoint.ExecutionId, ct);
@@ -64,6 +65,7 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 if (entity == null)
                 {
                     entity = BuildNewEntity(checkpoint);
+                    inserted = entity;
                     await _repository.InsertAsync(entity, ct);
                     _logger.LogDebug("Created workflow checkpoint for execution {ExecutionId}", checkpoint.ExecutionId);
                 }
@@ -75,6 +77,12 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                         checkpoint.ExecutionId, checkpoint.Status);
                 }
 
+                // A checkpoint is process state, not part of the caller's unit of work. Inside an
+                // ambient transaction the repository defers the write, and the next save reads the
+                // row back with a database query: it would find nothing and insert the same
+                // ExecutionId again, failing the whole request on the unique index at commit. The
+                // flush stays inside the transaction; outside one it has nothing left to save.
+                await _repository.SaveChangesAsync(ct);
                 return;
             }
             catch (DbUpdateConcurrencyException ex)
@@ -103,6 +111,13 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
                 // Lost the Insert race (unique violation). The next iteration re-reads
                 // and proceeds as an Update. Small backoff scaled by attempt reduces
                 // hot-loop contention without significantly slowing normal operation.
+                // The losing row is still tracked as Added; left there, every later save on
+                // this context would try to insert it again and hit the same violation.
+                if (inserted != null)
+                {
+                    _repository.Discard(inserted);
+                }
+
                 _logger.LogDebug(ex,
                     "Checkpoint insert conflict for {ExecutionId}, retrying (attempt {Attempt}/{Max})",
                     checkpoint.ExecutionId, attempt, SaveCheckpointMaxRetries);
@@ -348,26 +363,19 @@ public class DatabaseWorkflowCheckpointStore : IWorkflowCheckpointStore
         }
     }
 
-    private static string Truncate(string value) =>
-        value.Length <= 200 ? value : value[..200] + "...";
+    private static string Truncate(string value) => value.Truncate(200);
 
-    private static string? ResolveWaitReason(WorkflowCheckpoint checkpoint)
+    private static string? ResolveWaitReason(WorkflowCheckpoint checkpoint) => WaitReasonFor(checkpoint.Status);
+
+    /// <summary>
+    /// The <c>CurrentWaitReason</c> a status implies on its own: what a paused or cancelled execution is waiting
+    /// for. The service's terminal update uses the same mapping, so the two writers of the column agree.
+    /// </summary>
+    internal static string? WaitReasonFor(WorkflowExecutionStatus status) => status switch
     {
-        if (checkpoint.Status == WorkflowExecutionStatus.AwaitingApproval)
-        {
-            return "approval";
-        }
-
-        if (checkpoint.Status == WorkflowExecutionStatus.AwaitingInput)
-        {
-            return "input";
-        }
-
-        if (checkpoint.Status == WorkflowExecutionStatus.Cancelled)
-        {
-            return "cancelled";
-        }
-
-        return null;
-    }
+        WorkflowExecutionStatus.AwaitingApproval => "approval",
+        WorkflowExecutionStatus.AwaitingInput => "input",
+        WorkflowExecutionStatus.Cancelled => "cancelled",
+        _ => null
+    };
 }

@@ -102,6 +102,26 @@ describe('Finance BankFeed page', () => {
     createReconciliation.mockClear()
   })
 
+  // The server clamps a page to 100 rows: one request for 100 import batches
+  // hid every older batch of a busy account, so it could not be deleted.
+  it('lists every import batch of the account, past the first page', async () => {
+    const all = Array.from({ length: 130 }, (_, i) => ({ id: `b${i + 1}`, accountId: 'a1' }))
+    bankFeedSection.batches.mockImplementation((async (q: { pageIndex: number; pageSize: number }) => {
+      const size = Math.min(q.pageSize, 100)
+      const items = all.slice((q.pageIndex - 1) * size, q.pageIndex * size)
+      return { items, totalCount: all.length, pageIndex: q.pageIndex, pageSize: size, hasNextPage: q.pageIndex * size < all.length }
+    }) as never)
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as BankFeedVm & { openBatches: () => void; batches: unknown[] }
+    vm.accountId = 'a1'
+    await flushPromises()
+    vm.openBatches()
+    await flushPromises()
+    expect(vm.batches).toHaveLength(130)
+    bankFeedSection.batches.mockImplementation((async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 })) as never)
+  })
+
   it('waits for an account before fetching, then loads transactions', async () => {
     const wrapper = mount(Page, { global: { stubs } })
     await flushPromises()

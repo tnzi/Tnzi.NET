@@ -5,8 +5,14 @@ namespace Tnzi.AI.Rag.Search;
 /// <para>
 /// 三阶段处理：
 /// Phase 1: 权重应用 - weighted_score = base_relevance × source_weight
-/// Phase 2: 递减聚合 - 按 ContentHash 分组，相同内容多次出现时累加 score × diminishingFactor^i
+/// Phase 2: 递减聚合 - 按 ContentHash 分组，相同内容多次出现时累加 score × diminishingFactor^i，合并后的得分不超过 MaxMergedScore
 /// Phase 3: 排序 - 按得分降序，同分则按 ChunkIndex 升序
+/// </para>
+/// <para>
+/// ★ 排在去重与归一化<b>之前</b>（Order 5）。此前排在两者之后（Order 50）：逐字相同的内容 Jaccard 为 1.0，早被去重删掉，
+/// 递减聚合每组只剩一条，<c>DiminishingFactor</c> 从不起作用；权重又乘在 min-max 归一化之后的 0..1 分数上，再被
+/// <c>MaxMergedScore</c>（默认 1.0）截回 1.0，加权库里分数较高的结果全部并列 1.0、改按块序排。现在权重乘在检索给出的相关度上，
+/// 上限只约束真正合并过的组；之后的归一化保序，所以这里定下的先后就是最终先后（分数报回的仍是绝对相关度，见 RagRetriever）。
 /// </para>
 /// </summary>
 public class WeightedDiminishingReranker : ISearchPostProcessor
@@ -15,9 +21,11 @@ public class WeightedDiminishingReranker : ISearchPostProcessor
     private readonly ILogger<WeightedDiminishingReranker> _logger;
 
     /// <summary>
-    /// Run after deduplication(10) and normalization(20), before other enrichment
+    /// Run before deduplication(10) and normalization(20): identical content from several sources is merged here,
+    /// before deduplication would drop all but one copy, and weights apply to the retrieval relevance rather than
+    /// to normalised ranks. Normalisation preserves the order set here.
     /// </summary>
-    public int Order => 50;
+    public int Order => 5;
 
     public WeightedDiminishingReranker(IOptionsSnapshot<AIRagOptions> ragOptions, ILogger<WeightedDiminishingReranker> logger)
     {
@@ -118,8 +126,11 @@ public class WeightedDiminishingReranker : ISearchPostProcessor
                 mergedScore += sorted[i].Score * Math.Pow(options.DiminishingFactor, i);
             }
 
-            // 上限限制
-            mergedScore = Math.Min(mergedScore, options.MaxMergedScore);
+            // 上限只约束真正合并过的组：单条结果的得分就是它加权后的相关度，截到上限只会把加权库里的高分结果压成并列
+            if (sorted.Count > 1)
+            {
+                mergedScore = Math.Min(mergedScore, options.MaxMergedScore);
+            }
 
             // 使用最高得分结果作为代表，更新合并后的得分
             aggregated.Add(new VectorSearchResult

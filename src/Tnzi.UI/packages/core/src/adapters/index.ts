@@ -29,9 +29,6 @@ export * from './storage';
 // Internationalization
 export * from './i18n';
 
-// Store adapters (state management)
-export * from './store';
-
 // Theme adapter
 export * from './theme/index';
 
@@ -53,7 +50,6 @@ import { resetStorageAdapter } from './storage';
 import { resetEventBusAdapter } from './event-bus';
 import { resetI18nRuntime } from './i18n/runtime';
 import { resetMessageAdapter } from './message';
-import { resetStoreAdapter } from './store';
 import { resetDialogAdapter } from './dialog';
 import { resetNotificationAdapter } from './notification';
 import { resetLoadingBarAdapter } from './loading-bar';
@@ -62,7 +58,9 @@ import { resetRuntimeAdapter } from './runtime-adapter';
 import { resetLoggerAdapter } from './logger';
 
 /**
- * Reset all adapter runtimes to their defaults.
+ * Reset all adapter runtimes to fresh defaults: installed adapters are
+ * dropped, and so are the built-in defaults with whatever state they held
+ * (event-bus listeners, the locale set through `provideI18n`).
  * Call between SSR requests or in test teardown to avoid cross-contamination.
  */
 export function resetAllRuntimes(): void {
@@ -70,7 +68,6 @@ export function resetAllRuntimes(): void {
   resetEventBusAdapter();
   resetI18nRuntime();
   resetMessageAdapter();
-  resetStoreAdapter();
   resetDialogAdapter();
   resetNotificationAdapter();
   resetLoadingBarAdapter();

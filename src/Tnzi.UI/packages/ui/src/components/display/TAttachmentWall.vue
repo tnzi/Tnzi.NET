@@ -79,6 +79,7 @@
 import { computed, defineComponent, nextTick, ref } from 'vue'
 import { NImage, NImageGroup } from 'naive-ui'
 import { Icon } from '@iconify/vue'
+import { safeLinkHref } from '@tnzi/core/utils'
 import { useReorderable } from '../../headless/data/useReorderable'
 
 export interface Attachment {
@@ -204,14 +205,15 @@ const keyOf = (att: Attachment, index: number): string | number =>
 /**
  * Guard a caller-supplied file URL used in `<a :href>` - Vue does not sanitize
  * `:href`, so a `javascript:` / `vbscript:` / `data:text/html` scheme would run
- * on click. Everything else (http/https, relative, blob:, data: media) passes.
+ * on click. `safeLinkHref` is an allow-list (http/https, relative, blob:, data:
+ * media, ...); a URL it refuses becomes `#`.
  */
 function safeHref(url: string | undefined): string | undefined {
   // No URL at all (a private file whose host did not fill the `#tile` slot):
   // emit no href. An `<a>` without one is not a link - it neither navigates nor
   // takes focus - whereas `#` would scroll the page to the top on click.
   if (!url) return undefined
-  return /^\s*(javascript:|vbscript:|data:text\/html)/i.test(url) ? '#' : url
+  return safeLinkHref(url) ?? '#'
 }
 
 function isImage(att: Attachment): boolean {

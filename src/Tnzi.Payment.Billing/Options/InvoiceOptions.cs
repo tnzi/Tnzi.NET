@@ -75,4 +75,41 @@ public class InvoiceOptions
     [RuntimeSetting(Label = "Tax ID", I18n = "admin.modules.system.settings.fields.paymentInvoiceTaxId",
         Type = SettingFieldType.String, Subsection = "Company")]
     public string? TaxId { get; set; }
+
+    /// <summary>
+    /// 订阅收款开收据而不是发票（<see cref="InvoiceType.Receipt"/> + <see cref="ReceiptTemplate"/>）：
+    /// 已付的服务费给的是「收到了多少、哪张卡、哪一期」，不是一张待付的账单。默认 false，与此前相同。
+    /// </summary>
+    [RuntimeSetting(Label = "Receipts For Subscription Payments", I18n = "admin.modules.system.settings.fields.paymentInvoiceReceiptsForSubscriptions",
+        Type = SettingFieldType.Boolean,
+        Description = "Issue a receipt instead of an invoice for subscription payments")]
+    public bool ReceiptsForSubscriptionPayments { get; set; }
+
+    /// <summary>收据模板名（<c>Templates/Payment/Invoice/</c> 下，部署可按名覆盖）。</summary>
+    [RuntimeSetting(Label = "Receipt Template", I18n = "admin.modules.system.settings.fields.paymentInvoiceReceiptTemplate",
+        Type = SettingFieldType.String,
+        Description = "Template used for receipts")]
+    public string ReceiptTemplate { get; set; } = "ReceiptDefault";
+
+    /// <summary>
+    /// 退款成功后开一张贷项通知单冲减原发票（原发票不动，作废它就丢了「当初收过这笔钱」的凭据）。默认 false，与此前相同。
+    /// </summary>
+    [RuntimeSetting(Label = "Issue Credit Notes", I18n = "admin.modules.system.settings.fields.paymentInvoiceIssueCreditNotes",
+        Type = SettingFieldType.Boolean,
+        Description = "Issue a credit note against the original invoice when a refund succeeds")]
+    public bool IssueCreditNotes { get; set; }
+
+    /// <summary>贷项通知单模板名。</summary>
+    [RuntimeSetting(Label = "Credit Note Template", I18n = "admin.modules.system.settings.fields.paymentInvoiceCreditNoteTemplate",
+        Type = SettingFieldType.String,
+        Description = "Template used for credit notes")]
+    public string CreditNoteTemplate { get; set; } = "CreditNoteDefault";
+
+    /// <summary>
+    /// 卖方资料（标志、名称、多行地址、电话、邮箱、网站、税务登记号），开票那一刻快照到发票上：资料日后改了，
+    /// 已开出的票据重新生成时印的仍是当时的卖方。没有配置 <see cref="InvoiceSellerOptions.Name"/> 时退回上面
+    /// 四个公司字段（<see cref="CompanyName"/> 等），与此前相同。
+    /// </summary>
+    /// <remarks>刻意不进配置中心：多行地址、登记号列表与文件引用不是一个表单字段能表达的。</remarks>
+    public InvoiceSellerOptions Seller { get; set; } = new();
 }

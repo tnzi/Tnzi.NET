@@ -9,6 +9,7 @@ namespace Tnzi.AI.Dtos;
 /// 模板 spawn（AgentId 为 null）的运行会退化成一个没有任何工具的默认 agent，DB agent 的运行丢掉子 Agent 标记
 /// （<c>ToolResolver</c> 的子 Agent 裁剪与 <c>IsSubAgentOnly</c> 规则整体失效，比原运行更宽），用户消息也只剩摘要。
 /// 这些都没有别的地方可回填：trace 只记调用方给的事件数据，不含请求。
+/// 子 Agent 模板在 spawn 时定下的系统指令、工具循环上限与排除的工具组同样存在这里：续跑按起跑时的那份模板走，不回查注册表。
 /// </para>
 /// <para>
 /// 刻意不存的：<c>ExistingRunId</c> / <c>EnableRunTracking</c>（续跑自己定）、<c>WorkflowId</c> / <c>WorkflowInputs</c>
@@ -29,6 +30,9 @@ public sealed class AgentRunRequestSnapshot
     public bool TrustedToolSelection { get; init; }
     public bool IsBackground { get; init; }
     public string? SubAgentName { get; init; }
+    public string? SubAgentInstructions { get; init; }
+    public int? MaxToolIterations { get; init; }
+    public List<string>? ExcludedToolGroups { get; init; }
     public int? AgentVersionNumber { get; init; }
     public ReasoningEffort? ReasoningEffort { get; init; }
     public List<FileAttachment>? Attachments { get; init; }
@@ -51,6 +55,9 @@ public sealed class AgentRunRequestSnapshot
             TrustedToolSelection = request.TrustedToolSelection,
             IsBackground = request.IsBackground,
             SubAgentName = request.SubAgentName,
+            SubAgentInstructions = request.SubAgentInstructions,
+            MaxToolIterations = request.MaxToolIterations,
+            ExcludedToolGroups = request.ExcludedToolGroups?.ToList(),
             AgentVersionNumber = request.AgentVersionNumber,
             ReasoningEffort = request.ReasoningEffort,
             Attachments = request.Attachments?.ToList(),

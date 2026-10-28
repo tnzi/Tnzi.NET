@@ -133,6 +133,52 @@ public class FileUploadMiddlewareTests : IDisposable
         systemMsg.Text.ShouldContain("</uploaded_files>");
     }
 
+    [Fact]
+    public async Task InvokeAsync_SandboxThreadData_InjectsTheVirtualPathNotTheHostPath()
+    {
+        // 模型能用的 read_file / ls / bash 只认 /mnt/ 开头的路径；宿主机路径既读不到，也泄露了宿主机的目录布局。
+        var middleware = CreateMiddleware();
+        CreateTempFile("report.pdf", "%PDF");
+        var context = CreateContext(attachments: [new FileAttachment("report.pdf", 4, "application/pdf")], setUploadsDir: false);
+        context.Properties["ThreadData"] = new SandboxThreadData(_uploadsDir);
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(CreateSuccessResult()));
+
+        var injected = context.Messages[0].Text;
+        injected.ShouldContain("<path>/mnt/uploads/report.pdf</path>");
+        injected.ShouldNotContain(_uploadsDir);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_SandboxThreadData_FileInASubfolder_UsesForwardSlashes()
+    {
+        var middleware = CreateMiddleware();
+        Directory.CreateDirectory(Path.Combine(_uploadsDir, "batch"));
+        File.WriteAllText(Path.Combine(_uploadsDir, "batch", "a.csv"), "x");
+        var context = CreateContext(attachments: [new FileAttachment(Path.Combine("batch", "a.csv"), 1, "text/csv")], setUploadsDir: false);
+        context.Properties["ThreadData"] = new SandboxThreadData(_uploadsDir);
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(CreateSuccessResult()));
+
+        context.Messages[0].Text.ShouldContain("<path>/mnt/uploads/batch/a.csv</path>");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ExplicitUploadsDir_PassesThatPathThrough()
+    {
+        // 经 ThreadUploadsDirKey 直接给的目录是调用方自己的，不是沙箱的 /mnt/uploads。
+        var middleware = CreateMiddleware();
+        var filePath = CreateTempFile("readme.txt");
+        var context = CreateContext(attachments: [new FileAttachment("readme.txt", 12, "text/plain")]);
+
+        await middleware.InvokeAsync(context, (ctx, ct) => Task.FromResult(CreateSuccessResult()));
+
+        context.Messages[0].Text.ShouldContain($"<path>{System.Security.SecurityElement.Escape(Path.GetFullPath(filePath))}</path>");
+    }
+
+    /// <summary>Shape of the sandbox's thread data the middleware reads by reflection.</summary>
+    private sealed record SandboxThreadData(string UploadsPath);
+
     #endregion
 
     #region InvokeAsync - Path traversal rejection

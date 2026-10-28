@@ -18,9 +18,12 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         builder.Property(s => s.PaymentMethodBrand).HasMaxLength(32);
         builder.Property(s => s.PaymentMethodLast4).HasMaxLength(8);
         builder.Property(s => s.LastBillingTradeNo).HasMaxLength(64);
+        builder.Property(s => s.RecoveryPaymentTradeNo).HasMaxLength(64);
         builder.Property(s => s.CustomerName).HasMaxLength(256);
         builder.Property(s => s.CustomerEmail).HasMaxLength(256);
         builder.Property(s => s.ProductCode).HasMaxLength(64);
+        builder.Property(s => s.BillingAccountType).HasMaxLength(BillingAccountRef.TypeMaxLength).IsRequired();
+        builder.Property(s => s.BillingAccountId).HasMaxLength(BillingAccountRef.IdMaxLength).IsRequired();
 
         if (multiTenancyEnabled)
         {
@@ -35,6 +38,7 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         }
 
         builder.HasIndex(s => s.UserId);
+        builder.HasIndex(s => new { s.BillingAccountType, s.BillingAccountId });
         builder.HasIndex(s => s.PlanId);
         builder.HasIndex(s => s.Status);
         builder.HasIndex(s => s.EndTime);
@@ -49,7 +53,7 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
     }
 
     /// <summary>
-    /// 「同一用户在同一产品下至多一条有效订阅」——由数据库兜底。
+    /// 「同一计费账户在同一产品下至多一条有效订阅」：由数据库兜底。
     /// </summary>
     /// <remarks>
     /// <para>
@@ -68,6 +72,11 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
     /// <para>
     /// ★ 过滤条件排掉 <c>Cancelled</c> / <c>Expired</c>：已终止的订阅不占名额，
     /// 否则退订之后再也订不回同一个产品 —— 一条约束把正常业务动作永久堵死，比它防的问题更糟。
+    /// 暂停服务（<c>Suspended</c>）<b>占</b>名额：它不是终态，补缴恢复的是同一条订阅。
+    /// </para>
+    /// <para>
+    /// 名额按计费账户算而不是按经办人：单客户部署里两位管理者各点一次「开通」，得到的不该是同一个机构的两条订阅、两份月费。
+    /// 默认的 User 范围下账户就是用户，与按用户判重逐字相同。
     /// </para>
     /// </remarks>
     private static void ConfigureActiveSubscriptionUniqueness(EntityTypeBuilder<Subscription> builder, bool multiTenancyEnabled)
@@ -85,20 +94,26 @@ public class SubscriptionConfiguration : EntityTypeConfigurationBase<Subscriptio
         // （编译过、启动过、迁移里只剩一条）。NULL 那一支尤其不能带上 ProductCode 列 ——
         // PostgreSQL / SQLite 认为唯一索引里的 NULL 互不相等，带上它这条约束就等于不存在，
         // 而在 SQL Server 上它又是生效的：同一份代码在不同 provider 上守着不同的东西。
-        // 只按用户建（外加 "ProductCode IS NULL" 的过滤条件）在四家上表达的是同一件事。
+        // 只按账户建（外加 "ProductCode IS NULL" 的过滤条件）在四家上表达的是同一件事。
         if (multiTenancyEnabled)
         {
-            builder.HasIndex(s => new { s.TenantId, s.UserId, s.ProductCode }, "IX_Subscription_ActiveProductPerUser")
+            builder.HasIndex(s => new { s.TenantId, s.BillingAccountType, s.BillingAccountId, s.ProductCode }, ActiveProductPerAccountIndex)
                 .IsUnique().HasFilter($"{productCode} IS NOT NULL AND {stillCounts}");
-            builder.HasIndex(s => new { s.TenantId, s.UserId }, "IX_Subscription_ActiveWithoutProductPerUser")
+            builder.HasIndex(s => new { s.TenantId, s.BillingAccountType, s.BillingAccountId }, ActiveWithoutProductPerAccountIndex)
                 .IsUnique().HasFilter($"{productCode} IS NULL AND {stillCounts}");
         }
         else
         {
-            builder.HasIndex(s => new { s.UserId, s.ProductCode }, "IX_Subscription_ActiveProductPerUser")
+            builder.HasIndex(s => new { s.BillingAccountType, s.BillingAccountId, s.ProductCode }, ActiveProductPerAccountIndex)
                 .IsUnique().HasFilter($"{productCode} IS NOT NULL AND {stillCounts}");
-            builder.HasIndex(s => s.UserId, "IX_Subscription_ActiveWithoutProductPerUser")
+            builder.HasIndex(s => new { s.BillingAccountType, s.BillingAccountId }, ActiveWithoutProductPerAccountIndex)
                 .IsUnique().HasFilter($"{productCode} IS NULL AND {stillCounts}");
         }
     }
+
+    /// <summary>「同一账户同一产品至多一条有效订阅」的索引名。</summary>
+    public const string ActiveProductPerAccountIndex = "IX_Subscription_ActiveProductPerAccount";
+
+    /// <summary>「同一账户（不区分产品时）至多一条有效订阅」的索引名。</summary>
+    public const string ActiveWithoutProductPerAccountIndex = "IX_Subscription_ActiveWithoutProductPerAccount";
 }

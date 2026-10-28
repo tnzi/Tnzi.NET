@@ -23,6 +23,10 @@ public class AgentResolverWorkspaceTests
         _grantService.Setup(s => s.GetGrantsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentGrantsProjection());
 
+        // 指令模板默认原样返回（工作区 Agent 的指令也经它渲染）；需要别的结果的用例自己覆盖这条 Setup。
+        _templateEngine.Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, string>?>()))
+            .Returns((string template, IDictionary<string, string>? _) => template);
+
         // 注册表里没有任何工具声明权限：解析器每次都要问它「有哪些门控工具」，Moq 对 IReadOnlyList 默认答 null。
         _toolRegistry.Setup(r => r.GetToolsByGroups(It.IsAny<IEnumerable<string>>())).Returns([]);
         _toolRegistry.Setup(r => r.GetToolsByNames(It.IsAny<IEnumerable<string>>(), It.IsAny<IEnumerable<string>?>())).Returns([]);

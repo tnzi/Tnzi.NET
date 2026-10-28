@@ -65,6 +65,14 @@ describe('useAdminTaskApi', () => {
       params: { status: AgentTaskStatus.InProgress },
     });
   });
+
+  it('should pass the page to getByStatus', async () => {
+    const api = useAdminTaskApi(client);
+    await api.getByStatus(AgentTaskStatus.Completed, { pageIndex: 2, pageSize: 50 });
+    expect(client.get).toHaveBeenCalledWith('/admin/ai/tasks/by-status', {
+      params: { status: AgentTaskStatus.Completed, pageIndex: 2, pageSize: 50 },
+    });
+  });
 });
 
 // AgentTaskDto.status is serialized by the global JsonStringEnumConverter, so

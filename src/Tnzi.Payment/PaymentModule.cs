@@ -44,8 +44,8 @@
 /// <item><see cref="IPaymentStatisticsContributor"/> —— 总览里的活跃订阅数与整块订阅指标。
 ///   缺席时前者是 <c>null</c>（前端渲染「不适用」，不是与「生意崩了」无法区分的 0），
 ///   后者回 <b>501</b> 并指名要加载哪个包。</item>
-/// <item><see cref="IPaymentScheduledScan"/> —— 后台循环里的续费 / 转正 / 恢复 / 过期 / 提醒
-///   五条扫描。缺席时本模块自己那两条（关过期支付、对账在途退款）照跑不误。</item>
+/// <item><see cref="IPaymentScheduledScan"/>：后台循环里的续费 / 转正 / 恢复 / 过期 / 到期计划变更 / 提醒
+///   六条扫描。缺席时本模块自己那两条（关过期支付、对账在途退款）照跑不误。</item>
 /// </list>
 /// 前两条与后两条的注入形态不同是刻意的：可能有多个供给方的用 <c>IEnumerable&lt;T&gt;</c>
 /// （MS.DI 只对它有「解析成空集合」这条特例），单一问答的用「可空 + 默认 null」的可选构造参数。
@@ -92,6 +92,9 @@ public class PaymentModule : TnziApplicationModule
         // Payment:Subscription 由可选子模块 Tnzi.Payment.Subscriptions 自己绑（节路径一字不变）。
         // Payment:Promotion 由可选子模块 Tnzi.Payment.Promotions 自己绑（节路径一字不变）。
         context.Services.AddTnziOptions<TaxOptions>(configuration, "Payment:Tax");
+        context.Services.AddTnziOptions<BillingAccountOptions, BillingAccountOptionsValidator>(configuration, "Payment:BillingAccount");
+        // 每实例的后台扫描开关：只在启动时读，不是运行期设置（设置表是各实例共用的）
+        context.Services.AddTnziOptions<PaymentBackgroundTaskOptions>(configuration, "Payment:BackgroundTasks");
 
         return Task.CompletedTask;
     }
@@ -107,6 +110,9 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentService, PaymentService>();
         context.Services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         context.Services.AddScoped<IRefundService, RefundService>();
+        // 计费账户：内置解析器按 Payment:BillingAccount:Scope 划分；消费方注册自己的实现即可替换（TryAdd，先注册者胜出）
+        context.Services.TryAddScoped<IBillingAccountResolver, DefaultBillingAccountResolver>();
+        context.Services.AddScoped<IBillingAccountService, BillingAccountService>();
         // ISubscriptionService 随续费域住在可选子模块 Tnzi.Payment.Subscriptions，由它自己注册。
         // IPaymentInvoiceService 随发票域住在可选子模块 Tnzi.Payment.Billing，由它自己注册。
         // IPromotionService / ICouponService 随折扣域住在可选子模块 Tnzi.Payment.Promotions，
@@ -127,8 +133,8 @@ public class PaymentModule : TnziApplicationModule
         context.Services.AddScoped<IPaymentProvider, NullProvider>();
 
         // 注册后台任务。本模块自带两条扫描（关闭过期支付 + 对账在途退款）；
-        // 订阅侧的五条扫描由 Tnzi.Payment.Subscriptions 经 IPaymentScheduledScan 贡献，
-        // 不加载它就是少五条扫描，这两条照跑。
+        // 订阅侧的六条扫描由 Tnzi.Payment.Subscriptions 经 IPaymentScheduledScan 贡献，
+        // 不加载它就是少六条扫描，这两条照跑。
         context.Services.AddHostedService<PaymentBackgroundService>();
         // 多租户开启时后台循环按租户逐个跑；本模块贡献「有未终结支付 / 在途退款的租户」，
         // 可选域与消费方各自再贡献（IEnumerable 并集）

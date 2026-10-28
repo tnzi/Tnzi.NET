@@ -11,10 +11,11 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
     private readonly IRepository<AgentRun, Guid> _runRepository;
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IUsageLogService _usageLogService;
-    private readonly IQuotaService _quotaService;
+    private readonly IUsageLimitService _usageLimits;
     private readonly IWorkflowCheckpointStore _checkpointStore;
     private readonly WorkflowEngine _workflowEngine;
     private readonly IEnumerable<IWorkflowNode> _workflowNodes;
+    private readonly ICostCalculator? _costCalculator;
 
     public WorkflowService(
         IRepository<WorkflowDefinition, Guid> repository,
@@ -23,11 +24,12 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         IRepository<AgentRun, Guid> runRepository,
         IRepository<Agent, Guid> agentRepository,
         IUsageLogService usageLogService,
-        IQuotaService quotaService,
+        IUsageLimitService usageLimits,
         IWorkflowCheckpointStore checkpointStore,
         WorkflowEngine workflowEngine,
         IEnumerable<IWorkflowNode> workflowNodes,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICostCalculator? costCalculator = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -36,10 +38,11 @@ public partial class WorkflowService : ApplicationService, IWorkflowService
         _runRepository = Check.NotNull(runRepository);
         _agentRepository = Check.NotNull(agentRepository);
         _usageLogService = Check.NotNull(usageLogService);
-        _quotaService = Check.NotNull(quotaService);
+        _usageLimits = Check.NotNull(usageLimits);
         _checkpointStore = Check.NotNull(checkpointStore);
         _workflowEngine = Check.NotNull(workflowEngine);
         _workflowNodes = Check.NotNull(workflowNodes);
+        _costCalculator = costCalculator;
     }
 
     public async Task<Result<WorkflowDefinitionDto>> CreateAsync(CreateWorkflowDefinitionDto input)

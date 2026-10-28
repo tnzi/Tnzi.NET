@@ -38,6 +38,8 @@ public class SuperAdminTargetGuardIntegrationTests : RelationalIdentityIntegrati
         // 角色支配护栏另有其责：这里让它恒放行，确保拦下来的只能是超管目标护栏。
         _functionAuthorization.Setup(a => a.CanManageRoleAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
             .ReturnsAsync(true);
+        _functionAuthorization.Setup(a => a.CanManageRoleMembershipAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .ReturnsAsync(true);
 
         _users = new UserService(
             UserManager,
@@ -46,7 +48,6 @@ public class SuperAdminTargetGuardIntegrationTests : RelationalIdentityIntegrati
             ServiceProvider,
             eventBus: EventBusMock.Object,
             currentUser: _currentUser.Object,
-            cache: Cache,
             functionAuthorization: _functionAuthorization.Object,
             sessionRevocation: _sessionRevocation.Object);
         _organizations = new OrganizationService(

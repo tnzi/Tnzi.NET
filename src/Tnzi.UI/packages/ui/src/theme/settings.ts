@@ -23,8 +23,6 @@ export const defaultThemeSettings: ThemeSettings = {
     error: getColorPalette(defaultColors.error),
   },
   mode: 'light',
-  isInfoFollowPrimary: false,
-  recommendColor: false,
   presetName: 'default',
 }
 
@@ -55,8 +53,6 @@ export function mergeThemeSettings(
       error: getColorPalette(colors.error),
     },
     mode: partial.mode ?? defaultThemeSettings.mode,
-    isInfoFollowPrimary: partial.isInfoFollowPrimary ?? defaultThemeSettings.isInfoFollowPrimary,
-    recommendColor: partial.recommendColor ?? defaultThemeSettings.recommendColor,
     naiveOverrides: partial.naiveOverrides,
     presetName: partial.presetName ?? defaultThemeSettings.presetName,
   }

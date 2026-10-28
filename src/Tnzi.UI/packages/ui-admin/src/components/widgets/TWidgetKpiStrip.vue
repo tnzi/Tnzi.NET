@@ -9,15 +9,17 @@
  *   - **Auto-fetch mode** - consumer omits `kpis` (or passes empty array)
  *     and the widget pulls 4 admin-meaningful metrics in parallel via the
  *     bridge layer: total users, total access logs, AI request count, and
- *     payment order count. Bridges that fail (module not loaded, no
- *     backend endpoint, permission denied) silently degrade to `0` so
- *     one failed bridge doesn't blank the whole strip.
+ *     payment order count. A tile whose module is not loaded or whose
+ *     permission the user lacks is dropped; a load that fails (timeout, 500,
+ *     network) keeps its tile with the empty placeholder instead of a number,
+ *     so one failed bridge neither blanks the strip nor reads as a real 0.
  */
 import { computed, ref, watch } from 'vue'
 import { NGrid, NGi, NCard } from 'naive-ui'
 import { TCountTo } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { maybeTranslate } from '../../i18n/translate'
+import { EMPTY_DASH } from '../../utils/placeholders'
 import type { KpiCard } from '../pages/TDashboardPage.vue'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
@@ -39,6 +41,8 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { kpis: () => [] })
 
 const dynamicKpis = ref<KpiCard[]>([])
+/** Auto-fetched tiles whose load failed: they show the placeholder, not a number. */
+const unavailableKeys = ref<ReadonlySet<string>>(new Set())
 const displayKpis = computed<KpiCard[]>(() => (props.kpis.length ? props.kpis : dynamicKpis.value))
 const isAuto = computed(() => props.kpis.length === 0)
 
@@ -65,7 +69,7 @@ const paymentBridge = createPaymentBridge({ client })
  * KPI before permissions load, and let super admins see all four.
  */
 function canSee(permission: string): boolean {
-  return authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission(permission)
+  return authStore.bypassesPermissionChecks || authStore.userInfo === null || authStore.hasPermission(permission)
 }
 
 // Per-KPI module gate - each tile fetches from a DIFFERENT optional backend
@@ -142,20 +146,23 @@ const { reload } = useWidgetData(async () => {
     (s) => canSee(s.permission) && moduleAvailability.canActivate(s.module),
   )
   const results = await Promise.allSettled(visible.map((s) => s.load()))
+  // A fulfilled `null` means the tile asked to be dropped (nothing meaningful
+  // to show). A rejection keeps the tile, so one failed bridge doesn't blank
+  // the strip, but as "no figure": the placeholder is not 0.
+  const failed = new Set<string>()
   dynamicKpis.value = visible.flatMap((s, i) => {
     const r = results[i]
-    // A fulfilled `null` means the tile asked to be dropped (nothing meaningful
-    // to show); a rejection still degrades to 0 so one failed bridge doesn't
-    // blank the strip.
-    if (r && r.status === 'fulfilled' && r.value === null) return []
+    if (r?.status === 'fulfilled' && r.value === null) return []
+    if (r?.status !== 'fulfilled') failed.add(s.key)
     return [{
       key: s.key,
       title: s.title,
-      value: r && r.status === 'fulfilled' ? (r.value ?? 0) : 0,
+      value: r?.status === 'fulfilled' ? (r.value ?? 0) : 0,
       icon: s.icon,
       gradient: s.gradient,
     }]
   })
+  unavailableKeys.value = failed
 })
 
 // Re-run the auto-fetch when the module-availability signal settles or
@@ -200,12 +207,15 @@ watch(
           <div class="t-widget-kpi__text">
             <div class="t-widget-kpi__title">{{ maybeTranslate(kpi.title) }}</div>
             <div class="t-widget-kpi__value">
-              <span v-if="kpi.unit" class="t-widget-kpi__unit">{{ kpi.unit }}</span>
-              <TCountTo
-                :end-value="kpi.value"
-                :decimals="kpi.decimals ?? 0"
-                :duration="1200"
-              />
+              <template v-if="isAuto && unavailableKeys.has(kpi.key)">{{ EMPTY_DASH }}</template>
+              <template v-else>
+                <span v-if="kpi.unit" class="t-widget-kpi__unit">{{ kpi.unit }}</span>
+                <TCountTo
+                  :end-value="kpi.value"
+                  :decimals="kpi.decimals ?? 0"
+                  :duration="1200"
+                />
+              </template>
             </div>
             <div
               v-if="kpi.delta"

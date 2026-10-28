@@ -43,6 +43,9 @@ public class AIChannelsModule : TnziApplicationModule
             services.AddScoped<IChannelThreadStore, DatabaseChannelThreadStore>();
         }
 
+        // 线程被删除时清掉指向它的会话映射（否则该会话下一条消息才由自愈路径发现并重建）
+        services.AddEventHandler<ThreadDeletedEvent, ChannelThreadMappingCleanupHandler>();
+
         // 消息调度管理器
         services.AddSingleton<IChannelManager, ChannelManager>();
 
@@ -55,6 +58,7 @@ public class AIChannelsModule : TnziApplicationModule
         // Feishu 适配器（同时暴露为 IInboundWebhookAdapter 供 Webhook 控制器使用，单例同实例）
         if (options.Feishu.Enabled)
         {
+            services.AddHttpClient(FeishuChannelAdapter.HttpClientName);
             services.AddSingleton<FeishuChannelAdapter>();
             services.AddSingleton<IChannelAdapter>(sp => sp.GetRequiredService<FeishuChannelAdapter>());
             services.AddSingleton<IInboundWebhookAdapter>(sp => sp.GetRequiredService<FeishuChannelAdapter>());
@@ -111,6 +115,14 @@ public class AIChannelsModule : TnziApplicationModule
             services.AddSingleton<ISessionBinder, DefaultSessionBinder>();
             services.AddSingleton<IPresenceTracker, DefaultPresenceTracker>();
             services.AddSingleton<IGateway, DefaultGateway>();
+
+            // 浏览器的 WebSocket 握手带不了 Authorization 头，只能把 JWT 放进 ?access_token=。
+            // 不把网关路径登记进去，认证处理器只在 /hubs 下读它：浏览器客户端在网关上永远是匿名的，
+            // 开了 RequireAuthentication 就一律 401。
+            if (!string.IsNullOrWhiteSpace(gatewayOptions.Path) && gatewayOptions.Path.StartsWith('/'))
+            {
+                services.Configure<QueryStringTokenOptions>(o => o.PathPrefixes.Add(gatewayOptions.Path));
+            }
         }
 
         return Task.CompletedTask;

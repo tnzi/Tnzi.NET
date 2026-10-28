@@ -36,13 +36,20 @@ public class MessageFeedbackService : ApplicationService, IMessageFeedbackServic
         if (!string.Equals(message.Role, "assistant", StringComparison.OrdinalIgnoreCase))
             return Fail("Feedback can only be submitted on assistant messages", 400, ErrorCodes.FeedbackOnlyAssistant);
 
+        // Tags 仅在差评时保存，👍 时忽略。只收已知标签并去重：任意字符串会进管理端的标签分布统计，
+        // 条数不限时序列化结果还会超过列长（500），在落库时变成 500 而不是 400
+        var tags = !input.Rating && input.Tags is { Count: > 0 } ? input.Tags : null;
+        if (tags != null)
+        {
+            var unknown = tags.Where(t => !FeedbackTags.All.Contains(t)).Distinct().ToList();
+            if (unknown.Count > 0)
+                return Fail($"Unknown feedback tag(s): {string.Join(", ", unknown)}. Allowed: {string.Join(", ", FeedbackTags.All)}", 400, ErrorCodes.FeedbackTagInvalid);
+        }
+
         // 设置反馈字段（允许覆盖已有反馈）
         message.FeedbackRating = input.Rating;
         message.FeedbackComment = input.Comment;
-        // Tags 仅在差评时保存，👍 时忽略
-        message.FeedbackTags = !input.Rating && input.Tags is { Count: > 0 }
-            ? JsonSerializer.Serialize(input.Tags)
-            : null;
+        message.FeedbackTags = tags != null ? JsonSerializer.Serialize(tags.Distinct().ToList()) : null;
         message.FeedbackTime = DateTime.UtcNow;
 
         await _messageRepository.UpdateAsync(message);

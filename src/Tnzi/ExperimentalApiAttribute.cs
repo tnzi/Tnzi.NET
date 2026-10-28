@@ -10,7 +10,7 @@ namespace Tnzi;
 /// （把条目从 Unshipped 滚入 Shipped，或对移除写 <c>*REMOVED*</c> 项）。意图归意图，事实校验归 analyzer。
 /// 详见 docs/coding-standards/public-api-governance.md。
 /// </remarks>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
 public sealed class ExperimentalApiAttribute : Attribute
 {
     /// <summary>

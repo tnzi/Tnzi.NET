@@ -10,7 +10,11 @@ public interface IPostCommitActionQueue
     /// <summary>
     /// 将操作加入队列
     /// </summary>
-    /// <param name="action">要延迟执行的异步操作</param>
+    /// <param name="action">
+    /// 要延迟执行的异步操作。它收到的令牌由执行队列的一方决定，<b>不是</b>请求的取消令牌：
+    /// 工作单元管理器在事务提交之后执行队列，传的是不可取消的令牌：事务已经提交，
+    /// 客户端此时断开不应让提交后的副作用被取消而丢失。
+    /// </param>
     void Enqueue(Func<CancellationToken, Task> action);
 
     /// <summary>

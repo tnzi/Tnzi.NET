@@ -68,7 +68,7 @@
           mobile="scroll"
           :pagination="false"
           :bordered="false"
-          :empty-text="sourceAccountId ? t('queue.empty') : t('queue.pickAccount')"
+          :empty-text="queueError || (sourceAccountId ? t('queue.empty') : t('queue.pickAccount'))"
           @update:checked-row-keys="onCheckedChange"
         />
       </div>
@@ -278,6 +278,8 @@ void sources.ensureFundsAccounts()
 const sourceAccountId = ref<string | null>(null)
 const queueAll = ref<UndepositedReceiptDto[]>([])
 const queueLoading = ref(false)
+/** Why the queue could not be read; shown where the receipts would be (empty = it was read). */
+const queueError = ref('')
 const checkedQueueKeys = ref<string[]>([])
 
 /**
@@ -316,17 +318,26 @@ const destinationOptions = computed(() =>
   sources.fundsAccountOptions.value.filter((o) => o.value !== sourceAccountId.value),
 )
 
+// Last-wins: picking source account A then B must not let A's late answer fill
+// B's queue, where its receipts would be ticked into a deposit from B.
+let queueSeq = 0
+
 async function loadQueue() {
+  const mine = ++queueSeq
+  queueError.value = ''
   // 三条退出路径都要守住同一条不变式：勾选集合 ⊆ 屏幕上看得见的行。
   if (!sourceAccountId.value) {
     queueAll.value = []
     queueCurrency.value = null
     checkedQueueKeys.value = []
+    queueLoading.value = false
     return
   }
   queueLoading.value = true
   try {
-    queueAll.value = await bridge.deposits.undeposited({ accountId: sourceAccountId.value })
+    const loaded = await bridge.deposits.undeposited({ accountId: sourceAccountId.value })
+    if (mine !== queueSeq) return
+    queueAll.value = loaded
     // 保留当前币种（如果它还在清单里），否则落到第一个 —— 过账/作废后重刷不该
     // 把人从他正在看的那一档币种上弹走。
     const available = queueCurrencies.value
@@ -339,18 +350,21 @@ async function loadQueue() {
     const visible = new Set(queueRows.value.map((r) => r.paymentEntryId))
     checkedQueueKeys.value = checkedQueueKeys.value.filter((k) => visible.has(k))
   } catch (error) {
+    if (mine !== queueSeq) return
     queueAll.value = []
     queueCurrency.value = null
     checkedQueueKeys.value = []
-    message.error(error instanceof Error ? error.message : String(error))
+    queueError.value = error instanceof Error ? error.message : String(error)
+    message.error(queueError.value)
   } finally {
-    queueLoading.value = false
+    if (mine === queueSeq) queueLoading.value = false
   }
 }
 
 function onSourceAccountChange() {
-  // 换了来源账户，之前勾的那几张已经不在这张清单上了
+  // 换了来源账户，之前勾的那几张已经不在这张清单上了；上一个账户的收款也不留在屏幕上等新清单
   checkedQueueKeys.value = []
+  queueAll.value = []
   queueCurrency.value = null
   void loadQueue()
 }

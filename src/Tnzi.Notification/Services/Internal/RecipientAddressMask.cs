@@ -18,8 +18,8 @@ namespace Tnzi.Notification.Services.Internal;
 /// </para>
 /// <para>
 /// ★ <b>作用在 DTO 上而不是在每个查询里</b>：<c>NotificationInfo</c> 同时带着
-/// <c>Type</c> 与 <c>Recipients</c>，所以无论这份 DTO 是 <c>MapTo</c> 出来的还是
-/// <c>ProjectTo</c> 在 SQL 里投影出来的，这一步都成立。
+/// <c>Type</c> 与 <c>Recipients</c>，所以无论这份 DTO 是怎么构造出来的，这一步都成立。
+/// 两个分页列表的行不带收件人（只带计数），所以那里没有要遮的东西。
 /// </para>
 /// </remarks>
 internal static class RecipientAddressMask
@@ -38,13 +38,6 @@ internal static class RecipientAddressMask
             Mask(info.Type, info.Recipients);
 
         return infos;
-    }
-
-    /// <summary>给一页通知打掩码，返回同一个实例。</summary>
-    public static IPagedList<NotificationInfo> Apply(IPagedList<NotificationInfo> page)
-    {
-        Apply(page.Items);
-        return page;
     }
 
     /// <summary>给一份投递报告打掩码，返回同一个实例。</summary>

@@ -12,9 +12,22 @@ namespace Tnzi.Payment.Entities;
 public class StoredPaymentMethod : MultiTenantAuditedEntity<Guid>
 {
     /// <summary>
-    /// 持有用户ID
+    /// 绑卡的经办人（谁录入的这张卡）。归属看 <see cref="BillingAccountType"/> / <see cref="BillingAccountId"/>。
     /// </summary>
     public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 这张卡属于哪个计费账户：种类（见 <see cref="BillingAccountTypes"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 默认卡、渠道侧客户复用、「我的卡」都按账户算：单客户部署里任何一位管理者换的卡，就是整个账户续费用的卡。
+    /// </remarks>
+    public string BillingAccountType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 计费账户 Id（与 <see cref="BillingAccountType"/> 成对）。
+    /// </summary>
+    public string BillingAccountId { get; set; } = string.Empty;
 
     /// <summary>
     /// 支付渠道代码

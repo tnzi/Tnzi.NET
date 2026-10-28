@@ -20,7 +20,11 @@ public readonly record struct ChildCollectionSyncResult(int Added, int HardRemov
 /// 因此有意<b>非异步</b>，避免 async-over-sync。前置条件：父实体的子集合已加载
 /// （EF 导航属性），且父实体处于变更跟踪中。</para>
 /// <para>键匹配语义：目标与现有子项按 <c>keySelector</c> 的键比较——
-/// 两侧都有=保留（若曾软删则复活）；仅现有=移除（软删或物理删）；仅目标=新增。
+/// 两侧都有=保留（若曾软删则复活，并清空 <see cref="IHasDeleter"/> 的删除人与删除时间）；仅现有=移除（软删或物理删）；仅目标=新增。
+/// ★<b>复活只作用于集合里看得见的软删子项</b>：EF 的 <c>Include</c> 同样施加软删全局过滤器，按默认方式加载的集合里
+/// 没有已软删的行，目标里再出现同一业务键时会作为<b>新增</b>插入一行（键上有不带 <c>IsDeleted</c> 过滤的唯一索引时
+/// 保存会撞唯一约束）。要得到复活语义，子集合须连同软删行一起加载（查询带 <c>IgnoreQueryFilters()</c>，
+/// 或在同一个 DbContext 里先软删再加回，被跟踪的实体仍在集合中）。
 /// 新增子项的键为默认值（尚未持久化）时一律视为新增。<b>匹配到的子项其标量值不会被覆盖</b>
 /// （整体替换只处理增删，字段更新请另行映射）。</para>
 /// </remarks>
@@ -73,6 +77,12 @@ public static class ChildCollectionSync
                 if (existing is ISoftDelete { IsDeleted: true } revivable)
                 {
                     revivable.IsDeleted = false;
+                    if (existing is IHasDeleter deletionAudit)
+                    {
+                        deletionAudit.DeleterId = null;
+                        deletionAudit.DeletionTime = null;
+                    }
+
                     revived++;
                 }
                 continue;

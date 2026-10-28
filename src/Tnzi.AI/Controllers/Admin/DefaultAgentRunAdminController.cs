@@ -118,13 +118,17 @@ public class DefaultAgentRunAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 取消运行
+    /// 取消运行：写 Cancelled、触发后台任务的取消令牌、关联的工作流执行一并取消（与 kill_agent 同一条链路）。
     /// </summary>
+    /// <remarks>
+    /// 不能只调 <see cref="IAgentRunService.CancelAsync"/>：那一步只翻转行状态，后台任务照跑、继续调工具耗 token，
+    /// 跑完再把行写回 Completed，管理端的停止按钮等于没按。
+    /// </remarks>
     [HttpPost("{runId:guid}/cancel")]
     [ApiAuthorize(PermissionName = "ai.agentRun.execute")]
     public virtual async Task<ApiResult> Cancel(Guid runId)
     {
-        var result = await RunService.CancelAsync(runId);
+        var result = await RuntimeControlService.KillAsync(runId, AgentRunAccessScope.Tenant);
         return result.ToApiResult();
     }
 

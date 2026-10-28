@@ -16,6 +16,12 @@ namespace Tnzi.Notification.Controllers;
 /// 把退订放在 GET 上会被邮件客户端的链接预取器<b>替收件人点掉</b> —— 这是真实发生过的事故，
 /// 也是 RFC 8058 的一键退订走 POST 的原因。
 /// </para>
+/// <para>
+/// ★ <b>租户只信令牌</b>：退订与撤销都走服务的按令牌重载，它切到令牌里签的租户再落库。
+/// 匿名请求自带的租户（请求头、查询串、Cookie）由调用者随意填写，按它落库等于让拿到一封信的人
+/// 选择在哪个租户里退订；而邮件服务商的一键退订根本不带租户，按请求落库就全落在宿主，发信的租户看不见。
+/// 覆写这些端点时同样调用按令牌的重载，不要解析出地址再调按地址的那个。
+/// </para>
 /// </remarks>
 [DefaultController]
 [AllowAnonymous]
@@ -61,8 +67,7 @@ public class DefaultUnsubscribeController : ApiControllerBase
             return ApiResult.Error("This unsubscribe link is not valid.", 400);
 
         var result = await OptOut.OptOutAsync(
-            payload.Address, payload.Channel, payload.Category,
-            source: "one-click link", reason: input.Reason, cancellationToken: cancellationToken);
+            payload, source: "one-click link", reason: input.Reason, cancellationToken: cancellationToken);
         return result.ToApiResult();
     }
 
@@ -96,8 +101,7 @@ public class DefaultUnsubscribeController : ApiControllerBase
             return ApiResult.Error("This unsubscribe link is not valid.", 400);
 
         var result = await OptOut.OptOutAsync(
-            payload.Address, payload.Channel, payload.Category,
-            source: "one-click header", reason: null, cancellationToken: cancellationToken);
+            payload, source: "one-click header", reason: null, cancellationToken: cancellationToken);
         return result.ToApiResult();
     }
 
@@ -112,8 +116,7 @@ public class DefaultUnsubscribeController : ApiControllerBase
         if (payload == null)
             return ApiResult.Error("This unsubscribe link is not valid.", 400);
 
-        var result = await OptOut.OptInAsync(
-            payload.Address, payload.Channel, payload.Category, cancellationToken);
+        var result = await OptOut.OptInAsync(payload, cancellationToken);
         return result.ToApiResult();
     }
 
@@ -122,9 +125,10 @@ public class DefaultUnsubscribeController : ApiControllerBase
     {
         if (string.IsNullOrEmpty(address)) return string.Empty;
 
+        // 首字符按码元取：本地部分以 emoji 开头时一个都不露，而不是露出半个代理项
         var at = address.IndexOf('@');
         if (at > 0)
-            return $"{address[0]}***{address[at..]}";
+            return $"{address[..at].FitToLength(1)}***{address[at..]}";
 
         return address.Length <= 4 ? new string('*', address.Length) : $"•••••{address[^4..]}";
     }

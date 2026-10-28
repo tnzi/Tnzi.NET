@@ -128,13 +128,20 @@ const showRegister = computed(() => isModuleAvailable('register', features, call
 const showRecovery = computed(() => isModuleAvailable('reset-pwd', features, callbacks))
 
 async function handleSubmit(): Promise<void> {
+  // One attempt at a time. Enter on the form, a click on Sign in and a demo
+  // account chip all land here, and validation and the captcha await, so the
+  // flag goes up before them: a second Enter in that gap signed in again, and
+  // each attempt counts towards the lockout.
+  if (submitting.value) return
+  submitting.value = true
   submitError.value = ''
-  try { await validate() } catch { return }
+  try { await validate() } catch { submitting.value = false; return }
   if (!callbacks.pwdLogin) {
     submitError.value = translate(
       'admin.login.errorMissingCallback',
       'Login is not configured. Pass `defineAdminApp({ login: { callbacks: { pwdLogin } } })`.',
     )
+    submitting.value = false
     return
   }
   // When the adaptive captcha is on screen the user must solve it before we
@@ -147,13 +154,13 @@ async function handleSubmit(): Promise<void> {
       token = await captchaRef.value?.execute()
     } catch {
       submitError.value = translate('admin.login.captcha.required', 'Please complete the captcha.')
+      submitting.value = false
       return
     }
   }
   // Whether a captcha was already showing before this attempt - if it still is
   // afterwards, the token we just submitted was rejected.
   const hadCaptcha = pendingCaptcha.value !== null
-  submitting.value = true
   try {
     await callbacks.pwdLogin(
       {

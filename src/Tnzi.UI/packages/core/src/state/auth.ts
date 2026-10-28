@@ -10,9 +10,11 @@ import type { AuthState } from './types/auth';
 import type { LoginDto, LoginResultDto, UserProfile, UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useAuthApi, useProfileApi } from '../services/identity/index';
 import { isSessionEndedForSecurity, isSignInIpNotAllowed } from '../services/identity/session-security';
+import { readUserIdClaim } from '../services/identity/session-claims';
 import { HttpError, isHttpError } from '../errors/api-error';
 import { useLogger } from '../adapters/logger';
 import type { StateDeps } from './types/deps';
+import { fetchAccessProfilePermissions } from './access-profile';
 
 /**
  * Map UserDto to UserProfile.
@@ -59,6 +61,52 @@ function isRefreshRejection(error: unknown): boolean {
   if (!isHttpError(error)) return false;
   const status = error.statusCode;
   return status >= 400 && status < 500 && !TRANSIENT_REFRESH_STATUSES.has(status);
+}
+
+// ============================================
+// Sessions shared between tabs
+// ============================================
+
+/**
+ * A refresh found that the session this browser shares between tabs (the
+ * persisted keys in bearer mode, the one cookie in cookie mode) now belongs to
+ * a different user: another tab signed out and signed in as someone else.
+ *
+ * This tab's session is over. Carrying on would send every request as the other
+ * user while the page still shows this tab's user, and their data would appear
+ * under this user's name.
+ */
+class SessionTakenOverError extends Error {
+  constructor() {
+    super('Another account signed in on this browser; this session has ended');
+    this.name = 'SessionTakenOverError';
+  }
+}
+
+/**
+ * Whose session the shared storage holds, relative to this tab:
+ * - `none`: nothing persisted;
+ * - `ours`: our own refresh token, or one issued to the same user (another tab
+ *   rotated it, or the same person signed in again there);
+ * - `other`: issued to a different user;
+ * - `unknown`: a different token whose user cannot be read off one side (opaque
+ *   tokens). Never treated as ours: adopting a credential nobody can identify is
+ *   how a tab ends up acting as somebody else.
+ */
+type PersistedSessionOwner = 'none' | 'ours' | 'other' | 'unknown';
+
+/** User ids are GUIDs; compare them the way the server does, ignoring case. */
+function isSameUser(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * Role names and permission codes, lower-cased for lookup. The server compares
+ * both ignoring case (`StringComparer.OrdinalIgnoreCase`), so a check written
+ * `hasRole('admin')` must hold for a user whose role is stored as `Admin`.
+ */
+function lowerCaseSet(values: readonly string[]): Set<string> {
+  return new Set(values.map((value) => value.toLowerCase()));
 }
 
 /**
@@ -190,6 +238,20 @@ export class AuthStateManager {
    */
   private _lastRefreshRejection: unknown = null;
 
+  /**
+   * Which session the in-memory identity belongs to. Bumped whenever one ends
+   * (`clearAuth`) or another begins (login, a token session, `setAuth`), so a
+   * profile or permission response that comes back afterwards is dropped
+   * instead of being written over the next user's state.
+   */
+  private _session = 0;
+
+  /**
+   * The permission reload in flight, if any. A token refresh starts one without
+   * waiting for it; a restore that has to wait joins it instead of asking twice.
+   */
+  private _permissionReload: Promise<void> | null = null;
+
   /** Persisted-storage keys derived from the configurable storage prefix. */
   private readonly _keys: { token: string; refresh: string; expiry: string };
 
@@ -287,20 +349,24 @@ export class AuthStateManager {
   // Permission checking
   // ============================================
 
+  // All four ignore case, as the server does (see lowerCaseSet).
+
   hasRole(role: string): boolean {
-    return this.userRoles.includes(role);
+    return this.hasAnyRole([role]);
   }
 
   hasPermission(permission: string): boolean {
-    return this.userPermissions.includes(permission);
+    return this.hasAnyPermission([permission]);
   }
 
   hasAnyRole(roles: string[]): boolean {
-    return roles.some(role => this.userRoles.includes(role));
+    const owned = lowerCaseSet(this.userRoles);
+    return roles.some(role => owned.has(role.toLowerCase()));
   }
 
   hasAnyPermission(permissions: string[]): boolean {
-    return permissions.some(perm => this.userPermissions.includes(perm));
+    const owned = lowerCaseSet(this.userPermissions);
+    return permissions.some(perm => owned.has(perm.toLowerCase()));
   }
 
   // ============================================
@@ -342,6 +408,9 @@ export class AuthStateManager {
         throw new HttpError({ ...result, message: result.message ?? 'Login failed' });
       }
       const tokenResult = result.data;
+      // A login can land on top of a live session (a restored one, another
+      // user's): nothing of that identity may carry over into this one.
+      this._beginSession();
       // Set token first so profile fetch is authenticated
       this.accessToken = tokenResult.accessToken;
       this.refreshToken = tokenResult.refreshToken;
@@ -351,6 +420,7 @@ export class AuthStateManager {
 
       // Fetch profile and permissions in parallel to reduce login latency
       await Promise.all([this.fetchUserProfile(), this._fetchPermissions()]);
+      this.roles = this.user?.roles ?? [];
       this.persistTokens();
 
       return {
@@ -382,8 +452,14 @@ export class AuthStateManager {
         await this._revokeOnServer();
       }
     } finally {
+      // Decided before clearAuth(), which drops the identity the check needs.
+      // When another tab has since signed in as someone else, the persisted
+      // keys are theirs: clearing them would sign that user out on reload.
+      const persistedIsOurs = this._readPersistedSession().owner !== 'other';
       this.clearAuth();
-      this.clearPersistedTokens();
+      if (persistedIsOurs) {
+        this.clearPersistedTokens();
+      }
 
       // Notify dependent state managers (e.g., UserStateManager)
       try {
@@ -450,9 +526,15 @@ export class AuthStateManager {
   private async _refreshForLogout(api: ReturnType<typeof useAuthApi>): Promise<boolean> {
     if (!this._cookieDelivery && !this.refreshToken) return false;
     try {
+      const previousUser = readUserIdClaim(this.accessToken);
+      // Throws SessionTakenOverError when storage holds another user's
+      // session: their token is never presented, nothing is refreshed.
       const result = await api.refreshToken(
         this._cookieDelivery ? {} : { refreshToken: this._currentRefreshToken() });
       if (!result.succeeded || !result.data?.accessToken) return false;
+      // A token for another user must never authorise this tab's logout: the
+      // POST would revoke THEIR session, in the tab they are using.
+      if (this._issuedToAnotherUser(previousUser, result.data)) return false;
       this.accessToken = result.data.accessToken;
       this.deps.httpClient.setAccessToken(this.accessToken);
       return true;
@@ -500,6 +582,9 @@ export class AuthStateManager {
 
     try {
       const api = this._authApi();
+      const previousUser = readUserIdClaim(this.accessToken);
+      // Throws SessionTakenOverError (handled below) when storage now holds
+      // another user's session: their refresh token is never presented.
       const result = await api.refreshToken(
         this._cookieDelivery ? {} : { refreshToken: this._currentRefreshToken() });
       if (!result.succeeded || !result.data) {
@@ -509,6 +594,12 @@ export class AuthStateManager {
         // expired" from "we ended your session because the token appears to be
         // compromised".
         throw new HttpError({ ...result, message: result.message ?? 'Token refresh failed' });
+      }
+      // Cookie mode shares one cookie between tabs, so after another tab signs
+      // in as someone else the refresh simply answers for them. In bearer mode
+      // the check above makes this a race-only backstop.
+      if (this._issuedToAnotherUser(previousUser, result.data)) {
+        throw new SessionTakenOverError();
       }
       this.accessToken = result.data.accessToken;
       // Cookie mode: the body's refreshToken is empty by design (the browser got
@@ -523,28 +614,41 @@ export class AuthStateManager {
       // Sync token to HTTP client
       this.deps.httpClient.setAccessToken(this.accessToken);
 
-      // Fetch updated permissions after token refresh
-      await this._fetchPermissions();
+      // Permissions may have changed since the last token; reload them, but do
+      // not hold the refresh for it. Every request queued behind the 401 waits
+      // for this function, and the HttpClient bounds it with the request
+      // timeout: a slow permission call used to push a successful refresh past
+      // it and sign the user out. A restore that needs the codes before it
+      // reports a session joins the reload (`_loadPermissions`).
+      void this._loadPermissions();
     } catch (error) {
       // Clear mutex BEFORE cleanup so concurrent callers don't await a failed promise
       this._refreshPromise = null;
-      // Only a REJECTION is the end of the session. A transport failure
-      // (offline, timeout, 5xx, 429) means the server never looked at the
-      // token: rethrow so this attempt fails - the HttpClient's onUnauthorized
-      // will still sign this tab out - but leave the persisted tokens, the
-      // message and the router alone so the next boot can try again. Wiping
-      // here turned "opened the app on the train" into "signed out for good".
-      if (!isRefreshRejection(error)) {
+      // Only a REJECTION (or another user having taken over the shared
+      // session) is the end of the session. A transport failure (offline,
+      // timeout, 5xx, 429) means the server never looked at the token: rethrow
+      // so this attempt fails - the HttpClient's onUnauthorized will still sign
+      // this tab out - but leave the persisted tokens, the message and the
+      // router alone so the next boot can try again. Wiping here turned
+      // "opened the app on the train" into "signed out for good".
+      const takenOver = error instanceof SessionTakenOverError;
+      if (!takenOver && !isRefreshRejection(error)) {
         throw error;
       }
       this._lastRefreshRejection = error;
+      // The persisted keys are cleared only when they are still ours. Taken
+      // over, or replaced by another tab's sign-in while this request was out,
+      // they hold someone else's live session.
+      const persistedIsOurs = !takenOver && this._readPersistedSession().owner !== 'other';
       // Local sign-out only. The refresh token is already dead, so the backend
       // logout endpoint would just reject the stale access token; going through
       // logout() used to POST /auth/logout with that expired token, and the
       // resulting 401 stalled inside the HttpClient refresh cycle, delaying the
       // session-expired signal by a full request timeout.
       this.clearAuth();
-      this.clearPersistedTokens();
+      if (persistedIsOurs) {
+        this.clearPersistedTokens();
+      }
       // Set AFTER clearAuth (which resets error) so the message survives for
       // the login page to display.
       // ★ The security case gets its own message on purpose: this may be the
@@ -567,9 +671,12 @@ export class AuthStateManager {
   async fetchUserProfile(): Promise<void> {
     if (!this.isAuthenticated) return;
 
+    const session = this._session;
     try {
       const api = useProfileApi(this.deps.httpClient);
       const result = await api.get();
+      // Signed out, or another session began, while the request was out.
+      if (session !== this._session) return;
       if (result.succeeded && result.data) {
         this.user = toUserProfile(result.data, this.permissions);
       }
@@ -619,6 +726,7 @@ export class AuthStateManager {
   // ============================================
 
   setAuth(result: LoginResultDto): void {
+    this._beginSession();
     this.isAuthenticated = true;
     this.accessToken = result.accessToken;
     this.refreshToken = result.refreshToken;
@@ -627,7 +735,6 @@ export class AuthStateManager {
     this.roles = result.user.roles;
     this.permissions = result.user.permissions;
     this.error = null;
-    this._lastRefreshRejection = null;
 
     // Sync token to HTTP client
     this.deps.httpClient.setAccessToken(this.accessToken);
@@ -648,6 +755,9 @@ export class AuthStateManager {
     refreshToken?: string | null;
     expiresIn?: number | null;
   }): Promise<void> {
+    // The browser may still hold an earlier identity (accepting an invitation
+    // while another account is restored): none of it carries over.
+    this._beginSession();
     this.isAuthenticated = true;
     this.accessToken = tokens.accessToken;
     this.refreshToken = tokens.refreshToken ?? null;
@@ -657,7 +767,9 @@ export class AuthStateManager {
     // Sync + persist so a hard refresh can restore the session. NOTE: restoreAuth
     // requires BOTH an access and a refresh token, so a token-only session (no
     // refresh token) lives only for the current tab and is NOT restored on hard
-    // reload. setAuth deliberately persists nothing.
+    // reload; persisting it removes an earlier session's refresh token rather
+    // than leaving it paired with this access token. setAuth deliberately
+    // persists nothing.
     this.deps.httpClient.setAccessToken(this.accessToken);
     this.persistTokens();
 
@@ -665,12 +777,28 @@ export class AuthStateManager {
     // every hasPermission() / route guard / menu fails until a refresh or reload
     // happens to repopulate this.permissions.
     await Promise.all([this.fetchUserProfile(), this._fetchPermissions()]);
+    this.roles = this.user?.roles ?? [];
   }
 
   clearAuth(): void {
     Object.assign(this, createInitialAuthState());
+    this._session += 1;
+    this._permissionReload = null;
     // Clear token from HTTP client
     this.deps.httpClient.setAccessToken(null);
+  }
+
+  /**
+   * Drop the identity of whatever session was in memory before a new one is
+   * established. Tokens are left to the caller, which sets them next.
+   */
+  private _beginSession(): void {
+    this._session += 1;
+    this._permissionReload = null;
+    this._lastRefreshRejection = null;
+    this.user = null;
+    this.roles = [];
+    this.permissions = [];
   }
 
   setError(error: string | null): void {
@@ -721,13 +849,17 @@ export class AuthStateManager {
       this.roles = result.data.roles ?? [];
 
       // Fetch permissions before marking as authenticated,
-      // so permission checks don't run against stale/empty permissions
-      await this._fetchPermissions();
+      // so permission checks don't run against stale/empty permissions.
+      // (Joins the reload a refresh started, when the profile call drove one.)
+      await this._loadPermissions();
       this.isAuthenticated = true;
     } catch {
       // Token may be expired, try refresh
       try {
         await this.refreshAccessToken();
+        // The refresh only starts the permission reload; wait for it here so
+        // no route guard sees an authenticated user without codes.
+        await this._loadPermissions();
         // The refresh succeeded and persisted a fresh token pair, so the session
         // is live again - mark it authenticated BEFORE fetching the profile.
         // fetchUserProfile() short-circuits on `!isAuthenticated`, so skipping
@@ -744,11 +876,11 @@ export class AuthStateManager {
         // mode the profile 401 above already drove the refresh through the
         // HttpClient, and a REJECTED one cleared the token before this retry.
         // The rejection the manager recorded is the verdict; this error is not.
+        // A rejection always passes through `_doRefreshToken`, which has
+        // already cleared the persisted tokens - unless another tab signed in
+        // as someone else meanwhile, in which case they are not ours to clear.
         const cause = this._lastRefreshRejection ?? error;
         this._clearAfterFailedRestore(cause);
-        if (isRefreshRejection(cause)) {
-          this.clearPersistedTokens();
-        }
       }
     }
   }
@@ -794,13 +926,72 @@ export class AuthStateManager {
    * Reading storage at the moment of use collapses that window down to genuinely
    * concurrent refreshes, which the backend's rotation overlap window covers.
    * (Cookie mode has no such problem: the browser holds exactly one cookie.)
+   *
+   * ★ Only a token issued to the SAME user is adopted. When another tab has
+   * signed out and signed in as someone else, the stored token is theirs;
+   * presenting it would turn this tab into that user while the page still shows
+   * this one. That throws {@link SessionTakenOverError} instead. A stored token
+   * whose user cannot be told is not adopted either: this tab presents its own.
    */
   private _currentRefreshToken(): string {
-    const persisted = this.deps.storage.get<string>(this._keys.refresh);
-    if (persisted && persisted !== this.refreshToken) {
-      this.refreshToken = persisted;
+    const persisted = this._readPersistedSession();
+    if (persisted.owner === 'other') {
+      throw new SessionTakenOverError();
+    }
+    if (persisted.owner === 'ours' && persisted.refresh && persisted.refresh !== this.refreshToken) {
+      this.refreshToken = persisted.refresh;
     }
     return this.refreshToken!;
+  }
+
+  /**
+   * Read the session persisted in shared storage and say whose it is (see
+   * {@link PersistedSessionOwner}). Identity comes from the user id claim of this
+   * tab's access token and of the persisted one.
+   *
+   * The refresh token is read before the access token on purpose:
+   * {@link _writePersistedTokens} writes them the other way round, so a refresh
+   * token seen here is never newer than the access token read after it.
+   */
+  private _readPersistedSession(): { refresh: string | null; owner: PersistedSessionOwner } {
+    const refresh = this.deps.storage.get<string>(this._keys.refresh);
+    if (!refresh) return { refresh: null, owner: 'none' };
+    if (refresh === this.refreshToken) return { refresh, owner: 'ours' };
+
+    const ours = readUserIdClaim(this.accessToken);
+    const theirs = readUserIdClaim(this.deps.storage.get<string>(this._keys.token));
+    if (!ours || !theirs) return { refresh, owner: 'unknown' };
+    return { refresh, owner: isSameUser(ours, theirs) ? 'ours' : 'other' };
+  }
+
+  /**
+   * Whether a refresh answered with a token for a different user than the one
+   * this tab was signed in as (`previousUser`, read before the request). Unknown
+   * on either side (a cold boot, opaque tokens) is not a mismatch: there is no
+   * identity yet to protect.
+   *
+   * On a mismatch in bearer mode the server has just rotated THAT user's
+   * refresh token, so the replacement is written back to shared storage, where
+   * their tab picks it up. Dropping it would leave them holding a rotated-away
+   * token that their next refresh reports as a replay. (Cookie mode: the
+   * browser already stored the new cookie.)
+   */
+  private _issuedToAnotherUser(
+    previousUser: string | null,
+    tokens: { accessToken: string; refreshToken: string; expiresIn: number },
+  ): boolean {
+    const issuedTo = readUserIdClaim(tokens.accessToken);
+    if (!previousUser || !issuedTo || isSameUser(previousUser, issuedTo)) {
+      return false;
+    }
+    if (!this._cookieDelivery) {
+      this._writePersistedTokens(
+        tokens.accessToken,
+        tokens.refreshToken,
+        new Date(Date.now() + tokens.expiresIn * 1000),
+      );
+    }
+    return true;
   }
 
   /**
@@ -814,6 +1005,8 @@ export class AuthStateManager {
   private async _restoreFromCookie(): Promise<void> {
     try {
       await this.refreshAccessToken();
+      // See restoreAuth: the codes must be in before the session is reported.
+      await this._loadPermissions();
       this.isAuthenticated = true;
       await this.fetchUserProfile();
       this.roles = this.user?.roles ?? [];
@@ -823,18 +1016,44 @@ export class AuthStateManager {
   }
 
   /**
-   * Fetch permissions using the configured permissionsFetchFn.
-   * Falls back to empty array if not configured.
+   * Load the permission codes through `deps.permissionsFetchFn`, or the
+   * framework's access profile when it is left undefined. `null` opts out.
+   *
+   * The default lives here rather than in `createTnziClient` so every way of
+   * building the manager gets it: the Pinia auth stores of `@tnzi/ui` and
+   * `@tnzi/mobile` construct it directly, and without a source their
+   * `hasPermission()` answered false for every code, a super admin included.
    */
   private async _fetchPermissions(): Promise<void> {
-    if (this.deps.permissionsFetchFn) {
-      try {
-        this.permissions = await this.deps.permissionsFetchFn();
-      } catch {
-        // Non-critical: keep existing permissions
-        useLogger().warn('Failed to fetch permissions');
+    const fetchPermissions = this.deps.permissionsFetchFn === undefined
+      ? () => fetchAccessProfilePermissions(this.deps.httpClient)
+      : this.deps.permissionsFetchFn;
+    if (!fetchPermissions) return;
+    const session = this._session;
+    try {
+      const codes = await fetchPermissions();
+      // Signed out, or another session began, while the request was out: the
+      // codes belong to nobody who is still here.
+      if (session === this._session) {
+        this.permissions = codes;
       }
+    } catch {
+      // Non-critical: keep existing permissions
+      useLogger().warn('Failed to fetch permissions');
     }
+  }
+
+  /**
+   * {@link _fetchPermissions}, joining a reload already in flight instead of
+   * starting a second one. Never rejects.
+   */
+  private _loadPermissions(): Promise<void> {
+    if (this._permissionReload) return this._permissionReload;
+    const reload = this._fetchPermissions().finally(() => {
+      if (this._permissionReload === reload) this._permissionReload = null;
+    });
+    this._permissionReload = reload;
+    return reload;
   }
 
   private persistTokens(): void {
@@ -843,15 +1062,34 @@ export class AuthStateManager {
     // exists to remove - a credential any script or local process can read.
     if (this._cookieDelivery) return;
 
-    if (this.accessToken) {
-      this.deps.storage.set(this._keys.token, this.accessToken);
-    }
-    if (this.refreshToken) {
-      this.deps.storage.set(this._keys.refresh, this.refreshToken);
-    }
-    if (this.tokenExpiry) {
-      this.deps.storage.set(this._keys.expiry, this.tokenExpiry.toISOString());
-    }
+    this._writePersistedTokens(this.accessToken, this.refreshToken, this.tokenExpiry);
+  }
+
+  /**
+   * Write a token set to storage. The access token goes first and the refresh
+   * token after it: {@link _readPersistedSession} relies on that order to never
+   * pair a new refresh token with an older access token.
+   *
+   * A value the new set lacks removes its key rather than leaving the previous
+   * session's there: a token-only session written over a full one would
+   * otherwise persist this access token next to the earlier refresh token, and
+   * the next reload would restore the pair and refresh into the earlier user.
+   */
+  private _writePersistedTokens(
+    accessToken: string | null,
+    refreshToken: string | null,
+    expiry: Date | null,
+  ): void {
+    const write = (key: string, value: string | null): void => {
+      if (value) {
+        this.deps.storage.set(key, value);
+      } else {
+        this.deps.storage.remove(key);
+      }
+    };
+    write(this._keys.token, accessToken);
+    write(this._keys.refresh, refreshToken);
+    write(this._keys.expiry, expiry ? expiry.toISOString() : null);
   }
 
   private clearPersistedTokens(): void {

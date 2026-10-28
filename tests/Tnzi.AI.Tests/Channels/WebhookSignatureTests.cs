@@ -375,7 +375,7 @@ public class WebhookSignatureTests
     // ---------------- Discord (Ed25519) ----------------
 
     private static (DiscordChannelAdapter adapter, NSec.Cryptography.Key key) CreateDiscord(
-        InMemoryChannelMessageBus bus, out string publicKeyHex, List<string>? allowedUsers = null)
+        InMemoryChannelMessageBus bus, out string publicKeyHex, List<string>? allowedUsers = null, List<string>? allowedGuilds = null)
     {
         var algo = NSec.Cryptography.SignatureAlgorithm.Ed25519;
         var key = NSec.Cryptography.Key.Create(algo, new NSec.Cryptography.KeyCreationParameters
@@ -387,7 +387,11 @@ public class WebhookSignatureTests
 
         var options = MsOptions.Create(new ChannelsModuleOptions
         {
-            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot", PublicKey = publicKeyHex, AllowedUsers = allowedUsers ?? [] }
+            Discord = new DiscordAdapterOptions
+            {
+                Enabled = true, BotToken = "bot", PublicKey = publicKeyHex,
+                AllowedUsers = allowedUsers ?? [], AllowedGuilds = allowedGuilds ?? []
+            }
         });
         var adapter = new DiscordChannelAdapter(NullLogger<DiscordChannelAdapter>.Instance, bus, HttpFactory(), options);
         return (adapter, key);
@@ -464,6 +468,36 @@ public class WebhookSignatureTests
         challenge.ShouldContain("\"type\":4");
         challenge.ShouldContain("\"flags\":64");
         challenge.ShouldNotContain("\"type\":5");
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Discord_ValidSignature_DirectMessageCommand_WithGuildAllowlist_RejectedNotDispatched()
+    {
+        // 私信里的斜杠命令验签照样通过，但不带 guild_id。只配 AllowedGuilds 的部署要的是
+        // 「只在这些服务器里可用」，缺 guild 不能当作「不受 guild 名单约束」。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var (adapter, key) = CreateDiscord(bus, out _, allowedGuilds: ["G1"]);
+
+        var body = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "DM1",
+            user = new { id = "U1" },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "discord hi" } } }
+        });
+        var (sig, ts) = DiscordSign(key, body);
+        var headers = new Dictionary<string, string>
+        {
+            ["X-Signature-Ed25519"] = sig,
+            ["X-Signature-Timestamp"] = ts
+        };
+
+        var result = await adapter.ProcessWebhookAsync(body, headers);
+
+        result.Outcome.ShouldBe(WebhookOutcome.Challenge);
+        var challenge = result.ChallengeResponse.ShouldNotBeNull();
+        challenge.ShouldContain("\"type\":4");
+        challenge.ShouldContain("\"flags\":64");
         (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(150))).ShouldBeNull();
     }
 

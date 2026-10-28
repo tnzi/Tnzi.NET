@@ -12,6 +12,7 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     protected readonly IToolPermissionEvaluator PermissionEvaluator;
     protected readonly IToolPermissionRuleService PermissionRuleService;
     protected readonly IToolRegistry? ToolRegistry;
+    protected readonly IShellCommandAnalyzer? ShellCommandAnalyzer;
 
     /// <summary>
     /// 初始化权限管理控制器
@@ -19,11 +20,13 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     public DefaultPermissionAdminController(
         IToolPermissionEvaluator permissionEvaluator,
         IToolPermissionRuleService permissionRuleService,
-        IToolRegistry? toolRegistry = null)
+        IToolRegistry? toolRegistry = null,
+        IShellCommandAnalyzer? shellCommandAnalyzer = null)
     {
         PermissionEvaluator = Check.NotNull(permissionEvaluator);
         PermissionRuleService = Check.NotNull(permissionRuleService);
         ToolRegistry = toolRegistry;
+        ShellCommandAnalyzer = shellCommandAnalyzer;
     }
 
     /// <summary>
@@ -66,6 +69,12 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
     {
         Check.NotNull(request);
 
+        // 与运行时同源：ApprovalToolWrapper 用同一个分析器把 shell 命令拆成片段、并入破坏性判断。
+        // 不拆的话，带 CommandPrefix 的放行规则要求每个片段都命中，在这里永远不命中而运行时命中
+        var shellAnalysis = string.IsNullOrWhiteSpace(request.ShellCommand) || ShellCommandAnalyzer == null
+            ? null
+            : ShellCommandAnalyzer.Analyze(request.ShellCommand);
+
         var context = new ToolPermissionContext
         {
             ToolName = request.ToolName ?? string.Empty,
@@ -80,9 +89,12 @@ public class DefaultPermissionAdminController : ApiAdminControllerBase
             WorkflowExecutionId = request.WorkflowExecutionId,
             WorkflowNodeName = request.WorkflowNodeName,
             ShellCommand = request.ShellCommand,
+            ShellSegments = shellAnalysis?.Segments.Select(s => s.CommandText).ToList() ?? [],
             // 与运行时同源：ApprovalToolWrapper 把工具声明的 IsDestructive 与 shell 分析 OR 合并，
             // 试算也把注册表里的声明 OR 进来，否则 delete_memory 在这里答 Deny、运行时却直接执行
-            IsDestructive = request.IsDestructive || IsRegisteredAsDestructive(request.ToolName),
+            IsDestructive = request.IsDestructive
+                || IsRegisteredAsDestructive(request.ToolName)
+                || shellAnalysis?.IsDestructiveCandidate == true,
             UserId = request.UserId,
             Arguments = request.Arguments ?? new Dictionary<string, object?>()
         };

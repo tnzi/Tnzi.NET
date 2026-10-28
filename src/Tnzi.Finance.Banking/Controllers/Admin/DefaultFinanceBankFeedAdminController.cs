@@ -135,9 +135,17 @@ public class DefaultFinanceBankFeedAdminController : ApiAdminControllerBase
         return result.ToApiResult();
     }
 
-    /// <summary>由流水创建单据草稿（权限走 finance.document.create）</summary>
+    /// <summary>
+    /// 由流水创建单据（权限走 finance.document.create，叠加 finance.document.update）
+    /// </summary>
+    /// <remarks>
+    /// 「新建并对账」（<c>PostAndMatch</c>，对账工作台恒用这一种）会把单据过账进总账，
+    /// 而全部单据控制器上的「过账」都要 <c>.update</c>。只挂 <c>.create</c> 等于让只能起草的角色
+    /// 经这条路把钱记进账里。一个端点一种授权：按它能做到的最大效果设门，不随请求体变化。
+    /// </remarks>
     [HttpPost("transactions/{id:guid}/create-document")]
     [ApiAuthorize(PermissionName = "finance.document.create")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<BankDocumentResultDto>> CreateDocument(Guid id, [FromBody] CreateBankDocumentDto request)
     {
         var result = await _service.CreateDocumentAsync(id, request);

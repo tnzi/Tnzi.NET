@@ -42,6 +42,12 @@ public class FileRecord : EntityBase<Guid>, IHasCreationTime, IHasCreator, IMult
     public string? ThumbnailPath { get; set; }
 
     /// <summary>
+    /// 缩略图对象的字节数；null = 还没量过（缩略图生成时不记大小，存储用量采样第一次碰到它时向提供者查一次并记下）。
+    /// 换缩略图时清回 null。
+    /// </summary>
+    public long? ThumbnailSize { get; set; }
+
+    /// <summary>
     /// Custom tags (comma-separated, stored as single string for DB portability)
     /// </summary>
     public string? Tags { get; set; }

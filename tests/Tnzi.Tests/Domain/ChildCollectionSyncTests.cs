@@ -26,6 +26,14 @@ public class ChildCollectionSyncTests
         public int Key { get; init; }
     }
 
+    private sealed class AuditedChild : ISoftDelete, IHasDeleter
+    {
+        public int Key { get; init; }
+        public bool IsDeleted { get; set; }
+        public Guid? DeleterId { get; set; }
+        public DateTime? DeletionTime { get; set; }
+    }
+
     [Fact]
     public void ReplaceChildren_RemovedSoftDeleteChild_ShouldBeMarkedNotRemoved()
     {
@@ -93,6 +101,21 @@ public class ChildCollectionSyncTests
         Assert.Equal(1, result.Revived);
         Assert.False(parent.SoftChildren.Single().IsDeleted);
         Assert.Equal(0, result.Added);
+    }
+
+    [Fact]
+    public void ReplaceChildren_RevivedItem_ClearsTheDeletionAudit()
+    {
+        // 复活的行不再是被删除的：留着删除人与删除时间，审计视图里它看起来仍是某人在某时删掉的
+        var revived = new AuditedChild { Key = 1, IsDeleted = true, DeleterId = Guid.NewGuid(), DeletionTime = DateTime.UtcNow };
+        var children = new List<AuditedChild> { revived };
+
+        var result = ChildCollectionSync.ReplaceChildren(children, c => c, [new AuditedChild { Key = 1 }], c => c.Key);
+
+        Assert.Equal(1, result.Revived);
+        Assert.False(revived.IsDeleted);
+        Assert.Null(revived.DeleterId);
+        Assert.Null(revived.DeletionTime);
     }
 
     [Fact]

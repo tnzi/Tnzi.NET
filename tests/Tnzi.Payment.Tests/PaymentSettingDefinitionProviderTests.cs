@@ -37,10 +37,11 @@ public class PaymentSettingDefinitionProviderTests
     [Fact]
     public void Group_HasExpectedFieldCount()
     {
-        // 5 个退款/通知字段 + 后台任务运营字段（AutoCloseExpireMinutes / OfflineExpireDays /
+        // 币种 + 3 个退款字段 + 后台任务运营字段（AutoCloseExpireMinutes / OfflineExpireDays /
         // BackgroundTaskIntervalMinutes / RefundReconcileLookbackDays）+ 渠道与回跳字段
         // （DefaultChannelCode / DefaultReturnUrl）+ 对账导出上限（ReconciliationExportMaxRows）。
-        // 全部经父 IOptionsMonitor<PaymentOptions> 热消费。
+        // 全部经父 IOptionsMonitor<PaymentOptions> 热消费。没有 DefaultNotifyUrl：没有任何代码读它，
+        // 渠道的 webhook 地址是在渠道后台登记的。另有付款方自助退款开关（AllowCustomerRefundRequests）。
         Assert.Equal(12, _group.Fields.Count);
     }
 
@@ -51,7 +52,7 @@ public class PaymentSettingDefinitionProviderTests
         Assert.Contains(fields, f => f.Key == "Payment:DefaultCurrency");
         Assert.Contains(fields, f => f.Key == "Payment:DefaultChannelCode");
         Assert.Contains(fields, f => f.Key == "Payment:DefaultReturnUrl");
-        Assert.Contains(fields, f => f.Key == "Payment:DefaultNotifyUrl");
+        Assert.DoesNotContain(fields, f => f.Key == "Payment:DefaultNotifyUrl");
         Assert.Contains(fields, f => f.Key == "Payment:EnableRefundApproval");
         Assert.Contains(fields, f => f.Key == "Payment:RefundApprovalThreshold");
         Assert.Contains(fields, f => f.Key == "Payment:MaxRefundAmountPerDay");
@@ -83,7 +84,7 @@ public class PaymentSettingDefinitionProviderTests
     {
         var fields = _group.Fields;
         Assert.Equal(SettingFieldType.String, fields.First(f => f.Key == "Payment:DefaultCurrency").Type);
-        Assert.Equal(SettingFieldType.String, fields.First(f => f.Key == "Payment:DefaultNotifyUrl").Type);
+        Assert.Equal(SettingFieldType.String, fields.First(f => f.Key == "Payment:DefaultReturnUrl").Type);
         Assert.Equal(SettingFieldType.Boolean, fields.First(f => f.Key == "Payment:EnableRefundApproval").Type);
         Assert.Equal(SettingFieldType.Decimal, fields.First(f => f.Key == "Payment:RefundApprovalThreshold").Type);
         Assert.Equal(SettingFieldType.Decimal, fields.First(f => f.Key == "Payment:MaxRefundAmountPerDay").Type);

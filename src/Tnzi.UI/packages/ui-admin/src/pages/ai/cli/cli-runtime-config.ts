@@ -5,9 +5,13 @@
  * path, CLI version, host info) is a **probe outcome**, not a setting - letting
  * an admin type a path here would just be overwritten by the next probe.
  */
+import { h } from 'vue'
+import { formatDateTime } from '@tnzi/core'
 import type { FormSchemaItem } from '@tnzi/ui'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
-import { CliRunStatus, CliRuntimeStatus } from '../../../services/bridges/cli-agent-bridge'
+import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import { EMPTY_DASH } from '../../../utils/placeholders'
+import { CliRunStatus, CliRuntimeStatus, type CliRunDto } from '../../../services/bridges/cli-agent-bridge'
 
 /** Runtime status → badge mapping (label keys are page-scoped i18n keys). */
 export const statusBadgeMapping: Record<string, { label: string; type: string }> = {
@@ -16,20 +20,25 @@ export const statusBadgeMapping: Record<string, { label: string; type: string }>
   [CliRuntimeStatus.Disabled]: { label: 'status.disabled', type: 'default' },
 }
 
+/**
+ * Runtime edit form. `labelKey` + English `label` is the house shape: the key
+ * renders through the page translator, the literal is the fallback.
+ */
 export const formSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'columns.name', type: 'input', required: true },
+  { key: 'name', labelKey: 'columns.name', label: 'Name', type: 'text', required: true },
   {
     key: 'status',
-    label: 'columns.status',
+    labelKey: 'columns.status',
+    label: 'Status',
     type: 'select',
     // Offline is deliberately absent: it is what a probe concluded, not a state
     // an admin can assert. Taking a runtime out of service is `Disabled`.
     options: [
-      { label: 'status.online', value: CliRuntimeStatus.Online },
-      { label: 'status.disabled', value: CliRuntimeStatus.Disabled },
+      { labelKey: 'status.online', label: 'Online', value: CliRuntimeStatus.Online },
+      { labelKey: 'status.disabled', label: 'Disabled', value: CliRuntimeStatus.Disabled },
     ],
   },
-  { key: 'maxConcurrentRuns', label: 'columns.maxConcurrentRuns', type: 'number' },
+  { key: 'maxConcurrentRuns', labelKey: 'columns.maxConcurrentRuns', label: 'Max concurrent', type: 'number' },
 ]
 
 /** Run status → badge mapping, shared by the run list and its detail drawer. */
@@ -81,12 +90,42 @@ export const runSearchFields: FormSchemaItem[] = [
   { key: 'endTime', labelKey: 'search.endTime', label: 'To', type: 'date' },
 ]
 
+/** A run's duration as the list and the drawer show it. */
+export function formatRunDuration(durationMs: number | null | undefined): string | null {
+  return durationMs ? `${durationMs} ms` : null
+}
+
+/** A run's estimated cost as the list and the drawer show it. */
+export function formatRunCost(costUsd: number | null | undefined): string | null {
+  return costUsd != null ? `$${costUsd.toFixed(4)}` : null
+}
+
 /** Columns for the run list - a table, because these ARE compared across rows. */
-export const runColumns: ColumnDef[] = [
-  { key: 'creationTime', title: 'columns.creationTime', minWidth: 160 },
+export const runColumns: ColumnDef<CliRunDto>[] = [
+  {
+    key: 'creationTime',
+    title: 'columns.creationTime',
+    minWidth: 160,
+    render: (row) => formatDateTime(row.creationTime, { fallback: EMPTY_DASH }),
+  },
   { key: 'providerKey', title: 'columns.provider', minWidth: 110 },
-  { key: 'status', title: 'columns.status', minWidth: 110 },
+  {
+    key: 'status',
+    title: 'columns.status',
+    minWidth: 110,
+    // The badge resolves its label from the locale root, so the page-scoped
+    // key is qualified here.
+    render: (row) => {
+      const badge = runStatusBadgeMapping[row.status]
+      if (!badge) return row.status
+      return h(TStatusBadge, {
+        value: row.status,
+        type: badge.type as never,
+        labelKey: `admin.modules.ai.cliRuns.${badge.label}`,
+      })
+    },
+  },
   { key: 'prompt', title: 'columns.prompt', minWidth: 260 },
-  { key: 'durationMs', title: 'columns.duration', width: 110 },
-  { key: 'estimatedCostUsd', title: 'columns.cost', width: 110 },
+  { key: 'durationMs', title: 'columns.duration', width: 110, render: (row) => formatRunDuration(row.durationMs) ?? EMPTY_DASH },
+  { key: 'estimatedCostUsd', title: 'columns.cost', width: 110, render: (row) => formatRunCost(row.estimatedCostUsd) ?? EMPTY_DASH },
 ]

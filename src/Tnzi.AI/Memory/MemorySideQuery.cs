@@ -68,9 +68,7 @@ public class MemorySideQuery : IMemorySideQuery
 
         foreach (var entry in entries)
         {
-            var preview = entry.ContentPreview.Length > MaxContentPreviewLength
-                ? entry.ContentPreview[..MaxContentPreviewLength] + "..."
-                : entry.ContentPreview;
+            var preview = entry.ContentPreview.Truncate(MaxContentPreviewLength);
 
             var categoryPart = string.IsNullOrEmpty(entry.Category) ? "" : $" [{entry.Category}]";
             sb.AppendLine($"  {entry.Index}.{categoryPart} {preview}");
@@ -112,7 +110,7 @@ public class MemorySideQuery : IMemorySideQuery
         catch (JsonException ex)
         {
             _logger?.LogWarning(ex, "Failed to parse memory side query response as JSON: {Response}",
-                jsonPart.Length > 200 ? jsonPart[..200] : jsonPart);
+                jsonPart.FitToLength(200));
             return Enumerable.Range(0, entryCount).ToList();
         }
     }

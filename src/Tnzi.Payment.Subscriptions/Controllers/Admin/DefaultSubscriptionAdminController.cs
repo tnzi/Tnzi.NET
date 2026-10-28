@@ -48,6 +48,13 @@ public class DefaultSubscriptionAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
+    /// 新建计划表单的预填值（默认币种）
+    /// </summary>
+    [HttpGet("plans/defaults")]
+    public virtual ApiResult<SubscriptionPlanDefaultsDto> GetPlanDefaults()
+        => _subscriptionService.GetPlanDefaults().ToApiResult();
+
+    /// <summary>
     /// 创建订阅计划
     /// </summary>
     [HttpPost("plans")]

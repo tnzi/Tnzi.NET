@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
 import Operations from '../../../src/pages/audit/Operations.vue'
@@ -27,7 +27,11 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
         pageIndex: 1,
         pageSize: 20,
       })),
-      detail: vi.fn(async (id: string) => ({ id, functionName: 'GetUser', resultType: 'Success', entityEntries: [], creationTime: '2026-01-01T00:00:00Z', startTime: '2026-01-01T00:00:00Z', elapsed: 42 })),
+      detail: vi.fn(async (id: string) => ({
+        id, functionName: 'CreateRole', resultType: 'Success', entityEntries: [], creationTime: '2026-01-01T00:00:00Z', startTime: '2026-01-01T00:00:00Z', elapsed: 42,
+        httpStatusCode: 201, permissionName: 'identity.role.create',
+        requestBody: '{"name":"Auditors"}', responseResult: 'sandbox stdout: ok',
+      })),
     },
   }),
   // The bridge re-exports `AuditResultType` / `EntityChangeType` so pages read
@@ -49,6 +53,8 @@ vi.mock('../../../src/services/bridges/audit-bridge', () => ({
 
 describe('Operations page (Tier 2: timeline view)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
+  // The drawer teleports to document.body; unmount so one test's drawer never leaks into the next.
+  enableAutoUnmount(afterEach)
 
   it('mounts the timeline view and fetches operation entries on load', async () => {
     const wrapper = mount(Operations)
@@ -66,5 +72,27 @@ describe('Operations page (Tier 2: timeline view)', () => {
     await new Promise(r => setTimeout(r, 50))
     expect(wrapper.find('.t-crud-page').exists()).toBe(false)
     expect(wrapper.find('.t-crud-toolbar').exists()).toBe(false)
+  })
+
+  // The API returns the captured request body, the recorded response, the status code and the
+  // permission; the drawer used to show none of them, so turning on request-body capture had no
+  // visible effect and sandbox command output never reached the screen.
+  it('shows the captured request body, response, status code and permission in the detail drawer', async () => {
+    const wrapper = mount(Operations, { attachTo: document.body })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+
+    await wrapper.find('.t-audit-timeline__item').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+    await nextTick()
+
+    const drawer = document.body.querySelector('.n-drawer')
+    expect(drawer).not.toBeNull()
+    const text = drawer!.textContent ?? ''
+    expect(text).toContain('{"name":"Auditors"}')
+    expect(text).toContain('sandbox stdout: ok')
+    expect(text).toContain('201')
+    expect(text).toContain('identity.role.create')
   })
 })

@@ -84,6 +84,29 @@ export const ADMIN_SETTINGS_CONFIG_KEY: InjectionKey<AdminSettingsConfig> = Symb
 
 export function provideAdminSettingsConfig(app: App, config: AdminSettingsConfig): void {
   app.provide(ADMIN_SETTINGS_CONFIG_KEY, config)
+  registerSettingsSectionEntryPermissions(config.sections ?? [])
+}
+
+/**
+ * Permission codes of the consumer's custom sections that declare one. Holding
+ * any of them opens the Settings Center (route guard and the sidebar entry),
+ * because those sections live nowhere else: a billing manager whose only grant
+ * is `payment.account.view` must reach the billing sections without also
+ * holding a settings or parameter code. Module-level (not injected) because the
+ * router guard asks outside any component setup.
+ */
+const sectionEntryPermissions = new Set<string>()
+
+function registerSettingsSectionEntryPermissions(sections: readonly AdminSettingsSection[]): void {
+  sectionEntryPermissions.clear()
+  for (const section of sections) {
+    if (section.permission) sectionEntryPermissions.add(section.permission)
+  }
+}
+
+/** Codes registered by {@link provideAdminSettingsConfig}; read by the Settings Center gate. */
+export function settingsSectionEntryPermissions(): ReadonlySet<string> {
+  return sectionEntryPermissions
 }
 
 export function useAdminSettingsConfig(): AdminSettingsConfig | null {

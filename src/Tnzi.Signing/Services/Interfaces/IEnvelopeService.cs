@@ -24,7 +24,8 @@ public interface IEnvelopeService
     /// </summary>
     /// <returns>
     /// 每个收件人的<b>明文令牌</b>，调用方据此拼签署链接发出去。
-    /// ★ 明文只在这一次返回，之后库里只有哈希 —— 补发链接要重新签发令牌。
+    /// ★ 明文只在这一次返回，之后库里只有哈希。只有草稿能发出，所以丢了的链接<b>补发不了</b>：
+    /// 本模块没有给已发出的请求重新签发令牌的路径，只能作废这份请求、重新发起一份。
     /// </returns>
     Task<Result<IReadOnlyList<IssuedSigningLink>>> SendAsync(Guid requestId, CancellationToken cancellationToken = default);
 
@@ -65,12 +66,18 @@ public interface IEnvelopeService
 
     /// <summary>
     /// 管理端重新密封：收件人已全部签完、而最后那次提交里的密封失败（请求停在 <c>InProgress</c>）时，
-    /// 再跑一遍密封 → 完成证书 → 归档。
+    /// 再跑一遍密封 → 完成证书 → 归档。对已完成的请求只补做密封之后的两步（完成证书缺失时生成、重新交宿主归档）。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 密封在最后一位收件人的那次提交里进行，一次瞬时故障（存储超时、盖章异常）就会让它失败；
     /// 那时收件人已全部 <c>Signed</c> 不能重交，没有这条路就只剩作废重发、作废每一个已收集的签名。
-    /// 已密封的请求拒绝再密封（409）：哈希只算一次。
+    /// </para>
+    /// <para>
+    /// 已完成的请求<b>不会被再密封</b>：成品与哈希只在密封那一刻产生一次。完成证书与宿主归档在密封那次提交里失败都只记日志、
+    /// 不回退密封，这里就是它们的补救：证书缺失才生成（内容由已定死的事实决定，补出来的是同一份），
+    /// <see cref="IDocumentHostSink.AttachAsync"/> 重新调用一次（所以 sink 必须幂等）。补做仍失败答 500 并指出是哪一步。
+    /// </para>
     /// </remarks>
     Task<Result<EnvelopeDto>> SealAsync(Guid requestId, CancellationToken cancellationToken = default);
 

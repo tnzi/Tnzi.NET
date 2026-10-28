@@ -18,7 +18,6 @@ export * from './useRealtimeHub'
 export * from './useTabContext'
 export * from './useTabTitle'
 export * from './use-breadcrumb'
-export * from './useAdminModuleManifest'
 // Moved to `@tnzi/ui` on 2026-08-02 (see the login stack note below).
 export { useFormRules, type Translate, type FormRules } from '@tnzi/ui'
 export * from './useNaiveForm'

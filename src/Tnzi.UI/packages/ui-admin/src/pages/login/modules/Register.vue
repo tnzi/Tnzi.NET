@@ -10,7 +10,7 @@
  *
  * Wired via `useLoginContext().callbacks.sendCode` (purpose='register') +
  * `callbacks.register`. The account field accepts email OR phone - rule + label
- * adapt to the backend-enabled channels (`features.codeChannels`) and the
+ * adapt to the backend-enabled quick-registration channels (`features.registerChannels`) and the
  * `type` is auto-detected per submit. On success the page returns to
  * `pwd-login` (the consumer's `register` callback may also navigate elsewhere).
  */
@@ -33,7 +33,7 @@ const { formRef, validate } = useNaiveForm()
 const { label: codeBtnLabel, isCounting, loading: sending, getCaptcha } = useCaptcha({ translate })
 const { rule: accountRule, label: accountLabel, placeholder: accountPlaceholder } = useLoginAccountField(
   translate,
-  () => features.codeChannels,
+  () => features.registerChannels,
 )
 
 // The captcha (always shown when enabled) gates the send-code step so bots
@@ -61,7 +61,7 @@ const submitError = ref('')
 const rules = computed<FormRules>(() => ({
   account: accountRule.value,
   code: [
-    { required: true, trigger: ['blur', 'input'], message: translate('admin.login.errorEmptyCode', 'Please enter the verification code') },
+    { required: true, whitespace: true, trigger: ['blur', 'input'], message: translate('admin.login.errorEmptyCode', 'Please enter the verification code') },
   ],
   password: r.password(),
   confirmPassword: [
@@ -116,16 +116,21 @@ async function handleSendCode(): Promise<void> {
 }
 
 async function handleSubmit(): Promise<void> {
+  // One attempt at a time. Enter on the form and a click on the button both
+  // land here, and validation awaits, so the flag goes up before it: a second
+  // Enter in that gap registered again.
+  if (submitting.value) return
+  submitting.value = true
   submitError.value = ''
-  try { await validate() } catch { return }
+  try { await validate() } catch { submitting.value = false; return }
   if (!callbacks.register) {
     submitError.value = translate(
       'admin.login.errorMissingCallback',
       'Register is not configured. Pass `defineAdminApp({ login: { callbacks: { register } } })`.',
     )
+    submitting.value = false
     return
   }
-  submitting.value = true
   try {
     await callbacks.register({ account: model.account, code: model.code, password: model.password, type: detectAccountType(model.account) })
     // Successful registration → bounce back to pwd-login (the consumer's

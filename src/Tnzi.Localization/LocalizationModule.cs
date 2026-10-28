@@ -108,7 +108,10 @@ public class LocalizationModule : TnziFrameworkModule
         services.Remove(descriptor);
         services.Add(ServiceDescriptor.Describe(
             typeof(IStringLocalizerFactory),
-            sp => new TrackingStringLocalizerFactory(CreateInner(sp, descriptor), sp.GetRequiredService<IMissingTranslationTracker>()),
+            sp => new TrackingStringLocalizerFactory(
+                CreateInner(sp, descriptor),
+                sp.GetRequiredService<IMissingTranslationTracker>(),
+                sp.GetService<IOptions<RequestLocalizationOptions>>()),
             descriptor.Lifetime));
 
         static IStringLocalizerFactory CreateInner(IServiceProvider sp, ServiceDescriptor descriptor)

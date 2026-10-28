@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .t-popover-menu :deep(.t-popover-menu__item-check) {
-  color: var(--tnzi-ai-accent, #3b82f6);
+  color: var(--tnzi-ai-accent-text);
   margin-left: auto;
   flex-shrink: 0;
 }

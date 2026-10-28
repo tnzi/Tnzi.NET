@@ -18,7 +18,7 @@ public class ModuleHotReloadOptions
     public string[] WatchedFileExtensions { get; set; } = ["*.dll"];
 
     /// <summary>
-    /// 监听的目录路径（相对于应用程序根目录）
+    /// 监听的目录路径。相对路径按应用程序根目录（<see cref="AppContext.BaseDirectory"/>）解析，不按进程工作目录。
     /// 默认值：null（监听应用程序根目录）
     /// </summary>
     public string? WatchDirectory { get; set; }
@@ -41,16 +41,4 @@ public class ModuleHotReloadOptions
     /// 默认值：["bin", "obj", "node_modules", ".git"]
     /// </summary>
     public string[] ExcludedDirectories { get; set; } = ["bin", "obj", "node_modules", ".git"];
-
-    /// <summary>
-    /// 热重载失败时的重试次数
-    /// 默认值：3
-    /// </summary>
-    public int RetryCount { get; set; } = 3;
-
-    /// <summary>
-    /// 重试间隔（毫秒）
-    /// 默认值：1000
-    /// </summary>
-    public int RetryDelayMs { get; set; } = 1000;
 }

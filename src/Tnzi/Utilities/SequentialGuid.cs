@@ -5,12 +5,40 @@ namespace Tnzi.Utilities;
 /// 有序Guid生成器 (Sequential GUID)
 /// 用于数据库主键，提高索引性能
 /// </summary>
+/// <remarks>
+/// <para>
+/// 「有序」只对某一种比较规则成立，而各数据库比较 Guid 列的规则不同，所以按数据库选排列
+/// （<see cref="SequentialGuidType"/>）。三种排列都由 48 位 Unix 毫秒时间戳 + 12 位计数器 + 随机位组成，
+/// 区别只在于把时间戳与计数器放在<b>目标库最先比较的那几个字节</b>上：
+/// </para>
+/// <list type="bullet">
+/// <item><see cref="SequentialGuidType.SequentialAsString"/>：按 <see cref="Guid.ToString()"/> 的十六进制顺序（= RFC 9562 大端字节序）
+/// 有序，是标准的 UUIDv7。存成文本的 MySQL <c>char(36)</c> / SQLite <c>TEXT</c> 与 PostgreSQL <c>uuid</c> 都按这个顺序比较。</item>
+/// <item><see cref="SequentialGuidType.SequentialAtEnd"/>：按 SQL Server <c>uniqueidentifier</c> 的比较顺序有序
+/// （先比 <see cref="Guid.ToByteArray()"/> 的第 10-15 字节，再比 8-9、6-7、4-5、0-3）。</item>
+/// <item><see cref="SequentialGuidType.SequentialAsBinary"/>：按 <see cref="Guid.ToByteArray()"/> 逐字节有序，
+/// 给以 .NET 字节序存成 16 字节原始值的列（如 Oracle <c>RAW(16)</c>）。</item>
+/// </list>
+/// <para>
+/// 同一进程内连续生成的 Id 在各自的比较规则下严格递增（时钟回拨除外）；跨进程靠 60 位以上的随机位保证唯一。
+/// 同一毫秒内超过 4096 个时等到下一毫秒。
+/// </para>
+/// </remarks>
 public static class SequentialGuid
 {
-    private static readonly RandomNumberGenerator _rng = RandomNumberGenerator.Create();
     private static readonly object _syncRoot = new();
     private static long _lastTimestamp = 0;
     private static int _counter = 0;
+
+    /// <summary>
+    /// 每毫秒计数器的最大值（12 位）。三种排列共用一个计数器，取最窄的那个字段（UUIDv7 的 rand_a）的位宽。
+    /// </summary>
+    private const int MaxCounter = 0xFFF;
+
+    /// <summary>
+    /// 随机字节数：三种排列里用随机字节最多的那一种所需的量。
+    /// </summary>
+    private const int RandomByteCount = 8;
 
     /// <summary>
     /// 有序Guid类型
@@ -18,17 +46,17 @@ public static class SequentialGuid
     public enum SequentialGuidType
     {
         /// <summary>
-        /// 将GUID当作字符串来处理的前排序, MySql, Sqlite, PostgreSQL中适用
+        /// 按 <see cref="Guid.ToString()"/> 的文本顺序有序（标准 UUIDv7）：MySql、Sqlite、PostgreSQL 中适用
         /// </summary>
         SequentialAsString,
 
         /// <summary>
-        /// 将GUID作为二进制处理的排序, Oracle, PostgreSQL中适用
+        /// 按 <see cref="Guid.ToByteArray()"/> 的字节顺序有序：以 .NET 字节序存成 16 字节原始值的列（如 Oracle RAW(16)）中适用
         /// </summary>
         SequentialAsBinary,
 
         /// <summary>
-        /// 按GUID的最后一段来排序, SqlServer中适用
+        /// 按 SQL Server uniqueidentifier 的比较顺序（最后一段最先比较）有序：SqlServer 中适用
         /// </summary>
         SequentialAtEnd
     }
@@ -45,70 +73,84 @@ public static class SequentialGuid
     /// <returns>有序Guid</returns>
     public static Guid NewGuid(SequentialGuidType guidType)
     {
-        // 1. 生成密码学安全的随机字节（RandomNumberGenerator 是线程安全的）
-        byte[] randomBytes = new byte[10];
-        _rng.GetBytes(randomBytes);
+        // 密码学安全的随机字节（RandomNumberGenerator.Fill 是线程安全的静态方法）
+        var random = new byte[RandomByteCount];
+        RandomNumberGenerator.Fill(random);
 
-        // 2. 获取有序组件（时间戳 + 计数器）
-        (long timestamp, ushort counter) = GetOrderedComponents();
-        byte[] timestampBytes = GetTimestampBytes(timestamp);
+        (long timestamp, int counter) = GetOrderedComponents();
 
-        // 3. 构造GUID
-        byte[] guidBytes = new byte[16];
+        return Compose(guidType, timestamp, counter, random);
+    }
+
+    /// <summary>
+    /// 按排列把时间戳、计数器与随机字节拼成 Guid。与时钟无关，各排列在边界上的有序性由测试直接驱动它验证。
+    /// </summary>
+    /// <param name="guidType">排列</param>
+    /// <param name="timestamp">Unix 毫秒时间戳（取低 48 位）</param>
+    /// <param name="counter">同一毫秒内的计数器（0 到 <see cref="MaxCounter"/>）</param>
+    /// <param name="random">至少 <see cref="RandomByteCount"/> 个随机字节</param>
+    private static Guid Compose(SequentialGuidType guidType, long timestamp, int counter, byte[] random)
+    {
+        Span<byte> bytes = stackalloc byte[16];
 
         switch (guidType)
         {
             case SequentialGuidType.SequentialAsString:
-                // 字符串排序布局：随机(6)+时间戳(6)+计数器(2)+随机(2)
-                // 字节布局: [0-5:随机] [6-11:时间戳] [12-13:计数器] [14-15:随机]
-                Buffer.BlockCopy(randomBytes, 0, guidBytes, 0, 6);
-                Buffer.BlockCopy(timestampBytes, 0, guidBytes, 6, 6);
-                guidBytes[12] = (byte)(counter >> 8);
-                guidBytes[13] = (byte)counter;
-                Buffer.BlockCopy(randomBytes, 6, guidBytes, 14, 2);
-                // 注意：字节6是时间戳的一部分，字节8也是时间戳的一部分，不能设置版本位和变体位
-                break;
+                // 按大端字节序（= ToString 的十六进制顺序 = PostgreSQL uuid 的比较顺序）构造 UUIDv7：
+                // [0-5] 时间戳 | [6] 版本 7 + 计数器高 4 位 | [7] 计数器低 8 位 | [8] 变体 10 + 6 位随机 | [9-15] 随机
+                // 不能按 ToByteArray 的下标去填：Guid 的前三段（Data1/2/3）在 ToByteArray 里是小端，ToString 会把它们倒过来
+                WriteTimestamp(bytes[..6], timestamp);
+                bytes[6] = (byte)(0x70 | ((counter >> 8) & 0x0F));
+                bytes[7] = (byte)counter;
+                bytes[8] = (byte)(0x80 | (random[0] & 0x3F));
+                random.AsSpan(1, 7).CopyTo(bytes[9..]);
+                return new Guid(bytes, bigEndian: true);
 
             case SequentialGuidType.SequentialAsBinary:
-                // 二进制排序布局：时间戳(6)+计数器(2)+随机(8)
-                // 字节布局: [0-5:时间戳] [6-7:计数器] [8-15:随机]
-                Buffer.BlockCopy(timestampBytes, 0, guidBytes, 0, 6);
-                guidBytes[6] = (byte)(counter >> 8);
-                guidBytes[7] = (byte)counter;
-                Buffer.BlockCopy(randomBytes, 0, guidBytes, 8, 8);
-                // 注意：字节6是计数器的高字节，不能设置版本位；字节8是随机字节，可以设置变体位
-                // 设置变体位 (字节8的高2位: 10xxxxxx)
-                guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80);
-                break;
+                // 按 ToByteArray 逐字节比较：
+                // [0-5] 时间戳 | [6] 计数器高 8 位 | [7] 版本 8 + 计数器低 4 位 | [8] 变体 10 + 6 位随机 | [9-15] 随机
+                // 版本号是 Data3 的高 4 位，而 Data3 在 ToByteArray 里小端存放，所以版本号落在第 7 字节的高半字节
+                WriteTimestamp(bytes[..6], timestamp);
+                bytes[6] = (byte)(counter >> 4);
+                bytes[7] = (byte)(0x80 | (counter & 0x0F));
+                bytes[8] = (byte)(0x80 | (random[0] & 0x3F));
+                random.AsSpan(1, 7).CopyTo(bytes[9..]);
+                return new Guid(bytes);
 
             case SequentialGuidType.SequentialAtEnd:
             default:
-                // SQL Server末尾排序布局：随机(10)+时间戳(4)+计数器(2)
-                // 字节布局: [0-9:随机] [10-13:时间戳] [14-15:计数器]
-                Buffer.BlockCopy(randomBytes, 0, guidBytes, 0, 10);
-                Buffer.BlockCopy(timestampBytes, 2, guidBytes, 10, 4);
-                guidBytes[14] = (byte)(counter >> 8);
-                guidBytes[15] = (byte)counter;
-                // 注意：字节6和8都在随机部分，可以安全设置版本位和变体位
-                // 设置版本位 (字节6的高4位: 0100xxxx)
-                guidBytes[6] = (byte)((guidBytes[6] & 0x0F) | 0x40);
-                // 设置变体位 (字节8的高2位: 10xxxxxx)
-                guidBytes[8] = (byte)((guidBytes[8] & 0x3F) | 0x80);
-                break;
+                // SQL Server 先比较 ToByteArray 的第 10-15 字节，再比较 8-9，最后才是 6-7、4-5、0-3：
+                // [0-6] 随机 | [7] 版本 8 + 4 位随机 | [8] 变体 10 + 计数器高 4 位 | [9] 计数器低 8 位 | [10-15] 时间戳
+                // 时间戳必须完整的 6 字节：只放低 32 位时每 2^32 毫秒（约 49.7 天）回绕一次，插入点跳回索引中部
+                random.AsSpan(0, 7).CopyTo(bytes);
+                bytes[7] = (byte)(0x80 | (random[7] & 0x0F));
+                bytes[8] = (byte)(0x80 | ((counter >> 8) & 0x0F));
+                bytes[9] = (byte)counter;
+                WriteTimestamp(bytes[10..], timestamp);
+                return new Guid(bytes);
         }
-
-        return new Guid(guidBytes);
     }
 
     /// <summary>
-    /// 获取有序组件（时间戳和计数器）
+    /// 把时间戳的低 48 位按大端序写进 6 个字节
+    /// </summary>
+    private static void WriteTimestamp(Span<byte> destination, long timestamp)
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            destination[i] = (byte)(timestamp >> (40 - 8 * i));
+        }
+    }
+
+    /// <summary>
+    /// 获取有序组件（Unix 毫秒时间戳和计数器）
     /// 线程安全：所有对共享状态的访问都在 lock 内
     /// </summary>
-    private static (long timestamp, ushort counter) GetOrderedComponents()
+    private static (long timestamp, int counter) GetOrderedComponents()
     {
         lock (_syncRoot)
         {
-            long timestamp = DateTime.UtcNow.Ticks / 10000L; // 毫秒时间戳
+            long timestamp = CurrentUnixMilliseconds();
 
             if (timestamp > _lastTimestamp)
             {
@@ -120,14 +162,14 @@ public static class SequentialGuid
             {
                 // 同一毫秒内，递增计数器
                 _counter++;
-                if (_counter > 65535) // ushort最大值 (0xFFFF)
+                if (_counter > MaxCounter)
                 {
-                    // 计数器溢出，等待下一毫秒（这种情况极少发生：需要在同一毫秒内生成超过65535个GUID）
+                    // 计数器溢出，等待下一毫秒（同一毫秒内超过 4096 个 Guid 时发生）
                     // 使用 Thread.Yield() 让出 CPU 时间片，避免 CPU 空转
                     while (timestamp <= _lastTimestamp)
                     {
                         Thread.Yield(); // 让出当前线程的时间片，允许其他线程执行
-                        timestamp = DateTime.UtcNow.Ticks / 10000L;
+                        timestamp = CurrentUnixMilliseconds();
                     }
                     _lastTimestamp = timestamp;
                     _counter = 0;
@@ -141,63 +183,34 @@ public static class SequentialGuid
                 _counter = 0;
             }
 
-            return (_lastTimestamp, (ushort)_counter);
+            return (_lastTimestamp, _counter);
         }
     }
 
-    /// <summary>
-    /// 将时间戳转换为字节数组（6字节，大端序）
-    /// 时间戳是毫秒级，从 DateTime.UtcNow.Ticks / 10000 计算得出
-    /// 使用6字节可以表示约 2^48 毫秒 ≈ 8925 年，足够实际使用
-    /// </summary>
-    private static byte[] GetTimestampBytes(long timestamp)
-    {
-        byte[] bytes = BitConverter.GetBytes(timestamp);
-        if (BitConverter.IsLittleEndian)
-        {
-            Array.Reverse(bytes);
-        }
-        // 取后6字节（低48位），确保大端序
-        // 对于实际使用场景（从1970-01-01开始），前2字节通常为0或很小的值
-        byte[] result = new byte[6];
-        Buffer.BlockCopy(bytes, 2, result, 0, 6);
-        return result;
-    }
+    private static long CurrentUnixMilliseconds()
+        => (DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerMillisecond;
 
     /// <summary>
     /// 从 SequentialAtEnd 类型的 GUID 中提取时间戳（UTC 时间）
-    /// 注意：此方法仅适用于 SequentialAtEnd 类型的 GUID（SQL Server 排序）
+    /// 注意：此方法仅适用于 SequentialAtEnd 类型的 GUID（SQL Server 排序，也是 <see cref="NewGuid()"/> 的默认排列）
     /// </summary>
     /// <param name="id">SequentialAtEnd 类型的 GUID</param>
-    /// <returns>UTC 时间（DateTime），如果 GUID 格式不正确则返回 DateTime.MinValue</returns>
+    /// <returns>UTC 时间（DateTime），精确到毫秒；如果其中的时间戳超出 DateTime 的范围则返回 DateTime.MinValue</returns>
     public static DateTime GetDateFrom(Guid id)
     {
-        byte[] guidBytes = id.ToByteArray();
+        Span<byte> guidBytes = stackalloc byte[16];
+        id.TryWriteBytes(guidBytes);
 
-        // SequentialAtEnd 布局：随机(10)+时间戳(4)+计数器(2)
-        // 时间戳在 [10-13] 字节，是大端序的4字节（从6字节时间戳的后4字节）
-        // 需要重建完整的6字节时间戳（前2字节通常为0）
-        byte[] timestampBytes = new byte[6];
-        timestampBytes[0] = 0;
-        timestampBytes[1] = 0;
-        Buffer.BlockCopy(guidBytes, 10, timestampBytes, 2, 4);
-
-        // timestampBytes 现在是大端序的6字节时间戳
-        // 需要转换为小端序以便 BitConverter 使用
-        if (BitConverter.IsLittleEndian)
+        // SequentialAtEnd 布局：时间戳是第 [10-15] 字节上的 48 位大端 Unix 毫秒
+        long timestamp = 0;
+        for (var i = 10; i < 16; i++)
         {
-            Array.Reverse(timestampBytes);
+            timestamp = (timestamp << 8) | guidBytes[i];
         }
 
-        // 将6字节时间戳转换为 long（时间戳是毫秒级）
-        // BitConverter.ToInt64 需要8字节，我们在开头补2个0字节
-        byte[] fullBytes = new byte[8];
-        Buffer.BlockCopy(timestampBytes, 0, fullBytes, 2, 6);
-        long timestamp = BitConverter.ToInt64(fullBytes, 0);
-
-        // 将毫秒时间戳转换为 DateTime（UTC）
-        // 时间戳是从 DateTime.UtcNow.Ticks / 10000 计算得出的
-        long ticks = timestamp * 10000L;
-        return new DateTime(ticks, DateTimeKind.Utc);
+        var maxMilliseconds = (DateTime.MaxValue.Ticks - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerMillisecond;
+        return timestamp > maxMilliseconds
+            ? DateTime.MinValue
+            : new DateTime(DateTime.UnixEpoch.Ticks + timestamp * TimeSpan.TicksPerMillisecond, DateTimeKind.Utc);
     }
 }

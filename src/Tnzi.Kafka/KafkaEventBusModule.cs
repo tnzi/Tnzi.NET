@@ -46,9 +46,12 @@ public class KafkaEventBusModule : TnziInfrastructureModule
         var kafkaOptions = new KafkaOptions();
         configuration.GetSection("Kafka").Bind(kafkaOptions);
 
-        // 获取 BootstrapServers（优先级：EventBusOptions.KafkaBootstrapServers > ConnectionStrings:Kafka > KafkaOptions），并展开 ${VAR} 占位符
-        var bootstrapServers = eventBusOptions.KafkaBootstrapServers
-            ?? configuration.GetConnectionString("Kafka");
+        // 获取 BootstrapServers（优先级：EventBusOptions.KafkaBootstrapServers > ConnectionStrings:Kafka > KafkaOptions），并展开 ${VAR} 占位符。
+        // 留空（空串或空白）视同未配置：配置样例里这一项就写成空串，只在 null 时才看下一个来源，
+        // 按文档改配 ConnectionStrings:Kafka 的部署会越过它，安静地连到 Kafka:BootstrapServers 的默认值
+        var bootstrapServers = string.IsNullOrWhiteSpace(eventBusOptions.KafkaBootstrapServers)
+            ? configuration.GetConnectionString("Kafka")
+            : eventBusOptions.KafkaBootstrapServers;
 
         if (string.IsNullOrWhiteSpace(bootstrapServers))
         {

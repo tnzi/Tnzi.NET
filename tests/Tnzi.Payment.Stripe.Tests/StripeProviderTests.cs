@@ -19,8 +19,7 @@ public class StripeProviderTests
             Enabled = true,
             SecretKey = "sk_test_key",
             PublishableKey = "pk_test_key",
-            WebhookSecret = string.Empty,
-            Currency = "usd"
+            WebhookSecret = string.Empty
         });
 
         _provider = new StripeProvider(options, new Mock<ILogger<StripeProvider>>().Object);
@@ -142,8 +141,7 @@ public class StripeProviderTests
             Enabled = true,
             SecretKey = "sk_test_key",
             PublishableKey = "pk_test_key",
-            WebhookSecret = "whsec_test",
-            Currency = "usd"
+            WebhookSecret = "whsec_test"
         });
 
         return new StripeProvider(options, new Mock<ILogger<StripeProvider>>().Object);

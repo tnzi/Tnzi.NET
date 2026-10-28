@@ -231,6 +231,21 @@ export function normalizeStepConfiguration(
   return rest
 }
 
+/**
+ * True when the step's `condition` field is its route expression rather than a
+ * run/skip gate. A conditional node reads its expression from
+ * `configuration.condition`, falling back to `condition` (the only field the
+ * editor offers it); the engine then does not evaluate that field as a gate.
+ * Mirrors `ConditionalNode.UsesStepConditionAsRouteExpression` in the backend.
+ */
+export function usesConditionAsRouteExpression(
+  step: { configuration?: Record<string, string> | null } | null | undefined,
+): boolean {
+  if (getStepKind(step) !== 'conditional') return false
+  const configured = step?.configuration?.condition
+  return configured === undefined || configured === null || configured.trim() === ''
+}
+
 /** Resolve the editor kind of a step from its `nodeType`; unknown / absent = agent. */
 export function getStepKind(
   step: { configuration?: Record<string, string> | null } | null | undefined,

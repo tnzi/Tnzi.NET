@@ -271,26 +271,35 @@
     <TDetailHost :state="metadataDetail" :title="t('metadata.title')" :width="460" :translate="t">
       <template #default>
         <p class="text-13px text-muted mb-8px">{{ metadataFileName }}</p>
-        <NSpin :show="metadataLoading">
-          <NEmpty v-if="!metadataRows.length" :description="t('metadata.empty')" class="my-12px" />
-          <NSpace v-else vertical size="small">
-            <div v-for="(row, i) in metadataRows" :key="i" class="flex items-center gap-8px">
-              <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
-              <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
-              <NButton size="small" quaternary @click="removeMetadataRow(i)">
-                <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
-              </NButton>
-            </div>
-          </NSpace>
-          <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
-            <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
-            {{ t('metadata.add') }}
-          </NButton>
+        <NSpin :show="metadataLoading" class="min-h-60px">
+          <!-- The rows are editable only once they are this file's own, read in
+               full: Save replaces the whole map, so "No metadata" after a failed
+               read would invite an edit that erases every key the file has. -->
+          <div v-if="metadataLoadError" class="metadata-load-error flex flex-wrap items-center gap-8px text-13px" role="alert">
+            <span class="text-error">{{ metadataLoadError }}</span>
+            <NButton size="tiny" text type="primary" @click="loadMetadata">{{ t('admin.common.retry') }}</NButton>
+          </div>
+          <template v-else-if="metadataEditable">
+            <NEmpty v-if="!metadataRows.length" :description="t('metadata.empty')" class="my-12px" />
+            <NSpace v-else vertical size="small">
+              <div v-for="(row, i) in metadataRows" :key="i" class="flex items-center gap-8px">
+                <NInput v-model:value="row.key" :placeholder="t('metadata.key')" size="small" class="flex-1" />
+                <NInput v-model:value="row.value" :placeholder="t('metadata.value')" size="small" class="flex-1" />
+                <NButton size="small" quaternary @click="removeMetadataRow(i)">
+                  <template #icon><TSvgIcon icon="mdi:close" :size="14" /></template>
+                </NButton>
+              </div>
+            </NSpace>
+            <NButton size="small" dashed class="mt-8px" @click="addMetadataRow">
+              <template #icon><TSvgIcon icon="mdi:plus" :size="14" /></template>
+              {{ t('metadata.add') }}
+            </NButton>
+          </template>
         </NSpin>
       </template>
       <template #footer="{ close }">
         <NButton @click="close">{{ t('cancel') }}</NButton>
-        <NButton type="primary" :loading="metadataSaving" @click="saveMetadata">{{ t('save') }}</NButton>
+        <NButton type="primary" :loading="metadataSaving" :disabled="!metadataEditable" @click="saveMetadata">{{ t('save') }}</NButton>
       </template>
     </TDetailHost>
 
@@ -313,7 +322,7 @@
             <NDescriptionsItem :label="t('detail.type')">{{ viewedFile.contentType }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.storage')">{{ viewedFile.provider }}</NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.uploader')">
-              {{ viewedFile.creatorName || viewedFile.creatorId || EMPTY_DASH }}
+              {{ viewedFile.creatorId || EMPTY_DASH }}
             </NDescriptionsItem>
             <NDescriptionsItem :label="t('detail.createdAt')">
               {{ formatDateTime(viewedFile.creationTime, { fallback: EMPTY_DASH }) }}
@@ -365,6 +374,17 @@
               </div>
             </NSpin>
           </div>
+
+          <!-- Version history belongs to Tnzi.Storage.Workspace. Mounted only once the
+               module signal says it is loaded (canActivate, not has): the section fires
+               a request on mount, and a host without the package would answer 501. -->
+          <TFileVersionHistory
+            v-if="versionsActive"
+            class="mt-16px"
+            :file="viewedFile"
+            :translate="t"
+            @changed="onFileContentChanged"
+          />
         </template>
       </template>
       <template #footer>
@@ -406,6 +426,7 @@ import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { useFileUrl } from '../../headless/useFileUrl'
 import TFileExplorer from './components/TFileExplorer.vue'
 import TFilePreviewModal from './components/TFilePreviewModal.vue'
+import TFileVersionHistory from './components/TFileVersionHistory.vue'
 import { FOLDER_GLYPH, fileGlyph } from './file-icons'
 import type { FileRecordDto, FileFolderDto, FileReferenceDto } from '@tnzi/core/services/storage'
 
@@ -445,6 +466,8 @@ watch(viewMode, (v) => {
 const { has, canActivate, pending: modulesPending, modules: loadedModules } = useModuleAvailability()
 const STORAGE_WORKSPACE = 'storage-workspace'
 const foldersAvailable = computed(() => has(STORAGE_WORKSPACE))
+/** 版本历史同属工作区包；它挂载即发请求，所以用 canActivate（探测落定且已加载）。 */
+const versionsActive = computed(() => canActivate(STORAGE_WORKSPACE))
 
 const folders = ref<FileFolderDto[]>([])
 const files = ref<FileRecordDto[]>([])
@@ -600,23 +623,46 @@ const metadataDetail = useDetail<FileRecordDto>({ mode: 'modal', url: 'meta', so
 const metadataRows = ref<Array<{ key: string; value: string }>>([])
 const metadataLoading = ref(false)
 const metadataSaving = ref(false)
+/** Why the open file's metadata could not be read; null when nothing failed. */
+const metadataLoadError = ref<string | null>(null)
+/**
+ * The file the rows on screen were read from, set only when that read succeeded.
+ *
+ * Saving PUTs the rows as the file's ENTIRE map, so they may be saved only onto
+ * the file they came from: rows shown while the read is still out (empty), after
+ * it failed (empty or just the keys added since) or delivered late from a file
+ * opened before would erase or overwrite the keys the file really has.
+ */
+const metadataReadFor = ref<string | null>(null)
+/** Bumped by every read: only the newest may fill the rows, the modal can move to another file mid-flight. */
+let metadataLoadSeq = 0
 const metadataFileName = computed(() => metadataDetail.data.value?.originalName ?? '')
-watch(() => metadataDetail.data.value, async (file) => {
-  if (!file) {
-    metadataRows.value = []
-    return
-  }
+const metadataEditable = computed(() => {
+  const file = metadataDetail.data.value
+  return !!file && !metadataLoading.value && metadataReadFor.value === file.id
+})
+
+async function loadMetadata(): Promise<void> {
+  const seq = ++metadataLoadSeq
+  const file = metadataDetail.data.value
   metadataRows.value = []
-  metadataLoading.value = true
+  metadataReadFor.value = null
+  metadataLoadError.value = null
+  metadataLoading.value = !!file
+  if (!file) return
   try {
     const map = await bridge.metadata.get(file.id)
+    if (seq !== metadataLoadSeq) return
     metadataRows.value = Object.entries(map).map(([key, value]) => ({ key, value }))
+    metadataReadFor.value = file.id
   } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e))
+    if (seq !== metadataLoadSeq) return
+    metadataLoadError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    metadataLoading.value = false
+    if (seq === metadataLoadSeq) metadataLoading.value = false
   }
-})
+}
+watch(() => metadataDetail.data.value, () => void loadMetadata())
 
 // ---- derived ----
 const currentFolder = computed(() =>
@@ -891,7 +937,13 @@ function buildFilters(): Record<string, unknown> {
   return f
 }
 
+// Last-wins: clicking folder A then folder B must not let A's late listing land
+// under B's breadcrumb, where delete and move would act on files that are
+// somewhere else.
+let filesSeq = 0
+
 async function loadFiles(): Promise<void> {
+  const mine = ++filesSeq
   filesLoading.value = true
   selectedIds.value = []
   moveTarget.value = undefined
@@ -904,14 +956,16 @@ async function loadFiles(): Promise<void> {
       searchText: '',
       filters: buildFilters(),
     })
+    if (mine !== filesSeq) return
     files.value = result.items
     totalFiles.value = result.totalCount
   } catch (e) {
+    if (mine !== filesSeq) return
     message.error(e instanceof Error ? e.message : String(e))
     files.value = []
     totalFiles.value = 0
   } finally {
-    filesLoading.value = false
+    if (mine === filesSeq) filesLoading.value = false
   }
 }
 
@@ -986,6 +1040,24 @@ function openDetail(row: FileRecordDto): void {
   // Open the `view` open-state; the `watch(viewedFile)` above loads references.
   void fileDetail.open('view', row)
 }
+/**
+ * A version upload / restore swapped `fileId`'s current content: size and thumbnail
+ * changed server-side. Re-read the listing, and re-read the record itself for the
+ * drawer: a deep-linked drawer (`?detail=view:<id>`) may show a file that is not on
+ * the current page. The drawer is rebound only if it still shows that file - the
+ * user may have moved it to another one while the requests were in flight (the URL
+ * key is unchanged by a rebind, so it pushes no history).
+ */
+async function onFileContentChanged(fileId: string): Promise<void> {
+  const [, fresh] = await Promise.all([
+    loadFiles(),
+    // A failed re-read leaves the drawer as it is; the listing has its own error path.
+    bridge.files.get(fileId).catch(() => null),
+  ])
+  if (fresh && fileDetail.visible.value && viewedFile.value?.id === fileId) {
+    await fileDetail.open('view', fresh)
+  }
+}
 async function deleteSingleFile(row: FileRecordDto): Promise<void> {
   try {
     await bridge.files.delete([row.id])
@@ -1026,7 +1098,8 @@ function removeMetadataRow(index: number): void {
 }
 async function saveMetadata(): Promise<void> {
   const file = metadataDetail.data.value
-  if (!file) return
+  // The disabled button is not the guard: this write replaces the whole map.
+  if (!file || !metadataEditable.value || metadataSaving.value) return
   metadataSaving.value = true
   try {
     const map: Record<string, string> = {}
@@ -1113,37 +1186,36 @@ async function onMoveFolder(payload: { folderId: string; newParentId: string }):
 const CHUNK_THRESHOLD = 90 * 1024 * 1024
 const CHUNK_SIZE = 5 * 1024 * 1024
 
-async function chunkedUpload(file: File): Promise<void> {
+async function chunkedUpload(file: File): Promise<FileRecordDto> {
   const chunkCount = Math.max(1, Math.ceil(file.size / CHUNK_SIZE))
   const { uploadId } = await bridge.files.initUpload({ name: file.name, size: file.size, chunkCount })
   for (let i = 0; i < chunkCount; i++) {
     const blob = file.slice(i * CHUNK_SIZE, Math.min(file.size, (i + 1) * CHUNK_SIZE))
     await bridge.files.uploadChunk(uploadId, i, blob)
   }
-  await bridge.files.completeUpload(uploadId)
+  return bridge.files.completeUpload(uploadId)
 }
 
-/** Upload one file; returns true when it went chunked-to-root despite a target folder. */
-async function uploadOne(file: File, target: string | null): Promise<boolean> {
+/** Upload one file and file it into `target` (null = leave it at the root). */
+async function uploadOne(file: File, target: string | null): Promise<void> {
   // 分片上传同样属于工作区包。没加载它时**直传**而不是走分片：分片端点会回 501，
   // 那是一条用户无从处理的错误；直传则由后端自己的 MaxFileSize 说话（超限就说超限）。
-  if (file.size > CHUNK_THRESHOLD && foldersAvailable.value) {
-    await chunkedUpload(file)
-    return target != null
-  }
-  const res = await bridge.files.upload(file)
-  if (target) await bridge.files.moveTo([res.id], target)
-  return false
+  // 两条路径都拿回落库的记录，归档进目标文件夹是同一步。
+  // 直传也按正式文件落库：文件库的文件没有任何实体字段引用它，按临时上传落库的话，开启后台清理后
+  // 保留期一过就被回收。与分片完成时的 isTemporary: false 同一个生命周期，文件大小不该决定它活多久。
+  const stored = file.size > CHUNK_THRESHOLD && foldersAvailable.value
+    ? await chunkedUpload(file)
+    : await bridge.files.upload(file, { isTemporary: false })
+  if (target) await bridge.files.moveTo([stored.id], target)
 }
 
 async function uploadFiles(list: File[], target: string | null): Promise<void> {
   if (!list.length) return
   uploading.value = true
   let ok = 0
-  let largeToRoot = false
   for (const file of list) {
     try {
-      if (await uploadOne(file, target)) largeToRoot = true
+      await uploadOne(file, target)
       ok++
     } catch (e) {
       message.error(e instanceof Error ? e.message : String(e))
@@ -1152,7 +1224,6 @@ async function uploadFiles(list: File[], target: string | null): Promise<void> {
   uploading.value = false
   if (ok) {
     message.success(t('uploadSuccess', { n: ok }))
-    if (largeToRoot) message.info(t('largeUploadedToRoot'))
     await reload()
   }
 }

@@ -99,4 +99,14 @@ describe('Finance Customers page', () => {
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
   })
+
+  // The Active switch renders OFF until something sets it, while the record
+  // is created active: the form starts where the server does.
+  it('a new record starts active on the form', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { crud: { openCreate: () => void; formModal: { formData: { value: Record<string, unknown> | null } } } }
+    vm.crud.openCreate()
+    expect(vm.crud.formModal.formData.value?.isActive).toBe(true)
+  })
 })

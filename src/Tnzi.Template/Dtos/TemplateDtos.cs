@@ -51,12 +51,12 @@ public class TemplateDto
     public TemplateType Type { get; set; }
 
     /// <summary>
-    /// Optional header layout FK (Template_Layout.Id).
+    /// Optional reference to a Template_Layout row. Stored only; rendering does not apply it.
     /// </summary>
     public Guid? HeaderLayoutId { get; set; }
 
     /// <summary>
-    /// Optional footer layout FK (Template_Layout.Id).
+    /// Optional reference to a Template_Layout row. Stored only; rendering does not apply it.
     /// </summary>
     public Guid? FooterLayoutId { get; set; }
 
@@ -138,13 +138,13 @@ public abstract class TemplateRequestBase
     public TemplateType? Type { get; set; }
 
     /// <summary>
-    /// Optional header layout FK - points to a Template_Layout row whose
-    /// content the engine should use as the header wrapper.
+    /// Optional reference to a Template_Layout row. Stored only: rendering wraps content with the
+    /// layout named by <c>DefaultLayoutName</c> (or the caller's layout argument), never with this one.
     /// </summary>
     public Guid? HeaderLayoutId { get; set; }
 
     /// <summary>
-    /// Optional footer layout FK.
+    /// Optional reference to a Template_Layout row. Stored only; rendering does not apply it.
     /// </summary>
     public Guid? FooterLayoutId { get; set; }
 

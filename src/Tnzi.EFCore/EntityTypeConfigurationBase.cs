@@ -132,6 +132,11 @@ public abstract class EntityTypeConfigurationBase<TEntity, TKey> : IEntityTypeCo
     /// </summary>
     public void RegisterTo(ModelBuilder modelBuilder, DbContext? dbContext)
     {
+        if (!IsEnabledFor(dbContext))
+        {
+            return;
+        }
+
         _currentModelBuilder.Value = modelBuilder;
         EntityConfigurationContext.SetCurrentDbContext(dbContext);
 
@@ -160,6 +165,17 @@ public abstract class EntityTypeConfigurationBase<TEntity, TKey> : IEntityTypeCo
             EntityConfigurationContext.SetCurrentLogger(null);
         }
     }
+
+    /// <summary>
+    /// 本配置是否进入这个上下文的模型。默认 <c>true</c>。
+    /// </summary>
+    /// <remarks>
+    /// 给「只在某种部署形态下才有表」的实体用（如多租户关闭时的 <c>Tenant</c>）。在 <see cref="Configure"/>
+    /// 里配完再由上下文 <c>Ignore</c> 掉，EF 会在模型校验时告警「先显式映射、后又忽略」；在这里返回
+    /// <c>false</c> 则根本不映射。<paramref name="dbContext"/> 在设计期同样传入，判断条件与运行期一致。
+    /// </remarks>
+    /// <param name="dbContext">正在构建模型的上下文；没有时为 <c>null</c></param>
+    protected virtual bool IsEnabledFor(DbContext? dbContext) => true;
 
     /// <summary>
     /// 实现实体配置（由子类重写）

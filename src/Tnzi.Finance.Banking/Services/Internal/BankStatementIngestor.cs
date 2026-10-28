@@ -127,7 +127,8 @@ public class BankStatementIngestor : ApplicationService
     {
         Check.NotNull(input);
 
-        var bankAccount = await _bankAccountRepository.AsQueryable(true).FirstOrDefaultAsync(b => b.AccountId == input.AccountId, cancellationToken);
+        // 无跟踪读取：档案在本方法里只被读，回写游标走下面那条定向更新（理由见那里）。
+        var bankAccount = await _bankAccountRepository.AsNoTracking().FirstOrDefaultAsync(b => b.AccountId == input.AccountId, cancellationToken);
         if (bankAccount == null)
             return Fail<BankImportResultDto>("No bank account profile is configured for this ledger account.", 404);
         if (string.IsNullOrWhiteSpace(bankAccount.FeedProviderKey))
@@ -183,12 +184,21 @@ public class BankStatementIngestor : ApplicationService
         batch.ImportedCount = imported;
         batch.SkippedCount = skipped;
         await _batchRepository.UpdateAsync(batch, cancellationToken);
-
-        // 成功后回写游标 / 同步时间
-        bankAccount.FeedCursor = pull.NextCursor ?? bankAccount.FeedCursor;
-        bankAccount.LastFeedSyncTime = DateTime.UtcNow;
-        await _bankAccountRepository.UpdateAsync(bankAccount, cancellationToken);
         await _batchRepository.SaveChangesAsync(cancellationToken);
+
+        // 成功后回写游标 / 同步时间。★ 定向更新这两列，而不是把开头读到的档案整行写回：
+        // 一次拉取可以跑上十几秒（提供者调用 + 逐行入库），期间打印的支票与生成的 EFT 文件已经把
+        // NextCheckNumber / EftFileCreationNumber 往前推了，整行写回会把它们退回旧值，之后每一次打印
+        // 都撞号 409、每一份文件都复用旧序号，直到有人手工改号。
+        // 不换并发标记：游标是幂等的（重复拉取按 ExternalId 去重），不值得让一次后台拉取把操作员
+        // 正在编辑的档案表单变成 409。
+        var nextCursor = pull.NextCursor ?? bankAccount.FeedCursor;
+        var syncedAt = DateTime.UtcNow;
+        await _bankAccountRepository.AsQueryable(true)
+            .Where(b => b.Id == bankAccount.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.FeedCursor, nextCursor)
+                .SetProperty(x => x.LastFeedSyncTime, syncedAt), cancellationToken);
 
         await PublishEventAsync(new BankStatementImportedEvent
         {
@@ -220,28 +230,45 @@ public class BankStatementIngestor : ApplicationService
         return Result.Success();
     }
 
+    /// <summary>查询既有去重键时每条 IN 列表的上限（远低于 SQL Server 单条语句 2100 个参数的上限）。</summary>
+    private const int ExistingKeyQueryChunkSize = 1000;
+
     /// <summary>
-    /// 去重落库：加载账户既有 ExternalId、按去重键跳过已存/同文件重复，逐条插入
-    /// （唯一索引兜底并发），返回 (导入数, 跳过数)。ImportStatement 与 PullFromProvider 共用
+    /// 去重落库：先算出本次全部去重键、只查这些键里账户已有的那些，按去重键跳过已存/同文件重复，
+    /// 逐条插入（唯一索引兜底并发），返回 (导入数, 跳过数)。ImportStatement 与 PullFromProvider 共用
     /// 同一逻辑，避免两份易漂移的重复实现。
     /// </summary>
+    /// <remarks>
+    /// ★ 只查本次的键，不加载账户的全部历史键：后者随账户年龄线性增长（每次导入都把几年来的
+    /// ExternalId 全量传输、全量哈希一遍），而一个文件最多 <c>BankImportMaxRows</c> 行。
+    /// 键的计算顺序与逐行插入时相同（同一个 occurrences 字典），所以去重语义逐字不变；
+    /// 软删的行照旧被全局过滤器排除，删掉批次后重导仍会重新导入。
+    /// </remarks>
     private async Task<(int Imported, int Skipped)> PersistDeduplicatedTransactionsAsync(
         Guid accountId, Guid batchId, BankTransactionSource source,
         IReadOnlyList<ParsedBankTransaction> transactions, string defaultCurrency, CancellationToken cancellationToken)
     {
-        var existing = (await _txnRepository.AsNoTracking()
-            .Where(t => t.AccountId == accountId)
-            .Select(t => t.ExternalId)
-            .ToListAsync(cancellationToken)).ToHashSet(StringComparer.Ordinal);
-
         var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
+        var keys = transactions.Select(p => ExternalIdFor(source, accountId, p, occurrences)).ToList();
+
+        var existing = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var chunk in keys.Distinct(StringComparer.Ordinal).Chunk(ExistingKeyQueryChunkSize))
+        {
+            var found = await _txnRepository.AsNoTracking()
+                .Where(t => t.AccountId == accountId && chunk.Contains(t.ExternalId))
+                .Select(t => t.ExternalId)
+                .ToListAsync(cancellationToken);
+            existing.UnionWith(found);
+        }
+
         var seenInFile = new HashSet<string>(StringComparer.Ordinal);
         var imported = 0;
         var skipped = 0;
 
-        foreach (var p in transactions)
+        for (var i = 0; i < transactions.Count; i++)
         {
-            var externalId = ExternalIdFor(source, accountId, p, occurrences);
+            var p = transactions[i];
+            var externalId = keys[i];
             if (existing.Contains(externalId) || !seenInFile.Add(externalId))
             {
                 skipped++;

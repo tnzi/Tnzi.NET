@@ -1,7 +1,9 @@
 using Moq.Protected;
+using Tnzi.AI.Channels.Adapters.Dingtalk;
 using Tnzi.AI.Channels.Adapters.Discord;
 using Tnzi.AI.Channels.Adapters.Feishu;
 using Tnzi.AI.Channels.Adapters.Slack;
+using Tnzi.AI.Channels.Adapters.Telegram;
 using Tnzi.AI.Channels.Bus;
 using Tnzi.AI.Channels.Options;
 using MsOptions = Microsoft.Extensions.Options.Options;
@@ -266,6 +268,84 @@ public class ChannelsModuleOptionsValidatorTests
 
         using var doc = JsonDocument.Parse(result.ChallengeResponse!);
         doc.RootElement.GetProperty("challenge").GetString().ShouldBe(plain);
+    }
+
+    // ─── DingTalk RobotCode ──────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void Validate_DingtalkEnabled_NoRobotCode_Fails(string? robotCode)
+    {
+        // 单聊与群聊两条回复接口都以 robotCode 指明发送方机器人：缺了它，启动照常而每一条回复都被拒
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Dingtalk = new DingtalkAdapterOptions { Enabled = true, AppKey = "ak", AppSecret = "secret", RobotCode = robotCode }
+        });
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("Dingtalk.RobotCode is required", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_DingtalkEnabled_RobotCodePresent_Passes()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Dingtalk = new DingtalkAdapterOptions { Enabled = true, AppKey = "ak", AppSecret = "secret", RobotCode = "ding-robot" }
+        });
+
+        result.Failed.ShouldBeFalse();
+    }
+
+    // ─── MaxMessageLength / MaxRetries ───────────────────────────────────────
+    // A message length of 0 makes the chunked sender cut empty chunks forever, a negative one
+    // throws on every send; either way no reply ever arrives, so it is refused at startup.
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_EnabledAdapter_NonPositiveMaxMessageLength_Fails(int maxLength)
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Slack = new SlackAdapterOptions { Enabled = true, BotToken = "xoxb-valid", SigningSecret = "s", MaxMessageLength = maxLength },
+            Discord = new DiscordAdapterOptions { Enabled = true, BotToken = "bot", PublicKey = "pk", MaxMessageLength = maxLength },
+            Dingtalk = new DingtalkAdapterOptions { Enabled = true, AppKey = "ak", AppSecret = "secret", RobotCode = "r", MaxMessageLength = maxLength }
+        });
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("Slack.MaxMessageLength must be greater than 0", StringComparison.Ordinal));
+        result.Failures.ShouldContain(f => f.Contains("Discord.MaxMessageLength must be greater than 0", StringComparison.Ordinal));
+        result.Failures.ShouldContain(f => f.Contains("Dingtalk.MaxMessageLength must be greater than 0", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_EnabledAdapter_NegativeMaxRetries_Fails()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Telegram = new TelegramAdapterOptions { Enabled = true, BotToken = "t", MaxRetries = -1 }
+        });
+
+        result.Failed.ShouldBeTrue();
+        result.Failures.ShouldContain(f => f.Contains("Telegram.MaxRetries must not be negative", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Validate_DisabledAdapter_InvalidSendLimits_Passes()
+    {
+        var result = Validate(new ChannelsModuleOptions
+        {
+            Enabled = true,
+            Slack = new SlackAdapterOptions { Enabled = false, MaxMessageLength = 0, MaxRetries = -1 }
+        });
+
+        result.Failed.ShouldBeFalse();
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────

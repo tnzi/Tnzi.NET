@@ -18,6 +18,17 @@ export interface NewMessagePayload {
   message?: ChatMessageDto | null;
 }
 
+/**
+ * A message was recalled (by its sender or by an admin). Clients drop it from
+ * an open thread; `preview` is the conversation's new list preview when the
+ * recalled message was the latest one, otherwise null (preview unchanged).
+ */
+export interface MessageRecalledPayload {
+  conversationId: string;
+  messageId: string;
+  preview?: string | null;
+}
+
 export interface MessageReadPayload {
   conversationId: string;
   userId: string;
@@ -41,7 +52,7 @@ export interface PresenceChangedPayload {
 
 export type ChatSignalRClientOptions = HubClientOptions;
 
-type ChatEvent = 'Chat.NewMessage' | 'Chat.MessageRead' | 'Chat.ConversationChanged' | 'Chat.PresenceChanged';
+type ChatEvent = 'Chat.NewMessage' | 'Chat.MessageRecalled' | 'Chat.MessageRead' | 'Chat.ConversationChanged' | 'Chat.PresenceChanged';
 
 export interface ChatSignalRClient {
   start(): Promise<void>;

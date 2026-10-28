@@ -57,12 +57,16 @@ public static class StorageKeyHelper
         return $"{SequentialGuid.NewGuid()}{suffix}";
     }
 
-    /// <summary>缩略图的键：从原件的（已生成的）键派生。</summary>
-    public static string ThumbnailKey(string originalKey)
-    {
-        Check.NotNullOrWhiteSpace(originalKey);
-        return $"thumb_{originalKey}";
-    }
+    /// <summary>
+    /// 为一张新画的缩略图生成存储键：<c>thumb_</c> + 顺序 GUID + <c>.jpg</c>（缩略图一律编码成 JPEG）。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>每画一次一个新键，不从原件的键派生。</b>派生出的键会在两处相撞：
+    /// 存量记录的 <c>FileName</c> 可能是调用方给的名字（见类注释），同名的两条记录回填时第二张图覆盖第一张，
+    /// A 的缩略图从此显示 B 的内容；同一条记录重画（建版本清掉旧图后再回填）又落回旧键，
+    /// 而旧键上的删除请求是异步的，晚到的那一次会删掉新画好的图。
+    /// </remarks>
+    public static string NewThumbnailKey() => $"thumb_{SequentialGuid.NewGuid()}.jpg";
 
     /// <summary>分片临时对象的键：会话 id 与序号都是服务端产生的值。</summary>
     public static string ChunkKey(Guid uploadSessionId, int chunkIndex)

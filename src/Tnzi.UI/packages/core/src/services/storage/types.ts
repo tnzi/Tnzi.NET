@@ -4,7 +4,7 @@
  */
 
 import type { CreationAuditedEntity } from '../../types/entities';
-import type { PagedQueryDto, SortedPagedQueryDto } from '../../types/pagination';
+import type { PagedList, PagedQueryDto } from '../../types/pagination';
 
 // ============================================
 // File Types
@@ -41,8 +41,8 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
    * 保留为可选仅为向后兼容;勿在新代码中依赖。
    */
   thumbnailPath?: string | null;
+  /** The uploader's user id. The DTO carries no name; resolve one through the user API if needed. */
   creatorId?: string | null;
-  creatorName?: string | null;
   /** Owning folder id; null = root / unfiled. */
   folderId?: string | null;
   /** True while the file is an unreferenced upload awaiting cleanup. */
@@ -72,7 +72,19 @@ export interface FileRecordDto extends CreationAuditedEntity<string> {
  * File query request
  * Aligned with backend FileQueryRequest
  */
-export interface FileQueryDto extends SortedPagedQueryDto {
+export interface FileQueryDto extends PagedQueryDto {
+  /**
+   * `CreationTime`, `Size` or `OriginalName` (case-insensitive). Anything else, or
+   * nothing, sorts newest first.
+   */
+  sortBy?: string;
+  /**
+   * Sort direction, `'asc'` or `'desc'`. Wins over {@link descending}. This
+   * endpoint does not read the `sortDescending` name other lists use.
+   */
+  sortOrder?: 'asc' | 'desc';
+  /** Descending when true; used only when {@link sortOrder} is unset. Default false. */
+  descending?: boolean;
   extension?: string;
   contentType?: string;
   minSize?: number;
@@ -106,7 +118,13 @@ export interface FileFolderDto {
   path: string;
   sortOrder: number;
   description?: string | null;
-  /** Files directly under this folder (excluding sub-folder contents). */
+  /**
+   * The user whose file space this folder belongs to (null for folders created
+   * without a signed-in user). Paths are unique per owner: two users can both
+   * have `/Documents`.
+   */
+  ownerId?: string | null;
+  /** Files directly under this folder (excluding sub-folder contents and files in the recycle bin). */
   fileCount: number;
   /** Populated by the tree endpoint; undefined on flat lookups. */
   children?: FileFolderDto[] | null;
@@ -132,20 +150,6 @@ export interface MoveFilesToFolderRequest {
 }
 
 /**
- * Chunk upload request (for large files)
- */
-export interface ChunkUploadDto {
-  fileId?: string | null;
-  fileName: string;
-  totalSize: number;
-  chunkSize: number;
-  chunkIndex: number;
-  totalChunks: number;
-  chunkData: Blob;
-  md5Hash?: string;
-}
-
-/**
  * Initiate chunked upload request
  * Aligned with backend InitiateChunkedUploadRequest
  */
@@ -162,18 +166,12 @@ export interface InitiateChunkedUploadDto {
  */
 export interface CompleteChunkedUploadDto {
   isTemporary?: boolean;
-}
-
-/**
- * Chunk upload result
- */
-export interface ChunkUploadResultDto {
-  fileId: string;
-  chunkIndex: number;
-  uploadedChunks: number;
-  totalChunks: number;
-  isComplete: boolean;
-  file?: FileRecordDto;
+  /**
+   * Put the merged file straight into one of the uploader's own folders (the
+   * user file space; needs Tnzi.Storage.Workspace). Cannot be combined with
+   * `isTemporary: true`.
+   */
+  folderId?: string | null;
 }
 
 /**
@@ -399,6 +397,185 @@ export interface UserStorageUsageDto {
 }
 
 // ============================================
+// Storage quota
+// ============================================
+
+/**
+ * A user's storage quota. Aligned with backend StorageQuotaDto.
+ *
+ * `usedBytes` is what the quota is judged against: the user's file records
+ * (temporary uploads and files in the recycle bin included) plus what
+ * sub-modules keep for them (old file versions). It can differ from
+ * `UserStorageUsageDto.totalSize`, which counts file records only.
+ */
+export interface StorageQuotaDto {
+  userId: string;
+  fileCount: number;
+  usedBytes: number;
+  /** null = unlimited */
+  allowanceBytes?: number | null;
+  /** null when unlimited; 0 when already over */
+  remainingBytes?: number | null;
+  /** True when usage is above the allowance (after an administrator lowered it). */
+  isExceeded: boolean;
+}
+
+/**
+ * `errorDetails` of a refused write (error code `FILE_QUOTA_EXCEEDED`, HTTP 413).
+ * Aligned with backend StorageQuotaExceededDetails.
+ */
+export interface StorageQuotaExceededDetails {
+  usedBytes: number;
+  requestedBytes: number;
+  allowanceBytes: number;
+}
+
+/** Error code of a write refused because it would exceed the owner's quota. */
+export const FILE_QUOTA_EXCEEDED_ERROR_CODE = 'FILE_QUOTA_EXCEEDED';
+
+/** An administrator-set allowance for one user. Aligned with backend StorageAllowanceDto. */
+export interface StorageAllowanceDto {
+  userId: string;
+  /** null = unlimited for this user */
+  allowanceBytes?: number | null;
+  note?: string | null;
+  creationTime: string;
+  lastModificationTime?: string | null;
+}
+
+/** Aligned with backend SetStorageAllowanceRequest. */
+export interface SetStorageAllowanceDto {
+  /** null = unlimited for this user; never negative */
+  allowanceBytes?: number | null;
+  note?: string | null;
+}
+
+// ============================================
+// User file space
+// ============================================
+
+/** Mirrors backend FileSpaceEntryKind (member names on the wire). */
+export enum FileSpaceEntryKind {
+  Folder = 'Folder',
+  File = 'File',
+}
+
+/**
+ * Sort field of a file space listing or search. Mirrors backend FileSpaceSortField.
+ * Folders always come before files; sorting by size orders folders by name.
+ */
+export enum FileSpaceSortField {
+  Name = 'Name',
+  Time = 'Time',
+  Size = 'Size',
+}
+
+/** One folder or file in the signed-in user's file space. Aligned with backend FileSpaceEntryDto. */
+export interface FileSpaceEntryDto {
+  kind: FileSpaceEntryKind;
+  /** Folder id or file id (a file id works with the `files/{id}/...` endpoints). */
+  id: string;
+  name: string;
+  /** Containing folder; null = root */
+  parentId?: string | null;
+  /** Path of the containing folder ("/" for the root). */
+  location: string;
+  /** Bytes; 0 for folders */
+  size: number;
+  extension?: string | null;
+  contentType?: string | null;
+  hasThumbnail: boolean;
+  isPublic: boolean;
+  creationTime: string;
+}
+
+export interface FileSpaceBreadcrumbDto {
+  id: string;
+  name: string;
+}
+
+/** A folder's contents. Aligned with backend FileSpaceListingDto. */
+export interface FileSpaceListingDto {
+  /** null = root */
+  folderId?: string | null;
+  path: string;
+  /** Root excluded; the listed folder is the last item. */
+  breadcrumbs: FileSpaceBreadcrumbDto[];
+  /** Folders first, then files, paged together. */
+  entries: PagedList<FileSpaceEntryDto>;
+}
+
+export interface FileSpaceListQuery {
+  /** Omit for the root */
+  folderId?: string | null;
+  sortBy?: FileSpaceSortField;
+  descending?: boolean;
+  pageIndex?: number;
+  /** Default 50, at most 200 */
+  pageSize?: number;
+}
+
+export interface FileSpaceSearchQuery {
+  /** Part of the file name, case-insensitive */
+  keyword?: string;
+  /** For example ".pdf" (the dot is optional) */
+  extension?: string;
+  /** Prefix match: "image/" finds every image */
+  contentType?: string;
+  /** Default Time */
+  sortBy?: FileSpaceSortField;
+  /** Default true (newest first) */
+  descending?: boolean;
+  pageIndex?: number;
+  pageSize?: number;
+}
+
+// ============================================
+// Recycle bin
+// ============================================
+
+/** Mirrors backend RecycleBinItemType. */
+export enum RecycleBinItemType {
+  File = 'File',
+  Folder = 'Folder',
+}
+
+/** One item in the signed-in user's recycle bin. Aligned with backend RecycleBinEntryDto. */
+export interface RecycleBinEntryDto {
+  /** Entry id: restore and purge take this, not the file or folder id. */
+  id: string;
+  itemType: RecycleBinItemType;
+  itemId: string;
+  name: string;
+  /** Where it was deleted from ("/" for the root). */
+  originalLocation: string;
+  /** Bytes (for a folder, of every file in it). Counted against the quota until purged. */
+  size: number;
+  fileCount: number;
+  extension?: string | null;
+  contentType?: string | null;
+  deletedAt: string;
+  /** When it is purged automatically; null when automatic purging is off. */
+  purgeAt?: string | null;
+}
+
+/** Aligned with backend MoveToRecycleBinRequest. */
+export interface MoveToRecycleBinDto {
+  fileIds?: string[];
+  /** Folders go with everything in them. */
+  folderIds?: string[];
+}
+
+/** Aligned with backend RecycleBinRestoreResult. */
+export interface RecycleBinRestoreResult {
+  restored: number;
+  /** Entries whose original folder was gone, so they went back to the root. */
+  restoredToRoot: string[];
+  /** Folders renamed because their name was taken again: entry id -> new name. */
+  renamed: Record<string, string>;
+}
+
+// ============================================
 // File Integrity Types
 // ============================================
 
@@ -522,69 +699,17 @@ export interface FileUploadOptions {
    * backend flag the file public on its own.
    */
   isPublic?: boolean;
-}
-
-// ============================================
-// Provider Types
-// ============================================
-
-/**
- * Storage provider info
- */
-export interface StorageProviderDto {
-  name: string;
-  type: string;
-  isEnabled: boolean;
-  isDefault: boolean;
-  maxFileSize: number;
-  allowedExtensions: string[];
-  baseUrl?: string | null;
-}
-
-/**
- * Presigned URL request
- */
-export interface PresignedUrlRequestDto {
-  fileName: string;
-  contentType: string;
-  size: number;
-  expiresIn?: number;
-}
-
-/**
- * Presigned URL response
- */
-export interface PresignedUrlResponseDto {
-  uploadUrl: string;
-  fileKey: string;
-  expiresAt: Date | string;
-  headers?: Record<string, string>;
-}
-
-// ============================================
-// Folder Types (if supported)
-// ============================================
-
-/**
- * Folder DTO
- */
-export interface FolderDto {
-  id: string;
-  name: string;
-  path: string;
-  parentId?: string | null;
-  fileCount: number;
-  totalSize: number;
-  creationTime: Date | string;
-  children?: FolderDto[];
-}
-
-/**
- * Create folder request
- */
-export interface CreateFolderDto {
-  name: string;
-  parentId?: string | null;
+  /**
+   * Lifetime of a single `upload` (not `uploadMany`, which always stores
+   * permanent records). Omitted, the server stores a temporary upload: it is
+   * held only by `[FileField]` references, so once background cleanup is on, an
+   * upload no entity field references is removed after the retention period.
+   * That suits "upload, then write the id into a record" (avatars, attachments).
+   *
+   * Pass `false` for a file that is uploaded to be kept as is, such as a file
+   * library entry: the upload itself holds it until it is deleted.
+   */
+  isTemporary?: boolean;
 }
 
 // ============================================
@@ -625,15 +750,6 @@ export interface FileReferenceStatisticsDto {
   permanentReferences: number;
   temporaryReferences: number;
   referencesByEntityType: Record<string, number>;
-}
-
-/**
- * Bulk file operation request
- */
-export interface BulkFileOperationDto {
-  fileIds: string[];
-  operation: 'delete' | 'move' | 'copy';
-  targetFolderId?: string;
 }
 
 // ---------------------------------------------------------------------------

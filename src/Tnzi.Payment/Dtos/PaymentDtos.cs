@@ -8,7 +8,12 @@ public class CreatePaymentDto
     /// <summary>
     /// 业务订单号
     /// </summary>
+    /// <remarks>
+    /// 本类上的长度上限都与对应的列宽一致（见 <c>PaymentConfiguration</c>）：超长的值此前通过校验、写库时被数据库截断报错，
+    /// 调用方拿到的是 500。只在经 MVC 模型绑定进来时生效，服务端模块直接构造的调用不受它约束。
+    /// </remarks>
     [Required]
+    [MaxLength(128, ErrorMessage = "BusinessOrderNo cannot exceed 128 characters.")]
     public string BusinessOrderNo { get; set; } = string.Empty;
 
     /// <summary>
@@ -31,11 +36,13 @@ public class CreatePaymentDto
     /// 于是欧元商户配好 <c>Payment:DefaultCurrency</c> 之后，前端不带币种的每一笔订单
     /// 仍会以那个初始值建单并送进渠道 —— 配置、日志与接口返回全都看不出异常。
     /// </remarks>
+    [MaxLength(8, ErrorMessage = "Currency cannot exceed 8 characters.")]
     public string? Currency { get; set; }
 
     /// <summary>
     /// 支付渠道代码
     /// </summary>
+    [MaxLength(32, ErrorMessage = "ChannelCode cannot exceed 32 characters.")]
     public string? ChannelCode { get; set; }
 
     /// <summary>
@@ -46,6 +53,7 @@ public class CreatePaymentDto
     /// <summary>
     /// 描述
     /// </summary>
+    [MaxLength(500, ErrorMessage = "Description cannot exceed 500 characters.")]
     public string? Description { get; set; }
 
     /// <summary>
@@ -62,6 +70,7 @@ public class CreatePaymentDto
     /// <summary>
     /// 优惠券代码
     /// </summary>
+    [MaxLength(64, ErrorMessage = "CouponCode cannot exceed 64 characters.")]
     public string? CouponCode { get; set; }
 
     /// <summary>
@@ -81,6 +90,7 @@ public class CreatePaymentDto
     /// <summary>
     /// 扩展数据（JSON格式）
     /// </summary>
+    [MaxLength(PaymentConstants.MaxExtraDataLength, ErrorMessage = "ExtraData cannot exceed 65536 characters.")]
     public string? ExtraData { get; set; }
 
     /// <summary>
@@ -101,6 +111,22 @@ public class CreatePaymentDto
     [JsonIgnore]
     [BindNever]
     public bool IsSystemInitiated { get; set; }
+
+    /// <summary>
+    /// 系统通道（<see cref="IsSystemInitiated"/>）建单时由调用方指定的计费账户：订阅的首付 / 补缴 / 补差单记在订阅所属的账户上。
+    /// 用户面建单不认这一项，账户一律由服务端按当前用户解析（并要求 <c>payment.account.manage</c>）。
+    /// </summary>
+    [JsonIgnore]
+    [BindNever]
+    public BillingAccountRef? BillingAccount { get; set; }
+
+    /// <summary>
+    /// 付款的同时把这张卡存下来，供之后无人值守扣款（Stripe 的 <c>setup_future_usage=off_session</c>）。
+    /// 只认系统通道：订阅首付与补缴用它，一次性结账的用户面建单不该替付款人做这个决定。渠道不支持保存支付方式时忽略。
+    /// </summary>
+    [JsonIgnore]
+    [BindNever]
+    public bool SavePaymentMethod { get; set; }
 }
 
 /// <summary>
@@ -149,6 +175,12 @@ public class OffSessionChargeDto
     /// </summary>
     public string PaymentMethodToken { get; set; } = string.Empty;
 
+    /// <summary>这张卡的卡组织（调用方手里的展示信息），记在支付上供收据使用；可为空。</summary>
+    public string? PaymentMethodBrand { get; set; }
+
+    /// <summary>这张卡的尾号；可为空。</summary>
+    public string? PaymentMethodLast4 { get; set; }
+
     /// <summary>
     /// 扩展数据（JSON，承载业务用途，如订阅计费 purpose）
     /// </summary>
@@ -158,6 +190,11 @@ public class OffSessionChargeDto
     /// 付款用户ID。后台扣款没有当前用户上下文，账单归属必须由调用方显式带上。
     /// </summary>
     public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 这笔扣款记在哪个计费账户上（订阅所属的账户）。为 null 时按 <see cref="UserId"/> 的个人账户记。
+    /// </summary>
+    public BillingAccountRef? BillingAccount { get; set; }
 
     /// <summary>
     /// 客户名称（开票/通知用）
@@ -334,6 +371,16 @@ public class PaymentDto
     public Guid? UserId { get; set; }
 
     /// <summary>
+    /// 计费账户种类（<c>User</c> / <c>Installation</c> / <c>Tenant</c>）；升级前建的、还没回填的单为空
+    /// </summary>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 计费账户 Id（与 <see cref="BillingAccountType"/> 合起来是账户键）
+    /// </summary>
+    public string? BillingAccountId { get; set; }
+
+    /// <summary>
     /// 客户名称
     /// </summary>
     public string? CustomerName { get; set; }
@@ -372,6 +419,24 @@ public class PaymentDto
     /// 支付完成时间
     /// </summary>
     public DateTime? PaidTime { get; set; }
+
+    /// <summary>付款用的卡组织（已知时）。</summary>
+    public string? PaymentMethodBrand { get; set; }
+
+    /// <summary>付款用的卡尾号（已知时）。</summary>
+    public string? PaymentMethodLast4 { get; set; }
+
+    /// <summary>争议（拒付）状态；没有争议时为 <see cref="PaymentDisputeStatus.None"/>。</summary>
+    public PaymentDisputeStatus DisputeStatus { get; set; }
+
+    /// <summary>渠道争议号。</summary>
+    public string? DisputeId { get; set; }
+
+    /// <summary>争议原因。</summary>
+    public string? DisputeReason { get; set; }
+
+    /// <summary>争议金额。</summary>
+    public decimal? DisputeAmount { get; set; }
 
     /// <summary>
     /// 创建时间
@@ -418,6 +483,16 @@ public class PaymentQueryDto : PagedQueryDto
     /// 付款用户ID（管理端按客户筛选）
     /// </summary>
     public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 按计费账户种类筛选（管理端；与 <see cref="BillingAccountId"/> 合用）
+    /// </summary>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 按计费账户 Id 筛选（管理端）
+    /// </summary>
+    public string? BillingAccountId { get; set; }
 
     /// <summary>
     /// 开始时间
@@ -490,6 +565,31 @@ public class PaymentProviderCreateDto
     /// 渠道侧客户标识（有已保存客户时透传，便于渠道复用支付方式）
     /// </summary>
     public string? ProviderCustomerId { get; set; }
+
+    /// <summary>
+    /// 付款成功后把支付方式留存给之后的无人值守扣款。渠道据此在没有客户时先为 <see cref="BillingAccount"/> 建一个。
+    /// </summary>
+    public bool SavePaymentMethod { get; set; }
+
+    /// <summary>
+    /// 只提供能被留存、之后无人值守再扣的支付方式（卡）。订阅收款与付款同时存卡时为 true。
+    /// </summary>
+    /// <remarks>
+    /// 渠道收银组件按账户后台启用的方式自动提供，先买后付（Klarna、Afterpay）这类方式一次性有效、不能做 off-session 续费：
+    /// 首期用它付了，第一次续费就无卡可扣。限制要落在渠道单据上（例如 Stripe 的 <c>allowed_payment_method_types</c>），
+    /// 只在前端藏起来挡不住直接拿 client secret 拉起的收银台。
+    /// </remarks>
+    public bool ReusableMethodsOnly { get; set; }
+
+
+    /// <summary>这笔付款所属的计费账户（需要新建渠道客户时写进客户元数据）。</summary>
+    public BillingAccountRef? BillingAccount { get; set; }
+
+    /// <summary>客户名称（新建渠道客户时使用）</summary>
+    public string? CustomerName { get; set; }
+
+    /// <summary>客户邮箱（新建渠道客户时使用）</summary>
+    public string? CustomerEmail { get; set; }
 }
 
 /// <summary>
@@ -519,6 +619,12 @@ public class PaymentProviderSetupDto
     /// 用户标识（写入渠道侧 metadata，便于对账与排障）
     /// </summary>
     public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 这次操作所属的计费账户。渠道把它写进自己建的客户的元数据（Stripe 的 <c>BillingAccount</c>），
+    /// 之后凭它判定「这张卡是不是这个账户的」。为 null 时按 <see cref="UserId"/> 的个人账户处理。
+    /// </summary>
+    public BillingAccountRef? BillingAccount { get; set; }
 
     /// <summary>
     /// 客户名称
@@ -587,6 +693,12 @@ public class PaymentProviderResolveMethodDto
     /// 用户标识（首次绑卡需要新建渠道客户时使用）
     /// </summary>
     public Guid UserId { get; set; }
+
+    /// <summary>
+    /// 这次操作所属的计费账户。渠道把它写进自己建的客户的元数据（Stripe 的 <c>BillingAccount</c>），
+    /// 之后凭它判定「这张卡是不是这个账户的」。为 null 时按 <see cref="UserId"/> 的个人账户处理。
+    /// </summary>
+    public BillingAccountRef? BillingAccount { get; set; }
 
     /// <summary>
     /// 客户名称
@@ -706,8 +818,20 @@ public class PaymentProviderQueryResult
     public string? ExternalTradeNo { get; set; }
     public PaymentStatus Status { get; set; }
     public decimal Amount { get; set; }
+
+    /// <summary>
+    /// 渠道回报的到账币种（ISO 4217）。语义与 <see cref="PaymentProviderCallbackResult.Currency"/> 相同：
+    /// 同步落定为成功时服务层拿它与支付的币种比对，留空表示渠道没报、跳过比对。
+    /// </summary>
+    public string? Currency { get; set; }
+
     public DateTime? PaidTime { get; set; }
     public string? FailReason { get; set; }
+
+    /// <summary>
+    /// 这笔付款按要求留存下来的支付方式（建单时 <see cref="PaymentProviderCreateDto.SavePaymentMethod"/> 为 true、且已收款时才有值）。
+    /// </summary>
+    public string? SavedPaymentMethodToken { get; set; }
 }
 
 /// <summary>
@@ -784,4 +908,80 @@ public class PaymentProviderCallbackResult
     /// 被撤销的支付方式凭据（<see cref="Kind"/> 为 <see cref="PaymentCallbackKind.PaymentMethodRevoked"/> 时有值）
     /// </summary>
     public string? PaymentMethodToken { get; set; }
+
+    /// <summary>
+    /// 付款人已经批准、渠道在等商户收款（PayPal 的 <c>CHECKOUT.ORDER.APPROVED</c>）。
+    /// 服务层对一笔还没结束的支付据此调用 <see cref="IPaymentProvider.FinalizePaymentAsync"/> 把钱收下来；
+    /// 收款请求没走通时答 5xx 让渠道重投这条回调（收款本身幂等）。缺省 false。
+    /// </summary>
+    public bool RequiresFinalization { get; set; }
+
+    /// <summary>
+    /// 与 <see cref="PaymentProviderQueryResult.SavedPaymentMethodToken"/> 同义：收款时按要求留存的支付方式。
+    /// </summary>
+    public string? SavedPaymentMethodToken { get; set; }
+
+    /// <summary>
+    /// 渠道侧更新后的支付方式信息（<see cref="Kind"/> 为 <see cref="PaymentCallbackKind.PaymentMethodUpdated"/> 时有值：
+    /// 换了有效期、发卡行自动换卡之后的卡组织与尾号）。
+    /// </summary>
+    public PaymentProviderPaymentMethodResult? UpdatedPaymentMethod { get; set; }
+
+    /// <summary>
+    /// 渠道侧的退款（<see cref="Kind"/> 为 <see cref="PaymentCallbackKind.ExternalRefund"/> 时有值）。
+    /// 支付按 <see cref="ExternalTradeNo"/> 定位（这类事件不带本模块的流水号）。
+    /// </summary>
+    public List<PaymentProviderExternalRefund>? Refunds { get; set; }
+
+    /// <summary>
+    /// 争议（<see cref="Kind"/> 为 <see cref="PaymentCallbackKind.Dispute"/> 时有值）。支付按 <see cref="ExternalTradeNo"/> 定位。
+    /// </summary>
+    public PaymentProviderDispute? Dispute { get; set; }
+}
+
+/// <summary>
+/// 渠道回报的一笔退款。
+/// </summary>
+public class PaymentProviderExternalRefund
+{
+    /// <summary>渠道退款号（Stripe <c>re_...</c>），渠道后台手工退款按它幂等。</summary>
+    public string ExternalRefundNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 本模块的退款号：这笔退款是本模块发起的（Stripe 退款元数据里的 <c>RefundNo</c>）。为空 = 在渠道后台手工退的。
+    /// </summary>
+    public string? LocalRefundNo { get; set; }
+
+    /// <summary>退款金额（已从最小单位换算回来）。</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>币种（ISO 4217）。</summary>
+    public string? Currency { get; set; }
+
+    /// <summary>渠道侧状态。</summary>
+    public RefundStatus Status { get; set; }
+
+    /// <summary>渠道记录的原因（Stripe <c>requested_by_customer</c> 等），可为空。</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>
+/// 渠道回报的一次争议（拒付）。
+/// </summary>
+public class PaymentProviderDispute
+{
+    /// <summary>渠道争议号（Stripe <c>dp_...</c>）。</summary>
+    public string DisputeId { get; set; } = string.Empty;
+
+    /// <summary>状态。</summary>
+    public PaymentDisputeStatus Status { get; set; }
+
+    /// <summary>原因（Stripe <c>fraudulent</c> / <c>product_not_received</c> 等）。</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>争议金额。</summary>
+    public decimal Amount { get; set; }
+
+    /// <summary>币种。</summary>
+    public string? Currency { get; set; }
 }

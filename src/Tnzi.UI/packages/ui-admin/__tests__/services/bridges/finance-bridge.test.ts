@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createFinanceBridge } from '../../../src/services/bridges/finance-bridge'
 import type { HttpClient } from '@tnzi/core/http'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 // ---- 失败信封必须抛，不能被当成成功 ----
 //
@@ -119,6 +121,20 @@ describe('finance-bridge write paths', () => {
     await expect(bridge.recurring.delete(['t1'])).rejects.toThrow(REFUSAL)
   })
 
+  it('reconciliations.worksheet rejects a refused read (Save writes the selection back as the whole cleared set)', async () => {
+    // A failed read handed over as null left the worksheet empty with Save and
+    // Complete live: one click cleared every selected line of the reconciliation.
+    const client = refusingClient()
+    ;(client.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: null, succeeded: false, success: false, code: 500, message: 'Worksheet unavailable',
+    })
+    await expect(createFinanceBridge({ client }).reconciliations.worksheet('r1')).rejects.toThrow('Worksheet unavailable')
+
+    const ws = { reconciliationId: 'r1', statementEndingBalance: 0, clearedBalance: 0, difference: 0, lines: [] }
+    ;(client.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ data: ws, succeeded: true, success: true, code: 200, message: '' })
+    await expect(createFinanceBridge({ client }).reconciliations.worksheet('r1')).resolves.toEqual(ws)
+  })
+
   it('a successful envelope still unwraps to the payload', async () => {
     const client = refusingClient()
     ;(client.post as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -130,5 +146,132 @@ describe('finance-bridge write paths', () => {
     })
     const okBridge = createFinanceBridge({ client })
     await expect(okBridge.customers.create({ code: 'X', name: 'X' } as never)).resolves.toEqual({ id: 'c1', code: 'X' })
+  })
+})
+
+// ---- 读侧：失败的读必须抛，不能被读成「空」 ----
+//
+// ★ 同一个 HttpClient 对 403 / 404 / 5xx / 超时也是**返回失败信封**（`data: undefined`）。
+//   裸 unwrap 把它变成 undefined，再经 `?? []` 就成了一个看起来真实的空答案：核销面板
+//   「没有未清单据」、存款 / 支票 / EFT 队列为空、报表像从没跑过、抽屉空白，页面自己的
+//   catch 一次也没机会执行。现在每个读都 reject 出服务端的原话。
+
+const READ_REFUSAL = 'You do not have permission to view finance records.'
+
+/** Every verb answers the failed-envelope shape `createFailedApiResult` produces. */
+function failingClient() {
+  const failed = () => ({ data: undefined, succeeded: false, success: false, code: 403, message: READ_REFUSAL })
+  return {
+    get: vi.fn(async () => failed()),
+    post: vi.fn(async () => failed()),
+    put: vi.fn(async () => failed()),
+    delete: vi.fn(async () => failed()),
+    download: vi.fn(async () => failed()),
+  } as unknown as HttpClient
+}
+
+/** Every verb answers success with no body. */
+function emptyBodyClient() {
+  const ok = () => ({ data: null, succeeded: true, success: true, code: 200, message: '' })
+  return {
+    get: vi.fn(async () => ok()),
+    post: vi.fn(async () => ok()),
+    put: vi.fn(async () => ok()),
+    delete: vi.fn(async () => ok()),
+  } as unknown as HttpClient
+}
+
+describe('finance-bridge read paths', () => {
+  const bridge = createFinanceBridge({ client: failingClient() })
+  const q = { pageIndex: 1, pageSize: 20, filters: {} } as never
+
+  const reads: Array<[string, () => Promise<unknown>]> = [
+    ['accounts.fetch', () => bridge.accounts.fetch(q)],
+    ['accounts.tree', () => bridge.accounts.tree()],
+    ['accounts.balances', () => bridge.accounts.balances(['a1'])],
+    ['journals.fetch', () => bridge.journals.fetch(q)],
+    ['journals.getById', () => bridge.journals.getById('j1')],
+    ['rates.fetch', () => bridge.rates.fetch(q)],
+    ['fiscalYears.list', () => bridge.fiscalYears.list()],
+    ['fiscalYears.getClosingDate', () => bridge.fiscalYears.getClosingDate()],
+    ['reports.trialBalance', () => bridge.reports.trialBalance('2026-01-01', '2026-01-31')],
+    ['reports.balanceSheet', () => bridge.reports.balanceSheet('2026-01-31')],
+    ['reports.profitAndLoss', () => bridge.reports.profitAndLoss('2026-01-01', '2026-01-31')],
+    ['reports.generalLedger', () => bridge.reports.generalLedger('a1', '2026-01-01', '2026-01-31')],
+    ['reports.arAging', () => bridge.reports.arAging('2026-01-31')],
+    ['reports.apAging', () => bridge.reports.apAging('2026-01-31')],
+    ['reports.taxSummary', () => bridge.reports.taxSummary('2026-01-01', '2026-01-31')],
+    ['reports.cashFlow', () => bridge.reports.cashFlow('2026-01-01', '2026-01-31')],
+    ['customers.fetch', () => bridge.customers.fetch(q)],
+    ['customers.get', () => bridge.customers.get('c1')],
+    ['customers.summary', () => bridge.customers.summary('c1')],
+    ['customers.transactions', () => bridge.customers.transactions('c1', {} as never)],
+    ['vendors.get', () => bridge.vendors.get('v1')],
+    ['vendors.summary', () => bridge.vendors.summary('v1')],
+    ['vendors.transactions', () => bridge.vendors.transactions('v1', {} as never)],
+    ['items.fetch', () => bridge.items.fetch(q)],
+    ['taxes.agencies', () => bridge.taxes.agencies()],
+    ['taxes.rates', () => bridge.taxes.rates()],
+    ['taxes.codes', () => bridge.taxes.codes()],
+    ['collaboration.attachments', () => bridge.collaboration.attachments('invoice', 'i1')],
+    ['collaboration.attachmentCounts', () => bridge.collaboration.attachmentCounts('invoice', ['i1'])],
+    ['collaboration.comments', () => bridge.collaboration.comments('invoice', 'i1')],
+    ['bankRules.fetch', () => bridge.bankRules.fetch(q)],
+    ['bankRules.getById', () => bridge.bankRules.getById('r1')],
+    ['statements.get', () => bridge.statements.get('customer' as never, 'c1', {} as never)],
+    ['statements.dunning', () => bridge.statements.dunning('customer' as never)],
+    ['taxReturns.forms', () => bridge.taxReturns.forms()],
+    ['taxReturns.get', () => bridge.taxReturns.get('CA', 'GST34', '2026-01-01', '2026-03-31')],
+    ['recurring.fetch', () => bridge.recurring.fetch(q)],
+    ['recurring.getById', () => bridge.recurring.getById('t1')],
+    ['recurring.preview', () => bridge.recurring.preview('t1', 6)],
+    ['recurring.previewSchedule', () => bridge.recurring.previewSchedule({} as never, 6)],
+    ['recurring.runs', () => bridge.recurring.runs({} as never)],
+    ['estimates.fetch', () => bridge.estimates.fetch(q)],
+    ['purchaseOrders.getById', () => bridge.purchaseOrders.getById('p1')],
+    ['invoices.fetch', () => bridge.invoices.fetch(q)],
+    ['invoices.getById', () => bridge.invoices.getById('i1')],
+    ['creditMemos.getById', () => bridge.creditMemos.getById('m1')],
+    ['deposits.undeposited', () => bridge.deposits.undeposited({} as never)],
+    ['reconciliations.fetch', () => bridge.reconciliations.fetch(q)],
+    ['reconciliations.getById', () => bridge.reconciliations.getById('r1')],
+    ['revaluations.preview', () => bridge.revaluations.preview({} as never)],
+    ['settlements.applications', () => bridge.settlements.applications('PaymentEntry' as never, 'p1')],
+    ['settlements.openDocuments', () => bridge.settlements.openDocuments('Customer' as never, 'c1')],
+    ['bankAccounts.capabilities', () => bridge.bankAccounts.capabilities()],
+    ['bankAccounts.fetch', () => bridge.bankAccounts.fetch(q)],
+    ['bankAccounts.getById', () => bridge.bankAccounts.getById('b1')],
+    ['partyBankAccounts.byParty', () => bridge.partyBankAccounts.byParty('Vendor' as never, 'v1')],
+    ['bankFeed.transactions', () => bridge.bankFeed.transactions(q)],
+    ['bankFeed.candidates', () => bridge.bankFeed.candidates('t1')],
+    ['bankFeed.batches', () => bridge.bankFeed.batches(q)],
+    ['checks.queue', () => bridge.checks.queue('b1')],
+    ['checks.fetch', () => bridge.checks.fetch(q)],
+    ['eftBatches.queue', () => bridge.eftBatches.queue()],
+    ['eftBatches.fetch', () => bridge.eftBatches.fetch(q)],
+    ['eftBatches.getById', () => bridge.eftBatches.getById('e1')],
+    ['receipts.fetch', () => bridge.receipts.fetch(q)],
+    ['receipts.getById', () => bridge.receipts.getById('r1')],
+  ]
+
+  it.each(reads)('%s rejects with the server reason instead of answering empty', async (_name, call) => {
+    await expect(call()).rejects.toThrow(READ_REFUSAL)
+  })
+
+  it('checks.templates still answers empty when the rendering module is absent (501 is a deployment fact)', async () => {
+    await expect(bridge.checks.templates()).resolves.toEqual([])
+  })
+
+  it('a successful answer with no body is still an empty list, not a TypeError', async () => {
+    const empty = createFinanceBridge({ client: emptyBodyClient() })
+    await expect(empty.customers.fetch(q)).resolves.toMatchObject({ items: [], totalCount: 0 })
+    await expect(empty.invoices.fetch(q)).resolves.toMatchObject({ items: [], totalCount: 0 })
+    await expect(empty.settlements.openDocuments('Customer' as never, 'c1')).resolves.toEqual([])
+    await expect(empty.checks.queue('b1')).resolves.toEqual([])
+  })
+
+  it('no read in the bridge goes through the unchecked unwrap', () => {
+    const src = readFileSync(join(__dirname, '../../../src/services/bridges/finance-bridge.ts'), 'utf8')
+    expect(src).not.toMatch(/\bunwrap(Result|Unchecked)?\s*[<(]/)
   })
 })

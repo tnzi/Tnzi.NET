@@ -12,7 +12,7 @@
       :value="fmt(overdue)"
       :animated="false"
       icon="mdi:clock-alert-outline"
-      :tone="overdue > 0 ? 'error' : 'success'"
+      :tone="overdue === null ? 'default' : overdue > 0 ? 'error' : 'success'"
       :to="reportTarget"
     />
     <TKpiCard
@@ -42,7 +42,7 @@
 import { computed, onMounted, ref } from 'vue'
 import TKpiRow from '../../../components/data/TKpiRow.vue'
 import TKpiCard from '../../../components/data/TKpiCard.vue'
-import { formatMoney } from '../../../utils/finance-format'
+import { formatMoney, tsToIsoDate } from '../../../utils/finance-format'
 import type { AgingBucketsDto, FinanceBridge } from '../../../services/bridges/finance-bridge'
 
 const props = defineProps<{
@@ -57,8 +57,11 @@ const totals = ref<AgingBucketsDto | null>(null)
 const partyCount = ref<number | null>(null)
 const currency = ref<string | undefined>(undefined)
 
-/** 逾期 = 合计 − 未到期。不写死桶名，账龄分桶已参数化。 */
-const overdue = computed(() => (totals.value ? totals.value.total - totals.value.current : 0))
+/**
+ * 逾期 = 合计 − 未到期。不写死桶名，账龄分桶已参数化。
+ * 读失败为 null（显示占位符、中性色）：0 加成功色是在断言「没有逾期」，而这一条没读到。
+ */
+const overdue = computed(() => (totals.value ? totals.value.total - totals.value.current : null))
 
 // 按路由名而非路径字面量：`defineAdminApp({ basePath })` 会重写前缀，
 // 写死 `/admin/...` 的目标在自定义前缀下会落到 404。
@@ -71,7 +74,8 @@ const fmt = (v?: number | null) => formatMoney(v, { currency: currency.value })
 
 onMounted(async () => {
   try {
-    const asOf = new Date().toISOString().slice(0, 10)
+    // 本地日历日：toISOString 在美洲傍晚已是 UTC 的明天。
+    const asOf = tsToIsoDate(Date.now())
     const report = props.kind === 'ar'
       ? await props.bridge.reports.arAging(asOf)
       : await props.bridge.reports.apAging(asOf)

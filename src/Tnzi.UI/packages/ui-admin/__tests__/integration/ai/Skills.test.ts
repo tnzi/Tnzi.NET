@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { EMPTY_DASH } from '../../../src/utils/placeholders'
 
 /**
  * Skills integration test - production-grade card grid (TCardPage) with a KPI
@@ -88,6 +89,7 @@ const getBySlug = vi.fn(async (slug: string) => ({
   parameters: [],
   creationTime: '2026-04-01T00:00:00Z',
 }))
+const skillUpdate = vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) }))
 const activate = vi.fn(async () => undefined)
 const deactivate = vi.fn(async () => undefined)
 const getSkills = vi.fn(async () => [])
@@ -99,7 +101,7 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
     skills: {
       fetch: skillFetch,
       create: vi.fn(async (data: unknown) => ({ id: 's3', ...(data as object) })),
-      update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
+      update: skillUpdate,
       delete: vi.fn(async () => undefined),
       activate,
       deactivate,
@@ -216,6 +218,14 @@ describe('Skills page (production-grade card grid)', () => {
     expect(wrapper.text()).toContain('271')
   })
 
+  it('★ catalog statistics that could not be read show dashes, not zeros', async () => {
+    getUsageStats.mockRejectedValueOnce(new Error('Forbidden'))
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const values = wrapper.findAll('.ai-skills-kpi .t-stat-card__value').map((v) => v.text())
+    expect(values).toEqual([EMPTY_DASH, EMPTY_DASH, EMPTY_DASH, EMPTY_DASH])
+  })
+
   it('toggleEnabled calls deactivate for an enabled skill', async () => {
     const wrapper = mount(Skills, { global: { stubs } })
     await flushPromises()
@@ -237,6 +247,49 @@ describe('Skills page (production-grade card grid)', () => {
     await vm.toggleEnabled({ id: 's2', enabled: false })
     await flushPromises()
     expect(activate).toHaveBeenCalledWith('s2')
+  })
+
+  // The list switches go through the batch endpoints, which never touch a
+  // System-scope row and have no row behind a file-source skill (its SKILL.md
+  // decides whether it is enabled, and its card carries an empty id): the click
+  // used to toast "Skill deactivated" over a skill that stayed enabled.
+  it('★ offers the on/off switch and delete only on skills the list can change', async () => {
+    skillFetch.mockResolvedValueOnce({
+      items: [
+        { id: 's1', slug: 'mine', scope: 'User', name: 'Mine', enabled: true, source: 1, isReadOnly: false, tags: [], creationTime: '2026-04-01T00:00:00Z' },
+        { id: 's9', slug: 'shared', scope: 'System', name: 'Shared', enabled: true, source: 1, isReadOnly: false, tags: [], creationTime: '2026-04-01T00:00:00Z' },
+        { id: '00000000-0000-0000-0000-000000000000', slug: 'on-disk', scope: 2, name: 'On Disk', enabled: true, source: 0, isReadOnly: true, tags: [], creationTime: '2026-04-01T00:00:00Z' },
+      ],
+      totalCount: 3,
+      pageIndex: 1,
+      pageSize: 20,
+    } as never)
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+
+    const cards = wrapper.findAll('.t-entity-card')
+    expect(cards).toHaveLength(3)
+    const buttons = (i: number) => cards[i]!.findAll('button').map((b) => b.text())
+    expect(buttons(0)).toContain('Deactivate')
+    expect(buttons(1)).not.toContain('Deactivate')
+    expect(buttons(2)).not.toContain('Deactivate')
+    // Only the user's own DB row gets a delete confirmation.
+    expect(wrapper.findAllComponents({ name: 'Popconfirm' })).toHaveLength(1)
+  })
+
+  it('a refused switch reports the reason instead of a success toast', async () => {
+    toast.error.mockClear()
+    toast.success.mockClear()
+    deactivate.mockRejectedValueOnce(new Error('The skill was not changed.'))
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      toggleEnabled: (s: { id: string; enabled: boolean }) => Promise<void>
+    }
+    await vm.toggleEnabled({ id: 's1', enabled: true })
+    await flushPromises()
+    expect(toast.error).toHaveBeenCalledWith('The skill was not changed.')
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('opening the view state loads full content via getBySlug', async () => {
@@ -357,5 +410,141 @@ describe('Skills page - agents that depend on a skill', () => {
 
     expect(confirm.text()).toContain('Could not check which agents use this (timeout)')
     expect(confirm.text()).not.toContain('No agent has an active grant')
+  })
+})
+
+/**
+ * The list row is a SkillSummaryDto: it has no `content`. Opening edit on it
+ * showed the required SKILL.md body empty, so Save was refused until the
+ * operator typed something, and whatever they typed replaced the stored body.
+ * Slug and scope were editable too, though the update contract carries neither.
+ */
+describe('Skills page - editing keeps the stored SKILL.md body', () => {
+  const STORED_BODY = '# Write Blog Post\n\nFull SKILL.md body…'
+  const row = {
+    id: 's1',
+    slug: 'write-blog-post',
+    scope: 'User',
+    name: 'Write Blog Post',
+    description: 'Generates a blog post outline',
+    whenToUse: 'When drafting long-form content',
+    tags: ['writing', 'content'],
+    priority: 100,
+    enabled: true,
+    source: 1,
+    isReadOnly: false,
+    creationTime: '2026-04-01T00:00:00Z',
+  }
+
+  type EditVm = {
+    crud: {
+      openEdit: (s: typeof row) => void
+      submit: () => Promise<unknown>
+      formModal: { visible: { value: boolean }; mode: { value: string | null }; formData: { value: Record<string, unknown> | null } }
+    }
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getBySlug.mockClear()
+    skillUpdate.mockClear()
+    toast.warning.mockClear()
+  })
+
+  function schemaKeys(wrapper: ReturnType<typeof mount>): string[] {
+    const form = wrapper.findComponent({ name: 'TFormSchemaRenderer' })
+    return (form.props('schema') as Array<{ key: string }>).map((f) => f.key)
+  }
+
+  it('★ fills the edit form with the stored body', async () => {
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+    vm.crud.openEdit(row)
+    await flushPromises()
+    expect(getBySlug).toHaveBeenCalledWith('write-blog-post')
+    expect(vm.crud.formModal.formData.value?.content).toBe(STORED_BODY)
+  })
+
+  it('★ renaming a skill sends the stored body back, not a blank or retyped one', async () => {
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+    vm.crud.openEdit(row)
+    await flushPromises()
+    vm.crud.formModal.formData.value!.name = 'Write Blog Post (v2)'
+    await vm.crud.submit()
+    expect(skillUpdate).toHaveBeenCalledTimes(1)
+    const [id, payload] = skillUpdate.mock.calls[0] as [string, Record<string, unknown>]
+    expect(id).toBe('s1')
+    expect(payload.name).toBe('Write Blog Post (v2)')
+    expect(payload.content).toBe(STORED_BODY)
+  })
+
+  it('★ does not offer slug or scope on edit (the update contract carries neither)', async () => {
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.vm as unknown as EditVm).crud.openEdit(row)
+    await flushPromises()
+    const keys = schemaKeys(wrapper)
+    expect(keys).not.toContain('slug')
+    expect(keys).not.toContain('scope')
+    expect(keys).toContain('content')
+  })
+
+  it('still offers slug and scope on create', async () => {
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.vm as unknown as { crud: { openCreate: () => void } }).crud.openCreate()
+    await flushPromises()
+    expect(schemaKeys(wrapper)).toEqual(expect.arrayContaining(['slug', 'scope', 'content']))
+  })
+
+  it('★ a body that cannot be loaded is left out of the edit, never sent blank', async () => {
+    getBySlug.mockRejectedValueOnce(new Error('timeout'))
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+    vm.crud.openEdit(row)
+    await flushPromises()
+
+    expect(schemaKeys(wrapper)).not.toContain('content')
+    expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('could not be loaded'))
+    vm.crud.formModal.formData.value!.description = 'Fixed a typo'
+    await vm.crud.submit()
+    const payload = skillUpdate.mock.calls[0]![1] as Record<string, unknown>
+    expect(payload.description).toBe('Fixed a typo')
+    // Absent, so the server keeps the body it has.
+    expect('content' in payload).toBe(false)
+  })
+
+  it('★ a slug that resolves to a different skill does not supply the body', async () => {
+    // A file-source or higher-precedence definition can shadow this row's slug:
+    // its body must not be written over this row's.
+    getBySlug.mockResolvedValueOnce({
+      id: 'someone-else',
+      slug: 'write-blog-post',
+      scope: 'System',
+      name: 'Write Blog Post',
+      content: 'A DIFFERENT SKILL BODY',
+      whenToUse: '',
+      tags: [],
+      priority: 1,
+      enabled: true,
+      source: 0,
+      parameters: [],
+      creationTime: '2026-04-01T00:00:00Z',
+    })
+    const wrapper = mount(Skills, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+    vm.crud.openEdit(row)
+    await flushPromises()
+
+    expect(vm.crud.formModal.formData.value?.content).toBeUndefined()
+    expect(schemaKeys(wrapper)).not.toContain('content')
+    await vm.crud.submit()
+    const payload = skillUpdate.mock.calls[0]![1] as Record<string, unknown>
+    expect('content' in payload).toBe(false)
   })
 })

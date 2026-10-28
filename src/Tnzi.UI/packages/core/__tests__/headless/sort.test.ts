@@ -217,3 +217,39 @@ describe('SortController', () => {
     });
   });
 });
+
+describe('SortController - long direction spellings', () => {
+  it('stores a descending sort as desc and requests it descending', () => {
+    const s = new SortController();
+    s.setSort('createdAt', 'descending');
+    expect(s.sortDirection).toBe('desc');
+    expect(s.isDescending).toBe(true);
+    expect(s.getFieldDirection('createdAt')).toBe('desc');
+    expect(s.toQuery()).toEqual({ sortBy: 'createdAt', sortDescending: true });
+  });
+
+  it('stores an ascending sort as asc', () => {
+    const s = new SortController();
+    s.setSort('name', 'ascending');
+    expect(s.sortDirection).toBe('asc');
+    expect(s.isAscending).toBe(true);
+    expect(s.toQuery()).toEqual({ sortBy: 'name', sortDescending: false });
+  });
+
+  it('folds a long default direction so the first toggle reverses it', () => {
+    const s = new SortController({ defaultField: 'name', defaultDirection: 'ascending' });
+    expect(s.sortDirection).toBe('asc');
+    s.toggle('name');
+    expect(s.sortDirection).toBe('desc');
+  });
+
+  it('folds the long form in multiple mode too', () => {
+    const s = new SortController({ multiple: true });
+    s.setSort('a', 'descending');
+    s.setSort('b', 'ascending');
+    expect(s.sortFields).toEqual([
+      { field: 'a', direction: 'desc' },
+      { field: 'b', direction: 'asc' },
+    ]);
+  });
+});

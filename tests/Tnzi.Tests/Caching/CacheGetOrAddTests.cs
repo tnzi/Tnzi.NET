@@ -1,3 +1,5 @@
+using Tnzi.Services;
+
 namespace Tnzi.Tests.Caching;
 
 /// <summary>
@@ -100,5 +102,27 @@ public class CacheGetOrAddTests
         var hit = await _cache.TryGetAsync<int>("present");
         Assert.True(hit.Found);
         Assert.Equal(0, hit.Value);
+    }
+
+    /// <summary>
+    /// 经 <c>GetOrAddAsync</c> 的一次未命中只记一次 miss、一次命中只记一次 hit。
+    /// 默认接口实现在拿到锁后的复查里又计了一次，命中率被低估（真实 50% 显示约 33%）。
+    /// </summary>
+    [Fact]
+    public async Task GetOrAddAsync_RecordsOneMissForAMiss_AndOneHitForAHit()
+    {
+        var monitor = new Mock<IPerformanceMonitorService>();
+        var services = new ServiceCollection().AddSingleton(monitor.Object).BuildServiceProvider();
+        ICache cache = new MemoryCacheService(
+            new MemoryCache(new MemoryCacheOptions()),
+            Mock.Of<ILogger<MemoryCacheService>>(),
+            Microsoft.Extensions.Options.Options.Create(new CachingOptions()),
+            services);
+
+        await cache.GetOrAddAsync("metered", () => Task.FromResult(1));
+        await cache.GetOrAddAsync("metered", () => Task.FromResult(2));
+
+        monitor.Verify(m => m.RecordCacheMiss("metered"), Times.Once);
+        monitor.Verify(m => m.RecordCacheHit("metered"), Times.Once);
     }
 }

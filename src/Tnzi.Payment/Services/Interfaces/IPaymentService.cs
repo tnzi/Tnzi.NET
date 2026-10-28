@@ -51,9 +51,12 @@ public interface IPaymentService
     Task<Result<int>> CloseExpiredPaymentsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// off-session 自动扣款（后台续费/试用转正调用）。
-    /// 成功时落地一笔 Succeeded 支付并发布 <see cref="Events.PaymentCompletedEvent"/>；
-    /// 失败时落地一笔 Failed 支付并发布 <see cref="Events.PaymentFailedEvent"/>，由订阅状态机据此推进/降级。
+    /// off-session 自动扣款（后台续费/试用转正调用）。三种结果：
+    /// 渠道当场收款 → 落地一笔 Succeeded 支付并发布 <see cref="Events.PaymentCompletedEvent"/>，返回成功、<c>Status = Succeeded</c>；
+    /// 渠道明确拒付 → 落地一笔 Failed 支付并发布 <see cref="Events.PaymentFailedEvent"/>，返回失败；
+    /// ★ <b>结果未落定</b>（渠道回报处理中，或调用异常 / 渠道返回失败、请求是否到达渠道无从得知）→ 支付保持 Processing、
+    /// <b>不发任何事件</b>，返回成功、<c>Status = Processing</c>：钱可能还在路上，调用方不能当它已付，也不能换一笔再扣，
+    /// 等渠道回调落定，或到 <c>ExpireTime</c> 由过期清扫核实后发完成 / 过期事件。
     /// ★ 例外：建单之前就被拒绝（金额非正、无支付方式、渠道不可用或不支持、计税失败）时<b>没有支付记录也没有事件</b>，
     /// 返回的失败带 <c>ErrorCode = </c><see cref="ErrorCodes.PaymentOffSessionNotAttempted"/>，调用方须自己收口。
     /// </summary>

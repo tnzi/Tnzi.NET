@@ -232,10 +232,144 @@ public class CliAgentOptionsValidatorTests
         {
             Enabled = false,
             MaxConcurrentRuns = 0,
-            LeaseDuration = TimeSpan.Zero
+            LeaseDuration = TimeSpan.Zero,
+            ProbeInterval = TimeSpan.Zero,
+            ToolWatchdog = TimeSpan.Zero,
+            Gc = { ArtifactTtl = TimeSpan.Zero },
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = ["*"], TokenLifetime = TimeSpan.Zero }
         };
 
         Validate(options).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Enabled_TheDefaultsPass()
+    {
+        // 正控制：下面几条「拒绝」的断言不是因为什么都拒绝才成立的
+        Validate(new CliAgentOptions { Enabled = true, WorkspacesRoot = Path.GetTempPath() }).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("ProbeInterval")]
+    [InlineData("ToolWatchdog")]
+    [InlineData("Gc:ArtifactTtl")]
+    public void Enabled_RejectsANonPositiveTiming(string setting)
+    {
+        // 零或负数的探测间隔让探测循环要么不停拉起进程、要么异常退出；工具看门狗为零时每次工具调用都在下一刻度被判超时；
+        // 产物期限为零时每轮回收都把每个终态工作区的可再生目录删一遍。
+        foreach (var value in new[] { TimeSpan.Zero, TimeSpan.FromSeconds(-5) })
+        {
+            var options = new CliAgentOptions { Enabled = true, WorkspacesRoot = Path.GetTempPath() };
+            switch (setting)
+            {
+                case "ProbeInterval": options.ProbeInterval = value; break;
+                case "ToolWatchdog": options.ToolWatchdog = value; break;
+                default: options.Gc.ArtifactTtl = value; break;
+            }
+
+            Validate(options).ShouldContain(e => e.Contains($"AI:Cli:{setting}"));
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("/mcp")]
+    [InlineData("api.example.com/mcp")]
+    [InlineData("ftp://api.example.com/mcp")]
+    public void Enabled_WriteBackWithoutAnAbsoluteHttpEndpoint_Fails(string? endpoint)
+    {
+        // 此前只在每次运行时记一条 Warning：开关是开着的，agent 手里却从来没有回写通道。
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = ["*"], McpEndpoint = endpoint }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:McpEndpoint"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackWithAnAbsoluteEndpointAndALifetime_Passes()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions { Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp" }
+        };
+
+        Validate(options).ShouldNotContain(e => e.Contains("AI:Cli:WriteBack"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackWithANonPositiveTokenLifetime_Fails()
+    {
+        // 签发出来的凭据当场过期，每一次回写调用都被拒。
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions
+            {
+                Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp", TokenLifetime = TimeSpan.Zero
+            }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:TokenLifetime"));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Enabled_WriteBackWithANonPositiveToolCallTimeout_Fails(int seconds)
+    {
+        // claude 不认 1 秒以下的值，配了等于没配，而配置看上去是改过的
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions
+            {
+                Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp",
+                ToolCallTimeout = TimeSpan.FromSeconds(seconds)
+            }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:ToolCallTimeout"));
+    }
+
+    [Theory]
+    [InlineData(30)]
+    [InlineData(45)]
+    public void Enabled_WriteBackWithAToolCallTimeoutNotShorterThanTheToolWatchdog_Fails(int minutes)
+    {
+        // 工具看门狗从工具开始起算，先到点就判整次运行超时：比它长的单次调用上限永远轮不到生效
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            ToolWatchdog = TimeSpan.FromMinutes(30),
+            WriteBack = new CliWriteBackOptions
+            {
+                Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp",
+                ToolCallTimeout = TimeSpan.FromMinutes(minutes)
+            }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("AI:Cli:WriteBack:ToolCallTimeout") && e.Contains("ToolWatchdog"));
+    }
+
+    [Fact]
+    public void Enabled_WriteBackWithAToolCallTimeoutShorterThanTheToolWatchdog_Passes()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            WriteBack = new CliWriteBackOptions
+            {
+                Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp",
+                ToolCallTimeout = TimeSpan.FromMinutes(15)
+            }
+        };
+
+        Validate(options).ShouldNotContain(e => e.Contains("ToolCallTimeout"));
     }
 
     [Fact]
@@ -341,6 +475,102 @@ public class CliAgentOptionsValidatorTests
         };
 
         Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("IsolatedConfigDirectory"));
+    }
+
+    [Fact]
+    public void Enabled_RejectsPerWorkspaceConfigDirectoryOnAProviderThatCannotRelocateIt()
+    {
+        var options = new CliAgentOptions
+        {
+            Enabled = true,
+            Providers = { ["kimi"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory } }
+        };
+
+        Validate(options).ShouldContain(e => e.Contains("'kimi'") && e.Contains("PerWorkspaceConfigDirectory"));
+    }
+
+    /// <summary>每工作区配置目录里永远没有存储的登录：看不出任何令牌来源时告警（只告警，凭据可能来自校验器看不到的地方）。</summary>
+    [Fact]
+    public void PerWorkspaceConfigDirectory_WithoutAnyVisibleCredential_Warns()
+    {
+        var options = PerWorkspaceClaude();
+
+        Warnings(options).ShouldContain(w => w.Contains("'claude'") && w.Contains("stored sign-in"));
+        Validate(options).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("CLAUDE_CODE_OAUTH_TOKEN")]
+    [InlineData("ANTHROPIC_API_KEY")]
+    public void PerWorkspaceConfigDirectory_WithAWhitelistedCredential_DoesNotWarn(string variable)
+    {
+        var options = PerWorkspaceClaude();
+        options.EnvironmentWhitelist.Add(variable);
+
+        Warnings(options).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void PerWorkspaceConfigDirectory_WithAFallbackToken_DoesNotWarn()
+    {
+        var options = PerWorkspaceClaude();
+        options.Providers["claude"].FallbackAuthToken = "token";
+
+        Warnings(options).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ConfigDirectory_WithAnotherIsolationTier_WarnsThatItIsIgnored()
+    {
+        var options = PerWorkspaceClaude();
+        options.Providers["claude"].FallbackAuthToken = "token";
+        options.Providers["claude"].ConfigDirectory = "/srv/claude-home";
+
+        Warnings(options).ShouldContain(w => w.Contains("ConfigDirectory") && w.Contains("ignored"));
+    }
+
+    /// <summary>claude 把回写条目上低于 60 秒的 timeout 抬到 60 秒（实测）：配了也缩短不了，只告警，别的 CLI 可能认。</summary>
+    [Fact]
+    public void WriteBack_ToolCallTimeoutBelowSixtySeconds_WarnsThatClaudeIgnoresIt()
+    {
+        var options = WriteBackWithToolCallTimeout(TimeSpan.FromSeconds(30));
+
+        Warnings(options).ShouldContain(w => w.Contains("AI:Cli:WriteBack:ToolCallTimeout") && w.Contains("60 seconds"));
+        Validate(options).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void WriteBack_ToolCallTimeoutOfSixtySecondsOrMore_DoesNotWarn()
+    {
+        Warnings(WriteBackWithToolCallTimeout(TimeSpan.FromSeconds(60))).ShouldBeEmpty();
+        Warnings(WriteBackWithToolCallTimeout(TimeSpan.FromMinutes(15))).ShouldBeEmpty();
+    }
+
+    private static CliAgentOptions WriteBackWithToolCallTimeout(TimeSpan timeout) => new()
+    {
+        Enabled = true,
+        WriteBack = new CliWriteBackOptions
+        {
+            Enabled = true, AllowedTools = ["*"], McpEndpoint = "https://api.example.com/mcp", ToolCallTimeout = timeout
+        }
+    };
+
+    private static CliAgentOptions PerWorkspaceClaude() => new()
+    {
+        Enabled = true,
+        Providers = { ["claude"] = new CliProviderOptions { UserConfigIsolation = CliUserConfigIsolation.PerWorkspaceConfigDirectory } }
+    };
+
+    private static List<string> Warnings(CliAgentOptions options) => new WarningProbe().Collect(options);
+
+    private sealed class WarningProbe : CliAgentOptionsValidator
+    {
+        public List<string> Collect(CliAgentOptions options)
+        {
+            var warnings = new List<string>();
+            CollectWarnings(options, warnings);
+            return warnings;
+        }
     }
 
     [Fact]

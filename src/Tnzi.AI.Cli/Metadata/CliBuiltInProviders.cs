@@ -29,6 +29,10 @@ public static class CliBuiltInProviders
         // CLI 会收到两个互相冲突的值，而哪个生效取决于 CLI 内部的解析顺序。
         ["--effort"] = BlockedArgMode.WithValue,
         ["--resume"] = BlockedArgMode.WithValue,
+        // 截断续接由框架按线程里的消息决定（编辑、重新生成），用户参数改写它会让会话与线程对不上
+        ["--resume-session-at"] = BlockedArgMode.WithValue,
+        ["--resume-drops-turn"] = BlockedArgMode.WithValue,
+        ["--fork-session"] = BlockedArgMode.Standalone,
         ["--model"] = BlockedArgMode.WithValue
     };
 
@@ -64,7 +68,24 @@ public static class CliBuiltInProviders
                 AuthStatusArgs = ["auth", "status", "--json"],
                 AuthTokenEnvironmentVariable = "CLAUDE_CODE_OAUTH_TOKEN",
                 ExcludeUserSettingsArgs = ["--setting-sources", "project,local"],
-                ConfigDirectoryEnvironmentVariable = "CLAUDE_CONFIG_DIR"
+                ConfigDirectoryEnvironmentVariable = "CLAUDE_CONFIG_DIR",
+                // 以下按 2.1.308 实测：项目目录名固定后，记录在 <配置目录>/projects/<名字>/<会话 id>.jsonl，
+                // 两个 worktree 共用一份、--resume 能续上；--append-system-prompt-file 在 stream-json 输入下生效；
+                // --add-dir 目录里的技能照常加载；--setting-sources user 加 --settings 交回去的仓库设置，权限规则照样生效。
+                // 与 .jsonl 同名的目录是 CLI 为单个会话另存内容（子 agent 的记录等）的位置，实测的简单轮次里没出现，不存在就跳过。
+                ProjectDirectoryNameEnvironmentVariable = "CLAUDE_CODE_PROJECT_DIR_NAME",
+                SessionStorePaths = ["projects/{project}/{session}.jsonl", "projects/{project}/{session}"],
+                AppendSystemPromptFileArg = "--append-system-prompt-file",
+                AddDirectoryArg = "--add-dir",
+                BuiltInToolsArg = "--tools",
+                SettingSourcesArg = "--setting-sources",
+                SettingsArg = "--settings",
+                SessionRetentionSettingName = "cleanupPeriodDays",
+                // 实测（2.1.303）：stream-json 输入的 user 消息接受 image（base64 source）与 document（base64 PDF）内容块，
+                // 模型读得到；--resume <会话> --resume-session-at <条目 uuid> --fork-session 分叉出只含该条目之前对话的新会话，
+                // 原会话不变。两者都有真机冒烟测试守着（ClaudeStreamJsonSmokeTests）。
+                AcceptsAttachments = true,
+                SupportsResumeAtEntry = true
             },
             new CliProviderDescriptor
             {
@@ -130,6 +151,8 @@ public static class CliBuiltInProviders
                 Protocol = CliAgentProtocol.Acp,
                 DefaultExecutable = "qodercli",
                 LaunchArgs = ["--yolo", "--acp"],
+                // 权限档位不是全权时不带 --yolo：带着它 CLI 从不请求权限，档位落不到应答上
+                LaunchArgsWithoutAutoApproval = ["--acp"],
                 BriefFileName = "AGENTS.md",
                 SkillsRelativePath = ".qoder/skills",
                 LaunchHeader = "qodercli --acp",
@@ -154,6 +177,7 @@ public static class CliBuiltInProviders
                 Protocol = CliAgentProtocol.Acp,
                 DefaultExecutable = "grok",
                 LaunchArgs = ["agent", "--always-approve", "stdio"],
+                LaunchArgsWithoutAutoApproval = ["agent", "stdio"],
                 BriefFileName = "AGENTS.md",
                 LaunchHeader = "grok agent stdio",
                 BlockedArgs = AcpBlockedArgs

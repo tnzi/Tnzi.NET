@@ -9,6 +9,7 @@ public partial class SkillService : ApplicationService, ISkillService
     private static partial Regex SlugPattern();
 
     private readonly IRepository<SkillEntity, Guid> _repository;
+    private readonly IRepository<SkillCategory, Guid> _categoryRepository;
     private readonly ISkillRegistry _registry;
     private readonly ISkillTemplateEngine _templateEngine;
     private readonly FileSystemSkillStore _fileStore;
@@ -18,6 +19,7 @@ public partial class SkillService : ApplicationService, ISkillService
     public SkillService(
         IServiceProvider serviceProvider,
         IRepository<SkillEntity, Guid> repository,
+        IRepository<SkillCategory, Guid> categoryRepository,
         ISkillRegistry registry,
         ISkillTemplateEngine templateEngine,
         FileSystemSkillStore fileStore,
@@ -26,6 +28,7 @@ public partial class SkillService : ApplicationService, ISkillService
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
+        _categoryRepository = Check.NotNull(categoryRepository);
         _registry = Check.NotNull(registry);
         _templateEngine = Check.NotNull(templateEngine);
         _fileStore = Check.NotNull(fileStore);
@@ -97,16 +100,15 @@ public partial class SkillService : ApplicationService, ISkillService
     /// </list>
     /// </summary>
     private IQueryable<SkillEntity> ApplyTenantVisibility(IQueryable<SkillEntity> query)
-    {
-        var tenantId = _currentTenant?.Id;
-        if (tenantId == null)
-            return query; // single-tenant: no additional filter
+        => SkillVisibility.ForTenant(query, _currentTenant?.Id);
 
-        return query.Where(e =>
-            e.Scope == SkillScope.System ||
-            (e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
-            (e.Scope == SkillScope.User && e.TenantId == tenantId));
-    }
+    /// <summary>
+    /// 写进技能的分类必须存在且对调用者可见（<see cref="SkillCategory"/> 是多租户实体，仓储按当前租户过滤）。
+    /// ★ 此前原样写入调用者给的 Id，外键只证明「库里某处有这个分类」：别的租户的用户把自己的个人技能挂到本租户的分类下，
+    /// 它就出现在本租户管理员的分类视图里，还让这个分类再也删不掉（删除前查到挂着技能，而本租户看不见那一行）。
+    /// </summary>
+    private async Task<bool> CategoryIsVisibleAsync(Guid categoryId)
+        => await _categoryRepository.AnyAsync(c => c.Id == categoryId);
 
     public async Task<Result<List<SkillSummaryDto>>> GetAvailableAsync()
     {
@@ -165,6 +167,11 @@ public partial class SkillService : ApplicationService, ISkillService
         if (skill == null)
             return Fail<SkillActivationResult>("Skill not found.", 404, ErrorCodes.SkillNotFound);
 
+        // 与 GetBySlugAsync 同一道闸：激活返回渲染后的完整正文，比详情暴露得更多。404 不 403，不确认 slug 存在；
+        // 也排在启用检查之前，停用的内部技能同样不该答出「已停用」。
+        if (skill.IsInternal && !await HasManagePermissionAsync(SkillViewPermission))
+            return Fail<SkillActivationResult>("Skill not found.", 404, ErrorCodes.SkillNotFound);
+
         if (!skill.Enabled)
             return Fail<SkillActivationResult>("Skill is disabled.", 400, ErrorCodes.SkillDisabled);
 
@@ -173,7 +180,18 @@ public partial class SkillService : ApplicationService, ISkillService
         {
             var validation = _requirementsValidator.ValidateRequirements(skill);
             if (!validation.IsValid)
-                return Fail<SkillActivationResult>($"Skill requirements not met: {validation.GetFailureReason()}", 400, ErrorCodes.SkillActivationFailed);
+            {
+                // The missing list names configuration keys, environment variables and programs
+                // of the host. Administrators get it; everyone else gets the fact, and the detail
+                // goes to the server log.
+                var reason = validation.GetFailureReason();
+                if (await HasManagePermissionAsync(SkillViewPermission))
+                    return Fail<SkillActivationResult>($"Skill requirements not met: {reason}", 400, ErrorCodes.SkillActivationFailed);
+
+                Logger.LogWarning("Skill {Slug} ({Scope}) requirements not met for user {UserId}: {Reason}",
+                    skill.Slug, skill.Scope, CurrentUser?.Id, reason);
+                return Fail<SkillActivationResult>("Skill requirements not met.", 400, ErrorCodes.SkillActivationFailed);
+            }
         }
 
         var renderResult = _templateEngine.Render(skill, parameters);
@@ -223,6 +241,13 @@ public partial class SkillService : ApplicationService, ISkillService
         // Validate slug format
         if (string.IsNullOrWhiteSpace(input.Slug) || input.Slug.Length > 64 || !SlugPattern().IsMatch(input.Slug))
             return Fail<SkillDetailDto>("Slug must be 1-64 lowercase letters, digits, or hyphens (cannot start or end with a hyphen).", 400, ErrorCodes.SkillInvalidSlug);
+
+        var requirementsError = SkillRequirementRules.Validate(input.Requirements, input.Scope);
+        if (requirementsError != null)
+            return Fail<SkillDetailDto>(requirementsError, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
+
+        if (input.CategoryId.HasValue && !await CategoryIsVisibleAsync(input.CategoryId.Value))
+            return Fail<SkillDetailDto>("Skill category not found.", 404, ErrorCodes.SkillCategoryNotFound);
 
         // Check slug doesn't conflict with system (FileSystem) skills
         var systemSkill = await _fileStore.GetBySlugAsync(input.Slug);
@@ -278,7 +303,7 @@ public partial class SkillService : ApplicationService, ISkillService
 
         await _repository.InsertAsync(entity);
 
-        _registry.InvalidateCache();
+        _registry.InvalidateDatabaseSkills();
 
         return Ok(MapEntityToDetailDto(entity));
     }
@@ -319,6 +344,13 @@ public partial class SkillService : ApplicationService, ISkillService
                 return Fail<SkillDetailDto>("Access denied.", 403, ErrorCodes.SkillUnauthorized);
         }
 
+        var requirementsError = SkillRequirementRules.Validate(input.Requirements, entity.Scope);
+        if (requirementsError != null)
+            return Fail<SkillDetailDto>(requirementsError, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
+
+        if (input.CategoryId.HasValue && input.CategoryId != entity.CategoryId && !await CategoryIsVisibleAsync(input.CategoryId.Value))
+            return Fail<SkillDetailDto>("Skill category not found.", 404, ErrorCodes.SkillCategoryNotFound);
+
         if (input.Name != null) entity.Name = input.Name;
         if (input.Description != null) entity.Description = input.Description;
         if (input.Content != null) entity.Content = input.Content;
@@ -337,7 +369,7 @@ public partial class SkillService : ApplicationService, ISkillService
 
         await _repository.UpdateAsync(entity);
 
-        _registry.InvalidateCache();
+        _registry.InvalidateDatabaseSkills();
 
         return Ok(MapEntityToDetailDto(entity));
     }
@@ -373,24 +405,38 @@ public partial class SkillService : ApplicationService, ISkillService
 
         await _repository.DeleteAsync(entity);
 
-        _registry.InvalidateCache();
+        _registry.InvalidateDatabaseSkills();
 
         return Ok();
     }
 
+    /// <summary>
+    /// File-source rows reach the admin list with an empty id (they have no database row). A
+    /// batch operation that receives one is acting on a card it cannot change; answering 200
+    /// with 0 rows told the operator "done".
+    /// </summary>
+    private const string FileSourceReadOnlyMessage =
+        "File-source skills are read-only: they are managed by their SKILL.md files, not in the database.";
+
     public async Task<Result<int>> BatchDeleteAsync(List<Guid> ids)
     {
         Check.NotNullOrEmpty(ids);
+        if (ids.Contains(Guid.Empty))
+            return Fail<int>(FileSourceReadOnlyMessage, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
 
         // Tenant isolation: ApplyTenantVisibility ensures a tenant user can only
         // delete rows it is allowed to see (System rows are excluded by the filter
         // in multi-tenant mode → never deletable here; admin-only via single-tenant host).
+        // Soft delete, the same as DeleteAsync: SkillEntity is soft-deletable and its slug index
+        // skips deleted rows. A raw ExecuteDelete removed the rows for good and recorded no
+        // deleter or deletion time. The bulk statement joins the request transaction first.
+        await _repository.EnsureTransactionStartedAsync();
         var deleted = await ApplyTenantVisibility(_repository.AsQueryable())
             .Where(e => ids.Contains(e.Id) && e.Scope != SkillScope.System)
-            .ExecuteDeleteAsync();
+            .BatchSoftDeleteByAsync(CurrentUser?.Id, DateTime.UtcNow);
 
         if (deleted > 0)
-            _registry.InvalidateCache();
+            _registry.InvalidateDatabaseSkills();
 
         return Ok(deleted);
     }
@@ -398,15 +444,18 @@ public partial class SkillService : ApplicationService, ISkillService
     public async Task<Result<int>> BatchSetEnabledAsync(List<Guid> ids, bool enabled)
     {
         Check.NotNullOrEmpty(ids);
+        if (ids.Contains(Guid.Empty))
+            return Fail<int>(FileSourceReadOnlyMessage, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
 
         // Tenant isolation: only the current tenant's visible rows may be toggled
         // (System rows excluded so tenant users cannot enable/disable shared skills).
+        await _repository.EnsureTransactionStartedAsync();
         var updated = await ApplyTenantVisibility(_repository.AsQueryable())
             .Where(e => ids.Contains(e.Id) && e.Scope != SkillScope.System)
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.Enabled, enabled));
 
         if (updated > 0)
-            _registry.InvalidateCache();
+            _registry.InvalidateDatabaseSkills();
 
         return Ok(updated);
     }
@@ -476,99 +525,131 @@ public partial class SkillService : ApplicationService, ISkillService
         }
 
         // ── Merged branch ────────────────────────────────────────────────
-        // Pull ALL skills through ISkillRegistry (handles dual-source merge
-        // by slug+scope priority) then materialise to DTOs and filter/sort/
-        // page in memory. The total cost is bounded by the file-source size
-        // (typically tens of skills); we still re-resolve the DB filters
-        // post-merge so paging stays consistent with the DB-only fast path.
-        var allSkills = await _registry.GetAvailableSkillsAsync();
-        // SkillDefinition is identified by Slug + Scope (file-source rows have
-        // no Guid id). To keep the DTO contract `Id: Guid`, we look up the
-        // DB row by slug when available and use its Id; otherwise we deterministically
-        // derive an empty Guid so the front-end can fall back to Slug-keyed rendering.
-        var dbIdBySlug = await ApplyTenantVisibility(_repository.AsQueryable())
-            .Select(e => new { e.Id, e.Slug })
+        // Two explicit sources, each row carrying its own identity. The database part is the
+        // same filtered query as the fast path, so it keeps disabled rows, every visible User
+        // row and the real Id / CategoryId / CreationTime. The file-source part is read-only
+        // and has no Id. The runtime registry is NOT the source of database rows: it holds only
+        // enabled rows and only the caller's own personal skills, and matching its rows back to
+        // database ids by slug put another row's id on a card whenever two scopes or two users
+        // shared a slug, so Delete and Disable acted on someone else's skill.
+        var dbRows = await queryable
+            .Select(e => new
+            {
+                e.Id, e.Slug, e.Scope, e.Name, e.Description, e.WhenToUse, e.Priority, e.Version, e.Author,
+                e.Enabled, e.CategoryId, e.CreationTime, e.LastModificationTime, e.ActivationCount, e.TagsJson
+            })
             .ToListAsync();
-        var dbIdMap = dbIdBySlug
-            .GroupBy(x => x.Slug, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
-        var merged = allSkills.Select(s => new SkillSummaryDto
-        {
-            Id = dbIdMap.TryGetValue(s.Slug, out var dbId) ? dbId : Guid.Empty,
-            Slug = s.Slug,
-            Scope = s.Scope,
-            Name = s.Name,
-            Description = s.Description,
-            WhenToUse = s.WhenToUse,
-            Priority = s.Priority,
-            Version = s.Version,
-            Author = s.Author,
-            Enabled = s.Enabled,
-            Source = s.Source,
-            IsReadOnly = s.Source != SkillSource.Database,
-            FilePath = s.FilePath,
-            Tags = s.Tags?.ToList() ?? [],
-            CreationTime = default,
-            LastModificationTime = null,
-        }).AsQueryable();
 
-        // Apply DB-equivalent filters in memory (sortable by IQueryable since
-        // it's a Linq-to-Objects materialised list).
-        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        var rows = dbRows.Select(e => (Dto: new SkillSummaryDto
         {
-            var kw = query.Keyword.ToLowerInvariant();
-            merged = merged.Where(d =>
-                d.Name.ToLower().Contains(kw)
-                || (d.Description ?? string.Empty).ToLower().Contains(kw)
-                || d.Slug.ToLower().Contains(kw));
-        }
-        if (query.Scope.HasValue)
-            merged = merged.Where(d => d.Scope == query.Scope.Value);
-        if (query.Enabled.HasValue)
-            merged = merged.Where(d => d.Enabled == query.Enabled.Value);
-        if (!string.IsNullOrWhiteSpace(query.Tag))
-        {
-            var tagLower = query.Tag.ToLowerInvariant();
-            merged = merged.Where(d => d.Tags != null && d.Tags.Any(t => t.ToLowerInvariant().Contains(tagLower)));
-        }
+            Id = e.Id,
+            Slug = e.Slug,
+            Scope = e.Scope,
+            Name = e.Name,
+            Description = e.Description,
+            WhenToUse = e.WhenToUse,
+            Priority = e.Priority,
+            Version = e.Version,
+            Author = e.Author,
+            Enabled = e.Enabled,
+            Source = SkillSource.Database,
+            IsReadOnly = false,
+            Tags = SkillJsonHelper.DeserializeOrDefault<List<string>>(e.TagsJson) ?? [],
+            CategoryId = e.CategoryId,
+            CreationTime = e.CreationTime,
+            LastModificationTime = e.LastModificationTime
+        }, e.ActivationCount)).ToList();
 
-        merged = query.SortBy?.ToLowerInvariant() switch
+        var fileSkills = await GetFileSourceSkillsAsync();
+        rows.AddRange(fileSkills
+            .Where(s => MatchesAdminFilters(s, query))
+            .Select(s => (Dto: new SkillSummaryDto
+            {
+                Id = Guid.Empty,
+                Slug = s.Slug,
+                Scope = s.Scope,
+                Name = s.Name,
+                Description = s.Description,
+                WhenToUse = s.WhenToUse,
+                Priority = s.Priority,
+                Version = s.Version,
+                Author = s.Author,
+                Enabled = s.Enabled,
+                Source = s.Source,
+                IsReadOnly = true,
+                FilePath = s.FilePath,
+                Tags = s.Tags?.ToList() ?? []
+            }, ActivationCount: 0L)));
+
+        // Same sort keys as the fast path; the name breaks ties so file rows (no creation time,
+        // no activation count) still page deterministically.
+        IEnumerable<(SkillSummaryDto Dto, long ActivationCount)> ordered = query.SortBy?.ToLowerInvariant() switch
         {
-            "name" => query.SortDesc ? merged.OrderByDescending(d => d.Name) : merged.OrderBy(d => d.Name),
-            "priority" => query.SortDesc ? merged.OrderByDescending(d => d.Priority) : merged.OrderBy(d => d.Priority),
-            _ => query.SortDesc ? merged.OrderByDescending(d => d.Name) : merged.OrderBy(d => d.Name),
+            "name" => query.SortDesc ? rows.OrderByDescending(r => r.Dto.Name) : rows.OrderBy(r => r.Dto.Name),
+            "priority" => query.SortDesc ? rows.OrderByDescending(r => r.Dto.Priority).ThenBy(r => r.Dto.Name) : rows.OrderBy(r => r.Dto.Priority).ThenBy(r => r.Dto.Name),
+            "activationcount" => query.SortDesc ? rows.OrderByDescending(r => r.ActivationCount).ThenBy(r => r.Dto.Name) : rows.OrderBy(r => r.ActivationCount).ThenBy(r => r.Dto.Name),
+            _ => query.SortDesc ? rows.OrderByDescending(r => r.Dto.CreationTime).ThenBy(r => r.Dto.Name) : rows.OrderBy(r => r.Dto.CreationTime).ThenBy(r => r.Dto.Name)
         };
 
-        var totalCount = merged.Count();
         var skip = (query.PageIndex - 1) * query.PageSize;
-        var items = merged.Skip(skip).Take(query.PageSize).ToList();
-        var mergedPaged = new PagedList<SkillSummaryDto>(items, query.PageIndex, query.PageSize, totalCount);
+        var items = ordered.Skip(skip).Take(query.PageSize).Select(r => r.Dto).ToList();
+        var mergedPaged = new PagedList<SkillSummaryDto>(items, query.PageIndex, query.PageSize, rows.Count);
         return Ok((IPagedList<SkillSummaryDto>)mergedPaged);
+    }
+
+    /// <summary>
+    /// File-source skills (built-in, workspace SKILL.md, plugin, managed) as the runtime sees
+    /// them. Database rows are deliberately dropped here: callers read those from the table.
+    /// </summary>
+    private async Task<List<SkillDefinition>> GetFileSourceSkillsAsync()
+        => (await _registry.GetAvailableSkillsAsync()).Where(s => s.Source != SkillSource.Database).ToList();
+
+    /// <summary>
+    /// The admin list filters, applied to a file-source skill the way the database query
+    /// applies them to a row. A file skill has no category, so a category filter excludes it.
+    /// </summary>
+    private static bool MatchesAdminFilters(SkillDefinition skill, SkillQueryDto query)
+    {
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var kw = query.Keyword;
+            if (!skill.Name.Contains(kw, StringComparison.OrdinalIgnoreCase)
+                && !(skill.Description ?? string.Empty).Contains(kw, StringComparison.OrdinalIgnoreCase)
+                && !skill.Slug.Contains(kw, StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        if (query.Scope.HasValue && skill.Scope != query.Scope.Value) return false;
+        if (query.Enabled.HasValue && skill.Enabled != query.Enabled.Value) return false;
+        if (query.CategoryId.HasValue) return false;
+
+        if (!string.IsNullOrWhiteSpace(query.Tag)
+            && !(skill.Tags ?? []).Any(t => t.Contains(query.Tag, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        return true;
     }
 
     public async Task<Result<SkillUsageStatsDto>> GetUsageStatsAsync()
     {
-        // Count over the same dual-source merged view the list endpoint exposes
-        // (DB rows + file-source skills via ISkillRegistry), so file-based skills
-        // (BuiltIn embedded resources + workspace SKILL.md + plugin/managed paths)
-        // are included. A DB-only count would report 0 on a fresh install even
-        // though the skill list shows the file-source skills.
-        var allSkills = await _registry.GetAvailableSkillsAsync();
-
-        // TotalActivations keeps its DB semantics: activation tracking
-        // (ActivationCount) only exists on AI_Skill rows. Tenant-scoped so the
-        // sum never leaks another tenant's usage.
-        var totalActivations = await ApplyTenantVisibility(_repository.AsQueryable())
-            .SumAsync(e => (long?)e.ActivationCount) ?? 0L;
+        // Count over the same two sources the admin list shows: every visible database row
+        // (disabled ones and every user's personal skills included, which the runtime registry
+        // view leaves out) plus the file-source skills (built-in, SKILL.md, plugin, managed).
+        // A DB-only count would report 0 on a fresh install although the list shows file skills.
+        var dbRows = await ApplyTenantVisibility(_repository.AsQueryable())
+            .Select(e => new { e.Scope, e.Enabled, e.ActivationCount })
+            .ToListAsync();
+        var fileSkills = await GetFileSourceSkillsAsync();
 
         var stats = new SkillUsageStatsDto
         {
-            TotalSkills = allSkills.Count,
-            EnabledSkills = allSkills.Count(s => s.Enabled),
-            DisabledSkills = allSkills.Count(s => !s.Enabled),
-            TenantScopeSkills = allSkills.Count(s => s.Scope == SkillScope.Tenant),
-            UserScopeSkills = allSkills.Count(s => s.Scope == SkillScope.User),
-            TotalActivations = totalActivations
+            TotalSkills = dbRows.Count + fileSkills.Count,
+            EnabledSkills = dbRows.Count(r => r.Enabled) + fileSkills.Count(s => s.Enabled),
+            DisabledSkills = dbRows.Count(r => !r.Enabled) + fileSkills.Count(s => !s.Enabled),
+            TenantScopeSkills = dbRows.Count(r => r.Scope == SkillScope.Tenant) + fileSkills.Count(s => s.Scope == SkillScope.Tenant),
+            UserScopeSkills = dbRows.Count(r => r.Scope == SkillScope.User) + fileSkills.Count(s => s.Scope == SkillScope.User),
+            // Activation tracking (ActivationCount) only exists on database rows.
+            TotalActivations = dbRows.Sum(r => r.ActivationCount)
         };
 
         return Ok(stats);
@@ -633,28 +714,13 @@ public partial class SkillService : ApplicationService, ISkillService
         var toInsert = new List<SkillEntity>();
         var toUpdate = new List<SkillEntity>();
 
-        // Tenant isolation: System-scope rows are tenant-agnostic and administrator-managed
-        // (UpdateAsync/DeleteAsync return 403 for them, and the admin create endpoint pins
-        // Scope=Tenant). Import must not be a side door that lets a tenant user create or
-        // overwrite globally visible System skills, so reject it in multi-tenant mode.
-        // Single-tenant hosts (_currentTenant?.Id == null) keep the existing behaviour.
-        if (targetScope == SkillScope.System && _currentTenant?.Id != null)
-            return Fail<SkillImportResultDto>("Access denied: system skills are managed by administrators.", 403, ErrorCodes.SkillUnauthorized);
-
-        // Resolve TenantId for the import batch (same rule as CreateAsync):
-        // Tenant- and User-scoped rows both record the current tenant; System stays null.
-        Guid? importTenantId = targetScope == SkillScope.System ? null : _currentTenant?.Id;
-
-        // Pre-load existing slugs in target scope+tenant for conflict detection.
-        // ApplyTenantVisibility is layered on as defence in depth so the update branch
-        // below can never resolve a row outside the caller's tenant.
-        var existingSlugs = await ApplyTenantVisibility(_repository.AsQueryable())
-            .Where(e => e.Scope == targetScope && e.TenantId == importTenantId)
-            .Select(e => new { e.Id, e.Slug })
-            .ToDictionaryAsync(e => e.Slug, e => e.Id, StringComparer.OrdinalIgnoreCase);
-
-        // Pre-load all system skill slugs to avoid N+1 queries in the loop
-        var systemSlugs = (await _fileStore.GetAllAsync()).Select(s => s.Slug).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // System scope is refused in both tenancy modes. The runtime never loads database rows
+        // in the System scope (DatabaseSkillStore reads Tenant and User rows; system skills are
+        // SKILL.md files), so such an import reported "Created N" for skills no agent and no
+        // list would ever show; in a multi-tenant host it would also be a side door into a
+        // host-wide scope. The admin create endpoint pins Tenant for the same reason.
+        if (targetScope == SkillScope.System)
+            return Fail<SkillImportResultDto>("Skills cannot be imported into the System scope: system skills are installed as SKILL.md files.", 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
 
         Guid? ownerUserId = null;
         if (targetScope == SkillScope.User)
@@ -665,11 +731,59 @@ public partial class SkillService : ApplicationService, ISkillService
             ownerUserId = userId.Value;
         }
 
+        // Resolve TenantId for the import batch (same rule as CreateAsync):
+        // Tenant- and User-scoped rows both record the current tenant.
+        var importTenantId = _currentTenant?.Id;
+
+        // Overwriting an existing skill is an update, and the endpoint only demands the create
+        // code. Without the update code an import may add skills but not rewrite one that
+        // agents already load (that is what UpdateAsync enforces for shared skills too).
+        var mayOverwrite = await HasManagePermissionAsync(SkillUpdatePermission);
+
+        // Existing rows this import may overwrite: same scope and tenant, and for the User scope
+        // the caller's own rows only (another user's personal skill with the same slug is not
+        // the caller's to overwrite). ApplyTenantVisibility is layered on as defence in depth.
+        // Grouped rather than ToDictionary: rows that already share a slug (possible where the
+        // unique index treats NULL tenant or owner values as distinct) must not turn every later
+        // import into a 500; the oldest row is the one updated.
+        var existingRows = await ApplyTenantVisibility(_repository.AsQueryable())
+            .Where(e => e.Scope == targetScope && e.TenantId == importTenantId && e.OwnerUserId == ownerUserId)
+            .Select(e => new { e.Id, e.Slug, e.CreationTime })
+            .ToListAsync();
+        var existingSlugs = existingRows
+            .GroupBy(e => e.Slug, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderBy(e => e.CreationTime).ThenBy(e => e.Id).First().Id,
+                StringComparer.OrdinalIgnoreCase);
+
+        // Pre-load all system skill slugs to avoid N+1 queries in the loop
+        var systemSlugs = (await _fileStore.GetAllAsync()).Select(s => s.Slug).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var seenSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var skill in skills)
         {
             if (string.IsNullOrWhiteSpace(skill.Slug))
             {
                 result.Errors.Add($"Skipped skill with empty slug.");
+                result.Skipped++;
+                continue;
+            }
+
+            // Same slug rule as CreateAsync: the import must not store a slug the create
+            // endpoint would refuse.
+            if (skill.Slug.Length > 64 || !SlugPattern().IsMatch(skill.Slug))
+            {
+                result.Errors.Add($"Slug '{skill.Slug}' must be 1-64 lowercase letters, digits, or hyphens (cannot start or end with a hyphen).");
+                result.Skipped++;
+                continue;
+            }
+
+            // A payload that names one slug twice would create two rows, or rewrite one row
+            // twice with the second entry silently winning.
+            if (!seenSlugs.Add(skill.Slug))
+            {
+                result.Errors.Add($"Slug '{skill.Slug}' appears more than once in the import; only the first entry was used.");
                 result.Skipped++;
                 continue;
             }
@@ -682,12 +796,27 @@ public partial class SkillService : ApplicationService, ISkillService
                 continue;
             }
 
+            var requirementsError = SkillRequirementRules.Validate(skill.Requirements, targetScope);
+            if (requirementsError != null)
+            {
+                result.Errors.Add($"Skill '{skill.Slug}': {requirementsError}");
+                result.Skipped++;
+                continue;
+            }
+
             var constraintsJson = SkillJsonHelper.BuildConstraintsJson(
                 skill.AllowedToolGroups, skill.AllowedTools, skill.DeniedTools,
                 skill.RequiredModel, skill.RequiredProvider);
 
             if (existingSlugs.TryGetValue(skill.Slug, out var existingId))
             {
+                if (!mayOverwrite)
+                {
+                    result.Errors.Add($"Skill '{skill.Slug}' already exists; overwriting it requires the ai.skill.update permission.");
+                    result.Skipped++;
+                    continue;
+                }
+
                 // Update existing
                 var entity = await _repository.GetAsync(existingId);
                 if (entity != null)
@@ -741,7 +870,7 @@ public partial class SkillService : ApplicationService, ISkillService
             await _repository.UpdateManyAsync(toUpdate);
 
         if (toInsert.Count > 0 || toUpdate.Count > 0)
-            _registry.InvalidateCache();
+            _registry.InvalidateDatabaseSkills();
 
         return Ok(result);
     }
@@ -760,6 +889,8 @@ public partial class SkillService : ApplicationService, ISkillService
         var dto = definition.MapTo<SkillDetailDto>();
         dto.Id = entity.Id;
         dto.OwnerUserId = entity.OwnerUserId;
+        // 分类只在行上，技能定义里没有：不补这一句，创建 / 更新 / 详情的应答一律报「未分类」。
+        dto.CategoryId = entity.CategoryId;
         dto.CreationTime = entity.CreationTime;
         dto.LastModificationTime = entity.LastModificationTime;
         return dto;

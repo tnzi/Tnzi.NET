@@ -1,6 +1,45 @@
 import type { GlobalThemeOverrides } from 'naive-ui'
 import type { ThemeMode } from '@tnzi/core/types'
 import type { ThemeSettings } from './types'
+import { CONTRAST_TEXT_LIGHT, getContrastTextColor } from './palette'
+
+/**
+ * naive's own foreground on a primary FILL (a primary button, a checked box, a
+ * checked tag, today's date, the active step) for a primary light enough that
+ * white does not read on it.
+ *
+ * naive paints that foreground with `baseColor`: white in its light theme,
+ * black in its dark one, whatever the primary is. Only the light-primary case
+ * is overridden: for a dark primary the light theme's white is already what
+ * `--tnzi-on-primary` says, and the dark theme's black is left as naive draws
+ * it, so no existing product changes. For a light primary both modes get the
+ * same ink, the one the package's own components put on the same fill.
+ *
+ * The keys are every `baseColor` / literal-white foreground naive draws on
+ * `primaryColor` (naive-ui 2.45): Button (primary type, all states), Checkbox
+ * check mark, checkable Tag, Calendar's current date, DatePicker's selected
+ * item, Steps' active indicator, FloatButton (primary type). The primary used
+ * as TEXT (Menu, Tabs, Pagination, text/ghost buttons) is not touched here.
+ */
+function onPrimaryFillOverrides(primary: string): GlobalThemeOverrides {
+  const ink = getContrastTextColor(primary)
+  if (ink === CONTRAST_TEXT_LIGHT) return {}
+  return {
+    Button: {
+      textColorPrimary: ink,
+      textColorHoverPrimary: ink,
+      textColorPressedPrimary: ink,
+      textColorFocusPrimary: ink,
+      textColorDisabledPrimary: ink,
+    },
+    Checkbox: { checkMarkColor: ink },
+    Tag: { textColorChecked: ink },
+    Calendar: { dateTextColorCurrent: ink },
+    DatePicker: { itemTextColorActive: ink },
+    Steps: { indicatorTextColorProcess: ink },
+    FloatButton: { textColorPrimary: ink },
+  }
+}
 
 /**
  * Build a Naive UI GlobalThemeOverrides object from a Tnzi ThemeSettings.
@@ -10,8 +49,10 @@ import type { ThemeSettings } from './types'
  * `theme-overrides` prop.
  *
  * Hover/pressed variants are computed from the 400/600 palette levels.
- * Consumer-provided `naiveOverrides` are shallow-merged at the top level so that
- * consumers can customize specific components (Menu, DataTable, etc.).
+ * Consumer-provided `naiveOverrides` are merged section by section over the
+ * generated ones (`common`, `Button`, ...): a consumer key wins, the generated
+ * keys it does not name survive, and sections the bridge does not generate
+ * (Menu, DataTable, ...) pass through as given.
  */
 export function buildNaiveThemeOverrides(settings: ThemeSettings): GlobalThemeOverrides {
   const { palettes, naiveOverrides = {} } = settings
@@ -52,17 +93,17 @@ export function buildNaiveThemeOverrides(settings: ThemeSettings): GlobalThemeOv
     },
   }
 
-  // Top-level spread lets consumers override any per-component section
-  // (Menu, DataTable, ...). `common` is explicitly deep-merged so consumer
-  // tweaks (e.g. primaryColorHover) win over our generated defaults without
-  // wiping the rest of the base common section.
-  return {
-    ...naiveOverrides,
-    common: {
-      ...base.common,
-      ...(naiveOverrides.common ?? {}),
-    },
+  // Every generated section is merged one level deep, so a consumer tweak
+  // (e.g. `common.primaryColorHover`, `Button.heightMedium`) wins over the
+  // generated value without wiping the rest of that section; sections the
+  // bridge does not generate pass through untouched.
+  const generated: Record<string, object> = { ...base, ...onPrimaryFillOverrides(palettes.primary[500]) }
+  const consumer = naiveOverrides as Record<string, object | undefined>
+  const merged: Record<string, object | undefined> = { ...consumer }
+  for (const [section, values] of Object.entries(generated)) {
+    merged[section] = { ...values, ...(consumer[section] ?? {}) }
   }
+  return merged as GlobalThemeOverrides
 }
 
 /**
@@ -88,7 +129,9 @@ export function resolveThemeMode(
   }
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const resolved = mq.matches ? 'dark' : 'light'
-  if (onChange) {
+  // `addEventListener` on MediaQueryList is missing from Safari before 14 and
+  // from some test doubles; there the mode is still resolved, just not followed.
+  if (onChange && typeof mq.addEventListener === 'function') {
     const handler = (e: MediaQueryListEvent) => onChange(e.matches ? 'dark' : 'light')
     mq.addEventListener('change', handler)
     return { resolved, cleanup: () => mq.removeEventListener('change', handler) }

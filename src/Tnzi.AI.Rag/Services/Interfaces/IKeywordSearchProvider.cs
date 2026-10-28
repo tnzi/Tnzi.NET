@@ -42,6 +42,15 @@ public class KeywordSearchResult
     /// <summary>所属知识库 ID</summary>
     public Guid KnowledgeBaseId { get; set; }
 
+    /// <summary>
+    /// 块在文档中的索引。父文档检索按它取相邻窗口；提供者给不出时留空，混合检索会按 <see cref="ChunkId"/> 回查分块表补上。
+    /// </summary>
+    /// <remarks>
+    /// ★ 此前没有这个字段，混合检索把仅关键词命中的块一律记作第 0 块：开启父文档检索后，注入上下文的是文档开头的几块
+    /// （封面、目录），真正命中的段落被换掉。
+    /// </remarks>
+    public int? ChunkIndex { get; set; }
+
     /// <summary>TF-IDF 或全文搜索相关性得分</summary>
     public double Score { get; set; }
 }

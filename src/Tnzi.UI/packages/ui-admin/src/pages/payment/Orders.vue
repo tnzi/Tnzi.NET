@@ -1,9 +1,9 @@
 <template>
   <!--
     Orders - admin view of payment orders. Read-only, because payment records are
-    an immutable financial ledger: no create, no edit, no delete, and no row
-    buttons at all. Opening a row IS the only operation, so the row card carries
-    it and a lone "View" button would just duplicate it.
+    an immutable financial ledger: no create, no edit, no delete. Opening a row
+    is "View"; the only row button is "Refund", on paid orders, for holders of
+    `payment.refund.create`.
 
     A KPI row (payment statistics) renders between the page header and the list
     via the #kpis slot. Statistics are fetched ONCE on mount (the figures are a
@@ -46,6 +46,9 @@
               <TSvgIcon icon="mdi:clock-outline" :size="13" />
               <TRelativeTime :value="item.paidTime ?? item.creationTime" />
             </span>
+            <span v-if="item.billingAccountType || item.billingAccountId" class="ord-meta__item" data-testid="order-billing-account">
+              <TSvgIcon icon="mdi:domain" :size="13" />{{ formatBillingAccount(item) }}
+            </span>
             <span v-if="item.description" class="ord-meta__desc" :title="item.description">
               {{ item.description }}
             </span>
@@ -54,7 +57,7 @@
 
         <template #trailing>
           <div class="ord-amount">
-            <span class="ord-amount__value">{{ formatCurrency(item.paidAmount, item.currency) }}</span>
+            <span class="ord-amount__value">{{ formatCurrency(orderAmount(item), item.currency) }}</span>
             <span v-if="item.discountAmount > 0" class="ord-amount__label">
               {{ t('admin.shared.card.discount', { amount: formatCurrency(item.discountAmount, item.currency) }) }}
             </span>
@@ -62,18 +65,23 @@
         </template>
 
         <!--
-          No #actions slot: on an immutable payment ledger the only operation
-          was "View", and the row already opens it. Rendering a lone View button
-          next to a clickable row would be a second control for the same intent;
-          the card shows its chevron affordance instead.
+          Opening the row is "View". The one other operation is raising a
+          refund on a paid order, so only those rows carry an action cluster;
+          every other row keeps the chevron affordance.
         -->
+        <template v-if="isRefundable(item)" #actions>
+          <TRowActions :row="item" :actions="rowActions" :translate="t" />
+        </template>
       </TItemCard>
     </template>
 
-    <template #kpis>
+    <!-- The statistics endpoint needs payment.statistics.view; this page needs
+         only payment.order.view. Without the code the row is not offered: its
+         read can only be refused. -->
+    <template v-if="canSeeStatistics" #kpis>
       <TKpiRow class="orders-page__stats">
         <TKpiCard :label="t('kpi.totalRevenue')" :value="totalRevenueDisplay" />
-        <TKpiCard :label="t('kpi.orderCount')" :value="stats.totalTransactions" />
+        <TKpiCard :label="t('kpi.orderCount')" :value="stats?.totalTransactions ?? null" />
         <TKpiCard :label="t('kpi.averageAmount')" :value="averageAmountDisplay" />
         <TKpiCard :label="t('kpi.paidRate')" :value="paidRateDisplay" suffix="%" />
       </TKpiRow>
@@ -91,21 +99,69 @@
       />
     </template>
   </TItemPage>
+
+  <!-- Refund overlay: amount + reason. Deep-linkable as `?refund=edit:<id>`. -->
+  <TDetailHost :state="refundDetail" :title="t('refund.title')" :width="480" :translate="t">
+    <template #default>
+      <NForm>
+        <NFormItem :label="t('refund.amount')" required>
+          <NInputNumber
+            v-model:value="refundAmount"
+            class="w-full"
+            :min="0.01"
+            :max="refundDetail.data.value?.paidAmount"
+            :precision="2"
+            data-testid="refund-amount"
+          />
+        </NFormItem>
+        <NFormItem :label="t('refund.reason')" required>
+          <NInput
+            v-model:value="refundReason"
+            type="textarea"
+            :rows="3"
+            :maxlength="500"
+            :placeholder="t('refund.reasonPlaceholder')"
+            data-testid="refund-reason"
+          />
+        </NFormItem>
+      </NForm>
+    </template>
+    <template #footer="{ close }">
+      <NButton @click="close">{{ t('admin.crud.cancel') }}</NButton>
+      <NButton
+        type="warning"
+        :loading="refundSaving"
+        :disabled="!canSubmitRefund"
+        data-testid="refund-submit"
+        @click="submitRefund"
+      >
+        {{ t('actions.refund') }}
+      </NButton>
+    </template>
+  </TDetailHost>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { NButton, NForm, NFormItem, NInput, NInputNumber } from 'naive-ui'
 import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
 import TItemPage from '../../components/crud/TItemPage.vue'
+import TRowActions from '../../components/crud/TRowActions.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
+import { useDetail } from '../../headless/useDetail'
+import type { RowAction } from '../../headless/row-actions'
+import { useSafeMessage } from '../_shared/safe-message'
+import { billingAccountSearchFields, formatBillingAccount } from './billing-account-config'
 import TItemCard, { type ItemCardTag, type ItemCardTone } from '../../components/data/TItemCard.vue'
 import TKpiRow from '../../components/data/TKpiRow.vue'
 import TKpiCard from '../../components/data/TKpiCard.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import type { FormSchemaItem } from '../_shared/form-schema'
-import { buildOrderColumns, orderFormSchema, orderStatusOptions } from './order-config'
+import { buildOrderColumns, orderAmount, orderFormSchema, orderStatusOptions } from './order-config'
 import { makePageTranslator } from '../_shared/translate'
 import { formatCurrency } from '@tnzi/core'
 import type { PaymentDto, PaymentStatisticsDto } from '@tnzi/core/services/payment'
@@ -113,6 +169,8 @@ import type { PaymentDto, PaymentStatisticsDto } from '@tnzi/core/services/payme
 const t = makePageTranslator('payment.orders')
 
 const bridge = createPaymentBridge({ client: useAdminClient() })
+const { can } = usePermissionGuard()
+const canSeeStatistics = computed(() => can('payment.statistics.view'))
 
 const columns = buildOrderColumns(t)
 
@@ -129,6 +187,7 @@ const searchFields: FormSchemaItem[] = [
     placeholder: 'Status',
     options: orderStatusOptions.map((o) => ({ value: o.value, label: o.value, labelKey: o.labelKey })),
   },
+  ...billingAccountSearchFields(),
 ]
 
 const defaultStats: PaymentStatisticsDto = {
@@ -148,23 +207,39 @@ const defaultStats: PaymentStatisticsDto = {
   channelDistribution: [],
 }
 
-const stats = ref<PaymentStatisticsDto>({ ...defaultStats })
+/**
+ * Null until read, and after a failed read: the cards then show the
+ * placeholder. Zeros would state "no revenue, no orders" about figures nobody
+ * saw (the statistics endpoint needs `payment.statistics.view`, while this page
+ * needs only `payment.order.view`).
+ */
+const stats = ref<PaymentStatisticsDto | null>(null)
 
-const averageAmount = computed(() =>
-  stats.value.totalTransactions > 0
-    ? stats.value.totalRevenue / stats.value.totalTransactions
-    : 0,
-)
+// Revenue sums only succeeded payments, so it is averaged over those: dividing
+// by every attempt (failed and pending included) understates the order value.
+const averageAmount = computed(() => {
+  const s = stats.value
+  if (!s) return null
+  return s.successfulTransactions > 0 ? s.totalRevenue / s.successfulTransactions : 0
+})
 // KPI display values - money formats through @tnzi/core's formatCurrency
 // ("$1,234.56"); the paid rate keeps one decimal place. TKpiCard renders
 // string values verbatim (no number animation), which is intended here.
-const totalRevenueDisplay = computed(() => formatCurrency(stats.value.totalRevenue))
-const averageAmountDisplay = computed(() => formatCurrency(averageAmount.value))
-const paidRateDisplay = computed(() =>
-  stats.value.totalTransactions > 0
-    ? ((stats.value.successfulTransactions / stats.value.totalTransactions) * 100).toFixed(1)
-    : '0.0',
-)
+// The strip carries the currency the server reports (CA$, not a bare "$"); with mixed currencies
+// the totals are a plain sum and are shown as numbers without a symbol.
+function statMoney(amount: number): string {
+  const currency = stats.value?.currency
+  if (currency === null) return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  // An older server sends no currency at all: keep its formatting
+  return currency ? formatCurrency(amount, currency) : formatCurrency(amount)
+}
+const totalRevenueDisplay = computed(() => (stats.value ? statMoney(stats.value.totalRevenue) : null))
+const averageAmountDisplay = computed(() => (averageAmount.value === null ? null : statMoney(averageAmount.value)))
+const paidRateDisplay = computed(() => {
+  const s = stats.value
+  if (!s) return null
+  return s.totalTransactions > 0 ? ((s.successfulTransactions / s.totalTransactions) * 100).toFixed(1) : '0.0'
+})
 
 const crud = useCrudPage<PaymentDto>({
   pageId: 'payment.orders',
@@ -176,15 +251,14 @@ const crud = useCrudPage<PaymentDto>({
 
 
 async function loadStats(): Promise<void> {
+  if (!canSeeStatistics.value) return
   try {
     const result = await bridge.orders.statistics()
-    // Bridge may return null/undefined when the backend endpoint is down or
-    // unauthorized; keep the default-stats shape so the template's
-    // `stats.totalRevenue` access stays safe.
-    stats.value = result ? { ...defaultStats, ...result } : { ...defaultStats }
+    // A body missing some fields keeps the DTO shape; no body at all is no figure.
+    stats.value = result ? { ...defaultStats, ...result } : null
   } catch {
-    // Stats fetch failure must not block the main table
-    stats.value = { ...defaultStats }
+    // Stats fetch failure must not block the main table, nor read as zeros.
+    stats.value = null
   }
 }
 
@@ -218,6 +292,55 @@ function isDead(row: PaymentDto): boolean {
   const s = String(row.status ?? '')
   return s === 'Failed' || s === 'Cancelled' || s === 'Expired'
 }
+
+// ─── Refund ────────────────────────────────────────────────────────────────
+// Raised on the customer's behalf (`POST admin/refunds`): the most common
+// refund path, and the user-facing endpoint cannot serve it. Only money that
+// was taken can be returned; the server checks the remaining refundable amount.
+const message = useSafeMessage()
+const REFUNDABLE = new Set(['Succeeded', 'PartiallyRefunded'])
+const isRefundable = (row: PaymentDto): boolean => can('payment.refund.create') && REFUNDABLE.has(String(row.status ?? ''))
+
+const refundDetail = useDetail<PaymentDto>({ mode: 'modal', url: 'refund', source: crud })
+const refundAmount = ref<number | null>(null)
+const refundReason = ref('')
+const refundSaving = ref(false)
+watch(() => refundDetail.data.value, (payment) => {
+  if (!payment) return
+  refundAmount.value = payment.paidAmount > 0 ? payment.paidAmount : null
+  refundReason.value = ''
+})
+const canSubmitRefund = computed(
+  () => !refundSaving.value && !!refundReason.value.trim() && (refundAmount.value ?? 0) > 0,
+)
+
+async function submitRefund(): Promise<void> {
+  const payment = refundDetail.data.value
+  const amount = refundAmount.value
+  const reason = refundReason.value.trim()
+  if (!payment || !amount || !reason || refundSaving.value) return
+  refundSaving.value = true
+  try {
+    await bridge.refunds.create(payment.tradeNo, amount, reason)
+    message.success(t('refund.created'))
+    refundDetail.close()
+    await crud.refresh()
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  } finally {
+    refundSaving.value = false
+  }
+}
+
+const rowActions: RowAction<PaymentDto>[] = [
+  {
+    key: 'refund',
+    label: 'actions.refund',
+    type: 'warning',
+    icon: 'mdi:cash-refund',
+    onClick: (row) => void refundDetail.open('edit', row),
+  },
+]
 
 function orderTags(row: PaymentDto): ItemCardTag[] {
   const out: ItemCardTag[] = [

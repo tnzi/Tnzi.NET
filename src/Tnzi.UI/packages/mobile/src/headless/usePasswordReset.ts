@@ -1,5 +1,6 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from '@tnzi/core/adapters/i18n'
+import { isBlank } from './blank'
 
 export interface PasswordResetData {
   email: string
@@ -11,6 +12,10 @@ export interface UsePasswordResetOptions {
   countdownSeconds?: number
   onSubmit?: (data: PasswordResetData) => void | Promise<void>
   onCancel?: () => void
+  /**
+   * Send the code. A rejection means it was not sent: the countdown stays off
+   * and the message lands in `errors.code`.
+   */
   onSendCode?: (email: string) => void | Promise<void>
 }
 
@@ -51,13 +56,14 @@ export function usePasswordReset(options: UsePasswordResetOptions = {}): UsePass
     () => confirmPassword.value !== '' && confirmPassword.value !== password.value,
   )
 
-  const canSendCode = computed(() => email.value !== '' && countdown.value === 0 && !isSendingCode.value)
+  const canSendCode = computed(() => !isBlank(email.value) && countdown.value === 0 && !isSendingCode.value)
 
   const canSubmit = computed(
     () =>
-      email.value !== '' &&
-      code.value !== '' &&
-      password.value !== '' &&
+      !isBlank(email.value) &&
+      !isBlank(code.value) &&
+      !isBlank(password.value) &&
+      !isBlank(confirmPassword.value) &&
       !passwordMismatch.value &&
       !isSubmitting.value,
   )
@@ -81,18 +87,30 @@ export function usePasswordReset(options: UsePasswordResetOptions = {}): UsePass
     isSendingCode.value = true
     try {
       await options.onSendCode?.(email.value)
-      startCountdown()
+    } catch (err) {
+      // Nothing was sent, so there is nothing to wait for: keep the button
+      // available and say why.
+      errors.value = { ...errors.value, code: err instanceof Error ? err.message : String(err) }
+      return
     } finally {
       isSendingCode.value = false
     }
+    errors.value = Object.fromEntries(Object.entries(errors.value).filter(([key]) => key !== 'code'))
+    startCountdown()
   }
 
   async function submit(): Promise<void> {
     const newErrors: Record<string, string> = {}
-    if (!email.value) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
-    if (!code.value) newErrors.code = t('auth.pleaseEnter', { field: t('auth.verificationCode') })
-    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.newPassword') })
-    if (passwordMismatch.value) newErrors.confirmPassword = t('auth.passwordMismatch')
+    if (isBlank(email.value)) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
+    if (isBlank(code.value)) newErrors.code = t('auth.pleaseEnter', { field: t('auth.verificationCode') })
+    if (isBlank(password.value)) newErrors.password = t('auth.pleaseEnter', { field: t('auth.newPassword') })
+    // Required, not just "equal when given": a single copy of a new password
+    // with a typo in it is a password the user does not know.
+    if (isBlank(confirmPassword.value)) {
+      newErrors.confirmPassword = t('auth.pleaseConfirm', { field: t('auth.newPassword') })
+    } else if (passwordMismatch.value) {
+      newErrors.confirmPassword = t('auth.passwordMismatch')
+    }
     errors.value = newErrors
     if (Object.keys(newErrors).length > 0) return
 

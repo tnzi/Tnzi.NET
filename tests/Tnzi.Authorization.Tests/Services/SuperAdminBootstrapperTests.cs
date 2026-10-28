@@ -152,4 +152,74 @@ public class SuperAdminBootstrapperTests
 
         assigned.ShouldBe(0);
     }
+
+    // ── 名字只是声明：可能被别人抢注的账号不提拔 ─────────────────────────────
+
+    private async Task<int> BootstrapOneAsync(User user, string configuredName)
+    {
+        var role = NewRole("SuperAdmin");
+        SetRoleMembers(role.Id);
+        _userService.Setup(s => s.AssignRolesAsync(user.Id, It.IsAny<IEnumerable<Guid>>()))
+            .ReturnsAsync(Result.Success());
+        return await Build([role], [user]).BootstrapAsync(["SuperAdmin"], [configuredName]);
+    }
+
+    /// <summary>
+    /// ★ 配置里写了一个尚未注册的地址、又开着自助注册且不要求确认邮箱：谁先注册这个地址，谁就在下次重启时成为超管。
+    /// </summary>
+    [Fact]
+    public async Task An_account_with_an_unconfirmed_email_is_not_promoted()
+    {
+        var user = NewUser("ops@example.com");
+        user.Email = "ops@example.com";
+        user.EmailConfirmed = false;
+
+        (await BootstrapOneAsync(user, "ops@example.com")).ShouldBe(0);
+        _userService.Verify(s => s.AssignRolesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task An_account_with_a_confirmed_email_is_promoted()
+    {
+        var user = NewUser("ops@example.com");
+        user.Email = "ops@example.com";
+        user.EmailConfirmed = true;
+
+        (await BootstrapOneAsync(user, "ops@example.com")).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// 用户名可以自选时，任何人都能注册一个叫 <c>ops@example.com</c> 的用户名、同时证明一个别的地址。
+    /// </summary>
+    [Fact]
+    public async Task An_email_shaped_name_must_be_the_accounts_own_confirmed_email()
+    {
+        var user = NewUser("ops@example.com");
+        user.Email = "attacker@example.net";
+        user.EmailConfirmed = true;
+
+        (await BootstrapOneAsync(user, "ops@example.com")).ShouldBe(0);
+        _userService.Verify(s => s.AssignRolesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task An_account_whose_invitation_is_pending_is_not_promoted()
+    {
+        var user = NewUser("admin");
+        user.PendingActions = Tnzi.Identity.Metadata.PendingUserActions.InvitationPending;
+
+        (await BootstrapOneAsync(user, "admin")).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_locked_out_account_is_not_promoted_but_an_expired_lockout_is_ignored()
+    {
+        var locked = NewUser("admin");
+        locked.LockoutEnd = DateTimeOffset.UtcNow.AddDays(1);
+        (await BootstrapOneAsync(locked, "admin")).ShouldBe(0);
+
+        var expired = NewUser("admin");
+        expired.LockoutEnd = DateTimeOffset.UtcNow.AddDays(-1);
+        (await BootstrapOneAsync(expired, "admin")).ShouldBe(1);
+    }
 }

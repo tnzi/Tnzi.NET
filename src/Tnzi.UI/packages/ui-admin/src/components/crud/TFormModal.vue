@@ -11,6 +11,12 @@
     <template #footer>
       <slot name="footer">
         <div class="t-form-modal__footer">
+          <!-- The label toggles the switch too: it is the bigger target. -->
+          <div v-if="shownSwitch" class="t-form-modal__switch">
+            <span class="t-form-modal__switch-label" @click="setSwitch(!switchOn)">{{ t(shownSwitch.label) }}</span>
+            <THint v-if="shownSwitch.hint" :content="t(shownSwitch.hint)" :size="14" />
+            <NSwitch :value="switchOn" :aria-label="t(shownSwitch.label)" @update:value="setSwitch" />
+          </div>
           <NButton class="t-form-modal__cancel" @click="onCancel">
             {{ t('admin.common.cancel') }}
           </NButton>
@@ -18,6 +24,7 @@
             v-if="rendered.mode.value !== 'view'"
             type="primary"
             class="t-form-modal__confirm"
+            :loading="busy"
             @click="onConfirm"
           >
             {{ t('admin.common.confirm') }}
@@ -29,11 +36,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton } from 'naive-ui'
-import { TModalShell } from '@tnzi/ui'
+import { computed, ref } from 'vue'
+import { NButton, NSwitch } from 'naive-ui'
+import { THint, TModalShell } from '@tnzi/ui'
 import { provideFormHost } from '@tnzi/ui/headless'
-import { useFormModal, useRetainedFormState } from '../../headless/useFormModal'
+import { useFormModal, useRetainedFormState, type FormFooterSwitch } from '../../headless/useFormModal'
 
 type FormState = ReturnType<typeof useFormModal<unknown>>
 
@@ -58,6 +65,8 @@ interface Props {
    * modal. Off by default, so a page with no `#detail` slot keeps view-in-modal.
    */
   skipViewMode?: boolean
+  /** Opt-in switch at the footer's left (a record flag such as "Active"); see {@link FormFooterSwitch}. */
+  footerSwitch?: FormFooterSwitch
   translate?: (key: string) => string
 }
 
@@ -66,6 +75,7 @@ const props = withDefaults(defineProps<Props>(), {
   contentMaxHeightVh: 65,
   fullscreen: undefined,
   skipViewMode: false,
+  footerSwitch: undefined,
   translate: undefined,
 })
 
@@ -92,6 +102,23 @@ const emit = defineEmits<{
 // toast came back on top of it.
 const formHost = provideFormHost()
 
+/** The footer switch when this mode shows it: never in view mode, edit only by default. */
+const shownSwitch = computed(() => {
+  const sw = props.footerSwitch
+  const mode = rendered.mode.value
+  return sw && mode && mode !== 'view' && (sw.modes ?? ['edit']).includes(mode) ? sw : null
+})
+
+const switchOn = computed(() => {
+  const data = rendered.formData.value as Record<string, unknown> | null | undefined
+  return !!shownSwitch.value && data?.[shownSwitch.value.key] === true
+})
+
+function setSwitch(value: boolean): void {
+  const data = rendered.formData.value as Record<string, unknown> | null | undefined
+  if (shownSwitch.value && data) data[shownSwitch.value.key] = value
+}
+
 function t(key: string): string {
   return props.translate ? props.translate(key) : key
 }
@@ -104,16 +131,59 @@ function onCancel(): void {
   props.state.close()
 }
 
+// One save per Confirm. `validating` covers the click-to-emit window (the
+// validation is async, so a second click would otherwise pass it too);
+// `state.submitting` covers the request itself, raised by the engine that
+// owns the write. A hand-rolled state without the flag still gets the first.
+const validating = ref(false)
+const busy = computed(() => validating.value || props.state.submitting?.value === true)
+
 async function onConfirm(): Promise<void> {
-  if (!(await formHost.validate())) return
+  if (busy.value) return
+  validating.value = true
+  let valid: boolean
+  try {
+    valid = await formHost.validate()
+  } finally {
+    validating.value = false
+  }
+  if (!valid) return
   emit('submit')
 }
 </script>
 
 <style scoped>
+/*
+ * `flex-grow` fills the modal shell's footer row, which is itself `flex-end`: without it this box shrink-wraps
+ * its children and the switch's `margin-right: auto` has no free space to take, so the switch lands beside
+ * Cancel. Without a switch the buttons still sit at the right as before. On phones the shell's footer is a
+ * column, where growing is vertical and there is nothing to grow into.
+ */
 .t-form-modal__footer {
   display: flex;
+  flex-grow: 1;
   justify-content: flex-end;
+  align-items: center;
   gap: var(--tnzi-spacing-sm, 8px);
+}
+/* The switch takes the free space, so it sits at the left opposite the buttons. */
+.t-form-modal__switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+}
+/* Phone: the shell stretches the buttons full width, so the switch gets its own line above them. */
+@media (max-width: 767px) {
+  .t-form-modal__footer:has(.t-form-modal__switch) {
+    flex-wrap: wrap;
+  }
+  .t-form-modal__footer:has(.t-form-modal__switch) .t-form-modal__switch {
+    flex-basis: 100%;
+  }
+}
+.t-form-modal__switch-label {
+  cursor: pointer;
+  user-select: none;
 }
 </style>

@@ -49,9 +49,11 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NScrollbar } from 'naive-ui'
+import { useSafeMessage } from '@tnzi/ui'
+import { useDebounced } from '@tnzi/core/headless'
 import type { ChatMessageDto } from '@tnzi/core/services/chat'
 import { formatDateTime } from '@tnzi/core'
 import { useChatStore } from '../../stores/useChatStore'
@@ -71,6 +73,7 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+const message = useSafeMessage()
 // Phone (<md) flexes the fixed list height so it never exceeds the viewport.
 const { isSm } = useBreakpoint()
 
@@ -87,29 +90,45 @@ const emptyHint = computed(() =>
       : t('window.searchHistoryHint'),
 )
 
-watch(() => props.show, (open) => { if (open) { keyword.value = ''; results.value = [] } })
-
-let timer: ReturnType<typeof setTimeout> | null = null
-function onSearch() {
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(async () => {
-    if (!props.conversationId || !keyword.value.trim()) { results.value = []; return }
-    loading.value = true
-    try {
-      const thread = await store.searchMessages(props.conversationId, keyword.value.trim())
-      results.value = thread.messages
-    } finally {
-      loading.value = false
-    }
-  }, 300)
+// Only the latest search fills the list: an earlier keyword answering last
+// would show messages that do not match what is typed.
+let searchSeq = 0
+async function search(): Promise<void> {
+  const seq = ++searchSeq
+  const kw = keyword.value.trim()
+  if (!props.conversationId || !kw) {
+    results.value = []
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const thread = await store.searchMessages(props.conversationId, kw)
+    if (seq === searchSeq) results.value = thread.messages
+  } catch (e) {
+    if (seq === searchSeq) message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    if (seq === searchSeq) loading.value = false
+  }
 }
+
+const onSearch = useDebounced(() => void search())
+
+// Reopening starts blank: a search still waiting or answering from the last
+// visit does not fill it.
+watch(() => props.show, (open) => {
+  if (!open) return
+  onSearch.cancel()
+  searchSeq += 1
+  keyword.value = ''
+  results.value = []
+  loading.value = false
+})
 
 function onResultClick(messageId: string) {
   // v1: surface the message id to the parent (scroll-to-message is a follow-up).
   emit('jump', messageId)
 }
-
-onUnmounted(() => { if (timer) clearTimeout(timer) })
 
 defineExpose({ keyword, results })
 </script>

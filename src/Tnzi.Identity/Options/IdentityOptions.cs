@@ -58,11 +58,6 @@ public class IdentityOptions
     public OAuthOptions OAuth { get; set; } = new();
 
     /// <summary>
-    /// 是否启用双因素认证
-    /// </summary>
-    public bool EnableTwoFactor { get; set; } = false;
-
-    /// <summary>
     /// 会话配置
     /// 配置路径：Identity:Session
     /// </summary>
@@ -289,6 +284,29 @@ public class RegistrationOptions
     public bool EnableQuickRegisterSms { get; set; } = false;
 
     /// <summary>
+    /// 第三方登录（Google / Microsoft / GitHub 等）遇到一个本地没有的身份时，是否就地建一个新账号。默认 <c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ <strong>此前这条路径没有任何开关。</strong>OAuth 回调找不到关联记录、邮箱也对不上任何人时，
+    /// 无条件建号并签发令牌：一个关着全部注册开关、只为员工开了 Google 登录的内部系统，
+    /// 任何有 Google 账号的陌生人点一下「用 Google 登录」就拿到了本地账号，能进每一个只要求登录的端点，
+    /// 而 <c>/auth/config</c> 报的是 <c>enableRegistration: false</c>。与 <see cref="EnableSelfRegistration"/> 当初是同一个缺口：
+    /// <b>隐藏的是入口，端点仍然可达</b>。
+    /// </para>
+    /// <para>
+    /// 关着时只挡「新建」：已关联的外部身份照常登录，提供商证实过的邮箱照常关联到同邮箱的既有账号，
+    /// 新来的身份得到 403 <c>IDENTITY_OAUTH_REGISTRATION_DISABLED</c>（回调页带着错误码交给前端）。
+    /// 先发邀请、再由本人从个人中心绑定第三方账号，是不开放注册的系统里接入第三方登录的方式。
+    /// 单独一个开关而不复用 <see cref="EnableSelfRegistration"/>：「允许用第三方身份开户」不等于「允许用户名 + 密码开户」。
+    /// ⚠ <b>运行时行为变更</b>：依赖第三方登录自动开户的部署升级后要显式设为 <c>true</c>。
+    /// </para>
+    /// </remarks>
+    [RuntimeSetting(Label = "Enable OAuth Registration", I18n = "admin.modules.system.settings.fields.enableOAuthRegistration", Type = SettingFieldType.Boolean, Subsection = "Registration",
+        Description = "Create a new account when someone signs in with a third-party provider (Google, Microsoft, GitHub, ...) and matches no existing account")]
+    public bool EnableOAuthRegistration { get; set; } = false;
+
+    /// <summary>
     /// 自助注册没填用户名时是否退回邮箱。只在 <see cref="TnziSignInOptions.UseEmailAsUserName"/>
     /// 关闭时有意义（开启时用户名总是邮箱）。
     /// </summary>
@@ -394,10 +412,11 @@ public class OtpOptions
     public int ResendIntervalSeconds { get; set; } = 60;
 
     /// <summary>
-    /// 最大验证失败次数
+    /// 每个 15 分钟窗口内允许的验证尝试次数：验证器（TOTP）按账号计，短信 / 邮件验证码按规范化后的收件地址计。
+    /// 超出后在窗口结束前一律 429，不再验码。
     /// </summary>
     [RuntimeSetting(Label = "Max Attempts", I18n = "admin.modules.system.settings.fields.otpMaxAttempts", Type = SettingFieldType.Int, Min = 1,
-        Description = "Maximum verification attempts before a code is rejected")]
+        Description = "Verification attempts allowed per account (authenticator) or per address (SMS and email codes) in a 15-minute window; further attempts are refused until the window ends")]
     public int MaxAttempts { get; set; } = 5;
 
     /// <summary>
@@ -714,12 +733,6 @@ public class AccountSecurityOptions
     /// </summary>
     [RuntimeSetting(Label = "New Device Risk Level", I18n = "admin.modules.system.settings.fields.accountSecurityNewDeviceRisk", Type = SettingFieldType.Int, Min = 0, Max = 100, Subsection = "Risk Scoring")]
     public int NewDeviceRiskLevel { get; set; } = 40;
-
-    /// <summary>
-    /// 位置变化风险等级（0-100）
-    /// </summary>
-    [RuntimeSetting(Label = "Location Change Risk Level", I18n = "admin.modules.system.settings.fields.accountSecurityLocationChangeRisk", Type = SettingFieldType.Int, Min = 0, Max = 100, Subsection = "Risk Scoring")]
-    public int LocationChangeRiskLevel { get; set; } = 60;
 
     /// <summary>
     /// 不可能旅行风险等级（0-100）

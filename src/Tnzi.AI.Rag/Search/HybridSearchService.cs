@@ -9,15 +9,23 @@ namespace Tnzi.AI.Rag.Search;
 /// </para>
 /// <para>
 /// 搜索管道：
-/// 1. 并行执行向量搜索（语义匹配）和关键词搜索（精确匹配）
-/// 2. 使用 RRF 算法融合两路结果：score = alpha/(k + rank_vector) + beta/(k + rank_keyword)
-/// 3. 按融合得分去重、排序、截取 topK
-/// 4. 可选经过 <see cref="IReranker"/> 重排序
-/// 5. 父文档窗口扩展（<c>ParentDocumentRetrieval.Enabled</c>）与图谱上下文片段（<c>GraphRag.Enabled</c>，仅知识库范围内）
+/// 1. 加载范围内仍可检索（存在且启用中）的知识库，按各库的嵌入配置分组生成查询向量
+/// 2. 并行执行向量搜索（语义匹配）和关键词搜索（精确匹配）
+/// 3. 使用 RRF 算法融合两路结果：score = alpha/(k + rank_vector) + beta/(k + rank_keyword)
+/// 4. 按融合得分去重、排序、截取 topK
+/// 5. 可选经过 <see cref="IReranker"/> 重排序
+/// 6. 父文档窗口扩展（<c>ParentDocumentRetrieval.Enabled</c>）与图谱上下文片段（<c>GraphRag.Enabled</c>，仅知识库范围内）
 ///    —— 与 <see cref="RagRetriever"/> / <see cref="VectorTextSearchService"/> 共用 <see cref="RetrievalAugmentation"/>
 /// </para>
 /// <para>
-/// 支持按知识库范围过滤（<see cref="TextSearchFilter.KnowledgeBaseIds"/>）：向量与关键词两路都逐库检索后再融合。
+/// 检索范围只来自 <see cref="TextSearchFilter.KnowledgeBaseIds"/>：向量与关键词两路都逐库检索后再融合。
+/// <b>没有范围就答空</b>，与 <see cref="VectorTextSearchService"/> 同一判据（<see cref="RetrievalAugmentation.ResolveKnowledgeBaseScope"/>）：
+/// 换成混合检索不能把 agent 侧的授权边界换掉。已禁用的知识库不进任何一路。
+/// </para>
+/// <para>
+/// ★ 查询向量按库对齐（与 <see cref="RagRetriever"/> 同一分组）：此前恒用全局默认嵌入配置，建库时指定了自己 provider/model 的库
+/// 在混合检索下按另一个向量空间的余弦排序，静默返回语义无关的块；不设全局默认、每库各配 provider（文档列为正常用法）时
+/// 嵌入直接失败，整次检索连关键词路一起答空。现在某一组嵌入失败只让该组的向量路缺席，关键词路照常返回。
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "Hybrid search is in preview")]
@@ -27,7 +35,9 @@ public class HybridSearchService : ApplicationService, ITextSearchService
     private readonly IKeywordSearchProvider _keywordSearchProvider;
     private readonly IEmbeddingService _embeddingService;
     private readonly IReranker _reranker;
+    private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
     private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly IRepository<DocumentChunk, Guid> _chunkRepository;
     private readonly AIRagOptions _ragOptions;
     private readonly HybridSearchOptions _hybridOptions;
     private readonly IGraphSearchService? _graphSearchService;
@@ -39,7 +49,9 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         IKeywordSearchProvider keywordSearchProvider,
         IEmbeddingService embeddingService,
         IReranker reranker,
+        IRepository<KnowledgeBase, Guid> kbRepository,
         IRepository<KnowledgeDocument, Guid> docRepository,
+        IRepository<DocumentChunk, Guid> chunkRepository,
         IOptionsSnapshot<AIRagOptions> ragOptions,
         IGraphSearchService? graphSearchService = null,
         IParentDocumentRetriever? parentDocumentRetriever = null) : base(serviceProvider)
@@ -48,7 +60,9 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         _keywordSearchProvider = Check.NotNull(keywordSearchProvider);
         _embeddingService = Check.NotNull(embeddingService);
         _reranker = Check.NotNull(reranker);
+        _kbRepository = Check.NotNull(kbRepository);
         _docRepository = Check.NotNull(docRepository);
+        _chunkRepository = Check.NotNull(chunkRepository);
         _ragOptions = Check.NotNull(ragOptions).Value;
         _hybridOptions = _ragOptions.HybridSearch;
         _graphSearchService = graphSearchService;
@@ -56,50 +70,60 @@ public class HybridSearchService : ApplicationService, ITextSearchService
     }
 
     /// <inheritdoc />
+    /// <remarks>不带过滤 = 没有知识库范围，恒答空（见类注释）。</remarks>
     public Task<IEnumerable<TextSearchResult>> SearchAsync(
         string query, int maxResults = 5, CancellationToken ct = default)
-        => SearchCoreAsync(query, knowledgeBaseIds: null, maxResults, ct);
+        => SearchAsync(query, filter: null, maxResults, ct);
 
     /// <inheritdoc />
     public Task<IEnumerable<TextSearchResult>> SearchAsync(
         string query, TextSearchFilter? filter, int maxResults = 5, CancellationToken ct = default)
-        => SearchCoreAsync(query, filter?.KnowledgeBaseIds, maxResults, ct);
-
-    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
-        string query, IReadOnlyList<Guid>? knowledgeBaseIds, int maxResults, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return [];
+            return Task.FromResult<IEnumerable<TextSearchResult>>([]);
         }
 
-        var kbIds = knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds.Distinct().ToList() : null;
+        var knowledgeBaseIds = RetrievalAugmentation.ResolveKnowledgeBaseScope(filter);
+        if (knowledgeBaseIds is null)
+        {
+            Logger.LogDebug("HybridSearchService skipped a search without a knowledge base scope it can enforce");
+            return Task.FromResult<IEnumerable<TextSearchResult>>([]);
+        }
 
+        return SearchCoreAsync(query, knowledgeBaseIds, maxResults, ct);
+    }
+
+    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
+        string query, IReadOnlyList<Guid> requestedKbIds, int maxResults, CancellationToken ct)
+    {
         try
         {
             using var activity = RagActivitySource.StartSearchActivity(maxResults);
             var sw = Stopwatch.StartNew();
 
-            // 1. 生成查询向量 - 使用 RAG 默认嵌入配置（provider/model 须与摄取对齐，
-            //    与 VectorTextSearchService.SearchCoreAsync 同范式；否则向量空间不一致）。
-            var defaultOptions = RagEmbeddingOptionsResolver.ResolveDefault(_ragOptions);
-            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, defaultOptions, ct);
-            if (!embeddingResult.Succeeded)
+            // 1. 范围内仍可检索的知识库（存在且启用中），按各库的嵌入配置生成查询向量。
+            //    这几步都要顺序做：加载知识库走本 scope 的 RagDbContext，关键词提供者也可能走它。
+            var knowledgeBases = await RetrievalAugmentation.LoadSearchableKnowledgeBasesAsync(
+                _kbRepository, requestedKbIds, Logger, ct);
+            if (knowledgeBases.Count == 0)
             {
-                Logger.LogWarning("Embedding generation failed for hybrid search: {Message}", embeddingResult.Message);
                 return [];
             }
 
+            var kbIds = knowledgeBases.Select(kb => kb.Id).ToList();
+            var queryVectors = await GenerateQueryVectorsAsync(query, knowledgeBases, ct);
+
             // 2. 并行执行向量搜索和关键词搜索（请求双倍数量以便融合后仍有足够结果）。
-            //    有知识库范围时两路都逐库检索后合并（关键词提供者按库过滤走 DB 侧，向量路径亦然）。
+            //    两路都逐库检索后合并（关键词提供者按库过滤走 DB 侧，向量路径亦然）。
             var fetchCount = maxResults * 2;
-            var vectorTask = SearchVectorAsync(embeddingResult.Data!, fetchCount, kbIds, ct);
+            var vectorTask = SearchVectorAsync(queryVectors, fetchCount, ct);
             var keywordTask = SearchKeywordAsync(query, fetchCount, kbIds, ct);
 
             await Task.WhenAll(vectorTask, keywordTask);
 
             var vectorResults = await vectorTask;
-            var keywordResults = await keywordTask;
+            var keywordResults = await ResolveMissingChunkIndexesAsync(await keywordTask, ct);
 
             Logger.LogDebug(
                 "Hybrid search fetched {VectorCount} vector results and {KeywordCount} keyword results",
@@ -159,34 +183,87 @@ public class HybridSearchService : ApplicationService, ITextSearchService
         }
     }
 
-    private async Task<List<VectorSearchResult>> SearchVectorAsync(float[] queryVector, int fetchCount, List<Guid>? kbIds, CancellationToken ct)
+    /// <summary>
+    /// 按 (provider, model) 分组为每组生成一次查询向量（与摄取、<see cref="RagRetriever"/> 同一解析）。
+    /// 某组失败只让该组的库缺席向量路，记一条警告；关键词路不受影响。
+    /// </summary>
+    private async Task<List<(float[] Vector, List<Guid> KnowledgeBaseIds)>> GenerateQueryVectorsAsync(
+        string query, IReadOnlyList<KnowledgeBase> knowledgeBases, CancellationToken ct)
     {
-        if (kbIds is null)
+        var queryVectors = new List<(float[] Vector, List<Guid> KnowledgeBaseIds)>();
+        foreach (var (embeddingOptions, groupKbIds) in RagEmbeddingOptionsResolver.GroupByEmbeddingConfig(knowledgeBases, _ragOptions))
         {
-            return await _vectorStore.SearchAsync(queryVector, fetchCount, ct: ct);
+            var embeddingResult = await _embeddingService.GenerateEmbeddingAsync(query, embeddingOptions, ct);
+            if (!embeddingResult.Succeeded)
+            {
+                Logger.LogWarning(
+                    "Embedding generation failed for hybrid search (provider={Provider}, model={Model}); {Count} knowledge bases are searched by keyword only: {Message}",
+                    embeddingOptions.Provider, embeddingOptions.Model, groupKbIds.Count, embeddingResult.Message);
+                continue;
+            }
+
+            queryVectors.Add((embeddingResult.Data!, groupKbIds));
         }
 
+        return queryVectors;
+    }
+
+    private async Task<List<VectorSearchResult>> SearchVectorAsync(
+        IReadOnlyList<(float[] Vector, List<Guid> KnowledgeBaseIds)> queryVectors, int fetchCount, CancellationToken ct)
+    {
         var merged = new List<VectorSearchResult>();
-        foreach (var kbId in kbIds)
+        foreach (var (vector, groupKbIds) in queryVectors)
         {
-            merged.AddRange(await _vectorStore.SearchAsync(queryVector, fetchCount, kbId, ct));
+            foreach (var kbId in groupKbIds)
+            {
+                merged.AddRange(await _vectorStore.SearchAsync(vector, fetchCount, kbId, ct));
+            }
         }
         return merged.OrderByDescending(r => r.Score).Take(fetchCount).ToList();
     }
 
-    private async Task<List<KeywordSearchResult>> SearchKeywordAsync(string query, int fetchCount, List<Guid>? kbIds, CancellationToken ct)
+    private async Task<List<KeywordSearchResult>> SearchKeywordAsync(string query, int fetchCount, List<Guid> kbIds, CancellationToken ct)
     {
-        if (kbIds is null)
-        {
-            return await _keywordSearchProvider.SearchAsync(query, fetchCount, ct: ct);
-        }
-
         var merged = new List<KeywordSearchResult>();
         foreach (var kbId in kbIds)
         {
             merged.AddRange(await _keywordSearchProvider.SearchAsync(query, fetchCount, kbId, ct));
         }
         return merged.OrderByDescending(r => r.Score).Take(fetchCount).ToList();
+    }
+
+    /// <summary>
+    /// 提供者没给出 <see cref="KeywordSearchResult.ChunkIndex"/> 的命中，按 <see cref="KeywordSearchResult.ChunkId"/> 一次回查分块表补上；
+    /// 分块表里已经没有的命中（文档刚被删）丢弃。框架自带的两个提供者都直接给出，不会走到回查。
+    /// </summary>
+    /// <remarks>
+    /// 不能「不知道就不写 chunkIndex」：父文档检索丢掉没有 chunkIndex 的结果、再用扩展结果整体替换原列表，关键词命中会直接消失。
+    /// </remarks>
+    private async Task<List<KeywordSearchResult>> ResolveMissingChunkIndexesAsync(List<KeywordSearchResult> keywordResults, CancellationToken ct)
+    {
+        var missing = keywordResults.Where(r => r.ChunkIndex is null).Select(r => r.ChunkId).Distinct().ToList();
+        if (missing.Count == 0)
+        {
+            return keywordResults;
+        }
+
+        var indexes = await _chunkRepository.AsQueryable()
+            .Where(c => missing.Contains(c.Id))
+            .Select(c => new { c.Id, c.ChunkIndex })
+            .ToDictionaryAsync(c => c.Id, c => c.ChunkIndex, ct);
+
+        return keywordResults
+            .Where(r => r.ChunkIndex is not null || indexes.ContainsKey(r.ChunkId))
+            .Select(r => r.ChunkIndex is not null ? r : new KeywordSearchResult
+            {
+                ChunkId = r.ChunkId,
+                Content = r.Content,
+                DocumentId = r.DocumentId,
+                KnowledgeBaseId = r.KnowledgeBaseId,
+                ChunkIndex = indexes[r.ChunkId],
+                Score = r.Score
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -235,7 +312,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
             }
             else
             {
-                // 仅关键词搜索有此块
+                // 仅关键词搜索有此块：块索引取提供者给的（经 ResolveMissingChunkIndexesAsync 补齐）
                 fusedScores[result.ChunkId] = new FusedEntry
                 {
                     VectorResult = new VectorSearchResult
@@ -244,7 +321,7 @@ public class HybridSearchService : ApplicationService, ITextSearchService
                         Content = result.Content,
                         DocumentId = result.DocumentId,
                         KnowledgeBaseId = result.KnowledgeBaseId,
-                        ChunkIndex = 0 // 关键词搜索不返回 ChunkIndex
+                        ChunkIndex = result.ChunkIndex ?? 0
                     },
                     Score = rrfScore
                 };

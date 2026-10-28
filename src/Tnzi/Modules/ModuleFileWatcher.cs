@@ -56,7 +56,7 @@ public class ModuleFileWatcher : IDisposable
                 return;
             }
 
-            var watchPath = _options.WatchDirectory ?? AppContext.BaseDirectory;
+            var watchPath = ResolveWatchPath(_options.WatchDirectory);
             if (!Directory.Exists(watchPath))
             {
                 _logger.LogWarning("Watch directory does not exist: {WatchPath}", watchPath);
@@ -85,6 +85,20 @@ public class ModuleFileWatcher : IDisposable
 
             _logger.LogInformation("Started watching module files in: {WatchPath}", watchPath);
         }
+    }
+
+    /// <summary>
+    /// 相对路径按应用程序根目录解析（与默认值同一基准），不按进程工作目录：Windows 服务的工作目录是 system32，
+    /// 从别的目录启动的进程也不在应用目录下，相对路径交给 <see cref="FileSystemWatcher"/> 会落到错误位置。
+    /// </summary>
+    private static string ResolveWatchPath(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+            return AppContext.BaseDirectory;
+
+        return Path.IsPathFullyQualified(configured)
+            ? configured
+            : Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, configured));
     }
 
     /// <summary>

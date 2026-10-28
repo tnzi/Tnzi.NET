@@ -4,8 +4,8 @@ namespace Tnzi.AI.Infrastructure.Memory;
 /// LLM 驱动的记忆合并器 - 通过语义比对决定 ADD/UPDATE/DELETE/NOOP
 /// </summary>
 /// <remarks>
-/// 所有失败（LLM 超时、速率限制、网络错误、空响应、无效 JSON）均降级为 Add。
-/// 此类不会向调用方抛出异常。
+/// 所有失败（LLM 超时、速率限制、网络错误、空响应、无效 JSON）均降级为 Add；
+/// UPDATE / DELETE 没有点名一条候选记忆时同样降级为 Add。此类不会向调用方抛出异常。
 /// </remarks>
 public class LlmMemoryConsolidator : IMemoryConsolidator
 {
@@ -86,14 +86,20 @@ public class LlmMemoryConsolidator : IMemoryConsolidator
                 : null;
 
             Guid? targetId = null;
-            if (root.TryGetProperty("targetId", out var targetProp) &&
-                Guid.TryParse(targetProp.GetString(), out var parsed))
+            if (root.TryGetProperty("targetId", out var targetProp)
+                && targetProp.ValueKind == JsonValueKind.String
+                && Guid.TryParse(targetProp.GetString(), out var parsed)
+                && existing.Any(m => m.Id == parsed))
             {
                 targetId = parsed;
             }
-            else if (action is MemoryAction.Update or MemoryAction.Delete && existing.Count > 0)
+
+            // UPDATE / DELETE 必须点名候选里的某一条：没点名、点名的不是候选（模型编造的 id），
+            // 都不替它猜一条去改写或删除，按新增处理：多存一条可以再合并，删错的记忆找不回来
+            if (action is MemoryAction.Update or MemoryAction.Delete && targetId == null)
             {
-                targetId = existing.OrderByDescending(m => m.Score).First().Id;
+                _logger.LogDebug("Consolidation answered {Action} without a known target, falling back to Add", action);
+                return new MemoryConsolidationResult(MemoryAction.Add);
             }
 
             return new MemoryConsolidationResult(action, content, targetId);
@@ -110,7 +116,7 @@ public class LlmMemoryConsolidator : IMemoryConsolidator
         Decide ONE action:
         - ADD: New memory contains novel information not in existing memories
         - UPDATE: New memory updates/supersedes an existing memory (return the merged content)
-        - DELETE: New memory contradicts an existing memory that should be removed
+        - DELETE: New memory contradicts an existing memory; the existing one is removed and the new memory is stored
         - NOOP: New memory is redundant (already covered by existing memories)
 
         Return JSON only: {"action": "add|update|delete|noop", "content": "updated content if action=update, else null", "targetId": "id of existing memory to update/delete, else null"}

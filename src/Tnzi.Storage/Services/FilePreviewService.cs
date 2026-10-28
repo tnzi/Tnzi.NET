@@ -95,9 +95,10 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
     /// <c>UrlPrefix</c> 时甚至回的是相对键而不是 URL；两种形态都把 <c>FileRecordDto</c> 刻意不外露的
     /// 存储键交了出去。需要直连对象存储的调用方走 <c>presigned-url</c>（有 TTL 上限、有 <c>[SensitiveEndpoint]</c>）。
     /// <para>
-    /// 两条 API 路由按类型分：浏览器能直接显示的类型（<see cref="FileTypeHelper.IsInlineRenderable"/>）回
+    /// 两条 API 路由按类型分：浏览器能直接显示的类型（<see cref="FileTypeHelper.IsInlineRenderable"/>）与所有图片
+    /// （含 SVG，那条路由把它按附件发出、<c>&lt;img&gt;</c> 里照常渲染）回
     /// <c>/api/files/{id}/preview</c> —— 匿名可达（公开文件 / <c>?sig=</c>）、每次都过授权器、带缓存头，
-    /// <c>&lt;img src&gt;</c> 在 Bearer 交付模式下拼上 <c>sig</c> 就能加载；其余类型（Office 转 PDF、SVG 等）回
+    /// <c>&lt;img src&gt;</c> 在 Bearer 交付模式下拼上 <c>sig</c> 就能加载；其余类型（Office 转 PDF、源码类文本等）回
     /// <c>/api/files/preview/{id}/preview?type=…</c>，那个控制器是类级 <c>[ApiAuthorize]</c>，登录才可达，
     /// 也只有它会做转换。
     /// </para>
@@ -107,9 +108,10 @@ public class FilePreviewService : ApplicationService, IFilePreviewService
         if (fileRecord == null || string.IsNullOrEmpty(fileRecord.Path))
             return Task.FromResult(string.Empty);
 
-        // 路由对应 DefaultStorageController：[Route("files")] + [HttpGet("{id:guid}/preview")]，
-        // 与它内联的判据同一个（不在白名单里的类型那条路由会按附件发出，装不进 <img>）。
-        if (FileTypeHelper.IsInlineRenderable(fileRecord.ContentType))
+        // 路由对应 DefaultStorageController：[Route("files")] + [HttpGet("{id:guid}/preview")]。
+        // 图片一律走它，含不在内联白名单里的 SVG：那条路由对 SVG 按附件发出、保留 image/svg+xml 并带 sandbox，
+        // <img> 加载子资源不理会 Content-Disposition，照样渲染；它也不要求登录，拼上 sig 就进得了 <img>。
+        if (FileTypeHelper.IsInlineRenderable(fileRecord.ContentType) || FileTypeHelper.IsImage(fileRecord.Extension))
             return Task.FromResult($"/api/files/{fileRecord.Id}/preview");
 
         // 路由对应 DefaultStoragePreviewController：[Route("files/preview")] + [HttpGet("{id:guid}/preview")]，

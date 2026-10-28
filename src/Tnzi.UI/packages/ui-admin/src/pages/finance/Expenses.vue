@@ -126,6 +126,7 @@ import { useSafeMessage } from '../_shared/safe-message'
 import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
 import { amountCell, fmtAmount, fmtDate } from './money'
+import { useViewedRecord } from './viewed-record'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './components/DocumentEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -141,15 +142,23 @@ const columns = buildDocumentColumns(t, 'vendorName', { showApplied: false, show
 // 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
 // TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
 const searchFields = buildDocumentSearchFields(td, {
-  renderParty: (model) =>
-    h(TPartySelect, {
-      modelValue: (model.partyId as string) ?? null,
-      bridge,
-      kind: 'vendor',
-      size: 'small',
-      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
-    }),
+  party: {
+    key: 'vendorId',
+    render: (model, key) =>
+      h(TPartySelect, {
+        modelValue: (model[key] as string) ?? null,
+        bridge,
+        kind: 'vendor',
+        size: 'small',
+        'onUpdate:modelValue': (v: string | null) => (model[key] = v ?? undefined),
+      }),
+  },
 })
+
+// The full record behind the read-only drawer. Last-wins: a late answer for
+// the row opened before must not paint the drawer of the one open now.
+const viewing = useViewedRecord<ExpenseDto>((id) => bridge.expenses.getById(id), (error) => message.error(error))
+const viewed = viewing.record
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.expenses',
@@ -159,7 +168,7 @@ const crud = useCrudPage<FinanceDocRow>({
   fetchData: (q) => bridge.expenses.fetch(q),
   // Deep-link cold restore (?detail=view:<id>) hydrates even off-page rows.
   loadDetailById: (id) => bridge.expenses.getById(id),
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 const title = 'tnzi.admin.modules.finance.expenses.title'
@@ -177,17 +186,6 @@ function methodLabel(method?: string | null): string {
 }
 
 // ── Read-only detail ────────────────────────────────────────────
-const viewed = ref<ExpenseDto | null>(null)
-
-async function loadViewed(row: FinanceDocRow) {
-  viewed.value = null
-  try {
-    viewed.value = await bridge.expenses.getById(String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
 const lineColumns: DataTableColumns<ExpenseDto['lines'][number]> = [
   { key: 'lineNumber', title: '#', width: 48 },
   { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? EMPTY_DASH },
@@ -212,6 +210,7 @@ const editingEntry = computed<EditableDocument | null>(() => {
     docDate: d.docDate,
     dueDate: null,
     currency: d.currency,
+    exchangeRate: d.exchangeRate,
     memo: d.memo,
     lines: d.lines,
   }
@@ -242,18 +241,22 @@ function openEdit(row: FinanceDocRow) {
 }
 
 async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
+  // The update replaces the draft: the rate and the per-line tax override are
+  // carried by the editor even though it has no control for them.
   const data: CreateExpenseDto = {
     vendorId: payload.partyId,
     paidFromAccountId: payload.paidFromAccountId!,
     paymentMethod: payload.paymentMethod,
     docDate: payload.docDate,
     currency: payload.currency,
+    exchangeRate: payload.exchangeRate,
     memo: payload.memo,
     lines: payload.lines.map((l) => ({
       description: l.description,
       accountId: l.accountId!,
       amount: l.amount,
       taxCodeId: l.taxCodeId,
+      taxAmount: l.taxAmount,
     })),
   }
 

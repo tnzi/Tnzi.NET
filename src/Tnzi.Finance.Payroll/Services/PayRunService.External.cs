@@ -21,6 +21,11 @@ public partial class PayRunService
             return Fail<PayRunDto>("At least one payslip is required.", 400);
 
         var providerRunId = input.ProviderRunId.Trim();
+        var tooLong = PayrollFieldLimits.FirstTooLong(
+            (providerRunId, PayrollFieldLimits.ProviderRunIdMaxLength, "ProviderRunId"),
+            (input.Memo, PayrollFieldLimits.MemoMaxLength, "memo"));
+        if (tooLong != null)
+            return Fail<PayRunDto>(tooLong, 400);
 
         // 幂等：已存在则返回赢家（External + AutoPost 且 Calculated 无错则自愈过账）
         var existing = await _runRepo.AsNoTracking().FirstOrDefaultAsync(r => r.ProviderRunId == providerRunId, cancellationToken);
@@ -58,6 +63,11 @@ public partial class PayRunService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            // ★ 失败的整张图（批次、工资单、行）先从跟踪器里摘掉，再做任何查询或过账：
+            // 它们仍是 Added，下面赢家的自愈过账（PostAsync 在同一作用域里提交）会把它们再插一次、
+            // 再撞一次唯一索引，异常冲出本方法，调用方拿到 500 而不是「返回赢家」。Discard 不级联，故逐个摘。
+            DiscardIngestGraph(run);
+
             // 并发摄取：返回赢家
             var winner = await _runRepo.AsNoTracking().FirstOrDefaultAsync(r => r.ProviderRunId == providerRunId, cancellationToken);
             if (winner != null)
@@ -65,6 +75,8 @@ public partial class PayRunService
                 await SelfHealPostAsync(winner, cancellationToken);
                 return await GetAsync(winner.Id, cancellationToken);
             }
+
+            _logger.LogError(ex, "External pay run {ProviderRunId} hit a unique constraint other than its provider run id.", providerRunId);
             return Fail<PayRunDto>("Failed to ingest the external pay run.", 500);
         }
 
@@ -79,6 +91,18 @@ public partial class PayRunService
 
         await SelfHealPostAsync(run, cancellationToken);
         return await GetAsync(run.Id, cancellationToken);
+    }
+
+    private void DiscardIngestGraph(PayRun run)
+    {
+        // 先拍快照：摘掉一个实体时 EF 的导航修正会从集合里移除它。
+        foreach (var payslip in run.Payslips.ToList())
+        {
+            foreach (var line in payslip.Lines.ToList())
+                _lineRepo.Discard(line);
+            _payslipRepo.Discard(payslip);
+        }
+        _runRepo.Discard(run);
     }
 
     private async Task SelfHealPostAsync(PayRun run, CancellationToken cancellationToken)
@@ -129,11 +153,16 @@ public partial class PayRunService
         };
 
         var payslips = new List<Payslip>();
+        var seenEmployees = new HashSet<Guid>();
         foreach (var ext in input.Payslips)
         {
             var employeeCode = ext.EmployeeCode?.Trim();
             if (string.IsNullOrWhiteSpace(employeeCode) || !employees.TryGetValue(employeeCode, out var employee))
                 return Result.Failure<PayRun>($"Employee '{ext.EmployeeCode}' is not registered; create the employee before ingesting.", 400);
+            // 一个批次里每人至多一张工资单（唯一索引如此）。不在这里挡，撞索引的那一下会被当成
+            // 「并发摄取」处理，找不到赢家，调用方拿到一个不点名的 500。
+            if (!seenEmployees.Add(employee.Id))
+                return Result.Failure<PayRun>($"Employee '{employeeCode}' appears more than once; send one payslip per employee.", 400);
             if (ext.Lines == null || ext.Lines.Count == 0)
                 return Result.Failure<PayRun>($"Payslip for employee '{employeeCode}' has no lines.", 400);
 

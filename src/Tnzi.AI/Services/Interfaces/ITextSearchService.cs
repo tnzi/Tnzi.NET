@@ -40,4 +40,16 @@ public interface ITextSearchService
         int maxResults = 5,
         CancellationToken ct = default)
         => SearchAsync(query, maxResults, ct);
+
+    /// <summary>
+    /// 本实现是否支持对话范围检索：检索的是已索引的聊天历史，并且真正按 <see cref="TextSearchFilter.UserId"/> /
+    /// <see cref="TextSearchFilter.ThreadId"/>（以及 AgentId / CollectionName）限定结果。
+    /// </summary>
+    /// <remarks>
+    /// 聊天历史记忆（<c>ChatHistoryMemoryProvider</c>）只在它为 true 时工作。默认 false：框架内置的检索实现
+    /// （向量检索与混合检索）只认 <see cref="TextSearchFilter.KnowledgeBaseIds"/>，其余字段原样忽略，
+    /// 拿去做「历史对话」检索会退化成跨全部知识库的检索，绕过 Agent 的知识库授权，结果还被当作以前的对话注入。
+    /// 提供聊天历史索引的实现覆写为 true，并保证上述字段确实限定了结果。
+    /// </remarks>
+    bool SupportsConversationScope => false;
 }

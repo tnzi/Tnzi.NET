@@ -19,6 +19,9 @@ public class AgentValidationServiceTests
 
         chatClientFactory.Setup(x => x.GetAvailableProviders()).Returns(["OpenAI", "Anthropic"]);
         chatClientFactory.Setup(x => x.GetDefaultModel(It.IsAny<string?>())).Returns("gpt-4");
+        // 按名解析：配置里的两个，加上一个只在库里登记的（管理端「提供商」页新建的那种）
+        chatClientFactory.Setup(x => x.IsProviderAvailable(It.IsAny<string>()))
+            .Returns((string name) => name is "OpenAI" or "Anthropic" or DatabaseOnlyProvider);
         toolRegistry.Setup(x => x.GetAllGroupNames()).Returns(["web_search", "code_tools", "file_tools"]);
 
         var services = new ServiceCollection();
@@ -104,6 +107,34 @@ public class AgentValidationServiceTests
         var details = providerCheck.Details;
         details.ShouldNotBeNull();
         details.ShouldContain("NonExistent");
+    }
+
+    private const string DatabaseOnlyProvider = "Moonshot";
+
+    /// <summary>
+    /// 只在库里登记的提供商不在配置名单（GetAvailableProviders）里，却能正常对话：校验要按名问工厂，
+    /// 否则 Agent 详情页的校验按钮把一个可用的提供商报成「未注册」。
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_DatabaseRegisteredProvider_PassesProviderCheck()
+    {
+        var agentId = Guid.NewGuid();
+        var agent = new Agent
+        {
+            Id = agentId,
+            Name = "Test Agent",
+            Provider = DatabaseOnlyProvider,
+            Model = "moonshot-v1",
+            ExecutionMode = AgentExecutionMode.Single
+        };
+
+        var agentRepo = new Mock<IRepository<Agent, Guid>>();
+        agentRepo.Setup(x => x.GetAsync(agentId, It.IsAny<CancellationToken>())).ReturnsAsync(agent);
+
+        var result = await CreateService(agentRepo, skillRegistry: Mock.Of<ISkillRegistry>()).ValidateAsync(agentId);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Checks.First(c => c.Name == "provider").Passed.ShouldBeTrue();
     }
 
     [Fact]

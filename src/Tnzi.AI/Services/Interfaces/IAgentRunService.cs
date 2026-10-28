@@ -20,7 +20,10 @@ public interface IAgentRunService
     /// <summary>获取指定节点详情</summary>
     Task<Result<AgentRunNodeDto>> GetNodeAsync(Guid runId, Guid nodeId);
 
-    /// <summary>取消运行</summary>
+    /// <summary>
+    /// 把运行行翻转为 Cancelled。★只改行状态，不停止正在执行的运行：要真正停下来（触发后台任务的取消令牌、
+    /// 取消关联的工作流执行）走 <see cref="IAgentRuntimeControlService.KillAsync"/>，它在内部调用本方法。
+    /// </summary>
     Task<Result> CancelAsync(Guid runId);
 
     /// <summary>恢复运行</summary>

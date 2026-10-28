@@ -16,7 +16,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 
 const totalUsers = ref<number | null>(null)
@@ -33,7 +33,7 @@ useWidgetData(async () => {
   // semantics as the sidebar), so a business admin's dashboard doesn't fire a
   // doomed request that lands as console 403 noise. Skipped → em-dash rows.
   const canSeeSessions =
-    authStore.isSuperUser || authStore.userInfo === null || authStore.hasPermission('session.view')
+    authStore.bypassesPermissionChecks || authStore.userInfo === null || authStore.hasPermission('session.view')
 
   // Parallel fetch - neither depends on the other.
   const [stats, users] = await Promise.allSettled([
@@ -54,7 +54,7 @@ useWidgetData(async () => {
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 
 function fmt(n: number | null): string {

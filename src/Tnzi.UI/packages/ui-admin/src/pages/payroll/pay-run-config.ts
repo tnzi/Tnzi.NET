@@ -18,10 +18,12 @@ export interface PayRunRow {
   frequency?: PayFrequency
   source?: string
   employeeCount?: number
-  errorCount?: number
   grossTotal?: number
   netTotal?: number
   creationTime?: string
+  /** Carried by the list row so an edit opened from it writes them back unchanged. */
+  structureId?: string | null
+  memo?: string | null
 }
 
 /** naive TStatusBadge type per pay-run status. */

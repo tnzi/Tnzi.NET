@@ -24,4 +24,31 @@ public static class ExceptionHttpStatusCode
             _ => StatusCodes.Status500InternalServerError,
         };
     }
+
+    /// <summary>
+    /// 一个从下游抛到观测类中间件的异常，客户端最终会收到哪个状态码：响应已开始就是已经发出的那个；
+    /// 客户端自己断开（<c>RequestAborted</c> 已触发的取消）是 499，与异常处理中间件的处置一致；
+    /// 其余按 <see cref="Resolve(Exception)"/> 折算。
+    /// </summary>
+    /// <remarks>
+    /// 只用 <see cref="Resolve(Exception)"/> 的话，关页面、导航走引起的取消会被记成 500，
+    /// 「服务器错误」的统计里混进客户端行为；而响应已开始后抛出的异常，客户端收到的仍是已发出的那个码。
+    /// </remarks>
+    public static int Resolve(HttpContext context, Exception exception)
+    {
+        Check.NotNull(context);
+        Check.NotNull(exception);
+
+        if (context.Response.HasStarted)
+        {
+            return context.Response.StatusCode;
+        }
+
+        if (exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested)
+        {
+            return StatusCodes.Status499ClientClosedRequest;
+        }
+
+        return Resolve(exception);
+    }
 }

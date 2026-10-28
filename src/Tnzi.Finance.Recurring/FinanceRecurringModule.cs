@@ -27,7 +27,7 @@ public class FinanceRecurringModule : TnziApplicationModule
     public override string? TableNamePrefix => "Finance";
 
     /// <inheritdoc />
-    /// <remarks>59：Finance(55) / Payroll·Ai(56) / Banking(57) / Documents(58) 之后。</remarks>
+    /// <remarks>59：Finance(55) / Payroll(56) / Banking(57) / Documents·Ai(58) 之后。</remarks>
     public override int LoadOrder => 59;
 
     /// <inheritdoc />

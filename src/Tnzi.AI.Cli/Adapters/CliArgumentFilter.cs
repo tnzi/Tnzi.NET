@@ -74,6 +74,26 @@ public static class CliArgumentFilter
     /// 只处理两种形态：<c>--flag='value'</c>（只剥值）与 <c>'standalone'</c>。
     /// 不做转义处理 —— 那需要一个真正的 shell 词法器，而这里的目的只是补救最常见的手误。
     /// </remarks>
+    /// <summary>
+    /// 合并被禁参数表：provider 的协议契约参数，加上这次运行由框架接管的开关（启动档案、权限档位带来的）。
+    /// </summary>
+    /// <remarks>后面的表与前面的同名时取后面的匹配模式。</remarks>
+    public static IReadOnlyDictionary<string, BlockedArgMode> Combine(params IReadOnlyDictionary<string, BlockedArgMode>[] tables)
+    {
+        Check.NotNull(tables);
+
+        var combined = new Dictionary<string, BlockedArgMode>(StringComparer.Ordinal);
+        foreach (var table in tables)
+        {
+            foreach (var (flag, mode) in table)
+            {
+                combined[flag] = mode;
+            }
+        }
+
+        return combined;
+    }
+
     private static string Unquote(string argument)
     {
         if (argument.StartsWith('-'))

@@ -21,6 +21,12 @@ export interface SettingsSectionGroup {
   sections: readonly SettingsSection[]
 }
 
+/**
+ * On a narrow screen the section list and the selected section are two screens
+ * of one sheet instead of two columns: which of them is showing.
+ */
+export type SettingsNarrowView = 'sections' | 'section'
+
 export interface UseSettingsDialogOptions {
   sections: Ref<readonly SettingsSection[]>
   initialSection?: string
@@ -40,9 +46,18 @@ export interface UseSettingsDialogReturn {
   query: Ref<string>
   /** Sections grouped by heading, already filtered by `query`. */
   groupedSections: ComputedRef<readonly SettingsSectionGroup[]>
+  /**
+   * The screen a narrow layout shows. `show()` opens on the section list unless
+   * it was asked for a section, and picking a section moves to it; the wide
+   * two-column layout ignores this.
+   */
+  narrowView: Ref<SettingsNarrowView>
   show: (sectionId?: string) => void
   hide: () => void
+  /** Select a section (and, on a narrow screen, move to it). Unknown ids are ignored. */
   setSection: (id: string) => void
+  /** Back from a section to the section list (narrow layout). */
+  showSections: () => void
   markDirty: () => void
   clearDirty: () => void
 }
@@ -60,6 +75,7 @@ export function useSettingsDialog(options: UseSettingsDialogOptions): UseSetting
   const isDirty = ref(false)
 
   const query = ref('')
+  const narrowView = ref<SettingsNarrowView>('sections')
 
   const currentSection = computed(() => {
     return sections.value.find((s) => s.id === activeSection.value) ?? null
@@ -88,12 +104,22 @@ export function useSettingsDialog(options: UseSettingsDialogOptions): UseSetting
   function setSection(id: string): void {
     if (sections.value.some((s) => s.id === id)) {
       activeSection.value = id
+      narrowView.value = 'section'
     }
   }
 
+  /* Asked for a section ("Account" from the account menu), the dialog opens on
+     it; opened plainly ("Settings"), a narrow sheet opens on the list, which is
+     where a phone user expects to start. The selected section is kept either
+     way, so the wide layout still reopens where the user left off. */
   function show(sectionId?: string): void {
+    narrowView.value = 'sections'
     if (sectionId) setSection(sectionId)
     open.value = true
+  }
+
+  function showSections(): void {
+    narrowView.value = 'sections'
   }
 
   function hide(): void {
@@ -119,9 +145,11 @@ export function useSettingsDialog(options: UseSettingsDialogOptions): UseSetting
     currentSection,
     query,
     groupedSections,
+    narrowView,
     show,
     hide,
     setSection,
+    showSections,
     markDirty,
     clearDirty,
   }

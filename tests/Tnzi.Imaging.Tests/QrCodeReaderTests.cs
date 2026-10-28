@@ -178,6 +178,21 @@ public class QrCodeReaderTests
         ex.Message.ShouldContain("10000");
     }
 
+    /// <summary>
+    /// 边长检查只约束一帧：多页 TIFF 的次页可以声明任意尺寸（下面这份只有几百字节），
+    /// 全部解出来时 ImageSharp 先给每一页分配位图，最后才报「尺寸不一致不支持」。
+    /// 读码只看首页，其余页既不解也不分配。
+    /// </summary>
+    [Fact]
+    public async Task ReadAsync_OnAMultiPageTiff_DecodesOnlyTheFirstPage()
+    {
+        var bytes = TiffSamples.ClassicPages(pixelDataLimit: 64, (8, 8), (3000, 2000));
+
+        var result = await Reader.ReadAsync(bytes);
+
+        result.ShouldBe(QrCodeScanResult.NotFound);
+    }
+
     [Fact]
     public void PureBarcodeHint_IsNeverSet()
     {

@@ -106,12 +106,9 @@ public static class ChatHistoryHelper
                     var resultText = result.Result?.ToString();
                     if (!string.IsNullOrEmpty(resultText))
                     {
-                        // 截断过长的工具输出
+                        // 截断过长的工具输出（截断点落在代理对中间时整个字符一起舍掉）
                         const int maxLength = 500;
-                        if (resultText.Length > maxLength)
-                        {
-                            resultText = resultText[..maxLength] + "...(truncated)";
-                        }
+                        resultText = resultText.Truncate(maxLength, "...(truncated)");
                         sb.Append($"[Tool Result: {resultText}]");
                     }
                     else

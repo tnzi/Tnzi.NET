@@ -49,11 +49,14 @@ public partial class AIModule : TnziApplicationModule
         // AiUtilityOptions 由核心的 CoreServicesModule 绑定（契约与默认实现已下沉到核心），
         // 此处重复绑定会让同一个验证器注册两次，故刻意不绑。
         BindAndValidate<ThreadOptions, ThreadOptionsValidator>(context, "AI:Thread");
+        BindAndValidate<AiChatOptions, AiChatOptionsValidator>(context, "AI:Chat");
         BindAndValidate<LoopDetectionOptions, LoopDetectionOptionsValidator>(context, "AI:LoopDetection");
         BindAndValidate<SubAgentOptions, SubAgentOptionsValidator>(context, "AI:SubAgent");
         BindAndValidate<BudgetOptions, BudgetOptionsValidator>(context, "AI:Budget");
+        BindAndValidate<UsageLimitOptions, UsageLimitOptionsValidator>(context, "AI:UsageLimits");
         BindAndValidate<SuggestionOptions, SuggestionOptionsValidator>(context, "AI:Suggestions");
         BindAndValidate<TodoOptions, TodoOptionsValidator>(context, "AI:Todo");
+        BindAndValidate<WidgetOptions, WidgetOptionsValidator>(context, "AI:Widgets");
         BindAndValidate<Tools.Sql.SqlToolOptions, Tools.Sql.SqlToolOptionsValidator>(context, "AI:Sql");
         BindAndValidate<PortAllocatorOptions, PortAllocatorOptionsValidator>(context, "AI:PortAllocator");
 
@@ -127,6 +130,11 @@ public partial class AIModule : TnziApplicationModule
         // SQL 工具套件的连接工厂回退（同样依赖 Post 阶段的时序，理由见该方法注释）。
         RegisterSqlConnectionFactoryFallback(context.Services);
 
+        // 聊天 Agent 策略的默认实现（按 AI:Chat 配置）。放在 Post 阶段：消费方在 Configure 阶段的任何注册
+        // （TryAdd 或 Add）都先于它，替换它不需要任何约定；放在 Configure 阶段的话，消费方一用 TryAdd 就被这里挡掉，
+        // 症状是「注册了自己的策略，聊天照旧按配置放行」。
+        context.Services.TryAddScoped<IChatAgentPolicy, ConfiguredChatAgentPolicy>();
+
         return Task.CompletedTask;
     }
 
@@ -143,6 +151,10 @@ public partial class AIModule : TnziApplicationModule
 
         // 交叉校验预算与成本追踪（预算开着却产不出成本 = 一道恒判通过的闸门）
         ValidateBudgetCostWiring(serviceProvider, logger);
+        ValidateUsageLimitCostWiring(serviceProvider, logger);
+
+        // 配置了需要审批的工具时，说出由谁来答（默认的自动批准处理器 = 人工闸门里没有人）
+        ValidateApprovalHandlerWiring(serviceProvider, logger);
 
         // 扫描并注册工具（在应用初始化阶段执行一次）
         var toolRegistry = serviceProvider.GetRequiredService<IToolRegistry>();
@@ -213,6 +225,23 @@ public partial class AIModule : TnziApplicationModule
             if (!builtInOptions.EnableMemory) toolRegistry.UnregisterByProviderType(typeof(MemoryTools));
         }
 
+        // 内联小部件：工具与运行页同开同关。没开时把 show_widget 从注册表摘掉，
+        // 免得授予了 widget 组的 agent 画出一个客户端无处可装的小部件。
+        var widgetOptions = serviceProvider.GetRequiredService<IOptions<WidgetOptions>>().Value;
+        if (!widgetOptions.Enabled)
+        {
+            toolRegistry.UnregisterByProviderType(typeof(WidgetTools));
+        }
+        else if (context.WebApp != null)
+        {
+            context.WebApp.MapWidgetRunner(widgetOptions);
+            logger.LogInformation("Mapped the inline widget runner at {RunnerPath}", widgetOptions.RunnerPath);
+        }
+        else
+        {
+            logger.LogWarning("AI:Widgets is enabled but no WebApplication is available; the widget runner page was not mapped");
+        }
+
         // 从数据库加载持久化的子 Agent 类型定义
         try
         {
@@ -229,15 +258,13 @@ public partial class AIModule : TnziApplicationModule
             logger.LogWarning(ex, "Failed to load sub-agent type definitions from database. Using built-in types only.");
         }
 
-        // Memory 工具依赖 ContextProviders 的记忆召回能力 —— 如果召回不可用，
-        // 注册 save_memory 工具只会产生永远不会被想起的记忆，误导 AI 和用户。
-        // 移除整个 "memory" 工具组（包含框架内置和应用自定义的 memory 工具）。
+        // Memory 工具依赖 ContextProviders 的记忆召回能力：召回关着时整个 "memory" 组不交给模型。
+        // 判定在 ToolResolver 每次解析时按当前配置做（Memory.Enabled 是运行时设置），这里不从注册表删组。
         var contextProviders = aiOptions.ContextProviders;
         if (!contextProviders.Enabled || !contextProviders.Memory.Enabled)
         {
-            toolRegistry.UnregisterGroup("memory");
             logger.LogInformation(
-                "Memory tool group disabled: ContextProviders.Enabled={ContextEnabled}, Memory.Enabled={MemoryEnabled}. " +
+                "Memory tools are withheld from agents while recall is off: ContextProviders.Enabled={ContextEnabled}, Memory.Enabled={MemoryEnabled}. " +
                 "Enable both to allow AI to save and recall memories",
                 contextProviders.Enabled, contextProviders.Memory.Enabled);
         }

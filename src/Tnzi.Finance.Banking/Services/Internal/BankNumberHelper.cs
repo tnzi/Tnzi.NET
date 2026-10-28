@@ -6,6 +6,11 @@ namespace Tnzi.Finance.Banking.Services.Internal;
 /// <remarks>
 /// US ABA：9 位数字 + mod-10 校验位（3·7·1 加权）；CA EFT：机构号 3 位 + transit 号 5 位。
 /// 掩码保留尾 4 位，其余以 <c>*</c> 表示，供列表展示（明文永不回 UI）。
+/// <para>
+/// ★ 「数字」一律指 ASCII 0-9（<see cref="char.IsAsciiDigit"/>），不是 <see cref="char.IsDigit(char)"/>：
+/// 后者认全部 Unicode 十进制数字，全角输入法敲的「１２３４５」会存进档案、装进批次，几天后才在生成时
+/// 失败（NACHA 的 <c>long.Parse</c> 直接 500），白纸支票的 MICR 行还会印出全角字形。录入与生成同一判据。
+/// </para>
 /// </remarks>
 internal static class BankNumberHelper
 {
@@ -20,8 +25,8 @@ internal static class BankNumberHelper
                 if (string.IsNullOrWhiteSpace(routingNumber))
                     return Result.Success();
                 var routing = routingNumber.Trim();
-                if (routing.Length != 9 || !routing.All(char.IsDigit))
-                    return Result.Failure("A US ABA routing number must be exactly 9 digits.", 400);
+                if (routing.Length != 9 || !routing.All(char.IsAsciiDigit))
+                    return Result.Failure("A US ABA routing number must be exactly 9 digits (0-9).", 400);
                 if (!IsValidAbaChecksum(routing))
                     return Result.Failure("The US ABA routing number failed its mod-10 checksum.", 400);
                 return Result.Success();
@@ -29,10 +34,10 @@ internal static class BankNumberHelper
             case BankNumberScheme.CaEft:
                 if (string.IsNullOrWhiteSpace(institutionNumber) && string.IsNullOrWhiteSpace(transitNumber))
                     return Result.Success();
-                if (string.IsNullOrWhiteSpace(institutionNumber) || institutionNumber.Trim().Length != 3 || !institutionNumber.Trim().All(char.IsDigit))
-                    return Result.Failure("A Canadian institution number must be exactly 3 digits.", 400);
-                if (string.IsNullOrWhiteSpace(transitNumber) || transitNumber.Trim().Length != 5 || !transitNumber.Trim().All(char.IsDigit))
-                    return Result.Failure("A Canadian transit number must be exactly 5 digits.", 400);
+                if (string.IsNullOrWhiteSpace(institutionNumber) || institutionNumber.Trim().Length != 3 || !institutionNumber.Trim().All(char.IsAsciiDigit))
+                    return Result.Failure("A Canadian institution number must be exactly 3 digits (0-9).", 400);
+                if (string.IsNullOrWhiteSpace(transitNumber) || transitNumber.Trim().Length != 5 || !transitNumber.Trim().All(char.IsAsciiDigit))
+                    return Result.Failure("A Canadian transit number must be exactly 5 digits (0-9).", 400);
                 return Result.Success();
 
             default:
@@ -122,12 +127,12 @@ internal static class BankNumberHelper
             _ => false
         };
 
-    private static int DigitCount(string? value) => (value ?? string.Empty).Count(char.IsDigit);
+    private static int DigitCount(string? value) => (value ?? string.Empty).Count(char.IsAsciiDigit);
 
     /// <summary>US ABA mod-10 校验位（3·7·1 加权和被 10 整除）</summary>
     public static bool IsValidAbaChecksum(string routing)
     {
-        if (routing.Length != 9 || !routing.All(char.IsDigit))
+        if (routing.Length != 9 || !routing.All(char.IsAsciiDigit))
             return false;
 
         var d = routing.Select(c => c - '0').ToArray();

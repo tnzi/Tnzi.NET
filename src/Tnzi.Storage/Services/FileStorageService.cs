@@ -25,6 +25,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// </summary>
     private readonly IFileThumbnailGenerator _thumbnails;
 
+    /// <summary>
+    /// 按用户的存储配额。每条把新字节交给 provider 的写路径在交出之前问它一次；没有配额时它一条查询都不发。
+    /// </summary>
+    private readonly IStorageQuotaService _quota;
+
     private StorageOptions Options => _optionsMonitor.CurrentValue;
 
     public FileStorageService(
@@ -37,9 +42,12 @@ public class FileStorageService : ApplicationService, IFileStorageService
         IFileUrlSigner urlSigner,
         IServiceProvider serviceProvider,
         UploadGuard guard,
-        IFileThumbnailGenerator thumbnails)
+        IFileThumbnailGenerator thumbnails,
+        IStorageQuotaService quota)
         : base(serviceProvider)
     {
+        // 必需而非可选：DI 漏注册时静默退成「没有配额」正是「机制在、没接上」的形态。
+        _quota = Check.NotNull(quota);
         _repository = Check.NotNull(repository);
         _referenceRepository = Check.NotNull(referenceRepository);
         _storage = Check.NotNull(storage);
@@ -59,12 +67,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
     private bool ShouldAutoGenerateThumbnail(string? extension)
         => Options.AutoGenerateThumbnail && _thumbnails.CanGenerate(extension);
 
-    public async Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
+    public Task<Result<FileRecord>> SaveAsync(string originalFileName, Stream stream, bool isTemporary = false, bool isPublic = false)
+        => SaveAsync(originalFileName, stream, new FileSaveOptions { IsTemporary = isTemporary, IsPublic = isPublic });
+
+    public async Task<Result<FileRecord>> SaveAsync(string fileName, Stream stream, FileSaveOptions options, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(options);
+
         var uploaded = new List<string>();
         try
         {
-            return await SaveCoreAsync(originalFileName, stream, isTemporary, isPublic, uploaded);
+            return await SaveCoreAsync(fileName, stream, options, uploaded, cancellationToken);
         }
         catch
         {
@@ -81,8 +94,13 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// 靠它知道哪些对象是这一批写进去的。
     /// </summary>
     private async Task<Result<FileRecord>> SaveCoreAsync(
-        string originalFileName, Stream stream, bool isTemporary, bool isPublic, List<string> uploadedObjects)
+        string originalFileName, Stream stream, FileSaveOptions options, List<string> uploadedObjects, CancellationToken cancellationToken = default)
     {
+        var isTemporary = options.IsTemporary;
+        var isPublic = options.IsPublic;
+        // 这份字节归谁：指定了所有者就是他（系统身份代写），否则是当前用户。去重候选与配额都按它算。
+        var ownerId = options.OwnerId ?? CurrentUser?.Id;
+
         var validation = ValidateFileName<FileRecord>(originalFileName);
         if (validation != null)
             return validation;
@@ -117,11 +135,15 @@ public class FileStorageService : ApplicationService, IFileStorageService
             md5Hash = await HashHelper.GetMd5Async(stream);
             stream.Position = 0;
 
-            // 检查是否已存在相同MD5的文件
-            var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream, isTemporary, isPublic, uploadedObjects);
-            if (existingResult != null)
+            // ★ 只有正式上传参与去重：临时上传一律落一条自己的记录（理由见 TryGetExistingFileByMd5Async）。
+            //   调用方也可以明说不要去重（文件空间里每次上传都是一个独立的条目，见 FileSaveOptions.Deduplicate）。
+            if (!isTemporary && options.Deduplicate)
             {
-                return existingResult;
+                var existingResult = await TryGetExistingFileByMd5Async(md5Hash, originalFileName, stream, ownerId, isPublic, uploadedObjects);
+                if (existingResult != null)
+                {
+                    return existingResult;
+                }
             }
         }
 
@@ -133,16 +155,36 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // 上传后再读 Length 会被已关闭的流直接打成 ObjectDisposedException。
         var knownSize = TryGetStreamLength(stream);
 
+        // 配额在交出字节之前判（去重命中的上一支不新增字节，所以排在它之后）。量得出大小的流在这里就拦下；
+        // 量不出来的（不可 seek）只能等落盘之后按实际大小再判一次，超了就把刚写下的对象删掉。
+        if (knownSize is { } declaredSize)
+        {
+            var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(ownerId, declaredSize, cancellationToken);
+            if (quotaCheck != null)
+                return quotaCheck;
+        }
+
         // 1. 上传文件到存储
+        var firstObjectOfThisFile = uploadedObjects.Count;
         var filePath = await _storage.UploadAsync(fileName, stream, contentType);
         uploadedObjects.Add(filePath);
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
+
+        if (knownSize == null)
+        {
+            var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(ownerId, size, cancellationToken);
+            if (quotaCheck != null)
+            {
+                await DiscardUploadedObjectsAsync(uploadedObjects, firstObjectOfThisFile);
+                return quotaCheck;
+            }
+        }
 
         // 2. 位图与 PDF（后者需可选包 Tnzi.Documents）生成缩略图；画不出来只是没有图，不影响保存
         string? thumbnailPath = null;
         if (ShouldAutoGenerateThumbnail(extension))
         {
-            thumbnailPath = await _thumbnails.GenerateAsync(filePath, fileName, extension, size);
+            thumbnailPath = await _thumbnails.GenerateAsync(filePath, extension, size);
             if (thumbnailPath != null)
                 uploadedObjects.Add(thumbnailPath);
         }
@@ -162,10 +204,12 @@ public class FileStorageService : ApplicationService, IFileStorageService
             ThumbnailPath = thumbnailPath,
             IsTemporary = isTemporary,
             IsPublic = isPublic,
-            ReferenceCount = isTemporary ? 0 : 1
+            ReferenceCount = isTemporary ? 0 : 1,
+            // 审计钩子只在 CreatorId 为 null 时填当前用户，所以指定的所有者会原样落库。
+            CreatorId = options.OwnerId
         };
 
-        await _repository.InsertAsync(fileRecord);
+        await _repository.InsertAsync(fileRecord, cancellationToken);
         LogInformation("File saved: {FileName}, OriginalName: {OriginalName}, Size: {Size}", fileName, originalFileName, size);
 
         await PublishFileUploadedEventAsync(fileRecord);
@@ -264,25 +308,43 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return Ok(stream);
     }
 
-    public async Task<Result> DeleteAsync(Guid id)
+    /// <remarks>
+    /// ★★ 整件事在一个工作单元里，与 <see cref="DeleteManyAsync"/> 相同：-1 的行锁要一直持有到记录删掉、事务提交，
+    /// 期间并发的 +1（同一个人的 MD5 复用、一次实体绑定）等着它，提交之后找不到这一行，按新上传 / 找不到文件处理。
+    /// 此前这里没有事务，-1 当场提交：之后、删对象之前落下的 +1 让计数回到 1，对象照删，而随后的条件删除因计数不为 0
+    /// 留下了记录，刚拿到这条记录的人手里是一个指向已删除对象的文件。
+    /// </remarks>
+    public Task<Result> DeleteAsync(Guid id)
+        => ExecuteInUnitOfWorkAsync(cancellationToken => DeleteCoreAsync(id, cancellationToken));
+
+    private async Task<Result> DeleteCoreAsync(Guid id, CancellationToken cancellationToken)
     {
-        var record = await _repository.GetAsync(id);
-        var check = await EnsureWritableAsync<object>(record);
+        var record = await _repository.GetAsync(id, cancellationToken);
+        var check = await EnsureWritableAsync<object>(record, cancellationToken);
         if (check != null)
             return check;
 
-        // 减少引用计数
-        var newCount = DecrementReferenceCount(record!);
+        // 删除释放的是一个不留引用行的隐式持有者（正式上传本身 / MD5 复用），扣不了业务记录的那一份。
+        // 只剩引用行时拒绝，什么都不改（理由见 FindHeldOnlyByReferencesAsync）。
+        var heldOnlyByReferences = await FindHeldOnlyByReferencesAsync([record!], cancellationToken);
+        if (heldOnlyByReferences.TryGetValue(record!.Id, out var referenceRows))
+        {
+            return Fail(
+                $"The file is still referenced by {referenceRows} record(s). Remove it from those records before deleting it.",
+                409, ErrorCodes.DATA_CONFLICT);
+        }
+
+        // 减少引用计数：原子 -1（理由见 FileReferenceCounts），读出来再减会与并发的复用 / 绑定互相覆盖。
+        var newCount = await FileReferenceCounts.ReleaseAsync(_repository, record!.Id, cancellationToken) ?? 0;
         if (newCount > 0)
         {
-            // 还有引用，只更新计数
-            await _repository.UpdateAsync(record!);
+            // 还有引用，只减计数
             LogInformation("File reference count decreased: {FileName}, ReferenceCount: {ReferenceCount}", record!.FileName, newCount);
             return Ok("File reference count decreased");
         }
 
         // 1. 批量删除所有引用记录
-        await _referenceRepository.DeleteAsync(r => r.FileId == id);
+        await _referenceRepository.DeleteAsync(r => r.FileId == id, cancellationToken);
 
         // 2. 删除物理文件，仅当物理删除成功（或文件已不存在）才删数据库记录
         var dbDeleted = await DeleteFileAsync(record!);
@@ -338,43 +400,64 @@ public class FileStorageService : ApplicationService, IFileStorageService
             return Fail<FileRecord>(sanitized.Reason!, 400);
         }
 
-        if (!ReferenceEquals(sanitized.Content, stream))
+        // ★ 去重的键是这份字节**算出来**的哈希，不是调用方声称的那个：先按声称值去重，任何人附上一个
+        //   不相干的流就能拿到声称哈希对应的那条记录；记录在而对象丢了时，下面还会把这个流按原键重传，
+        //   等于把另一份字节写进那条记录（MD5 列照旧，完整性校验从此报 Corrupted）。
+        //   声称值只用来核对：不一致直接 400，一条记录都不碰。
+        var rewritten = !ReferenceEquals(sanitized.Content, stream);
+        if (rewritten)
         {
             // 净化器改写了内容：调用方给的哈希描述的是一份永远不会落库的字节。去重与落库都按净化后的
             // 哈希走，而不是当成「哈希不符」拒掉 —— 后者会让每一个剥元数据的部署都存不进图片。
             stream = sanitized.Content;
-            md5Hash = await HashHelper.GetMd5Async(stream);
-            stream.Position = 0;
+        }
+
+        var calculatedMd5 = await HashHelper.GetMd5Async(stream);
+        stream.Position = 0;
+        if (!rewritten && !string.IsNullOrEmpty(md5Hash)
+            && !string.Equals(calculatedMd5, md5Hash, StringComparison.OrdinalIgnoreCase))
+        {
+            return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         // 检查是否已存在相同MD5的文件
         // 这条路径建的是正式记录（ReferenceCount 从 1 起），复用时也按正式持有者对待。
-        var existingResult = await TryGetExistingFileByMd5Async(md5Hash, fileName, stream, isTemporary: false, uploadedObjects: uploadedObjects);
+        var ownerId = CurrentUser?.Id;
+        var existingResult = await TryGetExistingFileByMd5Async(calculatedMd5, fileName, stream, ownerId, uploadedObjects: uploadedObjects);
         if (existingResult != null)
         {
             return existingResult;
         }
 
-        // 验证 MD5
-        var calculatedMd5 = await HashHelper.GetMd5Async(stream);
-        stream.Position = 0;
-        if (!string.IsNullOrEmpty(md5Hash) && calculatedMd5 != md5Hash)
-        {
-            return Fail<FileRecord>("File MD5 hash mismatch", 400, ErrorCodes.VALIDATION_ERROR);
-        }
-
         var newFileName = StorageKeyHelper.NewKey(extension);
 
-        // 与 SaveAsync 同理：长度在交给 provider 之前取。
+        // 与 SaveAsync 同理：长度在交给 provider 之前取，配额也在交出之前判。
         var knownSize = TryGetStreamLength(stream);
+        if (knownSize is { } declaredSize)
+        {
+            var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(ownerId, declaredSize);
+            if (quotaCheck != null)
+                return quotaCheck;
+        }
+
         var filePath = await _storage.UploadAsync(newFileName, stream, contentType);
         uploadedObjects.Add(filePath);
         var size = await ResolveStoredSizeAsync(knownSize, filePath);
 
+        if (knownSize == null)
+        {
+            var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(ownerId, size);
+            if (quotaCheck != null)
+            {
+                await DiscardUploadedObjectsAsync(uploadedObjects);
+                return quotaCheck;
+            }
+        }
+
         string? thumbnailPath = null;
         if (ShouldAutoGenerateThumbnail(extension))
         {
-            thumbnailPath = await _thumbnails.GenerateAsync(filePath, newFileName, extension, size);
+            thumbnailPath = await _thumbnails.GenerateAsync(filePath, extension, size);
             if (thumbnailPath != null)
                 uploadedObjects.Add(thumbnailPath);
         }
@@ -431,6 +514,14 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 return validation;
         }
 
+        // 配额按整批判：批里的记录在工作单元提交之前不落库，逐条判看不见前面几条，一批可以整个越过上限。
+        // 去重命中的条目其实不新增字节，这里按全量算，宁可保守。
+        var batchBytes = batch.Sum(item => TryGetStreamLength(item.stream) ?? 0);
+        var batchQuotaCheck = await _quota.EnsureCapacityAsync<IEnumerable<FileRecord>>(CurrentUser?.Id, batchBytes);
+        if (batchQuotaCheck != null)
+            return batchQuotaCheck;
+
+        var saveOptions = new FileSaveOptions { IsPublic = isPublic };
         var uploaded = new List<string>();
         var saved = new List<FileRecord>();
         try
@@ -439,7 +530,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             {
                 foreach (var (fileName, stream) in batch)
                 {
-                    var result = await SaveCoreAsync(fileName, stream, isTemporary: false, isPublic, uploaded);
+                    var result = await SaveCoreAsync(fileName, stream, saveOptions, uploaded, cancellationToken);
                     if (!result.Succeeded)
                     {
                         // 以异常离开工作单元才会回滚；失败结果在下面的 catch 里翻译回 Result。
@@ -498,10 +589,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
     /// <summary>
     /// 删掉一批已交给 provider、却不会有记录指向的对象。删除失败只记日志：这里已经在收拾一次失败了。
     /// </summary>
-    private async Task DiscardUploadedObjectsAsync(List<string> uploaded)
+    private Task DiscardUploadedObjectsAsync(List<string> uploaded)
+        => DiscardUploadedObjectsAsync(uploaded, 0);
+
+    /// <summary>
+    /// 只删 <paramref name="from"/> 之后那几个对象（这一份文件写下的），前面的属于同一批里已经落成的文件。
+    /// </summary>
+    private async Task DiscardUploadedObjectsAsync(List<string> uploaded, int from)
     {
-        foreach (var path in uploaded)
+        for (var i = from; i < uploaded.Count; i++)
         {
+            var path = uploaded[i];
             try
             {
                 await _storage.DeleteAsync(GetSafePath(path));
@@ -512,7 +610,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
         }
 
-        uploaded.Clear();
+        uploaded.RemoveRange(from, uploaded.Count - from);
     }
 
     /// <summary>
@@ -532,16 +630,33 @@ public class FileStorageService : ApplicationService, IFileStorageService
             var records = await _repository
                 .ToListAsync(r => idList.Contains(r.Id), cancellationToken);
 
+            // 先整批判定、再动手：一批里有一条只剩业务记录在引用，整批拒绝，一条都不改。
+            // 部分执行的结果在管理端看来只是「删除成功」，那一条留在列表里却说不出为什么。
+            var heldOnlyByReferences = await FindHeldOnlyByReferencesAsync(records, cancellationToken);
+            if (heldOnlyByReferences.Count > 0)
+            {
+                var names = records
+                    .Where(r => heldOnlyByReferences.ContainsKey(r.Id))
+                    .Select(r => r.OriginalName)
+                    .Take(MaxNamesInConflictMessage)
+                    .ToList();
+                var more = heldOnlyByReferences.Count > names.Count ? $" and {heldOnlyByReferences.Count - names.Count} more" : string.Empty;
+                return Fail(
+                    $"{heldOnlyByReferences.Count} of the selected files are still referenced by other records ({string.Join(", ", names)}{more}). "
+                    + "Remove them from those records first; nothing was deleted.",
+                    409, ErrorCodes.DATA_CONFLICT);
+            }
+
             var deletedCount = 0;
             var decrementedCount = 0;
 
             foreach (var record in records)
             {
-                var newCount = DecrementReferenceCount(record);
+                // 原子 -1（理由见 FileReferenceCounts）
+                var newCount = await FileReferenceCounts.ReleaseAsync(_repository, record.Id, cancellationToken) ?? 0;
                 if (newCount > 0)
                 {
-                    // 还有引用，只更新计数
-                    await _repository.UpdateAsync(record, cancellationToken);
+                    // 还有引用，只减计数
                     decrementedCount++;
                     continue;
                 }
@@ -579,13 +694,22 @@ public class FileStorageService : ApplicationService, IFileStorageService
     {
         var sourceFile = await _repository.GetAsync(sourceFileId, cancellationToken);
         // Copying hands the caller the bytes under a new id, so it needs read
-        // rights on the source, not merely knowledge of its id.
-        var sourceCheck = await EnsureReadableAsync<FileRecord>(sourceFile, cancellationToken);
+        // rights on the source, not merely knowledge of its id - and the *mint* verdict,
+        // not the read one: the copy is owned by the caller and outlives any request-level
+        // credential. A 10-minute ?sig= render token or a capped share link must not be
+        // traded for a permanent copy the caller can download, re-sign and share at will
+        // (same reason IFileReadAccessProbe and token minting refuse those credentials).
+        var sourceCheck = await EnsureMintableAsync<FileRecord>(sourceFile, cancellationToken);
         if (sourceCheck != null)
             return sourceCheck;
 
         if (string.IsNullOrEmpty(sourceFile!.Path))
             return Fail<FileRecord>("Source file path is empty", 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        // 副本归调用者所有、占他的配额：在复制字节之前判。
+        var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(CurrentUser?.Id, sourceFile.Size, cancellationToken);
+        if (quotaCheck != null)
+            return quotaCheck;
 
         var extension = sourceFile.Extension;
         var copyFileName = StorageKeyHelper.NewKey(extension);
@@ -608,7 +732,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
             string? thumbnailPath = null;
             if (ShouldAutoGenerateThumbnail(extension))
             {
-                thumbnailPath = await _thumbnails.GenerateAsync(newFilePath, copyFileName, extension, sourceFile.Size, cancellationToken);
+                thumbnailPath = await _thumbnails.GenerateAsync(newFilePath, extension, sourceFile.Size, cancellationToken);
                 if (thumbnailPath != null)
                     uploaded.Add(thumbnailPath);
             }
@@ -774,8 +898,9 @@ public class FileStorageService : ApplicationService, IFileStorageService
 
         if (!string.IsNullOrEmpty(request.Tag))
         {
-            var tag = request.Tag.Trim().ToLower();
-            query = query.Where(f => f.Tags != null && f.Tags.ToLower().Contains(tag));
+            // 整项匹配，与 GetFilesByTagAsync 同一个判据：按子串查，"voice" 会把带 "invoice" 的文件一起带出来。
+            var needle = "," + request.Tag.Trim().ToLower() + ",";
+            query = query.Where(f => f.Tags != null && ("," + f.Tags.ToLower() + ",").Contains(needle));
         }
 
         // Metadata filtering: search within the JSON-serialized metadata column
@@ -874,7 +999,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
                         //
                         // 越权 id 静默省略而不是让整批失败，与 CreateAccessTokensAsync 同一取舍：
                         // 省略本身不透露那个 id 上是否真有文件（不可读与不存在观测上不可区分）。
-                        if (await EnsureReadableAsync<FileRecord>(fileRecord, cancellationToken) != null)
+                        //
+                        // ★ 判据是「签发」而不是「读取」：压缩包归调用者所有、活得比任何请求级凭据都久。
+                        //   认了 ?sig= 渲染令牌或分享授予，一条会过期、限次数的链接就换成了一份永久属于他的副本。
+                        if (await EnsureMintableAsync<FileRecord>(fileRecord, cancellationToken) != null)
                             continue;
 
                         using var fileStream = await _storage.DownloadAsync(GetSafePath(fileRecord.Path));
@@ -891,6 +1019,11 @@ public class FileStorageService : ApplicationService, IFileStorageService
                 zipFileStream.Position = 0;
                 var md5Hash = await HashHelper.GetMd5Async(zipFileStream);
                 var zipSize = zipFileStream.Length;
+
+                // 压缩包是一份归调用者所有的新文件，占他的配额（打包前不知道它多大，所以在交出之前判）。
+                var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(CurrentUser?.Id, zipSize, cancellationToken);
+                if (quotaCheck != null)
+                    return quotaCheck;
 
                 zipFileStream.Position = 0;
 
@@ -944,14 +1077,36 @@ public class FileStorageService : ApplicationService, IFileStorageService
         // ★ 解包把整个压缩包的内容交到调用者手上（解出的每条记录 CreatorId 都是他），
         // 所以要的是对这个 zip 的读权限，不是知道它的 id。与其它单文件操作同形：
         // 不可读与不存在都返回 404，不泄露存在性。
-        var readCheck = await EnsureReadableAsync<IEnumerable<FileRecord>>(fileRecord, cancellationToken);
+        // ★ 判据是「签发」而不是「读取」，理由同 CopyAsync：解出的记录永久归调用者，请求级凭据不能换成它们。
+        var readCheck = await EnsureMintableAsync<IEnumerable<FileRecord>>(fileRecord, cancellationToken);
         if (readCheck != null)
             return readCheck;
 
-        if (fileRecord!.Extension != ".zip")
+        // Extension 保留上传者文件名的大小写（BACKUP.ZIP），比对不能区分大小写。
+        if (!string.Equals(fileRecord!.Extension, ".zip", StringComparison.OrdinalIgnoreCase))
             return Fail<IEnumerable<FileRecord>>("Only ZIP files can be decompressed", 400, ErrorCodes.FILE_OPERATION_ERROR);
 
         var extractedFiles = new List<FileRecord>();
+        try
+        {
+            return await ExtractArchiveAsync(fileRecord, extractedFiles, cancellationToken);
+        }
+        catch
+        {
+            // 与 SaveAsync / CopyAsync / CompressAsync 同理：中途抛出（provider 上传失败、落库失败）时，
+            // 已经交给 provider 的条目还没有任何记录，不收拾就是孤儿回收按记录永远看不见的对象。
+            await DiscardExtractedAsync(extractedFiles);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 解压的主体：每解出一条就把它的记录（尚未落库）放进 <paramref name="extractedFiles"/>，
+    /// 调用方据此在异常时删掉已上传的对象。
+    /// </summary>
+    private async Task<Result<IEnumerable<FileRecord>>> ExtractArchiveAsync(FileRecord fileRecord, List<FileRecord> extractedFiles, CancellationToken cancellationToken)
+    {
+        var fileId = fileRecord.Id;
         var archiveOptions = Options.Archive;
         var maxEntrySize = Options.MaxFileSize;
         long extractedTotal = 0;
@@ -1021,6 +1176,15 @@ public class FileStorageService : ApplicationService, IFileStorageService
                             return Fail<IEnumerable<FileRecord>>(
                                 $"The archive expands to more than the allowed total of {archiveOptions.MaxTotalExtractedBytes} bytes.",
                                 400, ErrorCodes.VALIDATION_ERROR);
+                        }
+
+                        // 解出的每一条都归调用者、占他的配额。同一取舍：超了作废整次解包，而不是解出一半。
+                        // 记录到最后才一起落库，所以库里的用量在整个循环里不变，按累计量判。
+                        var quotaCheck = await _quota.EnsureCapacityAsync<IEnumerable<FileRecord>>(CurrentUser?.Id, extractedTotal, cancellationToken);
+                        if (quotaCheck != null)
+                        {
+                            await DiscardExtractedAsync(extractedFiles);
+                            return quotaCheck;
                         }
 
                         var entryExtension = Path.GetExtension(entry.Name);
@@ -1238,6 +1402,17 @@ public class FileStorageService : ApplicationService, IFileStorageService
         };
 
         return Ok(usage);
+    }
+
+    public async Task<Result<StorageQuotaDto>> GetStorageQuotaAsync(Guid userId, CancellationToken cancellationToken = default)
+        => Ok(await _quota.GetQuotaAsync(userId, cancellationToken));
+
+    public async Task<Result<StorageQuotaDto>> GetMyStorageQuotaAsync(CancellationToken cancellationToken = default)
+    {
+        if (CurrentUser?.Id is not { } userId)
+            return Fail<StorageQuotaDto>("Sign in to see your storage quota", 401, ErrorCodes.UNAUTHORIZED);
+
+        return Ok(await _quota.GetQuotaAsync(userId, cancellationToken));
     }
 
     public async Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default)
@@ -1491,7 +1666,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var thumbnailPath = await _thumbnails.GenerateAsync(record.Path!, record.FileName, record.Extension, record.Size, cancellationToken);
+            var thumbnailPath = await _thumbnails.GenerateAsync(record.Path!, record.Extension, record.Size, cancellationToken);
             if (thumbnailPath == null)
             {
                 // 画不出来的原因已经在生成器里记了日志；它仍是候选，下一轮（游标从头开始）还会再试。
@@ -1633,81 +1808,184 @@ public class FileStorageService : ApplicationService, IFileStorageService
         => _guard.Validate<T>(fileName, TryGetStreamLength(stream));
 
     /// <summary>
-    /// 尝试通过 MD5 获取已存在的文件。
+    /// 尝试通过 MD5 获取已存在的<b>正式</b>记录。<b>只服务正式上传</b>：命中即给记录添一个不留引用行的隐式持有者（<c>+1</c>）。
     /// </summary>
     /// <remarks>
-    /// <paramref name="isTemporary"/> 是本次上传的形态，不是命中记录的形态。一条由临时上传创建的记录
-    /// （<c>IsTemporary = true</c>，计数 = 正式引用行数）被一次**正式**上传复用后，就有了一个不留引用行的
-    /// 隐式持有者 —— 那正是正式记录的形状，所以记录随之转正（<c>IsTemporary = false</c>）。
-    /// 不转正的话，「只重算临时记录」的 <c>SyncAllReferenceCountsAsync</c> 会按引用行把它归零，
-    /// 默认开启的孤儿回收随后物理删除正式上传者的文件。
+    /// <para>
+    /// ★ <b>临时上传不进这里</b>（调用方在外面就分流了）。临时上传不是持有者，它的保护是「保留期内不回收」，
+    /// 而保留期挂在<b>记录</b>的 <c>CreationTime</c> 上：复用一条旧记录，这段保护带不过来。
+    /// 此前临时复用照样 <c>+1</c> 来顶替那段保护，可这个 +1 没有任何人释放得了：上传者之后绑定，
+    /// 绑定路径（<c>FileReferenceProcessor</c> / <c>ConfirmReferenceAsync</c>）只认识引用行，再 <c>+1</c> 一次；
+    /// 上传者放弃，孤儿回收只收 <c>&lt;= 0</c>，更轮不到它。于是每次临时复用都永久多出一个持有者，
+    /// 这条记录从此回收不掉（方向失败安全，但是泄漏）。
+    /// 反过来只去掉 <c>+1</c> 又是失败不安全的：原持有者在上传者绑定之前 <c>DeleteAsync</c> 一次，
+    /// 计数归零当场物理删除，上传者随后绑定到一条已经不存在的记录上。
+    /// 临时上传各自落一条记录，两头都成立：它的计数恒等于它的引用行数（同步工具对临时记录的前提），
+    /// 保留期从它自己的上传时刻算起，别人的删除也碰不到它。代价是相同字节的临时上传各存一份，
+    /// 没被绑定的那些照常在保留期后被回收。
+    /// </para>
+    /// <para>
+    /// ★ <b>正式上传也只复用正式记录</b>，临时记录一律不是候选。临时记录的所有者（上传者）对它有写权，而他从没给它
+    /// 加过持有者：他取消草稿时的一次 <c>DeleteAsync</c> 会扣掉别人的那个 <c>+1</c>，计数归零当场物理删除，
+    /// 复用了它的正式上传者从此指向一条不存在的记录，而且零症状。正式记录没有这个问题：它的每个持有者都加过一次、
+    /// 也只扣得掉一次。所以「正式上传命中临时记录就把它转正」那条路径（2026-09-12）连同转正本身一起删掉了：
+    /// 正式上传命中不到正式记录时另存一份，那份临时记录仍按它自己的引用行与保留期过日子。
+    /// </para>
+    /// <para>
+    /// ★ <b>候选只来自调用者自己的记录</b>（<c>CreatorId == 当前用户</c>）。复用的是整条记录而不只是字节：
+    /// 它的 <c>CreatorId</c>、原始文件名、标签、目录都跟着走。跨用户命中时，上传者在响应里拿到的是别人的文件名与 id
+    /// （即「有人持有完全相同的内容」的确认），他不是这条记录的所有者，下载、删除自己刚传的文件都是 404；
+    /// 原所有者却仍对它有写权，建版本、改可见性、反复删除都落在上传者以为是自己的那份文件上。
+    /// 没有当前用户（后台任务、匿名请求）时不去重：<c>CreatorId</c> 为 null 的记录不归任何人所有，无从判断「同一个人」。
+    /// 代价是不同用户的相同字节各存一份。
+    /// </para>
+    /// <para>
+    /// 同一份 MD5 可以有多条正式记录（公开 / 私密各一条、副本、压缩包、关过 MD5 校验的那段时间存下的），
+    /// 选哪一条必须是确定的，不能取决于数据库按堆顺序返回哪个：按 <c>CreationTime</c>、再按 <c>Id</c> 取最早的一条。
+    /// 公开上传只在公开记录里挑（见下）。
+    /// </para>
     /// </remarks>
     private async Task<Result<FileRecord>?> TryGetExistingFileByMd5Async(
-        string md5Hash, string originalFileName, Stream stream, bool isTemporary, bool isPublic = false, List<string>? uploadedObjects = null)
+        string md5Hash, string originalFileName, Stream stream, Guid? ownerId, bool isPublic = false, List<string>? uploadedObjects = null)
     {
-        var match = await _repository.FindAsync(f => f.Md5Hash == md5Hash);
-        if (match == null)
+        // 候选只来自这份字节的所有者：通常是当前用户，系统身份代写时是指定的那个用户。
+        var uploaderId = ownerId;
+        if (uploaderId == null)
+        {
+            return null;
+        }
+
+        // 内容相同但可见性诉求不同：本次上传要公开，候选里的私密记录不能复用。复用它等于把私密记录
+        // 一并改成人人可读，上传者持有相同的字节不代表他有权把那条记录对外开放；没有公开的候选就另存一份。
+        var matchId = await _repository.AsQueryable()
+            .Where(f => f.Md5Hash == md5Hash && !f.IsTemporary && f.CreatorId == uploaderId && (!isPublic || f.IsPublic))
+            .OrderBy(f => f.CreationTime)
+            .ThenBy(f => f.Id)
+            .Select(f => (Guid?)f.Id)
+            .FirstOrDefaultAsync();
+        if (matchId == null)
         {
             return null;
         }
 
         // 按 id 再取一次（GetAsync → DbSet.FindAsync 先问变更跟踪器，命中就不发查询）。
-        // 上面那句按谓词查走的是 AsNoTracking，拿到的是脱离跟踪的**新实例**，
-        // 它的 ReferenceCount 是数据库里的值 —— 同一个作用域内第二次命中同一行时，
-        // 前一次的 ++ 可能还没落库（调用方开着事务就一定没有），在这个旧值上再 ++
-        // 只会把上一次的递增覆盖掉：引用计数少算，清理任务随后删掉仍被引用的文件。
-        // 与 FileShareService.LoadForUpdateAsync 同一路子。
-        var existing = await _repository.GetAsync(match.Id) ?? match;
+        // 上面那句查询读的是数据库里的值；同一个作用域内第二次命中同一行时，前一次的 ++ 可能还没落库
+        // （调用方开着事务就一定没有），在旧值上再 ++ 只会把上一次的递增覆盖掉：引用计数少算，
+        // 清理任务随后删掉仍被引用的文件。与 FileShareService.LoadForUpdateAsync 同一路子。
+        var existing = await _repository.GetAsync(matchId.Value);
 
-        // 内容相同但可见性诉求不同：本次上传要公开，命中的记录却是私密的。
-        // 复用它等于把**别人的**私密文件一并改成人人可读 —— 上传者持有相同的字节
-        // 不代表他有权把那条记录对外开放。宁可多存一份，也不做这次提权。
-        if (isPublic && !existing.IsPublic)
+        // 跟踪器里的实例才是本作用域眼中的现状（查询只看得见已落库的值）：按它再判一次三条候选条件。
+        if (existing == null || existing.IsTemporary || existing.CreatorId != uploaderId || (isPublic && !existing.IsPublic))
         {
-            LogInformation("Skipping MD5 reuse for a public upload: existing record {FileId} is private", existing.Id);
             return null;
         }
 
-        if (!isTemporary && existing.IsTemporary)
+        // 先原子 +1 占住它，再动别的（理由见 FileReferenceCounts）：两次并发上传同一份字节各加各的；
+        // 记录在查到它与占住它之间被回收或删除了（受影响 0 行），就不复用，按一次新上传处理，
+        // 而不是把一条已经不存在的记录交给调用方。
+        if (await FileReferenceCounts.AddAsync(_repository, existing.Id) == null)
         {
-            LogInformation("Temporary record {FileId} reused by a permanent upload; marking it permanent", existing.Id);
-            existing.IsTemporary = false;
+            return null;
         }
 
-        var fileExists = await _storage.ExistsAsync(GetSafePath(existing.Path));
-        if (fileExists)
+        // ★ 从这里起这条记录多了一个持有者，而它要到这一步正常返回才真正交给调用方。中途抛出（provider 的存在性检查
+        //   报错、重传失败、落库失败）时把这次 +1 还回去：没有外层工作单元时它已经单独提交了，却没有任何人持有它，
+        //   这条记录从此要多删一次才删得掉，孤儿回收也永远收不走它。外层工作单元回滚时这一步随它一起回滚，同样无害。
+        try
         {
-            existing.ReferenceCount++;
-            await _repository.UpdateAsync(existing);
-            LogInformation("File reused by MD5: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
-            await PublishFileUploadedEventAsync(existing, isReused: true);
-            return Ok(existing, "File reused by MD5");
-        }
-        else
-        {
-            LogWarning("File record exists but physical file missing, re-uploading: {FileName}", existing.FileName);
-
-            var existingContentType = FileTypeHelper.GetContentType(existing.Extension ?? Path.GetExtension(originalFileName));
-            stream.Position = 0;
-            var newFilePath = await _storage.UploadAsync(existing.FileName, stream, existingContentType);
-            uploadedObjects?.Add(newFilePath);
-
-            existing.Path = newFilePath;
-            existing.ReferenceCount++;
-
-            if (ShouldAutoGenerateThumbnail(existing.Extension))
+            var fileExists = await _storage.ExistsAsync(GetSafePath(existing.Path));
+            if (fileExists)
             {
-                // 缩略图是从 newFilePath 回读生成的，不碰 stream。上传之后这个流可能已经
-                // 被 provider 关掉，回退它的位置只会白白抛 ObjectDisposedException。
-                existing.ThumbnailPath = await _thumbnails.GenerateAsync(newFilePath, existing.FileName, existing.Extension, existing.Size);
-                if (existing.ThumbnailPath != null)
-                    uploadedObjects?.Add(existing.ThumbnailPath);
+                LogInformation("File reused by MD5: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
+                await PublishFileUploadedEventAsync(existing, isReused: true);
+                return Ok(existing, "File reused by MD5");
             }
+            else
+            {
+                LogWarning("File record exists but physical file missing, re-uploading: {FileName}", existing.FileName);
 
-            await _repository.UpdateAsync(existing);
-            LogInformation("File re-uploaded and record updated: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
-            return Ok(existing, "File re-uploaded (was missing)");
+                // 按原键重传：键当初是服务端生成的，对象存储上旧路径因此重新可用（版本行里记着的也是它）。
+                // ★ 原键不是生成形态时换一个新键：2026-09-04 之前三条写路径把调用方给的名字写进了 FileName，
+                //   同名的存量记录在对象存储上（本地磁盘上同一天内）共用同一个对象，按它重传等于把这份字节
+                //   写进别人的记录。FileName 与存储键同步换掉，「FileName 就是存储键」这条约定继续成立。
+                var reuploadKey = StorageKeyHelper.IsGenerated(existing.FileName)
+                    ? existing.FileName
+                    : StorageKeyHelper.NewKey(existing.Extension);
+                var existingContentType = FileTypeHelper.GetContentType(existing.Extension ?? Path.GetExtension(originalFileName));
+                stream.Position = 0;
+                var newFilePath = await _storage.UploadAsync(reuploadKey, stream, existingContentType);
+                uploadedObjects?.Add(newFilePath);
+
+                existing.FileName = reuploadKey;
+                existing.Path = newFilePath;
+
+                string? staleThumbnail = null;
+                if (ShouldAutoGenerateThumbnail(existing.Extension))
+                {
+                    // 缩略图是从 newFilePath 回读生成的，不碰 stream。上传之后这个流可能已经
+                    // 被 provider 关掉，回退它的位置只会白白抛 ObjectDisposedException。
+                    staleThumbnail = existing.ThumbnailPath;
+                    existing.ThumbnailPath = await _thumbnails.GenerateAsync(newFilePath, existing.Extension, existing.Size);
+                    existing.ThumbnailSize = null;
+                    if (existing.ThumbnailPath != null)
+                        uploadedObjects?.Add(existing.ThumbnailPath);
+                }
+
+                await _repository.UpdateAsync(existing);
+                // 新图落在新键上（缩略图键每次新生成），旧图对象不会被覆盖，要在行更新之后请求删除。
+                await RequestStaleThumbnailDeletionAsync(existing, staleThumbnail);
+                LogInformation("File re-uploaded and record updated: {FileName}, OriginalName: {OriginalName}", existing.FileName, originalFileName);
+                return Ok(existing, "File re-uploaded (was missing)");
+            }
         }
+        catch
+        {
+            await ReleaseAbandonedHoldAsync(existing.Id);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 把复用路径占住之后没能交出去的那一次 +1 还回去。还不回去（库此刻不可用）只记日志：调用方正在把原异常抛出去，
+    /// 不能让收拾现场的异常把它盖掉；多出来的持有者是失败安全的方向（文件不会被误删，只是要多删一次）。
+    /// </summary>
+    private async Task ReleaseAbandonedHoldAsync(Guid fileId)
+    {
+        try
+        {
+            await FileReferenceCounts.ReleaseAsync(_repository, fileId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Could not release the hold taken on file {FileId} for an MD5 reuse that failed; the file keeps one extra holder", fileId);
+        }
+    }
+
+    /// <summary>
+    /// 记录已不再指向旧缩略图对象之后，请求删除它。走 <see cref="FileDeleteRequestedEvent"/>（事务感知，提交之后才处理），
+    /// 与工作区建版本 / 恢复版本清掉旧图是同一条约定。
+    /// </summary>
+    /// <remarks>
+    /// 没有事件总线时不就地删：此刻行更新可能还没提交，删了而事务回滚，记录就指向一个不存在的对象（<c>/thumbnail</c> 答 500）。
+    /// 留下的只是一个占空间的孤儿对象。
+    /// </remarks>
+    private async Task RequestStaleThumbnailDeletionAsync(FileRecord record, string? staleThumbnail)
+    {
+        if (string.IsNullOrEmpty(staleThumbnail) || string.Equals(staleThumbnail, record.ThumbnailPath, StringComparison.Ordinal))
+            return;
+
+        if (EventBus == null)
+        {
+            LogWarning("No event bus: stale thumbnail {Path} of file {FileId} is left in storage", staleThumbnail, record.Id);
+            return;
+        }
+
+        await EventBus.PublishAsync(new FileDeleteRequestedEvent
+        {
+            FileId = record.Id,
+            ThumbnailPath = staleThumbnail,
+            Provider = record.Provider ?? _storage.ProviderName
+        });
     }
 
     /// <summary>
@@ -1727,14 +2005,7 @@ public class FileStorageService : ApplicationService, IFileStorageService
         await _referenceRepository.InsertAsync(reference, cancellationToken);
 
         if (!isTemporary)
-        {
-            var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
-            if (fileRecord != null)
-            {
-                fileRecord.ReferenceCount++;
-                await _repository.UpdateAsync(fileRecord, cancellationToken);
-            }
-        }
+            await FileReferenceCounts.AddAsync(_repository, fileId, cancellationToken);
     }
 
     private Result<T>? EnsureFileRecordExists<T>(FileRecord? fileRecord)
@@ -1763,8 +2034,10 @@ public class FileStorageService : ApplicationService, IFileStorageService
     }
 
     /// <summary>
-    /// 存在性 + **签发**访问令牌的权限。与读取判据同源,但不认「签名令牌」那一条 ——
+    /// 存在性 + **签发**判据。与读取判据同源,但不认请求级凭据(签名令牌 / 分享授予)，
     /// 渲染凭据不该能自我续期(见 <c>IFileAccessAuthorizer.CanMintAccessTokenAsync</c>)。
+    /// 凡是把这一次访问换成一样比本次请求活得久的东西都走它:访问令牌、预签名 URL,
+    /// 以及归调用者所有的派生记录(复制、压缩、解压)。
     /// </summary>
     private async Task<Result<T>?> EnsureMintableAsync<T>(FileRecord? fileRecord, CancellationToken cancellationToken = default)
     {
@@ -1878,10 +2151,39 @@ public class FileStorageService : ApplicationService, IFileStorageService
         return null;
     }
 
-    private static int DecrementReferenceCount(FileRecord fileRecord)
+    /// <summary>批量删除被拒时，消息里最多点名几个文件。</summary>
+    private const int MaxNamesInConflictMessage = 5;
+
+    /// <summary>
+    /// 这些记录里哪些已经<b>没有隐式持有者</b>、只剩业务记录的引用行在持有：返回它们的 id 与引用行数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>ReferenceCount</c> = 正式引用行数 + 隐式持有者数（正式上传本身 +1、MD5 复用每次 +1，这两种都不留行）。
+    /// 删除能释放的只有后者：它是调用方（上传者，或替他处理的管理员）手里的那一份。前者属于引用它的业务记录，
+    /// 由那条记录换掉或清空字段时经 <c>[FileField]</c> 追踪释放。删除若照扣不误，扣掉的就是某条记录的那一份，
+    /// 计数随后在另一条记录解绑时提前归零，文件被物理删除，而仍引用它的记录从此指向一个不存在的对象。
+    /// </para>
+    /// <para>
+    /// 计数低于引用行数（并发下丢失过一次递增）同样落在这里：那种计数本来就不可信，按它删除只会更糟。
+    /// 没有任何引用行、计数也为 0 的记录不在结果里，它谁也不属于，照常删除。
+    /// </para>
+    /// </remarks>
+    private async Task<Dictionary<Guid, int>> FindHeldOnlyByReferencesAsync(IReadOnlyCollection<FileRecord> records, CancellationToken cancellationToken = default)
     {
-        fileRecord.ReferenceCount = Math.Max(0, fileRecord.ReferenceCount - 1);
-        return fileRecord.ReferenceCount;
+        if (records.Count == 0)
+            return [];
+
+        var ids = records.Select(r => r.Id).ToList();
+        var referenceRows = await _referenceRepository.AsQueryable()
+            .Where(r => ids.Contains(r.FileId) && !r.IsTemporary)
+            .GroupBy(r => r.FileId)
+            .Select(g => new { FileId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.FileId, x => x.Count, cancellationToken);
+
+        return records
+            .Where(r => referenceRows.TryGetValue(r.Id, out var rows) && r.ReferenceCount - rows <= 0)
+            .ToDictionary(r => r.Id, r => referenceRows[r.Id]);
     }
 
     private async Task PublishFileUploadedEventAsync(FileRecord record, bool isReused = false)
@@ -2002,8 +2304,29 @@ public class FileStorageService : ApplicationService, IFileStorageService
             }
         }
 
-        await _repository.DeleteAsync(record);
+        // 条件删除（计数仍 <= 0）：期间被重新持有的记录不删，免得把刚交给别人的记录一起删掉。
+        // 两个调用方（单条与批量删除）都在工作单元里，这一步与上面的 -1 同一个事务，-1 的行锁挡住了并发的 +1，
+        // 不会走到这一支；只有没有工作单元管理器的宿主（不加载 EFCore）才可能走到。
+        if (!await FileReferenceCounts.TryDeleteReleasedAsync(_repository, record.Id))
+        {
+            LogWarning("File {FileId} was held again while it was being deleted; its record is kept", record.Id);
+            return false;
+        }
+
+        await PublishFileRecordDeletedAsync(record.Id);
         return true;
+    }
+
+    /// <summary>
+    /// 告诉别的程序集这条记录没了，它们挂在这个文件上的数据（工作区的历史版本与分享链接）该一并收掉。
+    /// 事务感知发布：删除回滚则不发。
+    /// </summary>
+    private async Task PublishFileRecordDeletedAsync(Guid fileId)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new FileRecordDeletedEvent { FileId = fileId });
     }
 
     #endregion

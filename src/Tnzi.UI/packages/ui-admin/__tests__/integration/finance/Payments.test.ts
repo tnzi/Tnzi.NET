@@ -64,6 +64,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 })
 
 import Page from '../../../src/pages/finance/Payments.vue'
+import { applyDocumentSearch } from './document-search.helper'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -94,5 +95,61 @@ describe('Finance Payments page', () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
+  })
+  // The list endpoint binds its filters by name: payments filter by either party (`partyId`), and a
+  // key it does not declare is dropped without an error, so the list would
+  // claim to be filtered while showing every party. The date goes out as the
+  // picked calendar day; the picker's epoch number fails model binding.
+  it('the advanced search filters by the party key the list endpoint binds, and a calendar date', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const filters = await applyDocumentSearch(wrapper)
+    expect(filters).toEqual({ dateFrom: '2026-01-15', partyId: 'party-1' })
+  })
+
+  /**
+   * The payment form has no exchange-rate field, and a draft update replaces
+   * the payment (`ExchangeRate = input ?? 0`). A manual rate set through the
+   * API must survive an edit made for something else, and must NOT follow the
+   * payment into a different currency.
+   */
+  describe('editing a foreign-currency draft', () => {
+    type CrudVm = {
+      formModal: { formData: { value: Record<string, unknown> | null } }
+      openEdit: (row: unknown) => void
+      submit: () => Promise<unknown>
+    }
+    const draft = {
+      id: 'p7', status: 'Draft', direction: 'Outbound', partyType: 'Vendor', partyId: 'v1',
+      docDate: '2026-07-01', currency: 'USD', exchangeRate: 1.3601, amount: 250, appliedTotal: 0, memo: null,
+    }
+
+    it('sends the stored rate back when the currency is unchanged', async () => {
+      docSection.updateDraft.mockClear()
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const crud = (wrapper.vm as unknown as { crud: CrudVm }).crud
+
+      crud.openEdit(draft)
+      crud.formModal.formData.value!.memo = 'Wire ref 8812'
+      await crud.submit()
+
+      expect(docSection.updateDraft).toHaveBeenCalledWith('p7', expect.objectContaining({ memo: 'Wire ref 8812', currency: 'USD', exchangeRate: 1.3601 }))
+      wrapper.unmount()
+    })
+
+    it('leaves the rate to the rate table once the currency changes', async () => {
+      docSection.updateDraft.mockClear()
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const crud = (wrapper.vm as unknown as { crud: CrudVm }).crud
+
+      crud.openEdit(draft)
+      crud.formModal.formData.value!.currency = 'eur'
+      await crud.submit()
+
+      expect(docSection.updateDraft).toHaveBeenCalledWith('p7', expect.objectContaining({ currency: 'EUR', exchangeRate: null }))
+      wrapper.unmount()
+    })
   })
 })

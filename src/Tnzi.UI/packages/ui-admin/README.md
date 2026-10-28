@@ -169,6 +169,39 @@ defineAdminApp({
 `hideRoutes` hides a single sub-menu (route stays reachable by deep link
 or `router.push`).
 
+### Leave out the public recipient pages
+
+Three built-in pages are opened by people who are not signed in: a file
+share (`/share/:token`), the notification unsubscribe page and the
+invitation acceptance page. An app whose recipients open those links in
+another front end can leave them out of the route table:
+
+```ts
+defineAdminApp({ client, hidePublicPages: ['share-link', 'accept-invitation'] })
+```
+
+A left-out page is not registered at all, so its address falls through to
+the 404 page, and the built-in pages that link to it stop offering the link
+(the shares list drops "Copy link"). The backend must then send recipients
+to the other front end (for invitations, `Identity:Invitation:AcceptUrlTemplate`).
+The names are exported as `PUBLIC_PAGE_ROUTE_NAMES`.
+
+### Match the deployment's password policy
+
+The register, reset and invitation pages check a new password in the
+browser before sending it. By default the check is the server's default
+policy (at least 6 characters, a digit and a lowercase letter). A deployment
+that configures `Identity:PasswordPolicy` passes the same values here, so the
+form never accepts a password the server then refuses:
+
+```ts
+defineAdminApp({ client, passwordPolicy: { minLength: 12, requireUppercase: true } })
+```
+
+Fields left out keep the server's defaults. It applies to every
+`useFormRules().password()` rule in the app; an app built without
+`defineAdminApp` provides `PASSWORD_POLICY_KEY` from `@tnzi/ui` itself.
+
 ### Override sidebar ordering
 
 Every framework top-level module ships with a default `meta.order` so
@@ -317,7 +350,7 @@ The theme drawer offers a fifth layout, `desktop`: an icon grid (one tile per to
 |---|---|
 | `@tnzi/ui-admin` | `defineAdminApp`, `createTnziUiAdmin`, `useAdminClient`, `vPermission`, `installDirectives`, `fetchAdminManifest`, `TAdminAppRoot` |
 | `@tnzi/ui-admin/components` | `TAdminLoginCard`, `TStepUpModal`, `TIconPicker`, `TJsonEditor`, layout primitives (`TAdminAppRoot`, `TAdminAutoBreadcrumb`, `TAdminUserAvatar`, `TDarkModeContainer`, `TAdminRouterView`, `TSystemLogo`), display + utility re-exports from `@tnzi/ui` |
-| `@tnzi/ui-admin/headless` | `useCrudPage`, `useFormRules`, `useNaiveForm`, `useAdminModuleManifest`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, ... |
+| `@tnzi/ui-admin/headless` | `useCrudPage`, `useFormRules`, `useNaiveForm`, `useModuleAvailability`, `useColumnSettings`, `useBatchActions`, `useFormModal`, `usePermissionGuard`, `useAdminMenuContext`, `useBreakpoint`, ... |
 | `@tnzi/ui-admin/stores` | `useAdminThemeStore`, `useAdminAuthStore`, `useAdminAppStore`, `useAdminRouteStore`, `useAdminTabStore`, `useAdminBreadcrumbStore` |
 | `@tnzi/ui-admin/router` | `defaultAdminRoutes` (filtered/overridable via `defineAdminApp`) |
 | `@tnzi/ui-admin/pages` | 预置页面（`defaultAdminRoutes` 当前挂 102 个懒加载路由组件；以 `src/router/routes.ts` 为准，不在本表维护计数） |
@@ -451,13 +484,18 @@ const { rules } = useFormRules() // optional translate fn for i18n
 const formRules = {
   userName: rules.userName,
   email: rules.email,
-  password: rules.password({ min: 10, max: 32 }),
+  password: rules.password({ min: 10 }),
   confirmPassword: rules.matches(() => model.password),
 }
 ```
 
 Available: `required`, `text`, `userName`, `email`, `phone`, `password`,
 `matches`, `url`, `json`, `integer`.
+
+`password()` defaults to 6-128 characters with a letter and a digit, which
+never refuses a password the backend's default policy (minimum 6, no
+maximum) accepts. A deployment with a stricter policy passes its own `min`;
+the backend enforces the configured rule either way.
 
 ## Theme drawer
 
@@ -469,21 +507,24 @@ toggles), **General** (page transitions), **Watermark** (text +
 opacity + auto-username + auto-date), **Preset** (copy / download /
 import JSON config).
 
-## Backend module manifest
+## Backend module availability
 
-The framework reads `GET admin/diagnostics/admin-manifest` to learn
-which modules + admin controllers the backend actually exposes:
+The shell reads `GET admin/shell/modules` (any signed-in admin) to learn
+which business modules the backend host loaded, and hides the menus and
+routes of the others. Gate your own UI on the same signal:
 
 ```ts
-import { useAdminModuleManifest } from '@tnzi/ui-admin/headless'
-import { useAdminClient } from '@tnzi/ui-admin'
+import { computed } from 'vue'
+import { useModuleAvailability } from '@tnzi/ui-admin/headless'
 
-const client = useAdminClient()
-const { menuTree, modules, isAvailable } = useAdminModuleManifest({ client })
+const modules = useModuleAvailability()
+const showAiMenu = computed(() => modules.has('ai'))
 ```
 
-Use this to gate UI on backend feature availability ("only show the AI
-menu when the AI module is loaded server-side").
+`fetchAdminManifest(client)` (from `@tnzi/ui-admin`) returns the richer
+diagnostics view of `GET admin/diagnostics/admin-manifest` (gated on
+`system.diagnostics.view`): each loaded module with its admin controllers'
+API routes and HTTP methods. Those are API routes, not admin page paths.
 
 ## Troubleshooting
 

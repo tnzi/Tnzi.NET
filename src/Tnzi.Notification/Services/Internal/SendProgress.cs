@@ -28,10 +28,15 @@ namespace Tnzi.Notification.Services.Internal;
 /// <list type="bullet">
 /// <item><b>记账</b> —— 已投递的收件人落库，崩溃时的重发面收窄到最后一片；</item>
 /// <item><b>心跳</b> —— 消息行的 <c>LastModificationTime</c> 推进，正在飞的批次不会被
-/// 判成「卡住」。心跳靠 <c>UpdateAsync</c> 把实体整体置为 <c>Modified</c> 实现，
-/// 审计拦截器随即把时间戳覆写成"现在"；<b>不能</b>只保存收件人 —— 那样消息行本身
-/// 一个字段都没改，时间戳原地不动。</item>
+/// 判成「卡住」。心跳是一条带条件的更新（<see cref="MessageClaim.TryHeartbeatAsync"/>）：
+/// 只保存收件人的话，消息行本身一个字段都没改，时间戳原地不动。</item>
 /// </list>
+/// <para>
+/// ★★ <b>落库只按属性保存，不把消息行整行写回。</b>此前心跳靠 <c>UpdateAsync</c> 把实体整体置为
+/// <c>Modified</c>：内存里那份 <c>Status = Sending</c>、<c>IsDeleted = false</c> 于是在每次分片时盖掉管理端的取消与删除，
+/// 取消答复成功、剩下的人照发不误，删掉的消息又回来了。现在保存只写本轮真改过的列（收件人状态与两个计数），
+/// 心跳的条件（仍在发送中）同时回答「这一行还归不归这一轮」，答否之后 <see cref="StillSendingAsync"/> 一律答否。
+/// </para>
 /// <para>
 /// ★ <b>两个触发条件都要</b>：按条数（<see cref="FlushEveryRecipients"/>）管的是崩溃时的
 /// 重发面，按时长（<see cref="FlushInterval"/>）管的是心跳。只有条数时，一批 3 个收件人
@@ -54,15 +59,38 @@ internal sealed class SendProgress
     private readonly IRepository<Message, Guid> _repository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly Message _message;
+    private readonly TimeSpan _flushInterval;
 
     private int _sinceLastFlush;
     private DateTime _lastFlushUtc = DateTime.UtcNow;
+    private bool _stillSending = true;
 
-    public SendProgress(IRepository<Message, Guid> repository, IUnitOfWork unitOfWork, Message message)
+    /// <param name="repository">消息仓储。</param>
+    /// <param name="unitOfWork">工作单元。</param>
+    /// <param name="message">正在发送的消息（带收件人，被跟踪）。</param>
+    /// <param name="flushInterval">按时长落库的间隔；只给测试用，发送路径一律取 <see cref="FlushInterval"/>（理由见类注释）。</param>
+    public SendProgress(IRepository<Message, Guid> repository, IUnitOfWork unitOfWork, Message message, TimeSpan? flushInterval = null)
     {
         _repository = Check.NotNull(repository);
         _unitOfWork = Check.NotNull(unitOfWork);
         _message = Check.NotNull(message);
+        _flushInterval = flushInterval ?? FlushInterval;
+    }
+
+    /// <summary>
+    /// 这条消息是否仍归这一轮发送：没被取消、没被删除。答过一次否之后不再查库。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 发送循环<b>每投递一个收件人之前</b>问一次：管理端的取消与删除发生在另一个作用域里，
+    /// 循环手里那份收件人名单是开跑时读出来的，不问库就会把取消之后的人照样发完。
+    /// 一次按主键的存在性查询，比一次投递便宜得多。
+    /// </remarks>
+    public async Task<bool> StillSendingAsync(CancellationToken cancellationToken)
+    {
+        if (_stillSending)
+            _stillSending = await MessageClaim.IsSendingAsync(_repository, _message.Id, cancellationToken);
+
+        return _stillSending;
     }
 
     /// <summary>
@@ -72,14 +100,36 @@ internal sealed class SendProgress
     {
         _sinceLastFlush++;
 
-        if (_sinceLastFlush < FlushEveryRecipients && DateTime.UtcNow - _lastFlushUtc < FlushInterval)
+        if (_sinceLastFlush < FlushEveryRecipients && DateTime.UtcNow - _lastFlushUtc < _flushInterval)
             return;
 
         await FlushAsync(cancellationToken);
     }
 
     /// <summary>
-    /// 立即把当前进度落库：重算两个计数、把消息置为已修改（推进心跳）、保存。
+    /// 等这么久再投递下一个收件人（限速，见 <see cref="NotificationSendPacer"/>），<b>等待期间照样推进心跳</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 限速的等待可以很长：每分钟一次的配额加上几场并发的群发，一个收件人前面就可能排上十几分钟。
+    /// 心跳只在每个收件人处理完时推进的话，这段等待里消息行的 <c>LastModificationTime</c> 原地不动，
+    /// 卡住扫描会把一条<b>正在飞</b>的批次判成卡住接手过去：那正是本类要挡住的重复投递。
+    /// 所以按落库间隔切片等待，每片之后到点就落一次。
+    /// </remarks>
+    public async Task WaitAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        while (delay > TimeSpan.Zero)
+        {
+            var slice = delay < _flushInterval ? delay : _flushInterval;
+            await Task.Delay(slice, cancellationToken);
+            delay -= slice;
+
+            if (DateTime.UtcNow - _lastFlushUtc >= _flushInterval)
+                await FlushAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 立即把当前进度落库：重算两个计数、按属性保存、推进心跳。
     /// </summary>
     /// <remarks>
     /// 计数在这里重算而不是在调用方累加：<c>Recipients</c> 里可能有本轮之前就已经
@@ -90,8 +140,10 @@ internal sealed class SendProgress
         _message.SuccessCount = _message.Recipients.Count(r => r.Status == NotificationStatus.Sent);
         _message.FailureCount = _message.Recipients.Count(r => r.Status == NotificationStatus.Failed);
 
-        await _repository.UpdateAsync(_message, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        if (_stillSending)
+            _stillSending = await MessageClaim.TryHeartbeatAsync(_repository, _message.Id, cancellationToken);
 
         _sinceLastFlush = 0;
         _lastFlushUtc = DateTime.UtcNow;

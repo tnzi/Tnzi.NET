@@ -53,4 +53,11 @@ public interface IFieldEncryptor
     /// 读取路径据此决定是否需要解密。迁移完成后该判断恒为真。
     /// </remarks>
     bool IsEncrypted(string value);
+
+    /// <summary>
+    /// 密文里除「明文 UTF-8 字节 + 28 字节随机数与标签的 Base64」之外的最大字符数,
+    /// <c>IsEncrypted()</c> 据此放宽列长。默认是直接模式的形态:密钥标识上限加 <c>:v2:</c>。
+    /// 密文布局更长的实现 MUST 覆盖,否则列长不够、写入在数据库层才失败。
+    /// </summary>
+    int CiphertextOverheadChars => FieldEncryptionOptions.MaxKeyIdLength + 4;
 }

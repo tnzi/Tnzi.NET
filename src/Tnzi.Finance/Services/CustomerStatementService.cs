@@ -6,6 +6,11 @@
 /// <remarks>
 /// 余额、账龄、流水三者都**复用既有服务**（账龄报表 + 往来方流水），不另写一遍：
 /// 寄出去的那张纸与自己账上的数对不上，比不寄更糟。
+/// <para>
+/// ★ 流水的口径必须与账龄（期初、期末余额的来源）逐项一致，否则同一张纸上末行余额与「应付金额」
+/// 对不上：作废的单据账龄视为从未存在，流水也不列；费用直接付清、从不挂应付，供应商对账单也不列；
+/// 账龄是本位币，所以对账单只出本位币单据，含外币单据时拒绝出单，而不是把外币金额加进本位币余额。
+/// </para>
 /// </remarks>
 public class CustomerStatementService : ApplicationService, ICustomerStatementService
 {
@@ -13,6 +18,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     private readonly IFinancialReportService _reports;
     private readonly IDunningPolicy _dunning;
     private readonly FinanceDocumentHelper _helper;
+    private readonly IReadOnlyRepository<PaymentApplication, Guid> _applicationRepository;
     private readonly FinanceOptions _options;
 
     public CustomerStatementService(
@@ -21,6 +27,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
         IFinancialReportService reports,
         IDunningPolicy dunning,
         FinanceDocumentHelper helper,
+        IReadOnlyRepository<PaymentApplication, Guid> applicationRepository,
         IOptionsSnapshot<FinanceOptions> options)
         : base(serviceProvider)
     {
@@ -28,6 +35,7 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
         _reports = Check.NotNull(reports);
         _dunning = Check.NotNull(dunning);
         _helper = Check.NotNull(helper);
+        _applicationRepository = Check.NotNull(applicationRepository);
         _options = Check.NotNull(options).Value;
     }
 
@@ -139,33 +147,65 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     private sealed record StatementBody(List<StatementLineDto> Lines, decimal OpeningBalance);
 
     /// <summary>
-    /// Open Item：只列还没付清的单据。
+    /// Open Item：只列截至 <paramref name="asOf"/> 还没付清的单据（发票 / 账单）。
     /// </summary>
+    /// <remarks>
+    /// ★ 未清额按 <paramref name="asOf"/> 时点重建（核销记账时刻早于次日零点的才算），与账龄同一判据：
+    /// 用单据上当前的已核销额，一张过去日期的对账单会漏掉当时还欠着、之后才付清的单据，
+    /// 而同一张纸上的期末余额（账龄）照样把它算在里面。逾期天数同理按 <paramref name="asOf"/> 算。
+    /// </remarks>
     private async Task<Result<StatementBody>> BuildOpenItemLinesAsync(
         FinancePartyType partyType, Guid partyId, DateTime asOf, CancellationToken cancellationToken)
     {
-        var page = await _ledger.GetTransactionsAsync(partyType, partyId,
-            new PartyLedgerQueryDto { PageIndex = 1, PageSize = MaxLines, OpenOnly = true, To = asOf }, cancellationToken);
-        if (!page.Succeeded)
-            return Fail<StatementBody>(page.Message!, page.Code ?? 400);
-        if (page.Data!.TotalCount > MaxLines)
-            return TooManyLines<StatementBody>(page.Data.TotalCount);
+        var all = await _ledger.GetAllTransactionsAsync(partyType, partyId, to: asOf, cancellationToken: cancellationToken);
+        if (!all.Succeeded)
+            return Fail<StatementBody>(all.Message!, all.Code ?? 400);
 
-        var lines = page.Data.Items
-            .OrderBy(e => e.DocDate)
-            .Select(e => new StatementLineDto
+        var (targetDocType, settlementType) = partyType == FinancePartyType.Customer
+            ? (FinanceSourceTypes.Invoice, SettlementDocType.Invoice)
+            : (FinanceSourceTypes.Bill, SettlementDocType.Bill);
+        var targets = all.Data!
+            .Where(e => e.DocType == targetDocType && e.Status != FinanceDocumentStatus.Voided)
+            .ToList();
+
+        var targetIds = targets.Select(e => e.DocId).ToList();
+        var appliedCutoff = asOf.AddDays(1);
+        var appliedAsOf = targetIds.Count == 0
+            ? new Dictionary<Guid, decimal>()
+            : await _applicationRepository.AsNoTracking()
+                .Where(a => a.TargetType == settlementType && targetIds.Contains(a.TargetId) && a.CreationTime < appliedCutoff)
+                .GroupBy(a => a.TargetId)
+                .Select(g => new { TargetId = g.Key, Applied = g.Sum(x => x.AppliedAmount) })
+                .ToDictionaryAsync(x => x.TargetId, x => x.Applied, cancellationToken);
+
+        var open = targets
+            .Select(e => (Entry: e, Outstanding: e.Amount - appliedAsOf.GetValueOrDefault(e.DocId)))
+            .Where(x => x.Outstanding > 0)
+            .ToList();
+        if (open.Count > MaxLines)
+            return TooManyLines<StatementBody>(open.Count);
+
+        var foreign = ForeignCurrencyRejection<StatementBody>(open.Select(x => x.Entry));
+        if (foreign != null)
+            return foreign;
+
+        var lines = open
+            .OrderBy(x => x.Entry.DocDate)
+            .Select(x => new StatementLineDto
             {
-                DocDate = e.DocDate,
-                DueDate = e.DueDate,
-                DocType = e.DocType,
-                DocId = e.DocId,
-                Number = e.Number,
-                Charge = e.Amount > 0 ? e.Amount : 0,
-                Payment = e.Amount < 0 ? -e.Amount : 0,
-                Outstanding = e.Outstanding,
-                OverdueDays = e.OverdueDays,
+                DocDate = x.Entry.DocDate,
+                DueDate = x.Entry.DueDate,
+                DocType = x.Entry.DocType,
+                DocId = x.Entry.DocId,
+                Number = x.Entry.Number,
+                Charge = x.Entry.Amount > 0 ? x.Entry.Amount : 0,
+                Payment = x.Entry.Amount < 0 ? -x.Entry.Amount : 0,
+                Outstanding = x.Outstanding,
+                OverdueDays = x.Entry.DueDate != null && x.Entry.DueDate.Value.ToUtcDate() < asOf
+                    ? (int)(asOf - x.Entry.DueDate.Value.ToUtcDate()).TotalDays
+                    : 0,
                 // Open Item 上的"余额"是未清额本身：这张单还欠多少。
-                Balance = e.Outstanding,
+                Balance = x.Outstanding,
             })
             .ToList();
 
@@ -178,21 +218,30 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     private async Task<Result<StatementBody>> BuildActivityLinesAsync(
         FinancePartyType partyType, Guid partyId, DateTime from, DateTime to, CancellationToken cancellationToken)
     {
-        var period = await _ledger.GetTransactionsAsync(partyType, partyId,
-            new PartyLedgerQueryDto { PageIndex = 1, PageSize = MaxLines, From = from, To = to }, cancellationToken);
+        var period = await _ledger.GetAllTransactionsAsync(partyType, partyId, from, to, cancellationToken);
         if (!period.Succeeded)
             return Fail<StatementBody>(period.Message!, period.Code ?? 400);
-        if (period.Data!.TotalCount > MaxLines)
-            return TooManyLines<StatementBody>(period.Data.TotalCount);
 
-        // 期初 = 期末余额 − 本期净发生额。用减法而不是再查一次历史：往来方流水
-        // 的符号已经统一（发票为正、收款为负），两者必然自洽。
+        // 与账龄同一口径（期初与期末余额都取自账龄）：作废单据在账龄里视为从未存在，
+        // 费用直接付清、从不挂应付，列进来，末行余额就与同一张纸上的应付金额对不上。
+        var entries = period.Data!
+            .Where(e => e.Status != FinanceDocumentStatus.Voided && e.DocType != FinanceSourceTypes.Expense)
+            .ToList();
+        if (entries.Count > MaxLines)
+            return TooManyLines<StatementBody>(entries.Count);
+
+        var foreign = ForeignCurrencyRejection<StatementBody>(entries);
+        if (foreign != null)
+            return foreign;
+
+        // 期初取起始日前一天的账龄余额，与期末余额同一口径；上面的筛选让本期流水与账龄逐项一致，
+        // 于是「期初 + 本期净发生额」落在期末余额上（往来方流水的符号已统一：发票为正、收款为负）。
         var priorSummary = await _ledger.GetSummaryAsync(partyType, partyId, from.AddDays(-1), cancellationToken: cancellationToken);
         var opening = priorSummary.Succeeded ? priorSummary.Data!.OpenBalance : 0m;
 
         var running = opening;
         var lines = new List<StatementLineDto>();
-        foreach (var e in period.Data.Items.OrderBy(x => x.DocDate).ThenBy(x => x.Number))
+        foreach (var e in entries.OrderBy(x => x.DocDate).ThenBy(x => x.Number))
         {
             running = _helper.Round(running + e.Amount);
             lines.Add(new StatementLineDto
@@ -223,6 +272,34 @@ public class CustomerStatementService : ApplicationService, ICustomerStatementSe
     /// 的 <c>ReportExportMaxRows</c> 同一取舍。
     /// </remarks>
     private const int MaxLines = 500;
+
+    /// <summary>
+    /// 含外币单据时拒绝出单（返回 null = 全是本位币）。
+    /// </summary>
+    /// <remarks>
+    /// 期初、期末与账龄分桶都是本位币（账龄按捕获汇率折算），单据行却是交易币金额：
+    /// 把 EUR 加进 USD 的累计余额，纸上就同时印着两个互相矛盾的数。换算成本位币也不够，
+    /// 同一张发票与收款汇率不同时，差额作为已实现汇兑损益记在控制科目上，不在任何一张单据里，
+    /// 累计余额仍落不到期末余额上。外币对账单（按交易币出单，或带汇兑差额行）需要另行设计，
+    /// 在那之前拒绝，比寄出一张自相矛盾的纸好。
+    /// </remarks>
+    private Result<T>? ForeignCurrencyRejection<T>(IEnumerable<PartyLedgerEntryDto> entries)
+    {
+        var baseCurrency = _options.BaseCurrency;
+        var foreign = entries
+            .Select(e => e.Currency)
+            .Where(c => !string.IsNullOrWhiteSpace(c) && !string.Equals(c, baseCurrency, StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.ToUpperInvariant())
+            .Distinct()
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .ToList();
+        if (foreign.Count == 0)
+            return null;
+
+        return Fail<T>(
+            $"Statements are issued in the base currency ({baseCurrency}), but this one would include documents in {string.Join(", ", foreign)}. "
+            + "Foreign-currency statements are not supported in this version.", 400);
+    }
 
     /// <summary>超限拒绝：两种形态各自的补救办法都写出来，别只说"太多了"。</summary>
     private Result<T> TooManyLines<T>(int total) => Fail<T>(

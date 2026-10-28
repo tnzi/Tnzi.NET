@@ -60,6 +60,13 @@ public class EftQueueItemDto
 {
     public Guid PaymentEntryId { get; set; }
     public string? PaymentNumber { get; set; }
+
+    /// <summary>
+    /// 付款过账时贷记的资金科目（<c>PaymentEntry.DepositToAccountId</c>）。
+    /// 装批时所选银行档案挂的科目必须与它相同，呈现端据此只列可选的档案。
+    /// </summary>
+    public Guid? FundingAccountId { get; set; }
+
     public FinancePartyType PartyType { get; set; }
     public Guid PartyId { get; set; }
     public string? PayeeName { get; set; }

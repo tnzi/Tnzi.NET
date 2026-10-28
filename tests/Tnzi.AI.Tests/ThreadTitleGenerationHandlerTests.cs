@@ -36,6 +36,18 @@ public class ThreadTitleGenerationHandlerTests
         return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
+    /// <summary>
+    /// 标题要再调一次 LLM。同步处理器会让发布方（首轮收尾）等它完成：非流式响应多一次完整的 LLM 往返，
+    /// 流式连接在 done 之后也要挂到标题生成结束。总线按这份元数据决定是否放到后台。
+    /// </summary>
+    [Fact]
+    public void Handler_RunsInTheBackground_SoTheFirstReplyDoesNotWaitForTheTitle()
+    {
+        var metadata = EventHandlerInvoker.GetMetadata(typeof(ThreadTitleGenerationHandler), typeof(ThreadFirstReplyCompletedEvent));
+
+        metadata.IsBackground.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task HandleAsync_WhenEnabled_GeneratesAndUpdatesTitle()
     {

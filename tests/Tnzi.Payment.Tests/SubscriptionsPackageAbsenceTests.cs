@@ -215,6 +215,8 @@ public class SubscriptionsPackageAbsenceTests
             new Mock<IRepository<StoredPaymentMethod, Guid>>().Object,
             new Mock<IPaymentProviderFactory>().Object,
             OptionsMonitorOver(new PaymentOptions()),
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             LoggingServiceProvider());
 
         service.ShouldNotBeNull();

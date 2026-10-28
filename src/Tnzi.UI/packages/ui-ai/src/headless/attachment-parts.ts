@@ -9,17 +9,32 @@
  *
  * What the endpoint can carry:
  *   - **images** inline, as base64 (`ImageContentPartDto`);
+ *   - **PDFs** inline, as base64 (`DocumentContentPartDto`): an agent bound to an
+ *     external CLI runtime receives them as document blocks, the built-in engine
+ *     hands them to the provider as inline data;
  *   - **anything else** only by reference - `FileContentPartDto.fileId` is a
  *     Storage record id, so a non-image file has to be uploaded first. That
  *     upload is the consumer's call (`uploadFile`): which storage, which
  *     folder, public or not. Without it a non-image file is REFUSED, loudly,
  *     rather than sent as a name the model never sees.
+ *
+ * The framework's default backend resolver does NOT load file contents: a
+ * turn carrying a `file` part fails with 501 (`AI_UNSUPPORTED_MEDIA_TYPE`)
+ * instead of handing the model a file name it cannot read. Pass `uploadFile`
+ * only to a backend whose `IAgentResolver` resolves file references; against
+ * the default backend, leave it out so non-image files are refused here,
+ * before anything is uploaded.
  */
-import type { ImageContentPartDto, FileContentPartDto, TextContentPartDto } from '@tnzi/core/services/ai';
+import type {
+  DocumentContentPartDto,
+  ImageContentPartDto,
+  FileContentPartDto,
+  TextContentPartDto,
+} from '@tnzi/core/services/ai';
 import type { MessageAttachment } from './useChat';
 
-/** The three shapes `ChatRequestDto.content` accepts, as a union. */
-export type ChatContentPart = TextContentPartDto | ImageContentPartDto | FileContentPartDto;
+/** The shapes `ChatRequestDto.content` accepts, as a union. */
+export type ChatContentPart = TextContentPartDto | ImageContentPartDto | DocumentContentPartDto | FileContentPartDto;
 
 /** A non-image file uploaded to storage; what `FileContentPartDto` references. */
 export interface UploadedAttachment {
@@ -30,7 +45,9 @@ export interface UploadedAttachment {
 export interface FilesToContentPartsOptions {
   /**
    * Upload a non-image file and return its storage id. Typically
-   * `useStorageApi(http).upload` unwrapped. Throw to refuse.
+   * `useStorageApi(http).upload` unwrapped. Throw to refuse. Only useful
+   * against a backend that resolves file references: the default one answers
+   * a `file` part with 501.
    */
   uploadFile?: (file: File) => Promise<UploadedAttachment>;
   /** Per-file ceiling in bytes. Default 10 MB. */
@@ -53,20 +70,39 @@ export interface ContentPartsResult {
   attachments: MessageAttachment[];
 }
 
+/** Why an attachment could not be sent. */
+export type AttachmentRefusalReason = 'too-large' | 'unsupported-type' | 'upload-failed';
+
+export interface AttachmentRefusedErrorOptions {
+  reason?: AttachmentRefusalReason;
+  /** The file it was about. */
+  fileName?: string;
+  /** What `uploadFile` threw, when the upload failed (an `HttpError` carries the server's error code). */
+  cause?: unknown;
+}
+
 /**
  * Raised when an attachment cannot be sent. `message` is user-facing: the
  * transports report it through their `onError` and leave the turn unsent.
+ * `reason` and `fileName` say which refusal it was, so a product can word it
+ * in its own copy; an upload that failed keeps what was thrown as `cause`.
  */
 export class AttachmentRefusedError extends Error {
-  constructor(message: string) {
-    super(message);
+  readonly reason: AttachmentRefusalReason | null;
+  readonly fileName: string | null;
+
+  constructor(message: string, options: AttachmentRefusedErrorOptions = {}) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'AttachmentRefusedError';
+    this.reason = options.reason ?? null;
+    this.fileName = options.fileName ?? null;
   }
 }
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
 
 const isImage = (file: File): boolean => file.type.startsWith('image/');
+const isPdf = (file: File): boolean => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 
 /** The message a files-only turn is sent and persisted with; user-facing. */
 export function describeAttachments(files: readonly File[]): string {
@@ -102,7 +138,14 @@ export function attachmentsToContentParts(
   const parts: ChatContentPart[] = [{ type: 'text', text: message }];
   for (const attachment of attachments) {
     if (attachment.type === 'image') {
-      parts.push({ type: 'image', base64Data: attachment.base64Data ?? '', mediaType: attachment.mediaType ?? '' });
+      parts.push({
+        type: 'image',
+        base64Data: attachment.base64Data ?? '',
+        mediaType: attachment.mediaType ?? '',
+        ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+      });
+    } else if (attachment.base64Data) {
+      parts.push({ type: 'document', base64Data: attachment.base64Data, mediaType: attachment.mediaType, fileName: attachment.fileName });
     } else {
       parts.push({ type: 'file', fileId: attachment.fileId ?? '', fileName: attachment.fileName });
     }
@@ -122,10 +165,16 @@ export async function filesToContentParts(
   // leave no half-uploaded state behind.
   for (const file of files) {
     if (file.size > maxBytes) {
-      throw new AttachmentRefusedError(`"${file.name}" is larger than ${describeSize(maxBytes)} and cannot be sent.`);
+      throw new AttachmentRefusedError(`"${file.name}" is larger than ${describeSize(maxBytes)} and cannot be sent.`, {
+        reason: 'too-large',
+        fileName: file.name,
+      });
     }
-    if (!isImage(file) && !options.uploadFile) {
-      throw new AttachmentRefusedError(`"${file.name}" cannot be sent: only images can be attached here.`);
+    if (!isImage(file) && !isPdf(file) && !options.uploadFile) {
+      throw new AttachmentRefusedError(`"${file.name}" cannot be sent: only images and PDFs can be attached here.`, {
+        reason: 'unsupported-type',
+        fileName: file.name,
+      });
     }
   }
 
@@ -140,15 +189,26 @@ export async function filesToContentParts(
     if (isImage(file)) {
       const base64Data = await toBase64(file);
       const mediaType = file.type;
-      parts.push({ type: 'image', base64Data, mediaType });
-      attachments.push({ type: 'image', fileName: file.name, mediaType, base64Data });
+      parts.push({ type: 'image', base64Data, mediaType, fileName: file.name });
+      attachments.push({ type: 'image', fileName: file.name, mediaType, base64Data, size: file.size });
+      continue;
+    }
+    if (isPdf(file)) {
+      const base64Data = await toBase64(file);
+      const mediaType = 'application/pdf';
+      parts.push({ type: 'document', base64Data, mediaType, fileName: file.name });
+      attachments.push({ type: 'file', fileName: file.name, mediaType, base64Data, size: file.size });
       continue;
     }
     let uploaded: UploadedAttachment;
     try {
       uploaded = await options.uploadFile!(file);
     } catch (err) {
-      throw new AttachmentRefusedError(err instanceof Error ? err.message : `"${file.name}" could not be uploaded.`);
+      throw new AttachmentRefusedError(err instanceof Error ? err.message : `"${file.name}" could not be uploaded.`, {
+        reason: 'upload-failed',
+        fileName: file.name,
+        cause: err,
+      });
     }
     const fileName = uploaded.fileName ?? file.name;
     parts.push({ type: 'file', fileId: uploaded.id, fileName });

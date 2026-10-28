@@ -206,7 +206,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     employees: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<PayrollPagedResult<EmployeeDto>>(
+        const result = unwrapOk<PayrollPagedResult<EmployeeDto>>(
           (await api.employees.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -223,7 +223,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
         for (const id of ids) ensureOk(await api.employees.delete(id))
       },
       ensureVendor: async (id) => unwrapOk<EmployeeDto>(await api.employees.ensureVendor(id)),
-      assignments: async (id) => unwrap<SalaryAssignmentDto[]>(await api.employees.getAssignments(id)) ?? [],
+      assignments: async (id) => unwrapOk<SalaryAssignmentDto[]>(await api.employees.getAssignments(id)) ?? [],
       createAssignment: async (id, data) =>
         unwrapOk<SalaryAssignmentDto>(await api.employees.createAssignment(id, data)),
       deleteAssignment: async (id, assignmentId) => {
@@ -234,7 +234,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     components: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<PayrollPagedResult<SalaryComponentDto>>(
+        const result = unwrapOk<PayrollPagedResult<SalaryComponentDto>>(
           (await api.components.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -255,7 +255,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     structures: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<PayrollPagedResult<SalaryStructureListDto>>(
+        const result = unwrapOk<PayrollPagedResult<SalaryStructureListDto>>(
           (await api.structures.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -277,7 +277,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     brackets: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<PayrollPagedResult<BracketTableListDto>>(
+        const result = unwrapOk<PayrollPagedResult<BracketTableListDto>>(
           (await api.brackets.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -300,7 +300,7 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     runs: {
       fetch: async (query) => {
         const filters = query.filters ?? {}
-        const result = unwrap<PayrollPagedResult<PayRunListDto>>(
+        const result = unwrapOk<PayrollPagedResult<PayRunListDto>>(
           (await api.runs.getList({
             pageIndex: query.pageIndex,
             pageSize: query.pageSize,
@@ -323,11 +323,11 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
       post: async (id) => unwrapOk<PayRunDto>(await api.runs.post(id)),
       pay: async (id, data) => unwrapOk<PayRunDto>(await api.runs.pay(id, data)),
       voidRun: async (id) => unwrapOk<PayRunDto>(await api.runs.void(id)),
-      payslips: async (id) => unwrap<PayslipListDto[]>(await api.runs.getPayslips(id)) ?? [],
+      payslips: async (id) => unwrapOk<PayslipListDto[]>(await api.runs.getPayslips(id)) ?? [],
       payslip: async (id, payslipId) => unwrap<PayslipDto | null>(await api.runs.getPayslip(id, payslipId)),
       updatePayslipInputs: async (id, payslipId, data) =>
         unwrapOk<PayslipDto>(await api.runs.updatePayslipInputs(id, payslipId, data)),
-      inputs: async (id) => unwrap<PayRunInputDto[]>(await api.runs.getInputs(id)) ?? [],
+      inputs: async (id) => unwrapOk<PayRunInputDto[]>(await api.runs.getInputs(id)) ?? [],
       setInput: async (id, data) => unwrapOk<PayRunInputDto>(await api.runs.setInput(id, data)),
       deleteInput: async (id, inputId) => {
         ensureOk(await api.runs.deleteInput(id, inputId))
@@ -338,8 +338,9 @@ export function createPayrollBridge(deps: PayrollBridgeDeps = {}): PayrollBridge
     countryPacks: {
       fetch: async (query) =>
         pageArray(
-          unwrap<CountryPackDto[]>(await api.countryPacks.getRegistered()) ?? [],
+          unwrapOk<CountryPackDto[]>(await api.countryPacks.getRegistered()) ?? [],
           { searchText: '', filters: {}, ...query },
+          (p) => [p.code, p.displayName, p.description],
         ),
       seed: async (code) => unwrapOk<CountryPackSeedResult>(await api.countryPacks.seed(code)),
     },

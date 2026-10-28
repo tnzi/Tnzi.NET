@@ -95,14 +95,27 @@ metadata:
 > 正文以 `---` 开头的文件会被当作带 front matter。正文**中间**的 `---`（分隔线）不受影响。
 
 ## 使用
-```csharp
-// 注册（在启动时）
-services.AddTnziTemplate(builder.Configuration);
 
-// 渲染
-var content = await templateEngine.RenderAsync("Hello @Model.Name", new { Name = "User" });
-var fromFile = await templateEngine.RenderFromFileAsync("Templates/Notification/Email/UserWelcome.cshtml", model);
+本包以模块方式加载，没有 `services.AddXxx(...)` 形式的注册扩展：在应用模块上声明依赖，
+`ITemplateEngine` / `ITemplateRenderService` 等服务由 `TemplateModule` 注册，配置从上面的 `Template` 节读取。
+
+```csharp
+[DependsOn(typeof(TemplateModule))]
+public class MyAppModule : TnziCustomModule
+{
+}
 ```
+
+```csharp
+// 从字符串渲染
+var content = await templateEngine.RenderAsync("Hello @Model.Name", new { Name = "User" });
+
+// 从文件渲染：路径相对 TemplateRootPath（本身已指向 Templates/），不要再带 "Templates/" 前缀；扩展名可省略
+var fromFile = await templateEngine.RenderFromFileAsync("Notification/Email/UserWelcome", model);
+```
+
+`@expr` 默认 HTML 编码，`Raw(...)` / `Html.Raw(...)` 原样输出；`HtmlEncode(...)` / `Html.Encode(...)` 的产物已经编码过，
+写出时不会再被编码一次。`ITemplateRenderService` 的方法把模板不存在、编译失败、渲染期出错都以失败的 `Result` 返回，不抛出。
 
 ## 发布与复制
 

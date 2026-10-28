@@ -46,6 +46,15 @@ public class PayRunListDto
     public decimal GrossTotal { get; set; }
     public decimal NetTotal { get; set; }
     public DateTime CreationTime { get; set; }
+
+    /// <summary>
+    /// 结构过滤（null = 全部有分配的员工）。★ 列表行必须带它与 <see cref="Memo"/>：编辑表单从列表行打开，
+    /// 而更新是整行覆盖，行里缺的字段会以 null 写回，一个限定了结构的草稿批次随即圈进全部员工。
+    /// </summary>
+    public Guid? StructureId { get; set; }
+
+    /// <summary>摘要</summary>
+    public string? Memo { get; set; }
 }
 
 /// <summary>

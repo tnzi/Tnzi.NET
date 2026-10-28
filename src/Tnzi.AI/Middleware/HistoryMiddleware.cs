@@ -53,16 +53,21 @@ public class HistoryMiddleware : IAiMiddleware
                 Guid? userMessageId = null;
                 Guid? assistantMessageId = null;
 
-                // 保存用户消息
-                if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+                // 保存用户消息：落库的是模型实际收到的文本（守卫改写之后；带内容块时是其中的文本块），
+                // 而不是 Request.UserMessage，否则下一轮把历史读回来时，模型会看到这一轮被脱敏掉的原文
+                var userTurnText = UserTurn.EffectiveText(context);
+                if (!string.IsNullOrWhiteSpace(userTurnText))
                 {
                     var preGenUserId = SequentialGuid.NewGuid();
-                    userMessageId = await _threadService.SaveMessageAsync(
-                        threadId.Value,
-                        "user",
-                        context.Request.UserMessage,
-                        messageId: preGenUserId,
-                        ct: cancellationToken);
+                    userMessageId = context.Request.TurnMetadata is { Count: > 0 } metadata
+                        ? await _threadService.SaveUserMessageAsync(
+                            threadId.Value, userTurnText, metadata, messageId: preGenUserId, ct: cancellationToken)
+                        : await _threadService.SaveMessageAsync(
+                            threadId.Value,
+                            "user",
+                            userTurnText,
+                            messageId: preGenUserId,
+                            ct: cancellationToken);
                 }
 
                 // 保存助手回复
@@ -126,7 +131,8 @@ public class HistoryMiddleware : IAiMiddleware
         // 收集流式响应文本和工具调用详情
         var responseBuilder = new StringBuilder();
         var toolCallDetails = new List<ToolCallDetail>();
-        TokenUsageDto? lastUsage = null;
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径），消息上记的是这一轮的总和
+        TokenUsageDto? totalUsage = null;
         string? lastFinishReason = null;
         var afterToolCall = false;
         Guid? preGenUserMessageId = null;
@@ -169,10 +175,7 @@ public class HistoryMiddleware : IAiMiddleware
             {
                 toolCallDetails.AddRange(chunk.ToolCalls);
             }
-            if (chunk.Usage != null)
-            {
-                lastUsage = chunk.Usage;
-            }
+            totalUsage = StreamUsage.Add(totalUsage, chunk.Usage);
             if (chunk.FinishReason != null)
             {
                 // Pre-generate persisted message ids on the first terminal chunk so the
@@ -182,7 +185,7 @@ public class HistoryMiddleware : IAiMiddleware
                     && threadId != null
                     && ShouldPersistResult(chunk.FinishReason))
                 {
-                    if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+                    if (!string.IsNullOrWhiteSpace(UserTurn.EffectiveText(context)))
                     {
                         preGenUserMessageId = SequentialGuid.NewGuid();
                     }
@@ -214,18 +217,28 @@ public class HistoryMiddleware : IAiMiddleware
         {
             try
             {
-                if (!string.IsNullOrWhiteSpace(context.Request.UserMessage))
+                // 与非流式路径同一口径：模型实际收到的文本
+                var userTurnText = UserTurn.EffectiveText(context);
+                if (!string.IsNullOrWhiteSpace(userTurnText))
                 {
                     var userId = preGenUserMessageId ?? SequentialGuid.NewGuid();
-                    await _threadService.SaveMessageAsync(
-                        threadId.Value, "user", context.Request.UserMessage, messageId: userId, ct: CancellationToken.None);
+                    if (context.Request.TurnMetadata is { Count: > 0 } metadata)
+                    {
+                        await _threadService.SaveUserMessageAsync(
+                            threadId.Value, userTurnText, metadata, messageId: userId, ct: CancellationToken.None);
+                    }
+                    else
+                    {
+                        await _threadService.SaveMessageAsync(
+                            threadId.Value, "user", userTurnText, messageId: userId, ct: CancellationToken.None);
+                    }
                 }
 
                 var response = responseBuilder.ToString();
                 if (!string.IsNullOrEmpty(response))
                 {
-                    var usageJson = lastUsage != null
-                        ? JsonSerializer.Serialize(lastUsage)
+                    var usageJson = totalUsage != null
+                        ? JsonSerializer.Serialize(totalUsage)
                         : null;
                     var toolCallsJson = toolCallDetails.Count > 0
                         ? JsonSerializer.Serialize(toolCallDetails)
@@ -385,7 +398,7 @@ public class HistoryMiddleware : IAiMiddleware
             var newContents = msg.Contents.Select<AIContent, AIContent>(c =>
                 c is FunctionResultContent frc && frc.Result is string text && text.Length > maxChars
                     ? new FunctionResultContent(frc.CallId,
-                        $"{text[..previewChars]}\n\n[truncated: original {text.Length:N0} chars]")
+                        $"{text.FitToLength(previewChars)}\n\n[truncated: original {text.Length:N0} chars]")
                     : c).ToList();
             result.Add(new ChatMessage(msg.Role, newContents));
         }
@@ -439,17 +452,5 @@ public class HistoryMiddleware : IAiMiddleware
     private Task EnsureThreadAsync(AiMiddlewareContext context, CancellationToken ct)
         => ThreadResolutionMiddleware.ResolveAsync(_threadService, context, _logger, ct);
 
-    private static bool ShouldPersistResult(string? finishReason)
-    {
-        return finishReason switch
-        {
-            FinishReasons.GuardrailRejected or
-            FinishReasons.QuotaExceeded or
-            FinishReasons.Error or
-            FinishReasons.Failed or
-            FinishReasons.Rejected or
-            FinishReasons.MaxHandoffs => false,
-            _ => true
-        };
-    }
+    private static bool ShouldPersistResult(string? finishReason) => FinishReasons.EndsWithAnswer(finishReason);
 }

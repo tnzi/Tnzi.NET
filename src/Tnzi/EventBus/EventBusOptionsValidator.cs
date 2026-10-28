@@ -33,23 +33,10 @@ public class EventBusOptionsValidator : OptionsValidatorBase<EventBusOptions>
             errors.Add("EventBus.MaxConcurrency must be greater than 0.");
         }
 
-        // 条件验证：当使用 RabbitMQ 时，验证 RabbitMQ 配置
-        if (string.Equals(options.Type, "RabbitMQ", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrEmpty(options.RabbitMqConnectionString))
-            {
-                errors.Add("EventBus.RabbitMqConnectionString is required when Type is RabbitMQ.");
-            }
-        }
-
-        // 条件验证：当使用 Kafka 时，验证 Kafka 配置
-        if (string.Equals(options.Type, "Kafka", StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrEmpty(options.KafkaBootstrapServers))
-            {
-                errors.Add("EventBus.KafkaBootstrapServers is required when Type is Kafka.");
-            }
-        }
+        // 不在这里要求 RabbitMqConnectionString / KafkaBootstrapServers：传输模块还认 ConnectionStrings:RabbitMQ、
+        // ConnectionStrings:Kafka 与 Kafka:BootstrapServers，这里只看得见 EventBus 节里的那一个。
+        // 硬性要求它会让按文档只配备选来源的部署启动即失败；来源全缺由传输模块在解析处报错，消息列出它认的全部键。
+        // 配了 Type 却没加载传输模块，由 EventBusModule 的启动自证拦下。
 
         // 验证 DefaultHandlerLifetime 的有效值
         if (!Enum.IsDefined(typeof(ServiceLifetime), options.DefaultHandlerLifetime))

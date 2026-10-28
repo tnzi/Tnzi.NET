@@ -84,7 +84,7 @@ export function createDualControlBridge(deps: DualControlBridgeDeps = {}): DualC
 
   async function fetchRequests(query: CrudPageQuery): Promise<CrudPageResult<DualControlRequestDto>> {
     const params = mapQueryToListRequest(query) as unknown as DualControlQueryDto
-    const result = unwrap<CrudPageResult<DualControlRequestDto>>(await a.query(params))
+    const result = unwrapOk<CrudPageResult<DualControlRequestDto>>(await a.query(params))
     return pagedResult({
       items: result.items ?? [],
       totalCount: result.totalCount ?? 0,

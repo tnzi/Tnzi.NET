@@ -73,7 +73,7 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NPopconfirm, NDescriptions, NDescriptionsItem, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
@@ -104,7 +104,8 @@ import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'
+import { amountCell, carriedExchangeRate, fmtAmount, roundMoney, tsToIsoDate, fmtDate } from './money'
+import { useViewedRecord } from './viewed-record'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const route = useRoute()
@@ -121,31 +122,65 @@ const columns = buildDocumentColumns(t, 'partyName', { amountKey: 'amount', show
 // 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
 // TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
 const searchFields = buildDocumentSearchFields(td, {
-  renderParty: (model) =>
-    h(TPartySelect, {
-      modelValue: (model.partyId as string) ?? null,
-      bridge,
-      kind: 'auto',
-      size: 'small',
-      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
-    }),
+  party: {
+    key: 'partyId',
+    render: (model, key) =>
+      h(TPartySelect, {
+        modelValue: (model[key] as string) ?? null,
+        bridge,
+        kind: 'auto',
+        size: 'small',
+        'onUpdate:modelValue': (v: string | null) => (model[key] = v ?? undefined),
+      }),
+  },
 })
+
+/**
+ * The payment as it was when the form opened. The form has no exchange-rate
+ * field, but a draft update replaces the payment, so a manual rate set through
+ * the API is sent back from here (while the currency is unchanged) rather than
+ * silently reset to the rate table. Captured synchronously on open, before the
+ * operator can type into the cloned form data.
+ */
+const openedRecord = shallowRef<FinanceDocRow | null>(null)
 
 function toPayload(d: Record<string, unknown>) {
   const direction = (d.direction as PaymentDirection) ?? PaymentDirection.Inbound
+  const currency = typeof d.currency === 'string' && d.currency.trim() ? d.currency.trim().toUpperCase() : null
   return {
     direction,
     partyType: direction === PaymentDirection.Inbound ? FinancePartyType.Customer : FinancePartyType.Vendor,
     partyId: String(d.partyId ?? ''),
     docDate: typeof d.docDate === 'number' ? tsToIsoDate(d.docDate) : String(d.docDate ?? ''),
     amount: Number(d.amount ?? 0),
-    currency: typeof d.currency === 'string' && d.currency.trim() ? d.currency.trim().toUpperCase() : null,
+    currency,
+    exchangeRate: openedRecord.value?.id === d.id ? carriedExchangeRate(openedRecord.value, currency) : null,
     depositToAccountId: (d.depositToAccountId as string | null) || null,
     paymentMethod: (d.paymentMethod as string | null) || null,
     reference: (d.reference as string | null) || null,
     memo: (d.memo as string | null) || null,
   }
 }
+
+// The full payment behind the read-only drawer, with its applications. Last-wins:
+// a late answer for the row opened before must not paint the drawer of the one
+// open now. A failed applications read still shows the payment (and says why).
+const viewing = useViewedRecord<{ entry: PaymentEntryDto; applications: PaymentApplicationDto[] }>(
+  async (id) => {
+    const entry = await bridge.payments.getById(id)
+    if (!entry) return null
+    let applications: PaymentApplicationDto[] = []
+    try {
+      applications = await bridge.settlements.applications(SettlementDocType.PaymentEntry, id)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error))
+    }
+    return { entry, applications }
+  },
+  (error) => message.error(error),
+)
+const viewed = computed(() => viewing.record.value?.entry ?? null)
+const applications = computed(() => viewing.record.value?.applications ?? [])
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.payments',
@@ -160,8 +195,16 @@ const crud = useCrudPage<FinanceDocRow>({
   deleteData: async (ids) => {
     for (const id of ids) await bridge.payments.deleteDraft(String(id))
   },
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
+
+watch(
+  () => crud.formModal.formData.value,
+  (d) => {
+    openedRecord.value = d ? { ...d } : null
+  },
+  { flush: 'sync' },
+)
 
 const title = 'tnzi.admin.modules.finance.payments.title'
 const detailTitle = (d: FinanceDocRow) => d.number ?? t('detail.draftTitle')
@@ -170,7 +213,7 @@ const detailTitle = (d: FinanceDocRow) => d.number ?? t('detail.draftTitle')
 // `?party=<id>&direction=Inbound|Outbound` opens a pre-filled draft. Without
 // this the "Receive payment" action on a customer page would drop the operator
 // on a blank form that already knew the answer to its first two questions.
-onMounted(async () => {
+async function consumePartyHandOff(): Promise<void> {
   const party = route.query.party
   const direction = route.query.direction
   if (typeof party !== 'string' || !party) return
@@ -181,7 +224,17 @@ onMounted(async () => {
   const { party: _p, direction: _d, ...rest } = route.query
   await router.replace({ query: rest })
   crud.openCreate({ direction: dir, partyId: party } as Partial<FinanceDocRow>)
-})
+}
+
+onMounted(consumePartyHandOff)
+// Kept alive in its tab, the page is not mounted again: a hand-off into the
+// open Payments tab arrives as a change of this page's route.
+watch(
+  () => route.query.party,
+  (party, previous) => {
+    if (party && party !== previous) void consumePartyHandOff()
+  },
+)
 
 function statusLabel(status?: FinanceDocumentStatus): string {
   const meta = DOC_STATUS_META[status ?? '']
@@ -258,25 +311,12 @@ watch(
 )
 
 // ── Read-only detail + applications ─────────────────────────────
-const viewed = ref<PaymentEntryDto | null>(null)
-const applications = ref<PaymentApplicationDto[]>([])
-
-async function loadViewed(row: FinanceDocRow) {
-  viewed.value = null
-  applications.value = []
-  try {
-    viewed.value = await bridge.payments.getById(String(row.id ?? ''))
-    applications.value = await bridge.settlements.applications(SettlementDocType.PaymentEntry, String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
 
 async function unapply(applicationId: string) {
   try {
     await bridge.settlements.unapply(applicationId)
     message.success(t('applications.unapplied'))
-    if (viewed.value) await loadViewed({ id: viewed.value.id })
+    if (viewed.value) await viewing.load(viewed.value.id)
     await crud.refresh()
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
@@ -310,7 +350,7 @@ const applySource = computed<SettlementApplySource | null>(() => {
     partyType: d.partyType,
     partyId: d.partyId,
     currency: d.currency,
-    remaining: d.amount - d.appliedTotal,
+    remaining: roundMoney(d.amount - d.appliedTotal),
   }
 })
 
@@ -343,7 +383,7 @@ async function run(action: () => Promise<unknown>, successKey: string) {
 const isDraft = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Draft
 const isPosted = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.Posted
 const canApply = (row: FinanceDocRow) =>
-  isPosted(row) && (row.amount ?? 0) - (row.appliedTotal ?? 0) > 0
+  isPosted(row) && roundMoney((row.amount ?? 0) - (row.appliedTotal ?? 0)) > 0
 
 const rowActions: RowAction<FinanceDocRow>[] = [
   viewAction(crud),

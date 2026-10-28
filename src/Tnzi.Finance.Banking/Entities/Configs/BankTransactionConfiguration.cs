@@ -36,5 +36,10 @@ public class BankTransactionConfiguration : EntityTypeConfigurationBase<BankTran
 
         builder.HasIndex(e => new { e.AccountId, e.Status });
         builder.HasIndex(e => e.ImportBatchId);
+        // 冲销守卫（任何单据作废都会问「这一行被银行流水匹配着吗」，不带科目）与匹配候选的反连接
+        // 都按这一列查；表只增不减（每一行导入的流水），没有索引两者都随历年导入量全表扫。
+        // 只有已匹配的行有值，过滤掉 NULL 让索引只随已匹配行增长。
+        builder.HasIndex(e => e.MatchedJournalLineId)
+            .HasFilter(IndexFilterFactory.GetColumnNotNull(nameof(BankTransaction.MatchedJournalLineId)));
     }
 }

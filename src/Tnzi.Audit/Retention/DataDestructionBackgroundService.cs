@@ -115,24 +115,62 @@ public class DataDestructionBackgroundService : BackgroundService
     }
 
     /// <summary>
-    /// 跑一轮。互斥由 <see cref="DataDestructionService.RunAsync"/> 内部抢（timeout: null，立即返回）：
+    /// 一个周期内最多连续跑几轮。
+    /// </summary>
+    /// <remarks>
+    /// 一轮里每条策略最多销毁 <see cref="DataDestructionOptions.BatchSize"/> 条（一条短语句，持锁时间有界）；
+    /// 还有剩余（<c>HasMore</c>）时本周期接着跑下一轮，而不是睡满 <see cref="DataDestructionOptions.IntervalHours"/> 再来：
+    /// 否则每天到期量超过 BatchSize 的策略积压只会线性增长，首次启用时的历史存量要几年才销毁完。
+    /// 上限挡的是「销毁器没让行离开到期集合」（例如只做匿名化而不改时间戳也不在 Scope 里排除它）：
+    /// 那时每一轮都会拿回同一批行，没有上限就是一个不停写证明的死循环。
+    /// </remarks>
+    internal const int MaxRunsPerCycle = 20;
+
+    /// <summary>
+    /// 跑一个周期。互斥由 <see cref="DataDestructionService.RunAsync"/> 内部抢（timeout: null，立即返回）：
     /// 抢不到说明另一个实例（或一次手动 Run）正在跑这一轮——跳过就好，下一个周期会再来；
     /// 排队等锁只会让所有实例挤在同一时刻醒来。
     /// </summary>
+    /// <remarks>
+    /// 只要上一轮有策略真的销毁了东西且报告还有剩余，就在同一周期里接着跑，最多 <see cref="MaxRunsPerCycle"/> 轮。
+    /// 空跑不续：空跑什么都不删，下一轮拿回的是同一批。每一轮用新的作用域，不让变更跟踪器跨轮堆积。
+    /// </remarks>
     internal async Task RunOnceAsync(CancellationToken stoppingToken)
     {
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var service = scope.ServiceProvider.GetService<IDataDestructionService>();
-        if (service == null)
+        for (var run = 1; run <= MaxRunsPerCycle; run++)
         {
-            _logger.LogWarning("IDataDestructionService is not registered; skipping this cycle.");
-            return;
+            stoppingToken.ThrowIfCancellationRequested();
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var service = scope.ServiceProvider.GetService<IDataDestructionService>();
+            if (service == null)
+            {
+                _logger.LogWarning("IDataDestructionService is not registered; skipping this cycle.");
+                return;
+            }
+
+            var outcome = await RunAndLogAsync(service, stoppingToken);
+            if (outcome == null || !HasBacklog(outcome))
+            {
+                return;
+            }
         }
 
-        await RunAndLogAsync(service, stoppingToken);
+        _logger.LogInformation(
+            "Data destruction stopped after {Runs} consecutive runs with records still pending; the next cycle continues.",
+            MaxRunsPerCycle);
     }
 
-    private async Task RunAndLogAsync(IDataDestructionService service, CancellationToken stoppingToken)
+    /// <summary>
+    /// 上一轮之后是否还该接着跑：非空跑，且有策略本轮确实销毁了记录、并报告还有剩余。
+    /// </summary>
+    /// <remarks>
+    /// 「确实销毁了」这一条不能省：整批都被保全或者销毁器一条没删时接着跑只会原地打转。
+    /// </remarks>
+    private static bool HasBacklog(DataDestructionRunDto run)
+        => !run.IsDryRun && run.Policies.Any(p => p.Error == null && p.HasMore && p.DestroyedCount > 0);
+
+    private async Task<DataDestructionRunDto?> RunAndLogAsync(IDataDestructionService service, CancellationToken stoppingToken)
     {
         var result = await service.RunAsync(stoppingToken);
 
@@ -141,19 +179,19 @@ public class DataDestructionBackgroundService : BackgroundService
             if (result.ErrorCode == AuditErrorCodes.AuditDestructionRunInProgress)
             {
                 _logger.LogDebug("Data destruction skipped this cycle: another run holds the lock");
-                return;
+                return null;
             }
 
             // 其余失败一律 Error，包括同名策略（409）与锁中途丢失（409）：前者是每轮都不会自愈的配置错误，
             // 后者是策略跑了一半。两者与「跳过这一轮」只在错误码上有区别。
             _logger.LogError("Data destruction cycle failed: {Message}", result.Message);
-            return;
+            return null;
         }
 
         var run = result.Data;
         if (run == null)
         {
-            return;
+            return null;
         }
 
         var failed = run.Policies.Where(p => p.Error != null).ToList();
@@ -169,5 +207,7 @@ public class DataDestructionBackgroundService : BackgroundService
                 "Data destruction cycle completed: {Destroyed} destroyed, {Held} held by litigation hold{DryRun}",
                 run.TotalDestroyed, run.TotalHeld, run.IsDryRun ? " [dry run]" : string.Empty);
         }
+
+        return run;
     }
 }

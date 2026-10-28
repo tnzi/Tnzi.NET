@@ -22,6 +22,10 @@ export interface AgentToolCall {
   endedAt: string | null;
   /** Duration in milliseconds (null if still running). */
   durationMs: number | null;
+  /** Outcome as the backend reports it. Absent while running. */
+  isSuccess?: boolean | null;
+  /** Error message when `isSuccess` is false. */
+  error?: string | null;
   /** Tool input (JSON string). */
   input?: string | null;
   /** Tool output (JSON string). */
@@ -53,6 +57,8 @@ export interface AgentExecutionEvent {
   toolCalls?: Array<{
     name: string;
     durationMs?: number | null;
+    isSuccess?: boolean | null;
+    error?: string | null;
     input?: string | null;
     output?: string | null;
   }>;
@@ -131,24 +137,29 @@ export function useAgentExecution(): UseAgentExecutionReturn {
       }
 
       case 'tool_call_end': {
-        const details = event.toolCalls ?? [];
+        // The same tool called twice is two entries, and each result settles
+        // exactly one: the FIRST still-running entry of that name. A result
+        // with no running entry to settle is dropped.
         const now = new Date().toISOString();
-        // Build a Map for O(1) lookup instead of nested find
-        const detailMap = new Map(details.map((d) => [d.name, d]));
-        toolCalls.value = toolCalls.value.map((tc) => {
-          if (tc.endedAt !== null) return tc;
-          const match = detailMap.get(tc.name);
-          if (match) {
-            return {
-              ...tc,
-              endedAt: now,
-              durationMs: match.durationMs ?? null,
-              input: match.input ?? tc.input,
-              output: match.output ?? tc.output,
-            };
-          }
-          return tc;
-        });
+        let next = toolCalls.value;
+        for (const detail of event.toolCalls ?? []) {
+          const idx = next.findIndex((tc) => tc.name === detail.name && tc.endedAt === null);
+          if (idx === -1) continue;
+          next = next.map((tc, i) =>
+            i === idx
+              ? {
+                  ...tc,
+                  endedAt: now,
+                  durationMs: detail.durationMs ?? null,
+                  isSuccess: detail.isSuccess ?? tc.isSuccess,
+                  error: detail.error ?? tc.error,
+                  input: detail.input ?? tc.input,
+                  output: detail.output ?? tc.output,
+                }
+              : tc,
+          );
+        }
+        toolCalls.value = next;
         break;
       }
 

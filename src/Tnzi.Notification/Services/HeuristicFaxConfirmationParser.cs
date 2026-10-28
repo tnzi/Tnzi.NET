@@ -164,7 +164,7 @@ public class HeuristicFaxConfirmationParser : IFaxConfirmationParser
         if (string.IsNullOrWhiteSpace(subject))
             return null;
 
-        var trimmed = subject.Trim();
-        return trimmed.Length <= 300 ? trimmed : trimmed[..300];
+        // 收进 300 个码元；截断点落在代理对中间时整个字符一起舍掉（原因会落库，孤立的高代理项会让严格 UTF-8 的驱动拒绝写入）
+        return subject.Trim().FitToLength(300);
     }
 }

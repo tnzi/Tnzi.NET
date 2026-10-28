@@ -111,6 +111,7 @@ public class TenantService : ApplicationService, ITenantService
 
         var tenant = input.MapTo<Tenant>();
         tenant.Code = string.IsNullOrWhiteSpace(input.Code) ? null : input.Code.Trim();
+        tenant.ExpiredAt = NormalizeExpiry(input.ExpiredAt);
 
         try
         {
@@ -157,7 +158,7 @@ public class TenantService : ApplicationService, ITenantService
         tenant.Name = input.Name;
         tenant.Code = newCode;
         tenant.IsEnabled = input.IsEnabled;
-        tenant.ExpiredAt = input.ExpiredAt;
+        tenant.ExpiredAt = NormalizeExpiry(input.ExpiredAt);
         tenant.Remark = input.Remark;
 
         try
@@ -226,6 +227,16 @@ public class TenantService : ApplicationService, ITenantService
             t.IsEnabled &&
             (!t.ExpiredAt.HasValue || t.ExpiredAt > now));
     }
+
+    /// <summary>
+    /// 到期时间是与 <c>UtcNow</c> 比较的时刻，落库前统一成 UTC。
+    /// </summary>
+    /// <remarks>
+    /// ★ 管理端日期选择器发的是 <c>YYYY-MM-DD</c>，反序列化成 Kind=Unspecified，
+    /// PostgreSQL 的 timestamptz 列拒写（保存以 500 结束）。不带时区的值按 UTC 解读（那一天的 UTC 零点），
+    /// 带时区的值换算成同一时刻的 UTC。
+    /// </remarks>
+    private static DateTime? NormalizeExpiry(DateTime? expiredAt) => expiredAt?.ToUtc();
 
     private Result FeatureDisabled()
     {

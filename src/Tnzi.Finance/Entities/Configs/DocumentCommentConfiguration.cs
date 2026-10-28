@@ -7,9 +7,9 @@ public class DocumentCommentConfiguration : EntityTypeConfigurationBase<Document
 {
     public override void Configure(EntityTypeBuilder<DocumentComment> builder)
     {
-        builder.Property(e => e.SourceType).HasMaxLength(64).IsRequired();
-        builder.Property(e => e.SourceId).HasMaxLength(64).IsRequired();
-        builder.Property(e => e.Body).HasMaxLength(4000).IsRequired();
+        builder.Property(e => e.SourceType).HasMaxLength(FinanceFieldLimits.DocumentKeyMaxLength).IsRequired();
+        builder.Property(e => e.SourceId).HasMaxLength(FinanceFieldLimits.DocumentKeyMaxLength).IsRequired();
+        builder.Property(e => e.Body).HasMaxLength(FinanceFieldLimits.CommentBodyMaxLength).IsRequired();
 
         builder.HasIndex(e => new { e.SourceType, e.SourceId });
     }

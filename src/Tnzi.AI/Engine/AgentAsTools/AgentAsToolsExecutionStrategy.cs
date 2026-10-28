@@ -2,18 +2,20 @@ namespace Tnzi.AI.Engine.AgentAsTools;
 
 /// <summary>
 /// AgentAsTools 执行策略 - 将子 Agent 作为工具注入父 Agent，由 LLM 决定调用
-/// 支持 SemaphoreSlim 并发限制 + 单子 Agent 超时 + SSE progress events
+/// 支持单子 Agent 超时 + SSE progress events
 /// </summary>
-public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDisposable
+/// <remarks>
+/// 子 Agent 一个接一个执行：生成的 <c>call_*</c> 工具不在工具注册表里，执行器按未知工具失败关闭、顺序执行
+/// （<see cref="AgentExecutor.CanExecuteConcurrently"/>）。并行需要每个子 Agent 各用自己的 DI 作用域与属性包，
+/// 那是设计改动，当前不提供，所以这里也没有并发上限可配。
+/// </remarks>
+public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy
 {
     private readonly AgentAsToolsConfiguration _config;
-    private readonly SemaphoreSlim _concurrencyLimiter;
 
     public AgentAsToolsExecutionStrategy(AgentAsToolsConfiguration config)
     {
         _config = Check.NotNull(config);
-        var maxConcurrent = Math.Clamp(config.MaxConcurrentSubAgents, 2, 4);
-        _concurrencyLimiter = new SemaphoreSlim(maxConcurrent, maxConcurrent);
         ValidateNoDuplicateToolNames();
     }
 
@@ -36,26 +38,43 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         var childTools = CreateChildAgentTools(context, childInvocations, ct);
         var parentWithTools = agent.WithAdditionalTools(childTools);
 
+        var anyChildInvoked = false;
         await foreach (var chunk in parentWithTools.ExecuteStreamingAsync(messages, ct).WithCancellation(ct))
         {
+            // 子 Agent 在父 Agent 的工具调用里跑完，它们的用量必须先于父 Agent 的下一个 chunk 发出：
+            // 消费方在第一个终止 chunk 上就收尾（SSE 终止事件、配额结算），排在它后面的用量没人再看
+            anyChildInvoked |= !childInvocations.IsEmpty;
+            if (DrainChildUsage(childInvocations) is { } childUsage)
+            {
+                yield return new AgentStreamChunk { Usage = childUsage };
+            }
+
             yield return chunk;
         }
 
-        if (!childInvocations.IsEmpty)
+        anyChildInvoked |= !childInvocations.IsEmpty;
+        if (DrainChildUsage(childInvocations) is { } remainingUsage)
         {
-            int totalInput = 0, totalOutput = 0;
-            while (childInvocations.TryDequeue(out var inv))
-            {
-                totalInput += inv.Input;
-                totalOutput += inv.Output;
-            }
-
-            yield return new AgentStreamChunk
-            {
-                Usage = ExecutionStrategyAgentLoader.BuildUsage(totalInput, totalOutput),
-                FinishReason = FinishReasons.AgentAsToolsComplete
-            };
+            yield return new AgentStreamChunk { Usage = remainingUsage };
         }
+
+        if (anyChildInvoked)
+        {
+            yield return new AgentStreamChunk { FinishReason = FinishReasons.AgentAsToolsComplete };
+        }
+    }
+
+    /// <summary>取出队列里已完成子 Agent 的用量并相加；没有可报的用量时返回 null。</summary>
+    private static TokenUsageDto? DrainChildUsage(ConcurrentQueue<(string Name, int Input, int Output)> invocations)
+    {
+        int input = 0, output = 0;
+        while (invocations.TryDequeue(out var invocation))
+        {
+            input += invocation.Input;
+            output += invocation.Output;
+        }
+
+        return ExecutionStrategyAgentLoader.BuildUsage(input, output);
     }
 
     private List<AITool> CreateChildAgentTools(ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations, CancellationToken ct)
@@ -76,19 +95,18 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
     private AITool CreateChildAgentTool(string childName, Guid childAgentId, ExecutionStrategyContext context, ConcurrentQueue<(string, int, int)> invocations, IAgentStreamForwarder? forwarder, CancellationToken ct)
     {
         return AIFunctionFactory.Create(
-            async (string task) =>
+            async (string task, CancellationToken invocationToken) =>
             {
-                // Acquire concurrency slot
-                await _concurrencyLimiter.WaitAsync(ct);
-                try
-                {
-                    return await ExecuteChildWithTimeoutAsync(
-                        childName, childAgentId, task, context, invocations, forwarder, ct);
-                }
-                finally
-                {
-                    _concurrencyLimiter.Release();
-                }
+                // 调用令牌由执行器给（含工具超时与外部取消），策略令牌是整次运行的；两者任一取消都要停下子 Agent。
+                // 此前 lambda 不收调用令牌，工具超时后子 Agent 在后台照跑到 SubAgentTimeout，结果却已被丢弃。
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, invocationToken);
+
+                // 子 Agent 自带上限（SubAgentTimeout，默认 15 分钟），不占父 Agent 这一次工具调用的超时预算：
+                // 否则子 Agent 永远跑不过工具超时，SubAgentTimeout 形同虚设
+                using var suspended = ToolCallTimeout.Suspend();
+
+                return await ExecuteChildWithTimeoutAsync(
+                    childName, childAgentId, task, context, invocations, forwarder, linked.Token);
             },
             new AIFunctionFactoryOptions
             {
@@ -103,6 +121,11 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         IAgentStreamForwarder? forwarder, CancellationToken ct)
     {
         var previousProperties = context.ExecutionContextAccessor?.CaptureProperties();
+        // 子 Agent 在本方法的执行流里拿一份自己的属性包副本，再打子 Agent 标记。运行的属性包是整次运行共享的
+        // 同一个实例（AgentRuntime 进入运行时就建好），直接往里写 IsSubAgent / SubAgentName，子 Agent 返回后
+        // 父 Agent 后续的每一次工具调用都按子 Agent 的身份评估权限；并行的两个 call_* 还会互相改写对方的名字。
+        // 本方法是独立的 async 帧，这里换掉的属性包不会传回调用方。
+        context.ExecutionContextAccessor?.RestoreProperties(previousProperties);
         SetSubAgentContext(context, childName);
 
         // Emit started event
@@ -209,10 +232,11 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
                 await forwarder.WriteAsync(childName, chunk.Text, ct);
             }
 
+            // 每个 chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径），逐个相加
             if (chunk.Usage != null)
             {
-                promptTokens = chunk.Usage.InputTokens;
-                completionTokens = chunk.Usage.OutputTokens;
+                promptTokens += chunk.Usage.InputTokens;
+                completionTokens += chunk.Usage.OutputTokens;
             }
         }
 
@@ -265,13 +289,7 @@ public partial class AgentAsToolsExecutionStrategy : IExecutionStrategy, IDispos
         };
     }
 
-    public void Dispose()
-    {
-        _concurrencyLimiter.Dispose();
-    }
-
-    private static string Truncate(string value, int maxLength)
-        => value.Length > maxLength ? value[..maxLength] + "..." : value;
+    private static string Truncate(string value, int maxLength) => value.Truncate(maxLength);
 
     [GeneratedRegex(@"[^a-z0-9]")]
     private static partial Regex NonAlphanumericLowerRegex();

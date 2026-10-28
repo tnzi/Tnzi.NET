@@ -1,0 +1,13 @@
+<Project>
+  <!-- 导入根目录的 Directory.Build.props（分析器、代码风格门禁与运行时地板）。
+       MSBuild 找到最近的一份 Directory.Build.props 就停止向上查找，
+       所以这里必须显式 Import，否则 tests/ 下的项目会整片脱离这些约定。 -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- CS8002（引用的程序集没有强名称）：测试项目以 build/Tnzi.snk 强签名只为匹配 src 侧
+         InternalsVisibleTo 的 PublicKey；只面向 net10.0，运行时不校验强名称，这条警告没有运行期后果，
+         与 build/public.props 对 src 的处置同理。不签名的测试项目不会触发它。 -->
+    <NoWarn>$(NoWarn);CS8002</NoWarn>
+  </PropertyGroup>
+</Project>

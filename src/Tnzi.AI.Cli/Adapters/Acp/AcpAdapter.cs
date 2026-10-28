@@ -39,6 +39,8 @@ public class AcpAdapter : ICliProtocolAdapter
     private CliRunFailureReason? _failureReason;
     private bool _resumeRejected;
     private string? _requestedResumeSessionId;
+    private volatile bool _promptCompleted;
+    private AcpJsonRpcClient? _client;
 
     /// <summary>初始化 ACP 适配器。</summary>
     public AcpAdapter(ILogger<AcpAdapter> logger)
@@ -54,11 +56,17 @@ public class AcpAdapter : ICliProtocolAdapter
     {
         Check.NotNull(context);
 
-        var args = new List<string>(context.Provider.LaunchArgs);
-        args.AddRange(CliArgumentFilter.Filter(
-            context.ExtraArgs, context.Provider.BlockedArgs, _logger, context.Provider.Key));
-        args.AddRange(CliArgumentFilter.Filter(
-            context.CustomArgs, context.Provider.BlockedArgs, _logger, context.Provider.Key));
+        // 非全权档不能带「一律自动批准」的开关：带着它 CLI 从不请求权限，档位落不到应答上
+        var launchArgs = context.PermissionMode == CliPermissionMode.Full
+            ? context.Provider.LaunchArgs
+            : context.Provider.LaunchArgsWithoutAutoApproval ?? context.Provider.LaunchArgs;
+
+        var args = new List<string>(launchArgs);
+        args.AddRange(context.ManagedArgs);
+
+        var blocked = CliArgumentFilter.Combine(context.Provider.BlockedArgs, context.OwnedArgs);
+        args.AddRange(CliArgumentFilter.Filter(context.ExtraArgs, blocked, _logger, context.Provider.Key));
+        args.AddRange(CliArgumentFilter.Filter(context.CustomArgs, blocked, _logger, context.Provider.Key));
 
         return new CliProcessSpec
         {
@@ -83,14 +91,27 @@ public class AcpAdapter : ICliProtocolAdapter
 
         _requestedResumeSessionId = context.ResumeSessionId;
 
+        // 推理强度只有 stream-json 一路能投递（--effort）；ACP 的会话请求里没有对应的位置，本适配器也不经别的途径传它。
+        // 绑定上填了也照常运行，但要留一条痕迹：管理端对所有运行时都提供这个字段，静默丢掉会让人以为它生效了。
+        if (!string.IsNullOrWhiteSpace(context.ThinkingLevel))
+        {
+            _logger.LogWarning(
+                "[{Provider}] The binding's reasoning effort '{ThinkingLevel}' is not applied: ACP runtimes are not given a reasoning effort",
+                context.Provider.Key, context.ThinkingLevel);
+        }
+
         var events = Channel.CreateUnbounded<CliAgentEvent>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
         var client = new AcpJsonRpcClient(transport, _logger)
         {
             OnSessionUpdate = parameters => DispatchSessionUpdate(parameters, events.Writer),
-            OnPromptResult = ExtractPromptResult
+            OnPromptResult = ExtractPromptResult,
+            PermissionMode = context.PermissionMode,
+            AsksForApproval = context.AsksForApproval,
+            OnPermissionRequest = (key, parameters) => events.Writer.TryWrite(BuildPermissionRequest(key, parameters))
         };
+        _client = client;
 
         // 读循环与生命周期驱动分开跑：ACP 的请求要等响应，而响应只会从读循环来 ——
         // 放在同一个任务里就是自己等自己。
@@ -124,6 +145,16 @@ public class AcpAdapter : ICliProtocolAdapter
         }
 
         await lifecycle;
+
+        // 取消必须以 OperationCanceledException 交还给执行器（与 stream-json 适配器同一契约）：生命周期任务把取消吞掉、
+        // 正常收尾，事件流也就正常结束。不在这里抛，执行器分不出「被取消」与「跑完了」，用户取消与宿主停机
+        // 都会被记成 Completed，截断的半句话当成交付物写进线程，宿主停机时的运行也不会被打回队列。
+        // prompt 已经答完才到的取消不算：回合是完整的，记成取消（或打回队列重跑一遍）反而丢掉一份已经付过钱的答案。
+        if (cancellationToken.IsCancellationRequested && !_promptCompleted)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+
         await transport.CloseInputAsync();
 
         // 读循环随着进程退出自然结束；不无限等它，避免一个卡住的子进程把调用方一起拖住。
@@ -211,7 +242,7 @@ public class AcpAdapter : ICliProtocolAdapter
                 cancellationToken);
 
             var mcpServers = AcpMcpServerTranslator.FilterByCapabilities(
-                AcpMcpServerTranslator.Translate(context.McpConfigPath is null ? null : ReadMcpConfig(context.McpConfigPath), _logger),
+                AcpMcpServerTranslator.Translate(context.McpConfigJson, _logger),
                 initializeResult, context.Provider.Key, _logger);
 
             var cwd = string.IsNullOrWhiteSpace(context.WorkingDirectory) ? "." : context.WorkingDirectory;
@@ -274,6 +305,7 @@ public class AcpAdapter : ICliProtocolAdapter
                 sessionId = _sessionId,
                 prompt = new[] { new { type = "text", text = promptText } }
             }, cancellationToken);
+            _promptCompleted = true;
 
             // 响应到了不代表通知发完了，留一小段收尾窗口。
             await Task.Delay(NotificationDrainGrace, CancellationToken.None);
@@ -302,6 +334,41 @@ public class AcpAdapter : ICliProtocolAdapter
         {
             events.TryComplete();
         }
+    }
+
+    /// <inheritdoc />
+    public Task<bool> AnswerPermissionAsync(string protocolKey, CliPermissionDecision decision, CancellationToken cancellationToken)
+    {
+        Check.NotNullOrWhiteSpace(protocolKey);
+        Check.NotNull(decision);
+
+        return _client is null ? Task.FromResult(false) : _client.AnswerPermissionAsync(protocolKey, decision, cancellationToken);
+    }
+
+    /// <summary><c>session/request_permission</c> 的 params → 权限请求事件（工具名、调用 id、入参、标题、agent 给的选项）。</summary>
+    private CliAgentEvent BuildPermissionRequest(string key, JsonElement parameters)
+    {
+        var toolCall = parameters.ValueKind == JsonValueKind.Object
+                       && parameters.TryGetProperty("toolCall", out var call) && call.ValueKind == JsonValueKind.Object
+            ? call
+            : default;
+        var title = toolCall.ValueKind == JsonValueKind.Object ? ReadString(toolCall, "title") : null;
+
+        return new CliAgentEvent
+        {
+            Type = CliAgentEventType.PermissionRequest,
+            Tool = AcpToolNames.Normalize(title) ?? (toolCall.ValueKind == JsonValueKind.Object ? ReadString(toolCall, "kind") : null),
+            CallId = toolCall.ValueKind == JsonValueKind.Object ? ReadString(toolCall, "toolCallId") : null,
+            Input = toolCall.ValueKind == JsonValueKind.Object ? ReadObject(toolCall, "rawInput", "input", "parameters") : null,
+            Content = title,
+            SessionId = _sessionId,
+            Permission = new CliAgentPermission
+            {
+                ProtocolKey = key,
+                Title = title,
+                Options = AcpPermissionSelector.ReadOptions(parameters)
+            }
+        };
     }
 
     private async Task<bool> TrySetModelAsync(
@@ -355,18 +422,6 @@ public class AcpAdapter : ICliProtocolAdapter
     {
         _failureReason = reason;
         _failureMessage = message;
-    }
-
-    private static string ReadMcpConfig(string path)
-    {
-        try
-        {
-            return File.ReadAllText(path);
-        }
-        catch (IOException)
-        {
-            return string.Empty;
-        }
     }
 
     private static async Task<JsonElement> WithHandshakeTimeoutAsync(

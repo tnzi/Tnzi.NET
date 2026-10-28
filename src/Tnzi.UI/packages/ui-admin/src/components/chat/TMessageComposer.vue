@@ -163,6 +163,9 @@ function onSend() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // Enter inside an IME composition commits the candidate (pinyin, kana), it
+  // does not send; some browsers flag it only with key code 229.
+  if (e.isComposing || e.keyCode === 229) return
   // Enter without Shift → send; Shift+Enter → native newline
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()

@@ -1,20 +1,19 @@
 /**
  * @tnzi/ui/stores/factory
  *
- * Simplified store runtime for dependency injection.
- * Provides HTTP client and storage adapter to Pinia stores.
+ * The store runtime: the HTTP client and storage adapter the Pinia stores in
+ * `@tnzi/ui/stores` build their state managers from.
+ *
+ * The runtime is module-level, one per JavaScript realm. It is not scoped to a
+ * Vue app or to a request: two apps on one page, or concurrent SSR requests in
+ * one process, share it. Each store builds its state manager on first use and
+ * keeps it until that store's reset helper runs (`resetAuthRuntime()`,
+ * `resetUserRuntime()`, `resetAppRuntime()`), so pointing the runtime at
+ * another client afterwards does not reach a store already in use.
  */
 
-import { inject, type App, type InjectionKey } from 'vue';
 import type { HttpClient } from '@tnzi/core/http';
 import type { StorageAdapter } from '@tnzi/core/adapters';
-
-// ============================================
-// Injection Keys (SSR-safe provide/inject DI)
-// ============================================
-
-export const STORE_HTTP_CLIENT: InjectionKey<HttpClient> = Symbol('tnzi:store-http-client');
-export const STORE_STORAGE: InjectionKey<StorageAdapter> = Symbol('tnzi:store-storage');
 
 // ============================================
 // Store Runtime State
@@ -30,6 +29,7 @@ let _storageAdapter: StorageAdapter | null = null;
 /**
  * Initialize store runtime with HTTP client and optional storage adapter.
  * Must be called before using any store that requires API access.
+ * `createTnziUi({ httpClient, storage })` calls it at install.
  *
  * @param httpClient - HTTP client for API calls
  * @param storage - Optional storage adapter for persistence
@@ -63,7 +63,7 @@ export function getStoreStorage(): StorageAdapter | null {
 }
 
 // ============================================
-// Setters (for plugin integration)
+// Setters
 // ============================================
 
 /**
@@ -81,59 +81,14 @@ export function setStoreStorageAdapter(adapter: StorageAdapter): void {
 }
 
 // ============================================
-// Reset & Convenience
+// Reset
 // ============================================
 
 /**
- * Reset store runtime to uninitialized state.
- * Useful for SSR isolation or test teardown.
+ * Reset store runtime to uninitialized state (test teardown). Stores already
+ * in use keep their state managers; reset those with their own helpers.
  */
 export function resetStoreRuntime(): void {
   _httpClient = null;
   _storageAdapter = null;
-}
-
-// ============================================
-// Provide/Inject DI (SSR-safe)
-// ============================================
-
-/**
- * Provide store runtime via Vue's provide/inject system (SSR-safe).
- * Also sets module-level fallback for non-component contexts (e.g. Pinia actions).
- *
- * @param app - Vue app instance
- * @param httpClient - HTTP client for API calls
- * @param storage - Optional storage adapter for persistence
- */
-export function provideStoreRuntime(app: App, httpClient: HttpClient, storage?: StorageAdapter): void {
-  app.provide(STORE_HTTP_CLIENT, httpClient);
-  if (storage) {
-    app.provide(STORE_STORAGE, storage);
-  }
-  // Also set module-level fallback for non-component contexts
-  _httpClient = httpClient;
-  _storageAdapter = storage ?? null;
-}
-
-/**
- * Inject the HTTP client from Vue's provide/inject system.
- * Falls back to module-level variable if not in a component context.
- * Must be called inside setup() or a composable.
- */
-export function useStoreHttpClient(): HttpClient {
-  const injected = inject(STORE_HTTP_CLIENT, null);
-  if (injected) return injected;
-  if (_httpClient) return _httpClient;
-  throw new Error('HTTP client not provided. Call provideStoreRuntime() or initStoreRuntime() first.');
-}
-
-/**
- * Inject the storage adapter from Vue's provide/inject system.
- * Falls back to module-level variable if not in a component context.
- * Must be called inside setup() or a composable.
- */
-export function useStoreStorage(): StorageAdapter | null {
-  const injected = inject(STORE_STORAGE, null);
-  if (injected) return injected;
-  return _storageAdapter;
 }

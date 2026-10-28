@@ -56,6 +56,27 @@ describe('Finance FiscalYears page', () => {
     reopen.mockClear()
   })
 
+  // The list endpoint takes no keyword: the search box was shown and ignored.
+  it('★ the search box filters the loaded years by name', async () => {
+    list.mockImplementationOnce(async () => [
+      { id: 'f1', name: 'FY2026', startDate: '2026-01-01T00:00:00', endDate: '2026-12-31T00:00:00', isClosed: false },
+      { id: 'f0', name: 'FY2025', startDate: '2025-01-01T00:00:00', endDate: '2025-12-31T00:00:00', isClosed: true },
+    ])
+    const wrapper = mount(FiscalYears, { global: { stubs } })
+    await flushPromises()
+    const crud = (wrapper.vm as unknown as { crud: { items: { value: Array<{ id: string }> }; setSearch: (s: string) => void; refresh: () => Promise<void> } }).crud
+    expect(crud.items.value).toHaveLength(2)
+
+    list.mockImplementationOnce(async () => [
+      { id: 'f1', name: 'FY2026', startDate: '2026-01-01T00:00:00', endDate: '2026-12-31T00:00:00', isClosed: false },
+      { id: 'f0', name: 'FY2025', startDate: '2025-01-01T00:00:00', endDate: '2025-12-31T00:00:00', isClosed: true },
+    ])
+    crud.setSearch('fy2025')
+    await crud.refresh()
+    await flushPromises()
+    expect(crud.items.value.map((r) => r.id)).toEqual(['f0'])
+  })
+
   it('mounts and loads the fiscal-year list', async () => {
     mount(FiscalYears, { global: { stubs } })
     await flushPromises()

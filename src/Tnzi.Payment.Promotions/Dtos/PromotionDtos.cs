@@ -9,6 +9,7 @@ public class CreatePromotionDto
     /// 促销代码
     /// </summary>
     [Required]
+    [MaxLength(32)]
     [RegularExpression(@"^[A-Za-z0-9_-]+$", ErrorMessage = "Promotion code can only contain letters, numbers, underscores and hyphens.")]
     public string PromotionCode { get; set; } = string.Empty;
 
@@ -16,11 +17,13 @@ public class CreatePromotionDto
     /// 促销名称
     /// </summary>
     [Required]
+    [MaxLength(128)]
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
     /// 描述
     /// </summary>
+    [MaxLength(500)]
     public string? Description { get; set; }
 
     /// <summary>
@@ -102,9 +105,16 @@ public class CreatePromotionDto
     public bool FirstSubscriptionOnly { get; set; } = false;
 
     /// <summary>
-    /// 币种（固定金额折扣时生效）
+    /// 币种（固定金额折扣时生效），ISO 4217 三字母代码。留空 = 本部署的 <c>Payment:DefaultCurrency</c>。
     /// </summary>
-    public string Currency { get; set; } = PaymentConstants.DefaultCurrency;
+    /// <remarks>
+    /// 刻意<b>没有</b>初始值：给它一个非空初始值，「调用方没指定」与「调用方指定了这个值」就无法区分，
+    /// 回退到配置的那一支永远走不到。此前初始值是常量 <c>"USD"</c>，配了 CAD 的商户建的每一张固定金额券
+    /// 都绑在 USD 上，结账按 CAD 校验币种时一律 <c>COUPON_SCOPE_MISMATCH</c>，而列表看不出异常。
+    /// 同形先例是 <c>CreatePaymentDto.Currency</c>。
+    /// </remarks>
+    [RegularExpression(@"^\s*([A-Za-z]{3})?\s*$", ErrorMessage = "Currency must be a three-letter ISO 4217 code.")]
+    public string? Currency { get; set; }
 
     /// <summary>
     /// 是否公开：公开促销任何用户输码即可用；非公开促销必须先通过兑换码领取
@@ -120,11 +130,13 @@ public class UpdatePromotionDto
     /// <summary>
     /// 促销名称
     /// </summary>
+    [MaxLength(128)]
     public string? Name { get; set; }
 
     /// <summary>
     /// 描述
     /// </summary>
+    [MaxLength(500)]
     public string? Description { get; set; }
 
     /// <summary>

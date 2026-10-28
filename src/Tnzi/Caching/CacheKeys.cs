@@ -51,9 +51,14 @@ public static class CacheKeys
     public static class Authorization
     {
         /// <summary>
-        /// 用户功能权限 (UserFunctions:{userId})
+        /// 用户功能权限 (UserFunctions:{userId}:v2)
         /// </summary>
-        public static string UserFunctions(Guid userId) => $"UserFunctions:{userId}";
+        /// <remarks>
+        /// 值是一份权限集连同它被算出时的租户分区。<c>v2</c> 后缀是为了这次值形状的变化：
+        /// 升级前留在分布式缓存里的旧值（不带分区的数组）不会被按新形状读，原样过期。
+        /// 前缀仍是 <c>UserFunctions:</c>，整体清空（按前缀删）照样覆盖它。
+        /// </remarks>
+        public static string UserFunctions(Guid userId) => $"UserFunctions:{userId}:v2";
     }
 
     /// <summary>

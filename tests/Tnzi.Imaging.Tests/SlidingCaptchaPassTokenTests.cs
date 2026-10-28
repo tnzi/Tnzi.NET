@@ -177,23 +177,25 @@ public class SlidingCaptchaPassTokenTests
 }
 
 /// <summary>
-/// 真实缓存的包装：只在「按拼图 / 通行令牌读数据」的那一步上设屏障，N 个并发调用者全部读到之后才一起放行。
+/// 真实缓存的包装：只在「按令牌读数据」的那一步上设屏障（键以 <c>keyPrefix</c> 开头的读），N 个并发调用者全部读到之后才一起放行。
 /// 这正是先读后删的窗口 —— 没有它，内存缓存的同步完成会让并发调用在测试里天然串行化。
 /// </summary>
 public class BarrierCache : System.Reflection.DispatchProxy
 {
     private ICache _inner = null!;
     private Barrier _barrier = null!;
+    private string _keyPrefix = null!;
 
     /// <summary>关掉时不设屏障（准备阶段的单线程调用用）。</summary>
     public bool Enabled { get; set; } = true;
 
-    public static ICache Wrap(ICache inner, int participants)
+    public static ICache Wrap(ICache inner, int participants, string keyPrefix = "SlidingCaptcha:")
     {
         var proxy = Create<ICache, BarrierCache>();
         var self = (BarrierCache)(object)proxy;
         self._inner = inner;
         self._barrier = new Barrier(participants);
+        self._keyPrefix = keyPrefix;
         return proxy;
     }
 
@@ -202,7 +204,7 @@ public class BarrierCache : System.Reflection.DispatchProxy
         if (Enabled
             && targetMethod!.Name == nameof(ICache.GetAsync)
             && args?.Length > 0 && args[0] is string key
-            && key.StartsWith("SlidingCaptcha:", StringComparison.Ordinal))
+            && key.StartsWith(_keyPrefix, StringComparison.Ordinal))
         {
             Assert.True(_barrier.SignalAndWait(TimeSpan.FromSeconds(30)), "concurrent readers never all arrived");
         }

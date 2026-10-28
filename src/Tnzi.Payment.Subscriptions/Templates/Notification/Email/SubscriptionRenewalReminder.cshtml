@@ -1,0 +1,44 @@
+---
+subject: "Your subscription renews soon"
+layout: DefaultEmail
+description: Sent to the billing contacts a few days before an automatic renewal charge
+metadata:
+  type: Email
+  version: "1.0"
+---
+@{
+    var manageUrl = (string?)Model.ManageUrl;
+    var hasLink = !string.IsNullOrWhiteSpace(manageUrl);
+    var paymentMethod = (string?)Model.PaymentMethod;
+}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="greeting ink" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a2e; line-height: 1.35; padding-bottom: 14px;">
+            Your @Model.UpcomingPlanName renews on @Model.RenewalDate
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.65; color: #4a5568;">
+            Hi @(string.IsNullOrWhiteSpace((string?)Model.CustomerName) ? "there" : Model.CustomerName),
+            @if (Model.HasPaymentMethod == true)
+            {
+                <text>subscription @Model.SubscriptionNo will be charged @Model.Amount @Model.Currency@(string.IsNullOrWhiteSpace(paymentMethod) ? "" : $" to your {paymentMethod}") on @Model.RenewalDate.</text>
+            }
+            else
+            {
+                <text>subscription @Model.SubscriptionNo renews on @Model.RenewalDate, but no payment method is on file. Please add one to avoid interruption.</text>
+            }
+        </td>
+    </tr>
+</table>
+
+@if (hasLink)
+{
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" class="btn" style="margin: 26px 0 0 0;">
+    <tr>
+        <td bgcolor="#0f3460" style="border-radius: 8px;">
+            <a href="@manageUrl" target="_blank" style="display: inline-block; padding: 14px 28px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px; background-color: #0f3460; text-align: center;">Manage subscription</a>
+        </td>
+    </tr>
+</table>
+}

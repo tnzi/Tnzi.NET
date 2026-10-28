@@ -74,7 +74,7 @@ public class DefaultEvaluationAdminController : ApiAdminControllerBase
     /// 获取评分趋势（最近 N 次运行）
     /// </summary>
     [HttpGet("agents/{agentId:guid}/trend")]
-    public virtual async Task<ApiResult<EvaluationTrendDto>> GetTrend(Guid agentId, [FromQuery] int lastNRuns = 10, CancellationToken ct = default)
+    public virtual async Task<ApiResult<EvaluationTrendDto>> GetTrend(Guid agentId, [FromQuery][Range(1, 100)] int lastNRuns = 10, CancellationToken ct = default)
     {
         var result = await MetricsService.GetTrendAsync(agentId, lastNRuns, ct);
         return result.ToApiResult();

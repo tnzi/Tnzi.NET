@@ -135,4 +135,76 @@ public class ChatMessageProcessorTests
         result.Count.ShouldBe(1);
         result[0].Text.ShouldBe("<think>not a think tag for user</think>");
     }
+
+    // -------------------------------------------------------------------------
+    // 带 <think> 的助手消息里除正文以外的内容（工具调用等）必须原样保留：
+    // 非流式执行器从 response.Messages 里找工具调用，丢了它运行就安静地结束
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void MiniMax_ProcessIncoming_ThinkTextWithToolCall_KeepsTheToolCallAndMessageIdentity()
+    {
+        var processor = new MiniMaxChatMessageProcessor();
+        var call = new FunctionCallContent("call-1", "get_weather", new Dictionary<string, object?> { ["city"] = "Paris" });
+        var msg = new ChatMessage(ChatRole.Assistant, [new TextContent("<think>need the weather</think>I will check."), call])
+        {
+            MessageId = "msg-1",
+            AuthorName = "agent"
+        };
+
+        var result = processor.ProcessIncoming([msg]).Single();
+
+        var keptCall = result.Contents.OfType<FunctionCallContent>().Single();
+        keptCall.ShouldBeSameAs(call);
+        result.Text.ShouldBe("I will check.");
+        result.Contents.OfType<TextReasoningContent>().Single().Text.ShouldBe("need the weather");
+        result.MessageId.ShouldBe("msg-1");
+        result.AuthorName.ShouldBe("agent");
+    }
+
+    [Fact]
+    public void Kimi_ProcessIncoming_ThinkOnlyTextWithToolCall_DropsTheEmptyTextButKeepsTheCall()
+    {
+        var processor = new KimiChatMessageProcessor();
+        var call = new FunctionCallContent("call-1", "search", new Dictionary<string, object?>());
+        var usage = new UsageContent(new UsageDetails { InputTokenCount = 10 });
+        var msg = new ChatMessage(ChatRole.Assistant, [new TextContent("<think>search first</think>"), call, usage]);
+
+        var result = processor.ProcessIncoming([msg]).Single();
+
+        result.Contents.OfType<TextContent>().ShouldBeEmpty();
+        result.Contents.OfType<FunctionCallContent>().Single().ShouldBeSameAs(call);
+        result.Contents.OfType<UsageContent>().Single().ShouldBeSameAs(usage);
+    }
+
+    [Fact]
+    public void Glm_ProcessOutgoing_HistoryWithThinkTextAndToolCall_KeepsTheToolCall()
+    {
+        var processor = new GlmChatMessageProcessor();
+        var call = new FunctionCallContent("call-1", "lookup", new Dictionary<string, object?>());
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "hi"),
+            new(ChatRole.Assistant, [new TextContent("<think>old draft</think>Looking it up."), call]),
+            new(ChatRole.Tool, [new FunctionResultContent("call-1", "result")])
+        };
+
+        var result = processor.ProcessOutgoing(history);
+
+        result[1].Text.ShouldBe("Looking it up.");
+        result[1].Contents.OfType<FunctionCallContent>().Single().ShouldBeSameAs(call);
+        result[2].ShouldBeSameAs(history[2]);
+    }
+
+    [Fact]
+    public void MiniMax_ProcessIncoming_ThinkTagSplitAcrossTextContents_IsStillExtracted()
+    {
+        var processor = new MiniMaxChatMessageProcessor();
+        var msg = new ChatMessage(ChatRole.Assistant, [new TextContent("<think>part one "), new TextContent("part two</think>answer")]);
+
+        var result = processor.ProcessIncoming([msg]).Single();
+
+        result.Text.ShouldBe("answer");
+        result.Contents.OfType<TextReasoningContent>().Single().Text.ShouldBe("part one part two");
+    }
 }

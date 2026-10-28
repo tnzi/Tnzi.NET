@@ -22,7 +22,7 @@
     <div class="t-global-search__body">
       <NInput
         ref="inputRef"
-        :value="inputBuffer"
+        :value="query"
         :placeholder="translate('admin.search.placeholder')"
         class="t-global-search__input"
         @update:value="onQueryChange"
@@ -107,7 +107,9 @@ const emit = defineEmits<{
 }>()
 
 const routeStore = useAdminRouteStore()
-const inputBuffer = ref('')
+// The box and the filter read the same ref. A separate display buffer drifted
+// from it on reopen: the box kept the old text over the full list, so Enter
+// opened an entry the text did not match.
 const query = ref('')
 const highlighted = ref(0)
 const inputRef = ref<{ focus?: () => void } | null>(null)
@@ -150,10 +152,8 @@ const filtered = computed<SearchItem[]>(() => {
 })
 
 function onQueryChange(value: string): void {
-  // Phase H4 I5 revisited: tests expect immediate filtering. Keep
-  // inputBuffer + query in sync; debounce can come back later as an
-  // opt-in prop if a consumer's menu tree is large enough to lag.
-  inputBuffer.value = value
+  // Filters immediately; debounce can come back later as an opt-in prop if a
+  // consumer's menu tree is large enough to lag.
   query.value = value
   highlighted.value = 0
 }

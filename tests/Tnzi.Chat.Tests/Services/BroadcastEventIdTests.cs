@@ -91,4 +91,35 @@ public class BroadcastEventIdTests : Integration.IntegrationTestBase
             .FirstAsync(m => m.ConversationId == conv.Id && m.ContentType == MessageContentType.System);
         evt.MessageId.ShouldBe(msg.Id);
     }
+
+    /// <summary>
+    /// 系统通知的推送也要带完整消息体：前端只在 <c>message</c> 存在时把它追加进打开着的会话，
+    /// 随后对可见的活动会话标已读：不带消息体就是「未读清零、通知却没出现」。
+    /// </summary>
+    [Fact]
+    public async Task NotifyUsers_PushesTheFullMessageBody()
+    {
+        var uid = Guid.NewGuid();
+
+        var result = await ServiceProvider.GetRequiredService<IBroadcastService>().NotifyUsersAsync([uid], new ChatNotification
+        {
+            Content = "Your order has shipped.",
+            Title = "Order shipped",
+            LinkUrl = "/orders/1001",
+            Category = "order"
+        });
+        result.Succeeded.ShouldBeTrue(result.Message);
+
+        var evt = _eventBus.Published.OfType<ConversationMessageSentEvent>().ShouldHaveSingleItem();
+        var body = evt.Message.ShouldNotBeNull();
+        body.Id.ShouldBe(evt.MessageId);
+        body.ConversationId.ShouldBe(evt.ConversationId);
+        body.SenderId.ShouldBeNull();
+        body.ContentType.ShouldBe(MessageContentType.System);
+        body.Content.ShouldBe("Your order has shipped.");
+        body.Title.ShouldBe("Order shipped");
+        body.LinkUrl.ShouldBe("/orders/1001");
+        body.Category.ShouldBe("order");
+        body.SentAt.ShouldNotBe(default);
+    }
 }

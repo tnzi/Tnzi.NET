@@ -27,6 +27,7 @@ import { useBreakpoints } from '../../headless/theme/useBreakpoints'
 import { useFormHostRegistration } from '../../headless/form/form-host'
 import TDescriptions, { type DescriptionItem } from '../display/TDescriptions.vue'
 import TSvgIcon from '../display/TSvgIcon.vue'
+import THint from '../display/THint.vue'
 import { EMPTY_DASH, isEmptyValue } from '../../utils/placeholders'
 import './form-schema.css'
 
@@ -98,6 +99,13 @@ export interface FormSchemaItem {
   hint?: string
   /** i18n key for {@link hint}. */
   hintKey?: string
+  /**
+   * Where the hint shows. `'inline'` (default): a line under the control.
+   * `'popover'`: an ⓘ after the label that opens the full text - for a hint
+   * that would wrap to two lines or more, which as running text outweighs the
+   * field it explains (same rule as `TDetailSection`'s `hintMode`).
+   */
+  hintMode?: 'inline' | 'popover'
 }
 
 /**
@@ -117,6 +125,8 @@ export interface FormSchemaSection {
   hint?: string
   /** i18n key for the hint. */
   hintKey?: string
+  /** `'popover'` puts the hint behind an ⓘ after the heading instead of a line under it. */
+  hintMode?: 'inline' | 'popover'
   /** Iconify name shown before the heading. */
   icon?: string
   /** Per-section column override. Falls back to the renderer's `columns`. */
@@ -187,13 +197,27 @@ function toDateTimestamp(value: unknown): number | null {
   return null
 }
 
-/** ISO calendar date for a description row - stable across locales/timezones. */
-function toDateText(value: unknown): string {
-  const ts = toDateTimestamp(value)
-  if (ts === null) return ''
+/** Local calendar date of an epoch-ms instant, as `YYYY-MM-DD`. */
+function toIsoCalendarDate(ts: number): string {
   const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** ISO calendar date for a description row - stable across locales/timezones. */
+function toDateText(value: unknown): string {
+  const ts = toDateTimestamp(value)
+  return ts === null ? '' : toIsoCalendarDate(ts)
+}
+
+/**
+ * date 字段写回模型的形态与读入时接受的形态一致：NDatePicker 给的是所选那天本地午夜的毫秒时间戳，
+ * 写回时按**本地日历日**格式化成 `YYYY-MM-DD`（即 `toDateTimestamp` 的逆）。后端的日期字段绑定
+ * `DateTime`，JSON 数字绑不上（400），所以直接转发模型的页面此前一选日期就保存失败。清空写 `null`。
+ * 没碰过的字段不经过这里，原值（可能带时刻）原样留在模型里。
+ */
+function fromDatePicker(value: number | null): string | null {
+  return typeof value === 'number' && Number.isFinite(value) ? toIsoCalendarDate(value) : null
 }
 
 const TSchemaForm = defineComponent({
@@ -350,7 +374,10 @@ const TSchemaForm = defineComponent({
             'onUpdate:value': onUpdate,
           })
         case 'number':
+          // Every control fills its grid cell: naive's number and date inputs are inline and size to their
+          // content, so next to a text or select field in the same row they read as half a field.
           return h(NInputNumber, {
+            class: 't-form-schema__fill',
             value: value as number | null,
             readonly: viewMode,
             min: item.min,
@@ -367,7 +394,13 @@ const TSchemaForm = defineComponent({
           return h(NSelect, { value: value as string | number | null, disabled: viewMode, options: opts, 'onUpdate:value': onUpdate })
         }
         case 'date':
-          return h(NDatePicker, { value: toDateTimestamp(value), disabled: viewMode, type: 'date', 'onUpdate:value': onUpdate })
+          return h(NDatePicker, {
+            class: 't-form-schema__fill',
+            value: toDateTimestamp(value),
+            disabled: viewMode,
+            type: 'date',
+            'onUpdate:value': (v: number | null) => onUpdate(fromDatePicker(v)),
+          })
         default:
           // Unknown field type without a registered renderer: degrade to a
           // visible read-only text rendering rather than silently rendering
@@ -495,10 +528,12 @@ const TSchemaForm = defineComponent({
       const formChildren = items.map((item) => {
         const spanStyle = fieldSpanStyle(item, cols)
         const hint = tr(item.hintKey, item.hint ?? '')
+        const label = tr(item.labelKey, item.label)
+        const asPopover = !!hint && item.hintMode === 'popover'
         return h(
           NFormItem,
           {
-            label: tr(item.labelKey, item.label),
+            label,
             path: item.key,
             required: item.required,
             rule: requiredRule(item),
@@ -506,8 +541,17 @@ const TSchemaForm = defineComponent({
             style: spanStyle,
           },
           {
+            ...(asPopover
+              ? {
+                  label: () =>
+                    h('span', { class: 't-form-schema__label' }, [
+                      h('span', label),
+                      h(THint, { content: hint, size: 14, 'data-testid': `hint-${item.key}` }),
+                    ]),
+                }
+              : {}),
             default: () =>
-              hint
+              hint && !asPopover
                 ? h('div', { class: 't-form-schema__field' }, [
                     renderField(item),
                     h('div', { class: 't-form-schema__hint' }, hint),
@@ -571,14 +615,16 @@ const TSchemaForm = defineComponent({
       const label = tr(section.labelKey, section.label ?? '')
       const hint = tr(section.hintKey, section.hint ?? '')
       if (!label && !hint) return null
+      const asPopover = !!hint && section.hintMode === 'popover'
       return h('div', { class: 't-form-schema__section-head' }, [
         label
           ? h('div', { class: 't-form-schema__section-title' }, [
               section.icon ? h(TSvgIcon, { icon: section.icon, size: 15 }) : null,
               h('span', label),
+              asPopover ? h(THint, { content: hint, size: 14 }) : null,
             ])
           : null,
-        hint ? h('p', { class: 't-form-schema__section-hint' }, hint) : null,
+        hint && !asPopover ? h('p', { class: 't-form-schema__section-hint' }, hint) : null,
       ])
     }
 

@@ -12,7 +12,7 @@ public class AIRagOptions
     /// 默认切块大小（字符数）
     /// </summary>
     [RuntimeSetting(Label = "Default Chunk Size", I18n = "admin.modules.system.settings.fields.ragDefaultChunkSize",
-        Type = SettingFieldType.Int, Min = 128, Max = 8192, Subsection = "Chunking & Retrieval",
+        Type = SettingFieldType.Int, Min = ChunkSettings.MinChunkSize, Max = ChunkSettings.MaxChunkSize, Subsection = "Chunking & Retrieval",
         Description = "Default number of characters per chunk when a knowledge base does not override it")]
     public int DefaultChunkSize { get; set; } = 1024;
 
@@ -21,7 +21,7 @@ public class AIRagOptions
     /// </summary>
     [RuntimeSetting(Label = "Default Chunk Overlap", I18n = "admin.modules.system.settings.fields.ragDefaultChunkOverlap",
         Type = SettingFieldType.Int, Min = 0, Subsection = "Chunking & Retrieval",
-        Description = "Default overlap in characters between consecutive chunks (must be less than chunk size)")]
+        Description = "Default overlap in characters between consecutive chunks (at most half the chunk size)")]
     public int DefaultChunkOverlap { get; set; } = 128;
 
     /// <summary>

@@ -103,10 +103,9 @@ public class TnziApplication : ITnziApplication
         {
             try
             {
-                var beforeCount = _services.Count;
+                var before = SnapshotServices();
                 await module.Instance.ConfigureServicesAsync(context);
-                var newServices = _services.Skip(beforeCount).ToList();
-                moduleServiceMap[module.Type] = newServices;
+                moduleServiceMap[module.Type] = NewlyAddedServices(before);
             }
             catch (Exception ex)
             {
@@ -120,11 +119,11 @@ public class TnziApplication : ITnziApplication
         {
             try
             {
-                var beforeCount = _services.Count;
+                var before = SnapshotServices();
                 await module.Instance.PostConfigureServicesAsync(context);
-                if (_services.Count > beforeCount)
+                var newServices = NewlyAddedServices(before);
+                if (newServices.Count > 0)
                 {
-                    var newServices = _services.Skip(beforeCount).ToList();
                     if (moduleServiceMap.TryGetValue(module.Type, out var existing))
                     {
                         existing.AddRange(newServices);
@@ -141,11 +140,28 @@ public class TnziApplication : ITnziApplication
             }
         }
 
-        // 保存模块服务映射，用于 InitializeAsync 阶段的依赖审计
+        // 保存模块服务映射，用于 InitializeAsync 阶段的依赖审计。
+        // 后来的模块 RemoveAll 掉的描述符刻意仍记在原模块名下：依赖审计把一个服务类型的全部注册模块都算作候选，
+        // 可替换实现（Redis 换掉内存缓存）的原始提供者因此仍然算数，不会把所有用缓存的模块报成「没声明依赖 Redis」。
         _moduleServiceMap = moduleServiceMap;
 
         _servicesConfigured = true;
     }
+
+    /// <summary>
+    /// 按引用记录当前已注册的描述符。
+    /// </summary>
+    /// <remarks>
+    /// 不能按「调用前的数量」取下标之后的描述符：模块先 <c>RemoveAll</c> 掉更早模块的注册再 <c>Add</c> 时列表左移，
+    /// 本模块最早的那几条注册落到旧下标之前而被漏记。按引用比较而非值相等：两个模块完全可能注册出
+    /// 值相等的描述符（同服务类型、同实现类型、同生命周期），值相等会把后者误判成已存在。
+    /// </remarks>
+    private HashSet<ServiceDescriptor> SnapshotServices()
+        => new(_services, ReferenceEqualityComparer.Instance);
+
+    /// <summary>取快照之后新增的描述符，保持注册顺序。</summary>
+    private List<ServiceDescriptor> NewlyAddedServices(HashSet<ServiceDescriptor> before)
+        => _services.Where(descriptor => !before.Contains(descriptor)).ToList();
 
     /// <summary>
     /// 注册框架内建的模块基础设施服务：模块健康检查器、文件监听器、重初始化重载器。

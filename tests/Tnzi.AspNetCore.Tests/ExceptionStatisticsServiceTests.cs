@@ -326,11 +326,13 @@ public class ExceptionStatisticsServiceTests
     public void ExceptionStatistics_ShouldHandleGenericExceptions()
     {
         _statistics.RecordException(new Exception("generic error"), "req-1");
+        _statistics.RecordException(new NullReferenceException("null"), "req-2");
 
         var stats = _statistics.GetStats(TimeSpan.FromMinutes(1));
-        Assert.Equal(1, stats.TotalCount);
-        // Generic exceptions don't have status codes
-        Assert.Empty(stats.ByStatusCode);
+        Assert.Equal(2, stats.TotalCount);
+        // 未处理的系统异常就是客户端收到的 500：此前记成 null，「按状态码」里永远没有它们
+        Assert.Equal(2, stats.ByStatusCode[500]);
+        Assert.Equal(500, _statistics.GetRecentExceptions(1)[0].StatusCode);
     }
 
     [Fact]

@@ -106,7 +106,19 @@ public class ServerOptions
     public string? ServerName { get; set; }
 
     /// <summary>
-    /// 队列列表（默认: default）
+    /// 队列列表，按优先级从高到低。留空表示只处理 <c>default</c> 队列。
     /// </summary>
-    public List<string> Queues { get; set; } = new() { "default" };
+    /// <remarks>
+    /// ★ <b>默认值必须是空列表</b>：.NET 的配置绑定对已有的集合是<b>追加</b>语义。若这里预置 <c>["default"]</c>，
+    /// 配的 <c>["critical", "default"]</c> 会绑成 <c>["default", "critical", "default"]</c>：Hangfire 按列表顺序取队列，
+    /// 优先级整个倒过来；只配 <c>["reports"]</c> 的专用服务器也照样去拉 <c>default</c> 队列的任务。
+    /// 缺省值改在读取处补，读取方一律经 <see cref="ResolveQueues"/>。
+    /// </remarks>
+    public List<string> Queues { get; set; } = [];
+
+    /// <summary>
+    /// 取生效的队列列表：配了就用配的（去重、保持先后），没配只处理 <c>default</c>。
+    /// </summary>
+    public string[] ResolveQueues()
+        => Queues is { Count: > 0 } configured ? configured.Distinct().ToArray() : ["default"];
 }

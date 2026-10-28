@@ -67,8 +67,9 @@ public class CreateUserDto
     /// <remarks>
     /// ★ 从必填改为可空，是为了让「管理员开号 + 本人来设密码」这条路走得通
     /// （<see cref="Services.IInvitationService"/>）。让邀请自己拼一个 <c>User</c> 塞进库
-    /// 才是危险的做法：那样会绕开这条路径上的重名校验、密码策略与注册事件，
-    /// 而 <c>CreateAsync</c> 是它们唯一的共同出口。
+    /// 才是危险的做法：那样会绕开这条路径上的重名校验、组织校验与角色分配，
+    /// 而建号服务是它们唯一的共同出口（邀请走 <c>CreateForInvitationAsync</c>，
+    /// 区别只在注册事件推迟到接受邀请时发布）。
     /// <para>
     /// 留空创建出的账号<b>登录不进去</b>：没有 <c>PasswordHash</c> 则密码登录必失败，
     /// 而邀请路径还会另外置上 <see cref="PendingUserActions.InvitationPending"/>，
@@ -82,6 +83,7 @@ public class CreateUserDto
     
     public string? PhoneNumber { get; set; }
     
+    /// <summary>昵称。写进资料（<c>UserDetail</c>），不在账号表上。</summary>
     public string? Nickname { get; set; }
     
     public Guid? OrganizationId { get; set; }
@@ -366,7 +368,7 @@ public class DeactivateAccountDto
 }
 
 /// <summary>
-/// 用户个人数据导出DTO（GDPR 合规）
+/// 用户自助导出的账号数据：账号字段、角色、所属组织名与已关联的第三方登录提供商（不含资料与登录历史）
 /// </summary>
 public class PersonalDataExportDto
 {

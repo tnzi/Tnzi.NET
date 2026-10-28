@@ -22,8 +22,7 @@ public class StripeCallbackStatusTests
             Enabled = true,
             SecretKey = "sk_test_key",
             PublishableKey = "pk_test_key",
-            WebhookSecret = string.Empty,
-            Currency = "usd"
+            WebhookSecret = string.Empty
         });
 
         _provider = new StripeProvider(options, new Mock<ILogger<StripeProvider>>().Object);
@@ -31,7 +30,7 @@ public class StripeCallbackStatusTests
 
     private static string StripeApiVersion => global::Stripe.StripeConfiguration.ApiVersion;
 
-    private static Dictionary<string, string> Event(string type, string intentStatus) => new()
+    private static Dictionary<string, string> Event(string type, string intentStatus, bool offSession = false) => new()
     {
         // api_version 取 SDK 自己的版本：ParseEvent 默认在版本不一致时抛异常，
         // 写死一个字面量会让这组测试在下一次升级 Stripe.net 时整体变红，而原因与被测行为无关。
@@ -49,22 +48,54 @@ public class StripeCallbackStatusTests
               "amount": 1000,
               "amount_received": 0,
               "currency": "usd",
-              "metadata": { "TradeNo": "PAY-CB-1" }
+              "metadata": { "TradeNo": "PAY-CB-1"{{(offSession ? ", \"OffSession\": \"true\"" : string.Empty)}} }
             }
           }
         }
         """
     };
 
+    /// <summary>
+    /// 无人值守扣款（续费 / 试用转正）的失败是终态：没有人在收银台前换卡，intent 退回
+    /// <c>requires_payment_method</c> 之后不会再有任何尝试。
+    /// </summary>
     [Fact]
-    public async Task PaymentFailedEvent_MapsToFailed_NotProcessing()
+    public async Task PaymentFailedEvent_OnAnOffSessionIntent_MapsToFailed()
     {
-        // Stripe 把失败的 intent 退回 requires_payment_method；只看 intent 状态就读成「还在处理」
-        var result = await _provider.HandleCallbackAsync(Event("payment_intent.payment_failed", "requires_payment_method"));
+        var result = await _provider.HandleCallbackAsync(
+            Event("payment_intent.payment_failed", "requires_payment_method", offSession: true));
 
         result.Succeeded.ShouldBeTrue();
         result.Data!.TradeNo.ShouldBe("PAY-CB-1");
         result.Data.Status.ShouldBe(PaymentStatus.Failed);
+    }
+
+    /// <summary>
+    /// 收银台上的一次拒付不是终态：intent 退回 <c>requires_payment_method</c> 正是为了让客户在同一个
+    /// Payment Element 里换一张卡重试。判成 Failed 会把本地支付终结（券归还、发失败事件、业务单取消），
+    /// 客户换卡付掉之后的成功回调撞上本地终态被吞掉，钱收了，订单没履约。
+    /// 本地保持处理中，等成功回调或过期（过期时作废 intent）。
+    /// </summary>
+    [Fact]
+    public async Task PaymentFailedEvent_OnACheckoutIntent_StaysProcessing()
+    {
+        var result = await _provider.HandleCallbackAsync(Event("payment_intent.payment_failed", "requires_payment_method"));
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.TradeNo.ShouldBe("PAY-CB-1");
+        result.Data.Status.ShouldBe(PaymentStatus.Processing);
+    }
+
+    /// <summary>无人值守扣款建的 intent 必须带上这个标记，否则它的失败回调会被当成收银台上的一次可重试拒付。</summary>
+    [Fact]
+    public void OffSessionIntentMetadata_CarriesTheOffSessionMarker()
+    {
+        var metadata = StripeProvider.BuildIntentMetadata("PAY-1", "ORDER-1", offSession: true);
+
+        metadata["TradeNo"].ShouldBe("PAY-1");
+        metadata["BusinessOrderNo"].ShouldBe("ORDER-1");
+        metadata["OffSession"].ShouldBe("true");
+        StripeProvider.BuildIntentMetadata("PAY-2", "ORDER-2", offSession: false).ShouldNotContainKey("OffSession");
     }
 
     [Fact]

@@ -42,7 +42,10 @@ public class SubscriptionBillingIntegrationTests : SubscriptionsIntegrationTestB
             AutoRenew = true,
             ChannelCode = "Null",
             PaymentMethodToken = paymentMethodToken,
-            ProviderCustomerId = "cus_test"
+            ProviderCustomerId = "cus_test",
+            // 一条真实的 Active / Trial 订阅都付过首期或开过试用：恢复与重开自动续费以此区分「从没激活过」的订阅
+            LastBillingTradeNo = trialEnd == null ? $"PAY-SEED-{subscriptionNo}" : null,
+            TrialStartTime = trialEnd == null ? null : trialEnd.Value.AddDays(-14)
         };
         await SeedAsync(subscription);
         return subscription;

@@ -52,7 +52,7 @@ public abstract class WorkflowServiceSqliteTestBase : IntegratedTestBase<Workflo
         services.AddScoped(_ => RunRepository.Object);
         services.AddScoped(_ => AgentRepository.Object);
         services.AddScoped(_ => Mock.Of<IUsageLogService>());
-        services.AddScoped(_ => Mock.Of<IQuotaService>());
+        services.AddScoped(_ => UsageLimitsThatGrantEverything());
 
         services.AddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();
         services.AddScoped<WorkflowNodeExecutor>();
@@ -61,6 +61,12 @@ public abstract class WorkflowServiceSqliteTestBase : IntegratedTestBase<Workflo
 
         ConfigureWorkflowNodes(services);
     }
+
+    /// <summary>
+    /// Every run and every resume (booked to the signed-in test user) opens a usage window; a bare
+    /// mock would answer that with null.
+    /// </summary>
+    internal static IUsageLimitService UsageLimitsThatGrantEverything() => UsageLimitMocks.Allowing().Object;
 
     /// <summary>
     /// Register the <see cref="IWorkflowNode"/> implementations a test needs. The default

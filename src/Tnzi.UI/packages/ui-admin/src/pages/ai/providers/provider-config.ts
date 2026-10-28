@@ -43,7 +43,7 @@ export const providerFormSchema: FormSchemaItem[] = [
     key: 'apiKey',
     labelKey: 'form.apiKey',
     label: 'API Key',
-    type: 'text',
+    type: 'password',
     placeholder: 'Required on create; leave blank on edit to keep existing key',
   },
   { key: 'defaultModel', labelKey: 'form.defaultModel', label: 'Default Model', type: 'text' },

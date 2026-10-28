@@ -43,6 +43,9 @@
         <div v-if="previewDates.length" class="flex flex-wrap gap-6px">
           <NTag v-for="d in previewDates" :key="d" size="small" :bordered="false">{{ fmtDate(d) }}</NTag>
         </div>
+        <!-- A refused preview is not "no dates": say why, so a bad schedule is
+             caught here rather than by the save. -->
+        <span v-else-if="previewError" class="text-12px text-error">{{ previewError }}</span>
         <span v-else class="text-12px text-muted">{{ tp('preview.hint') }}</span>
       </div>
     </template>
@@ -53,7 +56,9 @@
     <template #default>
       <div class="fin-rec__runs">
         <NSpin :show="runsLoading">
-          <TEmpty v-if="!runsLoading && runs.length === 0" :text="tp('history.empty')" />
+          <!-- A failed read is not "nothing generated yet". -->
+          <NAlert v-if="runsError" type="error">{{ runsError }}</NAlert>
+          <TEmpty v-else-if="!runsLoading && runs.length === 0" :text="tp('history.empty')" />
           <TResponsiveTable
             v-else
             :columns="runColumns"
@@ -81,8 +86,9 @@
  * mistake nobody finds until month end.
  */
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { computed, h, ref } from 'vue'
-import { NButton, NSpin, NTag, type DataTableColumns } from 'naive-ui'
+import { toIsoDateValue } from '../../utils/calendar-date'
+import { computed, h, ref, watch } from 'vue'
+import { NAlert, NButton, NSpin, NTag, type DataTableColumns } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import TDetailHost from '../../components/detail/TDetailHost.vue'
@@ -104,6 +110,7 @@ import { buildRecurringColumns, recurringFormSchema, type RecurringRow } from '.
 import {
   createFinanceBridge,
   type RecurringRunDto,
+  type RecurringSweepResultDto,
 } from '../../services/bridges/finance-bridge'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -128,18 +135,52 @@ const crud = useCrudPage<RecurringRow>({
   rowKey: (r) => String(r.id ?? ''),
   permission: 'finance.recurring',
   fetchData: (q) => bridge.recurring.fetch(q),
+  loadDetailById: (id) => bridge.recurring.getById(id),
   createData: (d) => bridge.recurring.create(toCreate(d)),
   updateData: (id, d) => bridge.recurring.update(String(id), toUpdate(d)),
   deleteData: (ids) => bridge.recurring.delete(ids.map(String)),
 })
 
+// ── Edit opens on the full template ─────────────────────────
+
+/**
+ * The list projection carries no lines (and the save replaces them), so an
+ * edit opened on a list row showed an empty lines editor: the save was refused
+ * ("needs at least one line") or kept only what was retyped from memory.
+ */
+async function openEditFull(row: RecurringRow): Promise<void> {
+  if (!row.id) return
+  try {
+    const full = await bridge.recurring.getById(String(row.id))
+    if (!full) throw new Error(tp('actions.failed'))
+    crud.openEdit(full)
+  } catch (error) {
+    crud.formModal.close()
+    message.error(error instanceof Error ? error.message : tp('actions.failed'))
+  }
+}
+
+// A restored `?detail=edit:<id>` resolves from the loaded list first, so it
+// lands on a row without lines too. A saved template always has at least one
+// line, so an edit open on none is a list row: swap in the full record. Keyed
+// on the id, so the swap itself does not fire this again.
+watch(
+  () => (crud.formModal.mode.value === 'edit' ? crud.formModal.formData.value?.id ?? null : null),
+  (id) => {
+    if (id && !crud.formModal.formData.value?.lines?.length) void openEditFull({ id })
+  },
+)
+
 // ── Schedule preview ────────────────────────────────────────
 
 const previewDates = ref<string[]>([])
 const previewing = ref(false)
+/** Why the last preview was refused (empty = it was not). */
+const previewError = ref('')
 
 async function previewSchedule(formData: unknown) {
   const model = (formData ?? {}) as Record<string, unknown>
+  previewError.value = ''
   if (!model.startDate || !model.frequency) {
     previewDates.value = []
     return
@@ -148,9 +189,11 @@ async function previewSchedule(formData: unknown) {
   try {
     const result = await bridge.recurring.previewSchedule(toCreate(model), 6)
     previewDates.value = result.dates ?? []
-  } catch {
-    // A failed preview must not block saving - it is an aid, not a gate.
+  } catch (error) {
+    // A failed preview must not block saving - it is an aid, not a gate - but
+    // it is not an empty schedule either: show the reason in its place.
     previewDates.value = []
+    previewError.value = error instanceof Error ? error.message : tp('actions.failed')
   } finally {
     previewing.value = false
   }
@@ -161,6 +204,8 @@ async function previewSchedule(formData: unknown) {
 const history = useDetail({ mode: 'drawer', url: 'runs' })
 const runs = ref<RecurringRunDto[]>([])
 const runsLoading = ref(false)
+/** Why the history could not be read (empty = it was read). */
+const runsError = ref('')
 
 const RUN_STATUS_TYPE: Record<string, 'success' | 'warning' | 'error'> = {
   Generated: 'success',
@@ -199,6 +244,7 @@ const runColumns = computed<DataTableColumns<RecurringRunDto>>(() => [
 
 async function openHistory(templateId?: string) {
   runs.value = []
+  runsError.value = ''
   runsLoading.value = true
   await history.open('view', templateId ?? 'all')
   try {
@@ -208,6 +254,8 @@ async function openHistory(templateId?: string) {
       recurringDocumentId: templateId,
     } as never)
     runs.value = page.items ?? []
+  } catch (error) {
+    runsError.value = error instanceof Error ? error.message : String(error)
   } finally {
     runsLoading.value = false
   }
@@ -221,18 +269,42 @@ async function runDue() {
   sweeping.value = true
   try {
     const result = await bridge.recurring.runDue()
-    message.success(
-      tp('actions.sweepDone')
-        .replace('{generated}', String(result.generated))
-        .replace('{skipped}', String(result.skipped))
-        .replace('{failed}', String(result.failed)),
-    )
+    if (result.failed > 0) message.warning(describeRun(result))
+    else message.success(describeRun(result))
     await crud.refresh()
   } catch (error) {
     message.error(error instanceof Error ? error.message : tp('actions.sweepFailed'))
   } finally {
     sweeping.value = false
   }
+}
+
+/**
+ * A run answers 200 with counts even when a period failed: the failure is
+ * recorded on the run and retried, it is not an error response. So the counts
+ * choose the message, and a failed period carries its reason.
+ */
+function describeRun(result: RecurringSweepResultDto): string {
+  const counts = tp('actions.sweepDone')
+    .replace('{generated}', String(result.generated))
+    .replace('{skipped}', String(result.skipped))
+    .replace('{failed}', String(result.failed))
+  const reason = result.failed > 0
+    ? (result.runs ?? []).find((r) => r.status === 'Failed')?.failReason
+    : null
+  return reason ? `${counts} ${reason}` : counts
+}
+
+/**
+ * Run now on one template. "Nothing due" never reaches here (the server answers
+ * 409 for it), so a run that generated nothing failed, was skipped by the
+ * catch-up policy, or found nothing left to do; none of those is "nothing due".
+ */
+function reportRunNow(result: RecurringSweepResultDto) {
+  if (result.failed > 0) message.error(describeRun(result))
+  else if (result.generated > 0) message.success(tp('actions.ranOne').replace('{n}', String(result.generated)))
+  else if (result.skipped > 0) message.info(describeRun(result))
+  else message.info(tp('actions.nothingGenerated'))
 }
 
 async function transition(row: RecurringRow, action: 'pause' | 'resume' | 'end') {
@@ -246,7 +318,7 @@ async function transition(row: RecurringRow, action: 'pause' | 'resume' | 'end')
 }
 
 const rowActions = computed((): RowAction<RecurringRow>[] => [
-  editAction(crud),
+  editAction(crud, { onClick: (row) => openEditFull(row) }),
   {
     key: 'run',
     label: 'actions.runNow',
@@ -254,12 +326,7 @@ const rowActions = computed((): RowAction<RecurringRow>[] => [
     onClick: async (row) => {
       if (!row.id) return
       try {
-        const result = await bridge.recurring.run(row.id)
-        message.success(
-          result.generated > 0
-            ? tp('actions.ranOne').replace('{n}', String(result.generated))
-            : tp('actions.nothingDue'),
-        )
+        reportRunNow(await bridge.recurring.run(row.id))
         await crud.refresh()
       } catch (error) {
         message.error(error instanceof Error ? error.message : tp('actions.failed'))
@@ -347,6 +414,14 @@ function normalizeAutoPost(value: unknown): boolean | null {
   return null
 }
 
+/**
+ * The form's model → the create / update / preview body.
+ *
+ * The save replaces the template, so `paymentMethod` (set through the API, no
+ * control on this form) is carried back rather than cleared. Dates picked on
+ * the form are epoch numbers and go out as calendar dates; an untouched date
+ * goes back as it came.
+ */
 function toCreate(model: Record<string, unknown> | unknown) {
   const m = (model ?? {}) as Record<string, unknown>
   return {
@@ -355,12 +430,13 @@ function toCreate(model: Record<string, unknown> | unknown) {
     partyId: String(m.partyId ?? ''),
     paidFromAccountId: (m.paidFromAccountId as string | null) ?? null,
     currency: (m.currency as string | null) ?? null,
+    paymentMethod: (m.paymentMethod as string | null) ?? null,
     memo: (m.memo as string | null) ?? null,
     frequency: (m.frequency ?? 'Monthly') as 'Daily' | 'Weekly' | 'Monthly' | 'Quarterly' | 'Yearly',
     interval: Number(m.interval ?? 1) || 1,
     anchorDay: m.anchorDay == null || m.anchorDay === '' ? null : Number(m.anchorDay),
-    startDate: String(m.startDate ?? ''),
-    endDate: (m.endDate as string | null) || null,
+    startDate: toIsoDateValue(m.startDate) ?? '',
+    endDate: toIsoDateValue(m.endDate),
     maxOccurrences: m.maxOccurrences == null || m.maxOccurrences === '' ? null : Number(m.maxOccurrences),
     dueDays: m.dueDays == null || m.dueDays === '' ? null : Number(m.dueDays),
     autoPost: normalizeAutoPost(m.autoPost),

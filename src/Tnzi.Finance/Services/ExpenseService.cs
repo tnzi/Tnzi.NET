@@ -196,13 +196,21 @@ public class ExpenseService : ApplicationService, IExpenseService
         if (!guardResult.Succeeded)
             return Fail<ExpenseDto>(guardResult.Message ?? "Posting was rejected.", guardResult.Code ?? 403);
 
-        var paidFromResult = await _helper.GetPostableAccountAsync(expense.PaidFromAccountId, cancellationToken);
+        // 付出科目与全部行科目一条 IN 查询加载，再按原顺序逐个判定（错误消息仍报单据行号）
+        var accounts = await _helper.LoadAccountsAsync(
+            expense.Lines.Select(l => l.AccountId).Append(expense.PaidFromAccountId), cancellationToken);
+
+        var paidFromResult = FinanceDocumentHelper.CheckPostable(accounts.GetValueOrDefault(expense.PaidFromAccountId));
         if (!paidFromResult.Succeeded)
             return Fail<ExpenseDto>($"Paid-from account: {paidFromResult.Message}", paidFromResult.Code ?? 400);
+        // 过账时再判一次：草稿之后科目表可能被改过（角色挪到了这个科目上）
+        var paidFromControlCheck = FinanceDocumentHelper.RejectControlAccount(paidFromResult.Data!, "Paid-from account");
+        if (!paidFromControlCheck.Succeeded)
+            return Fail<ExpenseDto>(paidFromControlCheck.Message!, paidFromControlCheck.Code ?? 400);
 
         foreach (var line in expense.Lines)
         {
-            var accountResult = await _helper.GetPostableAccountAsync(line.AccountId, cancellationToken);
+            var accountResult = FinanceDocumentHelper.CheckPostable(accounts.GetValueOrDefault(line.AccountId));
             if (!accountResult.Succeeded)
                 return Fail<ExpenseDto>($"Line {line.LineNumber}: {accountResult.Message}", accountResult.Code ?? 400);
         }
@@ -408,6 +416,12 @@ public class ExpenseService : ApplicationService, IExpenseService
 
     private async Task<Result> ApplyDraftAsync(Expense expense, CreateExpenseDto input, CancellationToken cancellationToken)
     {
+        var memoTooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"),
+            (input.PaymentMethod, FinanceFieldLimits.PaymentMethodMaxLength, "payment method"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (input.Lines == null || input.Lines.Count == 0)
             return Fail("At least one line is required.");
         if (input.Lines.Count > _options.MaxLinesPerEntry)
@@ -422,6 +436,9 @@ public class ExpenseService : ApplicationService, IExpenseService
         var paidFromResult = await _helper.GetPostableAccountAsync(input.PaidFromAccountId, cancellationToken);
         if (!paidFromResult.Succeeded)
             return Fail($"Paid-from account: {paidFromResult.Message}", paidFromResult.Code ?? 400);
+        var paidFromControlCheck = FinanceDocumentHelper.RejectControlAccount(paidFromResult.Data!, "Paid-from account");
+        if (!paidFromControlCheck.Succeeded)
+            return paidFromControlCheck;
 
         expense.VendorId = input.VendorId;
         expense.PaidFromAccountId = input.PaidFromAccountId;
@@ -441,6 +458,8 @@ public class ExpenseService : ApplicationService, IExpenseService
                 return Fail($"Line {lineNo}: the manual tax amount must not be negative.");
             if (line.TaxAmount.HasValue && !line.TaxCodeId.HasValue)
                 return Fail($"Line {lineNo}: a manual tax amount requires a tax code.");
+            if (line.Description?.Length > FinanceFieldLimits.LineDescriptionMaxLength)
+                return Fail($"Line {lineNo}: the description must be at most {FinanceFieldLimits.LineDescriptionMaxLength} characters.", 400);
 
             expense.Lines.Add(new ExpenseLine
             {

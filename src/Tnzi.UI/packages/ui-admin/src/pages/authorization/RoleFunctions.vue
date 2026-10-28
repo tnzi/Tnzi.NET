@@ -34,7 +34,7 @@
                     <span
                       v-if="isSuperRole(role)"
                       class="t-role-func-page__role-count is-super"
-                      :title="t('super.badgeTip')"
+                      :title="t(superKey('badgeTip'))"
                     >
                       {{ t('super.all') }}
                     </span>
@@ -82,7 +82,7 @@
                 </div>
                 <div v-if="selectedIsSuper" class="t-role-func-page__role-progress-line">
                   <span class="t-role-func-page__assigned-text">
-                    {{ t('super.summary', { total: totalFunctionCount }) }}
+                    {{ t(superKey('summary'), { total: totalFunctionCount }) }}
                   </span>
                   <span class="t-role-func-page__bar">
                     <span class="t-role-func-page__bar-fill is-super" style="width: 100%" />
@@ -123,7 +123,7 @@
                   type="primary"
                   size="small"
                   :loading="saving"
-                  :disabled="!isDirty"
+                  :disabled="!isDirty || !assignedReady"
                   @click="handleSave"
                 >
                   {{ t('save') }}
@@ -138,7 +138,7 @@
               <TSvgIcon icon="mdi:shield-crown-outline" :size="22" class="t-role-func-page__super-banner-icon" />
               <div class="t-role-func-page__super-banner-text">
                 <span class="t-role-func-page__super-banner-title">{{ t('super.badge') }}</span>
-                <span class="t-role-func-page__super-banner-line">{{ t('super.explain1') }}</span>
+                <span class="t-role-func-page__super-banner-line">{{ t(superKey('explain1')) }}</span>
               </div>
               <code class="t-role-func-page__super-banner-code">Authorization:SuperAdminRoles</code>
               <div
@@ -146,7 +146,7 @@
                 class="t-role-func-page__super-stale"
               >
                 <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
-                {{ t('super.stale', { n: roleAssignedCount(selectedRoleId!) ?? 0 }) }}
+                {{ t(superKey('stale'), { n: roleAssignedCount(selectedRoleId!) ?? 0 }) }}
                 <NButton size="tiny" secondary type="warning" @click="onCleanupSuperRows">
                   {{ t('super.cleanup') }}
                 </NButton>
@@ -269,7 +269,7 @@
                 {{ t('dirtyChip', { added: dirtyAdded, removed: dirtyRemoved }) }}
               </NTag>
               <NButton size="small" :disabled="treeLoading" @click="reset">{{ t('reset') }}</NButton>
-              <NButton type="primary" size="small" :loading="saving" @click="handleSave">
+              <NButton type="primary" size="small" :loading="saving" :disabled="!assignedReady" @click="handleSave">
                 {{ t('save') }}
               </NButton>
             </div>
@@ -448,7 +448,7 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { computed, reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDialog } from 'naive-ui'
 import type { SelectOption } from 'naive-ui'
@@ -474,18 +474,17 @@ import { TOverlayTheme } from '../../components/overlay'
 import { useDetail } from '../../headless/useDetail'
 import { useSafeMessage } from '../_shared/safe-message'
 import { createAuthorizationBridge } from '../../services/bridges/authorization-bridge'
-import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { makePageTranslator } from '../_shared/translate'
 import { TSvgIcon, createDialogAdapter } from '@tnzi/ui'
 import type {
+  AssignableRoleDto,
   FunctionModuleDto,
   ModuleFunctionDto,
   PermissionComparisonDto,
   FunctionSummaryDto,
 } from '@tnzi/core/services/authorization'
-import type { RoleDto } from '@tnzi/core/services/identity'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
@@ -493,7 +492,6 @@ interface Role { id: string; code: string; name: string; description?: string | 
 
 const client = useAdminClient()
 const authBridge = createAuthorizationBridge({ client })
-const idBridge = createIdentityBridge({ client })
 const t = makePageTranslator('authorization.roleFunctions')
 
 const message = useSafeMessage()
@@ -637,10 +635,21 @@ const selectedIsSuper = computed(() =>
   selectedRole.value !== null && isSuperRole(selectedRole.value),
 )
 
+// With `Authorization:SuperAdminBypassScope = Platform` the bypass covers platform
+// codes only: business codes on a super role are NOT implied, and explicit rows
+// on it DO grant business codes to every super admin. The matrix stays read-only
+// either way (business access belongs on a business role); only the wording
+// changes. The scope arrives with the access profile, for every viewer.
+const bypassNarrowed = computed(() => authStore.superAdminBypassScope === 'Platform')
+
+function superKey(key: 'badgeTip' | 'summary' | 'explain1' | 'stale' | 'cleanupConfirm'): string {
+  return bypassNarrowed.value ? `super.platform.${key}` : `super.${key}`
+}
+
 // Stale explicit rows on a super role have zero effect - offer a one-click
 // cleanup so the dead data doesn't linger and confuse audits.
 async function onCleanupSuperRows(): Promise<void> {
-  const ok = await confirmWarning(t('super.cleanup'), t('super.cleanupConfirm'))
+  const ok = await confirmWarning(t('super.cleanup'), t(superKey('cleanupConfirm')))
   if (ok) await handleClear()
 }
 
@@ -733,12 +742,14 @@ async function loadAll(): Promise<void> {
 async function loadRoles(): Promise<void> {
   rolesLoading.value = true
   try {
-    // The unpaged endpoint: the paged one clamps pageSize to 100 silently, so
-    // the former `pageSize: 500` call left roles 101+ out of the matrix.
-    const all = await idBridge.roles.getAll()
+    // Unpaged, and read from the role-functions surface itself: this page is
+    // gated by `authorization.roleFunction.view`, and Identity's role list sits
+    // behind `role.view`, which a delegated role-permission admin need not hold.
+    // (A paged read would clamp to 100 rows and leave roles 101+ out.)
+    const all = await authBridge.roleFunctions.roles()
     roles.value = [...all]
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-      .filter((r): r is RoleDto & { id: string; name: string } => !!(r.id && r.name))
+      .filter((r): r is AssignableRoleDto & { id: string; name: string } => !!(r.id && r.name))
       .map((r) => ({
         id: r.id,
         // RoleDto exposes normalizedName (uppercased system identifier) rather
@@ -759,26 +770,20 @@ async function loadRoles(): Promise<void> {
 async function loadModulesAndFunctions(): Promise<void> {
   treeLoading.value = true
   try {
-    modules.value = await authBridge.functionModules.getAll()
-    // Load functions for each module in parallel; bounded fan-out keeps it
-    // friendly for typical module counts (<50).
+    // One read from this page's own surface (`authorization.roleFunction.view`),
+    // not `/admin/modules`, which is gated by the module management code.
+    const catalogue = await authBridge.roleFunctions.catalogue()
+    modules.value = catalogue.modules
+    // 退役的码要排除在分配矩阵之外。目录同时服务权限管理页（那一页**要**看得见
+    // 退役行并打标），所以过滤发生在消费侧而不是端点侧。
+    // 后端拒绝把退役 / 已禁用的码当作新授权提交（404，文案给出码）；与之配套，
+    // `function-ids` 读端点只返回生效功能的 id，`set` 只覆盖生效范围、保留休眠授权行，
+    // 所以 GET → 勾选 → PUT 的往返对角色身上既有的退役授权是一次空操作。
+    // 这里过滤只是为了不呈现一个点不动、也不该点的勾选框。
     const next = new Map<string, ModuleFunctionDto[]>()
-    await Promise.all(
-      modules.value.map(async (m) => {
-        try {
-          // 退役的码要排除在分配矩阵之外。该端点同时服务权限管理页（那一页**要**看得见
-          // 退役行并打标），所以过滤发生在消费侧而不是端点侧。
-          // 后端拒绝把退役 / 已禁用的码当作新授权提交（404，文案给出码）；与之配套，
-          // `function-ids` 读端点只返回生效功能的 id，`set` 只覆盖生效范围、保留休眠授权行，
-          // 所以 GET → 勾选 → PUT 的往返对角色身上既有的退役授权是一次空操作。
-          // 这里过滤只是为了不呈现一个点不动、也不该点的勾选框。
-          const list = await authBridge.permissions.getByModule(m.id)
-          next.set(m.id, list.filter((f) => !f.isRetired))
-        } catch {
-          next.set(m.id, [])
-        }
-      }),
-    )
+    for (const [moduleId, list] of catalogue.functionsByModule) {
+      next.set(moduleId, list.filter((f) => !f.isRetired))
+    }
     functionsByModule.value = next
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
@@ -788,18 +793,38 @@ async function loadModulesAndFunctions(): Promise<void> {
   }
 }
 
+/**
+ * The role the checked set was read from, set only when that read succeeded.
+ *
+ * Save PUTs the checked set as the role's ENTIRE assignment set, so it may be
+ * saved only onto the role it was read for: a set shown while the read is still
+ * out, after it failed (empty, plus whatever was ticked since) or delivered late
+ * for the role selected before would strip or replace every grant the role holds.
+ */
+const assignedReadFor = ref<string | null>(null)
+/** Bumped by every read: only the newest may fill the matrix, the selection can move mid-flight. */
+let assignedLoadSeq = 0
+const assignedReady = computed(
+  () => selectedRoleId.value !== null && assignedReadFor.value === selectedRoleId.value,
+)
+
 async function loadAssignedForRole(roleId: string): Promise<void> {
+  const seq = ++assignedLoadSeq
+  assignedReadFor.value = null
+  originalAssignedIds.value = new Set()
+  checkedFunctionIds.value = []
   treeLoading.value = true
   try {
     const ids = await authBridge.roleFunctions.getAssignedIds(roleId)
+    if (seq !== assignedLoadSeq) return
     originalAssignedIds.value = new Set(ids)
     checkedFunctionIds.value = [...ids]
+    assignedReadFor.value = roleId
   } catch (e) {
+    if (seq !== assignedLoadSeq) return
     message.error(e instanceof Error ? e.message : String(e))
-    originalAssignedIds.value = new Set()
-    checkedFunctionIds.value = []
   } finally {
-    treeLoading.value = false
+    if (seq === assignedLoadSeq) treeLoading.value = false
   }
 }
 
@@ -824,13 +849,16 @@ function reset(): void {
 }
 
 async function handleSave(): Promise<void> {
-  if (!selectedRoleId.value) return
+  const roleId = selectedRoleId.value
+  // The disabled button is not the guard: this write replaces the role's whole set.
+  if (!roleId || !assignedReady.value || saving.value) return
+  const ids = [...checkedFunctionIds.value]
   saving.value = true
   try {
-    await authBridge.roleFunctions.setForRole(selectedRoleId.value, checkedFunctionIds.value)
-    originalAssignedIds.value = new Set(checkedFunctionIds.value)
+    await authBridge.roleFunctions.setForRole(roleId, ids)
+    if (assignedReadFor.value === roleId) originalAssignedIds.value = new Set(ids)
     const counts = new Map(assignedCountByRole.value)
-    counts.set(selectedRoleId.value, checkedFunctionIds.value.length)
+    counts.set(roleId, ids.length)
     assignedCountByRole.value = counts
     message.success(t('saveSuccess'))
   } catch (e) {
@@ -841,14 +869,19 @@ async function handleSave(): Promise<void> {
 }
 
 async function handleClear(): Promise<void> {
-  if (!selectedRoleId.value) return
+  const roleId = selectedRoleId.value
+  if (!roleId) return
   saving.value = true
   try {
-    await authBridge.roleFunctions.clearForRole(selectedRoleId.value)
-    originalAssignedIds.value = new Set()
-    checkedFunctionIds.value = []
+    await authBridge.roleFunctions.clearForRole(roleId)
+    // Only blank the matrix if it still shows this role: blanking another role's
+    // set would make its next Save strip everything that role holds.
+    if (assignedReadFor.value === roleId) {
+      originalAssignedIds.value = new Set()
+      checkedFunctionIds.value = []
+    }
     const counts = new Map(assignedCountByRole.value)
-    counts.set(selectedRoleId.value, 0)
+    counts.set(roleId, 0)
     assignedCountByRole.value = counts
     message.success(t('clearSuccess'))
   } catch (e) {
@@ -993,6 +1026,17 @@ onMounted(async () => {
     await loadAssignedForRole(queryRoleId)
   }
 })
+
+// Kept alive in its tab, the page is not mounted again: the deep link into the
+// open page arrives as a change of this page's route. Goes through selectRole,
+// so unsaved edits on the role on screen are confirmed before switching.
+watch(
+  () => route?.query?.roleId,
+  (roleId) => {
+    if (typeof roleId !== 'string' || roleId === selectedRoleId.value) return
+    if (roles.value.some((r) => r.id === roleId)) void selectRole(roleId)
+  },
+)
 </script>
 
 <style scoped>

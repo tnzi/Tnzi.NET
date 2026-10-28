@@ -90,10 +90,10 @@ public class HardDeleteDataDestroyer : IDataDestroyer
     /// </summary>
     private DbContext ResolveDbContext<TEntity>() where TEntity : class
     {
+        // 未注册的实体由 GetDbContextTypeForEntity 自己抛；未指定上下文的实体它答主上下文类型。
+        // 这里只挡住自定义 IEntityManager 交回的非 DbContext 类型。
         var dbContextType = _entityManager.GetDbContextTypeForEntity(typeof(TEntity));
-
-        // GetDbContextTypeForEntity 对未注册实体返回 typeof(object) 占位符。
-        if (dbContextType == null || dbContextType == typeof(object))
+        if (dbContextType == null || !typeof(DbContext).IsAssignableFrom(dbContextType))
         {
             throw new InvalidOperationException(
                 $"No DbContext is registered for entity type '{typeof(TEntity).FullName}'. "

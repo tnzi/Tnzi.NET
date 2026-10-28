@@ -200,7 +200,6 @@ public class AuditRetentionBackgroundServiceTests
 
         public Task SaveOperationAsync(AuditOperation operation) => throw new NotSupportedException();
         public Task SaveOperationBatchAsync(IEnumerable<AuditOperation> operations) => throw new NotSupportedException();
-        public Task SaveEntityEntriesAsync(IEnumerable<AuditEntityEntry> entries) => throw new NotSupportedException();
 
         public Task<int> DeleteExpiredAsync(int days, CancellationToken cancellationToken = default)
         {

@@ -15,9 +15,10 @@
 import { NButton } from 'naive-ui';
 import { ref, computed, watch } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useAiI18n } from '../../i18n/index';
-import { formatFileSize } from '@tnzi/core/utils';
+import { useAiI18n, formatAiMessage } from '../../i18n/index';
+import { formatFileSize, isImeComposing } from '@tnzi/core/utils';
 import { useComposerAttachments } from '../../headless/useComposerAttachments';
+import { fileIconForName } from '../../utils/file-icon';
 const props = withDefaults(defineProps<{
   modelValue: string;
   placeholder?: string;
@@ -49,10 +50,12 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const {
   files,
+  rejected,
   isDragOver,
   addFiles,
   removeFile,
   clearFiles,
+  clearRejected,
   getPreviewUrl,
   isImageFile,
   onPaste: handlePaste,
@@ -71,6 +74,17 @@ watch(
   },
 );
 
+// An oversized file is refused at selection; say so instead of dropping it
+// without a word.
+const rejectedMessage = computed(() =>
+  rejected.value.length === 0
+    ? ''
+    : formatAiMessage(t.value.composer.filesTooLarge, {
+        size: formatFileSize(props.maxFileSize),
+        names: rejected.value.map((r) => r.file.name).join(', '),
+      }),
+);
+
 const canSend = computed(() => {
   return (props.modelValue.trim().length > 0 || files.value.length > 0) && !props.disabled;
 });
@@ -82,10 +96,17 @@ function updateValue(event: Event): void {
   emit('update:modelValue', target.value);
 }
 
+/**
+ * Enter sends; it never stops. While an answer streams the button turns into
+ * Stop, but the keyboard is where the user is already typing the next
+ * question, and an Enter that aborted the running answer threw it away. The
+ * Enter that commits an IME candidate is not a send either.
+ */
 function handleKeyDown(event: KeyboardEvent): void {
   if (event.key === 'Enter' && !event.shiftKey) {
+    if (isImeComposing(event)) return;
     event.preventDefault();
-    handleSubmit();
+    if (!props.loading) handleSubmit();
     return;
   }
 
@@ -133,6 +154,15 @@ watch(textareaRef, (el) => {
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
   >
+    <!-- Oversized files are refused; say so instead of dropping them silently. -->
+    <div v-if="rejectedMessage" class="t-prompt-input__reject" role="status">
+      <Icon icon="lucide:triangle-alert" class="t-prompt-input__reject-icon" />
+      <span class="t-prompt-input__reject-text">{{ rejectedMessage }}</span>
+      <NButton quaternary size="tiny" :aria-label="t.composer.dismiss" @click="clearRejected">
+        <template #icon><Icon icon="lucide:x" /></template>
+      </NButton>
+    </div>
+
     <!-- File previews -->
     <div
       v-if="files.length > 0"
@@ -152,7 +182,7 @@ watch(textareaRef, (el) => {
         />
         <Icon
           v-else
-          icon="lucide:file"
+          :icon="fileIconForName(file.name)"
           class="size-4 text-tnzi-muted"
         />
 
@@ -227,3 +257,29 @@ watch(textareaRef, (el) => {
     />
   </div>
 </template>
+
+<style scoped>
+.t-prompt-input__reject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 8px 0;
+  padding: 2px 2px 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--tnzi-ai-warning) 32%, transparent);
+  background: color-mix(in srgb, var(--tnzi-ai-warning) 10%, transparent);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.t-prompt-input__reject-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--tnzi-ai-warning);
+}
+.t-prompt-input__reject-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

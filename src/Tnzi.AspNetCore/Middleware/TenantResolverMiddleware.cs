@@ -2,26 +2,32 @@ namespace Tnzi.AspNetCore.Middleware;
 
 /// <summary>
 /// 租户解析中间件
-/// 按配置的解析链（Header → QueryString → Cookie → Claims）解析租户 ID，
+/// 按配置的解析链（出厂顺序 Claims → Header → QueryString → Cookie）解析租户 ID，
 /// 解析成功后通过 ICurrentTenant.Change() 切换租户上下文
 /// </summary>
 public class TenantResolverMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly TenantResolverOptions _options;
+    private readonly IReadOnlyList<TenantResolutionSource> _resolutionOrder;
     private readonly ILogger<TenantResolverMiddleware> _logger;
-    private readonly ITenantChecker? _tenantChecker;
 
+    /// <remarks>
+    /// ★★ <see cref="ITenantChecker"/> 刻意<b>不</b>在这里注入。约定式中间件由根容器构造、
+    /// 进程内只有一个实例，而 checker 的实现通常是 Scoped（它查租户表，背后是 DbContext）：
+    /// 构造注入在开发环境（ValidateScopes）让管线构建当场抛异常，在生产环境则让一个
+    /// checker 连同它的 DbContext 被根作用域捕获、服务所有并发请求。按请求从
+    /// <see cref="HttpContext.RequestServices"/> 取，见 <see cref="InvokeAsync"/>。
+    /// </remarks>
     public TenantResolverMiddleware(
         RequestDelegate next,
         IOptions<TenantResolverOptions> options,
-        ILogger<TenantResolverMiddleware> logger,
-        ITenantChecker? tenantChecker = null)
+        ILogger<TenantResolverMiddleware> logger)
     {
         _next = Check.NotNull(next);
         _options = Check.NotNull(options).Value;
+        _resolutionOrder = _options.ResolveResolutionOrder();
         _logger = Check.NotNull(logger);
-        _tenantChecker = tenantChecker;
     }
 
     public async Task InvokeAsync(HttpContext httpContext, ICurrentTenant currentTenant)
@@ -87,9 +93,12 @@ public class TenantResolverMiddleware
 
         if (tenantId.HasValue)
         {
-            if (_tenantChecker != null)
+            // ITenantChecker 按请求解析（为什么不构造注入见构造函数的 remarks）。它也不能写成 InvokeAsync 的参数：
+            // 那里的参数按必需解析，而未加载 Identity 时本来就没有实现（此时不做活跃性检查，与之前一致）。
+            var tenantChecker = httpContext.RequestServices?.GetService<ITenantChecker>();
+            if (tenantChecker != null)
             {
-                var isActive = await _tenantChecker.IsActiveAsync(tenantId.Value, httpContext.RequestAborted);
+                var isActive = await tenantChecker.IsActiveAsync(tenantId.Value, httpContext.RequestAborted);
                 if (!isActive)
                 {
                     _logger.LogWarning("Rejected request with invalid or inactive tenant ID: {TenantId}", tenantId.Value);
@@ -129,12 +138,12 @@ public class TenantResolverMiddleware
     /// <remarks>
     /// 存在的唯一理由是「这次请求有没有<b>要求</b>换一个租户」这个问题，
     /// 必须与「最终该用哪个租户」分开问 —— 见 <see cref="InvokeAsync"/> 里的说明。
-    /// 按配置的 <see cref="TenantResolverOptions.ResolutionOrder"/> 顺序尝试，
+    /// 按生效的解析顺序（<see cref="TenantResolverOptions.ResolveResolutionOrder"/>）尝试，
     /// 这样部署方关掉某个来源（把它从列表里删掉）时，这里也不再认它。
     /// </remarks>
     private Guid? ResolveExternalTenantId(HttpContext httpContext)
     {
-        foreach (var source in _options.ResolutionOrder)
+        foreach (var source in _resolutionOrder)
         {
             var tenantId = source switch
             {
@@ -152,7 +161,7 @@ public class TenantResolverMiddleware
 
     private Guid? ResolveTenantId(HttpContext httpContext)
     {
-        foreach (var source in _options.ResolutionOrder)
+        foreach (var source in _resolutionOrder)
         {
             var tenantId = source switch
             {

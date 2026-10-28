@@ -22,3 +22,5 @@ global using Tnzi.Options;
 global using Tnzi.Redis.Locking;
 global using Tnzi.Redis.Options;
 global using Tnzi.Utilities;
+global using Tnzi.Services;
+global using Tnzi.Threading;

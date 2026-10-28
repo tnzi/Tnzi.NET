@@ -5,28 +5,62 @@ public class GroupService : ApplicationService, IGroupService
     private readonly IRepository<Conversation, Guid> _conversationRepository;
     private readonly IRepository<ConversationMember, Guid> _memberRepository;
     private readonly IRepository<ChatMessage, Guid> _messageRepository;
+    private readonly IRepository<User, Guid> _userRepository;
     private readonly IConversationService _conversationService;
     private readonly IOptionsSnapshot<ChatOptions> _options;
     private readonly IFunctionAuthorizationService? _functionAuthorization;
     private readonly IChatAccessService? _chatAccess;
+    private readonly IUserTenantScopeProvider _userScope;
 
     public GroupService(
         IServiceProvider serviceProvider,
         IRepository<Conversation, Guid> conversationRepository,
         IRepository<ConversationMember, Guid> memberRepository,
         IRepository<ChatMessage, Guid> messageRepository,
+        IRepository<User, Guid> userRepository,
         IConversationService conversationService,
         IOptionsSnapshot<ChatOptions> options,
+        IUserTenantScopeProvider userScope,
         IFunctionAuthorizationService? functionAuthorization = null,
         IChatAccessService? chatAccess = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
         _messageRepository = Check.NotNull(messageRepository);
+        _userRepository = Check.NotNull(userRepository);
         _conversationService = Check.NotNull(conversationService);
         _options = Check.NotNull(options);
+        _userScope = Check.NotNull(userScope);
         _functionAuthorization = functionAuthorization;
         _chatAccess = chatAccess;
+    }
+
+    /// <summary>
+    /// Drop ids that are not existing accounts (unknown or soft-deleted). Silent, like the
+    /// rules below. Needed on its own: the tenant scope is unrestricted in a single-tenant
+    /// deployment and the <c>chat.use</c> gate is inactive without Authorization, and both
+    /// then pass any id through, so an unknown id became a member row counted in
+    /// <c>MemberCount</c>.
+    /// </summary>
+    private async Task<List<Guid>> ExcludeNonexistentAsync(List<Guid> ids)
+    {
+        if (ids.Count == 0) return ids;
+        var existing = (await _userRepository.GetListAsync(ids)).Select(u => u.Id).ToHashSet();
+        return existing.Count == ids.Count ? ids : ids.Where(existing.Contains).ToList();
+    }
+
+    /// <summary>
+    /// Drop ids outside the caller's tenant (and ids that don't exist). <c>User</c> is not
+    /// <c>IMultiTenant</c>, so nothing else stops a caller from pulling another tenant's
+    /// account into a group by passing its id. Silent, like the two rules below: refusing
+    /// would confirm that the id exists. No-op when multi-tenancy is off or there is no
+    /// tenant context (<see cref="IUserTenantScopeProvider"/> is then unrestricted).
+    /// </summary>
+    private async Task<List<Guid>> ExcludeOutOfScopeAsync(List<Guid> ids)
+    {
+        if (ids.Count == 0) return ids;
+        var inScope = (await _userScope.FilterAsync(ids)).ToHashSet();
+        return ids.Where(inScope.Contains).ToList();
     }
 
     // Sync - no await in body; using static avoids CS1998 warning.
@@ -61,6 +95,43 @@ public class GroupService : ApplicationService, IGroupService
         return disabled.Count == 0 ? ids : ids.Where(id => !disabled.Contains(id)).ToList();
     }
 
+    /// <summary>
+    /// 在数据库端把一名成员标记为已移出；返回是否真的移出了（并发的另一次移出 / 退群已经做过时为 false）。
+    /// </summary>
+    /// <remarks>
+    /// 条件里重查 <c>RemovedAt == null</c>：踢人与本人退群同时到达时只有一方生效，成员数只减一次。
+    /// 不整行写回读出的快照：那会把这段时间里成员自己改的已读、设置一并撤销。
+    /// </remarks>
+    private async Task<bool> MarkRemovedAsync(Guid memberId, DateTime now, CancellationToken ct)
+    {
+        await _memberRepository.EnsureTransactionStartedAsync(ct);
+        var affected = await _memberRepository.AsQueryable()
+            .Where(m => m.Id == memberId && m.RemovedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.RemovedAt, now), ct);
+        return affected > 0;
+    }
+
+    /// <summary>
+    /// 在数据库端调整成员数并刷新会话的最后一条消息。
+    /// </summary>
+    /// <remarks>
+    /// ★ 成员数是计数器：读出来减一再整行写回，并发的加人 / 踢人 / 退群会互相覆盖（丢一次增减），
+    /// 整行写回还会把并发的改名、解散一并撤销。这里只改这几列，增减在数据库里算。
+    /// </remarks>
+    private async Task TouchConversationAsync(Guid conversationId, int memberDelta, string preview, DateTime now, CancellationToken ct)
+    {
+        await _conversationRepository.EnsureTransactionStartedAsync(ct);
+        var modifierId = CurrentUser?.Id;
+        await _conversationRepository.AsQueryable()
+            .Where(c => c.Id == conversationId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.MemberCount, c => c.MemberCount + memberDelta < 0 ? 0 : c.MemberCount + memberDelta)
+                .SetProperty(c => c.LastMessageAt, now)
+                .SetProperty(c => c.LastMessagePreview, preview)
+                .SetProperty(c => c.LastModificationTime, now)
+                .SetProperty(c => c.LastModifierId, modifierId), ct);
+    }
+
     private async Task SystemMessageAsync(Guid conversationId, string text, DateTime now, CancellationToken ct)
     {
         await _messageRepository.InsertAsync(new ChatMessage
@@ -93,8 +164,10 @@ public class GroupService : ApplicationService, IGroupService
         var me = GetRequiredCurrentUser().Id!.Value;
 
         var memberIds = (input.MemberIds ?? new List<Guid>()).Where(id => id != Guid.Empty && id != me).Distinct().ToList();
-        // Never seed a business group with a super admin, nor with a user who can't
-        // use chat (no `chat.use`) - both are dropped silently even if passed directly.
+        // Never seed a business group with an unknown id, another tenant's account, a super admin,
+        // or a user who can't use chat (no `chat.use`) - all dropped silently even if passed directly.
+        memberIds = await ExcludeNonexistentAsync(memberIds);
+        memberIds = await ExcludeOutOfScopeAsync(memberIds);
         memberIds = await ExcludeSuperAdminsAsync(memberIds);
         memberIds = await ExcludeDisabledAsync(memberIds);
         if (opts.MaxGroupMembers > 0 && memberIds.Count + 1 > opts.MaxGroupMembers)
@@ -156,7 +229,10 @@ public class GroupService : ApplicationService, IGroupService
         if (!IsOwner(conv, me)) return Fail("Only the group owner can add members.", 403);
 
         var toAdd = (userIds ?? Enumerable.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
-        // Same rules as CreateGroup: no super admins, and no users lacking `chat.use`.
+        // Same rules as CreateGroup: existing accounts of the same tenant only, no super admins,
+        // and no users lacking `chat.use`.
+        toAdd = await ExcludeNonexistentAsync(toAdd);
+        toAdd = await ExcludeOutOfScopeAsync(toAdd);
         toAdd = await ExcludeSuperAdminsAsync(toAdd);
         toAdd = await ExcludeDisabledAsync(toAdd);
         if (toAdd.Count == 0) return Fail("No members to add.", 400);
@@ -178,14 +254,17 @@ public class GroupService : ApplicationService, IGroupService
 
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
+            // 裸 SQL（下面的 ExecuteUpdate）默认不进工作单元的事务，先开起来。
+            await _memberRepository.EnsureTransactionStartedAsync(ct);
+
             foreach (var uid in toAdd)
             {
                 if (existingActive.Contains(uid)) continue;
                 var revoked = existing.FirstOrDefault(m => m.UserId == uid && m.RemovedAt != null);
                 if (revoked != null)
                 {
+                    // 跟踪着的实体：只写 RemovedAt 这一列，不把这份快照的其它列整行写回去。
                     revoked.RemovedAt = null;
-                    await _memberRepository.UpdateAsync(revoked, ct);
                 }
                 else
                 {
@@ -195,11 +274,9 @@ public class GroupService : ApplicationService, IGroupService
             }
             if (added.Count > 0)
             {
-                conv.MemberCount += added.Count;
+                await _memberRepository.SaveChangesAsync(ct);
                 await SystemMessageAsync(conversationId, $"{added.Count} member(s) added", now, ct);
-                conv.LastMessageAt = now;
-                conv.LastMessagePreview = "[Member added]";
-                await _conversationRepository.UpdateAsync(conv, ct);
+                await TouchConversationAsync(conversationId, added.Count, "[Member added]", now, ct);
             }
         });
 
@@ -223,13 +300,11 @@ public class GroupService : ApplicationService, IGroupService
         var now = DateTime.UtcNow;
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            member.RemovedAt = now;
-            await _memberRepository.UpdateAsync(member, ct);
-            conv.MemberCount = Math.Max(0, conv.MemberCount - 1);
-            await SystemMessageAsync(conversationId, "A member was removed", now, ct);
-            conv.LastMessageAt = now;
-            conv.LastMessagePreview = "[Member removed]";
-            await _conversationRepository.UpdateAsync(conv, ct);
+            if (await MarkRemovedAsync(member.Id, now, ct))
+            {
+                await SystemMessageAsync(conversationId, "A member was removed", now, ct);
+                await TouchConversationAsync(conversationId, -1, "[Member removed]", now, ct);
+            }
         });
 
         await PublishChangedAsync(conversationId, ConversationChangeType.MemberRemoved, extra: userId);
@@ -249,7 +324,8 @@ public class GroupService : ApplicationService, IGroupService
         if (titleTooLong != null) return Fail(titleTooLong, 400);
 
         conv.Title = trimmedTitle;
-        await _conversationRepository.UpdateAsync(conv);
+        // 跟踪着的实体（FindAsync）：只写 Title，不把读出时的 MemberCount / 解散标记整行写回去。
+        await _conversationRepository.SaveChangesAsync();
         await PublishChangedAsync(conversationId, ConversationChangeType.Renamed);
         return Ok();
     }
@@ -268,7 +344,7 @@ public class GroupService : ApplicationService, IGroupService
         if (noticeTooLong != null) return Fail(noticeTooLong, 400);
 
         conv.Notice = trimmedNotice;
-        await _conversationRepository.UpdateAsync(conv);
+        await _conversationRepository.SaveChangesAsync();
         return Ok();
     }
 
@@ -311,13 +387,11 @@ public class GroupService : ApplicationService, IGroupService
         var now = DateTime.UtcNow;
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            member.RemovedAt = now;
-            await _memberRepository.UpdateAsync(member, ct);
-            conv.MemberCount = Math.Max(0, conv.MemberCount - 1);
-            await SystemMessageAsync(conversationId, "A member left", now, ct);
-            conv.LastMessageAt = now;
-            conv.LastMessagePreview = "[Member left]";
-            await _conversationRepository.UpdateAsync(conv, ct);
+            if (await MarkRemovedAsync(member.Id, now, ct))
+            {
+                await SystemMessageAsync(conversationId, "A member left", now, ct);
+                await TouchConversationAsync(conversationId, -1, "[Member left]", now, ct);
+            }
         });
 
         await PublishChangedAsync(conversationId, ConversationChangeType.Left, extra: me);

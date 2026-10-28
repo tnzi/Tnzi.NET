@@ -56,15 +56,23 @@ public partial class MemoryTools : IAIToolProvider
         if (category != null && CurrentMemoryOptions.ValidCategories.Count > 0 && !CurrentMemoryOptions.ValidCategories.Contains(category))
             return new { status = "error", message = $"Invalid category '{category}'. Valid categories: {string.Join(", ", CurrentMemoryOptions.ValidCategories)}" };
 
+        if (!TryBuildScope(out var scope))
+            return OwnerUnavailable();
+
         try
         {
-            var scope = BuildScope();
             importance = Math.Clamp(importance, 0, 1);
 
             await _memoryStore.AppendAsync(scope, content, importance, category, ct);
 
+            // 告诉轮后的自动沉淀：这一轮模型已经亲手存过记忆了（见 MemoryContextProvider 的互斥）
+            if (_executionContextAccessor != null)
+            {
+                _executionContextAccessor.Properties[ContextPropertyKeys.MemorySavedThisRun] = true;
+            }
+
             _logger.LogDebug("Memory saved via tool: {Content} (category={Category}, importance={Importance})",
-                content[..Math.Min(50, content.Length)], category, importance);
+                content.FitToLength(50), category, importance);
 
             return new { status = "saved", scope = scope.Name, importance = Math.Round(importance, 1), category = category ?? "none" };
         }
@@ -81,7 +89,8 @@ public partial class MemoryTools : IAIToolProvider
         Use this to recall information from previous conversations. Check memory BEFORE asking the user about known facts.
         Optional: filter by category for more precise retrieval.
         """,
-        IsReadOnly = true, IsConcurrencySafe = true, SearchHint = "recall find remember search memory")]
+        // 不标 IsConcurrencySafe：检索走请求作用域的 DbContext，同一批的两个调用并行会撞上 EF 的并发检测
+        IsReadOnly = true, SearchHint = "recall find remember search memory")]
     public async Task<object> SearchMemoryAsync(
         [AIParameter("query", "Search query (keyword or natural language)", true)]
         string query,
@@ -94,9 +103,11 @@ public partial class MemoryTools : IAIToolProvider
         if (string.IsNullOrWhiteSpace(query))
             return new { results = Array.Empty<object>(), message = "Empty query" };
 
+        if (!TryBuildScope(out var scope))
+            return new { results = Array.Empty<object>(), count = 0, message = OwnerUnavailableMessage };
+
         try
         {
-            var scope = BuildScope();
             maxResults = Math.Clamp(maxResults, 1, 20);
 
             // Search local, project snapshot, and shared memories.
@@ -204,13 +215,19 @@ public partial class MemoryTools : IAIToolProvider
         if (CurrentMemoryOptions.EnablePiiProtection && ContainsPiiPattern(newContent))
             return new { status = "rejected", message = "Cannot save content that appears to contain personal information" };
 
+        if (!TryBuildScope(out var scope))
+            return OwnerUnavailable();
+
         try
         {
-            var scope = BuildScope();
             await _memoryStore.UpdateEntryAsync(scope.ToScopeKey(), id, newContent, ct);
 
             _logger.LogDebug("Memory updated via tool: {EntryId}", id);
             return new { status = "updated", entry_id = id.ToString("N") };
+        }
+        catch (ResourceNotFoundException)
+        {
+            return EntryNotInWritableScope(id);
         }
         catch (Exception ex)
         {
@@ -229,13 +246,19 @@ public partial class MemoryTools : IAIToolProvider
         if (!Guid.TryParse(entryId, out var id))
             return new { status = "error", message = "Invalid entry ID format. Expected a GUID from search_memory results." };
 
+        if (!TryBuildScope(out var scope))
+            return OwnerUnavailable();
+
         try
         {
-            var scope = BuildScope();
             await _memoryStore.DeleteEntryAsync(scope.ToScopeKey(), id, ct);
 
             _logger.LogDebug("Memory deleted via tool: {EntryId}", id);
             return new { status = "deleted", entry_id = id.ToString("N") };
+        }
+        catch (ResourceNotFoundException)
+        {
+            return EntryNotInWritableScope(id);
         }
         catch (Exception ex)
         {
@@ -244,14 +267,48 @@ public partial class MemoryTools : IAIToolProvider
         }
     }
 
-    private MemoryScope BuildScope()
+    /// <summary>
+    /// 条目不存在，或来自本工具改不了的 scope：search_memory 也返回共享 scope 与项目快照 scope 的条目，而更新 / 删除只作用于本地 scope。
+    /// </summary>
+    private static object EntryNotInWritableScope(Guid id) => new
     {
-        return MemoryScopeResolver.BuildLocalScope(
-            CurrentMemoryOptions.DefaultScope,
-            CurrentMemoryOptions.EnableUserIsolation,
-            CurrentMemoryOptions.EnableAgentIsolation,
-            _currentUser?.Id,
+        status = "not_found",
+        entry_id = id.ToString("N"),
+        message = "No memory entry with this ID exists in the memory scope this tool can change. Shared and project memories returned by search_memory cannot be updated or deleted here.",
+    };
+
+    private const string OwnerUnavailableMessage = "Memory is not available because this conversation has no user identity.";
+
+    private static object OwnerUnavailable() => new { status = "error", message = OwnerUnavailableMessage };
+
+    /// <summary>
+    /// 本次运行的本地记忆范围；开启用户隔离却解析不到用户时返回 false（调用方拒绝读写）。
+    /// </summary>
+    /// <remarks>
+    /// 归属人取<b>运行发起人</b>（请求的 UserId），只在没有运行上下文时回退到登录用户：管理员续跑用户 X 的运行时，
+    /// 作用域里的登录用户是管理员，按它取会把 X 的记忆写进管理员名下、把管理员的记忆读给 X。
+    /// 开启隔离而谁都解析不出来时（如外部渠道的匿名会话），旧行为是落进所有无用户运行共用的 default 范围，
+    /// 一个人说的「记住我的地址」会被另一个人检索到；隔离开着就不该有这个共享范围，所以拒绝。
+    /// </remarks>
+    private bool TryBuildScope(out MemoryScope scope)
+    {
+        var options = CurrentMemoryOptions;
+        var userId = _executionContextAccessor?.CurrentRequest?.UserId ?? _currentUser?.Id;
+
+        scope = MemoryScopeResolver.BuildLocalScope(
+            options.DefaultScope,
+            options.EnableUserIsolation,
+            options.EnableAgentIsolation,
+            userId,
             _executionContextAccessor?.CurrentRequest?.AgentId);
+
+        if (options.EnableUserIsolation && userId == null)
+        {
+            _logger.LogWarning("Memory tool call refused: user isolation is enabled but the run has no user identity");
+            return false;
+        }
+
+        return true;
     }
 
     private static string GetDeduplicationKey(MemorySearchResult result)

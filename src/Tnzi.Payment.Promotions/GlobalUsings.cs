@@ -3,6 +3,7 @@ global using System;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations;
 global using System.Linq;
+global using System.Linq.Expressions;
 global using System.Security.Cryptography;
 global using System.Text.Json;
 global using System.Threading;
@@ -41,13 +42,15 @@ global using Tnzi.Utilities;
 // 错误码与常量、币种精度工具。方向恒为「本模块 → 父模块」，反过来一条都没有。
 global using Tnzi.Payment.Dtos;
 global using Tnzi.Payment.Metadata;
+global using Tnzi.Payment.Options;
 global using Tnzi.Payment.Providers;
 global using Tnzi.Payment.Services;
 
 // 注意：`Payment` 这个标识符在本程序集的命名空间里会先解析到 `Tnzi.Payment` 这个**命名空间**
-// （类型查找从内层命名空间逐级向外，命名空间成员先于 using 命中）。本模块不直接用支付实体
-// —— 与支付的关联走 CouponUsage.PaymentId 这个无约束标量。真要用时请像 Tnzi.Payment.Billing
-// 那样起一个 `PaymentEntity` 别名，不要写裸的 `Payment`。
+// （类型查找从内层命名空间逐级向外，命名空间成员先于 using 命中），所以支付实体一律经下面的别名引用。
+// 与支付的关联仍走 CouponUsage.PaymentId 这个无约束标量；唯一读支付表的地方是归还核销记录前
+// 确认同一张业务单上没有别的支付还在用这次折扣（CouponService.ReleaseUsageAsync）。方向是子 → 父，合法。
+global using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
 // 本模块
 global using Tnzi.Payment.Promotions.Dtos;

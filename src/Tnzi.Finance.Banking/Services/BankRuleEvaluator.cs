@@ -80,6 +80,12 @@ public class BankRuleEvaluator : IBankRuleEvaluator
         {
             if (!DirectionMatches(rule.Direction, txn.Amount))
                 continue;
+            // ★ 费用规则只认出账：「摘要含 AMAZON → 费用」按默认方向 Any 保存后，同一商户的
+            // 退款进账也会命中它，而费用单只能记钱出去（建单端对进账一律拒绝）。在这里跳过，
+            // 退款就落到下一条规则（例如一条 MoneyIn 的收款规则）而不是一个注定失败的建议；
+            // AutoApply 时更不会在无人值守下撞上那次拒绝。
+            if (rule.DocType == BankFeedDocType.Expense && txn.Amount > 0)
+                continue;
             if (!ConditionsMatch(rule, txn))
                 continue;
 

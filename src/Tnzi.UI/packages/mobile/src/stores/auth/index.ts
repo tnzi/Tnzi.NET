@@ -9,7 +9,7 @@
 
 import { computed } from 'vue';
 import { defineStore } from 'pinia';
-import { AuthStateManager } from '@tnzi/core/state';
+import { AuthStateManager, authStateOf } from '@tnzi/core/state';
 import type { StateDeps } from '@tnzi/core/state';
 import { createLocalStorageAdapter } from '@tnzi/core/adapters/storage';
 import type { LoginDto, LoginResultDto, UserProfile, UpdateProfileDto } from '@tnzi/core/services/identity';
@@ -21,13 +21,25 @@ import { getStoreHttpClient, getStoreStorage } from '../factory';
 
 let _manager: AuthStateManager | null = null;
 
+/**
+ * The auth state behind this store.
+ *
+ * ★ When the runtime's HttpClient came from `createTnziClient()`, that client's
+ * own manager IS the store's: the client refreshes expired tokens and clears
+ * a rejected session through it. A second manager over the same HttpClient
+ * held a session the refresh chain could not see, so the first expired token
+ * ended in a failed refresh while the store still reported the user signed in.
+ * Any other HttpClient gets a manager of its own, as before (and has no
+ * automatic refresh unless the app wires one).
+ */
 function getManager(): AuthStateManager {
   if (!_manager) {
+    const httpClient = getStoreHttpClient();
     const deps: StateDeps = {
-      httpClient: getStoreHttpClient(),
+      httpClient,
       storage: getStoreStorage() ?? createLocalStorageAdapter(),
     };
-    _manager = new AuthStateManager(deps);
+    _manager = authStateOf(httpClient) ?? new AuthStateManager(deps);
   }
   return _manager;
 }

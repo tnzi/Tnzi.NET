@@ -122,6 +122,16 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
   // can itself be answered with a two-factor challenge, and that challenge needs
   // the account name the shell shows; the completion payloads only carry tokens.
   let pendingActionAccount = ''
+  // Quick registrations whose account exists but whose password step has not
+  // succeeded yet, keyed by channel + address. `quickRegister` spends the code
+  // and creates the account; the set-password token it returns stays valid
+  // after a refused password (the backend consumes it only once a password is
+  // set). Dropping it left a passwordless account behind, and every retry
+  // re-ran `quickRegister`: a spent code, an address that is now taken.
+  // The code that created the account is kept with it: these callbacks live as
+  // long as the app, so a later visitor to the same login page must not be
+  // able to finish someone else's fresh account by typing its address.
+  const pendingPasswordSetups = new Map<string, { code: string; userId: string; token: string }>()
 
   async function establishSession(data: {
     accessToken?: string | null
@@ -380,18 +390,27 @@ export function buildDefaultLoginCallbacks(runtime: AdminAuthRuntime): LoginCall
     // Quick register: account + code → passwordless account → set the chosen
     // password. Requires the backend's quick-register flow to be enabled (the
     // register entry only shows when `GET /auth/config` reports it on).
+    //
+    // ★ The two calls are not atomic. When the password is refused (the
+    // backend's policy is a runtime setting the form rules cannot mirror) or
+    // the second call never lands, the account already exists: the next submit
+    // for the same address and code finishes ITS password step instead of
+    // registering again.
     register: async ({ account, code, password, type }) => {
       const f = codeChannelFields(account, type)
-      const qr = await authApi.quickRegister({ email: f.email, phoneNumber: f.phoneNumber, code })
-      if (!qr.succeeded || !qr.data) throw new Error(qr.message ?? 'Registration failed')
-      if (qr.data.requirePasswordSetup && qr.data.setPasswordToken) {
-        const sp = await authApi.setPassword({
-          userId: qr.data.userId,
-          token: qr.data.setPasswordToken,
-          password,
-        })
-        if (!sp.succeeded) throw new Error(sp.message ?? 'Failed to set the password')
+      const key = `${f.type}:${account.trim().toLowerCase()}`
+      const submittedCode = code.trim()
+      let pending = pendingPasswordSetups.get(key)
+      if (!pending || pending.code !== submittedCode) {
+        const qr = await authApi.quickRegister({ email: f.email, phoneNumber: f.phoneNumber, code })
+        if (!qr.succeeded || !qr.data) throw new Error(qr.message ?? 'Registration failed')
+        if (!qr.data.requirePasswordSetup || !qr.data.setPasswordToken) return
+        pending = { code: submittedCode, userId: qr.data.userId, token: qr.data.setPasswordToken }
+        pendingPasswordSetups.set(key, pending)
       }
+      const sp = await authApi.setPassword({ userId: pending.userId, token: pending.token, password })
+      if (!sp.succeeded) throw new Error(sp.message ?? 'Failed to set the password')
+      pendingPasswordSetups.delete(key)
       // The login shell returns to pwd-login on success.
     },
     // Submit the 2FA code from the challenge → verify-2fa → establish the

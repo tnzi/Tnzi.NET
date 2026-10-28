@@ -10,11 +10,13 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
     private readonly IReadOnlyRepository<Envelope, Guid> _requests;
     private readonly IFileReadAccessProbe _fileAccess;
     private readonly IFileStorageService _files;
+    private readonly SigningSealer _sealer;
 
     /// <remarks>
     /// <c>fileAccess</c> 是写入侧的归属探针（<see cref="IFileReadAccessProbe"/>）。本模块 <c>[DependsOn(StorageModule)]</c>，
     /// 实现随它注册，故这里是必需依赖而不是可空的 —— 少了 Storage 的应用在解析本服务时就崩在容器里，
-    /// 不会静默跳过校验。<c>files</c> 只用来读渲染稿的记录（看它是不是 PDF）。
+    /// 不会静默跳过校验。<c>files</c> 只用来读渲染稿的记录（看它是不是 PDF）。<c>sealer</c> 用密封时的同一个盖章器与
+    /// 同一套锚匹配预检上传型模板的渲染稿（见 <see cref="SigningSealer.InspectForSealing"/>）。
     /// </remarks>
     public EnvelopeTemplateService(
         IServiceProvider serviceProvider,
@@ -22,7 +24,8 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         IRepository<Field, Guid> fields,
         IReadOnlyRepository<Envelope, Guid> requests,
         IFileReadAccessProbe fileAccess,
-        IFileStorageService files)
+        IFileStorageService files,
+        SigningSealer sealer)
         : base(serviceProvider)
     {
         _templates = Check.NotNull(templates);
@@ -30,6 +33,7 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         _requests = Check.NotNull(requests);
         _fileAccess = Check.NotNull(fileAccess);
         _files = Check.NotNull(files);
+        _sealer = Check.NotNull(sealer);
     }
 
     /// <inheritdoc />
@@ -54,9 +58,8 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         if (!string.IsNullOrWhiteSpace(query.HostEntityType))
         {
             // 不限（空）的模板对每种宿主都可用，所以它们必须留在结果里 —— 否则按宿主
-            // 筛选会把通用模板筛没，而那些恰恰是最常用的。
-            var host = query.HostEntityType.Trim();
-            q = q.Where(t => string.IsNullOrEmpty(t.HostEntityTypes) || t.HostEntityTypes!.Contains(host));
+            // 筛选会把通用模板筛没，而那些恰恰是最常用的。清单按整项比较（见 HostEntityTypeList）。
+            q = q.Where(HostEntityTypeList.MatchesExpression(query.HostEntityType.Trim()));
         }
 
         var paged = await q
@@ -108,8 +111,12 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         if (denial != null)
             return denial;
 
+        var pageCount = await ResolvePageCountAsync(input, cancellationToken);
+        if (!pageCount.Succeeded)
+            return Fail<EnvelopeTemplateDto>(pageCount.Message ?? "The document cannot be used by this template.", pageCount.Code ?? 400);
+
         var template = new EnvelopeTemplate();
-        Apply(template, input);
+        Apply(template, input, pageCount.Data);
         template.Version = 1;
         AppendFields(template, input.Fields);
 
@@ -143,6 +150,10 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         if (denial != null)
             return denial;
 
+        var pageCount = await ResolvePageCountAsync(input, cancellationToken);
+        if (!pageCount.Succeeded)
+            return Fail<EnvelopeTemplateDto>(pageCount.Message ?? "The document cannot be used by this template.", pageCount.Code ?? 400);
+
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
             // 字段整体重建（硬删 + 重挂）：字段集是一个整体，逐字段 diff 会让结果
@@ -151,7 +162,7 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
                 await _fields.DeleteManyAsync(template.Fields.ToList(), ct);
             template.Fields.Clear();
 
-            Apply(template, input);
+            Apply(template, input, pageCount.Data);
             template.Version += 1;
             AppendFields(template, input.Fields);
 
@@ -239,6 +250,60 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         return null;
     }
 
+    /// <summary>
+    /// 模板的页数。上传型模板取自渲染稿本身，并在这里用密封时的同一套东西把它试一遍；拼装型模板沿用请求体里的数。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 上传型模板的页数曾经由操作员手填、从不与文档核对，渲染稿也从不被打开：手填多了一页、把签名框放在那一页上，
+    /// 或者渲染稿是一份禁止编辑的表格，模板都能存下、请求都能发出、每个人都能签完，直到密封时盖章器抛异常，
+    /// 请求退回 InProgress，而重新密封是同一份文档同一套落点，失败得一模一样，唯一的出路是作废、让每个人重签。
+    /// 找不到的锚则连异常都没有：那个字段在密封时被静默跳过。
+    /// </para>
+    /// <para>
+    /// 所以这里读渲染稿：页数用真实的（请求体里的数被忽略），绝对定位的页码对照真实页数，
+    /// 盖章器以修改模式打开一次（什么都不画），每个锚文本按密封时的匹配找一遍。任何一条不成立都在保存这一步 400。
+    /// 读不到渲染稿也是 400（归属与类型在 <see cref="RejectUnusableFilesAsync"/> 已经问过）。
+    /// </para>
+    /// </remarks>
+    private async Task<Result<int>> ResolvePageCountAsync(CreateEnvelopeTemplateDto input, CancellationToken cancellationToken)
+    {
+        if (input.Source != TemplateSource.Uploaded || input.RenderedPdfFileId is not { } renderedId)
+            return Result<int>.Success(input.PageCount);
+
+        var bytes = await _sealer.ReadDocumentAsync(renderedId, cancellationToken);
+        if (bytes is null)
+            return Result<int>.Failure("The rendered document could not be read.", 400);
+
+        var fields = input.Fields ?? [];
+        var anchors = fields
+            .Where(f => f.PlacementMode == FieldPlacementMode.Anchor)
+            .Select(f => (Key: f.Key.Trim(), AnchorText: f.AnchorText?.Trim() ?? string.Empty))
+            .ToList();
+
+        var inspected = _sealer.InspectForSealing(bytes, anchors);
+        if (!inspected.Succeeded || inspected.Data is null)
+            return Result<int>.Failure(inspected.Message ?? "The rendered document cannot be used for signing.", inspected.Code ?? 400);
+
+        var pageCount = inspected.Data.PageCount;
+        var beyond = fields.FirstOrDefault(f => f.PlacementMode == FieldPlacementMode.Absolute && f.Page > pageCount);
+        if (beyond != null)
+        {
+            return Result<int>.Failure(
+                $"Field '{beyond.Key.Trim()}': page {beyond.Page} is beyond the document's {pageCount} page(s).", 400);
+        }
+
+        if (inspected.Data.UnfoundAnchorKeys.Count > 0)
+        {
+            var anchorOf = anchors.ToDictionary(a => a.Key, a => a.AnchorText, StringComparer.OrdinalIgnoreCase);
+            var named = inspected.Data.UnfoundAnchorKeys.Select(k => $"'{k}' (anchor '{anchorOf.GetValueOrDefault(k)}')");
+            return Result<int>.Failure(
+                $"The anchor text of these fields was not found in the document: {string.Join(", ", named)}.", 400);
+        }
+
+        return Result<int>.Success(pageCount);
+    }
+
     private static Result Validate(CreateEnvelopeTemplateDto input)
     {
         if (string.IsNullOrWhiteSpace(input.Name))
@@ -268,7 +333,8 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
             }
         }
 
-        if (input.PageCount < 1)
+        // 上传型模板的页数取自渲染稿本身（ResolvePageCountAsync），请求体里的数不参与；拼装型模板没有现成的文档可读。
+        if (input.Source == TemplateSource.Composed && input.PageCount < 1)
             return Result.Failure("PageCount must be at least 1.", 400);
 
         var fields = input.Fields ?? [];
@@ -312,7 +378,8 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
             {
                 if (field.Page < 1)
                     return Result.Failure($"Field '{field.Key}': page must be 1 or greater.", 400);
-                if (field.Page > input.PageCount)
+                // 上传型模板对照文档的真实页数（ResolvePageCountAsync），不对照请求体里填的那个数。
+                if (input.Source == TemplateSource.Composed && field.Page > input.PageCount)
                     return Result.Failure($"Field '{field.Key}': page {field.Page} is beyond the template's {input.PageCount} page(s).", 400);
             }
 
@@ -332,17 +399,17 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
         return Result.Success();
     }
 
-    private static void Apply(EnvelopeTemplate template, CreateEnvelopeTemplateDto input)
+    private static void Apply(EnvelopeTemplate template, CreateEnvelopeTemplateDto input, int pageCount)
     {
         template.Name = input.Name.Trim();
         template.Category = input.Category?.Trim() ?? string.Empty;
         template.Source = input.Source;
-        template.HostEntityTypes = string.IsNullOrWhiteSpace(input.HostEntityTypes) ? null : input.HostEntityTypes.Trim();
+        template.HostEntityTypes = HostEntityTypeList.Normalize(input.HostEntityTypes);
         template.BodyTemplate = input.BodyTemplate?.Trim() ?? string.Empty;
         template.SourceFileId = input.SourceFileId;
         template.SourceFileName = input.SourceFileName;
         template.RenderedPdfFileId = input.RenderedPdfFileId;
-        template.PageCount = input.PageCount;
+        template.PageCount = pageCount;
         template.RequiresWetSignature = input.RequiresWetSignature;
         template.IsActive = input.IsActive;
     }
@@ -361,7 +428,8 @@ public class EnvelopeTemplateService : ApplicationService, IEnvelopeTemplateServ
                 Binding = string.IsNullOrWhiteSpace(input.Binding) ? null : input.Binding.Trim(),
                 Required = input.Required,
                 PlacementMode = input.PlacementMode,
-                AnchorText = string.IsNullOrWhiteSpace(input.AnchorText) ? null : input.AnchorText,
+                // 首尾空白不是锚的一部分：编辑器里多敲的一个空格不该让密封时找不到它。
+                AnchorText = string.IsNullOrWhiteSpace(input.AnchorText) ? null : input.AnchorText.Trim(),
                 Page = input.Page < 1 ? 1 : input.Page,
                 X = input.X,
                 Y = input.Y,

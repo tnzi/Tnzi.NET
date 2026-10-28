@@ -15,6 +15,7 @@ global using System.Text;
 global using System.Text.Json;
 global using System.Text.Json.Serialization;
 global using System.Text.RegularExpressions;
+global using System.Threading.Channels;
 global using Tnzi.AI.Metadata;
 // 别名：消歧 Tnzi.AI.Metadata.ErrorCodes 与 Tnzi.Exceptions.ErrorCodes
 global using ErrorCodes = Tnzi.AI.Metadata.ErrorCodes;
@@ -36,6 +37,7 @@ global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
+global using Tnzi.AspNetCore.Mvc.Filters;
 global using Tnzi.Data;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;

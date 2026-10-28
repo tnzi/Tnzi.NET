@@ -35,7 +35,27 @@ public interface ICliProtocolAdapter
 
     /// <summary>会话结束后取终态。</summary>
     CliAgentResult GetResult(CliSessionOutcome outcome);
+
+    /// <summary>
+    /// 把使用方对一个权限请求的回答写给 CLI（<see cref="CliAgentLaunchContext.AsksForApproval"/> 时，适配器产出的
+    /// <see cref="CliAgentEventType.PermissionRequest"/> 事件带的 <see cref="CliAgentPermission.ProtocolKey"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>可以在 <see cref="RunAsync"/> 迭代期间从别的线程调用。写入在返回之前已经交给 transport（重放时按调用次序计 stdin 行）。</para>
+    /// <para>默认实现返回 false：不转发权限请求的适配器从不产出 <c>PermissionRequest</c> 事件。</para>
+    /// </remarks>
+    /// <returns>认得这个键、写出了应答为 true；键不认识或已经应答过为 false。</returns>
+    Task<bool> AnswerPermissionAsync(string protocolKey, CliPermissionDecision decision, CancellationToken cancellationToken)
+        => Task.FromResult(false);
 }
+
+/// <summary>
+/// 交给 CLI 的一个权限回答。
+/// </summary>
+/// <param name="Allow">允许还是拒绝。</param>
+/// <param name="OptionId">选中的选项 id（请求给出的那些之一）；超时、随运行结束时为 null，适配器自己挑一个单次拒绝。</param>
+/// <param name="Message">拒绝时交给 agent 的说明。</param>
+public sealed record CliPermissionDecision(bool Allow, string? OptionId, string? Message);
 
 /// <summary>
 /// 按协议族解析适配器实例。

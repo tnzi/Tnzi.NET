@@ -20,7 +20,9 @@
       :row-actions="rowActions"
       :translate="t"
     />
-    <p v-if="!loading && accounts.length === 0" class="fin-remit__empty">{{ t('remitTo.empty') }}</p>
+    <!-- A failed read is not "no accounts on file": say why there is no list. -->
+    <p v-if="!loading && loadError" class="fin-remit__empty fin-remit__error" role="alert">{{ loadError }}</p>
+    <p v-else-if="!loading && accounts.length === 0" class="fin-remit__empty">{{ t('remitTo.empty') }}</p>
 
     <TModalShell v-model:show="formShow" :title="t(editingId ? 'remitTo.edit' : 'remitTo.add')" :width="480">
       <TFormSchemaRenderer :schema="formSchema" :model="form" :translate="t" />
@@ -69,6 +71,8 @@ const message = useSafeMessage()
 
 const accounts = ref<PartyBankAccountDto[]>([])
 const loading = ref(false)
+/** Why the accounts could not be read (null = they were read). */
+const loadError = ref<string | null>(null)
 const formShow = ref(false)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
@@ -77,10 +81,13 @@ const form = ref<Record<string, unknown>>({})
 async function load() {
   if (!props.partyId) return
   loading.value = true
+  loadError.value = null
   try {
     accounts.value = await props.bridge.partyBankAccounts.byParty(props.partyType, props.partyId)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
+    accounts.value = []
+    loadError.value = error instanceof Error ? error.message : String(error)
+    message.error(loadError.value)
   } finally {
     loading.value = false
   }
@@ -292,5 +299,8 @@ async function remove(row: PartyBankAccountDto) {
   font-size: 13px;
   color: var(--tnzi-base-text-muted);
   text-align: center;
+}
+.fin-remit__error {
+  color: var(--tnzi-error, #d03050);
 }
 </style>

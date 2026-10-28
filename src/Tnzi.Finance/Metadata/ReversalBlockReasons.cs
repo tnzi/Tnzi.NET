@@ -12,7 +12,14 @@ namespace Tnzi.Finance.Metadata;
 /// <para>
 /// 判定这些代码的唯一实现是 <see cref="Services.ILedgerPostingService.GetReversibilityAsync"/>，
 /// 它与冲销漏斗 <c>LedgerPostingEngine.BuildReversalAsync</c> 共用同一段守卫
-/// （<c>ReversalGuard</c>），因此"查询说能冲、真冲吃 409"不会发生。
+/// （<c>ReversalGuard</c>），因此<b>这里列出的原因</b>不会出现"查询说能冲、真冲吃 409"。
+/// </para>
+/// <para>
+/// 这份清单只覆盖每条冲销路径都要过的<b>账本侧</b>原因。两类拒绝不在其中、查询答 <c>CanReverse = true</c>
+/// 时动作仍可能 409：一是走错了门（单据投影的凭证从总账冲销会被拒，要经单据自己的作废），
+/// 二是 <see cref="Services.IFinancePostingGuard"/> 钩子（随动作带着单据执行，无法只读预判；
+/// 内置的「收款已被存活存款单收走」与银行域的「付款仍在未作废 EFT 批次里」都属此类）。
+/// 见 <see cref="Services.ILedgerPostingService.GetReversibilityAsync"/> 的说明。
 /// </para>
 /// </remarks>
 public static class ReversalBlockReasons

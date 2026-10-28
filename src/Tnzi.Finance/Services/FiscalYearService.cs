@@ -64,6 +64,7 @@ public class FiscalYearService : ApplicationService, IFiscalYearService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _fiscalYearRepository.Discard(fiscalYear); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<FiscalYearDto>($"Fiscal year '{name}' already exists.", 409);
         }
 

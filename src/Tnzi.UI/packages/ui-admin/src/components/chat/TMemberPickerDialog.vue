@@ -62,9 +62,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onUnmounted } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { NScrollbar, NCheckbox, NButton } from 'naive-ui'
 import { Icon } from '@iconify/vue'
+import { useSafeMessage } from '@tnzi/ui'
+import { useDebounced } from '@tnzi/core/headless'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../i18n/translate'
@@ -91,6 +93,7 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+const message = useSafeMessage()
 // Phone (<md) flexes the fixed list height so it never exceeds the viewport.
 const { isSm } = useBreakpoint()
 
@@ -112,14 +115,21 @@ function reset() {
   selected.clear()
 }
 
+// Only the latest search fills the list: an earlier keyword answering last
+// would show candidates that do not match what is typed.
+let loadSeq = 0
 async function load(kw: string) {
+  const seq = ++loadSeq
   searching.value = true
   try {
     const results = await store.searchContacts(kw.trim())
+    if (seq !== loadSeq) return
     const exclude = new Set(props.excludeIds)
     candidates.value = results.filter((c) => !exclude.has(c.userId))
+  } catch (e) {
+    if (seq === loadSeq) message.error(e instanceof Error ? e.message : String(e))
   } finally {
-    searching.value = false
+    if (seq === loadSeq) searching.value = false
   }
 }
 
@@ -128,11 +138,7 @@ watch(() => props.show, (open) => {
   if (open) { reset(); void load('') }
 })
 
-let timer: ReturnType<typeof setTimeout> | null = null
-function onSearch() {
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(() => void load(keyword.value), 300)
-}
+const onSearch = useDebounced(() => void load(keyword.value))
 
 function clearKeyword() {
   keyword.value = ''
@@ -150,8 +156,6 @@ function onConfirm() {
 }
 
 function close() { emit('update:show', false) }
-
-onUnmounted(() => { if (timer) clearTimeout(timer) })
 
 defineExpose({ reset, load, candidates, selected, toggle, onConfirm, keyword })
 </script>

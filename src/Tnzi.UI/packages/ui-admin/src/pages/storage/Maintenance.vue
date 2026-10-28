@@ -15,7 +15,7 @@
     <template #actions>
       <div class="flex items-center gap-6px">
         <span class="text-12px text-muted">{{ t('olderThan') }}</span>
-        <NInputNumber v-model:value="olderThanHours" size="small" :min="0" :max="8760" :step="1" class="w-110px" />
+        <NInputNumber v-model:value="olderThanHours" size="small" :min="1" :max="8760" :step="1" class="w-110px" />
         <span class="text-12px text-muted">{{ t('hours') }}</span>
       </div>
       <NButton size="small" :loading="loading" @click="loadTemporary">

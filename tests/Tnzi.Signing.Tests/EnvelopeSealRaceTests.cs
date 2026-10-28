@@ -125,6 +125,18 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
             => [.. pdf, .. BitConverter.GetBytes(Interlocked.Increment(ref _stamps))];
 
         public byte[] Create(PdfStampRequest request) => [0x25, 0x50, 0x44, 0x46];
+
+        public double MeasureTextWidth(string text, double fontSize, bool bold = false, bool italic = false)
+            => TestTextMetrics.Width(text, fontSize, bold);
+    }
+
+    /// <summary>放行每一条记录的 provider：这一组测的是密封并发，不是绑定授权。</summary>
+    private sealed class AllowAllSource : IMergeSourceProvider
+    {
+        public string EntityType => HostType;
+
+        public Task<IReadOnlyDictionary<string, object?>> ResolveAsync(Guid entityId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
     }
 
     /// <summary>记下宿主模块收到几次归档。</summary>
@@ -163,6 +175,12 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
         /// <summary>什么样的读要被拦下。按结果的语义判定，不按第几次调用。</summary>
         public Func<List<Signer>, bool>? GateWhen { get; set; }
 
+        /// <summary>
+        /// 放行后是否重读。<see langword="true"/>（默认）= 这次读发生在放行那一刻；
+        /// <see langword="false"/> = 读早已发生、只是之后的动作被拖到放行之后（交回拦下时的旧结果）。
+        /// </summary>
+        public bool RereadAfterRelease { get; set; } = true;
+
         public TaskCompletionSource Reached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public void Release() => _release.TrySetResult();
@@ -179,7 +197,7 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
             Reached.TrySetResult();
             await _release.Task;
             // 放行后重读：这一刻另一方已经提交，于是这次读到的是"全签完"。
-            return await base.ToListAsync(predicate, cancellationToken);
+            return RereadAfterRelease ? await base.ToListAsync(predicate, cancellationToken) : list;
         }
     }
 
@@ -205,7 +223,8 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
             new EFCoreRepository<SigningRaceDbContext, FieldValue, Guid>(db, null, scoped),
             new EFCoreRepository<SigningRaceDbContext, EnvelopeTemplate, Guid>(db, null, scoped),
             new EFCoreRepository<SigningRaceDbContext, Field, Guid>(db, null, scoped),
-            new MergeSourceRegistry([], [_sink]),
+            // sink 与 provider 成对注册（provider 是绑定的授权点，缺了它创建请求失败关闭）。
+            new MergeSourceRegistry([new AllowAllSource()], [_sink]),
             new SigningSealer(_stamper, inspector, files, NullLogger<SigningSealer>.Instance),
             new SigningCertificateBuilder(_stamper, files, NullLogger<SigningCertificateBuilder>.Instance),
             new ComposedDocumentRenderer(_stamper),
@@ -334,5 +353,91 @@ public class EnvelopeSealRaceTests : IntegratedTestBase<SigningRaceDbContext>
         signers.Count.ShouldBe(2);
         signers.ShouldAllBe(s => s.Status == SigningRecipientStatus.Signed);
         signers.ShouldAllBe(s => s.SignedAt != null);
+    }
+    /// <summary>
+    /// ★ 另一种交错：B 先读到信封（并发戳 s0），A 随后签完、读到「B 还没签」、把信封从 Sent 推进到 InProgress（戳变成 s1），
+    /// 然后 B 签完、读到「全签完」去抢占。B 手上是旧戳 s0，抢占撞上的并发冲突来自 A 那次与密封无关的推进，
+    /// 不是另一个密封者。此前这一下被当成「已经有人在密封」吞掉：全员 Signed、没有人密封，信封停在 InProgress。
+    /// </summary>
+    [Fact]
+    public async Task ParallelSigning_AnEarlierSignersAdvanceBumpingTheStamp_DoesNotCostTheLastSignerTheSeal()
+    {
+        var (requestId, hostId, tokenA, tokenB) = await ArrangeSentEnvelopeAsync();
+
+        using var scopeA = ServiceProvider.CreateScope();
+        using var scopeB = ServiceProvider.CreateScope();
+
+        // 拦住 B 在「自己还没签、谁都还没签」时的那次读：那时 B 手上的信封已经读出来了（戳 s0）。
+        var gatedB = new GatedSignerRepository(
+            scopeB.ServiceProvider.GetRequiredService<SigningRaceDbContext>(),
+            scopeB.ServiceProvider)
+        {
+            GateWhen = list => list.Count == 2 && list.All(s => s.Status != SigningRecipientStatus.Signed),
+        };
+
+        var taskB = BuildService(scopeB.ServiceProvider, gatedB).SubmitAsync(tokenB, new SubmitSigningDto());
+        await gatedB.Reached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // A 走完整条路：签完、看到 B 还没签、把信封推进到 InProgress。
+        var resultA = await BuildService(scopeA.ServiceProvider).SubmitAsync(tokenA, new SubmitSigningDto());
+        resultA.Succeeded.ShouldBeTrue(resultA.Message);
+        resultA.Data!.RequestStatus.ShouldBe(EnvelopeStatus.InProgress);
+
+        gatedB.Release();
+        var resultB = await taskB;
+        resultB.Succeeded.ShouldBeTrue(resultB.Message);
+
+        var envelope = await DbContext.Set<Envelope>().AsNoTracking().FirstAsync(e => e.Id == requestId);
+        envelope.Status.ShouldBe(EnvelopeStatus.Completed, "every recipient signed but nobody sealed the document");
+        envelope.FinalPdfFileId.ShouldNotBeNull();
+        envelope.Sha256.ShouldBe(Convert.ToHexStringLower(SHA256.HashData(_files.Read(envelope.FinalPdfFileId!.Value))));
+
+        _files.Saved.Count(f => f.Name.EndsWith("-signed.pdf", StringComparison.Ordinal)).ShouldBe(1);
+        _sink.Attached.Count.ShouldBe(1);
+        _sink.Attached[0].EntityId.ShouldBe(hostId);
+        _sink.Attached[0].FileId.ShouldBe(envelope.FinalPdfFileId!.Value);
+    }
+
+    /// <summary>
+    /// 镜像交错：A 签完、读到「B 还没签」之后被拖住；B 这时签完、抢占、密封完成。A 接着把信封从 Sent 推进到 InProgress，
+    /// 用的是旧戳，此前这次写的并发冲突一路抛出去，A 收到 500，而它的签名早已落库、信封也已经完成。
+    /// </summary>
+    [Fact]
+    public async Task ParallelSigning_AnAdvanceThatLosesToTheSeal_StillAnswersTheSigner()
+    {
+        var (requestId, _, tokenA, tokenB) = await ArrangeSentEnvelopeAsync();
+
+        using var scopeA = ServiceProvider.CreateScope();
+        using var scopeB = ServiceProvider.CreateScope();
+
+        var gatedA = new GatedSignerRepository(
+            scopeA.ServiceProvider.GetRequiredService<SigningRaceDbContext>(),
+            scopeA.ServiceProvider)
+        {
+            GateWhen = list => list.Any(s => s.Name == "Alice" && s.Status == SigningRecipientStatus.Signed)
+                               && list.Any(s => s.Status != SigningRecipientStatus.Signed),
+            // A 的读发生在 B 提交之前，只是之后的推进被拖到 B 密封之后：交回拦下时的旧结果。
+            RereadAfterRelease = false,
+        };
+
+        var taskA = BuildService(scopeA.ServiceProvider, gatedA).SubmitAsync(tokenA, new SubmitSigningDto());
+        await gatedA.Reached.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var resultB = await BuildService(scopeB.ServiceProvider).SubmitAsync(tokenB, new SubmitSigningDto());
+        resultB.Succeeded.ShouldBeTrue(resultB.Message);
+        resultB.Data!.RequestStatus.ShouldBe(EnvelopeStatus.Completed);
+
+        gatedA.Release();
+        var resultA = await taskA;
+
+        // ★ A 的签名早已落库：回报失败（或 500）会让签署人以为没签成。
+        resultA.Succeeded.ShouldBeTrue(resultA.Message);
+        resultA.Data!.RequestStatus.ShouldBe(EnvelopeStatus.Completed);
+
+        var envelope = await DbContext.Set<Envelope>().AsNoTracking().FirstAsync(e => e.Id == requestId);
+        envelope.Status.ShouldBe(EnvelopeStatus.Completed);
+        envelope.CompletedAt.ShouldNotBeNull();
+        _files.Saved.Count(f => f.Name.EndsWith("-signed.pdf", StringComparison.Ordinal)).ShouldBe(1);
+        _sink.Attached.Count.ShouldBe(1);
     }
 }

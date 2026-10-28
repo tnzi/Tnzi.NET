@@ -39,6 +39,8 @@ const props = withDefaults(
     runtime: AdminAuthRuntime;
     brandName?: string;
     brandIcon?: string;
+    /** Iconify name of the brand's logotype, drawn in place of `brandName` (see `TAuthPage`). */
+    brandWordmark?: string;
     heading?: string;
     subheading?: string;
     termsHref?: string;
@@ -53,6 +55,7 @@ const props = withDefaults(
   {
     brandName: '',
     brandIcon: '',
+    brandWordmark: '',
     heading: '',
     subheading: '',
     termsHref: '',
@@ -116,6 +119,7 @@ function onOauth(provider: LoginThirdPartyProvider): void {
   <TAuthPage
     :brand-name="brandName"
     :brand-icon="brandIcon"
+    :brand-wordmark="brandWordmark"
     :heading="heading"
     :subheading="subheading"
     :features="features"

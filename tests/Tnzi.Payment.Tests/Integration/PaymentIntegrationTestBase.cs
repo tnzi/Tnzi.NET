@@ -58,6 +58,7 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
         AddRepo<PaymentEntity>(services);
         AddRepo<Refund>(services);
         AddRepo<StoredPaymentMethod>(services);
+        AddRepo<BillingAccount>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -78,6 +79,9 @@ public abstract class PaymentIntegrationTestBase : IntegratedTestBase<PaymentTes
 
         // 业务服务
         services.AddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
+        // 计费账户：默认的 User 范围（与引入计费账户之前逐字相同）
+        services.AddScoped<IBillingAccountResolver, DefaultBillingAccountResolver>();
+        services.AddScoped<IBillingAccountService, BillingAccountService>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         services.AddScoped<IRefundService, RefundService>();

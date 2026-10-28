@@ -18,6 +18,12 @@ const h = vi.hoisted(() => ({
   close: vi.fn(),
   convert: vi.fn(),
   getById: vi.fn(),
+  update: vi.fn(),
+  error: vi.fn(),
+}))
+
+vi.mock('../../../src/pages/_shared/safe-message', () => ({
+  useSafeMessage: () => ({ success: vi.fn(), error: h.error, warning: vi.fn(), info: vi.fn() }),
 }))
 
 vi.mock('../../../src/plugin/client', () => ({
@@ -44,7 +50,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
     fetch: h.fetch,
     getById: h.getById,
     createDraft: vi.fn(),
-    update: vi.fn(),
+    update: h.update,
     deleteDraft: vi.fn(),
     send: h.send,
     accept: h.accept,
@@ -69,6 +75,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 // Mounted directly rather than through `Estimates.vue`: that file is a
 // two-line wrapper, and `wrapper.vm` would expose the wrapper, not the page.
 import Page from '../../../src/pages/finance/components/OfferPage.vue'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -119,6 +126,20 @@ describe('Finance offer documents', () => {
     expect(visible(rows[2])).toEqual([])
   })
 
+  // Edit and Delete replaced the standard actions' `show`, which is where they
+  // check the update / delete grant: a viewer was offered both and got a 403.
+  it('★ a viewer without update or delete is offered neither Edit nor Delete', async () => {
+    useAdminAuthStore().setUserInfo({ id: 'op', username: 'viewer', roles: [], permissions: ['finance.estimate.view'] } as never)
+    const wrapper = mount(Page, { props: { kind: 'estimate' as const }, global: { stubs } })
+    await flushPromises()
+
+    const actions = wrapper.vm.rowActions as Array<{ key: string; show?: (r: unknown) => boolean }>
+    const visible = (row: unknown) => actions.filter((a) => !a.show || a.show(row)).map((a) => a.key)
+    expect(visible(rows[0])).not.toContain('edit')
+    expect(visible(rows[0])).not.toContain('delete')
+    expect(visible(rows[1])).not.toContain('edit')
+  })
+
   it('lands on the draft it created after converting', async () => {
     const wrapper = mount(Page, { props: { kind: 'estimate' as const }, global: { stubs } })
     await flushPromises()
@@ -141,5 +162,60 @@ describe('Finance offer documents', () => {
     ;(wrapper.vm as unknown as { openTarget: (r: unknown) => void }).openTarget(rows[2])
 
     expect(h.push).toHaveBeenCalledWith({ name: 'finance.invoices', query: { detail: 'view:i9' } })
+  })
+
+  // The editor has no field for the internal note or a purchase order's ship-to,
+  // and the update replaces the document: an edit sent without them cleared both.
+  describe('editing keeps the fields the editor does not show', () => {
+    const payload = {
+      partyId: 'party-1', paidFromAccountId: null, paymentMethod: null, docDate: '2026-07-20', dueDate: null,
+      currency: 'USD', exchangeRate: null, memo: 'Quote',
+      lines: [{ itemId: null, description: 'Work', accountId: 'a1', quantity: 1, unitPrice: 100, amount: 100, taxCodeId: null, taxAmount: null }],
+    }
+
+    async function editAndSave(kind: 'estimate' | 'purchaseOrder', record: Record<string, unknown>) {
+      h.update.mockReset().mockResolvedValue({ id: record.id })
+      h.getById.mockReset().mockResolvedValue(record)
+      const wrapper = mount(Page, { props: { kind }, global: { stubs } })
+      await flushPromises()
+      const vm = wrapper.vm as unknown as {
+        entryDetail: { open: (action: string, id: string) => Promise<void> }
+        saveEditor: (p: unknown, send: boolean) => Promise<void>
+      }
+      await vm.entryDetail.open('edit', String(record.id))
+      await flushPromises()
+      await vm.saveEditor(payload, false)
+      wrapper.unmount()
+    }
+
+    it('★ an estimate keeps its internal note', async () => {
+      await editAndSave('estimate', {
+        id: 'e1', status: 'Draft', customerId: 'party-1', docDate: '2026-07-20', currency: 'USD',
+        internalNote: 'Margin is thin, check before discounting', lines: [],
+      })
+      expect(h.update).toHaveBeenCalledWith('e1', expect.objectContaining({ internalNote: 'Margin is thin, check before discounting' }))
+    })
+
+    it('★ a purchase order keeps its internal note and ship-to', async () => {
+      await editAndSave('purchaseOrder', {
+        id: 'p1', status: 'Draft', vendorId: 'party-1', docDate: '2026-07-20', currency: 'USD',
+        internalNote: 'Call before delivery', shipTo: 'Dock 4, 12 Harbour St', lines: [],
+      })
+      expect(h.update).toHaveBeenCalledWith('p1', expect.objectContaining({
+        internalNote: 'Call before delivery',
+        shipTo: 'Dock 4, 12 Harbour St',
+      }))
+    })
+  })
+
+  it('a failed read of the opened document is reported, not left as a blank drawer', async () => {
+    h.getById.mockRejectedValueOnce(new Error('Estimate not found.'))
+    const wrapper = mount(Page, { props: { kind: 'estimate' as const }, global: { stubs } })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { viewing: { load: (id: string) => Promise<void> } }).viewing.load(String((rows[1] as { id: string }).id))
+
+    expect(h.error).toHaveBeenCalledWith('Estimate not found.')
+    expect((wrapper.vm as unknown as { viewed: unknown }).viewed).toBeNull()
   })
 })

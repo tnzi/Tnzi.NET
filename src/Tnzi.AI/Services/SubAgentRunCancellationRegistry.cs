@@ -10,14 +10,18 @@ public sealed class SubAgentRunCancellationRegistry : ISubAgentRunCancellationRe
 
     /// <inheritdoc />
     public void Register(Guid runId, CancellationTokenSource cts, TimeSpan? timeout = null)
+        => TryRegister(runId, cts, timeout);
+
+    /// <inheritdoc />
+    public bool TryRegister(Guid runId, CancellationTokenSource cts, TimeSpan? timeout = null)
     {
         Check.NotNull(cts);
 
         var entry = new Entry(cts);
-        // TryAdd - silently ignore if already registered (edge-case: duplicate runId).
+        // TryAdd - the first registration of a runId wins (edge-case: duplicate runId).
         if (!_registry.TryAdd(runId, entry))
         {
-            return;
+            return false;
         }
 
         if (timeout.HasValue)
@@ -28,6 +32,8 @@ public sealed class SubAgentRunCancellationRegistry : ISubAgentRunCancellationRe
             entry.TimeoutTimer = new Timer(_ => Cancel(runId, RunCancellationKind.TimedOut, reason),
                 null, timeout.Value, Timeout.InfiniteTimeSpan);
         }
+
+        return true;
     }
 
     /// <inheritdoc />

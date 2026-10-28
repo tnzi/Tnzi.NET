@@ -6,7 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
  * SandboxStatus integration test - a read-only operations view over
  * `/admin/sandbox/status`. The admin client + sandbox bridge are mocked so the
  * page mounts without a backend. Assertions cover: the status overview (enabled
- * / provider / data root + denylist counts), the three denylist sections with
+ * / provider / data root + denylist counts), the four denylist sections with
  * per-section keyword filter, the disabled-module banner branch, and the
  * not-loaded (null status / 404) branch.
  */
@@ -19,6 +19,7 @@ const getStatus = vi.fn(async () => ({
   provider: 'LocalSandboxProvider',
   dataRoot: '/var/tnzi/sandbox',
   deniedCommands: ['rm', 'curl', 'wget', 'shutdown'],
+  deniedCommandPrefixes: ['mkfs', 'dd'],
   deniedPatterns: ['*.key', '*.pem', '/etc/**'],
   environmentBlacklist: ['AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY'],
 }))
@@ -64,6 +65,7 @@ describe('SandboxStatus page (status overview + filtered denylists)', () => {
       provider: 'LocalSandboxProvider',
       dataRoot: '/var/tnzi/sandbox',
       deniedCommands: ['rm', 'curl', 'wget', 'shutdown'],
+      deniedCommandPrefixes: ['mkfs', 'dd'],
       deniedPatterns: ['*.key', '*.pem', '/etc/**'],
       environmentBlacklist: ['AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY'],
     })
@@ -82,18 +84,22 @@ describe('SandboxStatus page (status overview + filtered denylists)', () => {
     expect(wrapper.text()).toContain('/var/tnzi/sandbox')
   })
 
-  it('renders the three denylist sections with counts', async () => {
+  it('renders the four denylist sections with counts', async () => {
     const wrapper = mount(SandboxStatus, { global: { stubs } })
     await flushPromises()
     const vm = wrapper.vm as unknown as Vm
 
-    // Three sections × the right items each.
+    // Four sections × the right items each.
     const byKey = Object.fromEntries(vm.denylists.map((d) => [d.key, d]))
     expect(byKey.deniedCommands.items).toHaveLength(4)
+    expect(byKey.deniedCommandPrefixes.items).toHaveLength(2)
     expect(byKey.deniedPatterns.items).toHaveLength(3)
     expect(byKey.envBlacklist.items).toHaveLength(2)
 
-    // Items render as chips.
+    // Items render as chips, including the token-level executable denylist
+    // (the layer that actually stops `'mkfs'` / `cat x | mkfs`).
+    expect(wrapper.text()).toContain('Denied Executables')
+    expect(wrapper.text()).toContain('mkfs')
     expect(wrapper.text()).toContain('shutdown')
     expect(wrapper.text()).toContain('*.pem')
     expect(wrapper.text()).toContain('OPENAI_API_KEY')
@@ -132,6 +138,7 @@ describe('SandboxStatus page (status overview + filtered denylists)', () => {
       provider: 'LocalSandboxProvider',
       dataRoot: '/var/tnzi/sandbox',
       deniedCommands: ['rm'],
+      deniedCommandPrefixes: [],
       deniedPatterns: [],
       environmentBlacklist: [],
     })
@@ -152,12 +159,16 @@ describe('SandboxStatus page (status overview + filtered denylists)', () => {
     expect(wrapper.find('.card-title').exists()).toBe(false)
   })
 
-  it('treats a thrown bridge error as not-loaded', async () => {
-    getStatus.mockRejectedValueOnce(new Error('404'))
+  it('reports a refused or failed read instead of claiming the module is not loaded', async () => {
+    // The bridge answers null only for an absent module (404 / 501); anything
+    // else rejects with the server's reason, and the route is module-gated anyway.
+    getStatus.mockRejectedValueOnce(new Error('You do not have permission to read the sandbox status'))
     const wrapper = mount(SandboxStatus, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as Vm
+    const vm = wrapper.vm as unknown as Vm & { loadError: string | null }
     expect(vm.status).toBeNull()
-    expect(wrapper.text()).toContain('Sandbox module not loaded')
+    expect(vm.loadError).toBe('You do not have permission to read the sandbox status')
+    expect(wrapper.find('[data-test="sandbox-load-error"]').text()).toContain('You do not have permission')
+    expect(wrapper.text()).not.toContain('Sandbox module not loaded')
   })
 })

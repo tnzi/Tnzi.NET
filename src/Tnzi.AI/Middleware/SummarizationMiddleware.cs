@@ -78,7 +78,9 @@ public class SummarizationMiddleware : IAiMiddleware
         if (messages.Count == 0)
             return;
 
-        var contextWindow = ResolveContextWindow(opts, context.EffectiveProvider);
+        // EffectiveProvider 由技能约束中间件（Order 450）写入，本中间件（350）运行时恒为空，
+        // 所以按 Agent 的提供商取窗口（与 PromptCachingMiddleware 同一取法）
+        var contextWindow = ResolveContextWindow(opts, context.EffectiveProvider ?? context.Agent.Provider);
         if (!ShouldTrigger(messages, opts, contextWindow))
             return;
 

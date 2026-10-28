@@ -7,8 +7,9 @@ public class CliAuthStatusProbeTests : IDisposable
 {
     private const string StateVariable = "TNZI_TEST_PROBE_STATE";
 
-    private readonly string _scratch = Path.Combine(Path.GetTempPath(), "tnzi-cli-probe-" + Guid.NewGuid().ToString("N"));
+    private readonly string _scratch = TestScratch.NewPath("probe");
     private readonly CliAuthStatusProbe _probe = new(NullLogger<CliAuthStatusProbe>.Instance);
+    private readonly LocalProcessHost _host = LocalHosts.Create();
 
     public CliAuthStatusProbeTests()
     {
@@ -17,14 +18,7 @@ public class CliAuthStatusProbeTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_scratch, recursive: true);
-        }
-        catch (IOException)
-        {
-            // 清理失败不该让测试红。
-        }
+        TestScratch.Delete(_scratch);
 
         GC.SuppressFinalize(this);
     }
@@ -47,7 +41,7 @@ public class CliAuthStatusProbeTests : IDisposable
     [InlineData("false", false)]
     public async Task IsSignedIn_RunsWithTheSpecEnvironment(string state, bool expected)
     {
-        var signedIn = await _probe.IsSignedInAsync(ScriptSpec(new Dictionary<string, string> { [StateVariable] = state }), CancellationToken.None);
+        var signedIn = await _probe.IsSignedInAsync(_host, ScriptSpec(new Dictionary<string, string> { [StateVariable] = state }), CancellationToken.None);
 
         signedIn.ShouldBe(expected);
     }
@@ -56,7 +50,7 @@ public class CliAuthStatusProbeTests : IDisposable
     public async Task IsSignedIn_UnreadableOutput_IsUnknown()
     {
         // 变量没给：脚本输出的 loggedIn 值为空，不是合法 JSON。
-        var signedIn = await _probe.IsSignedInAsync(ScriptSpec(new Dictionary<string, string>()), CancellationToken.None);
+        var signedIn = await _probe.IsSignedInAsync(_host, ScriptSpec(new Dictionary<string, string>()), CancellationToken.None);
 
         signedIn.ShouldBeNull();
     }
@@ -70,7 +64,7 @@ public class CliAuthStatusProbeTests : IDisposable
             WorkingDirectory = _scratch
         };
 
-        (await _probe.IsSignedInAsync(spec, CancellationToken.None)).ShouldBeNull();
+        (await _probe.IsSignedInAsync(_host, spec, CancellationToken.None)).ShouldBeNull();
     }
 
     private CliProcessSpec ScriptSpec(IReadOnlyDictionary<string, string> environment)

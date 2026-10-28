@@ -189,3 +189,74 @@ describe('AgentDetail - grant states in the resource sections', () => {
     expect(items).toEqual([expect.objectContaining({ value: 'write', enabled: undefined })])
   })
 })
+
+/**
+ * Each assignment is a full-list replace built from the agent's lists. Built
+ * at click time, quick clicks each started from the list as it was before any
+ * of them answered: assigning two skills sent [write, fresh] and [write, old],
+ * the later one won and reconcile deleted the other grant. The writes run one
+ * after another, each from the lists the previous one left.
+ */
+describe('AgentDetail - quick resource assignments', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    updateMock.mockImplementation(async (_id: string, data: object) => ({ ...AGENT, ...data }))
+    grantMock.listForAgent.mockImplementation(async () => structuredClone(GRANTS))
+  })
+
+  function holdUpdates() {
+    const pending: Array<() => void> = []
+    updateMock.mockImplementation(
+      (_id: string, data: object) =>
+        new Promise((resolve) => {
+          pending.push(() => resolve({ ...AGENT, ...data }))
+        }),
+    )
+    return pending
+  }
+
+  it('two quick assignments keep both skills', async () => {
+    const wrapper = await openSkills()
+    const pending = holdUpdates()
+
+    picker(wrapper).vm.$emit('assign', 'fresh')
+    picker(wrapper).vm.$emit('assign', 'old')
+    await flushPromises()
+    // The second write waits for the first.
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    pending.shift()!()
+    await flushPromises()
+    expect(updateMock).toHaveBeenCalledTimes(2)
+    pending.shift()!()
+    await flushPromises()
+
+    expect(updateMock.mock.calls[0]![1]).toEqual({ skillSlugs: ['write', 'fresh'] })
+    expect(updateMock.mock.calls[1]![1]).toEqual({ skillSlugs: ['write', 'fresh', 'old'] })
+  })
+
+  it('a double click assigns once', async () => {
+    const wrapper = await openSkills()
+    const pending = holdUpdates()
+
+    picker(wrapper).vm.$emit('assign', 'fresh')
+    picker(wrapper).vm.$emit('assign', 'fresh')
+    await flushPromises()
+    pending.shift()!()
+    await flushPromises()
+
+    expect(updateMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an assignment does not throw away unsaved basic-info edits', async () => {
+    const wrapper = await openSkills()
+    const vm = wrapper.vm as unknown as { edit: { description: string }; isDirty: boolean }
+    vm.edit.description = 'Unsaved description'
+
+    picker(wrapper).vm.$emit('assign', 'fresh')
+    await flushPromises()
+
+    expect(vm.edit.description).toBe('Unsaved description')
+    expect(vm.isDirty).toBe(true)
+  })
+})

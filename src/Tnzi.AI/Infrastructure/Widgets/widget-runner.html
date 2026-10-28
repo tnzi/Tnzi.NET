@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>Widget</title>
+<style>
+html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+</style>
+</head>
+<body>
+<script>
+/*
+ * The widget runner: a sandbox proxy in the shape of the MCP Apps host (io.modelcontextprotocol/ui).
+ *
+ * The page that embeds it (the host) hands it a document with
+ * `ui/notifications/sandbox-resource-ready` ({ html, colorScheme? }); the runner shows that
+ * document in an inner frame (srcdoc, sandbox="allow-scripts") and relays every other message
+ * between the host and the document unchanged. The host checks what it receives; the runner only
+ * keeps the two ends apart.
+ *
+ * Served with `Content-Security-Policy: sandbox allow-scripts` and no network sources, so this page
+ * and the document it shows (a srcdoc frame inherits the policy) have no origin, no storage and no
+ * network. The document cannot navigate this page or the host; when it navigates its own frame
+ * away, the frame is removed and the host is told (`tnzi/widget-navigated`).
+ */
+(function () {
+  'use strict';
+  var host = window.parent;
+  var frame = null;
+  var loads = 0;
+
+  function toHost(message) {
+    // The host's origin is not known to an opaque-origin page; the host checks the source window.
+    host.postMessage(message, '*');
+  }
+
+  function setColorScheme(scheme) {
+    if (scheme === 'light' || scheme === 'dark') {
+      document.documentElement.style.colorScheme = scheme;
+    }
+  }
+
+  function show(params) {
+    if (frame || !params || typeof params.html !== 'string') return;
+    setColorScheme(params.colorScheme);
+    frame = document.createElement('iframe');
+    // Never more than scripts, whatever the host asks for.
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('title', typeof params.title === 'string' ? params.title : 'Widget');
+    frame.addEventListener('load', function () {
+      loads += 1;
+      if (loads > 1) {
+        // The document navigated its frame away: what is there now is not the widget.
+        frame.remove();
+        toHost({ jsonrpc: '2.0', method: 'tnzi/widget-navigated', params: {} });
+      }
+    });
+    frame.srcdoc = params.html;
+    document.body.appendChild(frame);
+  }
+
+  window.addEventListener('message', function (event) {
+    var data = event.data;
+    if (!data || typeof data !== 'object' || data.jsonrpc !== '2.0') return;
+    if (event.source === host) {
+      if (data.method === 'ui/notifications/sandbox-resource-ready') {
+        show(data.params);
+        return;
+      }
+      if (data.method === 'ui/notifications/host-context-changed' && data.params) {
+        setColorScheme(data.params.theme);
+      }
+      if (frame && frame.contentWindow) frame.contentWindow.postMessage(data, '*');
+      return;
+    }
+    if (frame && event.source === frame.contentWindow) {
+      toHost(data);
+    }
+  });
+
+  toHost({ jsonrpc: '2.0', method: 'ui/notifications/sandbox-proxy-ready', params: {} });
+})();
+</script>
+</body>
+</html>

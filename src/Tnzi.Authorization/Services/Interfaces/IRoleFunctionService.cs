@@ -61,8 +61,8 @@ public interface IRoleFunctionService
     /// 获取功能的角色列表
     /// </summary>
     /// <param name="functionId">功能ID</param>
-    /// <returns>角色功能列表</returns>
-    Task<Result<IEnumerable<RoleFunction>>> GetFunctionRolesAsync(Guid functionId);
+    /// <returns>角色功能列表（带功能的码、名称与所属模块）</returns>
+    Task<Result<IEnumerable<RoleFunctionDto>>> GetFunctionRolesAsync(Guid functionId);
 
     /// <summary>
     /// 批量分配功能到多个角色

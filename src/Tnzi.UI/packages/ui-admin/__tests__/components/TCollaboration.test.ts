@@ -74,6 +74,50 @@ describe('TAttachmentPanel', () => {
     expect(wrapper.emitted('changed')).toBeFalsy()
   })
 
+  it('a batch that fails part-way still lists the files that did attach, and keeps the reason', async () => {
+    // Files 1 and 2 attach, file 3 is refused at the per-record cap. Without a
+    // refresh the list still lacks 1 and 2, and the operator re-drops all three.
+    const upload = vi.fn(async (f: File) => ({ fileId: f.name, fileName: f.name, contentType: f.type, fileSize: 1 }))
+    const attach = vi.fn(async (l: { fileId: string }) => {
+      if (l.fileId === 'c.pdf') throw new Error('A document can have at most 20 attachments.')
+    })
+    const wrapper = mount(TAttachmentPanel, { props: { items: [], upload, attach }, global: { stubs } })
+
+    await (wrapper.vm as unknown as { send: (f: File[]) => Promise<void> }).send([
+      new File(['a'], 'a.pdf'), new File(['b'], 'b.pdf'), new File(['c'], 'c.pdf'),
+    ])
+    await flushPromises()
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+
+    // The host reloads on `changed`; the reason must survive that reload.
+    await wrapper.setProps({ items: [
+      { id: 'x1', fileId: 'a.pdf', fileName: 'a.pdf', fileSize: 1 },
+      { id: 'x2', fileId: 'b.pdf', fileName: 'b.pdf', fileSize: 1 },
+    ] })
+    expect(wrapper.text()).toContain('at most 20 attachments')
+  })
+
+  it('a drop while a batch is still uploading waits its turn', async () => {
+    const order: string[] = []
+    let releaseFirst!: () => void
+    const upload = vi.fn(async (f: File) => {
+      order.push(`up:${f.name}`)
+      if (f.name === 'a.pdf') await new Promise<void>((r) => { releaseFirst = r })
+      return { fileId: f.name, fileName: f.name, contentType: f.type, fileSize: 1 }
+    })
+    const attach = vi.fn(async (l: { fileId: string }) => { order.push(`link:${l.fileId}`) })
+    const wrapper = mount(TAttachmentPanel, { props: { items: [], upload, attach }, global: { stubs } })
+    const send = (wrapper.vm as unknown as { send: (f: File[]) => Promise<void> }).send
+
+    const first = send([new File(['a'], 'a.pdf')])
+    const second = send([new File(['b'], 'b.pdf')])
+    await flushPromises()
+    releaseFirst()
+    await Promise.all([first, second])
+
+    expect(order).toEqual(['up:a.pdf', 'link:a.pdf', 'up:b.pdf', 'link:b.pdf'])
+  })
+
   it('hides the remove affordance when the viewer cannot remove', () => {
     const items = [{ id: 'a1', fileId: 'f1', fileName: 'x.pdf', fileSize: 10 }]
     const withRemove = mount(TAttachmentPanel, { props: { items, canRemove: true }, global: { stubs } })

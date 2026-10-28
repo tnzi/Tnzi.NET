@@ -18,13 +18,13 @@ public interface IPerformanceMonitorService
     /// <summary>
     /// 记录缓存命中
     /// </summary>
-    /// <param name="cacheKey">缓存键</param>
+    /// <param name="cacheKey">缓存键。只供实现做进程内判断，不得写进导出的指标标签或日志：键里可能有个人数据（邮箱、手机号、用户 Id）。</param>
     void RecordCacheHit(string cacheKey);
 
     /// <summary>
     /// 记录缓存未命中
     /// </summary>
-    /// <param name="cacheKey">缓存键</param>
+    /// <param name="cacheKey">缓存键。约束同 <see cref="RecordCacheHit"/>。</param>
     void RecordCacheMiss(string cacheKey);
 
     /// <summary>

@@ -14,11 +14,17 @@ public class CreateSubscriptionDto
     /// <summary>
     /// 支付渠道代码
     /// </summary>
+    /// <remarks>
+    /// 本类上的长度上限都与对应的列宽一致（<c>Subscription.ChannelCode</c> 32、<c>PaymentMethodToken</c> 128，
+    /// 优惠券代码与 <c>CreatePaymentDto.CouponCode</c> 同为 64）：超长的值此前通过校验、写库时被数据库截断报错，调用方拿到的是 500。
+    /// </remarks>
+    [MaxLength(32, ErrorMessage = "ChannelCode cannot exceed 32 characters.")]
     public string? ChannelCode { get; set; }
 
     /// <summary>
     /// 优惠券代码
     /// </summary>
+    [MaxLength(64, ErrorMessage = "CouponCode cannot exceed 64 characters.")]
     public string? CouponCode { get; set; }
 
     /// <summary>
@@ -30,17 +36,13 @@ public class CreateSubscriptionDto
     /// 渠道侧支付方式标识（如 Stripe PaymentMethod ID）。
     /// 提供后会登记为该用户已保存的支付方式并绑定到本订阅，使后续自动续费可用。
     /// </summary>
+    [MaxLength(128, ErrorMessage = "Payment method token cannot exceed 128 characters.")]
     public string? PaymentMethodToken { get; set; }
 
     /// <summary>
     /// 已保存的支付方式ID；与 <see cref="PaymentMethodToken"/> 二选一，都不传则用该渠道默认支付方式
     /// </summary>
     public Guid? PaymentMethodId { get; set; }
-
-    /// <summary>
-    /// 扩展数据
-    /// </summary>
-    public string? ExtraData { get; set; }
 }
 
 /// <summary>
@@ -223,6 +225,21 @@ public class SubscriptionDto
     public DateTime? PastDueSince { get; set; }
 
     /// <summary>
+    /// 进入暂停服务的时间（<c>Status = Suspended</c> 时有值）
+    /// </summary>
+    public DateTime? SuspendedAt { get; set; }
+
+    /// <summary>
+    /// 所属计费账户：种类
+    /// </summary>
+    public string BillingAccountType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 所属计费账户：Id
+    /// </summary>
+    public string BillingAccountId { get; set; } = string.Empty;
+
+    /// <summary>
     /// 续费扣款连续失败次数
     /// </summary>
     public int RenewalRetryCount { get; set; }
@@ -257,6 +274,16 @@ public class SubscriptionQueryDto : PagedQueryDto
     /// 是否自动续费
     /// </summary>
     public bool? AutoRenew { get; set; }
+
+    /// <summary>
+    /// 按计费账户种类筛选（管理端；与 <see cref="BillingAccountId"/> 合用）
+    /// </summary>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 按计费账户 Id 筛选（管理端）
+    /// </summary>
+    public string? BillingAccountId { get; set; }
 }
 
 /// <summary>
@@ -272,21 +299,25 @@ public class SubscriptionPlanDto
     /// <summary>
     /// 计划代码
     /// </summary>
+    [MaxLength(32)]
     public string PlanCode { get; set; } = string.Empty;
 
     /// <summary>
     /// 产品代码（同一产品下的多个计划互为升降级）
     /// </summary>
+    [MaxLength(64)]
     public string? ProductCode { get; set; }
 
     /// <summary>
     /// 计划名称
     /// </summary>
+    [MaxLength(128)]
     public string PlanName { get; set; } = string.Empty;
 
     /// <summary>
     /// 描述
     /// </summary>
+    [MaxLength(500)]
     public string? Description { get; set; }
 
     /// <summary>
@@ -297,7 +328,8 @@ public class SubscriptionPlanDto
     /// <summary>
     /// 币种
     /// </summary>
-    public string Currency { get; set; } = "USD";
+    [MaxLength(8)]
+    public string Currency { get; set; } = string.Empty;
 
     /// <summary>
     /// 计费周期类型
@@ -325,6 +357,16 @@ public class SubscriptionPlanDto
     public decimal? TrialDiscount { get; set; }
 
     /// <summary>
+    /// 套餐包含的存储（字节，1 GB = 2^30 字节）。null = 不计量存储：不限量、没有超额费。
+    /// </summary>
+    public long? IncludedStorageBytes { get; set; }
+
+    /// <summary>
+    /// 超出包含存储的部分每 GB-月的单价（计划币种）。null 或 0 = 只显示用量不收费。
+    /// </summary>
+    public decimal? StorageOveragePricePerGbMonth { get; set; }
+
+    /// <summary>
     /// 排序号
     /// </summary>
     public int SortOrder { get; set; }
@@ -333,6 +375,52 @@ public class SubscriptionPlanDto
     /// 是否启用
     /// </summary>
     public bool IsActive { get; set; }
+
+    /// <summary>
+    /// 按这台宿主的计税规则，标价一期要交的税（只读，只有用户端计划列表填写；管理端与写入时为 null）。
+    /// </summary>
+    /// <remarks>
+    /// 由 <c>IPaymentTaxCalculator</c> 现算，与首期付款建单时问的是同一个计算器、同一组入参，
+    /// 所以开通页上写的「另加税」与收银台上的金额是同一个数。计算器答不上来时为 null（不印税）。
+    /// </remarks>
+    public SubscriptionPlanTaxDto? Tax { get; set; }
+}
+
+/// <summary>
+/// 新建计划时表单的预填值（管理端「新建计划」用）。
+/// </summary>
+public class SubscriptionPlanDefaultsDto
+{
+    /// <summary>
+    /// 这台宿主的默认币种（<c>Payment:DefaultCurrency</c>）。新建计划不填币种时服务端同样用它。
+    /// </summary>
+    public string Currency { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 订阅计划一期标价的计税结果（开通页用来写「含税 / 另加税」与应付金额）。
+/// </summary>
+public class SubscriptionPlanTaxDto
+{
+    /// <summary>
+    /// 价内税：标价已含税，应付额等于标价
+    /// </summary>
+    public bool TaxIncluded { get; set; }
+
+    /// <summary>
+    /// 一期的税额；为 0 表示不计税
+    /// </summary>
+    public decimal TaxAmount { get; set; }
+
+    /// <summary>
+    /// 一期的应付额（价外税时 = 标价 + 税额）
+    /// </summary>
+    public decimal PayableAmount { get; set; }
+
+    /// <summary>
+    /// 逐行税额（名称、税率、税号）
+    /// </summary>
+    public List<TaxLineDto> Lines { get; set; } = [];
 }
 
 /// <summary>
@@ -343,6 +431,7 @@ public class CancelSubscriptionDto
     /// <summary>
     /// 取消原因
     /// </summary>
+    [MaxLength(500, ErrorMessage = "Reason cannot exceed 500 characters.")]
     public string? Reason { get; set; }
 
     /// <summary>

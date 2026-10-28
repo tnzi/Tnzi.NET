@@ -48,8 +48,9 @@ public interface IAccessLogService
     }
 
     /// <summary>
-    /// 获取 Top 端点统计（最热/最慢/最多错误）
+    /// 获取 Top 端点统计（最热/最慢/最多错误）。<paramref name="top"/> 夹到 1 到 100 之间。
     /// </summary>
+    /// <remarks>按原始请求路径（含资源 id）与方法分组，排序与取前 N 在数据库端完成。</remarks>
     Task<Result<List<TopEndpointDto>>> GetTopEndpointsAsync(
         DateTime? startDate = null,
         DateTime? endDate = null,

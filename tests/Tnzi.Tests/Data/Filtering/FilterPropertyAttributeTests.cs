@@ -60,6 +60,15 @@ public class FilterPropertyAttributeTests
         public decimal? MaxPrice { get; set; }
     }
 
+    private class NonNullableQueryDto
+    {
+        [FilterProperty(Operator = FilterOperator.LessThanOrEqual)]
+        public int Stock { get; set; }
+
+        [FilterProperty(Operator = FilterOperator.Equal)]
+        public bool IsActive { get; set; }
+    }
+
     private class DtoWithoutAttributes
     {
         public string? Name { get; set; }
@@ -219,16 +228,58 @@ public class FilterPropertyAttributeTests
     }
 
     [Fact]
-    public void BuildFromDto_DefaultValueSkipped_IntStock()
+    public void BuildFromDto_NullableZero_IsAFilter()
     {
-        // Stock = 0 (default for int) should be skipped
+        // On a nullable property null already means "not set", so an explicit 0 is a real criterion
         var dto = new ProductQueryDto { Stock = 0 };
 
         var expression = FilterExpressionBuilder.BuildFromDto<ProductEntity, ProductQueryDto>(dto);
         var compiled = expression.Compile();
 
-        // Default value is skipped, so all entities match
-        Assert.True(compiled(new ProductEntity { Stock = 100 }));
+        Assert.False(compiled(new ProductEntity { Stock = 100 }));
+        Assert.True(compiled(new ProductEntity { Stock = 0 }));
+    }
+
+    [Fact]
+    public void BuildFromDto_NullableFalse_FiltersForFalse()
+    {
+        var dto = new ProductQueryDto { IsActive = false };
+
+        var compiled = FilterExpressionBuilder.BuildFromDto<ProductEntity, ProductQueryDto>(dto).Compile();
+
+        Assert.True(compiled(new ProductEntity { IsActive = false }));
+        Assert.False(compiled(new ProductEntity { IsActive = true }));
+    }
+
+    [Fact]
+    public void BuildFromDto_NullableEnumZero_FiltersForIt()
+    {
+        var dto = new ProductQueryDto { Status = ProductStatus.Draft };
+
+        var compiled = FilterExpressionBuilder.BuildFromDto<ProductEntity, ProductQueryDto>(dto).Compile();
+
+        Assert.True(compiled(new ProductEntity { Status = ProductStatus.Draft }));
+        Assert.False(compiled(new ProductEntity { Status = ProductStatus.Published }));
+    }
+
+    [Fact]
+    public void BuildFromDto_NonNullableDefaultValues_AreSkipped()
+    {
+        // A non-nullable property cannot say "not set", so its default value still means no filter
+        var dto = new NonNullableQueryDto { Stock = 0, IsActive = false };
+
+        var compiled = FilterExpressionBuilder.BuildFromDto<ProductEntity, NonNullableQueryDto>(dto).Compile();
+
+        Assert.True(compiled(new ProductEntity { Stock = 100, IsActive = true }));
+    }
+
+    [Fact]
+    public void BuildGroupFromDto_NullableFalse_AddsARule()
+    {
+        var group = FilterExpressionBuilder.BuildGroupFromDto(new ProductQueryDto { IsActive = false });
+
+        var rule = Assert.Single(group.Rules);
+        Assert.Equal("IsActive", rule.Field);
     }
 
     [Fact]

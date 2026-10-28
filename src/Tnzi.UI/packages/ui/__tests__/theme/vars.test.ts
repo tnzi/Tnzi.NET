@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { buildCssVars, injectCssVars, clearCssVars } from '../../src/theme/vars'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { buildCssVars, injectCssVars, clearCssVars, READABLE_TEXT_BACKGROUND } from '../../src/theme/vars'
+import { CONTRAST_TEXT_DARK, CONTRAST_TEXT_LIGHT, contrastRatio } from '../../src/theme/palette'
 import { defaultThemeSettings } from '../../src/theme/settings'
 
 /**
@@ -87,6 +90,72 @@ describe('buildCssVars', () => {
     expect(dark['--tnzi-base-text']).not.toBe(light['--tnzi-base-text'])
     expect(dark['--tnzi-layout-bg']).toBe('rgb(18, 18, 18)')
     expect(dark['--tnzi-container-bg']).toBe('rgb(28, 28, 28)')
+  })
+})
+
+describe('buildCssVars: readable companions of the primary', () => {
+  const withPrimary = (primary: string, mode: 'light' | 'dark' = 'light') =>
+    buildCssVars({ ...defaultThemeSettings.colors, primary }, mode)
+
+  it('puts white on a dark primary and the ink on a light one', () => {
+    expect(withPrimary('#2563eb')['--tnzi-on-primary']).toBe(CONTRAST_TEXT_LIGHT)
+    expect(withPrimary('#FFD217')['--tnzi-on-primary']).toBe(CONTRAST_TEXT_DARK)
+    expect(contrastRatio(CONTRAST_TEXT_DARK, '#FFD217')).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('keeps the default teal exactly as it was: white on the fill, the colour itself on dark surfaces', () => {
+    const vars = withPrimary('#0d9488')
+    expect(vars['--tnzi-on-primary']).toBe('#ffffff')
+    expect(vars['--tnzi-primary-text-on-dark']).toBe('#0d9488')
+  })
+
+  it.each(['#FFD217', '#0d9488', '#2563eb', '#f97316', '#7c3aed'])(
+    'gives %s a text colour that reads at 4.5:1 on both canvases',
+    (primary) => {
+      const vars = withPrimary(primary)
+      for (const canvas of ['#ffffff', '#f8f8f7', READABLE_TEXT_BACKGROUND.light, 'rgb(247, 250, 252)']) {
+        expect(contrastRatio(vars['--tnzi-primary-text-on-light'], canvas)).toBeGreaterThanOrEqual(4.5)
+      }
+      for (const canvas of ['#141414', '#0f0f0f', READABLE_TEXT_BACKGROUND.dark, 'rgb(18, 18, 18)']) {
+        expect(contrastRatio(vars['--tnzi-primary-text-on-dark'], canvas)).toBeGreaterThanOrEqual(4.5)
+      }
+    },
+  )
+
+  // An inline writer that cannot follow the mode (a snapshot applied without a
+  // theme context) writes these once; the stylesheet alias picks per mode.
+  it('emits the same companions in light and dark mode', () => {
+    for (const key of ['--tnzi-on-primary', '--tnzi-primary-text-on-light', '--tnzi-primary-text-on-dark']) {
+      expect(withPrimary('#FFD217', 'dark')[key]).toBe(withPrimary('#FFD217', 'light')[key])
+    }
+  })
+
+  it('leaves the mode alias to the stylesheet', () => {
+    expect(withPrimary('#FFD217')['--tnzi-primary-text']).toBeUndefined()
+  })
+
+  describe('stylesheet defaults', () => {
+    const css = readFileSync(resolve(__dirname, '../../src/styles/variables.css'), 'utf8')
+    const block = (selector: string) => {
+      const start = css.indexOf(`\n${selector} {`)
+      return css.slice(start, css.indexOf('\n}', start))
+    }
+    const declared = (text: string, name: string) =>
+      new RegExp(`${name}:\\s*([^;]+);`).exec(text)?.[1]?.trim()
+
+    // Components render with these before the theme context writes its map.
+    it('match what the builder computes for the default primary', () => {
+      const vars = buildCssVars(defaultThemeSettings.colors, 'light')
+      const root = block(':root')
+      for (const key of ['--tnzi-on-primary', '--tnzi-primary-text-on-light', '--tnzi-primary-text-on-dark']) {
+        expect(declared(root, key)).toBe(vars[key])
+      }
+    })
+
+    it('repoint the mode alias in the dark block', () => {
+      expect(declared(block(':root'), '--tnzi-primary-text')).toBe('var(--tnzi-primary-text-on-light)')
+      expect(declared(block('.dark'), '--tnzi-primary-text')).toBe('var(--tnzi-primary-text-on-dark)')
+    })
   })
 })
 

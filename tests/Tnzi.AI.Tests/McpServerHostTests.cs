@@ -107,4 +107,61 @@ public class McpServerHostTests
 
         agentRuntime.Verify(x => x.RunAsync(It.Is<AgentRunRequest>(r => r.AgentId == agentId), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    /// <summary>
+    /// 护栏拒绝、配额超限、交接超限、运行失败都以 FinishReason 返回而不是抛出。此前 MCP 只看有没有异常：
+    /// 客户端收到 IsError=false、把拒绝文案当成工具的真实输出继续推理，调用记录也记成功。
+    /// </summary>
+    [Theory]
+    [InlineData(FinishReasons.GuardrailRejected)]
+    [InlineData(FinishReasons.QuotaExceeded)]
+    [InlineData(FinishReasons.MaxHandoffs)]
+    [InlineData(FinishReasons.Error)]
+    public async Task CallToolAsync_ARunThatEndedInFailure_IsAToolError(string finishReason)
+    {
+        var result = await CallAgentToolAsync(new AgentRunResult { Response = "I can't help with that.", FinishReason = finishReason });
+
+        result.IsError.ShouldBe(true);
+        var text = result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Single().Text;
+        text.ShouldBe("Error: I can't help with that.");
+    }
+
+    [Fact]
+    public async Task CallToolAsync_ARunThatStoppedNormally_IsNotAToolError()
+    {
+        var result = await CallAgentToolAsync(new AgentRunResult { Response = "the answer", FinishReason = FinishReasons.Stop });
+
+        result.IsError.ShouldNotBe(true);
+        result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Single().Text.ShouldBe("the answer");
+    }
+
+    private static async Task<ModelContextProtocol.Protocol.CallToolResult> CallAgentToolAsync(AgentRunResult runResult)
+    {
+        var agentId = Guid.NewGuid();
+        var agentService = new Mock<IAgentService>();
+        agentService.Setup(x => x.GetByIdAsync(agentId))
+            .ReturnsAsync(Result<AgentDto>.Success(new AgentDto { Id = agentId, Name = "Guarded Agent", Description = "d" }));
+
+        var agentRuntime = new Mock<IAgentRuntime>();
+        agentRuntime.Setup(x => x.RunAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(runResult);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(agentService.Object);
+        services.AddSingleton(agentRuntime.Object);
+        using var serviceProvider = services.BuildServiceProvider();
+
+        var options = new StaticOptionsMonitor<McpServerOptions>(new McpServerOptions
+        {
+            Enabled = true,
+            ExposedAgentIds = [agentId],
+            RequireAuthentication = false,
+            RateLimitPerMinute = 0
+        });
+        var security = new McpServerSecurityMiddleware(options, NullLogger<McpServerSecurityMiddleware>.Instance, serviceProvider);
+        var host = new McpServerHost(serviceProvider, options, NullLogger<McpServerHost>.Instance, security);
+
+        return await host.CallToolAsync(
+            "Guarded_Agent",
+            new Dictionary<string, JsonElement> { ["message"] = JsonSerializer.SerializeToElement("hello") });
+    }
 }

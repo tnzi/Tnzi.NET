@@ -34,6 +34,9 @@ public class StripeProvider : IPaymentProvider
     private static RequestOptions Idempotent(string scope, string businessNo)
         => new() { IdempotencyKey = $"{scope}:{businessNo}" };
 
+    /// <inheritdoc />
+    public string? PublishableKey => string.IsNullOrWhiteSpace(_options.Value.PublishableKey) ? null : _options.Value.PublishableKey;
+
     public bool IsSupported(PaymentMethodEnum method)
     {
         return method switch
@@ -50,21 +53,36 @@ public class StripeProvider : IPaymentProvider
             var client = GetClient();
             var service = new PaymentIntentService(client);
 
+            // 付款同时存卡：卡必须挂在一个客户名下才能留给之后的无人值守扣款，没有就先为这个账户建一个
+            var customerId = input.ProviderCustomerId;
+            if (input.SavePaymentMethod && string.IsNullOrWhiteSpace(customerId))
+            {
+                var account = input.BillingAccount
+                    ?? throw new InvalidOperationException("Saving a payment method requires the payment's billing account.");
+                customerId = await CreateCustomerAsync(client, account, input.CustomerName, input.CustomerEmail);
+            }
+
             var options = new PaymentIntentCreateOptions
             {
                 Amount = CurrencyInfo.ToMinorUnits(input.Amount, input.Currency),
                 Currency = input.Currency.ToLowerInvariant(),
-                Customer = input.ProviderCustomerId,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "TradeNo", input.TradeNo },
-                    { "BusinessOrderNo", input.BusinessOrderNo }
-                },
-                AutomaticPaymentMethods = new PaymentIntentAutomaticPaymentMethodsOptions
-                {
-                    Enabled = true
-                }
+                Customer = customerId,
+                Metadata = BuildIntentMetadata(input.TradeNo, input.BusinessOrderNo, offSession: false, _options.Value),
+                StatementDescriptorSuffix = StatementDescriptorSuffix,
+                // off_session：这张卡会被留下来做之后的无人值守续费，Stripe 据此在这一次（有人在场、可做 3-D Secure）就完成授权
+                SetupFutureUsage = input.SavePaymentMethod ? "off_session" : null
             };
+
+            if (input.ReusableMethodsOnly)
+            {
+                // 只收卡（与绑卡的 SetupIntent 同一个参数）：先买后付这类方式不能留给之后的续费，
+                // 不在单据上限制，Payment Element 会照账户后台启用的方式把 Klarna 一并提供出来
+                options.AllowedPaymentMethodTypes = ["card"];
+            }
+            else
+            {
+                options.AutomaticPaymentMethods = new PaymentIntentAutomaticPaymentMethodsOptions { Enabled = true };
+            }
 
             var paymentIntent = await service.CreateAsync(options, Idempotent("pi", input.TradeNo));
 
@@ -86,7 +104,11 @@ public class StripeProvider : IPaymentProvider
         }
     }
 
-    public async Task<Result<PaymentProviderQueryResult>> QueryPaymentAsync(string tradeNo)
+    /// <summary>
+    /// 按本地流水号（写在 PaymentIntent 的 <c>metadata.TradeNo</c> 上）搜索渠道侧的支付；
+    /// <see cref="SyncOrderAsync"/> 拿到的不是 PaymentIntent id 时走这里。
+    /// </summary>
+    private async Task<Result<PaymentProviderQueryResult>> SearchByTradeNoAsync(string tradeNo)
     {
         try
         {
@@ -95,7 +117,7 @@ public class StripeProvider : IPaymentProvider
 
             var searchResult = await service.SearchAsync(new PaymentIntentSearchOptions
             {
-                Query = $"metadata['TradeNo']:'{EscapeSearchValue(tradeNo)}'"
+                Query = BuildTradeNoSearchQuery(tradeNo, _options.Value)
             });
 
             var intent = searchResult.Data.FirstOrDefault();
@@ -124,7 +146,10 @@ public class StripeProvider : IPaymentProvider
             {
                 PaymentIntent = input.ExternalTradeNo ?? input.TradeNo,
                 Amount = CurrencyInfo.ToMinorUnits(input.RefundAmount, input.Currency),
-                Reason = RefundReasons.RequestedByCustomer
+                Reason = RefundReasons.RequestedByCustomer,
+                // 退款号写进元数据：渠道回调（charge.refunded / refund.updated）据此认出这是本模块发起的那一笔，
+                // 只推进它自己的状态，而不是当成一笔在 Stripe 后台手工退的新退款再记一遍
+                Metadata = WithAppStamp(new Dictionary<string, string> { [RefundNoMetadataKey] = input.RefundNo }, _options.Value)
             };
 
             var refund = await service.CreateAsync(refundOptions, Idempotent("re", input.RefundNo));
@@ -180,29 +205,42 @@ public class StripeProvider : IPaymentProvider
 
         try
         {
-            var stripeEvent = EventUtility.ParseEvent(rawBody);
+            // 版本容错的理由见 VerifySignatureAsync：签名已在前一步验过，这里只负责读字段
+            var stripeEvent = EventUtility.ParseEvent(rawBody, throwOnApiVersionMismatch: false);
+            WarnOnApiVersionMismatch(stripeEvent);
 
-            // 用户在 Stripe 侧移除了这张卡（或商户在后台删了它）。
-            // 不处理的话，本地会一直拿着一个已经作废的凭据，直到下次续费扣款失败才发现。
-            if (stripeEvent.Data.Object is StripePaymentMethod detachedMethod)
-            {
-                _logger.LogInformation("Stripe payment method {Token} was detached at the channel.", detachedMethod.Id);
+            // 渠道侧的退款与争议：不带本模块的流水号，服务层按 PaymentIntent 找本地支付，找不到即是别人的、安静地成功
+            if (stripeEvent.Data.Object is global::Stripe.Charge charge && stripeEvent.Type == "charge.refunded")
+                return MapChargeRefundedAsync(stripeEvent, charge);
 
-                return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
-                {
-                    EventId = stripeEvent.Id,
-                    Kind = PaymentCallbackKind.PaymentMethodRevoked,
-                    PaymentMethodToken = detachedMethod.Id,
-                    // 只有"已解绑"才代表凭据失效；attached / updated 同样带 PaymentMethod 载荷，
-                    // 把它们一并当撤销会把用户刚绑好的卡立刻清掉
-                    IsHandled = string.Equals(stripeEvent.Type, "payment_method.detached", StringComparison.Ordinal)
-                }));
-            }
+            if (stripeEvent.Data.Object is global::Stripe.Refund refundObject && stripeEvent.Type.StartsWith("refund.", StringComparison.Ordinal))
+                return Task.FromResult(Result.Success(MapRefundEvent(stripeEvent, [refundObject], refundObject.PaymentIntentId)));
+
+            if (stripeEvent.Data.Object is global::Stripe.Dispute dispute && stripeEvent.Type.StartsWith("charge.dispute.", StringComparison.Ordinal))
+                return Task.FromResult(Result.Success(MapDisputeEvent(stripeEvent, dispute)));
+
+            // 支付方式事件不带本应用的元数据（卡由 Stripe Elements 建），按事件类型分流，不按应用标记过滤：
+            // 本地按凭据查找，别的应用的卡在这里本来就查不到，查不到即安静地成功。
+            if (stripeEvent.Data.Object is StripePaymentMethod paymentMethod)
+                return Task.FromResult(Result.Success(MapPaymentMethodEvent(stripeEvent, paymentMethod)));
 
             // Stripe 会推送大量与支付状态无关的事件（customer.*、invoice.* 等）。
             // 这类事件必须被识别为"已接收但无需处理"，否则回非 2xx 会让 Stripe 反复重投直至禁用端点。
             if (stripeEvent.Data.Object is not PaymentIntent paymentIntent)
             {
+                return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+                {
+                    EventId = stripeEvent.Id,
+                    IsHandled = false
+                }));
+            }
+
+            // ★ 同一个 Stripe 账户被几个应用共用：不带本应用标记的 intent 是别人的。安静地答 200 忽略，
+            // 不记告警（那是别人的正常业务），更不去本地找支付（找不到会答 404，Stripe 随即反复重投三天）。
+            if (!CarriesAppStamp(paymentIntent.Metadata, _options.Value))
+            {
+                _logger.LogDebug("Stripe event {EventId} for payment intent {IntentId} belongs to another application; ignored.",
+                    stripeEvent.Id, paymentIntent.Id);
                 return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
                 {
                     EventId = stripeEvent.Id,
@@ -225,14 +263,15 @@ public class StripeProvider : IPaymentProvider
             {
                 TradeNo = tradeNo,
                 ExternalTradeNo = paymentIntent.Id,
-                Status = MapCallbackStatus(stripeEvent.Type, paymentIntent.Status),
+                Status = MapCallbackStatus(stripeEvent.Type, paymentIntent),
                 // 金额已按这个币种从最小单位换算回来；不把它带上，服务层就只能比数值
                 Currency = paymentIntent.Currency,
                 PaidAmount = paymentIntent.AmountReceived > 0
                     ? CurrencyInfo.FromMinorUnits(paymentIntent.AmountReceived, paymentIntent.Currency)
                     : CurrencyInfo.FromMinorUnits(paymentIntent.Amount, paymentIntent.Currency),
                 FailReason = paymentIntent.LastPaymentError?.Message,
-                EventId = stripeEvent.Id
+                EventId = stripeEvent.Id,
+                SavedPaymentMethodToken = SavedPaymentMethodOf(paymentIntent)
             }));
         }
         catch (StripeException ex)
@@ -253,9 +292,13 @@ public class StripeProvider : IPaymentProvider
         if (!parameters.TryGetValue(PaymentConstants.CallbackStripeSignatureKey, out var signature) || string.IsNullOrWhiteSpace(signature))
             return Task.FromResult(false);
 
+        // 只验真伪（HMAC + 时间戳容差），不连带检查事件的 API 版本。
+        // ConstructEvent 默认在事件版本与 SDK 发布线不一致时也抛 StripeException，
+        // 读成「签名无效」的后果是端点版本没对齐时**每一条**真回调都被 400 拒掉、Stripe 重投直至禁用端点，
+        // 而日志说的是签名不对。版本不一致在解析时单独告警，见 WarnOnApiVersionMismatch。
         try
         {
-            _ = EventUtility.ConstructEvent(rawBody, signature, _options.Value.WebhookSecret);
+            EventUtility.ValidateSignature(rawBody, signature, _options.Value.WebhookSecret);
             return Task.FromResult(true);
         }
         catch (StripeException ex)
@@ -263,6 +306,25 @@ public class StripeProvider : IPaymentProvider
             _logger.LogWarning(ex, "Stripe webhook signature verification failed.");
             return Task.FromResult(false);
         }
+    }
+
+    /// <summary>
+    /// 事件的 API 版本与 SDK 不在同一条发布线时记一条告警，指名两边的版本与对齐方法。
+    /// </summary>
+    /// <remarks>
+    /// 不拒收：本渠道读的字段（事件 id/type、PaymentIntent 的 id/status/金额/币种/metadata/失败原因、
+    /// PaymentMethod id）跨发布线稳定。拒收换来的是丢掉所有失败、作废与撤卡事件，
+    /// 而支付本身只能等过期扫描去渠道查才被记成功。
+    /// </remarks>
+    private void WarnOnApiVersionMismatch(Event stripeEvent)
+    {
+        if (string.IsNullOrWhiteSpace(stripeEvent.ApiVersion) || EventUtility.IsCompatibleApiVersion(stripeEvent.ApiVersion))
+            return;
+
+        _logger.LogWarning(
+            "Stripe event {EventId} uses API version {EventApiVersion}, but Stripe.net expects {SdkApiVersion}. "
+            + "The event is processed; set the webhook endpoint's API version to {SdkApiVersion} in the Stripe dashboard to align them.",
+            stripeEvent.Id, stripeEvent.ApiVersion, StripeConfiguration.ApiVersion, StripeConfiguration.ApiVersion);
     }
 
     public async Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
@@ -287,7 +349,7 @@ public class StripeProvider : IPaymentProvider
         }
 
         // Fallback: 按内部 TradeNo 通过 metadata 搜索
-        return await QueryPaymentAsync(tradeNo);
+        return await SearchByTradeNoAsync(tradeNo);
     }
 
     public bool SupportsPaymentCancellation => true;
@@ -311,7 +373,7 @@ public class StripeProvider : IPaymentProvider
                 // 落库前进程死掉的单只有内部 TradeNo：按元数据找它，找不到 = 渠道侧没有可付的东西
                 var found = await service.SearchAsync(new PaymentIntentSearchOptions
                 {
-                    Query = $"metadata['TradeNo']:'{EscapeSearchValue(tradeNo)}'"
+                    Query = BuildTradeNoSearchQuery(tradeNo, _options.Value)
                 });
                 var match = found.Data.FirstOrDefault();
                 if (match == null)
@@ -381,9 +443,10 @@ public class StripeProvider : IPaymentProvider
             var client = GetClient();
             var customerId = input.ProviderCustomerId;
 
+            var account = input.BillingAccount ?? BillingAccountRef.ForUser(input.UserId);
             if (string.IsNullOrWhiteSpace(customerId))
             {
-                customerId = await CreateCustomerAsync(client, input.UserId, input.CustomerName, input.CustomerEmail);
+                customerId = await CreateCustomerAsync(client, account, input.CustomerName, input.CustomerEmail);
             }
 
             var setupIntent = await new SetupIntentService(client).CreateAsync(new SetupIntentCreateOptions
@@ -391,11 +454,16 @@ public class StripeProvider : IPaymentProvider
                 Customer = customerId,
                 // off_session：声明该支付方式将用于后续无人值守扣款，Stripe 会据此在收集阶段完成必要的授权
                 Usage = "off_session",
-                PaymentMethodTypes = ["card"],
-                Metadata = new Dictionary<string, string>
+                // 只收卡。API 2026-08-26 起写入 payment_method_types 一律 400（payment_method_types_no_longer_supported），
+                // allowed_payment_method_types 是它的替代：Stripe 只在这份清单里挑要提供的方式（与账户后台启用的方式一起决定），
+                // 不兼容的类型被滤掉而不是报错。
+                // SetupIntent 对象上的 payment_method_types 仍在，只是变成了只读的计算结果。
+                AllowedPaymentMethodTypes = ["card"],
+                Metadata = WithAppStamp(new Dictionary<string, string>
                 {
-                    { "UserId", input.UserId.ToString() }
-                }
+                    { "UserId", input.UserId.ToString() },
+                    { BillingAccountMetadataKey, account.Key }
+                }, _options.Value)
             });
 
             _logger.LogInformation("Stripe setup intent created. UserId: {UserId}, SetupIntentId: {SetupIntentId}",
@@ -437,7 +505,7 @@ public class StripeProvider : IPaymentProvider
                 //   所以不能要求「未挂任何 customer」；判据是那个 customer 是不是本系统为**这个用户**建的：
                 //   CreateCustomerAsync 写了 Metadata["UserId"]。缺失或不等一律拒绝，方向关闭。
                 var customer = await new CustomerService(client).GetAsync(paymentMethod.CustomerId);
-                var violation = DescribeCustomerOwnershipViolation(customer, input.UserId);
+                var violation = DescribeCustomerOwnershipViolation(customer, input.BillingAccount ?? BillingAccountRef.ForUser(input.UserId), _options.Value);
                 if (violation != null)
                 {
                     _logger.LogWarning(
@@ -451,7 +519,7 @@ public class StripeProvider : IPaymentProvider
 
             if (string.IsNullOrWhiteSpace(customerId))
             {
-                customerId = await CreateCustomerAsync(client, input.UserId, input.CustomerName, input.CustomerEmail);
+                customerId = await CreateCustomerAsync(client, input.BillingAccount ?? BillingAccountRef.ForUser(input.UserId), input.CustomerName, input.CustomerEmail);
             }
 
             // 未挂到客户名下的支付方式无法用于 off-session 扣款，这里补齐绑定（已绑定则跳过）
@@ -532,11 +600,9 @@ public class StripeProvider : IPaymentProvider
                 Confirm = true,
                 OffSession = true,
                 Description = input.Description,
-                Metadata = new Dictionary<string, string>
-                {
-                    { "TradeNo", input.TradeNo },
-                    { "BusinessOrderNo", input.BusinessOrderNo }
-                }
+                StatementDescriptorSuffix = StatementDescriptorSuffix,
+                // 带上无人值守标记：这笔的 payment_failed 回调是终态（见 MapCallbackStatus）
+                Metadata = BuildIntentMetadata(input.TradeNo, input.BusinessOrderNo, offSession: true, _options.Value)
             };
 
             // 幂等键按内部流水号：即便"扣款成功但本地状态机推进失败"后换轮重试，
@@ -556,6 +622,15 @@ public class StripeProvider : IPaymentProvider
                     : input.Amount
             });
         }
+        catch (StripeException ex) when ((int)ex.HttpStatusCode >= 500 || ex.HttpStatusCode == HttpStatusCode.Conflict)
+        {
+            // 5xx 是 Stripe 自己出了问题（官方说法：结果不确定，带同一幂等键重试）；409 是同一幂等键的请求还在处理。
+            // 两者都说不准钱扣没扣：按结果未知回报，由回调或到期核实（按 TradeNo 元数据找回 intent）落定，
+            // 而不是当成拒付让订阅换一个流水号（也就换了幂等键）再扣一笔。
+            _logger.LogWarning(ex, "Stripe off-session charge {TradeNo} ended with HTTP {Status}; its outcome is unknown.",
+                input.TradeNo, (int)ex.HttpStatusCode);
+            return Result.Failure<PaymentProviderChargeResult>(ex.StripeError?.Message ?? ex.Message, 502);
+        }
         catch (StripeException ex)
         {
             // 链下扣款被拒（如卡需要 3DS / 余额不足）属预期失败，记录原因供降级 PastDue
@@ -571,41 +646,215 @@ public class StripeProvider : IPaymentProvider
     }
 
     /// <summary>
-    /// <paramref name="customer"/> 是不是本系统为 <paramref name="userId"/> 建的客户；是则返回 <see langword="null"/>，
+    /// <paramref name="customer"/> 是不是本系统为计费账户 <paramref name="account"/> 建的客户；是则返回 <see langword="null"/>，
     /// 否则返回一句写进日志的原因。
     /// </summary>
     /// <remarks>
-    /// 判据是 <see cref="CreateCustomerAsync"/> 写下的 <c>Metadata["UserId"]</c>。★ 缺失不等于放行：
-    /// 一个不是本系统建的（或已删除的）customer 上挂着的卡，本系统无从证明它属于调用者。
+    /// 判据是 <see cref="CreateCustomerAsync"/> 写下的 <c>Metadata["BillingAccount"]</c>（<c>{种类}:{Id}</c>）。
+    /// 引入计费账户之前建的客户只带 <c>Metadata["UserId"]</c>：对个人账户照旧按它认（同一个用户的老客户继续可用）。
+    /// ★ 缺失不等于放行：一个不是本系统建的（或已删除的）customer 上挂着的卡，本系统无从证明它属于调用者。
+    /// ★ 配置了应用标记时，客户带着<b>另一个</b>应用的标记一律拒绝（同一个 Stripe 账户里两套安装都叫
+    /// <c>Installation:default</c> 时，靠它分得清）；没带标记的老客户照旧按账户认。
     /// 与 PayPal 侧按 <c>merchant_customer_id</c> 的校验同形；纯函数，便于不触网断言。
     /// </remarks>
-    internal static string? DescribeCustomerOwnershipViolation(Customer? customer, Guid userId)
+    internal static string? DescribeCustomerOwnershipViolation(Customer? customer, BillingAccountRef account, StripeOptions? options = null)
     {
         if (customer == null || customer.Deleted == true)
             return "the customer does not exist or has been deleted";
 
-        if (customer.Metadata == null || !customer.Metadata.TryGetValue("UserId", out var owner) || string.IsNullOrWhiteSpace(owner))
-            return "the customer carries no UserId metadata, so it was not created for this user by this system";
+        var metadata = customer.Metadata ?? new Dictionary<string, string>();
 
-        return string.Equals(owner, userId.ToString(), StringComparison.OrdinalIgnoreCase)
-            ? null
-            : "the customer was created for a different user";
+        if (options?.HasMetadataStamp == true
+            && metadata.TryGetValue(options.MetadataStampKey, out var stamp)
+            && !string.Equals(stamp, options.MetadataStampValue, StringComparison.Ordinal))
+            return "the customer belongs to another application sharing this Stripe account";
+
+        if (metadata.TryGetValue(BillingAccountMetadataKey, out var owner) && !string.IsNullOrWhiteSpace(owner))
+        {
+            return string.Equals(owner, account.Key, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : "the customer was created for a different billing account";
+        }
+
+        if (account.TryGetUserId(out var userId)
+            && metadata.TryGetValue("UserId", out var legacyOwner) && !string.IsNullOrWhiteSpace(legacyOwner))
+        {
+            return string.Equals(legacyOwner, userId.ToString(), StringComparison.OrdinalIgnoreCase)
+                ? null
+                : "the customer was created for a different user";
+        }
+
+        return "the customer carries no BillingAccount metadata, so it was not created for this account by this system";
     }
 
-    private static async Task<string> CreateCustomerAsync(StripeClient client, Guid userId, string? name, string? email)
+    /// <summary>本渠道建的客户上标记「这个客户属于哪个计费账户」的元数据键。</summary>
+    internal const string BillingAccountMetadataKey = "BillingAccount";
+
+    private async Task<string> CreateCustomerAsync(StripeClient client, BillingAccountRef account, string? name, string? email)
     {
+        var metadata = new Dictionary<string, string> { { BillingAccountMetadataKey, account.Key } };
+        // 个人账户照旧写 UserId：排障时在 Stripe 后台一眼认得出是谁，也让按 UserId 认主的老代码路径继续成立
+        if (account.TryGetUserId(out var userId))
+            metadata["UserId"] = userId.ToString();
+
+        // 幂等键与引入计费账户之前相同（个人账户仍是 cus:{userId}），两次并发的首次绑卡不会建出两个客户
+        var idempotencyKey = account.TryGetUserId(out var uid) ? $"cus:{uid}" : $"cus:{account.Key}";
+
         var customer = await new CustomerService(client).CreateAsync(new CustomerCreateOptions
         {
             Name = string.IsNullOrWhiteSpace(name) ? null : name,
             Email = string.IsNullOrWhiteSpace(email) ? null : email,
-            Metadata = new Dictionary<string, string>
-            {
-                { "UserId", userId.ToString() }
-            }
-        }, new RequestOptions { IdempotencyKey = $"cus:{userId}" });
+            Metadata = WithAppStamp(metadata, _options.Value)
+        }, new RequestOptions { IdempotencyKey = idempotencyKey });
 
         return customer.Id;
     }
+
+    /// <summary>每笔卡支付的账单描述后缀；未配置时为 null（不设）。</summary>
+    private string? StatementDescriptorSuffix
+        => string.IsNullOrWhiteSpace(_options.Value.StatementDescriptorSuffix) ? null : _options.Value.StatementDescriptorSuffix;
+
+    /// <summary>
+    /// 把支付方式事件翻译成回调结果：<c>detached</c> = 凭据失效；<c>updated</c> / <c>automatically_updated</c> = 只刷新展示信息；
+    /// 其余（<c>attached</c> 等）已接收、无需处理。
+    /// </summary>
+    internal static PaymentProviderCallbackResult MapPaymentMethodEvent(Event stripeEvent, StripePaymentMethod paymentMethod)
+    {
+        switch (stripeEvent.Type)
+        {
+            // 用户在 Stripe 侧移除了这张卡（或商户在后台删了它）。
+            // 不处理的话，本地会一直拿着一个已经作废的凭据，直到下次续费扣款失败才发现。
+            case "payment_method.detached":
+                return new PaymentProviderCallbackResult
+                {
+                    EventId = stripeEvent.Id,
+                    Kind = PaymentCallbackKind.PaymentMethodRevoked,
+                    PaymentMethodToken = paymentMethod.Id
+                };
+
+            // 持卡人更新了有效期，或发卡行经 Stripe 的自动换卡（card account updater）换了卡号 / 有效期：
+            // 凭据不变，只是本地展示的尾号与有效期过时了。不刷新，「卡快过期了」的提醒会对着一张早已换过的卡发。
+            case "payment_method.updated":
+            case "payment_method.automatically_updated":
+                return new PaymentProviderCallbackResult
+                {
+                    EventId = stripeEvent.Id,
+                    Kind = PaymentCallbackKind.PaymentMethodUpdated,
+                    PaymentMethodToken = paymentMethod.Id,
+                    UpdatedPaymentMethod = new PaymentProviderPaymentMethodResult
+                    {
+                        Token = paymentMethod.Id,
+                        ProviderCustomerId = paymentMethod.CustomerId,
+                        MethodType = MapStripeMethodType(paymentMethod),
+                        Brand = paymentMethod.Card?.Brand,
+                        Last4 = paymentMethod.Card?.Last4,
+                        ExpiryMonth = paymentMethod.Card != null ? (int)paymentMethod.Card.ExpMonth : null,
+                        ExpiryYear = paymentMethod.Card != null ? (int)paymentMethod.Card.ExpYear : null
+                    }
+                };
+
+            // attached 同样带 PaymentMethod 载荷：把它当撤销会把用户刚绑好的卡立刻清掉
+            default:
+                return new PaymentProviderCallbackResult
+                {
+                    EventId = stripeEvent.Id,
+                    Kind = PaymentCallbackKind.PaymentMethodRevoked,
+                    PaymentMethodToken = paymentMethod.Id,
+                    IsHandled = false
+                };
+        }
+    }
+
+    /// <summary>本模块写在 Stripe 退款元数据里的退款号的键。</summary>
+    internal const string RefundNoMetadataKey = "RefundNo";
+
+    /// <summary>
+    /// <c>charge.refunded</c>：这笔收款上的全部退款。新版本 API 的事件里不再内嵌退款列表，缺了（或不全）就按 charge 去查；
+    /// 查不到答 502 让 Stripe 重投，而不是当成「没有退款」吞掉。
+    /// </summary>
+    private async Task<Result<PaymentProviderCallbackResult>> MapChargeRefundedAsync(Event stripeEvent, global::Stripe.Charge charge)
+    {
+        var refunds = charge.Refunds?.Data;
+        if (refunds == null || charge.Refunds!.HasMore)
+        {
+            try
+            {
+                var listed = await new global::Stripe.RefundService(GetClient()).ListAsync(new RefundListOptions { Charge = charge.Id, Limit = 100 });
+                refunds = listed.Data;
+            }
+            catch (StripeException ex)
+            {
+                _logger.LogWarning(ex, "Stripe refunds for charge {ChargeId} could not be listed; the event will be redelivered.", charge.Id);
+                return Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.StripeRefundQueryFailed, 502);
+            }
+        }
+
+        return Result.Success(MapRefundEvent(stripeEvent, refunds, charge.PaymentIntentId));
+    }
+
+    /// <summary>把渠道退款翻译成回调结果。带本模块退款号的那几笔标上 <see cref="PaymentProviderExternalRefund.LocalRefundNo"/>。</summary>
+    internal static PaymentProviderCallbackResult MapRefundEvent(Event stripeEvent, IEnumerable<global::Stripe.Refund> refunds, string? paymentIntentId)
+    {
+        return new PaymentProviderCallbackResult
+        {
+            EventId = stripeEvent.Id,
+            Kind = PaymentCallbackKind.ExternalRefund,
+            ExternalTradeNo = paymentIntentId,
+            Refunds = refunds
+                .Where(r => !string.IsNullOrWhiteSpace(r.Id))
+                .Select(r => new PaymentProviderExternalRefund
+                {
+                    ExternalRefundNo = r.Id,
+                    LocalRefundNo = r.Metadata != null && r.Metadata.TryGetValue(RefundNoMetadataKey, out var refundNo) && !string.IsNullOrWhiteSpace(refundNo)
+                        ? refundNo
+                        : null,
+                    Amount = CurrencyInfo.FromMinorUnits(r.Amount, r.Currency),
+                    Currency = r.Currency?.ToUpperInvariant(),
+                    Status = MapStripeRefundStatus(r.Status),
+                    Reason = r.Reason
+                })
+                .ToList()
+        };
+    }
+
+    /// <summary>把 Stripe 争议翻译成回调结果。</summary>
+    internal static PaymentProviderCallbackResult MapDisputeEvent(Event stripeEvent, global::Stripe.Dispute dispute)
+        => new()
+        {
+            EventId = stripeEvent.Id,
+            Kind = PaymentCallbackKind.Dispute,
+            ExternalTradeNo = dispute.PaymentIntentId,
+            Dispute = new PaymentProviderDispute
+            {
+                DisputeId = dispute.Id,
+                Status = MapDisputeStatus(dispute.Status),
+                Reason = dispute.Reason,
+                Amount = CurrencyInfo.FromMinorUnits(dispute.Amount, dispute.Currency),
+                Currency = dispute.Currency?.ToUpperInvariant()
+            }
+        };
+
+    internal static PaymentDisputeStatus MapDisputeStatus(string? status) => status switch
+    {
+        "warning_needs_response" => PaymentDisputeStatus.WarningNeedsResponse,
+        "warning_under_review" => PaymentDisputeStatus.WarningUnderReview,
+        "warning_closed" => PaymentDisputeStatus.WarningClosed,
+        "needs_response" => PaymentDisputeStatus.NeedsResponse,
+        "under_review" => PaymentDisputeStatus.UnderReview,
+        "won" => PaymentDisputeStatus.Won,
+        "lost" => PaymentDisputeStatus.Lost,
+        _ => PaymentDisputeStatus.Unknown
+    };
+
+    /// <summary>
+    /// 这笔已收款的 intent 按要求留存下来的支付方式（建单时带了 <c>setup_future_usage</c>）；其余情况 null。
+    /// </summary>
+    internal static string? SavedPaymentMethodOf(PaymentIntent intent)
+        => string.Equals(intent.Status, "succeeded", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(intent.SetupFutureUsage)
+            && !string.IsNullOrWhiteSpace(intent.PaymentMethodId)
+                ? intent.PaymentMethodId
+                : null;
 
     private static PaymentProviderQueryResult BuildQueryResult(PaymentIntent intent, string fallbackTradeNo)
     {
@@ -618,7 +867,8 @@ public class StripeProvider : IPaymentProvider
             Status = MapStripeStatus(intent.Status),
             Amount = CurrencyInfo.FromMinorUnits(intent.Amount, intent.Currency),
             PaidTime = intent.Status == "succeeded" ? DateTime.UtcNow : null,
-            FailReason = intent.LastPaymentError?.Message
+            FailReason = intent.LastPaymentError?.Message,
+            SavedPaymentMethodToken = SavedPaymentMethodOf(intent)
         };
     }
 
@@ -626,6 +876,32 @@ public class StripeProvider : IPaymentProvider
     /// Stripe search 查询语法用单引号包裹字符串值，值内单引号需转义，避免注入到查询表达式
     /// </summary>
     private static string EscapeSearchValue(string value) => value.Replace("'", "\\'", StringComparison.Ordinal);
+
+    /// <summary>按内部流水号搜 PaymentIntent 的查询；配置了应用标记时只搜本应用建的。</summary>
+    internal static string BuildTradeNoSearchQuery(string tradeNo, StripeOptions options)
+    {
+        var query = $"metadata['TradeNo']:'{EscapeSearchValue(tradeNo)}'";
+        return options.HasMetadataStamp
+            ? $"{query} AND metadata['{EscapeSearchValue(options.MetadataStampKey)}']:'{EscapeSearchValue(options.MetadataStampValue!)}'"
+            : query;
+    }
+
+    /// <summary>配置了应用标记时把它加进元数据；否则原样返回。</summary>
+    internal static Dictionary<string, string> WithAppStamp(Dictionary<string, string> metadata, StripeOptions options)
+    {
+        if (options.HasMetadataStamp)
+            metadata[options.MetadataStampKey] = options.MetadataStampValue!;
+        return metadata;
+    }
+
+    /// <summary>
+    /// 这个对象是不是本应用建的：没配置应用标记时一律是（与引入标记之前逐字相同）；配置了就要求元数据里带着同一个标记。
+    /// </summary>
+    internal static bool CarriesAppStamp(IDictionary<string, string>? metadata, StripeOptions options)
+        => !options.HasMetadataStamp
+            || (metadata != null
+                && metadata.TryGetValue(options.MetadataStampKey, out var value)
+                && string.Equals(value, options.MetadataStampValue, StringComparison.Ordinal));
 
     private static PaymentMethodEnum MapStripeMethodType(StripePaymentMethod paymentMethod)
     {
@@ -657,16 +933,53 @@ public class StripeProvider : IPaymentProvider
     /// 而 <c>requires_payment_method</c> 同时也是**新建 intent 的正常初始状态**，
     /// 所以判据只能是事件类型，不能是 intent 状态 —— 与本文件里
     /// <c>payment_method.detached</c> 的处理同形。
+    /// <para>
+    /// ★ <c>payment_intent.payment_failed</c> 只对<b>无人值守扣款</b>（续费 / 试用转正，intent 带
+    /// <see cref="OffSessionMetadataKey"/> 标记）是终态：没有人会在收银台前换卡，intent 退回
+    /// <c>requires_payment_method</c> 之后不会再有尝试。收银台上的一次拒付则不是：intent 退回
+    /// <c>requires_payment_method</c> 正是为了让客户在同一个 Payment Element 里换一张卡重试。
+    /// 此前一律判成 Failed，本地支付当场终结（券归还、发失败事件、业务单取消），客户换卡付掉之后的成功回调
+    /// 撞上本地终态被吞掉，钱收了，订单没履约。所以那种拒付读作处理中：本地支付等成功回调，
+    /// 或等过期扫描作废 intent 后过期（那时才归还券、发过期事件）。
+    /// </para>
     /// </remarks>
-    private static PaymentStatus MapCallbackStatus(string? eventType, string? intentStatus)
+    private static PaymentStatus MapCallbackStatus(string? eventType, PaymentIntent intent)
     {
         return eventType switch
         {
-            "payment_intent.payment_failed" => PaymentStatus.Failed,
+            "payment_intent.payment_failed" => IsOffSessionIntent(intent) ? PaymentStatus.Failed : PaymentStatus.Processing,
             "payment_intent.canceled" => PaymentStatus.Cancelled,
-            _ => MapStripeStatus(intentStatus)
+            _ => MapStripeStatus(intent.Status)
         };
     }
+
+    /// <summary>
+    /// intent 元数据里标记「这是一笔无人值守扣款」的键。只由 <see cref="ChargeOffSessionAsync"/> 写入。
+    /// </summary>
+    internal const string OffSessionMetadataKey = "OffSession";
+
+    /// <summary>
+    /// 本系统建的 PaymentIntent 统一带的元数据：内部流水号（回调凭它找回本地支付）、业务单号，
+    /// 无人值守扣款另带 <see cref="OffSessionMetadataKey"/>。
+    /// </summary>
+    internal static Dictionary<string, string> BuildIntentMetadata(string tradeNo, string businessOrderNo, bool offSession, StripeOptions? options = null)
+    {
+        var metadata = new Dictionary<string, string>
+        {
+            { "TradeNo", tradeNo },
+            { "BusinessOrderNo", businessOrderNo }
+        };
+
+        if (offSession)
+            metadata[OffSessionMetadataKey] = "true";
+
+        return options == null ? metadata : WithAppStamp(metadata, options);
+    }
+
+    private static bool IsOffSessionIntent(PaymentIntent intent)
+        => intent.Metadata != null
+            && intent.Metadata.TryGetValue(OffSessionMetadataKey, out var flag)
+            && string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
 
     private static PaymentStatus MapStripeStatus(string? status)
     {

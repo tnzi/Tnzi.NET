@@ -23,6 +23,12 @@ public class AgentRunRequest
     /// <summary>多模态内容部分</summary>
     public List<ContentPartDto>? ContentParts { get; init; }
 
+    /// <summary>
+    /// 线程刚为这一轮回退过（聊天的编辑或重新生成）：被替换的用户消息及其后的消息已从线程删除。
+    /// 只由 <c>ChatService</c> 在执行回退之后置 true，不映射任何请求体；外部 CLI 路径据此告诉消费方的轮次处理器。
+    /// </summary>
+    public bool RewoundTurns { get; init; }
+
     /// <summary>对话线程 ID（为空则新建，中间件可回写）</summary>
     public Guid? ThreadId { get; set; }
 
@@ -84,6 +90,30 @@ public class AgentRunRequest
     /// </remarks>
     public string? SubAgentName { get; init; }
 
+    /// <summary>
+    /// 子 Agent 模板的系统指令（<c>SubAgentType.Instructions</c>），给没有自己 Agent 的模板运行当系统提示。
+    /// </summary>
+    /// <remarks>
+    /// spawn 时从模板抄进请求，续跑按快照取回，不在运行时回查注册表：模板事后被改、被删或在别的实例上还没重载，
+    /// 已经起跑的运行仍按它起跑时的那份模板走（与 <see cref="ToolGroups"/> / <see cref="Model"/> 同一口径）。
+    /// 带 <see cref="AgentId"/> 的 spawn 不填它：已定义的 Agent 用自己的指令。
+    /// ★ 只由进程内的 spawn 路径设置，<b>绝不映射任何 HTTP 请求体</b>（与 <see cref="TrustedToolSelection"/> 同一纪律）。
+    /// </remarks>
+    public string? SubAgentInstructions { get; init; }
+
+    /// <summary>
+    /// 本次运行的工具循环上限（子 Agent 模板的 <c>MaxTurns</c>）；为空沿用执行器自己的上限。
+    /// ★ 只由进程内的 spawn 路径设置，<b>绝不映射任何 HTTP 请求体</b>：上限决定一次运行最多调用模型多少次。
+    /// </summary>
+    public int? MaxToolIterations { get; init; }
+
+    /// <summary>
+    /// 本次运行不给模型的工具组（子 Agent 模板的 <c>ExcludedToolGroups</c>，按 <c>[AIToolGroup]</c> 组名）。
+    /// 运行时把组里的工具名并进 <c>AiMiddlewareContext.ExcludedToolNames</c>，Agent 自带的、请求自选的、
+    /// 中间件注入的工具一并去掉。★ 只由进程内的 spawn 路径设置，<b>绝不映射任何 HTTP 请求体</b>。
+    /// </summary>
+    public List<string>? ExcludedToolGroups { get; init; }
+
     /// <summary>当前用户 ID（用于配额检查等）</summary>
     public Guid? UserId { get; init; }
 
@@ -107,6 +137,15 @@ public class AgentRunRequest
 
     /// <summary>扩展元数据</summary>
     public Dictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>
+    /// 客户端随这一轮带来的每轮元数据（<c>ChatRequestDto.Metadata</c>，已校验）。
+    /// </summary>
+    /// <remarks>
+    /// 刻意与 <see cref="Metadata"/> 分开：那一份是框架内部的键值（中间件读 <c>ThreadId</c> 之类），
+    /// 把客户端的键并进去，客户端就能冒充框架写的值。只由 <c>ChatService</c> 设置。
+    /// </remarks>
+    public IReadOnlyDictionary<string, JsonElement>? TurnMetadata { get; init; }
 
     /// <summary>是否启用计划模式（启用 Todo 追踪）</summary>
     public bool PlanMode { get; init; }

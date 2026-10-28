@@ -72,6 +72,34 @@ export enum PermissionCategory {
 export interface AccessProfileDto {
   isSuperAdmin: boolean
   permissions: string[]
+  /**
+   * Present only when the backend narrows the super-admin bypass
+   * (`Authorization:SuperAdminBypassScope = Platform`). Then a super admin's
+   * `permissions` is the platform catalogue plus their explicit grants, and a
+   * client must gate on that list instead of on `isSuperAdmin`. Absent means
+   * `All`: the bypass covers every code.
+   */
+  superAdminBypassScope?: SuperAdminBypassScope
+}
+
+/**
+ * Which codes the backend's super-admin bypass covers
+ * (`Authorization:SuperAdminBypassScope`).
+ */
+export enum SuperAdminBypassScope {
+  /** Every code (default). */
+  All = 'All',
+  /** Only codes in platform-scoped permission groups. */
+  Platform = 'Platform',
+}
+
+/**
+ * Who a permission group belongs to: the platform operator or the
+ * organisation using the application. Drives the narrowed super-admin bypass.
+ */
+export enum PermissionScope {
+  Platform = 'Platform',
+  Application = 'Application',
 }
 
 export interface ModuleFunctionDto {
@@ -102,6 +130,50 @@ export interface ModuleFunctionDto {
    * rather than offering it for assignment.
    */
   isRetired?: boolean
+}
+
+/**
+ * One module of the permission catalogue together with every one of its
+ * functions (`GET /admin/role-functions/catalogue`,
+ * `/admin/user-functions/catalogue`, `/admin/module-functions/catalogue`).
+ *
+ * The list is flat: the hierarchy is carried by `parentId` only. Disabled and
+ * retired modules and functions are included with their flags, the same rows
+ * `GET /admin/modules` plus `GET /admin/modules/{id}/functions` return, so each
+ * page decides what to hide (the assignment matrices drop retired functions,
+ * the permission catalogue page greys them out).
+ *
+ * The same read sits behind each page's own class-level code
+ * (`authorization.roleFunction.view` / `authorization.userFunction.view` /
+ * `authorization.permission.view`), so a delegated administrator holding only
+ * that code can use the page without `authorization.functionModule.view`.
+ */
+export interface PermissionCatalogueModuleDto extends FunctionModuleDto {
+  /** No loaded module declares this module any more. */
+  isRetired?: boolean
+  /**
+   * Platform or application group. Sent only when the super-admin bypass is
+   * narrowed to platform codes; an admin-created module is `Application`.
+   */
+  scope?: PermissionScope
+  /** Every function of the module, ordered by `order`. */
+  functions: ModuleFunctionDto[]
+}
+
+/**
+ * A role as listed beside the role assignment matrix
+ * (`GET /admin/role-functions/roles`, behind `authorization.roleFunction.view`).
+ * Same shape as Identity's role list; the role management page itself stays
+ * behind Identity's `role.view`.
+ */
+export interface AssignableRoleDto {
+  id: string
+  name: string
+  normalizedName?: string | null
+  description?: string | null
+  isSystem: boolean
+  isDefault: boolean
+  creationTime: Date | string
 }
 
 /** Create a custom permission point (POST /admin/module-functions). */
@@ -252,9 +324,15 @@ export interface CreateEntityInfoDto {
   isDataAuthEnabled?: boolean
 }
 
+/**
+ * Replaces the editable fields of a registration (the type name is fixed).
+ * `name` and `isDataAuthEnabled` are required: the server answers 400 without
+ * them rather than defaulting to an empty name or a re-enabled switch.
+ */
 export interface UpdateEntityInfoDto {
+  name: string
   displayName?: string | null
-  isDataAuthEnabled?: boolean
+  isDataAuthEnabled: boolean
 }
 
 // ─── EntityRole ───────────────────────────────────────────────────────────────
@@ -277,10 +355,10 @@ export interface CreateEntityRoleDto {
   filter?: string
 }
 
+/** Backend: UpdateEntityRoleRequest. A rule is enabled while it exists; delete it to switch it off. */
 export interface UpdateEntityRoleDto {
   operation: DataAuthOperation
   filter?: string
-  isEnabled?: boolean
 }
 
 // ============================================
@@ -401,4 +479,94 @@ export interface UserPermissionPictureDto {
   denied: string[];
   /** Codes in effect. */
   effective: string[];
+}
+
+// ─── Permission holders (who holds a code) ───────────────────────────────────
+
+/**
+ * How a role relates to one permission code (mirrors backend
+ * `PermissionRoleGrantState`, serialized by member name).
+ */
+export enum PermissionRoleGrantState {
+  /** Super-admin role: members bypass every check; no grant row involved. */
+  SuperAdmin = 'SuperAdmin',
+  /** Enabled grant on a function in effect: members hold the code (unless denied). */
+  Effective = 'Effective',
+  /**
+   * Enabled grant on a disabled or retired function. Grants nothing today and
+   * comes back unchanged when the function does.
+   */
+  Dormant = 'Dormant',
+  /** The grant row exists but its own switch is off. */
+  GrantDisabled = 'GrantDisabled',
+}
+
+/** One role in a {@link PermissionHoldersDto}. */
+export interface PermissionHolderRoleDto {
+  id: string;
+  /** Empty when the role no longer exists. */
+  name: string;
+  state: PermissionRoleGrantState;
+  /** Members inside the caller's tenant scope whose accounts still exist. */
+  memberCount: number;
+}
+
+/** A role on a holder's path. */
+export interface PermissionHolderRoleRefDto {
+  id: string;
+  name: string;
+}
+
+/** One account that holds the code, with how it holds it. */
+export interface PermissionHolderUserDto {
+  id: string;
+  /** Empty when the caller lacks `user.view` or the backend has no Identity user lookup. */
+  userName: string;
+  /** Holds it as a super admin (bypasses every check; deny rows do not apply). */
+  isSuperAdmin: boolean;
+  /** Holds it through a direct user grant. */
+  isDirect: boolean;
+  /** Roles it holds the code through, super-admin roles first. Empty for direct-only holders. */
+  roles: PermissionHolderRoleRefDto[];
+}
+
+/** An account with a user-level deny row on the code. */
+export interface PermissionDeniedUserDto {
+  id: string;
+  /** Empty when the caller lacks `user.view` or the backend has no Identity user lookup. */
+  userName: string;
+}
+
+/**
+ * Who holds one permission code (`GET /admin/function-authorization/permission/holders`):
+ * the roles that grant it, the accounts that end up holding it and through
+ * what, and the accounts explicitly denied it.
+ *
+ * `users` agrees with the runtime check account by account, narrowed to the
+ * caller's tenant scope. Super admins are part of it (they hold every code
+ * without a grant row), and when the function is not in effect they are all
+ * that is left; grants pointing at it are still listed as `Dormant` because
+ * they come back the moment the function does.
+ */
+export interface PermissionHoldersDto {
+  functionId: string;
+  code: string;
+  name: string;
+  category: PermissionCategory;
+  isEnabled: boolean;
+  isRetired: boolean;
+  /** Enabled and not retired. When false only super admins hold the code. */
+  isInEffect: boolean;
+  /**
+   * The caller lacks `user.view`, so `users` and `deniedUsers` carry ids but
+   * empty user names. The list itself is complete; account names belong to the
+   * user-management surface, not to the permission catalogue.
+   */
+  userNamesHidden: boolean;
+  /** Super-admin roles, then effective, dormant and disabled grants; by name within each. */
+  roles: PermissionHolderRoleDto[];
+  /** Accounts holding the code, by user name. */
+  users: PermissionHolderUserDto[];
+  /** Accounts with a deny row (super admins excluded: a deny does not apply to them). */
+  deniedUsers: PermissionDeniedUserDto[];
 }

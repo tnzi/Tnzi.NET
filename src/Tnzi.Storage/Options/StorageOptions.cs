@@ -116,11 +116,15 @@ public class StorageOptions
     public int ImageCompressionQuality { get; set; } = 85;
 
     /// <summary>
-    /// 获取或设置 文件访问URL前缀
+    /// 获取或设置 provider 级直链的 URL 前缀：只被 <see cref="Providers.IFileStorage.GetUrlAsync"/> 在不带过期时间时读取
+    /// （为空时用各 provider 自己的默认地址）。
     /// </summary>
-    [RuntimeSetting(Label = "File URL Prefix", I18n = "admin.modules.system.settings.fields.storageUrlPrefix",
-        Type = SettingFieldType.String, Subsection = "Files",
-        Description = "Base URL prefix prepended to generated file access URLs (e.g. a CDN origin). Leave empty to use the storage provider default.")]
+    /// <remarks>
+    /// ★ 框架自己生成的文件地址<b>一个都不经过它</b>：<c>files/{id}/url</c>、<c>preview-url</c>、缩略图与下载都是
+    /// <c>/api/files/{id}/…</c>，每次访问都过授权器。它只服务于直接注入 <c>IFileStorage</c> 拼 provider 直链的消费方代码。
+    /// 所以它不在设置中心里：那里的开关承诺的是「改了就生效」，而管理员改了它，框架生成的任何地址都不会变。
+    /// 也<b>不要</b>把它接到 <c>files/{id}/url</c> / <c>preview-url</c> 上：那会重新发出绕过授权器、永不失效的直链。
+    /// </remarks>
     public string? UrlPrefix { get; set; }
 
     /// <summary>
@@ -152,6 +156,58 @@ public class StorageOptions
     /// 获取或设置 压缩 / 解压的资源上限
     /// </summary>
     public ArchiveOptions Archive { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 按用户的存储配额
+    /// </summary>
+    public StorageQuotaOptions Quota { get; set; } = new();
+
+    /// <summary>
+    /// 获取或设置 回收站（由 <c>Tnzi.Storage.Workspace</c> 提供；未加载时本节不起作用）
+    /// </summary>
+    public RecycleBinOptions RecycleBin { get; set; } = new();
+}
+
+/// <summary>
+/// 按用户的存储配额。配置路径：Storage:Quota
+/// </summary>
+/// <remarks>
+/// <para>
+/// 配额的主语是<b>文件的所有者</b>（<see cref="Entities.FileRecord.CreatorId"/>）：上传者自己，或服务端代某个用户写入时
+/// 指定的那个用户。没有所有者的写入（后台任务、匿名请求）不计入任何人，也不受配额约束。
+/// </para>
+/// <para>
+/// 用量 = 该用户名下所有文件记录的字节数（含临时上传、回收站里尚未清除的文件），加上子模块为他保留的字节
+/// （<c>Tnzi.Storage.Workspace</c> 加载时：文件的历史版本）。检查发生在字节交给存储提供者之前，
+/// 所以是「这次写入之后会不会超」；同一用户的并发上传可以一起越过上限，越过的量不超过同时在途的那几份。
+/// </para>
+/// <para>
+/// 这里给的是全体用户的默认值。按用户覆盖由 <see cref="Services.IStorageAllowanceProvider"/> 决定：
+/// 加载 <c>Tnzi.Storage.Workspace</c> 时由它的覆盖表提供（管理端 <c>admin/storage/quotas</c>），
+/// 消费方也可以注册自己的实现（例如按订阅套餐给配额）。
+/// </para>
+/// </remarks>
+public class StorageQuotaOptions
+{
+    /// <summary>
+    /// 获取或设置 每个用户默认可用的字节数。<c>null</c>（默认）= 不限；<c>0</c> = 不允许存任何文件。
+    /// </summary>
+    public long? DefaultUserAllowanceBytes { get; set; }
+}
+
+/// <summary>
+/// 回收站。配置路径：Storage:RecycleBin
+/// </summary>
+/// <remarks>
+/// 自动清除跑在父模块的后台清理里（<c>Storage:Cleanup:Enabled</c>），那个开关关着时回收站只能手动清空。
+/// 回收站里的文件在清除之前一直计入所有者的配额。
+/// </remarks>
+public class RecycleBinOptions
+{
+    /// <summary>
+    /// 获取或设置 放进回收站多少天之后自动清除，默认 30。<c>0</c> = 不自动清除。
+    /// </summary>
+    public int RetentionDays { get; set; } = 30;
 }
 
 /// <summary>
@@ -588,6 +644,12 @@ public class StorageOptionsValidator : OptionsValidatorBase<StorageOptions>
 
         if (options.Archive.MaxTotalExtractedBytes <= 0)
             errors.Add("Archive.MaxTotalExtractedBytes must be greater than 0.");
+
+        if (options.Quota.DefaultUserAllowanceBytes < 0)
+            errors.Add("Quota.DefaultUserAllowanceBytes cannot be negative (leave it empty for no limit).");
+
+        if (options.RecycleBin.RetentionDays < 0)
+            errors.Add("RecycleBin.RetentionDays cannot be negative (use 0 to keep items until they are deleted by hand).");
 
         // 验证S3配置（如果Provider为S3）
         if (options.Provider.Equals("S3", StringComparison.OrdinalIgnoreCase))

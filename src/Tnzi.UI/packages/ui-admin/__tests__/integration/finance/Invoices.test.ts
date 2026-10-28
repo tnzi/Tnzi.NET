@@ -67,6 +67,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 })
 
 import Page from '../../../src/pages/finance/Invoices.vue'
+import { applyDocumentSearch } from './document-search.helper'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -99,10 +100,42 @@ describe('Finance Invoices page', () => {
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
   })
+  // The list endpoint binds its filters by name: invoices filter by customer (`customerId`), and a
+  // key it does not declare is dropped without an error, so the list would
+  // claim to be filtered while showing every party. The date goes out as the
+  // picked calendar day; the picker's epoch number fails model binding.
+  it('the advanced search filters by the party key the list endpoint binds, and a calendar date', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const filters = await applyDocumentSearch(wrapper)
+    expect(filters).toEqual({ dateFrom: '2026-01-15', customerId: 'party-1' })
+  })
 
   // The customer work surface hands off with `?entry=new&party=<id>`. `new` is
   // useDetail's create token - spelling it `create` silently opens nothing,
   // which typecheck and a push-payload assertion both wave through.
+  // A draft update replaces the invoice, rate included: a manual rate the
+  // editor does not show must survive an edit made for something else.
+  it('saving an edited draft sends back its manual exchange rate', async () => {
+    docSection.getById.mockResolvedValueOnce({
+      id: 'i9', status: 'Draft', customerId: 'c1', docDate: '2026-07-01', currency: 'EUR', exchangeRate: 1.48, memo: null,
+      lines: [{ id: 'l1', lineNumber: 1, itemId: null, description: 'Licence', accountId: 'a1', quantity: 2, unitPrice: 50, amount: 100, taxCodeId: null }],
+    } as never)
+    docSection.updateDraft.mockClear().mockResolvedValueOnce({ id: 'i9' } as never)
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { openEdit: (row: { id: string }) => void }
+    vm.openEdit({ id: 'i9' })
+    await flushPromises()
+    const editorVm = wrapper.findComponent({ name: 'DocumentEditor' }).vm as unknown as { memo: string; save: (post: boolean) => Promise<void> }
+    editorVm.memo = 'PO 4411'
+    await editorVm.save(false)
+
+    expect(docSection.updateDraft).toHaveBeenCalledWith('i9', expect.objectContaining({ memo: 'PO 4411', currency: 'EUR', exchangeRate: 1.48 }))
+    wrapper.unmount()
+  })
+
   it('opens a pre-filled draft from a customer hand-off', async () => {
     routeQuery.current = { entry: 'new', party: 'p9' }
     const wrapper = mount(Page, { global: { stubs } })

@@ -18,6 +18,10 @@ namespace Tnzi.BackgroundJobs;
 ///
 /// ★**每批一个 DI 作用域**：仓储与 DbContext 是 Scoped，而后台服务是 Singleton，
 /// 不开作用域就会跨批共用同一个 DbContext（变更跟踪器无限增长 + 并发访问）。
+///
+/// ★**停机先排空再退出**：停机信号不会打断正在落库的批次，通道里剩下的元素也照常成批写完，
+/// 整段排空以 <see cref="ShutdownDrainTimeout"/> 为限；只有超时才放弃剩余元素并记 Warning。
+/// 子类收到的 <c>cancellationToken</c> 因此只在排空超时后才会取消。
 /// </remarks>
 public abstract class ChannelBatchProcessorBase<TItem> : BackgroundService
 {
@@ -54,6 +58,13 @@ public abstract class ChannelBatchProcessorBase<TItem> : BackgroundService
     protected virtual TimeSpan ErrorRetryDelay => TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// 停机信号到达后，把正在落库的批次与通道里剩下的元素写完的时间上限。
+    /// 超时仍未写完的元素被放弃（记 Warning）。须明显小于宿主的 <c>HostOptions.ShutdownTimeout</c>（默认 30 秒），
+    /// 否则宿主会先于排空结束放弃等待。
+    /// </summary>
+    protected virtual TimeSpan ShutdownDrainTimeout => TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// 日志中使用的服务名。
     /// </summary>
     protected virtual string ServiceName => GetType().Name;
@@ -68,18 +79,30 @@ public abstract class ChannelBatchProcessorBase<TItem> : BackgroundService
         CancellationToken cancellationToken);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★落库用的令牌与停机信号是两个：停机信号只让循环不再等新元素，正在落库的批次不被打断；
+    /// 循环退出后把通道里剩下的元素照常成批写完，整段排空以 <see cref="ShutdownDrainTimeout"/> 为限，
+    /// 到点才取消落库令牌。否则每次发布 / 重启都会丢掉停机前最后几秒的审计与登录记录。
+    /// </remarks>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("{Service} is starting.", ServiceName);
+
+        using var processingCts = new CancellationTokenSource();
+        var drainTimeout = ShutdownDrainTimeout < TimeSpan.Zero ? TimeSpan.Zero : ShutdownDrainTimeout;
+        using var stopRegistration = stoppingToken.Register(() => processingCts.CancelAfter(drainTimeout));
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (await _reader.WaitToReadAsync(stoppingToken).ConfigureAwait(false))
+                if (!await _reader.WaitToReadAsync(stoppingToken).ConfigureAwait(false))
                 {
-                    await DrainOneBatchAsync(stoppingToken).ConfigureAwait(false);
+                    // 写入端已完成且通道已空：不会再有元素，继续等只会空转
+                    break;
                 }
+
+                await DrainOneBatchAsync(processingCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -101,10 +124,34 @@ public abstract class ChannelBatchProcessorBase<TItem> : BackgroundService
             }
         }
 
+        await DrainOnShutdownAsync(processingCts.Token).ConfigureAwait(false);
+
         _logger.LogInformation("{Service} is stopping.", ServiceName);
     }
 
-    private async Task DrainOneBatchAsync(CancellationToken stoppingToken)
+    /// <summary>
+    /// 停机时把通道里剩下的元素成批写完。一批失败就停下：数据库此刻不可用，
+    /// 继续逐批重试只会在停机窗口里刷出一串同样的错误。
+    /// </summary>
+    private async Task DrainOnShutdownAsync(CancellationToken processingToken)
+    {
+        while (!processingToken.IsCancellationRequested)
+        {
+            var outcome = await DrainOneBatchAsync(processingToken).ConfigureAwait(false);
+            if (outcome == BatchOutcome.Empty)
+                return;
+            if (outcome != BatchOutcome.Stored)
+                break;
+        }
+
+        if (_reader.TryPeek(out _))
+        {
+            _logger.LogWarning("{Service} stopped with items still queued; they were dropped because the shutdown drain could not finish.",
+                ServiceName);
+        }
+    }
+
+    private async Task<BatchOutcome> DrainOneBatchAsync(CancellationToken processingToken)
     {
         var batchSize = Math.Max(1, BatchSize);
         var batch = new List<TItem>(batchSize);
@@ -115,20 +162,35 @@ public abstract class ChannelBatchProcessorBase<TItem> : BackgroundService
         }
 
         if (batch.Count == 0)
-            return;
-
-        using var scope = _serviceProvider.CreateScope();
+            return BatchOutcome.Empty;
 
         try
         {
-            await ProcessBatchAsync(batch, scope.ServiceProvider, stoppingToken).ConfigureAwait(false);
+            using var scope = _serviceProvider.CreateScope();
+            await ProcessBatchAsync(batch, scope.ServiceProvider, processingToken).ConfigureAwait(false);
             _logger.LogDebug("{Service} processed {Count} items.", ServiceName, batch.Count);
+            return BatchOutcome.Stored;
+        }
+        catch (OperationCanceledException) when (processingToken.IsCancellationRequested)
+        {
+            // 落库令牌只在停机排空超时后才会取消
+            _logger.LogWarning("{Service} dropped a batch of {Count} items because the shutdown drain timeout ({Timeout}) elapsed before it was stored.",
+                ServiceName, batch.Count, ShutdownDrainTimeout);
+            return BatchOutcome.Dropped;
         }
         catch (Exception ex)
         {
             // 丢弃这一批：遥测数据不值得把后台服务拖垮（见类型注释）。
             _logger.LogError(ex, "{Service} failed to process a batch of {Count} items; the batch was dropped.",
                 ServiceName, batch.Count);
+            return BatchOutcome.Dropped;
         }
+    }
+
+    private enum BatchOutcome
+    {
+        Empty,
+        Stored,
+        Dropped
     }
 }

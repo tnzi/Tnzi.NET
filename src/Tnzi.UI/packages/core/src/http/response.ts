@@ -53,6 +53,9 @@ function failedFromStatus<T>(httpStatus: number, raw: Record<string, unknown> | 
  *   `succeeded: true, code: 200, data: undefined`, so a rejected write reported
  *   success and a gateway 401 bypassed the refresh cycle. Omit it and the body
  *   is all there is (older callers, already-parsed payloads).
+ *
+ * A body without envelope fields on a 2xx (or with no status given) is the
+ * payload itself: `{ succeeded: true, data: body }`.
  */
 export function normalizeApiResult<T>(
   raw: Record<string, unknown> | null | undefined,
@@ -74,8 +77,17 @@ export function normalizeApiResult<T>(
     };
   }
 
-  if (statusFails && !isEnvelope(raw)) {
-    return failedFromStatus<T>(httpStatus, raw);
+  if (!isEnvelope(raw)) {
+    if (statusFails) return failedFromStatus<T>(httpStatus, raw);
+    // A successful body that is not an envelope (an endpoint that returns a
+    // bare document, such as the Altcha challenge) IS the payload. Reading
+    // `raw.data` here used to hand back `data: undefined` and drop it.
+    return {
+      succeeded: true,
+      success: true,
+      code: httpStatus ?? 200,
+      data: raw as T,
+    };
   }
 
   const code = (raw.code ?? raw.Code ?? 200) as number;

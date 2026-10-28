@@ -76,6 +76,8 @@ const cropperContainerRef = ref<HTMLImageElement | null>(null)
 
 // Cropper instance (set lazily after dynamic import; cropperjs v2 web-component API)
 let cropperInstance: CropperJs | null = null
+// The file being cropped: its name and type decide the cropped file's.
+let cropSource: File | null = null
 
 // ---------------------------------------------------------------------------
 // Computed
@@ -154,17 +156,14 @@ async function handleFileChange(event: Event): Promise<void> {
 
   // Validate type
   if (!isAcceptedType(file, props.accept)) {
-    emit('error', `Invalid file type. Please select a file matching "${props.accept}".`)
+    emit('error', t('upload.fileTypeLimit'))
     return
   }
 
   // Validate size
   const sizeMb = file.size / (1024 * 1024)
   if (sizeMb > props.maxSizeMb) {
-    emit(
-      'error',
-      `File size (${sizeMb.toFixed(1)} MB) exceeds the maximum allowed size of ${props.maxSizeMb} MB.`,
-    )
+    emit('error', t('upload.fileSizeLimit'))
     return
   }
 
@@ -180,6 +179,7 @@ async function handleFileChange(event: Event): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function openCropper(file: File): Promise<void> {
+  cropSource = file
   cropperImageSrc.value = URL.createObjectURL(file)
   cropperModalOpen.value = true
 }
@@ -237,16 +237,34 @@ function onCropperModalEntered(): void {
   fitCropperToCanvas()
 }
 
+/**
+ * The format the crop is exported in: a JPEG stays JPEG, anything else becomes
+ * PNG. JPEG has no alpha channel, so exporting a transparent PNG / WebP / GIF
+ * as JPEG painted its transparent areas black.
+ */
+function croppedFormat(source: File | null): { type: string; extension: string; quality?: number } {
+  return source?.type === 'image/jpeg'
+    ? { type: 'image/jpeg', extension: 'jpg', quality: 0.9 }
+    : { type: 'image/png', extension: 'png' }
+}
+
+/** `photo.jpeg` -> `photo.jpg`: the source's base name with the export's extension. */
+function croppedFileName(source: File | null, extension: string): string {
+  const base = source?.name.replace(/\.[^./\\]*$/, '') || 'image'
+  return `${base}.${extension}`
+}
+
 async function confirmCrop(): Promise<void> {
   if (!cropperInstance) return
 
-  // v2: render the current selection to a real canvas (async), then export a JPEG blob.
+  // v2: render the current selection to a real canvas (async), then export it.
+  const format = croppedFormat(cropSource)
   const selection = cropperInstance.getCropperSelection()
   const blob = selection
     ? await new Promise<Blob | null>((resolve) => {
         selection
           .$toCanvas()
-          .then((canvas) => canvas.toBlob(resolve, 'image/jpeg', 0.9))
+          .then((canvas) => canvas.toBlob(resolve, format.type, format.quality))
           .catch(() => resolve(null))
       })
     : null
@@ -256,8 +274,14 @@ async function confirmCrop(): Promise<void> {
   cropperInstance = null
 
   if (blob) {
-    await performUpload(blob)
+    // A named file of the right type: an upload endpoint that checks the
+    // content against the extension must not have to guess one.
+    await performUpload(new File([blob], croppedFileName(cropSource, format.extension), { type: format.type }))
+  } else {
+    // The dialog has closed; without this the user is left with nothing.
+    emit('error', t('upload.cropFailed'))
   }
+  cropSource = null
 
   if (cropperImageSrc.value.startsWith('blob:')) {
     URL.revokeObjectURL(cropperImageSrc.value)
@@ -266,6 +290,7 @@ async function confirmCrop(): Promise<void> {
 }
 
 function cancelCrop(): void {
+  cropSource = null
   cropperModalOpen.value = false
   if (cropperInstance) {
     cropperInstance.destroy()
@@ -288,8 +313,10 @@ async function performUpload(fileOrBlob: File | Blob): Promise<void> {
     emit('update:modelValue', result.url)
     emit('update:fileId', result.id)
     emit('change', { id: result.id, url: result.url })
-  } catch {
-    emit('error', 'Upload failed. Please try again.')
+  } catch (err) {
+    // The upload function's own message says why (a refused type, a quota);
+    // the generic text is only for a failure that carries none.
+    emit('error', err instanceof Error && err.message ? err.message : t('upload.uploadFailed'))
   } finally {
     loading.value = false
   }

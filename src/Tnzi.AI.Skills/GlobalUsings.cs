@@ -44,6 +44,7 @@ global using Tnzi.EventBus;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.EFCore.Extensions;
+global using Tnzi.EFCore.Internal;
 global using Tnzi.Extensions;
 global using Tnzi.Json;
 global using Tnzi.Mapster;

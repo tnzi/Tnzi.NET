@@ -110,6 +110,8 @@ public class AuditOptions
     /// 因为它们的请求本身正是要审计的操作。
     /// 与 <see cref="SensitiveFields"/> 刻意是两份名单：请求体字段名走 camelCase（<c>accessToken</c>），
     /// 查询参数名走 OAuth 的 snake_case（<c>access_token</c>）。部署方按自己的参数名增删。
+    /// 同一份名单也作用于路径里的路由参数（<see cref="RequestPathRedactor"/>）：<c>signing/{token}</c>、
+    /// <c>files/share/{token}</c> 这类端点的那一段在 <c>Url</c> 与回退的 <c>FunctionName</c> 里同样记为 <c>***</c>。
     /// </remarks>
     public HashSet<string> SensitiveQueryKeys { get; set; } =
         new(QueryStringRedactor.DefaultSensitiveKeys, StringComparer.OrdinalIgnoreCase);
@@ -128,23 +130,29 @@ public class AuditOptions
         Description = "Record query string / form parameters on each audited operation")]
     public bool EnableRequestParameters { get; set; } = true;
 
-    /// <summary>
-    /// 是否记录响应结果。
-    /// KEEP-STATIC：当前无运行时消费者（AuditMiddleware 未读取此开关），暴露会造成"假热配"。
-    /// </summary>
-    public bool EnableResponseResult { get; set; } = false;
-
     /// <summary>是否启用请求体记录</summary>
     [RuntimeSetting(Label = "Capture Request Body", I18n = "admin.modules.system.settings.fields.auditEnableRequestBodyCapture",
         Type = SettingFieldType.Boolean, Subsection = "Capture",
         Description = "Persist request bodies to the audit table. May store sensitive payloads (PII, credentials); sensitive fields are redacted, but review privacy impact before enabling in production")]
     public bool EnableRequestBodyCapture { get; set; } = false;
 
-    /// <summary>请求体最大记录大小（字节），超出部分截断</summary>
+    /// <summary>
+    /// 请求体最大记录大小，超出部分截断（截断发生在脱敏<b>之后</b>；按字符计，ASCII 正文下即字节数）。
+    /// </summary>
+    /// <remarks>
+    /// 截断的是<b>已脱敏</b>的文本：脱敏要解析完整文档，截断过的 JSON 是非法串、脱敏器只能原样返回：
+    /// 此前先截断后脱敏，任何超过这个值的 JSON 体连同其中的口令一起原样入表。为此中间件会把整条体
+    /// （至多 <see cref="MaxRequestBodySizeLimit"/> 字节）读进来脱敏，更大的体只留一个标记。
+    /// </remarks>
     [RuntimeSetting(Label = "Max Request Body Size (bytes)", I18n = "admin.modules.system.settings.fields.auditMaxRequestBodySize",
-        Type = SettingFieldType.Int, Min = 1, Max = 65536, Subsection = "Capture",
-        Description = "Request bodies larger than this size (bytes) are truncated")]
+        Type = SettingFieldType.Int, Min = 1, Max = MaxRequestBodySizeLimit, Subsection = "Capture",
+        Description = "Recorded request bodies are truncated to this size after sensitive fields are redacted. Bodies larger than 64 KB, and bodies that are neither JSON nor form-encoded, are recorded as a marker only")]
     public int MaxRequestBodySize { get; set; } = 4096;
+
+    /// <summary>
+    /// <see cref="MaxRequestBodySize"/> 的上限，也是请求体为了脱敏而整条读入的上界（字节）。超过它的体不读、只记标记。
+    /// </summary>
+    public const int MaxRequestBodySizeLimit = 65536;
 
     /// <summary>
     /// 需要脱敏的敏感字段名（不区分大小写，精确匹配）。

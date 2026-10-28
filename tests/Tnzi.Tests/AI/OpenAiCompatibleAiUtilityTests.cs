@@ -660,6 +660,28 @@ public class OpenAiCompatibleAiUtilityTests
         logger.AssertNeverContains(InlineKey);
     }
 
+    /// <summary>
+    /// 失败响应体截到 500 个码元写进日志：截断点落在代理对中间时整个字符一起舍掉，
+    /// 日志里不留孤立的高代理项（按严格 UTF-8 落库的日志汇点会拒收整批）。
+    /// </summary>
+    [Fact]
+    public async Task FailureResponse_CutInsideASurrogatePair_LogsNoLoneSurrogate()
+    {
+        // 第 500 个码元是 emoji 的前半个
+        var body = new string('a', 499) + "\U0001F600" + new string('b', 50);
+        var handler = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "text/plain")
+        });
+        var logger = new CapturingLogger();
+        var sut = CreateSut(handler, new AiProviderRegistryOptions(), logger: logger);
+
+        await sut.ExecuteAsync("system", "user", new AiUtilityCallOptions { Provider = Inline() });
+
+        var failure = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("returned 400"));
+        Assert.EndsWith(": " + new string('a', 499), failure.Message);
+    }
+
     [Fact]
     public async Task Inline_TransportFailure_KeyNotLogged()
     {

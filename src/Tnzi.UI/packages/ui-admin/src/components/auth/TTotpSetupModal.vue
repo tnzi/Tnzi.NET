@@ -15,7 +15,6 @@
               :placeholder="t('totpSetup.codePlaceholder')"
               inputmode="numeric"
               autocomplete="one-time-code"
-              @keyup.enter="confirm"
             />
           </NFormItem>
         </NForm>
@@ -103,7 +102,14 @@ async function load(): Promise<void> {
   }
 }
 
+/**
+ * Enter in the code box reaches here once, through the form's submit (the
+ * browser's implicit submission for a form's only field). Listening on the key
+ * as well confirmed the same code twice. The in-flight check covers the footer
+ * button pressed while the first confirm is still answering.
+ */
 async function confirm(): Promise<void> {
+  if (confirming.value) return
   const value = code.value.trim()
   if (!value) {
     message.warning(t('totpSetup.codeRequired'))

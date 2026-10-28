@@ -45,6 +45,9 @@ public static class TnziDbContextHelper
     public static void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Properties<decimal>().HavePrecision(19, 4);
+
+        // 框架实体的 Guid / long 主键由框架的 Id 规则生成，long 主键不再是数据库生成列（见 FrameworkKeyConvention）
+        configurationBuilder.Conventions.Add(_ => new FrameworkKeyConvention());
     }
 
     /// <summary>
@@ -101,9 +104,13 @@ public static class TnziDbContextHelper
                 await processor.ProcessChangesAsync(fileTracker.GetChanges(), cancellationToken);
 
                 // 显式保存 Repository 延迟添加的引用实体（与主保存处于同一物理事务时一并提交/回滚）。
-                // 使用 baseSaveAsync 避开递归审计逻辑。
+                // 使用 baseSaveAsync 避开递归的文件追踪与处理器调用，但审计照样要套：事务里处理器经仓储
+                // 新增 / 修改的条目（引用记录、文件记录的引用计数）只经这次保存落库，不套就是 TenantId 为 NULL
+                // （严格等值过滤 ⇒ 写入者自己查不到它）、CreationTime 0001-01-01 的行。主保存的条目此时已接受变更
+                // （Unchanged），这一遍只作用于处理器带进来的那些。
                 if (dbContext.ChangeTracker.HasChanges())
                 {
+                    AuditPropertyHelper.ApplyAuditProperties(dbContext, currentUser, currentTenant, timeProvider, multiTenancyEnabled);
                     await baseSaveAsync(cancellationToken);
                     logger?.LogDebug("[FileTracking] Saved pending file reference changes");
                 }
@@ -179,12 +186,17 @@ public static class TnziDbContextHelper
         {
             if (uowManager?.IsEnabledTransaction == true && postCommitQueue != null)
             {
+                // 入队前在保存方的作用域里捕获租户：提交后才发布时，保存方的 Change() 多半已经退出，
+                // 总线那时再捕获只能读到提交方的环境租户（匿名回调里就是 null）
+                EventTenantContext.Capture(@event, serviceProvider);
                 var capturedEvent = @event;
                 postCommitQueue.Enqueue(async ct => await eventBus.PublishAsync(capturedEvent, ct));
             }
             else
             {
-                await eventBus.PublishAsync(@event, cancellationToken);
+                // 没有工作单元事务：上面那次保存已经自动提交，这里与提交后队列同理，不再传调用方的令牌。
+                // 请求在保存之后被取消时，事件不能在总线的并发闸门处被取消而丢失（数据已落库，SaveChanges 却抛 OperationCanceledException）
+                await eventBus.PublishAsync(@event, CancellationToken.None);
             }
         }
     }

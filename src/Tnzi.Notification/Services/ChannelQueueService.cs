@@ -61,17 +61,19 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
     {
         try
         {
-            await Task.Delay(delay, _stoppingToken);
+            // 定时消息可以排在几个月之后：单次 Task.Delay 过不了约 49.7 天（见 LongDelay）。
+            await LongDelay.DelayAsync(delay, _stoppingToken);
             await _queue.Writer.WriteAsync(workItem, _stoppingToken);
         }
         catch (OperationCanceledException)
         {
             // 服务停止：未到期的延迟项丢弃（内存队列本就不跨进程持久化）。
-            // ★ 必须留一行：丢掉的可能是一条已经答复过"已排期"的定时消息。行还在库里，
-            // 由 NotificationDispatchBackgroundService 的到期扫描接手 —— 但那要等一个
-            // StuckAfterMinutes 的宽限，中间这段时间里没有这条日志就完全看不出发生过什么。
+            // ★ 必须留一行：丢掉的可能是一条已经答复过"已排期"的定时消息，或一次正在等退避的重试。
+            // 两者的行都还在库里、都带着「最早几点发」（ScheduledTime），由 NotificationDispatchBackgroundService
+            // 接手（到期定时那一遍 / 排队与重试那一遍）：但那要等一个 StuckAfterMinutes 的宽限，
+            // 中间这段时间里没有这条日志就完全看不出发生过什么。
             _logger.LogInformation(
-                "A delayed notification work item was dropped on shutdown. A scheduled message is not lost: its row stays in the database and the dispatch recovery scan will send it once it is overdue.");
+                "A delayed notification work item (a scheduled send or a retry) was dropped on shutdown. The message is not lost: its row keeps its due time and the dispatch recovery scan sends it once it is overdue, when Notification:Dispatch:EnableRecovery is on.");
         }
         catch (Exception ex)
         {
@@ -111,6 +113,15 @@ public class ChannelQueueService : BackgroundService, INotificationQueueService
             {
                 _logger.LogError(ex, "Error occurred processing notification queue.");
             }
+        }
+
+        // ★ 停机时还排在通道里的工作项随进程一起丢掉，此前一行日志都没有。它们的行停在 Pending 且带着
+        // 交给发送那一刻的 ScheduledTime，由派发恢复的排队那一遍接手：说出来，免得有人去找它们。
+        if (_queue.Reader.CanCount && _queue.Reader.Count > 0)
+        {
+            _logger.LogInformation(
+                "{Count} queued notification work item(s) were not run before shutdown. Their messages stay Pending with their due time and the dispatch recovery scan sends them once they are overdue, when Notification:Dispatch:EnableRecovery is on.",
+                _queue.Reader.Count);
         }
 
         _logger.LogInformation("Notification Background Queue Service is stopping.");

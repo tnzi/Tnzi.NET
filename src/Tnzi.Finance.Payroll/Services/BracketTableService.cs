@@ -177,6 +177,11 @@ public class BracketTableService : ApplicationService, IBracketTableService
             return Fail("Table code must not exceed 64 characters.");
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("Table name is required.");
+        var tooLong = PayrollFieldLimits.FirstTooLong(
+            (input.Name.Trim(), PayrollFieldLimits.NameMaxLength, "table name"),
+            (input.Description, PayrollFieldLimits.DescriptionMaxLength, "description"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
         if (input.Rows == null || input.Rows.Count == 0)
             return Fail("A bracket table requires at least one row.");
 

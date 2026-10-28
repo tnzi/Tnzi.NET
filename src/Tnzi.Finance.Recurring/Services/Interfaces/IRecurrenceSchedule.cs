@@ -20,7 +20,7 @@ public interface IRecurrenceSchedule
     /// <param name="after">从哪天之后开始找（不含当天）</param>
     /// <param name="frequency">周期</param>
     /// <param name="interval">每几个周期一次（≥1）</param>
-    /// <param name="anchorDay">锚点：月/季/年取几号（1-31，超出当月天数收到月末）；周取星期几（1=周一…7=周日）；null = 跟随 <paramref name="after"/> 那天</param>
+    /// <param name="anchorDay">锚点：月/季/年取几号（1-31，超出当月天数收到月末）；周取星期几（1=周一…7=周日）；null = 跟随 <paramref name="after"/> 那天（月度 / 季度 / 年度模板没填锚点时，本模块在调用前已补成起始日那天，所以实现在这三种周期上通常拿不到 null）</param>
     DateTime Next(DateTime after, RecurrenceFrequency frequency, int interval, int? anchorDay);
 
     /// <summary>

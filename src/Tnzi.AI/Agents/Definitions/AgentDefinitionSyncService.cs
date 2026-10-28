@@ -33,6 +33,14 @@ public class AgentDefinitionSyncService : BackgroundService
     /// <summary>文件变更后的去抖窗口（连续保存只同步一次）</summary>
     public TimeSpan ChangeDebounce { get; init; } = TimeSpan.FromMilliseconds(500);
 
+    /// <summary>
+    /// 同步失败后第一次重试前等多久；之后每次失败翻倍，封顶 <see cref="MaxRetryDelay"/>，成功一次回到这里。
+    /// </summary>
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>重试间隔的上限：数据库长时间不可用时不至于每秒打一条错误日志。</summary>
+    public TimeSpan MaxRetryDelay { get; init; } = TimeSpan.FromMinutes(5);
+
     public AgentDefinitionSyncService(
         IServiceProvider serviceProvider,
         IAgentDefinitionProvider definitionProvider,
@@ -49,6 +57,7 @@ public class AgentDefinitionSyncService : BackgroundService
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         var config = _options.CurrentValue.AgentDefinitions;
+        var startupSyncFailed = false;
         if (config.Enabled && config.SyncOnStartup)
         {
             try
@@ -58,6 +67,7 @@ public class AgentDefinitionSyncService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Agent definition sync failed during startup");
+                startupSyncFailed = true;
             }
         }
         else
@@ -69,6 +79,12 @@ public class AgentDefinitionSyncService : BackgroundService
         if (config.Enabled && config.WatchForChanges)
         {
             _subscription = _definitionProvider.OnDefinitionsChanged(() => _changeSignals.Writer.TryWrite(true));
+
+            // 启动同步失败时交给变更循环重试，不必等到第一次改文件
+            if (startupSyncFailed)
+            {
+                _changeSignals.Writer.TryWrite(true);
+            }
         }
 
         await base.StartAsync(cancellationToken);
@@ -90,6 +106,7 @@ public class AgentDefinitionSyncService : BackgroundService
             return;
         }
 
+        var retryDelay = RetryDelay;
         try
         {
             while (await _changeSignals.Reader.WaitToReadAsync(stoppingToken))
@@ -101,6 +118,7 @@ public class AgentDefinitionSyncService : BackgroundService
                 try
                 {
                     var outcome = await SyncAllAsync(stoppingToken);
+                    retryDelay = RetryDelay;
                     _logger.LogInformation("Agent definitions re-synced after file change: {Synced} synced, {Skipped} skipped",
                         outcome.Synced, outcome.Skipped);
                 }
@@ -110,7 +128,12 @@ public class AgentDefinitionSyncService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Agent definition re-sync after file change failed");
+                    // 一次失败（SQLite 的 database is locked、数据库短暂不可达）不能让这次改动等到下一次存盘：
+                    // 不重试的话数据库里的定义一直停在旧版本，留下的只有这一条错误日志。
+                    _logger.LogError(ex, "Agent definition re-sync after file change failed; retrying in {Delay}", retryDelay);
+                    await Task.Delay(retryDelay, stoppingToken);
+                    retryDelay = TimeSpan.FromTicks(Math.Min(retryDelay.Ticks * 2, MaxRetryDelay.Ticks));
+                    _changeSignals.Writer.TryWrite(true);
                 }
             }
         }

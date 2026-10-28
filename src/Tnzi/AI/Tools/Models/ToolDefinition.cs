@@ -56,7 +56,7 @@ public class ToolDefinition
     public bool IsReadOnly { get; set; }
 
     /// <summary>
-    /// 是否可安全并发执行。默认 false（fail-closed）。
+    /// 是否可安全并发执行。默认 false（fail-closed）。判据见 <see cref="Attributes.AIFunctionAttribute.IsConcurrencySafe"/>。
     /// </summary>
     public bool IsConcurrencySafe { get; set; }
 
@@ -64,11 +64,6 @@ public class ToolDefinition
     /// 是否为破坏性操作。默认 false。
     /// </summary>
     public bool IsDestructive { get; set; }
-
-    /// <summary>
-    /// 工具结果最大字符数限制。0 = 不限制。
-    /// </summary>
-    public int MaxResultSizeChars { get; set; }
 
     /// <summary>
     /// 搜索提示关键词
@@ -79,11 +74,6 @@ public class ToolDefinition
     /// 工具别名列表
     /// </summary>
     public IReadOnlyList<string> Aliases { get; set; } = [];
-
-    /// <summary>
-    /// 搜索优先级。值越高越优先。
-    /// </summary>
-    public int Priority { get; set; }
 
     /// <summary>
     /// 工具中断行为

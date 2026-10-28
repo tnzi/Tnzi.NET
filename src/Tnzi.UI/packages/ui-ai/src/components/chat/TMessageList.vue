@@ -3,7 +3,8 @@
  * TMessageList - Grouped message list
  *
  * Renders messages grouped by role using groupMessages().
- * Shows loading skeleton, streaming indicator, and tool calls.
+ * Shows loading skeleton and streaming indicator; each message (tool calls
+ * included) is drawn by TChatMessage.
  */
 
 import { computed } from 'vue';
@@ -11,8 +12,8 @@ import type { ChatMessage } from '../../headless/useChat';
 import { groupMessages, type MessageGroup } from '../../headless/use-message-group';
 import type { FeedbackValue } from './TMessageFeedback.vue';
 import TChatMessage from './TChatMessage.vue';
-import TToolCallDisplay from '../reasoning/TToolCallDisplay.vue';
 import TStreamLoader from '../streaming/TStreamLoader.vue';
+import { useAiI18n } from '../../i18n/index';
 
 const props = withDefaults(defineProps<{
   messages: readonly ChatMessage[];
@@ -28,6 +29,8 @@ const emit = defineEmits<{
   edit: [messageId: string];
   feedback: [messageId: string, type: FeedbackValue, reason?: string];
 }>();
+
+const t = useAiI18n();
 
 const groups = computed<MessageGroup[]>(() => groupMessages(props.messages));
 
@@ -52,19 +55,10 @@ const isLastMessageStreaming = computed(() => {
     <!-- Grouped messages -->
     <template v-else>
       <div v-for="group in groups" :key="group.id" class="flex flex-col gap-2">
+        <!-- Tool calls are TChatMessage's to render: it draws them inside the
+             bubble column, keyed by position. Drawing them here as well showed
+             every card twice. -->
         <template v-for="message in group.messages" :key="message.id">
-          <!-- Tool calls before assistant content. The condition sits on a
-               wrapper rather than beside `v-for` on the same element: Vue 3
-               evaluates `v-if` first, so co-locating them re-tests the same
-               group-level condition once per tool call. -->
-          <template v-if="group.type === 'assistant' && message.toolCalls?.length">
-            <TToolCallDisplay
-              v-for="toolCall in message.toolCalls"
-              :key="toolCall.name"
-              :tool-call="toolCall"
-            />
-          </template>
-
           <TChatMessage
             :message="message"
             :show-actions="message.role === 'assistant'"
@@ -79,7 +73,7 @@ const isLastMessageStreaming = computed(() => {
       <!-- Streaming indicator -->
       <div v-if="isLastMessageStreaming" class="flex items-center gap-2 text-sm text-tnzi-muted">
         <TStreamLoader :size="14" />
-        <span>Generating...</span>
+        <span>{{ t.chat.generating }}</span>
       </div>
     </template>
 

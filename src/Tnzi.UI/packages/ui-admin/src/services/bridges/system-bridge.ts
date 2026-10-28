@@ -100,6 +100,13 @@ export interface SystemBridge {
 // page keeps importing it from this bridge).
 export type { ScheduledJobDto } from '@tnzi/core/services/system'
 
+/** A read answered 404 / 501: the module behind the endpoint is not loaded on this host. */
+function isModuleAbsent(response: unknown): boolean {
+  const envelope = response as { succeeded?: boolean; success?: boolean; code?: number } | null | undefined
+  if (!envelope || (envelope.succeeded ?? envelope.success)) return false
+  return envelope.code === 404 || envelope.code === 501
+}
+
 export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
   const settingApi = deps.settingApi ?? (deps.client ? useAdminSettingApi(deps.client) : null)
   const accessLogApi = deps.accessLogApi ?? (deps.client ? useAdminAccessLogApi(deps.client) : null)
@@ -138,7 +145,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
 
   const settings: BridgeCrudContract<SettingDto, CreateSettingDto, UpdateSettingDto> = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<SettingDto>> => {
-      const raw = unwrap<SettingDto[]>(await settingApi.getList())
+      const raw = unwrapOk<SettingDto[]>(await settingApi.getList())
       const source = Array.isArray(raw) ? raw : []
       // Optional group-prefix filter exposed by Parameter/Dictionary pages via
       // crud.setFilters({ groupPrefix }). Empty string means "all groups".
@@ -148,7 +155,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
       const filtered = groupPrefix.length > 0
         ? source.filter((s) => (s.group ?? '').startsWith(groupPrefix))
         : source
-      return pageArray(filtered, query)
+      return pageArray(filtered, query, (s) => [s.key, s.value, s.description, s.group])
     },
     create: async (data) => unwrapOk(await settingApi.create(data)) as SettingDto,
     update: async (id, data) => unwrapOk(await settingApi.update(String(id), data)) as SettingDto,
@@ -160,7 +167,7 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
   const accessLogs = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<AccessLogInfoDto>> => {
       const params = mapQueryToListRequest(query) as unknown as AccessLogQueryDto
-      const result = unwrap<{ items: AccessLogInfoDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: AccessLogInfoDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await accessLogApi.getList(params),
       )
       return pagedResult({
@@ -176,8 +183,14 @@ export function createSystemBridge(deps: SystemBridgeDeps = {}): SystemBridge {
 
   const scheduledJobs: SystemBridge['scheduledJobs'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<ScheduledJobDto>> => {
-      const items = unwrap<ScheduledJobDto[]>(await requireJobApi('scheduledJobs.fetch').getList()) ?? []
-      return pageArray(items, query)
+      const response = await requireJobApi('scheduledJobs.fetch').getList()
+      // The endpoint lives in the optional Hangfire module, which the loaded-
+      // module signal does not report (it lists business modules only), so a
+      // super-admin reaches this page on a host without it. A 404 / 501 there
+      // means "this host schedules nothing"; every other refusal rejects.
+      if (isModuleAbsent(response)) return pageArray([], query)
+      const items = unwrapOk<ScheduledJobDto[]>(response) ?? []
+      return pageArray(items, query, (j) => [j.id, j.cron, j.queue, j.lastJobState, j.error])
     },
     trigger: async (id: string): Promise<void> => {
       ensureOk(await requireJobApi('scheduledJobs.trigger').trigger(id))

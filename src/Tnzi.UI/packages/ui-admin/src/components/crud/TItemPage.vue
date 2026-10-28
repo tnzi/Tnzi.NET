@@ -51,7 +51,7 @@
       <slot name="batchActions" :selected-ids="selectedIds" />
     </template>
     <template v-if="$slots.error" #error="e"><slot name="error" v-bind="e" /></template>
-    <template #form="f"><slot name="form" v-bind="f" /></template>
+    <template v-if="$slots.form" #form="f"><slot name="form" v-bind="f" /></template>
     <template v-if="$slots.formFooter" #formFooter><slot name="formFooter" /></template>
     <template v-if="$slots.detail" #detail="d"><slot name="detail" v-bind="d" /></template>
     <template v-if="$slots.detailFooter" #detailFooter="d"><slot name="detailFooter" v-bind="d" /></template>

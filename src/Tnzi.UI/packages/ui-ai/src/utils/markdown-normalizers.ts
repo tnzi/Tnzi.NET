@@ -23,16 +23,29 @@ function isCjk(cp: number): boolean {
 // normalizeCjkSpacing
 // ---------------------------------------------------------------------------
 
+/** Returns true for an ASCII letter or digit. */
+function isAsciiAlnum(cp: number): boolean {
+  return (
+    (cp >= 0x30 && cp <= 0x39) || // 0-9
+    (cp >= 0x41 && cp <= 0x5a) || // A-Z
+    (cp >= 0x61 && cp <= 0x7a)    // a-z
+  );
+}
+
 /**
- * Adds a space between CJK (Chinese/Japanese/Korean) characters and
- * surrounding Latin / ASCII characters, since LLM output often omits them.
+ * Adds a space between CJK (Chinese/Japanese/Korean) characters and an
+ * adjacent ASCII letter or digit, since LLM output often omits it.
  *
- * Operates idempotently - running it twice produces the same result.
+ * Only a letter-or-digit next to a CJK character is a boundary. Whitespace,
+ * line breaks, CJK punctuation (`。`, `，`) and markdown delimiters (`**`,
+ * `` ` ``) are never spaced, so emphasis around CJK text keeps rendering and
+ * an existing gap is not widened. Running it twice produces the same result.
  *
  * @example
  * normalizeCjkSpacing('你好world')  // '你好 world'
  * normalizeCjkSpacing('Hello世界')  // 'Hello 世界'
  * normalizeCjkSpacing('你好 world')  // '你好 world'  (already spaced)
+ * normalizeCjkSpacing('你好。世界')  // '你好。世界'  (punctuation)
  */
 export function normalizeCjkSpacing(text: string): string {
   if (!text) return text;
@@ -47,18 +60,15 @@ export function normalizeCjkSpacing(text: string): string {
   }
 
   // Step 2: Determine at which boundaries a space must be inserted.
-  // A boundary (idx → idx+1) needs a space if:
-  //   - left is CJK and right is NOT CJK  → insert AFTER left
-  //   - left is NOT CJK and right is CJK  → insert BEFORE right
-  // Skip if the right character is already horizontal whitespace (already spaced).
+  // A boundary (idx → idx+1) needs a space only when one side is CJK and the
+  // other an ASCII letter or digit. Anything else (whitespace on either side,
+  // punctuation, markdown delimiters) is left alone, which is also what makes
+  // a second pass a no-op: an inserted space is never itself a boundary.
   const needSpaceAfter: boolean[] = codePoints.map(() => false);
   for (let idx = 0; idx < codePoints.length - 1; idx++) {
     const leftCp = codePoints[idx]!;
     const rightCp = codePoints[idx + 1]!;
-    const leftIsCjk = isCjk(leftCp);
-    const rightIsCjk = isCjk(rightCp);
-    const rightIsWs = rightCp === 0x20 || rightCp === 0x09; // space or tab
-    if (leftIsCjk !== rightIsCjk && !rightIsWs) {
+    if ((isCjk(leftCp) && isAsciiAlnum(rightCp)) || (isAsciiAlnum(leftCp) && isCjk(rightCp))) {
       needSpaceAfter[idx] = true; // space goes after this character
     }
   }

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
+import { createApp, nextTick } from 'vue'
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 
 describe('useAdminAuthStore', () => {
@@ -73,5 +75,82 @@ describe('useAdminAuthStore', () => {
     store.setUserInfo({ id: '1', username: 'a', roles: ['admin', 'editor'], permissions: [] })
     expect(store.hasRole('admin')).toBe(true)
     expect(store.hasRole('guest')).toBe(false)
+  })
+})
+
+// The access token is a credential. The core client decides where it lives (in
+// cookie mode: memory only, nothing in web storage); this store is a UI gate and
+// must not put a copy where any script or local process can read it.
+describe('useAdminAuthStore persistence', () => {
+  const KEY = 'tnzi-admin-auth'
+
+  /** A pinia wired the way `install()` wires it, so `persist` actually runs. */
+  function persistedPinia(): void {
+    const pinia = createPinia()
+    pinia.use(piniaPluginPersistedstate)
+    createApp({ render: () => null }).use(pinia)
+    setActivePinia(pinia)
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    persistedPinia()
+  })
+
+  it('★ never writes the access token to web storage', async () => {
+    const store = useAdminAuthStore()
+    store.setToken('secret-access-token', 'secret-refresh-token')
+    store.setUserInfo({ id: 'u1', username: 'alice', roles: [], permissions: [] })
+    await nextTick() // persistence runs as a pre-flush subscription
+
+    const raw = localStorage.getItem(KEY) ?? ''
+    expect(raw).toContain('alice') // the write did happen
+    expect(raw).not.toContain('secret-access-token')
+    expect(raw).not.toContain('secret-refresh-token')
+    expect(store.token).toBe('secret-access-token') // still available in memory
+  })
+
+  it('a reload keeps the signed-in marker without the credential', async () => {
+    const before = useAdminAuthStore()
+    before.setToken('secret-access-token')
+    before.setUserInfo({ id: 'u1', username: 'alice', roles: [], permissions: [] })
+    await nextTick()
+
+    persistedPinia() // a fresh page: hydrate from storage
+    const after = useAdminAuthStore()
+    expect(after.isLogin).toBe(true)
+    expect(after.token).toBe('')
+    expect(after.userInfo?.id).toBe('u1')
+  })
+
+  it('a sign-out survives a reload', async () => {
+    const before = useAdminAuthStore()
+    before.setToken('secret-access-token')
+    await nextTick()
+    before.logout()
+    await nextTick()
+
+    persistedPinia()
+    expect(useAdminAuthStore().isLogin).toBe(false)
+  })
+
+  it('★ scrubs a token persisted by an earlier version and keeps the session marker', () => {
+    localStorage.setItem(KEY, JSON.stringify({
+      token: 'legacy-access-token',
+      userInfo: { id: 'u1', username: 'alice', roles: [], permissions: [] },
+      isSuperUser: false,
+    }))
+    persistedPinia()
+
+    const store = useAdminAuthStore()
+    expect(store.isLogin).toBe(true)
+    expect(store.token).toBe('')
+    expect(localStorage.getItem(KEY) ?? '').not.toContain('legacy-access-token')
+  })
+
+  it('an earlier version\'s signed-out payload stays signed out', () => {
+    localStorage.setItem(KEY, JSON.stringify({ token: '', userInfo: null, isSuperUser: false }))
+    persistedPinia()
+    expect(useAdminAuthStore().isLogin).toBe(false)
   })
 })

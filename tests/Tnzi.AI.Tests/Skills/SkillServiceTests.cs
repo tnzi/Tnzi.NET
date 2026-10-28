@@ -74,6 +74,7 @@ public class SkillServiceTests : IDisposable
     private SkillService CreateService() => new(
         _serviceProvider,
         _mockRepository.Object,
+        Mock.Of<IRepository<SkillCategory, Guid>>(),
         _mockRegistry.Object,
         _mockTemplateEngine.Object,
         _fileStore);
@@ -365,7 +366,8 @@ public class SkillServiceTests : IDisposable
         result.Data.Name.ShouldBe("My Skill");
 
         _mockRepository.Verify(r => r.InsertAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()), Times.Once);
-        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateDatabaseSkills(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
     }
 
     [Fact]
@@ -439,7 +441,8 @@ public class SkillServiceTests : IDisposable
         result.Data!.Name.ShouldBe("New Name");
 
         _mockRepository.Verify(r => r.UpdateAsync(entity, It.IsAny<CancellationToken>()), Times.Once);
-        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateDatabaseSkills(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
     }
 
     [Fact]
@@ -482,7 +485,8 @@ public class SkillServiceTests : IDisposable
 
         result.Succeeded.ShouldBeTrue();
         _mockRepository.Verify(r => r.DeleteAsync(entity, It.IsAny<CancellationToken>()), Times.Once);
-        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateDatabaseSkills(), Times.Once);
+        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
     }
 
     [Fact]
@@ -536,7 +540,7 @@ public class SkillServiceTests : IDisposable
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(403);
         _mockRepository.Verify(r => r.UpdateAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()), Times.Never);
-        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
+        _mockRegistry.Verify(r => r.InvalidateDatabaseSkills(), Times.Never);
     }
 
     [Theory]
@@ -554,7 +558,7 @@ public class SkillServiceTests : IDisposable
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(403);
         _mockRepository.Verify(r => r.DeleteAsync(It.IsAny<SkillEntity>(), It.IsAny<CancellationToken>()), Times.Never);
-        _mockRegistry.Verify(r => r.InvalidateCache(), Times.Never);
+        _mockRegistry.Verify(r => r.InvalidateDatabaseSkills(), Times.Never);
     }
 
     /// <summary>
@@ -600,6 +604,7 @@ public class SkillServiceTests : IDisposable
         var service = new SkillService(
             _serviceProvider,
             _mockRepository.Object,
+            Mock.Of<IRepository<SkillCategory, Guid>>(),
             _mockRegistry.Object,
             _mockTemplateEngine.Object,
             _fileStore,
@@ -770,6 +775,7 @@ public class SkillServiceTests : IDisposable
         var service = new SkillService(
             sp,
             _mockRepository.Object,
+            Mock.Of<IRepository<SkillCategory, Guid>>(),
             _mockRegistry.Object,
             _mockTemplateEngine.Object,
             _fileStore);
@@ -811,6 +817,7 @@ public class SkillServiceTests : IDisposable
         var service = new SkillService(
             _serviceProvider,
             _mockRepository.Object,
+            Mock.Of<IRepository<SkillCategory, Guid>>(),
             _mockRegistry.Object,
             _mockTemplateEngine.Object,
             _fileStore,
@@ -861,6 +868,7 @@ public class SkillServiceTests : IDisposable
         var service = new SkillService(
             sp,
             _mockRepository.Object,
+            Mock.Of<IRepository<SkillCategory, Guid>>(),
             _mockRegistry.Object,
             _mockTemplateEngine.Object,
             _fileStore,
@@ -923,6 +931,7 @@ public class SkillServiceTests : IDisposable
         var service = new SkillService(
             _serviceProvider,
             _mockRepository.Object,
+            Mock.Of<IRepository<SkillCategory, Guid>>(),
             _mockRegistry.Object,
             _mockTemplateEngine.Object,
             _fileStore,

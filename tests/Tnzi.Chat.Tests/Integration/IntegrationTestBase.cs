@@ -38,6 +38,12 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<User>());
+        // 本套用例拿 Guid.NewGuid() 当单聊对象：一律视为存在的账号。
+        // 关心「对象不存在 / 是超管」的用例自己换掉它（见 DirectChatTargetTests）。
+        userRepo.Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        // 建群 / 加人 / 广播按 id 批量核对账号是否存在：同一口径，一律存在。
+        userRepo.Setup(r => r.GetListAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, CancellationToken _) => ExistingUsers(ids));
         services.AddScoped(_ => userRepo.Object);
 
         // ChatContactService now joins UserDetail for display name + avatar - register
@@ -49,6 +55,10 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
 
         // Multi-tenancy OFF by default (BroadcastService guards the All path on this).
         services.AddSingleton<IOptions<MultiTenancyOptions>>(Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions()));
+
+        // 用户的租户边界（User 不是 IMultiTenant，聊天的目录 / 资料卡 / 建群 / 单聊 / 广播都要问它）。
+        // 真实实现：多租户关闭时它不裁剪、不查库，与此前逐字相同；租户收口的用例自己换掉它。
+        services.AddScoped<Tnzi.Identity.Services.IUserTenantScopeProvider, Tnzi.Identity.Services.UserTenantScopeProvider>();
 
         // Chat options (IOptionsSnapshot consumers). Tests override ConfigureChatOptions to
         // exercise the enforcement paths (disabled groups, member cap, file-message toggle).
@@ -96,6 +106,10 @@ public class IntegrationTestBase : IntegratedTestBase<ChatTestDbContext>, IDispo
 
         services.AddScoped<IChatConfigService, ChatConfigService>();
     }
+
+    /// <summary>把每个 id 都当成一个存在的账号（单租户、无租户归属）。</summary>
+    protected static List<User> ExistingUsers(IEnumerable<Guid> ids)
+        => ids.Distinct().Select(id => new User { Id = id, UserName = $"user-{id:N}" }).ToList();
 
     /// <summary>一律放行的文件归属探针。</summary>
     private static IFileReadAccessProbe PermissiveFileAccess()

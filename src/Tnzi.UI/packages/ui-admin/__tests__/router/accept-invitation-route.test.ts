@@ -1,24 +1,37 @@
 import { describe, it, expect } from 'vitest'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { defaultAdminRoutes } from '../../src/router/routes'
+import { applyBasePath, normalizeBasePath } from '../../src/plugin/route-transforms'
 import { en } from '../../src/locales/en'
 import { zhCn } from '../../src/locales/zh-cn'
 
 /**
  * The backend's `DefaultInvitationUrlGenerator` builds the invite link as
- * `{System:FrontendUrl}/accept-invitation?token=...` when no
- * `Identity:Invitation:AcceptUrlTemplate` is configured. The route literal here
- * is that contract's other half: until 2026-09-12 no package shipped it, so the
- * default link landed on the 404 route while the admin half (invite / resend /
- * revoke) looked complete.
+ * `{System:FrontendUrl}/admin/accept-invitation?token=...` when no
+ * `Identity:Invitation:AcceptUrlTemplate` is configured. This page is that
+ * contract's other half, and it has to be checked on the table an app actually
+ * mounts: `defineAdminApp` prefixes every top-level route with the `basePath`
+ * (default `/admin`). The earlier version of this test built a router from the
+ * raw preset, so it stayed green while the mounted page lived at
+ * `/admin/accept-invitation` and the emailed `/accept-invitation` link fell to
+ * the 404 route.
  */
 describe('accept-invitation route', () => {
-  const router = createRouter({ history: createMemoryHistory(), routes: defaultAdminRoutes })
+  const mounted = (basePath?: string) =>
+    createRouter({
+      history: createMemoryHistory(),
+      routes: applyBasePath(defaultAdminRoutes, normalizeBasePath(basePath)),
+    })
 
-  it('resolves the default invite link to the acceptance page, not 404', () => {
-    const resolved = router.resolve('/accept-invitation?token=abc')
+  it('resolves the default invite link under the default basePath to the acceptance page', () => {
+    const resolved = mounted().resolve('/admin/accept-invitation?token=abc')
     expect(resolved.name).toBe('accept-invitation')
     expect(resolved.query.token).toBe('abc')
+    expect(mounted().resolve({ name: 'accept-invitation' }).path).toBe('/admin/accept-invitation')
+  })
+
+  it('sits at the root on a root basePath, where the backend needs AcceptUrlTemplate', () => {
+    expect(mounted('/').resolve({ name: 'accept-invitation' }).path).toBe('/accept-invitation')
   })
 
   it('is reachable anonymously - the invitee has no account to sign in with yet', () => {

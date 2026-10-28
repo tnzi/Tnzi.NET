@@ -28,29 +28,31 @@ public partial class SubscriptionService
     {
         Check.NotNull(input);
 
-        var context = await LoadChangeContextAsync(subscriptionId, input.NewPlanId, ownerUserId, cancellationToken);
-        if (!context.Succeeded || context.Data == null)
-            return Fail<SubscriptionChangeDto>(context.Message ?? ErrorCodes.SubscriptionNotFound, context.Code ?? 400);
-
-        var (subscription, currentPlan, newPlan) = (context.Data.Subscription, context.Data.CurrentPlan, context.Data.NewPlan);
-
-        // 检查是否有待生效 / 等补差款的变更
-        var pendingChange = await _changeRepository.FirstOrDefaultAsync(
-            c => c.SubscriptionId == subscriptionId
-                && (c.Status == SubscriptionChangeStatus.Pending || c.Status == SubscriptionChangeStatus.AwaitingPayment),
-            cancellationToken);
-        if (pendingChange != null)
-            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionChangePending, 400);
-
-        // ★ 与取消同一把计费锁、同一个条件（见 CancelSubscriptionAsync）。后台续费抢到这条订阅之后、
+        // ★ 与取消同一把计费锁、同一个入口（见 ClaimForUserChangeAsync）。后台续费抢到这条订阅之后、
         // 与渠道往返的那几秒里，变更不看锁就会与续费各做各的：续费按旧价扣、这里把计划换掉，
         // 用户以旧价拿到新计划一整期。锁最多持有 BillingLockMinutes 分钟，因此是 409 不是 400。
-        var now = DateTime.UtcNow;
-        if (!await TryClaimAsync(subscriptionId, now, now.AddMinutes(PaymentOptions.BillingLockMinutes), cancellationToken))
-            return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionBillingInProgress, 409);
+        // 先抢锁再读订阅、做前置校验：读在抢锁之前，读与抢之间落地的续费或取消就会被这里拿旧快照覆盖。
+        var claim = await ClaimForUserChangeAsync(subscriptionId, ownerUserId, cancellationToken);
+        if (!claim.Succeeded)
+            return Fail<SubscriptionChangeDto>(claim.Message ?? ErrorCodes.SubscriptionNotFound, claim.Code ?? 404);
 
         try
         {
+            // 归属已经在抢锁时认过了
+            var context = await LoadChangeContextAsync(subscriptionId, input.NewPlanId, owner: null, cancellationToken);
+            if (!context.Succeeded || context.Data == null)
+                return Fail<SubscriptionChangeDto>(context.Message ?? ErrorCodes.SubscriptionNotFound, context.Code ?? 400);
+
+            var (subscription, currentPlan, newPlan) = (context.Data.Subscription, context.Data.CurrentPlan, context.Data.NewPlan);
+
+            // 检查是否有待生效 / 等补差款的变更
+            var pendingChange = await _changeRepository.FirstOrDefaultAsync(
+                c => c.SubscriptionId == subscriptionId
+                    && (c.Status == SubscriptionChangeStatus.Pending || c.Status == SubscriptionChangeStatus.AwaitingPayment),
+                cancellationToken);
+            if (pendingChange != null)
+                return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionChangePending, 400);
+
             return await ChangeSubscriptionPlanCoreAsync(subscription, currentPlan, newPlan, input, cancellationToken);
         }
         finally
@@ -131,9 +133,12 @@ public partial class SubscriptionService
         }
         else if (isImmediate)
         {
-            await ApplyPlanChangeAsync(subscription, newPlan, cancellationToken);
-            change.Status = SubscriptionChangeStatus.Applied;
+            var written = await WritePlanTermsAsync(subscriptionId, newPlan, cancellationToken);
+            change.Status = written ? SubscriptionChangeStatus.Applied : SubscriptionChangeStatus.Cancelled;
             await _changeRepository.UpdateAsync(change, cancellationToken);
+
+            if (!written)
+                return Fail<SubscriptionChangeDto>(ErrorCodes.SubscriptionAlreadyCancelledOrExpired, 400);
         }
 
         if (EventBus != null)
@@ -170,7 +175,11 @@ public partial class SubscriptionService
 
     public async Task<Result<SubscriptionChangeDto>> GetPlanChangePreviewAsync(Guid subscriptionId, Guid newPlanId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var context = await LoadChangeContextAsync(subscriptionId, newPlanId, ownerUserId, cancellationToken);
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: false, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail<SubscriptionChangeDto>(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
+
+        var context = await LoadChangeContextAsync(subscriptionId, newPlanId, owner.Data, cancellationToken);
         if (!context.Succeeded || context.Data == null)
             return Fail<SubscriptionChangeDto>(context.Message ?? ErrorCodes.SubscriptionNotFound, context.Code ?? 400);
 
@@ -198,6 +207,11 @@ public partial class SubscriptionService
 
     public async Task<Result> CancelPendingChangeAsync(Guid changeId, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
+        var scope = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: true, cancellationToken);
+        if (!scope.Succeeded)
+            return Fail(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+        var owner = scope.Data;
+
         var change = await _changeRepository
             .Where(c => c.Id == changeId)
             .Include(c => c.Subscription)
@@ -205,15 +219,21 @@ public partial class SubscriptionService
         if (change == null)
             return Fail(ErrorCodes.SubscriptionChangeNotFound, 404);
 
-        if (ownerUserId.HasValue && change.Subscription?.UserId != ownerUserId.Value)
+        if (owner != null
+            && (change.Subscription == null
+                || change.Subscription.BillingAccountType != owner.Type
+                || change.Subscription.BillingAccountId != owner.Id))
             return Fail(ErrorCodes.SubscriptionChangeNotFound, 404);
 
         // 等补差款的变更同样可以反悔（用户还没付）。
-        if (change.Status is not (SubscriptionChangeStatus.Pending or SubscriptionChangeStatus.AwaitingPayment))
+        // ★ 条件更新（WHERE Status IN (Pending, AwaitingPayment)）而不是读出来判一次再整行写回：读与写之间补差款可能刚到账、
+        // 回流已把它置成 Applied 并换了计划，整行写回会把它改回 Cancelled，订阅在新计划上而变更记录写着已取消。
+        var cancelled = await _changeRepository.AsQueryable()
+            .Where(c => c.Id == change.Id
+                && (c.Status == SubscriptionChangeStatus.Pending || c.Status == SubscriptionChangeStatus.AwaitingPayment))
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SubscriptionChangeStatus.Cancelled), cancellationToken);
+        if (cancelled == 0)
             return Fail(ErrorCodes.SubscriptionChangeCannotCancel, 400);
-
-        change.Status = SubscriptionChangeStatus.Cancelled;
-        await _changeRepository.UpdateAsync(change, cancellationToken);
 
         // 连带关掉它的待支付单：不关，用户取消之后再付那张单就是一笔无处生效的孤儿付款。
         await CloseChangePaymentAsync(change, "plan change cancelled", cancellationToken);
@@ -256,10 +276,7 @@ public partial class SubscriptionService
         foreach (var change in awaiting)
         {
             // CAS：补差款回流可能同时正把它置成 Applied，抢不到就不关它的单
-            var cancelled = await _changeRepository.AsQueryable()
-                .Where(c => c.Id == change.Id && c.Status == SubscriptionChangeStatus.AwaitingPayment)
-                .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SubscriptionChangeStatus.Cancelled), cancellationToken);
-            if (cancelled == 0)
+            if (!await CancelAwaitingChangeAsync(change.Id, cancellationToken))
                 continue;
 
             await CloseChangePaymentAsync(change, "billing period ended before the proration was paid", cancellationToken);
@@ -272,29 +289,50 @@ public partial class SubscriptionService
     public async Task<Result<int>> ApplyDuePlanChangesAsync(CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
+        var lockUntil = now.AddMinutes(PaymentOptions.BillingLockMinutes);
 
-        var dueChangeIds = await _changeRepository.AsNoTracking()
-            .Where(c => c.Status == SubscriptionChangeStatus.Pending && c.EffectiveDate <= now)
+        // 暂停中的订阅不结算（见 ApplyDueChangeAsync），也不进这一页：否则攒满一页的暂停订阅会把别人的到期变更挤出去
+        var dueChanges = await _changeRepository.AsNoTracking()
+            .Where(c => c.Status == SubscriptionChangeStatus.Pending && c.EffectiveDate <= now
+                && (c.Subscription == null || c.Subscription.Status != SubscriptionStatus.Paused))
             .OrderBy(c => c.EffectiveDate)
             .Take(BillingScanPageSize)
-            .Select(c => c.Id)
+            .Select(c => new { c.Id, c.SubscriptionId })
             .ToListAsync(cancellationToken);
 
-        if (dueChangeIds.Count == 0)
+        if (dueChanges.Count == 0)
             return Ok(0);
 
         var applied = 0;
-        foreach (var changeId in dueChangeIds)
+        foreach (var due in dueChanges)
         {
             try
             {
-                if (await ApplyDueChangeAsync(changeId, now, cancellationToken) != null)
-                    applied++;
+                // ★ 与续费扫描、用户换计划抢同一把锁。续费扫描读完一页快照、正逐条扣款时，另一个实例的这条扫描
+                // 不看锁就把计划换掉：续费轮到它时找不到待生效的变更，按快照里的旧计划扣款，账单与订阅详情对不上。
+                // 抢不到就这一轮不动它：持锁的续费在扣款之前自己会结算它，否则下一轮再来。
+                if (!await TryClaimAsync(due.SubscriptionId, now, lockUntil, cancellationToken))
+                {
+                    // 订阅已不存在（被删）时永远抢不到锁，也不会有别人来结算：照旧让结算把这条变更作废
+                    if (!await _subscriptionRepository.AsNoTracking().AnyAsync(s => s.Id == due.SubscriptionId, cancellationToken))
+                        await ApplyDueChangeAsync(due.Id, now, cancellationToken);
+                    continue;
+                }
+
+                try
+                {
+                    if (await ApplyDueChangeAsync(due.Id, now, cancellationToken) != null)
+                        applied++;
+                }
+                finally
+                {
+                    await ReleaseBillingLockAsync(due.SubscriptionId, CancellationToken.None);
+                }
             }
             catch (Exception ex)
             {
                 // 一条结算失败不能拖垮同一轮里其它订阅的变更
-                Logger.LogError(ex, "Applying a due subscription plan change failed. ChangeId: {ChangeId}", changeId);
+                Logger.LogError(ex, "Applying a due subscription plan change failed. ChangeId: {ChangeId}", due.Id);
             }
         }
 
@@ -340,9 +378,22 @@ public partial class SubscriptionService
     /// 续费扫描与本扫描可能落在两个实例上同时命中同一条变更，先读后写会让两边都判定
     /// 「还没结算」，于是同一条变更发两次已生效事件。
     /// </para>
+    /// <para>
+    /// ★ <b>暂停中的订阅不结算</b>，变更留在 <c>Pending</c>。暂停冻结的是计费时钟：<c>EffectiveDate</c> 取的是暂停前的
+    /// 周期边界，恢复时它与 <c>NextBillingTime</c> 一起顺延（见 <c>ShiftPendingChangesAsync</c>）。此前暂停期间照样按原日期结算，
+    /// 用户在已按高价付过、被冻结的那段时间里被换到了低计划上。调用方都持有这条订阅的计费锁，暂停 / 恢复也要抢同一把锁，
+    /// 判定与结算之间状态不会变。
+    /// </para>
     /// </remarks>
     private async Task<SubscriptionPlan?> ApplyDueChangeAsync(Guid changeId, DateTime now, CancellationToken cancellationToken)
     {
+        var paused = await _changeRepository.AsNoTracking()
+            .Where(c => c.Id == changeId)
+            .Select(c => c.Subscription != null && c.Subscription.Status == SubscriptionStatus.Paused)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (paused)
+            return null;
+
         var claimed = await _changeRepository.AsQueryable()
             .Where(c => c.Id == changeId && c.Status == SubscriptionChangeStatus.Pending)
             .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SubscriptionChangeStatus.Applied), cancellationToken);
@@ -359,8 +410,12 @@ public partial class SubscriptionService
 
         // 已终止的订阅不能被一条旧的待生效变更改写：那会给一个已取消的订阅换上新计划，
         // 让它在列表与报表里重新看起来像一份活订阅。计划被删掉同理 —— 无处可换。
+        // 写入本身也带着这个条件（WritePlanTermsAsync），读与写之间被终止的同样不改。
         var terminated = subscription == null
             || subscription.Status is SubscriptionStatus.Cancelled or SubscriptionStatus.Expired;
+
+        if (!terminated && subscription != null && newPlan != null)
+            terminated = !await WritePlanTermsAsync(subscription.Id, newPlan, cancellationToken);
 
         if (terminated || subscription == null || newPlan == null)
         {
@@ -372,15 +427,6 @@ public partial class SubscriptionService
                 changeId, change.SubscriptionId, terminated ? "subscription is no longer active" : "target plan no longer exists");
             return null;
         }
-
-        subscription.PlanId = newPlan.Id;
-        // 不设 Plan 导航：仓储读出的计划是游离态，挂上去会被 EF 当新计划 INSERT（撞 PlanCode 唯一索引）
-        subscription.ProductCode = newPlan.ProductCode;
-        subscription.CycleType = newPlan.CycleType;
-        subscription.CycleValue = newPlan.CycleValue;
-        subscription.OriginalPrice = newPlan.Price;
-        subscription.Currency = newPlan.Currency;
-        await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
 
         if (EventBus != null)
         {
@@ -413,10 +459,10 @@ public partial class SubscriptionService
     /// 计划变更的公共前置校验：订阅状态、计划有效性、币种与产品一致性
     /// </summary>
     private async Task<Result<PlanChangeContext>> LoadChangeContextAsync(
-        Guid subscriptionId, Guid newPlanId, Guid? ownerUserId, CancellationToken cancellationToken)
+        Guid subscriptionId, Guid newPlanId, BillingAccountRef? owner, CancellationToken cancellationToken)
     {
-        var subscription = await _subscriptionRepository
-            .Where(s => s.Id == subscriptionId && (!ownerUserId.HasValue || s.UserId == ownerUserId.Value))
+        var subscription = await OwnedBy(_subscriptionRepository.AsQueryable(), owner)
+            .Where(s => s.Id == subscriptionId)
             .Include(s => s.Plan)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -451,24 +497,38 @@ public partial class SubscriptionService
     }
 
     /// <summary>
-    /// 应用无需收款的立即变更到订阅（补差为 0、试用期内升级）。
+    /// 把一个计划的计费条款写到订阅行上（计划、产品、周期、快照价、币种），<b>只写这几列</b>；订阅已取消 / 已过期时不写，返回 false。
+    /// 无需收款的立即变更（补差为 0、试用期内升级）与到期变更结算共用。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// ★ 不动 <c>NextBillingTime</c>：这里没有发生任何一次收款，把时钟拨到「现在 + 整周期」等于白送一期，
     /// 周期末尾补差四舍五入到 0 的那次升级还会顺带跳过本该发生的续费扣款（续费扫描要 NextBillingTime &lt;= now）。
     /// 锚点留在原处，到期由续费按新价收。
+    /// </para>
+    /// <para>
+    /// ★ 列级条件更新而不是整行写回：调用方手里的订阅是先前读出来的，整行写回会把读与写之间落地的取消、
+    /// 续费推进或计费锁一并拨回旧值（此前第六条扫描就这样放掉过续费扫描正持有的锁）。也不经导航属性：
+    /// 仓储读出的计划是游离态，挂上去会被 EF 当新计划 INSERT（撞 PlanCode 唯一索引）。
+    /// </para>
     /// </remarks>
-    private async Task ApplyPlanChangeAsync(Subscription subscription, SubscriptionPlan newPlan, CancellationToken cancellationToken)
+    private async Task<bool> WritePlanTermsAsync(Guid subscriptionId, SubscriptionPlan plan, CancellationToken cancellationToken)
     {
-        subscription.PlanId = newPlan.Id;
-        // 不设 Plan 导航：仓储读出的计划是游离态，挂上去会被 EF 当新计划 INSERT（撞 PlanCode 唯一索引）
-        subscription.ProductCode = newPlan.ProductCode;
-        subscription.CycleType = newPlan.CycleType;
-        subscription.CycleValue = newPlan.CycleValue;
-        subscription.OriginalPrice = newPlan.Price;
-        subscription.Currency = newPlan.Currency;
+        var now = DateTime.UtcNow;
+        var written = await _subscriptionRepository.AsQueryable()
+            .Where(s => s.Id == subscriptionId
+                && s.Status != SubscriptionStatus.Cancelled
+                && s.Status != SubscriptionStatus.Expired)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.PlanId, plan.Id)
+                .SetProperty(x => x.ProductCode, plan.ProductCode)
+                .SetProperty(x => x.CycleType, plan.CycleType)
+                .SetProperty(x => x.CycleValue, plan.CycleValue)
+                .SetProperty(x => x.OriginalPrice, plan.Price)
+                .SetProperty(x => x.Currency, plan.Currency)
+                .SetProperty(x => x.LastModificationTime, (DateTime?)now), cancellationToken);
 
-        await _subscriptionRepository.UpdateAsync(subscription, cancellationToken);
+        return written > 0;
     }
 
     /// <summary>

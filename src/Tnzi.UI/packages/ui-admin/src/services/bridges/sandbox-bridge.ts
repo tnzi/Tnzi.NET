@@ -7,12 +7,12 @@
  * bridge is structured so adding them is just appending new methods.
  *
  * The DTO + the raw API factory live in `@tnzi/core/services/ai` (`sandbox.ts`).
- * This bridge delegates to `useSandboxAdminApi(client)` and adds the tolerant
- * `unwrap` shaping the page expects.
+ * This bridge delegates to `useSandboxAdminApi(client)`: `null` when the module
+ * is absent (404 / 501), the server's reason thrown for any other failure.
  */
 import type { HttpClient } from '@tnzi/core/http'
 import { useSandboxAdminApi } from '@tnzi/core/services/ai'
-import { unwrapResult as unwrap } from '../_mappers'
+import { readOrAbsent } from '../_mappers'
 
 export type { SandboxStatusDto } from '@tnzi/core/services/ai'
 
@@ -38,6 +38,6 @@ export function createSandboxBridge(deps: SandboxBridgeDeps = {}): SandboxBridge
 
   return {
     getStatus: async () =>
-      unwrap<SandboxStatusDto | null>(await api.getStatus()),
+      readOrAbsent<SandboxStatusDto | null>(await api.getStatus(), null),
   }
 }

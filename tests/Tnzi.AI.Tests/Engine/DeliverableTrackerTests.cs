@@ -142,13 +142,13 @@ public class DeliverableTrackerTests
         // 把它弄丢，服务层分好的「可重试」就又被抹平回 500。
         var original = new AgentRunResult
         {
-            Response = "reservation lost a concurrent update",
+            Response = "the usage meter is unavailable",
             FinishReason = FinishReasons.Error,
-            ErrorCode = ErrorCodes.QuotaConcurrencyConflict
+            ErrorCode = ErrorCodes.UsageLimitCheckFailed
         };
 
         var annotated = original.CloneWith(runId: Guid.NewGuid());
 
-        annotated.ErrorCode.ShouldBe(ErrorCodes.QuotaConcurrencyConflict);
+        annotated.ErrorCode.ShouldBe(ErrorCodes.UsageLimitCheckFailed);
     }
 }

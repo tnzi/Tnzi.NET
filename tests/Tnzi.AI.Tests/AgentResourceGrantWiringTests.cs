@@ -312,6 +312,68 @@ public class AgentResourceGrantWiringTests : IDisposable
         resolution.KnowledgeBaseIds.ShouldBe(new[] { newKb });
     }
 
+    // =====================================================================
+    // Optional text fields are tri-state like Persona: null = no change,
+    // "" = clear. Clearing the system prompt or the forced model used to be
+    // impossible: the admin page sent null for an emptied field, which reads as
+    // "no change", reported "Saved" and kept running with the old prompt. An
+    // empty model must be stored as null: the runtime falls back to the
+    // provider's default only for null, and would otherwise ask for model "".
+    // =====================================================================
+
+    [Fact]
+    public async Task UpdateAsync_EmptyText_ClearsDescriptionInstructionsAndModel()
+    {
+        var created = await _agentService.CreateAsync(new CreateAgentDto
+        {
+            Name = "clear-agent",
+            Provider = "OpenAI",
+            Description = "Answers billing questions",
+            Instructions = "Always cite the invoice number.",
+            Model = "gpt-4o",
+        });
+        var agentId = created.Data!.Id;
+        _context.ChangeTracker.Clear();
+
+        var result = await _agentService.UpdateAsync(agentId, new UpdateAgentDto
+        {
+            Description = string.Empty,
+            Instructions = string.Empty,
+            Model = string.Empty,
+        });
+        _context.ChangeTracker.Clear();
+
+        result.Succeeded.ShouldBeTrue();
+        var stored = await _context.Set<Agent>().SingleAsync(a => a.Id == agentId);
+        stored.Description.ShouldBeNull();
+        stored.Instructions.ShouldBeNull();
+        stored.Model.ShouldBeNull();
+        result.Data!.Model.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateAsync_NullText_LeavesDescriptionInstructionsAndModel()
+    {
+        var created = await _agentService.CreateAsync(new CreateAgentDto
+        {
+            Name = "keep-agent",
+            Provider = "OpenAI",
+            Description = "Answers billing questions",
+            Instructions = "Always cite the invoice number.",
+            Model = "gpt-4o",
+        });
+        var agentId = created.Data!.Id;
+        _context.ChangeTracker.Clear();
+
+        await _agentService.UpdateAsync(agentId, new UpdateAgentDto { Name = "renamed" });
+        _context.ChangeTracker.Clear();
+
+        var stored = await _context.Set<Agent>().SingleAsync(a => a.Id == agentId);
+        stored.Description.ShouldBe("Answers billing questions");
+        stored.Instructions.ShouldBe("Always cite the invoice number.");
+        stored.Model.ShouldBe("gpt-4o");
+    }
+
     [Fact]
     public async Task UpdateAsync_NullResourceFields_LeavesGrantsUnchanged()
     {
@@ -396,6 +458,32 @@ public class AgentResourceGrantWiringTests : IDisposable
         // DTO of the clone reflects the carried grants.
         cloned.Data.ToolGroups!.ShouldBe(new[] { "fs", "git" }, ignoreOrder: true);
         cloned.Data.SkillSlugs!.ShouldBe(new[] { "writing" });
+    }
+
+    /// <summary>
+    /// Per-tool grants have no DTO field: they are written through IAgentGrantService (or restored by a
+    /// version rollback). A clone that drops them silently narrows the clone's tool surface.
+    /// </summary>
+    [Fact]
+    public async Task CloneAsync_CarriesPerToolGrantsToClone()
+    {
+        var created = await _agentService.CreateAsync(new CreateAgentDto
+        {
+            Name = "clone-tool-source",
+            Provider = "OpenAI",
+            ToolGroups = ["fs"]
+        });
+        var sourceId = created.Data!.Id;
+        await _grantService.ReconcileToolNamesAsync(sourceId, ["web_search", "read_file"]);
+        _context.ChangeTracker.Clear();
+
+        var cloned = await _agentService.CloneAsync(sourceId, "clone-tool-target");
+        cloned.Succeeded.ShouldBeTrue();
+        _context.ChangeTracker.Clear();
+
+        var cloneGrants = await _grantService.GetGrantsAsync(cloned.Data!.Id);
+        cloneGrants.ToolNames.ShouldBe(new[] { "web_search", "read_file" }, ignoreOrder: true);
+        cloneGrants.ToolGroups.ShouldBe(new[] { "fs" });
     }
 }
 

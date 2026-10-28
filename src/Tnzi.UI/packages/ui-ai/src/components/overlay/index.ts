@@ -8,6 +8,8 @@
  */
 
 export { default as TPopoverMenu } from './TPopoverMenu.vue';
+export { default as TActionMenu } from './TActionMenu.vue';
+export type { ActionMenuItem } from './TActionMenu.vue';
 export { default as TUserMenu } from './TUserMenu.vue';
 export type { UserMenuItem } from './TUserMenu.vue';
 

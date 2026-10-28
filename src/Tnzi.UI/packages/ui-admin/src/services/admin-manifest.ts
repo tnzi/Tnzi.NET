@@ -1,7 +1,11 @@
 /**
- * Admin manifest service - fetches the backend-driven module manifest from
- * <c>GET admin/diagnostics/admin-manifest</c>. Shipped in `@tnzi/ui-admin` 0.2.4
- * and consumed by `useAdminModuleManifest()` to auto-build the admin menu.
+ * Admin manifest service - fetches the backend diagnostics manifest from
+ * <c>GET admin/diagnostics/admin-manifest</c> (gated on
+ * `system.diagnostics.view`): which business modules are loaded and the admin
+ * controllers each exposes (route + HTTP methods). The routes are API routes,
+ * not admin SPA routes, so they describe the backend surface rather than menu
+ * links. For "is module X loaded" gating, use `useModuleAvailability`, backed
+ * by the ungated `admin/shell/modules` signal.
  *
  * Backed by the `Tnzi.AspNetCore.Dtos.AdminManifestDto` shape; see
  * `src/Tnzi.AspNetCore/Dtos/AdminManifestDto.cs` for the canonical schema.

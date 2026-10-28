@@ -163,6 +163,33 @@ public class CliRunClaimMultiTenancyTests : IntegratedTestBase<CliMultiTenantDbC
                            "'no external CLI binding' means the lookup ran with tenant=null");
     }
 
+    /// <summary>
+    /// 认领后的预算门按<b>运行记录上持久化的</b>租户算：认领发生在后台服务里，没有 HTTP 请求也没有当前租户，
+    /// 读环境只会拿到 null，于是每条运行都退化成「按全局预算算」，租户维度形同虚设。
+    /// </summary>
+    /// <remarks>
+    /// 执行器在新作用域里从库里加载运行（不跟踪），TenantId 只能来自那一列，所以这里必须是开着多租户的上下文：
+    /// 关着时那一列不在模型里，种子上的 TenantId 根本写不进库。
+    /// </remarks>
+    [Fact]
+    public async Task Executor_ChecksTheBudgetAgainstTheRunsPersistedTenant()
+    {
+        var run = await SeedRunAsync(CliRunStatus.Dispatched);
+        DbContext.ChangeTracker.Clear();
+
+        var budget = new Mock<IBudgetService>();
+        budget.Setup(b => b.CheckBudgetAsync(
+                It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BudgetCheckResult { IsAllowed = false, Status = BudgetStatus.BudgetExceeded, Reason = "exhausted" });
+
+        using var scope = ServiceProvider.CreateScope();
+        await CreateExecutor(scope.ServiceProvider, budget.Object).ExecuteAsync(run.Id, CancellationToken.None);
+
+        budget.Verify(b => b.CheckBudgetAsync(
+            It.IsAny<Guid?>(), TenantId, AgentId, It.IsAny<CancellationToken>()), Times.Once);
+        (await ReloadAsync(run.Id)).FailureReason.ShouldBe(CliRunFailureReason.QuotaExceeded);
+    }
+
     /// <summary>MCP 回写凭据从未认证的入站请求校验：根作用域，没有租户。</summary>
     [Fact]
     public async Task TokenService_ValidatesATenantRunsCredential_FromATenantlessScope()
@@ -194,7 +221,7 @@ public class CliRunClaimMultiTenancyTests : IntegratedTestBase<CliMultiTenantDbC
             EnabledOptions(),
             NullLogger<CliRunQueueProcessor>.Instance);
 
-    private static CliRunExecutor CreateExecutor(IServiceProvider scoped)
+    private static CliRunExecutor CreateExecutor(IServiceProvider scoped, IBudgetService? budget = null)
     {
         var runs = scoped.GetRequiredService<IRepository<CliRun, Guid>>();
         return new CliRunExecutor(
@@ -205,19 +232,20 @@ public class CliRunClaimMultiTenancyTests : IntegratedTestBase<CliMultiTenantDbC
             Mock.Of<IRepository<Agent, Guid>>(),
             Mock.Of<ICliProviderRegistry>(),
             Mock.Of<ICliProtocolAdapterFactory>(),
-            Mock.Of<ICliProcessHost>(),
+            Mock.Of<ICliHost>(),
             Mock.Of<ICliWorkspacePreparer>(),
             Mock.Of<ICliBriefComposer>(),
             Mock.Of<ICliMcpConfigComposer>(),
             new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
-            Mock.Of<ICliExecutableResolver>(),
             new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
             Mock.Of<IAgentGrantService>(),
             Mock.Of<ISkillService>(),
             new CliRunSignalHub(),
             EnabledOptions(),
             scoped.GetRequiredService<ICurrentTenant>(),
-            NullLogger<CliRunExecutor>.Instance);
+            NullLogger<CliRunExecutor>.Instance,
+            scoped.GetRequiredService<IServiceScopeFactory>(),
+            budgetService: budget);
     }
 
     private static IOptionsMonitor<CliAgentOptions> EnabledOptions()

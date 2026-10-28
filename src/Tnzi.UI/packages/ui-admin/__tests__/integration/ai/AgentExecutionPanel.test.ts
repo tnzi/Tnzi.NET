@@ -57,7 +57,7 @@ type PanelVm = {
 
 function mountPanel(props: Partial<InstanceType<typeof AgentExecutionPanel>['$props']> = {}) {
   return mount(AgentExecutionPanel, {
-    props: { binding: null, runtimes: [runtime], canEdit: true, ...props } as never,
+    props: { binding: null, runtimes: [runtime], canEdit: true, canUnbind: true, ...props } as never,
     global: { stubs: { TSvgIcon: true } },
   })
 }
@@ -184,17 +184,49 @@ describe('AgentExecutionPanel', () => {
 })
 
 describe('AgentExecutionPanel - read-only viewer', () => {
-  it('offers no write affordance without ai.cliBinding.update', () => {
+  it('offers no write affordance without ai.cliBinding.update and .delete', () => {
     // The backend [ApiAuthorize] is the real wall; hiding the buttons just keeps
     // the page from offering something that will 403.
     const editable = mountPanel({ binding, canEdit: true })
     expect(editable.find('.n-button--primary-type').exists()).toBe(true)
     expect(editable.find('.n-button--error-type').exists()).toBe(true)
 
-    const readOnly = mountPanel({ binding, canEdit: false })
+    const readOnly = mountPanel({ binding, canEdit: false, canUnbind: false })
     expect(readOnly.find('.n-button--primary-type').exists()).toBe(false)
     expect(readOnly.find('.n-button--error-type').exists()).toBe(false)
     // Discard stays: reverting local edits is not a write.
     expect(readOnly.findAll('button').length).toBeGreaterThan(0)
+  })
+
+  // Unbinding is DELETE, gated on ai.cliBinding.delete, not on update.
+  it('offers no unbind, by button or by switching to built-in, without ai.cliBinding.delete', async () => {
+    const wrapper = mountPanel({ binding, canEdit: true, canUnbind: false })
+    expect(wrapper.find('.n-button--error-type').exists()).toBe(false)
+
+    const vm = wrapper.vm as unknown as PanelVm
+    vm.mode = 'builtIn'
+    await wrapper.vm.$nextTick()
+    expect(vm.canSave).toBe(false)
+  })
+})
+
+describe('AgentExecutionPanel - a binding that could not be read', () => {
+  it('reports the failure instead of describing the agent as built-in', () => {
+    const wrapper = mountPanel({ loadError: 'Forbidden' })
+    expect(wrapper.find('[data-test="cli-execution-load-error"]').text()).toContain('Forbidden')
+    // No mode picker and no form: either would describe a state nobody read.
+    expect(wrapper.find('.n-radio-group').exists()).toBe(false)
+    expect(wrapper.find('form').exists()).toBe(false)
+  })
+
+  it('offers no save and no unbind until the binding is read', async () => {
+    // With one runtime registered, picking External would preselect it and a
+    // save would replace the real binding with defaults.
+    const wrapper = mountPanel({ loadError: 'Internal Server Error' })
+    const vm = wrapper.vm as unknown as PanelVm
+    vm.mode = 'external'
+    await wrapper.vm.$nextTick()
+    expect(vm.canSave).toBe(false)
+    expect(wrapper.find('.n-button--error-type').exists()).toBe(false)
   })
 })

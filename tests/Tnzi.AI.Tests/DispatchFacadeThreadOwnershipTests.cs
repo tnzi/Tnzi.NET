@@ -68,11 +68,12 @@ public class DispatchFacadeThreadOwnershipTests
 
         var request = new AgentRunRequest { AgentId = Guid.NewGuid(), ThreadId = ForeignThread, UserMessage = "x" };
 
-        var result = await facade.RunAsync(request);
+        // The recording dispatcher refuses the run (a business error to the caller); what matters is what reached it.
+        await Should.ThrowAsync<BusinessException>(() => facade.RunAsync(request));
 
         dispatcher.EnqueueCalls.ShouldBe(1);
         dispatcher.LastRequest!.ThreadId.ShouldBeNull("an id nobody verified must not reach the dispatcher");
-        result.ThreadId.ShouldBeNull("nor be echoed back to the caller as if it had been resolved");
+        request.ThreadId.ShouldBeNull("nor be echoed back to the caller as if it had been resolved");
     }
 
     private static AgentDispatchFacade CreateFacade(RecordingDispatcher dispatcher, IAgentThreadInternalService threadService)
@@ -86,7 +87,6 @@ public class DispatchFacadeThreadOwnershipTests
             new AlwaysBoundBindingService(),
             dispatcher,
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            threadService,
             NullLogger<AgentDispatchFacade>.Instance);
     }
 
@@ -138,7 +138,7 @@ public class DispatchFacadeThreadOwnershipTests
     /// <summary>Answers exactly like <c>AgentThreadService</c> does for a thread that is not yours.</summary>
     private sealed class RefusingThreadService : IAgentThreadInternalService
     {
-        public Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
             Guid? threadId, Guid? agentId, CancellationToken ct = default)
             => throw new BusinessException("Thread not found", ErrorCodes.ThreadNotFound, 404);
 
@@ -149,15 +149,12 @@ public class DispatchFacadeThreadOwnershipTests
         public Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default)
             => Task.FromResult(new List<ChatMessage>());
 
-        // Every write path refuses, not only SaveMessageAsync: a fake that accepts a metadata
-        // or serialized-state write would keep the ownership test green if the facade ever
-        // persisted into the thread around the check.
-        public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
-            => throw new InvalidOperationException("nothing may be written into a refused thread");
-
         public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
             => Task.FromResult<string?>(null);
 
+        // Every write path refuses, not only SaveMessageAsync: a fake that accepts a metadata
+        // write would keep the ownership test green if the facade ever persisted into the
+        // thread around the check.
         public Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default)
             => throw new InvalidOperationException("nothing may be written into a refused thread");
     }
@@ -165,7 +162,7 @@ public class DispatchFacadeThreadOwnershipTests
     /// <summary>The database is down: not a verdict on the thread, just no answer.</summary>
     private sealed class BrokenThreadService : IAgentThreadInternalService
     {
-        public Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
             Guid? threadId, Guid? agentId, CancellationToken ct = default)
             => throw new InvalidOperationException("connection refused");
 
@@ -175,9 +172,6 @@ public class DispatchFacadeThreadOwnershipTests
 
         public Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default)
             => Task.FromResult(new List<ChatMessage>());
-
-        public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
 
         public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
             => Task.FromResult<string?>(null);

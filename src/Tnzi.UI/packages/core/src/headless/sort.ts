@@ -16,7 +16,18 @@ export type { SortDirection };
 
 export interface SortField {
   field: string;
+  /** Always the short form: the long spellings are folded into it on the way in. */
   direction: SortDirection;
+}
+
+/**
+ * Fold the long spellings `SortDirection` admits ('ascending' / 'descending',
+ * the shape some table components emit) into 'asc' / 'desc', so every getter,
+ * `toggle` and `toQuery` compare against one form. Without this a 'descending'
+ * sort showed as descending and was requested as ascending.
+ */
+function toShortDirection(direction: SortDirection): 'asc' | 'desc' {
+  return direction === 'desc' || direction === 'descending' ? 'desc' : 'asc';
 }
 
 export interface SortOptions {
@@ -78,7 +89,7 @@ export class SortController {
   constructor(options: SortOptions = {}) {
     this.multiple = options.multiple ?? false;
     this.sortFields = options.defaultField
-      ? [{ field: options.defaultField, direction: options.defaultDirection ?? 'asc' }]
+      ? [{ field: options.defaultField, direction: toShortDirection(options.defaultDirection ?? 'asc') }]
       : [];
     return reactive(this) as this;
   }
@@ -134,8 +145,9 @@ export class SortController {
     }
   }
 
-  /** 设置排序 */
-  setSort(field: string, direction: SortDirection): void {
+  /** 设置排序（'ascending' / 'descending' 折算成 'asc' / 'desc' 存储） */
+  setSort(field: string, requested: SortDirection): void {
+    const direction = toShortDirection(requested);
     if (!this.multiple) {
       this.sortFields = [{ field, direction }];
     } else {

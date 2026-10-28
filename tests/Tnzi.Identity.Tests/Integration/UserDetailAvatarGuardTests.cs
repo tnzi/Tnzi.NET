@@ -23,13 +23,24 @@ public class UserDetailAvatarGuardTests : IntegrationTestBase
 {
     private readonly Guid _userId = Guid.NewGuid();
     private readonly Mock<UserManager<User>> _userManager;
+    private readonly IDisposable _mapperScope;
 
     public UserDetailAvatarGuardTests()
     {
+        // 服务经静态 MapTo 映射：映射器由本类自己装上（作用域内有效），不靠同一进程里别的测试类先设过全局映射器，
+        // 否则单独跑这个类时放行路径一律以「Mapper has not been initialized」失败。
+        _mapperScope = MapperExtensions.PushMapper(new Mapper(new TypeAdapterConfig()));
+
         var store = new Mock<IUserStore<User>>();
         _userManager = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
         _userManager.Setup(m => m.FindByIdAsync(_userId.ToString()))
             .ReturnsAsync(new User { Id = _userId, UserName = "victim-picker" });
+    }
+
+    public override void Dispose()
+    {
+        _mapperScope.Dispose();
+        base.Dispose();
     }
 
     /// <summary>UserDetail 对 User 有外键，行得先在；TnziDbContext 只认异步保存，故不能放进构造函数。</summary>
@@ -46,6 +57,7 @@ public class UserDetailAvatarGuardTests : IntegrationTestBase
             new EFCoreRepository<IdentityTestDbContext, UserDetail, Guid>(DbContext, serviceProvider: ServiceProvider),
             _userManager.Object,
             ServiceProvider,
+            UnscopedUserTenantScope.Create(),
             probe);
     }
 

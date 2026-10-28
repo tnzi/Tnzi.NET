@@ -175,4 +175,21 @@ public class DefaultUserFunctionAdminController : ApiAdminControllerBase
         var result = await UserFunctionService.GetUserPermissionPictureAsync(userId, scope);
         return result.ToApiResult();
     }
+
+    /// <summary>
+    /// The permission catalogue the user grant matrix renders: every module (flat,
+    /// hierarchy via <c>parentId</c>) with all of its functions, in one read.
+    /// </summary>
+    /// <remarks>
+    /// Behind this controller's own <c>authorization.userFunction.view</c> gate so a
+    /// delegated administrator can edit a user's direct grants without also holding
+    /// <c>authorization.functionModule.view</c>; the permission picture on this
+    /// surface already returns the catalogue to the same callers.
+    /// </remarks>
+    [HttpGet("catalogue")]
+    public virtual async Task<ApiResult<IReadOnlyList<PermissionCatalogueModuleDto>>> GetCatalogue([FromServices] IModuleManagementService moduleManagementService)
+    {
+        var result = await moduleManagementService.GetPermissionCatalogueAsync();
+        return result.ToApiResult();
+    }
 }

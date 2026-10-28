@@ -2,7 +2,7 @@ namespace Tnzi.Authorization.Controllers.Admin;
 
 /// <summary>
 /// 功能授权控制器
-/// 提供权限检查、获取用户权限列表、获取模块树等API端点，所有方法支持重写
+/// 提供权限检查、获取用户权限列表、权限持有者反查等API端点，所有方法支持重写
 /// </summary>
 [DefaultController]
 [Route("admin/function-authorization")]
@@ -11,24 +11,21 @@ namespace Tnzi.Authorization.Controllers.Admin;
 // 二者只随基类的认证边界开放（任何已登录用户可自查）——零授权用户也必须能查到
 // “自己没有权限”，否则前端权限加载死锁（这正是旧 Admin.Manage 外层门的事故面：
 // 角色权限被清空后连自查端点都 403）。
-// 其余端点（权限检查 / 模块树 / 模块功能 / 反查角色用户 / 统计）均属管理读操作，
+// 其余端点（权限检查 / 持有者反查 / 统计）均属管理读操作，
 // 逐一叠加方法级 authorization.permission.view，不再随认证边界泛化开放。
+// 模块树与模块功能列表不在这里：它们属于 admin/modules（DefaultModuleAdminController），
+// 由 authorization.functionModule.view 把守。
 public class DefaultFunctionAuthorizationAdminController : ApiAdminControllerBase
 {
     protected readonly IFunctionAuthorizationService FunctionAuthorizationService;
-    protected readonly IModuleManagementService ModuleManagementService;
 
     /// <summary>
     /// 初始化功能授权控制器
     /// </summary>
     /// <param name="functionAuthorizationService">功能授权服务</param>
-    /// <param name="moduleManagementService">模块管理服务</param>
-    public DefaultFunctionAuthorizationAdminController(
-        IFunctionAuthorizationService functionAuthorizationService,
-        IModuleManagementService moduleManagementService)
+    public DefaultFunctionAuthorizationAdminController(IFunctionAuthorizationService functionAuthorizationService)
     {
         FunctionAuthorizationService = Check.NotNull(functionAuthorizationService);
-        ModuleManagementService = Check.NotNull(moduleManagementService);
     }
 
     /// <summary>
@@ -88,53 +85,16 @@ public class DefaultFunctionAuthorizationAdminController : ApiAdminControllerBas
     }
 
     /// <summary>
-    /// 获取模块树
+    /// 谁持有这个权限码：授予它的角色（含超管角色、行停用与休眠授权）、最终持有它的账号及其路径
+    /// （超管 / 角色 / 直授）、被单独否定的账号。名单与运行时检查逐人一致，收窄到调用者的租户范围。
     /// </summary>
-    /// <returns>模块树</returns>
-    [HttpGet("modules/tree")]
+    /// <param name="permissionName">权限码（大小写不敏感）</param>
+    /// <returns>持有者全景</returns>
+    [HttpGet("permission/holders")]
     [ApiAuthorize(PermissionName = "authorization.permission.view")]
-    public virtual async Task<ApiResult<IEnumerable<FunctionModule>>> GetModuleTree()
+    public virtual async Task<ApiResult<PermissionHoldersDto>> GetPermissionHolders([FromQuery] string permissionName)
     {
-        var result = await ModuleManagementService.GetModuleTreeAsync();
-        return result.ToApiResult();
-    }
-
-    /// <summary>
-    /// 获取模块的功能列表
-    /// </summary>
-    /// <param name="moduleId">模块ID</param>
-    /// <returns>功能列表</returns>
-    [HttpGet("modules/{moduleId:guid}/functions")]
-    [ApiAuthorize(PermissionName = "authorization.permission.view")]
-    public virtual async Task<ApiResult<IEnumerable<ModuleFunction>>> GetModuleFunctions(Guid moduleId)
-    {
-        var result = await ModuleManagementService.GetModuleFunctionsAsync(moduleId);
-        return result.ToApiResult();
-    }
-
-    /// <summary>
-    /// Reverse permission query: get all roles that have a specific permission
-    /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of roles with the permission</returns>
-    [HttpGet("permission/roles")]
-    [ApiAuthorize(PermissionName = "authorization.permission.view")]
-    public virtual async Task<ApiResult<IEnumerable<PermissionRoleDto>>> GetPermissionRoles([FromQuery] string permissionName)
-    {
-        var result = await FunctionAuthorizationService.GetPermissionRolesAsync(permissionName);
-        return result.ToApiResult();
-    }
-
-    /// <summary>
-    /// Reverse permission query: get all users that have a specific permission
-    /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of users with the permission</returns>
-    [HttpGet("permission/users")]
-    [ApiAuthorize(PermissionName = "authorization.permission.view")]
-    public virtual async Task<ApiResult<IEnumerable<PermissionUserDto>>> GetPermissionUsers([FromQuery] string permissionName)
-    {
-        var result = await FunctionAuthorizationService.GetPermissionUsersAsync(permissionName);
+        var result = await FunctionAuthorizationService.GetPermissionHoldersAsync(permissionName);
         return result.ToApiResult();
     }
 

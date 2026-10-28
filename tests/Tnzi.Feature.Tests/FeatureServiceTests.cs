@@ -8,6 +8,7 @@ using Tnzi.EventBus;
 using Tnzi.Feature.Dtos;
 using Tnzi.Feature.Entities;
 using Tnzi.Feature.Events;
+using Tnzi.Feature.Metadata;
 using Tnzi.Feature.Services;
 using Tnzi.Mapster;
 
@@ -276,6 +277,89 @@ public class FeatureServiceTests
             default), Times.Once);
     }
 
+    [Theory]
+    [InlineData(FeatureValueType.Boolean, "0")]
+    [InlineData(FeatureValueType.Boolean, "off")]
+    [InlineData(FeatureValueType.Integer, "ten")]
+    public async Task CreateDefinitionAsync_DefaultValueNotOfItsType_IsRejected(FeatureValueType type, string defaultValue)
+    {
+        SetupDefinitionQueryable([]);
+
+        var result = await _service.CreateDefinitionAsync(new CreateFeatureDefinitionRequest
+        {
+            Name = "Premium.Export",
+            ValueType = type,
+            DefaultValue = defaultValue
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.InvalidFeatureValueType);
+        _definitionRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<FeatureDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateDefinitionAsync_DefaultValueNotOfItsType_IsRejected()
+    {
+        var id = Guid.NewGuid();
+        _definitionRepositoryMock.Setup(r => r.FindAsync(It.IsAny<object[]>()))
+            .ReturnsAsync(new FeatureDefinition { Id = id, Name = "Premium.Export", ValueType = FeatureValueType.Boolean, DefaultValue = "false" });
+
+        var result = await _service.UpdateDefinitionAsync(id, new UpdateFeatureDefinitionRequest
+        {
+            ValueType = FeatureValueType.Boolean,
+            DefaultValue = "0"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        _definitionRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<FeatureDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// String 改 Boolean 时既有的 "v2" 在新类型下解析不出来：拒绝，而不是留下一个显示着值、运行时却关闭的开关。
+    /// </summary>
+    [Fact]
+    public async Task UpdateDefinitionAsync_ValueTypeChangeIncompatibleWithExistingValues_IsRejected()
+    {
+        var id = Guid.NewGuid();
+        _definitionRepositoryMock.Setup(r => r.FindAsync(It.IsAny<object[]>()))
+            .ReturnsAsync(new FeatureDefinition { Id = id, Name = "Checkout.Variant", ValueType = FeatureValueType.String });
+        SetupValueQueryable([
+            new() { Id = Guid.NewGuid(), FeatureDefinitionId = id, ProviderName = "Tenant", ProviderKey = "t1", Value = "v2" },
+            new() { Id = Guid.NewGuid(), FeatureDefinitionId = id, ProviderName = "Tenant", ProviderKey = "t2", Value = "true" },
+        ]);
+
+        var result = await _service.UpdateDefinitionAsync(id, new UpdateFeatureDefinitionRequest
+        {
+            ValueType = FeatureValueType.Boolean
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(409);
+        result.Message!.ShouldContain("1 existing value");
+        _definitionRepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<FeatureDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateDefinitionAsync_ValueTypeChangeCompatibleWithExistingValues_Succeeds()
+    {
+        var id = Guid.NewGuid();
+        _definitionRepositoryMock.Setup(r => r.FindAsync(It.IsAny<object[]>()))
+            .ReturnsAsync(new FeatureDefinition { Id = id, Name = "Checkout.Flag", ValueType = FeatureValueType.String });
+        SetupValueQueryable([
+            new() { Id = Guid.NewGuid(), FeatureDefinitionId = id, ProviderName = "Tenant", ProviderKey = "t1", Value = "false" },
+        ]);
+
+        var result = await _service.UpdateDefinitionAsync(id, new UpdateFeatureDefinitionRequest
+        {
+            ValueType = FeatureValueType.Boolean,
+            DefaultValue = "true"
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+    }
+
     [Fact]
     public async Task UpdateDefinitionAsync_PublishesEvent()
     {
@@ -320,6 +404,7 @@ public class FeatureServiceTests
 
         _definitionRepositoryMock.Setup(r => r.FindAsync(It.IsAny<object[]>()))
             .ReturnsAsync(entity);
+        SetupValueQueryable([]);
 
         var result = await _service.DeleteDefinitionAsync(id);
         result.Succeeded.ShouldBeTrue();
@@ -328,6 +413,57 @@ public class FeatureServiceTests
             It.Is<FeatureDefinitionDeletedEvent>(evt =>
                 evt.Name == "Feature.ToDelete" && evt.DefinitionId == id),
             default), Times.Once);
+    }
+
+    /// <summary>
+    /// 定义是软删除，数据库的级联删除永远不会触发：此前值行留成孤儿，值缓存里按功能名存着的条目也没人失效，
+    /// 删掉再建同名定义后 ValueCacheSeconds 之内运行时读到的仍是旧值。
+    /// </summary>
+    [Fact]
+    public async Task DeleteDefinitionAsync_DeletesItsValues_AndInvalidatesEachCachedScope()
+    {
+        var id = Guid.NewGuid();
+        var entity = new FeatureDefinition { Id = id, Name = "Feature.ToDelete", IsEnabled = true };
+        _definitionRepositoryMock.Setup(r => r.FindAsync(It.IsAny<object[]>())).ReturnsAsync(entity);
+        var global = new FeatureValue { Id = Guid.NewGuid(), FeatureDefinitionId = id, ProviderName = "Global", Value = "true" };
+        var tenant = new FeatureValue { Id = Guid.NewGuid(), FeatureDefinitionId = id, ProviderName = "Tenant", ProviderKey = "t-1", Value = "false" };
+        var unrelated = new FeatureValue { Id = Guid.NewGuid(), FeatureDefinitionId = Guid.NewGuid(), ProviderName = "Global", Value = "true" };
+        SetupValueQueryable([global, tenant, unrelated]);
+
+        var result = await _service.DeleteDefinitionAsync(id);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        _valueRepositoryMock.Verify(r => r.DeleteManyAsync(
+            It.Is<IEnumerable<FeatureValue>>(v => v.Select(x => x.Id).OrderBy(x => x).SequenceEqual(new[] { global.Id, tenant.Id }.OrderBy(x => x))),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _eventBusMock.Verify(e => e.PublishAsync(
+            It.Is<FeatureValueDeletedEvent>(evt => evt.FeatureName == "Feature.ToDelete" && evt.ProviderName == "Global" && evt.ProviderKey == null),
+            default), Times.Once);
+        _eventBusMock.Verify(e => e.PublishAsync(
+            It.Is<FeatureValueDeletedEvent>(evt => evt.FeatureName == "Feature.ToDelete" && evt.ProviderName == "Tenant" && evt.ProviderKey == "t-1"),
+            default), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(101, 0, 0)]
+    [InlineData(0, 201, 0)]
+    [InlineData(0, 0, 51)]
+    public async Task CreateDefinitionAsync_FieldLongerThanItsColumn_Rejected400(int nameLength, int displayNameLength, int groupLength)
+    {
+        SetupDefinitionQueryable([]);
+
+        var result = await _service.CreateDefinitionAsync(new CreateFeatureDefinitionRequest
+        {
+            Name = nameLength > 0 ? new string('n', nameLength) : "Feature.Ok",
+            DisplayName = displayNameLength > 0 ? new string('d', displayNameLength) : null,
+            Group = groupLength > 0 ? new string('g', groupLength) : null,
+            ValueType = FeatureValueType.Boolean
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.FeatureFieldTooLong);
+        _definitionRepositoryMock.Verify(r => r.InsertAsync(It.IsAny<FeatureDefinition>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

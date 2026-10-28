@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readSessionIdClaim } from '../../src/services/identity/session-claims';
+import { readExpiryClaim, readSessionIdClaim, readUserIdClaim } from '../../src/services/identity/session-claims';
 
 // ---------------------------------------------------------------------------
 // The session list the backend returns has no "this is you" marker, but the
@@ -47,5 +47,46 @@ describe('readSessionIdClaim', () => {
     expect(readSessionIdClaim('a.b')).toBeNull();
     expect(readSessionIdClaim('a.!!!not-base64!!!.c')).toBeNull();
     expect(readSessionIdClaim(`h.${base64url('[1,2]')}.s`)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The user id claim decides whether a session another tab left in shared
+// storage belongs to the same person (see AuthStateManager). Unknown must be
+// null, never a guess.
+// ---------------------------------------------------------------------------
+
+describe('readUserIdClaim', () => {
+  it('reads the short nameid claim the framework token handler writes', () => {
+    expect(readUserIdClaim(jwt({ nameid: 'user-1', sub: 'other', session_id: 's' }))).toBe('user-1');
+  });
+
+  it('falls back to sub, then to the long NameIdentifier claim type', () => {
+    expect(readUserIdClaim(jwt({ sub: 'user-2' }))).toBe('user-2');
+    expect(
+      readUserIdClaim(jwt({ 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier': 'user-3' })),
+    ).toBe('user-3');
+  });
+
+  it('is null when no user id can be read', () => {
+    expect(readUserIdClaim(jwt({ session_id: 's' }))).toBeNull();
+    expect(readUserIdClaim(jwt({ nameid: '' }))).toBeNull();
+    expect(readUserIdClaim(jwt({ nameid: 7 }))).toBeNull();
+    expect(readUserIdClaim(null)).toBeNull();
+    expect(readUserIdClaim('opaque-reference-token')).toBeNull();
+    expect(readUserIdClaim('a.!!!not-base64!!!.c')).toBeNull();
+  });
+});
+
+describe('readExpiryClaim', () => {
+  it('reads the exp claim as epoch milliseconds', () => {
+    expect(readExpiryClaim(jwt({ sub: 'u1', exp: 1_791_000_000 }))).toBe(1_791_000_000_000);
+  });
+
+  it('is null when the expiry cannot be told', () => {
+    expect(readExpiryClaim(jwt({ sub: 'u1' }))).toBeNull();
+    expect(readExpiryClaim(jwt({ exp: '1791000000' }))).toBeNull();
+    expect(readExpiryClaim(null)).toBeNull();
+    expect(readExpiryClaim('opaque-reference-token')).toBeNull();
   });
 });

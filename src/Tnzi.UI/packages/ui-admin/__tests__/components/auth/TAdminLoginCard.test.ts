@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 import TAdminLoginCard from '../../../src/components/auth/TAdminLoginCard.vue'
 
 /**
@@ -28,5 +28,35 @@ describe('TAdminLoginCard', () => {
 
   it('omits the switcher entirely when code login is off', () => {
     expect(mountCard({ enableCodeLogin: false }).find('.n-tabs').exists()).toBe(false)
+  })
+
+  // The backend's [Required] refuses a whitespace-only user name or password:
+  // letting one through only trades the field message for a failed sign-in
+  // that counts towards the lockout.
+  it.each([
+    ['a whitespace-only user name', '   ', 'secret'],
+    ['a whitespace-only password', 'admin', '      '],
+  ])('holds %s at the form instead of signing in', async (_case, userName, password) => {
+    const onLogin = vi.fn(async () => undefined)
+    const w = mount(TAdminLoginCard, {
+      props: { onLogin, defaultUserName: userName, defaultPassword: password },
+      attachTo: document.body,
+    })
+    await w.find('button[type="submit"]').trigger('click')
+    await flushPromises()
+    expect(onLogin).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('signs in with a password that merely has spaces around it', async () => {
+    const onLogin = vi.fn(async () => undefined)
+    const w = mount(TAdminLoginCard, {
+      props: { onLogin, defaultUserName: 'admin', defaultPassword: ' secret ' },
+      attachTo: document.body,
+    })
+    await w.find('button[type="submit"]').trigger('click')
+    await flushPromises()
+    expect(onLogin).toHaveBeenCalledTimes(1)
+    w.unmount()
   })
 })

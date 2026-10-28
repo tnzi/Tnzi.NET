@@ -27,7 +27,7 @@ public class RerankerOptions
     public double DiminishingFactor { get; set; } = 0.5;
 
     /// <summary>
-    /// 合并后得分上限
+    /// 合并后得分上限：只约束同一内容多次命中、合并过的组；单条结果不受它限制
     /// </summary>
     [RuntimeSetting(Label = "Max Merged Score", I18n = "admin.modules.system.settings.fields.ragRerankerMaxMergedScore",
         Type = SettingFieldType.Decimal, Min = 0, Max = 100, Subsection = "Reranker",

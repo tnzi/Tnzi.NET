@@ -59,3 +59,40 @@ describe('cli-agent-bridge write paths', () => {
     await expect(noClient.runtimes.probe()).resolves.toEqual({ runtimes: [], notFound: [] })
   })
 })
+
+// ---- 读：只有「模块不在」才读作空 ----
+//
+// 501（模块关着）与 404（路由不在）是部署事实，列表页读作「这里没有」。其余拒绝
+// （400 绑定失败、403 无权、500）以前也被读成空列表：运行记录页筛「昨天失败的」
+// 拿到 400，表格显示「暂无数据」，读起来就是「那段时间没有运行」。
+describe('cli-agent-bridge reads', () => {
+  function answering(code: number, message = 'Refused') {
+    const envelope = { data: null, succeeded: false, success: false, code, message }
+    return {
+      get: vi.fn(async () => envelope),
+      post: vi.fn(async () => envelope),
+      put: vi.fn(async () => envelope),
+      delete: vi.fn(async () => envelope),
+    } as unknown as HttpClient
+  }
+
+  const reads: Array<[string, (b: ReturnType<typeof createCliAgentBridge>) => Promise<unknown>]> = [
+    ['runs.list', (b) => b.runs.list({ pageIndex: 1, pageSize: 20 } as never)],
+    ['runs.messages', (b) => b.runs.messages('run1')],
+    ['runtimes.list', (b) => b.runtimes.list()],
+    ['runtimes.providers', (b) => b.runtimes.providers()],
+    ['bindings.get', (b) => b.bindings.get('a1')],
+  ]
+
+  it.each(reads)('%s rejects with the server reason on a refusal that is not "module absent"', async (_name, call) => {
+    await expect(call(createCliAgentBridge({ client: answering(400, 'The value is not valid for StartTime.') }))).rejects.toThrow(
+      'The value is not valid for StartTime.',
+    )
+    await expect(call(createCliAgentBridge({ client: answering(403, 'Forbidden') }))).rejects.toThrow('Forbidden')
+  })
+
+  it.each(reads)('%s still reads a 501 or 404 as "not available here"', async (_name, call) => {
+    await expect(call(createCliAgentBridge({ client: answering(501) }))).resolves.not.toBeUndefined()
+    await expect(call(createCliAgentBridge({ client: answering(404) }))).resolves.not.toBeUndefined()
+  })
+})

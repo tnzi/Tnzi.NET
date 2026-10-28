@@ -617,7 +617,7 @@ public class ApprovalToolWrapperTests
     }
 
     [Fact]
-    public async Task InvokeAsync_WorkflowNodeRule_UsesExecutionContextMetadata()
+    public async Task InvokeAsync_WorkflowNodeRule_UsesTheEnginesNodeScope()
     {
         var inner = AIFunctionFactory.Create(() => "should-not-run", "write_file", "Write a file");
         var approvalHandler = new Mock<IToolApprovalHandler>(MockBehavior.Strict);
@@ -634,18 +634,8 @@ public class ApprovalToolWrapperTests
             }
         ]);
 
-        var accessor = new AgentExecutionContextAccessor
-        {
-            CurrentRequest = new AgentRunRequest
-            {
-                WorkflowId = Guid.NewGuid(),
-                Metadata = new Dictionary<string, object>
-                {
-                    ["workflow_execution_id"] = "wf-exec-001",
-                    ["node_name"] = "approval-step"
-                }
-            }
-        };
+        var request = new AgentRunRequest { WorkflowId = Guid.NewGuid() };
+        var accessor = new AgentExecutionContextAccessor { CurrentRequest = request };
 
         var wrapper = new ApprovalToolWrapper(
             inner,
@@ -655,7 +645,12 @@ public class ApprovalToolWrapperTests
             executionContextAccessor: accessor,
             toolGroup: "file");
 
-        var result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+        // 节点身份由工作流引擎在节点执行期间设置（WorkflowNodeScope），不来自请求元数据
+        object? result;
+        using (WorkflowNodeScope.Enter(request.WorkflowId, "wf-exec-001", "approval-step"))
+        {
+            result = await wrapper.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+        }
 
         result.ShouldBe("Tool call rejected: Approval step write blocked");
         approvalHandler.VerifyNoOtherCalls();

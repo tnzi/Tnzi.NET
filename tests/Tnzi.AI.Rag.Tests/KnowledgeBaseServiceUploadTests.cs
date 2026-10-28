@@ -114,6 +114,30 @@ public class KnowledgeBaseServiceUploadTests : IntegratedTestBase<RagJobTestDbCo
         (await ReadKbAsync(kbId)).DocumentCount.ShouldBe(0);
     }
 
+    /// <summary>
+    /// 客户端在同步摄取途中断开：摄取以失败结果返回，请求令牌已经取消。此前终态带着这枚令牌去写，当场抛出，
+    /// 文档永久停在 Processing（去重不命中、前端轮询不结束）。
+    /// </summary>
+    [Fact]
+    public async Task UploadDocumentAsync_SyncFallback_ClientDisconnectsDuringIngestion_TheDocumentStillLeavesProcessing()
+    {
+        var kbId = await SeedKbAsync();
+        using var requestAborted = new CancellationTokenSource();
+        _ingestion
+            .Setup(s => s.IngestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await requestAborted.CancelAsync();
+                return IngestResult.Failure("Document ingestion failed due to an internal error.");
+            });
+
+        var result = await CreateService(withJobManager: false)
+            .UploadDocumentAsync(kbId, Content("hello"), "a.txt", ct: requestAborted.Token);
+
+        var row = await ReadDocAsync(result.Data!.DocumentId);
+        row!.Status.ShouldBe(DocumentStatus.Failed);
+    }
+
     [Fact]
     public async Task UploadDocumentAsync_SyncFallback_SecondUploadOfSameContent_IsDeduplicated()
     {
@@ -166,6 +190,43 @@ public class KnowledgeBaseServiceUploadTests : IntegratedTestBase<RagJobTestDbCo
         await Manager.CommitTransactionAsync();
 
         visibleAtEnqueue.ShouldBe([true], "the job runs after commit and must find the row");
+    }
+
+    /// <summary>
+    /// 异步摄取下第一份还在 Processing 时再传一次同样的内容：返回进行中的那一篇，不再写第二篇、不再入队第二个任务。
+    /// 此前去重只认 Completed，两篇文档、两套相同分块、知识库计数翻倍。
+    /// </summary>
+    [Fact]
+    public async Task UploadDocumentAsync_SameContentWhileTheFirstIsStillProcessing_ReturnsTheInProgressDocument()
+    {
+        var kbId = await SeedKbAsync();
+        _jobManager.Setup(m => m.Enqueue(It.IsAny<DocumentIngestionJobArgs>())).Returns("job-1");
+        var service = CreateService(withJobManager: true);
+
+        var first = await service.UploadDocumentAsync(kbId, Content("same"), "a.txt");
+        var second = await service.UploadDocumentAsync(kbId, Content("same"), "a-again.txt");
+
+        second.Data!.IsDuplicate.ShouldBeTrue();
+        second.Data.DocumentId.ShouldBe(first.Data!.DocumentId);
+        second.Data.Status.ShouldBe(DocumentStatus.Processing);
+        _jobManager.Verify(m => m.Enqueue(It.IsAny<DocumentIngestionJobArgs>()), Times.Once);
+        (await DbContext.Set<KnowledgeDocument>().AsNoTracking().CountAsync(d => d.KnowledgeBaseId == kbId)).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task UploadDocumentAsync_SameContentAsAFailedDocument_IsIngestedAgain()
+    {
+        var kbId = await SeedKbAsync();
+        IngestionReturns(IngestResult.Failure("bad file"));
+        var service = CreateService(withJobManager: false);
+
+        var failed = await service.UploadDocumentAsync(kbId, Content("same"), "a.txt");
+        IngestionReturns(IngestResult.Success(1));
+        var retried = await service.UploadDocumentAsync(kbId, Content("same"), "a.txt");
+
+        retried.Data!.IsDuplicate.ShouldBeFalse();
+        retried.Data.DocumentId.ShouldNotBe(failed.Data!.DocumentId);
+        retried.Data.Status.ShouldBe(DocumentStatus.Completed);
     }
 
     [Fact]

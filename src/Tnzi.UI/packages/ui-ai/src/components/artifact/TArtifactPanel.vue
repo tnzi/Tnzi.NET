@@ -22,13 +22,15 @@
  * - **Toolbar** with copy / download / open-external + custom slot
  * - `#preview` / `#history` slots for tab content overrides
  *
- * Theme defaults to `github-light` (matches Manus's read-only code view).
+ * Code colours follow light/dark (`github-light` / `github-dark`) unless the
+ * `theme` prop pins one Shiki theme.
  * Different from the lightweight `Artifact` container - this one owns
  * tabs, resize, file selection and Shiki rendering.
  */
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useCodeHighlight, detectLangFromFilename } from '../../headless/useCodeHighlight'
+import { useAiI18n } from '../../i18n/index'
 
 export type ArtifactView = 'preview' | 'code' | 'history'
 
@@ -129,6 +131,8 @@ const props = withDefaults(
     resizable: true,
   },
 )
+
+const t = useAiI18n()
 
 const emit = defineEmits<{
   'update:view': [view: ArtifactView]
@@ -498,7 +502,7 @@ function selectFile(path: string): void {
           @click="setView('preview')"
         >
           <Icon icon="lucide:play" />
-          <span>Preview</span>
+          <span>{{ t.artifact.preview }}</span>
         </button>
         <button
           type="button"
@@ -508,7 +512,7 @@ function selectFile(path: string): void {
           @click="setView('code')"
         >
           <Icon icon="lucide:code" />
-          <span>Code</span>
+          <span>{{ t.artifact.code }}</span>
         </button>
         <button
           type="button"
@@ -526,7 +530,7 @@ function selectFile(path: string): void {
         <button
           type="button"
           class="t-artifact-panel__tool"
-          :aria-label="copied ? 'Copied' : 'Copy code'"
+          :aria-label="copied ? t.chat.copied : t.chat.copyCode"
           @click="handleCopy"
         >
           <Icon :icon="copied ? 'lucide:check' : 'lucide:copy'" />
@@ -534,7 +538,7 @@ function selectFile(path: string): void {
         <button
           type="button"
           class="t-artifact-panel__tool"
-          aria-label="Download"
+          :aria-label="t.artifact.download"
           @click="emit('download', isProject ? activeFile! : artifact!)"
         >
           <Icon icon="lucide:download" />
@@ -542,7 +546,7 @@ function selectFile(path: string): void {
         <button
           type="button"
           class="t-artifact-panel__tool"
-          aria-label="Open in new tab"
+          :aria-label="t.artifact.openExternal"
           @click="emit('open-external', isProject ? activeFile! : artifact!)"
         >
           <Icon icon="lucide:external-link" />
@@ -556,7 +560,7 @@ function selectFile(path: string): void {
       <!-- File tree sidebar (project mode only). Renders the flattened
            visible rows from `flatRows`. Folder rows have a chevron toggle
            that hides/shows their children; file rows fire `selectFile`. -->
-      <nav v-if="isProject" class="t-artifact-panel__filelist">
+      <nav v-if="isProject" class="t-artifact-panel__filelist t-ai-scroll">
         <template v-for="row in flatRows" :key="row.node.path">
           <button
             v-if="row.visible"
@@ -653,7 +657,7 @@ function selectFile(path: string): void {
                   <button
                     type="button"
                     class="t-artifact-panel__chrome-btn"
-                    aria-label="Open in new tab"
+                    :aria-label="t.artifact.openExternal"
                     @click="emit('open-external', isProject ? activeFile! : artifact!)"
                   >
                     <Icon icon="lucide:external-link" />
@@ -661,7 +665,7 @@ function selectFile(path: string): void {
                   <button
                     type="button"
                     class="t-artifact-panel__chrome-btn"
-                    aria-label="Refresh"
+                    :aria-label="t.common.refresh"
                     @click="refreshPreview"
                   >
                     <Icon icon="lucide:refresh-cw" />
@@ -670,14 +674,14 @@ function selectFile(path: string): void {
                 <button
                   type="button"
                   class="t-artifact-panel__chrome-edit"
-                  aria-label="Edit"
+                  :aria-label="t.common.edit"
                   @click="emit('preview:edit')"
                 >
                   <Icon icon="lucide:square-pen" />
-                  <span>Edit</span>
+                  <span>{{ t.common.edit }}</span>
                 </button>
               </div>
-              <div class="t-artifact-panel__iframe-wrap">
+              <div class="t-artifact-panel__iframe-wrap t-ai-scroll">
                 <iframe
                   ref="iframeRef"
                   class="t-artifact-panel__iframe"
@@ -702,7 +706,7 @@ function selectFile(path: string): void {
 
         <div
           v-else-if="view === 'code'"
-          class="t-artifact-panel__code"
+          class="t-artifact-panel__code t-ai-scroll-scope"
           v-html="highlightedCode"
         />
 
@@ -828,6 +832,7 @@ function selectFile(path: string): void {
   flex-shrink: 0;
   border-right: 1px solid var(--tnzi-ai-divider, #ececec);
   overflow-y: auto;
+  position: relative;
   padding: 6px 4px;
   display: flex;
   flex-direction: column;
@@ -1026,6 +1031,7 @@ function selectFile(path: string): void {
   justify-content: center;
   background: var(--tnzi-ai-bg, #f8f8f7);
   overflow: auto;
+  position: relative;
 }
 .t-artifact-panel__iframe {
   height: 100%;
@@ -1067,6 +1073,7 @@ function selectFile(path: string): void {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  position: relative;
   padding: 4px 0 16px;
 }
 .t-artifact-panel__code :deep(pre.shiki) {
@@ -1075,9 +1082,10 @@ function selectFile(path: string): void {
   background: transparent !important;
   font-family: var(--tnzi-ai-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 12px;
-  line-height: 1.65;
+  line-height: var(--tnzi-ai-code-line-height, 1.5);
   white-space: pre;
   overflow-x: auto;
+  position: relative;
 }
 .t-artifact-panel__code :deep(pre.shiki code) {
   background: transparent;

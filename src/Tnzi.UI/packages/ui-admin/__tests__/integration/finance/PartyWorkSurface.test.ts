@@ -66,6 +66,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 })
 
 import Page from '../../../src/pages/finance/CustomerDetail.vue'
+import { fmtMoney } from '../../../src/pages/finance/money'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -105,6 +106,18 @@ describe('Finance party work surface', () => {
     expect(wrapper.text()).toContain('Acme Supplies Ltd')
   })
 
+  // A failed summary read rendered both money cards as a dash in the success
+  // tone: a green "nothing owed, nothing overdue" over figures it never read.
+  it('★ a failed summary read leaves the balance cards neutral', async () => {
+    getSummary.mockRejectedValue(new Error('Request failed with status code 500'))
+    const wrapper = mount(Page, { props: { id: 'c1' }, global: { stubs } })
+    await flushPromises()
+
+    const tones = wrapper.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('tone'))
+    expect(tones).not.toContain('success')
+    expect(tones).not.toContain('error')
+  })
+
   it('shows the balance the backend computed, in the accounting format', async () => {
     const wrapper = mount(Page, { props: { id: 'c1' }, global: { stubs } })
     await flushPromises()
@@ -112,6 +125,22 @@ describe('Finance party work surface', () => {
     // $2,040.00 - the aging report's figure, not a sum of the visible page.
     expect(wrapper.text()).toContain('2,040.00')
     expect(wrapper.text()).toContain('840.00')
+  })
+
+  it('labels the balance strip with the ledger base currency, not the party currency', async () => {
+    // The summary figures are converted to the base currency (the same basis
+    // as the aging bar under them); the party currency is only what its
+    // documents are written in.
+    getParty.mockResolvedValue({ ...party, currency: 'EUR' })
+    const wrapper = mount(Page, { props: { id: 'c1' }, global: { stubs } })
+    await flushPromises()
+
+    const values = wrapper
+      .findAllComponents({ name: 'TKpiCard' })
+      .map((c) => c.props('value'))
+      .filter((v): v is string => typeof v === 'string')
+    expect(values).toEqual([fmtMoney(2040, 'CAD'), fmtMoney(840, 'CAD'), fmtMoney(2040, 'CAD')])
+    expect(values.join(' ')).not.toContain('€')
   })
 
   it('drills a ledger row through to its source document', async () => {
@@ -154,5 +183,38 @@ describe('Finance party work surface', () => {
     await flushPromises()
 
     expect(getTransactions).toHaveBeenCalledWith('c1', expect.objectContaining({ openOnly: true, pageIndex: 1 }))
+  })
+
+  // The route reuses this page from one party to the next. On a slow link the
+  // first party's answers arriving last must not paint its name, balance and
+  // ledger under the party now on screen.
+  it('★ keeps the party navigated to last when an earlier read answers late', async () => {
+    const answers = new Map<string, Array<() => void>>()
+    const later = <T,>(id: string, value: T) =>
+      new Promise<T>((resolve) => { answers.set(id, [...(answers.get(id) ?? []), () => resolve(value)]) })
+    getParty.mockImplementation((id: string) => later(id, { ...party, id, name: id === 'c1' ? 'Acme Supplies Ltd' : 'Beta Traders Inc' }))
+    getSummary.mockImplementation((id: string) => later(id, { ...summary, partyId: id, openBalance: id === 'c1' ? 2040 : 75 }))
+    getTransactions.mockImplementation((id: string) =>
+      later(id, { items: id === 'c1' ? entries : [], totalCount: id === 'c1' ? 2 : 0, pageIndex: 1, pageSize: 20 }),
+    )
+
+    const wrapper = mount(Page, { props: { id: 'c1' }, global: { stubs } })
+    await flushPromises()
+    await wrapper.setProps({ id: 'c2' })
+    await flushPromises()
+
+    for (const answer of answers.get('c2') ?? []) answer()
+    await flushPromises()
+    for (const answer of answers.get('c1') ?? []) answer()
+    await flushPromises()
+
+    const surface = wrapper.findComponent({ name: 'PartyWorkSurface' }).vm as unknown as {
+      party: { name: string } | null
+      summary: { partyId: string } | null
+      entries: unknown[]
+    }
+    expect(surface.party?.name).toBe('Beta Traders Inc')
+    expect(surface.summary?.partyId).toBe('c2')
+    expect(surface.entries).toEqual([])
   })
 })

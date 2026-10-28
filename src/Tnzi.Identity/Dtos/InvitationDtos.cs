@@ -98,6 +98,19 @@ public class InvitationPreviewDto
 }
 
 /// <summary>
+/// 读取邀请展示信息。
+/// </summary>
+/// <remarks>
+/// 令牌放在请求体而不是路径里：请求路径会被写进请求日志与访问日志，而预览不消费令牌。
+/// </remarks>
+public class PreviewInvitationDto
+{
+    /// <summary>邀请令牌（从链接里来）。</summary>
+    [Required]
+    public string Token { get; set; } = null!;
+}
+
+/// <summary>
 /// 接受邀请。
 /// </summary>
 public class AcceptInvitationDto

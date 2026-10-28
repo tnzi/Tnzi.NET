@@ -13,18 +13,49 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     /// </summary>
     private readonly string _postMessageOrigin;
 
+    private readonly IOptionsMonitor<IdentityOptions>? _identityOptions;
+
+    private readonly IOptions<Microsoft.AspNetCore.Identity.IdentityOptions>? _aspNetIdentityOptions;
+
+    /// <remarks>
+    /// 最后两个只被重置密码页读：链接有效期（<c>Identity:Recovery:ResetTokenExpirationMinutes</c>，运行时设置）
+    /// 与 ASP.NET Identity 实际强制的最短密码长度。缺席时退回各自的默认值（30 分钟、6 位）。
+    /// </remarks>
     public IdentityPageService(
         IServiceProvider serviceProvider,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IOptionsMonitor<IdentityOptions>? identityOptions = null,
+        IOptions<Microsoft.AspNetCore.Identity.IdentityOptions>? aspNetIdentityOptions = null)
         : base(serviceProvider)
     {
         _configuration = configuration;
+        _identityOptions = identityOptions;
+        _aspNetIdentityOptions = aspNetIdentityOptions;
         _postMessageOrigin = FrontendUrlResolver.Resolve(configuration, Logger) ?? string.Empty;
     }
+
+    /// <summary>OAuth 回调页上「正在处理」的那句话；页面脚本据此判断还没有出结果。</summary>
+    private const string ProcessingMessage = "Signing you in...";
+
+    /// <summary>站点名缺省时页面上显示的名字。</summary>
+    private const string DefaultSiteName = "Tnzi.NET";
+
+    /// <summary>
+    /// 页面抬头用的站点名：与邀请信、密码重置信同一个来源（<c>System:SiteName</c>，经 <see cref="SiteNameResolver"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 此前读的是 <c>App:AppName</c>，一个别处都不读的键：部署方配好了站点名，这两个页面上照样显示框架名。
+    /// </remarks>
+    private string ResolveSiteName() => SiteNameResolver.Resolve(_configuration, Logger) ?? DefaultSiteName;
 
     /// <summary>
     /// 生成OAuth回调HTML页面（通过postMessage传递结果给父窗口）
     /// </summary>
+    /// <remarks>
+    /// ★★ 页面脚本一个 console 调用都不留：载荷里就是访问令牌（Bearer 模式下还有刷新令牌），
+    /// 写进控制台等于让它随排障截图、共享的控制台日志、录屏一起流出去。脚本出错时也只给一句通用的话，
+    /// 不把异常对象渲染到页面上。页面里的文字与脚本注释一律英文：它们原样送到最终用户的浏览器。
+    /// </remarks>
     public string GenerateOAuthCallbackHtml(OAuthCallbackResultDto result, string? returnUrl = null)
     {
         var dataObject = new
@@ -48,8 +79,10 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             // 前端按 errorCode 分支、从 errorDetails 取临时令牌，与 JSON 端点上的处理逐字相同。
             errorCode = result.ErrorCode,
             errorDetails = result.ErrorDetails,
-            // 绑定流程：回调页据此知道这次没有令牌可交，只需跳回 returnUrl / 通知 opener。
+            // 绑定流程：回调页据此知道这次没有令牌可交。关联还没发生：完成码要交回发起绑定的那个页面，
+            // 由它以已登录身份调完成端点（见 OAuthCallbackResultDto.LinkCode）。
             linkedProvider = result.LinkedProvider,
+            linkCode = result.LinkCode,
             returnUrl = returnUrl
         };
         // 使用 System.Text.Json 序列化为 JSON，然后作为 JavaScript 对象字面量嵌入
@@ -110,41 +143,43 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
 <body>
     <div class=""container"">
         <div class=""spinner""></div>
-        <div class=""message"">正在处理登录...</div>
+        <div class=""message"">{ProcessingMessage}</div>
     </div>
     <noscript>
         <div class=""container"">
-            <div class=""message"" style=""color: #ff4d4f;"">请启用 JavaScript 以完成登录</div>
+            <div class=""message"" style=""color: #ff4d4f;"">Enable JavaScript to finish signing in.</div>
         </div>
     </noscript>
     <script>
         (function() {{
-            try {{
-                // 直接将 JSON 作为对象字面量嵌入，避免字符串转义问题
-                var jsonData = {json};
-                console.log('OAuth callback data:', jsonData);
+            // Nothing on this page writes to the console: the payload carries the tokens.
+            function showMessage(text, isError) {{
+                document.body.innerHTML = '<div class=""container""><div class=""message""></div></div>';
+                var message = document.querySelector('.message');
+                if (isError) {{
+                    message.style.color = '#ff4d4f';
+                }}
+                message.textContent = text;
+            }}
 
-                // 向父窗口发送消息
+            try {{
+                // The JSON is embedded as an object literal, so no string unescaping is needed.
+                var jsonData = {json};
+
+                // Hand the result to the window that opened this one.
                 if (window.opener && !window.opener.closed) {{
-                    console.log('Sending message to opener');
                     window.opener.postMessage({{
                         type: 'oauth-callback',
                         data: jsonData
                     }}, {originJs});
-                    // 延迟关闭，确保消息已发送
+                    // Close a moment later so the message is delivered first.
                     setTimeout(function() {{
-                        console.log('Closing window');
                         window.close();
                     }}, 200);
                 }} else {{
-                    console.log('No opener window, attempting redirect');
-                    // ★ 只有成功才跳转。失败时跳过去等于把一个「登录没成功、而且原因你看不到」
-                    // 的页面丢给用户 —— 挑战（2FA / 待办义务）只能经 postMessage 交给打开它的窗口，
-                    // 没有 opener 时唯一诚实的做法是当场把原因说出来。
+                    // Only a success redirects; a failure is explained here, because a challenge can only reach an opener.
                     if (!jsonData.success) {{
-                        document.body.innerHTML = '<div class=""container""><div class=""message"" style=""color: #ff4d4f;""></div></div>';
-                        document.querySelector('.message').textContent =
-                            jsonData.errorMessage || '登录未完成，请回到登录页重试。';
+                        showMessage(jsonData.errorMessage || 'Sign-in was not completed. Go back to the sign-in page and try again.', true);
                     }} else if (jsonData.returnUrl) {{
                         var url = new URL(jsonData.returnUrl, window.location.origin);
                         if (jsonData.success && jsonData.accessToken) {{
@@ -154,31 +189,36 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                                 params.set('refreshToken', jsonData.refreshToken);
                             }}
                             url.hash = params.toString();
+                        }} else if (jsonData.success && jsonData.linkCode) {{
+                            // The link code travels in the fragment, which stays out of server logs and the Referer header.
+                            var linkParams = new URLSearchParams();
+                            linkParams.set('linkCode', jsonData.linkCode);
+                            linkParams.set('linkedProvider', jsonData.linkedProvider || '');
+                            url.hash = linkParams.toString();
                         }}
                         window.location.href = url.toString();
+                    }} else if (jsonData.linkedProvider) {{
+                        // Without an opener or a return address the link code cannot reach the page that started linking.
+                        showMessage('Linking was not completed. Close this window and start again from your profile.', false);
                     }} else {{
-                        document.body.innerHTML = '<div class=""container""><div class=""message"">'
-                            + (jsonData.linkedProvider ? '绑定成功！请关闭此窗口。' : '登录成功！请关闭此窗口。') + '</div></div>';
+                        showMessage('You are signed in. You can close this window.', false);
                     }}
                 }}
             }} catch (e) {{
-                console.error('OAuth callback error:', e);
-                console.error('Error stack:', e.stack);
-                var errorMsg = '处理登录时发生错误：' + (e.message || '未知错误') + '，请重试。';
-                document.body.innerHTML = '<div class=""container""><div class=""message"" style=""color: #ff4d4f;"">' + errorMsg + '</div><div class=""message"" style=""margin-top: 1rem; font-size: 12px; color: #999;"">错误详情：' + e.toString() + '</div></div>';
+                // The error itself is not shown: its message may carry the tokens or the return address.
+                showMessage('Something went wrong while signing you in. Close this window and try again.', true);
             }}
         }})();
     </script>
     <script>
-        // 备用检查：如果 3 秒后还没有关闭窗口，显示提示
+        // Fallback hint when the window is still open after 3 seconds.
         setTimeout(function() {{
             if (!document.body.classList.contains('closed')) {{
-                console.warn('OAuth callback window still open after 3 seconds');
                 var container = document.querySelector('.container');
                 if (container) {{
                     var message = container.querySelector('.message');
-                    if (message && message.textContent === '正在处理登录...') {{
-                        message.textContent = '处理时间较长，请稍候...如果长时间无响应，请关闭窗口重试。';
+                    if (message && message.textContent === '{ProcessingMessage}') {{
+                        message.textContent = 'This is taking longer than usual. If nothing happens, close this window and try again.';
                     }}
                 }}
             }}
@@ -248,10 +288,10 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     <div class=""container"">
         <div class=""error-icon"">⚠</div>
         <div class=""error-message"">{WebUtility.HtmlEncode(errorMessage)}</div>
-        <button class=""close-btn"" onclick=""window.close()"">关闭窗口</button>
+        <button class=""close-btn"" onclick=""window.close()"">Close window</button>
     </div>
     <script>
-        // 向父窗口发送错误消息
+        // Hand the failure to the window that opened this one.
         if (window.opener) {{
             window.opener.postMessage({{
                 type: 'oauth-callback',
@@ -273,7 +313,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     {
         var iconColor = success ? "#52c41a" : "#ff4d4f";
         var icon = success ? "✓" : "✗";
-        var title = success ? "邮箱确认成功" : "邮箱确认失败";
+        var title = success ? "Email confirmed" : "Email not confirmed";
 
         return $@"<!DOCTYPE html>
 <html>
@@ -339,7 +379,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
         <div class=""icon"">{icon}</div>
         <div class=""title"">{WebUtility.HtmlEncode(title)}</div>
         <div class=""message"">{WebUtility.HtmlEncode(message)}</div>
-        <a href=""/"" class=""button"">返回首页</a>
+        <a href=""/"" class=""button"">Back to home</a>
     </div>
 </body>
 </html>";
@@ -348,6 +388,10 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
     /// <summary>
     /// 生成重置密码表单HTML页面
     /// </summary>
+    /// <remarks>
+    /// 表单提交回页面自己的地址（GET 出表单、POST 收新密码，同一条路由）。此前写死 <c>/auth/reset-password</c>，
+    /// 而 API 路由带着全局前缀（默认 <c>/api</c>），这个兜底页的每一次提交都是 404。
+    /// </remarks>
     public string GenerateResetPasswordFormHtml(string email, string token)
     {
         var encodedEmail = WebUtility.HtmlEncode(email);
@@ -356,16 +400,20 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
         // a JavaScript string literal context).
         var jsToken = JsonSerializer.Serialize(token);
 
-        // 获取应用名称
-        var appName = _configuration?["App:AppName"] ?? "Tnzi.NET";
+        var appName = ResolveSiteName();
+
+        // 页面上的有效期与长度提示取实际生效的值：此前写死「30 分钟」「至少 6 位」，
+        // 有效期改了、或密码策略要求更长时，页面说的与服务端判的是两回事。
+        var resetMinutes = _identityOptions?.CurrentValue.Recovery.ResetTokenExpirationMinutes ?? new RecoveryOptions().ResetTokenExpirationMinutes;
+        var minLength = Math.Max(1, _aspNetIdentityOptions?.Value.Password.RequiredLength ?? 6);
 
         return $@"<!DOCTYPE html>
-<html lang=""zh-CN"">
+<html lang=""en"">
 <head>
     <meta charset=""utf-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
     <meta http-equiv=""X-UA-Compatible"" content=""IE=edge"">
-    <title>重置密码 - {WebUtility.HtmlEncode(appName)}</title>
+    <title>Reset password - {WebUtility.HtmlEncode(appName)}</title>
     <style>
         /* Reset */
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -378,7 +426,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             width: 100% !important;
             min-height: 100vh;
             background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -628,35 +676,34 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 <div class=""logo"">
                     {WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
                 </div>
-                <div class=""tagline"">安全 · 可靠 · 专业</div>
             </div>
 
             <!-- Content -->
             <div class=""content"">
-                <h1 class=""title"">重置密码</h1>
-                <p class=""subtitle"">请输入您的新密码以完成重置</p>
+                <h1 class=""title"">Reset password</h1>
+                <p class=""subtitle"">Enter a new password to finish resetting it.</p>
 
                 <form id=""resetForm"" onsubmit=""handleSubmit(event)"">
                     <div class=""form-group"">
-                        <label for=""email"">邮箱地址</label>
+                        <label for=""email"">Email address</label>
                         <input type=""email"" id=""email"" name=""email"" value=""{encodedEmail}"" disabled required>
                     </div>
                     <div class=""form-group"">
-                        <label for=""newPassword"">新密码</label>
-                        <input type=""password"" id=""newPassword"" name=""newPassword"" required minlength=""6"" placeholder=""请输入新密码（至少6位）"">
+                        <label for=""newPassword"">New password</label>
+                        <input type=""password"" id=""newPassword"" name=""newPassword"" required minlength=""{minLength}"" placeholder=""At least {minLength} characters"">
                     </div>
                     <div class=""form-group"">
-                        <label for=""confirmPassword"">确认密码</label>
-                        <input type=""password"" id=""confirmPassword"" name=""confirmPassword"" required minlength=""6"" placeholder=""请再次输入新密码"">
+                        <label for=""confirmPassword"">Confirm password</label>
+                        <input type=""password"" id=""confirmPassword"" name=""confirmPassword"" required minlength=""{minLength}"" placeholder=""Enter the new password again"">
                     </div>
                     <div class=""error-message"" id=""errorMessage""></div>
                     <div class=""success-message"" id=""successMessage""></div>
-                    <button type=""submit"" class=""button"" id=""submitButton"">重置密码</button>
+                    <button type=""submit"" class=""button"" id=""submitButton"">Reset password</button>
                 </form>
 
                 <div class=""divider""></div>
                 <p class=""footer-text"">
-                    此链接将在30分钟后过期，请及时完成重置
+                    This link expires {resetMinutes} minutes after it was sent.
                 </p>
             </div>
         </div>
@@ -673,29 +720,29 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             var successMessage = document.getElementById('successMessage');
             var submitButton = document.getElementById('submitButton');
 
-            // 隐藏之前的消息
+            // Hide earlier messages.
             errorMessage.style.display = 'none';
             successMessage.style.display = 'none';
 
-            // 验证密码
+            // Check the passwords.
             if (newPassword !== confirmPassword) {{
-                errorMessage.textContent = '两次输入的密码不一致，请重新输入';
+                errorMessage.textContent = 'The passwords do not match.';
                 errorMessage.style.display = 'block';
                 return;
             }}
 
-            if (newPassword.length < 6) {{
-                errorMessage.textContent = '密码长度至少为6位，请重新输入';
+            if (newPassword.length < {minLength}) {{
+                errorMessage.textContent = 'The password must be at least {minLength} characters long.';
                 errorMessage.style.display = 'block';
                 return;
             }}
 
-            // 禁用按钮
+            // Disable the button while the request runs.
             submitButton.disabled = true;
-            submitButton.textContent = '处理中...';
+            submitButton.textContent = 'Resetting...';
 
-            // 发送请求
-            fetch('/auth/reset-password', {{
+            // Post back to this page's own address: the same route serves the form (GET) and takes the new password (POST).
+            fetch(window.location.pathname, {{
                 method: 'POST',
                 headers: {{
                     'Content-Type': 'application/json'
@@ -709,24 +756,24 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             .then(response => response.json())
             .then(data => {{
                 if (data.succeeded) {{
-                    successMessage.textContent = data.message || '密码重置成功！正在跳转...';
+                    successMessage.textContent = data.message || 'Your password has been reset. Redirecting...';
                     successMessage.style.display = 'block';
                     document.getElementById('resetForm').reset();
                     setTimeout(function() {{
                         window.location.href = '/';
                     }}, 2000);
                 }} else {{
-                    errorMessage.textContent = data.message || '密码重置失败，请检查链接是否有效';
+                    errorMessage.textContent = data.message || 'The password could not be reset. Check that the link is still valid.';
                     errorMessage.style.display = 'block';
                     submitButton.disabled = false;
-                    submitButton.textContent = '重置密码';
+                    submitButton.textContent = 'Reset password';
                 }}
             }})
             .catch(error => {{
-                errorMessage.textContent = '网络错误，请稍后重试';
+                errorMessage.textContent = 'Network error. Please try again later.';
                 errorMessage.style.display = 'block';
                 submitButton.disabled = false;
-                submitButton.textContent = '重置密码';
+                submitButton.textContent = 'Reset password';
             }});
         }}
     </script>
@@ -742,13 +789,12 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
         var iconColor = success ? "#16a34a" : "#dc2626";
         var iconBgColor = success ? "#f0fdf4" : "#fef2f2";
         var icon = success ? "✓" : "✗";
-        var title = success ? "密码重置成功" : "密码重置失败";
+        var title = success ? "Password reset" : "Password not reset";
 
-        // 获取应用名称
-        var appName = _configuration?["App:AppName"] ?? "Tnzi.NET";
+        var appName = ResolveSiteName();
 
         return $@"<!DOCTYPE html>
-<html lang=""zh-CN"">
+<html lang=""en"">
 <head>
     <meta charset=""utf-8"">
     <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
@@ -766,7 +812,7 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
             width: 100% !important;
             min-height: 100vh;
             background-color: #f8f9fa;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -938,7 +984,6 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 <div class=""logo"">
                     {WebUtility.HtmlEncode(appName)}<span class=""logo-accent""></span>
                 </div>
-                <div class=""tagline"">安全 · 可靠 · 专业</div>
             </div>
 
             <!-- Content -->
@@ -948,11 +993,11 @@ public class IdentityPageService : ApplicationService, IIdentityPageService
                 </div>
                 <h1 class=""title"">{WebUtility.HtmlEncode(title)}</h1>
                 <p class=""message"">{WebUtility.HtmlEncode(message)}</p>
-                <a href=""/"" class=""button"">返回首页</a>
+                <a href=""/"" class=""button"">Back to home</a>
 
                 <div class=""divider""></div>
                 <p class=""footer-text"">
-                    {WebUtility.HtmlEncode(appName)} · 感谢您的使用
+                    {WebUtility.HtmlEncode(appName)}
                 </p>
             </div>
         </div>

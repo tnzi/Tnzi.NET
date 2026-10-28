@@ -15,13 +15,11 @@ public interface IAuditStore
     /// 批量保存审计操作
     /// </summary>
     /// <param name="operations">审计操作列表</param>
+    /// <remarks>
+    /// 实体级变更（<see cref="AuditOperation.EntityEntries"/>）挂在操作上随它一起落库，没有单独的保存入口：
+    /// 每条实体条目都隶属于一个请求级操作。
+    /// </remarks>
     Task SaveOperationBatchAsync(IEnumerable<AuditOperation> operations);
-
-    /// <summary>
-    /// 保存实体变更记录
-    /// </summary>
-    /// <param name="entries">实体变更记录列表</param>
-    Task SaveEntityEntriesAsync(IEnumerable<AuditEntityEntry> entries);
 
     /// <summary>
     /// 删除过期审计数据

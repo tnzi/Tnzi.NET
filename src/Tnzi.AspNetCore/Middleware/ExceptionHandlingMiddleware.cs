@@ -78,10 +78,21 @@ public class ExceptionHandlingMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // 客户端断开（关页面、导航走）引起的取消不是服务器错误：不记 Error、不进异常统计、不往已断开的连接写 500。
+            // 只认 RequestAborted 已触发的取消；内部超时等其它取消仍走下面的 500 路径。
+            _logger.LogDebug("Request {Method} {Path} was aborted by the client", context.Request.Method, context.GetRedactedPath());
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status499ClientClosedRequest;
+            }
+        }
         catch (Exception ex)
         {
-            // 记录异常统计
-            _exceptionStats?.RecordException(ex, context.TraceIdentifier);
+            // 记录异常统计。请求 ID 用追踪中间件写回给客户端的那一个（X-Request-Id），
+            // 而不是客户端从来看不到的连接级 TraceIdentifier，否则支持人员拿着客户端的 id 对不上任何记录。
+            _exceptionStats?.RecordException(ex, ResolveRequestId(context));
 
             // 诊断：记录触发异常的请求体（可能含敏感数据，默认关闭）
             if (captureRequestBody)
@@ -89,13 +100,25 @@ public class ExceptionHandlingMiddleware
                 await LogRequestBodyAsync(context, ex);
             }
 
-            // 尝试自定义处理器
-            var customResult = await TryCustomHandlersAsync(ex, context);
-            if (customResult != null)
+            if (context.Response.HasStarted)
             {
-                if (customResult.ShouldContinueHandling)
-                    throw;
+                // 响应头已发出（流式端点写过一段之后抛异常）：已经写不出错误信封。
+                // 正常返回会让服务器写出结束块，客户端看到的是一个 200、形式完整、内容被截断的响应体；
+                // 原样抛出则服务器中止这条响应（并带堆栈记录这次未处理异常）。客户端已经走了就没有可中止的了。
+                if (context.RequestAborted.IsCancellationRequested)
+                {
+                    _logger.LogDebug(ex, "Request {Method} {Path} failed after the response started and the client has disconnected",
+                        context.Request.Method, context.GetRedactedPath());
+                    return;
+                }
 
+                throw;
+            }
+
+            // 尝试自定义处理器；返回 null 或 ShouldContinueHandling 都交给内置处理器链
+            var customResult = await TryCustomHandlersAsync(ex, context);
+            if (customResult is { ShouldContinueHandling: false })
+            {
                 await HandleExceptionAsync(context, ex, customResult);
                 return;
             }
@@ -104,6 +127,12 @@ public class ExceptionHandlingMiddleware
             await HandleExceptionAsync(context, ex, null);
         }
     }
+
+    /// <summary>
+    /// 错误路径上的请求 ID：优先取 <see cref="RequestTrackingMiddleware"/> 写进 Items 并回显在 X-Request-Id 里的那一个，
+    /// 没有追踪中间件时才退回连接级的 <see cref="HttpContext.TraceIdentifier"/>。
+    /// </summary>
+    private static string ResolveRequestId(HttpContext context) => context.GetRequestId() ?? context.TraceIdentifier;
 
     /// <summary>
     /// 这个请求的体值不值得为异常诊断缓冲一份：文本型 Content-Type，且声明了不超过
@@ -141,8 +170,9 @@ public class ExceptionHandlingMiddleware
             var body = LoggedBodySanitizer.Redact(rawBody, request.ContentType);
             if (!string.IsNullOrEmpty(body))
             {
+                // 路径与请求日志同一道脱敏：signing/{token}、files/share/{token} 这类路由把凭据放在路径里。
                 _logger.LogError(exception, "Unhandled exception processing {Method} {Path}. Request body ({Length} chars captured): {RequestBody}",
-                    request.Method, request.Path, body.Length, body);
+                    request.Method, context.GetRedactedPath(), body.Length, body);
             }
         }
         catch (Exception readEx)
@@ -155,19 +185,33 @@ public class ExceptionHandlingMiddleware
     private async Task<ExceptionHandlingResult?> TryCustomHandlersAsync(
         Exception exception, HttpContext context)
     {
-        var options = _options.CurrentValue;
-        var exceptionType = exception.GetType();
-
-        // 查找自定义处理器
-        if (options.CustomHandlers.TryGetValue(exceptionType, out var handlerType))
+        var customHandlers = _options.CurrentValue.CustomHandlers;
+        if (customHandlers.Count == 0)
         {
-            var handler = _serviceProvider.GetService(handlerType);
-            if (handler != null)
+            return null;
+        }
+
+        // 沿继承链向上找：登记在基类上的处理器也处理它的子类，离抛出类型最近的登记优先。
+        for (var registeredType = exception.GetType(); registeredType != null; registeredType = registeredType.BaseType)
+        {
+            if (!customHandlers.TryGetValue(registeredType, out var handlerType))
             {
-                // 使用编译委托替代每次反射调用（Lazy 确保并发时只编译一次）
-                var invokeDelegate = _customHandlerDelegateCache.GetOrAdd(exceptionType, CreateLazyDelegate).Value;
-                return await invokeDelegate(handler, exception, context, default);
+                continue;
             }
+
+            // 从请求作用域解析：中间件是进程级单例，构造时拿到的是根容器。自定义处理器注册成 scoped 时，
+            // 从根容器解析在 Development 抛异常（而且是在 catch 块里，原异常被它替换），
+            // 在 Production 则被捕获成全进程共享的单例。没有请求作用域（直接构造中间件）时才退回根容器。
+            var handler = (context.RequestServices ?? _serviceProvider).GetService(handlerType);
+            if (handler == null)
+            {
+                return null;
+            }
+
+            // 委托按登记的类型编译：处理器实现的是 IExceptionHandler<登记类型>，不是 IExceptionHandler<抛出类型>
+            // （使用编译委托替代每次反射调用，Lazy 确保并发时只编译一次）
+            var invokeDelegate = _customHandlerDelegateCache.GetOrAdd(registeredType, CreateLazyDelegate).Value;
+            return await invokeDelegate(handler, exception, context, default);
         }
 
         return null;
@@ -209,14 +253,7 @@ public class ExceptionHandlingMiddleware
 
     private async Task HandleExceptionAsync(HttpContext context, Exception exception, ExceptionHandlingResult? customResult = null)
     {
-        // If the response has already started (e.g., streaming), we can't modify headers or status code
-        if (context.Response.HasStarted)
-        {
-            _logger.LogWarning("Response has already started, unable to write error response for {ExceptionType}: {Message}",
-                exception.GetType().Name, exception.Message);
-            return;
-        }
-
+        // 响应已开始的情形在 InvokeAsync 里处理（原样抛出），到这里响应头一定还没发出
         context.Response.ContentType = "application/json";
 
         ExceptionHandlingResult result;
@@ -252,38 +289,47 @@ public class ExceptionHandlingMiddleware
     private Task WriteResponseAsync(HttpContext context, ExceptionHandlingResult result)
     {
         var options = _options.CurrentValue;
-        var hasExtendedInfo = result.ContextData != null || result.IsRetryable.HasValue;
+        // IncludeRetryInfo 关闭时不输出 isRetryable，也不因它切到扩展形状（与 IncludeContextData 同一做法）
+        var isRetryable = options.IncludeRetryInfo ? result.IsRetryable : null;
+        var hasExtendedInfo = result.ContextData != null || isRetryable.HasValue;
+        var requestId = options.IncludeRequestId ? ResolveRequestId(context) : null;
 
-        object responseObject;
+        string json;
 
         if (hasExtendedInfo || (_environment.IsDevelopment() && result.ErrorDetail != null))
         {
             // 包含扩展信息（ContextData/IsRetryable），开发环境额外包含 Detail
             // 错误详情字段与标准信封统一为 errorDetails（前端只读 errorDetails，
             // 旧的扩展形状用 Errors→序列化为 errors，前端读不到导致详情丢失）。
-            responseObject = new
+            json = JsonSerializer.Serialize(new
             {
                 Code = result.StatusCode ?? 500,
                 Message = result.Message ?? "An error occurred while processing your request.",
                 ErrorCode = result.ErrorCode,
                 ErrorDetails = result.ErrorDetails,
                 ContextData = result.ContextData,
-                IsRetryable = result.IsRetryable,
+                IsRetryable = isRetryable,
                 Detail = _environment.IsDevelopment() ? result.ErrorDetail : null,
-                RequestId = options.IncludeRequestId ? context.TraceIdentifier : null,
+                RequestId = requestId,
                 Success = false
-            };
+            }, TnziJsonDefaults.Options);
         }
         else
         {
-            // 标准响应
-            responseObject = ApiResult.Error(
+            // 标准响应；IncludeRequestId 开着时追加 requestId（只加字段，信封其余部分不变）
+            var envelope = ApiResult.Error(
                 result.Message ?? "An error occurred while processing your request.",
                 result.StatusCode ?? 500,
                 result.ErrorCode,
                 result.ErrorDetails);
+            var node = JsonSerializer.SerializeToNode(envelope, TnziJsonDefaults.Options)!.AsObject();
+            if (requestId != null)
+            {
+                node["requestId"] = requestId;
+            }
+            json = node.ToJsonString(TnziJsonDefaults.Options);
         }
 
-        return context.Response.WriteAsync(JsonSerializer.Serialize(responseObject, TnziJsonDefaults.Options));
+        return context.Response.WriteAsync(json);
     }
 }

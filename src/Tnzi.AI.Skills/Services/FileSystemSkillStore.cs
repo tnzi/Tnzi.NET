@@ -16,6 +16,9 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     private readonly string? _contentRootPath;
     private readonly ITnziApplication? _application;
 
+    /// <summary>内置技能嵌入资源的 LogicalName 前缀，也是内置技能 <see cref="SkillDefinition.FilePath"/> 的前缀。</summary>
+    private const string BuiltInResourcePrefix = "BuiltInSkill:";
+
     // 缓存状态
     private List<SkillDefinition>? _cache;
     private DateTime _cacheExpiresAt = DateTime.MinValue;
@@ -74,10 +77,15 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// 同一个 slug 可以有多份（不同作用域、不同租户 / 用户）：按 <see cref="SkillPrecedence"/> 选，与列表合并同一口径，
+    /// 而不是取第一个加载到的（DataPath 里某个租户的同名技能会把系统技能遮住）。这里不知道当前租户 / 用户，
+    /// 需要按可见性过滤的调用方（<see cref="SkillRegistry"/>）自己从 <see cref="GetAllAsync"/> 里挑。
+    /// </remarks>
     public async Task<SkillDefinition?> GetBySlugAsync(string slug, CancellationToken ct = default)
     {
         var all = await GetAllAsync(ct);
-        return all.FirstOrDefault(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        return SkillPrecedence.PickWinner(all.Where(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>
@@ -148,14 +156,60 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
             SkillOptions.ManagedPaths, SkillSource.Managed, skills, scannedPaths, scannedSkillFiles, ct);
 
         skills = FilterSkills(skills);
+        var loadedCount = skills.Count;
+        skills = KeepLastLoadedPerSlug(skills);
 
         _logger.LogInformation(
-            "Loaded {Count} skills (built-in: {BuiltIn}, plugin: {Plugin}, managed: {Managed}, file-system: {FileSystem})",
+            "Loaded {Count} skills (built-in: {BuiltIn}, plugin: {Plugin}, managed: {Managed}, file-system: {FileSystem}, overridden: {Overridden})",
             skills.Count, builtInCount, pluginCount, managedCount,
-            skills.Count - builtInCount - pluginCount - managedCount);
+            loadedCount - builtInCount - pluginCount - managedCount, loadedCount - skills.Count);
 
         return skills;
     }
+
+    /// <summary>
+    /// 同 slug、同作用域、同租户 / 用户的技能只留最后加载的那一份（加载顺序即覆盖顺序：内置最先，托管路径最后）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 文档承诺「在文件系统路径放置同 slug 的 SKILL.md，自动覆盖内置版本」，而内置技能一直先加载、
+    /// 同 slug 的文件技能只是追加在后面：按 slug 查找取第一个（内置），列表合并在作用域与优先级都相同时也保留第一个（内置）。
+    /// 覆盖从来不生效，且没有任何症状。胜者留在被覆盖者原来的位置上，列表顺序不因覆盖而跳动。
+    /// 不同作用域、不同租户 / 用户的同名技能是不同的技能，留给 <see cref="SkillPrecedence"/> 在可见性过滤之后再选。
+    /// </remarks>
+    private List<SkillDefinition> KeepLastLoadedPerSlug(List<SkillDefinition> skills)
+    {
+        var result = new List<SkillDefinition>(skills.Count);
+        var indexByKey = new Dictionary<(string Slug, SkillScope Scope, Guid? TenantId, Guid? OwnerUserId), int>();
+
+        foreach (var skill in skills)
+        {
+            var key = (skill.Slug.ToLowerInvariant(), skill.Scope, skill.TenantId, skill.OwnerUserId);
+            if (!indexByKey.TryGetValue(key, out var index))
+            {
+                indexByKey[key] = result.Count;
+                result.Add(skill);
+                continue;
+            }
+
+            var overridden = result[index];
+            if (IsBuiltIn(overridden))
+            {
+                _logger.LogInformation("Built-in skill '{Slug}' is overridden by {FilePath}", skill.Slug, skill.FilePath);
+            }
+            else
+            {
+                _logger.LogDebug("Skill '{Slug}' from {Overridden} is overridden by {FilePath}",
+                    skill.Slug, overridden.FilePath, skill.FilePath);
+            }
+
+            result[index] = skill;
+        }
+
+        return result;
+    }
+
+    private static bool IsBuiltIn(SkillDefinition skill)
+        => skill.FilePath?.StartsWith(BuiltInResourcePrefix, StringComparison.Ordinal) == true;
 
     /// <summary>
     /// Loads skills from a list of paths and assigns the specified <see cref="SkillSource"/>.
@@ -500,7 +554,7 @@ public class FileSystemSkillStore : ISkillStore, IDisposable
     private int LoadBuiltInSkills(List<SkillDefinition> skills)
     {
         var assembly = typeof(FileSystemSkillStore).Assembly;
-        const string prefix = "BuiltInSkill:";
+        const string prefix = BuiltInResourcePrefix;
 
         var allResources = assembly.GetManifestResourceNames()
             .Where(n => n.StartsWith(prefix, StringComparison.Ordinal))

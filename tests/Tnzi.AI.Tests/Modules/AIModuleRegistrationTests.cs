@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Tnzi.AI.Infrastructure.Mcp;
 using Tnzi.AI.Infrastructure.Network;
 using Tnzi.AI.Infrastructure.Readability;
@@ -325,14 +328,14 @@ public class AIModuleRegistrationTests
     }
 
     [Fact]
-    public void QuotaService_RegisteredAsBothInterfaces()
+    public void UsageLimitServices_AreRegistered()
     {
         var services = CreateServiceCollection();
 
-        services.Any(d => d.ServiceType == typeof(IQuotaService))
-            .ShouldBeTrue("IQuotaService should be registered");
-        services.Any(d => d.ServiceType == typeof(IQuotaProvider))
-            .ShouldBeTrue("IQuotaProvider should be registered");
+        services.Any(d => d.ServiceType == typeof(IUsageLimitService) && d.ImplementationType == typeof(UsageLimitService))
+            .ShouldBeTrue("IUsageLimitService should be registered");
+        services.Any(d => d.ServiceType == typeof(IUsagePolicyService) && d.ImplementationType == typeof(UsagePolicyService))
+            .ShouldBeTrue("IUsagePolicyService should be registered");
     }
 
     [Fact]
@@ -360,6 +363,121 @@ public class AIModuleRegistrationTests
 
         decision.Behavior.ShouldBe(PermissionBehavior.Deny);
         decision.Reason.ShouldBe("Blocked by config");
+    }
+
+    #endregion
+
+    #region 出站 HttpClient
+
+    /// <summary>
+    /// 租户自填的 Provider 端点经 <see cref="ResilientHttpClientNames.TenantEndpoint"/> 连接：写入时的 EgressGuard
+    /// 只是那一刻的 DNS 结果，事后改指内网（或存量行从没被检查过）时连接本身必须被拒。这里用回环当「内网」。
+    /// </summary>
+    [Fact]
+    public async Task TenantEndpointClient_RefusesAnInternalAddressBeforeConnecting()
+    {
+        using var listener = new LoopbackListener();
+        await using var provider = CreateServiceCollection().BuildServiceProvider();
+        var factory = provider.GetRequiredService<IHttpClientFactory>();
+
+        // 正控制：同一个地址，部署配置的客户端连得上（证明下面的拒绝不是因为这个地址本来就连不通）
+        using (var fallback = factory.CreateClient(ResilientHttpClientNames.Fallback))
+        {
+            using var response = await fallback.GetAsync($"http://127.0.0.1:{listener.Port}/v1/models");
+            listener.Connections.ShouldBeGreaterThan(0);
+        }
+
+        var before = listener.Connections;
+        using var tenantClient = factory.CreateClient(ResilientHttpClientNames.TenantEndpoint);
+        await Should.ThrowAsync<HttpRequestException>(() => tenantClient.GetAsync($"http://127.0.0.1:{listener.Port}/v1/models"));
+
+        listener.Connections.ShouldBe(before, "the tenant endpoint client must not open a connection to an internal address");
+    }
+
+    [Fact]
+    public async Task A2AClient_RefusesAnInternalAddressAtConnectTime()
+    {
+        // HttpA2AClient 在发请求前查一次 EgressGuard，但连接时还会再解析一次 DNS：判定必须落在连接本身
+        using var listener = new LoopbackListener();
+        await using var provider = CreateServiceCollection().BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(HttpA2AClient.HttpClientName);
+
+        await Should.ThrowAsync<HttpRequestException>(() => client.GetAsync($"http://127.0.0.1:{listener.Port}/.well-known/agent-card"));
+
+        listener.Connections.ShouldBe(0);
+    }
+
+    [Fact]
+    public void EgressGuardedHandler_DoesNotFollowRedirects()
+    {
+        // 307 / 308 保留方法与请求体：跟随它就是把聊天 POST（连同密钥头）原样投到 Location 指的地方
+        using var handler = EgressGuardedConnector.CreateHandler();
+
+        handler.AllowAutoRedirect.ShouldBeFalse();
+        handler.ConnectCallback.ShouldNotBeNull();
+    }
+
+    /// <summary>回环上的最小 HTTP 监听：数连接，每个连接回一个 404。</summary>
+    private sealed class LoopbackListener : IDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _cts = new();
+        private int _connections;
+
+        public LoopbackListener()
+        {
+            _listener.Start();
+            Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+            _ = AcceptLoopAsync();
+        }
+
+        public int Port { get; }
+        public int Connections => Volatile.Read(ref _connections);
+
+        private async Task AcceptLoopAsync()
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                TcpClient client;
+                try
+                {
+                    client = await _listener.AcceptTcpClientAsync(_cts.Token);
+                }
+                catch
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref _connections);
+                _ = RespondAsync(client);
+            }
+        }
+
+        private async Task RespondAsync(TcpClient client)
+        {
+            using (client)
+            {
+                try
+                {
+                    var stream = client.GetStream();
+                    var buffer = new byte[8192];
+                    _ = await stream.ReadAsync(buffer, _cts.Token);
+                    var response = Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    await stream.WriteAsync(response, _cts.Token);
+                }
+                catch
+                {
+                    // 客户端中途断开：测试只关心连接是否建立
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _listener.Stop();
+            _cts.Dispose();
+        }
     }
 
     #endregion

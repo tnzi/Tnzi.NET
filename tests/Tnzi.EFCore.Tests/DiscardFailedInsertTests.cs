@@ -91,37 +91,35 @@ public class DiscardFailedInsertTests : EFCoreTestBase
     }
 
     /// <summary>
-    /// ★★ 为什么不能用 <c>DeleteAsync</c> 代替：软删实体会被<b>真的插进库里</b>。
+    /// <c>Added</c> 状态的软删实体：<c>DeleteAsync</c> 与 <c>Discard</c> 都不让它落库。
     /// </summary>
     /// <remarks>
-    /// 这正是 <c>BankStatementIngestor</c>（<c>BankTransaction</c> 是软删实体）如果照抄
-    /// <c>DocumentNumberService</c> 的 <c>DeleteAsync</c> 写法会发生的事：
-    /// 一条从未成功过的插入，变成库里一行带着 <c>IsDeleted = true</c> 的垃圾数据，
-    /// 而软删实体的过滤唯一索引排除已删行，所以它连报错都不会。
+    /// 一条从未成功过的插入被业务删除，结果必须是「库里没有这一行」，而不是一行带着 <c>IsDeleted = true</c>
+    /// 的垃圾数据（软删实体的过滤唯一索引排除已删行，那种垃圾行连报错都不会）。
+    /// 两者仍有区别：<c>DeleteAsync</c> 是业务删除，无事务时会立即 <c>SaveChanges</c>，把本作用域里别的挂起变更一并提交；
+    /// <c>Discard</c> 只改变更跟踪状态、不产生任何 SQL，错误恢复路径用它。
     /// <para>
     /// 这里用 <c>DbContext.Add</c> 直接把实体置为 <c>Added</c>（不落库），
-    /// 因为要验的恰恰是「<c>Added</c> 状态下这两个方法的行为差别」。
+    /// 因为要验的恰恰是「<c>Added</c> 状态下这两个方法的行为」。
     /// </para>
     /// </remarks>
     [Fact]
-    public async Task DeleteAsync_IsNotASubstitute_ItPersistsAnAddedSoftDeleteEntity()
+    public async Task DeleteAsync_AndDiscard_NeitherPersistsAnAddedSoftDeleteEntity()
     {
         var viaDelete = new TestSoftDeletableProduct { Id = Guid.NewGuid(), Name = "via delete" };
         DbContext.Add(viaDelete);
 
-        // 业务删除：软删实体走「置 IsDeleted 再 Update」，而 Added 状态下那就是一次 INSERT
         await _softDeleteRepository.DeleteAsync(viaDelete);
 
-        var afterDelete = await CountAllSoftDeletableAsync();
-        Assert.True(afterDelete == 1,
-            "DeleteAsync 把一条从未成功过的插入写进了库里 —— 这就是不能用它代替 Discard 的理由");
+        Assert.Equal(EntityState.Detached, DbContext.Entry(viaDelete).State);
+        Assert.True(await CountAllSoftDeletableAsync() == 0, "DeleteAsync 不该把一条从未成功过的插入写进库里");
 
         var viaDiscard = new TestSoftDeletableProduct { Id = Guid.NewGuid(), Name = "via discard" };
         DbContext.Add(viaDiscard);
         _softDeleteRepository.Discard(viaDiscard);
         await DbContext.SaveChangesAsync();
 
-        Assert.True(await CountAllSoftDeletableAsync() == 1, "Discard 之后不该多出任何一行");
+        Assert.True(await CountAllSoftDeletableAsync() == 0, "Discard 之后不该多出任何一行");
     }
 
     // ── 夹具 ──────────────────────────────────────────────────────────────────

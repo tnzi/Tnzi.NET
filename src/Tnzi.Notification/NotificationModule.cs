@@ -81,10 +81,11 @@ public class NotificationModule : TnziApplicationModule
             context.Services.AddHttpClient();
         }
 
-        // 远程附件下载：禁自动重定向。EgressGuard 只审原始 URL，跟随 302 会把第二跳（云元数据 / 内网）
-        // 直接发出去并把回应装进信里 —— 见 NotificationHttpClientNames。
+        // 远程附件下载：禁自动重定向、连接钉在连接那一刻校验过的地址上（见 NotificationHttpClientNames）。
+        // EgressGuard 的事先检查只审原始 URL 的那一次解析：跟随 302 会把第二跳（云元数据 / 内网）直接发出去，
+        // 而连接时的第二次解析可以被 TTL 为 0 的域名换成内网地址（DNS rebinding），回应都会装进信里寄走。
         context.Services.AddHttpClient(NotificationHttpClientNames.Attachments)
-            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+            .ConfigurePrimaryHttpMessageHandler(EgressGuardedConnector.CreateHandler);
 
         // 注册后台队列服务
         context.Services.AddSingleton<ChannelQueueService>();
@@ -93,6 +94,10 @@ public class NotificationModule : TnziApplicationModule
 
         // 退订（群发合规：CASL / CAN-SPAM 要求一键退订且须很快生效）
         context.Services.AddScoped<INotificationOptOutService, NotificationOptOutService>();
+
+        // 投递限速（Dispatch:RatePerMinute）：整个进程一份。管的是发送账号的配额，
+        // 一次群发、一次重发失败项、一次恢复续发打到的是同一个账号；每个 NotificationService 各算各的就等于没限。
+        context.Services.TryAddSingleton<NotificationSendPacer>();
 
         // 派发恢复：把进程中途退出后停在 Sending 的批次接着发完。
         // 收件人状态本来就逐行持久化，缺的只是把它接回去的那个循环。

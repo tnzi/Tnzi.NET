@@ -78,13 +78,31 @@ public partial class WorkflowService
     {
         Check.NotNull(query);
 
+        // 只取列表要用的列再分页：整行里有 StepOutputs（每个节点的完整模型输出，无长度上限）、InitialInput 与两个
+        // 待处理 JSON，此前每翻一页都把它们整页拉回再丢掉。
         var pagedEntities = await _executionRepository.AsQueryable()
             .WhereIf(e => e.WorkflowDefinitionId == query.WorkflowDefinitionId!.Value, query.WorkflowDefinitionId.HasValue)
             .WhereIf(e => e.Status == query.Status!.Value, query.Status.HasValue)
             .OrderByDescending(e => e.CreationTime)
+            .Select(e => new
+            {
+                e.Id,
+                e.ExecutionId,
+                e.WorkflowDefinitionId,
+                e.Status,
+                e.CompletedSteps,
+                e.StepsAwaitingApproval,
+                e.StartedAt,
+                e.DurationMs,
+                e.CreationTime,
+                e.CompletedTime,
+                e.UpdatedTime,
+                e.PendingSignalCount,
+                e.CurrentWaitReason
+            })
             .CreateAsync(query);
 
-        // 分页后在内存中反序列化 JSON 列，得出真实的步骤计数（每页条目少，成本可接受）
+        // 分页后在内存中反序列化两个步骤 ID 数组，得出真实的步骤计数（每页条目少，成本可接受）
         var items = pagedEntities.Items
             .Select(e => new WorkflowExecutionSummaryDto
             {
@@ -156,6 +174,9 @@ public partial class WorkflowService
             try
             {
                 await _executionRepository.UpdateAsync(entity, ct);
+                // Flushed here, inside any ambient transaction, so a concurrent watchdog write
+                // surfaces as the conflict handled below instead of failing the caller's commit.
+                await _executionRepository.SaveChangesAsync(ct);
             }
             catch (DbUpdateConcurrencyException conflict)
             {
@@ -179,11 +200,15 @@ public partial class WorkflowService
         }
     }
 
+    /// <remarks>
+    /// 没给等待原因时按状态推导，与检查点存储写的同口径（approval / input / cancelled）。此前一律写 null：RunAsync 在
+    /// 执行暂停后也走这里，刚由检查点写下的 "approval" / "input" 被清空，列表里看不出它在等审批还是等输入。
+    /// </remarks>
     private static void ApplyTerminalStatus(WorkflowExecution entity, WorkflowExecutionStatus status, string? currentWaitReason)
     {
         var now = DateTime.UtcNow;
         entity.Status = status;
-        entity.CurrentWaitReason = currentWaitReason;
+        entity.CurrentWaitReason = currentWaitReason ?? DatabaseWorkflowCheckpointStore.WaitReasonFor(status);
         entity.UpdatedTime = now;
         if (status is WorkflowExecutionStatus.Completed or WorkflowExecutionStatus.Failed or WorkflowExecutionStatus.Cancelled)
         {

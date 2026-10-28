@@ -6,8 +6,10 @@ namespace Tnzi.AI.Events.Handlers;
 /// <remarks>
 /// 清理顺序：
 /// 1. AgentThreadMessage（消息记录）
-/// 2. AgentRunTrace + AgentRunNode + AgentRun（运行记录及追踪）
-/// 3. AgentArtifact（产物记录）
+/// 2. AgentRunTrace + AgentRunNode + AgentTask + AgentRun（运行记录、追踪与 write_todos 留下的任务）。
+///    AgentTask 只有裸 RunId 列、没有外键，数据库不会级联；不在这里删，任务标题（取自对话内容）会在
+///    线程删除后留在管理端任务列表里，RunId 指向已不存在的运行
+/// 3. AgentArtifact（产物记录）与 AgentAttachment（用户随消息发的图片 / PDF、工具返回的图片，连同字节）
 /// 4. UsageLog（使用日志）：只解除 ThreadId 引用，账目行保留（预算聚合与用量分析的事实来源）
 /// 各仓储均为可选注入，缺失时对应步骤跳过（软依赖）。
 /// 级联删除是持久化副作用，本处理器不吞异常：任何一步失败均让异常冒泡给事件总线
@@ -21,8 +23,10 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
     private readonly IRepository<AgentRun, Guid>? _runRepository;
     private readonly IRepository<AgentRunTrace, Guid>? _traceRepository;
     private readonly IRepository<AgentRunNode, Guid>? _nodeRepository;
+    private readonly IRepository<AgentTask, Guid>? _taskRepository;
     private readonly IRepository<AgentArtifact, Guid>? _artifactRepository;
     private readonly IRepository<UsageLog, Guid>? _usageLogRepository;
+    private readonly IRepository<AgentAttachment, Guid>? _attachmentRepository;
     private readonly ILogger<ThreadCleanupHandler> _logger;
 
     public ThreadCleanupHandler(
@@ -32,15 +36,19 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         IRepository<AgentRunTrace, Guid>? traceRepository = null,
         IRepository<AgentRunNode, Guid>? nodeRepository = null,
         IRepository<AgentArtifact, Guid>? artifactRepository = null,
-        IRepository<UsageLog, Guid>? usageLogRepository = null)
+        IRepository<UsageLog, Guid>? usageLogRepository = null,
+        IRepository<AgentTask, Guid>? taskRepository = null,
+        IRepository<AgentAttachment, Guid>? attachmentRepository = null)
     {
         _logger = Check.NotNull(logger);
         _messageRepository = messageRepository;
         _runRepository = runRepository;
         _traceRepository = traceRepository;
         _nodeRepository = nodeRepository;
+        _taskRepository = taskRepository;
         _artifactRepository = artifactRepository;
         _usageLogRepository = usageLogRepository;
+        _attachmentRepository = attachmentRepository;
     }
 
     public async Task HandleAsync(ThreadDeletedEvent evt, CancellationToken ct = default)
@@ -82,6 +90,13 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
                         .Where(n => runIds.Contains(n.RunId))
                         .ExecuteDeleteAsync(ct);
                 }
+
+                if (_taskRepository != null)
+                {
+                    await _taskRepository.AsQueryable()
+                        .Where(t => runIds.Contains(t.RunId))
+                        .ExecuteDeleteAsync(ct);
+                }
             }
 
             // 再删主表
@@ -94,6 +109,15 @@ public class ThreadCleanupHandler : IEventHandler<ThreadDeletedEvent>
         if (_artifactRepository != null)
         {
             await _artifactRepository.AsQueryable()
+                .Where(a => a.ThreadId == threadId)
+                .ExecuteDeleteAsync(ct);
+        }
+
+        // 附件带着字节：用户删掉对话，他发过的图片与文档、工具从他的机器上取回的截图不能留在库里
+        if (_attachmentRepository != null)
+        {
+            await _attachmentRepository.AsQueryable()
+                .IgnoreQueryFilters()
                 .Where(a => a.ThreadId == threadId)
                 .ExecuteDeleteAsync(ct);
         }

@@ -124,6 +124,31 @@ public class AgentServiceRunTests
         events[1].FinishReason.ShouldBe(FinishReasons.RequiresClarification);
     }
 
+    [Fact]
+    public async Task RunStreamingAsync_TerminalEvent_CarriesTheSumOfAllUsageChunks()
+    {
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(x => x.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(
+            [
+                new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 100, OutputTokens = 10 } },
+                new AgentStreamChunk { Text = "answer" },
+                new AgentStreamChunk { FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 200, OutputTokens = 20 } }
+            ]));
+
+        var service = CreateService(runtime.Object);
+        var events = new List<StreamEvent>();
+        await foreach (var item in service.RunStreamingAsync(Guid.NewGuid(), "hello"))
+        {
+            events.Add(item);
+        }
+
+        var terminal = events.Single(e => e.IsDone);
+        terminal.Usage.ShouldNotBeNull();
+        terminal.Usage!.InputTokens.ShouldBe(300);
+        terminal.Usage.OutputTokens.ShouldBe(30);
+    }
+
     private static AgentService CreateService(IAgentRuntime runtime)
     {
         var grantService = new Mock<IAgentGrantService>();

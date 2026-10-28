@@ -40,6 +40,8 @@ const bridge = createTemplateBridge({ client: useAdminClient() })
 
 const crud = useCrudPage<LayoutInfoDto, string>({
   pageId: 'template.layouts',
+  // A layout left alone on the switch is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'template.layout',
   columns: layoutColumns,
   rowKey: (r) => {

@@ -26,7 +26,15 @@ public class FileRecordConfiguration : EntityTypeConfigurationBase<FileRecord, G
         // 之后 0 是一个真值，会原样写进 INSERT；不碰这个属性的行仍由 CLR 初始化器 = 1 兜住。
         // 哨兵只是模型元数据，不进迁移快照，消费方零迁移。
         builder.Property(e => e.ReferenceCount).HasDefaultValue(1).HasSentinel(-1);
-        builder.Property(e => e.IsTemporary).HasDefaultFalse();
+        // ★ 计数只由原子 SQL 改写（FileReferenceCounts），整行更新一律不写这一列。
+        //   计数此前全是「读出来 ++ 再整行写回」，而 FileRecord 没有并发令牌：两个请求同时绑定同一份文件，
+        //   都读到 1、都写回 2，实际持有者 3 个，之后两次释放就归零、文件被删；改名、改可见性、挪目录这类
+        //   整行写回同样会把别人刚加上的计数覆盖回旧值。插入照常写入初值（BeforeSaveBehavior 不变）。
+        //   与哨兵一样只是模型元数据，不进迁移快照，消费方零迁移。
+        builder.Property(e => e.ReferenceCount).Metadata.SetAfterSaveBehavior(PropertySaveBehavior.Ignore);
+        // 列默认值 false 只服务于绕过 EF 的直接 SQL 插入；EF 自己总是写入实际值。不写 ValueGeneratedNever 时，
+        // 默认值与 CLR 默认值相同的 bool 列会让 EF 在模型校验时告警（它分不出「没设」与「设成 false」）。
+        builder.Property(e => e.IsTemporary).HasDefaultFalse().ValueGeneratedNever();
         builder.Property(e => e.Tags).HasMaxLength(1024);
 
         builder.Property(e => e.Metadata).HasMaxLength(4096);

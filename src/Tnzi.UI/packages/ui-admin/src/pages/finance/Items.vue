@@ -64,6 +64,8 @@ function toPayload(d: Record<string, unknown>): UpdateItemDto {
 
 const crud = useCrudPage<ItemRow>({
   pageId: 'finance.items',
+  // An item is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'finance.item',
   columns,
   rowKey: (r) => String(r.id ?? ''),

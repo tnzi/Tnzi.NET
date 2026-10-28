@@ -6,6 +6,12 @@ namespace Tnzi.Audit.Services;
 /// <summary>
 /// 操作审计服务实现
 /// </summary>
+/// <remarks>
+/// ★ 全部读取面（列表、导出、按用户 / 按功能统计、趋势、Top N）按 <see cref="AuditOperation.StartTime"/>
+/// 过滤与排序，不按 <c>CreationTime</c>：后者没有索引，这张表每个被审计的请求一行，按它排序与计数在几个月之后
+/// 就是每翻一页一次全表扫描加排序；<c>StartTime</c> 有单列与 (UserId, StartTime) / (IsWrite, StartTime) 索引，
+/// 也是语义上正确的那一个（请求发生的时刻，界面上显示的也是它）；两者只差采集队列的几秒延迟。
+/// </remarks>
 public class AuditOperationService : ApplicationService, IAuditOperationService
 {
     private readonly IRepository<AuditOperation, Guid> _operationRepository;
@@ -91,12 +97,12 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (startDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime >= startDate.Value);
+            query = query.Where(o => o.StartTime >= startDate.Value);
         }
 
         if (endDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime <= endDate.Value);
+            query = query.Where(o => o.StartTime <= endDate.Value);
         }
 
         if (resultType.HasValue)
@@ -105,7 +111,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         }
 
         var operations = await query
-            .OrderByDescending(o => o.CreationTime)
+            .OrderByDescending(o => o.StartTime)
             .Take(500) // 分页保护
             .ToListAsync();
         return Ok(operations.MapToList<AuditOperationDto>().AsEnumerable());
@@ -161,12 +167,12 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (query.StartDate.HasValue)
         {
-            queryable = queryable.Where(o => o.CreationTime >= query.StartDate.Value);
+            queryable = queryable.Where(o => o.StartTime >= query.StartDate.Value);
         }
 
         if (query.EndDate.HasValue)
         {
-            queryable = queryable.Where(o => o.CreationTime <= query.EndDate.Value);
+            queryable = queryable.Where(o => o.StartTime <= query.EndDate.Value);
         }
 
         if (!string.IsNullOrEmpty(query.Ip))
@@ -212,7 +218,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
     public async Task<Result<IPagedList<AuditOperationDto>>> GetOperationsAsync(AuditOperationQueryDto query)
     {
         var queryable = ApplyQueryFilters(ScopedOperations(), query)
-            .OrderByDescending(o => o.CreationTime);
+            .OrderByDescending(o => o.StartTime);
 
         var paged = await queryable.CreateAsync(query.PageIndex, query.PageSize);
         var dtoItems = paged.Items.MapToList<AuditOperationDto>();
@@ -233,12 +239,12 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (startDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime >= startDate.Value);
+            query = query.Where(o => o.StartTime >= startDate.Value);
         }
 
         if (endDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime <= endDate.Value);
+            query = query.Where(o => o.StartTime <= endDate.Value);
         }
 
         var statistics = await CalculateStatisticsAsync(query);
@@ -257,12 +263,12 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         if (startDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime >= startDate.Value);
+            query = query.Where(o => o.StartTime >= startDate.Value);
         }
 
         if (endDate.HasValue)
         {
-            query = query.Where(o => o.CreationTime <= endDate.Value);
+            query = query.Where(o => o.StartTime <= endDate.Value);
         }
 
         var statistics = await CalculateStatisticsAsync(query);
@@ -356,7 +362,7 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         var filtered = ApplyQueryFilters(ScopedOperations(), query);
 
         var rows = await filtered
-            .OrderByDescending(o => o.CreationTime)
+            .OrderByDescending(o => o.StartTime)
             .Take(max + 1)
             .ToListAsync(cancellationToken);
 
@@ -389,8 +395,8 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
 
         // 在数据库侧按日期分组聚合，避免加载全量记录到内存
         var dailyAggregates = await ScopedOperations()
-            .Where(o => o.CreationTime >= startDate && o.CreationTime <= endDate)
-            .GroupBy(o => o.CreationTime.Date)
+            .Where(o => o.StartTime >= startDate && o.StartTime <= endDate)
+            .GroupBy(o => o.StartTime.Date)
             .Select(g => new
             {
                 Date = g.Key,
@@ -443,9 +449,9 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         var queryable = ScopedOperations();
 
         if (startDate.HasValue)
-            queryable = queryable.Where(o => o.CreationTime >= startDate.Value);
+            queryable = queryable.Where(o => o.StartTime >= startDate.Value);
         if (endDate.HasValue)
-            queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
+            queryable = queryable.Where(o => o.StartTime <= endDate.Value);
 
         // 在数据库侧分组聚合，避免加载全量记录到内存
         var topFunctions = await queryable
@@ -483,9 +489,9 @@ public class AuditOperationService : ApplicationService, IAuditOperationService
         var queryable = ScopedOperations();
 
         if (startDate.HasValue)
-            queryable = queryable.Where(o => o.CreationTime >= startDate.Value);
+            queryable = queryable.Where(o => o.StartTime >= startDate.Value);
         if (endDate.HasValue)
-            queryable = queryable.Where(o => o.CreationTime <= endDate.Value);
+            queryable = queryable.Where(o => o.StartTime <= endDate.Value);
 
         // 在数据库侧分组聚合，避免加载全量记录到内存
         var topUsers = await queryable

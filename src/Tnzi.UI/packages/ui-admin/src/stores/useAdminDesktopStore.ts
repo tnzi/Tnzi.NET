@@ -203,6 +203,19 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
    * when it closed and read back a different one.
    */
   const geometryMemory = ref<Record<string, RememberedGeometry>>({})
+  /**
+   * Id of the signed-in user the windows belong to. Empty = not claimed yet.
+   * Windows carry record names in their titles and record ids in their
+   * stacks, so they are as personal as the tabs (see `claimForUser`).
+   */
+  const ownerId = ref<string>('')
+  /**
+   * Windows restored from storage with no owner recorded: written by a build
+   * that predates `ownerId`, or opened and reloaded before any identity was
+   * resolved. Nobody can say whose they are, so the first claim drops them.
+   * Not persisted - it describes this page load's hydrate.
+   */
+  const unattributedIds = ref<string[]>([])
 
   /** Windows in stacking order, back to front. Render order for the canvas. */
   /**
@@ -339,6 +352,31 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
   function closeAll(): void {
     windows.value = []
     activeId.value = null
+  }
+
+  /**
+   * Bind the windows to the signed-in user. Called by the framework once the
+   * user's identity is resolved, next to the tab store's claim. Windows saved
+   * under a DIFFERENT user are closed: a desktop restored on a shared browser
+   * must not show the next person the previous person's record names in the
+   * title bars and taskbar, nor reopen their records. Windows restored with no
+   * owner are closed too, since nothing says whose they are.
+   *
+   * Windows opened in this page load before the identity arrived are adopted:
+   * they were opened by whoever is signed in now. Remembered geometry is kept;
+   * it is a screen-layout preference, not a record.
+   */
+  function claimForUser(userId: string): void {
+    if (!userId) return
+    if (ownerId.value && ownerId.value !== userId) {
+      closeAll()
+    } else if (!ownerId.value && unattributedIds.value.length > 0) {
+      const unattributed = new Set(unattributedIds.value)
+      windows.value = windows.value.filter((w) => !unattributed.has(w.id))
+      if (activeId.value !== null && unattributed.has(activeId.value)) activeId.value = null
+    }
+    unattributedIds.value = []
+    ownerId.value = userId
   }
 
   /** Bring a window to the front and focus it. Un-minimises on the way. */
@@ -579,6 +617,9 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
     openOrFocusRoute,
     close,
     closeAll,
+    ownerId,
+    unattributedIds,
+    claimForUser,
     focus,
     minimize,
     toggleMinimize,
@@ -603,7 +644,7 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
     key: 'tnzi-admin-desktop',
     // Only flat serialisable state. `stacked`/`activeWindow` are computed and
     // the actions are functions - persisting either would serialise garbage.
-    pick: ['windows', 'activeId', 'seq', 'topZ', 'geometryMemory'],
+    pick: ['windows', 'activeId', 'seq', 'topZ', 'geometryMemory', 'ownerId'],
     /**
      * Hydration bypasses every action, so anything a newer build no longer
      * accepts has to be repaired here or it renders as a ghost.
@@ -616,6 +657,10 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
      *    a (possibly truncated) stack yields `undefined` as the current
      *    location, which renders an empty window with no way to fix it.
      *
+     * Windows restored with no `ownerId` are noted as unattributed, so the
+     * first `claimForUser` closes them instead of handing them to whoever
+     * signs in next.
+     *
      * Geometry clamping is NOT done here: the desktop surface size isn't known
      * at hydrate time. `TDesktopHost` calls `clampAll` once it has measured.
      */
@@ -624,6 +669,8 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
         windows: AdminDesktopWindow[]
         activeId: string | null
         topZ: number
+        ownerId: string
+        unattributedIds: string[]
       }
       const list = Array.isArray(store.windows) ? store.windows : []
       const sound = list.filter(
@@ -639,6 +686,8 @@ export const useAdminDesktopStore = defineStore('admin-desktop', () => {
       if (store.activeId && !store.windows.some((w) => w.id === store.activeId)) {
         store.activeId = null
       }
+      if (typeof store.ownerId !== 'string') store.ownerId = ''
+      store.unattributedIds = store.ownerId ? [] : store.windows.map((w) => w.id)
     },
   },
 })

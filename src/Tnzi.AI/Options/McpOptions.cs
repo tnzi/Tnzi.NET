@@ -88,7 +88,9 @@ public class McpServerConfig
     public McpApprovalMode ApprovalMode { get; set; } = McpApprovalMode.AlwaysRequire;
 
     /// <summary>
-    /// 是否在工具名前加 Server 名（避免多服务器时重名）
+    /// 是否在工具名前加 Server 名（避免多服务器时重名）。名字为 <c>{server}__{tool}</c>，只含 <c>[a-zA-Z0-9_-]</c>、
+    /// 不超过 64 字符（见 <see cref="McpToolNames"/>）；调用时仍以原名发给服务器。
+    /// <see cref="AllowedTools"/> 与审批名单写原名或前缀名都认。
     /// </summary>
     public bool PrefixToolNameWithServer { get; set; } = false;
 
@@ -108,15 +110,10 @@ public class McpServerConfig
     public string? Command { get; set; }
 
     /// <summary>
-    /// 环境变量。Stdio 模式下当 ApplyEnvironmentToProcess 为 true 时传入子进程。
-    /// 与 ModelContextProtocol SDK 的 StdioClientTransportOptions 一致，便于与官方 SDK 行为对齐。
+    /// 环境变量。Stdio 模式下经 SDK 的 <c>StdioClientTransportOptions.EnvironmentVariables</c> 传给子进程，
+    /// 不改动宿主进程自己的环境。
     /// </summary>
     public Dictionary<string, string> Environment { get; set; } = [];
-
-    /// <summary>
-    /// 是否将 Environment 中的变量应用到当前进程后再启动子进程；为 true 时子进程继承这些变量
-    /// </summary>
-    public bool ApplyEnvironmentToProcess { get; set; } = false;
 
     /// <summary>
     /// 启动参数（Stdio 时）
@@ -131,7 +128,7 @@ public class McpServerConfig
 
     /// <summary>
     /// 运行时租户分区键 — <b>不来自配置绑定</b>，由 <c>IMcpServerCatalog</c> 物化 DB 注册表条目时
-    /// 按该行自身的 <c>TenantId</c> 填充。
+    /// 按该行自身的 <c>TenantId</c> 填充（宿主行填宿主分区名，与部署配置条目分开）。
     /// </summary>
     /// <remarks>
     /// 多租户下 <c>McpServerRegistration</c> 的唯一索引是 (TenantId, Name)：两个租户可以注册同名 server
@@ -140,6 +137,16 @@ public class McpServerConfig
     /// 所有租户共用一条连接。
     /// </remarks>
     public string? TenantKey { get; set; }
+
+    /// <summary>
+    /// 建立每一条 TCP 连接时都按 SSRF egress 规则检查实际要连的地址（除非 <c>AI:Mcp:AllowPrivateEndpoints</c> 开启）。
+    /// </summary>
+    /// <remarks>
+    /// <c>IMcpServerCatalog</c> 物化 DB 注册表条目时置 true：那些端点由租户管理员填写，注册时的一次检查挡不住
+    /// 事后把 DNS 改指内网（下一次重连就连进去）。部署配置（<c>AI:Mcp:Servers</c>）条目默认 false：
+    /// 部署方受信，常见的就是内网 sidecar；也可以显式设为 true。
+    /// </remarks>
+    public bool EnforceEgressGuard { get; set; }
 }
 
 /// <summary>

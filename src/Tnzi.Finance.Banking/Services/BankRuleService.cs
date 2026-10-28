@@ -5,6 +5,9 @@ namespace Tnzi.Finance.Banking.Services;
 /// </summary>
 public class BankRuleService : ApplicationService, IBankRuleService
 {
+    /// <summary>规则试跑最多评估多少条待匹配流水（最近的优先）。</summary>
+    internal const int MaxDryRunTransactions = 2000;
+
     private readonly IRepository<BankRule, Guid> _repository;
     private readonly IRepository<BankRuleCondition, Guid> _conditionRepository;
     private readonly IReadOnlyRepository<BankTransaction, Guid> _txnRepository;
@@ -212,7 +215,9 @@ public class BankRuleService : ApplicationService, IBankRuleService
     {
         Check.NotNull(input);
 
-        var rule = await _repository.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var rule = await _repository.AsNoTracking()
+            .Include(r => r.Conditions)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (rule == null)
             return Fail<BankRuleTestResultDto>("Bank rule not found.", 404);
 
@@ -224,22 +229,46 @@ public class BankRuleService : ApplicationService, IBankRuleService
         else if (rule.AccountId.HasValue)
             queryable = queryable.Where(t => t.AccountId == rule.AccountId.Value);
 
-        var pending = await queryable.OrderByDescending(t => t.TxnDate).ToListAsync(cancellationToken);
+        // ★ 有界：试跑回答的是「这条规则大致会命中什么」，最近的一批流水足以回答；把一个租户积压的
+        // 全部待匹配流水（不限科目时跨所有账户）整行读进内存逐条求值，每点一次「试跑」就是一次全量扫描。
+        var pending = await queryable
+            .OrderByDescending(t => t.TxnDate)
+            .ThenByDescending(t => t.CreationTime)
+            .Take(MaxDryRunTransactions)
+            .ToListAsync(cancellationToken);
 
-        // ★经完整求值器跑，而不是只拿这一条规则去比对：操作员真正需要知道的
-        // 不是"我这条规则能匹配什么"，而是"这些流水最终归谁"——首个命中者胜
-        // 意味着一条更高优先级的规则可能把它们全都抢走。
-        var matches = await _evaluator.EvaluateManyAsync(pending, cancellationToken);
+        // ★两步走，各答一个问题：
+        // ① 这条规则自己命中哪些流水（只看它自己的条件，不看 IsEnabled），决定计数与行。
+        //    只跑完整求值器会把**任何**规则赢下的流水都算到它头上：一条什么都不匹配的规则
+        //    会报「命中 40 条、全被更高优先级的规则抢走」，操作员照提示把它往上挪，反而让它
+        //    去抢本不该归它的流水；而停用的规则求值器根本不看，先存成停用再试跑恒报 0。
+        // ② 这些流水最终归谁，经完整求值器（消费方可替换），因为首个命中者胜意味着一条
+        //    更高优先级的规则可能把它们全都抢走，那正是保存前要看见的事实。
+        var testedRule = new[] { rule };
+        var own = pending
+            .Where(t => (rule.AccountId == null || rule.AccountId == t.AccountId)
+                        && BankRuleEvaluator.FirstMatch(testedRule, t).HasValue)
+            .ToList();
+
+        var matches = await _evaluator.EvaluateManyAsync(own, cancellationToken);
+
+        // 停用规则不参与求值，求值器给出的赢家可能排在它**后面**：那不是「抢走」，
+        // 启用后它自己会赢。只有排在它前面的赢家才算数。
+        var ranksAhead = rule.IsEnabled
+            ? null
+            : await RulesRankedAheadAsync(rule, matches.Values.Select(m => m.RuleId).Distinct().ToList(), cancellationToken);
 
         var rows = new List<BankRuleTestRowDto>();
-        var matched = 0;
-        foreach (var txn in pending)
+        foreach (var txn in own)
         {
-            if (!matches.TryGetValue(txn.Id, out var match))
-                continue;
-            matched++;
             if (rows.Count >= sample)
-                continue;
+                break;
+
+            // 求值器没给出赢家（被替换的求值器语义不同），或给出的赢家排在一条停用规则之后：
+            // 按「它在当前位置启用」回答，赢家就是它自己。
+            var winner = matches.TryGetValue(txn.Id, out var match) && (ranksAhead == null || ranksAhead.Contains(match.RuleId))
+                ? (Id: match.RuleId, Name: match.RuleName)
+                : (Id: rule.Id, Name: rule.Name);
 
             rows.Add(new BankRuleTestRowDto
             {
@@ -248,18 +277,42 @@ public class BankRuleService : ApplicationService, IBankRuleService
                 Amount = txn.Amount,
                 Description = txn.Description,
                 Payee = txn.Payee,
-                WinningRuleId = match.RuleId,
-                WinningRuleName = match.RuleName
+                WinningRuleId = winner.Id,
+                WinningRuleName = winner.Name
             });
         }
 
-        return Ok(new BankRuleTestResultDto { Evaluated = pending.Count, Matched = matched, Rows = rows });
+        return Ok(new BankRuleTestResultDto { Evaluated = pending.Count, Matched = own.Count, Rows = rows });
+    }
+
+    /// <summary>
+    /// 候选赢家里排在 <paramref name="rule"/> 之前的那些（与求值器同序：Priority，再创建时间）。
+    /// </summary>
+    private async Task<HashSet<Guid>> RulesRankedAheadAsync(BankRule rule, List<Guid> candidateIds, CancellationToken cancellationToken)
+    {
+        if (candidateIds.Count == 0)
+            return [];
+
+        var candidates = await _repository.AsNoTracking()
+            .Where(r => candidateIds.Contains(r.Id))
+            .Select(r => new { r.Id, r.Priority, r.CreationTime })
+            .ToListAsync(cancellationToken);
+
+        return candidates
+            .Where(c => c.Priority < rule.Priority || (c.Priority == rule.Priority && c.CreationTime < rule.CreationTime))
+            .Select(c => c.Id)
+            .ToHashSet();
     }
 
     private async Task<Result> ApplyAsync(BankRule rule, CreateBankRuleDto input, bool isCreate, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("A rule name is required.", 400);
+        var tooLong = BankingFieldLimits.FirstTooLong(
+            (input.Name.Trim(), BankingFieldLimits.BankRuleNameMaxLength, "rule name"),
+            (input.PaymentMethod?.Trim(), BankingFieldLimits.PaymentMethodMaxLength, "payment method"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
 
         if (input.Conditions == null)
             return Fail("Conditions are required (send an empty list for an account/direction-only rule).", 400);
@@ -269,6 +322,8 @@ public class BankRuleService : ApplicationService, IBankRuleService
             var c = input.Conditions[i];
             if (string.IsNullOrWhiteSpace(c.Value))
                 return Fail($"Condition {i + 1}: a value is required.", 400);
+            if (c.Value.Trim().Length > BankingFieldLimits.BankRuleConditionValueMaxLength)
+                return Fail($"Condition {i + 1}: the value must be at most {BankingFieldLimits.BankRuleConditionValueMaxLength} characters.", 400);
 
             // 运算符与字段必须配套：把 "contains" 用在金额上、"greater than" 用在
             // 摘要上，规则会静默地永不命中——那比直接拒绝难查得多。
@@ -290,6 +345,11 @@ public class BankRuleService : ApplicationService, IBankRuleService
             return Fail("Bank account not found.", 404);
         if (input.CounterAccountId.HasValue && !await _accountRepository.AnyAsync(a => a.Id == input.CounterAccountId.Value, cancellationToken))
             return Fail("Counter account not found.", 404);
+
+        // 费用单只记钱出去：只认进账的费用规则一条流水也命中不了（求值器对进账跳过费用规则），
+        // 保存成功只会让操作员以为它在工作。
+        if (input.DocType == BankFeedDocType.Expense && input.Direction == BankRuleDirection.MoneyIn)
+            return Fail("An expense rule can only match money going out. Choose the money-out or any direction, or post deposits as payments or transfers.", 400);
 
         // 自动入账的规则必须自己说得清钱记到哪儿：缺科目就自动过账，等于让
         // 系统替人猜一个科目。

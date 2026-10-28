@@ -39,6 +39,32 @@ internal static class NotificationFieldLimits
     /// <summary><see cref="Recipient.ExternalMessageId"/> 的列宽。</summary>
     internal const int ExternalMessageIdMaxLength = 200;
 
+    /// <summary><see cref="OptOut.Reason"/> 的列宽。</summary>
+    internal const int OptOutReasonMaxLength = 1000;
+
+    /// <summary><see cref="OptOut.Source"/> 的列宽。</summary>
+    internal const int OptOutSourceMaxLength = 200;
+
+    /// <summary>
+    /// 把一段附带的说明文字收敛到列装得下：空白当没填（<see langword="null"/>），超长截断并补省略号。
+    /// </summary>
+    /// <remarks>
+    /// ★ 用在<b>不能因为它而失败</b>的写入上。退订原因是收件人随手填的附注，而退订本身是法定必须生效的动作：
+    /// 一段超出列宽的原因此前让插入在 PostgreSQL 上抛出、匿名退订端点答 500、退订没记下，这个地址照样收信。
+    /// </remarks>
+    internal static string? FitNote(string? text, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        var trimmed = text.Trim();
+        if (trimmed.Length <= maxLength)
+            return trimmed;
+
+        const string ellipsis = "…";
+        return Cut(trimmed, maxLength - ellipsis.Length) + ellipsis;
+    }
+
     /// <summary>
     /// 把失败原因收敛到列装得下的长度。<see langword="null"/> 原样返回。
     /// </summary>

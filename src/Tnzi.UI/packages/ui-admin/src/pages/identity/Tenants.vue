@@ -82,6 +82,7 @@ import { editAction, deleteAction, type RowAction } from '../../headless/row-act
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { EMPTY_DASH } from '../../utils/placeholders'
+import { toIsoDateValue } from '../../utils/calendar-date'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import {
   tenantColumns,
@@ -95,14 +96,25 @@ import type { TenantDto } from '@tnzi/core/services/identity'
 const title = 'title'
 const bridge = createIdentityBridge({ client: useAdminClient() })
 
+/**
+ * A picked expiry is the picker's epoch number; `ExpiredAt` binds to a
+ * DateTime, which a JSON number is not (the save would fail with 400). An
+ * expiry left alone goes back as it came.
+ */
+function toWrite(data: Partial<TenantDto>): Partial<TenantDto> {
+  return { ...data, expiredAt: toIsoDateValue(data.expiredAt) }
+}
+
 const crud = useCrudPage<TenantDto, string>({
   pageId: 'identity.tenants',
+  // A tenant left alone on the switch is created enabled; the switch says so.
+  createDefaults: { isEnabled: true },
   permission: 'tenant',
   columns: tenantColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.tenants.fetch(query),
-  createData: (data) => bridge.tenants.create(data as never),
-  updateData: (id, data) => bridge.tenants.update(id, data as never),
+  createData: (data) => bridge.tenants.create(toWrite(data) as never),
+  updateData: (id, data) => bridge.tenants.update(id, toWrite(data) as never),
   deleteData: (ids) => bridge.tenants.delete(ids),
 })
 

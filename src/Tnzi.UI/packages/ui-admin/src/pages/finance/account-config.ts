@@ -61,6 +61,8 @@ export const SYSTEM_ROLE_LABELS: Record<string, string> = {
   [AccountSystemRole.UndepositedFunds]: 'Undeposited Funds',
   [AccountSystemRole.OpeningBalance]: 'Opening Balance',
   [AccountSystemRole.CurrencyExchangeClearing]: 'Currency Exchange Clearing',
+  [AccountSystemRole.WagesPayable]: 'Wages Payable',
+  [AccountSystemRole.NonRecoverableTaxExpense]: 'Non-recoverable Tax Expense',
 }
 
 export const CASH_FLOW_LABELS: Record<string, string> = {

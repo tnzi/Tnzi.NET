@@ -155,8 +155,9 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
         if (!await CanEditAsync(group))
             return Fail<SettingsCenterGroupDto>($"You do not have permission to modify settings group '{groupKey}'", 403);
 
-        var overrides = await LoadGlobalOverridesAsync(group.Fields.Select(f => f.Key), cancellationToken);
-        foreach (var row in overrides.Values)
+        // 删的是每一行，不是每个键一行：同一个键的 Global 覆盖可能不止一行（见 LoadGlobalOverrideRowsAsync），
+        // 只删其一的话「恢复默认」报成功而覆盖仍然生效。
+        foreach (var row in await LoadGlobalOverrideRowsAsync(group.Fields.Select(f => f.Key), cancellationToken))
         {
             var deleted = await _settingService.DeleteSettingAsync(row.Id);
             if (!deleted.Succeeded)
@@ -214,10 +215,15 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
 
     private async Task<Result> RemoveOverrideAsync(string key, CancellationToken cancellationToken)
     {
-        var overrides = await LoadGlobalOverridesAsync([key], cancellationToken);
-        if (!overrides.TryGetValue(key, out var row))
-            return Result.Success();
-        return await _settingService.DeleteSettingAsync(row.Id);
+        // 与恢复默认同一理由：这个键的每一行覆盖都删掉。
+        foreach (var row in await LoadGlobalOverrideRowsAsync([key], cancellationToken))
+        {
+            var deleted = await _settingService.DeleteSettingAsync(row.Id);
+            if (!deleted.Succeeded)
+                return deleted;
+        }
+
+        return Result.Success();
     }
 
     private static string? ValidateFieldValue(SettingFieldDefinition field, string? value)
@@ -277,10 +283,17 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
     }
 
     /// <summary>
-    /// 对组内每个贡献 Options 类型（GROUP MERGE 的组有多个）绑定候选实例并跑注册的
-    /// IValidateOptions&lt;T&gt;。返回 null 表示通过。绑定本身失败（如经原始 CRUD 混入的
+    /// 对组内每个贡献 Options 类型（GROUP MERGE 的组有多个）以及把它当作一段来绑定的外层 Options 类型
+    /// 绑定候选实例并跑注册的 IValidateOptions&lt;T&gt;。返回 null 表示通过。绑定本身失败（如经原始 CRUD 混入的
     /// 不可转换值）同样按验证失败处理。
     /// </summary>
+    /// <remarks>
+    /// ★★ 外层类型必须一起验：<c>web-ratelimit</c> 的 <c>RateLimitOptions</c> 只是 <c>AspNetCoreOptions.RateLimit</c>，
+    /// 自己没有验证器，运行时重绑定并验证的是 <c>AspNetCoreOptions</c>。只验组类型时预检一律放行，
+    /// 而根验证器里「开关打开才检查」的规则（如 ByPath 规则的 Limit）恰好在这次保存之后才生效：
+    /// 落库成功，reload 后每个读 <c>IOptionsMonitor&lt;AspNetCoreOptions&gt;.CurrentValue</c> 的请求都抛
+    /// <c>OptionsValidationException</c>，连改回去要用的配置中心端点也一样，只能直接改库恢复。
+    /// </remarks>
     private async Task<string?> ValidateCandidateOptionsAsync(
         SettingDefinitionGroup group,
         Dictionary<string, SettingFieldDefinition> fieldMap,
@@ -314,7 +327,10 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
             }
         }
 
-        foreach (var optionsType in group.OptionsTypes)
+        var typesToValidate = group.OptionsTypes
+            .Concat(group.OptionsTypes.SelectMany(EnclosingOptionsTypeFinder.Find))
+            .Distinct();
+        foreach (var optionsType in typesToValidate)
         {
             var error = ValidateCandidateForType(optionsType, overrides);
             if (error != null)
@@ -368,16 +384,38 @@ public class SettingsCenterService : ApplicationService, ISettingsCenterService
             .ToList();
     }
 
+    /// <summary>这些键的 Global 覆盖，每个键一行（展示用）。</summary>
     private async Task<Dictionary<string, Setting>> LoadGlobalOverridesAsync(IEnumerable<string> keys, CancellationToken cancellationToken)
-    {
-        // Setting 表是小表（运行时覆盖项），全量加载后内存过滤 -
-        // 与既有测试基建（mock ToListAsync）兼容，避免 mock IQueryable 异步算子。
-        var keySet = new HashSet<string>(keys, StringComparer.OrdinalIgnoreCase);
-        var settings = await _settingRepository.ToListAsync(null, cancellationToken);
-        return settings
-            .Where(s => s.Scope == SettingScope.Global && keySet.Contains(s.Key))
+        => (await LoadGlobalOverrideRowsAsync(keys, cancellationToken))
             .GroupBy(s => s.Key, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 这些键的 Global 覆盖<b>的全部行</b>，在数据库端按作用域与键筛选（键不分大小写）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 此前整张 <c>Sys_Setting</c> 读进内存再过滤：这张表也存每个用户 / 租户的设置行与每个前端产品一份最大 64 KB 的主题快照，
+    /// 打开一次配置中心、保存一次（定义 + 存后回读）、恢复一次默认都是一次全表读取，按字段删除覆盖时还逐字段再读一遍。
+    /// </para>
+    /// <para>
+    /// 同一个键的 Global 覆盖可能不止一行：Global 行的 <c>ScopeId</c> 为 null，而 PostgreSQL / MySQL / SQLite 上 null 互不相等，
+    /// (Key, Scope, ScopeId) 唯一索引挡不住两次并发保存各插一行。展示取其一，删除必须删全。
+    /// </para>
+    /// </remarks>
+    private async Task<List<Setting>> LoadGlobalOverrideRowsAsync(IEnumerable<string> keys, CancellationToken cancellationToken)
+    {
+        var lowered = keys.Select(k => k.ToLowerInvariant()).Distinct().ToList();
+        if (lowered.Count == 0)
+            return [];
+
+        var rows = await _settingRepository.ToListAsync(
+            s => s.Scope == SettingScope.Global && lowered.Contains(s.Key.ToLower()),
+            cancellationToken);
+
+        // 数据库端已经筛过；这里按同一口径再筛一遍，不依赖数据库的大小写排序规则。
+        var keySet = new HashSet<string>(lowered, StringComparer.OrdinalIgnoreCase);
+        return rows.Where(s => s.Scope == SettingScope.Global && keySet.Contains(s.Key)).ToList();
     }
 
     private SettingsCenterGroupDto ToDto(SettingDefinitionGroup group, Dictionary<string, Setting> overrides)

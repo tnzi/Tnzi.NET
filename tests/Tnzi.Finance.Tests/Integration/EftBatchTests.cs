@@ -7,6 +7,19 @@ namespace Tnzi.Finance.Tests.Integration;
 /// </summary>
 public class EftBatchTests : FinanceIntegrationTestBase
 {
+    private readonly RaceHooks _hooks = new();
+
+    protected override void ConfigureServices(IServiceCollection services)
+    {
+        base.ConfigureServices(services);
+        // 后注册者胜：两个钩子默认不挂任何动作，只在竞态用例里各插一次「另一个操作员」。
+        services.AddScoped<IFinanceDataProtector>(sp =>
+            new HookedProtector(ActivatorUtilities.CreateInstance<FinanceDataProtector>(sp), _hooks));
+        services.AddScoped<IRepository<EftBatchLine, Guid>>(sp =>
+            new HookedLineRepository(sp.GetRequiredService<FinanceTestDbContext>(), sp, _hooks));
+        services.AddScoped<IReadOnlyRepository<EftBatchLine, Guid>>(sp => sp.GetRequiredService<IRepository<EftBatchLine, Guid>>());
+    }
+
     /// <summary>
     /// 一个稳定落在未来的生效日。
     /// </summary>
@@ -92,6 +105,32 @@ public class EftBatchTests : FinanceIntegrationTestBase
     /// 而 EFT 是真正把钱送出门且不可撤回的那一条。
     /// </para>
     /// </remarks>
+    /// <summary>装进批次的付款离开待付队列，没装的留在队列里。</summary>
+    [Fact]
+    public async Task Queue_ExcludesPaymentsAlreadyInABatch()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync(account: "5550002");
+        var batched = await CreatePostedTransferPaymentAsync(ledger, vendor, 250m);
+        var waiting = await CreatePostedTransferPaymentAsync(ledger, vendor, 75m);
+
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
+            PaymentEntryIds = new List<Guid> { batched }
+        });
+        batch.Succeeded.ShouldBeTrue(batch.Message);
+
+        var queue = await InScopeAsync<IEftService, Result<List<EftQueueItemDto>>>(s => s.GetQueueAsync());
+        queue.Succeeded.ShouldBeTrue(queue.Message);
+        var item = queue.Data!.Single();
+        item.PaymentEntryId.ShouldBe(waiting);
+        item.Amount.ShouldBe(75m);
+        item.FundingAccountId.ShouldBe(ledger);
+    }
+
     [Fact]
     public async Task VoidPayment_InGeneratedBatch_IsRejected()
     {
@@ -225,6 +264,127 @@ public class EftBatchTests : FinanceIntegrationTestBase
         text.ShouldContain("ACME CORP");
     }
 
+    // ── 存储的账号解不开（密钥更换、库恢复到另一把密钥的环境） ─────────────────
+    //
+    // 解密异常此前一路冒成 500，看不出是哪个档案要重新录入账号；NACHA 批次还会因为一个
+    // 根本不写进文件的本方账号一起生成不了。拒绝必须发生在分配批次号与文件序号之前。
+
+    /// <summary>一段格式合法、但用任何密钥都解不开的密文（认证标签对不上）。</summary>
+    private static string Undecryptable() => "v2:" + Convert.ToBase64String(new byte[40]);
+
+    private Task CorruptAsync<TEntity>(Guid id, Action<TEntity> corrupt) where TEntity : class, Tnzi.Domain.Entities.IEntity<Guid>
+        => InScopeAsync<IRepository<TEntity, Guid>, int>(async repo =>
+        {
+            var row = (await repo.GetAsync(id))!;
+            corrupt(row);
+            await repo.UpdateAsync(row);
+            await repo.SaveChangesAsync();
+            return 0;
+        });
+
+    [Fact]
+    public async Task Generate_PayeeAccountUndecryptable_Returns400NamingThePayee_AndAllocatesNothing()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync(account: "5550003", name: "Globex Trading");
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 120m);
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
+            PaymentEntryIds = new List<Guid> { payment }
+        });
+        batch.Succeeded.ShouldBeTrue(batch.Message);
+        var partyBank = await InScopeAsync<IReadOnlyRepository<PartyBankAccount, Guid>, PartyBankAccount?>(
+            r => r.FirstOrDefaultAsync(a => a.PartyId == vendor));
+        await CorruptAsync<PartyBankAccount>(partyBank!.Id, a => a.AccountNumberEncrypted = Undecryptable());
+
+        var generated = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
+
+        generated.Succeeded.ShouldBeFalse();
+        generated.Code.ShouldBe(400);
+        generated.Message!.ShouldContain("Globex Trading");
+        var reloaded = (await ReloadAsync<EftBatch>(batch.Data!.Id))!;
+        reloaded.Status.ShouldBe(EftBatchStatus.Draft);
+        reloaded.Number.ShouldBeNull();
+        reloaded.FileCreationNumber.ShouldBeNull();
+        (await ReloadAsync<BankAccount>(bank))!.EftFileCreationNumber.ShouldBe(0);
+    }
+
+    /// <summary>NACHA 不写本方账号：本方账号解不开不该挡住 NACHA 文件。</summary>
+    [Fact]
+    public async Task Generate_Nacha_WithAnUndecryptableOriginatorAccount_StillSucceeds()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync(account: "5550004");
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 80m);
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
+            PaymentEntryIds = new List<Guid> { payment }
+        });
+        batch.Succeeded.ShouldBeTrue(batch.Message);
+        await CorruptAsync<BankAccount>(bank, b => b.AccountNumberEncrypted = Undecryptable());
+
+        var generated = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
+
+        generated.Succeeded.ShouldBeTrue(generated.Message);
+        generated.Data!.Status.ShouldBe(EftBatchStatus.Generated);
+    }
+
+    /// <summary>CPA-005 要写本方账号：解不开时点名银行账户档案拒绝，不分配任何号。</summary>
+    [Fact]
+    public async Task Generate_Cpa005_WithAnUndecryptableOriginatorAccount_Returns400NamingTheBankAccount()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var created = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = ledger,
+            Name = "Operating CAD",
+            Scheme = BankNumberScheme.CaEft,
+            InstitutionNumber = "003",
+            TransitNumber = "12345",
+            AccountNumber = "1234567",
+            EftOriginatorId = "ACMECORP01",
+            EftOriginatorName = "ACME CORP"
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+        var bank = created.Data!.Id;
+        await CorruptAsync<BankAccount>(bank, b => b.AccountNumberEncrypted = Undecryptable());
+
+        // 直接落一个草稿批次：本用例只关心生成时对本方账号的处理，不关心装批路径上的币种与收款方。
+        var batchId = Guid.NewGuid();
+        await InScopeAsync<IServiceProvider, int>(async sp =>
+        {
+            var batches = sp.GetRequiredService<IRepository<EftBatch, Guid>>();
+            await batches.InsertAsync(new EftBatch
+            {
+                Id = batchId, BankAccountId = bank, Format = EftFileFormat.Cpa005, Currency = "CAD",
+                EffectiveDate = FutureDate(), Status = EftBatchStatus.Draft, TotalCount = 1, TotalAmount = 1m
+            });
+            await batches.SaveChangesAsync();
+            var lines = sp.GetRequiredService<IRepository<EftBatchLine, Guid>>();
+            await lines.InsertAsync(new EftBatchLine
+            {
+                EftBatchId = batchId, PaymentEntryId = Guid.NewGuid(), PartyBankAccountId = Guid.NewGuid(), Amount = 1m, PayeeName = "Payee"
+            });
+            await lines.SaveChangesAsync();
+            return 0;
+        });
+
+        var generated = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batchId));
+
+        generated.Succeeded.ShouldBeFalse();
+        generated.Code.ShouldBe(400);
+        generated.Message!.ShouldContain("Operating CAD");
+        (await ReloadAsync<EftBatch>(batchId))!.Number.ShouldBeNull();
+        (await ReloadAsync<BankAccount>(bank))!.EftFileCreationNumber.ShouldBe(0);
+    }
+
     [Fact]
     public async Task CreateBatch_SchemeMismatch_Rejects400()
     {
@@ -244,6 +404,56 @@ public class EftBatchTests : FinanceIntegrationTestBase
         batch.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// 付款贷的是哪个资金科目，文件就必须从那个科目对应的银行档案出钱。
+    /// </summary>
+    /// <remarks>
+    /// 付款过账贷记 <c>DepositToAccountId</c>（这里是 1120）；若操作员在装批时选了挂在
+    /// 另一个科目（1110）上的档案，生成的文件让银行从 1110 对应的账户付钱，而总账记的是
+    /// 1120 减少，两个账户的银行对账同时对不平，此前每一步都返回成功。
+    /// 拒绝必须发生在任何写入之前：批次表零行，付款仍在待付队列里。
+    /// </remarks>
+    [Fact]
+    public async Task CreateBatch_PaymentFundedFromAnotherLedgerAccount_Rejects400_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        await CreateBankAccountAsync(); // 1120 上的档案：付款真正的出款户
+        var otherLedger = await AccountIdByCodeAsync("1110");
+        var other = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.CreateAsync(new CreateBankAccountDto
+        {
+            AccountId = otherLedger,
+            Name = "Payroll",
+            Scheme = BankNumberScheme.UsAba,
+            RoutingNumber = "021000021",
+            AccountNumber = "999888777",
+            EftOriginatorId = "123456789",
+            EftOriginatorName = "ACME CORP"
+        }));
+        other.Succeeded.ShouldBeTrue(other.Message);
+        var vendor = await CreateVendorWithBankAsync(account: "5550101");
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 125m);
+
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = other.Data!.Id, Format = EftFileFormat.Nacha, EffectiveDate = FutureDate(),
+            PaymentEntryIds = new List<Guid> { payment }
+        });
+
+        batch.Succeeded.ShouldBeFalse("the file would debit the Payroll account while the ledger credited the Operating account");
+        batch.Code.ShouldBe(400);
+        batch.Message.ShouldNotBeNull().ShouldContain("not funded from the selected bank account");
+
+        (await InScopeAsync<IReadOnlyRepository<EftBatch, Guid>, int>(r => r.CountAsync())).ShouldBe(0);
+        (await InScopeAsync<IReadOnlyRepository<EftBatchLine, Guid>, int>(r => r.CountAsync())).ShouldBe(0);
+
+        // 队列把出款科目带出来，呈现端据此只列匹配的档案；付款仍在队列里可以正确地重新装批。
+        var queue = await InScopeAsync<IEftService, Result<List<EftQueueItemDto>>>(s => s.GetQueueAsync());
+        queue.Succeeded.ShouldBeTrue(queue.Message);
+        var item = queue.Data!.Single(q => q.PaymentEntryId == payment);
+        item.FundingAccountId.ShouldBe(ledger);
+    }
+
     [Fact]
     public async Task CreateBatch_PastEffectiveDate_Rejects400()
     {
@@ -253,10 +463,11 @@ public class EftBatchTests : FinanceIntegrationTestBase
         var vendor = await CreateVendorWithBankAsync();
         var p = await CreatePostedTransferPaymentAsync(ledger, vendor, 100m);
 
-        // 生效日在过去 → ODFI 会拒收，前置拒绝 400
+        // 生效日在过去 → ODFI 会拒收，前置拒绝 400。用前天：「昨天」在 UTC-12 那一侧可能还是今天，
+        // 判据只拒绝在任何时区都已经过去的日期（见 EftEffectiveDateTests）。
         var batch = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = DateTime.UtcNow.Date.AddDays(-1),
+            BankAccountId = bank, Format = EftFileFormat.Nacha, EffectiveDate = DateTime.UtcNow.Date.AddDays(-2),
             PaymentEntryIds = new List<Guid> { p }
         });
         batch.Succeeded.ShouldBeFalse();
@@ -477,33 +688,95 @@ public class EftBatchTests : FinanceIntegrationTestBase
     }
 
     /// <summary>
-    /// ★ 下载不得改动并发标记 —— 否则两个人同时下载会有一个拿到 409。
+    /// ★ 两个人同时下载都成功、都计数：留痕是条件 <c>ExecuteUpdate</c>，下载之间不做带跟踪的比对。
     /// </summary>
     /// <remarks>
     /// 留痕走 <c>ExecuteUpdate</c> 而不是「加载实体 → 改 → 保存」正是为此：后者要经过变更
-    /// 跟踪器，从而参与 <c>IConcurrencyStamp</c> 的乐观并发校验，把一个纯读动作变成会因并发
-    /// 而失败的写动作。这条用例是那个取舍的可执行形式。
+    /// 跟踪器，从而对 <c>IConcurrencyStamp</c> 做乐观并发比对，把一个纯读动作变成会因并发
+    /// 而失败的写动作。第二次下载插在第一次的「读到 Generated」与「留痕」之间。
     /// </remarks>
     [Fact]
-    public async Task Download_DoesNotBumpTheConcurrencyStamp()
+    public async Task Download_ConcurrentWithAnotherDownload_BothSucceed_AndBothCount()
     {
-        await SeedCoaAsync();
-        var ledger = await BankLedgerIdAsync();
-        var bank = await CreateBankAccountAsync();
-        var vendor = await CreateVendorWithBankAsync();
-        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 100m);
-        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        var batchId = await GeneratedBatchAsync();
+        Result<EftFileDto>? inner = null;
+        _hooks.BeforeUnprotect = async () =>
+            inner = await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batchId));
+
+        var outer = await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batchId));
+
+        inner.ShouldNotBeNull("钩子必须真的插进了第一次下载");
+        inner.Succeeded.ShouldBeTrue(inner.Message);
+        outer.Succeeded.ShouldBeTrue(outer.Message);
+        (await ReloadAsync<EftBatch>(batchId))!.DownloadCount.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// ★★ 下载读到 Generated 之后批次被并发作废：文件不得交出。
+    /// </summary>
+    /// <remarks>
+    /// 作废已经硬删了批次行、把付款放回待付队列；这时把文件交出去，那些付款会被再装一批付第二次：
+    /// 恰恰是作废守卫要挡的那笔重复付款，只是从另一侧绕了过去。
+    /// </remarks>
+    [Fact]
+    public async Task Download_WhenTheBatchIsVoidedAfterTheStatusRead_Returns409_AndHandsOutNoFile()
+    {
+        var batchId = await GeneratedBatchAsync();
+        Result<EftBatchDto>? voided = null;
+        _hooks.BeforeUnprotect = async () =>
+            voided = await InScopeAsync<IEftService, Result<EftBatchDto>>(
+                s => s.VoidBatchAsync(batchId, new VoidEftBatchDto { Reason = "Concurrent void" }));
+
+        var download = await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batchId));
+
+        voided.ShouldNotBeNull("钩子必须真的插进了下载");
+        voided.Succeeded.ShouldBeTrue(voided.Message);
+        download.Succeeded.ShouldBeFalse("批次已被作废，文件不得交出");
+        download.Code.ShouldBe(409);
+        download.Data.ShouldBeNull();
+        var reloaded = (await ReloadAsync<EftBatch>(batchId))!;
+        reloaded.Status.ShouldBe(EftBatchStatus.Voided);
+        reloaded.FirstDownloadedTime.ShouldBeNull();
+        reloaded.DownloadCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// ★★ 作废读到「从未下载」之后文件被交出：作废必须失败，付款留在原批次，留痕保住。
+    /// </summary>
+    /// <remarks>
+    /// 作废的守卫读与提交之间插进一次下载。此前作废照常提交：行被删、付款回到队列，
+    /// 而它那次整行写入还把刚戳上的 <c>FirstDownloadedTime</c> 写回 null，连「交出去过」的痕迹都抹掉。
+    /// </remarks>
+    [Fact]
+    public async Task Void_WhenTheFileIsHandedOutAfterTheGuardRead_Returns409_AndKeepsTheBatch()
+    {
+        var batchId = await GeneratedBatchAsync();
+        var paymentId = await InScopeAsync<IReadOnlyRepository<EftBatchLine, Guid>, Guid>(
+            async r => (await r.FirstOrDefaultAsync(l => l.EftBatchId == batchId))!.PaymentEntryId);
+        var bankAccountId = (await ReloadAsync<EftBatch>(batchId))!.BankAccountId;
+        Result<EftFileDto>? download = null;
+        _hooks.BeforeLineLoad = async () =>
+            download = await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batchId));
+
+        var voided = await InScopeAsync<IEftService, Result<EftBatchDto>>(
+            s => s.VoidBatchAsync(batchId, new VoidEftBatchDto { Reason = "Concurrent void" }));
+
+        download.ShouldNotBeNull("钩子必须真的插进了作废");
+        download.Succeeded.ShouldBeTrue(download.Message);
+        voided.Succeeded.ShouldBeFalse("文件已在作废提交前交出，作废必须失败");
+        voided.Code.ShouldBe(409);
+        var reloaded = (await ReloadAsync<EftBatch>(batchId))!;
+        reloaded.Status.ShouldBe(EftBatchStatus.Generated);
+        reloaded.FirstDownloadedTime.ShouldNotBeNull();
+        reloaded.DownloadCount.ShouldBe(1);
+
+        var rebatch = await CreateBatchAsync(new CreateEftBatchDto
         {
-            BankAccountId = bank, Format = EftFileFormat.Nacha,
-            EffectiveDate = FutureDate(), PaymentEntryIds = new List<Guid> { payment }
+            BankAccountId = bankAccountId, Format = EftFileFormat.Nacha,
+            EffectiveDate = FutureDate(2), PaymentEntryIds = new List<Guid> { paymentId }
         });
-        await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
-        var before = (await ReloadAsync<EftBatch>(batch.Data!.Id))!.ConcurrencyStamp;
-
-        await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batch.Data!.Id));
-        await InScopeAsync<IEftService, Result<EftFileDto>>(s => s.DownloadAsync(batch.Data!.Id));
-
-        (await ReloadAsync<EftBatch>(batch.Data!.Id))!.ConcurrencyStamp.ShouldBe(before);
+        rebatch.Succeeded.ShouldBeFalse("付款仍属于原批次，不得重入新批");
+        rebatch.Code.ShouldBe(409);
     }
 
     /// <summary>
@@ -546,6 +819,63 @@ public class EftBatchTests : FinanceIntegrationTestBase
         voided.Code.ShouldBe(409);
     }
 
+    /// <summary>
+    /// ★ 档案编辑读档案之后、保存之前生成了一份文件：编辑必须 409，File Creation Number 不得被写回旧值。
+    /// </summary>
+    /// <remarks>
+    /// 序号由 <c>ExecuteUpdate</c> 推进，档案编辑是整行写。不换并发标记的话编辑照常成功并把序号退回去，
+    /// 下一份 CPA-005 文件复用一个已用过的序号，被银行按重复文件拒收。
+    /// </remarks>
+    [Fact]
+    public async Task UpdateBankProfile_WhileAFileIsGenerated_Returns409_AndKeepsTheFileCreationNumber()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync();
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 100m);
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha,
+            EffectiveDate = FutureDate(), PaymentEntryIds = new List<Guid> { payment }
+        });
+        batch.Succeeded.ShouldBeTrue(batch.Message);
+        Result<EftBatchDto>? generated = null;
+        _hooks.BeforeProtectWithAad = async () =>
+            generated = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
+
+        var updated = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(s => s.UpdateAsync(bank, new UpdateBankAccountDto
+        {
+            Name = "Renamed", Scheme = BankNumberScheme.UsAba, RoutingNumber = "021000021", AccountNumber = "111222333",
+            EftOriginatorId = "123456789", EftOriginatorName = "ACME CORP"
+        }));
+
+        generated.ShouldNotBeNull("钩子必须真的插进了档案编辑");
+        generated.Succeeded.ShouldBeTrue(generated.Message);
+        updated.Succeeded.ShouldBeFalse("整行写入不得覆盖在它读档案之后分配出去的序号");
+        updated.Code.ShouldBe(409);
+        (await ReloadAsync<BankAccount>(bank))!.EftFileCreationNumber.ShouldBe(1);
+    }
+
+    /// <summary>已生成文件、从未下载过的批次。</summary>
+    private async Task<Guid> GeneratedBatchAsync()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorWithBankAsync();
+        var payment = await CreatePostedTransferPaymentAsync(ledger, vendor, 100m);
+        var batch = await CreateBatchAsync(new CreateEftBatchDto
+        {
+            BankAccountId = bank, Format = EftFileFormat.Nacha,
+            EffectiveDate = FutureDate(), PaymentEntryIds = new List<Guid> { payment }
+        });
+        batch.Succeeded.ShouldBeTrue(batch.Message);
+        var generated = await InScopeAsync<IEftService, Result<EftBatchDto>>(s => s.GenerateAsync(batch.Data!.Id));
+        generated.Succeeded.ShouldBeTrue(generated.Message);
+        return batch.Data!.Id;
+    }
+
     /// <summary>生成并下载过一次文件的批次（= 已交出去）。</summary>
     private async Task<(Guid BatchId, (Guid BankAccountId, Guid PaymentId) Context)> HandedOutBatchAsync()
     {
@@ -569,5 +899,55 @@ public class EftBatchTests : FinanceIntegrationTestBase
         download.Succeeded.ShouldBeTrue(download.Message);
 
         return (batch.Data!.Id, (bank, payment));
+    }
+    /// <summary>竞态插入点：每个钩子只触发一次，触发前先清空（插入的那个操作自己不会再触发它）。</summary>
+    private sealed class RaceHooks
+    {
+        public Func<Task>? BeforeUnprotect { get; set; }
+        public Func<Task>? BeforeLineLoad { get; set; }
+        public Func<Task>? BeforeProtectWithAad { get; set; }
+    }
+
+    /// <summary>在下载「读到 Generated」之后、「留痕」之前插入另一个操作（下载解密文件正好在两者之间）。</summary>
+    private sealed class HookedProtector(IFinanceDataProtector inner, RaceHooks hooks) : IFinanceDataProtector
+    {
+        public bool IsConfigured => inner.IsConfigured;
+        public string Protect(string plaintext) => inner.Protect(plaintext);
+        public string Unprotect(string protectedValue, string associatedData) => inner.Unprotect(protectedValue, associatedData);
+
+        /// <summary>档案编辑在「读档案」之后、「保存」之前加密账号。</summary>
+        public string Protect(string plaintext, string associatedData)
+        {
+            var hook = hooks.BeforeProtectWithAad;
+            hooks.BeforeProtectWithAad = null;
+            if (hook != null)
+                Task.Run(hook).GetAwaiter().GetResult();
+            return inner.Protect(plaintext, associatedData);
+        }
+
+        public string Unprotect(string protectedValue)
+        {
+            var hook = hooks.BeforeUnprotect;
+            hooks.BeforeUnprotect = null;
+            // 在线程池上跑完再回来：Unprotect 是同步接口，直接阻塞等待一个 async 钩子会撞上测试框架的同步上下文。
+            if (hook != null)
+                Task.Run(hook).GetAwaiter().GetResult();
+            return inner.Unprotect(protectedValue);
+        }
+    }
+
+    /// <summary>在作废「读完下载留痕」之后、「提交」之前插入另一个操作（作废在工作单元里先读批次行）。</summary>
+    private sealed class HookedLineRepository(FinanceTestDbContext dbContext, IServiceProvider sp, RaceHooks hooks)
+        : EFCoreRepository<FinanceTestDbContext, EftBatchLine, Guid>(dbContext, serviceProvider: sp)
+    {
+        public override async Task<List<EftBatchLine>> ToListAsync(
+            System.Linq.Expressions.Expression<Func<EftBatchLine, bool>>? predicate = null, CancellationToken cancellationToken = default)
+        {
+            var hook = hooks.BeforeLineLoad;
+            hooks.BeforeLineLoad = null;
+            if (hook != null)
+                await hook();
+            return await base.ToListAsync(predicate, cancellationToken);
+        }
     }
 }

@@ -17,12 +17,14 @@
     </template>
 
     <NSpin :show="loading">
-      <TEmpty v-if="!loading && !sessions.length" :text="t('detail.sessions.empty')" size="small" />
+      <!-- "No sessions" is a claim about the account: made only after a load
+           that succeeded, never as the leftover of one that failed. -->
+      <TEmpty v-if="!loading && !loadFailed && !sessions.length" :text="t('detail.sessions.empty')" size="small" />
       <div v-else class="us-list">
         <TItemCard
           v-for="s in sessions"
           :key="s.id"
-          :title="s.deviceInfo || t('detail.sessions.unknownDevice')"
+          :title="(s.groupKey && s.label) || s.deviceInfo || t('detail.sessions.unknownDevice')"
           :icon="deviceIcon(s)"
           :icon-tone="s.isRevoked ? 'default' : 'success'"
           :muted="s.isRevoked"
@@ -90,6 +92,7 @@ const message = useSafeMessage()
 
 const sessions = ref<UserSessionDto[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 const revoking = ref(false)
 
 const activeCount = computed(() => sessions.value.filter((s) => !s.isRevoked).length)
@@ -100,8 +103,10 @@ async function load(): Promise<void> {
     // Revoked sessions are included: "this device was signed out on Tuesday" is
     // part of the account's story, and hiding them makes a revoke look like the
     // session vanished.
-    sessions.value = await bridge.sessions.listForUser(props.userId, true)
+    sessions.value = (await bridge.sessions.listForUser(props.userId, true)) ?? []
+    loadFailed.value = false
   } catch (err) {
+    loadFailed.value = true
     message.error(err instanceof Error ? err.message : String(err))
   } finally {
     loading.value = false
@@ -110,9 +115,12 @@ async function load(): Promise<void> {
 void load()
 
 function sessionTags(s: UserSessionDto): ItemCardTag[] {
-  return s.isRevoked
-    ? [{ label: props.t('detail.sessions.revoked'), type: 'default' }]
-    : [{ label: props.t('detail.sessions.active'), type: 'success' }]
+  const state: ItemCardTag = s.isRevoked
+    ? { label: props.t('detail.sessions.revoked'), type: 'default' }
+    : { label: props.t('detail.sessions.active'), type: 'success' }
+  // An application issued this one for another device (not a sign-in); it
+  // ends at its absolute expiry no matter how it is refreshed.
+  return s.groupKey ? [state, { label: props.t('detail.sessions.delegated'), type: 'info' }] : [state]
 }
 
 /** Rough device glyph from the user agent, so the list is scannable. */

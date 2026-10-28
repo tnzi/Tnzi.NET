@@ -68,7 +68,7 @@
             </ul>
           </NSpin>
           <div v-if="hasMore" class="t-wf-run-page__more">
-            <NButton size="tiny" @click="loadMore">{{ t('loadMore') }}</NButton>
+            <NButton size="tiny" :loading="listLoading" @click="loadMore">{{ t('loadMore') }}</NButton>
           </div>
         </template>
         <template #detail>
@@ -116,12 +116,12 @@
                     @positive-click="onResume"
                   >
                     <template #trigger>
-                      <NButton size="small" type="success" ghost :loading="actionPending">
+                      <NButton size="small" type="success" ghost :loading="actionPending" data-test="wf-run-resume">
                         <template #icon><TSvgIcon icon="mdi:play" :size="14" /></template>
                         {{ t('detail.resume') }}
                       </NButton>
                     </template>
-                    {{ t('detail.confirmResume') }}
+                    {{ resumeConfirmText }}
                   </NPopconfirm>
                 </NSpace>
               </header>
@@ -254,11 +254,12 @@ import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import WorkflowInterruptPanel from './WorkflowInterruptPanel.vue'
-import type {
-  WorkflowDefinitionDto,
-  WorkflowExecutionDetailDto,
-  WorkflowExecutionSignalDto,
-  WorkflowExecutionSummaryDto,
+import {
+  WorkflowExecutionMode,
+  type WorkflowDefinitionDto,
+  type WorkflowExecutionDetailDto,
+  type WorkflowExecutionSignalDto,
+  type WorkflowExecutionSummaryDto,
 } from '@tnzi/core/services/ai'
 
 const bridge = createAiBridge({ client: useAdminClient() })
@@ -423,21 +424,40 @@ const cancelConfirmText = computed(() =>
   String(detail.value?.status ?? '') === 'Running' ? t('detail.confirmCancelRunning') : t('detail.confirmCancel'),
 )
 
+/** The run's workflow runs as a DAG (the only mode with checkpoints to resume from). */
+const runIsDag = computed(() => {
+  const mode = workflows.value.find((w) => w.id === detail.value?.workflowDefinitionId)?.executionMode as unknown
+  return mode === WorkflowExecutionMode.Dag || mode === 2
+})
+
+// Mirrors WorkflowService.ResumeAsync, which refuses everything else with a 400:
+// a Paused or AwaitingApproval run with no step still awaiting a decision (those
+// are approved or rejected first), and a Failed run of a DAG workflow, which
+// resumes from its last checkpoint (retry, and re-approval after a rejected
+// step). An AwaitingInput run is answered through the interrupt panel instead
+// (resume-with-input). `WorkflowExecutionStatus` values are the member names
+// the backend serializes, so a direct string compare matches the wire payload.
 const canResume = computed(() => {
   if (!canExecute.value) return false
   if (!detail.value) return false
-  // `WorkflowExecutionStatus` is a string enum whose values are the member
-  // names the backend serializes, so a direct string compare matches the wire
-  // payload. A paused / awaiting run, or one with steps pending approval,
-  // can be resumed.
+  if ((detail.value.stepsAwaitingApproval?.length ?? 0) > 0) return false
   const status = String(detail.value.status)
-  return status === 'Paused'
-    || status === 'AwaitingApproval'
-    || status === 'AwaitingInput'
-    || (detail.value.stepsAwaitingApproval?.length ?? 0) > 0
+  if (status === 'Paused' || status === 'AwaitingApproval') return true
+  return status === 'Failed' && runIsDag.value
 })
 
-async function loadRuns(append = false): Promise<void> {
+const resumeConfirmText = computed(() =>
+  String(detail.value?.status ?? '') === 'Failed' ? t('detail.confirmResumeFailed') : t('detail.confirmResume'),
+)
+
+// Only the latest list request may write the list: a Load more still on its way
+// when the filter changes would otherwise append a page of the old query under
+// the new one.
+let runsFetchToken = 0
+
+/** Resolves false only when this request failed (a superseded one resolves true: a newer load owns the list). */
+async function loadRuns(append = false): Promise<boolean> {
+  const myToken = ++runsFetchToken
   listLoading.value = true
   try {
     const result = await bridge.workflowRuns.fetch({
@@ -448,13 +468,17 @@ async function loadRuns(append = false): Promise<void> {
       searchText: '',
       filters: { ...filters },
     })
+    if (myToken !== runsFetchToken) return true
     runs.value = append ? [...runs.value, ...result.items] : result.items
     total.value = result.totalCount
+    return true
   } catch (e) {
+    if (myToken !== runsFetchToken) return true
     message.error(e instanceof Error ? e.message : String(e))
     if (!append) runs.value = []
+    return false
   } finally {
-    listLoading.value = false
+    if (myToken === runsFetchToken) listLoading.value = false
   }
 }
 
@@ -519,8 +543,13 @@ async function refresh(): Promise<void> {
 }
 
 async function loadMore(): Promise<void> {
+  // One page at a time: a second click while the first is on its way would ask
+  // for the page after it and supersede it, so that page never showed.
+  if (listLoading.value) return
   pageIndex.value += 1
-  await loadRuns(true)
+  const loaded = await loadRuns(true)
+  // A failed page is asked for again on retry instead of being skipped.
+  if (!loaded) pageIndex.value -= 1
 }
 
 function onFilterChange(): void {
@@ -528,9 +557,14 @@ function onFilterChange(): void {
 }
 
 // --- Resume + approve/reject + cancel -----------------------------------------
-/** Re-read the selected run and the list after any execution write. */
+/**
+ * Re-read the selected run and the list after any execution write. The list
+ * starts over from the first page: re-reading at the advanced page index would
+ * replace everything on screen with that one page.
+ */
 async function afterAction(): Promise<void> {
   if (selectedRunId.value) await loadDetail(selectedRunId.value)
+  pageIndex.value = 1
   await loadRuns(false)
 }
 

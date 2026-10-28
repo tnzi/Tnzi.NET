@@ -39,10 +39,11 @@ public class DataDestructionPolicyResultDto
     public int HeldCount { get; set; }
 
     /// <summary>
-    /// 本批是否可能还有更多到期数据（候选数达到了 <c>BatchSize</c> 上限）。
+    /// 是否可能还有更多可销毁的到期数据（本轮凑满了 <c>BatchSize</c> 条可销毁的记录才停下）。
     /// </summary>
     /// <remarks>
-    /// 为真说明剩下的会在下一个周期继续销毁。首次启用时通常为真。
+    /// 被诉讼保全的记录不占 <c>BatchSize</c> 名额，扫描会越过它们继续往后找。
+    /// 为真时后台服务在同一周期内接着跑下一轮（有上限），手动触发的调用方可以再触发一次。首次启用时通常为真。
     /// </remarks>
     public bool HasMore { get; set; }
 

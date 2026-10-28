@@ -10,8 +10,17 @@ namespace Tnzi.Notification.Controllers.Admin;
 ///
 /// <para>
 /// If the Tnzi.Template module is not loaded (optional dep), every endpoint
-/// returns HTTP 503 so the frontend surfaces a clean "backend gap" message
-/// instead of a DI failure.
+/// returns HTTP 501 so the frontend surfaces a clean "backend gap" message
+/// instead of a DI failure. 501 rather than 503: the module is absent for the
+/// lifetime of the process, and 503 tells monitoring and clients to keep
+/// retrying something that will never recover.
+/// </para>
+/// <para>
+/// ★ 新建与修改叠加模板模块的 <c>template.template.create</c> / <c>.update</c>（AND）。
+/// 通知模板是存进共享模板库的 Razor，发送与预览都会把它编译成 C# 在本进程里运行：
+/// 能写模板就能执行代码（读文件、拿连接串），而进程是所有租户共用的。模板模块把这件事标成了
+/// 代码执行权限；只挂 <c>notification.template.*</c> 时，它看上去是一个改文案的权限，
+/// 授给运营或市场同事就是授出了代码执行。叠加之后代码执行的授权只有模板模块那一个。
 /// </para>
 /// </summary>
 [DefaultController]
@@ -24,6 +33,12 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// the shared Template store, regardless of what the client sends.
     /// </summary>
     protected const string NotificationModuleName = "Notification";
+
+    /// <summary>模板模块新建模板的权限码：写 Razor = 在本进程里执行代码。</summary>
+    protected const string TemplateCodeExecutionCreate = "template.template.create";
+
+    /// <summary>模板模块修改模板的权限码：写 Razor = 在本进程里执行代码。</summary>
+    protected const string TemplateCodeExecutionUpdate = "template.template.update";
 
     protected readonly ITemplateStoreService? TemplateStoreService;
 
@@ -42,7 +57,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult<IPagedList<TemplateInfoDto>>.Error("Template module is not loaded", 503);
+            return ApiResult<IPagedList<TemplateInfoDto>>.Error("Template module is not loaded", 501);
         }
 
         request.Module = NotificationModuleName;
@@ -60,7 +75,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult<TemplateDto>.Error("Template module is not loaded", 503);
+            return ApiResult<TemplateDto>.Error("Template module is not loaded", 501);
         }
 
         var result = await TemplateStoreService.GetTemplateByIdAsync(id);
@@ -84,11 +99,12 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPost]
     [ApiAuthorize(PermissionName = "notification.template.create")]
+    [ApiAuthorize(PermissionName = TemplateCodeExecutionCreate)]
     public virtual async Task<ApiResult<TemplateDto>> Create([FromBody] CreateTemplateRequest request)
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult<TemplateDto>.Error("Template module is not loaded", 503);
+            return ApiResult<TemplateDto>.Error("Template module is not loaded", 501);
         }
 
         request.Module = NotificationModuleName;
@@ -103,11 +119,12 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPut("{id:guid}")]
     [ApiAuthorize(PermissionName = "notification.template.update")]
+    [ApiAuthorize(PermissionName = TemplateCodeExecutionUpdate)]
     public virtual async Task<ApiResult<TemplateDto>> Update(Guid id, [FromBody] UpdateTemplateRequest request)
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult<TemplateDto>.Error("Template module is not loaded", 503);
+            return ApiResult<TemplateDto>.Error("Template module is not loaded", 501);
         }
 
         var existing = await TemplateStoreService.GetTemplateByIdAsync(id);
@@ -135,7 +152,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult.Error("Template module is not loaded", 503);
+            return ApiResult.Error("Template module is not loaded", 501);
         }
 
         var existing = await TemplateStoreService.GetTemplateByIdAsync(id);
@@ -164,7 +181,7 @@ public class DefaultNotificationTemplateAdminController : ApiAdminControllerBase
     {
         if (TemplateStoreService is null)
         {
-            return ApiResult.Error("Template module is not loaded", 503);
+            return ApiResult.Error("Template module is not loaded", 501);
         }
 
         var scoped = new List<Guid>();

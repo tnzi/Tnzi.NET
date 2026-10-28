@@ -49,14 +49,35 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     {
         Check.NotNull(input);
 
+        // 切块参数创建后改不了：按与全局默认值同一条规则校验落库的有效值（含取自默认值的那一个）。
+        // ★ 此前原样入库，只填 ChunkSize=100 的库因默认重叠 128 比块还大，切块每次只前进一个字符。
+        var chunkSize = input.ChunkSize ?? _options.DefaultChunkSize;
+        var chunkOverlap = input.ChunkOverlap ?? _options.DefaultChunkOverlap;
+        var chunkSettingsError = ChunkSettings.Validate(chunkSize, chunkOverlap);
+        if (chunkSettingsError != null)
+        {
+            var source = input.ChunkOverlap is null && input.ChunkSize is not null
+                ? " ChunkOverlap was not given, so the configured default (AI:Rag:DefaultChunkOverlap) applies; pass ChunkOverlap explicitly."
+                : string.Empty;
+            return Fail<KnowledgeBaseDto>(chunkSettingsError + source, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // 指定了别家嵌入提供商而不给模型：全局默认模型属于默认提供商，回退过去就是向这一家请求另一家的模型名，
+        // 每次摄取都失败。默认模型没配时不拦（模型由该提供商自己的默认值决定，与此前一致）。
+        var embeddingModelError = ValidateEmbeddingModel(input.EmbeddingProvider, input.EmbeddingModel);
+        if (embeddingModelError != null)
+        {
+            return Fail<KnowledgeBaseDto>(embeddingModelError, 400, Tnzi.Exceptions.ErrorCodes.VALIDATION_ERROR);
+        }
+
         var entity = new KnowledgeBase
         {
             Name = input.Name,
             Description = input.Description,
             EmbeddingProvider = input.EmbeddingProvider ?? "default",
             EmbeddingModel = input.EmbeddingModel,
-            ChunkSize = input.ChunkSize ?? _options.DefaultChunkSize,
-            ChunkOverlap = input.ChunkOverlap ?? _options.DefaultChunkOverlap,
+            ChunkSize = chunkSize,
+            ChunkOverlap = chunkOverlap,
             // 不传即关闭：开放给用户直查必须是一次明确的动作。
             IsUserQueryable = input.IsUserQueryable ?? false
         };
@@ -65,6 +86,28 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         Logger.LogInformation("Created knowledge base {Id}: {Name}", entity.Id, entity.Name);
 
         return Ok(entity.MapTo<KnowledgeBaseDto>());
+    }
+
+    /// <summary>
+    /// 嵌入模型留空时会回退到 <see cref="AIRagOptions.DefaultEmbeddingModel"/>（见 <see cref="RagEmbeddingOptionsResolver"/>），
+    /// 那个模型名属于 <see cref="AIRagOptions.DefaultEmbeddingProvider"/>。知识库指定了另一家提供商时它不成立，要求显式给模型。
+    /// </summary>
+    private string? ValidateEmbeddingModel(string? provider, string? model)
+    {
+        var usesDefaultProvider = string.IsNullOrWhiteSpace(provider)
+            || provider == RagEmbeddingOptionsResolver.DefaultProviderSentinel
+            || string.Equals(provider, _options.DefaultEmbeddingProvider, StringComparison.OrdinalIgnoreCase);
+
+        if (usesDefaultProvider
+            || !string.IsNullOrWhiteSpace(model)
+            || string.IsNullOrWhiteSpace(_options.DefaultEmbeddingModel)
+            || string.IsNullOrWhiteSpace(_options.DefaultEmbeddingProvider))
+        {
+            return null;
+        }
+
+        return $"EmbeddingModel is required when EmbeddingProvider ('{provider}') is not the default embedding provider " +
+               $"('{_options.DefaultEmbeddingProvider}'): the default embedding model belongs to that provider.";
     }
 
     /// <inheritdoc />
@@ -100,6 +143,11 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         await ExecuteInUnitOfWorkAsync(async _ =>
         {
             await _vectorStore.DeleteByKnowledgeBaseAsync(id, ct);
+            if (!_vectorStore.UsesRagChunkTable)
+            {
+                // 分块表之外的向量存储：上一行只删了它那边，分块表的行要另删（PgVectorStore 删的就是分块表本身）
+                await _chunkRepository.DeleteAsync(c => c.KnowledgeBaseId == id, ct);
+            }
 
             var docs = await _docRepository.AsQueryable()
                 .Where(d => d.KnowledgeBaseId == id)
@@ -214,11 +262,16 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         var contentHash = await ComputeContentHashAsync(content, ct);
         content.Position = 0; // 重置流位置
 
-        // 去重检测: 检查同一知识库中是否已有相同内容的已完成文档
+        // 去重检测：同一知识库里相同内容的文档已完成，或正在摄取（返回那一篇，前端照常轮询它）。
+        // ★ 此前只认 Completed：异步摄取下第一份还在 Processing 时再传一次（重复点击、批量里夹着同一个文件）不命中，
+        // 两篇文档、两套相同分块、知识库计数翻倍。失败的文档不挡重新上传；卡在 Processing 的文档要先删掉才能重新上传。
+        // 两次上传真正同时到达时仍可能各写一篇（没有唯一约束兜底）。
         var existingDoc = await _docRepository.AsQueryable()
-            .FirstOrDefaultAsync(d => d.KnowledgeBaseId == kbId
+            .Where(d => d.KnowledgeBaseId == kbId
                 && d.ContentHash == contentHash
-                && d.Status == DocumentStatus.Completed, ct);
+                && (d.Status == DocumentStatus.Completed || d.Status == DocumentStatus.Processing))
+            .OrderBy(d => d.Status == DocumentStatus.Completed ? 0 : 1)
+            .FirstOrDefaultAsync(ct);
 
         if (existingDoc != null)
         {
@@ -294,7 +347,9 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
         // 同步回退路径（无 Hangfire 模块时）
         var ingestResult = await _ingestionService.IngestAsync(kbId, doc.Id, content, fileName, ct);
 
-        // 终态用条件 ExecuteUpdateAsync 落库（与 DocumentIngestionBackgroundJob 同一原语），不靠"末尾 SaveChanges"：
+        // 终态用条件 ExecuteUpdateAsync 落库（与 DocumentIngestionBackgroundJob 同一原语），不靠"末尾 SaveChanges"。
+        // 终态一律用 CancellationToken.None 写：客户端在摄取途中断开时请求令牌已取消，摄取以失败结果返回，
+        // 带着已取消的令牌去写终态当场抛出，文档就永久停在 Processing（去重不命中、前端轮询不结束）。
         // ★ 此前这里只改了内存里的 doc.Status 并留下一段注释说 UoW 末尾会顺手写进去 —— 那只在开了环境事务时成立；
         // 框架默认 EnableGlobalUnitOfWork=false，InsertAsync 早已立即落库，之后再没有任何 SaveChanges，
         // 于是响应说 Completed/N，行永远停在 Processing/0：去重永不命中、删除按 0 扣计数。
@@ -305,14 +360,14 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.Status, DocumentStatus.Completed)
                     .SetProperty(d => d.ChunkCount, ingestResult.ChunkCount)
-                    .SetProperty(d => d.ErrorMessage, (string?)null), ct);
+                    .SetProperty(d => d.ErrorMessage, (string?)null), CancellationToken.None);
 
             // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
             await _kbRepository.AsQueryable()
                 .Where(k => k.Id == kbId)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(k => k.DocumentCount, k => k.DocumentCount + 1)
-                    .SetProperty(k => k.ChunkCount, k => k.ChunkCount + ingestResult.ChunkCount), ct);
+                    .SetProperty(k => k.ChunkCount, k => k.ChunkCount + ingestResult.ChunkCount), CancellationToken.None);
 
             doc.Status = DocumentStatus.Completed;
             doc.ChunkCount = ingestResult.ChunkCount;
@@ -323,7 +378,7 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 .Where(d => d.Id == doc.Id && d.Status == DocumentStatus.Processing)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(d => d.Status, DocumentStatus.Failed)
-                    .SetProperty(d => d.ErrorMessage, ingestResult.ErrorMessage), ct);
+                    .SetProperty(d => d.ErrorMessage, ingestResult.ErrorMessage), CancellationToken.None);
 
             doc.Status = DocumentStatus.Failed;
             doc.ErrorMessage = ingestResult.ErrorMessage;
@@ -340,32 +395,95 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// ★ 顺序是约定的一半：先删文档行（并提交），再清分块与图谱。另一半在 <see cref="DocumentIngestionService"/>：
+    /// 摄取写完分块与图谱后确认文档行还在，不在就清掉自己刚写的。于是删除一份仍在处理中的文档，任何交错都不留孤儿
+    /// （此前先清分块、后删行，摄取随后写入的整套分块成为无主孤儿，照样被检索命中、却不出现在任何管理列表里）。
+    /// 处在事务里时清理排到提交之后：文档行的删除对摄取可见之前清理，等于没清；事务回滚时也不能已经把分块删掉。
+    /// </para>
+    /// <para>
+    /// ★ 知识库计数只扣「被计过数」的文档：计数只在 Processing → Completed 那一刻递增，
+    /// 删除一份 Failed / Processing 文档不该把 DocumentCount 再减 1。判据取删除那一刻的行（条件删除），
+    /// 而不是删除前读到的旧值，摄取恰在两者之间完成并计数时，按旧值判就会漏扣。
+    /// </para>
+    /// </remarks>
     public async Task<Result> DeleteDocumentAsync(Guid kbId, Guid documentId, CancellationToken ct = default)
     {
-        var doc = await _docRepository.AsQueryable()
-            .FirstOrDefaultAsync(d => d.Id == documentId && d.KnowledgeBaseId == kbId, ct);
-        if (doc == null)
+        DeletedDocument? deleted = null;
+        for (var attempt = 0; attempt < DocumentDeleteAttempts && deleted is null; attempt++)
         {
-            return Fail("Document not found", 404, Tnzi.Exceptions.ErrorCodes.RESOURCE_NOT_FOUND);
+            var snapshot = await _docRepository.AsQueryable()
+                .AsNoTracking()
+                .Where(d => d.Id == documentId && d.KnowledgeBaseId == kbId)
+                .Select(d => new DeletedDocument(d.Status, d.ChunkCount, d.FileName))
+                .FirstOrDefaultAsync(ct);
+            if (snapshot is null)
+            {
+                return Fail("Document not found", 404, Tnzi.Exceptions.ErrorCodes.RESOURCE_NOT_FOUND);
+            }
+
+            // 条件删除：状态与块数都还是快照里的样子才删。落空说明摄取恰在此刻改了这一行，按新状态重来
+            await _docRepository.EnsureTransactionStartedAsync(ct);
+            var affected = await _docRepository.AsQueryable()
+                .Where(d => d.Id == documentId
+                            && d.KnowledgeBaseId == kbId
+                            && d.Status == snapshot.Status
+                            && d.ChunkCount == snapshot.ChunkCount)
+                .ExecuteDeleteAsync(ct);
+            if (affected > 0)
+            {
+                deleted = snapshot;
+            }
         }
 
-        // 删除块
-        await _vectorStore.DeleteByDocumentAsync(documentId, ct);
+        if (deleted is null)
+        {
+            return Fail("The document changed while it was being deleted. Retry the request.", 409);
+        }
 
-        // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
-        var chunkCount = doc.ChunkCount;
-        await _kbRepository.AsQueryable()
-            .Where(k => k.Id == kbId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(k => k.DocumentCount, k => k.DocumentCount > 0 ? k.DocumentCount - 1 : 0)
-                .SetProperty(k => k.ChunkCount, k => k.ChunkCount >= chunkCount ? k.ChunkCount - chunkCount : 0), ct);
+        if (deleted.Status == DocumentStatus.Completed)
+        {
+            // 原子更新知识库统计（避免并发竞态，通过 EF Core 查询过滤器保持租户隔离）
+            var chunkCount = deleted.ChunkCount;
+            await _kbRepository.AsQueryable()
+                .Where(k => k.Id == kbId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(k => k.DocumentCount, k => k.DocumentCount > 0 ? k.DocumentCount - 1 : 0)
+                    .SetProperty(k => k.ChunkCount, k => k.ChunkCount >= chunkCount ? k.ChunkCount - chunkCount : 0), ct);
+        }
 
-        await _docRepository.DeleteAsync(doc, ct);
+        if (UnitOfWorkManager?.IsEnabledTransaction == true && PostCommitActionQueue != null)
+        {
+            PostCommitActionQueue.Enqueue(token => RemoveDocumentArtifactsAsync(documentId, token));
+        }
+        else
+        {
+            await RemoveDocumentArtifactsAsync(documentId, ct);
+        }
 
-        Logger.LogInformation("Deleted document {DocId} ({FileName}) from knowledge base {KbId}",
-            documentId, doc.FileName, kbId);
+        Logger.LogInformation("Deleted document {DocId} ({FileName}, {Status}) from knowledge base {KbId}",
+            documentId, deleted.FileName, deleted.Status, kbId);
 
         return Ok();
+    }
+
+    /// <summary>删除文档时最多尝试几次条件删除（每次落空都意味着文档状态恰好在读与删之间变了）。</summary>
+    private const int DocumentDeleteAttempts = 3;
+
+    /// <summary>被删除那一刻的文档行。</summary>
+    private sealed record DeletedDocument(DocumentStatus Status, int ChunkCount, string FileName);
+
+    /// <summary>清掉一份已删除文档的分块与图谱（按来源文档归属）。</summary>
+    private async Task RemoveDocumentArtifactsAsync(Guid documentId, CancellationToken ct)
+    {
+        await _vectorStore.DeleteByDocumentAsync(documentId, ct);
+        if (!_vectorStore.UsesRagChunkTable)
+        {
+            // 分块表之外的向量存储：上一行只删了它那边，分块表的行要另删
+            await _chunkRepository.DeleteAsync(c => c.DocumentId == documentId, ct);
+        }
+        await DocumentGraph.RemoveAsync(_graphEdgeRepository, _graphNodeRepository, documentId, ct);
     }
 
     /// <inheritdoc />
@@ -584,6 +702,18 @@ public class KnowledgeBaseService : ApplicationService, IKnowledgeBaseService
                 }
 
                 await _chunkRepository.UpdateManyAsync(batch, cancellationToken);
+
+                // 分块表之外的向量存储检索的是它自己那份向量：只更新分块表，重建索引对检索毫无作用
+                if (!_vectorStore.UsesRagChunkTable)
+                {
+                    for (var i = 0; i < batch.Count; i++)
+                    {
+                        var chunk = batch[i];
+                        await _vectorStore.UpsertAsync(chunk.Id, embeddings[i], chunk.DocumentId, chunk.KnowledgeBaseId,
+                            chunk.Content, chunk.ChunkIndex, chunk.Metadata, cancellationToken);
+                    }
+                }
+
                 totalProcessed += batch.Count;
 
                 Logger.LogDebug("Reindex progress for knowledge base {KbId}: {Processed}/{Total} chunks",

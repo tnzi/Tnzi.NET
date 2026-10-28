@@ -5,10 +5,16 @@ namespace Tnzi.EFCore.Providers;
 /// 数据库提供者配置器基类
 /// 提供反射查找和调用扩展方法的公共逻辑
 /// </summary>
+/// <remarks>
+/// ★ <see cref="Configure"/> 不是只在启动时跑一次：<c>AddDbContext</c> 的 options 生命周期是 Scoped，
+/// 每个作用域（每个请求）解析 DbContext 时都会重跑一遍。所以这里一切只取决于程序集与方法签名的反射结果都要缓存，
+/// 子类覆写的查找也一样（缓存放在 <see cref="Configure"/> 这一层，而不是基类自己的查找实现里）。
+/// </remarks>
 public abstract class DatabaseProviderConfiguratorBase : IDatabaseProviderConfigurator
 {
     private static readonly ConcurrentDictionary<string, Assembly?> _assemblyCache = new();
-    private static readonly ConcurrentDictionary<(Assembly, string), MethodInfo?> _methodCache = new();
+    private static readonly ConcurrentDictionary<(Type Configurator, Assembly Assembly, string Method), MethodInfo?> _methodCache = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo> _typedOptionsActionFactories = new();
 
     /// <summary>
     /// 支持的提供者类型
@@ -38,7 +44,9 @@ public abstract class DatabaseProviderConfiguratorBase : IDatabaseProviderConfig
                 "Please ensure the package is referenced in your project.");
         }
 
-        var method = FindExtensionMethod(assembly, ExtensionMethodName);
+        var method = _methodCache.GetOrAdd(
+            (GetType(), assembly, ExtensionMethodName),
+            key => FindExtensionMethod(key.Assembly, key.Method));
         if (method == null)
         {
             throw new InvalidOperationException(
@@ -80,86 +88,82 @@ public abstract class DatabaseProviderConfiguratorBase : IDatabaseProviderConfig
     }
     
     /// <summary>
-    /// 查找扩展方法
+    /// 查找扩展方法（结果由 <see cref="Configure"/> 按配置器类型缓存，覆写不必自己缓存）
     /// </summary>
     protected virtual MethodInfo? FindExtensionMethod(Assembly assembly, string methodName)
     {
-        return _methodCache.GetOrAdd((assembly, methodName), key =>
+        // 确保程序集的所有类型都被加载
+        Type[]? allTypes = null;
+        try
         {
-            var (asm, name) = key;
-            // 确保程序集的所有类型都被加载
-            Type[]? allTypes = null;
+            allTypes = assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            // 使用可加载的类型继续查找
+            allTypes = ex.Types.Where(t => t != null).Cast<Type>().ToArray();
+        }
+
+        if (allTypes == null)
+        {
+            allTypes = Array.Empty<Type>();
+        }
+
+        // 直接在所有类型中查找扩展方法
+        foreach (var type in allTypes)
+        {
             try
             {
-                allTypes = asm.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                // 使用可加载的类型继续查找
-                allTypes = ex.Types.Where(t => t != null).Cast<Type>().ToArray();
-            }
+                if (type == null || !type.IsClass || !type.IsSealed || type.IsGenericType)
+                    continue;
 
-            if (allTypes == null)
-            {
-                allTypes = Array.Empty<Type>();
-            }
-
-            // 直接在所有类型中查找扩展方法
-            foreach (var type in allTypes)
-            {
-                try
+                var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .Where(m => m.Name == methodName)
+                    .ToList();
+                
+                // 优先查找 2 个参数的重载 (builder, connectionString)
+                var extensionMethod = methods.FirstOrDefault(m =>
                 {
-                    if (type == null || !type.IsClass || !type.IsSealed || type.IsGenericType)
-                        continue;
-
-                    var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                        .Where(m => m.Name == name)
-                        .ToList();
+                    var parameters = m.GetParameters();
+                    if (parameters.Length != 2)
+                        return false;
                     
-                    // 优先查找 2 个参数的重载 (builder, connectionString)
-                    var extensionMethod = methods.FirstOrDefault(m =>
+                    var firstParam = parameters[0].ParameterType;
+                    var secondParam = parameters[1].ParameterType;
+                    
+                    return firstParam == typeof(DbContextOptionsBuilder) && secondParam == typeof(string);
+                });
+                
+                // 如果找不到 2 个参数的重载，尝试查找 3 个参数的重载（第三个参数是 Action）
+                if (extensionMethod == null)
+                {
+                    extensionMethod = methods.FirstOrDefault(m =>
                     {
                         var parameters = m.GetParameters();
-                        if (parameters.Length != 2)
+                        if (parameters.Length != 3)
                             return false;
                         
                         var firstParam = parameters[0].ParameterType;
                         var secondParam = parameters[1].ParameterType;
+                        var thirdParam = parameters[2].ParameterType;
                         
-                        return firstParam == typeof(DbContextOptionsBuilder) && secondParam == typeof(string);
+                        return firstParam == typeof(DbContextOptionsBuilder) && 
+                               secondParam == typeof(string) &&
+                               thirdParam.IsGenericType &&
+                               thirdParam.GetGenericTypeDefinition() == typeof(Action<>);
                     });
-                    
-                    // 如果找不到 2 个参数的重载，尝试查找 3 个参数的重载（第三个参数是 Action）
-                    if (extensionMethod == null)
-                    {
-                        extensionMethod = methods.FirstOrDefault(m =>
-                        {
-                            var parameters = m.GetParameters();
-                            if (parameters.Length != 3)
-                                return false;
-                            
-                            var firstParam = parameters[0].ParameterType;
-                            var secondParam = parameters[1].ParameterType;
-                            var thirdParam = parameters[2].ParameterType;
-                            
-                            return firstParam == typeof(DbContextOptionsBuilder) && 
-                                   secondParam == typeof(string) &&
-                                   thirdParam.IsGenericType &&
-                                   thirdParam.GetGenericTypeDefinition() == typeof(Action<>);
-                        });
-                    }
+                }
 
-                    if (extensionMethod != null)
-                        return extensionMethod;
-                }
-                catch (Exception)
-                {
-                    // 忽略单个类型的错误，继续查找（某些类型可能无法加载）
-                }
+                if (extensionMethod != null)
+                    return extensionMethod;
             }
+            catch (Exception)
+            {
+                // 忽略单个类型的错误，继续查找（某些类型可能无法加载）
+            }
+        }
 
-            return null;
-        });
+        return null;
     }
     
     /// <summary>
@@ -219,9 +223,10 @@ public abstract class DatabaseProviderConfiguratorBase : IDatabaseProviderConfig
             return null;
         }
 
-        var typed = typeof(DatabaseProviderConfiguratorBase)
-            .GetMethod(nameof(BuildTypedOptionsAction), BindingFlags.NonPublic | BindingFlags.Static)!
-            .MakeGenericMethod(optionsBuilderType);
+        var typed = _typedOptionsActionFactories.GetOrAdd(optionsBuilderType, type =>
+            typeof(DatabaseProviderConfiguratorBase)
+                .GetMethod(nameof(BuildTypedOptionsAction), BindingFlags.NonPublic | BindingFlags.Static)!
+                .MakeGenericMethod(type));
         return typed.Invoke(null, new object?[] { opts, extraAction });
     }
 

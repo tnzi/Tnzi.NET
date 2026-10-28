@@ -174,6 +174,8 @@ public class FinanceOptions
     /// 刻意不设默认白名单：多数部署并不想管这件事，给一份"合理默认"只会让第一个
     /// 挂 .heic 收据的人撞墙。需要收紧的部署自己列。
     /// 数组型配置不进设置中心（那里没有数组控件），只从 appsettings 绑定。
+    /// 配了之后失败关闭：登记时没报内容类型的一律 400。比对的是登记请求里报的类型
+    /// （管理端取自上传结果），按名单逐项精确比对、不分大小写，不支持 <c>image/*</c> 这类通配。
     /// </remarks>
     public string[] AllowedAttachmentContentTypes { get; set; } = [];
 

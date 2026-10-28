@@ -69,6 +69,7 @@ public class RoleService : ApplicationService, IRoleService
     /// 与 <c>UserService.GetRoleMembershipViolationAsync</c> 同一判据、同一降级方式
     /// （无授权模块或无用户上下文时整体跳过）。此前只有成员变更受管辖，
     /// 而「改掉一个角色的定义」与「把人放进这个角色」是同一量级的权力。
+    /// 判据是成员版本（休眠授权一并计入）：删掉一个角色就是一次摘掉全部成员。
     /// </remarks>
     private async Task<string?> GetRoleManagementViolationAsync(Guid roleId, string roleName)
     {
@@ -78,9 +79,63 @@ public class RoleService : ApplicationService, IRoleService
         if (actorId == null || actorId == Guid.Empty) return null;
         if (await _functionAuthorization.IsSuperAdminAsync(actorId.Value)) return null;
 
-        return await _functionAuthorization.CanManageRoleAsync(actorId.Value, roleId)
+        return await _functionAuthorization.CanManageRoleMembershipAsync(actorId.Value, roleId)
             ? null
-            : $"You cannot manage role '{roleName}': its permission set is not contained in yours, or it is a super-admin role.";
+            : $"You cannot manage role '{roleName}': its permission set (including grants on disabled or retired permissions) " +
+              "is not contained in yours, or it is a super-admin role.";
+    }
+
+    /// <summary>
+    /// 角色当前的成员。必须在删除<b>之前</b>取：成员关系随角色级联删除，删完就再也问不出「谁刚刚失去了它」。
+    /// </summary>
+    private async Task<List<Guid>> GetMemberIdsAsync(Guid roleId)
+        => await _dbContext.Set<UserRole>()
+            .Where(ur => ur.RoleId == roleId)
+            .Select(ur => ur.UserId)
+            .Distinct()
+            .ToListAsync();
+
+    /// <summary>
+    /// 删除一个角色之后，为它的每个成员发一条 <see cref="UserRolesChangedEvent"/>（<see cref="UserRolesChangeType.RoleDeleted"/>）。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 删除角色就是把它从每个成员身上摘掉，而成员关系行是被数据库级联删掉的，没有经过
+    /// <c>UserService.RemoveRolesAsync</c> 那条会发事件的路径。授权模块的每用户权限缓存只认这条事件：
+    /// 不发，被删角色的权限在缓存有效期内（30 分钟）照样通过检查，而界面上角色已经不见了。
+    /// 「删掉角色来收回一批人的权限」恰恰是最常见的撤销方式。<see cref="RoleDeletedEvent"/> 带不出成员，
+    /// 订阅它的人也无从按人失效。
+    /// <para>
+    /// 用户名只为审计取，按 id 直接查且不经全局过滤器：成员关系不按租户过滤，被删角色的成员未必都在当前租户里，
+    /// 而少发任何一个成员的事件都是一次没有症状的权限保留。
+    /// </para>
+    /// </remarks>
+    private async Task PublishMembershipDroppedAsync(Guid roleId, IReadOnlyCollection<Guid> memberIds)
+    {
+        if (EventBus == null || memberIds.Count == 0)
+        {
+            return;
+        }
+
+        var userNames = await _dbContext.Set<User>()
+            .IgnoreQueryFilters()
+            .Where(u => memberIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.UserName })
+            .ToDictionaryAsync(u => u.Id, u => u.UserName);
+
+        var changedBy = CurrentUser?.Id;
+        foreach (var userId in memberIds)
+        {
+            await EventBus.PublishAsync(new UserRolesChangedEvent
+            {
+                UserId = userId,
+                UserName = userNames.GetValueOrDefault(userId) ?? string.Empty,
+                AddedRoleIds = [],
+                RemovedRoleIds = [roleId],
+                ChangeType = UserRolesChangeType.RoleDeleted,
+                ChangedTime = DateTime.UtcNow,
+                ChangedBy = changedBy,
+            }, cancellationToken: default);
+        }
     }
 
     public async Task<Result<IEnumerable<RoleDto>>> GetAllAsync()
@@ -306,6 +361,7 @@ public class RoleService : ApplicationService, IRoleService
         }
 
         var roleName = role.Name ?? string.Empty;
+        var memberIds = await GetMemberIdsAsync(role.Id);
         var result = await _roleManager.DeleteAsync(role);
         if (!result.Succeeded)
         {
@@ -323,6 +379,8 @@ public class RoleService : ApplicationService, IRoleService
             }, cancellationToken: default);
         }
 
+        await PublishMembershipDroppedAsync(role.Id, memberIds);
+
         LogInformation("Role deleted: {RoleId}, Name: {RoleName}", id, roleName);
         return Ok();
     }
@@ -331,9 +389,11 @@ public class RoleService : ApplicationService, IRoleService
     {
         Check.NotNullOrEmpty(ids);
 
-        var failures = new List<string>();
-
-        foreach (var id in ids)
+        // 先把整批找齐、过完委托护栏，再动手删：与单个删除同一道护栏（批量入口此前没有它，
+        // 弱管理员把强角色夹进批量里就绕开了 DeleteAsync 的拒绝），且一条越权就整批不删：
+        // 删到一半才拒绝，留下的是一次谁也没批准过的部分删除。
+        var roles = new List<Role>();
+        foreach (var id in ids.Distinct())
         {
             var role = await _roleManager.FindByIdAsync(id.ToString());
             if (role == null)
@@ -341,6 +401,22 @@ public class RoleService : ApplicationService, IRoleService
                 continue; // 已不存在，跳过
             }
 
+            if (!role.IsSystem)
+            {
+                var violation = await GetRoleManagementViolationAsync(role.Id, role.Name ?? string.Empty);
+                if (violation != null)
+                {
+                    return Fail(violation, 403, ErrorCodes.FORBIDDEN);
+                }
+            }
+
+            roles.Add(role);
+        }
+
+        var failures = new List<string>();
+
+        foreach (var role in roles)
+        {
             if (role.IsSystem)
             {
                 failures.Add($"Role '{role.Name}' is a system role and cannot be deleted");
@@ -348,6 +424,7 @@ public class RoleService : ApplicationService, IRoleService
             }
 
             var roleName = role.Name ?? string.Empty;
+            var memberIds = await GetMemberIdsAsync(role.Id);
             var result = await _roleManager.DeleteAsync(role);
             if (!result.Succeeded)
             {
@@ -360,13 +437,15 @@ public class RoleService : ApplicationService, IRoleService
             {
                 await EventBus.PublishAsync(new RoleDeletedEvent
                 {
-                    RoleId = id,
+                    RoleId = role.Id,
                     RoleName = roleName,
                     DeletedTime = DateTime.UtcNow
                 }, cancellationToken: default);
             }
 
-            LogInformation("Role deleted: {RoleId}, Name: {RoleName}", id, roleName);
+            await PublishMembershipDroppedAsync(role.Id, memberIds);
+
+            LogInformation("Role deleted: {RoleId}, Name: {RoleName}", role.Id, roleName);
         }
 
         if (failures.Count > 0)
@@ -442,6 +521,13 @@ public class RoleService : ApplicationService, IRoleService
         if (role == null)
         {
             return Fail("Role not found", 404, ErrorCodes.IDENTITY_ROLE_NOT_FOUND);
+        }
+
+        // 与 UpdateAsync 改 IsDefault 是同一件事，同一道委托护栏（此前这个入口没有它）。
+        var violation = await GetRoleManagementViolationAsync(role.Id, role.Name ?? string.Empty);
+        if (violation != null)
+        {
+            return Fail(violation, 403, ErrorCodes.FORBIDDEN);
         }
 
         role.IsDefault = isDefault;

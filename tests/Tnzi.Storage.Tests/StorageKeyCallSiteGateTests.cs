@@ -30,12 +30,13 @@ public class StorageKeyCallSiteGateTests
     ];
 
     /// <summary>
-    /// 允许直接复用**已落库的**键的调用点：文件记录存在而物理文件丢失时按原键重传。
-    /// 那个键当初就是生成出来的，重传不该给它换名字（否则记录与旧路径的对应关系就断了）。
+    /// 允许复用**已落库的**键的调用点：文件记录存在而物理文件丢失时按原键重传。
+    /// 只在原键是生成形态时才沿用它（<c>StorageKeyHelper.IsGenerated</c>），否则当场换一个新键，
+    /// 存量记录的 <c>FileName</c> 可能是调用方给的名字，按它重传会写进另一条同名记录的对象。
     /// </summary>
     private static readonly HashSet<(string File, string Argument)> ReuseOfAStoredKey =
     [
-        ("FileStorageService.cs", "existing.FileName"),
+        ("FileStorageService.cs", "reuploadKey"),
     ];
 
     private static readonly Regex CallSite = new(@"\.UploadAsync\(", RegexOptions.Compiled);

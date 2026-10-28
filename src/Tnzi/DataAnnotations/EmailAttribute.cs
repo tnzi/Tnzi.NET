@@ -2,7 +2,7 @@
 namespace Tnzi.DataAnnotations;
 
 /// <summary>
-/// 邮箱验证特性
+/// 邮箱验证特性：只接受 ASCII 地址（规则同 <c>StringExtensions.IsEmail()</c>），默认必填（<see cref="Required"/>）。
 /// </summary>
 public class EmailAttribute : ValidationAttribute
 {

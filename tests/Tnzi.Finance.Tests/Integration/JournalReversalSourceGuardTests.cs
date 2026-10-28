@@ -67,10 +67,10 @@ public class JournalReversalSourceGuardTests : FinanceIntegrationTestBase
     /// 期末重估的凭证<b>仍然</b>可以从总账冲销 —— 那是它唯一的撤销路径。
     /// </summary>
     /// <remarks>
-    /// 这条防的是把守卫做过头：<c>FinanceSourceTypes.All</c> 里含 <c>Revaluation</c> 与
-    /// <c>PaymentApplication</c>，而这两者<b>没有</b>单据级作废端点 ——
-    /// <c>RevaluationService</c> 自己的错误消息就写着「Reverse it before revaluing an earlier
-    /// or equal date」。一起拦下会堵死一条既定流程且没有替代路径。
+    /// 这条防的是把守卫做过头：<c>FinanceSourceTypes.All</c> 里含 <c>Revaluation</c>，而它<b>没有</b>
+    /// 单据级作废端点：<c>RevaluationService</c> 自己的错误消息就写着「Reverse it before revaluing
+    /// an earlier or equal date」。一起拦下会堵死一条既定流程且没有替代路径。
+    /// （<c>PaymentApplication</c> 不同：它有撤销核销这条单据级路径，故在名单内。）
     /// </remarks>
     [Fact]
     public async Task GlReverse_OnARevaluationEntry_IsStillAllowed()
@@ -92,14 +92,14 @@ public class JournalReversalSourceGuardTests : FinanceIntegrationTestBase
     }
 
     /// <summary>
-    /// 一个 <see cref="IDocumentProjectedSourceTypeProvider"/> 都没注册时，清单就是核心那七种 —— 缺省只增不减。
+    /// 一个 <see cref="IDocumentProjectedSourceTypeProvider"/> 都没注册时，清单就是核心那八种，缺省只增不减。
     /// </summary>
     /// <remarks>
     /// 子模块（Payroll）经 provider 贡献自己的令牌；本测试项目刻意不加载 Payroll，
     /// 所以这里守的是「没有 provider 的部署与引入契约之前逐字一致」。
     /// </remarks>
     [Fact]
-    public void DocumentProjectedSourceTypes_WithoutProviders_StaysAtTheCoreSeven()
+    public void DocumentProjectedSourceTypes_WithoutProviders_StaysAtTheCoreEight()
     {
         ServiceProvider.GetServices<IDocumentProjectedSourceTypeProvider>().ShouldBeEmpty();
 
@@ -107,7 +107,7 @@ public class JournalReversalSourceGuardTests : FinanceIntegrationTestBase
         var service = (JournalEntryService)scope.ServiceProvider.GetRequiredService<IJournalEntryService>();
 
         service.DocumentProjectedSourceTypes.ShouldBe(JournalEntryService.CoreDocumentProjectedSourceTypes, ignoreOrder: true);
-        JournalEntryService.CoreDocumentProjectedSourceTypes.Count.ShouldBe(7);
+        JournalEntryService.CoreDocumentProjectedSourceTypes.Count.ShouldBe(8);
     }
 
     /// <summary>

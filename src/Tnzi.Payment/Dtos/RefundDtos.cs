@@ -9,6 +9,7 @@ public class CreateRefundDto
     /// 支付交易流水号
     /// </summary>
     [Required]
+    [MaxLength(64, ErrorMessage = "TradeNo cannot exceed 64 characters.")]
     public string TradeNo { get; set; } = string.Empty;
 
     /// <summary>
@@ -18,15 +19,11 @@ public class CreateRefundDto
     public decimal RefundAmount { get; set; }
 
     /// <summary>
-    /// 退款原因
+    /// 退款原因（列宽 500，见 <c>RefundConfiguration</c>；超长的值此前写库时才失败，调用方拿到 500）
     /// </summary>
     [Required]
+    [MaxLength(500, ErrorMessage = "Reason cannot exceed 500 characters.")]
     public string Reason { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 备注
-    /// </summary>
-    public string? Remark { get; set; }
 }
 
 /// <summary>
@@ -68,6 +65,21 @@ public class RefundDto
     /// 退款状态
     /// </summary>
     public RefundStatus Status { get; set; }
+
+    /// <summary>
+    /// 退款从哪里来：本模块发起，或在支付渠道后台手工退的（经渠道回调记下）。
+    /// </summary>
+    public RefundOrigin Origin { get; set; }
+
+    /// <summary>
+    /// 所退支付的计费账户种类（<c>User</c> / <c>Installation</c> / <c>Tenant</c>）；升级前建的、还没回填的支付为空
+    /// </summary>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 计费账户 Id（与 <see cref="BillingAccountType"/> 合起来是账户键）
+    /// </summary>
+    public string? BillingAccountId { get; set; }
 
     /// <summary>
     /// 审批人ID
@@ -116,6 +128,16 @@ public class RefundQueryDto : PagedQueryDto
     public RefundStatus? Status { get; set; }
 
     /// <summary>
+    /// 按计费账户种类筛选（管理端；与 <see cref="BillingAccountId"/> 合用）
+    /// </summary>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 按计费账户 Id 筛选（管理端）
+    /// </summary>
+    public string? BillingAccountId { get; set; }
+
+    /// <summary>
     /// 开始时间
     /// </summary>
     public DateTime? StartTime { get; set; }
@@ -137,8 +159,9 @@ public class ApproveRefundDto
     public bool Approved { get; set; }
 
     /// <summary>
-    /// 备注
+    /// 备注（存进 <c>Refund.ApproveRemark</c>，列宽 500，见 <c>RefundConfiguration</c>）
     /// </summary>
+    [MaxLength(500, ErrorMessage = "Remark cannot exceed 500 characters.")]
     public string? Remark { get; set; }
 }
 

@@ -98,6 +98,27 @@ export interface TnziClient {
  * HttpClient falls through to `onUnauthorized`); `onUnauthorized` clears the
  * auth state. This is the belt-and-braces wiring every app copied by hand.
  */
+/**
+ * The auth state each {@link createTnziClient} HttpClient refreshes through.
+ * Weak, so a discarded client takes its entry with it.
+ */
+const authByHttpClient = new WeakMap<HttpClient, AuthStateManager>();
+
+/**
+ * The {@link AuthStateManager} a `createTnziClient()` HttpClient is wired to, or
+ * `undefined` for an HttpClient built some other way.
+ *
+ * Anything that keeps auth state over an HttpClient it was handed (the Pinia
+ * auth stores of `@tnzi/ui` and `@tnzi/mobile`) must use this instance rather
+ * than build a second one. The client's `refreshTokenFn` and `onUnauthorized`
+ * act on THIS manager: a session held by a second instance is invisible to
+ * them, so the first expired token ends in a failed refresh while the second
+ * instance still reports the user as signed in.
+ */
+export function authStateOf(http: HttpClient): AuthStateManager | undefined {
+  return authByHttpClient.get(http);
+}
+
 export function createTnziClient(options: CreateTnziClientOptions = {}): TnziClient {
   const storage = options.storage ?? createLocalStorageAdapter();
 
@@ -145,40 +166,15 @@ export function createTnziClient(options: CreateTnziClientOptions = {}): TnziCli
     storage,
     storagePrefix: options.storagePrefix,
     tokenDelivery: options.tokenDelivery,
-    permissionsFetchFn:
-      options.permissionsFetchFn === null
-        ? undefined
-        : (options.permissionsFetchFn ?? (() => fetchAccessProfilePermissions(http))),
+    // undefined = the manager's default (the access profile); null opts out.
+    permissionsFetchFn: options.permissionsFetchFn,
   });
   authRef = auth;
+  authByHttpClient.set(http, auth);
 
   return {
     http,
     auth,
     authApi: useAuthApi(http, { withCredentials: options.tokenDelivery === 'cookie' }),
   };
-}
-
-/**
- * Default permission source: the framework's access profile for the CURRENT
- * user. Any signed-in user may read their own.
- *
- * Returns `[]` on any failure - a backend that predates the endpoint, a network
- * blip, an unexpected envelope. `AuthStateManager._fetchPermissions` keeps the
- * previous list when this throws, so returning empty rather than throwing is
- * the honest answer for "the server says you hold nothing".
- */
-async function fetchAccessProfilePermissions(http: HttpClient): Promise<string[]> {
-  const res = await http.get<{ permissions?: string[] | null }>(
-    '/admin/function-authorization/access-profile',
-    // ★ Part of the auth cycle, so it must NOT re-enter the refresh path.
-    // `_fetchPermissions` runs right after a token is established - including
-    // from inside `refreshAccessToken` itself. A 401 here without this flag
-    // would ask the HttpClient to refresh while a refresh is already in flight,
-    // and that wait can only be broken by the 30s mutex timeout. A 401 on this
-    // endpoint means the session is bad; retrying it cannot help.
-    { skipAuthRefresh: true },
-  );
-  const permissions = res?.data?.permissions;
-  return Array.isArray(permissions) ? permissions : [];
 }

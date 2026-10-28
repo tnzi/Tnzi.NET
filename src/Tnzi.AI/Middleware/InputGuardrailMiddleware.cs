@@ -23,12 +23,9 @@ public class InputGuardrailMiddleware : IAiMiddleware
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        var inputText = context.Request.UserMessage ?? string.Empty;
-
         try
         {
-            var (text, rejection) = await _guardrailRunner.RunInputGuardrailsAsync(
-                inputText, cancellationToken);
+            var rejection = await GuardUserTurnAsync(context, cancellationToken);
 
             if (rejection != null)
             {
@@ -43,12 +40,6 @@ public class InputGuardrailMiddleware : IAiMiddleware
                     FinishReason = FinishReasons.GuardrailRejected,
                     Status = AgentRunStatus.Failed
                 };
-            }
-
-            // 如果 guardrail 修改了文本（如 PII 脱敏），写入 EffectiveUserMessage 供 AgentRuntime 使用
-            if (!string.Equals(text, inputText, StringComparison.Ordinal))
-            {
-                context.EffectiveUserMessage = text;
             }
         }
         catch (TripwireGuardrailException ex)
@@ -75,14 +66,11 @@ public class InputGuardrailMiddleware : IAiMiddleware
     /// </summary>
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var inputText = context.Request.UserMessage ?? string.Empty;
-
         // Before: 输入检查（在 yield 之前执行，可安全使用 try/catch）
         AgentStreamChunk? rejectionChunk = null;
         try
         {
-            var (text, rejection) = await _guardrailRunner.RunInputGuardrailsAsync(
-                inputText, cancellationToken);
+            var rejection = await GuardUserTurnAsync(context, cancellationToken);
 
             if (rejection != null)
             {
@@ -96,10 +84,6 @@ public class InputGuardrailMiddleware : IAiMiddleware
                     Text = rejection.Reason ?? "Input rejected by guardrail",
                     FinishReason = FinishReasons.GuardrailRejected
                 };
-            }
-            else if (!string.Equals(text, inputText, StringComparison.Ordinal))
-            {
-                context.EffectiveUserMessage = text;
             }
         }
         catch (TripwireGuardrailException ex)
@@ -127,6 +111,51 @@ public class InputGuardrailMiddleware : IAiMiddleware
         {
             yield return chunk;
         }
+    }
+
+    /// <summary>
+    /// 对本轮用户输入跑输入守卫，返回拒绝结果（null = 放行）。改写结果写到 context 上供下游使用。
+    /// </summary>
+    /// <remarks>
+    /// 评估的是<b>模型实际收到的文本</b>（见 <see cref="UserTurn"/>）：带内容块时是其中的文本块，不是 Message。
+    /// 带内容块时 Message 不进模型，但它仍会进标题生成与运行摘要，与模型文本不同时也单独过一遍守卫（只取拒绝结论），
+    /// 免得这条入口在改为评估内容块之后反而没人看。
+    /// </remarks>
+    private async Task<GuardrailResult?> GuardUserTurnAsync(AiMiddlewareContext context, CancellationToken cancellationToken)
+    {
+        var request = context.Request;
+        var parts = request.ContentParts;
+        var modelText = UserTurn.TextOf(request.UserMessage, parts);
+
+        var (text, rejection) = await _guardrailRunner.RunInputGuardrailsAsync(modelText, cancellationToken);
+        if (rejection != null)
+        {
+            return rejection;
+        }
+
+        if (parts is { Count: > 0 }
+            && !string.IsNullOrWhiteSpace(request.UserMessage)
+            && !string.Equals(request.UserMessage, modelText, StringComparison.Ordinal))
+        {
+            var (_, messageRejection) = await _guardrailRunner.RunInputGuardrailsAsync(request.UserMessage, cancellationToken);
+            if (messageRejection != null)
+            {
+                return messageRejection;
+            }
+        }
+
+        // 守卫改写了文本（如 PII 脱敏）：写到 context 上供 AgentRuntime / 历史落库 / 上下文检索使用，请求原值不动。
+        // 带内容块时模型只读内容块，改写必须落进内容块副本，否则模型收到的仍是原文。
+        if (!string.Equals(text, modelText, StringComparison.Ordinal))
+        {
+            context.EffectiveUserMessage = text;
+            if (parts is { Count: > 0 })
+            {
+                context.EffectiveContentParts = UserTurn.WithText(parts, text);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>发布 Guardrail 拦截事件（静默失败）</summary>

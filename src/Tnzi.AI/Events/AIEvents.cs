@@ -31,41 +31,41 @@ public class AgentRunCompletedEvent : EventBase
 }
 
 /// <summary>
-/// 配额超限事件 - 当用户配额不足被拒绝时发布。
-/// 可用于告警、通知管理员、自动扩容等。
+/// 用量上限拦下一轮时发布（5 小时窗口或每周窗口到上限）。可用于告警、通知管理员。
 /// </summary>
-public class QuotaExceededEvent : EventBase
+/// <remarks>
+/// 只在真的到上限时发布：计量子系统自身的故障（<c>AI_USAGE_LIMIT_CHECK_FAILED</c>）不发，那会让超限统计里混进基础设施故障。
+/// </remarks>
+public class UsageLimitReachedEvent : EventBase
 {
     /// <summary>User ID</summary>
     public Guid UserId { get; set; }
-    /// <summary>Remaining daily quota</summary>
-    public long RemainingDailyQuota { get; set; }
-    /// <summary>Remaining monthly quota</summary>
-    public long RemainingMonthlyQuota { get; set; }
-    /// <summary>Estimated tokens requested</summary>
-    public long EstimatedTokens { get; set; }
-    /// <summary>Rejection reason</summary>
-    public string Reason { get; set; } = string.Empty;
+    /// <summary>The window that is at its limit.</summary>
+    public UsageLimitWindow Window { get; set; }
+    /// <summary>The window's limit (USD).</summary>
+    public decimal LimitUsd { get; set; }
+    /// <summary>What the window has used (USD).</summary>
+    public decimal UsedUsd { get; set; }
+    /// <summary>When the window resets (UTC); null when the limit is zero.</summary>
+    public DateTime? ResetsAt { get; set; }
 }
 
 /// <summary>
-/// 配额预警阈值触达事件 - 当用户配额使用率达到预警或严重阈值时发布。
-/// 可用于发送预警通知、Dashboard 展示等。
+/// 一个窗口的用量越过接近上限的提示阈值（<c>AI:UsageLimits:WarningThreshold</c>）或上限本身时发布，每次越过各发一次。
+/// 可用于发送预警通知。
 /// </summary>
-public class QuotaThresholdReachedEvent : EventBase
+public class UsageLimitThresholdReachedEvent : EventBase
 {
     /// <summary>User ID</summary>
     public Guid UserId { get; set; }
-    /// <summary>Warning level (Warning or Critical)</summary>
-    public string Level { get; set; } = string.Empty;
-    /// <summary>Daily usage percentage (0-1)</summary>
-    public decimal DailyUsagePercentage { get; set; }
-    /// <summary>Monthly usage percentage (0-1)</summary>
-    public decimal MonthlyUsagePercentage { get; set; }
-    /// <summary>Remaining daily quota</summary>
-    public long RemainingDailyQuota { get; set; }
-    /// <summary>Remaining monthly quota</summary>
-    public long RemainingMonthlyQuota { get; set; }
+    /// <summary>The window that crossed the threshold.</summary>
+    public UsageLimitWindow Window { get; set; }
+    /// <summary>True when the window reached its limit (the next turn is refused); false for the warning threshold.</summary>
+    public bool LimitReached { get; set; }
+    /// <summary>Used share of the limit (0-100, may exceed 100).</summary>
+    public decimal UsedPercent { get; set; }
+    /// <summary>When the window resets (UTC).</summary>
+    public DateTime? ResetsAt { get; set; }
 }
 
 /// <summary>

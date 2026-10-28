@@ -49,11 +49,51 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         query = query.OrderByDescending(n => n.CreationTime);
 
         var paged = await query
-            .ProjectTo<Message, NotificationInfo>()
+            .Select(ListRow)
             .CreateAsync(request, cancellationToken);
 
-        return Ok(RecipientAddressMask.Apply(paged));
+        return Ok(paged);
     }
+
+    /// <summary>
+    /// 列表一行：消息本身的全部字段，<b>不带</b>收件人与附件（两者在列表行上恒为空集合）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ 此前两个分页查询都 <c>ProjectTo&lt;Message, NotificationInfo&gt;()</c>，而 DTO 上挂着两个集合：
+    /// 投影把它们一起翻成 SQL，每一行带出它的<b>全部</b>收件人（附件再乘一遍），整份 HTML 正文按收件人行数重复。
+    /// 一个跑过几场两万人群发的租户，打开一页 20 行的消息列表就要搬几十万行：而管理端列表只用成功数 / 总数两个计数。
+    /// 要看哪些人、为什么，有投递报告；要一条消息的完整收件人，有按 Id 取详情。
+    /// </para>
+    /// <para>
+    /// ★ 显式列出字段而不是交给映射器：要排除的恰恰是映射器会自动带上的那两个集合。新增一个标量字段时要在这里补一行：
+    /// <c>NotificationListRowTests</c> 用反射对照详情接口逐个字段比，漏补即红。
+    /// </para>
+    /// </remarks>
+    internal static readonly Expression<Func<Message, NotificationInfo>> ListRow = m => new NotificationInfo
+    {
+        Id = m.Id,
+        Type = m.Type,
+        Subject = m.Subject,
+        Content = m.Content,
+        IsHtml = m.IsHtml,
+        Status = m.Status,
+        SentTime = m.SentTime,
+        FailureReason = m.FailureReason,
+        RetryCount = m.RetryCount,
+        MaxRetryCount = m.MaxRetryCount,
+        TotalRecipientCount = m.TotalRecipientCount,
+        SuccessCount = m.SuccessCount,
+        FailureCount = m.FailureCount,
+        CreationTime = m.CreationTime,
+        Priority = m.Priority,
+        SenderId = m.SenderId,
+        Category = m.Category,
+        IsTransactional = m.IsTransactional,
+        TemplateName = m.TemplateName,
+        ProviderKey = m.ProviderKey,
+        ScheduledTime = m.ScheduledTime,
+    };
 
     public async Task<Result<NotificationInfo>> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -240,11 +280,12 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
 
         query = query.OrderBy(n => n.ScheduledTime);
 
+        // 与 QueryAsync 同一行形状：不带收件人与附件（理由见 ListRow）。
         var paged = await query
-            .ProjectTo<Message, NotificationInfo>()
+            .Select(ListRow)
             .CreateAsync(request, cancellationToken);
 
-        return Ok(RecipientAddressMask.Apply(paged));
+        return Ok(paged);
     }
 
     public async Task<Result<int>> BatchDeleteAsync(List<Guid> ids, CancellationToken cancellationToken = default)
@@ -268,9 +309,19 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         if (endDate <= startDate)
             return Fail<NotificationTrendDto>("End date must be after start date", 400);
 
-        var notifications = await _notificationRepository.AsQueryable().AsNoTracking()
+        // ★ 在库里按自然日聚合，内存里只折叠日汇总。此前把区间内每一条消息读进内存、再对每个桶整表过滤一遍：
+        //   区间不设上限，一年的按日趋势在日发五万条的部署上是一千八百万行、扫 365 遍。
+        //   三种粒度的桶都对齐到自然日边界（日 / ISO 周一 / 月一日），所以一天的汇总整天落在同一个桶里，折叠结果与逐行分桶相同。
+        var dailyAggregates = await _notificationRepository.AsQueryable().AsNoTracking()
             .Where(n => n.CreationTime >= startDate && n.CreationTime <= endDate)
-            .Select(n => new { n.CreationTime, n.Status })
+            .GroupBy(n => n.CreationTime.Date)
+            .Select(g => new
+            {
+                Date = g.Key,
+                TotalCount = g.Count(),
+                SentCount = g.Count(n => n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.PartiallySent),
+                FailedCount = g.Count(n => n.Status == NotificationStatus.Failed)
+            })
             .ToListAsync(cancellationToken);
 
         // 分桶与标签统一走核心 TimeBucket：桶对齐到自然日 / ISO 周（周一起）/ 自然月，
@@ -281,17 +332,17 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         {
             var bucketEnd = TimeBucket.Next(bucketStart, interval);
 
-            var periodNotifications = notifications
-                .Where(n => n.CreationTime >= bucketStart && n.CreationTime < bucketEnd)
+            var days = dailyAggregates
+                .Where(d => d.Date >= bucketStart && d.Date < bucketEnd)
                 .ToList();
 
             dataPoints.Add(new TrendDataPoint
             {
                 Label = TimeBucket.Label(bucketStart, interval),
                 StartTime = bucketStart,
-                TotalCount = periodNotifications.Count,
-                SentCount = periodNotifications.Count(n => n.Status == NotificationStatus.Sent || n.Status == NotificationStatus.PartiallySent),
-                FailedCount = periodNotifications.Count(n => n.Status == NotificationStatus.Failed)
+                TotalCount = days.Sum(d => d.TotalCount),
+                SentCount = days.Sum(d => d.SentCount),
+                FailedCount = days.Sum(d => d.FailedCount)
             });
         }
 
@@ -306,28 +357,61 @@ public class NotificationQueryService : ApplicationService, INotificationQuerySe
         return Ok(trend);
     }
 
+    /// <summary>
+    /// 投递报告一次最多列出的收件人行数：失败的排最前，其次被拦下的（<c>Cancelled</c>），然后其余。
+    /// </summary>
+    /// <remarks>
+    /// ★ 计数（总数 / 已送达 / 失败 / 待发 / 已读）始终按<b>全部</b>收件人在库里聚合，只有明细行受这个上限约束。
+    /// 一次两万人群发的报告此前把两万行连同每一行的全部字段读进内存、整份序列化出去，而管理端抽屉只渲染前 200 行。
+    /// 报告要回答的是「哪些人、为什么」，失败的那些排在最前就已经答完了；明细是否完整，看
+    /// <see cref="DeliveryReportDto.TotalRecipients"/> 与返回的行数是否相等。完整名单走按 Id 取详情。
+    /// </remarks>
+    internal const int MaxReportRecipients = 200;
+
     public async Task<Result<DeliveryReportDto>> GetDeliveryReportAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
         var notification = await _notificationRepository.AsQueryable().AsNoTracking()
-            .Include(m => m.Recipients)
-            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+            .Where(m => m.Id == messageId)
+            .Select(m => new { m.Id, m.Subject, m.Type })
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (notification == null)
             return Fail<DeliveryReportDto>("Notification not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
-        var recipients = notification.Recipients.ToList();
+        var recipients = _notificationRepository.AsQueryable().AsNoTracking()
+            .Where(m => m.Id == messageId)
+            .SelectMany(m => m.Recipients);
+
+        // 计数在库里聚合，不把收件人搬进内存。
+        var counts = await recipients
+            .GroupBy(r => 1)
+            .Select(g => new
+            {
+                Total = g.Count(),
+                Sent = g.Count(r => r.Status == NotificationStatus.Sent),
+                Failed = g.Count(r => r.Status == NotificationStatus.Failed),
+                Pending = g.Count(r => r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled),
+                Read = g.Count(r => r.IsRead),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var rows = await recipients
+            .OrderBy(r => r.Status == NotificationStatus.Failed ? 0 : r.Status == NotificationStatus.Cancelled ? 1 : 2)
+            .ThenBy(r => r.Id)
+            .Take(MaxReportRecipients)
+            .ToListAsync(cancellationToken);
 
         var report = new DeliveryReportDto
         {
             MessageId = notification.Id,
             Subject = notification.Subject,
             Type = notification.Type,
-            TotalRecipients = recipients.Count,
-            SentCount = recipients.Count(r => r.Status == NotificationStatus.Sent),
-            FailedCount = recipients.Count(r => r.Status == NotificationStatus.Failed),
-            PendingCount = recipients.Count(r => r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled),
-            ReadCount = recipients.Count(r => r.IsRead),
-            Recipients = recipients.MapToList<RecipientOutput>()
+            TotalRecipients = counts?.Total ?? 0,
+            SentCount = counts?.Sent ?? 0,
+            FailedCount = counts?.Failed ?? 0,
+            PendingCount = counts?.Pending ?? 0,
+            ReadCount = counts?.Read ?? 0,
+            Recipients = rows.MapToList<RecipientOutput>()
         };
 
         report.SuccessRate = report.TotalRecipients > 0

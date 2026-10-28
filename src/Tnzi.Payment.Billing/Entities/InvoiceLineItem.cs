@@ -61,4 +61,13 @@ public class InvoiceLineItem : EntityBase<Guid>, IMultiTenant
     /// 产品代码
     /// </summary>
     public string? ProductCode { get; set; }
+
+    /// <summary>服务期开始（含），订阅收款的明细行有。</summary>
+    public DateTime? PeriodStart { get; set; }
+
+    /// <summary>服务期结束（不含）。</summary>
+    public DateTime? PeriodEnd { get; set; }
+
+    /// <summary>行的类别（来自 <c>PaymentLineDescription.Kind</c>，例如超额存储行 <c>storage-overage</c>）；普通行为空。</summary>
+    public string? Kind { get; set; }
 }

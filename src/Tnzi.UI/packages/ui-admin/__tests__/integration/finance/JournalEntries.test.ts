@@ -120,4 +120,41 @@ describe('Finance JournalEntries page', () => {
     expect(vm.entryDetail.visible.value).toBe(true)
     expect(vm.entryDetail.action.value).toBe('create')
   })
+
+  // An entry a document posted is undone by voiding that document: the ledger
+  // refuses to reverse it (409), since the document would stay Posted. Manual
+  // entries and the ledger's own postings (revaluation) are reversed here.
+  it('★ offers Reverse only on posted entries the ledger can reverse', async () => {
+    const wrapper = mount(JournalEntries, { global: { stubs } })
+    await flushPromises()
+    const actions = (wrapper.vm as unknown as { rowActions: Array<{ key: string; show?: (r: unknown) => boolean }> }).rowActions
+    const offersReverse = (row: unknown) => actions.some((a) => a.key === 'reverse' && (!a.show || a.show(row)))
+
+    expect(offersReverse({ id: 'm', status: 'Posted', sourceType: null })).toBe(true)
+    expect(offersReverse({ id: 'r', status: 'Posted', sourceType: 'Revaluation' })).toBe(true)
+    expect(offersReverse({ id: 'a', status: 'Posted', sourceType: 'PaymentApplication' })).toBe(true)
+    for (const token of ['Invoice', 'Bill', 'CreditMemo', 'Expense', 'PaymentEntry', 'Transfer', 'Deposit', 'PayRun', 'PayRun.Payment']) {
+      expect(offersReverse({ id: token, status: 'Posted', sourceType: token })).toBe(false)
+    }
+  })
+
+  // A new entry's first save creates a draft even when the post that follows
+  // fails. The editor then continues on that draft; the page shows it as the
+  // record being edited and lists it.
+  it('★ a draft created by the editor becomes the record being edited and is listed', async () => {
+    const wrapper = mount(JournalEntries, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as JournalEntriesVm
+    vm.openCreate()
+    await flushPromises()
+    journalsFetch.mockClear()
+
+    wrapper.findComponent({ name: 'JournalEntryEditor' }).vm.$emit('drafted', { ...entry, id: 'j9', status: 'Draft' })
+    await flushPromises()
+
+    expect(vm.entryDetail.action.value).toBe('edit')
+    const editor = wrapper.findComponent({ name: 'JournalEntryEditor' })
+    expect((editor.props('entry') as { id: string } | null)?.id).toBe('j9')
+    expect(journalsFetch).toHaveBeenCalled()
+  })
 })

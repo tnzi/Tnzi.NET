@@ -179,7 +179,6 @@ public class AgentOrchestrationIntegrationTests
                 AgentAsTools = new AgentAsToolsExecutionConfigDto
                 {
                     Agents = agentIds,
-                    MaxConcurrentSubAgents = 2,
                     SubAgentTimeoutSeconds = 30
                 }
             };

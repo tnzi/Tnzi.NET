@@ -93,7 +93,10 @@ public class AIRagModule : TnziApplicationModule
             case "Semantic":
                 // Semantic 是 IAsyncChunkingStrategy（要调嵌入服务），DocumentIngestionService
                 // 在它存在时优先用它；同步契约仍需一个实现作为回退。
-                services.TryAddSingleton<IAsyncChunkingStrategy, SemanticChunkingStrategy>();
+                // ★ 必须是 Scoped：它依赖的 IEmbeddingService 是 Scoped。注册成 Singleton 时开发环境（作用域校验默认开启）
+                // 启动即失败，生产环境则由单例从根作用域捕获一个嵌入服务，其按请求的配置快照只取一次就冻结。
+                // 唯一的消费方 DocumentIngestionService 本身就是 Scoped。
+                services.TryAddScoped<IAsyncChunkingStrategy, SemanticChunkingStrategy>();
                 services.TryAddSingleton<IChunkingStrategy, FixedSizeChunkingStrategy>();
                 break;
             default:

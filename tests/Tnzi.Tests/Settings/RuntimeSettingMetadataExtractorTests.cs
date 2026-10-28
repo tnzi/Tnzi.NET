@@ -1,3 +1,4 @@
+using System.Globalization;
 using Tnzi.Settings;
 
 public class RuntimeSettingMetadataExtractorTests
@@ -50,6 +51,15 @@ public class RuntimeSettingMetadataExtractorTests
         [RuntimeSetting] public TimeSpan Ttl { get; set; } = TimeSpan.FromMinutes(5);
         [RuntimeSetting] public TimeSpan? MaxIdle { get; set; } = TimeSpan.FromHours(1);
         [RuntimeSetting(Subsection = "Advanced")] public int Retries { get; set; } = 3;
+    }
+
+    [ConfigSection("Num")]
+    private sealed class FractionalOptions
+    {
+        [RuntimeSetting] public double Ratio { get; set; } = 0.3;
+        [RuntimeSetting] public decimal Tolerance { get; set; } = 0.05m;
+        [RuntimeSetting] public float? Weight { get; set; } = 1.5f;
+        [RuntimeSetting] public long Big { get; set; } = 1234567;
     }
 
     [Fact]
@@ -139,5 +149,29 @@ public class RuntimeSettingMetadataExtractorTests
         Assert.Equal("Advanced", g.Fields.Single(f => f.Key == "Dur:Retries").Subsection);
         // 未标 Subsection 的字段为 null。
         Assert.Null(g.Fields.Single(f => f.Key == "Dur:Ttl").Subsection);
+    }
+
+    [Theory]
+    [InlineData("de-DE")]
+    [InlineData("fr-FR")]
+    public void Default_values_are_formatted_with_the_invariant_culture(string culture)
+    {
+        // 写回路径按不变文化解析；默认值若跟随当前区域性，逗号小数文化下会变成 "0,3"，
+        // 设置中心把它解析成 NaN 显示为空。定义只构建一次并缓存，所以首个请求的区域性会影响所有人。
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo(culture);
+            var g = RuntimeSettingMetadataExtractor.Extract(typeof(FractionalOptions))!;
+
+            Assert.Equal("0.3", g.Fields.Single(f => f.Key == "Num:Ratio").DefaultValueAccessor!());
+            Assert.Equal("0.05", g.Fields.Single(f => f.Key == "Num:Tolerance").DefaultValueAccessor!());
+            Assert.Equal("1.5", g.Fields.Single(f => f.Key == "Num:Weight").DefaultValueAccessor!());
+            Assert.Equal("1234567", g.Fields.Single(f => f.Key == "Num:Big").DefaultValueAccessor!());
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
     }
 }

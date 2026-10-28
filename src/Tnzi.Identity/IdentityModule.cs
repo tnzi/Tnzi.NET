@@ -100,6 +100,8 @@ public class IdentityModule : TnziApplicationModule
         // 让不引用 Identity 的模块也能把 CreatorId 显示成名字（可选契约，
         // 未加载 Identity 时根本不注册，消费方按缺失降级）。
         context.Services.AddScoped<IUserDisplayNameProvider, UserDisplayNameProvider>();
+        // 同理：按用户 Id 查账号邮箱（令牌不带邮箱声明、或后台任务没有当前用户时，账单邮件仍有人可寄）
+        context.Services.AddScoped<IUserEmailProvider, UserEmailProvider>();
 
         // 注册用户角色服务（用于授权模块）
         context.Services.AddScoped<IUserRoleService, UserRoleService>();
@@ -244,17 +246,16 @@ public class IdentityModule : TnziApplicationModule
                     IssuerSigningKey = new SymmetricSecurityKey(key),
                     NameClaimType = ClaimTypes.Name,
                     RoleClaimType = ClaimTypes.Role,
-                    // 写端固定 HS256（对称密钥）；锁死算法消除算法混淆面，与
-                    // JwtTokenService.GetPrincipalFromExpiredToken 的手动 alg 校验一致。
+                    // 写端固定 HS256（对称密钥，JwtTokenService.GenerateToken）；锁死算法消除算法混淆面。
                     ValidAlgorithms = new[] { SecurityAlgorithms.HmacSha256 }
                 };
 
-                // SignalR 的 WebSocket / ServerSentEvents 传输无法发送 Authorization 头，
+                // 浏览器的 WebSocket / ServerSentEvents 握手无法发送 Authorization 头，
                 // JS 客户端改用 `access_token` 查询参数携带 JWT。这里把它读入 context.Token，
                 // 让这两种传输也能通过 Bearer 校验（LongPolling 走 Authorization 头，本就可用）。
-                // Hub 统一挂在 "/hubs" 前缀下（如 Tnzi.Chat 的 "/hubs/chat"）；即便部署在
-                // "/api" 之类 PathBase 下，Request.Path 已被剥离为 "/hubs/..."，段匹配各环境一致。
-                // 安全：仅对 /hubs 路径读取查询参数中的 token。
+                // 只对登记过的路径读取（QueryStringTokenOptions：默认 SignalR 的 "/hubs"，模块追加自己的实时端点，
+                // 如 AI 渠道网关的 WebSocket 路径）；其余路径只认请求头。即便部署在 "/api" 之类 PathBase 下，
+                // Request.Path 已被剥离为 "/hubs/..."，段匹配各环境一致。
                 jwtBearerOptions.Events ??= new JwtBearerEvents();
                 var previousOnMessageReceived = jwtBearerOptions.Events.OnMessageReceived;
                 jwtBearerOptions.Events.OnMessageReceived = async messageContext =>
@@ -266,9 +267,11 @@ public class IdentityModule : TnziApplicationModule
 
                     if (string.IsNullOrEmpty(messageContext.Token))
                     {
-                        var accessToken = messageContext.Request.Query["access_token"];
-                        var path = messageContext.HttpContext.Request.Path;
-                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        var accessToken = messageContext.Request.Query[QueryStringTokenOptions.ParameterName];
+                        var queryTokenPaths = messageContext.HttpContext.RequestServices
+                            .GetService<IOptions<QueryStringTokenOptions>>()?.Value ?? new QueryStringTokenOptions();
+                        if (!string.IsNullOrEmpty(accessToken)
+                            && queryTokenPaths.AcceptsQueryToken(messageContext.HttpContext.Request.Path))
                         {
                             messageContext.Token = accessToken;
                         }
@@ -527,12 +530,16 @@ public static class IdentityExtensions
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(accountSecuritySection.GetValue("LockoutDurationMinutes", 30));
                 options.Lockout.AllowedForNewUsers = accountSecuritySection.GetValue("EnableLockout", true);
 
+                // 重置令牌单独一个提供者，有效期取 Identity:Recovery:ResetTokenExpirationMinutes。
+                // 不改全局 TokenLifespan：邮箱确认等同走默认提供者，它们的有效期与找回密码无关。
+                options.Tokens.PasswordResetTokenProvider = PasswordResetTokenProvider.ProviderName;
             })
             .AddTnziPasskeyOptions(configuration)
             // 用户名与邮箱跨字段唯一：登录按「用户名 → 邮箱」解析，任一输入串只能落到一个账号上
             .AddUserValidator<CrossFieldIdentifierValidator>()
             .AddEntityFrameworkStores<TDbContext>()
-            .AddDefaultTokenProviders();
+            .AddDefaultTokenProviders()
+            .AddTokenProvider<PasswordResetTokenProvider>(PasswordResetTokenProvider.ProviderName);
     }
 
     /// <summary>

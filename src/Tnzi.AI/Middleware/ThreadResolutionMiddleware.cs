@@ -69,7 +69,7 @@ public class ThreadResolutionMiddleware : IAiMiddleware
 
         try
         {
-            var (_, resolvedThreadId, isNewThread) = await threadService.GetOrCreateThreadAsync(
+            var (resolvedThreadId, isNewThread) = await threadService.GetOrCreateThreadAsync(
                 context.Request.ThreadId, context.Request.AgentId, ct);
             context.Request.ThreadId = resolvedThreadId;
             context.IsNewThread = isNewThread;

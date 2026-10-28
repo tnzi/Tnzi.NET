@@ -6,23 +6,6 @@ namespace Tnzi;
 public class TnziOptions
 {
     /// <summary>
-    /// 是否启用诊断模式
-    /// 启用后会输出更详细的日志信息
-    /// </summary>
-    public bool EnableDiagnostics { get; set; } = false;
-
-    /// <summary>
-    /// 是否启用模块加载日志
-    /// </summary>
-    public bool LogModuleLoading { get; set; } = true;
-
-    /// <summary>
-    /// 是否使用 Source Generator 生成的模块注册表
-    /// 启用后可以避免运行时反射扫描，提升启动性能
-    /// </summary>
-    public bool UseGeneratedModuleRegistry { get; set; } = false;
-
-    /// <summary>
     /// 是否自动初始化数据库（迁移和种子数据）
     /// 默认值：true。Production 环境默认被 SkipDatabaseInitInProduction 跳过；
     /// 未注册任何 IDbInitializer 时为 no-op。
@@ -105,9 +88,14 @@ public class TnziOptions
     public bool EnableRuntimeSettingConsumerAudit { get; set; } = true;
 
     /// <summary>
-    /// 启动失败时是否写入错误日志文件 (startup-error.log)
-    /// 文件写入 AppContext.BaseDirectory，适用于 IIS/Docker/Windows Service 等控制台输出不可见的场景
+    /// 是否在 <c>TnziApp.RunAsync</c> 启动失败时写入错误日志文件 (startup-error.log)
+    /// 文件写入 AppContext.BaseDirectory，含完整堆栈，适用于 IIS/Docker/Windows Service 等控制台输出不可见的场景；
+    /// 关闭后只写控制台。
     /// 默认值：true
     /// </summary>
+    /// <remarks>
+    /// 启动失败时容器多半还没建成，这一项不经 <c>IOptions</c> 读取，只认 "Tnzi" 配置节与传给
+    /// <c>RunAsync</c> 的代码回调（回调优先）。
+    /// </remarks>
     public bool WriteStartupErrorLog { get; set; } = true;
 }

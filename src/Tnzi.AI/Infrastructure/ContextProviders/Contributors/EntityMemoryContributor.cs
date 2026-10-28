@@ -10,7 +10,6 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
     private readonly LlmEntityExtractor _entityExtractor;
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
-    private readonly ICurrentUser? _currentUser;
     private readonly ILoggerFactory _loggerFactory;
 
     public int Order => ContextProviderOrders.Memory + 1;
@@ -20,15 +19,13 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
         LlmEntityExtractor entityExtractor,
         IOptionsMonitor<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
-        ILoggerFactory loggerFactory,
-        ICurrentUser? currentUser = null)
+        ILoggerFactory loggerFactory)
     {
         _entityMemoryStore = Check.NotNull(entityMemoryStore);
         _entityExtractor = Check.NotNull(entityExtractor);
         _options = Check.NotNull(options);
         _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _loggerFactory = Check.NotNull(loggerFactory);
-        _currentUser = currentUser;
     }
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
@@ -44,7 +41,8 @@ internal sealed class EntityMemoryContributor : IContextProviderContributor
                 entityMemoryOptions,
                 _entityExtractor,
                 logger,
-                _currentUser,
+                // 归属人取运行发起人（与其它记忆贡献者同源），不取作用域里的登录用户
+                context.UserId,
                 context.AgentId,
                 executionContextAccessor: _executionContextAccessor);
         }

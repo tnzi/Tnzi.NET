@@ -114,18 +114,27 @@ defineSlots<{
 
 const visibleItems = computed(() => props.items.filter((item) => !item.hidden))
 
+/** The grid's column gap; the stylesheet and the per-track floor both read it. */
+const COLUMN_GAP = 'var(--t-desc-column-gap, 24px)'
+
 const gridStyle = computed<CSSProperties>(() => {
   // `auto-fit` + `minmax` lets the CONTAINER pick the column count: it fits as
   // many tracks of at least `minColumnWidth` as will go, then stretches them.
   //
-  // The cap is expressed by raising that per-track minimum to at least
-  // `100% / maxColumns`, so auto-fit can never place more than N tracks while
-  // the block still fills its container and still collapses to fewer columns on
-  // a narrow one. Capping with `max-width` instead is what used to pin every
-  // single-column read-only record to 280px with the rest of the row blank.
+  // The cap is expressed by raising that per-track minimum to an N-th of the
+  // row, so auto-fit can never place more than N tracks while the block still
+  // fills its container and still collapses to fewer columns on a narrow one.
+  // Capping with `max-width` instead is what used to pin every single-column
+  // read-only record to 280px with the rest of the row blank.
+  //
+  // auto-fit counts the column gaps: N tracks fit when N x floor + (N - 1) x
+  // gap <= 100%. The floor is therefore (100% - (N - 1) x gap) / N, less 1px so
+  // sub-pixel rounding cannot push the N-th track out; a bare `100% / N` left
+  // no room for the gaps and laid out at most N - 1 columns.
+  const n = props.maxColumns
   const floor =
-    props.maxColumns > 0
-      ? `max(${props.minColumnWidth}px, ${100 / props.maxColumns}%)`
+    n > 0
+      ? `max(${props.minColumnWidth}px, calc((100% - ${n - 1} * ${COLUMN_GAP} - 1px) / ${n}))`
       : `${props.minColumnWidth}px`
 
   return { gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, ${floor}), 1fr))` }
@@ -183,7 +192,7 @@ function boolLabel(value: boolean): string {
 <style scoped>
 .t-desc {
   display: grid;
-  column-gap: 24px;
+  column-gap: var(--t-desc-column-gap, 24px);
   row-gap: 0;
   margin: 0;
 }

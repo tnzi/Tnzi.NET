@@ -13,6 +13,14 @@ public class CostCalculator : ICostCalculator
     }
 
     public decimal? CalculateCost(string provider, string model, int inputTokens, int outputTokens)
+        => CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens: 0);
+
+    /// <inheritdoc />
+    public decimal? CalculateCost(string provider, string model, int inputTokens, int outputTokens, int cachedInputTokens)
+        => CalculateCost(provider, model, (long)inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens: 0);
+
+    /// <inheritdoc />
+    public decimal? CalculateCost(string provider, string model, long inputTokens, long outputTokens, long cachedInputTokens, long cacheWriteTokens)
     {
         var costOptions = _options.CurrentValue.CostTracking;
         if (!costOptions.Enabled) return null;
@@ -20,8 +28,14 @@ public class CostCalculator : ICostCalculator
         var rate = ResolveCostRate(costOptions, provider, model);
         if (rate == null) return null;
 
-        // 成本 = (inputTokens * inputRate + outputTokens * outputRate) / 1,000,000
-        var cost = (inputTokens * rate.InputCostPer1MTokens + outputTokens * rate.OutputCostPer1MTokens) / 1_000_000m;
+        // 缓存读取与缓存写入都是输入的一部分（MEAI 口径）：各自配了价目的按各自的价计，其余输入按输入价；没配就按输入价。
+        var input = Math.Max(inputTokens, 0);
+        var cached = rate.CachedInputCostPer1MTokens.HasValue ? Math.Clamp(cachedInputTokens, 0, input) : 0;
+        var written = rate.CacheWriteCostPer1MTokens.HasValue ? Math.Clamp(cacheWriteTokens, 0, input - cached) : 0;
+        var cost = ((input - cached - written) * rate.InputCostPer1MTokens
+                    + cached * rate.CachedInputCostPer1MTokens.GetValueOrDefault()
+                    + written * rate.CacheWriteCostPer1MTokens.GetValueOrDefault()
+                    + Math.Max(outputTokens, 0) * rate.OutputCostPer1MTokens) / 1_000_000m;
         return Math.Round(cost, 6); // 保留 6 位小数精度
     }
 

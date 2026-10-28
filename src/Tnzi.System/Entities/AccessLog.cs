@@ -15,6 +15,15 @@ public class AccessLog : CreationAuditedEntity<Guid>
     public int StatusCode { get; set; }
     public long ResponseTime { get; set; }
 
+    /// <summary>
+    /// 请求所属租户：采集时取自调用者的身份（宿主、匿名请求、未开多租户时为 null）。
+    /// </summary>
+    /// <remarks>
+    /// 刻意不实现 <c>IMultiTenant</c>：后台服务在没有租户上下文的作用域里落库，全局租户过滤器会把写入挡住或改写。
+    /// 读取面按调用者的租户自己加谓词（见 <c>AccessLogService</c>）。多租户关闭时该列被 Ignore（见 <c>AccessLogConfiguration</c>）。
+    /// </remarks>
+    public Guid? TenantId { get; set; }
+
     // IP定位信息
     public string? IpCountry { get; set; }
     public string? IpProvince { get; set; }

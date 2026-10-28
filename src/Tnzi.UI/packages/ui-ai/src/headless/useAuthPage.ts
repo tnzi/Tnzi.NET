@@ -71,6 +71,10 @@ export interface UseAuthPageReturn {
   accountType: ComputedRef<'email' | 'phone' | undefined>;
   busy: ComputedRef<boolean>;
   canContinue: ComputedRef<boolean>;
+  /** Code sign-in is on and can send its code to the kind of address typed. */
+  offersCodeSignIn: ComputedRef<boolean>;
+  /** Sign-up is on and can send its code to the kind of address typed. */
+  offersSignUp: ComputedRef<boolean>;
   challenge: Ref<TwoFactorChallenge | null>;
   twoFactorMethod: Ref<TwoFactorMethodName | undefined>;
   otherTwoFactorMethods: ComputedRef<TwoFactorMethodName[]>;
@@ -115,6 +119,27 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
 
   const busy = computed(() => submitting.value || (options.loading?.() ?? false));
   const canContinue = computed(() => account.value.trim().length > 0 && !busy.value);
+
+  /**
+   * Whether a code flow can reach the address typed. Sign-in and sign-up have
+   * their own channels on the backend, so offering a flow that cannot send its
+   * code to this kind of address (sign-up by email on an SMS-only deployment)
+   * only led to a refused send. An identifier the page cannot classify is not
+   * judged here: the flow stays offered and the backend answers.
+   */
+  function reachesAccount(channels: { sms: boolean; email: boolean } | undefined): boolean {
+    const type = accountType.value;
+    if (!channels || !type) return true;
+    return type === 'email' ? channels.email : channels.sms;
+  }
+  const offersCodeSignIn = computed(() => {
+    const features = options.features();
+    return features.codeLogin && reachesAccount(features.codeChannels);
+  });
+  const offersSignUp = computed(() => {
+    const features = options.features();
+    return features.register && reachesAccount(features.registerChannels);
+  });
 
   // -- Two-factor / captcha / pending action -----------------------------------
   const challenge = ref<TwoFactorChallenge | null>(null);
@@ -234,6 +259,12 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
    * moves to the password pane, which also carries the routes to the code and
    * register flows. That keeps the first screen to a single field while leaving
    * every enabled path one tap away.
+   *
+   * With password sign-in off, Continue sends the code itself. That send goes
+   * through `run()` like every other request here: outside it a refused send
+   * (rate limit, captcha, bad address) rejected out of the click handler with
+   * nothing on screen, and with no busy flag each further click sent another
+   * code. On a refusal the page stays on this step with the error under it.
    */
   async function onContinue(): Promise<void> {
     if (!canContinue.value) return;
@@ -242,8 +273,10 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     if (features.passwordLogin) {
       step.value = 'password';
     } else if (features.codeLogin) {
-      await sendCode('code-login');
-      step.value = 'code';
+      await run(async () => {
+        await sendCode('code-login');
+        step.value = 'code';
+      });
     } else {
       error.value = t('auth.errors.noMethod', 'Sign-in is not available right now.');
     }
@@ -416,6 +449,8 @@ export function useAuthPage(options: UseAuthPageOptions): UseAuthPageReturn {
     accountType,
     busy,
     canContinue,
+    offersCodeSignIn,
+    offersSignUp,
     challenge,
     twoFactorMethod,
     otherTwoFactorMethods,

@@ -22,7 +22,7 @@ export { UserStateManager, createInitialUserState } from './user';
 export { AppStateManager, createInitialAppState } from './app';
 
 // 运行时装配工厂 (HttpClient + AuthStateManager + authApi 一次接线)
-export { createTnziClient } from './client';
+export { createTnziClient, authStateOf } from './client';
 export type { TnziClient, CreateTnziClientOptions } from './client';
 
 // 所有类型

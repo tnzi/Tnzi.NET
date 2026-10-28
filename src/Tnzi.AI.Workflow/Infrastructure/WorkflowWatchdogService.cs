@@ -23,17 +23,20 @@ public class WorkflowWatchdogService
     private readonly ILogger<WorkflowWatchdogService> _logger;
     private readonly WorkflowWatchdogOptions _options;
     private readonly IDataFilterManager? _dataFilterManager;
+    private readonly IRepository<AgentRun, Guid>? _runRepository;
 
     public WorkflowWatchdogService(
         IRepository<WorkflowExecution, Guid> repository,
         ILogger<WorkflowWatchdogService> logger,
         IOptionsSnapshot<WorkflowWatchdogOptions> options,
-        IDataFilterManager? dataFilterManager = null)
+        IDataFilterManager? dataFilterManager = null,
+        IRepository<AgentRun, Guid>? runRepository = null)
     {
         _repository = Check.NotNull(repository);
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options).Value;
         _dataFilterManager = dataFilterManager;
+        _runRepository = runRepository;
     }
 
     /// <summary>
@@ -94,6 +97,13 @@ public class WorkflowWatchdogService
                     execution.ExecutionId,
                     previousStatus,
                     lastActiveTime);
+
+                // 等待中的执行没有引擎在跑，它的 AgentRun 投影只能在这里收尾（见 WaitingAgentRunCloser）。
+                // 超时的 Running 执行不碰：引擎可能还活着，它收场时会自己写运行行。
+                if (previousStatus is WorkflowExecutionStatus.AwaitingApproval or WorkflowExecutionStatus.AwaitingInput)
+                {
+                    await CloseWaitingAgentRunAsync(execution.ExecutionId, previousStatus, cancellationToken);
+                }
             }
             catch (Exception ex)
             {
@@ -109,5 +119,25 @@ public class WorkflowWatchdogService
             batch.Count);
 
         return markedCount;
+    }
+
+    private async Task CloseWaitingAgentRunAsync(string executionId, WorkflowExecutionStatus previousStatus, CancellationToken cancellationToken)
+    {
+        if (_runRepository == null)
+        {
+            return;
+        }
+
+        var waitedFor = previousStatus == WorkflowExecutionStatus.AwaitingApproval ? "approval" : "input";
+        try
+        {
+            await WaitingAgentRunCloser.CloseAsync(_runRepository, executionId, AgentRunStatus.Failed,
+                $"Workflow execution timed out while waiting for {waitedFor}.", cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // The execution itself is already marked; only its run projection is left behind.
+            _logger.LogError(ex, "Workflow execution '{ExecutionId}' timed out, but its agent run could not be marked as failed.", executionId);
+        }
     }
 }

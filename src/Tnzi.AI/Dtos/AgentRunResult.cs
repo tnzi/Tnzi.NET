@@ -66,6 +66,17 @@ public class AgentRunResult
     /// </remarks>
     public string? ErrorCode { get; init; }
 
+    /// <summary>
+    /// 因用量上限结束时的重置时间（UTC）：<see cref="ErrorCode"/> 为 <c>AI_USAGE_LIMIT_REACHED</c>（框架给用户设的上限）
+    /// 或 <c>AI_CLI_USAGE_LIMIT</c>（外部 CLI 背后账号的上限）；不知道时为 null。
+    /// </summary>
+    public DateTime? UsageLimitResetsAt { get; init; }
+
+    /// <summary>
+    /// <see cref="ErrorCode"/> 为 <c>AI_USAGE_LIMIT_REACHED</c> 时，到上限的是哪个窗口；其余情况为 null。
+    /// </summary>
+    public UsageLimitWindow? UsageLimitWindow { get; init; }
+
     /// <summary>实际执行使用的模型</summary>
     public string? Model { get; init; }
 
@@ -87,7 +98,7 @@ public class AgentRunResult
     /// <summary>是否需要用户澄清（从 Status 派生）</summary>
     public bool RequiresClarification => Status == AgentRunStatus.RequiresClarification;
 
-    /// <summary>后续建议问题（由 ISuggestionService 生成）</summary>
+    /// <summary>后续建议问题。框架的运行管线不填它（恒为 null）；按需生成建议走 <c>POST threads/{id}/suggestions</c>（ISuggestionService）</summary>
     public List<string>? Suggestions { get; init; }
 
     /// <summary>当前 Todo 列表（Plan Mode 下由 TodoMiddleware 填充）</summary>
@@ -157,7 +168,9 @@ public class AgentRunResult
             Artifacts = artifacts ?? Artifacts,
             ClarificationQuestion = clarificationQuestion ?? ClarificationQuestion,
             UserMessageId = userMessageId ?? UserMessageId,
-            AssistantMessageId = assistantMessageId ?? AssistantMessageId
+            AssistantMessageId = assistantMessageId ?? AssistantMessageId,
+            UsageLimitResetsAt = UsageLimitResetsAt,
+            UsageLimitWindow = UsageLimitWindow
         };
     }
 }

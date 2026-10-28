@@ -16,6 +16,13 @@ describe('truncate', () => {
     expect(truncate('hello world', 6, '…')).toBe('hello…');
   });
 
+  it('never cuts a surrogate pair in half', () => {
+    // 'ab😀cd': the emoji is code units 2 and 3, so a 3-unit head would end in half of it.
+    expect(truncate('ab😀cd', 4, '…')).toBe('ab…');
+    expect(truncate('ab😀cd', 5, '…')).toBe('ab😀…');
+    expect(truncate('ab😀cd', 3, '')).toBe('ab');
+  });
+
   it('never returns more than maxLength characters when the ellipsis alone does not fit', () => {
     // `maxLength - ellipsis.length` went negative and `slice(0, -1)` kept almost
     // the whole string: truncate('hello world', 2) used to yield 'hello worl...'.

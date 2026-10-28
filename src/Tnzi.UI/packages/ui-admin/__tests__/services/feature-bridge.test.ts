@@ -62,6 +62,17 @@ describe('feature-bridge', () => {
     expect(all.totalCount).toBe(2)
   })
 
+  // The bridge used to filter on the trimmed keyword and then hand the list to
+  // a second filter that searched with the untrimmed one, so a stray space
+  // dropped every row the first filter had kept.
+  it('a keyword with a trailing space finds what it finds without one', async () => {
+    const bridge = createFeatureBridge(apis() as never)
+    const definitions = await bridge.definitions.fetch({ ...query, searchText: 'C.D ' })
+    expect(definitions.items.map((d) => d.name)).toEqual(['C.D'])
+    const values = await bridge.values.all({ providerName: 'Global', providerKey: null }, { ...query, searchText: ' c.d ' })
+    expect(values.items.map((v) => v.featureName)).toEqual(['C.D'])
+  })
+
   it('values.all passes the scope through and pages the merged view', async () => {
     const a = apis()
     const bridge = createFeatureBridge(a as never)

@@ -201,7 +201,7 @@ public class GroupChatOrchestrator
         {
             foreach (var keyword in Options.TerminationKeywords)
             {
-                if (lastResponse.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                if (ContainsTerminationKeyword(lastResponse, keyword))
                 {
                     return true;
                 }
@@ -216,6 +216,45 @@ public class GroupChatOrchestrator
 
         return false;
     }
+
+    /// <summary>
+    /// 终止关键词按<b>区分大小写的整词</b>匹配：前后紧挨着字母、数字或下划线的不算。
+    /// </summary>
+    /// <remarks>
+    /// 此前是不区分大小写的子串匹配，默认词表里还有 DONE / CONSENSUS：辩论里第一个发言者写一句
+    /// "once this is done we can seek consensus" 讨论就在第一轮结束，"undone"、"abandoned" 同样命中，
+    /// 产出的是一面之词且没有任何报错。关键词是哨兵，不是日常用词。
+    /// </remarks>
+    internal static bool ContainsTerminationKeyword(string response, string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return false;
+        }
+
+        var start = 0;
+        while (start <= response.Length - keyword.Length)
+        {
+            var index = response.IndexOf(keyword, start, StringComparison.Ordinal);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            var end = index + keyword.Length;
+            if ((index == 0 || !IsWordCharacter(response[index - 1]))
+                && (end == response.Length || !IsWordCharacter(response[end])))
+            {
+                return true;
+            }
+
+            start = index + 1;
+        }
+
+        return false;
+    }
+
+    private static bool IsWordCharacter(char c) => char.IsLetterOrDigit(c) || c == '_';
 }
 
 /// <summary>
@@ -229,8 +268,11 @@ public class GroupChatOptions
     /// <summary>Agent 选择策略</summary>
     public GroupChatSelectionStrategy SelectionStrategy { get; set; } = GroupChatSelectionStrategy.RoundRobin;
 
-    /// <summary>终止关键词列表（任一出现则终止讨论）</summary>
-    public List<string> TerminationKeywords { get; set; } = ["TERMINATE", "DONE", "CONSENSUS"];
+    /// <summary>
+    /// 终止关键词列表：发言里以<b>区分大小写的整词</b>出现任一个即终止讨论。默认只有哨兵 <c>TERMINATE</c>；
+    /// 要让 Agent 主动收尾，把哨兵写进它们的指令（例如「结论已定时单独输出一行 TERMINATE」）。
+    /// </summary>
+    public List<string> TerminationKeywords { get; set; } = ["TERMINATE"];
 
     /// <summary>自定义终止条件</summary>
     public Func<List<GroupChatMessage>, bool>? TerminationCondition { get; set; }

@@ -53,7 +53,7 @@ public class FinanceOffersModule : TnziApplicationModule
 
     /// <inheritdoc />
     /// <remarks>
-    /// 61：Finance(55) / Payroll·Ai(56) / Banking(57) / Documents(58) / Recurring(59) /
+    /// 61：Finance(55) / Payroll(56) / Banking(57) / Documents·Ai(58) / Recurring(59) /
     /// Tax.Ca(60) 之后。本模块不被任何兄弟子模块依赖，排在末位即可。
     /// </remarks>
     public override int LoadOrder => 61;

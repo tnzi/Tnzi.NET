@@ -29,6 +29,8 @@ export default defineConfig({
         router: resolve(import.meta.dirname, 'src/router/index.ts'),
         stores: resolve(import.meta.dirname, 'src/stores/index.ts'),
         presets: resolve(import.meta.dirname, 'src/presets/index.ts'),
+        // Customer-facing billing UI (`@tnzi/ui-admin/billing`): off the root barrel so the shell does not carry it.
+        billing: resolve(import.meta.dirname, 'src/billing/index.ts'),
         // locales barrel needs its own entry - consumers import the
         // aggregate `@tnzi/ui-admin/locales`; without this entry,
         // preserveModules tree-shakes the barrel and the subpath 404s.
@@ -43,7 +45,7 @@ export default defineConfig({
       // so the `./style.css` export keeps resolving.
       cssFileName: 'style',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) =>
         id === 'vue' ||
         id === 'pinia' ||

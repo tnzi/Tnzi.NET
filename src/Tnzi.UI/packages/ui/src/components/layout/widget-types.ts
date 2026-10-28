@@ -30,9 +30,12 @@
 import type { Component, InjectionKey } from 'vue'
 
 /**
- * NGrid-friendly responsive span. `xs/sm/md/lg/xl` mirror the naive-ui
- * `responsive="screen"` breakpoints (576 / 768 / 992 / 1200 / 1600 px).
- * A plain number applies to every breakpoint.
+ * NGrid-friendly responsive span. `sm/md/lg/xl` apply from naive-ui's
+ * default `responsive="screen"` breakpoints (640 / 1024 / 1280 / 1536 px)
+ * upwards, `xs` below 640; a width with no value of its own takes the
+ * nearest smaller one, or a full row (24) when there is none. Both the fixed
+ * and the draggable workbench layout resolve spans this way. A plain number
+ * applies to every breakpoint.
  */
 export type SpanValue =
   | number

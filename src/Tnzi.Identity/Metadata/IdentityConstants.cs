@@ -60,11 +60,18 @@ public static class IdentityConstants
     /// <summary>
     /// 登录提供者常量
     /// </summary>
+    /// <remarks>
+    /// 同时是 <c>UserLoggedInEvent.LoginProvider</c> 上的登录方式名：<see cref="JWT"/> 是密码登录，
+    /// 其余各自对应一种登录方式。
+    /// </remarks>
     public static class LoginProvider
     {
         public const string JWT = "JWT";
         public const string CodeLogin = "CodeLogin";
         public const string Registration = "Registration";
+
+        /// <summary>第三方 OAuth 登录（Google / Microsoft / GitHub 等，具体是哪一家见日志里的 provider）。</summary>
+        public const string OAuth = "OAuth";
 
         /// <summary>Passkey（WebAuthn）。也是 passkey 注册令牌在 <c>AuthToken</c> 里的归属标记。</summary>
         public const string Passkey = "Passkey";
@@ -74,6 +81,9 @@ public static class IdentityConstants
 
         /// <summary>待办挑战。它的临时令牌在 <c>AuthToken</c> 里的归属标记。</summary>
         public const string PendingAction = "PendingAction";
+
+        /// <summary>应用代码签发的委派会话（<c>IAuthService.IssueDelegatedSessionAsync</c>）。</summary>
+        public const string Delegated = "Delegated";
     }
 
     /// <summary>

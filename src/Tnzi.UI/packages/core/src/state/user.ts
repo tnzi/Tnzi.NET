@@ -11,6 +11,7 @@ import type { UserDto, UpdateProfileDto } from '../services/identity/types';
 import { useProfileApi } from '../services/identity/index';
 import type { StateDeps } from './types/deps';
 import { normalizeThemeMode } from '../types/theme';
+import { debounce, type Debounced } from '../utils/timing';
 
 // ============================================
 // Initial state
@@ -39,21 +40,6 @@ const MAX_RECENT_ITEMS = 50;
 const MAX_FAVORITES = 50;
 
 // ============================================
-// Debounce utility
-// ============================================
-
-function debounce<T extends (...args: any[]) => void>(fn: T, delay: number): (...args: Parameters<T>) => void {
-  let timerId: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Parameters<T>) => {
-    if (timerId !== null) clearTimeout(timerId);
-    timerId = setTimeout(() => {
-      timerId = null;
-      fn(...args);
-    }, delay);
-  };
-}
-
-// ============================================
 // UserStateManager
 // ============================================
 
@@ -66,8 +52,8 @@ export class UserStateManager {
   isLoading = false;
   error: string | null = null;
 
-  /** Debounced persist function to avoid frequent storage writes */
-  private readonly _debouncedPersist: () => void;
+  /** Debounced persist function to avoid frequent storage writes; `clear()` cancels it. */
+  private readonly _debouncedPersist: Debounced<[]>;
 
   constructor(private readonly deps: StateDeps) {
     this._debouncedPersist = debounce(() => this._persistDataImmediate(), 300);
@@ -293,6 +279,9 @@ export class UserStateManager {
    * Should be called on logout to prevent data leakage between users.
    */
   clear(): void {
+    // A write still waiting on the debounce would land after this and put the
+    // keys straight back.
+    this._debouncedPersist.cancel();
     Object.assign(this, createInitialUserState());
     this.clearPersistedData();
   }

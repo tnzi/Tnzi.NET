@@ -41,6 +41,12 @@ public class AuthorizationTestDbContext : TnziDbContext<AuthorizationTestDbConte
     /// </summary>
     public DbSet<Tnzi.Identity.Entities.User> IdentityUsers => Set<Tnzi.Identity.Entities.User>();
 
+    /// <summary>
+    /// Identity 用户-角色关联表(最小映射)。持有者反查与运行时检查都经真实的 <c>UserRoleService</c>
+    /// 读同一张表,比对两边答案时就不必让 mock 自己保持一致。
+    /// </summary>
+    public DbSet<Tnzi.Identity.Entities.UserRole> IdentityUserRoles => Set<Tnzi.Identity.Entities.UserRole>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // 应用 Authorization 实体配置
@@ -64,6 +70,12 @@ public class AuthorizationTestDbContext : TnziDbContext<AuthorizationTestDbConte
         {
             b.ToTable("Identity_User");
             b.HasKey(u => u.Id);
+        });
+
+        modelBuilder.Entity<Tnzi.Identity.Entities.UserRole>(b =>
+        {
+            b.ToTable("Identity_UserRole");
+            b.HasKey(ur => new { ur.UserId, ur.RoleId });
         });
 
         base.OnModelCreating(modelBuilder);

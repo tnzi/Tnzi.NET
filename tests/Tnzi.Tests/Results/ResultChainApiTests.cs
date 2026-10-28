@@ -357,6 +357,34 @@ public class ResultChainApiTests
 
     #endregion
 
+    #region 编码规范里的链式示例
+
+    /// <summary>
+    /// docs/coding-standards/service.md「Result 链式 API」一节的示例按原样调用一遍：
+    /// 示例里的类名与 lambda 形状一旦与签名分叉，这里先编译失败。
+    /// </summary>
+    [Fact]
+    public async Task DocumentedChainExamples_CompileAndBehaveAsDescribed()
+    {
+        var failed = Result<int>.Failure("Out of stock", 409);
+        var message = failed.Match(
+            onSuccess: id => $"Order {id} placed",
+            onFailure: failure => $"Failed: {failure.Message}");
+        Assert.Equal("Failed: Out of stock", message);
+
+        var data = await ResultTryExtensions.TryAsync(() => Task.FromResult(42));
+        Assert.Equal(42, data.Data);
+
+        var available = ResultConditionExtensions.OkIf(false, "product", "Out of stock");
+        Assert.False(available.Succeeded);
+
+        var recovered = await Task.FromResult(Result<string>.Failure("cache miss", 404))
+            .ElseAsync(_ => Task.FromResult("from database"));
+        Assert.Equal("from database", recovered.Data);
+    }
+
+    #endregion
+
     #region Try (exception wrapping)
 
     [Fact]
@@ -388,12 +416,47 @@ public class ResultChainApiTests
     }
 
     [Fact]
-    public async Task TryAsync_WhenActionThrows_ShouldReturnFailure()
+    public async Task TryAsync_WhenActionThrows_ShouldReturnFailureWithoutTheExceptionText()
     {
-        var result = await ResultTryExtensions.TryAsync<int>(() => throw new InvalidOperationException("kaboom"));
+        // 非框架异常的原始消息可能带表名、约束名、主机地址；失败结果会经 ToApiResult 原样到达客户端
+        var result = await ResultTryExtensions.TryAsync<int>(() => throw new InvalidOperationException("kaboom on table Orders"));
 
         Assert.False(result.Succeeded);
-        Assert.Equal("kaboom", result.Message);
+        Assert.Equal(500, result.Code);
+        Assert.Equal(ErrorCodes.INTERNAL_SERVER_ERROR, result.ErrorCode);
+        Assert.DoesNotContain("kaboom", result.Message);
+        Assert.Null(result.ErrorDetails);
+    }
+
+    [Fact]
+    public async Task TryAsync_WhenCallerCancels_ShouldPropagateTheCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ResultTryExtensions.TryAsync<int>(() => Task.FromCanceled<int>(cts.Token)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ResultTryExtensions.TryAsync(() => Task.FromCanceled(cts.Token)));
+    }
+
+    [Fact]
+    public void Try_WhenCallerCancels_ShouldPropagateTheCancellation()
+    {
+        Assert.Throws<OperationCanceledException>(
+            () => ResultTryExtensions.Try<int>(() => throw new OperationCanceledException()));
+        Assert.Throws<OperationCanceledException>(
+            () => ResultTryExtensions.Try(() => throw new OperationCanceledException()));
+    }
+
+    [Fact]
+    public async Task TryAsync_WhenAnHttpClientTimesOut_ShouldStillReturnFailure()
+    {
+        // HttpClient 超时抛的是内含 TimeoutException 的 TaskCanceledException：那是被调用方的失败，不是调用方的取消
+        var result = await ResultTryExtensions.TryAsync<int>(
+            () => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException()));
+
+        Assert.False(result.Succeeded);
         Assert.Equal(500, result.Code);
     }
 

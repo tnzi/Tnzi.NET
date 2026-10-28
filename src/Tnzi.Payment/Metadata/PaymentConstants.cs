@@ -45,6 +45,26 @@ public static class PaymentConstants
     public const int MaxPaymentExpireMinutes = 365 * 24 * 60;
 
     /// <summary>
+    /// 用户面建单时 <c>ExtraData</c> 的长度上限（字符），64K。
+    /// </summary>
+    /// <remarks>
+    /// 这一列不限类型，而 <c>POST /payments</c> 对任何已登录用户开放：没有上限，每一笔支付都能塞进数 MB 文本
+    /// （只受请求体大小限制）。64K 装得下一份订单上下文的 JSON；服务端模块直接构造 DTO 的调用不经模型校验，不受它约束。
+    /// </remarks>
+    public const int MaxExtraDataLength = 64 * 1024;
+
+    /// <summary>
+    /// 渠道明确回报「处理中」的 off-session 扣款最多等多久（小时），七天。到点由过期清扫向渠道核实后收口。
+    /// </summary>
+    /// <remarks>
+    /// 渠道收下了这笔扣款、钱还在路上（PayPal capture 处于 PENDING：风控复核、eCheck 清算；Stripe 的 <c>processing</c>），
+    /// 落定会经回调到达。按在线收银台的默认有效期（30 分钟）过期它，订阅随即降级 PastDue 并换一个流水号再扣，
+    /// 原来那笔随后入账就是同一期扣了两次。七天覆盖 eCheck 最长的清算期；
+    /// 这期间订阅保持计费锁（不再发起新扣款，也不能被取消或过期）。
+    /// </remarks>
+    public const int OffSessionSettlementHours = 7 * 24;
+
+    /// <summary>
     /// 默认发票到期天数
     /// </summary>
     public const int DefaultInvoiceDueDays = 30;
@@ -195,6 +215,30 @@ public static class PaymentConstants
     /// 测试渠道
     /// </summary>
     public const string NullChannelCode = "Null";
+
+    #endregion
+
+    #region 对账导出响应头
+
+    /// <summary>
+    /// 对账 CSV 下载的响应头：文件里实际写入的行数。
+    /// </summary>
+    /// <remarks>
+    /// 截断的文件看起来与完整的一模一样，少掉的行会被读成对账差异；下载响应不带 JSON 信封，
+    /// 是否截断只能经这三个头带出去（摘要端点的 <c>Truncated</c> 与它们同源）。
+    /// 跨域部署的浏览器端读不到自定义响应头（框架的 <c>AspNetCore:Cors</c> 没有暴露头的配置项），浏览器里先调摘要端点判断。
+    /// </remarks>
+    public const string ReconciliationTotalRecordsHeader = "X-Reconciliation-Total-Records";
+
+    /// <summary>
+    /// 对账 CSV 下载的响应头：查询条件命中的行数（截断前）。
+    /// </summary>
+    public const string ReconciliationMatchedRecordsHeader = "X-Reconciliation-Matched-Records";
+
+    /// <summary>
+    /// 对账 CSV 下载的响应头：是否因单次导出上限而截断（<c>true</c> / <c>false</c>）。
+    /// </summary>
+    public const string ReconciliationTruncatedHeader = "X-Reconciliation-Truncated";
 
     #endregion
 

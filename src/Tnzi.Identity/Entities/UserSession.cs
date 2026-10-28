@@ -65,6 +65,27 @@ public class UserSession : EntityBase<Guid>, IHasCreationTime
     public DateTime? AbsoluteExpiresAt { get; set; }
 
     /// <summary>
+    /// 获取或设置 委派会话的分组键。<b>非 null 即委派会话</b>（经 <c>IAuthService.IssueDelegatedSessionAsync</c> 签发），
+    /// 普通登录建立的会话恒为 null。
+    /// </summary>
+    /// <remarks>
+    /// 多登录策略据它把委派会话排除在外（不占并发名额，也不会被挤掉），
+    /// <c>ISessionRevocationService.RevokeSessionGroupAsync</c> 据它按组撤销。
+    /// </remarks>
+    public string? GroupKey { get; set; }
+
+    /// <summary>
+    /// 获取或设置 委派会话在用户会话列表里的显示名。
+    /// </summary>
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// 获取或设置 委派会话的应用声明（字符串到字符串的 JSON 对象）。
+    /// 每次签发 access token（含刷新）都从这里读回，写进令牌。
+    /// </summary>
+    public string? ClaimsJson { get; set; }
+
+    /// <summary>
     /// 获取或设置 是否已撤销
     /// </summary>
     public bool IsRevoked { get; set; }

@@ -20,11 +20,13 @@ public class FeishuChannelAdapterTests
         adapter.Name.ShouldBe("feishu");
     }
 
+    // IM replies are never streamed (ChannelManager sends one message per reply), so the
+    // admin page must not advertise streaming for Feishu.
     [Fact]
-    public void SupportsStreaming_ReturnsTrue()
+    public void SupportsStreaming_ReturnsFalse()
     {
         var adapter = CreateAdapter();
-        adapter.SupportsStreaming.ShouldBeTrue();
+        adapter.SupportsStreaming.ShouldBeFalse();
     }
 
     [Fact]
@@ -369,6 +371,36 @@ public class FeishuChannelAdapterTests
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return Convert.ToHexStringLower(hash);
+    }
+
+    [Theory]
+    [InlineData("p2p", "user")]
+    [InlineData("group", "group")]
+    [InlineData(null, null)]
+    public async Task HandleEventAsync_ReportsThePeerKindFromChatType(string? chatType, string? expected)
+    {
+        // 绑定规则的 PeerKind 按它匹配：不报出来，带 PeerKind 的规则永远不会命中
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, encryptKey: null);
+
+        await adapter.HandleEventAsync(JsonSerializer.Serialize(new
+        {
+            @event = new
+            {
+                sender = new { sender_id = new { open_id = "ou_user_1" } },
+                message = new
+                {
+                    chat_id = "oc_chat_1",
+                    chat_type = chatType,
+                    message_type = "text",
+                    content = JsonSerializer.Serialize(new { text = "hi" })
+                }
+            }
+        }));
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.PeerKind.ShouldBe(expected);
     }
 
     private static async Task<InboundMessage?> TryConsumeAsync(InMemoryChannelMessageBus bus, TimeSpan timeout)

@@ -27,7 +27,6 @@ public class ToolScannerTests
         readTool.IsReadOnly.ShouldBeTrue();
         readTool.IsConcurrencySafe.ShouldBeTrue();
         readTool.IsDestructive.ShouldBeFalse();
-        readTool.MaxResultSizeChars.ShouldBe(5000);
         readTool.SearchHint.ShouldBe("read file content");
     }
 
@@ -41,7 +40,6 @@ public class ToolScannerTests
         defaultTool.IsReadOnly.ShouldBeFalse();
         defaultTool.IsConcurrencySafe.ShouldBeFalse();
         defaultTool.IsDestructive.ShouldBeFalse();
-        defaultTool.MaxResultSizeChars.ShouldBe(0); // 0 = 不限制
         defaultTool.SearchHint.ShouldBeNull();
     }
 
@@ -180,7 +178,7 @@ public class ToolScannerTests
     {
         [AIFunction("safe_read", "Read a file safely",
             IsReadOnly = true, IsConcurrencySafe = true, IsDestructive = false,
-            MaxResultSizeChars = 5000, SearchHint = "read file content",
+            SearchHint = "read file content",
             Aliases = "read,cat", Category = "io")]
         public Task<string> SafeReadAsync() => Task.FromResult("content");
 

@@ -12,7 +12,10 @@ public class SlackAdapterOptions
     /// <summary>Bot token (xoxb- prefix). Inject via env var AI__CHANNELS__SLACK__BOTTOKEN.</summary>
     public string? BotToken { get; set; }
 
-    /// <summary>App-level token (xapp- prefix) for Socket Mode.</summary>
+    /// <summary>
+    /// Reserved; not read. The adapter receives events over the HTTP Events API webhook only;
+    /// Socket Mode is not implemented.
+    /// </summary>
     public string? AppToken { get; set; }
 
     /// <summary>Signing secret for webhook signature verification.</summary>

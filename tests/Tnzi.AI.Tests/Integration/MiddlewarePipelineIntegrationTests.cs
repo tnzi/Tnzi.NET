@@ -93,40 +93,27 @@ public class MiddlewarePipelineIntegrationTests
     #region 2. Quota Enforcement
 
     /// <summary>
-    /// 测试 QuotaMiddleware 配额用尽后拒绝请求
+    /// 测试 QuotaMiddleware 用量到上限后拒绝请求
     /// </summary>
     public class QuotaEnforcementTests : AiIntegrationTestBase
     {
-        private readonly Mock<IQuotaService> _quotaServiceMock = new();
+        private readonly Mock<IUsageLimitService> _usageLimitsMock = UsageLimitMocks.Allowing();
         private int _callCount;
 
         protected override void ConfigureMiddlewares(IServiceCollection services)
         {
-            // 第一次调用允许，后续拒绝（模拟配额耗尽）
-            _quotaServiceMock
-                .Setup(q => q.ReserveQuotaAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() =>
+            // 第一次调用允许，后续拒绝（模拟到上限）
+            _usageLimitsMock
+                .Setup(q => q.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid userId, CancellationToken _) =>
                 {
                     var count = Interlocked.Increment(ref _callCount);
-                    if (count <= 1)
-                    {
-                        return Result<QuotaReservation>.Success(new QuotaReservation
-                        {
-                            ReservedTokens = 100,
-                            ReservedAt = DateTime.UtcNow
-                        });
-                    }
-                    // 错误码是「是否真的超限」的判据（QuotaMiddleware.IsQuotaExceeded），真实服务始终带码
-                    return Result<QuotaReservation>.Failure("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded);
+                    return count <= 1
+                        ? Result<UsageLimitReservation>.Success(new UsageLimitReservation(userId, DateTime.UtcNow))
+                        : UsageLimitMocks.Denial();
                 });
 
-            _quotaServiceMock
-                .Setup(q => q.SettleQuotaAsync(
-                    It.IsAny<Guid>(), It.IsAny<QuotaReservation>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(Result.Success());
-
-            services.AddSingleton(_quotaServiceMock.Object);
-            services.AddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
+            services.AddSingleton(_usageLimitsMock.Object);
             // Budget service mock - always allow
             var budgetMock = new Mock<IBudgetService>();
             budgetMock.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -135,9 +122,8 @@ public class MiddlewarePipelineIntegrationTests
 
             services.AddSingleton<IAiMiddleware>(sp =>
                 new QuotaMiddleware(
-                    sp.GetRequiredService<IQuotaService>(),
+                    sp.GetRequiredService<IUsageLimitService>(),
                     sp.GetRequiredService<IBudgetService>(),
-                    sp.GetRequiredService<ITokenEstimator>(),
                     NullLogger<QuotaMiddleware>.Instance));
         }
 
@@ -178,7 +164,9 @@ public class MiddlewarePipelineIntegrationTests
             // Assert
             result.ShouldNotBeNull();
             result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
-            result.Response.ShouldContain("quota exceeded", Case.Insensitive);
+            result.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+            result.UsageLimitWindow.ShouldBe(UsageLimitWindow.Session);
+            result.Response.ShouldContain("usage limit", Case.Insensitive);
         }
 
         [Fact]
@@ -212,9 +200,13 @@ public class MiddlewarePipelineIntegrationTests
             var stream = Runtime.RunStreamingAsync(request);
             var result = await StreamingTestHelper.CollectStreamAsync(stream);
 
-            // Assert
+            // Assert：拒绝以错误块交出（带码与窗口），不混进回答正文
             result.FinishReason.ShouldBe(FinishReasons.QuotaExceeded);
-            result.FullText.ShouldContain("quota exceeded", Case.Insensitive);
+            result.FullText.ShouldBeEmpty();
+            var error = result.ErrorChunks.ShouldHaveSingleItem();
+            error.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+            error.UsageLimitWindow.ShouldBe(UsageLimitWindow.Session);
+            error.UsageLimitResetsAt.ShouldNotBeNull();
         }
     }
 
@@ -238,7 +230,7 @@ public class MiddlewarePipelineIntegrationTests
                 .ReturnsAsync((Guid? threadId, Guid? agentId, CancellationToken ct) =>
                 {
                     var tid = threadId ?? Guid.NewGuid();
-                    return (new ConversationContext(), tid, threadId == null);
+                    return (tid, threadId == null);
                 });
 
             _threadServiceMock
@@ -508,7 +500,7 @@ public class MiddlewarePipelineIntegrationTests
     /// </summary>
     public class StreamingPipelineTests : AiIntegrationTestBase
     {
-        private readonly Mock<IQuotaService> _quotaServiceMock = new();
+        private readonly Mock<IUsageLimitService> _usageLimitsMock = UsageLimitMocks.Allowing();
 
         protected override void ConfigureAiOptions(AIOptions options)
         {
@@ -532,21 +524,8 @@ public class MiddlewarePipelineIntegrationTests
                     sp.GetRequiredService<GuardrailRunner>(),
                     NullLogger<InputGuardrailMiddleware>.Instance));
 
-            // Quota (always allow)
-            _quotaServiceMock
-                .Setup(q => q.ReserveQuotaAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(Result<QuotaReservation>.Success(new QuotaReservation
-                {
-                    ReservedTokens = 1000,
-                    ReservedAt = DateTime.UtcNow
-                }));
-            _quotaServiceMock
-                .Setup(q => q.SettleQuotaAsync(
-                    It.IsAny<Guid>(), It.IsAny<QuotaReservation>(), It.IsAny<long>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(Result.Success());
-
-            services.AddSingleton(_quotaServiceMock.Object);
-            services.AddSingleton<ITokenEstimator, HeuristicTokenEstimator>();
+            // Usage limits (always allow)
+            services.AddSingleton(_usageLimitsMock.Object);
             // Budget service mock - always allow
             var budgetMock = new Mock<IBudgetService>();
             budgetMock.Setup(x => x.CheckBudgetAsync(It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -555,9 +534,8 @@ public class MiddlewarePipelineIntegrationTests
 
             services.AddSingleton<IAiMiddleware>(sp =>
                 new QuotaMiddleware(
-                    sp.GetRequiredService<IQuotaService>(),
+                    sp.GetRequiredService<IUsageLimitService>(),
                     sp.GetRequiredService<IBudgetService>(),
-                    sp.GetRequiredService<ITokenEstimator>(),
                     NullLogger<QuotaMiddleware>.Instance));
 
             // LoopDetection
@@ -618,9 +596,9 @@ public class MiddlewarePipelineIntegrationTests
             result.Usage.ShouldNotBeNull();
             result.Usage!.InputTokens.ShouldBeGreaterThan(0);
 
-            // Quota 服务应被调用
-            _quotaServiceMock.Verify(q =>
-                q.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()),
+            // 用量上限：一轮开一次窗口、结算一次
+            _usageLimitsMock.Verify(q => q.BeginAsync(userId, It.IsAny<CancellationToken>()), Times.Once);
+            _usageLimitsMock.Verify(q => q.SettleAsync(It.Is<UsageLimitReservation>(r => r.UserId == userId), It.IsAny<decimal>(), It.IsAny<CancellationToken>()),
                 Times.Once);
         }
     }

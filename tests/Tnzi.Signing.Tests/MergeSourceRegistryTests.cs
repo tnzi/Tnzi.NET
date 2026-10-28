@@ -24,6 +24,22 @@ public class MergeSourceRegistryTests
             => Task.CompletedTask;
     }
 
+    /// <summary>只解析不描述的 provider：<see cref="IMergeSourceProvider.Describe"/> 还没有调用方，不必为它写一个空实现。</summary>
+    private sealed class ResolveOnlyProvider : IMergeSourceProvider
+    {
+        public string EntityType => "Matter";
+        public Task<IReadOnlyDictionary<string, object?>> ResolveAsync(Guid entityId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
+    }
+
+    [Fact]
+    public void A_provider_that_does_not_describe_its_variables_describes_none()
+    {
+        IMergeSourceProvider provider = new ResolveOnlyProvider();
+
+        provider.Describe().ShouldBeEmpty();
+    }
+
     [Fact]
     public void A_registered_provider_is_found_by_its_host_type()
     {

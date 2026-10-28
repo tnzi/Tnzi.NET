@@ -1,3 +1,4 @@
+using PdfSharp.Fonts;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 
@@ -14,12 +15,24 @@ namespace Tnzi.Documents.Services;
 /// Y 轴向下，与本包的归一化坐标同向；PDF 原生的左下角原点只在**读**的那一侧出现。
 /// 在这里再翻一次 Y 是最容易犯的错，<c>NormalizedCoordinateTests</c> 把这条钉死。</para>
 /// <para>文本不自动换行（<see cref="XGraphics.DrawString(string, XFont, XBrush, XRect, XStringFormat)"/>
-/// 的语义），需要多行由调用方拆成多个 <see cref="PdfTextStamp"/>。页面 <c>/Rotate</c> 不做补偿。</para>
+/// 的语义），需要多行由调用方拆成多个 <see cref="PdfTextStamp"/>，宽度按 <see cref="MeasureTextWidth"/> 量；
+/// 量与画共用 <see cref="CreateFont"/>，所以量出来的就是画出来的。页面 <c>/Rotate</c> 不做补偿。</para>
+/// <para><b>字体画不出的字符拒绝，不画成空框。</b> 默认字体解析器只找拉丁系的系统 sans（见 <c>DocumentFontResolver</c>），
+/// 中日韩等文字在其中没有字形，PDFsharp 会一声不响地画成 .notdef 方框：对签署而言那是一份带着方框、
+/// 却已算好哈希出了证书的成品。盖章前逐字符核对字形覆盖，缺字形时抛 <see cref="PdfDocumentException"/>。
+/// 要画这些文字，在第一次盖章之前装一个把 <c>TnziDocumentSans</c> 解析到覆盖该文字的字体的
+/// <see cref="GlobalFontSettings.FontResolver"/>（本包只在没人装过时才装自己的）。</para>
 /// </remarks>
 public sealed class PdfSharpPdfStamper : IPdfStamper
 {
     /// <summary>文本框高度为 0 时按字号的多少倍补一行高。</summary>
     private const double LineHeightFactor = 1.4d;
+
+    /// <summary>字号不大于 0 时的默认字号（量与画同一个值）。</summary>
+    private const double DefaultFontSize = 10d;
+
+    /// <summary>量字用的虚拟画布边长（pt）。量的结果与画布大小无关，只是 PDFsharp 要一个尺寸。</summary>
+    private const double MeasureCanvasPoints = 1000d;
 
     private readonly ILogger<PdfSharpPdfStamper> _logger;
 
@@ -65,6 +78,23 @@ public sealed class PdfSharpPdfStamper : IPdfStamper
         return Build(document, request);
     }
 
+    /// <inheritdoc />
+    public double MeasureTextWidth(string text, double fontSize, bool bold = false, bool italic = false)
+    {
+        Check.NotNull(text);
+
+        if (text.Length == 0)
+            return 0d;
+
+        RequireFont();
+
+        using var context = XGraphics.CreateMeasureContext(
+            new XSize(MeasureCanvasPoints, MeasureCanvasPoints),
+            XGraphicsUnit.Point,
+            XPageDirection.Downwards);
+        return context.MeasureString(text, CreateFont(fontSize, bold, italic)).Width;
+    }
+
     /// <summary>造页 → 绘制 → 保存。<c>Stamp</c> 与 <c>Create</c> 只在「文档从哪来」上不同。</summary>
     private byte[] Build(PdfDocument document, PdfStampRequest request)
     {
@@ -96,16 +126,83 @@ public sealed class PdfSharpPdfStamper : IPdfStamper
         }
     }
 
-    /// <summary>只有真要画文字时才要求字体（见 <see cref="Stamp"/> 里的同款判断）。</summary>
+    /// <summary>只有真要画文字时才要求字体（见 <see cref="Stamp"/> 里的同款判断），并核对每段文字的字形覆盖。</summary>
     private void RequireFontIfDrawingText(PdfStampRequest request)
     {
-        if (request.Stamps.Any(stamp => stamp is PdfTextStamp) && !DocumentFontResolver.EnsureReady(_logger))
+        if (!request.Stamps.Any(stamp => stamp is PdfTextStamp))
+            return;
+
+        RequireFont();
+
+        foreach (var text in request.Stamps.OfType<PdfTextStamp>())
+            RequireGlyphCoverage(text);
+    }
+
+    /// <summary>
+    /// 解析到的字体必须画得出这段文字的每一个可见字符；缺字形的字符 PDFsharp 会画成 .notdef 方框而不报任何错。
+    /// </summary>
+    /// <remarks>
+    /// 字形查的是与 <see cref="DrawText"/> 同一个 <see cref="XFont"/>（同一份字体解析结果），查到字形号 0 即缺。
+    /// 控制字符与格式字符（换行、制表、零宽连接符等）不画任何东西，不参与核对。
+    /// 异常消息里不放字体文件路径（它会被转述到调用方），路径记在日志里。
+    /// </remarks>
+    private void RequireGlyphCoverage(PdfTextStamp stamp)
+    {
+        if (string.IsNullOrEmpty(stamp.Text))
+            return;
+
+        var font = CreateFont(stamp.FontSize, stamp.Bold, stamp.Italic);
+        foreach (var pair in GlyphHelper.GlyphIndicesFromString(stamp.Text, font))
+        {
+            if (pair.GlyphIndex != 0 || IsInvisible(pair.CodePoint))
+                continue;
+
+            var character = char.ConvertFromUtf32(pair.CodePoint);
+            _logger.LogWarning(
+                "Refusing to stamp text: the character U+{CodePoint:X4} has no glyph in the resolved font ({FontPath}).",
+                pair.CodePoint, DocumentFontResolver.ResolvedFontPath ?? "a font resolver installed by another component");
+            throw new PdfDocumentException(
+                $"The text to stamp contains the character '{character}' (U+{pair.CodePoint:X4}), which the resolved font cannot draw; "
+                + "it would print as an empty box. Install a PDFsharp font resolver that maps the document font to a font covering this script "
+                + "before the first stamp, or remove the character.");
+        }
+    }
+
+    private static bool IsInvisible(int codePoint)
+    {
+        if (codePoint is < 0 or > 0x10FFFF || codePoint is >= 0xD800 and <= 0xDFFF)
+            return false;
+
+        var category = CharUnicodeInfo.GetUnicodeCategory(codePoint);
+        return category is UnicodeCategory.Control or UnicodeCategory.Format;
+    }
+
+    private void RequireFont()
+    {
+        if (!DocumentFontResolver.EnsureReady(_logger))
         {
             throw new PdfDocumentException(
                 "No usable system font was found, so text cannot be drawn on the PDF. " +
                 "Install a sans-serif font (for example DejaVu or Liberation) in the runtime image.");
         }
     }
+
+    /// <summary>
+    /// 盖章文字用的字体。<see cref="DrawText"/> 与 <see cref="MeasureTextWidth"/> 共用这一处：
+    /// 两边各建一份，迟早会出现「量的是常规体、画的是粗体」，量出来的宽度就不再是画出来的宽度。
+    /// </summary>
+    private static XFont CreateFont(double fontSize, bool bold, bool italic)
+    {
+        var style = XFontStyleEx.Regular;
+        if (bold)
+            style |= XFontStyleEx.Bold;
+        if (italic)
+            style |= XFontStyleEx.Italic;
+
+        return new XFont(DocumentFontResolver.FamilyName, EffectiveFontSize(fontSize), style);
+    }
+
+    private static double EffectiveFontSize(double fontSize) => fontSize > 0 ? fontSize : DefaultFontSize;
 
     private static PdfDocument OpenForModify(Stream input)
     {
@@ -182,15 +279,8 @@ public sealed class PdfSharpPdfStamper : IPdfStamper
         if (string.IsNullOrEmpty(stamp.Text))
             return;
 
-        var fontSize = stamp.FontSize > 0 ? stamp.FontSize : 10d;
-        var style = XFontStyleEx.Regular;
-        if (stamp.Bold)
-            style |= XFontStyleEx.Bold;
-        if (stamp.Italic)
-            style |= XFontStyleEx.Italic;
-
-        var font = new XFont(DocumentFontResolver.FamilyName, fontSize, style);
-        var rect = NormalizedCoordinates.ToPageRect(stamp.Rect, pageWidth, pageHeight, fontSize * LineHeightFactor);
+        var font = CreateFont(stamp.FontSize, stamp.Bold, stamp.Italic);
+        var rect = NormalizedCoordinates.ToPageRect(stamp.Rect, pageWidth, pageHeight, EffectiveFontSize(stamp.FontSize) * LineHeightFactor);
 
         graphics.DrawString(stamp.Text, font, ResolveBrush(stamp.Color), rect, ResolveFormat(stamp.Alignment));
     }

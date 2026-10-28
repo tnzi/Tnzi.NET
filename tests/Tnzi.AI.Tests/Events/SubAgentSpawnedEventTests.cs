@@ -30,7 +30,7 @@ public class SubAgentSpawnedEventTests
             runStore,
             subAgentRegistry ?? Mock.Of<ISubAgentRegistry>(),
             new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             DefaultOptions());
@@ -97,12 +97,13 @@ public class SubAgentSpawnedEventTests
         services.AddSingleton(eventBus.Object);
         var provider = services.BuildServiceProvider();
 
+        var runStore = CreateRunStore(childRunId, agentId, threadId);
         var service = new SubAgentExecutionService(
             CreateResolver(agentId),
-            CreateRunStore(childRunId, agentId, threadId),
+            runStore,
             registry.Object,
             new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             DefaultOptions());
@@ -183,12 +184,13 @@ public class SubAgentSpawnedEventTests
         services.AddSingleton(eventBus.Object);
         var provider = services.BuildServiceProvider();
 
+        var runStore = CreateRunStore(childRunId);
         var service = new SubAgentExecutionService(
             CreateResolver(),
-            CreateRunStore(childRunId),
+            runStore,
             Mock.Of<ISubAgentRegistry>(),
             executionContext,
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             DefaultOptions());

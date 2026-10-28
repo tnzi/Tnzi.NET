@@ -218,15 +218,20 @@ public class JournalEntryService : ApplicationService, IJournalEntryService, IDo
     }
 
     /// <summary>
-    /// 核心自带的、有单据级作废端点的来源令牌 —— 它们的凭证只能经单据 void 撤销。
+    /// 核心自带的、有单据级撤销端点的来源令牌：它们的凭证只能经单据自己的撤销路径处理。
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>刻意不用 <see cref="FinanceSourceTypes.All"/></b>：那份清单还含
-    /// <see cref="FinanceSourceTypes.Revaluation"/> 与 <see cref="FinanceSourceTypes.PaymentApplication"/>，
-    /// 而这两者<b>没有</b>单据级作废端点 —— 期末重估的唯一撤销路径恰恰就是从总账冲销
-    /// （<c>RevaluationService</c> 自己的错误消息写着「Reverse it before revaluing an earlier or equal date」）。
-    /// 把它们一起拦下会堵死一条既定流程。
+    /// <see cref="FinanceSourceTypes.Revaluation"/>，而它<b>没有</b>单据级作废端点：
+    /// 期末重估的唯一撤销路径恰恰就是从总账冲销（<c>RevaluationService</c> 自己的错误消息写着
+    /// 「Reverse it before revaluing an earlier or equal date」）。把它一起拦下会堵死一条既定流程。
+    /// </para>
+    /// <para>
+    /// <see cref="FinanceSourceTypes.PaymentApplication"/>（核销产生的 realized FX 凭证）<b>在</b>清单内：
+    /// 它的撤销端点是撤销核销（<c>SettlementService.UnapplyAsync</c>），后者直接经冲销漏斗处理这张凭证、
+    /// 不走本道门。核销还在时从总账冲销它，AR/AP 控制科目多出一笔而单据仍是 Paid，
+    /// 账龄合计与控制科目从此对不上。
     /// </para>
     /// <para>
     /// 核心新增带 <c>VoidAsync</c> 的单据类型时要同步加进来，否则它的凭证又可以从总账绕过去。
@@ -242,6 +247,8 @@ public class JournalEntryService : ApplicationService, IJournalEntryService, IDo
         FinanceSourceTypes.CreditMemo,
         FinanceSourceTypes.Expense,
         FinanceSourceTypes.PaymentEntry,
+        // realized FX 凭证：撤销路径是撤销核销（见上方 remarks）
+        FinanceSourceTypes.PaymentApplication,
         FinanceSourceTypes.Transfer,
         // 存款单尤其不能从总账绕过去：那样凭证冲销了、单据仍是 Posted，
         // 它收走的那几张收款也还被声明占着，永远回不到候选清单。
@@ -289,6 +296,10 @@ public class JournalEntryService : ApplicationService, IJournalEntryService, IDo
     {
         Check.NotNull(input);
 
+        var memoTooLong = FinanceFieldLimits.FirstTooLong((input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"));
+        if (memoTooLong != null)
+            return Fail<JournalEntryDto>(memoTooLong, 400);
+
         var original = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)
             .FirstOrDefaultAsync(e => e.Id == id, cancellationToken);
@@ -325,8 +336,12 @@ public class JournalEntryService : ApplicationService, IJournalEntryService, IDo
         else if (!string.IsNullOrEmpty(original.SourceType)
             && _documentProjectedSourceTypes.Contains(original.SourceType))
         {
+            // 核销没有「作废」，它的撤销叫撤销核销；指路要说对操作员能找到的那个按钮
+            var undo = string.Equals(original.SourceType, FinanceSourceTypes.PaymentApplication, StringComparison.Ordinal)
+                ? "Unapply that settlement instead"
+                : "Void that document instead";
             return Fail<JournalEntryDto>(
-                $"This entry was posted from a {original.SourceType}. Void that document instead so its status and the ledger stay in sync.",
+                $"This entry was posted from a {original.SourceType}. {undo} so its status and the ledger stay in sync.",
                 409);
         }
 
@@ -386,6 +401,10 @@ public class JournalEntryService : ApplicationService, IJournalEntryService, IDo
     /// </summary>
     private async Task<Result> ValidateDraftInputAsync(CreateJournalEntryDto input, CancellationToken cancellationToken)
     {
+        var memoTooLong = FinanceFieldLimits.FirstTooLong((input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (input.Lines == null || input.Lines.Count == 0)
             return Fail("At least one line is required.");
         if (input.Lines.Count > _options.MaxLinesPerEntry)

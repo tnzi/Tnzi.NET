@@ -49,21 +49,13 @@ public class PaymentOptions
     /// 默认支付完成后的浏览器跳转地址。
     /// </summary>
     /// <remarks>
-    /// 与 <see cref="DefaultNotifyUrl"/> 是两回事：return 是付款人浏览器回到的页面，
-    /// notify 是渠道服务端回调本系统的地址。此前二者混用会把 webhook 地址塞进 ReturnUrl。
+    /// 只管付款人浏览器回到的页面。渠道服务端回调本系统的地址（webhook）不在这里配：
+    /// 它在渠道后台登记（Stripe / PayPal 都是），指向 <c>/api/payments/callback/{渠道}</c>。
     /// </remarks>
     [RuntimeSetting(Label = "Default Return URL", I18n = "admin.modules.system.settings.fields.paymentDefaultReturnUrl",
         Type = SettingFieldType.String,
         Description = "Where the payer's browser lands after completing payment")]
     public string? DefaultReturnUrl { get; set; }
-
-    /// <summary>
-    /// 默认异步通知（webhook）地址：渠道服务端回调本系统的地址，仅部分渠道（如 PayPal）需要在建单时告知。
-    /// </summary>
-    [RuntimeSetting(Label = "Default Notify URL", I18n = "admin.modules.system.settings.fields.defaultNotifyUrl",
-        Type = SettingFieldType.String,
-        Description = "Server-to-server webhook address reported to channels that require it")]
-    public string? DefaultNotifyUrl { get; set; }
 
     /// <summary>
     /// 允许作为付款人回跳目标的主机名清单（精确匹配，大小写不敏感）。
@@ -116,6 +108,19 @@ public class PaymentOptions
     [RuntimeSetting(Label = "Enable Refund Approval", I18n = "admin.modules.system.settings.fields.enableRefundApproval",
         Type = SettingFieldType.Boolean)]
     public bool EnableRefundApproval { get; set; } = true;
+
+    /// <summary>
+    /// 付款方能否自己发起退款申请（用户面 <c>POST /refunds</c>）。默认 true，与引入这一项之前相同。
+    /// </summary>
+    /// <remarks>
+    /// 关掉之后退款只能由运营方经管理端发起（<c>payment.refund.create</c>）：按月向客户收服务费的部署里，
+    /// 「客户自己点一下就把这个月的服务费退回去」不是一个该存在的按钮，哪怕后面还有一道审批。
+    /// 关着时用户面答 403 <c>PAYMENT_REFUND_REQUESTS_DISABLED</c>；查看自己的退款记录不受影响。
+    /// </remarks>
+    [RuntimeSetting(Label = "Allow Customer Refund Requests", I18n = "admin.modules.system.settings.fields.paymentAllowCustomerRefundRequests",
+        Type = SettingFieldType.Boolean,
+        Description = "Let payers request refunds themselves; when off, only administrators can raise refunds")]
+    public bool AllowCustomerRefundRequests { get; set; } = true;
 
     /// <summary>
     /// 支付渠道配置：键是渠道代码（<c>Stripe</c> / <c>PayPal</c> / <c>Offline</c> …），
@@ -224,4 +229,20 @@ public class TaxOptions
         Type = SettingFieldType.Boolean,
         Description = "When enabled the listed price already contains tax; tax is only itemised on the invoice")]
     public bool TaxIncluded { get; set; }
+
+    /// <summary>
+    /// 税种名，印在收据与发票的税额行上（例如 <c>HST</c>，行文为「HST 13%」）。默认 <c>Tax</c>。
+    /// </summary>
+    [RuntimeSetting(Label = "Tax Name", I18n = "admin.modules.system.settings.fields.paymentTaxName",
+        Type = SettingFieldType.String,
+        Description = "Name printed on the tax line of receipts and invoices, e.g. HST")]
+    public string Name { get; set; } = "Tax";
+
+    /// <summary>
+    /// 卖方在这个税种下的登记号（例如加拿大的 GST/HST 号），印在税额行上。默认空 = 不印。
+    /// </summary>
+    [RuntimeSetting(Label = "Tax Registration Number", I18n = "admin.modules.system.settings.fields.paymentTaxRegistrationNumber",
+        Type = SettingFieldType.String,
+        Description = "Your registration number for this tax, printed next to the tax line")]
+    public string? RegistrationNumber { get; set; }
 }

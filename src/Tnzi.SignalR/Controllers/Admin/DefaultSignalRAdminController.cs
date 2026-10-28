@@ -4,9 +4,15 @@ namespace Tnzi.SignalR.Controllers;
 /// Default SignalR admin controller (activated by HostingModule).
 /// Provides connection statistics, online user queries, and connection detail endpoints.
 /// </summary>
+/// <remarks>
+/// Host-only when multi-tenancy is enabled: the connection registry is process-wide and its
+/// metadata has no tenant dimension, so a tenant caller gets 403 from <see cref="HostContextOnlyFilter"/>
+/// on every endpoint (see that filter for why it is a class-level filter rather than a check in each action).
+/// </remarks>
 [Route("admin/signalr")]
 [DefaultController]
 [ApiAuthorize(PermissionName = "system.signalr.view")]
+[TypeFilter(typeof(HostContextOnlyFilter))]
 public class DefaultSignalRAdminController : ApiAdminControllerBase
 {
     protected readonly IConnectionManager ConnectionManager;

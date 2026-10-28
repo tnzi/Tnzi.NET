@@ -103,6 +103,11 @@ export interface CreateEnvelopeTemplateDto {
   sourceFileId?: string | null;
   sourceFileName?: string | null;
   renderedPdfFileId?: string | null;
+  /**
+   * Checked against `Absolute` field pages of a `Composed` template. An
+   * `Uploaded` template's page count is read from its rendered PDF; the value
+   * sent here is ignored.
+   */
   pageCount: number;
   requiresWetSignature: boolean;
   isActive: boolean;
@@ -168,7 +173,8 @@ export interface EnvelopeDto {
   /**
    * Completion certificate - a SEPARATE PDF recording who signed when and from
    * where, carrying the hash above. Completed but null = certificate generation
-   * failed; the sealed document itself is still valid.
+   * failed; the sealed document itself is still valid, and sealing the request
+   * again produces the certificate.
    */
   completionCertificateFileId?: string | null;
   recipients: SignerDto[];
@@ -214,8 +220,8 @@ export interface CreateEnvelopeDto {
  * One freshly issued signing link.
  *
  * ★ `token` is PLAINTEXT and is returned by `send` ONCE - the store only keeps a
- * hash. Whatever receives this must dispatch it immediately; losing it means
- * re-sending, which invalidates the previous link.
+ * hash. Whatever receives this must dispatch it immediately: a lost link
+ * cannot be re-issued, the request would have to be voided and started again.
  */
 export interface IssuedSigningLink {
   recipientId: string;

@@ -1,4 +1,6 @@
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using Tnzi.EFCore.Extensions;
 using Microsoft.Extensions.Logging;
 using Tnzi.Finance.Events;
 using Tnzi.Finance.Banking.Events.Handlers;
@@ -10,6 +12,17 @@ namespace Tnzi.Finance.Tests.Integration;
 /// </summary>
 public class CheckPrintingTests : FinanceIntegrationTestBase
 {
+    private readonly StubLineHook _stubHook = new();
+
+    protected override void ConfigureServices(IServiceCollection services)
+    {
+        base.ConfigureServices(services);
+        // 存根附加行在「已开过票」检查之后、开票事务之前被问一次：竞态用例在那里插入另一个出纳。
+        // 平时不挂动作、不给任何附加行，与未注册提供者逐字相同。
+        services.AddSingleton(_stubHook);
+        services.AddScoped<ICheckStubLineProvider, HookedStubLineProvider>();
+    }
+
     private Task<Guid> BankLedgerIdAsync() => AccountIdByCodeAsync("1120");
 
     private async Task<Guid> CreateBankAccountAsync(long nextCheckNumber = 1, CheckStockType stock = CheckStockType.PrePrinted)
@@ -74,6 +87,63 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         csv.Data!.ShouldContain("CheckNumber,Amount,IssueDate,Payee,Status");
         csv.Data!.ShouldContain("Issued");
         csv.Data!.ShouldContain("Acme Supplies");
+    }
+
+    /// <summary>
+    /// ★★ 早先签发、本期作废（挂失重打）的票必须出现在本期清单里，标 Void、保留原签发日。
+    /// </summary>
+    /// <remarks>
+    /// 作废不改签发日。只按签发日圈选时，本期清单只有替换票，原票在银行那边仍是有效票，被兑现就是付第二次。
+    /// </remarks>
+    [Fact]
+    public async Task ExportPositivePay_IncludesChecksVoidedInTheWindow_WithTheirOriginalIssueDate()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        var issueDate = DateTime.UtcNow.Date.AddDays(-30);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment }, IssueDate = issueDate })).Succeeded.ShouldBeTrue();
+        var original = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }))).Data!.Items.Single();
+
+        var reprint = await InScopeAsync<ICheckService, Result<CheckFileDto>>(s => s.ReprintAsync(original.Id));
+        reprint.Succeeded.ShouldBeTrue(reprint.Message);
+
+        var today = DateTime.UtcNow.Date;
+        var csv = await InScopeAsync<ICheckService, Result<string>>(s => s.ExportPositivePayAsync(bank, today, today));
+        csv.Succeeded.ShouldBeTrue(csv.Message);
+        var rows = csv.Data!.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(r => r.TrimEnd('\r')).ToList();
+        rows.ShouldContain(r => r.StartsWith("1,") && r.Contains(issueDate.ToString("yyyy-MM-dd")) && r.EndsWith(",Void"));
+        rows.ShouldContain(r => r.StartsWith("2,") && r.EndsWith(",Issued"));
+
+        // 签发那一期的清单照旧列出它（此时已是 Void）。
+        var issueWindow = await InScopeAsync<ICheckService, Result<string>>(s => s.ExportPositivePayAsync(bank, issueDate, issueDate));
+        var issueRows = issueWindow.Data!.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1).Select(r => r.TrimEnd('\r')).ToList();
+        issueRows.ShouldHaveSingleItem().ShouldEndWith(",Void");
+    }
+
+    /// <summary>对照：作废时刻不在窗口内、签发日也不在窗口内的票不出现。</summary>
+    [Fact]
+    public async Task ExportPositivePay_LeavesOutChecksIssuedAndVoidedOutsideTheWindow()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        var issueDate = DateTime.UtcNow.Date.AddDays(-30);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment }, IssueDate = issueDate })).Succeeded.ShouldBeTrue();
+        var original = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }))).Data!.Items.Single();
+        (await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.VoidAsync(original.Id, new VoidCheckDto { Reason = "Lost" }))).Succeeded.ShouldBeTrue();
+
+        var lastWeek = DateTime.UtcNow.Date.AddDays(-7);
+        var csv = await InScopeAsync<ICheckService, Result<string>>(s => s.ExportPositivePayAsync(bank, lastWeek, lastWeek));
+
+        csv.Succeeded.ShouldBeTrue(csv.Message);
+        csv.Data!.Trim().ShouldBe("CheckNumber,Amount,IssueDate,Payee,Status");
     }
 
     /// <summary>回归：Blank 票纸须现打 MICR 行，无 scheme 有效路由时打印须 fail-fast（否则打出空路由字段的
@@ -177,6 +247,7 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         }));
         spoil.Succeeded.ShouldBeTrue(spoil.Message);
         spoil.Data!.Status.ShouldBe(CheckStatus.Spoiled);
+        (await ReloadAsync<BankCheck>(spoil.Data.Id))!.VoidedTime.ShouldNotBeNull("毁票同样是失效的票，positive-pay 要按失效时刻报给银行");
 
         var entity = await ReloadAsync<BankAccount>(bank);
         entity!.NextCheckNumber.ShouldBe(2);
@@ -197,6 +268,122 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         voided.Succeeded.ShouldBeTrue(voided.Message);
         voided.Data!.Status.ShouldBe(CheckStatus.Void);
         voided.Data.VoidReason.ShouldBe("Lost");
+        (await ReloadAsync<BankCheck>(check.Id))!.VoidedTime.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// 队列只排除「已有有效（Issued）支票」的付款：票被作废后，这笔付款回到队列等着重开。
+    /// </summary>
+    [Fact]
+    public async Task Queue_ExcludesIssuedChecksOnly_AVoidedCheckReturnsThePayment()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var printed = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        var waiting = await CreatePostedCheckPaymentAsync(ledger, vendor, 250m);
+        await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { printed } });
+
+        var queue = await InScopeAsync<ICheckService, Result<List<CheckQueueItemDto>>>(s => s.GetQueueAsync(null));
+        queue.Data!.Select(q => q.PaymentEntryId).ShouldBe(new[] { waiting });
+        queue.Data![0].Amount.ShouldBe(250m);
+        queue.Data[0].BankAccountId.ShouldBe(bank);
+
+        var check = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }))).Data!.Items[0];
+        (await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.VoidAsync(check.Id, new VoidCheckDto { Reason = "Lost" }))).Succeeded.ShouldBeTrue();
+
+        var after = await InScopeAsync<ICheckService, Result<List<CheckQueueItemDto>>>(s => s.GetQueueAsync(null));
+        after.Data!.Select(q => q.PaymentEntryId).OrderBy(id => id).ShouldBe(new[] { printed, waiting }.OrderBy(id => id));
+    }
+
+    // ── 下一张支票号设到已用过的号上 ─────────────────────────────────────────
+    //
+    // 把下一号设回一个已经开过的号，此后每一次打印都撞唯一索引、回滚又把计数器恢复到同一个号，
+    // 于是永远 409「Reload and retry」：重新加载帮不上忙，消息也不指向真正该改的那个设置。
+
+    [Fact]
+    public async Task SetNextCheckNumber_ToANumberAlreadyUsed_Returns400_NamingTheNextFreeNumber()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync(nextCheckNumber: 1001);
+        var vendor = await CreateVendorAsync();
+        var p1 = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        var p2 = await CreatePostedCheckPaymentAsync(ledger, vendor, 200m);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { p1, p2 } })).Succeeded.ShouldBeTrue();
+
+        var set = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(
+            s => s.SetNextCheckNumberAsync(bank, new SetNextCheckNumberDto { NextCheckNumber = 1001 }));
+
+        set.Succeeded.ShouldBeFalse();
+        set.Code.ShouldBe(400);
+        set.Message!.ShouldContain("1001");
+        set.Message!.ShouldContain("1003");
+        (await ReloadAsync<BankAccount>(bank))!.NextCheckNumber.ShouldBe(1003);
+    }
+
+    /// <summary>
+    /// 计数器已经指向一个被占用的号（早于上面那道校验写进库的、或数据导入留下的）：
+    /// 打印的 409 要指向真正该改的设置，而不是只说「重新加载再试」。
+    /// </summary>
+    [Fact]
+    public async Task Print_WhenTheNextNumberIsAlreadyUsed_Returns409_PointingAtTheNextNumberSetting()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync(nextCheckNumber: 7);
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        await InScopeAsync<IRepository<BankCheck, Guid>, int>(async repo =>
+        {
+            await repo.InsertAsync(new BankCheck { BankAccountId = bank, CheckNumber = 7, Status = CheckStatus.Spoiled, IssueDate = new DateTime(2026, 7, 1) });
+            await repo.SaveChangesAsync();
+            return 0;
+        });
+
+        var print = await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } });
+
+        print.Succeeded.ShouldBeFalse();
+        print.Code.ShouldBe(409);
+        print.Message!.ShouldContain("next check number");
+    }
+
+    /// <summary>对照：换一本号段更低的新支票本是正常操作，只要那个号本身没用过。</summary>
+    [Fact]
+    public async Task SetNextCheckNumber_BelowExistingChecks_ToAnUnusedNumber_Succeeds()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync(nextCheckNumber: 1001);
+        var vendor = await CreateVendorAsync();
+        var p1 = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { p1 } })).Succeeded.ShouldBeTrue();
+
+        var set = await InScopeAsync<IBankAccountService, Result<BankAccountDto>>(
+            s => s.SetNextCheckNumberAsync(bank, new SetNextCheckNumberDto { NextCheckNumber = 500 }));
+
+        set.Succeeded.ShouldBeTrue(set.Message);
+        set.Data!.NextCheckNumber.ShouldBe(500);
+    }
+
+    /// <summary>
+    /// 回写到付款单的参考号与票面、MICR 同一个形状（按 <c>Finance:CheckNumberDigits</c> 补零），
+    /// 付款列表里看到的号与纸上、对账单上的号逐字相同。
+    /// </summary>
+    [Fact]
+    public async Task Print_StampsThePaymentReferenceAsPrintedOnTheCheck()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        await CreateBankAccountAsync(nextCheckNumber: 1001);
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } })).Succeeded.ShouldBeTrue();
+
+        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBe(CheckNumberFormat.Format(1001, CheckNumberFormat.DefaultDigits));
+        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBe("01001");
     }
 
     [Fact]
@@ -218,12 +405,48 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         var reloaded = await ReloadAsync<BankCheck>(original.Id);
         reloaded!.Status.ShouldBe(CheckStatus.Void);
         reloaded.VoidReason.ShouldBe("Reprinted");
+        reloaded.VoidedTime.ShouldNotBeNull();
         reloaded.ReplacedByCheckId.ShouldNotBeNull();
 
         var replacement = await ReloadAsync<BankCheck>(reloaded.ReplacedByCheckId!.Value);
         replacement!.Status.ShouldBe(CheckStatus.Issued);
         replacement.CheckNumber.ShouldBe(2);
         replacement.PaymentEntryId.ShouldBe(p);
+    }
+
+    /// <summary>
+    /// 重打分配到的号撞上已有支票：消息要指向下一号设置，而不是「已开过票，请用重打」。
+    /// </summary>
+    /// <remarks>
+    /// 撞号回滚之后，被重打的原票在库里仍是 Issued；按「这笔付款有没有有效票」区分两条唯一索引的话，
+    /// 它恒为是，操作员正在重打却被告知去重打，真正该改的计数器设置一个字也没提。
+    /// </remarks>
+    [Fact]
+    public async Task Reprint_WhenTheNextNumberIsAlreadyUsed_Returns409_PointingAtTheNextNumberSetting()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync(nextCheckNumber: 1);
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } })).Succeeded.ShouldBeTrue();
+        // 计数器此刻是 2；把 2 号先占掉（数据导入或早于设号校验写进库的毁票）。
+        await InScopeAsync<IRepository<BankCheck, Guid>, int>(async repo =>
+        {
+            await repo.InsertAsync(new BankCheck { BankAccountId = bank, CheckNumber = 2, Status = CheckStatus.Spoiled, IssueDate = new DateTime(2026, 7, 1) });
+            await repo.SaveChangesAsync();
+            return 0;
+        });
+        var original = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }))).Data!.Items.Single(c => c.CheckNumber == 1);
+
+        var reprint = await InScopeAsync<ICheckService, Result<CheckFileDto>>(s => s.ReprintAsync(original.Id));
+
+        reprint.Succeeded.ShouldBeFalse();
+        reprint.Code.ShouldBe(409);
+        reprint.Message!.ShouldContain("next check number");
+        reprint.Message!.ShouldNotContain("Use reprint");
+        (await ReloadAsync<BankCheck>(original.Id))!.Status.ShouldBe(CheckStatus.Issued);
     }
 
     [Fact]
@@ -248,6 +471,7 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
 
         var reloaded = await ReloadAsync<BankCheck>(check.Id);
         reloaded!.Status.ShouldBe(CheckStatus.Void);
+        reloaded.VoidedTime.ShouldNotBeNull();
     }
 
     [Fact]
@@ -303,6 +527,99 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         entity!.NextCheckNumber.ShouldBe(1);
         var checks = await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }));
         checks.Data!.Items.Count.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// ★ 同号重出与重打的票面与首次打印同源：收款人地址（开窗信封）、付款单号、摘要都在，金额大写与票面同币种。
+    /// </summary>
+    /// <remarks>
+    /// 此前两条路径各自手搭一个只有号 / 收款人 / 金额的条目：开窗信封版式重出的那张纸地址栏是空的，
+    /// 寄出去没有地址；存根上收款方用来对账的付款单号也没了；重打连摘要都丢了。
+    /// 参考号是唯一例外：首次打印后付款单参考号被回写成支票号，那只是重复票号，重出的存根不印它。
+    /// </remarks>
+    [Fact]
+    public async Task RenderAndReprint_CarryTheSameStubFieldsAsTheFirstPrint()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto
+        {
+            Name = "Acme Supplies", Address = "100 King St W\nToronto ON M5X 1A9"
+        }));
+        vendor.Succeeded.ShouldBeTrue(vendor.Message);
+        var draft = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.CreateDraftAsync(new CreatePaymentEntryDto
+        {
+            Direction = PaymentDirection.Outbound, PartyType = FinancePartyType.Vendor, PartyId = vendor.Data!.Id,
+            DocDate = new DateTime(2026, 7, 10), Amount = 100m, DepositToAccountId = ledger,
+            PaymentMethod = PaymentMethods.Check, Memo = "July rent"
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+        var posted = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        var payment = posted.Data!.Id;
+
+        using var scope = ServiceProvider.CreateScope();
+        var sp = scope.ServiceProvider;
+        var renderer = new CapturingCheckRenderer(sp.GetRequiredService<ICheckDocumentRenderer>());
+        var service = new CheckService(
+            sp,
+            sp.GetRequiredService<IRepository<BankCheck, Guid>>(),
+            sp.GetRequiredService<IRepository<BankAccount, Guid>>(),
+            sp.GetRequiredService<IRepository<PaymentEntry, Guid>>(),
+            sp.GetRequiredService<CheckNumberAllocator>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsSnapshot<FinanceOptions>>(),
+            sp.GetRequiredService<CheckBatchComposer>(),
+            renderer);
+
+        (await service.PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } })).Succeeded.ShouldBeTrue();
+        var first = renderer.Items.Single();
+        first.PayeeAddressLines.ShouldBe(["100 King St W", "Toronto ON M5X 1A9"]);
+        first.PaymentNumber.ShouldNotBeNullOrWhiteSpace();
+        first.Memo.ShouldBe("July rent");
+
+        var check = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }))).Data!.Items.Single();
+
+        renderer.Items.Clear();
+        (await service.RenderAsync(check.Id)).Succeeded.ShouldBeTrue();
+        var rerendered = renderer.Items.Single();
+        rerendered.CheckNumber.ShouldBe(first.CheckNumber);
+        rerendered.PayeeName.ShouldBe(first.PayeeName);
+        rerendered.PayeeAddressLines.ShouldBe(first.PayeeAddressLines);
+        rerendered.PaymentNumber.ShouldBe(first.PaymentNumber);
+        rerendered.Memo.ShouldBe(first.Memo);
+        rerendered.Amount.ShouldBe(first.Amount);
+        rerendered.Currency.ShouldBe(first.Currency);
+        rerendered.AmountInWords.ShouldBe(first.AmountInWords);
+        rerendered.Reference.ShouldBeNull("付款单参考号此时只是首打回写的票号");
+
+        renderer.Items.Clear();
+        (await service.ReprintAsync(check.Id)).Succeeded.ShouldBeTrue();
+        var reprinted = renderer.Items.Single();
+        reprinted.CheckNumber.ShouldBe(first.CheckNumber + 1);
+        reprinted.PayeeName.ShouldBe(first.PayeeName);
+        reprinted.PayeeAddressLines.ShouldBe(first.PayeeAddressLines);
+        reprinted.PaymentNumber.ShouldBe(first.PaymentNumber);
+        reprinted.Memo.ShouldBe("July rent");
+        reprinted.Currency.ShouldBe(first.Currency);
+        reprinted.AmountInWords.ShouldBe(first.AmountInWords);
+        reprinted.Reference.ShouldBeNull();
+
+        // 早先回写的参考号不补零：这样的存量值同样只是票号，不印。
+        var current = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank, Status = CheckStatus.Issued }))).Data!.Items.Single();
+        await InScopeAsync<IRepository<PaymentEntry, Guid>, int>(async repo =>
+        {
+            var row = (await repo.GetAsync(payment))!;
+            row.Reference = current.CheckNumber.ToString(CultureInfo.InvariantCulture);
+            await repo.UpdateAsync(row);
+            await repo.SaveChangesAsync();
+            return 0;
+        });
+        renderer.Items.Clear();
+        (await service.RenderAsync(current.Id)).Succeeded.ShouldBeTrue();
+        renderer.Items.Single().Reference.ShouldBeNull("an unpadded reference stamped before padding is still just the check number");
     }
 
     [Fact]
@@ -439,17 +756,80 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBeNull();
 
         (await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { p } })).Succeeded.ShouldBeTrue();
-        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("1");
+        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("00001");
 
         var original = (await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
             s => s.GetPagedAsync(new CheckQueryDto { PaymentEntryId = p }))).Data!.Items.Single();
         (await InScopeAsync<ICheckService, Result<CheckFileDto>>(s => s.ReprintAsync(original.Id))).Succeeded.ShouldBeTrue();
 
         // 旧纸已止付，参考号跟到重打链上仍然有效的那一张
-        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("2");
+        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("00002");
     }
 
     /// <summary>C：手工登记的票同样回写参考号；作废不改写历史事实（Reference 保持原号）。</summary>
+    // ── 手写票挂付款单时的金额 / 币种 / 收款人 ─────────────────────────────────
+    //
+    // 付款单的这三样是已知的。没填金额的手写票此前以 0.00 进 positive pay（银行据此拒付一张合法的票），
+    // 填错的则把一个错的金额预授权给了银行。
+
+    [Fact]
+    public async Task RegisterManual_LinkedToAPayment_WithoutAmount_TakesThePaymentsAmountCurrencyAndPayee()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync("Initech LLC");
+        var p = await CreatePostedCheckPaymentAsync(ledger, vendor, 345.67m);
+
+        var registered = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 88, IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = p
+        }));
+
+        registered.Succeeded.ShouldBeTrue(registered.Message);
+        var check = (await ReloadAsync<BankCheck>(registered.Data!.Id))!;
+        check.Amount.ShouldBe(345.67m);
+        check.Currency.ShouldBe((await ReloadAsync<PaymentEntry>(p))!.Currency);
+        check.PayeeName.ShouldBe("Initech LLC");
+    }
+
+    [Fact]
+    public async Task RegisterManual_LinkedToAPayment_WithAMismatchingAmount_Rejects400_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var p = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+
+        var registered = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 89, Amount = 1000m, IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = p
+        }));
+
+        registered.Succeeded.ShouldBeFalse();
+        registered.Code.ShouldBe(400);
+        registered.Message!.ShouldContain("amount");
+        (await InScopeAsync<IReadOnlyRepository<BankCheck, Guid>, int>(r => r.CountAsync())).ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-25)]
+    public async Task RegisterManual_NonPositiveAmount_Rejects400(int amount)
+    {
+        await SeedCoaAsync();
+        var bank = await CreateBankAccountAsync();
+
+        var registered = await InScopeAsync<ICheckService, Result<BankCheckDto>>(s => s.RegisterManualAsync(new RegisterManualCheckDto
+        {
+            BankAccountId = bank, CheckNumber = 90, PayeeName = "Cash", Amount = amount, IssueDate = new DateTime(2026, 7, 10)
+        }));
+
+        registered.Succeeded.ShouldBeFalse();
+        registered.Code.ShouldBe(400);
+    }
+
     [Fact]
     public async Task RegisterManual_StampsReference_AndVoidLeavesItIntact()
     {
@@ -465,11 +845,11 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
             IssueDate = new DateTime(2026, 7, 10), PaymentEntryId = p
         }));
         registered.Succeeded.ShouldBeTrue(registered.Message);
-        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("77");
+        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("00077");
 
         (await InScopeAsync<ICheckService, Result<BankCheckDto>>(
             s => s.VoidAsync(registered.Data!.Id, new VoidCheckDto { Reason = "Lost" }))).Succeeded.ShouldBeTrue();
-        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("77");
+        (await ReloadAsync<PaymentEntry>(p))!.Reference.ShouldBe("00077");
     }
 
     /// <summary>
@@ -597,7 +977,7 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
 
         register.Succeeded.ShouldBeFalse();
         register.Code.ShouldBe(409);
-        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBe("1");
+        (await ReloadAsync<PaymentEntry>(payment))!.Reference.ShouldBe("00001");
     }
 
     /// <summary>预览与打印共用同一条解析路径，收紧一处两边都收紧 —— 这条锁住共用没有被拆开。</summary>
@@ -632,6 +1012,71 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         print.Succeeded.ShouldBeTrue(print.Message);
     }
 
+    /// <summary>
+    /// ★★ 两个出纳同时打印同一笔付款（或双击、超时重试）：只能开出一张有效支票。
+    /// </summary>
+    /// <remarks>
+    /// 「已开过票」检查在事务外读，两个请求会各自通过、各分配一个号，登记簿上留下两张可流通的票，
+    /// positive-pay 两张都报，收款方两张都能兑。第二个打印插在第一个的检查与开票事务之间。
+    /// </remarks>
+    [Fact]
+    public async Task Print_ConcurrentPrintOfTheSamePayment_SecondIsRejected_AndOnlyOneCheckIsIssued()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+        Result<CheckFileDto>? first = null;
+        _stubHook.Next = async () => first = await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } });
+
+        var second = await PrintAsync(new PrintChecksDto { PaymentEntryIds = new List<Guid> { payment } });
+
+        first.ShouldNotBeNull("钩子必须真的插进了打印");
+        first.Succeeded.ShouldBeTrue(first.Message);
+        second.Succeeded.ShouldBeFalse("同一笔付款已经开出一张有效支票");
+        second.Code.ShouldBe(409);
+        second.Message!.ShouldContain("already have an issued check");
+        var checks = await InScopeAsync<ICheckService, Result<IPagedList<BankCheckDto>>>(
+            s => s.GetPagedAsync(new CheckQueryDto { BankAccountId = bank }));
+        checks.Data!.Items.Count(c => c.Status == CheckStatus.Issued && c.PaymentEntryId == payment).ShouldBe(1);
+        // 被拒的那次连号码都不占：它在建票之前就回滚了。
+        (await ReloadAsync<BankAccount>(bank))!.NextCheckNumber.ShouldBe(2);
+    }
+
+    /// <summary>
+    /// 兜底：不经号码行锁的写入（手工登记的并发窗口）同样写不进第二张 Issued 票；作废 / 毁票的行不受约束。
+    /// </summary>
+    [Fact]
+    public async Task Register_HoldsAtMostOneIssuedCheckPerPayment()
+    {
+        await SeedCoaAsync();
+        var ledger = await BankLedgerIdAsync();
+        var bank = await CreateBankAccountAsync();
+        var vendor = await CreateVendorAsync();
+        var payment = await CreatePostedCheckPaymentAsync(ledger, vendor, 100m);
+
+        async Task InsertAsync(long number, CheckStatus status, Guid? paymentId)
+        {
+            using var scope = ServiceProvider.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IRepository<BankCheck, Guid>>();
+            await repo.InsertAsync(new BankCheck
+            {
+                BankAccountId = bank, CheckNumber = number, Status = status, PaymentEntryId = paymentId,
+                IssueDate = new DateTime(2026, 7, 10, 0, 0, 0, DateTimeKind.Utc)
+            });
+            await repo.SaveChangesAsync();
+        }
+
+        await InsertAsync(10, CheckStatus.Void, payment);
+        await InsertAsync(11, CheckStatus.Issued, payment);
+        await InsertAsync(12, CheckStatus.Spoiled, null);
+        await InsertAsync(13, CheckStatus.Spoiled, null);
+
+        var duplicate = await Should.ThrowAsync<DbUpdateException>(() => InsertAsync(14, CheckStatus.Issued, payment));
+        duplicate.IsUniqueConstraintViolation().ShouldBeTrue();
+    }
+
     private async Task<Guid> CreatePostedPaymentAsync(Guid ledgerId, Guid vendorId, decimal amount, string method, string? reference = null)
     {
         var draft = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.CreateDraftAsync(new CreatePaymentEntryDto
@@ -649,6 +1094,41 @@ public class CheckPrintingTests : FinanceIntegrationTestBase
         var posted = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.PostAsync(draft.Data!.Id));
         posted.Succeeded.ShouldBeTrue(posted.Message);
         return posted.Data!.Id;
+    }
+
+    /// <summary>竞态插入点：只触发一次，触发前先清空（插入的那个操作自己不会再触发它）。</summary>
+    private sealed class StubLineHook
+    {
+        public Func<Task>? Next { get; set; }
+    }
+
+    private sealed class HookedStubLineProvider(StubLineHook hook) : ICheckStubLineProvider
+    {
+        public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<CheckStubLine>>> GetStubLinesAsync(
+            IReadOnlyList<Guid> paymentEntryIds, CancellationToken cancellationToken = default)
+        {
+            var next = hook.Next;
+            hook.Next = null;
+            if (next != null)
+                await next();
+            return new Dictionary<Guid, IReadOnlyList<CheckStubLine>>();
+        }
+    }
+
+    /// <summary>记下每次渲染请求里的票面条目，再交给真实渲染器出字节。</summary>
+    private sealed class CapturingCheckRenderer(ICheckDocumentRenderer inner) : ICheckDocumentRenderer
+    {
+        private readonly ICheckDocumentRenderer _inner = inner;
+
+        public List<CheckRenderItem> Items { get; } = new();
+
+        public Result<byte[]> Render(CheckRenderRequest request)
+        {
+            Items.AddRange(request.Checks);
+            return _inner.Render(request);
+        }
+
+        public Result<byte[]> RenderCalibration(CheckRenderRequest request) => _inner.RenderCalibration(request);
     }
 
     private sealed class FailingCheckRenderer : ICheckDocumentRenderer

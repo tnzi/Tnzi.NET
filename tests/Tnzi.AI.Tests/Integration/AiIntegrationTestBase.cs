@@ -25,13 +25,15 @@ public class AiIntegrationDbContext : TnziDbContext<AiIntegrationDbContext>
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentRunTraceConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentVersionConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UsageLogConfiguration());
-        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UserQuotaConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AiUsagePolicyConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AiUsageMeterConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.MemoryEntryConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.EntityMemoryConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.UserProfileConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.AgentArtifactConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.EvaluationRunConfiguration());
         modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.ToolPermissionRuleEntityConfiguration());
+        modelBuilder.ApplyConfiguration(new Tnzi.AI.Entities.Configs.SubAgentTypeConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
@@ -114,8 +116,10 @@ public abstract class AiIntegrationTestBase : IntegratedTestBase<AiIntegrationDb
             EFCoreRepository<AiIntegrationDbContext, AgentRunTrace, Guid>>();
         services.AddScoped<IRepository<UsageLog, Guid>,
             EFCoreRepository<AiIntegrationDbContext, UsageLog, Guid>>();
-        services.AddScoped<IRepository<UserQuota, Guid>,
-            EFCoreRepository<AiIntegrationDbContext, UserQuota, Guid>>();
+        services.AddScoped<IRepository<AiUsagePolicy, Guid>,
+            EFCoreRepository<AiIntegrationDbContext, AiUsagePolicy, Guid>>();
+        services.AddScoped<IRepository<AiUsageMeter, Guid>,
+            EFCoreRepository<AiIntegrationDbContext, AiUsageMeter, Guid>>();
         services.AddScoped<IRepository<MemoryEntry, Guid>,
             EFCoreRepository<AiIntegrationDbContext, MemoryEntry, Guid>>();
         services.AddScoped<IRepository<EntityMemory, Guid>,

@@ -215,25 +215,55 @@ public class OutboxRelayBackgroundService : BackgroundService
             _logger.LogWarning(ex, "Failed to publish outbox event {EventId} ({EventType})",
                 storedEvent.EventId, storedEvent.EventType);
 
-            await eventStore.MarkAsFailedAsync(storedEvent.EventId, ex.Message, stoppingToken);
-
-            // 使用 MarkAsFailedAsync 后的实际 FailureCount（已在 DB 原子递增）
-            var updatedEvent = await eventStore.GetEventAsync(storedEvent.EventId, stoppingToken);
-            if (updatedEvent == null || updatedEvent.FailureCount < _options.MaxRetryCount)
+            // ★★ 记账本身失败（例如错误信息撞上列长、数据库瞬断）是这一条的问题，不能中止整批：
+            // 异常一旦逃出去，失败次数一次都记不上，这条事件永远是最早的未处理行，之后每一轮都卡在它上面，
+            // 后面的事件不再中继，保留期清理也轮不到。记日志后留给下一轮，继续处理同批其余事件。
+            try
             {
-                return;
+                await RecordFailureAsync(eventStore, services, storedEvent, materialized, ex, stoppingToken);
             }
-
-            _logger.LogError("Outbox event {EventId} ({EventType}) exceeded max retry count ({MaxRetry}), marking as dead letter",
-                storedEvent.EventId, storedEvent.EventType, _options.MaxRetryCount);
-
-            // ★ 不能走 MarkAsProcessedAsync：那与「投递成功」写同一组字段，这些从未送达的
-            // 消息会与成功记录混在一起，随后被保留期清理连同 LastError 一起删掉 —— 静默丢失。
-            await eventStore.MarkAsDeadLetterAsync(storedEvent.EventId, ex.Message, stoppingToken);
-
-            await RouteToDeadLetterQueueAsync(services, storedEvent, materialized, ex,
-                updatedEvent.FailureCount, stoppingToken);
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception bookkeepingFailure)
+            {
+                _logger.LogError(bookkeepingFailure,
+                    "Failed to record the failure of outbox event {EventId} ({EventType}); it stays unprocessed and will be retried",
+                    storedEvent.EventId, storedEvent.EventType);
+            }
         }
+    }
+
+    /// <summary>
+    /// 记一次失败；重试次数用尽时转为死信并交给死信队列。
+    /// </summary>
+    private async Task RecordFailureAsync(
+        IEventStore eventStore,
+        IServiceProvider services,
+        StoredEvent storedEvent,
+        MaterializedEvent? materialized,
+        Exception failure,
+        CancellationToken stoppingToken)
+    {
+        await eventStore.MarkAsFailedAsync(storedEvent.EventId, failure.Message, stoppingToken);
+
+        // 使用 MarkAsFailedAsync 后的实际 FailureCount（已在 DB 原子递增）
+        var updatedEvent = await eventStore.GetEventAsync(storedEvent.EventId, stoppingToken);
+        if (updatedEvent == null || updatedEvent.FailureCount < _options.MaxRetryCount)
+        {
+            return;
+        }
+
+        _logger.LogError("Outbox event {EventId} ({EventType}) exceeded max retry count ({MaxRetry}), marking as dead letter",
+            storedEvent.EventId, storedEvent.EventType, _options.MaxRetryCount);
+
+        // ★ 不能走 MarkAsProcessedAsync：那与「投递成功」写同一组字段，这些从未送达的
+        // 消息会与成功记录混在一起，随后被保留期清理连同 LastError 一起删掉，静默丢失。
+        await eventStore.MarkAsDeadLetterAsync(storedEvent.EventId, failure.Message, stoppingToken);
+
+        await RouteToDeadLetterQueueAsync(services, storedEvent, materialized, failure,
+            updatedEvent.FailureCount, stoppingToken);
     }
 
     /// <summary>

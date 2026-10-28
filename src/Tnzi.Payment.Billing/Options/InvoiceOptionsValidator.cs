@@ -20,5 +20,9 @@ public class InvoiceOptionsValidator : OptionsValidatorBase<InvoiceOptions>
         // 而使用者以为自己配的模板生效了。启动期说清楚，比在第一封发票邮件里发现要早得多。
         if (options.Enabled && string.IsNullOrWhiteSpace(options.DefaultTemplate))
             errors.Add("Invoice:DefaultTemplate is required when invoice is enabled.");
+
+        var accent = options.Seller?.AccentColor;
+        if (!string.IsNullOrWhiteSpace(accent) && !InvoiceSellerOptions.IsHexColor(accent.Trim()))
+            errors.Add($"Payment:Invoice:Seller:AccentColor must be a hex colour such as #0B5FFF or #06F, got '{accent}'.");
     }
 }

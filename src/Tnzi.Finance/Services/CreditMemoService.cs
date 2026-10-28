@@ -241,7 +241,9 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
             PartyId = creditMemo.CustomerId.ToString()
         });
 
-        foreach (var line in creditMemo.Lines.OrderBy(l => l.LineNumber))
+        // ★ 零额行（免费赠送、0 元运费）是单据上合法的展示行，但不产生分录：引擎要求每条分录行借贷恰好一方
+        // 大于零，原样投影会让整张单据过不了账，报出的还是凭证行号而不是单据行号。
+        foreach (var line in creditMemo.Lines.Where(l => l.Amount != 0).OrderBy(l => l.LineNumber))
         {
             entry.Lines.Add(new JournalLine
             {
@@ -385,6 +387,10 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
     /// </summary>
     private async Task<Result> ApplyDraftAsync(CreditMemo creditMemo, CreateCreditMemoDto input, CancellationToken cancellationToken)
     {
+        var memoTooLong = FinanceFieldLimits.FirstTooLong((input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (input.Lines == null || input.Lines.Count == 0)
             return Fail("At least one line is required.");
         if (input.Lines.Count > _options.MaxLinesPerEntry)
@@ -413,13 +419,17 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
             if (line.UnitPrice < 0)
                 return Fail($"Line {lineNo}: unit price must not be negative.");
 
+            if (line.Description?.Length > FinanceFieldLimits.LineDescriptionMaxLength)
+                return Fail($"Line {lineNo}: the description must be at most {FinanceFieldLimits.LineDescriptionMaxLength} characters.", 400);
+
             var item = line.ItemId.HasValue ? itemsResult.Data![line.ItemId.Value] : null;
             creditMemo.Lines.Add(new CreditMemoLine
             {
                 CreditMemoId = creditMemo.Id,
                 LineNumber = lineNo++,
                 ItemId = line.ItemId,
-                Description = line.Description ?? item?.Description,
+                // 目录项描述的列宽（1000）比行描述宽：缺省抄过来的那一份收进列宽，人填的超长在上面已经拒绝
+                Description = line.Description ?? FinanceFieldLimits.Fit(item?.Description, FinanceFieldLimits.LineDescriptionMaxLength),
                 AccountId = line.AccountId,
                 Quantity = line.Quantity,
                 UnitPrice = line.UnitPrice,
@@ -451,22 +461,12 @@ public class CreditMemoService : ApplicationService, ICreditMemoService
         if (!itemsResult.Succeeded)
             return Fail<Dictionary<Guid, Guid>>(itemsResult.Message!, itemsResult.Code ?? 400);
 
-        var resolved = new Dictionary<Guid, Guid>();
-        foreach (var line in lines)
-        {
-            var accountId = line.AccountId
-                ?? (line.ItemId.HasValue ? itemsResult.Data![line.ItemId.Value].IncomeAccountId : null);
-            if (!accountId.HasValue)
-                return Fail<Dictionary<Guid, Guid>>($"Line {line.LineNumber}: no income account (set the line account or the item default).", 400);
+        var items = itemsResult.Data!;
+        var lineAccounts = lines
+            .Select(l => (l.Id, l.LineNumber, l.AccountId ?? (l.ItemId.HasValue ? items[l.ItemId.Value].IncomeAccountId : null)))
+            .ToList();
 
-            var accountResult = await _helper.GetPostableAccountAsync(accountId.Value, cancellationToken);
-            if (!accountResult.Succeeded)
-                return Fail<Dictionary<Guid, Guid>>($"Line {line.LineNumber}: {accountResult.Message}", accountResult.Code ?? 400);
-
-            resolved[line.Id] = accountId.Value;
-        }
-
-        return Ok(resolved);
+        return await _helper.ResolvePostableLineAccountsAsync(lineAccounts, "income", cancellationToken);
     }
 
     private static CreditMemoDto ToDto(CreditMemo creditMemo)

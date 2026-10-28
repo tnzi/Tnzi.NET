@@ -144,6 +144,53 @@ describe('TDynamicForm', () => {
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ due: '2024-03-05' }])
   })
 
+  // Vant's date picker defaults to the current year +/- 10 and snaps a value
+  // outside that range to the nearest allowed year. Opening the picker on a
+  // birth date therefore rewrote it, and Confirm stored the rewritten date.
+  it.each(['1985-03-02', '1901-01-01', '2071-12-31'])('keeps %s when the date picker is opened and confirmed', async (value) => {
+    const wrapper = mountForm({
+      modelValue: { due: value },
+      fields: [{ key: 'due', type: 'date', label: 'Due' }],
+    })
+
+    await wrapper.find('.van-cell').trigger('click')
+    await flushPromises()
+    await wrapper.find('.van-picker__confirm').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ due: value }])
+  })
+
+  it('offers dates a century back and decades ahead', async () => {
+    const wrapper = mountForm({
+      modelValue: {},
+      fields: [{ key: 'due', type: 'date', label: 'Due' }],
+    })
+
+    await wrapper.find('.van-cell').trigger('click')
+    await flushPromises()
+
+    const years = wrapper.findAll('.van-picker-column').at(0)!.findAll('.van-picker-column__item').map((item) => Number(item.text()))
+    expect(Math.min(...years)).toBeLessThanOrEqual(1900)
+    expect(Math.max(...years)).toBeGreaterThanOrEqual(new Date().getFullYear() + 50)
+  })
+
+  // The backend parses ISO 8601: a space-separated "2024-03-05 08:30" is a 400
+  // on any DateTime property.
+  it('writes back an ISO 8601 date-time when the datetime picker is confirmed', async () => {
+    const wrapper = mountForm({
+      modelValue: { startAt: '1990-03-05T08:30:00' },
+      fields: [{ key: 'startAt', type: 'datetime', label: 'Start' }],
+    })
+
+    expect(wrapper.find('input').element.value).toBe('1990-03-05 08:30')
+
+    await wrapper.find('.van-cell').trigger('click')
+    await flushPromises()
+    await wrapper.find('.van-picker-group .van-picker__confirm').trigger('click')
+
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([{ startAt: '1990-03-05T08:30:00' }])
+  })
+
   it('renders a two-step picker group for datetime fields', async () => {
     const wrapper = mountForm({
       modelValue: { startAt: '2024-03-05 08:30' },
@@ -194,6 +241,24 @@ describe('TDynamicForm - required and props on every field type', () => {
     await wrapper.setProps({ modelValue: { gender: 'a' } })
     await submit(wrapper)
     expect(wrapper.emitted('submit')?.[0]).toEqual([{ gender: 'a' }])
+  })
+
+  // The backend's [Required] refuses a whitespace-only string: a text field of
+  // spaces is as empty as a blank one, under `required` and under a contract
+  // rule alike. The value that does go through is not trimmed.
+  it.each([
+    ['field.required', { key: 'name', type: 'text', label: 'Name', required: true }],
+    ['a required contract rule', { key: 'name', type: 'text', label: 'Name', rules: [{ required: true }] }],
+    ['a required textarea', { key: 'name', type: 'textarea', label: 'Name', required: true }],
+  ] as const)('blocks submit while a text field under %s holds only whitespace', async (_case, field) => {
+    const wrapper = mountForm({ modelValue: { name: ' \t ' }, fields: [field as IDynamicFormField] })
+    await submit(wrapper)
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('This field is required')
+
+    await wrapper.setProps({ modelValue: { name: '  alice  ' } })
+    await submit(wrapper)
+    expect(wrapper.emitted('submit')?.[0]).toEqual([{ name: '  alice  ' }])
   })
 
   it('blocks submit while a required file field holds no file', async () => {

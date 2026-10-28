@@ -12,6 +12,9 @@ import { Icon } from '@iconify/vue';
 import { useEmbedMode } from '../headless/useEmbedMode';
 import TChatBox from '../components/chat/TChatBox.vue';
 import type { ChatMessage } from '../headless/useChat';
+import { useAiI18n } from '../i18n/index';
+
+const t = useAiI18n();
 
 const { isOpen, toggle } = useEmbedMode('sidebar');
 
@@ -84,9 +87,9 @@ watch(isOpen, (v) => {
       <!-- Header -->
       <div class="t-sidebar-chat__header">
         <slot name="header">
-          <span class="text-sm font-medium">AI Chat</span>
+          <span class="text-sm font-medium">{{ t.embed.title }}</span>
         </slot>
-        <NButton text size="small" @click="toggle()">
+        <NButton text size="small" :aria-label="t.embed.close" @click="toggle()">
           <template #icon><Icon icon="lucide:x" class="size-4" /></template>
         </NButton>
       </div>
@@ -108,6 +111,8 @@ watch(isOpen, (v) => {
 </template>
 
 <style scoped>
+/* The overlay covers the whole viewport; the panel starts below the page's
+   top inset (`--tnzi-overlay-inset-top`). */
 .t-sidebar-chat__overlay {
   position: fixed;
   inset: 0;
@@ -116,7 +121,7 @@ watch(isOpen, (v) => {
 }
 .t-sidebar-chat__panel {
   position: fixed;
-  top: 0;
+  top: var(--tnzi-overlay-inset-top, 0px);
   right: 0;
   bottom: 0;
   z-index: 50;

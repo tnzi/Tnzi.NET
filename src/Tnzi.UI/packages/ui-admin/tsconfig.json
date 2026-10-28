@@ -20,6 +20,9 @@
     "src/template/**/*",
     "src/router/**/*",
     "src/plugin/**/*",
+    // `@tnzi/ui-admin/billing` subpath entry: nothing in the library imports it, so it must be named here
+    // for `dist/billing/index.d.ts` to be written.
+    "src/billing/**/*",
     "src/locales/**/*",
     "src/styles/**/*",
     // Generated icon manifest. It is not reachable from any other source file

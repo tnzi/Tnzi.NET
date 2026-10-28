@@ -54,12 +54,15 @@ public class OfferComposer
                 return Result<Composition>.Failure($"Line {lineNo}: quantity must be greater than zero.", 400);
             if (line.UnitPrice < 0)
                 return Result<Composition>.Failure($"Line {lineNo}: unit price must not be negative.", 400);
+            // 人填的描述超长拒绝；缺省时从目录项抄过来的描述（目录列更宽）收进列宽，原文仍留在目录项上。
+            if (line.Description?.Length > OfferFieldLimits.LineDescriptionMaxLength)
+                return Result<Composition>.Failure($"Line {lineNo}: the description must be at most {OfferFieldLimits.LineDescriptionMaxLength} characters.", 400);
 
             var item = line.ItemId.HasValue ? itemsResult.Data![line.ItemId.Value] : null;
             composed.Add(new ComposedLine(
                 lineNo++,
                 line.ItemId,
-                line.Description ?? item?.Description,
+                line.Description ?? FinanceFieldLimits.Fit(item?.Description, OfferFieldLimits.LineDescriptionMaxLength),
                 line.AccountId,
                 line.Quantity,
                 line.UnitPrice,

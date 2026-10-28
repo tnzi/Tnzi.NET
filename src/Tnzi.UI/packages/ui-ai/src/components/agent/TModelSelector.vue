@@ -1,6 +1,12 @@
 <script setup lang="ts">
 /**
  * TModelSelector - Model selection dialog with search filtering
+ *
+ * Provider logos are opt-in through `providerLogo`. The picker used to load
+ * them from a third-party host for every user who opened it, which told that
+ * host each user's address and every provider name the deployment configures
+ * (internal ones included), and broke under a strict CSP. Without a resolver
+ * each row shows a generic glyph and nothing leaves the page.
  */
 
 import { NModal, NInput, NButton } from 'naive-ui';
@@ -20,8 +26,16 @@ const props = withDefaults(defineProps<{
   models: ModelOption[];
   modelValue?: string;
   open?: boolean;
+  /**
+   * URL of a provider's logo, or null/undefined for the generic glyph. The
+   * resolver owns the URL, so it also owns encoding the provider name into it.
+   * Serve logos from your own origin where you can; a remote host sees every
+   * user who opens the picker.
+   */
+  providerLogo?: (provider: string) => string | null | undefined;
 }>(), {
   open: false,
+  providerLogo: undefined,
 });
 
 const emit = defineEmits<{
@@ -66,8 +80,8 @@ function handleAfterEnter(): void {
   searchQuery.value = '';
 }
 
-function getProviderLogoUrl(provider: string): string {
-  return `https://models.dev/logos/${provider}.svg`;
+function logoUrl(provider: string): string | null {
+  return props.providerLogo?.(provider) || null;
 }
 </script>
 
@@ -101,7 +115,7 @@ function getProviderLogoUrl(provider: string): string {
         </template>
       </NInput>
 
-      <div class="max-h-[300px] overflow-y-auto">
+      <div class="t-ai-scroll relative max-h-[300px] overflow-y-auto">
         <template v-if="filtered.length === 0">
           <div class="py-6 text-center text-sm text-tnzi-muted">
             {{ t.model.noResults }}
@@ -119,16 +133,23 @@ function getProviderLogoUrl(provider: string): string {
               @click="selectModel(model.id)"
             >
               <img
-                :src="getProviderLogoUrl(model.provider)"
+                v-if="logoUrl(model.provider)"
+                :src="logoUrl(model.provider) ?? undefined"
                 :alt="model.provider"
                 class="size-4 t-model-logo"
                 loading="lazy"
+              />
+              <Icon
+                v-else
+                icon="lucide:cpu"
+                class="size-4 shrink-0 text-tnzi-muted"
+                aria-hidden="true"
               />
               <span class="flex-1 truncate text-xs">{{ model.name }}</span>
               <Icon
                 v-if="model.id === modelValue"
                 icon="lucide:check"
-                class="size-3.5 text-primary"
+                class="size-3.5 text-ai-accent-text"
               />
             </div>
             <div class="my-1 h-px bg-tnzi-border last:hidden" />

@@ -57,7 +57,7 @@
         </template>
         {{ t('actions.create') }}
       </NButton>
-      <NButton v-if="can('finance.document.create')" tertiary size="small" @click="payDetail.open('create')">
+      <NButton v-if="canPayBills" tertiary size="small" @click="payDetail.open('create')">
         <template #icon>
           <TSvgIcon icon="mdi:cash-multiple" :size="16" />
         </template>
@@ -151,7 +151,7 @@
           <NInputNumber v-model:value="payAllocations[bill.id]" size="small" :min="0" :max="bill.outstanding" :show-button="false" placeholder="0.00" />
         </div>
         <div class="fin-pay-run__footer">
-          <span class="fin-pay-run__num">{{ t('pay.total') }}: <strong>{{ fmtAmount(payTotal) }}</strong></span>
+          <span class="fin-pay-run__num">{{ t('pay.total') }}: <strong>{{ payTotalText }}</strong></span>
           <div class="fin-pay-run__actions">
             <NButton size="small" @click="payDetail.close()">{{ td('editor.cancel') }}</NButton>
             <NButton size="small" type="primary" :loading="paying" :disabled="payTotal <= 0 || !payForm.fundsAccountId" @click="submitPay">
@@ -192,7 +192,8 @@ import { FinanceDocToken } from './source-type'
 import { useSafeMessage } from '../_shared/safe-message'
 import { buildDocumentColumns, buildDocumentSearchFields, DOC_STATUS_META, type FinanceDocRow } from './document-config'
 import { createFinanceOptionSources } from './options'
-import { amountCell, fmtAmount, tsToIsoDate, fmtDate } from './money'
+import { amountCell, fmtAmount, fmtCurrencyTotals, roundMoney, totalsByCurrency, tsToIsoDate, fmtDate } from './money'
+import { useViewedRecord } from './viewed-record'
 import DocumentEditor, { type DocumentEditorPayload, type EditableDocument } from './components/DocumentEditor.vue'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -203,6 +204,9 @@ const t = makePageTranslator('finance.bills')
 const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
 const { can } = usePermissionGuard()
+// Pay Bills creates the payments AND posts and applies them, so the backend gates it
+// on finance.document.create plus finance.document.update (posting everywhere else).
+const canPayBills = computed(() => can('finance.document.create') && can('finance.document.update'))
 const sources = createFinanceOptionSources(bridge)
 
 const columns = buildDocumentColumns(t, 'vendorName', { showApplied: true, showDueDate: true })
@@ -210,15 +214,23 @@ const columns = buildDocumentColumns(t, 'vendorName', { showApplied: true, showD
 // 真实筛选（标准 1）：状态 / 单据日期区间 / 往来方。往来方走 render 逃生口挂
 // TPartySelect —— 它是异步远程搜索，form-schema 的静态 select 承载不了。
 const searchFields = buildDocumentSearchFields(td, {
-  renderParty: (model) =>
-    h(TPartySelect, {
-      modelValue: (model.partyId as string) ?? null,
-      bridge,
-      kind: 'vendor',
-      size: 'small',
-      'onUpdate:modelValue': (v: string | null) => (model.partyId = v ?? undefined),
-    }),
+  party: {
+    key: 'vendorId',
+    render: (model, key) =>
+      h(TPartySelect, {
+        modelValue: (model[key] as string) ?? null,
+        bridge,
+        kind: 'vendor',
+        size: 'small',
+        'onUpdate:modelValue': (v: string | null) => (model[key] = v ?? undefined),
+      }),
+  },
 })
+
+// The full record behind the read-only drawer. Last-wins: a late answer for
+// the row opened before must not paint the drawer of the one open now.
+const viewing = useViewedRecord<BillDto>((id) => bridge.bills.getById(id), (error) => message.error(error))
+const viewed = viewing.record
 
 const crud = useCrudPage<FinanceDocRow>({
   pageId: 'finance.bills',
@@ -228,7 +240,7 @@ const crud = useCrudPage<FinanceDocRow>({
   fetchData: (q) => bridge.bills.fetch(q),
   // Deep-link cold restore (?detail=view:<id>) hydrates even off-page rows.
   loadDetailById: (id) => bridge.bills.getById(id),
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 const title = 'tnzi.admin.modules.finance.bills.title'
@@ -240,17 +252,6 @@ function statusLabel(status?: FinanceDocumentStatus): string {
 }
 
 // ── Read-only detail ────────────────────────────────────────────
-const viewed = ref<BillDto | null>(null)
-
-async function loadViewed(row: FinanceDocRow) {
-  viewed.value = null
-  try {
-    viewed.value = await bridge.bills.getById(String(row.id ?? ''))
-  } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
-  }
-}
-
 const lineColumns: DataTableColumns<BillDto['lines'][number]> = [
   { key: 'lineNumber', title: '#', width: 48 },
   { key: 'description', title: td('editor.description'), minWidth: 180, render: (row) => row.description ?? EMPTY_DASH },
@@ -282,6 +283,7 @@ const editingEntry = computed<EditableDocument | null>(() => {
     docDate: d.docDate,
     dueDate: d.dueDate,
     currency: d.currency,
+    exchangeRate: d.exchangeRate,
     memo: d.memo,
     lines: d.lines,
   }
@@ -320,11 +322,14 @@ function openEdit(row: FinanceDocRow) {
 }
 
 async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
+  // The update replaces the draft: the rate and the per-line tax override are
+  // carried by the editor even though it has no control for them.
   const data: CreateBillDto = {
     vendorId: payload.partyId!,
     docDate: payload.docDate,
     dueDate: payload.dueDate,
     currency: payload.currency,
+    exchangeRate: payload.exchangeRate,
     memo: payload.memo,
     lines: payload.lines.map((l) => ({
       itemId: l.itemId,
@@ -333,6 +338,7 @@ async function saveEditor(payload: DocumentEditorPayload, post: boolean) {
       quantity: l.quantity,
       unitPrice: l.unitPrice,
       taxCodeId: l.taxCodeId,
+      taxAmount: l.taxAmount,
     })),
   }
 
@@ -386,8 +392,19 @@ const payForm = reactive({
 const methodOptions = computed(() =>
   PAYMENT_METHODS.map((m) => ({ label: td(`method.${m.charAt(0).toLowerCase()}${m.slice(1)}`), value: m })))
 
+// Every derived amount on this dialog goes through roundMoney: it is what the
+// submit button is gated on and what the operator reads as "about to pay".
 const payTotal = computed(() =>
-  Object.values(payAllocations).reduce<number>((sum, v) => sum + (v ?? 0), 0))
+  roundMoney(Object.values(payAllocations).reduce<number>((sum, v) => sum + roundMoney(v), 0)))
+// What the operator reads as the total: open bills of every currency share the
+// picker (the backend pays them per vendor and currency), so it is totalled per
+// currency rather than added up into one figure that is no amount of money.
+const payTotalText = computed(() =>
+  fmtCurrencyTotals(totalsByCurrency(
+    openBills.value.filter((b) => roundMoney(payAllocations[b.id]) > 0),
+    (b) => payAllocations[b.id],
+    (b) => b.currency,
+  )))
 
 watch(
   () => payDetail.visible.value,
@@ -413,7 +430,9 @@ watch(
           vendorName: b.vendorName ?? null,
           dueDate: b.dueDate ?? null,
           currency: b.currency,
-          outstanding: (b.total ?? 0) - (b.appliedTotal ?? 0),
+          // Rounded: this value is prefilled into the allocation as-is, and in
+          // doubles 50.3 - 20.1 is 30.199999999999996 - a hair short of paid.
+          outstanding: roundMoney((b.total ?? 0) - (b.appliedTotal ?? 0)),
         }))
         .filter((b) => b.outstanding > 0)
         .sort((a, b) => ((a.dueDate ?? '9999') < (b.dueDate ?? '9999') ? -1 : 1))
@@ -440,8 +459,8 @@ function fillAll() {
 
 async function submitPay() {
   const targets = openBills.value
-    .filter((b) => (payAllocations[b.id] ?? 0) > 0)
-    .map((b) => ({ docType: SettlementDocType.Bill, docId: b.id, amount: payAllocations[b.id]! }))
+    .map((b) => ({ docType: SettlementDocType.Bill, docId: b.id, amount: roundMoney(payAllocations[b.id]) }))
+    .filter((target) => target.amount > 0)
   if (targets.length === 0) return
 
   paying.value = true
@@ -491,7 +510,7 @@ const isVoidable = (row: FinanceDocRow) => row.status === FinanceDocumentStatus.
 /** 未清 = 已过账且还有余额没付出去。 */
 const isOpen = (row: FinanceDocRow) =>
   (row.status === FinanceDocumentStatus.Posted || row.status === FinanceDocumentStatus.PartiallyPaid)
-  && (row.total ?? 0) - (row.appliedTotal ?? 0) > 0
+  && roundMoney((row.total ?? 0) - (row.appliedTotal ?? 0)) > 0
 
 /** 行内下游动作（标准 1）：这张账单直接去付，模态里它已被选中并填好金额。 */
 function payBill(row: FinanceDocRow) {
@@ -504,7 +523,7 @@ const rowActions: RowAction<FinanceDocRow>[] = [
   { key: 'edit', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), onClick: openEdit },
   { key: 'post', label: 'actions.post', type: 'primary', show: (row) => can('finance.document.update') && isDraft(row), confirm: 'confirmPost', onClick: (row) => void run(() => bridge.bills.post(String(row.id ?? '')), 'postSuccess') },
   // 下游动作：未清账单 → 直接付款（模态里这张已预选并填满）。
-  { key: 'pay', label: 'actions.payBill', show: (row) => can('finance.document.create') && isOpen(row), onClick: payBill },
+  { key: 'pay', label: 'actions.payBill', show: (row) => canPayBills.value && isOpen(row), onClick: payBill },
   { key: 'void', label: 'actions.void', type: 'warning', show: (row) => can('finance.document.update') && isVoidable(row) && (row.appliedTotal ?? 0) === 0, confirm: 'confirmVoid', onClick: (row) => void run(() => bridge.bills.voidDoc(String(row.id ?? '')), 'voidSuccess') },
   { key: 'delete', label: 'actions.delete', type: 'error', show: (row) => can('finance.document.delete') && isDraft(row), confirm: 'confirmDelete', onClick: (row) => void run(() => bridge.bills.deleteDraft(String(row.id ?? '')), 'deleteSuccess') },
 ]

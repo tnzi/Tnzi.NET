@@ -29,8 +29,8 @@ public class FileFieldWriteProbeGateTests
     {
         // Tnzi.Notification 曾在这里豁免（「没有发送器按 FileId 取字节」）。2026-09-12 起派发经核心的
         // IFileContentReader 以系统身份按 FileId 读字节，于是创建入口必须问探针 —— 它现在真的问了，不再豁免。
-        // Invoice 的 PDF 路径 / URL / 文件 id 都由发票渲染在服务端生成，从不来自请求体。
-        ["Tnzi.Payment.Billing"] = "Invoice PDF file fields are generated server-side, never taken from a request",
+        // Tnzi.Payment.Billing 也曾在这里豁免（发票 PDF 的路径 / URL 由服务端生成）。那两个 [FileField] 标在从不存文件 id 的
+        // 字符串列上，已经撤掉，引用由发票服务显式维护；豁免随之删除，免得以后有人加回标记时被这一行悄悄放过。
     };
 
     private static readonly Regex FileFieldAttribute = new(@"\[FileField(\(|\])", RegexOptions.Compiled);
@@ -40,6 +40,14 @@ public class FileFieldWriteProbeGateTests
         => File.ReadLines(file)
             .Select(l => l.TrimStart())
             .Any(l => !l.StartsWith("//", StringComparison.Ordinal) && FileFieldAttribute.IsMatch(l));
+
+    /// <summary>
+    /// 服务代码里用到了读取探针。注释里提到它不算：一段解释「这里为什么不需要探针」的文档注释会让整个模块被当成已经问过。
+    /// </summary>
+    private static bool UsesTheReadAccessProbe(string file)
+        => File.ReadLines(file)
+            .Select(l => l.TrimStart())
+            .Any(l => !l.StartsWith("//", StringComparison.Ordinal) && l.Contains("IFileReadAccessProbe", StringComparison.Ordinal));
 
     [Fact]
     public void EveryModuleWithAFileFieldEntity_AsksTheReadAccessProbeBeforeWriting()
@@ -53,10 +61,10 @@ public class FileFieldWriteProbeGateTests
             .OrderBy(m => m, StringComparer.Ordinal)
             .ToList();
 
-        // 扫描面没塌：今天有 7 个模块的实体带 [FileField]（Chat / Finance / Finance.Banking / Identity /
-        // Notification / Payment.Billing / Signing）。数字变小说明扫描面丢了目录，不是代码变干净了。
-        Assert.True(modulesWithFileFields.Count >= 7,
-            $"expected at least 7 modules declaring [FileField] entities, found {modulesWithFileFields.Count}: {string.Join(", ", modulesWithFileFields)}");
+        // 扫描面没塌：今天有 6 个模块的实体带 [FileField]（Chat / Finance / Finance.Banking / Identity /
+        // Notification / Signing）。数字变小说明扫描面丢了目录，不是代码变干净了。
+        Assert.True(modulesWithFileFields.Count >= 6,
+            $"expected at least 6 modules declaring [FileField] entities, found {modulesWithFileFields.Count}: {string.Join(", ", modulesWithFileFields)}");
 
         var offenders = new List<string>();
         foreach (var module in modulesWithFileFields)
@@ -65,7 +73,7 @@ public class FileFieldWriteProbeGateTests
                 continue;
 
             var asksTheProbe = RepoScan.EnumerateFiles($"src/{module}/Services", "*.cs")
-                .Any(f => File.ReadAllText(f).Contains("IFileReadAccessProbe", StringComparison.Ordinal));
+                .Any(UsesTheReadAccessProbe);
             if (!asksTheProbe)
                 offenders.Add(module);
         }

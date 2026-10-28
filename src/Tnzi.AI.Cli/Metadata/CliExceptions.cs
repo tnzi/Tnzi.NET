@@ -35,6 +35,31 @@ public class CliProcessLaunchException : InfrastructureException
     {
         ExecutablePath = executablePath;
     }
+
+    /// <summary>以明确的原因初始化异常（启动前就拒绝、不可重试）。</summary>
+    public CliProcessLaunchException(string executablePath, string reason)
+        : base("CliAgent", $"Refused to launch external agent process '{executablePath}': {reason}", isRetryable: false)
+    {
+        ExecutablePath = executablePath;
+    }
+}
+
+/// <summary>
+/// 执行宿主给不出这个作用域的目标：对应的远程端没连上、容器没起来，或宿主不服务这种作用域。
+/// </summary>
+/// <remarks>
+/// 运行以 <see cref="CliRunFailureReason.LaunchFailed"/> 结束（消息原样给出），运行时探测跳过这一轮。
+/// </remarks>
+public class CliHostUnavailableException : InfrastructureException
+{
+    /// <summary>初始化异常。</summary>
+    /// <param name="message">面向使用者的说明（英文），说清是哪个目标、为什么不可用。</param>
+    /// <param name="isRetryable">稍后再试是否可能成功（远程端掉线 = true；宿主不服务这种作用域 = false）。</param>
+    /// <param name="innerException">底层原因。</param>
+    public CliHostUnavailableException(string message, bool isRetryable = true, Exception? innerException = null)
+        : base("CliAgent", message, isRetryable, innerException)
+    {
+    }
 }
 
 /// <summary>
@@ -54,6 +79,30 @@ public class CliProviderConfigurationException : InfrastructureException
         : base("CliAgent", message, isRetryable: false)
     {
         ProviderKey = providerKey;
+    }
+}
+
+/// <summary>
+/// 工作目录正被另一次运行（另一条线程）占用：身份哨兵能解析，且归属他人。
+/// </summary>
+/// <remarks>
+/// 单独成类，调度层才能把它归入 <see cref="CliRunFailureReason.WorkspacePrepareFailed"/>（此前是通用异常，落成 <c>Unknown</c>），
+/// 并据 <see cref="OwnerRunId"/> 回查占用者：它已经结束时，标记是崩溃留下的残留，可以回收。
+/// </remarks>
+public class CliWorkspaceClaimedException : InfrastructureException
+{
+    /// <summary>标记里记录的占用者运行。</summary>
+    public Guid OwnerRunId { get; }
+
+    /// <summary>被占用的目录。</summary>
+    public string Directory { get; }
+
+    /// <summary>初始化异常。</summary>
+    public CliWorkspaceClaimedException(string directory, Guid ownerRunId)
+        : base("CliAgent", $"Workspace at '{directory}' is already claimed by run {ownerRunId}.", isRetryable: false)
+    {
+        Directory = directory;
+        OwnerRunId = ownerRunId;
     }
 }
 

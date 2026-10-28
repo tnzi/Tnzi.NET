@@ -12,7 +12,9 @@ public class DiscordAdapterOptions
     /// <summary>Bot token. Inject via env var AI__CHANNELS__DISCORD__BOTTOKEN.</summary>
     public string? BotToken { get; set; }
 
-    /// <summary>Application ID.</summary>
+    /// <summary>
+    /// Reserved; not read. Interaction replies use the application id carried by each interaction payload.
+    /// </summary>
     public string? ApplicationId { get; set; }
 
     /// <summary>Application public key for webhook signature verification (Ed25519).</summary>

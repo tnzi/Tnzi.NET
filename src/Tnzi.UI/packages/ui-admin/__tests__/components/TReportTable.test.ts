@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { VNode } from 'vue'
 import TReportTable from '../../src/components/data/TReportTable.vue'
+import { EMPTY_DASH } from '../../src/utils/placeholders'
 
 const stub = {
   name: 'TResponsiveTable',
@@ -41,6 +42,33 @@ describe('TReportTable', () => {
     const row = summary([{ name: 'A', amt: 10 }, { name: 'B', amt: 5 }])
     expect(row.name!.value.children).toBe('Total')
     expect(row.amt!.value.children).toBe('15.00')
+  })
+
+  it('formats money the way every other money cell does: parenthesised credits, a dash for blanks', () => {
+    // A blank amount printed as 0.00 reads as "nothing owed"; a credit printed
+    // as -500.00 disagrees with every TMoney cell, which prints (500.00).
+    const w = mountRT({
+      columns: [{ key: 'name', title: 'Name' }, { key: 'amount', title: 'Amount', money: true }],
+      rows: [],
+    })
+    const render = (w.findComponent({ name: 'TResponsiveTable' }).props('columns') as Array<Record<string, unknown>>)[1]!
+      .render as (r: unknown) => string
+    expect(render({ amount: -500 })).toBe('(500.00)')
+    expect(render({ amount: 1234.5 })).toBe('1,234.50')
+    expect(render({ amount: null })).toBe(EMPTY_DASH)
+    expect(render({})).toBe(EMPTY_DASH)
+    expect(render({ amount: 0 })).toBe('0.00')
+  })
+
+  it('hands a custom formatMoney the number, as before', () => {
+    const w = mountRT({
+      columns: [{ key: 'amount', title: 'Amount', money: true }],
+      rows: [],
+      formatMoney: (v: number) => `$${v}`,
+    })
+    const render = (w.findComponent({ name: 'TResponsiveTable' }).props('columns') as Array<Record<string, unknown>>)[0]!
+      .render as (r: unknown) => string
+    expect(render({ amount: -5 })).toBe('$-5')
   })
 
   it('no summary when no total columns and showTotals not set', () => {

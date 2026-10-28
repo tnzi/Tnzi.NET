@@ -98,7 +98,7 @@ withDefaults(
 }
 .t-reasoning-stage__status--error {
   background: var(--tnzi-ai-danger);
-  color: var(--tnzi-ai-on-accent);
+  color: var(--tnzi-ai-on-status);
   font-size: 11px;
 }
 .t-reasoning-stage__title {

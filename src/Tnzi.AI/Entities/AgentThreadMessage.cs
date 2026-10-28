@@ -38,7 +38,28 @@ public class AgentThreadMessage : CreationAuditedEntity<Guid>, IMultiTenant
     public int Order { get; set; }
 
     /// <summary>
-    /// JSON array of component IDs attached to this message (for session restore)
+    /// 回复没有正常完成时的结局（<see cref="ThreadMessageStatuses"/>：<c>stopped</c> / <c>failed</c> / <c>usage_limit</c>）；正常完成为 null。
+    /// </summary>
+    /// <remarks>
+    /// 内建引擎只存正常完成的回复，从不写它。外部 CLI 运行被用户停下、或中途失败时，把已经写出的部分与已经发生的工具调用
+    /// 照样存下来（那是用户当时看到的、也是 CLI 会话里已经有的），并用它标明这是半截回复。
+    /// </remarks>
+    public string? Status { get; set; }
+
+    /// <summary>
+    /// <see cref="Status"/> 为 <c>usage_limit</c> 时，外部 CLI 账号用量上限的重置时间（UTC）；CLI 没报出来时为 null。
+    /// </summary>
+    public DateTime? UsageLimitResetsAt { get; set; }
+
+    /// <summary>
+    /// 用户消息：客户端随这一轮发来的每轮元数据（<c>ChatRequestDto.Metadata</c>，JSON 对象），由消费方定义键与值；
+    /// 没带时为 null。随消息存下是为了重新生成时原样再带一次、重新加载时客户端还看得到这一轮指向了什么。
+    /// </summary>
+    public string? MetadataJson { get; set; }
+
+    /// <summary>
+    /// JSON array of component IDs attached to this message (for session restore).
+    /// The framework neither reads nor writes it; an application that emits <c>StreamEvent.ComponentRef</c> persists the IDs here.
     /// </summary>
     public string? ComponentRefs { get; set; }
 

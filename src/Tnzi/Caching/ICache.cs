@@ -22,7 +22,7 @@ public interface ICache
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间（绝对过期），null 使用默认过期时间 <c>Caching:DefaultExpirationMinutes</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default);
     
@@ -112,7 +112,7 @@ public interface ICache
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间（绝对过期），null 使用默认过期时间 <c>Caching:DefaultExpirationMinutes</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>如果设置成功返回 true，如果键已存在返回 false</returns>
     Task<bool> TrySetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default);
@@ -133,7 +133,7 @@ public interface ICache
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
     /// <param name="tags">标签列表</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间（绝对过期），null 使用默认过期时间 <c>Caching:DefaultExpirationMinutes</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default);
     
@@ -161,7 +161,7 @@ public interface ICache
     /// </summary>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="items">键值对集合</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间（绝对过期），null 使用默认过期时间 <c>Caching:DefaultExpirationMinutes</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     Task SetManyAsync<T>(
         IEnumerable<KeyValuePair<string, T>> items,
@@ -212,11 +212,15 @@ public interface ICache
     /// <remarks>
     /// 命中判定走 <see cref="TryGetAsync{T}"/> 而不是「取回来的值非 null」：后者对值类型恒为真，
     /// 会让工厂永不被调用、缓存永不被写入，<c>GetOrAddAsync&lt;int&gt;</c> 恒返回 0 且不报任何错。
+    /// <para>
+    /// 默认实现在拿到锁之后再调一次 <see cref="TryGetAsync{T}"/> 复查。在 <c>TryGetAsync</c> 里计命中率的实现
+    /// 应重写本方法、让复查不计数（内置的内存与 Redis 实现都已重写），否则一次未命中记成两次，命中率被系统性低估。
+    /// </para>
     /// </remarks>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="factory">值不存在时的创建工厂</param>
-    /// <param name="expiration">过期时间，null 使用默认过期时间</param>
+    /// <param name="expiration">过期时间（绝对过期），null 使用默认过期时间 <c>Caching:DefaultExpirationMinutes</c></param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>缓存值或工厂创建的值</returns>
     async Task<T?> GetOrAddAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null, CancellationToken cancellationToken = default)

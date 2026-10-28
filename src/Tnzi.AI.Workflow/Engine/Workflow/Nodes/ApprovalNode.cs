@@ -29,7 +29,7 @@ public class ApprovalNode : IWorkflowNode
         var interrupt = new WorkflowInterrupt
         {
             StepId = step.StepId ?? "unknown",
-            Reason = $"Approval required for step '{step.StepId}'. Content: {(approvalContent.Length > 200 ? approvalContent[..200] + "..." : approvalContent)}",
+            Reason = $"Approval required for step '{step.StepId}'. Content: {approvalContent.Truncate(200)}",
             Type = InterruptType.Approval,
             RequestedInput = new Dictionary<string, object>
             {

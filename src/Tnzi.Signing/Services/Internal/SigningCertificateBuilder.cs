@@ -36,6 +36,13 @@ public sealed class SigningCertificateBuilder
     private const double LineHeight = 0.0175d;
     private const double SectionGap = 0.012d;
 
+    // 标签 + 值两列。值列按实测宽度换行（见 WrapValue），所以列宽与字号都要在这里定死。
+    private const double RowLabelWidth = 0.22d;
+    private const double RowFontSize = 9d;
+    private const double RecipientFontSize = 10d;
+    private const double RowValueWidthPoints = PageWidthPoints * (ContentWidth - RowLabelWidth);
+    private const double ContentWidthPoints = PageWidthPoints * ContentWidth;
+
     /// <summary>正文区的上下边界：越过下界就翻页。</summary>
     private const double TopY = 0.07d;
     private const double BottomY = 0.94d;
@@ -46,6 +53,8 @@ public sealed class SigningCertificateBuilder
     private readonly IPdfStamper _stamper;
     private readonly IFileStorageService _files;
     private readonly ILogger<SigningCertificateBuilder> _logger;
+    private readonly PdfTextFitter _rowValueText;
+    private readonly PdfTextFitter _recipientText;
 
     public SigningCertificateBuilder(
         IPdfStamper stamper,
@@ -55,6 +64,8 @@ public sealed class SigningCertificateBuilder
         _stamper = Check.NotNull(stamper);
         _files = Check.NotNull(files);
         _logger = Check.NotNull(logger);
+        _rowValueText = new PdfTextFitter(_stamper, RowFontSize);
+        _recipientText = new PdfTextFitter(_stamper, RecipientFontSize, bold: true);
     }
 
     /// <summary>
@@ -73,34 +84,36 @@ public sealed class SigningCertificateBuilder
         Check.NotNull(request);
         Check.NotNull(recipients);
 
-        var stamps = new List<PdfStamp>();
-        var cursor = new Cursor(1, TopY);
-
-        cursor = WriteHeading(stamps, "Certificate of Completion", cursor);
-        cursor = Advance(cursor, SectionGap);
-
-        cursor = WriteRow(stamps, "Document", request.Title, cursor);
-        cursor = WriteRow(stamps, "File", sealedFileName, cursor);
-        cursor = WriteRow(stamps, "Request ID", request.Id.ToString(), cursor);
-        // ★ 这一行是整份证书的重点：它把证书与某一份确定的字节绑在一起。
-        cursor = WriteRow(stamps, "SHA-256", request.Sha256 ?? "(not computed)", cursor);
-        cursor = WriteRow(stamps, "Completed (UTC)", Format(request.CompletedAt), cursor);
-        if (!string.IsNullOrWhiteSpace(request.SentByName))
-            cursor = WriteRow(stamps, "Sent by", request.SentByName!, cursor);
-
-        cursor = Advance(cursor, SectionGap);
-        cursor = WriteHeading(stamps, "Signers", cursor, fontSize: 12d);
-        cursor = Advance(cursor, SectionGap / 2);
-
-        foreach (var recipient in recipients.OrderBy(r => r.Order).ThenBy(r => r.Name, StringComparer.Ordinal))
-            cursor = WriteRecipient(stamps, recipient, cursor);
-
-        cursor = Advance(cursor, SectionGap);
-        cursor = WriteNote(stamps, cursor);
-
         byte[] pdf;
         try
         {
+            // 排版也在 try 里：按实测宽度换行要量字，量字在没有字体的环境里会抛，那与画不出来是同一种失败，
+            // 都只该让证书缺席，不能把异常抛给已经密封完的调用方。
+            var stamps = new List<PdfStamp>();
+            var cursor = new Cursor(1, TopY);
+
+            cursor = WriteHeading(stamps, "Certificate of Completion", cursor);
+            cursor = Advance(cursor, SectionGap);
+
+            cursor = WriteRow(stamps, "Document", request.Title, cursor);
+            cursor = WriteRow(stamps, "File", sealedFileName, cursor);
+            cursor = WriteRow(stamps, "Request ID", request.Id.ToString(), cursor);
+            // ★ 这一行是整份证书的重点：它把证书与某一份确定的字节绑在一起。
+            cursor = WriteRow(stamps, "SHA-256", request.Sha256 ?? "(not computed)", cursor);
+            cursor = WriteRow(stamps, "Completed (UTC)", Format(request.CompletedAt), cursor);
+            if (!string.IsNullOrWhiteSpace(request.SentByName))
+                cursor = WriteRow(stamps, "Sent by", request.SentByName!, cursor);
+
+            cursor = Advance(cursor, SectionGap);
+            cursor = WriteHeading(stamps, "Signers", cursor, fontSize: 12d);
+            cursor = Advance(cursor, SectionGap / 2);
+
+            foreach (var recipient in recipients.OrderBy(r => r.Order).ThenBy(r => r.Name, StringComparer.Ordinal))
+                cursor = WriteRecipient(stamps, recipient, cursor);
+
+            cursor = Advance(cursor, SectionGap);
+            cursor = WriteNote(stamps, cursor);
+
             pdf = _stamper.Create(new PdfStampRequest
             {
                 // 页数由排版结果决定 —— 游标只会往后翻，所以末值就是总页数。
@@ -151,86 +164,127 @@ public sealed class SigningCertificateBuilder
         return Advance(cursor, height);
     }
 
-    private static Cursor WriteRow(List<PdfStamp> stamps, string label, string value, Cursor cursor)
-    {
-        const double labelWidth = 0.22d;
-        cursor = EnsureRoom(cursor, LineHeight);
+    private Cursor WriteRow(List<PdfStamp> stamps, string label, string value, Cursor cursor)
+        => WriteRow(stamps, label, WrapValue(value), cursor);
 
-        stamps.Add(new PdfTextStamp
+    /// <summary>
+    /// 一行「标签 + 值」，值已按值列宽度拆好行：标签只画在第一行，续行只画值。
+    /// </summary>
+    /// <remarks>
+    /// 每一行各自 <see cref="EnsureRoom"/>：一段比剩余版面还长的值（几千字的同意声明）在行与行之间翻页，
+    /// 而不是整段越过页底。
+    /// </remarks>
+    private static Cursor WriteRow(List<PdfStamp> stamps, string label, IReadOnlyList<string> lines, Cursor cursor)
+    {
+        for (var i = 0; i < lines.Count; i++)
         {
-            PageNumber = cursor.Page,
-            Rect = new NormalizedRect(MarginX, cursor.Y, labelWidth, LineHeight),
-            Text = label,
-            FontSize = 9d,
-            Color = "#666666",
-            Alignment = PdfStampAlignment.CenterLeft,
-        });
-        stamps.Add(new PdfTextStamp
-        {
-            PageNumber = cursor.Page,
-            Rect = new NormalizedRect(MarginX + labelWidth, cursor.Y, ContentWidth - labelWidth, LineHeight),
-            // 长值（哈希、UA 串）不换行会被裁掉右半 —— 裁掉的哈希等于没有哈希，
-            // 所以这里按框宽截断并显式加省略号，让"这是被截断的"看得出来。
-            Text = Truncate(value, 74),
-            FontSize = 9d,
-            Alignment = PdfStampAlignment.CenterLeft,
-        });
-        return Advance(cursor, LineHeight);
+            cursor = EnsureRoom(cursor, LineHeight);
+
+            if (i == 0)
+            {
+                stamps.Add(new PdfTextStamp
+                {
+                    PageNumber = cursor.Page,
+                    Rect = new NormalizedRect(MarginX, cursor.Y, RowLabelWidth, LineHeight),
+                    Text = label,
+                    FontSize = RowFontSize,
+                    Color = "#666666",
+                    Alignment = PdfStampAlignment.CenterLeft,
+                });
+            }
+
+            stamps.Add(new PdfTextStamp
+            {
+                PageNumber = cursor.Page,
+                Rect = new NormalizedRect(MarginX + RowLabelWidth, cursor.Y, ContentWidth - RowLabelWidth, LineHeight),
+                Text = lines[i],
+                FontSize = RowFontSize,
+                Alignment = PdfStampAlignment.CenterLeft,
+            });
+            cursor = Advance(cursor, LineHeight);
+        }
+
+        return cursor;
+    }
+
+    /// <summary>
+    /// 把一个值按值列的实测宽度拆成若干行；值里自带的换行保留为分行。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>换行，不截断。</b>证书是证据：同意声明要能回答「他当时同意的是什么」，User-Agent 要能回答「是在哪台机器上按的」，
+    /// 拒签理由是当事人的原话。曾按值列宽度截断加省略号，一段常见的几百字电子签名同意声明在证书上只剩开头一行，
+    /// 而 <c>Signer.ConsentText</c> 在管理端与 API 里都不出现，证书是唯一能看到它的地方。
+    /// 放得下的值（哈希、id、时间）仍是一行，与原来逐字相同。
+    /// </remarks>
+    private IReadOnlyList<string> WrapValue(string value)
+    {
+        var paragraphs = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n');
+        var lines = new List<string>();
+        foreach (var paragraph in paragraphs)
+            lines.AddRange(_rowValueText.Wrap(paragraph, RowValueWidthPoints));
+        return lines;
     }
 
     private Cursor WriteRecipient(List<PdfStamp> stamps, Signer recipient, Cursor cursor)
     {
-        // ★ 一位签署人的记录整段不拆页：姓名在上一页、签署时间在下一页，读起来像是
-        //   两个人各签了一半。整段比一页还高时不能空转（会翻出一堆空白页），
-        //   那时退回逐行翻页 —— 行级 EnsureRoom 始终兜底。
-        var block = BlockHeight(recipient);
-        if (block <= BottomY - TopY)
-            cursor = EnsureRoom(cursor, block);
-
         var who = string.IsNullOrWhiteSpace(recipient.Email)
             ? recipient.Name
             : $"{recipient.Name} <{recipient.Email}>";
 
-        cursor = EnsureRoom(cursor, LineHeight);
-        stamps.Add(new PdfTextStamp
-        {
-            PageNumber = cursor.Page,
-            Rect = new NormalizedRect(MarginX, cursor.Y, ContentWidth, LineHeight),
-            Text = $"{recipient.Order}. {who}",
-            FontSize = 10d,
-            Bold = true,
-            Alignment = PdfStampAlignment.CenterLeft,
-        });
-        cursor = Advance(cursor, LineHeight);
+        // 姓名（160 字）加邮箱（256 字）一行放不下时同样换行，而不是截掉，邮箱是「谁签的」的一半。
+        var nameLines = _recipientText.Wrap($"{recipient.Order}. {who}", ContentWidthPoints);
+        var rows = RecipientRows(recipient)
+            .Select(row => (row.Label, Lines: WrapValue(row.Value)))
+            .ToList();
 
-        cursor = WriteRow(stamps, "    Role", string.IsNullOrWhiteSpace(recipient.Role) ? "-" : recipient.Role, cursor);
-        cursor = WriteRow(stamps, "    Status", recipient.Status.ToString(), cursor);
-        cursor = WriteRow(stamps, "    Viewed (UTC)", Format(recipient.ViewedAt), cursor);
-        cursor = WriteRow(stamps, "    Signed (UTC)", Format(recipient.SignedAt), cursor);
-        if (recipient.DeclinedAt.HasValue)
+        // ★ 一位签署人的记录整段不拆页：姓名在上一页、签署时间在下一页，读起来像是
+        //   两个人各签了一半。整段高度按**真正要写的行数**算（换行之后的），与下面写的是同一份行列表，
+        //   不会再出现「估的行数与画的行数各算各的」。整段比一页还高时不能空转（会翻出一堆空白页），
+        //   那时退回逐行翻页 —— 行级 EnsureRoom 始终兜底。
+        var block = ((nameLines.Count + rows.Sum(r => r.Lines.Count)) * LineHeight) + (SectionGap / 2);
+        if (block <= BottomY - TopY)
+            cursor = EnsureRoom(cursor, block);
+
+        foreach (var line in nameLines)
         {
-            cursor = WriteRow(stamps, "    Declined (UTC)", Format(recipient.DeclinedAt), cursor);
-            cursor = WriteRow(stamps, "    Reason", recipient.DeclineReason ?? "-", cursor);
+            cursor = EnsureRoom(cursor, LineHeight);
+            stamps.Add(new PdfTextStamp
+            {
+                PageNumber = cursor.Page,
+                Rect = new NormalizedRect(MarginX, cursor.Y, ContentWidth, LineHeight),
+                Text = line,
+                FontSize = RecipientFontSize,
+                Bold = true,
+                Alignment = PdfStampAlignment.CenterLeft,
+            });
+            cursor = Advance(cursor, LineHeight);
         }
-        // IP 与 UA 是这份证书里唯一能回答"是不是本人在那台机器上按的"的两行；
-        // 缺失时写 "-" 而不是省略这一行 —— 一行不存在与一行为空是两回事。
-        cursor = WriteRow(stamps, "    IP", recipient.SignerIp ?? "-", cursor);
-        cursor = WriteRow(stamps, "    User agent", recipient.SignerUserAgent ?? "-", cursor);
-        if (!string.IsNullOrWhiteSpace(recipient.ConsentText))
-            cursor = WriteRow(stamps, "    Consent", recipient.ConsentText!, cursor);
+
+        foreach (var (label, lines) in rows)
+            cursor = WriteRow(stamps, label, lines, cursor);
 
         return Advance(cursor, SectionGap / 2);
     }
 
-    /// <summary>一位签署人整段占多高（用来判断要不要提前翻页）。必须与 <see cref="WriteRecipient"/> 写的行数一致。</summary>
-    private static double BlockHeight(Signer recipient)
+    /// <summary>一位签署人名下的明细行（标签 + 原值），按画出来的先后。</summary>
+    private static IEnumerable<(string Label, string Value)> RecipientRows(Signer recipient)
     {
-        var rows = 1 // 姓名行
-                   + 4 // Role / Status / Viewed / Signed
-                   + 2 // IP / User agent
-                   + (recipient.DeclinedAt.HasValue ? 2 : 0)
-                   + (string.IsNullOrWhiteSpace(recipient.ConsentText) ? 0 : 1);
-        return (rows * LineHeight) + (SectionGap / 2);
+        yield return ("    Role", string.IsNullOrWhiteSpace(recipient.Role) ? "-" : recipient.Role);
+        yield return ("    Status", recipient.Status.ToString());
+        yield return ("    Viewed (UTC)", Format(recipient.ViewedAt));
+        yield return ("    Signed (UTC)", Format(recipient.SignedAt));
+        if (recipient.DeclinedAt.HasValue)
+        {
+            yield return ("    Declined (UTC)", Format(recipient.DeclinedAt));
+            yield return ("    Reason", recipient.DeclineReason ?? "-");
+        }
+
+        // IP 与 UA 是这份证书里唯一能回答"是不是本人在那台机器上按的"的两行；
+        // 缺失时写 "-" 而不是省略这一行 —— 一行不存在与一行为空是两回事。
+        yield return ("    IP", recipient.SignerIp ?? "-");
+        yield return ("    User agent", recipient.SignerUserAgent ?? "-");
+        if (!string.IsNullOrWhiteSpace(recipient.ConsentText))
+            yield return ("    Consent", recipient.ConsentText!);
     }
 
     private static Cursor WriteNote(List<PdfStamp> stamps, Cursor cursor)
@@ -252,15 +306,5 @@ public sealed class SigningCertificateBuilder
     private static string Format(DateTime? value)
         => value?.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "-";
 
-    private static string Truncate(string value, int max)
-        => value.Length <= max ? value : value[..(max - 1)] + "…";
-
-    private static string BuildFileName(string title)
-    {
-        var safe = string.IsNullOrWhiteSpace(title) ? "document" : title.Trim();
-        foreach (var c in Path.GetInvalidFileNameChars())
-            safe = safe.Replace(c, '_');
-        if (safe.Length > 110) safe = safe[..110];
-        return $"{safe}-certificate.pdf";
-    }
+    private static string BuildFileName(string title) => $"{SigningLimits.FileNameStem(title, 110)}-certificate.pdf";
 }

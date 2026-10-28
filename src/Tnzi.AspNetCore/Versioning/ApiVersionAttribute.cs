@@ -1,11 +1,16 @@
-
 namespace Tnzi.AspNetCore.Versioning;
 
 /// <summary>
-/// API 版本特性
-/// 用于标记控制器或方法的版本
+/// API 版本特性（不生效，见备注）
 /// </summary>
+/// <remarks>
+/// 框架里没有任何代码读取这个特性：版本由 <see cref="ApiVersionMiddleware"/> 按 <see cref="ApiVersionOptions"/>
+/// 全局解析，写进 <c>HttpContext.Items["ApiVersion"]</c>，路由不按版本分派。给两个控制器标上不同版本，
+/// 请求照样只按路由模板落到其中一个。需要按版本分派时请用不同的路由模板（如 <c>v2/users</c>），
+/// 或在 action 里读 <c>HttpContext.Items["ApiVersion"]</c>。
+/// </remarks>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false)]
+[Obsolete("ApiVersionAttribute is not enforced: versions are resolved globally by ApiVersionMiddleware and stored in HttpContext.Items[\"ApiVersion\"]; routing does not dispatch by version.")]
 public class ApiVersionAttribute : Attribute
 {
     /// <summary>

@@ -37,10 +37,21 @@ export const exchangeRateColumns: ColumnDef<RateRow>[] = [
   },
 ]
 
+/**
+ * Field type the page renders as a read-only value (registered in ExchangeRates.vue).
+ *
+ * A rate is upserted by its currency pair and date, so editing any of them
+ * saved a second rate and left the mistaken one in force for postings on its
+ * date. On edit they are shown, not edited; a wrong pair or date is fixed by
+ * deleting the rate and entering the right one.
+ */
+export const RATE_KEY_LOCKED_TYPE = 'exchange-rate-key-locked'
+const lockedOnEdit = (type: string) => (model: Record<string, unknown>) => (model.id ? RATE_KEY_LOCKED_TYPE : type)
+
 export const exchangeRateFormSchema: FormSchemaItem[] = [
-  { key: 'fromCurrency', labelKey: 'form.fromCurrency', label: 'From Currency', type: 'text', required: true },
-  { key: 'toCurrency', labelKey: 'form.toCurrency', label: 'To Currency', type: 'text', required: true },
+  { key: 'fromCurrency', labelKey: 'form.fromCurrency', label: 'From Currency', type: 'text', typeFn: lockedOnEdit('text'), required: true },
+  { key: 'toCurrency', labelKey: 'form.toCurrency', label: 'To Currency', type: 'text', typeFn: lockedOnEdit('text'), required: true },
   { key: 'rate', labelKey: 'form.rate', label: 'Rate', type: 'number', required: true },
-  { key: 'rateDate', labelKey: 'form.rateDate', label: 'Rate Date', type: 'date', required: true },
+  { key: 'rateDate', labelKey: 'form.rateDate', label: 'Rate Date', type: 'date', typeFn: lockedOnEdit('date'), required: true },
   { key: 'source', labelKey: 'form.source', label: 'Source', type: 'text' },
 ]

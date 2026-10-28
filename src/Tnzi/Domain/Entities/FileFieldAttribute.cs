@@ -4,6 +4,12 @@ namespace Tnzi.Domain.Entities;
 /// <summary>
 /// 标记属性为文件字段，用于自动跟踪文件引用
 /// </summary>
+/// <remarks>
+/// ★ 只在以 <c>Guid</c> 作 <c>Id</c> 的实体上受支持：文件引用表的实体标识是 Guid 列。
+/// <c>long</c> / <c>int</c> / <c>string</c> 主键的实体保存文件字段时，Storage 模块的引用处理器抛
+/// <see cref="InvalidOperationException"/> 并指名实体，保存失败。不能安静跳过：那会让文件以引用计数 0
+/// 被孤儿清理物理删除，而实体行仍指着它。
+/// </remarks>
 [AttributeUsage(AttributeTargets.Property)]
 public class FileFieldAttribute : Attribute
 {

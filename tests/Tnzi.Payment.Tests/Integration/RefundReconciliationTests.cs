@@ -21,6 +21,14 @@ public class AsyncRefundProvider : IPaymentProvider
     /// </summary>
     public RefundStatus SettledStatus { get; set; } = RefundStatus.Succeeded;
 
+    /// <summary>按渠道退款号给出对账查询的结果；为 null 时一律用 <see cref="SettledStatus"/>。</summary>
+    public Func<string, RefundStatus>? SettledStatusFor { get; set; }
+
+    /// <summary>对账查询在渠道往返期间别处发生的事，只跑一次。</summary>
+    public Func<Task>? DuringQuery { get; set; }
+
+    private int _duringQueryRan;
+
     public string ChannelCode => "AsyncRefund";
     public string ChannelName => "Async Refund (Test)";
 
@@ -29,11 +37,8 @@ public class AsyncRefundProvider : IPaymentProvider
     public Task<Result<PaymentProviderOrderResult>> CreatePaymentAsync(PaymentProviderCreateDto input)
         => Task.FromResult(Result.Success(new PaymentProviderOrderResult { TradeNo = input.TradeNo }));
 
-    public Task<Result<PaymentProviderQueryResult>> QueryPaymentAsync(string tradeNo)
-        => Task.FromResult(Result.Success(new PaymentProviderQueryResult { TradeNo = tradeNo, Status = PaymentStatus.Succeeded }));
-
     public Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
-        => QueryPaymentAsync(tradeNo);
+        => Task.FromResult(Result.Success(new PaymentProviderQueryResult { TradeNo = tradeNo, Status = PaymentStatus.Succeeded }));
 
     public Task<Result<PaymentProviderRefundResult>> RefundAsync(PaymentProviderRefundDto input)
         => Task.FromResult(Result.Success(new PaymentProviderRefundResult
@@ -44,14 +49,20 @@ public class AsyncRefundProvider : IPaymentProvider
             Status = RefundStatus.Refunding
         }));
 
-    public Task<Result<PaymentProviderRefundQueryResult>> QueryRefundAsync(string externalRefundNo)
-        => Task.FromResult(Result.Success(new PaymentProviderRefundQueryResult
+    public async Task<Result<PaymentProviderRefundQueryResult>> QueryRefundAsync(string externalRefundNo)
+    {
+        if (DuringQuery != null && Interlocked.Exchange(ref _duringQueryRan, 1) == 0)
+            await DuringQuery();
+
+        var status = SettledStatusFor?.Invoke(externalRefundNo) ?? SettledStatus;
+        return Result.Success(new PaymentProviderRefundQueryResult
         {
             RefundNo = externalRefundNo,
             ExternalRefundNo = externalRefundNo,
-            Status = SettledStatus,
-            CompletedTime = SettledStatus == RefundStatus.Succeeded ? DateTime.UtcNow : null
-        }));
+            Status = status,
+            CompletedTime = status == RefundStatus.Succeeded ? DateTime.UtcNow : null
+        });
+    }
 
     public Task<Result<PaymentProviderCallbackResult>> HandleCallbackAsync(IDictionary<string, string> parameters)
         => Task.FromResult(Result.Failure<PaymentProviderCallbackResult>(ErrorCodes.PaymentChannelNotSupported, 400));

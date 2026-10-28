@@ -99,4 +99,26 @@ describe('Finance Vendors page', () => {
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
   })
+
+  // The Active switch renders OFF until something sets it, while the record
+  // is created active: the form starts where the server does.
+  it('a new record starts active on the form', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { crud: { openCreate: () => void; formModal: { formData: { value: Record<string, unknown> | null } } } }
+    vm.crud.openCreate()
+    expect(vm.crud.formModal.formData.value?.isActive).toBe(true)
+  })
+
+  // The vendor form has no tax-code control, but the update replaces the
+  // vendor: a default tax code set through the API was cleared by any edit.
+  it('an edit keeps the default tax code the form does not show', async () => {
+    crudSection.update.mockClear()
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { crud: { openEdit: (row: Record<string, unknown>) => void; submit: () => Promise<unknown> } }
+    vm.crud.openEdit({ id: 'v1', name: 'Supplies Co', isActive: true, defaultTaxCodeId: 'tax-hst' })
+    await vm.crud.submit()
+    expect(crudSection.update).toHaveBeenCalledWith('v1', expect.objectContaining({ defaultTaxCodeId: 'tax-hst' }))
+  })
 })

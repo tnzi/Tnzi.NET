@@ -78,15 +78,15 @@ const bridge = createPromotionBridge({ client: useAdminClient() })
 
 const columns = buildPromotionColumns(t)
 
-// ─── Active-filter select (drives crud.setFilters) ───────────────────
+// ─── Status filter (drives crud.setFilters) ──────────────────────────
+// The list endpoint answers one status question: valid right now (enabled and
+// inside the start/end window), which is what the list's "Valid" badge shows.
+// It has no "disabled" filter, so the select offers none: an "Inactive" option
+// sent the same request as no filter and listed every promotion.
 const activeFilterRaw = ref<string | null>(null)
-const activeFilterOptions = [
-  { value: 'active', label: t('status.active') },
-  { value: 'inactive', label: t('status.inactive') },
-]
+const activeFilterOptions = [{ value: 'valid', label: t('status.valid') }]
 function onActiveFilterChange(v: string | null): void {
-  const isActive: boolean | null = v === 'active' ? true : v === 'inactive' ? false : null
-  crud.setFilters({ isActive })
+  crud.setFilters({ validNow: v === 'valid' ? true : null })
   void crud.refresh()
 }
 
@@ -96,8 +96,8 @@ const crud = useCrudPage<PromotionDto>({
   columns,
   rowKey: (r) => r.id,
   fetchData: async (q) => {
-    const isActive = (q.filters.isActive as boolean | null | undefined) ?? null
-    const r = await bridge.getList({ pageIndex: q.pageIndex, pageSize: q.pageSize, isActive })
+    const validNow = q.filters.validNow === true
+    const r = await bridge.getList({ pageIndex: q.pageIndex, pageSize: q.pageSize, validNow })
     const pageSize = q.pageSize
     return {
       items: r.items,

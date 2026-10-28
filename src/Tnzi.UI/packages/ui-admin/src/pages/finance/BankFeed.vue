@@ -148,6 +148,7 @@ import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
 import { TEmpty } from '@tnzi/ui'
 import TReconcileWorkspace from '../../components/finance/TReconcileWorkspace.vue'
 import { useDetail } from '../../headless/useDetail'
+import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import {
   createFinanceBridge,
@@ -176,8 +177,9 @@ const sources = createFinanceOptionSources(bridge)
 // super-admin / unloaded; the backend [ApiAuthorize] is the real wall).
 const canImport = computed(() => can('finance.bankFeed.create'))
 const canMatch = computed(() => can('finance.bankFeed.update'))
-// Create-document delegates to the document workflow (backend gate = finance.document.create).
-const canCreateDoc = computed(() => can('finance.document.create'))
+// Create-document creates, posts and matches in one step, so the backend gates it on
+// finance.document.create plus finance.document.update (posting everywhere else).
+const canCreateDoc = computed(() => can('finance.document.create') && can('finance.document.update'))
 
 const title = 'tnzi.admin.modules.finance.bankFeed.title'
 
@@ -447,8 +449,11 @@ function openBatches() {
 async function loadBatches() {
   if (!accountId.value) return
   try {
-    const page = await bridge.bankFeed.batches({ pageIndex: 1, pageSize: 100, filters: { accountId: accountId.value } })
-    batches.value = page.items
+    // Every page: the server clamps a page to 100 rows without saying so, and
+    // a busy account's older batches would otherwise be out of reach.
+    batches.value = await fetchAllPages((q) => bridge.bankFeed.batches(q), {
+      filters: { accountId: accountId.value },
+    })
   } catch (error) {
     message.error(error instanceof Error ? error.message : String(error))
   }

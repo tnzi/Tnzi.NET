@@ -4,6 +4,14 @@
  * Network-level error classes for transport failures, timeouts, and aborts.
  */
 
+import {
+  ABORT_ERROR_BRAND,
+  NETWORK_ERROR_BRAND,
+  TIMEOUT_ERROR_BRAND,
+  brandError,
+  hasErrorBrand,
+} from './brand';
+
 /**
  * Base class for network-level errors (connection failures, DNS errors, etc.).
  * Distinct from ApiError which represents server-returned error responses.
@@ -15,6 +23,7 @@ export class NetworkError extends Error {
     super(message);
     this.name = 'NetworkError';
     this.cause = options?.cause;
+    brandError(this, NETWORK_ERROR_BRAND);
   }
 }
 
@@ -29,6 +38,7 @@ export class TimeoutError extends NetworkError {
         : 'Request timed out',
     );
     this.name = 'TimeoutError';
+    brandError(this, TIMEOUT_ERROR_BRAND);
   }
 }
 
@@ -39,20 +49,25 @@ export class AbortError extends NetworkError {
   constructor() {
     super('Request was aborted');
     this.name = 'AbortError';
+    brandError(this, ABORT_ERROR_BRAND);
   }
 }
 
-/** Type guard: check if an error is a NetworkError (or subclass). */
+/**
+ * Type guard: check if an error is a NetworkError (or subclass), whichever
+ * `@tnzi/core` sub-path created it (each bundles its own copy of the class, so
+ * `instanceof` alone misses errors from another entry; see `errors/brand`).
+ */
 export function isNetworkError(error: unknown): error is NetworkError {
-  return error instanceof NetworkError;
+  return error instanceof NetworkError || hasErrorBrand(error, NETWORK_ERROR_BRAND);
 }
 
-/** Type guard: check if an error is a TimeoutError. */
+/** Type guard: check if an error is a TimeoutError, from any `@tnzi/core` sub-path. */
 export function isTimeoutError(error: unknown): error is TimeoutError {
-  return error instanceof TimeoutError;
+  return error instanceof TimeoutError || hasErrorBrand(error, TIMEOUT_ERROR_BRAND);
 }
 
-/** Type guard: check if an error is an AbortError. */
+/** Type guard: check if an error is an AbortError, from any `@tnzi/core` sub-path. */
 export function isAbortError(error: unknown): error is AbortError {
-  return error instanceof AbortError;
+  return error instanceof AbortError || hasErrorBrand(error, ABORT_ERROR_BRAND);
 }

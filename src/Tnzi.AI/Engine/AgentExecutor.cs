@@ -72,6 +72,36 @@ public class AgentExecutor : IAgentExecutor
         => WithoutTools(toolNames);
 
     /// <summary>
+    /// 创建一个换用指定系统指令的新 AgentExecutor（不修改原实例）。
+    /// </summary>
+    public AgentExecutor WithInstructions(string instructions)
+    {
+        Check.NotNullOrWhiteSpace(instructions);
+
+        var newOptions = _options.Clone();
+        newOptions.Instructions = instructions;
+        return new AgentExecutor(_chatClient, newOptions);
+    }
+
+    IAgentExecutor IAgentExecutor.WithInstructions(string instructions)
+        => WithInstructions(instructions);
+
+    /// <summary>
+    /// 创建一个使用指定工具循环上限的新 AgentExecutor（不修改原实例）。
+    /// </summary>
+    public AgentExecutor WithMaxToolIterations(int maxToolIterations)
+    {
+        Check.Positive(maxToolIterations);
+
+        var newOptions = _options.Clone();
+        newOptions.MaxToolIterations = maxToolIterations;
+        return new AgentExecutor(_chatClient, newOptions);
+    }
+
+    IAgentExecutor IAgentExecutor.WithMaxToolIterations(int maxToolIterations)
+        => WithMaxToolIterations(maxToolIterations);
+
+    /// <summary>
     /// 创建一个使用指定工具列表的新 AgentExecutor（替换原有工具，不修改原实例）。
     /// 选项经 <see cref="AgentExecutorOptions.Clone"/> 全量复制。
     /// </summary>
@@ -103,19 +133,14 @@ public class AgentExecutor : IAgentExecutor
         var (chatOptions, allTools) = BuildChatOptions();
 
         // 工具调用循环
-        var totalInputTokens = 0;
-        var totalOutputTokens = 0;
+        TokenUsageDto? totalUsage = null;
 
         for (var iteration = 0; iteration < _options.MaxToolIterations; iteration++)
         {
             var response = await _chatClient.GetResponseAsync(working, chatOptions, ct);
 
-            // 累计 token 用量
-            if (response.Usage != null)
-            {
-                totalInputTokens += (int)(response.Usage.InputTokenCount ?? 0);
-                totalOutputTokens += (int)(response.Usage.OutputTokenCount ?? 0);
-            }
+            // 累计 token 用量，与流式路径同一换算（含缓存命中 / 写入；此前非流式只累计输入输出，缓存数恒为 0）
+            totalUsage = StreamUsage.Add(totalUsage, ConvertUsage(response.Usage));
 
             // 将助手回复添加到工作副本
             working.AddRange(response.Messages);
@@ -145,12 +170,7 @@ public class AgentExecutor : IAgentExecutor
                 return new AgentResponse
                 {
                     Text = response.Text,
-                    Usage = new TokenUsageDto
-                    {
-                        InputTokens = totalInputTokens,
-                        OutputTokens = totalOutputTokens,
-                        TotalTokens = totalInputTokens + totalOutputTokens
-                    },
+                    Usage = totalUsage ?? new TokenUsageDto(),
                     FinishReason = response.FinishReason?.ToString(),
                     Messages = working,
                     Citations = null,
@@ -169,12 +189,7 @@ public class AgentExecutor : IAgentExecutor
         return new AgentResponse
         {
             Text = (lastAssistantText ?? "") + truncationNotice,
-            Usage = new TokenUsageDto
-            {
-                InputTokens = totalInputTokens,
-                OutputTokens = totalOutputTokens,
-                TotalTokens = totalInputTokens + totalOutputTokens
-            },
+            Usage = totalUsage ?? new TokenUsageDto(),
             FinishReason = FinishReasons.MaxToolIterations,
             Messages = working,
             Citations = null,
@@ -226,14 +241,14 @@ public class AgentExecutor : IAgentExecutor
 
             await foreach (var update in _chatClient.GetStreamingResponseAsync(working, chatOptions, ct))
             {
-                // 收集内容（TextReasoningContent 为合成类型，不加入 assistantContents）
+                // 收集内容：推理块按到达顺序记下，本轮结束时由 PrepareReasoningForHistory 决定哪些进历史
                 foreach (var content in update.Contents)
                 {
-                    // Reasoning chunks are synthetic - yield them but do not add to the assistant message history
                     if (content is TextReasoningContent reasoning)
                     {
                         accumulatedReasoning.Append(reasoning.Text);
-                        if (!toolCallSignaled)
+                        assistantContents.Add(reasoning);
+                        if (!toolCallSignaled && !string.IsNullOrEmpty(reasoning.Text))
                             yield return new AgentStreamChunk { ReasoningText = reasoning.Text };
                         continue;
                     }
@@ -328,15 +343,17 @@ public class AgentExecutor : IAgentExecutor
             // DeepSeek handles content + tool_calls poorly - sending both causes token
             // fracturing (\n\n between every token) in the continuation. The text was
             // already streamed to the client, so omitting it from the history is safe.
+            var roundContents = PrepareReasoningForHistory(assistantContents);
             var historyContents = _options.StripTextFromToolCallMessages && toolCallContents.Count > 0
-                ? assistantContents.Where(c => c is not TextContent).ToList()
-                : assistantContents;
+                ? roundContents.Where(c => c is not TextContent).ToList()
+                : roundContents;
             var assistantMessage = new ChatMessage(ChatRole.Assistant, [.. historyContents]);
             working.Add(assistantMessage);
 
             // 检查是否有工具调用
             if (toolCallContents.Count == 0)
             {
+                // 终止 chunk 只带本轮这一次调用的用量：之前各轮已各自发出（StreamUsage 的增量口径）
                 yield return new AgentStreamChunk
                 {
                     Usage = ConvertUsage(usage),
@@ -348,6 +365,15 @@ public class AgentExecutor : IAgentExecutor
 
             // Intermediate iteration with tool call - tool call indicator was already sent above.
 
+            // 本轮调用的用量在执行工具之前单独发出。只在终止 chunk 里报用量，前面各轮与跑满
+            // MaxToolIterations 的整段都量不到；放在执行工具之前，是因为 Router / Handoff 在工具
+            // 执行完的那一刻就可能中止本执行器，之后的 chunk 不会再被读取。
+            var iterationUsage = ConvertUsage(usage);
+            if (iterationUsage != null)
+            {
+                yield return new AgentStreamChunk { Usage = iterationUsage };
+            }
+
             // 执行工具（含详情，用于客户端性能基准）
             var (toolResults, toolDetails) = await ExecuteToolCallsWithDetailsAsync(toolCallContents, allTools, ct);
             working.Add(new ChatMessage(ChatRole.Tool, [.. toolResults]));
@@ -358,7 +384,7 @@ public class AgentExecutor : IAgentExecutor
             // 注意: RecordToolCall 已在 ExecuteToolCallsCoreAsync 内部调用，此处不重复记录
         }
 
-        // 达到最大迭代次数 - 发送提示文本告知用户
+        // 达到最大迭代次数 - 发送提示文本告知用户（各轮用量已在循环内逐轮发出）
         yield return new AgentStreamChunk
         {
             Text = $"\n\n[System: Reached the maximum tool call limit ({_options.MaxToolIterations}). The response may be incomplete. Please try a more specific query.]"
@@ -511,7 +537,7 @@ public class AgentExecutor : IAgentExecutor
         var tool = FindTool(toolCall.Name, allTools);
         if (tool == null)
         {
-            var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = "Tool not found" };
+            var detail = new ToolCallDetail { Name = toolCall.Name, Input = ToolInput(toolCall), IsSuccess = false, Error = "Tool not found" };
             return (new FunctionResultContent(toolCall.CallId, $"Tool '{toolCall.Name}' not found"), detail);
         }
 
@@ -519,7 +545,7 @@ public class AgentExecutor : IAgentExecutor
         var argSummary = toolCall.Arguments is { Count: > 0 }
             ? string.Join(", ", toolCall.Arguments.Select(kv => $"{kv.Key}={Truncate(kv.Value?.ToString(), 50)}"))
             : null;
-        if (argSummary?.Length > 200) argSummary = argSummary[..200] + "...";
+        argSummary = Truncate(argSummary, 200);
 
         ToolDefinition? toolDef = null;
         var interruptBehavior = ToolInterruptBehavior.Cancel;
@@ -552,26 +578,40 @@ public class AgentExecutor : IAgentExecutor
 
                 var args = toolCall.Arguments is null ? null : new AIFunctionArguments(toolCall.Arguments);
 
-                if (interruptBehavior == ToolInterruptBehavior.GracefulShutdown)
-                {
-                    // GracefulShutdown: 不直接链接外部 CT（链接会立即传播取消），
-                    // 而是用独立 CTS + 回调延迟取消，给工具宽限期完成清理。
-                    using var graceCts = new CancellationTokenSource();
-                    using var registration = ct.Register(() => graceCts.CancelAfter(GracefulShutdownGracePeriod));
+                // ★ 超时要取消工具，而不是丢下它不管：此前只在等待上加了超时（WaitAsync），交给工具的令牌从不取消。
+                // 模型被告知「超时」并继续下一轮，原调用却还在跑：审批晚到时照样执行那个破坏性工具，
+                // wait_agent 之类的轮询与下一轮的工具、历史落库同时用同一个作用域的 DbContext。
+                // 预算到点即取消令牌；有自己上限的等待（审批、子 Agent、wait_agent）经 ToolCallTimeout.Suspend 排除在外。
+                using var timeoutCts = new CancellationTokenSource();
+                using var budget = ToolCallTimeout.Begin(timeoutCts, TimeSpan.FromSeconds(_options.ToolTimeoutSeconds));
 
-                    if (ct.IsCancellationRequested)
+                try
+                {
+                    if (interruptBehavior == ToolInterruptBehavior.GracefulShutdown)
                     {
-                        // 外部已取消 → 启动宽限倒计时
-                        graceCts.CancelAfter(GracefulShutdownGracePeriod);
+                        // GracefulShutdown: 不直接链接外部 CT（链接会立即传播取消），
+                        // 而是用独立 CTS + 回调延迟取消，给工具宽限期完成清理。超时同样是一次中断，同样给宽限期。
+                        using var graceCts = new CancellationTokenSource();
+                        using var registration = ct.Register(() => graceCts.CancelAfter(GracefulShutdownGracePeriod));
+                        using var timeoutRegistration = timeoutCts.Token.Register(() => graceCts.CancelAfter(GracefulShutdownGracePeriod));
+
+                        if (ct.IsCancellationRequested)
+                        {
+                            // 外部已取消 → 启动宽限倒计时
+                            graceCts.CancelAfter(GracefulShutdownGracePeriod);
+                        }
+
+                        return await aiFunction.InvokeAsync(args, graceCts.Token).AsTask().WaitAsync(graceCts.Token);
                     }
 
-                    return await aiFunction.InvokeAsync(args, graceCts.Token).AsTask()
-                        .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), graceCts.Token);
+                    // Cancel (默认): 外部取消与超时都直接传播；不理会令牌的工具在到点时被放弃（它已收到取消信号）
+                    using var toolCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+                    return await aiFunction.InvokeAsync(args, toolCts.Token).AsTask().WaitAsync(toolCts.Token);
                 }
-
-                // Cancel (默认): 直接传播取消信号
-                return await aiFunction.InvokeAsync(args, ct).AsTask()
-                    .WaitAsync(TimeSpan.FromSeconds(_options.ToolTimeoutSeconds), ct);
+                catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"Tool '{toolCall.Name}' timed out after {_options.ToolTimeoutSeconds}s", ex);
+                }
             };
 
             // 通过中间件管道执行
@@ -590,6 +630,7 @@ public class AgentExecutor : IAgentExecutor
             var detail = new ToolCallDetail
             {
                 Name = toolCall.Name,
+                Input = ToolInput(toolCall),
                 DurationMs = sw.Elapsed.TotalMilliseconds,
                 IsSuccess = isSuccess,
                 Error = toolFailure
@@ -605,6 +646,7 @@ public class AgentExecutor : IAgentExecutor
             var detail = new ToolCallDetail
             {
                 Name = toolCall.Name,
+                Input = ToolInput(toolCall),
                 DurationMs = _options.ToolTimeoutSeconds * 1000,
                 IsSuccess = false,
                 Error = $"Timed out after {_options.ToolTimeoutSeconds}s"
@@ -615,7 +657,7 @@ public class AgentExecutor : IAgentExecutor
         {
             AIActivitySource.RecordToolCallDetailed(toolCall.Name, 0, isSuccess: false);
             _options.Logger?.LogError(ex, "Tool '{ToolName}' execution failed", toolCall.Name);
-            var detail = new ToolCallDetail { Name = toolCall.Name, IsSuccess = false, Error = ex.Message };
+            var detail = new ToolCallDetail { Name = toolCall.Name, Input = ToolInput(toolCall), IsSuccess = false, Error = ex.Message };
             return (new FunctionResultContent(toolCall.CallId, $"Tool execution failed: {ex.Message}"), detail);
         }
     }
@@ -643,12 +685,82 @@ public class AgentExecutor : IAgentExecutor
         return await pipeline();
     }
 
+    /// <summary>
+    /// 工具调用的参数，按模型发来的 JSON 对象原样记在 <see cref="ToolCallDetail.Input"/> 上（与外部 CLI 路径同形）。
+    /// 客户端靠它画工具卡片（例如 <c>show_widget</c> 的内联小部件是从参数里的 HTML 画出来的），刷新与翻历史后也一样。
+    /// 序列化不了时省略，不让一次记录失败变成工具调用失败。
+    /// </summary>
+    private static JsonElement? ToolInput(FunctionCallContent toolCall)
+    {
+        if (toolCall.Arguments is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.SerializeToElement(toolCall.Arguments);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private static string? ResolveToolFailure(ToolExecutionContext context)
     {
         return ToolErrorRecoveryMiddleware.GetRecoveredError(context)
             ?? ToolGuardrailMiddleware.GetDenialReason(context)
             ?? RequiresSkillToolMiddleware.GetShortCircuitReason(context)
             ?? context.FailureReason;
+    }
+
+    /// <summary>
+    /// 流式一轮的助手内容进历史前处理推理块。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 带 <see cref="TextReasoningContent.ProtectedData"/>（签名）的推理是提供商要求原样回传的原生 thinking 块：
+    /// Anthropic 在 thinking 开启时要求最后一组工具调用之前的助手消息以带签名的 thinking 块开头，缺了整个请求被拒。
+    /// 流式下一个块是一串增量片段加最后一个只带签名的片段，这里把每段合并回一个块、签名取那一段的签名，保持原位置。
+    /// </para>
+    /// <para>
+    /// 没有签名的推理（OpenAI 兼容端点的 reasoning_content、&lt;think&gt; 标签切出的片段）是给界面看的合成块，
+    /// 提供商不收回，照旧不进历史；一轮里没有任何签名时整轮推理都不进历史。
+    /// </para>
+    /// </remarks>
+    internal static List<AIContent> PrepareReasoningForHistory(IReadOnlyList<AIContent> contents)
+    {
+        var result = new List<AIContent>(contents.Count);
+        StringBuilder? block = null;
+        foreach (var content in contents)
+        {
+            if (content is TextReasoningContent reasoning)
+            {
+                block ??= new StringBuilder();
+                block.Append(reasoning.Text);
+                if (reasoning.ProtectedData != null)
+                {
+                    // 签名片段是一个块的结尾。它的 RawRepresentation / AdditionalProperties 要跟着走：
+                    // redacted_thinking 与 display 被省略的 thinking 块长得一样（空文本 + 不透明数据），
+                    // Anthropic 适配器只凭这两样认出前者，丢了就把它当成签名对不上的 thinking 块发回去
+                    result.Add(new TextReasoningContent(block.ToString())
+                    {
+                        ProtectedData = reasoning.ProtectedData,
+                        RawRepresentation = reasoning.RawRepresentation,
+                        AdditionalProperties = reasoning.AdditionalProperties
+                    });
+                    block = null;
+                }
+                continue;
+            }
+
+            // 被别的内容打断、始终没等到签名的残段不是原生块，不回传（轮末未闭合的同理）
+            block = null;
+            result.Add(content);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -708,13 +820,9 @@ public class AgentExecutor : IAgentExecutor
     }
 
     /// <summary>
-    /// 截取字符串（用于追踪摘要）
+    /// 截取字符串（用于追踪摘要）；截断点落在代理对中间时整个字符一起舍掉。
     /// </summary>
-    private static string? Truncate(string? value, int maxLength)
-    {
-        if (value == null || value.Length <= maxLength) return value;
-        return value[..maxLength] + "...";
-    }
+    private static string? Truncate(string? value, int maxLength) => value?.Truncate(maxLength);
 
     /// <summary>
     /// 从合并后的完整工具列表中查找工具
@@ -776,27 +884,29 @@ public class AgentExecutor : IAgentExecutor
         {
             InputTokens = (int)(usage.InputTokenCount ?? 0),
             OutputTokens = (int)(usage.OutputTokenCount ?? 0),
-            TotalTokens = (int)(usage.TotalTokenCount ?? 0)
+            TotalTokens = (int)(usage.TotalTokenCount ?? 0),
+            // 缓存命中读 MEAI 的一等字段：OpenAI 与 Anthropic 的适配器都写在这里，且按 MEAI 约定它包含在
+            // InputTokenCount 之内（Anthropic 适配器的 InputTokenCount = input + cache_read + cache_creation）。
+            // 此前只查附加计数里的几个键名，两家适配器都不用那些键，记下的缓存数恒为 0
+            CachedInputTokens = (int)(usage.CachedInputTokenCount ?? 0)
         };
 
-        // Extract cache metrics from AdditionalCounts (provider-specific fields)
-        // OpenAI: "CachedInputTokens" / Anthropic: "cache_creation_input_tokens", "cache_read_input_tokens"
-        // DeepSeek: "prompt_cache_hit_tokens" (via OpenAI-compatible API)
         if (usage.AdditionalCounts is { Count: > 0 })
         {
-            // OpenAI-style (Microsoft.Extensions.AI normalizes to this)
-            if (usage.AdditionalCounts.TryGetValue("CachedInputTokens", out var cached))
-                dto.CachedInputTokens = (int)cached;
+            // 缓存写入没有一等字段：Anthropic 适配器的键是 CacheCreationInputTokens；蛇形键留给原样透传的兼容端点
+            if (usage.AdditionalCounts.TryGetValue("CacheCreationInputTokens", out var cacheCreation)
+                || usage.AdditionalCounts.TryGetValue("cache_creation_input_tokens", out cacheCreation))
+            {
+                dto.CacheCreationTokens = (int)cacheCreation;
+            }
 
-            // Anthropic-style
-            if (usage.AdditionalCounts.TryGetValue("cache_read_input_tokens", out var cacheRead))
+            // 只把命中数放进附加计数的兼容端点（一等字段为空时才看）
+            if (dto.CachedInputTokens == 0
+                && (usage.AdditionalCounts.TryGetValue("cache_read_input_tokens", out var cacheRead)
+                    || usage.AdditionalCounts.TryGetValue("prompt_cache_hit_tokens", out cacheRead)))
+            {
                 dto.CachedInputTokens = (int)cacheRead;
-            if (usage.AdditionalCounts.TryGetValue("cache_creation_input_tokens", out var cacheCreate))
-                dto.CacheCreationTokens = (int)cacheCreate;
-
-            // DeepSeek-style (OpenAI-compatible, may pass through as-is)
-            if (usage.AdditionalCounts.TryGetValue("prompt_cache_hit_tokens", out var dsCache))
-                dto.CachedInputTokens = (int)dsCache;
+            }
         }
 
         return dto;

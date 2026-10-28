@@ -79,6 +79,7 @@ import UserCenter from '../../../src/pages/account/UserCenter.vue'
 import { ADMIN_USER_CENTER_CONFIG_KEY } from '../../../src/plugin/user-center-config'
 import type { AdminUserCenterConfig } from '../../../src/plugin/user-center-config'
 import { useUserCenterProfileExtra } from '../../../src/pages/account/useUserCenterProfileExtra'
+import { useAdminRouteStore } from '../../../src/stores/useAdminRouteStore'
 
 function mountUserCenter(config?: AdminUserCenterConfig) {
   return mount(UserCenter, {
@@ -92,7 +93,7 @@ describe('UserCenter (section-registry shell)', () => {
     vi.clearAllMocks()
   })
 
-  it('mounts, loads the profile + auth config, and renders the six built-in sections', async () => {
+  it('mounts, loads the profile + auth config, and renders the built-in sections', async () => {
     const wrapper = mountUserCenter()
     await flushPromises()
 
@@ -105,7 +106,7 @@ describe('UserCenter (section-registry shell)', () => {
 
     // Left nav renders every built-in section label (en locale).
     const text = wrapper.text()
-    for (const label of ['Profile', 'Security', 'Sessions', 'Login History', 'Linked Accounts', 'Danger Zone']) {
+    for (const label of ['Profile', 'Security', 'Notifications', 'Sessions', 'Login History', 'Linked Accounts', 'Danger Zone']) {
       expect(text).toContain(label)
     }
 
@@ -114,11 +115,53 @@ describe('UserCenter (section-registry shell)', () => {
     expect(text).toContain('Nickname')
   })
 
+  it('a failed profile load offers no editor, so Save cannot write blanks over the stored profile', async () => {
+    // The profile update replaces every field. An editor left open after the
+    // load failed holds empty defaults, and saving it (or uploading an avatar,
+    // which saves the same form) would erase the stored names, bio, address,
+    // website and birthday.
+    me.getProfile.mockRejectedValueOnce(new Error('profile service down'))
+    const wrapper = mountUserCenter()
+    await flushPromises()
+
+    expect(messageApi.error).toHaveBeenCalledWith('profile service down')
+    expect(wrapper.find('.t-uc-save-bar').exists()).toBe(false)
+    expect(wrapper.find('input[placeholder="Display name shown across the app"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TImageUpload' }).exists()).toBe(false)
+    expect(me.updateProfile).not.toHaveBeenCalled()
+
+    // Retry loads it again, and the editor appears seeded from the server.
+    const retry = wrapper.findAll('button').find((b) => b.text() === 'Retry')
+    expect(retry, 'a retry action is offered').toBeTruthy()
+    await retry!.trigger('click')
+    await flushPromises()
+
+    expect(me.getProfile).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.t-uc-save-bar').exists()).toBe(true)
+    const nickname = wrapper.find('input[placeholder="Display name shown across the app"]')
+    expect((nickname.element as HTMLInputElement).value).toBe('Ali')
+  })
+
   it('hides a built-in section via userCenter.hideSections', async () => {
     const wrapper = mountUserCenter({ hideSections: ['danger'] })
     await flushPromises()
     expect(wrapper.text()).not.toContain('Danger Zone')
     expect(wrapper.text()).toContain('Profile')
+  })
+
+  it('drops the Notifications section on a backend that did not load the Notification module', async () => {
+    useAdminRouteStore().setAvailableModules(new Set(['identity']))
+    const wrapper = mountUserCenter()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Notifications')
+    expect(wrapper.text()).toContain('Security')
+  })
+
+  it('keeps the Notifications section when the Notification module is loaded', async () => {
+    useAdminRouteStore().setAvailableModules(new Set(['identity', 'notification']))
+    const wrapper = mountUserCenter()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Notifications')
   })
 
   it('renders a consumer custom section in the nav', async () => {

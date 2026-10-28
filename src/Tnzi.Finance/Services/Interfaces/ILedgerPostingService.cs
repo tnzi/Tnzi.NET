@@ -69,8 +69,20 @@ public interface ILedgerPostingService
     /// <remarks>
     /// <para>
     /// 供呈现端在渲染时就决定按钮是禁用还是可点，并把原因显示出来——而不是让操作员点下去才吃一个 409。
-    /// 判定口径与 <see cref="ReverseAsync"/> 实际执行的校验<b>同源</b>（期间封账 / 已完成对账 / 已匹配银行流水
-    /// 三项共用冲销漏斗内的同一段守卫），避免两处规则漂移。
+    /// 判定覆盖每条冲销路径（总账冲销与单据作废）都要过的<b>账本侧</b>原因：凭证状态（与冲销漏斗的状态门同序同措辞），
+    /// 以及期间封账 / 已完成对账 / 已匹配银行流水（三项共用冲销漏斗内的同一段守卫），这几项不会漂移。
+    /// </para>
+    /// <para>
+    /// 两类拒绝<b>不在</b>判定范围内，答 <c>CanReverse = true</c> 时动作仍可能 409：
+    /// <list type="bullet">
+    /// <item><b>走哪道门</b>：来源类型属于单据投影（内置单据，以及经 <see cref="IDocumentProjectedSourceTypeProvider"/> 登记的）
+    /// 的凭证，<see cref="ReverseAsync"/> 与总账冲销端点一律拒绝，只能经单据自己的作废
+    /// （<see cref="ReverseOnBehalfOfDocumentAsync"/>）。本查询回答的是「这张凭证能否被撤销」，
+    /// 决定总账「冲销」按钮的呈现端还要看 <c>SourceType</c>。</item>
+    /// <item><see cref="IFinancePostingGuard"/> 钩子：随动作带着单据执行，无法只读预判。内置的
+    /// 「收款已被存活存款单收走」、银行域的「付款仍在未作废 EFT 批次里」与消费方自己的钩子都属此类，
+    /// 它们的拒绝照常在动作上返回。</item>
+    /// </list>
     /// </para>
     /// <para>
     /// 冲销日期按<b>原凭证记账日</b>判定——那是 <see cref="ReverseAsync"/> 不指定日期时的默认，

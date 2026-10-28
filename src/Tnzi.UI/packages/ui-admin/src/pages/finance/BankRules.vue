@@ -36,7 +36,7 @@
           </div>
           <div class="fin-rules__field">
             <span class="fin-rules__label">{{ t('form.direction') }}</span>
-            <NSelect v-model:value="form(formData).direction" :options="directionOptions" size="small" :disabled="mode === 'view'" />
+            <NSelect v-model:value="form(formData).direction" :options="directionOptionsFor(form(formData).docType)" size="small" :disabled="mode === 'view'" />
           </div>
         </div>
 
@@ -53,7 +53,7 @@
         <div class="fin-rules__grid">
           <div class="fin-rules__field">
             <span class="fin-rules__label">{{ t('form.docType') }}</span>
-            <NSelect v-model:value="form(formData).docType" :options="docTypeOptions" size="small" :disabled="mode === 'view'" />
+            <NSelect v-model:value="form(formData).docType" :options="docTypeOptionsFor(form(formData).direction)" size="small" :disabled="mode === 'view'" />
           </div>
           <div class="fin-rules__field">
             <span class="fin-rules__label">{{ t('form.counterAccount') }}</span>
@@ -67,6 +67,22 @@
               :placeholder="t('form.counterAccountPlaceholder')"
             />
           </div>
+        </div>
+
+        <!-- A payment books against a customer (money in) or a vendor (money out);
+             the backend will not auto-apply a payment rule without one. -->
+        <div v-if="form(formData).docType === BankFeedDocType.PaymentEntry" class="fin-rules__field">
+          <span class="fin-rules__label">{{ t('form.party') }}</span>
+          <NSelect
+            v-model:value="form(formData).partyId"
+            :options="partyOptionsFor(form(formData).direction)"
+            size="small"
+            clearable
+            filterable
+            :disabled="mode === 'view'"
+            :placeholder="t('form.partyPlaceholder')"
+          />
+          <span v-if="form(formData).direction === BankRuleDirection.Any" class="fin-rules__switch-hint">{{ t('form.partyHint') }}</span>
         </div>
 
         <div class="fin-rules__field">
@@ -137,8 +153,8 @@
  * priority-ordered, movable, and says so at the top.
  */
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { computed, h, onMounted, ref } from 'vue'
-import { NAlert, NButton, NDivider, NInput, NSelect, NSpin, NSwitch, type DataTableColumns } from 'naive-ui'
+import { computed, h, onMounted, ref, watch } from 'vue'
+import { NAlert, NButton, NDivider, NInput, NSelect, NSpin, NSwitch, type DataTableColumns, type SelectOption, type SelectGroupOption } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { TModalShell } from '@tnzi/ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
@@ -178,6 +194,8 @@ interface RuleForm {
   matchMode: string
   docType: string
   counterAccountId: string | null
+  /** Customer (money in) or vendor (money out) a payment rule books against. */
+  partyId: string | null
   paymentMethod: string | null
   autoApply: boolean
   isEnabled: boolean
@@ -193,6 +211,7 @@ function form(data: Record<string, unknown> | null | undefined): RuleForm {
   d.matchMode ??= 'All'
   d.docType ??= BankFeedDocType.Expense
   d.counterAccountId ??= null
+  d.partyId ??= null
   d.paymentMethod ??= null
   d.autoApply ??= false
   d.isEnabled ??= true
@@ -210,6 +229,9 @@ function toPayload(d: Record<string, unknown>): CreateBankRuleDto {
     matchMode: f.matchMode as CreateBankRuleDto['matchMode'],
     docType: f.docType as CreateBankRuleDto['docType'],
     counterAccountId: f.counterAccountId || null,
+    // The update replaces the whole rule: a party left out of the payload is a
+    // party deleted, including one set through the API that this form never showed.
+    partyId: f.partyId || null,
     paymentMethod: f.paymentMethod || null,
     autoApply: f.autoApply === true,
     conditions: (f.conditions ?? []).map((c) => ({ field: c.field, operator: c.operator, value: c.value })),
@@ -235,20 +257,55 @@ const fundsAccountOptions = computed(() => sources.fundsAccountOptions.value)
 const leafAccountOptions = computed(() => sources.leafAccountOptions.value)
 const methodOptions = computed(() => PAYMENT_METHODS.map((m) => ({ label: m, value: m })))
 
-const directionOptions = computed(() => [
+/**
+ * Who a payment rule can book against. The posting side decides by the bank
+ * line's sign - money in is a receipt from a customer, money out a payment to a
+ * vendor - so a rule scoped to one direction offers only that list, and a rule
+ * that takes either offers both, grouped, rather than guessing.
+ */
+function partyOptionsFor(direction: string | null | undefined): Array<SelectOption | SelectGroupOption> {
+  if (direction === BankRuleDirection.MoneyIn) return sources.customerOptions.value
+  if (direction === BankRuleDirection.MoneyOut) return sources.vendorOptions.value
+  return [
+    { type: 'group', key: 'customers', label: t('form.customers'), children: sources.customerOptions.value },
+    { type: 'group', key: 'vendors', label: t('form.vendors'), children: sources.vendorOptions.value },
+  ]
+}
+
+// The party lists are only needed for a payment rule; load them the first time
+// one is on screen instead of on every visit to the page.
+watch(
+  () => crud.formModal.formData.value?.docType,
+  (docType) => {
+    if (docType !== BankFeedDocType.PaymentEntry) return
+    void sources.ensureCustomers()
+    void sources.ensureVendors()
+  },
+)
+
+/**
+ * An expense only records money going out: the backend never applies an expense
+ * rule to a deposit and refuses to save one scoped to money in. The two pickers
+ * disable that pairing from either side so the form cannot build it.
+ */
+function directionOptionsFor(docType: string | null | undefined) {
   // A bank rule scopes itself to one funds account's own side, so it speaks the
   // money-in / money-out vocabulary. The words come from the shared dictionary
   // rather than a page-local copy - three copies is how the wording drifted.
-  { label: t('admin.shared.moneyFlow.any'), value: BankRuleDirection.Any },
-  { label: t('admin.shared.moneyFlow.in'), value: BankRuleDirection.MoneyIn },
-  { label: t('admin.shared.moneyFlow.out'), value: BankRuleDirection.MoneyOut },
-])
+  return [
+    { label: t('admin.shared.moneyFlow.any'), value: BankRuleDirection.Any },
+    { label: t('admin.shared.moneyFlow.in'), value: BankRuleDirection.MoneyIn, disabled: docType === BankFeedDocType.Expense },
+    { label: t('admin.shared.moneyFlow.out'), value: BankRuleDirection.MoneyOut },
+  ]
+}
 
-const docTypeOptions = computed(() => [
-  { label: t('docType.expense'), value: BankFeedDocType.Expense },
-  { label: t('docType.paymentEntry'), value: BankFeedDocType.PaymentEntry },
-  { label: t('docType.transfer'), value: BankFeedDocType.Transfer },
-])
+function docTypeOptionsFor(direction: string | null | undefined) {
+  return [
+    { label: t('docType.expense'), value: BankFeedDocType.Expense, disabled: direction === BankRuleDirection.MoneyIn },
+    { label: t('docType.paymentEntry'), value: BankFeedDocType.PaymentEntry },
+    { label: t('docType.transfer'), value: BankFeedDocType.Transfer },
+  ]
+}
 
 // ── Priority moves ──────────────────────────────────────────────
 /**

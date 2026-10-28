@@ -1,174 +1,187 @@
 <template>
   <TUserCenterSection :title="t('nav.profile')">
-    <NForm label-placement="top" :show-feedback="false">
-      <!-- Identity row: the picker sits BESIDE the name fields - the picture and
-           the name answer the same question, so they read as one block. Only
-           this top block shares the row; every field below it stays full width,
-           because pairing a 96px avatar with the whole (long) profile form would
-           leave a column of dead space under it.
-           Avatar upload pushes to the Storage module - hide the picker on hosts
-           that never loaded it (v-module is the module twin of v-permission).
-           No "Avatar" caption: a circular picker is self-explanatory, and the
-           format / size constraint is a hover title on the picker itself. -->
-      <div class="t-uc-identity">
-        <div v-module="'storage'" class="t-uc-identity__avatar">
-          <TImageUpload
-            shape="circle"
-            :cropper="true"
-            :model-value="ctx.resolvedAvatarUrl.value"
-            :disabled="savingAvatar"
-            :upload="handleAvatarUpload"
-            :title="t('profile.avatarHint')"
-            removable
-            :remove-label="t('profile.avatarRemove')"
-            @remove="handleAvatarRemove"
-            @error="(msg: string) => ctx.message.error(msg)"
-          />
+    <!-- The editor exists only over a profile read from the server. Save (and
+         an avatar upload, which saves the same form) replaces EVERY field, so
+         an editor left open after a failed or timed-out load would write its
+         empty defaults over the stored profile. While the first load is out the
+         shell's spinner covers this; once it has failed, offer a retry. -->
+    <div v-if="!ctx.profile.value" class="t-uc-profile-unloaded">
+      <template v-if="!ctx.loadingProfile.value">
+        <p class="t-uc-hint">{{ t('loadFailed') }}</p>
+        <NButton size="small" @click="ctx.loadProfile">{{ t('admin.crud.retry') }}</NButton>
+      </template>
+    </div>
+    <template v-else>
+      <NForm label-placement="top" :show-feedback="false">
+        <!-- Identity row: the picker sits BESIDE the name fields - the picture and
+             the name answer the same question, so they read as one block. Only
+             this top block shares the row; every field below it stays full width,
+             because pairing a 96px avatar with the whole (long) profile form would
+             leave a column of dead space under it.
+             Avatar upload pushes to the Storage module - hide the picker on hosts
+             that never loaded it (v-module is the module twin of v-permission).
+             No "Avatar" caption: a circular picker is self-explanatory, and the
+             format / size constraint is a hover title on the picker itself. -->
+        <div class="t-uc-identity">
+          <div v-module="'storage'" class="t-uc-identity__avatar">
+            <TImageUpload
+              shape="circle"
+              :cropper="true"
+              :model-value="ctx.resolvedAvatarUrl.value"
+              :disabled="savingAvatar"
+              :upload="handleAvatarUpload"
+              :title="t('profile.avatarHint')"
+              removable
+              :remove-label="t('profile.avatarRemove')"
+              @remove="handleAvatarRemove"
+              @error="(msg: string) => ctx.message.error(msg)"
+            />
+          </div>
+          <div class="t-uc-identity__fields t-uc-form-grid">
+            <NFormItem :label="t('profile.userName')">
+              <NInput :value="ctx.profile.value?.userName ?? ''" disabled />
+            </NFormItem>
+            <NFormItem v-if="showField('nickname')" :label="t('profile.nickname')">
+              <NInput
+                v-model:value="form.nickname"
+                :disabled="readonly('nickname')"
+                :placeholder="t('profile.nicknamePlaceholder')"
+              />
+            </NFormItem>
+            <NFormItem v-if="showField('firstName')" :label="t('profile.firstName')">
+              <NInput
+                v-model:value="form.firstName"
+                :disabled="readonly('firstName')"
+                :placeholder="t('profile.firstNamePlaceholder')"
+              />
+            </NFormItem>
+            <NFormItem v-if="showField('lastName')" :label="t('profile.lastName')">
+              <NInput
+                v-model:value="form.lastName"
+                :disabled="readonly('lastName')"
+                :placeholder="t('profile.lastNamePlaceholder')"
+              />
+            </NFormItem>
+          </div>
         </div>
-        <div class="t-uc-identity__fields t-uc-form-grid">
-          <NFormItem :label="t('profile.userName')">
-            <NInput :value="ctx.profile.value?.userName ?? ''" disabled />
-          </NFormItem>
-          <NFormItem v-if="showField('nickname')" :label="t('profile.nickname')">
-            <NInput
-              v-model:value="form.nickname"
-              :disabled="readonly('nickname')"
-              :placeholder="t('profile.nicknamePlaceholder')"
-            />
-          </NFormItem>
-          <NFormItem v-if="showField('firstName')" :label="t('profile.firstName')">
-            <NInput
-              v-model:value="form.firstName"
-              :disabled="readonly('firstName')"
-              :placeholder="t('profile.firstNamePlaceholder')"
-            />
-          </NFormItem>
-          <NFormItem v-if="showField('lastName')" :label="t('profile.lastName')">
-            <NInput
-              v-model:value="form.lastName"
-              :disabled="readonly('lastName')"
-              :placeholder="t('profile.lastNamePlaceholder')"
-            />
-          </NFormItem>
-        </div>
-      </div>
 
-      <!-- Identity-core rows. The value ALWAYS renders (even when locked): a
-           user who cannot see which address signs them in cannot reason about
-           their own account. Only the `Change…` affordance is conditional, and
-           it is gated by TWO independent things ANDed together:
-             - `capabilities.*Channel` - can this deployment do email/SMS at all
-               (derived from the backend auth-channel config);
-             - `readonly('email'|'phone')` - may the USER rebind it themselves
-               (`userCenter.profile.readonlyFields`, an app-level policy).
-           Neither substitutes for the other: turning off the email channel to
-           stop self-service rebinding would also take out email login and
-           recovery. When locked the button is REMOVED, not disabled - a button
-           that does nothing when pressed is worse than no button. -->
-      <div class="t-uc-form-grid">
-        <NFormItem :label="t('profile.email')">
-          <NInput :value="ctx.profile.value?.email ?? ''" disabled :placeholder="t('profile.emailPlaceholder')">
-            <template v-if="canChangeEmail" #suffix>
-              <NButton size="tiny" tertiary @click="openChangeEmail">{{ t('profile.change') }}</NButton>
-            </template>
-          </NInput>
-        </NFormItem>
-        <NFormItem :label="t('profile.phone')">
+        <!-- Identity-core rows. The value ALWAYS renders (even when locked): a
+             user who cannot see which address signs them in cannot reason about
+             their own account. Only the `Change…` affordance is conditional, and
+             it is gated by TWO independent things ANDed together:
+               - `capabilities.*Channel` - can this deployment do email/SMS at all
+                 (derived from the backend auth-channel config);
+               - `readonly('email'|'phone')` - may the USER rebind it themselves
+                 (`userCenter.profile.readonlyFields`, an app-level policy).
+             Neither substitutes for the other: turning off the email channel to
+             stop self-service rebinding would also take out email login and
+             recovery. When locked the button is REMOVED, not disabled - a button
+             that does nothing when pressed is worse than no button. -->
+        <div class="t-uc-form-grid">
+          <NFormItem :label="t('profile.email')">
+            <NInput :value="ctx.profile.value?.email ?? ''" disabled :placeholder="t('profile.emailPlaceholder')">
+              <template v-if="canChangeEmail" #suffix>
+                <NButton size="tiny" tertiary @click="openChangeEmail">{{ t('profile.change') }}</NButton>
+              </template>
+            </NInput>
+          </NFormItem>
+          <NFormItem :label="t('profile.phone')">
+            <NInput
+              :value="ctx.profile.value?.phoneNumber ?? ''"
+              disabled
+              :placeholder="t('profile.phonePlaceholder')"
+            >
+              <template v-if="canChangePhone" #suffix>
+                <NButton size="tiny" tertiary @click="openChangePhone">{{ t('profile.change') }}</NButton>
+              </template>
+            </NInput>
+          </NFormItem>
+          <NFormItem v-if="showField('gender')" :label="t('profile.gender')">
+            <NSelect
+              v-model:value="form.gender"
+              :options="genderOptions"
+              :disabled="readonly('gender')"
+              :placeholder="t('profile.genderPlaceholder')"
+            />
+          </NFormItem>
+          <NFormItem v-if="showField('birthday')" :label="t('profile.birthday')">
+            <NDatePicker
+              v-model:formatted-value="form.birthday"
+              value-format="yyyy-MM-dd"
+              type="date"
+              clearable
+              :disabled="readonly('birthday')"
+              class="w-full"
+            />
+          </NFormItem>
+        </div>
+        <NFormItem v-if="showField('bio')" :label="t('profile.bio')">
           <NInput
-            :value="ctx.profile.value?.phoneNumber ?? ''"
-            disabled
-            :placeholder="t('profile.phonePlaceholder')"
-          >
-            <template v-if="canChangePhone" #suffix>
-              <NButton size="tiny" tertiary @click="openChangePhone">{{ t('profile.change') }}</NButton>
-            </template>
-          </NInput>
-        </NFormItem>
-        <NFormItem v-if="showField('gender')" :label="t('profile.gender')">
-          <NSelect
-            v-model:value="form.gender"
-            :options="genderOptions"
-            :disabled="readonly('gender')"
-            :placeholder="t('profile.genderPlaceholder')"
+            v-model:value="form.bio"
+            type="textarea"
+            :rows="3"
+            :disabled="readonly('bio')"
+            :placeholder="t('profile.bioPlaceholder')"
           />
         </NFormItem>
-        <NFormItem v-if="showField('birthday')" :label="t('profile.birthday')">
-          <NDatePicker
-            v-model:formatted-value="form.birthday"
-            value-format="yyyy-MM-dd"
-            type="date"
-            clearable
-            :disabled="readonly('birthday')"
-            class="w-full"
+        <NFormItem v-if="showField('address')" :label="t('profile.address')">
+          <NInput
+            v-model:value="form.address"
+            :disabled="readonly('address')"
+            :placeholder="t('profile.addressPlaceholder')"
           />
         </NFormItem>
+        <NFormItem v-if="showField('website')" :label="t('profile.website')">
+          <NInput
+            v-model:value="form.website"
+            :disabled="readonly('website')"
+            :placeholder="t('profile.websitePlaceholder')"
+          />
+        </NFormItem>
+      </NForm>
+
+      <!-- Save bar, self-contained placement: the extension block below owns its
+           own save button, so this bar must stay attached to the identity fields
+           it actually governs - putting it under a foreign block would read as
+           "saves everything" while saving only half. -->
+      <div v-if="!extraJoined" class="t-uc-save-bar">
+        <NButton size="small" @click="resetForm">{{ t('reset') }}</NButton>
+        <NButton size="small" type="primary" :loading="saving" @click="save">{{ t('save') }}</NButton>
       </div>
-      <NFormItem v-if="showField('bio')" :label="t('profile.bio')">
-        <NInput
-          v-model:value="form.bio"
-          type="textarea"
-          :rows="3"
-          :disabled="readonly('bio')"
-          :placeholder="t('profile.bioPlaceholder')"
-        />
-      </NFormItem>
-      <NFormItem v-if="showField('address')" :label="t('profile.address')">
-        <NInput
-          v-model:value="form.address"
-          :disabled="readonly('address')"
-          :placeholder="t('profile.addressPlaceholder')"
-        />
-      </NFormItem>
-      <NFormItem v-if="showField('website')" :label="t('profile.website')">
-        <NInput
-          v-model:value="form.website"
-          :disabled="readonly('website')"
-          :placeholder="t('profile.websitePlaceholder')"
-        />
-      </NFormItem>
-    </NForm>
 
-    <!-- Save bar, self-contained placement: the extension block below owns its
-         own save button, so this bar must stay attached to the identity fields
-         it actually governs - putting it under a foreign block would read as
-         "saves everything" while saving only half. -->
-    <div v-if="!extraJoined" class="t-uc-save-bar">
-      <NButton size="small" @click="resetForm">{{ t('reset') }}</NButton>
-      <NButton size="small" type="primary" :loading="saving" @click="save">{{ t('save') }}</NButton>
-    </div>
+      <!-- Consumer extension block (`userCenter.profile.extra`) - the app's own
+           field block, appended to the built-in Profile section. Rendered in ONE
+           fixed position (the save bar is what moves around it) so registering
+           never remounts it and drops what the user typed.
 
-    <!-- Consumer extension block (`userCenter.profile.extra`) - the app's own
-         field block, appended to the built-in Profile section. Rendered in ONE
-         fixed position (the save bar is what moves around it) so registering
-         never remounts it and drops what the user typed.
+           Two modes, chosen by the block itself and never by config:
+           - self-contained (default): own data, own validation, own save button;
+             the framework's Reset/Save neither triggers nor awaits it, so neither
+             half can block the other.
+           - joined: the block calls `useUserCenterProfileExtra({ save, … })` in
+             setup and the single Reset/Save pair below drives BOTH halves. See
+             `useUserCenterProfileExtra.ts` for the (non-atomic) save contract.
 
-         Two modes, chosen by the block itself and never by config:
-         - self-contained (default): own data, own validation, own save button;
-           the framework's Reset/Save neither triggers nor awaits it, so neither
-           half can block the other.
-         - joined: the block calls `useUserCenterProfileExtra({ save, … })` in
-           setup and the single Reset/Save pair below drives BOTH halves. See
-           `useUserCenterProfileExtra.ts` for the (non-atomic) save contract.
+           It gets no props either way - the section's internals stay out of the
+           public contract. -->
+      <component :is="extraComponent" v-if="extraComponent" />
 
-         It gets no props either way - the section's internals stay out of the
-         public contract. -->
-    <component :is="extraComponent" v-if="extraComponent" />
-
-    <!-- Save bar, joined placement: it now governs the block above it too, so
-         it sits last. Duplicated rather than reordered with CSS on purpose -
-         `order` would leave the tab sequence running against the visual one. -->
-    <div v-if="extraJoined" class="t-uc-save-bar">
-      <!-- Combined unsaved-changes marker: the identity fields plus whatever the
-           registered `dirty()` reports. Deliberately an indicator and NOT a gate
-           on Save - a block whose `dirty()` reads non-reactive state would
-           otherwise lock the user out of saving. -->
-      <span v-if="isDirty" class="t-uc-save-bar__dirty">
-        <i class="t-uc-save-bar__dot" aria-hidden="true" />
-        {{ t('profile.unsaved') }}
-      </span>
-      <NButton size="small" @click="resetForm">{{ t('reset') }}</NButton>
-      <NButton size="small" type="primary" :loading="saving" @click="save">{{ t('save') }}</NButton>
-    </div>
+      <!-- Save bar, joined placement: it now governs the block above it too, so
+           it sits last. Duplicated rather than reordered with CSS on purpose -
+           `order` would leave the tab sequence running against the visual one. -->
+      <div v-if="extraJoined" class="t-uc-save-bar">
+        <!-- Combined unsaved-changes marker: the identity fields plus whatever the
+             registered `dirty()` reports. Deliberately an indicator and NOT a gate
+             on Save - a block whose `dirty()` reads non-reactive state would
+             otherwise lock the user out of saving. -->
+        <span v-if="isDirty" class="t-uc-save-bar__dirty">
+          <i class="t-uc-save-bar__dot" aria-hidden="true" />
+          {{ t('profile.unsaved') }}
+        </span>
+        <NButton size="small" @click="resetForm">{{ t('reset') }}</NButton>
+        <NButton size="small" type="primary" :loading="saving" @click="save">{{ t('save') }}</NButton>
+      </div>
+    </template>
 
     <!-- Change email / phone (two-step verify). TModalShell = shared modal
          chrome (width cap + auto-fullscreen on phones + no-autofocus on phones). -->
@@ -389,6 +402,9 @@ const errorText = (e: unknown): string => (e instanceof Error ? e.message : Stri
  *    left re-seeded from the server response (so they stop reading as unsaved).
  */
 async function save(): Promise<void> {
+  // The template offers no Save without a loaded profile; this write replaces
+  // every field, so the handler refuses on its own as well.
+  if (!ctx.profile.value) return
   saving.value = true
   try {
     // ── Step 1: identity fields (framework-owned) ──
@@ -401,8 +417,10 @@ async function save(): Promise<void> {
         ctx.detail.value?.avatarUrl ?? null,
       )
       const updated = await ctx.bridge.me.updateProfile(payload)
-      ctx.setProfile(updated)
+      // An answer without a body keeps the profile on screen: clearing it would
+      // take the editor (and a joined block's unsaved input) down with it.
       if (updated) {
+        ctx.setProfile(updated)
         applyProfileToForm(updated)
         mirrorDisplayName(updated)
       }
@@ -455,6 +473,8 @@ const extraComponent = resolveExtra(ctx.config.profile?.extra)
 
 // ── Avatar ──
 async function handleAvatarUpload(file: File | Blob): Promise<{ id?: string; url: string }> {
+  // Saves the whole form like Save does; never over a profile that was not read.
+  if (!ctx.profile.value) throw new Error(t('loadFailed'))
   savingAvatar.value = true
   try {
     const toUpload =
@@ -484,6 +504,7 @@ async function handleAvatarUpload(file: File | Blob): Promise<{ id?: string; url
 }
 
 async function handleAvatarRemove(): Promise<void> {
+  if (!ctx.profile.value) return
   savingAvatar.value = true
   try {
     const updated = await ctx.bridge.me.updateProfile(buildPayload(null, null))

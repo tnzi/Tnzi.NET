@@ -10,6 +10,7 @@ public class OAuthService : ApplicationService, IOAuthService
     private readonly IUserDetailService? _userDetailService;
     private readonly IAuthService _authService;
     private readonly IOAuthEmailVerificationPolicy _emailVerificationPolicy;
+    private readonly IOptionsMonitor<IdentityOptions> _identityOptions;
     private readonly ICurrentTenant? _currentTenant;
     private readonly bool _multiTenancyEnabled;
 
@@ -29,6 +30,7 @@ public class OAuthService : ApplicationService, IOAuthService
         IServiceProvider serviceProvider,
         IAuthService authService,
         IOAuthEmailVerificationPolicy emailVerificationPolicy,
+        IOptionsMonitor<IdentityOptions> identityOptions,
         IUserDetailService? userDetailService = null,
         ICurrentTenant? currentTenant = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
@@ -38,6 +40,7 @@ public class OAuthService : ApplicationService, IOAuthService
         _userLoginService = Check.NotNull(userLoginService);
         _authService = Check.NotNull(authService);
         _emailVerificationPolicy = Check.NotNull(emailVerificationPolicy);
+        _identityOptions = Check.NotNull(identityOptions);
         _userDetailService = userDetailService;
         _currentTenant = currentTenant;
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
@@ -84,7 +87,7 @@ public class OAuthService : ApplicationService, IOAuthService
         if (existingUser != null)
         {
             // 用户已存在，直接登录
-            var result = await GenerateTokenAndPublishLoginEventAsync(existingUser, provider, principal);
+            var result = await GenerateTokenAndPublishLoginEventAsync(existingUser, provider);
             if (result.Succeeded)
             {
                 LogInformation("OAuth login successful for user {UserName} via {Provider}", existingUser.UserName ?? string.Empty, provider);
@@ -115,7 +118,7 @@ public class OAuthService : ApplicationService, IOAuthService
             }
 
             // 登录并返回Token
-            var result = await GenerateTokenAndPublishLoginEventAsync(userByEmail, provider, principal);
+            var result = await GenerateTokenAndPublishLoginEventAsync(userByEmail, provider);
             if (result.Succeeded)
             {
                 LogInformation("OAuth login successful for user {UserName} via {Provider} (linked account)", userByEmail.UserName ?? string.Empty, provider);
@@ -138,6 +141,21 @@ public class OAuthService : ApplicationService, IOAuthService
                 "This email is already registered. Sign in with your existing method, then link this provider from your profile.",
                 409,
                 ErrorCodes.IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED);
+        }
+
+        // ★★★ 走到这里就是「新建一个账号」，必须有人明确打开过这扇门（Registration:EnableOAuthRegistration，默认关）。
+        //   此前这一支无条件建号并签发令牌：关着全部注册开关、只为员工开了第三方登录的系统，
+        //   任何持有该提供商账号的陌生人都能就地开户。上面两支（已关联的身份、已证实的同邮箱账号）不受影响。
+        if (!_identityOptions.CurrentValue.Registration.EnableOAuthRegistration)
+        {
+            LogWarning(
+                "OAuth callback from {Provider} matched no local account and OAuth registration is disabled; refusing to create one.",
+                provider);
+
+            return Fail<OAuthCallbackResultDto>(
+                "No account is linked to this sign-in and new accounts cannot be created this way. Ask an administrator for an invitation, then link this provider from your profile.",
+                403,
+                ErrorCodes.IDENTITY_OAUTH_REGISTRATION_DISABLED);
         }
 
         // 用户不存在且邮箱未注册，自动创建无密码账户
@@ -218,11 +236,19 @@ public class OAuthService : ApplicationService, IOAuthService
                 400, ErrorCodes.IDENTITY_OAUTH_ERROR);
         }
 
-        // 记录登录记录
-        await _userLoginService.RecordLoginAsync(newUser.Id, provider, providerKey, displayName);
+        // ★★ 与其它开户入口（自助注册、快速注册、验证码登录自动注册、管理员建号）一样发注册事件。
+        //   此前只有这一条不发：挂在它上面的欢迎邮件与消费方的建档逻辑，对经第三方登录开户的人一律不运行，且没有任何报错。
+        //   发在外部登录挂上之后：账号到这里才算建成（挂不上会被删掉）。
+        await PublishEventAsync(new UserRegisteredEvent
+        {
+            UserId = newUser.Id,
+            UserName = newUser.UserName ?? string.Empty,
+            Email = newUser.Email,
+            RegistrationTime = DateTime.UtcNow,
+        });
 
         // 生成 Token 并返回
-        var newUserResult = await GenerateTokenAndPublishLoginEventAsync(newUser, provider, principal);
+        var newUserResult = await GenerateTokenAndPublishLoginEventAsync(newUser, provider);
         if (newUserResult.Succeeded)
         {
             LogInformation("New user created via OAuth: {UserName}, provider: {Provider}", newUser.UserName, provider);
@@ -241,22 +267,7 @@ public class OAuthService : ApplicationService, IOAuthService
             return Fail("Provider key not found in claims", 400, ErrorCodes.IDENTITY_OAUTH_ERROR);
         }
 
-        var user = await _userManager.FindByGuidAsync(userId);
-        if (user == null)
-        {
-            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
-        }
-
-        // ★ 这个外部身份已经属于别人 → 409，两边都不动。这正是登录流程的「按 provider key 直接登录」分支
-        //   在绑定语义下的反面：登录时它是「就是这个人」，绑定时它是「这个身份不是你的」。
-        var owner = await _userManager.FindByLoginAsync(provider, providerKey);
-        if (owner != null && owner.Id != userId)
-        {
-            LogWarning("Refused to link {Provider} to user {UserId}: the external account is already linked to another user.", provider, userId);
-            return Fail("This external account is already linked to another user.", 409, ErrorCodes.DATA_CONFLICT);
-        }
-
-        // 与登录流程同一组 claim 取显示名；不取邮箱 —— 绑定不按邮箱认领任何东西。
+        // 与登录流程同一组 claim 取显示名；不取邮箱：绑定不按邮箱认领任何东西。
         var displayName = ExtractDisplayName(principal);
         return await LinkOAuthAccountAsync(userId, provider, providerKey, displayName);
     }
@@ -269,6 +280,16 @@ public class OAuthService : ApplicationService, IOAuthService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        // ★ 这个外部身份已经属于别人 → 409，两边都不动。这正是登录流程的「按 provider key 直接登录」分支
+        //   在绑定语义下的反面：登录时它是「就是这个人」，绑定时它是「这个身份不是你的」。
+        //   放在这里而不是只放在某一个调用方：个人中心的完成端点、回调的自动关联都经这里。
+        var owner = await _userManager.FindByLoginAsync(provider, providerKey);
+        if (owner != null && owner.Id != userId)
+        {
+            LogWarning("Refused to link {Provider} to user {UserId}: the external account is already linked to another user.", provider, userId);
+            return Fail("This external account is already linked to another user.", 409, ErrorCodes.DATA_CONFLICT);
+        }
+
         // 检查是否已关联
         var hasLogin = await _userLoginService.HasLoginAsync(userId, provider, providerKey);
         if (hasLogin)
@@ -276,7 +297,8 @@ public class OAuthService : ApplicationService, IOAuthService
             return Ok(); // 已关联，无需重复操作
         }
 
-        // 添加外部登录
+        // 添加外部登录。这一次写入就是全部：UserManager 的存储与 IUserLoginService 读的是同一张 UserLogin 表，
+        // 此前紧跟着再经 IUserLoginService 写一遍同一行（多一次查询加一次保存，且走的是另注入的 DbContext）。
         var loginInfo = new UserLoginInfo(provider, providerKey, displayName ?? provider);
         var result = await _userManager.AddLoginAsync(user, loginInfo);
 
@@ -285,8 +307,6 @@ public class OAuthService : ApplicationService, IOAuthService
             return Fail($"Failed to link OAuth account: {result.FormatErrors()}", 400, ErrorCodes.IDENTITY_OAUTH_ERROR);
         }
 
-        // 记录登录记录
-        await _userLoginService.RecordLoginAsync(userId, provider, providerKey, displayName);
         LogInformation("OAuth account linked for user {UserName} (ID: {UserId}), provider: {Provider}", user.UserName ?? string.Empty, userId, provider);
         return Ok();
     }
@@ -314,8 +334,6 @@ public class OAuthService : ApplicationService, IOAuthService
             return Fail($"Failed to unlink OAuth account: {result.FormatErrors()}", 400, ErrorCodes.IDENTITY_OAUTH_ERROR);
         }
 
-        // 删除登录记录
-        await _userLoginService.RemoveLoginAsync(userId, provider, loginToRemove.ProviderKey);
         LogInformation("OAuth account unlinked for user {UserName} (ID: {UserId}), provider: {Provider}", user.UserName ?? string.Empty, userId, provider);
         return Ok();
     }
@@ -323,14 +341,14 @@ public class OAuthService : ApplicationService, IOAuthService
     #region Private Methods
 
     /// <summary>提供商侧的用户标识（支持多平台：Google, Microsoft, Facebook, Twitter, GitHub）。</summary>
-    private static string? ExtractProviderKey(ClaimsPrincipal principal)
+    internal static string? ExtractProviderKey(ClaimsPrincipal principal)
         => principal.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? principal.FindFirstValue("sub")
             ?? principal.FindFirstValue("id")
             ?? principal.FindFirstValue("user_id");
 
     /// <summary>显示名 / 昵称（GitHub 用 login，Twitter 用 screen_name）。</summary>
-    private static string? ExtractDisplayName(ClaimsPrincipal principal)
+    internal static string? ExtractDisplayName(ClaimsPrincipal principal)
         => principal.FindFirstValue("display_name")
             ?? principal.FindFirstValue(ClaimTypes.Name)
             ?? principal.FindFirstValue("name")
@@ -342,7 +360,7 @@ public class OAuthService : ApplicationService, IOAuthService
     /// 统一处理OAuth登录后的Token生成和保存逻辑，减少代码重复。
     /// 先建立登录会话（应用多登录策略），使 OAuth 登录与密码登录一致地受会话强制约束。
     /// </summary>
-    private async Task<Result<OAuthCallbackResultDto>> GenerateTokenAndPublishLoginEventAsync(User user, string provider, ClaimsPrincipal principal)
+    private async Task<Result<OAuthCallbackResultDto>> GenerateTokenAndPublishLoginEventAsync(User user, string provider)
     {
         // ★★★ 整段签发交给共享出口。此前这里是 IssueTokenAsync 后半段的**手抄件**：
         // 守卫链、会话协调器、令牌、登录事件都抄了，唯独漏掉两件 ——

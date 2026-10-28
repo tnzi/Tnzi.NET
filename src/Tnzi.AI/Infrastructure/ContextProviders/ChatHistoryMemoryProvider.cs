@@ -13,6 +13,12 @@ namespace Tnzi.AI.Infrastructure.ContextProviders;
 /// <item><description>OnDemandFunctionCalling - 将搜索暴露为工具，由模型按需调用</description></item>
 /// </list>
 /// </para>
+/// <para>
+/// ★ 失败关闭：只在检索实现声明 <see cref="ITextSearchService.SupportsConversationScope"/>，且本次检索带得出
+/// 用户或线程范围时才发起检索。框架内置的检索实现只认知识库范围、忽略用户 / 线程字段，拿它检索「历史对话」
+/// 就是一次跨全部知识库的检索：绕过 Agent 的知识库授权，结果还被当作以前的对话注入。不带范围的检索同理。
+/// 框架本身不索引聊天历史；要用这项能力，需要提供索引聊天历史并按上述字段限定结果的实现。
+/// </para>
 /// </remarks>
 public sealed class ChatHistoryMemoryProvider : IContextProvider
 {
@@ -82,8 +88,12 @@ public sealed class ChatHistoryMemoryProvider : IContextProvider
                 return ContextInjection.Empty;
             }
 
-            // 构建过滤条件
-            var filter = BuildFilter();
+            // 构建过滤条件：给不出对话范围（或检索实现不按它限定结果）就不检索
+            var filter = BuildConversationFilter();
+            if (filter == null)
+            {
+                return ContextInjection.Empty;
+            }
 
             // 执行语义搜索
             var maxResults = _options.MaxResults > 0 ? _options.MaxResults : 5;
@@ -149,9 +159,14 @@ public sealed class ChatHistoryMemoryProvider : IContextProvider
             return "Please provide a non-empty search query.";
         }
 
+        var filter = BuildConversationFilter();
+        if (filter == null)
+        {
+            return "Chat history search is not available in this conversation.";
+        }
+
         try
         {
-            var filter = BuildFilter();
             var maxResults = _options.MaxResults > 0 ? _options.MaxResults : 5;
             var results = await _textSearchService.SearchAsync(query, filter, maxResults, cancellationToken);
             var resultList = results.ToList();
@@ -180,20 +195,23 @@ public sealed class ChatHistoryMemoryProvider : IContextProvider
     }
 
     /// <summary>
-    /// 从 scope 构建 TextSearchFilter
+    /// 构建对话范围的 TextSearchFilter；检索不能被限定在某个用户或线程之内时返回 null（调用方据此不检索）。
     /// </summary>
-    private TextSearchFilter? BuildFilter()
+    /// <remarks>
+    /// 两个条件缺一不可：检索实现声明按这些字段限定结果（<see cref="ITextSearchService.SupportsConversationScope"/>），
+    /// 且本次至少带得出用户或线程。只有 Agent / 集合名不算对话范围：同一 Agent 下所有用户的历史会混在一起。
+    /// </remarks>
+    private TextSearchFilter? BuildConversationFilter()
     {
+        if (!_textSearchService.SupportsConversationScope)
+        {
+            return null;
+        }
+
         var request = _executionContextAccessor?.CurrentRequest;
         var userId = request?.UserId?.ToString() ?? _scope.UserId;
         var agentId = request?.AgentId?.ToString() ?? _scope.AgentId;
         var threadId = request?.ThreadId?.ToString() ?? _scope.ThreadId;
-
-        if (string.IsNullOrEmpty(userId) && string.IsNullOrEmpty(agentId) &&
-            string.IsNullOrEmpty(threadId) && string.IsNullOrEmpty(_options.CollectionName))
-        {
-            return null;
-        }
 
         var filter = new TextSearchFilter
         {
@@ -204,10 +222,10 @@ public sealed class ChatHistoryMemoryProvider : IContextProvider
             filter.UserId = parsedUserId;
         if (Guid.TryParse(agentId, out var parsedAgentId))
             filter.AgentId = parsedAgentId;
-        if (!string.IsNullOrEmpty(threadId))
+        if (!string.IsNullOrWhiteSpace(threadId))
             filter.ThreadId = threadId;
 
-        return filter;
+        return filter.UserId.HasValue || filter.ThreadId != null ? filter : null;
     }
 }
 

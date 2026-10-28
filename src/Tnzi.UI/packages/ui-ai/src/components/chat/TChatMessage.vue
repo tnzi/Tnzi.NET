@@ -17,7 +17,7 @@ import TMessageAttachments from './TMessageAttachments.vue';
 import TMessageActions, { type MessageAction } from './TMessageActions.vue';
 import TMessageFeedback from './TMessageFeedback.vue';
 import TReasoning from '../reasoning/TReasoning.vue';
-import TToolCallDisplay from '../reasoning/TToolCallDisplay.vue';
+import TToolRun from '../reasoning/TToolRun.vue';
 
 const props = withDefaults(defineProps<{
   message: ChatMessage;
@@ -60,6 +60,16 @@ const hasToolCalls = computed(
 const hasAttachments = computed(
   () => !!props.message.attachments && props.message.attachments.length > 0,
 );
+
+/* The rating the message already carries: loaded with the thread's history,
+   or written by the consumer when a click lands. Passing it is what lets the
+   pressed thumb show and a second click on it revoke the rating. */
+const feedbackValue = computed<FeedbackValue>(() => {
+  const rating = props.message.feedbackRating;
+  if (rating === true) return 'positive';
+  if (rating === false) return 'negative';
+  return null;
+});
 </script>
 
 <template>
@@ -75,7 +85,7 @@ const hasAttachments = computed(
           prefer-icon
           :size="32"
           :color="isUser ? 'var(--tnzi-primary)' : 'var(--tnzi-border)'"
-          :text-color="isUser ? '#fff' : 'var(--tnzi-base-text-muted)'"
+          :text-color="isUser ? 'var(--tnzi-on-primary, #fff)' : 'var(--tnzi-base-text-muted)'"
         />
       </slot>
     </div>
@@ -101,17 +111,15 @@ const hasAttachments = computed(
         class="w-full"
       />
 
-      <!-- Tool calls (assistant only) -->
-      <div
+      <!-- Tool calls (assistant only): one run, as in the thread layout, with the
+           same per-tool renderers; only where it sits differs (above the bubble). -->
+      <TToolRun
         v-if="isAssistant && hasToolCalls"
-        class="flex w-full flex-col gap-1"
-      >
-        <TToolCallDisplay
-          v-for="(tc, i) in message.toolCalls"
-          :key="`${tc.name}:${i}`"
-          :tool-call="tc"
-        />
-      </div>
+        class="w-full"
+        :tool-calls="message.toolCalls!"
+        :streaming="isStreaming"
+        :active="isStreaming && !message.content"
+      />
 
       <!-- Attachments -->
       <TMessageAttachments
@@ -179,7 +187,7 @@ const hasAttachments = computed(
           />
           <TMessageFeedback
             v-if="showFeedback"
-            :value="null"
+            :value="feedbackValue"
             @feedback="(type, reason) => emit('feedback', message.id, type, reason)"
           />
         </slot>

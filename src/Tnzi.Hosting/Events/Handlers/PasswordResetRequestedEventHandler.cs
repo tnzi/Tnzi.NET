@@ -20,6 +20,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
     private readonly IResetPasswordUrlGenerator? _urlGenerator;
     private readonly ILogger<PasswordResetRequestedEventHandler> _logger;
     private readonly IConfiguration? _configuration;
+    private readonly AspNetCoreOptions _aspNetCoreOptions;
 
     public PasswordResetRequestedEventHandler(
         INotificationService notificationService,
@@ -27,7 +28,8 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         ISettingService? settingService = null,
         IOptionsMonitor<IdentityOptions>? identityOptions = null,
         IResetPasswordUrlGenerator? urlGenerator = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IOptions<AspNetCoreOptions>? aspNetCoreOptions = null)
     {
         _notificationService = Check.NotNull(notificationService);
         _settingService = settingService;
@@ -35,6 +37,7 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         _urlGenerator = urlGenerator;
         _logger = Check.NotNull(logger);
         _configuration = configuration;
+        _aspNetCoreOptions = aspNetCoreOptions?.Value ?? new AspNetCoreOptions();
     }
 
     public async Task HandleAsync(PasswordResetRequestedEvent @event, CancellationToken cancellationToken = default)
@@ -139,9 +142,10 @@ public class PasswordResetRequestedEventHandler : IEventHandler<PasswordResetReq
         }
 
         // 3. 如果未配置 ResetPasswordRoute，使用后端API URL + /auth/reset-password（框架内置兜底方案）
+        //    端点挂在 API 前缀之下，见 ApiRootUrl
         if (!string.IsNullOrEmpty(apiBaseUrl))
         {
-            var resetUrl = $"{apiBaseUrl}/auth/reset-password?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
+            var resetUrl = $"{ApiRootUrl.Compose(apiBaseUrl, _aspNetCoreOptions)}/auth/reset-password?email={Uri.EscapeDataString(email)}&token={Uri.EscapeDataString(token)}";
             _logger.LogDebug("Generated password reset URL (backend fallback) for email {Email}", email);
             return resetUrl;
         }

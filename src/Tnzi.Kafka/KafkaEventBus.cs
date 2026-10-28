@@ -246,6 +246,9 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IDistri
                 var currentConsumer = consumer;
                 var reconnectAttempts = 0;
                 var poisonStalls = new PoisonStallTracker();
+                // 处理器耗尽重试、又没能进死信的消息卡住分区时的周期计数（只用于 Critical 节流）。
+                // 与毒消息分开计：卡住的那条每轮都能反序列化，poisonStalls.Clear 会把它清零
+                var handlerStalls = new PoisonStallTracker();
 
                 while (!cts.Token.IsCancellationRequested)
                 {
@@ -300,6 +303,7 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IDistri
                                     if (outcome == KafkaConsumeOutcome.Commit)
                                     {
                                         currentConsumer.Commit(result);
+                                        handlerStalls.Clear(result.TopicPartition);
                                         _logger.LogDebug("Processed event {EventType} with ID {EventId}", eventTypeName, @event.EventId);
                                         break;
                                     }
@@ -340,25 +344,25 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IDistri
                                             await ProduceToDeadLetterAsync(
                                                 topic, result.Message, eventTypeName, @event.EventId, consumerConfig.GroupId, DeadLetterReasonHandlerFailure);
                                             currentConsumer.Commit(result);
+                                            handlerStalls.Clear(result.TopicPartition);
                                             _logger.LogError(
                                                 "Event {EventType} (EventId: {EventId}) routed to dead-letter topic after {Attempts} failed attempt(s); offset committed.",
                                                 eventTypeName, @event.EventId, attemptsMade);
                                         }
                                         catch (Exception dlqEx)
                                         {
-                                            // DLQ 投递失败 ⇒ 不提交偏移量，等待重投，绝不丢失
-                                            _logger.LogCritical(dlqEx,
-                                                "Failed to dead-letter event {EventType} (EventId: {EventId}); offset NOT committed, message will be redelivered.",
-                                                eventTypeName, @event.EventId);
+                                            // DLQ 投递失败 ⇒ 消息既没处理成功也没进死信：卡住分区，绝不让下一条的提交越过它
+                                            await HoldPartitionAtFailedEventAsync(
+                                                currentConsumer, result, eventTypeName, @event.EventId, attemptsMade, dlqEx,
+                                                handlerStalls.Register(result.TopicPartitionOffset), cts.Token);
                                         }
                                         break;
                                     }
 
-                                    // RedeliverWithoutCommit：不提交偏移量，等待重投（at-least-once，绝不静默丢弃）
-                                    _logger.LogCritical(
-                                        "Event {EventType} (EventId: {EventId}) failed after {Attempts} attempt(s) and dead-letter is disabled. " +
-                                        "Offset NOT committed; message will be redelivered (at-least-once).",
-                                        eventTypeName, @event.EventId, attemptsMade);
+                                    // RedeliverWithoutCommit：死信关闭，卡住分区等处理器恢复（at-least-once，绝不静默丢弃）
+                                    await HoldPartitionAtFailedEventAsync(
+                                        currentConsumer, result, eventTypeName, @event.EventId, attemptsMade, deadLetterFailure: null,
+                                        handlerStalls.Register(result.TopicPartitionOffset), cts.Token);
                                     break;
                                 }
                             }
@@ -634,6 +638,64 @@ public class KafkaEventBus : IDistributedEventBus, IIntegrationEventBus, IDistri
             _logger.LogDebug("Partition still blocked by the poison message at {TopicPartitionOffset} for event {EventType}", result.TopicPartitionOffset, eventTypeName);
         }
 
+        await SeekBackAsync(consumer, result, eventTypeName, cancellationToken);
+    }
+
+    /// <summary>
+    /// 处理器耗尽重试、消息又没能进死信（死信关闭，或死信投递失败）：Seek 回它的偏移量，让分区卡在这条消息上。
+    /// </summary>
+    /// <remarks>
+    /// 与毒消息同一个理由：Kafka 提交的是分区的<b>位置</b>，「不提交」守不住偏移量。
+    /// 只记一条日志就去拉下一条的话，同分区下一条处理成功、提交的位置越过失败的这条，
+    /// 它就被永久跳过：重启、再均衡都不会再投。Seek 回去之后每个周期重读同一条、重跑处理器，
+    /// 直到处理器恢复或死信可用；分区停在这里是响亮的，越过则是静默的。
+    /// Critical 只在卡住的第一个周期与之后每 <see cref="PoisonStallLogEveryCycles"/> 个周期各记一次，其余周期记 Debug
+    /// （每个周期的处理器失败本身另有 Error 日志）。
+    /// </remarks>
+    private async Task HoldPartitionAtFailedEventAsync(
+        IConsumer<string, string> consumer,
+        ConsumeResult<string, string> result,
+        string eventTypeName,
+        Guid eventId,
+        int attemptsMade,
+        Exception? deadLetterFailure,
+        int stallCycles,
+        CancellationToken cancellationToken)
+    {
+        if (stallCycles % PoisonStallLogEveryCycles != 0)
+        {
+            _logger.LogDebug(
+                "Partition still held at {TopicPartitionOffset} by event {EventType} (EventId: {EventId}) whose handlers keep failing",
+                result.TopicPartitionOffset, eventTypeName, eventId);
+        }
+        else if (deadLetterFailure != null)
+        {
+            _logger.LogCritical(deadLetterFailure,
+                "Failed to dead-letter event {EventType} (EventId: {EventId}) after {Attempts} failed attempt(s); offset NOT committed. "
+                + "The partition is held at {TopicPartitionOffset} and the event is retried rather than skipped (stalled for {Cycles} poll cycle(s)).",
+                eventTypeName, eventId, attemptsMade, result.TopicPartitionOffset, stallCycles + 1);
+        }
+        else
+        {
+            _logger.LogCritical(
+                "Event {EventType} (EventId: {EventId}) failed after {Attempts} attempt(s) and dead-letter is disabled; offset NOT committed. "
+                + "The partition is held at {TopicPartitionOffset} until the handlers succeed or Kafka:Consumer:DeadLetterEnabled is turned on "
+                + "(stalled for {Cycles} poll cycle(s)).",
+                eventTypeName, eventId, attemptsMade, result.TopicPartitionOffset, stallCycles + 1);
+        }
+
+        await SeekBackAsync(consumer, result, eventTypeName, cancellationToken);
+    }
+
+    /// <summary>
+    /// Seek 回这条记录的偏移量并退避：分区下一轮重读同一条，而不是越过它。
+    /// </summary>
+    private async Task SeekBackAsync(
+        IConsumer<string, string> consumer,
+        ConsumeResult<string, string> result,
+        string eventTypeName,
+        CancellationToken cancellationToken)
+    {
         try
         {
             consumer.Seek(result.TopicPartitionOffset);

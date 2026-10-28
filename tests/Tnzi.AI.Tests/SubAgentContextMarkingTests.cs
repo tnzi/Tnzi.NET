@@ -127,7 +127,7 @@ public class SubAgentContextMarkingTests
             runStore.Object,
             registry.Object,
             new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore.Object),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             new StaticOptionsMonitor<SubAgentOptions>(new SubAgentOptions()));

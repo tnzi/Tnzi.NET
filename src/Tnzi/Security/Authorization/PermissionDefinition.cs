@@ -31,15 +31,10 @@ public class PermissionDefinition
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// 权限分类（对应ModuleFunction.Category）。
-    /// Business = 业务管理员可达；Technical = 仅显式授权或超管可达。
+    /// 权限分类（对应ModuleFunction.Category）：给授权界面看的受众标注（Technical 渲染警示徽标），
+    /// 不产生任何隐式授权。见 <see cref="PermissionCategory"/>。
     /// </summary>
     public PermissionCategory Category { get; set; } = PermissionCategory.Business;
-
-    /// <summary>
-    /// 权限组（对应Module）
-    /// </summary>
-    public PermissionGroupDefinition? Group { get; set; }
 
     // 权限模型是扁平的 deny-by-default 码集合：一次判定只问「用户的有效集里有没有这个码」。
     // 早期这里还有 RequiresPermission(...)（依赖码）与 InheritFromParent()（持父码即持子码）两个链式 API，

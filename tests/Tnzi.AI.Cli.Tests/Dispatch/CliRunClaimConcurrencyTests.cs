@@ -13,6 +13,7 @@ public class CliQueueDbContext : TnziDbContext<CliQueueDbContext>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfiguration(new CliRunConfiguration());
+        modelBuilder.ApplyConfiguration(new CliRuntimeConfiguration());
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
     }

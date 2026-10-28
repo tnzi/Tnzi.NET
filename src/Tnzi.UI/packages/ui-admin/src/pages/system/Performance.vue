@@ -104,12 +104,14 @@ import {
   type SlowRequestRecordDto,
 } from '../../services/bridges/performance-bridge'
 import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safe-message'
 import { methodTone } from '../_shared/http-method'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 
 const bridge = createPerformanceBridge({ client: useAdminClient() })
 
 const t = makePageTranslator('system.performance')
+const message = useSafeMessage()
 
 const loading = ref(false)
 const summary = ref<PercentileResultDto | null>(null)
@@ -278,7 +280,10 @@ async function clearAll(): Promise<void> {
   try {
     await bridge.clear()
     await refresh()
-  } catch { /* bridge swallows */ }
+  } catch (error) {
+    // The bridge throws the server's refusal; a failed clear must not read as done.
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 onMounted(() => {

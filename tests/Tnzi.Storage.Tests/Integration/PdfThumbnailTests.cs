@@ -333,7 +333,7 @@ public class PdfThumbnailTests : StorageIntegrationTestBase
             pdfRasterizer: rasterizer);
         var originalPath = await Storage.UploadAsync("big.pdf", new MemoryStream(PdfBytes), "application/pdf");
 
-        var path = await generator.GenerateAsync(originalPath, "big.pdf", ".pdf", size: 0);
+        var path = await generator.GenerateAsync(originalPath, ".pdf", size: 0);
 
         Assert.Null(path);
         Assert.Equal(0, rasterizer.PageCountCalls);
@@ -651,24 +651,27 @@ public class PdfThumbnailTests : StorageIntegrationTestBase
         var recorder = new RecordingFileStorage(Storage);
         var generator = new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(ThumbnailOptions()));
 
-        var path = await generator.GenerateAsync("some/path", "key.docx", ".docx", 10);
+        var path = await generator.GenerateAsync("some/path", ".docx", 10);
 
         Assert.Null(path);
         Assert.Empty(recorder.UploadedKeys);
     }
 
     [Fact]
-    public async Task GenerateAsync_ThumbnailKeyIsDerivedFromTheOriginalKey()
+    public async Task GenerateAsync_ThumbnailKeyIsServerGenerated_NotDerivedFromTheOriginal()
     {
         var recorder = new RecordingFileStorage(Storage);
         var generator = new FileThumbnailGenerator(
             recorder, new StaticOptionsMonitor<StorageOptions>(ThumbnailOptions()), pdfRasterizer: new FakePdfRasterizer());
         var originalPath = await Storage.UploadAsync("original.pdf", new MemoryStream(PdfBytes), "application/pdf");
 
-        var path = await generator.GenerateAsync(originalPath, "original.pdf", ".pdf", PdfBytes.Length);
+        var path = await generator.GenerateAsync(originalPath, ".pdf", PdfBytes.Length);
 
         Assert.NotNull(path);
-        Assert.Equal(new[] { StorageKeyHelper.ThumbnailKey("original.pdf") }, recorder.UploadedKeys);
+        var key = Assert.Single(recorder.UploadedKeys);
+        Assert.True(StorageKeyHelper.IsGenerated(key), key);
+        Assert.StartsWith("thumb_", key);
+        Assert.DoesNotContain("original", key);
     }
 
     // ---------- DI 解析：可选注入的地基 ----------

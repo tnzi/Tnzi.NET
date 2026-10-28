@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useGlobalAiTheme, AI_THEME_SCOPE } from '../../src/headless/useGlobalAiTheme';
 import { buildAiThemeSnapshot } from '../../src/theme/snapshot';
+import { createApp, defineComponent, h } from 'vue';
+import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui';
 
 function client(overrides: Record<string, unknown> = {}) {
   return {
@@ -145,6 +147,37 @@ describe('useGlobalAiTheme', () => {
     expect(useGlobalAiTheme({ client: client() }).canManage.value).toBe(false);
     expect(useGlobalAiTheme({ canManage: () => true }).canManage.value).toBe(false);
     expect(useGlobalAiTheme({ client: client(), canManage: () => true }).canManage.value).toBe(true);
+  });
+
+  /**
+   * The published brand colour goes through the host theme context: the context
+   * re-writes `--tnzi-primary` on every change to its settings (a light/dark
+   * switch included), so an inline value beside it did not survive one.
+   */
+  it('applies the brand colour through the theme context provided to the caller', async () => {
+    const snapshot = buildAiThemeSnapshot({ primary: '#7c3aed' });
+    const c = client({
+      get: vi.fn(async () => ({ succeeded: true, code: 200, data: { theme: snapshot } })),
+    });
+    const context = createThemeContext(mergeThemeSettings({ colors: { primary: '#0d9488' } }));
+    let controller: ReturnType<typeof useGlobalAiTheme> | null = null;
+    const app = createApp(
+      defineComponent({
+        setup() {
+          controller = useGlobalAiTheme({ client: c });
+          return () => h('div');
+        },
+      }),
+    );
+    app.provide(THEME_CONTEXT_KEY, context);
+    app.mount(document.createElement('div'));
+
+    await controller!.load();
+    expect(context.settings.value.colors.primary).toBe('#7c3aed');
+
+    await controller!.reset();
+    expect(context.settings.value.colors.primary).toBe('#0d9488');
+    app.unmount();
   });
 
   it('autoApply false leaves the document alone', async () => {

@@ -232,6 +232,12 @@ public partial class ProviderService : ApplicationService, IProviderService
             }
             var effectiveTenantId = scope == ResourceScope.Tenant ? tenantId : null;
 
+            var endpointBlocked = await CheckTenantEndpointAsync(scope, dto.Endpoint, ct);
+            if (endpointBlocked != null)
+            {
+                return Fail<ProviderDto>(endpointBlocked, 400, ErrorCodes.ProviderOperationFailed);
+            }
+
             var exists = await _repository.AsQueryable().AnyAsync(
                 p => p.Name == name && p.Scope == scope && p.TenantId == effectiveTenantId, ct);
             if (exists)
@@ -287,6 +293,16 @@ public partial class ProviderService : ApplicationService, IProviderService
             if (_currentTenant?.Id != null && entity.Scope == ResourceScope.System)
             {
                 return Fail<ProviderDto>("Access denied: system providers are managed by administrators.", 403, ErrorCodes.ProviderOperationFailed);
+            }
+
+            // 在改动实体之前校验：被拒时实体保持原样
+            if (dto.Endpoint != null)
+            {
+                var endpointBlocked = await CheckTenantEndpointAsync(entity.Scope, dto.Endpoint, ct);
+                if (endpointBlocked != null)
+                {
+                    return Fail<ProviderDto>(endpointBlocked, 400, ErrorCodes.ProviderOperationFailed);
+                }
             }
 
             var previousName = entity.Name;
@@ -502,12 +518,51 @@ public partial class ProviderService : ApplicationService, IProviderService
             try { apiKey = GetProtector().Unprotect(entity.ApiKeyEncrypted); } catch { /* key rotated - proceed unauthenticated */ }
         }
 
-        var probe = new ModelProbe(entity.Name, entity.ProviderType, entity.Endpoint, apiKey, entity.DefaultModel);
+        // 租户行的端点在列模型前再查一次（登记之后可能把 DNS 改指了内网，也覆盖此前登记的存量行）；
+        // 被拒就不发实时请求，退回静态模型表
+        var endpointBlocked = await CheckTenantEndpointAsync(entity.Scope, entity.Endpoint, ct);
+        if (endpointBlocked != null)
+        {
+            Logger.LogWarning("Live model listing skipped for tenant provider {Name}: {Reason}", entity.Name, endpointBlocked);
+            return Ok(new ProviderModelsDto
+            {
+                Models = MergeDefault(StaticModelsFor(entity.ProviderType), entity.DefaultModel),
+                Source = "fallback"
+            });
+        }
+
+        // 上面那次检查只是此刻的 DNS 结果：真正连接时（含端点回 3xx 的情况）同样要过 egress 检查，
+        // 所以租户自填的端点走带连接期守卫、不跟随重定向的客户端
+        var httpClientName = entity.Scope == ResourceScope.Tenant && !string.IsNullOrWhiteSpace(entity.Endpoint)
+            ? ResilientHttpClientNames.TenantEndpoint
+            : ResilientHttpClientNames.Fallback;
+        var probe = new ModelProbe(entity.Name, entity.ProviderType, entity.Endpoint, apiKey, entity.DefaultModel, httpClientName);
         return Ok(await ListModelsCoreAsync(probe, ct));
     }
 
+    /// <summary>
+    /// 租户行的端点按 SSRF egress 规则检查，返回英文拒绝原因（null = 放行）。
+    /// </summary>
+    /// <remarks>
+    /// 租户行的端点由租户管理员填写，服务器会替它发请求（每次对话、每次列模型）：指向环回 / 内网 / 链路本地 /
+    /// 云元数据地址就是借服务器的网络位置访问租户本不该碰到的地方。System 行由宿主管理员维护，
+    /// 本地 Ollama / vLLM 正是常见用法，不检查。
+    /// </remarks>
+    private static async Task<string?> CheckTenantEndpointAsync(ResourceScope scope, string? endpoint, CancellationToken ct)
+    {
+        if (scope != ResourceScope.Tenant || string.IsNullOrWhiteSpace(endpoint))
+        {
+            return null;
+        }
+
+        var blockReason = await EgressGuard.CheckAsync(endpoint.Trim(), ct);
+        return blockReason == null ? null : $"Provider endpoint is not allowed: {blockReason}";
+    }
+
     /// <summary>模型列表探针参数 - 数据库实体与配置条目共用（ApiKey 为已解密明文，仅驻留内存）。</summary>
-    private sealed record ModelProbe(string Name, string ProviderType, string? Endpoint, string? ApiKey, string? DefaultModel);
+    private sealed record ModelProbe(
+        string Name, string ProviderType, string? Endpoint, string? ApiKey, string? DefaultModel,
+        string HttpClientName = ResilientHttpClientNames.Fallback);
 
     /// <summary>
     /// 列出模型的共享核心：优先实时 /v1/models，失败按 ProviderType 静态兜底；
@@ -556,7 +611,7 @@ public partial class ProviderService : ApplicationService, IProviderService
             }
         }
 
-        var client = _httpClientFactory.CreateClient(ResilientHttpClientNames.Fallback);
+        var client = _httpClientFactory.CreateClient(probe.HttpClientName);
         using var response = await client.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -622,22 +677,38 @@ public partial class ProviderService : ApplicationService, IProviderService
     {
         Check.NotNullOrEmpty(ids);
 
-        // 范围是「当前可见的数据库条目」——配置条目没有实体行，本来就不在这里面；
-        // 提交里混进它们的伪 id 会被重排原语当作范围外记录挡掉（404），而不是被悄悄忽略。
-        var result = await ExecuteInUnitOfWorkAsync(
-            c => _repository.ReorderAsync(ids, cancellationToken: c),
-            ct);
+        // 范围是调用者能改的数据库条目，与 Update/Delete 的 System 门同一判定。Provider 不是 IMultiTenant，
+        // 没有全局租户过滤；不给范围时整张表是一条序列，租户管理员就能改写 System 行与他租户行的展示顺序。
+        // - 租户调用者：本租户的行是它自己的一条序列，只在这些行之间重排。System 行对它可见但不归它管，
+        //   提交里的 System id 被略过、序号不动（列表页把可见的数据库行整页提交，System 行就在其中），
+        //   它们与租户行之间的先后仍由各自的序号决定；他租户的 id 不在范围内，由重排原语挡掉（404）。
+        // - 无租户上下文（单租户 / 宿主）：整张表一条序列。
+        // 配置条目没有实体行，提交里混进它们的伪 id 同样按范围外记录挡掉，而不是被悄悄忽略。
+        var tenantId = _currentTenant?.Id;
+        IReadOnlyList<Guid> orderedIds = ids;
+        if (tenantId.HasValue)
+        {
+            var systemIds = await _repository.AsQueryable()
+                .Where(p => ids.Contains(p.Id) && p.Scope == ResourceScope.System)
+                .Select(p => p.Id)
+                .ToListAsync(ct);
+            orderedIds = ids.Where(id => !systemIds.Contains(id)).ToList();
+            if (orderedIds.Count == 0)
+                return Ok();
+        }
+
+        var result = tenantId.HasValue
+            ? await ExecuteInUnitOfWorkAsync(
+                c => _repository.ReorderAsync(orderedIds, p => p.Scope == ResourceScope.Tenant && p.TenantId == tenantId, c),
+                ct)
+            : await ExecuteInUnitOfWorkAsync(
+                c => _repository.ReorderAsync(orderedIds, cancellationToken: c),
+                ct);
 
         if (!result.Succeeded)
             return Result.Failure(result.Message ?? "Reorder failed.", result.Code ?? 400, result.ErrorCode);
 
-        // Priority 决定同名多行里运行时连哪一个（ChatClientFactory 按 Priority 取第一），改了顺序也要让工厂重读
-        var reorderedNames = await _repository.AsQueryable()
-            .Where(p => ids.Contains(p.Id))
-            .Select(p => p.Name)
-            .ToListAsync(ct);
-        InvalidateRuntimeCache(reorderedNames.ToArray());
-
+        // 重排只写展示用的 SortOrder，不碰决定运行时连哪一行的 Priority，所以不需要让运行时工厂重读
         LogInformation("Reordered {Count} provider(s)", result.Data);
         return Ok();
     }

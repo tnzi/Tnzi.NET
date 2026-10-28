@@ -30,9 +30,10 @@ internal static class PayRunEligibility
 
     /// <summary>
     /// 判定单个员工对某批次的资格。<paramref name="assignment"/> 传
-    /// <see cref="PickEffective"/> 的结果。
+    /// <see cref="PickEffective"/> 的结果；<paramref name="structureFrequency"/> 传该分配所指
+    /// 薪资结构的发薪频率（结构已不存在时传 null，不在这里排除，让计算端把它报成错误工资单）。
     /// </summary>
-    public static PayRunEligibilityStatus Evaluate(PayRun run, Employee employee, SalaryAssignment? assignment)
+    public static PayRunEligibilityStatus Evaluate(PayRun run, Employee employee, SalaryAssignment? assignment, PayFrequency? structureFrequency)
     {
         Check.NotNull(run);
         Check.NotNull(employee);
@@ -44,11 +45,23 @@ internal static class PayRunEligibility
         if (employee.TerminationDate.HasValue && employee.TerminationDate.Value.ToUtcDate() < run.PeriodStart.ToUtcDate())
             return PayRunEligibilityStatus.Terminated;
 
+        // 与离职日对称：期末之后才入职的不发；期间内入职的照发（首期工资在这一期，出勤天数由人填）。
+        // 分配生效日是另一回事，管理端新建分配默认生效日为当天，提前录入的新人因此会带着
+        // 一条「已生效」的分配进入入职之前的那一期，并按整期计算。
+        if (employee.HireDate.HasValue && employee.HireDate.Value.ToUtcDate() > run.PeriodEnd.ToUtcDate())
+            return PayRunEligibilityStatus.NotYetHired;
+
         if (assignment == null)
             return PayRunEligibilityStatus.NoAssignment;
 
         if (run.StructureId.HasValue && assignment.StructureId != run.StructureId.Value)
             return PayRunEligibilityStatus.StructureMismatch;
+
+        // ★ 批次只有一个 PERIODS_PER_YEAR（取自 run.Frequency）。不选结构过滤的月薪批次若把周薪
+        // 结构上的员工也圈进来，就会按 12 期/年给他们算一整月，而他们的周薪批次还会再发一遍，
+        // 没有任何报错。所以频率不同的员工不进这个批次。
+        if (structureFrequency.HasValue && structureFrequency.Value != run.Frequency)
+            return PayRunEligibilityStatus.FrequencyMismatch;
 
         return PayRunEligibilityStatus.Eligible;
     }
@@ -70,5 +83,11 @@ internal enum PayRunEligibilityStatus
     NoAssignment = 3,
 
     /// <summary>批次按薪资结构过滤，而该员工的分配指向另一个结构</summary>
-    StructureMismatch = 4
+    StructureMismatch = 4,
+
+    /// <summary>员工的入职日晚于本期期末</summary>
+    NotYetHired = 5,
+
+    /// <summary>该员工的薪资结构发薪频率与批次不同</summary>
+    FrequencyMismatch = 6
 }

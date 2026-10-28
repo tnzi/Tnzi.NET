@@ -13,7 +13,7 @@ public class TodoOptions
         Type = SettingFieldType.Boolean)]
     public bool Enabled { get; set; } = true;
 
-    /// <summary>最大 Todo 数量</summary>
+    /// <summary>write_todos 一份列表的最大条目数；超过时整份拒收并让模型精简后重写，上一份列表保留</summary>
     [RuntimeSetting(Label = "Todo Max Items", I18n = "admin.modules.system.settings.fields.todoMaxItems",
         Type = SettingFieldType.Int, Min = 1, Max = 200)]
     public int MaxItems { get; set; } = 50;

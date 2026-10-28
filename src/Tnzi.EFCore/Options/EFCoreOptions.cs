@@ -38,15 +38,18 @@ public class EFCoreOptions
     public bool LogQueryParameters { get; set; } = false;
 
     /// <summary>
-    /// 批量操作的默认批次大小
+    /// 带 <c>[FileField]</c> 的实体按条件硬删时，每批从数据库加载的实体数
     /// 默认值：1000
-    /// 
-    /// 当批量插入、更新或删除的实体数量超过此值时，将分批处理以减少内存占用
     /// </summary>
+    /// <remarks>
+    /// 只用于这一处：那条路径要先把实体读进变更跟踪器（文件引用处理需要它们），分批读才不会一次加载全部匹配行。
+    /// <c>InsertManyAsync</c> / <c>UpdateManyAsync</c> / <c>DeleteManyAsync</c> 收到的实体本就全部在内存里，
+    /// 一次保存写出；发往数据库的命令如何分批由 provider 的 <c>MaxBatchSize</c> 决定（在 DbContext 选项里配置）。
+    /// </remarks>
     public int BatchSize { get; set; } = 1000;
 
     /// <summary>
-    /// 按实体类型配置的批次大小
+    /// 按实体类型覆盖 <see cref="BatchSize"/>
     /// Key 为实体类型的完整名称（FullName），Value 为批次大小
     /// 
     /// 如果实体类型在此字典中，将使用指定的批次大小；否则使用 BatchSize
@@ -62,14 +65,5 @@ public class EFCoreOptions
     /// 检测顺序：UnitOfWorkManager -> UnitOfWork -> DbContext.Database.CurrentTransaction
     /// </summary>
     public bool EnableTransactionDetection { get; set; } = true;
-
-    /// <summary>
-    /// 是否记录自动保存决策过程
-    /// 默认值：false
-    /// 
-    /// 当为 true 时，会在 Debug 级别记录 ShouldSaveImmediately 的决策过程
-    /// 用于调试和诊断自动保存行为
-    /// </summary>
-    public bool LogAutoSaveDecisions { get; set; } = false;
 }
 

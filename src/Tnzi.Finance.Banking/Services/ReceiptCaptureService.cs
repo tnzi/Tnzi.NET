@@ -21,6 +21,8 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    private const string ExtractionConflictMessage = "The receipt was modified by another operation while it was being extracted. Reload and retry.";
+
     private readonly IRepository<Receipt, Guid> _receiptRepository;
     private readonly IReadOnlyRepository<Vendor, Guid> _vendorRepository;
     private readonly IExpenseService _expenseService;
@@ -150,8 +152,8 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         {
             receipt.Status = ReceiptStatus.Failed;
             receipt.FailReason = ReceiptFieldLimits.TruncateFailReason(extraction.Message);
-            await _receiptRepository.UpdateAsync(receipt, cancellationToken);
-            await _receiptRepository.SaveChangesAsync(cancellationToken);
+            if (!await TrySaveExtractionAsync(receipt, cancellationToken))
+                return Fail<ReceiptDto>(ExtractionConflictMessage, 409);
             return Fail<ReceiptDto>(receipt.FailReason, extraction.Code ?? 502);
         }
 
@@ -178,8 +180,8 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
         receipt.Status = ReceiptStatus.Extracted;
         receipt.FailReason = null;
 
-        await _receiptRepository.UpdateAsync(receipt, cancellationToken);
-        await _receiptRepository.SaveChangesAsync(cancellationToken);
+        if (!await TrySaveExtractionAsync(receipt, cancellationToken))
+            return Fail<ReceiptDto>(ExtractionConflictMessage, 409);
 
         await PublishEventAsync(new ReceiptExtractedEvent
         {
@@ -353,6 +355,28 @@ public class ReceiptCaptureService : ApplicationService, IReceiptCaptureService
 
         await _receiptRepository.DeleteAsync(receipt, cancellationToken);
         return Ok();
+    }
+
+    /// <summary>
+    /// 写回一次提取的结果（成功或失败）；收据在提取期间被别人改过时返回 <see langword="false"/>。
+    /// </summary>
+    /// <remarks>
+    /// 提取是一次可能长达数十秒的模型调用，读收据与写回之间隔着它。期间另一个操作员手工修正了字段
+    /// 或已经转换了它，并发戳会挡住这次过期的写：那是 409（重新加载再试），不是没人接的 500，
+    /// 也绝不能把模型的结果盖到人改过的值上。
+    /// </remarks>
+    private async Task<bool> TrySaveExtractionAsync(Receipt receipt, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _receiptRepository.UpdateAsync(receipt, cancellationToken);
+            await _receiptRepository.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return false;
+        }
     }
 
     /// <summary>按供应商名称建议匹配（精确优先，其次前缀）。</summary>

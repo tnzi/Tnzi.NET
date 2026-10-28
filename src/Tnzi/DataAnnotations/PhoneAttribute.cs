@@ -2,7 +2,9 @@
 namespace Tnzi.DataAnnotations;
 
 /// <summary>
-/// 手机号验证特性
+/// 电话号码验证特性：北美 NANP 格式（区号与局号首位为 2-9，可带 <c>+1</c>、括号、分隔符与分机号），
+/// 规则同 <c>StringExtensions.IsPhoneNumber()</c>。中国大陆手机号与其它国家的号码判为无效。
+/// 默认必填（<see cref="Required"/>）。
 /// </summary>
 public class PhoneAttribute : ValidationAttribute
 {

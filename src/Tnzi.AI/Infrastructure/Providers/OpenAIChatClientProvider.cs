@@ -30,7 +30,7 @@ public class OpenAIChatClientProvider : IChatClientProvider
 
         var openAIClient = CreateOpenAIClient(options);
         var client = openAIClient.GetChatClient(model).AsIChatClient();
-        return new ReasoningAwareChatClientDecorator(client, options.Thinking);
+        return new ReasoningAwareChatClientDecorator(client, options, model);
     }
 
     /// <summary>

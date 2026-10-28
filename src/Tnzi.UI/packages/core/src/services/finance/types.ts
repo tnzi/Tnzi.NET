@@ -1571,7 +1571,10 @@ export interface CheckTemplateDto {
   /** False = created by this application in the Template admin surface. */
   isBuiltIn: boolean;
   isActive: boolean;
-  /** False = a shipped layout not yet seeded into the template store. */
+  /**
+   * False = no row for this layout in the template store for the current tenant;
+   * a shipped layout still renders from the body bundled with the framework.
+   */
   isSeeded: boolean;
 }
 
@@ -1654,6 +1657,11 @@ export interface EftBatchDto {
 export interface EftQueueItemDto {
   paymentEntryId: string;
   paymentNumber?: string | null;
+  /**
+   * Funds account the payment was posted against. A batch can only be drawn on the
+   * bank account profile attached to this account (the backend refuses any other).
+   */
+  fundingAccountId?: string | null;
   partyType: FinancePartyType;
   partyId: string;
   payeeName?: string | null;

@@ -106,8 +106,8 @@
 
     <div class="fin-doc-editor__footer">
       <NButton size="small" @click="emit('cancel')">{{ t('editor.cancel') }}</NButton>
-      <NButton size="small" :loading="savingDraft" @click="save(false)">{{ t('editor.saveDraft') }}</NButton>
-      <NButton size="small" type="primary" :loading="savingPost" @click="save(true)">
+      <NButton size="small" :loading="savingDraft" :disabled="saving" @click="save(false)">{{ t('editor.saveDraft') }}</NButton>
+      <NButton size="small" type="primary" :loading="savingPost" :disabled="saving" @click="save(true)">
         {{ primaryLabel ? primaryLabel : t('editor.saveAndPost') }}
       </NButton>
     </div>
@@ -122,7 +122,7 @@ import { PAYMENT_METHODS } from '../../../services/bridges/finance-bridge'
 import { makePageTranslator } from '../../_shared/translate'
 import { useSafeMessage } from '../../_shared/safe-message'
 import type { SelectOption } from '../options'
-import { fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../money'
+import { carriedExchangeRate, fmtAmount, isoDateToLocalTs, tsToIsoDate } from '../money'
 
 interface EditableLine {
   itemId: string | null
@@ -132,6 +132,25 @@ interface EditableLine {
   unitPrice: number | null
   amount: number | null
   taxCodeId: string | null
+  /**
+   * Manual tax amount carried from the loaded line. This form has no control
+   * for it (it is set through the API, typically to match the tax a vendor
+   * printed), but the draft update rebuilds every line from the payload, so a
+   * value left out is a value deleted.
+   */
+  taxAmount: number | null
+  /** What the override was set against: see {@link taxBasisOf}. */
+  taxBasis: string | null
+}
+
+/**
+ * The inputs a line's tax is computed from. A carried tax override is only
+ * sent while these are unchanged: once the operator edits the amount or the
+ * tax code, the figure they cannot see no longer describes the line, and the
+ * backend recomputes the tax from the code they can see.
+ */
+function taxBasisOf(l: Pick<EditableLine, 'itemId' | 'quantity' | 'unitPrice' | 'amount' | 'taxCodeId'>): string {
+  return JSON.stringify([l.itemId, l.quantity, l.unitPrice, l.amount, l.taxCodeId])
 }
 
 /** 页面适配后的通用单据形态（发票/账单/贷项 = sales；费用 = expense）。 */
@@ -143,6 +162,8 @@ export interface EditableDocument {
   docDate?: string
   dueDate?: string | null
   currency?: string
+  /** Stored rate of the loaded draft; 0 / absent = resolved from the rate table at posting. */
+  exchangeRate?: number | null
   memo?: string | null
   lines?: Array<{
     itemId?: string | null
@@ -152,6 +173,8 @@ export interface EditableDocument {
     unitPrice?: number
     amount?: number
     taxCodeId?: string | null
+    /** Manual tax override (bills / expenses); not editable here, carried through. */
+    taxAmount?: number | null
   }>
 }
 
@@ -163,6 +186,8 @@ export interface DocumentEditorPayload {
   docDate: string
   dueDate: string | null
   currency: string | null
+  /** The loaded draft's manual rate while its currency is unchanged, else null (resolve at posting). */
+  exchangeRate: number | null
   memo: string | null
   lines: Array<{
     itemId: string | null
@@ -172,6 +197,8 @@ export interface DocumentEditorPayload {
     unitPrice: number
     amount: number
     taxCodeId: string | null
+    /** The loaded line's manual tax override while its tax basis is unchanged, else null. */
+    taxAmount: number | null
   }>
 }
 
@@ -217,11 +244,16 @@ const dueDateTs = ref<number | null>(null)
 const currency = ref('')
 const memo = ref('')
 const lines = ref<EditableLine[]>([])
+// The loaded draft's rate and the currency it was set for. Not shown on the
+// form; sent back only while the currency is unchanged (see `save`).
+const loadedRate = ref<{ currency: string | null; exchangeRate: number | null }>({ currency: null, exchangeRate: null })
 const savingDraft = ref(false)
 const savingPost = ref(false)
+/** Either save in flight: both buttons wait, or two clicks on a new document would create two drafts. */
+const saving = computed(() => savingDraft.value || savingPost.value)
 
 function emptyLine(): EditableLine {
-  return { itemId: null, description: '', accountId: null, quantity: 1, unitPrice: null, amount: null, taxCodeId: null }
+  return { itemId: null, description: '', accountId: null, quantity: 1, unitPrice: null, amount: null, taxCodeId: null, taxAmount: null, taxBasis: null }
 }
 
 const methodOptions = computed<SelectOption[]>(() =>
@@ -234,16 +266,22 @@ function resetFrom(entry: EditableDocument | null) {
   docDateTs.value = entry?.docDate ? isoDateToLocalTs(entry.docDate) : Date.now()
   dueDateTs.value = entry?.dueDate ? isoDateToLocalTs(entry.dueDate) : null
   currency.value = entry?.currency ?? ''
+  loadedRate.value = { currency: entry?.currency ?? null, exchangeRate: entry?.exchangeRate ?? null }
   memo.value = entry?.memo ?? ''
-  lines.value = (entry?.lines ?? []).map((l) => ({
-    itemId: l.itemId ?? null,
-    description: l.description ?? '',
-    accountId: l.accountId ?? null,
-    quantity: l.quantity ?? 1,
-    unitPrice: l.unitPrice ?? null,
-    amount: l.amount ?? null,
-    taxCodeId: l.taxCodeId ?? null,
-  }))
+  lines.value = (entry?.lines ?? []).map((l) => {
+    const line: EditableLine = {
+      itemId: l.itemId ?? null,
+      description: l.description ?? '',
+      accountId: l.accountId ?? null,
+      quantity: l.quantity ?? 1,
+      unitPrice: l.unitPrice ?? null,
+      amount: l.amount ?? null,
+      taxCodeId: l.taxCodeId ?? null,
+      taxAmount: l.taxAmount ?? null,
+      taxBasis: null,
+    }
+    return line.taxAmount == null ? line : { ...line, taxBasis: taxBasisOf(line) }
+  })
   if (lines.value.length === 0) lines.value = [emptyLine()]
 }
 
@@ -268,6 +306,7 @@ function removeLine(index: number) {
 }
 
 async function save(post: boolean) {
+  if (saving.value) return
   if (props.showParty && !props.partyOptional && !partyId.value) {
     message.warning(t('editor.partyRequired'))
     return
@@ -295,6 +334,9 @@ async function save(post: boolean) {
     docDate: tsToIsoDate(docDateTs.value),
     dueDate: dueDateTs.value ? tsToIsoDate(dueDateTs.value) : null,
     currency: currency.value.trim() ? currency.value.trim().toUpperCase() : null,
+    // A rate belongs to the currency it was set for: carried while that is
+    // unchanged, otherwise left to the rate table at posting.
+    exchangeRate: carriedExchangeRate(loadedRate.value, currency.value),
     memo: memo.value.trim() || null,
     lines: usable.map((l) => ({
       itemId: l.itemId,
@@ -304,6 +346,7 @@ async function save(post: boolean) {
       unitPrice: l.unitPrice ?? 0,
       amount: l.amount ?? 0,
       taxCodeId: l.taxCodeId,
+      taxAmount: l.taxAmount != null && l.taxBasis === taxBasisOf(l) ? l.taxAmount : null,
     })),
   }
 

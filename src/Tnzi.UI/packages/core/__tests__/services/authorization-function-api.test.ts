@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  useAdminEntityRoleApi,
+  useAdminFunctionAuthorizationApi,
+  useAdminModuleFunctionApi,
   useAdminRoleFunctionApi,
   useAdminUserFunctionApi,
 } from '../../src/services/authorization/api';
+import {
+  PermissionCategory,
+  PermissionRoleGrantState,
+  type PermissionHoldersDto,
+} from '../../src/services/authorization/types';
 
 /**
  * The bounded overrides (`set-in-scope` / `set-denied-in-scope`) exist because the
@@ -83,5 +91,80 @@ describe('useAdminRoleFunctionApi parity with DefaultRoleFunctionAdminController
     const doc = { version: '1.0', exportedAt: '2026-09-12T00:00:00Z', sourceRoleId: 'r0', functionCodes: ['a.b.c'] };
     await useAdminRoleFunctionApi(c as never).importRolePermissions('r1', doc);
     expect(c.post).toHaveBeenCalledWith('/admin/role-functions/role/r1/import', doc);
+  });
+});
+
+// Each assignment page reads the catalogue from its own controller, so the
+// page's class-level code alone is enough to use it. Before, all three read
+// `/admin/modules` (authorization.functionModule.view) and a delegated
+// administrator holding only the page's code got a 403 and an empty matrix.
+describe('permission catalogue reads sit behind each page gate', () => {
+  it('role matrix reads role-functions/catalogue and role-functions/roles', async () => {
+    const c = mockClient();
+    const api = useAdminRoleFunctionApi(c as never);
+    await api.getCatalogue();
+    await api.getRoles();
+    expect(c.get).toHaveBeenNthCalledWith(1, '/admin/role-functions/catalogue');
+    expect(c.get).toHaveBeenNthCalledWith(2, '/admin/role-functions/roles');
+  });
+
+  it('user grant matrix reads user-functions/catalogue', async () => {
+    const c = mockClient();
+    await useAdminUserFunctionApi(c as never).getCatalogue();
+    expect(c.get).toHaveBeenCalledWith('/admin/user-functions/catalogue');
+  });
+
+  it('entity-role matrix reads its role axis from data-auth/roles', async () => {
+    const c = mockClient();
+    await useAdminEntityRoleApi(c as never).getRoles();
+    expect(c.get).toHaveBeenCalledWith('/admin/data-auth/roles');
+  });
+
+  it('permission catalogue page reads module-functions/catalogue', async () => {
+    const c = mockClient();
+    await useAdminModuleFunctionApi(c as never).getCatalogue();
+    expect(c.get).toHaveBeenCalledWith('/admin/module-functions/catalogue');
+  });
+});
+
+describe('useAdminFunctionAuthorizationApi permission holders', () => {
+  it('getPermissionHolders GETs permission/holders with the code as a query parameter', async () => {
+    const c = mockClient();
+    await useAdminFunctionAuthorizationApi(c as never).getPermissionHolders('catalog.product.export');
+    expect(c.get).toHaveBeenCalledWith('/admin/function-authorization/permission/holders', {
+      params: { permissionName: 'catalog.product.export' },
+    });
+  });
+
+  it('passes the holders payload through untouched', async () => {
+    const c = mockClient();
+    const holders: PermissionHoldersDto = {
+      functionId: 'f1',
+      code: 'catalog.product.export',
+      name: 'Export Products',
+      category: PermissionCategory.Business,
+      isEnabled: true,
+      isRetired: false,
+      isInEffect: true,
+      userNamesHidden: false,
+      roles: [{ id: 'r1', name: 'Root', state: PermissionRoleGrantState.SuperAdmin, memberCount: 1 }],
+      users: [{ id: 'u1', userName: 'erin', isSuperAdmin: true, isDirect: false, roles: [{ id: 'r1', name: 'Root' }] }],
+      deniedUsers: [],
+    };
+    c.get.mockResolvedValueOnce({ succeeded: true, success: true, code: 200, data: holders } as never);
+    const result = await useAdminFunctionAuthorizationApi(c as never).getPermissionHolders('catalog.product.export');
+    expect(result.data).toEqual(holders);
+  });
+
+  it('grant states use the backend member names (the wire format of JsonStringEnumConverter)', () => {
+    expect(Object.values(PermissionRoleGrantState)).toEqual(['SuperAdmin', 'Effective', 'Dormant', 'GrantDisabled']);
+  });
+
+  it('returns the 404 envelope for an unknown code instead of throwing', async () => {
+    const c = mockClient();
+    const notFound = { succeeded: false, success: false, code: 404, message: "Permission 'x.y' not found" };
+    c.get.mockResolvedValueOnce(notFound as never);
+    const result = await useAdminFunctionAuthorizationApi(c as never).getPermissionHolders('x.y');
+    expect(result).toEqual(notFound);
   });
 });

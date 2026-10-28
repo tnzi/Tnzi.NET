@@ -46,7 +46,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NDivider, NPopconfirm, NSpin } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
-import type { UserLoginDto } from '@tnzi/core/services/identity'
+import { parseOAuthLinkCompletion, type UserLoginDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
 import TDetailBlock from '../../../components/detail/TDetailBlock.vue'
 import { createGuardedLoader } from '../guarded-loader'
@@ -96,8 +96,8 @@ async function linkProvider(provider: string): Promise<void> {
   // runs the login flow and, when the provider's email differs from ours,
   // creates a brand-new account instead of linking. Fetch the one-time link
   // token first (authenticated call), then hand it over on the URL; the
-  // callback links the provider to this account and redirects back to
-  // `returnUrl` without issuing tokens.
+  // callback stages the provider identity and redirects back to `returnUrl`
+  // with a completion code, which `completeReturnedLink` redeems on mount.
   if (typeof window === 'undefined') return
   try {
     const linkToken = await ctx.bridge.me.issueOAuthLinkToken(provider)
@@ -108,6 +108,30 @@ async function linkProvider(provider: string): Promise<void> {
   }
 }
 
-onMounted(() => void load())
+/**
+ * Finish a link the OAuth callback staged: it comes back to this page with
+ * `#linkCode=…&linkedProvider=…`. The link is only made here, as the signed-in
+ * user - the callback is anonymous and a link token is just a URL parameter, so
+ * linking there would let anyone send a start link to someone else and attach
+ * that person's provider identity to their own account.
+ */
+async function completeReturnedLink(): Promise<void> {
+  if (typeof window === 'undefined') return
+  const pending = parseOAuthLinkCompletion(window.location.hash)
+  if (!pending) return
+  // Single-use code: drop it from the address bar before anything else, so a
+  // reload or a copied URL never carries it.
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+  try {
+    await ctx.bridge.me.completeOAuthLink(pending.provider, pending.code)
+  } catch (e) {
+    ctx.message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
+onMounted(async () => {
+  await completeReturnedLink()
+  await load()
+})
 watch(() => ctx.reloadKey.value, () => void load())
 </script>

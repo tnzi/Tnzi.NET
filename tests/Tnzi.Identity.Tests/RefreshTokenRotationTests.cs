@@ -251,6 +251,7 @@ public class RefreshTokenRotationTests
     {
         var (user, entry) = ArrangeCurrentToken("current");
         _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.GetLockoutEndDateAsync(user)).ReturnsAsync(DateTimeOffset.UtcNow.AddYears(100));
 
         var result = await _authService.RefreshTokenAsync("current");
 
@@ -259,6 +260,53 @@ public class RefreshTokenRotationTests
         _authTokenServiceMock.Verify(
             x => x.RotateRefreshTokenAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<DateTime?>()),
             Times.Never);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeSessionAsync(entry.SessionId, SessionRevocationReason.GuardDenied), Times.Once);
+    }
+
+    /// <summary>
+    /// ★★ 输错密码触发的<b>临时</b>锁定不撤销已经在线的会话，刷新照常。
+    /// </summary>
+    /// <remarks>
+    /// 只知道用户名的匿名者输错 5 次就能把账号锁 30 分钟；若刷新把这种锁定当成停用、否决并撤销会话，
+    /// 受害者每台设备的下一次刷新都会被登出，且锁定结束后也回不来，每 30 分钟重锁一次就能一直把他挡在外面。
+    /// 锁定挡的是新的登录尝试；握着一枚绑定会话的有效刷新令牌，本身就证明了身份。
+    /// 判据是剩余锁定时长不超过失败锁定窗口（失败计数只写得出这么长的锁定）；停用 / 管理员锁定都更长。
+    /// </remarks>
+    [Fact]
+    public async Task Refresh_DuringATemporaryFailureLockout_StillRotates_AndRevokesNothing()
+    {
+        var (user, entry) = ArrangeCurrentToken("current");
+        _userManagerMock.Object.Options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.GetLockoutEndDateAsync(user)).ReturnsAsync(DateTimeOffset.UtcNow.AddMinutes(29));
+        _authTokenServiceMock
+            .Setup(x => x.RotateRefreshTokenAsync(entry.Id, "current", "next_refresh", It.IsAny<DateTime?>()))
+            .ReturnsAsync(true);
+
+        var result = await _authService.RefreshTokenAsync("current");
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("next_refresh", result.Data!.RefreshToken);
+        _sessionRevocationMock.Verify(
+            x => x.RevokeSessionAsync(It.IsAny<Guid>(), It.IsAny<SessionRevocationReason>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 对照组：比失败锁定窗口长的锁定（管理员锁定，默认一天）照旧否决并撤销。
+    /// </summary>
+    [Fact]
+    public async Task Refresh_DuringALockoutLongerThanTheFailureWindow_IsDeniedAndRevoked()
+    {
+        var (user, entry) = ArrangeCurrentToken("current");
+        _userManagerMock.Object.Options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
+        _userManagerMock.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(true);
+        _userManagerMock.Setup(x => x.GetLockoutEndDateAsync(user)).ReturnsAsync(DateTimeOffset.UtcNow.AddDays(1));
+
+        var result = await _authService.RefreshTokenAsync("current");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
         _sessionRevocationMock.Verify(
             x => x.RevokeSessionAsync(entry.SessionId, SessionRevocationReason.GuardDenied), Times.Once);
     }

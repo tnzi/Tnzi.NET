@@ -88,14 +88,14 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         var grants = prefetchedGrants ?? await _grantService.GetGrantsAsync(agent.Id);
         checks.Add(ValidateToolGroups(grants.ToolGroups));
 
-        // Check 4: Handoff targets exist (for Handoff/AgentAsTools modes)
-        if (agent.ExecutionMode is AgentExecutionMode.Handoff or AgentExecutionMode.AgentAsTools)
+        // Check 4: Target agents exist (multi-agent modes)
+        if (agent.ExecutionMode is AgentExecutionMode.Handoff or AgentExecutionMode.AgentAsTools or AgentExecutionMode.Router)
         {
-            checks.Add(await ValidateHandoffTargetsAsync(agent));
+            checks.Add(await ValidateDelegationTargetsAsync(agent));
         }
 
-        // Check 5: Skill references valid
-        checks.Add(await ValidateSkillReferencesAsync(agent));
+        // Check 5: Skill registry present when the agent has skill grants
+        checks.Add(ValidateSkillReferences(grants.SkillSlugs));
 
         return new AgentValidationResultDto
         {
@@ -106,20 +106,28 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         };
     }
 
+    /// <remarks>
+    /// 按名问工厂（与对话时解析提供商同一口径），而不是拿配置名单比对：管理端登记在库里的提供商不在配置名单里，
+    /// 比对会把一个能正常对话的提供商报成「未注册」。
+    /// </remarks>
     private ValidationCheckDto ValidateProvider(Agent agent)
     {
-        var providers = _chatClientFactory.GetAvailableProviders();
-        var isValid = providers.Any(p => string.Equals(p, agent.Provider, StringComparison.OrdinalIgnoreCase));
+        // 空白 Provider（省略 provider 的 YAML 定义）在运行时解析为默认提供商，这里同一口径
+        var isValid = _chatClientFactory.IsProviderAvailable(agent.Provider);
+        var shown = DescribeProvider(agent);
 
         return new ValidationCheckDto
         {
             Name = "provider",
             Passed = isValid,
             Details = isValid
-                ? $"Provider '{agent.Provider}' is available"
-                : $"Provider '{agent.Provider}' is not registered. Available: {string.Join(", ", providers)}"
+                ? $"Provider {shown} is available"
+                : $"Provider {shown} is not registered or is disabled. Configured: {string.Join(", ", _chatClientFactory.GetAvailableProviders())}"
         };
     }
+
+    private static string DescribeProvider(Agent agent)
+        => string.IsNullOrWhiteSpace(agent.Provider) ? "(default provider)" : $"'{agent.Provider}'";
 
     private ValidationCheckDto ValidateModel(Agent agent)
     {
@@ -133,7 +141,7 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
                 Passed = !string.IsNullOrWhiteSpace(defaultModel),
                 Details = !string.IsNullOrWhiteSpace(defaultModel)
                     ? $"No model specified, will use default: {defaultModel}"
-                    : $"No model specified and no default model configured for provider '{agent.Provider}'"
+                    : $"No model specified and no default model configured for provider {DescribeProvider(agent)}"
             };
         }
 
@@ -172,92 +180,89 @@ public class AgentValidationService : ApplicationService, IAgentValidationServic
         };
     }
 
-    private async Task<ValidationCheckDto> ValidateHandoffTargetsAsync(Agent agent)
+    /// <summary>
+    /// 多 Agent 模式（Handoff / AgentAsTools / Router）配置的目标 Agent 是否都还在、都启用、对调用者可见。
+    /// </summary>
+    /// <remarks>
+    /// 按运行时同一口径读配置（<see cref="AgentExecutionConfigDto.Deserialize"/>，即 <c>ExecutionStrategyResolver</c> 读的那份）：
+    /// 目标在 <c>handoff.targets</c> / <c>agentAsTools.agents</c> / <c>router.targets</c> 里，是「名称 → AgentId」的映射。
+    /// 存在性也按运行时同一口径判（<c>ExecutionStrategyAgentLoader</c>）：租户调用者看得见本租户的与宿主共享的定义，
+    /// 禁用的目标运行时同样解析不出来，一并算缺失。运行时找不到目标只记一条 Warning、静默返回源 Agent 的回复，
+    /// 这项检查是唯一看得见的信号。
+    /// </remarks>
+    private async Task<ValidationCheckDto> ValidateDelegationTargetsAsync(Agent agent)
     {
-        if (string.IsNullOrWhiteSpace(agent.Configuration))
+        var config = AgentExecutionConfigDto.Deserialize(agent.Configuration);
+        var targets = agent.ExecutionMode switch
         {
-            return new ValidationCheckDto
-            {
-                Name = "handoff_targets",
-                Passed = true,
-                Details = "No handoff configuration"
-            };
-        }
+            AgentExecutionMode.Handoff => config?.Handoff?.Targets,
+            AgentExecutionMode.AgentAsTools => config?.AgentAsTools?.Agents,
+            AgentExecutionMode.Router => config?.Router?.Targets,
+            _ => null
+        };
 
-        try
-        {
-            using var doc = JsonDocument.Parse(agent.Configuration);
-            if (!doc.RootElement.TryGetProperty("HandoffTargets", out var targetsElement) &&
-                !doc.RootElement.TryGetProperty("handoffTargets", out targetsElement))
-            {
-                return new ValidationCheckDto
-                {
-                    Name = "handoff_targets",
-                    Passed = true,
-                    Details = "No handoff targets configured"
-                };
-            }
-
-            var targetIds = new List<Guid>();
-            foreach (var target in targetsElement.EnumerateArray())
-            {
-                if (target.TryGetProperty("AgentId", out var agentIdProp) || target.TryGetProperty("agentId", out agentIdProp))
-                {
-                    if (Guid.TryParse(agentIdProp.GetString(), out var targetId))
-                        targetIds.Add(targetId);
-                }
-            }
-
-            if (targetIds.Count == 0)
-            {
-                return new ValidationCheckDto
-                {
-                    Name = "handoff_targets",
-                    Passed = true,
-                    Details = "No handoff target agent IDs found"
-                };
-            }
-
-            var existingIds = await _agentRepository
-                .Where(a => targetIds.Contains(a.Id))
-                .Select(a => a.Id)
-                .ToListAsync();
-
-            var missingIds = targetIds.Except(existingIds).ToList();
-
-            return new ValidationCheckDto
-            {
-                Name = "handoff_targets",
-                Passed = missingIds.Count == 0,
-                Details = missingIds.Count == 0
-                    ? $"All {targetIds.Count} handoff target agents exist"
-                    : $"Missing handoff target agents: {string.Join(", ", missingIds)}"
-            };
-        }
-        catch (JsonException)
+        if (targets is not { Count: > 0 })
         {
             return new ValidationCheckDto
             {
                 Name = "handoff_targets",
                 Passed = false,
-                Details = "Configuration JSON is malformed"
+                Details = $"No target agents are configured for {agent.ExecutionMode} mode"
             };
         }
+
+        var targetIds = targets.Values.Distinct().ToList();
+        var visible = await SharedAgentScope.Resolve(ServiceProvider)
+            .Apply(_agentRepository.AsQueryable())
+            .Where(a => targetIds.Contains(a.Id))
+            .Select(a => new { a.Id, a.IsEnabled })
+            .ToListAsync();
+
+        var enabledIds = visible.Where(a => a.IsEnabled).Select(a => a.Id).ToHashSet();
+        var disabledIds = visible.Where(a => !a.IsEnabled).Select(a => a.Id).ToHashSet();
+        var problems = targets
+            .Where(t => !enabledIds.Contains(t.Value))
+            .Select(t => disabledIds.Contains(t.Value)
+                ? $"'{t.Key}' ({t.Value}) is disabled"
+                : $"'{t.Key}' ({t.Value}) does not exist")
+            .ToList();
+
+        return new ValidationCheckDto
+        {
+            Name = "handoff_targets",
+            Passed = problems.Count == 0,
+            Details = problems.Count == 0
+                ? $"All {targets.Count} target agents exist and are enabled"
+                : $"Unavailable target agents: {string.Join("; ", problems)}"
+        };
     }
 
-    private Task<ValidationCheckDto> ValidateSkillReferencesAsync(Agent agent)
+    /// <summary>
+    /// 授予了技能的 Agent 需要技能注册表（<c>Tnzi.AI.Skills</c>）；没有技能授权的 Agent 与它无关。
+    /// </summary>
+    /// <remarks>
+    /// 技能注册表没有核心回退，不加载技能子模块时为 null。此前对每个 Agent 都要求它存在，
+    /// 不加载技能子模块的部署里每个启用的 Agent 都被报成不健康，健康统计失去意义。
+    /// </remarks>
+    private ValidationCheckDto ValidateSkillReferences(IReadOnlyList<string> skillSlugs)
     {
-        // Check [RequiresSkill] references can't be validated per-agent from configuration alone
-        // since they're attribute-based. Just verify skill registry is available.
-        var result = new ValidationCheckDto
+        if (skillSlugs.Count == 0)
+        {
+            return new ValidationCheckDto
+            {
+                Name = "skill_registry",
+                Passed = true,
+                Details = "No skills granted"
+            };
+        }
+
+        return new ValidationCheckDto
         {
             Name = "skill_registry",
             Passed = _skillRegistry != null,
             Details = _skillRegistry != null
-                ? "Skill registry is available"
-                : "Skill registry is not registered (SkillService may not be loaded)"
+                ? $"Skill registry is available for {skillSlugs.Count} granted skills"
+                : $"{skillSlugs.Count} skills are granted but the skill registry is not registered (the skills module is not loaded)"
         };
-
-        return Task.FromResult(result);
     }
 }

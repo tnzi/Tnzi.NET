@@ -383,6 +383,12 @@ public class TransferService : ApplicationService, ITransferService
 
     private async Task<Result> ApplyDraftAsync(Transfer transfer, CreateTransferDto input, CancellationToken cancellationToken)
     {
+        var memoTooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"),
+            (input.Reference, FinanceFieldLimits.ReferenceMaxLength, "reference"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (input.Amount <= 0)
             return Fail("Transfer amount must be greater than zero.");
 

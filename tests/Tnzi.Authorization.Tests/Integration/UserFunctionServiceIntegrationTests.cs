@@ -353,6 +353,35 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
         rows.ShouldNotContain(uf => uf.FunctionId == userView.Id);
     }
 
+    [Fact]
+    public async Task Set_with_a_repeated_function_id_writes_one_row()
+    {
+        // 整集覆盖按集合语义：重复的 id 此前各插一行，撞 (用户, 功能) 唯一索引后整次 500。
+        var (userView, _, _) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        var result = await userFunctions.SetUserFunctionsAsync(TargetUserId, [userView.Id, userView.Id]);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        DbContext.ChangeTracker.Clear();
+        DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId && uf.FunctionId == userView.Id && uf.IsGranted).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task SetDenied_with_a_repeated_function_id_writes_one_row()
+    {
+        var (userView, _, _) = await SeedCatalogueAsync();
+        MakeGrantorSuperAdmin();
+        var (userFunctions, _) = GetServices();
+
+        var result = await userFunctions.SetUserDeniedFunctionsAsync(TargetUserId, [userView.Id, userView.Id]);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        DbContext.ChangeTracker.Clear();
+        DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId && uf.FunctionId == userView.Id && !uf.IsGranted).ShouldBe(1);
+    }
+
     #endregion
 
     #region 有界写入（切片）
@@ -567,6 +596,53 @@ public class UserFunctionServiceIntegrationTests : IntegratedTestBase<Authorizat
         (await userFunctions.ClearUserFunctionsAsync(TargetUserId)).Code.ShouldBe(403);
         (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id])).Code.ShouldBe(403);
         DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// 支配集含目标经角色得到的码：一个没有直授行、经角色持有授权者没有的码的人，此前支配集是空集，
+    /// 被任何授权者平凡支配，弱管理员能对他下 deny，从他的角色授权里扣掉码。
+    /// </summary>
+    [Fact]
+    public async Task NonSuper_grantor_cannot_manage_a_user_whose_role_grants_exceed_own()
+    {
+        var (userView, _, diagnostics) = await SeedCatalogueAsync();
+        await MakeGrantorRegularWithAsync(userView);
+        // 目标没有任何直授行，经角色持有 userView 与授权者不持有的 diagnostics。
+        _roleIdsByUser[TargetUserId] = [TargetRoleId];
+        await SeedRoleGrantAsync(TargetRoleId, userView);
+        await SeedRoleGrantAsync(TargetRoleId, diagnostics);
+        var (userFunctions, auth) = GetServices();
+
+        (await userFunctions.SetUserDeniedFunctionsAsync(TargetUserId, [userView.Id])).Code.ShouldBe(403);
+        (await userFunctions.SetUserDeniedFunctionsInScopeAsync(TargetUserId, [userView.Id], [userView.Id])).Code.ShouldBe(403);
+        (await userFunctions.AssignFunctionsToUserAsync(TargetUserId, [userView.Id])).Code.ShouldBe(403);
+        (await userFunctions.ClearUserFunctionsAsync(TargetUserId)).Code.ShouldBe(403);
+
+        DbContext.UserFunctions.Count(uf => uf.UserId == TargetUserId).ShouldBe(0);
+        (await auth.CheckPermissionAsync(TargetUserId, "user.view")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task NonSuper_grantor_can_deny_a_code_to_a_user_they_dominate()
+    {
+        var (userView, roleView, _) = await SeedCatalogueAsync();
+        await MakeGrantorRegularWithAsync(userView, roleView);
+        _roleIdsByUser[TargetUserId] = [TargetRoleId];
+        await SeedRoleGrantAsync(TargetRoleId, userView);
+        var (userFunctions, auth) = GetServices();
+
+        (await userFunctions.SetUserDeniedFunctionsAsync(TargetUserId, [userView.Id])).Succeeded.ShouldBeTrue();
+        (await auth.CheckPermissionAsync(TargetUserId, "user.view")).ShouldBeFalse();
+    }
+
+    private async Task SeedRoleGrantAsync(Guid roleId, ModuleFunction function)
+    {
+        await DbContext.RoleFunctions.AddAsync(new RoleFunction
+        {
+            Id = Guid.NewGuid(), RoleId = roleId, FunctionId = function.Id,
+            IsEnabled = true, CreationTime = DateTime.UtcNow,
+        });
+        await DbContext.SaveChangesAsync();
     }
 
     [Fact]

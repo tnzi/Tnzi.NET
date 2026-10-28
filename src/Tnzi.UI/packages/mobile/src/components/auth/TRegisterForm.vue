@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requiredRule } from '../form/required-rule';
 import { computed, ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import { composeImageCaptchaToken } from '@tnzi/core/services/captcha';
@@ -116,28 +117,28 @@ const isDisabled = computed(() => props.disabled);
 const isLoading = computed(() => props.loading || form.isSubmitting.value);
 
 const emailRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: t('auth.email') }) },
+  requiredRule(t('auth.pleaseEnter', { field: t('auth.email') })),
   { pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/, message: t('form.invalidEmail') },
 ]);
 const usernameRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: t('auth.username') }) },
+  requiredRule(t('auth.pleaseEnter', { field: t('auth.username') })),
 ]);
 const phoneRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: t('auth.phone') }) },
+  requiredRule(t('auth.pleaseEnter', { field: t('auth.phone') })),
 ]);
 const passwordRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: t('auth.password') }) },
+  requiredRule(t('auth.pleaseEnter', { field: t('auth.password') })),
   {
     validator: (val: string) => val.length >= props.passwordMinLength,
     message: t('auth.passwordMinLength', { min: props.passwordMinLength }),
   },
 ]);
 const confirmPasswordRules = computed(() => [
-  { required: true, message: t('auth.pleaseConfirm', { field: t('auth.password') }) },
+  requiredRule(t('auth.pleaseConfirm', { field: t('auth.password') })),
   { validator: (val: string) => val === password.value, message: t('auth.passwordMismatch') },
 ]);
 const captchaRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') }) },
+  requiredRule(t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') })),
 ]);
 
 const handleSocialLogin = (provider: NonNullable<IRegisterFormProps['socialProviders']>[number]) => {

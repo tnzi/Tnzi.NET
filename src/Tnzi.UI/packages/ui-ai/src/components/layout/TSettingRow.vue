@@ -52,14 +52,18 @@ withDefaults(
 </template>
 
 <style scoped>
+/* Wraps when the label and the control do not fit side by side (a narrow
+   settings sheet): the control moves under the label instead of squeezing the
+   label to nothing or pushing past the pane. On a wide pane nothing wraps. */
 .t-setting-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 24px;
+  gap: 10px 24px;
   padding: 14px 0;
 }
 .t-setting-row__text {
-  flex: 1;
+  flex: 1 1 12rem;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -88,6 +92,12 @@ withDefaults(
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
+}
+/* The text's `flex: 1 1 12rem` is a WIDTH basis for the side-by-side row. In a
+   column the basis is the main axis, so it becomes a 12rem HEIGHT and opens an
+   empty band between the description and the control. Size to content here. */
+.t-setting-row--stacked .t-setting-row__text {
+  flex: none;
 }
 .t-setting-row--stacked .t-setting-row__control {
   justify-content: flex-start;

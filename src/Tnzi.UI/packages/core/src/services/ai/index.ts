@@ -13,6 +13,8 @@ export { useRagApi, useAdminKnowledgeBaseApi } from './rag';
 export type {
   RagQueryParams,
   RagChatParams,
+  RagQueryResult,
+  RagChatResult,
   KnowledgeBaseCreateParams,
   KnowledgeBaseUpdateParams,
   SearchTestParams,
@@ -51,7 +53,9 @@ export type {
   ChannelModuleStatusDto,
   GatewayStatusDto,
   GatewayConnectionInfo,
+  GatewaySessionScope,
   SessionBindingRuleDto,
+  SessionBindingRuleSource,
 } from './channels';
 
 // Sandbox (admin/sandbox) - Tnzi.AI.Sandbox
@@ -67,6 +71,8 @@ export {
   useCliRunApi,
   CliRunStatus,
   CliAgentEventType,
+  CliPermissionStatus,
+  CliPermissionOptionKind,
   CliRunFailureReason,
   CliRuntimeMode,
   CliRuntimeStatus,
@@ -82,6 +88,9 @@ export type {
   CliRunDto,
   CliRunMessageDto,
   CliAgentEvent,
+  CliAgentPermission,
+  CliPermissionOption,
+  CliPermissionAnswerDto,
   CliRunQueryDto,
   CliProviderOptionDto,
   CliRuntimeProbeResultDto,

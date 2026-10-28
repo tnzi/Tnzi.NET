@@ -36,6 +36,28 @@ describe('useStorageApi upload options', () => {
     )
   })
 
+  it('sends isTemporary only when the caller states a lifetime', async () => {
+    // Omitted = the server default (a temporary upload held by [FileField] references).
+    // A file library entry asks for a permanent record, which background cleanup never collects.
+    const c = mockClient()
+    await useStorageApi(c as never).upload(FILE, { isTemporary: false })
+    expect(c.upload).toHaveBeenCalledWith(
+      '/files/upload',
+      FILE,
+      expect.objectContaining({ additionalData: { isTemporary: 'false' } }),
+    )
+  })
+
+  it('sends isPublic and isTemporary together', async () => {
+    const c = mockClient()
+    await useStorageApi(c as never).upload(FILE, { isPublic: true, isTemporary: false })
+    expect(c.upload).toHaveBeenCalledWith(
+      '/files/upload',
+      FILE,
+      expect.objectContaining({ additionalData: { isPublic: 'true', isTemporary: 'false' } }),
+    )
+  })
+
   it('still accepts a bare progress callback in the options position', async () => {
     // Backwards compatibility: `upload(file, onProgress)` predates the options
     // object and is called that way across consuming apps.

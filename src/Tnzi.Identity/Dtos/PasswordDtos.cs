@@ -19,6 +19,21 @@ public class CompletePasswordChangeDto
 }
 
 /// <summary>
+/// 只带待办挑战临时令牌的请求体：读待办（<c>pending-actions/describe</c>）与给确认邮箱发码（<c>pending-actions/send-email-code</c>）。
+/// </summary>
+/// <remarks>
+/// ★★ 令牌只走请求体，不进 URL。请求路径会被原样写进请求日志与访问日志，而这枚令牌在 10 分钟内
+/// 足以改掉账号的密码并拿到登录令牌（<c>pending-actions/change-password</c> 只认它），
+/// 读待办还会交出绑定验证器用的密钥。能读日志的人不该因此能接管账号。
+/// </remarks>
+public class PendingActionTokenDto
+{
+    /// <summary>登录时随待办挑战一起发下来的临时令牌。</summary>
+    [Required]
+    public string TempToken { get; set; } = null!;
+}
+
+/// <summary>
 /// 完成一件需要验证码的待办（绑定验证器 / 确认邮箱）。
 /// </summary>
 public class CompletePendingActionCodeDto

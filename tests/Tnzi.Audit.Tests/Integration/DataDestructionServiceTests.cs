@@ -107,11 +107,11 @@ public class DataDestructionServiceTests : IntegrationTestBase
     }
 
     private async Task<RetentionTestRecord> SeedAsync(
-        int ageInDays, string category = "general", bool softDeleted = false)
+        int ageInDays, string category = "general", bool softDeleted = false, Guid? id = null)
     {
         var record = new RetentionTestRecord
         {
-            Id = Guid.NewGuid(),
+            Id = id ?? Guid.NewGuid(),
             Category = category,
             CreationTime = DateTime.UtcNow.AddDays(-ageInDays),
             ClosedAt = DateTime.UtcNow.AddDays(-ageInDays),
@@ -333,6 +333,55 @@ public class DataDestructionServiceTests : IntegrationTestBase
         Assert.Single(await SurvivingRecordsAsync());
     }
 
+    /// <summary>
+    /// 被保全的行不占 BatchSize 名额：保全行先入库（在存储顺序上排在最前）且多于一批时，
+    /// 其后已到期而未被保全的行仍然要在这一轮被销毁，而不是每一轮都只拿到同一批保全行。
+    /// </summary>
+    [Fact]
+    public async Task HeldRowsFillingABatch_DoNotStarveTheRecordsBehindThem()
+    {
+        // 保全行在插入顺序与主键顺序上都排在前面：无论扫描按哪种顺序走，第一批都只有保全行。
+        var held = new[] { await SeedAsync(100, id: SequentialId(1)), await SeedAsync(100, id: SequentialId(2)), await SeedAsync(100, id: SequentialId(3)) };
+        var free = new[] { await SeedAsync(100, id: SequentialId(4)), await SeedAsync(100, id: SequentialId(5)) };
+        var service = CreateService(
+            Enabled(batchSize: 2),
+            holds: [new StubHoldProvider(held.Select(h => h.Id.ToString()).ToArray())]);
+
+        var result = await service.RunAsync();
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, result.Data!.TotalDestroyed);
+
+        var survivors = await SurvivingRecordsAsync();
+        Assert.Equal(held.Select(h => h.Id).OrderBy(id => id), survivors.Select(r => r.Id).OrderBy(id => id));
+        Assert.DoesNotContain(survivors, r => free.Any(f => f.Id == r.Id));
+
+        // 一轮一张证明：保全数记的是本轮扫描时越过的保全行，销毁数是凑满的那一批。
+        var certificate = Assert.Single(await CertificatesAsync());
+        Assert.Equal(2, certificate.DestroyedCount);
+        Assert.True(certificate.HeldCount > 0);
+    }
+
+    private static Guid SequentialId(int n) => Guid.Parse($"00000000-0000-0000-0000-{n:D12}");
+
+    [Fact]
+    public async Task EverythingExpiredIsHeld_ReportsNoBacklog()
+    {
+        // 翻到底都是保全行：HasMore 为假，后台服务不会为它原地连跑。
+        var held = new[] { await SeedAsync(ageInDays: 100), await SeedAsync(ageInDays: 100), await SeedAsync(ageInDays: 100) };
+        var service = CreateService(
+            Enabled(batchSize: 2),
+            holds: [new StubHoldProvider(held.Select(h => h.Id.ToString()).ToArray())]);
+
+        var result = await service.RunAsync();
+
+        var policy = Assert.Single(result.Data!.Policies);
+        Assert.Equal(0, policy.DestroyedCount);
+        Assert.Equal(3, policy.HeldCount);
+        Assert.False(policy.HasMore);
+        Assert.Equal(3, (await SurvivingRecordsAsync()).Count);
+    }
+
     // ---- 销毁证明 -----------------------------------------------------------
 
     [Fact]
@@ -428,6 +477,30 @@ public class DataDestructionServiceTests : IntegrationTestBase
 
         Assert.False(verify.Succeeded);
         Assert.Contains("altered", verify.Message!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task VerifyChain_PassesOnADatabaseThatStoresMicroseconds()
+    {
+        // ★ 证书哈希覆盖 Cutoff 与 CreationTime 两个时间。PostgreSQL / MySQL 只存到微秒：写入时按 100ns 的内存值算哈希、
+        // 校验时按读回来的值重算，一份完好的证书会被报成「被篡改」。这里按微秒精度把两个时间存一遍再校验。
+        await SeedAsync(ageInDays: 100);
+        var service = CreateService(Enabled());
+        await service.RunAsync();
+        await SeedAsync(ageInDays: 100);
+        await service.RunAsync();
+
+        foreach (var certificate in await CertificatesAsync())
+        {
+            certificate.Cutoff = certificate.Cutoff.AddTicks(-(certificate.Cutoff.Ticks % TimeSpan.TicksPerMicrosecond));
+            certificate.CreationTime = certificate.CreationTime.AddTicks(-(certificate.CreationTime.Ticks % TimeSpan.TicksPerMicrosecond));
+        }
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var verify = await service.VerifyChainAsync();
+
+        Assert.True(verify.Succeeded, verify.Message);
     }
 
     [Fact]

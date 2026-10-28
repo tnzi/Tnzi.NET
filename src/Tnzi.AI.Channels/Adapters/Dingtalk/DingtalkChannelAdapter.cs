@@ -6,8 +6,9 @@ namespace Tnzi.AI.Channels.Adapters.Dingtalk;
 /// </summary>
 /// <remarks>
 /// 使用纯 HTTP API 调用（无第三方 SDK 依赖）：
-/// - POST /v1.0/robot/oToMessages/batchSend: 单聊发送消息
-/// - POST /v1.0/robot/groupMessages/send: 群聊发送消息
+/// - POST /v1.0/robot/oToMessages/batchSend: 单聊回复（收件人是发送者的 staffId）
+/// - POST /v1.0/robot/groupMessages/send: 群聊回复（收件人是会话的 openConversationId）
+/// - 选哪条、发给谁由入站回调带来的元数据决定（见 <see cref="DingtalkConversationMetadata"/>）
 /// - 事件接收通过 Webhook 回调由 Controller 调用 HandleEventAsync
 /// - 认证: appkey+appsecret 获取 access_token
 /// </remarks>
@@ -44,6 +45,8 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             throw new ArgumentException("DingTalk AppKey is required when adapter is enabled");
         if (string.IsNullOrWhiteSpace(_options.AppSecret))
             throw new ArgumentException("DingTalk AppSecret is required when adapter is enabled");
+        if (string.IsNullOrWhiteSpace(_options.RobotCode))
+            throw new ArgumentException("DingTalk RobotCode is required when adapter is enabled");
 
         _allowedUsers = _options.AllowedUsers is { Count: > 0 } ? [.. _options.AllowedUsers] : [];
         _allowedOrganizations = _options.AllowedOrganizations is { Count: > 0 } ? [.. _options.AllowedOrganizations] : [];
@@ -57,9 +60,13 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     }
 
     /// <summary>检查组织是否被允许（空白名单=不限制）</summary>
-    public bool IsOrganizationAllowed(string orgId)
+    /// <remarks>
+    /// <paramref name="orgId"/> 为 null 表示回调没带 <c>senderCorpId</c>。配了白名单时，说不出自己属于哪个组织的消息
+    /// 不属于任何允许的组织，必须拒绝，而不是当作不受组织名单约束。
+    /// </remarks>
+    public bool IsOrganizationAllowed(string? orgId)
     {
-        return _allowedOrganizations.Count == 0 || _allowedOrganizations.Contains(orgId);
+        return _allowedOrganizations.Count == 0 || (orgId != null && _allowedOrganizations.Contains(orgId));
     }
 
     public Task StartAsync(CancellationToken ct = default)
@@ -236,9 +243,9 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 : null;
 
             // 组织白名单
-            if (corpId != null && !IsOrganizationAllowed(corpId))
+            if (!IsOrganizationAllowed(corpId))
             {
-                _logger.LogDebug("DingTalk message from non-allowed organization {CorpId}, ignoring", corpId);
+                _logger.LogDebug("DingTalk message from non-allowed organization {CorpId}, ignoring", corpId ?? "(none)");
                 return;
             }
 
@@ -265,13 +272,31 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
             if (string.IsNullOrWhiteSpace(text)) return;
 
+            var conversationType = root.TryGetProperty("conversationType", out var convTypeEl)
+                ? convTypeEl.GetString()
+                : null;
+
+            // 回复要知道走单聊还是群聊接口、单聊发给哪个 staffId：ChatId（conversationId）只是线程映射的键
+            var metadata = new Dictionary<string, object>(StringComparer.Ordinal);
+            if (!string.IsNullOrWhiteSpace(conversationType))
+                metadata[DingtalkConversationMetadata.ConversationType] = conversationType;
+            if (!string.IsNullOrWhiteSpace(senderId))
+                metadata[DingtalkConversationMetadata.SenderStaffId] = senderId;
+
             var isCommand = text.StartsWith('/');
             var inbound = new InboundMessage(
                 ChannelName: Name,
                 ChatId: conversationId,
                 UserId: senderId,
                 Text: text,
-                Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat);
+                Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
+                Metadata: metadata,
+                PeerKind: conversationType switch
+                {
+                    DingtalkConversationMetadata.SingleChat => ChannelPeerKinds.User,
+                    DingtalkConversationMetadata.GroupChat => ChannelPeerKinds.Group,
+                    _ => null
+                });
 
             await _bus.PublishInboundAsync(inbound, ct);
         }
@@ -283,43 +308,84 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 
     public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {
+        Check.NotNull(message);
+
+        // 先定收件人再分块：定不下来是确定性的失败，不该被当成可重试的发送失败退避重试几轮
+        var target = ResolveReplyTarget(message);
+
         return ChannelSendHelper.SendChunkedWithRetryAsync(
             message.Text,
             _options.MaxMessageLength,
             _options.MaxRetries,
-            (chunk, token) => PostMessageAsync(message.ChatId, chunk, token),
+            (chunk, token) => PostMessageAsync(target, chunk, token),
             _logger,
             Name,
             ct);
     }
 
+    /// <summary>
+    /// 按入站回调带来的会话类型选接口与收件人。缺元数据时失败关闭：
+    /// 拿 conversationId 当员工 id 发，钉钉回 200 却什么都不投递，日志里看起来一切正常。
+    /// </summary>
+    private static DingtalkReplyTarget ResolveReplyTarget(OutboundMessage message)
+    {
+        var conversationType = ReadMetadata(message, DingtalkConversationMetadata.ConversationType);
+
+        if (conversationType == DingtalkConversationMetadata.GroupChat)
+        {
+            if (string.IsNullOrWhiteSpace(message.ChatId))
+                throw new InvalidOperationException("DingTalk group reply has no conversation id to send to.");
+
+            return new DingtalkReplyTarget(IsGroup: true, message.ChatId);
+        }
+
+        if (conversationType == DingtalkConversationMetadata.SingleChat)
+        {
+            var staffId = ReadMetadata(message, DingtalkConversationMetadata.SenderStaffId);
+            if (string.IsNullOrWhiteSpace(staffId))
+                throw new InvalidOperationException("DingTalk 1:1 reply has no sender staff id to send to.");
+
+            return new DingtalkReplyTarget(IsGroup: false, staffId);
+        }
+
+        throw new InvalidOperationException(
+            "DingTalk reply target is unknown: the outbound message does not carry the conversation type of the inbound callback.");
+    }
+
+    private static string? ReadMetadata(OutboundMessage message, string key)
+        => message.Metadata != null && message.Metadata.TryGetValue(key, out var value) ? value?.ToString() : null;
+
+    /// <param name="IsGroup">群聊走 groupMessages/send，单聊走 oToMessages/batchSend</param>
+    /// <param name="Recipient">群聊是 openConversationId，单聊是员工 staffId</param>
+    private sealed record DingtalkReplyTarget(bool IsGroup, string Recipient);
+
     public ValueTask DisposeAsync()
         => _tokenRefresher.DisposeAsync();
 
     /// <summary>
-    /// 通过钉钉机器人 API 发送 Markdown 消息到单聊
+    /// 通过钉钉机器人 API 发送 Markdown 消息：群聊发到会话，单聊发给发送者。
     /// </summary>
-    private async Task PostMessageAsync(string conversationId, string content, CancellationToken ct)
+    private async Task PostMessageAsync(DingtalkReplyTarget target, string content, CancellationToken ct)
     {
         var token = await _tokenRefresher.GetTokenAsync(ct);
         var client = _httpClientFactory.CreateClient("Tnzi.AI.Dingtalk");
 
-        var payload = new
+        const string msgKey = "sampleMarkdown";
+        var msgParam = JsonSerializer.Serialize(new
         {
-            robotCode = _options.RobotCode,
-            userIds = new[] { conversationId },
-            msgKey = "sampleMarkdown",
-            msgParam = JsonSerializer.Serialize(new
-            {
-                title = "Reply",
-                text = content
-            })
-        };
+            title = "Reply",
+            text = content
+        });
+
+        object payload = target.IsGroup
+            ? new { robotCode = _options.RobotCode, openConversationId = target.Recipient, msgKey, msgParam }
+            : new { robotCode = _options.RobotCode, userIds = new[] { target.Recipient }, msgKey, msgParam };
+        var path = target.IsGroup ? "/v1.0/robot/groupMessages/send" : "/v1.0/robot/oToMessages/batchSend";
 
         // Set the access-token header per-request - the named HttpClient is pooled and its
         // DefaultRequestHeaders must not be mutated across concurrent sends (.Add throws on a
         // duplicate header name and the token changes on refresh).
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{NewApiBaseUrl}/v1.0/robot/oToMessages/batchSend")
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{NewApiBaseUrl}{path}")
         {
             Content = JsonContent.Create(payload)
         };
@@ -333,7 +399,61 @@ public class DingtalkChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             _logger.LogWarning("DingTalk send failed: {StatusCode} {Body}", response.StatusCode, responseBody);
             throw new HttpRequestException($"DingTalk API returned {response.StatusCode}");
         }
+
+        if (!target.IsGroup)
+        {
+            EnsureRecipientAccepted(responseBody);
+        }
     }
+
+    /// <summary>
+    /// 单聊批量发送对收件人问题回 200：无效的 staffId 列进 <c>invalidStaffIdList</c>，被限流的列进
+    /// <c>flowControlledStaffIdList</c>。只看状态码会把「一条都没投递」记成成功。
+    /// </summary>
+    private void EnsureRecipientAccepted(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return;
+        }
+
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(responseBody);
+        }
+        catch (JsonException ex)
+        {
+            // 状态码已是成功；读不懂响应体不改判，留一条日志
+            _logger.LogDebug(ex, "DingTalk send response is not JSON: {Body}", responseBody);
+            return;
+        }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            if (HasEntries(root, "invalidStaffIdList"))
+            {
+                _logger.LogWarning("DingTalk rejected the reply recipient as an invalid staff id: {Body}", responseBody);
+                throw new HttpRequestException("DingTalk rejected the reply recipient as an invalid staff id.");
+            }
+
+            if (HasEntries(root, "flowControlledStaffIdList"))
+            {
+                throw new HttpRequestException("DingTalk throttled the reply to this recipient.");
+            }
+        }
+    }
+
+    private static bool HasEntries(JsonElement root, string property)
+        => root.TryGetProperty(property, out var list)
+           && list.ValueKind == JsonValueKind.Array
+           && list.GetArrayLength() > 0;
 
     /// <summary>
     /// 调用钉钉 v2.0 API 刷新 access_token。

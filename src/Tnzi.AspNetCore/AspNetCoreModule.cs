@@ -86,15 +86,10 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 不再仅依赖 DI 容器释放时的 sync-over-async Dispose 兜底路径（ShutdownAsync 幂等，重复触发安全）
         context.Services.AddHostedService<TnziShutdownHostedService>();
 
-        // 注册 Web 层工具服务（IP 定位、UserAgent 解析）
-        if (!context.Services.Any(s => s.ServiceType == typeof(IIpLocatorService)))
-        {
-            if (!context.Services.Any(s => s.ServiceType == typeof(IHttpClientFactory)))
-            {
-                context.Services.AddHttpClient();
-            }
-            context.Services.TryAddScoped<IIpLocatorService, IpLocatorService>();
-        }
+        // 注册 Web 层工具服务（UserAgent 解析，纯本地计算）。
+        // ★ IP 定位（IIpLocatorService）刻意不默认注册：自带的 IpLocatorService 把访问者 IP 以明文 HTTP 发给
+        // 第三方公共接口，默认注册等于任何宿主一打开访问日志就把每个公网来访 IP 交出去而无人知情。
+        // 需要归属地的消费方显式注册一个实现（自带的或自己的本地 IP 库）；没注册时访问日志的归属地列留空。
         if (!context.Services.Any(s => s.ServiceType == typeof(IUserAgentParserService)))
         {
             context.Services.TryAddSingleton<IUserAgentParserService, UserAgentParserService>();
@@ -247,7 +242,7 @@ public class AspNetCoreModule : TnziFrameworkModule
         // 注册 UnitOfWorkActionFilter（用于可选标记模式）
         context.Services.AddScoped<UnitOfWorkActionFilter>();
 
-        // 注册 AjaxOnlyFilter（供 [ServiceFilter(typeof(AjaxOnlyFilter))] 使用）
+        // 注册 AjaxOnlyFilter（[AjaxOnly] 是 ServiceFilterAttribute，按请求从容器解析它）
         context.Services.AddScoped<AjaxOnlyFilter>();
 
         // 注册请求验证服务（如果启用）

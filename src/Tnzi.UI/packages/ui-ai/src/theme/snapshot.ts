@@ -3,9 +3,9 @@
  *
  * ## What a snapshot is
  *
- * A serialisable record of every token an operator is allowed to change, plus
- * the light/dark preference. The backend stores it as an opaque JSON document
- * under a `scope` (`'chat'` here) and never interprets it - so the schema below
+ * A serialisable record of every token an operator is allowed to change (and a
+ * reserved light/dark field, see `mode`). The backend stores it as an opaque
+ * JSON document under a `scope` (`'chat'` here) and never interprets it - so the schema below
  * is owned entirely by this package. See `Tnzi.System`'s `IAppearanceService`.
  *
  * ## Why the envelope has two halves
@@ -25,6 +25,8 @@
  * a key from a saved snapshot has to actually drop the override, otherwise
  * un-setting something would be impossible without a hard reload.
  */
+import { buildCssVars, defaultThemeSettings } from '@tnzi/ui/theme';
+import type { ThemeContext } from '@tnzi/ui';
 import { applyAiTheme, resetAiTheme, type AiThemeTokens } from './tokens';
 
 /** Snapshot format version. Bump only on a breaking shape change. */
@@ -41,7 +43,12 @@ export interface AiThemeSnapshotV1 {
   };
   /** This package's own tokens. Absent keys fall back to the stylesheet. */
   ai: AiThemeTokens;
-  /** Light / dark / follow-system default for the product. */
+  /**
+   * Reserved for a light / dark / follow-system default. Not applied by
+   * `applyAiThemeSnapshot` and not editable in `TAppearanceAdmin`, which only
+   * keeps a stored value across a save. The chat's mode comes from
+   * `TChatApp`'s `theme` prop and the viewer's own choice.
+   */
   mode?: 'light' | 'dark' | 'auto';
 }
 
@@ -107,23 +114,79 @@ function writeSharedVar(target: HTMLElement, name: string, value: string): void 
 }
 
 /**
+ * `--tnzi-primary` and every variable derived from it: `--tnzi-primary-rgb`
+ * (which the accent tints are built from), the palette levels with their
+ * `-rgb` twins, and the readable companions (`--tnzi-on-primary`, the
+ * foreground on an accent fill, and the `--tnzi-primary-text-on-light` /
+ * `-on-dark` pair, the accent as text). Computed by `@tnzi/ui`'s own builder so
+ * the values match what its theme context would write for the same colour.
+ *
+ * Built for light mode, written once: every variable taken here is the same in
+ * both modes (the stylesheet picks the text colour per mode), so an inline
+ * write that cannot follow a mode switch is still right after one.
+ */
+function primaryVars(primary: string): Record<string, string> {
+  const all = buildCssVars({ ...defaultThemeSettings.colors, primary }, 'light');
+  return Object.fromEntries(
+    Object.entries(all).filter(
+      ([name]) => name === '--tnzi-primary' || name === '--tnzi-on-primary' || name.startsWith('--tnzi-primary-'),
+    ),
+  );
+}
+
+/** The primary each host theme context had before a snapshot overrode it. */
+const CONTEXT_BASE_PRIMARY = new WeakMap<ThemeContext, string>();
+
+/**
+ * Set (or hand back) the brand colour through the host's theme context.
+ *
+ * ★ The context owns `--tnzi-primary`: it re-writes the whole variable map on
+ * every change to its settings, a light/dark switch included, so an inline
+ * write beside it was undone by the next mode switch. Going through
+ * `setColor` also moves what an inline write never reached: the palette, the
+ * `-rgb` triplets and the naive-ui overrides the controls are painted with.
+ */
+function applyBrandThroughContext(context: ThemeContext, primary: string | undefined): void {
+  const current = context.settings.value.colors.primary;
+  if (primary) {
+    if (!CONTEXT_BASE_PRIMARY.has(context)) CONTEXT_BASE_PRIMARY.set(context, current);
+    if (current !== primary) context.setColor('primary', primary);
+    return;
+  }
+  const base = CONTEXT_BASE_PRIMARY.get(context);
+  if (base === undefined) return;
+  CONTEXT_BASE_PRIMARY.delete(context);
+  if (current !== base) context.setColor('primary', base);
+}
+
+/**
  * Apply a snapshot to the document, or clear every override when given null.
  *
  * Resets first on purpose: a snapshot is the complete set of deviations, so a
  * token the operator removed must stop being overridden. Without the reset,
  * removing a key would appear to do nothing until a full reload.
+ *
+ * @param themeContext the host's `@tnzi/ui` theme context, when there is one
+ *        (`defineChatApp()` and `createTnziUi()` provide it). The brand colour
+ *        then goes through it; without one the primary variables are written
+ *        inline on `target`.
  */
 export function applyAiThemeSnapshot(
   snapshot: AiThemeSnapshot | null,
   target: HTMLElement | null = typeof document === 'undefined' ? null : document.documentElement,
+  themeContext?: ThemeContext | null,
 ): void {
   if (!target) return;
 
   resetAiTheme(target);
   clearOwnedSharedVars(target);
 
-  if (!snapshot) return;
+  const primary = snapshot?.ui?.primary || undefined;
+  if (themeContext) {
+    applyBrandThroughContext(themeContext, primary);
+  } else if (primary) {
+    for (const [name, value] of Object.entries(primaryVars(primary))) writeSharedVar(target, name, value);
+  }
 
-  if (snapshot.ui?.primary) writeSharedVar(target, '--tnzi-primary', snapshot.ui.primary);
-  if (snapshot.ai) applyAiTheme(snapshot.ai, target);
+  if (snapshot?.ai) applyAiTheme(snapshot.ai, target);
 }

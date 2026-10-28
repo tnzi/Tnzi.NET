@@ -7,7 +7,7 @@ import type { HttpClient } from '../../http/http';
 import type {
   ConversationListItemDto, ConversationDto, ChatMessageDto, MessageThreadDto,
   SendMessageDto, CreateGroupDto, AddMembersDto, ChatContactDto, BroadcastDto,
-  ConversationMemberSettingsDto, ChatContactProfileDto,
+  ConversationMemberSettingsDto, ChatContactProfileDto, SearchMessagesParams,
   ChatClientConfigDto,
   ChatStatisticsDto, AdminConversationQueryDto, AdminConversationListItemDto,
   AdminConversationDetailDto, PresenceOverviewDto, PresenceOverviewQueryDto,
@@ -100,7 +100,7 @@ export function useChatImApi(client: HttpClient) {
       client.post<void>(`${CONV}/${id}/delete-for-me`),
 
     /** Search messages in a conversation - GET /conversations/{id}/messages/search */
-    searchMessages: (id: string, params: { keyword: string; before?: string; limit?: number }) =>
+    searchMessages: (id: string, params: SearchMessagesParams) =>
       client.get<MessageThreadDto>(`${CONV}/${id}/messages/search`, { params }),
 
     /** Update group notice - PUT /conversations/{id}/notice */

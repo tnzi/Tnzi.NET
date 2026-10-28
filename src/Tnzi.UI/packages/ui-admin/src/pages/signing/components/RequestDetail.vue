@@ -20,7 +20,7 @@
             <TStatusBadge
               :value="String(signer.status)"
               :type="recipientStatusTone(signer.status)"
-              :label="String(signer.status)"
+              :label="recipientStatusLabel(signer.status)"
             />
             <!-- The one timestamp that matters for this signer's current
                  state. Showing all four turns the row into a log nobody
@@ -86,6 +86,7 @@ import { NSpin } from 'naive-ui'
 import { TDescriptions, TSvgIcon } from '@tnzi/ui'
 import { formatDateOnly, formatDateTime } from '@tnzi/core'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
+import { envelopeStatusLabel, recipientStatusLabel } from '../signing-labels'
 import TFileLink from '../../../components/display/TFileLink.vue'
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import { createSigningBridge } from '../../../services/bridges/signing-bridge'
@@ -134,7 +135,7 @@ const facts = computed(() => {
   const r = request.value
   if (!r) return []
   return [
-    { label: t('columns.status'), value: String(r.status) },
+    { label: t('columns.status'), value: envelopeStatusLabel(r.status) },
     { label: t('form.isSequential'), value: r.isSequential ? t('detail.sequential') : t('detail.parallel') },
     { label: t('columns.expiresAt'), value: formatDateOnly(r.expiresAt, { utc: true }) || EMPTY_DASH },
     { label: t('form.completedAt'), value: formatDateTime(r.completedAt) || EMPTY_DASH },

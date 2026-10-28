@@ -11,11 +11,22 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// </para>
 /// <para>
 /// 部署配置（<c>AI:Mcp:Servers</c>）条目的 <see cref="McpServerConfig.TenantKey"/> 为 null：那是进程级的
-/// 同一份凭据，所有租户共用一条连接，键退化为服务器名 —— 单租户部署与引入租户维度之前逐字相同。
+/// 同一份凭据，所有租户共用一条连接，键退化为服务器名。
+/// </para>
+/// <para>
+/// 宿主级注册行（<c>TenantId</c> 为 null）不能也退化为服务器名：它可以与部署配置条目同名（DB 条目覆盖同名配置），
+/// 而多租户下全局过滤器只让宿主上下文看见宿主行，租户上下文解析到的仍是部署配置那一条。两者共用一个键时，
+/// 谁先建连谁赢：宿主先跑，租户的 agent 拿到的就是宿主的内部端点与宿主的令牌。故宿主行落在
+/// <see cref="HostRegistryPartition"/> 分区，与部署配置分开。
 /// </para>
 /// </remarks>
 internal static class McpCacheKey
 {
+    /// <summary>
+    /// 宿主级注册行（<c>TenantId</c> 为 null）的分区名。不是 GUID 的形状，不会与任何租户键相撞。
+    /// </summary>
+    internal const string HostRegistryPartition = "host";
+
     /// <summary>
     /// 分隔符用单元分隔符（U+001F）：租户键是 GUID、服务器名是配置/注册表里的显示名，
     /// 两者都不会包含它，因此名字里塞分隔符也伪造不出另一个租户的键。
@@ -26,8 +37,24 @@ internal static class McpCacheKey
     internal static string For(McpServerConfig config)
     {
         Check.NotNull(config);
-        return For(config.TenantKey, config.Name ?? string.Empty);
+        return config is UserMcpServerConfig user
+            ? ForUser(user.UserId, user.Name)
+            : For(config.TenantKey, config.Name ?? string.Empty);
     }
+
+    /// <summary>
+    /// 用户专属服务器的分区键：<c>user:{用户 id}</c> 段 + 服务器名。段头 <c>user:</c> 不是 GUID 的形状，
+    /// 与租户键、<see cref="HostRegistryPartition"/> 都不会相撞；用户 id 全局唯一，不再叠租户段。
+    /// </summary>
+    internal static string ForUser(Guid userId, string serverName) =>
+        UserSegment(userId) + Separator + serverName;
+
+    /// <summary>该分区键是否属于给定用户（<paramref name="serverName"/> 为 null = 该用户的任何服务器）。</summary>
+    internal static bool BelongsToUser(string cacheKey, Guid userId, string? serverName = null) =>
+        cacheKey.StartsWith(UserSegment(userId) + Separator, StringComparison.Ordinal)
+        && (serverName is null || MatchesServerName(cacheKey, serverName));
+
+    private static string UserSegment(Guid userId) => "user:" + userId.ToString("N");
 
     /// <summary>按租户键与服务器名组装分区键；租户键为空时退化为服务器名。</summary>
     internal static string For(string? tenantKey, string serverName) =>

@@ -29,13 +29,23 @@ public partial class WorkflowService
     public async Task<Result<int>> BatchDeleteAsync(List<Guid> ids)
     {
         Check.NotNullOrEmpty(ids);
-        var deleted = await _repository.Where(e => ids.Contains(e.Id)).ExecuteDeleteAsync();
+
+        // Soft delete, the same as DeleteAsync. WorkflowDefinition is soft-deletable; a raw
+        // ExecuteDelete removed the row for good, let the database cascade take every version
+        // snapshot with it, and recorded no deleter or deletion time. The admin page deletes
+        // single rows through this endpoint as well, so every admin delete was unrecoverable.
+        // The bulk statement joins the request transaction first.
+        await _repository.EnsureTransactionStartedAsync();
+        var deleted = await _repository
+            .Where(e => ids.Contains(e.Id))
+            .BatchSoftDeleteByAsync(CurrentUser?.Id, DateTime.UtcNow);
         return Ok(deleted);
     }
 
     public async Task<Result<int>> BatchSetEnabledAsync(List<Guid> ids, bool enabled)
     {
         Check.NotNullOrEmpty(ids);
+        await _repository.EnsureTransactionStartedAsync();
         var updated = await _repository
             .Where(e => ids.Contains(e.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(e => e.IsEnabled, enabled));

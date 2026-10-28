@@ -362,6 +362,48 @@ public class ReceiptCaptureTests : FinanceIntegrationTestBase
         result.Succeeded.ShouldBeTrue(result.Message);
     }
 
+    // ── 提取期间的并发写 ───────────────────────────────────────────────────
+    //
+    // 提取是一次几秒到几十秒的模型调用，期间另一个操作员可能已经手工修正了这张收据。
+    // 收据带并发戳，过期的写被挡住是对的；挡住的形状必须是 409，而不是没人接的异常变成 500。
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Extract_ReceiptEditedWhileTheExtractorRuns_Returns409_AndKeepsTheEdit(bool extractionSucceeds)
+    {
+        await SeedCoaAsync();
+        var receipt = await CreateReceiptAsync();
+
+        var extractor = new CallbackExtractor(async () =>
+        {
+            using var other = ServiceProvider.CreateScope();
+            var repo = other.ServiceProvider.GetRequiredService<IRepository<Receipt, Guid>>();
+            var row = (await repo.GetAsync(receipt))!;
+            row.VendorName = "Edited meanwhile";
+            await repo.UpdateAsync(row);
+            await repo.SaveChangesAsync();
+            return extractionSucceeds
+                ? Result<ReceiptExtractionResult>.Success(new ReceiptExtractionResult { VendorName = "From the model", Total = 5m, Confidence = 0.5m })
+                : Result<ReceiptExtractionResult>.Failure("vision timeout", 502);
+        });
+
+        using var scope = ServiceProvider.CreateScope();
+        var result = await BuildServiceWithExtractor(scope.ServiceProvider, extractor).ExtractAsync(receipt);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(409);
+        var reloaded = (await ReloadAsync<Receipt>(receipt))!;
+        reloaded.VendorName.ShouldBe("Edited meanwhile");
+        reloaded.Status.ShouldBe(ReceiptStatus.Uploaded);
+    }
+
+    private sealed class CallbackExtractor(Func<Task<Result<ReceiptExtractionResult>>> callback) : IReceiptExtractor
+    {
+        public Task<Result<ReceiptExtractionResult>> ExtractAsync(ReceiptExtractionRequest request, CancellationToken cancellationToken = default)
+            => callback();
+    }
+
     private sealed class StubExtractor : IReceiptExtractor
     {
         private readonly Result<ReceiptExtractionResult> _result;

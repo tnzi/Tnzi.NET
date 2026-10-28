@@ -25,7 +25,7 @@ import { useAdminDiagnosticsApi } from '@tnzi/core/services/diagnostics'
 import { useAdminClient } from '../../plugin/client'
 import { unwrapOk } from '../../services/_mappers'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 
 interface HealthSnapshot {
   status: 'ok' | 'degraded' | 'down'
@@ -70,7 +70,7 @@ useWidgetData(async () => {
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 </script>
 

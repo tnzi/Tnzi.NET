@@ -12,6 +12,18 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
     private const int FrequentIpAnalysisDays = 90;
     private const int FrequentIpTopCount = 10;
 
+    /// <summary>管理端安全报表（总览、频繁失败）可查的最长时间窗：30 天。</summary>
+    internal const int MaxReportWindowHours = 720;
+
+    /// <summary>「频繁失败用户」最多列出多少个账号（按失败次数从多到少）。</summary>
+    internal const int MaxFrequentFailureUsers = 200;
+
+    /// <summary>「频繁失败用户」每个账号最多列出多少个来源地址（按出现次数从多到少）。</summary>
+    internal const int MaxIpAddressesPerUser = 20;
+
+    /// <summary>管理端「最近登录」一次最多取多少条。</summary>
+    internal const int MaxRecentLogins = 100;
+
     private readonly IRepository<LoginLog, Guid>? _loginLogRepository;
     private readonly UserManager<User>? _userManager;
     private readonly IOptionsMonitor<IdentityOptions>? _identityOptionsMonitor;
@@ -176,7 +188,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         var logs = await _loginLogRepository
             .Where(l => l.UserId == userId)
             .OrderByDescending(l => l.CreationTime)
-            .Take(count)
+            .Take(Math.Min(Math.Max(count, 0), MaxRecentLogins))
             .ProjectTo<LoginLog, LoginLogDto>()
             .ToListAsync();
 
@@ -232,6 +244,11 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
         if (_loginLogRepository == null)
         {
             return Fail<SecurityOverviewDto>("Login log repository is not available");
+        }
+
+        if (hours < 1 || hours > MaxReportWindowHours)
+        {
+            return Fail<SecurityOverviewDto>($"hours must be between 1 and {MaxReportWindowHours}", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var since = DateTime.UtcNow.AddHours(-hours);
@@ -292,9 +309,20 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
             return Fail<IEnumerable<UserFailedLoginSummaryDto>>("Login log repository is not available");
         }
 
+        if (hours < 1 || hours > MaxReportWindowHours)
+        {
+            return Fail<IEnumerable<UserFailedLoginSummaryDto>>(
+                $"hours must be between 1 and {MaxReportWindowHours}", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (minFailures < 1)
+        {
+            return Fail<IEnumerable<UserFailedLoginSummaryDto>>("minFailures must be at least 1", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var since = DateTime.UtcNow.AddHours(-hours);
 
-        // 查询有频繁失败的用户
+        // 查询有频繁失败的用户（按失败次数取前 MaxFrequentFailureUsers 个）
         var failedGroups = await WhereInScope(_loginLogRepository.AsQueryable())
             .Where(l => l.CreationTime >= since && l.Status == LoginStatus.Failed && l.UserId != null)
             .GroupBy(l => l.UserId)
@@ -306,6 +334,7 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
             })
             .Where(g => g.FailureCount >= minFailures)
             .OrderByDescending(g => g.FailureCount)
+            .Take(MaxFrequentFailureUsers)
             .ToListAsync();
 
         if (!failedGroups.Any())
@@ -320,17 +349,24 @@ public class LoginSecurityService : ApplicationService, ILoginSecurityService
             ? await _userManager.Users.Where(u => userIds.Contains(u.Id)).ToListAsync()
             : new List<User>();
 
-        // 获取失败的IP地址
+        // 获取失败的IP地址：在库里按 (用户, 地址) 聚合，只取回每对一行。
+        // ★ 此前把窗口内每一次失败的 (用户, 地址) 都读回内存再去重，撞库期间把窗口调大，一次请求就是几十万行。
+        //   现在取回的行数有上限（按出现次数取前若干对），每个用户再截到 MaxIpAddressesPerUser 个。
         var failedIps = await _loginLogRepository
             .Where(l => l.CreationTime >= since && l.Status == LoginStatus.Failed &&
                         l.UserId != null && userIds.Contains(l.UserId.Value) &&
                         !string.IsNullOrEmpty(l.IpAddress))
-            .Select(l => new { l.UserId, l.IpAddress })
+            .GroupBy(l => new { l.UserId, l.IpAddress })
+            .Select(g => new { g.Key.UserId, g.Key.IpAddress, Attempts = g.Count() })
+            .OrderByDescending(x => x.Attempts)
+            .Take(MaxFrequentFailureUsers * MaxIpAddressesPerUser)
             .ToListAsync();
 
         var ipsByUser = failedIps
             .GroupBy(x => x.UserId)
-            .ToDictionary(g => g.Key!.Value, g => g.Select(x => x.IpAddress!).Distinct().ToList());
+            .ToDictionary(
+                g => g.Key!.Value,
+                g => g.OrderByDescending(x => x.Attempts).Select(x => x.IpAddress!).Take(MaxIpAddressesPerUser).ToList());
 
         var results = failedGroups.Select(g =>
         {

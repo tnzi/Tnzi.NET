@@ -42,12 +42,13 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public string? FailureReason { get; set; }
 
     /// <summary>
-    /// 重试次数
+    /// 重试次数：失败之后经 <c>INotificationRetryService.RetryAsync</c>（单条或「重试全部失败」）重新发送了几次。
+    /// 首次发送、派发恢复续发与静默时段延后到点的那一遍都不算。
     /// </summary>
     public int RetryCount { get; set; }
 
     /// <summary>
-    /// 最大重试次数
+    /// 最大重试次数：<see cref="RetryCount"/> 到了这个数，就不再接受重试。
     /// </summary>
     public int MaxRetryCount { get; set; } = 3;
 
@@ -123,8 +124,16 @@ public class Message : MultiTenantAuditedEntity<Guid>
     public string? ProviderKey { get; set; }
 
     /// <summary>
-    /// Scheduled send time (null = send immediately or as queued)
-    /// When set, notification will not be sent until this time
+    /// 这条消息最早几点发（UTC）。
     /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><c>Scheduled</c> 消息：调用方定下的发送时刻。</item>
+    /// <item><c>Pending</c> 消息：交给发送的那一刻（排队发送），或下一次重试到期的时刻（延迟重试）。</item>
+    /// <item><c>Pending</c> 且为 <see langword="null"/>：只创建、没要求发送的草稿。</item>
+    /// </list>
+    /// ★ 后两条是派发恢复的判据：排队与重试真正会去发它的只有进程内的队列与定时器，进程一停就没了；
+    /// <c>Pending</c> + 这一列是「已经交给发送」的标记，超过宽限仍停在 <c>Pending</c> 由恢复扫描接手，草稿永远不碰。
+    /// </remarks>
     public DateTime? ScheduledTime { get; set; }
 }

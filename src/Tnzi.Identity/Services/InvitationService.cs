@@ -28,6 +28,7 @@ public class InvitationService : ApplicationService, IInvitationService
     private readonly IUserTenantScopeProvider _scope;
     private readonly IConfiguration? _configuration;
     private readonly IAuthService? _authService;
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
 
     /// <summary>
     /// 初始化一个 <see cref="InvitationService"/> 类型的新实例。
@@ -42,7 +43,8 @@ public class InvitationService : ApplicationService, IInvitationService
         IOptionsMonitor<IdentityOptions> options,
         IUserTenantScopeProvider scope,
         IConfiguration? configuration = null,
-        IAuthService? authService = null)
+        IAuthService? authService = null,
+        IFunctionAuthorizationService? functionAuthorization = null)
         : base(serviceProvider)
     {
         _userManager = Check.NotNull(userManager);
@@ -54,6 +56,7 @@ public class InvitationService : ApplicationService, IInvitationService
         _scope = Check.NotNull(scope);
         _configuration = configuration;
         _authService = authService;
+        _functionAuthorization = functionAuthorization;
     }
 
     /// <inheritdoc />
@@ -71,9 +74,19 @@ public class InvitationService : ApplicationService, IInvitationService
                 ErrorCodes.VALIDATION_ERROR);
         }
 
-        // ★ 经 IUserService.CreateAsync 建号，不自己拼 User：重名校验、组织可分配性校验、
-        //   角色分配与注册事件都只在那一条路上。绕过去就等于把它们悄悄关掉。
-        var created = await _userService.CreateAsync(new CreateUserDto
+        // ★ 有效期在建号之前校验：此前它到签发那一步才用，int.MaxValue 小时在 AddHours 上抛异常时
+        //   账号已经建好、已经置成 Pending，留下一个没有令牌的待接受账号与一个 500。
+        if (InvalidLifetime<InvitationDto>(input.LifetimeHours) is { } invalidLifetime)
+        {
+            return invalidLifetime;
+        }
+
+        // ★ 经 IUserService 建号，不自己拼 User：重名校验、组织可分配性校验与角色分配都只在那一条路上。
+        //   绕过去就等于把它们悄悄关掉。
+        // ★★★ 用不发布注册事件的那个入口：此刻账号没有密码、登录不进去，宣布「已注册」会让订阅者
+        //   （框架自带的欢迎邮件）告诉对方「账号已可用」，被邀请人先收到它、再收到真正的邀请。
+        //   注册事件在接受邀请、账号真正可用时由 AcceptAsync 发布。
+        var created = await _userService.CreateForInvitationAsync(new CreateUserDto
         {
             UserName = input.UserName,
             Password = null,        // 密码由本人在接受邀请时设置
@@ -113,10 +126,8 @@ public class InvitationService : ApplicationService, IInvitationService
     /// 不在范围内与不存在同样返回 <c>null</c>，调用方一律答 404。
     /// </summary>
     /// <remarks>
-    /// ★ 重发与撤销都必须先过这一道再碰令牌。撤销是「先作废令牌再删账号」，而删账号那一步
-    /// 走 <c>IUserService.DeleteAsync</c>、自带范围校验 —— 只裁剪后半段的结果是一次半截操作：
-    /// 外租户管理员拿到 404，被撤销那家的邀请链接却已经悄悄失效，账号留在 Pending、再没有令牌。
-    /// 令牌表不是 <c>IMultiTenant</c>，全局过滤器管不到它。
+    /// ★ 重发与撤销都必须先过这一道（以及其后的超管护栏）再碰令牌或账号。令牌表不是 <c>IMultiTenant</c>，
+    /// 全局过滤器管不到它：只靠后面某一步自带的范围校验，外租户管理员就能把别家的邀请链接作废或换掉。
     /// </remarks>
     private async Task<User?> FindScopedUserAsync(Guid userId)
     {
@@ -138,13 +149,37 @@ public class InvitationService : ApplicationService, IInvitationService
         return null;
     }
 
+    /// <summary>
+    /// 调用者（非超管）要对一个超管账号的邀请动手时为 true，判据见 <see cref="SuperAdminTargetGuard"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 被邀请的账号在 <c>InviteAsync</c> 里就已经挂上了预设角色，所以「待接受的超管」就是超管目标。
+    /// 重发会把一条新的接受链接交给调用者，接受是匿名的、默认还会直接签发登录令牌：
+    /// 对超管目标重发，等于持 <c>user.update</c> 的普通管理员给自己发了一个超管账号。
+    /// 同一个权限码下的重置密码早就挂着这道护栏，重发是同一件事（决定谁能以这个账号登录）换了一条路。
+    /// 撤销同理：删账号那一步自己也会对超管答 403，在这里先拦下，回答与重发一致。
+    /// </remarks>
+    private Task<bool> IsSuperAdminTargetForbiddenAsync(Guid targetUserId)
+        => SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, CurrentUser?.Id, targetUserId);
+
     /// <inheritdoc />
     public async Task<Result<InvitationDto>> ResendAsync(Guid userId, int? lifetimeHours = null, CancellationToken cancellationToken = default)
     {
+        if (InvalidLifetime<InvitationDto>(lifetimeHours) is { } invalidLifetime)
+        {
+            return invalidLifetime;
+        }
+
         var user = await FindScopedUserAsync(userId);
         if (user == null)
         {
             return Fail<InvitationDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 在碰令牌之前：被邀请人手里那条链接在拒绝之后必须原样可用。
+        if (await IsSuperAdminTargetForbiddenAsync(user.Id))
+        {
+            return Fail<InvitationDto>(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
         if (!user.HasPendingAction(PendingUserActions.InvitationPending))
@@ -169,6 +204,11 @@ public class InvitationService : ApplicationService, IInvitationService
             return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
+        if (await IsSuperAdminTargetForbiddenAsync(user.Id))
+        {
+            return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
         if (!user.HasPendingAction(PendingUserActions.InvitationPending))
         {
             // 撤销只针对还没被接受的邀请。已激活的账号要停用请走 DisableAsync ——
@@ -179,15 +219,18 @@ public class InvitationService : ApplicationService, IInvitationService
                 ErrorCodes.IDENTITY_ACTIVATION_PENDING);
         }
 
-        // 先作废令牌再删账号：反过来的话，删账号失败时链接已经悄悄失效了，
-        // 而管理员看到的是一条失败的请求，会以为什么都没发生。
-        await _authTokenService.RemoveTokenAsync(user.Id, TokenLoginProvider, TokenName);
-
+        // ★ 先删账号再作废令牌。删账号这一步可能被拒（IUserUsageProvider 声明账号在用时 409，超管目标 403），
+        //   先作废令牌的话，拒绝时链接已经悄悄失效：管理员看到一条失败的请求以为什么都没发生，
+        //   被邀请人手里的链接却打不开了，账号停在 Pending、再没有令牌，只能等人重发。
+        //   反过来是安全的：账号软删之后，接受与预览按 id 取账号取不到，即使作废令牌那一步没走完，链接也用不了。
         var deleted = await _userService.DeleteAsync(user.Id);
         if (!deleted.Succeeded)
         {
             return deleted;
         }
+
+        await _authTokenService.RemoveTokenAsync(user.Id, TokenLoginProvider, TokenName);
+        await _authTokenService.RemoveTokenAsync(user.Id, TokenLoginProvider, ProfileTokenName);
 
         LogInformation("Invitation revoked for user {UserId} ({UserName}).", user.Id, user.UserName ?? string.Empty);
         return Ok();
@@ -267,6 +310,9 @@ public class InvitationService : ApplicationService, IInvitationService
         //   于是账号「已激活」但锁到一百年后：本人刚设好密码、链接也用掉了，却登不进去。
         // ★ 只清这一位，不是赋 None：赋 None 会把同时欠着的义务位（比如管理员在邀请
         //   发出后又勾了「下次登录必须改密」）一起抹掉，而它不报错也不会让测试变红。
+        // ★ 清锁定是安全的，因为待接受期间这把锁只可能是邀请自己的占位：UserService 的停用 / 锁定
+        //   对待接受的账号一律 409（指向撤销邀请）。否则管理员停掉的人也会在这里被一并放出来：
+        //   停用写下的「一百年后」与占位锁定形状相同，这里分不出谁是谁。
         user.PendingActions &= ~PendingUserActions.InvitationPending;
         user.LockoutEnd = null;
         var activated = await _userManager.UpdateAsync(user);
@@ -287,13 +333,26 @@ public class InvitationService : ApplicationService, IInvitationService
 
         LogInformation("Invitation accepted by user {UserId} ({UserName}).", user.Id, user.UserName ?? string.Empty);
 
+        // 预填资料只在「已邀请、还没接受」这个窗口里有意义，交给 handler 之后就该消失（见 ProfileTokenName）。
+        await _authTokenService.RemoveTokenAsync(user.Id, TokenLoginProvider, ProfileTokenName);
+
+        // 账号从这一刻起才可用：注册事件在这里发（发邀请时刻意没发，见 InviteAsync），每个账号恰好一次：
+        // 令牌的条件消费保证同一份邀请只会走到这里一次。
+        await PublishEventAsync(new UserRegisteredEvent
+        {
+            UserId = user.Id,
+            UserName = user.UserName ?? string.Empty,
+            Email = user.Email,
+            RegistrationTime = DateTime.UtcNow,
+        });
+
         var result = new AcceptInvitationResultDto { Completed = true };
 
         if (_options.CurrentValue.Invitation.SignInAfterAccept && _authService != null)
         {
             // ★ 走 IssueTokenAsync 而不是自己签：这条路上有登录守卫、2FA 判定、会话协调器
             //   与登录成功事件。账号刚转出 Pending，此刻它和任何账号一样该被守卫过一遍
-            //   （管理员完全可能在邀请发出后又把这个人停掉）。
+            //   （例如消费方挂的准入守卫）。管理员要拦住待接受的人，用的是撤销邀请，不是停用。
             var issued = await _authService.IssueTokenAsync(user, LoginMethod.Invitation);
             if (issued.Succeeded)
             {
@@ -313,12 +372,35 @@ public class InvitationService : ApplicationService, IInvitationService
     }
 
     /// <summary>
+    /// 调用方指定的链接有效期不在 [1, <see cref="InvitationOptions.MaxLinkLifetimeHours"/>] 小时内时给出 400；
+    /// 没指定（用配置值）或在范围内时为 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 此前只夹了下限：一个大到离谱的值要么在签发时抛异常，要么签出一条百年有效的接受链接，而接受是匿名的。
+    /// 上限 30 天与配置项的上限相同（理由见 <see cref="InvitationOptions.LinkLifetimeHours"/>）。
+    /// </remarks>
+    private Result<T>? InvalidLifetime<T>(int? lifetimeHours)
+    {
+        if (lifetimeHours is null or (>= 1 and <= InvitationOptions.MaxLinkLifetimeHours))
+        {
+            return null;
+        }
+
+        return Fail<T>(
+            $"The invitation lifetime must be between 1 and {InvitationOptions.MaxLinkLifetimeHours} hours",
+            400,
+            ErrorCodes.VALIDATION_ERROR);
+    }
+
+    /// <summary>
     /// 签发一枚新的邀请令牌，拼出链接，并发出事件让应用去投递。
     /// </summary>
     private async Task<Result<InvitationDto>> IssueAsync(User user, int? lifetimeHours, bool isResend)
     {
-        var configured = _options.CurrentValue.Invitation.LinkLifetimeHours;
-        var hours = Math.Max(1, lifetimeHours ?? configured);
+        // 调用方给的有效期已在建号 / 重发之前由 InvalidLifetime 挡过；配置值由选项校验器管住同一个范围，
+        // 这里再夹一次只是不让一份没经过校验的配置在这一步抛异常。
+        var hours = lifetimeHours
+            ?? Math.Clamp(_options.CurrentValue.Invitation.LinkLifetimeHours, 1, InvitationOptions.MaxLinkLifetimeHours);
         var expiresAt = DateTime.UtcNow.AddHours(hours);
 
         // 256 位随机数：没有字典可查，所以存哈希时不需要加盐或慢哈希（理由写在原语里）。
@@ -438,9 +520,14 @@ public class InvitationService : ApplicationService, IInvitationService
     /// </summary>
     /// <remarks>
     /// ★ 借 <c>AuthToken</c> 存而不是给 <c>User</c> 加一列：这份数据只在
-    /// 「已邀请、还没接受」这个窗口里有意义，接受之后就该消失。放进用户表就意味着
-    /// 一列永久存在的、只有极少数行非空的 JSON，还要额外写清理逻辑；
-    /// 放这里则随账号删除、随过期清理一起走。
+    /// 「已邀请、还没接受」这个窗口里有意义。放进用户表就意味着
+    /// 一列永久存在的、只有极少数行非空的 JSON。
+    /// <para>
+    /// ★★ 它<b>不带过期时间</b>，所以过期清理永远清不到它；撤销是软删账号，这一行也不会随账号消失。
+    /// 生命周期因此由本服务显式收尾：接受成功（激活落库之后）与撤销成功时删掉。
+    /// 不给它设过期是刻意的：重发可以延长链接有效期，资料行若按旧的过期时间被清掉，被邀请人接受时就丢了预填资料。
+    /// 此前两处都不删，管理员预填的个人资料在每一份接受过或撤销过的邀请上无限期留存。
+    /// </para>
     /// </remarks>
     private const string ProfileTokenName = "InvitationProfile";
 
@@ -498,6 +585,8 @@ public class InvitationService : ApplicationService, IInvitationService
     /// </summary>
     /// <remarks>
     /// 本人认得出是自己的地址，旁人拼不回来。留首字母与顶级域，其余一律遮掉。
+    /// 首字母按码元取：本地部分或域名以 emoji 等补充平面字符开头时那一段一个字符都不露，
+    /// 而不是露出半个代理项（预览页上是一个替换字符）。
     /// </remarks>
     private static string? MaskEmail(string? email)
     {
@@ -516,10 +605,12 @@ public class InvitationService : ApplicationService, IInvitationService
         var domain = email[(at + 1)..];
         var dot = domain.LastIndexOf('.');
 
-        var maskedLocal = local[0] + new string('*', Math.Max(1, local.Length - 1));
+        var localHead = local.FitToLength(1);
+        var domainHead = domain.FitToLength(1);
+        var maskedLocal = localHead + new string('*', Math.Max(1, local.Length - localHead.Length));
         var maskedDomain = dot > 0
-            ? domain[0] + new string('*', Math.Max(1, dot - 1)) + domain[dot..]
-            : domain[0] + new string('*', Math.Max(1, domain.Length - 1));
+            ? domainHead + new string('*', Math.Max(1, dot - domainHead.Length)) + domain[dot..]
+            : domainHead + new string('*', Math.Max(1, domain.Length - domainHead.Length));
 
         return $"{maskedLocal}@{maskedDomain}";
     }

@@ -115,6 +115,19 @@ public interface ITwoFactorService
     Task<Result<TotpSetupDto>> GetTotpSetupInfoAsync(Guid userId);
 
     /// <summary>
+    /// 取 TOTP 设置信息，账号已有一枚<b>尚未确认</b>的密钥时原样交回，没有才生成。
+    /// </summary>
+    /// <remarks>
+    /// 给「同一次登记里可能被反复拉取」的入口用（登录期的待办挑战）。<see cref="GetTotpSetupInfoAsync"/>
+    /// 每次都重置密钥：页面重新拉一次描述（刷新、组件重挂、办完上一件待办之后），用户已经扫进验证器的密钥就作废了，
+    /// 下一步只会得到「验证码不对」，看不出原因。已启用验证器的账号两者都拒绝（409）。
+    /// 默认实现退回 <see cref="GetTotpSetupInfoAsync"/>，自定义实现不改也照常工作。
+    /// </remarks>
+    /// <param name="userId">用户ID</param>
+    /// <returns>TOTP 设置信息（包含密钥和 otpauth URI）</returns>
+    Task<Result<TotpSetupDto>> GetOrCreateTotpSetupInfoAsync(Guid userId) => GetTotpSetupInfoAsync(userId);
+
+    /// <summary>
     /// 启用 TOTP（验证用户输入的 code 后启用）
     /// </summary>
     /// <param name="userId">用户ID</param>

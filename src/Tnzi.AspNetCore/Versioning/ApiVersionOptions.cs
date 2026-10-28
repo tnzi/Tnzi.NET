@@ -35,7 +35,8 @@ public class ApiVersionOptions
     public string QueryStringName { get; set; } = "api-version";
 
     /// <summary>
-    /// URL 方式下的版本参数名称
+    /// URL 方式下标出版本的路径段名：版本取紧跟在 <c>/{UrlParameterName}/</c> 之后的那一段，
+    /// 默认 <c>"v"</c> 时 <c>/api/v/2.0/users</c> 读出 <c>2.0</c>（<c>/api/v2/users</c> 这种写法不识别）
     /// </summary>
     public string UrlParameterName { get; set; } = "v";
 

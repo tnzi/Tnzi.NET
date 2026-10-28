@@ -18,14 +18,23 @@ export function mapAuthConfig(c: AuthConfigDto): LoginFeatures {
   return {
     passwordLogin: c.allowUserNameLogin || c.allowEmailLogin || c.allowSmsLogin,
     codeLogin: c.enableCodeLogin,
-    register: c.enableRegistration,
+    // The built-in register module is quick registration by code, so it is open
+    // only when a quick-registration channel is. `enableRegistration` also
+    // counts password self-registration, which that module cannot perform: the
+    // entry showed and every send-code was refused.
+    register: c.registerViaSms || c.registerViaEmail,
     passwordRecovery: c.enablePasswordRecovery,
     identifiers: {
       userName: c.allowUserNameLogin,
       email: c.allowEmailLogin,
       phone: c.allowSmsLogin,
     },
+    // Each code flow has its own switches on the backend. Reading the code
+    // sign-in channels for all three let the register and reset forms accept
+    // an address the backend refuses for that flow, and refuse one it accepts.
     codeChannels: { sms: c.codeLoginViaSms, email: c.codeLoginViaEmail },
+    registerChannels: { sms: c.registerViaSms, email: c.registerViaEmail },
+    recoveryChannels: { sms: c.recoveryViaSms, email: c.recoveryViaEmail },
     captchaOnLogin: c.enableCaptchaOnLogin,
     captchaOnRegister: c.enableCaptchaOnRegister,
     captchaOnPasswordRecovery: c.enableCaptchaOnPasswordRecovery ?? false,
@@ -49,6 +58,8 @@ export function mergeFeatures(base: LoginFeatures, override?: PartialLoginFeatur
     passwordRecovery: override?.passwordRecovery ?? base.passwordRecovery,
     identifiers: { ...base.identifiers, ...override?.identifiers },
     codeChannels: { ...base.codeChannels, ...override?.codeChannels },
+    registerChannels: { ...base.registerChannels, ...override?.registerChannels },
+    recoveryChannels: { ...base.recoveryChannels, ...override?.recoveryChannels },
     captchaOnLogin: override?.captchaOnLogin ?? base.captchaOnLogin,
     captchaOnRegister: override?.captchaOnRegister ?? base.captchaOnRegister,
     captchaOnPasswordRecovery: override?.captchaOnPasswordRecovery ?? base.captchaOnPasswordRecovery,

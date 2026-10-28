@@ -1,7 +1,7 @@
 namespace Tnzi.Storage.Helpers;
 
 /// <summary>
-/// 预览 / 缩略图响应的 <c>ETag</c>：由记录 id 与 MD5 派生的不透明强校验器。
+/// 预览 / 缩略图响应的 <c>ETag</c>：不透明强校验器，预览由记录 id 与 MD5 派生，缩略图由记录 id 与缩略图的存储键派生。
 /// </summary>
 /// <remarks>
 /// 不直接发 <see cref="FileRecord.Md5Hash"/>：<c>FileRecordDto</c> 的契约是 MD5 不对普通读者外露
@@ -21,7 +21,28 @@ public static class PreviewEtagHelper
         if (string.IsNullOrEmpty(record.Md5Hash))
             return null;
 
-        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"{record.Id:N}:{record.Md5Hash}"));
+        return Derive($"{record.Id:N}:{record.Md5Hash}");
+    }
+
+    /// <summary>
+    /// 缩略图响应的 ETag：由记录 id 与缩略图的存储键派生；记录没有缩略图时返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 不用 MD5：缩略图换了（建版本、回填、按新尺寸重生成）而原件字节可以不变。每次生成的缩略图都落在新键上，
+    /// 所以键变了就是内容变了。存储键同样不外露（理由同 MD5），只发派生值。
+    /// </remarks>
+    public static string? ComputeThumbnail(FileRecord record)
+    {
+        Check.NotNull(record);
+        if (string.IsNullOrEmpty(record.ThumbnailPath))
+            return null;
+
+        return Derive($"{record.Id:N}:thumbnail:{record.ThumbnailPath}");
+    }
+
+    private static string Derive(string material)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(material));
         return $"\"{Convert.ToHexStringLower(digest.AsSpan(0, 16))}\"";
     }
 }

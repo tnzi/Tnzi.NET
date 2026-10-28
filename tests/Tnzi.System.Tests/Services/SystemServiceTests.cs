@@ -57,6 +57,49 @@ public class AccessLogServiceTests
         _accessLogSenderMock.Verify(s => s.SendAsync(
             It.Is<AccessLogDto>(l => l.UserName == "TestUser" && l.Path == "/api/test")), Times.Once);
     }
+
+    /// <summary>
+    /// 手工上报的路径与方法是必填列：空值或超列宽的一行在后台批量落库时会连带拖垮同一批的其它记录，
+    /// 所以在入口就以 400 拒绝，一条都不进队列。
+    /// </summary>
+    [Theory]
+    [InlineData("", "GET")]
+    [InlineData("   ", "GET")]
+    [InlineData(null, "GET")]
+    [InlineData("/api/test", "")]
+    [InlineData("/api/test", "PROPPATCHXX")]
+    public async Task LogAccessAsync_RejectsAMissingOrOversizedPathOrMethod(string? path, string method)
+    {
+        var result = await _service.LogAccessAsync(new AccessLogDto { Path = path!, Method = method, StatusCode = 200 });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        _accessLogSenderMock.Verify(s => s.SendAsync(It.IsAny<AccessLogDto>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LogAccessAsync_RejectsAPathLongerThanItsColumn()
+    {
+        var result = await _service.LogAccessAsync(new AccessLogDto
+        {
+            Path = "/" + new string('x', AccessLogColumns.PathMaxLength),
+            Method = "GET",
+        });
+
+        result.Code.ShouldBe(400);
+        _accessLogSenderMock.Verify(s => s.SendAsync(It.IsAny<AccessLogDto>()), Times.Never);
+    }
+
+    /// <summary>主键由落库时生成：调用者给的 id（可能重复、可能已存在）不随行进队列。</summary>
+    [Fact]
+    public async Task LogAccessAsync_DoesNotForwardTheCallersId()
+    {
+        var input = new AccessLogDto { Id = Guid.NewGuid(), Path = "/api/test", Method = "GET", StatusCode = 200 };
+
+        await _service.LogAccessAsync(input);
+
+        _accessLogSenderMock.Verify(s => s.SendAsync(It.Is<AccessLogDto>(l => l.Id == Guid.Empty && l.Path == "/api/test")), Times.Once);
+    }
 }
 
 /// <summary>

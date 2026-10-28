@@ -35,11 +35,22 @@ public class FeishuAdapterOptions
     /// </summary>
     public Guid? TenantId { get; set; }
 
+    /// <summary>
+    /// Maximum characters per message; longer replies are sent as several messages.
+    /// Feishu caps a text message request at 150 KB and the text is JSON-encoded twice
+    /// (non-ASCII characters can take up to 7 bytes each), so the default stays well below that.
+    /// </summary>
+    public int MaxMessageLength { get; set; } = 10000;
+
+    /// <summary>Retry attempts per message chunk.</summary>
+    public int MaxRetries { get; set; } = 3;
+
     public override string ToString() =>
         $"FeishuAdapterOptions {{ Enabled = {Enabled}, AppId = {AppId}, " +
         $"AppSecret = {SecretMask.Mask(AppSecret)}, " +
         $"VerificationToken = {SecretMask.Mask(VerificationToken)}, " +
         $"EncryptKey = {SecretMask.Mask(EncryptKey)}, " +
         $"TenantId = {TenantId?.ToString() ?? "<null>"}, " +
-        $"AllowedUserIds.Count = {AllowedUserIds.Count} }}";
+        $"AllowedUserIds.Count = {AllowedUserIds.Count}, " +
+        $"MaxMessageLength = {MaxMessageLength}, MaxRetries = {MaxRetries} }}";
 }

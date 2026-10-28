@@ -1,0 +1,39 @@
+/**
+ * Naive UI button background, restored against CSS resets.
+ *
+ * Naive paints a button's fill with `.n-button { background-color:
+ * var(--n-color) }` (specificity 0,1,0) and inserts its styles at the START of
+ * `<head>`, so any stylesheet the application loads comes after it. A reset
+ * that clears button backgrounds at the same specificity therefore wins on
+ * source order: Tailwind / UnoCSS preflights carry
+ * `[type='button'] { background-color: transparent }`, and naive renders its
+ * buttons as `<button type="button">`. The result is a primary button drawn as
+ * white text on a transparent background, which on a white surface is close to
+ * invisible.
+ *
+ * Doubling the class lifts the restore to (0,2,0), above any such reset,
+ * whichever order the stylesheets arrive in. It lives here rather than in each
+ * product package because every package that renders naive buttons imports
+ * this stylesheet (`@tnzi/ui-admin` and `@tnzi/ui-ai` both `@import` it), and a
+ * product that adds its own reset is exactly the case this exists for.
+ *
+ * Only the background is restored: naive draws the outline with a
+ * `.n-button__border` pseudo element, so reapplying `border` here would draw
+ * the edge twice.
+ */
+.n-button.n-button {
+  background-color: var(--n-color);
+}
+.n-button.n-button:hover {
+  background-color: var(--n-color-hover);
+}
+.n-button.n-button:active,
+.n-button.n-button.n-button--pressed {
+  background-color: var(--n-color-pressed);
+}
+.n-button.n-button:focus {
+  background-color: var(--n-color-focus);
+}
+.n-button.n-button.n-button--disabled {
+  background-color: var(--n-color-disabled);
+}

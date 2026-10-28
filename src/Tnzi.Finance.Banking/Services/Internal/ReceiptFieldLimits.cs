@@ -240,6 +240,5 @@ internal static class ReceiptFieldLimits
     }
 
     /// <summary>日志里只放前 32 个字符：越界的值本来就可能是一整段文本。</summary>
-    private static string Preview(string text)
-        => text.Length <= 32 ? text : text[..32] + "...";
+    private static string Preview(string text) => text.Truncate(32);
 }

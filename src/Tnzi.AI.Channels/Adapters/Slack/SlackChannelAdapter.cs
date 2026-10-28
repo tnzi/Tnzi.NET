@@ -247,6 +247,12 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             var text = eventObj.TryGetProperty("text", out var t) ? t.GetString() ?? "" : "";
             var threadTs = eventObj.TryGetProperty("thread_ts", out var ts) ? ts.GetString() : null;
             var messageTs = eventObj.TryGetProperty("ts", out var mts) ? mts.GetString() : null;
+            var peerKind = (eventObj.TryGetProperty("channel_type", out var channelTypeEl) ? channelTypeEl.GetString() : null) switch
+            {
+                "im" => ChannelPeerKinds.User,
+                "channel" or "group" or "mpim" => ChannelPeerKinds.Group,
+                _ => null
+            };
 
             if (string.IsNullOrWhiteSpace(text)) return;
 
@@ -271,7 +277,8 @@ public class SlackChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 UserId: userId,
                 Text: text,
                 Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
-                ThreadTs: threadTs ?? messageTs);
+                ThreadTs: threadTs ?? messageTs,
+                PeerKind: peerKind);
 
             await _bus.PublishInboundAsync(inbound, ct);
         }

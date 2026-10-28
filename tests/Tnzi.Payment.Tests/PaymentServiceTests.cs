@@ -59,6 +59,8 @@ public class PaymentServiceTests
             new DefaultPaymentTaxCalculator(taxOptionsMock.Object),
             new Mock<IPaymentMethodService>().Object,
             _optionsMock.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProviderMock.Object
         );
     }

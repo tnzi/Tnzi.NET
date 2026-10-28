@@ -86,36 +86,30 @@ public class RecipientAddressMaskTests : IntegrationTestBase
         addresses.ShouldAllBe(a => a != Token);
     }
 
+    /// <summary>
+    /// 两个分页列表的行不带收件人（只带计数，见 <c>NotificationQueryService.ListRow</c>），
+    /// 于是这个读取面上根本没有地址：断言的是「没有」，而不是「有就得是掩码」：后者在空集合上恒真，验不出任何东西。
+    /// </summary>
     [Fact]
-    public async Task TheQueryPage_DoesNotHandOutTheRawPushToken()
+    public async Task TheQueryPage_HandsOutNoRecipientAddressesAtAll()
     {
         await SeedAsync(NotificationType.Push, Token, NotificationStatus.Sent);
 
         var page = await Query.QueryAsync(new QueryNotificationRequest());
 
-        AssertNoRawToken(page.Data!.Items.SelectMany(n => n.Recipients).Select(r => r.Address).ToList());
+        page.Data!.Items.ShouldNotBeEmpty();
+        page.Data.Items.SelectMany(n => n.Recipients).ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task TheScheduledPage_DoesNotHandOutTheRawPushToken()
+    public async Task TheScheduledPage_HandsOutNoRecipientAddressesAtAll()
     {
         await SeedAsync(NotificationType.Push, Token, NotificationStatus.Scheduled);
 
         var page = await Query.GetScheduledAsync(new QueryNotificationRequest());
 
-        AssertNoRawToken(page.Data!.Items.SelectMany(n => n.Recipients).Select(r => r.Address).ToList());
-    }
-
-    /// <summary>
-    /// 分页两条走的是 <c>ProjectTo</c>（在 SQL 里投影），收件人集合<b>可能根本没被投影出来</b>。
-    /// 那种情况下这个读取面不泄露令牌，但断言也无从谈起 —— 说出来，别让它假装验过。
-    /// </summary>
-    private static void AssertNoRawToken(List<string> addresses)
-    {
-        if (addresses.Count == 0)
-            return;
-
-        addresses.ShouldAllBe(a => a != Token);
+        page.Data!.Items.ShouldNotBeEmpty();
+        page.Data.Items.SelectMany(n => n.Recipients).ShouldBeEmpty();
     }
 
     // ── 别的渠道不受影响 ─────────────────────────────────────────────────────

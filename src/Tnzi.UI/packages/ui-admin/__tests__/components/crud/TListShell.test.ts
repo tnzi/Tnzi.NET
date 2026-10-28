@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed } from 'vue'
 import TListShell from '../../../src/components/crud/TListShell.vue'
+import TFormModal from '../../../src/components/crud/TFormModal.vue'
 
 const downloadBlob = vi.fn()
 vi.mock('@tnzi/core/utils', async (importOriginal) => ({
@@ -68,12 +69,22 @@ describe('TListShell', () => {
     expect(hidden.find('.t-list-shell__create').exists()).toBe(false)
   })
 
-  it('does not mount the form modal when neither canCreate nor canUpdate', () => {
+  it('does not mount the form modal when it has nothing to show (no create, no update, no #form)', () => {
+    const state = makeState({ canCreate: false, canUpdate: false })
+    state.formModal.visible.value = true
+    state.formModal.mode.value = 'view'
+    const wrapper = mount(TListShell, { props: { state: state as any }, slots: { renderer: '<div/>' }, global: { stubs } })
+    expect(wrapper.findComponent(TFormModal).exists()).toBe(false)
+  })
+
+  // View is not permission-gated, and without a #detail slot it opens in the
+  // form modal. A reader who may neither create nor update still has to get it.
+  it('mounts the form modal for a view when the page supplies #form, even without create or update', () => {
     const state = makeState({ canCreate: false, canUpdate: false })
     state.formModal.visible.value = true
     state.formModal.mode.value = 'view'
     const wrapper = mount(TListShell, { props: { state: state as any }, slots: { renderer: '<div/>', form: '<div class="form-body" />' }, global: { stubs } })
-    expect(wrapper.find('.form-body').exists()).toBe(false)
+    expect(wrapper.find('.form-body').exists()).toBe(true)
   })
 
   it('hides pagination when showPagination=false', () => {
@@ -84,6 +95,30 @@ describe('TListShell', () => {
   it('applies container modifier class in container mode', () => {
     const wrapper = mount(TListShell, { props: { state: makeState() as any, mode: 'container' }, slots: { renderer: '<div/>' }, global: { stubs } })
     expect(wrapper.find('.t-list-shell--container').exists()).toBe(true)
+  })
+
+  it('a refused batch delete settles: handleDelete has already reported it', async () => {
+    // The popconfirm fires the batch delete and forgets it; a rejection there
+    // is an unhandled rejection on every refused delete, on top of the toast.
+    // A plain function, not vi.fn: a spy attaches its own handler to the promise
+    // it returns (to record the settled result), which would hide the defect.
+    const deleted: unknown[] = []
+    const handleDelete = (ids: unknown) => { deleted.push(ids); return Promise.reject(new Error('In use')) }
+    const state = makeState({ handleDelete })
+    state.batchActions.selected.value = new Set([1])
+    const wrapper = mount(TListShell, { props: { state: state as any }, slots: { renderer: '<div/>' }, global: { stubs } })
+    const unhandled: unknown[] = []
+    const record = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', record)
+    try {
+      const confirm = wrapper.findAllComponents({ name: 'Popconfirm' }).at(-1)!
+      confirm.vm.$emit('positive-click')
+      await new Promise((r) => setTimeout(r, 10))
+    } finally {
+      process.off('unhandledRejection', record)
+    }
+    expect(deleted).toEqual([[1]])
+    expect(unhandled).toEqual([])
   })
 
   it('refresh button calls state.refresh()', async () => {
@@ -468,6 +503,22 @@ describe('TListShell - header off (embedded in a tab)', () => {
     expect(wrapper.find('.t-list-shell__mobile-search').exists()).toBe(false)
   })
 
+  // A list whose endpoint has no free-text query turns the keyword box off and
+  // keeps Advanced. The header path honoured that; the toolbar path (header off)
+  // rendered the keyword box regardless, so it was shown and silently ignored.
+  it('desktop: showDefaultSearch=false drops the inline keyword box and keeps Advanced', () => {
+    ;(globalThis as any).__bpNarrow = false
+    const wrapper = mount(TListShell, {
+      props: { state: makeState() as any, showHeader: false, showDefaultSearch: false, searchFields: fields },
+      slots: { renderer: '<div/>' },
+      global: { stubs: drawerStubs },
+    })
+    expect(wrapper.find('.t-list-shell__inline-keyword').exists()).toBe(false)
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels.some((l) => l.includes('admin.crud.advancedSearch'))).toBe(true)
+    expect(labels.some((l) => l.trim() === 'admin.crud.search')).toBe(false)
+  })
+
   it('header on: the phone panel stays in the header card, not the list card', async () => {
     ;(globalThis as any).__bpNarrow = true
     const wrapper = mount(TListShell, {
@@ -501,5 +552,38 @@ describe('TListShell - translation keys', () => {
       expect(typeof lookup(en.admin.crud as Record<string, unknown>, key), `en admin.crud.${key}`).toBe('string')
       expect(typeof lookup(zhCn.admin.crud as Record<string, unknown>, key), `zh-cn admin.crud.${key}`).toBe('string')
     }
+  })
+})
+
+// The picker offered .xlsx and .json for every page, while the built-in user
+// import reads the upload as CSV text: a spreadsheet was accepted and then
+// refused row by row.
+describe('TListShell - import picker file types', () => {
+  function pickerAccept(state: ReturnType<typeof makeState>): string | undefined {
+    const created: HTMLInputElement[] = []
+    const createElement = document.createElement.bind(document)
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const el = createElement(tag, options)
+      if (tag === 'input') {
+        ;(el as HTMLInputElement).click = () => undefined
+        created.push(el as HTMLInputElement)
+      }
+      return el
+    }) as typeof document.createElement)
+    try {
+      const wrapper = mount(TListShell, { props: { state: state as any, showImport: true }, slots: { renderer: '<div/>' }, global: { stubs } })
+      ;(wrapper.vm as unknown as { onImport: () => void }).onImport()
+      return created.at(-1)?.accept
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it('offers what the page imports', () => {
+    expect(pickerAccept(makeState({ importAccept: '.csv' }))).toBe('.csv')
+  })
+
+  it('keeps the broad set when the page does not say', () => {
+    expect(pickerAccept(makeState())).toBe('.csv,.xlsx,.json')
   })
 })

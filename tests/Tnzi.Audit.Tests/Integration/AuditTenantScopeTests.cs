@@ -155,7 +155,8 @@ public class AuditTenantScopeTests : IntegrationTestBase
     /// 给了就替换按 <paramref name="tenantId"/> 造的替身：跑遍租户的用例要用真实的 <see cref="CurrentTenant"/>，
     /// 替身的 <c>Change</c> 不会改 <c>Id</c>，切进哪个租户都读不出来。
     /// </param>
-    private DataDestructionService DestructionService(Guid? tenantId, IEnumerable<RetentionPolicy>? policies = null, ICurrentTenant? currentTenant = null)
+    /// <param name="holds">诉讼保全提供者；不给则没有任何保全。</param>
+    private DataDestructionService DestructionService(Guid? tenantId, IEnumerable<RetentionPolicy>? policies = null, ICurrentTenant? currentTenant = null, IEnumerable<ILitigationHoldProvider>? holds = null)
     {
         var repository = new EFCoreRepository<AuditTestDbContext, AuditDataDestruction, Guid>(DbContext, serviceProvider: ServiceProvider);
         return new DataDestructionService(
@@ -163,7 +164,7 @@ public class AuditTenantScopeTests : IntegrationTestBase
             repository,
             new StaticOptionsMonitor<DataDestructionOptions>(new DataDestructionOptions { Enabled = true }),
             policies == null ? [] : [new StubPolicyProvider(policies.ToArray())],
-            [],
+            holds ?? [],
             new HardDeleteDataDestroyer(ServiceProvider, new StubEntityManager()),
             currentTenant ?? Tenant(tenantId),
             null,
@@ -399,6 +400,43 @@ public class AuditTenantScopeTests : IntegrationTestBase
 
         var seenByA = await DestructionService(TenantA).GetCertificatesAsync(new DataDestructionQueryDto());
         seenByA.Data!.Items.Select(c => c.Sequence).ShouldBe([issued.Single(c => c.TenantId == TenantA).Sequence, 1]);
+    }
+
+    /// <summary>只在某一个租户的上下文里查不通的保全系统（按当前租户判断）。</summary>
+    private sealed class TenantFailingHoldProvider(ICurrentTenant currentTenant, Guid failingTenant) : ILitigationHoldProvider
+    {
+        public Task<IReadOnlyCollection<string>> GetHeldIdentifiersAsync(
+            string policyName, Type entityType, IReadOnlyCollection<string> candidates, CancellationToken ct = default)
+            => currentTenant.Id == failingTenant
+                ? throw new InvalidOperationException("hold system unreachable")
+                : Task.FromResult<IReadOnlyCollection<string>>([]);
+    }
+
+    [Fact]
+    public async Task HostRun_OneTenantFailing_DoesNotStopTheOtherTenants_AndKeepsTheirCounts()
+    {
+        // 一个租户的保全系统查不通只中止该租户：别家租户的到期数据照常销毁，结果里的计数是真实已销毁的数目，
+        // 失败租户写进 Error。此前异常直接冒出逐租户循环：排在它后面的租户本轮不跑，而排在前面已经销毁的
+        // 租户也被报成「0 条」：不可逆的删除发生了，报告却说什么都没删。
+        await SeedExpiredTenantRecordsAsync();
+        var currentTenant = new CurrentTenant(ServiceProvider.GetRequiredService<ICurrentUser>());
+        var service = DestructionService(
+            null,
+            policies: [TenantPolicy()],
+            currentTenant: currentTenant,
+            holds: [new TenantFailingHoldProvider(currentTenant, TenantB)]);
+
+        var result = await service.RunAsync();
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var policy = result.Data!.Policies.ShouldHaveSingleItem();
+        policy.DestroyedCount.ShouldBe(1);
+        policy.Error.ShouldNotBeNull();
+        policy.Error.ShouldContain(TenantB.ToString());
+        policy.Error.ShouldContain("hold system unreachable");
+
+        // 租户 A 的到期行没了，租户 B 的原样还在（保全查不通宁可不销毁）。
+        (await SurvivingTenantRecordsAsync()).Select(r => r.TenantId).ShouldBe([TenantB]);
     }
 
     // ---- 多租户关闭：谓词一行都不能加 ----------------------------------------------

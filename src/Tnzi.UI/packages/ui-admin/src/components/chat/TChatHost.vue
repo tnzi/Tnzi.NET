@@ -68,6 +68,21 @@ const isDesktopLayout = computed(
   () => themeStore.layoutMode === 'desktop' && !appStore.isMobile,
 )
 
+/**
+ * Whether a chat surface is on screen. The floating window reports it through
+ * `show`; on the desktop it is the chat window, which this component never
+ * opens or closes itself - the window manager does (close, minimise, restore).
+ * A minimised window is off screen; one behind another window still counts,
+ * as an ordinary window that is open but not focused does on any desktop.
+ * Without the desktop half, the thread on screen collected unread counts and
+ * attention tones and was never marked read.
+ */
+const chatOnScreen = computed(() =>
+  isDesktopLayout.value
+    ? desktopStore.windows.some((w) => w.stack[w.stackIndex]?.panel === 'chat' && !w.minimized)
+    : show.value,
+)
+
 function openChat(): void {
   if (!isDesktopLayout.value) {
     show.value = true
@@ -111,6 +126,9 @@ if (client) {
     // and never re-synced, so reading it alone would go stale after the access
     // token expires (~1h) and SignalR reconnects would 401 → realtime dies.
     getToken: () => client.getAccessToken() ?? auth.token ?? '',
+    // A reconnect after the page sat idle past the token lifetime would present
+    // an expired token; refreshing through the client's own mutex brings it back.
+    refreshToken: () => client.refreshAccessToken(),
     getUserId: () => auth.userInfo?.id,
     onNewMessage: (p) => {
       const conv = store.conversations.find(c => c.id === p.conversationId)
@@ -149,7 +167,9 @@ if (client) {
 
   // Mirror the window's open state into the store so incoming-message logic
   // can tell "conversation selected" apart from "conversation on screen".
-  watch(show, (open) => {
+  // Immediate: a desktop chat window restored with the rest of the desktop is
+  // on screen from the first render, with no open/close transition to report it.
+  watch(chatOnScreen, (open) => {
     store.setWindowVisible(open)
     if (open) {
       titleFlash.stop() // engaging with chat clears the tab-title flash
@@ -160,7 +180,7 @@ if (client) {
         if (conv?.unreadCount) void store.markRead(store.activeId)
       }
     }
-  })
+  }, { immediate: true })
 
   // Once everything is read (here or elsewhere), stop flashing the tab title.
   watch(() => store.totalUnread, (n) => { if (n === 0) titleFlash.stop() })

@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import * as echarts from 'echarts/core'
 import {
   BarChart,
@@ -15,7 +15,7 @@ import {
   DataZoomComponent,
   ToolboxComponent,
 } from 'echarts/components'
-import { CanvasRenderer } from 'echarts/renderers'
+import { CanvasRenderer, SVGRenderer } from 'echarts/renderers'
 import { useResizeObserver } from '@vueuse/core'
 import { useTheme } from '../theme/useTheme'
 import type { EChartsOption } from 'echarts'
@@ -44,6 +44,9 @@ function ensureEchartsModulesRegistered(): void {
     DataZoomComponent,
     ToolboxComponent,
     CanvasRenderer,
+    // `renderer: 'svg'` is an option of this composable; without the renderer
+    // registered, zrender cannot honour it and the chart box stays empty.
+    SVGRenderer,
   ])
   registered = true
 }
@@ -111,7 +114,9 @@ function resolveThemeRef(opts: UseEchartsOptions): Ref<'light' | 'dark'> {
 
 /**
  * Headless ECharts composable. Wires up:
- * - lifecycle (init on mount, dispose on unmount)
+ * - lifecycle (init when the container appears, dispose when it goes away or
+ *   on unmount). The container may render after mount (`v-if="hasData"` with
+ *   data that arrives later) or be re-created; each new element gets a chart.
  * - theme reactivity (rebuilds option when `useTheme().resolvedMode` changes
  *   OR when an explicit `opts.mode` ref changes)
  * - automatic resize via ResizeObserver on the container
@@ -165,21 +170,39 @@ export function useEcharts(opts: UseEchartsOptions): UseEchartsReturn {
     }
   }
 
-  onMounted(() => {
-    if (!containerRef.value) return
+  /** The element the current chart was created on. */
+  let initializedEl: HTMLDivElement | null = null
+
+  function init(el: HTMLDivElement): void {
+    initializedEl = el
     // Wrap init: jsdom (used by vitest integration tests) has no canvas
     // backend, and echarts.init throws synchronously. Letting it bubble
     // crashes the consumer's mount cycle, so we degrade gracefully -
     // chart stays null, setOption / resize / dispose become no-ops.
     try {
-      chart.value = echarts.init(containerRef.value, opts.themeName, {
+      chart.value = echarts.init(el, opts.themeName, {
         renderer: opts.renderer ?? 'canvas',
       })
       setOption(true)
     } catch {
       chart.value = null
     }
-  })
+  }
+
+  // Follows the container rather than initialising once in onMounted: a
+  // container rendered after mount (behind a `v-if` waiting for data) never
+  // got a chart, and the box stayed empty once the data arrived. 'post':
+  // template refs are filled during patch, so the element is in the DOM here.
+  watch(
+    containerRef,
+    (el) => {
+      if (el === initializedEl) return
+      dispose()
+      initializedEl = null
+      if (el) init(el)
+    },
+    { flush: 'post', immediate: true },
+  )
 
   // Theme reactivity - rebuild option when the resolved mode toggles light/dark.
   watch(modeRef, () => setOption(true))

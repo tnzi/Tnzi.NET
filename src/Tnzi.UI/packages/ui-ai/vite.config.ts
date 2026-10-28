@@ -57,9 +57,13 @@ export default defineConfig({
         // Everything that touches @vue-flow/core. A dedicated entry keeps the
         // heavy dep reachable only through `@tnzi/ui-ai/workflow`.
         workflow: resolve(import.meta.dirname, 'src/workflow/index.ts'),
+        // Inline widgets (show_widget): the frame, the host bridge and the in-frame
+        // bootstrap, for the products that show widgets.
+        widget: resolve(import.meta.dirname, 'src/widget/index.ts'),
         // Declaring `theme` as a top-level entry forces rollup to
         // preserve the named re-exports in `theme/index.ts`
-        // (applyAiTheme / lightTokens / darkTokens / AiThemeTokens).
+        // (applyAiTheme / applyThemeVars / resetAiTheme / AiThemeTokens
+        // and the theme-snapshot helpers).
         // Otherwise tree-shake strips the `export { … } from
         // './tokens'` line and leaves only the locally-defined
         // applyTheme / resetTheme. Consumers can import the barrel
@@ -72,7 +76,7 @@ export default defineConfig({
       // so the `./style.css` export keeps resolving.
       cssFileName: 'style',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) => {
         const normalizedId = id.replace(/\\/g, '/');
 

@@ -39,4 +39,12 @@ public class NoOpCliAgentDispatcher : ICliAgentDispatcher, INoOpService
     /// <inheritdoc />
     public Task<Result> CancelAsync(Guid runId, CancellationToken cancellationToken = default)
         => Task.FromResult(Result.Failure(Message, 501, ErrorCodes.CliModuleNotLoaded));
+
+    /// <inheritdoc />
+    public Task<Result> CancelAsSystemAsync(Guid runId, string? reason = null, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure(Message, 501, ErrorCodes.CliModuleNotLoaded));
+
+    /// <inheritdoc />
+    public Task<Result<int>> CancelThreadRunsAsSystemAsync(Guid threadId, string? reason = null, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result.Failure<int>(Message, 501, ErrorCodes.CliModuleNotLoaded));
 }

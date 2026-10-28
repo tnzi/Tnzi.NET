@@ -196,13 +196,12 @@ public class AiMiddlewarePipelineTests
     #region QuotaMiddleware
 
     [Fact]
-    public async Task Quota_NoUserId_SkipsQuotaCheck()
+    public async Task Quota_NoUserId_SkipsUsageLimits()
     {
-        var quotaService = new Mock<IQuotaService>();
+        var limits = UsageLimitMocks.Allowing();
         var middleware = new QuotaMiddleware(
-            quotaService.Object,
+            limits.Object,
             CreatePassthroughBudgetService(),
-            new HeuristicTokenEstimator(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
         var context = CreateContext(userId: null);
@@ -211,22 +210,20 @@ public class AiMiddlewarePipelineTests
             (ctx, ct) => Task.FromResult(expected));
 
         result.ShouldBe(expected);
-        quotaService.Verify(q => q.ReserveQuotaAsync(It.IsAny<Guid>(), It.IsAny<long>(), It.IsAny<CancellationToken>()), Times.Never);
+        limits.Verify(q => q.BeginAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task Quota_ReservationFails_ReturnsQuotaExceeded()
+    public async Task Quota_LimitReached_ReturnsQuotaExceeded_WithTheWindow()
     {
         var userId = Guid.NewGuid();
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(q => q.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            // 错误码是「是否真的超限」的判据（QuotaMiddleware.IsQuotaExceeded），真实服务始终带码
-            .ReturnsAsync(Result<QuotaReservation>.Failure("Daily quota exceeded", 429, ErrorCodes.QuotaExceeded));
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(q => q.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(UsageLimitMocks.Denial(UsageLimitWindow.Weekly));
 
         var middleware = new QuotaMiddleware(
-            quotaService.Object,
+            limits.Object,
             CreatePassthroughBudgetService(),
-            new HeuristicTokenEstimator(),
             Mock.Of<ILogger<QuotaMiddleware>>());
 
         var context = CreateContext(userId: userId);
@@ -234,23 +231,26 @@ public class AiMiddlewarePipelineTests
             (ctx, ct) => Task.FromResult(CreateSuccessResult()));
 
         result.FinishReason.ShouldBe("quota_exceeded");
+        result.ErrorCode.ShouldBe(ErrorCodes.UsageLimitReached);
+        result.UsageLimitWindow.ShouldBe(UsageLimitWindow.Weekly);
     }
 
     [Fact]
-    public async Task Quota_Success_SettlesWithActualUsage()
+    public async Task Quota_Success_SettlesTheCostOfTheActualUsage()
     {
         var userId = Guid.NewGuid();
-        var reservation = new QuotaReservation { ReservedTokens = 100, ReservedAt = DateTime.UtcNow };
-
-        var quotaService = new Mock<IQuotaService>();
-        quotaService.Setup(q => q.ReserveQuotaAsync(userId, It.IsAny<long>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<QuotaReservation>.Success(reservation));
+        var reservation = new UsageLimitReservation(userId, DateTime.UtcNow);
+        var limits = UsageLimitMocks.Allowing();
+        limits.Setup(q => q.BeginAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<UsageLimitReservation>.Success(reservation));
+        var calculator = new Mock<ICostCalculator>();
+        calculator.Setup(c => c.CalculateCost("TestProvider", "test-model", 20L, 10L, 0L, 0L)).Returns(0.003m);
 
         var middleware = new QuotaMiddleware(
-            quotaService.Object,
+            limits.Object,
             CreatePassthroughBudgetService(),
-            new HeuristicTokenEstimator(),
-            Mock.Of<ILogger<QuotaMiddleware>>());
+            Mock.Of<ILogger<QuotaMiddleware>>(),
+            calculator.Object);
 
         var context = CreateContext(userId: userId);
         var expected = CreateSuccessResult(promptTokens: 20, completionTokens: 10);
@@ -258,7 +258,7 @@ public class AiMiddlewarePipelineTests
             (ctx, ct) => Task.FromResult(expected));
 
         result.Response.ShouldBe("Hi there");
-        quotaService.Verify(q => q.SettleQuotaAsync(userId, reservation, 30, It.IsAny<CancellationToken>()), Times.Once);
+        limits.Verify(q => q.SettleAsync(reservation, 0.003m, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
@@ -330,7 +330,7 @@ public class AiMiddlewarePipelineTests
         // 线程存在且归当前用户所有：EnsureThreadAsync 现在**总是**经 GetOrCreateThreadAsync
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         threadService.Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
 
         // 模拟历史消息
         var history = new List<ChatMessage>
@@ -370,7 +370,7 @@ public class AiMiddlewarePipelineTests
         var autoThreadId = Guid.NewGuid();
         var threadService = new Mock<IAgentThreadInternalService>();
         threadService.Setup(s => s.GetOrCreateThreadAsync(null, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, autoThreadId, true));
+            .ReturnsAsync((autoThreadId, true));
         threadService.Setup(s => s.GetMessageHistoryAsync(autoThreadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
 

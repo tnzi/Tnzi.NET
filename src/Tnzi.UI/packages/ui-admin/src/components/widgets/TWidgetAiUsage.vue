@@ -14,7 +14,7 @@ import { TCountTo } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createAiBridge } from '../../services/bridges/ai-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 
 const tokens = ref<number>(0)
 const cost = ref<number>(0)
@@ -35,7 +35,8 @@ useWidgetData(async () => {
     searchText: '',
     filters: { startTime: thirtyDaysAgo.toISOString(), endTime: now.toISOString() },
   })
-  // A 403/failed envelope can resolve to undefined - keep the placeholders.
+  // A refused read (403, 500) rejects: useWidgetData reports it on the card and
+  // the figures keep their placeholders instead of showing zeros.
   if (!summary) return
   tokens.value = summary.totalTokens ?? 0
   cost.value = summary.totalCostUsd ?? 0
@@ -44,7 +45,7 @@ useWidgetData(async () => {
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 </script>
 

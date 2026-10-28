@@ -123,7 +123,8 @@ public class SkillDefinition
     public List<string>? DeniedTools { get; set; }
 
     /// <summary>
-    /// 条件激活路径 glob 模式列表（匹配 resource_paths 时自动激活）
+    /// SKILL.md frontmatter 里 <c>paths</c> 声明的 glob 模式列表。只解析保存，当前没有任何激活逻辑读取它：
+    /// 按资源路径自动激活技能没有实现，写了 <c>paths</c> 的技能与没写的激活方式相同。
     /// </summary>
     public IReadOnlyList<string> Paths { get; set; } = [];
 

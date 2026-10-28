@@ -113,7 +113,42 @@ public class PaymentBillingModule : TnziApplicationModule
         // 支付完成 → 自动开票。父模块在同一个事件上已经挂了两个处理器（记日志 + 订阅计费回流），
         // 这里是第三个：事件总线按 IEnumerable<IEventHandler<TEvent>> 解析，互不覆盖。
         context.Services.AddEventHandler<PaymentCompletedEvent, InvoiceIssuingHandler>();
+        // 退款成功 → 贷项通知单（Payment:Invoice:IssueCreditNotes，默认关闭）
+        context.Services.AddEventHandler<RefundProcessedEvent, CreditNoteIssuingHandler>();
 
         return base.ConfigureServicesAsync(context);
+    }
+
+    /// <summary>
+    /// 启动时说一次票据产物是什么格式、由谁转出来：同时加载模板与文档两个模块的宿主出 PDF，
+    /// 只加载模板的出 HTML。此前没有这一行，票据一直是 HTML 而谁都看不出来（直到有人下载了一张「PDF」）。
+    /// </summary>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        using var scope = context.ServiceProvider.CreateScope();
+        var converter = scope.ServiceProvider.GetService<IHtmlToPdfConverter>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<PaymentBillingModule>>();
+        LogDocumentFormat(logger, converter);
+        return base.OnApplicationInitializationAsync(context);
+    }
+
+    internal static void LogDocumentFormat(ILogger logger, IHtmlToPdfConverter? converter)
+    {
+        if (converter == null)
+        {
+            logger.LogInformation("Invoices, receipts and credit notes are rendered as built-in HTML: the template module is not loaded.");
+            return;
+        }
+
+        if (string.Equals(converter.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("Invoices, receipts and credit notes are rendered as PDF ({ContentType}, {Extension}) by {Converter}.",
+                converter.ContentType, converter.FileExtension, converter.GetType().Name);
+            return;
+        }
+
+        logger.LogInformation(
+            "Invoices, receipts and credit notes are rendered as {ContentType} ({Extension}) by {Converter}. For PDF documents load Tnzi.Documents with a browser it can use, or register an IHtmlToPdfConverter.",
+            converter.ContentType, converter.FileExtension, converter.GetType().Name);
     }
 }

@@ -86,8 +86,52 @@ export function getLocaleMessages(locale: AdminLocale): Dictionary | undefined {
  * dictionary present synchronously instead of awaiting a chunk.
  */
 export function setLocaleMessages(locale: AdminLocale, messages: Dictionary): void {
-  dictionaries.value.set(locale, messages)
+  dictionaries.value.set(locale, withSupplements(locale, messages))
   triggerRef(dictionaries)
+}
+
+/**
+ * Strings that ship with a lazily loaded feature instead of the locale pack
+ * (the billing UI), keyed by locale. A supplement fills only keys the bundled
+ * dictionary does not have, and consumer overrides are looked up before either,
+ * so registering one never changes a string that already resolves.
+ */
+const supplements = new Map<AdminLocale, Dictionary[]>()
+
+/**
+ * Add `tree` to `locale`'s dictionary: now if it is loaded, and to every later
+ * load. For feature chunks that carry their own strings so that applications
+ * which never load the feature do not download them with the locale pack.
+ */
+export function addLocaleSupplement(locale: AdminLocale, tree: Dictionary): void {
+  supplements.set(locale, [...(supplements.get(locale) ?? []), tree])
+  const current = dictionaries.value.get(locale)
+  if (current) {
+    dictionaries.value.set(locale, fillMissing(current, tree))
+    triggerRef(dictionaries)
+  }
+}
+
+function withSupplements(locale: AdminLocale, messages: Dictionary): Dictionary {
+  return (supplements.get(locale) ?? []).reduce(fillMissing, messages)
+}
+
+/** `base` with every key of `extra` it lacks added; `base` wins on conflict. Returns a new object. */
+function fillMissing(base: Dictionary, extra: Dictionary): Dictionary {
+  const out: Dictionary = { ...base }
+  for (const [key, value] of Object.entries(extra)) {
+    const existing = out[key]
+    if (existing === undefined) {
+      out[key] = value
+    } else if (isDictionary(existing) && isDictionary(value)) {
+      out[key] = fillMissing(existing, value)
+    }
+  }
+  return out
+}
+
+function isDictionary(value: unknown): value is Dictionary {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

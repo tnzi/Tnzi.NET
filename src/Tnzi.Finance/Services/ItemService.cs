@@ -62,6 +62,7 @@ public class ItemService : ApplicationService, IItemService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _itemRepository.Discard(item); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<ItemDto>($"Item code '{item.Code}' already exists.", 409);
         }
 

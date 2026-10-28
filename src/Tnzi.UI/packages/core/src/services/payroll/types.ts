@@ -294,6 +294,13 @@ export interface PayRunListDto {
   grossTotal: number
   netTotal: number
   creationTime: string
+  /**
+   * Structure filter (null = everyone with an assignment). The edit form opens
+   * from the list row and the update replaces the run, so the row must carry
+   * it and `memo`: a field missing here is written back as null.
+   */
+  structureId?: string | null
+  memo?: string | null
 }
 
 export interface CreatePayRunDto {

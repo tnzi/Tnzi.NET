@@ -53,27 +53,45 @@ function writePersisted(key: string | null | undefined, mode: SidebarMode): void
  *
  * Entering the mobile breakpoint saves the current desktop mode and forces
  * `hidden`. Leaving the mobile breakpoint restores the remembered mode.
+ * Starting below the breakpoint starts `hidden` too, with the persisted mode
+ * kept for when the viewport widens.
+ *
+ * Only modes chosen on a desktop viewport are persisted: below the breakpoint
+ * the sidebar is a drawer, and opening or closing it is not a layout
+ * preference (persisting it would bring a later desktop load back hidden).
+ *
+ * Below the breakpoint the drawer is only ever open (`expanded`) or closed
+ * (`hidden`): `setMode('icon')` there opens it expanded. A drawer holding the
+ * icon rail is a wide panel of unlabelled icons with no conversations in it,
+ * which is what a phone got whenever anything asked for the rail while narrow
+ * (the drawer's own collapse button, the rail, a product's own toggle).
  */
 export function useSidebarState(options: UseSidebarStateOptions = {}): UseSidebarStateReturn {
   const storageKey = options.storageKey === undefined ? 'tnzi-ui-ai-sidebar-mode' : options.storageKey
   const mobileBreakpoint = options.mobileBreakpoint ?? 768
-  const initial = readPersisted(storageKey) ?? options.initialMode ?? 'expanded'
-
-  const mode = ref<SidebarMode>(initial)
-  const rememberedDesktopMode = ref<SidebarMode>(initial === 'hidden' ? 'expanded' : initial)
+  const desktopMode = readPersisted(storageKey) ?? options.initialMode ?? 'expanded'
   const windowWidth = ref(typeof window === 'undefined' ? 1280 : window.innerWidth)
 
   const isMobile = computed(() => windowWidth.value < mobileBreakpoint)
 
+  const mode = ref<SidebarMode>(isMobile.value ? 'hidden' : desktopMode)
+  const rememberedDesktopMode = ref<SidebarMode>(desktopMode === 'hidden' ? 'expanded' : desktopMode)
+
   function setMode(next: SidebarMode): void {
-    mode.value = next
-    if (!isMobile.value) {
-      rememberedDesktopMode.value = next
+    if (isMobile.value) {
+      mode.value = next === 'hidden' ? 'hidden' : 'expanded'
+      return
     }
+    mode.value = next
+    rememberedDesktopMode.value = next
     writePersisted(storageKey, next)
   }
 
   function cycle(): void {
+    if (isMobile.value) {
+      setMode(mode.value === 'hidden' ? 'expanded' : 'hidden')
+      return
+    }
     const order: SidebarMode[] = ['expanded', 'icon', 'hidden']
     const currentIndex = order.indexOf(mode.value)
     const nextMode = order[(currentIndex + 1) % order.length] ?? 'expanded'
@@ -104,6 +122,10 @@ export function useSidebarState(options: UseSidebarStateOptions = {}): UseSideba
   // consumer's store factory), so deferring would break those callers.
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', onResize)
+    /* Read again once the first frame is laid out: a mobile browser can report
+       a desktop-sized layout viewport while the page's viewport meta is still
+       being applied, and does not always follow it with a resize event. */
+    if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(onResize)
   }
 
   let disposed = false

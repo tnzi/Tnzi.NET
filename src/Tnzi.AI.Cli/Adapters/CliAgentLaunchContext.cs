@@ -8,13 +8,13 @@ public sealed record CliAgentLaunchContext
     /// <summary>provider 描述（协议、被禁参数、记忆文件名等）。</summary>
     public required CliProviderDescriptor Provider { get; init; }
 
-    /// <summary>已解析的可执行文件绝对路径。</summary>
+    /// <summary>已解析的可执行文件绝对路径（执行目标上的）。</summary>
     public required string ExecutablePath { get; init; }
 
     /// <summary>提示词。经 stdin 投递，绝不作为命令行参数。</summary>
     public required string Prompt { get; init; }
 
-    /// <summary>子进程工作目录。</summary>
+    /// <summary>子进程工作目录（执行目标上的路径）。</summary>
     public required string WorkingDirectory { get; init; }
 
     /// <summary>模型覆盖。空 = 用 CLI 自己的默认。</summary>
@@ -27,24 +27,71 @@ public sealed record CliAgentLaunchContext
     public string? ResumeSessionId { get; init; }
 
     /// <summary>
-    /// 本次<b>意图</b>续接（即使 <see cref="ResumeSessionId"/> 被重试清空）。
-    /// 用于在开新会话时向用户披露「上一轮的上下文已丢失」—— 不说的话，
-    /// agent 会自然地假装连续性（"如我之前所说…"），而用户无从察觉。
+    /// 非空则从 <see cref="ResumeSessionId"/> 的这个条目处截断、分叉成一个新会话续接（丢掉它之后的轮次）。
+    /// 只对 <see cref="CliProviderDescriptor.SupportsResumeAtEntry"/> 的 provider 给出。
     /// </summary>
-    public bool ResumeExpected { get; init; }
+    public string? ResumeAtEntryId { get; init; }
 
-    /// <summary>无原生记忆文件的 provider 才用；其余留空（brief 已写进工作目录）。</summary>
+    /// <summary>
+    /// 随提示一起投递的附件（已校验过的图片与 PDF）。只对 <see cref="CliProviderDescriptor.AcceptsAttachments"/> 的 provider 给出。
+    /// </summary>
+    public IReadOnlyList<CliPromptAttachment> Attachments { get; init; } = [];
+
+    /// <summary>
+    /// 内联在提示前面的 agent 说明。两种情况才有值：provider 没有原生记忆文件（每一轮都带）；
+    /// 工作目录是用户提供的而 provider 不能以文件接收追加系统提示（只在新会话的第一条提示里带，续接的会话里已经有了）。
+    /// 其余留空（brief 已写进记忆文件或追加系统提示文件）。
+    /// </summary>
     public string? InlineSystemPrompt { get; init; }
 
     /// <summary>
-    /// 受管 MCP 配置文件的绝对路径。null = 继承 provider 的本机配置。
+    /// 受管 MCP 配置文件在执行目标上的绝对路径。null = 继承 provider 在执行位置上的本机配置。
     /// </summary>
     /// <remarks>
-    /// 刻意传<b>路径</b>而不是 JSON：文件由工作区布置器写在运行目录内，
-    /// 于是它的生命周期与工作区一致，由同一套回收逻辑管掉。适配器写系统临时目录的话，
-    /// 进程被强杀时就没人删了。
+    /// 文件由工作区布置器写在运行目录内，于是它的生命周期与工作区一致，由同一套回收逻辑管掉。
+    /// 适配器写系统临时目录的话，进程被强杀时就没人删了。把路径交给 CLI 的适配器（stream-json 的
+    /// <c>--mcp-config</c>）用它；要读内容的适配器用 <see cref="McpConfigJson"/>，不去读这个文件。
     /// </remarks>
     public string? McpConfigPath { get; init; }
+
+    /// <summary>
+    /// 受管 MCP 配置的内容（与 <see cref="McpConfigPath"/> 处的文件逐字相同）。null = 没有受管配置。
+    /// </summary>
+    /// <remarks>
+    /// ACP 在 <c>session/new</c> 里以参数投递 MCP server，需要内容而不是路径。文件在执行目标上，
+    /// 远程目标的文件 API 进程读不到，所以内容随启动上下文一起来。
+    /// </remarks>
+    public string? McpConfigJson { get; init; }
+
+    /// <summary>
+    /// 这次运行的权限档位（<see cref="CliLaunchProfile.PermissionMode"/>）。stream-json 落成 <c>--permission-mode</c>，
+    /// ACP 落在对权限请求的应答上。
+    /// </summary>
+    public CliPermissionMode PermissionMode { get; init; } = CliPermissionMode.Full;
+
+    /// <summary>
+    /// true = 档位不自动放行的权限请求交给使用方批准：适配器产出 <see cref="CliAgentEventType.PermissionRequest"/> 事件、不应答，
+    /// 等执行器经 <see cref="ICliProtocolAdapter.AnswerPermissionAsync"/> 把回答交回来。false = 按档位当场应答（此前的行为）。
+    /// </summary>
+    /// <remarks>执行器只在 <see cref="CliPermissionMode.Ask"/> 且这一轮有人值守时置 true。</remarks>
+    public bool AsksForApproval { get; init; }
+
+    /// <summary>
+    /// 有受管 MCP 配置时是否只用它（stream-json 的 <c>--strict-mcp-config</c>）。执行器按启动档案设置；
+    /// 缺省 true 只是为直接构造这个上下文的调用方保持旧行为。
+    /// </summary>
+    public bool StrictMcpConfig { get; init; } = true;
+
+    /// <summary>
+    /// 框架为这次运行组出的参数（隔离档位、启动档案、追加系统提示、附加目录），排在 <see cref="ExtraArgs"/> 之前，不经被禁参数过滤。
+    /// </summary>
+    public IReadOnlyList<string> ManagedArgs { get; init; } = [];
+
+    /// <summary>
+    /// 这次运行由启动档案接管的开关：与 provider 的被禁参数一起，从 <see cref="ExtraArgs"/> 与 <see cref="CustomArgs"/> 里丢弃。
+    /// </summary>
+    public IReadOnlyDictionary<string, BlockedArgMode> OwnedArgs { get; init; }
+        = new Dictionary<string, BlockedArgMode>(StringComparer.Ordinal);
 
     /// <summary>部署级默认参数，先于 <see cref="CustomArgs"/> 追加。</summary>
     public IReadOnlyList<string> ExtraArgs { get; init; } = [];
@@ -67,6 +114,18 @@ public sealed record CliAgentLaunchContext
 
     /// <summary>整树终止的宽限期。</summary>
     public TimeSpan TerminateGrace { get; init; } = TimeSpan.FromSeconds(5);
+}
+
+/// <summary>
+/// 随提示投递给 CLI 的一个附件。
+/// </summary>
+/// <param name="MediaType">媒体类型（PNG / JPEG / GIF / WebP 图片或 <c>application/pdf</c>）。</param>
+/// <param name="FileName">文件名（用户给的话）。</param>
+/// <param name="Content">字节。</param>
+public sealed record CliPromptAttachment(string MediaType, string? FileName, byte[] Content)
+{
+    /// <summary>是否图片（否则是 PDF 文档）。</summary>
+    public bool IsImage => MediaType.StartsWith("image/", StringComparison.Ordinal);
 }
 
 /// <summary>

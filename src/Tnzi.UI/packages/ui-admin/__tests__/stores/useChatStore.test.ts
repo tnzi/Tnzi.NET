@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { MessageContentType } from '@tnzi/core/services/chat'
+import { MessageContentType, UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../src/stores/useChatStore'
 
 // Enum DTO fields are now PascalCase member-name strings; SignalR NewMessagePayload
@@ -349,5 +349,125 @@ describe('useChatStore - presence + sorting (U7)', () => {
     expect(sorted[0].id).toBe('s2')  // sticky, newer
     expect(sorted[1].id).toBe('s1')  // sticky, older
     expect(sorted[2].id).toBe('n1')  // non-sticky (but newest overall - still last)
+  })
+})
+
+// The store lives in memory for the life of the tab and a sign-out navigates
+// (it does not reload), so whatever is left here is what the next user to sign
+// in on the same tab starts from.
+describe('useChatStore - session boundaries', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  /** A store that holds user A's chat: config, list, an open thread, presence. */
+  async function signedInAsA() {
+    const bridge = {
+      ...mockBridge(),
+      getConfig: vi.fn(async () => ({ enabled: true })),
+      getPresence: vi.fn(async () => [{ userId: 'peer', status: UserPresenceStatus.Busy, lastSeenAt: null }]),
+      getMyStatus: vi.fn(async () => UserPresenceStatus.Away),
+    }
+    const store = useChatStore()
+    store.init(bridge as never)
+    store.claimForUser('user-a')
+    await store.loadConfig()
+    await store.fetchConversations()
+    await store.openConversation('c1')
+    await store.loadPresence(['peer'])
+    await store.loadMyStatus()
+    store.setWindowVisible(true)
+    return { store, bridge }
+  }
+
+  function expectSignedOutState(store: ReturnType<typeof useChatStore>) {
+    expect(store.config.enabled).toBe(false)
+    expect(store.conversations).toEqual([])
+    expect(store.totalUnread).toBe(0)
+    expect(store.activeId).toBeNull()
+    expect(store.messagesByConv).toEqual({})
+    expect(store.presenceByUser).toEqual({})
+    expect(store.myStatus).toBe(UserPresenceStatus.Online)
+    expect(store.windowVisible).toBe(false)
+  }
+
+  it('★ reset() returns to the signed-out state, chat disabled until the next probe', async () => {
+    const { store } = await signedInAsA()
+    expect(store.config.enabled).toBe(true)
+    expect(store.conversations).toHaveLength(2)
+    expect(store.messagesByConv.c1).toHaveLength(1)
+    expect(store.myStatus).toBe(UserPresenceStatus.Away)
+
+    store.reset()
+
+    expectSignedOutState(store)
+    expect(store.ownerId).toBe('')
+  })
+
+  it('★ claimForUser resets the state loaded for a different user', async () => {
+    const { store } = await signedInAsA()
+    store.claimForUser('user-b')
+    expectSignedOutState(store)
+    expect(store.ownerId).toBe('user-b')
+  })
+
+  it('claimForUser keeps the state of the same user and adopts an unclaimed one', async () => {
+    const { store } = await signedInAsA()
+    store.claimForUser('user-a')
+    expect(store.conversations).toHaveLength(2)
+
+    setActivePinia(createPinia())
+    const fresh = useChatStore()
+    fresh.init(mockBridge() as never)
+    await fresh.fetchConversations()
+    fresh.claimForUser('user-a')
+    expect(fresh.conversations).toHaveLength(2)
+    expect(fresh.ownerId).toBe('user-a')
+  })
+
+  it('★ a response from the previous session that lands after reset() is dropped', async () => {
+    const { store, bridge } = await signedInAsA()
+    store.reset()
+
+    // Requests started before the reset, answered after it.
+    let answerList!: (v: unknown) => void
+    let answerConfig!: (v: unknown) => void
+    let answerThread!: (v: unknown) => void
+    bridge.listConversations.mockImplementationOnce(() => new Promise((r) => { answerList = r }) as never)
+    bridge.getConfig.mockImplementationOnce(() => new Promise((r) => { answerConfig = r }) as never)
+    bridge.getMessages.mockImplementationOnce(() => new Promise((r) => { answerThread = r }) as never)
+    store.claimForUser('user-a')
+    const pending = [store.fetchConversations(), store.loadConfig(), store.openConversation('c1')]
+    store.reset() // user A signs out while those are in flight
+    answerList([{ id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 7, isMuted: false, memberCount: 2 }])
+    answerConfig({ enabled: true })
+    answerThread({ messages: [{ id: 'm1', conversationId: 'c1', content: 'secret', sentAt: '' }], hasMore: false })
+    await Promise.all(pending)
+
+    expectSignedOutState(store)
+    expect(store.loading).toBe(false)
+  })
+
+  it('a write answered after reset() does not refetch the list into the next session', async () => {
+    const { store, bridge } = await signedInAsA()
+    let answer!: () => void
+    const renameGroup = vi.fn(() => new Promise<void>((r) => { answer = r }))
+    store.init({ ...bridge, renameGroup } as never)
+    const renaming = store.renameGroup('c1', 'New name')
+    store.reset()
+    bridge.listConversations.mockClear()
+    answer()
+    await renaming
+    expect(bridge.listConversations).not.toHaveBeenCalled()
+    expect(store.conversations).toEqual([])
+  })
+
+  it('a send rejected after reset() leaves no failed placeholder in the new session', async () => {
+    const { store, bridge } = await signedInAsA()
+    let reject!: (e: unknown) => void
+    bridge.sendMessage.mockImplementationOnce(() => new Promise((_r, j) => { reject = j }) as never)
+    const sending = store.sendText('c1', 'hello').catch(() => undefined)
+    store.reset()
+    reject(new Error('Forbidden'))
+    await sending
+    expect(store.messagesByConv).toEqual({})
   })
 })

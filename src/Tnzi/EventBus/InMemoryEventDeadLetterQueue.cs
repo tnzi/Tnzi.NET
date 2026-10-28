@@ -7,9 +7,13 @@ namespace Tnzi.EventBus;
 /// 容量由 EventBusOptions.DeadLetterQueueCapacity 控制,超限时驱逐失败时间最旧的条目并记录警告,
 /// 防止处理器持续失败导致内存无界增长;重启后内容丢失
 /// </summary>
+/// <remarks>
+/// 按「事件 + 处理器」记账:同一事件的多个处理器都失败时每个处理器各留一条(重放要知道是哪几个处理器没跑成),
+/// 同一处理器对同一事件再次失败时以最近一次为准。<see cref="RemoveAsync"/> 移除该事件的全部条目。
+/// </remarks>
 public class InMemoryEventDeadLetterQueue : IEventDeadLetterQueue
 {
-    private readonly ConcurrentDictionary<Guid, DeadLetterEvent> _deadLetters = new();
+    private readonly ConcurrentDictionary<(Guid EventId, string HandlerTypeName), DeadLetterEvent> _deadLetters = new();
     private readonly ILogger<InMemoryEventDeadLetterQueue>? _logger;
     private readonly int _capacity;
     private readonly object _evictionLock = new();
@@ -36,19 +40,22 @@ public class InMemoryEventDeadLetterQueue : IEventDeadLetterQueue
         Check.NotNull(handlerType);
         Check.NotNull(exception);
 
+        // 以运行时类型记账与序列化：总线按运行时类型派发，以 IEvent / 基类静态类型传进来的事件
+        // 若按 TEvent 记，类型名是 IEvent、序列化只剩基类字段，重放时还原不出原事件
+        var eventType = @event.GetType();
         var deadLetter = new DeadLetterEvent
         {
             EventId = @event.EventId,
-            EventTypeName = typeof(TEvent).FullName ?? typeof(TEvent).Name,
-            EventData = JsonSerializer.Serialize(@event, _jsonOptions),
+            EventTypeName = eventType.FullName ?? eventType.Name,
+            EventData = JsonSerializer.Serialize(@event, eventType, _jsonOptions),
             HandlerTypeName = handlerType.FullName ?? handlerType.Name,
             ExceptionMessage = exception.Message,
             ExceptionStackTrace = exception.StackTrace,
             FailedAt = DateTime.UtcNow,
-            RetryCount = 0 // 初始重试次数为 0，实际重试次数由调用方设置
+            RetryCount = 0 // 内存实现不记录重试次数
         };
 
-        _deadLetters.TryAdd(@event.EventId, deadLetter);
+        _deadLetters[(deadLetter.EventId, deadLetter.HandlerTypeName)] = deadLetter;
         EvictIfOverCapacity();
         return Task.CompletedTask;
     }
@@ -69,9 +76,9 @@ public class InMemoryEventDeadLetterQueue : IEventDeadLetterQueue
                 return;
 
             var evicted = 0;
-            foreach (var oldest in _deadLetters.Values.OrderBy(e => e.FailedAt).Take(overflow))
+            foreach (var oldest in _deadLetters.OrderBy(e => e.Value.FailedAt).Take(overflow).ToList())
             {
-                if (_deadLetters.TryRemove(oldest.EventId, out _))
+                if (_deadLetters.TryRemove(oldest.Key, out _))
                 {
                     evicted++;
                 }
@@ -97,7 +104,11 @@ public class InMemoryEventDeadLetterQueue : IEventDeadLetterQueue
     /// <inheritdoc />
     public Task RemoveAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
-        _deadLetters.TryRemove(eventId, out _);
+        foreach (var key in _deadLetters.Keys.Where(k => k.EventId == eventId).ToList())
+        {
+            _deadLetters.TryRemove(key, out _);
+        }
+
         return Task.CompletedTask;
     }
 

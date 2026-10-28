@@ -89,4 +89,38 @@ describe('Chat Conversations page', () => {
     await btn!.trigger('click')
     expect((wrapper.vm as unknown as { broadcastShow: boolean }).broadcastShow).toBe(true)
   })
+
+  // Opening A and then B before A answers: A's slower answer must not land
+  // under B's drawer, where a recall would then target A's message.
+  it('a slower answer for the conversation opened first does not replace the one opened after it', async () => {
+    let releaseFirst: () => void = () => undefined
+    detail.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseFirst = () => resolve({
+        id: 'c1', type: 'Group', title: 'Team Alpha', notice: null, ownerId: 'o1', ownerName: 'Bob',
+        directKey: null, memberCount: 3, messageCount: 2, lastMessageAt: null, creationTime: '2026-01-01T00:00:00Z',
+        members: [],
+      })
+    }) as never)
+    detail.mockImplementationOnce(async () => ({
+      id: 'c2', type: 'Direct', title: 'Carol', notice: null, ownerId: 'o2', ownerName: 'Carol',
+      directKey: 'k', memberCount: 2, messageCount: 1, lastMessageAt: null, creationTime: '2026-01-02T00:00:00Z',
+      members: [],
+    }) as never)
+    const wrapper = mount(Conversations)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      crud: { openView: (row: unknown) => void }
+      detail: { id: string } | null
+    }
+    vm.crud.openView({ id: 'c1', title: 'Team Alpha' })
+    await flushPromises()
+    vm.crud.openView({ id: 'c2', title: 'Carol' })
+    await flushPromises()
+    expect(vm.detail?.id).toBe('c2')
+
+    releaseFirst()
+    await flushPromises()
+    expect(vm.detail?.id).toBe('c2')
+    expect(messages).not.toHaveBeenCalledWith('c1', expect.anything())
+  })
 })

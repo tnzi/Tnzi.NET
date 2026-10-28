@@ -14,9 +14,11 @@ import {
   TemplateSource,
   type EnvelopeListDto,
   type EnvelopeTemplateListDto,
+  type TemplateFieldDto,
 } from '@tnzi/core/services/signing'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem, FormSchemaSection } from '../_shared/form-schema'
+import { signingEnumKey } from './signing-labels'
 
 type StatusTone = 'success' | 'warning' | 'error' | 'info' | 'default'
 
@@ -75,6 +77,28 @@ export const SIGNING_FIELD_TYPE_OPTIONS = [
 export const FIELD_PLACEMENT_OPTIONS = [FieldPlacementMode.Absolute, FieldPlacementMode.Anchor] as const
 
 /**
+ * A field the SENDER fills when creating a request: no recipient role, and not
+ * a signature (signatures always belong to a recipient - the backend refuses a
+ * signature field without a role).
+ */
+export function isSenderField(field: Pick<TemplateFieldDto, 'type' | 'recipientRole'>): boolean {
+  return (
+    field.type !== SigningFieldType.Signature &&
+    field.type !== SigningFieldType.Initials &&
+    !(field.recipientRole ?? '').trim()
+  )
+}
+
+/**
+ * A sender field that must be given a value on the create form. Bound fields
+ * are exempt: their value comes from the host record, and the backend's send
+ * check (409 naming the field) covers a record that has no such value.
+ */
+export function isRequiredAtCreate(field: Pick<TemplateFieldDto, 'required' | 'binding'>): boolean {
+  return field.required && !(field.binding ?? '').trim()
+}
+
+/**
  * Columns exist because `useCrudPage` needs them for column settings and the
  * mobile card fallback; both signing pages render their own shapes (document
  * rows / tiles) rather than a grid.
@@ -106,15 +130,15 @@ export const templateFormSections: FormSchemaSection[] = [
 ]
 
 export const templateFormSchema: FormSchemaItem[] = [
-  { key: 'name', label: 'form.name', type: 'input', required: true, section: 'basics' },
-  { key: 'category', label: 'form.category', type: 'input', section: 'basics' },
+  { key: 'name', label: 'form.name', type: 'text', required: true, section: 'basics' },
+  { key: 'category', label: 'form.category', type: 'text', section: 'basics' },
   {
     key: 'source',
     label: 'form.source',
     type: 'select',
     required: true,
     section: 'basics',
-    options: TEMPLATE_SOURCE_OPTIONS.map((v) => ({ label: v, value: v })),
+    options: TEMPLATE_SOURCE_OPTIONS.map((v) => ({ label: v, labelKey: signingEnumKey('templateSource', v), value: v })),
   },
   { key: 'isActive', label: 'form.isActive', type: 'switch', section: 'basics' },
   {
@@ -126,7 +150,7 @@ export const templateFormSchema: FormSchemaItem[] = [
   // Which host record types may use this template. Empty means "any" - and the
   // backend treats it that way, so leaving it blank is a real answer, not a
   // missing one.
-  { key: 'hostEntityTypes', label: 'form.hostEntityTypes', type: 'input', section: 'basics' },
+  { key: 'hostEntityTypes', label: 'form.hostEntityTypes', type: 'text', section: 'basics' },
   {
     key: 'bodyTemplate',
     label: 'form.bodyTemplate',
@@ -146,6 +170,17 @@ export const templateFormSchema: FormSchemaItem[] = [
     section: 'source',
     span: 'full',
   },
-  { key: 'pageCount', label: 'form.pageCount', type: 'number', section: 'source', min: 1 },
+  // An uploaded template's page count is read from its PDF by the backend (a
+  // typed number used to be trusted, and a field on a page that did not exist
+  // only failed at sealing, after everyone had signed). Only a composed
+  // template, which has no document yet, declares one.
+  {
+    key: 'pageCount',
+    label: 'form.pageCount',
+    type: 'number',
+    section: 'source',
+    min: 1,
+    visible: (model) => model.source !== TemplateSource.Uploaded,
+  },
   { key: 'fields', label: 'form.fields', type: 'custom', section: 'fields' },
 ]

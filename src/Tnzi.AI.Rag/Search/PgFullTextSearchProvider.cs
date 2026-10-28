@@ -83,7 +83,8 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
                 Content = reader.GetString(1),
                 DocumentId = reader.GetGuid(2),
                 KnowledgeBaseId = reader.GetGuid(3),
-                Score = reader.GetFloat(4)
+                ChunkIndex = reader.GetInt32(4),
+                Score = reader.GetFloat(5)
             });
         }
 
@@ -109,7 +110,7 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
         {
             var tenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "");
             return $"""
-              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId",
+              SELECT "Id", "Content", "DocumentId", "KnowledgeBaseId", "ChunkIndex",
                      ts_rank(to_tsvector('english', "Content"), plainto_tsquery('english', @query)) AS score
               FROM "{chunkTable}"
               WHERE "KnowledgeBaseId" = @kbId
@@ -121,7 +122,7 @@ public class PgFullTextSearchProvider : IKeywordSearchProvider
 
         var joinTenantPredicate = RagTenantSqlFilter.BuildPredicate(tenantId, columnQualifier: "c.");
         return $"""
-              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId",
+              SELECT c."Id", c."Content", c."DocumentId", c."KnowledgeBaseId", c."ChunkIndex",
                      ts_rank(to_tsvector('english', c."Content"), plainto_tsquery('english', @query)) AS score
               FROM "{chunkTable}" c
               INNER JOIN "{knowledgeBaseTable}" kb ON c."KnowledgeBaseId" = kb."Id"

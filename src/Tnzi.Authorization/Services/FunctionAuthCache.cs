@@ -36,26 +36,39 @@ public class FunctionAuthCache
     }
 
     /// <summary>
-    /// 获取用户的权限名称集合
+    /// 获取用户在指定分区下的权限名称集合；没有缓存、或缓存的是另一个分区算出来的集合时返回 <c>null</c>。
     /// </summary>
+    /// <remarks>
+    /// ★ 一个用户只有一个键，值上带着它是在哪个分区（租户过滤器）之下算出来的。
+    /// 分区放在值里而不是键里，是为了让所有失效路径保持「按用户删一个键」：
+    /// 角色成员变化、直授变化、角色授权变化在哪个租户上下文里发生都删得到，不必知道这个人在哪些分区里留过缓存。
+    /// 分区不同按未命中处理：那份集合是别的租户视角下的事实，读给这个分区就是越权或者漏权。
+    /// </remarks>
     /// <param name="userId">用户ID</param>
+    /// <param name="partition">当前请求的分区（见 <c>PermissionCachePartition</c>）</param>
     /// <returns>权限名称集合</returns>
-    public async Task<IEnumerable<string>?> GetUserPermissionNamesAsync(Guid userId)
+    public async Task<IEnumerable<string>?> GetUserPermissionNamesAsync(Guid userId, string partition)
     {
-        string cacheKey = CacheKeys.Authorization.UserFunctions(userId);
-        return await _cache.GetAsync<IEnumerable<string>>(cacheKey);
+        Check.NotNullOrWhiteSpace(partition);
+        var entry = await _cache.GetAsync<UserPermissionEntry>(CacheKeys.Authorization.UserFunctions(userId));
+        return entry != null && string.Equals(entry.Partition, partition, StringComparison.Ordinal)
+            ? entry.Codes
+            : null;
     }
 
     /// <summary>
-    /// 设置用户的权限名称集合
+    /// 设置用户在指定分区下的权限名称集合（覆盖这个用户此前缓存的任何分区）。
     /// </summary>
     /// <param name="userId">用户ID</param>
+    /// <param name="partition">算出这份集合时的分区</param>
     /// <param name="permissionNames">权限名称集合</param>
     /// <returns>任务</returns>
-    public async Task SetUserPermissionNamesAsync(Guid userId, IEnumerable<string> permissionNames)
+    public async Task SetUserPermissionNamesAsync(Guid userId, string partition, IEnumerable<string> permissionNames)
     {
-        string cacheKey = CacheKeys.Authorization.UserFunctions(userId);
-        await _cache.SetAsync(cacheKey, permissionNames, DefaultCacheExpiration);
+        Check.NotNullOrWhiteSpace(partition);
+        Check.NotNull(permissionNames);
+        var entry = new UserPermissionEntry { Partition = partition, Codes = permissionNames.ToList() };
+        await _cache.SetAsync(CacheKeys.Authorization.UserFunctions(userId), entry, DefaultCacheExpiration);
     }
 
     /// <summary>
@@ -129,5 +142,12 @@ public class FunctionAuthCache
     public Task InvalidateSuperAdminCatalogueAsync()
         => _cache.RemoveAsync(SuperAdminCatalogueKey);
 
+    /// <summary>缓存值：一份权限集，连同它是在哪个分区之下算出来的。</summary>
+    private sealed class UserPermissionEntry
+    {
+        public string Partition { get; init; } = string.Empty;
+
+        public List<string> Codes { get; init; } = [];
+    }
 }
 

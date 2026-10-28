@@ -44,7 +44,13 @@ public partial class PayRunService
     {
         Check.NotNull(input);
 
-        var run = await _runRepo.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        // 列宽在入口先查（缘由见 PayrollFieldLimits）：备注按修剪后要落库的那个值算。
+        var noteTooLong = PayrollFieldLimits.FirstTooLong((input.Note?.Trim(), PayrollFieldLimits.InputNoteMaxLength, "note"));
+        if (noteTooLong != null)
+            return Fail<PayRunInputDto>(noteTooLong, 400);
+
+        // 跟踪加载：门判与重算依据的是这一份快照，提交时以它的并发戳认领批次（见 ClaimRunForInputChangeAsync）。
+        var run = await _runRepo.AsQueryable(true).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (run == null)
             return Fail<PayRunInputDto>("Pay run not found.", 404);
 
@@ -76,8 +82,9 @@ public partial class PayRunService
             entity = await ExecuteInUnitOfWorkAsync(async ct =>
             {
                 var saved = await UpsertInputAsync(id, input, note, ct);
+                await ClaimRunForInputChangeAsync(run, ct);
 
-                var recalc = await RecalculateForInputChangeAsync(run, input.EmployeeId, ct);
+                var recalc = await RecalculateForInputChangeAsync(run, input.EmployeeId, requirePayslip: true, ct);
                 if (!recalc.Succeeded)
                     throw new PayrollUnitOfWorkAbortException(recalc);
 
@@ -87,6 +94,10 @@ public partial class PayRunService
         catch (PayrollUnitOfWorkAbortException ex)
         {
             return Fail<PayRunInputDto>(ex.Result.Message ?? "Recalculation failed.", ex.Result.Code ?? 400);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail<PayRunInputDto>(InputConcurrencyMessage, 409);
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
@@ -127,7 +138,7 @@ public partial class PayRunService
 
     public async Task<Result> DeleteInputAsync(Guid id, Guid inputId, CancellationToken cancellationToken = default)
     {
-        var run = await _runRepo.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        var run = await _runRepo.AsQueryable(true).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (run == null)
             return Fail("Pay run not found.", 404);
 
@@ -140,6 +151,14 @@ public partial class PayRunService
             return Fail("One-time input not found.", 404);
 
         var employeeId = entity.EmployeeId;
+
+        // ★ 人已经不在这个批次里（停用 / 离职日回填 / 分配换了结构或频率）时不重算他那张旧工资单：
+        // 重算必然失败（「不再合格」，或再报一次孤儿输入），删除随之回滚，而整批重算正因为这些输入
+        // 拒绝并要求先删掉它们，两条路互相堵死。删掉之后整批重算会连同那张旧工资单一起去掉他。
+        var employee = await _employeeRepo.AsNoTracking().FirstOrDefaultAsync(e => e.Id == employeeId, cancellationToken);
+        var stillSelected = employee != null
+            && (await EvaluateEligibilityAsync(run, employee, cancellationToken)).Status == PayRunEligibilityStatus.Eligible;
+
         try
         {
             // 与 SetInputAsync 同理：删除与重算要么一起成立，要么都不成立。
@@ -147,8 +166,12 @@ public partial class PayRunService
             {
                 await _inputRepo.DeleteAsync(entity, ct);
                 await _inputRepo.SaveChangesAsync(ct);
+                await ClaimRunForInputChangeAsync(run, ct);
 
-                var recalc = await RecalculateForInputChangeAsync(run, employeeId, ct);
+                // 删除不要求有工资单：没有工资单的那一笔本来就没人读，删掉正是出路。
+                var recalc = stillSelected
+                    ? await RecalculateForInputChangeAsync(run, employeeId, requirePayslip: false, ct)
+                    : Ok();
                 if (!recalc.Succeeded)
                     throw new PayrollUnitOfWorkAbortException(recalc);
             }, cancellationToken);
@@ -157,8 +180,32 @@ public partial class PayRunService
         {
             return Fail(ex.Result.Message ?? "Recalculation failed.", ex.Result.Code ?? 400);
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail(InputConcurrencyMessage, 409);
+        }
 
         return Ok();
+    }
+
+    private const string InputConcurrencyMessage =
+        "The pay run was modified concurrently (for example, it was being calculated). Reload and try again.";
+
+    /// <summary>
+    /// 输入的增删同时写一次批次行（框架在每次修改时轮换并发戳），让它与整批计算互斥。
+    /// </summary>
+    /// <remarks>
+    /// ★ 整批计算先读全部输入、再在自己的事务里把批次落成 Calculated。草稿态的录入此前不写批次行，
+    /// 批次的并发戳就管不到它：计算读完输入之后才提交的一笔奖金，会被一张不含它的工资单「算完」，
+    /// 两边都返回成功，批次照常过账（删除方向则是删掉的奖金照发）。在这里认领批次之后，
+    /// 两个请求里后提交的那一个撞上并发戳回滚并答 409，不会两个都成功。
+    /// 门判与重算用的都是 <paramref name="run"/> 这一份跟踪快照，所以「读到草稿、跳过重算」
+    /// 也只在提交时批次仍是那个状态才成立。
+    /// </remarks>
+    private async Task ClaimRunForInputChangeAsync(PayRun run, CancellationToken cancellationToken)
+    {
+        await _runRepo.UpdateAsync(run, cancellationToken);
+        await _runRepo.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
@@ -195,24 +242,10 @@ public partial class PayRunService
         if (!component.IsActive)
             return Result.Failure<(Employee, SalaryComponent)>($"Salary component '{component.Code}' is inactive.", 400);
 
-        var periodEnd = run.PeriodEnd.ToUtcDate();
-
-        // 圈选判据与计算器同源（PayRunEligibility）——数据库侧的 Where 只是少拉数据的预筛。
-        var candidates = await _assignmentRepo.AsNoTracking()
-            .Where(a => a.EmployeeId == employeeId && a.EffectiveFrom <= periodEnd)
-            .ToListAsync(cancellationToken);
-        var assignment = PayRunEligibility.PickEffective(candidates, periodEnd);
-
-        var eligibility = PayRunEligibility.Evaluate(run, employee, assignment);
+        var (eligibility, structure) = await EvaluateEligibilityAsync(run, employee, cancellationToken);
         if (eligibility != PayRunEligibilityStatus.Eligible)
             return Result.Failure<(Employee, SalaryComponent)>(DescribeIneligibility(employee, eligibility), 400);
 
-        // Eligible 蕴含分配非空（Evaluate 对 null 返回 NoAssignment），编译器推不出来。
-        var effective = Check.NotNull(assignment);
-
-        var structure = await _structureRepo.AsNoTracking()
-            .Include(s => s.Lines)
-            .FirstOrDefaultAsync(s => s.Id == effective.StructureId, cancellationToken);
         var structureLine = structure?.Lines.FirstOrDefault(l => l.ComponentId == componentId);
 
         // 可读性判据与计算端同源（PayRunInputBinding）——跑批时那一侧会再核一次。
@@ -221,6 +254,28 @@ public partial class PayRunService
             return Result.Failure<(Employee, SalaryComponent)>(DescribeUnreadableInput(employee, component, binding), 400);
 
         return Result.Success((employee, component));
+    }
+
+    /// <summary>
+    /// 这个员工此刻在不在本批次的圈选范围里，连同他本期生效的薪资结构（含行；没有分配时为 null）。
+    /// </summary>
+    /// <remarks>圈选判据与计算器同源（<see cref="PayRunEligibility"/>）；数据库侧的 Where 只是少拉数据的预筛。</remarks>
+    private async Task<(PayRunEligibilityStatus Status, SalaryStructure? Structure)> EvaluateEligibilityAsync(
+        PayRun run, Employee employee, CancellationToken cancellationToken)
+    {
+        var periodEnd = run.PeriodEnd.ToUtcDate();
+        var candidates = await _assignmentRepo.AsNoTracking()
+            .Where(a => a.EmployeeId == employee.Id && a.EffectiveFrom <= periodEnd)
+            .ToListAsync(cancellationToken);
+        var assignment = PayRunEligibility.PickEffective(candidates, periodEnd);
+
+        var structure = assignment == null
+            ? null
+            : await _structureRepo.AsNoTracking()
+                .Include(s => s.Lines)
+                .FirstOrDefaultAsync(s => s.Id == assignment.StructureId, cancellationToken);
+
+        return (PayRunEligibility.Evaluate(run, employee, assignment, structure?.Frequency), structure);
     }
 
     /// <summary>把"读不到"的原因翻成录入端的 400（判据本身在 <see cref="PayRunInputBinding"/>）</summary>
@@ -246,6 +301,10 @@ public partial class PayRunService
             $"Employee '{employee.Code}' has no salary assignment effective in this period.",
         PayRunEligibilityStatus.StructureMismatch =>
             $"Employee '{employee.Code}' is not included in this pay run (the run filters on a different salary structure).",
+        PayRunEligibilityStatus.NotYetHired =>
+            $"Employee '{employee.Code}' is not included in this pay run (their hire date is after the period end).",
+        PayRunEligibilityStatus.FrequencyMismatch =>
+            $"Employee '{employee.Code}' is not included in this pay run (their salary structure is paid at a different frequency).",
         _ => $"Employee '{employee.Code}' is not included in this pay run."
     };
 
@@ -254,8 +313,13 @@ public partial class PayRunService
     /// </summary>
     /// <remarks>
     /// 出勤天数取工资单现值而不是周期天数——否则"录一笔奖金"会顺手把已经改过的出勤天数冲回去。
+    /// <para>
+    /// ★ 已计算的批次里这个人没有工资单（批次算完之后他才合格，例如之后才拿到分配）：录入必须失败
+    /// （<paramref name="requirePayslip"/>）。此前直接放行，输入存下、返回 200，却没有任何一张工资单
+    /// 带上它，过账时那个人和那笔钱都不在批次里。先整批重算把他圈进来，再录。
+    /// </para>
     /// </remarks>
-    private async Task<Result> RecalculateForInputChangeAsync(PayRun run, Guid employeeId, CancellationToken cancellationToken)
+    private async Task<Result> RecalculateForInputChangeAsync(PayRun run, Guid employeeId, bool requirePayslip, CancellationToken cancellationToken)
     {
         if (run.Status != PayRunStatus.Calculated)
             return Ok();
@@ -263,7 +327,9 @@ public partial class PayRunService
         var payslip = await _payslipRepo.AsQueryable(true).Include(p => p.Lines)
             .FirstOrDefaultAsync(p => p.PayRunId == run.Id && p.EmployeeId == employeeId, cancellationToken);
         if (payslip == null)
-            return Ok();
+            return requirePayslip
+                ? Fail("This employee has no payslip in the calculated pay run, so the input would never be paid. Recalculate the pay run first, then enter the input.", 409)
+                : Ok();
 
         return await RecalculatePayslipAsync(run, payslip, payslip.WorkedDays, cancellationToken);
     }

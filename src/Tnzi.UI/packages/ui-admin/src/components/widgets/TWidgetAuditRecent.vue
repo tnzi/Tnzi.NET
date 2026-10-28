@@ -15,7 +15,8 @@ import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createAuditBridge } from '../../services/bridges/audit-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
+import { auditResultTone } from '../../utils/audit-result-tone'
 
 interface Props {
   /** How many rows to pull. Default 8. */
@@ -30,7 +31,7 @@ interface AuditRow {
   id: string
   user: string
   action: string
-  resultType: number | string | undefined
+  resultType: unknown
   time: string | undefined
 }
 
@@ -49,23 +50,16 @@ useWidgetData(async () => {
     const r = raw as unknown as Record<string, unknown>
     return {
       id: String(r.id ?? ''),
-      user: String(r.userName ?? r.userId ?? translatePageKey('', 'admin.modules.audit.logs.anonymous') ?? 'anonymous'),
+      user: String(r.userName ?? r.userId ?? translateChromeKey('admin.modules.audit.logs.anonymous', 'anonymous')),
       action: String(r.functionName ?? r.action ?? EMPTY_DASH),
-      resultType: r.resultType as number | string | undefined,
+      resultType: r.resultType,
       time: (r.startTime ?? r.creationTime) as string | undefined,
     }
   })
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
-}
-
-function resultTone(value: number | string | undefined): 'success' | 'warning' | 'error' | 'default' {
-  if (value === 0 || value === '0' || value === 'success') return 'success'
-  if (value === 1 || value === '1' || value === 'failed') return 'error'
-  if (value === 2 || value === '2' || value === 'warning') return 'warning'
-  return 'default'
+  return translateChromeKey(key, fallback)
 }
 </script>
 
@@ -77,7 +71,7 @@ function resultTone(value: number | string | undefined): 'success' | 'warning' |
     </div>
     <ul v-else class="t-widget-audit__list">
       <li v-for="row in rows" :key="row.id" class="t-widget-audit__row">
-        <NTag size="tiny" :type="resultTone(row.resultType)" round>
+        <NTag size="tiny" :type="auditResultTone(row.resultType)" round>
           {{ row.action }}
         </NTag>
         <span class="t-widget-audit__user">{{ row.user }}</span>

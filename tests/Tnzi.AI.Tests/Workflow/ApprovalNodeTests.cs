@@ -71,6 +71,28 @@ public class ApprovalNodeTests
         result.Output.Metadata.ShouldContainKeyAndValue("step_id", "approval-step-1");
     }
 
+    /// <summary>
+    /// 中断原因里的内容摘录截到 200 个码元：截断点落在代理对中间时整个字符一起舍掉
+    /// （原因随检查点落库、显示在审批界面上）。
+    /// </summary>
+    [Fact]
+    public async Task CheckInterruptAsync_ContentCutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        // 第 200 个码元是 emoji 的前半个
+        var context = new WorkflowNodeContext
+        {
+            Step = new WorkflowStepDto { StepId = "approval-test" },
+            State = new WorkflowState(new string('a', 199) + "\U0001F600tail"),
+            DependencyOutputs = new Dictionary<string, WorkflowStepOutput>(),
+            ServiceProvider = Mock.Of<IServiceProvider>()
+        };
+
+        var interrupt = await _node.CheckInterruptAsync(context);
+
+        interrupt.ShouldNotBeNull();
+        interrupt.Reason.ShouldEndWith(": " + new string('a', 199) + "...");
+    }
+
     #region Helpers
 
     private static WorkflowNodeContext CreateContext(

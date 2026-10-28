@@ -11,7 +11,8 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// 开始事务（如果已启用事务，则只增加嵌套深度）
+    /// 开始事务：与 <see cref="EnableTransaction"/> 等价，嵌套深度 +1，物理事务延迟到首次保存才开启。
+    /// 与 <see cref="CommitTransactionAsync"/> / <see cref="RollbackTransactionAsync"/> 成对使用，可以嵌套。
     /// </summary>
     Task BeginTransactionAsync(CancellationToken cancellationToken = default);
     

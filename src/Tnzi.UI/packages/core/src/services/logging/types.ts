@@ -75,7 +75,7 @@ export interface LogSearchHitDto {
  * Why a log search stopped before reading everything - mirrors the backend
  * `LogSearchTruncation` enum (PascalCase member names).
  */
-export type LogSearchTruncation = 'None' | 'ResultLimit' | 'ByteBudget' | 'TimeBudget';
+export type LogSearchTruncation = 'None' | 'ResultLimit' | 'ByteBudget' | 'TimeBudget' | 'Cancelled';
 
 /**
  * Aggregate result of a keyword search across log files.

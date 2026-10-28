@@ -51,7 +51,7 @@
     <template v-if="footer" #footer>
       <slot name="footer" :submit="submit" :close="state.close">
         <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
-        <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="submit">{{ t('admin.common.confirm') }}</NButton>
+        <NButton v-if="rendered.mode.value !== 'view'" type="primary" :loading="busy" @click="submit">{{ t('admin.common.confirm') }}</NButton>
       </slot>
     </template>
   </TDrawerShell>
@@ -82,7 +82,7 @@
       <slot name="footer" :submit="submit" :close="state.close">
         <div class="t-detail-host__footer">
           <NButton @click="state.close">{{ t('admin.common.cancel') }}</NButton>
-          <NButton v-if="rendered.mode.value !== 'view'" type="primary" @click="submit">{{ t('admin.common.confirm') }}</NButton>
+          <NButton v-if="rendered.mode.value !== 'view'" type="primary" :loading="busy" @click="submit">{{ t('admin.common.confirm') }}</NButton>
         </div>
       </slot>
     </template>
@@ -90,7 +90,7 @@
 </template>
 
 <script setup lang="ts" generic="T">
-import { computed, useSlots } from 'vue'
+import { computed, ref, useSlots } from 'vue'
 import { NButton } from 'naive-ui'
 import { TModalShell, TDrawerShell, TSvgIcon } from '@tnzi/ui'
 import { provideFormHost } from '@tnzi/ui/headless'
@@ -194,8 +194,24 @@ const rendered = useRetainedFormState(props.state.form)
 // `state.submit` runs. The `#footer` slot receives this gated call, not the
 // raw `state.submit`, so a page-supplied footer gets the same block.
 const formHost = provideFormHost()
+
+// One save per Confirm (and per call of the slot's `submit`). `validating`
+// covers the async validation window; `form.submitting` covers the request,
+// raised by `useDetail.submit`. A hand-rolled state without the flag still
+// gets the first.
+const validating = ref(false)
+const busy = computed(() => validating.value || props.state.form?.submitting?.value === true)
+
 async function submit(): Promise<void> {
-  if (!(await formHost.validate())) return
+  if (busy.value) return
+  validating.value = true
+  let valid: boolean
+  try {
+    valid = await formHost.validate()
+  } finally {
+    validating.value = false
+  }
+  if (!valid) return
   await props.state.submit()
 }
 

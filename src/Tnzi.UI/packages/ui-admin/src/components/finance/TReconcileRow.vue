@@ -161,9 +161,12 @@ watch(
     tab.value = 'match'
     manualLineId.value = null
     // A rule already said what this line is - start from its answer rather than
-    // making the operator retype what the system just worked out.
-    docType.value = (props.txn.suggestedDocType as typeof docType.value | undefined)
-      ?? (isInbound.value ? BankFeedDocType.PaymentEntry : BankFeedDocType.Expense)
+    // making the operator retype what the system just worked out. An expense only
+    // ever records money going out, so a suggestion of one never applies to a deposit.
+    const suggested = props.txn.suggestedDocType as typeof docType.value | undefined
+    docType.value = suggested && !(suggested === BankFeedDocType.Expense && isInbound.value)
+      ? suggested
+      : (isInbound.value ? BankFeedDocType.PaymentEntry : BankFeedDocType.Expense)
     counterAccountId.value = props.txn.suggestedCounterAccountId ?? null
     partyId.value = props.txn.suggestedPartyId ?? null
   },
@@ -206,8 +209,10 @@ const confidenceType = computed(() => {
   return (props.txn.matchConfidence ?? 0) >= 1 ? ('success' as const) : ('warning' as const)
 })
 
+// The backend refuses an expense for money in (it would post the deposit as money
+// out); disabling it here keeps the operator from finding that out after a click.
 const docTypeOptions = computed<SelectOption[]>(() => [
-  { label: props.t('row.docExpense'), value: BankFeedDocType.Expense },
+  { label: props.t('row.docExpense'), value: BankFeedDocType.Expense, disabled: isInbound.value },
   { label: props.t('row.docPayment'), value: BankFeedDocType.PaymentEntry },
   { label: props.t('row.docTransfer'), value: BankFeedDocType.Transfer },
 ])

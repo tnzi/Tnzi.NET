@@ -23,6 +23,16 @@ public class AccessLogDto
     public string? UaOperatingSystem { get; set; }
     public string? UaDeviceType { get; set; }
     public bool UaIsMobile { get; set; }
+
+    /// <summary>
+    /// 这条访问所属的租户，由服务端从调用者身份定出、随队列带到后台落库。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="JsonIgnoreAttribute"/>：不出现在任何响应里，也<b>不接受</b>客户端经请求体指定，
+    /// 否则手工上报的入口可以把日志写进别的租户名下（服务层同样不信任 DTO 上已有的值，一律以调用者身份覆盖）。
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? TenantId { get; set; }
 }
 
 /// <summary>

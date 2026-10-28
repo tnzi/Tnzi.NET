@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 
@@ -14,6 +15,12 @@ vi.mock('naive-ui', async () => {
     useMessage: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
   }
 })
+// Shared with the tests so the preview / test-send requests can be read back.
+const templateActions = vi.hoisted(() => ({
+  preview: vi.fn(async () => ({ subject: 'Hi', content: 'Body', isHtml: false })),
+  sendTest: vi.fn(async () => undefined),
+}))
+
 vi.mock('../../../src/services/bridges/notification-bridge', () => ({
   createNotificationBridge: () => ({
     messages: {
@@ -28,7 +35,8 @@ vi.mock('../../../src/services/bridges/notification-bridge', () => ({
       create: vi.fn(async () => { throw new Error('backend gap') }),
       update: vi.fn(async () => { throw new Error('backend gap') }),
       delete: vi.fn(async () => { throw new Error('backend gap') }),
-      preview: vi.fn(async () => '<p>Preview content</p>'),
+      preview: templateActions.preview,
+      sendTest: templateActions.sendTest,
     },
     subscriptions: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
@@ -61,6 +69,25 @@ const stubs = {
 describe('Templates page (Phase 3.25)', () => {
   beforeEach(() => { setActivePinia(createPinia()) })
 
+  // Stored Razor runs in the server process on every send and preview, so the backend
+  // requires the Template module's code-execution codes on top of the notification ones.
+  // A user holding only notification.template.* must not see a create button that 403s.
+  async function createButtonFor(permissions: string[]): Promise<boolean> {
+    useAdminAuthStore().setUserInfo({ id: 'u1', username: 'tester', roles: [], permissions })
+    const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
+    const wrapper = mount(Templates, { global: { stubs } })
+    await nextTick()
+    return wrapper.find('.t-crud-page__create').exists()
+  }
+
+  it('hides create without the Template module code-execution grant', async () => {
+    expect(await createButtonFor(['notification.template.view', 'notification.template.create'])).toBe(false)
+  })
+
+  it('shows create when both gates are held', async () => {
+    expect(await createButtonFor(['notification.template.view', 'notification.template.create', 'template.template.create'])).toBe(true)
+  })
+
   it('mounts without throwing', async () => {
     const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
     const wrapper = mount(Templates, { global: { stubs } })
@@ -74,6 +101,101 @@ describe('Templates page (Phase 3.25)', () => {
     await nextTick()
     await new Promise(r => setTimeout(r, 10))
     expect(wrapper.find('.dt').exists()).toBe(true)
+  })
+})
+
+type TemplatesVm = {
+  openPreview: (row: Record<string, unknown>) => Promise<void>
+  openSendTest: (row: Record<string, unknown>) => void
+  runSendTest: () => Promise<void>
+  recipientAddress: string
+}
+
+describe('Templates page preview and test send', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    templateActions.preview.mockClear()
+    templateActions.sendTest.mockClear()
+  })
+
+  // An SMS template filed under its own category: the channel comes from the
+  // template's `type`, and the category goes along because the server finds a
+  // template by name AND category. Guessing the channel from the category
+  // previewed and test-sent this template as an email, and without the
+  // category the lookup used the channel name and missed it.
+  const smsRow = { id: 't1', templateName: 'otp', category: 'Auth', type: 'Sms', module: 'Notification' }
+
+  it('previews a template on its own channel and category', async () => {
+    const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
+    const wrapper = mount(Templates, { global: { stubs } })
+    await nextTick()
+    const vm = wrapper.vm as unknown as TemplatesVm
+
+    await vm.openPreview(smsRow)
+
+    expect(templateActions.preview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateName: 'otp', category: 'Auth', type: 'Sms' }),
+    )
+  })
+
+  it('test-sends a template on its own channel and category', async () => {
+    const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
+    const wrapper = mount(Templates, { global: { stubs } })
+    await nextTick()
+    const vm = wrapper.vm as unknown as TemplatesVm
+
+    vm.openSendTest(smsRow)
+    // The overlay opens asynchronously; the operator types after it is up.
+    await new Promise(r => setTimeout(r, 0))
+    vm.recipientAddress = '+15550100'
+    await vm.runSendTest()
+
+    expect(templateActions.sendTest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateName: 'otp', category: 'Auth', type: 'Sms', recipientAddress: '+15550100' }),
+    )
+  })
+
+  // A Generic template (the store default, and what a file template reports)
+  // names no channel; its category still does for the shipped Email / Sms /
+  // Push folders. A template filed under its channel name goes without a
+  // category, as real sends of it do, so the server's default lookup finds it.
+  it('falls back to the category for a template whose type names no channel', async () => {
+    const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
+    const wrapper = mount(Templates, { global: { stubs } })
+    await nextTick()
+    const vm = wrapper.vm as unknown as TemplatesVm
+
+    await vm.openPreview({ id: 't2', templateName: 'alert', category: 'Push', type: 'Generic' })
+
+    expect(templateActions.preview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ templateName: 'alert', category: null, type: 'Push' }),
+    )
+  })
+
+  // Preview and test-send run on the notifications endpoints, which check the
+  // message codes (`notification.message.view` / `.create`), not the template
+  // codes this page is reached with. A template editor without them got a 403
+  // on every Preview and Send test.
+  it('★ offers Preview and Send test by the message codes their endpoints check', async () => {
+    useAdminAuthStore().setUserInfo({
+      id: 'editor', username: 'editor', roles: [],
+      permissions: ['notification.template.view', 'notification.template.update'],
+    } as never)
+    const { default: Templates } = await import('../../../src/pages/notification/Templates.vue')
+    const wrapper = mount(Templates, { global: { stubs } })
+    await nextTick()
+    const actions = (wrapper.vm as unknown as { rowActions: Array<{ key: string; show?: (r: unknown) => boolean }> }).rowActions
+    const offered = () => actions.filter((a) => !a.show || a.show(smsRow)).map((a) => a.key)
+
+    expect(offered()).not.toContain('preview')
+    expect(offered()).not.toContain('sendTest')
+
+    useAdminAuthStore().setUserInfo({
+      id: 'sender', username: 'sender', roles: [],
+      permissions: ['notification.template.view', 'notification.message.view', 'notification.message.create'],
+    } as never)
+    expect(offered()).toContain('preview')
+    expect(offered()).toContain('sendTest')
   })
 })
 

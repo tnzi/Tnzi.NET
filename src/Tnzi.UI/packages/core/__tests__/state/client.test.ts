@@ -162,7 +162,7 @@ describe('createTnziClient session-expiry chain', () => {
       ok: status >= 200 && status < 300,
       status,
       statusText: 'x',
-      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
       headers: new Headers(),
     };
   }

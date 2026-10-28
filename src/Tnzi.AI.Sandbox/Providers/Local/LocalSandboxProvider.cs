@@ -60,7 +60,8 @@ public class LocalSandboxProvider : ISandboxProvider
             deniedCommandPrefixes: localOpts.DeniedCommandPrefixes,
             commandAnalyzer: _commandAnalyzer,
             deniedPatterns: localOpts.DeniedPatterns,
-            maxFileSize: options.MaxFileSizeBytes);
+            maxFileSize: options.MaxFileSizeBytes,
+            environmentWhitelist: options.EnvironmentWhitelist);
 
         return Task.FromResult(sandbox);
     }

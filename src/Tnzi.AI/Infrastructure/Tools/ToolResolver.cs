@@ -20,7 +20,7 @@ public interface IToolResolver
 /// <summary>
 /// 工具解析器 - 解析 C# 工具、OpenAPI 工具、MCP 工具并合并
 /// </summary>
-public class ToolResolver : IToolResolver, IDisposable
+public class ToolResolver : IToolResolver
 {
     private readonly IToolRegistry _toolRegistry;
     private readonly IMcpToolProvider _mcpToolProvider;
@@ -36,15 +36,6 @@ public class ToolResolver : IToolResolver, IDisposable
     private readonly ILogger<ApprovalToolWrapper>? _approvalLogger;
     private readonly ILogger _toolAdapterLogger;
     private readonly ILogger<ToolResolver> _logger;
-
-    /// <summary>
-    /// OpenAPI 工具缓存（线程安全的延迟初始化，避免重复拉取规范）
-    /// </summary>
-    private readonly SemaphoreSlim _openApiCacheLock = new(1, 1);
-    private readonly IDisposable? _optionsChangeListener;
-    private IReadOnlyList<AITool>? _openApiToolsCache;
-    private long _openApiCacheVersion;
-    private long _currentConfigVersion;
 
     public ToolResolver(
         IToolRegistry toolRegistry,
@@ -76,11 +67,6 @@ public class ToolResolver : IToolResolver, IDisposable
         _approvalLogger = lf.CreateLogger<ApprovalToolWrapper>();
         _toolAdapterLogger = lf.CreateLogger(typeof(ToolAdapter).FullName!);
         _logger = Check.NotNull(logger);
-
-        _optionsChangeListener = options.OnChange(_ =>
-        {
-            Interlocked.Increment(ref _currentConfigVersion);
-        });
     }
 
     /// <inheritdoc />
@@ -112,7 +98,10 @@ public class ToolResolver : IToolResolver, IDisposable
                 }
             }
 
-            var toolDefinitions = (IReadOnlyList<ToolDefinition>)toolDefMap.Values.ToList();
+            var memoryRecallOn = IsMemoryRecallEnabled();
+            var toolDefinitions = (IReadOnlyList<ToolDefinition>)toolDefMap.Values
+                .Where(td => memoryRecallOn || !string.Equals(td.GroupName, MemoryToolGroup, StringComparison.OrdinalIgnoreCase))
+                .ToList();
             csharpTools = ToolAdapter.ConvertToAITools(toolDefinitions, _serviceProvider, _toolAdapterLogger);
 
             if (csharpTools.Count > 0 && ShouldWrapWithApproval())
@@ -184,6 +173,21 @@ public class ToolResolver : IToolResolver, IDisposable
         return merged.Count > 0 ? merged : null;
     }
 
+    /// <summary>记忆工具组名（框架 <c>MemoryTools</c> 与应用自带的同组工具共用）。</summary>
+    private const string MemoryToolGroup = "memory";
+
+    /// <summary>
+    /// 记忆召回此刻是否开着（<c>ContextProviders.Enabled</c> 且 <c>ContextProviders.Memory.Enabled</c>）。
+    /// 关着时整个 memory 组不交给模型：save_memory 写下的记忆不会再被注入，留着它只会让模型以为记住了。
+    /// <c>Memory.Enabled</c> 是运行时设置，所以在每次解析时读当前值，而不是启动时从注册表删组：
+    /// 那样运行时关掉记忆后工具还在，以关闭状态启动后再打开则一直没有工具，直到重启。
+    /// </summary>
+    private bool IsMemoryRecallEnabled()
+    {
+        var contextProviders = _options.CurrentValue.ContextProviders;
+        return contextProviders.Enabled && contextProviders.Memory.Enabled;
+    }
+
     /// <summary>
     /// 在合并之后按 <see cref="SubAgentOptions"/> 的三份名单裁剪，C# / OpenAPI / MCP 工具一视同仁：
     /// <c>GlobalDisallowedTools</c> 对所有 Agent 生效；<c>SubAgentDisallowedTools</c> 只对子 Agent
@@ -227,7 +231,9 @@ public class ToolResolver : IToolResolver, IDisposable
     /// </summary>
     private IList<AITool> WrapWithApproval(IList<AITool> tools, IReadOnlyList<ToolDefinition> toolDefinitions)
     {
-        if (_approvalHandler == null && _permissionEvaluator == null) return tools;
+        // 判据是「有没有治理配置」，不是「有没有审批处理器」：审批开着而处理器缺席时也要包装，
+        // 由 ApprovalToolWrapper 把 Ask 决策失败关闭地拒掉；原样返回等于让需要审批的工具直接执行
+        if (!ShouldWrapWithApproval()) return tools;
 
         var approvalOptions = _options.CurrentValue.ToolApproval;
         var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -246,7 +252,8 @@ public class ToolResolver : IToolResolver, IDisposable
         => _options.CurrentValue.ToolApproval.Enabled || _permissionEvaluator != null;
 
     /// <summary>
-    /// 获取 OpenAPI 生成的工具（线程安全的延迟初始化缓存，配置变更时自动失效）
+    /// 获取 OpenAPI 生成的工具。缓存在单例 <see cref="OpenApiToolGenerator"/> 里（跨请求、配置变更时失效）：
+    /// 本类按请求创建，放在这里的缓存每个请求都是空的。
     /// </summary>
     private async Task<IReadOnlyList<AITool>?> GetOpenApiToolsAsync(CancellationToken ct)
     {
@@ -255,46 +262,19 @@ public class ToolResolver : IToolResolver, IDisposable
             return null;
         }
 
-        var configVersion = Volatile.Read(ref _currentConfigVersion);
-
-        // 快速路径：缓存有效且版本匹配
-        if (_openApiToolsCache != null && Volatile.Read(ref _openApiCacheVersion) == configVersion)
-        {
-            return _openApiToolsCache;
-        }
-
-        await _openApiCacheLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            // 二次检查：另一个线程可能已在等锁期间完成初始化
-            if (_openApiToolsCache != null && Volatile.Read(ref _openApiCacheVersion) == configVersion)
+            var tools = await _openApiToolGenerator.GenerateToolsAsync(ct).ConfigureAwait(false);
+            if (tools.Count > 0)
             {
-                return _openApiToolsCache;
+                _logger.LogDebug("Resolved {Count} OpenAPI tools", tools.Count);
             }
-
-            _openApiToolsCache = await _openApiToolGenerator.GenerateToolsAsync(ct).ConfigureAwait(false);
-            if (_openApiToolsCache.Count > 0)
-            {
-                _logger.LogDebug("Resolved {Count} OpenAPI tools", _openApiToolsCache.Count);
-            }
-            Volatile.Write(ref _openApiCacheVersion, configVersion);
-            return _openApiToolsCache;
+            return tools;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "Failed to generate OpenAPI tools, skipping");
             return null;
         }
-        finally
-        {
-            _openApiCacheLock.Release();
-        }
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        _optionsChangeListener?.Dispose();
-        _openApiCacheLock.Dispose();
     }
 }

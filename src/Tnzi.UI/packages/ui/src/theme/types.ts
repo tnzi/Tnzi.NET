@@ -30,10 +30,6 @@ export interface ThemeSettings {
   palettes: Record<ColorRole, ColorPalette>
   /** Theme mode. `'auto'` follows the OS colour scheme. */
   mode: ThemeMode
-  /** Whether info color should follow primary. */
-  isInfoFollowPrimary: boolean
-  /** Whether the user's chosen color should be recommended to the nearest soybean-style palette. */
-  recommendColor: boolean
   /** Naive UI overrides (raw, consumer-provided). Merged over the generated base by `buildNaiveThemeOverrides`. */
   naiveOverrides?: GlobalThemeOverrides
   /** The name of the preset this theme is derived from, if any. */

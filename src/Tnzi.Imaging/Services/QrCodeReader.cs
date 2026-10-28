@@ -58,6 +58,12 @@ public class QrCodeReader : IQrCodeReader
     /// </remarks>
     private const int MaxDimension = 10_000;
 
+    /// <summary>只识别、只解码首帧：解码器只读首帧的亮度（<see cref="DecodeSinglePass"/>）。</summary>
+    /// <remarks>
+    /// 边长检查只约束一帧；多帧 GIF / 多页 TIFF 若全部解出来，帧数就成了没有上限的乘数。
+    /// </remarks>
+    private static readonly DecoderOptions FirstFrameOnly = new() { MaxFrames = 1 };
+
     /// <inheritdoc />
     public async Task<QrCodeScanResult> ReadAsync(byte[] image, CancellationToken ct = default)
     {
@@ -139,14 +145,27 @@ public class QrCodeReader : IQrCodeReader
     /// 60000×60000，解出来就是几个 GB。<c>Identify</c> 只读头不解像素，
     /// 判完再决定要不要真的解 —— 先解了再检查尺寸的话，内存已经申请过了。
     /// </para>
+    /// <para>
+    /// ★ <b>只解首帧。</b>边长检查只约束一帧，而多帧 GIF / 多页 TIFF 的每一帧都是一整张画布：
+    /// 全部解出来时帧数就是一个没有上限的乘数。
+    /// </para>
+    /// <para>
+    /// ★ <b>BigTIFF 在 <c>Identify</c> 之前就拒绝。</b>本方法不走 <see cref="ImageDecodeGuard"/>
+    /// （它按边长自判、解成 <c>L8</c>），所以那道闸门里的 BigTIFF 判定要在这里再做一次：
+    /// ImageSharp 3.1 光是对 BigTIFF 做一次 <c>Identify</c> 就会空转（GHSA-wmxv-xphr-5c9g），
+    /// 而传真网关与扫描仪交回来的正是 TIFF。拒绝抛的是 <see cref="UnknownImageFormatException"/>，由下面同一个分支
+    /// 变成「这不是一张可读的图片」。
+    /// </para>
     /// </remarks>
     private static async Task<Image<L8>> LoadAsync(byte[] image, CancellationToken ct)
     {
         try
         {
+            ImageDecodeGuard.ThrowIfBigTiff(image);
+
             using var stream = new MemoryStream(image, writable: false);
 
-            var info = await Image.IdentifyAsync(stream, ct);
+            var info = await Image.IdentifyAsync(FirstFrameOnly, stream, ct);
             if (info.Width > MaxDimension || info.Height > MaxDimension)
             {
                 throw new ArgumentException(
@@ -155,7 +174,7 @@ public class QrCodeReader : IQrCodeReader
             }
 
             stream.Position = 0;
-            return await Image.LoadAsync<L8>(stream, ct);
+            return await Image.LoadAsync<L8>(FirstFrameOnly, stream, ct);
         }
         catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException)
         {

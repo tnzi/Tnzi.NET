@@ -7,7 +7,7 @@ namespace Tnzi.AI.Rag.Chunking;
 /// <para>
 /// 算法流程：
 /// 1. 将文本拆分为句子（以 .!?\n 为分隔符）
-/// 2. 通过 <see cref="IEmbeddingService"/> 批量生成每个句子的嵌入向量
+/// 2. 通过 <see cref="IEmbeddingService"/> 按 <c>AI:Rag:EmbeddingBatchSize</c> 分批生成每个句子的嵌入向量
 /// 3. 计算相邻句子间的余弦相似度
 /// 4. 在相似度低于阈值（默认 0.5）的位置确定分块边界
 /// 5. 将边界之间的句子合并为块
@@ -22,6 +22,10 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
     private readonly double _similarityThreshold;
     private readonly int _minChunkSize;
     private readonly EmbeddingOptions? _embeddingOptions;
+    private readonly int _embeddingBatchSize;
+
+    /// <summary>没有 RAG 配置时每批送去嵌入的句子数，与 <see cref="AIRagOptions.EmbeddingBatchSize"/> 的默认值相同。</summary>
+    private const int DefaultEmbeddingBatchSize = 200;
 
     private static readonly char[] SentenceDelimiters = ['.', '!', '?', '\n'];
 
@@ -51,6 +55,9 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
         _embeddingOptions = ragOptions is not null
             ? RagEmbeddingOptionsResolver.ResolveDefault(ragOptions.Value)
             : null;
+        _embeddingBatchSize = ragOptions?.Value.EmbeddingBatchSize is > 0 and var batchSize
+            ? batchSize
+            : DefaultEmbeddingBatchSize;
     }
 
     /// <inheritdoc />
@@ -75,16 +82,13 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
 
         _logger.LogDebug("Split text into {SentenceCount} sentences for semantic chunking", sentences.Count);
 
-        // 2. 批量生成嵌入（按 RAG 默认嵌入配置对齐 provider/model，与摄取/检索向量空间一致）
-        var embeddingResult = await _embeddingService.GenerateEmbeddingsAsync(sentences, _embeddingOptions, ct);
-        if (!embeddingResult.Succeeded || embeddingResult.Data == null || embeddingResult.Data.Count != sentences.Count)
+        // 2. 分批生成嵌入（按 RAG 默认嵌入配置对齐 provider/model，与摄取/检索向量空间一致）
+        var embeddings = await EmbedSentencesAsync(sentences, ct);
+        if (embeddings is null)
         {
             // 嵌入生成失败，回退到固定大小分块
-            _logger.LogWarning("Embedding generation failed for semantic chunking, falling back to fixed-size chunking");
             return new FixedSizeChunkingStrategy().Chunk(text, chunkSize, chunkOverlap);
         }
-
-        var embeddings = embeddingResult.Data;
 
         // 3. 计算相邻句子间余弦相似度并确定分块边界
         var breakPoints = FindBreakPoints(embeddings);
@@ -100,6 +104,36 @@ public class SemanticChunkingStrategy : IAsyncChunkingStrategy
         _logger.LogDebug("Semantic chunking produced {ChunkCount} chunks", finalChunks.Count);
 
         return finalChunks;
+    }
+
+    /// <summary>
+    /// 按批生成全部句子的嵌入；任一批失败返回 null（由调用方整体回退到定长切块）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 必须分批：句子以 <c>. ! ? 换行</c> 为界，PDF / Word 提取出的文本每行都是一个「句子」，一篇文档动辄数千条。
+    /// 此前一次全部送出，OpenAI 兼容接口单次超过 2048 条输入（或超出总 token 上限）就拒绝，策略静默回退定长切块：
+    /// 语义切块实际只对小文档生效。批大小与摄取用同一个 <c>AI:Rag:EmbeddingBatchSize</c>。
+    /// </remarks>
+    private async Task<List<float[]>?> EmbedSentencesAsync(List<string> sentences, CancellationToken ct)
+    {
+        var embeddings = new List<float[]>(sentences.Count);
+
+        for (var start = 0; start < sentences.Count; start += _embeddingBatchSize)
+        {
+            var batch = sentences.GetRange(start, Math.Min(_embeddingBatchSize, sentences.Count - start));
+            var result = await _embeddingService.GenerateEmbeddingsAsync(batch, _embeddingOptions, ct);
+            if (!result.Succeeded || result.Data == null || result.Data.Count != batch.Count)
+            {
+                _logger.LogWarning(
+                    "Embedding generation failed for semantic chunking (sentences {First}-{Last} of {Total}: {Message}); falling back to fixed-size chunking",
+                    start + 1, start + batch.Count, sentences.Count, result.Message);
+                return null;
+            }
+
+            embeddings.AddRange(result.Data);
+        }
+
+        return embeddings;
     }
 
     /// <summary>

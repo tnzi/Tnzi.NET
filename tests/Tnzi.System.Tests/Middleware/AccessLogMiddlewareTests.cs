@@ -116,6 +116,29 @@ public class AccessLogMiddlewareTests
         log.CreationTime.ShouldBeInRange(DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddMinutes(1));
     }
 
+    /// <summary>
+    /// 路径里的凭据不得进 <c>Sys_AccessLog</c>：访问日志页给持查看权限的管理员看，
+    /// 而签署 / 分享链接的 <c>{token}</c> 本身就是能用的凭据。判定只看路由参数名（<c>{token}</c>、<c>{tempToken}</c>），
+    /// 用例里的路径是合成的形状，不对应框架的某个端点。
+    /// </summary>
+    [Theory]
+    [InlineData("/api/auth/pending-actions/S3CR3T-TOKEN", "tempToken", "/api/auth/pending-actions/***")]
+    [InlineData("/api/invitations/S3CR3T-TOKEN", "token", "/api/invitations/***")]
+    public async Task ACredentialInThePath_IsRedacted(string path, string key, string expected)
+    {
+        var (sender, _) = await RunAsync(
+            CreateHttpContext(path),
+            Enabled(),
+            next: ctx =>
+            {
+                // 路由在本中间件内侧匹配。
+                ctx.Request.RouteValues[key] = "S3CR3T-TOKEN";
+                return Task.CompletedTask;
+            });
+
+        sender.Captured.ShouldHaveSingleItem().Path.ShouldBe(expected);
+    }
+
     [Fact]
     public async Task ExcludedPath_IsSkipped()
     {
@@ -174,6 +197,29 @@ public class AccessLogMiddlewareTests
         sender.Captured.ShouldHaveSingleItem().StatusCode.ShouldBe(expected);
     }
 
+    /// <summary>
+    /// 客户端断开引起的取消记 499，与异常处理中间件的处置一致：记成 500 会让「服务器错误」里混进关页面与导航。
+    /// </summary>
+    [Fact]
+    public async Task ClientAbort_IsRecordedAs499()
+    {
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        var context = CreateHttpContext();
+        context.RequestAborted = aborted.Token;
+        var sender = new CapturingSender();
+        var middleware = new AccessLogMiddleware(
+            _ => throw new OperationCanceledException(aborted.Token),
+            sender,
+            new StaticOptionsMonitor(Enabled()),
+            NullLogger<AccessLogMiddleware>.Instance);
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => middleware.InvokeAsync(context, new Mock<ICurrentUser>().Object));
+
+        sender.Captured.ShouldHaveSingleItem().StatusCode.ShouldBe(StatusCodes.Status499ClientClosedRequest);
+    }
+
     /// <summary>队列那头出问题不能让请求失败：访问日志是旁路。</summary>
     [Fact]
     public async Task SenderFailure_DoesNotFailTheRequest()
@@ -189,6 +235,44 @@ public class AccessLogMiddlewareTests
         await Should.NotThrowAsync(() => middleware.InvokeAsync(CreateHttpContext(), new Mock<ICurrentUser>().Object));
     }
 
+    /// <summary>
+    /// 入队失败的那条告警同样写进日志文件（<c>admin/logs</c> 给只持查看权限的人看），
+    /// 路径里的一次性凭据与入表时一样记为掩码。
+    /// </summary>
+    [Fact]
+    public async Task SenderFailure_WarningCarriesTheRedactedPath()
+    {
+        var sender = new Mock<IAccessLogSender>();
+        sender.Setup(s => s.SendAsync(It.IsAny<AccessLogDto>())).ThrowsAsync(new InvalidOperationException("queue down"));
+        var logger = new CapturingLogger();
+        var middleware = new AccessLogMiddleware(
+            ctx =>
+            {
+                ctx.Request.RouteValues["tempToken"] = "S3CR3T-TOKEN";
+                return Task.CompletedTask;
+            },
+            sender.Object,
+            new StaticOptionsMonitor(Enabled()),
+            logger);
+
+        await middleware.InvokeAsync(CreateHttpContext("/api/auth/pending-actions/S3CR3T-TOKEN"), new Mock<ICurrentUser>().Object);
+
+        var warning = logger.Entries.ShouldHaveSingleItem();
+        warning.Message.ShouldContain("/api/auth/pending-actions/***");
+        warning.Message.ShouldNotContain("S3CR3T-TOKEN");
+    }
+
+    private sealed class CapturingLogger : ILogger<AccessLogMiddleware>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     /// <summary>路径收敛到列宽：一个超长 URL 不能让整批 InsertMany 失败（09-04 审计表踩过同一个坑）。</summary>
     [Fact]
     public async Task Path_IsTruncatedToTheColumnWidth()
@@ -198,5 +282,59 @@ public class AccessLogMiddlewareTests
         var (sender, _) = await RunAsync(CreateHttpContext(longPath), Enabled());
 
         sender.Captured.ShouldHaveSingleItem().Path.Length.ShouldBe(AccessLogMiddleware.MaxPathLength);
+    }
+
+    /// <summary>
+    /// 列宽正好落在 emoji 的两个码元之间：少截一个字符，不留孤立的高代理项。
+    /// PostgreSQL 的严格 UTF-8 编码会拒绝那一行，整批访问日志随之丢弃；SQLite 照收，所以要在这里断言。
+    /// </summary>
+    [Fact]
+    public async Task Path_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var path = "/" + new string('x', AccessLogMiddleware.MaxPathLength - 2) + "\U0001F600tail";
+
+        var (sender, _) = await RunAsync(CreateHttpContext(path), Enabled());
+
+        var captured = sender.Captured.ShouldHaveSingleItem().Path;
+        captured.Length.ShouldBe(AccessLogMiddleware.MaxPathLength - 1);
+        char.IsHighSurrogate(captured[^1]).ShouldBeFalse();
+    }
+
+    /// <summary>后台落库前的第二道裁剪（<see cref="AccessLogColumns.Fit"/>）同样不切开代理对。</summary>
+    [Fact]
+    public void AccessLogColumnsFit_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var value = new string('c', AccessLogColumns.IpCityMaxLength - 1) + "\U0001F600";
+
+        var fitted = AccessLogColumns.Fit(value, AccessLogColumns.IpCityMaxLength).ShouldNotBeNull();
+
+        fitted.Length.ShouldBe(AccessLogColumns.IpCityMaxLength - 1);
+        char.IsHighSurrogate(fitted[^1]).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// 每一条都记下调用者的租户：读取面按它收口。不记的话多租户部署里所有租户的访问日志混在一张表里，
+    /// 租户管理员要么看得到别家的用户名、IP 与路径，要么（收口之后）一条都看不到自己的。
+    /// </summary>
+    [Fact]
+    public async Task Entry_CarriesTheCallersTenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var user = new Mock<ICurrentUser>();
+        user.SetupGet(u => u.Id).Returns(Guid.NewGuid());
+        user.SetupGet(u => u.TenantId).Returns(tenantId);
+
+        var (sender, _) = await RunAsync(CreateHttpContext(), Enabled(), currentUser: user.Object);
+
+        sender.Captured.ShouldHaveSingleItem().TenantId.ShouldBe(tenantId);
+    }
+
+    /// <summary>匿名请求与宿主用户没有租户：记成 null（宿主才看得到），而不是猜一个。</summary>
+    [Fact]
+    public async Task AnonymousEntry_HasNoTenant()
+    {
+        var (sender, _) = await RunAsync(CreateHttpContext(), Enabled());
+
+        sender.Captured.ShouldHaveSingleItem().TenantId.ShouldBeNull();
     }
 }

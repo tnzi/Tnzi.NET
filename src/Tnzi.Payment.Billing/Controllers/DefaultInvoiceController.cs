@@ -41,13 +41,13 @@ public class DefaultInvoiceController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取我的发票列表
+    /// 获取我的发票列表（分页；不带参数时为最新 100 条）
     /// </summary>
     [HttpGet("my")]
-    public virtual async Task<ApiResult<IPagedList<PaymentInvoiceDto>>> GetMyInvoices()
+    public virtual async Task<ApiResult<IPagedList<PaymentInvoiceDto>>> GetMyInvoices([FromQuery] OwnerListQueryDto query)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
-        var result = await _invoiceService.GetUserInvoicesAsync(userId);
+        var result = await _invoiceService.GetUserInvoicesAsync(userId, query);
         return result.ToApiResult();
     }
 
@@ -58,7 +58,7 @@ public class DefaultInvoiceController : ApiControllerBase
     /// 直接返回文件字节。此前这里返回的是一个字符串，而那个字符串正是本端点自己的路径 ——
     /// 一条指向自己的链接，任何客户端顺着它走都只会再拿到同一个字符串。
     /// 直接吐文件是唯一在两种落地方式下都成立的做法：只有 Storage 给得出 HTTP 可达的地址，
-    /// 而未加载 Storage 的宿主把产物写在本地磁盘上。要在邮件里放链接请用 <c>{id}/pdf-url</c>。
+    /// 而未加载 Storage 的宿主把产物写在本地磁盘上。
     /// </remarks>
     [HttpGet("{id:guid}/pdf")]
     public virtual async Task<IActionResult> DownloadPdf(Guid id)
@@ -73,8 +73,12 @@ public class DefaultInvoiceController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取发票文件的可分享地址（仅在产物由 Storage 承载时有值；本地回退时为空）。
+    /// 获取发票文件在 Storage 里的下载地址（仅在产物由 Storage 承载时有值；本地回退时为空）。
     /// </summary>
+    /// <remarks>
+    /// 返回的是站内相对路径，按登录会话鉴权（归属用户或持 <c>payment.invoice.view</c> 的人可读），
+    /// 不是可以放进邮件发给别人的公开链接：收件人没有会话，打开就是 404。要把发票交给客户请用发送（附件）。
+    /// </remarks>
     [HttpGet("{id:guid}/pdf-url")]
     public virtual async Task<ApiResult<string>> GetPdfUrl(Guid id)
     {

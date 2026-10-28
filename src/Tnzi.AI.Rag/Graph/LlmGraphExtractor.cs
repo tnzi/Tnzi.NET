@@ -65,7 +65,15 @@ public class LlmGraphExtractor : IGraphExtractor
         _logger = Check.NotNull(logger);
     }
 
-    public async Task<GraphExtractionResult> ExtractAsync(string text, Guid knowledgeBaseId, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    public Task<GraphExtractionResult> ExtractAsync(string text, Guid knowledgeBaseId, CancellationToken cancellationToken = default)
+        => ExtractCoreAsync(text, knowledgeBaseId, documentId: null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<GraphExtractionResult> ExtractAsync(string text, Guid knowledgeBaseId, Guid documentId, CancellationToken cancellationToken = default)
+        => ExtractCoreAsync(text, knowledgeBaseId, documentId, cancellationToken);
+
+    private async Task<GraphExtractionResult> ExtractCoreAsync(string text, Guid knowledgeBaseId, Guid? documentId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -80,7 +88,7 @@ public class LlmGraphExtractor : IGraphExtractor
             _logger.LogWarning(
                 "Graph extraction text exceeds max length ({TextLength} > {MaxLength}), truncating",
                 inputText.Length, MaxTextLength);
-            inputText = inputText[..MaxTextLength];
+            inputText = inputText.FitToLength(MaxTextLength);
         }
 
         var response = await _aiUtility.ExecuteAsync(
@@ -97,7 +105,7 @@ public class LlmGraphExtractor : IGraphExtractor
             return GraphExtractionResult.Empty;
         }
 
-        var (nodes, edges, parsed) = ParseResponse(response, knowledgeBaseId);
+        var (nodes, edges, parsed) = ParseResponse(response, knowledgeBaseId, documentId);
 
         if (!parsed)
         {
@@ -112,7 +120,7 @@ public class LlmGraphExtractor : IGraphExtractor
                 "No graph was extracted for this text.",
                 knowledgeBaseId,
                 response.Length,
-                trimmed.Length <= 40 ? trimmed : trimmed[^40..],
+                TailForLog(trimmed),
                 !trimmed.EndsWith('}'));
 
             return GraphExtractionResult.Unparsable;
@@ -144,7 +152,7 @@ public class LlmGraphExtractor : IGraphExtractor
         }
 
         // 将原始边的 source/target name 映射为实际 node ID，过滤无效引用
-        var validEdges = ResolveEdgeNodeIds(edges, nodeIdMap, knowledgeBaseId);
+        var validEdges = ResolveEdgeNodeIds(edges, nodeIdMap, knowledgeBaseId, documentId);
 
         if (validEdges.Count > 0)
         {
@@ -164,7 +172,7 @@ public class LlmGraphExtractor : IGraphExtractor
     /// 节点、边，以及<b>是否解析成功</b>。第三项不能省：解析失败与"文本里确实没有实体"
     /// 都产出空集合，少了它两者在调用方眼里完全一样。
     /// </returns>
-    internal (List<KnowledgeGraphNode> Nodes, List<RawEdge> Edges, bool Parsed) ParseResponse(string json, Guid knowledgeBaseId)
+    internal (List<KnowledgeGraphNode> Nodes, List<RawEdge> Edges, bool Parsed) ParseResponse(string json, Guid knowledgeBaseId, Guid? documentId = null)
     {
         var nodes = new List<KnowledgeGraphNode>();
         var edges = new List<RawEdge>();
@@ -192,6 +200,7 @@ public class LlmGraphExtractor : IGraphExtractor
                     var node = new KnowledgeGraphNode
                     {
                         KnowledgeBaseId = knowledgeBaseId,
+                        DocumentId = documentId,
                         Name = name,
                         EntityType = type,
                         Description = ReadString(entity, "description")
@@ -241,7 +250,8 @@ public class LlmGraphExtractor : IGraphExtractor
     /// <summary>
     /// 将原始边的 source/target name 映射为实际 node ID
     /// </summary>
-    private static List<KnowledgeGraphEdge> ResolveEdgeNodeIds(List<RawEdge> rawEdges, Dictionary<string, Guid> nodeIdMap, Guid knowledgeBaseId)
+    private static List<KnowledgeGraphEdge> ResolveEdgeNodeIds(
+        List<RawEdge> rawEdges, Dictionary<string, Guid> nodeIdMap, Guid knowledgeBaseId, Guid? documentId)
     {
         var resolved = new List<KnowledgeGraphEdge>();
 
@@ -256,6 +266,7 @@ public class LlmGraphExtractor : IGraphExtractor
             resolved.Add(new KnowledgeGraphEdge
             {
                 KnowledgeBaseId = knowledgeBaseId,
+                DocumentId = documentId,
                 SourceNodeId = sourceId,
                 TargetNodeId = targetId,
                 RelationType = raw.Relation,
@@ -291,6 +302,21 @@ public class LlmGraphExtractor : IGraphExtractor
         }
 
         return text;
+    }
+
+    /// <summary>
+    /// 日志里报的响应结尾：最后 40 个码元，起点不落在代理对中间（不以孤立的低代理项开头）。
+    /// </summary>
+    internal static string TailForLog(string text)
+    {
+        const int tailLength = 40;
+        if (text.Length <= tailLength)
+            return text;
+
+        var start = text.Length - tailLength;
+        if (char.IsLowSurrogate(text[start]))
+            start++;
+        return text[start..];
     }
 
     /// <summary>

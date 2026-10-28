@@ -71,9 +71,10 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         IFileAccessAuthorizer? authorizer = null,
         IFileAccessGrantContext? grantContext = null,
         IEnumerable<IUploadSanitizer>? sanitizers = null,
-        IPdfRasterizer? pdfRasterizer = null)
+        IPdfRasterizer? pdfRasterizer = null,
+        IStorageQuotaService? quota = null)
     {
-        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers, pdfRasterizer);
+        return CreateStorageService(Storage, options, publicFieldResolver, authorizer, grantContext, sanitizers, pdfRasterizer, quota);
     }
 
     /// <summary>
@@ -93,7 +94,8 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
         IFileAccessAuthorizer? authorizer = null,
         IFileAccessGrantContext? grantContext = null,
         IEnumerable<IUploadSanitizer>? sanitizers = null,
-        IPdfRasterizer? pdfRasterizer = null)
+        IPdfRasterizer? pdfRasterizer = null,
+        IStorageQuotaService? quota = null)
     {
         var effective = options ?? StorageOptions;
         var optionsMonitor = new Mock<IOptionsMonitor<StorageOptions>>();
@@ -111,7 +113,31 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
             ServiceProvider,
             CreateUploadGuard(effective, sanitizers),
             // 缩略图生成器与生产同一个实现；PDF 光栅化器按用例给（默认 null = 没加载 Tnzi.Documents 的现场）。
-            new FileThumbnailGenerator(storage, optionsMonitor.Object, NullLogger<FileThumbnailGenerator>.Instance, pdfRasterizer));
+            new FileThumbnailGenerator(storage, optionsMonitor.Object, NullLogger<FileThumbnailGenerator>.Instance, pdfRasterizer),
+            quota ?? UnlimitedStorageQuota.Instance);
+    }
+
+    /// <summary>
+    /// 真实的配额服务：配额来源是 <paramref name="allowance"/>（不给就读 <see cref="StorageOptions"/> 的默认值），
+    /// 用量另加 <paramref name="contributors"/> 报的数。
+    /// </summary>
+    protected StorageQuotaService CreateQuotaService(
+        IStorageAllowanceProvider? allowance = null,
+        IEnumerable<IStorageUsageContributor>? contributors = null)
+    {
+        return new StorageQuotaService(
+            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
+            allowance ?? new OptionsStorageAllowanceProvider(new StaticOptionsMonitor<StorageOptions>(StorageOptions)),
+            contributors ?? []);
+    }
+
+    protected FileHoldService CreateHoldService(IFileStorage? storage = null)
+    {
+        return new FileHoldService(
+            ServiceProvider,
+            new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
+            new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
+            storage ?? Storage);
     }
 
     protected FileReferenceProcessor CreateReferenceProcessor(StorageOptions? options = null)
@@ -148,19 +174,26 @@ public abstract class StorageIntegrationTestBase : IntegratedTestBase<StorageTes
     private IFileAccessAuthorizer BuildAuthorizer(IFileAccessGrantContext? grantContext)
         => grantContext is null ? TestFileAccessAuthorizer.AllowAll() : CreateRealAuthorizer(grantContext);
 
+    /// <summary>
+    /// 孤立引用清理的扫描位置。生产里是单例，跨轮次活着；测试里每个测试实例一份，同一个测试里多次清理共用它。
+    /// </summary>
+    protected OrphanReferenceScanCursor OrphanReferenceCursor { get; } = new();
+
     protected FileCleanupService CreateCleanupService(
         Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null,
         IOrphanReferenceValidator? orphanReferenceValidator = null,
         bool multiTenancyEnabled = false,
-        IEnumerable<IStorageCleanupContributor>? contributors = null)
+        IEnumerable<IStorageCleanupContributor>? contributors = null,
+        IFileStorage? storage = null)
     {
         return new FileCleanupService(
             new EFCoreRepository<StorageTestDbContext, FileRecord, Guid>(DbContext, serviceProvider: ServiceProvider),
             new EFCoreRepository<StorageTestDbContext, FileReference, Guid>(DbContext, serviceProvider: ServiceProvider),
-            Storage,
+            storage ?? Storage,
             currentTenant ?? new Tnzi.MultiTenancy.CurrentTenant(),
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider,
+            OrphanReferenceCursor,
             contributors,
             Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = multiTenancyEnabled }),
             orphanReferenceValidator);

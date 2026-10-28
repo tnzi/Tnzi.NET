@@ -117,7 +117,7 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     /// <param name="functionId">功能ID</param>
     /// <returns>角色列表</returns>
     [HttpGet("function/{functionId:guid}/roles")]
-    public virtual async Task<ApiResult<IEnumerable<RoleFunction>>> GetFunctionRoles(Guid functionId)
+    public virtual async Task<ApiResult<IEnumerable<RoleFunctionDto>>> GetFunctionRoles(Guid functionId)
     {
         var result = await RoleFunctionService.GetFunctionRolesAsync(functionId);
         return result.ToApiResult();
@@ -201,4 +201,37 @@ public class DefaultRoleFunctionAdminController : ApiAdminControllerBase
     [HttpGet("super-admin-roles")]
     public virtual ApiResult<IReadOnlyList<string>> GetSuperAdminRoles()
         => Result.Success<IReadOnlyList<string>>(RoleFunctionService.GetSuperAdminRoleNames()).ToApiResult();
+
+    /// <summary>
+    /// The permission catalogue the role assignment matrix renders: every module
+    /// (flat, hierarchy via <c>parentId</c>) with all of its functions, in one read.
+    /// </summary>
+    /// <remarks>
+    /// Behind this controller's own <c>authorization.roleFunction.view</c> gate so a
+    /// delegated role-permission administrator can use the matrix without also
+    /// holding <c>authorization.functionModule.view</c>, the module management code.
+    /// The roles' own grants on this surface already expose the codes and names.
+    /// </remarks>
+    [HttpGet("catalogue")]
+    public virtual async Task<ApiResult<IReadOnlyList<PermissionCatalogueModuleDto>>> GetCatalogue([FromServices] IModuleManagementService moduleManagementService)
+    {
+        var result = await moduleManagementService.GetPermissionCatalogueAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// Every role (unpaged), for the role list beside the assignment matrix.
+    /// </summary>
+    /// <remarks>
+    /// Behind <c>authorization.roleFunction.view</c> for the same reason as
+    /// <see cref="GetCatalogue"/>: assigning permissions to roles means seeing the
+    /// roles, and the paged assignment list on this surface already names them.
+    /// The role management page stays behind Identity's <c>role.view</c>.
+    /// </remarks>
+    [HttpGet("roles")]
+    public virtual async Task<ApiResult<IEnumerable<RoleDto>>> GetRoles([FromServices] IRoleService roleService)
+    {
+        var result = await roleService.GetAllAsync();
+        return result.ToApiResult();
+    }
 }

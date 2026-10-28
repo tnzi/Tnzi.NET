@@ -14,3 +14,4 @@ export { default as TAuthPage } from './TAuthPage.vue';
 export { default as TAuthRoute } from './TAuthRoute.vue';
 export { default as TAuthField } from './TAuthField.vue';
 export { default as TAuthProviderButton } from './TAuthProviderButton.vue';
+export { default as TGuestWelcome } from './TGuestWelcome.vue';

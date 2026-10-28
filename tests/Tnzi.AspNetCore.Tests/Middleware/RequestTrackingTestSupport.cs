@@ -17,6 +17,9 @@ internal static class RequestTrackingTestSupport
     {
         public List<RequestLogEntry> Entries { get; } = [];
 
+        /// <summary>每条 <see cref="Entries"/> 记下时用的级别（下标一一对应）。</summary>
+        public List<LogLevel> Levels { get; } = [];
+
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
@@ -35,6 +38,7 @@ internal static class RequestTrackingTestSupport
                     if (pair.Value is RequestLogEntry entry)
                     {
                         Entries.Add(entry);
+                        Levels.Add(logLevel);
                     }
                 }
             }

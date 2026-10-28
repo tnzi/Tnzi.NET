@@ -99,17 +99,43 @@ public class DefaultStoragePreviewController : ApiControllerBase
         }
 
         var stream = await FilePreviewService.GeneratePreviewAsync(record);
-        var contentType = FilePreviewService.GetPreviewType(record) switch
-        {
-            "image" => "image/png",
-            "pdf" => "application/pdf",
-            "video" => "video/mp4",
-            "audio" => "audio/mpeg",
-            "text" => "text/plain",
-            _ => "application/octet-stream"
-        };
+        Response.Headers.XContentTypeOptions = "nosniff";
 
-        return File(stream, contentType);
+        switch (FilePreviewService.GetPreviewType(record))
+        {
+            case "pdf":
+                // 原件就是 PDF，或 Office 文档转换出来的 PDF。
+                return File(stream, "application/pdf");
+            case "text":
+                // .html / .js / .json 在这里是被阅读的文字，不是被执行的文档：一律按纯文本发出。
+                return File(stream, "text/plain");
+            default:
+                return OriginalBytes(record, stream);
+        }
+    }
+
+    /// <summary>
+    /// 原样返回的图片 / 视频 / 音频：声明记录自己的类型，形态与 <c>files/{id}/preview</c> 相同。
+    /// </summary>
+    /// <remarks>
+    /// 此前按预览种类写死 <c>image/png</c> / <c>video/mp4</c> / <c>audio/mpeg</c>：SVG 被声明成 PNG，浏览器不会把它
+    /// 嗅探回 SVG，<c>&lt;img&gt;</c> 与直接打开都是破图；<c>.webm</c> / <c>.wav</c> 也被报成别的格式。
+    /// 内联白名单（<see cref="FileTypeHelper.IsInlineRenderable"/>）之外的类型（SVG）按附件发出、保留声明的类型，
+    /// 叠 <c>Content-Security-Policy: sandbox</c>：<c>&lt;img&gt;</c> 照常渲染，当文档打开时脚本不执行。
+    /// </remarks>
+    protected virtual IActionResult OriginalBytes(FileRecord record, Stream stream)
+    {
+        var contentType = string.IsNullOrWhiteSpace(record.ContentType)
+            ? FileTypeHelper.GetContentType(record.Extension)
+            : record.ContentType;
+
+        if (FileTypeHelper.IsInlineRenderable(contentType))
+        {
+            return File(stream, contentType);
+        }
+
+        Response.Headers.ContentSecurityPolicy = "sandbox";
+        return File(stream, contentType, record.OriginalName ?? record.FileName);
     }
 }
 

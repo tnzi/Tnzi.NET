@@ -20,7 +20,7 @@ namespace Tnzi.System.Middleware;
 /// <para>
 /// 访问日志是旁路：投递失败只记 Warning，绝不让请求失败；下游异常原样上抛，但这一条按客户端<b>实际会收到</b>的码记下来
 /// （异常还没到外层的异常处理中间件，此刻 <c>Response.StatusCode</c> 仍是 200）：经 <see cref="ExceptionHttpStatusCode"/>
-/// 折算，服务层抛的 <c>ForbiddenException</c> / <c>NotFoundException</c> 是 403 / 404 而不是 500 —— 一律记 500 会让
+/// 折算，服务层抛的 <c>ForbiddenException</c> / <c>NotFoundException</c> 是 403 / 404 而不是 500，客户端断开是 499。一律记 500 会让
 /// 「服务器错误」的统计被业务拒绝灌满。路径收敛到列宽：一个超长 URL 不能让整批 <c>InsertMany</c> 失败。
 /// </para>
 /// <para>
@@ -32,10 +32,10 @@ namespace Tnzi.System.Middleware;
 /// </remarks>
 public class AccessLogMiddleware
 {
-    /// <summary>与 <c>AccessLogConfiguration</c> 里 <c>Path</c> 的列宽一致。</summary>
-    public const int MaxPathLength = 500;
+    /// <summary>与 <c>AccessLogConfiguration</c> 里 <c>Path</c> 的列宽一致（同一份 <see cref="AccessLogColumns"/>）。</summary>
+    public const int MaxPathLength = AccessLogColumns.PathMaxLength;
 
-    private const int MaxMethodLength = 10;
+    private const int MaxMethodLength = AccessLogColumns.MethodMaxLength;
 
     private readonly RequestDelegate _next;
     private readonly IAccessLogSender _sender;
@@ -93,20 +93,24 @@ public class AccessLogMiddleware
             {
                 UserId = currentUser.Id,
                 UserName = currentUser.UserName,
-                Path = Fit(context.Request.Path.Value ?? string.Empty, MaxPathLength),
+                // 路径里值命中敏感名单的路由参数（签署 / 分享链接的 {token}）换成掩码：令牌本身就是能用的凭据。
+                Path = Fit(context.GetRedactedPath(), MaxPathLength),
                 Method = Fit(context.Request.Method, MaxMethodLength),
                 IpAddress = context.GetClientIp(),
                 UserAgent = context.GetUserAgent(),
-                StatusCode = failure is null ? context.Response.StatusCode : ExceptionHttpStatusCode.Resolve(failure),
+                StatusCode = failure is null ? context.Response.StatusCode : ExceptionHttpStatusCode.Resolve(context, failure),
                 ResponseTime = elapsedMilliseconds,
                 CreationTime = startedAt,
+                // 读取面按它收口（AccessLogService）。取自身份：本中间件挂在认证之后、租户解析之前，
+                // 已认证请求的租户此时只由令牌里的 claim 决定；匿名请求记成宿主（null），只有宿主看得到。
+                TenantId = currentUser.TenantId,
             };
 
             await _sender.SendAsync(log);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to enqueue the access log for {Method} {Path}", context.Request.Method, context.Request.Path);
+            _logger.LogWarning(ex, "Failed to enqueue the access log for {Method} {Path}", context.Request.Method, context.GetRedactedPath());
         }
     }
 
@@ -121,6 +125,6 @@ public class AccessLogMiddleware
         return false;
     }
 
-    private static string Fit(string value, int maxLength)
-        => value.Length <= maxLength ? value : value[..maxLength];
+    // 不切开代理对：路径里的 emoji 落在截断边界上时，孤立的高代理项会让整批访问日志写入失败
+    private static string Fit(string value, int maxLength) => value.FitToLength(maxLength);
 }

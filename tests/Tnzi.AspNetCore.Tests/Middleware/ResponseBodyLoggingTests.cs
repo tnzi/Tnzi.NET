@@ -180,4 +180,21 @@ public class ResponseBodyLoggingTests
         Assert.Equal(0, original.Length);
         Assert.True(string.IsNullOrEmpty(entry.ResponseBody), entry.ResponseBody);
     }
+
+    [Theory]
+    // 支付创建 / setup-session 响应里的 Stripe client secret（包在 ApiResult 的 data 里）
+    [InlineData("""{"code":200,"data":{"paymentId":"p1","clientSecret":"pi_123_secret_456"}}""", "pi_123_secret_456")]
+    // 匿名设备注册响应里只签发一次的设备密钥
+    [InlineData("""{"code":200,"data":{"deviceId":"d1","deviceKey":"k3yMaterialOnlyShownOnce"}}""", "k3yMaterialOnlyShownOnce")]
+    public async Task ResponseSecretsTheServerHandsOut_AreRedacted(string json, string secret)
+    {
+        // 名单按字段名精确匹配：表单分支收了 client_secret，JSON 分支此前漏了驼峰的 clientSecret 与 deviceKey，
+        // 热开 LogResponseBody 排障时它们原文进日志。
+        var options = new RequestTrackingOptions { LogResponseBody = true };
+
+        var (entry, _) = await RunAsync(ctx => WriteJsonAsync(ctx, json), options);
+
+        Assert.DoesNotContain(secret, entry.ResponseBody);
+        Assert.Contains(Tnzi.Security.RequestBodyRedactor.RedactedValue, entry.ResponseBody);
+    }
 }

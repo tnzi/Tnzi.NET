@@ -5,7 +5,7 @@ import { TCountTo } from '@tnzi/ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useEcharts } from '../../headless/useEcharts'
 import { useBreakpoint } from '../../headless/useBreakpoint'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 import type { EChartsOption } from 'echarts'
 
 /**
@@ -82,7 +82,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emptyLabel = computed(() => {
   if (props.emptyText) return props.emptyText
-  return translatePageKey('', 'admin.common.noData') || 'No data'
+  return translateChromeKey('admin.common.noData', 'No data')
 })
 
 const lineHasData = computed(

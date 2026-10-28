@@ -6,8 +6,9 @@
 /// </summary>
 /// <remarks>
 /// <para>
-/// 仓储删除走的是 EF 的 <c>Deleted</c> 状态，审计管线在那条分支里把它转成软删并写
-/// <c>DeleterId</c> / <c>DeletionTime</c>。但代码也可以<b>直接赋值</b> ——
+/// <c>DbContext.Remove</c> 走 EF 的 <c>Deleted</c> 状态，审计管线在那条分支里把它转成软删并写
+/// <c>DeleterId</c> / <c>DeletionTime</c>；仓储的软删与下面的直接赋值一样停在 <c>Modified</c>
+/// （仓储路径的用例见 <c>RepositoryDetachedWriteTests</c>）。代码也可以<b>直接赋值</b>：
 /// <c>ChildCollectionSync.ReplaceChildren</c> 就是这么做的（它是纯内存操作，拿不到当前用户，
 /// 本来也不该拿）。那条路径此前只走 <c>Modified</c> 分支，于是产出一批
 /// 「没有人、在没有时间删掉的」软删行：<c>IsDeleted</c> 为真，而事后追责唯一想看的那两列是 null。

@@ -8,11 +8,29 @@ public class LlmJudgeGuardrailTests
     private const string PassResponse = "PASS";
     private const string FailResponse = "FAIL: Content contains harmful instructions";
 
-    private static IOptionsMonitor<AIOptions> CreateOptions(Action<LlmJudgeOptions>? configure = null)
+    private static IOptionsMonitor<AIOptions> CreateOptions(Action<LlmJudgeOptions>? configure = null, bool failClosed = true)
     {
         var options = new AIOptions();
+        options.Guardrails.FailClosed = failClosed;
         configure?.Invoke(options.Guardrails.LlmJudge);
         return new StaticOptionsMonitor<AIOptions>(options);
+    }
+
+    private static Mock<IChatClientFactory> CreateThrowingFactory(Exception exception)
+    {
+        var mockClient = new Mock<IChatClient>();
+        mockClient
+            .Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(exception);
+
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory
+            .Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
+            .Returns(mockClient.Object);
+        return mockFactory;
     }
 
     private static (Mock<IChatClientFactory> factory, Mock<IChatClient> client) CreateMockChatClient(string response)
@@ -118,34 +136,62 @@ public class LlmJudgeGuardrailTests
 
     #endregion
 
-    #region Error Handling (Fail-Open)
+    #region Error Handling (Guardrails:FailClosed)
+
+    // 评审不可用（出错 / 超时 / 答复无法解析）时按 Guardrails:FailClosed 处理：默认 true 即拒绝。
+    // 此前评审吞掉自己的失败一律放行，ToolGuardrailMiddleware 的 fail-closed 分支永远看不到异常，
+    // 而管理端把这个开关显示为「失败即拒绝」。
 
     [Fact]
-    public async Task LlmError_ReturnsAllowed()
+    public async Task LlmError_FailClosedByDefault_Rejects()
     {
-        var mockFactory = new Mock<IChatClientFactory>();
-        var mockClient = new Mock<IChatClient>();
-        mockClient
-            .Setup(c => c.GetResponseAsync(
-                It.IsAny<IEnumerable<ChatMessage>>(),
-                It.IsAny<ChatOptions?>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("LLM service unavailable"));
+        var mockFactory = CreateThrowingFactory(new InvalidOperationException("LLM service unavailable"));
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true), Mock.Of<ILogger<LlmJudgeGuardrail>>());
 
-        mockFactory
-            .Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(mockClient.Object);
+        var input = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+        var output = await ((IOutputGuardrail)guardrail).ValidateAsync("test output");
 
-        var options = CreateOptions(o => o.Enabled = true);
-        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, options, Mock.Of<ILogger<LlmJudgeGuardrail>>());
+        input.IsAllowed.ShouldBeFalse();
+        input.GuardrailName.ShouldBe("LlmJudgeGuardrail");
+        output.IsAllowed.ShouldBeFalse();
+    }
 
-        // fail-open: LLM 错误时应放行
+    [Fact]
+    public async Task LlmError_FailOpenConfigured_Allows()
+    {
+        var mockFactory = CreateThrowingFactory(new InvalidOperationException("LLM service unavailable"));
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true, failClosed: false), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+
         var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+
         result.IsAllowed.ShouldBeTrue();
     }
 
     [Fact]
-    public async Task Timeout_ReturnsAllowed()
+    public async Task LlmError_AsGuardrailProvider_DeniesWithUnavailableCode()
+    {
+        var mockFactory = CreateThrowingFactory(new HttpRequestException("connection refused"));
+        IGuardrailProvider guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+
+        var decision = await guardrail.EvaluateAsync(new GuardrailRequest { ToolName = "bash", Content = "rm -rf /" });
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.Reasons.ShouldContain(r => r.Code == GuardrailReasonCodes.LlmJudgeUnavailable);
+    }
+
+    [Fact]
+    public async Task ExternalCancellation_IsRethrownRegardlessOfFailClosed()
+    {
+        var mockFactory = CreateThrowingFactory(new OperationCanceledException());
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => ((IInputGuardrail)guardrail).ValidateAsync("test input", cts.Token));
+    }
+
+    [Fact]
+    public async Task Timeout_FailClosedByDefault_Rejects()
     {
         var mockFactory = new Mock<IChatClientFactory>();
         var mockClient = new Mock<IChatClient>();
@@ -172,9 +218,9 @@ public class LlmJudgeGuardrailTests
         });
         var guardrail = new LlmJudgeGuardrail(mockFactory.Object, options, Mock.Of<ILogger<LlmJudgeGuardrail>>());
 
-        // fail-open: 超时时应放行
+        // 超时即评审不可用：默认失败即拒绝
         var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
-        result.IsAllowed.ShouldBeTrue();
+        result.IsAllowed.ShouldBeFalse();
     }
 
     #endregion
@@ -249,16 +295,59 @@ public class LlmJudgeGuardrailTests
         result.Reason.ShouldBe("Content rejected by LLM judge");
     }
 
+    [Theory]
+    [InlineData("I think this is fine, but let me explain...")]
+    [InlineData("Unsafe: contains personal data")]
+    [InlineData("OK")]
+    [InlineData("PASSABLE, though it asks for credentials")]
+    [InlineData("")]
+    public async Task UnparsableResponse_FailClosedByDefault_Rejects(string reply)
+    {
+        // 只有明确以 PASS 这个词开头的答复才放行：其余都不是「通过」的裁决
+        var (mockFactory, _) = CreateMockChatClient(reply);
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+
+        var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+
+        result.IsAllowed.ShouldBeFalse();
+    }
+
     [Fact]
-    public async Task UnparsableResponse_ReturnsAllowed()
+    public async Task UnparsableResponse_FailOpenConfigured_Allows()
     {
         var (mockFactory, _) = CreateMockChatClient("I think this is fine, but let me explain...");
-        var options = CreateOptions(o => o.Enabled = true);
-        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, options, Mock.Of<ILogger<LlmJudgeGuardrail>>());
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true, failClosed: false), Mock.Of<ILogger<LlmJudgeGuardrail>>());
 
-        // 无法解析的响应 - fail-open
         var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+
         result.IsAllowed.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("PASS")]
+    [InlineData("pass.")]
+    [InlineData("**PASS**")]
+    [InlineData("  PASS - nothing harmful")]
+    public async Task PassVerdict_InCommonFormats_Allows(string reply)
+    {
+        var (mockFactory, _) = CreateMockChatClient(reply);
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+
+        var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+
+        result.IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task FailVerdict_IsRejectedEvenWhenFailOpenIsConfigured()
+    {
+        var (mockFactory, _) = CreateMockChatClient("FAIL: asks for credentials");
+        var guardrail = new LlmJudgeGuardrail(mockFactory.Object, CreateOptions(o => o.Enabled = true, failClosed: false), Mock.Of<ILogger<LlmJudgeGuardrail>>());
+
+        var result = await ((IInputGuardrail)guardrail).ValidateAsync("test input");
+
+        result.IsAllowed.ShouldBeFalse();
+        result.Reason.ShouldBe("asks for credentials");
     }
 
     #endregion

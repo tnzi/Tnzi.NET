@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed } from 'vue'
 import TCardPage from '../../../src/components/crud/TCardPage.vue'
+import TFormModal from '../../../src/components/crud/TFormModal.vue'
 
 const stubs = {
   Pagination: { name: 'Pagination', props: ['page', 'itemCount', 'pageSize'], template: '<div class="n-pagination-stub" />' },
@@ -71,5 +72,24 @@ describe('TCardPage', () => {
       global: { stubs },
     })
     expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(true)
+  })
+})
+
+describe('TCardPage - the form modal for a read-only reader', () => {
+  function viewing() {
+    const state = makeState()
+    state.formModal.visible.value = true
+    ;(state.formModal.mode as { value: unknown }).value = 'view'
+    return state
+  }
+
+  it('opens a view on #form', () => {
+    const wrapper = mount(TCardPage, { props: { state: viewing() as any }, slots: { form: '<div class="form-body" />' }, global: { stubs } })
+    expect(wrapper.find('.form-body').exists()).toBe(true)
+  })
+
+  it('does not mount the modal when the page has no form to show', () => {
+    const wrapper = mount(TCardPage, { props: { state: viewing() as any }, global: { stubs } })
+    expect(wrapper.findComponent(TFormModal).exists()).toBe(false)
   })
 })

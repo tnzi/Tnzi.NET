@@ -2,7 +2,7 @@
  * AI Module API
  *
  * Covers: Chat, Threads, Agents (admin), Agent Runs (admin), Providers (admin),
- * Quotas (user + admin), Usage Analytics (admin), Evaluations (admin),
+ * Usage limits & model selection (user + admin), Usage Analytics (admin), Evaluations (admin),
  * Skills (user + admin), Workflows (admin), MCP (admin), MCP Tool Analytics (admin),
  * Skill Categories (admin), Artifacts (user), User Profile (user),
  * Workspace Agents (admin).
@@ -17,10 +17,14 @@
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
 import type { ReorderRequest } from '../../types/api';
+import type { CliPermissionAnswerDto } from './cli';
 import type {
   // Chat
   ChatRequestDto,
   ChatResponseDto,
+  ChatRunDto,
+  ThreadMessagePageDto,
+  ThreadMessagePageQuery,
   // Agents
   AgentDto,
   CreateAgentDto,
@@ -54,11 +58,14 @@ import type {
   AgentRunStatsDto,
   ApproveRunDto,
   RejectRunDto,
-  // Quotas
-  UserQuotaDto,
-  UserQuotaQueryDto,
-  SetQuotaDto,
-  ResetQuotaDto,
+  // Usage limits & model selection
+  MyUsageLimitsDto,
+  ChatModelsDto,
+  UsageLimitDefaultsDto,
+  SaveUsagePolicyDto,
+  UserUsageLimitsDto,
+  UsageMeterQueryDto,
+  UserUsageSummaryDto,
   BudgetSummaryDto,
   // Usage Analytics
   UsageSummaryDto,
@@ -69,6 +76,7 @@ import type {
   ModelUsageDto,
   UsageTrendPointDto,
   UsageTrendQueryDto,
+  UsageBreakdownFilters,
   AgentUsageDto,
   AgentFeedbackStatsDto,
   CostSummaryDto,
@@ -165,6 +173,34 @@ export function useChatApi(client: HttpClient) {
     /** Build stream URL for SSE chat */
     getChatStreamUrl: () =>
       client.resolveUrl(`${base}/stream`),
+
+    /**
+     * The thread's runs that have not finished (external CLI agents). After a refresh, a
+     * client reattaches to these with `getRunStreamUrl`.
+     */
+    getActiveRuns: (threadId: string) =>
+      client.get<ChatRunDto[]>(`${base}/threads/${encodeURIComponent(threadId)}/runs`),
+
+    /**
+     * URL of a run's event stream (SSE, GET, same events as `chat/stream`): from the start,
+     * or after `fromSequence`. Pass it to `streamChat({ url, method: 'GET' })`.
+     */
+    getRunStreamUrl: (runId: string, fromSequence = 0) =>
+      client.resolveUrl(`${base}/runs/${encodeURIComponent(runId)}/stream?fromSequence=${fromSequence}`),
+
+    /** Cancel a run on the server. What it had written stays in the thread as a stopped reply. */
+    cancelRun: (runId: string) =>
+      client.post<void>(`${base}/runs/${encodeURIComponent(runId)}/cancel`),
+
+    /**
+     * Answer a `permission_request` event of a run you started: `optionId` is one of the event's
+     * `eventData.options[].id`. 409 when the request already has an outcome (answered elsewhere, timed out).
+     */
+    answerRunPermission: (runId: string, requestId: string, answer: CliPermissionAnswerDto) =>
+      client.post<void>(
+        `${base}/runs/${encodeURIComponent(runId)}/permissions/${encodeURIComponent(requestId)}`,
+        answer,
+      ),
   };
 }
 
@@ -185,9 +221,40 @@ export function useThreadApi(client: HttpClient) {
     getDetail: (id: string, messageLimit = 50) =>
       client.get<AgentThreadDetailDto>(`${base}/${id}`, { params: { messageLimit } }),
 
+    /**
+     * A page of the thread's messages, oldest first: the newest `limit` before `beforeOrder`
+     * (all the newest when omitted). Page back with the first message's `order`.
+     */
+    getMessages: (id: string, query: ThreadMessagePageQuery = {}) =>
+      client.get<ThreadMessagePageDto>(`${base}/${id}/messages`, {
+        params: {
+          limit: query.limit ?? 50,
+          ...(query.beforeOrder != null ? { beforeOrder: query.beforeOrder } : {}),
+        },
+      }),
+
+    /**
+     * An attachment's content (Blob): an image or PDF the user sent, or an image a tool
+     * returned. Fetched through the client because the endpoint needs the signed-in caller,
+     * which a plain `<img src>` cannot carry.
+     */
+    getAttachment: (threadId: string, attachmentId: string) =>
+      client.download(`${base}/${threadId}/attachments/${attachmentId}`),
+
     /** Update thread title */
     updateTitle: (id: string, data: UpdateThreadTitleDto) =>
       client.patch<AgentThreadDto>(`${base}/${id}/title`, data),
+
+    /**
+     * Archive a thread: it leaves lists filtered by `status: Active`, its content stays. A new user
+     * message in it unarchives it. Archiving an archived thread keeps its archive time.
+     */
+    archive: (id: string) =>
+      client.post<AgentThreadDto>(`${base}/${id}/archive`),
+
+    /** Unarchive a thread. */
+    unarchive: (id: string) =>
+      client.post<AgentThreadDto>(`${base}/${id}/unarchive`),
 
     /** Delete thread */
     delete: (id: string) =>
@@ -197,9 +264,15 @@ export function useThreadApi(client: HttpClient) {
     exportJson: (id: string) =>
       client.get<ThreadExportDto>(`${base}/${id}/export/json`),
 
-    /** Get export markdown URL (file download) */
-    getExportMarkdownUrl: (id: string) =>
-      client.resolveUrl(`${base}/${id}/export/markdown`),
+    /**
+     * Export thread as a Markdown file (Blob).
+     *
+     * Fetched through the client rather than handed to the browser as a URL:
+     * the endpoint needs a signed-in caller, and a browser navigation carries
+     * no Authorization header, so a link always downloaded a 401.
+     */
+    exportMarkdown: (id: string) =>
+      client.download(`${base}/${id}/export/markdown`),
 
     /** Submit message feedback */
     submitFeedback: (threadId: string, messageId: string, data: MessageFeedbackDto) =>
@@ -212,16 +285,30 @@ export function useThreadApi(client: HttpClient) {
 }
 
 // ============================================
-// User: Quota API
-// Route: /quotas
+// User: Usage limits & model selection
+// Routes: /usage-limits, /chat/models
 // ============================================
 
-/** User-facing quota API (current user) */
-export function useQuotaApi(client: HttpClient) {
+/** The current user's own usage limits (percentages and reset times, no amounts). */
+export function useUsageLimitApi(client: HttpClient) {
   return {
-    /** Get current user's quota info */
-    getMyQuota: () =>
-      client.get<UserQuotaDto>('/quotas/me'),
+    /** Each window's used share and reset time. */
+    getMine: () =>
+      client.get<MyUsageLimitsDto>('/usage-limits/me'),
+  };
+}
+
+/** The models the current user may pick in the chat. */
+export function useChatModelApi(client: HttpClient) {
+  return {
+    /** Models for an agent (omit `agentId` for agentless chat, filtered by `provider` or the default provider). */
+    getModels: (agentId?: string | null, provider?: string | null) =>
+      client.get<ChatModelsDto>('/chat/models', {
+        params: {
+          ...(agentId ? { agentId } : {}),
+          ...(provider ? { provider } : {}),
+        },
+      }),
   };
 }
 
@@ -447,36 +534,54 @@ export function useAdminThreadApi(client: HttpClient) {
     exportJson: (id: string) =>
       client.get<ThreadExportDto>(`${base}/${id}/export/json`),
 
-    /** Get export markdown URL (file download) */
-    getExportMarkdownUrl: (id: string) =>
-      client.resolveUrl(`${base}/${id}/export/markdown`),
+    /**
+     * Export thread as a Markdown file (Blob).
+     *
+     * Fetched through the client rather than handed to the browser as a URL:
+     * the endpoint needs a signed-in caller, and a browser navigation carries
+     * no Authorization header, so a link always downloaded a 401.
+     */
+    exportMarkdown: (id: string) =>
+      client.download(`${base}/${id}/export/markdown`),
   };
 }
 
 // ============================================
-// Admin: Quota API
-// Route: /admin/quotas
+// Admin: Usage limits API
+// Route: /admin/ai/usage-limits
 // ============================================
 
-/** Admin quota management API */
-export function useAdminQuotaApi(client: HttpClient) {
-  const base = '/admin/quotas';
+/** Admin usage limits & model policy API */
+export function useAdminUsageLimitApi(client: HttpClient) {
+  const base = '/admin/ai/usage-limits';
   return {
-    /** Get quota for a user */
-    getQuota: (userId: string) =>
-      client.get<UserQuotaDto>(`${base}/${userId}`),
+    /** Everyone's defaults: saved, configuration level, effective, model list. */
+    getDefaults: () =>
+      client.get<UsageLimitDefaultsDto>(`${base}/defaults`),
 
-    /** Get user quotas (paged) */
-    getList: (data: UserQuotaQueryDto) =>
-      client.post<PagedList<UserQuotaDto>>(`${base}/query`, data),
+    /** Save everyone's defaults. */
+    saveDefaults: (data: SaveUsagePolicyDto) =>
+      client.put<UsageLimitDefaultsDto>(`${base}/defaults`, data),
 
-    /** Set user quota */
-    setQuota: (data: SetQuotaDto) =>
-      client.post<UserQuotaDto>(base, data),
+    /** One user's own settings, what they resolve to, and current usage. */
+    getUser: (userId: string) =>
+      client.get<UserUsageLimitsDto>(`${base}/users/${userId}`),
 
-    /** Reset user quota */
-    resetQuota: (data: ResetQuotaDto) =>
-      client.post<void>(`${base}/reset`, data),
+    /** Save one user's own settings. */
+    saveUser: (userId: string, data: SaveUsagePolicyDto) =>
+      client.put<UserUsageLimitsDto>(`${base}/users/${userId}`, data),
+
+    /** Remove one user's own settings: everything follows the defaults again. */
+    clearUser: (userId: string) =>
+      client.delete<void>(`${base}/users/${userId}`),
+
+    /** Clear one user's current windows. */
+    resetUser: (userId: string) =>
+      client.post<void>(`${base}/users/${userId}/reset`),
+
+    /** Users who used AI, most recent first, with their windows. */
+    queryUsers: (data: UsageMeterQueryDto) =>
+      client.post<PagedList<UserUsageSummaryDto>>(`${base}/users/query`, data),
 
     /**
      * Get the USD cost budget summary for a tenant/time-range.
@@ -573,25 +678,25 @@ export function useAdminUsageAnalyticsApi(client: HttpClient) {
     getByProvider: (startTime: string, endTime: string) =>
       client.get<ProviderUsageDto[]>(`${base}/by-provider`, { params: { startTime, endTime } }),
 
-    /** Get usage by model */
-    getByModel: (startTime: string, endTime: string, provider?: string) =>
-      client.get<ModelUsageDto[]>(`${base}/by-model`, { params: { startTime, endTime, provider } }),
+    /** Get usage by model (optionally narrowed to one provider and/or one agent) */
+    getByModel: (startTime: string, endTime: string, provider?: string, agentId?: string) =>
+      client.get<ModelUsageDto[]>(`${base}/by-model`, { params: { startTime, endTime, provider, agentId } }),
 
     /** Get usage trend (time series) */
     getTrend: (data: UsageTrendQueryDto) =>
       client.post<UsageTrendPointDto[]>(`${base}/trend`, data),
 
-    /** Get usage by agent (top N) */
-    getByAgent: (startTime: string, endTime: string, topN = 20) =>
-      client.get<AgentUsageDto[]>(`${base}/by-agent`, { params: { startTime, endTime, topN } }),
+    /** Get usage and estimated cost by agent (top N; optionally narrowed by provider, model and/or agent) */
+    getByAgent: (startTime: string, endTime: string, topN = 20, filters: UsageBreakdownFilters = {}) =>
+      client.get<AgentUsageDto[]>(`${base}/by-agent`, { params: { startTime, endTime, topN, ...filters } }),
 
     /** Get agent feedback statistics */
     getAgentFeedbackStats: (topN = 20) =>
       client.get<AgentFeedbackStatsDto[]>(`${base}/agent-feedback-stats`, { params: { topN } }),
 
-    /** Get cost summary */
-    getCostSummary: (startTime: string, endTime: string, provider?: string, model?: string) =>
-      client.get<CostSummaryDto>(`${base}/cost-summary`, { params: { startTime, endTime, provider, model } }),
+    /** Get cost summary (optionally narrowed by provider, model and/or agent) */
+    getCostSummary: (startTime: string, endTime: string, provider?: string, model?: string, agentId?: string) =>
+      client.get<CostSummaryDto>(`${base}/cost-summary`, { params: { startTime, endTime, provider, model, agentId } }),
   };
 }
 
@@ -910,7 +1015,7 @@ export function useAdminMcpToolAnalyticsApi(client: HttpClient) {
   return {
     /** Get statistics for a specific tool */
     getToolStats: (toolName: string, from?: string, to?: string) =>
-      client.get<McpToolStatsDto>(`${base}/stats/${toolName}`, { params: { from, to } }),
+      client.get<McpToolStatsDto>(`${base}/stats/${encodeURIComponent(toolName)}`, { params: { from, to } }),
 
     /** Get most used tools ranking */
     getMostUsedTools: (top = 10, from?: string, to?: string) =>
@@ -918,7 +1023,7 @@ export function useAdminMcpToolAnalyticsApi(client: HttpClient) {
 
     /** Get errors for a specific tool */
     getToolErrors: (toolName: string, top = 20) =>
-      client.get<McpToolErrorDto[]>(`${base}/errors/${toolName}`, { params: { top } }),
+      client.get<McpToolErrorDto[]>(`${base}/errors/${encodeURIComponent(toolName)}`, { params: { top } }),
 
     /** Cleanup old analytics records */
     cleanup: (retentionDays = 90) =>
@@ -975,11 +1080,7 @@ export function useAdminSkillCategoryApi(client: HttpClient) {
 export function useArtifactApi(client: HttpClient) {
   const base = '/artifacts';
   return {
-    /** Get artifact list (paged query) */
-    getList: (params?: Record<string, unknown>) =>
-      client.get<AgentArtifactDto[]>(base, { params }),
-
-    /** Get artifacts by thread */
+    /** Get artifacts by thread (the endpoint has no unscoped listing) */
     getByThread: (threadId: string) =>
       client.get<AgentArtifactDto[]>(base, { params: { threadId } }),
 
@@ -1025,8 +1126,8 @@ import type { WorkspaceAgentDto, WorkspacePersonaDto } from './types';
  *
  * Workspace agents/personas come from AGENT.md / PERSONA.md files on disk
  * (under `~/.tnzi/agents/` or the project's `.agents/` directory). They
- * are surfaced read-only because editing should happen on disk; the file
- * watcher (when enabled in WorkspaceOptions.FileWatchEnabled) hot-reloads.
+ * are surfaced read-only because editing should happen on disk; files are
+ * re-read on every request, so an edit shows up on the next listing.
  */
 export function useAdminWorkspaceAgentApi(client: HttpClient) {
   const base = '/admin/ai/workspace';

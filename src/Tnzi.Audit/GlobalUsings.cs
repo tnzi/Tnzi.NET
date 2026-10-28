@@ -1,5 +1,5 @@
-global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.WebUtilities;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -25,6 +25,7 @@ global using Tnzi.Application;
 global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Http;
+global using Tnzi.AspNetCore.Middleware;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Audit.Dtos;

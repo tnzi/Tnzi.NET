@@ -177,4 +177,104 @@ public class SandboxToolsTests : IAsyncLifetime
         Assert.DoesNotContain("Command denied", json);
         Assert.DoesNotContain("outside the sandbox thread directory", json);
     }
+
+    // ------------------------------------------------------------------ //
+    // Result budget: read_file and ls
+    // ------------------------------------------------------------------ //
+
+    private SandboxTools CreateToolsWithReadBudget(int maxResultChars) => new(
+        _translator, NullLogger<SandboxTools>.Instance, _accessor,
+        aiOptions: new StaticOptionsMonitor<AIOptions>(new AIOptions
+        {
+            ToolResultBudget = new ToolResultBudgetOptions { Enabled = true, MaxResultChars = maxResultChars }
+        }));
+
+    private static System.Text.Json.JsonElement ToJson(object result)
+        => System.Text.Json.JsonSerializer.SerializeToElement(result);
+
+    private static string NumberedLines(int count)
+        => string.Concat(Enumerable.Range(1, count).Select(i => $"line {i:000}\n"));
+
+    [Fact]
+    public async Task ReadFile_WholeFileOverTheBudget_ReturnsWholeLinesAndWhereToContinue()
+    {
+        SeedEnvironment();
+        var tools = CreateToolsWithReadBudget(100);
+        await tools.WriteFileAsync("/mnt/workspace/big.txt", NumberedLines(50)); // 9 characters a line
+
+        var json = ToJson(await tools.ReadFileAsync("/mnt/workspace/big.txt"));
+
+        json.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        json.GetProperty("total_chars").GetInt32().ShouldBe(450);
+        var content = json.GetProperty("content").GetString()!;
+        content.ShouldBe(NumberedLines(11));
+        json.GetProperty("next_offset").GetInt32().ShouldBe(12);
+
+        var next = ToJson(await tools.ReadFileAsync("/mnt/workspace/big.txt", offset: 12, limit: 1));
+        next.GetProperty("content").GetString().ShouldBe("line 012");
+    }
+
+    /// <summary>
+    /// 第一行就超出预算时按码元硬切：切点落在代理对中间时整个字符一起舍掉，交给模型的工具结果是合法文本。
+    /// </summary>
+    [Fact]
+    public async Task ReadFile_FirstLineOverTheBudget_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        SeedEnvironment();
+        var tools = CreateToolsWithReadBudget(100);
+        // 一整行，第 100 个码元是 emoji 的前半个
+        await tools.WriteFileAsync("/mnt/workspace/line.txt", new string('a', 99) + "\U0001F600" + new string('b', 50));
+
+        var json = ToJson(await tools.ReadFileAsync("/mnt/workspace/line.txt"));
+
+        json.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        json.GetProperty("content").GetString().ShouldBe(new string('a', 99));
+    }
+
+    [Fact]
+    public async Task ReadFile_UnderTheBudget_OrWithALineWindow_IsReturnedWhole()
+    {
+        SeedEnvironment();
+        var tools = CreateToolsWithReadBudget(100);
+        await tools.WriteFileAsync("/mnt/workspace/small.txt", NumberedLines(5));
+        await tools.WriteFileAsync("/mnt/workspace/big.txt", NumberedLines(50));
+
+        var small = ToJson(await tools.ReadFileAsync("/mnt/workspace/small.txt"));
+        small.TryGetProperty("truncated", out _).ShouldBeFalse();
+        small.GetProperty("content").GetString().ShouldBe(NumberedLines(5));
+
+        // An explicit window is what the caller asked for, even past the budget.
+        var window = ToJson(await tools.ReadFileAsync("/mnt/workspace/big.txt", offset: 1, limit: 50));
+        window.TryGetProperty("truncated", out _).ShouldBeFalse();
+        window.GetProperty("content").GetString()!.Length.ShouldBeGreaterThan(100);
+    }
+
+    [Fact]
+    public async Task ListDirectory_ClampsTheDepthTheModelAsksFor()
+    {
+        SeedEnvironment();
+        var deepest = Path.Combine(_translator.ToPhysical("/mnt/workspace", _threadId), "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8");
+        Directory.CreateDirectory(deepest);
+
+        var json = ToJson(await _tools.ListDirectoryAsync("/mnt/workspace", maxDepth: 50));
+
+        var names = json.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("name").GetString()).ToList();
+        names.ShouldContain("d6");
+        names.ShouldNotContain("d7");
+    }
+
+    [Fact]
+    public async Task ListDirectory_CapsTheEntriesAndSaysHowManyThereWere()
+    {
+        SeedEnvironment();
+        var dir = _translator.ToPhysical("/mnt/workspace", _threadId);
+        for (var i = 0; i < SandboxTools.MaxListEntries + 5; i++)
+            File.WriteAllText(Path.Combine(dir, $"f{i:0000}.txt"), "x");
+
+        var json = ToJson(await _tools.ListDirectoryAsync("/mnt/workspace", maxDepth: 0));
+
+        json.GetProperty("entries").GetArrayLength().ShouldBe(SandboxTools.MaxListEntries);
+        json.GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        json.GetProperty("total_entries").GetInt32().ShouldBe(SandboxTools.MaxListEntries + 5);
+    }
 }

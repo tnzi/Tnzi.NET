@@ -42,6 +42,8 @@ const managerInstance = {
 vi.mock('@tnzi/core/state', () => ({
   // vitest 4: `new`-able mock must use a regular function (arrow impls are not constructors)
   AuthStateManager: vi.fn(function () { return managerInstance }),
+  // The stubbed HttpClient below is not a createTnziClient() one: no shared manager.
+  authStateOf: () => undefined,
 }))
 
 vi.mock('@tnzi/core/adapters/storage', () => ({
@@ -52,8 +54,6 @@ vi.mock('@tnzi/core/adapters/storage', () => ({
 vi.mock('../../src/stores/factory', () => ({
   getStoreHttpClient: () => ({ get: vi.fn(), post: vi.fn() }),
   getStoreStorage: () => null,
-  STORE_HTTP_CLIENT: Symbol('stub-http'),
-  STORE_STORAGE: Symbol('stub-storage'),
 }))
 
 import { useAuthStore, useAuth, resetAuthRuntime } from '../../src/stores/auth'

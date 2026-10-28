@@ -5,7 +5,7 @@ namespace Tnzi.AI.Services;
 /// </summary>
 /// <remarks>
 /// ⚠️ <b>ADVISORY / best-effort，非硬性原子上限。</b>
-/// 与 Token 配额（<c>IQuotaService.ReserveQuotaAsync</c> 采用单条 SQL 原子 check-and-decrement，
+/// 与按用户的用量上限（<c>IUsageLimitService.BeginAsync</c> 用单条条件更新原子开闸，
 /// 消除 TOCTOU 竞态）不同，USD 预算检查是基于 UsageLog 聚合 + 进程级内存缓存（默认 60s TTL）实现的，
 /// <b>不做 reserve-then-settle</b>。因此并发请求可能在缓存窗口内短暂超支，不应将其当作硬性的、
 /// 实时精确的成本闸门，仅作为告警 / 软性管控使用。要收紧竞态窗口可调小 <c>AI:Budget:CacheTtlSeconds</c>。

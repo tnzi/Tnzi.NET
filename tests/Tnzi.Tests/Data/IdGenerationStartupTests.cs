@@ -182,6 +182,34 @@ public class IdGenerationStartupTests
         Assert.Null(WorkerIdResolver.Resolve(new IdGenerationOptions { WorkerIdFromHostname = true }, "web"));
     }
 
+    /// <summary>
+    /// Deployment / ReplicaSet 的 Pod 名与容器 ID 末尾是随机字符，碰巧以数字结尾时取到的「序号」不稳定、可以撞号
+    /// （<c>api-6d4cf56db6-q7</c> 与 <c>api-6d4cf56db6-k7</c> 都得 8）：按未配置处理，而不是派生出一个机器码。
+    /// </summary>
+    [Theory]
+    [InlineData("api-6d4cf56db6-x7k27")]
+    [InlineData("payments-7b9d8f6c5d-qb4c7")]
+    [InlineData("worker-58f7c9b4f-2x9z5")]
+    [InlineData("3f2a9c1b7d84")]
+    [InlineData("3f2a9c1b7d843f2a9c1b7d843f2a9c1b7d843f2a9c1b7d843f2a9c1b7d843f21")]
+    public void WorkerIdResolver_GeneratedHostname_IsTreatedAsUnconfigured(string machineName)
+    {
+        Assert.Null(WorkerIdResolver.Resolve(new IdGenerationOptions { WorkerIdFromHostname = true }, machineName));
+    }
+
+    [Theory]
+    [InlineData("api-0", 1)]
+    [InlineData("payments-statefulset-12", 13)]
+    [InlineData("web12", 13)]
+    [InlineData("kafka-broker-2", 3)]
+    public void WorkerIdResolver_StableOrdinalHostnames_StillResolve(string machineName, int expectedWorkerId)
+    {
+        var resolution = WorkerIdResolver.Resolve(new IdGenerationOptions { WorkerIdFromHostname = true }, machineName);
+
+        Assert.NotNull(resolution);
+        Assert.Equal(expectedWorkerId, resolution.WorkerId);
+    }
+
     [Theory]
     [InlineData(0, 6, 6)]     // WorkerId 0 不是合法机器码
     [InlineData(64, 6, 6)]    // 超出 6 位机器码

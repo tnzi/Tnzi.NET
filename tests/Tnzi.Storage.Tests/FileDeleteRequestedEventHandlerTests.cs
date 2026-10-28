@@ -48,6 +48,49 @@ public class FileDeleteRequestedEventHandlerTests
         }));
     }
 
+    /// <summary>
+    /// ★★ 内置的 S3 / R2 / Azure / Local 遇到故障不抛，而是吞掉异常报 <c>false</c>。此前处理器丢掉这个返回值，
+    /// 对它们而言重试与死信从来不会发生：瞬时故障被记成「删除完成」，对象成了永久孤儿。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_WhenTheProviderReportsFalse_AndTheObjectIsStillThere_Throws()
+    {
+        var storage = new Mock<IFileStorage>();
+        storage.Setup(s => s.DeleteAsync("files/a.pdf")).ReturnsAsync(false);
+        storage.Setup(s => s.ExistsAsync("files/a.pdf")).ReturnsAsync(true);
+        storage.Setup(s => s.DeleteAsync("thumb/a.pdf")).ReturnsAsync(true);
+        var handler = new FileDeleteRequestedEventHandler(storage.Object, NullLogger<FileDeleteRequestedEventHandler>.Instance);
+
+        var ex = await Assert.ThrowsAsync<AggregateException>(() => handler.HandleAsync(new FileDeleteRequestedEvent
+        {
+            FileId = Guid.NewGuid(),
+            FilePath = "files/a.pdf",
+            ThumbnailPath = "thumb/a.pdf",
+            Provider = "S3"
+        }));
+
+        Assert.Single(ex.InnerExceptions);
+        storage.Verify(s => s.DeleteAsync("thumb/a.pdf"), Times.Once);
+    }
+
+    /// <summary>对照：<c>false</c> 而对象本来就不在（重试时上一轮已经删掉、Local 的文件不存在）是成功，删除是幂等的。</summary>
+    [Fact]
+    public async Task HandleAsync_WhenTheProviderReportsFalse_ButTheObjectIsGone_DoesNotThrow()
+    {
+        var storage = new Mock<IFileStorage>();
+        storage.Setup(s => s.DeleteAsync(It.IsAny<string>())).ReturnsAsync(false);
+        storage.Setup(s => s.ExistsAsync(It.IsAny<string>())).ReturnsAsync(false);
+        var handler = new FileDeleteRequestedEventHandler(storage.Object, NullLogger<FileDeleteRequestedEventHandler>.Instance);
+
+        await handler.HandleAsync(new FileDeleteRequestedEvent
+        {
+            FileId = Guid.NewGuid(),
+            FilePath = "files/a.pdf",
+            ThumbnailPath = "thumb/a.pdf",
+            Provider = "Local"
+        });
+    }
+
     [Fact]
     public async Task HandleAsync_WhenBothDeletesSucceed_DoesNotThrow()
     {

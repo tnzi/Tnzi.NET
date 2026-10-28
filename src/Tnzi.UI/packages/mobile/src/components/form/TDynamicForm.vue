@@ -4,6 +4,7 @@ import type { FieldRule, UploaderFileListItem } from 'vant';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IDynamicFormField, IFormRule } from '@tnzi/core/types/shared-ui';
 import { useDynamicForm } from '../../headless/useDynamicForm';
+import { requiredRule } from './required-rule';
 
 interface IDynamicFormProps {
   /** Form model. Two-way bound: `v-model="model"`. */
@@ -97,7 +98,7 @@ const toVantRules = (rule: IFormRule): FieldRule[] => {
   const trigger = toVantTrigger(rule.trigger);
   const rules: FieldRule[] = [];
 
-  if (rule.required) rules.push({ required: true, message: rule.message ?? t('form.required'), trigger });
+  if (rule.required) rules.push(requiredRule(rule.message ?? t('form.required'), trigger));
   if (rule.pattern) {
     rules.push({ pattern: rule.pattern, message: rule.message ?? t('form.invalidFormat'), trigger });
   }
@@ -140,6 +141,8 @@ const rangeMessage = (min?: number, max?: number) => {
  * `required` applies to every type: Vant's required rule reads an empty string,
  * null / undefined, an empty array (file, multi-checkbox) and `false` as
  * missing, so on a switch or checkbox it means "must be on" (a consent gate).
+ * A whitespace-only string is missing too (`requiredRule` trims for the check),
+ * as the backend's [Required] treats it.
  * `min` / `max` are read as numeric bounds for `number` fields, as a file count
  * for `file` fields (applied as the uploader's max-count, not as a rule), as a
  * selection count for a checkbox group (a checkbox with `options` holds an
@@ -150,7 +153,7 @@ const fieldRules = (field: IDynamicFormField): FieldRule[] => {
   const rules: FieldRule[] = [];
 
   if (field.required) {
-    rules.push({ required: true, message: t('form.required') });
+    rules.push(requiredRule(t('form.required')));
   }
 
   const hasBound = field.min != null || field.max != null;
@@ -221,6 +224,37 @@ const toTimeColumns = (value: InputValue): string[] => {
   return ['00', '00'];
 };
 
+/** Earliest year the date pickers offer by default. */
+const PICKER_MIN_YEAR = 1900;
+/** How many years past the current one the date pickers offer by default. */
+const PICKER_YEARS_AHEAD = 50;
+
+/**
+ * Bounds for a field's date picker.
+ *
+ * Vant defaults to the current year +/- 10 and snaps a value outside that range
+ * to the nearest allowed year, so merely opening the picker on a birth date
+ * rewrote it and Confirm stored the rewritten date. The range is wide enough for
+ * birth dates and long contracts, and always widened to contain the value being
+ * edited.
+ */
+const pickerBounds = (key: string): { minDate: Date; maxDate: Date } => {
+  const year = Number(dateDraft.value[key]?.[0]);
+  const known = Number.isFinite(year);
+  const latest = new Date().getFullYear() + PICKER_YEARS_AHEAD;
+  return {
+    minDate: new Date(known ? Math.min(PICKER_MIN_YEAR, year) : PICKER_MIN_YEAR, 0, 1),
+    maxDate: new Date(known ? Math.max(latest, year) : latest, 11, 31),
+  };
+};
+
+/** A datetime value as shown in its field: `YYYY-MM-DD HH:mm`, whatever separator it carries. */
+const getDateTimeDisplay = (key: string): InputValue => {
+  const value = getInputValue(key);
+  const matched = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(String(value ?? ''));
+  return matched ? `${matched[1]} ${matched[2]}` : value;
+};
+
 const openPopup = (field: IDynamicFormField) => {
   if (props.disabled || field.disabled) return;
   if (field.type === 'date' || field.type === 'datetime') {
@@ -266,10 +300,14 @@ const onDateConfirm = (key: string) => {
   closePopup(key);
 };
 
+/**
+ * Writes ISO 8601 local date-time (`2026-10-10T12:30:00`). The space-separated
+ * form a person reads is rejected by the backend's DateTime parsing (400).
+ */
 const onDateTimeConfirm = (key: string) => {
   const date = (dateDraft.value[key] ?? []).join('-');
   const time = (timeDraft.value[key] ?? []).join(':');
-  updateField(key, `${date} ${time}`);
+  updateField(key, `${date}T${time}:00`);
   closePopup(key);
 };
 
@@ -445,6 +483,8 @@ const getFileList = (key: string): UploaderFileListItem[] => {
             <van-date-picker
               :model-value="dateDraft[field.key] ?? []"
               :title="field.label"
+              :min-date="pickerBounds(field.key).minDate"
+              :max-date="pickerBounds(field.key).maxDate"
               @update:model-value="setDateDraft(field.key, $event)"
               @confirm="onDateConfirm(field.key)"
               @cancel="closePopup(field.key)"
@@ -455,7 +495,7 @@ const getFileList = (key: string): UploaderFileListItem[] => {
         <!-- datetime -> van-picker-group (date step + time step) -->
         <template v-else-if="field.type === 'datetime'">
           <van-field
-            :model-value="getInputValue(field.key)"
+            :model-value="getDateTimeDisplay(field.key)"
             :name="field.key"
             is-link
             readonly
@@ -476,6 +516,8 @@ const getFileList = (key: string): UploaderFileListItem[] => {
             >
               <van-date-picker
                 :model-value="dateDraft[field.key] ?? []"
+                :min-date="pickerBounds(field.key).minDate"
+                :max-date="pickerBounds(field.key).maxDate"
                 @update:model-value="setDateDraft(field.key, $event)"
               />
               <van-time-picker

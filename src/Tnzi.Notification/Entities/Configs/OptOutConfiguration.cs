@@ -11,8 +11,8 @@ public class OptOutConfiguration : EntityTypeConfigurationBase<OptOut, Guid>
 
         builder.Property(o => o.Address).IsRequired().HasMaxLength(500);
         builder.Property(o => o.Category).HasMaxLength(100);
-        builder.Property(o => o.Source).HasMaxLength(200);
-        builder.Property(o => o.Reason).HasMaxLength(1000);
+        builder.Property(o => o.Source).HasMaxLength(NotificationFieldLimits.OptOutSourceMaxLength);
+        builder.Property(o => o.Reason).HasMaxLength(NotificationFieldLimits.OptOutReasonMaxLength);
 
         if (multiTenancyEnabled)
         {

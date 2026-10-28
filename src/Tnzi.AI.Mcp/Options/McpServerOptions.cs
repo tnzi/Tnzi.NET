@@ -67,7 +67,7 @@ public class McpServerOptions
     /// </summary>
     [RuntimeSetting(Label = "Rate Limit (per minute)", I18n = "admin.modules.system.settings.fields.mcpServerRateLimitPerMinute",
         Type = SettingFieldType.Int, Min = 0, Subsection = "Rate Limiting",
-        Description = "Per-client sliding-window request cap per minute. 0 disables rate limiting.")]
+        Description = "Per-client request cap per fixed 60-second window. 0 disables rate limiting.")]
     public int RateLimitPerMinute { get; set; } = 600;
 
     /// <summary>

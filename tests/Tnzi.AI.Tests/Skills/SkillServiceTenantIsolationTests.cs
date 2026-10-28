@@ -310,6 +310,7 @@ public class SkillServiceTenantIsolationTests : IDisposable
         return new SkillService(
             sp,
             repo,
+            new EFCoreRepository<SkillTenantDbContext, SkillCategory, Guid>(ctx),
             registry.Object,
             templateEngine.Object,
             fileStore,

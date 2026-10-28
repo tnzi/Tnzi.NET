@@ -54,11 +54,6 @@ public class TemplateOptions
     public string TemplateExtension { get; set; } = ".cshtml";
     
     /// <summary>
-    /// 是否启用调试模式（输出编译错误详情）
-    /// </summary>
-    public bool EnableDebug { get; set; } = false;
-
-    /// <summary>
     /// 缓存大小限制（最多缓存多少个模板；0 或负数表示不限制）。
     /// 只作用于模板引擎自己的缓存实例，不影响全进程共享的 <c>IMemoryCache</c>（那个由 <c>Caching:MemorySizeLimit</c> 管）。
     /// </summary>

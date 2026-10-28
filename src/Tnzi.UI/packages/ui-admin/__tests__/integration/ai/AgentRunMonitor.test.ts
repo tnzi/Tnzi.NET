@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 /**
  * AgentRunMonitor - run trace viewer test.
@@ -57,21 +58,34 @@ const getTracesMock = vi.fn(async (runId: string) => [
 ])
 
 const cancelMock = vi.fn(async () => undefined)
+const getRunByIdMock = vi.fn(async (id: string) => ({
+  id,
+  agentId: 'agent-1',
+  status: 'Running',
+  executionMode: 'Single',
+  inputSummary: 'old',
+  outputSummary: '',
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  durationMs: 800,
+  creationTime: '2026-03-01T10:00:00Z',
+}))
+const routeParams = vi.hoisted(() => ({ value: { agentId: 'agent-1' } as Record<string, string> }))
 
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     agentRuns: {
       fetch: fetchRunsMock,
+      getById: getRunByIdMock,
       cancel: cancelMock,
       getTraces: getTracesMock,
-      tail: vi.fn(),
     },
   }),
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { agentId: 'agent-1' }, meta: {}, query: {} }),
+  useRoute: () => ({ params: routeParams.value, meta: {}, query: {} }),
   useRouter: () => ({ push: vi.fn(), back: vi.fn() }),
 }))
 
@@ -87,6 +101,8 @@ describe('AgentRunMonitor page (trace viewer + polling)', () => {
     fetchRunsMock.mockClear()
     getTracesMock.mockClear()
     cancelMock.mockClear()
+    getRunByIdMock.mockClear()
+    routeParams.value = { agentId: 'agent-1' }
   })
 
   afterEach(() => {
@@ -167,5 +183,44 @@ describe('AgentRunMonitor page (trace viewer + polling)', () => {
     await flushPromises()
 
     expect(cancelMock).toHaveBeenCalledWith('run-aaa-111')
+  })
+
+  // The list holds the latest 30 runs. A link to an older run used to open on
+  // "select a run" with nothing to select.
+  it('a linked run older than the loaded page opens in the detail pane', async () => {
+    vi.useFakeTimers()
+    routeParams.value = { agentId: 'agent-1', runId: 'run-old-999' }
+    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
+    await flushPromises()
+
+    expect(getRunByIdMock).toHaveBeenCalledWith('run-old-999')
+    const detail = wrapper.find('[data-test="run-detail"]')
+    expect(detail.text()).toContain('run-old-999')
+    expect(getTracesMock).toHaveBeenCalledWith('run-old-999')
+
+    // Still running: the poll keeps it on screen and refreshes it on its own.
+    getRunByIdMock.mockClear()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(getRunByIdMock).toHaveBeenCalledWith('run-old-999')
+    expect(wrapper.find('[data-test="run-detail"]').text()).toContain('run-old-999')
+    wrapper.unmount()
+  })
+
+  it('a linked run that cannot be read says why', async () => {
+    routeParams.value = { agentId: 'agent-1', runId: 'run-gone' }
+    getRunByIdMock.mockRejectedValueOnce(new Error('Agent run not found'))
+    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="run-detail"]').text()).toContain('Agent run not found')
+  })
+
+  it('offers no cancel to a reader without ai.agentRun.execute', async () => {
+    useAdminAuthStore().setUserInfo({ id: 'r', username: 'reader', roles: [], permissions: ['ai.agentRun.view'] })
+    const wrapper = mount(AgentRunMonitor, { global: { stubs } })
+    await flushPromises()
+    await wrapper.find('[data-run-id="run-aaa-111"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.t-run-monitor__cancel').exists()).toBe(false)
   })
 })

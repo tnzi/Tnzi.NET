@@ -69,6 +69,93 @@ public class FirstSubscriptionEligibilityIntegrationTests : SubscriptionsIntegra
         precheck.Data.ShouldBeTrue("核销会放行，预检却把首单折扣的入口藏掉了");
     }
 
+    /// <summary>
+    /// ★★ 新用户第一次订阅、输入首单券：经开通链路真的核销得掉。
+    /// 此前订阅先落库再建首期支付，核销时的探针看到的正是刚插入的这条 Pending 订阅，
+    /// 于是每个新用户都被 400 <c>COUPON_FIRST_SUBSCRIPTION_ONLY</c> 拒绝、订阅被删，而预检与试算都答「可用」。
+    /// </summary>
+    [Fact]
+    public async Task ANewCustomer_CanSubscribeWithAFirstOrderCoupon()
+    {
+        var plan = await NewPlanAsync();
+        await SeedFirstOrderPromotionAsync();
+
+        var created = await InScopeAsync<ISubscriptionService, Result<SubscriptionCreateResultDto>>(s => s.CreateSubscriptionAsync(new CreateSubscriptionDto
+        {
+            PlanId = plan.Id,
+            ChannelCode = "Null",
+            CouponCode = FirstOrderCode
+        }));
+
+        created.Succeeded.ShouldBeTrue(created.Message);
+        created.Data!.Payment!.DiscountAmount.ShouldBe(6m);
+        created.Data.Payment.Amount.ShouldBe(24m);
+        created.Data.Subscription.Status.ShouldBe(SubscriptionStatus.Pending);
+    }
+
+    /// <summary>
+    /// 只留下过一条从没开始的订阅（开通后没付首期就取消了）的人不是老订户：他从没成为过订户。
+    /// </summary>
+    [Fact]
+    public async Task ACustomerWhoseOnlySubscriptionNeverStarted_IsAcceptedByBoth()
+    {
+        var userId = Guid.NewGuid();
+        var plan = await NewPlanAsync();
+        var abandoned = SubscriptionFor(userId, plan);
+        abandoned.Status = SubscriptionStatus.Cancelled;
+        abandoned.NextBillingTime = null;
+        abandoned.CancelTime = DateTime.UtcNow.AddDays(-1);
+        await SeedAsync(abandoned);
+        await SeedFirstOrderPromotionAsync();
+
+        var precheck = await InScopeAsync<ICouponWalletService, Result<bool>>(s => s.CanUseFirstSubscriptionDiscountAsync(userId));
+        var validation = await InScopeAsync<IPromotionService, Result<CouponValidationResultDto>>(s => s.ValidateCouponAsync(Context(userId)));
+
+        validation.Data!.IsValid.ShouldBeTrue(validation.Data.ErrorMessage);
+        precheck.Data.ShouldBeTrue();
+    }
+
+    /// <summary>退订过再回来的人不能再拿一次首单折扣：付过款的已取消订阅照样算历史。</summary>
+    [Fact]
+    public async Task AFormerSubscriberWhoPaid_IsStillRefused()
+    {
+        var userId = Guid.NewGuid();
+        var plan = await NewPlanAsync();
+        var former = SubscriptionFor(userId, plan);
+        former.Status = SubscriptionStatus.Cancelled;
+        former.LastBillingTradeNo = "PAY-PAST-1";
+        former.PaidAmount = 30m;
+        former.CancelTime = DateTime.UtcNow.AddDays(-1);
+        await SeedAsync(former);
+        await SeedFirstOrderPromotionAsync();
+
+        var precheck = await InScopeAsync<ICouponWalletService, Result<bool>>(s => s.CanUseFirstSubscriptionDiscountAsync(userId));
+        var validation = await InScopeAsync<IPromotionService, Result<CouponValidationResultDto>>(s => s.ValidateCouponAsync(Context(userId)));
+
+        validation.Data!.IsValid.ShouldBeFalse();
+        validation.Data.ErrorMessage.ShouldBe(ErrorCodes.CouponFirstSubscriptionOnly);
+        precheck.Data.ShouldBeFalse();
+    }
+
+    /// <summary>开过试用也是订户：试用结束后取消的人同样不再是新客。</summary>
+    [Fact]
+    public async Task AFormerTrialUser_IsStillRefused()
+    {
+        var userId = Guid.NewGuid();
+        var plan = await NewPlanAsync();
+        var former = SubscriptionFor(userId, plan);
+        former.Status = SubscriptionStatus.Expired;
+        former.TrialStartTime = DateTime.UtcNow.AddDays(-30);
+        former.TrialEndTime = DateTime.UtcNow.AddDays(-16);
+        await SeedAsync(former);
+        await SeedFirstOrderPromotionAsync();
+
+        var validation = await InScopeAsync<IPromotionService, Result<CouponValidationResultDto>>(s => s.ValidateCouponAsync(Context(userId)));
+
+        validation.Data!.IsValid.ShouldBeFalse();
+        validation.Data.ErrorMessage.ShouldBe(ErrorCodes.CouponFirstSubscriptionOnly);
+    }
+
     // ── 夹具 ─────────────────────────────────────────────────────────────────
 
     private async Task<SubscriptionPlan> NewPlanAsync()

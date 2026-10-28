@@ -18,7 +18,9 @@ public class CreateEnvelopeDto
     /// <summary>是否顺序签署（默认 true）</summary>
     public bool IsSequential { get; set; } = true;
 
-    /// <summary>有效期（天）；默认 30</summary>
+    /// <summary>
+    /// 有效期（天），从<b>发出</b>那一刻起算（不是建草稿那一刻）；默认 30，上限 365（<c>SigningLimits.MaxExpiresInDays</c>），小于 1 按 1 天。
+    /// </summary>
     public int ExpiresInDays { get; set; } = 30;
 
     /// <summary>收件人（顺序签署时按列表顺序定位次）</summary>
@@ -124,7 +126,7 @@ public class EnvelopeDto
 
     /// <summary>
     /// 完成证书（独立 PDF，记述谁在什么时候从哪里签的，并写有上面那个哈希）。
-    /// 已完成但此项为 null = 证书生成失败，成品本身仍然有效。
+    /// 已完成但此项为 null = 证书生成失败，成品本身仍然有效；管理端对这份请求再调一次 seal 会补生成。
     /// </summary>
     public Guid? CompletionCertificateFileId { get; set; }
 

@@ -25,7 +25,7 @@ defineProps<{
       <span class="h-px w-4 bg-ai-handoff-accent/50" />
     </div>
     <div class="flex items-center gap-1.5 font-medium text-tnzi-base">
-      <Icon :icon="toIcon ?? 'lucide:bot'" class="size-4 text-primary" />
+      <Icon :icon="toIcon ?? 'lucide:bot'" class="size-4 text-ai-accent-text" />
       <span>{{ toAgent }}</span>
     </div>
   </div>

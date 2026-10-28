@@ -1,0 +1,26 @@
+---
+layout: DefaultEmail
+description: Sent with a payment receipt attached (the subject is set by the sender, "Receipt <number>")
+metadata:
+  type: Email
+  version: "1.0"
+---
+@{
+    var seller = (string?)Model.SellerName;
+    var last4 = (string?)Model.CardLast4;
+    var brand = string.IsNullOrWhiteSpace((string?)Model.CardBrand) ? "card" : (string)Model.CardBrand;
+}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="greeting ink" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a2e; line-height: 1.35; padding-bottom: 14px;">
+            Thank you for your payment
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.65; color: #4a5568;">
+            Hi @(string.IsNullOrWhiteSpace((string?)Model.CustomerName) ? "there" : Model.CustomerName),
+            @(string.IsNullOrWhiteSpace(seller) ? "We" : seller) received @Model.Currency @Model.Amount on @Model.PaidDate@(string.IsNullOrWhiteSpace(last4) ? "" : $" from your {brand} ending in {last4}").
+            Your receipt @Model.DocumentNo is attached.
+        </td>
+    </tr>
+</table>

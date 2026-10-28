@@ -193,7 +193,7 @@ public class RecurrencePreviewDto
 /// </summary>
 public class RecurringSweepResultDto
 {
-    /// <summary>扫到的到期模板数</summary>
+    /// <summary>本轮有事可做的模板数（处理了某一期，或排期 / 状态因此改变；只因留有历史失败记录被捞进扫描、实际无事可做的不计）</summary>
     public int TemplatesDue { get; set; }
 
     /// <summary>成功生成的单据数</summary>

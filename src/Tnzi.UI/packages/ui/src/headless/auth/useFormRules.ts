@@ -1,7 +1,10 @@
 /**
- * `useFormRules()` - i18n-reactive form validation rules for Naive UI's
- * `NForm`. Returns a frozen set of `FormItemRule[]` keyed by common field
- * names; consumers pick the ones they need.
+ * `useFormRules()` - form validation rules for Naive UI's `NForm`, with
+ * messages from an optional translator. Returns a set of `FormItemRule[]`
+ * keyed by common field names; consumers pick the ones they need. Messages
+ * of the rule factories (`password()`, `text()`, ...) are built when called,
+ * those of the fixed arrays (`email`, `phone`, `userName`, `url`) when the
+ * hook is called, so build the rules where the active locale is known.
  *
  * @example
  * ```vue
@@ -11,8 +14,13 @@
  *
  * All rules accept a `translate` function. When omitted, returns
  * English fallback messages.
+ *
+ * Every required rule counts a whitespace-only string as empty
+ * (`whitespace: true`, or a trimming validator): the backend's [Required]
+ * refuses such a string, so passing it here only moves the error to a 400.
  */
 
+import { hasInjectionContext, inject, type InjectionKey } from 'vue'
 import type { FormItemRule } from 'naive-ui'
 
 export type Translate = (key: string, fallback?: string) => string
@@ -35,13 +43,20 @@ export interface FormRules {
   /** International phone number - digits + optional `+` and dashes. */
   phone: FormItemRule[]
   /**
-   * Strong password - length range + (by default) at least one letter and one
-   * digit. Pass `complexity: false` for LOGIN forms where the password must
-   * only be non-empty (composition rules belong to register/reset, and the
-   * backend enforces its own policy - the login form must not reject a valid
-   * existing password client-side).
+   * A new password, checked against the server's password policy
+   * (`Identity:PasswordPolicy`): its minimum length and the character classes
+   * it requires, up to the 128-character ceiling the login form and the user
+   * DTOs use. The policy is the server's default unless the application
+   * provides its own (`PASSWORD_POLICY_KEY`) or the call passes one; `min`
+   * still overrides the length alone. The backend enforces the configured rule
+   * either way: this check only spares the user a round trip, and it must not
+   * accept a password the server would refuse.
+   *
+   * Pass `complexity: false` for LOGIN forms, where the password must only be
+   * non-empty: the login form must not reject a valid existing password
+   * client-side.
    */
-  password(opts?: { min?: number; max?: number; complexity?: boolean }): FormItemRule[]
+  password(opts?: { min?: number; max?: number; complexity?: boolean; policy?: Partial<PasswordPolicy> }): FormItemRule[]
   /**
    * Account identifier - username, email, OR phone. Length-only (no strict
    * format) so a login form accepts whatever the backend allows. Used by the
@@ -64,6 +79,69 @@ export interface FormRules {
   integer(opts?: { min?: number; max?: number }): FormItemRule[]
 }
 
+/**
+ * The server's password policy, field for field (`Identity:PasswordPolicy`:
+ * `MinLength`, `RequireDigit`, `RequireLowercase`, `RequireUppercase`,
+ * `RequireNonAlphanumeric`).
+ */
+export interface PasswordPolicy {
+  minLength: number
+  requireDigit: boolean
+  requireLowercase: boolean
+  requireUppercase: boolean
+  requireNonAlphanumeric: boolean
+}
+
+/**
+ * The policy a server enforces when `Identity:PasswordPolicy` is not configured.
+ * A form that checked less than this passed passwords the server then refused
+ * (`ABCDEF12` has letters and digits and no lowercase letter).
+ */
+export const DEFAULT_PASSWORD_POLICY: Readonly<PasswordPolicy> = Object.freeze({
+  minLength: 6,
+  requireDigit: true,
+  requireLowercase: true,
+  requireUppercase: false,
+  requireNonAlphanumeric: false,
+})
+
+/**
+ * The deployment's password policy, for every `password()` rule built in the
+ * application, the built-in register / reset / invitation pages included:
+ * `app.provide(PASSWORD_POLICY_KEY, { requireUppercase: true })`, with the
+ * values the server is configured with. Fields left out keep the server's
+ * defaults. (`defineAdminApp({ passwordPolicy })` provides it for an admin app.)
+ */
+export const PASSWORD_POLICY_KEY: InjectionKey<Partial<PasswordPolicy>> = Symbol('tnzi-password-policy')
+
+/** The ceiling the login form and the user DTOs use; the server sets no maximum. */
+const DEFAULT_PASSWORD_MAX = 128
+
+/**
+ * The character classes the server tests for, in the order it reports them.
+ * The classes are ASCII, as in ASP.NET Identity's validator, which is what the
+ * server's register path runs: a password whose only lowercase letter is `é`
+ * would pass a Unicode test here and be refused there. "Not a letter or digit"
+ * counts every letter, in any script, as a letter, which is the stricter of the
+ * server's two checks; so a password this accepts, both of them accept.
+ */
+const PASSWORD_CLASSES: ReadonlyArray<{
+  readonly flag: keyof Omit<PasswordPolicy, 'minLength'>
+  readonly pattern: RegExp
+  readonly key: string
+  readonly fallback: string
+}> = [
+  { flag: 'requireUppercase', pattern: /[A-Z]/, key: 'admin.rules.passwordUppercase', fallback: 'Password must contain an uppercase letter (A-Z)' },
+  { flag: 'requireLowercase', pattern: /[a-z]/, key: 'admin.rules.passwordLowercase', fallback: 'Password must contain a lowercase letter (a-z)' },
+  { flag: 'requireDigit', pattern: /[0-9]/, key: 'admin.rules.passwordDigit', fallback: 'Password must contain a digit (0-9)' },
+  { flag: 'requireNonAlphanumeric', pattern: /[^\p{L}\p{Nd}]/u, key: 'admin.rules.passwordSymbol', fallback: 'Password must contain a character that is not a letter or digit' },
+]
+
+/** The provided policy, when this runs where the application can be asked (setup or `app.runWithContext`). */
+function providedPasswordPolicy(): Partial<PasswordPolicy> | null {
+  return hasInjectionContext() ? inject(PASSWORD_POLICY_KEY, null) : null
+}
+
 function emailRegex(): RegExp {
   return /^[\w.+-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 }
@@ -79,6 +157,8 @@ function urlRegex(): RegExp {
 
 export function useFormRules(translate?: Translate): { rules: FormRules } {
   const t = translate
+  // Read once, where the hook is called: `inject` only works inside setup.
+  const appPasswordPolicy = providedPasswordPolicy()
 
   const rules: FormRules = {
     required(message) {
@@ -107,6 +187,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
       return [
         {
           required: true,
+          whitespace: true,
           trigger: ['blur', 'input'],
           message: opts.message ?? fb(t, 'admin.rules.required', 'This field is required'),
         },
@@ -130,6 +211,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     userName: [
       {
         required: true,
+        whitespace: true,
         trigger: ['blur', 'input'],
         message: fb(t, 'admin.rules.required', 'Username is required'),
       },
@@ -147,6 +229,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     email: [
       {
         required: true,
+        whitespace: true,
         trigger: ['blur', 'input'],
         message: fb(t, 'admin.rules.required', 'Email is required'),
       },
@@ -160,6 +243,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     phone: [
       {
         required: true,
+        whitespace: true,
         trigger: ['blur', 'input'],
         message: fb(t, 'admin.rules.required', 'Phone is required'),
       },
@@ -171,12 +255,15 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     ],
 
     password(opts = {}) {
-      const min = opts.min ?? 8
-      const max = opts.max ?? 32
+      const policy: PasswordPolicy = { ...DEFAULT_PASSWORD_POLICY, ...appPasswordPolicy, ...opts.policy }
+      const min = opts.min ?? policy.minLength
+      const max = opts.max ?? DEFAULT_PASSWORD_MAX
       const complexity = opts.complexity ?? true
+      const required = complexity ? PASSWORD_CLASSES.filter((c) => policy[c.flag]) : []
       return [
         {
           required: true,
+          whitespace: true,
           trigger: ['blur', 'input'],
           message: fb(t, 'admin.rules.required', 'Password is required'),
         },
@@ -191,11 +278,8 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
                   .replace('{max}', String(max)),
               )
             }
-            if (complexity && (!/[A-Za-z]/.test(v) || !/\d/.test(v))) {
-              return new Error(
-                fb(t, 'admin.rules.passwordMix', 'Password must contain letters and digits'),
-              )
-            }
+            const missing = required.find((c) => !c.pattern.test(v))
+            if (missing) return new Error(fb(t, missing.key, missing.fallback))
             return true
           },
         },
@@ -208,6 +292,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
       return [
         {
           required: true,
+          whitespace: true,
           trigger: ['blur', 'input'],
           message: opts.message ?? fb(t, 'admin.rules.required', 'Account is required'),
         },
@@ -232,6 +317,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
       return [
         {
           required: true,
+          whitespace: true,
           trigger: ['blur', 'input'],
           message: fb(t, 'admin.rules.required', 'This field is required'),
         },
@@ -265,6 +351,7 @@ export function useFormRules(translate?: Translate): { rules: FormRules } {
     url: [
       {
         required: true,
+        whitespace: true,
         trigger: ['blur', 'input'],
         message: fb(t, 'admin.rules.required', 'URL is required'),
       },

@@ -47,7 +47,7 @@ public class Agent : MultiTenantAuditedEntity<Guid>
     public int? MaxTokens { get; set; }
 
     /// <summary>
-    /// 超时时间（秒）
+    /// 超时时间（秒）。当前只保存与复制（管理端、YAML 同步、克隆、版本快照），AgentRuntime 不读它，运行不会到点结束。
     /// </summary>
     public int? TimeoutSeconds { get; set; }
 

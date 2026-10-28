@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { useFormRules } from '../../../src/headless/auth/useFormRules'
+import { defineComponent, h, ref } from 'vue'
+import { mount } from '@vue/test-utils'
+import { NForm, NFormItem, type FormInst, type FormItemRule } from 'naive-ui'
+import { useFormRules, PASSWORD_POLICY_KEY, DEFAULT_PASSWORD_POLICY } from '../../../src/headless/auth/useFormRules'
 
 function runValidator(rule: { validator?: unknown }, value: unknown): true | Error {
   if (typeof rule.validator !== 'function') return true
@@ -66,11 +69,78 @@ describe('useFormRules', () => {
     expect(regex.pattern.test('555-1234')).toBe(true)
   })
 
-  it('password rule requires letters + digits', () => {
+  // The server's default policy requires a digit AND a lowercase letter. The
+  // rule used to ask for "letters and digits", so `ABCDEF12` passed the form
+  // and was refused by the server.
+  it('password rule follows the server default policy: a lowercase letter and a digit', () => {
     const chain = rules.password()
     expect(runValidator(chain[1]!, 'onlylett')).toBeInstanceOf(Error)
     expect(runValidator(chain[1]!, '12345678')).toBeInstanceOf(Error)
+    expect(runValidator(chain[1]!, 'ABCDEF12')).toBeInstanceOf(Error)
     expect(runValidator(chain[1]!, 'Admin123')).toBe(true)
+    expect(runValidator(chain[1]!, 'admin123')).toBe(true)
+  })
+
+  it('password rule says which character class is missing', () => {
+    const chain = rules.password()
+    expect((runValidator(chain[1]!, 'ABCDEF12') as Error).message).toMatch(/lowercase/)
+    expect((runValidator(chain[1]!, 'abcdefgh') as Error).message).toMatch(/digit/)
+  })
+
+  it('password rule applies the classes as the server register path does (ASCII letters)', () => {
+    const chain = rules.password()
+    // `é` is a lowercase letter, but not one ASP.NET Identity's validator counts.
+    expect(runValidator(chain[1]!, 'ÉCOLE12é')).toBeInstanceOf(Error)
+  })
+
+  it('password rule takes a deployment policy', () => {
+    const upper = rules.password({ policy: { requireUppercase: true } })
+    expect(runValidator(upper[1]!, 'admin123')).toBeInstanceOf(Error)
+    expect(runValidator(upper[1]!, 'Admin123')).toBe(true)
+
+    const symbol = rules.password({ policy: { requireNonAlphanumeric: true } })
+    expect(runValidator(symbol[1]!, 'Admin123')).toBeInstanceOf(Error)
+    // A letter in any script is a letter, not the "other" character the policy asks for.
+    expect(runValidator(symbol[1]!, 'Admin12é')).toBeInstanceOf(Error)
+    expect(runValidator(symbol[1]!, 'Admin12!')).toBe(true)
+
+    const relaxed = rules.password({ policy: { requireDigit: false, requireLowercase: false, minLength: 10 } })
+    expect(runValidator(relaxed[1]!, 'ABCDEFGHI')).toBeInstanceOf(Error)
+    expect(runValidator(relaxed[1]!, 'ABCDEFGHIJ')).toBe(true)
+  })
+
+  it('password rule `min` still overrides the policy length alone', () => {
+    const chain = rules.password({ min: 8, policy: { minLength: 12 } })
+    expect(runValidator(chain[1]!, 'abcdef12')).toBe(true)
+  })
+
+  it('password rule follows a policy the application provides', () => {
+    let built: FormItemRule[] = []
+    const Probe = defineComponent({
+      setup() {
+        built = useFormRules().rules.password()
+        return () => h('div')
+      },
+    })
+    mount(Probe, { global: { provide: { [PASSWORD_POLICY_KEY as symbol]: { requireUppercase: true } } } })
+    expect(runValidator(built[1]!, 'admin123')).toBeInstanceOf(Error)
+    expect(runValidator(built[1]!, 'Admin123')).toBe(true)
+    expect(DEFAULT_PASSWORD_POLICY).toEqual({
+      minLength: 6, requireDigit: true, requireLowercase: true, requireUppercase: false, requireNonAlphanumeric: false,
+    })
+  })
+
+  // The defaults must never refuse what the backend's default policy accepts
+  // (minimum 6, no maximum): a 40-character password-manager password was
+  // rejected client-side by an 8-32 range on register / reset / forced change,
+  // while the login form (and the server) took up to 128.
+  it('password rule defaults to the backend default range of 6 to 128', () => {
+    const chain = rules.password()
+    expect(runValidator(chain[1]!, 'abc12')).toBeInstanceOf(Error)
+    expect(runValidator(chain[1]!, 'abc123')).toBe(true)
+    expect(runValidator(chain[1]!, `${'a'.repeat(38)}12`)).toBe(true)
+    expect(runValidator(chain[1]!, `${'a'.repeat(127)}1`)).toBe(true)
+    expect(runValidator(chain[1]!, `${'a'.repeat(128)}1`)).toBeInstanceOf(Error)
   })
 
   it('password rule enforces length range', () => {
@@ -136,6 +206,50 @@ describe('useFormRules', () => {
     const chain = rules.integer()
     expect(runValidator(chain[1]!, 1.5)).toBeInstanceOf(Error)
     expect(runValidator(chain[1]!, 'abc')).toBeInstanceOf(Error)
+  })
+
+  describe('whitespace-only input counts as empty (the backend [Required] refuses it)', () => {
+    // Run the rule chain through a real NForm: `required` / `whitespace` are
+    // read by the form's validator, not by any function on the rule.
+    async function validationErrors(chain: FormItemRule | FormItemRule[], value: string): Promise<string[]> {
+      const formRef = ref<FormInst | null>(null)
+      const wrapper = mount(defineComponent({
+        setup: () => () =>
+          h(NForm, { ref: formRef, model: { v: value }, rules: { v: chain } }, () =>
+            h(NFormItem, { path: 'v', label: 'V' }, () => h('span'))),
+      }))
+      try {
+        await formRef.value!.validate()
+        return []
+      } catch (errors) {
+        return (errors as Array<Array<{ message?: string }>>).flat().map((e) => e.message ?? '')
+      } finally {
+        wrapper.unmount()
+      }
+    }
+
+    it.each([
+      ['phone', () => rules.phone, '       ', 'Phone is required'],
+      ['password (login, no complexity)', () => rules.password({ complexity: false }), '        ', 'Password is required'],
+      ['password', () => rules.password(), '        ', 'Password is required'],
+      ['userName', () => rules.userName, '     ', 'Username is required'],
+      ['email', () => rules.email, '   ', 'Email is required'],
+      ['url', () => rules.url, '   ', 'URL is required'],
+      ['account', () => rules.account(), '   ', 'Account is required'],
+      ['emailOrPhone', () => rules.emailOrPhone(), '        ', 'This field is required'],
+      ['text', () => rules.text(), '   ', 'This field is required'],
+      ['required', () => rules.required(), '   ', 'This field is required'],
+    ] as const)('%s rejects a whitespace-only value with its required message', async (_name, chain, blank, message) => {
+      expect((await validationErrors(chain(), blank))[0]).toBe(message)
+    })
+
+    it.each([
+      ['phone', () => rules.phone, '+1 555 123 4567'],
+      ['password (login, no complexity)', () => rules.password({ complexity: false }), ' secret '],
+      ['account', () => rules.account(), ' admin '],
+    ] as const)('%s still accepts a real value with surrounding spaces', async (_name, chain, value) => {
+      expect(await validationErrors(chain(), value)).toEqual([])
+    })
   })
 
   it('translate prop substitutes messages', () => {

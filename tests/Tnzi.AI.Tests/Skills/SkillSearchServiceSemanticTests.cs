@@ -291,4 +291,65 @@ public class SkillSearchServiceSemanticTests
             e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), null, It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    /// <summary>
+    /// 候选嵌入缓存在全进程共享，而 slug 只在 (作用域, 租户, 所有者) 之内唯一：按 slug 取键时，
+    /// 先被嵌入的那份技能的向量会被所有同 slug 的技能沿用，改了描述后 TTL 内也还用旧向量。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_TwoSkillsSharingASlugWithDifferentText_EachGetTheirOwnEmbedding()
+    {
+        var embedded = new List<string>();
+        var embeddingMock = CreateRecordingEmbeddingService(embedded);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new SkillSearchService(
+            logger: NullLogger<SkillSearchService>.Instance,
+            embeddingService: embeddingMock.Object,
+            embeddingCache: cache);
+
+        var tenantA = new SkillDefinition { Slug = "faq", Scope = SkillScope.Tenant, TenantId = Guid.NewGuid(), Name = "Alpha", Description = "Billing questions." };
+        var tenantB = new SkillDefinition { Slug = "faq", Scope = SkillScope.Tenant, TenantId = Guid.NewGuid(), Name = "Beta", Description = "Shipping questions." };
+
+        await service.SearchAsync([tenantA], "xyz", maxResults: 5);
+        await service.SearchAsync([tenantB], "xyz", maxResults: 5);
+
+        embedded.ShouldContain(t => t.Contains("Billing questions."));
+        embedded.ShouldContain(t => t.Contains("Shipping questions."));
+    }
+
+    [Fact]
+    public async Task SearchAsync_AfterTheDescriptionChanges_EmbedsTheNewText_AndUnchangedTextStaysCached()
+    {
+        var embedded = new List<string>();
+        var embeddingMock = CreateRecordingEmbeddingService(embedded);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new SkillSearchService(
+            logger: NullLogger<SkillSearchService>.Instance,
+            embeddingService: embeddingMock.Object,
+            embeddingCache: cache);
+
+        var before = new SkillDefinition { Slug = "triage", Name = "Triage", Description = "Sorts incoming tickets." };
+        var after = new SkillDefinition { Slug = "triage", Name = "Triage", Description = "Routes incoming calls." };
+
+        await service.SearchAsync([before], "xyz", maxResults: 5);
+        await service.SearchAsync([before], "xyz", maxResults: 5);
+        await service.SearchAsync([after], "xyz", maxResults: 5);
+
+        embedded.Count(t => t.Contains("Sorts incoming tickets.")).ShouldBe(1);
+        embedded.Count(t => t.Contains("Routes incoming calls.")).ShouldBe(1);
+    }
+
+    private static Mock<IEmbeddingService> CreateRecordingEmbeddingService(List<string> embeddedTexts)
+    {
+        var mock = new Mock<IEmbeddingService>();
+        mock.Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(new float[] { 1f, 0f, 0f }));
+        mock.Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string> texts, EmbeddingOptions? _, CancellationToken _) =>
+            {
+                embeddedTexts.AddRange(texts);
+                return Result<List<float[]>>.Success(texts.Select(_ => new float[] { 0.9f, 0.1f, 0.1f }).ToList());
+            });
+        return mock;
+    }
 }

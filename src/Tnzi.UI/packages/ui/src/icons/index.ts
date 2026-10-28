@@ -21,7 +21,7 @@
  * bundleTnziIcons([lineMd, mdi])
  * ```
  */
-import { addCollection, type IconifyJSON } from '@iconify/vue'
+import { _api, addCollection, type IconifyJSON } from '@iconify/vue'
 import { getIcons } from '@iconify/utils'
 
 /** Every Iconify name `@tnzi/ui` and its @tnzi dependencies can render (52 names, 2 collections). */
@@ -190,4 +190,21 @@ export function bundleTnziIcons(collections: readonly IconifyJSON[]): TnziIconBu
   const { subsets, ...report } = selectTnziIcons(collections)
   for (const subset of subsets) addCollection(subset)
   return report
+}
+
+/**
+ * Stops `@iconify/vue` from asking the public Iconify API for an icon it does
+ * not have. Registering the framework's icons (above) makes them local; this
+ * makes that the only source: an icon nobody registered (the application's
+ * own, one named in data) renders blank instead of being fetched, so no icon
+ * request ever leaves the page. An application that cannot reach the network,
+ * or must not tell a third party what its users are looking at, wants both.
+ *
+ * Call it once, before mounting. Register the application's own icons the same
+ * way (`addCollection`); anything missed then shows up as a blank square in
+ * development rather than as a request in production. Only the default provider
+ * is affected: one added with `addAPIProvider` keeps working.
+ */
+export function disableRemoteIcons(): void {
+  _api.setAPIModule('', { prepare: () => [], send: () => {} })
 }

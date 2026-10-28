@@ -12,10 +12,12 @@ const mockStats = {
   failedTransactions: 5,
   totalRefunds: 500,
   refundCount: 3,
-  refundRate: 0.06,
+  refundRate: 6,
   activeSubscriptions: 20,
   channelDistribution: [],
 }
+
+const statistics = vi.fn(async (): Promise<unknown> => mockStats)
 
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
@@ -46,7 +48,7 @@ vi.mock('../../../src/services/bridges/payment-bridge', () => ({
         pageIndex: 1,
         pageSize: 20,
       })),
-      statistics: vi.fn(async () => mockStats),
+      statistics,
     },
     subscriptions: {
       fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 })),
@@ -86,7 +88,84 @@ const stubs = {
 }
 
 describe('Orders page (Phase 3.32)', () => {
-  beforeEach(() => { setActivePinia(createPinia()) })
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    statistics.mockReset()
+    statistics.mockImplementation(async () => mockStats)
+  })
+
+  // The statistics endpoint needs payment.statistics.view while this page needs
+  // only payment.order.view. A failed or forbidden read reset the cards to
+  // zeros: "Total revenue $0.00, 0 orders, 0.0% paid" about figures nobody saw.
+  it('★ a failed statistics read leaves the cards on a placeholder, not zeros', async () => {
+    statistics.mockRejectedValue(new Error('Request failed with status code 403'))
+    const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
+    const wrapper = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+
+    const values = wrapper.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))
+    expect(values).toHaveLength(4)
+    expect(values).toEqual([null, null, null, null])
+  })
+
+  // Revenue counts only succeeded payments, so the average is per succeeded
+  // payment: dividing by every attempt (failed and pending included) understated
+  // it, 10,000 over 45 paid orders read as 200.00 instead of 222.22.
+  it('★ shows the statistics it read, averaging over the paid orders', async () => {
+    const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
+    const wrapper = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+
+    const values = wrapper.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))
+    expect(values).toEqual(['$10,000.00', 50, '$222.22', '90.0'])
+  })
+
+  it('★ prints the totals in the currency the server reports, and without a symbol when currencies are mixed', async () => {
+    statistics.mockImplementation(async () => ({ ...mockStats, currency: 'CAD' }))
+    const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
+    const cad = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+    expect(cad.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))).toEqual(['CA$10,000.00', 50, 'CA$222.22', '90.0'])
+
+    statistics.mockImplementation(async () => ({ ...mockStats, currency: null }))
+    const mixed = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+    expect(mixed.findAllComponents({ name: 'TKpiCard' }).map((c) => c.props('value'))).toEqual(['10,000.00', 50, '222.22', '90.0'])
+  })
+
+  // A clerk granted payment.order.view but not payment.statistics.view: the
+  // statistics read can only 403, so it is not made and the KPI row is not
+  // offered (four placeholders forever would read as a broken page).
+  it('★ without payment.statistics.view the KPI row is not offered and no statistics read fires', async () => {
+    const { useAdminAuthStore } = await import('../../../src/stores/useAdminAuthStore')
+    useAdminAuthStore().setUserInfo({ id: 'clerk', username: 'clerk', roles: [], permissions: ['payment.order.view'] } as never)
+    const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
+    const wrapper = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(statistics).not.toHaveBeenCalled()
+    expect(wrapper.find('.orders-page__stats').exists()).toBe(false)
+    expect(wrapper.text()).toContain('TRADE-001')
+  })
+
+  it('with payment.statistics.view the KPI row reads the statistics', async () => {
+    const { useAdminAuthStore } = await import('../../../src/stores/useAdminAuthStore')
+    useAdminAuthStore().setUserInfo({
+      id: 'lead', username: 'lead', roles: [], permissions: ['payment.order.view', 'payment.statistics.view'],
+    } as never)
+    const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')
+    const wrapper = mount(Orders, { global: { stubs } })
+    await nextTick()
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(statistics).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.orders-page__stats').exists()).toBe(true)
+  })
 
   it('mounts without throwing', async () => {
     const { default: Orders } = await import('../../../src/pages/payment/Orders.vue')

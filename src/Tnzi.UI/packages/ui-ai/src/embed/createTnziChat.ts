@@ -40,11 +40,26 @@
  * **Attachments.** The widgets show a paperclip and accept paste / drop by
  * default. Server-backed mode sends images inline and needs `uploadFile` for
  * anything else (a `file` part is a Storage id) - without it a non-image file
- * is refused through `onError`, never silently dropped. A BYO transport that
- * ignores files should pass `enableAttachments: false` so no chip is offered.
+ * is refused, never silently dropped: the turn shows as failed in the widget
+ * (its Retry sends the same text and files again) and `onError` is called.
+ * The framework's default backend does not load file contents (a `file` part
+ * gets 501), so only a backend that resolves file references needs `uploadFile`.
+ * A BYO transport that ignores files should pass `enableAttachments: false`
+ * so no chip is offered.
+ *
+ * **One turn at a time.** A send while a reply is still streaming (or its
+ * attachments are still uploading) is ignored, as the composer's Enter is:
+ * two concurrent turns would share the thread id and the abort handle.
+ *
+ * **Theme.** The widget provides its own naive theme (see `useAiNaiveTheme`):
+ * the Tnzi palette rather than naive's stock green, light or dark after
+ * `<html>` (a `dark` class or `data-theme="dark"`), which is also what
+ * switches the package's `--tnzi-ai-*` colours. Without it the launcher and the send button stayed
+ * naive green and light on any page.
  */
 
 import { createApp, ref, h, type App } from 'vue';
+import { NConfigProvider } from 'naive-ui';
 import { streamChat } from '@tnzi/core/services/ai';
 import {
   attachmentsToContentParts,
@@ -56,6 +71,14 @@ import TFloatingChat from './TFloatingChat.vue';
 import TSidebarChat from './TSidebarChat.vue';
 import TInlineChat from './TInlineChat.vue';
 import type { ChatMessage, MessageRole } from '../headless/useChat';
+import { useAiNaiveTheme } from '../headless/useAiNaiveTheme';
+
+/** The page's colour mode, read the way the package stylesheet reads it. */
+function documentIsDark(): boolean {
+  if (typeof document === 'undefined') return false;
+  const root = document.documentElement;
+  return root.classList.contains('dark') || root.getAttribute('data-theme') === 'dark';
+}
 
 /** Handle passed to `onSend` for pushing a reply back into the widget. */
 export interface TnziChatTransportApi {
@@ -110,6 +133,8 @@ export interface TnziChatOptions {
    * Server-backed mode: upload a non-image attachment and return its storage
    * id (images travel inline as base64 and need nothing). Without it a
    * non-image file is refused through `onError` and the turn is not sent.
+   * Only for a backend that resolves file references: the default one answers
+   * a `file` part with 501.
    */
   uploadFile?: (file: File) => Promise<UploadedAttachment>;
   /** Per-attachment ceiling in bytes. Default 10 MB. */
@@ -121,7 +146,10 @@ export interface TnziChatInstance {
   open: () => void;
   /** Close the chat widget. */
   close: () => void;
-  /** Send a message programmatically, optionally with attachments. */
+  /**
+   * Send a message programmatically, optionally with attachments. Ignored
+   * while a reply is streaming.
+   */
   sendMessage: (text: string, files?: File[]) => void;
   /** Abort the in-flight response, if any. */
   stop: () => void;
@@ -178,6 +206,27 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
   let destroyed = false;
   let abortController: AbortController | null = null;
   let threadId: string | null = options.threadId ?? null;
+  /**
+   * The user row whose question the server reported as stored in the thread (the last one
+   * that was). Regenerating that turn asks the server to answer it again (`regenerate`),
+   * instead of sending the question as a new message: the thread, and an external agent's
+   * session, then lose the old answer rather than gain a second copy of the question.
+   */
+  let storedUserRowId: string | null = null;
+  /**
+   * Increments on every server turn AND on every stop, so a turn can tell
+   * whether it is still the current one when its awaits return. Without it the
+   * tail of a stopped turn (the stream resolves cleanly on abort) re-marked the
+   * stopped row `done`, and once a new turn had started it cleared that turn's
+   * streaming flag and abort handle, leaving a reply nothing could cancel.
+   */
+  let turnSeq = 0;
+  /**
+   * The files of a server turn whose attachments were refused, by the id of
+   * its failed row: that row's Retry sends the turn again, and the files are
+   * not on any row to rebuild from.
+   */
+  const refusedTurnFiles = new Map<string, File[]>();
 
   function pushMessage(message: Partial<ChatMessage> & { role: MessageRole }): string {
     const id = message.id ?? generateId();
@@ -216,8 +265,17 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
     options.onError?.(error);
   }
 
-  async function runServerTurn(message: string, parts: ChatContentPart[] | null, assistantId: string): Promise<void> {
-    abortController = new AbortController();
+  async function runServerTurn(
+    turn: number,
+    message: string,
+    parts: ChatContentPart[] | null,
+    assistantId: string,
+    userRowId: string,
+    regenerateStored = false,
+  ): Promise<void> {
+    const isCurrent = () => turn === turnSeq;
+    const controller = new AbortController();
+    abortController = controller;
     const base = (options.apiBaseUrl ?? '').replace(/\/+$/, '');
     try {
       // `message` stays alongside `content`: the backend builds the model
@@ -226,21 +284,32 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
       // attachment names, see `filesToContentParts`).
       const result = await streamChat({
         url: `${base}/chat/stream`,
-        body: {
-          message,
-          threadId,
-          agentId: options.agentId ?? null,
-          model: options.model ?? null,
-          ...(parts ? { content: parts } : {}),
-        },
+        body: regenerateStored
+          ? { threadId, regenerate: true, agentId: options.agentId ?? null, model: options.model ?? null }
+          : {
+              message,
+              threadId,
+              agentId: options.agentId ?? null,
+              model: options.model ?? null,
+              ...(parts ? { content: parts } : {}),
+            },
         headers: typeof options.headers === 'function' ? options.headers() : options.headers,
-        signal: abortController.signal,
-        onDelta: (chunk) => appendDelta(assistantId, chunk),
+        signal: controller.signal,
+        onDelta: (chunk) => {
+          if (isCurrent()) appendDelta(assistantId, chunk);
+        },
+        onEvent: (event) => {
+          // An external agent's turn names its stored question in its first event
+          if (isCurrent() && event.eventType === 'run_started' && event.userMessageId) storedUserRowId = userRowId;
+        },
         onDone: (event) => {
           if (event.threadId) threadId = event.threadId;
+          if (isCurrent() && event.userMessageId) storedUserRowId = userRowId;
         },
       });
-      if (destroyed) return;
+      // Stopped or superseded: `stop()` already settled this turn's row and the
+      // streaming flag, and either may belong to a newer turn by now.
+      if (destroyed || !isCurrent()) return;
       if (result.error) {
         reportError(result.error, assistantId);
         return;
@@ -248,15 +317,16 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
       updateMessage(assistantId, { isStreaming: false, status: 'done' });
       setStreaming(false);
     } catch (err) {
-      if (destroyed) return;
+      if (destroyed || !isCurrent()) return;
       reportError(err instanceof Error ? err : new Error(String(err)), assistantId);
     } finally {
-      abortController = null;
+      if (abortController === controller) abortController = null;
     }
   }
 
   function send(text: string, files: File[] = []): void {
     if (destroyed || (!text.trim() && files.length === 0)) return;
+    if (isStreaming.value) return;
 
     if (options.apiBaseUrl) {
       void sendServer(text, files);
@@ -285,12 +355,21 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
   }
 
   /**
-   * Attachments are resolved BEFORE the user row appears: a refusal (a file
-   * the transport cannot carry, an oversized one, a failed upload) is
-   * reported through `onError` and nothing is pushed, instead of a bubble
-   * that claims the file was sent.
+   * Attachments are resolved BEFORE the turn's rows appear. Reading and
+   * uploading are part of the turn: the Stop button shows, and a second send
+   * cannot start underneath it.
+   *
+   * A refusal (a file the transport cannot carry, an oversized one, a failed
+   * upload) is a failed turn like any other: the user row carries the text
+   * but no attachments (nothing was attached to the conversation), and the
+   * failed row says why. The composer has already cleared its draft and chips,
+   * so reporting it only through the optional `onError` lost the message
+   * without a word on any page that did not wire one. The row's Retry sends
+   * the same text and files again.
    */
   async function sendServer(text: string, files: File[]): Promise<void> {
+    const turn = ++turnSeq;
+    setStreaming(true);
     let resolved: Awaited<ReturnType<typeof filesToContentParts>>;
     try {
       resolved = await filesToContentParts(text, files, {
@@ -298,15 +377,19 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
         maxBytes: options.maxAttachmentBytes,
       });
     } catch (err) {
-      if (!destroyed) options.onError?.(err instanceof Error ? err : new Error(String(err)));
+      if (destroyed || turn !== turnSeq) return;
+      pushMessage({ role: 'user', content: text });
+      const failedId = pushMessage({ role: 'assistant', content: '' });
+      refusedTurnFiles.set(failedId, files);
+      reportError(err instanceof Error ? err : new Error(String(err)), failedId);
       return;
     }
-    if (destroyed) return;
+    // Stopped (or destroyed) while the attachments were being read or uploaded.
+    if (destroyed || turn !== turnSeq) return;
     const { parts, message, attachments } = resolved;
-    pushMessage({ role: 'user', content: text, ...(attachments.length ? { attachments } : {}) });
+    const userRowId = pushMessage({ role: 'user', content: text, ...(attachments.length ? { attachments } : {}) });
     const assistantId = pushMessage({ role: 'assistant', content: '', isStreaming: true });
-    setStreaming(true);
-    await runServerTurn(message, parts, assistantId);
+    await runServerTurn(turn, message, parts, assistantId, userRowId);
   }
 
   /**
@@ -330,21 +413,34 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
     }
     const userMessage = userIdx === -1 ? null : messages.value[userIdx];
     if (!userMessage) return;
+    // The last turn, whose question the server stored: it can answer it again in place
+    const regenerateStored = !!threadId && idx === messages.value.length - 1 && userMessage.id === storedUserRowId;
 
+    const refusedFiles = refusedTurnFiles.get(messageId);
     messages.value = messages.value.slice(0, userIdx);
+    // Dropped rows can no longer be retried.
+    for (const id of [...refusedTurnFiles.keys()]) {
+      if (!messages.value.some((m) => m.id === id)) refusedTurnFiles.delete(id);
+    }
     if (!options.apiBaseUrl) {
       send(userMessage.content);
       return;
     }
+    if (refusedFiles) {
+      void sendServer(userMessage.content, refusedFiles);
+      return;
+    }
     const attachments = userMessage.attachments ?? [];
     const { parts, message } = attachmentsToContentParts(userMessage.content, attachments);
-    pushMessage({ role: 'user', content: userMessage.content, ...(attachments.length ? { attachments } : {}) });
+    const turn = ++turnSeq;
+    const userRowId = pushMessage({ role: 'user', content: userMessage.content, ...(attachments.length ? { attachments } : {}) });
     const assistantId = pushMessage({ role: 'assistant', content: '', isStreaming: true });
     setStreaming(true);
-    void runServerTurn(message, parts, assistantId);
+    void runServerTurn(turn, message, parts, assistantId, userRowId, regenerateStored);
   }
 
   function stop(): void {
+    turnSeq += 1;
     abortController?.abort();
     abortController = null;
     messages.value = messages.value.map((m) =>
@@ -353,25 +449,38 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
     setStreaming(false);
   }
 
+  const isDark = ref(documentIsDark());
+  const themeObserver =
+    typeof MutationObserver !== 'undefined' && typeof document !== 'undefined'
+      ? new MutationObserver(() => {
+          isDark.value = documentIsDark();
+        })
+      : null;
+  themeObserver?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+
   let app: App | null = createApp({
     setup() {
+      const { theme, themeOverrides } = useAiNaiveTheme(isDark);
+      // `abstract`: no wrapper element around the widget.
       return () =>
-        h(component, {
-          messages: messages.value,
-          isStreaming: isStreaming.value,
-          inputText: inputText.value,
-          open: isOpen.value,
-          'onUpdate:open': (v: boolean) => {
-            isOpen.value = v;
-          },
-          'onUpdate:inputText': (v: string) => {
-            inputText.value = v;
-          },
-          enableAttachments: options.enableAttachments ?? true,
-          onSend: (content: string, files: File[]) => send(content, files),
-          onStop: () => stop(),
-          onRegenerate: (messageId: string) => regenerate(messageId),
-        });
+        h(NConfigProvider, { abstract: true, theme: theme.value, themeOverrides: themeOverrides.value }, () =>
+          h(component, {
+            messages: messages.value,
+            isStreaming: isStreaming.value,
+            inputText: inputText.value,
+            open: isOpen.value,
+            'onUpdate:open': (v: boolean) => {
+              isOpen.value = v;
+            },
+            'onUpdate:inputText': (v: string) => {
+              inputText.value = v;
+            },
+            enableAttachments: options.enableAttachments ?? true,
+            onSend: (content: string, files: File[]) => send(content, files),
+            onStop: () => stop(),
+            onRegenerate: (messageId: string) => regenerate(messageId),
+          }),
+        );
     },
   });
 
@@ -398,6 +507,8 @@ export function createTnziChat(options: TnziChatOptions): TnziChatInstance {
       destroyed = true;
       abortController?.abort();
       abortController = null;
+      refusedTurnFiles.clear();
+      themeObserver?.disconnect();
       app?.unmount();
       app = null;
       if (ownsMountEl && mountEl.parentNode) {

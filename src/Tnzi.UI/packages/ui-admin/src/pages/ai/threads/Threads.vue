@@ -229,16 +229,17 @@ async function exportJson(id: string): Promise<void> {
   }
 }
 
-function exportMd(id: string): void {
+async function exportMd(id: string): Promise<void> {
   if (!id) return
-  // The MD export is a server file download - hand the browser the URL.
-  const a = document.createElement('a')
-  a.href = bridge.threads.getExportMarkdownUrl(id)
-  a.download = `thread-${id}.md`
-  a.rel = 'noopener'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  // Fetched through the client, which sends the access token, then saved as a
+  // Blob. Handing the browser the endpoint URL sends no Authorization header,
+  // so the authenticated admin route answered 401.
+  try {
+    const blob = await bridge.threads.exportMarkdown(id)
+    downloadBlob(blob, `thread-${id}.md`)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : String(err))
+  }
 }
 
 // --- declarative row actions (C5) -------------------------------------------
@@ -247,7 +248,7 @@ function exportMd(id: string): void {
 const rowActions: RowAction<AgentThreadDto>[] = [
   // No View action: the row itself opens the transcript drawer.
   { key: 'exportJson', label: 'actions.exportJson', onClick: (row) => void exportJson(String(row.id)) },
-  { key: 'exportMd', label: 'actions.exportMd', onClick: (row) => exportMd(String(row.id)) },
+  { key: 'exportMd', label: 'actions.exportMd', onClick: (row) => void exportMd(String(row.id)) },
   editAction(crud),
   deleteAction(crud),
 ]

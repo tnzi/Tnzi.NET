@@ -172,9 +172,12 @@ function formatMoney(n: number | null | undefined): string {
     return n.toFixed(2)
   }
 }
+// `refundRate` and `churnRate` arrive as percentages on a 0-100 scale (the
+// service multiplies by 100 and rounds to two places), like the channel
+// `percentage` below. Scaling them again shows 6% as 600%.
 function formatPercent(n: number | null | undefined): string {
   if (n == null) return EMPTY_DASH
-  return `${(n * 100).toFixed(2)}%`
+  return `${n.toFixed(2)}%`
 }
 
 const trendCategories = computed(() => trend.value.map((p) => formatDate(p.date)))

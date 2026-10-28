@@ -96,6 +96,12 @@ public class CompleteChunkedUploadRequest
     /// 是否临时文件
     /// </summary>
     public bool IsTemporary { get; set; } = false;
+
+    /// <summary>
+    /// 合并完成后直接放进上传者自己的这个目录（用户文件空间；需要 <c>Tnzi.Storage.Workspace</c>）。
+    /// 不传 = 不归档。与 <see cref="IsTemporary"/> 为 true 不能同时出现。
+    /// </summary>
+    public Guid? FolderId { get; set; }
 }
 
 /// <summary>

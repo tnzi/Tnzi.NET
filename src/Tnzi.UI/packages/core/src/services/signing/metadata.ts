@@ -63,8 +63,8 @@ export enum SigningRecipientStatus {
 /**
  * Statuses a request can no longer move out of.
  *
- * Drives "can this still be voided / resent" in the UI without hard-coding the
- * list at each call site.
+ * Drives "can this still be voided" in the UI without hard-coding the list at
+ * each call site.
  */
 export const TERMINAL_ENVELOPE_STATUSES: readonly EnvelopeStatus[] = [
   EnvelopeStatus.Completed,

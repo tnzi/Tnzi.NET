@@ -102,7 +102,7 @@ export const recurringFormSchema: FormSchemaItem[] = [
   { key: 'currency', labelKey: 'form.currency', label: 'Currency', type: 'text' },
 
   { key: 'frequency', labelKey: 'form.frequency', label: 'Frequency', type: 'recurring-frequency', required: true },
-  { key: 'interval', labelKey: 'form.interval', label: 'Every', type: 'number', min: 1 },
+  { key: 'interval', labelKey: 'form.interval', label: 'Every', type: 'number', min: 1, max: 1000 },
   { key: 'anchorDay', labelKey: 'form.anchorDay', label: 'On day', type: 'number', min: 1, max: 31 },
 
   { key: 'startDate', labelKey: 'form.startDate', label: 'Starts', type: 'date', required: true },

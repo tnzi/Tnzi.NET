@@ -22,6 +22,17 @@ public interface ISubAgentRunCancellationRegistry
     void Register(Guid runId, CancellationTokenSource cts, TimeSpan? timeout = null);
 
     /// <summary>
+    /// Same as <see cref="Register"/>, but reports whether <paramref name="cts"/> was actually registered:
+    /// <see langword="false"/> when another CTS already holds <paramref name="runId"/>. A caller that got
+    /// <see langword="false"/> must not <see cref="Unregister"/> the run, because that entry is not its own.
+    /// </summary>
+    bool TryRegister(Guid runId, CancellationTokenSource cts, TimeSpan? timeout = null)
+    {
+        Register(runId, cts, timeout);
+        return true;
+    }
+
+    /// <summary>
     /// Removes the CTS (and any recorded cancellation) for the given <paramref name="runId"/> and returns it so the
     /// caller can dispose it. Returns <see langword="null"/> if not found.
     /// </summary>

@@ -29,6 +29,8 @@ public class McpAuthRecoveryToolWrapperTests
     [InlineData("Network timeout")]
     [InlineData("Internal server error")]
     [InlineData("Bad gateway")]
+    [InlineData("Order 4031 was not found")]
+    [InlineData("Request id 14010 failed with a timeout")]
     public void IsAuthFailure_WithNonAuthMessage_ReturnsFalse(string message)
     {
         var ex = new InvalidOperationException(message);
@@ -97,36 +99,79 @@ public class McpAuthRecoveryToolWrapperTests
     public async Task InvokeCoreAsync_AuthFailure_InvalidatesTokenAndRetries()
     {
         // Arrange
-        var callCount = 0;
+        var innerCalls = 0;
         var innerFunction = CreateMockFunction(() =>
         {
-            callCount++;
-            if (callCount == 1)
-            {
-                throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized);
-            }
-            return "retry-success";
+            innerCalls++;
+            throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized);
         });
 
         var oauthHandler = new TrackingOAuthHandler();
-        var clientFactory = new Mock<IMcpClientFactory>();
-        clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
+        var clientFactory = CreateReconnectingFactory(() => "retry-success");
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         var wrapper = new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
 
         // Act
         var result = await wrapper.InvokeAsync(new AIFunctionArguments());
 
         // Assert
         result?.ToString().ShouldBe("retry-success");
-        callCount.ShouldBe(2);
+        innerCalls.ShouldBe(1);
         oauthHandler.InvalidateCount.ShouldBe(1);
         oauthHandler.InvalidatedServers.ShouldContain("test-server");
         clientFactory.Verify(x => x.InvalidateClientAsync("test-server", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// SDK 的 McpClientTool 绑在列出它的那个客户端上，而恢复流程刚把那个客户端释放掉：
+    /// 在原函数上重试必然失败（此前每次都以「Token was refreshed but the retry also failed」收尾）。
+    /// 重试要到重连后的客户端上，按服务器侧原名找到同一个工具再调。
+    /// </summary>
+    [Fact]
+    public async Task InvokeCoreAsync_AuthFailure_RetriesOnTheReconnectedClient_NotTheDisposedOne()
+    {
+        var disposed = false;
+        var innerFunction = CreateMockFunction(() =>
+        {
+            if (disposed)
+            {
+                throw new ObjectDisposedException("McpClient");
+            }
+            throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized);
+        });
+
+        var clientFactory = CreateReconnectingFactory(() => "fresh-connection");
+        clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => disposed = true)
+            .Returns(Task.CompletedTask);
+
+        var wrapper = new McpAuthRecoveryToolWrapper(
+            innerFunction, Server, new TrackingOAuthHandler(), clientFactory.Object, CreateMockToolProvider(clientFactory.Object), _logger.Object);
+
+        var result = await wrapper.InvokeAsync(new AIFunctionArguments());
+
+        result?.ToString().ShouldBe("fresh-connection");
+        clientFactory.Verify(x => x.GetOrCreateClientAsync(Server, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeCoreAsync_AuthFailure_ToolGoneAfterReconnect_ThrowsWithClearMessage()
+    {
+        var innerFunction = CreateMockFunction(() => throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized));
+        var adapter = new Mock<IMcpClientAdapter>();
+        adapter.Setup(a => a.ListToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AITool> { AIFunctionFactory.Create(() => "x", "another-tool") });
+        var clientFactory = new Mock<IMcpClientFactory>();
+        clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        clientFactory.Setup(x => x.GetOrCreateClientAsync(It.IsAny<McpServerConfig>(), It.IsAny<CancellationToken>())).ReturnsAsync(adapter.Object);
+
+        var wrapper = new McpAuthRecoveryToolWrapper(
+            innerFunction, Server, new TrackingOAuthHandler(), clientFactory.Object, CreateMockToolProvider(clientFactory.Object), _logger.Object);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => wrapper.InvokeAsync(new AIFunctionArguments()).AsTask());
+        ex.InnerException.ShouldNotBeNull().Message.ShouldContain("no longer offers the tool 'test-tool'");
     }
 
     [Fact]
@@ -139,14 +184,12 @@ public class McpAuthRecoveryToolWrapperTests
         });
 
         var oauthHandler = new TrackingOAuthHandler();
-        var clientFactory = new Mock<IMcpClientFactory>();
-        clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var clientFactory = CreateReconnectingFactory(() => throw new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized));
 
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         var wrapper = new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
 
         // Act & Assert
         var ex = await Should.ThrowAsync<InvalidOperationException>(
@@ -172,7 +215,7 @@ public class McpAuthRecoveryToolWrapperTests
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         var wrapper = new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
 
         // Act & Assert
         await Should.ThrowAsync<InvalidOperationException>(
@@ -185,66 +228,45 @@ public class McpAuthRecoveryToolWrapperTests
     public async Task InvokeCoreAsync_AuthFailure_InvalidatesToolCache()
     {
         // Arrange
-        var callCount = 0;
-        var innerFunction = CreateMockFunction(() =>
-        {
-            callCount++;
-            if (callCount == 1)
-            {
-                throw new InvalidOperationException("Server returned 401 Unauthorized");
-            }
-            return "ok";
-        });
+        var innerFunction = CreateMockFunction(() => throw new InvalidOperationException("Server returned 401 Unauthorized"));
 
         var oauthHandler = new TrackingOAuthHandler();
-        var clientFactory = new Mock<IMcpClientFactory>();
-        clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var clientFactory = CreateReconnectingFactory(() => "ok");
 
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         var wrapper = new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
 
         // Act
         var result = await wrapper.InvokeAsync(new AIFunctionArguments());
 
         // Assert
         result?.ToString().ShouldBe("ok");
-        callCount.ShouldBe(2);
+        clientFactory.Verify(x => x.GetOrCreateClientAsync(Server, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task InvokeCoreAsync_ClientInvalidationFails_StillRetries()
     {
         // Arrange - client invalidation throws, but retry should still happen
-        var callCount = 0;
-        var innerFunction = CreateMockFunction(() =>
-        {
-            callCount++;
-            if (callCount == 1)
-            {
-                throw new HttpRequestException("Forbidden", null, HttpStatusCode.Forbidden);
-            }
-            return "recovered";
-        });
+        var innerFunction = CreateMockFunction(() => throw new HttpRequestException("Forbidden", null, HttpStatusCode.Forbidden));
 
         var oauthHandler = new TrackingOAuthHandler();
-        var clientFactory = new Mock<IMcpClientFactory>();
+        var clientFactory = CreateReconnectingFactory(() => "recovered");
         clientFactory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Invalidation failed"));
 
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         var wrapper = new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
 
         // Act
         var result = await wrapper.InvokeAsync(new AIFunctionArguments());
 
         // Assert - should still recover despite invalidation failure
         result?.ToString().ShouldBe("recovered");
-        callCount.ShouldBe(2);
     }
 
     #endregion
@@ -264,7 +286,7 @@ public class McpAuthRecoveryToolWrapperTests
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         // Act
-        var wrapped = McpAuthRecoveryToolWrapper.Wrap(tools, "server", oauthHandler, clientFactory.Object, toolProvider);
+        var wrapped = McpAuthRecoveryToolWrapper.Wrap(tools, Server, oauthHandler, clientFactory.Object, toolProvider);
 
         // Assert
         wrapped.Count.ShouldBe(2);
@@ -279,7 +301,7 @@ public class McpAuthRecoveryToolWrapperTests
         var clientFactory = new Mock<IMcpClientFactory>();
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
-        var result = McpAuthRecoveryToolWrapper.Wrap(new List<AITool>(), "server", oauthHandler, clientFactory.Object, toolProvider);
+        var result = McpAuthRecoveryToolWrapper.Wrap(new List<AITool>(), Server, oauthHandler, clientFactory.Object, toolProvider);
         result.Count.ShouldBe(0);
     }
 
@@ -290,13 +312,27 @@ public class McpAuthRecoveryToolWrapperTests
         var clientFactory = new Mock<IMcpClientFactory>();
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
-        var result = McpAuthRecoveryToolWrapper.Wrap(null!, "server", oauthHandler, clientFactory.Object, toolProvider);
+        var result = McpAuthRecoveryToolWrapper.Wrap(null!, Server, oauthHandler, clientFactory.Object, toolProvider);
         result.Count.ShouldBe(0);
     }
 
     #endregion
 
     #region Helpers
+
+    private static readonly McpServerConfig Server = new() { Name = "test-server" };
+
+    /// <summary>A factory whose (re)connected client offers a fresh "test-tool" that runs <paramref name="onFreshCall"/>.</summary>
+    private static Mock<IMcpClientFactory> CreateReconnectingFactory(Func<object?> onFreshCall)
+    {
+        var adapter = new Mock<IMcpClientAdapter>();
+        adapter.Setup(a => a.ListToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new List<AITool> { CreateMockFunction(onFreshCall) });
+        var factory = new Mock<IMcpClientFactory>();
+        factory.Setup(x => x.InvalidateClientAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        factory.Setup(x => x.GetOrCreateClientAsync(It.IsAny<McpServerConfig>(), It.IsAny<CancellationToken>())).ReturnsAsync(adapter.Object);
+        return factory;
+    }
 
     private McpAuthRecoveryToolWrapper CreateWrapper(AIFunction innerFunction)
     {
@@ -308,7 +344,7 @@ public class McpAuthRecoveryToolWrapperTests
         var toolProvider = CreateMockToolProvider(clientFactory.Object);
 
         return new McpAuthRecoveryToolWrapper(
-            innerFunction, "test-server", oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
+            innerFunction, Server, oauthHandler, clientFactory.Object, toolProvider, _logger.Object);
     }
 
     private static AIFunction CreateMockFunction(Func<object?> action)

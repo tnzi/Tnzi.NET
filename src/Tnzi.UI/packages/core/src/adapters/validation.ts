@@ -50,8 +50,8 @@ export interface FieldRule {
  */
 export function createZodSchema<T extends Record<string, unknown>>(
   rules: { [K in keyof T]?: FieldRule },
-): z.ZodObject<Record<string, z.ZodTypeAny>> {
-  const shape: Record<string, z.ZodTypeAny> = {};
+): z.ZodObject<Record<string, z.ZodType>> {
+  const shape: Record<string, z.ZodType> = {};
 
   for (const [key, rule] of Object.entries(rules)) {
     if (!rule) continue;
@@ -64,7 +64,7 @@ export function createZodSchema<T extends Record<string, unknown>>(
 /**
  * Build a single field schema by chaining all rules on the same instance.
  */
-function buildFieldSchema(key: string, rule: FieldRule): z.ZodTypeAny {
+function buildFieldSchema(key: string, rule: FieldRule): z.ZodType {
   const fieldType = rule.type ?? 'string';
 
   switch (fieldType) {
@@ -80,14 +80,22 @@ function buildFieldSchema(key: string, rule: FieldRule): z.ZodTypeAny {
   }
 }
 
-function buildStringSchema(key: string, rule: FieldRule): z.ZodTypeAny {
+function buildStringSchema(key: string, rule: FieldRule): z.ZodType {
   // zod 4 unified the legacy `required_error`/`invalid_type_error` options into a
   // single `error` map; an `undefined` input is the "missing/required" case.
+  const requiredMessage = rule.requiredMessage ?? `${key} is required`;
   let schema = z.string({
-    error: (issue) =>
-      issue.input === undefined ? (rule.requiredMessage ?? `${key} is required`) : undefined,
+    error: (issue) => (issue.input === undefined ? requiredMessage : undefined),
   });
 
+  // An empty text box submits '', not undefined: a required string must reject
+  // it too, or "required" lets a blank field through. Whitespace counts as
+  // blank, the same as the backend's [Required], which refuses a string that is
+  // only whitespace; passing it here would only move the error to a 400. The
+  // check does not trim the value: what the user typed is what gets submitted.
+  if (rule.required) {
+    schema = schema.refine((value) => value.trim() !== '', { message: requiredMessage });
+  }
   if (rule.min !== undefined) {
     schema = schema.min(rule.min, `${key} must be at least ${rule.min} characters`);
   }
@@ -98,16 +106,16 @@ function buildStringSchema(key: string, rule: FieldRule): z.ZodTypeAny {
     schema = schema.regex(rule.pattern, `${key} format is invalid`);
   }
   if (rule.email) {
-    schema = schema.email(`${key} must be a valid email`);
+    schema = schema.check(z.email(`${key} must be a valid email`));
   }
   if (rule.url) {
-    schema = schema.url(`${key} must be a valid URL`);
+    schema = schema.check(z.url(`${key} must be a valid URL`));
   }
 
   return rule.required ? schema : schema.optional();
 }
 
-function buildNumberSchema(key: string, rule: FieldRule): z.ZodTypeAny {
+function buildNumberSchema(key: string, rule: FieldRule): z.ZodType {
   // zod 4: `undefined` input → required message; any other invalid input → type message.
   let schema = z.number({
     error: (issue) =>
@@ -126,12 +134,12 @@ function buildNumberSchema(key: string, rule: FieldRule): z.ZodTypeAny {
   return rule.required ? schema : schema.optional();
 }
 
-function buildBooleanSchema(rule: FieldRule): z.ZodTypeAny {
+function buildBooleanSchema(rule: FieldRule): z.ZodType {
   const schema = z.boolean();
   return rule.required ? schema : schema.optional();
 }
 
-function buildDateSchema(rule: FieldRule): z.ZodTypeAny {
+function buildDateSchema(rule: FieldRule): z.ZodType {
   const schema = z.date();
   return rule.required ? schema : schema.optional();
 }

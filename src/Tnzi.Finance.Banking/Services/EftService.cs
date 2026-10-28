@@ -52,22 +52,17 @@ public class EftService : ApplicationService, IEftService
 
     public async Task<Result<List<EftQueueItemDto>>> GetQueueAsync(CancellationToken cancellationToken = default)
     {
-        var payments = await _paymentRepository.AsNoTracking()
+        // ★ 「已装进某个批次」的排除在 SQL 里做（反连接），只取队列要显示的列：先把历年全部转账付款
+        // 整行读出、再把它们的 Id 当 IN 列表去查批次行，代价随历史增长而不是随待付的款增长。
+        var batchLines = _lineRepository.AsNoTracking();
+        var candidates = await _paymentRepository.AsNoTracking()
             .Where(p => p.Status == FinanceDocumentStatus.Posted
                 && p.Direction == PaymentDirection.Outbound
-                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == BankTransferMethodLower)
+                && p.PaymentMethod != null && p.PaymentMethod.ToLower() == BankTransferMethodLower
+                && !batchLines.Any(l => l.PaymentEntryId == p.Id))
             .OrderBy(p => p.Number)
+            .Select(p => new { p.Id, p.Number, p.DepositToAccountId, p.PartyType, p.PartyId, p.DocDate, p.Currency, p.Amount })
             .ToListAsync(cancellationToken);
-        if (payments.Count == 0)
-            return Ok(new List<EftQueueItemDto>());
-
-        var paymentIds = payments.Select(p => p.Id).ToList();
-        var batched = (await _lineRepository.AsNoTracking()
-            .Where(l => paymentIds.Contains(l.PaymentEntryId))
-            .Select(l => l.PaymentEntryId)
-            .ToListAsync(cancellationToken)).ToHashSet();
-
-        var candidates = payments.Where(p => !batched.Contains(p.Id)).ToList();
         if (candidates.Count == 0)
             return Ok(new List<EftQueueItemDto>());
 
@@ -90,6 +85,7 @@ public class EftService : ApplicationService, IEftService
             {
                 PaymentEntryId = p.Id,
                 PaymentNumber = p.Number,
+                FundingAccountId = p.DepositToAccountId,
                 PartyType = p.PartyType,
                 PartyId = p.PartyId,
                 PayeeName = vendorNames.GetValueOrDefault(p.PartyId),
@@ -153,7 +149,7 @@ public class EftService : ApplicationService, IEftService
         // a file whose effective date has already passed. Banking-day/holiday checks
         // are out of scope (they need a per-region calendar); this catches the common
         // "dated last week" mistake up front instead of at bank submission.
-        if (input.EffectiveDate.ToUtcDate() < DateTime.UtcNow.ToUtcDate())
+        if (IsEffectiveDatePast(input.EffectiveDate))
             return Fail<EftBatchDto>("The effective date cannot be in the past.", 400);
 
         var currency = CurrencyForFormat(input.Format);
@@ -188,6 +184,11 @@ public class EftService : ApplicationService, IEftService
                 return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' has a non-positive amount and cannot be sent as a credit.", 400);
             if (!string.Equals(p.Currency, currency, StringComparison.OrdinalIgnoreCase))
                 return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' currency {p.Currency} does not match the {input.Format} currency {currency}.", 400);
+            // 付款过账时贷的是 DepositToAccountId 这个资金科目；文件让银行从所选档案的账户出钱。
+            // 两者不是同一个账户时，钱从 B 户付出、账上却记 A 户减少，两边的银行对账都对不平，
+            // 而每一步都返回成功。与支票路径（CheckBatchComposer）同一条不变量、同一句报错。
+            if (p.DepositToAccountId != bank.AccountId)
+                return Fail<EftBatchDto>($"Payment '{p.Number ?? p.Id.ToString()}' is not funded from the selected bank account.", 400);
 
             if (!defaultByParty.TryGetValue((p.PartyType, p.PartyId), out var partyBank))
                 return Fail<EftBatchDto>($"Payee for payment '{p.Number ?? p.Id.ToString()}' has no default bank account on file.", 400);
@@ -254,6 +255,14 @@ public class EftService : ApplicationService, IEftService
         if (batch.Status != EftBatchStatus.Draft)
             return Fail<EftBatchDto>("Only a draft batch can be generated. Void and rebuild to change a generated batch.", 409);
 
+        // ★ 装批时判过一次不够：草稿批次可以搁置任意天，几天后生成的文件会带着一个已经过去的生效日。
+        // 生效日在批次上不可改（改了就是另一个批次），所以出路是作废重建；在分配任何号之前拒绝。
+        if (IsEffectiveDatePast(batch.EffectiveDate))
+        {
+            return Fail<EftBatchDto>(
+                $"The batch's effective date {batch.EffectiveDate:yyyy-MM-dd} has passed. Void the batch and build a new one with a current effective date.", 409);
+        }
+
         if (!_protector.IsConfigured)
             return Fail<EftBatchDto>("Configure Finance:Encryption:EncryptionKey before generating EFT files.", 400);
 
@@ -272,6 +281,22 @@ public class EftService : ApplicationService, IEftService
             .Where(a => partyBankIds.Contains(a.Id))
             .ToDictionaryAsync(a => a.Id, cancellationToken);
 
+        // ★ 存储的账号逐条解密、解不开就点名拒绝（400），而不是让异常一路冒成 500：
+        // 密钥更换或把库恢复到另一把密钥的环境之后，操作员需要知道是哪一个档案要重新录入账号。
+        // 本方账号只有 CPA-005 写进文件（NACHA 没有这个字段），所以只在 CPA-005 时解它，
+        // 否则一个用不上的字段会让 NACHA 批次一起生成不了。全部发生在分配批次号与文件序号之前。
+        string? originatorAccount = null;
+        if (batch.Format == EftFileFormat.Cpa005)
+        {
+            originatorAccount = TryDecrypt(bank.AccountNumberEncrypted, FinanceProtectionAad.ForBankAccount(bank.AccountId), "bank account", bank.Id);
+            if (originatorAccount == null)
+            {
+                return Fail<EftBatchDto>(
+                    $"The stored account number on bank account '{bank.Name}' cannot be decrypted (the encryption key may have changed). "
+                    + "Re-enter the account number before generating the file.", 400);
+            }
+        }
+
         // 明文账号仅在内存栈拼装文件
         var request = new EftComposeRequest
         {
@@ -285,20 +310,28 @@ public class EftService : ApplicationService, IEftService
             OriginatorRoutingNumber = bank.RoutingNumber,
             OriginatorInstitutionNumber = bank.InstitutionNumber,
             OriginatorTransitNumber = bank.TransitNumber,
-            OriginatorAccountNumber = DecryptOrEmpty(bank.AccountNumberEncrypted, FinanceProtectionAad.ForBankAccount(bank.AccountId))
+            OriginatorAccountNumber = originatorAccount
         };
 
         foreach (var line in lines)
         {
             if (!partyBanks.TryGetValue(line.PartyBankAccountId, out var partyBank))
                 return Fail<EftBatchDto>("A payee bank account referenced by the batch no longer exists.", 400);
+            var payeeAccount = TryDecrypt(partyBank.AccountNumberEncrypted,
+                FinanceProtectionAad.ForPartyBankAccount(partyBank.PartyType, partyBank.PartyId), "payee bank account", partyBank.Id);
+            if (payeeAccount == null)
+            {
+                return Fail<EftBatchDto>(
+                    $"The stored account number for payee '{line.PayeeName ?? partyBank.Label ?? partyBank.Id.ToString()}' cannot be decrypted (the encryption key may have changed). "
+                    + "Re-enter the payee's account number before generating the file.", 400);
+            }
             request.Entries.Add(new EftComposeEntry
             {
                 PayeeName = line.PayeeName ?? string.Empty,
                 RoutingNumber = partyBank.RoutingNumber,
                 InstitutionNumber = partyBank.InstitutionNumber,
                 TransitNumber = partyBank.TransitNumber,
-                AccountNumber = DecryptOrEmpty(partyBank.AccountNumberEncrypted, FinanceProtectionAad.ForPartyBankAccount(partyBank.PartyType, partyBank.PartyId)),
+                AccountNumber = payeeAccount,
                 AccountType = partyBank.AccountType,
                 Amount = line.Amount,
                 Reference = null
@@ -377,7 +410,10 @@ public class EftService : ApplicationService, IEftService
             return Fail<EftFileDto>("The EFT file could not be decrypted.", 500);
         }
 
-        await StampHandoutAsync(batch.Id, cancellationToken);
+        // ★ 留痕与状态核对是同一条条件写：上面那次读取之后批次可能已被并发作废（行已硬删、
+        // 付款已回到待付队列），这时再把文件交出去，它们会被再装一批付第二次。
+        if (!await StampHandoutAsync(batch.Id, cancellationToken))
+            return Fail<EftFileDto>("The batch was voided by another operation. Reload and retry.", 409);
 
         return Ok(new EftFileDto
         {
@@ -391,6 +427,9 @@ public class EftService : ApplicationService, IEftService
     public async Task<Result<EftBatchDto>> VoidBatchAsync(Guid id, VoidEftBatchDto input, CancellationToken cancellationToken = default)
     {
         Check.NotNull(input);
+        var reasonTooLong = BankingFieldLimits.FirstTooLong((input.Reason, BankingFieldLimits.VoidReasonMaxLength, "reason"));
+        if (reasonTooLong != null)
+            return Fail<EftBatchDto>(reasonTooLong, 400);
 
         var batch = await _batchRepository.AsQueryable(true).FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
         if (batch == null)
@@ -454,36 +493,56 @@ public class EftService : ApplicationService, IEftService
     }
 
     /// <summary>
-    /// 记下「文件被交出去了」—— 首次时间取最早那次，次数每次递增。
+    /// 记下「文件被交出去了」—— 首次时间取最早那次，次数每次递增。仅当批次仍是
+    /// <see cref="EftBatchStatus.Generated"/> 时生效；返回 <c>false</c> = 批次已被并发作废，文件不得交出。
     /// </summary>
     /// <remarks>
-    /// ★ 走 <c>ExecuteUpdate</c> 而不是加载实体再保存：后者会经过变更跟踪器，从而参与
-    /// <see cref="EftBatch.ConcurrencyStamp"/> 的乐观并发校验，两个人同时下载就会有一个拿到 409 ——
+    /// ★ 走 <c>ExecuteUpdate</c> 而不是加载实体再保存：后者会经过变更跟踪器，从而对
+    /// <see cref="EftBatch.ConcurrencyStamp"/> 做乐观并发比对，两个人同时下载就会有一个拿到 409 ——
     /// 让一个纯粹的读动作因为并发而失败。这里的写入是单调的（时间取 coalesce、次数自增），
-    /// 天然不需要并发校验。
+    /// 下载之间天然不需要并发校验。
+    /// <para>
+    /// ★★ 但它必须**换掉**并发标记，并且只在 Generated 态生效，作废守卫与交出文件之间
+    /// 两个方向的竞态都靠这两点关上：
+    /// 下载读到 Generated 之后作废先提交，条件写命中 0 行，文件不交出；
+    /// 作废读到「从未下载」之后下载先戳，作废那次带跟踪的整行写入比对的是旧标记，
+    /// 命中 0 行转 409 并整体回滚（行不删、付款不放回队列），也不会把刚戳上的留痕写回 null。
+    /// 下载之间不受影响：它们从不做带跟踪的比对。
+    /// </para>
     /// <para>
     /// 首次时间用 <c>x.FirstDownloadedTime ?? now</c> 而不是「先查再判断」：并发下载下
     /// 后者会让两次都认为自己是第一次，把首次时间改晚 —— 而这个字段的全部意义就是
     /// 「最早交出去是什么时候」。
     /// </para>
     /// </remarks>
-    private async Task StampHandoutAsync(Guid batchId, CancellationToken cancellationToken)
+    private async Task<bool> StampHandoutAsync(Guid batchId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
-        await _batchRepository.AsQueryable(true)
-            .Where(b => b.Id == batchId)
+        var stamp = Guid.NewGuid().ToString("N");
+        var affected = await _batchRepository.AsQueryable(true)
+            .Where(b => b.Id == batchId && b.Status == EftBatchStatus.Generated)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(x => x.FirstDownloadedTime, x => x.FirstDownloadedTime ?? now)
-                .SetProperty(x => x.DownloadCount, x => x.DownloadCount + 1), cancellationToken);
+                .SetProperty(x => x.DownloadCount, x => x.DownloadCount + 1)
+                .SetProperty(x => x.ConcurrencyStamp, stamp), cancellationToken);
+        return affected == 1;
     }
 
     /// <summary>原子递增 <see cref="BankAccount.EftFileCreationNumber"/> 并返回 1-9999 循环序号（须在活动事务内）。</summary>
+    /// <remarks>
+    /// ★ 同一条语句换掉档案的并发标记（与 <see cref="CheckNumberAllocator"/> 同一口径）：在分配之前读过档案的
+    /// 实体级整行写入（档案编辑）会比对失败转 409，而不是把序号写回旧值，回退后下一份文件复用一个
+    /// 已用过的 File Creation Number，银行按重复文件拒收。
+    /// </remarks>
     private async Task<int> AllocateFileCreationNumberAsync(Guid bankAccountId, CancellationToken cancellationToken)
     {
         await _bankAccountRepository.EnsureTransactionStartedAsync(cancellationToken);
+        var stamp = Guid.NewGuid().ToString("N");
         await _bankAccountRepository.AsQueryable(true)
             .Where(b => b.Id == bankAccountId)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.EftFileCreationNumber, x => x.EftFileCreationNumber + 1), cancellationToken);
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.EftFileCreationNumber, x => x.EftFileCreationNumber + 1)
+                .SetProperty(x => x.ConcurrencyStamp, stamp), cancellationToken);
         var raw = await _bankAccountRepository.AsQueryable()
             .Where(b => b.Id == bankAccountId)
             .Select(b => b.EftFileCreationNumber)
@@ -491,8 +550,43 @@ public class EftService : ApplicationService, IEftService
         return ((raw - 1) % 9999) + 1;
     }
 
-    private string DecryptOrEmpty(string? encrypted, string associatedData)
-        => string.IsNullOrEmpty(encrypted) ? string.Empty : _protector.Unprotect(encrypted, associatedData);
+    /// <summary>
+    /// 生效日是否已经过去：按「在任何时区都已经过去」判断，时钟取注入的 <see cref="TimeProvider"/>。
+    /// </summary>
+    /// <remarks>
+    /// 管理端发的是浏览器本地的日历日，而本模块没有业务时区设置：拿 UTC 日期比，北美晚上八点之后
+    /// UTC 已是明天，表单默认值（今天）被当成过去拒掉。所以只拒绝早于「此刻全球最早那个日历日」
+    /// （UTC-12）的日期，那在任何时区都已经过去了。
+    /// </remarks>
+    private bool IsEffectiveDatePast(DateTime effectiveDate)
+    {
+        var earliestToday = TimeProvider.GetUtcNow().UtcDateTime.AddHours(-EarliestUtcOffsetHours).ToUtcDate();
+        return effectiveDate.ToUtcDate() < earliestToday;
+    }
+
+    /// <summary>最西的时区（UTC-12）与 UTC 相差的小时数。</summary>
+    private const int EarliestUtcOffsetHours = 12;
+
+    /// <summary>
+    /// 解密一个存储的账号（未存 = 空串）；解不开时记一条点名档案的警告（不含任何账号内容）并返回 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>与支票白纸打印的守卫（<c>CheckBatchComposer.ValidateBlankStockPrintable</c>）同一处理。</remarks>
+    private string? TryDecrypt(string? encrypted, string associatedData, string profileKind, Guid profileId)
+    {
+        if (string.IsNullOrEmpty(encrypted))
+            return string.Empty;
+        try
+        {
+            return _protector.Unprotect(encrypted, associatedData);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex,
+                "The stored account number on {ProfileKind} {ProfileId} cannot be decrypted; refusing to generate the EFT file.",
+                profileKind, profileId);
+            return null;
+        }
+    }
 
     private async Task<Dictionary<Guid, string>> LoadVendorNamesAsync(IEnumerable<Guid> partyIds, CancellationToken cancellationToken)
     {

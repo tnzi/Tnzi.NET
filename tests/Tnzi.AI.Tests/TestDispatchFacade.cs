@@ -19,30 +19,5 @@ internal static class TestDispatchFacade
             // Only reached on the external path, which these tests never take:
             // with no binding the facade hands straight over to the runtime.
             new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            new UnusedThreadService(),
             NullLogger<AgentDispatchFacade>.Instance);
-
-    /// <summary>Only the external path touches threads, and these tests never take it.</summary>
-    private sealed class UnusedThreadService : IAgentThreadInternalService
-    {
-        public Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
-            Guid? threadId, Guid? agentId, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,
-            string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
-            => throw new NotSupportedException();
-
-        public Task SetMetadataValueAsync(Guid threadId, string key, string? valueJson, CancellationToken ct = default)
-            => throw new NotSupportedException();
-    }
 }

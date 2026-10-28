@@ -49,8 +49,6 @@ public class AuditBackgroundServiceFallbackTests
             throw BatchFailure;
         }
 
-        public Task SaveEntityEntriesAsync(IEnumerable<AuditEntityEntry> entries) => Task.CompletedTask;
-
         public Task<int> DeleteExpiredAsync(int days, CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 

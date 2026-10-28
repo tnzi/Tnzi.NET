@@ -26,7 +26,9 @@
         </div>
 
         <NSpin :show="loadingDunning" class="fin-stmt__spin">
-          <TEmpty v-if="!loadingDunning && candidates.length === 0" :text="tp('collections.empty')" />
+          <!-- A failed read is not "nobody is overdue": say why there is no list. -->
+          <NAlert v-if="dunningError" type="error" class="flex-none">{{ dunningError }}</NAlert>
+          <TEmpty v-else-if="!loadingDunning && candidates.length === 0" :text="tp('collections.empty')" />
           <div v-else class="flex flex-col gap-8px flex-1 min-h-0 overflow-y-auto">
             <!-- One row per party: the level, the money, and the two things you
                  would actually do next. A worklist that only lists names makes
@@ -129,6 +131,7 @@
 
         <NSpin :show="loadingStatement" class="fin-stmt__spin">
           <TEmpty v-if="!partyId" :text="tp('statement.pickPartyHint')" />
+          <NAlert v-else-if="statementError" type="error" class="flex-none">{{ statementError }}</NAlert>
           <TEmpty v-else-if="!loadingStatement && !statement" :text="tp('statement.empty')" />
           <div v-else-if="statement" class="fin-stmt__doc flex flex-col gap-12px flex-1 min-h-0 overflow-y-auto">
             <!-- The three numbers that decide what happens next, above the detail. -->
@@ -233,6 +236,9 @@ const statement = ref<CustomerStatementDto | null>(null)
 const loadingDunning = ref(false)
 const loadingStatement = ref(false)
 const renderError = ref('')
+/** Why the worklist / statement could not be read (empty = it was read). */
+const dunningError = ref('')
+const statementError = ref('')
 
 /** Collections rows are cross-party, so they are shown in the base currency. */
 const currency = computed(() => statement.value?.currency ?? undefined)
@@ -303,12 +309,25 @@ const lineColumns = computed<DataTableColumns<StatementLineDto>>(() => [
   },
 ])
 
+// Both reads are last-wins: flipping customers / vendors or picking another
+// party while a read is in flight must not let the earlier answer land under
+// the later choice (a statement shown, and downloaded, as another party's).
+let dunningSeq = 0
+let statementSeq = 0
+
 async function loadDunning() {
+  const mine = ++dunningSeq
   loadingDunning.value = true
+  dunningError.value = ''
   try {
-    candidates.value = await bridge.statements.dunning(partyType.value)
+    const loaded = await bridge.statements.dunning(partyType.value)
+    if (mine === dunningSeq) candidates.value = loaded
+  } catch (error) {
+    if (mine !== dunningSeq) return
+    candidates.value = []
+    dunningError.value = error instanceof Error ? error.message : String(error)
   } finally {
-    loadingDunning.value = false
+    if (mine === dunningSeq) loadingDunning.value = false
   }
 }
 
@@ -323,22 +342,34 @@ function buildQuery() {
 }
 
 async function loadStatement() {
+  const mine = ++statementSeq
   if (!partyId.value) {
     statement.value = null
+    loadingStatement.value = false
     return
   }
   loadingStatement.value = true
+  statementError.value = ''
   try {
-    statement.value = await bridge.statements.get(partyType.value, partyId.value, buildQuery())
+    const loaded = await bridge.statements.get(partyType.value, partyId.value, buildQuery())
+    if (mine === statementSeq) statement.value = loaded
+  } catch (error) {
+    if (mine !== statementSeq) return
+    statement.value = null
+    statementError.value = error instanceof Error ? error.message : String(error)
   } finally {
-    loadingStatement.value = false
+    if (mine === statementSeq) loadingStatement.value = false
   }
 }
 
 function onPartyTypeChange() {
-  // A vendor id is meaningless once the switch flips to customers.
+  // A vendor id is meaningless once the switch flips to customers. Bumping the
+  // sequence also drops a statement read still in flight for that vendor.
+  statementSeq++
   partyId.value = null
   statement.value = null
+  statementError.value = ''
+  loadingStatement.value = false
   void loadDunning()
 }
 
@@ -371,10 +402,11 @@ onMounted(() => {
   void loadDunning()
 })
 
+/** The local calendar date `n` months back (`toISOString` would give the UTC date: a day late in an evening west of Greenwich). */
 function monthsAgo(n: number) {
   const d = new Date()
   d.setMonth(d.getMonth() - n)
-  return d.toISOString().slice(0, 10)
+  return tsToIsoDate(d.getTime())
 }
 </script>
 

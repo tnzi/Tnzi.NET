@@ -6,6 +6,10 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ meta: {}, query: {}, params: {} }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }))
+const messageError = vi.hoisted(() => vi.fn())
+vi.mock('../../../src/pages/_shared/safe-message', () => ({
+  useSafeMessage: () => ({ success: vi.fn(), error: messageError, warning: vi.fn(), info: vi.fn() }),
+}))
 vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
@@ -55,5 +59,15 @@ describe('Chat Overview page', () => {
     // Presence table rows render.
     expect(wrapper.text()).toContain('Alice')
     expect(wrapper.text()).toContain('Bob')
+  })
+
+  it('a presence read refused on the online-only switch says why', async () => {
+    const wrapper = mount(Overview)
+    await flushPromises()
+    messageError.mockClear()
+    presence.mockRejectedValueOnce(new Error('Presence is not readable here'))
+    wrapper.findComponent({ name: 'Switch' }).vm.$emit('update:value', true)
+    await flushPromises()
+    expect(messageError).toHaveBeenCalledWith('Presence is not readable here')
   })
 })

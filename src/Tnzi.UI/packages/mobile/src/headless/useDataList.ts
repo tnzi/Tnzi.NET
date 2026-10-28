@@ -29,11 +29,22 @@ export function useDataList<T = unknown>(options: UseDataListOptions<T> = {}): U
 
   const isEmpty = computed(() => items.value.length === 0 && !isLoading.value && !isRefreshing.value)
 
+  /**
+   * Bumped by refresh() and reset(), which replace the list. A request that
+   * started before the bump answers for a list that no longer exists: its rows
+   * are dropped, and it leaves the loading flags to whatever runs now.
+   */
+  let generation = 0
+
   async function loadMore(): Promise<void> {
-    if (isLoading.value || !hasMore.value) return
+    // During a refresh the page cursor is about to be reset; a page requested
+    // now would be the wrong one.
+    if (isLoading.value || isRefreshing.value || !hasMore.value) return
+    const started = generation
     isLoading.value = true
     try {
       const result = await options.onLoad?.(page.value, pageSize)
+      if (started !== generation) return
       if (result) {
         const newItems = result as T[]
         items.value = [...items.value, ...newItems]
@@ -45,15 +56,19 @@ export function useDataList<T = unknown>(options: UseDataListOptions<T> = {}): U
         hasMore.value = false
       }
     } finally {
-      isLoading.value = false
+      if (started === generation) isLoading.value = false
     }
   }
 
   async function refresh(): Promise<void> {
     if (isRefreshing.value) return
+    const started = ++generation
+    // A page load still in flight is abandoned (its answer is dropped above).
+    isLoading.value = false
     isRefreshing.value = true
     try {
       const result = await options.onRefresh?.() ?? await options.onLoad?.(1, pageSize)
+      if (started !== generation) return
       if (result) {
         const newItems = result as T[]
         items.value = newItems
@@ -65,11 +80,12 @@ export function useDataList<T = unknown>(options: UseDataListOptions<T> = {}): U
         hasMore.value = false
       }
     } finally {
-      isRefreshing.value = false
+      if (started === generation) isRefreshing.value = false
     }
   }
 
   function reset(): void {
+    generation += 1
     items.value = []
     isLoading.value = false
     isRefreshing.value = false

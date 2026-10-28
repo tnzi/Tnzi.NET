@@ -18,8 +18,12 @@ namespace Tnzi.AspNetCore.Tests.Middleware;
 /// </remarks>
 public class RequestValidationMiddlewareTests
 {
-    private static RequestValidationMiddleware Create(RequestDelegate next, IRequestValidator validator)
-        => new(next, validator, Mock.Of<ILogger<RequestValidationMiddleware>>());
+    /// <summary>校验器按请求经 InvokeAsync 的参数传入（它是 Scoped），这里把它绑进委托。</summary>
+    private static Func<HttpContext, Task> Create(RequestDelegate next, IRequestValidator validator)
+    {
+        var middleware = new RequestValidationMiddleware(next, Mock.Of<ILogger<RequestValidationMiddleware>>());
+        return context => middleware.InvokeAsync(context, validator);
+    }
 
     private static IRequestValidator PassingValidator()
     {
@@ -36,7 +40,7 @@ public class RequestValidationMiddlewareTests
             PassingValidator());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => middleware.InvokeAsync(new DefaultHttpContext()));
+            () => middleware(new DefaultHttpContext()));
 
         Assert.Equal("downstream blew up", ex.Message);
     }
@@ -52,7 +56,7 @@ public class RequestValidationMiddlewareTests
             _ => throw new InvalidOperationException("downstream blew up"),
             PassingValidator());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => middleware.InvokeAsync(context));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => middleware(context));
 
         context.Response.Body.Position = 0;
         var body = await new StreamReader(context.Response.Body).ReadToEndAsync();
@@ -73,7 +77,7 @@ public class RequestValidationMiddlewareTests
 
         var middleware = Create(_ => { nextCalled = true; return Task.CompletedTask; }, validator.Object);
 
-        await middleware.InvokeAsync(context);
+        await middleware(context);
 
         Assert.Equal(500, context.Response.StatusCode);
         Assert.False(nextCalled, "校验器失效时放行，等于让失效变成静默放行");
@@ -91,7 +95,7 @@ public class RequestValidationMiddlewareTests
 
         var middleware = Create(_ => { nextCalled = true; return Task.CompletedTask; }, validator.Object);
 
-        await middleware.InvokeAsync(context);
+        await middleware(context);
 
         Assert.Equal(400, context.Response.StatusCode);
         Assert.False(nextCalled);
@@ -103,7 +107,7 @@ public class RequestValidationMiddlewareTests
         var nextCalled = false;
         var middleware = Create(_ => { nextCalled = true; return Task.CompletedTask; }, PassingValidator());
 
-        await middleware.InvokeAsync(new DefaultHttpContext());
+        await middleware(new DefaultHttpContext());
 
         Assert.True(nextCalled);
     }

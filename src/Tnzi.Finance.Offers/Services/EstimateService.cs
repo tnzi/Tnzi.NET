@@ -340,6 +340,15 @@ public class EstimateService : ApplicationService, IEstimateService
 
     private async Task<Result> ApplyAsync(Estimate estimate, CreateEstimateDto input, CancellationToken cancellationToken)
     {
+        // 列宽在入口先查（缘由见 OfferFieldLimits）：超长答 400 并点名字段，而不是落库时一个不点名的 500。
+        var currency = _helper.NormalizeCurrency(input.Currency);
+        var tooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, OfferFieldLimits.MemoMaxLength, "memo"),
+            (input.InternalNote, OfferFieldLimits.InternalNoteMaxLength, "internal note"),
+            (currency, OfferFieldLimits.CurrencyMaxLength, "currency code"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
+
         if (!await _customerRepository.AnyAsync(c => c.Id == input.CustomerId, cancellationToken))
             return Fail("Customer not found.", 404);
 
@@ -355,7 +364,7 @@ public class EstimateService : ApplicationService, IEstimateService
         estimate.CustomerId = input.CustomerId;
         estimate.DocDate = docDate;
         estimate.ExpiryDate = expiry;
-        estimate.Currency = _helper.NormalizeCurrency(input.Currency);
+        estimate.Currency = currency;
         estimate.Memo = input.Memo;
         estimate.InternalNote = input.InternalNote;
 

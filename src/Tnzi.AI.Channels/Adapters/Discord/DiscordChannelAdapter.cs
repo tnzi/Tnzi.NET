@@ -65,9 +65,14 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     }
 
     /// <summary>检查 Guild 是否被允许（空白名单=不限制）</summary>
-    public bool IsGuildAllowed(string guildId)
+    /// <remarks>
+    /// <paramref name="guildId"/> 为 null 表示私信 / 群组私信（不属于任何 guild）。配了白名单时它不属于任何
+    /// 允许的 guild，必须拒绝：把「缺 guild」当成「不受 guild 名单约束」，等于让任何与机器人共享一个服务器的人
+    /// 在私信里绕开这份名单。
+    /// </remarks>
+    public bool IsGuildAllowed(string? guildId)
     {
-        return _allowedGuilds.Count == 0 || _allowedGuilds.Contains(guildId);
+        return _allowedGuilds.Count == 0 || (guildId != null && _allowedGuilds.Contains(guildId));
     }
 
     public Task StartAsync(CancellationToken ct = default)
@@ -307,9 +312,9 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             CollectStringOptions(data, stringValues);
             var text = stringValues.Count > 0 ? string.Join(" ", stringValues) : "/" + commandName;
 
-            if (guildId != null && !IsGuildAllowed(guildId))
+            if (!IsGuildAllowed(guildId))
             {
-                _logger.LogDebug("Discord interaction from non-allowed guild {GuildId}, rejecting", guildId);
+                _logger.LogDebug("Discord interaction from non-allowed guild {GuildId}, rejecting", guildId ?? "(direct message)");
                 return InteractionOutcome.NotAllowed;
             }
 
@@ -341,7 +346,8 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 UserId: userId,
                 Text: text,
                 Type: text.StartsWith('/') ? InboundMessageType.Command : InboundMessageType.Chat,
-                Metadata: metadata);
+                Metadata: metadata,
+                PeerKind: PeerKindOf(guildId));
 
             await _bus.PublishInboundAsync(inbound, ct);
             return InteractionOutcome.Published;
@@ -429,9 +435,9 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             if (string.IsNullOrWhiteSpace(text)) return;
 
             // Guild 白名单
-            if (guildId != null && !IsGuildAllowed(guildId))
+            if (!IsGuildAllowed(guildId))
             {
-                _logger.LogDebug("Discord message from non-allowed guild {GuildId}, ignoring", guildId);
+                _logger.LogDebug("Discord message from non-allowed guild {GuildId}, ignoring", guildId ?? "(direct message)");
                 return;
             }
 
@@ -456,7 +462,8 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 UserId: userId,
                 Text: text,
                 Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
-                ThreadTs: messageId);
+                ThreadTs: messageId,
+                PeerKind: PeerKindOf(guildId));
 
             await _bus.PublishInboundAsync(inbound, ct);
         }
@@ -465,6 +472,10 @@ public class DiscordChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             _logger.LogWarning(ex, "Failed to process Discord event");
         }
     }
+
+    /// <summary>没有 guild_id 的消息与交互来自私信，有的来自服务器频道。</summary>
+    private static string PeerKindOf(string? guildId)
+        => string.IsNullOrWhiteSpace(guildId) ? ChannelPeerKinds.User : ChannelPeerKinds.Group;
 
     public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
     {

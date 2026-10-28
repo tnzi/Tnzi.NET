@@ -103,4 +103,50 @@ public class TemplateHtmlEncodingTests : IDisposable
         var result = await _engine.RenderAsync("<p><b>@Model.Name</b></p>", new { Name = "x" });
         Assert.Equal("<p><b>x</b></p>", result);
     }
+
+    /// <summary>
+    /// ★ <c>@expr</c> 默认编码之后，显式的 <c>HtmlEncode</c> / <c>Html.Encode</c> 若仍返回普通字符串，
+    /// 写出时会再被编码一次：<c>A &amp; B</c> 渲染成 <c>A &amp;amp; B</c>，邮件与 PDF 里看得见，无异常。
+    /// 两个助手的产物已经是编码过的文本，写出时必须原样输出。
+    /// </summary>
+    [Theory]
+    [InlineData("<p>@HtmlEncode(Model.Name)</p>")]
+    [InlineData("<p>@Html.Encode(Model.Name)</p>")]
+    public async Task ExplicitEncodeHelpers_AreEncodedExactlyOnce(string template)
+    {
+        var result = await _engine.RenderAsync(template, new { Name = "A & B <C>" });
+
+        Assert.Equal("<p>A &amp; B &lt;C&gt;</p>", result);
+    }
+
+    [Fact]
+    public async Task ExplicitEncodeHelper_InAttribute_IsEncodedExactlyOnce()
+    {
+        var result = await _engine.RenderAsync("<a title=\"@HtmlEncode(Model.Name)\">x</a>", new { Name = "A & \"B\"" });
+
+        Assert.Equal("<a title=\"A &amp; &quot;B&quot;\">x</a>", result);
+    }
+
+    /// <summary>
+    /// 两个助手的产物仍能当字符串用：拼进 <c>Raw(...)</c> 的字符串、赋给 <c>string</c> 变量、
+    /// 传给收 <c>string</c> 的助手。模型是 dynamic，这些调用在运行期绑定，换返回类型时最容易在这里断掉。
+    /// </summary>
+    [Fact]
+    public async Task ExplicitEncodeHelper_StillComposesAsAString()
+    {
+        var result = await _engine.RenderAsync(
+            "@Raw(\"<b>\" + HtmlEncode(Model.Name) + \"</b>\")|@{ string s = Html.Encode(Model.Name); }@Raw(s)|@Raw(Truncate(HtmlEncode(Model.Name), 5))",
+            new { Name = "A & B" });
+
+        Assert.Equal("<b>A &amp; B</b>|A &amp; B|A &am...", result);
+    }
+
+    /// <summary>纯文本输出下 <c>@expr</c> 不编码，显式 <c>HtmlEncode</c> 照旧编码一次：调用方要的就是编码。</summary>
+    [Fact]
+    public async Task ExplicitEncodeHelper_InPlainText_EncodesOnce()
+    {
+        var result = await _engine.RenderAsync("@HtmlEncode(Model.Name)", new { Name = "A & B" }, TemplateOutputKind.PlainText);
+
+        Assert.Equal("A &amp; B", result);
+    }
 }

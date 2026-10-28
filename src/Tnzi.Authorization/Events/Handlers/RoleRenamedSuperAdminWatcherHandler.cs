@@ -11,7 +11,9 @@ namespace Tnzi.Authorization.Events.Handlers;
 /// are runtime-generated Guids that can't be hardcoded into appsettings.
 /// The trade-off: if an admin renames a role through the role-management
 /// UI, the appsettings entry now points at a non-existent role, and the
-/// affected admins silently lose super-admin bypass at next cache miss.
+/// affected admins lose super-admin bypass on their very next request
+/// (the super-admin check reads role membership by name on every call; it is
+/// not cached).
 /// </para>
 /// <para>
 /// This handler doesn't *fix* the problem (we can't safely auto-rewrite
@@ -59,22 +61,23 @@ public class RoleRenamedSuperAdminWatcherHandler : IEventHandler<RoleUpdatedEven
         if (configured.Contains(@event.PreviousName!))
         {
             // Match by previous name → admin renamed a role currently listed
-            // in the config. Its members lose the tier once the cache TTL
-            // expires. Log loud so runbook can catch it.
+            // in the config. Its members lose the tier immediately. Log loud so
+            // the runbook can catch it.
             _logger.LogWarning(
                 "Role '{PreviousName}' was renamed to '{NewName}' but {OptionPath} still references the old name. " +
-                "Members of this role will lose {Tier} after the cache TTL expires. " +
+                "Members of this role have lost {Tier} as of this rename. " +
                 "Either rename the config entry to '{NewName}' or rename the role back to '{PreviousName}'.",
                 @event.PreviousName, @event.RoleName, optionPath, tierLabel, @event.RoleName, @event.PreviousName);
         }
         else if (configured.Contains(@event.RoleName))
         {
-            // Match by new name → admin renamed *into* a configured slot.
-            // Probably intentional (adopting an existing role into the tier),
-            // but log Info so the audit trail captures it.
+            // Match by new name → a role was renamed *into* a configured slot.
+            // Identity's role service refuses this rename with 403, so this only
+            // fires for a RoleUpdatedEvent raised outside that service. Kept as a
+            // defensive audit line.
             _logger.LogInformation(
                 "Role '{PreviousName}' was renamed to '{NewName}'; the new name is listed in {OptionPath}. " +
-                "Members of this role will gain {Tier} after the cache TTL refreshes.",
+                "Members of this role have gained {Tier} as of this rename.",
                 @event.PreviousName, @event.RoleName, optionPath, tierLabel);
         }
     }

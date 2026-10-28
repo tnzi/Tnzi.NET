@@ -56,59 +56,16 @@ public class SubscriptionServiceTests
             _paymentMethodServiceMock.Object,
             _optionsMock.Object,
             _subscriptionOptionsMock.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProviderMock.Object
         );
     }
 
     #region CancelSubscriptionAsync Tests
 
-    [Fact]
-    public async Task CancelSubscriptionAsync_WithNonExistingSubscription_Returns404()
-    {
-        // Arrange
-        _subscriptionRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Subscription, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Subscription?)null);
-
-        var request = new CancelSubscriptionDto { Reason = "Test", Immediate = true };
-
-        // Act
-        var result = await _service.CancelSubscriptionAsync(Guid.NewGuid(), request);
-
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Code.ShouldBe(404);
-    }
-
-    [Fact]
-    public async Task CancelSubscriptionAsync_WithAlreadyCancelled_ReturnsFailure()
-    {
-        // Arrange
-        var subscription = new Subscription
-        {
-            Id = Guid.NewGuid(),
-            SubscriptionNo = "SUB001",
-            Status = SubscriptionStatus.Cancelled,
-            UserId = Guid.NewGuid()
-        };
-
-        _subscriptionRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Subscription, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(subscription);
-
-        var request = new CancelSubscriptionDto { Reason = "Test", Immediate = true };
-
-        // Act
-        var result = await _service.CancelSubscriptionAsync(subscription.Id, request);
-
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Message.ShouldBe(ErrorCodes.SubscriptionAlreadyCancelledOrExpired);
-    }
-
-    // 取消的两条成功路径改用条件更新（CAS）抢计费锁，需要真实 EF Provider，
-    // 因此覆盖移到集成测试 SubscriptionCancellationIntegrationTests。
-    // 这里保留的是在抢锁之前就该拒绝的分支（不存在 / 已取消或已过期）。
+    // 取消先用条件更新（CAS）抢计费锁、再读行判定，每一个分支（不存在 / 已取消或已过期 / 两条成功路径）
+    // 都要真实 EF Provider，覆盖在集成测试 SubscriptionCancellationIntegrationTests。
 
     #endregion
 
@@ -396,32 +353,8 @@ public class SubscriptionServiceTests
         subscription.PastDueSince.ShouldNotBeNull();
     }
 
-    [Fact]
-    public async Task ApplyPaymentFailedAsync_Initial_KeepsPending()
-    {
-        // Arrange
-        var subscription = new Subscription
-        {
-            Id = Guid.NewGuid(),
-            SubscriptionNo = "SUB-INITFAIL",
-            Status = SubscriptionStatus.Pending,
-            UserId = Guid.NewGuid()
-        };
-        SetupSubscription(subscription);
-
-        // Act
-        var result = await _service.ApplyPaymentFailedAsync(new SubscriptionPaymentContext
-        {
-            Purpose = SubscriptionBillingPurpose.Initial,
-            SubscriptionId = subscription.Id,
-            SubscriptionNo = subscription.SubscriptionNo,
-            PayerUserId = subscription.UserId
-        });
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        subscription.Status.ShouldBe(SubscriptionStatus.Pending);
-    }
+    // 首期失败 / 过期把 Pending 收口为 Cancelled 是一次条件更新，需要真实 EF Provider，
+    // 覆盖在集成测试 PendingFirstPaymentEndedTests。
 
     // ───────── 元数据只是路由键：付款人与金额都要核 ─────────
 

@@ -7,6 +7,8 @@ import { useAdminRouteStore } from '../../src/stores/useAdminRouteStore'
 import { useAdminAuthStore } from '../../src/stores/useAdminAuthStore'
 import { useAdminTabStore } from '../../src/stores/useAdminTabStore'
 import { useAdminAppStore } from '../../src/stores/useAdminAppStore'
+import { useAdminDesktopStore } from '../../src/stores/useAdminDesktopStore'
+import { useChatStore } from '../../src/stores/useChatStore'
 import { ADMIN_LOGIN_CONFIG_KEY, type AdminLoginConfig } from '../../src/plugin/login-config'
 
 const dummyClient = {
@@ -226,6 +228,26 @@ describe('defineAdminApp', () => {
     expect(childNames).toEqual(['identity'])
   })
 
+  it('names a hideModules / showOnlyModules entry that matches no module group', () => {
+    // Both options compare against the group route names under /admin. A
+    // backend module name such as "AI.Skills" or "Finance.Payroll" matches
+    // none of them and used to hide nothing, silently.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      defineAdminApp({
+        client: dummyClient,
+        hideModules: ['Payment', 'AI.Skills'],
+        showOnlyModules: ['identity', 'payroll', 'Finance.Payroll'],
+      })
+      const messages = warn.mock.calls.map((c) => String(c[0]))
+      expect(messages.filter((m) => m.includes('matches no module group'))).toHaveLength(2)
+      expect(messages.some((m) => m.includes('hideModules') && m.includes('"AI.Skills"'))).toBe(true)
+      expect(messages.some((m) => m.includes('showOnlyModules') && m.includes('"Finance.Payroll"'))).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('overridePages swaps the component for a named route deep in the tree', () => {
     const customPage = defineComponent({
       name: 'CustomUserPage',
@@ -244,6 +266,22 @@ describe('defineAdminApp', () => {
     )
     expect(users).toBeTruthy()
     expect(users!.component).toBe(customPage)
+  })
+
+  it('overridePages replaces the admin shell layout and keeps its pages', () => {
+    const customShell = defineComponent({
+      name: 'CustomShell',
+      render: () => h('div', 'shell'),
+    })
+    const builtIn = findAdminRoute(defineAdminApp({ client: dummyClient }).routes)
+    const { routes } = defineAdminApp({
+      client: dummyClient,
+      overridePages: { 'admin-root': customShell },
+    })
+    const admin = findAdminRoute(routes)
+    expect(admin?.component).toBe(customShell)
+    expect(admin?.redirect).toEqual(builtIn?.redirect)
+    expect(namesOfChildren(admin)).toEqual(namesOfChildren(builtIn))
   })
 
   it('addModules appends consumer-supplied routes under /admin', () => {
@@ -463,6 +501,90 @@ describe('defineAdminApp', () => {
     expect(auth.isSuperUser).toBe(true)
   })
 
+  /**
+   * A client whose profile read names `profileId` while both permission reads
+   * fail the way a database timeout does (500 envelope, no data).
+   */
+  function permissionOutageClient(profileId: string) {
+    return {
+      get: async (url: string) =>
+        url.startsWith('/users/profile')
+          ? { success: true, code: 200, data: { id: profileId, userName: 'admin', roles: [] } }
+          : { success: false, code: 500, message: 'Database timeout' },
+      post: async () => ({ success: true, code: 200, data: null }),
+      addUnauthorizedListener: () => () => {},
+    } as never
+  }
+
+  it('a failed permission read keeps the same user\'s permissions, super-user flag and tabs', async () => {
+    const { loadPermissions } = defineAdminApp({ client: permissionOutageClient('u1') })
+    useAdminRouteStore().setAuthRoutes([
+      { name: 'identity.users', path: '/admin/identity/users', meta: { title: 'Users', permission: 'user.view' } },
+    ])
+    const auth = useAdminAuthStore()
+    // The persisted session of the same super admin, restored on reload.
+    auth.setUserInfo({ id: 'u1', username: 'admin', roles: [], permissions: ['user.view'] })
+    auth.setSuperUser(true)
+    const tabStore = useAdminTabStore()
+    tabStore.claimForUser('u1')
+    tabStore.addTab({ name: 'identity.users', path: '/admin/identity/users', fullPath: '/admin/identity/users', query: {}, params: {}, meta: { title: 'Users' } })
+
+    const result = await loadPermissions()
+
+    // The access-profile outage says nothing about the user's grants: the
+    // identity refreshes, the last known permission set stays.
+    expect(auth.userInfo?.id).toBe('u1')
+    expect(auth.userInfo?.permissions).toEqual(['user.view'])
+    expect(result).toEqual(['user.view'])
+    expect(auth.isSuperUser).toBe(true)
+    expect(tabStore.tabs.map((t) => t.id)).toEqual(['identity.users'])
+  })
+
+  it('a failed permission read does not prune the tabs of a user it knows nothing about yet', async () => {
+    const { loadPermissions } = defineAdminApp({ client: permissionOutageClient('u1') })
+    useAdminRouteStore().setAuthRoutes([
+      { name: 'identity.users', path: '/admin/identity/users', meta: { title: 'Users', permission: 'user.view' } },
+    ])
+    const tabStore = useAdminTabStore()
+    tabStore.claimForUser('u1')
+    tabStore.addTab({ name: 'identity.users', path: '/admin/identity/users', fullPath: '/admin/identity/users', query: {}, params: {}, meta: { title: 'Users' } })
+
+    await loadPermissions()
+
+    // No grants known: the store holds an empty set (the guard still blocks),
+    // but the user's own tabs are not dropped for an outage.
+    expect(useAdminAuthStore().userInfo?.permissions).toEqual([])
+    expect(tabStore.tabs.map((t) => t.id)).toEqual(['identity.users'])
+  })
+
+  it('a failed permission read never carries another user\'s permissions over', async () => {
+    const { loadPermissions } = defineAdminApp({ client: permissionOutageClient('u2') })
+    const auth = useAdminAuthStore()
+    auth.setUserInfo({ id: 'u1', username: 'root', roles: [], permissions: ['user.view'] })
+    auth.setSuperUser(true)
+
+    await loadPermissions()
+
+    expect(auth.userInfo?.id).toBe('u2')
+    expect(auth.userInfo?.permissions).toEqual([])
+    expect(auth.isSuperUser).toBe(false)
+  })
+
+  it('a bare refresh keeps the tenant id the caller supplied for the same user', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    const auth = useAdminAuthStore()
+    await loadPermissions({ id: 'u1', username: 'admin', permissions: [], tenantId: 't-1' })
+    expect(auth.currentTenantId).toBe('t-1')
+
+    // The framework's own refreshes (post-login, session restore, install)
+    // call loadPermissions() bare; none of its sources carries a tenant.
+    await loadPermissions({ id: 'u1', username: 'admin', permissions: [] })
+    expect(auth.currentTenantId).toBe('t-1')
+
+    await loadPermissions({ id: 'u2', username: 'other', permissions: [] })
+    expect(auth.currentTenantId).toBeUndefined()
+  })
+
   it('mirrors the LIVE client token into the admin store when no token is passed (self-fetch mode → isLogin)', async () => {
     // The auth guard's resolveSession + the post-login after() both call
     // loadPermissions() with no token - the session already lives on the client.
@@ -485,6 +607,35 @@ describe('defineAdminApp', () => {
     await loadPermissions({ id: 'u1', username: 'john', roles: ['Admin'], permissions: ['user.view'] })
     expect(auth.isLogin).toBe(true) // token mirrored from the live client session
     expect(auth.userInfo?.id).toBe('u1')
+  })
+
+  it('★ binds desktop windows and chat state to the resolved user, dropping another user\'s', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    const desktop = useAdminDesktopStore()
+    const chat = useChatStore()
+    // Left by user A on this browser / tab.
+    desktop.claimForUser('user-a')
+    desktop.open({ name: 'crm.customer', path: '/admin/crm/customers/c-9', title: 'Jane Doe' })
+    chat.claimForUser('user-a')
+    chat.conversations = [{ id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 3, isMuted: false, memberCount: 2 }] as never
+
+    await loadPermissions({ id: 'user-b', username: 'bob', permissions: [] })
+
+    expect(desktop.windows).toEqual([])
+    expect(desktop.ownerId).toBe('user-b')
+    expect(chat.conversations).toEqual([])
+    expect(chat.ownerId).toBe('user-b')
+  })
+
+  it('keeps the desktop windows of the same user on a refresh of their identity', async () => {
+    const { loadPermissions } = defineAdminApp({ client: dummyClient })
+    const desktop = useAdminDesktopStore()
+    desktop.claimForUser('user-a')
+    desktop.open({ name: 'crm.customer', path: '/admin/crm/customers/c-9', title: 'Jane Doe' })
+
+    await loadPermissions({ id: 'user-a', username: 'alice', permissions: [] })
+
+    expect(desktop.windows.map((w) => w.title)).toEqual(['Jane Doe'])
   })
 
   it('does not set isLogin when neither a passed token nor a live client token exists', async () => {
@@ -628,6 +779,20 @@ describe('defineAdminApp', () => {
       })
     })
 
+    it('★ resets the chat store, so the next sign-in on this tab starts without the expired user\'s chat', () => {
+      const { trigger } = setup()
+      const chat = useChatStore()
+      chat.claimForUser('u1')
+      chat.config = { ...chat.config, enabled: true }
+      chat.conversations = [{ id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 3, isMuted: false, memberCount: 2 }] as never
+
+      trigger!()
+
+      expect(chat.config.enabled).toBe(false)
+      expect(chat.conversations).toEqual([])
+      expect(chat.ownerId).toBe('')
+    })
+
     it('does not redirect when already on the login route', () => {
       const { trigger, replace } = setup({
         currentRoute: { name: 'login', path: '/login/pwd-login', fullPath: '/login/pwd-login' },
@@ -765,6 +930,28 @@ describe('defineAdminApp', () => {
       expect(auth.isLogin).toBe(false)
       expect(auth.userInfo).toBeNull()
       expect(auth.isSuperUser).toBe(false)
+    })
+
+    it('★ resets the chat store after the consumer callback', async () => {
+      // The SPA navigates to the login page instead of reloading: without this
+      // the next user to sign in on this tab mounted the chat host on the
+      // previous user's `chat.use` and saw their conversation list and threads.
+      let conversationsDuringConsumer = -1
+      const { wrapped } = installWithLogout(() => {
+        conversationsDuringConsumer = chat.conversations.length
+      })
+      const chat = useChatStore()
+      chat.claimForUser('u1')
+      chat.config = { ...chat.config, enabled: true }
+      chat.conversations = [{ id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 3, isMuted: false, memberCount: 2 }] as never
+      chat.messagesByConv = { c1: [{ id: 'm1', conversationId: 'c1', content: 'hi', sentAt: '' }] } as never
+
+      await wrapped.user!.onLogout!()
+
+      expect(conversationsDuringConsumer).toBe(1) // untouched until the consumer finished
+      expect(chat.config.enabled).toBe(false)
+      expect(chat.conversations).toEqual([])
+      expect(chat.messagesByConv).toEqual({})
     })
   })
 
@@ -1447,7 +1634,7 @@ describe('defineAdminApp', () => {
       // mounted at /admin, auth redirects previously escaped to the
       // domain-root '/login' and 404'd.
       expect(login?.path).toBe(
-        '/admin/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+        '/admin/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor|pending-actions)?',
       )
       expect(forbidden?.path).toBe('/admin/403')
       // The 404 / 500 exception routes are top-level too and share the prefix.
@@ -1476,7 +1663,7 @@ describe('defineAdminApp', () => {
       expect(adminRoot?.path).toBe('/')
       // Login at root must keep its original shape - no leading "//".
       expect(login?.path).toBe(
-        '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor)?',
+        '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat|two-factor|pending-actions)?',
       )
       expect((login?.path as string).startsWith('//')).toBe(false)
       expect(forbidden?.path).toBe('/403')

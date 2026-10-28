@@ -11,8 +11,9 @@
  * after creation, absent from `UpdatePromotionDto`).
  *
  * Backend note: `/admin/promotions` GET filters on
- * promotionCode/type/productType/activeOnly only - no free-text search. The
- * page's `isActive` boolean maps to the backend `activeOnly` flag.
+ * promotionCode/type/productType/activeOnly only - no free-text search.
+ * `activeOnly` means valid right now (enabled AND inside the start/end
+ * window), and `false` means no filter: there is no "disabled only" query.
  */
 import type { HttpClient } from '@tnzi/core/http'
 import {
@@ -33,12 +34,13 @@ export type UpdatePromotionDto = CoreUpdatePromotionDto
 // directly - pages route through the bridge per the no-restricted-imports gate.
 export { DiscountType, PromotionType } from '@tnzi/core/services/payment'
 
-/** Page-facing query shape (table page: page + active filter). */
+/** Page-facing query shape (table page: page + status filter). */
 export interface PromotionQueryDto {
   pageIndex: number
   pageSize: number
   type?: string | number | null
-  isActive?: boolean | null
+  /** Only promotions valid right now: enabled and inside their window (`activeOnly`). */
+  validNow?: boolean
 }
 
 export interface PromotionBridgeDeps {
@@ -71,12 +73,12 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
 
   return {
     getList: async (query: PromotionQueryDto) => {
-      const result = unwrap<{ items: PromotionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: PromotionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await api.getList({
           pageIndex: query.pageIndex,
           pageSize: query.pageSize,
           type: query.type ?? undefined,
-          activeOnly: query.isActive === true,
+          activeOnly: query.validNow === true,
         } as never),
       )
       return {
@@ -109,6 +111,10 @@ export function createPromotionBridge(deps: PromotionBridgeDeps = {}): Promotion
         stackable: data.stackable ?? undefined,
         priority: data.priority ?? undefined,
         firstSubscriptionOnly: data.firstSubscriptionOnly ?? undefined,
+        // A fixed-amount discount is bound to this currency; checkout rejects it
+        // for an order in any other. Left blank, the server binds the
+        // deployment's configured currency (`Payment:DefaultCurrency`).
+        currency: data.currency?.trim() || undefined,
       }
       return (unwrapOk<PromotionDto | null>(await api.create(body)) ?? ({} as PromotionDto))
     },

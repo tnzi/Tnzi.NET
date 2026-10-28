@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Tnzi.AI.Tests;
 
 /// <summary>
@@ -6,6 +8,34 @@ namespace Tnzi.AI.Tests;
 public class FixedSizeChunkingStrategyTests
 {
     private readonly FixedSizeChunkingStrategy _strategy = new();
+
+    /// <summary>严格的 UTF-8 编码器：遇到孤立代理项就抛异常，与 Npgsql 写入时的行为一致。</summary>
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>
+    /// 按整块大小断开（没有句子边界）时，断点与重叠起点都不落在代理对中间：每一块都是合法文本，落得进严格 UTF-8 的库。
+    /// </summary>
+    /// <param name="text">待切分的文本（不含句子结束符）</param>
+    /// <param name="chunkOverlap">重叠</param>
+    [Theory]
+    // 第 10 个码元是 emoji 的前半个：断点落在代理对中间
+    [InlineData("aaaaaaaaa\U0001F600bbbbbbbbbbbbbbbbbbbb", 0)]
+    // 第一块完整，重叠起点（10 - 3 = 7）落在 emoji 的后半个上
+    [InlineData("aaaaaa\U0001F600aaaaaaaaaaaaaaaaaaaa", 3)]
+    public void Chunk_SizeBreakInsideASurrogatePair_KeepsEveryChunkWellFormed(string text, int chunkOverlap)
+    {
+        var result = _strategy.Chunk(text, chunkSize: 10, chunkOverlap: chunkOverlap);
+
+        result.Count.ShouldBeGreaterThan(1);
+        foreach (var chunk in result)
+        {
+            chunk.Length.ShouldBeLessThanOrEqualTo(10);
+            Should.NotThrow(() => StrictUtf8.GetByteCount(chunk), $"chunk '{chunk}' holds a lone surrogate");
+        }
+
+        // 那个 emoji 完整地出现在某一块里
+        result.ShouldContain(chunk => chunk.Contains("\U0001F600", StringComparison.Ordinal));
+    }
 
     [Fact]
     public void Chunk_ShortText_ReturnsSingleChunk()

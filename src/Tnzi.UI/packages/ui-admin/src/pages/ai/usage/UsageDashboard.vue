@@ -323,8 +323,8 @@ async function refreshLogs() {
   const q = buildQuery({ pageIndex: logPage.value, pageSize: logPageSize.value })
   try {
     const page = await bridge.usage.getLogs(q)
-    logs.value = page.items ?? []
-    logTotal.value = page.totalCount ?? 0
+    logs.value = page?.items ?? []
+    logTotal.value = page?.totalCount ?? 0
   } catch (reason) {
     recordError('getLogs', reason)
     logs.value = []
@@ -339,50 +339,54 @@ async function refresh() {
   logsLoading.value = true
   errors.value = []
   logPage.value = 1
-  const q = buildQuery()
-  const logQ = buildQuery({ pageIndex: logPage.value, pageSize: logPageSize.value })
+  try {
+    const q = buildQuery()
+    const logQ = buildQuery({ pageIndex: logPage.value, pageSize: logPageSize.value })
 
-  const results = await Promise.allSettled([
-    bridge.usage.summary(q),
-    bridge.usage.byAgent(q),
-    bridge.usage.byModel(q),
-    bridge.usage.byDay(q),
-    bridge.usage.costSummary(q),
-    bridge.usage.feedbackStats(20),
-    bridge.usage.getLogs(logQ),
-  ])
+    const results = await Promise.allSettled([
+      bridge.usage.summary(q),
+      bridge.usage.byAgent(q),
+      bridge.usage.byModel(q),
+      bridge.usage.byDay(q),
+      bridge.usage.costSummary(q),
+      bridge.usage.feedbackStats(20),
+      bridge.usage.getLogs(logQ),
+    ])
 
-  const [
-    rSummary, rAgent, rModel, rDay, rCost, rFeedback, rLogs,
-  ] = results
+    const [
+      rSummary, rAgent, rModel, rDay, rCost, rFeedback, rLogs,
+    ] = results
 
-  if (rSummary.status === 'fulfilled') summary.value = rSummary.value as DashboardUsageSummary
-  else recordError('summary', rSummary.reason)
+    if (rSummary.status === 'fulfilled') summary.value = rSummary.value as DashboardUsageSummary
+    else recordError('summary', rSummary.reason)
 
-  if (rAgent.status === 'fulfilled') agentRows.value = rAgent.value as AgentUsageDto[]
-  else recordError('byAgent', rAgent.reason)
+    if (rAgent.status === 'fulfilled') agentRows.value = rAgent.value as AgentUsageDto[]
+    else recordError('byAgent', rAgent.reason)
 
-  if (rModel.status === 'fulfilled') modelRows.value = rModel.value as ModelUsageDto[]
-  else recordError('byModel', rModel.reason)
+    if (rModel.status === 'fulfilled') modelRows.value = rModel.value as ModelUsageDto[]
+    else recordError('byModel', rModel.reason)
 
-  if (rDay.status === 'fulfilled') trend.value = rDay.value as UsageTrendPointDto[]
-  else recordError('byDay', rDay.reason)
+    if (rDay.status === 'fulfilled') trend.value = rDay.value as UsageTrendPointDto[]
+    else recordError('byDay', rDay.reason)
 
-  if (rCost.status === 'fulfilled') cost.value = (rCost.value as CostSummaryDto) ?? EMPTY_COST_SUMMARY
-  else recordError('costSummary', rCost.reason)
+    if (rCost.status === 'fulfilled') cost.value = (rCost.value as CostSummaryDto) ?? EMPTY_COST_SUMMARY
+    else recordError('costSummary', rCost.reason)
 
-  if (rFeedback.status === 'fulfilled') feedback.value = sortFeedbackStats(rFeedback.value as AgentFeedbackStatsDto[])
-  else recordError('feedbackStats', rFeedback.reason)
+    if (rFeedback.status === 'fulfilled') feedback.value = sortFeedbackStats(rFeedback.value as AgentFeedbackStatsDto[])
+    else recordError('feedbackStats', rFeedback.reason)
 
-  if (rLogs.status === 'fulfilled') {
-    logs.value = rLogs.value.items ?? []
-    logTotal.value = rLogs.value.totalCount ?? 0
-  } else {
-    recordError('getLogs', rLogs.reason)
+    if (rLogs.status === 'fulfilled') {
+      logs.value = rLogs.value?.items ?? []
+      logTotal.value = rLogs.value?.totalCount ?? 0
+    } else {
+      recordError('getLogs', rLogs.reason)
+    }
+  } finally {
+    // Whatever a source answered, the spinners stop: a throw while applying one
+    // result must not leave the whole dashboard loading forever.
+    loading.value = false
+    logsLoading.value = false
   }
-
-  loading.value = false
-  logsLoading.value = false
 }
 
 onMounted(() => {

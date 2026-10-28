@@ -7,7 +7,7 @@ public class ExpenseLineConfiguration : EntityTypeConfigurationBase<ExpenseLine,
 {
     public override void Configure(EntityTypeBuilder<ExpenseLine> builder)
     {
-        builder.Property(l => l.Description).HasMaxLength(500);
+        builder.Property(l => l.Description).HasMaxLength(FinanceFieldLimits.LineDescriptionMaxLength);
         builder.Property(l => l.Amount).HasMoneyPrecision();
         builder.Property(l => l.TaxAmount).HasMoneyPrecision();
 

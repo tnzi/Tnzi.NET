@@ -62,6 +62,33 @@ public partial class DefaultAuthController
     }
 
     /// <summary>
+    /// 登出时清除刷新令牌 cookie，除非它属于另一位用户。
+    /// </summary>
+    /// <remarks>
+    /// ★ cookie 是整个浏览器共享的，访问令牌却留在各自的标签页里。旧标签页（用户 A，访问令牌仍有效）登出时，
+    /// 浏览器里的刷新 cookie 可能已经属于后来登录的用户 B：无条件清掉它，B 下一次刷新失败、被登出，
+    /// 而两个客户端都无从避免。只有 cookie 里的令牌仍有效、且持有者不是调用者时才保留；
+    /// 查不到、已失效（A 自己的会话刚被撤销，令牌随之删除）、属于调用者自己，照常清除。
+    /// </remarks>
+    /// <param name="userId">发起登出的用户</param>
+    protected async Task ClearRefreshTokenCookieOnLogoutAsync(Guid userId)
+    {
+        if (!UseCookieTokenDelivery)
+        {
+            return;
+        }
+
+        if (Request.Cookies.TryGetValue(TokenDelivery.CookieName, out var presented)
+            && !string.IsNullOrEmpty(presented)
+            && await AuthService.IsRefreshTokenHeldByAnotherUserAsync(presented, userId))
+        {
+            return;
+        }
+
+        RefreshTokenCookie.Clear(HttpContext, TokenDelivery);
+    }
+
+    /// <summary>
     /// 交付一次 OAuth 回调结果：cookie 模式下把刷新令牌写进 cookie，并从要发给页面的载荷里抹掉。
     /// </summary>
     /// <remarks>

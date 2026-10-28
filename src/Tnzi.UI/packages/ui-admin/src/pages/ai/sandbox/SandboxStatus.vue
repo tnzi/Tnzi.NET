@@ -2,9 +2,10 @@
   <!--
     SandboxStatus - surfaces /admin/sandbox/status exposed by
     `Tnzi.AI.Sandbox`. A read-only operations view: an at-a-glance status
-    overview (enabled / provider / data root + the three denylist counts)
-    followed by the three denylists (commands / file patterns / environment
-    variables) the local provider applies to every sandbox-bound tool call.
+    overview (enabled / provider / data root + the denylist counts) followed by
+    the four denylists the active provider applies to every sandbox-bound tool
+    call: command substrings, executable names (token-level, per pipeline
+    segment), file patterns and environment variables.
     Each denylist has its own keyword filter so long lists stay scannable.
     The backend exposes status only - there is no denylist CRUD here.
   -->
@@ -17,9 +18,19 @@
     </template>
 
     <template #default>
-      <!-- Module not loaded (404 → null status) -->
+      <!-- A refused or failed read: the module answered, so it is loaded. -->
+      <NAlert
+        v-if="!loading && loadError"
+        type="error"
+        :closable="false"
+        data-test="sandbox-load-error"
+      >
+        {{ loadError }}
+      </NAlert>
+
+      <!-- Module not loaded (404 / 501 → null status) -->
       <NEmpty
-        v-if="!loading && !status"
+        v-else-if="!loading && !status"
         class="t-sandbox-page__not-loaded"
         :description="t('notLoaded.title')"
       >
@@ -93,7 +104,7 @@
           </div>
         </NCard>
 
-        <!-- Three denylists, each with its own keyword filter -->
+        <!-- Four denylists, each with its own keyword filter -->
         <div class="t-sandbox-page__denylists">
           <NCard
             v-for="list in denylists"
@@ -161,11 +172,11 @@ import { createSandboxBridge, type SandboxStatusDto } from '../../../services/br
 import { makePageTranslator } from '../../_shared/translate'
 import TContentPage from '../../../components/layout/TContentPage.vue'
 
-type DenylistKey = 'deniedCommands' | 'deniedPatterns' | 'envBlacklist'
+type DenylistKey = 'deniedCommands' | 'deniedCommandPrefixes' | 'deniedPatterns' | 'envBlacklist'
 
 interface DenylistDef {
   key: DenylistKey
-  field: keyof Pick<SandboxStatusDto, 'deniedCommands' | 'deniedPatterns' | 'environmentBlacklist'>
+  field: keyof Pick<SandboxStatusDto, 'deniedCommands' | 'deniedCommandPrefixes' | 'deniedPatterns' | 'environmentBlacklist'>
   icon: string
   tagType: TagProps['type']
 }
@@ -175,16 +186,20 @@ const t = makePageTranslator('ai.sandbox')
 
 const loading = ref(false)
 const status = ref<SandboxStatusDto | null>(null)
+/** A refused or failed read (the bridge answers null only when the module is absent). */
+const loadError = ref<string | null>(null)
 
 // Per-section keyword filter state (one query string per denylist).
 const queries = reactive<Record<DenylistKey, string>>({
   deniedCommands: '',
+  deniedCommandPrefixes: '',
   deniedPatterns: '',
   envBlacklist: '',
 })
 
 const denylistDefs: DenylistDef[] = [
   { key: 'deniedCommands', field: 'deniedCommands', icon: 'mdi:cancel', tagType: 'error' },
+  { key: 'deniedCommandPrefixes', field: 'deniedCommandPrefixes', icon: 'mdi:console-line', tagType: 'error' },
   { key: 'deniedPatterns', field: 'deniedPatterns', icon: 'mdi:file-cancel-outline', tagType: 'warning' },
   { key: 'envBlacklist', field: 'environmentBlacklist', icon: 'mdi:key-remove', tagType: 'default' },
 ]
@@ -194,13 +209,14 @@ const counts = computed(() =>
     key: d.key,
     icon: d.icon,
     tagType: d.tagType,
-    count: status.value ? status.value[d.field].length : 0,
+    count: status.value ? (status.value[d.field] ?? []).length : 0,
   })),
 )
 
 const denylists = computed(() =>
   denylistDefs.map((d) => {
-    const items = status.value ? status.value[d.field] : []
+    // `?? []`: a backend older than the field omits it
+    const items = status.value ? (status.value[d.field] ?? []) : []
     const q = queries[d.key].trim().toLowerCase()
     const filtered = q ? items.filter((item) => item.toLowerCase().includes(q)) : items
     return { key: d.key, tagType: d.tagType, items, filtered }
@@ -209,10 +225,12 @@ const denylists = computed(() =>
 
 async function refresh(): Promise<void> {
   loading.value = true
+  loadError.value = null
   try {
     status.value = await bridge.getStatus()
-  } catch {
+  } catch (error) {
     status.value = null
+    loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
     loading.value = false
   }
@@ -220,7 +238,7 @@ async function refresh(): Promise<void> {
 
 onMounted(() => { void refresh() })
 
-defineExpose({ refresh, status, loading, queries, denylists })
+defineExpose({ refresh, status, loading, loadError, queries, denylists })
 </script>
 
 <style scoped>
@@ -243,7 +261,7 @@ defineExpose({ refresh, status, loading, queries, denylists })
 }
 .t-sandbox-page__overview {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px 24px;
 }
 .t-sandbox-page__stat--wide {
@@ -269,13 +287,13 @@ defineExpose({ refresh, status, loading, queries, denylists })
   word-break: break-all;
   min-width: 0;
 }
-/* Desktop: the three cards share one full-height grid row; each card's list
-   area flex-fills and the chip area scrolls internally. */
+/* Desktop: the four cards share the residual height as a 2 x 2 grid; each
+   card's list area flex-fills and the chip area scrolls internally. */
 .t-sandbox-page__denylists {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-rows: minmax(0, 1fr);
   gap: 12px;
 }
@@ -304,7 +322,7 @@ defineExpose({ refresh, status, loading, queries, denylists })
 @media (max-width: 900px) {
   .t-sandbox-page__overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Stacked cards keep their natural height and the section itself scrolls
-     within the fill body - three viewport-split cards would be unusably
+     within the fill body - four viewport-split cards would be unusably
      squashed on a phone. Chips fall back to a capped internal scroller. */
   .t-sandbox-page__denylists {
     grid-template-columns: 1fr;

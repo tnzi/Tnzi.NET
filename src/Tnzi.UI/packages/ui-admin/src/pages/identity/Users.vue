@@ -32,7 +32,7 @@
  * row, which meant investigating one account was a sequence of modals that
  * could never be seen together. A row now opens the user.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
@@ -41,11 +41,13 @@ import { editAction, deleteAction, type RowAction } from '../../headless/row-act
 import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { hasFlag, type Flags } from '@tnzi/core/utils'
-import { PendingUserActions } from '@tnzi/core/services/identity'
+import { PendingUserActions, type UserImportResult } from '@tnzi/core/services/identity'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { userColumns, userSearchFields, createUserFormSchema } from './user-config'
+import { buildUserUpdatePayload, isUserEditableKey, pickEdits } from './user-update-payload'
+import { summarizeUserImport } from './user-import-summary'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
 
 interface UserListItem {
@@ -95,12 +97,18 @@ const crud = useCrudPage<UserListItem>({
   // 0.2.72+ (C4): fetch now returns the full `PagedList<T>` shape so
   // we no longer need to cast back to the 4-field tuple.
   fetchData: (query) => bridge.users.fetch(query) as never,
+  // A restored `?detail=edit:<id>` for a user not on the loaded page.
+  loadDetailById: (id) => bridge.users.getById(String(id)) as Promise<UserListItem>,
+  // Edit opens on the full record, not the list row: the row has no nickname, so
+  // the form would show an empty one and saving would clear it.
+  loadEditRecord: async (row) => ({ ...row, ...(await bridge.users.getById(row.id)) }) as UserListItem,
   createData: (data) => bridge.users.create(data as never) as Promise<UserListItem>,
-  updateData: (id, data) =>
-    bridge.users.update(String(id), data as never) as Promise<UserListItem>,
+  updateData: (id, data) => saveUserEdits(String(id), data as Record<string, unknown>),
   deleteData: (ids) => bridge.users.delete(ids.map(String)),
   exportData: (query) => bridge.users.export!(query),
-  importData: (file) => bridge.users.import!(file),
+  importData: async (file) => reportImport(await bridge.users.import(file)),
+  // The endpoint reads the upload as CSV text.
+  importAccept: '.csv',
 })
 
 const rowKey = (row: unknown) => (row as UserListItem).id
@@ -117,10 +125,29 @@ onMounted(async () => {
 })
 const userFormSchema = computed(() => createUserFormSchema({ useEmailAsUserName: useEmailAsUserName.value }))
 
+/**
+ * Save the edit modal.
+ *
+ * ★★★ The modal edits a few fields (contact details, nickname), but the
+ * profile half of `PUT admin/users/{id}` is replaced as a whole once the
+ * request carries any profile field. Sending the form as-is (a list row plus
+ * a nickname) wiped the person's names, avatar, birthday and bio. The body is
+ * built from the user as the server holds it NOW, with only the fields this
+ * form shows taken from the form; reading at save time also keeps an edit
+ * made elsewhere since the modal opened.
+ */
+async function saveUserEdits(id: string, data: Record<string, unknown>): Promise<UserListItem> {
+  const current = await bridge.users.getById(id)
+  const shownKeys = userFormSchema.value.map((field) => field.key).filter(isUserEditableKey)
+  const payload = buildUserUpdatePayload(current, pickEdits(data, shownKeys))
+  return (await bridge.users.update(id, payload as never)) as UserListItem
+}
+
 const t = makePageTranslator('identity.users')
 const message = useSafeMessage()
 const { can } = usePermissionGuard()
 const canViewGrants = computed(() => can('authorization.userFunction.view'))
+const canViewRoles = computed(() => can('role.view'))
 
 /** Open a user's page, optionally landing on one of its sections. */
 function openUser(id: string, section?: string): void {
@@ -136,6 +163,22 @@ const rowProps = (row: UserListItem) => ({
   style: 'cursor: pointer;',
   onClick: () => openUser(row.id),
 })
+
+/**
+ * Say what a CSV import did. The endpoint answers 200 even when rows were
+ * refused (password policy, missing columns) or skipped (the email already has
+ * an account), so without this a partial import looks exactly like a complete
+ * one. A partial import stays on screen until dismissed: it names the rows to fix.
+ */
+function reportImport(result: UserImportResult): void {
+  const summary = summarizeUserImport(result, t)
+  if (summary.tone === 'success') {
+    message.success(summary.text)
+    return
+  }
+  // One line per refused row: a plain message collapses the newlines.
+  message.warning(() => h('div', { style: { whiteSpace: 'pre-line' } }, summary.text), { duration: 0, closable: true })
+}
 
 async function withRefresh(action: () => Promise<void>, successKey: string): Promise<void> {
   try {
@@ -199,7 +242,8 @@ const isPending = (row: UserListItem) =>
  */
 const rowActions: RowAction<UserListItem>[] = [
   editAction(crud),
-  { key: 'manageRoles', label: 'actions.manageRoles', show: () => crud.canUpdate, onClick: (row) => openUser(row.id, 'roles') },
+  // Lands on the roles section, which the user page shows only with `role.view`.
+  { key: 'manageRoles', label: 'actions.manageRoles', show: () => crud.canUpdate && canViewRoles.value, onClick: (row) => openUser(row.id, 'roles') },
   { key: 'directGrants', label: 'actions.managePermissions', show: () => canViewGrants.value, onClick: (row) => openUser(row.id, 'grants') },
   // ★ 邀请中的账号只给「重发 / 撤销」，不给启用·停用·锁定·解锁。
   //   后端对未接受邀请的账号拒绝 enable（启用就是清掉 LockoutEnd，那一步会把一个

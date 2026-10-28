@@ -154,8 +154,12 @@ export function createEventBus(options: EventBusOptions = {}): EventBus {
 
       log('emitting', { event, payload, handlerCount: handlers.size });
 
-      // Call all handlers
-      for (const handler of handlers) {
+      // Iterate a snapshot: a Set visits entries added during iteration, so a
+      // handler that subscribes to this event again (a `once` that re-arms
+      // itself) would run again in this same emit, and could loop forever.
+      // A handler removed by an earlier one is skipped, as it was before.
+      for (const handler of [...handlers]) {
+        if (!handlers.has(handler)) continue;
         try {
           handler(payload as T);
         } catch (error) {

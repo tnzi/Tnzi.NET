@@ -130,22 +130,20 @@ public class UserNotificationService : ApplicationService, IUserNotificationServ
 
     public async Task<Result<UnreadCountDto>> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        IQueryable<Recipient> unreadQuery = _recipientRepository
+        // ★ 总数是各分类之和，不单独 CountAsync：聚合时 Include 被忽略、不连 Message，消息的软删除过滤器也就不生效，
+        //   单独数出来的总数会把管理员删掉的消息算进去，而列表与分类明细（经导航访问 Message）不算，
+        //   角标永远比列表多、永远消不掉。按分类分组本身就经导航访问 Message，三处因此是同一个集合，还少一次查询。
+        var unreadByCategory = await _recipientRepository
             .AsQueryable()
             .AsNoTracking()
-            .Include(r => r.Message)
-            .Where(r => r.UserId == userId && !r.IsRead && r.Status == NotificationStatus.Sent);
-
-        var totalUnread = await unreadQuery.CountAsync(cancellationToken);
-
-        var unreadByCategory = await unreadQuery
+            .Where(r => r.UserId == userId && !r.IsRead && r.Status == NotificationStatus.Sent)
             .GroupBy(r => r.Message.Category)
             .Select(g => new { Category = g.Key, Count = g.Count() })
             .ToListAsync(cancellationToken);
 
         var dto = new UnreadCountDto
         {
-            TotalUnread = totalUnread,
+            TotalUnread = unreadByCategory.Sum(x => x.Count),
             UnreadByCategory = unreadByCategory.ToDictionary(x => x.Category, x => x.Count)
         };
 

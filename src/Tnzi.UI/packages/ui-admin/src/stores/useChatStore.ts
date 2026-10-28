@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ConversationListItemDto, ChatMessageDto, PresenceChangedPayload, ConversationMemberSettingsDto, ChatClientConfigDto } from '@tnzi/core/services/chat'
 import type { ChatImBridge } from '../services/bridges/chat-im-bridge'
-import type { NewMessagePayload, MessageReadPayload } from '@tnzi/core/services/chat'
+import type { NewMessagePayload, MessageRecalledPayload, MessageReadPayload } from '@tnzi/core/services/chat'
 import { MessageContentType, UserPresenceStatus, ChatSoundEffect, ChatNewMessageEffect } from '@tnzi/core/services/chat'
 import { useAdminAuthStore } from './useAdminAuthStore'
 
@@ -49,6 +49,14 @@ export const useChatStore = defineStore('admin-chat', () => {
   // Monotonic id for local (failed) message placeholders - unique per store.
   let clientSeq = 0
   let bridge: ChatImBridge | null = null
+  // Bumped by `reset()`. An action captures it before its first await and
+  // drops its result when it has moved: a response that belongs to the
+  // previous user's session must not land in the next user's store.
+  let session = 0
+  // The session `loadConfig()` last ran for. `ensureConfig()` probes once per
+  // session: a reset (sign-out, or a user switch without one) starts a new
+  // session whose config nobody has asked for yet.
+  let configSession = -1
 
   const conversations = ref<ConversationListItemDto[]>([])
   // Deployment-level feature config (server ChatOptions projection) + this
@@ -58,7 +66,9 @@ export const useChatStore = defineStore('admin-chat', () => {
   // it from the server value, or fails open to DEFAULT_CHAT_CONFIG.
   const config = ref<ChatClientConfigDto>({ ...DEFAULT_CHAT_CONFIG, enabled: false })
   const activeId = ref<string | null>(null)
-  // Whether the chat window (NModal) is currently open. "User is viewing a
+  // Whether a chat surface is on screen: the floating window (NModal) is open,
+  // or on the desktop layout the chat window is open and not minimised (the
+  // shell's TChatHost mirrors both into this). "User is viewing a
   // conversation" = window visible AND conversation active: activeId alone
   // survives closing the window (so reopening lands on the same thread), and
   // must therefore never suppress the unread badge / notification sound.
@@ -67,6 +77,8 @@ export const useChatStore = defineStore('admin-chat', () => {
   const loading = ref(false)
   const presenceByUser = ref<Record<string, { status: UserPresenceStatus; lastSeenAt?: string | null }>>({})
   const myStatus = ref<UserPresenceStatus>(UserPresenceStatus.Online)
+  // Id of the user this state was loaded for. Empty = not claimed yet.
+  const ownerId = ref('')
 
   const totalUnread = computed(() => conversations.value.reduce((s, c) => s + (c.unreadCount || 0), 0))
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
@@ -79,19 +91,72 @@ export const useChatStore = defineStore('admin-chat', () => {
   function init(b: ChatImBridge) { bridge = b }
   function requireBridge(): ChatImBridge { if (!bridge) throw new Error('useChatStore: call init(bridge) first'); return bridge }
 
+  /**
+   * Back to the signed-out state: no conversations, threads, presence or
+   * window, and chat disabled until the next user's `GET /chat/config` says
+   * otherwise. The store outlives a sign-out (the SPA navigates to the login
+   * page, it does not reload), so without this the next person to sign in on
+   * the same tab saw the previous person's conversation list, unread badge and
+   * cached threads until their own fetch replaced them - and kept seeing them
+   * when that fetch failed or they lacked `chat.use`.
+   *
+   * The bridge is kept: it holds only the HTTP client, which carries whichever
+   * session is current, and the shell re-initialises it on mount anyway.
+   */
+  function reset() {
+    session += 1
+    conversations.value = []
+    config.value = { ...DEFAULT_CHAT_CONFIG, enabled: false }
+    activeId.value = null
+    windowVisible.value = false
+    messagesByConv.value = {}
+    loading.value = false
+    presenceByUser.value = {}
+    myStatus.value = UserPresenceStatus.Online
+    ownerId.value = ''
+  }
+
+  /**
+   * Bind the state to the signed-in user; a different user than the one it
+   * was loaded for resets it first (a user switch without a sign-out). Called
+   * by the framework once the identity is resolved.
+   */
+  function claimForUser(userId: string) {
+    if (!userId) return
+    if (ownerId.value && ownerId.value !== userId) reset()
+    ownerId.value = userId
+  }
+
+  /**
+   * Refresh the list after a write, unless the session ended meanwhile: the
+   * list then belongs to whoever signs in next, and loading it is their
+   * shell's job (with no session yet the request would only 401).
+   */
+  async function refetchAfterWrite(at: number) {
+    if (at === session) await fetchConversations()
+  }
+
   async function fetchConversations() {
+    const at = session
     loading.value = true
     // `?? []` keeps the `conversations` ref invariant (never undefined) even if a
     // bridge/backend hands back null - every getter (totalUnread/sorted/map) reads it.
-    try { conversations.value = (await requireBridge().listConversations()) ?? [] }
-    finally { loading.value = false }
+    try {
+      const list = (await requireBridge().listConversations()) ?? []
+      if (at === session) conversations.value = list
+    } finally {
+      if (at === session) loading.value = false
+    }
   }
 
   /** Load the deployment feature config; keeps the all-enabled defaults on any
    *  failure so the chat window still works against older backends. */
   async function loadConfig() {
+    const at = session
+    configSession = at
     try {
       const cfg = await requireBridge().getConfig()
+      if (at !== session) return
       // DENY-BY-DEFAULT: enable chat ONLY from a real config payload (the backend
       // projects `enabled` from the user's `chat.use` grant). A null / forbidden /
       // empty result - e.g. a `{ succeeded, data: null }` envelope unwrapped to
@@ -108,28 +173,44 @@ export const useChatStore = defineStore('admin-chat', () => {
     } catch {
       // Genuine load failure (network / no endpoint): stay deny-by-default so a
       // user we can't confirm never calls chat's permission-guarded endpoints.
-      config.value = { ...DEFAULT_CHAT_CONFIG, enabled: false }
+      if (at === session) config.value = { ...DEFAULT_CHAT_CONFIG, enabled: false }
     }
   }
 
+  /**
+   * Load the config unless this session already asked for it. The shell calls
+   * it whenever chat could run and whenever the store is claimed for a user:
+   * a user switch without a sign-out resets the config to disabled, and with
+   * only a one-off probe on mount the new user's chat stayed off (fail-closed)
+   * until the shell happened to mount again. Asking once per session keeps the
+   * first claim after mount from probing a second time.
+   */
+  function ensureConfig(): Promise<void> {
+    return configSession === session ? Promise.resolve() : loadConfig()
+  }
+
   async function openConversation(id: string) {
+    const at = session
     activeId.value = id
     const thread = await requireBridge().getMessages(id, { limit: 30 })
+    if (at !== session) return
     messagesByConv.value = { ...messagesByConv.value, [id]: thread.messages }
     await markRead(id)
+    if (at !== session) return
     const conv = conversations.value.find(c => c.id === id)
     if (conv?.peerUserId && config.value.enablePresence) loadPresence([conv.peerUserId]).catch(() => undefined)
   }
 
   async function sendText(id: string, content: string) {
+    const at = session
     try {
       const msg = await requireBridge().sendMessage(id, { contentType: MessageContentType.Text, content })
-      appendMessage(id, msg)
+      if (at === session) appendMessage(id, msg)
     } catch (e) {
       // Keep the attempted message in the thread, flagged failed, so the window
       // shows a WeChat-style retry marker + reason inline (no toast). Re-throw so
       // the caller skips the "sent" sound.
-      pushFailed(id, { contentType: MessageContentType.Text, content }, e)
+      if (at === session) pushFailed(id, { contentType: MessageContentType.Text, content }, e)
       throw e
     }
   }
@@ -184,7 +265,9 @@ export const useChatStore = defineStore('admin-chat', () => {
   }
 
   async function markRead(id: string) {
+    const at = session
     await requireBridge().markRead(id)
+    if (at !== session) return
     const conv = conversations.value.find(c => c.id === id)
     if (conv) conv.unreadCount = 0
   }
@@ -226,6 +309,22 @@ export const useChatStore = defineStore('admin-chat', () => {
     // If the conversation isn't in the list yet (new direct/group/system), caller should refetch.
   }
 
+  /**
+   * A message was recalled (by its sender or an admin): drop it from the loaded
+   * thread, and when the server rewrote the conversation preview (the recalled
+   * message was the latest one) show the new preview in the list.
+   */
+  function applyRecall(p: MessageRecalledPayload) {
+    const cur = messagesByConv.value[p.conversationId]
+    if (cur?.some(m => m.id === p.messageId)) {
+      messagesByConv.value = { ...messagesByConv.value, [p.conversationId]: cur.filter(m => m.id !== p.messageId) }
+    }
+    if (p.preview) {
+      const conv = conversations.value.find(c => c.id === p.conversationId)
+      if (conv) conv.lastMessagePreview = p.preview
+    }
+  }
+
   function applyRead(_p: MessageReadPayload) { /* read-receipt UI handled in Plan 3 */ }
 
   async function refreshUnread() {
@@ -240,15 +339,21 @@ export const useChatStore = defineStore('admin-chat', () => {
   }
 
   async function startDirect(userId: string) {
+    const at = session
     const c = await requireBridge().getOrCreateDirect(userId)
+    if (at !== session) return c.id
     await fetchConversations()
+    if (at !== session) return c.id
     await openConversation(c.id)
     return c.id
   }
 
   async function createGroup(title: string, memberIds: string[]) {
+    const at = session
     const c = await requireBridge().createGroup({ title, memberIds })
+    if (at !== session) return c.id
     await fetchConversations()
+    if (at !== session) return c.id
     await openConversation(c.id)
     return c.id
   }
@@ -259,30 +364,35 @@ export const useChatStore = defineStore('admin-chat', () => {
   }
 
   async function addMembers(id: string, userIds: string[]) {
+    const at = session
     await requireBridge().addMembers(id, userIds)
-    await fetchConversations()
+    await refetchAfterWrite(at)
   }
 
   async function removeMember(id: string, userId: string) {
+    const at = session
     await requireBridge().removeMember(id, userId)
-    await fetchConversations()
+    await refetchAfterWrite(at)
   }
 
   async function renameGroup(id: string, title: string) {
+    const at = session
     await requireBridge().renameGroup(id, title)
-    await fetchConversations()
+    await refetchAfterWrite(at)
   }
 
   async function dissolveGroup(id: string) {
+    const at = session
     await requireBridge().dissolveGroup(id)
-    await fetchConversations()
-    if (activeId.value === id) activeId.value = null
+    await refetchAfterWrite(at)
+    if (at === session && activeId.value === id) activeId.value = null
   }
 
   async function leaveGroup(id: string) {
+    const at = session
     await requireBridge().leaveGroup(id)
-    await fetchConversations()
-    if (activeId.value === id) activeId.value = null
+    await refetchAfterWrite(at)
+    if (at === session && activeId.value === id) activeId.value = null
   }
 
   // Presence
@@ -295,37 +405,53 @@ export const useChatStore = defineStore('admin-chat', () => {
   async function loadPresence(userIds: string[]) {
     const ids = userIds.filter(Boolean)
     if (!ids.length) return
+    const at = session
     const list = await requireBridge().getPresence(ids)
+    if (at !== session) return
     const next = { ...presenceByUser.value }
     for (const p of list) next[p.userId] = { status: p.status, lastSeenAt: p.lastSeenAt }
     presenceByUser.value = next
   }
 
-  async function loadMyStatus() { myStatus.value = await requireBridge().getMyStatus() }
+  async function loadMyStatus() {
+    const at = session
+    const status = await requireBridge().getMyStatus()
+    if (at === session) myStatus.value = status
+  }
 
-  async function setMyStatus(status: UserPresenceStatus) { await requireBridge().setStatus(status); myStatus.value = status }
+  async function setMyStatus(status: UserPresenceStatus) {
+    const at = session
+    await requireBridge().setStatus(status)
+    if (at === session) myStatus.value = status
+  }
 
   // Member settings
   async function setMemberSettings(id: string, settings: ConversationMemberSettingsDto) {
+    const at = session
     await requireBridge().updateMemberSettings(id, settings)
-    await fetchConversations()
+    await refetchAfterWrite(at)
   }
 
   async function clearHistory(id: string) {
+    const at = session
     await requireBridge().clearHistory(id)
-    messagesByConv.value = { ...messagesByConv.value, [id]: [] }
+    if (at === session) messagesByConv.value = { ...messagesByConv.value, [id]: [] }
   }
 
   /** Hide from my list (server re-surfaces it automatically on a new message). */
   async function hideConversation(id: string) {
+    const at = session
     await requireBridge().updateMemberSettings(id, { isHidden: true })
+    if (at !== session) return
     if (activeId.value === id) activeId.value = null
     await fetchConversations()
   }
 
   /** Per-user delete: wipes my history view + hides from my list. */
   async function deleteConversation(id: string) {
+    const at = session
     await requireBridge().deleteForMe(id)
+    if (at !== session) return
     const { [id]: _dropped, ...rest } = messagesByConv.value
     messagesByConv.value = rest
     if (activeId.value === id) activeId.value = null
@@ -340,6 +466,7 @@ export const useChatStore = defineStore('admin-chat', () => {
 
   // Part 3: media send
   async function sendMedia(id: string, payload: { contentType: MessageContentType; fileId: string; fileName: string; fileSize: number }) {
+    const at = session
     try {
       const msg = await requireBridge().sendMessage(id, {
         contentType: payload.contentType,
@@ -347,22 +474,23 @@ export const useChatStore = defineStore('admin-chat', () => {
         fileName: payload.fileName,
         fileSize: payload.fileSize,
       })
-      appendMessage(id, msg)
+      if (at === session) appendMessage(id, msg)
     } catch (e) {
       // Same inline-failure treatment as text: keep the media message flagged
       // failed with a retry marker instead of a toast (the upload succeeded, only
       // the send was rejected). Re-throw so the caller skips the "sent" sound.
-      pushFailed(id, { contentType: payload.contentType, fileId: payload.fileId, fileName: payload.fileName, fileSize: payload.fileSize }, e)
+      if (at === session) pushFailed(id, { contentType: payload.contentType, fileId: payload.fileId, fileName: payload.fileName, fileSize: payload.fileSize }, e)
       throw e
     }
   }
 
   return {
     conversations, activeId, windowVisible, messagesByConv, loading,
-    presenceByUser, myStatus, config,
+    presenceByUser, myStatus, config, ownerId,
     totalUnread, activeConversation, sortedConversations,
-    init, setWindowVisible, fetchConversations, loadConfig, openConversation, sendText, markRead,
-    appendMessage, applyIncomingMessage, applyRead, refreshUnread,
+    init, reset, claimForUser,
+    setWindowVisible, fetchConversations, loadConfig, ensureConfig, openConversation, sendText, markRead,
+    appendMessage, applyIncomingMessage, applyRecall, applyRead, refreshUnread,
     searchContacts, startDirect, createGroup,
     getConversationDetail, addMembers, removeMember, renameGroup,
     dissolveGroup, leaveGroup, sendMedia, resendMessage,

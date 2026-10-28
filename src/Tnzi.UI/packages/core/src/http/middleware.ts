@@ -7,7 +7,7 @@ import { useMessage } from '../adapters/message';
 import { createFailedApiResult, getApiResultErrorMessage, HttpError } from '../errors/api-error';
 import type { ApiResult, HttpMethod } from '../types/api';
 import { isSuccess } from './response';
-import type { ZodTypeAny } from 'zod';
+import type { ZodType } from 'zod';
 
 export interface HttpResponseContext {
   method: HttpMethod;
@@ -24,7 +24,7 @@ export type HttpResponseMiddleware = <T>(
 export interface HttpSchemaBinding {
   method?: HttpMethod;
   path: string | RegExp;
-  schema: ZodTypeAny;
+  schema: ZodType;
 }
 
 function normalizePath(value: string): string {
@@ -40,7 +40,7 @@ function isPathMatch(pattern: string | RegExp, url: string): boolean {
 }
 
 export function createSchemaResolver(bindings: HttpSchemaBinding[]) {
-  return (context: HttpResponseContext): ZodTypeAny | undefined => {
+  return (context: HttpResponseContext): ZodType | undefined => {
     for (const binding of bindings) {
       if (binding.method && binding.method !== context.method) {
         continue;
@@ -54,7 +54,7 @@ export function createSchemaResolver(bindings: HttpSchemaBinding[]) {
 }
 
 export interface SchemaValidationMiddlewareOptions {
-  resolveSchema: (context: HttpResponseContext) => ZodTypeAny | undefined;
+  resolveSchema: (context: HttpResponseContext) => ZodType | undefined;
   errorCode?: string;
   message?: string;
   coerceData?: boolean;

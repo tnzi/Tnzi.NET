@@ -130,38 +130,47 @@ public class ReferenceCountSyncTests : StorageIntegrationTestBase
     }
 
     [Fact]
-    public async Task SyncAllReferenceCounts_KeepsAFileWhosePermanentUploadReusedATemporaryRecord()
+    public async Task SyncAllReferenceCounts_KeepsAPermanentUploadOfBytesADraftAlreadyHolds()
     {
-        // 默认上传端点先以临时形态存了一份；之后另一个调用方把相同字节作为正式上传交进来，
-        // MD5 去重命中同一条记录 —— 它现在有一个隐式持有者、零引用行。同步不能把它归零，
-        // 孤儿回收也不能删掉正式上传者的文件。
+        // 默认上传端点先以临时形态存了一份；之后另一个调用方把相同字节作为正式上传交进来。
+        // 正式上传不复用临时记录（草稿的所有者对它有写权，他一次删除就会扣掉正式上传者的持有者），
+        // 而是另存一条正式记录：一个隐式持有者、零引用行。同步不能把它归零，孤儿回收也不能删掉它；
+        // 没人绑定的草稿则照常按自己的保留期被回收。
         var storageService = CreateStorageService();
         var payload = "shared bytes"u8.ToArray();
+        Guid draftId;
+        Guid permanentId;
         using (var first = new MemoryStream(payload))
         {
             var temp = await storageService.SaveAsync("draft.txt", first, isTemporary: true);
             Assert.True(temp.Succeeded);
+            draftId = temp.Data!.Id;
         }
         using (var second = new MemoryStream(payload))
         {
             var permanent = await storageService.SaveAsync("final.txt", second, isTemporary: false);
             Assert.True(permanent.Succeeded);
-            Assert.Equal("File reused by MD5", permanent.Message);
+            Assert.NotEqual("File reused by MD5", permanent.Message);
+            permanentId = permanent.Data!.Id;
         }
+        Assert.NotEqual(draftId, permanentId);
 
-        var shared = await DbContext.FileRecords.AsNoTracking().SingleAsync();
         await DbContext.FileRecords
-            .Where(f => f.Id == shared.Id)
             .ExecuteUpdateAsync(s => s.SetProperty(f => f.CreationTime, DateTime.UtcNow.AddHours(-200)));
+        DbContext.ChangeTracker.Clear();
 
         var result = await CreateReferenceService().SyncAllReferenceCountsAsync();
 
         Assert.True(result.Succeeded);
-        Assert.True(await ReloadReferenceCountAsync(shared.Id) >= 1);
+        Assert.Equal(1, await ReloadReferenceCountAsync(permanentId));
+        Assert.Equal(0, await ReloadReferenceCountAsync(draftId));
 
         var deleted = await CreateCleanupService().CleanupOrphanFilesAsync();
-        Assert.Equal(0, deleted);
-        Assert.True(await Storage.ExistsAsync(shared.Path!));
+        Assert.Equal(1, deleted);
+        var survivor = await DbContext.FileRecords.AsNoTracking().SingleAsync();
+        Assert.Equal(permanentId, survivor.Id);
+        Assert.False(survivor.IsTemporary);
+        Assert.True(await Storage.ExistsAsync(survivor.Path!));
     }
 
     // ------------------------------------------------------------------

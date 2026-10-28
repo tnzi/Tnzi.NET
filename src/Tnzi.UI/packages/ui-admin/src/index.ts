@@ -4,6 +4,7 @@
 // up in the build output so consumers get pixel-perfect rendering without
 // installing unocss themselves.
 import 'virtual:uno.css'
+import { defineAsyncComponent } from 'vue'
 
 // IMPORTANT: every folder barrel below is imported as `./<folder>/index`, NOT
 // `./<folder>`. `vue-tsc` copies these specifiers verbatim into
@@ -61,6 +62,19 @@ export type { TwoFactorPanelMode } from './components/auth/TTwoFactorPanel.vue'
 // `user.security` itself). `UserSecurityBlocks` (pages) is the two of them
 // with the rule between; `UserSecuritySection` adds the section chrome.
 export { default as TSignInPolicyPanel } from './components/auth/TSignInPolicyPanel.vue'
+
+// AI usage limits, hostable for the same reason (they call a bridge): everyone's
+// defaults (no props: limits for the 5-hour and weekly windows, allowed models,
+// default model) and one user's limits (`userId`: their usage per window with
+// reset times, their own settings over the defaults). Each checks
+// `ai.quota.update` itself before offering a write.
+//
+// Exported as async components: they load on first render. As static exports
+// they put ~5 kB gzip on the shell every consumer downloads up front, for a
+// settings page most never open (measured 218.17 vs 223.16 kB, 2026-10-21).
+// The props stay typed: `defineAsyncComponent` keeps the loaded component's type.
+export const TUsageLimitDefaultsPanel = defineAsyncComponent(() => import('./components/ai/TUsageLimitDefaultsPanel.vue'))
+export const TUserUsageLimitsPanel = defineAsyncComponent(() => import('./components/ai/TUserUsageLimitsPanel.vue'))
 
 // Bridge plumbing - envelope helpers (`ensureOk` / `unwrapOk` / `unwrapUnchecked`,
 // re-exported from @tnzi/core) + the CRUD query/result adapters, surfaced at the

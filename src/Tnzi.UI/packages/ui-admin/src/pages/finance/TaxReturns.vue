@@ -34,8 +34,12 @@
       </div>
 
       <!-- No country pack loaded is a deployment fact, not an error: say what to
-           do about it instead of rendering an empty table. -->
-      <NAlert v-if="!loadingForms && formOptions.length === 0" type="info" class="flex-none">
+           do about it instead of rendering an empty table. Only when the server
+           actually answered "no forms" - a failed read gets its own reason. -->
+      <NAlert v-if="formsError" type="error" class="flex-none">
+        {{ formsError }}
+      </NAlert>
+      <NAlert v-else-if="!loadingForms && formOptions.length === 0" type="info" class="flex-none">
         {{ tp('noForms') }}
       </NAlert>
 
@@ -99,7 +103,8 @@ import { useAdminClient } from '../../plugin/client'
 import { useTabTitle } from '../../headless/useTabTitle'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
-import { formatAccountingDateRange, formatMoney, tsToIsoDate } from '../../utils/finance-format'
+import { formatAccountingDateRange, tsToIsoDate } from '../../utils/finance-format'
+import { roundMoney } from './money'
 import { buildTaxReturnColumns, taxReturnRowClass } from './tax-return-config'
 import {
   createFinanceBridge,
@@ -118,6 +123,8 @@ const rangeTs = ref<[number, number] | null>(null)
 const ret = ref<TaxReturnDto | null>(null)
 const loading = ref(false)
 const loadingForms = ref(true)
+/** Why the form list could not be read (empty = the server answered). */
+const formsError = ref('')
 const error = ref('')
 
 const lineColumns = computed(() => buildTaxReturnColumns(tp, ret.value?.currency))
@@ -126,12 +133,14 @@ const rowProps = (row: TaxReturnLineDto) => ({ class: taxReturnRowClass(row) })
 
 async function loadForms() {
   loadingForms.value = true
+  formsError.value = ''
   try {
     const forms = await bridge.taxReturns.forms()
     formOptions.value = forms.map((f) => ({ label: `${f.country} · ${f.formCode}`, value: `${f.country}/${f.formCode}` }))
     if (formOptions.value.length === 1) selectedForm.value = formOptions.value[0]!.value
-  } catch {
+  } catch (err) {
     formOptions.value = []
+    formsError.value = err instanceof Error ? err.message : tp('failed')
   } finally {
     loadingForms.value = false
   }
@@ -157,11 +166,18 @@ async function load() {
   }
 }
 
-/** Copy every line as `code<TAB>amount` - the shape people paste into the portal. */
+/**
+ * Copy every line as `code<TAB>amount` - the shape people paste into the portal.
+ *
+ * The amount is a plain number (two decimals, leading minus, no currency symbol
+ * or grouping): it lands in a numeric field. The screen's accounting form would
+ * paste a refund as "($1,234.56)", which a portal refuses, or reads as an amount
+ * owing once it strips the non-digits.
+ */
 async function copyAll() {
   if (!ret.value) return
   const text = ret.value.lines
-    .map((l) => `${l.line}\t${formatMoney(l.amount, { currency: ret.value!.currency })}`)
+    .map((l) => `${l.line}\t${roundMoney(l.amount).toFixed(2)}`)
     .join('\n')
   try {
     await navigator.clipboard.writeText(text)

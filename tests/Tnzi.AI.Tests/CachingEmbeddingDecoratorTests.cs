@@ -214,6 +214,65 @@ public class CachingEmbeddingDecoratorTests
         cacheMock.Verify(c => c.SetAsync(It.IsAny<string>(), embedding, TimeSpan.FromHours(12), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// Dimensions now reach the generator, so a 256-dimension request must not be served the cached full-size vector
+    /// of the same text; requests without Dimensions keep the key they always had.
+    /// </summary>
+    [Fact]
+    public async Task GenerateEmbedding_DifferentDimensions_UseDifferentCacheKeys()
+    {
+        var keys = new List<string>();
+        _cacheMock.Setup(c => c.GetAsync<float[]>(Capture.In(keys), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((float[]?)null);
+        _innerMock.Setup(s => s.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success([0.1f]));
+        var decorator = new CachingEmbeddingDecorator(_innerMock.Object, _loggerMock.Object, _options, _cacheMock.Object);
+
+        await decorator.GenerateEmbeddingAsync("same text");
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions());
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions { Dimensions = 256 });
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions { Dimensions = 1536 });
+
+        keys.Count.ShouldBe(4);
+        keys[1].ShouldBe(keys[0]);
+        keys.Distinct().Count().ShouldBe(3);
+    }
+
+    /// <summary>
+    /// Parameters reach the generator too (e.g. an <c>input_type</c> of query vs document changes the vector),
+    /// so they are part of the key; the same parameters in a different order are the same request.
+    /// </summary>
+    [Fact]
+    public async Task GenerateEmbedding_DifferentParameters_UseDifferentCacheKeys()
+    {
+        var keys = new List<string>();
+        _cacheMock.Setup(c => c.GetAsync<float[]>(Capture.In(keys), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((float[]?)null);
+        _innerMock.Setup(s => s.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success([0.1f]));
+        var decorator = new CachingEmbeddingDecorator(_innerMock.Object, _loggerMock.Object, _options, _cacheMock.Object);
+
+        await decorator.GenerateEmbeddingAsync("same text");
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions { Parameters = [] });
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions
+        {
+            Parameters = new Dictionary<string, object> { ["input_type"] = "query", ["truncate"] = "END" }
+        });
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions
+        {
+            Parameters = new Dictionary<string, object> { ["truncate"] = "END", ["input_type"] = "query" }
+        });
+        await decorator.GenerateEmbeddingAsync("same text", new EmbeddingOptions
+        {
+            Parameters = new Dictionary<string, object> { ["input_type"] = "document", ["truncate"] = "END" }
+        });
+
+        keys.Count.ShouldBe(5);
+        keys[1].ShouldBe(keys[0]);
+        keys[3].ShouldBe(keys[2]);
+        keys.Distinct().Count().ShouldBe(3);
+    }
+
     [Fact]
     public void DI_KeyedInner_IsNotResolvableAsUnkeyed()
     {

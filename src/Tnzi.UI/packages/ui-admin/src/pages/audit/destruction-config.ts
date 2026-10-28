@@ -19,7 +19,7 @@ export const destructionColumns: ColumnDef[] = [
 ]
 
 export const destructionSearchFields: FormSchemaItem[] = [
-  { key: 'policyName', label: 'columns.policyName', type: 'input' },
+  { key: 'policyName', label: 'columns.policyName', type: 'text' },
   {
     key: 'isDryRun',
     label: 'columns.isDryRun',

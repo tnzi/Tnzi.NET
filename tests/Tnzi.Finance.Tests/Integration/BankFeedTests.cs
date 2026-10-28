@@ -513,6 +513,121 @@ public class BankFeedTests : FinanceIntegrationTestBase
         reloaded.Status.ShouldBe(BankTransactionStatus.Pending);
     }
 
+    /// <summary>
+    /// 银行给的摘要可以比单据摘要列宽（500）更长（流水摘要存 512）：由它建单要能建成，
+    /// 摘要与行描述收进单据的列宽，全文留在流水上。
+    /// </summary>
+    /// <remarks>
+    /// 单据摘要的长度校验是给人填的值设的（超长拒绝）。这里的摘要是从银行流水抄过来的，
+    /// 原样交过去就是每一行长摘要的流水都建不了单（AutoApply 规则在无人值守时同样撞上），
+    /// 而操作员没有任何办法改短一条银行流水。
+    /// </remarks>
+    [Theory]
+    [InlineData(BankFeedDocType.Expense, -120.00)]
+    [InlineData(BankFeedDocType.PaymentEntry, 120.00)]
+    [InlineData(BankFeedDocType.Transfer, -120.00)]
+    public async Task CreateDocument_FromALineWhoseBankDescriptionExceedsTheMemoWidth_Succeeds_WithTheDescriptionFitted(BankFeedDocType docType, decimal amount)
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        var otherFunds = await AccountIdByCodeAsync("1110");
+        var customer = (await InScopeAsync<ICustomerService, Result<CustomerDto>>(
+            s => s.CreateAsync(new CreateCustomerDto { Code = "C-LONG", Name = "Long Memo Customer" }))).Data!.Id;
+        var description = new string('D', 512);
+        await ImportCsvAsync(bank, $"Date,Description,Amount\n2026-03-10,{description},{amount.ToString(System.Globalization.CultureInfo.InvariantCulture)}\n", SingleColumnMapping());
+        var txn = (await TxnsAsync(bank)).Single();
+        txn.Description!.Length.ShouldBe(512);
+
+        var doc = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, new CreateBankDocumentDto
+        {
+            DocType = docType,
+            CounterAccountId = docType == BankFeedDocType.Transfer ? otherFunds : expenseAccount,
+            PartyId = docType == BankFeedDocType.PaymentEntry ? customer : null,
+        }));
+
+        doc.Succeeded.ShouldBeTrue(doc.Message);
+        var memo = docType switch
+        {
+            BankFeedDocType.Expense => (await ReloadAsync<Expense>(doc.Data!.DocId))!.Memo,
+            BankFeedDocType.PaymentEntry => (await ReloadAsync<PaymentEntry>(doc.Data!.DocId))!.Memo,
+            _ => (await ReloadAsync<Transfer>(doc.Data!.DocId))!.Memo,
+        };
+        memo.ShouldBe(description[..500]);
+        (await ReloadTxnAsync(txn.Id)).Description.ShouldBe(description);
+    }
+
+    /// <summary>
+    /// ★ 流水上已经挂着一张单据（上一次「新建并对账」过账失败留下的草稿）时，再点一次不能再建一张：
+    /// 第二张会把挂接挪走，第一张就成了没人引用的草稿，两张都过账就是同一笔钱记两次。
+    /// </summary>
+    [Fact]
+    public async Task CreateDocument_WhenALinkedDocumentStillExists_Returns409_AndCreatesNoSecondDraft()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,Office supplies,-120.00\n", SingleColumnMapping());
+        var txn = (await TxnsAsync(bank)).Single();
+        var input = new CreateBankDocumentDto { DocType = BankFeedDocType.Expense, CounterAccountId = expenseAccount, PaymentMethod = "Check" };
+
+        var first = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+        first.Succeeded.ShouldBeTrue(first.Message);
+
+        var second = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+
+        second.Succeeded.ShouldBeFalse();
+        second.Code.ShouldBe(409);
+        second.Message!.ShouldContain("Expense");
+        (await ReloadTxnAsync(txn.Id)).CreatedDocId.ShouldBe(first.Data!.DocId);
+        (await InScopeAsync<IReadOnlyRepository<Expense, Guid>, int>(r => r.CountAsync())).ShouldBe(1);
+    }
+
+    /// <summary>对照：挂着的草稿被删掉之后，再建一张照常进行并改挂到新的那张上。</summary>
+    [Fact]
+    public async Task CreateDocument_AfterTheLinkedDraftWasDeleted_CreatesANewOne()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,Office supplies,-120.00\n", SingleColumnMapping());
+        var txn = (await TxnsAsync(bank)).Single();
+        var input = new CreateBankDocumentDto { DocType = BankFeedDocType.Expense, CounterAccountId = expenseAccount, PaymentMethod = "Check" };
+
+        var first = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+        first.Succeeded.ShouldBeTrue(first.Message);
+        (await InScopeAsync<IExpenseService, Result>(s => s.DeleteDraftAsync(first.Data!.DocId))).Succeeded.ShouldBeTrue();
+
+        var second = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+
+        second.Succeeded.ShouldBeTrue(second.Message);
+        second.Data!.DocId.ShouldNotBe(first.Data!.DocId);
+        (await ReloadTxnAsync(txn.Id)).CreatedDocId.ShouldBe(second.Data.DocId);
+    }
+
+    /// <summary>对照：挂着的单据已作废（冲销了），它不再记账，再建一张照常进行。</summary>
+    [Fact]
+    public async Task CreateDocument_AfterTheLinkedDocumentWasVoided_CreatesANewOne()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,Office supplies,-120.00\n", SingleColumnMapping());
+        var txn = (await TxnsAsync(bank)).Single();
+        var input = new CreateBankDocumentDto { DocType = BankFeedDocType.Expense, CounterAccountId = expenseAccount, PaymentMethod = "Check" };
+
+        var first = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+        first.Succeeded.ShouldBeTrue(first.Message);
+        (await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.PostAsync(first.Data!.DocId))).Succeeded.ShouldBeTrue();
+        var voided = await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.VoidAsync(first.Data!.DocId));
+        voided.Succeeded.ShouldBeTrue(voided.Message);
+
+        var second = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(s => s.CreateDocumentAsync(txn.Id, input));
+
+        second.Succeeded.ShouldBeTrue(second.Message);
+        (await ReloadTxnAsync(txn.Id)).CreatedDocId.ShouldBe(second.Data!.DocId);
+    }
+
     [Fact]
     public async Task CreateDocument_PostAndMatch_PostsAndClearsInOneStep()
     {
@@ -729,6 +844,113 @@ public class BankFeedTests : FinanceIntegrationTestBase
         txn.CreatedDocType.ShouldNotBeNull();
         txn.ReconciliationLineId.ShouldNotBeNull();
         txn.MatchedJournalLineId.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// ★一笔进账不能被建成费用：费用单只记钱出去，取绝对值后照样过账就是方向反了。
+    /// </summary>
+    /// <remarks>
+    /// 此前费用分支不看流水方向：+50 的退款被记成 Dr 费用 / Cr 银行 50，账上银行少 50、
+    /// 实际多 50；随后匹配因符号对不上而失败，单据却已过账。拒绝必须发生在建任何东西之前。
+    /// </remarks>
+    [Fact]
+    public async Task CreateDocument_ExpenseForADeposit_Rejects400_AndWritesNothing()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var expenseAccount = await AccountIdByCodeAsync("5200");
+        await ImportCsvAsync(bank, "Date,Description,Amount\n2026-03-10,AMAZON REFUND,50.00\n", SingleColumnMapping());
+        await CreateDraftReconAsync(bank, 50m, new DateTime(2026, 3, 31));
+        var txn = (await TxnsAsync(bank)).Single();
+
+        var doc = await InScopeAsync<IBankFeedService, Result<BankDocumentResultDto>>(
+            s => s.CreateDocumentAsync(txn.Id, new CreateBankDocumentDto
+            {
+                DocType = BankFeedDocType.Expense,
+                CounterAccountId = expenseAccount,
+                PostAndMatch = true
+            }));
+
+        doc.Succeeded.ShouldBeFalse("a deposit booked as an expense moves the bank balance the wrong way");
+        doc.Code.ShouldBe(400);
+        doc.Message.ShouldNotBeNull().ShouldContain("deposit");
+
+        var reloaded = await ReloadTxnAsync(txn.Id);
+        reloaded.CreatedDocType.ShouldBeNull();
+        reloaded.CreatedDocId.ShouldBeNull();
+        reloaded.Status.ShouldBe(BankTransactionStatus.Pending);
+        (await InScopeAsync<IReadOnlyRepository<Expense, Guid>, int>(r => r.CountAsync())).ShouldBe(0);
+        (await InScopeAsync<IReadOnlyRepository<JournalEntry, Guid>, int>(r => r.CountAsync())).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// ★无人值守的那一条：默认方向 Any 的 AutoApply 费用规则不得把同一商户的退款记成费用。
+    /// </summary>
+    /// <remarks>
+    /// 规则「摘要含 AMAZON → 费用 6100」按默认方向保存，退款进账照样命中；此前 AutoApply
+    /// 建单并过账一笔方向相反的费用、匹配失败只记一条警告，流水挂上单据后也不会再重试。
+    /// 同一条规则对出账照常自动入账（正控制）。
+    /// </remarks>
+    [Fact]
+    public async Task Suggest_AutoApplyExpenseRule_DirectionAny_LeavesDepositsAlone_ButStillAppliesToSpending()
+    {
+        await SeedCoaAsync();
+        var bank = await BankAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+        await CreateDraftReconAsync(bank, -25m, DateTime.UtcNow.Date);
+
+        var rule = await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Amazon auto",
+            DocType = BankFeedDocType.Expense,
+            CounterAccountId = meals,
+            AutoApply = true,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "amazon" }],
+        });
+        rule.Succeeded.ShouldBeTrue(rule.Message);
+        rule.Data!.Direction.ShouldBe(BankRuleDirection.Any);
+
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        await ImportCsvAsync(bank, $"Date,Description,Amount\n{today},AMAZON REFUND,50.00\n{today},AMAZON PURCHASE,-25.00\n", SingleColumnMapping());
+
+        var suggest = await SuggestAsync(bank);
+
+        suggest.Succeeded.ShouldBeTrue(suggest.Message);
+        suggest.Data!.AutoCategorized.ShouldBe(1);
+
+        var txns = await TxnsAsync(bank);
+        var refund = txns.Single(t => t.Amount > 0);
+        refund.Status.ShouldBe(BankTransactionStatus.Pending);
+        refund.CreatedDocId.ShouldBeNull();
+        refund.SuggestedRuleId.ShouldBeNull();
+
+        var spend = txns.Single(t => t.Amount < 0);
+        spend.Status.ShouldBe(BankTransactionStatus.Matched);
+
+        // 只有出账那一笔变成了费用：账上没有任何一张费用记的是那笔退款。
+        var expenses = await InScopeAsync<IReadOnlyRepository<Expense, Guid>, List<Expense>>(r => r.ToListAsync());
+        expenses.Count.ShouldBe(1);
+        expenses[0].Id.ShouldBe(spend.CreatedDocId!.Value);
+    }
+
+    /// <summary>只认进账的费用规则一条流水也命中不了，保存时就拒绝而不是安静地永不生效。</summary>
+    [Fact]
+    public async Task CreateRule_ExpenseForMoneyIn_Rejects400()
+    {
+        await SeedCoaAsync();
+        var meals = await AccountIdByCodeAsync("5200");
+
+        var rule = await CreateRuleAsync(new CreateBankRuleDto
+        {
+            Name = "Refunds as expense",
+            DocType = BankFeedDocType.Expense,
+            Direction = BankRuleDirection.MoneyIn,
+            CounterAccountId = meals,
+            Conditions = [new() { Field = BankRuleField.Description, Operator = BankRuleOperator.Contains, Value = "refund" }],
+        });
+
+        rule.Succeeded.ShouldBeFalse();
+        rule.Code.ShouldBe(400);
     }
 
     /// <summary>

@@ -52,7 +52,12 @@ export interface AdapterSingleton<T> {
   set(adapter: T): void;
   /** Read the active implementation, falling back to the built-in default. */
   use(): T;
-  /** Drop the active implementation (tests / SSR isolation). */
+  /**
+   * Drop the active implementation AND the built-in default (tests / SSR
+   * isolation), so the next `use()` starts from a fresh default. Keeping the
+   * default would keep its state: the listeners on the fallback event bus,
+   * the locale `provideI18n` wrote into the fallback i18n runtime.
+   */
   reset(): void;
   /** The installed implementation, or null when running on the fallback. */
   peek(): T | null;
@@ -81,6 +86,7 @@ export function createAdapterSingleton<T>(name: string, createFallback: () => T)
     },
     reset(): void {
       slot.active = null;
+      slot.fallback = null;
     },
     peek(): T | null {
       return slot.active;

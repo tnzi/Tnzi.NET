@@ -45,6 +45,12 @@ public class ChatClientFactory : IChatClientFactory
     /// </summary>
     private readonly List<IChatMessageProcessor> _messageProcessors;
 
+    /// <summary>
+    /// 已记过 Error 的不可解析降级规格（键：调用方租户 + 规格）。降级链在每次 <see cref="GetChatClient"/> 时解析，
+    /// 一条指向已停用 / 已删除提供商的规格此前每个请求都写一条带异常的 Error；现在每条只记一次，
+    /// 它重新解析成功、配置热更新或 <see cref="InvalidateProvider"/> 之后才会再记。
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _reportedFallbackFailures = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 数据库 Provider 缓存项。<paramref name="TenantPartition"/> 非空表示解析到的是某个租户自己的行，
@@ -64,11 +70,13 @@ public class ChatClientFactory : IChatClientFactory
 
     /// <summary>
     /// 客户端缓存键。<paramref name="TenantPartition"/> 只在解析到租户行时非空；
-    /// <paramref name="Credential"/> 是主提供商与整条降级链的密钥指纹 —— 客户端在创建时固化密钥，
+    /// <paramref name="Credential"/> 是主提供商的密钥指纹：客户端在创建时固化密钥，
     /// 不把它并进键，密钥轮换后 DB 缓存到 TTL 重读到新密钥、客户端缓存却照样命中旧客户端，
     /// 旧钥一吊销就 401 到进程重启（单实例有 InvalidateProvider 兜底，多实例只有这条）。
+    /// <paramref name="Fallbacks"/> 是整条降级链的描述（每项的名字、协议、端点、模型、密钥指纹）：
+    /// 降级链与主提供商一起缓存，降级项的端点或模型改了而键不变，链就继续打旧端点直到进程重启。
     /// </summary>
-    private readonly record struct ClientCacheKey(string? TenantPartition, string Kind, string ProviderName, string BaseUrl, string Model, string Credential);
+    private readonly record struct ClientCacheKey(string? TenantPartition, string Kind, string ProviderName, string BaseUrl, string Model, string Credential, string Fallbacks = "");
 
     /// <summary>密钥指纹：SHA-256 前 8 字节；只进缓存键，永不记日志。</summary>
     private static string CredentialFingerprint(ProviderOptions options)
@@ -76,10 +84,26 @@ public class ChatClientFactory : IChatClientFactory
             ? "-"
             : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(options.ApiKey)), 0, 8);
 
-    private static string ChainCredentialFingerprint(ProviderOptions primary, List<ResolvedFallback> fallbacks)
-        => fallbacks.Count == 0
-            ? CredentialFingerprint(primary)
-            : string.Join("|", fallbacks.Select(f => CredentialFingerprint(f.Provider.Options)).Prepend(CredentialFingerprint(primary)));
+    /// <summary>降级链各项之间、以及一项内部各字段之间的分隔符（不会出现在提供商名、URL 与模型名里）。</summary>
+    private const char FallbackSeparator = '\u001f';
+    private const char FallbackFieldSeparator = '\u001e';
+
+    /// <summary>
+    /// 降级链描述：每项 = 名字 + 协议 + 端点 + 生效模型 + 密钥指纹，按链序拼接。
+    /// 第一个字段是提供商名，<see cref="InvalidateProvider"/> 据此找到引用了某个提供商的链。
+    /// </summary>
+    private static string DescribeFallbackChain(List<ResolvedFallback> fallbacks)
+        => string.Join(FallbackSeparator, fallbacks.Select(f => string.Join(FallbackFieldSeparator,
+            f.Provider.Name,
+            f.Provider.Options.ProviderType ?? string.Empty,
+            f.Provider.Options.BaseUrl ?? "default",
+            f.Model,
+            CredentialFingerprint(f.Provider.Options))));
+
+    /// <summary>该缓存项的降级链里是否有名叫 <paramref name="providerName"/> 的一项</summary>
+    private static bool ChainReferences(ClientCacheKey key, string providerName)
+        => key.Fallbacks.Length > 0
+            && key.Fallbacks.Split(FallbackSeparator).Any(item => NameMatches(item.Split(FallbackFieldSeparator)[0], providerName));
 
     /// <summary>
     /// 只让数据库解析缓存过期（客户端缓存不动）—— 模拟另一实例到 TTL 重读的形态，供测试用。
@@ -112,6 +136,7 @@ public class ChatClientFactory : IChatClientFactory
             // Also clear DB provider cache so next resolution re-reads the DB in case
             // the admin updated both config and DB rows in tandem.
             _dbProviderCache.Clear();
+            _reportedFallbackFailures.Clear();
 
             // 异步 Dispose 旧客户端，避免阻塞 OnChange 回调
             Task.Run(() => DisposeOldClientsAsync(oldChatClients, oldEmbeddingClients));
@@ -142,7 +167,7 @@ public class ChatClientFactory : IChatClientFactory
         var fallbacks = hasFallbacks ? ResolveFallbackChain(providerOptions.FallbackProviders!, tenantId) : [];
         var cacheKey = new ClientCacheKey(
             BuildChainPartition(tenantPartition, fallbacks), hasFallbacks ? "meai-fb" : "meai", name, providerOptions.BaseUrl ?? "default", model,
-            ChainCredentialFingerprint(providerOptions, fallbacks));
+            CredentialFingerprint(providerOptions), DescribeFallbackChain(fallbacks));
 
         var chatClients = Volatile.Read(ref _chatClients);
         return chatClients.GetOrAdd(cacheKey, _ =>
@@ -245,9 +270,13 @@ public class ChatClientFactory : IChatClientFactory
             _dbProviderCache.TryRemove(key, out _);
         }
 
+        // 降级规格可能正指向这个刚被改好（或刚被删掉）的提供商：让它重新报一次
+        _reportedFallbackFailures.Clear();
+
+        // 以它为主提供商的客户端，以及降级链里有它的客户端（链里的降级客户端同样固化了它的端点与密钥）
         var chatClients = Volatile.Read(ref _chatClients);
         var evictedChatClients = new ConcurrentDictionary<ClientCacheKey, IChatClient>();
-        foreach (var key in chatClients.Keys.Where(k => NameMatches(k.ProviderName, providerName)).ToList())
+        foreach (var key in chatClients.Keys.Where(k => NameMatches(k.ProviderName, providerName) || ChainReferences(k, providerName)).ToList())
         {
             if (chatClients.TryRemove(key, out var client))
             {
@@ -296,7 +325,12 @@ public class ChatClientFactory : IChatClientFactory
     /// <summary>同上，但由调用方给定租户（一次调用里解析多个提供商时只开一次作用域）。</summary>
     private ResolvedProvider ResolveProvider(string? providerName, Guid? tenantId)
     {
-        providerName ??= _options.CurrentValue.DefaultProvider;
+        // 空白名字与未指定同义（省略 provider 的 Agent 定义在库里存的是空串）
+        if (string.IsNullOrWhiteSpace(providerName))
+        {
+            providerName = _options.CurrentValue.DefaultProvider;
+        }
+
         if (string.IsNullOrWhiteSpace(providerName))
         {
             throw new InvalidOperationException(
@@ -422,13 +456,25 @@ public class ChatClientFactory : IChatClientFactory
                 ? configOpts
                 : new ProviderOptions();
 
+            // 租户行绝不借用部署配置的密钥：租户管理员可以登记一个与部署配置同名的行、把 Endpoint 指到自己的服务器、
+            // 不填密钥，合并之后宿主的密钥就随每一次对话（含 IAiUtility 这类宿主级调用）发到那里。
+            // 租户行只用自己登记的密钥；没有就不带，客户端创建时以缺少密钥失败，宁可不可用也不外借。
+            // System 行由宿主管理员维护，沿用配置里的密钥（只改端点 / 默认模型的常见用法）。
+            var isTenantRow = entity.Scope == ResourceScope.Tenant;
+            if (isTenantRow && apiKey is null && !string.IsNullOrEmpty(configBase.ApiKey))
+            {
+                _logger.LogWarning(
+                    "Tenant-scoped Provider '{Name}' (id={Id}) has no API key of its own; deployment credentials are never lent to tenant rows",
+                    entity.Name, entity.Id);
+            }
+
             var resolved = new ProviderOptions
             {
                 Name = entity.Name,
                 // 实体注释一直写着「用作 IChatClientFactory 选择 SDK 的 key」，这里此前根本不复制它
                 ProviderType = string.IsNullOrWhiteSpace(entity.ProviderType) ? configBase.ProviderType : entity.ProviderType,
                 Enabled = entity.IsEnabled,
-                ApiKey = apiKey ?? configBase.ApiKey,
+                ApiKey = isTenantRow ? apiKey : apiKey ?? configBase.ApiKey,
                 BaseUrl = entity.Endpoint ?? configBase.BaseUrl,
                 DefaultModel = entity.DefaultModel ?? configBase.DefaultModel,
                 TimeoutSeconds = configBase.TimeoutSeconds,
@@ -438,7 +484,13 @@ public class ChatClientFactory : IChatClientFactory
                 Models = configBase.Models,
                 Thinking = configBase.Thinking,
                 PromptCaching = configBase.PromptCaching,
-                ContextWindowSize = configBase.ContextWindowSize
+                ContextWindowSize = configBase.ContextWindowSize,
+                // 端点是租户管理员填的：连接走不跟随重定向、每条连接都过 egress 检查的客户端。
+                // 写入时的检查挡不住事后改 DNS，也没检查过守卫之前登记的存量行。
+                // 租户行没填端点时用的是部署配置的 BaseUrl（或 SDK 默认地址），属于部署方信任边界，照旧
+                HttpClientName = isTenantRow && !string.IsNullOrWhiteSpace(entity.Endpoint)
+                    ? ResilientHttpClientNames.TenantEndpoint
+                    : null
             };
 
             return new DbProviderCacheEntry(expiresAt, resolved, tenantPartition);
@@ -463,21 +515,42 @@ public class ChatClientFactory : IChatClientFactory
     }
 
     /// <summary>
-    /// 获取指定提供商的默认模型名称
+    /// 获取指定提供商的默认模型名称：按 <see cref="GetChatClient"/> 的同一口径解析（库里的行可以覆写默认模型），
+    /// 解析不到（不存在 / 已禁用 / 未配置 DefaultProvider）时为 null。
     /// </summary>
     public string? GetDefaultModel(string? providerName = null)
     {
-        providerName ??= _options.CurrentValue.DefaultProvider;
-        return _options.CurrentValue.Providers.TryGetValue(providerName, out var opts)
-            ? opts.DefaultModel
-            : null;
+        try
+        {
+            return ResolveProvider(providerName).Options.DefaultModel;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public bool IsProviderAvailable(string providerName)
+    {
+        // 空白名字与 GetChatClient 同一口径：解析为默认提供商
+        try
+        {
+            ResolveProvider(providerName);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>已解析的降级项：提供商 + 生效模型 + 原始规格（日志用）。</summary>
     private readonly record struct ResolvedFallback(ResolvedProvider Provider, string Model, string Spec);
 
     /// <summary>
-    /// 按调用方租户解析整条降级链。解析失败的项记 Error 后跳过（与建客户端失败同一口径）。
+    /// 按调用方租户解析整条降级链。解析失败的项跳过：每条规格第一次失败记 Error（与建客户端失败同一口径），
+    /// 之后同一条规格在同一租户下的失败只记 Debug，直到它解析成功、配置热更新或 <see cref="InvalidateProvider"/>。
     /// </summary>
     /// <param name="fallbackSpecs">降级规格列表，格式: "ProviderName" 或 "ProviderName:ModelName"</param>
     /// <param name="tenantId">调用方租户（与主提供商同一次读取）</param>
@@ -494,17 +567,28 @@ public class ChatClientFactory : IChatClientFactory
 
                 var provider = ResolveProvider(fbProviderName, tenantId);
                 resolved.Add(new ResolvedFallback(provider, ResolveModel(provider.Name, provider.Options, fbModel), spec));
+                _reportedFallbackFailures.TryRemove(FallbackFailureKey(tenantId, spec), out _);
             }
             catch (Exception ex)
             {
                 // Elevated to Error because fallback misconfiguration silently
                 // weakens resilience: the primary provider stays up but the
                 // degraded-mode path is unavailable until an operator notices.
-                _logger.LogError(ex, "Failed to resolve fallback provider for spec '{Spec}', skipping", spec);
+                // Logged once per spec: the chain is resolved on every GetChatClient call.
+                if (_reportedFallbackFailures.TryAdd(FallbackFailureKey(tenantId, spec), 0))
+                {
+                    _logger.LogError(ex, "Failed to resolve fallback provider for spec '{Spec}', skipping", spec);
+                }
+                else
+                {
+                    _logger.LogDebug("Fallback provider spec '{Spec}' still cannot be resolved, skipping", spec);
+                }
             }
         }
         return resolved;
     }
+
+    private static string FallbackFailureKey(Guid? tenantId, string spec) => $"{tenantId}|{spec}";
 
     /// <summary>
     /// 链的缓存分区：主提供商与每个降级项的分区都是 null 时为 null（进程级共用，与无降级时逐字相同）；

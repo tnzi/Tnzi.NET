@@ -46,6 +46,144 @@ public class PayRunEligibilityAndGuardTests : PayrollIntegrationTestBase
         calc.Code.ShouldBe(400);
     }
 
+    /// <summary>
+    /// ★入职日与离职日对称：期末之后才入职的不进这一期；期间内入职的照常入选。
+    /// </summary>
+    /// <remarks>
+    /// 管理端新建分配时生效日默认为当天，提前录入的新人因此带着一条「已生效」的分配
+    /// 进入入职之前的那一期，此前圈选只看分配与离职日，于是按整期发了一份工资。
+    /// </remarks>
+    [Fact]
+    public async Task Calculate_HiredAfterThePeriodEnd_Excluded_HiredWithinThePeriod_Included()
+    {
+        var (structureId, _) = await StandardScenarioAsync("EMP1");
+        var future = await CreateHiredEmployeeAsync("NEW", new DateTime(2026, 7, 1));
+        await AssignAsync(future.Id, structureId, 1000m, new DateTime(2026, 6, 10));
+        var midPeriod = await CreateHiredEmployeeAsync("MID", new DateTime(2026, 6, 15));
+        await AssignAsync(midPeriod.Id, structureId, 1000m, new DateTime(2026, 6, 10));
+
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+        var calc = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(runId));
+
+        calc.Succeeded.ShouldBeTrue(calc.Message);
+        calc.Data!.EmployeeCount.ShouldBe(2, "EMP1 and MID are on the payroll in June; NEW starts in July");
+        (await CountAsync<Payslip>(p => p.PayRunId == runId && p.EmployeeId == future.Id)).ShouldBe(0);
+        (await CountAsync<Payslip>(p => p.PayRunId == runId && p.EmployeeId == midPeriod.Id)).ShouldBe(1);
+    }
+
+    /// <summary>录入端与计算端同一判据：给一个还没入职的人录一笔钱，当场 400 并说清原因。</summary>
+    [Fact]
+    public async Task SetInput_ForAnEmployeeNotYetHired_Rejected400()
+    {
+        var (structureId, _) = await StandardScenarioAsync("EMP1");
+        var future = await CreateHiredEmployeeAsync("NEW", new DateTime(2026, 7, 1));
+        await AssignAsync(future.Id, structureId, 1000m, new DateTime(2026, 6, 10));
+        var bonus = await ComponentWithAccountsAsync("BONUS", SalaryComponentType.Earning, "INPUT()", expenseAccountCode: "5300");
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+
+        var set = await InScopeAsync<IPayRunService, Result<PayRunInputDto>>(s => s.SetInputAsync(runId, new SetPayRunInputDto
+        {
+            EmployeeId = future.Id,
+            ComponentId = bonus,
+            Amount = 500m
+        }));
+
+        set.Succeeded.ShouldBeFalse();
+        set.Code.ShouldBe(400);
+        set.Message.ShouldNotBeNull().ShouldContain("hire date");
+    }
+
+    /// <summary>
+    /// ★不选结构过滤的月薪批次不得把周薪结构上的员工圈进来。
+    /// </summary>
+    /// <remarks>
+    /// 批次只有一个 PERIODS_PER_YEAR（取自批次频率）：周薪员工被按 12 期/年算一整月并过账，
+    /// 而他们的周薪批次还会再发一遍，没有任何报错。
+    /// </remarks>
+    [Fact]
+    public async Task Calculate_MonthlyRunWithoutAStructureFilter_LeavesWeeklyStructureEmployeesOut()
+    {
+        await StandardScenarioAsync("MONTHLY");
+        var weekly = await CreateWeeklyStructureAsync();
+        var weeklyEmployee = await CreateEmployeeAsync("WEEKLY", "Weekly Paid");
+        await AssignAsync(weeklyEmployee.Id, weekly, 800m, new DateTime(2026, 1, 1));
+
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+        var calc = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CalculateAsync(runId));
+
+        calc.Succeeded.ShouldBeTrue(calc.Message);
+        calc.Data!.EmployeeCount.ShouldBe(1);
+        (await CountAsync<Payslip>(p => p.PayRunId == runId && p.EmployeeId == weeklyEmployee.Id)).ShouldBe(0,
+            "a weekly employee computed with PERIODS_PER_YEAR = 12 gets a month of pay on top of their weekly runs");
+    }
+
+    [Fact]
+    public async Task SetInput_ForAWeeklyEmployeeOnAMonthlyRun_Rejected400()
+    {
+        await StandardScenarioAsync("MONTHLY");
+        var weekly = await CreateWeeklyStructureAsync();
+        var weeklyEmployee = await CreateEmployeeAsync("WEEKLY", "Weekly Paid");
+        await AssignAsync(weeklyEmployee.Id, weekly, 800m, new DateTime(2026, 1, 1));
+        var bonus = await ComponentWithAccountsAsync("BONUS", SalaryComponentType.Earning, "INPUT()", expenseAccountCode: "5300");
+        var runId = await CreateRunAsync(PeriodStart, PeriodEnd, PayDate);
+
+        var set = await InScopeAsync<IPayRunService, Result<PayRunInputDto>>(s => s.SetInputAsync(runId, new SetPayRunInputDto
+        {
+            EmployeeId = weeklyEmployee.Id,
+            ComponentId = bonus,
+            Amount = 500m
+        }));
+
+        set.Succeeded.ShouldBeFalse();
+        set.Code.ShouldBe(400);
+        set.Message.ShouldNotBeNull().ShouldContain("different frequency");
+    }
+
+    /// <summary>频率与自己的结构过滤不一致的批次一个人也圈不到：建单时就说清楚，不等到计算时才报「无人合格」。</summary>
+    [Fact]
+    public async Task CreateRun_WithAStructureFilterPaidAtAnotherFrequency_Rejected400()
+    {
+        await StandardScenarioAsync();
+        var weekly = await CreateWeeklyStructureAsync();
+
+        var result = await InScopeAsync<IPayRunService, Result<PayRunDto>>(s => s.CreateAsync(new CreatePayRunDto
+        {
+            PeriodStart = PeriodStart,
+            PeriodEnd = PeriodEnd,
+            PayDate = PayDate,
+            Frequency = PayFrequency.Monthly,
+            StructureId = weekly
+        }));
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+    }
+
+    private async Task<EmployeeDto> CreateHiredEmployeeAsync(string code, DateTime hireDate)
+    {
+        var result = await InScopeAsync<IEmployeeService, Result<EmployeeDto>>(s => s.CreateAsync(new CreateEmployeeDto
+        {
+            Code = code,
+            Name = code,
+            HireDate = hireDate
+        }));
+        result.Succeeded.ShouldBeTrue(result.Message);
+        return result.Data!;
+    }
+
+    private async Task<Guid> CreateWeeklyStructureAsync()
+    {
+        var wage = await ComponentWithAccountsAsync("WAGE", SalaryComponentType.Earning, "BASE", expenseAccountCode: "5300");
+        var result = await InScopeAsync<ISalaryStructureService, Result<SalaryStructureDto>>(s => s.CreateAsync(new CreateSalaryStructureDto
+        {
+            Name = "Weekly",
+            Frequency = PayFrequency.Weekly,
+            Lines = [new SalaryStructureLineInputDto { ComponentId = wage, Sequence = 1 }]
+        }));
+        result.Succeeded.ShouldBeTrue(result.Message);
+        return result.Data!.Id;
+    }
+
     [Fact]
     public async Task Post_DraftRun_Rejected()
     {

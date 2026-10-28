@@ -10,8 +10,11 @@ namespace Tnzi.Documents.Services.Internal;
 /// <list type="bullet">
 /// <item><b>只在没人装过解析器时才装自己的</b>。<c>FontResolver</c> 是**进程级单例**，
 /// 同一进程里可能还有别的模块装了自己的（例如 <c>Tnzi.Finance.Documents</c> 的支票 MICR 解析器），
-/// 覆盖掉别人的解析器会让对方的专用字体失效。反过来别人覆盖我们也无妨 ——
-/// 那些解析器对未知字体族都会回退到常规 sans，画普通文字照常。</item>
+/// 覆盖掉别人的解析器会让对方的专用字体失效。反过来，之后取代槽位的解析器必须把不属于自己的
+/// 字体族与字面转交回被取代的那一个，本包的盖章文字才继续用这里解析到的字体：
+/// <c>Tnzi.Finance.Documents</c> 正是这样做的（安装时记下被取代者并委派）。一个不委派的解析器会把
+/// <see cref="FamilyName"/> 当未知族、换成它自己的字体，字形随之悄悄改变；它画不出的字符由盖章前的
+/// 字形覆盖检查拦下。</item>
 /// <item>不内嵌任何字体二进制：避免把字体授权问题带进 MIT 框架
 /// （同 <c>Tnzi.Imaging</c> 锁 ImageSharp 免授权版本的取舍）。</item>
 /// </list>
@@ -51,7 +54,8 @@ internal sealed class DocumentFontResolver : IFontResolver
                 GlobalFontSettings.FontResolver = Instance;
             }
 
-            // 别人的解析器在位：认为可用（未知字体族会回退到它自己的常规字体）。
+            // 别人的解析器在位：认为可用。委派的解析器把本族交回给我们；不委派的会换成它自己的字体，
+            // 那款字体画不出的字符由盖章前的字形覆盖检查报错，不会静默画成方框。
             return !ReferenceEquals(GlobalFontSettings.FontResolver, Instance) || _regular != null;
         }
     }

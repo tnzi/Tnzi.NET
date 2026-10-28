@@ -10,6 +10,9 @@
  * The module is optional AND disabled by default, so every read here treats a
  * 501/404 as "not available in this deployment" and returns an empty result -
  * an admin page must render an informative empty state, not an error toast.
+ * Any other refusal (400, 403, 5xx) rejects with the server's reason: read as
+ * an empty result it answered a question the server never answered ("no runs
+ * failed yesterday", "no runtimes on this host").
  */
 import type { HttpClient } from '@tnzi/core/http'
 import type { PagedList } from '@tnzi/core'
@@ -28,7 +31,7 @@ import {
   type CliRuntimeProbeResultDto,
 } from '@tnzi/core/services/ai'
 
-import { ensureOk, unwrapResult as unwrap, unwrapOk } from '../_mappers'
+import { ensureOk, readOrAbsent, unwrapOk } from '../_mappers'
 
 export interface CliAgentBridge {
   runtimes: {
@@ -77,14 +80,12 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
     runtimes: {
       async list() {
         if (!runtimeApi) return []
-        const response = await runtimeApi.getList()
         // 501 (module not loaded / disabled) reads as "no runtimes here".
-        return response?.succeeded ? (response.data ?? []) : []
+        return readOrAbsent<CliRuntimeDto[]>(await runtimeApi.getList(), [])
       },
       async providers() {
         if (!runtimeApi) return []
-        const response = await runtimeApi.getProviders()
-        return response?.succeeded ? (response.data ?? []) : []
+        return readOrAbsent<CliProviderOptionDto[]>(await runtimeApi.getProviders(), [])
       },
       async probe() {
         if (!runtimeApi) return { runtimes: [], notFound: [] }
@@ -103,8 +104,7 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
     bindings: {
       async get(agentId) {
         if (!bindingApi) return null
-        const response = await bindingApi.getByAgentId(agentId)
-        return response?.succeeded ? (response.data ?? null) : null
+        return readOrAbsent<CliAgentBindingDto | null>(await bindingApi.getByAgentId(agentId), null)
       },
       async upsert(agentId, input) {
         if (!bindingApi) throw new Error('AI.Cli module is not available')
@@ -119,17 +119,16 @@ export function createCliAgentBridge(deps: CliAgentBridgeDeps): CliAgentBridge {
     runs: {
       async list(query) {
         if (!runApi) return EMPTY_PAGE
-        const response = await runApi.getList(query)
-        return response?.succeeded ? (response.data ?? EMPTY_PAGE) : EMPTY_PAGE
+        return readOrAbsent<PagedList<CliRunDto>>(await runApi.getList(query), EMPTY_PAGE)
       },
       async get(id) {
         if (!runApi) throw new Error('AI.Cli module is not available')
-        return unwrap<CliRunDto>(await runApi.getById(id))
+        // A refused read rejects with the server's reason instead of resolving null.
+        return unwrapOk<CliRunDto>(await runApi.getById(id))
       },
       async messages(id, fromSequence = 0) {
         if (!runApi) return []
-        const response = await runApi.getMessages(id, fromSequence)
-        return response?.succeeded ? (response.data ?? []) : []
+        return readOrAbsent<CliRunMessageDto[]>(await runApi.getMessages(id, fromSequence), [])
       },
       async cancel(id) {
         if (!runApi) throw new Error('AI.Cli module is not available')

@@ -67,16 +67,31 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         if (input.QuietHoursStart.HasValue != input.QuietHoursEnd.HasValue)
             return Fail<NotificationPreferenceDto>("Quiet hours start and end must both be set or both be empty", 400);
 
+        // 开始等于结束是空区间，永远不会生效：存下来只会让人以为自己设了免打扰
+        if (input.QuietHoursStart.HasValue && input.QuietHoursStart == input.QuietHoursEnd)
+            return Fail<NotificationPreferenceDto>("Quiet hours start and end must differ; a window that starts and ends at the same time never applies", 400);
+
         // 验证频率限制
         if (input.MaxFrequencyPerHour.HasValue && input.MaxFrequencyPerHour.Value <= 0)
             return Fail<NotificationPreferenceDto>("Max frequency per hour must be a positive number", 400);
+
+        // 验证时区：只收规范大小写的 IANA 标识，原样存（理由见 IanaTimeZone）
+        if (!IanaTimeZone.TryNormalize(input.QuietHoursTimeZone, out var timeZone))
+            return Fail<NotificationPreferenceDto>(
+                $"Unknown time zone '{input.QuietHoursTimeZone}'. Use an IANA time zone id such as 'America/Toronto'.",
+                400, ErrorCodes.NOTIFICATION_INVALID_TIME_ZONE);
+
+        // ★ 分类按读取路径同一个口径归一化：空串与空白就是「整渠道」（null）。原样存下的 "" 既不是渠道级行
+        //   （读取路径按 Category == null 找它），也匹配不上任何消息分类（消息分类同样把空白归成 null），
+        //   于是一行「关掉这个渠道」在管理端显示为已关闭、发送时却被忽略。清空过的表单输入框发来的就是 ""。
+        var category = NormalizeCategory(input.Category);
 
         // 查找已有偏好（按 UserId + Channel + Category 唯一）
         var existing = await _repository
             .AsQueryable()
             .Where(p => p.UserId == userId
                 && p.Channel == input.Channel
-                && p.Category == input.Category)
+                && p.Category == category)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (existing != null)
@@ -85,6 +100,7 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
             existing.IsEnabled = input.IsEnabled;
             existing.QuietHoursStart = input.QuietHoursStart;
             existing.QuietHoursEnd = input.QuietHoursEnd;
+            existing.QuietHoursTimeZone = timeZone;
             existing.MaxFrequencyPerHour = input.MaxFrequencyPerHour;
             await _repository.UpdateAsync(existing, cancellationToken);
 
@@ -99,10 +115,11 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
         {
             UserId = userId,
             Channel = input.Channel,
-            Category = input.Category,
+            Category = category,
             IsEnabled = input.IsEnabled,
             QuietHoursStart = input.QuietHoursStart,
             QuietHoursEnd = input.QuietHoursEnd,
+            QuietHoursTimeZone = timeZone,
             MaxFrequencyPerHour = input.MaxFrequencyPerHour
         };
 
@@ -125,7 +142,7 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
     /// </summary>
     /// <remarks>
     /// ★ <b>必须带归属判定</b>：本方法同时被用户面
-    /// （<c>DELETE /notification-preferences/{id}</c>，只有 <c>[ApiAuthorize]</c>）与管理端
+    /// （<c>DELETE /notification/preferences/{id}</c>，只有 <c>[ApiAuthorize]</c>）与管理端
     /// （带 <c>notification.subscription.delete</c>）调用 —— 它<b>无从知道谁在问</b>，
     /// 所以判定必须在这里做，而不是靠调用方。
     /// <para>
@@ -184,29 +201,33 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
     {
         Check.NotNullOrWhiteSpace(channel);
 
-        // 先查分类级偏好
-        if (category != null)
-        {
-            var categoryPreference = await _repository
-                .AsQueryable()
-                .AsNoTracking()
-                .Where(p => p.UserId == userId && p.Channel == channel && p.Category == category)
-                .FirstOrDefaultAsync(cancellationToken);
+        // ★ 与 FilterEnabledUsersAsync 同一个口径：渠道不分大小写、分类把空白归成 null。
+        //   此前这里按原样比较渠道：管理端存的 "Email" 对 IsChannelEnabledAsync(user, "email") 一行都匹配不上，
+        //   答「启用」，而真正的发送路径会把这个人排除掉。
+        var channelName = channel.ToLower();
+        var normalizedCategory = NormalizeCategory(category);
 
-            if (categoryPreference != null)
-                return categoryPreference.IsEnabled;
-        }
-
-        // 再查渠道级全局偏好
-        var channelPreference = await _repository
+        var rows = await _repository
             .AsQueryable()
             .AsNoTracking()
-            .Where(p => p.UserId == userId && p.Channel == channel && p.Category == null)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Where(p => p.UserId == userId
+                        && p.Channel.ToLower() == channelName
+                        && (p.Category == null || p.Category == normalizedCategory))
+            .Select(p => new { p.Category, p.IsEnabled })
+            .ToListAsync(cancellationToken);
 
-        // 无偏好记录时默认启用
-        return channelPreference?.IsEnabled ?? true;
+        // 分类级优先于渠道级，两者都没有则默认启用。
+        var categoryRow = normalizedCategory == null
+            ? null
+            : rows.Find(r => r.Category == normalizedCategory);
+        var channelRow = rows.Find(r => r.Category == null);
+
+        return categoryRow?.IsEnabled ?? channelRow?.IsEnabled ?? true;
     }
+
+    /// <summary>分类归一化：空串与空白就是「整渠道」（null），与各读取路径对消息分类的处理一致。</summary>
+    private static string? NormalizeCategory(string? category)
+        => string.IsNullOrWhiteSpace(category) ? null : category;
 
     /// <inheritdoc />
     public async Task<IReadOnlyCollection<Guid>> FilterEnabledUsersAsync(
@@ -316,14 +337,29 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★ 带时区的行按「包含现在的那一次、或紧随其后的下一次」换算成 UTC 时刻，
+    /// 所以只认 UTC 的老调用方在当天拿到的仍是正确答案；跨夏令时切换的精确判定走
+    /// <see cref="GetQuietHoursWindowsAsync"/>。没有时区的行原样返回。
+    /// </remarks>
     public async Task<IReadOnlyDictionary<Guid, (TimeOnly Start, TimeOnly End)>> GetQuietHoursAsync(
         IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default)
     {
         Check.NotNull(userIds);
 
         var windows = await LoadQuietHoursAsync(userIds, channel.ToString(), cancellationToken);
+        var utcNow = DateTime.UtcNow;
 
-        return windows.ToDictionary(kv => kv.Key, kv => (kv.Value.Start, kv.Value.End));
+        return windows.ToDictionary(kv => kv.Key, kv => kv.Value.ToUtcTimesOfDay(utcNow));
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, QuietHoursWindow>> GetQuietHoursWindowsAsync(
+        IEnumerable<Guid> userIds, NotificationType channel, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(userIds);
+
+        return await LoadQuietHoursAsync(userIds, channel.ToString(), cancellationToken);
     }
 
     /// <summary>
@@ -336,6 +372,8 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
     /// <see cref="GetFrequencyCapsAsync"/> 同款（偏好的渠道词汇比 <c>NotificationType</c> 宽）。
     /// ★ 两个时刻缺任一即视为没设：只有开始没有结束的窗口算不出结束时刻，而延后必须
     /// 写得出「什么时候再发」。
+    /// ★ 写入时校验过的时区在这台主机上查不到（时区数据与写入那台不同），按 UTC 解释并告警：
+    /// 那是部署问题，跳过这个人的静默时段等于在他设的免打扰里照发，比偏几个小时更糟。
     /// </remarks>
     private async Task<Dictionary<Guid, QuietHoursWindow>> LoadQuietHoursAsync(
         IEnumerable<Guid> userIds, string channel, CancellationToken cancellationToken)
@@ -354,13 +392,29 @@ public class NotificationPreferenceService : ApplicationService, INotificationPr
                         && p.Category == null
                         && p.QuietHoursStart != null
                         && p.QuietHoursEnd != null)
-            .Select(p => new { p.UserId, p.QuietHoursStart, p.QuietHoursEnd })
+            .Select(p => new { p.UserId, p.QuietHoursStart, p.QuietHoursEnd, p.QuietHoursTimeZone })
             .ToListAsync(cancellationToken);
 
         var windows = new Dictionary<Guid, QuietHoursWindow>();
+        // 按时区聚合后各记一条：主机缺时区数据时一批里每个人都查不到，逐人记会把日志淹掉。
+        var unknownZones = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            windows[row.UserId] = new QuietHoursWindow(row.QuietHoursStart!.Value, row.QuietHoursEnd!.Value);
+            var zone = IanaTimeZone.Resolve(row.QuietHoursTimeZone);
+            if (zone == null)
+            {
+                unknownZones[row.QuietHoursTimeZone!] = unknownZones.GetValueOrDefault(row.QuietHoursTimeZone!) + 1;
+                zone = TimeZoneInfo.Utc;
+            }
+
+            windows[row.UserId] = new QuietHoursWindow(row.QuietHoursStart!.Value, row.QuietHoursEnd!.Value, zone);
+        }
+
+        foreach (var (timeZone, userCount) in unknownZones)
+        {
+            LogWarning(
+                "Time zone {TimeZone} on the {Channel} quiet hours of {UserCount} user(s) is not known on this host; evaluating them as UTC. Install the host's time zone data (tzdata / ICU) to fix this",
+                timeZone, channel, userCount);
         }
 
         return windows;

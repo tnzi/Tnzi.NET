@@ -237,6 +237,46 @@ public class EnvelopeTemplateFileAccessTests : SigningStorageTestBase
         (await TemplateReferencesAsync()).ShouldContain(r => r.FileId == mine);
     }
 
+    /// <summary>
+    /// 换文件之后引用跟着走：新文件登记在模板名下，旧文件的引用释放。
+    /// 模板是不跟踪读出再写回的，写回时文件字段的原值若等于新值，引用一条都不会变：
+    /// 新文件没有引用（开了孤儿清理会被物理删除），旧文件凭残留引用仍按 signing.template.view 可读。
+    /// </summary>
+    [Fact]
+    public async Task Updating_a_template_to_new_files_moves_its_references()
+    {
+        var original = await StoreAsync("contract.pdf", RenderedPdf);
+        var revised = await StoreAsync("contract-v2.pdf", [.. RenderedPdf, 0x0A, 0x25, 0x56, 0x32]);
+
+        Guid templateId;
+        using (var create = BeginRequest())
+        {
+            var created = await create.Templates.CreateAsync(Uploaded(source: original, rendered: original));
+            created.Succeeded.ShouldBeTrue(created.Message);
+            templateId = created.Data!.Id;
+        }
+
+        using (var update = BeginRequest())
+        {
+            var result = await update.Templates.UpdateAsync(templateId, new UpdateEnvelopeTemplateDto
+            {
+                Name = "Engagement letter",
+                Source = TemplateSource.Uploaded,
+                SourceFileId = revised,
+                RenderedPdfFileId = revised,
+                PageCount = 1,
+                IsActive = true,
+                Fields = [],
+            });
+            result.Succeeded.ShouldBeTrue(result.Message);
+        }
+
+        DbContext.ChangeTracker.Clear();
+        var references = await TemplateReferencesAsync();
+        references.ShouldNotBeEmpty();
+        references.ShouldAllBe(r => r.FileId == revised);
+    }
+
     [Fact]
     public async Task A_composed_template_without_files_is_unaffected()
     {

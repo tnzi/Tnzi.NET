@@ -527,22 +527,27 @@ public class PasskeyService : ApplicationService, IPasskeyService
     private async Task<string> StoreStateAsync(string kind, string state, Guid? userId)
     {
         var stateId = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
-        var ttl = TimeSpan.FromSeconds(Math.Max(30, Passkey.ChallengeTimeoutSeconds));
 
         await _cache.SetAsync(
             StateCacheKey(kind, stateId),
             new PasskeyChallengeState(state, userId),
-            ttl);
+            StateTimeToLive);
 
         return stateId;
     }
 
+    /// <summary>挑战状态（与它的消费标记）在缓存里活多久。</summary>
+    private TimeSpan StateTimeToLive => TimeSpan.FromSeconds(Math.Max(30, Passkey.ChallengeTimeoutSeconds));
+
     /// <summary>
-    /// 取回并<strong>立即删除</strong>挑战状态：一次性，用过即失效。
+    /// 取回挑战状态并<strong>占住</strong>它：一次性，只有第一个来取的请求拿得到。
     /// </summary>
     /// <remarks>
-    /// 先删再用。挑战重放是 WebAuthn 的核心威胁，删除失败时宁可让这次登录失败，
-    /// 也不能留下一个可以再用一次的挑战。
+    /// ★★ 一次性由「占住消费标记」保证，不是由后面那次删除保证。读、删两步之间没有原子性：
+    /// 同一个 stateId 的两次并发提交都能在任何一方删掉之前读到状态，于是一次仪式签出两条会话
+    /// （签名计数此时还没写回，两份断言都过得了）。<c>TrySetAsync</c> 在 Redis 上是 SET NX、在内存缓存上持锁，
+    /// 只有一个请求占得住，其余一律按无效挑战处理；与图形验证码的一次性校验同一个做法。
+    /// 挑战重放是 WebAuthn 的核心威胁，宁可让这次失败，也不能留下一个可以再用一次的挑战。
     /// </remarks>
     private async Task<PasskeyChallengeState?> ConsumeStateAsync(string kind, string? stateId)
     {
@@ -558,8 +563,9 @@ public class PasskeyService : ApplicationService, IPasskeyService
             return null;
         }
 
+        var claimed = await _cache.TrySetAsync($"{key}:consumed", true, StateTimeToLive);
         await _cache.RemoveAsync(key);
-        return state;
+        return claimed ? state : null;
     }
 
     private static string StateCacheKey(string kind, string stateId) => $"{StateCachePrefix}{kind}:{stateId}";

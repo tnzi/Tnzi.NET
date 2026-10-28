@@ -5,6 +5,7 @@
  */
 
 import type { ApiResult } from '../types/api';
+import { API_ERROR_BRAND, HTTP_ERROR_BRAND, brandError, hasErrorBrand } from './brand';
 
 export interface ApiErrorOptions {
   message: string;
@@ -33,6 +34,7 @@ export class ApiError extends Error {
     this.code = options.code;
     this.errorCode = options.errorCode;
     this.details = options.details;
+    brandError(this, API_ERROR_BRAND);
   }
 }
 
@@ -50,6 +52,7 @@ export class HttpError extends ApiError {
     });
     this.name = 'HttpError';
     this.statusCode = statusCode;
+    brandError(this, HTTP_ERROR_BRAND);
   }
 }
 
@@ -88,11 +91,22 @@ export function createFailedApiResultFromError<T>(
   });
 }
 
+/**
+ * Whether `error` is an {@link ApiError} (an {@link HttpError} included).
+ *
+ * Prefer this over `instanceof`: each `@tnzi/core` sub-path bundles its own copy
+ * of the class, so an error thrown by one entry is not an `instanceof` the class
+ * exported by another. The guards recognise every copy (see `errors/brand`).
+ */
 export function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
+  return error instanceof ApiError || hasErrorBrand(error, API_ERROR_BRAND);
 }
 
+/**
+ * Whether `error` is an {@link HttpError}, whichever `@tnzi/core` sub-path created
+ * it. Prefer this over `instanceof` for the reason given on {@link isApiError}.
+ */
 export function isHttpError(error: unknown): error is HttpError {
-  return error instanceof HttpError;
+  return error instanceof HttpError || hasErrorBrand(error, HTTP_ERROR_BRAND);
 }
 

@@ -88,6 +88,54 @@ public class MessageFeedbackTests
     }
 
     [Fact]
+    public async Task SubmitAsync_UnknownTag_Returns400AndWritesNothing()
+    {
+        // 自造标签会进管理端的标签分布统计；条数不限时序列化结果还会超过列长，在落库时变成 500
+        var (threadRepo, messageRepo, userId, threadId, messageId) = SetupOwned();
+        var service = CreateService(threadRepo, messageRepo);
+
+        var input = new MessageFeedbackDto { Rating = false, Tags = [FeedbackTags.Incorrect, "made_up"] };
+        var result = await service.SubmitAsync(threadId, messageId, userId, input);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.FeedbackTagInvalid);
+        result.Message!.ShouldContain("made_up");
+        messageRepo.Verify(x => x.UpdateAsync(It.IsAny<AgentThreadMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_RepeatedTags_AreStoredOnceAndFitTheColumn()
+    {
+        var (threadRepo, messageRepo, userId, threadId, messageId) = SetupOwned();
+        var service = CreateService(threadRepo, messageRepo);
+        AgentThreadMessage? saved = null;
+        messageRepo.Setup(x => x.UpdateAsync(It.IsAny<AgentThreadMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<AgentThreadMessage, CancellationToken>((m, _) => saved = m)
+            .Returns(Task.CompletedTask);
+
+        var tags = Enumerable.Repeat(FeedbackTags.TooLong, 60).Concat(FeedbackTags.All).ToList();
+        var result = await service.SubmitAsync(threadId, messageId, userId, new MessageFeedbackDto { Rating = false, Tags = tags });
+
+        result.Succeeded.ShouldBeTrue();
+        saved.ShouldNotBeNull();
+        JsonSerializer.Deserialize<List<string>>(saved!.FeedbackTags!)!.Count.ShouldBe(FeedbackTags.All.Count);
+        saved.FeedbackTags!.Length.ShouldBeLessThanOrEqualTo(500);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_ThumbsUp_IgnoresTagsWithoutValidatingThem()
+    {
+        var (threadRepo, messageRepo, userId, threadId, messageId) = SetupOwned();
+        var service = CreateService(threadRepo, messageRepo);
+
+        var result = await service.SubmitAsync(threadId, messageId, userId, new MessageFeedbackDto { Rating = true, Tags = ["anything"] });
+
+        result.Succeeded.ShouldBeTrue();
+        messageRepo.Verify(x => x.UpdateAsync(It.Is<AgentThreadMessage>(m => m.FeedbackTags == null), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SubmitAsync_MessageNotFound_Returns404()
     {
         var userId = Guid.NewGuid();

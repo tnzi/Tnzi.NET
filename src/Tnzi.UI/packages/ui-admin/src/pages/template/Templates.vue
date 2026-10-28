@@ -2,11 +2,15 @@
   <!--
     Templates - the cross-module template library (email, sms, cheque, …).
 
-    Clicking a card renders the template through `bridge.templates.render(id, {})`
+    Clicking a card renders the template through `bridge.templates.render(row, {})`
     into a deep-linkable preview modal (`?preview=view:<id>`) - that IS the
     preview, so there is no separate Preview button. Clone / Edit / Delete are the
     row actions; FileSystem-source templates ship with the binaries and the
-    backend rejects edit + delete on them, so those two hide themselves.
+    backend rejects edit + delete on them, so those two hide themselves. Such a
+    row has no stored id (the list reports the empty Guid), so preview and clone
+    hand the bridge the row itself: its body renders as listed, and its clone is
+    a new stored row, the way to customise a shipped template. A preview that
+    fails shows the server's reason in the modal; a refused clone toasts it.
 
     Preview needs `template.template.update`, not a read code: rendering compiles
     and RUNS the Razor source on the server, so the backend gates it as authoring
@@ -72,12 +76,16 @@
       <!-- Sandboxed: the rendered template is author-controlled markup, and
            `v-html` would run it at the admin's origin in an authenticated
            session. See THtmlPreview. -->
+      <p v-if="previewLoading" class="t-template-preview__empty">{{ t('admin.common.loading') }}</p>
       <THtmlPreview
-        v-if="previewContent"
+        v-else-if="previewContent"
         :html="previewContent"
         :height="'60vh'"
         :title="t('previewTitle')"
       />
+      <!-- Why it did not render (a body that does not compile, a row that is
+           gone), in place of a preview that would otherwise read as empty. -->
+      <p v-else-if="previewError" class="t-template-preview__error" role="alert">{{ previewError }}</p>
       <p v-else class="t-template-preview__empty">{{ t('admin.common.noPreview') }}</p>
     </template>
   </TDetailHost>
@@ -85,6 +93,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useMessage } from 'naive-ui'
 import { TSvgIcon, TSourceBadge } from '@tnzi/ui'
 import TCardPage from '../../components/crud/TCardPage.vue'
 import TEntityCard from '../../components/data/TEntityCard.vue'
@@ -101,14 +110,25 @@ import TFormSchemaRenderer from '../_shared/form-schema'
 import { templateColumns, templateFormSchema, templateFormSections } from './template-config'
 import { makePageTranslator } from '../_shared/translate'
 import type { TemplateInfoDto } from '@tnzi/core/services/template'
+import { truncate } from '@tnzi/core/utils'
 
 type TemplateRow = TemplateInfoDto & { id: string }
 
 const bridge = createTemplateBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
+// Not every host wraps the shell in an NMessageProvider.
+const message = (() => {
+  try {
+    return useMessage()
+  } catch {
+    return null
+  }
+})()
 
 const crud = useCrudPage<TemplateInfoDto, string>({
   pageId: 'template.templates',
+  // A template left alone on the switch is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'template.template',
   columns: templateColumns,
   // File-source rows have no DB id (backend returns Guid.Empty); use the
@@ -150,24 +170,44 @@ const rowActions: RowAction<TemplateRow>[] = [
 const canPreview = computed(() => can('template.template.update'))
 const previewDetail = useDetail<TemplateInfoDto>({ mode: 'modal', url: 'preview' })
 const previewContent = ref('')
+const previewError = ref('')
+const previewLoading = ref(false)
+// Each click supersedes the last: a slow render of the card clicked before
+// must not land in the preview of the one clicked after it.
+let previewSeq = 0
+
+/** The thrown reason, or `fallback` when there is none to show. */
+function reasonOf(e: unknown, fallback: string): string {
+  return e instanceof Error && e.message ? e.message : fallback
+}
 
 async function openPreview(row: TemplateRow): Promise<void> {
   if (!canPreview.value) return
+  const seq = ++previewSeq
   previewContent.value = ''
+  previewError.value = ''
+  previewLoading.value = true
   await previewDetail.open('view', row)
   try {
-    previewContent.value = await bridge.templates.render(row.id, {})
-  } catch {
-    previewContent.value = ''
+    // The row, not its id: a FileSystem-source row has no stored id and renders
+    // the body it carries.
+    const html = await bridge.templates.render(row, {})
+    if (seq === previewSeq) previewContent.value = html
+  } catch (e) {
+    if (seq === previewSeq) previewError.value = reasonOf(e, t('admin.common.error'))
+  } finally {
+    if (seq === previewSeq) previewLoading.value = false
   }
 }
 
 async function handleClone(row: TemplateRow): Promise<void> {
   try {
-    await bridge.templates.clone(row.id)
+    // The row, not its id: a FileSystem-source row is copied from its body.
+    const cloned = await bridge.templates.clone(row)
+    message?.success(t('actions.cloneSuccess', { name: cloned.templateName }))
     await crud.refresh()
-  } catch {
-    // Error handling deferred to error boundary / toast in full integration
+  } catch (e) {
+    message?.error(reasonOf(e, t('admin.common.error')))
   }
 }
 
@@ -186,7 +226,7 @@ function categoryIcon(category?: string | null): string {
 function bodyExcerpt(row: TemplateInfoDto): string {
   const body = (row.contentTemplate ?? '').trim()
   if (!body) return t('admin.common.noPreview')
-  return body.length > 260 ? `${body.slice(0, 260)}…` : body
+  return truncate(body, 261, '…')
 }
 </script>
 
@@ -207,6 +247,16 @@ function bodyExcerpt(row: TemplateInfoDto): string {
   margin: 0;
   padding: 24px 8px;
   text-align: center;
+}
+.t-template-preview__error {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--tnzi-error, #d03050);
+  border-radius: 6px;
+  color: var(--tnzi-error, #d03050);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tpl-card {

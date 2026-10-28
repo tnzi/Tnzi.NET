@@ -8,6 +8,7 @@ namespace Tnzi.Notification.Services;
 public class NotificationService : ApplicationService, INotificationService
 {
     private readonly IRepository<Message, Guid> _notificationRepository;
+    private readonly IRepository<Recipient, Guid> _recipientRepository;
     private readonly RecipientChannelDispatcher _dispatcher;
     private readonly RecipientEligibility _eligibility;
     private readonly INotificationQueueService? _queueService;
@@ -21,6 +22,7 @@ public class NotificationService : ApplicationService, INotificationService
     private readonly ICurrentTenant? _currentTenant;
     private readonly IFileContentReader? _fileContentReader;
     private readonly IFileReadAccessProbe? _fileReadAccessProbe;
+    private readonly NotificationSendPacer _pacer;
 
     // 静态信号量，确保跨请求的并发控制真正生效
     private static SemaphoreSlim? _sendSemaphore;
@@ -43,14 +45,19 @@ public class NotificationService : ApplicationService, INotificationService
         IServiceProvider serviceProvider,
         INotificationOptOutService optOutService,
         INotificationPreferenceService preferenceService,
+        IRepository<Recipient, Guid> recipientRepository,
         INotificationQueueService? queueService = null,
         ITemplateRenderService? templateRenderService = null,
         ICurrentTenant? currentTenant = null,
         IFileContentReader? fileContentReader = null,
-        IFileReadAccessProbe? fileReadAccessProbe = null)
+        IFileReadAccessProbe? fileReadAccessProbe = null,
+        TimeProvider? timeProvider = null,
+        NotificationSendPacer? sendPacer = null)
         : base(serviceProvider)
     {
         _notificationRepository = Check.NotNull(notificationRepository);
+        // 取消的级联是一条按状态带条件的批量更新（见 CancelAsync），要直接对收件人表下手。
+        _recipientRepository = Check.NotNull(recipientRepository);
         _unitOfWork = Check.NotNull(unitOfWork);
         _optionsMonitor = Check.NotNull(optionsMonitor);
         // 发送器不再直接注入：一条渠道可以有多个（默认 + 具名），派发时按 Message.ProviderKey
@@ -76,17 +83,23 @@ public class NotificationService : ApplicationService, INotificationService
         _preferenceService = Check.NotNull(preferenceService);
         // 「谁还应该收到这条消息」的三道过滤全在这里，顺序表只有一份。
         _eligibility = new RecipientEligibility(
-            _notificationRepository, _unitOfWork, _optOutService, _preferenceService, Logger);
+            _notificationRepository, _unitOfWork, _optOutService, _preferenceService, Logger,
+            timeProvider ?? TimeProvider.System);
         _queueService = queueService;
         _templateRenderService = templateRenderService;
         _currentTenant = currentTenant;
+        // 模块把它注册成单例：限速管的是发送账号，一次群发、一次重发失败项、一次恢复续发打的是同一个账号。
+        // 没注册（自行组装服务的消费方、测试）时退回本实例自己的一份，至少一次发送之内仍按配置限速。
+        _pacer = sendPacer ?? new NotificationSendPacer(_optionsMonitor, timeProvider);
 
         EnsureSemaphoreInitialized(Options.MaxConcurrency);
     }
 
     public async Task<Result<NotificationInfo>> CreateAndSendAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
     {
-        var createResult = await CreateAsync(request, cancellationToken);
+        Check.NotNull(request);
+
+        var createResult = await CreateCoreAsync(request, QueuedAt(request), cancellationToken);
         if (!createResult.Succeeded)
             return Fail<NotificationInfo>(createResult.Message ?? "Failed to create notification", createResult.Code ?? 400, createResult.ErrorCode);
 
@@ -95,34 +108,11 @@ public class NotificationService : ApplicationService, INotificationService
 
         var notificationInfo = createResult.Data;
 
-        // Handle scheduled notifications: defer sending until ScheduledTime
-        if (request.ScheduledTime.HasValue && request.ScheduledTime.Value > DateTime.UtcNow)
-        {
-            var delay = request.ScheduledTime.Value - DateTime.UtcNow;
-            if (_queueService != null)
-            {
-                await _queueService.EnqueueWithDelayAsync(
-                    NotificationWorkItem.SendMessage(notificationInfo.Id, CurrentTenantId), delay);
-            }
+        var delivery = await StartDeliveryAsync(notificationInfo.Id, request, cancellationToken);
+        if (!delivery.Succeeded)
+            return Fail<NotificationInfo>(delivery.Message ?? "Failed to send notification", delivery.Code ?? 400, delivery.ErrorCode);
 
-            LogInformation("Notification scheduled: {NotificationId}, Type: {Type}, ScheduledTime: {ScheduledTime}",
-                notificationInfo.Id, notificationInfo.Type, request.ScheduledTime.Value);
-            return Ok(notificationInfo, $"Notification scheduled for {request.ScheduledTime.Value:u}");
-        }
-
-        if (request.SendImmediately)
-        {
-            var sendResult = await SendAsync(notificationInfo.Id, cancellationToken);
-            if (!sendResult.Succeeded)
-                return Fail<NotificationInfo>(sendResult.Message ?? "Failed to send notification", sendResult.Code ?? 400, sendResult.ErrorCode);
-        }
-        else
-        {
-            await QueueNotificationAsync(notificationInfo.Id, cancellationToken);
-        }
-
-        LogInformation("Notification created and queued: {NotificationId}, Type: {Type}", notificationInfo.Id, notificationInfo.Type);
-        return Ok(notificationInfo, "Notification created and queued successfully");
+        return Ok(notificationInfo, delivery.Message ?? "Notification created and queued successfully");
     }
 
     public async Task<Result<IEnumerable<NotificationInfo>>> CreateManyAndSendAsync(IEnumerable<CreateNotificationRequest> requests, CancellationToken cancellationToken = default)
@@ -140,67 +130,16 @@ public class NotificationService : ApplicationService, INotificationService
             var request = requestList[i];
             try
             {
-                var validationError = ValidateRecipients(request.Recipients);
-                if (validationError != null)
+                // ★★ 与 CreateAsync 共用同一份构造：此前这里自己拼 Message，不抄 ScheduledTime、状态恒为 Pending，
+                // 于是批量排给明早的提醒当场就发出去了。两条入口对同一份请求必须做同一件事。
+                var built = await BuildMessageAsync(request, QueuedAt(request), cancellationToken);
+                if (!built.Succeeded)
                 {
-                    errors.Add($"Request at index {i}: {validationError}");
+                    errors.Add($"Request at index {i}: {built.Message}");
                     continue;
                 }
 
-                var rendered = await RenderContentAsync(request, cancellationToken);
-                if (!rendered.Succeeded)
-                {
-                    errors.Add($"Request at index {i}: {rendered.Message}");
-                    continue;
-                }
-
-                var (subject, content, category) = rendered.Data;
-
-                var providerKey = await ResolveProviderKeyAsync(request, category, cancellationToken);
-                if (!providerKey.Succeeded)
-                {
-                    errors.Add($"Request at index {i}: {providerKey.Message}");
-                    continue;
-                }
-
-                var attachments = await BuildAttachmentsAsync(request, cancellationToken);
-                if (!attachments.Succeeded)
-                {
-                    errors.Add($"Request at index {i}: {attachments.Message}");
-                    continue;
-                }
-
-                var notification = new Message
-                {
-                    Type = request.Type,
-                    Subject = subject,
-                    Content = content,
-                    IsHtml = request.IsHtml,
-                    Priority = request.Priority,
-                    Status = NotificationStatus.Pending,
-                    SenderId = request.SenderId,
-                    Category = category,
-                    IsTransactional = request.IsTransactional,
-                    TemplateName = request.TemplateName,
-                    ProviderKey = providerKey.Data,
-                    RetryCount = 0,
-                    MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
-                    TotalRecipientCount = request.Recipients.Count,
-                    SuccessCount = 0,
-                    FailureCount = 0
-                };
-
-                notification.Recipients = request.Recipients.Select(r => new Recipient
-                {
-                    Address = r.Address,
-                    Name = r.Name,
-                    UserId = r.UserId,
-                    Status = NotificationStatus.Pending
-                }).ToList();
-
-                notification.Attachments = attachments.Data!;
-
-                messageRequestMap.Add((notification, request));
+                messageRequestMap.Add((built.Data!, request));
             }
             catch (Exception ex)
             {
@@ -222,18 +161,14 @@ public class NotificationService : ApplicationService, INotificationService
         await _notificationRepository.InsertManyAsync(messages, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        foreach (var message in messages)
+            await PublishCreatedAsync(message);
+
         foreach (var (message, request) in messageRequestMap)
         {
-            if (request.SendImmediately)
-            {
-                var sendResult = await SendAsync(message.Id, cancellationToken);
-                if (!sendResult.Succeeded)
-                    Logger.LogWarning("Failed to send notification {NotificationId} immediately: {Error}", message.Id, sendResult.Message);
-            }
-            else
-            {
-                await QueueNotificationAsync(message.Id, cancellationToken);
-            }
+            var delivery = await StartDeliveryAsync(message.Id, request, cancellationToken);
+            if (!delivery.Succeeded)
+                Logger.LogWarning("Failed to send notification {NotificationId} immediately: {Error}", message.Id, delivery.Message);
         }
 
         var successMessage = errors.Count > 0
@@ -245,74 +180,26 @@ public class NotificationService : ApplicationService, INotificationService
         return Ok((IEnumerable<NotificationInfo>)notificationInfos, successMessage);
     }
 
-    public async Task<Result<NotificationInfo>> CreateAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
+    public Task<Result<NotificationInfo>> CreateAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
     {
         Check.NotNull(request);
 
-        var validationError = ValidateRecipients(request.Recipients);
-        if (validationError != null)
-            return Fail<NotificationInfo>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
+        // 只创建、不要求发送：不写 ScheduledTime，派发恢复永远不碰它（见 QueuedAt）。
+        return CreateCoreAsync(request, queuedAt: null, cancellationToken);
+    }
 
-        var rendered = await RenderContentAsync(request, cancellationToken);
-        if (!rendered.Succeeded)
-            return Fail<NotificationInfo>(rendered.Message ?? "Notification content could not be rendered", rendered.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+    private async Task<Result<NotificationInfo>> CreateCoreAsync(CreateNotificationRequest request, DateTime? queuedAt, CancellationToken cancellationToken)
+    {
+        var built = await BuildMessageAsync(request, queuedAt, cancellationToken);
+        if (!built.Succeeded)
+            return Fail<NotificationInfo>(built.Message ?? "Notification could not be created", built.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        var (subject, content, category) = rendered.Data;
-
-        var providerKey = await ResolveProviderKeyAsync(request, category, cancellationToken);
-        if (!providerKey.Succeeded)
-            return Fail<NotificationInfo>(providerKey.Message ?? "Notification provider could not be resolved", providerKey.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
-
-        var attachments = await BuildAttachmentsAsync(request, cancellationToken);
-        if (!attachments.Succeeded)
-            return Fail<NotificationInfo>(attachments.Message ?? "Attachment source is not allowed", attachments.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
-
-        var notification = new Message
-        {
-            Type = request.Type,
-            Subject = subject,
-            Content = content,
-            IsHtml = request.IsHtml,
-            Priority = request.Priority,
-            Status = request.ScheduledTime.HasValue ? NotificationStatus.Scheduled : NotificationStatus.Pending,
-            SenderId = request.SenderId,
-            Category = category,
-            IsTransactional = request.IsTransactional,
-            TemplateName = request.TemplateName,
-            ProviderKey = providerKey.Data,
-            ScheduledTime = request.ScheduledTime,
-            RetryCount = 0,
-            MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
-            TotalRecipientCount = request.Recipients.Count,
-            SuccessCount = 0,
-            FailureCount = 0
-        };
-
-        notification.Recipients = request.Recipients.Select(r => new Recipient
-        {
-            Address = r.Address,
-            Name = r.Name,
-            UserId = r.UserId,
-            Status = NotificationStatus.Pending
-        }).ToList();
-
-        notification.Attachments = attachments.Data!;
+        var notification = built.Data!;
 
         await _notificationRepository.InsertAsync(notification, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        // 发布通知创建事件
-        if (EventBus != null)
-        {
-            await EventBus.PublishAsync(new NotificationCreatedEvent
-            {
-                MessageId = notification.Id,
-                Type = notification.Type,
-                RecipientCount = notification.TotalRecipientCount,
-                Priority = notification.Priority,
-                Category = notification.Category
-            });
-        }
+        await PublishCreatedAsync(notification);
 
         LogInformation("Notification created: {NotificationId}, Type: {Type}, Recipients: {Count}",
             notification.Id, notification.Type, notification.TotalRecipientCount);
@@ -321,7 +208,20 @@ public class NotificationService : ApplicationService, INotificationService
         return Ok(RecipientAddressMask.Apply(notification.MapTo<NotificationInfo>()));
     }
 
-    public async Task<Result> SendAsync(Guid messageId, CancellationToken cancellationToken = default)
+    public Task<Result> SendAsync(Guid messageId, CancellationToken cancellationToken = default)
+        => SendCoreAsync(messageId, claimedByCaller: false, cancellationToken);
+
+    /// <summary>
+    /// 发送一条<b>调用方已经认领过</b>（条件更新到 <see cref="NotificationStatus.Sending"/>）的消息。
+    /// </summary>
+    /// <remarks>
+    /// 派发恢复的几遍扫描在交给发送路径之前各自做过一次条件认领（见 <see cref="MessageClaim"/> 与卡住批次的租约），
+    /// 手上拿着的就是那份认领。走 <see cref="SendAsync"/> 会被自己的认领挡在门外：它对一条 <c>Sending</c> 的消息答 409。
+    /// </remarks>
+    internal Task<Result> SendClaimedAsync(Guid messageId, CancellationToken cancellationToken = default)
+        => SendCoreAsync(messageId, claimedByCaller: true, cancellationToken);
+
+    private async Task<Result> SendCoreAsync(Guid messageId, bool claimedByCaller, CancellationToken cancellationToken)
     {
         // Use tracking query to avoid conflict when entity is already tracked
         // (e.g., CreateAndSendAsync inserts then immediately sends)
@@ -344,20 +244,32 @@ public class NotificationService : ApplicationService, INotificationService
         if (notification.Status == NotificationStatus.Scheduled && notification.ScheduledTime.HasValue && notification.ScheduledTime.Value > DateTime.UtcNow)
             return Fail($"Notification {messageId} is scheduled for {notification.ScheduledTime.Value:u}", 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        notification.Status = NotificationStatus.Sending;
-        notification.RetryCount++;
+        // ★★★ 先抢到这条消息，再发。发送入口不止一个（排队 / 定时器 / 延迟重试 / 管理端 {id}/send /
+        // 恢复扫描），它们看到的是同一行；此前这里只拒绝 Sent / Cancelled / 未到点，然后**无条件**写 Sending。
+        // 于是恢复扫描先认领了一条到期的定时消息、定时器的工作项在单读者队列里排到之后才执行时，
+        // 它看到 Sending 照样往下走，把还没分片落库的收件人（库里仍是 Pending）再发一遍。
+        // 现在 Sending 一律答 409；其余状态经一次条件更新抢到才往下走，两个同时到达的入口只有一个抢得到。
+        if (claimedByCaller)
+        {
+            if (notification.Status != NotificationStatus.Sending)
+                return Fail($"Notification {messageId} is no longer held by this dispatch pass (status {notification.Status}); nothing was sent", 409, ErrorCodes.NOTIFICATION_ERROR);
+        }
+        else
+        {
+            if (notification.Status == NotificationStatus.Sending)
+                return Fail($"Notification {messageId} is already being sent", 409, ErrorCodes.NOTIFICATION_ERROR);
 
-        // ★★ 这一句必须**立刻落库**，不能等到方法末尾那次 SaveChanges。
-        // 「正在发送」在这一刻就已经是事实，而库里的行在整个收件人循环期间（一次千人群发
-        // 可能几十分钟）都还写着 Scheduled / Pending —— 于是：
-        //  ① 到期扫描的条件认领（`WHERE Status = Scheduled`）会**合法地**抢到一条正在发送的
-        //     消息，第二次 SendAsync 看到全部收件人仍是 Pending，把已经发出去的那些再发一遍。
-        //     那正是本轮一直在消灭的形态，而它是「宽限期能挡住本进程定时器」这个**错误前提**
-        //     的后果：定时器到点只是**入队**，队列单读者串行执行，真正开发的时刻取决于积压。
-        //  ② 进程在循环中途退出时，行仍停在发送前的状态，于是卡住批次那一遍也扫不到它 ——
-        //     两道恢复都够不着，消息永远停在那里。
-        await _notificationRepository.UpdateAsync(notification, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (!await MessageClaim.TryClaimAsync(_notificationRepository, notification.Id, notification.Status, cancellationToken))
+                return Fail($"Notification {messageId} was taken by another sender; it is not sent twice", 409, ErrorCodes.NOTIFICATION_ERROR);
+        }
+
+        // ★ RetryCount 不在这里加：它数的是「失败之后又重试了几次」（由 RetryAsync 计），不是这条路径被走了几遍。
+        //   此前每次进入都加一：第一次发送、恢复扫描续发、静默时段延后到点的那一遍都各算一次，
+        //   一条延后过两次的消息还没真正重试过就到了 MaxRetryCount，之后真失败了「重试」与「重试全部失败」都不再接手。
+        // ★★ 状态与心跳都已由认领落库（同一条条件更新，进程在循环中途退出时行停在 Sending，卡住批次那一遍扫得到它）。
+        //   被跟踪的那份消息的 Status 刻意不跟着改、也不在这里保存：改了它就是一列待写的修改，下一次保存
+        //   会把 Sending 无条件写回去，认领之后、保存之前落下的取消或删除于是被盖掉，剩下的人照发不误。
+        //   这一列此后只由 MessageClaim 的条件更新改写（理由见那里），被跟踪的那份停在加载时的值，任何保存都不碰它。
 
         var dueNow = DateTime.UtcNow;
         var pendingRecipients = notification.Recipients
@@ -381,22 +293,33 @@ public class NotificationService : ApplicationService, INotificationService
         if (pendingRecipients.Count == 0)
         {
             // ★★ 三种「现在没人可发」要分开答，因为它们的下文完全不同：
-            //   ① 有人被延后 → 这条消息还有下文，状态回到 Scheduled 等到期扫描接手，
+            //   ① 有人还排在延后里 → 这条消息还有下文，状态回到 Scheduled 等延后那一遍接手，
             //      **不能**盖 SentTime（那会让一条还没送到的消息显示成已发送）。
             //   ② 全员被拦   → 到此为止，Cancelled。
             //   ③ 本来就没有待发收件人 → 维持原有语义，Sent。
-            notification.Status = deferredCount > 0
+            // ★★ ① 要看**整条消息**的收件人，不只是这一轮新延后的人数：上一轮就延后、还没到点的那些
+            // 不在候选里（只挑到期的），deferredCount 数不到他们。只看 deferredCount 时，一条等着延后
+            // 到点的消息被再发一次（管理端「发送」、到期扫描）就会写成 Sent：而延后那一遍只看
+            // Scheduled 的消息，到点再也看不见它，被延后的人永远收不到。与下面主循环的判据同一份。
+            var stillDeferred = deferredCount > 0 || HasDeferredRecipients(notification);
+
+            // ★★ 「全员被拦」只说这一轮：续发的批次、延后到点的那一遍之前可能已经送到过别人。
+            //   此前只看这一轮，九百九十人昨晚已送达、剩下十个被延后的人到点时被上限拦下，整条消息就成了 Cancelled。
+            //   有人收到过的消息按已发送收尾：这一轮被拦下的人标 Cancelled，与主循环里被过滤掉的人同一个处置，不算失败。
+            var deliveredEarlier = notification.Recipients.Any(r => r.Status == NotificationStatus.Sent);
+
+            var emptyOutcome = stillDeferred
                 ? NotificationStatus.Scheduled
-                : everyoneFilteredOut ? NotificationStatus.Cancelled : NotificationStatus.Sent;
+                : everyoneFilteredOut && !deliveredEarlier ? NotificationStatus.Cancelled : NotificationStatus.Sent;
 
-            if (deferredCount == 0)
-                notification.SentTime = DateTime.UtcNow;
-
-            await _notificationRepository.UpdateAsync(notification, cancellationToken);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (!await FinishAsync(notification, emptyOutcome, stillDeferred ? notification.SentTime : DateTime.UtcNow, notification.FailureReason, cancellationToken))
+                return Fail(StoppedWhileSendingMessage(messageId, 0), 409, ErrorCodes.NOTIFICATION_ERROR);
 
             if (deferredCount > 0)
                 return Ok($"{deferredCount} recipient(s) are inside their quiet hours; delivery was deferred, not dropped.");
+
+            if (stillDeferred)
+                return Ok("No recipient is due yet; the remaining recipients are deferred by their quiet hours and will be sent when those end.");
 
             return everyoneFilteredOut
                 // 具体是哪一道拦下了谁，逐条写在收件人的 FailureReason 里。
@@ -416,6 +339,15 @@ public class NotificationService : ApplicationService, INotificationService
 
         foreach (var recipient in pendingRecipients)
         {
+            // ★★ 限速落在每个收件人的投递上（Dispatch:RatePerMinute，见 NotificationSendPacer）。
+            // 先等槽再占并发名额：等待期间不该占着一个并发位。
+            await progress.WaitAsync(_pacer.Reserve(notification.Type, notification.ProviderKey), cancellationToken);
+
+            // ★★ 管理端的取消与删除发生在另一个作用域里，而这份名单是开跑时读出来的：
+            // 每投递一个收件人之前问一次库，消息已不在发送中就停在这里，剩下的人一个都不发。
+            if (!await progress.StillSendingAsync(cancellationToken))
+                break;
+
             await _sendSemaphore!.WaitAsync(cancellationToken);
             try
             {
@@ -453,44 +385,45 @@ public class NotificationService : ApplicationService, INotificationService
         // ★★ 还有人排在静默时段之后时，这条消息**没有结束**：状态回到 Scheduled，
         // 到期扫描会把剩下那些发完。写成 Sent 就是一条「已发送」而实际上还没送到的记录，
         // 也会让恢复扫描永远看不见它。
-        var stillDeferred = notification.Recipients.Any(
-            r => r.Status == NotificationStatus.Scheduled && r.DeferredUntil != null);
-
-        if (stillDeferred)
+        NotificationStatus outcome;
+        var sentTime = notification.SentTime;
+        var failureReason = notification.FailureReason;
+        if (HasDeferredRecipients(notification))
         {
-            notification.Status = NotificationStatus.Scheduled;
-            notification.FailureReason = notification.FailureCount > 0 ? lastError : notification.FailureReason;
+            outcome = NotificationStatus.Scheduled;
+            failureReason = notification.FailureCount > 0 ? lastError : failureReason;
         }
         else if (notification.FailureCount == 0)
         {
-            notification.Status = NotificationStatus.Sent;
-            notification.SentTime = DateTime.UtcNow;
+            outcome = NotificationStatus.Sent;
+            sentTime = DateTime.UtcNow;
         }
         else if (notification.SuccessCount > 0)
         {
-            notification.Status = NotificationStatus.PartiallySent;
-            notification.SentTime = DateTime.UtcNow;
-            notification.FailureReason = lastError;
+            outcome = NotificationStatus.PartiallySent;
+            sentTime = DateTime.UtcNow;
+            failureReason = lastError;
         }
         else
         {
-            notification.Status = NotificationStatus.Failed;
-            notification.FailureReason = lastError;
+            outcome = NotificationStatus.Failed;
+            failureReason = lastError;
         }
 
-        await _notificationRepository.UpdateAsync(notification, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // 收尾同样是条件更新：这一轮里被取消或删除的消息，不再被写回成已发送（也不发「已发送」事件）。
+        if (!await FinishAsync(notification, outcome, sentTime, failureReason, cancellationToken))
+            return Fail(StoppedWhileSendingMessage(messageId, successCount), 409, ErrorCodes.NOTIFICATION_ERROR);
 
         // 发布事件
         if (EventBus != null)
         {
-            if (notification.Status == NotificationStatus.Failed)
+            if (outcome == NotificationStatus.Failed)
             {
                 await EventBus.PublishAsync(new NotificationFailedEvent
                 {
                     MessageId = notification.Id,
                     Type = notification.Type,
-                    FailureReason = notification.FailureReason ?? "Unknown error",
+                    FailureReason = failureReason ?? "Unknown error",
                     RetryCount = notification.RetryCount,
                     MaxRetryCount = notification.MaxRetryCount
                 });
@@ -511,83 +444,112 @@ public class NotificationService : ApplicationService, INotificationService
         LogInformation("Notification {NotificationId} sent: {SuccessCount} success, {FailureCount} failed",
             messageId, successCount, failureCount);
 
-        return notification.Status == NotificationStatus.Failed
+        return outcome == NotificationStatus.Failed
             ? Fail($"Failed to send notification: {lastError}", 500, ErrorCodes.NOTIFICATION_ERROR)
             : Ok("Notification sent successfully");
     }
 
+    /// <summary>
+    /// 取消一条还没发完的消息。正在发送中的消息同样可以取消：发送循环每投递一个收件人之前都会问一次库，
+    /// 看到取消就停下，剩下的人一个都不发（已经发出去的那些照实记成 Sent）。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 状态改写是一次条件更新（从刚才读到的状态改成 <c>Cancelled</c>），收件人的级联是一条按状态带条件的批量更新：
+    /// 此前这里把整行读出来、改完再整行写回，既会被正在飞的发送循环的整行写回盖掉，也会反过来把发送循环刚记下的
+    /// 计数与「已发送」盖回去。正在投递的那一个收件人此刻在库里仍是 <c>Pending</c>，会被标成 <c>Cancelled</c>，
+    /// 随后发送循环把它照实记成 <c>Sent</c> 或 <c>Failed</c>。
+    /// </remarks>
     public async Task<Result> CancelAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
-        var notification = await _notificationRepository.AsQueryable(withTracking: true)
-            .Include(m => m.Recipients)
-            .FirstOrDefaultAsync(m => m.Id == messageId, cancellationToken);
+        var status = await _notificationRepository.AsQueryable()
+            .Where(m => m.Id == messageId)
+            .Select(m => (NotificationStatus?)m.Status)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (notification == null)
+        if (status == null)
             return Fail($"Notification {messageId} not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
-        if (notification.Status == NotificationStatus.Sent || notification.Status == NotificationStatus.PartiallySent)
+        if (status == NotificationStatus.Sent || status == NotificationStatus.PartiallySent)
             return Fail($"Notification {messageId} has already been sent and cannot be cancelled", 400, ErrorCodes.NOTIFICATION_ERROR);
 
-        if (notification.Status == NotificationStatus.Cancelled)
+        if (status == NotificationStatus.Cancelled)
             return Ok("Notification is already cancelled");
 
-        notification.Status = NotificationStatus.Cancelled;
+        var cancelledRecipients = await TryCancelFromAsync(messageId, status.Value, cancellationToken);
+        if (cancelledRecipients == null)
+            return Fail($"Notification {messageId} changed state while it was being cancelled; reload it and try again", 409, ErrorCodes.NOTIFICATION_ERROR);
 
-        // Cascade: update pending/scheduled recipients to cancelled
-        foreach (var recipient in notification.Recipients.Where(r =>
-            r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled))
-        {
-            recipient.Status = NotificationStatus.Cancelled;
-        }
-
-        await _notificationRepository.UpdateAsync(notification, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        LogInformation("Notification cancelled: {NotificationId}", messageId);
+        LogInformation("Notification cancelled: {NotificationId} (was {Status}, {Count} recipient(s) not sent)",
+            messageId, status.Value, cancelledRecipients);
         return Ok("Notification cancelled successfully");
     }
 
+    /// <summary>
+    /// 批量取消还没开始发送的消息（<c>Pending</c> / <c>Scheduled</c>）。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 与 <see cref="CancelAsync"/> 同一种写法：每条消息的状态是一次条件更新（从读到的状态改成 <c>Cancelled</c>），
+    /// 收件人的级联是按状态带条件的批量更新。此前这里把整批消息连同收件人读进来、改完再 <c>UpdateManyAsync</c> 整图写回：
+    /// 读与写之间被排队的工作项或派发恢复认领走、已经送达了几个人的消息，会被写成 <c>Cancelled</c>，
+    /// 刚记成 <c>Sent</c> 的收件人连同 <c>SentTime</c> / 外部消息号一起被写回 <c>Cancelled</c>，投递报告从此说人没收到。
+    /// 读完之后状态已经变了的消息（被认领去发送了）原样留下，不计入取消的条数。
+    /// </remarks>
     public async Task<Result<int>> BatchCancelAsync(List<Guid> ids, CancellationToken cancellationToken = default)
     {
         Check.NotNullOrEmpty(ids);
 
-        var notifications = await _notificationRepository
-            .AsQueryable(withTracking: true)
-            .Include(n => n.Recipients)
+        var candidates = await _notificationRepository.AsQueryable()
             .Where(n => ids.Contains(n.Id) && (n.Status == NotificationStatus.Pending || n.Status == NotificationStatus.Scheduled))
+            .Select(n => new { n.Id, n.Status })
             .ToListAsync(cancellationToken);
 
-        if (notifications.Count == 0)
+        if (candidates.Count == 0)
             return Ok(0, "No cancellable notifications found");
 
-        foreach (var notification in notifications)
+        var cancelled = 0;
+        foreach (var candidate in candidates)
         {
-            notification.Status = NotificationStatus.Cancelled;
-
-            // Cascade: update pending/scheduled recipients to cancelled
-            foreach (var recipient in notification.Recipients.Where(r =>
-                r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled))
-            {
-                recipient.Status = NotificationStatus.Cancelled;
-            }
+            if (await TryCancelFromAsync(candidate.Id, candidate.Status, cancellationToken) != null)
+                cancelled++;
         }
 
-        await _notificationRepository.UpdateManyAsync(notifications, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        LogInformation("Batch cancelled {Count} notifications", notifications.Count);
-        return Ok(notifications.Count, $"{notifications.Count} notifications cancelled");
+        var changed = candidates.Count - cancelled;
+        LogInformation("Batch cancelled {Count} notifications ({Changed} changed state before they could be cancelled)", cancelled, changed);
+        return changed > 0
+            ? Ok(cancelled, $"{cancelled} notifications cancelled; {changed} started sending before they could be cancelled and were left as they are")
+            : Ok(cancelled, $"{cancelled} notifications cancelled");
     }
 
-    public async Task<Result<NotificationPreviewDto>> PreviewAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 把一条消息从 <paramref name="from"/> 改成 <c>Cancelled</c>（条件更新），成功时把还没发的收件人一并取消。
+    /// 返回取消的收件人数；消息此刻已不是 <paramref name="from"/> 时什么都不写，返回 <see langword="null"/>。
+    /// </summary>
+    private async Task<int?> TryCancelFromAsync(Guid messageId, NotificationStatus from, CancellationToken cancellationToken)
+    {
+        if (!await MessageClaim.TryTransitionAsync(_notificationRepository, messageId, from, NotificationStatus.Cancelled, cancellationToken))
+            return null;
+
+        // Cascade: recipients not sent yet are cancelled. 带条件的批量更新：已经由发送循环记成 Sent / Failed 的不动。
+        return await _recipientRepository.AsQueryable()
+            .Where(r => r.MessageId == messageId
+                        && (r.Status == NotificationStatus.Pending || r.Status == NotificationStatus.Scheduled))
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, NotificationStatus.Cancelled), cancellationToken);
+    }
+
+    public async Task<Result<NotificationPreviewDto>> PreviewAsync(PreviewNotificationRequest request, CancellationToken cancellationToken = default)
     {
         Check.NotNull(request);
 
-        var validationError = ValidateRecipients(request.Recipients);
-        if (validationError != null)
-            return Fail<NotificationPreviewDto>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
+        // 收件人可选：预览渲染的是内容。给了就按创建时的同一条规则校验，免得预览通过、真发时才 400。
+        if (request.Recipients is { Count: > 0 })
+        {
+            var validationError = ValidateRecipients(request.Recipients);
+            if (validationError != null)
+                return Fail<NotificationPreviewDto>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
+        }
 
-        var rendered = await RenderContentAsync(request, cancellationToken);
+        var source = ContentSource.Of(request);
+        var rendered = await RenderContentAsync(source, cancellationToken);
         if (!rendered.Succeeded)
             return Fail<NotificationPreviewDto>(rendered.Message ?? "Notification content could not be rendered", rendered.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
 
@@ -597,9 +559,16 @@ public class NotificationService : ApplicationService, INotificationService
         {
             Subject = subject,
             Content = content,
-            IsHtml = request.IsHtml,
+            // ★ 按渲染时实际用的输出类型回报，不是回显入参：IsHtml 默认 true，短信 / 推送的预览不带它时
+            //   会被当成 HTML 放进预览框，换行全部塌掉，而发出去的是纯文本。
+            IsHtml = ResolveOutputKind(source) switch
+            {
+                TemplateOutputKind.PlainText => false,
+                TemplateOutputKind.Html => true,
+                _ => request.IsHtml
+            },
             Category = category,
-            RecipientCount = request.Recipients.Count,
+            RecipientCount = request.Recipients?.Count ?? 0,
             TemplateName = request.TemplateName
         });
     }
@@ -617,19 +586,40 @@ public class NotificationService : ApplicationService, INotificationService
             .Where(r => r.Status == NotificationStatus.Failed)
             .ToList();
 
-        // 重发同样要过四道过滤：上次失败之后对方可能已经退订，而这条路径绕开 SendAsync。
-        (failedRecipients, _) = await _eligibility.FilterAsync(notification, failedRecipients, cancellationToken);
-
         if (failedRecipients.Count == 0)
             return Ok(0, "No failed recipients to resend to");
+
+        // ★★ 先抢到这条消息，再重发：理由与 SendCoreAsync 逐字相同：这条路径绕开 SendAsync 自己投递，
+        // 管理端连点两下就是两个并发的重发，各自把同一批失败的收件人再发一遍。认领之后消息在整个循环里
+        // 是 Sending（心跳由 SendProgress 推进），进程中途退出时卡住扫描接得回来。
+        if (notification.Status == NotificationStatus.Sending)
+            return Fail<int>($"Notification {messageId} is already being sent", 409, ErrorCodes.NOTIFICATION_ERROR);
+
+        if (!await MessageClaim.TryClaimAsync(_notificationRepository, notification.Id, notification.Status, cancellationToken))
+            return Fail<int>($"Notification {messageId} was taken by another sender; it is not sent twice", 409, ErrorCodes.NOTIFICATION_ERROR);
+
+        // 被跟踪的那份不跟着改 Status、不在这里保存（理由同 SendCoreAsync）：认领之后落下的取消或删除不会被它盖掉。
+
+        // 重发同样要过四道过滤：上次失败之后对方可能已经退订，而这条路径绕开 SendAsync。
+        // ★★ 过滤放在认领之后，与 SendCoreAsync 同序：静默时段那一道会把人延后（Scheduled + DeferredUntil），
+        // 这条消息于是还没有结束，收尾必须看见它们。此前过滤在认领之前、全员被延后时直接答「没有失败的收件人」，
+        // 消息原样停在 Failed / PartiallySent：延后那一遍只看 Scheduled 的消息，这些人从此收不到。
+        var (sendable, deferredCount) = await _eligibility.FilterAsync(notification, failedRecipients, cancellationToken);
 
         var successCount = 0;
         // 与 SendAsync 同一条理由：整批只在末尾保存一次时，中途崩溃会把已经重发出去的
         // 那些人退回 Failed，下一次「重发失败项」再发一遍。
         var progress = new SendProgress(_notificationRepository, _unitOfWork, notification);
 
-        foreach (var recipient in failedRecipients)
+        foreach (var recipient in sendable)
         {
+            // 与 SendAsync 同一道限速：重发打到的是同一个发送账号。
+            await progress.WaitAsync(_pacer.Reserve(notification.Type, notification.ProviderKey), cancellationToken);
+
+            // 与 SendAsync 同一道取消检查：消息在这一轮里被取消或删除，剩下的人不再重发。
+            if (!await progress.StillSendingAsync(cancellationToken))
+                break;
+
             recipient.Status = NotificationStatus.Pending;
             recipient.FailureReason = null;
 
@@ -664,26 +654,56 @@ public class NotificationService : ApplicationService, INotificationService
         notification.SuccessCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Sent);
         notification.FailureCount = notification.Recipients.Count(r => r.Status == NotificationStatus.Failed);
 
-        if (notification.FailureCount == 0)
-        {
-            notification.Status = NotificationStatus.Sent;
-        }
+        // 认领把状态改成了 Sending，所以每一种结局都要写回。
+        // 还有人排在静默时段之后时这条消息没有结束，与 SendAsync 同一判据。
+        // 既没有人收到过、也没有人失败（剩下的失败项都被过滤拦下了）：与 SendAsync「全员被拦」同一个结局。
+        NotificationStatus outcome;
+        if (HasDeferredRecipients(notification))
+            outcome = NotificationStatus.Scheduled;
+        else if (notification.FailureCount == 0)
+            outcome = notification.SuccessCount > 0 ? NotificationStatus.Sent : NotificationStatus.Cancelled;
         else if (notification.SuccessCount > 0)
-        {
-            notification.Status = NotificationStatus.PartiallySent;
-        }
+            outcome = NotificationStatus.PartiallySent;
+        else
+            outcome = NotificationStatus.Failed;
 
-        await _notificationRepository.UpdateAsync(notification, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (!await FinishAsync(notification, outcome, notification.SentTime, notification.FailureReason, cancellationToken))
+            return Fail<int>(StoppedWhileSendingMessage(messageId, successCount), 409, ErrorCodes.NOTIFICATION_ERROR);
 
-        LogInformation("Resent notification {NotificationId} to {Count} failed recipients, {Success} succeeded",
-            messageId, failedRecipients.Count, successCount);
+        LogInformation("Resent notification {NotificationId} to {Count} failed recipients, {Success} succeeded, {Deferred} deferred by quiet hours",
+            messageId, sendable.Count, successCount, deferredCount);
 
-        return Ok(successCount, $"{successCount}/{failedRecipients.Count} recipients resent successfully");
+        var summary = $"{successCount}/{sendable.Count} recipients resent successfully";
+        return deferredCount > 0
+            ? Ok(successCount, $"{summary}; {deferredCount} recipient(s) are inside their quiet hours and will be sent when those end")
+            : Ok(successCount, summary);
     }
 
     #region Private Methods
 
+
+    /// <summary>
+    /// 把这一轮的结局写回：先按属性保存收件人与两个计数，再用一条条件更新写消息的状态。
+    /// 消息在这一轮里被取消或删除了，状态一列都不写，返回 <see langword="false"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 被跟踪的那份消息的 <c>Status</c> 刻意<b>不</b>跟着改：从认领到结局，它一直停在加载时的值、从未被标成已修改，
+    /// 之后无论谁再保存一次（外层工作单元提交时），这一列都不会被写，盖不掉别处的取消、删除与结局。
+    /// </remarks>
+    private async Task<bool> FinishAsync(Message notification, NotificationStatus outcome, DateTime? sentTime, string? failureReason, CancellationToken cancellationToken)
+    {
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (await MessageClaim.TryFinishAsync(_notificationRepository, notification.Id, outcome, sentTime, failureReason, cancellationToken))
+            return true;
+
+        LogInformation("Notification {NotificationId} was cancelled or deleted while it was being sent; the deliveries made in this round are recorded and its status is left as is",
+            notification.Id);
+        return false;
+    }
+
+    /// <summary>发送进行到一半时消息被取消或删除：已经发出去的照实记下，剩下的不发，状态留给取消 / 删除的那一方。</summary>
+    private static string StoppedWhileSendingMessage(Guid messageId, int sentThisRound)
+        => $"Notification {messageId} was cancelled or deleted while it was being sent; {sentThisRound} recipient(s) had already been sent and the rest were not";
 
     /// <summary>
     /// 把一次成功投递记到收件人上。
@@ -731,6 +751,13 @@ public class NotificationService : ApplicationService, INotificationService
         recipient.FailureReason = bounded;
         return bounded;
     }
+
+    /// <summary>
+    /// 还有收件人排在静默时段之后（<c>Scheduled</c> + <c>DeferredUntil</c>）：这条消息没有结束，
+    /// 状态要留在 <c>Scheduled</c> 等延后那一遍接手。
+    /// </summary>
+    private static bool HasDeferredRecipients(Message notification)
+        => notification.Recipients.Any(r => r.Status == NotificationStatus.Scheduled && r.DeferredUntil != null);
 
     private static void EnsureSemaphoreInitialized(int maxConcurrency)
     {
@@ -847,6 +874,24 @@ public class NotificationService : ApplicationService, INotificationService
     /// <summary>渲染后的消息内容：主题、正文与消息分类。</summary>
     private readonly record struct RenderedContent(string Subject, string Content, string Category);
 
+    /// <summary>渲染一条消息内容要用的输入。创建与预览两条路径各自从请求里取，走同一份渲染规则。</summary>
+    private readonly record struct ContentSource(
+        NotificationType Type,
+        string Subject,
+        string Content,
+        bool IsHtml,
+        string? TemplateName,
+        string? LayoutName,
+        Dictionary<string, object>? TemplateVariables,
+        string? Category)
+    {
+        public static ContentSource Of(CreateNotificationRequest request)
+            => new(request.Type, request.Subject, request.Content, request.IsHtml, request.TemplateName, request.LayoutName, request.TemplateVariables, request.Category);
+
+        public static ContentSource Of(PreviewNotificationRequest request)
+            => new(request.Type, request.Subject ?? string.Empty, request.Content ?? string.Empty, request.IsHtml, request.TemplateName, request.LayoutName, request.TemplateVariables, request.Category);
+    }
+
     /// <summary>
     /// 渲染通知内容（使用 ITemplateRenderService 或直接使用请求内容）。
     /// </summary>
@@ -859,7 +904,7 @@ public class NotificationService : ApplicationService, INotificationService
     /// 而日志里是「Invitation email sent」。调用方显式给了主题或正文时，回落照旧成立。
     /// </para>
     /// </remarks>
-    private async Task<Result<RenderedContent>> RenderContentAsync(CreateNotificationRequest request, CancellationToken cancellationToken)
+    private async Task<Result<RenderedContent>> RenderContentAsync(ContentSource request, CancellationToken cancellationToken)
     {
         var category = request.Category ?? "General";
 
@@ -934,7 +979,7 @@ public class NotificationService : ApplicationService, INotificationService
     /// 成员、纯文本邮件也不是一种模板类型 —— 不在这里说清楚，推送里的 <c>@Model.Url</c> 就发成 <c>&amp;amp;</c>，
     /// 发送状态成功、无日志。
     /// </remarks>
-    private static TemplateOutputKind? ResolveOutputKind(CreateNotificationRequest request) => request.Type switch
+    private static TemplateOutputKind? ResolveOutputKind(ContentSource request) => request.Type switch
     {
         NotificationType.Sms or NotificationType.Push => TemplateOutputKind.PlainText,
         NotificationType.Email => request.IsHtml ? TemplateOutputKind.Html : TemplateOutputKind.PlainText,
@@ -1023,6 +1068,139 @@ public class NotificationService : ApplicationService, INotificationService
         return await _fileReadAccessProbe.CanReadAsync(fileId, cancellationToken)
             ? null
             : $"Attachment '{attachment.FileName}' references stored file {fileId}, which the current user cannot read.";
+    }
+
+    /// <summary>
+    /// 由一份创建请求构造出待落库的消息：校验收件人、渲染内容、定下服务商、过附件纪律，再拼实体。
+    /// 失败时返回可直接回给调用方的英文原因。
+    /// </summary>
+    /// <remarks>
+    /// 单条与批量两条创建路径共用这一份（批量那条此前自己拼实体，漏掉了 <c>ScheduledTime</c> 与定时状态）。
+    /// </remarks>
+    /// <param name="request">创建请求。</param>
+    /// <param name="queuedAt">
+    /// 排队发送时交给发送的那一刻（见 <see cref="QueuedAt"/>），写进 <c>ScheduledTime</c>；草稿与其它情形为 <see langword="null"/>。
+    /// </param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    private async Task<Result<Message>> BuildMessageAsync(CreateNotificationRequest request, DateTime? queuedAt, CancellationToken cancellationToken)
+    {
+        var validationError = ValidateRecipients(request.Recipients);
+        if (validationError != null)
+            return Fail<Message>(validationError, 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var rendered = await RenderContentAsync(ContentSource.Of(request), cancellationToken);
+        if (!rendered.Succeeded)
+            return Fail<Message>(rendered.Message ?? "Notification content could not be rendered", rendered.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var (subject, content, category) = rendered.Data;
+
+        var providerKey = await ResolveProviderKeyAsync(request, category, cancellationToken);
+        if (!providerKey.Succeeded)
+            return Fail<Message>(providerKey.Message ?? "Notification provider could not be resolved", providerKey.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var attachments = await BuildAttachmentsAsync(request, cancellationToken);
+        if (!attachments.Succeeded)
+            return Fail<Message>(attachments.Message ?? "Attachment source is not allowed", attachments.Code ?? 400, ErrorCodes.NOTIFICATION_ERROR);
+
+        var notification = new Message
+        {
+            Type = request.Type,
+            Subject = subject,
+            Content = content,
+            IsHtml = request.IsHtml,
+            Priority = request.Priority,
+            Status = request.ScheduledTime.HasValue ? NotificationStatus.Scheduled : NotificationStatus.Pending,
+            SenderId = request.SenderId,
+            Category = category,
+            IsTransactional = request.IsTransactional,
+            TemplateName = request.TemplateName,
+            ProviderKey = providerKey.Data,
+            ScheduledTime = request.ScheduledTime ?? queuedAt,
+            RetryCount = 0,
+            MaxRetryCount = request.MaxRetryCount > 0 ? request.MaxRetryCount : 3,
+            TotalRecipientCount = request.Recipients.Count,
+            SuccessCount = 0,
+            FailureCount = 0
+        };
+
+        notification.Recipients = request.Recipients.Select(r => new Recipient
+        {
+            Address = r.Address,
+            Name = r.Name,
+            UserId = r.UserId,
+            Status = NotificationStatus.Pending
+        }).ToList();
+
+        notification.Attachments = attachments.Data!;
+
+        return Ok(notification);
+    }
+
+    /// <summary>发布「通知已创建」事件（没有事件总线时什么都不做）。</summary>
+    private async Task PublishCreatedAsync(Message notification)
+    {
+        if (EventBus == null)
+            return;
+
+        await EventBus.PublishAsync(new NotificationCreatedEvent
+        {
+            MessageId = notification.Id,
+            Type = notification.Type,
+            RecipientCount = notification.TotalRecipientCount,
+            Priority = notification.Priority,
+            Category = notification.Category
+        });
+    }
+
+    /// <summary>
+    /// 排队发送（没定时、也不要求立即发送）的消息在落库时就写下「最早几点发」= 现在；其余返回 <see langword="null"/>。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 排队只是把工作项写进<b>进程内</b>的有界队列，行停在 <c>Pending</c>。进程在队列排空之前退出，
+    /// 这些行就永远停在那里：恢复扫描此前只看 <c>Sending</c> / <c>Scheduled</c>，而 <c>Pending</c> 同时也是
+    /// 草稿（<c>CreateAsync</c>，只创建不发送）的状态，不能一概捎带发出去。<c>Pending</c> + <c>ScheduledTime</c>
+    /// 就是「已经交给发送」的标记：派发恢复超过宽限仍见它停在 <c>Pending</c> 就接手（见
+    /// <c>NotificationDispatchBackgroundService.ResumeOverdueQueuedAsync</c>），草稿不带它，永远不会被碰。
+    /// 延迟重试写的是同一列（退避到期的时刻）。不加列，不需要迁移。
+    /// </remarks>
+    private static DateTime? QueuedAt(CreateNotificationRequest request)
+        => request.ScheduledTime == null && !request.SendImmediately ? DateTime.UtcNow : null;
+
+    /// <summary>
+    /// 刚落库的消息接下来怎么发：定时到将来 → 延迟入队；要求立即发送 → 当场发；其余 → 入队。
+    /// </summary>
+    /// <remarks>
+    /// ★ 顺序就是语义：定时优先于「立即发送」。单条与批量两条「创建并发送」共用这一份。
+    /// 没有队列服务时定时消息不入队，行已是 <c>Scheduled</c> + <c>ScheduledTime</c>，到期后由派发恢复的扫描发出去。
+    /// </remarks>
+    private async Task<Result> StartDeliveryAsync(Guid messageId, CreateNotificationRequest request, CancellationToken cancellationToken)
+    {
+        if (request.ScheduledTime is { } scheduledTime && scheduledTime > DateTime.UtcNow)
+        {
+            if (_queueService != null)
+            {
+                await _queueService.EnqueueWithDelayAsync(
+                    NotificationWorkItem.SendMessage(messageId, CurrentTenantId), scheduledTime - DateTime.UtcNow);
+            }
+
+            LogInformation("Notification scheduled: {NotificationId}, Type: {Type}, ScheduledTime: {ScheduledTime}",
+                messageId, request.Type, scheduledTime);
+            return Ok($"Notification scheduled for {scheduledTime:u}");
+        }
+
+        if (request.SendImmediately)
+        {
+            var sendResult = await SendAsync(messageId, cancellationToken);
+            if (!sendResult.Succeeded)
+                return Fail(sendResult.Message ?? "Failed to send notification", sendResult.Code ?? 400, sendResult.ErrorCode);
+        }
+        else
+        {
+            await QueueNotificationAsync(messageId, cancellationToken);
+        }
+
+        LogInformation("Notification created and queued: {NotificationId}, Type: {Type}", messageId, request.Type);
+        return Ok("Notification created and queued successfully");
     }
 
     private async Task QueueNotificationAsync(Guid messageId, CancellationToken cancellationToken)

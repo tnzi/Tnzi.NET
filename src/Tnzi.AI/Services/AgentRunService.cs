@@ -168,14 +168,14 @@ public class AgentRunService : ApplicationService, IAgentRunService
         if (entity.Status != AgentRunStatus.AwaitingApproval)
             return Fail("Run is not awaiting approval", 400, ErrorCodes.RunInvalidState);
 
-        await _runtime.ResumeAsync(runId, new ResumeRunInput
+        var result = await _runtime.ResumeAsync(runId, new ResumeRunInput
         {
             ApprovalDecision = "approve",
             ApprovalComment = comment
         });
 
         Logger.LogInformation("Run {RunId} approved with comment: {Comment}", runId, comment);
-        return Ok();
+        return ToResumeOutcome(result);
     }
 
     public async Task<Result> RejectAsync(Guid runId, string? comment)
@@ -187,14 +187,15 @@ public class AgentRunService : ApplicationService, IAgentRunService
         if (entity.Status != AgentRunStatus.AwaitingApproval)
             return Fail("Run is not awaiting approval", 400, ErrorCodes.RunInvalidState);
 
-        await _runtime.ResumeAsync(runId, new ResumeRunInput
+        var result = await _runtime.ResumeAsync(runId, new ResumeRunInput
         {
             ApprovalDecision = "reject",
             ApprovalComment = comment
         });
 
         Logger.LogInformation("Run {RunId} rejected with comment: {Comment}", runId, comment);
-        return Ok();
+        // 驳回的正常结局就是 Rejected：这次操作成功了，只是运行按驳回收尾
+        return result.FinishReason == FinishReasons.Rejected ? Ok() : ToResumeOutcome(result);
     }
 
     public async Task<Result> RetryNodeAsync(Guid runId, Guid nodeId)
@@ -214,14 +215,23 @@ public class AgentRunService : ApplicationService, IAgentRunService
         if (entity.Status != AgentRunStatus.Failed)
             return Fail("Run must be in failed state before retrying a node", 400, ErrorCodes.RunInvalidState);
 
-        await _runtime.ResumeAsync(runId, new ResumeRunInput
+        var result = await _runtime.ResumeAsync(runId, new ResumeRunInput
         {
             RetryNodeId = nodeId
         });
 
         Logger.LogInformation("Node {NodeId} in Run {RunId} retried via runtime resume", nodeId, runId);
-        return Ok();
+        return ToResumeOutcome(result);
     }
+
+    /// <summary>
+    /// 续跑的失败（配额、护栏、节点再次失败）以结果返回而不是异常，端点按结果回答；
+    /// 否则节点重试再次失败时界面照样弹出「成功」，运行却还停在 Failed。
+    /// </summary>
+    private Result ToResumeOutcome(AgentRunResult result)
+        => TryMapFailure(result, out var statusCode, out var errorCode)
+            ? Fail(result.Response, statusCode, errorCode)
+            : Ok();
 
     private static AgentResponseDto MapResponse(AgentRunResult result)
     {

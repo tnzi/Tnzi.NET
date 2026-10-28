@@ -1,4 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { defineComponent, h, ref } from 'vue'
+import { mount } from '@vue/test-utils'
+import { NForm, NFormItem, type FormInst } from 'naive-ui'
+import type { IFormRule } from '@tnzi/core'
 import {
   convertToMenuOptions,
   convertFormRule,
@@ -83,6 +87,79 @@ describe('utils/naive-helpers', () => {
       const validator = vi.fn().mockResolvedValue('specific error')
       const rule = convertFormRule({ validator } as any)
       await expect(rule.validator!({} as any, 'v', () => {})).rejects.toThrow('specific error')
+    })
+  })
+
+  describe('convertFormRule: a required value of only whitespace is missing (the backend [Required] refuses it)', () => {
+    // Run the converted rule through a real NForm: async-validator decides
+    // which checks run from the rule's shape (a `validator` shadows `required`,
+    // `min`, `max` and `pattern`), so asserting fields on the rule proves nothing.
+    async function errorsFor(rule: IFormRule, value: unknown): Promise<string[]> {
+      const formRef = ref<FormInst | null>(null)
+      const wrapper = mount(defineComponent({
+        setup: () => () =>
+          h(NForm, { ref: formRef, model: { v: value }, rules: convertFormRules({ v: [rule] }) }, () =>
+            h(NFormItem, { path: 'v', label: 'V' }, () => h('span'))),
+      }))
+      try {
+        await formRef.value!.validate()
+        return []
+      } catch (errors) {
+        return (errors as Array<Array<{ message?: string }>>).flat().map((e) => e.message ?? '')
+      } finally {
+        wrapper.unmount()
+      }
+    }
+
+    it.each([
+      ['a bare required rule', { required: true, message: 'req' }],
+      ['a required rule with a trigger', { required: true, message: 'req', trigger: 'blur' }],
+      ['a required rule with a length range', { required: true, message: 'req', min: 2, max: 10 }],
+      ['a required rule with a pattern', { required: true, message: 'req', pattern: /^[\s\w]+$/ }],
+      ['a required rule with a custom validator', { required: true, message: 'req', validator: () => true }],
+    ] as Array<[string, IFormRule]>)('%s refuses a whitespace-only value', async (_case, rule) => {
+      expect(await errorsFor(rule, '   ')).toEqual(['req'])
+      expect(await errorsFor(rule, ' \t\n ')).toEqual(['req'])
+      // Positive control: a real value with spaces around it passes the same rule.
+      expect(await errorsFor(rule, ' ok ')).toEqual([])
+    })
+
+    it('a required rule with a custom validator refuses an empty value (async-validator never read `required` next to a validator)', async () => {
+      const rule: IFormRule = { required: true, message: 'req', validator: () => true }
+      expect(await errorsFor(rule, '')).toEqual(['req'])
+      expect(await errorsFor(rule, null)).toEqual(['req'])
+      expect(await errorsFor(rule, [])).toEqual(['req'])
+    })
+
+    it('a bare required rule still treats an empty list as missing and 0 / false as values', async () => {
+      const rule: IFormRule = { required: true, message: 'req' }
+      expect(await errorsFor(rule, [])).toEqual(['req'])
+      expect(await errorsFor(rule, ['a'])).toEqual([])
+      expect(await errorsFor(rule, 0)).toEqual([])
+      expect(await errorsFor(rule, false)).toEqual([])
+    })
+
+    it('a required rule with a length range still checks the length', async () => {
+      const rule: IFormRule = { required: true, message: 'req', min: 3 }
+      expect(await errorsFor(rule, 'ab')).toEqual(['req'])
+      expect(await errorsFor(rule, 'abc')).toEqual([])
+    })
+
+    it('a required rule with a pattern still checks the pattern, and a validator still runs', async () => {
+      const patterned: IFormRule = { required: true, message: 'req', pattern: /^\d+$/ }
+      expect(await errorsFor(patterned, 'abc')).toEqual(['req'])
+      expect(await errorsFor(patterned, '123')).toEqual([])
+      expect(await errorsFor({ required: true, validator: (v) => v === 'ok' || 'not ok' }, 'no')).toEqual(['not ok'])
+    })
+
+    it('a required rule without a message keeps the form default messages', async () => {
+      expect(await errorsFor({ required: true }, '  ')).toEqual(['v is required'])
+      expect(await errorsFor({ required: true }, '')).toEqual(['v is required'])
+      expect(await errorsFor({ required: true, pattern: /^\d+$/ }, 'abc')).toEqual(['v value abc does not match pattern /^\\d+$/'])
+    })
+
+    it('an optional rule accepts a whitespace-only value', async () => {
+      expect(await errorsFor({ max: 10 }, '   ')).toEqual([])
     })
   })
 

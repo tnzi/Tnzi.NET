@@ -43,6 +43,11 @@ public abstract class McpProviderBase<TSelf> where TSelf : class
             var adapter = await ClientFactory.GetOrCreateClientAsync(server, ct).ConfigureAwait(false);
             return await operation(adapter, ct).ConfigureAwait(false);
         }
+        catch (McpServerUnavailableException ex)
+        {
+            Logger.LogDebug(ex, "Skipped {Operation} on MCP server '{ServerName}': cooling down after a failed connection", operationName, serverName);
+            return defaultValue;
+        }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to {Operation} from MCP server '{ServerName}'", operationName, serverName);
@@ -72,6 +77,11 @@ public abstract class McpProviderBase<TSelf> where TSelf : class
                 {
                     var adapter = await ClientFactory.GetOrCreateClientAsync(server, ct).ConfigureAwait(false);
                     return await operation(adapter, ct).ConfigureAwait(false);
+                }
+                catch (McpServerUnavailableException ex)
+                {
+                    Logger.LogDebug(ex, "Skipped {Operation} on MCP server '{ServerName}': cooling down after a failed connection", operationName, server.Name);
+                    return Array.Empty<TItem>();
                 }
                 catch (Exception ex)
                 {

@@ -148,7 +148,8 @@ const props = withDefaults(
     customerOptions: SelectOption[]
     vendorOptions: SelectOption[]
     /**
-     * Gate write actions on `finance.bankFeed.update` / `finance.document.create`.
+     * Gate write actions on `finance.bankFeed.update` / `finance.document.create`
+     * plus `finance.document.update` (creating from a line also posts it).
      *
      * Defaulted explicitly: Vue casts an ABSENT Boolean prop to `false`, so
      * leaving these undeclared would silently disable every action for callers
@@ -202,24 +203,43 @@ function candidatesFor(id: string): BankMatchCandidateDto[] {
   return candidateCache.value[id] ?? []
 }
 
+/**
+ * Only the latest load may paint. The account selector sits on the same
+ * screen, so a slower answer for the previous account (or tab) could land
+ * after the current one: the operator then saw A's lines, A's suggested matches
+ * and A's counter under B, and OK confirmed or created documents for A.
+ */
+let loadSeq = 0
+/**
+ * Bumped when the account or the tab changes. A write started before the
+ * switch still reports `settled`, but its line is no longer on screen and must
+ * not count down the new account's queue.
+ */
+let view = 0
+
 async function load() {
+  const seq = ++loadSeq
   if (!props.accountId) {
     rows.value = []
     totalCount.value = 0
     pendingTotal.value = null
+    loading.value = false
     return
   }
+  // Read once: the request and what its answer is filed under are one pair.
+  const loadingStatus = status.value
   loading.value = true
   error.value = null
   try {
     const page = await props.bridge.bankFeed.transactions({
       pageIndex: pageIndex.value,
       pageSize: PAGE_SIZE,
-      filters: { accountId: props.accountId, status: status.value },
+      filters: { accountId: props.accountId, status: loadingStatus },
     })
+    if (seq !== loadSeq) return
     rows.value = page.items
     totalCount.value = page.totalCount
-    if (status.value === BankTransactionStatus.Pending) {
+    if (loadingStatus === BankTransactionStatus.Pending) {
       pendingTotal.value = page.totalCount
       // Anchor the progress denominator on the first load for this account, so
       // the bar measures *this session's* work instead of resetting to 0% on
@@ -227,16 +247,18 @@ async function load() {
       if (sessionStart.value === 0) sessionStart.value = page.totalCount
     }
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = e instanceof Error ? e.message : String(e)
     rows.value = []
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 watch(
   () => props.accountId,
   () => {
+    view += 1
     pageIndex.value = 1
     sessionStart.value = 0
     pendingTotal.value = null
@@ -247,6 +269,7 @@ watch(
 )
 
 watch(status, () => {
+  view += 1
   pageIndex.value = 1
   void load()
 })
@@ -256,11 +279,20 @@ function goToPage(next: number) {
   void load()
 }
 
-/** Drop the settled row in place - a full reload would scroll the operator away. */
+/**
+ * Drop the settled row in place - a full reload would scroll the operator away.
+ * The line leaves the tab on screen: from For review it is done (one fewer
+ * left); from Categorized or Excluded, Unmatch and Restore send it back to
+ * review (one more left).
+ */
 function settle(txn: BankTransactionDto) {
   rows.value = rows.value.filter((r) => r.id !== txn.id)
   totalCount.value = Math.max(0, totalCount.value - 1)
-  if (pendingTotal.value !== null) pendingTotal.value = Math.max(0, pendingTotal.value - 1)
+  if (pendingTotal.value !== null) {
+    pendingTotal.value = status.value === BankTransactionStatus.Pending
+      ? Math.max(0, pendingTotal.value - 1)
+      : pendingTotal.value + 1
+  }
   emit('settled', txn)
   // Refill an emptied page so the operator is never left staring at a blank
   // list while later pages still hold work.
@@ -268,15 +300,19 @@ function settle(txn: BankTransactionDto) {
 }
 
 async function run(txn: BankTransactionDto, action: () => Promise<unknown>) {
+  const startedIn = view
   busyId.value = txn.id
   error.value = null
   try {
     await action()
-    settle(txn)
+    // The line settled either way; the host refreshes its totals. Only the
+    // view it was started in holds that line and counts it.
+    if (view === startedIn) settle(txn)
+    else emit('settled', txn)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    busyId.value = null
+    if (busyId.value === txn.id) busyId.value = null
   }
 }
 
@@ -309,14 +345,17 @@ function onExclude(txn: BankTransactionDto) {
 
 async function onLoadCandidates(txn: BankTransactionDto) {
   if (candidateCache.value[txn.id]) return
+  const startedIn = view
   candidateLoadingId.value = txn.id
   try {
     const list = await props.bridge.bankFeed.candidates(txn.id)
-    candidateCache.value = { ...candidateCache.value, [txn.id]: list }
+    // The cache was emptied for the account now on screen; a line of the
+    // previous one does not belong in it.
+    if (view === startedIn) candidateCache.value = { ...candidateCache.value, [txn.id]: list }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    if (view === startedIn) error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    candidateLoadingId.value = null
+    if (candidateLoadingId.value === txn.id) candidateLoadingId.value = null
   }
 }
 
@@ -324,10 +363,12 @@ async function onLoadCandidates(txn: BankTransactionDto) {
  * Seed each pending row's candidate list from the engine's own suggestion so
  * the Match pane has something to render before the operator asks for
  * alternatives (the list endpoint returns the suggested id, not the line).
+ * Stops once another page of rows has replaced this one.
  */
 watch(rows, async (list) => {
   if (status.value !== BankTransactionStatus.Pending) return
   for (const txn of list) {
+    if (rows.value !== list) return
     if (txn.suggestedJournalLineId && !candidateCache.value[txn.id]) {
       await onLoadCandidates(txn)
     }

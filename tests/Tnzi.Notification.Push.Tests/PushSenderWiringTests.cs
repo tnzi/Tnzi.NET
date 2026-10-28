@@ -71,6 +71,11 @@ public class PushSenderWiringTests
         result.FailureReason.ShouldNotBeNull().ShouldContain("Notification:PushSender");
         result.FailureReason.ShouldNotContain("Tnzi.Notification.Push", customMessage: "the package is loaded; the fix is configuration, not a package");
 
+        // 带点击目标的发法：默认那一格给出同一句指向配置的失败，不是接口默认体那句「不支持点击目标」。
+        var withContent = await sender.SendToAsync("token", new PushContent("t", "b") { Link = "https://app.example.com/x" });
+        withContent.Success.ShouldBeFalse();
+        withContent.FailureReason.ShouldBe(result.FailureReason);
+
         scope.ServiceProvider.GetRequiredKeyedService<IPushSender>("ops").ShouldBeOfType<PushSender>();
     }
 

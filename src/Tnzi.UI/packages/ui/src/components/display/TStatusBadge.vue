@@ -15,6 +15,7 @@
  */
 import { computed } from 'vue'
 import { NTag } from 'naive-ui'
+import { EMPTY_DASH, isEmptyValue } from '../../utils/placeholders'
 
 export type StatusType = 'success' | 'info' | 'warning' | 'error' | 'default'
 
@@ -76,6 +77,19 @@ function resolveLabel(key: string | undefined, fallback: string): string {
   return out || fallback || humaniseKey(key)
 }
 
+/**
+ * No value and nothing that names it: render the shared placeholder instead of
+ * a pill reading "null" / "undefined". An explicit label, label key or a
+ * mapping entry for the empty key still renders a pill.
+ */
+const isEmpty = computed(
+  () =>
+    isEmptyValue(props.value) &&
+    !props.label &&
+    !props.labelKey &&
+    props.mapping[String(props.value)] === undefined,
+)
+
 const resolved = computed<{ type: StatusType; label: string }>(() => {
   // Explicit label-key + type - short-circuit i18n resolution path.
   if (props.type && props.labelKey) {
@@ -119,7 +133,14 @@ const resolved = computed<{ type: StatusType; label: string }>(() => {
 </script>
 
 <template>
-  <NTag :type="resolved.type === 'default' ? 'default' : resolved.type" :size="size" round>
+  <span v-if="isEmpty" class="t-status-badge__empty">{{ EMPTY_DASH }}</span>
+  <NTag v-else :type="resolved.type === 'default' ? 'default' : resolved.type" :size="size" round>
     {{ resolved.label }}
   </NTag>
 </template>
+
+<style scoped>
+.t-status-badge__empty {
+  color: var(--tnzi-base-text-muted);
+}
+</style>

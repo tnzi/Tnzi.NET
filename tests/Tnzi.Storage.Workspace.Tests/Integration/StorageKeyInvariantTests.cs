@@ -23,7 +23,9 @@ public class StorageKeyInvariantTests : WorkspaceIntegrationTestBase
             recorder,
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider,
-            new UploadGuard(new StaticOptionsMonitor<StorageOptions>(StorageOptions)));
+            new UploadGuard(new StaticOptionsMonitor<StorageOptions>(StorageOptions)),
+            UnlimitedStorageQuota.Instance,
+            Repo<FileFolder>());
 
     private FileVersionService CreateVersionService(RecordingFileStorage recorder)
         => new(
@@ -32,7 +34,8 @@ public class StorageKeyInvariantTests : WorkspaceIntegrationTestBase
             recorder,
             TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider,
-            new UploadGuard(new StaticOptionsMonitor<StorageOptions>(StorageOptions)));
+            new UploadGuard(new StaticOptionsMonitor<StorageOptions>(StorageOptions)),
+            UnlimitedStorageQuota.Instance);
 
     private async Task<string> Md5OfStoredAsync(string path)
     {

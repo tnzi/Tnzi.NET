@@ -79,13 +79,13 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
     conversations: {
       fetch: adminApi
         ? async (query) =>
-            unwrap(await adminApi.queryConversations(mapQueryToListRequest(query) as unknown as AdminConversationQueryDto))
+            unwrapOk(await adminApi.queryConversations(mapQueryToListRequest(query) as unknown as AdminConversationQueryDto))
         : noClient('conversations.fetch'),
       detail: adminApi
         ? async (id) => unwrap(await adminApi.getConversation(id))
         : noClient('conversations.detail'),
       messages: adminApi
-        ? async (id, params) => unwrap(await adminApi.getConversationMessages(id, params))
+        ? async (id, params) => unwrapOk(await adminApi.getConversationMessages(id, params))
         : noClient('conversations.messages'),
       delete: adminApi
         ? async (ids) => {
@@ -104,7 +104,7 @@ export function createChatBridge(deps: ChatBridgeDeps = {}): ChatBridge {
       : noClient('presence'),
 
     broadcasts: adminApi
-      ? async (params) => unwrap(await adminApi.getBroadcasts(params))
+      ? async (params) => unwrapOk(await adminApi.getBroadcasts(params))
       : noClient('broadcasts'),
   }
 }

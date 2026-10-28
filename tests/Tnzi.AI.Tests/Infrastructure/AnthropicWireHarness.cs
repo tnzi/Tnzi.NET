@@ -14,7 +14,7 @@ internal static class AnthropicWireHarness
 {
     public const string Model = "claude-sonnet-4-5";
 
-    public static (IChatClient client, CapturingHandler handler) CreateClient()
+    public static (IChatClient client, CapturingHandler handler) CreateClient(string model = Model)
     {
         var handler = new CapturingHandler();
         var anthropic = new AnthropicClient
@@ -22,7 +22,8 @@ internal static class AnthropicWireHarness
             ApiKey = "sk-ant-test",
             HttpClient = new HttpClient(handler)
         };
-        IChatClient chatClient = new AnthropicThinkingChatClient(anthropic.AsIChatClient(Model));
+        // 与生产同一条装配路径：thinking 形态按型号选（AnthropicChatClientProvider.CreateThinkingAwareClient）
+        var chatClient = AnthropicChatClientProvider.CreateThinkingAwareClient(anthropic, model);
         return (chatClient, handler);
     }
 

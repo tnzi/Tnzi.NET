@@ -100,6 +100,10 @@ const t = makePageTranslator('finance.vendors')
 // Columns still drive export + the mobile card fallback's field list.
 const columns = buildVendorColumns(t, openDetail)
 
+/**
+ * The update replaces the vendor, so the default tax code (no control on this
+ * form, settable through the API) is carried back rather than cleared.
+ */
 function toPayload(d: Record<string, unknown>): UpdateVendorDto {
   return {
     name: String(d.name ?? '').trim(),
@@ -109,6 +113,7 @@ function toPayload(d: Record<string, unknown>): UpdateVendorDto {
     address: (d.address as string | null) || null,
     currency: typeof d.currency === 'string' && d.currency.trim() ? d.currency.trim().toUpperCase() : null,
     paymentTermsDays: d.paymentTermsDays == null ? null : Number(d.paymentTermsDays),
+    defaultTaxCodeId: (d.defaultTaxCodeId as string | null) || null,
     notes: (d.notes as string | null) || null,
     isActive: d.isActive !== false,
   }
@@ -116,6 +121,8 @@ function toPayload(d: Record<string, unknown>): UpdateVendorDto {
 
 const crud = useCrudPage<VendorRow>({
   pageId: 'finance.vendors',
+  // A vendor is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'finance.vendor',
   columns,
   rowKey: (r) => String(r.id ?? ''),

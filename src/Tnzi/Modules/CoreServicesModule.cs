@@ -119,7 +119,8 @@ public class CoreServicesModule : TnziCoreModule
                 "WorkerId, otherwise two instances produce identical long ids within the same millisecond " +
                 "(primary-key conflicts, duplicated trade/invoice numbers). Set IdGeneration:WorkerId to a value " +
                 "unique per instance (for example via the IdGeneration__WorkerId environment variable), or set " +
-                "IdGeneration:WorkerIdFromHostname=true when the hostname carries a stable ordinal (StatefulSet pods).");
+                "IdGeneration:WorkerIdFromHostname=true when the hostname carries a stable ordinal (StatefulSet pods; " +
+                "Deployment pod names and container ids end in random characters and are not accepted).");
         }
 
         logger?.LogWarning(

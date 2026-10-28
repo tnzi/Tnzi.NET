@@ -34,6 +34,52 @@ public class ChatRequestDto
 
     /// <summary>Per-request reasoning effort override (None = no reasoning)</summary>
     public ReasoningEffort? ReasoningEffort { get; set; }
+
+    /// <summary>
+    /// Edit: a user message of <see cref="ThreadId"/> that this message replaces. That message and everything after it
+    /// are removed from the thread before the turn runs, and <see cref="Message"/> / <see cref="Content"/> are sent in
+    /// its place. On an agent bound to an external CLI runtime the CLI session continues from the turn before it, so
+    /// the replaced turns are gone from the agent's memory too.
+    /// </summary>
+    public Guid? EditMessageId { get; set; }
+
+    /// <summary>
+    /// Regenerate: send the last user message of <see cref="ThreadId"/> again (its text and attachments). The previous
+    /// answer to it is removed first. <see cref="Message"/> and <see cref="Content"/> must be empty.
+    /// </summary>
+    public bool Regenerate { get; set; }
+
+    /// <summary>
+    /// 这一轮的每轮元数据：消费方自己定义的一小组值（键是字符串，值是任意 JSON），例如用户这条消息点名的几台设备的 id。
+    /// </summary>
+    /// <remarks>
+    /// 框架不解释它，只校验大小（<c>AI:Chat:Metadata</c>：默认至多 16 个键、序列化后 4 KB，键字母开头、只含字母数字与 <c>_ . : -</c>，
+    /// 不合规答 400 <c>AI_INVALID_TURN_METADATA</c>）。外部 CLI 路径上 <c>ICliAgentTurnHandler</c> 从
+    /// <c>CliTurnContext.Metadata</c> 读到它；内建路径放在 <c>AgentRunRequest.TurnMetadata</c> 上。两条路径都随用户消息存下
+    /// （<c>ThreadMessageDto.Metadata</c>）；重新生成没带它时沿用被重发那条消息存下的那份。
+    /// </remarks>
+    public Dictionary<string, JsonElement>? Metadata { get; set; }
+}
+
+/// <summary>
+/// A run in progress behind a chat thread (a turn on an external CLI runtime), for a client to reattach to or cancel.
+/// </summary>
+public class ChatRunDto
+{
+    /// <summary>Run ID: reattach at <c>GET chat/runs/{runId}/stream</c>, cancel at <c>POST chat/runs/{runId}/cancel</c>.</summary>
+    public Guid RunId { get; set; }
+
+    /// <summary>Thread the run answers in.</summary>
+    public Guid? ThreadId { get; set; }
+
+    /// <summary>The user message the run answers.</summary>
+    public Guid? UserMessageId { get; set; }
+
+    /// <summary>Run status: <c>Queued</c>, <c>Dispatched</c> or <c>Running</c>.</summary>
+    public CliRunStatus Status { get; set; }
+
+    /// <summary>When the run was queued.</summary>
+    public DateTime CreationTime { get; set; }
 }
 
 /// <summary>

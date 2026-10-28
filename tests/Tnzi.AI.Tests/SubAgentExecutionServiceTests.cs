@@ -7,6 +7,29 @@ public class SubAgentExecutionServiceTests
     // Helpers
     // ------------------------------------------------------------------
 
+    /// <summary>
+    /// Upper bound for conditions the spawned background task must reach. The wait returns as soon as the
+    /// condition holds; only a task that never gets there runs the bound out. Sized for a fully loaded
+    /// machine running the whole suite in parallel, where a few hundred milliseconds is not enough.
+    /// </summary>
+    private static readonly TimeSpan BackgroundBound = TimeSpan.FromSeconds(30);
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan bound)
+    {
+        var deadline = DateTime.UtcNow + bound;
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return true;
+    }
+
     private static IOptionsMonitor<SubAgentOptions> DefaultOptions(Action<SubAgentOptions>? configure = null)
     {
         var opts = new SubAgentOptions();
@@ -28,7 +51,7 @@ public class SubAgentExecutionServiceTests
             runStore,
             subAgentRegistry,
             executionContext,
-            scopeFactory,
+            new RunStoreScopeFactory(scopeFactory, runStore),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             options ?? DefaultOptions());
@@ -165,24 +188,35 @@ public class SubAgentExecutionServiceTests
     }
 
     [Fact]
-    public async Task SpawnAsync_ExplicitInputUserId_WinsOverContext()
+    public async Task SpawnAsync_FromTheAdminEndpoint_IgnoresAUserIdInTheRequestBody()
     {
-        var explicitUser = Guid.NewGuid();
+        // 管理端 spawn 的请求体曾经可以带 userId，且它优先于调用者本人：持 ai.agentRun.execute 的管理员
+        // 点名一个持 ai.tools.sandbox 的用户，后台运行就按那个人解析工具权限、校验线程归属、扣配额。
+        // 发起人只能是调用者本人，请求体里的身份一律不认。
+        var admin = Guid.NewGuid();
+        var victim = Guid.NewGuid();
         var agentId = Guid.NewGuid();
         AgentRun? createdRun = null;
         var runtimeCalled = new TaskCompletionSource<AgentRunRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var resolver = ResolverFor(agentId);
         var runStore = RunStoreCapturing(run => createdRun = run);
-        var provider = ProviderWithRuntime(runtimeCalled, currentUserId: Guid.NewGuid());
+        var provider = ProviderWithRuntime(runtimeCalled, currentUserId: admin);
 
         var service = CreateService(
             resolver.Object, runStore.Object, Mock.Of<ISubAgentRegistry>(), new AgentExecutionContextAccessor(),
             provider.GetRequiredService<IServiceScopeFactory>(), provider);
 
-        await service.SpawnAsync(new SpawnAgentRunInput { AgentId = agentId, Message = "child", UserId = explicitUser });
+        // 与 MVC 绑定 [FromBody] 时同一套 Web 序列化约定
+        var body = $$"""{"agentId":"{{agentId}}","message":"run it","toolGroups":["sandbox"],"userId":"{{victim}}"}""";
+        var input = JsonSerializer.Deserialize<SpawnAgentRunInput>(body, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
-        createdRun!.CreatorId.ShouldBe(explicitUser);
+        var result = await service.SpawnAsync(input);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        createdRun!.CreatorId.ShouldBe(admin);
+        var runtimeRequest = await runtimeCalled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        runtimeRequest.UserId.ShouldBe(admin, "the background run must resolve tools, threads and quota as the caller, never as a user named in the body");
     }
 
     [Fact]
@@ -564,7 +598,8 @@ public class SubAgentExecutionServiceTests
 
         var service = new SubAgentExecutionService(
             resolver.Object, runStore.Object, Mock.Of<ISubAgentRegistry>(), new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<SubAgentExecutionService>.Instance, provider,
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore.Object),
+            NullLogger<SubAgentExecutionService>.Instance, provider,
             DefaultOptions(o => o.TimeoutSeconds = 1), registry);
 
         var result = await service.SpawnAsync(new SpawnAgentRunInput { AgentId = agentId, Message = "runaway" });
@@ -646,6 +681,83 @@ public class SubAgentExecutionServiceTests
         runtimeRequest.ToolGroups.ShouldContain("web-search");
         runtimeRequest.ToolGroups.ShouldContain("file");
         runtimeRequest.Model.ShouldBe("gpt-5.4");
+    }
+
+    /// <summary>
+    /// 模板的 Instructions / MaxTurns / ExcludedToolGroups 此前只存不用：spawn 只抄 ToolGroups 与 DefaultModel，
+    /// 模板运行没有系统指令、上限是执行器默认的 25 次、排除的组照样能用。
+    /// </summary>
+    [Fact]
+    public async Task SpawnAsync_SubAgentType_CarriesTheTemplateInstructionsTurnLimitAndExclusionsIntoTheRun()
+    {
+        var runtimeCalled = new TaskCompletionSource<AgentRunRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+        List<string>? resolvedGroups = null;
+
+        var resolver = new Mock<IAgentResolver>();
+        resolver.Setup(x => x.ResolveAgentAsync(null, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid? _, string? _, string? _, List<string>? groups, CancellationToken _, List<string>? _) => resolvedGroups = groups)
+            .ReturnsAsync(AgentResolution.Success(Mock.Of<IAgentExecutor>(), "openai", "gpt-5.4", null, null, AgentExecutionMode.Single));
+
+        var registry = RegistryWith(new SubAgentTypeDefinition(
+            Name: "reviewer",
+            Description: "Review only",
+            ToolGroups: ["text", "sandbox"],
+            ExcludedToolGroups: ["sandbox"],
+            MaxTurns: 5,
+            Instructions: "Only review, never edit."));
+        var provider = ProviderWithRuntime(runtimeCalled);
+
+        var service = CreateService(
+            resolver.Object, RunStoreCapturing(_ => { }).Object, registry.Object, new AgentExecutionContextAccessor(),
+            provider.GetRequiredService<IServiceScopeFactory>(), provider);
+
+        var result = await service.SpawnAsync(new SpawnAgentRunInput { Message = "review the diff", SubAgentType = "reviewer" });
+
+        result.Succeeded.ShouldBeTrue();
+        var runtimeRequest = await runtimeCalled.Task.WaitAsync(BackgroundBound);
+        runtimeRequest.SubAgentInstructions.ShouldBe("Only review, never edit.");
+        runtimeRequest.MaxToolIterations.ShouldBe(5);
+        runtimeRequest.ExcludedToolGroups.ShouldBe(["sandbox"]);
+        // 排除的组也不出现在请求的工具组里：管理端 spawn 自带的组同样过这一道
+        runtimeRequest.ToolGroups.ShouldBe(["text"]);
+        resolvedGroups.ShouldBe(["text"]);
+        runtimeRequest.SubAgentName.ShouldBe("reviewer");
+    }
+
+    [Fact]
+    public async Task SpawnAsync_AgentWithSubAgentType_KeepsTheAgentsOwnInstructionsButAppliesTheLimits()
+    {
+        var agentId = Guid.NewGuid();
+        var runtimeCalled = new TaskCompletionSource<AgentRunRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var registry = RegistryWith(new SubAgentTypeDefinition(
+            Name: "reviewer",
+            Description: "Review only",
+            ToolGroups: ["text"],
+            ExcludedToolGroups: ["sandbox"],
+            MaxTurns: 5,
+            Instructions: "Only review, never edit."));
+        var provider = ProviderWithRuntime(runtimeCalled);
+
+        var service = CreateService(
+            ResolverFor(agentId).Object, RunStoreCapturing(_ => { }).Object, registry.Object, new AgentExecutionContextAccessor(),
+            provider.GetRequiredService<IServiceScopeFactory>(), provider);
+
+        var result = await service.SpawnAsync(new SpawnAgentRunInput { AgentId = agentId, Message = "review the diff", SubAgentType = "reviewer" });
+
+        result.Succeeded.ShouldBeTrue();
+        var runtimeRequest = await runtimeCalled.Task.WaitAsync(BackgroundBound);
+        runtimeRequest.SubAgentInstructions.ShouldBeNull("a defined agent keeps its own instructions");
+        runtimeRequest.MaxToolIterations.ShouldBe(5);
+        runtimeRequest.ExcludedToolGroups.ShouldBe(["sandbox"]);
+    }
+
+    private static Mock<ISubAgentRegistry> RegistryWith(SubAgentTypeDefinition definition)
+    {
+        // 服务层按租户桶查（Moq 不执行默认接口成员，须直接 setup 带租户键的重载）
+        var registry = new Mock<ISubAgentRegistry>();
+        registry.Setup(x => x.GetForTenant(definition.Name, It.IsAny<string>())).Returns(definition);
+        return registry;
     }
 
     // ------------------------------------------------------------------
@@ -930,7 +1042,7 @@ public class SubAgentExecutionServiceTests
             runStore.Object,
             Mock.Of<ISubAgentRegistry>(),
             new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore.Object),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             DefaultOptions(),
@@ -945,14 +1057,16 @@ public class SubAgentExecutionServiceTests
         result.Succeeded.ShouldBeTrue();
 
         // Wait until the background task is inside RunAsync
-        await runtimeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        (await runtimeStarted.WaitAsync(BackgroundBound)).ShouldBeTrue("the background task never entered RunAsync");
 
         // CTS must be registered while the task is running
         registry.TryCancel(createdRunId, "test kill").ShouldBeTrue("CTS should be registered while background task is running");
 
-        // Now the background task will observe cancellation and exit the finally block
-        // The registry Unregister in the finally will remove it
-        await Task.Delay(200); // allow finally block to run
+        // The background task now observes cancellation and its finally block unregisters the CTS.
+        // Wait for that to be observable instead of sleeping a fixed time: GetCancellation answers
+        // non-null while the cancelled entry is still registered and null once it is gone.
+        (await WaitUntilAsync(() => registry.GetCancellation(createdRunId) == null, BackgroundBound))
+            .ShouldBeTrue("the background task's finally block never unregistered the CTS");
 
         // CTS should now be unregistered (Unregister called in finally)
         registry.TryCancel(createdRunId, "test kill").ShouldBeFalse("CTS should be removed after task finishes");
@@ -1013,7 +1127,7 @@ public class SubAgentExecutionServiceTests
             runStore.Object,
             Mock.Of<ISubAgentRegistry>(),
             new AgentExecutionContextAccessor(),
-            provider.GetRequiredService<IServiceScopeFactory>(),
+            new RunStoreScopeFactory(provider.GetRequiredService<IServiceScopeFactory>(), runStore.Object),
             NullLogger<SubAgentExecutionService>.Instance,
             provider,
             DefaultOptions(),
@@ -1026,14 +1140,14 @@ public class SubAgentExecutionServiceTests
         });
 
         // Wait until the background task is inside RunAsync
-        await runtimeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        (await runtimeStarted.WaitAsync(BackgroundBound)).ShouldBeTrue("the background task never entered RunAsync");
 
         // Act: trip the CTS via the registry (simulates what CancelAsync does)
         var cancelled = registry.TryCancel(createdRunId, "test kill");
         cancelled.ShouldBeTrue("TryCancel should find and trip the registered CTS");
 
         // Assert: the background task observed the cancellation
-        var taskObservedCancellation = await taskCancelledTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var taskObservedCancellation = await taskCancelledTcs.Task.WaitAsync(BackgroundBound);
         taskObservedCancellation.ShouldBeTrue("Background task should have observed cancellation via the CTS");
     }
 }

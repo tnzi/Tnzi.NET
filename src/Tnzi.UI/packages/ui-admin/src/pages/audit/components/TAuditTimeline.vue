@@ -136,6 +136,12 @@
             <NDescriptionsItem :label="t('detail.time')">
               {{ formatDateTime(detailItem.startTime, { fallback: EMPTY_DASH }) }}
             </NDescriptionsItem>
+            <NDescriptionsItem v-if="detailItem.httpStatusCode != null" :label="t('detail.statusCode')">
+              {{ detailItem.httpStatusCode }}
+            </NDescriptionsItem>
+            <NDescriptionsItem v-if="detailItem.permissionName" :label="t('detail.permission')">
+              <code>{{ detailItem.permissionName }}</code>
+            </NDescriptionsItem>
           </NDescriptions>
 
           <details v-if="detailItem.message" class="t-audit-timeline__details">
@@ -149,6 +155,17 @@
           <details v-if="detailItem.requestParameters" class="t-audit-timeline__details">
             <summary>{{ t('detail.requestParameters') }}</summary>
             <pre>{{ detailItem.requestParameters }}</pre>
+          </details>
+          <!-- Captured only when the deployment turns request-body capture on (Settings
+               Center), and redacted before it is stored; the response is the recorded
+               result, e.g. a sandbox command's output. -->
+          <details v-if="detailItem.requestBody" class="t-audit-timeline__details">
+            <summary>{{ t('detail.requestBody') }}</summary>
+            <pre>{{ detailItem.requestBody }}</pre>
+          </details>
+          <details v-if="detailItem.responseResult" class="t-audit-timeline__details">
+            <summary>{{ t('detail.responseResult') }}</summary>
+            <pre>{{ detailItem.responseResult }}</pre>
           </details>
 
           <!-- Entity-level changes (fetched via fetchDetail - list rows carry no entityEntries) -->
@@ -194,6 +211,7 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../../utils/placeholders'
+import { dayRangeBounds } from '../../../utils/day-range'
 import { computed, ref, onMounted } from 'vue'
 import {
   NButton, NDropdown, NInput, NSelect, NDatePicker, NSpin, NTimeline, NTimelineItem,
@@ -346,16 +364,25 @@ function typeFor(item: AuditOperationDto): 'success' | 'error' | 'default' | 'wa
   return 'info'
 }
 
-/** The active filter as backend `AuditOperationQueryDto` fields - shared by the list query and the export. */
+/** The filter inputs as backend `AuditOperationQueryDto` fields. */
 function buildFilter(): Partial<AuditOperationQueryDto> {
   const filt: Partial<AuditOperationQueryDto> = { ...filters.value }
   if (dateRange.value) {
-    // Backend `AuditOperationQueryDto.StartDate` / `EndDate`.
-    filt.startDate = new Date(dateRange.value[0]).toISOString()
-    filt.endDate = new Date(dateRange.value[1]).toISOString()
+    // Backend `AuditOperationQueryDto.StartDate` / `EndDate`, both inclusive.
+    // The picker gives midnight for both ends; widen the end to cover its day.
+    const { start, end } = dayRangeBounds(dateRange.value)
+    filt.startDate = start
+    filt.endDate = end
   }
   return filt
 }
+
+// The inputs are bound live but only Search applies them, so the list on screen
+// belongs to the filter captured at the last search, not to whatever the inputs
+// hold now. Load more and Export read this capture: reading the live inputs
+// appended the next page of a different query under the current list and
+// exported a set other than the one shown.
+let appliedFilter: Partial<AuditOperationQueryDto> = {}
 
 function buildQuery(): CrudPageQuery {
   return {
@@ -364,7 +391,7 @@ function buildQuery(): CrudPageQuery {
     sortField: 'startTime',
     sortOrder: 'desc' as const,
     searchText: '',
-    filters: buildFilter() as Record<string, unknown>,
+    filters: { ...appliedFilter } as Record<string, unknown>,
   }
 }
 
@@ -387,7 +414,7 @@ async function onExportSelect(key: string): Promise<void> {
     // The whole filtered set, never one page of it: the export carries no
     // pageIndex / pageSize. The backend refuses a set above its row cap with
     // a message that names the count and asks to narrow the filter.
-    const blob = await exporter(buildFilter())
+    const blob = await exporter({ ...appliedFilter })
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
     downloadBlob(blob, `audit-${props.pageId.replace(/^audit\./, '')}-${stamp}.${format}`)
   } catch (e) {
@@ -398,6 +425,7 @@ async function onExportSelect(key: string): Promise<void> {
 }
 
 async function loadFirst(): Promise<void> {
+  appliedFilter = buildFilter()
   pageIndex.value = 1
   items.value = []
   total.value = 0
@@ -406,7 +434,9 @@ async function loadFirst(): Promise<void> {
 
 async function loadMore(): Promise<void> {
   pageIndex.value += 1
-  await loadInternal(true)
+  const loaded = await loadInternal(true)
+  // A failed page is asked for again on retry instead of being skipped.
+  if (!loaded) pageIndex.value -= 1
 }
 
 function resetFilters(): void {
@@ -420,18 +450,21 @@ function resetFilters(): void {
 // newer one (especially since the filter row sits above the list).
 let fetchToken = 0
 
-async function loadInternal(append = false): Promise<void> {
+/** Resolves false only when this request failed (a superseded one resolves true: a newer load owns the state). */
+async function loadInternal(append = false): Promise<boolean> {
   const myToken = ++fetchToken
   loading.value = true
   try {
     const result = await props.fetch(buildQuery())
-    if (myToken !== fetchToken) return
+    if (myToken !== fetchToken) return true
     items.value = append ? [...items.value, ...result.items] : result.items
     total.value = result.totalCount
+    return true
   } catch (e) {
-    if (myToken !== fetchToken) return
+    if (myToken !== fetchToken) return true
     message.error(e instanceof Error ? e.message : String(e))
     if (!append) items.value = []
+    return false
   } finally {
     if (myToken === fetchToken) loading.value = false
   }

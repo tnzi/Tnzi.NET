@@ -60,6 +60,42 @@ public class UserRoleServiceBatchTests : IntegratedTestBase<UserRoleTestDbContex
 
         (await service.GetUserRoleIdsAsync([])).ShouldBeEmpty();
     }
+
+    /// <summary>反方向：授权模块回答「谁持有这个码」时一次拿到全部授予角色的成员。</summary>
+    [Fact]
+    public async Task BatchRoleMembers_GroupsByRole_AndOmitsRolesWithoutMembers()
+    {
+        var service = await BuildAsync();
+        var emptyRole = Guid.NewGuid();
+
+        var result = await service.GetRoleUserIdsAsync([RoleA, RoleB, emptyRole, RoleA]);
+
+        result.Keys.ShouldBe([RoleA, RoleB], ignoreOrder: true);
+        result[RoleA].ShouldBe([Alice]);
+        result[RoleB].ShouldBe([Alice, Bob], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task BatchRoleMembers_MatchesThePerRoleLookup()
+    {
+        var service = await BuildAsync();
+
+        var batch = await service.GetRoleUserIdsAsync([RoleA, RoleB]);
+
+        foreach (var roleId in new[] { RoleA, RoleB })
+        {
+            var single = await service.GetRoleUserIdsAsync(roleId);
+            batch[roleId].ShouldBe(single, ignoreOrder: true);
+        }
+    }
+
+    [Fact]
+    public async Task BatchRoleMembers_EmptyInput_ReturnsEmpty()
+    {
+        var service = await BuildAsync();
+
+        (await service.GetRoleUserIdsAsync(Array.Empty<Guid>())).ShouldBeEmpty();
+    }
 }
 
 /// <summary>只映射角色成员关系的最小 DbContext（不拉入 Identity 全模型）。</summary>

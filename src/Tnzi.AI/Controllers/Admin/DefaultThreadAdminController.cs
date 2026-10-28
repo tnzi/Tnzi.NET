@@ -54,7 +54,7 @@ public class DefaultThreadAdminController : ApiAdminControllerBase
     /// 获取线程详情（含最近消息）
     /// </summary>
     [HttpGet("{id:guid}/detail")]
-    public virtual async Task<ApiResult<AgentThreadDetailDto>> GetDetail(Guid id, [FromQuery] int messageLimit = 50)
+    public virtual async Task<ApiResult<AgentThreadDetailDto>> GetDetail(Guid id, [FromQuery][Range(1, 200)] int messageLimit = 50)
     {
         var result = await ThreadService.GetDetailAsync(id, messageLimit);
         return result.ToApiResult();

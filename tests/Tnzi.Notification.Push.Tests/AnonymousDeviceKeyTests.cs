@@ -1,5 +1,3 @@
-using Tnzi.Notification.Push.Services.Internal;
-
 namespace Tnzi.Notification.Push.Tests;
 
 /// <summary>

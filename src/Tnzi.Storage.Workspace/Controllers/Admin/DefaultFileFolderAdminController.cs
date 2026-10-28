@@ -26,12 +26,13 @@ public class DefaultFileFolderAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// Get folder tree (recursive)
+    /// Get folder tree (recursive). Every user has their own namespace, so pass <paramref name="ownerId"/>
+    /// to see one user's tree; without it the tree mixes every owner's folders.
     /// </summary>
     [HttpGet("tree")]
-    public virtual async Task<ApiResult<List<FileFolderDto>>> GetTree([FromQuery] Guid? parentId = null)
+    public virtual async Task<ApiResult<List<FileFolderDto>>> GetTree([FromQuery] Guid? parentId = null, [FromQuery] Guid? ownerId = null)
     {
-        var result = await FileFolderService.GetTreeAsync(parentId);
+        var result = await FileFolderService.GetTreeAsync(parentId, ownerId);
         return result.ToApiResult();
     }
 

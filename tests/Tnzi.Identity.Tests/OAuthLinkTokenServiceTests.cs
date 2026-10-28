@@ -95,6 +95,99 @@ public class OAuthLinkTokenServiceTests
         Assert.Equal(400, result.Code);
     }
 
+    // ------------------------------------------------- 回调只暂存，关联要回到发起绑定的会话
+
+    /// <summary>
+    /// ★★★ 暂存在 A 名下的绑定，B 拿着完成码也完成不了：这是「把受害者的第三方身份挂到攻击者账号上」被挡住的地方。
+    /// </summary>
+    /// <remarks>
+    /// 攻击者 A 给自己签绑定令牌、把发起链接发给受害者 B；回调（匿名、跑在 B 的浏览器里）把 B 的第三方身份暂存在 A 名下，
+    /// 完成码交回 B 的浏览器。B 的前端以 B 的身份去完成：必须失败，且不能把 A 那份暂存消费掉或变成 B 的。
+    /// </remarks>
+    [Fact]
+    public async Task StagedLink_CannotBeCompletedByAnotherAccount()
+    {
+        var fixture = new Fixture();
+        var attacker = Guid.NewGuid();
+        var victim = Guid.NewGuid();
+        var code = (await fixture.Service.StagePendingLinkAsync(attacker, "GitHub", GitHubPrincipal())).Data!;
+
+        var byVictim = await fixture.Service.ConsumePendingLinkAsync(victim, "github", code);
+
+        Assert.False(byVictim.Succeeded);
+        Assert.Equal(400, byVictim.Code);
+        Assert.Null(byVictim.Data);
+    }
+
+    [Fact]
+    public async Task StagedLink_CompletesForTheIssuingAccount_Once()
+    {
+        var fixture = new Fixture();
+        var owner = Guid.NewGuid();
+        var code = (await fixture.Service.StagePendingLinkAsync(owner, "github", GitHubPrincipal("gh_owner", "owner-login"))).Data!;
+
+        var completed = await fixture.Service.ConsumePendingLinkAsync(owner, "GitHub", code);
+        var again = await fixture.Service.ConsumePendingLinkAsync(owner, "github", code);
+
+        Assert.True(completed.Succeeded);
+        Assert.Equal("github", completed.Data!.Provider);
+        Assert.Equal("gh_owner", completed.Data.ProviderKey);
+        Assert.Equal("owner-login", completed.Data.DisplayName);
+        Assert.False(again.Succeeded);
+    }
+
+    [Fact]
+    public async Task StagedLink_RejectsAWrongCode_AndKeepsTheStagingForTheRightOne()
+    {
+        var fixture = new Fixture();
+        var owner = Guid.NewGuid();
+        var code = (await fixture.Service.StagePendingLinkAsync(owner, "github", GitHubPrincipal())).Data!;
+
+        var wrong = await fixture.Service.ConsumePendingLinkAsync(owner, "github", "not-the-code");
+        var right = await fixture.Service.ConsumePendingLinkAsync(owner, "github", code);
+
+        Assert.False(wrong.Succeeded);
+        Assert.True(right.Succeeded);
+    }
+
+    [Fact]
+    public async Task StagedLink_RejectsAnotherProviderAndExpiry()
+    {
+        var fixture = new Fixture();
+        var owner = Guid.NewGuid();
+        var code = (await fixture.Service.StagePendingLinkAsync(owner, "github", GitHubPrincipal())).Data!;
+
+        Assert.False((await fixture.Service.ConsumePendingLinkAsync(owner, "google", code)).Succeeded);
+
+        fixture.ExpireStoredTokens();
+        Assert.False((await fixture.Service.ConsumePendingLinkAsync(owner, "github", code)).Succeeded);
+    }
+
+    /// <summary>库里只存完成码的哈希：读到这张表的人换不出一枚能用的完成码。</summary>
+    [Fact]
+    public async Task StagedLink_StoresOnlyTheHashOfTheCode()
+    {
+        var fixture = new Fixture();
+
+        var code = (await fixture.Service.StagePendingLinkAsync(Guid.NewGuid(), "github", GitHubPrincipal())).Data!;
+
+        Assert.DoesNotContain(code, fixture.LastSavedValue!, StringComparison.Ordinal);
+        Assert.Contains(OneTimeToken.Hash(code), fixture.LastSavedValue!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Stage_WithoutAProviderKey_IsRejected()
+    {
+        var fixture = new Fixture();
+        var nameless = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Email, "x@example.com")], "GitHub"));
+
+        var staged = await fixture.Service.StagePendingLinkAsync(Guid.NewGuid(), "github", nameless);
+
+        Assert.False(staged.Succeeded);
+        Assert.Equal(400, staged.Code);
+        Assert.Empty(fixture.Tokens);
+    }
+
     [Fact]
     public async Task Issue_RejectsEmptyUserOrProvider()
     {
@@ -104,53 +197,21 @@ public class OAuthLinkTokenServiceTests
         Assert.False((await fixture.Service.IssueAsync(Guid.NewGuid(), " ")).Succeeded);
     }
 
+    private static ClaimsPrincipal GitHubPrincipal(string providerKey = "gh_victim", string login = "victim-login")
+        => new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, providerKey), new Claim("login", login)], "GitHub"));
+
     private sealed class Fixture
     {
-        private readonly List<AuthToken> _tokens = [];
+        private readonly InMemoryAuthTokenStore _store = new();
 
         public OAuthLinkTokenService Service { get; }
 
-        public string? LastSavedValue { get; private set; }
+        public string? LastSavedValue => _store.LastSavedValue;
+
+        public IReadOnlyList<AuthToken> Tokens => _store.Tokens;
 
         public Fixture()
         {
-            var authTokenService = new Mock<IAuthTokenService>();
-
-            authTokenService
-                .Setup(x => x.SaveTokenAsync(
-                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<string>(), It.IsAny<DateTime?>(), It.IsAny<Guid>()))
-                .ReturnsAsync((Guid userId, string provider, string name, string value, DateTime? expiresAt, Guid _) =>
-                {
-                    LastSavedValue = value;
-                    var token = new AuthToken
-                    {
-                        Id = Guid.NewGuid(), UserId = userId, LoginProvider = provider, Name = name, Value = value, ExpiresAt = expiresAt
-                    };
-                    _tokens.RemoveAll(t => t.UserId == userId && t.LoginProvider == provider && t.Name == name);
-                    _tokens.Add(token);
-                    return token.Id;
-                });
-
-            authTokenService
-                .Setup(x => x.FindTokenByValueAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .ReturnsAsync((string provider, string name, string value) =>
-                    _tokens.FirstOrDefault(t => t.LoginProvider == provider && t.Name == name && t.Value == value));
-
-            authTokenService
-                .Setup(x => x.MarkTokenAsUsedAsync(It.IsAny<Guid>()))
-                .ReturnsAsync((Guid id) =>
-                {
-                    var token = _tokens.FirstOrDefault(t => t.Id == id);
-                    if (token == null || token.IsUsed)
-                    {
-                        return false;
-                    }
-
-                    token.IsUsed = true;
-                    return true;
-                });
-
             var options = new Mock<IOptionsMonitor<TnziIdentityOptions>>();
             options.Setup(x => x.CurrentValue).Returns(new TnziIdentityOptions());
 
@@ -159,15 +220,9 @@ public class OAuthLinkTokenServiceTests
             var serviceProvider = new Mock<IServiceProvider>();
             serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
 
-            Service = new OAuthLinkTokenService(serviceProvider.Object, authTokenService.Object, options.Object);
+            Service = new OAuthLinkTokenService(serviceProvider.Object, _store.Service, options.Object);
         }
 
-        public void ExpireStoredTokens()
-        {
-            foreach (var token in _tokens)
-            {
-                token.ExpiresAt = DateTime.UtcNow.AddMinutes(-1);
-            }
-        }
+        public void ExpireStoredTokens() => _store.ExpireAll();
     }
 }

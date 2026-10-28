@@ -148,9 +148,15 @@ public class DockerSandboxOptions
     /// Docker daemon host URI. Defaults to platform-appropriate socket.
     /// Linux: unix:///var/run/docker.sock, Windows: npipe:////./pipe/docker_engine
     /// </summary>
-    public string DockerHost { get; set; } = OperatingSystem.IsWindows()
+    public string DockerHost { get; set; } = DefaultDockerHost;
+
+    /// <summary>The platform's default Docker daemon address.</summary>
+    public static string DefaultDockerHost => OperatingSystem.IsWindows()
         ? "npipe:////./pipe/docker_engine"
         : "unix:///var/run/docker.sock";
+
+    /// <summary>The configured daemon address, or the platform default when it is blank.</summary>
+    public string ResolveDockerHost() => string.IsNullOrWhiteSpace(DockerHost) ? DefaultDockerHost : DockerHost;
 
     /// <summary>
     /// Default container image for sandbox execution. Defaults to the official

@@ -32,6 +32,16 @@ public class GatewayWebSocketHandler
     public const string AnonymousPeerPrefix = "anon:";
 
     /// <summary>
+    /// WebSocket 入口的渠道名，由服务端指定。
+    /// </summary>
+    /// <remarks>
+    /// 渠道名决定命中哪条绑定规则（<c>SessionBindingRule.Channel</c>），所以它是路由身份而不是客户端偏好。
+    /// IM 渠道的验签与白名单都在各自的适配器里，WS 连接一条都没经过；让客户端自报渠道，
+    /// 等于让任何能连上 <c>/ws/gateway</c> 的人（默认允许匿名）挑一个渠道的 Agent 来跑。
+    /// </remarks>
+    public const string WebSocketChannel = "web";
+
+    /// <summary>
     /// Serializes all sends on this connection - WebSocket forbids overlapping SendAsync
     /// calls (heartbeat vs stream), which otherwise corrupt frames / throw InvalidOperationException.
     /// </summary>
@@ -83,7 +93,8 @@ public class GatewayWebSocketHandler
             ConnectionId = connectionId,
             UserId = userId,
             ClientType = "websocket",
-            ConnectedAt = DateTimeOffset.UtcNow
+            ConnectedAt = DateTimeOffset.UtcNow,
+            TenantId = tenantId
         });
 
         _logger.LogInformation("WebSocket connected: connectionId={ConnectionId} userId={UserId}", connectionId, userId);
@@ -209,24 +220,33 @@ public class GatewayWebSocketHandler
             return;
         }
 
-        switch (msg.Method.ToLowerInvariant())
+        try
         {
-            case "chat.send":
-                await HandleChatSendAsync(ws, msg, userId, connectionId, tenantId, ct);
-                break;
+            switch (msg.Method.ToLowerInvariant())
+            {
+                case "chat.send":
+                    await HandleChatSendAsync(ws, msg, userId, connectionId, tenantId, ct);
+                    break;
 
-            case "session.list":
-                await HandleSessionListAsync(ws, msg, userId, connectionId, ct);
-                break;
+                case "session.list":
+                    await HandleSessionListAsync(ws, msg, userId, connectionId, ct);
+                    break;
 
-            case "session.get":
-                await HandleSessionGetAsync(ws, msg, userId, connectionId, ct);
-                break;
+                case "session.get":
+                    await HandleSessionGetAsync(ws, msg, userId, connectionId, ct);
+                    break;
 
-            case "session.prune":
-                await HandleSessionPruneAsync(ws, msg, userId, connectionId, ct);
-                break;
-
+                case "session.prune":
+                    await HandleSessionPruneAsync(ws, msg, userId, connectionId, ct);
+                    break;
+            }
+        }
+        catch (Exception ex) when (ex is not WebSocketException && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+        {
+            // 一个请求失败只回答这个请求：异常穿出消息循环会关掉整条连接，同一连接上的其它请求一并丢失，
+            // 客户端也收不到这个 id 的任何回应。与 ProcessAsync 一样只记日志、不回显异常详情。
+            _logger.LogError(ex, "WebSocket {Method} failed for connectionId={ConnectionId}", msg.Method, connectionId);
+            await SendAsync(ws, BuildResponseMessage(msg.Id, msg.Method, error: "error"), ct);
         }
     }
 
@@ -234,7 +254,6 @@ public class GatewayWebSocketHandler
     {
         var payload = msg.Payload;
         var text = payload?.TryGetProperty("text", out var textElem) == true ? textElem.GetString() : null;
-        var channel = payload?.TryGetProperty("channel", out var chanElem) == true ? chanElem.GetString() : "web";
         var chatId = ResolveChatId(payload, userId, connectionId);
 
         if (string.IsNullOrEmpty(text))
@@ -246,12 +265,19 @@ public class GatewayWebSocketHandler
 
         var request = new GatewayRequest
         {
-            Channel = channel ?? "web",
+            // 渠道由服务端指定：payload 里的 "channel" 一律不读（理由见 WebSocketChannel）
+            Channel = WebSocketChannel,
             ChatId = chatId,
-            UserId = userId ?? "anonymous",
+            // 一条 WebSocket 连接就是一个人与网关的单聊
+            PeerKind = ChannelPeerKinds.User,
+            // 匿名连接以自己的 peer 标识（匿名命名空间下的连接 id）出现，而不是一个共用的字面量：
+            // 共用值让所有匿名客户端落在同一把会话键上、互相覆盖会话记录，归属过滤也认不出谁是谁
+            UserId = ResolvePeerId(userId, connectionId),
             UserMessage = text,
             // 来自已认证连接的租户上下文（服务端解析），绝不信任客户端 payload
-            TenantId = tenantId
+            TenantId = tenantId,
+            // 已认证连接以这个用户的名义运行：配额、预算与按用户的工具规则都只认 AgentRunRequest.UserId
+            AuthenticatedUserId = Guid.TryParse(userId, out var authenticatedUserId) ? authenticatedUserId : null
         };
 
         await foreach (var chunk in _gateway.ProcessStreamingAsync(request, ct))

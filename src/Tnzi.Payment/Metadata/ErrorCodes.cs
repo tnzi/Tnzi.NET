@@ -116,6 +116,16 @@ public static class ErrorCodes
     public const string PaymentMethodBindingFailed = "PAYMENT_METHOD_BINDING_FAILED";
 
     /// <summary>
+    /// 调用者不代表这个计费账户，或没有查看 / 管理它的权限（payment.account.view / payment.account.manage）
+    /// </summary>
+    public const string BillingAccountAccessDenied = "BILLING_ACCOUNT_ACCESS_DENIED";
+
+    /// <summary>
+    /// 本部署关闭了付款方自助退款（Payment:AllowCustomerRefundRequests = false）
+    /// </summary>
+    public const string PaymentRefundRequestsDisabled = "PAYMENT_REFUND_REQUESTS_DISABLED";
+
+    /// <summary>
     /// 手动确认收款仅适用于线下渠道
     /// </summary>
     public const string PaymentManualConfirmChannelOnly = "PAYMENT_MANUAL_CONFIRM_CHANNEL_ONLY";
@@ -134,6 +144,11 @@ public static class ErrorCodes
     /// 该业务类型的支付只能由服务端业务模块发起（如订阅首付 / 补差），用户面端点不接受
     /// </summary>
     public const string PaymentBusinessTypeSystemOnly = "PAYMENT_BUSINESS_TYPE_SYSTEM_ONLY";
+
+    /// <summary>
+    /// 这笔支付已经结束（成功 / 失败 / 关闭 / 过期 / 取消 / 已退款），不再发放付款凭据；要付就重新建单
+    /// </summary>
+    public const string PaymentNotPayable = "PAYMENT_NOT_PAYABLE";
 
     #endregion
 
@@ -242,6 +257,11 @@ public static class ErrorCodes
     /// </summary>
     public const string InvoiceDocumentUnavailable = "INVOICE_DOCUMENT_UNAVAILABLE";
 
+    /// <summary>
+    /// 发票已作废：不能再发送或标记已付
+    /// </summary>
+    public const string InvoiceCancelled = "INVOICE_CANCELLED";
+
     #endregion
 
     #region Subscription 错误码
@@ -290,6 +310,11 @@ public static class ErrorCodes
     /// 无法删除有活跃订阅的计划
     /// </summary>
     public const string SubscriptionPlanHasActiveSubscriptions = "SUBSCRIPTION_PLAN_HAS_ACTIVE_SUBSCRIPTIONS";
+
+    /// <summary>
+    /// 订阅计划代码已存在
+    /// </summary>
+    public const string SubscriptionPlanCodeAlreadyExists = "SUBSCRIPTION_PLAN_CODE_ALREADY_EXISTS";
 
     /// <summary>
     /// 新旧计划相同
@@ -355,6 +380,16 @@ public static class ErrorCodes
     /// 计划的试用折扣（金额）必须落在 [0, Price] 内
     /// </summary>
     public const string SubscriptionTrialDiscountOutOfRange = "SUBSCRIPTION_TRIAL_DISCOUNT_OUT_OF_RANGE";
+
+    /// <summary>
+    /// 只有逾期欠费（PastDue）或已暂停服务（Suspended）的订阅能当场补缴；还没付首期（Pending）的订阅只有首期单仍可付时能接着付
+    /// </summary>
+    public const string SubscriptionCannotPayNow = "SUBSCRIPTION_CANNOT_PAY_NOW";
+
+    /// <summary>
+    /// 计费账户的服务已暂停（宽限期满仍未付清），访问门禁拒绝了这次请求（HTTP 402）
+    /// </summary>
+    public const string SubscriptionSuspended = "SUBSCRIPTION_SUSPENDED";
 
     #endregion
 
@@ -501,6 +536,11 @@ public static class ErrorCodes
     /// 您已达到此兑换码的使用限制
     /// </summary>
     public const string RedemptionCodeUserLimitReached = "REDEMPTION_CODE_USER_LIMIT_REACHED";
+
+    /// <summary>
+    /// 兑换码数量必须大于 0
+    /// </summary>
+    public const string RedemptionCodeInvalidQuantity = "REDEMPTION_CODE_INVALID_QUANTITY";
 
     #endregion
 }

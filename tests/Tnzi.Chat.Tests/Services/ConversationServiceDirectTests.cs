@@ -94,11 +94,12 @@ public class ConversationServiceDirectTests : Integration.IntegrationTestBase
         sent.Succeeded.ShouldBeTrue(sent.Message);
         (await DbContext.Set<ChatMessage>().CountAsync(m => m.ConversationId == conv.Id)).ShouldBe(1);
 
-        var otherMember = await DbContext.Set<ConversationMember>()
+        // 不跟踪地读：发送在数据库端改未读与预览，测试与服务共用的 DbContext 里跟踪着的是插入时的旧实体。
+        var otherMember = await DbContext.Set<ConversationMember>().AsNoTracking()
             .FirstAsync(m => m.ConversationId == conv.Id && m.UserId == other);
         otherMember.UnreadCount.ShouldBe(1);
 
-        var updated = await DbContext.Set<Conversation>().FindAsync(conv.Id);
+        var updated = await DbContext.Set<Conversation>().AsNoTracking().FirstOrDefaultAsync(c => c.Id == conv.Id);
         updated!.LastMessagePreview.ShouldBe("hi there");
         updated.LastMessageAt.ShouldNotBeNull();
     }

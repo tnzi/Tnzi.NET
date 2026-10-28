@@ -9,9 +9,10 @@ namespace Tnzi.Identity.Tests;
 /// 个人中心「绑定第三方账号」经 OAuth 发起 / 回调两个匿名端点的落地。
 /// </summary>
 /// <remarks>
-/// ★ 守的是这样一条：带 <c>linkToken</c> 的回调<b>绝不能</b>走登录路径（<c>HandleOAuthCallbackAsync</c>），
-/// 那条路的兜底是「新建账号 + 签发令牌」—— 此前前端的「绑定」按钮就是这么把一个孤儿账号建出来的。
-/// 绑定回调只做 <c>LinkExternalLoginAsync</c>，回调页拿到的结果里没有任何令牌。
+/// ★ 守的是两条：带 <c>linkToken</c> 的回调<b>绝不能</b>走登录路径（<c>HandleOAuthCallbackAsync</c>），
+/// 那条路的兜底是「新建账号 + 签发令牌」：此前前端的「绑定」按钮就是这么把一个孤儿账号建出来的；
+/// 也<b>绝不能</b>在这个匿名回调里直接关联（见 <see cref="OAuthLinkCsrfTests"/>）：它只暂存并交回完成码，
+/// 回调页拿到的结果里没有任何令牌。
 /// </remarks>
 public class DefaultAuthControllerOAuthLinkTests
 {
@@ -85,38 +86,41 @@ public class DefaultAuthControllerOAuthLinkTests
     }
 
     [Fact]
-    public async Task Callback_WithALinkToken_LinksTheIssuingUser_AndNeverEntersTheLoginPath()
+    public async Task Callback_WithALinkToken_StagesTheLink_AndLinksNothingYet()
     {
         var owner = Guid.NewGuid();
         _linkTokens.Setup(t => t.ConsumeAsync("good", "github")).ReturnsAsync(Result<Guid>.Success(owner));
-        _oauth.Setup(o => o.LinkExternalLoginAsync(owner, "github", It.IsAny<ClaimsPrincipal>())).ReturnsAsync(Result.Success());
+        _linkTokens.Setup(t => t.StagePendingLinkAsync(owner, "github", It.IsAny<ClaimsPrincipal>()))
+            .ReturnsAsync(Result<string>.Success("completion-code"));
         ArrangeExternalAuthentication(new Dictionary<string, string?> { ["linkToken"] = "good" });
 
         await Build().OAuthCallbackHandler("github");
 
-        _oauth.Verify(o => o.LinkExternalLoginAsync(owner, "github", It.IsAny<ClaimsPrincipal>()), Times.Once);
+        _linkTokens.Verify(t => t.StagePendingLinkAsync(owner, "github", It.IsAny<ClaimsPrincipal>()), Times.Once);
+        _oauth.Verify(o => o.LinkExternalLoginAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ClaimsPrincipal>()), Times.Never);
+        _oauth.Verify(o => o.LinkOAuthAccountAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
         _oauth.Verify(o => o.HandleOAuthCallbackAsync(It.IsAny<string>(), It.IsAny<ClaimsPrincipal>()), Times.Never);
         _renderedResult.ShouldNotBeNull();
         _renderedResult!.Success.ShouldBeTrue();
         _renderedResult.LinkedProvider.ShouldBe("github");
+        _renderedResult.LinkCode.ShouldBe("completion-code");
         _renderedResult.AccessToken.ShouldBeNull();
         _renderedResult.RefreshToken.ShouldBeNull();
     }
 
     [Fact]
-    public async Task Callback_WithALinkToken_WhenTheExternalAccountBelongsToSomeoneElse_RendersTheConflict()
+    public async Task Callback_WithALinkToken_WhenStagingFails_RendersTheErrorPage()
     {
         var owner = Guid.NewGuid();
         _linkTokens.Setup(t => t.ConsumeAsync("good", "github")).ReturnsAsync(Result<Guid>.Success(owner));
-        _oauth.Setup(o => o.LinkExternalLoginAsync(owner, "github", It.IsAny<ClaimsPrincipal>()))
-            .ReturnsAsync(Result.Failure("This external account is already linked to another user.", 409, ErrorCodes.DATA_CONFLICT));
+        _linkTokens.Setup(t => t.StagePendingLinkAsync(owner, "github", It.IsAny<ClaimsPrincipal>()))
+            .ReturnsAsync(Result<string>.Failure("Provider key not found in claims", 400, ErrorCodes.IDENTITY_OAUTH_ERROR));
         ArrangeExternalAuthentication(new Dictionary<string, string?> { ["linkToken"] = "good" });
 
-        await Build().OAuthCallbackHandler("github");
+        var result = await Build().OAuthCallbackHandler("github");
 
-        _renderedResult.ShouldNotBeNull();
-        _renderedResult!.Success.ShouldBeFalse();
-        _renderedResult.ErrorCode.ShouldBe(ErrorCodes.DATA_CONFLICT);
+        result.ShouldBeOfType<ContentResult>().Content!.ShouldContain("<error>");
+        _renderedResult.ShouldBeNull();
         _oauth.Verify(o => o.HandleOAuthCallbackAsync(It.IsAny<string>(), It.IsAny<ClaimsPrincipal>()), Times.Never);
     }
 
@@ -132,6 +136,38 @@ public class DefaultAuthControllerOAuthLinkTests
 
         _oauth.Verify(o => o.HandleOAuthCallbackAsync("github", It.IsAny<ClaimsPrincipal>()), Times.Once);
         _linkTokens.Verify(t => t.ConsumeAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 回调里抛出的异常只进服务端日志：此前异常文本被原样渲染进页面并 postMessage 给打开它的窗口，
+    /// 数据库错误、类型名之类的内部细节直接摆在最终用户面前。
+    /// </summary>
+    [Fact]
+    public async Task Callback_WhenTheSignInThrows_ShowsAGenericMessage()
+    {
+        _oauth.Setup(o => o.HandleOAuthCallbackAsync("github", It.IsAny<ClaimsPrincipal>()))
+            .ThrowsAsync(new InvalidOperationException("internal-detail-marker"));
+        ArrangeExternalAuthentication(new Dictionary<string, string?>());
+
+        var result = await Build().OAuthCallbackHandler("github");
+
+        var content = result.ShouldBeOfType<ContentResult>().Content!;
+        content.ShouldContain("<error>");
+        content.ShouldNotContain("internal-detail-marker");
+    }
+
+    /// <summary>外部认证失败的原因同理：它可能带着第三方令牌端点的响应头与响应体。</summary>
+    [Fact]
+    public async Task Callback_WhenExternalAuthenticationFails_ShowsAGenericMessage()
+    {
+        _authentication.Setup(a => a.AuthenticateAsync(It.IsAny<HttpContext>(), "Identity.External"))
+            .ReturnsAsync(AuthenticateResult.Fail("token-endpoint-body-marker"));
+
+        var result = await Build().OAuthCallbackHandler("github");
+
+        var content = result.ShouldBeOfType<ContentResult>().Content!;
+        content.ShouldContain("<error>");
+        content.ShouldNotContain("token-endpoint-body-marker");
     }
 
     private void ArrangeExternalAuthentication(Dictionary<string, string?> items)

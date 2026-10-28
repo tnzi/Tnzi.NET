@@ -68,10 +68,32 @@ public class StreamEvent
     /// <summary>是否等待人工审批</summary>
     public bool AwaitingApproval { get; set; }
 
-    /// <summary>关联的 Run ID</summary>
+    /// <summary>
+    /// 关联的 Run ID。聊天流上绑定了外部 CLI 运行时的一轮：第一个事件（<c>run_started</c>）与终止事件给出外部运行的 id，
+    /// 客户端用它重新接上（<c>GET chat/runs/{runId}/stream</c>）或取消（<c>POST chat/runs/{runId}/cancel</c>）。
+    /// </summary>
     public Guid? RunId { get; set; }
 
-    /// <summary>Rich component reference for frontend interactive rendering</summary>
+    /// <summary>
+    /// 外部 CLI 运行的事件序号。重新接上时把收到的最后一个序号作为 <c>fromSequence</c> 带回去。
+    /// </summary>
+    public int? Sequence { get; set; }
+
+    /// <summary>
+    /// 错误码为 <c>AI_USAGE_LIMIT_REACHED</c>（框架给用户设的 5 小时 / 每周上限）或 <c>AI_CLI_USAGE_LIMIT</c>（外部 CLI 背后账号的上限）时，
+    /// 上限的重置时间（UTC）；不知道时为 null。客户端据此说「用量上限到了，大约几点恢复」，而不是一句笼统的失败。
+    /// </summary>
+    public DateTime? UsageLimitResetsAt { get; set; }
+
+    /// <summary>
+    /// 错误码为 <c>AI_USAGE_LIMIT_REACHED</c> 时，到上限的是哪个窗口（<c>Session</c> = 5 小时，<c>Weekly</c> = 每周）。
+    /// </summary>
+    public UsageLimitWindow? UsageLimitWindow { get; set; }
+
+    /// <summary>
+    /// Rich component reference for frontend interactive rendering. The framework never sets it:
+    /// it is an extension point for applications that emit interactive components from their own streaming endpoint.
+    /// </summary>
     public ComponentRefDto? ComponentRef { get; set; }
 
     /// <summary>Tool call details (name + duration, for client-side benchmarking)</summary>

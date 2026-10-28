@@ -66,5 +66,5 @@ defineEmits<{
   padding: 4px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
-.t-wf-toolbar__run { color: var(--tnzi-primary); }
+.t-wf-toolbar__run { color: var(--tnzi-ai-accent-text); }
 </style>

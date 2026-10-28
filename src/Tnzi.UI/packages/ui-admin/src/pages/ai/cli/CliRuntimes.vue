@@ -7,7 +7,7 @@
     :show-batch="false"
   >
     <template #primary>
-      <NButton size="small" type="primary" :loading="probing" @click="probe">
+      <NButton v-if="can('ai.cliRuntime.execute')" size="small" type="primary" :loading="probing" @click="probe">
         <template #icon><TSvgIcon icon="mdi:radar" :size="14" /></template>
         {{ t('actions.probe') }}
       </NButton>
@@ -72,6 +72,7 @@
       <TFormSchemaRenderer
         :schema="formSchema"
         :model="(formData ?? {}) as Record<string, unknown>"
+        :translate="t"
       />
     </template>
   </TItemPage>
@@ -85,9 +86,11 @@ import TItemCard, { type ItemCardTag } from '../../../components/data/TItemCard.
 import TRowActions from '../../../components/crud/TRowActions.vue'
 import { TRelativeTime, TSvgIcon } from '@tnzi/ui'
 import TFormSchemaRenderer from '../../_shared/form-schema'
+import { filterByKeyword } from '../../../utils/keyword-filter'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { deleteAction, editAction, type RowAction } from '../../../headless/row-actions'
 import { useSafeMessage } from '../../_shared/safe-message'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../../i18n/translate'
 import { useAdminClient } from '../../../plugin/client'
 import {
@@ -101,7 +104,8 @@ import { formSchema, statusBadgeMapping } from './cli-runtime-config'
 const bridge = createCliAgentBridge({ client: useAdminClient() })
 const message = useSafeMessage()
 const t = makePageTranslator('ai.cliRuntimes')
-const title = 'CLI Runtimes'
+const { can } = usePermissionGuard()
+const title = 'title'
 
 const providers = ref<CliProviderOptionDto[]>([])
 const probing = ref(false)
@@ -112,9 +116,11 @@ const crud = useCrudPage<CliRuntimeDto>({
   rowKey: (r) => String(r.id ?? ''),
   permission: 'ai.cliRuntime',
   // The registry is a bounded per-host list, so it is fetched whole and wrapped
-  // in a single page rather than pretending to paginate.
-  fetchData: async () => {
-    const [items] = await Promise.all([bridge.runtimes.list(), loadProviders()])
+  // in a single page rather than pretending to paginate. The endpoint takes no
+  // keyword, so the search box filters the loaded runtimes here.
+  fetchData: async (q) => {
+    const [all] = await Promise.all([bridge.runtimes.list(), loadProviders()])
+    const items = filterByKeyword(all, q.searchText, (r) => [r.name, r.hostId, r.providerKey, r.providerDisplayName, r.executablePath])
     return {
       items,
       totalCount: items.length,

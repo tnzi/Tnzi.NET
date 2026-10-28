@@ -16,8 +16,9 @@ public class TextSearchFilter
     public Guid? AgentId { get; set; }
 
     /// <summary>
-    /// 知识库 ID 范围过滤 - 仅在这些知识库内检索（空/null = 跨所有启用知识库）。
-    /// 用于按 Agent 分配的知识库限定 RAG 检索范围。
+    /// 知识库 ID 范围过滤 - 仅在这些知识库内检索。
+    /// 用于按 Agent 分配的知识库限定 RAG 检索范围。空/null 表示调用方没有知识库范围：
+    /// RAG 模块的实现据此不检索、答空（不是跨所有知识库）。
     /// </summary>
     public List<Guid>? KnowledgeBaseIds { get; set; }
 
@@ -91,7 +92,7 @@ public class VectorSearchResult
     /// <summary>额外元数据（JSON 格式）</summary>
     public string? Metadata { get; set; }
 
-    /// <summary>父块 ID（层级切块时的父子关系）</summary>
+    /// <summary>父块 ID（预留，内置摄取不写父子关系，恒为 null）</summary>
     public Guid? ParentChunkId { get; set; }
 
     /// <summary>相似度得分（0-1，越高越相似）</summary>

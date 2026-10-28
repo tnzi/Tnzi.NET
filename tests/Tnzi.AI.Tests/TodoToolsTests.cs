@@ -23,6 +23,31 @@ public class TodoToolsTests
         Assert.Equal(2, stored.Count);
     }
 
+    /// <summary>
+    /// AI:Todo:MaxItems 此前只有校验器读它，write_todos 收多少存多少；设置中心里改了上限没有任何效果。
+    /// </summary>
+    [Fact]
+    public void WriteTodos_OverMaxItems_RejectsTheListAndKeepsThePreviousOne()
+    {
+        var accessor = new AgentExecutionContextAccessor();
+        var options = new Mock<IOptionsMonitor<TodoOptions>>();
+        options.Setup(o => o.CurrentValue).Returns(new TodoOptions { MaxItems = 2 });
+        var tools = new TodoTools(accessor, options: options.Object);
+
+        tools.WriteTodos([new() { Content = "A", Order = 1 }, new() { Content = "B", Order = 2 }]);
+        var result = tools.WriteTodos(
+        [
+            new() { Content = "A", Order = 1 },
+            new() { Content = "B", Order = 2 },
+            new() { Content = "C", Order = 3 }
+        ]);
+
+        Assert.StartsWith("Error:", result, StringComparison.Ordinal);
+        Assert.Contains("at most 2", result, StringComparison.Ordinal);
+        var stored = Assert.IsType<List<TodoItemDto>>(accessor.Properties["Todos"]);
+        Assert.Equal(2, stored.Count);
+    }
+
     [Fact]
     public void WriteTodos_EmptyList_ReturnsMessage()
     {
@@ -176,7 +201,7 @@ public class TodoToolsPersistenceTests
         public Task<Result<List<AgentTaskDto>>> GetByRunIdAsync(Guid runId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
-        public Task<Result<List<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatus status, CancellationToken cancellationToken = default) =>
+        public Task<Result<IPagedList<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatusQueryDto query, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }

@@ -11,7 +11,18 @@ public class DocumentIngestionServiceTests
     private readonly Mock<IEmbeddingService> _embeddingServiceMock = new();
     private readonly Mock<IRepository<DocumentChunk, Guid>> _chunkRepoMock = new();
     private readonly Mock<IRepository<KnowledgeBase, Guid>> _kbRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeDocument, Guid>> _docRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeGraphNode, Guid>> _graphNodeRepoMock = new();
+    private readonly Mock<IRepository<KnowledgeGraphEdge, Guid>> _graphEdgeRepoMock = new();
     private readonly Mock<IGraphExtractor> _graphExtractorMock = new();
+
+    public DocumentIngestionServiceTests()
+    {
+        // 摄取末尾确认文档行仍在；删除与摄取并发的用例自己改写这条
+        _docRepoMock
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+    }
 
     private DocumentIngestionService CreateService(IAsyncChunkingStrategy? asyncStrategy = null, bool graphRagEnabled = false)
     {
@@ -34,7 +45,11 @@ public class DocumentIngestionServiceTests
             _chunkingStrategyMock.Object,
             _embeddingServiceMock.Object,
             _chunkRepoMock.Object,
+            Mock.Of<IVectorStore>(v => v.UsesRagChunkTable),
             _kbRepoMock.Object,
+            _docRepoMock.Object,
+            _graphNodeRepoMock.Object,
+            _graphEdgeRepoMock.Object,
             _graphExtractorMock.Object,
             options,
             serviceProviderMock.Object,
@@ -337,15 +352,17 @@ public class DocumentIngestionServiceTests
         var kbId = Guid.NewGuid();
         SetupSuccessfulPipeline(kbId);
         _graphExtractorMock
-            .Setup(g => g.ExtractAsync(It.IsAny<string>(), kbId, It.IsAny<CancellationToken>()))
+            .Setup(g => g.ExtractAsync(It.IsAny<string>(), kbId, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(GraphExtractionResult.Empty);
+        var docId = Guid.NewGuid();
 
         var service = CreateService(graphRagEnabled: true);
-        var result = await service.IngestAsync(kbId, Guid.NewGuid(), Stream.Null, "test.txt");
+        var result = await service.IngestAsync(kbId, docId, Stream.Null, "test.txt");
 
         result.Succeeded.ShouldBeTrue();
+        // 带来源文档的重载：写下的图谱行才归属得到这份文档
         _graphExtractorMock.Verify(
-            g => g.ExtractAsync(It.IsAny<string>(), kbId, It.IsAny<CancellationToken>()),
+            g => g.ExtractAsync(It.IsAny<string>(), kbId, docId, It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -362,6 +379,9 @@ public class DocumentIngestionServiceTests
         _graphExtractorMock.Verify(
             g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        _graphExtractorMock.Verify(
+            g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -370,7 +390,7 @@ public class DocumentIngestionServiceTests
         var kbId = Guid.NewGuid();
         SetupSuccessfulPipeline(kbId);
         _graphExtractorMock
-            .Setup(g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(g => g.ExtractAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("graph extraction blew up"));
 
         var service = CreateService(graphRagEnabled: true);

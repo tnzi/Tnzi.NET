@@ -59,11 +59,11 @@ public class TenantResolverOptions
     public string ClaimType { get; set; } = DefaultClaimType;
 
     /// <summary>
-    /// 解析顺序（按列表顺序尝试，找到即停止）。
+    /// 出厂解析顺序：Claims → Header → QueryString → Cookie。
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ★★ <strong>出厂顺序把 <see cref="TenantResolutionSource.Claims"/> 放在最前。</strong>
+    /// ★★ <strong>Claims 放在最前。</strong>
     /// 此前 Header 打头，于是一个已登录用户只要加一个 <c>X-Tenant-Id</c> 就能让整条请求
     /// 在别的租户上下文里执行。中间件现在对已认证请求一律以 claim 为准
     /// （不符即 403），所以顺序本身不再是安全边界；但一个只看默认值就上线的部署
@@ -73,14 +73,37 @@ public class TenantResolverOptions
     /// Header / QueryString / Cookie 三项仍然有用，它们服务的是<b>匿名</b>请求
     /// —— 按租户分流的登录页在拿到令牌之前没有 claim 可读。
     /// </para>
+    /// <para>不作为 <see cref="ResolutionOrder"/> 的属性初始值，理由见该属性。</para>
     /// </remarks>
-    public List<TenantResolutionSource> ResolutionOrder { get; set; } =
+    private static readonly TenantResolutionSource[] DefaultResolutionOrder =
     [
         TenantResolutionSource.Claims,
         TenantResolutionSource.Header,
         TenantResolutionSource.QueryString,
         TenantResolutionSource.Cookie
     ];
+
+    /// <summary>
+    /// 解析顺序（按列表顺序尝试，找到即停止）。留空表示用出厂顺序 Claims → Header → QueryString → Cookie。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★ <strong>默认值必须是空列表。</strong>.NET 的配置绑定对已有的集合是<b>追加</b>语义：
+    /// 若这里预置出厂顺序，部署方配的 <c>["Claims"]</c>（只信令牌）会绑成
+    /// <c>[Claims, Header, QueryString, Cookie, Claims]</c>，想关掉的来源一个都关不掉：
+    /// 匿名请求照样能用 <c>?tenantId=</c> / Cookie / 头挑一个租户进去，
+    /// 已登录请求带着一个残留的异租户 Cookie 照样被 403，而配置里写着那些来源已经关了。
+    /// 缺省值改在读取处补，读取方一律经 <see cref="ResolveResolutionOrder"/>。
+    /// </para>
+    /// <para>配了就<b>整体替换</b>出厂顺序；重复项只取第一次出现的位置。</para>
+    /// </remarks>
+    public List<TenantResolutionSource> ResolutionOrder { get; set; } = [];
+
+    /// <summary>
+    /// 取生效的解析顺序：配了就用配的（去重、保持先后），没配用出厂顺序 Claims → Header → QueryString → Cookie。
+    /// </summary>
+    public IReadOnlyList<TenantResolutionSource> ResolveResolutionOrder()
+        => ResolutionOrder is { Count: > 0 } configured ? configured.Distinct().ToArray() : [.. DefaultResolutionOrder];
 
     /// <summary>
     /// 默认租户 ID（所有来源均未解析到时使用）

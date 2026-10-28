@@ -34,18 +34,6 @@ public class NullProvider : IPaymentProvider
         }));
     }
 
-    public Task<Result<PaymentProviderQueryResult>> QueryPaymentAsync(string tradeNo)
-    {
-        _logger.LogInformation("Null payment query (test mode). TradeNo: {TradeNo}", tradeNo);
-
-        return Task.FromResult(Result.Success(new PaymentProviderQueryResult
-        {
-            TradeNo = tradeNo,
-            Status = PaymentStatus.Processing,
-            Amount = 0
-        }));
-    }
-
     public Task<Result<PaymentProviderRefundResult>> RefundAsync(PaymentProviderRefundDto input)
     {
         _logger.LogInformation("Null refund (test mode). RefundNo: {RefundNo}, Amount: {Amount}",
@@ -88,6 +76,89 @@ public class NullProvider : IPaymentProvider
             }));
         }
 
+        // 支付方式在渠道侧被更新（对应 Stripe 的 payment_method.updated / automatically_updated）
+        if (parameters.TryGetValue("updated_token", out var updatedToken) && !string.IsNullOrWhiteSpace(updatedToken))
+        {
+            parameters.TryGetValue("last4", out var last4);
+            parameters.TryGetValue("brand", out var brand);
+            int? expiryYear = parameters.TryGetValue("exp_year", out var yearText) && int.TryParse(yearText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var year)
+                ? year
+                : null;
+
+            return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+            {
+                EventId = callbackEventId,
+                Kind = PaymentCallbackKind.PaymentMethodUpdated,
+                PaymentMethodToken = updatedToken,
+                UpdatedPaymentMethod = new PaymentProviderPaymentMethodResult
+                {
+                    Token = updatedToken,
+                    Brand = brand,
+                    Last4 = last4,
+                    ExpiryYear = expiryYear
+                }
+            }));
+        }
+
+        // 渠道后台的退款（对应 Stripe 的 charge.refunded / refund.updated）：按渠道交易号找支付
+        if (parameters.TryGetValue("external_refund_id", out var externalRefundId) && !string.IsNullOrWhiteSpace(externalRefundId))
+        {
+            parameters.TryGetValue("external_trade_no", out var refundedTradeNo);
+            parameters.TryGetValue("local_refund_no", out var localRefundNo);
+            decimal.TryParse(parameters.TryGetValue("refund_amount", out var refundAmountText) ? refundAmountText : null,
+                NumberStyles.Number, CultureInfo.InvariantCulture, out var refundAmount);
+            var refundStatus = parameters.TryGetValue("refund_status", out var refundStatusText)
+                && Enum.TryParse<RefundStatus>(refundStatusText, ignoreCase: true, out var parsedRefundStatus)
+                ? parsedRefundStatus
+                : RefundStatus.Succeeded;
+
+            return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+            {
+                EventId = callbackEventId,
+                Kind = PaymentCallbackKind.ExternalRefund,
+                ExternalTradeNo = refundedTradeNo,
+                Refunds =
+                [
+                    new PaymentProviderExternalRefund
+                    {
+                        ExternalRefundNo = externalRefundId,
+                        LocalRefundNo = string.IsNullOrWhiteSpace(localRefundNo) ? null : localRefundNo,
+                        Amount = refundAmount,
+                        Currency = parameters.TryGetValue("currency", out var refundCurrency) ? refundCurrency : null,
+                        Status = refundStatus,
+                        Reason = parameters.TryGetValue("refund_reason", out var refundReason) ? refundReason : null
+                    }
+                ]
+            }));
+        }
+
+        // 拒付（对应 Stripe 的 charge.dispute.*）
+        if (parameters.TryGetValue("dispute_id", out var disputeId) && !string.IsNullOrWhiteSpace(disputeId))
+        {
+            parameters.TryGetValue("external_trade_no", out var disputedTradeNo);
+            decimal.TryParse(parameters.TryGetValue("dispute_amount", out var disputeAmountText) ? disputeAmountText : null,
+                NumberStyles.Number, CultureInfo.InvariantCulture, out var disputeAmount);
+            var disputeStatus = parameters.TryGetValue("dispute_status", out var disputeStatusText)
+                && Enum.TryParse<PaymentDisputeStatus>(disputeStatusText, ignoreCase: true, out var parsedDisputeStatus)
+                ? parsedDisputeStatus
+                : PaymentDisputeStatus.NeedsResponse;
+
+            return Task.FromResult(Result.Success(new PaymentProviderCallbackResult
+            {
+                EventId = callbackEventId,
+                Kind = PaymentCallbackKind.Dispute,
+                ExternalTradeNo = disputedTradeNo,
+                Dispute = new PaymentProviderDispute
+                {
+                    DisputeId = disputeId,
+                    Status = disputeStatus,
+                    Reason = parameters.TryGetValue("dispute_reason", out var disputeReason) ? disputeReason : null,
+                    Amount = disputeAmount,
+                    Currency = parameters.TryGetValue("currency", out var disputeCurrency) ? disputeCurrency : null
+                }
+            }));
+        }
+
         parameters.TryGetValue("trade_no", out var tradeNo);
         parameters.TryGetValue("amount", out var amountText);
         // 回调金额一律按 invariant 解析：跟随服务器区域会把 "12.34" 在小数逗号区域解析成 1234
@@ -107,7 +178,9 @@ public class NullProvider : IPaymentProvider
             PaidAmount = amount,
             Currency = parameters.TryGetValue("currency", out var currency) ? currency : null,
             FailReason = status == PaymentStatus.Succeeded ? null : $"Null provider reported {status}",
-            EventId = callbackEventId
+            EventId = callbackEventId,
+            // 可选：模拟「付款时按要求留存了这张卡」（Stripe 的 setup_future_usage）
+            SavedPaymentMethodToken = status == PaymentStatus.Succeeded && parameters.TryGetValue("saved_token", out var savedToken) ? savedToken : null
         }));
     }
 

@@ -173,7 +173,8 @@ public class LoginGuardTests
 
         Assert.True(result.Succeeded);
         Assert.Equal("access_token", result.Data);
-        fixture.Captcha.Verify(x => x.ClearLoginFailureAsync(It.IsAny<string>()), Times.Once);
+        // 这里的失败计数按来源地址记，成功登录不清它（理由见 AuthService.OnSignInCompletedAsync）。
+        fixture.Captcha.Verify(x => x.ClearLoginFailureAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

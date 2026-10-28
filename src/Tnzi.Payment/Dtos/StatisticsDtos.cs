@@ -21,6 +21,12 @@ public class PaymentStatisticsDto
     public decimal TotalRevenue { get; set; }
 
     /// <summary>
+    /// 金额的币种：窗口内收款只有一个币种时就是它，没有收款时是 <c>Payment:DefaultCurrency</c>，
+    /// 混有多个币种时为 null（总额是直接相加的，不能配任何一个货币符号）。
+    /// </summary>
+    public string? Currency { get; set; }
+
+    /// <summary>
     /// 总交易数
     /// </summary>
     public int TotalTransactions { get; set; }
@@ -357,9 +363,9 @@ public class ReconciliationEntryDto
 public class ReconciliationExportResultDto
 {
     /// <summary>
-    /// CSV 文件内容
+    /// CSV 文件内容。摘要端点（<c>GET admin/payment-statistics/reconciliation/summary</c>）不带它，为 null。
     /// </summary>
-    public string CsvContent { get; set; } = string.Empty;
+    public string? CsvContent { get; set; }
 
     /// <summary>
     /// 文件名

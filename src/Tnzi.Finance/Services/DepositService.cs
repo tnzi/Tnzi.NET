@@ -9,6 +9,8 @@ namespace Tnzi.Finance.Services;
 /// 贷 各「其它款项」行自己指定的科目。借方之所以坚持一行，是因为整张单据存在的理由
 /// 就是让银行流水上那一行 1 : 1 配得上；贷方之所以逐行展开，是因为
 /// 「这笔存款由哪几张收款组成」正是待存款项科目要携带的信息。
+/// 外币存款与收款入账汇率不同时，本位币差额在同一工作单元里另过一张同来源的汇兑损益凭证
+/// （见 <see cref="PostReceiptFxResidualAsync"/>），作废按来源反查、与主凭证一并冲销。
 /// </para>
 /// <para>
 /// 独占声明（一张收款至多进一张存活的存款单）由 <c>DepositLine.ClaimedPaymentEntryId</c>
@@ -350,11 +352,18 @@ public class DepositService : ApplicationService, IDepositService
             }
         }
 
+        // 这些收款当初借记来源科目的本位币额：取总账本身，不取单据上的派生字段
+        var receiptBaseResult = await SumReceiptBaseOnSourceAsync(payments, deposit.FromAccountId, cancellationToken);
+        if (!receiptBaseResult.Succeeded)
+            return Fail<DepositDto>(receiptBaseResult.Message!, receiptBaseResult.Code ?? 409);
+        var receiptBase = receiptBaseResult.Data;
+
+        var memo = string.IsNullOrWhiteSpace(deposit.Memo) ? "Bank deposit" : deposit.Memo;
         var entry = new JournalEntry
         {
             Status = JournalEntryStatus.Draft,
             PostingDate = deposit.DepositDate,
-            Memo = string.IsNullOrWhiteSpace(deposit.Memo) ? "Bank deposit" : deposit.Memo,
+            Memo = memo,
             Currency = deposit.Currency,
             ExchangeRate = deposit.ExchangeRate,
             SourceType = FinanceSourceTypes.Deposit,
@@ -396,6 +405,11 @@ public class DepositService : ApplicationService, IDepositService
 
                 await _entryRepository.InsertAsync(entry, ct);
 
+                // 凭证号已分配：此后的失败必须抛 UnitOfWorkAbortException 整体回滚
+                var fxResult = await PostReceiptFxResidualAsync(deposit, entry, receiptBase, memo, ct);
+                if (!fxResult.Succeeded)
+                    throw new UnitOfWorkAbortException(fxResult);
+
                 deposit.Number = await _numberService.NextFormattedAsync(
                     FinanceSourceTypes.Deposit, _options.DepositNumberPrefix, _options.JournalNumberPadding, ct);
                 deposit.Status = FinanceDocumentStatus.Posted;
@@ -406,6 +420,10 @@ public class DepositService : ApplicationService, IDepositService
 
                 return Result.Success();
             }, cancellationToken);
+        }
+        catch (UnitOfWorkAbortException ex)
+        {
+            postResult = ex.Result;
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -444,28 +462,39 @@ public class DepositService : ApplicationService, IDepositService
         if (!guardResult.Succeeded)
             return Fail<DepositDto>(guardResult.Message ?? "Void was rejected.", guardResult.Code ?? 403);
 
-        var original = await _entryRepository.AsQueryable(true)
+        // 按 (SourceType, SourceId, Posted) 反查这张存款单过账的全部凭证（主凭证 + 可能有的外币差额凭证），
+        // 逐张冲销。只冲主凭证的话，汇兑损益上就留下一笔再也对不上任何单据的数
+        var sourceId = deposit.Id.ToString();
+        var vouchers = await _entryRepository.AsQueryable(true)
             .Include(e => e.Lines)
-            .FirstOrDefaultAsync(e => e.Id == deposit.JournalEntryId, cancellationToken);
-        if (original == null)
+            .Where(e => e.SourceType == FinanceSourceTypes.Deposit && e.SourceId == sourceId && e.Status == JournalEntryStatus.Posted)
+            .ToListAsync(cancellationToken);
+        if (!vouchers.Any(e => e.Id == deposit.JournalEntryId))
             return Fail<DepositDto>("The posting journal entry was not found.", 500);
 
-        JournalEntry? reversal = null;
+        var primaryReversalId = Guid.Empty;
         Result voidResult;
         try
         {
             voidResult = await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
-                var buildResult = await _engine.BuildReversalAsync(original, original.PostingDate, $"Void {deposit.Number}", ct);
-                if (!buildResult.Succeeded)
-                    return Result.Failure(buildResult.Message ?? "Void failed.", buildResult.Code ?? 400);
+                // 多写入循环：每次 BuildReversalAsync 分配冲销凭证号，任一失败以 UnitOfWorkAbortException 整体回滚
+                foreach (var original in vouchers)
+                {
+                    var buildResult = await _engine.BuildReversalAsync(original, original.PostingDate, $"Void {deposit.Number}", ct);
+                    if (!buildResult.Succeeded)
+                        throw new UnitOfWorkAbortException(Result.Failure(buildResult.Message ?? "Void failed.", buildResult.Code ?? 400));
 
-                reversal = buildResult.Data!;
-                await _entryRepository.InsertAsync(reversal, ct);
+                    var reversal = buildResult.Data!;
+                    await _entryRepository.InsertAsync(reversal, ct);
 
-                original.Status = JournalEntryStatus.Reversed;
-                original.ReversedByEntryId = reversal.Id;
-                await _entryRepository.UpdateAsync(original, ct);
+                    original.Status = JournalEntryStatus.Reversed;
+                    original.ReversedByEntryId = reversal.Id;
+                    await _entryRepository.UpdateAsync(original, ct);
+
+                    if (original.Id == deposit.JournalEntryId)
+                        primaryReversalId = reversal.Id;
+                }
 
                 // 释放收款：只清声明，行留着 —— 作废的存款单仍要答得出当初装的是哪几笔
                 foreach (var line in deposit.Lines.Where(l => l.ClaimedPaymentEntryId.HasValue))
@@ -475,11 +504,15 @@ public class DepositService : ApplicationService, IDepositService
                 }
 
                 deposit.Status = FinanceDocumentStatus.Voided;
-                deposit.VoidJournalEntryId = reversal.Id;
+                deposit.VoidJournalEntryId = primaryReversalId;
                 await _depositRepository.UpdateAsync(deposit, ct);
 
                 return Result.Success();
             }, cancellationToken);
+        }
+        catch (UnitOfWorkAbortException ex)
+        {
+            voidResult = ex.Result;
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -494,7 +527,7 @@ public class DepositService : ApplicationService, IDepositService
             DocType = FinanceSourceTypes.Deposit,
             DocId = deposit.Id,
             Number = deposit.Number,
-            VoidJournalEntryId = reversal!.Id,
+            VoidJournalEntryId = primaryReversalId,
             TenantId = deposit.TenantId
         }, cancellationToken);
 
@@ -530,6 +563,11 @@ public class DepositService : ApplicationService, IDepositService
 
         if (paymentIds.Count == 0 && otherFunds.Count == 0)
             return Result<DepositDraft>.Failure("A deposit requires at least one receipt or one other-funds line.", 400);
+        var memoTooLong = FinanceFieldLimits.FirstTooLong(
+            (input.Memo, FinanceFieldLimits.MemoMaxLength, "memo"),
+            (input.Reference, FinanceFieldLimits.ReferenceMaxLength, "reference"));
+        if (memoTooLong != null)
+            return Result<DepositDraft>.Failure(memoTooLong, 400);
         if (paymentIds.Distinct().Count() != paymentIds.Count)
             return Result<DepositDraft>.Failure("The same receipt cannot appear twice on one deposit.", 400);
 
@@ -599,6 +637,11 @@ public class DepositService : ApplicationService, IDepositService
         {
             if (funds.Amount <= 0)
                 return Result<DepositDraft>.Failure($"Line {lineNumber}: amount must be greater than zero.", 400);
+            var fundsTooLong = FinanceFieldLimits.FirstTooLong(
+                (funds.Description, FinanceFieldLimits.LineDescriptionMaxLength, "description"),
+                (funds.Reference, FinanceFieldLimits.ReferenceMaxLength, "reference"));
+            if (fundsTooLong != null)
+                return Result<DepositDraft>.Failure($"Line {lineNumber}: {fundsTooLong}", 400);
 
             var accountResult = await ValidateOtherFundsAccountAsync(funds.AccountId, header, lineNumber, cancellationToken);
             if (!accountResult.Succeeded)
@@ -670,6 +713,96 @@ public class DepositService : ApplicationService, IDepositService
             return Fail($"Destination account: {toResult.Message}", toResult.Code ?? 400);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// 这几张收款当初在来源科目上留下的本位币净借方（逐张取它们自己那张过账凭证的行）。
+    /// </summary>
+    /// <remarks>
+    /// 已过账的收款必有过账凭证；缺了就说明数据被动过，宁可拒绝过账也不拿一个猜出来的数去算差额。
+    /// SQLite 不支持 decimal 聚合，所以行取回来在内存里求和（每张收款只有两行）。
+    /// </remarks>
+    private async Task<Result<decimal>> SumReceiptBaseOnSourceAsync(IReadOnlyCollection<PaymentEntry> payments, Guid fromAccountId, CancellationToken cancellationToken)
+    {
+        if (payments.Count == 0)
+            return Result<decimal>.Success(0m);
+
+        var missing = payments.FirstOrDefault(p => !p.JournalEntryId.HasValue);
+        if (missing != null)
+            return Result<decimal>.Failure($"Receipt '{missing.Number ?? missing.Id.ToString()}' has no posting journal entry.", 409);
+
+        var entryIds = payments.Select(p => p.JournalEntryId!.Value).ToList();
+        var lines = await _entryRepository.AsNoTracking()
+            .Where(e => entryIds.Contains(e.Id))
+            .SelectMany(e => e.Lines)
+            .Where(l => l.AccountId == fromAccountId)
+            .Select(l => new { l.Debit, l.Credit })
+            .ToListAsync(cancellationToken);
+
+        return Result<decimal>.Success(lines.Sum(l => l.Debit - l.Credit));
+    }
+
+    /// <summary>
+    /// 外币存款的本位币差额：收款按各自汇率借记来源科目，存款按自己的汇率贷记它，
+    /// 交易币归零了，本位币却留下差额。在这里实现为汇兑损益，与本存款单同来源，作废时一并冲销。
+    /// </summary>
+    /// <remarks>
+    /// ★ 不能「留给期末重估」：重估只看限定了外币的科目，而默认科目表的待存款项不限定币种、
+    /// 什么币都收，差额就永远挂在那里，资产负债表与现金流量表上是一笔不存在的现金，且每笔外币存款都在累加。
+    /// 限定了外币的来源科目同样受益：已实现的部分在这里落地，此前重估记下的未实现部分由下一次重估
+    /// （delta-to-target）自动转回，两边合计不重复。
+    /// 「其它款项」行没有入账汇率，不参与差额。汇率没变时差额为 0，不过账。
+    /// </remarks>
+    /// <param name="deposit">存款单</param>
+    /// <param name="entry">已经由引擎过账（行上本位币金额已定格）的存款主凭证</param>
+    /// <param name="receiptBase">这些收款当初借记来源科目的本位币额</param>
+    /// <param name="memo">主凭证摘要</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task<Result> PostReceiptFxResidualAsync(Deposit deposit, JournalEntry entry, decimal receiptBase, string memo, CancellationToken cancellationToken)
+    {
+        var creditedBase = entry.Lines
+            .Where(l => l.AccountId == deposit.FromAccountId)
+            .Sum(l => l.Credit - l.Debit);
+        var residual = receiptBase - creditedBase;
+        if (residual == 0m)
+            return Result.Success();
+
+        var fxResult = await _helper.ResolveSystemAccountAsync(AccountSystemRole.ExchangeGainLoss, cancellationToken);
+        if (!fxResult.Succeeded)
+            return fxResult;
+        var fx = fxResult.Data!;
+
+        var baseCurrency = _helper.NormalizeCurrency(null);
+        var magnitude = Math.Abs(residual);
+        var fxEntry = new JournalEntry
+        {
+            Status = JournalEntryStatus.Draft,
+            PostingDate = deposit.DepositDate,
+            Memo = $"{memo} (fx)",
+            Currency = baseCurrency,
+            ExchangeRate = 1m,
+            SourceType = FinanceSourceTypes.Deposit,
+            SourceId = deposit.Id.ToString()
+        };
+
+        // residual > 0：收款入账时值得多、存款时值得少 → 汇兑损失（借汇兑损益 / 贷来源科目）；< 0 镜像
+        if (residual > 0m)
+        {
+            fxEntry.Lines.Add(new JournalLine { LineNumber = 1, AccountId = fx.Id, TxnDebit = magnitude, Currency = baseCurrency });
+            fxEntry.Lines.Add(new JournalLine { LineNumber = 2, AccountId = deposit.FromAccountId, TxnCredit = magnitude, Currency = baseCurrency });
+        }
+        else
+        {
+            fxEntry.Lines.Add(new JournalLine { LineNumber = 1, AccountId = deposit.FromAccountId, TxnDebit = magnitude, Currency = baseCurrency });
+            fxEntry.Lines.Add(new JournalLine { LineNumber = 2, AccountId = fx.Id, TxnCredit = magnitude, Currency = baseCurrency });
+        }
+
+        var postResult = await _engine.PostAsync(fxEntry, cancellationToken);
+        if (!postResult.Succeeded)
+            return postResult;
+
+        await _entryRepository.InsertAsync(fxEntry, cancellationToken);
+        return Result.Success();
     }
 
     /// <summary>收款行的准入：已过账的 Inbound 收款、就落在本单来源科目上、币种一致</summary>

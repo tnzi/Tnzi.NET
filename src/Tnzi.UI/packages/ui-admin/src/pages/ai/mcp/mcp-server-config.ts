@@ -26,6 +26,9 @@ import type {
  *   - Update: null/omitted = keep existing cipher; '' = clear; non-empty =
  *     rotate. The form leaves authToken blank in edit mode and uses the
  *     toUpdateDto adapter to drop the field when blank.
+ *   - Auth type "none" is how the form clears a token: the server attaches
+ *     any stored token to its requests whatever the auth type says, so "none"
+ *     sends '' on update and no token on create.
  */
 export const mcpServerColumns: ColumnDef[] = [
   { key: 'name', title: 'columns.name', primary: true },
@@ -77,6 +80,11 @@ export const mcpAuthTypeOptions: Array<{ label: string; value: string }> = [
   { label: 'OAuth', value: 'oauth' },
 ]
 
+/** The auth type that sends no credential: a token kept beside it would still go out. */
+function isNoAuth(authType: unknown): boolean {
+  return String(authType ?? '').trim().toLowerCase() === 'none'
+}
+
 /**
  * Maps an MCP transport string to a mdi icon name for the external-server
  * card grid. sse/http = a network stream. The stdio case only renders for
@@ -123,7 +131,7 @@ export const mcpServerFormSchema: FormSchemaItem[] = [
     key: 'authToken',
     labelKey: 'form.authToken',
     label: 'Auth Token',
-    type: 'text',
+    type: 'password',
     placeholder: 'Leave blank on edit to keep existing token',
   },
   { key: 'priority', labelKey: 'form.priority', label: 'Priority', type: 'number', min: 0 },
@@ -150,7 +158,7 @@ export function toCreateMcpServerDto(form: Record<string, unknown>): CreateMcpSe
     serverUrl: String(form.serverUrl ?? '').trim(),
     transport: String(form.transport ?? '').trim(),
     authType: (form.authType as string | undefined) || null,
-    authToken: authToken || null,
+    authToken: isNoAuth(form.authType) ? null : authToken || null,
     priority: (form.priority as number | undefined) ?? 0,
     isEnabled: (form.isEnabled as boolean | undefined) ?? true,
     description: (form.description as string | undefined) || null,
@@ -161,7 +169,7 @@ export function toCreateMcpServerDto(form: Record<string, unknown>): CreateMcpSe
 /**
  * Form -> UpdateMcpServerRegistrationDto adapter. Tri-state authToken:
  * blank means "keep existing", so we omit the field entirely; a non-empty
- * value rotates the encrypted token.
+ * value rotates the encrypted token; auth type "none" clears it ('').
  */
 export function toUpdateMcpServerDto(form: Record<string, unknown>): UpdateMcpServerRegistrationDto {
   const authTokenRaw = String(form.authToken ?? '')
@@ -175,7 +183,9 @@ export function toUpdateMcpServerDto(form: Record<string, unknown>): UpdateMcpSe
     description: (form.description as string | undefined) ?? null,
     tags: (form.tags as string | undefined) ?? null,
   }
-  if (authTokenRaw.trim().length > 0) {
+  if (isNoAuth(form.authType)) {
+    dto.authToken = ''
+  } else if (authTokenRaw.trim().length > 0) {
     dto.authToken = authTokenRaw
   }
   return dto

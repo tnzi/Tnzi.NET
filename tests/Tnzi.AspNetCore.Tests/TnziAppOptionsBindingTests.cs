@@ -17,14 +17,14 @@ public class TnziAppOptionsBindingTests
         var app = await CreateAppAsync(new Dictionary<string, string?>
         {
             ["Tnzi:AutoInitializeDatabase"] = "false",
-            ["Tnzi:LogModuleLoading"] = "false"
+            ["Tnzi:WriteStartupErrorLog"] = "false"
         });
 
         try
         {
             var options = app.Services.GetRequiredService<IOptions<TnziOptions>>().Value;
             Assert.False(options.AutoInitializeDatabase);
-            Assert.False(options.LogModuleLoading);
+            Assert.False(options.WriteStartupErrorLog);
         }
         finally
         {

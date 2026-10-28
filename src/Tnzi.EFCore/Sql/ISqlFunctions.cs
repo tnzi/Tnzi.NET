@@ -36,7 +36,7 @@ public interface ISqlFunctions
     /// </summary>
     /// <remarks>
     /// SQL Server: GETUTCDATE()
-    /// PostgreSQL: (NOW() AT TIME ZONE 'UTC')
+    /// PostgreSQL: NOW()（面向 timestamp with time zone 列，即 Npgsql 对 DateTime 的默认映射）
     /// MySQL: UTC_TIMESTAMP()
     /// SQLite: DATETIME('now')
     /// </remarks>
@@ -58,7 +58,7 @@ public interface ISqlFunctions
     /// </summary>
     /// <remarks>
     /// SQL Server: CAST(GETUTCDATE() AS DATE)
-    /// PostgreSQL: (CURRENT_DATE AT TIME ZONE 'UTC')
+    /// PostgreSQL: (NOW() AT TIME ZONE 'UTC')::DATE
     /// MySQL: UTC_DATE()
     /// SQLite: DATE('now')
     /// </remarks>

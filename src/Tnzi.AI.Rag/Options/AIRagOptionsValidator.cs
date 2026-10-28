@@ -7,9 +7,11 @@ public class AIRagOptionsValidator : OptionsValidatorBase<AIRagOptions>
 {
     protected override void ValidateOptions(AIRagOptions options, List<string> errors)
     {
-        if (options.DefaultChunkSize <= 0)
+        // 默认切块参数与知识库级参数同一条规则（ChunkSettings）：重叠超过半个块会让切块退化成逐字符前进
+        var chunkSettingsError = ChunkSettings.Validate(options.DefaultChunkSize, options.DefaultChunkOverlap);
+        if (chunkSettingsError != null)
         {
-            AddError(errors, nameof(options.DefaultChunkSize), "must be greater than 0");
+            AddError(errors, $"{nameof(options.DefaultChunkSize)}/{nameof(options.DefaultChunkOverlap)}", chunkSettingsError);
         }
 
         if (options.EmbeddingBatchSize <= 0)
@@ -20,16 +22,6 @@ public class AIRagOptionsValidator : OptionsValidatorBase<AIRagOptions>
         if (options.DefaultEmbeddingDimensions <= 0)
         {
             AddError(errors, nameof(options.DefaultEmbeddingDimensions), "must be greater than 0");
-        }
-
-        if (options.DefaultChunkOverlap < 0)
-        {
-            AddError(errors, nameof(options.DefaultChunkOverlap), "must be greater than or equal to 0");
-        }
-
-        if (options.DefaultChunkOverlap >= options.DefaultChunkSize)
-        {
-            AddError(errors, nameof(options.DefaultChunkOverlap), "must be less than DefaultChunkSize");
         }
 
         if (options.MaxTopK <= 0)

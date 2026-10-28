@@ -2,6 +2,7 @@ namespace Tnzi.Chat.Events.Handlers;
 
 public class ChatSignalREventHandler :
     IEventHandler<ConversationMessageSentEvent>,
+    IEventHandler<ConversationMessageRecalledEvent>,
     IEventHandler<ConversationReadEvent>,
     IEventHandler<ConversationChangedEvent>
 {
@@ -39,6 +40,25 @@ public class ChatSignalREventHandler :
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SignalR push failed for ConversationMessageSent {MessageId}", @event.MessageId);
+        }
+    }
+
+    public async Task HandleAsync(ConversationMessageRecalledEvent @event, CancellationToken cancellationToken = default)
+    {
+        if (_messagePush == null || @event.RecipientUserIds.Count == 0) return;
+        var payload = new
+        {
+            conversationId = @event.ConversationId,
+            messageId = @event.MessageId,
+            preview = @event.Preview
+        };
+        try
+        {
+            await _messagePush.PushToUsersAsync(@event.RecipientUserIds, "Chat.MessageRecalled", payload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR push failed for ConversationMessageRecalled {MessageId}", @event.MessageId);
         }
     }
 

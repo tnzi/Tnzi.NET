@@ -17,7 +17,8 @@ public class PayrollPermissions : IPermissionDefinitionProvider
 {
     public void Define(IPermissionDefinitionContext context)
     {
-        context.AddGroup("payroll", "Payroll");
+        // 应用范围：员工与薪资是使用方机构自己的数据（见 PermissionScope）。
+        context.AddGroup("payroll", "Payroll").Scope = PermissionScope.Application;
         context.AddPermission("payroll.view", "View Payroll", parentName: "payroll");
         context.AddCrudPermissions("payroll.employee", "Employees", parentName: "payroll");
         // 组件/结构/税级表三资源合一（同属薪酬配置面）

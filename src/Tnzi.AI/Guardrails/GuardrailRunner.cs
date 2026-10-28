@@ -182,19 +182,8 @@ public class GuardrailRunner
             return (input, rejection.result);
         }
 
-        // 按注册顺序依次应用修改（并行模式下修改基于原始输入，顺序应用）
-        var currentText = input;
-        foreach (var (_, result) in orderedResults)
-        {
-            if (result.ModifiedContent != null)
-            {
-                _logger.LogDebug("Input modified by {GuardrailName}: {Reason}",
-                    result.GuardrailName, result.Reason);
-                currentText = result.ModifiedContent;
-            }
-        }
-
-        return (currentText, null);
+        return await ChainParallelModificationsAsync(
+            input, orderedResults, (index, text, token) => guardrailList[index].ValidateAsync(text, token), "Input", ct);
     }
 
     /// <summary>
@@ -257,15 +246,49 @@ public class GuardrailRunner
             return (output, rejection.result);
         }
 
-        // 按注册顺序依次应用修改
-        var currentText = output;
-        foreach (var (_, result) in orderedResults)
+        return await ChainParallelModificationsAsync(
+            output, orderedResults, (index, text, token) => guardrailList[index].ValidateAsync(text, token), "Output", ct);
+    }
+
+    /// <summary>
+    /// 并行模式下合并多个守卫的改写。
+    /// </summary>
+    /// <remarks>
+    /// 并行时每个改写都是对<b>原始文本</b>算出来的，逐个取 <c>ModifiedContent</c> 覆盖等于只留最后一个：
+    /// 脱敏守卫在前、规范化守卫在后，脱敏结果就被规范化守卫基于原文的输出整个盖掉，原文照样进模型。
+    /// 这里按注册顺序把改写串起来，与顺序模式同一语义：第一个改写者的结果作起点，其余改写者在当前文本上重跑一次。
+    /// 只重跑改写过的守卫；重跑被拒即按拒绝处理（失败关闭）。
+    /// </remarks>
+    private async Task<(string text, GuardrailResult? rejection)> ChainParallelModificationsAsync(
+        string original,
+        IReadOnlyList<(int index, GuardrailResult result)> orderedResults,
+        Func<int, string, CancellationToken, Task<GuardrailResult>> validate,
+        string direction,
+        CancellationToken ct)
+    {
+        var modifiers = orderedResults.Where(r => r.result.ModifiedContent != null).ToList();
+        if (modifiers.Count == 0)
         {
-            if (result.ModifiedContent != null)
+            return (original, null);
+        }
+
+        var (_, first) = modifiers[0];
+        _logger.LogDebug("{Direction} modified by {GuardrailName}: {Reason}", direction, first.GuardrailName, first.Reason);
+        var currentText = first.ModifiedContent!;
+
+        foreach (var (index, _) in modifiers.Skip(1))
+        {
+            var rerun = await validate(index, currentText, ct);
+            if (!rerun.IsAllowed)
             {
-                _logger.LogDebug("Output modified by {GuardrailName}: {Reason}",
-                    result.GuardrailName, result.Reason);
-                currentText = result.ModifiedContent;
+                _logger.LogWarning("{Direction} blocked by {GuardrailName}: {Reason}", direction, rerun.GuardrailName, rerun.Reason);
+                return (currentText, rerun);
+            }
+
+            if (rerun.ModifiedContent != null)
+            {
+                _logger.LogDebug("{Direction} modified by {GuardrailName}: {Reason}", direction, rerun.GuardrailName, rerun.Reason);
+                currentText = rerun.ModifiedContent;
             }
         }
 

@@ -19,6 +19,10 @@ internal sealed class StreamJsonFrame
     [JsonPropertyName("session_id")]
     public string? SessionId { get; set; }
 
+    /// <summary>帧的 uuid。assistant / user 帧的就是会话里那个对话条目的 id，截断续接时用它指位置。</summary>
+    [JsonPropertyName("uuid")]
+    public string? Uuid { get; set; }
+
     [JsonPropertyName("model")]
     public string? Model { get; set; }
 
@@ -54,11 +58,86 @@ internal sealed class StreamJsonFrame
 
     [JsonPropertyName("request")]
     public JsonElement? Request { get; set; }
+
+    /// <summary>
+    /// assistant 帧：这条消息包着一次 API 错误时的公开分类（<c>rate_limit</c>、<c>authentication_failed</c>……）。
+    /// </summary>
+    /// <remarks>
+    /// 这几个错误字段一律按 <see cref="JsonElement"/> 收，读的时候再看类型：别的帧上同名字段可能是对象，
+    /// 按字符串收一旦类型不符，整帧反序列化失败、被丢掉（丢的可能就是 result 帧）。
+    /// </remarks>
+    [JsonPropertyName("error")]
+    public JsonElement? Error { get; set; }
+
+    /// <summary>assistant 帧：API 错误的具体种类（<c>usage_limit_reached</c> = 账号自身的用量上限）。</summary>
+    [JsonPropertyName("api_error")]
+    public JsonElement? ApiError { get; set; }
+
+    /// <summary>assistant 帧：<see cref="ApiError"/> 的参数；用量上限时带 <c>rate_limit_info</c>（哪个上限、何时重置）。</summary>
+    [JsonPropertyName("api_error_params")]
+    public JsonElement? ApiErrorParams { get; set; }
+
+    /// <summary><c>rate_limit_event</c> 帧：配额窗口的状态。</summary>
+    [JsonPropertyName("rate_limit_info")]
+    public JsonElement? RateLimitInfo { get; set; }
+}
+
+/// <summary>
+/// 一份 <c>rate_limit_info</c>：<c>rate_limit_event</c> 帧带的，或用量上限拒绝时 assistant 帧的 <c>api_error_params</c> 里带的，形状相同。
+/// </summary>
+/// <remarks>
+/// 形状取自 claude 2.1.303 自带的消息 schema：<c>status</c> 是 <c>allowed</c> / <c>allowed_warning</c> / <c>rejected</c>，
+/// <c>resetsAt</c> 是 Unix 秒，<c>rateLimitType</c> 是 <c>five_hour</c> / <c>seven_day</c> / <c>seven_day_opus</c> / ……
+/// </remarks>
+/// <param name="Status">窗口状态。</param>
+/// <param name="ResetsAt">何时重置；没报时为 null。</param>
+/// <param name="RateLimitType">哪一个上限；没报时为 null。</param>
+internal sealed record StreamJsonRateLimit(string Status, DateTimeOffset? ResetsAt, string? RateLimitType)
+{
+    /// <summary>请求被这个上限拒绝了。</summary>
+    public bool IsRejected => string.Equals(Status, "rejected", StringComparison.Ordinal);
+
+    /// <summary>读一份 <c>rate_limit_info</c>；不是对象或没有 <c>status</c> 时为 null。</summary>
+    public static StreamJsonRateLimit? Read(JsonElement? element)
+    {
+        if (element is not { ValueKind: JsonValueKind.Object } info
+            || !info.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        DateTimeOffset? resetsAt = null;
+        if (info.TryGetProperty("resetsAt", out var resets) && resets.ValueKind == JsonValueKind.Number
+            && resets.TryGetInt64(out var seconds) && seconds > 0)
+        {
+            try
+            {
+                resetsAt = DateTimeOffset.FromUnixTimeSeconds(seconds);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // 读不懂的时间等于没报：宁可说不出几点恢复，也不说一个错的
+            }
+        }
+
+        var type = info.TryGetProperty("rateLimitType", out var kind) && kind.ValueKind == JsonValueKind.String
+            ? kind.GetString()
+            : null;
+
+        return new StreamJsonRateLimit(status.GetString()!, resetsAt, type);
+    }
 }
 
 /// <summary>assistant 帧里的消息体。</summary>
 internal sealed class StreamJsonMessage
 {
+    /// <summary>
+    /// API 回复的 id。claude 把一次回复的每个内容块拆成一帧，同一个回复的几帧带着同一个 id 与同一份 <see cref="Usage"/>，
+    /// 按帧相加会把一次调用记成好几次。
+    /// </summary>
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
     [JsonPropertyName("role")]
     public string? Role { get; set; }
 
@@ -163,4 +242,28 @@ internal sealed class StreamJsonControlRequest
 
     [JsonPropertyName("input")]
     public JsonElement? Input { get; set; }
+
+    /// <summary>这次工具调用的 id（与 assistant 帧里的 tool_use 块同一个）。</summary>
+    [JsonPropertyName("tool_use_id")]
+    public string? ToolUseId { get; set; }
+
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("display_name")]
+    public string? DisplayName { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    /// <summary>为什么要问（给人看的说明，可能带 ANSI 转义）。</summary>
+    [JsonPropertyName("decision_reason")]
+    public string? DecisionReason { get; set; }
+
+    [JsonPropertyName("blocked_path")]
+    public string? BlockedPath { get; set; }
+
+    /// <summary>CLI 建议的「以后不再问」规则（<c>updatedPermissions</c> 的条目形状）。</summary>
+    [JsonPropertyName("permission_suggestions")]
+    public JsonElement? PermissionSuggestions { get; set; }
 }

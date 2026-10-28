@@ -31,10 +31,12 @@
       </div>
 
       <!-- ── DIRECT: peer + add (→ create group) ──────────────────────────── -->
+      <!-- "Add" here creates a group, so it follows the deployment's group switch
+           (the server refuses the create when groups are off). -->
       <div v-else class="t-conv-info__block">
         <TMemberGrid
           :members="detail.members"
-          :can-add="true"
+          :can-add="store.config.enableGroups"
           @add="openCreateGroup"
           @message="onMessageMember"
         />
@@ -48,6 +50,7 @@
           :value="detail.title"
           :editable="isOwner"
           :placeholder="t('window.notSet')"
+          :maxlength="FIELD_LIMITS.title"
           :loading="renaming"
           @save="onRename"
         />
@@ -58,6 +61,7 @@
           :editable="isOwner"
           multiline
           :placeholder="t('window.notSetByOwner')"
+          :maxlength="FIELD_LIMITS.notice"
           :loading="savingNotice"
           @save="onSaveNotice"
         />
@@ -67,6 +71,7 @@
           :value="detail.myAlias ?? ''"
           editable
           :placeholder="t('window.notSet')"
+          :maxlength="FIELD_LIMITS.memberNote"
           :loading="savingAlias"
           @save="onSaveAlias"
         />
@@ -75,6 +80,7 @@
           :value="detail.myRemark ?? ''"
           editable
           :placeholder="t('window.notSet')"
+          :maxlength="FIELD_LIMITS.memberNote"
           :loading="savingRemark"
           @save="onSaveRemark"
         />
@@ -156,6 +162,7 @@
 import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NPopconfirm, NSwitch } from 'naive-ui'
+import { useSafeMessage } from '@tnzi/ui'
 import { MemberRole, ConversationType } from '@tnzi/core/services/chat'
 import type { ConversationDto, ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
@@ -179,6 +186,28 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+const message = useSafeMessage()
+
+/**
+ * The server's column widths for the editable fields (group title, notice,
+ * a member's alias and remark). A longer value is refused with a 400, so the
+ * box stops at the width instead of letting the operator type past it.
+ */
+const FIELD_LIMITS = { title: 200, notice: 2000, memberNote: 100 } as const
+
+/**
+ * Run one write and show the server's reason when it is refused. The store
+ * rethrows the bridge error (not the owner, past the member cap, groups off,
+ * too long); without this the spinner stopped, an edited field went back to
+ * its old value, and the reason only reached the console.
+ */
+async function attempt(write: () => Promise<void>): Promise<void> {
+  try {
+    await write()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
 
 // Popovers/popconfirms must clear the chat NModal - give them a high z-index.
 const POPOVER_Z = 3000
@@ -251,7 +280,7 @@ watch(
   ([show]) => {
     if (show && props.conversationId) {
       resetState()
-      void loadDetail()
+      void attempt(loadDetail)
     } else if (!show) {
       resetState()
     }
@@ -266,54 +295,57 @@ async function reload() {
 // ── Editable field saves ─────────────────────────────────────────────────────
 async function onRename(value: string) {
   if (!props.conversationId || !value) return // group name can't be blank
+  const id = props.conversationId
   renaming.value = true
-  try {
-    await store.renameGroup(props.conversationId, value)
+  await attempt(async () => {
+    await store.renameGroup(id, value)
     await reload()
-  } finally {
-    renaming.value = false
-  }
+  })
+  renaming.value = false
 }
 
 async function onSaveNotice(value: string) {
   if (!props.conversationId) return
+  const id = props.conversationId
   savingNotice.value = true
-  try {
-    await store.setNotice(props.conversationId, value || null)
+  await attempt(async () => {
+    await store.setNotice(id, value || null)
     await reload()
-  } finally {
-    savingNotice.value = false
-  }
+  })
+  savingNotice.value = false
 }
 
 async function onSaveAlias(value: string) {
   if (!props.conversationId) return
+  const id = props.conversationId
   savingAlias.value = true
-  try {
+  await attempt(async () => {
     // Empty string clears (backend: "" = clear, null = don't touch).
-    await store.setMemberSettings(props.conversationId, { alias: value })
+    await store.setMemberSettings(id, { alias: value })
     await reload()
-  } finally {
-    savingAlias.value = false
-  }
+  })
+  savingAlias.value = false
 }
 
 async function onSaveRemark(value: string) {
   if (!props.conversationId) return
+  const id = props.conversationId
   savingRemark.value = true
-  try {
-    await store.setMemberSettings(props.conversationId, { remark: value })
+  await attempt(async () => {
+    await store.setMemberSettings(id, { remark: value })
     await reload()
-  } finally {
-    savingRemark.value = false
-  }
+  })
+  savingRemark.value = false
 }
 
 // ── Member removal (owner-only, confirmed inside the member popover) ─────────
 async function onRemoveMember(userId: string) {
   if (!props.conversationId) return
-  await store.removeMember(props.conversationId, userId)
-  await reload()
+  const id = props.conversationId
+  await attempt(async () => {
+    await store.removeMember(id, userId)
+    await reload()
+  })
 }
 
 // ── Toggles (optimistic) ─────────────────────────────────────────────────────
@@ -324,8 +356,9 @@ async function onToggleMute(value: boolean) {
   try {
     await store.setMemberSettings(props.conversationId, { isMuted: value })
     emit('changed')
-  } catch {
+  } catch (e) {
     if (detail.value) detail.value.isMuted = prev
+    message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -336,8 +369,9 @@ async function onToggleSticky(value: boolean) {
   try {
     await store.setMemberSettings(props.conversationId, { isSticky: value })
     emit('changed')
-  } catch {
+  } catch (e) {
     if (detail.value) detail.value.isSticky = prev
+    message.error(e instanceof Error ? e.message : String(e))
   }
 }
 
@@ -354,10 +388,13 @@ function openCreateGroup() {
 
 async function onPickerConfirm(contacts: ChatContactDto[]) {
   if (!props.conversationId || contacts.length === 0) return
+  const id = props.conversationId
   pickerLoading.value = true
-  try {
+  // A refusal (past the member cap, groups switched off) keeps the picker open
+  // with the selection, next to the reason.
+  await attempt(async () => {
     if (pickerMode.value === 'add') {
-      await store.addMembers(props.conversationId, contacts.map((c) => c.userId))
+      await store.addMembers(id, contacts.map((c) => c.userId))
       pickerOpen.value = false
       await reload()
     } else {
@@ -372,9 +409,8 @@ async function onPickerConfirm(contacts: ChatContactDto[]) {
       emit('open-conversation', cid)
       emit('update:show', false)
     }
-  } finally {
-    pickerLoading.value = false
-  }
+  })
+  pickerLoading.value = false
 }
 
 // ── Search history jump (v1: refocus the conversation) ───────────────────────
@@ -386,30 +422,41 @@ function onJump() {
 // ── Member → direct message ──────────────────────────────────────────────────
 async function onMessageMember(userId: string) {
   if (userId === props.myId) return
-  const cid = await store.startDirect(userId)
-  emit('open-conversation', cid)
-  emit('update:show', false)
+  await attempt(async () => {
+    const cid = await store.startDirect(userId)
+    emit('open-conversation', cid)
+    emit('update:show', false)
+  })
 }
 
 // ── Danger zone ──────────────────────────────────────────────────────────────
 async function onClearHistory() {
   if (!props.conversationId) return
-  await store.clearHistory(props.conversationId)
-  await reload()
+  const id = props.conversationId
+  await attempt(async () => {
+    await store.clearHistory(id)
+    await reload()
+  })
 }
 
 async function onDissolve() {
   if (!props.conversationId) return
-  await store.dissolveGroup(props.conversationId)
-  emit('changed')
-  emit('update:show', false)
+  const id = props.conversationId
+  await attempt(async () => {
+    await store.dissolveGroup(id)
+    emit('changed')
+    emit('update:show', false)
+  })
 }
 
 async function onLeave() {
   if (!props.conversationId) return
-  await store.leaveGroup(props.conversationId)
-  emit('changed')
-  emit('update:show', false)
+  const id = props.conversationId
+  await attempt(async () => {
+    await store.leaveGroup(id)
+    emit('changed')
+    emit('update:show', false)
+  })
 }
 
 defineExpose({ detail, isOwner, isGroup, loadDetail })

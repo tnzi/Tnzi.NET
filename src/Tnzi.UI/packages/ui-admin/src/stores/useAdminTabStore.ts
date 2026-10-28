@@ -4,6 +4,12 @@ import 'pinia-plugin-persistedstate'
 
 export interface AdminTab {
   id: string
+  /**
+   * Name of the route the tab was opened from. The `id` is that name only for
+   * single-instance pages; a detail tab's id is its path. Absent on tabs
+   * persisted before the field existed.
+   */
+  routeName?: string
   title: string
   fullPath: string
   query?: Record<string, unknown>
@@ -32,6 +38,13 @@ interface RouteLike {
     hideInTab?: boolean
   }
 }
+
+/**
+ * Puts a tab's page on screen: the shell binds one that navigates the router to
+ * `tab.fullPath`, or to the admin landing page for `null` (no tab is left to
+ * show). See `bindNavigation`.
+ */
+export type TabNavigator = (tab: AdminTab | null) => void
 
 function hasOwnKeys(o?: object | null): boolean {
   return !!o && Object.keys(o).length > 0
@@ -98,6 +111,7 @@ function routeToTab(route: RouteLike): AdminTab {
   const id = isMultiInstanceRoute(route) ? multiInstanceKey(route) : route.name
   return {
     id,
+    routeName: route.name,
     title: route.meta?.title ?? route.name,
     fullPath: route.fullPath,
     query: route.query,
@@ -123,6 +137,8 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   // Id of the signed-in user the persisted tabs belong to. Empty = not claimed
   // yet (fresh store, or tabs persisted before this field existed).
   const ownerId = ref<string>('')
+  // Not state: a function bound by the shell for as long as it is mounted.
+  let navigator: TabNavigator | null = null
 
   const allTabs = computed<AdminTab[]>(() => {
     return homeTab.value ? [homeTab.value, ...tabs.value] : [...tabs.value]
@@ -150,6 +166,29 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     fixedTabIds.value = fixedTabIds.value.filter((x) => x !== id)
   }
 
+  /**
+   * Bind the navigator that puts a tab's page on screen; returns the unbind.
+   * The admin shell binds one to the router while it is mounted. With none
+   * bound (a bare store, a consumer's own shell that navigates on the tab bar's
+   * `tabClick`), showing a tab only moves the highlight.
+   */
+  function bindNavigation(fn: TabNavigator): () => void {
+    navigator = fn
+    return () => {
+      if (navigator === fn) navigator = null
+    }
+  }
+
+  /**
+   * Make `tab` the one on screen, or the landing page for `null`. Every close
+   * that takes away the tab on screen ends here, so the page leaves with its
+   * tab instead of staying rendered under a URL no tab points at.
+   */
+  function showTab(tab: AdminTab | null): void {
+    activeTabId.value = tab?.id ?? ''
+    navigator?.(tab)
+  }
+
   function addTab(route: RouteLike): void {
     // Auth / exception / redirect routes are chrome-less full pages - never tab them.
     if (isNonTabRoute(route.name, route.meta)) return
@@ -163,6 +202,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
       existing.fullPath = tab.fullPath
       existing.query = tab.query
       existing.params = tab.params
+      existing.routeName = tab.routeName
       activeTabId.value = tab.id
       return
     }
@@ -180,17 +220,21 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
    * `deniedRouteNames`, so a persisted tab from a prior (higher-privilege)
    * session doesn't survive into a lower-privilege sign-in and 403 on click.
    *
-   * Matches a tab by its `id` (for single-instance routes the id IS the route
-   * name - which is what `deniedRouteNames` holds). Pinned tabs are pruned too
-   * (an unauthorized pin is still unauthorized). Re-points `activeTabId` to a
-   * surviving tab when the active one was removed.
+   * Matches a tab by the route it was opened from (`routeName`), which is what
+   * `deniedRouteNames` holds; a detail tab's `id` is its path, so matching ids
+   * alone left every detail tab in place. A tab persisted before `routeName`
+   * existed falls back to its `id`, the route name for single-instance pages.
+   * Pinned tabs are pruned too (an unauthorized pin is still unauthorized).
+   * Re-points `activeTabId` to a surviving tab when the active one was removed.
    */
   function pruneTabs(deniedNames: Set<string>): void {
     if (!deniedNames || deniedNames.size === 0) return
-    const before = tabs.value.length
-    tabs.value = tabs.value.filter((t) => !deniedNames.has(t.id))
-    if (tabs.value.length === before) return
-    fixedTabIds.value = fixedTabIds.value.filter((id) => !deniedNames.has(id))
+    const removed = new Set(
+      tabs.value.filter((t) => deniedNames.has(t.routeName ?? t.id)).map((t) => t.id),
+    )
+    if (removed.size === 0) return
+    tabs.value = tabs.value.filter((t) => !removed.has(t.id))
+    fixedTabIds.value = fixedTabIds.value.filter((id) => !removed.has(id))
     if (!tabs.value.find((t) => t.id === activeTabId.value)) {
       activeTabId.value =
         tabs.value[tabs.value.length - 1]?.id ?? (homeTab.value?.id ?? '')
@@ -226,10 +270,10 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx < 0) return null
     tabs.value.splice(idx, 1)
-    // If we removed the active one, switch to neighbor
+    // The tab on screen was closed: its neighbour (else home, else the landing
+    // page) takes its place.
     if (activeTabId.value === id) {
-      const next = tabs.value[idx] || tabs.value[idx - 1]
-      activeTabId.value = next?.id ?? (homeTab.value?.id ?? '')
+      showTab(tabs.value[idx] ?? tabs.value[idx - 1] ?? homeTab.value)
       return activeTabId.value
     }
     return null
@@ -238,17 +282,23 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
   function removeLeftTabs(id: string): void {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx <= 0) return
+    const target = tabs.value[idx]!
     // Phase G: keep pinned tabs that fall in the to-remove range.
     const removed = tabs.value.slice(0, idx)
     const survivors = removed.filter((t) => isTabPinned(t.id))
     tabs.value = [...survivors, ...tabs.value.slice(idx)]
+    // The tab on screen was among them: the tab the menu was opened on takes its place.
+    if (removed.some((t) => t.id === activeTabId.value && !isTabPinned(t.id))) showTab(target)
   }
 
   function removeRightTabs(id: string): void {
     const idx = tabs.value.findIndex((t) => t.id === id)
     if (idx < 0 || idx >= tabs.value.length - 1) return
-    const survivors = tabs.value.slice(idx + 1).filter((t) => isTabPinned(t.id))
+    const target = tabs.value[idx]!
+    const removed = tabs.value.slice(idx + 1)
+    const survivors = removed.filter((t) => isTabPinned(t.id))
     tabs.value = [...tabs.value.slice(0, idx + 1), ...survivors]
+    if (removed.some((t) => t.id === activeTabId.value && !isTabPinned(t.id))) showTab(target)
   }
 
   function removeOtherTabs(id: string): void {
@@ -257,15 +307,16 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     // Phase G: keep pinned tabs alongside the chosen one.
     const pinnedOthers = tabs.value.filter((t) => t.id !== id && isTabPinned(t.id))
     tabs.value = [...pinnedOthers, tab]
-    activeTabId.value = id
+    // The chosen tab is the one left on screen.
+    if (activeTabId.value !== id) showTab(tab)
   }
 
   function clearAllTabs(): void {
     // Phase G: pinned tabs are preserved across "close all".
     tabs.value = tabs.value.filter((t) => isTabPinned(t.id))
-    if (!tabs.value.find((t) => t.id === activeTabId.value)) {
-      activeTabId.value = homeTab.value?.id ?? (tabs.value[0]?.id ?? '')
-    }
+    const onScreen = activeTabId.value
+    const stillOpen = tabs.value.some((t) => t.id === onScreen) || (!!onScreen && homeTab.value?.id === onScreen)
+    if (!stillOpen) showTab(homeTab.value ?? tabs.value[0] ?? null)
   }
 
   function moveTab(fromIndex: number, toIndex: number): void {
@@ -286,10 +337,10 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     activeTabId.value = id
   }
 
-  // Presentation stub - Task 2.29 router guard will replace this with real navigation.
-  // Keeping it on the store lets TAdminTabs stay router-agnostic and unit-testable.
+  // A tab click. Navigation goes through the bound navigator, which keeps
+  // TAdminTabs router-agnostic and unit-testable.
   function switchRouteByTab(tab: AdminTab): void {
-    activeTabId.value = tab.id
+    showTab(tab)
   }
 
   return {
@@ -312,6 +363,7 @@ export const useAdminTabStore = defineStore('admin-tab', () => {
     updateTabTitle,
     setActiveTab,
     switchRouteByTab,
+    bindNavigation,
     findTab,
     isTabPinned,
     isTabRetain,

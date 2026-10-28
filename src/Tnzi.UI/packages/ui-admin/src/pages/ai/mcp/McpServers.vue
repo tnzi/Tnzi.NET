@@ -139,8 +139,8 @@
     <!-- ─── Tab 2: This Server (scroll: mixed variable-height content) ─── -->
     <template #status>
             <NSpin :show="statusLoading">
-              <!-- Tnzi.AI.Mcp not loaded (getStatus → null): friendly notice
-                   instead of a silently empty status surface. -->
+              <!-- Tnzi.AI.Mcp not loaded: friendly notice instead of a
+                   silently empty status surface. -->
               <NAlert
                 v-if="showModuleNotLoaded"
                 :title="t('status.notLoadedTitle')"
@@ -148,6 +148,12 @@
                 :closable="false"
               >
                 {{ t('status.notLoadedBody') }}
+              </NAlert>
+
+              <!-- A refused or failed read says so: an empty status card would
+                   read as "a disabled server with no tools". -->
+              <NAlert v-else-if="statusError" type="error" :closable="false" data-test="mcp-status-error">
+                {{ statusError }}
               </NAlert>
 
               <template v-else>
@@ -210,6 +216,11 @@
                     </NButton>
                   </div>
                 </template>
+                <!-- The agent catalog could not be read: the picker is empty for
+                     that reason, and exposed agents show by id. -->
+                <NAlert v-if="agentsError" type="warning" :closable="false" class="mb-8px" data-test="mcp-agents-error">
+                  {{ agentsError }}
+                </NAlert>
                 <div v-if="exposedAgents.length" class="flex flex-col gap-6px">
                   <div
                     v-for="row in exposedAgents"
@@ -233,6 +244,7 @@
                   </div>
                 </div>
                 <div v-else class="t-mcp__empty">{{ t('expose.none') }}</div>
+                <div class="t-mcp__hint">{{ t('expose.runtimeOnly') }}</div>
               </NCard>
 
               <!-- Registered tools -->
@@ -251,8 +263,8 @@
 
     <!-- ─── Tab 3: Tool Analytics ───────────────────────────────── -->
     <template #analytics>
-            <!-- Tnzi.AI.Mcp not loaded (getStatus → null): friendly notice
-                 instead of an empty analytics table. -->
+            <!-- Tnzi.AI.Mcp not loaded: friendly notice instead of an empty
+                 analytics table. -->
             <NAlert
               v-if="showModuleNotLoaded"
               :title="t('status.notLoadedTitle')"
@@ -260,6 +272,9 @@
               :closable="false"
             >
               {{ t('status.notLoadedBody') }}
+            </NAlert>
+            <NAlert v-else-if="analyticsError" type="error" :closable="false" data-test="mcp-analytics-error">
+              {{ analyticsError }}
             </NAlert>
             <template v-else>
             <div class="t-mcp__analytics-bar">
@@ -370,9 +385,11 @@ import { useCrudPage } from '../../../headless/useCrudPage'
 import { useDetail } from '../../../headless/useDetail'
 import { fetchAllPages } from '../../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
+import { useModuleAvailability } from '../../../headless/useModuleAvailability'
 import { createAiBridge } from '../../../services/bridges/ai-bridge'
 import { useAdminClient } from '../../../plugin/client'
 import { makePageTranslator } from '../../_shared/translate'
+import { useSafeMessage } from '../../_shared/safe-message'
 import {
   mcpServerFormSchema,
   mcpServerColumns,
@@ -391,6 +408,7 @@ import type {
 } from '@tnzi/core/services/ai'
 
 const t = makePageTranslator('ai.mcp')
+const message = useSafeMessage()
 
 const bridge = createAiBridge({ client: useAdminClient() })
 const { can } = usePermissionGuard()
@@ -412,6 +430,9 @@ const serverCrud = useCrudPage<McpServerRegistrationDto>({
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.mcpServers.fetch(query),
   createData: (data) => bridge.mcpServers.create(toCreateMcpServerDto(data as Record<string, unknown>)),
+  // The server's create defaults: an unseeded switch renders OFF while the
+  // created record is enabled.
+  createDefaults: { isEnabled: true, priority: 0 },
   updateData: (id, data) =>
     bridge.mcpServers.update(String(id), toUpdateMcpServerDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.mcpServers.delete(ids.map(String)),
@@ -456,21 +477,48 @@ async function onTestConnection(id: string): Promise<void> {
 }
 
 async function removeServer(item: McpServerRegistrationDto): Promise<void> {
-  await serverCrud.handleDelete([item.id])
+  // handleDelete has already reported a refusal (toast or onError) before rethrowing.
+  await serverCrud.handleDelete([item.id]).catch(() => undefined)
+}
+
+// ─── Server sub-module availability ────────────────────────────────────
+// The External Servers tab is the AI core client registry and works on every
+// host that loads Tnzi.AI. This Server + Tool Analytics are the optional
+// Tnzi.AI.Mcp sub-module, so they ask the loaded-module signal before firing a
+// request that can only 404. `has` is fail-open (no signal = old backend), so a
+// 404 / 501 from the server endpoints also reads as "not loaded".
+const MCP_SERVER_MODULE = 'ai-mcp'
+const {
+  has: hasModule,
+  canActivate,
+  pending: modulesPending,
+  modules: loadedModules,
+} = useModuleAvailability()
+const serverAnsweredAbsent = ref(false)
+const showModuleNotLoaded = computed(() => !hasModule(MCP_SERVER_MODULE) || serverAnsweredAbsent.value)
+
+const MODULE_ABSENT_CODES = new Set([404, 501])
+
+/** Records a failed server-tab read: "module absent" for 404 / 501, otherwise the reason. */
+function serverReadFailure(error: unknown): string | null {
+  const statusCode = (error as { statusCode?: number } | null)?.statusCode
+  if (statusCode !== undefined && MODULE_ABSENT_CODES.has(statusCode)) {
+    serverAnsweredAbsent.value = true
+    return null
+  }
+  return error instanceof Error ? error.message : String(error)
 }
 
 // ─── Tab 2: This server status + exposed agents + tools ────────────────
 const statusLoading = ref(false)
 const status = ref<McpServerStatusDto | null>(null)
-// Tnzi.AI.Mcp not loaded → getStatus() returns null (the bridge swallows the
-// 404). Once the status fetch has settled with a null, the self-hosted MCP
-// server + its tool analytics are unavailable, so both tabs show a friendly
-// "module not enabled" notice instead of a silently empty surface.
-const showModuleNotLoaded = computed(() => !statusLoading.value && status.value === null)
+const statusError = ref<string | null>(null)
 const tools = ref<McpToolInfoDto[]>([])
 const exposedAgentIds = ref<string[]>([])
 const allAgents = ref<AgentDto[]>([])
 const agentsLoading = ref(false)
+/** A refused agent-list read: the picker is empty because it could not be read, not because there are no agents. */
+const agentsError = ref<string | null>(null)
 const agentToExpose = ref<string | null>(null)
 const exposeBusy = ref(false)
 
@@ -491,30 +539,53 @@ const exposableAgentOptions = computed(() => {
     .map((a) => ({ label: a.name, value: a.id }))
 })
 
-async function loadStatusTab(): Promise<void> {
-  statusLoading.value = true
+/** A refused write's reason, for the toast. */
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * The agent catalog the expose picker offers and exposed ids are named from.
+ * Read on its own: it needs `ai.agent.view`, which a holder of the MCP server
+ * codes may lack, and its refusal says nothing about the server itself.
+ */
+async function loadAgents(): Promise<void> {
   agentsLoading.value = true
+  agentsError.value = null
   try {
-    const [st, tls, exposed, agents] = await Promise.all([
+    // Every agent, not the first clamped page: this list decides which agents can be exposed.
+    allAgents.value = await fetchAllPages((q) => bridge.agents.fetch(q))
+  } catch (error) {
+    allAgents.value = []
+    agentsError.value = reasonOf(error)
+  } finally {
+    agentsLoading.value = false
+  }
+}
+
+async function loadStatusTab(): Promise<void> {
+  if (!canActivate(MCP_SERVER_MODULE)) return
+  statusLoading.value = true
+  statusError.value = null
+  const agentsLoad = loadAgents()
+  try {
+    const [st, tls, exposed] = await Promise.all([
       bridge.mcp.getStatus(),
       bridge.mcp.getTools(),
       bridge.mcp.getExposedAgents(),
-      // Every agent, not the first clamped page: this list decides which agents can be exposed.
-      fetchAllPages((q) => bridge.agents.fetch(q)),
     ])
     status.value = st
     tools.value = tls
     exposedAgentIds.value = exposed
-    allAgents.value = agents
-  } catch {
+  } catch (error) {
     status.value = null
     tools.value = []
     exposedAgentIds.value = []
-    allAgents.value = []
+    statusError.value = serverReadFailure(error)
   } finally {
     statusLoading.value = false
-    agentsLoading.value = false
   }
+  await agentsLoad
 }
 
 async function onExposeAgent(): Promise<void> {
@@ -524,8 +595,8 @@ async function onExposeAgent(): Promise<void> {
     await bridge.mcp.exposeAgent(agentToExpose.value)
     exposedAgentIds.value = await bridge.mcp.getExposedAgents()
     agentToExpose.value = null
-  } catch {
-    /* bridge surfaces errors; keep UI responsive */
+  } catch (error) {
+    message.error(reasonOf(error))
   } finally {
     exposeBusy.value = false
   }
@@ -535,13 +606,14 @@ async function onRemoveAgent(agentId: string): Promise<void> {
   try {
     await bridge.mcp.removeAgent(agentId)
     exposedAgentIds.value = await bridge.mcp.getExposedAgents()
-  } catch {
-    /* bridge surfaces errors */
+  } catch (error) {
+    message.error(reasonOf(error))
   }
 }
 
 // ─── Tab 3: Tool analytics ─────────────────────────────────────────────
 const analyticsLoading = ref(false)
+const analyticsError = ref<string | null>(null)
 const popularTools = ref<McpToolPopularityDto[]>([])
 const retentionDays = 90
 const cleanupBusy = ref(false)
@@ -593,11 +665,14 @@ function analyticsRowProps(row: McpToolPopularityDto) {
 }
 
 async function loadAnalyticsTab(): Promise<void> {
+  if (!canActivate(MCP_SERVER_MODULE)) return
   analyticsLoading.value = true
+  analyticsError.value = null
   try {
     popularTools.value = await bridge.mcpToolAnalytics.getMostUsedTools(20)
-  } catch {
+  } catch (error) {
     popularTools.value = []
+    analyticsError.value = serverReadFailure(error)
   } finally {
     analyticsLoading.value = false
   }
@@ -609,8 +684,8 @@ async function onCleanup(): Promise<void> {
   try {
     await bridge.mcpToolAnalytics.cleanup(retentionDays)
     await loadAnalyticsTab()
-  } catch {
-    /* bridge surfaces errors */
+  } catch (error) {
+    message.error(reasonOf(error))
   } finally {
     cleanupBusy.value = false
   }
@@ -658,15 +733,29 @@ watch(() => toolDetail.data.value, async (row) => {
   }
 })
 
-onMounted(() => {
+// The server tabs load once the module signal says the sub-module is there. At
+// mount the probe may still be in flight (`canActivate` false), so the watch
+// picks the load up when it settles instead of leaving both tabs empty.
+let serverTabsRequested = false
+function loadServerTabs(): void {
+  if (serverTabsRequested || !canActivate(MCP_SERVER_MODULE)) return
+  serverTabsRequested = true
   void loadStatusTab()
   void loadAnalyticsTab()
-})
+}
+
+onMounted(loadServerTabs)
+watch(() => [modulesPending.value, loadedModules.value] as const, loadServerTabs)
 
 defineExpose({
   activeTab,
   status,
+  statusError,
+  agentsError,
+  analyticsError,
+  showModuleNotLoaded,
   tools,
+  agentToExpose,
   exposedAgents,
   popularTools,
   toolStats,
@@ -702,6 +791,11 @@ defineExpose({
 }
 .t-mcp__empty {
   font-size: 13px;
+  color: var(--tnzi-base-text-muted, #888);
+}
+.t-mcp__hint {
+  margin-top: 8px;
+  font-size: 12px;
   color: var(--tnzi-base-text-muted, #888);
 }
 /* External-server card */

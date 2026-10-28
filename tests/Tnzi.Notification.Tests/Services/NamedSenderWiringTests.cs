@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Configuration;
-using Tnzi.Exceptions;
 using Tnzi.Modules;
 using Tnzi.Notification.Extensions;
 
@@ -204,6 +203,11 @@ public class NamedSenderWiringTests
         var result = await sender.SendToAsync("token", "t", "b");
         result.Success.ShouldBeFalse();
         result.FailureReason.ShouldNotBeNull().ShouldContain("Tnzi.Notification.Push");
+
+        // 带点击目标与数据的发法：同一个具名键、同一句话，不是接口默认体那句「不支持点击目标」。
+        var withContent = await sender.SendToAsync("token", new PushContent("t", "b") { Link = "https://app.example.com/x" });
+        withContent.Success.ShouldBeFalse();
+        withContent.FailureReason.ShouldBe(result.FailureReason);
     }
 
     /// <summary>
@@ -230,6 +234,10 @@ public class NamedSenderWiringTests
         var byTopic = await sender.SendToTopicAsync("news", "t", "b");
         byTopic.Success.ShouldBeFalse();
         byTopic.FailureReason.ShouldNotBeNull().ShouldContain("Notification:PushSender");
+
+        var content = new PushContent("t", "b") { Data = new Dictionary<string, string> { ["threadId"] = "42" } };
+        (await sender.SendToAsync("token", content)).FailureReason.ShouldBe(byToken.FailureReason);
+        (await sender.SendToTopicAsync("news", content)).FailureReason.ShouldBe(byTopic.FailureReason);
     }
 
     /// <summary>什么都没配：沿用开发期的 <see cref="NullPushSender"/>，行为不变。</summary>

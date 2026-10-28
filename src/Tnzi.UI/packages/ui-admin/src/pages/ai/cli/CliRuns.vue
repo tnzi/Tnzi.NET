@@ -1,6 +1,7 @@
 <template>
   <TCrudPage
     :search-fields="runSearchFields"
+    :show-default-search="false"
     :state="crud"
     :all-columns="runColumns"
     :title="title"
@@ -29,7 +30,12 @@
             </NButton>
           </header>
 
-          <TEmpty v-if="!events.length && !loadingEvents" :text="t('detail.noEvents')" />
+          <div v-if="eventsError" class="cli-run-detail__error">
+            <TSvgIcon icon="mdi:alert-circle-outline" :size="14" />
+            <span>{{ eventsError }}</span>
+          </div>
+
+          <TEmpty v-if="!events.length && !loadingEvents && !eventsError" :text="t('detail.noEvents')" />
 
           <NTimeline v-else>
             <NTimelineItem
@@ -50,7 +56,7 @@
 </template>
 
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue'
+import { onActivated, onDeactivated, onUnmounted, ref, watch } from 'vue'
 import { NButton, NTimeline, NTimelineItem } from 'naive-ui'
 import { formatDateTime } from '@tnzi/core'
 import { EMPTY_DASH, TDescriptions, TEmpty, TSvgIcon } from '@tnzi/ui'
@@ -58,29 +64,33 @@ import TCrudPage from '../../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../../headless/useCrudPage'
 import { type RowAction } from '../../../headless/row-actions'
 import { useSafeMessage } from '../../_shared/safe-message'
+import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../../i18n/translate'
 import { useAdminClient } from '../../../plugin/client'
+import { toLocalDayBounds } from '../../../utils/calendar-date'
 import {
   createCliAgentBridge,
   CliAgentEventType,
-  CliRunStatus,
   CLI_RUN_TERMINAL_STATUSES,
   type CliRunDto,
   type CliRunMessageDto,
   type CliRunQueryDto,
 } from '../../../services/bridges/cli-agent-bridge'
-import { runColumns, runSearchFields, runStatusBadgeMapping } from './cli-runtime-config'
+import { formatRunCost, formatRunDuration, runColumns, runSearchFields, runStatusBadgeMapping } from './cli-runtime-config'
 
-/** How often a still-running run's timeline is re-fetched while its drawer is open. */
+/** How often a still-running run and its timeline are re-read while its drawer is open. */
 const LIVE_POLL_MS = 3000
 
 const bridge = createCliAgentBridge({ client: useAdminClient() })
 const message = useSafeMessage()
 const t = makePageTranslator('ai.cliRuns')
-const title = 'CLI Runs'
+const { can } = usePermissionGuard()
+const title = 'title'
 
 const events = ref<CliRunMessageDto[]>([])
 const loadingEvents = ref(false)
+/** A refused timeline read. Shown instead of "no events recorded", which it is not. */
+const eventsError = ref<string | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const crud = useCrudPage<CliRunDto>({
@@ -93,11 +103,13 @@ const crud = useCrudPage<CliRunDto>({
   // search fields actually reach the backend - the previous blanket cast
   // type-checked fine and shipped `filters[status]`, which the API ignores, so
   // the control would have looked like it did nothing.
+  // The date filters arrive as picked calendar dates and runs are filtered by
+  // their creation timestamp, so they go out as the bounds of those local days.
   fetchData: (query) =>
     bridge.runs.list({
       pageIndex: query.pageIndex,
       pageSize: query.pageSize,
-      ...(query.filters ?? {}),
+      ...toLocalDayBounds(query.filters ?? {}, 'startTime', 'endTime'),
     } as CliRunQueryDto),
 })
 
@@ -120,9 +132,46 @@ async function reloadEvents() {
 
   loadingEvents.value = true
   try {
-    events.value = await bridge.runs.messages(run.id)
+    const list = await bridge.runs.messages(run.id)
+    // The drawer may have moved on to another run while this one was loading.
+    if ((crud.formModal.formData.value as CliRunDto | null)?.id !== run.id) return
+    events.value = list
+    eventsError.value = null
+  } catch (e) {
+    if ((crud.formModal.formData.value as CliRunDto | null)?.id !== run.id) return
+    // Keep what is on screen: a poll that fails once must not blank the timeline.
+    eventsError.value = e instanceof Error ? e.message : String(e)
   } finally {
     loadingEvents.value = false
+  }
+}
+
+/**
+ * One poll tick: the timeline and the run itself. The drawer shows the run's
+ * status, output and completion time, which only a re-read of the run moves;
+ * once it is terminal there is nothing more to wait for, so the poll stops
+ * after one last timeline read.
+ */
+async function pollTick() {
+  const run = crud.formModal.formData.value as CliRunDto | null
+  if (!run?.id) {
+    stopPolling()
+    return
+  }
+  await reloadEvents()
+  let fresh: CliRunDto
+  try {
+    fresh = await bridge.runs.get(run.id)
+  } catch {
+    // Keep what is on screen; the next tick retries.
+    return
+  }
+  // The drawer may have moved on to another run, or closed, meanwhile.
+  if ((crud.formModal.formData.value as CliRunDto | null)?.id !== run.id || fresh?.id !== run.id) return
+  crud.formModal.formData.value = fresh
+  if (CLI_RUN_TERMINAL_STATUSES.includes(fresh.status)) {
+    stopPolling()
+    await reloadEvents()
   }
 }
 
@@ -133,25 +182,40 @@ function stopPolling() {
   }
 }
 
+/** Poll the open run while it is still going (one timer at most). */
+function pollWhileLive() {
+  if (pollTimer) return
+  const status = (crud.formModal.formData.value as CliRunDto | null)?.status
+  if (status && !CLI_RUN_TERMINAL_STATUSES.includes(status)) {
+    pollTimer = setInterval(() => void pollTick(), LIVE_POLL_MS)
+  }
+}
+
 watch(
   () => (crud.formModal.formData.value as CliRunDto | null)?.id,
   async (id) => {
     stopPolling()
-    if (!id) {
-      events.value = []
-      return
-    }
+    events.value = []
+    eventsError.value = null
+    if (!id) return
 
     await reloadEvents()
-
-    const status = (crud.formModal.formData.value as CliRunDto | null)?.status
-    if (status && !CLI_RUN_TERMINAL_STATUSES.includes(status)) {
-      pollTimer = setInterval(reloadEvents, LIVE_POLL_MS)
-    }
+    // Another run may have been opened while this one's timeline loaded.
+    if ((crud.formModal.formData.value as CliRunDto | null)?.id !== id) return
+    pollWhileLive()
   },
 )
 
 onUnmounted(stopPolling)
+// Kept alive in its tab, the page stays mounted while another page is on
+// screen: no polling there. Shown again, the timeline catches up and the
+// poll resumes if the drawer is still open on a running run.
+onDeactivated(stopPolling)
+onActivated(() => {
+  if (pollTimer || !(crud.formModal.formData.value as CliRunDto | null)?.id) return
+  void reloadEvents()
+  pollWhileLive()
+})
 
 function eventTone(type: CliAgentEventType) {
   switch (type) {
@@ -180,11 +244,8 @@ function detailItems(run: CliRunDto) {
   return [
     { label: t('columns.status'), value: t(runStatusBadgeMapping[run.status]?.label ?? '') },
     { label: t('columns.provider'), value: run.providerKey },
-    { label: t('columns.duration'), value: run.durationMs ? `${run.durationMs} ms` : null },
-    {
-      label: t('columns.cost'),
-      value: run.estimatedCostUsd != null ? `$${run.estimatedCostUsd.toFixed(4)}` : null,
-    },
+    { label: t('columns.duration'), value: formatRunDuration(run.durationMs) },
+    { label: t('columns.cost'), value: formatRunCost(run.estimatedCostUsd) },
     { label: t('detail.failureReason'), value: run.failureReason },
     { label: t('detail.sessionId'), value: run.providerSessionId },
     { label: t('detail.workDirectory'), value: run.workDirectory },
@@ -205,8 +266,9 @@ const rowActions: RowAction<CliRunDto>[] = [
     type: 'error',
     confirm: 'actions.cancelConfirm',
     // Cancelling a finished run is a no-op the backend rejects with 409;
-    // hiding it keeps the row from offering something that cannot work.
-    show: (row) => !CLI_RUN_TERMINAL_STATUSES.includes(row.status),
+    // hiding it keeps the row from offering something that cannot work. The
+    // endpoint also needs ai.cliRun.execute, which a reader of the list lacks.
+    show: (row) => can('ai.cliRun.execute') && !CLI_RUN_TERMINAL_STATUSES.includes(row.status),
     onClick: async (row) => {
       try {
         await bridge.runs.cancel(row.id)
@@ -224,8 +286,6 @@ const rowProps = (row: CliRunDto) => ({
   onClick: () => crud.openView(row),
 })
 
-// Referenced by the template's status badge mapping lookup.
-void CliRunStatus
 </script>
 
 <style scoped>

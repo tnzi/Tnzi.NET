@@ -25,10 +25,17 @@ internal static class ChannelSendHelper
         string adapterName,
         CancellationToken ct = default)
     {
+        // 0 会切出空块而原文不减，循环永不前进；启动期校验挡住了配置来源，这里兜住任何调用方。
+        if (maxLength <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxLength), maxLength, "The chunk length must be greater than 0.");
+        }
+
         while (text.Length > 0)
         {
-            var chunk = text.Length > maxLength ? text[..maxLength] : text;
-            text = text.Length > maxLength ? text[maxLength..] : string.Empty;
+            var cut = ChunkLength(text, maxLength);
+            var chunk = text[..cut];
+            text = text[cut..];
 
             var retryCount = 0;
             while (true)
@@ -51,5 +58,22 @@ internal static class ChannelSendHelper
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 下一块的长度：不超过 <paramref name="maxLength"/>，且不把代理对切进两块。
+    /// </summary>
+    /// <remarks>
+    /// emoji 等补充平面字符占两个 UTF-16 码元。两块各自是一条消息，切在中间的话两半都不是合法文本：
+    /// 平台要么拒收这一块，要么把两半各显示成一个替换字符。<paramref name="maxLength"/> 为 1 而开头正好是一个代理对时
+    /// 整对发出（多一个码元），否则这一块是空的、原文不减，循环永不前进。
+    /// </remarks>
+    private static int ChunkLength(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+            return text.Length;
+
+        var cut = text.FitToLength(maxLength).Length;
+        return cut > 0 ? cut : Math.Min(2, text.Length);
     }
 }

@@ -5,6 +5,10 @@ using Tnzi.Identity.Services;
 
 namespace Tnzi.Identity.IntegrationTests.Services;
 
+/// <remarks>
+/// 断言「码已用 / 未用」一律 <c>AsNoTracking</c> 读库：标记已用是一条条件 UPDATE（不经变更跟踪），
+/// 而本类与服务共用一个 DbContext，测试自己插入的那个实体仍被跟踪着、停在插入时的值上。
+/// </remarks>
 public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTestBase
 {
     private readonly TwoFactorService _service;
@@ -65,7 +69,7 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
         var result = await _service.VerifyCodeAsync(user.Id, "123456", TwoFactorType.Email, VerificationCodePurpose.TwoFactor);
 
         Assert.True(result.Succeeded);
-        Assert.True(DbContext.Set<TwoFactorCode>().Single().IsUsed);
+        Assert.True(DbContext.Set<TwoFactorCode>().AsNoTracking().Single().IsUsed);
     }
 
     [Fact]
@@ -89,7 +93,7 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
         var result = await _service.VerifyCodeAsync(user.Id, "654321", TwoFactorType.Email, VerificationCodePurpose.TwoFactor);
 
         Assert.False(result.Succeeded);
-        Assert.False(DbContext.Set<TwoFactorCode>().Single().IsUsed);
+        Assert.False(DbContext.Set<TwoFactorCode>().AsNoTracking().Single().IsUsed);
     }
 
     /// <summary>
@@ -118,14 +122,14 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
             user.Email!, issued.Code, TwoFactorType.Email, VerificationCodePurpose.TwoFactor);
 
         Assert.False(crossUse.Succeeded);
-        Assert.False(DbContext.Set<TwoFactorCode>().Single().IsUsed);
+        Assert.False(DbContext.Set<TwoFactorCode>().AsNoTracking().Single().IsUsed);
 
         // 对照组：用本来的用途验，同一枚码照常通过 —— 否则上面那条在「什么都验不过」的实现上也是绿的。
         var properUse = await _service.VerifyCodeByAddressAndMarkUsedAsync(
             user.Email!, issued.Code, TwoFactorType.Email, VerificationCodePurpose.CodeLogin);
 
         Assert.True(properUse.Succeeded);
-        Assert.True(DbContext.Set<TwoFactorCode>().Single().IsUsed);
+        Assert.True(DbContext.Set<TwoFactorCode>().AsNoTracking().Single().IsUsed);
     }
 
     /// <summary>
@@ -157,7 +161,7 @@ public class TwoFactorServiceIntegrationTests : RelationalIdentityIntegrationTes
             user.Email!, "111222", TwoFactorType.Email, VerificationCodePurpose.CodeLogin);
 
         Assert.False(result.Succeeded);
-        Assert.False(DbContext.Set<TwoFactorCode>().Single().IsUsed);
+        Assert.False(DbContext.Set<TwoFactorCode>().AsNoTracking().Single().IsUsed);
     }
 
     /// <summary>

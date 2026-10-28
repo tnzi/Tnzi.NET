@@ -2,15 +2,16 @@
  * Channels bridge - wraps `/admin/channels/*` + `/admin/gateway/*` exposed by
  * `Tnzi.AI.Channels`. The module is an optional sub-module of Tnzi.AI; when
  * not loaded the backend returns 404 and the bridge surfaces empty values
- * so the page renders an "unavailable" state.
+ * so the page renders an "unavailable" state. Any other failure (a 403, a
+ * 5xx) rejects with the server's reason: it is not "module not loaded".
  *
  * DTOs + the raw API factory live in `@tnzi/core/services/ai` (`channels.ts`).
- * This bridge delegates to `useChannelsAdminApi(client)` and adds the tolerant
- * `unwrap` + empty-on-404 shaping the pages expect.
+ * This bridge delegates to `useChannelsAdminApi(client)` and adds the
+ * empty-on-absent shaping the pages expect.
  */
 import type { HttpClient } from '@tnzi/core/http'
 import { useChannelsAdminApi } from '@tnzi/core/services/ai'
-import { unwrapResult as unwrap } from '../_mappers'
+import { readOrAbsent } from '../_mappers'
 
 export type {
   ChannelAdapterDto,
@@ -60,17 +61,17 @@ export function createChannelsBridge(deps: ChannelsBridgeDeps = {}): ChannelsBri
   return {
     channels: {
       getStatus: async () =>
-        unwrap<ChannelModuleStatusDto | null>(await api.getStatus()),
+        readOrAbsent<ChannelModuleStatusDto | null>(await api.getStatus(), null),
       getAdapters: async () =>
-        unwrap<ChannelAdapterDto[]>(await api.getAdapters()) ?? [],
+        readOrAbsent<ChannelAdapterDto[]>(await api.getAdapters(), []),
     },
     gateway: {
       getStatus: async () =>
-        unwrap<GatewayStatusDto | null>(await api.getGatewayStatus()),
+        readOrAbsent<GatewayStatusDto | null>(await api.getGatewayStatus(), null),
       getConnections: async () =>
-        unwrap<GatewayConnectionInfo[]>(await api.getGatewayConnections()) ?? [],
+        readOrAbsent<GatewayConnectionInfo[]>(await api.getGatewayConnections(), []),
       getBindings: async () =>
-        unwrap<SessionBindingRuleDto[]>(await api.getGatewayBindings()) ?? [],
+        readOrAbsent<SessionBindingRuleDto[]>(await api.getGatewayBindings(), []),
     },
   }
 }

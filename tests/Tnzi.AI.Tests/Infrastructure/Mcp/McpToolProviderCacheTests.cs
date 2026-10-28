@@ -193,6 +193,84 @@ public class McpToolProviderCacheTests
         invocationResult.ShouldBe("Tool call rejected: Blocked after reload");
     }
 
+    /// <summary>
+    /// 服务器要求审批而应用没注册审批处理器（也没有权限评估器）时，工具仍要被审批包装，调用被拒绝；
+    /// 不包装就等于让这台服务器上需要审批的工具直接执行。
+    /// </summary>
+    [Fact]
+    public async Task GetToolsAsync_ServerRequiresApproval_NoHandlerNoEvaluator_ToolCallIsRejected()
+    {
+        var server = new McpServerConfig { Name = "server1", ApprovalMode = McpApprovalMode.AlwaysRequire };
+        var aiOptions = CreateAiOptions(server);
+        _options.Setup(x => x.Value).Returns(aiOptions);
+
+        var executed = false;
+        var tool = AIFunctionFactory.Create(() => { executed = true; return "hello"; }, "tool_from_server1");
+        var mockAdapter = new Mock<IMcpClientAdapter>();
+        mockAdapter.Setup(x => x.ListToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AITool> { tool });
+        _clientFactory.Setup(x => x.GetOrCreateClientAsync(
+                It.Is<McpServerConfig>(s => s.Name == "server1"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mockAdapter.Object);
+
+        var provider = new McpToolProvider(
+            new StaticOptionsMonitor<AIOptions>(_options.Object.Value),
+            new OptionsBackedMcpServerCatalog(_options.Object),
+            _clientFactory.Object,
+            _loggerFactory.Object,
+            _logger.Object);
+
+        var result = await provider.GetToolsAsync();
+
+        var invocationResult = await ((AIFunction)result.ShouldHaveSingleItem()).InvokeAsync(new AIFunctionArguments());
+        invocationResult.ShouldBe("Tool call rejected: approval handler is not configured.");
+        executed.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// 缓存的工具绑在列出它们的那条连接上。子进程崩溃或 HTTP 会话丢失后工厂会重连（30 秒一次健康检查），
+    /// 但此前命中缓存时根本不问工厂，绑在死连接上的工具一直发到 ToolCacheSeconds（默认 300 秒）过期。
+    /// </summary>
+    [Fact]
+    public async Task GetToolsAsync_FactoryReconnected_ListsAgainFromTheNewConnection()
+    {
+        // Approval is not what this covers: with the default (AlwaysRequire) and no handler the call is refused.
+        var server = new McpServerConfig { Name = "server1", ApprovalMode = McpApprovalMode.NeverRequire };
+        _options.Setup(x => x.Value).Returns(CreateAiOptions(server));
+
+        var oldConnection = new Mock<IMcpClientAdapter>();
+        oldConnection.Setup(x => x.ListToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AITool> { AIFunctionFactory.Create(() => "old", "search") });
+        var newConnection = new Mock<IMcpClientAdapter>();
+        var newListings = 0;
+        newConnection.Setup(x => x.ListToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                newListings++;
+                return new List<AITool> { AIFunctionFactory.Create(() => "new", "search") };
+            });
+
+        var current = oldConnection.Object;
+        _clientFactory.Setup(x => x.GetOrCreateClientAsync(It.IsAny<McpServerConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => current);
+        var provider = new McpToolProvider(new StaticOptionsMonitor<AIOptions>(_options.Object.Value), new OptionsBackedMcpServerCatalog(_options.Object), _clientFactory.Object, _loggerFactory.Object, _logger.Object);
+
+        await provider.GetToolsAsync();
+        (await provider.GetToolsAsync()).ShouldHaveSingleItem();
+        oldConnection.Verify(x => x.ListToolsAsync(It.IsAny<CancellationToken>()), Times.Once);
+
+        // the factory reconnected (old client disposed): the cached tools are bound to the dead client
+        current = newConnection.Object;
+        var tools = await provider.GetToolsAsync();
+
+        newListings.ShouldBe(1);
+        (await ((AIFunction)tools.ShouldHaveSingleItem()).InvokeAsync(new AIFunctionArguments()))?.ToString().ShouldBe("new");
+
+        // and the new listing is cached again
+        await provider.GetToolsAsync();
+        newListings.ShouldBe(1);
+    }
+
     private McpToolProvider CreateSimpleProvider()
     {
         var aiOptions = new AIOptions

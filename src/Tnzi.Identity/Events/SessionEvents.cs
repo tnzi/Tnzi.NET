@@ -91,6 +91,12 @@ public class SessionsRevokedEvent : EventBase
     /// <summary>被保留的会话（一般是发起本次操作的当前会话）</summary>
     public Guid? ExcludedSessionId { get; set; }
 
+    /// <summary>
+    /// 按分组撤销委派会话时的分组键（<see cref="Services.ISessionRevocationService.RevokeSessionGroupAsync"/>），其余撤销为 null。
+    /// 应用据此断开那一组会话已经建立的 SignalR 连接 —— 撤销只在下一次认证时生效，连上的连接不会自己断。
+    /// </summary>
+    public string? GroupKey { get; set; }
+
     /// <summary>撤销时刻</summary>
     public DateTime RevokedTime { get; set; }
 }

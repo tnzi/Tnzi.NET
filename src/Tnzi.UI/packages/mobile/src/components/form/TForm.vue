@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { IFormRule } from '@tnzi/core/types/shared-ui';
+import { isBlank } from '../../headless/blank';
 
 interface IFormProps<T = Record<string, unknown>> {
   model: T;
@@ -46,17 +47,22 @@ const validateField = async (key: string): Promise<string[]> => {
   return fieldErrors;
 };
 
+// A whitespace-only string is missing too, as the backend's [Required] treats
+// it; the check never trims the value that gets submitted.
+const isMissing = (value: unknown): boolean =>
+  value === undefined || value === null || (typeof value === 'string' && isBlank(value));
+
 const applyRule = async (rule: IFormRule, value: unknown): Promise<string | undefined> => {
-  if (rule.required && (value === undefined || value === null || value === '')) {
+  if (rule.required && isMissing(value)) {
     return rule.message || t('common.required');
   }
 
   if (rule.min != null && typeof value === 'string' && value.length < rule.min) {
-    return rule.message || t('common.minLength');
+    return rule.message || t('common.minLength', { min: rule.min });
   }
 
   if (rule.max != null && typeof value === 'string' && value.length > rule.max) {
-    return rule.message || t('common.maxLength');
+    return rule.message || t('common.maxLength', { max: rule.max });
   }
 
   if (rule.pattern && typeof value === 'string' && !rule.pattern.test(value)) {

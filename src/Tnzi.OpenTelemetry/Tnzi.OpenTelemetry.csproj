@@ -18,19 +18,21 @@
 
   <ItemGroup>
     <!-- OpenTelemetry Core -->
-    <PackageReference Include="OpenTelemetry" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.20.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.20.0" />
 
     <!-- Instrumentation Libraries -->
-    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.17.0" />
-    <!-- 注意：EF Core Instrumentation 目前只有 beta 版本，尚无稳定版本 1.14.0 -->
-    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.0.0-beta.*" />
-    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.20.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.20.0" />
+    <!-- EF Core 检测只发 beta，没有稳定版。钉精确版本而不是写浮动范围：此前的 1.0.0-beta.* 只匹配 1.0.0 的预发布，
+         之后的版本线（1.10.0-beta.1 起跟随核心版本号）永远不在范围内，于是一直停在 2024 年的 beta.12。
+         升级时与上面的核心包对齐到同一个 1.x。 -->
+    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.20.0-beta.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.20.0" />
 
     <!-- Exporters -->
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.17.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.17.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.20.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.20.0" />
   </ItemGroup>
 
 </Project>

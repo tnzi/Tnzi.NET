@@ -8,6 +8,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="columns"
+    :search-fields="searchFields"
     :show-default-search="false"
     :title="t('title')"
     :translate="t"
@@ -37,6 +38,7 @@ import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { buildSubscriptionColumns, paymentSubscriptionFormSchema } from './subscription-config'
+import { billingAccountSearchFields } from './billing-account-config'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import type { SubscriptionDto } from '@tnzi/core/services/payment'
@@ -48,6 +50,7 @@ const { can } = usePermissionGuard()
 const bridge = createPaymentBridge({ client: useAdminClient() })
 
 const columns = buildSubscriptionColumns(t)
+const searchFields = billingAccountSearchFields()
 
 const crud = useCrudPage<SubscriptionDto, string>({
   pageId: 'payment.subscriptions',
@@ -78,13 +81,13 @@ async function run(action: () => Promise<void>, successKey: string): Promise<voi
 const rowActions: RowAction<SubscriptionDto>[] = [
   viewAction(crud),
   {
-    // Past-due tickets are the reason this page gets opened; retrying the charge
+    // Past-due and suspended tickets are the reason this page gets opened; retrying the charge
     // is the resolution, and waiting for the next background scan is not one.
     key: 'retryBilling',
     label: 'retryBilling',
     type: 'primary',
     icon: 'mdi:credit-card-refresh-outline',
-    show: (row) => canManage() && statusOf(row) === 'PastDue',
+    show: (row) => canManage() && ['PastDue', 'Suspended'].includes(statusOf(row)),
     onClick: (row) => void run(() => bridge.subscriptions.retryBilling(row.id), 'toast.billingRetried'),
   },
   {

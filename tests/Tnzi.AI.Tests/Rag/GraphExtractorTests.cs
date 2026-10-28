@@ -323,4 +323,51 @@ public class GraphExtractorTests
         result.Edges.Count.ShouldBe(1);
         result.Edges[0].Weight.ShouldBeNull();
     }
+
+    [Fact]
+    public async Task ExtractAsync_ForADocument_StampsEveryNodeAndEdgeWithIt()
+    {
+        // 删除文档时按来源清图谱、重复摄取时先删后插，都靠这一列；漏标一行就是一行永远清不掉的残留
+        var kbId = Guid.NewGuid();
+        var docId = Guid.NewGuid();
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "entities": [ { "name": "A", "type": "Concept" }, { "name": "B", "type": "Concept" } ],
+                  "relationships": [ { "source": "A", "target": "B", "relation": "related_to" } ]
+                }
+                """);
+
+        var result = await CreateExtractor().ExtractAsync("A relates to B", kbId, docId);
+
+        result.Nodes.ShouldAllBe(n => n.DocumentId == docId);
+        result.Edges.ShouldAllBe(e => e.DocumentId == docId);
+        result.Edges.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_WithoutADocument_LeavesTheSourceUnknown()
+    {
+        _aiUtilityMock.Setup(u => u.ExecuteAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<AiUtilityCallOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{ "entities": [ { "name": "A", "type": "Concept" } ], "relationships": [] }""");
+
+        var result = await CreateExtractor().ExtractAsync("A", Guid.NewGuid());
+
+        result.Nodes.ShouldHaveSingleItem().DocumentId.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// 解析失败时日志里报的响应结尾取最后 40 个码元：起点落在代理对中间时整个字符一起舍掉，不以孤立的低代理项开头。
+    /// </summary>
+    [Fact]
+    public void TailForLog_StartInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        // 共 43 个码元，倒数第 40 个是 emoji 的后半个
+        var response = "xx\U0001F600" + new string('b', 39);
+
+        LlmGraphExtractor.TailForLog(response).ShouldBe(new string('b', 39));
+        LlmGraphExtractor.TailForLog("short").ShouldBe("short");
+    }
 }

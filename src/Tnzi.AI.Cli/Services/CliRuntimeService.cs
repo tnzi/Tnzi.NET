@@ -14,7 +14,7 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
     private readonly IRepository<CliAgentBinding, Guid> _bindingRepository;
     private readonly ICliProviderRegistry _providerRegistry;
     private readonly ICliProtocolAdapterFactory _adapterFactory;
-    private readonly ICliExecutableResolver _executableResolver;
+    private readonly ICliHost _host;
     private readonly IOptionsMonitor<CliAgentOptions> _options;
     private readonly ICurrentTenant? _currentTenant;
     private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
@@ -26,7 +26,7 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         IRepository<CliAgentBinding, Guid> bindingRepository,
         ICliProviderRegistry providerRegistry,
         ICliProtocolAdapterFactory adapterFactory,
-        ICliExecutableResolver executableResolver,
+        ICliHost host,
         IOptionsMonitor<CliAgentOptions> options,
         IServiceProvider serviceProvider,
         ICurrentTenant? currentTenant = null,
@@ -37,7 +37,7 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
         _bindingRepository = Check.NotNull(bindingRepository);
         _providerRegistry = Check.NotNull(providerRegistry);
         _adapterFactory = Check.NotNull(adapterFactory);
-        _executableResolver = Check.NotNull(executableResolver);
+        _host = Check.NotNull(host);
         _options = Check.NotNull(options);
         _currentTenant = currentTenant;
         _multiTenancyOptions = multiTenancyOptions;
@@ -76,12 +76,25 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
             return Fail<CliRuntimeProbeResultDto>(HostManagedMessage, 403, ErrorCodes.CliRuntimeHostManaged);
         }
 
+        // 宿主级作用域：探测不属于任何运行。宿主不服务这种作用域（只认得具体用户的远程宿主）时这一轮不探测，
+        // 已登记的运行时保持原状，而不是被一次「哪儿都找不到」整批打成 Offline。
+        ICliHostTarget target;
+        try
+        {
+            target = await _host.GetTargetAsync(CliHostScope.HostLevel, cancellationToken);
+        }
+        catch (CliHostUnavailableException ex)
+        {
+            return Fail<CliRuntimeProbeResultDto>(
+                $"The execution host cannot be probed right now: {ex.Message}", 503, Tnzi.Exceptions.ErrorCodes.SERVICE_UNAVAILABLE);
+        }
+
         var result = new CliRuntimeProbeResultDto();
         var now = DateTime.UtcNow;
 
         foreach (var provider in _providerRegistry.GetEnabled())
         {
-            var executablePath = _executableResolver.Resolve(provider);
+            var executablePath = await target.FindExecutableAsync(provider, cancellationToken);
             if (executablePath is null)
             {
                 result.NotFound.Add(provider.Key);
@@ -89,7 +102,7 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
                 continue;
             }
 
-            var version = await _executableResolver.DetectVersionAsync(executablePath, cancellationToken);
+            var version = await CliHostCommand.DetectVersionAsync(target, executablePath, Logger, cancellationToken);
             var runtime = await _repository.AsQueryable(withTracking: true)
                 .FirstOrDefaultAsync(r => r.HostId == _hostId && r.ProviderKey == provider.Key, cancellationToken);
 
@@ -260,10 +273,13 @@ public class CliRuntimeService : ApplicationService, ICliRuntimeService
             .ExecuteUpdateAsync(s => s.SetProperty(r => r.Status, CliRuntimeStatus.Offline), cancellationToken);
     }
 
-    private CliRuntimeDto Project(Entities.CliRuntime runtime)
+    private CliRuntimeDto Project(Entities.CliRuntime runtime) => Project(runtime, _providerRegistry);
+
+    /// <summary>运行时记录加上 provider 描述里的展示字段。</summary>
+    internal static CliRuntimeDto Project(Entities.CliRuntime runtime, ICliProviderRegistry providerRegistry)
     {
         var dto = runtime.MapTo<CliRuntimeDto>();
-        var provider = _providerRegistry.Find(runtime.ProviderKey);
+        var provider = providerRegistry.Find(runtime.ProviderKey);
         dto.ProviderDisplayName = provider?.DisplayName;
         dto.Protocol = provider?.Protocol.ToString();
         dto.LaunchHeader = provider?.LaunchHeader;

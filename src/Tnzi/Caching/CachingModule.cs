@@ -31,21 +31,10 @@ public class CachingModule : TnziInfrastructureModule
                 options.SizeLimit = cachingOptions.MemorySizeLimit;
         });
 
-        // 注册缓存键生成器
-        services.AddSingleton<ICacheKeyGenerator, CacheKeyGenerator>();
-
         // 注册默认缓存服务（线程安全的MemoryCache）。
         // Redis 由 Tnzi.Redis 的 RedisCachingModule 用 RemoveAll + Add 接管；配了 Type=Redis 却没人接管
         // 由下面的 OnApplicationInitializationAsync 在启动期拦下，不会静默留在内存缓存上。
         services.AddSingleton<ICache, MemoryCacheService>();
-
-        // 注册缓存失效服务
-        services.AddScoped<ICacheInvalidationService>(sp =>
-        {
-            var cache = sp.GetRequiredService<ICache>();
-            var logger = sp.GetService<ILogger<CacheInvalidationService>>();
-            return new CacheInvalidationService(cache, logger);
-        });
 
         return Task.CompletedTask;
     }

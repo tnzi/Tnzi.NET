@@ -64,6 +64,29 @@ public class AdversarialSqlValidatorTests
         Assert.False(result.IsValid);
     }
 
+    /// <summary>
+    /// ScriptDom 180.140.0 之前的词法分析器把 U+FFFF 当成输入结束：塞进注释或语句中间，解析器只看到前半段
+    /// 那条 SELECT（零错误、单条语句），校验通过，而执行端执行的是整串原文，后面的 DROP 照样落到数据库上。
+    /// 降回受影响的版本时这里必须变红。载荷在方法体里拼：U+FFFF 不是合法的 XML 字符，放进 InlineData 会妨碍测试发现。
+    /// </summary>
+    [Fact]
+    public void TSql_RejectsStatementsSmuggledPastANonCharacter()
+    {
+        const char nonCharacter = '\uFFFF';
+        string[] payloads =
+        [
+            $"SELECT 1 -- {nonCharacter}\nDROP TABLE users",
+            $"SELECT 1 /* {nonCharacter} */; DROP TABLE users",
+            $"SELECT 1 {nonCharacter}; DROP TABLE users",
+            $"SELECT '{nonCharacter}'; DROP TABLE users",
+        ];
+
+        foreach (var sql in payloads)
+        {
+            Assert.False(_tsql.Validate(sql).IsValid, $"Accepted: {sql.Replace(nonCharacter, '#')}");
+        }
+    }
+
     [Theory]
     [InlineData("EXEC ('SELECT 1')")]
     [InlineData("EXECUTE sp_who")]

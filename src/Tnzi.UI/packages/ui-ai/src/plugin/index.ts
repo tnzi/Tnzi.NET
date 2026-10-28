@@ -9,4 +9,5 @@ export type {
   DefineChatAppOptions,
   DefineChatAppResult,
   ChatAppLoginConfig,
+  ChatAppGuestWelcomeConfig,
 } from './defineChatApp';

@@ -34,6 +34,12 @@ public class DistributedSessionService : ApplicationService, ISessionService
     private static readonly TimeSpan UserSessionsIndexExpiration = TimeSpan.FromDays(30);
 
     /// <summary>
+    /// 撤销标记的存活时间。它只需要比任何一个「撤销之前读、撤销之后写」的在途请求活得久
+    /// （见 <see cref="RepairIfRevokedAsync"/>）；会话本身的已撤销状态在会话那条记录里。
+    /// </summary>
+    private static readonly TimeSpan RevocationMarkerLifetime = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// 初始化一个 <see cref="DistributedSessionService"/>。<c>scope</c>（当前请求能碰到哪些用户）
     /// 的口径与 <see cref="DatabaseSessionService"/> 相同，必填的理由也相同。
     /// </summary>
@@ -66,12 +72,52 @@ public class DistributedSessionService : ApplicationService, ISessionService
     }
 
     /// <inheritdoc />
-    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
+    public Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
+        => CreateSessionCoreAsync(userId, deviceInfo, ipAddress, userAgent, expiresAt, delegation: null);
+
+    /// <inheritdoc />
+    public Task<Guid> CreateDelegatedSessionAsync(DelegatedSessionCreation creation)
+    {
+        Check.NotNull(creation);
+        return CreateSessionCoreAsync(
+            creation.UserId, creation.DeviceInfo, creation.IpAddress, creation.UserAgent, creation.ExpiresAt, creation.Delegation);
+    }
+
+    /// <inheritdoc />
+    public async Task<DelegatedSessionInfo?> GetDelegationAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var sessionData = await GetSessionDataAsync(sessionId);
+        if (sessionData?.GroupKey == null)
+        {
+            return null;
+        }
+
+        // 与数据库实现同口径：委派会话恒有绝对到期时间，读到 null 按已到期处理。
+        return new DelegatedSessionInfo(
+            sessionData.GroupKey,
+            sessionData.Label,
+            sessionData.Claims ?? new Dictionary<string, string>(),
+            sessionData.AbsoluteExpiresAt ?? DateTime.MinValue);
+    }
+
+    private async Task<Guid> CreateSessionCoreAsync(
+        Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt, DelegatedSessionInfo? delegation)
     {
         var sessionId = Guid.NewGuid();
         var now = DateTime.UtcNow;
         // 绝对上限在建立那一刻定死，任何续期都不会推动它（与数据库实现同口径）。
+        // 委派会话另有请求方给的到期时间，取两者里更早的那个。
         var absoluteExpiresAt = SessionLifetime.ComputeAbsoluteExpiry(now, _sessionOptions.AbsoluteLifetimeHours);
+        if (delegation != null)
+        {
+            absoluteExpiresAt = SessionLifetime.ClampToAbsolute(delegation.AbsoluteExpiresAt, absoluteExpiresAt);
+        }
+
         var effectiveExpiresAt = expiresAt.HasValue
             ? SessionLifetime.ClampToAbsolute(expiresAt.Value, absoluteExpiresAt)
             : absoluteExpiresAt;
@@ -87,6 +133,9 @@ public class DistributedSessionService : ApplicationService, ISessionService
             LastActivityTime = now,
             ExpiresAt = effectiveExpiresAt,
             AbsoluteExpiresAt = absoluteExpiresAt,
+            GroupKey = delegation?.GroupKey,
+            Label = delegation?.Label,
+            Claims = delegation == null ? null : new Dictionary<string, string>(delegation.Claims),
             IsRevoked = false
         };
 
@@ -110,6 +159,9 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 LastActivityTime = now,
                 ExpiresAt = effectiveExpiresAt,
                 AbsoluteExpiresAt = absoluteExpiresAt,
+                GroupKey = delegation?.GroupKey,
+                Label = delegation?.Label,
+                ClaimsJson = delegation == null ? null : DelegatedSessionRules.SerializeClaims(delegation.Claims),
                 IsRevoked = false
             };
             await _repository.InsertAsync(session);
@@ -149,6 +201,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
         // 判定会话是否仍计入并发数，漏填会让 Redis 模式下所有会话被视为"永不过期"。
         ExpiresAt = sessionData.ExpiresAt,
         AbsoluteExpiresAt = sessionData.AbsoluteExpiresAt,
+        GroupKey = sessionData.GroupKey,
+        Label = sessionData.Label,
         IsRevoked = sessionData.IsRevoked,
         RevokedAt = sessionData.RevokedAt
     };
@@ -265,9 +319,7 @@ public class DistributedSessionService : ApplicationService, ISessionService
             return Fail("Session already revoked", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        sessionData.IsRevoked = true;
-        sessionData.RevokedAt = DateTime.UtcNow;
-        await SetSessionAsync(sessionData);
+        await RevokeSessionDataAsync(sessionData, DateTime.UtcNow);
 
         // 从用户会话索引中移除
         await RemoveFromUserSessionsIndexAsync(sessionData.UserId, sessionId);
@@ -312,18 +364,11 @@ public class DistributedSessionService : ApplicationService, ISessionService
         var sessionDataTasks = sessionsToRevoke.Select(sessionId => GetSessionDataAsync(sessionId));
         var sessionDataResults = await Task.WhenAll(sessionDataTasks);
 
-        // 批量更新Redis中的会话状态（并行执行）
-        var updateTasks = new List<Task>();
-        for (int i = 0; i < sessionsToRevoke.Count; i++)
-        {
-            var sessionData = sessionDataResults[i];
-            if (sessionData != null && !sessionData.IsRevoked)
-            {
-                sessionData.IsRevoked = true;
-                sessionData.RevokedAt = DateTime.UtcNow;
-                updateTasks.Add(SetSessionAsync(sessionData));
-            }
-        }
+        // 批量更新Redis中的会话状态（并行执行；每一条内部先写撤销标记再写会话，见 RevokeSessionDataAsync）
+        var revokedAt = DateTime.UtcNow;
+        var updateTasks = sessionDataResults
+            .Where(sessionData => sessionData != null && !sessionData.IsRevoked)
+            .Select(sessionData => RevokeSessionDataAsync(sessionData!, revokedAt));
         await Task.WhenAll(updateTasks);
 
         // 从用户会话索引中移除（由于分布式锁，需要逐个处理，但可以并行尝试）
@@ -373,6 +418,10 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
         sessionData.LastActivityTime = DateTime.UtcNow;
         await SetSessionAsync(sessionData);
+        if (await RepairIfRevokedAsync(sessionData))
+        {
+            return Fail("Session is revoked", 400, ErrorCodes.VALIDATION_ERROR);
+        }
 
         return Ok();
     }
@@ -391,17 +440,22 @@ public class DistributedSessionService : ApplicationService, ISessionService
         sessionData.ExpiresAt = SessionLifetime.ClampToAbsolute(expiresAt, sessionData.AbsoluteExpiresAt);
         // SetSessionAsync 会据 ExpiresAt 重设 Redis 绝对 TTL（滑动延长记录存活）。
         await SetSessionAsync(sessionData);
+        if (await RepairIfRevokedAsync(sessionData))
+        {
+            return Ok();
+        }
 
-        // 若启用数据库审计日志，同步更新
+        // 若启用数据库审计日志，同步更新。只写两列、只在行未撤销时写：整行写回会把并发的撤销抹掉
+        // （与 DatabaseSessionService.RenewSessionAsync 同一理由）。
         if (_sessionOptions.KeepDatabaseAuditLog && _repository != null)
         {
-            var dbSession = await _repository.GetAsync(sessionId);
-            if (dbSession != null && !dbSession.IsRevoked)
-            {
-                dbSession.LastActivityTime = sessionData.LastActivityTime;
-                dbSession.ExpiresAt = sessionData.ExpiresAt;
-                await _repository.UpdateAsync(dbSession);
-            }
+            var renewedActivity = sessionData.LastActivityTime;
+            var renewedExpiry = sessionData.ExpiresAt;
+            await _repository
+                .Where(s => s.Id == sessionId && !s.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.LastActivityTime, renewedActivity)
+                    .SetProperty(s => s.ExpiresAt, renewedExpiry));
         }
 
         return Ok();
@@ -572,7 +626,53 @@ public class DistributedSessionService : ApplicationService, ISessionService
     #region Redis 操作辅助方法
 
     private string GetSessionKey(Guid sessionId) => $"{_sessionOptions.RedisKeyPrefix}:{sessionId}";
+    private string GetRevokedMarkerKey(Guid sessionId) => $"{_sessionOptions.RedisKeyPrefix}:Revoked:{sessionId}";
     private string GetUserSessionsIndexKey(Guid userId) => $"{_sessionOptions.RedisKeyPrefix}:User:{userId}";
+
+    /// <summary>
+    /// 撤销一条会话记录：<b>先写撤销标记，再写会话</b>。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 会话在缓存里是一整条 JSON，活动续期、刷新续期、撤销都是「读出来、改一处、整条写回」。
+    /// 续期那一方若在撤销之前读、在撤销之后写，写回的就是一份 <c>IsRevoked = false</c> 的旧快照：
+    /// 撤销答了成功、用户索引里也删掉了这条会话（之后的「登出所有设备」都看不见它），
+    /// 手里攥着 access token 的一方却每次请求都还过得了校验。分布式缓存没有比较并交换，
+    /// 于是撤销另写一个标记，续期在写回<b>之后</b>查它（<see cref="RepairIfRevokedAsync"/>）：
+    /// 查不到，说明那次查在标记写下之前，于是续期的写回也在撤销的写回之前，撤销的那次写回在后、留得下来；
+    /// 查得到，续期自己把会话改回已撤销。两种交错都以「已撤销」收场。
+    /// </remarks>
+    private async Task RevokeSessionDataAsync(SessionData sessionData, DateTime revokedAt)
+    {
+        await _cache.SetStringAsync(
+            GetRevokedMarkerKey(sessionData.Id),
+            revokedAt.ToString("O", CultureInfo.InvariantCulture),
+            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = RevocationMarkerLifetime });
+
+        sessionData.IsRevoked = true;
+        sessionData.RevokedAt = revokedAt;
+        await SetSessionAsync(sessionData);
+    }
+
+    /// <summary>
+    /// 续期写回之后调用：会话在这次读与写之间被撤销了，就把它改回已撤销。返回是否被撤销。
+    /// </summary>
+    private async Task<bool> RepairIfRevokedAsync(SessionData sessionData)
+    {
+        var marker = await _cache.GetStringAsync(GetRevokedMarkerKey(sessionData.Id));
+        if (string.IsNullOrEmpty(marker))
+        {
+            return false;
+        }
+
+        sessionData.IsRevoked = true;
+        sessionData.RevokedAt = DateTime.TryParse(marker, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var revokedAt)
+            ? revokedAt
+            : DateTime.UtcNow;
+        await SetSessionAsync(sessionData);
+
+        LogWarning("Session {SessionId} was revoked while a request was renewing it; the revocation has been restored.", sessionData.Id);
+        return true;
+    }
 
     private async Task<SessionData?> GetSessionDataAsync(Guid sessionId)
     {
@@ -781,6 +881,15 @@ public class DistributedSessionService : ApplicationService, ISessionService
         /// <summary>会话绝对过期时间（建立时定死，续期不推动）。null = 不设上限。</summary>
         public DateTime? AbsoluteExpiresAt { get; set; }
 
+        /// <summary>委派会话的分组键；非 null 即委派会话。</summary>
+        public string? GroupKey { get; set; }
+
+        /// <summary>委派会话的显示名。</summary>
+        public string? Label { get; set; }
+
+        /// <summary>委派会话的应用声明（字典的键不受命名策略影响，原样往返）。</summary>
+        public Dictionary<string, string>? Claims { get; set; }
+
         public bool IsRevoked { get; set; }
         public DateTime? RevokedAt { get; set; }
     }
@@ -831,7 +940,10 @@ public class DistributedSessionService : ApplicationService, ISessionService
             return SessionValidationResult.BindingMismatch;
         }
 
-        await TouchAsync(sessionData, context, ipChanged, now);
+        if (!await TouchAsync(sessionData, context, ipChanged, now))
+        {
+            return SessionValidationResult.Invalid;
+        }
 
         return SessionValidationResult.Valid;
     }
@@ -863,13 +975,14 @@ public class DistributedSessionService : ApplicationService, ISessionService
 
     /// <summary>
     /// 续期活动时间（并在地址变化时更新地址、发一条事件）。按 <see cref="ActivityWriteThrottleSeconds"/> 节流。
+    /// 返回会话是否仍然有效：写回期间被撤销返回 <c>false</c>（见 <see cref="RevokeSessionDataAsync"/>）。
     /// </summary>
-    private async Task TouchAsync(SessionData sessionData, SessionValidationContext context, bool ipChanged, DateTime now)
+    private async Task<bool> TouchAsync(SessionData sessionData, SessionValidationContext context, bool ipChanged, DateTime now)
     {
         var staleActivity = sessionData.LastActivityTime.AddSeconds(ActivityWriteThrottleSeconds) <= now;
         if (!staleActivity && !ipChanged)
         {
-            return;
+            return true;
         }
 
         var previousIp = sessionData.IpAddress;
@@ -881,6 +994,10 @@ public class DistributedSessionService : ApplicationService, ISessionService
         }
 
         await SetSessionAsync(sessionData);
+        if (await RepairIfRevokedAsync(sessionData))
+        {
+            return false;
+        }
 
         if (ipChanged && _eventBus != null)
         {
@@ -893,6 +1010,8 @@ public class DistributedSessionService : ApplicationService, ISessionService
                 ChangedTime = now
             }, cancellationToken: default);
         }
+
+        return true;
     }
 
 }

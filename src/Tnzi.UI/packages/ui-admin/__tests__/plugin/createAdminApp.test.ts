@@ -42,7 +42,19 @@ describe('createAdminApp', () => {
   it('routes the catch-all to the not-found route by name (basePath-agnostic)', () => {
     const handle = createAdminApp({ rootComponent: RootStub as never, client: dummyClient })
     const catchAll = handle.routes.find((r) => r.path === '/:pathMatch(.*)*')
-    expect(redirectOf(catchAll!)).toEqual({ name: 'not-found' })
+    expect(redirectOf(catchAll!)).toEqual({ name: 'not-found', params: {} })
+  })
+
+  // A redirect by name inherits the catch-all's `pathMatch`, which the 404 route
+  // does not declare: vue-router then warns "Discarded invalid param(s)" in the
+  // console of every app on every unknown URL.
+  it('lands an unknown URL on the 404 page without a discarded-param warning', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createAdminApp({ rootComponent: RootStub as never, client: dummyClient })
+    await handle.router.push('/admin/no/such/page')
+    expect(handle.router.currentRoute.value.name).toBe('not-found')
+    expect(spy.mock.calls.filter((call) => String(call[0]).includes('Discarded invalid param'))).toEqual([])
+    spy.mockRestore()
   })
 
   it('omits the added root redirect for domain-root deployment (basePath "/")', () => {
@@ -115,8 +127,11 @@ describe('createAdminApp', () => {
       client: dummyClient,
       rootRoutes: [publicRoute('/admin/forms/:token')],
     })
-    expect(spy).toHaveBeenCalledTimes(1)
-    expect(String(spy.mock.calls[0][0])).toContain('already carries basePath')
+    // Only this module's own warnings: a router warning from an earlier test's
+    // navigation can still land while the spy is installed.
+    const own = spy.mock.calls.filter((call) => String(call[0]).startsWith('[tnzi-admin]'))
+    expect(own).toHaveLength(1)
+    expect(String(own[0][0])).toContain('already carries basePath')
     spy.mockRestore()
   })
 
@@ -127,7 +142,7 @@ describe('createAdminApp', () => {
       client: dummyClient,
       rootRoutes: [publicRoute('/forms/:token')],
     })
-    expect(spy).not.toHaveBeenCalled()
+    expect(spy.mock.calls.filter((call) => String(call[0]).startsWith('[tnzi-admin]'))).toEqual([])
     spy.mockRestore()
   })
 
@@ -138,7 +153,8 @@ describe('createAdminApp', () => {
       notFoundRedirect: { name: 'dashboard' },
     })
     const catchAll = handle.routes.find((r) => r.path === '/:pathMatch(.*)*')
-    expect(redirectOf(catchAll!)).toEqual({ name: 'dashboard' })
+    // by name, so it drops the catch-all's inherited params like the default does
+    expect(redirectOf(catchAll!)).toEqual({ name: 'dashboard', params: {} })
   })
 
   it('mounts the root component', () => {

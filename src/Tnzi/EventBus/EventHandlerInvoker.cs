@@ -26,6 +26,11 @@ public class HandlerMetadata
     /// 是否为后台执行处理器（标记了 [BackgroundEventHandler] 特性）
     /// </summary>
     public bool IsBackground { get; set; }
+
+    /// <summary>
+    /// 同一事件的同步处理器之间的执行顺序（<see cref="EventHandlerOrderAttribute"/>，未标记为 0，小的先执行）
+    /// </summary>
+    public int Order { get; set; }
 }
 
 /// <summary>
@@ -99,6 +104,7 @@ public static class EventHandlerInvoker
 
         // 检查是否标记为后台执行（按处理器类型，与事件无关）
         metadata.IsBackground = handlerType.GetCustomAttribute<BackgroundEventHandlerAttribute>() != null;
+        metadata.Order = handlerType.GetCustomAttribute<EventHandlerOrderAttribute>()?.Order ?? 0;
 
         // 查找能接住本次事件的 IConditionalEventHandler<TEvent>。
         // 只对该事件有条件接口时才建 CanHandle 委托：处理器可能对 A 有条件、对 B 无条件，

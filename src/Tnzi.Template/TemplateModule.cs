@@ -60,8 +60,10 @@ public class TemplateModule : TnziApplicationModule
         // 注册模板渲染服务（高级 API，统一编排引擎+存储+布局）
         context.Services.AddScoped<ITemplateRenderService, TemplateRenderService>();
 
-        // 注册 HTML→PDF 转换器（默认 HTML 直出，应用层可替换为 PuppeteerSharp/Gotenberg 等实现）
-        context.Services.TryAddScoped<IHtmlToPdfConverter, HtmlPassThroughConverter>();
+        // 注册 HTML→PDF 转换器：宿主装了能把 HTML 转成 PDF 的核心 IDocumentConverter（Tnzi.Documents 的本机 Chromium）就用它，
+        // 否则 HTML 直出。按解析时的可用性判定，所以与两个模块的加载顺序无关；应用先注册自己的实现即可整体覆盖。
+        context.Services.TryAddScoped<IHtmlToPdfConverter>(provider =>
+            DocumentConverterHtmlToPdfConverter.Select(provider.GetService<IDocumentConverter>()));
 
         return Task.CompletedTask;
     }

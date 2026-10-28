@@ -60,7 +60,7 @@ function renderManifest(pkg, names) {
       + ` * \`@tnzi/ui-admin\`) - its manifest already includes every name below.\n`;
 
   const imports = pkg.bundler
-    ? `import { addCollection, type IconifyJSON } from '@iconify/vue'\n`
+    ? `import { _api, addCollection, type IconifyJSON } from '@iconify/vue'\n`
       + `import { getIcons } from '@iconify/utils'\n\n`
     : '';
 

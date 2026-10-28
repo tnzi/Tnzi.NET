@@ -76,8 +76,8 @@
 
     <div class="je-editor__footer">
       <NButton size="small" @click="emit('cancel')">{{ t('dialog.cancel') }}</NButton>
-      <NButton size="small" :loading="savingDraft" @click="save(false)">{{ t('dialog.saveDraft') }}</NButton>
-      <NButton size="small" type="primary" :loading="savingPost" :disabled="!balanced" @click="save(true)">
+      <NButton size="small" :loading="savingDraft" :disabled="saving" @click="save(false)">{{ t('dialog.saveDraft') }}</NButton>
+      <NButton size="small" type="primary" :loading="savingPost" :disabled="!balanced || saving" @click="save(true)">
         {{ t('dialog.saveAndPost') }}
       </NButton>
     </div>
@@ -98,6 +98,15 @@ interface EditableLine {
   debit: number | null
   credit: number | null
   memo: string
+  /**
+   * Party / dimension tags of a loaded line. This editor has no controls for
+   * them (integrations and the API set them), but a draft update rebuilds every
+   * line from the payload, so they are carried on the line object - they follow
+   * the line when another one is added or removed, and a new line has none.
+   */
+  partyType?: string | null
+  partyId?: string | null
+  dimensions?: string | null
 }
 
 const props = defineProps<{
@@ -110,6 +119,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'saved'): void
   (e: 'cancel'): void
+  /** A new entry's first save created this draft; the editor now writes to it. */
+  (e: 'drafted', entry: JournalEntryDto): void
 }>()
 
 const t = makePageTranslator('finance.journals')
@@ -122,6 +133,14 @@ const memo = ref('')
 const lines = ref<EditableLine[]>([])
 const savingDraft = ref(false)
 const savingPost = ref(false)
+/** Either save in flight: both buttons wait, or two clicks would create two drafts. */
+const saving = computed(() => savingDraft.value || savingPost.value)
+/**
+ * The draft this editor writes to: the entry it was opened on, or the draft its
+ * own first save created. "Save & post" is create-then-post, and when the post
+ * fails the retry must update that draft, not create another one.
+ */
+const draftId = ref<string | null>(null)
 
 function emptyLine(): EditableLine {
   return { accountId: null, debit: null, credit: null, memo: '' }
@@ -138,6 +157,9 @@ function resetFrom(entry: JournalEntryDto | null) {
       debit: l.txnDebit > 0 ? l.txnDebit : null,
       credit: l.txnCredit > 0 ? l.txnCredit : null,
       memo: l.memo ?? '',
+      partyType: l.partyType ?? null,
+      partyId: l.partyId ?? null,
+      dimensions: l.dimensions ?? null,
     }))
     if (lines.value.length === 0) lines.value = [emptyLine(), emptyLine()]
   } else {
@@ -152,7 +174,14 @@ function resetFrom(entry: JournalEntryDto | null) {
 // The host remounts the editor per open (keyed by open sequence), so
 // `immediate` covers the initial bind; the watch covers async record swaps
 // while mounted (e.g. a deep-link restore resolving after paint).
-watch(() => props.entry, (entry) => resetFrom(entry), { immediate: true })
+watch(
+  () => props.entry,
+  (entry) => {
+    draftId.value = entry?.id ?? null
+    resetFrom(entry)
+  },
+  { immediate: true },
+)
 
 const totalDebit = computed(() => lines.value.reduce((sum, l) => sum + (l.debit ?? 0), 0))
 const totalCredit = computed(() => lines.value.reduce((sum, l) => sum + (l.credit ?? 0), 0))
@@ -194,20 +223,29 @@ function buildPayload(): CreateJournalEntryDto | null {
       debit: l.debit ?? 0,
       credit: l.credit ?? 0,
       memo: l.memo.trim() || null,
+      partyType: l.partyType ?? null,
+      partyId: l.partyId ?? null,
+      dimensions: l.dimensions ?? null,
     })),
   }
 }
 
 async function save(post: boolean) {
+  if (saving.value) return
   const payload = buildPayload()
   if (!payload) return
 
   const loading = post ? savingPost : savingDraft
   loading.value = true
   try {
-    const saved = props.entry?.id
-      ? await props.bridge.journals.updateDraft(props.entry.id, payload)
+    const existingId = draftId.value
+    const saved = existingId
+      ? await props.bridge.journals.updateDraft(existingId, payload)
       : await props.bridge.journals.createDraft(payload)
+    if (!existingId) {
+      draftId.value = saved.id
+      emit('drafted', saved)
+    }
 
     if (post) {
       await props.bridge.journals.post(saved.id)

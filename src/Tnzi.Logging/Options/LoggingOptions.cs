@@ -127,11 +127,12 @@ public class FileOutputOptions
     };
 
     /// <summary>
-    /// Debug 级别日志配置
+    /// Debug 级别日志配置。只由配置决定（任何环境都不会自动打开）；要真的收到 Debug 事件，
+    /// 还须把 <see cref="LoggingOptions.MinimumLevel"/> 调到 Debug，否则这个目录只是 Information 目录的副本
     /// </summary>
     public LevelFileOptions Debug { get; set; } = new()
     {
-        Enabled = false, // 默认不启用，由环境或配置决定
+        Enabled = false,
         RetainedFileCountLimit = 7
     };
 }

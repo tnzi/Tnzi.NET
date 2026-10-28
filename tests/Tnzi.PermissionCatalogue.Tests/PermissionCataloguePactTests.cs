@@ -184,7 +184,9 @@ public class PermissionCataloguePactTests
         // 2026-09-20：账号登录安全管理 1 码（user.security，Business，复用 identity 组）。
         // 管理端摘掉别人的第二因子 / 给别人设登录 IP 允许列表，与 user.update 分开授予：
         // 改电话号码的岗位不该顺带拥有「让谁的登录少一道验证」。读仍走 user.view。
-        codes.Count.ShouldBe(311);
+        // 2026-10-26：计费账户 2 码（payment.account.view / payment.account.manage，复用 payment 组）。
+        // 只在 Payment:BillingAccount:Scope = Installation / Tenant 下由服务层检查：几位管理者共同管一个客户账户。
+        codes.Count.ShouldBe(313);
         context.Groups.Count.ShouldBe(13);
     }
 
@@ -240,6 +242,10 @@ public class PermissionCataloguePactTests
                     $"Group '{groupName}': {owner} declares a different DisplayName than {list[0].Owner}.");
                 group.DefaultCategory.ShouldBe(first.DefaultCategory,
                     $"Group '{groupName}': {owner} declares a different DefaultCategory than {list[0].Owner}.");
+                // Scope decides what a narrowed super-admin bypass reaches; contributors that
+                // disagree would make it depend on which provider set it last.
+                group.Scope.ShouldBe(first.Scope,
+                    $"Group '{groupName}': {owner} declares a different Scope than {list[0].Owner}.");
             }
         }
     }
@@ -565,4 +571,46 @@ public class PermissionCataloguePactTests
         return result;
     }
 
+
+    /// <summary>
+    /// The framework groups that belong to the customer organisation rather than to the
+    /// platform operator. Under <c>Authorization:SuperAdminBypassScope = Platform</c> super
+    /// admins need explicit grants for these; every other framework group stays platform.
+    /// Changing this set changes what a vendor's operator account can see in every product
+    /// that opted in, so it is locked here.
+    /// </summary>
+    private static readonly string[] ApplicationScopedFrameworkGroups = ["finance", "payroll", "signing"];
+
+    [Fact]
+    public void Framework_group_scopes_are_locked()
+    {
+        var registry = PermissionScopeRegistry.Build(AllProviders.Values);
+
+        registry.GroupScopes
+            .Where(g => g.Value == PermissionScope.Application)
+            .Select(g => g.Key)
+            .Order(StringComparer.Ordinal)
+            .ShouldBe(ApplicationScopedFrameworkGroups);
+
+        // Platform surfaces the operator must keep (users, roles, settings, audit, ops, billing back office).
+        foreach (var group in new[] { "identity", "authorization", "system", "audit", "chat", "payment", "notification", "storage", "ai" })
+        {
+            registry.GetGroupScope(group).ShouldBe(PermissionScope.Platform, $"group '{group}'");
+        }
+    }
+
+    [Fact]
+    public void Every_finance_code_is_application_scoped_including_sub_modules()
+    {
+        // Banking / Offers / Recurring declare codes under the shared "finance" group without
+        // declaring the group themselves; they must inherit its scope, not their assembly default.
+        var registry = PermissionScopeRegistry.Build(AllProviders.Values);
+        var context = BuildContext();
+        var financeCodes = context.Permissions.Keys
+            .Where(code => code.StartsWith("finance.", StringComparison.Ordinal) || code.StartsWith("payroll.", StringComparison.Ordinal))
+            .ToList();
+
+        financeCodes.Count.ShouldBeGreaterThan(50);
+        financeCodes.Where(code => registry.GetScope(code) != PermissionScope.Application).ShouldBeEmpty();
+    }
 }

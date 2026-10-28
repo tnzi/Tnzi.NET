@@ -19,7 +19,8 @@ public static class SettingConfigurationBuilderExtensions
     /// </summary>
     /// <param name="builder">IConfigurationBuilder 实例。</param>
     /// <param name="excludedKeys">
-    /// 永不进 IConfiguration 的 key 列表（OrdinalIgnoreCase）。
+    /// 永不进 IConfiguration 的 key 列表（OrdinalIgnoreCase）。每一项同时排除它下面的整棵子树：
+    /// <c>Appearance:Theme</c>（或 <c>Appearance:Theme:</c>）挡住 <c>Appearance:Theme:admin</c>。
     /// 适合保护启动级关键开关（如测试模式标志），即使写入 Setting 表也不会被业务代码读到。
     /// </param>
     /// <example>

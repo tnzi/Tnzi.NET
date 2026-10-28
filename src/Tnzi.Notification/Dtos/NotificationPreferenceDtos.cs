@@ -12,6 +12,8 @@ public class NotificationPreferenceDto
     public bool IsEnabled { get; set; }
     public TimeOnly? QuietHoursStart { get; set; }
     public TimeOnly? QuietHoursEnd { get; set; }
+    /// <summary>IANA 时区标识；null 表示静默时段的两个时刻是 UTC 时刻。</summary>
+    public string? QuietHoursTimeZone { get; set; }
     public int? MaxFrequencyPerHour { get; set; }
 }
 
@@ -67,14 +69,21 @@ public class SetNotificationPreferenceDto
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>
-    /// 静默时段开始时间 (UTC)
+    /// 静默时段开始时间（墙上时刻，按 <see cref="QuietHoursTimeZone"/> 解释）
     /// </summary>
     public TimeOnly? QuietHoursStart { get; set; }
 
     /// <summary>
-    /// 静默时段结束时间 (UTC)
+    /// 静默时段结束时间（墙上时刻，不含；按 <see cref="QuietHoursTimeZone"/> 解释）
     /// </summary>
     public TimeOnly? QuietHoursEnd { get; set; }
+
+    /// <summary>
+    /// IANA 时区标识（如 <c>America/Toronto</c>）。空 = 两个时刻按 UTC 解释。
+    /// 不是 IANA 标识（含 Windows 时区名）时返回 400。
+    /// </summary>
+    [MaxLength(IanaTimeZone.MaxLength)]
+    public string? QuietHoursTimeZone { get; set; }
 
     /// <summary>
     /// 每小时最大通知频率

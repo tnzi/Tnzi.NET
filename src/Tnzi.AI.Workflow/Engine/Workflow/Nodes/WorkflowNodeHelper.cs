@@ -38,6 +38,10 @@ internal static class WorkflowNodeHelper
     /// <summary>
     /// 解析 Agent 配置并创建 IAgentExecutor（封装完整的 resolve → create 流程）
     /// </summary>
+    /// <remarks>
+    /// <c>fallbackInstructions</c> 是步骤与 Agent 都没给系统提示词时才用的节点缺省提示词。它排在 Agent 之后：
+    /// 选了 Agent 的节点用的是那个 Agent 自己的系统提示词，节点要求的输出格式（verdict JSON、路由键）由节点放在用户消息里。
+    /// </remarks>
     internal static async Task<IAgentExecutor> CreateAgentExecutorAsync(
         Guid? agentId,
         IWorkflowNodeServiceContext serviceContext,
@@ -45,7 +49,8 @@ internal static class WorkflowNodeHelper
         string? model,
         string? instructions,
         string name,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? fallbackInstructions = null)
     {
         var config = new RefHolder
         {
@@ -55,6 +60,8 @@ internal static class WorkflowNodeHelper
         };
 
         await ResolveAgentConfigAsync(agentId, serviceContext, config, cancellationToken);
+        if (string.IsNullOrWhiteSpace(config.Instructions) && fallbackInstructions != null)
+            config.Instructions = fallbackInstructions;
 
         return await serviceContext.AgentFactory.CreateAgentAsync(
             providerName: config.Provider,
@@ -75,6 +82,26 @@ internal static class WorkflowNodeHelper
 
         return null;
     }
+
+    /// <summary>
+    /// 节点执行用的 Agent：节点专属配置键（如 <c>reviewerAgentId</c>）优先，缺失时用步骤的 <see cref="WorkflowStepDto.AgentId"/>。
+    /// </summary>
+    /// <remarks>
+    /// Builder 的 <c>AddReviewStep(stepId, agentId)</c> 一类方法、内置模板与可视化编辑器的 Agent 选择器都把
+    /// Agent 写在 <see cref="WorkflowStepDto.AgentId"/> 上；只读配置键会让这些入口选的 Agent 一律不生效。
+    /// </remarks>
+    internal static Guid? ResolveNodeAgentId(WorkflowStepDto step, Dictionary<string, string> config, string configKey)
+        => ParseAgentIdFromConfig(config, configKey) ?? step.AgentId;
+
+    /// <summary>
+    /// 步骤作者写的 <see cref="WorkflowStepDto.Instructions"/> 是模板：<c>{{stepId}}</c> / <c>{{input}}</c> 在节点执行时替换。
+    /// </summary>
+    /// <remarks>
+    /// 只有作者写的字符串（Instructions、条件、transform 模板）是模板；初始输入与上游输出是数据，不做替换 ——
+    /// 否则一段恰好含 <c>{{input}}</c> 的上游产出（生成的 Jinja / Handlebars 模板）会被悄悄换成别的内容。
+    /// </remarks>
+    internal static string? ResolveInstructions(WorkflowStepDto step, WorkflowState state)
+        => string.IsNullOrWhiteSpace(step.Instructions) ? step.Instructions : state.ResolveTemplate(step.Instructions);
 
     /// <summary>
     /// 收集上游输入 - 无依赖返回初始输入，单依赖直接返回文本，多依赖以 [depId] 分段拼接

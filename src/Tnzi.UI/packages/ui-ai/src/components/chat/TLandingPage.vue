@@ -22,8 +22,10 @@
 import { computed, nextTick, useTemplateRef } from 'vue'
 import { Icon } from '@iconify/vue'
 import TThreadComposer from './TThreadComposer.vue'
+import { useAiI18n } from '../../i18n/index'
 import type { ComposerAction } from './composer-types'
 import { DEFAULT_COMPOSER_ACCEPT } from './composer-types'
+import type { AddAttachmentsResult, RejectedAttachment } from '../../headless/useComposerAttachments'
 
 export interface LandingChip {
   readonly id?: string
@@ -36,11 +38,12 @@ const props = withDefaults(
   defineProps<{
     /** Composer text (two-way bound). */
     modelValue?: string
-    /** Main serif greeting text. Ignored if the `headline` slot is used. */
+    /** Main serif greeting text. Ignored if the `headline` slot is used.
+     *  Defaults to the current locale's. */
     greeting?: string
     /** Optional subtitle below the greeting. Ignored if the `subline` slot is used. */
     subline?: string
-    /** Composer placeholder. */
+    /** Composer placeholder. Defaults to the current locale's. */
     placeholder?: string
     /** Suggestion chips. Ignored if the `chips` slot is used. */
     chips?: readonly LandingChip[]
@@ -60,11 +63,18 @@ const props = withDefaults(
     maxFileSize?: number
     /** Voice recognition language (BCP-47). */
     voiceLang?: string
+    /** Refuse to send, e.g. while a previous submit is still being read or
+     *  uploaded. The text stays editable. */
+    disabled?: boolean
+    /**
+     * Phone layout: a smaller headline (content in the `headline` slot sized in
+     * `em` follows it), a one-line composer and tighter spacing. `TChatApp`
+     * sets it below its narrow-screen breakpoint.
+     */
+    compact?: boolean
   }>(),
   {
     modelValue: '',
-    greeting: 'What can I do for you?',
-    placeholder: 'Assign a task or ask anything',
     chips: () => [],
     maxWidth: 768,
     alwaysShowSend: false,
@@ -74,6 +84,8 @@ const props = withDefaults(
     accept: DEFAULT_COMPOSER_ACCEPT,
     maxFileSize: 10 * 1024 * 1024,
     voiceLang: 'en-US',
+    compact: false,
+    disabled: false,
   },
 )
 
@@ -82,9 +94,15 @@ const emit = defineEmits<{
   submit: [value: string, files: File[]]
   'chip-click': [chip: LandingChip]
   action: [id: string]
+  /** Files the composer refused (size or type), from any way they arrived. */
+  'attachments-rejected': [rejected: readonly RejectedAttachment[]]
 }>()
 
-const composerRef = useTemplateRef<{ focus: () => void }>('composerRef')
+const composerRef = useTemplateRef<InstanceType<typeof TThreadComposer>>('composerRef')
+
+const t = useAiI18n()
+const greetingText = computed(() => props.greeting ?? t.value.landing.greeting)
+const placeholderText = computed(() => props.placeholder ?? t.value.landing.placeholder)
 
 const text = computed({
   get: () => props.modelValue,
@@ -107,16 +125,24 @@ function onChipClick(chip: LandingChip): void {
      press End before they can continue the sentence. */
   void nextTick(() => composerRef.value?.focus())
 }
+
+/** The landing composer's `addAttachments` (see TThreadComposer). Null when
+ *  attachments are off. */
+function addAttachments(incoming: FileList | readonly File[]): AddAttachmentsResult | null {
+  return composerRef.value?.addAttachments(incoming) ?? null
+}
+
+defineExpose({ addAttachments, focus: () => composerRef.value?.focus() })
 </script>
 
 <template>
-  <section class="t-landing">
+  <section class="t-landing t-ai-scroll" :class="{ 't-landing--compact': compact }">
     <div v-if="$slots.plan" class="t-landing__plan">
       <slot name="plan" />
     </div>
 
     <h1 class="t-landing__headline">
-      <slot name="headline">{{ greeting }}</slot>
+      <slot name="headline">{{ greetingText }}</slot>
     </h1>
 
     <div v-if="subline || $slots.subline" class="t-landing__subline">
@@ -129,8 +155,10 @@ function onChipClick(chip: LandingChip): void {
       class="t-landing__composer"
       :sticky="false"
       :rows="2"
+      :compact="compact"
       :max-width="maxWidth"
-      :placeholder="placeholder"
+      :placeholder="placeholderText"
+      :disabled="disabled"
       :composer-actions="composerActions"
       :enable-voice="enableVoice"
       :enable-attachments="enableAttachments"
@@ -140,7 +168,11 @@ function onChipClick(chip: LandingChip): void {
       :always-show-send="alwaysShowSend"
       @send="onSubmit"
       @action="emit('action', $event)"
+      @attachments-rejected="emit('attachments-rejected', $event)"
     >
+      <template v-if="$slots['composer-notice']" #notice>
+        <slot name="composer-notice" />
+      </template>
       <template v-if="$slots['composer-left']" #left>
         <slot name="composer-left" />
       </template>
@@ -180,6 +212,7 @@ function onChipClick(chip: LandingChip): void {
   padding: 40px 24px 80px;
   min-height: 0;
   overflow-y: auto;
+  position: relative;
 }
 
 .t-landing__plan {
@@ -247,6 +280,26 @@ function onChipClick(chip: LandingChip): void {
   color: var(--tnzi-ai-text-secondary, rgba(0, 0, 0, 0.55));
   font-size: 15px;
 }
+
+/* Compact (phone). At 36px a short greeting took two lines of a 390px
+   screen, and anything in the headline slot sized in em grew with it. The
+   generous outer padding centred the hero in a desktop window; on a phone it
+   only pushed the composer down. */
+.t-landing--compact {
+  padding: 16px 12px 24px;
+}
+.t-landing--compact .t-landing__plan { margin-bottom: 12px; }
+.t-landing--compact .t-landing__headline {
+  font-size: 26px;
+  line-height: 1.3;
+  margin-bottom: 16px;
+}
+.t-landing--compact .t-landing__subline {
+  font-size: 14px;
+  margin: -8px 0 16px;
+}
+.t-landing--compact .t-landing__chips { margin-top: 12px; }
+.t-landing--compact .t-landing__footer { margin-top: 16px; }
 
 .t-landing__footer {
   margin-top: 24px;

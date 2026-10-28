@@ -43,6 +43,20 @@ public class LibreOfficeDocumentConverterTests
         CreateConverter().CanConvert(fileName).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// 回显的进程输出截到上限：截断点落在代理对中间时整个字符一起舍掉，日志与异常消息里不留孤立的高代理项。
+    /// </summary>
+    [Fact]
+    public void CapturedOutput_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var limit = LibreOfficeDocumentConverter.CapturedOutputLimit;
+        // 第 limit 个码元是 emoji 的前半个
+        var output = new string('a', limit - 1) + "\U0001F600tail";
+
+        LibreOfficeDocumentConverter.TruncateCapturedOutput(output).ShouldBe(new string('a', limit - 1) + "...");
+        LibreOfficeDocumentConverter.TruncateCapturedOutput("  ").ShouldBe(string.Empty);
+    }
+
     [Fact]
     public async Task ConvertToPdfAsync_ConfiguredPathDoesNotExist_ThrowsWithConfigurationGuidance()
     {
@@ -85,6 +99,45 @@ public class LibreOfficeDocumentConverterTests
 
         await Should.ThrowAsync<DocumentConversionException>(
             () => converter.ConvertToPdfAsync([], "contract.rtf"));
+    }
+
+    /// <summary>
+    /// 排队等闸门有上界：等满一次转换的超时仍轮不到，就以可重试的转换失败返回，而不是无限期挂着。
+    /// </summary>
+    /// <remarks>
+    /// 闸门是进程级单槽，每一次 Office 预览都要过它。一份慢文档或刻意构造的文档能占满整个超时，
+    /// 其后的预览全排在它后面；此前排队这一步不设上界（调用方又多半不传取消令牌），
+    /// 用户早就离开页面的请求还挂在队里，轮到时再完整跑一遍 soffice。
+    /// 这里先把闸门占住，配置路径指向一个存在的文件（闸门之后才会执行它，本用例走不到那里）。
+    /// </remarks>
+    [Fact]
+    public async Task ConvertToPdfAsync_QueueStaysBusyPastTheTimeout_FailsRetryablyInsteadOfWaitingForever()
+    {
+        var existingFile = typeof(LibreOfficeDocumentConverterTests).Assembly.Location;
+        var converter = CreateConverter(options =>
+        {
+            options.LibreOfficePath = existingFile;
+            options.ConversionTimeoutSeconds = 1;
+        });
+
+        await LibreOfficeDocumentConverter.ConversionGate.WaitAsync();
+        try
+        {
+            // 兜底：若排队不设上界，30 秒后以取消收场（断言失败），而不是让整个测试进程挂住。
+            using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var exception = await Should.ThrowAsync<DocumentConversionException>(
+                () => converter.ConvertToPdfAsync(RtfDocument(), "contract.rtf", safety.Token));
+
+            exception.IsRetryable.ShouldBeTrue();
+            exception.Message.ShouldContain("busy");
+            safety.IsCancellationRequested.ShouldBeFalse();
+        }
+        finally
+        {
+            LibreOfficeDocumentConverter.ConversionGate.Release();
+            LibreOfficeLocator.ResetCache();
+        }
     }
 
     [Fact]

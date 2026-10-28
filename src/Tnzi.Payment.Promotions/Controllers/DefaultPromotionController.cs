@@ -11,12 +11,22 @@ public class DefaultPromotionController : ApiControllerBase
 {
     private readonly IPromotionService _promotionService;
     private readonly ICouponWalletService _couponWalletService;
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptions;
 
-    public DefaultPromotionController(IPromotionService promotionService, ICouponWalletService couponWalletService)
+    public DefaultPromotionController(IPromotionService promotionService, ICouponWalletService couponWalletService, IOptionsMonitor<PaymentOptions> paymentOptions)
     {
         _promotionService = Check.NotNull(promotionService);
         _couponWalletService = Check.NotNull(couponWalletService);
+        _paymentOptions = Check.NotNull(paymentOptions);
     }
+
+    /// <summary>
+    /// 试算请求不带币种时按哪种币种校验：本部署的 <see cref="PaymentOptions.DefaultCurrency"/>，
+    /// 与不带币种的订单、不带币种建的促销是同一个默认值。写死 USD 会让配了别的币种的商户在试算时
+    /// 把一张结账能用的券判成币种不符。
+    /// </summary>
+    protected string ResolveCurrency(string? requested) =>
+        string.IsNullOrWhiteSpace(requested) ? _paymentOptions.CurrentValue.DefaultCurrency : requested;
 
     protected IPromotionService PromotionService => _promotionService;
 
@@ -38,7 +48,7 @@ public class DefaultPromotionController : ApiControllerBase
             CouponCode = request.CouponCode,
             UserId = userId,
             OrderAmount = request.OrderAmount,
-            Currency = request.Currency ?? PaymentConstants.DefaultCurrency,
+            Currency = ResolveCurrency(request.Currency),
             ProductType = request.ProductType,
             ScopeId = request.ProductId
         });
@@ -86,7 +96,7 @@ public class DefaultPromotionController : ApiControllerBase
             CouponCode = request.CouponCode,
             UserId = userId,
             OrderAmount = request.OrderAmount,
-            Currency = request.Currency ?? PaymentConstants.DefaultCurrency,
+            Currency = ResolveCurrency(request.Currency),
             ProductType = request.ProductType,
             ScopeId = request.ProductId
         });

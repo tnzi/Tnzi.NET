@@ -19,6 +19,21 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
         + "Load the Tnzi.Payment.Promotions module ([DependsOn(typeof(PaymentPromotionsModule))]) "
         + "or register your own IPromotionAnalyticsProvider.";
 
+    /// <summary>
+    /// 「钱收到过」的支付状态：成功，以及成功之后被部分 / 全额退款的。
+    /// </summary>
+    /// <remarks>
+    /// ★ 收入按毛额计，退款单独汇总、单独扣一次。退款成功会把支付回写成 <c>PartialRefunded</c> / <c>Refunded</c>，
+    /// 只认 <c>Succeeded</c> 的话这笔支付整笔从收入里消失，而它的退款额照样被减：100 元退 10 元在净收入里记成 −10，
+    /// 与按行「实收 − 退款」的对账导出对不上。
+    /// </remarks>
+    private static readonly PaymentStatus[] CollectedStatuses =
+    [
+        PaymentStatus.Succeeded,
+        PaymentStatus.PartialRefunded,
+        PaymentStatus.Refunded
+    ];
+
     private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IRepository<Refund, Guid> _refundRepository;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
@@ -64,11 +79,26 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             .Where(p => p.CreationTime >= startTime && p.CreationTime <= endTime);
 
         var totalTransactions = await paymentQuery.CountAsync(cancellationToken);
-        var successfulTransactions = await paymentQuery.CountAsync(p => p.Status == PaymentStatus.Succeeded, cancellationToken);
+        var successfulTransactions = await paymentQuery.CountAsync(p => CollectedStatuses.Contains(p.Status), cancellationToken);
         var failedTransactions = await paymentQuery.CountAsync(p => p.Status == PaymentStatus.Failed, cancellationToken);
         var totalRevenue = await paymentQuery
-            .Where(p => p.Status == PaymentStatus.Succeeded)
+            .Where(p => CollectedStatuses.Contains(p.Status))
             .SumAsync(p => (decimal?)p.PaidAmount, cancellationToken) ?? 0;
+
+        // 金额的币种：窗口内收款都是同一个币种时就是它，一笔都没有时是部署的默认币种，混了多个币种时为 null ——
+        // 这时上面的总额是不同币种直接相加的数，给它配上任何一个货币符号都是在说谎
+        var currencies = await paymentQuery
+            .Where(p => CollectedStatuses.Contains(p.Status))
+            .Select(p => p.Currency)
+            .Distinct()
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        var currency = currencies.Count switch
+        {
+            0 => PaymentOptions.DefaultCurrency,
+            1 => currencies[0],
+            _ => null
+        };
 
         // 数据库级聚合：退款统计
         var refundQuery = _refundRepository.AsNoTracking()
@@ -88,7 +118,7 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
 
         // 渠道分布（数据库级 GroupBy）
         var channelDistribution = await paymentQuery
-            .Where(p => p.Status == PaymentStatus.Succeeded)
+            .Where(p => CollectedStatuses.Contains(p.Status))
             .GroupBy(p => p.ChannelCode)
             .Select(g => new Dtos.ChannelStatisticsDto
             {
@@ -112,6 +142,7 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             StartTime = startTime,
             EndTime = endTime,
             TotalRevenue = totalRevenue,
+            Currency = currency,
             TotalTransactions = totalTransactions,
             SuccessfulTransactions = successfulTransactions,
             FailedTransactions = failedTransactions,
@@ -132,7 +163,7 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
 
         // 数据库级 GroupBy 按天聚合（每日粒度）
         var dailyPayments = await _paymentRepository.AsNoTracking()
-            .Where(p => p.CreationTime >= startTime && p.CreationTime <= endTime && p.Status == PaymentStatus.Succeeded)
+            .Where(p => p.CreationTime >= startTime && p.CreationTime <= endTime && CollectedStatuses.Contains(p.Status))
             .GroupBy(p => p.CreationTime.Date)
             .Select(g => new
             {
@@ -152,19 +183,22 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
             })
             .ToListAsync(cancellationToken);
 
+        var paymentLookup = dailyPayments.ToDictionary(d => d.Date);
         var refundLookup = dailyRefunds.ToDictionary(r => r.Date, r => r.RefundAmount);
 
-        // 构建每日数据点
-        var dailyPoints = dailyPayments.Select(d =>
+        // 构建每日数据点：日期取支付日与退款日的并集。只按支付日构建时，落在当天没有收入的那一天的退款
+        // 连同它的金额一起从趋势（以及由它汇总出的按周 / 按月数据）里消失，净收入被高报。
+        var dailyPoints = paymentLookup.Keys.Union(refundLookup.Keys).Select(date =>
         {
-            var refundAmount = refundLookup.GetValueOrDefault(d.Date);
+            var revenue = paymentLookup.TryGetValue(date, out var day) ? day.Revenue : 0m;
+            var refundAmount = refundLookup.GetValueOrDefault(date);
             return new RevenueTrendPointDto
             {
-                Date = d.Date,
-                Revenue = d.Revenue,
-                TransactionCount = d.TransactionCount,
+                Date = date,
+                Revenue = revenue,
+                TransactionCount = day?.TransactionCount ?? 0,
                 RefundAmount = refundAmount,
-                NetRevenue = d.Revenue - refundAmount
+                NetRevenue = revenue - refundAmount
             };
         }).ToList();
 
@@ -216,7 +250,9 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
 
         if (!string.IsNullOrWhiteSpace(query.ChannelCode))
         {
-            paymentQuery = paymentQuery.Where(p => p.ChannelCode == query.ChannelCode);
+            // 渠道代码不区分大小写（渠道查找就不区分）：运营按 "stripe" 筛选不能导出一份空的对账单
+            var channelCode = query.ChannelCode.ToLowerInvariant();
+            paymentQuery = paymentQuery.Where(p => p.ChannelCode.ToLower() == channelCode);
         }
 
         if (query.Status.HasValue)
@@ -341,69 +377,87 @@ public class PaymentStatisticsService : ApplicationService, IPaymentStatisticsSe
     /// <inheritdoc />
     public async Task<Result<RefundAnalyticsDto>> GetRefundAnalyticsAsync(DateTime? startDate = null, DateTime? endDate = null, CancellationToken cancellationToken = default)
     {
+        // ★ 分组与求和一律在数据库里做：此前把窗口内（不传日期时是整张表）的退款实体全部读进内存再分组，
+        // 外加一次按 PaymentId 列表 Contains 的支付投影。现在读回来的只有各分组的汇总行。
         var query = _refundRepository.AsNoTracking()
             .Where(r => (!startDate.HasValue || r.CreationTime >= startDate.Value)
                 && (!endDate.HasValue || r.CreationTime <= endDate.Value));
 
-        var refunds = await query.ToListAsync(cancellationToken);
+        var byStatus = await query
+            .GroupBy(r => r.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count(), Amount = g.Sum(r => r.RefundAmount) })
+            .ToListAsync(cancellationToken);
 
-        if (refunds.Count == 0)
+        var totalCount = byStatus.Sum(s => s.Count);
+        if (totalCount == 0)
         {
             return Ok(new RefundAnalyticsDto());
         }
 
-        var totalCount = refunds.Count;
-        var totalAmount = refunds.Sum(r => r.RefundAmount);
+        var totalAmount = byStatus.Sum(s => s.Amount);
 
-        // 平均处理时间（仅已完成的退款，CreationTime → CompletedTime）
-        var completedRefunds = refunds.Where(r => r.CompletedTime.HasValue).ToList();
-        var avgProcessingHours = completedRefunds.Count > 0
-            ? completedRefunds.Average(r => (r.CompletedTime!.Value - r.CreationTime).TotalHours)
-            : 0;
+        // 平均处理时间（仅已完成的退款，CreationTime → CompletedTime）。时长相减没有跨数据库通用的 SQL 写法，
+        // 只流式读这两列边读边累加，不把行攒进内存。
+        var completedCount = 0;
+        var completedHours = 0d;
+        var completedSpans = query
+            .Where(r => r.CompletedTime != null)
+            .Select(r => new { r.CreationTime, CompletedTime = r.CompletedTime!.Value })
+            .AsAsyncEnumerable()
+            .WithCancellation(cancellationToken);
+        await foreach (var span in completedSpans)
+        {
+            completedHours += (span.CompletedTime - span.CreationTime).TotalHours;
+            completedCount++;
+        }
+        var avgProcessingHours = completedCount > 0 ? completedHours / completedCount : 0;
 
-        // 退款原因分布
-        var reasonBreakdown = refunds
+        // 退款原因分布：库里按原文分组，空白原因在内存里并成一组（分组行数 = 不同原因的个数）
+        var byReason = await query
+            .GroupBy(r => r.Reason)
+            .Select(g => new { Reason = g.Key, Count = g.Count(), Amount = g.Sum(r => r.RefundAmount) })
+            .ToListAsync(cancellationToken);
+
+        var reasonBreakdown = byReason
             .GroupBy(r => string.IsNullOrWhiteSpace(r.Reason) ? "Unspecified" : r.Reason)
             .Select(g => new RefundReasonBreakdownDto
             {
                 Reason = g.Key,
-                Count = g.Count(),
-                Amount = g.Sum(r => r.RefundAmount),
-                Percentage = Math.Round((decimal)g.Count() / totalCount * 100, 2)
+                Count = g.Sum(r => r.Count),
+                Amount = g.Sum(r => r.Amount),
+                Percentage = Math.Round((decimal)g.Sum(r => r.Count) / totalCount * 100, 2)
             })
             .OrderByDescending(r => r.Count)
             .ToList();
 
-        // 退款渠道分布（需要关联 Payment 的 ChannelCode）
-        // 批量加载关联支付信息
-        var paymentIds = refunds.Select(r => r.PaymentId).Distinct().ToList();
-        var payments = await _paymentRepository.AsNoTracking()
-            .Where(p => paymentIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.ChannelCode })
+        // 退款渠道分布：左连接支付取渠道，支付查不到（已删除 / 不在当前租户）的记为 Unknown
+        var byChannel = await (
+                from r in query
+                join p in _paymentRepository.AsNoTracking() on r.PaymentId equals p.Id into matched
+                from p in matched.DefaultIfEmpty()
+                select new { ChannelCode = p != null ? p.ChannelCode : null, r.RefundAmount })
+            .GroupBy(x => x.ChannelCode)
+            .Select(g => new { ChannelCode = g.Key, Count = g.Count(), Amount = g.Sum(x => x.RefundAmount) })
             .ToListAsync(cancellationToken);
 
-        var paymentChannelLookup = payments.ToDictionary(p => p.Id, p => p.ChannelCode);
-
-        var channelBreakdown = refunds
-            .GroupBy(r => paymentChannelLookup.GetValueOrDefault(r.PaymentId, "Unknown"))
-            .Select(g => new RefundChannelBreakdownDto
+        var channelBreakdown = byChannel
+            .Select(c => new RefundChannelBreakdownDto
             {
-                ChannelCode = g.Key,
-                Count = g.Count(),
-                Amount = g.Sum(r => r.RefundAmount),
-                Percentage = Math.Round((decimal)g.Count() / totalCount * 100, 2)
+                ChannelCode = c.ChannelCode ?? "Unknown",
+                Count = c.Count,
+                Amount = c.Amount,
+                Percentage = Math.Round((decimal)c.Count / totalCount * 100, 2)
             })
             .OrderByDescending(c => c.Count)
             .ToList();
 
         // 退款状态分布
-        var statusBreakdown = refunds
-            .GroupBy(r => r.Status)
-            .Select(g => new RefundStatusBreakdownDto
+        var statusBreakdown = byStatus
+            .Select(s => new RefundStatusBreakdownDto
             {
-                Status = g.Key.ToString(),
-                Count = g.Count(),
-                Percentage = Math.Round((decimal)g.Count() / totalCount * 100, 2)
+                Status = s.Status.ToString(),
+                Count = s.Count,
+                Percentage = Math.Round((decimal)s.Count / totalCount * 100, 2)
             })
             .OrderByDescending(s => s.Count)
             .ToList();

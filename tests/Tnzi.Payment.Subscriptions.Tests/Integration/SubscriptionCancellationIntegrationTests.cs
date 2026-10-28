@@ -125,4 +125,27 @@ public class SubscriptionCancellationIntegrationTests : SubscriptionsIntegration
 
         (await ReloadAsync<Subscription>(subscription.Id))!.Status.ShouldBe(SubscriptionStatus.Cancelled);
     }
+
+    [Fact]
+    public async Task CancellingASubscriptionThatDoesNotExist_Is404()
+    {
+        var result = await CancelAsync(Guid.NewGuid(), immediate: true);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
+    }
+
+    /// <summary>已取消的订阅再取消一次是 400，且抢到的锁要放回去，不能让一次被拒的请求把它锁上一个锁窗口。</summary>
+    [Fact]
+    public async Task CancellingAnAlreadyCancelledSubscription_IsRefusedAndLeavesNoLock()
+    {
+        var subscription = await SeedSubscriptionAsync();
+        (await CancelAsync(subscription.Id, immediate: true)).Succeeded.ShouldBeTrue();
+
+        var again = await CancelAsync(subscription.Id, immediate: true);
+
+        again.Succeeded.ShouldBeFalse();
+        again.Message.ShouldBe(ErrorCodes.SubscriptionAlreadyCancelledOrExpired);
+        (await ReloadAsync<Subscription>(subscription.Id))!.BillingLockedUntil.ShouldBeNull();
+    }
 }

@@ -37,7 +37,7 @@ import { editAction, deleteAction, type RowAction } from '../../headless/row-act
 import { createSystemBridge } from '../../services/bridges/system-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer, { type FieldRenderer } from '../_shared/form-schema'
-import { parameterColumns, parameterFormSchema } from './parameter-config'
+import { parameterColumns, parameterFieldRenderers, parameterFormSchema, toParameterWrite } from './parameter-config'
 import { makePageTranslator } from '../_shared/translate'
 import type { SettingDto } from '@tnzi/core/services/system'
 
@@ -51,8 +51,8 @@ const crud = useCrudPage<SettingDto, string>({
   columns: parameterColumns,
   rowKey: (r) => r.id,
   fetchData: (query) => bridge.settings.fetch(query),
-  createData: (data) => bridge.settings.create(data as never),
-  updateData: (id, data) => bridge.settings.update(id, data as never),
+  createData: (data) => bridge.settings.create(toParameterWrite(data) as never),
+  updateData: (id, data) => bridge.settings.update(id, toParameterWrite(data) as never),
   deleteData: (ids) => bridge.settings.delete(ids),
 })
 
@@ -62,6 +62,7 @@ const rowActions: RowAction<SettingDto>[] = [editAction(crud), deleteAction(crud
 // parameter-config's typeFn swaps the key field to this locked renderer in edit
 // mode so the value is still visible but not editable.
 const fieldRenderers: Record<string, FieldRenderer> = {
+  ...parameterFieldRenderers,
   'param-key-locked': (ctx) => h(NInput, { value: (ctx.value as string) ?? '', disabled: true }),
 }
 

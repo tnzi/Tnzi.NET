@@ -60,7 +60,7 @@
           mobile="scroll"
           :pagination="false"
           :bordered="false"
-          :empty-text="t('queue.empty')"
+          :empty-text="queueError || t('queue.empty')"
           @update:checked-row-keys="onCheckedChange"
         />
       </div>
@@ -287,10 +287,15 @@ const crud = useCrudPage<BankCheckRow>({
 const queueAccountId = ref<string | null>(null)
 const queueRows = ref<CheckQueueItemDto[]>([])
 const queueLoading = ref(false)
+/** Why the queue could not be read; shown where the rows would be (empty = it was read). */
+const queueError = ref('')
 const checkedQueueKeys = ref<string[]>([])
 
 watch(queueAccountId, () => {
+  // Another account: its queue is not the previous one's, so nothing of that
+  // stays on screen (or tickable) while it loads.
   checkedQueueKeys.value = []
+  queueRows.value = []
   void loadQueue()
 })
 
@@ -306,18 +311,33 @@ const checkQueueKpis = computed(() => ({
   currency: queueRows.value[0]?.currency,
 }))
 
+// Last-wins: picking bank account A then B must not let A's late answer fill
+// B's queue. Printing sends only the ticked payment ids, so A's cheques would
+// print while B's stock is in the printer.
+let queueSeq = 0
+
 async function loadQueue() {
+  const mine = ++queueSeq
+  queueError.value = ''
   if (!queueAccountId.value) {
     queueRows.value = []
+    queueLoading.value = false
     return
   }
   queueLoading.value = true
   try {
-    queueRows.value = await bridge.checks.queue(queueAccountId.value)
+    const rows = await bridge.checks.queue(queueAccountId.value)
+    if (mine === queueSeq) queueRows.value = rows
   } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
+    if (mine !== queueSeq) return
+    // The rows on screen belong to the previous read (possibly another bank
+    // account): drop them rather than let them pass for this account's queue.
+    queueRows.value = []
+    checkedQueueKeys.value = []
+    queueError.value = error instanceof Error ? error.message : String(error)
+    message.error(queueError.value)
   } finally {
-    queueLoading.value = false
+    if (mine === queueSeq) queueLoading.value = false
   }
 }
 

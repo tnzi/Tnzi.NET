@@ -1,6 +1,8 @@
 <template>
   <div class="fin-apply">
-    <div v-if="openDocs.length === 0" class="fin-apply__empty">{{ td('apply.noOpenDocs') }}</div>
+    <!-- A failed read is not "nothing is owed": show why there is no list. -->
+    <div v-if="loadError" class="fin-apply__empty fin-apply__error" role="alert">{{ loadError }}</div>
+    <div v-else-if="openDocs.length === 0" class="fin-apply__empty">{{ td('apply.noOpenDocs') }}</div>
     <template v-else>
       <div class="fin-apply__row fin-apply__row--head">
         <span>{{ td('apply.document') }}</span>
@@ -31,7 +33,7 @@
         </span>
         <div class="fin-apply__actions">
           <NButton size="small" @click="emit('cancel')">{{ td('editor.cancel') }}</NButton>
-          <NButton size="small" type="primary" :loading="applying" :disabled="allocatedTotal <= 0 || !source || allocatedTotal > source.remaining" @click="submitApply">
+          <NButton size="small" type="primary" :loading="applying" :disabled="allocatedTotal <= 0 || !source || allocatedTotal > availableToApply" @click="submitApply">
             {{ td('apply.submit') }}
           </NButton>
         </div>
@@ -48,7 +50,7 @@ import { NButton, NInputNumber } from 'naive-ui'
 import { makePageTranslator } from '../../_shared/translate'
 import { useSafeMessage } from '../../_shared/safe-message'
 import type { FinanceBridge, OpenDocumentDto, SettlementDocType, FinancePartyType } from '../../../services/bridges/finance-bridge'
-import { fmtAmount, fmtDate } from '../money'
+import { fmtAmount, fmtDate, roundMoney } from '../money'
 
 /** The source document (payment or credit memo) being allocated across open targets. */
 export interface SettlementApplySource {
@@ -73,6 +75,8 @@ const td = makePageTranslator('finance.docs')
 const message = useSafeMessage()
 
 const openDocs = ref<OpenDocumentDto[]>([])
+/** Why the open documents could not be read (null = they were read). */
+const loadError = ref<string | null>(null)
 const allocations = reactive<Record<string, number | null>>({})
 const applying = ref(false)
 
@@ -85,26 +89,36 @@ watch(
   () => props.source?.id,
   async (id) => {
     openDocs.value = []
+    loadError.value = null
     Object.keys(allocations).forEach((k) => delete allocations[k])
     if (!id || !props.source) return
     try {
-      openDocs.value = await props.bridge.settlements.openDocuments(props.source.partyType, props.source.partyId)
+      const docs = await props.bridge.settlements.openDocuments(props.source.partyType, props.source.partyId)
+      // The source can change while the read is out; a late answer belongs to the previous one.
+      if (props.source?.id === id) openDocs.value = docs
     } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error))
+      if (props.source?.id !== id) return
+      loadError.value = error instanceof Error ? error.message : String(error)
+      message.error(loadError.value)
     }
   },
   { immediate: true },
 )
 
+// Derived amounts are rounded to cents before they are shown, compared or sent:
+// an unrounded float sum (0.1 + 0.2 = 0.30000000000000004) would disable the
+// submit for an allocation that exactly uses up the remaining amount.
 const allocatedTotal = computed(() =>
-  Object.values(allocations).reduce<number>((sum, v) => sum + (v ?? 0), 0))
-const applyRemaining = computed(() => (props.source?.remaining ?? 0) - allocatedTotal.value)
+  roundMoney(Object.values(allocations).reduce<number>((sum, v) => sum + roundMoney(v), 0)))
+const availableToApply = computed(() => roundMoney(props.source?.remaining))
+const applyRemaining = computed(() => roundMoney(availableToApply.value - allocatedTotal.value))
 
 async function submitApply() {
   if (!props.source) return
   const targets = openDocs.value
-    .filter((d) => (allocations[d.docId] ?? 0) > 0 && sameCurrency(d))
-    .map((d) => ({ targetType: d.docType, targetId: d.docId, amount: allocations[d.docId]! }))
+    .filter((d) => sameCurrency(d))
+    .map((d) => ({ targetType: d.docType, targetId: d.docId, amount: roundMoney(allocations[d.docId]) }))
+    .filter((target) => target.amount > 0)
   if (targets.length === 0) return
 
   applying.value = true
@@ -136,6 +150,9 @@ async function submitApply() {
   font-size: 13px;
   padding: 24px 0;
   text-align: center;
+}
+.fin-apply__error {
+  color: var(--tnzi-error, #d03050);
 }
 
 .fin-apply__row {

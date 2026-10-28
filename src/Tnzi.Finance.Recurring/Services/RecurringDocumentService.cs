@@ -14,6 +14,9 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
     private readonly IReadOnlyRepository<RecurringRun, Guid> _runRepository;
     private readonly IReadOnlyRepository<Customer, Guid> _customerRepository;
     private readonly IReadOnlyRepository<Vendor, Guid> _vendorRepository;
+    private readonly IReadOnlyRepository<Item, Guid> _itemRepository;
+    private readonly IReadOnlyRepository<Account, Guid> _accountRepository;
+    private readonly IReadOnlyRepository<TaxCode, Guid> _taxCodeRepository;
     private readonly IRecurrenceSchedule _schedule;
     private readonly RecurringOptions _options;
 
@@ -24,6 +27,9 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         IReadOnlyRepository<RecurringRun, Guid> runRepository,
         IReadOnlyRepository<Customer, Guid> customerRepository,
         IReadOnlyRepository<Vendor, Guid> vendorRepository,
+        IReadOnlyRepository<Item, Guid> itemRepository,
+        IReadOnlyRepository<Account, Guid> accountRepository,
+        IReadOnlyRepository<TaxCode, Guid> taxCodeRepository,
         IRecurrenceSchedule schedule,
         IOptionsSnapshot<RecurringOptions> options)
         : base(serviceProvider)
@@ -33,6 +39,9 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         _runRepository = Check.NotNull(runRepository);
         _customerRepository = Check.NotNull(customerRepository);
         _vendorRepository = Check.NotNull(vendorRepository);
+        _itemRepository = Check.NotNull(itemRepository);
+        _accountRepository = Check.NotNull(accountRepository);
+        _taxCodeRepository = Check.NotNull(taxCodeRepository);
         _schedule = Check.NotNull(schedule);
         _options = Check.NotNull(options).Value;
     }
@@ -96,6 +105,10 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
     {
         Check.NotNull(input);
 
+        // 未定义的种类会被当成「供应商侧」单据一路走下去，到生成时才以「不支持的种类」失败。
+        if (!Enum.IsDefined(input.Kind))
+            return Fail<RecurringDocumentDto>("Kind must be Invoice, Bill or Expense.", 400);
+
         var validation = ValidateSchedule(input.Frequency, input.Interval, input.AnchorDay, input.StartDate, input.EndDate, input.MaxOccurrences);
         if (validation != null)
             return Fail<RecurringDocumentDto>(validation, 400);
@@ -106,6 +119,11 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
 
         if (input.Lines == null || input.Lines.Count == 0)
             return Fail<RecurringDocumentDto>("A recurring template needs at least one line.", 400);
+
+        var contentCheck = await ValidateContentAsync(
+            input.Kind, input.Name, input.Currency, input.PaymentMethod, input.Memo, input.DueDays, input.Lines, cancellationToken);
+        if (contentCheck != null)
+            return Fail<RecurringDocumentDto>(contentCheck, 400);
 
         var entity = new RecurringDocument
         {
@@ -126,16 +144,21 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
             DueDays = input.DueDays,
             AutoPost = input.AutoPost,
         };
-        entity.NextRunDate = _schedule.First(entity.StartDate, entity.Frequency, entity.AnchorDay);
+        entity.NextRunDate = _schedule.First(entity.StartDate, entity.Frequency, RecurrenceAnchor.Effective(entity));
 
         if (string.IsNullOrWhiteSpace(entity.Name))
             return Fail<RecurringDocumentDto>("Name is required.", 400);
+
+        // ★ 头与行经导航属性一次插入（同一次 SaveChanges、同一个事务）：先提交头再写行的话，
+        // 行写入失败会留下一条 Active 而零行的模板，此后每一期都以「没有行」失败。
+        // 行的外键由 EF 沿导航属性在提交时回填。
+        foreach (var line in BuildLines(entity.Id, input.Lines))
+            entity.Lines.Add(line);
 
         await _repository.InsertAsync(entity, cancellationToken);
         // ★写完先 flush 再回读：全局 UoW 下仓储调用不会立刻提交，而 GetAsync 走
         // AsNoTracking() 直查数据库 —— 不 flush 就会拿到"刚建出来的东西不存在"。
         await _repository.SaveChangesAsync(cancellationToken);
-        await ReplaceLinesAsync(entity.Id, input.Lines, cancellationToken);
 
         return await GetAsync(entity.Id, cancellationToken);
     }
@@ -172,6 +195,11 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (input.Lines == null || input.Lines.Count == 0)
             return Fail<RecurringDocumentDto>("A recurring template needs at least one line.", 400);
 
+        var contentCheck = await ValidateContentAsync(
+            entity.Kind, input.Name, input.Currency, input.PaymentMethod, input.Memo, input.DueDays, input.Lines, cancellationToken);
+        if (contentCheck != null)
+            return Fail<RecurringDocumentDto>(contentCheck, 400);
+
         var scheduleChanged = entity.Frequency != input.Frequency
             || entity.Interval != Math.Max(1, input.Interval)
             || entity.AnchorDay != input.AnchorDay
@@ -197,21 +225,26 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (scheduleChanged)
         {
             entity.NextRunDate = entity.LastRunDate.HasValue
-                ? _schedule.Next(entity.LastRunDate.Value, entity.Frequency, entity.Interval, entity.AnchorDay)
-                : _schedule.First(entity.StartDate, entity.Frequency, entity.AnchorDay);
+                ? _schedule.Next(entity.LastRunDate.Value, entity.Frequency, entity.Interval, RecurrenceAnchor.Effective(entity))
+                : _schedule.First(entity.StartDate, entity.Frequency, RecurrenceAnchor.Effective(entity));
         }
 
+        // ★ 头与行在同一个工作单元里：行是硬删重建，分开提交时新行写入失败，
+        // 旧行已经删掉并提交，模板 Active 而零行，原来的价格也没了。
         try
         {
-            await _repository.UpdateAsync(entity, cancellationToken);
-            await _repository.SaveChangesAsync(cancellationToken);
+            await ExecuteInUnitOfWorkAsync(async ct =>
+            {
+                await _repository.UpdateAsync(entity, ct);
+                await _repository.SaveChangesAsync(ct);
+                await ReplaceLinesAsync(entity.Id, input.Lines, ct);
+            }, cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
             return Fail<RecurringDocumentDto>("This template was changed by someone else. Reload and try again.", 409);
         }
 
-        await ReplaceLinesAsync(entity.Id, input.Lines, cancellationToken);
         return await GetAsync(entity.Id, cancellationToken);
     }
 
@@ -221,16 +254,27 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (entity == null)
             return Fail("Recurring template not found.", 404);
 
-        var hasRuns = await _runRepository.AnyAsync(r => r.RecurringDocumentId == id, cancellationToken);
-        if (hasRuns)
+        // 只数真的生成过单据的期次：失败的那一期随本期事务回滚、跳过的那一期本就没有单据，
+        // 它们不构成「来历无从查起」的理由。
+        var hasGenerated = await _runRepository.AnyAsync(
+            r => r.RecurringDocumentId == id && r.Status == RecurringRunStatus.Generated, cancellationToken);
+        if (hasGenerated)
         {
             return Fail(
                 "This template has already generated documents; end it instead of deleting so their origin stays traceable.",
                 409);
         }
 
-        await _repository.DeleteAsync(entity, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _repository.DeleteAsync(entity, cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 软删是一次带并发戳的 UPDATE：读完「还没生成过单据」之后，扫描可能已经推进了它。
+            return Fail("This template was changed by someone else. Reload and try again.", 409);
+        }
         return Ok();
     }
 
@@ -251,7 +295,7 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
 
         return Ok(new RecurrencePreviewDto
         {
-            Dates = Project(entity.NextRunDate, entity.Frequency, entity.Interval, entity.AnchorDay,
+            Dates = Project(entity.NextRunDate, entity.Frequency, entity.Interval, RecurrenceAnchor.Effective(entity),
                 entity.EndDate, RemainingOccurrences(entity), count),
         });
     }
@@ -264,10 +308,12 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (validation != null)
             return Fail<RecurrencePreviewDto>(validation, 400);
 
-        var first = _schedule.First(input.StartDate.ToUtcDate(), input.Frequency, input.AnchorDay);
+        var startDate = input.StartDate.ToUtcDate();
+        var anchorDay = RecurrenceAnchor.Effective(input.Frequency, input.AnchorDay, startDate);
+        var first = _schedule.First(startDate, input.Frequency, anchorDay);
         return Ok(new RecurrencePreviewDto
         {
-            Dates = Project(first, input.Frequency, Math.Max(1, input.Interval), input.AnchorDay,
+            Dates = Project(first, input.Frequency, Math.Max(1, input.Interval), anchorDay,
                 input.EndDate?.ToUtcDate(), input.MaxOccurrences, count),
         });
     }
@@ -330,13 +376,22 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
             var next = entity.NextRunDate;
             var guard = 0;
             while (next < today && guard++ < MaxScheduleProjection)
-                next = _schedule.Next(next, entity.Frequency, entity.Interval, entity.AnchorDay);
+                next = _schedule.Next(next, entity.Frequency, entity.Interval, RecurrenceAnchor.Effective(entity));
             entity.NextRunDate = next;
         }
 
         entity.Status = target;
-        await _repository.UpdateAsync(entity, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _repository.UpdateAsync(entity, cancellationToken);
+            await _repository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 后台扫描的 AdvanceAsync 或另一个管理员的编辑可能在读与写之间改了同一个模板；
+            // 并发戳挡住这次过期的写，但那是 409 不是 500（同 UpdateAsync）。
+            return Fail<RecurringDocumentDto>("This template was changed by someone else. Reload and try again.", 409);
+        }
         return await GetAsync(id, cancellationToken);
     }
 
@@ -348,8 +403,14 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
         if (existing.Count > 0)
             await _lineRepository.DeleteManyAsync(existing, cancellationToken);
 
+        await _lineRepository.InsertManyAsync(BuildLines(documentId, lines), cancellationToken);
+        await _lineRepository.SaveChangesAsync(cancellationToken);
+    }
+
+    private static List<RecurringLine> BuildLines(Guid documentId, List<CreateRecurringLineDto> lines)
+    {
         var index = 1;
-        var fresh = lines.Select(l => new RecurringLine
+        return [.. lines.Select(l => new RecurringLine
         {
             RecurringDocumentId = documentId,
             LineNumber = index++,
@@ -359,10 +420,74 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
             Quantity = l.Quantity,
             UnitPrice = l.UnitPrice,
             TaxCodeId = l.TaxCodeId,
-        }).ToList();
+        })];
+    }
 
-        await _lineRepository.InsertManyAsync(fresh, cancellationToken);
-        await _lineRepository.SaveChangesAsync(cancellationToken);
+    /// <summary>
+    /// 保存时就能判定的内容错误：字段长度、到期天数、行的数量 / 单价 / 科目，以及行引用的目录项、科目、税码是否存在。
+    /// </summary>
+    /// <remarks>
+    /// ★ 这些错此前要等到期那一天才在生成时暴露：保存返回 200、预览一切正常，到期后每一期落一行 Failed，
+    /// 重试 <see cref="RecurringOptions.MaxFailedRetries"/> 次之后这一期不再尝试，单据从未开出，除非有人去翻生成记录。
+    /// 规则与生成目标（发票 / 账单 / 费用单）的草稿校验同一口径；生成时的同类检查仍保留，
+    /// 因为主数据在保存之后仍可能被停用。超长字段在 SQLite 上「保存成功」，在 SQL Server / PostgreSQL 上则是截断 500。
+    /// </remarks>
+    private async Task<string?> ValidateContentAsync(
+        RecurringDocKind kind, string? name, string? currency, string? paymentMethod, string? memo, int? dueDays,
+        List<CreateRecurringLineDto> lines, CancellationToken cancellationToken)
+    {
+        var tooLong = FirstTooLong(
+            (name?.Trim(), NameMaxLength, "name"),
+            (currency?.Trim(), CurrencyMaxLength, "currency"),
+            (paymentMethod?.Trim(), PaymentMethodMaxLength, "payment method"),
+            (memo, MemoMaxLength, "memo"));
+        if (tooLong != null)
+            return tooLong;
+        if (dueDays is < 0)
+            return "Due days cannot be negative.";
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            var number = i + 1;
+            if (line == null)
+                return $"Line {number} is empty.";
+            if (line.Description?.Length > LineDescriptionMaxLength)
+                return $"Line {number}: the description must be at most {LineDescriptionMaxLength} characters.";
+            if (line.Quantity <= 0)
+                return $"Line {number}: quantity must be greater than zero.";
+            if (line.UnitPrice < 0)
+                return $"Line {number}: unit price must not be negative.";
+            // 费用单按金额（数量 × 单价）落行，且要求金额为正、每行带费用科目
+            if (kind == RecurringDocKind.Expense && line.UnitPrice == 0)
+                return $"Line {number}: an expense line needs an amount greater than zero.";
+            if (kind == RecurringDocKind.Expense && line.AccountId is null)
+                return $"Line {number} has no expense account.";
+        }
+
+        var itemIds = lines.Where(l => l.ItemId.HasValue).Select(l => l.ItemId!.Value).Distinct().ToList();
+        if (itemIds.Count > 0 && await _itemRepository.CountAsync(i => itemIds.Contains(i.Id), cancellationToken) != itemIds.Count)
+            return "One or more catalog items on the lines do not exist.";
+
+        var accountIds = lines.Where(l => l.AccountId.HasValue).Select(l => l.AccountId!.Value).Distinct().ToList();
+        if (accountIds.Count > 0 && await _accountRepository.CountAsync(a => accountIds.Contains(a.Id), cancellationToken) != accountIds.Count)
+            return "One or more accounts on the lines do not exist.";
+
+        var taxCodeIds = lines.Where(l => l.TaxCodeId.HasValue).Select(l => l.TaxCodeId!.Value).Distinct().ToList();
+        if (taxCodeIds.Count > 0 && await _taxCodeRepository.CountAsync(t => taxCodeIds.Contains(t.Id), cancellationToken) != taxCodeIds.Count)
+            return "One or more tax codes on the lines do not exist.";
+
+        return null;
+    }
+
+    private static string? FirstTooLong(params (string? Value, int MaxLength, string Field)[] fields)
+    {
+        foreach (var (value, maxLength, field) in fields)
+        {
+            if (value != null && value.Length > maxLength)
+                return $"The {field} must be at most {maxLength} characters.";
+        }
+        return null;
     }
 
     private async Task<Result?> ValidatePartyAsync(RecurringDocKind kind, Guid partyId, Guid? paidFromAccountId, CancellationToken cancellationToken)
@@ -385,8 +510,12 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
     private static string? ValidateSchedule(
         RecurrenceFrequency frequency, int interval, int? anchorDay, DateTime startDate, DateTime? endDate, int? maxOccurrences)
     {
-        if (interval < 1)
-            return "Interval must be at least 1.";
+        if (!Enum.IsDefined(frequency))
+            return "Frequency must be Daily, Weekly, Monthly, Quarterly or Yearly.";
+        // ★ 上界不是品味：新建只调 First()（不用间隔），所以一个离谱的间隔能存进库，到期那一刻
+        // 排期越过 9999 年抛异常；再大一点，换算成月数的乘法溢出成负数，排期倒着走。
+        if (interval < 1 || interval > MaxInterval)
+            return $"Interval must be between 1 and {MaxInterval}.";
         if (startDate == default)
             return "Start date is required.";
         if (endDate.HasValue && endDate.Value.ToUtcDate() < startDate.ToUtcDate())
@@ -506,4 +635,22 @@ public class RecurringDocumentService : ApplicationService, IRecurringDocumentSe
     /// 那是消费方可替换的代码 —— 一个写错的实现不该让整个进程转不出来。
     /// </remarks>
     private const int MaxScheduleProjection = 120;
+
+    /// <summary>排期间隔的上界（每 1000 个周期一次：换算成月数的乘法不会溢出，正常的起始日也到不了日期上限）。</summary>
+    internal const int MaxInterval = 1000;
+
+    /// <summary><see cref="RecurringDocument.Name"/> 列宽</summary>
+    internal const int NameMaxLength = 200;
+
+    /// <summary><see cref="RecurringDocument.Currency"/> 列宽</summary>
+    internal const int CurrencyMaxLength = 8;
+
+    /// <summary><see cref="RecurringDocument.PaymentMethod"/> 列宽</summary>
+    internal const int PaymentMethodMaxLength = 32;
+
+    /// <summary><see cref="RecurringDocument.Memo"/> 列宽</summary>
+    internal const int MemoMaxLength = 500;
+
+    /// <summary><see cref="RecurringLine.Description"/> 列宽</summary>
+    internal const int LineDescriptionMaxLength = 500;
 }

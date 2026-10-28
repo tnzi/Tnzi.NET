@@ -48,7 +48,6 @@ public sealed class ChannelManagerReplyContextTests
     [InlineData("/status")]
     [InlineData("/help")]
     [InlineData("/models")]
-    [InlineData("/memory")]
     [InlineData("/unknown")]
     public async Task Command_Reply_CarriesInboundThreadTsAndTopicId(string command)
     {

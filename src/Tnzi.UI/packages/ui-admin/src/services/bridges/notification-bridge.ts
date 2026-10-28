@@ -18,6 +18,8 @@
  *   - optOuts       → address-keyed suppression list (read / hand-register /
  *                     revoke; no update - the (address, channel, category)
  *                     triple IS the row's identity).
+ *   - myPreferences → the SIGNED-IN user's own preferences (User Center),
+ *                     /notification/preferences; no admin permission involved.
  */
 import {
   useAdminNotificationApi,
@@ -26,6 +28,7 @@ import {
   useAdminNotificationTemplateApi,
   useUnsubscribeApi,
   useAdminPushDeviceApi,
+  useNotificationPreferenceApi,
   NotificationType,
   type NotificationInfo,
   type QueryNotificationRequest,
@@ -36,10 +39,11 @@ import {
   type OptOutQueryDto,
   type CreateOptOutDto,
   type DeliveryReportDto,
-  type DevicePlatform,
+  DevicePlatform,
   type PushDeviceDto,
   type PushDeviceQueryDto,
   type UnsubscribePreviewDto,
+  type NotificationPreviewDto,
 } from '@tnzi/core/services/notification'
 import type {
   TemplateInfoDto,
@@ -54,6 +58,12 @@ import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, u
 
 type HttpClient = Parameters<typeof useAdminNotificationApi>[0]
 
+const DEVICE_PLATFORMS: readonly unknown[] = Object.values(DevicePlatform)
+
+function isDevicePlatform(value: unknown): value is DevicePlatform {
+  return DEVICE_PLATFORMS.includes(value)
+}
+
 export interface NotificationBridgeDeps {
   /** Production path: provide HttpClient; bridge builds API internally. */
   client?: HttpClient
@@ -63,6 +73,7 @@ export interface NotificationBridgeDeps {
   optOutApi?: ReturnType<typeof useAdminNotificationOptOutApi>
   templateApi?: ReturnType<typeof useAdminNotificationTemplateApi>
   deviceApi?: ReturnType<typeof useAdminPushDeviceApi>
+  myPreferenceApi?: ReturnType<typeof useNotificationPreferenceApi>
 }
 
 /** messages sub-contract with extra send / cancel / delivery-report actions */
@@ -80,8 +91,19 @@ export interface NotificationMessageContract extends BridgeCrudContract<Notifica
 /** Request shape for template preview / test-send actions. */
 export interface NotificationTemplatePreviewRequest {
   templateName?: string | null
+  /**
+   * The template's own category. The server looks a template up by name AND
+   * category, and without one it uses the channel name (`Email` / `Sms`), so a
+   * template filed under any other category would not be found.
+   */
+  category?: string | null
   /** Notification channel (defaults to Email). Serializes as the member-name string. */
   type?: NotificationType
+  /**
+   * Raw subject / body the server falls back to when the template does not
+   * render. Leave them unset to preview or test a template: a stand-in here
+   * turns "this template does not render" into a preview of the stand-in.
+   */
   subject?: string | null
   content?: string | null
   variables?: Record<string, unknown> | null
@@ -101,10 +123,12 @@ export interface NotificationTemplatePreviewResult {
 /** templates sub-contract - full CRUD against /admin/notification-templates plus preview + test-send. */
 export interface NotificationTemplateContract extends BridgeCrudContract<TemplateInfoDto> {
   /**
-   * Preview notification rendering. Sends a CreateNotificationRequest to
-   * /admin/notifications/preview with the template name + variables; the
-   * backend renders the template via ITemplateRenderService and returns
-   * the materialized subject + content without persisting anything.
+   * Preview notification rendering. Sends a PreviewNotificationRequest to
+   * /admin/notifications/preview with the template name + variables (no
+   * recipients); the backend renders the template via ITemplateRenderService
+   * and returns the materialized subject + content without persisting
+   * anything. Rejects with the server's message when the template cannot be
+   * rendered.
    */
   preview(request: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult>
   /**
@@ -135,6 +159,23 @@ export interface NotificationPublicUnsubscribeContract {
   unsubscribe(token: string, reason?: string): Promise<boolean>
   /** Undo, for someone who clicked by mistake. */
   resubscribe(token: string): Promise<boolean>
+}
+
+/**
+ * The signed-in user's own notification preferences (User Center).
+ *
+ * Every call acts on the caller's rows only: the user comes from the session
+ * on the server, so nothing here takes a user id.
+ */
+export interface NotificationMyPreferencesContract {
+  /** The caller's rows: channel-wide (category null) and per-category. */
+  list(): Promise<NotificationPreferenceDto[]>
+  /** Upsert one row, keyed by (channel, category). */
+  set(input: SetNotificationPreferenceDto): Promise<NotificationPreferenceDto>
+  /** Remove one of the caller's rows. */
+  remove(id: string): Promise<void>
+  /** Remove every row the caller has: all channels back to the defaults. */
+  reset(): Promise<void>
 }
 
 export interface NotificationBridge {
@@ -177,10 +218,36 @@ export interface NotificationBridge {
    * module; an email-only deployment has neither the table nor these routes.
    */
   devices: BridgeCrudContract<PushDeviceDto>
+
+  /** The signed-in user's own preferences; see the contract. */
+  myPreferences: NotificationMyPreferencesContract
 }
 
 const backendGapReject = (name: string) => (): Promise<never> =>
   Promise.reject(new Error(`notification-bridge: ${name} - backend gap, no endpoint available`))
+
+function createMyPreferencesContract(
+  api: ReturnType<typeof useNotificationPreferenceApi> | null,
+): NotificationMyPreferencesContract {
+  if (!api) {
+    return {
+      list: backendGapReject('myPreferences.list'),
+      set: backendGapReject('myPreferences.set'),
+      remove: backendGapReject('myPreferences.remove'),
+      reset: backendGapReject('myPreferences.reset'),
+    }
+  }
+  return {
+    list: async () => unwrapOk(await api.getMine()) ?? [],
+    set: async (input) => unwrapOk(await api.set(input)),
+    remove: async (id) => {
+      ensureOk(await api.delete(id))
+    },
+    reset: async () => {
+      ensureOk(await api.resetToDefault())
+    },
+  }
+}
 
 export function createNotificationBridge(deps: NotificationBridgeDeps = {}): NotificationBridge {
   const notificationApi = deps.notificationApi ?? (deps.client ? useAdminNotificationApi(deps.client) : null)
@@ -188,6 +255,9 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
   const optOutApi = deps.optOutApi ?? (deps.client ? useAdminNotificationOptOutApi(deps.client) : null)
   const templateApi = deps.templateApi ?? (deps.client ? useAdminNotificationTemplateApi(deps.client) : null)
   const deviceApi = deps.deviceApi ?? (deps.client ? useAdminPushDeviceApi(deps.client) : null)
+  const myPreferences = createMyPreferencesContract(
+    deps.myPreferenceApi ?? (deps.client ? useNotificationPreferenceApi(deps.client) : null),
+  )
 
   if (!notificationApi) {
     const noFetch = backendGapReject('no deps provided')
@@ -237,6 +307,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         unsubscribe: async () => false,
         resubscribe: async () => false,
       },
+      myPreferences,
     }
   }
 
@@ -246,7 +317,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
 
   async function fetchMessages(query: CrudPageQuery): Promise<CrudPageResult<NotificationInfo>> {
     const params = mapQueryToListRequest(query) as unknown as QueryNotificationRequest
-    const result = unwrap<{ items: NotificationInfo[]; totalCount: number; pageIndex: number; pageSize: number }>(
+    const result = unwrapOk<{ items: NotificationInfo[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.query(params),
     )
     return pagedResult({
@@ -283,6 +354,52 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
     }),
   }
 
+  // Preview hits POST /admin/notifications/preview, which renders the template
+  // via ITemplateRenderService without creating or sending a notification. The
+  // body carries only the rendering inputs: no recipients (a template preview
+  // has no addresses, and the endpoint does not ask for any) and no placeholder
+  // subject. A placeholder would count as raw content, so a template that fails
+  // to render would come back as a blank "successful" preview instead of the
+  // server's reason. unwrapOk turns a refusal into an error the page shows.
+  const previewTemplate = async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
+    const result = unwrapOk<NotificationPreviewDto>(
+      await api.preview({
+        type: req.type ?? NotificationType.Email,
+        subject: req.subject ?? undefined,
+        content: req.content ?? undefined,
+        templateName: req.templateName ?? undefined,
+        category: req.category ?? undefined,
+        templateVariables: req.variables ?? undefined,
+      }),
+      'Preview failed',
+    )
+    return {
+      subject: result.subject ?? null,
+      content: result.content ?? '',
+      isHtml: result.isHtml ?? false,
+    }
+  }
+
+  // Test-send creates and dispatches a real notification - use a throwaway
+  // recipient address. Template name, category and variables ride on the
+  // request so the server renders and delivers exactly the template the admin
+  // clicked; with no stand-in subject, a template that does not render fails
+  // the send instead of mailing an empty "test".
+  async function sendTemplateTest(req: NotificationTemplatePreviewRequest): Promise<void> {
+    if (!req.recipientAddress) {
+      throw new Error('sendTest: recipientAddress is required.')
+    }
+    ensureOk(await api.createAndSend({
+      type: req.type ?? NotificationType.Email,
+      subject: req.subject ?? '',
+      content: req.content ?? '',
+      templateName: req.templateName ?? undefined,
+      category: req.category ?? undefined,
+      templateVariables: req.variables ?? undefined,
+      recipients: [{ address: req.recipientAddress }],
+    }))
+  }
+
   // /admin/notification-templates CRUD. The endpoint is a thin
   // notification-scoped view over the generic template store and pins
   // Module="Notification" server-side, so the bridge only forwards the standard
@@ -294,7 +411,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
     ? {
         fetch: async (query: CrudPageQuery): Promise<CrudPageResult<TemplateInfoDto>> => {
           const params = { ...mapQueryToListRequest(query), includeFileSource: true } as unknown as TemplateQueryDto
-          const result = unwrap<PagedList<TemplateInfoDto>>(await templateApi.getPagedList(params))
+          const result = unwrapOk<PagedList<TemplateInfoDto>>(await templateApi.getPagedList(params))
           return pagedResult({
             items: result.items ?? [],
             totalCount: result.totalCount ?? 0,
@@ -322,80 +439,17 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
           }
           ensureOk(await templateApi.batchDelete(ids.map(String)))
         },
-        // Preview hits POST /admin/notifications/preview which renders the
-        // template via ITemplateRenderService without creating or sending a
-        // notification. Page passes templateName + variables; the backend
-        // looks up the template by name + module="Notification".
-        preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
-          const result = unwrap(
-            await api.preview({
-              type: req.type ?? NotificationType.Email,
-              subject: req.subject ?? 'Preview',
-              content: req.content ?? '',
-              templateName: req.templateName ?? undefined,
-              recipients: [],
-              templateVariables: req.variables ?? undefined,
-            }),
-          )
-          return {
-            subject: (result as { subject?: string | null }).subject ?? null,
-            content: (result as { content?: string }).content ?? '',
-            isHtml: (result as { isHtml?: boolean }).isHtml ?? false,
-          }
-        },
-        // Test-send creates and dispatches a real notification - use a
-        // throwaway recipient address. Pin templateName + variables on the
-        // CreateNotificationRequest so the backend renders + delivers
-        // exactly the template the admin clicked.
-        sendTest: async (req: NotificationTemplatePreviewRequest): Promise<void> => {
-          if (!req.recipientAddress) {
-            throw new Error('sendTest: recipientAddress is required.')
-          }
-          ensureOk(await api.createAndSend({
-            type: req.type ?? NotificationType.Email,
-            subject: req.subject ?? 'Test Send',
-            content: req.content ?? '',
-            templateName: req.templateName ?? undefined,
-            templateVariables: req.variables ?? undefined,
-            recipients: [{ address: req.recipientAddress }],
-          }))
-        },
+        // The backend looks the template up by name + module="Notification".
+        preview: previewTemplate,
+        sendTest: sendTemplateTest,
       }
     : {
         fetch: backendGapReject('templates.fetch - no HttpClient (deps.client) or templateApi provided') as never,
         create: backendGapReject('templates.create - no HttpClient (deps.client) or templateApi provided'),
         update: backendGapReject('templates.update - no HttpClient (deps.client) or templateApi provided'),
         delete: backendGapReject('templates.delete - no HttpClient (deps.client) or templateApi provided'),
-        preview: async (req: NotificationTemplatePreviewRequest): Promise<NotificationTemplatePreviewResult> => {
-          const result = unwrap(
-            await api.preview({
-              type: req.type ?? NotificationType.Email,
-              subject: req.subject ?? 'Preview',
-              content: req.content ?? '',
-              templateName: req.templateName ?? undefined,
-              recipients: [],
-              templateVariables: req.variables ?? undefined,
-            }),
-          )
-          return {
-            subject: (result as { subject?: string | null }).subject ?? null,
-            content: (result as { content?: string }).content ?? '',
-            isHtml: (result as { isHtml?: boolean }).isHtml ?? false,
-          }
-        },
-        sendTest: async (req: NotificationTemplatePreviewRequest): Promise<void> => {
-          if (!req.recipientAddress) {
-            throw new Error('sendTest: recipientAddress is required.')
-          }
-          ensureOk(await api.createAndSend({
-            type: req.type ?? NotificationType.Email,
-            subject: req.subject ?? 'Test Send',
-            content: req.content ?? '',
-            templateName: req.templateName ?? undefined,
-            templateVariables: req.variables ?? undefined,
-            recipients: [{ address: req.recipientAddress }],
-          }))
-        },
+        preview: previewTemplate,
+        sendTest: sendTemplateTest,
       }
 
   // Subscriptions → NotificationPreference. Wired 2026-04-14 to the canonical
@@ -406,6 +460,23 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
   // Create/update both upsert via PUT /user/{userId} because the backend key
   // is (userId, channel, category) rather than a synthetic id - we still
   // expose a BridgeCrudContract shape so TCrudPage can consume it uniformly.
+  //
+  // A cleared text box is an empty string. The quiet-hours times bind to
+  // TimeOnly? on the server, which cannot read '' (the save answers 400), and
+  // the category is part of the upsert key, where '' names a different row from
+  // the channel-wide null one. Blank ones are left out, which the server reads
+  // as null; the time zone is sent as null, as its contract spells it.
+  const isBlank = (value: string | null | undefined): boolean => value == null || value.trim() === ''
+  const toPreferenceUpsert = (input: NotificationPreferenceDto, isEnabled: boolean): SetNotificationPreferenceDto => ({
+    channel: input.channel,
+    category: isBlank(input.category) ? undefined : input.category,
+    isEnabled,
+    quietHoursStart: isBlank(input.quietHoursStart) ? undefined : input.quietHoursStart,
+    quietHoursEnd: isBlank(input.quietHoursEnd) ? undefined : input.quietHoursEnd,
+    quietHoursTimeZone: isBlank(input.quietHoursTimeZone) ? null : input.quietHoursTimeZone,
+    maxFrequencyPerHour: input.maxFrequencyPerHour,
+  })
+
   const subscriptions: BridgeCrudContract<NotificationPreferenceDto> = prefApi
     ? {
         fetch: async (query: CrudPageQuery): Promise<CrudPageResult<NotificationPreferenceDto>> => {
@@ -422,7 +493,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             category: typeof filters.category === 'string' ? filters.category : undefined,
             isEnabled: typeof filters.isEnabled === 'boolean' ? filters.isEnabled : undefined,
           }
-          const result = unwrap<{ items: NotificationPreferenceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+          const result = unwrapOk<{ items: NotificationPreferenceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
             await prefApi.getPagedList(params),
           )
           return pagedResult({
@@ -434,26 +505,15 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         },
         create: async (data) => {
           const input = data as unknown as NotificationPreferenceDto & { userId: string }
-          const upsert: SetNotificationPreferenceDto = {
-            channel: input.channel,
-            category: input.category,
-            isEnabled: input.isEnabled ?? true,
-            quietHoursStart: input.quietHoursStart,
-            quietHoursEnd: input.quietHoursEnd,
-            maxFrequencyPerHour: input.maxFrequencyPerHour,
-          }
+          const upsert = toPreferenceUpsert(input, input.isEnabled ?? true)
           return unwrapOk(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
         },
+        // The upsert is keyed by (user, channel, category), not by the row id;
+        // the page keeps those three read-only on edit so this lands on the row
+        // being edited.
         update: async (_id, data) => {
           const input = data as unknown as NotificationPreferenceDto & { userId: string }
-          const upsert: SetNotificationPreferenceDto = {
-            channel: input.channel,
-            category: input.category,
-            isEnabled: input.isEnabled,
-            quietHoursStart: input.quietHoursStart,
-            quietHoursEnd: input.quietHoursEnd,
-            maxFrequencyPerHour: input.maxFrequencyPerHour,
-          }
+          const upsert = toPreferenceUpsert(input, input.isEnabled)
           return unwrapOk(await prefApi.setPreference(input.userId, upsert)) as NotificationPreferenceDto
         },
         delete: async (ids) => {
@@ -492,7 +552,7 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             from: typeof filters.from === 'string' ? filters.from : undefined,
             to: typeof filters.to === 'string' ? filters.to : undefined,
           }
-          const result = unwrap<{ items: OptOutDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+          const result = unwrapOk<{ items: OptOutDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
             await optOutApi.getPagedList(params),
           )
           return pagedResult({
@@ -573,12 +633,11 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
             pageSize: query.pageSize,
             orderBy,
             userId: typeof filters.userId === 'string' ? filters.userId : undefined,
-            // filters 是 Record<string, unknown>，窄化只能到 number；
-            // DevicePlatform 是数值联合，需显式断言。
-            platform: typeof filters.platform === 'number' ? (filters.platform as DevicePlatform) : undefined,
+            // 平台按成员名传（"Android"），与服务端写出的形态一致；不认识的值不下发。
+            platform: isDevicePlatform(filters.platform) ? filters.platform : undefined,
             lastSeenAfter: typeof filters.lastSeenAfter === 'string' ? filters.lastSeenAfter : undefined,
           }
-          const result = unwrap<{ items: PushDeviceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+          const result = unwrapOk<{ items: PushDeviceDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
             await deviceApi.getList(params),
           )
           return pagedResult({
@@ -604,5 +663,5 @@ export function createNotificationBridge(deps: NotificationBridgeDeps = {}): Not
         delete: backendGapReject('devices.delete'),
       }
 
-  return { messages, templates, subscriptions, optOuts, devices, publicUnsubscribe }
+  return { messages, templates, subscriptions, optOuts, devices, publicUnsubscribe, myPreferences }
 }

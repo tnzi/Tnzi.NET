@@ -78,6 +78,10 @@ public class BankAccountService : ApplicationService, IBankAccountService
             return Fail<BankAccountDto>("Bank account name is required.", 400);
         if (input.NextCheckNumber < 1)
             return Fail<BankAccountDto>("The next check number must be at least 1.", 400);
+        var tooLong = FirstTooLong(input.Name, input.BankName, input.Currency, input.CheckTemplateName,
+            input.FeedProviderKey, input.ExternalAccountId, input.EftOriginatorName);
+        if (tooLong != null)
+            return Fail<BankAccountDto>(tooLong, 400);
 
         var currency = string.IsNullOrWhiteSpace(input.Currency) ? null : input.Currency.Trim().ToUpperInvariant();
         var accountResult = await _helper.GetFundsAccountAsync(input.AccountId, currency, cancellationToken);
@@ -148,6 +152,11 @@ public class BankAccountService : ApplicationService, IBankAccountService
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail<BankAccountDto>("Bank account name is required.", 400);
 
+        var tooLong = FirstTooLong(input.Name, input.BankName, input.Currency, input.CheckTemplateName,
+            input.FeedProviderKey, input.ExternalAccountId, input.EftOriginatorName);
+        if (tooLong != null)
+            return Fail<BankAccountDto>(tooLong, 400);
+
         var routingResult = BankNumberHelper.ValidateRouting(input.Scheme, input.RoutingNumber, input.InstitutionNumber, input.TransitNumber);
         if (!routingResult.Succeeded)
             return Fail<BankAccountDto>(routingResult.Message!, routingResult.Code ?? 400);
@@ -215,7 +224,17 @@ public class BankAccountService : ApplicationService, IBankAccountService
         if (await _eftBatchRepository.AnyAsync(b => b.BankAccountId == entity.Id, cancellationToken))
             return Fail("The bank account has EFT batches on record and cannot be deleted.", 409);
 
-        await _bankAccountRepository.DeleteAsync(entity, cancellationToken);
+        try
+        {
+            await _bankAccountRepository.DeleteAsync(entity, cancellationToken);
+            await _bankAccountRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 软删是一次带并发标记的整行写：上面的引用检查读完之后，打印 / 登记 / 生成 EFT 的分配器
+            // 换掉了标记（它们在推进计数器）。重新加载会看到那张新票或那份新文件，删除随之被引用保护挡住。
+            return Fail("The bank account was modified by another operation. Reload and try again.", 409);
+        }
         return Ok();
     }
 
@@ -228,6 +247,16 @@ public class BankAccountService : ApplicationService, IBankAccountService
         var entity = await _bankAccountRepository.AsQueryable(true).FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
         if (entity == null)
             return Fail<BankAccountDto>("Bank account not found.", 404);
+
+        // ★ 设到一个已经用过的号上，此后每一次打印都撞（账户, 支票号）唯一索引、回滚又把计数器恢复到
+        // 同一个号，永远 409，而重新加载帮不上忙。只拒绝「这个号本身已被占用」：换一本号段更低的
+        // 支票本是正常操作，号段之上已有支票不构成拒绝的理由。作废票与毁票同样占号。
+        var nextFree = await NextUnusedCheckNumberAsync(entity.Id, input.NextCheckNumber, cancellationToken);
+        if (nextFree != input.NextCheckNumber)
+        {
+            return Fail<BankAccountDto>(
+                $"Check number {input.NextCheckNumber} is already used on this bank account. The next unused number from there is {nextFree}.", 400);
+        }
 
         entity.NextCheckNumber = input.NextCheckNumber;
         try
@@ -242,6 +271,39 @@ public class BankAccountService : ApplicationService, IBankAccountService
 
         return Ok(await ToDtoAsync(entity, cancellationToken));
     }
+
+    /// <summary>从 <paramref name="from"/> 起第一个没有被本账户任何支票（含作废票、毁票）占用的号。</summary>
+    private async Task<long> NextUnusedCheckNumberAsync(Guid bankAccountId, long from, CancellationToken cancellationToken)
+    {
+        if (!await _checkRepository.AnyAsync(c => c.BankAccountId == bankAccountId && c.CheckNumber == from, cancellationToken))
+            return from;
+
+        var used = await _checkRepository.AsNoTracking()
+            .Where(c => c.BankAccountId == bankAccountId && c.CheckNumber >= from)
+            .OrderBy(c => c.CheckNumber)
+            .Select(c => c.CheckNumber)
+            .ToListAsync(cancellationToken);
+        var next = from;
+        foreach (var number in used)
+        {
+            if (number > next)
+                break;
+            next = number + 1;
+        }
+        return next;
+    }
+
+    /// <summary>人工填写的档案字段与列宽比对（按落库前的形状：去首尾空白），返回第一个超长字段的拒绝消息。</summary>
+    private static string? FirstTooLong(string name, string? bankName, string? currency, string? checkTemplateName,
+        string? feedProviderKey, string? externalAccountId, string? eftOriginatorName)
+        => BankingFieldLimits.FirstTooLong(
+            (name.Trim(), BankingFieldLimits.BankAccountNameMaxLength, "bank account name"),
+            (bankName, BankingFieldLimits.BankNameMaxLength, "bank name"),
+            (currency?.Trim(), BankingFieldLimits.CurrencyMaxLength, "currency"),
+            (NormalizeTemplateName(checkTemplateName), BankingFieldLimits.CheckTemplateNameMaxLength, "check template name"),
+            (feedProviderKey?.Trim(), BankingFieldLimits.FeedProviderKeyMaxLength, "feed provider key"),
+            (externalAccountId?.Trim(), BankingFieldLimits.ExternalAccountIdMaxLength, "external account id"),
+            (eftOriginatorName?.Trim(), BankingFieldLimits.EftOriginatorNameMaxLength, "EFT originator name"));
 
     /// <summary>归一化支票模板名：空白 → null（= 回退渲染器默认模板）</summary>
     private static string? NormalizeTemplateName(string? templateName)

@@ -67,8 +67,8 @@ public class CreateAgentDto
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    /// <summary>System instructions</summary>
-    [MaxLength(4000)]
+    /// <summary>System instructions (same limit as the column)</summary>
+    [MaxLength(32000)]
     public string? Instructions { get; set; }
 
     /// <summary>Provider name</summary>
@@ -139,29 +139,29 @@ public class UpdateAgentDto
     [MaxLength(200)]
     public string? Name { get; set; }
 
-    /// <summary>Agent description</summary>
+    /// <summary>Agent description. Null = no change, empty string = clear.</summary>
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    /// <summary>System instructions</summary>
-    [MaxLength(4000)]
+    /// <summary>System instructions (same limit as the column). Null = no change, empty string = clear.</summary>
+    [MaxLength(32000)]
     public string? Instructions { get; set; }
 
     /// <summary>Provider name</summary>
     [MaxLength(50)]
     public string? Provider { get; set; }
 
-    /// <summary>Model name</summary>
+    /// <summary>Model name. Null = no change, empty string = clear (the provider's default model applies).</summary>
     [MaxLength(100)]
     public string? Model { get; set; }
 
     /// <summary>Tool group names</summary>
     public List<string>? ToolGroups { get; set; }
 
-    /// <summary>Temperature parameter</summary>
+    /// <summary>Temperature parameter. Null = no change; a set value cannot be cleared through an update.</summary>
     public double? Temperature { get; set; }
 
-    /// <summary>Max tokens</summary>
+    /// <summary>Max tokens. Null = no change; a set value cannot be cleared through an update.</summary>
     public int? MaxTokens { get; set; }
 
     /// <summary>Timeout in seconds</summary>
@@ -241,6 +241,55 @@ public class AgentExecutionConfigDto
     }
 
     /// <summary>
+    /// 把执行配置写回 Agent.Configuration：只替换 handoff / router / agentAsTools 三节（<paramref name="config"/> 为 null
+    /// 即清掉这三节），其余键原样保留。
+    /// </summary>
+    /// <remarks>
+    /// 这一列里还装着进行中的 A/B 实验（<c>abTest</c>）与按 Agent 的开关（<c>disableContextProviders</c>），
+    /// 它们都不属于执行配置。整列覆盖会让改一次执行模式就静默停掉实验，且界面上看不出来。
+    /// </remarks>
+    public static string? Merge(string? existingConfiguration, AgentExecutionConfigDto? config)
+    {
+        var merged = new Dictionary<string, JsonElement>();
+        if (!string.IsNullOrWhiteSpace(existingConfiguration))
+        {
+            try
+            {
+                using var existing = JsonDocument.Parse(existingConfiguration);
+                if (existing.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var property in existing.RootElement.EnumerateObject())
+                    {
+                        if (!ExecutionConfigKeys.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
+                        {
+                            merged[property.Name] = property.Value.Clone();
+                        }
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // 无法解析的旧值没有可保留的键，按只写执行配置处理（与此前整列覆盖的结果相同）
+            }
+        }
+
+        var serialized = Serialize(config);
+        if (serialized != null)
+        {
+            using var incoming = JsonDocument.Parse(serialized);
+            foreach (var property in incoming.RootElement.EnumerateObject())
+            {
+                merged[property.Name] = property.Value.Clone();
+            }
+        }
+
+        return merged.Count == 0 ? null : JsonSerializer.Serialize(merged);
+    }
+
+    /// <summary>执行配置在 Configuration JSON 里占用的键（与 <see cref="Serialize"/> 的 camelCase 输出一致）。</summary>
+    private static readonly string[] ExecutionConfigKeys = ["handoff", "router", "agentAsTools"];
+
+    /// <summary>
     /// 从 Agent.Configuration JSON 反序列化
     /// </summary>
     public static AgentExecutionConfigDto? Deserialize(string? json)
@@ -296,9 +345,6 @@ public class AgentAsToolsExecutionConfigDto
 {
     /// <summary>可调用的子 Agent 名称到 AgentId 的映射</summary>
     public Dictionary<string, Guid> Agents { get; set; } = [];
-
-    /// <summary>子 Agent 最大并发数（默认 3, 范围 [2,4]）</summary>
-    public int? MaxConcurrentSubAgents { get; set; }
 
     /// <summary>单个子 Agent 超时秒数（默认 900 = 15 分钟）</summary>
     public int? SubAgentTimeoutSeconds { get; set; }

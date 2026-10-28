@@ -85,9 +85,9 @@ public class RequestTrackingOptions
     public List<string>? IncludePaths { get; set; }
 
     /// <summary>
-    /// 不需要记录的路径模式
-    /// 默认排除：/health, /metrics, /favicon.ico, /swagger, /api-docs
-    /// 设置后将覆盖默认值
+    /// 不需要记录的路径模式（锚定全串匹配，* 匹配任意、? 匹配单个，大小写敏感）
+    /// 默认排除：/health 与 /health/*、/metrics、/favicon.ico、/swagger 与 /swagger/*、/api-docs 与 /api-docs/*、/hubs/*
+    /// 设置后将覆盖默认值（要排除子路径须写 "/*"）
     /// </summary>
     public List<string>? ExcludePaths { get; set; }
 
@@ -100,6 +100,8 @@ public class RequestTrackingOptions
     /// 按参数名脱敏更精确:请求照常留痕,只是值变成 `***`。
     /// 默认名单是核心的 <see cref="Tnzi.Security.QueryStringRedactor.DefaultSensitiveKeys"/>,
     /// 与审计模块的 <c>Audit:SensitiveQueryKeys</c> 同源。
+    /// 同一份名单也作用于路径里的路由参数(<see cref="Tnzi.Security.RequestPathRedactor"/>):
+    /// <c>signing/{token}</c>、<c>files/share/{token}</c> 这类端点的那一段同样记为 <c>***</c>。
     /// </summary>
     public List<string>? SensitiveQueryKeys { get; set; }
 }

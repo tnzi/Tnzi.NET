@@ -69,8 +69,11 @@ public class TemplateStoreTestDbContext : TnziDbContext<TemplateStoreTestDbConte
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.ApplyConfiguration(new TemplateConfiguration());
-        modelBuilder.ApplyConfiguration(new LayoutConfiguration());
+        // RegisterTo(modelBuilder, this) 而不是裸 ApplyConfiguration：配置类经它才读得到本上下文的
+        // 多租户开关与数据库提供者，裸调用时唯一索引永远是单租户形态，多租户用例里租户
+        // 建一条与宿主同名的行会撞上一个生产里根本不存在的全局唯一约束。
+        new TemplateConfiguration().RegisterTo(modelBuilder, this);
+        new LayoutConfiguration().RegisterTo(modelBuilder, this);
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

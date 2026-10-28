@@ -10,8 +10,14 @@
  * the range survives navigation and reloads. The comparison period is derived,
  * never stored: "previous period" of a range that the user just widened must
  * follow it.
+ *
+ * A relative preset ("This month", "Year to date") is a rule, not a range: it
+ * is re-resolved against today when the module loads, whenever a finance
+ * surface mounts, and when a tab left open is shown again. Restoring the
+ * stored dates instead kept the label while every report ran on the range of
+ * the day it was picked. Only a custom range keeps its stored dates.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, readonly, ref, watch } from 'vue'
 
 export type FinancePeriodPreset =
   | 'this-month'
@@ -32,6 +38,26 @@ export interface FinancePeriodValue {
 }
 
 const STORAGE_KEY = 'tnzi-admin-finance-period'
+
+const PRESETS: readonly FinancePeriodPreset[] = [
+  'this-month',
+  'last-month',
+  'this-quarter',
+  'last-quarter',
+  'year-to-date',
+  'last-year',
+  'custom',
+]
+
+const COMPARISONS: readonly FinanceComparison[] = ['none', 'previous-period', 'previous-year']
+
+function isPreset(value: unknown): value is FinancePeriodPreset {
+  return typeof value === 'string' && (PRESETS as readonly string[]).includes(value)
+}
+
+function isComparison(value: unknown): value is FinanceComparison {
+  return typeof value === 'string' && (COMPARISONS as readonly string[]).includes(value)
+}
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
@@ -118,10 +144,13 @@ function loadPersisted(): { value: FinancePeriodValue; preset: FinancePeriodPres
     const from = parsed.from
     const to = parsed.to
     if (typeof from !== 'string' || typeof to !== 'string') return null
+    // An unrecognised preset (an older build, a hand-edited entry) keeps the
+    // stored dates as a custom range rather than guessing at a rule.
+    const preset = isPreset(parsed.preset) ? parsed.preset : 'custom'
     return {
-      value: { from, to },
-      preset: (parsed.preset as FinancePeriodPreset) ?? 'custom',
-      comparison: (parsed.comparison as FinanceComparison) ?? 'none',
+      value: resolvePreset(preset) ?? { from, to },
+      preset,
+      comparison: isComparison(parsed.comparison) ? parsed.comparison : 'none',
     }
   } catch {
     return null
@@ -134,6 +163,33 @@ const fallback = resolvePreset('year-to-date')!
 const periodValue = ref<FinancePeriodValue>(initial?.value ?? fallback)
 const periodPreset = ref<FinancePeriodPreset>(initial?.preset ?? 'year-to-date')
 const comparisonMode = ref<FinanceComparison>(initial?.comparison ?? 'none')
+
+/** Bumped each time a relative preset moved to a new range on its own. */
+const rollovers = ref(0)
+
+/**
+ * Re-resolve a relative preset against today; a custom range is left alone.
+ * Writes only when the range actually moved, so calling it often is free.
+ */
+function refreshRelativePreset(): void {
+  const resolved = resolvePreset(periodPreset.value)
+  if (!resolved) return
+  const current = periodValue.value
+  if (resolved.from === current.from && resolved.to === current.to) return
+  periodValue.value = resolved
+  rollovers.value += 1
+}
+
+let visibilityHooked = false
+
+/** A tab left open overnight re-resolves when it is shown again. */
+function hookVisibility(): void {
+  if (visibilityHooked || typeof document === 'undefined') return
+  visibilityHooked = true
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshRelativePreset()
+  })
+}
 
 watch(
   [periodValue, periodPreset, comparisonMode],
@@ -152,6 +208,11 @@ watch(
 )
 
 export function useFinancePeriod() {
+  // A finance surface mounting is the moment its reports are about to run, so
+  // a relative preset is brought up to today here as well.
+  hookVisibility()
+  refreshRelativePreset()
+
   const comparisonPeriod = computed(() => resolveComparison(periodValue.value, comparisonMode.value))
 
   function setPreset(preset: FinancePeriodPreset) {
@@ -176,5 +237,13 @@ export function useFinancePeriod() {
     setRange,
     /** `asOf` reporting date - balance-sheet style points-in-time. */
     asOf: computed(() => periodValue.value.to),
+    /**
+     * Counts the times a relative preset moved to a new range without the
+     * user touching the picker (a tab shown again on a later day). A surface
+     * that has already run its reports watches it and runs them again, so the
+     * numbers stay on the range the picker shows. `TPeriodPicker` turns it
+     * into its `change` event.
+     */
+    rollovers: readonly(rollovers),
   }
 }

@@ -55,8 +55,9 @@ export function useAdminSigningApi(client: HttpClient) {
      * Send: issue the one-time links.
      *
      * ★ The plaintext tokens come back HERE AND ONLY HERE - the store keeps
-     * hashes. Dispatch them right away; losing them means re-sending, which
-     * invalidates the links already issued.
+     * hashes. Dispatch them right away: only a draft can be sent, so a lost
+     * link cannot be re-issued - the request would have to be voided and a new
+     * one started.
      */
     sendRequest: (id: string) =>
       client.post<IssuedSigningLink[]>(`${ADMIN_REQUEST_BASE}/${id}/send`),
@@ -68,8 +69,9 @@ export function useAdminSigningApi(client: HttpClient) {
     /**
      * Seal a request whose recipients have all signed but whose sealing
      * failed (it sits in InProgress). A recovery action for transient
-     * failures; an already sealed request is refused (the hash is computed
-     * exactly once).
+     * failures. On a completed request it never re-seals (the hash is computed
+     * exactly once): it only produces a missing completion certificate and
+     * hands the sealed document to its host record again.
      */
     sealRequest: (id: string) =>
       client.post<EnvelopeDto>(`${ADMIN_REQUEST_BASE}/${id}/seal`),

@@ -3,7 +3,7 @@
  */
 
 import type { HttpClient } from '../../http/http';
-import type { PagedList } from '../../types/pagination';
+import type { PagedList, PagedQuery } from '../../types/pagination';
 import type { ReorderRequest } from '../../types/api';
 import type {
   PaymentDto,
@@ -20,6 +20,8 @@ import type {
   CreateSubscriptionDto,
   SubscriptionQueryDto,
   SubscriptionPlanDto,
+  SubscriptionPlanWriteDto,
+  SubscriptionPlanDefaultsDto,
   CancelSubscriptionDto,
   PauseSubscriptionDto,
   ChangeSubscriptionPlanDto,
@@ -30,6 +32,12 @@ import type {
   SetupSessionDto,
   BindPaymentMethodDto,
   StoredPaymentMethodDto,
+  PaymentClientConfigDto,
+  SubscriptionPayNowResultDto,
+  BillingStandingDto,
+  StorageUsageDto,
+  BillingAccountDto,
+  UpdateBillingAccountDto,
   GrantCouponDto,
   InvoiceDto,
   InvoiceQueryDto,
@@ -62,6 +70,7 @@ const BASE = '/payments';
 const PAYMENT_METHOD_BASE = '/payment-methods';
 const REFUND_BASE = '/refunds';
 const SUBSCRIPTION_BASE = '/subscriptions';
+const BILLING_ACCOUNT_BASE = '/billing-account';
 const INVOICE_BASE = '/invoices';
 const PROMOTION_BASE = '/promotions';
 const ADMIN_BASE = '/admin/payments';
@@ -96,7 +105,10 @@ export function usePaymentApi(client: HttpClient) {
     close: (tradeNo: string, reason?: string) =>
       client.post<void>(`${BASE}/${tradeNo}/close`, { reason }),
 
-    /** Get payment params for channel */
+    /**
+     * Get payment params for channel. Only an open (pending / processing) payment has any:
+     * an ended one answers 400 `PAYMENT_NOT_PAYABLE`, so create a new payment to pay again.
+     */
     getParams: (tradeNo: string) =>
       client.get<PaymentParamsDto>(`${BASE}/${tradeNo}/params`),
 
@@ -148,9 +160,9 @@ export function useSubscriptionApi(client: HttpClient) {
     get: (id: string) =>
       client.get<SubscriptionDto>(`${SUBSCRIPTION_BASE}/${id}`),
 
-    /** Get my subscriptions */
-    getMy: () =>
-      client.get<PagedList<SubscriptionDto>>(`${SUBSCRIPTION_BASE}/my`),
+    /** Get my subscriptions, newest first (100 per page unless `pageSize` says otherwise) */
+    getMy: (params?: Partial<PagedQuery>) =>
+      client.get<PagedList<SubscriptionDto>>(`${SUBSCRIPTION_BASE}/my`, { params }),
 
     /** Get subscription list */
     getList: (params?: SubscriptionQueryDto) =>
@@ -193,6 +205,54 @@ export function useSubscriptionApi(client: HttpClient) {
     /** Update auto-renew setting */
     updateAutoRenew: (id: string, autoRenew: boolean) =>
       client.post<void>(`${SUBSCRIPTION_BASE}/${id}/auto-renew`, { autoRenew }),
+
+    /**
+     * Pay a past-due or suspended subscription now. Returns a checkout payment
+     * (confirm it with the channel's browser SDK, 3-D Secure included); calling
+     * again while it is still payable returns the same payment.
+     *
+     * For a `Pending` subscription (first payment not completed yet) it returns
+     * that first payment, so an abandoned checkout is finished rather than a
+     * second subscription started. Once the first payment can no longer be paid
+     * it answers 400 `SUBSCRIPTION_CANNOT_PAY_NOW`; subscribing again clears it.
+     */
+    payNow: (id: string) =>
+      client.post<SubscriptionPayNowResultDto>(`${SUBSCRIPTION_BASE}/${id}/pay-now`),
+
+    /**
+     * The current user's billing standing, optionally for one product. Readable
+     * by any signed-in user and never blocked by the access gate.
+     */
+    getStanding: (productCode?: string) =>
+      client.get<BillingStandingDto>(`${SUBSCRIPTION_BASE}/standing`, {
+        params: productCode ? { productCode } : undefined,
+      }),
+
+    /**
+     * The current billing account's storage against its plan's allowance and
+     * the overage accrued so far this period (needs `payment.account.view` on
+     * Installation / Tenant accounts). `metered` is false when the plan does
+     * not include storage.
+     */
+    getStorageUsage: (productCode?: string) =>
+      client.get<StorageUsageDto>(`${SUBSCRIPTION_BASE}/storage-usage`, {
+        params: productCode ? { productCode } : undefined,
+      }),
+  };
+}
+
+/**
+ * Billing account API (User): the account the current user pays for, and its billing profile.
+ */
+export function useBillingAccountApi(client: HttpClient) {
+  return {
+    /** The current billing account, its profile and whether the user can manage it */
+    get: () =>
+      client.get<BillingAccountDto>(BILLING_ACCOUNT_BASE),
+
+    /** Update the billing profile (requires manage access) */
+    update: (data: UpdateBillingAccountDto) =>
+      client.put<BillingAccountDto>(BILLING_ACCOUNT_BASE, data),
   };
 }
 
@@ -230,6 +290,12 @@ export function usePaymentMethodApi(client: HttpClient) {
     /** Remove (detach) a payment method */
     remove: (id: string) =>
       client.delete<void>(`${PAYMENT_METHOD_BASE}/${id}`),
+
+    /** Browser-safe channel config (Stripe publishable key); omit `channelCode` for the default channel */
+    getClientConfig: (channelCode?: string) =>
+      client.get<PaymentClientConfigDto>(`${PAYMENT_METHOD_BASE}/client-config`, {
+        params: channelCode ? { channelCode } : undefined,
+      }),
   };
 }
 
@@ -246,9 +312,9 @@ export function useInvoiceApi(client: HttpClient) {
     get: (id: string) =>
       client.get<InvoiceDto>(`${INVOICE_BASE}/${id}`),
 
-    /** Get my invoices */
-    getMy: () =>
-      client.get<PagedList<InvoiceDto>>(`${INVOICE_BASE}/my`),
+    /** Get my invoices, newest first (100 per page unless `pageSize` says otherwise) */
+    getMy: (params?: Partial<PagedQuery>) =>
+      client.get<PagedList<InvoiceDto>>(`${INVOICE_BASE}/my`, { params }),
 
     /**
      * Download the invoice document as a file.
@@ -262,9 +328,11 @@ export function useInvoiceApi(client: HttpClient) {
       client.download(`${INVOICE_BASE}/${id}/pdf`),
 
     /**
-     * Shareable address of the invoice document, for e-mails and links. Empty
-     * when the document is not held by Storage (local-disk fallback): only
-     * Storage can hand out an HTTP-reachable address.
+     * Storage download address of the invoice document. It is a site-relative
+     * path that needs the caller's session (the invoice owner, or an admin with
+     * `payment.invoice.view`), so it is not a link to e-mail to someone else:
+     * use `send` to deliver the invoice. Empty when the document is not held by
+     * Storage (local-disk fallback): only Storage can hand out an address.
      */
     getPdfUrl: (id: string) =>
       client.get<string>(`${INVOICE_BASE}/${id}/pdf-url`),
@@ -402,11 +470,15 @@ export function useAdminSubscriptionApi(client: HttpClient) {
       }),
 
     /** Create subscription plan */
-    createPlan: (data: SubscriptionPlanDto) =>
+    /** Values a new plan form starts with (the deployment's default currency) */
+    getPlanDefaults: () =>
+      client.get<SubscriptionPlanDefaultsDto>(`${ADMIN_SUBSCRIPTION_BASE}/plans/defaults`),
+
+    createPlan: (data: SubscriptionPlanWriteDto) =>
       client.post<SubscriptionPlanDto>(`${ADMIN_SUBSCRIPTION_BASE}/plans`, data),
 
     /** Update subscription plan */
-    updatePlan: (id: string, data: SubscriptionPlanDto) =>
+    updatePlan: (id: string, data: SubscriptionPlanWriteDto) =>
       client.put<void>(`${ADMIN_SUBSCRIPTION_BASE}/plans/${id}`, data),
 
     /** Delete subscription plan */

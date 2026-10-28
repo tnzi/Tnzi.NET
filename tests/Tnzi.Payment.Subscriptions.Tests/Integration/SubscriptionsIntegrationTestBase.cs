@@ -74,6 +74,8 @@ public abstract class SubscriptionsIntegrationTestBase : IntegratedTestBase<Subs
         AddRepo<RedemptionCode>(services);
         AddRepo<UserCoupon>(services);
         AddRepo<StoredPaymentMethod>(services);
+        AddRepo<BillingAccount>(services);
+        AddRepo<StorageUsageSample>(services);
 
         // UnitOfWork（让 ExecuteInUnitOfWorkAsync 走真实延迟保存路径）
         var entityManagerMock = new Mock<IEntityManager>();
@@ -96,6 +98,9 @@ public abstract class SubscriptionsIntegrationTestBase : IntegratedTestBase<Subs
 
         // 父模块的业务服务
         services.AddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
+        // 计费账户：默认的 User 范围（与引入计费账户之前逐字相同）
+        services.AddScoped<IBillingAccountResolver, DefaultBillingAccountResolver>();
+        services.AddScoped<IBillingAccountService, BillingAccountService>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         services.AddScoped<IRefundService, RefundService>();
@@ -129,12 +134,38 @@ public abstract class SubscriptionsIntegrationTestBase : IntegratedTestBase<Subs
     /// 在独立 scope 中持久化种子实体（模拟每请求独立 DbContext，避免跨调用身份映射冲突）。
     /// 持久化后实体对象的 Id 已回填。
     /// </summary>
+    /// <remarks>
+    /// 没写计费账户的种子行按经办人的个人账户补齐：与迁移回填对既有行做的事相同，
+    /// 所以这些用例跑的是「升级之后的老数据」，而不是一种生产里不存在的、没有归属的行。
+    /// </remarks>
     protected async Task SeedAsync(params object[] entities)
     {
+        foreach (var entity in entities)
+            FillPersonalAccount(entity);
+
         using var scope = ServiceProvider.CreateScope();
         var ctx = scope.ServiceProvider.GetRequiredService<SubscriptionsTestDbContext>();
         ctx.AddRange(entities);
         await ctx.SaveChangesAsync();
+    }
+
+    private static void FillPersonalAccount(object entity)
+    {
+        switch (entity)
+        {
+            case Subscription s when string.IsNullOrEmpty(s.BillingAccountType):
+                s.BillingAccountType = BillingAccountTypes.User;
+                s.BillingAccountId = s.UserId.ToString();
+                break;
+            case StoredPaymentMethod m when string.IsNullOrEmpty(m.BillingAccountType):
+                m.BillingAccountType = BillingAccountTypes.User;
+                m.BillingAccountId = m.UserId.ToString();
+                break;
+            case PaymentEntity p when string.IsNullOrEmpty(p.BillingAccountType) && p.UserId.HasValue:
+                p.BillingAccountType = BillingAccountTypes.User;
+                p.BillingAccountId = p.UserId.Value.ToString();
+                break;
+        }
     }
 
     /// <summary>

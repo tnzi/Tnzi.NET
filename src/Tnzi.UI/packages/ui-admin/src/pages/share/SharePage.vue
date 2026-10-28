@@ -27,7 +27,6 @@
               show-password-on="click"
               :placeholder="t('passwordPlaceholder')"
               :status="failed ? 'error' : undefined"
-              @keyup.enter="download"
             />
             <p v-if="failed" class="t-share__error">{{ t('wrongPassword') }}</p>
           </NForm>
@@ -112,8 +111,12 @@ onMounted(async () => {
   }
 })
 
+// Enter in the password box arrives through the form's submit only (the
+// browser's implicit submission for a form's one field); a key handler on top
+// of it checked and downloaded twice. The in-flight check drops a second
+// press while the first check is still answering.
 async function download(): Promise<void> {
-  if (!client || !file.value) return
+  if (!client || !file.value || downloading.value) return
   failed.value = false
   downloading.value = true
   try {

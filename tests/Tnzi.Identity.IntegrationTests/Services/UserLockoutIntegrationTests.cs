@@ -27,8 +27,7 @@ public class UserLockoutIntegrationTests : RelationalIdentityIntegrationTestBase
             CreateRepository<User>(),
             ServiceProvider,
             eventBus: EventBusMock.Object,
-            currentUser: ServiceProvider.GetRequiredService<ICurrentUser>(),
-            cache: Cache);
+            currentUser: ServiceProvider.GetRequiredService<ICurrentUser>());
     }
 
     private async Task<User> ReloadAsync(Guid id)
@@ -90,6 +89,38 @@ public class UserLockoutIntegrationTests : RelationalIdentityIntegrationTestBase
         var after = await ReloadAsync(user.Id);
         Assert.Null(after.LockoutEnd);
         Assert.True(after.LockoutEnabled);
+    }
+
+    /// <summary>
+    /// ★★ 不给截止时间的锁定是「直到管理员解锁」。管理端三处入口（登录安全看板、用户列表、用户详情）都这样调用，
+    /// 文案写的也是「永久」；此前服务端把它落成一天后，被锁的人第二天不经任何人解锁就又能登录了。
+    /// </summary>
+    [Fact]
+    public async Task Lock_WithoutAnEndDate_HoldsUntilAnAdminUnlocks()
+    {
+        var user = await CreateUserAsync(email: "indefinite@example.com");
+
+        var locked = await _service.LockAsync(user.Id, lockoutEnd: null, reason: "test");
+        Assert.True(locked.Succeeded, locked.Message);
+
+        var after = await ReloadAsync(user.Id);
+        Assert.NotNull(after.LockoutEnd);
+        Assert.True(after.LockoutEnd!.Value > DateTimeOffset.UtcNow.AddYears(50), $"LockoutEnd was {after.LockoutEnd:o}");
+    }
+
+    /// <summary>对照组：给了截止时间就按它来。</summary>
+    [Fact]
+    public async Task Lock_WithAnEndDate_KeepsThatEndDate()
+    {
+        var user = await CreateUserAsync(email: "until@example.com");
+        var end = DateTimeOffset.UtcNow.AddDays(3);
+
+        var locked = await _service.LockAsync(user.Id, end, "test");
+        Assert.True(locked.Succeeded, locked.Message);
+
+        var after = await ReloadAsync(user.Id);
+        Assert.NotNull(after.LockoutEnd);
+        Assert.True((after.LockoutEnd!.Value - end).Duration() < TimeSpan.FromSeconds(1), $"LockoutEnd was {after.LockoutEnd:o}");
     }
 
     /// <summary>

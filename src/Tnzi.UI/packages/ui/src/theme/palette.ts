@@ -143,3 +143,152 @@ export function mixColor(from: string, to: string, ratio: number): string {
   const clamped = Math.max(0, Math.min(1, ratio))
   return colord(from).mix(to, clamped).toHex()
 }
+
+// ---------------------------------------------------------------------------
+// Contrast: what goes on a colour, and the colour as text.
+//
+// A brand colour can be anything a person picks at runtime, light or dark, so
+// neither "white on the primary" nor "the primary as text" can be a constant.
+// These two functions answer both questions for any colour; the theme layer
+// (`buildCssVars`, `buildNaiveThemeOverrides`) applies them to the primary.
+//
+// Ratios follow WCAG 2.x (relative luminance, (L1 + 0.05) / (L2 + 0.05)).
+// Alpha is ignored: a ratio is only defined between two opaque colours.
+// ---------------------------------------------------------------------------
+
+/** The foreground {@link getContrastTextColor} puts on a dark fill. */
+export const CONTRAST_TEXT_LIGHT = '#ffffff'
+
+/**
+ * The foreground {@link getContrastTextColor} puts on a light fill.
+ *
+ * Near-black rather than black: on a saturated fill pure black reads harsher
+ * than it needs to. Any ink with a relative luminance at or below 0.0278 reads
+ * at 4.5:1 on every fill where white falls under 3:1; this one (0.007) reads at
+ * 6.1:1 or more there.
+ */
+export const CONTRAST_TEXT_DARK = '#141414'
+
+/**
+ * White stays on a fill down to this ratio: the WCAG floor for large text and
+ * for interface components (1.4.3 / 1.4.11).
+ *
+ * Why not "whichever reads better": white text on a mid-tone brand colour
+ * (the default teal at 3.7:1, most blues and purples) is how those colours are
+ * designed to be used, and a pure maximum-contrast rule would turn all of them
+ * dark. Below 3:1 white is no longer a design choice but illegible (yellow at
+ * 1.4:1, orange at 2.8:1), and the dark ink then reads at 6:1 or more.
+ */
+export const MIN_LIGHT_TEXT_CONTRAST = 3
+
+/** WCAG AA for normal-size text. */
+export const READABLE_TEXT_CONTRAST = 4.5
+
+function linearChannel(channel: number): number {
+  const c = channel / 255
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+}
+
+function parseOrThrow(color: string, caller: string) {
+  const parsed = colord(color)
+  if (!parsed.isValid()) {
+    throw new Error(`${caller}: invalid color "${color}"`)
+  }
+  return parsed
+}
+
+/**
+ * WCAG 2.x relative luminance, 0 (black) to 1 (white). Not exported: the
+ * public question is always a ratio between two colours, and the admin
+ * package already exports a `relativeLuminance` with a different contract
+ * (`null` for an unparseable colour).
+ */
+function luminanceOf(color: string): number {
+  const { r, g, b } = parseOrThrow(color, 'contrastRatio').toRgb()
+  return 0.2126 * linearChannel(r) + 0.7152 * linearChannel(g) + 0.0722 * linearChannel(b)
+}
+
+/**
+ * WCAG 2.x contrast ratio between two colours, 1 to 21. Order does not matter.
+ *
+ * @throws If either color cannot be parsed.
+ */
+export function contrastRatio(a: string, b: string): number {
+  const la = luminanceOf(a)
+  const lb = luminanceOf(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+export interface ContrastTextOptions {
+  /** Foreground for a dark fill. Default {@link CONTRAST_TEXT_LIGHT}. */
+  light?: string
+  /** Foreground for a light fill. Default {@link CONTRAST_TEXT_DARK}. */
+  dark?: string
+  /** `light` is kept while it reads at least this well. Default {@link MIN_LIGHT_TEXT_CONTRAST}. */
+  minLightContrast?: number
+}
+
+/**
+ * The text / icon colour for content sitting ON a fill of `fill`: white while
+ * white reads at {@link MIN_LIGHT_TEXT_CONTRAST} or better, otherwise whichever
+ * of the two candidates reads better (the dark ink, for every real colour).
+ *
+ * @example getContrastTextColor('#0d9488') // '#ffffff' (3.7:1)
+ * @example getContrastTextColor('#ffd217') // '#141414' (12.7:1; white is 1.4:1)
+ * @throws If any color cannot be parsed.
+ */
+export function getContrastTextColor(fill: string, options: ContrastTextOptions = {}): string {
+  const {
+    light = CONTRAST_TEXT_LIGHT,
+    dark = CONTRAST_TEXT_DARK,
+    minLightContrast = MIN_LIGHT_TEXT_CONTRAST,
+  } = options
+  const onLight = contrastRatio(light, fill)
+  if (onLight >= minLightContrast) return light
+  return contrastRatio(dark, fill) > onLight ? dark : light
+}
+
+/**
+ * `color` as a text / icon colour on `background`: the colour itself when it
+ * already reads at `minContrast`, otherwise the same hue moved darker (on a
+ * light background) or lighter (on a dark one) just far enough to read.
+ *
+ * The move is along HSL lightness with hue and saturation held, so the result
+ * is recognisably the same colour (a light yellow becomes a dark gold, not a
+ * grey); the smallest move that reaches the ratio is taken, so a colour that
+ * nearly reads barely changes. HSL rather than a perceptual space is enough
+ * here because the ratio is measured on every candidate, and it keeps the
+ * lab / xyz conversions of a colour-space plugin out of every bundle that
+ * builds a theme.
+ *
+ * @example getReadableColor('#ffd217', '#ebebeb') // '#816800'
+ * @example getReadableColor('#0d9488', '#1c1c1c') // '#0d9488' (already 4.5:1)
+ * @throws If either color cannot be parsed.
+ */
+export function getReadableColor(
+  color: string,
+  background: string,
+  minContrast: number = READABLE_TEXT_CONTRAST,
+): string {
+  const base = parseOrThrow(color, 'getReadableColor')
+  parseOrThrow(background, 'getReadableColor')
+  const hex = base.alpha(1).toHex()
+  if (contrastRatio(hex, background) >= minContrast) return hex
+
+  const darken = contrastRatio('#000000', background) >= contrastRatio('#ffffff', background)
+  const { h, s, l } = base.toHsl()
+  const reads = (lightness: number): boolean =>
+    contrastRatio(colord({ h, s, l: lightness }).toHex(), background) >= minContrast
+
+  // Bisect between the colour's own lightness (does not read) and the far end
+  // (black / white, which reads unless the target is impossible).
+  let fails = l
+  let passes = darken ? 0 : 100
+  if (!reads(passes)) return darken ? '#000000' : '#ffffff'
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (fails + passes) / 2
+    if (reads(mid)) passes = mid
+    else fails = mid
+  }
+  return colord({ h, s, l: passes }).toHex()
+}

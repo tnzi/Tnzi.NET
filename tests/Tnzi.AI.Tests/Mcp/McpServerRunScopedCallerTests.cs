@@ -157,13 +157,16 @@ public class McpServerRunScopedCallerTests
     }
 
     [Fact]
-    public async Task InvokeAgent_StaticApiKey_NeverTouchesTenantContext()
+    public async Task InvokeAgent_StaticApiKey_RunsInTheHostScope()
     {
+        // 静态 key 没有可信的租户：显式切到宿主，而不是继承请求头带来的环境租户
         ActAsStaticKey();
 
-        await _host.CallToolAsync("agent-a", null);
+        var result = await _host.CallToolAsync("agent-a", null);
 
-        _tenant.Changes.ShouldBeEmpty();
+        result.IsError.ShouldNotBe(true);
+        JsonSerializer.Serialize(result.Content).ShouldContain("tenant=none");
+        _tenant.Changes.ShouldAllBe(t => t == null);
     }
 
     private sealed class HttpContextAccessorStub : IHttpContextAccessor

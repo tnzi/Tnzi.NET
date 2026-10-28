@@ -21,6 +21,12 @@ namespace Tnzi.Payment.Services;
 /// 所以不能靠扫描自己 <c>IgnoreQueryFilters</c>，必须整轮切进那个租户。要扫哪些租户由
 /// <see cref="IPaymentTenantSource"/> 贡献（并集，宁可多扫不可漏扫）；未开启多租户时一遍跑完，行为不变。
 /// </para>
+/// <para>
+/// ★ <b>每实例开关 <c>Payment:BackgroundTasks:Enabled</c></b>（<see cref="PaymentBackgroundTaskOptions"/>）：为 false 时循环不启动，
+/// 启动时记一条 Information。只在启动时读一次，刻意不是运行期设置：设置表是共用一个库的所有实例共用的，
+/// 在开发机上关掉它会连生产一起关掉。服务照常注册（与存储清理、审计保留期同形），
+/// <see cref="RunOnceAsync"/> 这类显式调用不受它管：开关管的是「本实例要不要定时扫」，不是「扫描能不能跑」。
+/// </para>
 /// </remarks>
 public class PaymentBackgroundService : BackgroundService
 {
@@ -28,21 +34,30 @@ public class PaymentBackgroundService : BackgroundService
     private readonly ILogger<PaymentBackgroundService> _logger;
     private readonly IOptionsMonitor<PaymentOptions> _options;
     private readonly bool _multiTenancyEnabled;
+    private readonly bool _enabled;
 
     public PaymentBackgroundService(
         IServiceProvider serviceProvider,
         ILogger<PaymentBackgroundService> logger,
         IOptionsMonitor<PaymentOptions> options,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        IOptions<PaymentBackgroundTaskOptions>? backgroundTaskOptions = null)
     {
         _serviceProvider = Check.NotNull(serviceProvider);
         _logger = Check.NotNull(logger);
         _options = Check.NotNull(options);
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _enabled = backgroundTaskOptions?.Value.Enabled ?? true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_enabled)
+        {
+            _logger.LogInformation("PaymentBackgroundService is disabled on this instance (Payment:BackgroundTasks:Enabled=false): no scheduled payment scans (renewals, trial conversions, overdue handling, payment expiry, refund reconciliation) will run here. Webhooks and user-initiated payments are unaffected.");
+            return;
+        }
+
         _logger.LogInformation("PaymentBackgroundService started. Interval: {Interval}min", _options.CurrentValue.BackgroundTaskIntervalMinutes);
 
         // 启动后延迟 30 秒再开始首次执行，避免应用启动时负载

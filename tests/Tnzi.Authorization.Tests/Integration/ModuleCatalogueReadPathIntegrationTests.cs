@@ -142,4 +142,97 @@ public class ModuleCatalogueReadPathIntegrationTests : IntegratedTestBase<Author
 
         result.Data!.Single(f => f.Code == "parent.child.export").IsRetired.ShouldBeTrue();
     }
+
+    /// <summary>
+    /// ★权限目录（三张管理页共用的数据源）与「模块列表 + 逐模块功能列表」同一口径：
+    /// 每个模块都在（含停用、退役），每个功能挂在自己的模块下（含停用、退役），层级只靠 ParentId，按 Order 排。
+    /// </summary>
+    [Fact]
+    public async Task GetPermissionCatalogue_ReturnsEveryModuleWithAllItsFunctions()
+    {
+        await SeedParentAndChildAsync();
+        var modules = ServiceProvider.GetRequiredService<IRepository<FunctionModule, Guid>>();
+        var retiredModuleId = Guid.NewGuid();
+        await modules.InsertAsync(new FunctionModule { Id = retiredModuleId, Name = "Old", Code = "old", Order = 3, IsEnabled = false, IsRetired = true });
+        var functions = ServiceProvider.GetRequiredService<IRepository<ModuleFunction, Guid>>();
+        await functions.InsertAsync(new ModuleFunction { Id = Guid.NewGuid(), ModuleId = ChildId, Name = "Delete", Code = "parent.child.delete", Order = 0, IsEnabled = false });
+        await functions.InsertAsync(new ModuleFunction { Id = Guid.NewGuid(), ModuleId = retiredModuleId, Name = "Gone", Code = "old.gone", Order = 1, IsRetired = true });
+
+        var result = await Service.GetPermissionCatalogueAsync();
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var catalogue = result.Data!;
+        catalogue.Select(m => m.Code).ShouldBe(["parent", "parent.child", "old"]);
+        catalogue.Single(m => m.Id == ChildId).ParentId.ShouldBe(ParentId);
+        catalogue.Single(m => m.Id == ParentId).Functions.ShouldBeEmpty();
+        catalogue.Single(m => m.Id == ChildId).Functions.Select(f => f.Code).ShouldBe(["parent.child.delete", "parent.child.view"]);
+        catalogue.Single(m => m.Id == ChildId).Functions[0].IsEnabled.ShouldBeFalse();
+        var old = catalogue.Single(m => m.Id == retiredModuleId);
+        old.IsRetired.ShouldBeTrue();
+        old.IsEnabled.ShouldBeFalse();
+        old.Functions.Single().IsRetired.ShouldBeTrue();
+
+        Should.NotThrow(() => SerializeLikeMvc(catalogue));
+    }
+
+    /// <summary>内置目录的标记与 <c>GET admin/modules</c> 同源：按运行中的模块图，应用自己的模块不标。</summary>
+    [Fact]
+    public async Task GetPermissionCatalogue_FlagsFrameworkModulesFromTheRunningModuleGraph()
+    {
+        var modules = ServiceProvider.GetRequiredService<IRepository<FunctionModule, Guid>>();
+        await modules.InsertAsync(new FunctionModule { Id = Guid.NewGuid(), Name = "Authorization", Code = "authorization", Order = 1 });
+        await modules.InsertAsync(new FunctionModule { Id = Guid.NewGuid(), Name = "Shop", Code = "shop", Order = 2 });
+
+        var descriptor = new Mock<Tnzi.Modules.IModuleDescriptor>();
+        descriptor.SetupGet(d => d.Instance).Returns(new FakeAppModule());
+        descriptor.SetupGet(d => d.Assembly).Returns(typeof(AuthorizationPermissions).Assembly);
+        var application = new Mock<ITnziApplication>();
+        application.SetupGet(a => a.Modules).Returns(new List<Tnzi.Modules.IModuleDescriptor> { descriptor.Object });
+
+        var service = new FunctionAuthorizationService(
+            ServiceProvider.GetRequiredService<IRepository<FunctionModule, Guid>>(),
+            ServiceProvider.GetRequiredService<IRepository<ModuleFunction, Guid>>(),
+            ServiceProvider.GetRequiredService<IRepository<RoleFunction, Guid>>(),
+            ServiceProvider.GetRequiredService<IRepository<UserFunction, Guid>>(),
+            ServiceProvider,
+            application: application.Object);
+
+        var result = await service.GetPermissionCatalogueAsync();
+
+        var byCode = result.Data!.ToDictionary(m => m.Code);
+        byCode["authorization"].IsBuiltIn.ShouldBeTrue();
+        byCode["shop"].IsBuiltIn.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// 「哪些角色授了这个码」答的是与角色授权分页列表同一个形状：带上码、名称与所属模块。
+    /// 此前直接返回授权行实体，<c>function</c> 导航为空，前端按 <c>RoleFunctionDto</c> 读到的码与名称是 undefined。
+    /// </summary>
+    [Fact]
+    public async Task GetFunctionRoles_ReturnsTheCodeNameAndModuleOfTheFunction()
+    {
+        await SeedParentAndChildAsync();
+        var function = await DbContext.ModuleFunctions.AsNoTracking().SingleAsync(f => f.Code == "parent.child.view");
+        var grantingRole = Guid.NewGuid();
+        var disabledGrantRole = Guid.NewGuid();
+        DbContext.RoleFunctions.AddRange(
+            new RoleFunction { Id = Guid.NewGuid(), RoleId = grantingRole, FunctionId = function.Id, IsEnabled = true, CreationTime = DateTime.UtcNow },
+            new RoleFunction { Id = Guid.NewGuid(), RoleId = disabledGrantRole, FunctionId = function.Id, IsEnabled = false, CreationTime = DateTime.UtcNow });
+        await DbContext.SaveChangesAsync();
+
+        var result = await Service.GetFunctionRolesAsync(function.Id);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var row = result.Data!.ShouldHaveSingleItem();
+        row.RoleId.ShouldBe(grantingRole);
+        row.FunctionId.ShouldBe(function.Id);
+        row.FunctionCode.ShouldBe("parent.child.view");
+        row.FunctionName.ShouldBe("View");
+        row.ModuleId.ShouldBe(ChildId);
+        row.IsEnabled.ShouldBeTrue();
+    }
+
+    private sealed class FakeAppModule : Tnzi.Modules.TnziApplicationModule
+    {
+    }
 }

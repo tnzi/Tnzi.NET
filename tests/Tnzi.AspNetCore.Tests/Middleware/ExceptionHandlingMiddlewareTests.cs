@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.Http.Features;
 
 
 namespace Tnzi.AspNetCore.Tests.Middleware;
@@ -615,17 +616,12 @@ public class ExceptionHandlingMiddlewareTests
     }
 
     [Fact]
-    public async Task InvokeAsync_WhenCustomHandlerReturnsContinueHandling_ShouldThrowException()
+    public async Task InvokeAsync_WhenCustomHandlerReturnsContinueHandling_FallsThroughToTheBuiltInChain()
     {
-        // Arrange
-        var customResult = new ExceptionHandlingResult
-        {
-            ShouldContinueHandling = true
-        };
-
-        var handler = new TestBusinessExceptionHandler(customResult);
-        var exception = new BusinessException("Test error", ErrorCodes.BUSINESS_ERROR, 400);
-        RequestDelegate next = _ => throw exception;
+        // 「继续使用默认处理逻辑」= 交给内置处理器链出标准信封；此前是 throw; 把异常抛出最外层中间件，
+        // 客户端拿到的是服务器裸 500，没有信封。
+        var handler = new TestBusinessExceptionHandler(new ExceptionHandlingResult { ShouldContinueHandling = true });
+        RequestDelegate next = _ => throw new BusinessException("Test error", ErrorCodes.BUSINESS_ERROR, 409);
 
         var options = new ExceptionHandlingOptions
         {
@@ -635,21 +631,243 @@ public class ExceptionHandlingMiddlewareTests
             }
         };
         var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
-
-        _serviceProviderMock.Setup(sp => sp.GetService(typeof(TestBusinessExceptionHandler)))
-            .Returns(handler);
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(TestBusinessExceptionHandler))).Returns(handler);
 
         var middleware = new ExceptionHandlingMiddleware(
-            next,
-            _loggerMock.Object,
-            _environmentMock.Object,
-            optionsMonitor,
-            _serviceProviderMock.Object);
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
 
-        var context = new DefaultHttpContext();
+        await middleware.InvokeAsync(context);
 
-        // Act & Assert
-        await Assert.ThrowsAsync<BusinessException>(() => middleware.InvokeAsync(context));
+        Assert.Equal(409, context.Response.StatusCode);
+        var body = await ReadBodyAsync(context);
+        Assert.Equal("Test error", body.RootElement.GetProperty("message").GetString());
+        Assert.False(body.RootElement.GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ACustomHandlerRegisteredForABaseType_HandlesItsSubclasses()
+    {
+        // 按精确类型查表时，登记在 BusinessException 上的处理器永远看不到 ResourceNotFoundException。
+        var handler = new TestBusinessExceptionHandler(new ExceptionHandlingResult { StatusCode = 418, Message = "From base handler" });
+        RequestDelegate next = _ => throw new ResourceNotFoundException("Missing");
+
+        var options = new ExceptionHandlingOptions
+        {
+            CustomHandlers = new Dictionary<Type, Type>
+            {
+                { typeof(BusinessException), typeof(TestBusinessExceptionHandler) }
+            }
+        };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(TestBusinessExceptionHandler))).Returns(handler);
+
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(418, context.Response.StatusCode);
+        Assert.Equal("From base handler", (await ReadBodyAsync(context)).RootElement.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TheNearestRegisteredTypeWins()
+    {
+        var baseHandler = new TestBusinessExceptionHandler(new ExceptionHandlingResult { StatusCode = 418, Message = "base" });
+        var exactHandler = new TestNotFoundExceptionHandler(new ExceptionHandlingResult { StatusCode = 410, Message = "exact" });
+        RequestDelegate next = _ => throw new ResourceNotFoundException("Missing");
+
+        var options = new ExceptionHandlingOptions
+        {
+            CustomHandlers = new Dictionary<Type, Type>
+            {
+                { typeof(BusinessException), typeof(TestBusinessExceptionHandler) },
+                { typeof(ResourceNotFoundException), typeof(TestNotFoundExceptionHandler) }
+            }
+        };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(TestBusinessExceptionHandler))).Returns(baseHandler);
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(TestNotFoundExceptionHandler))).Returns(exactHandler);
+
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(410, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenIncludeRetryInfoFalse_OmitsIsRetryableAndKeepsTheStandardEnvelope()
+    {
+        RequestDelegate next = _ => throw new InfrastructureException("Cache", "Cache unavailable", isRetryable: true);
+        var options = new ExceptionHandlingOptions { IncludeRetryInfo = false };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(503, context.Response.StatusCode);
+        var body = await ReadBodyAsync(context);
+        Assert.False(body.RootElement.TryGetProperty("isRetryable", out _));
+        Assert.False(body.RootElement.TryGetProperty("contextData", out _));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TheRequestIdTheClientHolds_IsWhatTheErrorPathRecords()
+    {
+        // 客户端在 X-Request-Id 响应头里拿到的是追踪中间件给的 id；错误路径此前记的是 Kestrel 的 TraceIdentifier，
+        // 标准信封里则根本没有 requestId，三处对不上。
+        var stats = new Mock<IExceptionStatistics>();
+        RequestDelegate next = _ => throw new ResourceNotFoundException("Missing");
+        var options = new ExceptionHandlingOptions { IncludeRequestId = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object, stats.Object);
+        var context = CreateHttpContext();
+        context.TraceIdentifier = "0HN-connection:00000002";
+        context.Items["RequestId"] = "client-abc";
+
+        await middleware.InvokeAsync(context);
+
+        stats.Verify(s => s.RecordException(It.IsAny<Exception>(), "client-abc"), Times.Once);
+        var body = await ReadBodyAsync(context);
+        Assert.Equal(404, body.RootElement.GetProperty("code").GetInt32());
+        Assert.Equal("client-abc", body.RootElement.GetProperty("requestId").GetString());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenIncludeRequestIdFalse_TheStandardEnvelopeCarriesNoRequestId()
+    {
+        RequestDelegate next = _ => throw new ResourceNotFoundException("Missing");
+        var options = new ExceptionHandlingOptions { IncludeRequestId = false };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+        context.Items["RequestId"] = "client-abc";
+
+        await middleware.InvokeAsync(context);
+
+        Assert.False((await ReadBodyAsync(context)).RootElement.TryGetProperty("requestId", out _));
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AClientAbort_IsNotAServerError()
+    {
+        // 用户关掉页面：EF / HttpClient 抛 TaskCanceledException。此前被记成 Error 级系统异常、计入异常统计、
+        // 再往已断开的连接写一个 500。
+        var stats = new Mock<IExceptionStatistics>();
+        var handlerLogger = new Mock<ILogger<DefaultExceptionHandler>>();
+        _serviceProviderMock.Setup(sp => sp.GetService(typeof(ILogger<DefaultExceptionHandler>))).Returns(handlerLogger.Object);
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        RequestDelegate next = _ => throw new TaskCanceledException();
+
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == new ExceptionHandlingOptions());
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object, stats.Object);
+        var context = CreateHttpContext();
+        context.RequestAborted = aborted.Token;
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status499ClientClosedRequest, context.Response.StatusCode);
+        stats.Verify(s => s.RecordException(It.IsAny<Exception>(), It.IsAny<string?>()), Times.Never);
+        VerifyNoErrorLogged(handlerLogger);
+        VerifyNoErrorLogged(_loggerMock);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ACancellationTheClientDidNotCause_IsStillAServerError()
+    {
+        // 过宽的吞法会把内部超时（未开 RequestAborted 的取消）也当成客户端断开。
+        var stats = new Mock<IExceptionStatistics>();
+        RequestDelegate next = _ => throw new TaskCanceledException("internal timeout");
+
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == new ExceptionHandlingOptions());
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object, stats.Object);
+        var context = CreateHttpContext();
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(500, context.Response.StatusCode);
+        stats.Verify(s => s.RecordException(It.IsAny<Exception>(), It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AnExceptionAfterTheResponseStarted_IsRethrownSoTheServerAbortsTheResponse()
+    {
+        // 流式响应写过一段后抛异常：此前中间件只记一行不带堆栈的 Warning 然后正常返回，
+        // Kestrel 于是写出结束块，客户端看到一个 200、看上去完整、其实被截断的响应体。
+        var stats = new Mock<IExceptionStatistics>();
+        var failure = new InvalidOperationException("mid-stream failure");
+        RequestDelegate next = _ => throw failure;
+
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == new ExceptionHandlingOptions());
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object, stats.Object);
+        var context = CreateHttpContext();
+        context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(() => middleware.InvokeAsync(context));
+
+        Assert.Same(failure, thrown);
+        stats.Verify(s => s.RecordException(failure, It.IsAny<string?>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AnExceptionAfterTheResponseStarted_WhenTheClientIsGone_IsNotRethrown()
+    {
+        using var aborted = new CancellationTokenSource();
+        aborted.Cancel();
+        RequestDelegate next = _ => throw new IOException("connection reset");
+
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == new ExceptionHandlingOptions());
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+        var context = CreateHttpContext();
+        context.RequestAborted = aborted.Token;
+        context.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());
+
+        await middleware.InvokeAsync(context);
+
+        VerifyNoErrorLogged(_loggerMock);
+    }
+
+    private static async Task<JsonDocument> ReadBodyAsync(HttpContext context)
+    {
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var reader = new StreamReader(context.Response.Body, leaveOpen: true);
+        return JsonDocument.Parse(await reader.ReadToEndAsync());
+    }
+
+    private static void VerifyNoErrorLogged<T>(Mock<ILogger<T>> logger)
+        => logger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+
+    /// <summary>响应头已经发出（流式端点写过第一块）。</summary>
+    private sealed class StartedResponseFeature : IHttpResponseFeature
+    {
+        public int StatusCode { get; set; } = 200;
+        public string? ReasonPhrase { get; set; }
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+        public Stream Body { get; set; } = new MemoryStream();
+        public bool HasStarted => true;
+        public void OnStarting(Func<object, Task> callback, object state) { }
+        public void OnCompleted(Func<object, Task> callback, object state) { }
     }
 
     [Fact]
@@ -738,10 +956,55 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("secret-payload-123")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenLogRequestBodyEnabled_RedactsACredentialInThePath()
+    {
+        // 与请求日志同一道脱敏：签署页的 signing/{token} 是外部签署人的全部身份，
+        // 异常诊断把路径写进服务端日志时不能把它带出来。
+        const string secret = "S3CR3T-SIGNING-TOKEN";
+        RequestDelegate next = ctx =>
+        {
+            ctx.Request.RouteValues["token"] = secret;
+            throw new Exception("boom");
+        };
+
+        var options = new ExceptionHandlingOptions { LogRequestBody = true };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<ExceptionHandlingOptions>>(x => x.CurrentValue == options);
+
+        var middleware = new ExceptionHandlingMiddleware(
+            next, _loggerMock.Object, _environmentMock.Object, optionsMonitor, _serviceProviderMock.Object);
+
+        var context = CreateHttpContext();
+        var bodyBytes = "{\"fieldValues\":{\"name\":\"x\"}}"u8.ToArray();
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/signing/" + secret;
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        await middleware.InvokeAsync(context);
+
+        _loggerMock.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("/api/signing/***")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+        _loggerMock.Verify(
+            x => x.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains(secret)),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]
@@ -770,7 +1033,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("secret-payload-123")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -808,7 +1071,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("secret-payload-123")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -846,7 +1109,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("secret-payload-123")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -879,7 +1142,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("alice")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("alice")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -887,7 +1150,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("hunter2-plaintext")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("hunter2-plaintext")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -921,7 +1184,7 @@ public class ExceptionHandlingMiddlewareTests
             x => x.Log(
                 It.IsAny<LogLevel>(),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("secret-payload-123")),
+                It.Is<It.IsAnyType>((o, _) => o != null && o.ToString()!.Contains("secret-payload-123")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
@@ -963,4 +1226,16 @@ internal class TestBusinessExceptionHandler : IExceptionHandler<BusinessExceptio
     {
         return Task.FromResult(_result);
     }
+}
+
+/// <summary>
+/// 测试用的、登记在子类上的处理器（验证「最近的登记类型优先」）
+/// </summary>
+internal class TestNotFoundExceptionHandler(ExceptionHandlingResult? result) : IExceptionHandler<ResourceNotFoundException>
+{
+    public Task<ExceptionHandlingResult?> HandleAsync(
+        ResourceNotFoundException exception,
+        HttpContext context,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(result);
 }

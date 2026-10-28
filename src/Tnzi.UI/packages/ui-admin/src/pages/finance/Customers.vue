@@ -128,6 +128,8 @@ function toPayload(d: Record<string, unknown>): UpdateCustomerDto {
 
 const crud = useCrudPage<CustomerRow>({
   pageId: 'finance.customers',
+  // A customer is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'finance.customer',
   columns,
   rowKey: (r) => String(r.id ?? ''),

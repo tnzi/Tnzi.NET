@@ -15,5 +15,6 @@ export * from './flags';
 export * from './device-parser';
 export * from './download';
 export * from './print';
+export * from './keyboard';
 export { generateId, generateUuid } from './id';
 export { deepEqual } from './deep-equal';

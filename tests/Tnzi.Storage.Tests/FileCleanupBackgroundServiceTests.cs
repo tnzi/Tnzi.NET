@@ -99,7 +99,7 @@ public class FileCleanupBackgroundServiceTests
             x => x.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("cron expression")),
+                It.Is<It.IsAnyType>((v, t) => v != null && v.ToString()!.Contains("cron expression")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
@@ -135,10 +135,62 @@ public class FileCleanupBackgroundServiceTests
             x => x.Log(
                 LogLevel.Error,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Invalid Cleanup.CronExpression")),
+                It.Is<It.IsAnyType>((v, t) => v != null && v.ToString()!.Contains("Invalid Cleanup.CronExpression")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// ★★ A legal low-frequency cron (here: leap days only) puts the first run far beyond the
+    /// ~49.7-day ceiling of a single Task.Delay. The schedule has to keep waiting; a fault here
+    /// would stop the whole host under the default BackgroundServiceExceptionBehavior.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_WhenTheNextCronRunIsMonthsAway_KeepsWaitingInsteadOfFaulting()
+    {
+        var options = new StorageOptions
+        {
+            Cleanup = new CleanupOptions { Enabled = true, CronExpression = "0 0 29 2 *", IntervalMinutes = 60 }
+        };
+        var service = CreateService(options);
+        using var cts = new CancellationTokenSource();
+
+        await service.StartAsync(cts.Token);
+        await WaitForLogAsync(LogLevel.Information, "cron expression");
+        await Task.Delay(200);
+
+        Assert.NotNull(service.ExecuteTask);
+        Assert.False(service.ExecuteTask!.IsCompleted, "the cleanup schedule ended instead of waiting for its next run");
+
+        await service.StopAsync(CancellationToken.None);
+        Assert.False(HasLogged(LogLevel.Error, "unexpected scheduling error"));
+    }
+
+    [Fact]
+    public async Task DelayUntilAsync_FarBeyondTheTimerCeiling_WaitsInSlicesUntilCancelled()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        // 400 days: one Task.Delay of that length throws ArgumentOutOfRangeException.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => FileCleanupBackgroundService.DelayUntilAsync(DateTime.UtcNow.AddDays(400), cts.Token));
+    }
+
+    [Fact]
+    public async Task DelayUntilAsync_TargetInThePast_ReturnsImmediately()
+    {
+        await FileCleanupBackgroundService.DelayUntilAsync(DateTime.UtcNow.AddMinutes(-5), CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-30, 1)]
+    [InlineData(1, 1)]
+    [InlineData(100000, 100000)]
+    public void EffectiveInterval_IsAtLeastOneMinute(int configured, int expectedMinutes)
+    {
+        Assert.Equal(TimeSpan.FromMinutes(expectedMinutes), FileCleanupBackgroundService.EffectiveInterval(configured));
     }
 
     [Fact]

@@ -8,6 +8,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     private readonly IRepository<StoredPaymentMethod, Guid> _methodRepository;
     private readonly IPaymentProviderFactory _paymentProviderFactory;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+    private readonly IBillingAccountResolver _accountResolver;
+    private readonly IBillingAccountService _billingAccountService;
 
     /// <summary>
     /// 「卡被绑上 / 被解绑」的下游接收方。本模块不认识订阅 —— 续费域自己来接
@@ -23,6 +25,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         IRepository<StoredPaymentMethod, Guid> methodRepository,
         IPaymentProviderFactory paymentProviderFactory,
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
+        IBillingAccountResolver accountResolver,
+        IBillingAccountService billingAccountService,
         IServiceProvider serviceProvider,
         IEnumerable<IStoredPaymentMethodBindingSink>? bindingSinks = null,
         ICurrentTenant? currentTenant = null)
@@ -31,6 +35,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         _methodRepository = Check.NotNull(methodRepository);
         _paymentProviderFactory = Check.NotNull(paymentProviderFactory);
         _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
+        _accountResolver = Check.NotNull(accountResolver);
+        _billingAccountService = Check.NotNull(billingAccountService);
         _bindingSinks = bindingSinks?.ToList() ?? [];
         _currentTenant = currentTenant;
     }
@@ -38,6 +44,11 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     public async Task<Result<SetupSessionDto>> CreateSetupSessionAsync(Guid userId, CreateSetupSessionDto request, CancellationToken cancellationToken = default)
     {
         Check.NotNull(request);
+
+        var scope = await _accountResolver.ResolveScopeAsync(userId, manage: true, cancellationToken);
+        if (!scope.Succeeded || scope.Data == null)
+            return Fail<SetupSessionDto>(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+        var account = scope.Data;
 
         // 绑卡回跳同样把付款人的浏览器送出去（PayPal 走整页授权），与建单是同一条开放重定向面
         foreach (var (url, field) in new[] { (request.ReturnUrl, nameof(request.ReturnUrl)), (request.CancelUrl, nameof(request.CancelUrl)) })
@@ -53,23 +64,27 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             return Fail<SetupSessionDto>(ErrorCodes.PaymentReturnUrlNotAllowed, 400);
         }
 
-        var channelCode = ResolveChannelCode(request.ChannelCode);
-        var provider = _paymentProviderFactory.GetProvider(channelCode);
+        var provider = _paymentProviderFactory.GetProvider(ResolveChannelCode(request.ChannelCode));
         if (provider == null)
             return Fail<SetupSessionDto>(ErrorCodes.PaymentChannelNotSupported, 400);
 
         if (!provider.SupportsPaymentMethodStorage)
             return Fail<SetupSessionDto>(ErrorCodes.PaymentMethodStorageNotSupported, 400);
 
-        // 复用该用户在该渠道下已有的渠道客户，避免每次绑卡都在渠道侧新建一个客户
-        var providerCustomerId = await FindProviderCustomerIdAsync(userId, channelCode, cancellationToken);
+        // 渠道自己的写法：客户端拿回去原样传给绑卡，存下的与按它查的才是同一个值（见 BindEntityAsync）
+        var channelCode = provider.ChannelCode;
+
+        // 复用该账户在该渠道下已有的渠道客户，避免每次绑卡都在渠道侧新建一个客户
+        var providerCustomerId = await FindProviderCustomerIdAsync(account, channelCode, cancellationToken);
+        var contact = await _billingAccountService.ResolveContactAsync(account, CurrentUser?.UserName, CurrentUser?.Email, CurrentUser?.Id, cancellationToken);
 
         var result = await provider.CreateSetupSessionAsync(new PaymentProviderSetupDto
         {
             UserId = userId,
+            BillingAccount = account,
             ProviderCustomerId = providerCustomerId,
-            CustomerName = CurrentUser?.UserName,
-            CustomerEmail = CurrentUser?.Email,
+            CustomerName = contact.Name,
+            CustomerEmail = contact.PrimaryEmail,
             ReturnUrl = request.ReturnUrl,
             CancelUrl = request.CancelUrl
         });
@@ -90,12 +105,18 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     {
         Check.NotNull(request);
 
+        var scope = await _accountResolver.ResolveScopeAsync(userId, manage: true, cancellationToken);
+        if (!scope.Succeeded || scope.Data == null)
+            return Fail<StoredPaymentMethodDto>(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+
+        var contact = await _billingAccountService.ResolveContactAsync(scope.Data, CurrentUser?.UserName, CurrentUser?.Email, CurrentUser?.Id, cancellationToken);
         var result = await BindEntityAsync(
+            scope.Data,
             userId,
             ResolveChannelCode(request.ChannelCode),
             request.PaymentMethodToken,
-            CurrentUser?.UserName,
-            CurrentUser?.Email,
+            contact.Name,
+            contact.PrimaryEmail,
             request.SetAsDefault,
             cancellationToken);
 
@@ -106,7 +127,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     }
 
     public async Task<Result<StoredPaymentMethod>> BindEntityAsync(
-        Guid userId,
+        BillingAccountRef account,
+        Guid actingUserId,
         string channelCode,
         string paymentMethodToken,
         string? customerName,
@@ -114,6 +136,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         bool setAsDefault,
         CancellationToken cancellationToken = default)
     {
+        Check.NotNull(account);
+
         if (string.IsNullOrWhiteSpace(paymentMethodToken))
             return Fail<StoredPaymentMethod>(ErrorCodes.PaymentMethodNotFound, 400);
 
@@ -124,15 +148,22 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         if (!provider.SupportsPaymentMethodStorage)
             return Fail<StoredPaymentMethod>(ErrorCodes.PaymentMethodStorageNotSupported, 400);
 
-        var providerCustomerId = await FindProviderCustomerIdAsync(userId, channelCode, cancellationToken);
+        // ★ 以下的读写一律用渠道自己的写法：渠道查找不区分大小写，存下的值却被按等值比较：
+        // 撤卡回调按 "Stripe" 找、订阅按自己的渠道找默认卡、同一用户的渠道客户也按它复用。
+        // 此前存的是请求原样，以 "stripe" 绑的卡在区分大小写的数据库上谁都找不到：用户在渠道侧删掉的卡在本地仍然有效，
+        // 同一个用户还会在渠道侧多出一个客户。
+        channelCode = provider.ChannelCode;
 
-        // 向渠道校验：确认支付方式存在、归属本用户的渠道客户（必要时补挂），并取回展示信息。
+        var providerCustomerId = await FindProviderCustomerIdAsync(account, channelCode, cancellationToken);
+
+        // 向渠道校验：确认支付方式存在、归属本账户的渠道客户（必要时补挂），并取回展示信息。
         // 不做这一步就落库，等于把一个可能无效的 token 留到扣款当天才炸。
         var resolved = await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
         {
             PaymentMethodToken = paymentMethodToken,
             ProviderCustomerId = providerCustomerId,
-            UserId = userId,
+            UserId = actingUserId,
+            BillingAccount = account,
             CustomerName = customerName,
             CustomerEmail = customerEmail
         });
@@ -151,21 +182,21 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             var existing = await _methodRepository.FirstOrDefaultAsync(
                 m => m.ChannelCode == channelCode && m.Token == descriptor.Token, ct);
 
-            if (existing != null && existing.UserId != userId)
+            if (existing != null && (existing.BillingAccountType != account.Type || existing.BillingAccountId != account.Id))
             {
-                // 同一 token 已归属他人：拒绝，避免把别人的卡挂到当前用户名下
-                Logger.LogWarning("Payment method token already bound to another user. Channel: {Channel}", channelCode);
+                // 同一 token 已归属另一个账户：拒绝，避免把别人的卡挂到当前账户名下
+                Logger.LogWarning("Payment method token already bound to another billing account. Channel: {Channel}", channelCode);
                 return Fail<StoredPaymentMethod>(ErrorCodes.PaymentMethodBindingFailed, 409);
             }
 
             var isFirstMethod = !await _methodRepository.AnyAsync(
-                m => m.UserId == userId && m.ChannelCode == channelCode && m.IsActive, ct);
+                m => m.BillingAccountType == account.Type && m.BillingAccountId == account.Id && m.ChannelCode == channelCode && m.IsActive, ct);
 
             // 首个支付方式必须是默认的，否则后台扣款找不到默认卡
             var shouldBeDefault = setAsDefault || isFirstMethod;
 
             if (shouldBeDefault)
-                await ClearDefaultAsync(userId, channelCode, ct);
+                await ClearDefaultAsync(account, channelCode, ct);
 
             if (existing != null)
             {
@@ -184,7 +215,9 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
 
             var created = new StoredPaymentMethod
             {
-                UserId = userId,
+                UserId = actingUserId,
+                BillingAccountType = account.Type,
+                BillingAccountId = account.Id,
                 ChannelCode = channelCode,
                 ProviderCustomerId = descriptor.ProviderCustomerId,
                 Token = descriptor.Token,
@@ -205,20 +238,25 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         if (!stored.Succeeded || stored.Data == null)
             return stored;
 
-        Logger.LogInformation("Payment method bound. UserId: {UserId}, Channel: {Channel}, Brand: {Brand}, Last4: {Last4}",
-            userId, channelCode, stored.Data.Brand, stored.Data.Last4);
+        Logger.LogInformation("Payment method bound. Account: {Account}, UserId: {UserId}, Channel: {Channel}, Brand: {Brand}, Last4: {Last4}",
+            account, actingUserId, channelCode, stored.Data.Brand, stored.Data.Last4);
 
-        // 通知下游：新绑的默认卡可以同步到该用户尚未绑卡的记录，让"绑了卡就能自动续费"成立
+        // 通知下游：新绑的默认卡可以同步到该账户尚未绑卡的记录，让"绑了卡就能自动续费"成立
         if (stored.Data.IsDefault)
-            await NotifyBoundAsync(userId, stored.Data, cancellationToken);
+            await NotifyBoundAsync(account, stored.Data, cancellationToken);
 
         return stored;
     }
 
     public async Task<Result<List<StoredPaymentMethodDto>>> GetUserMethodsAsync(Guid userId, CancellationToken cancellationToken = default)
     {
+        var scope = await _accountResolver.ResolveScopeAsync(userId, manage: false, cancellationToken);
+        if (!scope.Succeeded || scope.Data == null)
+            return Fail<List<StoredPaymentMethodDto>>(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+        var account = scope.Data;
+
         var methods = await _methodRepository.AsNoTracking()
-            .Where(m => m.UserId == userId && m.IsActive)
+            .Where(m => m.BillingAccountType == account.Type && m.BillingAccountId == account.Id && m.IsActive)
             .OrderByDescending(m => m.IsDefault)
             .ThenByDescending(m => m.CreationTime)
             .ToListAsync(cancellationToken);
@@ -228,8 +266,12 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
 
     public async Task<Result> SetDefaultAsync(Guid userId, Guid paymentMethodId, CancellationToken cancellationToken = default)
     {
-        var method = await _methodRepository.FirstOrDefaultAsync(
-            m => m.Id == paymentMethodId && m.UserId == userId && m.IsActive, cancellationToken);
+        var scope = await _accountResolver.ResolveScopeAsync(userId, manage: true, cancellationToken);
+        if (!scope.Succeeded || scope.Data == null)
+            return Fail(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+        var account = scope.Data;
+
+        var method = await FindByIdAsync(account, paymentMethodId, cancellationToken);
         if (method == null)
             return Fail(ErrorCodes.PaymentMethodNotFound, 404);
 
@@ -240,13 +282,13 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         {
             // 同 BindEntityAsync：裸 SQL 必须先强开物理事务，否则"清旧默认"与"设新默认"可能只落一半
             await _methodRepository.EnsureTransactionStartedAsync(ct);
-            await ClearDefaultAsync(userId, method.ChannelCode, ct);
+            await ClearDefaultAsync(account, method.ChannelCode, ct);
             method.IsDefault = true;
             await _methodRepository.UpdateAsync(method, ct);
             return Ok();
         }, cancellationToken);
 
-        await NotifyBoundAsync(userId, method, cancellationToken);
+        await NotifyBoundAsync(account, method, cancellationToken);
 
         Logger.LogInformation("Default payment method changed. UserId: {UserId}, MethodId: {MethodId}", userId, paymentMethodId);
         return Ok();
@@ -254,8 +296,12 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
 
     public async Task<Result> RemoveAsync(Guid userId, Guid paymentMethodId, CancellationToken cancellationToken = default)
     {
-        var method = await _methodRepository.FirstOrDefaultAsync(
-            m => m.Id == paymentMethodId && m.UserId == userId && m.IsActive, cancellationToken);
+        var scope = await _accountResolver.ResolveScopeAsync(userId, manage: true, cancellationToken);
+        if (!scope.Succeeded || scope.Data == null)
+            return Fail(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+        var account = scope.Data;
+
+        var method = await FindByIdAsync(account, paymentMethodId, cancellationToken);
         if (method == null)
             return Fail(ErrorCodes.PaymentMethodNotFound, 404);
 
@@ -266,7 +312,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             {
                 PaymentMethodToken = method.Token,
                 ProviderCustomerId = method.ProviderCustomerId,
-                UserId = userId
+                UserId = userId,
+                BillingAccount = account
             });
 
             if (!detach.Succeeded)
@@ -296,16 +343,77 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
         return Ok();
     }
 
-    public Task<StoredPaymentMethod?> FindDefaultAsync(Guid userId, string channelCode, CancellationToken cancellationToken = default)
+    public Task<StoredPaymentMethod?> FindDefaultAsync(BillingAccountRef account, string channelCode, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(account);
         return _methodRepository.FirstOrDefaultAsync(
-            m => m.UserId == userId && m.ChannelCode == channelCode && m.IsActive && m.IsDefault, cancellationToken);
+            m => m.BillingAccountType == account.Type && m.BillingAccountId == account.Id
+                && m.ChannelCode == channelCode && m.IsActive && m.IsDefault, cancellationToken);
     }
 
-    public Task<StoredPaymentMethod?> FindByIdAsync(Guid userId, Guid paymentMethodId, CancellationToken cancellationToken = default)
+    public Task<StoredPaymentMethod?> FindByIdAsync(BillingAccountRef account, Guid paymentMethodId, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(account);
         return _methodRepository.FirstOrDefaultAsync(
-            m => m.Id == paymentMethodId && m.UserId == userId && m.IsActive, cancellationToken);
+            m => m.Id == paymentMethodId && m.BillingAccountType == account.Type && m.BillingAccountId == account.Id && m.IsActive,
+            cancellationToken);
+    }
+
+    public Result<PaymentClientConfigDto> GetClientConfig(string? channelCode)
+    {
+        var provider = _paymentProviderFactory.GetProvider(ResolveChannelCode(channelCode));
+        if (provider == null)
+            return Fail<PaymentClientConfigDto>(ErrorCodes.PaymentChannelNotSupported, 400);
+
+        return Ok(new PaymentClientConfigDto
+        {
+            ChannelCode = provider.ChannelCode,
+            PublishableKey = provider.PublishableKey
+        });
+    }
+
+    public async Task<Result> RefreshByTokenAsync(string channelCode, PaymentProviderPaymentMethodResult details, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(details);
+        if (string.IsNullOrWhiteSpace(channelCode) || string.IsNullOrWhiteSpace(details.Token))
+            return Ok();
+
+        // 与撤销同形：匿名回调，跨租户按凭据定位再切进它的租户
+        var method = await _methodRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(m => m.ChannelCode == channelCode && m.Token == details.Token && !m.IsDeleted, cancellationToken);
+
+        // ★ 找不到就安静地成功：与本系统共用同一个渠道账户的其它应用也会收到这类事件，它们的卡不在这里
+        if (method == null || !method.IsActive)
+            return Ok();
+
+        using var tenantScope = _currentTenant?.Change(method.TenantId);
+
+        var brand = details.Brand ?? method.Brand;
+        var last4 = details.Last4 ?? method.Last4;
+        var expiryMonth = details.ExpiryMonth ?? method.ExpiryMonth;
+        var expiryYear = details.ExpiryYear ?? method.ExpiryYear;
+
+        // 只写展示列：凭据没变，渠道客户也没变
+        await _methodRepository.AsQueryable()
+            .Where(m => m.Id == method.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Brand, brand)
+                .SetProperty(m => m.Last4, last4)
+                .SetProperty(m => m.ExpiryMonth, expiryMonth)
+                .SetProperty(m => m.ExpiryYear, expiryYear), cancellationToken);
+
+        method.Brand = brand;
+        method.Last4 = last4;
+        method.ExpiryMonth = expiryMonth;
+        method.ExpiryYear = expiryYear;
+
+        foreach (var sink in _bindingSinks)
+            await sink.OnUpdatedAsync(method, cancellationToken);
+
+        Logger.LogInformation("Payment method {MethodId} refreshed from channel {Channel}: {Brand} ending {Last4}, expires {Month}/{Year}.",
+            method.Id, channelCode, brand, last4, expiryMonth, expiryYear);
+        return Ok();
     }
 
     public async Task MarkUsedAsync(Guid paymentMethodId, CancellationToken cancellationToken = default)
@@ -357,6 +465,8 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             {
                 PaymentMethodId = method.Id,
                 UserId = method.UserId,
+                BillingAccountType = method.BillingAccountType,
+                BillingAccountId = method.BillingAccountId,
                 ChannelCode = channelCode,
                 Brand = method.Brand,
                 Last4 = method.Last4,
@@ -372,20 +482,23 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
             ? _paymentOptionsMonitor.CurrentValue.DefaultChannelCode
             : channelCode;
 
-    private async Task<string?> FindProviderCustomerIdAsync(Guid userId, string channelCode, CancellationToken cancellationToken)
+    public async Task<string?> FindProviderCustomerIdAsync(BillingAccountRef account, string channelCode, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(account);
         return await _methodRepository.AsNoTracking()
-            .Where(m => m.UserId == userId && m.ChannelCode == channelCode && m.ProviderCustomerId != null)
+            .Where(m => m.BillingAccountType == account.Type && m.BillingAccountId == account.Id
+                && m.ChannelCode == channelCode && m.ProviderCustomerId != null)
             .OrderByDescending(m => m.IsActive)
             .ThenByDescending(m => m.CreationTime)
             .Select(m => m.ProviderCustomerId)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    private Task ClearDefaultAsync(Guid userId, string channelCode, CancellationToken cancellationToken)
+    private Task ClearDefaultAsync(BillingAccountRef account, string channelCode, CancellationToken cancellationToken)
     {
         return _methodRepository.AsQueryable()
-            .Where(m => m.UserId == userId && m.ChannelCode == channelCode && m.IsDefault)
+            .Where(m => m.BillingAccountType == account.Type && m.BillingAccountId == account.Id
+                && m.ChannelCode == channelCode && m.IsDefault)
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsDefault, false), cancellationToken);
     }
 
@@ -397,10 +510,10 @@ public class PaymentMethodService : ApplicationService, IPaymentMethodService
     /// 订阅表的认知一起搬去了 <c>Tnzi.Payment.Subscriptions</c>；本模块只负责说出发生了什么。
     /// 没有接收方时什么都不发生 —— 没有订阅表，就没有要同步的行。
     /// </remarks>
-    private async Task NotifyBoundAsync(Guid userId, StoredPaymentMethod method, CancellationToken cancellationToken)
+    private async Task NotifyBoundAsync(BillingAccountRef account, StoredPaymentMethod method, CancellationToken cancellationToken)
     {
         foreach (var sink in _bindingSinks)
-            await sink.OnBoundAsync(userId, method, cancellationToken);
+            await sink.OnBoundAsync(account, method, cancellationToken);
     }
 
     /// <summary>

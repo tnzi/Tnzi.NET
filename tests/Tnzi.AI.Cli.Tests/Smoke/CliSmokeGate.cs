@@ -30,8 +30,7 @@ public static class CliSmokeGate
     {
         if (!CliBuiltInProviders.All.TryGetValue(providerKey, out var provider)) return null;
 
-        var resolver = new CliExecutableResolver(NullLogger<CliExecutableResolver>.Instance);
-        return resolver.Resolve(provider);
+        return CliExecutableResolver.Resolve(provider);
     }
 
     /// <summary>
@@ -64,6 +63,27 @@ public static class CliSmokeGate
             : null;
     }
 
+    /// <summary>Host environment variables that sign the claude CLI in without a stored login.</summary>
+    public static IReadOnlyList<string> CredentialVariables { get; } = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+    /// <summary>The credential variables that are actually set in this process's environment.</summary>
+    public static IReadOnlyList<string> PresentCredentialVariables()
+        => CredentialVariables.Where(v => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v))).ToList();
+
+    /// <summary>
+    /// Skip reason for a smoke test that needs an environment credential, or null to run it.
+    /// </summary>
+    /// <remarks>
+    /// A per-workspace config directory never contains a stored sign-in, so a machine that is only signed in
+    /// interactively cannot run these. Copying that login into a test directory is not an option: an OAuth refresh
+    /// in the copy can invalidate the original, signing the machine's owner out.
+    /// </remarks>
+    public static string? SkipReasonWithCredential(string providerKey)
+        => SkipReason(providerKey)
+           ?? (PresentCredentialVariables().Count == 0
+               ? $"Needs {string.Join(" or ", CredentialVariables)} in the environment: a per-workspace config directory has no stored sign-in."
+               : null);
+
     /// <summary>Skip reason for a protocol-level smoke test, or null to run it.</summary>
     public static string? SkipReasonForProtocol(CliAgentProtocol protocol)
     {
@@ -89,6 +109,17 @@ public sealed class SmokeFactAttribute : FactAttribute
     /// <summary>Gate on a specific provider being installed.</summary>
     public SmokeFactAttribute(string providerKey)
         => Skip = CliSmokeGate.SkipReason(providerKey);
+}
+
+/// <summary>
+/// A <see cref="FactAttribute"/> that skips unless the smoke gate is open for a provider and a credential is in the environment.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class SmokeCredentialFactAttribute : FactAttribute
+{
+    /// <summary>Gate on a provider being installed and an environment credential being set.</summary>
+    public SmokeCredentialFactAttribute(string providerKey)
+        => Skip = CliSmokeGate.SkipReasonWithCredential(providerKey);
 }
 
 /// <summary>

@@ -17,6 +17,11 @@ public class FileReferenceChangeTracker
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _fileFieldCache = new();
 
     /// <summary>
+    /// 实体类型是否以 Guid 作 Id 的缓存（只对带 [FileField] 的类型查询）
+    /// </summary>
+    private static readonly ConcurrentDictionary<Type, bool> _guidKeyedCache = new();
+
+    /// <summary>
     /// 从 ChangeTracker 收集文件引用变更
     /// </summary>
     public void CollectChanges(ChangeTracker changeTracker)
@@ -41,7 +46,11 @@ public class FileReferenceChangeTracker
             var entityTypeName = entityType.Name;
             var entityId = GetEntityId(entry);
 
-            if (string.IsNullOrEmpty(entityId))
+            // 只有 Guid 主键的空值可以跳过（ID 在收集前已生成，空值意味着没有可追踪的标识）。
+            // ★ 非 Guid 主键（long / int / string / 复合主键）一律交给处理器：引用表的 EntityId 是 Guid 列，
+            // 处理器据此失败关闭。在这里跳过（数据库自增主键保存前恰是 0）会让文件以引用计数 0 被孤儿清理删掉，
+            // 而实体行仍指着它。
+            if (string.IsNullOrEmpty(entityId) && IsGuidKeyed(entityType))
                 continue;
 
             foreach (var property in fileFieldProperties)
@@ -227,7 +236,13 @@ public class FileReferenceChangeTracker
     }
 
     /// <summary>
-    /// 获取实体ID（支持 Guid、long、int、string 等多种 ID 类型）
+    /// 实体是否以 <c>Guid</c> 作 <c>Id</c>（文件引用唯一受支持的主键形态）。
+    /// </summary>
+    private static bool IsGuidKeyed(Type entityType)
+        => _guidKeyedCache.GetOrAdd(entityType, type => type.GetProperty("Id")?.PropertyType == typeof(Guid));
+
+    /// <summary>
+    /// 获取实体ID的文本形式。只有 <c>Guid</c> 主键受文件引用支持；其它类型照实给出文本，由处理器拒绝。
     /// </summary>
     private string GetEntityId(EntityEntry entry)
     {

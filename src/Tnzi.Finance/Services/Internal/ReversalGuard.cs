@@ -13,9 +13,11 @@ namespace Tnzi.Finance.Services.Internal;
 /// 本类<b>只读</b>，不产生任何写入，因此可以安全地放在引擎的任何写入动作（凭证号分配、余额桶累加）之前。
 /// </para>
 /// <para>
-/// 覆盖三项：会计期间封账、已完成银行对账、已匹配银行流水。凭证状态（草稿 / 已冲销）<b>不</b>在这里判定——
-/// 那是单据状态机的事，冲销漏斗上游（各 <c>VoidAsync</c> 与 <c>IJournalEntryService.ReverseAsync</c>）
-/// 已经在做，重复一遍反而多一处会漂移的规则。
+/// 覆盖三项：会计期间封账、已完成银行对账、已匹配银行流水（经 <see cref="IJournalLineHoldProvider"/>）。
+/// 凭证状态（草稿 / 已冲销）<b>不</b>在这里判定，但也<b>不是</b>交给上游：它由冲销漏斗
+/// <see cref="LedgerPostingEngine.BuildReversalAsync"/> 自己在调用本类之前强制（<c>Status == Posted</c> 且
+/// <c>ReversedByEntryId</c> 为空）。上游的单据 <c>VoidAsync</c> 并不都检查原凭证状态，漏斗里那道门是
+/// 「同一张凭证不被冲销两次」的唯一保证，不是重复规则，不可删。
 /// </para>
 /// </remarks>
 public sealed class ReversalGuard

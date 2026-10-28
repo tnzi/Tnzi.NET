@@ -89,10 +89,15 @@
     <ProjectReference Include="..\Tnzi.AI.Cli\Tnzi.AI.Cli.csproj" PrivateAssets="all" />
   </ItemGroup>
 
-  <!-- 预制模板文件（作为内容文件复制到输出目录） -->
+  <!--
+    预制模板文件（作为内容文件复制到输出目录）。模板存储只认输出目录下的 Templates/。
+    PackageCopyToOutput 让 nuspec 写成 copyToOutput="true"：缺了它，以 PackageReference 消费的应用
+    bin 里没有这些模板（NuGet 的缺省是 false），邮件通知找不到模板而失败。
+  -->
   <ItemGroup>
     <Content Include="Templates\**\*.cshtml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
     </Content>
   </ItemGroup>
 

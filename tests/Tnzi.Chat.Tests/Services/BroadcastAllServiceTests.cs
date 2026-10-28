@@ -23,13 +23,16 @@ public class BroadcastAllServiceTests : Integration.IntegrationTestBase
         base.ConfigureServices(services);
 
         // Replace the base's empty user-repo mock so the "all" path enumerates two users.
+        var users = new List<User>
+        {
+            new() { Id = UserA, UserName = "alice" },
+            new() { Id = UserB, UserName = "bob" },
+        };
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<User>
-            {
-                new() { Id = UserA, UserName = "alice" },
-                new() { Id = UserB, UserName = "bob" },
-            });
+            .ReturnsAsync(users);
+        userRepo.Setup(r => r.GetListAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, CancellationToken _) => users.Where(u => ids.Contains(u.Id)).ToList());
         services.AddScoped(_ => userRepo.Object);
     }
 

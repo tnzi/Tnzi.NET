@@ -18,12 +18,9 @@ public class WorkspaceOptions
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".tnzi", "agents");
 
     /// <summary>
-    /// Whether to also scan the current project path for .agents/ directory
+    /// Whether the admin listing also scans the project's .agents/ directory (under the content root).
+    /// Runtime fallback only reads <see cref="GlobalPath"/>/&lt;agent guid&gt;/AGENT.md.
     /// </summary>
+    /// <remarks>Definitions are read from disk on every listing and resolution, so edits apply on the next request.</remarks>
     public bool ScanProjectPath { get; set; } = true;
-
-    /// <summary>
-    /// Whether to enable file watching for hot reload of agent definitions
-    /// </summary>
-    public bool FileWatchEnabled { get; set; }
 }

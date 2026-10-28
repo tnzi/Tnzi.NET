@@ -20,8 +20,8 @@
  * return a view model. Fetching stays with the consumer (or with the opt-in
  * `useChatThreads`), per this package's transport rule.
  */
-import type { AgentThreadDto, ThreadMessageDto } from '@tnzi/core/services/ai';
-import type { ChatMessage, ToolCallInfo, TokenUsage } from '../headless/useChat';
+import type { AgentThreadDto, AttachmentDto, ThreadMessageDto } from '@tnzi/core/services/ai';
+import type { ChatMessage, MessageAttachment, ToolCallInfo, TokenUsage } from '../headless/useChat';
 import type { ThreadItem } from '../components/chat/TThreadList.vue';
 
 /** Roles the message components know how to render. */
@@ -41,7 +41,8 @@ export function toMessageRole(role: string | null | undefined): ChatMessage['rol
 }
 
 /**
- * Lower-case the first letter of every key, recursively.
+ * Lower-case the first letter of every key, recursively, except inside the values of
+ * `keepKeys`.
  *
  * ★ The persisted `toolCalls` / `usage` columns were written by the backend's
  * history middleware with System.Text.Json's DEFAULT options - PascalCase
@@ -50,17 +51,25 @@ export function toMessageRole(role: string | null | undefined): ChatMessage['rol
  * database that has ever run the AI module, so the adapter reads both
  * spellings instead of asking for a data migration. camelCase input passes
  * through unchanged.
+ *
+ * ★ A tool call's `input` is the tool's own arguments, keyed however the tool
+ * names them (`Path`, `URL`, `X-Header`): it is data, not part of the stored
+ * shape, and is copied as is. Recursing into it renamed the tool's keys, so a
+ * reopened conversation showed different arguments from the live one.
  */
-function camelizeKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(camelizeKeys);
+function camelizeKeys(value: unknown, keepKeys: ReadonlySet<string> = TOOL_DATA_KEYS): unknown {
+  if (Array.isArray(value)) return value.map((item) => camelizeKeys(item, keepKeys));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, v]) => [
-      key.charAt(0).toLowerCase() + key.slice(1),
-      camelizeKeys(v),
-    ]),
+    Object.entries(value as Record<string, unknown>).map(([key, v]) => {
+      const camel = key.charAt(0).toLowerCase() + key.slice(1);
+      return [camel, keepKeys.has(camel) ? v : camelizeKeys(v, keepKeys)];
+    }),
   );
 }
+
+/** Keys whose values are a tool's own data and keep their keys (see `camelizeKeys`). */
+const TOOL_DATA_KEYS: ReadonlySet<string> = new Set(['input']);
 
 /**
  * `ThreadMessageDto.toolCalls` / `.usage` are JSON **strings** on the wire while
@@ -114,17 +123,62 @@ function toUsage(raw: string | null | undefined): TokenUsage | null {
  */
 export function toChatMessage(
   message: Pick<ThreadMessageDto, 'id' | 'role' | 'content' | 'creationTime'> &
-    Partial<Pick<ThreadMessageDto, 'feedbackRating' | 'toolCalls' | 'usage'>>,
+    Partial<Pick<
+      ThreadMessageDto,
+      'feedbackRating' | 'toolCalls' | 'usage' | 'order' | 'status' | 'usageLimitResetsAt' | 'metadata' | 'attachments'
+    >>,
 ): ChatMessage {
+  const role = toMessageRole(message.role);
+  const status = toMessageStatus(message.status);
+  const attachments = toAttachments(role, message.attachments);
   return {
     id: message.id,
-    role: toMessageRole(message.role),
+    role,
     content: message.content,
     createdAt: message.creationTime,
     feedbackRating: message.feedbackRating ?? null,
     toolCalls: toToolCalls(message.toolCalls),
     usage: toUsage(message.usage),
+    ...(message.order != null ? { order: message.order } : {}),
+    ...(status ? { status } : {}),
+    ...(status === 'usage_limit' ? { usageLimitResetsAt: message.usageLimitResetsAt ?? null } : {}),
+    ...(message.metadata ? { metadata: message.metadata } : {}),
+    ...(attachments.length ? { attachments } : {}),
   };
+}
+
+/**
+ * How a stored reply ended, in the renderers' terms. `failed` is the renderers' `error`
+ * (the reply keeps what it had written, and says it failed under it); a completed reply
+ * has no stored status.
+ */
+function toMessageStatus(status: string | null | undefined): ChatMessage['status'] | undefined {
+  switch (status) {
+    case 'stopped':
+      return 'stopped';
+    case 'failed':
+      return 'error';
+    case 'usage_limit':
+      return 'usage_limit';
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Stored attachments to renderable ones. On a reply only the uploads are listed: the
+ * images its tool calls returned are shown on the tool call that returned them.
+ */
+function toAttachments(role: ChatMessage['role'], attachments: AttachmentDto[] | null | undefined): MessageAttachment[] {
+  return (attachments ?? [])
+    .filter((a) => role === 'user' || a.origin !== 'ToolResult')
+    .map((a) => ({
+      type: a.mediaType.startsWith('image/') ? 'image' : 'file',
+      attachmentId: a.id,
+      fileName: a.fileName ?? null,
+      mediaType: a.mediaType,
+      size: a.size,
+    }));
 }
 
 /**
@@ -136,13 +190,16 @@ export function toChatMessage(
  * product calls a fresh conversation.
  */
 export function toThreadItem(
-  thread: Pick<AgentThreadDto, 'id' | 'lastActivityTime'> & Partial<Pick<AgentThreadDto, 'title'>>,
+  thread: Pick<AgentThreadDto, 'id' | 'lastActivityTime'>
+    & Partial<Pick<AgentThreadDto, 'title' | 'creationTime' | 'archivedTime'>>,
   untitledLabel = 'New chat',
 ): ThreadItem {
   return {
     id: thread.id,
     title: thread.title || untitledLabel,
     updatedAt: thread.lastActivityTime,
+    ...(thread.creationTime ? { createdAt: thread.creationTime } : {}),
+    ...(thread.archivedTime ? { archived: true } : {}),
   };
 }
 

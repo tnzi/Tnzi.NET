@@ -18,6 +18,27 @@ namespace Tnzi.AI.Services;
 public interface IVectorStore
 {
     /// <summary>
+    /// 本存储是否直接检索 RAG 模块的分块表（摄取经 EF 写入的 <c>{prefix}_DocumentChunk</c>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为 <see langword="true"/>（<c>PgVectorStore</c>）时，写下分块表即完成入库，删除分块表的行即完成删除。
+    /// </para>
+    /// <para>
+    /// 为 <see langword="false"/>（默认，含 <c>InMemoryVectorStore</c> 与 Qdrant、Milvus 这类外部向量库）时，RAG 摄取在写完分块表之后
+    /// 还对每个分块调用 <see cref="UpsertAsync"/>，重建索引同样回写，删除文档 / 知识库时分块表与本存储各删一次。
+    /// 外部向量库因此必须实现 <see cref="UpsertAsync"/>：默认实现抛 <see cref="NotSupportedException"/>，摄取据此失败，
+    /// 而不是标记完成却永远检索不到。
+    /// </para>
+    /// <para>
+    /// ★ 此前摄取只写分块表、从不调用 <see cref="UpsertAsync"/>：<c>AI:Rag:VectorStoreProvider=InMemory</c> 与自定义向量库下，
+    /// 文档显示「已完成 / N 块」，检索恒为空；删除只删本存储（本来就空），分块表的行永不删除。
+    /// 自己读分块表的自定义实现覆写本属性返回 <see langword="true"/>。
+    /// </para>
+    /// </remarks>
+    bool UsesRagChunkTable => false;
+
+    /// <summary>
     /// 向量相似度搜索
     /// </summary>
     /// <param name="queryVector">查询向量（float[] 格式）</param>

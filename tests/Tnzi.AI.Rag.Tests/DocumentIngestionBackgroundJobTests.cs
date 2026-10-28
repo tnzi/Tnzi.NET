@@ -116,6 +116,27 @@ public class DocumentIngestionBackgroundJobTests : IntegratedTestBase<RagJobTest
         kb.ChunkCount.ShouldBe(0);
     }
 
+    /// <summary>
+    /// 文档已经翻成 Completed（分块在线、可检索）之后，知识库计数那条语句遇上一次瞬时数据库错误：
+    /// 失败兜底不能把文档改回 Failed。此前会改，文档显示失败而分块照样被检索到，上传去重（只认 Completed）对它失效。
+    /// </summary>
+    [Fact]
+    public async Task CounterUpdateFailsAfterTheDocumentCompleted_TheDocumentStaysCompleted()
+    {
+        var (kbId, docId) = await SeedKbAndProcessingDocAsync();
+        var failingKbRepository = new Mock<IRepository<KnowledgeBase, Guid>>();
+        failingKbRepository.Setup(r => r.AsQueryable(It.IsAny<bool>())).Throws(new InvalidOperationException("connection reset"));
+        var job = new DocumentIngestionBackgroundJob(
+            IngestionReturning(IngestResult.Success(3)).Object, _docRepository, failingKbRepository.Object,
+            NullLogger<DocumentIngestionBackgroundJob>.Instance, currentTenant: null);
+
+        await job.ExecuteAsync(JobArgs(kbId, docId));
+
+        var doc = await ReloadDocAsync(docId);
+        doc.Status.ShouldBe(DocumentStatus.Completed);
+        doc.ChunkCount.ShouldBe(3);
+    }
+
     [Fact]
     public async Task MissingDocument_Throws_SoTheSchedulerRetries_AndDoesNotTouchCounters()
     {

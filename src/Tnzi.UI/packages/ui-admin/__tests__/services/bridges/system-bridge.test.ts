@@ -183,6 +183,30 @@ describe('system-bridge', () => {
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('job-1')
   })
+
+  // The jobs endpoint lives in the optional Hangfire module, which the module
+  // signal does not report: on a host without it the list reads as empty. Any
+  // other refusal must reach the page instead of reading as "no jobs".
+  it.each([
+    ['a host without the scheduling module (404)', 404, 'Not Found', true],
+    ['a refused read (403)', 403, 'Forbidden', false],
+    ['a server failure (500)', 500, 'Internal Server Error', false],
+  ])('scheduledJobs.fetch on %s', async (_label, code, message, readsEmpty) => {
+    const mockClient = {
+      get: vi.fn(async () => ({ succeeded: false, success: false, code, message })),
+      post: vi.fn(),
+      delete: vi.fn(),
+    }
+    const bridge = createSystemBridge({
+      client: mockClient as never,
+      settingApi: mockSettingApi() as never,
+      accessLogApi: mockAccessLogApi() as never,
+      settingsCenterApi: mockSettingsCenterApi() as never,
+    })
+    const read = bridge.scheduledJobs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
+    if (readsEmpty) await expect(read).resolves.toMatchObject({ items: [], totalCount: 0 })
+    else await expect(read).rejects.toThrow(message)
+  })
 })
 
 describe('system-bridge settingsCenter', () => {

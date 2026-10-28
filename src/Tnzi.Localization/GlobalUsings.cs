@@ -10,6 +10,7 @@ global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using System.Collections.Concurrent;
 global using System.Globalization;
+global using System.Resources;
 global using System.Text.Json;
 global using Tnzi.AspNetCore;
 global using Tnzi.AspNetCore.Models;

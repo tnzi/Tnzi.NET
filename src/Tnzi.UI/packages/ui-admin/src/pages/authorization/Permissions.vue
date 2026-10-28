@@ -142,6 +142,9 @@
                         </td>
                         <td class="t-permission-page__col-ops">
                           <div class="t-permission-page__ops">
+                            <NButton size="tiny" quaternary @click="openHolders(row.fn)">
+                              {{ t('holders.open') }}
+                            </NButton>
                             <template v-if="crud.canUpdate">
                               <NButton
                                 v-if="row.fn.isEnabled === false"
@@ -213,6 +216,14 @@
         />
       </template>
     </TFormModal>
+
+    <!-- Who holds the code: its own deep-link key, so `?holders=view:<code>`
+         opens straight onto it even when the code belongs to another module. -->
+    <TDetailHost :state="holdersDetail" :title="holdersTitle" :width="640" :footer="false" :translate="t">
+      <template #default="{ data }">
+        <PermissionHolders v-if="holdersCode(data)" :code="holdersCode(data)" />
+      </template>
+    </TDetailHost>
   </TContentPage>
 </template>
 
@@ -226,9 +237,11 @@ import {
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 import TFormModal from '../../components/crud/TFormModal.vue'
+import TDetailHost from '../../components/detail/TDetailHost.vue'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-schema'
 import { useCrudPage } from '../../headless/useCrudPage'
+import { useDetail } from '../../headless/useDetail'
 import type { UseFormModalReturn } from '../../headless/useFormModal'
 import { useSafeMessage } from '../_shared/safe-message'
 import { makePageTranslator } from '../_shared/translate'
@@ -237,6 +250,7 @@ import { useAdminClient } from '../../plugin/client'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { ZH_SURFACE_LABELS } from './surface-labels'
 import { permissionFormSchema } from './permission-config'
+import PermissionHolders from './PermissionHolders.vue'
 import type { FunctionModuleDto, ModuleFunctionDto } from '@tnzi/core/services/authorization'
 import { PermissionCategory } from '@tnzi/core/services/authorization'
 
@@ -323,7 +337,9 @@ const treeData = computed<TreeOption[]>(() => {
 async function loadModules(): Promise<void> {
   modulesLoading.value = true
   try {
-    modules.value = await bridge.functionModules.getAll()
+    // The catalogue behind this page's own `authorization.permission.view`;
+    // `/admin/modules` would also demand the module management code.
+    modules.value = (await bridge.permissions.catalogue()).modules
     // Auto-select the first root module (same order/name sort as the tree,
     // so the selection matches the tree's visible first node).
     if (!selectedModuleId.value && modules.value.length) {
@@ -544,6 +560,38 @@ async function removeFn(fn: PermissionRow): Promise<void> {
   }
 }
 
+// ─── Holders drawer ───────────────────────────────────────────────────────────
+
+/**
+ * The drawer is keyed by the permission CODE, not the row id: the holders read
+ * takes a code, and a code deep link must open even when the selected module is
+ * a different one (the row is not in `crud.items` then). The record is just the
+ * code; the drawer body loads everything else.
+ */
+interface HoldersTarget {
+  code: string
+}
+
+const holdersDetail = useDetail<HoldersTarget>({
+  mode: 'drawer',
+  url: 'holders',
+  getId: (target) => target.code,
+  loadData: async (code) => ({ code: String(code) }),
+})
+
+function openHolders(fn: PermissionRow): void {
+  if (fn.code) void holdersDetail.open('view', { code: fn.code })
+}
+
+function holdersCode(data: unknown): string {
+  return (data as HoldersTarget | null)?.code ?? ''
+}
+
+const holdersTitle = computed(() => {
+  const code = holdersDetail.data.value?.code
+  return code ? t('holders.title', { code }) : t('holders.open')
+})
+
 // ─── Create / edit form ───────────────────────────────────────────────────────
 
 const formTitle = computed(() =>
@@ -721,7 +769,7 @@ onMounted(() => {
   white-space: nowrap;
 }
 .t-permission-page__col-ops {
-  width: 200px;
+  width: 260px;
   text-align: right;
   white-space: nowrap;
 }

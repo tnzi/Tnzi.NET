@@ -12,7 +12,7 @@ namespace Tnzi.AspNetCore.Tests.Hosting;
 ///
 /// 与 <see cref="PasswordResetRequestedEventHandlerTests"/> 守的是同一条线：「按钮点不开的邮件不能发」。
 /// 默认的 <c>IInvitationUrlGenerator</c> 在 <c>Identity:Invitation:AcceptUrlTemplate</c> 与前端 origin
-/// （<c>System:FrontendUrl</c>，旧键 <c>App:FrontendUrl</c>）都没配时返回 <c>/accept-invitation?token=...</c> 这样一条相对路径，此前处理器原样塞进模板照发：
+/// （<c>System:FrontendUrl</c>，旧键 <c>App:FrontendUrl</c>）都没配时返回 <c>/admin/accept-invitation?token=...</c> 这样一条相对路径，此前处理器原样塞进模板照发：
 /// 被邀请人收到一封排版漂亮的信，按钮与可复制链接都是相对路径，没有任何邮件客户端打得开；
 /// 处理器记「sent」、服务层记「issued」，没有任何东西会再试一次。
 /// 链接检查在发信之前，抛出去让总线重试不会重复发信。

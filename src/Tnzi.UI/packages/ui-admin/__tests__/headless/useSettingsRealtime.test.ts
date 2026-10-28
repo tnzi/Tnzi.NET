@@ -40,6 +40,15 @@ describe('useSettingsRealtime', () => {
     expect(getToken).toHaveBeenCalled()
   })
 
+  it('forwards the token refresher so a reconnect can renew an expired token', async () => {
+    const refreshToken = vi.fn(async () => 'fresh')
+    const rt = useSettingsRealtime({ getToken: () => 'tok', refreshToken, onChanged: () => {} })
+    await rt.start()
+
+    const opts = (createSettingsRealtimeClient as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(opts.refreshAccessToken).toBe(refreshToken)
+  })
+
   it('does not build the client until start() is called', () => {
     useSettingsRealtime({ getToken: () => '', onChanged: () => {} })
     expect(createSettingsRealtimeClient).not.toHaveBeenCalled()

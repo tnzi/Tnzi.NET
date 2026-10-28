@@ -75,6 +75,55 @@ public class AuditMiddlewareRedactionTests
         operation.RequestParameters!.ShouldContain($"\"{key}\":\"***\"");
     }
 
+    [Theory]
+    [InlineData("/api/auth/pending-actions/" + Secret + "/send-email-code", "tempToken", "/api/auth/pending-actions/***/send-email-code")]
+    [InlineData("/api/signing/" + Secret + "/decline", "token", "/api/signing/***/decline")]
+    [InlineData("/api/files/share/" + Secret + "/verify", "token", "/api/files/share/***/verify")]
+    public async Task ACredentialInThePath_NeverReachesUrlOrFunctionName(string path, string key, string expected)
+    {
+        // 路径里的一次性凭据与查询串里的同样是凭据：这些 POST 正是要审计的操作，
+        // 而审计表给持审计查看权限的人看。没有 controller/action 路由值时（端点路由、minimal API）
+        // FunctionName 退回「方法 + 路径」，那一处同样要脱敏。
+        var context = GetRequest(path, string.Empty);
+        context.Request.Method = "POST";
+        context.Request.RouteValues[key] = Secret;
+
+        var operation = await CaptureAsync(context);
+
+        operation.Url.ShouldBe(expected);
+        operation.FunctionName.ShouldBe("POST " + expected);
+    }
+
+    /// <summary>
+    /// <c>Url</c> 存转义形式的路径：查询串那一半本来就是转义的，路径若存解码形式，段里的 <c>%3F</c> 会解成 <c>?</c>，
+    /// 路径与查询串的分界就说不清了。脱敏照样按解码后的路由值命中转义的段。
+    /// </summary>
+    [Fact]
+    public async Task ThePathIsStoredEscaped_AndARouteTokenNeedingEscapes_IsStillMasked()
+    {
+        var plain = GetRequest("/api/files/a?b c", "?x=1");
+        plain.Request.RouteValues["name"] = "a?b c";
+
+        (await CaptureAsync(plain)).Url.ShouldBe("/api/files/a%3Fb%20c?x=1");
+
+        var withToken = GetRequest("/api/signing/a+b c/decline", string.Empty);
+        withToken.Request.Method = "POST";
+        withToken.Request.RouteValues["token"] = "a+b c";
+
+        var operation = await CaptureAsync(withToken);
+
+        operation.Url.ShouldBe("/api/signing/***/decline");
+        operation.FunctionName.ShouldBe("POST /api/signing/***/decline");
+    }
+
+    [Fact]
+    public async Task TheOAuthLinkToken_IsRedactedFromTheQueryString()
+    {
+        var operation = await CaptureAsync(GetRequest("/api/auth/oauth/github/login", "?linkToken=" + Secret));
+
+        operation.Url.ShouldBe("/api/auth/oauth/github/login?linkToken=***");
+    }
+
     [Fact]
     public async Task TheOtherQueryParameters_SurviveIntact()
     {

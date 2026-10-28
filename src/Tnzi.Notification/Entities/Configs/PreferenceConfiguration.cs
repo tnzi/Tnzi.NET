@@ -12,6 +12,7 @@ public class PreferenceConfiguration : EntityTypeConfigurationBase<Preference, G
         builder.Property(p => p.Channel).IsRequired().HasMaxLength(50);
         builder.Property(p => p.Category).HasMaxLength(100);
         builder.Property(p => p.IsEnabled).HasDefaultValue(true);
+        builder.Property(p => p.QuietHoursTimeZone).HasMaxLength(IanaTimeZone.MaxLength);
 
         // 唯一约束：每个用户的每个渠道+分类只能有一条偏好记录
         // Category 为 NULL = 该渠道的默认偏好（不针对任何分类）。拆两条的理由同

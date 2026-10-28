@@ -350,4 +350,58 @@ public class SkillRegistryTests : IDisposable
         var second = await registry.GetAvailableSkillsAsync();
         second.Any(s => s.Slug == "security-audit").ShouldBeTrue();
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetBySlugAsync_AgreesWithTheList_WhenATenantSkillSharesASystemSlug(bool callerIsThatTenant)
+    {
+        // DataPath 先于配置路径加载：此前按 slug 直接取文件存储里的第一个，拿到的是租户的同名技能 ——
+        // 对那个租户答的是租户版（列表里却是系统版），对别的租户被可见性过滤成 null（系统版明明在）。
+        var tenantId = Guid.NewGuid();
+        var dataPath = Path.Combine(_tempDir, "data");
+        var tenantSkillDir = Path.Combine(dataPath, "skills", "tenants", tenantId.ToString(), "report");
+        Directory.CreateDirectory(tenantSkillDir);
+        File.WriteAllText(Path.Combine(tenantSkillDir, "SKILL.md"), """
+            ---
+            name: Report
+            slug: report
+            description: The tenant's report skill.
+            ---
+            """);
+        CreateSkillFile("report", """
+            ---
+            name: Report
+            slug: report
+            description: The system report skill.
+            ---
+            """);
+
+        var options = new StaticOptionsMonitor<AIOptions>(new AIOptions
+        {
+            ContextProviders = new ContextProvidersOptions
+            {
+                Skills = new SkillsOptions
+                {
+                    Paths = [Path.Combine(_tempDir, "report")],
+                    DataPath = dataPath,
+                    RequireChecksEnabled = false,
+                    LoadBuiltIn = false
+                }
+            }
+        });
+        var fileStore = new FileSystemSkillStore(Mock.Of<ILogger<FileSystemSkillStore>>(), options);
+        var currentTenant = new Mock<ICurrentTenant>();
+        currentTenant.SetupGet(t => t.Id).Returns(callerIsThatTenant ? tenantId : Guid.NewGuid());
+        var registry = new SkillRegistry(fileStore, new SkillSearchService(NullLogger<SkillSearchService>.Instance),
+            currentTenant: currentTenant.Object);
+
+        var listed = (await registry.GetAvailableSkillsAsync()).Single(s => s.Slug == "report");
+        var looked = await registry.GetBySlugAsync("report");
+
+        listed.Scope.ShouldBe(SkillScope.System);
+        looked.ShouldNotBeNull();
+        looked.Scope.ShouldBe(SkillScope.System);
+        looked.Description.ShouldBe(listed.Description);
+    }
 }

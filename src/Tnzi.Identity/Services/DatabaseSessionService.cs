@@ -61,11 +61,50 @@ public class DatabaseSessionService : ApplicationService, ISessionService
     private int IdleTimeoutMinutes => _identityOptionsMonitor?.CurrentValue.AccountSecurity.SessionTimeoutMinutes ?? 0;
 
     /// <inheritdoc />
-    public async Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
+    public Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null)
+        => InsertSessionAsync(userId, deviceInfo, ipAddress, userAgent, expiresAt, delegation: null);
+
+    /// <inheritdoc />
+    public Task<Guid> CreateDelegatedSessionAsync(DelegatedSessionCreation creation)
+    {
+        Check.NotNull(creation);
+        return InsertSessionAsync(
+            creation.UserId, creation.DeviceInfo, creation.IpAddress, creation.UserAgent, creation.ExpiresAt, creation.Delegation);
+    }
+
+    /// <inheritdoc />
+    public async Task<DelegatedSessionInfo?> GetDelegationAsync(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var row = await _repository
+            .Where(s => s.Id == sessionId && s.GroupKey != null)
+            .Select(s => new { s.GroupKey, s.Label, s.ClaimsJson, s.AbsoluteExpiresAt })
+            .FirstOrDefaultAsync();
+        if (row == null)
+        {
+            return null;
+        }
+
+        // 委派会话建立时恒有绝对到期时间；读到 null 说明这一行被改过，按已到期处理而不是按不过期。
+        return new DelegatedSessionInfo(
+            row.GroupKey!, row.Label, DelegatedSessionRules.DeserializeClaims(row.ClaimsJson), row.AbsoluteExpiresAt ?? DateTime.MinValue);
+    }
+
+    private async Task<Guid> InsertSessionAsync(
+        Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt, DelegatedSessionInfo? delegation)
     {
         var now = DateTime.UtcNow;
         // 绝对上限在建立那一刻就定死，后续任何续期都不会推动它。
+        // 委派会话另有请求方给的到期时间，取两者里更早的那个。
         var absoluteExpiresAt = SessionLifetime.ComputeAbsoluteExpiry(now, SessionOptions.AbsoluteLifetimeHours);
+        if (delegation != null)
+        {
+            absoluteExpiresAt = SessionLifetime.ClampToAbsolute(delegation.AbsoluteExpiresAt, absoluteExpiresAt);
+        }
 
         var session = new UserSession
         {
@@ -82,6 +121,9 @@ public class DatabaseSessionService : ApplicationService, ISessionService
                 ? SessionLifetime.ClampToAbsolute(expiresAt.Value, absoluteExpiresAt)
                 : absoluteExpiresAt,
             AbsoluteExpiresAt = absoluteExpiresAt,
+            GroupKey = delegation?.GroupKey,
+            Label = delegation?.Label,
+            ClaimsJson = delegation == null ? null : DelegatedSessionRules.SerializeClaims(delegation.Claims),
             IsRevoked = false
         };
 
@@ -132,7 +174,11 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             return SessionValidationResult.BindingMismatch;
         }
 
-        await TouchAsync(sessionId, snapshot, context, ipChanged, now);
+        // 写回时发现行已经撤销（快照读在撤销之前）：这一次就判失效，而不是再放行一次。
+        if (!await TouchAsync(sessionId, snapshot, context, ipChanged, now))
+        {
+            return SessionValidationResult.Invalid;
+        }
 
         return SessionValidationResult.Valid;
     }
@@ -166,29 +212,44 @@ public class DatabaseSessionService : ApplicationService, ISessionService
 
     /// <summary>
     /// 续期活动时间（并在地址变化时更新地址、发一条事件）。按 <see cref="ActivityWriteThrottleSeconds"/> 节流。
+    /// 返回会话是否仍然有效：写回时发现行已被撤销（或已不存在）返回 <c>false</c>，并清掉缓存里的旧快照。
     /// </summary>
-    private async Task TouchAsync(
+    /// <remarks>
+    /// ★★★ <strong>先放快照、再做带条件的写，顺序不能反。</strong>此前是「无条件写两列 → 把快照放回缓存」：
+    /// 快照若是撤销之前读的，撤销刚清掉的缓存键就被这份 <c>IsRevoked = false</c> 的旧快照重新占上；
+    /// 换着两个出口地址发请求，每一次都会写回、每一次都续上一个缓存周期，被撤销的 access token 一直过得了校验。
+    /// 现在写只在行未撤销时生效（<c>WHERE !IsRevoked</c>），影响 0 行就说明撤销已经提交，清掉快照、判失效；
+    /// 影响 1 行则这次写先于撤销落在这一行上，撤销提交之后的缓存失效必然晚于这里的放快照，旧快照活不下来。
+    /// </remarks>
+    private async Task<bool> TouchAsync(
         Guid sessionId, SessionSnapshot snapshot, SessionValidationContext context, bool ipChanged, DateTime now)
     {
         var staleActivity = snapshot.LastActivityTime.AddSeconds(ActivityWriteThrottleSeconds) <= now;
         if (!staleActivity && !ipChanged)
         {
-            return;
+            return true;
         }
 
         var previousIp = snapshot.IpAddress;
         var newIp = ipChanged ? context.IpAddress : snapshot.IpAddress;
 
-        await _repository
-            .Where(s => s.Id == sessionId)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(s => s.LastActivityTime, now)
-                .SetProperty(s => s.IpAddress, newIp));
-
         // 缓存里的快照跟着更新，否则本窗口内的后续请求会反复触发同一次写。
         snapshot.LastActivityTime = now;
         snapshot.IpAddress = newIp;
         await StoreSnapshotAsync(sessionId, snapshot);
+
+        var touched = await _repository
+            .Where(s => s.Id == sessionId && !s.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(s => s.LastActivityTime, now)
+                .SetProperty(s => s.IpAddress, newIp));
+
+        if (touched == 0)
+        {
+            await InvalidateValidityCacheAsync(sessionId);
+            LogWarning("Session {SessionId} was revoked while a request was validating it; rejecting the request.", sessionId);
+            return false;
+        }
 
         if (ipChanged && _eventBus != null)
         {
@@ -202,6 +263,8 @@ public class DatabaseSessionService : ApplicationService, ISessionService
                 ChangedTime = now
             }, cancellationToken: default);
         }
+
+        return true;
     }
 
     private async Task<SessionSnapshot?> GetSnapshotAsync(Guid sessionId)
@@ -272,6 +335,14 @@ public class DatabaseSessionService : ApplicationService, ISessionService
         public string? IpAddress { get; set; }
     }
 
+    /// <summary>
+    /// 清掉校验缓存里的快照；身处事务时提交之后再清一遍。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 只在写入之后、提交之前清一遍不够：撤销要到提交才对别的连接可见，这之间另一个请求缓存未命中，
+    /// 读到未撤销的行并放回缓存，被撤销的会话在一个缓存周期里照样放行（「登出所有设备」本身就跑在事务里）。
+    /// 不在事务里时写入已经自动提交，此刻这一遍就是提交后的那一遍。
+    /// </remarks>
     private async Task InvalidateValidityCacheAsync(params Guid[] sessionIds)
     {
         if (_cache == null || sessionIds.Length == 0)
@@ -279,12 +350,20 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             return;
         }
 
-        foreach (var sessionId in sessionIds)
+        var keys = sessionIds.Where(id => id != Guid.Empty).Select(ValidityCacheKey).ToArray();
+        await RemoveValidityCacheKeysAsync(keys);
+
+        if (AmbientUnitOfWork.Current is { IsTransactionActive: true } transaction)
         {
-            if (sessionId != Guid.Empty)
-            {
-                await _cache.RemoveAsync(ValidityCacheKey(sessionId));
-            }
+            transaction.EnqueuePostCommit(_ => RemoveValidityCacheKeysAsync(keys));
+        }
+    }
+
+    private async Task RemoveValidityCacheKeysAsync(IReadOnlyList<string> keys)
+    {
+        foreach (var key in keys)
+        {
+            await _cache!.RemoveAsync(key);
         }
     }
 
@@ -451,31 +530,48 @@ public class DatabaseSessionService : ApplicationService, ISessionService
             return Fail("Session not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        if (session.IsRevoked)
+        // 带条件的写（理由见 RenewSessionAsync）：读到的「未撤销」可能已经过时，整行写回会把撤销抹掉。
+        var touched = session.IsRevoked
+            ? 0
+            : await _repository
+                .Where(s => s.Id == sessionId && !s.IsRevoked)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(s => s.LastActivityTime, DateTime.UtcNow));
+
+        if (touched == 0)
         {
             return Fail("Session is revoked", 400, ErrorCodes.VALIDATION_ERROR);
         }
-
-        session.LastActivityTime = DateTime.UtcNow;
-        await _repository.UpdateAsync(session);
 
         return Ok();
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★★★ <strong>只写两列，且只在行未撤销时写。</strong>此前读出整行、改两列、再 <c>UpdateAsync</c> 整行写回
+    /// （实体被标成 <c>Modified</c>，所有列都写）：撤销落在这次刷新的读与写之间，就被 <c>IsRevoked = false</c> 盖掉，
+    /// 撤销答了成功，这次刷新签出的 access token 却一直过得了校验。绝对上限建立时定死、不会变，先读它来夹紧是安全的。
+    /// </remarks>
     public async Task<Result> RenewSessionAsync(Guid sessionId, DateTime expiresAt)
     {
-        var session = await _repository.GetAsync(sessionId);
-        if (session == null || session.IsRevoked)
+        var current = await _repository
+            .Where(s => s.Id == sessionId)
+            .Select(s => new { s.IsRevoked, s.AbsoluteExpiresAt })
+            .FirstOrDefaultAsync();
+        if (current == null || current.IsRevoked)
         {
             return Ok();
         }
 
-        session.LastActivityTime = DateTime.UtcNow;
         // ★ 续期不得越过绝对上限，否则这条上限就只是一个不参与任何判断的字段：
         // 刷新令牌每次都把 ExpiresAt 推到「今天 + 刷新周期」，一条会话可以被无限续下去。
-        session.ExpiresAt = SessionLifetime.ClampToAbsolute(expiresAt, session.AbsoluteExpiresAt);
-        await _repository.UpdateAsync(session);
+        DateTime? renewedExpiry = SessionLifetime.ClampToAbsolute(expiresAt, current.AbsoluteExpiresAt);
+        var renewedActivity = DateTime.UtcNow;
+        await _repository
+            .Where(s => s.Id == sessionId && !s.IsRevoked)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(s => s.LastActivityTime, renewedActivity)
+                .SetProperty(s => s.ExpiresAt, renewedExpiry));
+
         // 续期后有效性可能延长，清缓存让下次校验读到新值。
         await InvalidateValidityCacheAsync(sessionId);
 

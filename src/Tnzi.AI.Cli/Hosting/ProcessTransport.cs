@@ -18,6 +18,9 @@ namespace Tnzi.AI.Cli.Hosting;
 /// </remarks>
 public sealed class ProcessTransport : ICliAgentTransport
 {
+    /// <summary>释放时最多等多久让一次正在进行的写入让出写通道（理由见 <see cref="DisposeAsync"/>）。</summary>
+    internal static readonly TimeSpan DisposeWriteTimeout = TimeSpan.FromSeconds(2);
+
     private readonly Process _process;
     private readonly Channel<string> _stdout = Channel.CreateUnbounded<string>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
@@ -80,14 +83,33 @@ public sealed class ProcessTransport : ICliAgentTransport
     }
 
     /// <inheritdoc />
-    public async Task CloseInputAsync()
+    public Task CloseInputAsync() => TryCloseInputAsync(Timeout.InfiniteTimeSpan);
+
+    /// <summary>
+    /// 关闭 stdin，但最多等 <paramref name="writeTimeout"/> 让正在进行的写入让出写通道。
+    /// </summary>
+    /// <returns>
+    /// stdin 已关闭（或此前已被关闭、已断开）时为 true；写通道在时限内没让出来时为 false，
+    /// 此时 stdin 仍被标记为关闭，之后的写入一律直接返回。
+    /// </returns>
+    /// <remarks>
+    /// 终止流程用它而不是无限期地等：子进程不读 stdin 时（卡死的 CLI 正是这样），一次大写入会
+    /// 一直卡在管道上、占着写通道。无限期地等它，终止就永远走不到强制杀进程那一档，而杀掉进程
+    /// 恰恰是让那次写入（以管道断开）结束的唯一办法。
+    /// </remarks>
+    internal async Task<bool> TryCloseInputAsync(TimeSpan writeTimeout)
     {
         if (Interlocked.Exchange(ref _stdinClosed, 1) != 0)
         {
-            return;
+            return true;
         }
 
-        await _writeGate.WaitAsync();
+        if (!await _writeGate.WaitAsync(writeTimeout))
+        {
+            _logger.LogDebug("[{Provider}] stdin left open: a write is still blocked on the pipe", _providerKey);
+            return false;
+        }
+
         try
         {
             _process.StandardInput.Close();
@@ -104,6 +126,8 @@ public sealed class ProcessTransport : ICliAgentTransport
         {
             _writeGate.Release();
         }
+
+        return true;
     }
 
     private async Task PumpStdoutAsync()
@@ -157,11 +181,22 @@ public sealed class ProcessTransport : ICliAgentTransport
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// 关 stdin（有上限地等写通道）并结束 stdout 通道。
+    /// </summary>
+    /// <remarks>
+    /// 不能无限期地等写通道：子进程不读 stdin 时，一次卡在管道上的写入会一直占着它，而那次写入只会在进程被杀、
+    /// 管道断开时收尾，在那之前释放永远返回不了，持有它的调用方也就跟着挂住。等不到就放弃关 stdin
+    ///（它已被标记为关闭，之后的写入直接返回），与终止流程同一处理。
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        await CloseInputAsync();
+        await TryCloseInputAsync(DisposeWriteTimeout);
         _stdout.Writer.TryComplete();
-        _writeGate.Dispose();
+
+        // ★写通道刻意不释放。终止流程放弃关 stdin 时（见 TryCloseInputAsync），那次卡住的写入要等
+        // 进程被杀、管道断开才收尾，可能晚于这里；它收尾时要归还写通道，释放过的信号量会在那一刻
+        // 抛 ObjectDisposedException。SemaphoreSlim 只有访问过 AvailableWaitHandle 才持有内核对象，
+        // 这里从不访问，不释放也没有任何泄漏。
     }
 }

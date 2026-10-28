@@ -29,7 +29,7 @@ public class AcpSmokeTests
     public async Task Handshake_AndOneTurn_CompleteOverTheRealTransport()
     {
         var (provider, executablePath) = CliSmokeGate.FirstInstalled(CliAgentProtocol.Acp)!.Value;
-        var workDirectory = Directory.CreateTempSubdirectory("tnzi-acp-smoke-").FullName;
+        var workDirectory = TestScratch.CreateDirectory("acp-smoke");
 
         try
         {
@@ -42,7 +42,7 @@ public class AcpSmokeTests
             };
 
             var adapter = new AcpAdapter(NullLogger<AcpAdapter>.Instance);
-            var host = new LocalProcessHost(NullLogger<LocalProcessHost>.Instance);
+            var host = LocalHosts.Create();
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
 
             var events = new List<CliAgentEvent>();
@@ -84,14 +84,7 @@ public class AcpSmokeTests
         }
         finally
         {
-            try
-            {
-                Directory.Delete(workDirectory, recursive: true);
-            }
-            catch (IOException)
-            {
-                // Not worth failing a smoke test over.
-            }
+            TestScratch.Delete(workDirectory);
         }
     }
 }

@@ -187,6 +187,9 @@ public class EmployeeService : ApplicationService, IEmployeeService
 
         if (input.BaseAmount < 0)
             return Fail<SalaryAssignmentDto>("BaseAmount cannot be negative.", 400);
+        var notesTooLong = PayrollFieldLimits.FirstTooLong((input.Notes, PayrollFieldLimits.NotesMaxLength, "notes"));
+        if (notesTooLong != null)
+            return Fail<SalaryAssignmentDto>(notesTooLong, 400);
 
         var effectiveFrom = input.EffectiveFrom.ToUtcDate();
         if (await _assignmentRepository.AnyAsync(a => a.EmployeeId == employeeId && a.EffectiveFrom == effectiveFrom, cancellationToken))
@@ -241,6 +244,17 @@ public class EmployeeService : ApplicationService, IEmployeeService
             return Fail("Employee code is required.");
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("Employee name is required.");
+
+        // 列宽在入口先查（缘由见 PayrollFieldLimits）。判定落在要落库的那个值上：修剪过的就按修剪后的算。
+        var tooLong = PayrollFieldLimits.FirstTooLong(
+            (input.Code.Trim(), PayrollFieldLimits.EmployeeCodeMaxLength, "employee code"),
+            (input.Name.Trim(), PayrollFieldLimits.NameMaxLength, "employee name"),
+            (input.Email?.Trim(), PayrollFieldLimits.EmailMaxLength, "email"),
+            (input.Phone?.Trim(), PayrollFieldLimits.PhoneMaxLength, "phone"),
+            (string.IsNullOrWhiteSpace(input.AttributesJson) ? null : input.AttributesJson.Trim(), PayrollFieldLimits.AttributesJsonMaxLength, "attributes"),
+            (input.Notes, PayrollFieldLimits.NotesMaxLength, "notes"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
 
         if (input.HireDate.HasValue && input.TerminationDate.HasValue &&
             input.TerminationDate.Value.ToUtcDate() < input.HireDate.Value.ToUtcDate())

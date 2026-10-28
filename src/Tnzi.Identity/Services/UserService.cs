@@ -5,8 +5,20 @@
 /// </summary>
 public class UserService : ApplicationService, IUserService
 {
-    private static readonly TimeSpan UserCacheExpiration = TimeSpan.FromMinutes(30);
-    private const int DefaultLockoutDays = 1;
+    /// <summary>
+    /// 「直到有人解锁」的锁定年限：停用、不给截止时间的锁定、自助停用与自助注销都写一百年后。
+    /// </summary>
+    private const int IndefiniteLockoutYears = 100;
+
+    /// <summary>
+    /// 一次 CSV 导出最多的行数。超过时整次导出被拒绝（提示收窄筛选），不截断。
+    /// </summary>
+    internal const int DefaultExportMaxRows = 50000;
+
+    /// <summary>
+    /// 导出上限。只有测试会换掉它（造五万行只为跨过上限不现实）。
+    /// </summary>
+    internal int ExportMaxRows { get; init; } = DefaultExportMaxRows;
 
     private readonly UserManager<User> _userManager;
     private readonly RoleManager<Role> _roleManager;
@@ -14,7 +26,6 @@ public class UserService : ApplicationService, IUserService
     private readonly IRepository<UserRole>? _userRoleRepository;
     private readonly IOrganizationService? _organizationService;
     private readonly ICurrentUser? _currentUser;
-    private readonly ICache? _cache;
     private readonly IUserDetailService? _userDetailService;
     private readonly IUserRoleService? _userRoleService;
     private readonly ICurrentTenant? _currentTenant;
@@ -32,7 +43,6 @@ public class UserService : ApplicationService, IUserService
         IOrganizationService? organizationService = null,
         IEventBus? eventBus = null,
         ICurrentUser? currentUser = null,
-        ICache? cache = null,
         IUserDetailService? userDetailService = null,
         IUserRoleService? userRoleService = null,
         IRepository<UserRole>? userRoleRepository = null,
@@ -49,7 +59,6 @@ public class UserService : ApplicationService, IUserService
         _userRepository = Check.NotNull(userRepository);
         _organizationService = organizationService;
         _currentUser = currentUser;
-        _cache = cache;
         _userDetailService = userDetailService;
         _userRoleService = userRoleService;
         _userRoleRepository = userRoleRepository;
@@ -249,7 +258,16 @@ public class UserService : ApplicationService, IUserService
     private Task<bool> IsSuperAdminTargetForbiddenAsync(Guid targetUserId)
         => SuperAdminTargetGuard.IsForbiddenAsync(_functionAuthorization, _currentUser?.Id ?? CurrentUser?.Id, targetUserId);
 
-    public async Task<Result<UserDto>> CreateAsync(CreateUserDto input)
+    public Task<Result<UserDto>> CreateAsync(CreateUserDto input) => CreateCoreAsync(input, announceRegistration: true);
+
+    /// <inheritdoc />
+    public Task<Result<UserDto>> CreateForInvitationAsync(CreateUserDto input) => CreateCoreAsync(input, announceRegistration: false);
+
+    /// <param name="input">建号请求</param>
+    /// <param name="announceRegistration">
+    /// 建好之后是否发布 <see cref="UserRegisteredEvent"/>。邀请建出的账号还登录不进去，由邀请服务在接受时发布。
+    /// </param>
+    private async Task<Result<UserDto>> CreateCoreAsync(CreateUserDto input, bool announceRegistration)
     {
         var organizationCheck = await CheckOrganizationAssignableAsync(input.OrganizationId);
         if (!organizationCheck.Succeeded)
@@ -269,6 +287,21 @@ public class UserService : ApplicationService, IUserService
                 UseEmailAsUserName ? "Username is required when the account has no email address." : "Username is required.",
                 400,
                 ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // ★★★ 角色在建号之前问（不存在 404、委托护栏 403）。UserManager 每一步自己提交，框架默认也没有
+        //   请求级工作单元：先建号再分配，角色被拒时留下的是一个已经落库、没有密码也没有角色、
+        //   PendingActions = None 的账号。经邀请走到这里时它不受「待接受邀请」守卫管辖
+        //   （验证码登录收得到那个邮箱的码就能进来），改正角色重试则撞重名。
+        List<Role>? roles = null;
+        if (input.RoleIds is { Count: > 0 })
+        {
+            var resolved = await ResolveMembershipChangeAsync(input.RoleIds);
+            if (!resolved.Succeeded)
+            {
+                return Fail<UserDto>(resolved.Message!, resolved.Code ?? 400, resolved.ErrorCode);
+            }
+            roles = resolved.Data!;
         }
 
         var user = input.MapTo<User>();
@@ -292,18 +325,34 @@ public class UserService : ApplicationService, IUserService
                 ErrorCodes.IDENTITY_USER_CREATE_FAILED);
         }
 
-        // 分配角色
-        if (input.RoleIds != null && input.RoleIds.Any())
+        // 分配角色（已在建号之前问过）。这一步仍可能失败（角色恰在此刻被删、存储层拒绝），
+        // 失败就把刚建的账号收回去：返回失败而库里留着账号，正是上面那道前置检查要杜绝的局面。
+        if (roles != null)
         {
-            var assignResult = await AssignRolesAsync(user.Id, input.RoleIds);
+            var assignResult = await AddToResolvedRolesAsync(user, roles);
             if (!assignResult.Succeeded)
             {
+                await DiscardCreatedAccountAsync(user);
                 return Fail<UserDto>(assignResult.Message ?? "Failed to assign roles", assignResult.Code ?? 400, assignResult.ErrorCode);
             }
         }
 
-        // 发布用户注册事件（通过UserManager创建的用户也触发注册事件）
-        await PublishUserRegisteredEventAsync(user);
+        // ★★ 昵称住在资料表（UserDetail），按名字映射到 User 时被安静丢掉：接口答 200、返回的昵称是 null。
+        //   失败与角色同一处理：把刚建的账号收回去，不留一个「请求失败、库里却有号」的半截状态。
+        if (!string.IsNullOrWhiteSpace(input.Nickname) && _userDetailService != null)
+        {
+            var detailResult = await _userDetailService.CreateOrUpdateAsync(user.Id, new CreateUserDetailDto { Nickname = input.Nickname });
+            if (!detailResult.Succeeded)
+            {
+                await DiscardCreatedAccountAsync(user);
+                return Fail<UserDto>(detailResult.Message ?? "Failed to save the user profile", detailResult.Code ?? 400, detailResult.ErrorCode);
+            }
+        }
+
+        if (announceRegistration)
+        {
+            await PublishUserRegisteredEventAsync(user);
+        }
 
         var userDto = await MapUserToDtoAsync(user);
         LogInformation("User created: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
@@ -335,11 +384,43 @@ public class UserService : ApplicationService, IUserService
             // Email / PhoneNumber 同理：换绑必须走带验证码的换绑端点
         };
 
-        return UpdateAsync(id, admin);
+        // 自助端点只收资料字段，它的每一次保存都是一次整组替换（全空 = 把资料清空）。
+        return UpdateCoreAsync(id, admin, writeProfile: true);
     }
 
     /// <inheritdoc />
-    public async Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input)
+    public Task<Result<UserDto>> UpdateAsync(Guid id, UpdateUserDto input)
+    {
+        Check.NotNull(input);
+        return UpdateCoreAsync(id, input, writeProfile: CarriesProfileFields(input));
+    }
+
+    /// <summary>
+    /// <see cref="UpdateUserDto"/> 上会被搬进资料（<see cref="UserDetail"/>）的那几栏：与 <see cref="CreateUserDetailDto"/> 同名的属性。
+    /// </summary>
+    /// <remarks>
+    /// 按名字现算而不是手写清单：资料同步走的就是按名字搬的映射，两边口径逐字一致；
+    /// 将来给两个 DTO 加一栏资料字段，这里自动认得它。
+    /// </remarks>
+    private static readonly PropertyInfo[] ProfileFields = typeof(UpdateUserDto).GetProperties()
+        .Where(p => typeof(CreateUserDetailDto).GetProperty(p.Name) != null)
+        .ToArray();
+
+    /// <summary>
+    /// 管理端的更新请求带没带任何一栏资料字段。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 资料是<b>整组替换</b>（为 null 的栏被清空，自助资料靠它清掉某一栏），账号那一半却是「null = 不动」。
+    /// 此前不论请求带没带资料字段都替换一遍：管理端列表的编辑弹窗只改了手机号，那个人的姓名、昵称、头像、生日、
+    /// 简介就全没了，性别归零，头像文件的引用随之消失。一栏资料都没带的请求表达的是「只改账号」，资料一个字节都不碰；
+    /// 带了任何一栏，仍按整组替换。
+    /// </remarks>
+    private static bool CarriesProfileFields(UpdateUserDto input) => ProfileFields.Any(p => p.GetValue(input) != null);
+
+    /// <param name="id">账号 id</param>
+    /// <param name="input">要写的字段</param>
+    /// <param name="writeProfile">是否同步资料（整组替换）</param>
+    private async Task<Result<UserDto>> UpdateCoreAsync(Guid id, UpdateUserDto input, bool writeProfile)
     {
         var user = await FindScopedUserAsync(id);
         if (user == null)
@@ -356,6 +437,19 @@ public class UserService : ApplicationService, IUserService
         if (!organizationCheck.Succeeded)
         {
             return Fail<UserDto>(organizationCheck.Message!, organizationCheck.Code ?? 400, organizationCheck.ErrorCode);
+        }
+
+        // ★★★ 角色变更在写任何东西之前算好、问过（不存在 404、委托护栏 403）。下面每一步都自己提交、没有事务：
+        //   此前联系方式与组织先落库、旧角色先摘掉，加新角色时才被拒，请求答 4xx 而账号停在半截。
+        RoleChangePlan? rolePlan = null;
+        if (input.RoleIds != null)
+        {
+            var planned = await PlanRoleChangeAsync(user, input.RoleIds);
+            if (!planned.Succeeded)
+            {
+                return Fail<UserDto>(planned.Message!, planned.Code ?? 400, planned.ErrorCode);
+            }
+            rolePlan = planned.Data;
         }
 
         // 只更新非空字段，避免空字符串覆盖现有值
@@ -430,26 +524,20 @@ public class UserService : ApplicationService, IUserService
             }, cancellationToken: default);
         }
 
-        // 更新角色
-        if (input.RoleIds != null)
+        // 更新角色（已在写之前算好、问过）
+        if (rolePlan != null)
         {
-            var currentRoles = await _userManager.GetRolesAsync(user);
-            var currentRoleIds = await GetRoleIdsByNamesAsync(currentRoles);
-
-            var rolesToRemove = currentRoleIds.Except(input.RoleIds).ToList();
-            var rolesToAdd = input.RoleIds.Except(currentRoleIds).ToList();
-
-            if (rolesToRemove.Any())
+            if (rolePlan.Remove.Count > 0)
             {
-                var removeResult = await RemoveRolesAsync(user.Id, rolesToRemove);
+                var removeResult = await RemoveFromResolvedRolesAsync(user, rolePlan.Remove);
                 if (!removeResult.Succeeded)
                 {
                     return Fail<UserDto>(removeResult.Message ?? "Failed to remove roles", removeResult.Code ?? 400, removeResult.ErrorCode);
                 }
             }
-            if (rolesToAdd.Any())
+            if (rolePlan.Add.Count > 0)
             {
-                var assignResult = await AssignRolesAsync(user.Id, rolesToAdd);
+                var assignResult = await AddToResolvedRolesAsync(user, rolePlan.Add);
                 if (!assignResult.Succeeded)
                 {
                     return Fail<UserDto>(assignResult.Message ?? "Failed to assign roles", assignResult.Code ?? 400, assignResult.ErrorCode);
@@ -457,26 +545,21 @@ public class UserService : ApplicationService, IUserService
             }
         }
 
-        // 同步更新用户详情
-        if (_userDetailService != null)
+        // 同步更新用户详情（只在请求带了资料字段时，见 CarriesProfileFields）
+        if (_userDetailService != null && writeProfile)
         {
             var detailDto = new CreateUserDetailDto();
             input.MapTo(detailDto);
             // ★ 结果不能丢：详情那一侧会拒绝（头像文件归属探针 403 / 存储模块缺席 501），丢掉返回值
-            //   就是把「头像没写进去」报成「资料已更新」。请求级工作单元会把前面 UserManager 已写的
-            //   部分一并回滚。
+            //   就是把「头像没写进去」报成「资料已更新」。
+            // ⚠ 这一步排在账号写入之后，而账号那一半经 UserManager 逐步各自提交（它直接调 DbContext.SaveChanges，
+            //   不经工作单元开启物理事务）：头像被拒时，前面已写的联系方式与角色不会回滚。
             var detailResult = await _userDetailService.CreateOrUpdateAsync(user.Id, detailDto);
             if (!detailResult.Succeeded)
                 return Fail<UserDto>(detailResult.Message ?? "Failed to update user details", detailResult.Code ?? 400, detailResult.ErrorCode);
         }
 
         var userDto = await MapUserToDtoAsync(user);
-
-        // 更新成功，清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
 
         LogInformation("User updated: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
         return Ok(userDto, "User updated successfully");
@@ -527,13 +610,6 @@ public class UserService : ApplicationService, IUserService
 
         await RevokeSessionsAsync(id, SessionRevocationReason.AccountDeleted);
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            var cacheKey = CacheKeys.Identity.User(id);
-            await _cache.RemoveAsync(cacheKey);
-        }
-
         LogInformation("User deleted: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
 
         // Publish role-membership removal so downstream caches drop this
@@ -552,8 +628,7 @@ public class UserService : ApplicationService, IUserService
 
     public async Task<Result<UserDto>> GetByIdAsync(Guid id)
     {
-        // 缓存键不含租户，而 DTO 也不带 TenantId，无从事后核对 ——
-        // 裁剪时先用一次主键查询确认归属，再碰缓存。
+        // 先用一次主键查询确认归属（多租户裁剪），越界与不存在同一个回答。
         var scope = Scope;
         if (!scope.IsUnrestricted)
         {
@@ -567,17 +642,10 @@ public class UserService : ApplicationService, IUserService
             }
         }
 
-        // 尝试从缓存获取
-        if (_cache != null)
-        {
-            var cacheKey = CacheKeys.Identity.User(id);
-            var cachedUser = await _cache.GetAsync<UserDto>(cacheKey);
-            if (cachedUser != null)
-            {
-                return Ok(cachedUser);
-            }
-        }
-
+        // ★★★ 不缓存。此前整个 UserDto 按账号缓存 30 分钟，而它带的角色、待办义务、锁定、两步验证、失败次数与资料
+        //   由十几处写入方改动（分配 / 移除角色、管理员重置密码、两步验证开关、接受邀请、登录失败锁定、资料服务……），
+        //   只有少数几处记得清缓存：管理端勾上一个角色、保存成功，刷新回来的还是旧角色，再保存就撞「已在该角色中」。
+        //   IsLockedOut 还随时间变化，缓存本身就不可能对。这是详情读取（管理端详情页、本人资料），三四条主键 / 索引查询。
         var user = await _userRepository
             .Where(u => u.Id == id)
             .FirstOrDefaultAsync();
@@ -587,22 +655,51 @@ public class UserService : ApplicationService, IUserService
             return Fail<UserDto>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
-        var userDto = await MapUserToDtoAsync(user);
-
-        // 存入缓存（30分钟过期）
-        if (_cache != null)
-        {
-            var cacheKey = CacheKeys.Identity.User(id);
-            await _cache.SetAsync(cacheKey, userDto, UserCacheExpiration);
-        }
-
-        return Ok(userDto);
+        return Ok(await MapUserToDtoAsync(user));
     }
 
     public async Task<Result<IPagedList<UserListItemDto>>> GetListAsync(UserListQueryDto query)
     {
         // 拆分前这里 Include 了 Organization 导航属性以便 ProjectTo 出组织名；
         // 导航属性随实体搬进可选包之后，组织名改为投影完成后按整页批量补一次（见下）。
+        var queryable = FilterAndSortUsers(query);
+
+        // 使用 ProjectTo 完成基础映射（轻量版，不加载 UserDetail）
+        var paged = await queryable
+            .ProjectTo<User, UserListItemDto>()
+            .CreateAsync(query);
+
+        // 批量获取组织名，消除 N+1（未加载组织包时留空）
+        await FillOrganizationNamesAsync(paged.Items as IReadOnlyCollection<UserListItemDto> ?? paged.Items.ToList());
+
+        // 批量获取用户角色，消除 N+1
+        if (_userRoleService != null && paged.Items.Any())
+        {
+            var userIds = paged.Items.Select(u => u.Id).ToList();
+            var userRolesMap = await _userRoleService.GetUserRolesAsync(userIds);
+
+            foreach (var userDto in paged.Items)
+            {
+                if (userRolesMap.TryGetValue(userDto.Id, out var roles))
+                {
+                    userDto.Roles = roles.ToList();
+                }
+            }
+        }
+
+        return Ok(paged);
+    }
+
+    /// <summary>
+    /// 管理端用户列表的筛选与排序，列表分页与 CSV 导出共用这一份。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 导出必须与屏幕上那张列表是同一个集合：管理台导出时带的就是当前列表的查询条件。
+    /// 各写一份筛选就会漂移，漂移的样子是：筛到「待接受邀请」的 20 行再点导出，拿到的是只按关键词匹配的全部账号，
+    /// 而文件本身看不出任何异样。所以只留这一份。
+    /// </remarks>
+    private IQueryable<User> FilterAndSortUsers(UserListQueryDto query)
+    {
         var queryable = Scope.Apply(_userRepository.Where(u => !u.IsDeleted));
 
         // 关键词搜索（大小写不敏感）
@@ -694,30 +791,7 @@ public class UserService : ApplicationService, IUserService
             queryable = queryable.OrderByDescending(u => u.CreationTime);
         }
 
-        // 使用 ProjectTo 完成基础映射（轻量版，不加载 UserDetail）
-        var paged = await queryable
-            .ProjectTo<User, UserListItemDto>()
-            .CreateAsync(query);
-
-        // 批量获取组织名，消除 N+1（未加载组织包时留空）
-        await FillOrganizationNamesAsync(paged.Items as IReadOnlyCollection<UserListItemDto> ?? paged.Items.ToList());
-
-        // 批量获取用户角色，消除 N+1
-        if (_userRoleService != null && paged.Items.Any())
-        {
-            var userIds = paged.Items.Select(u => u.Id).ToList();
-            var userRolesMap = await _userRoleService.GetUserRolesAsync(userIds);
-
-            foreach (var userDto in paged.Items)
-            {
-                if (userRolesMap.TryGetValue(userDto.Id, out var roles))
-                {
-                    userDto.Roles = roles.ToList();
-                }
-            }
-        }
-
-        return Ok(paged);
+        return queryable;
     }
 
     public async Task<Result> EnableAsync(Guid id)
@@ -766,15 +840,25 @@ public class UserService : ApplicationService, IUserService
             }, cancellationToken: default);
         }
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
-
         LogInformation("User enabled: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
         return Ok("User enabled successfully");
     }
+
+    /// <summary>
+    /// 还没接受邀请的账号不能停用 / 锁定（与 <see cref="EnableAsync"/> 对称），让管理员改用撤销邀请。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 停用写下的「一百年后」与邀请占位写下的锁定形状完全一样，接受邀请时分不出谁是谁，会一并清掉：
+    /// 管理员停掉一个待接受的人，那人照样点开链接、设好密码、带着预设角色登录进来，列表里显示为活跃。
+    /// 不想让这个人进来，正确的动作是撤销邀请（链接作废、账号删除）；在源头拒绝，就不存在这种歧义。
+    /// </remarks>
+    private Result? RefuseLockoutChangeWhilePending(User user)
+        => user.HasPendingAction(PendingUserActions.InvitationPending)
+            ? Fail(
+                "This account has not accepted its invitation yet. Revoke the invitation instead.",
+                409,
+                ErrorCodes.IDENTITY_ACTIVATION_PENDING)
+            : null;
 
     public async Task<Result> DisableAsync(Guid id, string? reason = null)
     {
@@ -789,8 +873,14 @@ public class UserService : ApplicationService, IUserService
             return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
+        var pending = RefuseLockoutChangeWhilePending(user);
+        if (pending != null)
+        {
+            return pending;
+        }
+
         // 禁用用户：锁定到未来某个时间（如100年后）
-        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(IndefiniteLockoutYears));
         if (!locked.Succeeded)
         {
             return Fail(
@@ -815,12 +905,6 @@ public class UserService : ApplicationService, IUserService
             }, cancellationToken: default);
         }
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
-
         LogInformation("User disabled: {UserId}, UserName: {UserName}, Reason: {Reason}", user.Id, user.UserName ?? string.Empty, reason ?? string.Empty);
         return Ok("User disabled successfully");
     }
@@ -838,7 +922,15 @@ public class UserService : ApplicationService, IUserService
             return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
-        var lockoutEndDate = lockoutEnd ?? DateTimeOffset.UtcNow.AddDays(DefaultLockoutDays);
+        var pending = RefuseLockoutChangeWhilePending(user);
+        if (pending != null)
+        {
+            return pending;
+        }
+
+        // ★★ 不给截止时间 = 直到管理员解锁。管理端三处入口（登录安全看板、用户列表、用户详情）都这样调用，
+        //   文案写的也是「永久」；此前这里落成一天后，被锁的人第二天不经任何人解锁就又能登录了。
+        var lockoutEndDate = lockoutEnd ?? DateTimeOffset.UtcNow.AddYears(IndefiniteLockoutYears);
 
         var locked = await LockUntilAsync(user, lockoutEndDate);
         if (!locked.Succeeded)
@@ -864,12 +956,6 @@ public class UserService : ApplicationService, IUserService
             }, cancellationToken: default);
         }
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
-
         LogInformation("User locked: {UserId}, UserName: {UserName}, LockoutEnd: {LockoutEnd}, Reason: {Reason}",
             user.Id, user.UserName ?? string.Empty, lockoutEndDate, reason ?? string.Empty);
         return Ok("User locked successfully");
@@ -886,6 +972,16 @@ public class UserService : ApplicationService, IUserService
         if (await IsSuperAdminTargetForbiddenAsync(id))
         {
             return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // ★★★ 与 EnableAsync 同一道守卫：解锁与启用是同一个原语（ClearLockoutAsync），
+        //   只守住启用时，点一下「解锁」就把未接受邀请的账号放出了锁定。
+        if (user.HasPendingAction(PendingUserActions.InvitationPending))
+        {
+            return Fail(
+                "Cannot unlock an account that has not accepted its invitation. Resend the invitation instead.",
+                409,
+                ErrorCodes.IDENTITY_ACTIVATION_PENDING);
         }
 
         var cleared = await ClearLockoutAsync(user);
@@ -909,12 +1005,6 @@ public class UserService : ApplicationService, IUserService
             }, cancellationToken: default);
         }
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
-
         LogInformation("User unlocked: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
         return Ok("User unlocked successfully");
     }
@@ -924,9 +1014,23 @@ public class UserService : ApplicationService, IUserService
         var inputList = inputs.ToList();
         var results = new List<UserListItemDto>();
 
-        // 由于UserManager.CreateAsync需要逐个处理（密码哈希、验证等），
-        // 我们仍然需要循环调用，但可以优化后续的数据库操作
-        // 使用事务确保原子性（如果支持）
+        // 批量建号逐个提交、不是事务。角色被拒是最常见的失败，在建第一个之前就整批问完：
+        // 含一个不存在或调用者无权授予的角色，就一个都不建。（批里每个角色都是新授予，所以并集上问一次就是逐个问的结果。）
+        // 其余失败（例如第 k 个重名）仍会留下前 k-1 个，返回的失败信息指明是哪一个。
+        var requestedRoleIds = inputList
+            .Where(i => i.RoleIds != null)
+            .SelectMany(i => i.RoleIds!)
+            .Distinct()
+            .ToList();
+        if (requestedRoleIds.Count > 0)
+        {
+            var resolved = await ResolveMembershipChangeAsync(requestedRoleIds);
+            if (!resolved.Succeeded)
+            {
+                return Fail<IEnumerable<UserListItemDto>>(resolved.Message!, resolved.Code ?? 400, resolved.ErrorCode);
+            }
+        }
+
         foreach (var input in inputList)
         {
             var result = await CreateAsync(input);
@@ -1035,13 +1139,6 @@ public class UserService : ApplicationService, IUserService
             //   在令牌剩余寿命里照常通过认证，而管理员那边显示的是「已删除」。
             await RevokeSessionsAsync(user.Id, SessionRevocationReason.AccountDeleted);
 
-            // 清除缓存
-            if (_cache != null)
-            {
-                var cacheKey = CacheKeys.Identity.User(user.Id);
-                await _cache.RemoveAsync(cacheKey);
-            }
-
             // Publish per-user (consumers expect one event per affected user).
             await PublishUserRolesChangedAsync(
                 user,
@@ -1069,19 +1166,20 @@ public class UserService : ApplicationService, IUserService
             return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
-        var idList = roleIds.ToList();
-        var roles = await _roleManager.Roles.Where(r => idList.Contains(r.Id)).ToListAsync();
-        if (roles.Count != idList.Distinct().Count())
+        var resolved = await ResolveMembershipChangeAsync(roleIds.ToList());
+        if (!resolved.Succeeded)
         {
-            return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+            return Fail(resolved.Message!, resolved.Code ?? 400, resolved.ErrorCode);
         }
 
-        var membershipViolation = await GetRoleMembershipViolationAsync(roles);
-        if (membershipViolation != null)
-        {
-            return Fail(membershipViolation, 403, ErrorCodes.FORBIDDEN);
-        }
+        return await AddToResolvedRolesAsync(user, resolved.Data!);
+    }
 
+    /// <summary>
+    /// 把账号加进已经问过（<see cref="ResolveMembershipChangeAsync"/>）的角色，并通知下游。
+    /// </summary>
+    private async Task<Result> AddToResolvedRolesAsync(User user, IReadOnlyCollection<Role> roles)
+    {
         var result = await _userManager.AddToRolesAsync(user, roles.Select(r => r.Name!));
         if (!result.Succeeded)
         {
@@ -1092,7 +1190,7 @@ public class UserService : ApplicationService, IUserService
         }
 
         LogInformation("Roles assigned to user: {UserId}, Roles: {RoleNames}",
-            userId, string.Join(", ", roles.Select(r => r.Name)));
+            user.Id, string.Join(", ", roles.Select(r => r.Name)));
 
         // Tell downstream consumers (Authorization cache, audit log) the
         // user's role set changed. Without this signal the Authorization
@@ -1120,21 +1218,22 @@ public class UserService : ApplicationService, IUserService
             return Fail(SuperAdminTargetGuard.Message, 403, ErrorCodes.FORBIDDEN);
         }
 
-        var idList = roleIds.ToList();
-        var roles = await _roleManager.Roles.Where(r => idList.Contains(r.Id)).ToListAsync();
-        if (roles.Count != idList.Distinct().Count())
-        {
-            return Fail("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
-        }
-
-        // 摘除成员与授予成员同受支配约束——弱管理员把用户从强角色里摘出去
+        // 摘除成员与授予成员同受支配约束：弱管理员把用户从强角色里摘出去
         // 同样是越权干预(变相削权/锁死他人访问)。
-        var membershipViolation = await GetRoleMembershipViolationAsync(roles);
-        if (membershipViolation != null)
+        var resolved = await ResolveMembershipChangeAsync(roleIds.ToList());
+        if (!resolved.Succeeded)
         {
-            return Fail(membershipViolation, 403, ErrorCodes.FORBIDDEN);
+            return Fail(resolved.Message!, resolved.Code ?? 400, resolved.ErrorCode);
         }
 
+        return await RemoveFromResolvedRolesAsync(user, resolved.Data!);
+    }
+
+    /// <summary>
+    /// 把账号从已经问过（<see cref="ResolveMembershipChangeAsync"/>）的角色里摘出来，并通知下游。
+    /// </summary>
+    private async Task<Result> RemoveFromResolvedRolesAsync(User user, IReadOnlyCollection<Role> roles)
+    {
         var result = await _userManager.RemoveFromRolesAsync(user, roles.Select(r => r.Name!));
         if (!result.Succeeded)
         {
@@ -1145,7 +1244,7 @@ public class UserService : ApplicationService, IUserService
         }
 
         LogInformation("Roles removed from user: {UserId}, Roles: {RoleNames}",
-            userId, string.Join(", ", roles.Select(r => r.Name)));
+            user.Id, string.Join(", ", roles.Select(r => r.Name)));
 
         // Critical: removal must publish (more so than assignment) - a stale
         // cache after a revocation is a permission-retention security gap.
@@ -1192,12 +1291,88 @@ public class UserService : ApplicationService, IUserService
     }
 
     /// <summary>
+    /// 取出要变更成员关系的角色并问过委托护栏：有不存在的答 404，调用者无权变更其成员的答 403。
+    /// </summary>
+    /// <remarks>
+    /// 只读、不写任何东西：建号（<see cref="CreateAsync"/>）、批量建号与改号（<see cref="UpdateAsync"/>）都在落库之前先问它，
+    /// 单独的分配 / 摘除端点也走它，几条路一个口径。
+    /// </remarks>
+    private async Task<Result<List<Role>>> ResolveMembershipChangeAsync(IReadOnlyCollection<Guid> roleIds)
+    {
+        var distinct = roleIds.Distinct().ToList();
+        var roles = await _roleManager.Roles.Where(r => distinct.Contains(r.Id)).ToListAsync();
+        if (roles.Count != distinct.Count)
+        {
+            return Fail<List<Role>>("Some roles were not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var membershipViolation = await GetRoleMembershipViolationAsync(roles);
+        if (membershipViolation != null)
+        {
+            return Fail<List<Role>>(membershipViolation, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        return Ok(roles);
+    }
+
+    /// <summary>改号时的角色变更：要摘的与要加的，两边都已问过。</summary>
+    private sealed record RoleChangePlan(IReadOnlyCollection<Role> Remove, IReadOnlyCollection<Role> Add);
+
+    /// <summary>
+    /// 按请求里的完整角色集算出要摘与要加的角色，并对两边一起问过（<see cref="ResolveMembershipChangeAsync"/>）。不写任何东西。
+    /// </summary>
+    private async Task<Result<RoleChangePlan>> PlanRoleChangeAsync(User user, IReadOnlyCollection<Guid> requestedRoleIds)
+    {
+        var currentRoleIds = await GetRoleIdsByNamesAsync(await _userManager.GetRolesAsync(user) ?? Array.Empty<string>());
+        var toRemove = currentRoleIds.Except(requestedRoleIds).ToHashSet();
+        var toAdd = requestedRoleIds.Except(currentRoleIds).ToHashSet();
+        if (toRemove.Count == 0 && toAdd.Count == 0)
+        {
+            return Ok(new RoleChangePlan([], []));
+        }
+
+        var resolved = await ResolveMembershipChangeAsync(toRemove.Concat(toAdd).ToList());
+        if (!resolved.Succeeded)
+        {
+            return Fail<RoleChangePlan>(resolved.Message!, resolved.Code ?? 400, resolved.ErrorCode);
+        }
+
+        var roles = resolved.Data!;
+        return Ok(new RoleChangePlan(
+            roles.Where(r => toRemove.Contains(r.Id)).ToList(),
+            roles.Where(r => toAdd.Contains(r.Id)).ToList()));
+    }
+
+    /// <summary>
+    /// 建号之后的步骤失败时，收回刚建的账号。
+    /// </summary>
+    /// <remarks>
+    /// 直接经 <c>UserManager</c> 删、不走 <see cref="DeleteAsync"/>：这个账号的注册事件还没发出，
+    /// 不该让下游先收到一条它的删除事件。补偿失败只能记日志，措辞要让人看懂该去做什么。
+    /// </remarks>
+    private async Task DiscardCreatedAccountAsync(User user)
+    {
+        var deleted = await _userManager.DeleteAsync(user);
+        if (!deleted.Succeeded)
+        {
+            LogError(
+                "User {UserId} ({UserName}) was created but a later step failed, and the account could not be removed: {Errors}. "
+                + "It may have no password. Delete or disable it manually.",
+                user.Id, user.UserName ?? string.Empty, deleted.FormatErrors());
+        }
+    }
+
+    /// <summary>
     /// 角色成员变更的委托护栏。非超管调用者仅能变更自己支配的角色的成员
-    /// (支配语义由 Authorization 模块的 CanManageRoleAsync 提供:权限集包含
-    /// 且非超管配置角色)。允许时返回 null,越界返回英文错误消息。
+    /// (支配语义由 Authorization 模块的 CanManageRoleMembershipAsync 提供:权限集包含,
+    /// 连同指向已停用 / 已退役权限的休眠授权,且非超管配置角色)。允许时返回 null,越界返回英文错误消息。
     /// Authorization 模块未加载(_functionAuthorization null)或无用户上下文
     /// (系统/播种路径与单元测试)时整体跳过,保持旧行为。
     /// </summary>
+    /// <remarks>
+    /// ★ 用成员版本而不是 CanManageRoleAsync:后者只算生效码,于是先停用一个码、把自己挂进带着它的角色、
+    /// 再启用它,就能不经任何人授出而持有那个码。
+    /// </remarks>
     private async Task<string?> GetRoleMembershipViolationAsync(IReadOnlyCollection<Role> roles)
     {
         if (_functionAuthorization == null) return null;
@@ -1208,10 +1383,11 @@ public class UserService : ApplicationService, IUserService
 
         foreach (var role in roles)
         {
-            if (!await _functionAuthorization.CanManageRoleAsync(grantorId.Value, role.Id))
+            if (!await _functionAuthorization.CanManageRoleMembershipAsync(grantorId.Value, role.Id))
             {
                 return $"You cannot change membership of role '{role.Name}': " +
-                       "its permission set is not contained in yours, or it is a super-admin role.";
+                       "its permission set (including grants on disabled or retired permissions) is not contained in yours, " +
+                       "or it is a super-admin role.";
             }
         }
 
@@ -1238,27 +1414,19 @@ public class UserService : ApplicationService, IUserService
             .Where(u => u.LockoutEnd != null && u.LockoutEnd > now)
             .CountAsync();
 
-        // 统计组织用户数：如果指定了组织ID，则等于总用户数；否则统计所有有组织的用户数
-        int usersByOrganization;
-        if (organizationId.HasValue)
-        {
-            usersByOrganization = totalUsers; // 已过滤到指定组织，所以等于总用户数
-        }
-        else
-        {
-            // 统计所有有组织的用户数
-            usersByOrganization = await _userRepository
-                .Where(u => !u.IsDeleted && u.OrganizationId != null)
-                .CountAsync();
-        }
+        // ★ 每个数字都从同一个 query（租户范围 + 未删除 + 可选的组织）数出来。此前这两项各自重查：
+        //   组织人数数的是全平台所有租户，角色人数直接数关联表，而关联行在软删之后仍在，
+        //   于是它既跨租户、又比 GET admin/roles/{id}/user-count 多出已删的人。
+        //   给了组织时，组织人数就是总数（query 已经只剩那个组织的人），角色人数是该组织里的角色成员。
+        var usersByOrganization = organizationId.HasValue
+            ? totalUsers
+            : await query.Where(u => u.OrganizationId != null).CountAsync();
 
         var usersByRole = 0;
-        if (roleId.HasValue)
+        if (roleId.HasValue && _userRoleRepository != null)
         {
-            if (_userRoleRepository != null)
-            {
-                usersByRole = await _userRoleRepository.CountAsync(ur => ur.RoleId == roleId.Value);
-            }
+            var memberIds = _userRoleRepository.Where(ur => ur.RoleId == roleId.Value).Select(ur => ur.UserId);
+            usersByRole = await query.Where(u => memberIds.Contains(u.Id)).CountAsync();
         }
 
         var recentRegistrations = await query
@@ -1303,12 +1471,6 @@ public class UserService : ApplicationService, IUserService
             return Fail($"Failed to confirm email: {confirmResult.FormatErrors()}", 400, ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
         }
 
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
-        }
-
         // 发布邮箱变更事件
         if (EventBus != null)
         {
@@ -1344,12 +1506,6 @@ public class UserService : ApplicationService, IUserService
         }
 
         // ChangePhoneNumberAsync 已自动设置 PhoneNumberConfirmed = true
-
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
-        }
 
         // 发布手机号变更事件
         if (EventBus != null)
@@ -1406,11 +1562,6 @@ public class UserService : ApplicationService, IUserService
                 $"Failed to update user: {result.FormatErrors()}",
                 400,
                 ErrorCodes.IDENTITY_USER_UPDATE_FAILED);
-        }
-
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
         // ★ 必须留痕：这一步是「有人替另一个人担保了一个地址」，而框架下游拿那个断言
@@ -1591,7 +1742,7 @@ public class UserService : ApplicationService, IUserService
         }
 
         // 使用 lockout 机制禁用用户
-        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(IndefiniteLockoutYears));
         if (!locked.Succeeded)
         {
             return Fail(
@@ -1612,12 +1763,6 @@ public class UserService : ApplicationService, IUserService
                 DeactivatedTime = DateTime.UtcNow,
                 Reason = reason
             }, cancellationToken: default);
-        }
-
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
         LogInformation("User account deactivated: {UserId}, UserName: {UserName}", user.Id, user.UserName ?? string.Empty);
@@ -1645,7 +1790,7 @@ public class UserService : ApplicationService, IUserService
         // 先锁定再软删：锁定写不进去时账号不能已经被标成删除 ——
         // 此前是先在内存里置 IsDeleted 再调 Set*Async（它们各自 SaveChanges，会把软删标记一并带出去），
         // 于是一次失败的注销留下的是一条已软删、却没锁的行。
-        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(100));
+        var locked = await LockUntilAsync(user, DateTimeOffset.UtcNow.AddYears(IndefiniteLockoutYears));
         if (!locked.Succeeded)
         {
             return Fail(
@@ -1679,12 +1824,6 @@ public class UserService : ApplicationService, IUserService
 
         // 领域记录只需订阅一个「账号没了」的事件，不必区分是管理员删的还是本人注销的。
         await PublishUserDeletedAsync(user);
-
-        // 清除缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(userId));
-        }
 
         LogInformation("User account self-deleted: {UserId}, UserName: {UserName}", userId, userName);
         return Ok("Account deleted successfully");
@@ -1750,29 +1889,25 @@ public class UserService : ApplicationService, IUserService
     /// </summary>
     public async Task<Result<string>> ExportUsersCsvAsync(UserListQueryDto? query = null, CancellationToken cancellationToken = default)
     {
-        var queryable = Scope.Apply(_userRepository.Where(u => !u.IsDeleted));
+        // 筛选与排序与列表逐字相同（分页参数不参与：导出的是整个结果集，不是当前这一页）。
+        var queryable = FilterAndSortUsers(query ?? new UserListQueryDto());
 
-        if (query != null)
-        {
-            if (!string.IsNullOrEmpty(query.Keyword))
-            {
-                var keyword = query.Keyword.ToLower();
-                queryable = queryable.Where(u =>
-                    (u.UserName != null && u.UserName.ToLower().Contains(keyword)) ||
-                    (u.Email != null && u.Email.ToLower().Contains(keyword)) ||
-                    (u.PhoneNumber != null && u.PhoneNumber.ToLower().Contains(keyword)));
-            }
-
-            if (query.OrganizationId.HasValue)
-            {
-                queryable = queryable.Where(u => u.OrganizationId == query.OrganizationId.Value);
-            }
-        }
-
+        // ★ 超过上限时拒绝而不是截断：截断出来的是一份看起来完整、其实缺了一截的文件。
+        //   多取一行判超限，超限时再 COUNT 一次只为把总数写进提示。
         var users = await queryable
-            .OrderBy(u => u.CreationTime)
-            .Take(50000) // Export safety limit
+            .Take(ExportMaxRows + 1)
             .ToListAsync(cancellationToken);
+
+        if (users.Count > ExportMaxRows)
+        {
+            var total = await queryable.LongCountAsync(cancellationToken);
+            LogWarning("User export refused: the filter matches {Total} users, above the export limit of {Max}.", total, ExportMaxRows);
+            return Fail<string>(
+                $"The export matches {total} users, which exceeds the export limit of {ExportMaxRows} rows. "
+                + "Narrow the filters and export again; exports are never truncated silently.",
+                400,
+                ErrorCodes.IDENTITY_USER_EXPORT_TOO_LARGE);
+        }
 
         // 单元格转义统一走核心 CsvBuilder(含公式注入防护),日期保持 ISO 8601 往返格式
         var csv = new CsvBuilder();
@@ -1831,6 +1966,7 @@ public class UserService : ApplicationService, IUserService
         {
             var fields = ParseCsvLine(lines[i]);
             var rowNumber = i + 1;
+            User? user = null;
 
             try
             {
@@ -1869,7 +2005,7 @@ public class UserService : ApplicationService, IUserService
                     continue;
                 }
 
-                var user = new User
+                user = new User
                 {
                     UserName = userName,
                     Email = email,
@@ -1883,16 +2019,31 @@ public class UserService : ApplicationService, IUserService
                 if (createResult.Succeeded)
                 {
                     result.SuccessCount++;
+                    // ★ 留痕，理由同 ConfirmContactAsync：导入替每个地址盖了「已确认」的章，
+                    //   而框架下游拿这个断言决定能不能往那个地址发找回密码的码。
+                    LogWarning(
+                        "User {UserId} imported from CSV by {ActorId} with the email address marked confirmed.",
+                        user.Id, CurrentUser?.Id);
                 }
                 else
                 {
+                    _userRepository.Discard(user);
                     result.Errors[rowNumber] = createResult.FormatErrors();
                     result.FailedCount++;
                 }
             }
             catch (Exception ex)
             {
-                result.Errors[rowNumber] = ex.Message;
+                // ★ 数据库拒绝（列超长、并发重名）时，UserManager 已经把账号加进本请求的 DbContext，
+                //   它仍以 Added 状态留在那里。不丢掉它，下一行的保存会把它再提交一遍、再失败一遍，
+                //   坏行之后的每一个有效行都跟着报同一条错误。
+                if (user != null)
+                {
+                    _userRepository.Discard(user);
+                }
+
+                Logger.LogError(ex, "CSV user import: row {Row} could not be saved.", rowNumber);
+                result.Errors[rowNumber] = "The account could not be saved. The details are in the server log.";
                 result.FailedCount++;
             }
         }

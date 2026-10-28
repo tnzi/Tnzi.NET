@@ -21,11 +21,12 @@ public class RequestTrackingMiddleware
     /// 默认排除路径（当用户未配置 ExcludePaths 时使用）。
     /// "/hubs/*" 必须排除：SignalR WebSocket/SSE 经 access_token 查询参数携带 JWT，
     /// 本中间件原样记录 QueryString，不排除会把完整令牌写进请求日志。
-    /// 注意匹配是锚定全串（* 为通配符），故须带 "/*" 才能覆盖 "/hubs/chat" 等子路径。
+    /// 注意匹配是锚定全串（* 为通配符），故须带 "/*" 才能覆盖 "/hubs/chat" 等子路径；
+    /// 探针（"/health/live"、"/health/ready"）与 Swagger UI 的页面、文档、静态资源都在子路径上，裸条目只挡得住根路径。
     /// </summary>
     private static readonly List<string> DefaultExcludePaths =
     [
-        "/health", "/metrics", "/favicon.ico", "/swagger", "/api-docs", "/hubs/*"
+        "/health", "/health/*", "/metrics", "/favicon.ico", "/swagger", "/swagger/*", "/api-docs", "/api-docs/*", "/hubs/*"
     ];
 
     /// <summary>这条请求的体是否允许采集（认证端点整条不采，见 <see cref="LoggedBodySanitizer"/>）。</summary>
@@ -44,12 +45,14 @@ public class RequestTrackingMiddleware
         if (string.IsNullOrEmpty(raw) || query.Count == 0)
             return raw;
 
-        IReadOnlyCollection<string> keys = options.SensitiveQueryKeys is { Count: > 0 }
+        return QueryStringRedactor.Redact(query, raw, SensitiveKeys(options));
+    }
+
+    /// <summary>查询参数与路由参数共用的敏感名单：部署给了就用部署的（替换，不叠加），否则用核心默认名单。</summary>
+    private static IReadOnlyCollection<string> SensitiveKeys(RequestTrackingOptions options)
+        => options.SensitiveQueryKeys is { Count: > 0 }
             ? options.SensitiveQueryKeys
             : QueryStringRedactor.DefaultSensitiveKeys;
-
-        return QueryStringRedactor.Redact(query, raw, keys);
-    }
 
     public RequestTrackingMiddleware(
         RequestDelegate next,
@@ -91,8 +94,6 @@ public class RequestTrackingMiddleware
 
         // 记录请求开始（使用 Stopwatch 获取高精度计时）
         var stopwatch = Stopwatch.StartNew();
-        var logLevel = trackingOptions.LogLevel;
-        var isSlow = false;
 
         // 认证端点整条不采集体（见 LoggedBodySanitizer.AllowsBodyCapture）。
         var allowsBodyCapture = AllowsBodyCapture(context);
@@ -120,47 +121,19 @@ public class RequestTrackingMiddleware
 
         try
         {
-            await _next(context);
-
-            // 计算响应时间
-            stopwatch.Stop();
-            var duration = stopwatch.Elapsed.TotalMilliseconds;
-            isSlow = trackingOptions.SlowRequestThresholdMs.HasValue &&
-                      duration > trackingOptions.SlowRequestThresholdMs;
-
-            // 如果是慢请求，提升日志级别
-            if (isSlow && logLevel < LogLevel.Warning)
-                logLevel = LogLevel.Warning;
-
-            // 记录请求日志
-            if (_logger.IsEnabled(logLevel))
+            try
             {
-                var userId = GetUserId(context);
-                var logEntry = new RequestLogEntry
-                {
-                    RequestId = requestId,
-                    Method = context.Request.Method,
-                    Path = context.Request.Path.Value ?? "",
-                    QueryString = RedactQueryString(context.Request.Query, context.Request.QueryString.Value, trackingOptions),
-                    // 走 GetClientIp 而不是直接读 Connection：一来它支持反向代理（直接读连接
-                    // 在代理后面拿到的是代理地址，没有价值），二来它是隐私开关
-                    // AspNetCoreOptions.CollectClientIpAddress 的唯一判定点。
-                    IpAddress = context.Request.GetClientIp(),
-                    UserAgent = context.Request.Headers["User-Agent"].ToString(),
-                    RequestBody = requestBody,
-                    StatusCode = context.Response.StatusCode,
-                    DurationMs = duration,
-                    IsSlow = isSlow,
-                    UserId = userId
-                };
-
-                if (trackingOptions.LogResponseBody && responseCapture != null)
-                {
-                    logEntry.ResponseBody = DescribeCapturedResponse(responseCapture, trackingOptions);
-                }
-
-                _logger.Log(logLevel, "{@RequestLog}", logEntry);
+                await _next(context);
             }
+            catch (Exception ex)
+            {
+                // 异常处理中间件在本中间件外面，错误信封还没写。抛异常的请求恰恰是最需要对上 X-Request-Id 的那一类，
+                // 所以先按客户端将会收到的状态码记一条，再原样抛给外层。
+                WriteRequestLog(context, trackingOptions, requestId, requestBody, responseCapture, stopwatch, ExceptionHttpStatusCode.Resolve(context, ex));
+                throw;
+            }
+
+            WriteRequestLog(context, trackingOptions, requestId, requestBody, responseCapture, stopwatch, context.Response.StatusCode);
         }
         finally
         {
@@ -171,6 +144,67 @@ public class RequestTrackingMiddleware
             }
             responseCapture?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// 写一条请求日志：5xx 记 Error，慢请求提升到 Warning，其余用配置的级别。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 5xx 不跟着配置的级别走：这一条是客户端手里的 <c>X-Request-Id</c> 与服务端日志之间唯一的桥
+    /// （异常处理器的 Error 日志里没有这个 ID）。部署把 <see cref="RequestTrackingOptions.LogLevel"/> 调到 Debug 压住正常流量时，
+    /// 失败请求若也按 Debug 记，恰恰是最需要对上请求 ID 的那几条从日志里消失。与 Serilog 请求摘要行同一口径。
+    /// </para>
+    /// <para>
+    /// ★ 长连接不算慢请求（<see cref="HttpContextExtensions.IsLongLivedConnection"/>）：WebSocket、Hub 连接与事件流的耗时是连接存活时长，
+    /// 默认排除名单只挡得住 <c>/hubs/*</c>，挂在别的路径上的长连接每次断开都会被记成一条慢请求。
+    /// </para>
+    /// </remarks>
+    private void WriteRequestLog(HttpContext context, RequestTrackingOptions trackingOptions, string requestId, string? requestBody,
+        BoundedResponseCaptureStream? responseCapture, Stopwatch stopwatch, int statusCode)
+    {
+        stopwatch.Stop();
+        var duration = stopwatch.Elapsed.TotalMilliseconds;
+        var isSlow = trackingOptions.SlowRequestThresholdMs.HasValue &&
+                     duration > trackingOptions.SlowRequestThresholdMs &&
+                     !context.IsLongLivedConnection();
+
+        var logLevel = trackingOptions.LogLevel;
+        if (statusCode >= StatusCodes.Status500InternalServerError && logLevel < LogLevel.Error)
+            logLevel = LogLevel.Error;
+        else if (isSlow && logLevel < LogLevel.Warning)
+            logLevel = LogLevel.Warning;
+
+        if (!_logger.IsEnabled(logLevel))
+        {
+            return;
+        }
+
+        var logEntry = new RequestLogEntry
+        {
+            RequestId = requestId,
+            Method = context.Request.Method,
+            // 路径里值命中敏感名单的路由参数（签署 / 分享链接的 {token}）与查询串同一份名单掩掉。
+            Path = context.GetRedactedPath(SensitiveKeys(trackingOptions)),
+            QueryString = RedactQueryString(context.Request.Query, context.Request.QueryString.Value, trackingOptions),
+            // 走 GetClientIp 而不是直接读 Connection：一来它支持反向代理（直接读连接
+            // 在代理后面拿到的是代理地址，没有价值），二来它是隐私开关
+            // AspNetCoreOptions.CollectClientIpAddress 的唯一判定点。
+            IpAddress = context.Request.GetClientIp(),
+            UserAgent = context.Request.Headers["User-Agent"].ToString(),
+            RequestBody = requestBody,
+            StatusCode = statusCode,
+            DurationMs = duration,
+            IsSlow = isSlow,
+            UserId = GetUserId(context)
+        };
+
+        if (trackingOptions.LogResponseBody && responseCapture != null)
+        {
+            logEntry.ResponseBody = DescribeCapturedResponse(responseCapture, trackingOptions);
+        }
+
+        _logger.Log(logLevel, "{@RequestLog}", logEntry);
     }
 
     /// <summary>
@@ -303,12 +337,7 @@ public class RequestTrackingMiddleware
     }
 
     /// <summary>
-    /// 截断字符串到指定长度
+    /// 截断字符串到指定长度（不切开代理对：日志落到数据库 sink 时，孤立的高代理项会让严格的 UTF-8 编码器拒绝整批写入）
     /// </summary>
-    private static string Truncate(string value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            return value;
-        return value.Substring(0, maxLength) + "... (truncated)";
-    }
+    private static string Truncate(string value, int maxLength) => value.Truncate(maxLength, "... (truncated)");
 }

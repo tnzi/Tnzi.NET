@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requiredRule } from '../form/required-rule';
 import { computed } from 'vue';
 import { useI18n } from '@tnzi/core/adapters/i18n';
 import type { OAuthSocialProvider } from '@tnzi/core/types/shared-ui';
@@ -109,15 +110,15 @@ const isLoading = computed(() => props.loading || form.isSubmitting.value);
 const isDisabled = computed(() => props.disabled);
 
 const usernameRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: props.usernameLabel || t('auth.username') }) },
+  requiredRule(t('auth.pleaseEnter', { field: props.usernameLabel || t('auth.username') })),
 ]);
 const passwordRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: props.passwordLabel || t('auth.password') }) },
+  requiredRule(t('auth.pleaseEnter', { field: props.passwordLabel || t('auth.password') })),
 ]);
 // useLoginForm.validate() rejects a blank captcha whenever `showCaptcha` is on;
 // the rule makes that refusal visible instead of a submit that does nothing.
 const captchaRules = computed(() => [
-  { required: true, message: t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') }) },
+  requiredRule(t('auth.pleaseEnter', { field: props.captchaLabel || t('auth.verificationCode') })),
 ]);
 
 const handleSocialLogin = (provider: NonNullable<ILoginFormProps['socialProviders']>[number]) => {

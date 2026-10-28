@@ -40,13 +40,21 @@ public static class QueryStringRedactor
     ///   <item><c>sig</c>：签名文件链接的访问令牌</item>
     ///   <item><c>password</c>：分享链接口令</item>
     ///   <item><c>api_key</c> / <c>apiKey</c>：第三方回调与集成端点常见的密钥参数</item>
+    ///   <item><c>linkToken</c>：第三方账号绑定令牌（<c>auth/oauth/{provider}/login?linkToken=</c>），
+    ///     在有效期内拿它发起自己的授权流程，就能把自己的第三方身份绑到对方账号上</item>
+    ///   <item><c>tempToken</c>：两步验证与登录后待办的临时令牌。框架自己的端点只在请求体里收它
+    ///     （那一侧由 <see cref="RequestBodyRedactor"/> 的字段名单管）；它出现在查询串或路由参数里时同样是凭据</item>
     /// </list>
+    /// 同一份名单也用于路径里的路由参数（<see cref="RequestPathRedactor"/>）：一个参数名是不是凭据，
+    /// 与它出现在查询串还是路径里无关，<c>{token}</c> 就是 <c>signing/{token}</c>、<c>files/share/{token}</c> 的那一段。
+    /// 审计、访问日志、请求日志与性能采样写路径时都按它把路由参数的值换成掩码。★ 新加一个装凭据的路由参数，
+    /// 名字要落在这里，否则它的值原样进日志表：架构测试 <c>SensitiveRouteParameterTests</c> 守着框架自己的端点。
     /// 没有收 <c>code</c>：OAuth 回调的授权码是一次性的，而按码查记录的列表接口比比皆是，
     /// 收进来会把它们的过滤条件一起抹掉。
     /// </remarks>
     public static IReadOnlyList<string> DefaultSensitiveKeys { get; } =
     [
-        "access_token", "token", "enrollmentToken", "sig", "password", "api_key", "apiKey"
+        "access_token", "token", "enrollmentToken", "sig", "password", "api_key", "apiKey", "linkToken", "tempToken"
     ];
 
     /// <summary>判断一个参数名是否在敏感名单里（不区分大小写）。</summary>

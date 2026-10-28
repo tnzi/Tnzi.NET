@@ -64,6 +64,20 @@ public class RazorTemplateEngineTests : IDisposable
         Assert.Equal("Hello World!", result);
     }
 
+    /// <summary>
+    /// 模板里的 <c>@Truncate</c>：截断点落在代理对中间时整个字符一起舍掉，渲染结果里不出现替换字符。
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_TruncateCutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        // 第 10 个码元是 emoji 的前半个
+        var model = new { Text = new string('a', 9) + "\U0001F600tail" };
+
+        var result = await _engine.RenderAsync("@Truncate(Model.Text, 10)", model);
+
+        Assert.Equal(new string('a', 9) + "...", result);
+    }
+
     [Fact]
     public async Task RenderAsync_WithNullTemplate_ReturnsEmpty()
     {
@@ -302,8 +316,18 @@ public class RazorTemplateEngineTests : IDisposable
         Assert.Equal(0, ((MemoryCache)_cache).Count);
     }
 
-    /// <summary>MemoryCache 的驱逐回调与令牌驱逐都在线程池上异步派发，断言前等它们跑完。</summary>
-    private static Task LetEvictionsLand() => Task.Delay(150);
+    /// <summary>
+    /// 把已经过期的条目从共享缓存里物理移走，断言 <c>Count</c> 前调用。
+    /// </summary>
+    /// <remarks>
+    /// 令牌触发的逐出在线程池上异步落地，固定等 150 ms 在满载的 CI 上不够（Linux 全量作业实发过 Count 仍是 2）。
+    /// <c>Compact(0)</c> 同步扫掉过期条目、不动没过期的，断言于是只取决于「谁过期了」，不取决于线程池几时轮到它。
+    /// </remarks>
+    private Task LetEvictionsLand()
+    {
+        ((MemoryCache)_cache).Compact(0);
+        return Task.CompletedTask;
+    }
 
     #endregion
 

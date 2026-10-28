@@ -86,6 +86,20 @@ describe('Refunds page (Phase 3.34)', () => {
     await new Promise(r => setTimeout(r, 10))
     expect(wrapper.find('.dt').exists()).toBe(true)
   })
+
+  // The server approves or rejects only a Pending refund. A Processing refund
+  // (one that needed no approval and is being sent) answered both with a 400.
+  it('★ offers Approve and Reject only on a pending refund', async () => {
+    const { default: Refunds } = await import('../../../src/pages/payment/Refunds.vue')
+    const wrapper = mount(Refunds, { global: { stubs } })
+    await nextTick()
+    const actions = (wrapper.vm as unknown as { rowActions: Array<{ key: string; show?: (r: unknown) => boolean }> }).rowActions
+    const offered = (status: string) => actions.filter((a) => !a.show || a.show({ id: 'r', status })).map((a) => a.key)
+
+    expect(offered('Pending')).toEqual(expect.arrayContaining(['approve', 'reject']))
+    expect(offered('Processing')).not.toContain('approve')
+    expect(offered('Processing')).not.toContain('reject')
+  })
 })
 
 describe('refund-config', () => {

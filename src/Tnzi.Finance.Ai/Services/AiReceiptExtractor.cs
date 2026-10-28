@@ -107,20 +107,20 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
             return await _structuredOutput.GetStructuredOutputAsync<ReceiptExtractionResult>(messages, structuredOptions, cancellationToken);
         }
 
-        string text;
+        PdfText extracted;
         try
         {
-            text = ExtractPdfText(bytes, cancellationToken);
+            extracted = ExtractPdfText(bytes, opts.MaxPdfTextChars, cancellationToken);
         }
         catch (Exception ex)
         {
             return Fail<ReceiptExtractionResult>($"Failed to read the PDF: {ex.Message}", 400);
         }
 
-        if (string.IsNullOrWhiteSpace(text))
+        if (string.IsNullOrWhiteSpace(extracted.Text))
             return Fail<ReceiptExtractionResult>("The PDF has no extractable text. Upload an image scan for vision extraction.", 400);
 
-        text = ClampPromptText(text, opts.MaxPdfTextChars);
+        var text = ClampPromptText(extracted, opts.MaxPdfTextChars);
 
         var pdfMessages = new List<ChatMessage>
         {
@@ -143,15 +143,24 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
     /// ★ 注明是必需的：模型看不见被截掉的部分，但它要知道自己看到的不是全文 ——
     /// 否则「总计」在被截掉的那一页上时，它会拿倒数第二个数字凑一个看起来合理的答案。
     /// 返回值同时用作 <c>RawText</c>，所以人核对时看到的与模型看到的是同一份东西。
+    /// ★ 读取在超限后就停了（见 <see cref="ExtractPdfText"/>），所以注明分两部分：已读页里截掉的字符数，
+    /// 加上根本没读的页数；后者的字符数无从得知，也不该为了报出它去解析那些页。
+    /// ★ 截断点落在代理对中间时整个字符一起舍掉：同一份文本作为 <c>RawText</c> 落库，孤立的高代理项会让严格 UTF-8 的
+    /// 驱动（Npgsql）拒绝写入；进了提示词则被 JSON 编码器换成替换字符。
     /// </remarks>
-    private static string ClampPromptText(string text, int maxChars)
+    internal static string ClampPromptText(PdfText extracted, int maxChars)
     {
-        if (text.Length <= maxChars)
+        var text = extracted.Text;
+        if (text.Length <= maxChars && extracted.UnreadPages == 0)
             return text;
 
-        var omitted = text.Length - maxChars;
-        return text[..maxChars]
-            + $"{Environment.NewLine}{Environment.NewLine}[Text truncated: {omitted} more characters were omitted. Extract only from the text above.]";
+        var head = text.FitToLength(maxChars);
+        var omitted = text.Length - head.Length;
+        var unread = extracted.UnreadPages == 0
+            ? string.Empty
+            : $" and the remaining {extracted.UnreadPages} page(s) were not read";
+        return head
+            + $"{Environment.NewLine}{Environment.NewLine}[Text truncated: {omitted} more characters were omitted{unread}. Extract only from the text above.]";
     }
 
     private static string TooLargeMessage(int maxFileSizeMb)
@@ -185,11 +194,11 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
         return declared;
     }
 
-    /// <summary>视觉模型是否收这个内容类型（选项为空 = 不拦）。</summary>
+    /// <summary>视觉模型是否收这个内容类型（没配 = 缺省清单，<c>["*"]</c> = 不拦）。</summary>
     private static bool IsVisionAccepted(string contentType, FinanceAiOptions opts)
     {
-        var accepted = opts.VisionContentTypes;
-        return accepted.Length == 0
+        var accepted = opts.ResolveVisionContentTypes();
+        return accepted == null
             || accepted.Any(t => string.Equals(t.Trim(), contentType, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -227,20 +236,33 @@ public class AiReceiptExtractor : ApplicationService, IReceiptExtractor
                "and any line items from this receipt." + currencyHint;
     }
 
-    private static string ExtractPdfText(byte[] bytes, CancellationToken cancellationToken)
+    /// <summary>
+    /// 逐页抽取文本，攒够 <paramref name="maxChars"/> 即停。
+    /// </summary>
+    /// <remarks>
+    /// ★ 提示词只用得到前 <paramref name="maxChars"/> 个字符，而 PdfPig 是按页惰性解析的：
+    /// 一份几百页、20 MB 的纯文字 PDF，此前每一页都在请求线程上解析一遍，再整段丢掉。
+    /// 超限后多读的那一页恰好让截断可被察觉（文本长于上限），其余页一概不碰。
+    /// </remarks>
+    private static PdfText ExtractPdfText(byte[] bytes, int maxChars, CancellationToken cancellationToken)
     {
         using var document = PdfDocument.Open(bytes);
         var sb = new StringBuilder();
-        foreach (var page in document.GetPages())
+        var pagesRead = 0;
+        // 按页号取而不是 foreach GetPages()：枚举器在循环体判断之前就把下一页解析出来了。
+        while (pagesRead < document.NumberOfPages && sb.Length <= maxChars)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var text = page.Text;
+            var text = document.GetPage(++pagesRead).Text;
             if (string.IsNullOrWhiteSpace(text))
                 continue;
             if (sb.Length > 0)
                 sb.AppendLine();
             sb.Append(text);
         }
-        return sb.ToString();
+        return new PdfText(sb.ToString(), document.NumberOfPages - pagesRead);
     }
+
+    /// <summary>抽出的文本，与因已超上限而没有读取的页数。</summary>
+    internal readonly record struct PdfText(string Text, int UnreadPages);
 }

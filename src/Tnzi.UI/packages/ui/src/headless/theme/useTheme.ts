@@ -30,8 +30,28 @@ export const THEME_CONTEXT_KEY: InjectionKey<ThemeContext> = Symbol('tnzi-theme'
 export function createThemeContext(initial: ThemeSettings): ThemeContext {
   const settings = ref<ThemeSettings>({ ...initial })
 
+  // The OS colour scheme, kept live while the mode is 'auto'. A computed over
+  // `matchMedia(...).matches` alone has no reactive dependency on the OS, so
+  // 'auto' would only be resolved at the moment it was chosen. The OS listener
+  // goes through `onCleanup`: it is removed when the mode changes and when the
+  // scope that created this context (a component, an effect scope) ends.
+  const systemMode = ref<'light' | 'dark'>('light')
+  watch(
+    () => settings.value.mode,
+    (mode, _previous, onCleanup) => {
+      if (mode !== 'auto') return
+      const { resolved, cleanup } = resolveThemeMode('auto', (next) => {
+        systemMode.value = next
+      })
+      systemMode.value = resolved
+      if (cleanup) onCleanup(cleanup)
+    },
+    { immediate: true, flush: 'sync' },
+  )
+
   const resolvedMode = computed<'light' | 'dark'>(() => {
-    return resolveThemeMode(settings.value.mode).resolved
+    const mode = settings.value.mode
+    return mode === 'auto' ? systemMode.value : mode
   })
 
   const naiveOverrides = computed<GlobalThemeOverrides>(() => {
@@ -42,9 +62,12 @@ export function createThemeContext(initial: ThemeSettings): ThemeContext {
     settings.value = { ...settings.value, mode }
   }
 
+  // Rebuilt through `mergeThemeSettings` so the palettes follow the new colour,
+  // but from the CURRENT settings: passing only colours and mode reset the
+  // consumer's raw naive overrides, preset name and flags to the defaults.
   function setColor(role: keyof ThemeColors, color: string) {
-    const newColors = { ...settings.value.colors, [role]: color }
-    settings.value = mergeThemeSettings({ colors: newColors as ThemeColors, mode: settings.value.mode })
+    const { palettes: _palettes, ...current } = settings.value
+    settings.value = mergeThemeSettings({ ...current, colors: { ...current.colors, [role]: color } })
   }
 
   function applyPreset(preset: Partial<ThemeSettings> & { name: string }) {

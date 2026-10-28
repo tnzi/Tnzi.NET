@@ -19,7 +19,8 @@
  * `Reset` clears the server-side snapshot, so every client falls back to the
  * stylesheet defaults - it is not "undo my edits".
  */
-import { computed, ref, watch } from 'vue';
+import { computed, inject, ref, watch } from 'vue';
+import { THEME_CONTEXT_KEY } from '@tnzi/ui';
 import TSettingRow from './TSettingRow.vue';
 import TSettingGroup from './TSettingGroup.vue';
 import type { AiThemeSnapshot } from '../../theme/snapshot';
@@ -91,11 +92,15 @@ function currentSnapshot(): AiThemeSnapshot {
   });
 }
 
+/* The brand colour previews through the host theme context, the same way the
+   published snapshot is applied (see `applyAiThemeSnapshot`). */
+const hostTheme = inject(THEME_CONTEXT_KEY, null);
+
 /** Every edit previews locally so the operator judges the real surface. */
 function onEdit(): void {
   const snapshot = currentSnapshot();
   props.theme.setDraft(snapshot);
-  applyAiThemeSnapshot(snapshot);
+  applyAiThemeSnapshot(snapshot, undefined, hostTheme);
 }
 
 async function onPublish(): Promise<void> {

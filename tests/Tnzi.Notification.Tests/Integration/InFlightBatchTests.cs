@@ -209,6 +209,47 @@ public class InFlightBatchTests : IntegrationTestBase
         claimed.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// ★★ 限速的等待期间心跳照样推进：等待可以很长，心跳停着的话卡住扫描会把正在飞的批次判成卡住，接手后再发一遍。
+    /// </summary>
+    [Fact]
+    public async Task ALongPacingWait_KeepsTheHeartbeatGoing()
+    {
+        var messageId = await SeedAsync(status: NotificationStatus.Sending, lastModified: MinutesAgo(30));
+        var repository = ServiceProvider.GetRequiredService<IRepository<Message, Guid>>();
+        var message = await repository.AsQueryable(withTracking: true).Include(m => m.Recipients).FirstAsync(m => m.Id == messageId);
+        var progress = new SendProgress(repository, ServiceProvider.GetRequiredService<IUnitOfWork>(), message, flushInterval: TimeSpan.FromMilliseconds(40));
+
+        await progress.WaitAsync(TimeSpan.FromMilliseconds(200), CancellationToken.None);
+
+        DbContext.ChangeTracker.Clear();
+        var reloaded = await DbContext.Set<Message>().AsNoTracking().FirstAsync(m => m.Id == messageId);
+        reloaded.LastModificationTime.ShouldNotBeNull();
+        reloaded.LastModificationTime!.Value.ShouldBeGreaterThan(MinutesAgo(1));
+        (await progress.StillSendingAsync(CancellationToken.None)).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// ★★ 心跳只推进仍在发送中的消息：取消之后它不再碰这一行，也就不会把取消盖回 Sending，
+    /// 发送循环下一次问「还发不发」时得到否。
+    /// </summary>
+    [Fact]
+    public async Task TheHeartbeat_DoesNotTouchACancelledMessage()
+    {
+        var messageId = await SeedAsync(status: NotificationStatus.Sending, lastModified: MinutesAgo(30));
+        var repository = ServiceProvider.GetRequiredService<IRepository<Message, Guid>>();
+        var message = await repository.AsQueryable(withTracking: true).Include(m => m.Recipients).FirstAsync(m => m.Id == messageId);
+        var progress = new SendProgress(repository, ServiceProvider.GetRequiredService<IUnitOfWork>(), message);
+        (await MessageClaim.TryTransitionAsync(repository, messageId, NotificationStatus.Sending, NotificationStatus.Cancelled, CancellationToken.None))
+            .ShouldBeTrue();
+
+        await progress.FlushAsync(CancellationToken.None);
+
+        DbContext.ChangeTracker.Clear();
+        (await DbContext.Set<Message>().AsNoTracking().FirstAsync(m => m.Id == messageId)).Status.ShouldBe(NotificationStatus.Cancelled);
+        (await progress.StillSendingAsync(CancellationToken.None)).ShouldBeFalse();
+    }
+
     // ── 夹具 ─────────────────────────────────────────────────────────────────
 
     /// <summary>

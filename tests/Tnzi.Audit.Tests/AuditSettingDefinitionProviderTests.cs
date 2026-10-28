@@ -39,8 +39,7 @@ public class AuditSettingDefinitionProviderTests
         // EnableEntityAudit 自实体级审计采集管道落地后成为真热配
         // （EntityAuditSaveChangesInterceptor 经 IOptionsMonitor 热读）；
         // ExportMaxRows 由 AuditOperationService 经 IOptionsMonitor 热读（导出超限拒绝）；
-        // AutoPurgeEnabled 由 AuditRetentionBackgroundService 每轮热读（开关打开即从下一轮开始删）；
-        // EnableResponseResult 仍为"假热配"不暴露（AuditMiddleware 未消费）。
+        // AutoPurgeEnabled 由 AuditRetentionBackgroundService 每轮热读（开关打开即从下一轮开始删）。
         Assert.Equal(8, _group.Fields.Count);
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableOperationAudit");
         Assert.Contains(_group.Fields, f => f.Key == "Audit:EnableEntityAudit");

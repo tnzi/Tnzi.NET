@@ -40,6 +40,30 @@ public class AuthorizationOptions
     public bool DisableSuperAdminBypass { get; set; }
 
     /// <summary>
+    /// Which codes the super-admin bypass covers. <see cref="Options.SuperAdminBypassScope.All"/>
+    /// (default) keeps the bypass total. <see cref="Options.SuperAdminBypassScope.Platform"/>
+    /// limits it to codes in platform-scoped permission groups (see
+    /// <see cref="Tnzi.Security.Authorization.PermissionScope"/>): application codes
+    /// then resolve through explicit grants for super admins as for everyone else.
+    /// </summary>
+    /// <remarks>
+    /// Narrowing changes what a super admin sees by default, not what a super admin
+    /// can do: role management still lets a super admin manage every role, including
+    /// adding themselves to a business role. The trail of that is the role and grant
+    /// change events and the audit log.
+    /// </remarks>
+    public SuperAdminBypassScope SuperAdminBypassScope { get; set; } = SuperAdminBypassScope.All;
+
+    /// <summary>
+    /// Per-group scope overrides, keyed by permission group code (case-insensitive),
+    /// e.g. <c>{ "finance": "Application", "storage": "Application" }</c>. Values win
+    /// over the scope a provider declares and over the assembly-based default.
+    /// Only matters when <see cref="SuperAdminBypassScope"/> is
+    /// <see cref="Options.SuperAdminBypassScope.Platform"/>.
+    /// </summary>
+    public Dictionary<string, PermissionScope> PermissionScopeOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Per-code category overrides applied at permission seed time - lets a
     /// deployment reclassify a framework default without code changes, e.g.
     /// <c>{ "audit.log.view": "Technical" }</c>. The category is informational

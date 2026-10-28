@@ -25,9 +25,6 @@ public class PayPalOptionsValidator : OptionsValidatorBase<PayPalOptions>
             errors.Add("PayPal:Mode must be either 'sandbox' or 'live'.");
         }
 
-        if (string.IsNullOrWhiteSpace(options.Currency))
-            errors.Add("PayPal:Currency is required when PayPal is enabled.");
-
         if (!options.EnableVault)
             return;
 

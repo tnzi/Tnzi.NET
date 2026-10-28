@@ -20,7 +20,10 @@ public class DingtalkAdapterOptions
     /// </summary>
     public string? AppSecret { get; set; }
 
-    /// <summary>Robot code (used for receive-side routing).</summary>
+    /// <summary>
+    /// Robot code of the app's robot. Required: both reply APIs (1:1 batchSend and
+    /// group send) name the sending robot by it.
+    /// </summary>
     public string? RobotCode { get; set; }
 
     /// <summary>

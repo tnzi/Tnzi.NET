@@ -61,8 +61,9 @@ public static class DataScopeExtensions
     }
 
     /// <summary>
-    /// 从容器解析范围谓词并合成（供服务层把范围 AND 进自己的查询/校验，例如
-    /// <see cref="Tnzi.Application.CrudAppService{TEntity,TKey,TDto,TCreateDto,TUpdateDto}"/> 的 scope 钩子）。
+    /// 从容器解析范围谓词并合成（供服务层把范围 AND 进自己的查询/校验）。
+    /// <see cref="Tnzi.Application.CrudAppService{TEntity,TKey,TDto,TCreateDto,TUpdateDto}"/> 已经自动这样做，
+    /// 继承它的服务不需要再调。
     /// </summary>
     public static Expression<Func<TEntity, bool>>? BuildDataScopeFilter<TEntity>(
         this IServiceProvider serviceProvider)
@@ -115,6 +116,19 @@ public static class DataScopeExtensions
 
         var entity = await repository.GetAsync(id, cancellationToken);
         return entity != null && await serviceProvider.CanAccessAsync(entity, cancellationToken);
+    }
+
+    /// <summary>
+    /// 两个可空谓词的 AND：任一为 <c>null</c>（不限制）时返回另一个。
+    /// </summary>
+    internal static Expression<Func<TEntity, bool>>? AndAlso<TEntity>(
+        Expression<Func<TEntity, bool>>? left,
+        Expression<Func<TEntity, bool>>? right)
+        where TEntity : class
+    {
+        if (left == null)
+            return right;
+        return right == null ? left : And(left, right);
     }
 
     private static Expression<Func<TEntity, bool>> And<TEntity>(

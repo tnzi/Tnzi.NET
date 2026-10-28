@@ -4,6 +4,9 @@ namespace Tnzi.AI.Tests.Sandbox;
 
 public class LocalSandboxTests : IAsyncLifetime
 {
+    private const int TeardownDeleteAttempts = 50;
+    private static readonly TimeSpan TeardownDeleteRetryDelay = TimeSpan.FromMilliseconds(200);
+
     private readonly string _workDir;
     private LocalSandbox _sandbox = null!;
 
@@ -31,20 +34,22 @@ public class LocalSandboxTests : IAsyncLifetime
 
         // 超时的命令会被整树强杀，但 Windows 上刚被杀掉的 shell 还可能握着工作区句柄一会儿。
         // 立刻 Delete 会在拆卸阶段抛 IOException，把一条已经通过的用例判红（09-04 在满负载机器上实发）。
-        // 目录在 %TEMP% 下，给操作系统两秒钟再放弃；两秒后仍锁着才是值得看见的问题。
-        for (var attempt = 0; attempt < 10 && Directory.Exists(_workDir); attempt++)
+        // 两秒的上限在全量并行测试下仍不够（10-17 实发）；当时核实过不是进程泄漏：整树强杀后
+        // 没有残留的 ping，ping 的启动时间也都严格晚于 cmd。上限放到十秒：挂起命令本身要跑 60 秒，
+        // 真有进程漏杀，它握着目录的时间远超这个上限，这里照样会变红。
+        for (var attempt = 0; attempt < TeardownDeleteAttempts && Directory.Exists(_workDir); attempt++)
         {
             try
             {
                 Directory.Delete(_workDir, recursive: true);
             }
-            catch (IOException) when (attempt < 9)
+            catch (IOException) when (attempt < TeardownDeleteAttempts - 1)
             {
-                await Task.Delay(200);
+                await Task.Delay(TeardownDeleteRetryDelay);
             }
-            catch (UnauthorizedAccessException) when (attempt < 9)
+            catch (UnauthorizedAccessException) when (attempt < TeardownDeleteAttempts - 1)
             {
-                await Task.Delay(200);
+                await Task.Delay(TeardownDeleteRetryDelay);
             }
         }
     }
@@ -100,6 +105,29 @@ public class LocalSandboxTests : IAsyncLifetime
         Assert.True(entries.Count >= 2);
         Assert.Contains(entries, e => e.Name == "a.txt" && !e.IsDirectory);
         Assert.Contains(entries, e => e.Name == "subdir" && e.IsDirectory);
+    }
+
+    [Fact]
+    public async Task ExecuteCommand_OutputOverLimit_SaysItWasTruncated()
+    {
+        // 4 000 characters of output against the fixture's 1 024 cap.
+        var lines = Enumerable.Range(1, 200).Select(i => $"line-{i:D3}-xxxxxxxxxx");
+        await File.WriteAllTextAsync(Path.Combine(_workDir, "big.log"), string.Join('\n', lines) + "\n");
+
+        var result = await _sandbox.ExecuteCommandAsync(OperatingSystem.IsWindows() ? "type big.log" : "cat big.log");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.StartsWith("line-001", result.Output);
+        Assert.DoesNotContain("line-200", result.Output);
+        Assert.Contains("[output truncated", result.Output);
+    }
+
+    [Fact]
+    public async Task ExecuteCommand_OutputWithinLimit_CarriesNoTruncationNotice()
+    {
+        var result = await _sandbox.ExecuteCommandAsync("echo hello");
+
+        Assert.DoesNotContain("truncated", result.Output);
     }
 
     [Fact]
@@ -291,4 +319,99 @@ public class LocalSandboxTests : IAsyncLifetime
     private static string HangAfterWritingDiagnostics => OperatingSystem.IsWindows()
         ? "echo DIAG_MARKER 1>&2 & ping -n 60 127.0.0.1 > nul"
         : "echo DIAG_MARKER >&2; sleep 60";
+
+    // ------------------------------------------------------------------ //
+    // Environment whitelist
+    // ------------------------------------------------------------------ //
+
+    private const string ProbeVariable = "TNZI_SANDBOX_WHITELIST_PROBE";
+
+    /// <summary>The shell needs these to start; everything else is what the whitelist decides.</summary>
+    private static readonly string[] ShellEssentials = OperatingSystem.IsWindows() ? ["PATH", "SystemRoot", "ComSpec"] : ["PATH"];
+
+    private static string PrintEnvironment => OperatingSystem.IsWindows() ? "set" : "env";
+
+    private LocalSandbox CreateEnvironmentSandbox(IEnumerable<string>? whitelist, IReadOnlyDictionary<string, string>? overrides = null) => new(
+        id: "env-sandbox",
+        workspacePath: _workDir,
+        commandTimeout: TimeSpan.FromSeconds(10),
+        maxOutputSize: 256 * 1024,
+        environmentOverrides: overrides,
+        environmentWhitelist: whitelist);
+
+    [Fact]
+    public async Task EnvironmentWhitelist_KeepsOnlyTheListedHostVariables()
+    {
+        Environment.SetEnvironmentVariable(ProbeVariable, "leaked");
+        try
+        {
+            await using var sandbox = CreateEnvironmentSandbox(ShellEssentials);
+
+            var result = await sandbox.ExecuteCommandAsync(PrintEnvironment);
+
+            result.ExitCode.ShouldBe(0, result.Error);
+            result.Output.ShouldNotContain(ProbeVariable);
+            result.Output.ShouldContain("PATH=", Case.Insensitive);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ProbeVariable, null);
+        }
+    }
+
+    [Fact]
+    public async Task EnvironmentWhitelist_Null_KeepsTheHostEnvironment()
+    {
+        Environment.SetEnvironmentVariable(ProbeVariable, "inherited");
+        try
+        {
+            await using var sandbox = CreateEnvironmentSandbox(whitelist: null);
+
+            var result = await sandbox.ExecuteCommandAsync(PrintEnvironment);
+
+            result.Output.ShouldContain($"{ProbeVariable}=inherited");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ProbeVariable, null);
+        }
+    }
+
+    [Fact]
+    public async Task EnvironmentWhitelist_OverridesStillApply()
+    {
+        await using var sandbox = CreateEnvironmentSandbox(
+            ShellEssentials, new Dictionary<string, string> { ["TNZI_SANDBOX_OVERRIDE"] = "set-by-caller" });
+
+        var result = await sandbox.ExecuteCommandAsync(PrintEnvironment);
+
+        result.Output.ShouldContain("TNZI_SANDBOX_OVERRIDE=set-by-caller");
+    }
+
+    [Fact]
+    public async Task LocalProvider_PassesTheWhitelistToTheSandbox()
+    {
+        Environment.SetEnvironmentVariable(ProbeVariable, "leaked");
+        try
+        {
+            var provider = new LocalSandboxProvider(
+                Microsoft.Extensions.Options.Options.Create(new SandboxModuleOptions()),
+                new SandboxTestSupport.TestHostEnvironment(),
+                NullLogger<LocalSandboxProvider>.Instance);
+            await using var sandbox = await provider.CreateAsync(new SandboxCreateOptions
+            {
+                ThreadId = Guid.NewGuid(),
+                WorkspacePath = _workDir,
+                EnvironmentWhitelist = ShellEssentials
+            });
+
+            var result = await sandbox.ExecuteCommandAsync(PrintEnvironment);
+
+            result.Output.ShouldNotContain(ProbeVariable);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(ProbeVariable, null);
+        }
+    }
 }

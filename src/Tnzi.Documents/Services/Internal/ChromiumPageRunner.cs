@@ -15,6 +15,11 @@ namespace Tnzi.Documents.Services.Internal;
 /// 挂在实例上的话，两个服务各持一个闸门 = 实际上限翻倍，而那正是「不设上限就是一个现成的拒绝服务面」
 /// 想避免的事。容量在首次使用时定死，故改 <c>MaxConcurrency</c> 需要重启进程（已写进配置注释）。
 /// </para>
+/// <para>
+/// ★ <b>排队有上界</b>：等满一次渲染的超时（<c>TimeoutSeconds</c>）仍轮不到槽位，就以可重试的「忙」失败，
+/// 与 <see cref="LibreOfficeDocumentConverter"/> 的串行闸门同一口径。不设上界的话，并发满载时 HTML 转 PDF 与缩略图
+/// 无限期排队，调用方多半不传取消令牌，早已离开的请求还挂在队里，轮到时再完整起一次浏览器。
+/// </para>
 /// </remarks>
 internal static class ChromiumPageRunner
 {
@@ -26,6 +31,7 @@ internal static class ChromiumPageRunner
 
     private static readonly object GateSync = new();
     private static SemaphoreSlim? _gate;
+    private static int _gateCapacity;
 
     /// <summary>本机找不找得到浏览器。</summary>
     public static bool IsAvailable(HtmlPdfOptions options) => ChromiumLocator.Resolve(options.BrowserPath) != null;
@@ -69,7 +75,7 @@ internal static class ChromiumPageRunner
             await File.WriteAllBytesAsync(inputPath, source, ct);
 
             var gate = GetGate(options.MaxConcurrency);
-            await gate.WaitAsync(ct);
+            await EnterGateAsync(gate, options, ct);
             try
             {
                 // 计时从拿到闸门那一刻开始，不含排队：TimeoutSeconds 是「一次渲染」的预算。
@@ -182,17 +188,48 @@ internal static class ChromiumPageRunner
         }
     }
 
-    private static SemaphoreSlim GetGate(int maxConcurrency)
+    /// <summary>
+    /// 排队等一个渲染槽位；等满 <see cref="HtmlPdfOptions.TimeoutSeconds"/> 仍轮不到就抛可重试的忙碌错误。
+    /// 传入的取消令牌在排队时同样生效。
+    /// </summary>
+    /// <remarks>
+    /// 等待的上界取一次渲染的超时：渲染超时就被整棵杀掉，所以一个槽位最多被占这么久。
+    /// 消息点名两个配置项：满载是常态时该调的是 <c>MaxConcurrency</c>（内存允许的话），不是一味调大超时。
+    /// </remarks>
+    internal static async Task EnterGateAsync(SemaphoreSlim gate, HtmlPdfOptions options, CancellationToken ct)
+    {
+        if (await gate.WaitAsync(TimeSpan.FromSeconds(options.TimeoutSeconds), ct))
+            return;
+
+        var capacity = Volatile.Read(ref _gateCapacity);
+        var limit = capacity > 0 ? $"{capacity} render(s)" : "a limited number of renders";
+        throw new DocumentConversionException(
+            $"The HTML renderer is busy: no rendering slot freed up within {options.TimeoutSeconds}s ('Documents:Html:TimeoutSeconds'). " +
+            $"At most {limit} run at once ('Documents:Html:MaxConcurrency'); try again shortly, " +
+            "or raise 'Documents:Html:MaxConcurrency' if the host has memory to spare (a restart is required).",
+            isRetryable: true);
+    }
+
+    /// <summary>进程级并发闸门；容量在首次使用时定死。<c>internal</c> 只为测试能把它占满。</summary>
+    internal static SemaphoreSlim GetGate(int maxConcurrency)
     {
         if (_gate != null)
             return _gate;
 
         lock (GateSync)
         {
+            if (_gate != null)
+                return _gate;
+
             var permits = Math.Clamp(maxConcurrency, 1, 16);
-            return _gate ??= new SemaphoreSlim(permits, permits);
+            _gateCapacity = permits;
+            _gate = new SemaphoreSlim(permits, permits);
+            return _gate;
         }
     }
+
+    /// <summary>闸门的容量（尚未创建时为 0）。</summary>
+    internal static int GateCapacity => Volatile.Read(ref _gateCapacity);
 
     private static async Task TryDeleteDirectoryAsync(string directory, ILogger logger)
     {

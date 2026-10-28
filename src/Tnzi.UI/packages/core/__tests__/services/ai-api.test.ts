@@ -6,6 +6,8 @@ import {
   useArtifactApi,
   useUserProfileApi,
   useAdminWorkflowApi,
+  useThreadApi,
+  useAdminThreadApi,
 } from '../../src/services/ai/api';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +39,10 @@ function createMockClient() {
     delete: vi.fn((...args: unknown[]) => {
       calls.push({ method: 'DELETE', url: args[0] as string, options: args[1] });
       return mockResult(null);
+    }),
+    download: vi.fn((...args: unknown[]) => {
+      calls.push({ method: 'DOWNLOAD', url: args[0] as string, options: args[1] });
+      return mockResult(new Blob(['# thread']));
     }),
     resolveUrl: vi.fn((path: string) => `http://localhost:5000/api${path}`),
     calls,
@@ -159,21 +165,6 @@ describe('AI API Wrappers', () => {
   // ==========================================
 
   describe('useArtifactApi', () => {
-    it('should call GET /artifacts without params for getList', async () => {
-      const api = useArtifactApi(client);
-      await api.getList();
-      expect(client.get).toHaveBeenCalledWith('/artifacts', { params: undefined });
-    });
-
-    it('should call GET /artifacts with params for getList', async () => {
-      const api = useArtifactApi(client);
-      await api.getList({ threadId: 'thread-1' });
-      expect(client.get).toHaveBeenCalledWith(
-        '/artifacts',
-        { params: { threadId: 'thread-1' } },
-      );
-    });
-
     it('should call GET /artifacts with threadId for getByThread', async () => {
       const api = useArtifactApi(client);
       await api.getByThread('thread-1');
@@ -273,5 +264,38 @@ describe('AI API Wrappers', () => {
       await api.getPendingSignals('exec-1');
       expect(client.get).toHaveBeenCalledWith('/admin/workflows/executions/exec-1/signals');
     });
+  });
+});
+
+// The Markdown export is a bearer-only endpoint. A URL handed to the browser
+// (an <a href> click) carries no Authorization header and always downloaded a
+// 401, so the file has to come through the authenticated client.
+describe('thread Markdown export', () => {
+  it.each([
+    ['useThreadApi', useThreadApi, '/threads/t1/export/markdown'],
+    ['useAdminThreadApi', useAdminThreadApi, '/admin/threads/t1/export/markdown'],
+  ] as const)('%s downloads the file through the client', async (_name, factory, route) => {
+    const client = createMockClient();
+    const api = factory(client) as unknown as Record<string, unknown> & { exportMarkdown: (id: string) => Promise<unknown> };
+
+    const result = (await api.exportMarkdown('t1')) as { data?: unknown };
+
+    expect(client.download).toHaveBeenCalledWith(route);
+    expect(result.data).toBeInstanceOf(Blob);
+    expect(client.resolveUrl).not.toHaveBeenCalled();
+    expect(api).not.toHaveProperty('getExportMarkdownUrl');
+  });
+});
+
+describe('thread archive', () => {
+  it('archives and unarchives through their own endpoints', async () => {
+    const client = createMockClient();
+    const api = useThreadApi(client);
+
+    await api.archive('t1');
+    await api.unarchive('t1');
+
+    expect(client.post).toHaveBeenNthCalledWith(1, '/threads/t1/archive');
+    expect(client.post).toHaveBeenNthCalledWith(2, '/threads/t1/unarchive');
   });
 });

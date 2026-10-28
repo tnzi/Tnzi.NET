@@ -18,7 +18,9 @@ internal class SnowWorkerM2 : SnowWorkerM1
 
             if (_LastTimeTick == currentTimeTick)
             {
-                if (_CurrentSeqNumber++ > MaxSeqNumber)
+                // 先自增再比较：后置自增会在序号等于上限时再放行一个 MaxSeqNumber + 1，
+                // 它进位到机器码位，等于相邻机器码的序号 0
+                if (++_CurrentSeqNumber > MaxSeqNumber)
                 {
                     _CurrentSeqNumber = MinSeqNumber;
                     currentTimeTick = GetNextTimeTick();

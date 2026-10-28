@@ -1,6 +1,12 @@
 <script setup lang="ts">
 /**
  * TWorkflowCanvas - @vue-flow canvas wrapper
+ *
+ * Renders the two element types `useWorkflowVisualization` emits out of the
+ * box: node type `custom` as a `TWorkflowNode` status card (label,
+ * description and status read from the node's `data`) and edge type
+ * `animated` as the flowing `TWorkflowEdge`. A consumer `#node-custom` /
+ * `#edge-animated` slot replaces either one.
  */
 
 import { computed, useSlots } from 'vue';
@@ -8,6 +14,8 @@ import { VueFlow, type Node, type Edge } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import '@vue-flow/core/dist/style.css';
 import '@vue-flow/core/dist/theme-default.css';
+import TWorkflowNode from './TWorkflowNode.vue';
+import TWorkflowEdge from './TWorkflowEdge.vue';
 
 defineProps<{
   nodes: Node[];
@@ -53,6 +61,19 @@ const forwardedSlotNames = computed(() =>
     >
       <Background :style="{ backgroundColor: 'var(--tnzi-layout-bg)' }" />
       <slot />
+      <!-- The types useWorkflowVisualization emits; a consumer slot wins. -->
+      <template v-if="!$slots['node-custom']" #node-custom="nodeProps">
+        <TWorkflowNode
+          :label="nodeProps.data?.label ?? nodeProps.label"
+          :description="nodeProps.data?.description"
+          :status="nodeProps.data?.status"
+          target-handle
+          source-handle
+        />
+      </template>
+      <template v-if="!$slots['edge-animated']" #edge-animated="edgeProps">
+        <TWorkflowEdge v-bind="edgeProps" variant="animated" />
+      </template>
       <!--
         Forward every named slot to VueFlow so consumers can override built-in
         node/edge types (`#node-default`, `#node-input`, `#edge-default`, …) or

@@ -115,11 +115,29 @@ public class BatchEvaluationTargetDto
 /// </summary>
 public class BatchEvaluationResultDto
 {
-    /// <summary>各目标评估结果</summary>
+    /// <summary>评估成功的目标的结果</summary>
     public List<EvaluationRunDetailDto> Results { get; set; } = [];
+
+    /// <summary>评估失败的目标（与 <see cref="Results"/> 合起来覆盖请求里的每一个目标）</summary>
+    public List<BatchEvaluationFailureDto> Failures { get; set; } = [];
 
     /// <summary>总耗时</summary>
     public TimeSpan TotalDuration { get; set; }
+}
+
+/// <summary>
+/// 批量评估中失败的一个目标
+/// </summary>
+public class BatchEvaluationFailureDto
+{
+    /// <summary>Agent ID</summary>
+    public Guid AgentId { get; set; }
+
+    /// <summary>Agent 版本号（请求里没给则为 null）</summary>
+    public int? VersionNumber { get; set; }
+
+    /// <summary>失败原因</summary>
+    public string Message { get; set; } = string.Empty;
 }
 
 /// <summary>

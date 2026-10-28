@@ -38,7 +38,8 @@ public class SaveManyWithoutUnitOfWorkTests : StorageIntegrationTestBase
             new TestFileUrlSigner(),
             ServiceProvider,
             CreateUploadGuard(Options()),
-            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(Options())));
+            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(Options())),
+            UnlimitedStorageQuota.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.SaveManyAsync(
         [

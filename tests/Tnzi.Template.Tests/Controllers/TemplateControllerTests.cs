@@ -266,6 +266,24 @@ public class TemplateControllerTests
     }
 
     #endregion
+
+    #region Absent engine
+
+    /// <summary>
+    /// 模板引擎缺席时校验与预览答 501，不是 503：503 是暂时性故障，监控与客户端会一直重试
+    /// 一件在进程生命周期内永远不会好的事。
+    /// </summary>
+    [Fact]
+    public async Task ValidateAndPreview_WithoutAnEngine_AnswerNotImplemented()
+    {
+        var validate = await _controller.Validate(new ValidateTemplateRequest { Content = "@Model" });
+        var preview = await _controller.Preview(new PreviewTemplateRequest { Content = "@Model" });
+
+        Assert.Equal(501, validate.Code);
+        Assert.Equal(501, preview.Code);
+    }
+
+    #endregion
 }
 
 /// <summary>

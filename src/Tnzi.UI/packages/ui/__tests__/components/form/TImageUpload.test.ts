@@ -5,8 +5,8 @@ import { h } from 'vue'
 // ---------------------------------------------------------------------------
 // Mock cropperjs - happy-dom has no canvas/toBlob support
 // ---------------------------------------------------------------------------
-const mockToBlob = vi.fn((cb: (blob: Blob) => void) => {
-  cb(new Blob(['cropped'], { type: 'image/jpeg' }))
+const mockToBlob = vi.fn((cb: (blob: Blob | null) => void, type?: string) => {
+  cb(new Blob(['cropped'], { type: type ?? 'image/png' }))
 })
 // cropperjs v2 web-component API: configure the selection, then render it to a
 // canvas via the async `$toCanvas()`.
@@ -204,9 +204,11 @@ describe('TImageUpload', () => {
     await flushPromises()
 
     const errorEmit = wrapper.emitted('error')
+    // The upload function's own message reaches the error event; a generic
+    // "Upload failed" in its place hid why the server refused the file.
     expect(errorEmit).toBeTruthy()
     if (errorEmit) {
-      expect((errorEmit[0] as string[])[0]).toMatch(/upload failed/i)
+      expect((errorEmit[0] as string[])[0]).toBe('Network failure')
     }
     expect(wrapper.emitted('change')).toBeFalsy()
     expect(wrapper.emitted('update:modelValue')).toBeFalsy()
@@ -417,5 +419,53 @@ describe('TImageUpload', () => {
       props: makeProps({ modelValue: 'https://cdn.example.com/a.jpg', objectFit: 'contain', cropper: false }),
     })
     expect(contain.find('.t-image-upload__img').attributes('style')).toContain('object-fit: contain')
+  })
+
+  // ---------------------------------------------------------------------------
+  // Cropped output (regressions: every crop was exported as JPEG, so a
+  // transparent PNG came back on black, and it was handed over as a nameless
+  // Blob that a caller had to guess a file name for; a failed render closed
+  // the dialog with nothing uploaded and no error.)
+  // ---------------------------------------------------------------------------
+
+  async function cropAndConfirm(file: File, overrides: Record<string, unknown> = {}) {
+    const props = makeProps({ cropper: true, ...overrides })
+    const wrapper = mount(TImageUpload, { props })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], writable: false, configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+    await wrapper.find('.t-image-upload__cropper-img').trigger('load')
+    await flushPromises()
+    await wrapper.findAll('button').find((b) => b.text() === 'Confirm')!.trigger('click')
+    await flushPromises()
+    return { props, wrapper }
+  }
+
+  it('(o) keeps a PNG crop a PNG file named after the source', async () => {
+    const { props } = await cropAndConfirm(makeFile('logo.png', 1, 'image/png'))
+
+    expect(mockToBlob).toHaveBeenCalledWith(expect.any(Function), 'image/png', undefined)
+    const uploaded = (props.upload as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as File
+    expect(uploaded).toBeInstanceOf(File)
+    expect(uploaded.name).toBe('logo.png')
+    expect(uploaded.type).toBe('image/png')
+  })
+
+  it('(p) exports a JPEG crop of a JPEG source as a .jpg file', async () => {
+    const { props } = await cropAndConfirm(makeFile('photo.jpeg', 1, 'image/jpeg'))
+
+    expect(mockToBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', 0.9)
+    const uploaded = (props.upload as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as File
+    expect(uploaded.name).toBe('photo.jpg')
+    expect(uploaded.type).toBe('image/jpeg')
+  })
+
+  it('(q) reports an error when the crop cannot be rendered', async () => {
+    mockSelection.$toCanvas.mockRejectedValueOnce(new Error('tainted canvas'))
+    const { props, wrapper } = await cropAndConfirm(makeFile('photo.jpg', 1))
+
+    expect(props.upload).not.toHaveBeenCalled()
+    expect(wrapper.emitted('error')).toHaveLength(1)
   })
 })

@@ -1,4 +1,3 @@
-
 namespace Tnzi.AspNetCore.Extensions;
 
 /// <summary>
@@ -7,29 +6,34 @@ namespace Tnzi.AspNetCore.Extensions;
 public static class ServiceConfigurationContextExtensions
 {
     /// <summary>
-    /// 注册控制器程序集
-    /// 自动从 ITnziApplication 获取 MvcBuilder 并注册指定模块的程序集
+    /// 把 <typeparamref name="TModule"/> 所在程序集登记为 MVC 应用部件，使其中的控制器进入路由表。
     /// </summary>
-    /// <typeparam name="TModule">模块类型（用于获取程序集）</typeparam>
+    /// <remarks>
+    /// 已加载模块的程序集由 <c>AspNetCoreModule</c> 自动登记，这个方法用于不是模块的类库（例如只放控制器的插件程序集）。
+    /// 须在 <c>AspNetCoreModule</c> 的 <c>ConfigureServicesAsync</c> 之后调用（依赖它的模块在自己的 <c>ConfigureServicesAsync</c> 里调用即可）；
+    /// MVC 尚未注册时抛异常而不是静默跳过：静默跳过的后果是控制器全部 404 且没有任何日志。
+    /// </remarks>
+    /// <typeparam name="TModule">程序集里的任一类型（用于定位程序集）</typeparam>
     /// <param name="context">服务配置上下文</param>
     /// <returns>服务配置上下文（支持链式调用）</returns>
+    /// <exception cref="InvalidOperationException">MVC 尚未注册（服务集合里没有 <see cref="ApplicationPartManager"/>）。</exception>
     public static ServiceConfigurationContext AddControllerAssembly<TModule>(this ServiceConfigurationContext context)
         where TModule : class
     {
         Check.NotNull(context);
 
-        // 从服务容器中查找 IMvcBuilder
-        var mvcBuilderDescriptor = context.Services.FirstOrDefault(s => s.ServiceType == typeof(IMvcBuilder));
-        if (mvcBuilderDescriptor == null)
-        {
-            // IMvcBuilder 不存在，静默跳过（适用于非Web应用场景）
-            return context;
-        }
+        // AddControllers / AddMvcCore 把 ApplicationPartManager 以实例形式注册进服务集合；IMvcBuilder 从来不是服务
+        var partManager = context.Services
+            .LastOrDefault(s => s.ServiceType == typeof(ApplicationPartManager))?
+            .ImplementationInstance as ApplicationPartManager
+            ?? throw new InvalidOperationException(
+                $"Cannot register controllers from {typeof(TModule).Assembly.GetName().Name}: MVC is not registered yet. " +
+                "Call AddControllerAssembly from a module that depends on AspNetCoreModule, in ConfigureServicesAsync or later.");
 
-        // 尝试从 ImplementationInstance 获取（直接存储实例的情况）
-        if (mvcBuilderDescriptor.ImplementationInstance is IMvcBuilder mvcBuilder)
+        var assembly = typeof(TModule).Assembly;
+        if (!partManager.ApplicationParts.OfType<AssemblyPart>().Any(part => part.Assembly == assembly))
         {
-            mvcBuilder.AddApplicationPart(typeof(TModule).Assembly);
+            partManager.ApplicationParts.Add(new AssemblyPart(assembly));
         }
 
         return context;

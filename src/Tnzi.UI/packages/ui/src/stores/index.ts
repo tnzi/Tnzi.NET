@@ -24,15 +24,6 @@ export {
   resetStoreRuntime,
 } from './factory';
 
-// Store DI (SSR-safe provide/inject)
-export {
-  STORE_HTTP_CLIENT,
-  STORE_STORAGE,
-  provideStoreRuntime,
-  useStoreHttpClient,
-  useStoreStorage,
-} from './factory';
-
 // Re-export types from core
 export type {
   AuthState,

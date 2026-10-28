@@ -12,7 +12,7 @@ public class EftBatchConfiguration : EntityTypeConfigurationBase<EftBatch, Guid>
         builder.Property(e => e.Number).HasMaxLength(32);
         builder.Property(e => e.Currency).HasMaxLength(8).IsRequired();
         builder.Property(e => e.FileName).HasMaxLength(128);
-        builder.Property(e => e.VoidReason).HasMaxLength(256);
+        builder.Property(e => e.VoidReason).HasMaxLength(BankingFieldLimits.VoidReasonMaxLength);
         builder.Property(e => e.TotalAmount).HasMoneyPrecision();
 
         // 编号非空唯一（草稿不占号）

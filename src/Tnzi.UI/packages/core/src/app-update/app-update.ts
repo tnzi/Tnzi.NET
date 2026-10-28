@@ -199,8 +199,26 @@ function absolute(href: string): string {
   return new URL(href, window.location.href).href;
 }
 
+function withoutHash(href: string): string {
+  const url = new URL(href);
+  url.hash = '';
+  return url.href;
+}
+
+/**
+ * 整页加载 `href`（绝对地址）。必须真的换掉文档，否则拿不到新外壳。
+ *
+ * 只差 hash 的目标（hash 路由的每一次跳转都是这种形态）不能用 `location.assign`：
+ * 那是同文档的片段导航，不重载页面，而调用方此时已经认定「正在离开」，
+ * 之后的每一次路由跳转都会被守卫取消。这种目标先用 `history.pushState` 把地址
+ * 换成目标（不触发 `popstate` / `hashchange`，路由器不会再插一手），再重载。
+ */
 function loadPage(href: string): void {
-  if (href === window.location.href) {
+  const current = window.location.href;
+  if (href === current) {
+    window.location.reload();
+  } else if (withoutHash(href) === withoutHash(current)) {
+    window.history.pushState(null, '', href);
     window.location.reload();
   } else {
     window.location.assign(href);

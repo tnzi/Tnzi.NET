@@ -64,7 +64,7 @@ function handleSend(content: string, files: File[]): void {
     <div
       ref="containerRef"
       role="log"
-      class="relative flex-1 overflow-y-auto"
+      class="t-ai-scroll relative flex-1 overflow-y-auto"
     >
       <!-- Empty state -->
       <template v-if="isEmpty">

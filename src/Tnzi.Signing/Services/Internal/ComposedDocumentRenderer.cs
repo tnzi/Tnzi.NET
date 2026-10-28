@@ -39,22 +39,25 @@ public sealed partial class ComposedDocumentRenderer
     private const double TopY = 0.08d;
     private const double BottomY = 0.92d;
 
+    /// <summary>
+    /// 正文区宽度（pt）。<see cref="IPdfStamper"/> 不换行也不裁剪，所以每一行（标题、正文、字段标签）
+    /// 都在这里按<b>实测宽度</b>拆到这个宽度以内，见 <see cref="PdfTextFitter"/>。
+    /// </summary>
+    private const double ContentWidthPoints = PageWidthPoints * ContentWidth;
+
     private const double BodyFontSize = 10.5d;
     private const double TitleFontSize = 16d;
+    private const double LabelFontSize = 8d;
     private const double BodyLineHeight = 0.0182d;
     private const double ParagraphGap = 0.008d;
+
+    /// <summary>标题每行占的高度，与标题之后、正文之前的留白（归一化）。</summary>
+    private const double TitleLineHeight = BodyLineHeight * 1.8;
+    private const double TitleGapAfter = BodyLineHeight * 0.6;
 
     /// <summary>字段框的高度（归一化）。签名框比文本框高，因为落进去的是一张图。</summary>
     private const double FieldHeight = 0.020d;
     private const double SignatureFieldHeight = 0.045d;
-
-    /// <summary>
-    /// 一行大约放得下多少个字符。<see cref="IPdfStamper"/> 不换行，所以换行得在这里算；
-    /// 没有字体度量可用（那要求容器装了字体），用字号推一个保守值 —— 宁可一行短一点，
-    /// 也不要让文字被裁掉右半。
-    /// </summary>
-    private static int CharsPerLine(double fontSize)
-        => Math.Max(20, (int)(PageWidthPoints * ContentWidth / (fontSize * 0.52d)));
 
     [GeneratedRegex(@"\{\{\s*([^}]+?)\s*\}\}")]
     private static partial Regex MergeTokenRegex();
@@ -89,21 +92,31 @@ public sealed partial class ComposedDocumentRenderer
         var placements = new Dictionary<string, (int, decimal, decimal, decimal, decimal)>(StringComparer.OrdinalIgnoreCase);
         var stamps = new List<PdfStamp>();
 
+        var titleText = new PdfTextFitter(_stamper, TitleFontSize, bold: true);
+        var bodyText = new PdfTextFitter(_stamper, BodyFontSize);
+        var labelText = new PdfTextFitter(_stamper, LabelFontSize);
+
         var page = 1;
         var y = TopY;
 
         if (!string.IsNullOrWhiteSpace(title))
         {
-            stamps.Add(new PdfTextStamp
+            // 标题同样要换行：模板名或调用方给的标题可以长到 200 字，16 pt 粗体一行只放得下五六十个字符。
+            foreach (var line in titleText.Wrap(title.Trim(), ContentWidthPoints))
             {
-                PageNumber = page,
-                Rect = new NormalizedRect(MarginX, y, ContentWidth, BodyLineHeight * 1.8),
-                Text = title.Trim(),
-                FontSize = TitleFontSize,
-                Bold = true,
-                Alignment = PdfStampAlignment.CenterLeft,
-            });
-            y += BodyLineHeight * 2.4;
+                (page, y) = EnsureRoom(page, y, TitleLineHeight);
+                stamps.Add(new PdfTextStamp
+                {
+                    PageNumber = page,
+                    Rect = new NormalizedRect(MarginX, y, ContentWidth, TitleLineHeight),
+                    Text = line,
+                    FontSize = TitleFontSize,
+                    Bold = true,
+                    Alignment = PdfStampAlignment.CenterLeft,
+                });
+                y += TitleLineHeight;
+            }
+            y += TitleGapAfter;
         }
 
         foreach (var rawLine in SplitLines(bodyTemplate))
@@ -112,22 +125,26 @@ public sealed partial class ComposedDocumentRenderer
             if (fieldMatch.Success)
             {
                 var key = fieldMatch.Groups[1].Value;
-                var height = fieldByKey.TryGetValue(key, out var field) && field.IsSignatureLike
-                    ? SignatureFieldHeight
-                    : FieldHeight;
+                var described = fieldByKey.GetValueOrDefault(key);
+                var height = described is { IsSignatureLike: true } ? SignatureFieldHeight : FieldHeight;
 
-                (page, y) = EnsureRoom(page, y, height + BodyLineHeight);
+                IReadOnlyList<string> labelLines = described is null || string.IsNullOrWhiteSpace(described.Label)
+                    ? []
+                    : labelText.Wrap(described.Required ? $"{described.Label} *" : described.Label, ContentWidthPoints);
 
-                // 标签画在框上方一行；框本身不画边线 —— 签好之后那条线就是多余的墨，
+                // 标签与框不拆页：标签在上一页、框在下一页，读起来像一个没有说明的空白框。
+                (page, y) = EnsureRoom(page, y, height + (BodyLineHeight * Math.Max(1, labelLines.Count)));
+
+                // 标签画在框上方；框本身不画边线：签好之后那条线就是多余的墨，
                 // 而没签的空白正文本来就该看得出是空白。
-                if (fieldByKey.TryGetValue(key, out var described) && !string.IsNullOrWhiteSpace(described.Label))
+                foreach (var labelLine in labelLines)
                 {
                     stamps.Add(new PdfTextStamp
                     {
                         PageNumber = page,
                         Rect = new NormalizedRect(MarginX, y, ContentWidth, BodyLineHeight),
-                        Text = described.Required ? $"{described.Label} *" : described.Label,
-                        FontSize = 8d,
+                        Text = labelLine,
+                        FontSize = LabelFontSize,
                         Color = "#666666",
                         Alignment = PdfStampAlignment.CenterLeft,
                     });
@@ -147,7 +164,7 @@ public sealed partial class ComposedDocumentRenderer
                 continue;
             }
 
-            foreach (var wrapped in Wrap(text, CharsPerLine(BodyFontSize)))
+            foreach (var wrapped in bodyText.Wrap(text, ContentWidthPoints))
             {
                 (page, y) = EnsureRoom(page, y, BodyLineHeight);
                 stamps.Add(new PdfTextStamp
@@ -207,47 +224,4 @@ public sealed partial class ComposedDocumentRenderer
         => string.IsNullOrEmpty(body)
             ? []
             : body.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-
-    /// <summary>按空白断词换行；单个超长词直接硬切（宁可切开，也不要溢出到页外看不见）。</summary>
-    private static IEnumerable<string> Wrap(string text, int maxChars)
-    {
-        if (text.Length <= maxChars)
-        {
-            yield return text;
-            yield break;
-        }
-
-        var builder = new StringBuilder();
-        foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-        {
-            var piece = word;
-            while (piece.Length > maxChars)
-            {
-                if (builder.Length > 0)
-                {
-                    yield return builder.ToString();
-                    builder.Clear();
-                }
-                yield return piece[..maxChars];
-                piece = piece[maxChars..];
-            }
-
-            if (builder.Length == 0)
-            {
-                builder.Append(piece);
-            }
-            else if (builder.Length + 1 + piece.Length <= maxChars)
-            {
-                builder.Append(' ').Append(piece);
-            }
-            else
-            {
-                yield return builder.ToString();
-                builder.Clear().Append(piece);
-            }
-        }
-
-        if (builder.Length > 0)
-            yield return builder.ToString();
-    }
 }

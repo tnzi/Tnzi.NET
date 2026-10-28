@@ -9,10 +9,23 @@ namespace Tnzi.AI.Infrastructure.Streaming;
 /// - DeepSeek R1 / Qwen QwQ / OpenAI o-series: delta.reasoning_content
 /// - Gemini 2.5: delta.content with extra_content.google.thought=true (requires ThinkingOptions)
 /// </summary>
+/// <remarks>
+/// <para>
+/// 同时决定本次调用的推理参数（由 <see cref="ThinkingRequestPolicy"/> 写进请求体）：
+/// 管线内以 <c>ThinkingMiddleware</c> 写下的上下文为准，<b>包括它写下的「关」</b>；没有上下文说明调用不经过管线
+/// （IAiUtility、评审、摘要），这时才用提供商配置的 <see cref="ProviderOptions.Thinking"/>。
+/// 两条路都再按本客户端绑定的模型把一次关：模型不支持推理或推理常开时不注入，因为降级链里换到的模型未必支持推理，
+/// 中间件只看得见主模型。注入形态按本客户端绑定的提供商与模型识别（<see cref="ThinkingPayloadFormats"/>），
+/// 不按中间件给的条目名。
+/// </para>
+/// </remarks>
 public sealed class ReasoningAwareChatClientDecorator : IChatClient
 {
     private readonly IChatClient _inner;
     private readonly ThinkingOptions? _thinking;
+    private readonly string? _providerName;
+    private readonly string? _model;
+    private readonly ThinkingPayloadFormat _format;
 
     /// <summary>
     /// AsyncLocal channel writer - set by this decorator before making the HTTP call,
@@ -22,10 +35,40 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
     /// </summary>
     internal static readonly AsyncLocal<ChannelWriter<string>?> ReasoningChannelWriter = new();
 
-    public ReasoningAwareChatClientDecorator(IChatClient inner, ThinkingOptions? thinking = null)
+    /// <param name="inner">SDK 客户端</param>
+    /// <param name="provider">本客户端的提供商条目（管线外的推理配置与注入形态都取自它）</param>
+    /// <param name="model">本客户端绑定的模型（单次调用的 <see cref="ChatOptions.ModelId"/> 优先）</param>
+    public ReasoningAwareChatClientDecorator(IChatClient inner, ProviderOptions? provider = null, string? model = null)
     {
         _inner = Check.NotNull(inner);
-        _thinking = thinking;
+        _thinking = provider?.Thinking;
+        _providerName = provider?.Name;
+        _model = model;
+        _format = ThinkingPayloadFormats.Resolve(provider, model);
+    }
+
+    /// <summary>
+    /// 本次调用交给 <see cref="ThinkingRequestPolicy"/> 的上下文：恒非 null（「关」也写明），形态恒为本客户端的形态。
+    /// </summary>
+    private ThinkingRequestContext ResolveRequestContext(ChatOptions? options)
+    {
+        var current = ThinkingRequestPolicy.RequestContext.Value;
+        var model = options?.ModelId ?? _model;
+
+        var thinking = current != null ? current.Thinking : _thinking;
+        if (thinking is not { Effort: not ReasoningEffort.None }
+            || !ModelCapabilities.SupportsReasoning(model)
+            || ModelCapabilities.IsAlwaysOnReasoning(model))
+        {
+            thinking = new ThinkingOptions { Effort = ReasoningEffort.None };
+        }
+
+        return new ThinkingRequestContext
+        {
+            Thinking = thinking,
+            ProviderName = current?.ProviderName ?? _providerName,
+            Format = _format
+        };
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -46,15 +89,7 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
         var previousContext = ThinkingRequestPolicy.RequestContext.Value;
 
         ReasoningChannelWriter.Value = channel.Writer;
-
-        // Set thinking request context so ThinkingRequestPolicy can inject provider-specific params.
-        // Preserve any externally-set context (e.g., per-request override from ThinkingMiddleware).
-        if (ThinkingRequestPolicy.RequestContext.Value == null)
-        {
-            ThinkingRequestPolicy.RequestContext.Value = _thinking is { Effort: not ReasoningEffort.None }
-                ? new ThinkingRequestContext { Thinking = _thinking }
-                : null;
-        }
+        ThinkingRequestPolicy.RequestContext.Value = ResolveRequestContext(options);
 
         try
         {
@@ -99,11 +134,7 @@ public sealed class ReasoningAwareChatClientDecorator : IChatClient
         // Set thinking request context for non-streaming calls too,
         // so ThinkingRequestPolicy can inject provider-specific params (e.g., Gemini thinking_config).
         var previousContext = ThinkingRequestPolicy.RequestContext.Value;
-
-        if (ThinkingRequestPolicy.RequestContext.Value == null && _thinking is { Effort: not ReasoningEffort.None })
-        {
-            ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext { Thinking = _thinking };
-        }
+        ThinkingRequestPolicy.RequestContext.Value = ResolveRequestContext(options);
 
         try
         {

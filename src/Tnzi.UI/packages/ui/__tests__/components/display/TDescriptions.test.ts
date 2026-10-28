@@ -99,8 +99,12 @@ describe('TDescriptions', () => {
 
   it('raises the per-track floor so auto-fit cannot exceed maxColumns', () => {
     const two = mount(TDescriptions, { props: { items, maxColumns: 2 } })
-    // 100% / 2 = 50%: each track claims at least half the row, so a third
-    // track can never fit.
-    expect(two.find('.t-desc').attributes('style')).toContain('50%')
+    // auto-fit counts the column gaps: N tracks fit when N x floor + (N - 1)
+    // x gap <= 100%. A bare 100% / N floor (50% here) left no room for the
+    // gap, so maxColumns 2 never laid out more than one column. The floor is
+    // (100% - (N - 1) x gap - 1px) / N: N tracks fit, N + 1 do not.
+    const style = two.find('.t-desc').attributes('style') ?? ''
+    expect(style).toContain('calc((100% - 1 * var(--t-desc-column-gap, 24px) - 1px) / 2)')
+    expect(style).not.toMatch(/,\s*50%\)/)
   })
 })

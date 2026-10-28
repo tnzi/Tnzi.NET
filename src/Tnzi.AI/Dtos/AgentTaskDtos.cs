@@ -32,3 +32,15 @@ public class AgentTaskDto
     /// <summary>创建时间</summary>
     public DateTime CreationTime { get; set; }
 }
+
+/// <summary>
+/// 按状态分页查询 AgentTask（<c>GET admin/ai/tasks/by-status</c>）。
+/// </summary>
+/// <remarks>
+/// 已完成的任务随运行持续累积，一次读出某个状态的全部任务会随时间无界增长，所以按页取。
+/// </remarks>
+public class AgentTaskStatusQueryDto : PagedQueryDto
+{
+    /// <summary>任务状态</summary>
+    public AgentTaskStatus Status { get; set; }
+}

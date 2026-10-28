@@ -2,14 +2,27 @@
 namespace Tnzi.Services;
 
 /// <summary>
-/// IP定位服务实现（使用本地IP库或第三方API）
+/// 第三方 IP 定位实现：把公网 IP 发给 ip-api.com 的免费接口查询归属地。
 /// </summary>
+/// <remarks>
+/// <para>
+/// ★ <strong>框架不默认注册它</strong>，消费方要显式注册（<c>services.AddScoped&lt;IIpLocatorService, IpLocatorService&gt;()</c>）。
+/// 启用即意味着：每个被定位的公网地址以<b>明文 HTTP</b>（该免费接口不提供 HTTPS）交给一个第三方处理；
+/// 免费接口限每分钟 45 次请求、条款限非商业用途。生产部署建议注册自己的实现（本地 IP 库或签约的商业接口）。
+/// </para>
+/// <para>
+/// 只对合法的公网 IP 外呼：解析不出 IP 的值直接返回 <c>null</c>，回环 / 内网 / 链路本地地址就地答 <c>Local</c>。
+/// 成功结果缓存 24 小时；失败结果缓存 10 分钟：外呼被拦或被限流时，同一个地址不会让每条访问日志都再等一次超时。
+/// </para>
+/// </remarks>
 public class IpLocatorService : IIpLocatorService
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ICache? _cache;
     private readonly ILogger<IpLocatorService>? _logger;
     private static readonly TimeSpan CacheExpiration = TimeSpan.FromHours(24);
+    private static readonly TimeSpan FailureCacheExpiration = TimeSpan.FromMinutes(10);
+    private const string FailureMarker = "miss";
 
     /// <summary>
     /// 初始化一个<see cref="IpLocatorService"/>类型的新实例
@@ -29,38 +42,60 @@ public class IpLocatorService : IIpLocatorService
         if (string.IsNullOrWhiteSpace(ipAddress))
             return null;
 
-        // 检查本地IP
-        if (IsLocalIp(ipAddress))
-        {
-            return new IpLocationResult
-            {
-                IpAddress = ipAddress,
-                Country = "Local",
-                City = "-"
-            };
-        }
+        var trimmed = ipAddress.Trim();
+        if (trimmed.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            return LocalResult(ipAddress);
 
-        // 检查缓存
+        // 不是 IP 的值一律不外呼：拼进 URL 的只能是解析后的规范形式
+        if (!IPAddress.TryParse(trimmed, out var address))
+            return null;
+
+        if (address.IsIPv4MappedToIPv6)
+            address = address.MapToIPv4();
+
+        if (IsLocalAddress(address))
+            return LocalResult(ipAddress);
+
+        var canonical = address.ToString();
+
         if (_cache != null)
         {
-            var cachedResult = await _cache.GetAsync<IpLocationResult>(GetCacheKey(ipAddress), cancellationToken);
+            var cachedResult = await _cache.GetAsync<IpLocationResult>(GetCacheKey(canonical), cancellationToken);
             if (cachedResult != null)
             {
                 return cachedResult;
             }
+
+            if (await _cache.GetAsync<string>(GetFailureCacheKey(canonical), cancellationToken) != null)
+            {
+                return null;
+            }
         }
 
-        // 调用第三方API（示例：使用ip-api.com，免费但有限制）
-        var result = await LocateFromApiAsync(ipAddress, cancellationToken);
+        var result = await LocateFromApiAsync(canonical, cancellationToken);
 
-        // 缓存结果
-        if (result != null && _cache != null)
+        if (_cache != null)
         {
-            await _cache.SetAsync(GetCacheKey(ipAddress), result, CacheExpiration, cancellationToken);
+            if (result != null)
+            {
+                await _cache.SetAsync(GetCacheKey(canonical), result, CacheExpiration, cancellationToken);
+            }
+            else if (!cancellationToken.IsCancellationRequested)
+            {
+                // 调用方取消（如停机）不是这个地址查不到，不记失败
+                await _cache.SetAsync(GetFailureCacheKey(canonical), FailureMarker, FailureCacheExpiration, cancellationToken);
+            }
         }
 
         return result;
     }
+
+    private static IpLocationResult LocalResult(string ipAddress) => new()
+    {
+        IpAddress = ipAddress,
+        Country = "Local",
+        City = "-"
+    };
 
     /// <summary>
     /// 批量获取IP位置信息
@@ -90,8 +125,7 @@ public class IpLocatorService : IIpLocatorService
     {
         try
         {
-            // 使用ip-api.com免费API（限制：每分钟45次请求）
-            // 注意：生产环境建议使用付费API或本地IP库
+            // ip-api.com 免费接口：明文 HTTP、每分钟 45 次、限非商业用途（见类注释）
             var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(5);
 
@@ -148,26 +182,10 @@ public class IpLocatorService : IIpLocatorService
     }
 
     /// <summary>
-    /// 判断是否为本地IP
+    /// 判断是否为不该外呼的本地地址（回环、内网、链路本地）
     /// </summary>
-    private static bool IsLocalIp(string ipAddress)
-    {
-        if (string.IsNullOrWhiteSpace(ipAddress))
-            return false;
-
-        // 检查是否为localhost
-        if (ipAddress.Equals("127.0.0.1", StringComparison.Ordinal) ||
-            ipAddress.Equals("::1", StringComparison.Ordinal) ||
-            ipAddress.Equals("localhost", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        // 尝试解析IP地址
-        if (!IPAddress.TryParse(ipAddress, out var address))
-            return false;
-
-        // 检查是否为内网IP
-        return IsPrivateIpAddress(address);
-    }
+    private static bool IsLocalAddress(IPAddress address)
+        => IPAddress.IsLoopback(address) || IsPrivateIpAddress(address);
 
     /// <summary>
     /// 判断是否为私有IP地址
@@ -223,6 +241,14 @@ public class IpLocatorService : IIpLocatorService
     private static string GetCacheKey(string ipAddress)
     {
         return $"IpLocation:{ipAddress}";
+    }
+
+    /// <summary>
+    /// 获取失败结果的缓存键
+    /// </summary>
+    private static string GetFailureCacheKey(string ipAddress)
+    {
+        return $"IpLocation:Failed:{ipAddress}";
     }
 
     /// <summary>

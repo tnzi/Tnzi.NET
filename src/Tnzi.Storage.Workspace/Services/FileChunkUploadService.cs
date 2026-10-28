@@ -11,6 +11,8 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
     private readonly IFileStorage _storage;
     private readonly IOptionsMonitor<StorageOptions> _options;
     private readonly UploadGuard _guard;
+    private readonly IStorageQuotaService _quota;
+    private readonly IRepository<FileFolder, Guid> _folderRepository;
 
     public FileChunkUploadService(
         IRepository<FileUploadSession, Guid> uploadSessionRepository,
@@ -19,7 +21,9 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         IFileStorage storage,
         IOptionsMonitor<StorageOptions> options,
         IServiceProvider serviceProvider,
-        UploadGuard guard)
+        UploadGuard guard,
+        IStorageQuotaService quota,
+        IRepository<FileFolder, Guid> folderRepository)
         : base(serviceProvider)
     {
         _uploadSessionRepository = Check.NotNull(uploadSessionRepository);
@@ -28,6 +32,8 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         _storage = Check.NotNull(storage);
         _options = Check.NotNull(options);
         _guard = Check.NotNull(guard);
+        _quota = Check.NotNull(quota);
+        _folderRepository = Check.NotNull(folderRepository);
     }
 
     public async Task<Result<FileUploadSessionDto>> InitiateChunkedUploadAsync(
@@ -52,6 +58,12 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         var extensionCheck = _guard.ValidateExtension<FileUploadSessionDto>(fileName);
         if (extensionCheck != null)
             return extensionCheck;
+
+        // 配额按客户端声明的总大小先拦一次：一个装不下的 5 GB 文件不该先传完再被拒。
+        // 合并完成时按实际字节再判一次（期间别的上传可能已经用掉了空间）。
+        var quotaCheck = await _quota.EnsureCapacityAsync<FileUploadSessionDto>(CurrentUser?.Id, totalSize, cancellationToken);
+        if (quotaCheck != null)
+            return quotaCheck;
 
         // 计算总分块数
         var totalChunks = (int)Math.Ceiling((double)totalSize / chunkSize);
@@ -155,11 +167,22 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
         return Ok(MapToDto(chunk), "Chunk uploaded successfully");
     }
 
-    public async Task<Result<FileRecord>> CompleteChunkedUploadAsync(
+    public Task<Result<FileRecord>> CompleteChunkedUploadAsync(
         Guid uploadSessionId,
         bool isTemporary = false,
         CancellationToken cancellationToken = default)
+        => CompleteChunkedUploadAsync(uploadSessionId, isTemporary, null, cancellationToken);
+
+    public async Task<Result<FileRecord>> CompleteChunkedUploadAsync(
+        Guid uploadSessionId,
+        bool isTemporary,
+        Guid? folderId,
+        CancellationToken cancellationToken = default)
     {
+        // 放进目录的文件由文件空间持有，不是临时上传：两个要求互相矛盾，说清楚而不是悄悄挑一个。
+        if (folderId != null && isTemporary)
+            return Fail<FileRecord>("A file placed in a folder is kept by the file space; it cannot also be temporary", 400, ErrorCodes.VALIDATION_ERROR);
+
         // 获取会话和所有分块
         var session = await _uploadSessionRepository.GetAsync(uploadSessionId, cancellationToken);
         if (session == null || session.IsCompleted || session.IsCancelled || !IsSessionOwner(session))
@@ -167,6 +190,15 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
 
         if (IsExpired(session))
             return Fail<FileRecord>(SessionExpired, 400, ErrorCodes.FILE_OPERATION_ERROR);
+
+        // 目标目录在合并之前就判：几个 GB 的合并做完再告诉调用方目录不对，代价全白付。
+        // 目录必须是上传者自己的（会话归属已经确认了上传者就是当前用户），回答与「不存在」同一句。
+        if (folderId is { } targetFolderId)
+        {
+            var folder = await _folderRepository.GetAsync(targetFolderId, cancellationToken);
+            if (folder == null || folder.IsDeleted || folder.CreatorId != session.CreatorId)
+                return Fail<FileRecord>("Folder not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
 
         // 获取所有分块（按索引排序）
         var chunks = await _chunkRepository.AsQueryable()
@@ -197,20 +229,18 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 {
                     // 回读分片并校验其完整性（受 EnableMd5Validation 控制）。
                     // 损坏的分片在合并时会被检测出来，避免静默合出坏文件。
-                    if (_options.CurrentValue.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash))
-                    {
-                        using var verifyStream = await _storage.DownloadAsync(chunk.ChunkPath!);
-                        var actualChunkMd5 = await HashHelper.GetMd5Async(verifyStream);
-                        if (!string.Equals(actualChunkMd5, chunk.Md5Hash, StringComparison.OrdinalIgnoreCase))
-                        {
-                            LogWarning("Chunk MD5 mismatch during merge: SessionId={SessionId}, ChunkIndex={ChunkIndex}, Expected={Expected}, Actual={Actual}",
-                                uploadSessionId, chunk.ChunkIndex, chunk.Md5Hash, actualChunkMd5);
-                            return Fail<FileRecord>($"Chunk {chunk.ChunkIndex} integrity check failed (MD5 mismatch)", 400, ErrorCodes.VALIDATION_ERROR);
-                        }
-                    }
-
+                    // ★ 每片只下载一次：边写进合并文件边算哈希。先整片下载算哈希、再下载一遍复制，
+                    //   在对象存储上就是两倍的出口流量与时延，而分片通道恰恰是给超大文件用的。
+                    var verify = _options.CurrentValue.EnableMd5Validation && !string.IsNullOrEmpty(chunk.Md5Hash);
                     using var chunkStream = await _storage.DownloadAsync(chunk.ChunkPath!);
-                    await chunkStream.CopyToAsync(mergedStream, cancellationToken);
+                    var actualChunkMd5 = await CopyChunkAsync(chunkStream, mergedStream, verify, cancellationToken);
+
+                    if (verify && !string.Equals(actualChunkMd5, chunk.Md5Hash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        LogWarning("Chunk MD5 mismatch during merge: SessionId={SessionId}, ChunkIndex={ChunkIndex}, Expected={Expected}, Actual={Actual}",
+                            uploadSessionId, chunk.ChunkIndex, chunk.Md5Hash, actualChunkMd5);
+                        return Fail<FileRecord>($"Chunk {chunk.ChunkIndex} integrity check failed (MD5 mismatch)", 400, ErrorCodes.VALIDATION_ERROR);
+                    }
                 }
 
                 mergedSize = mergedStream.Length;
@@ -262,6 +292,12 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                 if (content.CanSeek) content.Position = 0;
                 var storedSize = content.CanSeek ? content.Length : mergedSize;
 
+                // 配额按落库的字节判，排在交给 provider 之前：会话建立时按声明的大小拦过一次，
+                // 但这期间同一个人的别的上传可能已经用掉了空间。拒绝时分片原样保留，腾出空间后可以再 complete。
+                var quotaCheck = await _quota.EnsureCapacityAsync<FileRecord>(session.CreatorId, storedSize, cancellationToken);
+                if (quotaCheck != null)
+                    return quotaCheck;
+
                 // ★ 存储键由服务端生成；session.FileName 是客户端建会话时给的名字，只做展示名。
                 //   这条路径此前直接拿它当键：文档把分片上传推荐给大文件，于是两个用户同一天
                 //   上传同名的 report.pdf，第二份在本地 provider 上把第一份截断覆盖、第一条记录的
@@ -285,7 +321,9 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
                     Provider = _storage.ProviderName,
                     ContentType = contentType,
                     IsTemporary = isTemporary,
-                    ReferenceCount = isTemporary ? 0 : 1
+                    ReferenceCount = isTemporary ? 0 : 1,
+                    // 正式记录本身就是文件空间的那一份持有，放进目录即可（同 IFileSpaceService.UploadFileAsync）。
+                    FolderId = folderId
                 };
 
                 try
@@ -415,6 +453,33 @@ public class FileChunkUploadService : ApplicationService, IFileChunkUploadServic
     /// 查进度也放行（只读，DTO 上本就带着 <c>ExpiresAt</c>）。
     /// </remarks>
     private static bool IsExpired(FileUploadSession session) => session.ExpiresAt <= DateTime.UtcNow;
+
+    /// <summary>
+    /// 把一片复制进合并文件；<paramref name="computeMd5"/> 为真时顺带算出这一片的 MD5
+    /// （小写十六进制，与 <see cref="HashHelper.GetMd5Async"/> 同形），否则返回 null。
+    /// </summary>
+    private static async Task<string?> CopyChunkAsync(Stream source, Stream destination, bool computeMd5, CancellationToken cancellationToken)
+    {
+        if (!computeMd5)
+        {
+            await source.CopyToAsync(destination, cancellationToken);
+            return null;
+        }
+
+        using var md5 = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+        var buffer = new byte[ChunkCopyBufferSize];
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            md5.AppendData(buffer, 0, read);
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        return Convert.ToHexStringLower(md5.GetHashAndReset());
+    }
+
+    /// <summary>合并时每次读写的块大小（与 <see cref="Stream.CopyToAsync(Stream)"/> 的默认值同量级）。</summary>
+    private const int ChunkCopyBufferSize = 81920;
 
     /// <summary>
     /// 删掉一个交给了 provider 却没有任何记录指向的合并对象。删除失败只记日志：调用方正在把原异常抛出去，

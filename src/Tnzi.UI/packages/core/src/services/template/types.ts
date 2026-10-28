@@ -4,10 +4,8 @@
  */
 
 import type { AuditedEntity } from '../../types/entities';
-import type { SortedPagedQueryDto } from '../../types/pagination';
-import type { TemplateType, TemplateVariableType } from './metadata';
-
-export type { TemplateVariableType };
+import type { PagedQueryDto } from '../../types/pagination';
+import type { TemplateType } from './metadata';
 
 // ============================================
 // Template Types
@@ -56,18 +54,6 @@ export interface TemplateEntityDto extends AuditedEntity<string> {
   metadata?: string | null;
 }
 
-/**
- * Template variable definition
- */
-export interface TemplateVariableDto {
-  name: string;
-  type: TemplateVariableType;
-  description?: string | null;
-  isRequired: boolean;
-  defaultValue?: unknown;
-  exampleValue?: unknown;
-}
-
 // ============================================
 // Template Request Types
 // ============================================
@@ -110,9 +96,10 @@ export interface UpdateTemplateDto {
 
 /**
  * Template list query
- * Aligned with backend QueryTemplateRequest
+ * Aligned with backend QueryTemplateRequest. Sorted by module, category and
+ * name; the endpoint takes no sort parameters.
  */
-export interface TemplateQueryDto extends SortedPagedQueryDto {
+export interface TemplateQueryDto extends PagedQueryDto {
   module?: string;
   category?: string;
   isActive?: boolean;
@@ -158,6 +145,7 @@ export interface PreviewTemplateDto {
  */
 export interface TemplateImportDto {
   json: string;
+  /** Rewrites existing templates; the caller then also needs `template.template.update` (403 otherwise). */
   overwriteExisting?: boolean;
 }
 
@@ -263,9 +251,10 @@ export interface UpdateLayoutDto {
 
 /**
  * Layout list query
- * Aligned with backend QueryLayoutRequest
+ * Aligned with backend QueryLayoutRequest. Sorted by module, category and
+ * name; the endpoint takes no sort parameters.
  */
-export interface LayoutQueryDto extends SortedPagedQueryDto {
+export interface LayoutQueryDto extends PagedQueryDto {
   module?: string;
   category?: string;
   isActive?: boolean;
@@ -285,6 +274,7 @@ export interface LayoutQueryDto extends SortedPagedQueryDto {
  */
 export interface LayoutImportDto {
   json: string;
+  /** Rewrites existing layouts; the caller then also needs `template.layout.update` (403 otherwise). */
   overwriteExisting?: boolean;
 }
 
@@ -297,41 +287,4 @@ export interface LayoutImportResultDto {
   updatedCount: number;
   skippedCount: number;
   errors: string[];
-}
-
-// ============================================
-// Template Rendering Types
-// ============================================
-
-/**
- * Render template request
- */
-export interface RenderTemplateDto {
-  templateName: string;
-  layoutName?: string;
-  variables: Record<string, unknown>;
-  culture?: string;
-}
-
-/**
- * Rendered template result
- */
-export interface RenderedTemplateDto {
-  templateId: string;
-  templateName: string;
-  subject: string;
-  content: string;
-  isHtml: boolean;
-  usedLayout?: string | null;
-}
-
-/**
- * Template category DTO
- */
-export interface TemplateCategoryDto {
-  module: string;
-  name: string;
-  displayName: string;
-  description?: string | null;
-  templateCount: number;
 }

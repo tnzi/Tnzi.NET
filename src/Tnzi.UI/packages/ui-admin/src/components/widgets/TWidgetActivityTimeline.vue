@@ -16,11 +16,13 @@ import { formatDateOnly } from '@tnzi/core'
 import { EMPTY_DASH } from '../../utils/placeholders'
 import { computed, ref } from 'vue'
 import TProjectTimeline from '../dashboard/TProjectTimeline.vue'
-import type { TimelineItem, TimelineTone } from '../dashboard/TProjectTimeline.vue'
+import type { TimelineItem } from '../dashboard/TProjectTimeline.vue'
 import { useAdminClient } from '../../plugin/client'
 import { createAuditBridge } from '../../services/bridges/audit-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { maybeTranslate, translatePageKey } from '../../i18n/translate'
+import { useAdminLocale } from '../../headless/useAdminLocale'
+import { maybeTranslate, translateChromeKey } from '../../i18n/translate'
+import { auditResultTone } from '../../utils/audit-result-tone'
 
 interface Props {
   /**
@@ -40,32 +42,40 @@ const props = withDefaults(defineProps<Props>(), {
   emptyText: undefined,
 })
 
-const dynamicItems = ref<TimelineItem[]>([])
+/** An audit row as a timeline item, keeping its timestamp so the relative time follows the locale. */
+interface AuditEntry {
+  item: TimelineItem
+  at?: string
+}
+
+const dynamicItems = ref<AuditEntry[]>([])
 const isAuto = computed(() => props.items.length === 0)
-const displayItems = computed<TimelineItem[]>(() => (props.items.length ? props.items : dynamicItems.value))
+const locales = useAdminLocale()
+const displayItems = computed<TimelineItem[]>(() =>
+  props.items.length
+    ? props.items
+    : dynamicItems.value.map(({ item, at }) => ({ ...item, time: formatRelative(at, locales.intlTag.value) })),
+)
 
 const client = useAdminClient()
 const auditBridge = createAuditBridge({ client })
 
-function resultTone(value: unknown): TimelineTone {
-  if (value === 0 || value === '0' || value === 'success') return 'success'
-  if (value === 1 || value === '1' || value === 'failed') return 'error'
-  if (value === 2 || value === '2' || value === 'warning') return 'warning'
-  return 'default'
-}
-
-function formatRelative(iso?: string): string | undefined {
+/**
+ * "now" / "5m ago" / "3h ago" / "2d ago" in the admin's language (the active
+ * locale's `Intl` tag), not English literals.
+ */
+function formatRelative(iso: string | undefined, intlTag: string): string | undefined {
   if (!iso) return undefined
   const t = Date.parse(iso)
   if (Number.isNaN(t)) return iso
-  const diff = Date.now() - t
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return 'now'
-  if (minutes < 60) return `${minutes}m ago`
+  const minutes = Math.floor((Date.now() - t) / 60000)
+  const rtf = new Intl.RelativeTimeFormat(intlTag, { numeric: 'auto', style: 'narrow' })
+  if (minutes < 1) return rtf.format(0, 'second')
+  if (minutes < 60) return rtf.format(-minutes, 'minute')
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return rtf.format(-hours, 'hour')
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
+  if (days < 30) return rtf.format(-days, 'day')
   // Beyond a month a relative label stops carrying information; fall back to
   // the shared date formatter so it matches every other date in the admin.
   return formatDateOnly(t)
@@ -85,12 +95,14 @@ useWidgetData(async () => {
       const user = String(r.userName ?? r.userId ?? 'system')
       const action = String(r.functionName ?? r.action ?? EMPTY_DASH)
       return {
-        key: String(r.id ?? `audit-${index}`),
-        title: `${user} · ${action}`,
-        description: r.module ? String(r.module) : undefined,
-        time: formatRelative((r.startTime ?? r.creationTime) as string | undefined),
-        tone: resultTone(r.resultType),
-      } as TimelineItem
+        item: {
+          key: String(r.id ?? `audit-${index}`),
+          title: `${user} · ${action}`,
+          description: r.module ? String(r.module) : undefined,
+          tone: auditResultTone(r.resultType),
+        } as TimelineItem,
+        at: (r.startTime ?? r.creationTime) as string | undefined,
+      }
     })
   } catch {
     // Audit module not loaded or permission denied - leave empty so the
@@ -113,7 +125,7 @@ const resolvedItems = computed<TimelineItem[]>(() =>
 )
 
 function emptyLabel(): string {
-  return props.emptyText ?? translatePageKey('', 'admin.common.empty') ?? 'No activity yet'
+  return props.emptyText ?? translateChromeKey('admin.common.empty', 'No activity yet')
 }
 </script>
 

@@ -1,3 +1,5 @@
+using Tnzi.AI.Infrastructure.ContextProviders.Contributors;
+
 namespace Tnzi.AI.Tests.Memory;
 
 /// <summary>
@@ -10,7 +12,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_BeforeAIInvoke_SearchesAndInjects()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         mockSearch.Setup(s => s.SearchAsync(
                 It.IsAny<string>(),
                 It.IsAny<TextSearchFilter?>(),
@@ -41,7 +43,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_BeforeAIInvoke_NoResults_ReturnsEmpty()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         mockSearch.Setup(s => s.SearchAsync(
                 It.IsAny<string>(),
                 It.IsAny<TextSearchFilter?>(),
@@ -64,7 +66,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_BeforeAIInvoke_EmptyMessages_ReturnsEmpty()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         var provider = CreateProvider(mockSearch.Object, ContextSearchTime.BeforeAIInvoke);
 
         var injection = await provider.GetContextAsync([]);
@@ -75,7 +77,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_BeforeAIInvoke_ServiceThrows_ReturnsEmpty()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         mockSearch.Setup(s => s.SearchAsync(
                 It.IsAny<string>(),
                 It.IsAny<TextSearchFilter?>(),
@@ -98,7 +100,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_OnDemand_InjectsSearchTool()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         var provider = CreateProvider(mockSearch.Object, ContextSearchTime.OnDemandFunctionCalling);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
@@ -112,7 +114,7 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task GetContextAsync_OnDemand_DoesNotAutoSearch()
     {
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         var provider = CreateProvider(mockSearch.Object, ContextSearchTime.OnDemandFunctionCalling);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
@@ -142,7 +144,7 @@ public class ChatHistoryMemoryProviderTests
             ThreadId = "thread-123"
         };
 
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         mockSearch.Setup(s => s.SearchAsync(
                 It.IsAny<string>(),
                 It.Is<TextSearchFilter?>(f => f != null && f.UserId == userId && f.AgentId == agentId && f.ThreadId == "thread-123"),
@@ -192,7 +194,7 @@ public class ChatHistoryMemoryProviderTests
                 ThreadId = "legacy-thread"
             };
 
-            var mockSearch = new Mock<ITextSearchService>();
+            var mockSearch = CreateSearchMock();
             mockSearch.Setup(s => s.SearchAsync(
                     It.IsAny<string>(),
                     It.Is<TextSearchFilter?>(f =>
@@ -222,10 +224,11 @@ public class ChatHistoryMemoryProviderTests
     }
 
     [Fact]
-    public async Task GetContextAsync_EmptyScope_PassesNullFilter()
+    public async Task GetContextAsync_EmptyScope_DoesNotSearch()
     {
+        // 没有用户也没有线程就不是一个对话范围：不带范围的检索就是跨全部数据的检索，绝不发起
         var scope = new ChatHistoryMemoryScope();
-        var mockSearch = new Mock<ITextSearchService>();
+        var mockSearch = CreateSearchMock();
         mockSearch.Setup(s => s.SearchAsync(
                 It.IsAny<string>(),
                 It.IsAny<TextSearchFilter?>(),
@@ -241,13 +244,34 @@ public class ChatHistoryMemoryProviderTests
             mockSearch.Object, options, scope, Mock.Of<ILogger<ChatHistoryMemoryProvider>>());
 
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
-        await provider.GetContextAsync(messages);
+        var injection = await provider.GetContextAsync(messages);
+
+        injection.ShouldBe(ContextInjection.Empty);
+        mockSearch.Verify(s => s.SearchAsync(
+            It.IsAny<string>(),
+            It.IsAny<TextSearchFilter?>(),
+            It.IsAny<int>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetContextAsync_AgentScopeOnly_DoesNotSearch()
+    {
+        // 只按 Agent 限定会把同一 Agent 下所有用户的历史混在一起：Agent 不是对话范围
+        var mockSearch = CreateSearchMock();
+        var provider = new ChatHistoryMemoryProvider(
+            mockSearch.Object,
+            new ChatHistoryMemoryOptions { SearchTime = ContextSearchTime.BeforeAIInvoke },
+            new ChatHistoryMemoryScope { AgentId = Guid.NewGuid().ToString() },
+            Mock.Of<ILogger<ChatHistoryMemoryProvider>>());
+
+        await provider.GetContextAsync([new ChatMessage(ChatRole.User, "test")]);
 
         mockSearch.Verify(s => s.SearchAsync(
             It.IsAny<string>(),
-            null,
+            It.IsAny<TextSearchFilter?>(),
             It.IsAny<int>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     #endregion
@@ -257,14 +281,95 @@ public class ChatHistoryMemoryProviderTests
     [Fact]
     public async Task OnCompletedAsync_NoOp()
     {
-        var provider = CreateProvider(Mock.Of<ITextSearchService>(), ContextSearchTime.BeforeAIInvoke);
+        var provider = CreateProvider(CreateSearchMock().Object, ContextSearchTime.BeforeAIInvoke);
         // 不应抛异常
         await provider.OnCompletedAsync([]);
     }
 
     #endregion
 
+    #region Search service without conversation scope (built-in knowledge-base search)
+
+    // 内置的向量 / 混合检索只认 KnowledgeBaseIds，UserId / ThreadId 原样忽略：拿它做「历史对话」检索
+    // 就是一次跨全部知识库的检索，绕过 Agent 的知识库授权，结果还被当作以前的对话注入。
+
+    [Fact]
+    public async Task GetContextAsync_ServiceWithoutConversationScope_DoesNotSearch()
+    {
+        var knowledgeBaseSearch = new Mock<ITextSearchService>();
+        knowledgeBaseSearch.Setup(s => s.SearchAsync(
+                It.IsAny<string>(), It.IsAny<TextSearchFilter?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextSearchResult> { new() { Text = "HR salary table" } });
+
+        var provider = CreateProvider(knowledgeBaseSearch.Object, ContextSearchTime.BeforeAIInvoke);
+        var injection = await provider.GetContextAsync([new ChatMessage(ChatRole.User, "salaries")]);
+
+        injection.ShouldBe(ContextInjection.Empty);
+        knowledgeBaseSearch.Verify(s => s.SearchAsync(
+            It.IsAny<string>(), It.IsAny<TextSearchFilter?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchTool_ServiceWithoutConversationScope_DoesNotSearch()
+    {
+        var knowledgeBaseSearch = new Mock<ITextSearchService>();
+        knowledgeBaseSearch.Setup(s => s.SearchAsync(
+                It.IsAny<string>(), It.IsAny<TextSearchFilter?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextSearchResult> { new() { Text = "HR salary table" } });
+
+        var provider = CreateProvider(knowledgeBaseSearch.Object, ContextSearchTime.OnDemandFunctionCalling);
+        var injection = await provider.GetContextAsync([new ChatMessage(ChatRole.User, "salaries")]);
+        var tool = (AIFunction)injection.Tools!.Single();
+        var result = await tool.InvokeAsync(new AIFunctionArguments { ["query"] = "salaries" });
+
+        result!.ToString()!.ShouldNotContain("HR salary table");
+        knowledgeBaseSearch.Verify(s => s.SearchAsync(
+            It.IsAny<string>(), It.IsAny<TextSearchFilter?>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void Contributor_ServiceWithoutConversationScope_CreatesNoProvider()
+    {
+        var options = new AIOptions();
+        options.ContextProviders.ChatHistoryMemory.Enabled = true;
+        var contributor = new ChatHistoryMemoryContributor(
+            new Mock<ITextSearchService>().Object,
+            new StaticOptionsMonitor<AIOptions>(options),
+            new AgentExecutionContextAccessor(),
+            NullLoggerFactory.Instance);
+
+        var provider = contributor.TryCreate(new ContextProviderCreationContext { UserId = Guid.NewGuid(), AgentId = Guid.NewGuid() });
+
+        provider.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Contributor_ServiceWithConversationScope_CreatesProvider()
+    {
+        var options = new AIOptions();
+        options.ContextProviders.ChatHistoryMemory.Enabled = true;
+        var contributor = new ChatHistoryMemoryContributor(
+            CreateSearchMock().Object,
+            new StaticOptionsMonitor<AIOptions>(options),
+            new AgentExecutionContextAccessor(),
+            NullLoggerFactory.Instance);
+
+        var provider = contributor.TryCreate(new ContextProviderCreationContext { UserId = Guid.NewGuid() });
+
+        provider.ShouldNotBeNull();
+    }
+
+    #endregion
+
     #region Helpers
+
+    /// <summary>一个声明支持对话范围检索的实现（检索已索引的聊天历史，且按 UserId / ThreadId 限定结果）。</summary>
+    private static Mock<ITextSearchService> CreateSearchMock()
+    {
+        var mock = new Mock<ITextSearchService>();
+        mock.SetupGet(s => s.SupportsConversationScope).Returns(true);
+        return mock;
+    }
 
     private static ChatHistoryMemoryProvider CreateProvider(
         ITextSearchService searchService,
@@ -275,7 +380,7 @@ public class ChatHistoryMemoryProviderTests
             SearchTime = searchTime,
             MaxResults = 5
         };
-        var scope = new ChatHistoryMemoryScope();
+        var scope = new ChatHistoryMemoryScope { UserId = Guid.NewGuid().ToString() };
         return new ChatHistoryMemoryProvider(
             searchService, options, scope, Mock.Of<ILogger<ChatHistoryMemoryProvider>>());
     }

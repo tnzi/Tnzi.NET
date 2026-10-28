@@ -52,7 +52,8 @@
            list) made VueDraggable's reactivity inconsistent: after a drag
            the popover went blank because the two arrays drifted out of
            sync. -->
-      <VueDraggable
+      <component
+        :is="dragContainer"
         v-model="localOrder"
         :animation="150"
         :disabled="bp.isSm.value"
@@ -72,7 +73,7 @@
                  list's vertical scroll. Cards keep only the checkbox toggle
                  (reordering has little value on a stacked card list). -->
             <span
-              v-if="!bp.isSm.value"
+              v-if="!bp.isSm.value && dragReady"
               class="t-crud-column-setting__drag"
               :aria-label="t('admin.crud.dragToReorder')"
             >
@@ -87,7 +88,7 @@
             </NCheckbox>
           </div>
         </div>
-      </VueDraggable>
+      </component>
     </div>
   </NPopover>
 </template>
@@ -95,8 +96,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NPopover, NCheckbox, NDivider } from 'naive-ui'
-import { VueDraggable } from 'vue-draggable-plus'
 import { TSvgIcon } from '@tnzi/ui'
+import { DraggableFallback, useDraggableComponent } from '@tnzi/ui/headless'
 import { useColumnSettings, type ColumnDef } from '../../headless/useColumnSettings'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 
@@ -116,6 +117,13 @@ const emit = defineEmits<{
 }>()
 
 const bp = useBreakpoint()
+
+// `vue-draggable-plus` is an optional peer, loaded on demand (a static import
+// made it required for every app that renders a CRUD table). Until it arrives,
+// and for good if it is not installed, the rows sit in a plain container; the
+// drag handle is only shown once dragging can actually happen.
+const dragContainer = useDraggableComponent(() => true)
+const dragReady = computed(() => dragContainer.value !== DraggableFallback)
 
 function t(key: string): string {
   return props.translate ? props.translate(key) : key

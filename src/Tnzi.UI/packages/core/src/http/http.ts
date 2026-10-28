@@ -7,15 +7,18 @@ import { createFailedApiResult, createFailedApiResultFromError } from '../errors
 import { TimeoutError } from '../errors/network-error';
 import { useLogger } from '../adapters/logger';
 import { normalizeApiResult } from './response';
+import { truncate } from '../utils/string';
 import { buildCapabilityHeaderValue, CAPABILITY_HEADER } from './capabilities';
 import { DEFAULT_AUTH_CHALLENGE_CODES } from './auth-challenge';
 import type { HttpResponseContext, HttpResponseMiddleware } from './middleware';
 
 /**
  * Default request timeout in milliseconds.
- * Applies to JSON API requests, uploads, and the token refresh call.
- * `download()` is exempt (large files may take longer); SSE streaming
- * (`streamChat`) does not go through HttpClient and is unaffected.
+ * Applies to JSON API requests and the token refresh call. Uploads use it as an
+ * idle timeout (no bytes sent, or no response, for this long) rather than a cap
+ * on the whole transfer, since a large file legitimately takes longer;
+ * `download()` is exempt for the same reason. SSE streaming (`streamChat`) does
+ * not go through HttpClient and is unaffected.
  */
 export const DEFAULT_REQUEST_TIMEOUT = 30000;
 
@@ -25,6 +28,58 @@ export const DEFAULT_REQUEST_TIMEOUT = 30000;
  * and caller-initiated aborts).
  */
 export const REQUEST_TIMEOUT_ERROR_CODE = 'REQUEST_TIMEOUT';
+
+/**
+ * Whether a response says up front that it carries no body: 204 / 205, or a
+ * declared `Content-Length: 0`. Such a body is not read at all. The headers
+ * are not the whole answer, though: a chunked empty 200 declares no length,
+ * so the request path also treats an empty body text as "no body".
+ */
+function hasNoBody(response: Pick<Response, 'status' | 'headers'>): boolean {
+  if (response.status === 204 || response.status === 205) return true;
+  return response.headers?.get?.('content-length') === '0';
+}
+
+/** The result of a 2xx that answered with no body: success, no payload. */
+function createEmptySuccess<T>(status: number): ApiResult<T> {
+  return { succeeded: true, success: true, code: status, data: undefined };
+}
+
+/**
+ * `ApiResult.errorCode` value set when a request is refused before it is sent
+ * because its relative path has a dot segment (`.` / `..`, literal or
+ * percent-encoded, after `/` or `\`). See {@link hasDotSegment}.
+ */
+export const REQUEST_PATH_REJECTED_ERROR_CODE = 'REQUEST_PATH_REJECTED';
+
+/**
+ * Whether a relative request URL's path (the part before `?` / `#`) has a
+ * `.` or `..` segment. API paths never do: one appears when a value taken from
+ * a link (a route param, a `?detail=edit:<id>` record id) is interpolated into
+ * the path, and `fetch` would resolve it, sending the request, with the
+ * signed-in user's credentials, to a different resource than the code built.
+ * `%2e` counts as a dot and `\` as a separator, as the URL parser treats them.
+ */
+function hasDotSegment(url: string): boolean {
+  const path = url.split(/[?#]/, 1)[0] ?? '';
+  return /(^|[\\/])(\.|%2e){1,2}([\\/]|$)/i.test(path);
+}
+
+/**
+ * The failed result for a relative URL refused by {@link hasDotSegment}, or
+ * `null` when the URL may be sent. Every entry point that sends a request
+ * (JSON, download, upload) asks this before it builds the URL: a download may
+ * be a POST and an upload is always a write, and both carry record ids in
+ * their paths like any other call.
+ */
+function rejectDotSegmentPath<T>(method: string, url: string): ApiResult<T> | null {
+  if (/^https?:/i.test(url) || !hasDotSegment(url)) return null;
+  return createFailedApiResult<T>({
+    message: `Request path rejected: ${method} ${url}`,
+    code: 400,
+    errorCode: REQUEST_PATH_REJECTED_ERROR_CODE,
+  });
+}
 
 /** Detect the DOM AbortError raised by fetch when its signal aborts. */
 function isDomAbortError(error: unknown): boolean {
@@ -43,6 +98,16 @@ export interface RetryConfig {
   retryableStatuses?: number[];
   /** Whether to use exponential backoff (default: true) */
   exponentialBackoff?: boolean;
+  /**
+   * HTTP methods that may be replayed (default: `['GET']`).
+   *
+   * A 5xx, a gateway 502/504, a client-side timeout (408) or a dropped
+   * connection does not tell the client whether the server already committed
+   * the request, so replaying a write can create the same payment or record
+   * twice while the caller sees one success. Add `PUT` / `DELETE` (or any
+   * other method) only for endpoints you know to be idempotent.
+   */
+  retryMethods?: HttpMethod[];
 }
 
 /**
@@ -55,9 +120,11 @@ export interface HttpClientConfig {
   defaultHeaders?: Record<string, string>;
   /**
    * Request timeout in milliseconds (default: 30000). Set to 0 to disable.
-   * Applies to JSON API requests, uploads, and the token refresh call.
-   * `download()` is exempt unless an explicit per-request timeout is given;
-   * SSE streaming (`streamChat`) does not go through HttpClient.
+   * Applies to JSON API requests and the token refresh call. For uploads it is
+   * an idle timeout: the upload fails only after this long without progress.
+   * `download()` is exempt. An explicit per-request `timeout` always caps the
+   * whole request, uploads and downloads included. SSE streaming (`streamChat`)
+   * does not go through HttpClient.
    */
   timeout?: number;
   /**
@@ -74,11 +141,27 @@ export interface HttpClientConfig {
    * @deprecated Use `onUnauthorized` instead. A 401 response already implies token expiration.
    */
   onTokenExpired?: () => void;
-  /** Request interceptor */
+  /**
+   * Request interceptor. JSON requests only: `upload` / `uploadFormData` and
+   * `download` do not pass through it.
+   */
   requestInterceptor?: (config: RequestConfig) => RequestConfig | Promise<RequestConfig>;
-  /** Response interceptor */
+  /**
+   * Response interceptor. Same reach and timing as {@link responseMiddlewares}.
+   */
   responseInterceptor?: <T>(response: ApiResult<T>) => ApiResult<T> | Promise<ApiResult<T>>;
-  /** Response middleware pipeline */
+  /**
+   * Response middleware pipeline.
+   *
+   * Runs on JSON requests only (not uploads or downloads), and once per
+   * network attempt: a 401 that the token refresh then recovers, and each
+   * failed attempt that `retry` repeats, pass through it before the final
+   * result does. A notifier middleware (such as `createErrorMappingMiddleware`)
+   * combined with `refreshTokenFn` therefore also reports the 401 that the
+   * silent refresh recovers from; skip it with that middleware's
+   * `shouldNotify` (`(_, context) => context.status !== 401`) when that is
+   * unwanted.
+   */
   responseMiddlewares?: HttpResponseMiddleware[];
   /** Error interceptor */
   errorInterceptor?: (error: Error) => void;
@@ -86,8 +169,10 @@ export interface HttpClientConfig {
   retry?: RetryConfig;
   /**
    * Whether to deduplicate concurrent identical GET requests (default: true).
-   * When enabled, multiple simultaneous GET requests to the same URL will share
-   * a single network call instead of making redundant requests.
+   * When enabled, simultaneous GET requests that would send the same request
+   * (same URL and query, bearer token, credentials mode, per-request headers
+   * and timeout) share a single network call. GETs that carry an abort signal
+   * or `skipAuthRefresh` never share.
    */
   deduplicateGets?: boolean;
   /**
@@ -118,11 +203,24 @@ interface RequestConfig {
   skipAuthRefresh?: boolean;
 }
 
+/** Where a settled result came from, as handed to {@link HttpClient.addResultListener}. */
+export interface HttpResultContext {
+  method: string;
+  /** The request path as the caller passed it (relative to `baseUrl`, no query). */
+  url: string;
+}
+
+/** Subscriber to every settled request's final result. */
+export type HttpResultListener = (result: ApiResult<unknown>, context: HttpResultContext) => void;
+
 /** Options accepted by {@link HttpClient.download}. */
 export type DownloadOptions = RequestOptions & { method?: 'GET' | 'POST' };
 
 /** Default HTTP status codes that are safe to retry */
 const DEFAULT_RETRYABLE_STATUSES = [408, 429, 500, 502, 503, 504];
+
+/** Default methods that may be retried: reads only (see {@link RetryConfig.retryMethods}). */
+const DEFAULT_RETRY_METHODS: readonly HttpMethod[] = ['GET'];
 
 /**
  * HttpClient class
@@ -136,6 +234,8 @@ export class HttpClient {
   private _refreshPromise: Promise<string> | null = null;
   /** Additional unauthorized subscribers (multicast alongside config.onUnauthorized) */
   private readonly _unauthorizedListeners = new Set<() => void>();
+  /** Subscribers to every settled request's final result (see addResultListener) */
+  private readonly _resultListeners = new Set<HttpResultListener>();
   /** Map of inflight GET requests for deduplication */
   private _inflightGets = new Map<string, Promise<ApiResult<unknown>>>();
 
@@ -240,15 +340,27 @@ export class HttpClient {
     formData: FormData,
     options?: UploadOptions
   ): Promise<ApiResult<T>> {
+    const rejected = rejectDotSegmentPath<T>('POST', url);
+    if (rejected) return rejected;
     const result = await this.executeUpload<T>(url, formData, options);
-    if (!this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)) {
-      return result;
-    }
-    return this.recoverUnauthorized(result, () => this.executeUpload<T>(url, formData, options));
+    const settled = this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)
+      ? await this.recoverUnauthorized(result, () => this.executeUpload<T>(url, formData, options))
+      : result;
+    this.notifyResult(settled, { method: 'POST', url });
+    return settled;
   }
 
   /**
    * Perform a single multipart upload over XHR (no retry, no 401 handling).
+   *
+   * Timeouts: an explicit per-request `timeout` caps the whole upload, as for
+   * JSON requests. The instance default does NOT: it would cap the time spent
+   * sending the body, and a 50 MB file on a 10 Mbps uplink needs about 40 s, so
+   * every larger file failed at 30 s while the server accepts up to its own
+   * size limit. Instead the instance default applies as an idle timeout: the
+   * upload fails only when it makes no progress for that long (no bytes sent,
+   * or no response within that long after the body was fully sent). A stalled
+   * connection still settles; a slow one that keeps moving is not killed.
    */
   private executeUpload<T>(
     url: string,
@@ -259,22 +371,73 @@ export class HttpClient {
       const xhr = new XMLHttpRequest();
 
       const fullUrl = this.buildUrl(url, options?.params);
-      const timeoutMs = options?.timeout ?? this.config.timeout ?? 0;
+      const timeoutMs = options?.timeout ?? 0;
+      const idleTimeoutMs = options?.timeout === undefined ? (this.config.timeout ?? 0) : 0;
+      const signal = options?.signal;
+
+      let settled = false;
+      let stalled = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const onCallerAbort = (): void => xhr.abort();
+
+      const finish = (result: ApiResult<T>): void => {
+        if (settled) return;
+        settled = true;
+        if (idleTimer !== undefined) clearTimeout(idleTimer);
+        signal?.removeEventListener('abort', onCallerAbort);
+        resolve(result);
+      };
+
+      // Re-armed on every sign of progress; fires only after a full idle window.
+      const armIdleTimer = (): void => {
+        if (idleTimeoutMs <= 0 || settled) return;
+        if (idleTimer !== undefined) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          stalled = true;
+          xhr.abort();
+        }, idleTimeoutMs);
+      };
+
+      if (signal?.aborted) {
+        finish(createFailedApiResultFromError<T>(new Error('Upload was aborted')));
+        return;
+      }
 
       xhr.upload.onprogress = (event) => {
+        armIdleTimer();
         if (event.lengthComputable && options?.onProgress) {
           const progress = Math.round((event.loaded / event.total) * 100);
           options.onProgress(progress, event.loaded, event.total);
         }
       };
+      // The body is fully sent: the server gets a fresh idle window to answer.
+      xhr.upload.onload = armIdleTimer;
+      xhr.onprogress = armIdleTimer;
+
+      xhr.onabort = () => {
+        if (stalled) {
+          finish(createFailedApiResult<T>({
+            message: `Upload timed out after ${idleTimeoutMs}ms without progress`,
+            code: 408,
+            errorCode: REQUEST_TIMEOUT_ERROR_CODE,
+          }));
+          return;
+        }
+        finish(createFailedApiResultFromError<T>(new Error('Upload was aborted')));
+      };
 
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
+          if (xhr.status === 204 || xhr.status === 205 || xhr.responseText === '') {
+            finish(createEmptySuccess<T>(xhr.status));
+            return;
+          }
           try {
-            const response = normalizeApiResult<T>(JSON.parse(xhr.responseText));
-            resolve(response);
+            const response = normalizeApiResult<T>(JSON.parse(xhr.responseText), xhr.status);
+            finish(response);
           } catch {
-            resolve(createFailedApiResultFromError<T>(
+            finish(createFailedApiResultFromError<T>(
               new Error('Invalid JSON response'),
               { code: xhr.status }
             ));
@@ -284,13 +447,13 @@ export class HttpClient {
           try {
             const raw = JSON.parse(xhr.responseText);
             if (raw && typeof raw === 'object' && ('Code' in raw || 'code' in raw)) {
-              resolve(normalizeApiResult<T>(raw));
+              finish(normalizeApiResult<T>(raw));
               return;
             }
           } catch {
             // Response is not valid JSON or not an ApiResult, create a failed result
           }
-          resolve(createFailedApiResult<T>({
+          finish(createFailedApiResult<T>({
             message: `Upload failed: ${xhr.status} ${xhr.statusText}`,
             code: xhr.status,
           }));
@@ -298,13 +461,13 @@ export class HttpClient {
       };
 
       xhr.onerror = () => {
-        resolve(createFailedApiResultFromError<T>(
+        finish(createFailedApiResultFromError<T>(
           new Error('Network error during upload'),
         ));
       };
 
       xhr.ontimeout = () => {
-        resolve(createFailedApiResult<T>({
+        finish(createFailedApiResult<T>({
           message: `Upload timed out after ${timeoutMs}ms`,
           code: 408,
           errorCode: REQUEST_TIMEOUT_ERROR_CODE,
@@ -349,6 +512,8 @@ export class HttpClient {
         xhr.withCredentials = true;
       }
 
+      signal?.addEventListener('abort', onCallerAbort);
+      armIdleTimer();
       xhr.send(formData);
     });
   }
@@ -370,11 +535,14 @@ export class HttpClient {
    * "Download failed: 401" with no refresh and no redirect.
    */
   async download(url: string, options?: DownloadOptions): Promise<ApiResult<Blob>> {
+    const rejected = rejectDotSegmentPath<Blob>(options?.method ?? 'GET', url);
+    if (rejected) return rejected;
     const result = await this.executeDownload(url, options);
-    if (!this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)) {
-      return result;
-    }
-    return this.recoverUnauthorized(result, () => this.executeDownload(url, options));
+    const settled = this.shouldRecoverUnauthorized(result, options?.skipAuthRefresh)
+      ? await this.recoverUnauthorized(result, () => this.executeDownload(url, options))
+      : result;
+    this.notifyResult(settled, { method: options?.method ?? 'GET', url });
+    return settled;
   }
 
   /**
@@ -457,6 +625,9 @@ export class HttpClient {
       config = await this.config.requestInterceptor(config);
     }
 
+    const rejected = rejectDotSegmentPath<T>(config.method, config.url);
+    if (rejected) return rejected;
+
     // GET deduplication: reuse inflight promise for identical GET URLs.
     //
     // Only signal-free GETs take part. The dedup key is the resolved URL and
@@ -468,21 +639,57 @@ export class HttpClient {
     // into an error state (cancel-then-refetch, as DataQueryController does).
     // Callers that pass a signal are exactly the cancel-and-refetch ones, and
     // they gain nothing from sharing a request anyway.
-    if (method === 'GET' && this.config.deduplicateGets !== false && !config.signal) {
-      const dedupKey = this.buildUrl(config.url, config.params);
+    //
+    // Auth-flow requests (`skipAuthRefresh`) never take part either, in either
+    // direction. The access-profile read issued from inside a token refresh
+    // used to join an ordinary GET of the same URL that was itself waiting on
+    // that refresh: each waited on the other until the 30s refresh timeout
+    // signed the user out. And an ordinary caller joining an auth-flow request
+    // would inherit its "never refresh on 401" handling.
+    if (method === 'GET' && this.config.deduplicateGets !== false && !config.signal && !config.skipAuthRefresh) {
+      const dedupKey = this.buildDedupKey(config);
       const inflight = this._inflightGets.get(dedupKey);
       if (inflight) {
         // Return shallow clone to prevent shared mutation across callers
         return inflight.then(r => ({ ...r })) as Promise<ApiResult<T>>;
       }
 
-      const promise = this.executeWithRetry<T>(config, false);
+      // Observed once here, not per joiner: listeners hear about each request
+      // that went to the network, however many callers shared it.
+      const promise = this.observeResult(config, this.executeWithRetry<T>(config, false));
       this._inflightGets.set(dedupKey, promise as Promise<ApiResult<unknown>>);
       promise.finally(() => this._inflightGets.delete(dedupKey));
       return promise;
     }
 
-    return this.executeWithRetry<T>(config, false);
+    return this.observeResult(config, this.executeWithRetry<T>(config, false));
+  }
+
+  /** Report a JSON request's final result to the result listeners. */
+  private async observeResult<T>(config: RequestConfig, pending: Promise<ApiResult<T>>): Promise<ApiResult<T>> {
+    const result = await pending;
+    this.notifyResult(result, { method: config.method, url: config.url });
+    return result;
+  }
+
+  /**
+   * Two GETs share one network call only when they would send the same
+   * request: same URL and query, same bearer token, same credentials mode, same
+   * per-request headers and timeout. The URL alone is not enough - a GET issued
+   * right after a sign-in or token change would otherwise receive the response
+   * to a request sent with the previous identity.
+   */
+  private buildDedupKey(config: RequestConfig): string {
+    const headers = Object.entries(config.headers ?? {})
+      .map(([name, value]) => [name.toLowerCase(), value] as const)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return JSON.stringify([
+      this.buildUrl(config.url, config.params),
+      this.accessToken ?? '',
+      config.withCredentials === true,
+      config.timeout ?? null,
+      headers,
+    ]);
   }
 
   /**
@@ -495,6 +702,11 @@ export class HttpClient {
     const baseDelay = retryConfig?.baseDelay ?? 1000;
     const retryableStatuses = retryConfig?.retryableStatuses ?? DEFAULT_RETRYABLE_STATUSES;
     const exponentialBackoff = retryConfig?.exponentialBackoff !== false;
+    // A replayed write is worse than a surfaced error: only the configured
+    // (by default read-only) methods are retried at all.
+    const retryMethods = retryConfig?.retryMethods ?? DEFAULT_RETRY_METHODS;
+    const method = config.method.toUpperCase();
+    const methodRetryable = retryMethods.some((m) => m.toUpperCase() === method);
 
     let lastResult: ApiResult<T> | undefined;
 
@@ -504,7 +716,13 @@ export class HttpClient {
         const delay = exponentialBackoff
           ? baseDelay * Math.pow(2, attempt - 1)
           : baseDelay;
-        await this.sleep(delay);
+        await this.sleep(delay, config.signal);
+        // The caller cancelled (during the last attempt, which then reported
+        // the abort as an ordinary failure, or while we were backing off):
+        // never send again, stop with what we have.
+        if (config.signal?.aborted) {
+          return lastResult!;
+        }
       }
 
       lastResult = await this.executeRequest<T>(config);
@@ -519,7 +737,7 @@ export class HttpClient {
 
       // Check if we should retry on other status codes
       const statusCode = lastResult.code;
-      if (attempt < maxRetries && retryableStatuses.includes(statusCode)) {
+      if (attempt < maxRetries && methodRetryable && retryableStatuses.includes(statusCode)) {
         continue;
       }
 
@@ -615,7 +833,7 @@ export class HttpClient {
       }
       return createFailedApiResult<Blob>({ message: fallback, code: response.status });
     } catch {
-      return createFailedApiResult<Blob>({ message: text.slice(0, 500), code: response.status });
+      return createFailedApiResult<Blob>({ message: truncate(text, 500, ''), code: response.status });
     }
   }
 
@@ -730,6 +948,34 @@ export class HttpClient {
   }
 
   /**
+   * Subscribe to the FINAL result of every request this client settles: JSON
+   * requests (after retries and the 401 refresh), uploads and downloads. One
+   * call per request that went to the network; GETs shared by deduplication
+   * report once. Requests the client refuses before sending (dot-segment
+   * paths) are not reported.
+   *
+   * For cross-cutting reactions to a server-wide condition that any endpoint
+   * can answer with, such as the billing gate's 402: the subscriber reads the
+   * envelope and decides. Listeners must not throw (a throwing listener is
+   * logged and skipped) and cannot change the result. Returns an unsubscribe
+   * function.
+   */
+  addResultListener(listener: HttpResultListener): () => void {
+    this._resultListeners.add(listener);
+    return () => this._resultListeners.delete(listener);
+  }
+
+  private notifyResult(result: ApiResult<unknown>, context: HttpResultContext): void {
+    for (const listener of this._resultListeners) {
+      try {
+        listener(result, context);
+      } catch (error) {
+        useLogger().error('Result listener threw:', error);
+      }
+    }
+  }
+
+  /**
    * Trigger the unauthorized handler (deduplicated - only fires once per auth cycle).
    */
   private notifyUnauthorized(): void {
@@ -775,12 +1021,15 @@ export class HttpClient {
         delete (headers as Record<string, string>)['content-type'];
       }
 
+      // `false`, `0` and `''` are bodies too: a `[FromBody] bool` endpoint
+      // must receive `false`, not an empty request. Same rule as download.
+      const hasJsonBody = config.body !== undefined && config.body !== null;
       const response = await fetch(fullUrl, {
         method: config.method,
         headers,
         body: isFormData
           ? (config.body as FormData)
-          : config.body
+          : hasJsonBody
             ? JSON.stringify(config.body)
             : undefined,
         signal: timeout.signal,
@@ -789,10 +1038,20 @@ export class HttpClient {
 
       let data: ApiResult<T>;
       try {
+        // A 2xx that carries no body is a success with nothing to hand back,
+        // not a JSON error. The headers cannot always tell: 204 / 205 and a
+        // declared zero length can, but a chunked empty 200 declares no
+        // length at all. So the body is read as text first and an empty text
+        // counts as no body, the same rule the upload path applies to
+        // `responseText`. Only a body that is there and does not parse is an
+        // "Invalid JSON response".
         // The status goes along with the body: a 4xx/5xx whose JSON body is
         // not an envelope (ProblemDetails, a gateway error page) must not
         // normalise to success just because it parsed.
-        data = normalizeApiResult<T>(await response.json(), response.status);
+        const text = hasNoBody(response) ? '' : await response.text();
+        data = response.ok && text === ''
+          ? createEmptySuccess<T>(response.status)
+          : normalizeApiResult<T>(JSON.parse(text), response.status);
       } catch (parseError) {
         // An abort during body read (timeout or caller cancellation) is not
         // a JSON problem - rethrow and let the outer catch classify it.
@@ -919,10 +1178,25 @@ export class HttpClient {
   }
 
   /**
-   * Sleep for the specified duration in milliseconds
+   * Sleep for the specified duration in milliseconds. Resolves early when
+   * `signal` aborts, so a cancelled request does not sit out its backoff.
    */
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      if (signal?.aborted) {
+        resolve();
+        return;
+      }
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   /**

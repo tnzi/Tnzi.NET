@@ -241,6 +241,40 @@ public class RateLimitHubFilterAnonymousTests
         service.Verify(s => s.ReleaseAnonymousConnectionAsync(It.IsAny<string>()), Times.Never);
     }
 
+    /// <summary>
+    /// ★ 回归：占下名额之后下游（Hub 的 <c>OnConnectedAsync</c>）拒绝连接，SignalR 不会再调用断开回调。
+    /// 此前名额就此漏掉，同一出口 IP 重试若干次后整个分区在计数 TTL 内被拒。
+    /// </summary>
+    [Fact]
+    public async Task AnonymousSlot_IsReleased_WhenTheHubRejectsTheConnection()
+    {
+        var service = PermissiveService();
+        var filter = CreateFilter(service.Object, new RateLimitOptions());
+        using var hub = new TestHub();
+        var context = Lifetime(hub, Anonymous());
+
+        await Should.ThrowAsync<HubException>(() =>
+            filter.OnConnectedAsync(context, _ => throw new HubException("not allowed here")));
+
+        service.Verify(s => s.ReleaseAnonymousConnectionAsync("ip:203.0.113.7"), Times.Once);
+    }
+
+    /// <summary>名额只还一次：即便断开回调之后仍被调用，也不会再还一次。</summary>
+    [Fact]
+    public async Task AnonymousSlot_IsReleasedOnlyOnce()
+    {
+        var service = PermissiveService();
+        var filter = CreateFilter(service.Object, new RateLimitOptions());
+        using var hub = new TestHub();
+        var context = Lifetime(hub, Anonymous());
+
+        await filter.OnConnectedAsync(context, _ => Task.CompletedTask);
+        await filter.OnDisconnectedAsync(context, null, (_, _) => Task.CompletedTask);
+        await filter.OnDisconnectedAsync(context, null, (_, _) => Task.CompletedTask);
+
+        service.Verify(s => s.ReleaseAnonymousConnectionAsync("ip:203.0.113.7"), Times.Once);
+    }
+
     // ---------- 回归：登录用户那条路不变 ----------
 
     [Fact]

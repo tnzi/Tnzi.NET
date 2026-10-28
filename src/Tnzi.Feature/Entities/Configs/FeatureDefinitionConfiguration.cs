@@ -7,13 +7,13 @@ public class FeatureDefinitionConfiguration : EntityTypeConfigurationBase<Featur
 {
     public override void Configure(EntityTypeBuilder<FeatureDefinition> builder)
     {
-        builder.Property(e => e.Name).IsRequired().HasMaxLength(100);
-        builder.Property(e => e.DisplayName).HasMaxLength(200);
-        builder.Property(e => e.Description).HasMaxLength(500);
-        builder.Property(e => e.DefaultValue).HasMaxLength(200);
+        builder.Property(e => e.Name).IsRequired().HasMaxLength(FeatureFieldLimits.Name);
+        builder.Property(e => e.DisplayName).HasMaxLength(FeatureFieldLimits.DisplayName);
+        builder.Property(e => e.Description).HasMaxLength(FeatureFieldLimits.Description);
+        builder.Property(e => e.DefaultValue).HasMaxLength(FeatureFieldLimits.Value);
         builder.Property(e => e.ValueType).IsRequired();
-        builder.Property(e => e.ParentName).HasMaxLength(100);
-        builder.Property(e => e.Group).HasMaxLength(50);
+        builder.Property(e => e.ParentName).HasMaxLength(FeatureFieldLimits.Name);
+        builder.Property(e => e.Group).HasMaxLength(FeatureFieldLimits.Group);
 
         // Unique index on Name with soft delete filter
         builder.HasIndex(e => e.Name).IsUnique()

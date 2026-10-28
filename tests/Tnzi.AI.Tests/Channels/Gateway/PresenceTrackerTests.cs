@@ -1,4 +1,5 @@
 using Tnzi.AI.Channels.Gateway;
+using Tnzi.AI.Channels.Gateway.Events;
 using Tnzi.AI.Channels.Gateway.Models;
 
 namespace Tnzi.AI.Tests.Channels.Gateway;
@@ -111,5 +112,57 @@ public class PresenceTrackerTests
         // Assert
         var connections = _tracker.GetConnections();
         connections.Count.ShouldBe(100);
+    }
+
+    // The tracking API is synchronous, so the publish is not awaited; a publish that fails
+    // asynchronously must still leave a trace instead of vanishing with the discarded task.
+    [Fact]
+    public async Task TrackAndRemove_PublishFailsAsynchronously_IsLogged()
+    {
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(b => b.PublishAsync(It.IsAny<GatewayClientConnectedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(FailLaterAsync());
+        eventBus
+            .Setup(b => b.PublishAsync(It.IsAny<GatewayClientDisconnectedEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(FailLaterAsync());
+        var logger = new WarningCounter();
+        var tracker = new DefaultPresenceTracker(logger, eventBus.Object);
+
+        tracker.TrackConnection(CreateConnection("conn-1"));
+        tracker.RemoveConnection("conn-1");
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (logger.Warnings < 2 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        logger.Warnings.ShouldBe(2);
+    }
+
+    private static async Task FailLaterAsync()
+    {
+        await Task.Yield();
+        throw new InvalidOperationException("broker unavailable");
+    }
+
+    private sealed class WarningCounter : ILogger<DefaultPresenceTracker>
+    {
+        private int _warnings;
+
+        public int Warnings => Volatile.Read(ref _warnings);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning && exception is not null)
+            {
+                Interlocked.Increment(ref _warnings);
+            }
+        }
     }
 }

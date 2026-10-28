@@ -46,9 +46,7 @@ public class ToolErrorRecoveryMiddleware : IAiMiddleware, IToolExecutionMiddlewa
         }
         catch (Exception ex)
         {
-            var errorDetail = ex.Message.Length > MaxErrorDetailLength
-                ? ex.Message[..MaxErrorDetailLength] + "..."
-                : ex.Message;
+            var errorDetail = ex.Message.Truncate(MaxErrorDetailLength);
             var recoveredError = $"{ex.GetType().Name}: {errorDetail}";
 
             _logger.LogError(ex, "Tool '{ToolName}' execution failed, injecting recoverable tool result", context.ToolName);

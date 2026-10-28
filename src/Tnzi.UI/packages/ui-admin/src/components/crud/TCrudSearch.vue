@@ -64,10 +64,11 @@ import type { FormSchemaItem } from '@tnzi/ui'
 /**
  * Minimum slice of `UseCrudPageReturn` that the search panel needs.
  * Decouples search from `T` / `TId` generics - the panel only writes back
- * `searchText` (string) and `filters` (Record<string, unknown>).
+ * `searchText` (string) and `filters` (Record<string, unknown>). It reads
+ * `filters` too, so the advanced form opens on the filters in effect.
  */
 export interface SearchableState {
-  query: Ref<{ searchText: string }>
+  query: Ref<{ searchText: string; filters?: Record<string, unknown> }>
   setSearch: (text: string) => void
   setFilters: (filters: Record<string, unknown>) => void
   refresh: () => Promise<void>

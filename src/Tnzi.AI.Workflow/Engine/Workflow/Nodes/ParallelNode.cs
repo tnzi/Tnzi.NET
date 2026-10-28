@@ -39,9 +39,9 @@ public class ParallelNode : IWorkflowNode
             };
         }
 
-        // 收集输入
+        // 收集输入（数据，不做模板替换）；步骤指令是模板，在分发给 worker 之前替换一次
         var inputText = WorkflowNodeHelper.CollectInput(context);
-        inputText = state.ResolveTemplate(inputText);
+        var instructions = WorkflowNodeHelper.ResolveInstructions(step, state);
 
         // 并行执行所有 worker，每个 worker 独立创建作用域避免共享 Scoped 服务（如 DbContext）
         var tasks = workers.Select(async worker =>
@@ -54,7 +54,7 @@ public class ParallelNode : IWorkflowNode
                 {
                     Provider = step.Provider,
                     Model = step.Model,
-                    Instructions = step.Instructions
+                    Instructions = instructions
                 };
 
                 // 如果 worker 指定了 agentId，从 worker scope 获取 AgentRepository 加载 Agent 定义

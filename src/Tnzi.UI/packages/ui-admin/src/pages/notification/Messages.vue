@@ -139,9 +139,9 @@
             :bordered="false"
           />
           <p v-if="reportTruncated" class="nm-report__truncated">
-            {{ t('report.truncated', { shown: REPORT_ROW_CAP, total: report!.recipients.length }) }}
+            {{ t('report.truncated', { shown: reportRows.length, total: report!.totalRecipients }) }}
           </p>
-          <TEmpty v-else-if="!reportLoading" :text="reportError ?? t('report.empty')" />
+          <TEmpty v-else-if="!reportLoading && reportRows.length === 0" :text="reportError ?? t('report.empty')" />
         </NSpin>
       </div>
     </template>
@@ -243,8 +243,10 @@ async function resendMessage(row: NotificationInfo): Promise<void> {
   try {
     await bridge.messages.send(id)
     await crud.refresh()
-  } catch {
-    // Error surfaced by useCrudPage or shown inline; swallow here to unblock UI
+  } catch (err) {
+    // The bridge throws the server's refusal (cancelled, forbidden, ...); only
+    // it can say why, and without it a refused resend reads as done.
+    message.error(errorText(err))
   } finally {
     const next = new Set(resendingIds.value)
     next.delete(id)
@@ -258,15 +260,25 @@ async function batchResend(ids: Array<string | number>): Promise<void> {
   try {
     // Backend's send endpoint is per-id - fan out sequentially so partial
     // failures don't poison the whole batch (admin can re-trigger the rest).
+    let sent = 0
+    let firstError: unknown = null
     for (const id of ids) {
       try {
         await bridge.messages.send(String(id))
-      } catch {
-        // Swallow per-id error; the UI will reflect remaining failed status
-        // on the next refresh.
+        sent++
+      } catch (err) {
+        firstError ??= err
       }
     }
     await crud.refresh()
+    // Say how many went: "all resent" would be a lie for a partial batch, and
+    // the first refusal says why the rest did not (usually the same reason).
+    const summary = t('actions.batchResendResult', { n: sent, total: ids.length })
+    if (firstError === null) message.success(summary)
+    else {
+      message.warning(summary)
+      message.error(errorText(firstError))
+    }
   } finally {
     batchResending.value = false
   }
@@ -345,6 +357,10 @@ function errorText(err: unknown): string {
  * ★ 一次群发可以有几千个收件人，而这是一个抽屉不是一个页面。整份渲染出来会让抽屉
  * 卡住，且没人会往下滚三千行 —— 报告要回答的是「哪些人、为什么」，失败的那些排在最前
  * 就已经答完了。超出部分明说被截断，**不装作这就是全部**。
+ *
+ * ★ 服务端本身就只回前 200 行（同一排序），计数却覆盖全部收件人：截断与否看
+ * `totalRecipients` 比实际拿到的行数多不多，不能看 `recipients.length`：那在服务端截断之后恒不超过上限，
+ * 提示永远不会出现。这里的上限与排序留作兜底。
  */
 const REPORT_ROW_CAP = 200
 
@@ -356,7 +372,7 @@ const reportRows = computed<RecipientOutput[]>(() => {
   return [...all].sort((a, b) => rank(a) - rank(b)).slice(0, REPORT_ROW_CAP)
 })
 
-const reportTruncated = computed(() => (report.value?.recipients?.length ?? 0) > REPORT_ROW_CAP)
+const reportTruncated = computed(() => (report.value?.totalRecipients ?? 0) > reportRows.value.length)
 
 const t = makePageTranslator('notification.messages')
 

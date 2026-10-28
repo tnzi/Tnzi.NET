@@ -16,24 +16,27 @@ function clientWith(handlers: { get?: unknown; post?: unknown }) {
 }
 
 describe('identity-bridge invitationAcceptance', () => {
-  it('preview returns the preview payload for a usable token', async () => {
-    const bridge = createIdentityBridge({
-      client: clientWith({
-        get: async () => ({ succeeded: true, code: 200, data: { userName: 'newhire', maskedEmail: 'n***@example.com', expiresAt: '2026-09-19T00:00:00Z' } }),
-      }),
+  // The token travels in the body of POST invitations/preview: a request path is
+  // written to request and access logs, and previewing does not consume the token.
+  it('preview returns the preview payload for a usable token, sending the token in the body', async () => {
+    const client = clientWith({
+      post: async () => ({ succeeded: true, code: 200, data: { userName: 'newhire', maskedEmail: 'n***@example.com', expiresAt: '2026-09-19T00:00:00Z' } }),
     })
+    const bridge = createIdentityBridge({ client })
     const preview = await bridge.invitationAcceptance.preview('tok')
     expect(preview?.userName).toBe('newhire')
+    expect((client as unknown as { post: ReturnType<typeof vi.fn> }).post).toHaveBeenCalledWith('/invitations/preview', { token: 'tok' })
+    expect((client as unknown as { get: ReturnType<typeof vi.fn> }).get).not.toHaveBeenCalled()
   })
 
   it('preview answers null for a dead link and for a dead network - one situation to the invitee', async () => {
     const refused = createIdentityBridge({
-      client: clientWith({ get: async () => ({ succeeded: false, code: 404, message: 'Invalid or expired invitation.' }) }),
+      client: clientWith({ post: async () => ({ succeeded: false, code: 404, message: 'Invalid or expired invitation.' }) }),
     })
     await expect(refused.invitationAcceptance.preview('tok')).resolves.toBeNull()
 
     const down = createIdentityBridge({
-      client: clientWith({ get: async () => { throw new Error('network down') } }),
+      client: clientWith({ post: async () => { throw new Error('network down') } }),
     })
     await expect(down.invitationAcceptance.preview('tok')).resolves.toBeNull()
   })

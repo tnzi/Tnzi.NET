@@ -2,11 +2,14 @@
 /**
  * TMessageAttachments - Attachment display
  *
- * Renders image thumbnails and file badges for message attachments.
+ * Renders image thumbnails and file cards for message attachments: ones still in memory
+ * (just sent, carrying their data) and stored ones (an `attachmentId`, read through the
+ * render context's resolver).
  */
 
-import { Icon } from '@iconify/vue';
 import type { MessageAttachment } from '../../headless/useChat';
+import TAttachmentImage from './TAttachmentImage.vue';
+import TFileCard from './TFileCard.vue';
 
 defineProps<{
   attachments: MessageAttachment[];
@@ -18,50 +21,34 @@ function isImage(attachment: MessageAttachment): boolean {
   return false;
 }
 
-function getImageSrc(attachment: MessageAttachment): string {
+/** An image at hand: its data, or a URL the browser can load. Null for a stored one. */
+function getImageSrc(attachment: MessageAttachment): string | null {
   if (attachment.base64Data && attachment.mediaType) {
     return `data:${attachment.mediaType};base64,${attachment.base64Data}`;
   }
-  return attachment.url ?? '';
+  return attachment.url ?? null;
 }
 
-function getFileIcon(attachment: MessageAttachment): string {
-  const name = attachment.fileName?.toLowerCase() ?? '';
-  if (name.endsWith('.pdf')) return 'lucide:file-text';
-  if (name.endsWith('.zip') || name.endsWith('.rar') || name.endsWith('.7z')) return 'lucide:file-archive';
-  if (name.endsWith('.csv') || name.endsWith('.xlsx') || name.endsWith('.xls')) return 'lucide:file-spreadsheet';
-  return 'lucide:file';
-}
 </script>
 
 <template>
   <div class="flex flex-wrap gap-2">
-    <template v-for="(attachment, index) in attachments" :key="index">
-      <!-- Image thumbnail -->
-      <div
+    <template v-for="(attachment, index) in attachments" :key="attachment.attachmentId ?? index">
+      <TAttachmentImage
         v-if="isImage(attachment)"
-        class="relative overflow-hidden rounded-lg border border-tnzi-border"
-      >
-        <img
-          :src="getImageSrc(attachment)"
-          :alt="attachment.fileName ?? 'Image'"
-          class="h-20 w-20 object-cover"
-          loading="lazy"
-        />
-      </div>
-
-      <!-- File badge -->
-      <div
+        :attachment-id="attachment.attachmentId"
+        :src="getImageSrc(attachment)"
+        :alt="attachment.fileName ?? 'Image'"
+      />
+      <TFileCard
         v-else
-        class="flex items-center gap-2 rounded-lg border border-tnzi-border bg-tnzi-layout/50 px-3 py-2"
-      >
-        <Icon :icon="getFileIcon(attachment)" class="size-4 shrink-0 text-tnzi-muted" />
-        <div class="min-w-0">
-          <div class="truncate text-sm font-medium">
-            {{ attachment.fileName ?? 'File' }}
-          </div>
-        </div>
-      </div>
+        :file="{
+          name: attachment.fileName,
+          mediaType: attachment.mediaType,
+          size: attachment.size,
+          attachmentId: attachment.attachmentId,
+        }"
+      />
     </template>
   </div>
 </template>

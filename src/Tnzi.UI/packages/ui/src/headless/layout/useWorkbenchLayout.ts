@@ -84,24 +84,27 @@ function clearPersisted(key: string): void {
 
 /**
  * Re-sort the widget array per a persisted id sequence. Pinned widgets
- * (defined order) are always honoured first; remaining widgets follow
- * the persisted id sequence, with any id not in `persistedOrder`
- * appended in declaration order so newly-added widgets stay visible.
+ * keep their declared slots (the same slots they hold before any order is
+ * saved); the remaining slots are filled by the movable widgets in the
+ * persisted id sequence, with any id not in `persistedOrder` appended in
+ * declaration order so newly-added widgets stay visible.
  */
 function applyOrder(widgets: WidgetDef[], persistedOrder: string[] | null): WidgetDef[] {
   if (!persistedOrder || persistedOrder.length === 0) return [...widgets]
   const byId = new Map(widgets.map((w) => [w.id, w]))
-  const pinned = widgets.filter((w) => w.pinned)
-  const pinnedIds = new Set(pinned.map((w) => w.id))
-  const fromPersisted: WidgetDef[] = []
+  const movable: WidgetDef[] = []
+  const placed = new Set<string>()
   for (const id of persistedOrder) {
-    if (pinnedIds.has(id)) continue
     const w = byId.get(id)
-    if (w) fromPersisted.push(w)
+    if (!w || w.pinned || placed.has(id)) continue
+    movable.push(w)
+    placed.add(id)
   }
-  const seen = new Set([...pinnedIds, ...fromPersisted.map((w) => w.id)])
-  const appended = widgets.filter((w) => !seen.has(w.id))
-  return [...pinned, ...fromPersisted, ...appended]
+  for (const w of widgets) {
+    if (!w.pinned && !placed.has(w.id)) movable.push(w)
+  }
+  let next = 0
+  return widgets.map((w) => (w.pinned ? w : movable[next++]!))
 }
 
 export function useWorkbenchLayout(
@@ -141,13 +144,8 @@ export function useWorkbenchLayout(
     clearPersisted(resolvedKey.value)
   }
 
-  // When draggable toggles off mid-session, fall back to declaration order.
-  watch(
-    () => options.draggable.value,
-    (on) => {
-      if (!on) persistedOrder.value = null
-    },
-  )
+  // Turning `draggable` off shows declaration order through `orderedWidgets`
+  // alone; the saved order is kept so turning it back on restores it.
 
   return { orderedWidgets, setOrder, resetOrder }
 }

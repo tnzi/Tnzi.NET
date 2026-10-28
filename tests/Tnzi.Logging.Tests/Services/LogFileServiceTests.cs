@@ -194,6 +194,79 @@ public sealed class LogFileServiceTests : IDisposable
         result.Data.Truncated.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// ★ 搜索必须能读 Serilog 正在写的那个文件：<c>shared: true</c> 的文件 sink 常驻持有当天日志的写句柄，
+    /// 而按修改时间倒序扫描时第一个打开的恰恰就是它。<c>FileInfo.OpenRead</c> 只给 <c>FileShare.Read</c>，
+    /// 在 Windows 上对一个已有写句柄的文件必然共享冲突，整次搜索 500，偏偏是最需要搜的当天日志。
+    /// </summary>
+    [Fact]
+    public async Task Search_ReadsAFileThatIsHeldOpenForWriting()
+    {
+        var path = WriteLog("Information", "log-20260101.txt", "starting", "a NullReferenceException here");
+        using var writer = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+
+        var result = await _service.SearchAsync("nullreferenceexception", level: "Information");
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Hits.ShouldHaveSingleItem().LineNumber.ShouldBe(2);
+    }
+
+    /// <summary>Tail 走的是同一种共享读（对照组：它此前就是对的）。</summary>
+    [Fact]
+    public async Task Tail_ReadsAFileThatIsHeldOpenForWriting()
+    {
+        var path = WriteLog("Information", "log-20260101.txt", "one", "two");
+        using var writer = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+
+        var result = await _service.TailAsync("Information", "log-20260101.txt", 10);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Lines.ShouldBe(["one", "two"]);
+    }
+
+    /// <summary>
+    /// 分级目录是「≥ 该级别」：一条 Error 同时写进 Information、Warning、Error 三个目录。
+    /// 不指定级别的检索此前逐目录扫描、每处命中都计入，同一行返回三次，结果上限被重复挤占。
+    /// </summary>
+    [Fact]
+    public async Task Search_WithoutALevel_ReturnsALineWrittenToSeveralLevelDirectoriesOnce()
+    {
+        const string errorLine = "2026-01-01 10:00:00.123 [ERR] a NullReferenceException here";
+        WriteLog("Information", "log-20260101.txt", "2026-01-01 09:59:59.000 [INF] starting", errorLine);
+        WriteLog("Warning", "log-20260101.txt", errorLine);
+        WriteLog("Error", "log-20260101.txt", errorLine);
+
+        var result = await _service.SearchAsync("nullreferenceexception");
+
+        result.Data!.Hits.ShouldHaveSingleItem().Line.ShouldBe(errorLine);
+    }
+
+    [Fact]
+    public async Task Search_WithoutALevel_KeepsALineThatOnlyAHigherLevelStillRetains()
+    {
+        // Error 目录保留得比 Information 久：只在 Error 目录里还在的那一天不能被当成重复丢掉
+        WriteLog("Information", "log-20260301.txt", "2026-03-01 [ERR] boom recent");
+        WriteLog("Error", "log-20260301.txt", "2026-03-01 [ERR] boom recent");
+        WriteLog("Error", "log-20260101.txt", "2026-01-01 [ERR] boom old");
+
+        var result = await _service.SearchAsync("boom");
+
+        result.Data!.Hits.Select(h => h.Line).OrderBy(l => l, StringComparer.Ordinal)
+            .ShouldBe(["2026-01-01 [ERR] boom old", "2026-03-01 [ERR] boom recent"]);
+    }
+
+    [Fact]
+    public async Task Search_WithALevel_StillReturnsThatDirectorysCopy()
+    {
+        const string errorLine = "2026-01-01 10:00:00.123 [ERR] a NullReferenceException here";
+        WriteLog("Information", "log-20260101.txt", errorLine);
+        WriteLog("Error", "log-20260101.txt", errorLine);
+
+        var result = await _service.SearchAsync("nullreferenceexception", level: "Error");
+
+        result.Data!.Hits.ShouldHaveSingleItem().Level.ShouldBe("Error");
+    }
+
     [Fact]
     public async Task Search_RequiresAKeyword()
     {

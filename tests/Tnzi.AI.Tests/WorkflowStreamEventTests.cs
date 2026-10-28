@@ -126,6 +126,50 @@ public class WorkflowStreamEventTests
         body.ShouldContain("\"isDone\":true");
     }
 
+    [Fact]
+    public async Task WorkflowAdminController_RunStreaming_FirstEventIsStartedWithTheExecutionId()
+    {
+        var workflowId = Guid.NewGuid();
+        var mockService = new Mock<IWorkflowService>();
+        mockService
+            .Setup(s => s.RunStreamingAsync(workflowId, "input", null, It.IsAny<CancellationToken>()))
+            .Returns(CreateStartedThenCompleted());
+
+        var controller = new TestWorkflowAdminController(mockService.Object);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers.Accept = "application/x-ndjson";
+        httpContext.Response.Body = new MemoryStream();
+        httpContext.RequestServices = new ServiceCollection().BuildServiceProvider();
+        controller.ControllerContext = new ControllerContext { HttpContext = httpContext };
+
+        await controller.RunStreaming(workflowId, new RunWorkflowRequestDto { Input = "input" });
+
+        httpContext.Response.Body.Position = 0;
+        var lines = (await new StreamReader(httpContext.Response.Body).ReadToEndAsync())
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+        var started = JsonDocument.Parse(lines[0]).RootElement;
+        started.GetProperty("eventType").GetString().ShouldBe("started");
+        started.GetProperty("executionId").GetString().ShouldBe("wf-started-001");
+        started.GetProperty("isDone").GetBoolean().ShouldBeFalse();
+        lines[^1].ShouldContain("\"eventType\":\"completed\"");
+    }
+
+    private static async IAsyncEnumerable<WorkflowExecutionResultDto> CreateStartedThenCompleted()
+    {
+        yield return new WorkflowExecutionResultDto { ExecutionId = "wf-started-001", Status = "Running" };
+
+        await Task.Yield();
+
+        yield return new WorkflowExecutionResultDto
+        {
+            ExecutionId = "wf-started-001",
+            Output = "final output",
+            Status = "Completed",
+            StepResults = [new WorkflowStepResultDto { StepId = "final", Output = "final output" }]
+        };
+    }
+
     private static async IAsyncEnumerable<WorkflowExecutionResultDto> CreateResults()
     {
         yield return new WorkflowExecutionResultDto

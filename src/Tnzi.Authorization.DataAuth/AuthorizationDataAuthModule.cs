@@ -51,6 +51,11 @@ public class AuthorizationDataAuthModule : TnziApplicationModule
 
         services.AddScoped<IDataAuthService, DataAuthService>();
 
+        // 角色成员一变（含删除角色：Identity 为每个成员各发一条），作废该用户缓存着的过滤表达式。
+        // 表达式按角色集编译、缓存键里没有角色集，不订阅这条事件，被摘掉的角色在缓存期内照样放出它的行。
+        // 框架程序集必须手动注册事件处理器。
+        services.AddEventHandler<UserRolesChangedEvent, UserRolesChangedDataFilterCacheHandler>();
+
         // 权限码随模块走：不加载本模块的宿主永远不会 seed 这 4 个码。
         // 码串与拆分前逐字相同，父组仍是 Authorization 声明的 authorization。
         services.AddTransient<IPermissionDefinitionProvider, AuthorizationDataAuthPermissions>();

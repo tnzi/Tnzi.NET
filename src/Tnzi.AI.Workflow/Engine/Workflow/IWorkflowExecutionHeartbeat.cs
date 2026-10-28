@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Workflow.Engine;
 
 /// <summary>
-/// 执行中的心跳：引擎在 <see cref="WorkflowEngine.ExecuteAsync"/> 运行的整个期间按 <see cref="Interval"/>
+/// 执行中的心跳：引擎在 <see cref="WorkflowEngine.ExecuteAsync(WorkflowGraph, string, IServiceProvider, WorkflowExecutionOptions, WorkflowUsageMeter, CancellationToken)"/> 运行的整个期间按 <see cref="Interval"/>
 /// 周期调用 <see cref="BeatAsync"/>，证明这个执行实例还活着。
 /// </summary>
 /// <remarks>

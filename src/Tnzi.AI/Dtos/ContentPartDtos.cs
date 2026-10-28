@@ -7,6 +7,7 @@ namespace Tnzi.AI.Dtos;
 [JsonDerivedType(typeof(TextContentPartDto), "text")]
 [JsonDerivedType(typeof(ImageContentPartDto), "image")]
 [JsonDerivedType(typeof(FileContentPartDto), "file")]
+[JsonDerivedType(typeof(DocumentContentPartDto), "document")]
 public abstract class ContentPartDto
 {
     // Type discriminator is handled automatically by [JsonPolymorphic] attribute.
@@ -39,11 +40,43 @@ public class ImageContentPartDto : ContentPartDto
     /// <summary>Media type (e.g. image/png, image/jpeg)</summary>
     [MaxLength(100)]
     public string? MediaType { get; set; }
+
+    /// <summary>Original file name, shown with the message when the attachment is stored</summary>
+    [MaxLength(500)]
+    public string? FileName { get; set; }
+}
+
+/// <summary>
+/// 文档内容部分（内联 Base64）。目前接受的只有 PDF（<c>application/pdf</c>）。
+/// </summary>
+/// <remarks>
+/// 与 <see cref="FileContentPartDto"/> 的区别：那个引用 Storage 里的文件（默认解析器不加载它），
+/// 这个把文档字节随请求带来。内建引擎把它作为数据内容交给提供商（提供商不支持时以错误结束，不会被丢掉）；
+/// 绑了外部 CLI 运行时的 Agent 把它作为 PDF 文档块交给 CLI，并随消息存档。
+/// </remarks>
+public class DocumentContentPartDto : ContentPartDto
+{
+    /// <summary>Base64 encoded document data (a <c>data:</c> URI is accepted as well)</summary>
+    [Required]
+    public string Base64Data { get; set; } = string.Empty;
+
+    /// <summary>Media type, <c>application/pdf</c></summary>
+    [MaxLength(100)]
+    public string? MediaType { get; set; }
+
+    /// <summary>Original file name, shown with the message</summary>
+    [MaxLength(500)]
+    public string? FileName { get; set; }
 }
 
 /// <summary>
 /// 文件内容部分（引用 Storage 模块的文件）
 /// </summary>
+/// <remarks>
+/// ★ 框架默认的 <c>IAgentResolver</c> <b>不加载</b>文件内容：带这种内容块的请求以 501
+/// （<c>AI_UNSUPPORTED_MEDIA_TYPE</c>）失败，而不是把一行文件名交给一个看不到文件的模型。
+/// 图片走 <see cref="ImageContentPartDto"/>；要支持文件引用，替换 <c>IAgentResolver</c>。
+/// </remarks>
 public class FileContentPartDto : ContentPartDto
 {
     /// <summary>File ID from storage module</summary>

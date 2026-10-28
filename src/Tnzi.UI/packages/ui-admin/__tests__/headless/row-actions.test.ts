@@ -127,6 +127,15 @@ describe('built-in action factories', () => {
     expect((state as unknown as { handleDelete: ReturnType<typeof vi.fn> }).handleDelete).toHaveBeenCalledWith(['42'])
   })
 
+  it('a refused delete settles the row action: handleDelete has already reported it', async () => {
+    // The row action's result is fired and forgotten (`void a.onClick(row)`), so
+    // a rejection here would surface as an unhandled rejection on every refused
+    // delete, on top of the toast handleDelete already showed.
+    const state = makeState()
+    ;(state as unknown as { handleDelete: ReturnType<typeof vi.fn> }).handleDelete.mockRejectedValueOnce(new Error('In use'))
+    await expect(Promise.resolve(deleteAction<Row>(state).onClick?.({ id: '42' }))).resolves.toBeUndefined()
+  })
+
   it('factory opts override the defaults', () => {
     const state = makeState()
     const custom = vi.fn()

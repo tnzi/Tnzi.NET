@@ -30,6 +30,31 @@ public class ChunkedUploadIntegrityTests : WorkspaceIntegrationTestBase
         Assert.Equal("abcdef", await reader.ReadToEndAsync());
     }
 
+    /// <summary>
+    /// ★★ 每片只读一次：哈希在复制进合并文件的同时算出。此前开着 MD5 校验（默认开）时每片下载两遍，
+    /// 先整片下载算哈希、再下载一遍复制；在对象存储上就是两倍的出口流量，而分片通道恰恰是给超大文件用的。
+    /// </summary>
+    [Fact]
+    public async Task CompleteChunkedUpload_DownloadsEachChunkOnce_WhileStillVerifyingIt()
+    {
+        var recording = new RecordingFileStorage(Storage);
+        var service = new FileChunkUploadService(
+            Repo<FileUploadSession>(), Repo<FileChunk>(), Repo<FileRecord>(), recording,
+            new StaticOptionsMonitor<StorageOptions>(StorageOptions), ServiceProvider, Guard(StorageOptions),
+            UnlimitedStorageQuota.Instance, Repo<FileFolder>());
+        var session = (await service.InitiateChunkedUploadAsync("once.txt", 6, 3)).Data!;
+        await service.UploadChunkAsync(session.Id, 0, new MemoryStream("abc"u8.ToArray()));
+        await service.UploadChunkAsync(session.Id, 1, new MemoryStream("def"u8.ToArray()));
+        var chunkPaths = DbContext.FileChunks.Where(c => c.UploadSessionId == session.Id).Select(c => c.ChunkPath!).ToList();
+
+        var result = await service.CompleteChunkedUploadAsync(session.Id);
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(2, chunkPaths.Count);
+        foreach (var path in chunkPaths)
+            Assert.Equal(1, recording.DownloadedPaths.Count(p => p == path));
+    }
+
     [Fact]
     public async Task CompleteChunkedUpload_WithCorruptedChunk_FailsValidation()
     {

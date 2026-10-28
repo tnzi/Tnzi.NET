@@ -25,7 +25,10 @@ internal static class EntityRegistrationHelper
         if (entityManager != null)
         {
             var contextType = dbContext.GetType();
-            var registers = entityManager.GetEntityRegisters(contextType);
+
+            // 主次决定未指定上下文的实体进不进这个模型（规则见 PrimaryDbContextResolver）；
+            // 从上下文实例判定，设计期工厂写在 options 上的标记也在这里被读到。
+            var registers = entityManager.GetEntityRegisters(contextType, PrimaryDbContextResolver.IsPrimary(dbContext));
             var logger = DbContextServiceResolver.GetLogger(dbContext);
 
             foreach (var register in registers)

@@ -60,6 +60,15 @@ public sealed record CliProviderDescriptor
     public IReadOnlyList<string> LaunchArgs { get; init; } = [];
 
     /// <summary>
+    /// 权限档位不是 <see cref="CliPermissionMode.Full"/> 时代替 <see cref="LaunchArgs"/> 的启动参数。null = 与 <see cref="LaunchArgs"/> 相同。
+    /// </summary>
+    /// <remarks>
+    /// 给那些在 <see cref="LaunchArgs"/> 里带着「一律自动批准」开关的 ACP CLI 用（qoder 的 <c>--yolo</c>、grok 的 <c>--always-approve</c>）：
+    /// 带着它，CLI 从不发 <c>session/request_permission</c>，档位无从落实。整列替换而不是删掉一个开关，是因为开关在子命令之间的位置有讲究。
+    /// </remarks>
+    public IReadOnlyList<string>? LaunchArgsWithoutAutoApproval { get; init; }
+
+    /// <summary>
     /// 该 provider 原生读取的记忆文件名，如 <c>CLAUDE.md</c> / <c>AGENTS.md</c> / <c>QWEN.md</c>。
     /// 空 = 不写文件，改为内联进 system prompt。
     /// </summary>
@@ -79,8 +88,32 @@ public sealed record CliProviderDescriptor
     /// <remarks>
     /// 默认 <c>false</c> = <b>fail-closed</b>：分不清就不做 fresh-session 重试，绝不猜。
     /// 猜错的代价是丢掉一整段可恢复的会话上下文并重跑一次任务 —— 比多报一次失败严重得多。
+    /// <para>
+    /// 读者是 stream-json 适配器：它判「被拒」靠的是对内置 provider 实测出来的 stderr 短语与
+    /// 「非零退出 + 0 轮 + 0 成本」的佐证，只对声明了这一位的 provider 使用。ACP 适配器不读它：
+    /// 那里只在 JSON-RPC 错误明说会话不存在时置位，本身就是正面证据。
+    /// </para>
     /// </remarks>
     public bool ResumeRejectionDetectable { get; init; }
+
+    /// <summary>
+    /// 该 provider 能否随提示接收附件（PNG / JPEG / GIF / WebP 图片与 PDF 文档，作为内容块投递）。
+    /// </summary>
+    /// <remarks>
+    /// 默认 <c>false</c>：带附件的消息发给不支持的 provider 时当场以 415 拒绝，而不是只把文字发出去：
+    /// 那样的回合看上去和成功一模一样，模型照样作答，用户以为它看到了附件。只对实测过的 provider 打开。
+    /// </remarks>
+    public bool AcceptsAttachments { get; init; }
+
+    /// <summary>
+    /// 该 provider 能否从会话里的某个条目处截断续接（claude：<c>--resume-session-at &lt;条目&gt; --fork-session</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 编辑与重新生成要丢掉会话里最近的几轮。能截断的 provider 从被保留的最后一轮处分叉出新会话，
+    /// 被替换的轮次就不在 agent 的记忆里了；不能截断的开一个新会话，并在这一轮的上下文里说明之前的对话已不可用。
+    /// 默认 <c>false</c>：只对实测过的 provider 打开。
+    /// </remarks>
+    public bool SupportsResumeAtEntry { get; init; }
 
     /// <summary>禁止用户 custom args 覆盖的参数（协议契约参数）。</summary>
     public IReadOnlyDictionary<string, BlockedArgMode> BlockedArgs { get; init; }
@@ -109,9 +142,45 @@ public sealed record CliProviderDescriptor
 
     /// <summary>
     /// 重定向整个配置目录的环境变量名（claude：<c>CLAUDE_CONFIG_DIR</c>）。
-    /// 空 = 不支持 <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/>。
+    /// 空 = 不支持 <see cref="CliUserConfigIsolation.IsolatedConfigDirectory"/> 及之后的几档。
     /// </summary>
     public string? ConfigDirectoryEnvironmentVariable { get; init; }
+
+    /// <summary>
+    /// <see cref="CliUserConfigIsolation.ProvidedConfigDirectory"/> 时给出项目目录名的环境变量（claude：<c>CLAUDE_CODE_PROJECT_DIR_NAME</c>）。
+    /// 空 = 不支持按名字固定项目目录。
+    /// </summary>
+    public string? ProjectDirectoryNameEnvironmentVariable { get; init; }
+
+    /// <summary>
+    /// 一个会话在配置目录里留下的记录，相对配置目录的路径模板（<c>{project}</c> = 项目目录名，<c>{session}</c> = 会话 id）。
+    /// 删除线程时按会话 id 删掉它们；文件与目录都可以，不存在的跳过。空 = 不知道记录在哪里，不删。
+    /// </summary>
+    public IReadOnlyList<string> SessionStorePaths { get; init; } = [];
+
+    /// <summary>以文件给出追加系统提示的参数（claude：<c>--append-system-prompt-file</c>）。空 = 不支持。</summary>
+    /// <remarks>
+    /// 工作目录是用户提供的时，框架不往里面写记忆文件，agent 说明经它投递；不支持的 provider 把说明内联进新会话的第一条提示。
+    /// </remarks>
+    public string? AppendSystemPromptFileArg { get; init; }
+
+    /// <summary>附加目录的参数（claude：<c>--add-dir</c>，每个目录一次）。空 = 不支持。</summary>
+    /// <remarks>
+    /// 工作目录是用户提供的时，技能物化在运行目录里、经它交给 CLI；不支持的 provider 在这种工作目录里不物化技能。
+    /// </remarks>
+    public string? AddDirectoryArg { get; init; }
+
+    /// <summary>限定内置工具的参数（claude：<c>--tools</c>，取值逗号分隔，空串 = 不开任何内置工具）。空 = 不支持。</summary>
+    public string? BuiltInToolsArg { get; init; }
+
+    /// <summary>选择设置来源的参数（claude：<c>--setting-sources</c>，取值逗号分隔）。空 = 不支持。</summary>
+    public string? SettingSourcesArg { get; init; }
+
+    /// <summary>以 JSON 给出附加设置的参数（claude：<c>--settings</c>）。空 = 不支持。</summary>
+    public string? SettingsArg { get; init; }
+
+    /// <summary>附加设置里表示会话记录保留天数的键（claude：<c>cleanupPeriodDays</c>）。空 = 不支持。</summary>
+    public string? SessionRetentionSettingName { get; init; }
 
     /// <summary>部署级的个人配置隔离档位。</summary>
     public CliUserConfigIsolation UserConfigIsolation { get; init; } = CliUserConfigIsolation.ExcludeUserSettings;
@@ -133,4 +202,21 @@ public sealed record CliProviderDescriptor
 
     /// <summary>部署级默认追加参数，先于每 agent 的自定义参数。</summary>
     public IReadOnlyList<string> ExtraArgs { get; init; } = [];
+
+    /// <summary>
+    /// 这个部署接受的最低 CLI 版本（含），如 <c>2.1.300</c>。空 = 不限。比较按数字逐段，缺的段按 0。
+    /// </summary>
+    /// <remarks>运行时登记的版本低于它、或者认不出版本时，这家 CLI 上的运行不跑（见 <see cref="CliVersionSupport"/>）。</remarks>
+    public string? MinimumVersion { get; init; }
+
+    /// <summary>
+    /// 这个部署接受的最高 CLI 版本（含），只比较写出来的那几段：<c>2.1</c> = 任何 2.1.x，<c>2</c> = 任何 2.x。空 = 不限。
+    /// </summary>
+    public string? MaximumVersion { get; init; }
+
+    /// <summary>
+    /// 部署的兜底令牌（<c>FallbackAuthToken</c>）是否也可以交给远程执行目标上的运行。缺省 false：
+    /// 远程目标（用户的工作区容器）里的进程能读到自己的环境变量，把服务器的凭据送过去等于交给了在那里跑的人。
+    /// </summary>
+    public bool AllowFallbackAuthTokenOnRemoteTargets { get; init; }
 }

@@ -3,7 +3,7 @@
  * Aligned with Tnzi.NET backend Chat module (Tnzi.Chat/Dtos/*.cs)
  */
 
-import type { SortedPagedQueryDto } from '../../types/pagination';
+import type { PagedQueryDto } from '../../types/pagination';
 // Presence types moved to @tnzi/core/services/presence (independent module, mirrors the
 // backend Tnzi.Identity.Presence extraction). Imported for use in the chat DTOs below and
 // re-exported for back-compat so existing `@tnzi/core/services/chat` imports keep resolving.
@@ -154,8 +154,11 @@ export interface ChatStatisticsDto {
   onlineUsers: number;
 }
 
-/** Admin conversation paged query. Backend: AdminConversationQueryDto */
-export interface AdminConversationQueryDto extends SortedPagedQueryDto {
+/**
+ * Admin conversation paged query. Backend: AdminConversationQueryDto. Ordered by
+ * the latest message; the endpoint takes no sort parameters.
+ */
+export interface AdminConversationQueryDto extends PagedQueryDto {
   type?: ConversationType;
   keyword?: string;
   userId?: string;

@@ -2,8 +2,18 @@
 namespace Tnzi.Http;
 
 /// <summary>
-/// 结合RSA, AES的通信传输加密解密操作类, 使用AES对数据进行对称加密, 使用RSA加密AES的密钥, 并对数据进行签名校验, 保证数据传输安全与完整性
+/// 结合 RSA、AES 的通信传输加密解密操作类：AES 对正文做对称加密，RSA 加密 AES 密钥，并用发送方私钥对正文签名。
 /// </summary>
+/// <remarks>
+/// <para>它是应用层的附加混淆，<b>不</b>保证身份与完整性：</para>
+/// <list type="bullet">
+/// <item>验签用的对方公钥由调用方提供、没有任何背书（服务端用的是请求头里客户端自带的公钥）。
+/// 验签通过只说明正文与这把公钥配套，不说明是谁发的，也挡不住中间人换掉公钥后重签。</item>
+/// <item>不是本协议格式的输入（不含分隔符）<b>原样返回、不验签</b>，见 <see cref="DecryptAndVerifyData"/>。
+/// 需要区分时先问 <see cref="IsEncryptedPayload"/>。</item>
+/// </list>
+/// <para>需要传输安全请用 TLS。</para>
+/// </remarks>
 public class TransmissionEncryptor
 {
     private const string DefaultSeparator = "#@|tnzi|@#";
@@ -24,22 +34,33 @@ public class TransmissionEncryptor
     }
 
     /// <summary>
-    /// 解密接收到的加密数据并验证完整性, 如果验证通过返回明文
+    /// 输入是不是本协议格式的密文（含分隔符）。不是的话 <see cref="DecryptAndVerifyData"/> 会原样返回它、不做任何校验。
     /// </summary>
-    /// <param name="data">接收到的加密数据</param>
-    /// <returns>解密并验证成功后, 返回明文</returns>
+    /// <param name="data">接收到的数据</param>
+    public bool IsEncryptedPayload(string data)
+    {
+        return !string.IsNullOrEmpty(data) && data.Contains(GetSeparator(_separator), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 解密接收到的密文并用对方公钥验签，通过后返回明文。
+    /// <b>不是本协议格式的输入（见 <see cref="IsEncryptedPayload"/>）原样返回、不验签。</b>
+    /// </summary>
+    /// <param name="data">接收到的数据</param>
+    /// <returns>解密并验签通过后的明文；输入不是本协议格式时就是输入本身</returns>
     /// <exception cref="ArgumentException">数据为空或格式不正确</exception>
     /// <exception cref="CryptographicException">解密或验证失败</exception>
     public string DecryptAndVerifyData(string data)
     {
         Check.NotNullOrEmpty(data);
 
-        string separator = GetSeparator(_separator);
-        if (!data.Contains(separator, StringComparison.Ordinal))
+        if (!IsEncryptedPayload(data))
         {
-            // 如果没有分隔符，说明数据未加密，直接返回
+            // 没有分隔符：不是本协议的密文，原样返回（调用方要区分时先问 IsEncryptedPayload）
             return data;
         }
+
+        string separator = GetSeparator(_separator);
 
         string[] separators = { separator };
         //0为AES密钥密文, 1为 正文+摘要 的密文

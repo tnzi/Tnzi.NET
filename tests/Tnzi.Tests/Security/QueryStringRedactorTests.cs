@@ -25,6 +25,9 @@ public class QueryStringRedactorTests
     [InlineData("?access_token=eyJhbGciOi", "access_token")]
     [InlineData("?token=reset-me-please", "token")]
     [InlineData("?enrollmentToken=enrol-1", "enrollmentToken")]
+    // OAuth 账号绑定令牌：只在授权回调时消费，有效期内拿它发起自己的流程就能把自己的第三方身份绑到对方账号上。
+    [InlineData("?linkToken=link-1", "linkToken")]
+    [InlineData("?tempToken=tmp-1", "tempToken")]
     public void EveryDefaultKey_IsReplacedWithThePlaceholder(string query, string key)
     {
         var redacted = QueryStringRedactor.Redact(Parse(query), query, QueryStringRedactor.DefaultSensitiveKeys);

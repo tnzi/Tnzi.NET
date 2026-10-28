@@ -299,24 +299,24 @@ public class MemoryContextProviderTests
         mockStore.Setup(s => s.ReadAsync(It.IsAny<MemoryScope>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(existingContent);
 
-        // 提取 LLM 返回记忆
-        var extractClient = CreateMockChatClient("- Dark mode preferred");
-        // 合并 LLM 返回合并结果
-        var consolidateClient = CreateMockChatClient("- Dark mode preferred\n- Key fact 1");
+        // 提取与合并用的是同一个 ChatClient（AutoPersist 取一次、合并沿用）：第一次调用返回提取结果，
+        // 第二次返回合并结果（25 条去重合并成 6 条要点：整段重写只接受像样的合并结果）
+        var chatClient = new Mock<IChatClient>();
+        chatClient.SetupSequence(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "- Dark mode preferred")))
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                "- Dark mode preferred\n- Key fact 1\n- Key fact 2\n- Key fact 3\n- Key fact 4\n- Key fact 5")));
 
-        var callCount = 0;
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetChatClient(It.IsAny<string?>(), It.IsAny<string?>()))
-            .Returns(() =>
-            {
-                callCount++;
-                return callCount == 1 ? extractClient : consolidateClient;
-            });
+            .Returns(chatClient.Object);
 
         var memoryOptions = new MemoryOptions
         {
             AutoPersist = true,
             AutoConsolidate = true,
+            IncrementalConsolidate = false, // 整段重写只在没有增量合并时进行
             ConsolidateThreshold = 5, // 低阈值触发合并
             MinTurnsBetweenExtractions = 0
         };

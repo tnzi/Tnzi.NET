@@ -6,8 +6,8 @@ namespace Tnzi.Finance.Services;
 public interface IExchangeRateService
 {
     /// <summary>
-    /// 解析汇率：同币种返回 1；优先直接汇率（不晚于目标日期的最近一条），
-    /// 其次反向汇率取倒数；无可用汇率返回 null
+    /// 解析汇率：同币种返回 1；直接与反向两个方向各取不晚于目标日期的最近一条，
+    /// 用日期较新的那条（反向取倒数），同日直接汇率优先；无可用汇率返回 null
     /// </summary>
     Task<decimal?> ResolveRateAsync(string fromCurrency, string toCurrency, DateTime date, CancellationToken cancellationToken = default);
 

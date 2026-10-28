@@ -40,7 +40,7 @@ public class OutboxMessageConfiguration : EntityTypeConfigurationBase<OutboxMess
             .HasDefaultValue(0);
 
         builder.Property(e => e.LastError)
-            .HasMaxLength(2000);
+            .HasMaxLength(OutboxMessage.LastErrorMaxLength);
 
         // 用于轮询未处理事件的复合索引
         builder.HasIndex(e => new { e.IsProcessed, e.CreationTime });

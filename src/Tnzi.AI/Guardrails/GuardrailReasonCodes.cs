@@ -10,6 +10,9 @@ public static class GuardrailReasonCodes
     public const string PiiDetected = "pii_detected";
     public const string BlockedContent = "blocked_content";
     public const string LlmJudgeRejected = "llm_judge_rejected";
+
+    /// <summary>LLM 评审出错、超时或答复无法解析，且 <c>Guardrails:FailClosed</c> 为 true（按拒绝处理）</summary>
+    public const string LlmJudgeUnavailable = "llm_judge_unavailable";
     public const string ToolDenied = "tool_denied";
     public const string ToolNotAllowed = "tool_not_allowed";
 }

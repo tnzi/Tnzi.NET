@@ -350,12 +350,10 @@ public class AgentAsToolsExecutionStrategyTests
         var result = await task;
 
         result.ShouldBe("child-result");
-        // ParentMarker was set via in-place mutation before any async work, so it remains visible
+        // The child marks a copy of the bag taken in its own async frame, so the caller's bag keeps
+        // its own entries and never sees the child's IsSubAgent / SubAgentName.
+        // AgentAsToolsPropertyIsolationTests covers the isolation itself.
         accessor.Properties["ParentMarker"].ShouldBe("parent");
-        // Note: RestoreProperties sets AsyncLocal.Value = new dict (copy-on-write),
-        // which does NOT propagate back to the caller's ExecutionContext.
-        // In production this is fine because child runs inside Task.Run with its own context.
-        // SetSubAgentContext mutates the same dict object, so those keys remain visible here.
     }
 
     private static ExecutionStrategyContext CreateContext()

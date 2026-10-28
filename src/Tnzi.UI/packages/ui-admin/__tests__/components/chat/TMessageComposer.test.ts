@@ -41,6 +41,19 @@ describe('TMessageComposer', () => {
     expect(textarea.element.value).toBe('')
   })
 
+  it('Enter that commits an IME candidate does NOT send', async () => {
+    // Pinyin / kana input: Enter picks the candidate (or commits the raw
+    // letters) while the composition is open. Sending there posts half-typed text.
+    const wrapper = mountComposer()
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('ni hao')
+    await textarea.trigger('keydown', { key: 'Enter', isComposing: true })
+    // Some browsers report the composing key as code 229 instead of the flag.
+    await textarea.trigger('keydown', { key: 'Enter', keyCode: 229 })
+    expect(wrapper.emitted('send')).toBeFalsy()
+    expect(textarea.element.value).toBe('ni hao')
+  })
+
   it('pressing Shift+Enter does NOT send', async () => {
     const wrapper = mountComposer()
     const textarea = wrapper.find('textarea')

@@ -28,7 +28,6 @@ public class PayPalVaultProviderTests
             ClientId = clientId,
             ClientSecret = "client-secret",
             Mode = "sandbox",
-            Currency = "USD",
             BrandName = "Example Inc",
             WebhookId = "webhook-id",
             EnableVault = enableVault,
@@ -121,6 +120,91 @@ public class PayPalVaultProviderTests
         body.GetProperty("customer").GetProperty("merchant_customer_id").GetString().ShouldBe(userId.ToString());
     }
 
+    // ---- 归属按计费账户 ----
+
+    private async Task<string> MerchantIdSentForAsync(PayPalProvider provider, BillingAccountRef? account, Guid userId)
+    {
+        _handler.OnPost("/v3/vault/setup-tokens", _ => Json(new
+        {
+            id = SetupTokenId,
+            status = "PAYER_ACTION_REQUIRED",
+            customer = new { id = CustomerId },
+            links = new[] { new { rel = "approve", href = "https://sandbox.paypal.com/agreements/approve?approval_session_id=X" } }
+        }));
+
+        var created = await provider.CreateSetupSessionAsync(new PaymentProviderSetupDto
+        {
+            UserId = userId,
+            BillingAccount = account,
+            ReturnUrl = "https://app.example.com/done"
+        });
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        return _handler.LastBodyFor(HttpMethod.Post, "/v3/vault/setup-tokens")
+            .GetProperty("customer").GetProperty("merchant_customer_id").GetString()!;
+    }
+
+    [Fact]
+    public async Task AnOrganisationAccount_IsTheVaultOwner_SoEveryManagerGetsTheSameMerchantId()
+    {
+        var provider = CreateProvider();
+        var firm = new BillingAccountRef(BillingAccountTypes.Installation, "default");
+
+        var first = await MerchantIdSentForAsync(provider, firm, Guid.NewGuid());
+        var second = await MerchantIdSentForAsync(provider, firm, Guid.NewGuid());
+
+        first.ShouldBe(second, "the card belongs to the account, not to whoever entered it");
+        // PayPal 只收字母数字与少数符号且限长：带冒号的账户键不能原样写进去
+        first.ShouldMatch("^ba-[0-9a-f]{40}$");
+    }
+
+    [Fact]
+    public async Task APersonalAccount_KeepsTheUserIdAsTheMerchantId()
+    {
+        var provider = CreateProvider();
+        var userId = Guid.NewGuid();
+
+        (await MerchantIdSentForAsync(provider, BillingAccountRef.ForUser(userId), userId)).ShouldBe(userId.ToString(),
+            "tokens vaulted before ownership moved to accounts must still be recognised");
+    }
+
+    [Fact]
+    public async Task ATokenVaultedForTheFirm_BindsForAnyManager_AndAPersonalTokenDoesNot()
+    {
+        var provider = CreateProvider();
+        var firm = new BillingAccountRef(BillingAccountTypes.Installation, "default");
+        var firmMerchantId = await MerchantIdSentForAsync(provider, firm, Guid.NewGuid());
+        var someManager = Guid.NewGuid();
+
+        _handler.OnGet($"/v3/vault/payment-tokens/{PaymentTokenId}", _ => Json(new
+        {
+            id = PaymentTokenId,
+            customer = new { id = CustomerId, merchant_customer_id = firmMerchantId },
+            payment_source = new { paypal = new { email_address = "billing@firm.example", payer_id = "AJM9JTWQJCFTA" } }
+        }));
+        var forTheFirm = await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = PaymentTokenId,
+            UserId = someManager,
+            BillingAccount = firm
+        });
+        forTheFirm.Succeeded.ShouldBeTrue(forTheFirm.Message);
+
+        _handler.OnGet($"/v3/vault/payment-tokens/{PaymentTokenId}", _ => Json(new
+        {
+            id = PaymentTokenId,
+            customer = new { id = CustomerId, merchant_customer_id = someManager.ToString() },
+            payment_source = new { paypal = new { email_address = "me@example.com", payer_id = "AJM9JTWQJCFTB" } }
+        }));
+        var personal = await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = PaymentTokenId,
+            UserId = someManager,
+            BillingAccount = firm
+        });
+        personal.Code.ShouldBe(403, "a manager's own PayPal token is not the firm's");
+    }
+
     [Fact]
     public async Task CreateSetupSession_WhenPayPalReturnsNoApprovalLink_Fails()
     {
@@ -136,6 +220,28 @@ public class PayPalVaultProviderTests
     }
 
     // ---- 绑定：换取长期凭据 ----
+
+    /// <summary>
+    /// 账户标识只露首字符：本地部分以 emoji 开头时一个都不露，而不是露出半个代理项（标识会落库、进管理端列表）。
+    /// </summary>
+    [Fact]
+    public async Task ResolvePaymentMethod_EmailStartingWithAnEmoji_MasksWithoutALoneSurrogate()
+    {
+        var provider = CreateProvider();
+        var userId = Guid.NewGuid();
+
+        _handler.OnGet($"/v3/vault/payment-tokens/{SetupTokenId}", _ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        _handler.OnPost("/v3/vault/payment-tokens", _ => Json(PaymentTokenPayload(userId, "\U0001F600payer@example.com")));
+
+        var result = await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = SetupTokenId,
+            UserId = userId
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.AccountLabel.ShouldBe("***@example.com");
+    }
 
     [Fact]
     public async Task ResolvePaymentMethod_ExchangesSetupTokenAndMasksAccount()
@@ -254,6 +360,40 @@ public class PayPalVaultProviderTests
         // PayPal 的有效期是 "YYYY-MM" 一个字符串，落库要拆成年月两列
         result.Data.ExpiryYear.ShouldBe(2031);
         result.Data.ExpiryMonth.ShouldBe(7);
+    }
+
+    /// <summary>
+    /// ★ 绑卡请求里的令牌是用户输入，拼进路径前必须转义：<c>../../../v2/...</c> 不能把带着商户访问令牌的请求带到 PayPal API 的别处。
+    /// </summary>
+    [Fact]
+    public async Task ResolvePaymentMethod_KeepsAPathLikeTokenInsideTheVaultPath()
+    {
+        var provider = CreateProvider();
+
+        await provider.ResolvePaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = "../../../v2/checkout/orders/ORDER-OF-SOMEONE-ELSE",
+            UserId = Guid.NewGuid()
+        });
+
+        var gets = _handler.Requests.Where(r => r.Method == HttpMethod.Get).ToList();
+        gets.ShouldNotBeEmpty();
+        gets.ShouldAllBe(r => r.Path.StartsWith("/v3/vault/payment-tokens/"));
+    }
+
+    [Fact]
+    public async Task Detach_KeepsAPathLikeTokenInsideTheVaultPath()
+    {
+        var provider = CreateProvider();
+
+        await provider.DetachPaymentMethodAsync(new PaymentProviderResolveMethodDto
+        {
+            PaymentMethodToken = "../../../v2/checkout/orders/ORDER-OF-SOMEONE-ELSE",
+            UserId = Guid.NewGuid()
+        });
+
+        var deletes = _handler.Requests.Where(r => r.Method == HttpMethod.Delete).ToList();
+        deletes.ShouldHaveSingleItem().Path.ShouldStartWith("/v3/vault/payment-tokens/");
     }
 
     // ---- 解绑 ----
@@ -460,6 +600,90 @@ public class PayPalVaultProviderTests
         result.Data.FailReason!.ShouldContain("INSTRUMENT_DECLINED");
     }
 
+    /// <summary>
+    /// capture 处于 PENDING（风控复核、eCheck 清算）：钱在路上，回报「处理中」而不是失败。
+    /// 当成失败的话订阅降级并换一个流水号再扣，原来那笔随后入账就是同一期扣了两次。
+    /// </summary>
+    [Fact]
+    public async Task ChargeOffSession_WhenTheCaptureIsPending_ReportsProcessingWithTheCaptureId()
+    {
+        var provider = CreateProvider();
+        _handler.OnPost("/v2/checkout/orders", _ => Json(new
+        {
+            id = "9XJ12399",
+            status = "COMPLETED",
+            purchase_units = new[]
+            {
+                new
+                {
+                    payments = new
+                    {
+                        captures = new[]
+                        {
+                            new { id = "CAP-PEND", status = "PENDING", amount = new { currency_code = "USD", value = "30.00" } }
+                        }
+                    }
+                }
+            }
+        }));
+
+        var result = await provider.ChargeOffSessionAsync(new PaymentProviderChargeDto
+        {
+            TradeNo = "T-1005",
+            Amount = 30m,
+            Currency = "USD",
+            PaymentMethodToken = PaymentTokenId
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Status.ShouldBe(PaymentStatus.Processing);
+        result.Data.ExternalTradeNo.ShouldBe("CAP-PEND");
+    }
+
+    /// <summary>
+    /// PayPal 答 5xx：订单建没建成、钱扣没扣都说不准。回报失败（服务层按结果未知处理）而不是「成功拿到一个拒付」。
+    /// </summary>
+    [Fact]
+    public async Task ChargeOffSession_WhenPayPalFailsWithAServerError_ReportsAnUnknownOutcomeRatherThanADecline()
+    {
+        var provider = CreateProvider();
+        _handler.OnPost("/v2/checkout/orders", _ => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent("{\"name\":\"INTERNAL_SERVER_ERROR\"}")
+        });
+
+        var result = await provider.ChargeOffSessionAsync(new PaymentProviderChargeDto
+        {
+            TradeNo = "T-1006",
+            Amount = 30m,
+            Currency = "USD",
+            PaymentMethodToken = PaymentTokenId
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldNotBe(ErrorCodes.PaymentOffSessionNotAttempted);
+    }
+
+    /// <summary>拿不到访问令牌：扣款请求根本没发出去，回报「未尝试」，服务层才把它当成确定的失败。</summary>
+    [Fact]
+    public async Task ChargeOffSession_WithoutAnAccessToken_ReportsThatNothingWasAttempted()
+    {
+        var provider = CreateProvider(clientId: $"client-{Guid.NewGuid():N}");
+        _handler.OnPost("/v1/oauth2/token", _ => new HttpResponseMessage(HttpStatusCode.Unauthorized));
+
+        var result = await provider.ChargeOffSessionAsync(new PaymentProviderChargeDto
+        {
+            TradeNo = "T-1007",
+            Amount = 30m,
+            Currency = "USD",
+            PaymentMethodToken = PaymentTokenId
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.PaymentOffSessionNotAttempted);
+        _handler.Requests.ShouldNotContain(r => r.Path == "/v2/checkout/orders");
+    }
+
     [Fact]
     public async Task ChargeOffSession_WhenVaultDisabled_ReportsNotSupported()
     {
@@ -509,55 +733,4 @@ public class PayPalVaultProviderTests
     {
         Content = new StringContent(JsonSerializer.Serialize(payload))
     };
-
-    /// <summary>
-    /// 按「方法 + 路径」派发的 HTTP 桩，同时录下发出去的请求体供断言。
-    /// </summary>
-    private sealed class StubHttpMessageHandler : HttpMessageHandler
-    {
-        private readonly Dictionary<string, Func<RecordedRequest, HttpResponseMessage>> _routes = new();
-
-        public List<RecordedRequest> Requests { get; } = [];
-
-        public void OnPost(string path, Func<RecordedRequest, HttpResponseMessage> responder) => _routes[Key(HttpMethod.Post, path)] = responder;
-        public void OnGet(string path, Func<RecordedRequest, HttpResponseMessage> responder) => _routes[Key(HttpMethod.Get, path)] = responder;
-        public void OnDelete(string path, Func<RecordedRequest, HttpResponseMessage> responder) => _routes[Key(HttpMethod.Delete, path)] = responder;
-
-        public JsonElement LastBodyFor(HttpMethod method, string path)
-        {
-            var request = Requests.Last(r => r.Method == method && r.Path == path);
-            request.Body.ShouldNotBeNull($"No JSON body recorded for {method} {path}.");
-            return request.Body.Value;
-        }
-
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            var path = request.RequestUri!.AbsolutePath;
-            JsonElement? body = null;
-
-            if (request.Content != null)
-            {
-                var raw = await request.Content.ReadAsStringAsync(cancellationToken);
-                // 换令牌那一步是表单不是 JSON，解析失败不该让用例炸掉
-                if (raw.StartsWith('{'))
-                    body = JsonDocument.Parse(raw).RootElement.Clone();
-            }
-
-            var recorded = new RecordedRequest(
-                request.Method,
-                path,
-                body,
-                request.Headers.TryGetValues("PayPal-Request-Id", out var ids) ? ids.FirstOrDefault() : null);
-
-            Requests.Add(recorded);
-
-            return _routes.TryGetValue(Key(request.Method, path), out var responder)
-                ? responder(recorded)
-                : new HttpResponseMessage(HttpStatusCode.NotFound);
-        }
-
-        private static string Key(HttpMethod method, string path) => $"{method}:{path}";
-    }
-
-    private sealed record RecordedRequest(HttpMethod Method, string Path, JsonElement? Body, string? IdempotencyKey);
 }

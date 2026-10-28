@@ -50,6 +50,30 @@ public class ChannelsModuleOptionsValidator : OptionsValidatorBase<ChannelsModul
                 errors.Add("Dingtalk.AppKey is required when DingTalk adapter is enabled");
             if (string.IsNullOrWhiteSpace(options.Dingtalk.AppSecret))
                 errors.Add("Dingtalk.AppSecret is required when DingTalk adapter is enabled");
+            if (string.IsNullOrWhiteSpace(options.Dingtalk.RobotCode))
+                errors.Add("Dingtalk.RobotCode is required when the DingTalk adapter is enabled (both reply APIs name the sending robot by it)");
         }
+
+        // 分块发送的上限：0 会让分块器一直切出空块、原文不减（零进展循环），负数则每次发送都抛异常；
+        // 两种都是启动照常、每条回复都发不出去。
+        ValidateSendLimits("Slack", options.Slack.Enabled, options.Slack.MaxMessageLength, options.Slack.MaxRetries, errors);
+        ValidateSendLimits("Discord", options.Discord.Enabled, options.Discord.MaxMessageLength, options.Discord.MaxRetries, errors);
+        ValidateSendLimits("Dingtalk", options.Dingtalk.Enabled, options.Dingtalk.MaxMessageLength, options.Dingtalk.MaxRetries, errors);
+        ValidateSendLimits("Feishu", options.Feishu.Enabled, options.Feishu.MaxMessageLength, options.Feishu.MaxRetries, errors);
+
+        // Telegram 的分块长度是平台上限常量（4096），只有重试次数可配
+        if (options.Telegram.Enabled && options.Telegram.MaxRetries < 0)
+            errors.Add("Telegram.MaxRetries must not be negative");
+    }
+
+    private static void ValidateSendLimits(string adapter, bool enabled, int maxMessageLength, int maxRetries, List<string> errors)
+    {
+        if (!enabled) return;
+
+        if (maxMessageLength <= 0)
+            errors.Add($"{adapter}.MaxMessageLength must be greater than 0");
+
+        if (maxRetries < 0)
+            errors.Add($"{adapter}.MaxRetries must not be negative");
     }
 }

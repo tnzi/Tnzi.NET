@@ -32,7 +32,7 @@ public class IdGenerationOptions
 
     /// <summary>
     /// 从主机名末尾的数字派生机器码（K8s StatefulSet 的 <c>api-0</c> / <c>api-1</c> …）：WorkerId = 序号 + 1。
-    /// 主机名末尾没有数字时视同未配置。
+    /// 主机名末尾没有数字、或主机名是 K8s Deployment / ReplicaSet 的 Pod 名与容器 ID 这类随机后缀时视同未配置。
     /// </summary>
     public bool WorkerIdFromHostname { get; set; }
 

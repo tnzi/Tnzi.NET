@@ -110,10 +110,12 @@ public class AgentService : ApplicationService, IAgentService
         await CreateVersionSnapshotAsync(entity, input.ChangeNote);
 
         if (input.Name != null) entity.Name = input.Name;
-        if (input.Description != null) entity.Description = input.Description;
-        if (input.Instructions != null) entity.Instructions = input.Instructions;
+        // Optional text - tri-state like Persona: null = no change, empty string = clear (stored null).
+        // An empty Model must become null: only null falls back to the provider's default model.
+        if (input.Description != null) entity.Description = EmptyToNull(input.Description);
+        if (input.Instructions != null) entity.Instructions = EmptyToNull(input.Instructions);
         if (input.Provider != null) entity.Provider = input.Provider;
-        if (input.Model != null) entity.Model = input.Model;
+        if (input.Model != null) entity.Model = EmptyToNull(input.Model);
         if (input.Temperature.HasValue) entity.Temperature = input.Temperature;
         if (input.MaxTokens.HasValue) entity.MaxTokens = input.MaxTokens;
         if (input.TimeoutSeconds.HasValue) entity.TimeoutSeconds = input.TimeoutSeconds;
@@ -128,11 +130,11 @@ public class AgentService : ApplicationService, IAgentService
         // Persona - tri-state: null = no change, empty string = clear, non-empty = set.
         if (input.Persona != null)
         {
-            entity.Persona = input.Persona.Length == 0 ? null : input.Persona;
+            entity.Persona = EmptyToNull(input.Persona);
         }
         var executionModeChanged = input.ExecutionMode.HasValue && input.ExecutionMode.Value != entity.ExecutionMode;
         if (input.ExecutionMode.HasValue) entity.ExecutionMode = input.ExecutionMode.Value;
-        if (input.ExecutionConfig != null || executionModeChanged) entity.Configuration = AgentExecutionConfigDto.Serialize(input.ExecutionConfig);
+        if (input.ExecutionConfig != null || executionModeChanged) entity.Configuration = AgentExecutionConfigDto.Merge(entity.Configuration, input.ExecutionConfig);
 
         // Atomic write: entity update + grant reconciles commit/roll back as a unit (see CreateAsync).
         // Snapshot was already captured ABOVE (outside the txn) so it reflects pre-mutation state regardless.
@@ -185,7 +187,8 @@ public class AgentService : ApplicationService, IAgentService
             TimeoutSeconds = source.TimeoutSeconds,
             IsEnabled = source.IsEnabled,
             ExecutionMode = source.ExecutionMode,
-            Configuration = source.Configuration,
+            // A/B 实验引用的是源 Agent 的版本号，克隆体没有任何版本：带过去只会让每次请求都找不到版本
+            Configuration = WithoutAbTest(source.Configuration),
             Domains = source.Domains?.ToList(),
             Roles = source.Roles?.ToList(),
             QualityTier = source.QualityTier,
@@ -201,7 +204,7 @@ public class AgentService : ApplicationService, IAgentService
         // Read the source's authoritative grants (a read of a DIFFERENT agent - safe outside the txn).
         var sourceGrants = await _grantService.GetGrantsAsync(source.Id);
 
-        // Atomic write: the clone insert + the three grant reconciles commit/roll back as a unit (see CreateAsync).
+        // Atomic write: the clone insert + the grant reconciles commit/roll back as a unit (see CreateAsync).
         // The insert's SaveChanges inside the txn assigns clone.Id before the reconciles read it.
         await ExecuteInUnitOfWorkAsync(async ct =>
         {
@@ -209,6 +212,9 @@ public class AgentService : ApplicationService, IAgentService
 
             // Carry the source agent's grants to the clone (junction is authoritative).
             await _grantService.ReconcileToolGroupsAsync(clone.Id, sourceGrants.ToolGroups, ct);
+            // Per-tool grants have no DTO field, so they only exist when written through IAgentGrantService
+            // (or restored by a version rollback); a clone without them would silently lose those tools.
+            await _grantService.ReconcileToolNamesAsync(clone.Id, sourceGrants.ToolNames, ct);
             await _grantService.ReconcileSkillsAsync(clone.Id, sourceGrants.SkillSlugs, ct);
             await _grantService.ReconcileKnowledgeAsync(clone.Id, sourceGrants.KnowledgeBaseIds, ct);
         });
@@ -278,7 +284,9 @@ public class AgentService : ApplicationService, IAgentService
         agent.TimeoutSeconds = snapshot.TimeoutSeconds;
         agent.IsEnabled = snapshot.IsEnabled;
         agent.ExecutionMode = snapshot.ExecutionMode;
-        agent.Configuration = snapshot.Configuration;
+        // 快照恢复的是 Agent 的定义；进行中的 A/B 实验是运营状态，不随回滚开停：
+        // 当前的实验原样保留，快照里记着的旧实验不复活
+        agent.Configuration = WithAbTest(snapshot.Configuration, AgentVersionRouter.ExtractAbTestConfig(agent.Configuration));
         agent.Domains = snapshot.Domains;
         agent.Roles = snapshot.Roles;
         agent.QualityTier = snapshot.QualityTier;
@@ -374,6 +382,9 @@ public class AgentService : ApplicationService, IAgentService
         }
     }
 
+    /// <summary>更新 DTO 里「空字符串 = 清空」的可选文本：空串落库为 null。</summary>
+    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
+
     /// <summary>把一份授权投影写入 DTO 的资源列表（空投影折叠为 null，保持 null-when-empty 语义）。</summary>
     private static void ApplyGrantsToDto(AgentDto dto, AgentGrantsProjection grants)
     {
@@ -448,7 +459,6 @@ public class AgentService : ApplicationService, IAgentService
         };
 
         int inputTokens = 0, outputTokens = 0;
-        AgentStreamChunk? lastChunk = null;
         string? streamErrorMessage = null;
         string? streamFinishReason = null;
         string? streamModel = null;
@@ -456,14 +466,13 @@ public class AgentService : ApplicationService, IAgentService
 
         await foreach (var chunk in _runtime.RunStreamingAsync(runRequest, ct).WithCancellation(ct))
         {
-            lastChunk = chunk;
-
             // HistoryMiddleware 在首批 chunk 到达前已完成线程自动创建，直接从 runRequest 读取。
             var currentThreadId = runRequest.ThreadId;
 
-            // 提取 Token 使用信息
+            // 累加 Token 用量：每个 chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径）
             var (inp, outp) = ChatMessageHelper.ExtractStreamingUsage(chunk);
-            if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
+            inputTokens += inp;
+            outputTokens += outp;
 
             // 收集 Citations（通常只在最终 chunk 中包含）
             if (chunk.Citations != null)
@@ -490,13 +499,6 @@ public class AgentService : ApplicationService, IAgentService
             {
                 yield return streamEvent;
             }
-        }
-
-        // 如果流式响应结束时还没有 Token 信息，尝试从最后一条 chunk 中查找
-        if (lastChunk is not null && inputTokens == 0 && outputTokens == 0)
-        {
-            var (inp, outp) = ChatMessageHelper.ExtractStreamingUsage(lastChunk);
-            if (inp > 0 || outp > 0) { inputTokens = inp; outputTokens = outp; }
         }
 
         // 发送终止事件
@@ -572,21 +574,29 @@ public class AgentService : ApplicationService, IAgentService
             return Fail<AgentDto>(message, status, code);
         }
 
-        // 移除 A/B 测试配置
-        agent.Configuration = AgentVersionRouter.MergeAbTestConfig(agent.Configuration, null);
-
-        // 如果 Configuration 变为空对象 "{}" 且没有其他配置，设为 null
-        if (agent.Configuration == "{}")
-            agent.Configuration = null;
-
+        agent.Configuration = WithoutAbTest(agent.Configuration);
         await _repository.UpdateAsync(agent);
 
         Logger.LogInformation("A/B test stopped for Agent {AgentId}", agentId);
         return Ok(await MapToDtoAsync(agent));
     }
 
+    /// <summary>Configuration 去掉 A/B 实验后的样子（去掉后没有别的键则为 null）。</summary>
+    private static string? WithoutAbTest(string? configuration)
+        => AgentVersionRouter.ExtractAbTestConfig(configuration) == null
+            ? configuration
+            : WithAbTest(configuration, null);
+
+    /// <summary>Configuration 的 A/B 实验替换为 <paramref name="abTest"/>（null = 不带实验），其余键原样保留。</summary>
+    private static string? WithAbTest(string? configuration, AbTestConfig? abTest)
+    {
+        var merged = AgentVersionRouter.MergeAbTestConfig(configuration, abTest);
+        return merged == "{}" ? null : merged;
+    }
+
     private async Task CreateVersionSnapshotAsync(Agent entity, string? changeNote)
     {
+        AgentVersion? versionEntity = null;
         try
         {
             var latestVersion = await _versionRepository
@@ -608,7 +618,7 @@ public class AgentService : ApplicationService, IAgentService
             snapshot.SkillSlugs = grants.SkillSlugs.Count > 0 ? grants.SkillSlugs.ToList() : null;
             snapshot.KnowledgeBaseIds = grants.KnowledgeBaseIds.Count > 0 ? grants.KnowledgeBaseIds.ToList() : null;
 
-            var versionEntity = new AgentVersion
+            versionEntity = new AgentVersion
             {
                 AgentId = entity.Id,
                 Version = nextVersion,
@@ -621,6 +631,14 @@ public class AgentService : ApplicationService, IAgentService
         }
         catch (Exception ex)
         {
+            // ★ 快照是尽力而为，插入失败的那一行必须从变更跟踪器里摘掉：它仍是 Added，紧接着的 Agent 更新
+            //   提交时会重放它，再撞一次，把这次编辑整个拖成 500。典型触发是两个管理员几乎同时保存，
+            //   取到同一个版本号，撞上 (AgentId, Version) 唯一索引。
+            if (versionEntity != null)
+            {
+                _versionRepository.Discard(versionEntity);
+            }
+
             Logger.LogWarning(ex, "Failed to create version snapshot for Agent {AgentId}", entity.Id);
         }
     }

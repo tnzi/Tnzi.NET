@@ -38,7 +38,7 @@ const statusConfig = computed(() => {
 
 <style scoped>
 .t-agent-status__icon {
-  color: var(--tnzi-primary);
+  color: var(--tnzi-ai-accent-text);
 }
 .t-agent-status__badge {
   display: inline-flex;
@@ -50,7 +50,7 @@ const statusConfig = computed(() => {
   padding: 1px 6px;
 }
 .t-agent-status--running {
-  color: var(--tnzi-primary);
+  color: var(--tnzi-ai-accent-text);
   animation: spin 1s linear infinite;
 }
 .t-agent-status--completed {

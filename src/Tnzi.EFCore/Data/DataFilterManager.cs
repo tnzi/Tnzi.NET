@@ -8,10 +8,17 @@ public class DataFilterManager : IDataFilterManager
 {
     private readonly AsyncLocal<Dictionary<Type, Stack<bool>>> _filterStates = new();
     private readonly ILogger<DataFilterManager>? _logger;
+    private readonly bool _multiTenancyEnabled;
 
-    public DataFilterManager(ILogger<DataFilterManager>? logger = null)
+    /// <param name="logger">审计日志</param>
+    /// <param name="multiTenancyOptions">
+    /// 多租户开关。没有时按「开着」处理，审计日志照记。启动时 <c>EFCoreModule</c> 已核对过每个 DbContext
+    /// 的开关都与这份配置一致，所以它就是运行期的真值。
+    /// </param>
+    public DataFilterManager(ILogger<DataFilterManager>? logger = null, IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
     {
         _logger = logger;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? true;
     }
 
     private Dictionary<Type, Stack<bool>> FilterStates
@@ -28,12 +35,20 @@ public class DataFilterManager : IDataFilterManager
 
     public IDisposable Disable<TFilter>() where TFilter : class, IDataFilter
     {
-        // 审计日志：跨租户过滤器操作
-        if (typeof(TFilter) == typeof(IMultiTenantFilter))
+        // 审计日志：跨租户过滤器操作。多租户关着时没有隔离可绕过，那句警告不成立，
+        // 而工作流看门狗这类后台服务每一轮都要关一次过滤器，单租户部署的日志会被它周期性刷屏。
+        if (typeof(TFilter) == typeof(IMultiTenantFilter) && _logger != null)
         {
-            _logger?.LogWarning(
-                "Multi-tenant filter disabled. Caller: {Caller}. Queries will bypass tenant isolation until scope is disposed.",
-                GetCallerInfo());
+            if (_multiTenancyEnabled)
+            {
+                _logger.LogWarning(
+                    "Multi-tenant filter disabled. Caller: {Caller}. Queries will bypass tenant isolation until scope is disposed.",
+                    GetCallerInfo());
+            }
+            else if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                _logger.LogDebug("Multi-tenant filter disabled while multi-tenancy is off; nothing is bypassed. Caller: {Caller}.", GetCallerInfo());
+            }
         }
 
         return SetState<TFilter>(false);

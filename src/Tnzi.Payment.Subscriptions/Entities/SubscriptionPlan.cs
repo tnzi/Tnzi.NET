@@ -72,6 +72,17 @@ public class SubscriptionPlan : AuditedEntity<Guid>, IHasOrder
     public decimal? TrialDiscount { get; set; }
 
     /// <summary>
+    /// 套餐包含的存储（字节，1 GB = 2^30 字节）。null = 这个计划不计量存储：不采样、不限量、没有超额费。
+    /// </summary>
+    public long? IncludedStorageBytes { get; set; }
+
+    /// <summary>
+    /// 超出包含存储的部分每 GB-月的单价（计划币种）。null 或 0 = 只显示用量不收费。
+    /// 只在 <see cref="IncludedStorageBytes"/> 有值时生效。
+    /// </summary>
+    public decimal? StorageOveragePricePerGbMonth { get; set; }
+
+    /// <summary>
     /// 订阅集合
     /// </summary>
     public virtual ICollection<Subscription> Subscriptions { get; set; } = new List<Subscription>();

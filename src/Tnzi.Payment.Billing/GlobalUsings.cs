@@ -2,22 +2,28 @@
 global using System;
 global using System.Collections.Generic;
 global using System.ComponentModel.DataAnnotations;
+global using System.Diagnostics.CodeAnalysis;
 global using System.IO;
 global using System.Linq;
+global using System.Linq.Expressions;
 global using System.Net;
 global using System.Text;
 global using System.Threading;
 global using System.Threading.Tasks;
+global using System.Globalization;
+global using System.Text.Json;
 
 // Microsoft
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
+global using Microsoft.EntityFrameworkCore.Query;
 global using Microsoft.Extensions.DependencyInjection;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 
 // Tnzi framework
+global using Tnzi.Json;
 global using Tnzi.Application;
 global using Tnzi.AspNetCore.Extensions;
 global using Tnzi.AspNetCore.Models;
@@ -52,11 +58,14 @@ global using Tnzi.Template;
 global using Tnzi.Template.Models;
 global using Tnzi.Template.Services;
 
-// Payment 核心：支付完成事件、支付状态枚举、错误码与常量。方向恒为「本模块 → 父模块」。
+// Payment 核心：支付完成事件、支付状态枚举、错误码与常量、「我的 X」列表的分页参数、计费账户解析。方向恒为「本模块 → 父模块」。
 // 支付实体本身不 using 整个 Tnzi.Payment.Entities，只走下面那条别名（见别名处的注释）。
+global using Tnzi.Payment.Dtos;
 global using Tnzi.Payment.Events;
 global using Tnzi.Payment.Metadata;
 global using Tnzi.Payment.Options;
+global using Tnzi.Payment.Extensions;
+global using Tnzi.Payment.Services;
 
 // `Payment` 这个标识符在本程序集的命名空间里会先解析到 `Tnzi.Payment` 这个**命名空间**
 // （类型查找从内层命名空间逐级向外，命名空间成员先于 using 命中），因此支付实体一律走别名。

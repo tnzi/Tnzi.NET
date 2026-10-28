@@ -34,8 +34,7 @@ public class LockoutEndSqliteQueryTests : RelationalIdentityIntegrationTestBase
             CreateRepository<User>(),
             ServiceProvider,
             eventBus: EventBusMock.Object,
-            currentUser: ServiceProvider.GetRequiredService<ICurrentUser>(),
-            cache: Cache);
+            currentUser: ServiceProvider.GetRequiredService<ICurrentUser>());
         _security = new LoginSecurityService(
             ServiceProvider,
             new UserTenantScopeProvider(CreateRepository<User>()),

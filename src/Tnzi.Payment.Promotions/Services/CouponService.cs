@@ -16,8 +16,22 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
     private readonly IRepository<RedemptionCode, Guid> _redemptionCodeRepository;
     private readonly IRepository<UserCoupon, Guid> _userCouponRepository;
     private readonly IRepository<Promotion, Guid> _promotionRepository;
+    private readonly IRepository<PaymentEntity, Guid> _paymentRepository;
     private readonly IPromotionService _promotionService;
     private readonly IOptionsMonitor<PromotionOptions> _promotionOptions;
+
+    /// <summary>
+    /// 一笔支付「仍在用它核销的那次折扣」的状态：还可能付掉（Pending / Processing），或已经付掉（含退过款的）。
+    /// 失败 / 取消 / 关闭 / 过期的支付不再需要它。
+    /// </summary>
+    private static readonly PaymentStatus[] CouponHoldingPaymentStatuses =
+    [
+        PaymentStatus.Pending,
+        PaymentStatus.Processing,
+        PaymentStatus.Succeeded,
+        PaymentStatus.PartialRefunded,
+        PaymentStatus.Refunded
+    ];
 
     /// <summary>
     /// 用量统计的空占位：单券场景没有批量统计，剩余次数按促销自身上限展示即可
@@ -29,6 +43,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         IRepository<RedemptionCode, Guid> redemptionCodeRepository,
         IRepository<UserCoupon, Guid> userCouponRepository,
         IRepository<Promotion, Guid> promotionRepository,
+        IRepository<PaymentEntity, Guid> paymentRepository,
         IPromotionService promotionService,
         IOptionsMonitor<PromotionOptions> promotionOptions,
         IServiceProvider serviceProvider)
@@ -39,6 +54,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         _redemptionCodeRepository = Check.NotNull(redemptionCodeRepository);
         _userCouponRepository = Check.NotNull(userCouponRepository);
         _promotionRepository = Check.NotNull(promotionRepository);
+        _paymentRepository = Check.NotNull(paymentRepository);
         _promotionService = Check.NotNull(promotionService);
     }
 
@@ -94,7 +110,29 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
                 .FirstOrDefaultAsync(ct);
 
             if (existingUsage != null)
+            {
+                // ★ 同一张单的又一笔支付（换渠道重付、建单重试）沿用这次折扣：核销记录改绑到最新这笔支付上，
+                // 归还时再看这张单上是否还有别的支付在用它（见 ReleaseUsageAsync）。此前原样返回、不改绑定：
+                // 第二笔付掉之后第一笔过期，按第一笔把券还了，核销记录被删、用量退回，第二笔的折扣从此无账。
+                // 条件更新：并发的归还刚把它删掉（或改绑走）时不能把一条已不存在的绑定当成功返回。
+                if (context.PaymentId is { } paymentId && existingUsage.PaymentId != paymentId)
+                {
+                    var boundTo = existingUsage.PaymentId;
+                    var rebound = await _couponUsageRepository.AsQueryable()
+                        .Where(c => c.Id == existingUsage.Id && c.PaymentId == boundTo)
+                        .ExecuteUpdateAsync(s => s.SetProperty(x => x.PaymentId, (Guid?)paymentId), ct);
+
+                    if (rebound == 0)
+                    {
+                        throw new ConflictException(
+                            "The coupons on this order changed while this coupon was being applied. Please retry.");
+                    }
+
+                    existingUsage.PaymentId = paymentId;
+                }
+
                 return Ok(existingUsage.MapTo<CouponUsageDto>());
+            }
 
             // 不可叠加是**双向**的：单上已有券而这张不可叠加，拒绝；单上已有一张不可叠加的券，
             // 不论这张可不可叠加也拒绝 —— 只判前者时，先用不可叠加的 A、再用可叠加的 B，A 的承诺就破了。
@@ -136,8 +174,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             //   代价是失败时要把刚才那一次递增补回去（见 ReleaseTotalUsageAsync）。
 
             // 每用户使用次数：与事务外那次校验同一个判据，区别只在这一次是在锁后读的
-            var perUserLimit = valid.Promotion.PerUserUsageLimit ?? _promotionOptions.CurrentValue.MaxCouponUsagePerUser;
-            if (perUserLimit > 0)
+            if (PerUserLimitOf(valid.Promotion.PerUserUsageLimit) is { } perUserLimit)
             {
                 var userUsageCount = await _couponUsageRepository.CountAsync(
                     c => c.CouponId == promotionId && c.UserId == context.UserId, ct);
@@ -207,15 +244,54 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         }, cancellationToken);
     }
 
-    public async Task<Result> ReleaseCouponAsync(Guid couponUsageId, CancellationToken cancellationToken = default)
+    public Task<Result> ReleaseCouponAsync(Guid couponUsageId, CancellationToken cancellationToken = default)
+        => ReleaseUsageAsync(c => c.Id == couponUsageId, cancellationToken);
+
+    /// <summary>
+    /// 归还一条核销记录：持券恢复可用、总用量减一、删记录，前提是同一张业务单上<b>没有别的支付还在用这次折扣</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 核销的幂等键是（促销 + 用户 + 业务单号），同一张单上先后几笔带同一张券的支付共用一条记录，
+    /// 它绑定的是最近核销的那一笔（见 <see cref="ApplyCouponAsync"/>）。被归还的那笔支付不是最后一个用户时，
+    /// 记录改绑到还在用它的那一笔（已付的优先）而不是归还：否则第二笔付掉之后第一笔过期，
+    /// 券连同用量一起被退回，第二笔的折扣从此无账，换一张单号即可无限重复。
+    /// </para>
+    /// <para>
+    /// 删除与改绑都是条件写（<c>PaymentId</c> 仍是读到的那个值）：并发的核销刚把记录改绑到一笔新支付上时，
+    /// 这里影响 0 行、什么都不做，那条记录已经有新主人了。
+    /// </para>
+    /// </remarks>
+    private async Task<Result> ReleaseUsageAsync(Expression<Func<CouponUsage, bool>> which, CancellationToken cancellationToken)
     {
         return await ExecuteInUnitOfWorkAsync(async ct =>
         {
             // 下面的递减是裸 SQL：不先强开物理事务它会在自动提交模式执行，回滚撤不掉
             await _promotionRepository.EnsureTransactionStartedAsync(ct);
 
-            var usage = await _couponUsageRepository.FirstOrDefaultAsync(c => c.Id == couponUsageId, ct);
+            var usage = await _couponUsageRepository.FirstOrDefaultAsync(which, ct);
             if (usage == null)
+                return Ok();
+
+            var boundTo = usage.PaymentId;
+            var stillUsedBy = await FindPaymentStillUsingAsync(usage, ct);
+            if (stillUsedBy.HasValue)
+            {
+                await _couponUsageRepository.AsQueryable()
+                    .Where(c => c.Id == usage.Id && c.PaymentId == boundTo)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.PaymentId, (Guid?)stillUsedBy.Value), ct);
+
+                Logger.LogInformation(
+                    "Coupon usage {UsageId} kept: payment {PaymentId} on order {OrderNo} still uses the discount, so it was rebound instead of released.",
+                    usage.Id, stillUsedBy.Value, usage.BusinessOrderNo);
+                return Ok();
+            }
+
+            var deleted = await _couponUsageRepository.AsQueryable()
+                .Where(c => c.Id == usage.Id && c.PaymentId == boundTo)
+                .ExecuteDeleteAsync(ct);
+
+            if (deleted == 0)
                 return Ok();
 
             if (usage.UserCouponId.HasValue)
@@ -235,13 +311,36 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
                 .Where(p => p.Id == usage.CouponId && p.UsedCount > 0)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.UsedCount, x => x.UsedCount - 1), ct);
 
-            await _couponUsageRepository.DeleteAsync(usage, ct);
-
             Logger.LogInformation("Coupon usage released. UsageId: {UsageId}, OrderNo: {OrderNo}",
-                couponUsageId, usage.BusinessOrderNo);
+                usage.Id, usage.BusinessOrderNo);
 
             return Ok();
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// 同一用户、同一业务单号上，除这条记录当前绑定的支付之外，还有没有用同一张券、且仍需要这次折扣的支付
+    /// （待付 / 处理中 / 已付，含退过款的）。有则返回其中一笔：已付的优先（这次折扣已经兑现在它身上），否则最新的那笔。
+    /// </summary>
+    private async Task<Guid?> FindPaymentStillUsingAsync(CouponUsage usage, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(usage.BusinessOrderNo))
+            return null;
+
+        var candidates = await _paymentRepository.AsNoTracking()
+            .Where(p => p.UserId == usage.UserId
+                && p.BusinessOrderNo == usage.BusinessOrderNo
+                && p.CouponId == usage.CouponId
+                && p.Id != usage.PaymentId
+                && CouponHoldingPaymentStatuses.Contains(p.Status))
+            .Select(p => new { p.Id, p.Status, p.CreationTime })
+            .ToListAsync(cancellationToken);
+
+        return candidates
+            .OrderByDescending(p => p.Status is PaymentStatus.Succeeded or PaymentStatus.PartialRefunded or PaymentStatus.Refunded)
+            .ThenByDescending(p => p.CreationTime)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefault();
     }
 
     /// <inheritdoc />
@@ -251,16 +350,8 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
     /// 查不到记录返回成功而不是 404：调用它的是支付失败与支付过期两条清扫路径，
     /// 「这笔支付没用券」和「券已经还过了」都是正常情形，报错只会让那两条路径无谓地记一堆日志。
     /// </remarks>
-    public async Task<Result> ReleaseCouponForPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default)
-    {
-        var usage = await _couponUsageRepository
-            .FirstOrDefaultAsync(c => c.PaymentId == paymentId, cancellationToken);
-
-        if (usage == null)
-            return Ok();
-
-        return await ReleaseCouponAsync(usage.Id, cancellationToken);
-    }
+    public Task<Result> ReleaseCouponForPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default)
+        => ReleaseUsageAsync(c => c.PaymentId == paymentId, cancellationToken);
 
     public async Task<Result<List<UserCouponDto>>> GetUserAvailableCouponsAsync(Guid userId, CancellationToken cancellationToken = default)
     {
@@ -485,7 +576,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
     public async Task<Result<string>> CreateRedemptionCodeAsync(Guid promotionId, int quantity, int? perUserLimit = null, CancellationToken cancellationToken = default)
     {
         if (quantity <= 0)
-            return Fail<string>(ErrorCodes.RedemptionCodeLimitReached, 400);
+            return Fail<string>(ErrorCodes.RedemptionCodeInvalidQuantity, 400);
 
         if (perUserLimit < 0)
             return Fail<string>("Per-user limit must be 0 (unlimited) or a positive number.", 400);
@@ -563,18 +654,17 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
         return true;
     }
 
-    private static bool HasRemainingUserQuota(Promotion promotion, IReadOnlyDictionary<Guid, int> usageCounts)
-    {
-        if (!promotion.PerUserUsageLimit.HasValue)
-            return true;
+    /// <summary>每用户实际生效的上限（null = 不限），与核销守卫同一个判定。</summary>
+    private int? PerUserLimitOf(int? perUserUsageLimit)
+        => Promotion.ResolvePerUserLimit(perUserUsageLimit, _promotionOptions.CurrentValue.MaxCouponUsagePerUser);
 
-        var used = usageCounts.GetValueOrDefault(promotion.Id, 0);
-        return used < promotion.PerUserUsageLimit.Value;
-    }
+    private bool HasRemainingUserQuota(Promotion promotion, IReadOnlyDictionary<Guid, int> usageCounts)
+        => PerUserLimitOf(promotion.PerUserUsageLimit) is not { } limit || usageCounts.GetValueOrDefault(promotion.Id, 0) < limit;
 
-    private static UserCouponDto BuildDto(Promotion promotion, IReadOnlyDictionary<Guid, int> usageCounts, UserCoupon? userCoupon)
+    private UserCouponDto BuildDto(Promotion promotion, IReadOnlyDictionary<Guid, int> usageCounts, UserCoupon? userCoupon)
     {
         var used = usageCounts.GetValueOrDefault(promotion.Id, 0);
+        var limit = PerUserLimitOf(promotion.PerUserUsageLimit);
 
         return new UserCouponDto
         {
@@ -587,9 +677,7 @@ public class CouponService : ApplicationService, ICouponService, ICouponWalletSe
             DiscountValue = promotion.DiscountValue,
             DiscountType = promotion.DiscountType,
             MaxDiscountAmount = promotion.MaxDiscountAmount,
-            RemainingUsageCount = promotion.PerUserUsageLimit.HasValue
-                ? Math.Max(0, promotion.PerUserUsageLimit.Value - used)
-                : -1,
+            RemainingUsageCount = limit is { } perUser ? Math.Max(0, perUser - used) : -1,
             ExpireTime = userCoupon?.ExpireTime ?? promotion.EndTime,
             Stackable = promotion.Stackable
         };

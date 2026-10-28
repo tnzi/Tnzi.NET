@@ -26,7 +26,7 @@ public class McpServerSecurityMiddleware
     private readonly ILogger<McpServerSecurityMiddleware> _logger;
 
     // 滑动窗口速率限制: clientKey -> 线程安全计数器
-    private readonly ConcurrentDictionary<string, SlidingWindowCounter> _rateLimits = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FixedWindowCounter> _rateLimits = new(StringComparer.OrdinalIgnoreCase);
     private long _cleanupCounter;
     private const int CleanupInterval = 100;
 
@@ -52,25 +52,42 @@ public class McpServerSecurityMiddleware
     /// server 只认自己配置的静态 key，这正是应有的默认。
     /// </para>
     /// <para>
-    /// 顺序上先试静态 key：那是纯内存的常数时间比较，而运行范围凭据要查一次库。
+    /// 要求认证时先试静态 key：那是纯内存的常数时间比较，而运行范围凭据要查一次库。
     /// </para>
     /// <para>
     /// ★ 凭据校验完<b>必须交出去</b>：此前这里只记一行 Debug 日志就返回 true，之后运行范围调用方与静态 key
-    /// 无从分辨 —— 全部 agent、全部消费方自定义工具都可调，契约写的「上限是该 Agent 自身的权限」没有一处在执行。
+    /// 无从分辨：全部 agent、全部消费方自定义工具都可调，凭据自带的工具白名单没有一处在执行。
+    /// </para>
+    /// <para>
+    /// ★ 关掉认证（<c>RequireAuthentication=false</c>）只放行<b>没有凭据</b>的请求，带着运行范围凭据来的照样按凭据收窄：
+    /// 此前关掉认证时任何 key 都直接答「不受限」，运行范围凭据不再被查，<c>AI:Cli:WriteBack:AllowedTools</c> 的白名单失效，
+    /// 调用也不再切到凭据所属的租户（多租户下租户的 agent 找不到）。认证是运行期可热切换的设置，排障时临时关掉就会撞上。
     /// </para>
     /// </remarks>
     public async Task<McpCallerScope?> ValidateCallerAsync(string? apiKey, CancellationToken cancellationToken = default)
     {
-        if (ValidateApiKey(apiKey))
+        var requireAuthentication = _options.CurrentValue.RequireAuthentication;
+        if (requireAuthentication && ValidateApiKey(apiKey))
         {
             return McpCallerScope.Unrestricted;
         }
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            return null;
+            return requireAuthentication ? null : McpCallerScope.Unrestricted;
         }
 
+        var runScoped = await TryValidateRunScopedAsync(apiKey, cancellationToken);
+        if (runScoped is not null)
+        {
+            return runScoped;
+        }
+
+        return requireAuthentication ? null : McpCallerScope.Unrestricted;
+    }
+
+    private async Task<McpCallerScope?> TryValidateRunScopedAsync(string apiKey, CancellationToken cancellationToken)
+    {
         using var scope = _serviceProvider.CreateScope();
         var validator = scope.ServiceProvider.GetService<IRunScopedCredentialValidator>();
         if (validator is null)
@@ -257,7 +274,7 @@ public class McpServerSecurityMiddleware
             }
         }
 
-        var counter = _rateLimits.GetOrAdd(clientKey, _ => new SlidingWindowCounter());
+        var counter = _rateLimits.GetOrAdd(clientKey, _ => new FixedWindowCounter());
         if (!counter.TryIncrement(limit))
         {
             _logger.LogWarning("MCP Server rate limit exceeded for client '{ClientKey}': {Limit} requests/minute",
@@ -359,9 +376,11 @@ public class McpServerSecurityMiddleware
     }
 
     /// <summary>
-    /// 线程安全的滑动窗口计数器，通过内部锁消除并发竞态条件
+    /// 线程安全的固定窗口计数器，通过内部锁消除并发竞态条件。
+    /// 窗口自上一窗口过期后的第一个请求起算 60 秒，过期即整体清零；因此窗口末尾与下一窗口开头
+    /// 相邻的两段里最多能放过 2 倍限额（不是平滑的滑动窗口）。
     /// </summary>
-    private sealed class SlidingWindowCounter
+    private sealed class FixedWindowCounter
     {
         private readonly object _lock = new();
         private DateTimeOffset _windowStart;

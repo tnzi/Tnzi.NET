@@ -4,6 +4,15 @@ namespace Tnzi.AI.Channels.Manager;
 /// 消息调度管理器 - 消费入站消息，路由命令/聊天，调用 AI，发布出站回复。
 /// 支持并发控制和流式更新节流。
 /// </summary>
+/// <remarks>
+/// <b>同一会话（渠道 + 聊天 + 话题）的消息按到达顺序逐条处理，不同会话之间并发</b>（上限 <c>MaxConcurrency</c>）。
+/// 用户连发两条消息是常态（「总结一下」紧跟一句更正）：并发处理时两次运行读到同一份历史、各自答各自的，
+/// 回复按完成先后而不是提问先后送达；新会话的两条首发消息各建一条线程、映射后写者胜，前一条线程连同它的消息成了孤儿。
+/// <para>
+/// 每个会话一条「车道」：会话没有在处理的消息时，新消息占一个并发槽、起一个工作者；工作者处理完手上这条，
+/// 就接着处理同一车道里排队的下一条，车道空了才归还槽位。所以一个连发消息的会话最多只占一个槽，挤不掉别的会话。
+/// </para>
+/// </remarks>
 public class ChannelManager : IChannelManager
 {
     private readonly ILogger<ChannelManager> _logger;
@@ -12,6 +21,10 @@ public class ChannelManager : IChannelManager
     private readonly ChannelsModuleOptions _options;
     private readonly SemaphoreSlim _concurrency;
     private readonly Dictionary<string, IChannelAdapter> _adapterMap;
+
+    /// <summary>正在处理中的会话 → 排在它后面的消息。键在、队列空 = 有一条在处理、没有排队的。</summary>
+    private readonly Dictionary<string, Queue<InboundMessage>> _lanes = new(StringComparer.Ordinal);
+    private readonly Lock _lanesGate = new();
     private CancellationTokenSource? _cts;
     private Task? _consumeLoop;
 
@@ -66,24 +79,27 @@ public class ChannelManager : IChannelManager
             try
             {
                 var message = await _bus.ConsumeInboundAsync(ct);
-                await _concurrency.WaitAsync(ct);
-                // CancellationToken.None 防止 Task.Run 在 ct 取消时跳过 action 导致信号量泄漏
-                _ = Task.Run(async () =>
+                var lane = LaneKey(message);
+
+                // 这个会话已有消息在处理：排到它后面，由那个工作者按序处理，不另占并发槽
+                if (TryJoinLane(lane, message))
                 {
-                    try
-                    {
-                        await ProcessMessageAsync(message, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Unhandled error processing message from {Channel}:{ChatId}",
-                            message.ChannelName, message.ChatId);
-                    }
-                    finally
-                    {
-                        _concurrency.Release();
-                    }
-                }, CancellationToken.None);
+                    continue;
+                }
+
+                try
+                {
+                    await _concurrency.WaitAsync(ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    // 车道是为这条消息开的，它不会被处理了；不关掉的话，同一会话之后的消息会排进一条没有工作者的车道
+                    CloseLane(lane);
+                    throw;
+                }
+
+                // CancellationToken.None 防止 Task.Run 在 ct 取消时跳过 action 导致信号量泄漏、车道永不关闭
+                _ = Task.Run(() => DrainLaneAsync(lane, message, ct), CancellationToken.None);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -95,6 +111,100 @@ public class ChannelManager : IChannelManager
             }
         }
     }
+
+    /// <summary>
+    /// 一条车道的工作者：处理手上这条，再按到达顺序处理同一会话排进来的消息，车道空了才归还并发槽。
+    /// </summary>
+    private async Task DrainLaneAsync(string lane, InboundMessage first, CancellationToken ct)
+    {
+        var laneClosed = false;
+        try
+        {
+            InboundMessage? next = first;
+            while (next != null)
+            {
+                try
+                {
+                    await ProcessMessageAsync(next, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unhandled error processing message from {Channel}:{ChatId}",
+                        next.ChannelName, next.ChatId);
+                }
+
+                if (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                next = TakeNextOrCloseLane(lane);
+                laneClosed = next == null;
+            }
+        }
+        finally
+        {
+            if (!laneClosed)
+            {
+                // 停机：排着的消息与总线里还没取出的消息一样不再处理
+                var dropped = CloseLane(lane);
+                if (dropped > 0)
+                {
+                    _logger.LogInformation("Dropped {Count} queued message(s) for {Lane} on shutdown", dropped, lane);
+                }
+            }
+
+            _concurrency.Release();
+        }
+    }
+
+    /// <summary>会话已有工作者时把消息排进它的车道并返回 true；否则为这条消息开一条车道并返回 false。</summary>
+    private bool TryJoinLane(string lane, InboundMessage message)
+    {
+        lock (_lanesGate)
+        {
+            if (_lanes.TryGetValue(lane, out var pending))
+            {
+                pending.Enqueue(message);
+                return true;
+            }
+
+            _lanes[lane] = new Queue<InboundMessage>();
+            return false;
+        }
+    }
+
+    /// <summary>取车道里的下一条；没有了就在同一把锁里关掉车道（之后到达的消息会开一条新车道）。</summary>
+    private InboundMessage? TakeNextOrCloseLane(string lane)
+    {
+        lock (_lanesGate)
+        {
+            var pending = _lanes[lane];
+            if (pending.Count > 0)
+            {
+                return pending.Dequeue();
+            }
+
+            _lanes.Remove(lane);
+            return null;
+        }
+    }
+
+    /// <summary>关掉车道并返回被丢弃的排队消息数。</summary>
+    private int CloseLane(string lane)
+    {
+        lock (_lanesGate)
+        {
+            return _lanes.Remove(lane, out var pending) ? pending.Count : 0;
+        }
+    }
+
+    /// <summary>
+    /// 车道键与线程映射的键同形（渠道 + 聊天 + 话题）：同一条线程上的运行一次只有一个。
+    /// 用单元分隔符拼接，平台 id 里不会出现它。
+    /// </summary>
+    private static string LaneKey(InboundMessage message)
+        => $"{message.ChannelName}\u001f{message.ChatId}\u001f{message.TopicId}";
 
     private async Task ProcessMessageAsync(InboundMessage message, CancellationToken ct)
     {
@@ -132,7 +242,7 @@ public class ChannelManager : IChannelManager
         IServiceProvider scopedProvider,
         CancellationToken ct)
     {
-        var command = message.Text.Trim().ToLowerInvariant();
+        var command = NormalizeCommand(message.Text);
 
         switch (command)
         {
@@ -188,31 +298,9 @@ public class ChannelManager : IChannelManager
                 await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, modelsText));
                 break;
             }
-            case "/memory":
-            {
-                var threadId = await threadStore.GetThreadIdAsync(message.ChannelName, message.ChatId, message.TopicId);
-                var memoryStore = scopedProvider.GetService<IMemoryStore>();
-                string memoryText;
-                if (memoryStore != null && threadId != null)
-                {
-                    var entries = await memoryStore.SearchAsync("default", query: "", maxResults: 5, ct: ct);
-                    memoryText = entries.Count > 0
-                        ? $"Memory ({entries.Count} entries):\n" + string.Join("\n",
-                            entries.Select(e => $"• [{e.Category ?? "general"}] {e.Content.Truncate(80)}"))
-                        : "No memory entries found for current context.";
-                }
-                else
-                {
-                    memoryText = threadId == null
-                        ? "No active conversation. Send /new to start one."
-                        : "Memory service is not available.";
-                }
-                await _bus.PublishOutboundAsync(Reply(message, threadId ?? Guid.Empty, memoryText));
-                break;
-            }
             case "/help":
             {
-                await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, "Commands:\n/new - Start a new conversation\n/status - Show current thread\n/models - List available AI models\n/memory - Show memory entries\n/help - Show this message"));
+                await _bus.PublishOutboundAsync(Reply(message, Guid.Empty, "Commands:\n/new - Start a new conversation\n/status - Show current thread\n/models - List available AI models\n/help - Show this message"));
                 break;
             }
             default:
@@ -246,14 +334,18 @@ public class ChannelManager : IChannelManager
         // 没装 Gateway：直接 IAgentRuntime 调用
         var threadId = await threadStore.GetThreadIdAsync(message.ChannelName, message.ChatId, message.TopicId);
 
-        var request = new AgentRunRequest
+        AgentRunResult result;
+        try
         {
-            AgentId = _options.DefaultAgentId,
-            UserMessage = message.Text,
-            ThreadId = threadId
-        };
-
-        var result = await runtime.RunAsync(request, ct);
+            result = await runtime.RunAsync(DirectRunRequest(message, threadId), ct);
+        }
+        catch (Exception ex) when (threadId != null && StaleThreadMapping.IsRejected(ex))
+        {
+            // 映射指向的线程已删除或归属别的 Agent（与 Gateway 路径同一自愈，见 StaleThreadMapping）
+            await StaleThreadMapping.ForgetAsync(threadStore, message.ChannelName, message.ChatId, message.TopicId, threadId.Value, _logger);
+            threadId = null;
+            result = await runtime.RunAsync(DirectRunRequest(message, threadId), ct);
+        }
 
         // 如果是新线程，保存映射
         var actualThreadId = result.ThreadId ?? threadId ?? Guid.Empty;
@@ -268,6 +360,14 @@ public class ChannelManager : IChannelManager
         // and correct on its own terms if this ever moves to streaming.
         await _bus.PublishOutboundAsync(Reply(message, actualThreadId, result.EffectiveDeliverable));
     }
+
+    private AgentRunRequest DirectRunRequest(InboundMessage message, Guid? threadId)
+        => new()
+        {
+            AgentId = _options.DefaultAgentId,
+            UserMessage = message.Text,
+            ThreadId = threadId
+        };
 
     /// <summary>
     /// 尝试通过 Gateway 处理聊天消息：没装 Gateway 返回 null（调用方走直连 Runtime），
@@ -287,6 +387,7 @@ public class ChannelManager : IChannelManager
                 ChatId = message.ChatId,
                 UserId = message.UserId ?? "unknown",
                 TopicId = message.TopicId,
+                PeerKind = message.PeerKind,
                 UserMessage = message.Text,
                 // 渠道默认 Agent 是兜底不是显式目标：填进 AgentId 会短路 Gateway 的全部绑定规则
                 //（配置 + 数据库），让「slack 频道 X → Agent B」这类规则对 IM 流量静默失效。
@@ -336,6 +437,7 @@ public class ChannelManager : IChannelManager
             ChatId = message.ChatId,
             UserId = message.UserId ?? "unknown",
             TopicId = message.TopicId,
+            PeerKind = message.PeerKind,
             ExplicitAgentId = null,
             FallbackAgentId = _options.DefaultAgentId,
             TenantId = ResolveChannelTenantId(message.ChannelName)
@@ -360,13 +462,32 @@ public class ChannelManager : IChannelManager
             : null;
 
     /// <summary>
+    /// 命令名归一：取第一个空白分隔的词，去掉 <c>@机器人名</c> 后缀，转小写。
+    /// Telegram 群聊里从命令菜单点出的命令带机器人名（<c>/new@MyBot</c>），深链接带参数（<c>/start payload</c>），
+    /// 整串比较会把这些都答成「Unknown command」。内置命令都不收参数，参数一律忽略。
+    /// </summary>
+    private static string NormalizeCommand(string text)
+    {
+        var trimmed = text.Trim();
+        var end = trimmed.IndexOfAny([' ', '\t', '\r', '\n']);
+        var name = end < 0 ? trimmed : trimmed[..end];
+        var at = name.IndexOf('@');
+        if (at > 0)
+        {
+            name = name[..at];
+        }
+
+        return name.ToLowerInvariant();
+    }
+
+    /// <summary>
     /// 构造对某条入站消息的回复：把入站的线程指针（<c>ThreadTs</c> / <c>TopicId</c>）与平台元数据原样带回，
     /// 使回复落在提问所在的 Slack 线程 / Telegram 论坛话题 / Discord 交互里。
-    /// 所有出站回复都必须经此构造 —— 直接 <c>new OutboundMessage(...)</c> 会把回复投到频道顶层或 General。
+    /// 所有出站回复都必须经此构造：直接 <c>new OutboundMessage(...)</c> 会把回复投到频道顶层或 General。
     /// </summary>
-    private static OutboundMessage Reply(InboundMessage source, Guid threadId, string text, bool isFinal = true)
+    private static OutboundMessage Reply(InboundMessage source, Guid threadId, string text)
         => new(source.ChannelName, source.ChatId, threadId, text,
-            IsFinal: isFinal, ThreadTs: source.ThreadTs, Metadata: source.Metadata, TopicId: source.TopicId);
+            ThreadTs: source.ThreadTs, Metadata: source.Metadata, TopicId: source.TopicId);
 
     private async Task PublishErrorReplyAsync(InboundMessage message, string errorText)
     {

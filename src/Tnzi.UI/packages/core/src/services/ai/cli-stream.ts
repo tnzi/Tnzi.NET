@@ -3,8 +3,13 @@
  *
  * Separate from `streamChat` because the two protocols differ in the two things
  * that matter: this endpoint is a **GET** (a run is addressed by id, not posted
- * as a body) and its events carry a **sequence number** so a reconnect can
- * resume precisely instead of replaying or dropping.
+ * as a body) and it takes a **`fromSequence`** so a reconnect can resume
+ * precisely instead of replaying or dropping. The live events themselves carry
+ * no sequence number: read the persisted history (`/messages`) first and resume
+ * from {@link lastCliRunSequence} of what it returned.
+ *
+ * Event `type` arrives as the enum name (`'Text'`, `'ToolUse'`, ...), as on every
+ * other endpoint.
  */
 
 import type { CliAgentEvent, CliRunMessageDto } from './cli';
@@ -22,7 +27,12 @@ export interface CliRunStreamOptions {
   onText?: (text: string) => void;
   /** Called for reasoning/thinking deltas. */
   onThinking?: (text: string) => void;
-  /** Called when the stream ends normally (the run reached a terminal status). */
+  /**
+   * Called when the server closes the stream cleanly. That is how a run that
+   * reached a terminal status ends, but also how the server answers a run
+   * that does not exist or that the caller may not see (see
+   * {@link streamCliRun}).
+   */
   onDone?: () => void;
   /** Called on transport failure. */
   onError?: (error: Error) => void;
@@ -38,7 +48,10 @@ export interface CliRunStreamResult {
   thinking: string;
   /** Every event received, in arrival order. */
   events: CliAgentEvent[];
-  /** Whether the server closed the stream normally. */
+  /**
+   * Whether the server closed the stream normally. Not proof that the run
+   * exists: see {@link streamCliRun} for the empty stream.
+   */
   completed: boolean;
   /** Transport error, if any. */
   error?: Error | null;
@@ -48,7 +61,15 @@ export interface CliRunStreamResult {
  * Consume an external CLI agent run's SSE stream.
  *
  * The server closes the stream when the run reaches a terminal status, so a
- * clean end-of-body IS the completion signal - there is no `[DONE]` sentinel.
+ * clean end-of-body is the completion signal - there is no `[DONE]` sentinel.
+ *
+ * A clean end with no events is ambiguous on purpose. The server answers a run
+ * id that does not exist, or that the caller may not see, with an empty 200
+ * stream (the response headers are already written, and a different answer
+ * would tell a prober which ids are real). Resuming a finished run from its
+ * last sequence ends the same way. When `events` is empty and the caller needs
+ * to tell these apart, read the run with `useCliRunApi().getById` (or
+ * `useAdminCliRunApi().getById`): a missing or hidden run answers 404 there.
  *
  * @example
  * ```ts

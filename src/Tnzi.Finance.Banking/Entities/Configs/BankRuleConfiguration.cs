@@ -9,8 +9,8 @@ public class BankRuleConfiguration : EntityTypeConfigurationBase<BankRule, Guid>
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.Name).HasMaxLength(200).IsRequired();
-        builder.Property(e => e.PaymentMethod).HasMaxLength(32);
+        builder.Property(e => e.Name).HasMaxLength(BankingFieldLimits.BankRuleNameMaxLength).IsRequired();
+        builder.Property(e => e.PaymentMethod).HasMaxLength(BankingFieldLimits.PaymentMethodMaxLength);
 
         builder.HasMany(e => e.Conditions)
             .WithOne()

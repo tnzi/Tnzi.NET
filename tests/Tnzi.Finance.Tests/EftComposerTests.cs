@@ -102,12 +102,100 @@ public class EftComposerTests
         // JOHN DOE 机构 002/分行 54321 → "000254321"；JANE ROE 机构 003/分行 67890 → "000367890"
         lines[1].Substring(43, 9).ShouldBe("000254321");
         lines[2].Substring(43, 9).ShouldBe("000367890");
-        // Originating Institution/Transit（C 段偏移 140 → 记录位置 164）：机构 001/分行 12345 → "000112345"
-        lines[1].Substring(164, 9).ShouldBe("000112345");
+    }
 
-        // Z 记录：总贷方金额（分，14 位）+ 笔数（8 位）
-        lines[3].ShouldContain("00000000035050");
-        lines[3].ShouldContain("00000002");
+    /// <summary>
+    /// ★ A / C / Z 三种记录按 CPA Standard 005 的字段位置逐字段断言（下标 0 起 = 标准位置 - 1）。
+    /// </summary>
+    /// <remarks>
+    /// 此前的断言拿实现自己的偏移当金标准：C 段在付款方全称之后多出一组出款行 / 出款账号，
+    /// 退票行与退票账号整体前移 8 位；Z 把贷方合计写在借方的位置；A 没有币种码。
+    /// 用例断言「位置 164 是出款行」时，锁住的恰恰是那个错位。
+    /// </remarks>
+    [Fact]
+    public void Cpa005_FieldsSitAtTheStandard005Positions()
+    {
+        var result = new DefaultEftFileComposer().Compose(Cpa005Request(fileCreationNumber: 7));
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var lines = result.Data!.Content.Split('\n');
+
+        // A：1 类型 / 2-10 记录号 / 11-20 Originator ID / 21-24 文件序号 / 25-30 创建日 0YYDDD /
+        // 31-35 数据中心 / 36-55 保留 / 56-58 币种 / 59- 填充
+        var a = lines[0];
+        a.Substring(0, 1).ShouldBe("A");
+        a.Substring(1, 9).ShouldBe("000000001");
+        a.Substring(10, 10).ShouldBe("CPA0012345");
+        a.Substring(20, 4).ShouldBe("0007");
+        a.Substring(24, 6).ShouldBe("026194"); // 2026-07-13 = 第 194 天
+        a.Substring(30, 5).ShouldBe("00000");
+        a.Substring(35, 20).ShouldBe(new string(' ', 20));
+        a.Substring(55, 3).ShouldBe("CAD");
+        a.Substring(58).ShouldBe(new string(' ', 1464 - 58));
+
+        // C 段 1（记录位置 25-264）
+        var c = lines[1];
+        c.Substring(0, 1).ShouldBe("C");
+        c.Substring(1, 9).ShouldBe("000000002");
+        c.Substring(10, 10).ShouldBe("CPA0012345");
+        c.Substring(20, 4).ShouldBe("0007");
+        c.Substring(24, 3).ShouldBe("450");                    // 25-27  交易类型
+        c.Substring(27, 10).ShouldBe("0000010000");            // 28-37  金额 100.00
+        c.Substring(37, 6).ShouldBe("026201");                 // 38-43  到账日 2026-07-20
+        c.Substring(43, 9).ShouldBe("000254321");              // 44-52  收款行
+        c.Substring(52, 12).ShouldBe("1234567     ");          // 53-64  收款账号
+        c.Substring(64, 22).Length.ShouldBe(22);               // 65-86  跟踪号
+        c.Substring(86, 3).ShouldBe("000");                    // 87-89  存储交易类型
+        c.Substring(89, 15).ShouldBe("ACME CORP      ");       // 90-104 付款方简称
+        c.Substring(104, 30).TrimEnd().ShouldBe("JOHN DOE");   // 105-134 收款人名
+        c.Substring(134, 30).TrimEnd().ShouldBe("ACME CORP");  // 135-164 付款方全称
+        c.Substring(164, 10).ShouldBe(new string(' ', 10));    // 165-174 直接清算方用户 ID
+        c.Substring(174, 19).ShouldBe(new string(' ', 19));    // 175-193 交叉参考号（本例无）
+        c.Substring(193, 9).ShouldBe("000112345");             // 194-202 退票行 = 出款行
+        c.Substring(202, 12).ShouldBe("111222333   ");         // 203-214 退票账号 = 出款账号
+        c.Substring(214, 15).ShouldBe(new string(' ', 15));    // 215-229 附言
+        c.Substring(229, 22).ShouldBe(new string(' ', 22));    // 230-251 填充
+        c.Substring(251, 2).ShouldBe("  ");                    // 252-253 结算码
+        c.Substring(253, 11).ShouldBe("00000000000");          // 254-264 无效数据元素 ID
+        c.Substring(264).ShouldBe(new string(' ', 1464 - 264)); // 段 2-6 空白
+
+        // Z：借方在前（25-46）、贷方在后（47-68）、两组错误更正（69-112）
+        var z = lines[3];
+        z.Substring(0, 1).ShouldBe("Z");
+        z.Substring(1, 9).ShouldBe("000000004");
+        z.Substring(10, 10).ShouldBe("CPA0012345");
+        z.Substring(20, 4).ShouldBe("0007");
+        z.Substring(24, 14).ShouldBe("00000000000000");         // 25-38 借方合计
+        z.Substring(38, 8).ShouldBe("00000000");                // 39-46 借方笔数
+        z.Substring(46, 14).ShouldBe("00000000035050");         // 47-60 贷方合计 350.50
+        z.Substring(60, 8).ShouldBe("00000002");                // 61-68 贷方笔数
+        z.Substring(68, 44).ShouldBe(new string('0', 44));      // 69-112 错误更正 E / F
+        z.Substring(112).ShouldBe(new string(' ', 1464 - 112));
+    }
+
+    /// <summary>付款方交叉参考号落在 175-193：有就写、超长截断（自由文本，不是账号）。</summary>
+    [Fact]
+    public void Cpa005_EntryReference_IsTheOriginatorCrossReference()
+    {
+        var request = Cpa005Request();
+        request.Entries[0].Reference = "PMT-000123";
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.Content.Split('\n')[1].Substring(174, 19).ShouldBe("PMT-000123         ");
+    }
+
+    /// <summary>A 记录的币种码不得留空或截断：不是三位字母代码就拒绝组装。</summary>
+    [Fact]
+    public void Cpa005_WithoutAThreeLetterCurrency_IsRejected()
+    {
+        var request = Cpa005Request();
+        request.Currency = "";
+
+        var result = new DefaultEftFileComposer().Compose(request);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
     }
 
     // ── 账号超长：截断出的是另一个人的账号 ─────────────────────────────────────

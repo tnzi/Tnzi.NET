@@ -275,3 +275,56 @@ describe('SelectionController', () => {
     });
   });
 });
+
+describe('SelectionController - selection across pages', () => {
+  const page1 = ['1', '2', '3'];
+  const page2 = ['4', '5', '6'];
+
+  it('does not report the next page as all selected because the counts match', () => {
+    const s = new SelectionController<string>();
+    s.setAllKeys(page1);
+    s.toggleAll();
+    s.setAllKeys(page2);
+    expect(s.isAllSelected).toBe(false);
+    expect(s.isIndeterminate).toBe(false);
+  });
+
+  it('adds the current page to the earlier picks instead of replacing them', () => {
+    const s = new SelectionController<string>();
+    s.setAllKeys(page1);
+    s.toggleAll();
+    s.setAllKeys(page2);
+    s.toggleAll();
+    expect(s.selectedKeys).toEqual([...page1, ...page2]);
+    expect(s.isAllSelected).toBe(true);
+  });
+
+  it('deselects only the current page when it is fully selected', () => {
+    const s = new SelectionController<string>();
+    s.setAllKeys(page1);
+    s.toggleAll();
+    s.setAllKeys(page2);
+    s.toggleAll();
+    s.toggleAll();
+    expect(s.selectedKeys).toEqual(page1);
+  });
+
+  it('keeps a partial pick on the current page when selecting the rest of it', () => {
+    const s = new SelectionController<string>();
+    s.setAllKeys(page1);
+    s.select('1');
+    s.setAllKeys(page2);
+    s.select('5');
+    expect(s.isIndeterminate).toBe(true);
+    s.toggleAll();
+    expect(s.selectedKeys).toEqual(['1', '5', '4', '6']);
+  });
+
+  it('is not all selected when a stale key makes up the count', () => {
+    const s = new SelectionController<string>();
+    s.setSelectedKeys(['gone', 'a']);
+    s.setAllKeys(['a', 'b']);
+    expect(s.isAllSelected).toBe(false);
+    expect(s.isIndeterminate).toBe(true);
+  });
+});

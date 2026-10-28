@@ -347,9 +347,10 @@ public class SkillQueryDto : PagedQueryDto
     /// <summary>
     /// When true, the paged result is augmented with file-system / plugin /
     /// managed / project / embedded skills discovered by ISkillRegistry.
-    /// File-source rows are read-only (DTO carries IsReadOnly=true) and are
-    /// not affected by `Scope`/`Enabled`/`Tag`/`CategoryId` filters that only
-    /// apply to database rows. Keyword filter applies post-merge in-memory.
+    /// Database rows are listed exactly as without this flag (disabled rows and
+    /// every visible personal skill included, each with its own Id); file-source
+    /// rows are read-only (IsReadOnly=true, Id = empty). All filters apply to both;
+    /// a file-source skill has no category, so a CategoryId filter excludes it.
     /// </summary>
     public bool IncludeFileSource { get; set; }
 }

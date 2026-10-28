@@ -8,12 +8,14 @@ namespace Tnzi.Finance.Payroll.Services;
 /// <remarks>
 /// 保存期校验 = 编码规范 + 公式/条件语法与函数白名单（经
 /// <see cref="ISalaryFormulaEvaluator.GetVariables"/>）+ 自引用拒绝。
-/// 跨组件依赖序校验属于结构语义，在结构保存时进行。
+/// 跨组件依赖序校验属于结构语义，在结构保存时进行；更新组件时对引用它的结构按同一份规则
+/// （<see cref="SalaryStructureRules"/>）回查一次，见 <see cref="ValidateReferencingStructuresAsync"/>。
 /// </remarks>
 public partial class SalaryComponentService : ApplicationService, ISalaryComponentService
 {
     private readonly IRepository<SalaryComponent, Guid> _componentRepository;
     private readonly IRepository<SalaryStructureLine, Guid> _lineRepository;
+    private readonly IReadOnlyRepository<SalaryStructure, Guid> _structureRepository;
     private readonly IReadOnlyRepository<PayslipLine, Guid> _payslipLineRepository;
     private readonly ISalaryFormulaEvaluator _evaluator;
     private readonly IEnumerable<IPayslipCalculationHook> _hooks;
@@ -22,12 +24,14 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
         IServiceProvider serviceProvider,
         IRepository<SalaryComponent, Guid> componentRepository,
         IRepository<SalaryStructureLine, Guid> lineRepository,
+        IReadOnlyRepository<SalaryStructure, Guid> structureRepository,
         IReadOnlyRepository<PayslipLine, Guid> payslipLineRepository,
         ISalaryFormulaEvaluator evaluator,
         IEnumerable<IPayslipCalculationHook> hooks) : base(serviceProvider)
     {
         _componentRepository = Check.NotNull(componentRepository);
         _lineRepository = Check.NotNull(lineRepository);
+        _structureRepository = Check.NotNull(structureRepository);
         _payslipLineRepository = Check.NotNull(payslipLineRepository);
         _evaluator = Check.NotNull(evaluator);
         _hooks = Check.NotNull(hooks);
@@ -104,6 +108,10 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
                 409);
         }
 
+        var structureCheck = await ValidateReferencingStructuresAsync(component, input, cancellationToken);
+        if (!structureCheck.Succeeded)
+            return Fail<SalaryComponentDto>(structureCheck.Message ?? "Invalid salary component.", structureCheck.Code ?? 400);
+
         Apply(component, input, input.IsActive);
 
         try
@@ -145,6 +153,11 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
             return Fail("Component code is required.");
         if (string.IsNullOrWhiteSpace(input.Name))
             return Fail("Component name is required.");
+        var tooLong = PayrollFieldLimits.FirstTooLong(
+            (input.Name.Trim(), PayrollFieldLimits.NameMaxLength, "component name"),
+            (input.Description, PayrollFieldLimits.DescriptionMaxLength, "description"));
+        if (tooLong != null)
+            return Fail(tooLong, 400);
         if (!Enum.IsDefined(input.Type))
             return Fail("Component type must be Earning, Deduction, EmployerContribution or Informational.");
         // 符号规则只有 PayrollAmountRules 一份（计算器 / 一次性输入 / 外部摄取 / 钉死额同一判据）。
@@ -182,6 +195,69 @@ public partial class SalaryComponentService : ApplicationService, ISalaryCompone
 
         if (await _componentRepository.AnyAsync(c => c.Code == code && c.Id != excludeId, cancellationToken))
             return Fail($"Salary component code '{code}' already exists.", 409);
+
+        return Ok();
+    }
+
+    /// <summary>
+    /// 本次修改会不会让引用这个组件的薪资结构失效（按结构保存时的同一份规则回查）。
+    /// </summary>
+    /// <remarks>
+    /// ★ 结构行的生效公式由「行覆盖 ∪ 组件定义」合成，所以结构合不合规不只取决于结构本身。
+    /// 此前规则只在结构保存时跑：把序号靠前的税组件公式改成读 <c>GROSS</c>，或把序号靠后的扣减项
+    /// 改成收入，两次保存都成功，此后每一期都对不完整的毛额计税，不落任何计算错误，照常过账并进入 YTD。
+    /// 改编码同理会让后续行引用一个不存在的名字，改类型会让钉死的负额变成负的扣减项。
+    /// <para>
+    /// 只拒绝**本次修改引入**的失效：结构本就不合规时不挡（否则连修复它的那次组件修改也改不动），
+    /// 这种结构由计算端兜底落 <c>CalculationError</c>、过不了账。
+    /// </para>
+    /// </remarks>
+    private async Task<Result> ValidateReferencingStructuresAsync(SalaryComponent current, UpdateSalaryComponentDto input, CancellationToken cancellationToken)
+    {
+        var candidate = new SalaryComponent();
+        Apply(candidate, input, input.IsActive);
+
+        // 结构规则只读组件的这四项；都没变就没有可回查的。
+        if (candidate.Code == current.Code && candidate.Type == current.Type
+            && candidate.Formula == current.Formula && candidate.Condition == current.Condition)
+        {
+            return Ok();
+        }
+
+        var structureIds = await _lineRepository.AsNoTracking()
+            .Where(l => l.ComponentId == current.Id)
+            .Select(l => l.StructureId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (structureIds.Count == 0)
+            return Ok();
+
+        var structures = await _structureRepository.AsQueryable()
+            .Include(s => s.Lines)
+            .Where(s => structureIds.Contains(s.Id))
+            .ToListAsync(cancellationToken);
+
+        var componentIds = structures.SelectMany(s => s.Lines).Select(l => l.ComponentId).Distinct().ToList();
+        var before = await _componentRepository.AsNoTracking()
+            .Where(c => componentIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, cancellationToken);
+        var after = new Dictionary<Guid, SalaryComponent>(before) { [current.Id] = candidate };
+        var externalVariables = PayrollExternalVariables.Collect(_hooks);
+
+        foreach (var structure in structures.OrderBy(s => s.Name, StringComparer.Ordinal))
+        {
+            var lines = structure.Lines.Select(SalaryStructureRules.ToSpec).ToList();
+            // 停用另有其义（不再加进新结构），不在回查之列。
+            var afterCheck = SalaryStructureRules.ValidateLines(lines, after, externalVariables, _evaluator, requireActiveComponents: false);
+            if (afterCheck.Succeeded)
+                continue;
+
+            var beforeCheck = SalaryStructureRules.ValidateLines(lines, before, externalVariables, _evaluator, requireActiveComponents: false);
+            if (!beforeCheck.Succeeded)
+                continue;
+
+            return Fail($"This change would make salary structure '{structure.Name}' invalid: {afterCheck.Message}", 400);
+        }
 
         return Ok();
     }

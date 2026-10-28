@@ -91,7 +91,8 @@ public class ThreadDataProvisionerTests : IDisposable
         await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Equal(1, store.MaxConcurrent);
-        Assert.Equal(1, store.Calls);
+        // 每次布置都读一次仓库来比对指纹（串行地）；第二次比对一致，不再复制。
+        Assert.Equal(2, store.Calls);
         Assert.True(File.Exists(Path.Combine(state.SkillsPath, "gated", "scripts", "run.py")));
         Assert.True(File.Exists(Path.Combine(state.ThreadDirectory, ".skills_wired")));
     }
@@ -149,7 +150,7 @@ public class ThreadDataProvisionerTests : IDisposable
     }
 
     [Fact]
-    public async Task Provision_MarkerWithRealDirectory_DoesNotCopyAgain()
+    public async Task Provision_MarkerWithRealDirectory_AndUnchangedResources_DoesNotCopyAgain()
     {
         var options = SandboxOptions(_root);
         var store = new CountingSkillStore();
@@ -157,9 +158,96 @@ public class ThreadDataProvisionerTests : IDisposable
         var state = State(options);
 
         await provisioner.ProvisionAsync(_threadId, state);
+        var copied = Path.Combine(state.SkillsPath, store.Slug, "scripts", "run.py");
+        var marker = Path.Combine(state.ThreadDirectory, ".skills_wired");
+        var past = DateTime.UtcNow.AddHours(-1);
+        File.SetLastWriteTimeUtc(copied, past);
+        var markerText = File.ReadAllText(marker);
+
         await provisioner.ProvisionAsync(_threadId, state);
 
-        Assert.Equal(1, store.GetAllCalls);
+        Assert.Equal(past, File.GetLastWriteTimeUtc(copied));
+        Assert.Equal(markerText, File.ReadAllText(marker));
+    }
+
+    /// <summary>
+    /// 技能仓库里的资源变了（管理员修了脚本），已经接过线的线程下一次用到沙箱就换上新的副本。
+    /// 此前哨兵只记时间，线程一旦接过线就永远用那一刻的副本。
+    /// </summary>
+    [Fact]
+    public async Task Provision_AfterAResourceChanges_RefreshesTheCopy()
+    {
+        var options = SandboxOptions(_root);
+        var store = new MutableSkillStore();
+        store.Set("report", ("scripts/build.py", "print('v1')"));
+        var provisioner = CreateProvisioner(options, store);
+        var state = State(options);
+
+        await provisioner.ProvisionAsync(_threadId, state);
+        store.Set("report", ("scripts/build.py", "print('v2')"), ("scripts/extra.py", "pass"));
+        await provisioner.ProvisionAsync(_threadId, state);
+
+        Assert.Equal("print('v2')", File.ReadAllText(Path.Combine(state.SkillsPath, "report", "scripts", "build.py")));
+        Assert.True(File.Exists(Path.Combine(state.SkillsPath, "report", "scripts", "extra.py")));
+    }
+
+    [Fact]
+    public async Task Provision_AfterASkillIsRemoved_ItsCopyIsGone()
+    {
+        var options = SandboxOptions(_root);
+        var store = new MutableSkillStore();
+        store.Set("keep", ("run.py", "1"));
+        store.Set("drop", ("run.py", "2"));
+        var provisioner = CreateProvisioner(options, store);
+        var state = State(options);
+
+        await provisioner.ProvisionAsync(_threadId, state);
+        store.Remove("drop");
+        await provisioner.ProvisionAsync(_threadId, state);
+
+        Assert.True(File.Exists(Path.Combine(state.SkillsPath, "keep", "run.py")));
+        Assert.False(Directory.Exists(Path.Combine(state.SkillsPath, "drop")));
+    }
+
+    /// <summary>这一版之前写的哨兵只有时间，没有指纹：按「已变化」重新复制一次，之后就按指纹比对。</summary>
+    [Fact]
+    public async Task Provision_MarkerWithoutAFingerprint_IsRecopiedOnce()
+    {
+        var options = SandboxOptions(_root);
+        var store = new CountingSkillStore();
+        var provisioner = CreateProvisioner(options, store);
+        var state = State(options);
+        Directory.CreateDirectory(Path.Combine(state.SkillsPath, "removed-long-ago"));
+        File.WriteAllText(Path.Combine(state.SkillsPath, "removed-long-ago", "old.py"), "stale");
+        var marker = Path.Combine(state.ThreadDirectory, ".skills_wired");
+        File.WriteAllText(marker, "copied at 2026-01-01T00:00:00.0000000Z");
+
+        await provisioner.ProvisionAsync(_threadId, state);
+
+        Assert.False(Directory.Exists(Path.Combine(state.SkillsPath, "removed-long-ago")));
+        Assert.True(File.Exists(Path.Combine(state.SkillsPath, store.Slug, "scripts", "run.py")));
+        Assert.Contains("fingerprint: ", File.ReadAllText(marker));
+    }
+
+    private sealed class MutableSkillStore : ISkillStore
+    {
+        private readonly Dictionary<string, Dictionary<string, string>> _skills = new(StringComparer.Ordinal);
+
+        public void Set(string slug, params (string Path, string Content)[] resources)
+            => _skills[slug] = resources.ToDictionary(r => r.Path, r => r.Content);
+
+        public void Remove(string slug) => _skills.Remove(slug);
+
+        public Task<List<SkillDefinition>> GetAllAsync(CancellationToken ct = default)
+            => Task.FromResult(_skills.Select(kv => new SkillDefinition
+            {
+                Slug = kv.Key,
+                Name = kv.Key,
+                Resources = new Dictionary<string, string>(kv.Value)
+            }).ToList());
+
+        public Task<SkillDefinition?> GetBySlugAsync(string slug, CancellationToken ct = default)
+            => Task.FromResult<SkillDefinition?>(null);
     }
 
     [Fact]
@@ -225,5 +313,32 @@ public class ThreadDataProvisionerTests : IDisposable
 
         Assert.Null(new DirectoryInfo(state.SkillsPath).LinkTarget);
         Assert.True(File.Exists(Path.Combine(state.SkillsPath, store.Slug, "scripts", "run.py")));
+    }
+
+    /// <summary>
+    /// 哨兵若是链接（线程根对容器用户可写的部署里，容器能把它换成指向宿主文件的链接），本进程读写它就是读写链接目标：
+    /// 技能一变化，刷新时的写入会以本进程身份覆盖那个宿主文件。只删链接本身，按未接线重来。
+    /// </summary>
+    [SymlinkFact]
+    public async Task Provision_MarkerThatIsALink_IsReplaced_AndItsTargetIsNotWritten()
+    {
+        var options = SandboxOptions(_root);
+        var store = new CountingSkillStore();
+        var provisioner = CreateProvisioner(options, store);
+        var state = State(options);
+        new VirtualPathTranslator(_root).EnsureThreadDirectories(_threadId);
+
+        var outside = Path.Combine(_root, "_host");
+        Directory.CreateDirectory(outside);
+        var hostFile = Path.Combine(outside, "config.json");
+        File.WriteAllText(hostFile, "host file");
+        var marker = Path.Combine(state.ThreadDirectory, ".skills_wired");
+        File.CreateSymbolicLink(marker, hostFile);
+
+        await provisioner.ProvisionAsync(_threadId, state);
+
+        Assert.Equal("host file", File.ReadAllText(hostFile));
+        Assert.Null(new FileInfo(marker).LinkTarget);
+        Assert.StartsWith("copied at", File.ReadAllText(marker));
     }
 }

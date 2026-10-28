@@ -6,8 +6,10 @@ namespace Tnzi.Payment.Providers;
 /// <remarks>
 /// 该渠道没有任何自动化能力，只负责把订单挂成"待确认收款"：
 /// 建单即返回 Pending，收款由运营在管理端核对银行流水后调
-/// <c>POST /admin/payments/{tradeNo}/confirm</c> 手动确认；退款同样走线下，
-/// 由运营在打款后手动登记，因此这里显式拒绝渠道退款而不是假装成功。
+/// <c>POST /admin/payments/{tradeNo}/confirm</c> 手动确认。退款只能在系统外把钱打回去，
+/// 这里显式拒绝渠道退款而不是假装成功：对线下支付发起的退款一律以 <c>Failed</c> 结束。
+/// ★ 系统里<b>没有</b>登记线下退款的入口（没有与收款确认对称的「确认线下退款」），线下打款退回之后，
+/// 这笔支付在统计与对账导出里仍是全额收入，要靠运营在系统外核对。
 /// <para>
 /// 与测试渠道（<see cref="NullProvider"/>）的本质区别：Null 会自说自话地宣称"支付成功"，
 /// 所以必须被生产门控关掉；Offline 从不自动置成功，任何一笔到账都需要人工凭据，可安全用于生产。
@@ -47,7 +49,7 @@ public class OfflineProvider : IPaymentProvider
     /// <summary>
     /// 线下渠道没有可查询的外部状态，本地状态即唯一真值，原样返回 Pending 让调用方不改写本地状态。
     /// </summary>
-    public Task<Result<PaymentProviderQueryResult>> QueryPaymentAsync(string tradeNo)
+    public Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
     {
         return Task.FromResult(Result.Success(new PaymentProviderQueryResult
         {
@@ -55,9 +57,6 @@ public class OfflineProvider : IPaymentProvider
             Status = PaymentStatus.Pending
         }));
     }
-
-    public Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
-        => QueryPaymentAsync(tradeNo);
 
     public Task<Result<PaymentProviderRefundResult>> RefundAsync(PaymentProviderRefundDto input)
     {

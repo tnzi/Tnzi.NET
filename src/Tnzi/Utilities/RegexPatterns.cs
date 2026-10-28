@@ -5,13 +5,13 @@ namespace Tnzi.Utilities;
 /// </summary>
 /// <remarks>
 /// ★这里的模式一律**不带锚点**（无 <c>^</c>/<c>$</c>），用途是从一段自由文本里**找出**目标片段，
-/// 配合 <c>StringExtensions.MatchAll(pattern)</c> / <c>StringExtensions.ReplaceRegex(...)</c> 使用。
+/// 配合 <c>StringExtensions.Matches(pattern)</c> / <c>StringExtensions.ReplaceRegex(...)</c> 使用。
 ///
 /// ⚠️ **不要拿它们做输入校验**：<c>Regex.IsMatch("随便什么 a@b.com 后面还有一堆", Email)</c> 为 true
 /// —— 只要文本里**含有**一个邮箱就命中。校验请走带锚点的专用入口：
 /// <list type="bullet">
 /// <item>邮箱 → <c>StringExtensions.IsEmail()</c> 或 <c>[Email]</c> 特性</item>
-/// <item>手机号 → <c>StringExtensions.IsPhoneNumber()</c> 或 <c>[Phone]</c> 特性</item>
+/// <item>北美电话号码（NANP）→ <c>StringExtensions.IsPhoneNumber()</c> 或 <c>[Phone]</c> 特性</item>
 /// <item>用户名 / 口令 → <c>[Username]</c> / <c>[Password]</c> 特性</item>
 /// </list>
 /// </remarks>

@@ -60,4 +60,9 @@ public class ModelCostRate
     /// 缓存输入 Token 成本（美元/百万 Token，可选，通常为正常输入成本的 10-50%）
     /// </summary>
     public decimal? CachedInputCostPer1MTokens { get; set; }
+
+    /// <summary>
+    /// 写入缓存的 Token 成本（美元/百万 Token，可选；Anthropic 的 5 分钟缓存是输入价的 1.25 倍）。不配时按输入价计。
+    /// </summary>
+    public decimal? CacheWriteCostPer1MTokens { get; set; }
 }

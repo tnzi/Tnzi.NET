@@ -40,3 +40,16 @@ _api.setAPIModule('', {
   prepare: () => [],
   send: () => {},
 })
+
+// Lazy sections. Pages pull heavy sections in with `defineAsyncComponent(() =>
+// import(...))` - the settings page's Advanced section loads the whole
+// Parameters CRUD page that way. A test that makes such a section active and
+// then ends leaves the import resolving after vitest has torn the environment
+// down, and vitest 5 reports that as an unhandled EnvironmentTeardownError: a
+// red run with every test passing. Waiting for in-flight dynamic imports at the
+// end of each test closes the window; with nothing pending it resolves at once.
+import { afterEach, vi } from 'vitest'
+
+afterEach(async () => {
+  await vi.dynamicImportSettled()
+})

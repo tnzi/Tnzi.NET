@@ -197,6 +197,50 @@ public class ShareLinkTests : WorkspaceIntegrationTestBase
         Assert.Equal(1, persisted!.FailedAttemptCount);
     }
 
+    /// <summary>
+    /// ★★ A burst of guesses all read the link while it is still enabled. The cap has to be enforced by the
+    /// count itself, taken atomically before the password is compared, not by that snapshot: here the
+    /// attempts allowed are already used up while the link is not disabled yet (the state a burst leaves
+    /// behind before the first failure lands), and even the right password must not get in.
+    /// </summary>
+    [Fact]
+    public async Task WhenEveryAllowedAttemptIsTaken_EvenTheRightPasswordIsRefused_BeforeTheLinkIsDisabled()
+    {
+        var file = await UploadPrivateAsync();
+        StorageOptions.Share.MaxFailedPasswordAttempts = 3;
+        var shares = CreateShareService();
+        var share = (await shares.CreateShareAsync(file.Id, password: "right")).Data!;
+        await DbContext.Set<FileShare>().Where(s => s.Id == share.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.FailedAttemptCount, 3));
+        DbContext.ChangeTracker.Clear();
+
+        Assert.False((await shares.ValidateShareAccessAsync(share.ShareToken, "right")).Data);
+    }
+
+    /// <summary>
+    /// The attempt is counted before the password is compared, by one atomic increment, so concurrent guesses
+    /// cannot lose each other's increments. A wrong guess against a link whose count was raised by another
+    /// request after this one could have read it still lands on top of that count.
+    /// </summary>
+    [Fact]
+    public async Task EachWrongGuess_AddsToTheStoredCount_NotToAStaleCopy()
+    {
+        var file = await UploadPrivateAsync();
+        StorageOptions.Share.MaxFailedPasswordAttempts = 5;
+        var shares = CreateShareService();
+        var share = (await shares.CreateShareAsync(file.Id, password: "right")).Data!;
+
+        await shares.ValidateShareAccessAsync(share.ShareToken, "wrong");
+        await DbContext.Set<FileShare>().Where(s => s.Id == share.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.FailedAttemptCount, x => x.FailedAttemptCount + 2));
+        await shares.ValidateShareAccessAsync(share.ShareToken, "wrong");
+
+        using var scope = ServiceProvider.CreateScope();
+        var persisted = await scope.ServiceProvider.GetRequiredService<IRepository<FileShare, Guid>>().GetAsync(share.Id);
+        Assert.Equal(4, persisted!.FailedAttemptCount);
+        Assert.True(persisted.IsEnabled);
+    }
+
     [Fact]
     public async Task ASuccessfulUnlock_ResetsTheFailureCounter()
     {

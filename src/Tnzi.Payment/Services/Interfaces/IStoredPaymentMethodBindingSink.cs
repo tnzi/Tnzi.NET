@@ -35,13 +35,23 @@ public interface IStoredPaymentMethodBindingSink
     /// 用户绑定了一张（默认）支付方式。
     /// </summary>
     /// <remarks>
-    /// 只在这张卡成为该用户该渠道的**默认卡**时调用 —— 与拆分前的触发条件逐字相同。
+    /// 只在这张卡成为该账户该渠道的**默认卡**时调用：与拆分前的触发条件相同（那时账户就是用户）。
     /// 实现方应当只补齐「还没有卡」的记录，不要覆盖用户已经明确选过的绑定。
     /// </remarks>
-    /// <param name="userId">支付方式归属的用户。</param>
+    /// <param name="account">支付方式归属的计费账户。</param>
     /// <param name="method">刚刚绑定或被设为默认的支付方式。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    Task OnBoundAsync(Guid userId, StoredPaymentMethod method, CancellationToken cancellationToken = default);
+    Task OnBoundAsync(BillingAccountRef account, StoredPaymentMethod method, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 一张支付方式的展示信息（卡组织、尾号、有效期）在渠道侧变了，凭据本身不变。默认什么都不做。
+    /// </summary>
+    /// <remarks>
+    /// 实现方只刷新自己存的展示快照，不要因此改绑定关系。
+    /// </remarks>
+    /// <param name="method">已更新过展示信息的支付方式。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    Task OnUpdatedAsync(StoredPaymentMethod method, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     /// <summary>
     /// 一张支付方式失效了（用户主动解绑，或渠道侧吊销回调）。

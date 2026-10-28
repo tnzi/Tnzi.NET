@@ -5,32 +5,33 @@ namespace Tnzi.AI.Tests.Engine;
 /// <summary>
 /// ToolInterruptBehavior 测试 - 验证 Cancel 和 GracefulShutdown 的取消传播行为
 /// </summary>
+/// <remarks>
+/// ★两种模式的差别直接看「外部 <c>Cancel()</c> 返回的那一刻，工具手里的 token 是不是已经取消」，
+/// 而不是用挂钟量工具多久收到取消：挂钟把工具开始到外部发出取消之间的调度延迟也算了进去，
+/// 满载机器上光这一段就是好几秒，量到的是机器有多忙。取消回调在 <c>Cancel()</c> 里同步执行，
+/// 所以这个时刻的状态是确定的；取消之前先等工具真的开始执行，否则观察的根本不是工具。
+/// </remarks>
 public class ToolInterruptBehaviorTests
 {
+    /// <summary>等工具真的开始执行的上限。条件一成立立即返回，按满载机器定。</summary>
+    private static readonly TimeSpan ToolStartBound = TimeSpan.FromSeconds(30);
+
     [Fact]
     public async Task GracefulShutdown_GivesGracePeriodAfterCancellation()
     {
-        // Arrange: 创建一个工具，在取消时记录宽限期是否生效
-        var toolInvoked = false;
-        var gracePeriodObserved = false;
+        // Arrange: 工具把自己拿到的 token 交出来，测试据此观察宽限期
+        var toolStarted = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var tool = AIFunctionFactory.Create(async (CancellationToken ct) =>
         {
-            toolInvoked = true;
-            // 等待外部取消
+            toolStarted.TrySetResult(ct);
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(30), ct);
             }
             catch (OperationCanceledException)
             {
-                // 取消后，检查是否还有宽限期（GracefulShutdown 应在取消后再给 5s）
-                // 创建一个短延迟来验证 token 还没被取消（宽限期内）
-                // 此处不应该立即抛出 - 宽限期应该还在
-                gracePeriodObserved = !ct.IsCancellationRequested || true;
-                // 实际上 GracefulShutdown 会在外部CT取消后延迟取消 linked token,
-                // 所以当 linked token 取消时（进入这个 catch），说明宽限期已到。
-                // 关键验证点：工具执行时间应显著长于立即取消
+                // 宽限期到了 token 才会取消，走到这里说明宽限期已经用完。
                 return "cleanup_done";
             }
             return "completed_normally";
@@ -73,38 +74,29 @@ public class ToolInterruptBehaviorTests
         var cts = new CancellationTokenSource();
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
 
-        // Act: 短暂延迟后取消 - 工具应获得宽限期
+        // Act: 等工具真的开始执行再取消
         var executeTask = executor.ExecuteAsync(messages, cts.Token);
-        await Task.Delay(100); // 等待工具开始执行
-        cts.Cancel(); // 触发取消
+        var toolToken = await WaitForToolStartAsync(toolStarted, executeTask);
+        cts.Cancel();
 
-        // GracefulShutdown 工具应在宽限期后抛出 OperationCanceledException
-        // 但由于 AgentExecutor 传播取消，整个 ExecuteAsync 会抛出
+        // Assert: 外部已取消，工具的 token 还没有：宽限期在生效
+        toolToken.IsCancellationRequested.ShouldBeFalse("GracefulShutdown must give the tool a grace period after cancellation");
+
+        // 宽限期过后取消照样传播：整个 ExecuteAsync 抛出，工具的 token 也已取消
         await Should.ThrowAsync<OperationCanceledException>(async () => await executeTask);
-
-        // Assert
-        toolInvoked.ShouldBeTrue("Tool should have been invoked");
+        toolToken.IsCancellationRequested.ShouldBeTrue("the grace period must end in cancellation");
     }
 
     [Fact]
     public async Task Cancel_PropagatesImmediately()
     {
-        // Arrange: 创建一个工具，验证取消信号立即传播
-        var cancellationReceivedTime = DateTime.MinValue;
-        var toolStartTime = DateTime.MinValue;
+        // Arrange: 工具把自己拿到的 token 交出来，测试据此观察取消是否立即传播
+        var toolStarted = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var tool = AIFunctionFactory.Create(async (CancellationToken ct) =>
         {
-            toolStartTime = DateTime.UtcNow;
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(30), ct);
-            }
-            catch (OperationCanceledException)
-            {
-                cancellationReceivedTime = DateTime.UtcNow;
-                throw;
-            }
+            toolStarted.TrySetResult(ct);
+            await Task.Delay(TimeSpan.FromSeconds(30), ct);
             return "should_not_reach";
         }, "cancel_tool");
 
@@ -140,20 +132,28 @@ public class ToolInterruptBehaviorTests
         var cts = new CancellationTokenSource();
         var messages = new List<ChatMessage> { new(ChatRole.User, "test") };
 
-        // Act: 短暂延迟后取消
+        // Act: 等工具真的开始执行再取消
         var executeTask = executor.ExecuteAsync(messages, cts.Token);
-        await Task.Delay(100);
+        var toolToken = await WaitForToolStartAsync(toolStarted, executeTask);
         cts.Cancel();
 
+        // Assert: Cancel() 一返回，工具的 token 就已取消，没有任何宽限期
+        toolToken.IsCancellationRequested.ShouldBeTrue("Cancel mode should propagate cancellation immediately without grace period");
         await Should.ThrowAsync<OperationCanceledException>(async () => await executeTask);
+    }
 
-        // Assert: Cancel 模式下取消应立即传播（不应有宽限期延迟）
-        if (cancellationReceivedTime > DateTime.MinValue && toolStartTime > DateTime.MinValue)
-        {
-            var elapsed = cancellationReceivedTime - toolStartTime;
-            // Cancel 模式应在 2 秒内收到取消（远小于 GracefulShutdown 的 5 秒宽限期）
-            elapsed.TotalSeconds.ShouldBeLessThan(2, "Cancel mode should propagate cancellation immediately without grace period");
-        }
+    /// <summary>
+    /// 等工具开始执行，返回它拿到的 token。代理运行先结束（工具根本没被调用）立即判失败，
+    /// 不必等满上限。
+    /// </summary>
+    private static async Task<CancellationToken> WaitForToolStartAsync(
+        TaskCompletionSource<CancellationToken> toolStarted, Task executeTask)
+    {
+        var first = await Task.WhenAny(toolStarted.Task, executeTask, Task.Delay(ToolStartBound));
+        first.ShouldBe(
+            toolStarted.Task,
+            $"the tool never started (agent run {executeTask.Status}: {executeTask.Exception?.GetBaseException().Message})");
+        return await toolStarted.Task;
     }
 
     [Fact]

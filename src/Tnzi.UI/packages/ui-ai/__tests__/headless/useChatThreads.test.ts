@@ -25,7 +25,7 @@ function api(overrides: Record<string, unknown> = {}) {
       succeeded: true,
       data: { items: [{ id: 't1', title: 'Existing', lastActivityTime: '2026-08-02T10:00:00Z' }] },
     })),
-    getDetail: vi.fn(async () => ({
+    getMessages: vi.fn(async () => ({
       succeeded: true,
       data: {
         messages: [
@@ -42,7 +42,12 @@ function api(overrides: Record<string, unknown> = {}) {
       refreshAccessToken: vi.fn(async () => 'fresh'),
       reportUnauthorized: vi.fn(),
     },
-    chatApi: { getChatStreamUrl: () => '/api/ai/chat/stream' },
+    chatApi: {
+      getChatStreamUrl: () => '/api/ai/chat/stream',
+      getActiveRuns: vi.fn(async () => ({ succeeded: true, data: [] })),
+      getRunStreamUrl: (runId: string, from = 0) => `/api/ai/chat/runs/${runId}/stream?fromSequence=${from}`,
+      cancelRun: vi.fn(async () => ({ succeeded: true })),
+    },
     threadApi,
   } as never;
 }
@@ -65,7 +70,7 @@ describe('useChatThreads', () => {
     const deps = api({ getList: vi.fn(async () => ({ succeeded: false, message: 'nope' })) });
     const chat = useChatThreads({ ...(deps as never), onError } as never);
     await chat.loadThreads();
-    expect(onError).toHaveBeenCalledWith('nope');
+    expect(onError).toHaveBeenCalledWith('nope', expect.objectContaining({ operation: 'load-threads' }));
   });
 
   it('opens a thread and maps its messages', async () => {
@@ -80,7 +85,7 @@ describe('useChatThreads', () => {
     const chat = useChatThreads(deps);
     await chat.selectThread('t1');
     await chat.selectThread('t1');
-    expect((deps as unknown as { threadApi: { getDetail: { mock: { calls: unknown[] } } } }).threadApi.getDetail.mock.calls).toHaveLength(1);
+    expect((deps as unknown as { threadApi: { getMessages: { mock: { calls: unknown[] } } } }).threadApi.getMessages.mock.calls).toHaveLength(1);
   });
 
   it('newChat drops back to the empty state without touching the server', () => {
@@ -127,14 +132,33 @@ describe('useChatThreads', () => {
     /** A sidebar row for a conversation that does not exist is worse than none. */
     it('rolls the optimistic row back when the stream fails', async () => {
       streamRunner = async (opts) => {
-        (opts.onError as (e: Error) => void)(new Error('boom'));
+        (opts.onError as (e: Error) => void)(new ChatStreamRequestError(500));
         return { text: '' };
       };
       const chat = useChatThreads(api());
       await chat.send('doomed');
       expect(chat.threads.value).toEqual([]);
       expect(chat.messages.value[1].status).toBe('error');
-      expect(chat.messages.value[1].error).toContain('boom');
+      expect(chat.messages.value[1].error).toContain('500');
+    });
+
+    /**
+     * A connection lost before any event named a thread: nothing to ask the server about, so
+     * the turn fails, but the server may have kept a thread, so the list is read again (as
+     * after Stop) instead of being left as it was.
+     */
+    it('a connection lost before the first event fails the turn and re-reads the list', async () => {
+      streamRunner = async (opts) => {
+        (opts.onError as (e: Error) => void)(new TypeError('Load failed'));
+        return { text: '' };
+      };
+      const deps = api();
+      const chat = useChatThreads(deps);
+      await chat.send('doomed');
+      expect(chat.threads.value.some((t) => t.pending)).toBe(false);
+      expect((deps as { threadApi: { getList: ReturnType<typeof vi.fn> } }).threadApi.getList).toHaveBeenCalled();
+      expect(chat.messages.value[1].status).toBe('error');
+      expect(chat.messages.value[1].error).toContain('Load failed');
     });
 
     it('keeps the row and adopts the real thread id when the backend commits one', async () => {
@@ -245,7 +269,7 @@ describe('useChatThreads', () => {
     await chat.loadThreads();
     await chat.deleteThread('t1');
     expect(chat.threads.value).toHaveLength(1);
-    expect(onError).toHaveBeenCalledWith('denied');
+    expect(onError).toHaveBeenCalledWith('denied', expect.objectContaining({ operation: 'delete-thread' }));
   });
 
   /**
@@ -521,7 +545,7 @@ describe('useChatThreads', () => {
       expect(aborted).toBe(false);
       expect(chat.isStreaming.value).toBe(true);
       expect(chat.activeThreadId.value).toBeUndefined();
-      expect((deps as unknown as { threadApi: { getDetail: ReturnType<typeof vi.fn> } }).threadApi.getDetail).not.toHaveBeenCalled();
+      expect((deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages).not.toHaveBeenCalled();
 
       release?.();
       await turn;
@@ -531,7 +555,7 @@ describe('useChatThreads', () => {
     it('a stale detail response is discarded when another thread was selected meanwhile', async () => {
       const resolvers = new Map<string, (v: unknown) => void>();
       const deps = api({
-        getDetail: vi.fn(
+        getMessages: vi.fn(
           (id: string) => new Promise((resolve) => resolvers.set(id, resolve)),
         ),
       });
@@ -560,7 +584,7 @@ describe('useChatThreads', () => {
       const onError = vi.fn();
       const resolvers = new Map<string, (v: unknown) => void>();
       const deps = api({
-        getDetail: vi.fn(
+        getMessages: vi.fn(
           (id: string) => new Promise((resolve) => resolvers.set(id, resolve)),
         ),
       });
@@ -575,6 +599,104 @@ describe('useChatThreads', () => {
       await a;
 
       expect(onError).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `selectThread` moved `activeThreadId` before the load and never put it
+     * back: a failed load left A's transcript on screen under B's id, the next
+     * message was persisted into B, and clicking B again did nothing because
+     * it already counted as open.
+     */
+    it('a failed load leaves the open conversation as it was, and the row can be retried', async () => {
+      const onError = vi.fn();
+      const deps = api();
+      const chat = useChatThreads({ ...(deps as never), onError } as never);
+      await chat.selectThread('t1');
+      const getMessages = (deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages;
+      getMessages.mockResolvedValueOnce({ succeeded: false, message: 'Network error' });
+
+      await chat.selectThread('B');
+
+      expect(onError).toHaveBeenCalledWith('Network error', expect.objectContaining({ operation: 'load-thread' }));
+      expect(chat.activeThreadId.value).toBe('t1');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['hi']);
+
+      // Not "already open": the retry reaches the server and switches.
+      getMessages.mockResolvedValueOnce({
+        succeeded: true,
+        data: { messages: [{ id: 'b1', role: 'user', content: 'from B', creationTime: '' }] },
+      });
+      await chat.selectThread('B');
+      expect(chat.activeThreadId.value).toBe('B');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['from B']);
+    });
+
+    it('the open conversation and its id switch together, when the transcript arrives', async () => {
+      let resolveB: ((v: unknown) => void) | undefined;
+      const deps = api();
+      const chat = useChatThreads(deps);
+      await chat.selectThread('t1');
+      (deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages.mockImplementationOnce(
+        () => new Promise((resolve) => (resolveB = resolve)),
+      );
+
+      const switching = chat.selectThread('B');
+      await vi.waitFor(() => expect(resolveB).toBeDefined());
+      expect(chat.activeThreadId.value).toBe('t1');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['hi']);
+
+      resolveB!({ succeeded: true, data: { messages: [{ id: 'b1', role: 'user', content: 'from B', creationTime: '' }] } });
+      await switching;
+      expect(chat.activeThreadId.value).toBe('B');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['from B']);
+    });
+
+    // The switch waits for the transcript, so the clicked row is not "open" yet:
+    // deleting it in that window must cancel the switch rather than land the
+    // user in a conversation that no longer exists.
+    it('deleting the thread still loading cancels the switch to it', async () => {
+      let resolveB: ((v: unknown) => void) | undefined;
+      const deps = api();
+      const chat = useChatThreads(deps);
+      await chat.selectThread('t1');
+      (deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages.mockImplementationOnce(
+        () => new Promise((resolve) => (resolveB = resolve)),
+      );
+
+      const switching = chat.selectThread('B');
+      await vi.waitFor(() => expect(resolveB).toBeDefined());
+      await chat.deleteThread('B');
+      resolveB!({ succeeded: true, data: { messages: [{ id: 'b1', role: 'user', content: 'from B', creationTime: '' }] } });
+      await switching;
+
+      expect(chat.activeThreadId.value).toBe('t1');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['hi']);
+    });
+
+    it('a send while another thread loads stays in the open conversation and cancels the switch', async () => {
+      let resolveB: ((v: unknown) => void) | undefined;
+      let body: { threadId?: string | null } | undefined;
+      streamRunner = async (opts) => {
+        body = opts.body as { threadId?: string | null };
+        return { text: 'answer' };
+      };
+      const deps = api();
+      const chat = useChatThreads(deps);
+      await chat.selectThread('t1');
+      (deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages.mockImplementationOnce(
+        () => new Promise((resolve) => (resolveB = resolve)),
+      );
+
+      const switching = chat.selectThread('B');
+      await vi.waitFor(() => expect(resolveB).toBeDefined());
+      await chat.send('continuing');
+      resolveB!({ succeeded: true, data: { messages: [{ id: 'b1', role: 'user', content: 'from B', creationTime: '' }] } });
+      await switching;
+
+      expect(body?.threadId).toBe('t1');
+      expect(chat.activeThreadId.value).toBe('t1');
+      // The turn is still on screen, under the conversation it went to.
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['hi', 'continuing', 'answer']);
     });
 
     it('aborting the first turn removes the optimistic row and refreshes the list', async () => {
@@ -604,7 +726,7 @@ describe('useChatThreads', () => {
       const chat = useChatThreads(deps);
       await chat.selectThread('pending_123_4');
       expect(chat.activeThreadId.value).toBeUndefined();
-      expect((deps as unknown as { threadApi: { getDetail: ReturnType<typeof vi.fn> } }).threadApi.getDetail).not.toHaveBeenCalled();
+      expect((deps as unknown as { threadApi: { getMessages: ReturnType<typeof vi.fn> } }).threadApi.getMessages).not.toHaveBeenCalled();
     });
 
     it('deleting a pending row is a no-op', async () => {
@@ -612,6 +734,151 @@ describe('useChatThreads', () => {
       const chat = useChatThreads(deps);
       await chat.deleteThread('pending_123_4');
       expect((deps as unknown as { threadApi: { delete: ReturnType<typeof vi.fn> } }).threadApi.delete).not.toHaveBeenCalled();
+    });
+  });
+  /**
+   * `activeThreadId` only moves when the transcript arrives, so before
+   * `openingThreadId` a click on a slow thread changed nothing on screen for the
+   * whole load, and two paths silently threw a click away: picking the
+   * conversation already on screen while another loaded (the other one still
+   * landed), and the same while a new conversation's first answer streamed.
+   */
+  describe('opening a thread', () => {
+    type Deps = { threadApi: { getMessages: ReturnType<typeof vi.fn> } };
+    const transcript = (content: string) => ({
+      succeeded: true,
+      data: { messages: [{ id: `${content}-1`, role: 'user', content, creationTime: '' }] },
+    });
+
+    /** A thread API whose loads wait until the test answers them. */
+    function deferredLoads() {
+      const pending = new Map<string, (v: unknown) => void>();
+      const deps = api({
+        getMessages: vi.fn((id: string) => new Promise((resolve) => pending.set(id, resolve))),
+      });
+      return { deps, pending };
+    }
+
+    it('names the thread being opened at once and clears it with the switch', async () => {
+      const { deps, pending } = deferredLoads();
+      const chat = useChatThreads(deps);
+
+      const opening = chat.selectThread('B');
+      expect(chat.openingThreadId.value).toBe('B');
+      expect(chat.activeThreadId.value).toBeUndefined();
+
+      await vi.waitFor(() => expect(pending.has('B')).toBe(true));
+      pending.get('B')!(transcript('from B'));
+      await opening;
+
+      expect(chat.openingThreadId.value).toBeUndefined();
+      expect(chat.activeThreadId.value).toBe('B');
+    });
+
+    it('clears it when the load fails, and when the load throws', async () => {
+      const onError = vi.fn();
+      const deps = api({
+        getMessages: vi
+          .fn()
+          .mockResolvedValueOnce({ succeeded: false, message: 'Network error' })
+          .mockRejectedValueOnce(new Error('offline')),
+      });
+      const chat = useChatThreads({ ...(deps as never), onError } as never);
+
+      await chat.selectThread('B');
+      expect(chat.openingThreadId.value).toBeUndefined();
+
+      await chat.selectThread('C');
+      expect(chat.openingThreadId.value).toBeUndefined();
+      expect(chat.activeThreadId.value).toBeUndefined();
+      expect(onError).toHaveBeenCalledTimes(2);
+      expect(onError).toHaveBeenLastCalledWith('offline', expect.objectContaining({ operation: 'load-thread' }));
+    });
+
+    it('picking the open conversation while another loads keeps it, instead of being overtaken', async () => {
+      const deps = api();
+      const chat = useChatThreads(deps);
+      await chat.selectThread('t1');
+      let resolveB: ((v: unknown) => void) | undefined;
+      (deps as unknown as Deps).threadApi.getMessages.mockImplementationOnce(
+        () => new Promise((resolve) => (resolveB = resolve)),
+      );
+
+      const switching = chat.selectThread('B');
+      await vi.waitFor(() => expect(resolveB).toBeDefined());
+      await chat.selectThread('t1');
+      expect(chat.openingThreadId.value).toBeUndefined();
+
+      resolveB!(transcript('from B'));
+      await switching;
+      expect(chat.activeThreadId.value).toBe('t1');
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['hi']);
+    });
+
+    it('picking the optimistic row while another loads keeps the new conversation', async () => {
+      let release: (() => void) | undefined;
+      streamRunner = async () => {
+        await new Promise<void>((r) => (release = r));
+        return { text: 'done' };
+      };
+      const { deps, pending } = deferredLoads();
+      const chat = useChatThreads(deps);
+      const turn = chat.send('first');
+      await vi.waitFor(() => expect(release).toBeDefined());
+      const pendingRow = chat.threads.value[0]!.id;
+
+      const switching = chat.selectThread('B');
+      await vi.waitFor(() => expect(pending.has('B')).toBe(true));
+      await chat.selectThread(pendingRow);
+      expect(chat.openingThreadId.value).toBeUndefined();
+
+      pending.get('B')!(transcript('from B'));
+      await switching;
+      expect(chat.isStreaming.value).toBe(true);
+      expect(chat.messages.value.map((m) => m.content)).toEqual(['first', '']);
+
+      release?.();
+      await turn;
+    });
+
+    it('a second click on the thread being opened waits for the same load', async () => {
+      const { deps, pending } = deferredLoads();
+      const chat = useChatThreads(deps);
+
+      const first = chat.selectThread('B');
+      const second = chat.selectThread('B');
+      expect(second).toBe(first);
+      await vi.waitFor(() => expect(pending.has('B')).toBe(true));
+      expect((deps as unknown as Deps).threadApi.getMessages).toHaveBeenCalledTimes(1);
+
+      pending.get('B')!(transcript('from B'));
+      await second;
+      expect(chat.activeThreadId.value).toBe('B');
+    });
+
+    it('a newer click takes over the highlight from the one still loading', async () => {
+      const { deps } = deferredLoads();
+      const chat = useChatThreads(deps);
+      void chat.selectThread('B');
+      void chat.selectThread('C');
+      expect(chat.openingThreadId.value).toBe('C');
+    });
+
+    it('New chat, a send and deleting the loading thread all end the opening', async () => {
+      const { deps } = deferredLoads();
+      const chat = useChatThreads(deps);
+
+      void chat.selectThread('B');
+      chat.newChat();
+      expect(chat.openingThreadId.value).toBeUndefined();
+
+      void chat.selectThread('B');
+      await chat.send('carry on here');
+      expect(chat.openingThreadId.value).toBeUndefined();
+
+      void chat.selectThread('C');
+      await chat.deleteThread('C');
+      expect(chat.openingThreadId.value).toBeUndefined();
     });
   });
   /**
@@ -666,6 +933,48 @@ describe('useChatThreads', () => {
       expect(chat.messages.value[1].toolCalls?.map((c) => c.durationMs)).toEqual([1, 2]);
     });
 
+    /**
+     * External CLI agents send a call's start and its result as two events
+     * with the same id, and the start event carries the detail as well as the
+     * name. One card per call, settled by id.
+     */
+    it('a call with an id is one entry from start to result, even when the same tool runs twice', async () => {
+      streamRunner = async (opts) => {
+        const onToolCall = opts.onToolCall as Cb<string[]>;
+        const onEvent = opts.onEvent as Cb<Record<string, unknown>>;
+        const start = (id: string) => {
+          const event = { isToolCall: true, toolCallNames: ['shot'], toolCalls: [{ id, name: 'shot', status: 'running', isSuccess: true }] };
+          onEvent(event);
+          onToolCall(['shot']);
+        };
+        start('a');
+        start('b');
+        onEvent({ toolCalls: [{ id: 'b', name: 'shot', status: 'completed', isSuccess: true, durationMs: 2 }] });
+        onEvent({ toolCalls: [{ id: 'a', name: 'shot', status: 'failed', isSuccess: false, durationMs: 1 }] });
+        return { text: 'ok' };
+      };
+      const chat = useChatThreads(api());
+      await chat.send('q');
+      expect(chat.messages.value[1].toolCalls?.map((c) => [c.id, c.status])).toEqual([
+        ['a', 'failed'],
+        ['b', 'completed'],
+      ]);
+    });
+
+    it('a name-only start still adds its entry after an event that carried no start detail', async () => {
+      streamRunner = async (opts) => {
+        const onToolCall = opts.onToolCall as Cb<string[]>;
+        const onEvent = opts.onEvent as Cb<Record<string, unknown>>;
+        onEvent({ toolCalls: [{ id: 'a', name: 'shot', status: 'completed', isSuccess: true }] });
+        onEvent({ isToolCall: true, toolCallNames: ['search'] });
+        onToolCall(['search']);
+        return { text: 'ok' };
+      };
+      const chat = useChatThreads(api());
+      await chat.send('q');
+      expect(chat.messages.value[1].toolCalls?.map((c) => c.name)).toEqual(['shot', 'search']);
+    });
+
     it('onAgentSwitch stamps the answering agent on the row', async () => {
       streamRunner = async (opts) => {
         (opts.onAgentSwitch as Cb<string>)('Researcher');
@@ -718,7 +1027,8 @@ describe('useChatThreads', () => {
    */
   describe('send with attachments', () => {
     const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
-    const pdf = () => new File([new Uint8Array([1, 2, 3])], 'doc.pdf', { type: 'application/pdf' });
+    const pdf = () => new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], 'doc.pdf', { type: 'application/pdf' });
+    const docx = () => new File([new Uint8Array([1, 2, 3])], 'notes.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 
     it('a send with files reaches streamChat with text + image content parts', async () => {
       let body: Record<string, unknown> | undefined;
@@ -732,10 +1042,10 @@ describe('useChatThreads', () => {
       expect(body?.message).toBe('what is this?');
       expect(body?.content).toEqual([
         { type: 'text', text: 'what is this?' },
-        { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png' },
+        { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png', fileName: 'shot.png' },
       ]);
       expect(chat.messages.value[0].attachments).toEqual([
-        { type: 'image', fileName: 'shot.png', mediaType: 'image/png', base64Data: 'iVBORw==' },
+        { type: 'image', fileName: 'shot.png', mediaType: 'image/png', base64Data: 'iVBORw==', size: 4 },
       ]);
       expect(chat.messages.value[1].content).toBe('a cat');
     });
@@ -758,7 +1068,7 @@ describe('useChatThreads', () => {
       expect(body?.message).toBe('[Attached: shot.png]');
       expect(body?.content).toEqual([
         { type: 'text', text: '[Attached: shot.png]' },
-        { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png' },
+        { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png', fileName: 'shot.png' },
       ]);
       expect(chat.messages.value).toHaveLength(2);
       // The user row shows what was typed (nothing) plus the attachment chip.
@@ -777,7 +1087,22 @@ describe('useChatThreads', () => {
       expect('content' in (body ?? {})).toBe(false);
     });
 
-    it('refuses a non-image file through onError and sends nothing, keeping the draft', async () => {
+    it('sends a PDF inline as a document part', async () => {
+      let body: Record<string, unknown> | undefined;
+      streamRunner = async (opts) => {
+        body = opts.body as Record<string, unknown>;
+        return { text: 'ok' };
+      };
+      const chat = useChatThreads(api());
+      await chat.send('summarise', [pdf()]);
+      expect(body?.content).toEqual([
+        { type: 'text', text: 'summarise' },
+        { type: 'document', base64Data: 'JVBERg==', mediaType: 'application/pdf', fileName: 'doc.pdf' },
+      ]);
+      expect(chat.messages.value[0].attachments?.[0]).toMatchObject({ type: 'file', fileName: 'doc.pdf' });
+    });
+
+    it('refuses a file that is neither an image nor a PDF through onError and sends nothing, keeping the draft', async () => {
       const onError = vi.fn();
       const sent: unknown[] = [];
       streamRunner = async (opts) => {
@@ -786,15 +1111,41 @@ describe('useChatThreads', () => {
       };
       const chat = useChatThreads({ ...(api() as never), onError } as never);
       chat.inputText.value = 'summarise this';
-      await chat.send('summarise this', [pdf()]);
+      await chat.send('summarise this', [docx()]);
 
       expect(sent).toEqual([]);
       expect(onError).toHaveBeenCalledTimes(1);
-      expect(onError.mock.calls[0][0]).toContain('doc.pdf');
+      expect(onError.mock.calls[0][0]).toContain('notes.docx');
       expect(chat.messages.value).toEqual([]);
       expect(chat.threads.value).toEqual([]);
       expect(chat.isStreaming.value).toBe(false);
       expect(chat.inputText.value).toBe('summarise this');
+    });
+
+    /**
+     * A composer bound with `v-model` (TChatApp's) clears the draft the moment
+     * it emits `send`, before the attachments are read. "The draft intact on
+     * refusal" therefore has to mean the hook puts it back; otherwise a long
+     * prompt is lost with the refused file.
+     */
+    it('puts the draft back when a composer cleared it before the refusal', async () => {
+      const chat = useChatThreads({ ...(api() as never), onError: vi.fn() } as never);
+      chat.inputText.value = '';
+      await chat.send('a long prompt about the attached report', [docx()]);
+      expect(chat.messages.value).toEqual([]);
+      expect(chat.inputText.value).toBe('a long prompt about the attached report');
+    });
+
+    it('does not overwrite what the user typed while a refused upload was in flight', async () => {
+      let rejectUpload: ((err: Error) => void) | undefined;
+      const uploadFile = vi.fn(() => new Promise<{ id: string }>((_, reject) => (rejectUpload = reject)));
+      const chat = useChatThreads({ ...(api() as never), uploadFile, onError: vi.fn() } as never);
+      const turn = chat.send('first draft', [docx()]);
+      await vi.waitFor(() => expect(rejectUpload).toBeDefined());
+      chat.inputText.value = 'something new';
+      rejectUpload!(new Error('upload failed'));
+      await turn;
+      expect(chat.inputText.value).toBe('something new');
     });
 
     it('refuses an oversized attachment before the optimistic row is added', async () => {
@@ -815,7 +1166,7 @@ describe('useChatThreads', () => {
         return { text: '' };
       };
       const chat = useChatThreads({ ...(api() as never), uploadFile } as never);
-      const turn = chat.send('summarise', [pdf()]);
+      const turn = chat.send('summarise', [docx()]);
       await vi.waitFor(() => expect(releaseUpload).toBeDefined());
       expect(chat.isStreaming.value).toBe(true);
 
@@ -836,12 +1187,12 @@ describe('useChatThreads', () => {
       };
       const uploadFile = vi.fn(async (f: File) => ({ id: 'file-9', fileName: f.name }));
       const chat = useChatThreads({ ...(api() as never), uploadFile } as never);
-      await chat.send('summarise', [pdf()]);
+      await chat.send('summarise', [docx()]);
       expect(body?.content).toEqual([
         { type: 'text', text: 'summarise' },
-        { type: 'file', fileId: 'file-9', fileName: 'doc.pdf' },
+        { type: 'file', fileId: 'file-9', fileName: 'notes.docx' },
       ]);
-      expect(chat.messages.value[0].attachments).toEqual([{ type: 'file', fileId: 'file-9', fileName: 'doc.pdf' }]);
+      expect(chat.messages.value[0].attachments).toEqual([{ type: 'file', fileId: 'file-9', fileName: 'notes.docx' }]);
     });
   });
 });

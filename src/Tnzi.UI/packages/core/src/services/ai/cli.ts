@@ -45,8 +45,75 @@ export const CliAgentEventType = {
   Status: 'Status',
   Error: 'Error',
   Log: 'Log',
+  /** The CLI asks to be allowed an action ("ask me" mode, someone attending the turn). Answer with `answerPermission`. */
+  PermissionRequest: 'PermissionRequest',
+  /** A permission request got its outcome (allowed, denied, timed out, ended with the run). */
+  PermissionResolved: 'PermissionResolved',
 } as const;
 export type CliAgentEventType = (typeof CliAgentEventType)[keyof typeof CliAgentEventType];
+
+/** Where a permission request stands. */
+export const CliPermissionStatus = {
+  Pending: 'Pending',
+  Allowed: 'Allowed',
+  Denied: 'Denied',
+  /** Nobody answered within `AI:Cli:Approval:Timeout`; the CLI was told no. */
+  TimedOut: 'TimedOut',
+  /** The run ended before the answer reached the CLI; the CLI was told no. */
+  Cancelled: 'Cancelled',
+} as const;
+export type CliPermissionStatus = (typeof CliPermissionStatus)[keyof typeof CliPermissionStatus];
+
+/**
+ * Kinds of permission options (the ACP vocabulary). Only the two `allow_*` kinds allow; any other
+ * kind, including one the client does not know, is a refusal.
+ */
+export const CliPermissionOptionKind = {
+  AllowOnce: 'allow_once',
+  AllowAlways: 'allow_always',
+  RejectOnce: 'reject_once',
+  RejectAlways: 'reject_always',
+} as const;
+
+/** One answer a permission request offers. Answer with its `id`. */
+export interface CliPermissionOption {
+  id: string;
+  name: string;
+  /** One of `CliPermissionOptionKind`, or a kind the CLI added (treat as a refusal). */
+  kind: string;
+}
+
+/**
+ * A permission request (on `PermissionRequest` events) or its outcome (on `PermissionResolved` events).
+ * The tool name, tool call id, input and the CLI's description are on the event itself
+ * (`tool` / `callId` / `input` / `content`).
+ */
+export interface CliAgentPermission {
+  /** The id to answer with; the outcome event carries the same id. */
+  requestId?: string | null;
+  title?: string | null;
+  /** Why the CLI asks, when it says. */
+  reason?: string | null;
+  /** The path that triggered the request (e.g. a file outside the working directory), when there is one. */
+  blockedPath?: string | null;
+  options: CliPermissionOption[];
+  /** After this moment (UTC) an unanswered request is denied. */
+  expiresAt?: string | null;
+  /** `Pending` on requests; the outcome on outcome events. */
+  status: CliPermissionStatus;
+  /** Outcome events: the option given to the CLI (null when timed out or ended with the run). */
+  optionId?: string | null;
+  /** Outcome events: who answered (null when timed out or ended with the run). */
+  answeredBy?: string | null;
+}
+
+/** Answer to a permission request. */
+export interface CliPermissionAnswerDto {
+  /** One of the request's `options[].id`. */
+  optionId: string;
+  /** When refusing: a note handed to the agent (e.g. what to do instead). Ignored when allowing. */
+  message?: string | null;
+}
 
 /**
  * Stable failure classification.
@@ -71,6 +138,22 @@ export const CliRunFailureReason = {
   WorkspacePrepareFailed: 'WorkspacePrepareFailed',
   Cancelled: 'Cancelled',
   ToolTimeout: 'ToolTimeout',
+  /** The external CLI's own account reached its usage limit. */
+  UsageLimit: 'UsageLimit',
+  /** The usage limit this deployment set for the user was reached while the run waited in the queue. */
+  UserUsageLimit: 'UserUsageLimit',
+  /**
+   * The run's process could not be reattached after a server restart (the execution host
+   * reported it gone, or could not be reached in time). What it had written stays in the
+   * thread; the turn is not run again.
+   */
+  Interrupted: 'Interrupted',
+  /**
+   * The execution target the run was placed on (for example a user's workspace
+   * container) never came online: the deployment refused to start it, or it did
+   * not connect within the activation timeout. No process was started.
+   */
+  TargetUnavailable: 'TargetUnavailable',
 } as const;
 export type CliRunFailureReason =
   (typeof CliRunFailureReason)[keyof typeof CliRunFailureReason];
@@ -188,7 +271,15 @@ export interface CliRunRequestDto {
   agentId: string;
   prompt: string;
   threadId?: string | null;
+  /**
+   * The framework AgentRun this external run belongs to. Same rule as `priority`: kept only for
+   * callers holding `ai.cliRun.execute` (or in-process callers); anyone else's value is dropped.
+   */
   agentRunId?: string | null;
+  /**
+   * Queue priority, higher first. Applied only for callers holding `ai.cliRun.execute`
+   * (or in-process callers without a signed-in user); anyone else is queued at 0.
+   */
   priority?: number;
   /**
    * Volatile per-turn context appended to the prompt tail.
@@ -197,6 +288,12 @@ export interface CliRunRequestDto {
    * prefix, so changing it per turn invalidates the whole conversation's cache.
    */
   perTurnContext?: string | null;
+  /**
+   * Whether someone waits on this turn. In the "ask me" permission mode, attended turns hand permission
+   * requests to the user (`PermissionRequest` events); unattended ones (scheduled jobs) deny them on the spot.
+   * Default false.
+   */
+  attended?: boolean | null;
 }
 
 /** One external run record. */
@@ -220,8 +317,12 @@ export interface CliRunDto {
   startedAt?: string | null;
   completedAt?: string | null;
   durationMs: number;
+  /** This turn's usage per model (not the session's running total). */
   usageJson?: string | null;
+  /** This turn's cost (USD). */
   estimatedCostUsd?: number | null;
+  /** The model the user picked for this turn; null = the binding's model. */
+  model?: string | null;
   creationTime: string;
 }
 
@@ -239,6 +340,8 @@ export interface CliRunMessageDto {
   output?: string | null;
   status?: string | null;
   level?: string | null;
+  /** Permission request / outcome (`PermissionRequest` / `PermissionResolved`). */
+  permission?: CliAgentPermission | null;
   creationTime: string;
 }
 
@@ -253,6 +356,8 @@ export interface CliAgentEvent {
   status?: string | null;
   level?: string | null;
   sessionId?: string | null;
+  /** Permission request / outcome (`PermissionRequest` / `PermissionResolved`). */
+  permission?: CliAgentPermission | null;
 }
 
 /** Run list query. */
@@ -367,6 +472,13 @@ export function useAdminCliRunApi(client: HttpClient) {
     /** Cancel a run - a running one has its whole process tree terminated */
     cancel: (id: string) => client.post<void>(`/admin/ai/cli-runs/${id}/cancel`),
 
+    /** Answer a permission request on behalf of whoever started the run (`ai.cliRun.execute`). */
+    answerPermission: (id: string, requestId: string, answer: CliPermissionAnswerDto) =>
+      client.post<void>(
+        `/admin/ai/cli-runs/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`,
+        answer,
+      ),
+
     /**
      * SSE stream URL, resolved against the client's baseUrl so it can be
      * handed to `streamCliRun` (which fetches it verbatim). Pass the last
@@ -392,6 +504,10 @@ export function useCliRunApi(client: HttpClient) {
 
     /** Cancel one of your own runs */
     cancel: (id: string) => client.post<void>(`/ai/cli-runs/${id}/cancel`),
+
+    /** Answer a permission request of one of your own runs: pick one of the request's options. */
+    answerPermission: (id: string, requestId: string, answer: CliPermissionAnswerDto) =>
+      client.post<void>(`/ai/cli-runs/${encodeURIComponent(id)}/permissions/${encodeURIComponent(requestId)}`, answer),
 
     /** SSE stream URL, resolved against the client's baseUrl (see the admin twin). */
     streamUrl: (id: string, fromSequence = 0) =>

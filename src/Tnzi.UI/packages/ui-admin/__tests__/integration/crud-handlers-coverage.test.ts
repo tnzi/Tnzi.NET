@@ -68,12 +68,26 @@ vi.mock('../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     agents: mkCrud(), threads: mkCrud(), agentRuns: mkCrud(), workflows: mkCrud(),
     workflowRuns: mkCrud(), skills: mkCrud(), providers: mkCrud(), usage: mkCrud(),
-    knowledge: mkCrud(), mcpServers: mkCrud(), quota: mkCrud(),
+    knowledge: mkCrud(), mcpServers: mkCrud(),
+    usageLimits: {
+      getDefaults: vi.fn(async () => ({
+        policy: { sessionLimit: { mode: 'Inherit' }, weeklyLimit: { mode: 'Inherit' }, allowedModels: null, defaultModel: null },
+        configuration: { allowedModels: [], sessionWindowMinutes: 300, weeklyWindowMinutes: 10080, warningThreshold: 0.8 },
+        effective: { allowedModels: [] },
+        catalog: [],
+      })),
+      fetchUsers: vi.fn(async () => pagedOne('1')),
+      getBudgetSummary: mkCrud().getBudgetSummary,
+    },
     evaluations: mkCrud(),
   }),
+  UsageLimitWindow: { Session: 'Session', Weekly: 'Weekly' },
 }))
 vi.mock('../../src/services/bridges/payment-bridge', () => ({
   createPaymentBridge: () => ({ orders: mkCrud(), refunds: mkCrud(), subscriptions: mkCrud(), invoices: mkCrud() }),
+}))
+vi.mock('../../src/services/bridges/subscription-plan-bridge', () => ({
+  createSubscriptionPlanBridge: () => ({ ...mkCrud(), deactivate: vi.fn(async () => undefined), reorder: vi.fn(async () => undefined) }),
 }))
 vi.mock('../../src/services/bridges/finance-bridge', () => ({
   // P2 页面从桥接 re-export 的枚举（vi.mock 全量替换模块，须补齐）。全局
@@ -85,7 +99,7 @@ vi.mock('../../src/services/bridges/finance-bridge', () => ({
   FinancePartyType: { Customer: 'Customer', Vendor: 'Vendor' },
   SettlementDocType: { Invoice: 'Invoice', Bill: 'Bill', PaymentEntry: 'PaymentEntry', CreditMemo: 'CreditMemo' },
   AccountRootType: { Asset: 'Asset', Liability: 'Liability', Equity: 'Equity', Income: 'Income', Expense: 'Expense' },
-  AccountSystemRole: { AccountsReceivable: 'AccountsReceivable', AccountsPayable: 'AccountsPayable', TaxPayable: 'TaxPayable', TaxReceivable: 'TaxReceivable', RetainedEarnings: 'RetainedEarnings', ExchangeGainLoss: 'ExchangeGainLoss', RoundingDifference: 'RoundingDifference', UndepositedFunds: 'UndepositedFunds', OpeningBalance: 'OpeningBalance', CurrencyExchangeClearing: 'CurrencyExchangeClearing' },
+  AccountSystemRole: { AccountsReceivable: 'AccountsReceivable', AccountsPayable: 'AccountsPayable', TaxPayable: 'TaxPayable', TaxReceivable: 'TaxReceivable', RetainedEarnings: 'RetainedEarnings', ExchangeGainLoss: 'ExchangeGainLoss', RoundingDifference: 'RoundingDifference', UndepositedFunds: 'UndepositedFunds', OpeningBalance: 'OpeningBalance', CurrencyExchangeClearing: 'CurrencyExchangeClearing', WagesPayable: 'WagesPayable', NonRecoverableTaxExpense: 'NonRecoverableTaxExpense' },
   CashFlowActivity: { Operating: 'Operating', Investing: 'Investing', Financing: 'Financing', CashEquivalent: 'CashEquivalent' },
   JournalEntryStatus: { Draft: 'Draft', Posted: 'Posted', Reversed: 'Reversed' },
   ReconciliationStatus: { Draft: 'Draft', Completed: 'Completed' },
@@ -445,6 +459,7 @@ import Quotas from '../../src/pages/ai/quota/Quotas.vue'
 import Orders from '../../src/pages/payment/Orders.vue'
 import Refunds from '../../src/pages/payment/Refunds.vue'
 import PaymentSubscriptions from '../../src/pages/payment/Subscriptions.vue'
+import PaymentSubscriptionPlans from '../../src/pages/payment/SubscriptionPlans.vue'
 import FinanceAccounts from '../../src/pages/finance/Accounts.vue'
 import FinanceExchangeRates from '../../src/pages/finance/ExchangeRates.vue'
 import FinanceFiscalYears from '../../src/pages/finance/FiscalYears.vue'
@@ -588,6 +603,7 @@ const PAGES: Array<[string, any]> = [
   ['Providers', Providers], ['Quotas', Quotas],
   // Payment / Chat / Notification / Template
   ['Orders', Orders], ['Refunds', Refunds], ['PaymentSubscriptions', PaymentSubscriptions],
+  ['PaymentSubscriptionPlans', PaymentSubscriptionPlans],
   ['FinanceAccounts', FinanceAccounts], ['FinanceExchangeRates', FinanceExchangeRates],
   ['FinanceFiscalYears', FinanceFiscalYears],
   ['FinanceCustomers', FinanceCustomers], ['FinanceVendors', FinanceVendors],

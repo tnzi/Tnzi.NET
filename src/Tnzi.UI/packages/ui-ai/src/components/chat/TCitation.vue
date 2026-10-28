@@ -11,9 +11,11 @@
  * The default slot can replace the body entirely if consumers need a
  * richer layout (multi-line snippet, link previews, etc.).
  */
+import { computed } from 'vue'
 import { Icon } from '@iconify/vue'
+import { safeLinkHref } from '@tnzi/core/utils'
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** Citation title - typically the document name or page title. */
     title: string
@@ -21,7 +23,10 @@ withDefaults(
     snippet?: string
     /** Optional lucide icon. Defaults to `lucide:bookmark`. */
     icon?: string
-    /** When set, makes the whole card a clickable link. */
+    /**
+     * When set, makes the whole card a clickable link. A URL `safeLinkHref`
+     * refuses (`javascript:` and the like) leaves the card a plain block.
+     */
     href?: string
   }>(),
   {
@@ -30,15 +35,17 @@ withDefaults(
     href: '',
   },
 )
+
+const link = computed(() => safeLinkHref(props.href))
 </script>
 
 <template>
   <component
-    :is="href ? 'a' : 'div'"
+    :is="link ? 'a' : 'div'"
     class="t-citation"
-    :href="href || undefined"
-    :target="href ? '_blank' : undefined"
-    :rel="href ? 'noopener noreferrer' : undefined"
+    :href="link"
+    :target="link ? '_blank' : undefined"
+    :rel="link ? 'noopener noreferrer' : undefined"
   >
     <Icon :icon="icon" class="t-citation__icon" />
     <div class="t-citation__body">

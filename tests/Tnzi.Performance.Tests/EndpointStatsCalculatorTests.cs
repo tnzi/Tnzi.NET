@@ -158,4 +158,36 @@ public class EndpointStatsCalculatorTests
         result[0].P95DurationMs.ShouldBeGreaterThan(result[0].AverageDurationMs);
         result[0].P95DurationMs.ShouldBeLessThanOrEqualTo(result[0].MaxDurationMs);
     }
+
+    /// <summary>
+    /// ★ 回归：此前按原始路径分组，<c>/api/users/{id}</c> 按每个 id 拆成一行，按端点的计数与 P95 失去意义。
+    /// </summary>
+    [Fact]
+    public void Calculate_GroupsByRouteTemplate_NotByRawPath()
+    {
+        var records = new[]
+        {
+            CreateMetrics("/api/users/1", "GET", 100) with { Route = "/api/users/{id}" },
+            CreateMetrics("/api/users/2", "GET", 200) with { Route = "/api/users/{id}" },
+            CreateMetrics("/api/users/3", "GET", 300) with { Route = "/api/users/{id}" },
+        };
+
+        var stats = EndpointStatsCalculator.Calculate(records).ShouldHaveSingleItem();
+
+        stats.Path.ShouldBe("/api/users/{id}");
+        stats.RequestCount.ShouldBe(3);
+    }
+
+    /// <summary>没有路由模板的记录（直接调用收集器）退回按原始路径分组。</summary>
+    [Fact]
+    public void Calculate_WithoutARoute_FallsBackToThePath()
+    {
+        var records = new[]
+        {
+            CreateMetrics("/api/users", "GET", 100),
+            CreateMetrics("/api/users", "GET", 200),
+        };
+
+        EndpointStatsCalculator.Calculate(records).ShouldHaveSingleItem().Path.ShouldBe("/api/users");
+    }
 }

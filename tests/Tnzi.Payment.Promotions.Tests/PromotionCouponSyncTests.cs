@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.Extensions.Logging;
+using Tnzi.Payment.Options;
 
 namespace Tnzi.Payment.Promotions.Tests;
 
@@ -34,6 +35,7 @@ public class PromotionCouponSyncTests
             new Mock<IRepository<CouponUsage, Guid>>().Object,
             new Mock<IRepository<UserCoupon, Guid>>().Object,
             _promotionOptionsMock.Object,
+            new Mock<IOptionsMonitor<PaymentOptions>>().Object,
             _serviceProviderMock.Object,
             couponSync);
 
@@ -99,34 +101,8 @@ public class PromotionCouponSyncTests
         promotion.StripeCouponId.ShouldBeNull();
     }
 
-    [Fact]
-    public async Task SyncToStripeAsync_WithStripeImplementation_StoresReturnedCouponId()
-    {
-        // Arrange
-        var promotion = ArrangePromotion();
-        PaymentChannelCouponDto? captured = null;
-
-        var stripeSync = new Mock<IPaymentChannelCouponSync>();
-        stripeSync.SetupGet(x => x.ChannelCode).Returns(PaymentConstants.StripeChannelCode);
-        stripeSync
-            .Setup(x => x.SyncCouponAsync(It.IsAny<PaymentChannelCouponDto>(), It.IsAny<CancellationToken>()))
-            .Callback<PaymentChannelCouponDto, CancellationToken>((dto, _) => captured = dto)
-            .ReturnsAsync(Result<string>.Success("coupon_SAVE10"));
-
-        var service = CreateService(stripeSync.Object);
-
-        // Act
-        var result = await service.SyncToStripeAsync(promotion.Id);
-
-        // Assert
-        result.Succeeded.ShouldBeTrue();
-        promotion.StripeCouponId.ShouldBe("coupon_SAVE10");
-
-        // 币种取促销自身的币种：固定金额折扣与币种强相关，传错渠道侧会按另一种货币建券
-        captured.ShouldNotBeNull();
-        captured!.Currency.ShouldBe("EUR");
-        captured.PromotionCode.ShouldBe("SAVE10");
-    }
+    // 实现就位时的成功路径（按促销自身币种建券、只写回渠道券标识那一列）要真实 EF Provider，
+    // 覆盖在集成测试 PromotionAdminWriteTests。
 
     [Fact]
     public async Task SyncToStripeAsync_WhenDisabledByConfiguration_DoesNotReachTheChannel()

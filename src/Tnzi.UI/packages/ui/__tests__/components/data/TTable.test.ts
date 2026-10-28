@@ -72,6 +72,27 @@ describe('TTable - server-side pagination contract', () => {
     expect(cells).toEqual(['zeta', 'alpha'])
   })
 
+  // naive cycles a column descend -> ascend -> unsorted; the third click reports
+  // `order: false`, which used to be forwarded as 'desc', so a sort could never
+  // be cleared.
+  it('emits a null order when the user clears the sort', async () => {
+    const wrapper = mount(TTable, {
+      props: { data: rows(2), columns, sortBy: 'name', sortOrder: 'asc' as const },
+    })
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.n-data-table-sorter').trigger('click')
+
+    expect(wrapper.emitted('sort')).toEqual([['name', null]])
+  })
+
+  it('shows emptyText when it is set and there are no rows', () => {
+    const wrapper = mount(TTable, {
+      props: { data: [], columns, emptyText: 'Nothing here yet' },
+    })
+    expect(wrapper.find('.n-data-table-empty').text()).toContain('Nothing here yet')
+  })
+
   it('renders every row it is given when pagination is off', () => {
     const wrapper = mount(TTable, {
       props: { data: rows(3), columns, pagination: false },

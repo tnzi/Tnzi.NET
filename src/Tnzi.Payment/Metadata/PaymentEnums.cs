@@ -132,6 +132,18 @@ public enum BusinessType
 #region Refund Enums
 
 /// <summary>
+/// 退款从哪里来。数值存库。
+/// </summary>
+public enum RefundOrigin
+{
+    /// <summary>经本模块发起（付款人申请、客服代退）</summary>
+    Framework = 0,
+
+    /// <summary>在支付渠道后台手工退的，经渠道回调记下</summary>
+    Channel = 1
+}
+
+/// <summary>
 /// 退款状态
 /// </summary>
 public enum RefundStatus
@@ -265,7 +277,57 @@ public enum PaymentCallbackKind
     /// 已保存的支付方式在渠道侧被移除：付款人自己撤销了授权，或商户在渠道后台删掉了它。
     /// 本地必须跟着失效，否则后台会拿一个已经作废的凭据反复扣款失败。
     /// </summary>
-    PaymentMethodRevoked = 1
+    PaymentMethodRevoked = 1,
+
+    /// <summary>
+    /// 已保存的支付方式在渠道侧被更新：有效期、卡组织或尾号变了（持卡人更新了卡、发卡行自动换卡）。
+    /// 本地只刷新展示信息，凭据本身不变。
+    /// </summary>
+    PaymentMethodUpdated = 2,
+
+    /// <summary>
+    /// 渠道侧发生了退款（在渠道后台手工退的，或本模块发起的那笔退款在渠道侧落定）。
+    /// 本模块发起的退款按自己的退款号推进；渠道后台手工退的按渠道退款号幂等地记成一条退款。
+    /// </summary>
+    ExternalRefund = 3,
+
+    /// <summary>
+    /// 付款人对这笔支付发起了拒付（争议），或争议的状态变了。只记录并发事件，不自动改动任何订阅。
+    /// </summary>
+    Dispute = 4
+}
+
+/// <summary>
+/// 支付的争议（拒付）状态。数值存库，只增不改。
+/// </summary>
+public enum PaymentDisputeStatus
+{
+    /// <summary>没有争议</summary>
+    None = 0,
+
+    /// <summary>预警（发卡行询问），需要回应</summary>
+    WarningNeedsResponse = 1,
+
+    /// <summary>预警已回应，审核中</summary>
+    WarningUnderReview = 2,
+
+    /// <summary>预警已结束（没有升级为争议）</summary>
+    WarningClosed = 3,
+
+    /// <summary>争议已发起，需要提交证据</summary>
+    NeedsResponse = 4,
+
+    /// <summary>证据已提交，发卡行审核中</summary>
+    UnderReview = 5,
+
+    /// <summary>商户胜诉，款项退回</summary>
+    Won = 6,
+
+    /// <summary>商户败诉，款项被扣</summary>
+    Lost = 7,
+
+    /// <summary>渠道报了一个本枚举不认识的状态</summary>
+    Unknown = 99
 }
 
 #endregion

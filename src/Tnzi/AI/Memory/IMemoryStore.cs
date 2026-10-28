@@ -128,7 +128,7 @@ public interface IMemoryStore
     // Agent-bound 范围（scope.AgentBound == true）走结构化 AgentId 列检索路径
     // （ReadByAgentAsync / SearchByAgentAsync），从而修复"写入 AgentId 列但读取仅按
     // Scope 字符串过滤、导致 Agent 记忆永不命中"的缺陷，并支持 headless 运行。
-    // 默认实现回退到字符串 scope 路径，使现有 IMemoryStore 实现（如 FileMemoryStore）
+    // 默认实现回退到字符串 scope 路径，使只实现了字符串 scope 成员的 IMemoryStore
     // 无需改动即可继续工作（向后兼容）。
 
     /// <summary>
@@ -190,18 +190,24 @@ public interface IMemoryStore
         => SearchAsync(MemoryScope.ForAgent(agentId, scope).ToScopeKey(), query, maxResults, ct);
 
     // --- Entry-level operations (default interface methods, backward compatible) ---
+    //
+    // ★ 默认实现返回失败而不是静默成功：update_memory / delete_memory 工具按「没抛异常」回报
+    //   「已更新 / 已删除」，静默返回会让模型对用户确认一条其实还在的记忆已被遗忘。
+    //   实现在条目不存在或不属于该 scope 时同样应抛异常，而不是静默返回。
 
     /// <summary>
     /// 按 ID 更新指定条目的内容
     /// </summary>
+    /// <exception cref="NotSupportedException">默认实现：本存储不支持按条目更新。</exception>
     Task UpdateEntryAsync(string scope, Guid entryId, string newContent, CancellationToken ct = default)
-        => Task.CompletedTask;
+        => Task.FromException(new NotSupportedException($"{GetType().Name} does not support updating individual memory entries."));
 
     /// <summary>
     /// 按 ID 删除指定条目
     /// </summary>
+    /// <exception cref="NotSupportedException">默认实现：本存储不支持按条目删除。</exception>
     Task DeleteEntryAsync(string scope, Guid entryId, CancellationToken ct = default)
-        => Task.CompletedTask;
+        => Task.FromException(new NotSupportedException($"{GetType().Name} does not support deleting individual memory entries."));
 
     /// <summary>
     /// 按类别搜索指定 scope 的记忆

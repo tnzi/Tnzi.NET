@@ -41,12 +41,16 @@ public interface IFileThumbnailGenerator
     /// <summary>
     /// 从已落库的原件派生缩略图并交给 provider。
     /// </summary>
+    /// <remarks>
+    /// 缩略图的存储键每次新生成（<c>StorageKeyHelper.NewThumbnailKey</c>），<b>不从原件的键派生</b>：
+    /// 存量记录的 <c>FileName</c> 可能是调用方给的名字，同名记录派生出同一个键会互相覆盖缩略图；
+    /// 同一条记录重画时落回旧键，又会被旧键上异步到达的删除请求删掉。
+    /// </remarks>
     /// <param name="originalPath">原件在 provider 里的路径（<c>FileRecord.Path</c>）。</param>
-    /// <param name="originalKey">原件的存储键（<c>FileRecord.FileName</c>）；缩略图的键从它派生。</param>
     /// <param name="extension">权威扩展名（<c>FileRecord.Extension</c>，带点），决定走哪条出图路径。
-    /// 不从 <paramref name="originalKey"/> 里猜：键里的后缀只在扩展名合安全形态时才带。</param>
+    /// 不从存储键里猜：键里的后缀只在扩展名合安全形态时才带。</param>
     /// <param name="size">原件字节数（<c>FileRecord.Size</c>）；0 表示不知道。</param>
     /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>缩略图在 provider 里的路径；画不出来（格式不支持、有口令、损坏、超限、原生库缺失）返回 <c>null</c>。</returns>
-    Task<string?> GenerateAsync(string originalPath, string originalKey, string? extension, long size, CancellationToken cancellationToken = default);
+    Task<string?> GenerateAsync(string originalPath, string? extension, long size, CancellationToken cancellationToken = default);
 }

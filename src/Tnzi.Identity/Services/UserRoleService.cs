@@ -94,4 +94,26 @@ public class UserRoleService : ApplicationService, IUserRoleService
 
         return userIds;
     }
+
+    /// <summary>
+    /// 批量获取多个角色的成员 Id（一条 IN 查询）
+    /// </summary>
+    /// <param name="roleIds">角色ID集合</param>
+    /// <returns>角色ID与成员用户ID集合的字典（无成员的角色不出现）</returns>
+    public async Task<IDictionary<Guid, IEnumerable<Guid>>> GetRoleUserIdsAsync(IEnumerable<Guid> roleIds)
+    {
+        var idList = roleIds.Distinct().ToList();
+        if (idList.Count == 0)
+        {
+            return new Dictionary<Guid, IEnumerable<Guid>>();
+        }
+
+        var memberships = await _dbContext.Set<UserRole>()
+            .Where(ur => idList.Contains(ur.RoleId))
+            .Select(ur => new { ur.RoleId, ur.UserId })
+            .ToListAsync();
+
+        return memberships.GroupBy(ur => ur.RoleId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.UserId).AsEnumerable());
+    }
 }

@@ -67,7 +67,7 @@ public class TelegramChannelAdapter : IChannelAdapter
             receiverOptions: receiverOptions,
             cancellationToken: _cts.Token);
 
-        _logger.LogInformation("Telegram adapter started with long-polling (timeout: {Timeout}s)", _options.PollingTimeoutSeconds);
+        _logger.LogInformation("Telegram adapter started with long-polling");
         return Task.CompletedTask;
     }
 
@@ -124,6 +124,12 @@ public class TelegramChannelAdapter : IChannelAdapter
         var chatId = telegramMessage.Chat.Id.ToString();
         var userId = telegramMessage.From.Id.ToString();
         var topicId = telegramMessage.MessageThreadId?.ToString();
+        var peerKind = telegramMessage.Chat.Type switch
+        {
+            ChatType.Private => ChannelPeerKinds.User,
+            ChatType.Group or ChatType.Supergroup or ChatType.Channel => ChannelPeerKinds.Group,
+            _ => null
+        };
 
         var inbound = new InboundMessage(
             ChannelName: "telegram",
@@ -132,7 +138,8 @@ public class TelegramChannelAdapter : IChannelAdapter
             Text: text,
             Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
             TopicId: topicId,
-            ThreadTs: telegramMessage.MessageId.ToString());
+            ThreadTs: telegramMessage.MessageId.ToString(),
+            PeerKind: peerKind);
 
         await _bus.PublishInboundAsync(inbound, ct);
     }

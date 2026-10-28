@@ -115,33 +115,29 @@ public class SettingService : ApplicationService, ISettingService
     }
 
     /// <summary>
-    /// 解密一条加密设置；解不开时返回<b>失败</b>的 Result 而不是默认值。
+    /// 解密一条加密设置；解不开时返回<b>失败</b>的 Result 而不是默认值（见 <see cref="EncryptedSettingValue"/>）。
     /// </summary>
     private Result<string?> DecryptOrFail(string key, string cipherText)
     {
-        if (_settingEncryptor == null)
-        {
-            LogError(
-                "Setting {Key} is stored encrypted but setting encryption is not configured (System:Encryption); the value cannot be read.",
-                key);
-            return Fail<string?>(
-                $"Setting '{key}' is encrypted but setting encryption is not configured",
-                500,
-                ErrorCodes.CONFIGURATION_MISSING);
-        }
-
         try
         {
-            return Ok<string?>(_settingEncryptor.Decrypt(cipherText));
+            return Ok<string?>(EncryptedSettingValue.Decrypt(_settingEncryptor, key, cipherText));
         }
-        catch (Exception ex)
+        catch (SettingUnreadableException ex)
         {
-            Logger.LogError(ex, "Setting {Key} could not be decrypted (wrong key or corrupted ciphertext).", key);
-            return Fail<string?>(
-                $"Setting '{key}' is encrypted but could not be decrypted (wrong key or corrupted ciphertext)",
-                500,
-                ErrorCodes.CONFIGURATION_INVALID);
+            return Unreadable<string?>(ex);
         }
+    }
+
+    /// <summary>一条加密设置解不开：记错误日志，回 500 + 配置错误码（不是默认值，也不是 <see langword="null"/>）。</summary>
+    private Result<T> Unreadable<T>(SettingUnreadableException ex)
+    {
+        Logger.LogError(
+            ex.InnerException ?? ex,
+            "Setting {Key} is stored encrypted but cannot be read ({Code}); check System:Encryption.",
+            ex.Key,
+            ex.Code);
+        return Fail<T>(ex.Message, 500, ex.Code);
     }
 
     /// <inheritdoc />
@@ -331,7 +327,7 @@ public class SettingService : ApplicationService, ISettingService
             return Fail<SettingDto>("Cannot update system setting", 403, ErrorCodes.SYSTEM_ERROR);
 
         // 加密行必须经 SetEncryptedAsync 更新：这里写入的是明文，而 IsEncrypted 仍为 true，
-        // 之后每次读取都会拿明文去解密（GetSettingAsync 静默回退默认值、GetDecryptedAsync 400）。
+        // 之后每次读取都会拿明文去解密而失败（各读取路径答 500 + CONFIGURATION_INVALID）。
         // 与 SetSettingAsync 的同名防护对齐。
         if (setting.IsEncrypted)
             return Fail<SettingDto>("Cannot update an encrypted setting here; use the encrypted setting endpoint instead", 400, ErrorCodes.VALIDATION_ERROR);
@@ -444,8 +440,14 @@ public class SettingService : ApplicationService, ISettingService
 
             return Ok<string?>(defaultValue);
         }
+        catch (SettingUnreadableException ex)
+        {
+            // 某一级的加密值解不开：失败，而不是默认值或低一级作用域的另一个值（与按键读取同一口径）。
+            return Unreadable<string?>(ex);
+        }
         catch (Exception)
         {
+            // 「读不到」（库故障）沿用回默认值的既定取舍：设置读取不该让业务请求整体失败。
             LogWarning("Failed to get setting {Key} from provider chain, returning default value", key);
             return Ok<string?>(defaultValue);
         }
@@ -465,9 +467,8 @@ public class SettingService : ApplicationService, ISettingService
         if (setting == null)
             return Ok<string?>(null);
 
-        // 自动解密加密配置
-        var value = setting.IsEncrypted ? DecryptValue(setting.Value) : setting.Value;
-        return Ok<string?>(value);
+        // 自动解密加密配置；解不开是失败，不是 null。
+        return setting.IsEncrypted ? DecryptOrFail(key, setting.Value) : Ok<string?>(setting.Value);
     }
 
     /// <inheritdoc />
@@ -599,23 +600,9 @@ public class SettingService : ApplicationService, ISettingService
         if (!setting.IsEncrypted)
             return Ok<string?>(setting.Value);
 
-        var decrypted = DecryptValue(setting.Value);
-        return Ok<string?>(decrypted);
-    }
-
-    /// <summary>
-    /// Decrypt value using the configured encryptor.
-    /// Returns null when encryptor is unavailable (fail-safe: never expose ciphertext).
-    /// </summary>
-    private string? DecryptValue(string encryptedValue)
-    {
-        if (_settingEncryptor == null)
-        {
-            LogWarning("Encrypted setting value found but encryption is not enabled, returning null for safety");
-            return null;
-        }
-
-        return _settingEncryptor.Decrypt(encryptedValue);
+        // 解不开是失败（500 + CONFIGURATION_MISSING / CONFIGURATION_INVALID），不是 null：
+        // 调用方拿 null 当「没配」走默认或降级逻辑，部署里「加密被关掉而加密行还在」就此无声无息。
+        return DecryptOrFail(key, setting.Value);
     }
 
     /// <inheritdoc />

@@ -11,7 +11,8 @@
 /// 为什么是新增一个处理器而不是把开票逻辑留在这里可选注入：留下就得让父模块引用
 /// <c>IPaymentInvoiceService</c> 与 <c>InvoiceOptions</c> 两个子模块类型，父 → 子的编译期依赖
 /// 一旦成立，本模块就再也不可能在不加载那个包时构建。事件总线本来就支持一个事件挂 N 个处理器
-/// （本模块自己就在 <see cref="PaymentCompletedEvent"/> 上挂了两个：这一个与订阅计费回流的那一个）。
+/// （<see cref="PaymentCompletedEvent"/> 上本模块只挂这一个；订阅计费的回流处理器在 <c>Tnzi.Payment.Subscriptions</c>，
+/// 自动开票的在 <c>Tnzi.Payment.Billing</c>，各自随子模块注册）。
 ///
 /// 缺席时退化成什么：**支付照常完成，只是不自动开票**。少一项能力，不是一次错误的支付。
 /// </remarks>
@@ -50,8 +51,8 @@ public class PaymentFailedEventHandler : IEventHandler<PaymentFailedEvent>
     public async Task HandleAsync(PaymentFailedEvent eventData, CancellationToken cancellationToken = default)
     {
         _logger.LogWarning(
-            "Payment failed. TradeNo: {TradeNo}, ErrorCode: {ErrorCode}, Reason: {Reason}",
-            eventData.TradeNo, eventData.ErrorCode, eventData.FailReason);
+            "Payment failed. TradeNo: {TradeNo}, Reason: {Reason}",
+            eventData.TradeNo, eventData.FailReason);
 
         await Task.CompletedTask;
     }

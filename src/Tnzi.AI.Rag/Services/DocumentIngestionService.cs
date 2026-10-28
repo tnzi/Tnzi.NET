@@ -3,6 +3,17 @@ namespace Tnzi.AI.Rag.Services;
 /// <summary>
 /// 文档摄取服务 - 提取文本 → 切块 → 生成嵌入 → 存储到 pgvector
 /// </summary>
+/// <remarks>
+/// ★ 与删除文档并发时的约定：<c>KnowledgeBaseService.DeleteDocumentAsync</c> 先删文档行（并提交），再清分块与图谱；
+/// 本服务写完分块与图谱之后再确认文档行还在，不在就把自己刚写下的清掉。两边各守一半，任何交错都不留孤儿：
+/// 写在清理之前的会被清理带走，写在清理之后的必然看得见「文档已删」。少了末尾这一查，
+/// 管理员删掉一份仍在处理中的文档后，摄取随后写入的整套分块会成为无主孤儿，照样被检索命中、却不出现在任何管理列表里。
+/// <para>
+/// ★ 分块表之外的向量存储（<see cref="IVectorStore.UsesRagChunkTable"/> 为 false：<c>InMemoryVectorStore</c>、外部向量库）
+/// 在写完分块表后逐块 <see cref="IVectorStore.UpsertAsync"/>，替换旧块时先清掉它那边本文档的旧条目。此前摄取从不调用它，
+/// 这类存储下文档显示完成、检索恒为空。写入失败时连同刚写的分块表行一起撤掉，文档按失败处理。
+/// </para>
+/// </remarks>
 public class DocumentIngestionService : ApplicationService, IDocumentIngestionService
 {
     private readonly IEnumerable<IFileExtractorService> _extractors;
@@ -10,7 +21,11 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
     private readonly IAsyncChunkingStrategy? _asyncChunkingStrategy;
     private readonly IEmbeddingService _embeddingService;
     private readonly IRepository<DocumentChunk, Guid> _chunkRepository;
+    private readonly IVectorStore _vectorStore;
     private readonly IRepository<KnowledgeBase, Guid> _kbRepository;
+    private readonly IRepository<KnowledgeDocument, Guid> _docRepository;
+    private readonly IRepository<KnowledgeGraphNode, Guid> _graphNodeRepository;
+    private readonly IRepository<KnowledgeGraphEdge, Guid> _graphEdgeRepository;
     private readonly IGraphExtractor _graphExtractor;
     private readonly AIRagOptions _options;
 
@@ -19,7 +34,11 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
         IChunkingStrategy chunkingStrategy,
         IEmbeddingService embeddingService,
         IRepository<DocumentChunk, Guid> chunkRepository,
+        IVectorStore vectorStore,
         IRepository<KnowledgeBase, Guid> kbRepository,
+        IRepository<KnowledgeDocument, Guid> docRepository,
+        IRepository<KnowledgeGraphNode, Guid> graphNodeRepository,
+        IRepository<KnowledgeGraphEdge, Guid> graphEdgeRepository,
         IGraphExtractor graphExtractor,
         IOptionsSnapshot<AIRagOptions> options,
         IServiceProvider serviceProvider,
@@ -30,7 +49,11 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
         _asyncChunkingStrategy = asyncChunkingStrategy;
         _embeddingService = Check.NotNull(embeddingService);
         _chunkRepository = Check.NotNull(chunkRepository);
+        _vectorStore = Check.NotNull(vectorStore);
         _kbRepository = Check.NotNull(kbRepository);
+        _docRepository = Check.NotNull(docRepository);
+        _graphNodeRepository = Check.NotNull(graphNodeRepository);
+        _graphEdgeRepository = Check.NotNull(graphEdgeRepository);
         _graphExtractor = Check.NotNull(graphExtractor);
         _options = Check.NotNull(options).Value;
     }
@@ -111,6 +134,10 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
             // 后台摄取任务可能被 Hangfire 重试（chunk 在状态回写之前就已提交），
             // 若不先删除，重试会重复插入整套块。先按 DocumentId 删除已有块，使重试"替换"而非"叠加"。
             await _chunkRepository.DeleteAsync(c => c.DocumentId == documentId, ct);
+            if (!_vectorStore.UsesRagChunkTable)
+            {
+                await _vectorStore.DeleteByDocumentAsync(documentId, ct);
+            }
 
             // 6. 构建 DocumentChunk 实体并批量插入（ID 由框架自动生成）
             var chunkEntities = new List<DocumentChunk>();
@@ -130,13 +157,22 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
 
             await _chunkRepository.InsertManyAsync(chunkEntities, ct);
 
+            // 6b. 不读分块表的向量存储单独入库（见类注释），与分块表用同一个分块 Id
+            if (!_vectorStore.UsesRagChunkTable)
+            {
+                await IndexInVectorStoreAsync(kbId, documentId, chunkEntities, allEmbeddings, ct);
+            }
+
             // 7. GraphRAG 实体/关系抽取（默认关闭，opt-in via AI:Rag:GraphRag:Enabled）
             // 抽取失败不能影响文档摄取主流程：捕获并记录后继续。
+            // 与分块同一语义：先清掉本文档上一次留下的图谱再抽（重试 / 重新摄取替换而非叠加），
+            // 写下的每一行都标上来源文档，删除文档时才清得掉。清理失败就不抽：宁可这次没有图谱，也不叠一份重复的。
             if (_options.GraphRag.Enabled)
             {
                 try
                 {
-                    var graphResult = await _graphExtractor.ExtractAsync(text, kbId, ct);
+                    await DocumentGraph.RemoveAsync(_graphEdgeRepository, _graphNodeRepository, documentId, ct);
+                    var graphResult = await _graphExtractor.ExtractAsync(text, kbId, documentId, ct);
                     Logger.LogDebug(
                         "GraphRAG extraction for document {FileName} in KB {KbId}: {NodeCount} nodes, {EdgeCount} edges",
                         fileName, kbId, graphResult.Nodes.Count, graphResult.Edges.Count);
@@ -148,6 +184,17 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
                         "GraphRAG extraction failed for document {FileName} in KB {KbId}; vector ingestion already persisted, continuing",
                         fileName, kbId);
                 }
+            }
+
+            // 8. 文档行还在吗？删除文档与摄取并发时，删除方在文档行删除提交之后才清分块与图谱；
+            //    写在那次清理之后的由这里收尾（见类注释）。
+            if (!await _docRepository.ExistsAsync(documentId, ct))
+            {
+                await RemoveArtifactsOfDeletedDocumentAsync(documentId);
+                Logger.LogWarning(
+                    "Document {DocumentId} ({FileName}) was deleted while it was being ingested; removed the chunks and graph written for it",
+                    documentId, fileName);
+                return IngestResult.DeletedDuringIngestion();
             }
 
             sw.Stop();
@@ -167,6 +214,54 @@ public class DocumentIngestionService : ApplicationService, IDocumentIngestionSe
 
             Logger.LogError(ex, "Document ingestion failed for {FileName} in knowledge base {KbId}", fileName, kbId);
             return IngestResult.Failure("Document ingestion failed due to an internal error.");
+        }
+    }
+
+    /// <summary>
+    /// 把刚写进分块表的分块逐块写进向量存储。先让框架生成分块 Id（事务内只是送进事务，无事务时插入已经落库、这里是空操作）。
+    /// 写入失败（例如外部向量库没有实现 <see cref="IVectorStore.UpsertAsync"/>）时撤掉本文档刚写下的分块表行与已写入的条目再抛出，
+    /// 文档按失败处理：留着它们，分块表上的关键词检索会命中一份失败文档的内容。
+    /// </summary>
+    private async Task IndexInVectorStoreAsync(
+        Guid kbId, Guid documentId, List<DocumentChunk> chunkEntities, List<float[]> embeddings, CancellationToken ct)
+    {
+        await _chunkRepository.SaveChangesAsync(ct);
+
+        try
+        {
+            for (var i = 0; i < chunkEntities.Count; i++)
+            {
+                var chunk = chunkEntities[i];
+                await _vectorStore.UpsertAsync(
+                    chunk.Id, embeddings[i], documentId, kbId, chunk.Content, chunk.ChunkIndex, chunk.Metadata, ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "Writing the chunks of document {DocumentId} to the vector store ({Store}) failed; removing what was written",
+                documentId, _vectorStore.GetType().Name);
+            await _chunkRepository.DeleteAsync(c => c.DocumentId == documentId, CancellationToken.None);
+            await _vectorStore.DeleteByDocumentAsync(documentId, CancellationToken.None);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 清掉为一份已被删除的文档写下的分块与图谱。用 <see cref="CancellationToken.None"/>：
+    /// 走到这里说明无主的行已经落库，半途取消就把它们永久留下了。
+    /// </summary>
+    private async Task RemoveArtifactsOfDeletedDocumentAsync(Guid documentId)
+    {
+        await _chunkRepository.DeleteAsync(c => c.DocumentId == documentId, CancellationToken.None);
+        if (!_vectorStore.UsesRagChunkTable)
+        {
+            await _vectorStore.DeleteByDocumentAsync(documentId, CancellationToken.None);
+        }
+
+        if (_options.GraphRag.Enabled)
+        {
+            await DocumentGraph.RemoveAsync(_graphEdgeRepository, _graphNodeRepository, documentId, CancellationToken.None);
         }
     }
 }

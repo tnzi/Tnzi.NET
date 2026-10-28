@@ -88,7 +88,8 @@ public class ThumbnailResetOrderingTests : WorkspaceIntegrationTestBase
             Storage,
             TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider,
-            Guard(StorageOptions));
+            Guard(StorageOptions),
+            UnlimitedStorageQuota.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.CreateVersionAsync(file.Id, new MemoryStream("v2"u8.ToArray()), "second"));

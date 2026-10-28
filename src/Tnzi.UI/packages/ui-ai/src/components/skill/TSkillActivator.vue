@@ -4,7 +4,7 @@
  */
 
 import { NCard, NButton, NInput } from 'naive-ui';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useAiI18n } from '../../i18n/index';
 import type { SkillInfo } from './TSkillCard.vue';
@@ -33,7 +33,15 @@ const paramValues = ref<Record<string, string>>(
   Object.fromEntries((props.params ?? []).map((p) => [p.key, p.defaultValue ?? ''])),
 );
 
+// `required` is enforced here, not only drawn as a mark: a required parameter
+// left empty, or holding only whitespace, keeps Activate disabled. The value
+// is passed on as typed, not trimmed.
+const missingRequired = computed(() =>
+  (props.params ?? []).some((p) => p.required && (paramValues.value[p.key] ?? '').trim() === ''),
+);
+
 function handleActivate(): void {
+  if (missingRequired.value) return;
   emit('activate', props.skill.slug, { ...paramValues.value });
 }
 </script>
@@ -58,7 +66,7 @@ function handleActivate(): void {
     </div>
     <div class="flex justify-end gap-2">
       <NButton secondary size="small" @click="$emit('cancel')">{{ t.common.cancel }}</NButton>
-      <NButton type="primary" size="small" @click="handleActivate">{{ t.skill.activate }}</NButton>
+      <NButton type="primary" size="small" :disabled="missingRequired" @click="handleActivate">{{ t.skill.activate }}</NButton>
     </div>
   </NCard>
 </template>

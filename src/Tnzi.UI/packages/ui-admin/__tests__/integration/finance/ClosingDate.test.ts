@@ -22,6 +22,7 @@ const stubs = {
   Input: { name: 'Input', template: '<input />' },
   Button: { name: 'Button', template: '<button @click="$emit(\'click\')"><slot /></button>' },
   Tag: { name: 'Tag', template: '<span><slot /></span>' },
+  Alert: { name: 'Alert', template: '<div class="n-alert-stub"><slot /></div>' },
 }
 
 interface PanelVm {
@@ -67,13 +68,49 @@ describe('ClosingDatePanel', () => {
     expect((wrapper.vm as unknown as PanelVm).locked).toBe(true)
   })
 
-  it('fails OPEN on a read error rather than claiming the books are open', async () => {
-    // Asserting "not closed" from a failed probe would invite someone to post
-    // into a period that is actually filed; the backend 409 is the real gate.
-    getClosingDate.mockRejectedValue(new Error('boom'))
+  // A failed read used to render "Books are open / any date can still be posted
+  // to" and offer "Set closing date" without the current-password field: a
+  // claim about a lock that may well be in force. It now says it does not know.
+  it('★ a failed read says the closing date is unknown, never that the books are open', async () => {
+    getClosingDate.mockRejectedValue(new Error('Request failed with status code 403'))
     const wrapper = mountPanel()
     await flushPromises()
-    expect((wrapper.vm as unknown as PanelVm).locked).toBe(false)
+    const text = wrapper.text()
+    expect(text).toContain('closingDate.unknown')
+    expect(text).toContain('Request failed with status code 403')
+    expect(text).not.toContain('closingDate.notClosed')
+    expect(text).not.toContain('closingDate.openHint')
+    // No editor over a lock it could not read (it would not know to ask for the password).
+    expect(text).not.toContain('closingDate.set')
+    expect(text).not.toContain('closingDate.change')
+  })
+
+  it('a failed read can be retried', async () => {
+    getClosingDate.mockRejectedValueOnce(new Error('timeout'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    const retry = wrapper.findAll('button').find((b) => b.text() === 'closingDate.retry')
+    expect(retry, 'retry button').toBeDefined()
+    await retry!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('closingDate.notClosed')
+    expect(wrapper.text()).not.toContain('closingDate.unknown')
+  })
+
+  // A rejected save (wrong password 403, future date 400) kept the modal open
+  // with no message: the error was stored but never rendered, then rethrown
+  // from the click handler as an unhandled rejection.
+  it('★ a rejected save shows the reason in the editor and settles', async () => {
+    setClosingDate.mockRejectedValue(new Error('The closing-date password is incorrect.'))
+    const wrapper = mountPanel()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as PanelVm
+    vm.openEditor()
+    vm.draftDate = new Date(2026, 5, 30).getTime()
+    await expect(vm.save()).resolves.toBeUndefined()
+    await flushPromises()
+    expect(vm.editing).toBe(true)
+    expect(wrapper.find('.n-alert-stub').text()).toContain('The closing-date password is incorrect.')
   })
 
   it('omits newPassword when the field was left blank', async () => {

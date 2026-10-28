@@ -9,7 +9,9 @@
  *   v-permission.hide="'user.delete'" - set visibility:hidden instead of removing
  *
  * Backed by `useAdminAuthStore.hasPermission/hasAnyPermission/hasAllPermissions`
- * plus the `isSuperUser` bypass. Super-admins pass every check.
+ * plus the super-user bypass (`bypassesPermissionChecks`). Super-admins pass every
+ * check unless the backend narrows their bypass to platform codes; then their
+ * permission list decides, as for everyone else.
  */
 
 import { watchEffect, type Directive, type DirectiveBinding, type WatchStopHandle } from 'vue'
@@ -25,7 +27,7 @@ function evaluate(value: PermissionValue, anyMode: boolean): boolean {
   // Fail-open while the user isn't loaded yet - mirrors the sidebar filter,
   // usePermissionGuard and useCrudPage action gating. Backend [ApiAuthorize]
   // remains the real enforcement.
-  if (auth.isSuperUser || auth.userInfo === null) return true
+  if (auth.bypassesPermissionChecks || auth.userInfo === null) return true
   if (typeof value === 'string') return auth.hasPermission(value)
   if (Array.isArray(value)) {
     return anyMode ? auth.hasAnyPermission(value) : auth.hasAllPermissions(value)

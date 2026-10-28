@@ -14,6 +14,11 @@ namespace Tnzi.Template.Services;
 /// 一种模板类型。<c>outputKind</c> 传 <c>null</c> 时按 <c>Template.Type</c> 推导（<c>Sms</c> = 纯文本，其余 HTML）；
 /// 传了值就按传的。主题永远按纯文本渲染，不受它影响。
 /// </para>
+/// <para>
+/// <b>模板本身的问题以失败的 Result 返回，不抛出。</b>模板不存在、编译失败（<c>TEMPLATE_COMPILATION_ERROR</c>）、
+/// 渲染期出错（<c>TEMPLATE_RENDER_ERROR</c>）都落成 <c>Succeeded == false</c>，调用方据此走自己的退路。
+/// 仍然抛出的只有两种：<see cref="TemplateSecurityException"/>（越界路径），以及调用方已经取消的那一次。
+/// </para>
 /// </remarks>
 public interface ITemplateRenderService
 {

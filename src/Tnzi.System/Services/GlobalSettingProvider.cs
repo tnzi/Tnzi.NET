@@ -7,18 +7,15 @@ public class GlobalSettingProvider : ISettingProvider
 {
     private readonly IRepository<Setting, Guid> _repository;
     private readonly ISettingEncryptor? _settingEncryptor;
-    private readonly ILogger<GlobalSettingProvider> _logger;
 
     public string Name => "Global";
     public int Priority => 100;
 
     public GlobalSettingProvider(
         IRepository<Setting, Guid> repository,
-        ILogger<GlobalSettingProvider> logger,
         ISettingEncryptor? settingEncryptor = null)
     {
         _repository = Check.NotNull(repository);
-        _logger = Check.NotNull(logger);
         _settingEncryptor = settingEncryptor;
     }
 
@@ -32,16 +29,10 @@ public class GlobalSettingProvider : ISettingProvider
         if (setting == null)
             return null;
 
+        // 加密值解不开（加密器缺席或密钥对不上）抛 SettingUnreadableException：返回 null 会让解析链
+        // 悄悄落到低一级作用域的另一个值上，与「这一级没配」无从区分。
         if (setting.IsEncrypted)
-        {
-            if (_settingEncryptor == null)
-            {
-                _logger.LogWarning("Encrypted setting '{Key}' found but encryption is not enabled, returning null for safety", key);
-                return null;
-            }
-
-            return setting.Value != null ? _settingEncryptor.Decrypt(setting.Value) : null;
-        }
+            return setting.Value != null ? EncryptedSettingValue.Decrypt(_settingEncryptor, key, setting.Value) : null;
 
         return setting.Value;
     }

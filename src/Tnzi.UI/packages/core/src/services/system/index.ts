@@ -1,7 +1,7 @@
 /**
  * @tnzi/core/services/system
  *
- * System Service - System configuration, menus, health checks, and maintenance.
+ * System Service - System configuration, menus, access logs and health checks.
  */
 
 export * from './metadata';

@@ -72,16 +72,21 @@ const adminFieldRenderers: Record<string, FieldRenderer> = {
       readonly: ctx.readonly,
       'onUpdate:value': (v: string) => ctx.onUpdate(v),
     }),
-  // Masked password input (click-to-reveal) - lets a create form declare
-  // `type: 'password'` instead of hand-wiring an NInput. Read-only view mode
-  // never echoes a password back, so it degrades to a muted dash.
+  // Masked secret input (click-to-reveal) - a password, an API key, a token -
+  // so a create form declares `type: 'password'` instead of hand-wiring an
+  // NInput. Read-only view mode never echoes a secret back and cannot tell a
+  // stored one from none, so it shows the dash rather than dots that read as
+  // "one is set". `new-password` keeps the browser from filling in the admin's
+  // own saved sign-in password, which it otherwise offers for any password box.
   password: (ctx) =>
     ctx.readonly
-      ? h('span', { class: 't-form-schema__password-view' }, '••••••')
+      ? h('span', { class: 't-form-schema__password-view' }, EMPTY_DASH)
       : h(NInput, {
           type: 'password',
           showPasswordOn: 'click',
           value: (ctx.value as string) ?? '',
+          placeholder: ctx.translate(ctx.item.placeholderKey, ctx.item.placeholder ?? ''),
+          inputProps: { autocomplete: 'new-password' },
           'onUpdate:value': (v: string) => ctx.onUpdate(v),
         }),
 }

@@ -23,6 +23,7 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     private readonly IRepository<Role, Guid>? _roleRepository;
     private readonly IRepository<User, Guid>? _userRepository;
     private readonly IUserTenantScopeProvider? _userScope;
+    private readonly SuperAdminBypassPolicy? _bypassPolicy;
 
     /// <summary>
     /// 初始化一个<see cref="UserFunctionService"/>类型的新实例
@@ -31,7 +32,9 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// 后三个可选依赖只被 <see cref="GetUserPermissionPictureAsync"/> 读：角色基线要角色授权表与
     /// 「这个人有哪些角色」，角色名要角色表。缺席时全景里的角色部分为空、其余照常 ——
     /// 与 <c>FunctionAuthorizationService</c> 对 <c>IUserRoleService</c> 的处理同形。
-    /// 最后两个同样只被全景读：目标账号不存在、或不在调用者的租户范围内时答 404。
+    /// 最后两个把守每一个按用户 id 寻址的读写：目标账号不存在、或不在调用者的租户范围内时答 404。
+    /// ★ 此前只有全景读问过：用户-角色关联与用户表都不按租户过滤，租户 A 的管理员能给别家租户的账号写直授行，
+    /// 写完还会让那个人的权限按 A 的视角重算一次。
     /// </remarks>
     public UserFunctionService(
         IServiceProvider serviceProvider,
@@ -43,11 +46,13 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         IUserRoleService? userRoleService = null,
         IRepository<Role, Guid>? roleRepository = null,
         IRepository<User, Guid>? userRepository = null,
-        IUserTenantScopeProvider? userScope = null)
+        IUserTenantScopeProvider? userScope = null,
+        SuperAdminBypassPolicy? bypassPolicy = null)
         : base(serviceProvider)
     {
         _userRepository = userRepository;
         _userScope = userScope;
+        _bypassPolicy = bypassPolicy;
         _userFunctionRepository = Check.NotNull(userFunctionRepository);
         _moduleFunctionRepository = Check.NotNull(moduleFunctionRepository);
         _functionAuthorizationService = Check.NotNull(functionAuthorizationService);
@@ -60,6 +65,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<ModuleFunction>>> GetUserFunctionsAsync(Guid userId)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail<IEnumerable<ModuleFunction>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var functionIds = await _userFunctionRepository
             .Where(uf => uf.UserId == userId && uf.IsEnabled && uf.IsGranted)
             .Select(uf => uf.FunctionId)
@@ -80,6 +90,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<Guid>>> GetUserFunctionIdsAsync(Guid userId)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail<IEnumerable<Guid>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         // 与角色侧同规：只返回指向生效功能的行。休眠行（退役 / 禁用功能）不进矩阵，
         // 也就不能出现在矩阵回写的集合里，否则同一判据的写路径会把整次保存拒掉。
         var functionIds = await _userFunctionRepository
@@ -92,6 +107,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result<IEnumerable<Guid>>> GetUserDeniedFunctionIdsAsync(Guid userId)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail<IEnumerable<Guid>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var functionIds = await _userFunctionRepository
             .Where(uf => uf.UserId == userId && uf.IsEnabled && !uf.IsGranted)
             .Join(LiveFunctions(), uf => uf.FunctionId, f => f.Id, (uf, _) => uf.FunctionId)
@@ -102,6 +122,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result> AssignFunctionsToUserAsync(Guid userId, IEnumerable<Guid> functionIds)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var functionIdList = functionIds.ToList();
         if (functionIdList.Count == 0)
         {
@@ -164,6 +189,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result> RemoveFunctionsFromUserAsync(Guid userId, IEnumerable<Guid> functionIds)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var functionIdList = functionIds.ToList();
         if (functionIdList.Count == 0)
         {
@@ -189,7 +219,13 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result> SetUserFunctionsAsync(Guid userId, IEnumerable<Guid> functionIds)
     {
-        var functionIdList = functionIds.ToList();
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 集合语义：同一个 id 出现两次只落一行（否则两行撞 (用户, 功能) 唯一索引，整次 500）。
+        var functionIdList = functionIds.Distinct().ToList();
 
         var violation = await GetUserGrantViolationAsync(userId, functionIdList);
         if (violation != null)
@@ -243,6 +279,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     public async Task<Result> SetUserFunctionsInScopeAsync(
         Guid userId, IEnumerable<Guid> scopeFunctionIds, IEnumerable<Guid> functionIds)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var invalid = UserFunctionScope.Normalize(scopeFunctionIds, functionIds, out var scope, out var functionIdList);
         if (invalid != null) return invalid;
 
@@ -300,6 +341,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     public async Task<Result> SetUserDeniedFunctionsInScopeAsync(
         Guid userId, IEnumerable<Guid> scopeFunctionIds, IEnumerable<Guid> functionIds)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         var invalid = UserFunctionScope.Normalize(scopeFunctionIds, functionIds, out var scope, out var functionIdList);
         if (invalid != null) return invalid;
 
@@ -352,7 +398,13 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result> SetUserDeniedFunctionsAsync(Guid userId, IEnumerable<Guid> functionIds)
     {
-        var functionIdList = functionIds.ToList();
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
+        // 集合语义，与 SetUserFunctionsAsync 同一理由。
+        var functionIdList = functionIds.Distinct().ToList();
 
         // deny 是削权而非授权,但支配约束与"只能触碰自己持有的码"同样适用
         // （不能替权限高于自己的用户做减法,也不能对自己够不着的面做减法）。
@@ -405,6 +457,11 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// <inheritdoc />
     public async Task<Result> ClearUserFunctionsAsync(Guid userId)
     {
+        if (!await IsVisibleUserAsync(userId))
+        {
+            return Fail("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         // 清空同样受支配约束——弱管理员不得清空强用户的直授集。
         var violation = await GetUserGrantViolationAsync(userId);
         if (violation != null)
@@ -450,6 +507,9 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var prefix = string.IsNullOrWhiteSpace(scope) ? null : scope.Trim();
 
         // 目录：切片内、生效的功能，带模块信息。按模块序、功能序，界面直接按这个顺序分组渲染。
+        // ★ 生效判据与运行时同一份（功能启用且未退役），不看模块状态：停用模块是一次级联操作，
+        //   不是生效判据，停用模块下被单独启用的功能照样生效。此前这里额外过滤模块，Effective 就缺了
+        //   CheckPermissionAsync 答 true 的码，访问审查者按全景会得出「此人无此权限」。
         var catalogueQuery = LiveFunctions();
         if (prefix != null)
         {
@@ -457,7 +517,6 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         }
 
         var catalogue = await catalogueQuery
-            .Where(f => f.FunctionModule.IsEnabled && !f.FunctionModule.IsRetired)
             .OrderBy(f => f.FunctionModule.Order).ThenBy(f => f.Order)
             .Select(f => new UserPermissionPictureItemDto
             {
@@ -513,10 +572,15 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
         var denied = overrides.Where(o => !o.IsGranted).Select(o => codeById[o.FunctionId]).Distinct().Order().ToList();
 
         // 生效集与运行时检查同源：超管 = 整个目录；其余 = (角色 ∪ 允许) − 拒绝。
+        // 旁路收窄到平台码时，超管 = 目录里的平台码 ∪ 他的显式集。
         var isSuperAdmin = await _functionAuthorizationService.IsSuperAdminAsync(userId);
-        var effective = isSuperAdmin
-            ? catalogue.Select(item => item.Code).Distinct().Order().ToList()
-            : roleGranted.Union(allowed).Except(denied).Order().ToList();
+        var effective = !isSuperAdmin
+            ? roleGranted.Union(allowed).Except(denied).Order().ToList()
+            : _bypassPolicy is null || _bypassPolicy.CoversEveryCode
+                ? catalogue.Select(item => item.Code).Distinct().Order().ToList()
+                : catalogue.Select(item => item.Code).Where(_bypassPolicy.Covers)
+                    .Union(roleGranted.Union(allowed).Except(denied))
+                    .Distinct().Order().ToList();
 
         return Ok(new UserPermissionPictureDto
         {
@@ -556,11 +620,18 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// 用户直授写路径的委托护栏，与角色路径同构（权限集包含支配）。
     /// 非超管授权者：①不能操作超管用户的直授行（对超管无效但会造成
     /// "看似可削权"的误导，且只有超管才应触碰超管的配置）；②仅能操作
-    /// "直授配置涉及的码（allow 与 deny）⊆ 自己有效权限集" 的用户；
+    /// "目标的有效权限集 ∪ 直授配置涉及的码（allow 与 deny）⊆ 自己有效权限集" 的用户；
     /// ③仅能授出/拒绝自己持有的权限码。
     /// 允许时返回 null，越界时返回英文错误消息（调用方包装为 403）。
     /// 无用户上下文（系统/播种/内部路径与单元测试）时整体跳过。
     /// </summary>
+    /// <remarks>
+    /// ★★★ 支配集必须含目标<b>经角色</b>得到的码。此前只算目标的直授行：一个没有直授行、经角色持有大量权限的人，
+    /// 支配集是空集，被任何授权者平凡支配，弱管理员就能对他下 deny，从他的角色授权里扣掉自己也持有的码
+    /// （连 <c>authorization.userFunction.assign</c> 都能扣），而他本人此后连删掉那条 deny 都会被同一道护栏拒绝。
+    /// 角色路径不让弱管理员把他移出那个强角色，用户路径却能达到同样的效果，两条路径对同一件事给了相反的结论。
+    /// 角色路径的支配判定比的是角色的全部授权，这里比的是目标的全部有效权限，同一强度。
+    /// </remarks>
     private async Task<string?> GetUserGrantViolationAsync(
         Guid targetUserId, IReadOnlyCollection<Guid>? functionIdsToTouch = null, string action = "grant")
     {
@@ -577,16 +648,19 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
             await _functionAuthorizationService.GetUserPermissionNamesAsync(grantorId.Value),
             StringComparer.OrdinalIgnoreCase);
 
-        // 支配集只算生效的码：退役码在谁的有效集里都没有，算进来会让目标身上一条休眠直授
+        // 支配集 = 目标此刻的有效权限（角色 ∪ 直授 − 否定）∪ 目标直授行涉及的码（allow 与 deny 都算，
+        // 否则被否定掉的码不在有效集里，替他撤销那条 deny 就不受约束）。
+        // 只算生效的码：退役码在谁的有效集里都没有，算进来会让目标身上一条休眠直授
         // 把每个非超管授权者都锁在外面（角色侧 GetRoleGrantedCodesAsync 同规）。
-        var targetCodes = await _userFunctionRepository
+        var targetDirectCodes = await _userFunctionRepository
             .Where(uf => uf.UserId == targetUserId && uf.IsEnabled)
             .Join(LiveFunctions(), uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code)
             .Distinct()
             .ToListAsync();
-        if (!targetCodes.All(grantorCodes.Contains))
+        var targetEffectiveCodes = await _functionAuthorizationService.GetUserPermissionNamesAsync(targetUserId);
+        if (!targetEffectiveCodes.Concat(targetDirectCodes).All(grantorCodes.Contains))
         {
-            return "You cannot manage this user's direct grants: their granted set is not contained in yours.";
+            return "You cannot manage this user's direct grants: their permissions are not contained in yours.";
         }
 
         if (functionIdsToTouch is { Count: > 0 })
@@ -613,18 +687,22 @@ public class UserFunctionService : ApplicationService, IUserFunctionService
     /// 用户直授变更只影响单个用户——精确失效其权限缓存即可，
     /// 比角色路径（失效角色全体成员）成本更低。
     /// </summary>
+    /// <remarks>
+    /// 此刻清一遍，身处事务时提交后再清一遍；删除失败退到全清，全清也失败则抛出
+    /// （见 <see cref="PermissionCacheInvalidation"/>）。此前失败被吞成一条警告、接口照样报成功，
+    /// 刚拒绝掉的码在缓存期内继续放行。
+    /// </remarks>
     private async Task InvalidateUserCacheAsync(Guid userId)
     {
         if (_functionAuthCache == null) return;
-        try
-        {
-            await _functionAuthCache.RemoveUserPermissionNamesAsync(userId);
-        }
-        catch (Exception ex)
-        {
-            // 缓存失效失败不应影响主业务流程，权限缓存会在过期后自动刷新
-            Logger.LogWarning(ex, "Failed to invalidate permission cache for user {UserId}", userId);
-        }
+
+        await PermissionCacheInvalidation.RunAsync(
+            _functionAuthCache,
+            cache => cache.RemoveUserPermissionNamesAsync(userId),
+            UnitOfWorkManager,
+            PostCommitActionQueue,
+            Logger,
+            $"user {userId}");
     }
 
     /// <summary>

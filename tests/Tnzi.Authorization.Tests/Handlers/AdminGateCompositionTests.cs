@@ -48,6 +48,7 @@ public class AdminGateCompositionTests
 
     [Theory]
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultRoleFunctionAdminController), "authorization.roleFunction.view")]
+    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultUserFunctionAdminController), "authorization.userFunction.view")]
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultModuleAdminController), "authorization.functionModule.view")]
     [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultModuleFunctionAdminController), "authorization.permission.view")]
     public void Gated_admin_controller_carries_its_module_code(Type controllerType, string moduleCode)
@@ -106,6 +107,30 @@ public class AdminGateCompositionTests
             $"{controllerType.Name}.{methodName} must carry the method-level action code (AND with the class-level .view gate).");
     }
 
+    /// <summary>
+    /// 角色授权 / 用户直授 / 权限目录三张页各自只要求自己的类级 .view 码,它们要读的目录与角色列表
+    /// 就必须挂在同一个控制器上、不再叠加方法级码。此前目录只在 admin/modules(functionModule.view)下,
+    /// 只持页面码的委托管理员打开页面得到 403 与一张空矩阵。
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultRoleFunctionAdminController), "GetCatalogue", "catalogue")]
+    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultRoleFunctionAdminController), "GetRoles", "roles")]
+    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultUserFunctionAdminController), "GetCatalogue", "catalogue")]
+    [InlineData(typeof(Tnzi.Authorization.Controllers.Admin.DefaultModuleFunctionAdminController), "GetCatalogue", "catalogue")]
+    public void Page_reads_live_under_the_page_controller_gate(Type controllerType, string methodName, string template)
+    {
+        var method = controllerType.GetMethod(methodName);
+        method.ShouldNotBeNull($"{controllerType.Name} must expose {methodName} so its page needs only the class-level code.");
+
+        var get = method!.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.HttpGetAttribute), inherit: true)
+            .Cast<Microsoft.AspNetCore.Mvc.HttpGetAttribute>()
+            .ShouldHaveSingleItem();
+        get.Template.ShouldBe(template);
+
+        MethodPermissionNames(controllerType, methodName).Where(p => p != null).ShouldBeEmpty(
+            $"{controllerType.Name}.{methodName} must be readable with the class-level .view code alone.");
+    }
+
     [Theory]
     // 自服务端点必须保持裸(仅随基类认证边界开放,无任何权限码)——登录链路依赖。
     [InlineData("GetUserPermissionNames")]
@@ -117,18 +142,31 @@ public class AdminGateCompositionTests
             .ShouldBeEmpty($"{methodName} is on the login chain and must not require any module/action code.");
     }
 
-    [Theory]
-    // 收窄后的豁免面:其余管理读端点逐一携带 authorization.permission.view。
-    [InlineData("CheckPermission")]
-    [InlineData("GetModuleTree")]
-    [InlineData("GetModuleFunctions")]
-    [InlineData("GetPermissionRoles")]
-    [InlineData("GetPermissionUsers")]
-    [InlineData("GetStatistics")]
-    public void Narrowed_self_service_reads_carry_permission_view(string methodName)
+    [Fact]
+    // 收窄后的豁免面:除两个自服务端点外,这个控制器上的每一个动作都携带 authorization.permission.view。
+    // 按反射枚举全部动作而不是逐个列名字:列名字的版本守不住「新加一个端点忘了加门」,
+    // 它只会在被列出的那几个上变红。
+    public void Narrowed_self_service_reads_carry_permission_view()
     {
-        MethodPermissionNames(
-            typeof(Tnzi.Authorization.Controllers.Admin.DefaultFunctionAuthorizationAdminController), methodName)
-            .ShouldBe(new[] { "authorization.permission.view" });
+        var controllerType = typeof(Tnzi.Authorization.Controllers.Admin.DefaultFunctionAuthorizationAdminController);
+        string[] selfService = ["GetUserPermissionNames", "GetAccessProfile"];
+        var actions = controllerType
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => m.GetCustomAttributes(typeof(Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute), inherit: true).Length > 0)
+            .Select(m => m.Name)
+            .ToList();
+
+        // 枚举本身必须看得见这些动作,否则下面的循环对空集恒真。
+        actions.ShouldContain("CheckPermission");
+        actions.ShouldContain("GetPermissionHolders");
+        actions.ShouldContain("GetStatistics");
+        actions.ShouldContain("GetUserPermissionNames");
+
+        foreach (var action in actions.Where(a => !selfService.Contains(a)))
+        {
+            MethodPermissionNames(controllerType, action)
+                .ShouldHaveSingleItem($"{action} must carry exactly the method-level authorization.permission.view gate.")
+                .ShouldBe("authorization.permission.view");
+        }
     }
 }

@@ -163,3 +163,17 @@ public class AttachPaymentMethodDto
     [MaxLength(128, ErrorMessage = "Payment method token cannot exceed 128 characters.")]
     public string? PaymentMethodToken { get; set; }
 }
+
+/// <summary>
+/// 浏览器端拉起渠道收银组件所需的公开配置
+/// </summary>
+public class PaymentClientConfigDto
+{
+    /// <summary>渠道代码（渠道自己的写法）</summary>
+    public string ChannelCode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 可公开给浏览器的密钥（Stripe 的 publishable key）。渠道不需要或没配置时为 null。
+    /// </summary>
+    public string? PublishableKey { get; set; }
+}

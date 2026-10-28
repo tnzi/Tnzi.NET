@@ -9,6 +9,7 @@ public class S3Storage : IFileStorage, IDisposable
     private readonly S3StorageOptions _options;
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
+    private readonly S3ObjectStore _objects;
     private readonly ILogger<S3Storage>? _logger;
     private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
 
@@ -82,6 +83,10 @@ public class S3Storage : IFileStorage, IDisposable
             Check.NotNullOrWhiteSpace(_options.SecretAccessKey);
             _s3Client = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
         }
+
+        // 预签名 URL 的 scheme 由请求的 Protocol 决定（默认 HTTPS），与 UseHttps 对齐。
+        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName,
+            _options.UseHttps ? Protocol.HTTPS : Protocol.HTTP, logger);
     }
 
     /// <summary>
@@ -89,111 +94,20 @@ public class S3Storage : IFileStorage, IDisposable
     /// </summary>
     public string ProviderName => "S3";
 
-    /// <summary>
-    /// 上传文件
-    /// </summary>
-    /// <param name="fileName">文件名</param>
-    /// <param name="stream">文件流</param>
-    /// <param name="contentType">内容类型</param>
-    /// <returns>文件路径或URL</returns>
-    public async Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
-    {
-        Check.NotNullOrEmpty(fileName);
-        Check.NotNull(stream);
+    /// <inheritdoc />
+    public Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
+        => _objects.UploadAsync(fileName, stream, contentType);
 
-        var request = new PutObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = fileName,
-            InputStream = stream,
-            ContentType = contentType ?? "application/octet-stream",
-            // AWS SDK 默认读完即关掉 InputStream，而流的生命周期归调用方
-            // （见 IFileStorage.UploadAsync 的所有权约定）：上传之后调用方还要读它的
-            // Length 写文件记录，被 SDK 关掉就是 ObjectDisposedException。
-            AutoCloseStream = false
-        };
+    /// <inheritdoc />
+    /// <exception cref="FileNotFoundException">对象不存在。</exception>
+    public Task<Stream> DownloadAsync(string filePath) => _objects.DownloadAsync(filePath);
 
-        await _s3Client.PutObjectAsync(request);
+    /// <inheritdoc />
+    public Task<bool> DeleteAsync(string filePath) => _objects.DeleteAsync(filePath);
 
-        return fileName;
-    }
-
-    /// <summary>
-    /// 下载文件
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>文件流</returns>
-    public async Task<Stream> DownloadAsync(string filePath)
-    {
-        Check.NotNullOrEmpty(filePath);
-
-        var request = new GetObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-
-        var response = await _s3Client.GetObjectAsync(request);
-        return response.ResponseStream;
-    }
-
-    /// <summary>
-    /// 删除文件
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>是否删除成功</returns>
-    public async Task<bool> DeleteAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return false;
-
-        try
-        {
-            var request = new DeleteObjectRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            await _s3Client.DeleteObjectAsync(request);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to delete file from S3: {FilePath}", filePath);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// 检查文件是否存在
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>是否存在</returns>
-    public async Task<bool> ExistsAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return false;
-
-        try
-        {
-            var request = new GetObjectMetadataRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            await _s3Client.GetObjectMetadataAsync(request);
-            return true;
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to check file existence in S3: {FilePath}", filePath);
-            return false;
-        }
-    }
+    /// <inheritdoc />
+    /// <remarks>只有 404 答 <c>false</c>；权限、网络等错误照常抛出。</remarks>
+    public Task<bool> ExistsAsync(string filePath) => _objects.ExistsAsync(filePath);
 
     /// <summary>
     /// 获取文件访问URL
@@ -207,159 +121,46 @@ public class S3Storage : IFileStorage, IDisposable
             return Task.FromResult(string.Empty);
 
         if (expiresIn.HasValue && expiresIn.Value > 0)
-        {
-            var request = new GetPreSignedUrlRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath,
-                Verb = HttpVerb.GET,
-                Expires = DateTime.UtcNow.AddSeconds(expiresIn.Value)
-            };
-            return Task.FromResult(_s3Client.GetPreSignedURL(request));
-        }
+            return Task.FromResult(_objects.GetPresignedUrl(filePath, expiresIn.Value, HttpVerb.GET));
 
         // 如果没有过期时间，返回基本URL
         var url = EffectiveBaseUrl?.TrimEnd('/') + "/" + filePath.TrimStart('/');
         return Task.FromResult(url);
     }
 
-    /// <summary>
-    /// 获取文件大小
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>文件大小（字节）</returns>
-    public async Task<long> GetFileSizeAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return 0L;
+    /// <inheritdoc />
+    public Task<long> GetFileSizeAsync(string filePath) => _objects.GetFileSizeAsync(filePath);
 
-        try
-        {
-            var request = new GetObjectMetadataRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            var response = await _s3Client.GetObjectMetadataAsync(request);
-            return response.ContentLength;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to get file size from S3: {FilePath}", filePath);
-            return 0L;
-        }
-    }
-
-    /// <summary>
-    /// 下载文件（支持 Range 请求，用于断点续传）。
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <param name="rangeStart">Range 起始位置（字节）</param>
-    /// <param name="rangeEnd">Range 结束位置（字节）</param>
-    /// <returns>文件流和范围信息</returns>
-    public async Task<(Stream Stream, long Start, long End, long TotalLength)> DownloadRangeAsync(
+    /// <inheritdoc />
+    /// <exception cref="FileNotFoundException">对象不存在。</exception>
+    public Task<(Stream Stream, long Start, long End, long TotalLength)> DownloadRangeAsync(
         string filePath,
         long? rangeStart = null,
         long? rangeEnd = null)
-    {
-        Check.NotNullOrEmpty(filePath);
-
-        // 先获取文件元数据以获取总长度
-        var metadataRequest = new GetObjectMetadataRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-        var metadataResponse = await _s3Client.GetObjectMetadataAsync(metadataRequest);
-        var totalLength = metadataResponse.ContentLength;
-
-        var request = new GetObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-
-        // 如果指定了范围，添加 Range 头
-        if (rangeStart.HasValue)
-        {
-            var rangeEndForRequest = rangeEnd.HasValue ? rangeEnd.Value : totalLength - 1;
-            request.ByteRange = new ByteRange(rangeStart.Value, rangeEndForRequest);
-        }
-
-        var response = await _s3Client.GetObjectAsync(request);
-
-        // 如果没有指定范围，返回整个文件
-        if (!rangeStart.HasValue)
-        {
-            return (response.ResponseStream, 0L, totalLength - 1, totalLength);
-        }
-
-        // 计算实际范围
-        var start = rangeStart.Value;
-        var actualEnd = rangeEnd.HasValue ? rangeEnd.Value : totalLength - 1;
-
-        return (response.ResponseStream, start, actualEnd, totalLength);
-    }
+        => _objects.DownloadRangeAsync(filePath, rangeStart, rangeEnd);
 
     /// <summary>
     /// Generate a presigned URL for direct upload or temporary public download access.
+    /// A GET URL for a type outside the inline whitelist carries a response-content-disposition of attachment.
     /// </summary>
     /// <param name="filePath">S3 object key</param>
     /// <param name="expiresInSeconds">URL expiration in seconds</param>
     /// <param name="httpMethod">HTTP method: GET for download, PUT for upload</param>
-    /// <returns>Presigned URL</returns>
+    /// <returns>Presigned URL, or null if the path is empty</returns>
     public Task<string?> GetPresignedUrlAsync(string filePath, int expiresInSeconds = 3600, string httpMethod = "GET")
     {
         if (string.IsNullOrEmpty(filePath))
             return Task.FromResult<string?>(null);
 
-        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase)
-            ? HttpVerb.PUT
-            : HttpVerb.GET;
-
-        var request = new GetPreSignedUrlRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath,
-            Verb = verb,
-            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds),
-            // 预签名 URL 的 scheme 由请求的 Protocol 决定（默认 HTTPS），与 UseHttps 对齐。
-            Protocol = _options.UseHttps ? Protocol.HTTPS : Protocol.HTTP
-        };
-
-        var url = _s3Client.GetPreSignedURL(request);
-        return Task.FromResult<string?>(url);
+        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase) ? HttpVerb.PUT : HttpVerb.GET;
+        return Task.FromResult<string?>(_objects.GetPresignedUrl(filePath, expiresInSeconds, verb));
     }
 
     /// <summary>
     /// Server-side copy an S3 object to a new key within the same bucket (no download/upload round-trip).
     /// </summary>
-    /// <param name="sourcePath">Source object key</param>
-    /// <param name="destFileName">Destination object key</param>
     /// <returns>The destination key on success, or null if the path is empty or the copy fails</returns>
-    public async Task<string?> CopyAsync(string sourcePath, string destFileName)
-    {
-        if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destFileName))
-            return null;
-
-        try
-        {
-            var request = new CopyObjectRequest
-            {
-                SourceBucket = _options.BucketName,
-                SourceKey = sourcePath,
-                DestinationBucket = _options.BucketName,
-                DestinationKey = destFileName
-            };
-            await _s3Client.CopyObjectAsync(request);
-            return destFileName;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to server-side copy S3 object: {SourcePath} -> {DestFileName}", sourcePath, destFileName);
-            return null;
-        }
-    }
+    public Task<string?> CopyAsync(string sourcePath, string destFileName) => _objects.CopyAsync(sourcePath, destFileName);
 
     /// <summary>
     /// 依据 UseHttps 规整自定义服务端点的 scheme。

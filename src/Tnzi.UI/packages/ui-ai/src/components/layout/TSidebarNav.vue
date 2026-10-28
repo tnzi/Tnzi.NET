@@ -238,21 +238,22 @@ function onGroupAction(group: NavGroup, actionId: string, event: MouseEvent): vo
 .t-sidebar-nav__items {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 .t-sidebar-nav__item {
   display: flex;
   align-items: center;
   gap: 12px;
   width: 100%;
-  height: 36px;
+  /* Row tokens: a shell sets touch sizes on a phone (see TChatApp). */
+  height: var(--tnzi-ai-row-height, 32px);
   padding: 0 9px;
   border: none;
   background: transparent;
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--tnzi-ai-text);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--tnzi-ai-row-font-size, 14px);
   cursor: pointer;
   text-align: left;
   transition: background var(--tnzi-ai-duration-fast, 120ms) var(--tnzi-ai-easing, ease);
@@ -262,18 +263,18 @@ function onGroupAction(group: NavGroup, actionId: string, event: MouseEvent): vo
 }
 .t-sidebar-nav__item.is-active {
   background: var(--tnzi-ai-accent-soft);
-  color: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-accent-text);
   font-weight: 500;
 }
 .t-sidebar-nav__item-icon {
-  width: 18px;
-  height: 18px;
-  font-size: 18px;
+  width: var(--tnzi-ai-row-icon-size, 18px);
+  height: var(--tnzi-ai-row-icon-size, 18px);
+  font-size: var(--tnzi-ai-row-icon-size, 18px);
   flex-shrink: 0;
   color: var(--tnzi-ai-text-secondary);
 }
 .t-sidebar-nav__item.is-active .t-sidebar-nav__item-icon {
-  color: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-accent-text);
 }
 .t-sidebar-nav__item-label {
   flex: 1;

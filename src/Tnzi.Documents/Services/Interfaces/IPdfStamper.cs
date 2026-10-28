@@ -13,7 +13,7 @@ public interface IPdfStamper
     /// <param name="request">盖章请求。</param>
     /// <returns>盖章后的 PDF 字节。内容直接画在页面内容层，输出天然是压平的。</returns>
     /// <exception cref="ArgumentOutOfRangeException"><see cref="PdfStamp.PageNumber"/> 越界。</exception>
-    /// <exception cref="Exceptions.PdfDocumentException">原字节不是合法 PDF、图片无法解码，或画文字时没有可用字体。</exception>
+    /// <exception cref="Exceptions.PdfDocumentException">原字节不是合法 PDF、图片无法解码、画文字时没有可用字体，或文字里有字体画不出的字符（不画成 .notdef 方框）。</exception>
     byte[] Stamp(byte[] pdf, PdfStampRequest request);
 
     /// <summary>
@@ -29,6 +29,29 @@ public interface IPdfStamper
     /// </remarks>
     /// <param name="request">造页 + 绘制请求；<see cref="PdfStampRequest.AppendPages"/> 不得为空（否则出来的是零页文档）。</param>
     /// <exception cref="ArgumentException"><see cref="PdfStampRequest.AppendPages"/> 为空。</exception>
-    /// <exception cref="Exceptions.PdfDocumentException">图片无法解码，或画文字时没有可用字体。</exception>
+    /// <exception cref="Exceptions.PdfDocumentException">图片无法解码、画文字时没有可用字体，或文字里有字体画不出的字符。</exception>
     byte[] Create(PdfStampRequest request);
+
+    /// <summary>
+    /// 量出一行文本按本实现绘制时的宽度（pt，即该行最后一个字形的步进终点到起点的距离）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 存在的理由：<see cref="PdfTextStamp"/> 不换行也不裁剪，放不下的部分照样画出去。
+    /// 越过页边的字形落在 MediaBox 之外，打开 PDF 看不见，压平、哈希、归档的也都是这份缺字的版本，
+    /// 整条链路不报任何错。所以换行只能由调用方按宽度来算，而宽度必须由<b>画字的同一个实现</b>
+    /// 用同一款字体量出来：按字符数乘一个平均字宽去估，全大写、宽字母或非拉丁文字一定估窄。
+    /// </para>
+    /// <para>
+    /// 参数与 <see cref="PdfTextStamp"/> 的同名属性一一对应（字号不大于 0 时取与绘制相同的默认值）。
+    /// 只量单行：换行符不会被当作换行。
+    /// </para>
+    /// </remarks>
+    /// <param name="text">要量的单行文本。</param>
+    /// <param name="fontSize">字号（pt）。</param>
+    /// <param name="bold">是否粗体。</param>
+    /// <param name="italic">是否斜体。</param>
+    /// <returns>绘制宽度（pt）；空串为 0。</returns>
+    /// <exception cref="Exceptions.PdfDocumentException">没有可用字体（画不了文字，也就量不了）。</exception>
+    double MeasureTextWidth(string text, double fontSize, bool bold = false, bool italic = false);
 }

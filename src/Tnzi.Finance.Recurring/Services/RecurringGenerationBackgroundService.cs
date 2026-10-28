@@ -60,13 +60,14 @@ public class RecurringGenerationBackgroundService : BackgroundService
         }
     }
 
+    /// <summary>扫一遍全部租户（或未注册租户来源时的环境上下文）。internal 供测试直接驱动。</summary>
     /// <remarks>
     /// ★**每个租户一个 DI 作用域**。作用域里装着 DbContext 与它的变更跟踪器；一个作用域
     /// 跑遍所有租户，只切 <see cref="ICurrentTenant"/>，会让租户 A 的实体留在跟踪器里被
     /// 租户 B 的 SaveChanges 一并刷库，而按主键取实体命中标识映射时**全局查询过滤器根本
     /// 不参与** —— 拿到的是上一个租户的行。内存也会随模板总数线性长上去。
     /// </remarks>
-    private async Task SweepAsync(CancellationToken cancellationToken)
+    internal async Task SweepAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<Guid> tenantIds;
 
@@ -90,7 +91,16 @@ public class RecurringGenerationBackgroundService : BackgroundService
             var currentTenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
             using (currentTenant.Change(tenantId))
             {
-                await RunOnceAsync(scope.ServiceProvider, cancellationToken);
+                try
+                {
+                    await RunOnceAsync(scope.ServiceProvider, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                {
+                    // ★ 一个租户的扫描失败不拖累列表里排在它后面的租户：外层只有一个包着整次扫描的 catch，
+                    // 没有这一层的话，前面的租户只要抛一次，后面的每个租户这个周期都不生成，下个周期重演。
+                    _logger.LogError(ex, "Recurring document sweep failed for tenant {TenantId}; continuing with the next tenant.", tenantId);
+                }
             }
         }
     }

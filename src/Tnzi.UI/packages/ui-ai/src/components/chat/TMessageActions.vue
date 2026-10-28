@@ -20,6 +20,7 @@
  */
 import { ref, onBeforeUnmount } from 'vue'
 import { Icon } from '@iconify/vue'
+import { useAiI18n } from '../../i18n/index'
 
 export interface MessageAction {
   /** Lucide icon id. */
@@ -52,6 +53,7 @@ const emit = defineEmits<{
   action: [action: MessageAction, index: number]
 }>()
 
+const t = useAiI18n()
 const copied = ref(false)
 
 /* Cleared on unmount so the reset callback cannot fire against a torn-down
@@ -88,7 +90,7 @@ function handleAction(a: MessageAction, i: number): void {
       v-if="!hideCopy"
       type="button"
       class="t-message-actions__btn t-message-actions__btn--icon"
-      :aria-label="copied ? 'Copied' : 'Copy'"
+      :aria-label="copied ? t.chat.copied : t.chat.copy"
       @click="handleCopy"
     >
       <Icon :icon="copied ? 'lucide:check' : 'lucide:copy'" />
@@ -146,6 +148,6 @@ function handleAction(a: MessageAction, i: number): void {
   justify-content: center;
 }
 .t-message-actions__btn--primary .iconify {
-  color: var(--tnzi-ai-accent, #3b82f6);
+  color: var(--tnzi-ai-accent-text);
 }
 </style>

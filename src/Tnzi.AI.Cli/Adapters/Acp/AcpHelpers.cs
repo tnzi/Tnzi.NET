@@ -31,13 +31,32 @@ internal static class AcpPermissionSelector
     /// </remarks>
     private static readonly string[] SessionScopedOptionIds = ["allow_session", "approve_for_session"];
 
-    /// <summary>挑一个 optionId；没有可安全选择的返回 null。</summary>
-    public static string? Select(JsonElement parameters)
+    /// <summary>只读（与先问我）档放行的工具类别：读、搜索、思考，不改任何东西。</summary>
+    private static readonly HashSet<string> ReadOnlyKinds = new(StringComparer.OrdinalIgnoreCase) { "read", "search", "think" };
+
+    /// <summary>改工作区档放行的工具类别：只读的那几类，加上文件的改、删、挪。执行命令、联网与其它一律拒绝。</summary>
+    private static readonly HashSet<string> EditWorkspaceKinds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "read", "search", "think", "edit", "delete", "move"
+    };
+
+    /// <summary>
+    /// 挑一个 optionId；没有可安全选择的返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 档位不放行这个工具（按 <c>toolCall.kind</c> 判：没有 kind 或认不出来的一律不放行）时只挑单次拒绝。
+    /// </remarks>
+    public static string? Select(JsonElement parameters, CliPermissionMode mode = CliPermissionMode.Full)
     {
         var options = EnumerateOptions(parameters).ToList();
         if (options.Count == 0)
         {
             return null;
+        }
+
+        if (!Permits(parameters, mode))
+        {
+            return options.FirstOrDefault(o => string.Equals(o.Kind, RejectOnce, StringComparison.OrdinalIgnoreCase)).OptionId;
         }
 
         // 1) 会话级放行（不留永久授权）
@@ -65,6 +84,90 @@ internal static class AcpPermissionSelector
         // 4) 单次拒绝
         var rejectOnce = options.FirstOrDefault(o => string.Equals(o.Kind, RejectOnce, StringComparison.OrdinalIgnoreCase));
         return rejectOnce.OptionId;
+    }
+
+    /// <summary>档位是否放行这次请求的工具。</summary>
+    public static bool Permits(JsonElement parameters, CliPermissionMode mode)
+    {
+        if (mode == CliPermissionMode.Full)
+        {
+            return true;
+        }
+
+        var kind = parameters.ValueKind == JsonValueKind.Object
+                   && parameters.TryGetProperty("toolCall", out var toolCall)
+                   && toolCall.ValueKind == JsonValueKind.Object
+                   && toolCall.TryGetProperty("kind", out var kindElement)
+                   && kindElement.ValueKind == JsonValueKind.String
+            ? kindElement.GetString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            return false;
+        }
+
+        return mode == CliPermissionMode.EditWorkspace ? EditWorkspaceKinds.Contains(kind) : ReadOnlyKinds.Contains(kind);
+    }
+
+    /// <summary>请求里有没有可选的选项。</summary>
+    public static bool HasOptions(JsonElement parameters) => EnumerateOptions(parameters).Any();
+
+    /// <summary>请求给出的选项（交给使用方挑）。名字没给时用 id。</summary>
+    public static List<CliPermissionOption> ReadOptions(JsonElement parameters)
+    {
+        var result = new List<CliPermissionOption>();
+        if (parameters.ValueKind != JsonValueKind.Object
+            || !parameters.TryGetProperty("options", out var options)
+            || options.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var option in options.EnumerateArray())
+        {
+            if (option.ValueKind != JsonValueKind.Object
+                || !option.TryGetProperty("optionId", out var id) || id.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(id.GetString()))
+            {
+                continue;
+            }
+
+            var name = option.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+            var kind = option.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String ? k.GetString() : null;
+            result.Add(new CliPermissionOption(id.GetString()!, string.IsNullOrWhiteSpace(name) ? id.GetString()! : name, kind ?? string.Empty));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 按使用方的回答挑一个 optionId：指定了且是请求给出的就用它（种类须与允许 / 拒绝一致）；没指定时允许挑单次允许（没有则永久允许），
+    /// 拒绝挑单次拒绝（没有则永久拒绝）。挑不出来返回 null。
+    /// </summary>
+    public static string? SelectForDecision(JsonElement parameters, bool allow, string? optionId)
+    {
+        var options = EnumerateOptions(parameters).ToList();
+        if (optionId is not null)
+        {
+            var chosen = options.FirstOrDefault(o => string.Equals(o.OptionId, optionId, StringComparison.Ordinal));
+            if (chosen.OptionId is not null && IsAllowKind(chosen.Kind) == allow)
+            {
+                return chosen.OptionId;
+            }
+        }
+
+        string[] preference = allow ? [AllowOnce, AllowAlways] : [RejectOnce, "reject_always"];
+        foreach (var kind in preference)
+        {
+            var match = options.FirstOrDefault(o => string.Equals(o.Kind, kind, StringComparison.OrdinalIgnoreCase));
+            if (match.OptionId is not null)
+            {
+                return match.OptionId;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>判断选中的 optionId 是不是放行项（用于日志措辞）。</summary>
@@ -227,6 +330,12 @@ internal sealed class AcpProviderErrorSniffer
 /// <remarks>
 /// 能力过滤不是锦上添花：给一个只支持 stdio 的运行时递一条 http/sse 条目，
 /// 会让整个 <c>session/new</c> 失败 —— 于是一个本可以少几个工具照常跑完的任务直接起不来。
+/// <para>
+/// 形状按 ACP 的 <c>McpServer</c> 写全，不能照搬 Claude 的配置格式：http / sse 的 <c>headers</c> 是
+/// <c>{name, value}</c> 数组且必填（没有请求头就给空数组），stdio 的 <c>args</c> 与 <c>env</c> 都给数组
+///（<c>env</c> 同为 <c>{name, value}</c>）。按 schema 校验参数的运行时会以「参数无效」拒掉整个 <c>session/new</c>，
+/// 每次运行都失败；宽松的运行时则丢掉对象形的请求头，回写端点的 Authorization 就这样没了，回写调用一律被拒。
+/// </para>
 /// </remarks>
 internal static class AcpMcpServerTranslator
 {
@@ -333,11 +442,9 @@ internal static class AcpMcpServerTranslator
                 ["url"] = url
             };
 
-            if (value.TryGetProperty("headers", out var headers) && headers.ValueKind == JsonValueKind.Object)
-            {
-                server["headers"] = headers.EnumerateObject()
-                    .ToDictionary(p => p.Name, p => (object?)p.Value.GetString(), StringComparer.Ordinal);
-            }
+            server["headers"] = value.TryGetProperty("headers", out var headers)
+                ? NameValueList(headers, name, "header", logger)
+                : [];
 
             return server;
         }
@@ -355,23 +462,50 @@ internal static class AcpMcpServerTranslator
             ["command"] = command
         };
 
-        if (value.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array)
-        {
-            stdio["args"] = args.EnumerateArray().Select(a => a.GetString()).Where(a => a is not null).ToList();
-        }
+        stdio["args"] = value.TryGetProperty("args", out var args) && args.ValueKind == JsonValueKind.Array
+            ? args.EnumerateArray()
+                .Where(a => a.ValueKind == JsonValueKind.String)
+                .Select(a => a.GetString()!)
+                .ToList()
+            : new List<string>();
 
-        if (value.TryGetProperty("env", out var env) && env.ValueKind == JsonValueKind.Object)
-        {
-            // ACP 的 env 是 {name, value} 数组，不是对象。
-            stdio["env"] = env.EnumerateObject()
-                .Select(p => new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["name"] = p.Name,
-                    ["value"] = p.Value.GetString()
-                })
-                .ToList();
-        }
+        // ACP 的 env 是 {name, value} 数组，不是对象。
+        stdio["env"] = value.TryGetProperty("env", out var env)
+            ? NameValueList(env, name, "environment variable", logger)
+            : [];
 
         return stdio;
+    }
+
+    /// <summary>
+    /// 把 Claude 格式的 <c>{"key": "value"}</c> 对象翻成 ACP 的 <c>[{name, value}]</c> 数组。
+    /// 值不是字符串的项丢弃并记 Warning：ACP 要求值是字符串，带着它整条 <c>session/new</c> 都会被拒。
+    /// </summary>
+    private static List<Dictionary<string, object?>> NameValueList(
+        JsonElement source, string serverName, string kind, ILogger logger)
+    {
+        var entries = new List<Dictionary<string, object?>>();
+        if (source.ValueKind != JsonValueKind.Object)
+        {
+            return entries;
+        }
+
+        foreach (var property in source.EnumerateObject())
+        {
+            if (property.Value.ValueKind != JsonValueKind.String)
+            {
+                logger.LogWarning("MCP server '{Name}': dropping {Kind} '{Key}' because its value is not a string",
+                    serverName, kind, property.Name);
+                continue;
+            }
+
+            entries.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["name"] = property.Name,
+                ["value"] = property.Value.GetString()
+            });
+        }
+
+        return entries;
     }
 }

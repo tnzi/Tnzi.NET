@@ -1,7 +1,8 @@
-import { watch, onBeforeUnmount, type Ref } from 'vue'
+import { watch, type Ref } from 'vue'
+import { useOverlayLayer, type OverlayLayer } from './useOverlayLayer'
 
 export interface UseFocusTrapOptions {
-  /** Called when the user presses Escape while the trap is active. */
+  /** Called when the user presses Escape while the trap is the topmost overlay. */
   onEscape?: () => void
   /**
    * Override the element that should be focused on activation.
@@ -25,10 +26,39 @@ function getFocusable(root: HTMLElement): HTMLElement[] {
   )
 }
 
+/** Keeps a Tab key press inside `root`: past either end it wraps round. */
+function trapTab(e: KeyboardEvent, root: HTMLElement | null): void {
+  if (!root) return
+  const focusable = getFocusable(root)
+  if (focusable.length === 0) {
+    e.preventDefault()
+    return
+  }
+  const first = focusable[0]!
+  const last = focusable[focusable.length - 1]!
+  const current = document.activeElement as HTMLElement | null
+  if (e.shiftKey) {
+    if (current === first || !root.contains(current)) {
+      e.preventDefault()
+      last.focus()
+    }
+  } else {
+    if (current === last || !root.contains(current)) {
+      e.preventDefault()
+      first.focus()
+    }
+  }
+}
+
 /**
  * Accessibility helper for modal-like components. Traps Tab navigation inside `rootRef`,
  * fires `onEscape` when Escape is pressed, and restores focus to the previously focused
  * element when `active` becomes false.
+ *
+ * The trap is a layer of the page's overlay stack (`useOverlayLayer`): Tab and Escape
+ * reach it only while it is the topmost open overlay. A dialog opened above it with
+ * `useFocusTrap` (or `useOverlayLayer`) gets them first, so one Escape closes only that
+ * dialog and Tab stays inside it.
  *
  * Consumers are responsible for wiring the returned activation state themselves - the
  * composable only reacts to the `active` getter passed in.
@@ -37,45 +67,22 @@ export function useFocusTrap(
   rootRef: Ref<HTMLElement | null>,
   active: () => boolean,
   options: UseFocusTrapOptions = {},
-) {
+): OverlayLayer {
   let previouslyFocused: HTMLElement | null = null
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (!active()) return
-    if (e.key === 'Escape') {
-      options.onEscape?.()
-      return
-    }
-    if (e.key !== 'Tab') return
-    const root = rootRef.value
-    if (!root) return
-    const focusable = getFocusable(root)
-    if (focusable.length === 0) {
-      e.preventDefault()
-      return
-    }
-    const first = focusable[0]!
-    const last = focusable[focusable.length - 1]!
-    const current = document.activeElement as HTMLElement | null
-    if (e.shiftKey) {
-      if (current === first || !root.contains(current)) {
-        e.preventDefault()
-        last.focus()
-      }
-    } else {
-      if (current === last || !root.contains(current)) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-  }
+  const layer = useOverlayLayer(active, {
+    root: () => rootRef.value,
+    onEscape: () => options.onEscape?.(),
+    onKeydown: (e) => {
+      if (e.key === 'Tab') trapTab(e, rootRef.value)
+    },
+  })
 
   watch(
     () => active(),
     (isActive) => {
       if (isActive) {
         previouslyFocused = (document.activeElement as HTMLElement) ?? null
-        document.addEventListener('keydown', handleKeydown)
         queueMicrotask(() => {
           const root = rootRef.value
           if (!root) return
@@ -83,7 +90,6 @@ export function useFocusTrap(
           target?.focus()
         })
       } else {
-        document.removeEventListener('keydown', handleKeydown)
         previouslyFocused?.focus()
         previouslyFocused = null
       }
@@ -91,7 +97,5 @@ export function useFocusTrap(
     { immediate: true },
   )
 
-  onBeforeUnmount(() => {
-    document.removeEventListener('keydown', handleKeydown)
-  })
+  return layer
 }

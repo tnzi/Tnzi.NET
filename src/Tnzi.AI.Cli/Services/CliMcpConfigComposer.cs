@@ -5,7 +5,7 @@ namespace Tnzi.AI.Cli.Services;
 /// </summary>
 /// <remarks>
 /// 把 Agent 绑定上配置的 MCP server，与框架自己的回写通道（<c>Tnzi.AI.Mcp</c> 暴露的
-/// HTTP/SSE 端点）合并成一份 Claude 风格的 <c>mcpServers</c> 对象。
+/// Streamable HTTP 端点）合并成一份 Claude 风格的 <c>mcpServers</c> 对象。
 /// <para>
 /// 框架<b>只</b>注入这条回写通道，<b>不内置任何业务工具</b>：建工单、发评论、改状态
 /// 这些是消费应用的领域，由应用自己往 <c>Tnzi.AI.Mcp</c> 注册。框架不含业务。
@@ -14,9 +14,13 @@ namespace Tnzi.AI.Cli.Services;
 public interface ICliMcpConfigComposer
 {
     /// <summary>
-    /// 合并绑定配置与回写通道。两者都没有时返回 <c>null</c>（= 让 CLI 继承宿主本机配置）。
+    /// 合并绑定配置与回写通道。两者都没有时返回 <c>null</c>（= 让 CLI 继承执行位置上的本机配置）。
     /// </summary>
-    string? Compose(string? bindingMcpConfigJson, string? writeBackToken, CliWriteBackOptions options);
+    /// <param name="bindingMcpConfigJson">Agent 绑定上配置的 MCP server。</param>
+    /// <param name="writeBackToken">这次运行的回写凭据；未签发时为 null。</param>
+    /// <param name="options">回写配置。</param>
+    /// <param name="target">执行目标：回写通道写成哪一条由它决定（<see cref="ICliHostTarget.CreateWriteBackServerEntry"/>）。</param>
+    string? Compose(string? bindingMcpConfigJson, string? writeBackToken, CliWriteBackOptions options, ICliHostTarget target);
 }
 
 /// <inheritdoc cref="ICliMcpConfigComposer" />
@@ -31,9 +35,10 @@ public class CliMcpConfigComposer : ICliMcpConfigComposer
     }
 
     /// <inheritdoc />
-    public string? Compose(string? bindingMcpConfigJson, string? writeBackToken, CliWriteBackOptions options)
+    public string? Compose(string? bindingMcpConfigJson, string? writeBackToken, CliWriteBackOptions options, ICliHostTarget target)
     {
         Check.NotNull(options);
+        Check.NotNull(target);
 
         var servers = ParseServers(bindingMcpConfigJson);
         var hasWriteBack = options.Enabled
@@ -49,17 +54,9 @@ public class CliMcpConfigComposer : ICliMcpConfigComposer
 
         if (hasWriteBack)
         {
-            servers[options.ServerName] = new JsonObject
-            {
-                ["type"] = "sse",
-                ["url"] = options.McpEndpoint,
-                ["headers"] = new JsonObject
-                {
-                    // MCP server 同时接受 X-Api-Key 与 Authorization: Bearer；
-                    // 用 Bearer 是因为它更不容易被中间代理当成可缓存的自定义头。
-                    ["Authorization"] = $"Bearer {writeBackToken}"
-                }
-            };
+            // 条目的形状由执行目标决定：本机直连平台端点（Streamable HTTP），连不到平台地址的远程目标写成它自己的中继命令
+            var channel = new CliWriteBackChannel(options.McpEndpoint!, writeBackToken!, options.ToolCallTimeout);
+            servers[options.ServerName] = target.CreateWriteBackServerEntry(channel);
         }
         else if (options.Enabled && string.IsNullOrWhiteSpace(options.McpEndpoint))
         {

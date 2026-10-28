@@ -96,6 +96,10 @@ export default defineConfig({
         'node-completed': 'var(--tnzi-ai-node-completed)',
         'node-failed': 'var(--tnzi-ai-node-failed)',
         'handoff-accent': 'var(--tnzi-ai-handoff-accent)',
+        // The accent as a text / icon colour (`text-ai-accent-text`). Not
+        // `text-primary`: the brand colour can be light, and is then
+        // unreadable as text on a light canvas.
+        'accent-text': 'var(--tnzi-ai-accent-text)',
       },
     },
   },

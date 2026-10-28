@@ -5,25 +5,37 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// and MCP client connection, then retries the call once with a fresh token.
 /// Only retries once to prevent infinite loops.
 /// </summary>
-public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
+/// <remarks>
+/// 两类服务器会用到它：配置了 OAuth client_credentials 的（失效 token 缓存后重连），
+/// 以及用户专属服务器（<see cref="UserMcpServerConfig"/>）：失效<b>这个用户的</b>那条连接，并让重连时向消费方的
+/// 凭据回调带 <c>Refresh = true</c> 要刷新过的凭据，然后重试一次。
+/// </remarks>
+/// <remarks>
+/// The retry cannot go through the wrapped function: an SDK <see cref="McpClientTool"/> is bound to the
+/// client it was listed from, and recovery has just disposed that client. The retry reconnects through
+/// <see cref="IMcpClientFactory"/> and calls the same tool (matched by its server-side name) on the new connection.
+/// </remarks>
+public sealed partial class McpAuthRecoveryToolWrapper : DelegatingAIFunction
 {
+    private readonly McpServerConfig _server;
     private readonly string _serverName;
-    private readonly McpOAuthClientHandler _oauthHandler;
+    private readonly McpOAuthClientHandler? _oauthHandler;
     private readonly IMcpClientFactory _clientFactory;
     private readonly McpToolProvider _toolProvider;
     private readonly ILogger<McpAuthRecoveryToolWrapper>? _logger;
 
     public McpAuthRecoveryToolWrapper(
         AIFunction innerFunction,
-        string serverName,
-        McpOAuthClientHandler oauthHandler,
+        McpServerConfig server,
+        McpOAuthClientHandler? oauthHandler,
         IMcpClientFactory clientFactory,
         McpToolProvider toolProvider,
         ILogger<McpAuthRecoveryToolWrapper>? logger = null)
         : base(Check.NotNull(innerFunction))
     {
-        _serverName = Check.NotNullOrEmpty(serverName);
-        _oauthHandler = Check.NotNull(oauthHandler);
+        _server = Check.NotNull(server);
+        _serverName = Check.NotNullOrEmpty(server.Name);
+        _oauthHandler = oauthHandler;
         _clientFactory = Check.NotNull(clientFactory);
         _toolProvider = Check.NotNull(toolProvider);
         _logger = logger;
@@ -35,8 +47,8 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
     /// </summary>
     public static IList<AITool> Wrap(
         IList<AITool> tools,
-        string serverName,
-        McpOAuthClientHandler oauthHandler,
+        McpServerConfig server,
+        McpOAuthClientHandler? oauthHandler,
         IMcpClientFactory clientFactory,
         McpToolProvider toolProvider,
         ILogger<McpAuthRecoveryToolWrapper>? logger = null)
@@ -51,7 +63,7 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
         {
             if (tool is AIFunction aiFunction)
             {
-                result.Add(new McpAuthRecoveryToolWrapper(aiFunction, serverName, oauthHandler, clientFactory, toolProvider, logger));
+                result.Add(new McpAuthRecoveryToolWrapper(aiFunction, server, oauthHandler, clientFactory, toolProvider, logger));
             }
             else
             {
@@ -79,12 +91,20 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
                 _serverName, InnerFunction.Name);
 
             // Invalidate cached OAuth token so a fresh token is obtained on next request
-            _oauthHandler.InvalidateToken(_serverName);
+            _oauthHandler?.InvalidateToken(_serverName);
 
-            // Invalidate the cached MCP client connection so it reconnects with the new token
+            // Invalidate the cached MCP client connection so it reconnects with the new token.
+            // 用户专属服务器只失效这个用户的连接（按名字会让别的用户一起掉线），并要求下一次建连向消费方要刷新过的凭据
             try
             {
-                await _clientFactory.InvalidateClientAsync(_serverName, cancellationToken).ConfigureAwait(false);
+                if (_server is UserMcpServerConfig)
+                {
+                    await _clientFactory.InvalidateClientAsync(_server, refreshCredential: true, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _clientFactory.InvalidateClientAsync(_serverName, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (Exception invalidateEx)
             {
@@ -95,16 +115,24 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
             }
 
             // Invalidate tool cache so tools are re-fetched from the reconnected client
-            _toolProvider.InvalidateCache(_serverName);
+            if (_server is UserMcpServerConfig)
+            {
+                _toolProvider.InvalidateServerCache(_server);
+            }
+            else
+            {
+                _toolProvider.InvalidateCache(_serverName);
+            }
 
-            // Retry once - do not catch auth failures on retry to avoid infinite loops
+            // Retry once on the reconnected client - do not catch auth failures on retry to avoid infinite loops
             try
             {
                 _logger?.LogDebug(
                     "Retrying MCP tool call for server '{ServerName}', tool '{ToolName}' after token refresh",
                     _serverName, InnerFunction.Name);
 
-                return await base.InvokeCoreAsync(arguments ?? new AIFunctionArguments(), cancellationToken).ConfigureAwait(false);
+                var reconnected = await ResolveOnNewConnectionAsync(cancellationToken).ConfigureAwait(false);
+                return await reconnected.InvokeAsync(arguments ?? new AIFunctionArguments(), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception retryEx)
             {
@@ -122,8 +150,23 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
     }
 
     /// <summary>
+    /// Connects again (with the refreshed token) and finds this tool on the new connection by its server-side name.
+    /// </summary>
+    private async Task<AIFunction> ResolveOnNewConnectionAsync(CancellationToken cancellationToken)
+    {
+        var originalName = McpToolNames.OriginalName(InnerFunction);
+        var adapter = await _clientFactory.GetOrCreateClientAsync(_server, cancellationToken).ConfigureAwait(false);
+        var tools = await adapter.ListToolsAsync(cancellationToken).ConfigureAwait(false);
+
+        return tools.OfType<AIFunction>().FirstOrDefault(t => string.Equals(McpToolNames.OriginalName(t), originalName, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"MCP server '{_serverName}' no longer offers the tool '{originalName}' after reconnecting.");
+    }
+
+    /// <summary>
     /// Determines whether an exception indicates an authentication/authorization failure (401/403).
-    /// Checks HttpRequestException status codes and common error message patterns.
+    /// Checks HttpRequestException status codes and common error message patterns
+    /// (status codes in a message only count as whole numbers: "4031" is not a 403).
     /// </summary>
     public static bool IsAuthFailure(Exception ex)
     {
@@ -145,8 +188,7 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
             var message = current.Message;
             if (!string.IsNullOrEmpty(message))
             {
-                if (message.Contains("401", StringComparison.OrdinalIgnoreCase)
-                    || message.Contains("403", StringComparison.OrdinalIgnoreCase)
+                if (AuthStatusCodeRegex().IsMatch(message)
                     || message.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("authentication failed", StringComparison.OrdinalIgnoreCase)
@@ -163,4 +205,7 @@ public sealed class McpAuthRecoveryToolWrapper : DelegatingAIFunction
 
         return false;
     }
+
+    [GeneratedRegex(@"(?<!\d)40[13](?!\d)")]
+    private static partial Regex AuthStatusCodeRegex();
 }

@@ -20,11 +20,6 @@ public class AIOptions
     public Dictionary<string, ProviderOptions> Providers { get; set; } = new();
 
     /// <summary>
-    /// 是否启用 OpenTelemetry 可观测性
-    /// </summary>
-    public bool EnableObservability { get; set; } = false;
-
-    /// <summary>
     /// Strip TextContent from assistant messages that contain tool calls before
     /// sending the continuation request. Some models (e.g. DeepSeek) produce token
     /// fracturing when receiving both content and tool_calls in the same message.
@@ -86,11 +81,6 @@ public class AIOptions
     /// 默认两张表都为空 = 客户端自选一律 403（失败关闭）。
     /// </summary>
     public AdHocToolsOptions AdHocTools { get; set; } = new();
-
-    /// <summary>
-    /// 配额默认值配置
-    /// </summary>
-    public QuotaOptions Quota { get; set; } = new();
 
     /// <summary>
     /// 安全防护 (Guardrails) 配置

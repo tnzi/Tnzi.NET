@@ -228,25 +228,62 @@ public class AgentTaskServiceTests
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetByStatusAsync_FiltersCorrectly()
+    public async Task GetByStatusAsync_FiltersOrdersAndPages()
     {
         // Arrange
-        var tasks = new List<AgentTask>
-        {
-            new() { Id = Guid.NewGuid(), Title = "T1", Status = AgentTaskStatus.Completed, CreationTime = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc) },
-            new() { Id = Guid.NewGuid(), Title = "T2", Status = AgentTaskStatus.Completed, CreationTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }
-        };
-        _repository.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<AgentTask, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(tasks);
+        SetupQueryable(
+        [
+            new() { Id = Guid.NewGuid(), Title = "T1", Status = AgentTaskStatus.Completed, CreationTime = new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = Guid.NewGuid(), Title = "T2", Status = AgentTaskStatus.Completed, CreationTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = Guid.NewGuid(), Title = "T3", Status = AgentTaskStatus.Completed, CreationTime = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc) },
+            new() { Id = Guid.NewGuid(), Title = "P1", Status = AgentTaskStatus.Pending, CreationTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc) }
+        ]);
 
         // Act
-        var result = await CreateService().GetByStatusAsync(AgentTaskStatus.Completed);
+        var result = await CreateService().GetByStatusAsync(new AgentTaskStatusQueryDto
+        {
+            Status = AgentTaskStatus.Completed,
+            PageIndex = 1,
+            PageSize = 2
+        });
 
-        // Assert
+        // Assert：只返回一页，按 CreationTime 升序，总数只算该状态
         Assert.True(result.Succeeded);
-        Assert.Equal(2, result.Data!.Count);
-        // 按 CreationTime 排序
-        Assert.Equal("T2", result.Data[0].Title);
-        Assert.Equal("T1", result.Data[1].Title);
+        Assert.Equal(3, result.Data!.TotalCount);
+        Assert.Equal(["T2", "T3"], result.Data.Items.Select(t => t.Title));
+    }
+
+    [Fact]
+    public async Task GetByStatusAsync_LargePageSize_IsCappedByThePagingLimit()
+    {
+        // 一次请求的条数有上限：已完成任务随运行持续累积，此前整表读进内存
+        SetupQueryable(Enumerable.Range(0, 150)
+            .Select(i => new AgentTask
+            {
+                Id = Guid.NewGuid(),
+                Title = $"T{i}",
+                Status = AgentTaskStatus.Completed,
+                CreationTime = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMinutes(i)
+            })
+            .ToList());
+
+        var result = await CreateService().GetByStatusAsync(new AgentTaskStatusQueryDto
+        {
+            Status = AgentTaskStatus.Completed,
+            PageSize = 10_000
+        });
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(150, result.Data!.TotalCount);
+        Assert.Equal(100, result.Data.Items.Count);
+    }
+
+    private void SetupQueryable(List<AgentTask> data)
+    {
+        var mock = data.BuildMock();
+        _repository.As<IQueryable<AgentTask>>().Setup(q => q.Provider).Returns(mock.Provider);
+        _repository.As<IQueryable<AgentTask>>().Setup(q => q.Expression).Returns(mock.Expression);
+        _repository.As<IQueryable<AgentTask>>().Setup(q => q.ElementType).Returns(mock.ElementType);
+        _repository.As<IQueryable<AgentTask>>().Setup(q => q.GetEnumerator()).Returns(() => mock.GetEnumerator());
     }
 }

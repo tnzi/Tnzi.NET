@@ -4,8 +4,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 /**
- * Run viewer execution controls: selection by execution id, cancel, the
- * pending-interrupt panel (resume-with-input) and the pending-signals list.
+ * Run viewer execution controls: selection by execution id, cancel, resume,
+ * the pending-interrupt panel (resume-with-input) and the pending-signals list.
  * Every write is gated on `ai.workflow.execute`, the code the backend enforces.
  */
 
@@ -24,6 +24,7 @@ const summaries = [
 ]
 
 let detailOverrides: Record<string, unknown> = {}
+let workflowItems: Array<Record<string, unknown>> = []
 const getDetail = vi.fn(async (executionId: string) => ({
   id: 'row-1',
   executionId,
@@ -41,6 +42,7 @@ const getDetail = vi.fn(async (executionId: string) => ({
   ...detailOverrides,
 }))
 const cancel = vi.fn()
+const resume = vi.fn()
 const getInterrupt = vi.fn()
 const resumeWithInput = vi.fn()
 const getSignals = vi.fn()
@@ -48,12 +50,12 @@ const getSignals = vi.fn()
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
     workflows: {
-      fetch: vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 })),
+      fetch: vi.fn(async () => ({ items: workflowItems, totalCount: workflowItems.length, pageIndex: 1, pageSize: 100 })),
     },
     workflowRuns: {
       fetch: vi.fn(async () => ({ items: summaries, totalCount: 1, pageIndex: 1, pageSize: 20 })),
       getDetail,
-      resume: vi.fn(),
+      resume,
       approveStep: vi.fn(),
       rejectStep: vi.fn(),
       cancel,
@@ -89,8 +91,10 @@ describe('WorkflowRunViewer execution controls', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     detailOverrides = {}
+    workflowItems = []
     getDetail.mockClear()
     cancel.mockReset().mockResolvedValue(undefined)
+    resume.mockReset().mockResolvedValue({ status: 'Completed', output: 'done' })
     getInterrupt.mockReset().mockResolvedValue({
       executionId: 'exec-1',
       stepId: 'gate',
@@ -145,6 +149,23 @@ describe('WorkflowRunViewer execution controls', () => {
     expect(wrapper.find('[data-test="wf-interrupt-submit"]').exists()).toBe(false)
   })
 
+  it('resumes a paused execution through the execution id', async () => {
+    detailOverrides = { status: 'Paused' }
+    const wrapper = await mountAndSelect()
+    const button = wrapper.find('[data-test="wf-run-resume"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+    await flushPromises()
+    expect(resume).toHaveBeenCalledWith('exec-1')
+  })
+
+  it('offers no resume without ai.workflow.execute', async () => {
+    grant('ai.workflow.view')
+    detailOverrides = { status: 'Paused' }
+    const wrapper = await mountAndSelect()
+    expect(wrapper.find('[data-test="wf-run-resume"]').exists()).toBe(false)
+  })
+
   it('lists pending signals, and shows the refusal when the mailbox read fails', async () => {
     getSignals.mockResolvedValueOnce([
       { signalId: 's1', type: 'cancel', reason: 'Cancelled by operator', createdAt: '2026-09-01T00:01:00Z' },
@@ -158,6 +179,58 @@ describe('WorkflowRunViewer execution controls', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="wf-run-signals-error"]').text()).toContain('Workflow mailbox is not available')
     expect(wrapper.find('[data-test="wf-run-signals-empty"]').exists()).toBe(false)
+  })
+
+  // Resume is offered exactly where WorkflowService.ResumeAsync resumes: a Paused or
+  // AwaitingApproval run with no step still waiting for a decision, and a Failed run
+  // of a DAG workflow (retry, and re-approval after a rejected step). An
+  // AwaitingInput run is answered through the interrupt panel instead.
+  describe('resume', () => {
+    const resumeShown = async () => (await mountAndSelect()).find('[data-test="wf-run-resume"]').exists()
+
+    it('is offered on a paused run', async () => {
+      detailOverrides = { status: 'Paused' }
+      expect(await resumeShown()).toBe(true)
+    })
+
+    it('is offered once every step awaiting approval has been decided', async () => {
+      detailOverrides = { status: 'AwaitingApproval', stepsAwaitingApproval: [] }
+      expect(await resumeShown()).toBe(true)
+    })
+
+    it('★ is not offered while a step still awaits approval', async () => {
+      detailOverrides = { status: 'AwaitingApproval', stepsAwaitingApproval: ['gate'] }
+      expect(await resumeShown()).toBe(false)
+    })
+
+    it('★ is not offered on a run awaiting input (the interrupt panel answers it)', async () => {
+      detailOverrides = { status: 'AwaitingInput' }
+      expect(await resumeShown()).toBe(false)
+    })
+
+    it('★ is offered on a failed run of a DAG workflow', async () => {
+      workflowItems = [{ id: 'wf-1', name: 'Review', executionMode: 'Dag' }]
+      detailOverrides = { status: 'Failed' }
+      expect(await resumeShown()).toBe(true)
+    })
+
+    it('is not offered on a failed run of a sequential workflow, or a finished one', async () => {
+      workflowItems = [{ id: 'wf-1', name: 'Review', executionMode: 'Sequential' }]
+      detailOverrides = { status: 'Failed' }
+      expect(await resumeShown()).toBe(false)
+      detailOverrides = { status: 'Completed' }
+      expect(await resumeShown()).toBe(false)
+    })
+
+    // The workflow is a DAG on purpose: the status alone has to refuse these, not a
+    // missing execution mode.
+    it('is not offered on a running or cancelled run, even of a DAG workflow', async () => {
+      workflowItems = [{ id: 'wf-1', name: 'Review', executionMode: 'Dag' }]
+      detailOverrides = { status: 'Running' }
+      expect(await resumeShown()).toBe(false)
+      detailOverrides = { status: 'Cancelled' }
+      expect(await resumeShown()).toBe(false)
+    })
   })
 
   describe('pending interrupt (AwaitingInput)', () => {

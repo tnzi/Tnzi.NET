@@ -135,4 +135,38 @@ describe('useChatStore deployment config', () => {
 
     expect(getPresence).not.toHaveBeenCalled()
   })
+
+  it('ensureConfig probes once per session, and again after a user switch resets the store', async () => {
+    const store = useChatStore()
+    const getConfig = vi.fn().mockResolvedValue({ ...DEFAULT_CHAT_CONFIG, enabled: true })
+    store.init(makeBridge({ getConfig }))
+
+    await store.ensureConfig()
+    store.claimForUser('user-a')
+    await store.ensureConfig()
+    expect(getConfig).toHaveBeenCalledTimes(1)
+    expect(store.config.enabled).toBe(true)
+
+    // A different user without a sign-out: the reset puts chat back to disabled,
+    // and the next ensureConfig must ask the server for this user's grant.
+    store.claimForUser('user-b')
+    expect(store.config.enabled).toBe(false)
+    await store.ensureConfig()
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    expect(store.config.enabled).toBe(true)
+  })
+
+  it('an explicit loadConfig counts for ensureConfig, and still refreshes on demand', async () => {
+    const store = useChatStore()
+    const getConfig = vi.fn().mockResolvedValue({ ...DEFAULT_CHAT_CONFIG, enabled: true })
+    store.init(makeBridge({ getConfig }))
+
+    await store.loadConfig()
+    await store.ensureConfig()
+    expect(getConfig).toHaveBeenCalledTimes(1)
+
+    // A runtime `Chat:*` change re-fetches through loadConfig regardless.
+    await store.loadConfig()
+    expect(getConfig).toHaveBeenCalledTimes(2)
+  })
 })

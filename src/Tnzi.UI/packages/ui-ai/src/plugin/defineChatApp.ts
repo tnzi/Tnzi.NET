@@ -26,7 +26,8 @@
  * this factory render it would trade that away for a few saved lines. The
  * `home` component is yours.
  */
-import { watchEffect, type App, type Component } from 'vue';
+import type { App, Component } from 'vue';
+import { preventPageZoom } from '../headless/preventPageZoom';
 import type { Router, RouteRecordRaw } from 'vue-router';
 import { createTnziAuthGuard } from '@tnzi/core/guards';
 import { installAppUpdate, type AppUpdateOptions } from '@tnzi/core/app-update';
@@ -34,12 +35,12 @@ import {
   THEME_CONTEXT_KEY,
   createThemeContext,
   mergeThemeSettings,
-  buildCssVars,
-  injectCssVars,
   type ThemeSettings,
 } from '@tnzi/ui';
 import type { AdminAuthRuntime } from '@tnzi/ui';
 import TAuthRoute from '../auth/TAuthRoute.vue';
+import TGuestWelcome from '../auth/TGuestWelcome.vue';
+import { TOOL_RENDERERS_KEY, type ToolRendererMap } from '../components/chat/chat-render-context';
 
 export interface ChatAppLoginConfig {
   /** Path the sign-in route is mounted at. Default `/login`. */
@@ -48,6 +49,12 @@ export interface ChatAppLoginConfig {
   name?: string;
   brandName?: string;
   brandIcon?: string;
+  /**
+   * The brand's logotype (an iconify name), drawn in place of the `brandName`
+   * text on the sign-in page and the guest welcome screen. `brandName` stays
+   * its accessible name, so set both.
+   */
+  brandWordmark?: string;
   heading?: string;
   subheading?: string;
   termsHref?: string;
@@ -55,6 +62,26 @@ export interface ChatAppLoginConfig {
   footnote?: string;
   /** Replace the whole sign-in page. Rarely needed - `TAuthRoute` is themed
    *  through the same tokens as the rest of the product. */
+  component?: Component;
+}
+
+/**
+ * The welcome screen signed-out visitors see instead of the sign-in page: they type first,
+ * sign in when they send, and the message is sent after sign-in.
+ */
+export interface ChatAppGuestWelcomeConfig {
+  /** Path of the welcome screen. Default `/welcome`. */
+  path?: string;
+  /** Route name. Default `welcome`. */
+  name?: string;
+  /** Headline. Defaults to the locale's landing greeting. */
+  greeting?: string;
+  subline?: string;
+  /** Composer placeholder. Defaults to the locale's. */
+  placeholder?: string;
+  /** Under the composer: what sending does. Defaults to the locale's; '' for none. */
+  hint?: string;
+  /** Replace the screen. It should keep the message (`stashWelcomeMessage`) and open sign-in. */
   component?: Component;
 }
 
@@ -98,6 +125,27 @@ export interface DefineChatAppOptions {
    * the Vite dev server. See `@tnzi/core/app-update`.
    */
   appUpdate?: false | Omit<AppUpdateOptions, 'router'>;
+  /**
+   * Signed-out visitors land on a welcome screen instead of the sign-in page: they type
+   * their first message, sign in when they send it, and the conversation screen sends it
+   * once they are in (`useChatThreads` does this by itself). Off by default. Needs the
+   * built-in guard (`guard` not false).
+   */
+  guestWelcome?: boolean | ChatAppGuestWelcomeConfig;
+  /**
+   * Tool renderers for the whole app, by tool name: a product's own view of its own tools.
+   * Every other tool shows the generic card. A shell's `toolRenderers` prop wins on the
+   * same name.
+   */
+  toolRenderers?: ToolRendererMap;
+  /**
+   * Turn off the browser's page zoom (pinch, double-tap, zoom on focusing a field)
+   * so the app behaves like an app on a phone; see `preventPageZoom` in
+   * `@tnzi/ui-ai/headless` for what it does per browser. Off by default: page zoom
+   * is how some people read small text, so giving it up is the product's call.
+   * A component that handles pinch itself keeps working.
+   */
+  preventPageZoom?: boolean;
 }
 
 export interface DefineChatAppResult {
@@ -113,6 +161,17 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
   const homePath = options.homePath ?? '/';
   const homeName = options.homeName ?? 'home';
   const redirectQuery = options.redirectQuery ?? 'redirect';
+  const welcome = options.guestWelcome
+    ? (typeof options.guestWelcome === 'object' ? options.guestWelcome : {})
+    : null;
+  const welcomePath = welcome?.path ?? '/welcome';
+  const welcomeName = welcome?.name ?? 'welcome';
+  /* Only when set: a `component` that replaces either page receives these route
+     props, and one that does not declare this newer prop would otherwise get
+     it as a fallthrough attribute (overriding what it passes to its own root). */
+  const wordmarkProp = options.login?.brandWordmark
+    ? { brandWordmark: options.login.brandWordmark }
+    : {};
 
   const routes: RouteRecordRaw[] = [
     {
@@ -125,6 +184,7 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
         runtime: options.runtime,
         brandName: options.login?.brandName ?? '',
         brandIcon: options.login?.brandIcon ?? '',
+        ...wordmarkProp,
         heading: options.login?.heading ?? '',
         subheading: options.login?.subheading ?? '',
         termsHref: options.login?.termsHref ?? '',
@@ -140,6 +200,27 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
       component: options.home as Component,
       meta: { requiresAuth: true },
     },
+    ...(welcome
+      ? [{
+          path: welcomePath,
+          name: welcomeName,
+          component: welcome.component ?? TGuestWelcome,
+          props: {
+            runtime: options.runtime,
+            brandName: options.login?.brandName ?? '',
+            brandIcon: options.login?.brandIcon ?? '',
+            ...wordmarkProp,
+            greeting: welcome.greeting ?? '',
+            subline: welcome.subline ?? '',
+            placeholder: welcome.placeholder ?? '',
+            ...(welcome.hint !== undefined ? { hint: welcome.hint } : {}),
+            loginName,
+            homePath,
+            redirectQuery,
+          },
+          meta: { requiresAuth: false },
+        } satisfies RouteRecordRaw]
+      : []),
     ...(options.routes ?? []),
   ];
 
@@ -160,20 +241,25 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
       const settings = mergeThemeSettings(
         typeof options.theme === 'object' ? options.theme : {},
       );
-      const context = createThemeContext(settings);
-      app.provide(THEME_CONTEXT_KEY, context);
-
-      /* Write the variables and keep writing them: the palette AND the
-         light/dark half both live in this map, so a mode flip has to re-emit
-         it or the surfaces keep the previous mode's greys. */
-      watchEffect(() => {
-        injectCssVars(buildCssVars(context.settings.value.colors, context.resolvedMode.value));
-      });
+      /* The context writes the `--tnzi-*` variables and the `dark` class
+         itself, now and on every change to its settings: the palette AND the
+         light/dark half both live in that map, so a mode flip re-emits it.
+         `TChatApp` drives the mode through this context (`autoApplyTheme`),
+         which is what keeps the tokens in the mode the user picked. */
+      app.provide(THEME_CONTEXT_KEY, createThemeContext(settings));
     }
 
     // Independent of the auth guard: a stale tab breaks the same way signed in or not.
     if (options.appUpdate !== false) {
       installAppUpdate({ ...options.appUpdate, router });
+    }
+
+    // App-wide, for the life of the page: an app does not stop being an app.
+    if (options.preventPageZoom) preventPageZoom();
+
+    // App-wide tool renderers: every shell's message renderers see them.
+    if (options.toolRenderers) {
+      app.provide(TOOL_RENDERERS_KEY, options.toolRenderers);
     }
 
     if (options.guard === false) return;
@@ -203,6 +289,17 @@ export function defineChatApp(options: DefineChatAppOptions): DefineChatAppResul
         restore: () => auth.restoreAuth(),
         loginRouteName: loginName,
         redirectQueryKey: redirectQuery,
+        ...(welcome
+          ? {
+              publicRouteNames: [welcomeName],
+              // A signed-out visit to the conversation screen lands on the welcome screen
+              // (type first, sign in on send); everything else still goes to sign-in.
+              resolveRedirect: ({ to, reason }) =>
+                reason === 'unauthenticated' && (to.name === homeName || to.path === homePath)
+                  ? { name: welcomeName }
+                  : undefined,
+            }
+          : {}),
       }) as Parameters<Router['beforeEach']>[0],
     );
   }

@@ -57,6 +57,6 @@ async function copyCode(): Promise<void> {
         </NTooltip>
       </div>
     </div>
-    <div class="flex-1 min-h-0 overflow-auto p-4 text-sm [&_pre]:!bg-transparent [&_code]:!bg-transparent" v-html="highlightedHtml" />
+    <div class="t-ai-scroll relative flex-1 min-h-0 overflow-auto p-4 text-sm leading-[var(--tnzi-ai-code-line-height,1.5)] [&_pre]:!bg-transparent [&_code]:!bg-transparent" v-html="highlightedHtml" />
   </div>
 </template>

@@ -6,7 +6,11 @@ namespace Tnzi.AI.Metadata;
 /// <remarks>
 /// 每种协议（stream-json / ACP / 厂商 app-server）的原生事件都由适配器映射到这几种上，
 /// 上层（持久化、SSE、前端时间线）只认识这一套，不认识任何 provider 的私有形状。
+/// ★ 线上一律按名字写（<c>"Text"</c> / <c>"ToolUse"</c>），与框架其它 JSON 出口同口径：前端按名字判别，
+/// 写成数字时流上的文本与时间线全丢（实时事件流曾按不带枚举转换器的选项序列化）。
+/// 标在类型上，不论调用方传哪套序列化选项都一致；读取时数字仍然接受。
 /// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<CliAgentEventType>))]
 public enum CliAgentEventType
 {
     /// <summary>面向用户的文本增量。</summary>
@@ -28,7 +32,40 @@ public enum CliAgentEventType
     Error = 5,
 
     /// <summary>运行时日志。未知事件类型一律降级到这里，不得崩溃。</summary>
-    Log = 6
+    Log = 6,
+
+    /// <summary>
+    /// CLI 请求批准一个动作（<c>can_use_tool</c> / <c>session/request_permission</c>），等使用方回答。
+    /// 只在「先问我」档且这一轮有人值守时出现；<see cref="Dtos.CliAgentEvent.Permission"/> 带请求 id、选项与过期时间。
+    /// </summary>
+    PermissionRequest = 7,
+
+    /// <summary>
+    /// 一个权限请求有了结局（允许、拒绝、超时、随运行结束）。<see cref="Dtos.CliAgentEvent.Permission"/> 的 <c>RequestId</c>
+    /// 指向那条请求，<c>Status</c> 是结局。
+    /// </summary>
+    PermissionResolved = 8
+}
+
+/// <summary>
+/// 外部 agent 的一个权限请求处在什么状态。
+/// </summary>
+public enum CliPermissionStatus
+{
+    /// <summary>等使用方回答。</summary>
+    Pending = 0,
+
+    /// <summary>使用方允许（一次，或 CLI 支持时「本会话总是允许」）。</summary>
+    Allowed = 1,
+
+    /// <summary>使用方拒绝。</summary>
+    Denied = 2,
+
+    /// <summary>到了期限没人回答，按拒绝交给 CLI。</summary>
+    TimedOut = 3,
+
+    /// <summary>运行在回答之前结束（取消、失败、进程退出），按拒绝结束。</summary>
+    Cancelled = 4
 }
 
 /// <summary>
@@ -113,22 +150,51 @@ public enum CliRunFailureReason
     Cancelled = 14,
 
     /// <summary>工具看门狗触发（有 tool-use 未收到 tool-result）。</summary>
-    ToolTimeout = 15
+    ToolTimeout = 15,
+
+    /// <summary>
+    /// provider 账号自身的用量上限到了（订阅的会话 / 每周额度，或用量额度的上限）。
+    /// 与 <see cref="QuotaExceeded"/>（框架自己的预算 / 配额门）不是一回事：这次是 CLI 背后的账号被拒，
+    /// 到重置时间（运行记录的 <c>UsageLimitResetsAt</c>，知道时）之前再发也一样被拒。
+    /// </summary>
+    UsageLimit = 16,
+
+    /// <summary>
+    /// 框架给这个用户设的用量上限（5 小时窗口或每周窗口）到了：入队时还没到、排队期间被别的运行用到了上限，认领后拦下。
+    /// 运行记录的 <c>UsageLimitResetsAt</c> 是那个窗口的重置时间。与 <see cref="UsageLimit"/>（CLI 背后账号的上限）不是一回事。
+    /// </summary>
+    UserUsageLimit = 17,
+
+    /// <summary>
+    /// 运行跑在一个能在服务端重启后重新接上的执行宿主上，但它的进程没能接回来：宿主报告进程已经不在（被杀掉、容器重启），
+    /// 或者在 <c>AI:Cli:Reattach:Timeout</c> 之内一直接不上。已经写出的部分照常留在线程里，这一轮不重跑；
+    /// 下一轮开新的 CLI 会话，并带上这一轮停在哪里的说明。<c>Error</c> 写着宿主给的原因。
+    /// </summary>
+    Interrupted = 18,
+
+    /// <summary>
+    /// 运行时所在的执行目标（例如某个用户的工作区容器）没有上线：使用方拒绝唤起它，
+    /// 或者唤起之后在 <c>AI:Cli:Activation:Timeout</c> 之内一直没连上。进程一次都没起，<c>Error</c> 写着原因。
+    /// </summary>
+    TargetUnavailable = 19
 }
 
 /// <summary>
 /// 外部运行时的执行位置。
 /// </summary>
 /// <remarks>
-/// 契约按远程 daemon 建模，首期只实现 <see cref="InProcess"/>。
-/// 先立对契约、后补实现；反过来会推倒重来。
+/// 决定哪个服务端副本认领这个运行时上的运行：<see cref="InProcess"/> 的运行由服务本机运行时的副本认领（任一副本都可以），
+/// <see cref="RemoteDaemon"/> 的运行只由此刻连着那个执行目标的副本认领。
 /// </remarks>
 public enum CliRuntimeMode
 {
     /// <summary>API 进程内起子进程。</summary>
     InProcess = 0,
 
-    /// <summary>远程 daemon 认领并执行。</summary>
+    /// <summary>
+    /// 登记在一个远程执行目标上（每用户一个的工作区容器、一台工作机）：<c>HostId</c> 是执行目标的标识，由使用方经
+    /// <c>ICliRemoteRuntimeRegistry</c> 登记。
+    /// </summary>
     RemoteDaemon = 1
 }
 

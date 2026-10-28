@@ -276,4 +276,51 @@ public class DelegationGuardIntegrationTests : IntegratedTestBase<AuthorizationT
         superProfile.Data!.IsSuperAdmin.ShouldBeTrue();
         superProfile.Data.Permissions.ShouldContain(fns.Diagnostics.Code);
     }
+
+    // ── 超管判定的查询次数 ──────────────────────────────────────────────────
+    // 超管判定每次都是一次不经缓存的角色查询（刻意不缓存：角色改名、删除与成员变更要立即生效）。
+    // 同一次判定里要的是同一个答案，问一次就够。
+
+    [Fact]
+    public async Task A_guarded_role_write_asks_who_the_grantor_is_once()
+    {
+        _authOptions.SuperAdminRoles = ["SuperAdmin"];
+        var fns = await SeedStandardAsync();
+        var service = GetService();
+        _userRoleService.Invocations.Clear();
+
+        (await service.AssignFunctionsToRoleAsync(TargetRoleId, [fns.UserView.Id])).Succeeded.ShouldBeTrue();
+
+        _userRoleService.Verify(s => s.GetUserRolesAsync(It.IsAny<IEnumerable<Guid>>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task A_guarded_role_write_is_still_refused_beyond_the_grantors_codes()
+    {
+        // 上一条的反面：问一次之后，支配判定与「只能授出自己持有的码」照旧生效。
+        _authOptions.SuperAdminRoles = ["SuperAdmin"];
+        var fns = await SeedStandardAsync();
+        var service = GetService();
+
+        (await service.AssignFunctionsToRoleAsync(TargetRoleId, [fns.Diagnostics.Id])).Code.ShouldBe(403);
+
+        var strongerRoleId = Guid.NewGuid();
+        await GrantAsync(strongerRoleId, fns.Diagnostics);
+        (await service.AssignFunctionsToRoleAsync(strongerRoleId, [fns.UserView.Id])).Code.ShouldBe(403);
+    }
+
+    [Fact]
+    public async Task A_batch_permission_check_asks_who_the_user_is_once()
+    {
+        _authOptions.SuperAdminRoles = ["SuperAdmin"];
+        var fns = await SeedStandardAsync();
+        var service = GetService();
+        _userRoleService.Invocations.Clear();
+
+        var results = await service.CheckPermissionsAsync(GrantorId, [fns.UserView.Code, fns.Diagnostics.Code]);
+
+        results[fns.UserView.Code].ShouldBeTrue();
+        results[fns.Diagnostics.Code].ShouldBeFalse();
+        _userRoleService.Verify(s => s.GetUserRolesAsync(It.IsAny<IEnumerable<Guid>>()), Times.Once());
+    }
 }

@@ -63,9 +63,9 @@ public partial class PayPalProvider
 
             var customer = new Dictionary<string, object?>
             {
-                // 商户侧客户标识：登记时据此确认该凭据确实是为当前用户创建的，
+                // 商户侧客户标识：登记时据此确认该凭据确实是为这个计费账户创建的，
                 // 否则拿到别人的 setup token 就能把别人的 PayPal 账户绑到自己名下。
-                ["merchant_customer_id"] = input.UserId.ToString()
+                ["merchant_customer_id"] = MerchantCustomerIdFor(input.BillingAccount, input.UserId)
             };
 
             // 复用该用户已有的 PayPal 客户，避免同一个人在 PayPal 侧散成多个客户
@@ -102,7 +102,7 @@ public partial class PayPalProvider
                 Content = JsonContent.Create(body)
             };
             // 幂等键按用户 + 客户：网络超时重试不会在 PayPal 侧堆出一串孤儿 setup token
-            message.Headers.Add("PayPal-Request-Id", $"vault-setup:{input.UserId}:{input.ProviderCustomerId ?? "new"}");
+            message.Headers.Add("PayPal-Request-Id", $"vault-setup:{MerchantCustomerIdFor(input.BillingAccount, input.UserId)}:{input.ProviderCustomerId ?? "new"}");
 
             var response = await client.SendAsync(message);
             if (!response.IsSuccessStatusCode)
@@ -182,10 +182,10 @@ public partial class PayPalProvider
                 return Result.Failure<PaymentProviderPaymentMethodResult>(ErrorCodes.PaymentMethodBindingFailed, 403);
             }
 
-            if (!string.Equals(merchantCustomerId, input.UserId.ToString(), StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(merchantCustomerId, MerchantCustomerIdFor(input.BillingAccount, input.UserId), StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning(
-                    "PayPal vault token {Token} belongs to another user; binding rejected.", token.Id);
+                    "PayPal vault token {Token} belongs to another billing account; binding rejected.", token.Id);
                 return Result.Failure<PaymentProviderPaymentMethodResult>(ErrorCodes.PaymentMethodBindingFailed, 403);
             }
 
@@ -212,7 +212,7 @@ public partial class PayPalProvider
             if (client == null)
                 return Result.Failure(ErrorCodes.PayPalVaultFailed, 400);
 
-            var response = await client.DeleteAsync($"/v3/vault/payment-tokens/{input.PaymentMethodToken}");
+            var response = await client.DeleteAsync($"/v3/vault/payment-tokens/{Uri.EscapeDataString(input.PaymentMethodToken)}");
 
             // 渠道侧已不存在（用户自己在 PayPal 后台撤销了授权）：解绑是幂等操作，本地照常清理
             if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.NotFound)
@@ -240,7 +240,12 @@ public partial class PayPalProvider
         {
             var client = await CreateAuthorizedClientAsync();
             if (client == null)
-                return Result.Failure<PaymentProviderChargeResult>(ErrorCodes.PayPalVaultFailed, 400);
+            {
+                // 拿不到访问令牌：扣款请求根本没发出去，这是确定的失败。下面其余的失败返回（下单后响应读不出来、
+                // 异常）都发生在请求可能已经到达 PayPal 之后，服务层按「结果未知」等回调落定，不当成拒付再扣一笔。
+                return Result.Failure<PaymentProviderChargeResult>(
+                    ErrorCodes.PayPalVaultFailed, 400, ErrorCodes.PaymentOffSessionNotAttempted);
+            }
 
             var decimals = CurrencyInfo.GetDecimalPlaces(input.Currency);
             var body = new
@@ -294,6 +299,11 @@ public partial class PayPalProvider
                 var reason = await LogPayPalErrorAsync(response,
                     "PayPal off-session charge declined. TradeNo: {TradeNo}", input.TradeNo);
 
+                // 5xx 是 PayPal 自己出了问题，订单建没建成、钱扣没扣都说不准：按结果未知回报，
+                // 由回调（按 custom_id 找回这笔支付）或到期核实落定，而不是当成拒付让订阅换一笔再扣。
+                if ((int)response.StatusCode >= 500)
+                    return Result.Failure<PaymentProviderChargeResult>(reason ?? ErrorCodes.PayPalVaultFailed, 502);
+
                 return Result.Success(new PaymentProviderChargeResult
                 {
                     TradeNo = input.TradeNo,
@@ -341,9 +351,13 @@ public partial class PayPalProvider
     /// <summary>
     /// 查询已有的 vault 支付凭据；不存在返回 null（用于区分"这是 setup token"和"这是 payment token"）。
     /// </summary>
+    /// <remarks>
+    /// ★ 令牌来自绑卡请求体（用户输入），拼进路径前必须转义：原样拼接时 <c>../../v2/...</c> 这样的值会让服务端
+    /// 带着商户的访问令牌去请求 PayPal API 上的任意路径。
+    /// </remarks>
     private async Task<PayPalPaymentTokenResponse?> TryGetPaymentTokenAsync(HttpClient client, string token)
     {
-        var response = await client.GetAsync($"/v3/vault/payment-tokens/{token}");
+        var response = await client.GetAsync($"/v3/vault/payment-tokens/{Uri.EscapeDataString(token)}");
         if (!response.IsSuccessStatusCode)
             return null;
 
@@ -453,8 +467,8 @@ public partial class PayPalProvider
         if (at <= 0)
             return "***";
 
-        var name = email[..at];
-        var visible = name.Length <= 1 ? name : name[..1];
+        // 首字符按码元取：本地部分以 emoji 开头时一个都不露，而不是把半个代理项写进账户标识（它会落库、进管理端列表）
+        var visible = email[..at].FitToLength(1);
         return $"{visible}***{email[at..]}";
     }
 
@@ -462,7 +476,8 @@ public partial class PayPalProvider
     {
         return status?.ToUpperInvariant() switch
         {
-            "COMPLETED" => PaymentStatus.Succeeded,
+            // 退过款的 capture 也是收到过钱的：同步一笔已结束的支付时按「已收款」读，不能读成处理中
+            "COMPLETED" or "REFUNDED" or "PARTIALLY_REFUNDED" => PaymentStatus.Succeeded,
             "DECLINED" or "FAILED" or "VOIDED" => PaymentStatus.Failed,
             _ => PaymentStatus.Processing
         };
@@ -506,5 +521,27 @@ public partial class PayPalProvider
 
         _logger.LogError(messageTemplate + " Status: {Status}, Body: {Body}", arg, response.StatusCode, body);
         return string.IsNullOrWhiteSpace(body) ? response.StatusCode.ToString() : body;
+    }
+
+    /// <summary>
+    /// 写进 PayPal 凭据 <c>customer.merchant_customer_id</c> 的商户侧客户标识：凭据属于哪个计费账户。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 个人账户（以及没带账户的调用方）仍写用户 Id，与按账户认主之前逐字相同：既有部署里已经保管的凭据照样认得。
+    /// 机构 / 租户账户写 <c>ba-</c> 加账户键的 SHA-256 十六进制前 40 位：PayPal 对这个字段限长且只收字母数字与少数符号，
+    /// <c>Installation:default</c> 这类带冒号的键直接写进去会被拒；摘要是确定性的，登记时按同一规则重算即可比对。
+    /// </para>
+    /// </remarks>
+    internal static string MerchantCustomerIdFor(BillingAccountRef? account, Guid userId)
+    {
+        if (account == null || (account.TryGetUserId(out var owner) && owner == userId))
+            return userId.ToString();
+
+        if (account.TryGetUserId(out var personal))
+            return personal.ToString();
+
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(account.Key));
+        return "ba-" + Convert.ToHexString(digest).Substring(0, 40).ToLowerInvariant();
     }
 }

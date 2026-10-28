@@ -382,6 +382,95 @@ public class FileSystemSkillStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task FileSkillWithABuiltInSlug_OverridesTheBuiltIn()
+    {
+        // 文档承诺「在文件系统路径放置同 slug 的 SKILL.md，自动覆盖内置版本」：内置技能先加载，
+        // 此前 GetBySlugAsync 取第一个、列表合并在优先级相同时也保留第一个，覆盖从来不生效。
+        CreateSkillFile("deep-research", """
+            ---
+            name: Deep Research
+            slug: deep-research
+            description: Company research playbook.
+            ---
+            """);
+
+        var store = CreateStore(paths: [_tempDir], loadBuiltIn: true);
+
+        var bySlug = await store.GetBySlugAsync("deep-research");
+        bySlug.ShouldNotBeNull();
+        bySlug.Description.ShouldBe("Company research playbook.");
+
+        var all = await store.GetAllAsync();
+        all.Count(s => s.Slug == "deep-research").ShouldBe(1, "list and lookup must agree on one skill per slug");
+        all.ShouldContain(s => s.Slug == "chart-visualization", "built-ins that are not overridden stay");
+    }
+
+    [Fact]
+    public async Task LaterFileSource_OverridesAnEarlierOneWithTheSameSlugAndScope()
+    {
+        var dataPath = Path.Combine(_tempDir, "data");
+        var dataSkillDir = Path.Combine(dataPath, "skills", "shared-skill");
+        Directory.CreateDirectory(dataSkillDir);
+        File.WriteAllText(Path.Combine(dataSkillDir, "SKILL.md"), """
+            ---
+            name: Shared Skill
+            slug: shared-skill
+            description: Installed copy.
+            ---
+            """);
+
+        var configured = Path.Combine(_tempDir, "configured");
+        var configuredSkillDir = Path.Combine(configured, "shared-skill");
+        Directory.CreateDirectory(configuredSkillDir);
+        File.WriteAllText(Path.Combine(configuredSkillDir, "SKILL.md"), """
+            ---
+            name: Shared Skill
+            slug: shared-skill
+            description: Configured copy.
+            ---
+            """);
+
+        var store = CreateStore(paths: [configured], dataPath: dataPath);
+
+        (await store.GetBySlugAsync("shared-skill"))!.Description.ShouldBe("Configured copy.");
+        (await store.GetAllAsync()).Count(s => s.Slug == "shared-skill").ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task GetBySlugAsync_PrefersTheSystemSkill_OverATenantSkillWithTheSameSlug()
+    {
+        // DataPath 先加载：此前按 slug 取第一个拿到的是某个租户的同名技能，系统技能被它遮住。
+        var dataPath = Path.Combine(_tempDir, "data");
+        var tenantSkillDir = Path.Combine(dataPath, "skills", "tenants", Guid.NewGuid().ToString(), "report");
+        Directory.CreateDirectory(tenantSkillDir);
+        File.WriteAllText(Path.Combine(tenantSkillDir, "SKILL.md"), """
+            ---
+            name: Report
+            slug: report
+            description: One tenant's report skill.
+            ---
+            """);
+
+        var configured = Path.Combine(_tempDir, "configured");
+        var systemSkillDir = Path.Combine(configured, "report");
+        Directory.CreateDirectory(systemSkillDir);
+        File.WriteAllText(Path.Combine(systemSkillDir, "SKILL.md"), """
+            ---
+            name: Report
+            slug: report
+            description: The system report skill.
+            ---
+            """);
+
+        var store = CreateStore(paths: [configured], dataPath: dataPath);
+
+        var skill = await store.GetBySlugAsync("report");
+        skill.ShouldNotBeNull();
+        skill.Scope.ShouldBe(SkillScope.System);
+        (await store.GetAllAsync()).Count(s => s.Slug == "report").ShouldBe(2, "different scopes are different skills");
+    }
+
+    [Fact]
     public async Task GetBySlugAsync_ReturnsNull_WhenNotFound()
     {
         CreateSkillFile("existing-skill", """
@@ -639,7 +728,8 @@ public class FileSystemSkillStoreTests : IDisposable
         string? dataPath = null,
         string? contentRootPath = null,
         List<string>? pluginPaths = null,
-        List<string>? managedPaths = null)
+        List<string>? managedPaths = null,
+        bool loadBuiltIn = false)
     {
         var options = new StaticOptionsMonitor<AIOptions>(new AIOptions
         {
@@ -653,7 +743,7 @@ public class FileSystemSkillStoreTests : IDisposable
                     // 传 null 表示"不覆盖"：沿用 SkillsOptions 的默认值 "App_Data/AI"
                     DataPath = dataPath ?? new SkillsOptions().DataPath,
                     RequireChecksEnabled = requireChecksEnabled,
-                    LoadBuiltIn = false,
+                    LoadBuiltIn = loadBuiltIn,
                     PluginPaths = pluginPaths ?? [],
                     ManagedPaths = managedPaths ?? []
                 }

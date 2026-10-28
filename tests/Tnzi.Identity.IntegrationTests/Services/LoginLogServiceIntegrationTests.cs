@@ -28,6 +28,31 @@ public class LoginLogServiceIntegrationTests : RelationalIdentityIntegrationTest
         Assert.All(result.Data!, log => Assert.Equal(user.Id, log.UserId));
     }
 
+    /// <summary>
+    /// ★ 按用户读的登录历史有上限：对一个已知用户名持续猜密码，每次失败都给受害者添一行，
+    /// 此前受害者打开登录历史时整批物化。返回最新的那一批，最新的在前。
+    /// </summary>
+    [Fact]
+    public async Task GetUserLoginLogsAsync_ReturnsAtMostTheNewestBatch()
+    {
+        var user = await CreateUserAsync(email: "inflated@example.com");
+        var now = DateTime.UtcNow;
+        var total = LoginLogService.MaxUserLoginLogs + 5;
+        for (var i = 0; i < total; i++)
+        {
+            DbContext.LoginLogs.Add(CreateLog(user.Id, $"10.1.{i / 250}.{i % 250}", LoginStatus.Failed, now.AddMinutes(-i)));
+        }
+        await SaveChangesAsync();
+
+        var result = await _service.GetUserLoginLogsAsync(user.Id);
+
+        Assert.True(result.Succeeded);
+        var logs = result.Data!.ToList();
+        Assert.Equal(LoginLogService.MaxUserLoginLogs, logs.Count);
+        Assert.Equal("10.1.0.0", logs[0].IpAddress);
+        Assert.True(logs.Zip(logs.Skip(1)).All(pair => pair.First.LoginTime >= pair.Second.LoginTime));
+    }
+
     [Fact]
     public async Task GetRecentLogsAsync_WithUserId_ReturnsRecentLogs()
     {

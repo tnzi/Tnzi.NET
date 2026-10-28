@@ -16,7 +16,13 @@ function mockUserApi() {
     update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
     deleteMany: vi.fn(async () => undefined),
     exportCsv: vi.fn(async () => new Blob(['id,userName\n1,alice'], { type: 'text/csv' })),
-    importCsv: vi.fn(async () => ({ successCount: 1, failureCount: 0, errors: [] })),
+    importCsv: vi.fn(async () => ({
+      totalRows: 3,
+      successCount: 1,
+      failedCount: 1,
+      skippedCount: 1,
+      errors: { 3: 'Passwords must be at least 8 characters.' },
+    })),
   } as any
 }
 
@@ -199,6 +205,31 @@ describe('identity-bridge', () => {
     expect(await bridge.me.exportPersonalData()).toEqual(payload)
   })
 
+  /**
+   * Read paths a detail section renders from must reject a refused envelope.
+   * The HTTP client resolves a 403 to `{ succeeded: false, data: null }`; an
+   * unchecked unwrap turned that into `null`, which crashed the sessions list
+   * (`null.filter`) and rendered the sign-in history as "no sign-ins" - a
+   * false empty an admin reads as "this account was never used".
+   */
+  it('sessions.listForUser rejects with the server message on a failed envelope', async () => {
+    const sessionApi = {
+      getUserSessions: vi.fn(async () => ({ succeeded: false, success: false, code: 403, data: null, message: 'Missing permission session.view' })),
+    }
+    const bridge = makeBridge({ sessionApi })
+    await expect(bridge.sessions.listForUser('u1', true)).rejects.toThrow('Missing permission session.view')
+  })
+
+  it('loginLogs.fetch rejects with the server message on a failed envelope', async () => {
+    const loginLogApi = {
+      getList: vi.fn(async () => ({ succeeded: false, success: false, code: 403, data: null, message: 'Missing permission identity.loginLog.view' })),
+    }
+    const bridge = makeBridge({ loginLogApi })
+    await expect(bridge.loginLogs.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: { userId: 'u1' } })).rejects.toThrow(
+      'Missing permission identity.loginLog.view',
+    )
+  })
+
   it('sessions.cleanExpired rejects with the server message on a failed envelope', async () => {
     const sessionApi = {
       cleanExpired: vi.fn(async () => ({ succeeded: false, success: false, code: 403, data: null, message: 'cleanup refused' })),
@@ -240,6 +271,23 @@ describe('identity-bridge', () => {
     expect(result.totalCount).toBe(1)
   })
 
+  // The Users page showed "No data" for a 403 or 500: the refusal unwrapped to
+  // `undefined` and an empty page stood in for it, so the list never reached
+  // its error state or retry.
+  it('users.fetch rejects a refused read instead of answering an empty page', async () => {
+    const userApi = {
+      ...mockUserApi(),
+      getList: vi.fn(async () => ({ succeeded: false, success: false, code: 403, data: null, message: 'Forbidden' })),
+    }
+    const bridge = createIdentityBridge({
+      userApi,
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi: mockLoginLogApi(),
+    })
+    await expect(bridge.users.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })).rejects.toThrow('Forbidden')
+  })
+
   it('users.fetch coerces isLockedOut/isEmailConfirmed string filters to booleans', async () => {
     const userApi = mockUserApi()
     const bridge = createIdentityBridge({
@@ -261,6 +309,28 @@ describe('identity-bridge', () => {
     )
   })
 
+  // The export posts the same query to `[FromBody] UserListQueryDto`; a JSON
+  // string in a bool? field is a 400, so filtering by Lock Status and then
+  // exporting failed while the list itself worked.
+  it('users.export coerces the boolean filters the same way the list does', async () => {
+    const userApi = mockUserApi()
+    const bridge = createIdentityBridge({
+      userApi,
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi: mockLoginLogApi(),
+    })
+    await bridge.users.export!({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { isLockedOut: 'true', isEmailConfirmed: '' },
+    })
+    const arg = userApi.exportCsv.mock.calls[0][0] as Record<string, unknown>
+    expect(arg.isLockedOut).toBe(true)
+    expect('isEmailConfirmed' in arg).toBe(false)
+  })
+
   it('users.fetch drops empty-string boolean filters (unset select = no filter)', async () => {
     const userApi = mockUserApi()
     const bridge = createIdentityBridge({
@@ -279,6 +349,31 @@ describe('identity-bridge', () => {
     expect('isLockedOut' in arg).toBe(false)
   })
 
+  // The export carries the list's current query (the backend applies the same
+  // filter + sort to both). Without the same coercion a lock / email filter
+  // reached the export as the JSON string 'true', which a bool? cannot bind.
+  it('users.export sends the same coerced query the list sends', async () => {
+    const userApi = mockUserApi()
+    const bridge = makeBridge({ userApi })
+    const q = {
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: 'ali',
+      sortField: 'email',
+      sortOrder: 'asc' as const,
+      filters: { isLockedOut: 'true', isEmailConfirmed: '', pendingAction: '1' },
+    }
+    await bridge.users.fetch(q)
+    await bridge.users.export!(q)
+
+    const exported = userApi.exportCsv.mock.calls[0][0]
+    expect(exported).toEqual(userApi.getList.mock.calls[0][0])
+    expect(exported).toEqual(
+      expect.objectContaining({ keyword: 'ali', sortBy: 'email', sortDescending: false, isLockedOut: true, pendingAction: '1' }),
+    )
+    expect('isEmailConfirmed' in exported).toBe(false)
+  })
+
   it('loginLogs.fetch coerces isSuccess string filter to a boolean', async () => {
     const loginLogApi = mockLoginLogApi()
     const bridge = createIdentityBridge({
@@ -295,6 +390,31 @@ describe('identity-bridge', () => {
     })
     expect(loginLogApi.getList).toHaveBeenCalledWith(
       expect.objectContaining({ isSuccess: false }),
+    )
+  })
+
+  // The advanced search hands over the picked calendar dates. The sign-in log
+  // is filtered by timestamp (`time >= start AND time <= end`), so the dates go
+  // out as the bounds of those local days: a one-day range covers the day.
+  it('loginLogs.fetch sends a date range as the bounds of those local days', async () => {
+    const loginLogApi = mockLoginLogApi()
+    const bridge = createIdentityBridge({
+      userApi: mockUserApi(),
+      roleApi: mockRoleApi(),
+      tenantApi: mockTenantApi(),
+      loginLogApi,
+    })
+    await bridge.loginLogs.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { startDate: '2026-10-10', endDate: '2026-10-10' },
+    })
+    expect(loginLogApi.getList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startDate: new Date(2026, 9, 10).toISOString(),
+        endDate: new Date(2026, 9, 10, 23, 59, 59, 999).toISOString(),
+      }),
     )
   })
 
@@ -349,7 +469,7 @@ describe('identity-bridge', () => {
     expect(userApi.deleteMany).toHaveBeenCalledWith(['1', '2'])
   })
 
-  it('users.export wraps CSV in Blob; users.import calls importCsv', async () => {
+  it('users.export wraps CSV in Blob; users.import resolves with the per-row outcome', async () => {
     const userApi = mockUserApi()
     const bridge = createIdentityBridge({
       userApi,
@@ -364,8 +484,30 @@ describe('identity-bridge', () => {
       filters: {},
     })
     expect(blob).toBeInstanceOf(Blob)
-    await bridge.users.import!(new File(['x'], 'x.csv'))
+    // The endpoint answers 200 even when rows were refused; the result is the only place that says so.
+    const imported = await bridge.users.import(new File(['x'], 'x.csv'))
     expect(userApi.importCsv).toHaveBeenCalled()
+    expect(imported).toEqual({
+      totalRows: 3,
+      successCount: 1,
+      failedCount: 1,
+      skippedCount: 1,
+      errors: { 3: 'Passwords must be at least 8 characters.' },
+    })
+  })
+
+  // A 200 import can still have refused or skipped rows; the result is the only
+  // place that shows, so the bridge hands it back instead of dropping it.
+  it('users.import returns the per-row result, and rejects a refused import', async () => {
+    const userApi = mockUserApi()
+    const result = { totalRows: 3, successCount: 1, failedCount: 1, skippedCount: 1, errors: { 3: 'Weak password' } }
+    userApi.importCsv.mockResolvedValueOnce({ succeeded: true, data: result })
+    const bridge = createIdentityBridge({ userApi, roleApi: mockRoleApi(), tenantApi: mockTenantApi(), loginLogApi: mockLoginLogApi() })
+
+    await expect(bridge.users.import(new File(['x'], 'x.csv'))).resolves.toEqual(result)
+
+    userApi.importCsv.mockResolvedValueOnce({ succeeded: false, code: 400, message: 'CSV header must contain at least: UserName, Email, Password' })
+    await expect(bridge.users.import(new File(['x'], 'x.csv'))).rejects.toThrow('CSV header must contain')
   })
 
   it('exposes roles sub-contract with fetch/create/update/delete', async () => {
@@ -534,5 +676,23 @@ describe('identity-bridge', () => {
     expect(profileApi.issueOAuthLinkToken).toHaveBeenCalledWith('github')
     expect(issued.token).toBe('tok123')
     expect(issued.provider).toBe('github')
+  })
+
+  // The callback only stages a link and hands back a code; the link is made when
+  // the signed-in page redeems it. A refusal (another account's code, expired,
+  // already used) has to reach the page as an error, not resolve silently.
+  it('me.completeOAuthLink redeems the code and rejects with the server message when refused', async () => {
+    const profileApi = {
+      completeOAuthLink: vi.fn()
+        .mockResolvedValueOnce({ succeeded: true, success: true, code: 200, data: null })
+        .mockResolvedValueOnce({
+          succeeded: false, success: false, code: 400, data: null, message: 'Invalid or expired link confirmation',
+        }),
+    }
+    const bridge = makeBridge({ profileApi })
+
+    await bridge.me.completeOAuthLink('github', 'code-1')
+    expect(profileApi.completeOAuthLink).toHaveBeenCalledWith('github', 'code-1')
+    await expect(bridge.me.completeOAuthLink('github', 'code-1')).rejects.toThrow('Invalid or expired link confirmation')
   })
 })

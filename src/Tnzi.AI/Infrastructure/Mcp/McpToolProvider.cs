@@ -7,8 +7,20 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 /// 单个服务器不可用时记录警告并跳过，不阻塞整体。
 /// </summary>
 /// <remarks>
+/// <para>
 /// 工具缓存按 <see cref="McpCacheKey"/>（租户键 + Server Name）分桶：两个租户可以注册同名 server
 /// 而工具清单各不相同，只按名字缓存会把先跑的租户的清单发给后来的租户。
+/// </para>
+/// <para>
+/// 用户专属服务器（<see cref="IUserMcpServerSource"/>）的缓存键再带上用户（<see cref="McpCacheKey.ForUser"/>）：
+/// 两个用户连着同名服务器、持不同令牌时，连接、工具清单、失败冷却互不相通。这一类服务器只出现在
+/// 「为该用户取工具」的那一次调用里，绝不进入别的用户的清单。
+/// </para>
+/// <para>
+/// 缓存的工具绑定在列出它们的那条连接上（SDK 的 <see cref="McpClientTool"/> 持有自己的 McpClient）。
+/// 命中缓存时仍向 <see cref="IMcpClientFactory"/> 取当前连接（30 秒一次健康检查）：连接已被换掉
+/// （子进程崩溃、HTTP 会话丢失后重连），就从新连接重新列出，而不是把绑在死连接上的工具一直发到缓存过期。
+/// </para>
 /// </remarks>
 public class McpToolProvider : IMcpToolProvider
 {
@@ -22,6 +34,7 @@ public class McpToolProvider : IMcpToolProvider
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly IEventBus? _eventBus;
     private readonly McpOAuthClientHandler? _oauthHandler;
+    private readonly IUserMcpServerSource? _userServerSource;
     private readonly ILogger<McpToolProvider> _logger;
     private readonly ConcurrentDictionary<string, ToolCacheEntry> _toolCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _toolLocks = new(StringComparer.OrdinalIgnoreCase);
@@ -38,7 +51,8 @@ public class McpToolProvider : IMcpToolProvider
         IShellCommandAnalyzer? shellCommandAnalyzer = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
         McpOAuthClientHandler? oauthHandler = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        IUserMcpServerSource? userServerSource = null)
     {
         _options = Check.NotNull(options);
         _serverCatalog = Check.NotNull(serverCatalog);
@@ -51,13 +65,35 @@ public class McpToolProvider : IMcpToolProvider
         _executionContextAccessor = executionContextAccessor;
         _eventBus = eventBus;
         _oauthHandler = oauthHandler;
+        _userServerSource = userServerSource;
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<AITool>> GetToolsAsync(CancellationToken ct = default)
+        // 当前运行的用户：与 ApprovalToolWrapper 发审批请求、权限规则按人匹配是同一个来源（AgentRunRequest.UserId）
+        => GetToolsAsync(_executionContextAccessor?.CurrentRequest?.UserId, ct);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AITool>> GetToolsAsync(Guid? userId, CancellationToken ct = default)
     {
-        // 有效服务器 = 部署配置 + DB 注册表合并（catalog 内部处理 AI:Mcp:Enabled 总开关）
-        var servers = await _serverCatalog.GetEffectiveServersAsync(ct).ConfigureAwait(false);
+        // 有效服务器 = 部署配置 + DB 注册表合并（catalog 内部处理 AI:Mcp:Enabled 总开关），再加上这个用户自己的服务器
+        var catalogServers = await _serverCatalog.GetEffectiveServersAsync(ct).ConfigureAwait(false);
+        var servers = new List<McpServerConfig>(catalogServers);
+        if (userId.HasValue)
+        {
+            servers.AddRange(await GetUserServersAsync(userId.Value, ct).ConfigureAwait(false));
+        }
+
+        return await BuildToolsAsync(servers, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AITool>> GetUserToolsAsync(Guid userId, CancellationToken ct = default)
+        => await BuildToolsAsync(await GetUserServersAsync(userId, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+
+    /// <summary>对一组服务器取工具：过滤、认证恢复 / 审批 / 审计包装、按名去重（先出现者胜）。单台不可用只跳过它。</summary>
+    private async Task<IReadOnlyList<AITool>> BuildToolsAsync(IReadOnlyList<McpServerConfig> servers, CancellationToken ct)
+    {
         if (servers.Count == 0)
         {
             return Array.Empty<AITool>();
@@ -86,34 +122,33 @@ public class McpToolProvider : IMcpToolProvider
 
                 // Wrap with auth recovery for servers with OAuth configured (retry once on 401/403)
                 IList<AITool> toAdd = filtered is IList<AITool> list ? list : filtered.ToList();
-                if (server.OAuth != null && _oauthHandler != null)
+                if ((server.OAuth != null && _oauthHandler != null) || server is UserMcpServerConfig)
                 {
                     var authRecoveryLogger = _loggerFactory.CreateLogger<McpAuthRecoveryToolWrapper>();
-                    toAdd = McpAuthRecoveryToolWrapper.Wrap(toAdd, server.Name, _oauthHandler, _clientFactory, this, authRecoveryLogger);
+                    toAdd = McpAuthRecoveryToolWrapper.Wrap(toAdd, server, _oauthHandler, _clientFactory, this, authRecoveryLogger);
                 }
 
                 // Build per-server approval options from McpServerConfig. Approval only wraps tools that are AIFunction; non-AIFunction AITool are passed through without approval.
                 var approvalOptions = BuildApprovalOptions(server);
+                // 审批开着而没有审批处理器时同样包装：ApprovalToolWrapper 把 Ask 决策失败关闭地拒掉，
+                // 不包装就等于让这台服务器上需要审批的工具直接执行
                 if (approvalOptions.Enabled || _permissionEvaluator != null)
                 {
-                    if (_approvalHandler != null || _permissionEvaluator != null)
+                    var approvalLogger = _loggerFactory.CreateLogger<ApprovalToolWrapper>();
+                    var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var t in toAdd)
                     {
-                        var approvalLogger = _loggerFactory.CreateLogger<ApprovalToolWrapper>();
-                        var toolNameToGroup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                        foreach (var t in toAdd)
+                        if (t.Name != null)
                         {
-                            if (t.Name != null)
-                            {
-                                toolNameToGroup[t.Name] = "mcp:" + server.Name;
-                            }
-                            var originalName = GetOriginalToolName(t);
-                            if (!string.IsNullOrWhiteSpace(originalName))
-                            {
-                                toolNameToGroup[originalName] = "mcp:" + server.Name;
-                            }
+                            toolNameToGroup[t.Name] = "mcp:" + server.Name;
                         }
-                        toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, approvalLogger, toolNameToGroup, _eventBus);
+                        var originalName = McpToolNames.OriginalName(t);
+                        if (!string.IsNullOrWhiteSpace(originalName))
+                        {
+                            toolNameToGroup[originalName] = "mcp:" + server.Name;
+                        }
                     }
+                    toAdd = ApprovalToolWrapper.Wrap(toAdd, _approvalHandler, approvalOptions, _permissionEvaluator, _shellCommandAnalyzer, _executionContextAccessor, approvalLogger, toolNameToGroup, _eventBus);
                 }
 
                 // 审计：包装 AIFunction 以便在调用时记录 ServerName、ToolName、参数数量
@@ -141,6 +176,11 @@ public class McpToolProvider : IMcpToolProvider
                 // 记录该服务器提供的工具名称（按租户分桶，同名 server 的两个租户各存一份）
                 _serverToolNames[McpCacheKey.For(server)] = serverTools;
             }
+            catch (McpServerUnavailableException ex)
+            {
+                // 冷却期内：失败原因已在建连那一次记过警告，每次运行不再重复
+                _logger.LogDebug(ex, "MCP server '{ServerName}' is cooling down after a failed connection. Skipping.", server.Name);
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to get tools from MCP server '{ServerName}'. Skipping.", server.Name);
@@ -148,6 +188,81 @@ public class McpToolProvider : IMcpToolProvider
         }
 
         return allTools;
+    }
+
+    /// <summary>
+    /// 取这个用户的专属服务器并盖上用户。清单来自消费方，框架不信任它携带的任何隔离信息：
+    /// 用户 id 由这里盖，不合规的条目（见 <see cref="UserMcpServerConfig"/>）跳过并记警告，
+    /// 整个来源抛异常按空清单处理（失败关闭：少给工具，不给错工具）。
+    /// </summary>
+    private async Task<IReadOnlyList<UserMcpServerConfig>> GetUserServersAsync(Guid userId, CancellationToken ct)
+    {
+        if (_userServerSource is null || _options.CurrentValue.Mcp?.Enabled != true)
+        {
+            return [];
+        }
+
+        IReadOnlyList<UserMcpServerConfig> declared;
+        try
+        {
+            declared = await _userServerSource.GetServersAsync(userId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "The user MCP server source failed; this run gets no user-scoped MCP servers");
+            return [];
+        }
+
+        var result = new List<UserMcpServerConfig>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var server in declared ?? [])
+        {
+            try
+            {
+                var stamped = server.ForUser(userId);
+                if (names.Add(stamped.Name))
+                {
+                    result.Add(stamped);
+                }
+                else
+                {
+                    _logger.LogWarning("User-scoped MCP server '{ServerName}' is declared twice; keeping the first", stamped.Name);
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                _logger.LogWarning("A user-scoped MCP server was skipped: {Reason}", ex.Message);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 失效<b>这一份配置</b>的工具缓存（分区键精确匹配）。用户专属服务器用它：按名字失效会把别的用户同名服务器的缓存也清掉。
+    /// </summary>
+    public void InvalidateServerCache(McpServerConfig server)
+    {
+        Check.NotNull(server);
+        var key = McpCacheKey.For(server);
+        _toolCache.TryRemove(key, out _);
+        _serverToolNames.TryRemove(key, out _);
+    }
+
+    /// <summary>
+    /// 失效某个用户的用户专属服务器的工具缓存；<paramref name="serverName"/> 为 null = 该用户的全部。
+    /// </summary>
+    public void InvalidateUserCache(Guid userId, string? serverName = null)
+    {
+        foreach (var key in _toolCache.Keys.Where(k => McpCacheKey.BelongsToUser(k, userId, serverName)).ToList())
+        {
+            _toolCache.TryRemove(key, out _);
+        }
+
+        foreach (var key in _serverToolNames.Keys.Where(k => McpCacheKey.BelongsToUser(k, userId, serverName)).ToList())
+        {
+            _serverToolNames.TryRemove(key, out _);
+        }
     }
 
     /// <summary>
@@ -185,7 +300,7 @@ public class McpToolProvider : IMcpToolProvider
     /// </summary>
     /// <param name="serverName">
     /// 服务器名称。只解析<b>无租户维度</b>的条目（部署配置 <c>AI:Mcp:Servers</c> 来源）。
-    /// DB 注册表来源的条目按租户分桶，裸名字寻址不到它们 —— 这里返回空列表，
+    /// DB 注册表来源的条目（含宿主级注册行）按租户分桶，裸名字寻址不到它们：这里返回空列表，
     /// 而不是随便挑一个租户的清单答给调用方。
     /// </param>
     /// <returns>工具名称列表（只读）；服务器不存在、尚未缓存或带租户维度时返回空列表</returns>
@@ -233,7 +348,8 @@ public class McpToolProvider : IMcpToolProvider
     {
         var cacheKey = McpCacheKey.For(server);
 
-        if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
+        if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow
+            && await IsCurrentConnectionAsync(server, cached, ct).ConfigureAwait(false))
         {
             return cached.Tools;
         }
@@ -242,18 +358,21 @@ public class McpToolProvider : IMcpToolProvider
         await fetchLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
+            var adapter = await _clientFactory.GetOrCreateClientAsync(server, ct).ConfigureAwait(false);
+
+            if (cacheSeconds > 0 && _toolCache.TryGetValue(cacheKey, out cached) && cached.ExpiresAt > DateTimeOffset.UtcNow
+                && ReferenceEquals(cached.Adapter, adapter))
             {
                 return cached.Tools;
             }
 
-            var adapter = await _clientFactory.GetOrCreateClientAsync(server, ct).ConfigureAwait(false);
             var tools = await adapter.ListToolsAsync(ct).ConfigureAwait(false);
 
             if (cacheSeconds > 0)
             {
                 _toolCache[cacheKey] = new ToolCacheEntry(
                     tools,
+                    adapter,
                     DateTimeOffset.UtcNow.AddSeconds(cacheSeconds));
             }
 
@@ -263,6 +382,22 @@ public class McpToolProvider : IMcpToolProvider
         {
             fetchLock.Release();
         }
+    }
+
+    /// <summary>
+    /// 缓存的工具是否还绑在工厂当前的那条连接上。工厂换了连接（重连）时这些工具调用的是已释放的客户端。
+    /// 建连失败照常抛出，由调用方按「这台服务器暂不可用」跳过。
+    /// </summary>
+    private async Task<bool> IsCurrentConnectionAsync(McpServerConfig server, ToolCacheEntry cached, CancellationToken ct)
+    {
+        var current = await _clientFactory.GetOrCreateClientAsync(server, ct).ConfigureAwait(false);
+        if (ReferenceEquals(current, cached.Adapter))
+        {
+            return true;
+        }
+
+        _logger.LogInformation("MCP server '{ServerName}' was reconnected; listing its tools again from the new connection", server.Name);
+        return false;
     }
 
     private static HashSet<string> BuildNameSet(
@@ -282,10 +417,11 @@ public class McpToolProvider : IMcpToolProvider
             {
                 continue;
             }
+            // 名单可以写服务器的原名，也可以写加了前缀的名字（模型看到的那个），两种都认
             set.Add(name);
-            if (prefixName && !name.StartsWith("mcp:", StringComparison.OrdinalIgnoreCase))
+            if (prefixName)
             {
-                set.Add($"mcp:{serverName}/{name}");
+                set.Add(McpToolNames.Prefixed(serverName, name));
             }
         }
         return set;
@@ -312,34 +448,10 @@ public class McpToolProvider : IMcpToolProvider
             return true;
         }
 
-        var original = GetOriginalToolName(tool);
+        var original = McpToolNames.OriginalName(tool);
         return !string.IsNullOrWhiteSpace(original) && allowedSet.Contains(original);
     }
 
-    private static string? GetOriginalToolName(AITool tool)
-    {
-        if (tool?.AdditionalProperties == null)
-        {
-            return null;
-        }
-
-        if (tool.AdditionalProperties.TryGetValue("mcp.originalName", out var value))
-        {
-            return value as string;
-        }
-
-        return null;
-    }
-
-    private sealed class ToolCacheEntry
-    {
-        public ToolCacheEntry(IReadOnlyList<AITool> tools, DateTimeOffset expiresAt)
-        {
-            Tools = tools;
-            ExpiresAt = expiresAt;
-        }
-
-        public IReadOnlyList<AITool> Tools { get; }
-        public DateTimeOffset ExpiresAt { get; }
-    }
+    /// <summary>缓存项：工具清单 + 列出它们的那条连接（工具绑在它上面）+ 过期时间</summary>
+    private sealed record ToolCacheEntry(IReadOnlyList<AITool> Tools, IMcpClientAdapter Adapter, DateTimeOffset ExpiresAt);
 }

@@ -1,5 +1,6 @@
 global using Microsoft.Extensions.Caching.Memory;
 global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.DependencyInjection.Extensions;
 global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using Moq;
@@ -23,7 +24,6 @@ global using Tnzi.Extensions;
 global using Tnzi.Locking;
 global using Tnzi.Modules;
 global using Tnzi.Modules.Diagnostics;
-global using Tnzi.Reflection;
 global using Tnzi.Results;
 global using Tnzi.ScopedContext;
 global using Tnzi.Security;

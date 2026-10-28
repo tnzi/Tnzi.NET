@@ -22,6 +22,12 @@ public static class SubscriptionQueryExtensions
         if (query.AutoRenew.HasValue)
             queryable = queryable.Where(s => s.AutoRenew == query.AutoRenew.Value);
 
+        if (!string.IsNullOrEmpty(query.BillingAccountType))
+            queryable = queryable.Where(s => s.BillingAccountType == query.BillingAccountType);
+
+        if (!string.IsNullOrEmpty(query.BillingAccountId))
+            queryable = queryable.Where(s => s.BillingAccountId == query.BillingAccountId);
+
         return queryable;
     }
 }

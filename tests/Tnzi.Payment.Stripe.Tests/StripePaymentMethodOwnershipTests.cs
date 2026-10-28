@@ -120,11 +120,12 @@ public class StripePaymentMethodOwnershipTests
         var unlabeled = new global::Stripe.Customer { Id = "cus_3", Metadata = new Dictionary<string, string>() };
         var deleted = new global::Stripe.Customer { Id = "cus_4", Deleted = true, Metadata = new Dictionary<string, string> { ["UserId"] = Victim.ToString() } };
 
-        StripeProvider.DescribeCustomerOwnershipViolation(mine, Victim).ShouldBeNull();
-        StripeProvider.DescribeCustomerOwnershipViolation(someoneElses, Victim).ShouldNotBeNull();
-        StripeProvider.DescribeCustomerOwnershipViolation(unlabeled, Victim).ShouldNotBeNull();
-        StripeProvider.DescribeCustomerOwnershipViolation(deleted, Victim).ShouldNotBeNull();
-        StripeProvider.DescribeCustomerOwnershipViolation(null, Victim).ShouldNotBeNull();
+        var victim = BillingAccountRef.ForUser(Victim);
+        StripeProvider.DescribeCustomerOwnershipViolation(mine, victim).ShouldBeNull();
+        StripeProvider.DescribeCustomerOwnershipViolation(someoneElses, victim).ShouldNotBeNull();
+        StripeProvider.DescribeCustomerOwnershipViolation(unlabeled, victim).ShouldNotBeNull();
+        StripeProvider.DescribeCustomerOwnershipViolation(deleted, victim).ShouldNotBeNull();
+        StripeProvider.DescribeCustomerOwnershipViolation(null, victim).ShouldNotBeNull();
     }
 
     // ── 夹具 ─────────────────────────────────────────────────────────────────
@@ -139,8 +140,7 @@ public class StripePaymentMethodOwnershipTests
         {
             Enabled = true,
             SecretKey = secretKey,
-            PublishableKey = "pk_test_key",
-            Currency = "usd"
+            PublishableKey = "pk_test_key"
         });
         return new StripeProvider(options, new Mock<ILogger<StripeProvider>>().Object);
     }

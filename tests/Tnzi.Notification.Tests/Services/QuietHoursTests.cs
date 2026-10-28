@@ -47,6 +47,22 @@ public class QuietHoursTests
     public void The_end_of_an_ordinary_window_is_today()
         => Window(1, 5).EndsAfter(Utc(3)).ShouldBe(Utc(5));
 
+    /// <summary>
+    /// ★ 窗口是半开区间 [开始, 结束)：到了结束时刻就已经可以发。闭区间会让「恰好在结束那一刻」
+    /// 既算在窗口里、又写不出任何严格晚于当下的结束时刻，只能延后整整一天。
+    /// </summary>
+    [Theory]
+    [InlineData(22, 6)]
+    [InlineData(1, 5)]
+    public void The_end_moment_itself_is_already_outside_the_window(int startHour, int endHour)
+    {
+        var window = Window(startHour, endHour);
+
+        window.Contains(Utc(endHour)).ShouldBeFalse();
+        window.EndsAfter(Utc(endHour)).ShouldBeNull();
+        window.Contains(Utc(startHour)).ShouldBeTrue("the start moment is inside");
+    }
+
     /// <summary>不在窗口里就没有「延后到什么时候」可言。</summary>
     [Fact]
     public void A_moment_outside_the_window_has_no_deferral()

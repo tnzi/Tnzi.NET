@@ -110,16 +110,20 @@ public class DependencyRegistrationServiceTests
         service.RegisterAll();
 
         // Assert
+        var selfDescriptor = services.FirstOrDefault(s => s.ServiceType == typeof(TestMultiInterfaceService));
         var service1Descriptor = services.FirstOrDefault(s => s.ServiceType == typeof(ITestService1));
         var service2Descriptor = services.FirstOrDefault(s => s.ServiceType == typeof(ITestService2));
 
+        Assert.NotNull(selfDescriptor);
         Assert.NotNull(service1Descriptor);
         Assert.NotNull(service2Descriptor);
 
-        // 主接口直接注册 ImplementationType
-        Assert.Equal(typeof(TestMultiInterfaceService), service1Descriptor.ImplementationType);
+        // 实例锚定在实现类型自身的注册上
+        Assert.Equal(typeof(TestMultiInterfaceService), selfDescriptor.ImplementationType);
+        Assert.Equal(ServiceLifetime.Scoped, selfDescriptor.Lifetime);
 
-        // 次要接口通过工厂委托注册（共享同一实例），ImplementationFactory 不为 null
+        // 每个接口都经工厂转发到实现类型（共享同一实例）
+        Assert.NotNull(service1Descriptor.ImplementationFactory);
         Assert.NotNull(service2Descriptor.ImplementationFactory);
     }
 
@@ -325,6 +329,160 @@ public class DependencyRegistrationServiceTests
         Assert.NotNull(interfaceDescriptor);
         Assert.NotNull(selfDescriptor);
     }
+
+    // ---- 多接口转发与瞬态自身注册 ----
+
+    private static ServiceCollection RegisterOnly(params Type[] types)
+    {
+        var services = new ServiceCollection();
+        var options = new DependencyRegistrationOptions
+        {
+            Assemblies = { typeof(DependencyRegistrationServiceTests).Assembly },
+            TypeFilter = types.Contains
+        };
+        new DependencyRegistrationService(services, options).RegisterAll();
+        return services;
+    }
+
+    [Fact]
+    public void RegisterAll_TransientWithoutInterfaces_RegistersAndResolvesTheTypeItself()
+    {
+        var services = RegisterOnly(typeof(AutoRegTransientNoInterface));
+
+        using var provider = services.BuildServiceProvider();
+        var first = provider.GetRequiredService<AutoRegTransientNoInterface>();
+        var second = provider.GetRequiredService<AutoRegTransientNoInterface>();
+
+        Assert.NotSame(first, second);
+        Assert.Single(services, d => d.ServiceType == typeof(AutoRegTransientNoInterface));
+    }
+
+    [Fact]
+    public void RegisterAll_TransientWithAddSelf_ResolvesByTypeAndByInterface()
+    {
+        var services = RegisterOnly(typeof(AutoRegTransientAddSelf));
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.IsType<AutoRegTransientAddSelf>(provider.GetRequiredService<AutoRegTransientAddSelf>());
+        Assert.IsType<AutoRegTransientAddSelf>(provider.GetRequiredService<IAutoRegTransientContract>());
+    }
+
+    [Fact]
+    public void RegisterAll_TransientTryAddWithoutInterfaces_DoesNotThrow()
+    {
+        var services = RegisterOnly(typeof(AutoRegTransientTryAddNoInterface));
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.NotNull(provider.GetRequiredService<AutoRegTransientTryAddNoInterface>());
+    }
+
+    [Fact]
+    public void RegisterAll_RunTwice_DoesNotDuplicateTransientRegistrations()
+    {
+        var services = new ServiceCollection();
+        var options = new DependencyRegistrationOptions
+        {
+            Assemblies = { typeof(DependencyRegistrationServiceTests).Assembly },
+            TypeFilter = t => t == typeof(AutoRegTransientNoInterface) || t == typeof(TestTransientService)
+        };
+
+        new DependencyRegistrationService(services, options).RegisterAll();
+        new DependencyRegistrationService(services, options).RegisterAll();
+
+        Assert.Single(services, d => d.ServiceType == typeof(AutoRegTransientNoInterface));
+        Assert.Single(services, d => d.ServiceType == typeof(ITestService));
+    }
+
+    [Theory]
+    [InlineData(ServiceLifetime.Scoped)]
+    [InlineData(ServiceLifetime.Singleton)]
+    public void RegisterAll_TwoImplementationsSharingTheFirstSortedInterface_ResolveTheirOwnSecondaryInterfaces(ServiceLifetime lifetime)
+    {
+        var (sms, webhook) = lifetime == ServiceLifetime.Scoped
+            ? (typeof(AutoRegScopedSmsChannel), typeof(AutoRegScopedWebhookChannel))
+            : (typeof(AutoRegSingletonSmsChannel), typeof(AutoRegSingletonWebhookChannel));
+        var services = RegisterOnly(sms, webhook);
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        Assert.IsType(sms, scope.ServiceProvider.GetRequiredService<IAutoRegSmsChannel>());
+        Assert.IsType(webhook, scope.ServiceProvider.GetRequiredService<IAutoRegWebhookChannel>());
+
+        var shared = scope.ServiceProvider.GetServices<IAutoRegSharedChannel>().Select(c => c.GetType()).ToList();
+        Assert.Equal(2, shared.Count);
+        Assert.Contains(sms, shared);
+        Assert.Contains(webhook, shared);
+    }
+
+    [Fact]
+    public void RegisterAll_InterfaceSharedAsTheSecondSortedInterface_ExposesEveryImplementation()
+    {
+        var services = RegisterOnly(typeof(AutoRegAlphaPlugin), typeof(AutoRegBetaPlugin));
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        var plugins = scope.ServiceProvider.GetServices<IAutoRegPlugin>().Select(p => p.GetType()).ToList();
+        Assert.Equal(2, plugins.Count);
+        Assert.Contains(typeof(AutoRegAlphaPlugin), plugins);
+        Assert.Contains(typeof(AutoRegBetaPlugin), plugins);
+    }
+
+    [Fact]
+    public void RegisterAll_ScopedMultiInterface_SharesOneInstancePerScopeAcrossInterfaces()
+    {
+        var services = RegisterOnly(typeof(TestMultiInterfaceService));
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope1 = provider.CreateScope();
+        using var scope2 = provider.CreateScope();
+
+        var a = scope1.ServiceProvider.GetRequiredService<ITestService1>();
+        var b = scope1.ServiceProvider.GetRequiredService<ITestService2>();
+        var c = scope2.ServiceProvider.GetRequiredService<ITestService1>();
+
+        Assert.IsType<TestMultiInterfaceService>(a);
+        Assert.Same(a, b);
+        Assert.NotSame(a, c);
+    }
+
+    [Fact]
+    public void RegisterAll_ScopedAddSelf_SharesOneInstanceBetweenTheTypeAndItsInterface()
+    {
+        var services = RegisterOnly(typeof(TestAddSelfService));
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        Assert.Same(
+            scope.ServiceProvider.GetRequiredService<TestAddSelfService>(),
+            scope.ServiceProvider.GetRequiredService<ITestService>());
+    }
+
+    [Theory]
+    [InlineData(typeof(AutoRegScopedTwoEventHandler))]
+    [InlineData(typeof(AutoRegSingletonTwoEventHandler))]
+    public void RegisterAll_MultiInterfaceForwards_LetALaterTryAddEnumerableOfTheSameImplementationDeduplicate(Type handlerType)
+    {
+        // 事件总线的自动扫描（以及任何别的模块）对同一实现用 TryAddEnumerable 再登记一次时，
+        // 转发描述符必须让它认出「已经有这个实现」，否则同一个处理器每个事件执行两遍
+        var services = RegisterOnly(handlerType);
+
+        services.TryAddEnumerable(new ServiceDescriptor(typeof(IEventHandler<AutoRegFirstEvent>), handlerType, ServiceLifetime.Scoped));
+        services.TryAddEnumerable(new ServiceDescriptor(typeof(IEventHandler<AutoRegSecondEvent>), handlerType, ServiceLifetime.Scoped));
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        using var scope = provider.CreateScope();
+
+        Assert.Single(scope.ServiceProvider.GetServices<IEventHandler<AutoRegFirstEvent>>());
+        Assert.Single(scope.ServiceProvider.GetServices<IEventHandler<AutoRegSecondEvent>>());
+        Assert.Same(
+            scope.ServiceProvider.GetRequiredService<IEventHandler<AutoRegFirstEvent>>(),
+            scope.ServiceProvider.GetRequiredService<IEventHandler<AutoRegSecondEvent>>());
+    }
 }
 
 // 测试服务接口和实现
@@ -364,3 +522,47 @@ public class TestReplaceExistingService : ITestService { }
 
 [Dependency(ServiceLifetime.Scoped, AddSelf = true)]
 public class TestAddSelfService : ITestService { }
+
+public class AutoRegTransientNoInterface : ITransientDependency { }
+
+public interface IAutoRegTransientContract { }
+
+[Dependency(ServiceLifetime.Transient, AddSelf = true)]
+public class AutoRegTransientAddSelf : IAutoRegTransientContract { }
+
+[Dependency(ServiceLifetime.Transient, TryAdd = true)]
+public class AutoRegTransientTryAddNoInterface { }
+
+// 共享接口按 FullName 排在最前（ISharedChannel < ISmsChannel < IWebhookChannel）
+public interface IAutoRegSharedChannel { }
+public interface IAutoRegSmsChannel { }
+public interface IAutoRegWebhookChannel { }
+
+public class AutoRegScopedSmsChannel : IAutoRegSharedChannel, IAutoRegSmsChannel, IScopedDependency { }
+public class AutoRegScopedWebhookChannel : IAutoRegSharedChannel, IAutoRegWebhookChannel, IScopedDependency { }
+public class AutoRegSingletonSmsChannel : IAutoRegSharedChannel, IAutoRegSmsChannel, ISingletonDependency { }
+public class AutoRegSingletonWebhookChannel : IAutoRegSharedChannel, IAutoRegWebhookChannel, ISingletonDependency { }
+
+// 共享接口按 FullName 排在第二（IAlphaPlugin / IBetaPlugin < IPlugin）
+public interface IAutoRegAlphaPlugin { }
+public interface IAutoRegBetaPlugin { }
+public interface IAutoRegPlugin { }
+
+public class AutoRegAlphaPlugin : IAutoRegAlphaPlugin, IAutoRegPlugin, IScopedDependency { }
+public class AutoRegBetaPlugin : IAutoRegBetaPlugin, IAutoRegPlugin, IScopedDependency { }
+
+// 一个处理器类处理两种事件、带生命周期标记：自动注册给每个 IEventHandler<> 一条转发描述符
+public class AutoRegFirstEvent : EventBase { }
+public class AutoRegSecondEvent : EventBase { }
+
+public class AutoRegScopedTwoEventHandler : IEventHandler<AutoRegFirstEvent>, IEventHandler<AutoRegSecondEvent>, IScopedDependency
+{
+    public Task HandleAsync(AutoRegFirstEvent @event, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task HandleAsync(AutoRegSecondEvent @event, CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+public class AutoRegSingletonTwoEventHandler : IEventHandler<AutoRegFirstEvent>, IEventHandler<AutoRegSecondEvent>, ISingletonDependency
+{
+    public Task HandleAsync(AutoRegFirstEvent @event, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task HandleAsync(AutoRegSecondEvent @event, CancellationToken cancellationToken = default) => Task.CompletedTask;
+}

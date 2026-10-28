@@ -239,7 +239,8 @@ public class DefaultUserProfileController : ApiControllerBase
     /// ★ 绑定为什么要先来这里：OAuth 的发起与回调都是匿名的整页跳转，请求上没有 bearer，回调里连「谁在绑定」
     /// 都无从知道。此前前端直接重走登录流程，第三方邮箱与本站不同时后端凭空建出一个孤儿账号。
     /// 前端拿到令牌后把它作为 <c>linkToken</c> 查询参数跳到 <c>GET auth/oauth/{provider}/login</c>，
-    /// 回调消费它并把外部登录挂到本账号上，不签发令牌、不新建账号。
+    /// 回调消费它、暂存外部身份并交回一枚完成码，前端再调 <see cref="CompleteLink"/> 才真正关联；
+    /// 全程不签发令牌、不新建账号。
     /// </para>
     /// <para>
     /// ★ 标 <c>[RequireStepUp]</c>：这是给账号新增一种登录方式。绑上去的外部身份在改密、撤销全部会话之后照样能登录，
@@ -263,6 +264,44 @@ public class DefaultUserProfileController : ApiControllerBase
 
         var result = await OAuthLinkTokens.IssueAsync(CurrentUser.Id.Value, provider);
         return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 完成第三方账号绑定：把 OAuth 回调暂存在当前账号名下的外部身份真正挂上来。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★★★ 绑定的最后一步必须在<b>发起绑定的那个已登录会话</b>里完成，而不是在匿名回调里：
+    /// 绑定令牌能被当成链接发给别人，回调又是匿名的，在回调里关联就让「把受害者的第三方身份挂到攻击者账号上」
+    /// 只需要受害者点开一条链接。回调现在只暂存并交回一枚完成码，这里按<b>当前账号</b>去取：
+    /// 别的账号暂存的那一份从这里够不着，受害者的浏览器里要么没有会话、要么登录的是他自己，都完成不了。
+    /// </para>
+    /// <para>
+    /// 不再要求 step-up：确认已经挂在签发绑定令牌那一步（<see cref="IssueLinkToken"/>），完成码只能交回同一个账号。
+    /// </para>
+    /// </remarks>
+    [HttpPost("linked-accounts/{provider}/complete")]
+    public virtual async Task<ApiResult> CompleteLink(string provider, [FromBody] CompleteOAuthLinkDto input)
+    {
+        if (CurrentUser?.Id == null)
+        {
+            return Unauthorized("User not authenticated");
+        }
+
+        if (OAuthLinkTokens == null || OAuthService == null)
+        {
+            return Error("OAuth link service is not available", 501);
+        }
+
+        var pending = await OAuthLinkTokens.ConsumePendingLinkAsync(CurrentUser.Id.Value, provider, input.Code);
+        if (!pending.Succeeded)
+        {
+            return Result.Failure(pending.Message ?? "Invalid or expired link confirmation", pending.Code ?? 400, pending.ErrorCode).ToApiResult();
+        }
+
+        var linked = await OAuthService.LinkOAuthAccountAsync(
+            CurrentUser.Id.Value, pending.Data!.Provider, pending.Data.ProviderKey, pending.Data.DisplayName);
+        return linked.ToApiResult();
     }
 
     /// <summary>
@@ -592,7 +631,7 @@ public class DefaultUserProfileController : ApiControllerBase
     }
 
     /// <summary>
-    /// 删除当前用户的账户（软删除，GDPR 合规）
+    /// 注销当前用户的账户：锁定、软删除账号行、撤销会话（不抹除资料与登录记录）
     /// </summary>
     [HttpDelete("account")]
     [RequireStepUp(StepUpScopes.AccountDestroy)]
@@ -608,7 +647,7 @@ public class DefaultUserProfileController : ApiControllerBase
     }
 
     /// <summary>
-    /// 导出当前用户的个人数据（GDPR 合规）
+    /// 导出当前用户的账号数据：账号字段、角色、所属组织与已关联的第三方登录提供商
     /// </summary>
     [HttpGet("personal-data")]
     public virtual async Task<ApiResult<PersonalDataExportDto>> ExportPersonalData()
@@ -640,6 +679,12 @@ public class DefaultUserProfileController : ApiControllerBase
         if (TwoFactorService == null)
         {
             return Error("Two-factor service is not available", 503);
+        }
+
+        var addressViolation = DescribeInvalidNewAddress(input.NewAddress, TwoFactorType.Email);
+        if (addressViolation != null)
+        {
+            return Error(addressViolation, 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         var result = await TwoFactorService.SendCodeByAddressAsync(
@@ -693,6 +738,12 @@ public class DefaultUserProfileController : ApiControllerBase
             return Error("Two-factor service is not available", 503);
         }
 
+        var addressViolation = DescribeInvalidNewAddress(input.NewAddress, TwoFactorType.Sms);
+        if (addressViolation != null)
+        {
+            return Error(addressViolation, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         var result = await TwoFactorService.SendCodeByAddressAsync(
             input.NewAddress, TwoFactorType.Sms, VerificationCodePurpose.ChangeContact);
         return result.ToApiResult();
@@ -726,6 +777,39 @@ public class DefaultUserProfileController : ApiControllerBase
         // 更新手机号（同时设置 PhoneNumberConfirmed = true 并发布变更事件）
         var changeResult = await UserService.ChangePhoneNumberAsync(CurrentUser.Id.Value, input.NewPhoneNumber);
         return changeResult.ToApiResult();
+    }
+
+    /// <summary>
+    /// 换绑发码前对新地址的形态校验；合法时返回 null，否则返回英文错误消息。
+    /// </summary>
+    /// <remarks>
+    /// 同一个 DTO 同时用于邮箱与手机，而它只有 <c>[Required]</c>：任意字符串都会以框架品牌的验证码邮件 / 短信发往第三方，
+    /// 超过列宽的在插入时 500。邮箱与确认端同一口径（<c>[EmailAddress]</c>），并且必须是一个裸地址
+    /// （带显示名或一串地址时 <see cref="MailAddress"/> 解析不出、或解析出的不是原串）；手机号按 <c>[Phone]</c>。
+    /// ★ 刻意不在这里检查新地址是否已被别的账号占用：那会给每个登录用户一个按地址查账号的探针；占用由确认时判定。
+    /// </remarks>
+    private static string? DescribeInvalidNewAddress(string? address, TwoFactorType type)
+    {
+        var value = address?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            return "New address is required.";
+        }
+
+        if (value.Length > TwoFactorCode.AddressMaxLength)
+        {
+            return $"New address must be at most {TwoFactorCode.AddressMaxLength} characters.";
+        }
+
+        if (type == TwoFactorType.Email)
+        {
+            var isOneEmailAddress = new EmailAddressAttribute().IsValid(value)
+                && MailAddress.TryCreate(value, out var parsed)
+                && string.Equals(parsed.Address, value, StringComparison.Ordinal);
+            return isOneEmailAddress ? null : "New address is not a valid email address.";
+        }
+
+        return new PhoneAttribute().IsValid(value) ? null : "New address is not a valid phone number.";
     }
 
     #endregion

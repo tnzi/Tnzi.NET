@@ -63,6 +63,50 @@ public class ChromiumHtmlDocumentConverterTests
         ChromiumLocator.ResetCache();
     }
 
+    /// <summary>
+    /// 排队等并发闸门有上界：等满一次渲染的超时仍轮不到，就以可重试的忙碌错误返回并点名配置项，而不是无限期挂着。
+    /// </summary>
+    /// <remarks>
+    /// 闸门是进程级的，HTML 转 PDF 与缩略图共用。这里先把它占满，配置路径指向一个存在的文件
+    /// （闸门之后才会去启动它，本用例走不到那里）。占满时若别的用例正在真实渲染，这里会等它们渲染完再占。
+    /// </remarks>
+    [Fact]
+    public async Task ConvertToPdfAsync_GateStaysFullPastTheTimeout_FailsRetryablyInsteadOfWaitingForever()
+    {
+        var existingFile = typeof(ChromiumHtmlDocumentConverterTests).Assembly.Location;
+        var converter = CreateConverter(options =>
+        {
+            options.BrowserPath = existingFile;
+            options.TimeoutSeconds = 1;
+        });
+
+        var gate = ChromiumPageRunner.GetGate(new HtmlPdfOptions().MaxConcurrency);
+        var taken = 0;
+        try
+        {
+            for (; taken < ChromiumPageRunner.GateCapacity; taken++)
+                await gate.WaitAsync();
+
+            // 兜底：若排队不设上界，30 秒后以取消收场（断言失败），而不是让整个测试进程挂住。
+            using var safety = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var exception = await Should.ThrowAsync<DocumentConversionException>(
+                () => converter.ConvertToPdfAsync(HtmlDocument(), "composed.html", safety.Token));
+
+            exception.IsRetryable.ShouldBeTrue();
+            exception.Message.ShouldContain("busy");
+            exception.Message.ShouldContain("Documents:Html:MaxConcurrency");
+            exception.Message.ShouldContain("Documents:Html:TimeoutSeconds");
+            safety.IsCancellationRequested.ShouldBeFalse();
+        }
+        finally
+        {
+            if (taken > 0)
+                gate.Release(taken);
+            ChromiumLocator.ResetCache();
+        }
+    }
+
     [Fact]
     public async Task ConvertToPdfAsync_WhenDisabled_SaysSoInsteadOfSilentlyUsingAnotherEngine()
     {

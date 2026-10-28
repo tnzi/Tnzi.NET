@@ -36,6 +36,15 @@ public class SandboxTools : IAIToolProvider
 
     private const string DenialPrefix = "Command denied:";
 
+    /// <summary>
+    /// <c>ls</c> 的递归深度上限。深度是模型给的参数：不封顶时一次 <c>ls /mnt</c> 带上大深度就把技能副本、
+    /// <c>node_modules</c> 之类整棵树塞进一条工具结果。
+    /// </summary>
+    internal const int MaxListDepth = 5;
+
+    /// <summary><c>ls</c> 一次最多返回的条目数，超出的部分明说省略了多少。</summary>
+    internal const int MaxListEntries = 1000;
+
     private const string SandboxUnavailableMessage =
         "Sandbox is not available in this execution context. Sandbox tools require an active sandbox " +
         "provisioned per agent run by the sandbox middleware. Ensure the sandbox module is enabled " +
@@ -48,13 +57,15 @@ public class SandboxTools : IAIToolProvider
     private readonly ICurrentUser? _currentUser;
     private readonly ICurrentTenant? _currentTenant;
     private readonly IThreadResourceQuota? _quota;
+    private readonly IOptionsMonitor<AIOptions>? _aiOptions;
 
     public SandboxTools(IVirtualPathTranslator translator, ILogger<SandboxTools> logger,
         IAgentExecutionContextAccessor? executionContextAccessor = null,
         IEventBus? eventBus = null,
         ICurrentUser? currentUser = null,
         ICurrentTenant? currentTenant = null,
-        IThreadResourceQuota? quota = null)
+        IThreadResourceQuota? quota = null,
+        IOptionsMonitor<AIOptions>? aiOptions = null)
     {
         _translator = Check.NotNull(translator);
         _logger = Check.NotNull(logger);
@@ -63,13 +74,28 @@ public class SandboxTools : IAIToolProvider
         _currentUser = currentUser;
         _currentTenant = currentTenant;
         _quota = quota;
+        _aiOptions = aiOptions;
+    }
+
+    /// <summary>
+    /// 一次整文件读取最多交给模型多少字符：取 <c>AI:ToolResultBudget:MaxResultChars</c>（「任何单个工具结果超过它就截断」），
+    /// 预算关闭或设为 0 时不限。没有选项（直接构造的测试）时用同一个默认值。
+    /// </summary>
+    private int? ReadFileBudget()
+    {
+        var budget = _aiOptions?.CurrentValue.ToolResultBudget ?? new ToolResultBudgetOptions();
+        return budget.Enabled && budget.MaxResultChars > 0 ? budget.MaxResultChars : null;
     }
 
     [AIFunction("bash",
         "Execute a bash command in the sandbox environment. Under the Local provider " +
         "the shell is NOT filesystem-jailed: it is protected only by the command blacklist " +
         "and a best-effort path check on translated /mnt paths. Use the Docker provider for " +
-        "strong isolation.",
+        "strong isolation. Under the Local provider /mnt paths are translated on this command line " +
+        "only, not inside scripts or files, so pass paths to a script as arguments or use paths " +
+        "relative to the working directory. The working directory is the thread root, which holds " +
+        "workspace/, uploads/, outputs/ and skills/ (the folders /mnt/workspace, /mnt/uploads, " +
+        "/mnt/outputs and /mnt/skills): write files under workspace/ or outputs/ so ls and read_file can see them.",
         SearchHint = "shell command execute terminal run script")]
     public async Task<object> BashAsync(
         [Description("The shell command to execute")] string command,
@@ -140,7 +166,7 @@ public class SandboxTools : IAIToolProvider
             }
         }
 
-        // 守卫过了才换根：每个虚拟根换成沙箱自己寻址的形态（Docker 是容器里的 /workspace/{mount}，
+        // 守卫过了才换根：每个虚拟根换成沙箱自己寻址的形态（Docker 是容器里同名的 /mnt/{mount}，即原样不变；
         // Local 是宿主物理路径），并按所在引号上下文加引号，含空格的根也作为一个词交给 shell。
         // 换根不放宽任何判定 —— 判定已经在上面做完了。
         var sandboxCommand = SandboxCommandPaths.Rewrite(
@@ -154,8 +180,9 @@ public class SandboxTools : IAIToolProvider
         // Record the soft-cap cost (duration + output bytes) even on non-zero exits
         // so a busy-looping agent cannot dodge the caps by failing fast. The command
         // count is already reserved by CheckAsync above (hard cap); RecordExecutionAsync
-        // deliberately does not touch it. Denials (handled above) return early and
-        // therefore never reach this accounting.
+        // deliberately does not touch it. Path-escape and quota denials (handled above)
+        // return early and never reach this accounting; a command the provider's
+        // blacklist rejects does reach it, having already used its slot.
         if (_quota is not null)
         {
             var outputBytes = (result.Output?.Length ?? 0) + (result.Error?.Length ?? 0);
@@ -169,12 +196,12 @@ public class SandboxTools : IAIToolProvider
         return new { stdout = result.Output, stderr = result.Error, exit_code = result.ExitCode, note = semanticNote };
     }
 
-    [AIFunction("ls", "List contents of a directory in the sandbox",
+    [AIFunction("ls", "List contents of a directory in the sandbox. Recursion is capped at 5 levels and 1000 entries per call.",
         IsReadOnly = true, IsConcurrencySafe = true,
         SearchHint = "list directory files folder")]
     public async Task<object> ListDirectoryAsync(
         [Description("Virtual directory path, e.g. /mnt/workspace")] string path,
-        [Description("Maximum recursion depth")] int maxDepth = 2,
+        [Description("Maximum recursion depth (at most 5)")] int maxDepth = 2,
         CancellationToken ct = default)
     {
         if (ResolveEnvironment() is not { } env) return SandboxUnavailable();
@@ -183,16 +210,24 @@ public class SandboxTools : IAIToolProvider
         try
         {
             var physicalPath = sandbox.MapPath(_translator.ToPhysical(path, env.ThreadId));
-            var entries = await sandbox.ListDirectoryAsync(physicalPath, maxDepth, ct);
+            var entries = await sandbox.ListDirectoryAsync(physicalPath, Math.Clamp(maxDepth, 0, MaxListDepth), ct);
+            var listed = entries.Take(MaxListEntries).Select(e => new
+            {
+                name = e.Name,
+                type = e.IsDirectory ? "directory" : "file",
+                size = e.Size
+            }).ToArray();
+
+            if (entries.Count <= MaxListEntries)
+                return new { path, entries = listed };
+
             return new
             {
                 path,
-                entries = entries.Select(e => new
-                {
-                    name = e.Name,
-                    type = e.IsDirectory ? "directory" : "file",
-                    size = e.Size
-                }).ToArray()
+                entries = listed,
+                truncated = true,
+                total_entries = entries.Count,
+                note = $"Only the first {MaxListEntries} of {entries.Count} entries are listed. List a subdirectory or use a smaller maxDepth."
             };
         }
         catch (OperationCanceledException)
@@ -206,7 +241,9 @@ public class SandboxTools : IAIToolProvider
         }
     }
 
-    [AIFunction("read_file", "Read the contents of a file in the sandbox",
+    [AIFunction("read_file", "Read the contents of a file in the sandbox. A whole-file read of a large file returns its " +
+        "first part with truncated=true and next_offset; read the rest with offset and limit, and never write a truncated " +
+        "read back as the whole file.",
         IsReadOnly = true, IsConcurrencySafe = true,
         SearchHint = "read file content view cat")]
     public async Task<object> ReadFileAsync(
@@ -224,6 +261,13 @@ public class SandboxTools : IAIToolProvider
             // Slicing is pushed down into the sandbox so large files are streamed
             // line-by-line rather than read fully into memory just to be sliced.
             var content = await sandbox.ReadFileAsync(physicalPath, offset, limit, ct);
+
+            // 整文件读取按工具结果预算交出开头一段，并明说截断了、下一段从哪行开始。★ 此前原样返回，Local 下上限只有
+            // MaxFileSizeBytes（50 MiB）：一个几十 MB 的 CSV 整个进了这一轮的模型上下文。显式给了行窗口的读取不截断，
+            // str_replace 直接读沙箱也不经过这里。
+            if (offset is null && limit is null && ReadFileBudget() is { } budget && content.Length > budget)
+                return TruncatedRead(path, content, budget);
+
             return new { path, content };
         }
         catch (OperationCanceledException)
@@ -300,6 +344,32 @@ public class SandboxTools : IAIToolProvider
     }
 
     /// <summary>
+    /// 整文件读取超出预算时的结果：在预算内的最后一个换行处截断（只交整行），给出下一段的起始行号。
+    /// </summary>
+    private static object TruncatedRead(string path, string content, int budget)
+    {
+        var cut = content.LastIndexOf('\n', budget - 1);
+        // 第一行就超出预算时按码元硬切：切点不落在代理对中间（半个 emoji 进了工具结果，序列化进模型请求时被换成替换字符）
+        var head = cut >= 0 ? content[..(cut + 1)] : content.FitToLength(budget);
+        var linesReturned = head.Count(c => c == '\n');
+        int? nextOffset = cut >= 0 ? linesReturned + 1 : null;
+
+        return new
+        {
+            path,
+            content = head,
+            truncated = true,
+            total_chars = content.Length,
+            next_offset = nextOffset,
+            note = nextOffset is { } next
+                ? $"Only the first {linesReturned} lines ({head.Length} of {content.Length} characters) were returned. " +
+                  $"Read the rest with offset={next} and a limit. Do not write this content back as the whole file."
+                : $"Only the first {head.Length} of {content.Length} characters were returned (the first line alone exceeds the budget). " +
+                  "Do not write this content back as the whole file."
+        };
+    }
+
+    /// <summary>
     /// 从执行上下文（AsyncLocal）解析当前运行的沙箱环境。
     /// SandboxMiddleware 在 next() 期间发布，工具调用必然发生在 next() 内部。
     /// </summary>
@@ -361,10 +431,5 @@ public class SandboxTools : IAIToolProvider
     }
 
     private static string Truncate(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return string.Empty;
-        return value.Length <= MaxAuditOutputBytes
-            ? value
-            : string.Concat(value.AsSpan(0, MaxAuditOutputBytes), "...[truncated]");
-    }
+        => string.IsNullOrEmpty(value) ? string.Empty : value.Truncate(MaxAuditOutputBytes, "...[truncated]");
 }

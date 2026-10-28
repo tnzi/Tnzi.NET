@@ -8,6 +8,8 @@ public class BudgetService : ApplicationService, IBudgetService
     private readonly IRepository<UsageLog, Guid> _usageLogRepository;
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly IOptionsMonitor<AIOptions> _aiOptions;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
 
     /// <summary>
     /// 进程级内存缓存：key = "budget:{tenantId}:{userId}" → (spend, expiry)。
@@ -48,13 +50,24 @@ public class BudgetService : ApplicationService, IBudgetService
         IServiceProvider serviceProvider,
         IRepository<UsageLog, Guid> usageLogRepository,
         IRepository<Agent, Guid> agentRepository,
-        IOptionsMonitor<AIOptions> aiOptions)
+        IOptionsMonitor<AIOptions> aiOptions,
+        ICurrentTenant? currentTenant = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
         : base(serviceProvider)
     {
         _usageLogRepository = Check.NotNull(usageLogRepository);
         _agentRepository = Check.NotNull(agentRepository);
         _aiOptions = Check.NotNull(aiOptions);
+        _currentTenant = currentTenant;
+        _multiTenancyOptions = multiTenancyOptions;
     }
+
+    /// <summary>
+    /// 按名解析 Agent 时的可见集合：与运行时解析同一规则（租户调用者 = 本租户 ∪ 宿主级共享 YAML 定义）。
+    /// 只走全局过滤器的话，共享定义（<c>TenantId</c> 为 null）对租户调用者不可见，按名配置的上限对它永远查不到。
+    /// </summary>
+    private IQueryable<Agent> VisibleAgents
+        => SharedAgentScope.Resolve(_multiTenancyOptions, _currentTenant, CurrentUser).Apply(_agentRepository.AsQueryable());
 
     public async Task<BudgetCheckResult> CheckBudgetAsync(Guid? userId, Guid? tenantId, Guid? agentId, CancellationToken ct = default)
     {
@@ -70,7 +83,7 @@ public class BudgetService : ApplicationService, IBudgetService
         // 如果有 Agent 级预算覆盖，先检查 Agent 预算
         if (agentId.HasValue)
         {
-            var agentBudgetResult = await CheckAgentBudgetAsync(agentId.Value, options, ct);
+            var agentBudgetResult = await CheckAgentBudgetAsync(agentId.Value, tenantId, options, ct);
             if (agentBudgetResult != null && !agentBudgetResult.IsAllowed)
             {
                 return agentBudgetResult;
@@ -106,11 +119,10 @@ public class BudgetService : ApplicationService, IBudgetService
         var cacheKey = BuildCacheKey(userId, tenantId);
         SpendCache.TryRemove(cacheKey, out _);
 
-        // Agent 级缓存也失效
+        // Agent 级缓存也失效（与 CheckBudgetAsync 读的是同一个按租户分区的键）
         if (agentId.HasValue)
         {
-            var agentCacheKey = $"budget:agent:{agentId.Value}";
-            SpendCache.TryRemove(agentCacheKey, out _);
+            SpendCache.TryRemove(BuildAgentCacheKey(agentId.Value, tenantId), out _);
         }
 
         return Task.CompletedTask;
@@ -152,7 +164,7 @@ public class BudgetService : ApplicationService, IBudgetService
         // 批量查询 Agent 名称
         var agentIds = agentSpends.Select(a => a.AgentId).ToList();
         var agents = agentIds.Count > 0
-            ? await _agentRepository.Where(a => agentIds.Contains(a.Id)).Select(a => new { a.Id, a.Name }).ToListAsync(ct)
+            ? await VisibleAgents.Where(a => agentIds.Contains(a.Id)).Select(a => new { a.Id, a.Name }).ToListAsync(ct)
             : [];
         var agentNameMap = agents.ToDictionary(a => a.Id, a => a.Name);
 
@@ -216,7 +228,7 @@ public class BudgetService : ApplicationService, IBudgetService
         };
     }
 
-    private async Task<BudgetCheckResult?> CheckAgentBudgetAsync(Guid agentId, BudgetOptions options, CancellationToken ct)
+    private async Task<BudgetCheckResult?> CheckAgentBudgetAsync(Guid agentId, Guid? tenantId, BudgetOptions options, CancellationToken ct)
     {
         if (options.PerAgentBudgets.Count == 0)
             return null;
@@ -233,7 +245,7 @@ public class BudgetService : ApplicationService, IBudgetService
             }
         }
 
-        var agentSpend = await GetAgentPeriodSpendAsync(agentId, options, ct);
+        var agentSpend = await GetAgentPeriodSpendAsync(agentId, tenantId, options, ct);
         var result = EvaluateBudget(agentSpend, agentBudget, options.WarningThreshold);
         if (!result.IsAllowed)
         {
@@ -270,9 +282,15 @@ public class BudgetService : ApplicationService, IBudgetService
         return spend;
     }
 
-    private async Task<decimal> GetAgentPeriodSpendAsync(Guid agentId, BudgetOptions options, CancellationToken ct)
+    /// <summary>
+    /// 本租户在这个 Agent 上本周期的花费。按 Agent 的上限是<b>每个租户各自的额度</b>：
+    /// 宿主级共享 Agent 的同一个 id 被所有租户使用，聚合按租户过滤，缓存键也必须按租户分区，
+    /// 否则一个租户的花费在 TTL 内被当成另一个租户的，拦下没花钱的租户（拒绝原因里还带着别人的金额），
+    /// 或者让超支的租户读到别人的 0。
+    /// </summary>
+    private async Task<decimal> GetAgentPeriodSpendAsync(Guid agentId, Guid? tenantId, BudgetOptions options, CancellationToken ct)
     {
-        var cacheKey = $"budget:agent:{agentId}";
+        var cacheKey = BuildAgentCacheKey(agentId, tenantId);
         var ttl = TimeSpan.FromSeconds(Math.Max(options.CacheTtlSeconds, 0));
 
         if (SpendCache.TryGetValue(cacheKey, out var cached) && cached.Expiry > DateTime.UtcNow)
@@ -282,10 +300,15 @@ public class BudgetService : ApplicationService, IBudgetService
 
         var (periodStart, periodEnd) = GetCurrentMonthPeriod();
 
-        var spend = await AggregateSpendAsync(
-            _usageLogRepository.Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd
-                                           && l.AgentId == agentId),
-            ct);
+        var q = _usageLogRepository.Where(l => l.CreationTime >= periodStart && l.CreationTime < periodEnd
+                                               && l.AgentId == agentId);
+
+        // 键按调用方给的租户分区，查询也按它过滤，两者指的是同一份数据（全局过滤器按环境租户，正常调用方两者一致）。
+        // 只在多租户开启时加：关闭时模型里没有 TenantId 列，引用它会让查询翻译失败。
+        if (tenantId.HasValue && _multiTenancyOptions?.Value.Enabled == true)
+            q = q.Where(l => l.TenantId == tenantId.Value);
+
+        var spend = await AggregateSpendAsync(q, ct);
 
         SetCacheEntry(cacheKey, spend, ttl);
         return spend.Usd;
@@ -362,7 +385,7 @@ public class BudgetService : ApplicationService, IBudgetService
 
     private async Task<string?> GetAgentNameAsync(Guid agentId, CancellationToken ct)
     {
-        var agent = await _agentRepository
+        var agent = await VisibleAgents
             .Where(a => a.Id == agentId)
             .Select(a => a.Name)
             .FirstOrDefaultAsync(ct);
@@ -416,6 +439,11 @@ public class BudgetService : ApplicationService, IBudgetService
     private static string BuildCacheKey(Guid? userId, Guid? tenantId)
     {
         return $"budget:{tenantId?.ToString() ?? "global"}:{userId?.ToString() ?? "all"}";
+    }
+
+    private static string BuildAgentCacheKey(Guid agentId, Guid? tenantId)
+    {
+        return $"budget:agent:{tenantId?.ToString() ?? "global"}:{agentId}";
     }
 
     private static (DateTime Start, DateTime End) GetCurrentMonthPeriod()

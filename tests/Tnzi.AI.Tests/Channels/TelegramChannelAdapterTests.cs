@@ -2,6 +2,7 @@ using Telegram.Bot;
 using Telegram.Bot.Requests;
 using Telegram.Bot.Requests.Abstractions;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.Enums;
 using Tnzi.AI.Channels.Adapters.Telegram;
 using Tnzi.AI.Channels.Bus;
 using Tnzi.AI.Channels.Models;
@@ -49,6 +50,41 @@ public class TelegramChannelAdapterTests
 
         var request = requests.ShouldHaveSingleItem().ShouldBeOfType<SendMessageRequest>();
         request.MessageThreadId.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(ChatType.Private, "user")]
+    [InlineData(ChatType.Group, "group")]
+    [InlineData(ChatType.Supergroup, "group")]
+    public async Task InboundUpdate_ReportsThePeerKindFromChatType(ChatType chatType, string expected)
+    {
+        // 绑定规则的 PeerKind 按它匹配：不报出来，带 PeerKind 的规则永远不会命中。
+        // 入站只有长轮询这一个公开入口，这里直接驱动它的更新处理方法。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = new TelegramChannelAdapter(
+            NullLogger<TelegramChannelAdapter>.Instance,
+            bus,
+            MsOptions.Create(new ChannelsModuleOptions { Telegram = new TelegramAdapterOptions { Enabled = true, BotToken = "123456:token" } }),
+            Mock.Of<ITelegramBotClient>());
+
+        var update = new Update
+        {
+            Message = new Message
+            {
+                Chat = new Chat { Id = -100123, Type = chatType },
+                From = new User { Id = 42, FirstName = "u" },
+                Text = "hello"
+            }
+        };
+
+        var handler = typeof(TelegramChannelAdapter).GetMethod("HandleUpdateAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await (Task)handler.Invoke(adapter, [Mock.Of<ITelegramBotClient>(), update, CancellationToken.None])!;
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var received = await bus.ConsumeInboundAsync(cts.Token);
+        received.PeerKind.ShouldBe(expected);
+        received.ChatId.ShouldBe("-100123");
     }
 
     private static (TelegramChannelAdapter Adapter, List<IRequest<Message>> Requests) CreateAdapter()

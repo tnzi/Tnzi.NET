@@ -30,6 +30,53 @@ describe('useAuthPage', () => {
     expect(auth.accountType.value).toBe('email');
   });
 
+  /**
+   * With password sign-in off, Continue sends the code itself. That send ran
+   * outside `run()`: a refused send rejected out of the click handler with no
+   * error on screen, and nothing marked the page busy, so every further click
+   * sent another code.
+   */
+  describe('Continue on a code-only deployment', () => {
+    const CODE_ONLY = { ...FEATURES, passwordLogin: false } as LoginFeatures;
+
+    it('sends the code and moves to the code pane', async () => {
+      const sendCode = vi.fn(async () => undefined);
+      const { auth } = page({ sendCode }, { features: () => CODE_ONLY });
+      auth.account.value = 'me@example.com';
+      await auth.onContinue();
+      expect(sendCode).toHaveBeenCalledWith({ account: 'me@example.com', type: 'email', purpose: 'code-login' });
+      expect(auth.step.value).toBe('code');
+      expect(auth.notice.value).toBe('Verification code sent.');
+    });
+
+    it('shows a refused send and stays on the identify step', async () => {
+      const sendCode = vi.fn(async () => {
+        throw new Error('Too many requests. Try again later.');
+      });
+      const { auth } = page({ sendCode }, { features: () => CODE_ONLY });
+      auth.account.value = 'me@example.com';
+      await expect(auth.onContinue()).resolves.toBeUndefined();
+      expect(auth.error.value).toBe('Too many requests. Try again later.');
+      expect(auth.step.value).toBe('identify');
+      expect(auth.submitting.value).toBe(false);
+    });
+
+    it('is busy while the code is being sent, so a second click sends nothing', async () => {
+      let finish: (() => void) | undefined;
+      const sendCode = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+      const { auth } = page({ sendCode }, { features: () => CODE_ONLY });
+      auth.account.value = 'me@example.com';
+      const first = auth.onContinue();
+      expect(auth.submitting.value).toBe(true);
+      expect(auth.canContinue.value).toBe(false);
+      await auth.onContinue();
+      finish!();
+      await first;
+      expect(sendCode).toHaveBeenCalledTimes(1);
+      expect(auth.step.value).toBe('code');
+    });
+  });
+
   it('a password login that establishes a session reports authenticated', async () => {
     const pwdLogin = vi.fn(async () => undefined);
     const { auth, onAuthenticated } = page({ pwdLogin });
@@ -58,6 +105,47 @@ describe('useAuthPage', () => {
    * route guard, which bounced them back to this same register pane with
    * nothing said, and a second click failed with "account exists".
    */
+  /**
+   * Sign-in and sign-up by code have their own channels on the backend. The
+   * links on the password pane are offered only for an address the flow can
+   * send its code to; offering sign-up by email on an SMS-only deployment led
+   * to a send the backend refused.
+   */
+  describe('code flow links follow their own channels', () => {
+    const SPLIT = {
+      ...FEATURES,
+      codeChannels: { sms: true, email: true },
+      registerChannels: { sms: true, email: false },
+    } as LoginFeatures;
+
+    it('hides sign-up for an email when quick registration only texts', () => {
+      const { auth } = page({}, { features: () => SPLIT });
+      auth.account.value = 'me@example.com';
+      expect(auth.offersCodeSignIn.value).toBe(true);
+      expect(auth.offersSignUp.value).toBe(false);
+      auth.account.value = '+1 555 0100';
+      expect(auth.offersSignUp.value).toBe(true);
+    });
+
+    it('hides code sign-in for a phone when codes only go by email', () => {
+      const emailCodes = { ...SPLIT, codeChannels: { sms: false, email: true } } as LoginFeatures;
+      const { auth } = page({}, { features: () => emailCodes });
+      auth.account.value = '+1 555 0100';
+      expect(auth.offersCodeSignIn.value).toBe(false);
+      auth.account.value = 'me@example.com';
+      expect(auth.offersCodeSignIn.value).toBe(true);
+    });
+
+    it('leaves an identifier it cannot classify to the backend, and a closed flow closed', () => {
+      const { auth } = page({}, { features: () => SPLIT });
+      auth.account.value = 'jsmith';
+      expect(auth.offersSignUp.value).toBe(true);
+      const closed = page({}, { features: () => ({ ...SPLIT, register: false }) as LoginFeatures }).auth;
+      closed.account.value = '+1 555 0100';
+      expect(closed.offersSignUp.value).toBe(false);
+    });
+  });
+
   describe('register', () => {
     it('returns to the password pane with a notice and does not report authenticated', async () => {
       const register = vi.fn(async () => undefined);

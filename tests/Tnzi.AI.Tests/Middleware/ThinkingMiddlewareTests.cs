@@ -58,10 +58,10 @@ public class ThinkingMiddlewareTests
 
     #endregion
 
-    #region Effort=None: skip
+    #region Effort=None: 显式写下「关」（留空在下游等于「不经过管线」，装饰器会按提供商配置打开）
 
     [Fact]
-    public async Task EffortNone_NoProviderConfig_AsyncLocalNotSet()
+    public async Task EffortNone_NoProviderConfig_ThinkingExplicitlyOff()
     {
         var middleware = CreateMiddleware(); // No provider config
         var context = CreateContext();
@@ -70,7 +70,7 @@ public class ThinkingMiddlewareTests
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
             nextCalled = true;
-            ThinkingRequestPolicy.RequestContext.Value.ShouldBeNull();
+            ThinkingRequestPolicy.RequestContext.Value.ShouldNotBeNull().Thinking.Effort.ShouldBe(ReasoningEffort.None);
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
 
@@ -79,7 +79,7 @@ public class ThinkingMiddlewareTests
     }
 
     [Fact]
-    public async Task EffortNone_ProviderConfigIsNone_AsyncLocalNotSet()
+    public async Task EffortNone_ProviderConfigIsNone_ThinkingExplicitlyOff()
     {
         var opts = CreateOptionsWithThinking(TestProvider, ReasoningEffort.None);
         var middleware = CreateMiddleware(o =>
@@ -90,7 +90,7 @@ public class ThinkingMiddlewareTests
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
-            ThinkingRequestPolicy.RequestContext.Value.ShouldBeNull();
+            ThinkingRequestPolicy.RequestContext.Value.ShouldNotBeNull().Thinking.Effort.ShouldBe(ReasoningEffort.None);
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
 
@@ -151,7 +151,7 @@ public class ThinkingMiddlewareTests
     #region 不支持推理模型: 静默跳过
 
     [Fact]
-    public async Task EffortHigh_NonReasoningModel_AsyncLocalNotSet()
+    public async Task EffortHigh_NonReasoningModel_ThinkingExplicitlyOff()
     {
         var opts = CreateOptionsWithThinking(TestProvider, ReasoningEffort.High);
         var middleware = CreateMiddleware(o =>
@@ -162,9 +162,37 @@ public class ThinkingMiddlewareTests
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
-            ThinkingRequestPolicy.RequestContext.Value.ShouldBeNull();
+            ThinkingRequestPolicy.RequestContext.Value.ShouldNotBeNull().Thinking.Effort.ShouldBe(ReasoningEffort.None);
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
+    }
+
+    /// <summary>
+    /// 能力表按名字认模型，新模型没收录时配置的推理被跳过：此前只有一条 Debug，运维看不见。
+    /// 每个提供商 + 模型提示一次 Information，之后回到 Debug。
+    /// </summary>
+    [Fact]
+    public async Task EffortHigh_ModelNotInTheCapabilityTable_LogsInformationOncePerModel()
+    {
+        // 进程级记录：用本测试独有的提供商名，避免与其它用例共享状态
+        var provider = "skip-log-" + Guid.NewGuid().ToString("N");
+        var opts = CreateOptionsWithThinking(provider, ReasoningEffort.High);
+        var logger = new Mock<ILogger<ThinkingMiddleware>>();
+        logger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+        var middleware = new ThinkingMiddleware(new TestOptionsMonitor<AIOptions>(opts), logger.Object);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await middleware.InvokeAsync(CreateContext(provider: provider, model: "brand-new-model"),
+                (ctx, ct) => Task.FromResult(new AgentRunResult { Response = "ok" }));
+        }
+
+        logger.Verify(l => l.Log(
+            LogLevel.Information,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((v, _) => v != null && v.ToString()!.Contains("brand-new-model")),
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
     }
 
     #endregion
@@ -207,7 +235,7 @@ public class ThinkingMiddlewareTests
 
         await middleware.InvokeAsync(context, (ctx, ct) =>
         {
-            ThinkingRequestPolicy.RequestContext.Value.ShouldBeNull();
+            ThinkingRequestPolicy.RequestContext.Value.ShouldNotBeNull().Thinking.Effort.ShouldBe(ReasoningEffort.None);
             return Task.FromResult(new AgentRunResult { Response = "ok" });
         });
     }

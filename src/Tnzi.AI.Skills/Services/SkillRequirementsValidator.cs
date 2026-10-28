@@ -31,9 +31,14 @@ public class SkillRequirementsValidator : ISkillRequirementsValidator
 
         var result = new SkillValidationResult { IsValid = true };
 
+        // Host requirements of a personal skill are never probed: whoever can write one could
+        // otherwise ask the host which secrets are configured and which files exist (see
+        // SkillRequirementRules). They count as unmet, so such a skill does not activate.
+        var probeHost = !SkillRequirementRules.IsSelfServiceAuthored(skill);
+
         foreach (var bin in skill.Requirements.Bins)
         {
-            if (!IsBinaryAvailable(bin))
+            if (!probeHost || !SkillRequirementRules.IsBareBinaryName(bin) || !IsBinaryAvailable(bin))
             {
                 result.IsValid = false;
                 result.MissingBins.Add(bin);
@@ -42,14 +47,22 @@ public class SkillRequirementsValidator : ISkillRequirementsValidator
 
         foreach (var env in skill.Requirements.Envs)
         {
-            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(env)))
+            if (!probeHost || string.IsNullOrEmpty(Environment.GetEnvironmentVariable(env)))
             {
                 result.IsValid = false;
                 result.MissingEnvs.Add(env);
             }
         }
 
-        if (_configuration != null)
+        if (!probeHost)
+        {
+            if (skill.Requirements.Configs.Count > 0)
+            {
+                result.IsValid = false;
+                result.MissingConfigs.AddRange(skill.Requirements.Configs);
+            }
+        }
+        else if (_configuration != null)
         {
             foreach (var config in skill.Requirements.Configs)
             {
@@ -87,6 +100,11 @@ public class SkillRequirementsValidator : ISkillRequirementsValidator
         return result;
     }
 
+    /// <summary>
+    /// Look a bare program name up in the PATH directories. Callers pass only names that
+    /// passed <see cref="SkillRequirementRules.IsBareBinaryName"/>: <c>Path.Combine</c> returns
+    /// its second argument unchanged when that is rooted, so a path here would be checked as-is.
+    /// </summary>
     private static bool IsBinaryAvailable(string binary)
     {
         try

@@ -24,12 +24,13 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
         ValidateMailSenderOptions(options.MailSender, "MailSender", errors);
         ValidateSmsSenderOptions(options.SmsSender, "SmsSender", errors);
         ValidatePushSenderOptions(options.PushSender, "PushSender", errors);
-        ValidateFaxSenderOptions(options.FaxSender, "FaxSender", errors);
+        ValidateFaxSenderOptions(options.FaxSender, "FaxSender", errors, namedProfile: false);
 
         ValidateNamedProfiles(options.MailSenders, "MailSenders", errors, ValidateMailSenderOptions);
         ValidateNamedProfiles(options.SmsSenders, "SmsSenders", errors, ValidateSmsSenderOptions);
         ValidateNamedProfiles(options.PushSenders, "PushSenders", errors, ValidatePushSenderOptions);
-        ValidateNamedProfiles(options.FaxSenders, "FaxSenders", errors, ValidateFaxSenderOptions);
+        ValidateNamedProfiles(options.FaxSenders, "FaxSenders", errors,
+            (profile, path, errs) => ValidateFaxSenderOptions(profile, path, errs, namedProfile: true));
 
         ValidateQueueOptions(options.Queue, errors);
         ValidateAttachmentOptions(options.Attachments, errors);
@@ -226,7 +227,15 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
     /// 网关域名写成邮箱地址（<c>fax@example.com</c>）是最容易犯的一个错，而它的后果是
     /// 拼出 <c>9055551234@fax@example.com</c> —— 一个投递失败的地址。这里当场拦掉。
     /// </remarks>
-    private static void ValidateFaxSenderOptions(FaxSenderOptions? faxSender, string prefix, List<string> errors)
+    /// <param name="faxSender">要校验的一节。</param>
+    /// <param name="prefix">报错里用的配置路径。</param>
+    /// <param name="errors">收集错误。</param>
+    /// <param name="namedProfile">
+    /// 是不是 <c>FaxSenders:{key}</c> 下的具名节。回执收件箱只从默认节（<c>Notification:FaxSender:Confirmation</c>）
+    /// 注册轮询，具名节上的 <c>Confirmation</c> 不会被任何东西读到，所以在这里拒绝而不是校验：此前它被当成生效的配置校验
+    /// （填一半还会拦下启动），却没有轮询，经那个网关失败的传真永远停在「已发送」，日志里什么都没有。
+    /// </param>
+    private static void ValidateFaxSenderOptions(FaxSenderOptions? faxSender, string prefix, List<string> errors, bool namedProfile)
     {
         if (faxSender == null || !faxSender.Enabled)
             return;
@@ -254,7 +263,15 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
         if (emailKey != null && NotificationProviderKeys.Describe(emailKey) is { } keyError)
             errors.Add($"{prefix}.EmailProviderKey: {keyError}");
 
-        ValidateFaxConfirmationOptions(faxSender.Confirmation, prefix, errors);
+        if (!namedProfile)
+        {
+            ValidateFaxConfirmationOptions(faxSender.Confirmation, prefix, errors);
+        }
+        else if (faxSender.Confirmation is { Enabled: true } confirmation && !string.IsNullOrWhiteSpace(confirmation.Host))
+        {
+            errors.Add($"{prefix}.Confirmation is not supported on a named fax profile; receipts are read only from Notification:FaxSender:Confirmation. " +
+                       "Route every gateway's receipts to that mailbox (receipts are matched across profiles) and remove this section.");
+        }
     }
 
     /// <summary>
@@ -298,9 +315,6 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
     /// </summary>
     private static void ValidateQueueOptions(QueueOptions queue, List<string> errors)
     {
-        if (!queue.Enabled)
-            return;
-
         if (queue.QueueCapacity <= 0)
             errors.Add("Queue.QueueCapacity must be greater than 0.");
     }
@@ -317,10 +331,6 @@ public class NotificationOptionsValidator : OptionsValidatorBase<NotificationOpt
         // 验证超时配置
         if (options.SendTimeoutSeconds <= 0)
             errors.Add("SendTimeoutSeconds must be greater than 0.");
-
-        // 验证 SMS 最大长度配置
-        if (options.SmsMaxContentLength <= 0)
-            errors.Add("SmsMaxContentLength must be greater than 0.");
 
         // 验证重试配置
         if (options.Retry.RetryDelaySeconds < 0)

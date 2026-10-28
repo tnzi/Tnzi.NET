@@ -14,8 +14,49 @@ public static class AgentStreamMapper
     /// <param name="defaultErrorCode">非 guardrail 错误时使用的错误码</param>
     public static StreamEvent? BuildStreamEvent(AgentStreamChunk chunk, Guid? threadId, string defaultErrorCode)
     {
-        var hasPayload =
-            chunk.Error != null ||
+        if (!HasClientPayload(chunk))
+            return null;
+
+        return new StreamEvent
+        {
+            Delta = chunk.Text,
+            FinishReason = chunk.FinishReason,
+            Model = chunk.Model,
+            ThreadId = threadId,
+            IsError = chunk.Error != null,
+            ErrorMessage = chunk.Error,
+            ErrorCode = chunk.Error == null
+                ? null
+                : chunk.ErrorCode
+                  ?? (chunk.FinishReason == FinishReasons.GuardrailRejected ? ErrorCodes.GuardrailRejected : defaultErrorCode),
+            UsageLimitResetsAt = chunk.UsageLimitResetsAt,
+            UsageLimitWindow = chunk.UsageLimitWindow,
+            IsToolCall = chunk.IsToolCall,
+            ToolCallNames = chunk.ToolCallNames,
+            ReasoningDelta = chunk.ReasoningText,
+            AgentName = chunk.AgentName,
+            ToolCalls = chunk.ToolCalls,
+            EventType = chunk.EventType,
+            EventData = chunk.EventData,
+            Suggestions = chunk.Suggestions,
+            Todos = chunk.Todos,
+            Artifacts = chunk.Artifacts,
+            RunId = chunk.RunId,
+            Sequence = chunk.Sequence,
+            UserMessageId = chunk.UserMessageId,
+            AssistantMessageId = chunk.AssistantMessageId
+        };
+    }
+
+    /// <summary>
+    /// chunk 是否带有要发给客户端的增量载荷（文本、推理、工具调用、事件、建议、待办、产物、错误、Agent 切换）。
+    /// 结束原因、用量、引用由终止事件统一汇总，不算增量载荷。
+    /// </summary>
+    public static bool HasClientPayload(AgentStreamChunk chunk)
+    {
+        Check.NotNull(chunk);
+
+        return chunk.Error != null ||
             chunk.AgentName != null ||
             chunk.ReasoningText != null ||
             chunk.Text != null ||
@@ -27,34 +68,6 @@ public static class AgentStreamMapper
             chunk.Suggestions != null ||
             chunk.Todos != null ||
             chunk.Artifacts != null;
-
-        if (!hasPayload)
-            return null;
-
-        return new StreamEvent
-        {
-            Delta = chunk.Text,
-            FinishReason = chunk.FinishReason,
-            Model = chunk.Model,
-            ThreadId = threadId,
-            IsError = chunk.Error != null,
-            ErrorMessage = chunk.Error,
-            ErrorCode = chunk.Error != null && chunk.FinishReason == FinishReasons.GuardrailRejected
-                ? ErrorCodes.GuardrailRejected
-                : chunk.Error != null
-                    ? defaultErrorCode
-                    : null,
-            IsToolCall = chunk.IsToolCall,
-            ToolCallNames = chunk.ToolCallNames,
-            ReasoningDelta = chunk.ReasoningText,
-            AgentName = chunk.AgentName,
-            ToolCalls = chunk.ToolCalls,
-            EventType = chunk.EventType,
-            EventData = chunk.EventData,
-            Suggestions = chunk.Suggestions,
-            Todos = chunk.Todos,
-            Artifacts = chunk.Artifacts
-        };
     }
 
     /// <summary>
@@ -74,8 +87,9 @@ public static class AgentStreamMapper
         switch (result.FinishReason)
         {
             case FinishReasons.QuotaExceeded:
+                // 用量上限（AI_USAGE_LIMIT_REACHED）与预算耗尽共用这个结束原因，错误码区分两者
                 statusCode = 429;
-                errorCode = ErrorCodes.QuotaExceeded;
+                errorCode = result.ErrorCode ?? ErrorCodes.QuotaExceeded;
                 return true;
             case FinishReasons.GuardrailRejected:
                 statusCode = 400;
@@ -88,17 +102,18 @@ public static class AgentStreamMapper
             case FinishReasons.MaxHandoffs:
             case FinishReasons.Error:
             case FinishReasons.Failed:
-                // 服务层把「预留输给并发更新」定为可重试的 409（AI_QUOTA_CONCURRENCY_CONFLICT）。
-                // 在这里贴 500 会把「重试即可」翻译成「内部错误」——客户端与告警都被指向错误的方向。
-                if (string.Equals(result.ErrorCode, ErrorCodes.QuotaConcurrencyConflict, StringComparison.Ordinal))
+
+                // 外部 CLI 的账号用量上限、外部运行认领后才撞上的用户用量上限：都是「过一阵再来」，答 429 而不是 500
+                if (string.Equals(result.ErrorCode, ErrorCodes.CliUsageLimit, StringComparison.Ordinal)
+                    || string.Equals(result.ErrorCode, ErrorCodes.UsageLimitReached, StringComparison.Ordinal))
                 {
-                    statusCode = 409;
-                    errorCode = ErrorCodes.QuotaConcurrencyConflict;
+                    statusCode = 429;
+                    errorCode = result.ErrorCode!;
                     return true;
                 }
 
                 statusCode = 500;
-                // 结果自带更具体的错误码时透传（如 AI_QUOTA_CHECK_FAILED），没有才回落到调用方的通用码
+                // 结果自带更具体的错误码时透传（如 AI_USAGE_LIMIT_CHECK_FAILED），没有才回落到调用方的通用码
                 errorCode = result.ErrorCode ?? failureErrorCode;
                 return true;
             default:

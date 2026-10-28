@@ -49,8 +49,11 @@ public class ImageEditor : IImageEditor
 
         ValidateRects(request);
 
-        // 经解码闸门：像素上限在读文件头时就判掉，不给"一份上传放倒一个进程"留口子
-        using var image = await ImageDecodeGuard.LoadAsync(source, cancellationToken: cancellationToken);
+        // 经解码闸门：像素上限在读文件头时就判掉，不给"一份上传放倒一个进程"留口子。
+        // ★ 只解首帧：遮挡框是在一张静止画面上框的，动画后面各帧里同一块内容可能挪了位置，
+        //   把同一个框套到每一帧上并不保证遮住了它；而保留其余帧原样输出，等于把被遮的内容
+        //   在第二帧起重新播放出来。产物与调用方看到并框选的那一帧一致。
+        using var image = await ImageDecodeGuard.LoadFirstFrameAsync(source, cancellationToken: cancellationToken);
 
         // 顺序固定：遮挡 -> 模糊 -> 裁切 -> 缩放。全部坐标相对源图，因此换算一次即可，
         // 且缩放排在最后 —— 先缩放再遮挡会让遮挡落在插值过的像素上，边缘可能残留原始信息。

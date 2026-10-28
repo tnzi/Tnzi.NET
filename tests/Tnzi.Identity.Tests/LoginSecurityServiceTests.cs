@@ -349,5 +349,73 @@ public class LoginSecurityServiceTests
         Assert.False(result.Succeeded);
     }
 
+    /// <summary>
+    /// 时间窗与阈值有边界：此前 hours 无上下限，撞库期间把窗口调成一年，一次请求就把窗口内每一次失败都读回内存。
+    /// </summary>
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(LoginSecurityService.MaxReportWindowHours + 1, 3)]
+    [InlineData(24, 0)]
+    public async Task GetUsersWithFrequentFailuresAsync_OutOfRangeArguments_Return400(int hours, int minFailures)
+    {
+        SetupLoginLogQueryable([]);
+
+        var result = await _loginSecurityService.GetUsersWithFrequentFailuresAsync(hours, minFailures);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(ErrorCodes.VALIDATION_ERROR, result.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(LoginSecurityService.MaxReportWindowHours + 1)]
+    public async Task GetSecurityOverviewAsync_OutOfRangeWindow_Returns400(int hours)
+    {
+        SetupLoginLogQueryable([]);
+
+        var result = await _loginSecurityService.GetSecurityOverviewAsync(hours);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+    }
+
+    /// <summary>每个账号列出的来源地址有上限，按出现次数从多到少取。</summary>
+    [Fact]
+    public async Task GetUsersWithFrequentFailuresAsync_CapsTheAddressesPerUser_KeepingTheMostFrequent()
+    {
+        var now = DateTime.UtcNow;
+        var userId = Guid.NewGuid();
+        var logs = new List<LoginLog>();
+        // 一个地址出现 5 次，其余 30 个地址各 1 次。
+        for (var i = 0; i < 5; i++)
+        {
+            logs.Add(new LoginLog { Id = Guid.NewGuid(), UserId = userId, IpAddress = "9.9.9.9", Status = LoginStatus.Failed, CreationTime = now.AddMinutes(-i - 1) });
+        }
+        for (var i = 0; i < 30; i++)
+        {
+            logs.Add(new LoginLog { Id = Guid.NewGuid(), UserId = userId, IpAddress = $"10.0.0.{i}", Status = LoginStatus.Failed, CreationTime = now.AddMinutes(-i - 1) });
+        }
+        SetupLoginLogQueryable(logs);
+
+        var store = new Mock<IUserStore<User>>();
+        var userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
+        userManagerMock.Setup(x => x.Users).Returns(new List<User> { new() { Id = userId, UserName = "sprayed" } }.BuildMock());
+        var service = new LoginSecurityService(
+            _serviceProviderMock.Object,
+            UnscopedUserTenantScope.Create(),
+            _identityOptionsMock.Object,
+            _loginLogRepositoryMock.Object,
+            userManagerMock.Object);
+
+        var result = await service.GetUsersWithFrequentFailuresAsync(hours: 24, minFailures: 3);
+
+        Assert.True(result.Succeeded);
+        var summary = Assert.Single(result.Data!);
+        Assert.Equal(35, summary.FailureCount);
+        Assert.Equal(LoginSecurityService.MaxIpAddressesPerUser, summary.IpAddresses.Count);
+        Assert.Equal("9.9.9.9", summary.IpAddresses[0]);
+    }
+
     #endregion
 }

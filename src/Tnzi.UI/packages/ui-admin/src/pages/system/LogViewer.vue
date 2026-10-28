@@ -243,12 +243,14 @@ import type {
   LogSearchResultDto,
 } from '@tnzi/core/services/logging'
 import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safe-message'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import TMasterDetailLayout from '../../components/layout/TMasterDetailLayout.vue'
 
 const bridge = createLoggingBridge({ client: useAdminClient() })
 
 const t = makePageTranslator('system.logFiles')
+const message = useSafeMessage()
 
 const levels = ref<LogLevelInfoDto[]>([])
 const levelsLoading = ref(false)
@@ -319,6 +321,18 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+// A failed read is said out loud: the empty list it leaves behind would
+// otherwise read as "no logs" (a 403 or a 500 looked exactly like a quiet day).
+function reportError(error: unknown): void {
+  message.error(error instanceof Error ? error.message : String(error))
+}
+
+// Files and tail reads are last-wins: switching level or file while a read is
+// in flight must not let the earlier answer land under the later choice (the
+// newest file's lines shown under the name of the file picked after it).
+let filesSeq = 0
+let tailSeq = 0
+
 async function refreshLevels(): Promise<void> {
   levelsLoading.value = true
   try {
@@ -329,8 +343,9 @@ async function refreshLevels(): Promise<void> {
         ?? levels.value.find((l) => l.isEnabled)
       if (candidate) selectLevel(candidate.level)
     }
-  } catch {
+  } catch (error) {
     levels.value = []
+    reportError(error)
   } finally {
     levelsLoading.value = false
   }
@@ -338,18 +353,23 @@ async function refreshLevels(): Promise<void> {
 
 async function refreshFiles(): Promise<void> {
   if (!selectedLevel.value) return
+  const mine = ++filesSeq
   filesLoading.value = true
   try {
-    files.value = await bridge.logFiles.getFiles(selectedLevel.value)
+    const loaded = await bridge.logFiles.getFiles(selectedLevel.value)
+    if (mine !== filesSeq) return
+    files.value = loaded
     // Auto-select newest file
     const newest = files.value[0]
     if (newest && !files.value.find((f) => f.fileName === selectedFile.value)) {
       selectFile(newest.fileName)
     }
-  } catch {
+  } catch (error) {
+    if (mine !== filesSeq) return
     files.value = []
+    reportError(error)
   } finally {
-    filesLoading.value = false
+    if (mine === filesSeq) filesLoading.value = false
   }
 }
 
@@ -357,7 +377,10 @@ function selectLevel(level: string): void {
   selectedLevel.value = level
   selectedFile.value = ''
   files.value = []
+  // Drop a tail read still in flight for the previous level's file.
+  tailSeq++
   tail.value = null
+  tailLoading.value = false
   void refreshFiles()
 }
 
@@ -367,21 +390,26 @@ function selectFile(fileName: string): void {
 }
 
 async function reloadTail(): Promise<void> {
+  const mine = ++tailSeq
   if (!selectedLevel.value || !selectedFile.value) {
     tail.value = null
+    tailLoading.value = false
     return
   }
   tailLoading.value = true
   try {
-    tail.value = await bridge.logFiles.tail({
+    const loaded = await bridge.logFiles.tail({
       level: selectedLevel.value,
       file: selectedFile.value,
       lines: lineCount.value,
     })
-  } catch {
+    if (mine === tailSeq) tail.value = loaded
+  } catch (error) {
+    if (mine !== tailSeq) return
     tail.value = null
+    reportError(error)
   } finally {
-    tailLoading.value = false
+    if (mine === tailSeq) tailLoading.value = false
   }
 }
 
@@ -395,8 +423,9 @@ async function runSearch(): Promise<void> {
       level: searchLevel.value || undefined,
       maxResults: searchMaxResults.value,
     })
-  } catch {
+  } catch (error) {
     searchResult.value = null
+    reportError(error)
   } finally {
     searchLoading.value = false
   }
@@ -404,11 +433,14 @@ async function runSearch(): Promise<void> {
 
 function jumpToHit(hit: LogSearchHitDto): void {
   if (hit.level !== selectedLevel.value) {
+    // Select the hit's file before the level's file list arrives, so that list
+    // keeps it instead of auto-selecting the newest file (which used to start a
+    // second tail read racing the hit's own).
     selectedLevel.value = hit.level
-    void refreshFiles().then(() => {
-      selectedFile.value = hit.fileName
-      void reloadTail()
-    })
+    selectedFile.value = hit.fileName
+    files.value = []
+    void refreshFiles()
+    void reloadTail()
   } else if (hit.fileName !== selectedFile.value) {
     selectFile(hit.fileName)
   }

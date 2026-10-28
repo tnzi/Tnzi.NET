@@ -18,9 +18,10 @@ public class DataDestructionOptionsValidator : OptionsValidatorBase<DataDestruct
             return;
         }
 
-        if (options.IntervalHours <= 0)
+        if (options.IntervalHours is <= 0 or > DataDestructionOptions.MaxIntervalHours)
         {
-            AddError(errors, nameof(options.IntervalHours), "must be greater than zero.");
+            AddError(errors, nameof(options.IntervalHours),
+                $"must be between 1 and {DataDestructionOptions.MaxIntervalHours}.");
         }
 
         if (options.BatchSize <= 0)

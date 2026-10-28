@@ -72,6 +72,9 @@ internal static class BankTransactionFieldLimits
         return FoldedExternalIdPrefix + Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static string? Truncate(string? value, int max)
-        => value != null && value.Length > max ? value[..max] : value;
+    /// <remarks>
+    /// 截断点落在代理对中间时整个字符一起舍掉：孤立的高代理项会让严格 UTF-8 的驱动（Npgsql）拒绝写入，
+    /// 一行带 emoji 的流水摘要就让整批导入失败。
+    /// </remarks>
+    private static string? Truncate(string? value, int max) => value.FitToLength(max);
 }

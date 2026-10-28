@@ -44,7 +44,8 @@ public class FileStorageServiceEnhancedTests
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
             new UploadGuard(optionsMonitor.Object),
-            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     #region 文件查询功能测试

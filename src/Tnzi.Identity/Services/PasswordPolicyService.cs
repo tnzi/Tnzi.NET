@@ -110,15 +110,17 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
         return false;
     }
 
+    /// <remarks>
+    /// ★★★ <strong>密码历史关着时也写，只留最近一行。</strong>这张表同时是「最近一次改密」的唯一来源，
+    /// 密码到期（<see cref="CheckPasswordExpirationAsync"/>）以它为参照。此前历史关着（出厂默认）就一行都不写，
+    /// 到期的参照时间永远回退到账号创建时间：开了到期、没开历史的部署里，账号满 N 天之后每次登录都被要求改密，
+    /// 改完下一次照样到期，永远走不出去。那一行只是时间戳，复用检查（<see cref="CheckPasswordHistoryAsync"/>）
+    /// 在历史关着时照旧不看它；顺带让日后再打开到期时，参照的是真实的最近改密时间。
+    /// </remarks>
     public async Task SavePasswordHistoryAsync(Guid userId, string passwordHash)
     {
         var options = PasswordPolicyOptions;
-
-        // 如果未启用密码历史，不保存
-        if (options.PasswordHistoryCount <= 0)
-        {
-            return;
-        }
+        var retained = Math.Max(options.PasswordHistoryCount, 1);
 
         // 保存新密码历史
         var passwordHistory = new PasswordHistory
@@ -136,13 +138,13 @@ public class PasswordPolicyService : ApplicationService, IPasswordPolicyService
         var allHistory = await _repository
             .Where(ph => ph.UserId == userId)
             .OrderByDescending(ph => ph.CreationTime)
-            .Take(options.PasswordHistoryCount + 10) // 多查询一些，确保覆盖并发情况
+            .Take(retained + 10) // 多查询一些，确保覆盖并发情况
             .ToListAsync();
 
-        if (allHistory.Count > options.PasswordHistoryCount)
+        if (allHistory.Count > retained)
         {
-            // 只保留最新的 PasswordHistoryCount 条记录
-            var toDelete = allHistory.Skip(options.PasswordHistoryCount).ToList();
+            // 只保留最新的 retained 条记录
+            var toDelete = allHistory.Skip(retained).ToList();
             await _repository.DeleteManyAsync(toDelete);
         }
     }

@@ -11,11 +11,15 @@ namespace Tnzi.AI.Tests.Agents;
 /// <remarks>
 /// 2026-09-12 前 <c>WatchForChanges</c>「热重载」只清提供者的解析缓存、没人重读：
 /// 日志写着 cache invalidated，DB 里的 Agent 行与运行时行为直到重启才变；整个子系统零测试零文档。
+/// <para>
+/// ★ 每个 DbContext 用自己的连接（临时文件库）。后台同步与测试线程的轮询是并发的，此前两者共用一个
+/// <see cref="SqliteConnection"/>：同步写库撞上轮询的读，报 <c>database is locked</c>，热重载用例约十次红一次。
+/// </para>
 /// </remarks>
 public class AgentDefinitionSyncServiceTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "tnzi-agent-defs-" + Guid.NewGuid().ToString("N"));
-    private readonly SqliteConnection _connection;
+    private readonly string _databasePath = Path.Combine(Path.GetTempPath(), "tnzi-agent-defs-" + Guid.NewGuid().ToString("N") + ".db");
     private readonly ServiceProvider _provider;
     private readonly Mock<IAgentGrantService> _grants = new();
     private readonly List<(Guid AgentId, IReadOnlyList<string>? Groups)> _reconciled = [];
@@ -23,9 +27,6 @@ public class AgentDefinitionSyncServiceTests : IDisposable
     public AgentDefinitionSyncServiceTests()
     {
         Directory.CreateDirectory(_directory);
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
         _grants.Setup(g => g.ReconcileToolGroupsAsync(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, IReadOnlyList<string>?, CancellationToken>((id, groups, _) => _reconciled.Add((id, groups)))
             .Returns(Task.CompletedTask);
@@ -38,7 +39,7 @@ public class AgentDefinitionSyncServiceTests : IDisposable
             user.Setup(u => u.Id).Returns(Guid.Empty);
             return user.Object;
         });
-        services.AddDbContext<AgentDefinitionSyncDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AgentDefinitionSyncDbContext>(o => o.UseSqlite($"Data Source={_databasePath}"));
         services.AddScoped<IRepository<Agent, Guid>, EFCoreRepository<AgentDefinitionSyncDbContext, Agent, Guid>>();
         services.AddSingleton(_grants.Object);
         _provider = services.BuildServiceProvider();
@@ -50,8 +51,9 @@ public class AgentDefinitionSyncServiceTests : IDisposable
     public void Dispose()
     {
         _provider.Dispose();
-        _connection.Dispose();
+        SqliteConnection.ClearAllPools();
         try { Directory.Delete(_directory, recursive: true); } catch { /* best effort */ }
+        try { File.Delete(_databasePath); } catch { /* best effort */ }
         GC.SuppressFinalize(this);
     }
 
@@ -162,6 +164,75 @@ public class AgentDefinitionSyncServiceTests : IDisposable
         await service.StopAsync(CancellationToken.None);
         agents.Count.ShouldBe(2);
         agents.Single(a => a.Name == "reviewer").Instructions.ShouldBe("v2");
+    }
+
+    /// <summary>
+    /// 一次失败的重新同步自己会重试：此前它只记一条错误，改动要等到下一次存盘（或重启）才进数据库。
+    /// </summary>
+    [Fact]
+    public async Task FailedResync_IsRetried_WithoutAnotherFileChange()
+    {
+        var definitions = new FlakyDefinitionProvider(failures: 1);
+        var options = Options(watch: true, syncOnStartup: false);
+        var service = new AgentDefinitionSyncService(_provider, definitions, options, NullLogger<AgentDefinitionSyncService>.Instance)
+        {
+            ChangeDebounce = TimeSpan.FromMilliseconds(10),
+            RetryDelay = TimeSpan.FromMilliseconds(50),
+        };
+        await service.StartAsync(CancellationToken.None);
+
+        definitions.RaiseChanged();
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        List<Agent> agents;
+        do
+        {
+            await Task.Delay(50);
+            agents = await AgentsAsync();
+        } while (DateTime.UtcNow < deadline && agents.Count == 0);
+
+        await service.StopAsync(CancellationToken.None);
+        agents.ShouldHaveSingleItem().Name.ShouldBe("reviewer");
+        definitions.Loads.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    /// <summary>第一次（或前 <c>failures</c> 次）读定义时抛，之后正常返回一条定义；变更由测试手动触发。</summary>
+    private sealed class FlakyDefinitionProvider(int failures) : IAgentDefinitionProvider
+    {
+        private Action? _changed;
+        private int _loads;
+
+        public int Loads => Volatile.Read(ref _loads);
+
+        public void RaiseChanged() => _changed?.Invoke();
+
+        public Task<IReadOnlyList<AgentDefinitionDto>> LoadDefinitionsAsync(CancellationToken ct = default)
+        {
+            if (Interlocked.Increment(ref _loads) <= failures)
+            {
+                throw new InvalidOperationException("transient failure");
+            }
+
+            IReadOnlyList<AgentDefinitionDto> result =
+            [
+                new AgentDefinitionDto { Name = "reviewer", Instructions = "v1", Provider = "OpenAI", Model = "gpt-4o", DefinitionHash = "h1" },
+            ];
+            return Task.FromResult(result);
+        }
+
+        public Task<AgentDefinitionDto?> GetByNameAsync(string name, CancellationToken ct = default)
+            => Task.FromResult<AgentDefinitionDto?>(null);
+
+        public IDisposable OnDefinitionsChanged(Action callback)
+        {
+            _changed = callback;
+            return new Unsubscribe(() => _changed = null);
+        }
+
+        private sealed class Unsubscribe(Action dispose) : IDisposable
+        {
+            public void Dispose() => dispose();
+        }
     }
 
     [Fact]

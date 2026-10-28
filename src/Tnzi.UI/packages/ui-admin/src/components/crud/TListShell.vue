@@ -219,18 +219,21 @@
                桌面仍是内联关键字框 + Advanced 抽屉。 -->
           <ReuseMobileToggles v-if="showInlineSearch && bp.isSm.value" />
           <template v-else-if="showInlineSearch">
-            <NInput
-              v-model:value="simpleQuery"
-              clearable
-              size="small"
-              :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
-              class="t-list-shell__inline-keyword"
-              @keydown.enter="onSimpleSearch"
-              @clear="onSimpleClear"
-            >
-              <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
-            </NInput>
-            <NButton size="small" @click="onSimpleSearch">{{ t('admin.crud.search') }}</NButton>
+            <!-- 与头部同一条约定：showDefaultSearch=false 只去掉关键词框，Advanced 保留 -->
+            <template v-if="showDefaultSearch">
+              <NInput
+                v-model:value="simpleQuery"
+                clearable
+                size="small"
+                :placeholder="searchPlaceholder ?? t('admin.crud.searchPlaceholder')"
+                class="t-list-shell__inline-keyword"
+                @keydown.enter="onSimpleSearch"
+                @clear="onSimpleClear"
+              >
+                <template #prefix><TSvgIcon icon="mdi:magnify" :size="16" /></template>
+              </NInput>
+              <NButton size="small" @click="onSimpleSearch">{{ t('admin.crud.search') }}</NButton>
+            </template>
             <NButton v-if="hasAdvanced" size="small" tertiary @click="advancedOpen = true">
               <template #icon><TSvgIcon icon="mdi:tune-variant" :size="16" /></template>
               {{ t('admin.crud.advancedSearch') }}
@@ -319,13 +322,18 @@
       </div>
     </NCard>
 
+    <!-- Mounted whenever it can open on something: create, edit, or a view.
+         View is not permission-gated and, without a #detail slot, renders the
+         #form slot read-only here, so a page with #form needs the modal even
+         for a reader who may neither create nor update. -->
     <TFormModal
-      v-if="props.state.canCreate !== false || props.state.canUpdate !== false || !!$slots.detail"
+      v-if="props.state.canCreate !== false || props.state.canUpdate !== false || !!$slots.detail || !!$slots.form"
       :state="formModalState"
       :title="modalTitle"
       :translate="props.translate"
       :width="formModalWidth"
       :skip-view-mode="!!$slots.detail"
+      :footer-switch="props.state.formFooterSwitch"
       @submit="props.state.submit"
     >
       <template #default="{ formData, mode: m }">
@@ -375,6 +383,7 @@ import type { UseFormModalReturn, FormModalMode } from '../../headless/useFormMo
 import type { FormSchemaItem } from '@tnzi/ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
 import { createReusableTemplate } from '@vueuse/core'
+import { maybeTranslateKey } from '../../i18n/translate'
 
 export interface TListShellProps<T, TId extends string | number = string | number> {
   state: UseCrudPageReturn<T, TId>
@@ -568,8 +577,12 @@ async function onExport(): Promise<void> {
     // and re-thrown. Nothing else listens for the rejection, so stop it here.
     return
   }
-  if (blob) downloadBlob(blob, `${props.title ?? 'export'}.csv`)
+  // Named after the title as the header shows it: a page passes a locale key
+  // there, and the file used to be saved as "title.csv".
+  const name = props.title ? maybeTranslateKey(props.translate, props.title, props.title) : 'export'
+  if (blob) downloadBlob(blob, `${name}.csv`)
 }
+const DEFAULT_IMPORT_ACCEPT = '.csv,.xlsx,.json'
 async function importPicked(file: File): Promise<void> {
   try {
     await props.state.importFile(file)
@@ -583,7 +596,8 @@ function onImport(): void {
   if (typeof document === 'undefined') return
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = '.csv,.xlsx,.json'
+  // What the page's importData reads (`importAccept`), else the historical set.
+  input.accept = props.state.importAccept || DEFAULT_IMPORT_ACCEPT
   input.onchange = (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0]
     if (file) void importPicked(file)
@@ -598,10 +612,15 @@ const batchDeleteConfirmText = computed(() => {
   if (tpl && tpl !== 'admin.crud.confirmBatchDelete') return tpl.replace('{n}', String(count))
   return t('admin.crud.confirmDelete')
 })
-function onBatchDelete(): void {
+async function onBatchDelete(): Promise<void> {
   const ids = props.state.batchActions.selectedIds.value
   if (ids.length === 0) return
-  void props.state.handleDelete(ids as TId[])
+  try {
+    await props.state.handleDelete(ids as TId[])
+  } catch {
+    // handleDelete reports a refusal itself (toast or the page's onError) and
+    // then rethrows; the popconfirm that fired this has nothing to add.
+  }
 }
 
 const modalTitle = computed(() => {

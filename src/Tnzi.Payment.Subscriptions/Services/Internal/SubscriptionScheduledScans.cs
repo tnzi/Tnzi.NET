@@ -1,27 +1,27 @@
 namespace Tnzi.Payment.Subscriptions.Services;
 
 /// <summary>
-/// 订阅域贡献给支付后台循环的五条扫描。
+/// 订阅域贡献给支付后台循环的六条扫描。
 /// </summary>
 /// <remarks>
 /// <para>
-/// 拆分前这五条是 <c>PaymentBackgroundService</c> 里写死的五行 <c>subscriptionService.XxxAsync()</c>，
+/// 拆分前其中五条是 <c>PaymentBackgroundService</c> 里写死的五行 <c>subscriptionService.XxxAsync()</c>，
 /// 那意味着后台服务必须认识 <c>ISubscriptionService</c>。改成经
 /// <see cref="IPaymentScheduledScan"/> 贡献之后，后台循环只知道「有一批扫描要跑」，
-/// 不加载本包就是少五条，父模块自己那两条照跑。
+/// 第六条（到期计划变更）是之后加的。不加载本包就是少这六条，父模块自己那两条照跑。
 /// </para>
 /// <para>
 /// 名字（<see cref="IPaymentScheduledScan.Name"/>）与拆分前的日志文案<b>逐字相同</b>，
 /// 运维手上按日志串搜的脚本不用改。
 /// </para>
 /// <para>
-/// 五个类嵌在一个外层类里，纯粹是为了让「它们是同一批东西」在文件与注册处都看得出来；
+/// 六个类嵌在一个外层类里，纯粹是为了让「它们是同一批东西」在文件与注册处都看得出来；
 /// 每个都是独立注册的 scoped 服务，各自有自己的 <c>try</c> 隔离（见调用方）。
 /// </para>
 /// </remarks>
 public static class SubscriptionScheduledScans
 {
-    /// <summary>五条扫描共用的基类：拿到订阅服务，剩下的交给子类点名调哪个方法。</summary>
+    /// <summary>六条扫描共用的基类：拿到订阅服务，剩下的交给子类点名调哪个方法。</summary>
     public abstract class SubscriptionScanBase : IPaymentScheduledScan
     {
         private readonly ISubscriptionService _subscriptionService;
@@ -125,5 +125,26 @@ public static class SubscriptionScheduledScans
         /// <inheritdoc />
         public override Task<Result<int>> RunAsync(CancellationToken cancellationToken = default)
             => SubscriptionService.SendRenewalRemindersAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 给计划包含存储的账户记下今天的存储用量（一天一条，超额存储费按一期的平均算）。
+    /// 每一轮都跑，但一个账户一天只会多出一条：已有今天样本的账户直接跳过。
+    /// </summary>
+    public sealed class SampleStorageUsage : IPaymentScheduledScan
+    {
+        private readonly ISubscriptionStorageMeter _meter;
+
+        public SampleStorageUsage(ISubscriptionStorageMeter meter)
+        {
+            _meter = Check.NotNull(meter);
+        }
+
+        /// <inheritdoc />
+        public string Name => "sample storage usage";
+
+        /// <inheritdoc />
+        public Task<Result<int>> RunAsync(CancellationToken cancellationToken = default)
+            => _meter.SampleAsync(cancellationToken);
     }
 }

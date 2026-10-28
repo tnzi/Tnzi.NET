@@ -10,10 +10,15 @@
     :data-style="themeStore.tabStyle"
   >
     <div ref="listRef" class="t-admin-tabs__list">
-      <!-- Two branches (draggable / static) instead of <component :is>
-           because VueDraggable + dynamic component triggers happy-dom
-           Vue-warn cascades during integration tests. -->
-      <VueDraggable
+      <!-- Two branches (draggable / static) instead of one
+           <component :is="draggable ? ... : 'div'">, because toggling
+           VueDraggable in and out of a dynamic component triggers happy-dom
+           Vue-warn cascades during integration tests.
+           The draggable branch mounts `dragContainer`: vue-draggable-plus
+           once it has loaded, a plain container holding the same tabs until
+           then - and for good if that optional peer is not installed. -->
+      <component
+        :is="dragContainer"
         v-if="draggable"
         v-model="draggableList"
         class="t-admin-tabs__draggable"
@@ -71,7 +76,7 @@
             aria-hidden="true"
           />
         </div>
-      </VueDraggable>
+      </component>
       <div v-else class="t-admin-tabs__draggable">
         <div
           v-for="tab in allTabs"
@@ -171,7 +176,7 @@
 <script setup lang="ts">
 import { ref, computed, h, nextTick, watch, onBeforeUnmount } from 'vue'
 import { NDropdown } from 'naive-ui'
-import { VueDraggable } from 'vue-draggable-plus'
+import { useDraggableComponent } from '@tnzi/ui/headless'
 import { useAdminTabStore, type AdminTab } from '../../stores/useAdminTabStore'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../../stores/useAdminThemeStore'
@@ -212,6 +217,12 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   tabClick: [tab: AdminTab]
 }>()
+
+// `vue-draggable-plus` is an optional peer. A static import made it required in
+// practice: the tab bar is in every admin shell and drags by default, so an app
+// without the package failed to build. Loaded on demand instead, the same way
+// as every other reorderable surface in @tnzi/ui and here.
+const dragContainer = useDraggableComponent(() => props.draggable)
 
 const tabStore = useAdminTabStore()
 const appStore = useAdminAppStore()

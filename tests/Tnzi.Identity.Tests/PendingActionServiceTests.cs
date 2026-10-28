@@ -177,6 +177,22 @@ public class PendingActionServiceTests
     }
 
     /// <summary>
+    /// ★ 描述会被反复拉取（刷新、组件重挂、办完上一件待办之后），它不能每次都换一枚密钥：
+    /// 此前每拉一次就重置，用户已经扫进验证器的那枚当场作废，下一步只会得到「验证码不对」。
+    /// </summary>
+    [Fact]
+    public async Task Describe_ReusesTheUnconfirmedKey_InsteadOfResettingIt()
+    {
+        var fixture = new Fixture(PendingUserActions.EnrollTotp);
+
+        await fixture.Service.DescribeAsync(fixture.TempToken);
+        await fixture.Service.DescribeAsync(fixture.TempToken);
+
+        fixture.TwoFactor.Verify(x => x.GetOrCreateTotpSetupInfoAsync(fixture.User.Id), Times.Exactly(2));
+        fixture.TwoFactor.Verify(x => x.GetTotpSetupInfoAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    /// <summary>
     /// 确认邮箱那一项要带掩码地址，供提示「码发到哪」；且不能是完整地址。
     /// </summary>
     [Fact]
@@ -259,6 +275,20 @@ public class PendingActionServiceTests
         Assert.Equal(VerificationCodePurpose.ConfirmEmail, fixture.VerifiedPurpose);
     }
 
+    /// <summary>
+    /// 码发到账号自己的地址：这是匿名端点，地址不由调用方决定。
+    /// </summary>
+    [Fact]
+    public async Task EmailConfirmation_SendsToTheAccountsOwnAddress()
+    {
+        var fixture = new Fixture(PendingUserActions.ConfirmEmail);
+
+        var sent = await fixture.Service.SendEmailConfirmationCodeAsync(fixture.TempToken);
+
+        Assert.True(sent.Succeeded);
+        Assert.Equal(Fixture.Email, fixture.SentAddress);
+    }
+
     private sealed class Fixture
     {
         public const string Email = "owing@example.com";
@@ -276,6 +306,8 @@ public class PendingActionServiceTests
         /// <summary>模拟并发：另一个请求抢先消费了这枚令牌，条件更新答 false。</summary>
         public bool ConsumeLosesRace { get; set; }
 
+        public Mock<ITwoFactorService> TwoFactor { get; } = new();
+
         public bool Issued { get; private set; }
 
         /// <summary>
@@ -287,6 +319,8 @@ public class PendingActionServiceTests
         public TwoFactorType? IssuedSatisfiedFactor { get; private set; }
 
         public VerificationCodePurpose? SentPurpose { get; private set; }
+
+        public string? SentAddress { get; private set; }
 
         public VerificationCodePurpose? VerifiedPurpose { get; private set; }
 
@@ -347,16 +381,20 @@ public class PendingActionServiceTests
                 .Setup(x => x.ForceSetPasswordAsync(It.IsAny<User>(), It.IsAny<string>()))
                 .ReturnsAsync(Result.Success());
 
-            var twoFactor = new Mock<ITwoFactorService>();
+            var twoFactor = TwoFactor;
             twoFactor
                 .Setup(x => x.GetTotpSetupInfoAsync(It.IsAny<Guid>()))
                 .ReturnsAsync(Result<TotpSetupDto>.Success(new TotpSetupDto { SharedKey = "KEY", AuthenticatorUri = "otpauth://x" }));
             twoFactor
-                .Setup(x => x.SendCodeToUserAsync(It.IsAny<Guid>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()))
-                .ReturnsAsync((Guid _, TwoFactorType __, VerificationCodePurpose purpose) =>
+                .Setup(x => x.GetOrCreateTotpSetupInfoAsync(It.IsAny<Guid>()))
+                .ReturnsAsync(Result<TotpSetupDto>.Success(new TotpSetupDto { SharedKey = "KEY", AuthenticatorUri = "otpauth://x" }));
+            twoFactor
+                .Setup(x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()))
+                .ReturnsAsync((string address, TwoFactorType __, VerificationCodePurpose purpose, Guid? ___) =>
                 {
+                    SentAddress = address;
                     SentPurpose = purpose;
-                    return Result<string?>.Success("m***@example.com");
+                    return Result.Success();
                 });
             twoFactor
                 .Setup(x => x.VerifyCodeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()))

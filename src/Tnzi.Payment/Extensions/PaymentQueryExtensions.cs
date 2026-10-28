@@ -32,6 +32,12 @@ public static class PaymentQueryExtensions
         if (query.UserId.HasValue)
             queryable = queryable.Where(p => p.UserId == query.UserId.Value);
 
+        if (!string.IsNullOrEmpty(query.BillingAccountType))
+            queryable = queryable.Where(p => p.BillingAccountType == query.BillingAccountType);
+
+        if (!string.IsNullOrEmpty(query.BillingAccountId))
+            queryable = queryable.Where(p => p.BillingAccountId == query.BillingAccountId);
+
         if (query.StartTime.HasValue)
             queryable = queryable.Where(p => p.CreationTime >= query.StartTime.Value);
 

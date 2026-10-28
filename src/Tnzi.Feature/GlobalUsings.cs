@@ -21,6 +21,7 @@ global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
+global using Tnzi.EFCore.Internal;
 global using Tnzi.Extensions;
 global using Tnzi.EventBus;
 global using Tnzi.Feature.Dtos;

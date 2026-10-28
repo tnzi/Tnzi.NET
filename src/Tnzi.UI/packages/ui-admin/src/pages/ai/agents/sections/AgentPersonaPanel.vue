@@ -13,9 +13,10 @@
         type="textarea"
         class="t-persona__editor font-mono"
         :rows="18"
+        :readonly="!canEdit"
         :placeholder="t('detail.persona.contentPlaceholder')"
       />
-      <div class="t-persona__actions">
+      <div v-if="canEdit" class="t-persona__actions">
         <NButton size="small" :disabled="!dirty" @click="reset">{{ t('detail.persona.discard') }}</NButton>
         <NButton size="small" type="primary" :loading="saving" :disabled="!dirty" @click="save">
           {{ t('detail.persona.save') }}
@@ -38,8 +39,13 @@ interface Props {
   saving?: boolean
   /** Section-header icon (mirrors the active nav item's icon). */
   icon?: string
+  /**
+   * Whether the viewer holds `ai.agent.update`. Without it the persona is shown
+   * read-only with no Save: the save would be refused, and the page skips it.
+   */
+  canEdit?: boolean
 }
-const props = withDefaults(defineProps<Props>(), { saving: false, icon: undefined })
+const props = withDefaults(defineProps<Props>(), { saving: false, icon: undefined, canEdit: true })
 
 const emit = defineEmits<{
   /** Persist the agent's inline persona (soul) content. Parent calls agents.update. */

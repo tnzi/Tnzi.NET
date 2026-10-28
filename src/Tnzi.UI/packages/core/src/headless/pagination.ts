@@ -7,6 +7,7 @@
 import { reactive } from 'vue';
 import type { PagedQueryDto } from '../types/pagination';
 import { createPagedQuery } from '../types/pagination';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination';
 
 // ============================================
 // Types
@@ -42,10 +43,10 @@ export class PaginationController {
   readonly pageSizes: readonly number[];
 
   constructor(options: PaginationOptions = {}) {
-    this.pageIndex = options.initialPage ?? 1;
+    this.pageIndex = options.initialPage ?? DEFAULT_PAGE;
     this.pageSize = options.initialPageSize ?? 20;
     this.totalCount = 0;
-    this.pageSizes = Object.freeze(options.pageSizes ?? [10, 20, 50, 100]);
+    this.pageSizes = Object.freeze(options.pageSizes ?? [...PAGE_SIZE_OPTIONS]);
     return reactive(this) as this;
   }
 
@@ -138,7 +139,7 @@ export class PaginationController {
 // Pagination Utility Functions
 // ============================================
 
-export function normalizePageSize(pageSize: number | undefined, fallback = 10): number {
+export function normalizePageSize(pageSize: number | undefined, fallback = DEFAULT_PAGE_SIZE): number {
   if (!pageSize || pageSize <= 0) {
     return fallback;
   }

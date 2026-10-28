@@ -62,10 +62,21 @@ public class OAuthCallbackResultDto
     public object? ErrorDetails { get; set; }
 
     /// <summary>
-    /// 这次回调完成的是<b>账号绑定</b>而不是登录时，被绑定的提供商（小写）。绑定回调不签发任何令牌：
-    /// <see cref="AccessToken"/> / <see cref="RefreshToken"/> 为空，回调页只跳回 <c>returnUrl</c>。
+    /// 这次回调走的是<b>账号绑定</b>而不是登录时，被绑定的提供商（小写）。绑定回调不签发任何令牌：
+    /// <see cref="AccessToken"/> / <see cref="RefreshToken"/> 为空。
     /// </summary>
     public string? LinkedProvider { get; set; }
+
+    /// <summary>
+    /// 绑定回调成功时的一次性完成码。<b>此时还没有关联</b>：前端要以发起绑定的那个已登录身份调
+    /// <c>POST users/profile/linked-accounts/{provider}/complete</c> 把它交回来，关联才发生。
+    /// </summary>
+    /// <remarks>
+    /// 回调页经 <c>postMessage</c> 交给 opener，或者放进 <c>returnUrl</c> 的 fragment
+    /// （<c>#linkCode=…&amp;linkedProvider=…</c>，fragment 不进服务器日志也不进 Referer）。
+    /// 理由见 <see cref="Services.IOAuthLinkTokenService"/>：回调是匿名的，绑定令牌又能被当成链接发给别人。
+    /// </remarks>
+    public string? LinkCode { get; set; }
 }
 
 /// <summary>
@@ -105,13 +116,39 @@ public class OAuthUserInfoDto
 }
 
 /// <summary>
+/// 完成第三方账号绑定：把回调交回的完成码送回来。
+/// </summary>
+public class CompleteOAuthLinkDto
+{
+    /// <summary>回调页交回的完成码（<see cref="OAuthCallbackResultDto.LinkCode"/>）。</summary>
+    [Required]
+    public string Code { get; set; } = null!;
+}
+
+/// <summary>
+/// 回调暂存、等待发起绑定的会话确认的外部身份。服务端内部传递，不出现在任何响应里。
+/// </summary>
+public class PendingOAuthLinkDto
+{
+    /// <summary>提供商（小写）</summary>
+    public string Provider { get; set; } = null!;
+
+    /// <summary>提供商侧的用户标识</summary>
+    public string ProviderKey { get; set; } = null!;
+
+    /// <summary>显示名</summary>
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>
 /// 个人中心「绑定第三方账号」签发的一次性绑定令牌。
 /// </summary>
 /// <remarks>
 /// OAuth 的发起与回调都是匿名的整页跳转，不带 bearer；这枚令牌把「当前用户是谁」带到回调：
 /// 前端先 <c>POST users/profile/linked-accounts/{provider}/link-token</c>，再把 <see cref="Token"/> 作为
-/// <c>linkToken</c> 查询参数跳到 <c>GET auth/oauth/{provider}/login</c>。回调消费它并把外部登录挂到<b>签发它的账号</b>上，
-/// 不签发令牌、不新建账号。
+/// <c>linkToken</c> 查询参数跳到 <c>GET auth/oauth/{provider}/login</c>。回调消费它、把外部身份暂存在<b>签发它的账号</b>名下，
+/// 交回一枚完成码；前端以同一个已登录身份调 <c>POST users/profile/linked-accounts/{provider}/complete</c> 才真正关联。
+/// 全程不签发令牌、不新建账号。
 /// </remarks>
 public class OAuthLinkTokenDto
 {

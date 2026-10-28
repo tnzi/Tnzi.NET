@@ -40,9 +40,9 @@ public interface INotificationService
     }
 
     /// <summary>
-    /// 预览通知渲染结果（不创建、不发送）
+    /// 预览通知渲染结果（不创建、不发送）。收件人可选，见 <see cref="PreviewNotificationRequest"/>。
     /// </summary>
-    Task<Result<NotificationPreviewDto>> PreviewAsync(CreateNotificationRequest request, CancellationToken cancellationToken = default)
+    Task<Result<NotificationPreviewDto>> PreviewAsync(PreviewNotificationRequest request, CancellationToken cancellationToken = default)
     {
         return Task.FromResult(Result.Failure<NotificationPreviewDto>("Preview not implemented", 501));
     }

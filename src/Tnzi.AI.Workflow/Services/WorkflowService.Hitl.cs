@@ -31,6 +31,11 @@ public partial class WorkflowService
         if (executionEntity?.WorkflowDefinitionId == null)
             return Fail<WorkflowExecutionResultDto>("Cannot determine workflow definition for this execution", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
+        var unclaimable = RefuseUnclaimableExecution(executionEntity,
+            WorkflowExecutionStatus.Paused, WorkflowExecutionStatus.AwaitingApproval, WorkflowExecutionStatus.Failed);
+        if (unclaimable != null)
+            return unclaimable;
+
         var workflowDef = await _repository.GetAsync(executionEntity.WorkflowDefinitionId.Value, ct);
         if (workflowDef == null)
             return Fail<WorkflowExecutionResultDto>("Associated workflow definition not found", 404, ErrorCodes.WorkflowNotFound);
@@ -39,17 +44,35 @@ public partial class WorkflowService
         if (workflowDef.ExecutionMode != WorkflowExecutionMode.Dag)
             return Fail<WorkflowExecutionResultDto>("Resume is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
+        // The resumed segment runs LLM nodes like the first one did, so it is reserved, logged
+        // and settled like RunAsync (see ReserveResumeQuotaAsync). Reserved before the CAS:
+        // a refused reservation must not leave the execution flipped to Running.
+        var stopwatch = Stopwatch.StartNew();
+        var (userId, reservation, quotaFailure) = await ReserveResumeQuotaAsync(workflowDef, checkpoint, ct);
+        if (quotaFailure != null)
+            return quotaFailure;
+
         // CAS guard: transition the execution to Running BEFORE invoking the engine.
         // The optimistic concurrency stamp (B13) is the compare-and-swap token - two
         // concurrent Resume POSTs both pass the status guard above, but only one wins the
         // status flip; the loser's UpdateAsync throws DbUpdateConcurrencyException and we
         // return 409 instead of re-running the engine (which would re-execute nodes and
         // double-charge tokens).
-        if (!await TryTransitionToRunningAsync(executionEntity, ct))
+        if (!await TryClaimResumeAsync(executionEntity, ct))
             return Fail<WorkflowExecutionResultDto>("Workflow execution is already being resumed by another request", 409, ErrorCodes.WorkflowExecutionInvalidState);
 
+        var usage = new WorkflowUsageMeter();
         try
         {
+            // The engine restores from the store, so the release is saved first; the status is the
+            // Running the CAS just wrote (the checkpoint object still carries the status it was read with).
+            if (ReleaseRejectedSteps(checkpoint))
+            {
+                checkpoint.Status = WorkflowExecutionStatus.Running;
+                checkpoint.UpdatedAt = DateTime.UtcNow;
+                await _checkpointStore.SaveCheckpointAsync(checkpoint, ct);
+            }
+
             var graph = BuildWorkflowGraph(workflowDef);
             var existingRun = await _runRepository.FirstOrDefaultAsync(r => r.WorkflowExecutionId == executionId, ct);
 
@@ -72,7 +95,14 @@ public partial class WorkflowService
                 ResumeDataByStep = approvalResumes.Count > 0 ? approvalResumes : null
             };
 
-            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, ct);
+            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, usage, ct);
+
+            // Same as RunAsync: the checkpoint store writes the status but not DurationMs, which only the
+            // terminal update computes. Without it every execution that went through an approval ended
+            // with no duration and dropped out of the execution stats.
+            await TryUpdateWorkflowExecutionStatusAsync(executionId, MapExecutionStatus(dagResult.StatusText), CancellationToken.None);
+
+            await AccountResumedSegmentAsync(workflowDef, userId, reservation, usage, stopwatch, dagResult);
 
             return Ok(new WorkflowExecutionResultDto
             {
@@ -86,8 +116,49 @@ public partial class WorkflowService
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to resume workflow execution: {ExecutionId}", executionId);
+            // Not left Running for the watchdog to find: Failed is resumable, so the operator can retry.
+            await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Failed, CancellationToken.None);
+            await AccountWorkflowUsageAsync(AIOperationType.WorkflowRun, workflowDef.Name, userId, reservation, usage,
+                stopwatch.Elapsed, isSuccess: false, ex.Message, ex.GetType().Name);
             return Fail<WorkflowExecutionResultDto>("Failed to resume workflow execution", 500, ErrorCodes.WorkflowFailed);
         }
+    }
+
+    /// <summary>
+    /// Check the usage limit for a resumed segment, charged to the user who resumes it (the same rule
+    /// the run endpoints follow: usage is booked to the signed-in caller). No signed-in user (a background
+    /// resume) means no metering, as for a run without a user; usage is still logged.
+    /// </summary>
+    private async Task<(Guid? UserId, UsageLimitReservation? Reservation, Result<WorkflowExecutionResultDto>? Failure)> ReserveResumeQuotaAsync(
+        WorkflowDefinition workflowDef, WorkflowCheckpoint checkpoint, CancellationToken ct)
+    {
+        var userId = CurrentUser?.Id;
+        if (!userId.HasValue)
+            return (null, null, null);
+
+        var begun = await _usageLimits.BeginAsync(userId.Value, ct);
+        if (!begun.Succeeded)
+            return (userId, null, UsageLimitFailure<WorkflowExecutionResultDto>(begun));
+
+        return (userId, begun.Data, null);
+    }
+
+    /// <summary>
+    /// The resume CAS (see <see cref="TryTransitionToRunningAsync"/>). A resume that does not go ahead
+    /// (lost race or failed write) has nothing to give back: a usage window reservation holds no amount,
+    /// and a segment that never ran records no cost.
+    /// </summary>
+    private Task<bool> TryClaimResumeAsync(WorkflowExecution executionEntity, CancellationToken ct)
+        => TryTransitionToRunningAsync(executionEntity, ct);
+
+    private Task AccountResumedSegmentAsync(
+        WorkflowDefinition workflowDef, Guid? userId, UsageLimitReservation? reservation,
+        WorkflowUsageMeter usage, Stopwatch stopwatch, WorkflowEngineResult dagResult)
+    {
+        var isSuccess = IsSuccessfulWorkflowStatus(MapExecutionStatus(dagResult.StatusText));
+        var errorMessage = isSuccess ? null : BuildWorkflowFailureMessage(dagResult.StatusText, dagResult.FinalOutput);
+        return AccountWorkflowUsageAsync(AIOperationType.WorkflowRun, workflowDef.Name, userId, reservation, usage,
+            stopwatch.Elapsed, isSuccess, errorMessage, dagResult.StatusText ?? WorkflowUnsuccessfulErrorType);
     }
 
     public async Task<Result> ApproveStepAsync(string executionId, string stepId, string? feedback = null, CancellationToken ct = default)
@@ -108,8 +179,14 @@ public partial class WorkflowService
         // 移除该步骤的审批等待
         checkpoint.StepsAwaitingApproval.Remove(stepId);
 
-        // 把审批结论记在步骤输出的元数据上：有 feedback 时它同时替换输出文本；
-        // ResumeAsync 据此为尚未执行的审批节点构造 ResumeData（见 BuildApprovalResumes）。
+        // 把审批结论记在步骤输出的元数据上；ResumeAsync 据此为尚未执行的审批节点构造 ResumeData
+        // （见 BuildApprovalResumes）。
+        // ★ 反馈只在步骤**尚未执行**时替换输出文本：审批节点（nodeType=approval）经中断暂停、不在
+        // CompletedStepIds 里，它的文本只是执行器的占位符，恢复时节点按 ResumeData 重新出结果。
+        // run-then-gate 步骤（内容节点上的 requiresApproval）暂停前已经执行完，它的输出就是被批准的
+        // 内容、下游等的就是它，恢复时也不会重跑；反馈是对这份内容的评语，只进元数据。此前一律替换，
+        // 下游拿到的是「Looks good」而不是草稿，草稿也从检查点里消失了。
+        var alreadyExecuted = checkpoint.CompletedStepIds.Contains(stepId);
         var existingOutput = checkpoint.StepOutputs.GetValueOrDefault(stepId);
         var metadata = existingOutput?.Metadata != null
             ? new Dictionary<string, string>(existingOutput.Metadata, StringComparer.OrdinalIgnoreCase)
@@ -122,7 +199,7 @@ public partial class WorkflowService
 
         checkpoint.StepOutputs[stepId] = new WorkflowStepOutput
         {
-            Text = !string.IsNullOrWhiteSpace(feedback) ? feedback : existingOutput?.Text ?? string.Empty,
+            Text = !alreadyExecuted && !string.IsNullOrWhiteSpace(feedback) ? feedback : existingOutput?.Text ?? string.Empty,
             Metadata = metadata
         };
 
@@ -151,14 +228,23 @@ public partial class WorkflowService
         if (!checkpoint.StepsAwaitingApproval.Contains(stepId))
             return Fail($"Step '{stepId}' is not awaiting approval", 400, ErrorCodes.WorkflowStepNotAwaitingApproval);
 
-        // 标记步骤输出为拒绝信息。审批节点本身不在 completed 里，之后若 ResumeAsync（Failed 可恢复），
-        // 它会重新中断、再次请求审批，而不是把这段拒绝文本当作输出交给下游。
+        // 标记步骤输出为拒绝信息。拒绝让整个执行失败，还在等审批的步骤一并清掉。
+        // ★ 被拒绝的步骤与同批还没批准的步骤都必须移出 completed。审批节点本来就不在里面，恢复时
+        // （Failed 可恢复）会重新中断；run-then-gate 步骤（内容节点上的 requiresApproval）暂停前已执行完、
+        // 在 completed 里，留着它，恢复时引擎直接越过闸门：下游拿着拒绝文本（或同批从未批准的内容）继续跑，
+        // 整条报 Completed 而没有任何人批准过。移出后，恢复时它们重新生成内容、再次请求审批。已批准的同批
+        // 步骤已不在 StepsAwaitingApproval 里，保持完成。
+        foreach (var pendingStepId in checkpoint.StepsAwaitingApproval)
+        {
+            checkpoint.CompletedStepIds.Remove(pendingStepId);
+        }
+
         checkpoint.StepOutputs[stepId] = new WorkflowStepOutput
         {
             Text = $"[Rejected: {reason}]",
             Metadata = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                [ApprovalStatusMetadataKey] = "rejected",
+                [ApprovalStatusMetadataKey] = ApprovalStatusRejected,
                 ["approval_reason"] = reason
             }
         };
@@ -167,8 +253,26 @@ public partial class WorkflowService
         checkpoint.UpdatedAt = DateTime.UtcNow;
 
         await _checkpointStore.SaveCheckpointAsync(checkpoint, ct);
+        await TryCloseWaitingAgentRunAsync(executionId, AgentRunStatus.Failed, reason);
 
         return Ok();
+    }
+
+    /// <summary>
+    /// Ends the waiting <see cref="AgentRun"/> of an execution that just left its wait here (see
+    /// <see cref="WaitingAgentRunCloser"/>). The execution's own transition has already been written; a failure
+    /// here leaves only the run projection behind, so it is logged rather than failing the call.
+    /// </summary>
+    private async Task TryCloseWaitingAgentRunAsync(string executionId, AgentRunStatus status, string? error)
+    {
+        try
+        {
+            await WaitingAgentRunCloser.CloseAsync(_runRepository, executionId, status, error, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Workflow execution {ExecutionId} left its wait, but its agent run could not be marked {Status}", executionId, status);
+        }
     }
 
     public async Task<Result<WorkflowExecutionResultDto>> ResumeWithInputAsync(string executionId, string stepId, Dictionary<string, object> input, CancellationToken ct = default)
@@ -210,6 +314,10 @@ public partial class WorkflowService
         if (executionEntity?.WorkflowDefinitionId == null)
             return Fail<WorkflowExecutionResultDto>("Cannot determine workflow definition for this execution", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
+        var unclaimable = RefuseUnclaimableExecution(executionEntity, WorkflowExecutionStatus.AwaitingInput);
+        if (unclaimable != null)
+            return unclaimable;
+
         var workflowDef = await _repository.GetAsync(executionEntity.WorkflowDefinitionId.Value, ct);
         if (workflowDef == null)
             return Fail<WorkflowExecutionResultDto>("Associated workflow definition not found", 404, ErrorCodes.WorkflowNotFound);
@@ -217,12 +325,19 @@ public partial class WorkflowService
         if (workflowDef.ExecutionMode != WorkflowExecutionMode.Dag)
             return Fail<WorkflowExecutionResultDto>("Resume with input is only supported for DAG execution mode", 400, ErrorCodes.WorkflowExecutionInvalidState);
 
+        // Reserved, logged and settled like any other segment (see ReserveResumeQuotaAsync).
+        var stopwatch = Stopwatch.StartNew();
+        var (userId, reservation, quotaFailure) = await ReserveResumeQuotaAsync(workflowDef, checkpoint, ct);
+        if (quotaFailure != null)
+            return quotaFailure;
+
         // CAS guard: flip the execution to Running BEFORE running the engine so two
         // concurrent ResumeWithInput POSTs cannot both execute. The concurrency stamp
         // (B13) is the compare-and-swap token; the losing writer gets 409.
-        if (!await TryTransitionToRunningAsync(executionEntity, ct))
+        if (!await TryClaimResumeAsync(executionEntity, ct))
             return Fail<WorkflowExecutionResultDto>("Workflow execution is already being resumed by another request", 409, ErrorCodes.WorkflowExecutionInvalidState);
 
+        var usage = new WorkflowUsageMeter();
         try
         {
             // 从检查点恢复状态，移除中断步骤使其重新进入就绪队列
@@ -247,14 +362,13 @@ public partial class WorkflowService
                 ResumeData = input
             };
 
-            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, ct);
+            var dagResult = await _workflowEngine.ExecuteAsync(graph, checkpoint.InitialInput, Check.NotNull(ServiceProvider), options, usage, ct);
 
-            // 更新执行状态
-            if (dagResult.AwaitingInterrupt == null && !dagResult.AwaitingApproval)
-            {
-                var completedStatus = dagResult.HasFailure ? WorkflowExecutionStatus.Failed : WorkflowExecutionStatus.Completed;
-                await TryUpdateWorkflowExecutionStatusAsync(executionId, completedStatus, CancellationToken.None);
-            }
+            // 更新执行状态。按引擎的结论映射，与 RunAsync / ResumeAsync 同口径：此前只分 Failed / Completed，
+            // 恢复途中经信号取消的执行被记成 Completed。
+            await TryUpdateWorkflowExecutionStatusAsync(executionId, MapExecutionStatus(dagResult.StatusText), CancellationToken.None);
+
+            await AccountResumedSegmentAsync(workflowDef, userId, reservation, usage, stopwatch, dagResult);
 
             return Ok(new WorkflowExecutionResultDto
             {
@@ -269,6 +383,8 @@ public partial class WorkflowService
         {
             Logger.LogError(ex, "Failed to resume workflow with input: {ExecutionId}, StepId={StepId}", executionId, stepId);
             await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Failed, CancellationToken.None);
+            await AccountWorkflowUsageAsync(AIOperationType.WorkflowRun, workflowDef.Name, userId, reservation, usage,
+                stopwatch.Elapsed, isSuccess: false, ex.Message, ex.GetType().Name);
             return Fail<WorkflowExecutionResultDto>("Failed to resume workflow with input", 500, ErrorCodes.WorkflowFailed);
         }
     }
@@ -303,18 +419,21 @@ public partial class WorkflowService
 
             await mailbox.ClearSignalsAsync(executionId, ct);
             await TryUpdateWorkflowExecutionStatusAsync(executionId, WorkflowExecutionStatus.Cancelled, CancellationToken.None, "cancelled");
+            await TryCloseWaitingAgentRunAsync(executionId, AgentRunStatus.Cancelled, error: null);
             return Ok();
         }
 
+        // The enqueue re-reads the row and writes the signal together with the "cancel_requested"
+        // wait reason. ★ Nothing is written back from `entity` afterwards: it is the copy read before
+        // the enqueue. Saving it failed on the stale concurrency stamp (a 500 after the signal was
+        // stored), and inside a transaction, where both writes wait for the commit, it overwrote the
+        // pending signal list, so the call answered 200 and the engine never saw the cancel.
         await mailbox.EnqueueSignalAsync(executionId, new WorkflowExecutionSignal
         {
             Type = WorkflowExecutionSignalTypes.Cancel,
             Reason = reason ?? "Cancelled by operator"
         }, ct);
 
-        entity.CurrentWaitReason = "cancel_requested";
-        entity.UpdatedTime = DateTime.UtcNow;
-        await _executionRepository.UpdateAsync(entity, ct);
         return Ok();
     }
 
@@ -372,6 +491,33 @@ public partial class WorkflowService
     private const string ApprovalStatusMetadataKey = "approval_status";
     private const string ApprovalFeedbackMetadataKey = "approval_feedback";
     private const string ApprovalStatusApproved = "approved";
+    private const string ApprovalStatusRejected = "rejected";
+
+    /// <summary>
+    /// Take every step whose output carries the rejection marker out of the completed set, so a
+    /// resume produces it again and puts it to approval instead of handing the rejection text to
+    /// its dependents. <see cref="RejectStepAsync"/> already removes it, but the checkpoint store
+    /// union-merges the completed set when a save hits a concurrency conflict: a step of the same
+    /// pause approved concurrently with the rejection puts the rejected step back. A checkpoint
+    /// rejected before rejections removed anything has the same shape. Returns whether anything changed.
+    /// </summary>
+    private static bool ReleaseRejectedSteps(WorkflowCheckpoint checkpoint)
+    {
+        var rejected = checkpoint.StepOutputs
+            .Where(kv => checkpoint.CompletedStepIds.Contains(kv.Key)
+                && kv.Value.Metadata != null
+                && kv.Value.Metadata.TryGetValue(ApprovalStatusMetadataKey, out var status)
+                && string.Equals(status, ApprovalStatusRejected, StringComparison.OrdinalIgnoreCase))
+            .Select(kv => kv.Key)
+            .ToList();
+
+        foreach (var stepId in rejected)
+        {
+            checkpoint.CompletedStepIds.Remove(stepId);
+        }
+
+        return rejected.Count > 0;
+    }
 
     /// <summary>
     /// Find every approval step that <see cref="ApproveStepAsync"/> approved but the engine has not
@@ -407,6 +553,23 @@ public partial class WorkflowService
     }
 
     /// <summary>
+    /// The status check that goes with the resume CAS. The status guard at the top of a resume reads
+    /// the checkpoint; the CAS swaps on the concurrency stamp of <paramref name="executionEntity"/>,
+    /// a second read. A concurrent resume that commits its claim between the two reads leaves this
+    /// row Running under a fresh stamp, and swapping on that stamp succeeds: both requests would run
+    /// the engine. So the status of the read that supplies the stamp decides whether it is claimable.
+    /// </summary>
+    private Result<WorkflowExecutionResultDto>? RefuseUnclaimableExecution(WorkflowExecution executionEntity, params WorkflowExecutionStatus[] claimable)
+    {
+        if (claimable.Contains(executionEntity.Status))
+            return null;
+
+        return executionEntity.Status == WorkflowExecutionStatus.Running
+            ? Fail<WorkflowExecutionResultDto>("Workflow execution is already being resumed by another request", 409, ErrorCodes.WorkflowExecutionInvalidState)
+            : Fail<WorkflowExecutionResultDto>($"Cannot resume execution in '{executionEntity.Status}' state", 400, ErrorCodes.WorkflowExecutionInvalidState);
+    }
+
+    /// <summary>
     /// Atomically transition a (resumable) execution to <see cref="WorkflowExecutionStatus.Running"/>
     /// using the optimistic concurrency stamp as a compare-and-swap token. Returns
     /// <c>false</c> when a concurrent Resume already flipped the status (stale token →
@@ -427,10 +590,17 @@ public partial class WorkflowService
         try
         {
             await _executionRepository.UpdateAsync(executionEntity, ct);
+            // The compare-and-swap happens when the UPDATE reaches the database. Inside an ambient
+            // transaction that would be the commit, after this request had already run the engine
+            // a second time; the flush makes the swap happen here, inside the transaction.
+            await _executionRepository.SaveChangesAsync(ct);
             return true;
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            // The losing write stays tracked as Modified; left there, the request's own commit
+            // would retry it and fail with a 500 after the 409 was already decided.
+            _executionRepository.Discard(executionEntity);
             Logger.LogInformation(ex,
                 "Resume CAS lost for execution {ExecutionId}: a concurrent resume already transitioned it",
                 executionEntity.ExecutionId);

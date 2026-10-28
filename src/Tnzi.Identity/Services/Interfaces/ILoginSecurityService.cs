@@ -119,8 +119,12 @@ public enum AbnormalLoginType
     NewIpAddress,
 
     /// <summary>
-    /// 异地登录（IP地理位置变更）
+    /// 异地登录（IP地理位置变更）。
     /// </summary>
+    /// <remarks>
+    /// 框架目前不产出它：没有地理位置解析，<c>LoginSecurityService</c> 只判新 IP、新设备、不可能旅行与频繁尝试。
+    /// 保留这个值是因为它是线上枚举（前端有同名常量），自己做异地判定的消费方可以用它记录。
+    /// </remarks>
     LocationChange,
 
     /// <summary>

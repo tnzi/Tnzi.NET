@@ -10,8 +10,8 @@ public class BracketTableConfiguration : EntityTypeConfigurationBase<BracketTabl
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(t => t.Code).HasMaxLength(64).IsRequired();
-        builder.Property(t => t.Name).HasMaxLength(200).IsRequired();
-        builder.Property(t => t.Description).HasMaxLength(500);
+        builder.Property(t => t.Name).HasMaxLength(PayrollFieldLimits.NameMaxLength).IsRequired();
+        builder.Property(t => t.Description).HasMaxLength(PayrollFieldLimits.DescriptionMaxLength);
 
         if (multiTenancyEnabled)
         {

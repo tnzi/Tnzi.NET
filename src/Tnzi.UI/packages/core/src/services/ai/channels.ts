@@ -17,6 +17,10 @@ import type { HttpClient } from '../../http/http';
 /** A single channel adapter (Telegram / Slack / Discord / Feishu / DingTalk). */
 export interface ChannelAdapterDto {
   name: string;
+  /**
+   * Display only: IM replies are always sent whole, so the built-in adapters report `false`.
+   * Streaming happens on the WebSocket gateway (`chat.stream` frames), not on IM channels.
+   */
   supportsStreaming: boolean;
 }
 
@@ -24,6 +28,7 @@ export interface ChannelAdapterDto {
 export interface ChannelModuleStatusDto {
   enabled: boolean;
   maxConcurrency: number;
+  /** Minimum interval between `chat.stream` frames on the `/ws/gateway` WebSocket (IM replies are not streamed). */
   streamingThrottleMs: number;
   adapters: ChannelAdapterDto[];
 }
@@ -40,21 +45,31 @@ export interface GatewayConnectionInfo {
   connectionId: string;
   userId?: string | null;
   clientType: string;
-  deviceNodeId?: string | null;
   connectedAt: string;
 }
 
-/** A session-binding rule (ISessionBinder 4-scope binding). */
+/** The backend `SessionScope` enum, serialized by member name. */
+export type GatewaySessionScope = 'Global' | 'PerPeer' | 'PerChannelPeer' | 'PerThread';
+
+/** Where a session-binding rule comes from. */
+export type SessionBindingRuleSource = 'config' | 'database';
+
+/**
+ * A session-binding rule (ISessionBinder 4-scope binding). The list holds the rules the binder routes
+ * with: configuration rules (`AI:Channels:Gateway:BindingRules`) and database rules, highest priority
+ * first, configuration first at equal priority.
+ */
 export interface SessionBindingRuleDto {
+  /** Database rule id; configuration rules are not persisted and carry the empty GUID. */
   id: string;
   channel?: string | null;
   peerKind?: string | null;
   peerId?: string | null;
   agentId: string;
-  /** SessionScope enum: 0=Global / 1=PerPeer / 2=PerChannelPeer / 3=PerThread */
-  scope: number;
+  scope: GatewaySessionScope;
   priority: number;
   isEnabled: boolean;
+  source: SessionBindingRuleSource;
 }
 
 // ---------------------------------------------------------------------------

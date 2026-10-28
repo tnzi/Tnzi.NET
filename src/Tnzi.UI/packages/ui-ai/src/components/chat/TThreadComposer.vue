@@ -8,7 +8,8 @@
  * the answer to "the input bar should allow placing more buttons". All
  * built-ins are opt-in/opt-out so the composer stays as light or as rich as
  * the consumer needs. Extra clusters can still go in `#left` / `#right`, and
- * the send button is replaceable via `#send`.
+ * the send button is replaceable via `#send`. `#notice` sits at the top of the
+ * box, above the text (a usage-limit notice, say), so it is read before typing.
  *
  * Two layouts, same component: `sticky` (default) pins it to the bottom of a
  * scrolling thread, and `:sticky="false"` renders it as a static block, which
@@ -18,14 +19,20 @@
  *
  * Fires `send(text, files)` on the built-in send button (when there is text
  * or at least one attachment) or on Enter without Shift (IME-safe).
+ *
+ * Exposes `addAttachments(files)` so a host can place files in the composer
+ * from outside (a capture button, files handed over by the operating system).
+ * They meet the same `accept` / `maxFileSize` checks and the same
+ * `attachments-rejected` event as a drop, and wait in the composer for the
+ * user's text. Null when attachments are off.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
-import { formatFileSize } from '@tnzi/core/utils'
-import { useAiI18n, formatAiMessage } from '../../i18n/index'
-import { useVoiceInput } from '../../headless/useVoiceInput'
+import { formatFileSize, isImeComposing } from '@tnzi/core/utils'
+import { useAiI18n, formatAiMessage, type AiLocaleMessages } from '../../i18n/index'
+import { useVoiceInput, type VoiceInputErrorCode } from '../../headless/useVoiceInput'
 import { useComposerAttachments } from '../../headless/useComposerAttachments'
-import type { RejectedAttachment } from '../../headless/useComposerAttachments'
+import type { AddAttachmentsResult, RejectedAttachment } from '../../headless/useComposerAttachments'
 import { useAutoGrowTextarea } from '../../headless/useAutoGrowTextarea'
 import { fileIconForName } from '../../utils/file-icon'
 import type { ComposerAction } from './composer-types'
@@ -63,6 +70,16 @@ const props = withDefaults(
     alwaysShowSend?: boolean
     /** Max width of the composer box in pixels. Unbounded when omitted. */
     maxWidth?: number
+    /**
+     * Phone layout: tighter padding, 16px input text (iOS zooms the page into
+     * a smaller field), and room for the home indicator below a sticky
+     * composer. A sticky (in-conversation) composer is also one line tall
+     * whatever `rows` says (it still grows with the text up to its maximum);
+     * a static one (the landing hero) keeps its `rows`, so the first screen
+     * still offers a two-line box. `TChatApp` sets it below its narrow-screen
+     * breakpoint.
+     */
+    compact?: boolean
   }>(),
   {
     placeholder: 'Send a message',
@@ -77,6 +94,7 @@ const props = withDefaults(
     sticky: true,
     alwaysShowSend: false,
     maxWidth: undefined,
+    compact: false,
   },
 )
 
@@ -84,8 +102,9 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   send: [text: string, files: File[]]
   action: [id: string]
-  /** One or more dropped/selected files were refused (currently only for
-   *  exceeding `maxFileSize`). */
+  /** One or more files were refused: over `maxFileSize`, or not matched by
+   *  `accept`. Fires for every way a file arrives (picker, drop, paste,
+   *  `addAttachments`). */
   'attachments-rejected': [rejected: readonly RejectedAttachment[]]
 }>()
 
@@ -93,7 +112,11 @@ const t = useAiI18n()
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-useAutoGrowTextarea(textareaRef, computed(() => props.modelValue), 200)
+const resizeInput = useAutoGrowTextarea(textareaRef, computed(() => props.modelValue), 200)
+const effectiveRows = computed(() => (props.compact && props.sticky ? 1 : props.rows))
+/* The auto-grown height is set inline from the content's height at `rows`;
+   switching layout (a phone rotated across the breakpoint) re-measures. */
+watch(effectiveRows, () => void nextTick(resizeInput))
 
 const {
   files,
@@ -111,6 +134,7 @@ const {
   onDragLeave,
 } = useComposerAttachments({
   maxFileSize: props.maxFileSize,
+  accept: () => props.accept,
   enabled: () => props.enableAttachments,
   onReject: (list) => emit('attachments-rejected', list),
 })
@@ -124,22 +148,59 @@ watch(
   },
 )
 
-const rejectedMessage = computed(() =>
-  rejected.value.length === 0
-    ? ''
-    : formatAiMessage(t.value.composer.filesTooLarge, {
-        size: formatFileSize(props.maxFileSize),
-        names: rejected.value.map((r) => r.file.name).join(', '),
-      }),
-)
+/* One sentence per reason: a single "not attached" line naming every file
+   would leave the user guessing which ones were too big and which ones the
+   composer does not take. */
+const rejectedMessage = computed(() => {
+  const namesFor = (reason: RejectedAttachment['reason']) =>
+    rejected.value.filter((r) => r.reason === reason).map((r) => r.file.name).join(', ')
+  const tooLarge = namesFor('too-large')
+  const unsupported = namesFor('unsupported-type')
+  return [
+    tooLarge
+      ? formatAiMessage(t.value.composer.filesTooLarge, { size: formatFileSize(props.maxFileSize), names: tooLarge })
+      : '',
+    unsupported ? formatAiMessage(t.value.composer.filesNotAccepted, { names: unsupported }) : '',
+  ].filter(Boolean).join(' ')
+})
 
 let voiceBase = ''
-const { isListening, isSupported, start: startVoice, stop: stopVoice } = useVoiceInput({
-  lang: props.voiceLang,
+const {
+  isListening,
+  isSupported,
+  error: voiceError,
+  start: startVoice,
+  stop: stopVoice,
+} = useVoiceInput({
+  // A getter: the language can change while the composer is mounted (the
+  // product switched its interface language).
+  lang: () => props.voiceLang,
   onResult: (transcript) => {
     emit('update:modelValue', voiceBase ? `${voiceBase} ${transcript}` : transcript)
   },
 })
+
+/* Every way the recogniser can stop has its own sentence: what happened and
+   what to do about it. Unsaid, the button just flips back and reads as broken -
+   which is what every failure other than a refused microphone used to do. The
+   notice is dismissed per attempt: pressing the mic again shows it again while
+   the cause is still there. */
+const VOICE_ERROR_KEYS = {
+  'mic-blocked': 'voiceMicBlocked',
+  'mic-not-granted': 'voiceMicNotGranted',
+  'service-not-allowed': 'voiceServiceNotAllowed',
+  'no-microphone': 'voiceNoMicrophone',
+  network: 'voiceNetwork',
+  'no-speech': 'voiceNoSpeech',
+  'language-not-supported': 'voiceLanguageNotSupported',
+  aborted: 'voiceAborted',
+  unavailable: 'voiceUnavailable',
+} as const satisfies Record<VoiceInputErrorCode, keyof AiLocaleMessages['composer']>
+
+const voiceNoticeDismissed = ref(false)
+const voiceNotice = computed(() =>
+  voiceError.value != null && !voiceNoticeDismissed.value ? t.value.composer[VOICE_ERROR_KEYS[voiceError.value]] : '',
+)
 
 const canSend = computed(
   () => !props.disabled && (props.modelValue.trim().length > 0 || files.value.length > 0),
@@ -176,8 +237,10 @@ function doSend(): void {
   clearFiles()
 }
 
+/* `isImeComposing` rather than `isComposing` alone: Safari fires the Enter
+   that commits an IME candidate with `isComposing` false and keyCode 229. */
 function onKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key === 'Enter' && !e.shiftKey && !isImeComposing(e)) {
     e.preventDefault()
     doSend()
   }
@@ -188,6 +251,7 @@ function toggleVoice(): void {
     stopVoice()
   } else {
     voiceBase = props.modelValue.trim()
+    voiceNoticeDismissed.value = false
     startVoice()
   }
 }
@@ -219,11 +283,30 @@ function focus(): void {
   el.setSelectionRange(el.value.length, el.value.length)
 }
 
-defineExpose({ focus })
+/**
+ * Place files in the composer from outside (a capture button, files handed
+ * over by the operating system). They go through the same checks and the same
+ * `attachments-rejected` event as a drop, and wait for the user's text; nothing
+ * is sent. Returns what was added and what was refused, or null when
+ * attachments are off (`enableAttachments` false).
+ */
+function addAttachments(incoming: FileList | readonly File[]): AddAttachmentsResult | null {
+  return addFiles(incoming)
+}
+
+defineExpose({ focus, addAttachments })
 </script>
 
 <template>
-  <div class="t-thread-composer-wrap" :class="{ 'is-sticky': sticky }">
+  <div
+    class="t-thread-composer-wrap"
+    :class="{ 'is-sticky': sticky, 'has-footer': !!$slots.footer, 'is-compact': compact }"
+  >
+    <!-- Floats just above the box (a "scroll to the latest" button); takes no
+         room, so the box does not move when it comes and goes. -->
+    <div v-if="$slots.above" class="t-thread-composer__above">
+      <slot name="above" />
+    </div>
     <div
       class="t-thread-composer"
       :class="{ 'is-dragover': isDragOver }"
@@ -232,6 +315,7 @@ defineExpose({ focus })
       @dragover="onDragOver"
       @dragleave="onDragLeave"
     >
+      <slot name="notice" />
       <!-- Oversized files are refused; say so instead of dropping them silently. -->
       <div v-if="rejectedMessage" class="t-thread-composer__reject" role="status">
         <Icon icon="lucide:triangle-alert" class="t-thread-composer__reject-icon" />
@@ -241,6 +325,19 @@ defineExpose({ focus })
           class="t-thread-composer__chip-x"
           :aria-label="t.composer.dismiss"
           @click="clearRejected"
+        >
+          <Icon icon="lucide:x" />
+        </button>
+      </div>
+
+      <div v-if="voiceNotice" class="t-thread-composer__reject t-thread-composer__reject--voice" role="alert">
+        <Icon icon="lucide:triangle-alert" class="t-thread-composer__reject-icon" />
+        <span class="t-thread-composer__reject-text">{{ voiceNotice }}</span>
+        <button
+          type="button"
+          class="t-thread-composer__chip-x"
+          :aria-label="t.composer.dismiss"
+          @click="voiceNoticeDismissed = true"
         >
           <Icon icon="lucide:x" />
         </button>
@@ -274,7 +371,7 @@ defineExpose({ focus })
         class="t-thread-composer__input"
         :value="modelValue"
         :placeholder="placeholder"
-        :rows="rows"
+        :rows="effectiveRows"
         @input="onInput"
         @keydown="onKeydown"
         @paste="onPaste"
@@ -372,11 +469,22 @@ defineExpose({ focus })
    keeps a max-width'd box centred exactly as `justify-content:center` did when
    the box was the only child. */
 .t-thread-composer-wrap {
+  position: relative;
   padding-top: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
+.t-thread-composer__above {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.t-thread-composer__above > * { pointer-events: auto; }
 .t-thread-composer__foot {
   width: 100%;
   padding: 8px 4px 10px;
@@ -401,9 +509,32 @@ defineExpose({ focus })
      scroller's PADDING box, not its visible edge. With the padding on the
      scroller instead, messages scrolled through that strip and showed under
      the composer (measured: a 24px uncovered band). Scrollers hosting a
-     sticky composer must therefore set `padding-bottom: 0`. */
-  padding-bottom: 24px;
+     sticky composer must therefore set `padding-bottom: 0`.
+     The gap is kept small: the block belongs to the bottom edge. It was 24px
+     under the box plus 10px under the fine print, a 34px empty band between
+     the disclaimer and the window edge. */
+  padding-bottom: 16px;
 }
+/* With fine print the print carries the box-to-edge spacing: 6px above it,
+   8px between it and the edge. */
+.t-thread-composer-wrap.is-sticky.has-footer { padding-bottom: 8px; }
+/* Compact (phone): the space above the box and inside it was sized for a
+   desktop window and costs a phone several lines of conversation. Below a
+   sticky box the gap includes the home indicator's safe area, so the box is
+   not drawn under it. */
+.t-thread-composer-wrap.is-compact { padding-top: 10px; }
+.t-thread-composer-wrap.is-sticky.is-compact,
+.t-thread-composer-wrap.is-sticky.is-compact.has-footer {
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.t-thread-composer-wrap.is-compact .t-thread-composer { padding: 10px 2px 6px; }
+.t-thread-composer-wrap.is-compact .t-thread-composer__input {
+  padding: 0 14px;
+  font-size: 16px;
+  line-height: 24px;
+}
+.t-thread-composer-wrap.is-compact .t-thread-composer__bar { padding: 4px 8px 0; }
+.t-thread-composer-wrap.is-sticky .t-thread-composer__foot { padding: 6px 4px 0; }
 .t-thread-composer {
   width: 100%;
   background: var(--tnzi-ai-surface, #ffffff);
@@ -446,6 +577,13 @@ defineExpose({ focus })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* A voice notice says what to do, so it wraps instead of being cut off. */
+.t-thread-composer__reject--voice { align-items: flex-start; }
+.t-thread-composer__reject--voice .t-thread-composer__reject-icon { margin-top: 2px; }
+.t-thread-composer__reject--voice .t-thread-composer__reject-text {
+  white-space: normal;
+  line-height: 1.5;
 }
 
 /* attachment chips */
@@ -514,7 +652,7 @@ defineExpose({ focus })
   line-height: 22px;
   background: transparent;
   color: var(--tnzi-ai-text, #1a1a1a);
-  caret-color: var(--tnzi-ai-accent, #0d9488);
+  caret-color: var(--tnzi-ai-accent-text);
   padding: 0 18px;
   min-height: 22px;
   max-height: 200px;
@@ -561,7 +699,7 @@ defineExpose({ focus })
   cursor: not-allowed;
 }
 .t-thread-composer__act.is-active {
-  color: var(--tnzi-ai-accent, #0d9488);
+  color: var(--tnzi-ai-accent-text);
   background: var(--tnzi-ai-accent-soft, rgba(13, 148, 136, 0.12));
 }
 .t-thread-composer__act.is-recording {

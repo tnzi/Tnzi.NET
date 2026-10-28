@@ -100,6 +100,37 @@ describe('usePasswordReset', () => {
     expect(errors.value.password).toBeTruthy()
   })
 
+  it('submit refuses an empty confirmation', async () => {
+    const onSubmit = vi.fn()
+    const { fields, errors, submit, canSubmit } = usePasswordReset({ onSubmit })
+    fields.email.value = 'test@test.com'
+    fields.code.value = '123456'
+    fields.password.value = 'newpass'
+    expect(canSubmit.value).toBe(false)
+    await submit()
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(errors.value.confirmPassword).toBeTruthy()
+  })
+
+  it('a failed send leaves the countdown off and reports why', async () => {
+    const onSendCode = vi.fn().mockRejectedValue(new Error('Too many requests'))
+    const { fields, countdown, canSendCode, errors, sendCode } = usePasswordReset({ onSendCode, countdownSeconds: 30 })
+    fields.email.value = 'test@test.com'
+    await sendCode()
+    expect(countdown.value).toBe(0)
+    expect(canSendCode.value).toBe(true)
+    expect(errors.value.code).toBe('Too many requests')
+  })
+
+  it('a successful send clears the previous send error', async () => {
+    const onSendCode = vi.fn().mockRejectedValueOnce(new Error('Too many requests')).mockResolvedValueOnce(undefined)
+    const { fields, errors, sendCode } = usePasswordReset({ onSendCode, countdownSeconds: 30 })
+    fields.email.value = 'test@test.com'
+    await sendCode()
+    await sendCode()
+    expect(errors.value.code).toBeUndefined()
+  })
+
   it('submit captures onSubmit rejection', async () => {
     const onSubmit = vi.fn().mockRejectedValue(new Error('Code expired'))
     const { fields, errors, submit } = usePasswordReset({ onSubmit })

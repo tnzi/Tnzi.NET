@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildUrl, parseQuery } from '../../src/utils/url';
+import { buildUrl, parseQuery, safeLinkHref } from '../../src/utils/url';
 
 describe('buildUrl', () => {
   it('returns the base unchanged when there are no params', () => {
@@ -43,5 +43,45 @@ describe('parseQuery', () => {
   it('keeps the last value for a repeated key and returns {} for an empty string', () => {
     expect(parseQuery('a=1&a=2')).toEqual({ a: '2' });
     expect(parseQuery('')).toEqual({});
+  });
+});
+
+describe('safeLinkHref', () => {
+  it('returns undefined for a missing URL', () => {
+    expect(safeLinkHref(undefined)).toBeUndefined();
+    expect(safeLinkHref(null)).toBeUndefined();
+    expect(safeLinkHref('')).toBeUndefined();
+  });
+
+  it.each([
+    'https://cdn.example.com/a.pdf',
+    'http://example.com/a.pdf',
+    'HTTPS://example.com/a.pdf',
+    '/files/a.pdf',
+    'files/a.pdf',
+    '?page=2',
+    '#section',
+    'blob:https://app.example.com/0b1c',
+    'data:image/png;base64,AAAA',
+    'mailto:someone@example.com',
+  ])('keeps %j', (url) => {
+    expect(safeLinkHref(url)).toBe(url);
+  });
+
+  // The URL parser drops leading C0 controls and spaces and every tab / newline
+  // before it reads the scheme; a pattern match on the raw string misses these.
+  it.each([
+    'javascript:alert(1)',
+    ' JAVASCRIPT:alert(1)',
+    '\u0001javascript:alert(1)',
+    'java\tscript:alert(1)',
+    'java\nscript:alert(1)',
+    'java\rscript:alert(1)',
+    'vbscript:msgbox(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'data:application/xhtml+xml,<x/>',
+    'file:///etc/passwd',
+  ])('rejects %j', (url) => {
+    expect(safeLinkHref(url)).toBeUndefined();
   });
 });

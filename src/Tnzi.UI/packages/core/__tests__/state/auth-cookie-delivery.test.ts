@@ -343,9 +343,14 @@ describe('multi-tab refresh', () => {
       storage,
     });
 
+    // 同一个用户的两代访问令牌（只取 nameid 判定是不是同一个人，签名不验）
+    const claims = (sessionId: string) =>
+      btoa(JSON.stringify({ nameid: 'user-1', session_id: sessionId })).replace(/=+$/, '');
     // 本标签页启动时拿到的那一代
+    auth.accessToken = `h.${claims('s1')}.sig`;
     auth.refreshToken = 'r1';
-    // 另一个标签页在此期间轮换过，写进了共享存储
+    // 另一个标签页在此期间轮换过，写进了共享存储（先写访问令牌，再写刷新令牌）
+    storage.set('tnzi:auth:token', `h.${claims('s1')}.sig2`);
     storage.set('tnzi:auth:refresh', 'r2');
 
     await auth.refreshAccessToken();

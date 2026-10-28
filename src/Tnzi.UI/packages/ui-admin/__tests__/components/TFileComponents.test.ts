@@ -7,7 +7,7 @@ const plain = vi.fn((id: string, kind?: string) => `/api/files/${id}/${kind ?? '
 
 vi.mock('../../src/plugin/client', () => ({ useAdminClient: () => ({ id: 'client' }) }))
 vi.mock('../../src/services/file-url-resolver', () => ({
-  getFileUrlResolver: () => ({ resolve, resolveMany: vi.fn(), plain, clear: vi.fn() }),
+  getFileUrlResolver: () => ({ resolve, resolveMany: vi.fn(), plain, clear: vi.fn(), refreshAt: () => null, invalidate: vi.fn() }),
 }))
 
 const TFileImage = (await import('../../src/components/display/TFileImage.vue')).default

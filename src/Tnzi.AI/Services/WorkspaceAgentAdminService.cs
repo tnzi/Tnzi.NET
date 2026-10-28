@@ -8,33 +8,44 @@ namespace Tnzi.AI.Services;
 public class WorkspaceAgentAdminService : IWorkspaceAgentAdminService
 {
     private readonly IWorkspaceAgentProvider _provider;
-    private readonly WorkspaceOptions _options;
+    private readonly IOptionsMonitor<AIOptions> _options;
+    private readonly ILogger<WorkspaceAgentAdminService> _logger;
     private readonly IHostEnvironment? _hostEnvironment;
 
     public WorkspaceAgentAdminService(
         IWorkspaceAgentProvider provider,
-        IOptions<WorkspaceOptions> options,
+        IOptionsMonitor<AIOptions> options,
+        ILogger<WorkspaceAgentAdminService> logger,
         IHostEnvironment? hostEnvironment = null)
     {
         _provider = Check.NotNull(provider);
-        _options = Check.NotNull(options).Value;
+        _options = Check.NotNull(options);
+        _logger = Check.NotNull(logger);
         _hostEnvironment = hostEnvironment;
     }
 
+    /// <summary>
+    /// 与运行时回退（AgentResolver）读同一份配置 <c>AI:Workspace</c>。此前注入的 <c>IOptions&lt;WorkspaceOptions&gt;</c>
+    /// 从未绑定任何配置节，列表恒用默认值：配置了 GlobalPath 时，管理端列的与运行时加载的是两个不同目录，
+    /// 关掉 Enabled 也照样列出。
+    /// </summary>
+    private WorkspaceOptions Options => _options.CurrentValue.Workspace;
+
     public async Task<Result<List<WorkspaceAgentDto>>> ListAgentsAsync(CancellationToken cancellationToken = default)
     {
-        if (!_options.Enabled)
+        var options = Options;
+        if (!options.Enabled)
         {
             return Result<List<WorkspaceAgentDto>>.Success([]);
         }
 
         var results = new List<WorkspaceAgentDto>();
 
-        // Global path: ~/.tnzi/agents/
-        await DiscoverScopeAsync(_options.GlobalPath, "Global", results, cancellationToken);
+        // Global path: AI:Workspace:GlobalPath (default ~/.tnzi/agents/)
+        await DiscoverScopeAsync(options.GlobalPath, "Global", results, cancellationToken);
 
         // Project path: .agents/ relative to ContentRootPath (host-controlled)
-        if (_options.ScanProjectPath && _hostEnvironment != null)
+        if (options.ScanProjectPath && _hostEnvironment != null)
         {
             var projectPath = Path.Combine(_hostEnvironment.ContentRootPath, ".agents");
             await DiscoverScopeAsync(projectPath, "Project", results, cancellationToken);
@@ -45,7 +56,7 @@ public class WorkspaceAgentAdminService : IWorkspaceAgentAdminService
 
     public async Task<Result<List<WorkspacePersonaDto>>> ListPersonasAsync(CancellationToken cancellationToken = default)
     {
-        if (!_options.Enabled)
+        if (!Options.Enabled)
         {
             return Result<List<WorkspacePersonaDto>>.Success([]);
         }
@@ -90,10 +101,11 @@ public class WorkspaceAgentAdminService : IWorkspaceAgentAdminService
                 sink.Add(Project(def, scope));
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Discover failures (permissions, malformed files) shouldn't block
-            // the admin endpoint - workspace agents are an optional surface.
+            // the admin endpoint - workspace agents are an optional surface - but they must be visible.
+            _logger.LogWarning(ex, "Workspace agent discovery failed for the {Scope} path {Path}", scope, path);
         }
     }
 

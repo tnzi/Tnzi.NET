@@ -21,4 +21,14 @@ public class AccessProfileDto
     /// super admin; explicit grants only for everyone else.
     /// </summary>
     public List<string> Permissions { get; set; } = [];
+
+    /// <summary>
+    /// Present only when the super-admin bypass is narrowed
+    /// (<c>Authorization:SuperAdminBypassScope = Platform</c>). Then a super admin's
+    /// <see cref="Permissions"/> is the platform catalogue plus their explicit grants,
+    /// and clients must gate on that list instead of on <see cref="IsSuperAdmin"/>.
+    /// Absent (not serialized) in the default mode, where the bypass covers everything.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Options.SuperAdminBypassScope? SuperAdminBypassScope { get; set; }
 }

@@ -203,6 +203,55 @@ public class RequestBodyRedactorTests
 
     #endregion
 
+    #region TryRedact (fail-closed)
+
+    [Fact]
+    public void TryRedact_ValidJson_ReturnsTrueAndRedactsLikeRedact()
+    {
+        var json = """{"username":"admin","password":"secret123"}""";
+
+        var ok = _redactor.TryRedact(json, DefaultSensitiveFields, out var redacted);
+
+        ok.ShouldBeTrue();
+        redacted.ShouldNotBeNull();
+        redacted.ShouldContain("\"username\":\"admin\"");
+        redacted.ShouldContain("\"password\":\"***REDACTED***\"");
+        redacted.ShouldNotContain("secret123");
+        redacted.ShouldBe(_redactor.Redact(json, DefaultSensitiveFields));
+    }
+
+    [Fact]
+    public void TryRedact_TruncatedJson_ReturnsFalse_AndNeverEchoesTheInput()
+    {
+        // 截断过的 JSON 是非法串：Redact 原样返回它，TryRedact 必须拒绝且不回传原文
+        var ok = _redactor.TryRedact("""{"username":"admin","password":"secret123","desc":"xx""", DefaultSensitiveFields, out var redacted);
+
+        ok.ShouldBeFalse();
+        redacted.ShouldBeNull();
+    }
+
+    [Fact]
+    public void TryRedact_EmptyList_ValidJson_ReturnsTheInput()
+    {
+        var json = """{"password":"secret123"}""";
+
+        var ok = _redactor.TryRedact(json, new HashSet<string>(), out var redacted);
+
+        ok.ShouldBeTrue();
+        redacted.ShouldBe(json);
+    }
+
+    [Fact]
+    public void TryRedact_EmptyList_InvalidJson_ReturnsFalse()
+    {
+        var ok = _redactor.TryRedact("not json", new HashSet<string>(), out var redacted);
+
+        ok.ShouldBeFalse();
+        redacted.ShouldBeNull();
+    }
+
+    #endregion
+
     #region AuditOptions Defaults
 
     [Fact]

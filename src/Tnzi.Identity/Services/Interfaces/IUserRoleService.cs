@@ -48,5 +48,25 @@ public interface IUserRoleService
     /// <param name="roleId">角色ID</param>
     /// <returns>用户ID集合</returns>
     Task<IEnumerable<Guid>> GetRoleUserIdsAsync(Guid roleId);
+
+    /// <summary>
+    /// 批量获取多个角色的成员 Id（<see cref="GetUserRoleIdsAsync(IEnumerable{Guid})"/> 的反方向）。
+    /// 供授权模块回答「谁持有这个码」时一次拿到所有授予角色与超管角色的成员，避免逐角色往返。
+    /// 默认实现逐个回落到 <see cref="GetRoleUserIdsAsync(Guid)"/>（不打断既有实现）；真实实现应改写成一条 IN 查询。
+    /// 没有任何成员的角色不出现在字典里。
+    /// </summary>
+    /// <param name="roleIds">角色ID集合</param>
+    /// <returns>角色ID与成员用户ID集合的字典</returns>
+    async Task<IDictionary<Guid, IEnumerable<Guid>>> GetRoleUserIdsAsync(IEnumerable<Guid> roleIds)
+    {
+        var result = new Dictionary<Guid, IEnumerable<Guid>>();
+        foreach (var roleId in roleIds.Distinct())
+        {
+            var userIds = (await GetRoleUserIdsAsync(roleId)).ToList();
+            if (userIds.Count > 0) result[roleId] = userIds;
+        }
+
+        return result;
+    }
 }
 

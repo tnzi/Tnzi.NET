@@ -18,82 +18,26 @@ public class AuthorizationEnhancedTests
         _serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
     }
 
-    #region GetPermissionRolesAsync Tests
+    #region GetPermissionHoldersAsync Tests
 
     [Fact]
-    public void IFunctionAuthorizationService_GetPermissionRolesAsync_MethodExists()
+    public void IFunctionAuthorizationService_GetPermissionHoldersAsync_MethodExists()
     {
-        // Verify the interface method exists
-        var method = typeof(Tnzi.Authorization.Services.IFunctionAuthorizationService).GetMethod("GetPermissionRolesAsync");
+        var method = typeof(Tnzi.Authorization.Services.IFunctionAuthorizationService).GetMethod("GetPermissionHoldersAsync");
         method.ShouldNotBeNull();
-        method!.ReturnType.ShouldBe(typeof(Task<Result<IEnumerable<PermissionRoleDto>>>));
+        method!.ReturnType.ShouldBe(typeof(Task<Result<PermissionHoldersDto>>));
     }
 
-    [Fact]
-    public async Task GetPermissionRolesAsync_WithEmptyPermissionName_ReturnsFail()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    public async Task GetPermissionHoldersAsync_WithBlankPermissionName_Is400(string? permissionName)
     {
-        // Arrange
-        var service = CreateService();
+        var service = CreateService(userRoleService: new Mock<IUserRoleService>().Object);
 
-        // Act
-        var result = await service.GetPermissionRolesAsync("");
+        var result = await service.GetPermissionHoldersAsync(permissionName!);
 
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Code.ShouldBe(400);
-    }
-
-    [Fact]
-    public async Task GetPermissionRolesAsync_WithWhitespacePermissionName_ReturnsFail()
-    {
-        // Arrange
-        var service = CreateService();
-
-        // Act
-        var result = await service.GetPermissionRolesAsync("   ");
-
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Code.ShouldBe(400);
-    }
-
-    #endregion
-
-    #region GetPermissionUsersAsync Tests
-
-    [Fact]
-    public void IFunctionAuthorizationService_GetPermissionUsersAsync_MethodExists()
-    {
-        // Verify the interface method exists
-        var method = typeof(Tnzi.Authorization.Services.IFunctionAuthorizationService).GetMethod("GetPermissionUsersAsync");
-        method.ShouldNotBeNull();
-        method!.ReturnType.ShouldBe(typeof(Task<Result<IEnumerable<PermissionUserDto>>>));
-    }
-
-    [Fact]
-    public async Task GetPermissionUsersAsync_WithEmptyPermissionName_ReturnsFail()
-    {
-        // Arrange
-        var service = CreateService();
-
-        // Act
-        var result = await service.GetPermissionUsersAsync("");
-
-        // Assert
-        result.Succeeded.ShouldBeFalse();
-        result.Code.ShouldBe(400);
-    }
-
-    [Fact]
-    public async Task GetPermissionUsersAsync_WithNullPermissionName_ReturnsFail()
-    {
-        // Arrange - no IUserRoleService provided
-        var service = CreateService(userRoleService: null);
-
-        // Act
-        var result = await service.GetPermissionUsersAsync(null!);
-
-        // Assert
         result.Succeeded.ShouldBeFalse();
         result.Code.ShouldBe(400);
     }
@@ -109,85 +53,6 @@ public class AuthorizationEnhancedTests
         var method = typeof(Tnzi.Authorization.Services.IFunctionAuthorizationService).GetMethod("GetStatisticsAsync");
         method.ShouldNotBeNull();
         method!.ReturnType.ShouldBe(typeof(Task<Result<AuthorizationStatisticsDto>>));
-    }
-
-    #endregion
-
-    #region PermissionRoleDto Tests
-
-    [Fact]
-    public void PermissionRoleDto_DefaultValues()
-    {
-        // Act
-        var dto = new PermissionRoleDto();
-
-        // Assert
-        dto.RoleId.ShouldBe(Guid.Empty);
-        dto.IsEnabled.ShouldBeFalse();
-        dto.FunctionId.ShouldBe(Guid.Empty);
-        dto.FunctionCode.ShouldBe(string.Empty);
-        dto.FunctionName.ShouldBe(string.Empty);
-    }
-
-    [Fact]
-    public void PermissionRoleDto_CanSetValues()
-    {
-        // Arrange
-        var roleId = Guid.NewGuid();
-        var functionId = Guid.NewGuid();
-
-        // Act
-        var dto = new PermissionRoleDto
-        {
-            RoleId = roleId,
-            IsEnabled = true,
-            FunctionId = functionId,
-            FunctionCode = "users.create",
-            FunctionName = "Create User"
-        };
-
-        // Assert
-        dto.RoleId.ShouldBe(roleId);
-        dto.IsEnabled.ShouldBeTrue();
-        dto.FunctionId.ShouldBe(functionId);
-        dto.FunctionCode.ShouldBe("users.create");
-        dto.FunctionName.ShouldBe("Create User");
-    }
-
-    #endregion
-
-    #region PermissionUserDto Tests
-
-    [Fact]
-    public void PermissionUserDto_DefaultValues()
-    {
-        // Act
-        var dto = new PermissionUserDto();
-
-        // Assert
-        dto.UserId.ShouldBe(Guid.Empty);
-        dto.RoleIds.ShouldNotBeNull();
-        dto.RoleIds.Count.ShouldBe(0);
-    }
-
-    [Fact]
-    public void PermissionUserDto_CanTrackMultipleRoles()
-    {
-        // Arrange
-        var roleId1 = Guid.NewGuid();
-        var roleId2 = Guid.NewGuid();
-
-        // Act
-        var dto = new PermissionUserDto
-        {
-            UserId = Guid.NewGuid(),
-            RoleIds = new List<Guid> { roleId1, roleId2 }
-        };
-
-        // Assert
-        dto.RoleIds.Count.ShouldBe(2);
-        dto.RoleIds.ShouldContain(roleId1);
-        dto.RoleIds.ShouldContain(roleId2);
     }
 
     #endregion

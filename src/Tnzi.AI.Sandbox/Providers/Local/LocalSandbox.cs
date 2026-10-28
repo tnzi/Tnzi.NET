@@ -16,6 +16,7 @@ public class LocalSandbox : ISandbox
     private readonly IReadOnlyCollection<string> _deniedPatterns;
     private readonly IShellCommandAnalyzer? _commandAnalyzer;
     private readonly List<string> _environmentBlacklist;
+    private readonly HashSet<string>? _environmentWhitelist;
     private readonly IReadOnlyDictionary<string, string>? _environmentOverrides;
     private readonly object _outputLock = new();
 
@@ -31,7 +32,8 @@ public class LocalSandbox : ISandbox
         IEnumerable<string>? deniedCommandPrefixes = null,
         IShellCommandAnalyzer? commandAnalyzer = null,
         IEnumerable<string>? deniedPatterns = null,
-        long maxFileSize = 0)
+        long maxFileSize = 0,
+        IEnumerable<string>? environmentWhitelist = null)
     {
         Id = Check.NotNullOrWhiteSpace(id);
         _workspacePath = Check.NotNullOrWhiteSpace(workspacePath);
@@ -45,6 +47,10 @@ public class LocalSandbox : ISandbox
         _deniedPatterns = (deniedPatterns ?? []).ToArray();
         _commandAnalyzer = commandAnalyzer;
         _environmentBlacklist = (environmentBlacklist ?? []).ToList();
+        // 环境变量名在 Windows 上不分大小写
+        _environmentWhitelist = environmentWhitelist is null
+            ? null
+            : new HashSet<string>(environmentWhitelist, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         _environmentOverrides = environmentOverrides;
     }
 
@@ -77,6 +83,15 @@ public class LocalSandbox : ISandbox
             psi.ArgumentList.Add(command);
         }
 
+        // 白名单先行：给了白名单（空的也算），宿主环境里只留名单上的变量。★ 此前这一项只有声明、没有任何地方读，
+        // 设了白名单的调用方照样拿到完整的宿主环境（连接串、名字里不含黑名单子串的密钥都在里面）。
+        if (_environmentWhitelist is not null)
+        {
+            var notListed = psi.Environment.Keys.Where(k => !_environmentWhitelist.Contains(k)).ToList();
+            foreach (var k in notListed)
+                psi.Environment.Remove(k);
+        }
+
         foreach (var key in _environmentBlacklist)
         {
             var toRemove = psi.Environment.Keys
@@ -96,6 +111,8 @@ public class LocalSandbox : ISandbox
         using var process = new Process { StartInfo = psi };
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
+        var stdoutTruncated = false;
+        var stderrTruncated = false;
 
         process.OutputDataReceived += (_, e) =>
         {
@@ -104,6 +121,8 @@ public class LocalSandbox : ISandbox
             {
                 if (stdoutBuilder.Length < _maxOutputSize)
                     stdoutBuilder.AppendLine(e.Data);
+                else
+                    stdoutTruncated = true;
             }
         };
         process.ErrorDataReceived += (_, e) =>
@@ -113,6 +132,8 @@ public class LocalSandbox : ISandbox
             {
                 if (stderrBuilder.Length < _maxOutputSize)
                     stderrBuilder.AppendLine(e.Data);
+                else
+                    stderrTruncated = true;
             }
         };
 
@@ -139,8 +160,8 @@ public class LocalSandbox : ISandbox
             string stdoutSoFar, stderrSoFar;
             lock (_outputLock)
             {
-                stdoutSoFar = stdoutBuilder.ToString();
-                stderrSoFar = stderrBuilder.ToString();
+                stdoutSoFar = WithTruncationNotice(stdoutBuilder, stdoutTruncated);
+                stderrSoFar = WithTruncationNotice(stderrBuilder, stderrTruncated);
             }
 
             var notice = $"Command timed out after {_commandTimeout.TotalSeconds:0.#}s";
@@ -150,8 +171,20 @@ public class LocalSandbox : ISandbox
                 string.IsNullOrWhiteSpace(stderrSoFar) ? notice : $"{notice}. {stderrSoFar}");
         }
 
-        return new CommandResult(process.ExitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
+        lock (_outputLock)
+        {
+            return new CommandResult(process.ExitCode,
+                WithTruncationNotice(stdoutBuilder, stdoutTruncated),
+                WithTruncationNotice(stderrBuilder, stderrTruncated));
+        }
     }
+
+    /// <summary>
+    /// A stream cut at the output cap says so (see <see cref="OutputTruncation"/>); the cap here
+    /// counts characters of whole lines, which matches the byte limit for ASCII output.
+    /// </summary>
+    private string WithTruncationNotice(StringBuilder builder, bool truncated) =>
+        truncated ? OutputTruncation.AppendNotice(builder.ToString(), _maxOutputSize) : builder.ToString();
 
     public async Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
     {

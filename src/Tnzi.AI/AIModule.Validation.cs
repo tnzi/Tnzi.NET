@@ -23,6 +23,13 @@ public partial class AIModule
                     "AI text search or chat history memory is enabled, but ITextSearchService is still a no-op fallback. Register a real ITextSearchService implementation.");
             }
 
+            if (options.ContextProviders.ChatHistoryMemory.Enabled && !textSearchService.SupportsConversationScope)
+            {
+                logger.LogWarning(
+                    "AI chat history memory is enabled, but ITextSearchService ({Implementation}) does not support conversation-scoped search, so chat history memory stays inactive. Register a search service that indexes chat history and honours UserId/ThreadId filters.",
+                    textSearchService.GetType().Name);
+            }
+
             // Paths 为空时不再报错 - FileSystemSkillStore 有自动发现机制（扫描模块程序集目录的 Skills/ 文件夹）
         }
 
@@ -99,10 +106,15 @@ public partial class AIModule
     /// <summary>
     /// 校验引擎运行时配置 - 当启用需要 LLM Provider 的功能时，必须存在已启用的 Provider。
     /// </summary>
-    private static void ValidateProviderRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
+    internal static void ValidateProviderRuntimeConfiguration(IServiceProvider serviceProvider, ILogger logger)
     {
         var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
-        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled);
+        var needsProvider =
+            options.History.Reduction.Mode == HistoryReductionMode.Summarize
+            || (options.Guardrails.Enabled && options.Guardrails.LlmJudge.Enabled)
+            || (options.ContextProviders.Enabled && options.ContextProviders.EntityMemory.Enabled);
+        var hasEnabledProvider = options.Providers.Values.Any(p => p.Enabled)
+            || (needsProvider && HasEnabledDatabaseProvider(serviceProvider, logger));
 
         if (options.History.Reduction.Mode == HistoryReductionMode.Summarize && !hasEnabledProvider)
         {
@@ -135,6 +147,30 @@ public partial class AIModule
         }
 
         logger.LogDebug("AI engine runtime configuration validation passed.");
+    }
+
+    /// <summary>
+    /// 库里有没有已启用的提供商（管理端「提供商」页登记的那种）。
+    /// </summary>
+    /// <remarks>
+    /// 配置里一个启用的提供商都没有，并不等于没有提供商：只在管理端登记提供商的部署是受支持的形态
+    /// （<c>AIOptionsValidator</c> 为它放行），<c>ChatClientFactory</c> 运行时也按库优先解析。
+    /// 只看配置会让这类部署一开 Summarize / LlmJudge / EntityMemory 就起不来，报的还是「没有提供商」。
+    /// 读不到库（未迁移、未加载 EF Core）按「没有」处理，与只看配置时的结论相同。
+    /// </remarks>
+    private static bool HasEnabledDatabaseProvider(IServiceProvider serviceProvider, ILogger logger)
+    {
+        try
+        {
+            using var scope = serviceProvider.CreateScope();
+            var repository = scope.ServiceProvider.GetService<IRepository<Provider, Guid>>();
+            return repository != null && repository.AsQueryable().Any(p => p.IsEnabled);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not query database-registered AI providers during startup validation");
+            return false;
+        }
     }
 
     /// <summary>
@@ -179,6 +215,102 @@ public partial class AIModule
                 "Configure AI:CostTracking:ModelCosts or AI:CostTracking:DefaultCostRate, " +
                 "otherwise every usage entry is costed as null and the budget will never trigger.");
         }
+    }
+
+    /// <summary>
+    /// 配了按金额的用量上限、内建路径却算不出成本时说一声：那些轮次记 0，上限对它们拦不住任何东西。
+    /// </summary>
+    /// <remarks>
+    /// 只看配置文件这一层；管理端设在库里的上限启动时不读库（运行期每一轮算不出成本时 <c>QuotaMiddleware</c> 自己记 Warning）。
+    /// 外部 CLI 运行用 CLI 自报的成本，不受这一条影响。
+    /// </remarks>
+    private static void ValidateUsageLimitCostWiring(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var limits = serviceProvider.GetRequiredService<IOptions<UsageLimitOptions>>().Value;
+        if (limits.SessionLimitUsd is null && limits.WeeklyLimitUsd is null)
+        {
+            return;
+        }
+
+        var costTracking = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value.CostTracking;
+        if (!costTracking.Enabled || (costTracking.ModelCosts.Count == 0 && costTracking.DefaultCostRate == null))
+        {
+            logger.LogWarning(
+                "AI:UsageLimits sets a spending limit, but AI:CostTracking has no enabled cost rates. Turns on built-in agents " +
+                "are costed at $0 and never count toward the limit; turns on external CLI runtimes use the cost the CLI reports.");
+        }
+    }
+
+    /// <summary>
+    /// 配置里有需要审批的工具时，说出这些审批由谁来答。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 默认注册的 <see cref="AutoApprovalHandler"/> 对每一个 Ask 决策直接批准：管理员设的 AlwaysRequire、写的 Ask 规则
+    /// 不会问任何人，调用照常执行，只留一条外观正常的 <c>ApprovalRequestedEvent</c>。默认值不在这里改：
+    /// MCP 服务器的 <c>ApprovalMode</c> 默认就是 AlwaysRequire，库里注册的服务器没有这个字段可配，
+    /// 失败关闭会让每个 MCP 工具开箱即被拒绝。所以这里只告警，让「人工闸门其实没有人」这件事出现在启动日志里。
+    /// </para>
+    /// <para>
+    /// 只看得见配置来源（<c>AI:ToolApproval</c>、<c>AI:Permissions</c> 的规则、<c>AI:Mcp:Servers</c>）；
+    /// 库里持久化的规则与运行期注册的 MCP 服务器启动时不读库，同样被自动批准。
+    /// </para>
+    /// </remarks>
+    internal static void ValidateApprovalHandlerWiring(IServiceProvider serviceProvider, ILogger logger)
+    {
+        var handler = serviceProvider.GetService<IToolApprovalHandler>();
+        if (handler is not null and not AutoApprovalHandler)
+        {
+            return;
+        }
+
+        var options = serviceProvider.GetRequiredService<IOptions<AIOptions>>().Value;
+        var sources = new List<string>();
+
+        if (options.ToolApproval.Enabled && options.ToolApproval.Mode != ToolApprovalMode.NeverRequire)
+        {
+            sources.Add($"AI:ToolApproval (Mode={options.ToolApproval.Mode})");
+        }
+
+        var permissions = options.Permissions;
+        if (permissions.Enabled
+            && permissions.SystemRules.Concat(permissions.ProjectRules).Concat(permissions.UserRules).Concat(permissions.SessionRules)
+                .Any(rule => rule.Behavior == PermissionBehavior.Ask))
+        {
+            sources.Add("AI:Permissions (Ask rules)");
+        }
+
+        if (options.Mcp.Enabled)
+        {
+            var servers = options.Mcp.Servers
+                .Where(server => server.ApprovalMode != McpApprovalMode.NeverRequire)
+                .Select(server => server.Name)
+                .ToList();
+            if (servers.Count > 0)
+            {
+                sources.Add($"AI:Mcp:Servers ({string.Join(", ", servers)})");
+            }
+        }
+
+        if (sources.Count == 0)
+        {
+            return;
+        }
+
+        if (handler is null)
+        {
+            logger.LogWarning(
+                "Tool approval is required by {Sources}, but no IToolApprovalHandler is registered: every such tool call is rejected. " +
+                "Register AddAIToolApprovalSse() or a custom IToolApprovalHandler, or set those sources to NeverRequire.",
+                string.Join("; ", sources));
+            return;
+        }
+
+        logger.LogWarning(
+            "Tool approval is required by {Sources}, but the IToolApprovalHandler is the default {Handler}, which approves every such call " +
+            "without asking anyone; Ask rules stored in the database and MCP servers registered at runtime are approved the same way. " +
+            "Register AddAIToolApprovalSse() or a custom IToolApprovalHandler to put a person in the loop.",
+            string.Join("; ", sources), nameof(AutoApprovalHandler));
     }
 
     /// <summary>

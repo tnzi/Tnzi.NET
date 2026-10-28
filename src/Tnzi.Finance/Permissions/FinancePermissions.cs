@@ -17,7 +17,9 @@ public class FinancePermissions : IPermissionDefinitionProvider
 {
     public void Define(IPermissionDefinitionContext context)
     {
-        context.AddGroup("finance", "Finance");
+        // 应用范围：这本账属于使用这个应用的机构自己（客户、单据、银行流水），不是运营方的管理面。
+        // 超管旁路收窄到平台码时，超管要看账也得经显式授权。所有 Finance 子模块共用这个组。
+        context.AddGroup("finance", "Finance").Scope = PermissionScope.Application;
         context.AddPermission("finance.view", "View Finance", parentName: "finance");
         context.AddCrudPermissions("finance.account", "Chart of Accounts", parentName: "finance");
         context.AddCrudPermissions("finance.journal", "Journal Entries", parentName: "finance");

@@ -8,7 +8,8 @@ public class UserDetailServiceIntegrationTests : RelationalIdentityIntegrationTe
 
     public UserDetailServiceIntegrationTests()
     {
-        _service = new UserDetailService(CreateRepository<UserDetail>(), UserManager, ServiceProvider);
+        _service = new UserDetailService(
+            CreateRepository<UserDetail>(), UserManager, ServiceProvider, new UserTenantScopeProvider(CreateRepository<User>()));
     }
 
     [Fact]

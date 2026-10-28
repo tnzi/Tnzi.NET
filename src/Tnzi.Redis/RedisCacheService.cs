@@ -31,6 +31,8 @@ public class RedisCacheService : ICache
     private readonly ILogger<RedisCacheService> _logger;
     private readonly string? _instanceName;
     private readonly ICacheSyncService? _cacheSyncService;
+    private readonly TimeSpan _defaultExpiration;
+    private readonly IPerformanceMonitorService? _performanceMonitor;
 
     /// <summary>
     /// 初始化一个<see cref="RedisCacheService"/>类型的新实例
@@ -39,16 +41,28 @@ public class RedisCacheService : ICache
     /// <param name="logger">日志记录器</param>
     /// <param name="instanceName">实例名称（用于键前缀，隔离多应用共享的同一 Redis 实例）</param>
     /// <param name="cacheSyncService">缓存同步服务（可选）</param>
+    /// <param name="defaultExpiration">
+    /// 写入未指定过期时间时所用的默认过期时间（<c>Caching:DefaultExpirationMinutes</c>）；null 取 <see cref="CachingOptions"/> 的默认值
+    /// </param>
+    /// <param name="performanceMonitor">
+    /// 运行期计数（可选）：读路径按命中 / 未命中记录，与核心内存实现同一口径。
+    /// 不传的话 Redis 部署的缓存命中率恒无样本。
+    /// </param>
     public RedisCacheService(
         IConnectionMultiplexer connectionMultiplexer,
         ILogger<RedisCacheService> logger,
         string? instanceName = null,
-        ICacheSyncService? cacheSyncService = null)
+        ICacheSyncService? cacheSyncService = null,
+        TimeSpan? defaultExpiration = null,
+        IPerformanceMonitorService? performanceMonitor = null)
     {
         _connectionMultiplexer = Check.NotNull(connectionMultiplexer);
         _logger = Check.NotNull(logger);
         _instanceName = instanceName;
         _cacheSyncService = cacheSyncService;
+        _defaultExpiration = defaultExpiration ?? TimeSpan.FromMinutes(new CachingOptions().DefaultExpirationMinutes);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(_defaultExpiration, TimeSpan.Zero, nameof(defaultExpiration));
+        _performanceMonitor = performanceMonitor;
     }
 
     /// <summary>
@@ -72,17 +86,28 @@ public class RedisCacheService : ICache
     private string GetTagKey(string tag) => GetCacheKey($"tag:{tag}");
 
     /// <summary>
-    /// 规范化过期时间：仅当为正值时才设置过期，否则视为永不过期
+    /// 把 <see cref="ICache"/> 写入方法收到的过期时间换成实际的 TTL：null 取默认过期时间（与契约、
+    /// <c>MemoryCacheService</c> 一致），显式的非正值表示不过期。
     /// </summary>
-    private static TimeSpan? NormalizeExpiration(TimeSpan? expiration)
-        => expiration.HasValue && expiration.Value > TimeSpan.Zero ? expiration : null;
+    /// <remarks>
+    /// ★ 此前 null 一律不设 TTL：同一句 <c>TrySetAsync(lockKey, "1")</c> 在内存缓存上到默认过期时间自动释放，
+    /// 上了 Redis 后持锁进程崩溃留下的键永不过期，<c>Caching:DefaultExpirationMinutes</c> 对 Redis 也从未生效。
+    /// </remarks>
+    private TimeSpan? ResolveExpiration(TimeSpan? expiration)
+    {
+        if (!expiration.HasValue)
+            return _defaultExpiration;
+
+        return expiration.Value > TimeSpan.Zero ? expiration : null;
+    }
 
     /// <summary>
-    /// 统一的字符串写入入口（裸 IDatabase，String 表示）。
+    /// 统一的字符串写入入口（裸 IDatabase，String 表示）。<paramref name="ttl"/> 是已经
+    /// <see cref="ResolveExpiration"/> 换算过的值（null = 不过期）。
     /// 显式指定 <see cref="When"/> 重载，确保所有写路径绑定同一方法签名。
     /// </summary>
-    private Task<bool> WriteStringAsync(IDatabase database, string cacheKey, string json, TimeSpan? expiration, When when = When.Always)
-        => database.StringSetAsync(cacheKey, json, NormalizeExpiration(expiration), when);
+    private static Task<bool> WriteStringAsync(IDatabase database, string cacheKey, string json, TimeSpan? ttl, When when = When.Always)
+        => database.StringSetAsync(cacheKey, json, ttl, when);
 
     /// <summary>
     /// 把完整 Redis 键还原成调用方看到的逻辑键（去掉实例前缀）。
@@ -163,8 +188,12 @@ public class RedisCacheService : ICache
             var cacheKey = GetCacheKey(key);
             var value = GetDatabase().StringGet(cacheKey);
             if (value.IsNullOrEmpty)
+            {
+                _performanceMonitor?.RecordCacheMiss(key);
                 return default;
+            }
 
+            _performanceMonitor?.RecordCacheHit(key);
             return JsonSerializer.Deserialize<T>(value.ToString(), TnziJsonDefaults.Options);
         }
         catch (Exception ex)
@@ -190,14 +219,104 @@ public class RedisCacheService : ICache
             var cacheKey = GetCacheKey(key);
             var value = await GetDatabase().StringGetAsync(cacheKey);
             if (value.IsNullOrEmpty)
+            {
+                _performanceMonitor?.RecordCacheMiss(key);
                 return default;
+            }
 
+            _performanceMonitor?.RecordCacheHit(key);
             return JsonSerializer.Deserialize<T>(value.ToString(), TnziJsonDefaults.Options);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting cache value for key: {Key}", key);
             return default;
+        }
+    }
+
+    /// <summary>
+    /// 读取缓存值并回答「键在不在」：一次 <c>GET</c>，以值是否存在判断，不再追问一次 <c>EXISTS</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 存着却读不出来的条目（部署改了缓存 DTO 的属性类型、枚举成员改名，而旧条目还没过期）按<b>未命中</b>回答。
+    /// 默认接口实现是「取值为 null 就再问存在性」：<see cref="GetAsync{T}"/> 把反序列化失败吞成 null，存在性又是 true，
+    /// 于是回答「命中了 null」。<c>GetOrAddAsync</c> 见命中就返回、不调工厂、不覆盖坏条目，
+    /// 在剩余 TTL 内（没有 TTL 的永远）对每个调用都答 null。按未命中回答之后，<c>GetOrAddAsync</c> 走工厂重建并覆盖它。
+    /// </remarks>
+    public Task<(bool Found, T? Value)> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(key);
+        return TryGetCoreAsync<T>(key, recordMetrics: true);
+    }
+
+    /// <summary>
+    /// 取值，没有就调工厂建一个并写入；每次调用恰好计一次命中或一次未命中。
+    /// </summary>
+    /// <remarks>
+    /// ★ 默认接口实现未命中时先 <see cref="TryGetAsync{T}"/>、拿到锁后再 <see cref="TryGetAsync{T}"/> 复查，
+    /// 两次都计数：一次未命中记成两次，<c>admin/performance/runtime</c> 的命中率被系统性低估
+    /// （真实 50% 显示约 33%）。这里语义与默认实现相同（按键加锁防击穿、读不出的旧条目按未命中重建、
+    /// 工厂返回 null 不写缓存），只是复查不计数。锁是进程内的：它挡的是同一实例上的并发重建。
+    /// </remarks>
+    public async Task<T?> GetOrAddAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNullOrEmpty(key);
+        Check.NotNull(factory);
+
+        var (found, value) = await TryGetCoreAsync<T>(key, recordMetrics: true);
+        if (found)
+            return value;
+
+        await using (await StampedeGuard.LockAsync(key, cancellationToken))
+        {
+            // 复查：另一个调用方可能已经填好了。本次调用已记过一次未命中，这里不再计数
+            (found, value) = await TryGetCoreAsync<T>(key, recordMetrics: false);
+            if (found)
+                return value;
+
+            value = await factory();
+
+            if (value is not null)
+                await SetAsync(key, value, expiration, cancellationToken);
+        }
+
+        return value;
+    }
+
+    /// <summary><see cref="GetOrAddAsync{T}"/> 的按键锁（防缓存击穿）。</summary>
+    private static readonly KeyedAsyncLock StampedeGuard = new();
+
+    private async Task<(bool Found, T? Value)> TryGetCoreAsync<T>(string key, bool recordMetrics)
+    {
+        RedisValue value;
+        try
+        {
+            value = await GetDatabase().StringGetAsync(GetCacheKey(key));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting cache value for key: {Key}", key);
+            return (false, default);
+        }
+
+        if (value.IsNull)
+        {
+            if (recordMetrics) _performanceMonitor?.RecordCacheMiss(key);
+            return (false, default);
+        }
+
+        try
+        {
+            var deserialized = JsonSerializer.Deserialize<T>(value.ToString(), TnziJsonDefaults.Options);
+            if (recordMetrics) _performanceMonitor?.RecordCacheHit(key);
+            return (true, deserialized);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            _logger.LogWarning(ex,
+                "Cache entry {Key} cannot be read as {Type}; treating it as a miss so it gets rebuilt", key, typeof(T).Name);
+            if (recordMetrics) _performanceMonitor?.RecordCacheMiss(key);
+            return (false, default);
         }
     }
 
@@ -235,7 +354,7 @@ public class RedisCacheService : ICache
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
-    /// <param name="expiration">过期时间，null表示不过期</param>
+    /// <param name="expiration">过期时间，null 使用默认过期时间，非正值表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
@@ -246,7 +365,7 @@ public class RedisCacheService : ICache
             var cacheKey = GetCacheKey(key);
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
 
-            await WriteStringAsync(GetDatabase(), cacheKey, json, expiration);
+            await WriteStringAsync(GetDatabase(), cacheKey, json, ResolveExpiration(expiration));
             PublishInvalidation(key, CacheOperation.Update);
         }
         catch (Exception ex)
@@ -389,13 +508,18 @@ public class RedisCacheService : ICache
     }
 
     /// <summary>
-    /// 收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）。
+    /// 收集所有主节点上匹配指定模式的 keys（单机、主从、Sentinel 拓扑下连接可能有多个端点）。
     /// </summary>
     /// <remarks>
     /// 只有失效路径（RemoveByPattern / RemoveByPrefix / Clear）调用它，所以它必须 <b>fail-closed</b>：
     /// 副本被跳过（键空间的权威副本在主节点上），但一个<b>断开的主节点</b>或一次扫描失败都意味着
     /// 「有键没扫到」，此时抛出而不是返回残缺的集合 —— 残缺集合会让后续 DEL 对着空数组「成功」，
     /// 调用方看到删除成功而键一个都没动，外层的 <see cref="CacheWriteException"/> 永远碰不到。
+    /// <para>
+    /// ★ 不支持 Redis Cluster：收集到的键随后由一条多键 <c>DEL</c> 删除，而键没有 hash tag、分布在不同槽，
+    /// 集群模式下客户端以「多键操作必须在同一个槽」拒绝它（<c>GetManyAsync</c> 的 <c>MGET</c>、
+    /// <c>RemoveManyAsync</c> / <c>RemoveByTagAsync</c> 的 <c>DEL</c> 同理）。
+    /// </para>
     /// </remarks>
     /// <exception cref="RedisConnectionException">某个主节点当前未连接。</exception>
     private RedisKey[] CollectKeys(string cachePattern)
@@ -420,7 +544,7 @@ public class RedisCacheService : ICache
     }
 
     /// <summary>
-    /// 异步收集所有 endpoints 上匹配指定模式的 keys（支持 Redis Cluster）。语义见 <see cref="CollectKeys"/>。
+    /// 异步收集所有主节点上匹配指定模式的 keys。语义见 <see cref="CollectKeys"/>。
     /// </summary>
     /// <exception cref="RedisConnectionException">某个主节点当前未连接。</exception>
     private async Task<RedisKey[]> CollectKeysAsync(string cachePattern)
@@ -523,19 +647,18 @@ public class RedisCacheService : ICache
     }
 
     /// <summary>
-    /// 清空所有缓存
+    /// 清空本实例名下的所有缓存
     /// </summary>
+    /// <exception cref="InvalidOperationException">没有配置实例名（见 <see cref="ThrowIfClearWouldWipeTheDatabase"/>）。</exception>
     public void Clear()
     {
+        ThrowIfClearWouldWipeTheDatabase();
+
         try
         {
             var database = GetDatabase();
 
-            var pattern = string.IsNullOrEmpty(_instanceName)
-                ? "*"
-                : $"{_instanceName}:*";
-
-            var keys = CollectKeys(pattern);
+            var keys = CollectKeys($"{_instanceName}:*");
             if (keys.Length > 0)
             {
                 database.KeyDelete(keys);
@@ -552,20 +675,19 @@ public class RedisCacheService : ICache
     }
 
     /// <summary>
-    /// 异步清空所有缓存
+    /// 异步清空本实例名下的所有缓存
     /// </summary>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <exception cref="InvalidOperationException">没有配置实例名（见 <see cref="ThrowIfClearWouldWipeTheDatabase"/>）。</exception>
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
+        ThrowIfClearWouldWipeTheDatabase();
+
         try
         {
             var database = GetDatabase();
 
-            var pattern = string.IsNullOrEmpty(_instanceName)
-                ? "*"
-                : $"{_instanceName}:*";
-
-            var keys = await CollectKeysAsync(pattern);
+            var keys = await CollectKeysAsync($"{_instanceName}:*");
             if (keys.Length > 0)
             {
                 await database.KeyDeleteAsync(keys);
@@ -578,6 +700,22 @@ public class RedisCacheService : ICache
         {
             _logger.LogError(ex, "Error clearing cache");
             throw new CacheWriteException("Failed to clear the cache.", null, ex);
+        }
+    }
+
+    /// <summary>
+    /// 没有实例名时拒绝清空：那时「本实例的键」就是整个库，<c>SCAN *</c> + <c>DEL</c> 会一并删掉分布式锁
+    /// （正在持有的 Outbox 中继、数据销毁的互斥随之失效）、会话、数据保护密钥，以及同库其它应用的全部数据。
+    /// 失败关闭，而不是照做。
+    /// </summary>
+    private void ThrowIfClearWouldWipeTheDatabase()
+    {
+        if (string.IsNullOrEmpty(_instanceName))
+        {
+            throw new InvalidOperationException(
+                "Clearing the cache requires Caching:RedisInstanceName. Without an instance name every key in the " +
+                "Redis database belongs to the cache, so a clear would also delete distributed locks, sessions and " +
+                "any other application's data in the same database. Set an instance name, or remove keys by prefix.");
         }
     }
 
@@ -679,7 +817,7 @@ public class RedisCacheService : ICache
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
-    /// <param name="expiration">过期时间，null表示不过期</param>
+    /// <param name="expiration">过期时间，null 使用默认过期时间，非正值表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>如果设置成功返回 true，如果键已存在返回 false</returns>
     public async Task<bool> TrySetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
@@ -692,7 +830,7 @@ public class RedisCacheService : ICache
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
 
             // 使用 Redis SET NX 原子操作，只在键不存在时设置
-            var success = await WriteStringAsync(GetDatabase(), cacheKey, json, expiration, When.NotExists);
+            var success = await WriteStringAsync(GetDatabase(), cacheKey, json, ResolveExpiration(expiration), When.NotExists);
             if (success)
             {
                 PublishInvalidation(key, CacheOperation.Update);
@@ -762,22 +900,22 @@ public class RedisCacheService : ICache
 
             for (int i = 0; i < keysList.Count; i++)
             {
-                if (!values[i].IsNullOrEmpty)
+                var logicalKey = ToLogicalKey(keysList[i]);
+                if (values[i].IsNullOrEmpty)
                 {
-                    try
-                    {
-                        var value = JsonSerializer.Deserialize<T>(values[i].ToString(), TnziJsonDefaults.Options);
-                        var originalKey = keysList[i];
-                        if (_instanceName != null && originalKey.StartsWith($"{_instanceName}:"))
-                        {
-                            originalKey = originalKey.Substring(_instanceName.Length + 1);
-                        }
-                        result[originalKey] = value;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error deserializing cache value for key: {Key}", keysList[i]);
-                    }
+                    _performanceMonitor?.RecordCacheMiss(logicalKey);
+                    continue;
+                }
+
+                try
+                {
+                    result[logicalKey] = JsonSerializer.Deserialize<T>(values[i].ToString(), TnziJsonDefaults.Options);
+                    _performanceMonitor?.RecordCacheHit(logicalKey);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error deserializing cache value for key: {Key}", keysList[i]);
+                    _performanceMonitor?.RecordCacheMiss(logicalKey);
                 }
             }
         }
@@ -794,7 +932,7 @@ public class RedisCacheService : ICache
     /// </summary>
     /// <typeparam name="T">值类型</typeparam>
     /// <param name="items">键值对集合</param>
-    /// <param name="expiration">过期时间，null 表示不过期</param>
+    /// <param name="expiration">过期时间，null 使用默认过期时间，非正值表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetManyAsync<T>(IEnumerable<KeyValuePair<string, T>> items, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
@@ -815,7 +953,7 @@ public class RedisCacheService : ICache
             var database = GetDatabase();
             var batch = database.CreateBatch();
             var tasks = new List<Task>();
-            var expiry = NormalizeExpiration(expiration);
+            var expiry = ResolveExpiration(expiration);
 
             foreach (var item in itemsList)
             {
@@ -891,7 +1029,7 @@ public class RedisCacheService : ICache
     /// <param name="key">缓存键</param>
     /// <param name="value">缓存值</param>
     /// <param name="tags">标签列表</param>
-    /// <param name="expiration">过期时间，null 表示不过期</param>
+    /// <param name="expiration">过期时间，null 使用默认过期时间，非正值表示不过期</param>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
@@ -904,7 +1042,7 @@ public class RedisCacheService : ICache
 
             // 序列化值
             var json = JsonSerializer.Serialize(value, TnziJsonDefaults.Options);
-            var expiry = NormalizeExpiration(expiration);
+            var expiry = ResolveExpiration(expiration);
 
             // 设置缓存值（与所有其它写路径一致，走裸 IDatabase string）
             await WriteStringAsync(database, cacheKey, json, expiry);

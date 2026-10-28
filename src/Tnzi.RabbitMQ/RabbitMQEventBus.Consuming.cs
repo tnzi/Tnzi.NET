@@ -342,6 +342,7 @@ public partial class RabbitMQEventBus
             };
             newProperties.Headers["x-retry-count"] = retryCount + 1;
 
+            // 发布 Channel 开着发布确认：这里返回即代理已接下副本；nack 或退回（本组队列已不在）都抛出，走下面的死信分支
             var publishChannel = await GetPublishChannelAsync();
             await publishChannel.BasicPublishAsync(string.Empty, queueName, true, newProperties, ea.Body);
 

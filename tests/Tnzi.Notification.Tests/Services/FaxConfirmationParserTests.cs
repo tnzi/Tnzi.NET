@@ -142,6 +142,21 @@ public class FaxConfirmationParserTests
         result!.Reason.ShouldBe("Fax to 9055551234 failed: invalid number");
     }
 
+    /// <summary>
+    /// 原因收进 300 个码元：截断点落在代理对中间时整个字符一起舍掉（原因会落库，半个 emoji 会让严格 UTF-8 的驱动拒绝写入）。
+    /// </summary>
+    [Fact]
+    public void Parse_ReasonCutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        const string prefix = "Fax to 9055551234 failed: ";
+        // 第 300 个码元是 emoji 的前半个
+        var padding = new string('x', 299 - prefix.Length);
+
+        var result = _parser.Parse(Message(subject: prefix + padding + "\U0001F600tail"));
+
+        result!.Reason.ShouldBe(prefix + padding);
+    }
+
     /// <summary>只有失败才带原因：另外两种结论不会改动任何数据，原因也就无处可写。</summary>
     [Fact]
     public void Parse_DoesNotCarryAReasonForADelivery()

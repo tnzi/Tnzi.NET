@@ -59,7 +59,7 @@ const submitError = ref('')
 const rules = computed<FormRules>(() => ({
   account: accountRule.value,
   code: [
-    { required: true, trigger: ['blur', 'input'], message: translate('admin.login.errorEmptyCode', 'Please enter the verification code') },
+    { required: true, whitespace: true, trigger: ['blur', 'input'], message: translate('admin.login.errorEmptyCode', 'Please enter the verification code') },
   ],
 }))
 
@@ -111,16 +111,21 @@ async function handleSendCode(): Promise<void> {
 }
 
 async function handleSubmit(): Promise<void> {
+  // One attempt at a time. Enter on the form and a click on the button both
+  // land here, and validation awaits, so the flag goes up before it: a second
+  // Enter in that gap signed in again with the same one-time code.
+  if (submitting.value) return
+  submitting.value = true
   submitError.value = ''
-  try { await validate() } catch { return }
+  try { await validate() } catch { submitting.value = false; return }
   if (!callbacks.codeLogin) {
     submitError.value = translate(
       'admin.login.errorMissingCallback',
       'Code-login is not configured. Pass `defineAdminApp({ login: { callbacks: { codeLogin } } })`.',
     )
+    submitting.value = false
     return
   }
-  submitting.value = true
   try {
     await callbacks.codeLogin({ account: model.account, code: model.code, type: detectAccountType(model.account) }, helpers)
   } catch (err) {

@@ -90,6 +90,31 @@ internal static class BuiltInCheckTemplates
             SupportedStockTypes: BothStockTypes)
     };
 
+    /// <summary>
+    /// 读出厂版式随程序集分发的模板正文（找不到资源返回 null）。
+    /// </summary>
+    /// <remarks>
+    /// 播种器与渲染器的兜底读的是同一份：库里那一行是它的副本，不是另一个权威。
+    /// 资源按后缀匹配（全名带程序集根命名空间前缀，避免受命名空间改动影响）。
+    /// </remarks>
+    public static string? ReadContent(BuiltInCheckTemplate builtIn)
+    {
+        Check.NotNull(builtIn);
+
+        var assembly = typeof(BuiltInCheckTemplates).Assembly;
+        var suffix = "Templates." + builtIn.ResourceFile;
+        var name = Array.Find(assembly.GetManifestResourceNames(), n => n.EndsWith(suffix, StringComparison.Ordinal));
+        if (name == null)
+            return null;
+
+        using var stream = assembly.GetManifestResourceStream(name);
+        if (stream == null)
+            return null;
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     /// <summary>按模板名查出厂声明（自建模板返回 null）。</summary>
     public static BuiltInCheckTemplate? Find(string? name)
         => string.IsNullOrWhiteSpace(name)

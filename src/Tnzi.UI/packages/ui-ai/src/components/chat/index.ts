@@ -37,6 +37,10 @@ export type { FollowUpItem } from './TFollowUpList.vue';
 export { default as TUpgradeBanner } from './TUpgradeBanner.vue';
 export { default as TThreadComposer } from './TThreadComposer.vue';
 export { default as TThreadMessage } from './TThreadMessage.vue';
+export { default as TUsageLimitNotice } from './TUsageLimitNotice.vue';
+export { default as TComposerModelPicker } from './TComposerModelPicker.vue';
+export type { ComposerModelOption } from './TComposerModelPicker.vue';
+export { default as TThreadLoading } from './TThreadLoading.vue';
 export type { ComposerAction } from './composer-types';
 export { DEFAULT_COMPOSER_ACCEPT } from './composer-types';
 export { default as TMessageActions } from './TMessageActions.vue';
@@ -50,8 +54,31 @@ export { default as TPromoCard } from './TPromoCard.vue';
    The `@tnzi/ui-ai/chat` subpath still exists (see src/chat-app.ts); only the
    file moved. */
 export { default as TChatApp } from './TChatApp.vue';
-export type { ThemePref, ChatAppView, BuiltinViewId } from './TChatApp.vue';
+export type { ThemePref, ChatAppView, BuiltinViewId, ChatAppAttachmentsResult } from './TChatApp.vue';
 export { default as TThreadList } from './TThreadList.vue';
 export type { ThreadItem } from './TThreadList.vue';
+export { default as TRecentsPage } from './TRecentsPage.vue';
+export { default as TThreadTitle } from './TThreadTitle.vue';
 export { default as TLandingPage } from './TLandingPage.vue';
 export type { LandingChip } from './TLandingPage.vue';
+export { default as TFileCard } from './TFileCard.vue';
+export { default as TAttachmentImage } from './TAttachmentImage.vue';
+export {
+  provideChatRenderContext,
+  provideToolRenderers,
+  useChatRenderContext,
+  resolveToolRenderer,
+  resolveToolRendererEntry,
+  defaultToolFileHref,
+  TOOL_RENDERERS_KEY,
+} from './chat-render-context';
+export type {
+  ChatRenderContext,
+  ChatFileRef,
+  ToolRenderer,
+  ToolRendererEntry,
+  ToolRendererMap,
+  ToolRendererProps,
+} from './chat-render-context';
+export { replyParts, segmentReply } from './reply-segments';
+export type { ReplyPart, ReplySegment, SegmentedReply } from './reply-segments';

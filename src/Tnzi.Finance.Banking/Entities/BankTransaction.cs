@@ -10,9 +10,17 @@ namespace Tnzi.Finance.Banking.Entities;
 /// 去重键 <see cref="ExternalId"/>（OFX FITID / provider id / CSV hash）在
 /// (租户, 科目, ExternalId) 上唯一，逐行去重不整批失败，并发由唯一索引兜底。
 /// <see cref="Amount"/> 带符号：正 = 存入 = GL 借方，负 = 支出 = GL 贷方。
+/// <para>
+/// ★ 带并发标记：建议 / 确认 / 解除 / 排除 / 恢复 / 建单都是「读出来、看状态、整行写回」，
+/// 没有标记就是后写者赢，一次跑几千行的「建议匹配」会把期间被确认的那一行整行写回 Pending，
+/// 勾选行留在草稿对账里、那条总账行再也不是候选，这笔钱只能再建一张单据，于是记了两次。
+/// </para>
 /// </remarks>
-public class BankTransaction : MultiTenantAuditedEntity<Guid>
+public class BankTransaction : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
 {
+    /// <summary>并发标记</summary>
+    public string ConcurrencyStamp { get; set; } = string.Empty;
+
     /// <summary>对应银行账户档案挂载的资金科目</summary>
     public Guid AccountId { get; set; }
 

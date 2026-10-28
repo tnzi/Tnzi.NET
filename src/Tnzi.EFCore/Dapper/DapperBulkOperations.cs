@@ -26,6 +26,10 @@ public static class DapperBulkOperations
     /// 文件引用追踪、领域事件、软删转换都<b>不会</b>发生。
     /// </para>
     /// <para>
+    /// 列值与 <c>SaveChanges</c> 一样经 EF 的值转换器写入（<c>IsEncrypted()</c> 的列落库的是密文，
+    /// <c>HasConversion&lt;string&gt;()</c> 的枚举落库的是名称）；没有可读 CLR 属性的列（影子属性）在发出 SQL 之前拒绝。
+    /// </para>
+    /// <para>
     /// 批大小按「参数总数」封顶（<see cref="IDatabaseProvider.MaxParametersPerCommand"/>），
     /// 不是按行数：SQL Server 每命令 2100 个参数，每行 N 列 1000 行一批在 N ≥ 3 时就越界。
     /// </para>
@@ -76,6 +80,9 @@ public static class DapperBulkOperations
             SqlIdentifierHelper.ThrowIfInvalidIdentifier(mapping.ColumnName, "column");
         }
 
+        // 每列的取值器（含 EF 的值转换器）在动实体、发 SQL 之前建好：写不了的列在这里就拒绝。
+        var readers = BuildColumnReaders<T>(dbContext, mappings);
+
         if (includeKey)
         {
             EnsureKeysAssigned(dbContext, entityList);
@@ -84,9 +91,6 @@ public static class DapperBulkOperations
         // 创建审计与租户列按 SaveChanges 新增分支同一套规则填充（协作者取自上下文自身）。
         // 这条路径绕过变更跟踪器，不填就是一批 CreationTime 0001-01-01、TenantId 为 null 的行安静落库。
         AuditPropertyHelper.ApplyCreationAudit(dbContext, entityList);
-
-        // 预缓存 PropertyInfo
-        var propertyInfos = CachePropertyInfos<T>(mappings);
 
         var totalInserted = 0;
         var rowsPerBatch = CalculateRowsPerBatch(batchSize, mappings.Count, provider.MaxParametersPerCommand);
@@ -103,13 +107,9 @@ public static class DapperBulkOperations
             for (int i = 0; i < batchList.Count; i++)
             {
                 var entity = batchList[i];
-                foreach (var mapping in mappings)
+                foreach (var reader in readers)
                 {
-                    if (propertyInfos.TryGetValue(mapping.PropertyName, out var prop))
-                    {
-                        var value = prop.GetValue(entity);
-                        parameters.Add($"{mapping.ColumnName}_{i}", value);
-                    }
+                    parameters.Add($"{reader.ColumnName}_{i}", reader.Read(entity));
                 }
             }
 
@@ -125,8 +125,8 @@ public static class DapperBulkOperations
     /// </summary>
     /// <remarks>
     /// 修改审计（<c>LastModificationTime</c> / <c>LastModifierId</c> / 换 <c>ConcurrencyStamp</c>）按
-    /// <c>SaveChanges</c> 修改分支同一套规则填充；其余非主键列从实体逐字写入，
-    /// 所以创建审计列要带着原值传进来（从库里读出来再改，不要 <c>new</c> 一个只填业务字段的实体）。
+    /// <c>SaveChanges</c> 修改分支同一套规则填充；其余非主键列从实体逐字写入（经 EF 的值转换器，
+    /// 与插入同一规则），所以创建审计列要带着原值传进来（从库里读出来再改，不要 <c>new</c> 一个只填业务字段的实体）。
     /// </remarks>
     /// <typeparam name="T">实体类型</typeparam>
     /// <param name="connection">数据库连接</param>
@@ -182,15 +182,12 @@ public static class DapperBulkOperations
         var escapedTable = provider.EscapeIdentifier(tableName);
         var escapedKey = provider.EscapeIdentifier(keyColumn);
 
-        // 获取主键的 PropertyInfo（通过 CLR 属性名反射）
-        var keyPropertyInfo = typeof(T).GetProperty(keyMapping.PropertyName, BindingFlags.Public | BindingFlags.Instance)
-            ?? throw new InvalidOperationException($"Cannot find key property '{keyMapping.PropertyName}' on type {typeof(T).Name}");
+        // 主键与各列的取值器（含 EF 的值转换器）在动实体、发 SQL 之前建好：写不了的列在这里就拒绝。
+        var keyReader = BuildColumnReaders<T>(dbContext, [keyMapping])[0];
+        var readers = BuildColumnReaders<T>(dbContext, mappings);
 
         // 修改审计按 SaveChanges 修改分支同一套规则填充（修改人 / 修改时间 / 换并发戳）。
         AuditPropertyHelper.ApplyModificationAudit(dbContext, entityList);
-
-        // 预缓存 PropertyInfo
-        var propertyInfos = CachePropertyInfos<T>(mappings);
 
         var columnNames = mappings.Select(m => m.ColumnName).ToList();
         var totalUpdated = 0;
@@ -207,16 +204,11 @@ public static class DapperBulkOperations
             for (int i = 0; i < batchList.Count; i++)
             {
                 var entity = batchList[i];
-                var keyValue = keyPropertyInfo.GetValue(entity);
-                parameters.Add($"{keyColumn}_{i}", keyValue);
+                parameters.Add($"{keyColumn}_{i}", keyReader.Read(entity));
 
-                foreach (var mapping in mappings)
+                foreach (var reader in readers)
                 {
-                    if (propertyInfos.TryGetValue(mapping.PropertyName, out var prop))
-                    {
-                        var value = prop.GetValue(entity);
-                        parameters.Add($"{mapping.ColumnName}_{i}", value);
-                    }
+                    parameters.Add($"{reader.ColumnName}_{i}", reader.Read(entity));
                 }
             }
 
@@ -253,10 +245,10 @@ public static class DapperBulkOperations
             return GenerateBulkUpdateSqlUsingFrom(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount);
         }
 
-        // MySQL 使用 INSERT ... ON DUPLICATE KEY UPDATE
+        // MySQL 没有 UPDATE ... FROM：多表 UPDATE 连接一张由行值拼出的派生表
         if (databaseType.Equals("MySQL", StringComparison.OrdinalIgnoreCase))
         {
-            return GenerateBulkUpdateSqlUsingInsertOnDuplicate(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount);
+            return GenerateBulkUpdateSqlUsingJoin(provider, escapedTable, escapedKey, keyColumn, columnNames, entityCount);
         }
 
         // 其他数据库回退到 UPDATE ... FROM，行值表放进 CTE：
@@ -327,15 +319,20 @@ WHERE {escapedTable}.{escapedKey} = v.{escapedKeyAlias}";
     }
 
     /// <summary>
-    /// 生成使用 INSERT ... ON DUPLICATE KEY UPDATE 的批量更新 SQL（MySQL）
+    /// 生成多表 UPDATE 连接派生表的批量更新 SQL（MySQL）
     /// </summary>
+    /// <remarks>
+    /// ★ 不用 <c>INSERT ... ON DUPLICATE KEY UPDATE</c>：那是 upsert，主键已被删掉（或调用方传错）的行会被整行重新插入，
+    /// 而其它方言的批量更新从不插入；它还按每行 2 计受影响行数，返回值恒为实际更新条数的两倍。
+    /// 派生表用 <c>SELECT ... UNION ALL SELECT ...</c> 拼出（所有 MySQL 版本可用），列名取自第一行的别名。
+    /// </remarks>
     /// <param name="provider">数据库提供者（负责标识符转义）</param>
     /// <param name="escapedTable">已转义的表名</param>
     /// <param name="escapedKey">已转义的主键列名</param>
     /// <param name="keyColumn">未转义的原始主键列名（用于参数名）</param>
     /// <param name="columnNames">未转义的原始列名列表（用于参数名）</param>
-    /// <param name="entityCount">本批实体数量（决定 VALUES 子句的组数）</param>
-    private static string GenerateBulkUpdateSqlUsingInsertOnDuplicate(
+    /// <param name="entityCount">本批实体数量（决定派生表的行数）</param>
+    private static string GenerateBulkUpdateSqlUsingJoin(
         IDatabaseProvider provider,
         string escapedTable,
         string escapedKey,
@@ -343,26 +340,27 @@ WHERE {escapedTable}.{escapedKey} = v.{escapedKeyAlias}";
         List<string> columnNames,
         int entityCount)
     {
-        var allEscapedColumns = new List<string> { escapedKey };
-        allEscapedColumns.AddRange(columnNames.Select(p => provider.EscapeIdentifier(p)));
+        var escapedColumns = columnNames.Select(p => provider.EscapeIdentifier(p)).ToList();
+        var escapedKeyAlias = provider.EscapeIdentifier("key_val");
+        var escapedColumnAliases = columnNames.Select((_, i) => provider.EscapeIdentifier($"val{i}")).ToList();
 
-        // 构建 VALUES 子句：参数名使用未转义的原始列名
-        var valuesParts = new List<string>();
+        // 派生表的行：参数名使用未转义的原始列名；列别名只写在第一行
+        var rows = new List<string>(entityCount);
         for (int i = 0; i < entityCount; i++)
         {
-            var valueParams = new List<string> { $"@{keyColumn}_{i}" };
-            valueParams.AddRange(columnNames.Select(col => $"@{col}_{i}"));
-            valuesParts.Add($"({string.Join(", ", valueParams)})");
+            var keyParam = $"@{keyColumn}_{i}";
+            var valueParams = columnNames.Select(col => $"@{col}_{i}").ToList();
+            rows.Add(i == 0
+                ? $"SELECT {keyParam} AS {escapedKeyAlias}, {string.Join(", ", valueParams.Select((v, j) => $"{v} AS {escapedColumnAliases[j]}"))}"
+                : $"SELECT {keyParam}, {string.Join(", ", valueParams)}");
         }
 
-        // 构建 ON DUPLICATE KEY UPDATE 子句
-        var updateClauses = columnNames.Select(p =>
-            $"{provider.EscapeIdentifier(p)} = VALUES({provider.EscapeIdentifier(p)})").ToList();
+        var setClauses = escapedColumns.Select((col, i) => $"t.{col} = v.{escapedColumnAliases[i]}");
 
         var sql = $@"
-INSERT INTO {escapedTable} ({string.Join(", ", allEscapedColumns)})
-VALUES {string.Join(", ", valuesParts)}
-ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
+UPDATE {escapedTable} AS t
+INNER JOIN ({string.Join(" UNION ALL ", rows)}) AS v ON t.{escapedKey} = v.{escapedKeyAlias}
+SET {string.Join(", ", setClauses)}";
 
         return sql.Trim();
     }
@@ -404,10 +402,18 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
             return 0;
 
         tableName ??= DapperEntityHelper.GetTableName(entityType, dbContext);
-        keyColumn ??= DapperEntityHelper.GetKeyColumnName(entityType, dbContext);
+        var keyMapping = DapperEntityHelper.GetKeyMapping(entityType, dbContext);
+        keyColumn ??= keyMapping.ColumnName;
 
         SqlIdentifierHelper.ThrowIfInvalidIdentifier(tableName, nameof(tableName));
         SqlIdentifierHelper.ThrowIfInvalidIdentifier(keyColumn, nameof(keyColumn));
+
+        // 与插入 / 更新同一规则：主键带值转换器时，按 CLR 主键类型传进来的值先转成提供程序值。
+        // 调用方显式指定了别的键列时那一列的转换无从得知，原样传。
+        if (string.Equals(keyColumn, keyMapping.ColumnName, StringComparison.Ordinal))
+        {
+            keyList = ConvertKeysToProvider(dbContext, entityType, keyMapping.PropertyName, keyList);
+        }
 
         var escapedTable = provider.EscapeIdentifier(tableName);
         var escapedKey = provider.EscapeIdentifier(keyColumn);
@@ -516,19 +522,92 @@ ON DUPLICATE KEY UPDATE {string.Join(", ", updateClauses)}";
     }
 
     /// <summary>
-    /// 预缓存实体的 PropertyInfo，使用 CLR 属性名作为 key
+    /// 为每个映射列建一个取值器：读出 CLR 值，再经 EF 为该属性选定的值转换器转成提供程序值。
     /// </summary>
-    private static Dictionary<string, PropertyInfo> CachePropertyInfos<T>(List<ColumnMapping> mappings)
+    /// <remarks>
+    /// <para>
+    /// ★ 转换器必须用：字段级加密（<c>IsEncrypted()</c>）只挂在值转换器上，跳过它就是明文落库；
+    /// 而读侧转换器对不像密文的值原样返回（给既有明文列加密的迁移期需要它），所以明文行读回时
+    /// 界面一切正常、没有任何告警。<c>HasConversion&lt;string&gt;()</c> 的枚举同理会被写成整数。
+    /// 转换器取类型映射上的那个（含约定与提供程序引入的），与 EF 生成参数时同源。
+    /// </para>
+    /// <para>
+    /// 失败关闭：CLR 对象上读不到值的列（影子属性）在动实体、发 SQL 之前点名拒绝，
+    /// 而不是生成一条缺参数的语句，或者更糟，让某个提供程序把缺失的参数当 NULL。
+    /// </para>
+    /// </remarks>
+    private static List<ColumnValueReader> BuildColumnReaders<T>(DbContext dbContext, IReadOnlyList<ColumnMapping> mappings)
     {
-        var result = new Dictionary<string, PropertyInfo>(mappings.Count);
+        var entityType = dbContext.Model.FindEntityType(typeof(T))
+            ?? throw new InvalidOperationException($"Entity type {typeof(T).Name} is not registered in DbContext {dbContext.GetType().Name}");
+
+        var readers = new List<ColumnValueReader>(mappings.Count);
+        var unreadable = new List<string>();
         foreach (var mapping in mappings)
         {
-            var prop = typeof(T).GetProperty(mapping.PropertyName, BindingFlags.Public | BindingFlags.Instance);
-            if (prop != null && prop.CanRead)
+            var property = entityType.FindProperty(mapping.PropertyName);
+            var clrProperty = property?.PropertyInfo
+                ?? typeof(T).GetProperty(mapping.PropertyName, BindingFlags.Public | BindingFlags.Instance);
+            if (clrProperty is not { CanRead: true })
             {
-                result[mapping.PropertyName] = prop;
+                unreadable.Add(mapping.PropertyName);
+                continue;
             }
+
+            readers.Add(new ColumnValueReader(mapping.ColumnName, clrProperty, ResolveToProvider(property)));
         }
-        return result;
+
+        if (unreadable.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Entity {typeof(T).Name} maps {string.Join(", ", unreadable)} to columns that have no readable CLR property (for example shadow properties). " +
+                "Bulk operations write values straight from the entity objects, so these columns cannot be written; save this entity type through SaveChanges instead.");
+        }
+
+        return readers;
+    }
+
+    /// <summary>
+    /// 取 EF 为该属性选定的「CLR 值 → 提供程序值」转换；没有转换器时返回 null（值原样作参数）。
+    /// </summary>
+    private static Func<object?, object?>? ResolveToProvider(IProperty? property)
+    {
+        if (property == null)
+        {
+            return null;
+        }
+
+        var converter = property.GetTypeMapping().Converter ?? property.GetValueConverter();
+        return converter?.ConvertToProvider;
+    }
+
+    /// <summary>
+    /// 主键值按主键属性的值转换器转成提供程序值；只转换 CLR 主键类型的值，已经是别的类型的值原样保留。
+    /// </summary>
+    private static List<object> ConvertKeysToProvider(DbContext dbContext, Type entityType, string keyPropertyName, List<object> keys)
+    {
+        var keyProperty = dbContext.Model.FindEntityType(entityType)?.FindProperty(keyPropertyName);
+        var toProvider = ResolveToProvider(keyProperty);
+        if (keyProperty == null || toProvider == null)
+        {
+            return keys;
+        }
+
+        return keys
+            .Select(key => keyProperty.ClrType.IsInstanceOfType(key) ? toProvider(key)! : key)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 一列的取值器。null 不进转换器、原样以 NULL 写入，与 EF 的语义一致
+    /// （加密列的空值因此仍是 NULL，而不是某个固定密文）。
+    /// </summary>
+    private readonly record struct ColumnValueReader(string ColumnName, PropertyInfo Property, Func<object?, object?>? ToProvider)
+    {
+        public object? Read(object entity)
+        {
+            var value = Property.GetValue(entity);
+            return value is null || ToProvider is null ? value : ToProvider(value);
+        }
     }
 }

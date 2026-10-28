@@ -90,9 +90,9 @@ describe('useAdminSubAgentTypeApi', () => {
 });
 
 describe('ToolApprovalMode enum', () => {
-  it('mirrors backend values', () => {
-    expect(ToolApprovalMode.NeverRequire).toBe(0);
-    expect(ToolApprovalMode.AlwaysRequire).toBe(1);
-    expect(ToolApprovalMode.Specific).toBe(2);
+  it('mirrors the backend member names the server writes', () => {
+    expect(ToolApprovalMode.NeverRequire).toBe('NeverRequire');
+    expect(ToolApprovalMode.AlwaysRequire).toBe('AlwaysRequire');
+    expect(ToolApprovalMode.Specific).toBe('Specific');
   });
 });

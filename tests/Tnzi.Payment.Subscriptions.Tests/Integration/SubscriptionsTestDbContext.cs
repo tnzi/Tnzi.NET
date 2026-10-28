@@ -36,10 +36,12 @@ public class SubscriptionsTestDbContext : TnziDbContext<SubscriptionsTestDbConte
         modelBuilder.ApplyConfiguration(new RedemptionCodeConfiguration());
         modelBuilder.ApplyConfiguration(new UserCouponConfiguration());
         modelBuilder.ApplyConfiguration(new StoredPaymentMethodConfiguration());
+        modelBuilder.ApplyConfiguration(new BillingAccountConfiguration());
 
         modelBuilder.ApplyConfiguration(new SubscriptionConfiguration());
         modelBuilder.ApplyConfiguration(new SubscriptionPlanConfiguration());
         modelBuilder.ApplyConfiguration(new SubscriptionChangeConfiguration());
+        modelBuilder.ApplyConfiguration(new StorageUsageSampleConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

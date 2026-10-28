@@ -182,7 +182,17 @@ const { can } = usePermissionGuard()
  */
 const crud = useCrudPage<TemplateRow>({
   pageId: 'notification.templates',
-  permission: 'notification.template',
+  // Writing a template is running code in the server process (stored Razor is compiled and
+  // executed on every send and preview), so the backend stacks the Template module's
+  // code-execution codes on create/update. Mirror both gates so the buttons do not show
+  // for a user the backend will refuse.
+  permission: {
+    create: ['notification.template.create', 'template.template.create'],
+    update: ['notification.template.update', 'template.template.update'],
+    delete: 'notification.template.delete',
+  },
+  // A template left alone on the switch is created active; the switch says so.
+  createDefaults: { isActive: true },
   columns: notificationTemplateColumns,
   rowKey: (r) => {
     const id = String(r.id ?? '')
@@ -201,8 +211,10 @@ const crud = useCrudPage<TemplateRow>({
 
 const rowActions: RowAction<TemplateRow>[] = [
   editAction(crud, { show: (row) => !row.isReadOnly }),
-  { key: 'preview', label: 'actions.preview', onClick: (row) => void openPreview(row) },
-  { key: 'sendTest', label: 'actions.sendTest', show: () => can('notification.template.update'), onClick: (row) => openSendTest(row) },
+  // Preview and test-send run on the notifications endpoints, which check the
+  // message codes, not the template codes this page is reached with.
+  { key: 'preview', label: 'actions.preview', show: () => can('notification.message.view'), onClick: (row) => void openPreview(row) },
+  { key: 'sendTest', label: 'actions.sendTest', show: () => can('notification.message.create'), onClick: (row) => openSendTest(row) },
   deleteAction(crud, { show: (row) => !row.isReadOnly }),
 ]
 
@@ -226,16 +238,36 @@ function templateNameOf(row: TemplateRow | null): string | null {
 }
 
 /**
- * Derive the notification channel from a template row's `category`. Notification
- * templates use `category` to distinguish channels (Email / Sms / Push); the
- * enum now serializes as its member-name string so we send e.g. 'Email'
- * (the backend accepts both string and numeric).
+ * The channel a template is written for. Its own `type` (TemplateType) names
+ * it for an Email or Sms template, whatever the category it is filed under. A
+ * template whose type names no channel (Generic is the store default, and what
+ * a file template reports) falls back to its category, which is how the
+ * shipped notification templates are organised (Email / Sms / Push folders).
+ * The enum serializes as its member-name string, so this sends e.g. 'Sms'.
  */
-function categoryToNotificationType(category?: unknown): NotificationType {
-  const c = String(category ?? '').toLowerCase()
+function templateChannel(row: TemplateRow | null): NotificationType {
+  const type = String(row?.type ?? '')
+  if (type === 'Sms') return NotificationType.Sms
+  if (type === 'Email') return NotificationType.Email
+  const c = String(row?.category ?? '').toLowerCase()
   if (c.includes('sms')) return NotificationType.Sms
   if (c.includes('push')) return NotificationType.Push
   return NotificationType.Email
+}
+
+/**
+ * The category sent with the preview and the test send. The server finds a
+ * template by name AND category, and without a category it looks under the
+ * channel name (Email / Sms / Push), where notification templates live by
+ * convention. A template filed under another category is only found when the
+ * category goes along, which is also what a real send of it has to do; one
+ * filed under its channel name goes without, as real sends do, so the test
+ * message carries the same category a real one does.
+ */
+function templateCategoryFor(row: TemplateRow | null, channel: NotificationType): string | null {
+  const c = typeof row?.category === 'string' ? row.category.trim() : ''
+  if (!c || c.toLowerCase() === String(channel).toLowerCase()) return null
+  return c
 }
 
 // ─── Preview overlay ───────────────────────────────────────────────
@@ -259,9 +291,11 @@ async function runPreview(): Promise<void> {
   previewResult.value = null
   previewError.value = null
   try {
+    const channel = templateChannel(row)
     previewResult.value = await bridge.templates.preview({
       templateName: templateNameOf(row),
-      type: categoryToNotificationType(row?.category),
+      category: templateCategoryFor(row, channel),
+      type: channel,
       variables: parsedVariables.value,
     })
   } catch (e: unknown) {
@@ -280,7 +314,7 @@ const sendTitle = computed(() => t('send.title', { name: templateNameOf(sendDeta
 
 function openSendTest(row: TemplateRow): void {
   recipientAddress.value = ''
-  sendChannel.value = categoryToNotificationType(row.category)
+  sendChannel.value = templateChannel(row)
   void sendDetail.open('view', row)
 }
 
@@ -291,6 +325,7 @@ async function runSendTest(): Promise<void> {
   try {
     await bridge.templates.sendTest({
       templateName: templateNameOf(sendDetail.data.value),
+      category: templateCategoryFor(sendDetail.data.value, sendChannel.value),
       type: sendChannel.value,
       variables: parsedVariables.value,
       recipientAddress: recipientAddress.value,

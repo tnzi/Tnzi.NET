@@ -46,7 +46,6 @@ public class UserTenantScopeIntegrationTests : RelationalIdentityIntegrationTest
             ServiceProvider,
             eventBus: EventBusMock.Object,
             currentUser: _currentUser.Object,
-            cache: Cache,
             currentTenant: _currentTenant.Object,
             multiTenancyOptions: multiTenancy,
             sessionRevocation: _sessionRevocation.Object);

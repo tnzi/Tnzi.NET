@@ -28,8 +28,8 @@ public class BusinessExceptionHandler : ExceptionHandlerBase
         // 获取本地化消息
         var errorMessage = GetLocalizedMessage(context, errorCode, businessException.Message);
 
-        // 处理验证异常的特殊情况
-        object? errors = null;
+        // 处理验证异常的特殊情况；其余业务异常带着结构化详情时原样交给客户端
+        object? errors = businessException.ErrorDetails;
         if (exception is ValidationException validationException && validationException.ValidationErrors != null)
         {
             errors = validationException.ValidationErrors;

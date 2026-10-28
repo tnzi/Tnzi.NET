@@ -1,119 +1,88 @@
 namespace Tnzi.AI.Middleware;
 
 /// <summary>
-/// 配额中间件 - Before: 预留配额，After: 结算实际用量
+/// 配额中间件：USD 预算门 + 按用户的用量上限（一轮开始前判上限、开窗口，跑完按实际费用结算）。
 /// </summary>
+/// <remarks>
+/// <para>
+/// 用量上限按 API 等价费用计：这一轮各次模型调用的 token（含缓存读写）按 <c>AI:CostTracking</c> 配的单价折算。
+/// 单价没配的模型算不出成本，这一轮记 0 并记一条 Warning：上限对它拦不住任何东西，这件事要在日志里看得见。
+/// </para>
+/// <para>
+/// 一轮开始时没超、跑的过程中超了，照常跑完、照常记账，下一轮才拦下。外部 CLI 路径不经这条管线，
+/// 同一对 <see cref="IUsageLimitService.BeginAsync"/> / <see cref="IUsageLimitService.SettleAsync"/> 在它的执行器里调用。
+/// </para>
+/// </remarks>
 public class QuotaMiddleware : IAiMiddleware
 {
-    private readonly IQuotaService _quotaService;
+    private readonly IUsageLimitService _usageLimits;
     private readonly IBudgetService _budgetService;
-    private readonly ITokenEstimator _tokenEstimator;
-    private readonly IEventBus? _eventBus;
+    private readonly ICostCalculator? _costCalculator;
     private readonly ILogger<QuotaMiddleware> _logger;
 
     public int Order => AiMiddlewareOrders.Quota;
 
     public QuotaMiddleware(
-        IQuotaService quotaService,
+        IUsageLimitService usageLimits,
         IBudgetService budgetService,
-        ITokenEstimator tokenEstimator,
         ILogger<QuotaMiddleware> logger,
-        IEventBus? eventBus = null)
+        ICostCalculator? costCalculator = null)
     {
-        _quotaService = Check.NotNull(quotaService);
+        _usageLimits = Check.NotNull(usageLimits);
         _budgetService = Check.NotNull(budgetService);
-        _tokenEstimator = Check.NotNull(tokenEstimator);
         _logger = Check.NotNull(logger);
-        _eventBus = eventBus;
+        _costCalculator = costCalculator;
     }
 
     public async Task<AgentRunResult> InvokeAsync(AiMiddlewareContext context, AiMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        var userId = context.Request.UserId;
-        var inputText = context.Request.UserMessage ?? string.Empty;
-
-        // 无用户 ID 时跳过配额检查
-        if (userId == null)
+        // 无用户 ID 时跳过（后台任务、匿名调用不计到任何人头上）
+        if (context.Request.UserId is not { } userId)
         {
             return await next(context, cancellationToken);
         }
 
-        // Budget check: USD 预算管控（在 token 配额之前检查，避免不必要的 token 预留）
-        var budgetResult = await CheckBudgetAsync(context, cancellationToken);
+        // USD 预算管控：在开窗口之前查，注定被拒的一轮不该先开出一个窗口
+        var budgetResult = await CheckBudgetAsync(context, userId, cancellationToken);
         if (budgetResult != null)
         {
             return budgetResult;
         }
 
-        // Before: 预留配额
-        var estimatedTokens = _tokenEstimator.Estimate(inputText);
-        var reserveResult = await _quotaService.ReserveQuotaAsync(userId.Value, estimatedTokens, cancellationToken);
-
-        if (!reserveResult.Succeeded)
+        var begun = await _usageLimits.BeginAsync(userId, cancellationToken);
+        if (!begun.Succeeded)
         {
-            // 只有真的超限才叫超限：配额记录缺失 / 并发冲突走的是另一条 finish reason，
-            // 也不该污染 QuotaExceededEvent（那条事件喂告警与用量分析）。
-            if (!IsQuotaExceeded(reserveResult))
-            {
-                return BuildQuotaFailureResult(userId.Value, reserveResult);
-            }
-
-            _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
-            await PublishQuotaExceededEventAsync(userId.Value, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
-            return new AgentRunResult
-            {
-                Response = reserveResult.Message ?? "Quota exceeded",
-                FinishReason = FinishReasons.QuotaExceeded,
-                // 归一化为框架码：可替换实现可能只给了 429 不给码
-                ErrorCode = ErrorCodes.QuotaExceeded
-            };
+            return BuildRejection(userId, begun);
         }
 
-        var reservation = reserveResult.Data!;
-
+        var reservation = begun.Data!;
+        AgentRunResult? result = null;
         try
         {
-            // 执行下游管道
-            var result = await next(context, cancellationToken);
-
-            // After: 结算实际用量
-            var actualTokens = (result.Usage?.InputTokens ?? 0) + (result.Usage?.OutputTokens ?? 0);
-            await _quotaService.SettleQuotaAsync(userId.Value, reservation, actualTokens, cancellationToken);
-
+            result = await next(context, cancellationToken);
             return result;
         }
-        catch (Exception)
+        finally
         {
-            // 异常时也结算（使用预估值）；用 CancellationToken.None 避免 token 已取消导致结算失败
-            await _quotaService.SettleQuotaAsync(userId.Value, reservation, estimatedTokens, CancellationToken.None);
-            throw;
+            // 无论成功、失败还是取消都结算一次（已经花掉的部分照记）；用 None：令牌可能已取消
+            await SettleAsync(context, reservation, result?.Usage, result?.Model);
         }
     }
 
     public IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, CancellationToken cancellationToken = default)
     {
-        var userId = context.Request.UserId;
-
-        // 无用户 ID 时跳过配额检查
-        if (userId == null)
+        // 无用户 ID 时跳过
+        if (context.Request.UserId is not { } userId)
         {
             return next(context, cancellationToken);
         }
 
-        return InvokeStreamingCoreAsync(context, next, userId.Value, cancellationToken);
+        return InvokeStreamingCoreAsync(context, next, userId, cancellationToken);
     }
 
     private async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingCoreAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, Guid userId, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var inputText = context.Request.UserMessage ?? string.Empty;
-
-        // Budget check: USD 预算管控
-        var budgetCheck = await _budgetService.CheckBudgetAsync(
-            userId,
-            ResolveTenantId(context),
-            context.Agent.AgentId,
-            cancellationToken);
-
+        var budgetCheck = await _budgetService.CheckBudgetAsync(userId, ResolveTenantId(context), context.Agent.AgentId, cancellationToken);
         if (!budgetCheck.IsAllowed)
         {
             _logger.LogWarning("Budget exceeded for user {UserId}: {Reason}", userId, budgetCheck.Reason);
@@ -125,84 +94,92 @@ public class QuotaMiddleware : IAiMiddleware
             yield break;
         }
 
-        // Before: 预留配额
-        var estimatedTokens = _tokenEstimator.Estimate(inputText);
-        var reserveResult = await _quotaService.ReserveQuotaAsync(userId, estimatedTokens, cancellationToken);
-
-        if (!reserveResult.Succeeded)
+        var begun = await _usageLimits.BeginAsync(userId, cancellationToken);
+        if (!begun.Succeeded)
         {
-            // 与非流式路径同一判据：配额记录缺失 / 并发冲突不是超限（见 IsQuotaExceeded）
-            if (!IsQuotaExceeded(reserveResult))
-            {
-                var failure = BuildQuotaFailureResult(userId, reserveResult);
-                yield return new AgentStreamChunk
-                {
-                    Text = failure.Response,
-                    FinishReason = failure.FinishReason
-                };
-                yield break;
-            }
-
-            _logger.LogWarning("Quota reservation failed for user {UserId}: {Error}", userId, reserveResult.Message);
-            await PublishQuotaExceededEventAsync(userId, estimatedTokens, reserveResult.Message ?? "Quota exceeded");
+            var rejection = BuildRejection(userId, begun);
+            // 以错误块交出（不是正文）：客户端据错误码显示用量上限提示，而不是把拒绝原因当成回答的一部分
             yield return new AgentStreamChunk
             {
-                Text = reserveResult.Message ?? "Quota exceeded",
-                FinishReason = FinishReasons.QuotaExceeded
+                Error = rejection.Response,
+                ErrorCode = rejection.ErrorCode,
+                FinishReason = rejection.FinishReason,
+                UsageLimitResetsAt = rejection.UsageLimitResetsAt,
+                UsageLimitWindow = rejection.UsageLimitWindow
             };
             yield break;
         }
 
-        var reservation = reserveResult.Data!;
-        TokenUsageDto? lastUsage = null;
-        var completedNormally = false;
+        var reservation = begun.Data!;
+
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径），结算的是全部之和
+        TokenUsageDto? totalUsage = null;
+        string? model = null;
 
         try
         {
             await foreach (var chunk in next(context, cancellationToken))
             {
-                if (chunk.Usage != null)
+                totalUsage = StreamUsage.Add(totalUsage, chunk.Usage);
+                if (!string.IsNullOrWhiteSpace(chunk.Model))
                 {
-                    lastUsage = chunk.Usage;
+                    model = chunk.Model;
                 }
+
                 yield return chunk; // 立即转发，保持真正的流式延迟
             }
-            completedNormally = true;
         }
         finally
         {
-            // After: 无论成功或失败都结算配额；用 CancellationToken.None 避免 token 已取消导致结算失败
-            try
+            await SettleAsync(context, reservation, totalUsage, model);
+        }
+    }
+
+    /// <summary>
+    /// 按这一轮实际的用量结算。算不出成本（没有用量、或这个模型没配单价）时记 0：
+    /// 前者确实没花钱，后者花了钱却量不出来，所以后者记一条 Warning，上限对这类轮次拦不住任何东西。
+    /// </summary>
+    /// <remarks>结算失败只记日志不抛：它跑在 finally 里，抛出会盖掉这一轮本身的结局。</remarks>
+    private async Task SettleAsync(AiMiddlewareContext context, UsageLimitReservation reservation, TokenUsageDto? usage, string? reportedModel)
+    {
+        var provider = context.Agent.Provider;
+        var model = string.IsNullOrWhiteSpace(reportedModel) ? context.Agent.Model ?? string.Empty : reportedModel;
+        var cost = 0m;
+
+        if (usage is { } used && used.InputTokens + used.OutputTokens > 0)
+        {
+            var calculated = _costCalculator?.CalculateCost(
+                provider, model, used.InputTokens, used.OutputTokens, used.CachedInputTokens, used.CacheCreationTokens);
+            if (calculated is { } value)
             {
-                if (completedNormally)
-                {
-                    var actualTokens = (lastUsage?.InputTokens ?? 0) + (lastUsage?.OutputTokens ?? 0);
-                    await _quotaService.SettleQuotaAsync(userId, reservation, actualTokens, CancellationToken.None);
-                }
-                else
-                {
-                    // 异常/取消时优先使用实际用量，若无则回退到预估值
-                    var tokensToSettle = lastUsage != null
-                        ? (lastUsage.InputTokens + lastUsage.OutputTokens)
-                        : estimatedTokens;
-                    await _quotaService.SettleQuotaAsync(userId, reservation, tokensToSettle, CancellationToken.None);
-                }
+                cost = value;
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogWarning(ex, "Failed to settle streaming quota for user {UserId}", userId);
+                _logger.LogWarning(
+                    "No cost rate for {Provider}/{Model}; this turn of user {UserId} ({Input} in / {Output} out tokens) does not count toward the usage limits",
+                    provider, model, reservation.UserId, used.InputTokens, used.OutputTokens);
             }
+        }
+
+        try
+        {
+            var settled = await _usageLimits.SettleAsync(reservation, cost, CancellationToken.None);
+            if (!settled.Succeeded)
+            {
+                _logger.LogWarning("Failed to record the usage of user {UserId}: {Message}", reservation.UserId, settled.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record the usage of user {UserId}", reservation.UserId);
         }
     }
 
     /// <summary>检查 USD 预算，超限时返回拒绝结果，否则返回 null</summary>
-    private async Task<AgentRunResult?> CheckBudgetAsync(AiMiddlewareContext context, CancellationToken ct)
+    private async Task<AgentRunResult?> CheckBudgetAsync(AiMiddlewareContext context, Guid userId, CancellationToken ct)
     {
-        var userId = context.Request.UserId;
-        var tenantId = ResolveTenantId(context);
-        var agentId = context.Agent.AgentId;
-
-        var budgetCheck = await _budgetService.CheckBudgetAsync(userId, tenantId, agentId, ct);
+        var budgetCheck = await _budgetService.CheckBudgetAsync(userId, ResolveTenantId(context), context.Agent.AgentId, ct);
         if (budgetCheck.IsAllowed) return null;
 
         _logger.LogWarning("Budget exceeded for user {UserId}: {Reason}", userId, budgetCheck.Reason);
@@ -214,43 +191,34 @@ public class QuotaMiddleware : IAiMiddleware
     }
 
     /// <summary>
-    /// 预留失败是不是「配额真的用完了」。
+    /// 开窗口失败的结果：到上限（429 <c>AI_USAGE_LIMIT_REACHED</c>，带窗口与重置时间）以结束原因 <c>quota_exceeded</c> 交回；
+    /// 计量子系统自身的失败如实以 <c>error</c> 交回、原样带着它的错误码（不说成「到上限了」，那会把排查引到上限配置上去）。
     /// </summary>
-    /// <remarks>
-    /// ★ 判据是错误码而不是「预留失败了」。<see cref="IQuotaService.ReserveQuotaAsync"/> 还会因为
-    /// <b>配额记录缺失</b>（<c>AI_QUOTA_CHECK_FAILED</c>）与<b>并发冲突</b>
-    /// （<c>AI_QUOTA_CONCURRENCY_CONFLICT</c>）而失败，这两种把用户和运维指向的方向完全不同：
-    /// 前者要去看那一行为什么不在，后者重试即可，都不该去调额度。全部贴成「配额耗尽」，
-    /// 排查会一路走到配额配置上去，而那里什么问题都没有。
-    /// <para>
-    /// ★ HTTP 429 也算超限：<see cref="IQuotaService"/> 是可替换契约，自定义实现按 HTTP 语义写
-    /// <c>Result.Failure("Quota exceeded", 429)</c>（带状态码不带框架错误码）是完全合理的形态。
-    /// 只认框架常量会把这类实现的超限贴成通用错误——429 丢了、告警事件也不发。
-    /// 内建实现的 429 只可能是超限（缺行 500 / 冲突 409），此判据不会误收。
-    /// </para>
-    /// </remarks>
-    private static bool IsQuotaExceeded(Result<QuotaReservation> reserveResult)
-        => string.Equals(reserveResult.ErrorCode, ErrorCodes.QuotaExceeded, StringComparison.Ordinal)
-           || reserveResult.Code == 429;
-
-    /// <summary>
-    /// 把「配额子系统失败」构造成一条如实的运行结果：finish reason 用 error 而非 quota_exceeded，
-    /// 且不发 QuotaExceededEvent（那条事件喂告警与用量分析，混进基础设施故障会让超限统计失真）。
-    /// </summary>
-    private AgentRunResult BuildQuotaFailureResult(Guid userId, Result<QuotaReservation> reserveResult)
+    private AgentRunResult BuildRejection(Guid userId, Result<UsageLimitReservation> begun)
     {
-        _logger.LogError(
-            "Quota reservation could not be completed for user {UserId} ({ErrorCode}): {Error}",
-            userId, reserveResult.ErrorCode, reserveResult.Message);
+        if (string.Equals(begun.ErrorCode, ErrorCodes.UsageLimitReached, StringComparison.Ordinal) || begun.Code == 429)
+        {
+            var denial = begun.ErrorDetails as UsageLimitDenialDto;
+            _logger.LogInformation("Usage limit reached for user {UserId} ({Window}, resets at {ResetsAt})",
+                userId, denial?.Window, denial?.ResetsAt);
+            return new AgentRunResult
+            {
+                Response = begun.Message ?? "Usage limit reached.",
+                FinishReason = FinishReasons.QuotaExceeded,
+                // 归一化为框架码：可替换实现可能只给了 429 不给码
+                ErrorCode = ErrorCodes.UsageLimitReached,
+                UsageLimitResetsAt = denial?.ResetsAt,
+                UsageLimitWindow = denial?.Window
+            };
+        }
 
+        _logger.LogError("Usage limit check could not be completed for user {UserId} ({ErrorCode}): {Error}",
+            userId, begun.ErrorCode, begun.Message);
         return new AgentRunResult
         {
-            Response = reserveResult.Message ?? "Quota reservation could not be completed.",
+            Response = begun.Message ?? "The usage limit could not be checked.",
             FinishReason = FinishReasons.Error,
-            // 原样携带服务层错误码：并发冲突（AI_QUOTA_CONCURRENCY_CONFLICT）在服务层定的是
-            // 「可重试的 409」，丢掉这个码，HTTP 边界只能按 FinishReason=Error 贴 500，
-            // 「重试即可」就被翻译成了「内部错误」。
-            ErrorCode = reserveResult.ErrorCode
+            ErrorCode = begun.ErrorCode ?? ErrorCodes.UsageLimitCheckFailed
         };
     }
 
@@ -259,25 +227,5 @@ public class QuotaMiddleware : IAiMiddleware
     {
         var currentTenant = context.ServiceProvider.GetService<ICurrentTenant>();
         return currentTenant?.Id;
-    }
-
-    /// <summary>发布配额超限事件（静默失败）</summary>
-    private async Task PublishQuotaExceededEventAsync(Guid userId, int estimatedTokens, string reason)
-    {
-        try
-        {
-            if (_eventBus == null) return;
-
-            await _eventBus.PublishAsync(new QuotaExceededEvent
-            {
-                UserId = userId,
-                EstimatedTokens = estimatedTokens,
-                Reason = reason
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to publish QuotaExceededEvent for user {UserId}", userId);
-        }
     }
 }

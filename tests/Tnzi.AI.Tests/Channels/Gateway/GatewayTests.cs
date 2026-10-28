@@ -253,6 +253,59 @@ public class GatewayTests
         emitted[^1].IsFinal.ShouldBeTrue();
     }
 
+    // Thread lookup runs before the run starts, outside the guarded enumeration: a store fault
+    // must still end the stream with an error chunk instead of escaping and tearing down the
+    // WebSocket connection that is enumerating it.
+    [Fact]
+    public async Task ProcessStreamingAsync_ThreadLookupFails_EndsWithErrorChunk()
+    {
+        var (gateway, runtime, threadStore) = CreateGateway();
+        threadStore
+            .Setup(s => s.GetThreadIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+
+        var emitted = new List<GatewayStreamChunk>();
+        await foreach (var chunk in gateway.ProcessStreamingAsync(CreateRequest()))
+        {
+            emitted.Add(chunk);
+        }
+
+        emitted.Count.ShouldBe(1);
+        emitted[0].IsFinal.ShouldBeTrue();
+        emitted[0].FinishReason.ShouldBe("error");
+        emitted[0].TextDelta.ShouldBeNull();
+        runtime.Verify(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // The reply has already been delivered when the new mapping is written; a failed write is
+    // logged (the next message opens a new thread) and must not surface as an exception after
+    // the final chunk.
+    [Fact]
+    public async Task ProcessStreamingAsync_MappingWriteFails_StillCompletesAfterFinalChunk()
+    {
+        var (gateway, runtime, threadStore) = CreateGateway();
+        runtime
+            .Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns((AgentRunRequest req, CancellationToken _) =>
+            {
+                req.ThreadId = TestThreadId;
+                return StreamChunks(new AgentStreamChunk { Text = "done", FinishReason = "stop" });
+            });
+        threadStore
+            .Setup(s => s.SetThreadIdAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ThrowsAsync(new InvalidOperationException("database unavailable"));
+
+        var emitted = new List<GatewayStreamChunk>();
+        await foreach (var chunk in gateway.ProcessStreamingAsync(CreateRequest()))
+        {
+            emitted.Add(chunk);
+        }
+
+        emitted.Count.ShouldBe(1);
+        emitted[0].TextDelta.ShouldBe("done");
+        emitted[0].FinishReason.ShouldBe("stop");
+    }
+
     private static async IAsyncEnumerable<AgentStreamChunk> StreamChunks(params AgentStreamChunk[] chunks)
     {
         foreach (var chunk in chunks)

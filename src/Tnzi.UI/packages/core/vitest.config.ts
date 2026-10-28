@@ -3,6 +3,19 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     globals: true,
+    environmentOptions: {
+      happyDOM: {
+        settings: {
+          // The app-update tests seed `document` with the `<script type="module">`
+          // entries a built page carries, only for the code under test to read
+          // their `src`. Script evaluation is off in happy-dom, and from 21 it
+          // reports every such module as a console DOMException ("JavaScript
+          // file loading is disabled") instead of skipping it. Treat the skipped
+          // load as a success so the output carries only what the tests say.
+          handleDisabledFileLoadingAsSuccess: true,
+        },
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -24,6 +24,10 @@ namespace Tnzi.Data.Filtering;
 /// // Build filter expression from DTO
 /// var expression = FilterExpressionBuilder.BuildFromDto&lt;ProductEntity, ProductQueryDto&gt;(dto);
 /// </code>
+/// All criteria from one DTO are combined with the <c>logic</c> argument of <c>BuildFromDto</c>.
+/// For mixed AND / OR, take the group from <c>BuildGroupFromDto</c> and nest sub-groups into it.
+/// Unset properties are skipped: null, blank strings, and the default value of a non-nullable
+/// value type (on a nullable property an explicit <c>false</c> or <c>0</c> is a criterion).
 /// </remarks>
 [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
 public sealed class FilterPropertyAttribute : Attribute
@@ -38,11 +42,6 @@ public sealed class FilterPropertyAttribute : Attribute
     /// The filter operator to apply (default: Equal)
     /// </summary>
     public FilterOperator Operator { get; set; } = FilterOperator.Equal;
-
-    /// <summary>
-    /// The logical operator for combining this filter with others (default: And)
-    /// </summary>
-    public LogicalOperator Logic { get; set; } = LogicalOperator.And;
 
     /// <summary>
     /// Creates a FilterProperty attribute that maps to the same-named entity property

@@ -93,6 +93,12 @@ public static class ErrorCodes
     /// 前端据此把它渲染成「先去办离职」而不是「删除出错」。
     /// </remarks>
     public const string IDENTITY_USER_IN_USE = "IDENTITY_USER_IN_USE";
+
+    /// <summary>
+    /// 管理端用户 CSV 导出命中的行数超过导出上限，整次导出被拒绝（HTTP 400）。导出从不静默截断，
+    /// 拿到的文件就是筛选条件下的全部结果；被拒时消息里写着命中了多少行，提示收窄筛选再导。
+    /// </summary>
+    public const string IDENTITY_USER_EXPORT_TOO_LARGE = "IDENTITY_USER_EXPORT_TOO_LARGE";
     public const string IDENTITY_ROLE_ASSIGN_FAILED = "IDENTITY_ROLE_ASSIGN_FAILED";
     public const string IDENTITY_ROLE_REMOVE_FAILED = "IDENTITY_ROLE_REMOVE_FAILED";
     public const string IDENTITY_ORGANIZATION_ERROR = "IDENTITY_ORGANIZATION_ERROR";
@@ -112,6 +118,16 @@ public static class ErrorCodes
     /// 让他用常规方式登录一次，再从个人中心主动绑定 —— 那时「他是不是账号主人」已经被证明过了。
     /// </remarks>
     public const string IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED = "IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED";
+
+    /// <summary>
+    /// 第三方登录带来的身份在本地没有账号，而这个部署没有开放第三方登录开户
+    /// （<c>Identity:Registration:EnableOAuthRegistration</c>，默认关闭）。
+    /// </summary>
+    /// <remarks>
+    /// 已关联的外部身份与按已证实邮箱关联的既有账号不受影响；这个码只出现在「要新建账号」的那一支。
+    /// 不开放注册的系统里，先邀请开户、再由本人从个人中心绑定第三方账号。
+    /// </remarks>
+    public const string IDENTITY_OAUTH_REGISTRATION_DISABLED = "IDENTITY_OAUTH_REGISTRATION_DISABLED";
     public const string IDENTITY_EMAIL_NOT_SET = "IDENTITY_EMAIL_NOT_SET";
     public const string IDENTITY_EMAIL_ALREADY_CONFIRMED = "IDENTITY_EMAIL_ALREADY_CONFIRMED";
     public const string IDENTITY_EMAIL_NOT_CONFIRMED = "IDENTITY_EMAIL_NOT_CONFIRMED";
@@ -165,6 +181,12 @@ public static class ErrorCodes
     public const string FILE_CHUNKED_UPLOAD_NOT_ENABLED = "FILE_CHUNKED_UPLOAD_NOT_ENABLED";
     public const string FILE_OPERATION_ERROR = "FILE_OPERATION_ERROR";
 
+    /// <summary>
+    /// 这次写入会让文件的所有者超出存储配额。响应码 413：重试同一个请求不会变好，
+    /// 要先腾出空间（删掉文件、清空回收站）或由管理员调高配额。
+    /// </summary>
+    public const string FILE_QUOTA_EXCEEDED = "FILE_QUOTA_EXCEEDED";
+
     // ==================== System 模块错误码 ====================
     public const string SYSTEM_ERROR = "SYSTEM_ERROR";
 
@@ -175,6 +197,7 @@ public static class ErrorCodes
     public const string NOTIFICATION_PUSH_ERROR = "NOTIFICATION_PUSH_ERROR";
     public const string NOTIFICATION_CANCELLED = "NOTIFICATION_CANCELLED";
     public const string NOTIFICATION_SEND_ERROR = "NOTIFICATION_SEND_ERROR";
+    public const string NOTIFICATION_INVALID_TIME_ZONE = "NOTIFICATION_INVALID_TIME_ZONE";
 
     // ==================== Template 模块错误码 ====================
     public const string TEMPLATE_ERROR = "TEMPLATE_ERROR";

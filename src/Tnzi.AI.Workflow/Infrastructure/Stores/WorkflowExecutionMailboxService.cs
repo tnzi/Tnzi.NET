@@ -40,7 +40,10 @@ public class WorkflowExecutionMailboxService : IWorkflowExecutionMailbox
         entity.PendingSignalsJson = JsonSerializer.Serialize(signals, TnziJsonDefaults.Options);
         entity.PendingSignalCount = signals.Count;
         entity.UpdatedTime = DateTime.UtcNow;
-        entity.CurrentWaitReason ??= signal.Type == WorkflowExecutionSignalTypes.Cancel ? "cancel_requested" : "external_signal";
+        // A cancel outranks whatever reason an earlier signal left behind; other signals keep an existing reason.
+        entity.CurrentWaitReason = signal.Type == WorkflowExecutionSignalTypes.Cancel
+            ? "cancel_requested"
+            : entity.CurrentWaitReason ?? "external_signal";
         await _repository.UpdateAsync(entity, ct);
     }
 

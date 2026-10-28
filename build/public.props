@@ -35,7 +35,9 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <!-- 1701, 1702: 程序集版本警告，不影响功能 -->
     <!-- 1591: XML 文档注释警告，保留抑制 -->
-    <!-- 8002: 其他警告，保留抑制 -->
+    <!-- 8002: 引用的程序集没有强名称（Stripe.net、Pgvector、Telegram.Bot 等第三方包未签名）。
+         只面向 net10.0，运行时不校验强名称，也不要求强名称程序集只引用强名称程序集，故无运行期后果。
+         强签名的测试项目不导入本文件，同一处置见 tests/Directory.Build.props -->
     <NoWarn>$(NoWarn);1701;1702;1591;8002</NoWarn>
   </PropertyGroup>
  

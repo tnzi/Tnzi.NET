@@ -61,7 +61,6 @@ const getDocuments = vi.fn(async () => ({
       fileSize: 524288,
       chunkCount: 42,
       status: 1,
-      version: 1,
       creationTime: '2026-04-01T00:00:00Z',
     },
   ],
@@ -197,7 +196,7 @@ describe('Knowledge page (TCardPage card grid + document drawer)', () => {
     expect(vm.manageVisible).toBe(true)
     expect(vm.managed?.id).toBe('kb1')
     expect(getDocuments).toHaveBeenCalledTimes(1)
-    expect(getDocuments).toHaveBeenCalledWith('kb1')
+    expect(getDocuments).toHaveBeenCalledWith('kb1', { pageIndex: 1, pageSize: 20 })
   })
 
   it('reindex action calls bridge.knowledge.reindex with the row id', async () => {
@@ -268,5 +267,130 @@ describe('Knowledge page - agents that depend on a knowledge base', () => {
     expect(usedBy).toHaveBeenCalledWith('knowledge', 'kb2')
     expect(deleteConfirms[1]!.text()).toContain('1 agent(s) have an active grant for this')
     expect(deleteConfirms[1]!.text()).toContain('Support Bot')
+  })
+})
+
+/**
+ * The documents endpoint is paged (default page size 10) and the drawer asked
+ * for one page with no query and rendered it without a pager: documents past
+ * the first page could not be seen, refreshed or deleted, and nothing said
+ * they existed.
+ */
+describe('Knowledge page - the manage drawer pages its documents', () => {
+  function docs(pageIndex: number, total: number, pageSize = 20) {
+    const start = (pageIndex - 1) * pageSize
+    const count = Math.max(0, Math.min(pageSize, total - start))
+    return {
+      items: Array.from({ length: count }, (_, i) => ({
+        id: `doc${start + i + 1}`,
+        knowledgeBaseId: 'kb1',
+        fileName: `file-${start + i + 1}.txt`,
+        contentType: 'text/plain',
+        fileSize: 10,
+        chunkCount: 1,
+        status: 1,
+        version: 1,
+        creationTime: '2026-04-01T00:00:00Z',
+      })),
+      totalCount: total,
+      pageIndex,
+      pageSize,
+    }
+  }
+
+  type PagingVm = {
+    openManage: (row: { id: string; name: string }) => Promise<void>
+    documents: Array<{ id: string }>
+  }
+
+  function documentsTable(wrapper: ReturnType<typeof mount>) {
+    const table = wrapper
+      .findAllComponents({ name: 'DataTable' })
+      .find((c) => (c.props('data') as Array<{ id?: string }> | undefined)?.some((r) => r.id?.startsWith('doc')))
+    if (!table) throw new Error('documents table not rendered')
+    return table
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getDocuments.mockReset()
+  })
+
+  it('shows how many documents there are and loads the page the operator picks', async () => {
+    getDocuments.mockImplementation((async (_kb: string, q?: { pageIndex?: number; pageSize?: number }) =>
+      docs(q?.pageIndex ?? 1, 25, q?.pageSize ?? 10)) as never)
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as PagingVm
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+
+    const pagination = documentsTable(wrapper).vm.$attrs.pagination as {
+      itemCount: number
+      onUpdatePage: (p: number) => void
+    }
+    expect(pagination.itemCount).toBe(25)
+    expect(documentsTable(wrapper).vm.$attrs.remote).not.toBeUndefined()
+
+    pagination.onUpdatePage(2)
+    await flushPromises()
+    expect(getDocuments).toHaveBeenLastCalledWith('kb1', { pageIndex: 2, pageSize: 20 })
+    expect(vm.documents.map((d) => d.id)).toEqual(['doc21', 'doc22', 'doc23', 'doc24', 'doc25'])
+  })
+
+  it('a slower answer for the knowledge base it left does not replace the one now open', async () => {
+    let releaseFirst!: () => void
+    getDocuments.mockImplementation((async (kb: string) => {
+      if (kb === 'kb1') {
+        await new Promise<void>((r) => {
+          releaseFirst = r
+        })
+        return docs(1, 3)
+      }
+      return { items: [{ ...docs(1, 1).items[0], id: 'docB', knowledgeBaseId: 'kb2' }], totalCount: 1, pageIndex: 1, pageSize: 20 }
+    }) as never)
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as PagingVm
+    void vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+    await vm.openManage({ id: 'kb2', name: 'Internal Wiki' })
+    await flushPromises()
+    releaseFirst()
+    await flushPromises()
+
+    expect(vm.documents.map((d) => d.id)).toEqual(['docB'])
+  })
+
+  it('a delete that empties the last page shows the page that is now last', async () => {
+    let total = 21
+    getDocuments.mockImplementation((async (_kb: string, q?: { pageIndex?: number; pageSize?: number }) =>
+      docs(q?.pageIndex ?? 1, total, q?.pageSize ?? 10)) as never)
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as PagingVm & { deleteDoc: (row: { id: string }) => Promise<void> }
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+    ;(documentsTable(wrapper).vm.$attrs.pagination as { onUpdatePage: (p: number) => void }).onUpdatePage(2)
+    await flushPromises()
+    expect(vm.documents.map((d) => d.id)).toEqual(['doc21'])
+
+    total = 20
+    await vm.deleteDoc({ id: 'doc21' })
+    await flushPromises()
+    expect(getDocuments).toHaveBeenLastCalledWith('kb1', { pageIndex: 1, pageSize: 20 })
+    expect(vm.documents).toHaveLength(20)
+  })
+
+  it('a refused document list says so instead of reading as an empty knowledge base', async () => {
+    getDocuments.mockImplementation((async () => {
+      throw new Error('Permission denied')
+    }) as never)
+    const wrapper = mount(Knowledge, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as PagingVm
+    await vm.openManage({ id: 'kb1', name: 'Product Docs' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not load the documents: Permission denied')
   })
 })

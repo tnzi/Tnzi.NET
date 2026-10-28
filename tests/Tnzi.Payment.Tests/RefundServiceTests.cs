@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Mapster;
 using MapsterMapper;
 using Microsoft.Extensions.Logging;
+using MockQueryable;
 using Tnzi.Domain.Repositories;
 using Tnzi.Mapster;
 using Tnzi.Payment.Dtos;
@@ -55,8 +56,21 @@ public class RefundServiceTests
             _paymentRepositoryMock.Object,
             _providerFactoryMock.Object,
             _optionsMock.Object,
+            TestBillingAccounts.UserScope(),
             serviceProviderMock.Object
         );
+    }
+
+    /// <summary>
+    /// 退款仓储的 IQueryable 替身：按 Id 读退款走的是与列表同一条 SQL 投影（TradeNo 要经支付导航取）。
+    /// </summary>
+    private void SetupRefundQueryable(List<Refund> refunds)
+    {
+        var mockQueryable = refunds.BuildMock();
+        _refundRepositoryMock.As<IQueryable<Refund>>().Setup(q => q.Provider).Returns(mockQueryable.Provider);
+        _refundRepositoryMock.As<IQueryable<Refund>>().Setup(q => q.Expression).Returns(mockQueryable.Expression);
+        _refundRepositoryMock.As<IQueryable<Refund>>().Setup(q => q.ElementType).Returns(mockQueryable.ElementType);
+        _refundRepositoryMock.As<IQueryable<Refund>>().Setup(q => q.GetEnumerator()).Returns(() => mockQueryable.GetEnumerator());
     }
 
     #region GetRefundAsync Tests
@@ -73,12 +87,11 @@ public class RefundServiceTests
             RefundAmount = 50m,
             Status = RefundStatus.Pending,
             Reason = "Test refund",
-            BusinessOrderNo = "ORDER001"
+            BusinessOrderNo = "ORDER001",
+            Payment = new PaymentEntity { TradeNo = "PAY001" }
         };
 
-        _refundRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Refund, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(refund);
+        SetupRefundQueryable([refund]);
 
         // Act
         var result = await _service.GetRefundAsync(refundId);
@@ -93,9 +106,7 @@ public class RefundServiceTests
     public async Task GetRefundAsync_WithNonExistingRefund_Returns404()
     {
         // Arrange
-        _refundRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Refund, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Refund?)null);
+        SetupRefundQueryable([]);
 
         // Act
         var result = await _service.GetRefundAsync(Guid.NewGuid());
@@ -112,10 +123,8 @@ public class RefundServiceTests
         var refundId = Guid.NewGuid();
         var ownerId = Guid.NewGuid();
 
-        // 当使用 ownerUserId 过滤时，非所有者查询返回 null
-        _refundRepositoryMock.Setup(r => r.FirstOrDefaultAsync(
-                It.IsAny<Expression<Func<Refund, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Refund?)null);
+        // 退款属于另一个付款人：按 ownerUserId 过滤后什么都不剩
+        SetupRefundQueryable([new Refund { Id = refundId, RefundNo = "REF002", Payment = new PaymentEntity { TradeNo = "PAY002", UserId = Guid.NewGuid() } }]);
 
         // Act
         var result = await _service.GetRefundAsync(refundId, ownerId);

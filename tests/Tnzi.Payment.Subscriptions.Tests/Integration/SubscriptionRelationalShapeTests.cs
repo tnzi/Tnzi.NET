@@ -131,6 +131,9 @@ public class SubscriptionRelationalShapeTests
 
         indexes.ShouldBe(
         [
+            "BillingAccountType,BillingAccountId",
+            "BillingAccountType,BillingAccountId [unique]",
+            "BillingAccountType,BillingAccountId,ProductCode [unique]",
             "EndTime",
             "PlanId",
             "Status",
@@ -139,9 +142,12 @@ public class SubscriptionRelationalShapeTests
             "Status,TrialEndTime",
             "SubscriptionNo [unique]",
             "UserId",
-            "UserId [unique]",
-            "UserId,ProductCode [unique]",
         ]);
+
+        // 两条唯一索引按名字找得到（迁移里一眼可辨，不会被 EF 按列组合合并掉）
+        var names = db.Model.FindEntityType(typeof(Subscription))!.GetIndexes().Select(i => i.Name).ToList();
+        names.ShouldContain(SubscriptionConfiguration.ActiveProductPerAccountIndex);
+        names.ShouldContain(SubscriptionConfiguration.ActiveWithoutProductPerAccountIndex);
     }
 
     /// <summary>

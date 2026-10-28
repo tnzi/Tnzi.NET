@@ -31,7 +31,7 @@
 
     <div class="t-presence-head">
       <span class="t-presence-title">{{ t('presence.title') }}</span>
-      <NSwitch v-model:value="onlineOnly" size="small" @update:value="loadPresence">
+      <NSwitch v-model:value="onlineOnly" size="small" @update:value="onPresenceFilterChange">
         <template #checked>{{ t('presence.onlineOnly') }}</template>
         <template #unchecked>{{ t('presence.all') }}</template>
       </NSwitch>
@@ -83,8 +83,23 @@ const stats = ref<ChatStatisticsDto | null>(null)
 const presence = ref<PresenceOverviewDto | null>(null)
 const presenceColumns = buildPresenceColumns(t)
 
+// The latest presence read wins: a slower answer for the switch's previous
+// position must not replace the list it now asks for.
+let presenceToken = 0
+
 async function loadPresence(): Promise<void> {
-  presence.value = await bridge.presence({ onlineOnly: onlineOnly.value })
+  const myToken = ++presenceToken
+  const result = await bridge.presence({ onlineOnly: onlineOnly.value })
+  if (myToken === presenceToken) presence.value = result
+}
+
+/** The online-only switch: a refused read is reported, not left as an unhandled rejection. */
+async function onPresenceFilterChange(): Promise<void> {
+  try {
+    await loadPresence()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
 }
 
 async function refresh(): Promise<void> {

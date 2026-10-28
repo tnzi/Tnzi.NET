@@ -13,6 +13,8 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
     private readonly ILogger<UnitOfWorkManager>? _logger;
     private readonly ConcurrentDictionary<Type, IUnitOfWork> _unitOfWorks = new();
     private int _transactionDepth;
+    // 被内层回滚连带终结、但还没收到自己那次提交/回滚的外层层数（只用于诊断，见 RollbackTransactionAsync）
+    private int _orphanedOuterLevels;
     private volatile List<Type>? _cachedDbContextTypes;
 
     public UnitOfWorkManager(IServiceProvider serviceProvider, ILogger<UnitOfWorkManager>? logger = null)
@@ -78,26 +80,14 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         return totalChanges;
     }
 
+    /// <remarks>
+    /// 与 <see cref="EnableTransaction"/> 等价：深度 +1，物理事务延迟到首次保存才开启。
+    /// ★ 已有事务时同样要计入深度。此前嵌套调用不加深度，与它配对的 <see cref="CommitTransactionAsync"/>
+    /// 看到深度 1 就走最外层分支：把外层到目前为止缓冲的写入一并物理提交、提前执行提交后队列、退出事务态，
+    /// 外层随后的回滚撤不掉任何东西，后续写入也落在自动提交模式下。
+    /// </remarks>
     public Task BeginTransactionAsync(CancellationToken cancellationToken = default)
     {
-        // 如果已启用事务，说明是嵌套调用
-        // 在嵌套场景中，我们不需要真正开始数据库事务，只需要标记事务已启用
-        if (IsEnabledTransaction)
-        {
-            // 为新获取的 UnitOfWork 也启用事务
-            var dbContextTypes = GetAllRegisteredDbContextTypes();
-            foreach (var dbContextType in dbContextTypes)
-            {
-                var unitOfWork = GetUnitOfWork(dbContextType);
-                if (unitOfWork != null)
-                {
-                    _unitOfWorks.TryAdd(dbContextType, unitOfWork);
-                }
-            }
-            return Task.CompletedTask;
-        }
-
-        // 第一次调用，启用事务（延迟开始）
         EnableTransaction();
         return Task.CompletedTask;
     }
@@ -113,6 +103,14 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
     {
         if (!IsEnabledTransaction)
         {
+            if (TryConsumeOrphanedOuterLevel())
+            {
+                // 调用方吞掉了内层失败、继续走到了外层提交：这次提交什么都提交不了，
+                // 内层回滚之后的写入已经在事务之外直接落库。此前这里静默返回，看起来与成功提交无异。
+                _logger?.LogWarning(
+                    "CommitTransactionAsync was called for an outer unit of work whose transaction had already been rolled back by an inner unit of work: nothing is committed by this call, and writes made since that rollback were saved outside any transaction. Abort the outer operation when an inner unit of work fails, or run each item in its own DI scope.");
+            }
+
             return;
         }
 
@@ -218,6 +216,10 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
                     }
                 }
 
+                // 没提交成功的上下文，其被回滚的写入不得留在变更跟踪器里（见 ClearChangeTrackers）；
+                // 已提交的那些条目已被接受、与库一致，不动
+                ClearChangeTrackers(unitOfWorkEntries.Select(u => u.Key).Where(t => !committedDbContexts.Contains(t)));
+
                 // 清空 post-commit 队列（事务失败，丢弃所有待执行操作）
                 var postCommitQueue = _serviceProvider.GetService<IPostCommitActionQueue>();
                 postCommitQueue?.Clear();
@@ -248,14 +250,24 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         Interlocked.Decrement(ref _transactionDepth);
         AmbientUnitOfWork.Set(null);
 
-        // 全部提交成功，执行 post-commit actions（如延迟事件发布）
+        // 物理事务属于先于本管理器进入事务的作用域工作单元，这次「提交」只 flush 进了它的事务：
+        // 提交后动作要等那个事务真正提交，由它执行；它回滚则随之作废（见 EFCoreUnitOfWork 的类型注释）
+        if (unitOfWorkEntries.Any(e => e.Value is IEnclosedUnitOfWork { LastCommitDeferredToEnclosingTransaction: true }))
+        {
+            return;
+        }
+
+        // 全部提交成功，执行 post-commit actions（如延迟事件发布）。
+        // ★ 不传调用方的令牌：它通常是请求的 RequestAborted。事务已经提交，客户端此刻断开（代理超时、移动端切后台）
+        // 不该让缓存失效、通知这些副作用在事件总线的并发闸门处被取消：那条取消发生在重试与死信之外，
+        // 结果是库已改而副作用一个都没发生，只留一条错误日志。
         var queue = _serviceProvider.GetService<IPostCommitActionQueue>();
         if (queue != null && queue.Count > 0)
         {
             var queuedCount = queue.Count;
             try
             {
-                await queue.ExecuteAsync(cancellationToken);
+                await queue.ExecuteAsync(CancellationToken.None);
             }
             catch (AggregateException ex)
             {
@@ -275,15 +287,35 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         // 事务深度与环境事务作用域已在 post-commit 队列执行前清理
     }
 
+    /// <remarks>
+    /// 任何深度的回滚都撤销整个环境事务（没有保存点）：嵌套层失败时，外层到目前为止的写入一并撤销，
+    /// 外层随后的提交/回滚找不到事务、直接返回。调用方因此必须在内层失败后中止外层操作
+    /// （见 docs/coding-standards/service.md 的失败语义）。违反这条规则的「吞掉内层异常、继续写入」
+    /// 不会被拦下，但外层那次什么都提交不了的提交会记一条警告，而不是静默。
+    /// </remarks>
     public async Task RollbackTransactionAsync(CancellationToken cancellationToken = default)
     {
         if (!IsEnabledTransaction)
         {
+            // 外层在内层回滚之后中止：这正是规定的处理方式，只把记账消化掉
+            TryConsumeOrphanedOuterLevel();
             return;
         }
 
+        // 参与本事务的上下文要在清空 _unitOfWorks 之前认出来，回滚之后清它们的变更跟踪器（见 ClearChangeTrackers）
+        var participants = CollectParticipatingContextTypes();
+
         // 重置事务深度（回滚所有嵌套事务）
-        Interlocked.Exchange(ref _transactionDepth, 0);
+        var depth = Interlocked.Exchange(ref _transactionDepth, 0);
+        if (depth > 1)
+        {
+            // 记 Information 而不是 Warning：「内层失败、外层随即中止」是正常的失败路径（业务校验经异常中止就走这里）。
+            // 真正的误用是外层吞掉失败后还去提交，那一处记 Warning（见 CommitTransactionAsync）
+            Interlocked.Add(ref _orphanedOuterLevels, depth - 1);
+            _logger?.LogInformation(
+                "An inner unit of work rolled back at transaction depth {Depth}: the whole ambient transaction was rolled back, including the writes of the {OuterLevels} enclosing unit(s) of work, which no longer have a transaction to commit. The enclosing operation must abort; writes it makes from here on are saved outside any transaction.",
+                depth, depth - 1);
+        }
 
         // 清除环境事务作用域(事务已结束)
         AmbientUnitOfWork.Set(null);
@@ -309,11 +341,68 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         }
 
         _unitOfWorks.Clear();
+        ClearChangeTrackers(participants);
 
         if (exceptions.Count > 0)
         {
             _logger?.LogWarning("One or more transactions failed to rollback");
             // 回滚失败不应该抛出异常，只记录警告
+        }
+    }
+
+    /// <summary>
+    /// 参与当前事务的上下文类型：建过工作单元的（flush 过、或提交时创建的），以及仍有挂起变更的
+    /// （事务里只做了缓冲写入、还没来得及建工作单元）。两者都没有的上下文没被这个事务碰过，不动它。
+    /// </summary>
+    private List<Type> CollectParticipatingContextTypes()
+    {
+        var candidates = new HashSet<Type>(_unitOfWorks.Keys);
+        try
+        {
+            candidates.UnionWith(GetAllRegisteredDbContextTypes());
+        }
+        catch (Exception ex)
+        {
+            // 回滚发生在 catch 里，这里再抛会盖掉调用方的原始异常；只清建过工作单元的那些上下文
+            _logger?.LogError(ex, "Could not enumerate DbContext types while rolling back; only contexts with a unit of work will have their change trackers cleared");
+        }
+
+        var participants = new List<Type>();
+        foreach (var type in candidates)
+        {
+            if (_unitOfWorks.ContainsKey(type)
+                || (_serviceProvider.GetService(type) is DbContext context && context.ChangeTracker.HasChanges()))
+            {
+                participants.Add(type);
+            }
+        }
+
+        return participants;
+    }
+
+    /// <summary>
+    /// 回滚之后清空参与上下文的变更跟踪器。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 回滚只撤销数据库里的事务。EF 在 <c>SaveChanges</c> 失败时不接受变更（条目保持 <c>Added</c> / <c>Modified</c>），
+    /// flush 之后被回滚的条目停在 <c>Unchanged</c>。不清的话，同一作用域里的下一次保存会把被回滚的写入重放
+    /// （同一个异常再抛一遍，「每项一个工作单元、失败就继续」的循环此后每一项都失败），或者把提交之前就抛出的那一项的
+    /// 半成品写入真正落库；按主键 <c>GetAsync</c> 还会从跟踪器里取到一个库里不存在的实例。
+    /// </para>
+    /// <para>
+    /// 清空同时会让调用方此前读出、仍持有的实体变成脱离跟踪：回滚之后的实例一律视为失效，需要的话重新读取。
+    /// 这是 EF 对「失败之后继续使用同一个上下文」的建议做法；逐条精确回退要给整个事务做快照，代价高且容易漏。
+    /// </para>
+    /// </remarks>
+    private void ClearChangeTrackers(IEnumerable<Type> contextTypes)
+    {
+        foreach (var type in contextTypes)
+        {
+            if (_serviceProvider.GetService(type) is DbContext context)
+            {
+                context.ChangeTracker.Clear();
+            }
         }
     }
 
@@ -419,6 +508,23 @@ public class UnitOfWorkManager : IUnitOfWorkManager, IAmbientUnitOfWorkScope, ID
         }
 
         return dbContextTypes;
+    }
+
+    private bool TryConsumeOrphanedOuterLevel()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _orphanedOuterLevels);
+            if (current <= 0)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _orphanedOuterLevels, current - 1, current) == current)
+            {
+                return true;
+            }
+        }
     }
 
     public void EnableTransaction()

@@ -14,6 +14,8 @@ public class ChatContactServiceTests
             sp.GetRequiredService<IRepository<UserDetail, Guid>>(),
             sp.GetRequiredService<IPresenceService>(),
             sp.GetRequiredService<IOptionsSnapshot<ChatOptions>>(),
+            // Real scope provider; multi-tenancy is off here, so it never narrows (see ChatTenantScopeTests).
+            new Tnzi.Identity.Services.UserTenantScopeProvider(sp.GetRequiredService<IRepository<User, Guid>>()),
             // Optional - null unless a test registers a super-admin source.
             sp.GetService<IFunctionAuthorizationService>(),
             // Optional - null unless a test registers a chat.use gate.
@@ -319,6 +321,64 @@ public class ChatContactServiceTests
 
         result.Data!.Count.ShouldBe(20);
         result.Data!.Select(c => c.UserId).ShouldNotContain(id => disabled.Contains(id));
+    }
+
+    /// <summary>
+    /// 聊天是白名单制（只有持 chat.use 的人能聊），持有者是少数时一个固定的 3 倍窗口里只剩几个可用的人：
+    /// 1000 个用户、每 10 个里 1 个持有，首页窗口 60 个候选只剩 6 个，「新建对话」列表只显示 6 个而不是 20 个。
+    /// 页面没填满就接着往后翻窗口，直到填满、翻到底或到达窗口上限。
+    /// </summary>
+    [Fact]
+    public async Task SearchUsers_SparseGrants_KeepsScanningUntilThePageFills()
+    {
+        var me = Guid.NewGuid();
+        var users = Directory(1000);
+        var disabled = users.Where((_, i) => i % 10 != 0).Select(u => u.Id).ToHashSet();
+        users.Add(new User { Id = me, UserName = "me" });
+        var access = new CountingAccess(disabled);
+        var svc = BuildService(BuildSp(users, me, access: access));
+
+        var result = await svc.SearchUsersAsync("");
+
+        result.Data!.Count.ShouldBe(20);
+        result.Data!.Select(c => c.UserId).ShouldNotContain(id => disabled.Contains(id));
+        result.Data!.Select(c => c.Name).ShouldBe(result.Data!.Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal));
+        access.BatchSizes.ShouldAllBe(n => n <= 20 * ChatContactService.CandidateWindowFactor);
+        access.BatchSizes.Count.ShouldBeLessThanOrEqualTo(ChatContactService.MaxCandidateWindows);
+    }
+
+    [Fact]
+    public async Task SearchUsers_FewerGrantedUsersThanThePage_ReturnsThemAllAndStopsAtTheEnd()
+    {
+        var me = Guid.NewGuid();
+        var users = Directory(130);
+        var granted = users.Where((_, i) => i % 30 == 0).Select(u => u.Id).ToHashSet();
+        var disabled = users.Select(u => u.Id).Where(id => !granted.Contains(id)).ToHashSet();
+        users.Add(new User { Id = me, UserName = "me" });
+        var access = new CountingAccess(disabled);
+        var svc = BuildService(BuildSp(users, me, access: access));
+
+        var result = await svc.SearchUsersAsync("");
+
+        result.Data!.Select(c => c.UserId).ShouldBe(granted, ignoreOrder: true);
+        // 130 个候选：60 + 60 + 10，第三个窗口不满即翻到底。
+        access.BatchSizes.ShouldBe([60, 60, 10]);
+    }
+
+    [Fact]
+    public async Task SearchUsers_ScanStopsAtTheWindowCap_WhenAlmostNobodyHoldsChatUse()
+    {
+        var me = Guid.NewGuid();
+        var users = Directory(5000);
+        var disabled = users.Select(u => u.Id).ToHashSet();
+        users.Add(new User { Id = me, UserName = "me" });
+        var access = new CountingAccess(disabled);
+        var svc = BuildService(BuildSp(users, me, access: access));
+
+        var result = await svc.SearchUsersAsync("");
+
+        result.Data!.ShouldBeEmpty();
+        access.BatchSizes.Count.ShouldBe(ChatContactService.MaxCandidateWindows);
     }
 
     [Fact]

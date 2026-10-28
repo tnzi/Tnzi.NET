@@ -13,6 +13,7 @@ global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.EventBus;
+global using Tnzi.Exceptions;
 global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Options;

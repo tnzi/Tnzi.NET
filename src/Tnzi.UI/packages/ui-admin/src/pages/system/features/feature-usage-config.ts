@@ -5,6 +5,7 @@ import type {
   FeatureUsageRangeQuery,
   FeatureUsageTrendDto,
 } from '../../../services/bridges/feature-bridge'
+import { dayRangeBounds } from '../../../utils/day-range'
 
 export const USAGE_TOP_OPTIONS = [10, 20, 50, 100] as const
 
@@ -29,10 +30,15 @@ export function defaultUsageRange(now = new Date()): [number, number] {
   return [start.getTime(), end.getTime()]
 }
 
-/** `[from, to]` epoch millis → the ISO strings the backend filters on (inclusive both ends). */
+/**
+ * `[from, to]` epoch millis → the ISO strings the backend filters on (inclusive
+ * both ends). A range the operator picks arrives as two local midnights, so the
+ * end is widened to the end of its day; the default range already ends there.
+ */
 export function toRangeQuery(range: [number, number] | null): FeatureUsageRangeQuery {
   if (!range) return {}
-  return { from: new Date(range[0]).toISOString(), to: new Date(range[1]).toISOString() }
+  const { start, end } = dayRangeBounds(range)
+  return { from: start, to: end }
 }
 
 /** `enableRate` arrives as a 0-100 percentage; render with one decimal. */

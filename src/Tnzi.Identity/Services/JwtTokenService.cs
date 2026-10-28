@@ -78,6 +78,10 @@ public class JwtTokenService : ApplicationService, ITokenService
     /// 生成JWT令牌
     /// </summary>
     public string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null)
+        => GenerateToken(user, roles, extraClaims, sessionId, notAfter: null);
+
+    /// <inheritdoc />
+    public string GenerateToken(User user, IList<string> roles, IEnumerable<Claim>? extraClaims, Guid? sessionId, DateTime? notAfter)
     {
         var claims = new List<Claim>
         {
@@ -123,6 +127,10 @@ public class JwtTokenService : ApplicationService, ITokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var expires = DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes);
+        if (notAfter.HasValue && notAfter.Value < expires)
+        {
+            expires = notAfter.Value;
+        }
 
         var token = new JwtSecurityToken(
             issuer: _jwtOptions.Issuer,
@@ -139,8 +147,9 @@ public class JwtTokenService : ApplicationService, ITokenService
     /// 判断 claim 是否落到框架保留语义（身份/角色/租户/标准 JWT 声明）。
     /// 同时检查长 URI、JWT 短名，以及 WriteToken outbound 映射后的有效名 ——
     /// 防止调用方经 extraClaims 用短名（如 "role"/"nameid"）绕过过滤伪造身份/提权。
+    /// 委派会话的声明名校验（<see cref="DelegatedSessionRules.IsAllowedClaimType"/>）也经它判断。
     /// </summary>
-    private static bool IsReservedClaimType(string? claimType)
+    internal static bool IsReservedClaimType(string? claimType)
     {
         if (string.IsNullOrEmpty(claimType))
         {
@@ -169,52 +178,5 @@ public class JwtTokenService : ApplicationService, ITokenService
         rng.GetBytes(randomNumber);
         // 使用URL安全的Base64编码，避免URL不安全的字符（+、/、=）
         return WebEncoders.Base64UrlEncode(randomNumber);
-    }
-
-    /// <summary>
-    /// 从过期的令牌获取Principal
-    /// </summary>
-    public ClaimsPrincipal? GetPrincipalFromExpiredToken(string token)
-    {
-        var tokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateAudience = false,
-            ValidateIssuer = false,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secretKey)),
-            ValidateLifetime = false // 不验证过期时间
-        };
-
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var principal = tokenHandler.ValidateToken(token, tokenValidationParameters, out SecurityToken securityToken);
-
-        if (securityToken is not JwtSecurityToken jwtSecurityToken ||
-            !jwtSecurityToken.Header.Alg.Equals(SecurityAlgorithms.HmacSha256, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new SecurityTokenException("Invalid token");
-        }
-
-        return principal;
-    }
-
-    /// <summary>
-    /// 生成令牌结果
-    /// </summary>
-    public TokenResult GenerateTokenResult(User user, IList<string> roles, IEnumerable<Claim>? extraClaims = null, Guid? sessionId = null)
-    {
-        var accessToken = GenerateToken(user, roles, extraClaims, sessionId);
-        var refreshToken = GenerateRefreshToken();
-        var expiresAt = DateTime.UtcNow.AddMinutes(_jwtOptions.AccessTokenExpirationMinutes);
-
-        return new TokenResult
-        {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            ExpiresAt = expiresAt,
-            ExpiresIn = _jwtOptions.AccessTokenExpirationMinutes * 60,
-            RefreshTokenExpiresIn = _jwtOptions.EnableRefreshToken
-                ? _jwtOptions.RefreshTokenExpirationDays * 24 * 60 * 60
-                : null
-        };
     }
 }

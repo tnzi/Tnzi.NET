@@ -432,4 +432,148 @@ public class FeatureValueScopeTests
         code.EffectiveSource.ShouldBe(FeatureValueSource.Default);
         code.Group.ShouldBe("Limits");
     }
+
+    // ==================== Tenant keys are stored the way the runtime reads them ====================
+
+    private TenantFeatureValueProvider RealTenantProvider()
+        => new(_valueRepositoryMock.Object, currentTenant: null,
+            multiTenancyOptions: Microsoft.Extensions.Options.Options.Create(new Tnzi.MultiTenancy.MultiTenancyOptions { Enabled = true }));
+
+    /// <summary>
+    /// 运行时按 <c>ICurrentTenant.Id.ToString()</c>（小写、带连字符）查租户值。宿主管理员手输大写 GUID 时
+    /// 此前 200 存进去，在区分大小写的库上运行时永远对不上。
+    /// </summary>
+    [Theory]
+    [InlineData("AAAAAAAA-0000-0000-0000-000000000001")]
+    [InlineData("aaaaaaaa000000000000000000000001")]
+    [InlineData("  {AAAAAAAA-0000-0000-0000-000000000001}  ")]
+    public async Task SetValueAsync_TenantKey_IsStoredInTheRuntimeForm(string key)
+    {
+        var definition = BooleanDefinition();
+        SetupDefinitions(definition);
+        SetupValues();
+        var service = CreateService(RealTenantProvider(), new StubFeatureValueProvider("Global", 100, requiresKey: false));
+
+        var result = await service.SetValueAsync(new SetFeatureValueRequest
+        {
+            FeatureDefinitionId = definition.Id, ProviderName = "Tenant", ProviderKey = key, Value = "true"
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        _insertedValues.ShouldHaveSingleItem().ProviderKey.ShouldBe("aaaaaaaa-0000-0000-0000-000000000001");
+    }
+
+    [Fact]
+    public async Task SetValueAsync_TenantKeyThatIsNotATenantId_Rejected400()
+    {
+        var definition = BooleanDefinition();
+        SetupDefinitions(definition);
+        SetupValues();
+        var service = CreateService(RealTenantProvider(), new StubFeatureValueProvider("Global", 100, requiresKey: false));
+
+        var result = await service.SetValueAsync(new SetFeatureValueRequest
+        {
+            FeatureDefinitionId = definition.Id, ProviderName = "Tenant", ProviderKey = "acme", Value = "true"
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.FeatureValueProviderKeyInvalid);
+        _insertedValues.ShouldBeEmpty();
+    }
+
+    // ==================== Lengths are refused with 400, not a 500 from the database ====================
+
+    [Fact]
+    public async Task SetValueAsync_ValueLongerThanTheColumn_Rejected400()
+    {
+        var definition = new FeatureDefinition { Id = Guid.NewGuid(), Name = "Feature.Text", ValueType = FeatureValueType.String, IsEnabled = true };
+        SetupDefinitions(definition);
+        SetupValues();
+        var service = CreateService(DefaultProviders());
+
+        var result = await service.SetValueAsync(new SetFeatureValueRequest
+        {
+            FeatureDefinitionId = definition.Id, ProviderName = "Global", Value = new string('x', 201)
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.FeatureFieldTooLong);
+        _insertedValues.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task BatchSetValuesAsync_OverlongItem_IsCountedAsFailure_OthersStillWritten()
+    {
+        var text = new FeatureDefinition { Id = Guid.NewGuid(), Name = "Feature.Text", ValueType = FeatureValueType.String, IsEnabled = true };
+        var toggle = BooleanDefinition();
+        SetupDefinitions(text, toggle);
+        SetupValues();
+        var service = CreateService(DefaultProviders());
+
+        var result = await service.BatchSetValuesAsync(new BatchSetFeatureValuesRequest
+        {
+            ProviderName = "Global",
+            Values =
+            [
+                new BatchFeatureValueItem { FeatureDefinitionId = text.Id, Value = new string('x', 201) },
+                new BatchFeatureValueItem { FeatureDefinitionId = toggle.Id, Value = "true" },
+            ]
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.SucceededCount.ShouldBe(1);
+        result.Data.FailedCount.ShouldBe(1);
+        result.Data.Errors.ShouldHaveSingleItem().ShouldContain("at most 200");
+        _valueRepositoryMock.Verify(r => r.InsertManyAsync(
+            It.Is<IEnumerable<FeatureValue>>(v => v.Single().FeatureDefinitionId == toggle.Id), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ==================== Duplicate definitions in one batch ====================
+
+    /// <summary>
+    /// 同一个定义在一批里出现两次、库里还没有行时，两条都进待插入列表：撞唯一索引整批 500，而无键作用域在
+    /// NULL 互不相等的库上连索引都挡不住，直接存成两行，之后值视图每次加载都 500。
+    /// </summary>
+    [Fact]
+    public async Task BatchSetValuesAsync_SameDefinitionTwice_Rejected400_BeforeAnyWrite()
+    {
+        var definition = BooleanDefinition();
+        SetupDefinitions(definition);
+        SetupValues();
+        var service = CreateService(DefaultProviders());
+
+        var result = await service.BatchSetValuesAsync(new BatchSetFeatureValuesRequest
+        {
+            ProviderName = "Global",
+            Values =
+            [
+                new BatchFeatureValueItem { FeatureDefinitionId = definition.Id, Value = "true" },
+                new BatchFeatureValueItem { FeatureDefinitionId = definition.Id, Value = "false" },
+            ]
+        });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.ErrorCode.ShouldBe(ErrorCodes.FeatureValueBatchDuplicate);
+        _valueRepositoryMock.Verify(r => r.InsertManyAsync(It.IsAny<IEnumerable<FeatureValue>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _valueRepositoryMock.Verify(r => r.UpdateManyAsync(It.IsAny<IEnumerable<FeatureValue>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetAllValuesAsync_DuplicateGlobalRows_StillLoad()
+    {
+        var definition = BooleanDefinition();
+        SetupDefinitions(definition);
+        SetupValues(
+            new FeatureValue { Id = Guid.NewGuid(), FeatureDefinitionId = definition.Id, ProviderName = "Global", ProviderKey = null, Value = "true" },
+            new FeatureValue { Id = Guid.NewGuid(), FeatureDefinitionId = definition.Id, ProviderName = "Global", ProviderKey = null, Value = "false" });
+        var service = CreateService(DefaultProviders());
+
+        var result = await service.GetAllValuesAsync("Global", null);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.ShouldHaveSingleItem().IsExplicitlySet.ShouldBeTrue();
+    }
 }

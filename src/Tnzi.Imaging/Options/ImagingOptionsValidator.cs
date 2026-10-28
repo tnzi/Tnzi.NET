@@ -21,12 +21,6 @@ public class ImagingOptionsValidator : OptionsValidatorBase<ImagingOptions>
         if (captcha.RandomLineCount < 0 || captcha.RandomLineCount > 50)
             AddError(errors, nameof(captcha.RandomLineCount), "RandomLineCount must be between 0 and 50.");
 
-        if (captcha.ExpireMinutes < 1 || captcha.ExpireMinutes > 60)
-            AddError(errors, nameof(captcha.ExpireMinutes), "ExpireMinutes must be between 1 and 60.");
-
-        if (captcha.DefaultLength < 2 || captcha.DefaultLength > 10)
-            AddError(errors, nameof(captcha.DefaultLength), "DefaultLength must be between 2 and 10.");
-
         if (options.MaxDecodePixels < 0)
             AddError(errors, nameof(options.MaxDecodePixels), "MaxDecodePixels cannot be negative (use 0 for no limit).");
 

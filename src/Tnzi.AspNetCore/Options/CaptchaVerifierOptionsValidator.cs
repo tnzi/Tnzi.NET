@@ -23,8 +23,11 @@ public class CaptchaVerifierOptionsValidator : OptionsValidatorBase<CaptchaVerif
         if (options.Altcha.ExpiresSeconds <= 0)
             errors.Add("Altcha.ExpiresSeconds must be greater than 0.");
 
-        if (!string.IsNullOrWhiteSpace(options.VerifyUrl) && !Uri.TryCreate(options.VerifyUrl, UriKind.Absolute, out _))
-            errors.Add("VerifyUrl must be an absolute URL.");
+        // 只看 UriKind.Absolute 不够：Linux 上 "/siteverify" 会被解析成绝对的 file:// 地址并通过校验。
+        if (!string.IsNullOrWhiteSpace(options.VerifyUrl)
+            && !(Uri.TryCreate(options.VerifyUrl, UriKind.Absolute, out var verifyUri)
+                && (verifyUri.Scheme == Uri.UriSchemeHttps || verifyUri.Scheme == Uri.UriSchemeHttp)))
+            errors.Add("VerifyUrl must be an absolute http(s) URL.");
 
         var provider = options.Provider?.Trim();
         if (string.IsNullOrEmpty(provider))

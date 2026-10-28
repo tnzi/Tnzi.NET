@@ -9,6 +9,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="columns"
+    :search-fields="searchFields"
     :show-default-search="false"
     :title="t('title')"
     :translate="t"
@@ -64,9 +65,10 @@ import { createPaymentBridge } from '../../services/bridges/payment-bridge'
 import { useAdminClient } from '../../plugin/client'
 import TFormSchemaRenderer from '../_shared/form-schema'
 import { buildRefundColumns, refundFormSchema } from './refund-config'
+import { billingAccountSearchFields } from './billing-account-config'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
-import type { RefundDto } from '@tnzi/core/services/payment'
+import { RefundStatus, type RefundDto } from '@tnzi/core/services/payment'
 
 const t = makePageTranslator('payment.refunds')
 const message = useSafeMessage()
@@ -75,6 +77,8 @@ const { can } = usePermissionGuard()
 const bridge = createPaymentBridge({ client: useAdminClient() })
 
 const columns = buildRefundColumns(t)
+// The list endpoint takes no keyword; billing account is the one free search.
+const searchFields = billingAccountSearchFields()
 
 const crud = useCrudPage<RefundDto, string>({
   pageId: 'payment.refunds',
@@ -84,9 +88,9 @@ const crud = useCrudPage<RefundDto, string>({
   // Refund records are immutable - lifecycle moves via approve/reject only.
 })
 
-// Only pending / in-review refunds can be approved or rejected.
-const REVIEWABLE = new Set(['Pending', 'Processing'])
-const isReviewable = (row: RefundDto): boolean => REVIEWABLE.has(String(row.status ?? ''))
+// The server approves or rejects only a Pending refund. Processing is a refund
+// that needed no approval and is being sent; both actions answer it with a 400.
+const isReviewable = (row: RefundDto): boolean => String(row.status ?? '') === RefundStatus.Pending
 
 async function approve(id: string): Promise<void> {
   try {

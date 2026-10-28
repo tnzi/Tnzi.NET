@@ -106,10 +106,10 @@ const statusLabel: Record<SubtaskStatus, string> = {
 }
 .t-subtask__badge--completed {
   background-color: var(--tnzi-ai-node-completed);
-  color: var(--tnzi-ai-on-accent);
+  color: var(--tnzi-ai-on-status);
 }
 .t-subtask__badge--failed {
   background-color: var(--tnzi-ai-node-failed);
-  color: var(--tnzi-ai-on-accent);
+  color: var(--tnzi-ai-on-status);
 }
 </style>

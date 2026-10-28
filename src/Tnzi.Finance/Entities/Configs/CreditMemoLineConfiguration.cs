@@ -7,7 +7,7 @@ public class CreditMemoLineConfiguration : EntityTypeConfigurationBase<CreditMem
 {
     public override void Configure(EntityTypeBuilder<CreditMemoLine> builder)
     {
-        builder.Property(l => l.Description).HasMaxLength(500);
+        builder.Property(l => l.Description).HasMaxLength(FinanceFieldLimits.LineDescriptionMaxLength);
         builder.Property(l => l.Quantity).HasQuantityPrecision();
         builder.Property(l => l.UnitPrice).HasMoneyPrecision();
         builder.Property(l => l.Amount).HasMoneyPrecision();

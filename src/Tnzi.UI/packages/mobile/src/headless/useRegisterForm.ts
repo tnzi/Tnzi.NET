@@ -1,5 +1,6 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from '@tnzi/core/adapters/i18n'
+import { isBlank } from './blank'
 
 export interface RegisterData {
   email: string
@@ -51,21 +52,26 @@ export function useRegisterForm(options: UseRegisterFormOptions = {}): UseRegist
 
   const canSubmit = computed(
     () =>
+      !isBlank(confirmPassword.value) &&
       !passwordMismatch.value &&
-      email.value !== '' &&
-      password.value !== '' &&
+      !isBlank(email.value) &&
+      !isBlank(password.value) &&
       !isSubmitting.value,
   )
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {}
-    if (!email.value) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
-    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
-    if (passwordMismatch.value) newErrors.confirmPassword = t('auth.passwordMismatch')
-    if (options.showUsername && !userName.value) {
+    if (isBlank(email.value)) newErrors.email = t('auth.pleaseEnter', { field: t('auth.email') })
+    if (isBlank(password.value)) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
+    if (isBlank(confirmPassword.value)) {
+      newErrors.confirmPassword = t('auth.pleaseConfirm', { field: t('auth.password') })
+    } else if (passwordMismatch.value) {
+      newErrors.confirmPassword = t('auth.passwordMismatch')
+    }
+    if (options.showUsername && isBlank(userName.value)) {
       newErrors.userName = t('auth.pleaseEnter', { field: t('auth.username') })
     }
-    if (options.showPhone && !phoneNumber.value) {
+    if (options.showPhone && isBlank(phoneNumber.value)) {
       newErrors.phoneNumber = t('auth.pleaseEnter', { field: t('auth.phone') })
     }
     errors.value = newErrors

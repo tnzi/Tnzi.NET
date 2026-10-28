@@ -1,5 +1,8 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Tnzi.MultiTenancy;
+using Tnzi.Options;
 
 namespace Tnzi.AspNetCore.Tests.Middleware;
 
@@ -43,9 +46,20 @@ public class TenantResolverMiddlewareTests
         }
     }
 
-    private static HttpContext BuildContext(Guid? headerTenant, Guid? claimTenant, bool authenticated)
+    private static HttpContext BuildContext(
+        Guid? headerTenant, Guid? claimTenant, bool authenticated, ITenantChecker? tenantChecker = null)
     {
-        var context = new DefaultHttpContext();
+        // 租户检查器按请求从 RequestServices 取（它通常是 Scoped），所以替身要放进请求容器。
+        var services = new ServiceCollection();
+        if (tenantChecker != null)
+        {
+            services.AddSingleton(tenantChecker);
+        }
+
+        var context = new DefaultHttpContext
+        {
+            RequestServices = services.BuildServiceProvider()
+        };
         context.Response.Body = new MemoryStream();
 
         if (headerTenant.HasValue)
@@ -154,9 +168,134 @@ public class TenantResolverMiddlewareTests
     }
 
     /// <summary>
+    /// 租户检查器从请求作用域取：停用的租户答 400，请求不往下走。两种来源都要挡：
+    /// 已认证请求的租户来自 claim，匿名请求的来自外部来源（这里是请求头）。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task InactiveTenant_FromTheRequestScopedChecker_IsRejected(bool authenticated)
+    {
+        var tenantId = authenticated ? TenantA : TenantB;
+        var checker = new Mock<ITenantChecker>();
+        checker.Setup(c => c.IsActiveAsync(tenantId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var context = authenticated
+            ? BuildContext(headerTenant: null, claimTenant: TenantA, authenticated: true, checker.Object)
+            : BuildContext(headerTenant: TenantB, claimTenant: null, authenticated: false, checker.Object);
+
+        var (resolved, status, nextCalled) = await RunAsync(context);
+
+        Assert.Equal(400, status);
+        Assert.False(nextCalled);
+        Assert.Null(resolved);
+        checker.Verify(c => c.IsActiveAsync(tenantId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
     /// 出厂解析顺序把 Claims 排在最前 —— 一个只看默认值就上线的部署也该拿到安全行为。
     /// </summary>
     [Fact]
     public void DefaultResolutionOrder_PutsClaimsFirst()
-        => Assert.Equal(TenantResolutionSource.Claims, new TenantResolverOptions().ResolutionOrder[0]);
+        => Assert.Equal(TenantResolutionSource.Claims, BindOptions([]).ResolveResolutionOrder()[0]);
+
+    // ---- 经配置绑定的解析顺序 -------------------------------------------------
+    //
+    // ★★ .NET 配置绑定对已有的 List 是追加语义：属性初始值若预置出厂顺序，
+    // 部署方配的 ["Claims"] 会绑成 [Claims, Header, QueryString, Cookie, Claims]，
+    // 想关掉的来源一个都关不掉，而配置里写着它关了。下面的用例都经真实绑定（与模块同一个
+    // AddTnziOptions），不经 new TenantResolverOptions()，后者恰好绕开了这个缺陷。
+
+    /// <summary>没配解析顺序时用出厂顺序。</summary>
+    [Fact]
+    public void UnconfiguredResolutionOrder_IsTheBuiltInDefault()
+        => Assert.Equal(
+            [
+                TenantResolutionSource.Claims,
+                TenantResolutionSource.Header,
+                TenantResolutionSource.QueryString,
+                TenantResolutionSource.Cookie
+            ],
+            BindOptions([]).ResolveResolutionOrder());
+
+    /// <summary>配了解析顺序就整体替换出厂顺序，不是接在它后面。</summary>
+    [Fact]
+    public void ConfiguredResolutionOrder_ReplacesTheDefault()
+        => Assert.Equal(
+            [TenantResolutionSource.Header, TenantResolutionSource.Claims],
+            BindOptions(new() { ["ResolutionOrder:0"] = "Header", ["ResolutionOrder:1"] = "Claims" })
+                .ResolveResolutionOrder());
+
+    /// <summary>
+    /// ★★ 只信令牌的部署（["Claims"]）：匿名请求带查询串 / Cookie / 头都不能选租户。
+    /// </summary>
+    [Theory]
+    [InlineData("query")]
+    [InlineData("cookie")]
+    [InlineData("header")]
+    public async Task ClaimsOnlyResolutionOrder_AnonymousRequestCannotPickATenant(string source)
+    {
+        var context = BuildContext(headerTenant: null, claimTenant: null, authenticated: false);
+        switch (source)
+        {
+            case "query":
+                context.Request.QueryString = new QueryString($"?tenantId={TenantB}");
+                break;
+            case "cookie":
+                context.Request.Headers.Cookie = $"TenantId={TenantB}";
+                break;
+            default:
+                context.Request.Headers["X-Tenant-Id"] = TenantB.ToString();
+                break;
+        }
+
+        var (resolved, _, nextCalled) = await RunAsync(
+            context, BindOptions(new() { ["Enabled"] = "true", ["ResolutionOrder:0"] = "Claims" }));
+
+        Assert.True(nextCalled);
+        Assert.Null(resolved);
+    }
+
+    /// <summary>
+    /// ★ 关掉了 Cookie 来源的部署：已登录请求带着一个残留的异租户 Cookie 不该被当成越权尝试而 403。
+    /// </summary>
+    [Fact]
+    public async Task RemovedCookieSource_IsNotComparedOnAuthenticatedRequests()
+    {
+        var context = BuildContext(headerTenant: null, claimTenant: TenantA, authenticated: true);
+        context.Request.Headers.Cookie = $"TenantId={TenantB}";
+
+        var (resolved, status, nextCalled) = await RunAsync(
+            context, BindOptions(new() { ["ResolutionOrder:0"] = "Claims", ["ResolutionOrder:1"] = "Header" }));
+
+        Assert.True(nextCalled);
+        Assert.Equal(200, status);
+        Assert.Equal(TenantA, resolved);
+    }
+
+    /// <summary>对照组：出厂顺序下匿名请求仍可经查询串选租户（按租户分流的登录页要用）。</summary>
+    [Fact]
+    public async Task DefaultResolutionOrder_AnonymousRequestResolvesFromQueryString()
+    {
+        var context = BuildContext(headerTenant: null, claimTenant: null, authenticated: false);
+        context.Request.QueryString = new QueryString($"?tenantId={TenantB}");
+
+        var (resolved, _, nextCalled) = await RunAsync(context, BindOptions([]));
+
+        Assert.True(nextCalled);
+        Assert.Equal(TenantB, resolved);
+    }
+
+    /// <summary>按模块的方式绑定 <c>AspNetCore:TenantResolver</c>。</summary>
+    private static TenantResolverOptions BindOptions(Dictionary<string, string?> section)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(section.ToDictionary(kv => $"AspNetCore:TenantResolver:{kv.Key}", kv => kv.Value))
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddTnziOptions<TenantResolverOptions>(configuration);
+
+        using var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<TenantResolverOptions>>().Value;
+    }
 }

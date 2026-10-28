@@ -47,6 +47,8 @@ public interface IFileStorage
     /// </summary>
     /// <param name="filePath">文件路径或URL</param>
     /// <returns>文件流</returns>
+    /// <exception cref="Exceptions.FileNotFoundException">对象不存在。内置 provider 都抛这一个类型（上层据此答 404），
+    /// 自定义 provider 请同样映射，而不是把 SDK 的「不存在」异常原样抛出（那会变成 500）。</exception>
     Task<Stream> DownloadAsync(string filePath);
 
     /// <summary>
@@ -59,6 +61,11 @@ public interface IFileStorage
     /// <summary>
     /// 检查文件是否存在
     /// </summary>
+    /// <remarks>
+    /// <c>false</c> 只表示「确定不在」。权限不足、超时、网络故障时<b>抛出</b>而不是答 <c>false</c>：
+    /// 删除路径在 <see cref="DeleteAsync"/> 报 <c>false</c> 之后靠它分辨「删失败了」与「本来就不在」，
+    /// 把故障答成「不在」，它就会删掉指向一个仍然存在的对象的最后一条记录。
+    /// </remarks>
     /// <param name="filePath">文件路径或URL</param>
     /// <returns>是否存在</returns>
     Task<bool> ExistsAsync(string filePath);

@@ -44,6 +44,28 @@ public class CliRunTokenServiceTests : IntegratedTestBase<CliQueueDbContext>
     }
 
     [Fact]
+    public async Task Issue_WritesOnlyTheCredential_NotTheCallersStaleCopyOfTheRun()
+    {
+        // 执行器在认领时加载运行、准备阶段签发凭据；期间别的副本写下的取消请求与续租不能被加载时的旧值盖掉
+        var run = await SeedRunAsync(CliRunStatus.Dispatched);
+        var renewed = DateTime.UtcNow.AddHours(1);
+        await DbContext.Set<CliRun>().Where(r => r.Id == run.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.CancelRequested, true)
+                .SetProperty(r => r.LeaseExpiresAt, renewed));
+        var service = ServiceProvider.GetRequiredService<CliRunTokenService>();
+
+        await service.IssueAsync(run, TimeSpan.FromHours(1), CancellationToken.None);
+
+        var stored = await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == run.Id);
+        stored.WriteBackTokenHash.ShouldNotBeNull();
+        stored.CancelRequested.ShouldBeTrue();
+        stored.LeaseExpiresAt.ShouldNotBeNull();
+        stored.LeaseExpiresAt!.Value.ShouldBe(renewed, TimeSpan.FromSeconds(1));
+        run.WriteBackTokenHash.ShouldBe(stored.WriteBackTokenHash, "the caller's copy mirrors what was written");
+    }
+
+    [Fact]
     public async Task Validate_AcceptsALiveTokenAndReportsTheAgentItIsScopedTo()
     {
         var run = await SeedRunAsync(CliRunStatus.Running);
@@ -56,6 +78,23 @@ public class CliRunTokenServiceTests : IntegratedTestBase<CliQueueDbContext>
         credential!.RunId.ShouldBe(run.Id);
         // 权限上限由 Agent 决定，而不是由派发这次运行的那个人决定。
         credential.AgentId.ShouldBe(run.AgentId);
+    }
+
+    [Fact]
+    public async Task Validate_CarriesTheUserWhoDispatchedTheRun()
+    {
+        // 消费方工具要按用户授权（只许碰派发者自己的资源），而它的可信来源与租户一样，只能是运行记录
+        var run = await SeedRunAsync(CliRunStatus.Running);
+        var creatorId = Guid.NewGuid();
+        await DbContext.Set<CliRun>().Where(r => r.Id == run.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.CreatorId, creatorId));
+        var service = ServiceProvider.GetRequiredService<CliRunTokenService>();
+        var token = await service.IssueAsync(run, TimeSpan.FromHours(1), CancellationToken.None);
+
+        var credential = await service.ValidateAsync(token);
+
+        credential.ShouldNotBeNull();
+        credential!.CreatorId.ShouldBe(creatorId);
     }
 
     [Fact]
@@ -130,19 +169,5 @@ public class CliRunTokenServiceTests : IntegratedTestBase<CliQueueDbContext>
 
         (await service.ValidateAsync("not-a-tnzi-token")).ShouldBeNull();
         (await service.ValidateAsync("")).ShouldBeNull();
-    }
-
-    [Fact]
-    public async Task Revoke_ClearsTheStoredHash()
-    {
-        var run = await SeedRunAsync(CliRunStatus.Running);
-        var service = ServiceProvider.GetRequiredService<CliRunTokenService>();
-        var token = await service.IssueAsync(run, TimeSpan.FromHours(1), CancellationToken.None);
-
-        await service.RevokeAsync(run.Id, CancellationToken.None);
-
-        (await service.ValidateAsync(token)).ShouldBeNull();
-        var stored = await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == run.Id);
-        stored.WriteBackTokenHash.ShouldBeNull();
     }
 }

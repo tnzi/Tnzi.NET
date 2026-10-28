@@ -2,6 +2,7 @@ using ModelContextProtocol.Protocol;
 using Tnzi.AI.Mcp.Controllers.Admin;
 using Tnzi.AI.Mcp.Server;
 using McpServerOptions = Tnzi.AI.Mcp.Options.McpServerOptions;
+using Result = Tnzi.Results.Result;
 
 namespace Tnzi.AI.Tests.Mcp;
 
@@ -93,28 +94,33 @@ public class DefaultMcpAdminControllerTests
     // ─── ExposeAgent ───────────────────────────────────────────────────────────
 
     [Fact]
-    public void ExposeAgent_DelegatesToHost()
+    public async Task ExposeAgent_DelegatesToTheValidatingEntryPoint()
     {
         var agentId = Guid.NewGuid();
         var opts = new McpToolExposureOptions { ToolName = "custom-name" };
+        _host.Setup(h => h.ExposeAgentAsync(agentId, opts, It.IsAny<CancellationToken>())).ReturnsAsync(Result.Success());
         var controller = CreateController();
 
-        var result = controller.ExposeAgent(agentId, opts);
+        var result = await controller.ExposeAgent(agentId, opts);
 
         result.Succeeded.ShouldBeTrue();
-        _host.Verify(h => h.ExposeAgent(agentId, opts), Times.Once);
+        _host.Verify(h => h.ExposeAgentAsync(agentId, opts, It.IsAny<CancellationToken>()), Times.Once);
+        _host.Verify(h => h.ExposeAgent(It.IsAny<Guid>(), It.IsAny<McpToolExposureOptions?>()), Times.Never,
+            "the unchecked in-process entry point would register agents nobody can see");
     }
 
     [Fact]
-    public void ExposeAgent_NullOptions_StillDelegates()
+    public async Task ExposeAgent_AnUnknownAgent_PassesThe404Through()
     {
         var agentId = Guid.NewGuid();
+        _host.Setup(h => h.ExposeAgentAsync(agentId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Failure("Agent not found.", 404));
         var controller = CreateController();
 
-        var result = controller.ExposeAgent(agentId, null);
+        var result = await controller.ExposeAgent(agentId, null);
 
-        result.Succeeded.ShouldBeTrue();
-        _host.Verify(h => h.ExposeAgent(agentId, null), Times.Once);
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
     }
 
     // ─── RemoveAgent ─────────────────────────────────────────────────────────────
@@ -130,6 +136,20 @@ public class DefaultMcpAdminControllerTests
 
         result.Succeeded.ShouldBeTrue();
         _host.Verify(h => h.RemoveAgent(agentId), Times.Once);
+    }
+
+    [Fact]
+    public void RemoveAgent_AConfiguredAgent_SaysTheRemovalLastsUntilRestart()
+    {
+        var agentId = Guid.NewGuid();
+        _host.Setup(h => h.RemoveAgent(agentId)).Returns(true);
+        _host.Setup(h => h.IsConfiguredAgent(agentId)).Returns(true);
+        var controller = CreateController();
+
+        var result = controller.RemoveAgent(agentId);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Message.ShouldNotBeNull().ShouldContain("ExposedAgentIds");
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 
 namespace Tnzi.Extensions;
 
@@ -202,12 +203,44 @@ public static class StringExtensions
     /// <summary>
     /// 截断字符串到指定长度
     /// </summary>
+    /// <remarks>
+    /// 截断点落在代理对中间时少截一个字符（见 <see cref="FitToLength"/>），结果正文可能比 <paramref name="maxLength"/> 短 1。
+    /// </remarks>
     public static string Truncate(this string str, int maxLength, string suffix = "...")
     {
         if (string.IsNullOrEmpty(str) || str.Length <= maxLength)
             return str;
 
-        return str[..maxLength] + suffix;
+        return str.FitToLength(maxLength) + suffix;
+    }
+
+    /// <summary>
+    /// 把字符串裁到最多 <paramref name="maxLength"/> 个 UTF-16 码元（数据库列宽的计量单位），不加后缀；
+    /// <c>null</c> 与够短的值原样返回。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 截断点落在代理对中间时少截一个字符。裸 <c>value[..maxLength]</c> 会留下一个孤立的高代理项：
+    /// 严格的 UTF-8 编码器（Npgsql）拒绝写入，按批落库的日志 / 审计记录因此整批失败、整批丢弃，
+    /// 而触发它只需要一个在截断边界处带 emoji 的 URL 或属性值。SQLite 不检查，测试全绿证明不了什么。
+    /// </para>
+    /// <para>
+    /// 刻意不加省略号：调用方要的是「装得进这一列」，后缀会让结果再次超出列宽。要给人看的截断用 <see cref="Truncate"/>。
+    /// </para>
+    /// </remarks>
+    /// <param name="value">待截断的字符串</param>
+    /// <param name="maxLength">最多保留的 UTF-16 码元数，不能为负</param>
+    /// <returns>长度不超过 <paramref name="maxLength"/>、且不以孤立高代理项结尾的字符串</returns>
+    [return: NotNullIfNotNull(nameof(value))]
+    public static string? FitToLength(this string? value, int maxLength)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(maxLength);
+
+        if (value is null || value.Length <= maxLength)
+            return value;
+
+        var length = maxLength > 0 && char.IsHighSurrogate(value[maxLength - 1]) ? maxLength - 1 : maxLength;
+        return value[..length];
     }
 
     /// <summary>

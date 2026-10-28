@@ -18,6 +18,18 @@ public class ConversationService : ApplicationService, IConversationService
     /// </summary>
     private readonly IFileReadAccessProbe? _fileAccess;
 
+    /// <summary>单聊对象的租户边界（<c>User</c> 不是 <c>IMultiTenant</c>，见 <see cref="GetOrCreateDirectAsync"/>）。</summary>
+    private readonly IUserTenantScopeProvider _userScope;
+
+    /// <summary>新建单聊前确认对象账号存在（租户边界不裁剪时不查库，答不了这一问）。</summary>
+    private readonly IRepository<User, Guid> _userRepository;
+
+    /// <summary>
+    /// 超管名单（可选：只有加载了 Authorization 才有超管概念）。单聊对象与群成员一样不能是超管，
+    /// 见 <see cref="IsDirectChatTargetAsync"/>。
+    /// </summary>
+    private readonly IFunctionAuthorizationService? _functionAuthorization;
+
     public ConversationService(
         IServiceProvider serviceProvider,
         IRepository<Conversation, Guid> conversationRepository,
@@ -28,7 +40,10 @@ public class ConversationService : ApplicationService, IConversationService
         IPresenceService presence,
         IOptionsSnapshot<ChatOptions> options,
         IChatAccessService access,
-        IFileReadAccessProbe? fileAccess = null) : base(serviceProvider)
+        IUserTenantScopeProvider userScope,
+        IRepository<User, Guid> userRepository,
+        IFileReadAccessProbe? fileAccess = null,
+        IFunctionAuthorizationService? functionAuthorization = null) : base(serviceProvider)
     {
         _conversationRepository = Check.NotNull(conversationRepository);
         _memberRepository = Check.NotNull(memberRepository);
@@ -38,21 +53,72 @@ public class ConversationService : ApplicationService, IConversationService
         _presence = Check.NotNull(presence);
         _options = Check.NotNull(options);
         _access = Check.NotNull(access);
+        _userScope = Check.NotNull(userScope);
+        _userRepository = Check.NotNull(userRepository);
         _fileAccess = fileAccess;
+        _functionAuthorization = functionAuthorization;
     }
 
     internal static string DirectKeyFor(Guid a, Guid b) =>
         a.CompareTo(b) <= 0 ? $"{a:N}:{b:N}" : $"{b:N}:{a:N}";
 
+    /// <summary>
+    /// 调用者在这个会话里的在册成员行；会话已被解散 / 删除时为 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ 解散与管理端删除只软删会话行，成员行不实现软删、<c>RemovedAt</c> 仍为空。只问成员行的话，
+    /// 管理员因违规删掉的会话，成员凭原会话 id 照样读得到全部历史与搜索结果。会话存在性与成员关系在同一条查询里判。
+    /// </remarks>
     private async Task<ConversationMember?> GetActiveMemberAsync(Guid conversationId, Guid userId)
-        => await _memberRepository.FirstOrDefaultAsync(
-            m => m.ConversationId == conversationId && m.UserId == userId && m.RemovedAt == null);
+    {
+        var liveConversations = _conversationRepository.AsQueryable();
+        return await _memberRepository.AsQueryable()
+            .Where(m => m.ConversationId == conversationId && m.UserId == userId && m.RemovedAt == null
+                        && liveConversations.Any(c => c.Id == m.ConversationId))
+            .FirstOrDefaultAsync();
+    }
+
+    /// <summary>
+    /// 能不能与这个账号新建单聊：账号存在，且不是超管。
+    /// </summary>
+    /// <remarks>
+    /// 对象 id 是调用方直接给的。群成员写入早就静默剔除超管，单聊却只拒绝空 id 与自己：业务用户直接给一个超管 id
+    /// 就能与运维账号建立单聊（超管持全部权限码，投递照常放行），给一个随机 GUID 则建出一个对方成员不存在的会话。
+    /// 两种情形答同一个 404，不泄露这个 id 是不是超管。
+    /// </remarks>
+    private async Task<bool> IsDirectChatTargetAsync(Guid userId)
+    {
+        if (!await _userRepository.ExistsAsync(userId))
+            return false;
+
+        if (_functionAuthorization == null)
+            return true;
+
+        var superAdmins = await _functionAuthorization.GetSuperAdminUserIdsAsync();
+        return !superAdmins.Contains(userId);
+    }
+
+    /// <summary>
+    /// 保存跟踪着的成员行上改过的列。
+    /// </summary>
+    /// <remarks>
+    /// ★ 不用仓储的 <c>UpdateAsync</c>：它把实体整个标成 Modified，生成一条写全部列的 UPDATE，
+    /// 于是读出这一行之后别的请求提交的改动（最要紧的是群主移出成员写下的 <c>RemovedAt</c>）被这份快照写回去：
+    /// 被移出的人点一下「已读」就回到了群里。跟踪着的实体经 SaveChanges 只写真正改过的列。
+    /// </remarks>
+    private Task SaveMemberChangesAsync(CancellationToken cancellationToken = default)
+        => _memberRepository.SaveChangesAsync(cancellationToken);
 
     public async Task<Result<ConversationDto>> GetOrCreateDirectAsync(Guid otherUserId)
     {
         var me = GetRequiredCurrentUser().Id!.Value;
         if (otherUserId == Guid.Empty || otherUserId == me)
             return Fail<ConversationDto>("Invalid target user.", 400);
+
+        // 别家租户的账号与不存在的账号答同一个 404。不拦的话，会话行建在本租户里、对方永远看不见，
+        // 而本租户这一侧照样拿得到对方的资料（名字、头像）：借一次单聊把目录的租户边界绕过去。
+        if (!await _userScope.ContainsAsync(otherUserId))
+            return Fail<ConversationDto>("User not found.", 404);
 
         var key = DirectKeyFor(me, otherUserId);
 
@@ -66,10 +132,15 @@ public class ConversationService : ApplicationService, IConversationService
             if (mine != null)
             {
                 mine.IsHidden = false;
-                await _memberRepository.UpdateAsync(mine);
+                // 跟踪着的实体：SaveChanges 只写改过的列（见 SaveMemberChangesAsync）。
+                await SaveMemberChangesAsync();
             }
             return Ok(await MapConversationAsync(existing));
         }
+
+        // 只在新建时判：既有会话（例如超管主动发起的那一个）照常能被对方重新打开。
+        if (!await IsDirectChatTargetAsync(otherUserId))
+            return Fail<ConversationDto>("User not found.", 404);
 
         try
         {
@@ -159,16 +230,16 @@ public class ConversationService : ApplicationService, IConversationService
             return Fail<ChatMessageDto>("Only image and file messages may carry a file reference.", 400);
         }
 
-        var conv = await _conversationRepository.AsQueryable(withTracking: true)
+        var conv = await _conversationRepository.AsQueryable()
             .FirstOrDefaultAsync(c => c.Id == conversationId);
         if (conv == null)
             return Fail<ChatMessageDto>("Conversation not found.", 404);
 
-        // Active recipients (excluding me).
-        var others = await _memberRepository.AsQueryable(withTracking: true)
+        // Active recipients (excluding me). Only the ids: the rows themselves are never written back (see below).
+        var otherIds = await _memberRepository.AsQueryable()
             .Where(m => m.ConversationId == conversationId && m.UserId != me && m.RemovedAt == null)
+            .Select(m => m.UserId)
             .ToListAsync();
-        var otherIds = others.Select(o => o.UserId).ToList();
 
         // Recipients who currently can't use chat (no chat.use) - isolated from this message.
         var disabled = await _access.FilterDisabledAsync(otherIds);
@@ -186,6 +257,13 @@ public class ConversationService : ApplicationService, IConversationService
 
         var message = await ExecuteInUnitOfWorkAsync(async ct =>
         {
+            // ★★ 会话与成员行一律在数据库端只改这几列（ExecuteUpdate），不把上面读到的快照整行写回去。
+            // 快照读在这次提交之前好几个往返（权限库查询、插消息），窗口里别的请求可能已经提交了：
+            // 群主把 B 移出群（RemovedAt）、B 删除了聊天或静音、另一条消息给 C 的未读 +1、群被改名或解散。
+            // 整行写回会把这些全部静默撤销：被移出的人回到群里、重新读得到消息与文件，两条并发消息只记一条未读。
+            // 裸 SQL 默认不进工作单元的事务，先把事务开起来，回滚才撤得掉它们。
+            await _memberRepository.EnsureTransactionStartedAsync(ct);
+
             var msg = new ChatMessage
             {
                 ConversationId = conversationId,
@@ -199,18 +277,25 @@ public class ConversationService : ApplicationService, IConversationService
             };
             await _messageRepository.InsertAsync(msg, ct);
 
-            conv.LastMessageAt = now;
-            conv.LastMessagePreview = preview;
-            await _conversationRepository.UpdateAsync(conv, ct);
+            await _conversationRepository.AsQueryable()
+                .Where(c => c.Id == conversationId)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(c => c.LastMessageAt, now)
+                    .SetProperty(c => c.LastMessagePreview, preview)
+                    .SetProperty(c => c.LastModificationTime, now)
+                    .SetProperty(c => c.LastModifierId, me), ct);
 
             // Deliver to able recipients: bump unread + re-surface a hidden conversation.
-            var deliveredMembers = others.Where(o => !disabled.Contains(o.UserId)).ToList();
-            foreach (var o in deliveredMembers)
+            // Unread is incremented in the database, and RemovedAt is re-checked there: a member removed
+            // while this message was being sent is neither touched nor counted.
+            if (deliveredIds.Count > 0)
             {
-                o.UnreadCount += 1;
-                o.IsHidden = false;
+                await _memberRepository.AsQueryable()
+                    .Where(m => m.ConversationId == conversationId && m.RemovedAt == null && deliveredIds.Contains(m.UserId))
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(m => m.UnreadCount, m => m.UnreadCount + 1)
+                        .SetProperty(m => m.IsHidden, false), ct);
             }
-            if (deliveredMembers.Count > 0) await _memberRepository.UpdateManyAsync(deliveredMembers, ct);
 
             // Isolation rows for disabled recipients: they will never see this message,
             // even after re-enable. FK filled from the nav property on SaveChanges (the
@@ -226,13 +311,9 @@ public class ConversationService : ApplicationService, IConversationService
             // Sending into a conversation I previously hid re-surfaces it for me too.
             if (member.IsHidden)
             {
-                var mine = await _memberRepository.AsQueryable(withTracking: true)
-                    .FirstOrDefaultAsync(m => m.ConversationId == conversationId && m.UserId == me && m.RemovedAt == null, ct);
-                if (mine != null)
-                {
-                    mine.IsHidden = false;
-                    await _memberRepository.UpdateAsync(mine, ct);
-                }
+                await _memberRepository.AsQueryable()
+                    .Where(m => m.ConversationId == conversationId && m.UserId == me && m.RemovedAt == null)
+                    .ExecuteUpdateAsync(s => s.SetProperty(m => m.IsHidden, false), ct);
             }
 
             return (ChatMessage?)msg;
@@ -549,9 +630,14 @@ public class ConversationService : ApplicationService, IConversationService
     {
         var me = GetRequiredCurrentUser().Id!.Value;
         // Hidden conversations don't contribute to the badge (they aren't in the
-        // list, so a phantom count would be unactionable).
-        var members = await _memberRepository.ToListAsync(m => m.UserId == me && m.RemovedAt == null && !m.IsHidden);
-        return Ok(members.Sum(m => m.UnreadCount));
+        // list, so a phantom count would be unactionable). Same for dissolved / deleted
+        // conversations: only the conversation row is soft-deleted, the member row stays.
+        var liveConversations = _conversationRepository.AsQueryable();
+        var total = await _memberRepository.AsQueryable()
+            .Where(m => m.UserId == me && m.RemovedAt == null && !m.IsHidden
+                        && liveConversations.Any(c => c.Id == m.ConversationId))
+            .SumAsync(m => m.UnreadCount);
+        return Ok(total);
     }
 
     public async Task<Result> MarkReadAsync(Guid conversationId)
@@ -573,7 +659,7 @@ public class ConversationService : ApplicationService, IConversationService
         {
             member.LastReadAt = now;
             member.UnreadCount = 0;
-            await _memberRepository.UpdateAsync(member, ct);
+            await SaveMemberChangesAsync(ct);
 
             var others = await _memberRepository.ToListAsync(
                 m => m.ConversationId == conversationId && m.UserId != me && m.RemovedAt == null, ct);
@@ -617,7 +703,7 @@ public class ConversationService : ApplicationService, IConversationService
         if (settings.Remark != null) member.Remark = settings.Remark.Length == 0 ? null : settings.Remark;
         if (settings.Alias != null) member.Alias = settings.Alias.Length == 0 ? null : settings.Alias;
 
-        await _memberRepository.UpdateAsync(member);
+        await SaveMemberChangesAsync();
         return Ok();
     }
 
@@ -638,7 +724,7 @@ public class ConversationService : ApplicationService, IConversationService
         member.ClearedAt = now;
         member.LastReadAt = now;
         member.UnreadCount = 0;
-        await _memberRepository.UpdateAsync(member);
+        await SaveMemberChangesAsync();
         return Ok();
     }
 
@@ -650,7 +736,7 @@ public class ConversationService : ApplicationService, IConversationService
         if (member == null) return Fail("You are not a member of this conversation.", 403);
 
         member.ClearedAt = DateTime.UtcNow;
-        await _memberRepository.UpdateAsync(member);
+        await SaveMemberChangesAsync();
         return Ok();
     }
 
@@ -702,7 +788,11 @@ public class ConversationService : ApplicationService, IConversationService
         if (msg == null) return Fail("Message not found.", 404);
         if (msg.SenderId != me) return Fail("You can only delete your own messages.", 403);
 
-        await _messageRepository.DeleteAsync(msg); // 软删（FullAudited）
+        // 软删之外还要改写会话预览、通知开着会话的成员（见 ChatMessageRecall）。
+        var recalled = await ExecuteInUnitOfWorkAsync(ct =>
+            ChatMessageRecall.RecallAsync(msg, _messageRepository, _conversationRepository, _memberRepository, ct));
+        if (EventBus != null)
+            await EventBus.PublishAsync(recalled);
         return Ok();
     }
 }

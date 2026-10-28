@@ -5,7 +5,10 @@
  */
 
 /**
- * Truncate string with ellipsis
+ * Truncate string with ellipsis. `maxLength` counts UTF-16 code units, the
+ * ellipsis included; a cut that would fall inside a surrogate pair (an emoji,
+ * a supplementary-plane character) moves one unit back, so the head never
+ * ends in half a character that renders as U+FFFD.
  */
 export function truncate(str: string, maxLength: number, ellipsis = '...'): string {
   if (str.length <= maxLength) return str;
@@ -13,7 +16,17 @@ export function truncate(str: string, maxLength: number, ellipsis = '...'): stri
   // negative and `slice(0, -1)` keeps almost the whole string, so the result
   // came out longer than maxLength. Return as much of the ellipsis as fits.
   if (maxLength <= ellipsis.length) return ellipsis.slice(0, Math.max(0, maxLength));
-  return str.slice(0, maxLength - ellipsis.length) + ellipsis;
+  let end = maxLength - ellipsis.length;
+  if (isHighSurrogate(str.charCodeAt(end - 1)) && isLowSurrogate(str.charCodeAt(end))) end -= 1;
+  return str.slice(0, end) + ellipsis;
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }
 
 /**

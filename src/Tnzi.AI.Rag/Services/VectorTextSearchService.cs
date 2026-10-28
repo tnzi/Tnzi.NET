@@ -13,9 +13,9 @@ namespace Tnzi.AI.Rag.Services;
 /// 运营方却已经为每份文档多付了一次图谱抽取。一条管线，两个出口。
 /// </para>
 /// <para>
-/// 支持按知识库范围过滤：当 <see cref="TextSearchFilter.KnowledgeBaseIds"/> 非空时，检索仅限
-/// 这些知识库（逐库查询后合并重排）；为空时跨所有启用知识库（向后兼容）。
-/// 该范围由 Agent 的 <c>KnowledgeBaseIds</c> 分配经 TextSearchProvider 传入。
+/// 检索范围只来自 <see cref="TextSearchFilter.KnowledgeBaseIds"/>（Agent 的知识库授权经 TextSearchProvider 传入），
+/// 逐库查询后合并重排。<b>没有范围就答空</b>：不带过滤的重载、空范围、以及带了本实现表达不了的维度
+/// （用户 / agent / 线程 / 集合 / 元数据）的过滤一律不检索，判据见 <see cref="RetrievalAugmentation.ResolveKnowledgeBaseScope"/>。
 /// 不套 <c>MinRelevance</c> 阈值（与改造前一致）：agent 上下文注入的相关性由重排与评分器决定。
 /// </para>
 /// </remarks>
@@ -34,11 +34,12 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
     }
 
     /// <inheritdoc />
+    /// <remarks>不带过滤 = 没有知识库范围，恒答空（见类注释）。</remarks>
     public Task<IEnumerable<TextSearchResult>> SearchAsync(
         string query,
         int maxResults = 5,
         CancellationToken ct = default)
-        => SearchCoreAsync(query, knowledgeBaseIds: null, maxResults, ct);
+        => SearchAsync(query, filter: null, maxResults, ct);
 
     /// <inheritdoc />
     public Task<IEnumerable<TextSearchResult>> SearchAsync(
@@ -46,24 +47,33 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
         TextSearchFilter? filter,
         int maxResults = 5,
         CancellationToken ct = default)
-        => SearchCoreAsync(query, filter?.KnowledgeBaseIds, maxResults, ct);
-
-    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
-        string query,
-        IReadOnlyList<Guid>? knowledgeBaseIds,
-        int maxResults,
-        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return [];
+            return Task.FromResult<IEnumerable<TextSearchResult>>([]);
         }
 
+        var knowledgeBaseIds = RetrievalAugmentation.ResolveKnowledgeBaseScope(filter);
+        if (knowledgeBaseIds is null)
+        {
+            Logger.LogDebug("VectorTextSearchService skipped a search without a knowledge base scope it can enforce");
+            return Task.FromResult<IEnumerable<TextSearchResult>>([]);
+        }
+
+        return SearchCoreAsync(query, knowledgeBaseIds, maxResults, ct);
+    }
+
+    private async Task<IEnumerable<TextSearchResult>> SearchCoreAsync(
+        string query,
+        IReadOnlyList<Guid> knowledgeBaseIds,
+        int maxResults,
+        CancellationToken ct)
+    {
         try
         {
             var options = new RagRetrievalOptions
             {
-                KnowledgeBaseIds = knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds.Distinct().ToList() : null,
+                KnowledgeBaseIds = knowledgeBaseIds.ToList(),
                 TopK = maxResults,
                 MinRelevance = 0
             };
@@ -84,7 +94,7 @@ public class VectorTextSearchService : ApplicationService, ITextSearchService
             var searchResults = RetrievalAugmentation.ToTextSearchResults(results, docs);
 
             Logger.LogDebug("VectorTextSearchService returned {Count} results for query length {Length} (kbScope={KbScope})",
-                searchResults.Count, query.Length, knowledgeBaseIds is { Count: > 0 } ? knowledgeBaseIds.Count : 0);
+                searchResults.Count, query.Length, knowledgeBaseIds.Count);
 
             return searchResults;
         }

@@ -128,8 +128,19 @@ public class NotificationInfo
     /// <summary>投递这条消息的服务商键；<see langword="null"/> = 默认发送器。</summary>
     public string? ProviderKey { get; set; }
 
+    /// <summary>
+    /// 最早几点发（UTC）：<c>Scheduled</c> 消息上是定时的时刻；<c>Pending</c> 消息上是交给发送（排队）或下一次重试到期的时刻；
+    /// <c>Pending</c> 且为 <see langword="null"/> 是只创建、没要求发送的草稿。
+    /// </summary>
     public DateTime? ScheduledTime { get; set; }
+
+    /// <summary>
+    /// 收件人。★ 只有按 Id 取详情（以及创建 / 失败列表）时带；消息列表与已排期列表的行恒为空集合：
+    /// 列表只用 <see cref="SuccessCount"/> / <see cref="TotalRecipientCount"/>，「哪些人、为什么」看投递报告。
+    /// </summary>
     public List<RecipientOutput> Recipients { get; set; } = new();
+
+    /// <summary>附件。与 <see cref="Recipients"/> 同：列表行恒为空集合。</summary>
     public List<FileInfoDto> Attachments { get; set; } = new();
 }
 
@@ -158,6 +169,41 @@ public class QueryNotificationRequest : PagedQueryDto
     /// Filter by sender user ID
     /// </summary>
     public Guid? SenderId { get; set; }
+}
+
+/// <summary>
+/// 预览通知渲染结果的请求：渲染要用的那几项，收件人可选。
+/// </summary>
+/// <remarks>
+/// <para>
+/// 与创建通知的 <see cref="CreateNotificationRequest"/> 刻意分开：创建要求至少一个收件人，而预览渲染的是内容，
+/// 管理端按模板名 + 变量预览时没有任何地址可填。此前预览直接收创建请求，模板页发的 <c>recipients: []</c>
+/// 每一次都被模型验证答 400，预览从来没有工作过。
+/// </para>
+/// <para>
+/// 字段名与创建请求逐字相同：把一份完整的创建请求原样发来预览照样可以，多出来的字段被忽略。
+/// </para>
+/// </remarks>
+public class PreviewNotificationRequest
+{
+    public NotificationType Type { get; set; }
+
+    /// <summary>主题。给了模板时是模板渲染不出来时的回落内容，不给就把渲染失败如实报出来。</summary>
+    public string? Subject { get; set; }
+
+    /// <summary>正文。与 <see cref="Subject"/> 同理。</summary>
+    public string? Content { get; set; }
+
+    public bool IsHtml { get; set; } = true;
+    public string? TemplateName { get; set; }
+    public string? LayoutName { get; set; }
+    public Dictionary<string, object>? TemplateVariables { get; set; }
+    public string? Category { get; set; }
+
+    /// <summary>
+    /// 可选。给了就按创建通知的同一条规则校验地址，并在 <see cref="NotificationPreviewDto.RecipientCount"/> 里回报人数；不给时人数为 0。
+    /// </summary>
+    public List<RecipientInput>? Recipients { get; set; }
 }
 
 /// <summary>
@@ -216,6 +262,11 @@ public class DeliveryReportDto
     /// <summary>Delivery success rate (0-1)</summary>
     public double SuccessRate { get; set; }
 
-    /// <summary>Recipient details</summary>
+    /// <summary>
+    /// 收件人明细：最多 200 行，失败的排最前，其次被拦下的（<c>Cancelled</c>），然后其余。
+    /// </summary>
+    /// <remarks>
+    /// 上面的计数始终覆盖全部收件人；行数小于 <see cref="TotalRecipients"/> 即明细被截断。完整名单走按 Id 取详情。
+    /// </remarks>
     public List<RecipientOutput> Recipients { get; set; } = [];
 }

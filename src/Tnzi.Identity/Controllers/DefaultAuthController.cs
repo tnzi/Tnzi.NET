@@ -95,21 +95,22 @@ public partial class DefaultAuthController : ApiControllerBase
     /// <remarks>
     /// 登录答 403 <c>IDENTITY_PENDING_ACTIONS_REQUIRED</c> 时，前端拿挑战里的
     /// <c>tempToken</c> 调这里，据此渲染对应的表单（绑验证器那一项会带上二维码）。
-    /// 匿名可达：走到这一步的人还没有令牌。
+    /// 匿名可达：走到这一步的人还没有令牌。不消费令牌，但令牌走请求体而不是路径（理由见 <see cref="PendingActionTokenDto"/>），
+    /// 所以是 POST。
     /// </remarks>
-    /// <param name="tempToken">待办挑战的临时令牌</param>
+    /// <param name="input">待办挑战的临时令牌</param>
     /// <returns>还欠哪些事 + 材料</returns>
-    [HttpGet("pending-actions/{tempToken}")]
+    [HttpPost("pending-actions/describe")]
     [AllowAnonymous]
     [ApiExplorerSettings(GroupName = "auth")]
-    public virtual async Task<ApiResult<PendingActionChallengeDto>> DescribePendingActions(string tempToken)
+    public virtual async Task<ApiResult<PendingActionChallengeDto>> DescribePendingActions([FromBody] PendingActionTokenDto input)
     {
         if (PendingActionService == null)
         {
             return ApiResult<PendingActionChallengeDto>.Error("Pending action service is not available", 500);
         }
 
-        var result = await PendingActionService.DescribeAsync(tempToken);
+        var result = await PendingActionService.DescribeAsync(input.TempToken);
         return result.ToApiResult();
     }
 
@@ -154,19 +155,19 @@ public partial class DefaultAuthController : ApiControllerBase
     /// <summary>
     /// 给「必须先确认邮箱」发一封验证码。地址取自账号本身，不接受调用方指定。
     /// </summary>
-    /// <param name="tempToken">待办挑战的临时令牌</param>
+    /// <param name="input">待办挑战的临时令牌（在请求体里，见 <see cref="PendingActionTokenDto"/>）</param>
     /// <returns>操作结果</returns>
-    [HttpPost("pending-actions/{tempToken}/send-email-code")]
+    [HttpPost("pending-actions/send-email-code")]
     [AllowAnonymous]
     [ApiExplorerSettings(GroupName = "auth")]
-    public virtual async Task<ApiResult> SendPendingActionEmailCode(string tempToken)
+    public virtual async Task<ApiResult> SendPendingActionEmailCode([FromBody] PendingActionTokenDto input)
     {
         if (PendingActionService == null)
         {
             return ApiResult.Error("Pending action service is not available", 500);
         }
 
-        var result = await PendingActionService.SendEmailConfirmationCodeAsync(tempToken);
+        var result = await PendingActionService.SendEmailConfirmationCodeAsync(input.TempToken);
         return result.ToApiResult();
     }
 
@@ -275,7 +276,7 @@ public partial class DefaultAuthController : ApiControllerBase
         // 1. 验证参数
         if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(token))
         {
-            return Content(GenerateResetPasswordResultHtml(false, "缺少必要的参数（email 或 token）"),
+            return Content(GenerateResetPasswordResultHtml(false, "This link is incomplete. Request a new password reset email."),
                 "text/html; charset=utf-8");
         }
 
@@ -362,8 +363,8 @@ public partial class DefaultAuthController : ApiControllerBase
 
         var result = await AuthService.LogoutAsync(CurrentUser.Id.Value);
         // 登出必须把 cookie 一起清掉，否则浏览器还留着一枚服务端已经作废的令牌，
-        // 下次打开页面会先发一次注定失败的刷新。
-        ClearRefreshTokenCookie();
+        // 下次打开页面会先发一次注定失败的刷新。例外是 cookie 已经属于同一浏览器里后来登录的另一位用户（见方法注释）。
+        await ClearRefreshTokenCookieOnLogoutAsync(CurrentUser.Id.Value);
         return result.ToApiResult();
     }
 
@@ -587,7 +588,7 @@ public partial class DefaultAuthController : ApiControllerBase
             }
 
             // 返回成功HTML页面
-            return Content(GenerateEmailConfirmationResultHtml(true, "邮箱确认成功！您现在可以使用所有功能。"), "text/html; charset=utf-8");
+            return Content(GenerateEmailConfirmationResultHtml(true, "Your email address has been confirmed."), "text/html; charset=utf-8");
         }
         else
         {
@@ -595,12 +596,12 @@ public partial class DefaultAuthController : ApiControllerBase
             if (!string.IsNullOrEmpty(returnUrl))
             {
                 // 重定向到前端页面（带错误信息）
-                var redirectUrl = AppendQueryParam(returnUrl, "emailConfirmError", result.Message ?? "确认失败");
+                var redirectUrl = AppendQueryParam(returnUrl, "emailConfirmError", result.Message ?? "Email confirmation failed");
                 return Redirect(redirectUrl);
             }
 
             // 返回失败HTML页面
-            return Content(GenerateEmailConfirmationResultHtml(false, result.Message ?? "邮箱确认失败"), "text/html; charset=utf-8");
+            return Content(GenerateEmailConfirmationResultHtml(false, result.Message ?? "Email confirmation failed"), "text/html; charset=utf-8");
         }
     }
 

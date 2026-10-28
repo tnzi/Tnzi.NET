@@ -7,7 +7,8 @@ namespace Tnzi.RabbitMQ;
 /// 实现 IDistributedEventBus 与 IIntegrationEventBus,PublishAsync 完成仅代表投递成功,
 /// 不执行本进程内处理器;不替换 IEventBus(本地总线始终可用)
 /// 使用独立的发布 Channel 和 per-consumer Channel 架构（RabbitMQ 最佳实践）
-/// RabbitMQ.Client 7.x 的 IChannel 是线程安全的，发布操作无需外部锁
+/// RabbitMQ.Client 7.x 的 IChannel 是线程安全的，发布操作无需外部锁。
+/// 发布 Channel 开启发布确认：PublishAsync 返回即代表代理已接下消息（代理 nack 时抛异常）
 /// </summary>
 /// <remarks>
 /// 本文件是<b>发布侧与生命周期</b>（Channel 池 / 发布 / 释放）；<b>消费侧</b>（订阅、
@@ -108,7 +109,7 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
             }
 
             // 创建新 Channel 并声明交换机（幂等操作）
-            var newChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+            var newChannel = await _connection.CreateChannelAsync(CreatePublishChannelOptions(), cancellationToken);
             await newChannel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
             await newChannel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
             AttachReturnLogging(newChannel);
@@ -179,12 +180,32 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
     /// </summary>
     private async Task<IChannel> CreateAndInitializeChannelAsync(CancellationToken cancellationToken = default)
     {
-        var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        var channel = await _connection.CreateChannelAsync(CreatePublishChannelOptions(), cancellationToken);
         await channel.ExchangeDeclareAsync(_exchangeName, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
         await channel.ExchangeDeclareAsync(_options.DeadLetterExchange, ExchangeType.Topic, true, false, cancellationToken: cancellationToken);
         AttachReturnLogging(channel);
         return channel;
     }
+
+    /// <summary>
+    /// 发布用 Channel 的创建选项：开启发布确认并由客户端跟踪。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 不开确认时 <c>BasicPublishAsync</c> 写完帧即返回，只代表消息交给了客户端，代理有没有接下无从得知。
+    /// Outbox 中继在发布返回后立即把行标成已处理，消费侧重试在副本发出后立即确认原消息；
+    /// 帧写出后连接断开、或代理在落盘前崩溃，消息就丢了而两边都以为它送到了。
+    /// 开启确认 + 跟踪后 <c>BasicPublishAsync</c> 等代理的 ack，nack 抛 <see cref="PublishException"/>，
+    /// 经调用方既有的失败路径处置（Outbox 计失败稍后重发；重试副本发不出去则原消息进死信）。
+    /// 跟踪还会让 <c>mandatory</c> 退回以 <see cref="PublishException.IsReturn"/> 为真的异常到达发布方，
+    /// 处置见 <see cref="PublishToChannelAsync"/>。
+    /// </para>
+    /// <para>
+    /// 每个 Channel 各建一份而不是共用一个静态实例：选项里带着在途确认的限流器，共用就成了跨 Channel 共享的限额。
+    /// </para>
+    /// </remarks>
+    private static CreateChannelOptions CreatePublishChannelOptions()
+        => new(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true);
 
     /// <summary>
     /// Publish a message to a specific channel.
@@ -194,12 +215,27 @@ public partial class RabbitMQEventBus : IDistributedEventBus, IIntegrationEventB
     /// （<c>basic.return</c>），<see cref="AttachReturnLogging"/> 因此能记下一条 Error。
     /// 用 <c>false</c> 时同样的情形是<b>静默丢弃</b> —— 发布方拿到的一切都正常：不抛异常、
     /// 日志里照常一行 "Published…"，而那条消息连同它记录的那件事一起没了。
-    /// 退回是异步到达的，所以这不构成投递保证，它是<b>可发现性</b>：让"没人在消费"
+    /// 这不构成投递保证，它是<b>可发现性</b>：让"没人在消费"
     /// 在第一条消息就留下痕迹，而不是等到有人去数数据对不对。
+    /// <para>
+    /// 开启发布确认跟踪后，退回会让 <c>BasicPublishAsync</c> 抛 <see cref="PublishException.IsReturn"/> 为真的异常
+    /// （Channel 的 basic.return 处理先于它执行，Error 已经记下）。退回<b>不算发布失败</b>：代理接下并确认了消息，
+    /// 只是这个事件类型此刻没有任何队列绑定，发布一个还没有消费者的集成事件是合法的。
+    /// 当成失败的话 Outbox 会把这类事件反复重发、最终推进死信。代理 nack 则照常抛出。
+    /// 消费侧重试副本直接调 <c>BasicPublishAsync</c>，不经过这里：副本被退回说明本组的队列已经不在，
+    /// 那里按发布失败处置（原消息进死信），而不是确认原消息。
+    /// </para>
     /// </remarks>
     private async Task PublishToChannelAsync(IChannel channel, string eventTypeName, BasicProperties properties, byte[] body, CancellationToken cancellationToken)
     {
-        await channel.BasicPublishAsync(_exchangeName, eventTypeName, true, properties, body, cancellationToken);
+        try
+        {
+            await channel.BasicPublishAsync(_exchangeName, eventTypeName, true, properties, body, cancellationToken);
+        }
+        catch (PublishException ex) when (ex.IsReturn)
+        {
+            _logger.LogDebug(ex, "Event {EventType} was returned as unroutable; the publish itself is complete", eventTypeName);
+        }
     }
 
     /// <summary>

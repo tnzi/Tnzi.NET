@@ -142,6 +142,45 @@ describe('useAdminTabStore', () => {
     expect(store.fixedTabIds).not.toContain('secret')
   })
 
+  // A detail tab's id is its path, not its route name, so a prune that only
+  // compared ids against the denied route names never removed one: a record
+  // tab outlived the permission (or the module) its page needs.
+  it('pruneTabs drops detail tabs whose route is denied, pinned ones included', () => {
+    const store = useAdminTabStore()
+    const agent = (id: string) => ({
+      name: 'ai.agents.detail',
+      path: `/admin/ai/agents/${id}`,
+      fullPath: `/admin/ai/agents/${id}`,
+      params: { id },
+      query: {},
+      meta: { title: 'Agent' },
+    })
+    store.addTab(sampleRoute('users', 'Users'))
+    store.addTab(agent('A'))
+    store.addTab(agent('B'))
+    store.fixTab('/admin/ai/agents/A')
+    expect(store.activeTabId).toBe('/admin/ai/agents/B')
+
+    store.pruneTabs(new Set(['ai.agents', 'ai.agents.detail']))
+
+    expect(store.tabs.map((t) => t.id)).toEqual(['users'])
+    expect(store.fixedTabIds).toEqual([])
+    expect(store.activeTabId).toBe('users')
+  })
+
+  it('a tab records the route it was opened from', () => {
+    const store = useAdminTabStore()
+    store.addTab({
+      name: 'ai.agents.detail',
+      path: '/admin/ai/agents/A',
+      fullPath: '/admin/ai/agents/A',
+      params: { id: 'A' },
+      query: {},
+      meta: { title: 'Agent' },
+    })
+    expect(store.tabs[0]).toMatchObject({ id: '/admin/ai/agents/A', routeName: 'ai.agents.detail' })
+  })
+
   // ── Multi-instance (detail / deep-link) routes ──────────────────────────────
   // `path` mirrors vue-router: the RESOLVED pathname (params filled, query
   // stripped); `fullPath` carries the query.
@@ -304,5 +343,113 @@ describe('useAdminTabStore', () => {
     expect(store.activeTabId).toBe('a')
     store.switchRouteByTab({ id: 'b', title: 'B', fullPath: '/b' })
     expect(store.activeTabId).toBe('b')
+  })
+
+  // The tab on screen is the page on screen. Closing it used to move only the
+  // highlight: the closed page stayed rendered under a URL no tab pointed at,
+  // and Close all left a page with no tab at all. The shell binds a navigator,
+  // and every close that takes away the tab on screen goes through it.
+  describe('closing the tab on screen shows another page', () => {
+    function seedShown(active = 'b') {
+      const store = useAdminTabStore()
+      store.addTab(sampleRoute('a', 'A'))
+      store.addTab(sampleRoute('b', 'B'))
+      store.addTab(sampleRoute('c', 'C'))
+      store.setActiveTab(active)
+      const shown: Array<string | null> = []
+      store.bindNavigation((tab) => shown.push(tab ? tab.fullPath : null))
+      return { store, shown }
+    }
+
+    it('★ closing the active tab shows the tab after it', () => {
+      const { store, shown } = seedShown('b')
+      expect(store.removeTab('b')).toBe('c')
+      expect(shown).toEqual(['/c'])
+      expect(store.activeTabId).toBe('c')
+    })
+
+    it('★ closing the last open tab shows the landing page', () => {
+      const store = useAdminTabStore()
+      store.addTab(sampleRoute('a', 'A'))
+      const shown: Array<string | null> = []
+      store.bindNavigation((tab) => shown.push(tab ? tab.fullPath : null))
+      store.removeTab('a')
+      expect(shown).toEqual([null])
+      expect(store.activeTabId).toBe('')
+    })
+
+    it('closing a tab in the background leaves the page alone', () => {
+      const { store, shown } = seedShown('b')
+      store.removeTab('a')
+      expect(shown).toEqual([])
+      expect(store.activeTabId).toBe('b')
+    })
+
+    it('★ Close left of a tab, with the active tab among them, shows that tab', () => {
+      const { store, shown } = seedShown('a')
+      store.removeLeftTabs('c')
+      expect(shown).toEqual(['/c'])
+      expect(store.activeTabId).toBe('c')
+    })
+
+    it('★ Close right of a tab, with the active tab among them, shows that tab', () => {
+      const { store, shown } = seedShown('c')
+      store.removeRightTabs('a')
+      expect(shown).toEqual(['/a'])
+      expect(store.activeTabId).toBe('a')
+    })
+
+    it('Close left / right that keep the active tab leave the page alone', () => {
+      const { store, shown } = seedShown('b')
+      store.removeLeftTabs('b')
+      store.removeRightTabs('b')
+      expect(store.tabs.map((t) => t.id)).toEqual(['b'])
+      expect(shown).toEqual([])
+    })
+
+    it('★ Close others shows the tab it was chosen on', () => {
+      const { store, shown } = seedShown('c')
+      store.removeOtherTabs('a')
+      expect(shown).toEqual(['/a'])
+      expect(store.activeTabId).toBe('a')
+    })
+
+    it('★ Close all shows the home tab, else a pinned tab, else the landing page', () => {
+      const { store, shown } = seedShown('b')
+      store.clearAllTabs()
+      expect(shown).toEqual([null])
+
+      const pinned = seedShown('b')
+      pinned.store.fixTab('a')
+      pinned.store.clearAllTabs()
+      expect(pinned.shown).toEqual(['/a'])
+      expect(pinned.store.activeTabId).toBe('a')
+    })
+
+    it('★ a tab click shows that tab', () => {
+      const { store, shown } = seedShown('b')
+      store.switchRouteByTab(store.findTab('a')!)
+      expect(shown).toEqual(['/a'])
+    })
+
+    it('pruning and a user switch move only the highlight', () => {
+      const { store, shown } = seedShown('b')
+      store.pruneTabs(new Set(['b']))
+      store.claimForUser('u1')
+      store.claimForUser('u2')
+      expect(shown).toEqual([])
+    })
+
+    it('unbinding stops the navigation; with none bound only the highlight moves', () => {
+      const store = useAdminTabStore()
+      store.addTab(sampleRoute('a', 'A'))
+      store.addTab(sampleRoute('b', 'B'))
+      const shown: Array<string | null> = []
+      const unbind = store.bindNavigation((tab) => shown.push(tab ? tab.fullPath : null))
+      unbind()
+      store.removeTab('b')
+      expect(shown).toEqual([])
+      expect(store.activeTabId).toBe('a')
+    })
   })
 })

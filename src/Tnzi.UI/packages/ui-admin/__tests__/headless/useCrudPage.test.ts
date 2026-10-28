@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { useCrudPage } from '../../src/headless/useCrudPage'
+import { HttpError } from '@tnzi/core'
 import type { ColumnDef } from '../../src/headless/useColumnSettings'
 
 interface User {
@@ -183,6 +184,35 @@ describe('useCrudPage', () => {
     expect(crud.batchActions.selectedCount.value).toBe(0)
   })
 
+  it('a batch delete refused part-way reloads the list and keeps selected only the rows still there', async () => {
+    // A per-id bridge deletes one at a time and stops at the first refusal:
+    // the rows before it are gone server-side.
+    const rows: User[] = [
+      { id: '1', name: 'A' },
+      { id: '2', name: 'B' },
+      { id: '3', name: 'C' },
+      { id: '4', name: 'D' },
+      { id: '5', name: 'E' },
+    ]
+    let stored = [...rows]
+    const fetchData = vi.fn(async () => ({ items: stored, totalCount: stored.length, pageIndex: 1, pageSize: 20 }))
+    const deleteData = vi.fn(async (ids: string[]) => {
+      for (const id of ids) {
+        if (id === '3') throw new Error('Account 3 is in use')
+        stored = stored.filter((r) => r.id !== id)
+      }
+    })
+    const { crud } = makeCrud({ fetchData: fetchData as any, deleteData: deleteData as any })
+    await crud.refresh()
+    for (const r of rows) crud.batchActions.select(r.id)
+
+    await expect(crud.handleDelete()).rejects.toThrow('Account 3 is in use')
+
+    expect(fetchData).toHaveBeenCalledTimes(2)
+    expect(crud.items.value.map((r) => r.id)).toEqual(['3', '4', '5'])
+    expect(crud.batchActions.selectedIds.value).toEqual(['3', '4', '5'])
+  })
+
   it('handleDelete with explicit ids bypasses selection', async () => {
     const { crud, bridge } = makeCrud()
     await crud.handleDelete(['9'])
@@ -244,6 +274,16 @@ describe('useCrudPage', () => {
     expect(crud.error.value?.message).toBe('always-fails')
     expect(onError).toHaveBeenCalledTimes(1)
     expect(onError.mock.calls[0][1]).toBe('fetch')
+  })
+
+  it('surfaces a refused list read after one request: a 403 is not retried', async () => {
+    const fetchData = vi.fn(async () => {
+      throw new HttpError({ succeeded: false, success: false, code: 403, message: 'Forbidden', data: undefined })
+    })
+    const { crud } = makeCrud({ fetchData: fetchData as any }, { retryFetch: 3, retryDelayMs: 0 })
+    await crud.refresh().catch(() => {})
+    expect(fetchData).toHaveBeenCalledTimes(1)
+    expect(crud.error.value?.message).toBe('Forbidden')
   })
 
   it('onError returning false suppresses the default toast', async () => {

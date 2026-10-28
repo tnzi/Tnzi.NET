@@ -53,8 +53,8 @@ public class ModuleBootTests
         // repository is left to the SQLite-backed tests, which already cover it.
         provider.GetRequiredService<ICliProviderRegistry>().ShouldNotBeNull();
         provider.GetRequiredService<ICliProtocolAdapterFactory>().ShouldNotBeNull();
-        provider.GetRequiredService<ICliProcessHost>().ShouldNotBeNull();
-        provider.GetRequiredService<ICliExecutableResolver>().ShouldNotBeNull();
+        // 没有消费方注册别的宿主时，本机宿主是默认（在 PostConfigure 阶段登记）
+        provider.GetRequiredService<ICliHost>().ShouldBeOfType<LocalProcessHost>();
         provider.GetRequiredService<ICliBriefComposer>().ShouldNotBeNull();
         provider.GetRequiredService<ICliMcpConfigComposer>().ShouldNotBeNull();
         provider.GetRequiredService<ICliWorkspacePreparer>().ShouldNotBeNull();
@@ -81,6 +81,8 @@ public class ModuleBootTests
             .Select(p => p.ParameterType)
             // Repositories come from the database module, which this boot deliberately omits.
             .Where(type => !(type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IRepository<,>)))
+            // The container itself provides these; they never appear as descriptors.
+            .Where(type => type != typeof(IServiceScopeFactory) && type != typeof(IServiceProvider))
             .Where(type => !services.Any(d => d.ServiceType == type
                 || (type.IsGenericType && d.ServiceType == type.GetGenericTypeDefinition())))
             .Select(type => type.Name)
@@ -113,12 +115,18 @@ public class ModuleBootTests
     }
 
     [Fact]
-    public async Task HostedServices_WithTheModuleDisabled_StartAndStopWithoutDoingWork()
+    public async Task HostedServices_WithTheModuleDisabled_IdleWithoutFaulting_AndStopPromptly()
     {
         // This is the default configuration, so it is the one that must not break a host.
-        // All three self-gate and return immediately; if one of them started polling, or
-        // threw because no database is configured, host startup would fail for every
-        // deployment that merely references the package.
+        // While AI:Cli:Enabled is off the three services idle and re-read the switch on every
+        // iteration (switching it on at runtime starts them without a restart), so they do not
+        // return on their own. What must hold is that starting them does not break the host,
+        // idling never faults them, and stopping the host ends them promptly.
+        //
+        // The test used to wait for ExecuteAsync to return by itself, which was right while the
+        // services exited when disabled. Since they idle, it only passed because the 60 second
+        // start token is linked to the stopping token; under load the check could run before the
+        // loop had observed that cancellation, and every run spent a full minute here.
         await using var provider = (await ComposeAsync(enabled: false)).Provider;
 
         var hosted = provider.GetServices<IHostedService>().OfType<BackgroundService>()
@@ -127,27 +135,26 @@ public class ModuleBootTests
             .ToList();
         hosted.Count.ShouldBe(3);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         foreach (var service in hosted)
         {
-            await service.StartAsync(cts.Token);
+            await service.StartAsync(CancellationToken.None);
         }
 
-        // Returning immediately is the observable form of "gated off". Waiting on the
-        // task is what makes this an assertion rather than a hope: a service that ignored
-        // the switch would still be running here.
+        // Give each loop time to run at least one idle iteration.
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
         foreach (var service in hosted)
         {
-            var executeTask = service.ExecuteTask;
-            Assert.NotNull(executeTask);
-            await executeTask.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
-            executeTask.IsCompletedSuccessfully.ShouldBeTrue(
-                $"{service.GetType().Name} kept running while AI:Cli:Enabled=false");
+            Assert.NotNull(service.ExecuteTask);
+            service.ExecuteTask.IsFaulted.ShouldBeFalse($"{service.GetType().Name} faulted while AI:Cli:Enabled=false");
         }
 
+        // The bound is for a loaded machine: each StopAsync returns the moment its loop ends.
+        using var stopBound = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         foreach (var service in hosted)
         {
-            await service.StopAsync(cts.Token);
+            await service.StopAsync(stopBound.Token);
+            service.ExecuteTask!.IsCompletedSuccessfully.ShouldBeTrue(
+                $"{service.GetType().Name} did not stop when the host stopped");
         }
     }
 

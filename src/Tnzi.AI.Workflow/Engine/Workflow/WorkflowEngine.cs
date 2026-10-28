@@ -30,11 +30,59 @@ public class WorkflowEngine
     /// <param name="options">执行选项（可选）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>执行结果</returns>
-    public async Task<WorkflowEngineResult> ExecuteAsync(
+    public Task<WorkflowEngineResult> ExecuteAsync(
         WorkflowGraph graph,
         string initialInput,
         IServiceProvider serviceProvider,
         WorkflowExecutionOptions? options = null,
+        CancellationToken cancellationToken = default)
+        => ExecuteAsync(graph, initialInput, serviceProvider, options, usageMeter: null, cancellationToken);
+
+    /// <summary>
+    /// 执行工作流图，并把每个节点完成时的 token 用量计入 <paramref name="usageMeter"/>。
+    /// </summary>
+    /// <param name="graph">工作流图</param>
+    /// <param name="initialInput">初始输入</param>
+    /// <param name="serviceProvider">服务提供者</param>
+    /// <param name="options">执行选项（可选）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <param name="usageMeter">
+    /// 调用方持有的计量器：本次调用抛出（取消、存储故障）时它仍记着已完成节点消耗的 token，
+    /// 调用方据此记账与结算配额，而不是按 0 退回预留。
+    /// </param>
+    /// <returns>执行结果</returns>
+    public Task<WorkflowEngineResult> ExecuteAsync(
+        WorkflowGraph graph,
+        string initialInput,
+        IServiceProvider serviceProvider,
+        WorkflowExecutionOptions? options,
+        WorkflowUsageMeter? usageMeter,
+        CancellationToken cancellationToken = default)
+        => ExecuteAsync(graph, initialInput, serviceProvider, options, usageMeter, onStepCompleted: null, cancellationToken);
+
+    /// <summary>
+    /// 执行工作流图，计量 token 用量，并在每个步骤的结果记录下来时回调 <paramref name="onStepCompleted"/>。
+    /// </summary>
+    /// <param name="graph">工作流图</param>
+    /// <param name="initialInput">初始输入</param>
+    /// <param name="serviceProvider">服务提供者</param>
+    /// <param name="options">执行选项（可选）</param>
+    /// <param name="usageMeter">调用方持有的计量器（见另一个重载）</param>
+    /// <param name="onStepCompleted">
+    /// 每个步骤（执行完、被条件跳过或被中断）的结果写进 <see cref="WorkflowEngineResult.StepResults"/> 时调用，
+    /// 按步骤完成的先后，一次一个。引擎等它返回再处理下一个结果，所以调用方可以借它让引擎在消费者处理事件时
+    /// 停下（流式执行用它逐步推送事件，并保证调用方的 DbContext 不会被引擎与消费者同时使用）。
+    /// 被条件边裁剪的分支没有结果，也不回调。
+    /// </param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>执行结果</returns>
+    public async Task<WorkflowEngineResult> ExecuteAsync(
+        WorkflowGraph graph,
+        string initialInput,
+        IServiceProvider serviceProvider,
+        WorkflowExecutionOptions? options,
+        WorkflowUsageMeter? usageMeter,
+        Func<WorkflowStepResultDto, CancellationToken, Task>? onStepCompleted,
         CancellationToken cancellationToken = default)
     {
         Check.NotNull(graph);
@@ -70,8 +118,8 @@ public class WorkflowEngine
         var (state, completed, stepResults) = await RestoreOrCreateStateAsync(
             executionId, initialInput, options, checkpointStore, cancellationToken);
 
-        // 跟踪循环迭代次数
-        var loopIterations = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // 跟踪循环的轮数、被路由带离的循环与本轮关上的出口
+        var loopProgress = new LoopProgress();
 
         int totalInputTokens = 0, totalOutputTokens = 0;
         var failed = false;
@@ -125,7 +173,8 @@ public class WorkflowEngine
                     BuildNodeInputSummary(step, state),
                     cancellationToken);
 
-                if (!string.IsNullOrWhiteSpace(step.Condition))
+                // 条件节点自己消费 step.Condition 作路由表达式时，它不是门控（见 ConditionalNode.UsesStepConditionAsRouteExpression）
+                if (!string.IsNullOrWhiteSpace(step.Condition) && !ConditionalNode.UsesStepConditionAsRouteExpression(step))
                 {
                     var evaluatedCondition = state.ResolveTemplate(step.Condition);
                     if (!EvaluateCondition(evaluatedCondition))
@@ -161,7 +210,13 @@ public class WorkflowEngine
                 {
                     using var scope = serviceProvider.CreateScope();
                     var scopedExecutor = scope.ServiceProvider.GetRequiredService<WorkflowNodeExecutor>();
+                    // 节点身份是工具权限规则的匹配维度（WorkflowNodeName / IsWorkflowOnly）：每个并发节点在自己的执行流里
+                    // 进入自己的作用域，不写共享属性包（同一个字典引用，并发节点会互相覆盖名字）
+                    using var nodeScope = WorkflowNodeScope.Enter(options?.WorkflowDefinitionId, executionId, p.StepId);
                     var result = await scopedExecutor.ExecuteAsync(p.Step, state, run, p.ResumeData, cancellationToken);
+                    // Metered here, as each node finishes, not after Task.WhenAll: if a sibling in
+                    // this layer throws, WhenAll throws and this result is never seen again.
+                    usageMeter?.Add(result.Usage);
                     return (p.StepId, p.NodeRecord, result, skipped: false);
                 })
                 .ToList();
@@ -198,12 +253,15 @@ public class WorkflowEngine
                     {
                         case NodeErrorPolicy.Skip:
                             // 跳过：空输出，不中止工作流
+                            // The output is dropped, the tokens the failed attempt consumed are not:
+                            // they were billed whatever policy absorbs the failure.
                             effectiveResult = new WorkflowNodeResult
                             {
                                 Output = string.Empty,
                                 IsSuccess = true,
                                 Error = result.Error,
-                                DurationMs = result.DurationMs
+                                DurationMs = result.DurationMs,
+                                Usage = result.Usage
                             };
                             _logger.LogWarning("Workflow node '{StepId}' failed (OnError=Skip, continuing): {Error}", stepId, result.Error);
                             break;
@@ -224,6 +282,9 @@ public class WorkflowEngine
                         default:
                             // Fail（默认）：中止工作流
                             failed = true;
+                            // ★ 失败的节点不算完成。此前它和成功的节点一样留在 completed 里，失败检查点照样列着它：
+                            // 恢复失败的执行（文档里的「重试失败节点」）跳过它，下游拿着失败输出继续跑、报 Completed。
+                            completed.Remove(stepId);
                             _logger.LogWarning("Workflow node '{StepId}' failed: {Error}", stepId, result.Error);
                             break;
                     }
@@ -231,12 +292,17 @@ public class WorkflowEngine
 
                 state.SetOutput(stepId, effectiveResult.Output);
 
-                stepResults.Add(new WorkflowStepResultDto
+                var stepResult = new WorkflowStepResultDto
                 {
                     StepId = stepId,
                     Output = effectiveResult.Output.Text,
                     Skipped = skipped
-                });
+                };
+                stepResults.Add(stepResult);
+                if (onStepCompleted != null)
+                {
+                    await onStepCompleted(stepResult, cancellationToken);
+                }
 
                 // 聚合 token 用量
                 if (effectiveResult.Usage != null)
@@ -267,13 +333,13 @@ public class WorkflowEngine
                 // 处理条件边路由（被中断的节点还没有真实输出，路由与循环等它恢复执行后再算）
                 if (!skipped && !failed && !interrupted)
                 {
-                    await HandleConditionalEdgeAsync(graph, stepId, effectiveResult, state, completed, runStore, run, nodeOrderIndex, cancellationToken);
+                    await HandleConditionalEdgeAsync(graph, stepId, effectiveResult, state, completed, loopProgress, runStore, run, nodeOrderIndex, cancellationToken);
                 }
 
                 // 处理循环
                 if (!skipped && !failed && !interrupted)
                 {
-                    HandleLoop(graph, stepId, state, completed, loopIterations);
+                    HandleLoop(graph, stepId, state, completed, loopProgress);
                 }
             }
 
@@ -282,6 +348,7 @@ public class WorkflowEngine
             // 第二个审批节点也因「已经在等审批」被跳过，永远进不了 StepsAwaitingApproval。
             if (awaitingApproval || awaitingInterrupt != null)
             {
+                ReleaseUnapprovedRunThenGateSteps(readyNodes, completed);
                 if (checkpointStore != null)
                 {
                     checkpointCreatedAt ??= DateTime.UtcNow;
@@ -301,7 +368,11 @@ public class WorkflowEngine
             }
 
             // 只有 Fail 策略（默认）会把 failed 置 true；Skip/Continue 吸收失败，不置位也不中止。
-            if (failed) break;
+            if (failed)
+            {
+                ReleaseUnapprovedRunThenGateSteps(readyNodes, completed);
+                break;
+            }
 
             // HITL：检查本层是否有步骤需要人工审批。
             // nodeType=approval 的节点自己就是闸门（经 CheckInterruptAsync 暂停、恢复时按 ResumeData 出结果），
@@ -310,7 +381,7 @@ public class WorkflowEngine
             if (!failed)
             {
                 var approvalNodes = readyNodes
-                    .Where(s => s.RequiresApproval && !IsApprovalNodeType(s))
+                    .Where(IsRunThenGateStep)
                     .ToList();
                 foreach (var approvalNode in approvalNodes)
                 {
@@ -334,6 +405,9 @@ public class WorkflowEngine
                                 Text = $"[Rejected: {interruptResult.Feedback ?? "No feedback provided"}]"
                             };
                             state.SetOutput(approvalStepId, rejectionOutput);
+                            // ★ 被拒绝的步骤不算完成：它在本层执行时已进 completed，留着它，恢复失败的执行时
+                            // 依赖它的节点直接就绪，拿着拒绝文本越过闸门。移出后恢复时它重新生成、再次送审。
+                            completed.Remove(approvalStepId);
                             UpdateStepResult(stepResults, approvalStepId, rejectionOutput.Text);
                             await UpdateRunNodeAsync(runStore, run?.Nodes.FirstOrDefault(n =>
                                 string.Equals(n.NodeName, approvalStepId, StringComparison.OrdinalIgnoreCase)),
@@ -379,6 +453,10 @@ public class WorkflowEngine
                 checkpointCreatedAt ??= DateTime.UtcNow;
                 await SaveCheckpointAsync(checkpointStore, executionId, state, completed, status, null, checkpointCreatedAt, cancellationToken);
             }
+
+            // ★ 中断处理器拒绝审批（上面的 HITL 段置 failed）同样就此中止。此前这里没有出口，循环进入
+            // 下一层：被拒绝的内容已经让下游就绪，同一次调用里下游就拿着拒绝文本执行了。
+            if (failed) break;
         }
 
         return await BuildFinalResultAsync(
@@ -405,9 +483,6 @@ public class WorkflowEngine
     // 条件边路由、循环处理、检查点、Run 节点管理等辅助方法
     // ------------------------------------------------------------------------
 
-    /// <summary>
-    /// 处理节点级审批暂停和通用中断
-    /// </summary>
     /// <summary>
     /// 恢复时交给节点的 ResumeData：按步骤的映射优先，其次是单步的 ResumeStepId/ResumeData 对。
     /// 同一层里多个审批节点各自被批准后，一次恢复要把每个节点的结论都带上。
@@ -545,8 +620,10 @@ public class WorkflowEngine
                             : awaitingInterrupt != null
                                 ? AgentRunStatus.RequiresClarification
                                 : AgentRunStatus.Completed;
-                run.TotalInputTokens = totalInputTokens;
-                run.TotalOutputTokens = totalOutputTokens;
+                // Added, not assigned: a resumed run reloads the same AgentRun, and this call only
+                // counted the segment it executed. Assigning left the run showing the last segment.
+                run.TotalInputTokens += totalInputTokens;
+                run.TotalOutputTokens += totalOutputTokens;
                 run.OutputSummary = stepResults.LastOrDefault(r => !r.Skipped)?.Output;
                 run.LastHeartbeatAt = DateTime.UtcNow;
                 await runStore.UpdateAsync(run, cancellationToken);
@@ -589,6 +666,7 @@ public class WorkflowEngine
         WorkflowNodeResult result,
         WorkflowState state,
         HashSet<string> completed,
+        LoopProgress loopProgress,
         IRunStore? runStore,
         AgentRun? run,
         IReadOnlyDictionary<string, int> nodeOrderIndex,
@@ -635,12 +713,28 @@ public class WorkflowEngine
                 selectedReachable.Add(selectedDownstream);
             }
 
+            // 路由节点所在的循环，按目标分两种：目标在循环里 = 再来一轮（循环继续），目标在循环外 =
+            // 离开循环。离开的循环不再重置，它里面没被选的分支和别的分支一样被裁剪；此前它们因为
+            // 「属于激活循环」不被裁剪，选了出口照样 rework、照样一轮轮审下去直到 MaxIterations。
+            var continuingLoopIds = new List<string>();
+            foreach (var (loopId, loopDef) in graph.Loops)
+            {
+                if (!ContainsNode(loopDef, fromNodeId)) continue;
+
+                if (ContainsNode(loopDef, targetNodeId))
+                {
+                    continuingLoopIds.Add(loopId);
+                }
+                else
+                {
+                    loopProgress.Exited.Add(loopId);
+                    _logger.LogDebug("Conditional edge from '{FromNode}' to '{TargetNode}' leaves loop '{LoopId}'", fromNodeId, targetNodeId, loopId);
+                }
+            }
+
             // Nodes belonging to a currently-active loop must NOT be force-marked completed by
             // branch pruning: loop iteration (HandleLoop) owns their completion lifecycle by
-            // removing them from `completed` to re-run. A loop is "active" when it contains the
-            // routing node (fromNodeId) or the selected target. Without this guard, an alternate
-            // branch node that happens to live inside the active loop would be wrongly skipped,
-            // breaking the loop's next iteration.
+            // removing them from `completed` to re-run. A loop the router has just left is not active.
             var activeLoopNodes = CollectActiveLoopNodeIds(graph, fromNodeId, targetNodeId, selectedReachable);
 
             var alternateRoots = edge.Routes.Values
@@ -674,6 +768,13 @@ public class WorkflowEngine
                     completed.Add(downstream);
                     _logger.LogDebug("Conditional edge: skipping non-target node '{SkippedNode}'", downstream);
 
+                    // 循环继续时，循环外没被选的分支只是本轮不走：循环重置进入下一轮时 HandleLoop 把它放回来。
+                    // 此前它被永久标成完成，第一轮选了 rework，第二轮判 accept 时出口已经「完成」，再也走不出去。
+                    foreach (var loopId in continuingLoopIds)
+                    {
+                        loopProgress.CloseForIteration(loopId, downstream);
+                    }
+
                     if (runStore != null && run != null && graph.GetNode(downstream) != null)
                     {
                         var skippedStep = graph.GetNode(downstream)!;
@@ -704,6 +805,7 @@ public class WorkflowEngine
     /// 或包含被选中的目标节点（<paramref name="targetNodeId"/>）、或其任一成员落在被选中路径
     /// （<paramref name="selectedReachable"/>）内。激活循环内的节点完成态由 <see cref="HandleLoop"/>
     /// 通过从 completed 集合移除来管理，故分支裁剪不得将其误标完成。
+    /// 例外：包含路由节点、目标却在它外面的循环已被路由带离，不算激活，它里面没被选的分支照常裁剪。
     /// </summary>
     private static HashSet<string> CollectActiveLoopNodeIds(
         WorkflowGraph graph,
@@ -716,10 +818,13 @@ public class WorkflowEngine
 
         foreach (var (_, loopDef) in graph.Loops)
         {
-            var isActive = loopDef.NodeIds.Any(id =>
-                string.Equals(id, fromNodeId, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(id, targetNodeId, StringComparison.OrdinalIgnoreCase)
-                || selectedReachable.Contains(id));
+            var containsRouter = ContainsNode(loopDef, fromNodeId);
+            var containsTarget = ContainsNode(loopDef, targetNodeId);
+            if (containsRouter && !containsTarget) continue;
+
+            var isActive = containsRouter
+                || containsTarget
+                || loopDef.NodeIds.Any(selectedReachable.Contains);
 
             if (!isActive) continue;
 
@@ -740,7 +845,7 @@ public class WorkflowEngine
         string nodeId,
         WorkflowState state,
         HashSet<string> completed,
-        Dictionary<string, int> loopIterations)
+        LoopProgress loopProgress)
     {
         var (inLoop, loopId) = graph.IsInLoop(nodeId);
         if (!inLoop || loopId == null) return;
@@ -751,8 +856,15 @@ public class WorkflowEngine
         // 只在循环的最后一个节点完成后检查是否需要继续循环
         if (!string.Equals(nodeId, lastNodeInLoop, StringComparison.OrdinalIgnoreCase)) return;
 
-        var currentIteration = loopIterations.GetValueOrDefault(loopId, 0) + 1;
-        loopIterations[loopId] = currentIteration;
+        // 条件边已经把执行带出了这个循环：不再重置
+        if (loopProgress.Exited.Contains(loopId))
+        {
+            _logger.LogDebug("Loop '{LoopId}' was left through a conditional edge", loopId);
+            return;
+        }
+
+        var currentIteration = loopProgress.Iterations.GetValueOrDefault(loopId, 0) + 1;
+        loopProgress.Iterations[loopId] = currentIteration;
 
         if (currentIteration >= loopDef.MaxIterations)
         {
@@ -776,6 +888,49 @@ public class WorkflowEngine
         {
             completed.Remove(loopNodeId);
         }
+
+        // 本轮没被选的循环外分支在新一轮里重新可选
+        foreach (var closedNodeId in loopProgress.ReopenForNextIteration(loopId))
+        {
+            completed.Remove(closedNodeId);
+        }
+
+        // 与本循环共用节点的（内层）循环随本循环重跑：上一轮里它被带离，不代表这一轮也被带离
+        loopProgress.Exited.RemoveWhere(otherLoopId => graph.Loops.TryGetValue(otherLoopId, out var other)
+            && other.NodeIds.Any(id => ContainsNode(loopDef, id)));
+    }
+
+    private static bool ContainsNode(LoopDefinition loopDef, string nodeId)
+        => loopDef.NodeIds.Any(id => string.Equals(id, nodeId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 一次 <see cref="ExecuteAsync(WorkflowGraph, string, IServiceProvider, WorkflowExecutionOptions?, WorkflowUsageMeter?, CancellationToken)"/>
+    /// 里各循环的进度：已完成的轮数、被条件边带离的循环、以及循环继续时「本轮不走」而暂时标成完成的循环外分支。
+    /// 与轮数一样只活在本次调用里，不进检查点。
+    /// </summary>
+    private sealed class LoopProgress
+    {
+        private readonly Dictionary<string, HashSet<string>> _closedForIteration = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>循环 ID → 已完成的轮数</summary>
+        public Dictionary<string, int> Iterations { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>路由节点选中了循环外目标的循环：不再重置</summary>
+        public HashSet<string> Exited { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public void CloseForIteration(string loopId, string nodeId)
+        {
+            if (!_closedForIteration.TryGetValue(loopId, out var closed))
+            {
+                closed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _closedForIteration[loopId] = closed;
+            }
+
+            closed.Add(nodeId);
+        }
+
+        public IReadOnlyCollection<string> ReopenForNextIteration(string loopId)
+            => _closedForIteration.Remove(loopId, out var closed) ? closed : [];
     }
 
     /// <summary>
@@ -813,8 +968,7 @@ public class WorkflowEngine
         return false;
     }
 
-    private static string Truncate(string value, int maxLength)
-        => value.Length <= maxLength ? value : value[..maxLength] + "…";
+    private static string Truncate(string value, int maxLength) => value.Truncate(maxLength, "…");
 
     private static string? EvaluateOutputContains(ConditionalEdge edge, string output)
     {
@@ -881,6 +1035,26 @@ public class WorkflowEngine
     private static bool IsApprovalNodeType(WorkflowStepDto step)
         => string.Equals(GetNodeType(step), WorkflowNodeTypes.Approval, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// 「先执行、再拦下」的步骤：内容节点上的 <see cref="WorkflowStepDto.RequiresApproval"/>。审批节点
+    /// （nodeType=approval）自己经中断暂停，不走这条路。
+    /// </summary>
+    private static bool IsRunThenGateStep(WorkflowStepDto step)
+        => step.RequiresApproval && !IsApprovalNodeType(step);
+
+    /// <summary>
+    /// run-then-gate 步骤执行完就进了 completed，但只有通过本层末尾的审批检查才算真的完成。本层在审批检查
+    /// 之前就收场（别的节点中断或失败）时，它们没有被任何人批准过：留在 completed 里，恢复时依赖它们的节点
+    /// 直接就绪，拿着未经批准的内容越过闸门。移出后，恢复时它们重新生成内容并送审。
+    /// </summary>
+    private static void ReleaseUnapprovedRunThenGateSteps(IEnumerable<WorkflowStepDto> layer, HashSet<string> completed)
+    {
+        foreach (var step in layer.Where(IsRunThenGateStep))
+        {
+            completed.Remove(step.StepId!);
+        }
+    }
+
     private static string GetNodeType(WorkflowStepDto step)
         => WorkflowStepNodeType.Get(step) ?? WorkflowNodeTypes.Agent;
 
@@ -911,7 +1085,7 @@ public class WorkflowEngine
         {
             Status = AgentRunStatus.Running,
             ExecutionMode = AgentExecutionMode.Single,
-            InputSummary = initialInput.Length > 500 ? initialInput[..500] : initialInput,
+            InputSummary = initialInput.FitToLength(500),
             WorkflowExecutionId = executionId,
             WorkflowDefinitionId = options?.WorkflowDefinitionId
         }, ct);

@@ -140,7 +140,7 @@ public class RecurringDocumentBuilder
 
         var draft = await _expenseService.CreateDraftAsync(new CreateExpenseDto
         {
-            VendorId = t.PartyId == Guid.Empty ? null : t.PartyId,
+            VendorId = t.PartyId,
             PaidFromAccountId = t.PaidFromAccountId.Value,
             PaymentMethod = t.PaymentMethod,
             DocDate = docDate,

@@ -21,8 +21,8 @@ public class ContextProvidersOptions
     /// 上下文注入的最大 token 预算（0 = 不限制，默认 16384）
     /// </summary>
     /// <remarks>
-    /// 当所有 ContextProvider 的注入内容总 token 超过此预算时，
-    /// 后续 Provider 的注入将被跳过。设为 0 则不进行 token 限制。
+    /// 只约束注入的消息：某个 Provider 的消息放不进剩余预算时，丢掉它的消息（及对应引用），
+    /// 它提供的工具照常合并，后面的 Provider 照常调用。设为 0 则不进行 token 限制。
     /// 推荐范围：仅记忆/Skill 场景用 4096-8192；RAG 为主用 8192-16384；全功能场景用 16384-32768。
     /// </remarks>
     public int MaxTokenBudget { get; set; } = 16_384;
@@ -264,18 +264,6 @@ public class MemoryOptions
     [RuntimeSetting(Label = "Embedding Model", I18n = "admin.modules.system.settings.fields.memoryEmbeddingModel",
         Subsection = "Embedding")]
     public string? EmbeddingModel { get; set; }
-
-    /// <summary>
-    /// 最大记忆事实数（超过时按置信度降序裁剪）
-    /// </summary>
-    [RuntimeSetting(Label = "Max Facts", I18n = "admin.modules.system.settings.fields.memoryMaxFacts",
-        Type = SettingFieldType.Int, Min = 1, Subsection = "Retrieval")]
-    public int MaxFacts { get; set; } = 100;
-
-    /// <summary>
-    /// 置信度裁剪阈值（低于此值的记忆条目在注入时被跳过，默认 0.0 不裁剪）
-    /// </summary>
-    public double ConfidencePruningThreshold { get; set; }
 }
 
 /// <summary>
@@ -293,7 +281,8 @@ public class ChatHistoryMemoryOptions
     /// 是否启用
     /// </summary>
     [RuntimeSetting(Label = "Chat History Memory Enabled", I18n = "admin.modules.system.settings.fields.chatHistoryMemoryEnabled",
-        Type = SettingFieldType.Boolean, Subsection = "Chat History Memory")]
+        Type = SettingFieldType.Boolean, Subsection = "Chat History Memory",
+        Description = "Needs a search service that indexes chat history and filters by user or thread; the built-in knowledge-base search does not, so this stays inactive without one")]
     public bool Enabled { get; set; } = false;
 
     /// <summary>
@@ -315,11 +304,6 @@ public class ChatHistoryMemoryOptions
     /// 向量集合名称
     /// </summary>
     public string? CollectionName { get; set; }
-
-    /// <summary>
-    /// 向量维度
-    /// </summary>
-    public int? VectorDimensions { get; set; }
 }
 
 /// <summary>
@@ -346,7 +330,7 @@ public class TextSearchOptions
     public ContextSearchTime SearchTime { get; set; } = ContextSearchTime.BeforeAIInvoke;
 
     /// <summary>
-    /// 最近消息记忆限制（避免反馈回路）
+    /// 检索查询里在本轮用户消息之前带上的最近用户 / 助手消息条数（追问要靠上一轮才知道在问什么）；0 = 只用本轮消息
     /// </summary>
     public int RecentMessageMemoryLimit { get; set; } = 5;
 

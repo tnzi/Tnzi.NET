@@ -9,7 +9,6 @@ internal static class IdGenerationHelper
 {
     private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo?> _idPropertyCache = new();
     private static readonly ConcurrentDictionary<Type, string?> _dbProviderCache = new();
-    private static readonly ConcurrentDictionary<string, SequentialGuid.SequentialGuidType> _guidTypeCache = new();
 
     /// <summary>
     /// 为新增实体自动生成 ID
@@ -54,20 +53,31 @@ internal static class IdGenerationHelper
         };
     }
 
-    private static SequentialGuid.SequentialGuidType GetSequentialGuidTypeForDatabase(DbContext dbContext)
-    {
-        string? providerName = GetCachedDatabaseProvider(dbContext);
-        providerName ??= "Default";
+    /// <summary>不经 <see cref="IEntityIdGenerator"/>、按 provider 选排列的顺序 Guid。</summary>
+    public static Guid NewSequentialGuid(DbContext dbContext)
+        => SequentialGuid.NewGuid(GetSequentialGuidTypeForDatabase(dbContext));
 
-        return _guidTypeCache.GetOrAdd(providerName, name =>
-            name switch
-            {
-                "Microsoft.EntityFrameworkCore.SqlServer" => SequentialGuid.SequentialGuidType.SequentialAtEnd,
-                "Npgsql.EntityFrameworkCore.PostgreSQL" => SequentialGuid.SequentialGuidType.SequentialAsBinary,
-                "Pomelo.EntityFrameworkCore.MySql" or "MySql.EntityFrameworkCore" or "Microsoft.EntityFrameworkCore.Sqlite" => SequentialGuid.SequentialGuidType.SequentialAsString,
-                _ => SequentialGuid.SequentialGuidType.SequentialAtEnd
-            });
-    }
+    private static SequentialGuid.SequentialGuidType GetSequentialGuidTypeForDatabase(DbContext dbContext)
+        => GetSequentialGuidType(GetCachedDatabaseProvider(dbContext));
+
+    /// <summary>
+    /// EF provider → 该库比较 Guid 列的规则对应的顺序 Guid 排列。<see cref="DefaultEntityIdGenerator"/> 也走这里，两张表不再各写一份。
+    /// </summary>
+    /// <remarks>
+    /// PostgreSQL 归文本顺序而不是字节顺序：Npgsql 按 RFC 大端字节序写 <c>uuid</c>、库按同一顺序比较，
+    /// 那正是 <see cref="Guid.ToString()"/> 的顺序；<see cref="Guid.ToByteArray()"/> 的前三段是小端，按它排的时间戳在库里是乱的。
+    /// MySQL（Pomelo / MySql.EntityFrameworkCore 默认 <c>char(36)</c>）与 SQLite（<c>TEXT</c>）存的就是文本。
+    /// 认不出的 provider 用默认排列（SQL Server）。
+    /// </remarks>
+    internal static SequentialGuid.SequentialGuidType GetSequentialGuidType(string? providerName) => providerName switch
+    {
+        "Microsoft.EntityFrameworkCore.SqlServer" => SequentialGuid.SequentialGuidType.SequentialAtEnd,
+        "Npgsql.EntityFrameworkCore.PostgreSQL"
+            or "Pomelo.EntityFrameworkCore.MySql"
+            or "MySql.EntityFrameworkCore"
+            or "Microsoft.EntityFrameworkCore.Sqlite" => SequentialGuid.SequentialGuidType.SequentialAsString,
+        _ => SequentialGuid.SequentialGuidType.SequentialAtEnd
+    };
 
     private static string? GetCachedDatabaseProvider(DbContext dbContext)
     {

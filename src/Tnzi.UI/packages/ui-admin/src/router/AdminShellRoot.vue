@@ -10,9 +10,11 @@
  * and toggles it on the header's 🎨 button - so consumers get a fully working
  * "click → open drawer → tweak → persist" loop out of the box.
  *
- * Consumers can override this by registering a route at `path: '/admin'` with
- * their own component; the route table replacement logic in
- * {@link createTnziUiAdmin} treats consumer-supplied routes as authoritative.
+ * Consumers replace this layout by route name, the same way as any built-in
+ * page: `defineAdminApp({ overridePages: { 'admin-root': MyLayout } })` swaps
+ * the component and keeps the route's path, redirect and child pages. A second
+ * route registered at `path: '/admin'` does not replace it: vue-router keeps
+ * matching the record registered first, which is this one.
  */
 import { computed, defineAsyncComponent, inject, ref, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -37,15 +39,17 @@ const TDesktopHost = defineAsyncComponent(
   () => import('../components/desktop/TDesktopHost.vue'),
 )
 import TThemeDrawer from '../components/layout/TThemeDrawer.vue'
+import { useAdminBillingConfig } from '../plugin/billing-config'
 import type { AdminMenuItem } from '../stores/useAdminRouteStore'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminThemeStore } from '../stores/useAdminThemeStore'
-import { useAdminTabStore, type AdminTab } from '../stores/useAdminTabStore'
+import { useAdminTabStore } from '../stores/useAdminTabStore'
+import { createTabNavigator } from './tab-navigation'
 import { routeToWindowInput, useAdminDesktopStore } from '../stores/useAdminDesktopStore'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
 import { useChatStore } from '../stores/useChatStore'
-import { createChatImBridge } from '../services/bridges/chat-im-bridge'
+import { useChatConfigProbe } from './chat-config-probe'
 import type { UserPresenceStatus } from '@tnzi/core/services/chat'
 import { useAdminLoginConfig } from '../plugin/login-config'
 import { useAdminChatConfig } from '../plugin/chat-config'
@@ -181,37 +185,29 @@ const builtinChatPossible = computed(
   () => chatConfig?.enabled !== false && moduleAvailability.canActivate('chat'),
 )
 
-// Load the per-user config independently of TChatHost. Chat is deny-by-default:
-// the launcher only appears once /chat/config confirms this user holds
-// `chat.use`. Probing here (not inside TChatHost) means a disabled user never
-// mounts TChatHost at all - no conversation fetch, no SignalR socket, no icon.
-//
-// ★ The chat store's bridge MUST be initialised HERE (not only in TChatHost's
-// setup) so `loadConfig()` actually runs `getConfig()`. Previously the bridge
-// was init'd ONLY by TChatHost, so this `loadConfig()` threw at `requireBridge()`
-// and fell into the fail-open catch → enabled:true → TChatHost mounted for EVERY
-// user (even those without chat.use), which then 403'd on /conversations. Wiring
-// the bridge up front lets `getConfig()` return the real per-user `enabled`
-// (false for a denied user) so TChatHost never mounts for them. TChatHost
-// re-inits the same (stateless) bridge idempotently when it does mount.
-watch(
-  builtinChatPossible,
-  (possible) => {
-    if (possible && storageClient) {
-      chatStore.init(createChatImBridge({ client: storageClient }))
-      void chatStore.loadConfig()
-    }
-  },
-  { immediate: true },
-)
+// Load the per-user config independently of TChatHost, and again whenever the
+// chat store is claimed for another user (a user switch without a sign-out
+// resets it to disabled). Chat is deny-by-default: the launcher only appears
+// once /chat/config confirms this user holds `chat.use`. Probing here (not
+// inside TChatHost) means a disabled user never mounts TChatHost at all - no
+// conversation fetch, no SignalR socket, no icon. See `useChatConfigProbe`.
+useChatConfigProbe({
+  possible: () => builtinChatPossible.value,
+  signedIn: () => authStore.isLogin,
+  client: storageClient,
+})
 
 // The actual launcher/host gate: possible AND this user may use chat.
 // `config.enabled` starts false (no icon flash for a disabled user) and flips
 // true only after the probe confirms the grant. Deny-by-default: a config that
 // can't be confirmed (null/forbidden/throw) stays `enabled:false`, so a denied
 // user never mounts TChatHost or hits its 403-guarded endpoints.
+// While the account is suspended every request and hub negotiation is refused with 402: chat
+// (header and tray), presence and the settings hub stay down and come back when the standing recovers.
+const billing = useAdminBillingConfig()
+const billingLive = computed(() => billing?.state.view !== 'suspended')
 const builtinChatEnabled = computed(
-  () => builtinChatPossible.value && chatStore.config.enabled === true,
+  () => builtinChatPossible.value && chatStore.config.enabled === true && billingLive.value,
 )
 
 // Presence in the header avatar - only when the built-in chat is live AND a
@@ -221,43 +217,41 @@ function onSetPresence(status: UserPresenceStatus): void {
   void chatStore.setMyStatus(status).catch(() => undefined)
 }
 
-// Phase I.7.8: auto-push a tab into the tab store whenever the route
-// changes. Without this watcher the tab bar stays empty until the user
-// clicks a sidebar item, and even then `switchRouteByTab` was a stub
-// that only flipped `activeTabId` without navigating. `immediate: true`
-// seeds the initial tab on the first page load.
-watch(
-  () => route.fullPath,
-  () => {
-    // Only track routes that have a name (built-in shell entries do).
-    // The bare `/admin` redirect is named `admin-root` and has no
-    // dedicated page - skip it.
-    if (!route.name || route.name === 'admin-root') return
-    tabStore.addTab({
-      name: typeof route.name === 'string' ? route.name : String(route.name),
-      fullPath: route.fullPath,
-      path: route.path,
-      query: route.query as Record<string, unknown>,
-      params: route.params as Record<string, unknown>,
-      meta: {
-        title: (route.meta?.title as string | undefined) ?? undefined,
-        keepAlive: route.meta?.keepAlive as boolean | undefined,
-        fixedIndexInTab: route.meta?.fixedIndexInTab as number | undefined,
-        multiTab: route.meta?.multiTab as boolean | undefined,
-        icon: route.meta?.icon as string | undefined,
-        // `addTab` refuses the route on this flag - it must survive the copy
-        // or `meta.hideInTab` is dead (see the same note in guards.ts).
-        hideInTab: route.meta?.hideInTab as boolean | undefined,
-      },
-    })
-  },
-  { immediate: true },
-)
-
-function onTabClick(tab: AdminTab): void {
-  if (route.fullPath === tab.fullPath) return
-  void router.push(tab.fullPath)
+// The one place a route becomes a tab: whenever the route changes while the
+// shell is mounted, i.e. after the navigation has been confirmed and only for
+// pages rendered inside the shell (a public page outside it never gets one).
+// `immediate: true` seeds the initial tab on the first page load.
+function trackRouteTab(): void {
+  // Only track routes that have a name (built-in shell entries do).
+  // The bare `/admin` redirect is named `admin-root` and has no
+  // dedicated page - skip it.
+  if (!route.name || route.name === 'admin-root') return
+  tabStore.addTab({
+    name: typeof route.name === 'string' ? route.name : String(route.name),
+    fullPath: route.fullPath,
+    path: route.path,
+    query: route.query as Record<string, unknown>,
+    params: route.params as Record<string, unknown>,
+    meta: {
+      title: (route.meta?.title as string | undefined) ?? undefined,
+      keepAlive: route.meta?.keepAlive as boolean | undefined,
+      fixedIndexInTab: route.meta?.fixedIndexInTab as number | undefined,
+      multiTab: route.meta?.multiTab as boolean | undefined,
+      icon: route.meta?.icon as string | undefined,
+      // `addTab` refuses the route on this flag - it must survive the copy
+      // or `meta.hideInTab` is dead.
+      hideInTab: route.meta?.hideInTab as boolean | undefined,
+    },
+  })
 }
+watch(() => route.fullPath, trackRouteTab, { immediate: true })
+
+// The tab bar puts a page on screen by navigating to it: a tab click, and a
+// close that takes away the tab on screen (its neighbour, else the landing
+// page, takes its place). Without the binding a close moved only the
+// highlight, and the closed page stayed rendered under its URL.
+const unbindTabNavigation = tabStore.bindNavigation(createTabNavigator(router, trackRouteTab))
+onUnmounted(unbindTabNavigation)
 
 // Phase I.7.9: default footer copyright when consumer didn't supply one.
 // Format: `Copyright © {year} {brand}` - matches soybean's default.
@@ -340,6 +334,8 @@ const settingsRealtime = useSettingsRealtime({
   // its own PathBase, so a sub-application deployment needs no config at all.
   hubUrl: () => settingsConfig?.hubUrl ?? realtimeHub.path('settings'),
   getToken: () => storageClient?.getAccessToken?.() ?? authStore.token ?? '',
+  // Lets a reconnect refresh an expired token instead of failing negotiate with 401.
+  refreshToken: async () => (await storageClient?.refreshAccessToken?.()) ?? null,
   onChanged: (p) => {
     if (p.key === 'Appearance:AdminTheme') {
       void globalTheme.load()
@@ -367,7 +363,7 @@ const settingsRealtime = useSettingsRealtime({
   },
 })
 watch(
-  () => authStore.isLogin && !!storageClient && realtimeHub.canConnect('settings'),
+  () => authStore.isLogin && !!storageClient && realtimeHub.canConnect('settings') && billingLive.value,
   (ready) => {
     // Failure is caught, not left to bubble: this is an OPTIONAL live-update
     // channel, and an unhandled rejection here would surface as a console error
@@ -429,6 +425,14 @@ function onLocaleChange(locale: AdminLocale): void {
 const naiveLocale = useAdminLocale().naive
 
 /**
+ * Billing standing (opt-in via `defineAdminApp({ billing })`). The host is a
+ * lazy chunk: it reads the standing, listens for the billing gate's refusals
+ * and renders the banner or the suspended screen; the shell only hides its
+ * pages while the host reports `suspended`. Absent config: nothing mounts.
+ */
+const BillingShellHost = billing ? defineAsyncComponent(() => import('../pages/billing/BillingShellHost.vue')) : null
+
+/**
  * Default fallback for the avatar's "User Center" menu item.
  *
  * In the `desktop` layout it opens a WINDOW. A `router.push` there navigates a
@@ -488,7 +492,6 @@ function defaultTranslate(key: string, fallback?: string): string {
       @menu-select="onMenuSelect"
       @open-theme-drawer="onOpenThemeDrawer"
       @locale-change="onLocaleChange"
-      @tab-click="onTabClick"
     >
     <!-- Header breadcrumb derived from the current route (Phase I.7.7+).
          `:show-icon` reads from themeStore so the Theme Drawer's
@@ -531,8 +534,9 @@ function defaultTranslate(key: string, fallback?: string): string {
     <!-- Desktop layout swaps the single outlet for the window manager. The
          router still resolves normally underneath (the desktop reads the route
          table to find page components); it just isn't what renders. -->
+    <component :is="BillingShellHost" v-if="BillingShellHost" />
     <TDesktopHost
-      v-if="isDesktopLayout"
+      v-if="isDesktopLayout && billingLive"
       :brand="loginConfig.brand ?? 'Tnzi Admin'"
       :brand-icon="loginConfig.brandIcon"
       :show-theme-btn="themeBtnVisible"
@@ -559,7 +563,7 @@ function defaultTranslate(key: string, fallback?: string): string {
         />
       </template>
     </TDesktopHost>
-    <TAdminRouterView v-else :exclude="['login', '403', '404']" />
+    <TAdminRouterView v-else-if="billingLive" :cache="themeStore.tabCache" :exclude="['login', '403', '404']" />
     </TAdminShell>
     <TThemeDrawer
       v-model:show="themeDrawerOpen"

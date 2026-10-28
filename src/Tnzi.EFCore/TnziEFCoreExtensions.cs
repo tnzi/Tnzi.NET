@@ -14,7 +14,10 @@ public static class TnziEFCoreExtensions
     /// <typeparam name="TDbContext">DbContext 类型</typeparam>
     /// <param name="services">服务集合</param>
     /// <param name="optionsAction">DbContext 配置选项</param>
-    /// <param name="isPrimary">是否为主 DbContext。只有主 DbContext 才会注册 DbContextType 为 null 的实体</param>
+    /// <param name="isPrimary">
+    /// 是否为主 DbContext。只有主 DbContext 才会注册 DbContextType 为 null 的实体（全部框架模块实体）的仓储，
+    /// 只有一个上下文时也要传 <c>true</c>
+    /// </param>
     public static void AddTnziDbContext<TDbContext>(this IServiceCollection services, Action<DbContextOptionsBuilder>? optionsAction = null, bool isPrimary = false)
         where TDbContext : DbContext
     {
@@ -67,8 +70,9 @@ public static class TnziEFCoreExtensions
         // SaveChangesAsync 时保存的是**另一个**上下文：主上下文里 Added 的实体既没有
         // INSERT 也不报错，随后按 Id 回查自然查不到（现网表现为紧接着的读操作 404），
         // 变更最终随作用域释放被静默丢弃。
-        // 主上下文用 RemoveAll + Add 显式夺回绑定（不依赖注册顺序）；非主上下文只做
-        // TryAdd 兜底，保留「单 DbContext 且未标 isPrimary」这一既有用法的可用性。
+        // 主上下文用 RemoveAll + Add 显式夺回绑定（不依赖注册顺序）；非主上下文只做 TryAdd 兜底。
+        // ★ 兜底只管 IUnitOfWork：未标 isPrimary 的上下文不注册框架实体（DbContextType 为 null）的仓储，
+        //   也不注册为基类 DbContext，所以「单 DbContext 且未标 isPrimary」不是可用的用法，装框架实体的上下文必须标主。
         if (isPrimary)
         {
             services.RemoveAll<IUnitOfWork>();
@@ -129,8 +133,5 @@ public static class TnziEFCoreExtensions
             var databaseProvider = sp.GetRequiredService<IDatabaseProvider>();
             return new DapperService(dbContext, databaseProvider, sp.GetService<IUnitOfWorkManager>(), sp.GetService<IUnitOfWork>());
         });
-
-        // 注册 Dapper Executor 工厂（TryAdd 确保只注册一次）
-        services.TryAddScoped<DapperExecutorFactory>();
     }
 }

@@ -4,12 +4,17 @@ namespace Tnzi.AI.Infrastructure.ContextProviders;
 /// 实体记忆上下文提供器 - 从 IEntityMemoryStore 加载已知实体并注入上下文，
 /// 在对话完成后从助手回复中提取新实体并持久化
 /// </summary>
+/// <remarks>
+/// 实体的归属人是<b>运行的发起人</b>（请求的 UserId），读写两侧共用这一个解析，不取当前 HTTP 作用域的登录用户：
+/// 两者在代人发起的运行上不同（管理员续跑用户 X 的运行时，运行以 X 的身份进行而登录用户是管理员），
+/// 按登录用户取会把管理员的实体注入 X 的运行，并把从 X 的对话里抽出的实体记在管理员名下。
+/// </remarks>
 public sealed class EntityMemoryContextProvider : IContextProvider
 {
     private readonly IEntityMemoryStore _entityMemoryStore;
     private readonly EntityMemoryOptions _options;
     private readonly LlmEntityExtractor _extractor;
-    private readonly ICurrentUser? _currentUser;
+    private readonly Guid? _userId;
     private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly Guid? _defaultAgentId;
     private readonly ILogger<EntityMemoryContextProvider> _logger;
@@ -19,7 +24,7 @@ public sealed class EntityMemoryContextProvider : IContextProvider
         EntityMemoryOptions options,
         LlmEntityExtractor extractor,
         ILogger<EntityMemoryContextProvider> logger,
-        ICurrentUser? currentUser = null,
+        Guid? userId = null,
         Guid? agentId = null,
         IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
@@ -27,7 +32,7 @@ public sealed class EntityMemoryContextProvider : IContextProvider
         _options = Check.NotNull(options);
         _extractor = Check.NotNull(extractor);
         _logger = Check.NotNull(logger);
-        _currentUser = currentUser;
+        _userId = userId;
         _defaultAgentId = agentId;
         _executionContextAccessor = executionContextAccessor;
     }
@@ -125,9 +130,10 @@ public sealed class EntityMemoryContextProvider : IContextProvider
         }
     }
 
+    /// <summary>运行发起人：创建时从运行上下文取得，缺失时回退到当前请求</summary>
     private Guid? ResolveUserId()
     {
-        return _currentUser?.Id ?? _executionContextAccessor?.CurrentRequest?.UserId;
+        return _userId ?? _executionContextAccessor?.CurrentRequest?.UserId;
     }
 
     private Guid? ResolveAgentId()

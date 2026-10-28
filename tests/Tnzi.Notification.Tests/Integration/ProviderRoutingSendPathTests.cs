@@ -1,4 +1,3 @@
-using Tnzi.Exceptions;
 using Tnzi.Domain.Entities;
 using Tnzi.Notification.Extensions;
 

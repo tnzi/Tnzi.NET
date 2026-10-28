@@ -142,6 +142,27 @@ public class ApiVersionMiddlewareTests
         Assert.Equal("v4", context.Response.Headers["X-Api-Version"].ToString());
     }
 
+    [Theory]
+    // 文档写的形态：默认段名 "v" 之后紧跟的那一段是版本
+    [InlineData("/api/v/2.0/users", "2.0")]
+    // /api/v2/users 不是这个读取器认的形态，回落到默认版本（文档此前把它写成示例）
+    [InlineData("/api/v2/users", "1.0")]
+    public async Task UrlPath_WithTheDefaultSegmentName_ReadsTheDocumentedForm(string path, string expected)
+    {
+        var aspNetCoreOptions = new AspNetCoreOptions
+        {
+            ApiVersion = new ApiVersionOptions { Enabled = true, ReaderType = ApiVersionReaderType.UrlPath }
+        };
+        var optionsMonitor = Mock.Of<IOptionsMonitor<AspNetCoreOptions>>(x => x.CurrentValue == aspNetCoreOptions);
+        var middleware = new ApiVersionMiddleware(_ => Task.CompletedTask, optionsMonitor, NullLogger<ApiVersionMiddleware>.Instance);
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(expected, context.Items["ApiVersion"]);
+    }
+
     [Fact]
     public async Task InvokeAsync_WhenVersionNotFound_ShouldUseDefaultVersion()
     {

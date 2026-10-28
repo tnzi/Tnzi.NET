@@ -257,6 +257,13 @@ public class RegistrationService : ApplicationService, IRegistrationService
         var captchaOptions = IdentityOptions.Captcha;
         var otpOptions = IdentityOptions.Otp;
 
+        // 一次只认一个渠道（理由见 QuickRegisterAsync 的同一道门）。排在人机验证之前：
+        // 注定被拒的请求不该先把用户手里那张验证码消费掉。
+        if (!string.IsNullOrWhiteSpace(input.Email) && !string.IsNullOrWhiteSpace(input.PhoneNumber))
+        {
+            return Fail<string>(QuickRegisterOneChannelMessage, 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
         // 人机验证(启用注册验证码时,发送短信/邮箱验证码前必须先过,
         // 防机器人刷发码接口造成短信/邮件费用;web admin 的注册走此快速注册流)。
         if (captchaOptions.EnableCaptchaOnRegister)
@@ -348,6 +355,15 @@ public class RegistrationService : ApplicationService, IRegistrationService
         if (!isEmailRequest && !isSmsRequest)
         {
             return Fail<QuickRegisterResultDto>("Email or phone number is required", 400);
+        }
+
+        // ★★★ 一次快速注册只证明一个渠道：下面只核一枚码（两个都在时是邮箱那枚），而建号时两个地址都会落库、
+        //   各自按请求标成已验证。两个开关都开着时，带着自己的邮箱 + 别人的手机号来注册，那个号码就以
+        //   「已验证」挂到了攻击者的账号上：短信找回密码与短信验证码登录认的正是已验证的号码，号码主人反而注册不了。
+        //   整体拒绝而不是「只存核过的那个」：静默丢掉一个字段，调用方会以为两个都登记上了。
+        if (isEmailRequest && isSmsRequest)
+        {
+            return Fail<QuickRegisterResultDto>(QuickRegisterOneChannelMessage, 400, ErrorCodes.VALIDATION_ERROR);
         }
 
         // 用户名规则在核销验证码之前判：被拒时那枚码还能用，不必重新收一次
@@ -646,6 +662,10 @@ public class RegistrationService : ApplicationService, IRegistrationService
 
         return Result.Success();
     }
+
+    /// <summary>快速注册同时带着邮箱与手机号时的回答：一次只证明一个渠道。</summary>
+    private const string QuickRegisterOneChannelMessage =
+        "Quick registration takes either an email address or a phone number, not both.";
 
     /// <summary>邮箱确认重发的统一回答：账号存不存在、有没有邮箱、确认没确认，一律同一句。</summary>
     private const string ConfirmationResentMessage =

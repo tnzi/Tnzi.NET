@@ -69,11 +69,44 @@ async function chooseExport(wrapper: ReturnType<typeof mount>, key: 'csv' | 'jso
   await flushPromises()
 }
 
-async function setFunctionName(wrapper: ReturnType<typeof mount>, value: string): Promise<void> {
+async function setFunctionName(wrapper: ReturnType<typeof mount>, value: string, apply = false): Promise<void> {
   const inputs = wrapper.findAll('input')
   const input = inputs.find((i) => i.attributes('placeholder') === 'Action' || i.attributes('placeholder') === 'Operation')
   expect(input, 'function-name filter input').toBeDefined()
   await input!.setValue(value)
+  if (apply) {
+    // Enter in the box runs the search, same as the Search button.
+    await input!.trigger('keyup', { key: 'Enter' })
+    await flushPromises()
+  }
+}
+
+function pageOf(n: number, totalCount: number) {
+  return {
+    items: Array.from({ length: 30 }, (_, i) => ({
+      id: `p${n}-${i}`,
+      functionName: `Op${n}`,
+      userId: 'u1',
+      userName: 'admin',
+      startTime: '2026-01-01T00:00:00Z',
+      resultType: 'Success',
+    })),
+    totalCount,
+    pageIndex: n,
+    pageSize: 30,
+  }
+}
+
+function lastFetchQuery(): { pageIndex: number; filters: Record<string, unknown> } {
+  const calls = bridge.logs.fetch.mock.calls as unknown as Array<[{ pageIndex: number; filters: Record<string, unknown> }]>
+  return calls[calls.length - 1]![0]
+}
+
+async function clickLoadMore(wrapper: ReturnType<typeof mount>): Promise<void> {
+  const button = wrapper.findAll('button').find((b) => b.text() === 'Load more')
+  expect(button, 'Load more button').toBeDefined()
+  await button!.trigger('click')
+  await flushPromises()
 }
 
 describe('audit export (Logs / Operations)', () => {
@@ -87,7 +120,7 @@ describe('audit export (Logs / Operations)', () => {
 
   it('Logs: exports CSV with the active filter and writes the file', async () => {
     const wrapper = await mountPage(Logs)
-    await setFunctionName(wrapper, 'GetUser')
+    await setFunctionName(wrapper, 'GetUser', true)
     await chooseExport(wrapper, 'csv')
 
     expect(bridge.logs.exportCsv).toHaveBeenCalledTimes(1)
@@ -121,5 +154,54 @@ describe('audit export (Logs / Operations)', () => {
 
     expect(downloadBlob).not.toHaveBeenCalled()
     expect(messageApi.error).toHaveBeenCalledWith('12000 rows matched; narrow the filter to at most 10000')
+  })
+})
+
+// The filter inputs are bound live but only Search applies them. Load more and
+// Export read the live inputs, so editing a filter without pressing Search
+// appended the next page of a DIFFERENT query under the current list, and
+// exported a set other than the one on screen. Both now use the filter the
+// list was searched with.
+describe('audit timeline uses the applied filter', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    bridge.logs.exportCsv.mockResolvedValue(csvBlob)
+    bridge.logs.fetch.mockImplementation(async (q: unknown) => pageOf((q as { pageIndex: number }).pageIndex, 90))
+  })
+  afterEach(() => {
+    bridge.logs.fetch.mockReset()
+    bridge.logs.fetch.mockImplementation(async () => emptyPage)
+  })
+
+  it('★ Load more continues the searched filter, not an edited-but-unsearched one', async () => {
+    const wrapper = await mountPage(Logs)
+    await setFunctionName(wrapper, 'GetUser', true)
+    await setFunctionName(wrapper, 'DeleteUser')
+    await clickLoadMore(wrapper)
+
+    const q = lastFetchQuery()
+    expect(q.pageIndex).toBe(2)
+    expect(q.filters.functionName).toBe('GetUser')
+  })
+
+  it('★ Export sends the filter the list on screen was searched with', async () => {
+    const wrapper = await mountPage(Logs)
+    await setFunctionName(wrapper, 'GetUser', true)
+    await setFunctionName(wrapper, 'DeleteUser')
+    await chooseExport(wrapper, 'csv')
+
+    expect(bridge.logs.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'GetUser' }))
+  })
+
+  it('★ a failed Load more asks for the same page again on retry', async () => {
+    const wrapper = await mountPage(Logs)
+    bridge.logs.fetch.mockRejectedValueOnce(new Error('timeout'))
+    await clickLoadMore(wrapper)
+    expect(lastFetchQuery().pageIndex).toBe(2)
+    expect(messageApi.error).toHaveBeenCalledWith('timeout')
+
+    await clickLoadMore(wrapper)
+    expect(lastFetchQuery().pageIndex).toBe(2)
   })
 })

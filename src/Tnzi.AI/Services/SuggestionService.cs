@@ -89,7 +89,7 @@ public class SuggestionService : ISuggestionService
         {
             var role = msg.Role == ChatRole.User ? "User" : "Assistant";
             var text = string.Join("", msg.Contents.OfType<TextContent>().Select(tc => tc.Text ?? ""));
-            var content = text.Length > 200 ? text[..200] + "..." : text;
+            var content = text.Truncate(200);
             conversationSummary.AppendLine($"{role}: {content}");
         }
 

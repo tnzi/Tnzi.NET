@@ -237,7 +237,7 @@ public class McpTenantIsolationTests
     }
 
     [Fact]
-    public void Mapper_SingleTenantRow_LeavesTenantKeyNull()
+    public void Mapper_HostRow_GetsAPartitionDistinctFromDeploymentConfig()
     {
         var entity = new McpServerRegistration
         {
@@ -249,9 +249,81 @@ public class McpTenantIsolationTests
 
         var config = McpServerRegistrationMapper.ToServerConfig(entity, _ => string.Empty);
 
-        // 单租户部署：键退化为名字，与引入租户维度之前逐字相同
-        config.TenantKey.ShouldBeNull();
-        McpCacheKey.For(config).ShouldBe("github");
+        // 宿主行可以与部署配置条目同名：两者不能落在同一个键上
+        config.TenantKey.ShouldBe(McpCacheKey.HostRegistryPartition);
+        McpCacheKey.For(config).ShouldNotBe(McpCacheKey.For(new McpServerConfig { Name = "github" }));
+        McpCacheKey.MatchesServerName(McpCacheKey.For(config), "github").ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// 多租户下宿主上下文解析到宿主注册行 'search'（内部端点 + 宿主令牌），租户上下文解析到同名的部署配置条目。
+    /// 两者此前都是裸名字键：宿主先建连，租户的 agent 就拿着宿主令牌连宿主的内部端点。
+    /// </summary>
+    [Fact]
+    public async Task GetOrCreateClient_HostRowAndSameNamedDeploymentConfig_DoNotShareConnection()
+    {
+        var factory = new RecordingMcpClientFactory(_loggerFactory.Object, _factoryLogger.Object);
+        var hostRow = McpServerRegistrationMapper.ToServerConfig(
+            new McpServerRegistration
+            {
+                Name = "search",
+                ServerUrl = "https://internal.example.com/mcp",
+                Transport = "http",
+                AuthType = "bearer",
+                AuthTokenEncrypted = "cipher",
+                TenantId = null
+            },
+            _ => "host-admin-token");
+        var deploymentConfig = new McpServerConfig
+        {
+            Name = "search",
+            ConnectionType = McpConnectionType.Http,
+            Endpoint = "https://public.example.com/mcp",
+            Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer shared-key" }
+        };
+
+        var hostClient = await factory.GetOrCreateClientAsync(hostRow);
+        var tenantClient = await factory.GetOrCreateClientAsync(deploymentConfig);
+
+        tenantClient.ShouldNotBeSameAs(hostClient);
+        factory.CreatedConfigs.Count.ShouldBe(2);
+        factory.CreatedConfigs[1].Headers["Authorization"].ShouldBe("Bearer shared-key");
+
+        // 按名字失效两条都要清掉
+        await factory.InvalidateClientAsync("search");
+        GetCacheKeys(factory).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetTools_HostRowAndSameNamedDeploymentConfig_DoNotShareTheToolList()
+    {
+        var hostRow = McpServerRegistrationMapper.ToServerConfig(
+            new McpServerRegistration { Name = "search", ServerUrl = "https://internal.example.com/mcp", Transport = "http" },
+            _ => string.Empty);
+        var deploymentConfig = new McpServerConfig { Name = "search", ConnectionType = McpConnectionType.Http, Endpoint = "https://public.example.com/mcp" };
+        var catalog = new SwitchableCatalog(hostRow);
+
+        var clientFactory = new Mock<IMcpClientFactory>();
+        var hostAdapter = AdapterReturning("internal_tool");
+        var publicAdapter = AdapterReturning("public_tool");
+        clientFactory
+            .Setup(x => x.GetOrCreateClientAsync(It.IsAny<McpServerConfig>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((McpServerConfig config, CancellationToken _) => config.TenantKey == null ? publicAdapter : hostAdapter);
+
+        var provider = new McpToolProvider(
+            new StaticOptionsMonitor<AIOptions>(AiOptionsWithToolCache()),
+            catalog,
+            clientFactory.Object,
+            _loggerFactory.Object,
+            _providerLogger.Object);
+
+        (await provider.GetToolsAsync()).Select(t => t.Name).ShouldContain("internal_tool");
+
+        catalog.Current = deploymentConfig;
+        var tenantTools = (await provider.GetToolsAsync()).Select(t => t.Name).ToList();
+
+        tenantTools.ShouldContain("public_tool");
+        tenantTools.ShouldNotContain("internal_tool");
     }
 
     [Fact]

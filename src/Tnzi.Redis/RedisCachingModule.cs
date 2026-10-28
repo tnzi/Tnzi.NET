@@ -80,14 +80,7 @@ public class RedisCachingModule : TnziInfrastructureModule
                 ?? throw new InvalidOperationException("IConfiguration service is not available.");
 
             var connectionString = GetConnectionString(config, cachingOptions, redisOptions);
-            var configOptions = ConfigurationOptions.Parse(connectionString);
-            var connOptions = redisOptions.Connection;
-
-            // 应用连接选项配置
-            configOptions.AbortOnConnectFail = connOptions.AbortOnConnectFail;
-            configOptions.ConnectRetry = connOptions.ConnectRetry;
-            configOptions.ConnectTimeout = connOptions.ConnectTimeout;
-            configOptions.SyncTimeout = connOptions.SyncTimeout;
+            var configOptions = BuildConfigurationOptions(connectionString, redisOptions.Connection);
 
             try
             {
@@ -104,13 +97,15 @@ public class RedisCachingModule : TnziInfrastructureModule
             }
         });
 
-        // 分布式锁：只要连接可用就注册，与缓存实现是谁无关
+        // 分布式锁：只要连接可用就注册，与缓存实现是谁无关。
+        // 锁键与缓存键同一前缀（Caching:RedisInstanceName），共用一个 Redis 的应用之间锁也隔离。
         services.AddSingleton<IDistributedLock>(provider =>
         {
             var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
             var lockOptions = provider.GetService<IOptions<RedisOptions>>()?.Value?.Lock;
             var loggerFactory = provider.GetService<ILoggerFactory>();
-            return new RedisDistributedLock(connectionMultiplexer, lockOptions, loggerFactory);
+            var instanceName = provider.GetService<IOptions<CachingOptions>>()?.Value?.RedisInstanceName;
+            return new RedisDistributedLock(connectionMultiplexer, lockOptions, loggerFactory, instanceName);
         });
 
         if (!redisIsTheCache)
@@ -147,7 +142,8 @@ public class RedisCachingModule : TnziInfrastructureModule
             {
                 var connectionMultiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
                 var logger = provider.GetRequiredService<ILogger<RedisCacheSyncService>>();
-                return new RedisCacheSyncService(connectionMultiplexer, logger);
+                var instanceName = provider.GetService<IOptions<CachingOptions>>()?.Value?.RedisInstanceName;
+                return new RedisCacheSyncService(connectionMultiplexer, logger, RedisCacheSyncService.ChannelNameFor(instanceName));
             });
         }
 
@@ -165,8 +161,12 @@ public class RedisCachingModule : TnziInfrastructureModule
             // 从已验证的配置获取实例名称
             var cachingOptions = provider.GetService<IOptions<CachingOptions>>()?.Value;
             var instanceName = cachingOptions?.RedisInstanceName;
+            TimeSpan? defaultExpiration = cachingOptions != null
+                ? TimeSpan.FromMinutes(cachingOptions.DefaultExpirationMinutes)
+                : null;
+            var performanceMonitor = provider.GetService<IPerformanceMonitorService>();
 
-            return new RedisCacheService(connectionMultiplexer, logger, instanceName, cacheSyncService);
+            return new RedisCacheService(connectionMultiplexer, logger, instanceName, cacheSyncService, defaultExpiration, performanceMonitor);
         });
 
         return Task.CompletedTask;
@@ -244,6 +244,62 @@ public class RedisCachingModule : TnziInfrastructureModule
 
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// 由连接串与 <c>Redis:Connection</c> 组出连接配置。优先级：<c>Redis:Connection</c> 里显式配置的值 &gt; 连接串里的同名参数
+    /// （<c>abortConnect</c> / <c>connectRetry</c> / <c>connectTimeout</c> / <c>syncTimeout</c>）&gt; 框架默认。
+    /// </summary>
+    /// <remarks>
+    /// ★ 此前四项无条件用 <c>Redis:Connection</c> 覆盖，而那里每一项都有默认值、分不出「没配」：
+    /// 按 StackExchange.Redis 惯用写法写在连接串里的 <c>syncTimeout=15000,abortConnect=true</c> 被静默改回 5000 与 false，
+    /// 慢网络下超时、该快速失败的不失败，而配置看上去完全正确。
+    /// 框架默认里只有 <c>AbortOnConnectFail = false</c> 与 StackExchange.Redis 自己的默认不同，所以只有它在两处都没写时要补上；
+    /// 其余三项两处都没写时就是 StackExchange.Redis 的默认（3 / 5000 / 5000）。
+    /// </remarks>
+    public static ConfigurationOptions BuildConfigurationOptions(string connectionString, ConnectionOptions? overrides)
+    {
+        var configOptions = ConfigurationOptions.Parse(connectionString);
+        overrides ??= new ConnectionOptions();
+
+        if (overrides.AbortOnConnectFail is { } abortOnConnectFail)
+        {
+            configOptions.AbortOnConnectFail = abortOnConnectFail;
+        }
+        else if (!ConnectionStringSpecifies(connectionString, "abortConnect"))
+        {
+            configOptions.AbortOnConnectFail = ConnectionOptions.DefaultAbortOnConnectFail;
+        }
+
+        if (overrides.ConnectRetry is { } connectRetry)
+        {
+            configOptions.ConnectRetry = connectRetry;
+        }
+
+        if (overrides.ConnectTimeout is { } connectTimeout)
+        {
+            configOptions.ConnectTimeout = connectTimeout;
+        }
+
+        if (overrides.SyncTimeout is { } syncTimeout)
+        {
+            configOptions.SyncTimeout = syncTimeout;
+        }
+
+        return configOptions;
+    }
+
+    /// <summary>
+    /// 连接串里有没有写某个参数（StackExchange.Redis 的参数名不区分大小写，逗号分隔、<c>name=value</c>）。
+    /// </summary>
+    private static bool ConnectionStringSpecifies(string connectionString, string option)
+        => connectionString
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(part =>
+            {
+                var separator = part.IndexOf('=');
+                return separator > 0
+                    && part[..separator].Trim().Equals(option, StringComparison.OrdinalIgnoreCase);
+            });
 
     /// <summary>
     /// 从连接字符串中提取 host:port，移除密码等敏感信息，用于日志记录

@@ -1,3 +1,5 @@
+using Tnzi.Exceptions;
+
 namespace Tnzi.AI.Tests;
 
 /// <summary>
@@ -85,10 +87,11 @@ public class DispatchFacadeEnqueueScopeTests
             new AlwaysBoundBindingService(),
             ambient,
             services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-            new StubThreadService(),
             NullLogger<AgentDispatchFacade>.Instance);
 
-        await facade.RunAsync(new AgentRunRequest { AgentId = Guid.NewGuid(), UserMessage = "x" });
+        // The recording dispatcher refuses the run, which the facade reports as a business error; what matters is who was asked.
+        await Should.ThrowAsync<BusinessException>(
+            () => facade.RunAsync(new AgentRunRequest { AgentId = Guid.NewGuid(), UserMessage = "x" }));
 
         scoped.EnqueueCalls.ShouldBe(1, "the queue row must be written in its own scope so it commits immediately");
         ambient.EnqueueCalls.ShouldBe(0, "using the ambient dispatcher puts the insert inside the caller's transaction, which deadlocks under a global unit of work");
@@ -97,9 +100,9 @@ public class DispatchFacadeEnqueueScopeTests
     /// <summary>A thread always resolves; this test is about which scope enqueues.</summary>
     private sealed class StubThreadService : IAgentThreadInternalService
     {
-        public Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
+        public Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(
             Guid? threadId, Guid? agentId, CancellationToken ct = default)
-            => Task.FromResult((new ConversationContext(), threadId ?? Guid.NewGuid(), threadId is null));
+            => Task.FromResult((threadId ?? Guid.NewGuid(), threadId is null));
 
         public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content,
             string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
@@ -107,9 +110,6 @@ public class DispatchFacadeEnqueueScopeTests
 
         public Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default)
             => Task.FromResult(new List<ChatMessage>());
-
-        public Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
-            => Task.CompletedTask;
 
         public Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default)
             => Task.FromResult<string?>(null);

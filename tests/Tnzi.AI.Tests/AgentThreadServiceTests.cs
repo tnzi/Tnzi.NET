@@ -407,18 +407,14 @@ public class AgentThreadServiceTests
                 inserted = e;
             })
             .Returns(Task.CompletedTask);
-        // GetAsync called for SaveThreadSerializedData
-        _threadRepo.Setup(r => r.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, CancellationToken _) => inserted != null && inserted.Id == id ? inserted : null);
-        _threadRepo.Setup(r => r.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         var service = CreateService();
-        var (context, threadId, isNew) = await service.GetOrCreateThreadAsync(null, null);
+        var (threadId, isNew) = await service.GetOrCreateThreadAsync(null, null);
 
         isNew.ShouldBeTrue();
         threadId.ShouldNotBe(Guid.Empty);
-        context.ShouldNotBeNull();
+        inserted.ShouldNotBeNull();
+        inserted!.SerializedData.ShouldBeNull("nothing reads a serialized copy of the conversation, so none is written");
         _threadRepo.Verify(r => r.InsertAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -462,15 +458,28 @@ public class AgentThreadServiceTests
         var thread = MakeThread(threadId);
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
 
-        // No serialized data → rebuild from history
-        SetupMessageQueryable([]);
-
         var service = CreateService();
-        var (context, resultId, isNew) = await service.GetOrCreateThreadAsync(threadId, null);
+        var (resultId, isNew) = await service.GetOrCreateThreadAsync(threadId, null);
 
         isNew.ShouldBeFalse();
         resultId.ShouldBe(threadId);
-        context.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task GetOrCreateThreadAsync_ExistingThread_DoesNotLoadHistoryOrWriteTheThread()
+    {
+        // 历史由 HistoryMiddleware 按上限单独加载。解析线程这一步此前还会把整段历史读出来、
+        // 再序列化写回线程行，而唯一的两个调用方把这份结果直接丢掉
+        var threadId = Guid.NewGuid();
+        var thread = MakeThread(threadId);
+        _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        SetupMessageQueryable([MakeMessage(threadId, content: "earlier turn")]);
+
+        var service = CreateService();
+        await service.GetOrCreateThreadAsync(threadId, null);
+
+        _threadRepo.Verify(r => r.UpdateAsync(It.IsAny<AgentThreadEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        thread.SerializedData.ShouldBeNull();
     }
 
     [Fact]
@@ -522,23 +531,21 @@ public class AgentThreadServiceTests
     }
 
     [Fact]
-    public async Task GetOrCreateThreadAsync_WithSerializedData_DeserializesContext()
+    public async Task DeleteAsync_ClearsTheLegacySerializedCopyOfTheConversation()
     {
+        // 软删除只留下行；旧版本在这一列里存过对话正文，消息被级联硬删后它不能还留在那里
         var threadId = Guid.NewGuid();
-        var context = new ConversationContext();
-        context.Messages.Add(new ChatMessage(ChatRole.User, "Previous message"));
-        var serialized = context.Serialize();
-
-        var thread = MakeThread(threadId, serializedData: serialized);
+        var thread = MakeThread(threadId, serializedData: """{"messages":[{"role":"user","contents":[{"type":"text","text":"private"}]}]}""");
+        string? serializedAtDelete = "not deleted";
         _threadRepo.Setup(r => r.GetAsync(threadId, It.IsAny<CancellationToken>())).ReturnsAsync(thread);
+        _threadRepo.Setup(r => r.DeleteAsync(thread, It.IsAny<CancellationToken>()))
+            .Callback<AgentThreadEntity, CancellationToken>((e, _) => serializedAtDelete = e.SerializedData)
+            .Returns(Task.CompletedTask);
 
-        var service = CreateService();
-        var (resultContext, resultId, isNew) = await service.GetOrCreateThreadAsync(threadId, null);
+        var result = await CreateService().DeleteAsync(threadId);
 
-        isNew.ShouldBeFalse();
-        resultId.ShouldBe(threadId);
-        resultContext.Messages.Count.ShouldBe(1);
-        resultContext.Messages[0].Text.ShouldBe("Previous message");
+        result.Succeeded.ShouldBeTrue();
+        serializedAtDelete.ShouldBeNull();
     }
 
     // -------------------------------------------------------------------------

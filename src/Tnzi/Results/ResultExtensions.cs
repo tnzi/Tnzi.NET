@@ -95,8 +95,20 @@ public static class ResultExtensions
     #region 从异常创建结果
 
     /// <summary>
+    /// 失败结果到达客户端时，非框架异常一律使用的文案（与异常中间件在生产环境的文案相同）。
+    /// </summary>
+    private const string UnexpectedErrorMessage = "An error occurred while processing your request.";
+
+    /// <summary>
     /// 从异常创建失败结果
     /// </summary>
+    /// <remarks>
+    /// <see cref="BusinessException"/> 保留消息、状态码、错误码与上下文数据（它的消息本就面向用户）；
+    /// 其它 <see cref="TnziException"/> 保留消息、错误码与上下文数据，状态码 500；
+    /// 非框架异常只给固定文案与 <see cref="ErrorCodes.INTERNAL_SERVER_ERROR"/>，不带原始消息与异常类型：
+    /// 失败结果经 <c>ToApiResult</c> 原样到达客户端，而数据库驱动、HTTP 客户端的异常消息会带出表名、约束名、主机地址。
+    /// 需要细节的调用方在转换之前自己记录异常。
+    /// </remarks>
     /// <param name="exception">异常</param>
     /// <returns>失败结果</returns>
     public static Result FromException(Exception exception)
@@ -117,17 +129,14 @@ public static class ResultExtensions
                 tnziEx.Code,
                 tnziEx.ContextData),
 
-            _ => Result.Failure(
-                exception.Message,
-                500,
-                ErrorCodes.INTERNAL_SERVER_ERROR,
-                new { ExceptionType = exception.GetType().Name })
+            _ => Result.Failure(UnexpectedErrorMessage, 500, ErrorCodes.INTERNAL_SERVER_ERROR)
         };
     }
 
     /// <summary>
     /// 从异常创建失败结果（带数据类型）
     /// </summary>
+    /// <remarks>映射规则同 <see cref="FromException(Exception)"/>。</remarks>
     /// <typeparam name="T">数据类型</typeparam>
     /// <param name="exception">异常</param>
     /// <returns>失败结果</returns>
@@ -149,11 +158,7 @@ public static class ResultExtensions
                 tnziEx.Code,
                 tnziEx.ContextData),
 
-            _ => Result<T>.Failure(
-                exception.Message,
-                500,
-                ErrorCodes.INTERNAL_SERVER_ERROR,
-                new { ExceptionType = exception.GetType().Name })
+            _ => Result<T>.Failure(UnexpectedErrorMessage, 500, ErrorCodes.INTERNAL_SERVER_ERROR)
         };
     }
 

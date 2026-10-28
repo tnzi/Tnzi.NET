@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createRouter, createMemoryHistory } from 'vue-router'
@@ -123,6 +123,23 @@ describe('useDetail (overlay ⇄ URL query)', () => {
     expect(api().data.value?.id).toBe(9)
   })
 
+  // The id is interpolated into the load path (`${base}/${id}`): an id that
+  // is not one path segment would send the admin's request somewhere else.
+  it.each(['../../roles/1', '5/sessions', '..', '%2e%2E', 'a\\b'])(
+    'drops a deep link whose id is not a single path segment: %s',
+    async (id) => {
+      const loadData = vi.fn(async (raw: number | string) => ({ id: 1, name: String(raw) }))
+      const { api, router } = await harness(
+        { mode: 'modal', url: 'roles', loadData },
+        `/list?roles=${encodeURIComponent(`edit:${id}`)}`,
+      )
+      await flushPromises()
+      expect(loadData).not.toHaveBeenCalled()
+      expect(api().visible.value).toBe(false)
+      expect(router.currentRoute.value.query.roles).toBeUndefined()
+    },
+  )
+
   it('resolves a deep link from `source` once its items arrive', async () => {
     const items = ref<Foo[]>([])
     const loading = ref(true)
@@ -220,5 +237,67 @@ describe('useDetail (page mode routing)', () => {
     await flushPromises()
     expect(router.currentRoute.value.params.id).toBe('5')
     expect(router.currentRoute.value.query.action).toBe('edit')
+  })
+})
+
+/**
+ * Opening by id when the record cannot be loaded used to open the overlay with
+ * no data. Edit-or-create editors decide "new or existing" from the data's id,
+ * so an Edit click on a record whose load failed opened a blank "New" form, and
+ * saving it created a second document. The overlay now stays closed and the
+ * failure is said out loud.
+ */
+describe('useDetail open by id - the record cannot be loaded', () => {
+  function withToast() {
+    const error = vi.fn()
+    ;(window as unknown as { $message?: unknown }).$message = { error, success: vi.fn() }
+    return error
+  }
+  afterEach(() => {
+    delete (window as unknown as { $message?: unknown }).$message
+  })
+
+  it('a failed load leaves the overlay closed and reports the server reason', async () => {
+    const toastError = withToast()
+    const d = useDetail<Foo>({ mode: 'modal', loadData: async () => { throw new Error('Invoice not found') } })
+    await d.open('edit', 42)
+    expect(d.visible.value).toBe(false)
+    expect(d.action.value).toBe(null)
+    expect(d.error.value?.message).toBe('Invoice not found')
+    expect(toastError).toHaveBeenCalledWith('Invoice not found')
+  })
+
+  it('a load that finds nothing leaves the overlay closed and says so', async () => {
+    const toastError = withToast()
+    const d = useDetail<Foo>({ mode: 'drawer', loadData: async () => null })
+    await d.open('view', 'gone')
+    expect(d.visible.value).toBe(false)
+    expect(toastError).toHaveBeenCalledWith('This record could not be found. It may have been deleted.')
+  })
+
+  it('only the latest open wins when an earlier load answers last', async () => {
+    let releaseFirst!: (v: Foo) => void
+    const loadData = vi.fn((id: number | string) =>
+      id === 1
+        ? new Promise<Foo>((r) => { releaseFirst = r })
+        : Promise.resolve({ id: Number(id), name: 'second' }),
+    )
+    const d = useDetail<Foo>({ mode: 'modal', loadData })
+    const first = d.open('edit', 1)
+    await d.open('edit', 2)
+    releaseFirst({ id: 1, name: 'first' })
+    await first
+    expect(d.data.value).toEqual({ id: 2, name: 'second' })
+  })
+
+  it('opening by object or for create is unchanged', async () => {
+    const loadData = vi.fn(async () => null)
+    const d = useDetail<Foo>({ mode: 'modal', loadData })
+    await d.open('create')
+    expect(d.visible.value).toBe(true)
+    d.close()
+    await d.open('edit', { id: 3, name: 'row' })
+    expect(d.data.value).toEqual({ id: 3, name: 'row' })
+    expect(loadData).not.toHaveBeenCalled()
   })
 })

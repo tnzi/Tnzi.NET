@@ -16,7 +16,7 @@
           <template #icon><TSvgIcon icon="mdi:lock-reset" :size="15" /></template>
           {{ t('actions.resetPassword') }}
         </NButton>
-        <NPopconfirm @positive-click="toggleLock">
+        <NPopconfirm v-if="canToggleLock" @positive-click="toggleLock">
           <template #trigger>
             <NButton size="small" tertiary :type="user.isLockedOut ? 'success' : 'warning'">
               <template #icon>
@@ -94,7 +94,7 @@
           <UserSessionsSection
             v-else-if="sec === 'sessions' && user"
             :user-id="id"
-            :can-revoke="canUpdate"
+            :can-revoke="canRevokeSessions"
             :t="t"
           />
 
@@ -151,6 +151,7 @@ import UserSecuritySection from './sections/UserSecuritySection.vue'
 import UserSessionsSection from './sections/UserSessionsSection.vue'
 import UserLoginLogsSection from './sections/UserLoginLogsSection.vue'
 import { userProfileSchema, userProfileSections } from './user-config'
+import { buildUserUpdatePayload } from './user-update-payload'
 import { useDetail } from '../../headless/useDetail'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -160,8 +161,9 @@ import { createIdentityBridge } from '../../services/bridges/identity-bridge'
 import { useAdminClient } from '../../plugin/client'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
-import { formatDateOnly } from '@tnzi/core/utils'
-import type { UserDto } from '@tnzi/core/services/identity'
+import { toIsoDateValue } from '../../utils/calendar-date'
+import { formatDateOnly, hasFlag } from '@tnzi/core/utils'
+import { PendingUserActions, type UserDto } from '@tnzi/core/services/identity'
 
 const props = defineProps<{ id: string }>()
 
@@ -173,6 +175,13 @@ const { can } = usePermissionGuard()
 const canUpdate = computed(() => can('user.update'))
 const canViewGrants = computed(() => can('authorization.userFunction.view'))
 const canAssignGrants = computed(() => can('authorization.userFunction.assign'))
+// Roles, sessions and sign-in history are their own grants, checked by their
+// own endpoints - not implied by `user.view` / `user.update`. Gating on the user
+// codes showed sections whose reads 403'd and revoke buttons that always did.
+const canViewRoles = computed(() => can('role.view'))
+const canViewSessions = computed(() => can('session.view'))
+const canRevokeSessions = computed(() => can('session.delete'))
+const canViewLoginLogs = computed(() => can('identity.loginLog.view'))
 
 /**
  * Smart back: step through the in-app history when there is one (so the list
@@ -211,6 +220,10 @@ async function reload(): Promise<void> {
     const dto = await bridge.users.getById(props.id)
     user.value = dto
     Object.assign(form, {
+      // Not edited on this form, but carried: the save replaces the user's
+      // detail record, so an avatar left out of the payload is an avatar deleted.
+      avatarId: dto.avatarId ?? null,
+      avatarUrl: dto.avatar ?? null,
       email: dto.email ?? null,
       phoneNumber: dto.phoneNumber ?? null,
       nickname: dto.nickname ?? null,
@@ -231,13 +244,27 @@ async function reload(): Promise<void> {
 void reload()
 watch(() => props.id, () => void reload())
 
+/**
+ * An account still waiting for its invitee to accept. It is locked out too (so
+ * active-user counts leave it out), but "a new hire has not arrived yet" is not
+ * "this person was disabled": it reads as Invited, as in the users list, and
+ * offers no lock / unlock. Unlocking it would release an account that has no
+ * password and already carries its roles; the server refuses that too.
+ */
+const isInvitationPending = computed(() =>
+  hasFlag(user.value?.pendingActions, PendingUserActions.InvitationPending, PendingUserActions),
+)
+const canToggleLock = computed(() => !!user.value && !isInvitationPending.value)
+
 const badges = computed<RecordBadge[]>(() => {
   const u = user.value
   if (!u) return []
   const out: RecordBadge[] = [
-    u.isLockedOut
-      ? { label: t('admin.shared.status.locked'), type: 'error' }
-      : { label: t('admin.shared.status.active'), type: 'success' },
+    isInvitationPending.value
+      ? { label: t('status.invited'), type: 'warning' }
+      : u.isLockedOut
+        ? { label: t('admin.shared.status.locked'), type: 'error' }
+        : { label: t('admin.shared.status.active'), type: 'success' },
   ]
   if (u.twoFactorEnabled) out.push({ label: t('columns.twoFactorEnabled'), type: 'info' })
   if (!u.isEmailConfirmed) out.push({ label: t('admin.shared.status.unconfirmed'), type: 'warning' })
@@ -270,20 +297,26 @@ const facts = computed<RecordFact[]>(() => {
   return out
 })
 
-/** Grants only appear for admins allowed to read them. */
+/** Every section past the profile appears only for admins allowed to read it. */
 const sections = computed(() => {
   const list = [
     { key: 'profile', label: t('detail.sections.profile'), icon: 'mdi:account-outline', group: t('detail.groups.general') },
-    { key: 'roles', label: t('detail.sections.roles'), icon: 'mdi:account-key-outline', group: t('detail.groups.access') },
   ]
+  // The role picker lists every role (`role.view`); the user's own role names
+  // are in the header facts either way.
+  if (canViewRoles.value) {
+    list.push({ key: 'roles', label: t('detail.sections.roles'), icon: 'mdi:account-key-outline', group: t('detail.groups.access') })
+  }
   if (canViewGrants.value) {
     list.push({ key: 'grants', label: t('detail.sections.grants'), icon: 'mdi:shield-key-outline', group: t('detail.groups.access') })
   }
-  list.push(
-    { key: 'security', label: t('detail.sections.security'), icon: 'mdi:shield-lock-outline', group: t('detail.groups.access') },
-    { key: 'sessions', label: t('detail.sections.sessions'), icon: 'mdi:devices', group: t('detail.groups.activity') },
-    { key: 'loginLogs', label: t('detail.sections.loginLogs'), icon: 'mdi:history', group: t('detail.groups.activity') },
-  )
+  list.push({ key: 'security', label: t('detail.sections.security'), icon: 'mdi:shield-lock-outline', group: t('detail.groups.access') })
+  if (canViewSessions.value) {
+    list.push({ key: 'sessions', label: t('detail.sections.sessions'), icon: 'mdi:devices', group: t('detail.groups.activity') })
+  }
+  if (canViewLoginLogs.value) {
+    list.push({ key: 'loginLogs', label: t('detail.sections.loginLogs'), icon: 'mdi:history', group: t('detail.groups.activity') })
+  }
   return list
 })
 
@@ -301,10 +334,21 @@ const section = computed({
   set: (v: string) => detail.setSection(v),
 })
 
+/**
+ * ★★ The form edits every profile field except the avatar, and the server
+ * replaces the profile as a whole: sending the form as-is cleared the avatar on
+ * every save. `buildUserUpdatePayload` carries the avatar (and anything else
+ * the form does not show) through from the loaded user.
+ */
 async function save(): Promise<void> {
+  const current = user.value
+  if (!current) return
   saving.value = true
   try {
-    await bridge.users.update(props.id, form as never)
+    // A picked birthday is the picker's epoch number; `Birthday` binds to a
+    // DateTime, which a JSON number is not (the save would fail with 400).
+    const edits = { ...form, birthday: toIsoDateValue(form.birthday) }
+    await bridge.users.update(props.id, buildUserUpdatePayload(current, edits) as never)
     message.success(t('detail.saved'))
     await reload()
   } catch (err) {

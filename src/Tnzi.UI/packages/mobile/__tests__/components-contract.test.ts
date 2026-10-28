@@ -231,14 +231,86 @@ describe('auth forms wired to the headless layer', () => {
   })
 
   it('TPasswordReset runs the resend countdown from usePasswordReset', async () => {
-    const wrapper = mount(TPasswordReset, { props: { countdownSeconds: 30 }, global })
+    const onSendCode = vi.fn()
+    const wrapper = mount(TPasswordReset, { props: { countdownSeconds: 30, onSendCode }, global })
 
     await wrapper.findAll('input')[0]!.setValue('alice@example.com')
     await wrapper.find('.van-field__button button').trigger('click')
     await flushPromises()
 
-    expect(wrapper.emitted('sendCode')?.[0]).toEqual(['alice@example.com'])
+    expect(onSendCode).toHaveBeenCalledWith('alice@example.com', undefined)
     expect(wrapper.text()).toContain('30s')
+  })
+
+  // `@send-code` used to be an emit, which cannot report back: a send the
+  // server refused (rate limit, captcha) still locked the button for 60s.
+  it('TPasswordReset keeps the send button open when the send fails', async () => {
+    const onSendCode = vi.fn().mockRejectedValue(new Error('Too many requests'))
+    const wrapper = mount(TPasswordReset, { props: { countdownSeconds: 30, onSendCode }, global })
+
+    await wrapper.findAll('input')[0]!.setValue('alice@example.com')
+    await wrapper.find('.van-field__button button').trigger('click')
+    await flushPromises()
+
+    expect(onSendCode).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('30s')
+    expect(wrapper.find('.van-field__button button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('Too many requests')
+  })
+
+  it('TPasswordReset sends the captcha token and renders the #captcha slot', async () => {
+    // The backend gates password-recovery send-code on a captcha when
+    // EnableCaptchaOnPasswordRecovery is on; the form had no way to carry one.
+    const onSendCode = vi.fn()
+    const wrapper = mount(TPasswordReset, {
+      props: { onSendCode, captchaToken: 'widget-token' },
+      slots: { captcha: '<div class="consumer-widget">widget</div>' },
+      global,
+    })
+
+    expect(wrapper.find('.consumer-widget').exists()).toBe(true)
+    await wrapper.findAll('input')[0]!.setValue('alice@example.com')
+    await wrapper.find('.van-field__button button').trigger('click')
+    await flushPromises()
+
+    expect(onSendCode).toHaveBeenCalledWith('alice@example.com', 'widget-token')
+  })
+
+  it('TPasswordReset refuses to submit with the confirmation left empty', async () => {
+    // One typo in the only copy of the new password would set a password the
+    // user does not know.
+    const wrapper = mount(TPasswordReset, { global })
+
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('alice@example.com')
+    await inputs[1]!.setValue('123456')
+    await inputs[2]!.setValue('secret1')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.text()).toContain('Please confirm New Password')
+  })
+})
+
+describe('TForm default rule messages', () => {
+  // `common.minLength` / `common.maxLength` carry {min} / {max}; without the
+  // values the user read "Must be at least {min} characters".
+  it('fills in the length a min / max rule asks for', async () => {
+    const wrapper = mount(TForm, {
+      props: {
+        model: { short: 'ab', long: 'abcdef' },
+        rules: { short: [{ min: 6 }], long: [{ max: 3 }] },
+      },
+      global,
+    })
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    const [errors] = wrapper.emitted('validateError')![0] as [Record<string, string[]>]
+    expect(errors.short).toEqual(['Must be at least 6 characters'])
+    expect(errors.long).toEqual(['Must be at most 3 characters'])
   })
 })
 

@@ -93,6 +93,45 @@ public class GroupChatOrchestratorTests
     }
 
     /// <summary>
+    /// 默认选项下（工作流 Debate 节点就是这么用的，它不覆写关键词），日常用词不能结束讨论。
+    /// 此前默认词表含 DONE / CONSENSUS 且按不区分大小写的子串匹配，第一个发言者一句话就让辩论在第一轮结束。
+    /// </summary>
+    [Theory]
+    [InlineData("Once this is done we can seek consensus on the rollout.")]
+    [InlineData("We have not reached consensus yet.")]
+    [InlineData("The migration was abandoned and the change undone.")]
+    [InlineData("We should not terminate the contract early.")]
+    [InlineData("Let's discuss TERMINATED_JOBS and TERMINATE_ALL separately.")]
+    public async Task RunAsync_DefaultOptions_OrdinaryWordsDoNotEndTheDiscussion(string firstResponse)
+    {
+        var orchestrator = new GroupChatOrchestrator(Mock.Of<ILogger<GroupChatOrchestrator>>());
+        orchestrator.AddAgent(CreateAgent("AgentA", firstResponse));
+        orchestrator.AddAgent(CreateAgent("AgentB", "My counterpoint"));
+        orchestrator.Options = new GroupChatOptions { MaxRounds = 3 };
+
+        var result = await orchestrator.RunAsync("Should we ship on Friday?");
+
+        result.TotalRounds.ShouldBe(3);
+    }
+
+    [Theory]
+    [InlineData("TERMINATE")]
+    [InlineData("We agree on the plan.\nTERMINATE")]
+    [InlineData("**TERMINATE**")]
+    [InlineData("[TERMINATE]")]
+    public async Task RunAsync_DefaultOptions_TheSentinelEndsTheDiscussion(string firstResponse)
+    {
+        var orchestrator = new GroupChatOrchestrator(Mock.Of<ILogger<GroupChatOrchestrator>>());
+        orchestrator.AddAgent(CreateAgent("AgentA", firstResponse));
+        orchestrator.AddAgent(CreateAgent("AgentB", "My counterpoint"));
+        orchestrator.Options = new GroupChatOptions { MaxRounds = 3 };
+
+        var result = await orchestrator.RunAsync("Should we ship on Friday?");
+
+        result.TotalRounds.ShouldBe(1);
+    }
+
+    /// <summary>
     /// 创建返回固定文本的 AgentExecutor
     /// </summary>
     private static AgentExecutor CreateAgent(string name, string response)

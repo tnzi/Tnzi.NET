@@ -37,15 +37,27 @@ public interface ICouponService
     /// 核销优惠券：写使用记录、原子递增总用量、消耗用户持券。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 幂等键为（促销 + 用户 + 业务单号），重复调用返回既有记录而不是报错，
     /// 使调用方在重试链路上无需自行去重。
+    /// </para>
+    /// <para>
+    /// 同一张业务单上的另一笔支付（换渠道重付、建单重试）命中既有记录时，记录<b>改绑</b>到
+    /// <see cref="CouponApplyContext.PaymentId"/> 指向的这笔支付，几笔支付共用这一次核销。
+    /// 归还因此必须确认这张单上没有别的支付还在用它（见 <see cref="ReleaseCouponForPaymentAsync"/>）。
+    /// </para>
     /// </remarks>
     Task<Result<CouponUsageDto>> ApplyCouponAsync(CouponApplyContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 释放已核销的优惠券：回滚使用记录、递减总用量、把持券恢复为可用。
-    /// 用于"券已核销但渠道下单失败"的补偿，否则用户的券会凭空消失。
+    /// 与 <see cref="ReleaseCouponForPaymentAsync"/> 同一条规则：同一张业务单上还有别的支付在用这次折扣时，
+    /// 记录改绑到那笔支付而不归还。
     /// </summary>
+    /// <remarks>
+    /// 支付流程里的补偿（渠道下单失败）按<b>支付</b>归还，用 <see cref="ReleaseCouponForPaymentAsync"/>：
+    /// 同一张单上先建的另一笔支付可能共用同一条核销记录，按记录 Id 归还还掉的是它的折扣。
+    /// </remarks>
     Task<Result> ReleaseCouponAsync(Guid couponUsageId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -61,6 +73,11 @@ public interface ICouponService
     /// <para>
     /// 由实现方保证幂等：重复调用不会把用量减两次（<c>ReleaseCouponAsync</c> 已经删掉了记录，
     /// 第二次查不到就直接成功返回）。
+    /// </para>
+    /// <para>
+    /// ★ 由实现方保证<b>不还掉别人还在用的折扣</b>：同一用户、同一业务单号上另有一笔用了同一张券、
+    /// 仍可能付掉或已经付掉的支付时，核销记录改绑到它而不是归还。否则第二笔付掉之后第一笔过期，
+    /// 券连同用量一起退回，第二笔拿到的折扣从此无账。调用方是支付失败 / 取消、过期、关单与渠道建单失败四条路径。
     /// </para>
     /// </remarks>
     Task<Result> ReleaseCouponForPaymentAsync(Guid paymentId, CancellationToken cancellationToken = default);

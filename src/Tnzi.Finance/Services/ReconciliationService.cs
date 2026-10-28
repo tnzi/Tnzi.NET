@@ -109,6 +109,7 @@ public class ReconciliationService : ApplicationService, IReconciliationService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _reconciliationRepository.Discard(reconciliation); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<ReconciliationDto>("A draft reconciliation already exists for this account. Complete or delete it first.", 409);
         }
 

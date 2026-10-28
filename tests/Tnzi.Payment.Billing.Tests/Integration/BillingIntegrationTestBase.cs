@@ -2,6 +2,7 @@ using Mapster;
 using MapsterMapper;
 using Tnzi.Domain.Entities;
 using Tnzi.Mapster;
+using Tnzi.Payment.Services;
 
 namespace Tnzi.Payment.Billing.Tests.Integration;
 
@@ -42,18 +43,37 @@ public abstract class BillingIntegrationTestBase : IntegratedTestBase<BillingTes
         services.AddSingleton(_ => entityManagerMock.Object);
         services.AddScoped<IUnitOfWorkManager, UnitOfWorkManager>();
 
+        services.AddScoped<IBillingAccountResolver, DefaultBillingAccountResolver>();
         services.AddScoped<IPaymentInvoiceService, PaymentInvoiceService>();
     }
 
-    private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>
+    protected static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, IEntity<Guid>
     {
         services.AddScoped<IRepository<TEntity, Guid>>(sp =>
             new EFCoreRepository<BillingTestDbContext, TEntity, Guid>(sp.GetRequiredService<BillingTestDbContext>(), serviceProvider: sp));
     }
 
     /// <summary>在独立 scope 中持久化种子实体（模拟每请求独立 DbContext）。</summary>
+    /// <remarks>
+    /// 没写计费账户的种子行按经办人的个人账户补齐：与迁移回填对既有行做的事相同。
+    /// </remarks>
     protected async Task SeedAsync(params object[] entities)
     {
+        foreach (var entity in entities)
+        {
+            switch (entity)
+            {
+                case PaymentEntity p when string.IsNullOrEmpty(p.BillingAccountType) && p.UserId.HasValue:
+                    p.BillingAccountType = BillingAccountTypes.User;
+                    p.BillingAccountId = p.UserId.Value.ToString();
+                    break;
+                case Invoice i when string.IsNullOrEmpty(i.BillingAccountType) && i.UserId.HasValue:
+                    i.BillingAccountType = BillingAccountTypes.User;
+                    i.BillingAccountId = i.UserId.Value.ToString();
+                    break;
+            }
+        }
+
         using var scope = ServiceProvider.CreateScope();
         var ctx = scope.ServiceProvider.GetRequiredService<BillingTestDbContext>();
         ctx.AddRange(entities);

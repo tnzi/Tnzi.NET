@@ -58,6 +58,22 @@ public class DataAuthAdminControllerGateTests
     }
 
     /// <summary>
+    /// 实体角色矩阵的角色轴挂在本控制器的 <c>authorization.entityRole.view</c> 门下、不叠加方法级码：
+    /// 此前页面读的是 Identity 的角色列表（<c>role.view</c>），只持页面码的委托管理员看到的是一条空角色轴。
+    /// </summary>
+    [Fact]
+    public void Role_list_is_readable_under_the_page_gate()
+    {
+        var method = typeof(DefaultDataAuthAdminController).GetMethod("GetRoles");
+        method.ShouldNotBeNull();
+        method!.GetCustomAttributes(typeof(HttpGetAttribute), inherit: true)
+            .Cast<HttpGetAttribute>()
+            .ShouldHaveSingleItem()
+            .Template.ShouldBe("roles");
+        MethodPermissionNames("GetRoles").Where(p => p != null).ShouldBeEmpty();
+    }
+
+    /// <summary>
     /// 路由模板逐字不变。子模块拿走的是<b>整个</b>控制器，父模块没有留下任何控制器还用着
     /// <c>admin/data-auth</c> —— 这是「整只控制器可以搬」的前提：若父模块还占着同一个模板，
     /// 消费方继承父模块默认控制器时会连带把子模块的端点一起带上

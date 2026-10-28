@@ -20,8 +20,20 @@ public class InvitationOptions
     /// 把它压到分钟级，唯一的效果是每个人都要让管理员重发一次，
     /// 而重发本身也是走邮件的，安全性一点没变。
     /// </para>
+    /// <para>
+    /// 取值范围 1 到 <see cref="MaxLinkLifetimeHours"/>（30 天），超出则启动校验失败；
+    /// 管理员发邀请 / 重发时指定的有效期受同一个范围约束（超出答 400）。
+    /// </para>
     /// </remarks>
     public int LinkLifetimeHours { get; set; } = 168;
+
+    /// <summary>
+    /// 邀请链接有效期的上限：720 小时（30 天，与 Auth0 允许的上限相同）。
+    /// </summary>
+    /// <remarks>
+    /// 接受邀请是匿名的：一条有效期以年计的链接就是一份以年计的凭据，而且没有人会记得它还在。
+    /// </remarks>
+    public const int MaxLinkLifetimeHours = 720;
 
     /// <summary>
     /// 接受邀请成功后是否直接签发登录令牌（免去再登录一次）。默认 <c>true</c>。
@@ -40,7 +52,13 @@ public class InvitationOptions
     /// <remarks>
     /// <para>
     /// 例：<c>https://admin.example.com/accept-invitation?token={token}</c>。
-    /// 留空时框架退回按前端 origin（<c>System:FrontendUrl</c>，经 <c>FrontendUrlResolver</c>）拼一条默认路径。
+    /// 留空时框架退回 <c>{System:FrontendUrl}/admin/accept-invitation?token=</c>（origin 经 <c>FrontendUrlResolver</c>），
+    /// 即 <c>@tnzi/ui-admin</c> 的接受页在默认 <c>basePath</c>（<c>/admin</c>）下的地址。
+    /// </para>
+    /// <para>
+    /// ★ 以下情形必须配它，否则邀请信照发、链接却打不开：管理台的 <c>basePath</c> 不是 <c>/admin</c>
+    /// （例如 <c>/</c>，接受页就在 <c>{origin}/accept-invitation</c>）；管理台与 <c>System:FrontendUrl</c> 不同源；
+    /// 接受页由应用自己提供（移动端深链同理）。
     /// </para>
     /// <para>
     /// 真正需要自定义时，实现 <see cref="Services.IInvitationUrlGenerator"/> 覆盖整段逻辑；

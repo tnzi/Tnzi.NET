@@ -148,5 +148,7 @@ public class DocumentsModuleTests
         public byte[] Stamp(byte[] pdf, PdfStampRequest request) => pdf;
 
         public byte[] Create(PdfStampRequest request) => [];
+
+        public double MeasureTextWidth(string text, double fontSize, bool bold = false, bool italic = false) => 0d;
     }
 }

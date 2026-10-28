@@ -16,7 +16,7 @@ public class RagEngineAuthorizationWiringTests
 
     private readonly Mock<IRagRetriever> _retriever = new();
     private readonly Mock<IAiUtility> _aiUtility = new();
-    private readonly Mock<IAgentRuntime> _agentRuntime = new();
+    private readonly Mock<IAgentDispatchFacade> _agentRuntime = new();
     private readonly Mock<IRagAccessAuthorizer> _authorizer = new();
     private readonly IServiceProvider _serviceProvider;
 
@@ -42,7 +42,8 @@ public class RagEngineAuthorizationWiringTests
     private static StaticOptionsMonitor<AIRagOptions> RagOptions() => new(new AIRagOptions());
 
     private RagQueryEngine CreateQueryEngine()
-        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object, RagOptions());
+        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object,
+            Mock.Of<IUsageLimitService>(), Mock.Of<IBudgetService>(), new HeuristicTokenEstimator(), Mock.Of<ICurrentTenant>(), RagOptions());
 
     private RagChatEngine CreateChatEngine()
         => new(_serviceProvider, _retriever.Object, _agentRuntime.Object, _authorizer.Object, RagOptions());

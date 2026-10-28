@@ -39,6 +39,10 @@ import {
   provideAdminShellConfig,
   type AdminShellConfig,
 } from './shell-config'
+import {
+  provideAdminBillingConfig,
+  type AdminBillingConfig,
+} from './billing-config'
 
 /**
  * Default palette for ui-admin when the consumer hasn't installed
@@ -59,7 +63,6 @@ export const DEFAULT_ADMIN_COLORS = {
 export interface TnziUiAdminOptions {
   pinia?: Pinia
   installPersistedstate?: boolean
-  globalSearchShortcut?: string
   /**
    * HttpClient that admin bridges use to talk to the backend.
    * If omitted, pages that call `useAdminClient()` will throw, and
@@ -125,6 +128,11 @@ export interface TnziUiAdminOptions {
    * renders exactly its built-ins.
    */
   shell?: AdminShellConfig
+  /**
+   * Billing standing in the shell (warning banner, suspended screen). Off unless
+   * `enabled`; see `AdminBillingConfig`.
+   */
+  billing?: AdminBillingConfig
 }
 
 export interface TnziUiAdminInstance {
@@ -183,6 +191,9 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
   // resolves without a null check from every strip that renders host actions.
   provideAdminShellConfig(app, options.shell ?? {})
 
+  // Billing - provided only when enabled, so the shell mounts nothing otherwise.
+  provideAdminBillingConfig(app, options.billing)
+
   // Install global directives (v-permission, etc).
   installDirectives(app)
 
@@ -212,25 +223,16 @@ export function createTnziUiAdmin(app: App, options: TnziUiAdminOptions = {}): T
     app.provide(THEME_CONTEXT_KEY, defaultThemeCtx)
   }
 
-  let keyHandler: ((e: KeyboardEvent) => void) | null = null
-  if (typeof window !== 'undefined') {
-    keyHandler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        window.dispatchEvent(new CustomEvent('tnzi:global-search-toggle'))
-      }
-    }
-    window.addEventListener('keydown', keyHandler)
-  }
-
+  // No global key listener here: the Ctrl/Cmd-K global search belongs to the
+  // shell (`TAdminShell`), which opens it and honours `builtinSearch: false`.
   return {
     uninstall() {
-      if (keyHandler) window.removeEventListener('keydown', keyHandler)
+      // Nothing to release: everything above is app-scoped (provides,
+      // directives, the pinia plugin) and goes with the app.
     },
   }
 }
 
-export { TnziUiAdminResolver } from './resolver'
 export { registerBrandIcon, type BrandIconData } from './brand-icon'
 export { TNZI_ADMIN_CLIENT_KEY, useAdminClient } from './client'
 export { TNZI_ADMIN_RUNTIME_KEY, useAdminRuntime } from './runtime'
@@ -241,6 +243,8 @@ export type { CreateAdminAppOptions, AdminAppHandle } from './createAdminApp'
 export { buildDefaultLoginCallbacks, codeChannelFields, type AdminAuthRuntime } from '@tnzi/ui'
 export { installDirectives, vPermission, vModule } from '../directives'
 export type { DefineAdminAppOptions, DefineAdminAppResult } from './defineAdminApp'
+export { PUBLIC_PAGE_ROUTE_NAMES } from './route-transforms'
+export type { AdminPublicPage } from './route-transforms'
 export { confirmAdminAppUpdate } from './app-update-config'
 export type { AdminAppUpdateConfig } from './app-update-config'
 export {
@@ -306,6 +310,14 @@ export {
   type UserCenterIdentityField,
   type UserCenterReadonlyField,
 } from './user-center-config'
+export {
+  ADMIN_BILLING_CONFIG_KEY,
+  provideAdminBillingConfig,
+  useAdminBillingConfig,
+  type AdminBillingConfig,
+  type AdminBillingShellState,
+  type ResolvedAdminBillingConfig,
+} from './billing-config'
 export {
   ADMIN_SHELL_CONFIG_KEY,
   provideAdminShellConfig,

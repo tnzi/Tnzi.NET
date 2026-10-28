@@ -15,9 +15,18 @@ namespace Tnzi.Payment.Permissions;
 /// </remarks>
 public class PaymentPermissions : IPermissionDefinitionProvider
 {
+    /// <summary>查看本人所代表的计费账户（订阅、付款、发票、已保存的卡）。</summary>
+    public const string AccountView = "payment.account.view";
+
+    /// <summary>代表计费账户付款、开通 / 变更 / 取消订阅、增删卡片、申请退款。</summary>
+    public const string AccountManage = "payment.account.manage";
+
     public void Define(IPermissionDefinitionContext context)
     {
-        context.AddGroup("payment", "Payment");
+        // 平台范围：收款、退款、计划定价、发票都是运营方的后台。payment.account.* 也在这个组里，
+        // 它们由客户一侧的管理者经显式授权持有（服务层按 Payment:BillingAccount:Scope 判），
+        // 两种超管旁路范围下都成立：Platform 下超管隐式持有，All 下更不必说。
+        context.AddGroup("payment", "Payment").Scope = PermissionScope.Platform;
         context.AddPermission("payment.view", "View Payment", parentName: "payment");
         // Orders are created by the payment flow; admin writes are lifecycle
         // transitions (close/sync) = update.
@@ -32,5 +41,8 @@ public class PaymentPermissions : IPermissionDefinitionProvider
         // payment.promotion.* 随折扣域搬去了可选子模块 Tnzi.Payment.Promotions
         // （PaymentPromotionsPermissions，3 个码逐字节相同，父组仍是这里声明的 "payment"）。
         context.AddPermission("payment.statistics.view", "View Payment Statistics", parentName: "payment");
+        // 用户面：只在 Installation / Tenant 范围下被检查（User 范围下每人恒可管理自己的账户）。
+        context.AddPermission(AccountView, "View Billing Account", parentName: "payment");
+        context.AddPermission(AccountManage, "Manage Billing Account", parentName: "payment");
     }
 }

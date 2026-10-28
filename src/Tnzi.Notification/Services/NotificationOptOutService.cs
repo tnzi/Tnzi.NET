@@ -5,18 +5,29 @@ namespace Tnzi.Notification.Services;
 /// <inheritdoc cref="INotificationOptOutService" />
 public class NotificationOptOutService : ApplicationService, INotificationOptOutService
 {
+    /// <summary>
+    /// 带租户的令牌载荷的版本标记：<c>v2|租户|地址|渠道|分类</c>。不带它的三段式是修复之前签发的旧令牌。
+    /// </summary>
+    private const string TenantBoundTokenVersion = "v2";
+
     private readonly IRepository<OptOut, Guid> _repository;
     private readonly IOptionsMonitor<NotificationOptions> _options;
+    private readonly ICurrentTenant? _currentTenant;
 
     public NotificationOptOutService(
         IServiceProvider serviceProvider,
         IRepository<OptOut, Guid> repository,
-        IOptionsMonitor<NotificationOptions> options)
+        IOptionsMonitor<NotificationOptions> options,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _options = Check.NotNull(options);
+        _currentTenant = currentTenant;
     }
+
+    /// <summary>签发令牌时所在的租户，与仓储过滤器、审计赋值同一个口径。</summary>
+    private Guid? CurrentTenantId => _currentTenant?.Id ?? CurrentUser?.TenantId;
 
     /// <summary>
     /// 地址归一化：去空白 + 小写；号码型渠道再走一遍号码归一化。
@@ -105,8 +116,8 @@ public class NotificationOptOutService : ApplicationService, INotificationOptOut
             Address = normalized,
             Channel = channel,
             Category = cat,
-            Source = source,
-            Reason = reason,
+            Source = NotificationFieldLimits.FitNote(source, NotificationFieldLimits.OptOutSourceMaxLength),
+            Reason = NotificationFieldLimits.FitNote(reason, NotificationFieldLimits.OptOutReasonMaxLength),
         }, cancellationToken);
 
         return Ok();
@@ -148,6 +159,63 @@ public class NotificationOptOutService : ApplicationService, INotificationOptOut
                    ?? throw new InvalidOperationException(
                        "The opt-out was rejected as a duplicate, but no matching record could be read back.", ex);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> OptOutAsync(
+        UnsubscribeTokenPayload payload,
+        string? source = null,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(payload);
+
+        if (!TryEnterTokenTenant(payload, out var tenantScope))
+            return TokenTenantUnavailable();
+
+        using (tenantScope)
+        {
+            return await OptOutAsync(payload.Address, payload.Channel, payload.Category, source, reason, cancellationToken);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<Result> OptInAsync(UnsubscribeTokenPayload payload, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(payload);
+
+        if (!TryEnterTokenTenant(payload, out var tenantScope))
+            return TokenTenantUnavailable();
+
+        using (tenantScope)
+        {
+            return await OptInAsync(payload.Address, payload.Channel, payload.Category, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 切到令牌签的租户。旧格式令牌（不带租户）切到宿主：请求自带的租户一律不用。
+    /// </summary>
+    /// <remarks>
+    /// 拿不到 <see cref="ICurrentTenant"/> 时：令牌指向宿主就原样执行（没有可切的东西），
+    /// 指向某个租户则拒绝。按请求的作用域落库正是这里要消灭的失效，宁可报错也不安静地落错地方。
+    /// </remarks>
+    private bool TryEnterTokenTenant(UnsubscribeTokenPayload payload, out IDisposable? scope)
+    {
+        if (_currentTenant != null)
+        {
+            scope = _currentTenant.Change(payload.TenantId);
+            return true;
+        }
+
+        scope = null;
+        return payload.TenantId == null;
+    }
+
+    private Result TokenTenantUnavailable()
+    {
+        Logger.LogError("An unsubscribe token names a tenant, but no ICurrentTenant is available to switch to it; the opt-out was not recorded.");
+        return Fail("The unsubscribe request could not be processed. Please try again later.", 500, ErrorCodes.NOTIFICATION_ERROR);
     }
 
     /// <inheritdoc />
@@ -331,7 +399,14 @@ public class NotificationOptOutService : ApplicationService, INotificationOptOut
     /// <inheritdoc />
     public string CreateUnsubscribeToken(string address, NotificationType channel, string? category = null)
     {
-        var payload = $"{Normalize(address, channel)}|{(int)channel}|{NormalizeCategory(category)}";
+        // ★ 租户签进载荷：兑现令牌的匿名请求（尤其是邮件服务商的一键退订）不带任何租户信息，
+        //   不签进去退订就只能落在宿主，而发送前的判定在租户作用域里看不见宿主行。
+        var payload = string.Join('|',
+            TenantBoundTokenVersion,
+            CurrentTenantId?.ToString("N") ?? string.Empty,
+            Normalize(address, channel),
+            $"{(int)channel}",
+            NormalizeCategory(category));
         var signature = Sign(payload);
         return $"{Base64UrlEncode(Encoding.UTF8.GetBytes(payload))}.{Base64UrlEncode(signature)}";
     }
@@ -365,15 +440,39 @@ public class NotificationOptOutService : ApplicationService, INotificationOptOut
             return null;
 
         var parts = payload.Split('|');
-        if (parts.Length != 3 || !int.TryParse(parts[1], out var channelValue))
+        Guid? tenantId = null;
+        string[] fields;
+        if (parts.Length == 5 && parts[0] == TenantBoundTokenVersion)
+        {
+            if (parts[1].Length > 0)
+            {
+                if (!Guid.TryParseExact(parts[1], "N", out var parsedTenant))
+                    return null;
+                tenantId = parsedTenant;
+            }
+
+            fields = parts[2..];
+        }
+        else if (parts.Length == 3)
+        {
+            // 修复之前签发的旧令牌：不带租户，按宿主兑现（与当初的落点一致）。
+            fields = parts;
+        }
+        else
+        {
+            return null;
+        }
+
+        if (!int.TryParse(fields[1], out var channelValue))
             return null;
         if (!Enum.IsDefined(typeof(NotificationType), channelValue))
             return null;
 
         return new UnsubscribeTokenPayload(
-            parts[0],
+            fields[0],
             (NotificationType)channelValue,
-            parts[2].Length == 0 ? null : parts[2]);
+            fields[2].Length == 0 ? null : fields[2],
+            tenantId);
     }
 
     private byte[] Sign(string payload)

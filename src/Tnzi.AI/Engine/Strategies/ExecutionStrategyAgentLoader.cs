@@ -35,8 +35,15 @@ public static class ExecutionStrategyAgentLoader
         // 被授予 sandbox 组的子 agent 就带着宿主 shell 替他跑。
         var permissionResolver = context.ServiceProvider.GetRequiredService<IUserToolPermissionResolver>();
         var userPermissions = await permissionResolver.ResolveAsync(toolGroups, toolNames, ct);
+
+        // 指令模板与主路径同一次渲染（{{date}} / {{user.name}} / {{agent.name}} 等）：不渲染时模型读到的是字面量占位符
+        var templateEngine = context.ServiceProvider.GetService<IPromptTemplateEngine>();
+        var instructions = templateEngine == null || string.IsNullOrEmpty(entity.Instructions)
+            ? entity.Instructions
+            : templateEngine.Render(entity.Instructions, new Dictionary<string, string> { ["agent.name"] = entity.Name });
+
         return await context.AgentFactory.CreateAgentAsync(
-            entity.Provider, entity.Model, entity.Instructions, entity.Name,
+            entity.Provider, entity.Model, instructions, entity.Name,
             toolGroups, entity.Temperature, entity.MaxTokens,
             userPermissions: userPermissions, toolNames: toolNames, agentId: entity.Id, ct: ct);
     }

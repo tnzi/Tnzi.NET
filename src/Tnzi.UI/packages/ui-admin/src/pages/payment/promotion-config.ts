@@ -27,12 +27,25 @@ const TYPE_KEY: Record<string, string> = {
   ThresholdDiscount: 'thresholdDiscount',
 }
 
-function discountLabel(value: number, type: string): string {
+/**
+ * A fixed discount is shown in the promotion's own currency: it only applies to
+ * orders in that currency. A code the formatter rejects (it throws a RangeError)
+ * degrades to the bare amount and code instead of failing the whole list.
+ */
+function discountLabel(value: number, type: string, currency: string | undefined): string {
   switch (type) {
     case DiscountType.Percentage:
       return `${value}%`
-    case DiscountType.Fixed:
-      return formatCurrency(Number(value ?? 0), 'USD')
+    case DiscountType.Fixed: {
+      const amount = Number(value ?? 0)
+      const code = (currency ?? '').trim()
+      if (!code) return String(amount)
+      try {
+        return formatCurrency(amount, code)
+      } catch {
+        return `${amount} ${code}`
+      }
+    }
     default:
       return String(value)
   }
@@ -79,7 +92,7 @@ export function buildPromotionColumns(t: (key: string) => string): ColumnDef[] {
       align: 'right',
       render: (row) => {
         const r = row as unknown as PromotionDto
-        return discountLabel(r.discountValue, String(r.discountType ?? ''))
+        return discountLabel(r.discountValue, String(r.discountType ?? ''), r.currency)
       },
     },
     {
@@ -121,8 +134,9 @@ const discountTypeOptions = [
 
 /**
  * Create/edit form schema. Fields immutable after creation
- * (promotionCode / type / discountType / startTime) are create-only via
- * `visible: (m) => !m.id`; `isActive` is edit-only (`!!m.id`).
+ * (promotionCode / type / discountType / currency / startTime) are create-only
+ * via `visible: (m) => !m.id`; `isActive` is edit-only (`!!m.id`). `currency`
+ * only matters to a fixed discount, so it shows for that one.
  */
 export const promotionFormSchema: FormSchemaItem[] = [
   { key: 'promotionCode', labelKey: 'form.promotionCode', label: 'Code', type: 'text', required: true, placeholder: 'WELCOME10', visible: (m) => !m.id },
@@ -131,6 +145,17 @@ export const promotionFormSchema: FormSchemaItem[] = [
   { key: 'type', labelKey: 'form.type', label: 'Type', type: 'select', required: true, options: typeOptions, visible: (m) => !m.id },
   { key: 'discountType', labelKey: 'form.discountType', label: 'Discount Type', type: 'select', required: true, options: discountTypeOptions, visible: (m) => !m.id },
   { key: 'discountValue', labelKey: 'form.discountValue', label: 'Discount Value', type: 'number', required: true, min: 0 },
+  {
+    key: 'currency',
+    labelKey: 'form.currency',
+    label: 'Currency',
+    type: 'text',
+    placeholder: 'CAD',
+    hintKey: 'form.currencyHint',
+    hint: 'Three-letter code. Leave blank for the store currency. Orders in another currency cannot use this discount.',
+    hintMode: 'popover',
+    visible: (m) => !m.id && m.discountType === DiscountType.Fixed,
+  },
   { key: 'maxDiscountAmount', labelKey: 'form.maxDiscountAmount', label: 'Max Discount', type: 'number', min: 0 },
   { key: 'minimumOrderAmount', labelKey: 'form.minimumOrderAmount', label: 'Min Order Amount', type: 'number', min: 0 },
   { key: 'totalUsageLimit', labelKey: 'form.totalUsageLimit', label: 'Total Usage Limit', type: 'number', min: 1 },

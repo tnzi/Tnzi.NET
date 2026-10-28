@@ -77,6 +77,35 @@ public interface ISessionService
     Task<Guid> CreateSessionAsync(Guid userId, string? deviceInfo, string? ipAddress, string? userAgent, DateTime? expiresAt = null);
 
     /// <summary>
+    /// 创建一条委派会话：与 <see cref="CreateSessionAsync"/> 相同，另把分组键、显示名与应用声明落到会话记录上，
+    /// 并把会话的绝对到期时间定为请求值与部署配置上限里更早的那个。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 默认实现返回 <see cref="Guid.Empty"/>，表示「不支持」，签发方据此拒绝签发。
+    /// 刻意不退回到 <see cref="CreateSessionAsync"/>：那会建出一条没有声明、没有分组的普通会话，
+    /// 应用认不出它是委派会话，也撤销不了它。
+    /// </para>
+    /// <para>
+    /// ★ 覆写本方法的实现<b>必须同时覆写</b> <see cref="GetDelegationAsync"/>。签发方建完会话会立刻读回一次核对，
+    /// 读不回来就撤掉会话并拒绝签发 —— 否则刷新出来的令牌会丢掉声明，在应用那里就是一条不受限制的会话。
+    /// </para>
+    /// </remarks>
+    /// <param name="creation">会话字段与委派事实</param>
+    /// <returns>会话ID；不支持时为 <see cref="Guid.Empty"/></returns>
+    Task<Guid> CreateDelegatedSessionAsync(DelegatedSessionCreation creation) => Task.FromResult(Guid.Empty);
+
+    /// <summary>
+    /// 读回一条会话上的委派事实。普通会话、不存在的会话返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 签发与刷新 access token 时调用：委派会话的令牌要带回同一组声明，过期时间不得晚于会话的绝对到期时间。
+    /// 默认实现返回 <c>null</c>，与 <see cref="CreateDelegatedSessionAsync"/> 的默认实现配套（建不出委派会话，也就没有可读的）。
+    /// </remarks>
+    /// <param name="sessionId">会话ID</param>
+    Task<DelegatedSessionInfo?> GetDelegationAsync(Guid sessionId) => Task.FromResult<DelegatedSessionInfo?>(null);
+
+    /// <summary>
     /// 校验会话是否仍然有效（存在、未撤销、未过期）。
     /// 供 JWT Bearer 的 <c>OnTokenValidated</c> 每请求校验、以及刷新令牌时校验；
     /// 实现应对高频调用做缓存（数据库模式）或直接读缓存（Redis 模式）。

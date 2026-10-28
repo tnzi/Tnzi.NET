@@ -26,6 +26,8 @@ public class WorkspaceTestDbContext : TnziDbContext<WorkspaceTestDbContext>
     public DbSet<FileUploadSession> FileUploadSessions => Set<FileUploadSession>();
     public DbSet<FileChunk> FileChunks => Set<FileChunk>();
     public DbSet<FileFolder> FileFolders => Set<FileFolder>();
+    public DbSet<RecycleBinEntry> RecycleBinEntries => Set<RecycleBinEntry>();
+    public DbSet<StorageAllowance> StorageAllowances => Set<StorageAllowance>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +38,8 @@ public class WorkspaceTestDbContext : TnziDbContext<WorkspaceTestDbContext>
         modelBuilder.ApplyConfiguration(new FileUploadSessionConfiguration());
         modelBuilder.ApplyConfiguration(new FileChunkConfiguration());
         modelBuilder.ApplyConfiguration(new FileFolderConfiguration());
+        modelBuilder.ApplyConfiguration(new RecycleBinEntryConfiguration());
+        modelBuilder.ApplyConfiguration(new StorageAllowanceConfiguration());
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);
@@ -90,7 +94,8 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
     protected FileStorageService CreateStorageService(
         StorageOptions? options = null,
         IFileAccessAuthorizer? authorizer = null,
-        IFileAccessGrantContext? grantContext = null)
+        IFileAccessGrantContext? grantContext = null,
+        IStorageQuotaService? quota = null)
     {
         var effective = options ?? StorageOptions;
         return new FileStorageService(
@@ -105,7 +110,8 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             new TestFileUrlSigner(),
             ServiceProvider,
             Guard(effective),
-            new FileThumbnailGenerator(Storage, new StaticOptionsMonitor<StorageOptions>(effective)));
+            new FileThumbnailGenerator(Storage, new StaticOptionsMonitor<StorageOptions>(effective)),
+            quota ?? UnlimitedStorageQuota.Instance);
     }
 
     /// <summary>
@@ -117,22 +123,66 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             ServiceProvider,
             Repo<FileFolder>(),
             Repo<FileRecord>(),
-            authorizer ?? TestFileAccessAuthorizer.AllowAll());
+            Repo<FileReference>(),
+            Repo<RecycleBinEntry>(),
+            authorizer ?? TestFileAccessAuthorizer.AllowAll(),
+            CreateRecycleBinLookup());
+
+    protected RecycleBinLookup CreateRecycleBinLookup() => new(Repo<RecycleBinEntry>(), Repo<FileFolder>());
+
+    /// <summary>
+    /// 真实的配额服务：配额来源是工作区的覆盖表（回落到 <paramref name="options"/> 的默认值），用量含历史版本。
+    /// </summary>
+    protected StorageQuotaService CreateQuotaService(StorageOptions? options = null)
+        => new(
+            Repo<FileRecord>(),
+            new StorageAllowanceProvider(Repo<StorageAllowance>(), new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions)),
+            [new FileVersionUsageContributor(Repo<FileVersion>(), Repo<FileRecord>())]);
+
+    protected FileHoldService CreateHoldService()
+        => new(ServiceProvider, Repo<FileRecord>(), Repo<FileReference>(), Storage);
+
+    protected FileSpaceService CreateSpaceService(IFileStorageService? fileStorage = null)
+        => new(
+            ServiceProvider,
+            Repo<FileFolder>(),
+            Repo<FileRecord>(),
+            Repo<FileReference>(),
+            Repo<RecycleBinEntry>(),
+            fileStorage ?? CreateStorageService());
+
+    protected RecycleBinService CreateRecycleBinService(IFileAccessAuthorizer? authorizer = null, StorageOptions? options = null)
+        => new(
+            ServiceProvider,
+            Repo<RecycleBinEntry>(),
+            Repo<FileFolder>(),
+            Repo<FileRecord>(),
+            Repo<FileReference>(),
+            authorizer ?? TestFileAccessAuthorizer.AllowAll(),
+            CreateHoldService(),
+            new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions),
+            new Tnzi.MultiTenancy.CurrentTenant());
+
+    protected StorageAllowanceService CreateAllowanceService() => new(ServiceProvider, Repo<StorageAllowance>());
 
     protected FileVersionService CreateVersionService(
         IEnumerable<IUploadSanitizer>? sanitizers = null,
-        StorageOptions? options = null)
+        StorageOptions? options = null,
+        IFileAccessAuthorizer? authorizer = null,
+        IStorageQuotaService? quota = null)
         => new(
             Repo<FileVersion>(),
             Repo<FileRecord>(),
             Storage,
-            TestFileAccessAuthorizer.AllowAll(),
+            authorizer ?? TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider,
-            Guard(options ?? StorageOptions, sanitizers));
+            Guard(options ?? StorageOptions, sanitizers),
+            quota ?? UnlimitedStorageQuota.Instance);
 
     protected FileChunkUploadService CreateChunkUploadService(
         StorageOptions? options = null,
-        IEnumerable<IUploadSanitizer>? sanitizers = null)
+        IEnumerable<IUploadSanitizer>? sanitizers = null,
+        IStorageQuotaService? quota = null)
         => new(
             Repo<FileUploadSession>(),
             Repo<FileChunk>(),
@@ -140,7 +190,9 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             Storage,
             new StaticOptionsMonitor<StorageOptions>(options ?? StorageOptions),
             ServiceProvider,
-            Guard(options ?? StorageOptions, sanitizers));
+            Guard(options ?? StorageOptions, sanitizers),
+            quota ?? UnlimitedStorageQuota.Instance,
+            Repo<FileFolder>());
 
     /// <summary>
     /// 传入同一个 <paramref name="grantContext"/> 给分享服务和读取服务，就能在测试里
@@ -154,7 +206,8 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             authorizer ?? TestFileAccessAuthorizer.AllowAll(),
             grantContext ?? new FileAccessGrantContext(),
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
-            ServiceProvider);
+            ServiceProvider,
+            CreateRecycleBinLookup());
 
     /// <summary>
     /// 真实的 <see cref="FileAccessAuthorizer"/>（匿名调用者、无权限体系），用来验证
@@ -185,7 +238,8 @@ public abstract class WorkspaceIntegrationTestBase : IntegratedTestBase<Workspac
             Storage,
             new Tnzi.MultiTenancy.CurrentTenant(),
             new StaticOptionsMonitor<StorageOptions>(options),
-            ServiceProvider);
+            ServiceProvider,
+            new OrphanReferenceScanCursor());
 
     protected ExpiredUploadSessionCleanupContributor CreateCleanupContributor(
         Tnzi.MultiTenancy.ICurrentTenant? currentTenant = null,

@@ -132,9 +132,12 @@ public class CliRunEnqueueThreadOwnershipTests : IntegratedTestBase<CliThreadOwn
         result.Code.ShouldBe(404);
     }
 
-    /// <summary>对照组：自己的线程照常入队，并续接自己上一轮的会话指针。</summary>
+    /// <summary>
+    /// 对照组：自己的线程照常入队。续接指针不在入队时定：执行器认领之后才按线程上最近结束的一轮解析
+    /// （只取自己派出的那些，见 <c>CliRunResumeRetryTests</c>），入队这一刻前一轮可能还没结束。
+    /// </summary>
     [Fact]
-    public async Task Enqueue_WithMyOwnThread_IsQueuedAndResumesMyPreviousSession()
+    public async Task Enqueue_WithMyOwnThread_IsQueued_AndLeavesTheResumePointerToTheExecutor()
     {
         await SeedBindingAsync();
         var myThread = await SeedThreadAsync(TestHelper.DefaultTestUserId, AgentId);
@@ -151,31 +154,7 @@ public class CliRunEnqueueThreadOwnershipTests : IntegratedTestBase<CliThreadOwn
 
         var run = await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == result.Data);
         run.ThreadId.ShouldBe(myThread);
-        run.ProviderSessionId.ShouldBe("sess-mine");
-        run.ResumeExpected.ShouldBeTrue();
-    }
-
-    /// <summary>
-    /// 第二道门：即便线程是自己的，续接指针也只从<b>自己派出的</b>上一轮取。
-    /// 一个曾被别人的运行写过会话指针的线程，那个指针也不该被接上。
-    /// </summary>
-    [Fact]
-    public async Task Enqueue_WithMyOwnThread_DoesNotResumeASessionSomeoneElseLeftInIt()
-    {
-        await SeedBindingAsync();
-        var myThread = await SeedThreadAsync(TestHelper.DefaultTestUserId, AgentId);
-        await SeedFinishedRunAsync(myThread, SomeoneElse, "sess-theirs");
-
-        var result = await CreateDispatcher().EnqueueAsync(new CliRunRequestDto
-        {
-            AgentId = AgentId,
-            ThreadId = myThread,
-            Prompt = "continue"
-        });
-
-        result.Succeeded.ShouldBeTrue(result.Message);
-
-        var run = await DbContext.Set<CliRun>().AsNoTracking().SingleAsync(r => r.Id == result.Data);
+        run.Status.ShouldBe(CliRunStatus.Queued);
         run.ProviderSessionId.ShouldBeNull();
         run.ResumeExpected.ShouldBeFalse();
     }
@@ -200,6 +179,7 @@ public class CliRunEnqueueThreadOwnershipTests : IntegratedTestBase<CliThreadOwn
             ServiceProvider.GetRequiredService<IRepository<CliAgentBinding, Guid>>(),
             ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
             ServiceProvider.GetRequiredService<IRepository<AgentThread, Guid>>(),
+            TestAgents.Repository(AgentId),
             new CliRunSignalHub(),
             new CliRunCancellationRegistry(),
             EnabledOptions(),

@@ -42,6 +42,32 @@ function mountTextarea(scrollHeight: number, maxHeight = 200) {
 }
 
 describe('useAutoGrowTextarea', () => {
+  // A bordered border-box field (the message editor): scrollHeight is the
+  // padding box, so without the borders the field came out 2px short and
+  // scrolled.
+  it('adds the borders of a border-box field', async () => {
+    const { text, node } = mountTextarea(80);
+    node.style.boxSizing = 'border-box';
+    node.style.border = '1px solid black';
+    text.value = 'two\nlines';
+    await nextTick();
+    await nextTick();
+    expect(node.style.height).toBe('82px');
+    expect(node.style.overflowY).toBe('hidden');
+  });
+
+  // A content-box field with vertical padding: height excludes the padding,
+  // so setting it to scrollHeight grew the field by its padding.
+  it('takes the padding off a content-box field', async () => {
+    const { text, node } = mountTextarea(80);
+    node.style.boxSizing = 'content-box';
+    node.style.padding = '10px 0';
+    text.value = 'two\nlines';
+    await nextTick();
+    await nextTick();
+    expect(node.style.height).toBe('60px');
+  });
+
   it('grows the textarea to its content height', async () => {
     const { text, node } = mountTextarea(80);
     text.value = 'two\nlines';

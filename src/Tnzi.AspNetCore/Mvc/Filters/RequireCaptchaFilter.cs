@@ -47,7 +47,7 @@ public sealed class RequireCaptchaFilter : IAsyncActionFilter
 
         _logger.LogInformation(
             "Captcha gate rejected {Method} {Path} (purpose {Purpose}): {Failure}",
-            context.HttpContext.Request.Method, context.HttpContext.Request.Path, _purpose, verification.Failure);
+            context.HttpContext.Request.Method, context.HttpContext.GetRedactedPath(), _purpose, verification.Failure);
 
         // 用户可见消息不区分原因（那是给机器人的反馈信号）；原因进 errorDetails 供前端决定要不要重置控件。
         context.Result = new BadRequestObjectResult(ApiResult.Error(

@@ -3,13 +3,13 @@
  * Aligned with Tnzi.NET backend System module
  */
 
-import type { AuditedEntity } from '../../types/entities';
-import type { SortedPagedQueryDto } from '../../types/pagination';
+import type { CreationAuditedEntity } from '../../types/entities';
+import type { PagedQueryDto } from '../../types/pagination';
 import { HealthStatus } from './metadata';
-import type { MenuBadgeType, FeatureRequirementType } from './metadata';
+import type { MenuBadgeType } from './metadata';
 
 export { HealthStatus };
-export type { MenuBadgeType, FeatureRequirementType };
+export type { MenuBadgeType };
 
 // ============================================
 // Enums
@@ -62,9 +62,13 @@ export enum TopEndpointSortBy {
 // ============================================
 
 /**
- * Access log info DTO
+ * Access log entry. Backend: AccessLogDto.
+ *
+ * Request and response bodies, sizes and exceptions are not captured, so there
+ * are no fields for them; the GeoIP and user-agent fields are what the access
+ * log middleware fills in.
  */
-export interface AccessLogInfoDto extends AuditedEntity<string> {
+export interface AccessLogInfoDto extends CreationAuditedEntity<string> {
   userId?: string | null;
   userName?: string | null;
   path: string;
@@ -72,32 +76,18 @@ export interface AccessLogInfoDto extends AuditedEntity<string> {
   ipAddress?: string | null;
   userAgent?: string | null;
   statusCode: number;
+  /** Milliseconds. */
   responseTime: number;
-  requestSize?: number | null;
-  responseSize?: number | null;
-  queryString?: string | null;
-  requestBody?: string | null;
-  responseBody?: string | null;
-  exception?: string | null;
-  correlationId?: string | null;
   // GeoIP information
   ipCountry?: string | null;
   ipProvince?: string | null;
   ipCity?: string | null;
   ipFullAddress?: string | null;
-  ipLatitude?: number | null;
-  ipLongitude?: number | null;
   // User agent parsed
   uaBrowser?: string | null;
-  uaBrowserVersion?: string | null;
   uaOperatingSystem?: string | null;
-  uaOsVersion?: string | null;
   uaDeviceType?: string | null;
-  uaDeviceBrand?: string | null;
-  uaDeviceModel?: string | null;
   uaIsMobile: boolean;
-  uaIsBot: boolean;
-  uaBotName?: string | null;
 }
 
 /**
@@ -155,26 +145,22 @@ export interface TopEndpointDto {
 }
 
 /**
- * Access log query parameters
+ * Access log query parameters. Backend: AccessLogQueryDto.
+ *
+ * The list is always newest first; the endpoint takes no sort parameters.
+ * `keyword` matches the path or the user name.
  */
-export interface AccessLogQueryDto extends SortedPagedQueryDto {
+export interface AccessLogQueryDto extends PagedQueryDto {
   userId?: string;
-  userName?: string;
   path?: string;
   method?: string;
   ipAddress?: string;
   statusCode?: number;
   minStatusCode?: number;
   maxStatusCode?: number;
-  minResponseTime?: number;
-  maxResponseTime?: number;
   startTime?: Date | string;
   endTime?: Date | string;
   keyword?: string;
-  isMobile?: boolean;
-  isBot?: boolean;
-  country?: string;
-  correlationId?: string;
 }
 
 // ============================================
@@ -292,54 +278,6 @@ export interface HealthCheckResponseDto {
 }
 
 // ============================================
-// Feature Flag Types
-// ============================================
-
-/**
- * Feature flag DTO
- */
-export interface FeatureFlagDto {
-  name: string;
-  isEnabled: boolean;
-  description?: string | null;
-  requirements?: FeatureRequirementDto[];
-}
-
-/**
- * Feature requirement
- */
-export interface FeatureRequirementDto {
-  type: FeatureRequirementType;
-  value: string;
-}
-
-// ============================================
-// Maintenance Types
-// ============================================
-
-/**
- * Maintenance mode info
- */
-export interface MaintenanceInfoDto {
-  isEnabled: boolean;
-  message?: string | null;
-  allowedIps: string[];
-  startTime?: Date | string | null;
-  endTime?: Date | string | null;
-}
-
-/**
- * Update maintenance mode request
- */
-export interface UpdateMaintenanceDto {
-  isEnabled: boolean;
-  message?: string;
-  allowedIps?: string[];
-  startTime?: Date | string;
-  endTime?: Date | string;
-}
-
-// ============================================
 // Settings Center Types
 // ============================================
 
@@ -395,39 +333,6 @@ export interface SettingsCenterGroupDto {
    */
   canEdit?: boolean;
   fields: SettingsCenterFieldDto[];
-}
-
-// ============================================
-// Cache Management Types
-// ============================================
-
-/**
- * Cache statistics
- */
-export interface CacheStatisticsDto {
-  totalKeys: number;
-  totalSize: number;
-  hitRate: number;
-  missRate: number;
-  byPrefix: Record<string, CachePrefixStatistics>;
-}
-
-/**
- * Cache prefix statistics
- */
-export interface CachePrefixStatistics {
-  keyCount: number;
-  size: number;
-  hitRate: number;
-}
-
-/**
- * Cache clear request
- */
-export interface ClearCacheDto {
-  prefix?: string;
-  keys?: string[];
-  clearAll?: boolean;
 }
 
 // ============================================

@@ -9,8 +9,7 @@
  *   - hidden: off-canvas; on mobile renders as an overlay drawer
  *
  * Slot-only design: consumers provide header/nav/content/footer/rail markup.
- * Import `useSidebarState` from `@tnzi/ui-ai/headless` (or
- * `@tnzi/ui-ai/shell`) for the state machine.
+ * Import `useSidebarState` from `@tnzi/ui-ai/headless` for the state machine.
  */
 import { computed, ref } from 'vue'
 import type { SidebarMode } from '../../headless/useSidebarState'
@@ -34,9 +33,17 @@ const emit = defineEmits<{
   'update:modelValue': [mode: SidebarMode]
 }>()
 
+/* What is drawn. A drawer is never the icon rail: on a narrow screen an open
+   sidebar is the full one (header, nav, conversations, account), whatever mode
+   a caller hands in. `useSidebarState` already never sets `icon` while narrow;
+   this covers a consumer driving the mode itself. */
+const shownMode = computed<SidebarMode>(() =>
+  props.isMobile && props.modelValue === 'icon' ? 'expanded' : props.modelValue,
+)
+
 const currentWidth = computed(() => {
-  if (props.modelValue === 'hidden') return 0
-  if (props.modelValue === 'icon') return props.railWidth
+  if (shownMode.value === 'hidden') return 0
+  if (shownMode.value === 'icon') return props.railWidth
   return props.width
 })
 
@@ -61,7 +68,7 @@ function closeFromBackdrop(): void {
  * input / [role=button]) keep their own semantics and DO NOT expand.
  */
 function handleRailClick(e: MouseEvent): void {
-  if (props.modelValue !== 'icon') return
+  if (shownMode.value !== 'icon') return
   const target = e.target as HTMLElement | null
   if (target?.closest('button,a,input,[role="button"],[data-no-expand]')) return
   emit('update:modelValue', 'expanded')
@@ -99,8 +106,8 @@ useBodyScrollLock(isDrawer)
   <aside
     class="t-collapsible-sidebar"
     :class="{
-      't-collapsible-sidebar--expanded': modelValue === 'expanded',
-      't-collapsible-sidebar--icon': modelValue === 'icon',
+      't-collapsible-sidebar--expanded': shownMode === 'expanded',
+      't-collapsible-sidebar--icon': shownMode === 'icon',
       't-collapsible-sidebar--hidden': modelValue === 'hidden',
       't-collapsible-sidebar--drawer': isDrawer,
     }"
@@ -114,14 +121,14 @@ useBodyScrollLock(isDrawer)
            mode the rail slot owns the full height and provides its own
            brand mark / footer icons. -->
       <header
-        v-if="$slots.header && modelValue !== 'icon'"
+        v-if="$slots.header && shownMode !== 'icon'"
         class="t-collapsible-sidebar__header"
       >
         <slot name="header" />
       </header>
 
       <div
-        v-if="$slots.nav && modelValue !== 'icon'"
+        v-if="$slots.nav && shownMode !== 'icon'"
         class="t-collapsible-sidebar__nav"
         :class="{ 'is-detached': contentScrolled }"
       >
@@ -130,10 +137,10 @@ useBodyScrollLock(isDrawer)
 
       <div
         ref="contentEl"
-        class="t-collapsible-sidebar__content"
+        class="t-collapsible-sidebar__content t-ai-scroll"
         @scroll="onContentScroll"
       >
-        <template v-if="modelValue === 'icon' && $slots.rail">
+        <template v-if="shownMode === 'icon' && $slots.rail">
           <slot name="rail" :mode="modelValue" />
         </template>
         <template v-else>
@@ -142,7 +149,7 @@ useBodyScrollLock(isDrawer)
       </div>
 
       <footer
-        v-if="$slots.footer && modelValue !== 'icon'"
+        v-if="$slots.footer && shownMode !== 'icon'"
         class="t-collapsible-sidebar__footer"
       >
         <slot name="footer" />
@@ -178,11 +185,14 @@ useBodyScrollLock(isDrawer)
 .t-collapsible-sidebar--icon [role='button'] {
   cursor: pointer;
 }
+/* The drawer starts below the page's top inset (`--tnzi-overlay-inset-top`,
+   e.g. a frameless window's title bar); its backdrop covers the whole
+   viewport, the inset included, so nothing behind it is left undimmed. */
 .t-collapsible-sidebar--drawer {
   position: fixed;
-  top: 0;
+  top: var(--tnzi-overlay-inset-top, 0px);
+  bottom: 0;
   left: 0;
-  height: 100vh;
   width: 280px !important;
   z-index: 50;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
@@ -237,6 +247,7 @@ useBodyScrollLock(isDrawer)
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  position: relative;
   /* Scrolls, but without a visible bar. The sidebar is a short, familiar list
      the user scrolls by wheel or trackpad; a permanent bar there costs real
      layout (the package's 8px scrollbar takes a 10px gutter out of a 300px

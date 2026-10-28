@@ -110,3 +110,4 @@ global using Tnzi.EventBus;
 global using Tnzi.MultiTenancy;
 global using Xunit;
 global using Tnzi.AI.Mcp.Services;
+global using Tnzi.Http;

@@ -13,8 +13,11 @@ public class DockerSandboxProvider : ISandboxProvider
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DockerSandboxProvider> _logger;
     private readonly IShellCommandAnalyzer? _commandAnalyzer;
+    // 本进程里每个线程正在用的沙箱（sandboxId → 容器 id，创建完成前为空串）。创建前先占位：
+    // 同一线程同时只能有一个沙箱（容器名按线程派生），名字被占时据此区分「本进程在用」与「上次没收尾」。
     private readonly ConcurrentDictionary<string, string> _activeContainers = new();
     private readonly SemaphoreSlim _containerSemaphore;
+    private int _notWritableWarned;
 
     public const string HttpClientName = "DockerEngine";
 
@@ -44,13 +47,34 @@ public class DockerSandboxProvider : ISandboxProvider
 
         var sandboxId = $"docker-{options.ThreadId:N}";
         var containerName = $"tnzi-sandbox-{options.ThreadId:N}";
+
+        // 先占住这个线程：容器名按线程派生，同一进程里同一线程同时只能有一个沙箱。占位也是孤儿判定的依据 ——
+        // 名字被占而本进程没有占位时，那个容器不属于本进程里任何一次在跑的运行（见 RemoveOrphanAsync）。
+        if (!_activeContainers.TryAdd(sandboxId, string.Empty))
+        {
+            _containerSemaphore.Release();
+            throw new InvalidOperationException(
+                $"A sandbox container for thread {options.ThreadId:N} is already in use by another run in this process. " +
+                "Runs of one thread share a Docker sandbox one at a time.");
+        }
+
         var httpClient = _httpClientFactory.CreateClient(HttpClientName);
 
         string? createdContainerId = null;
         try
         {
-            // 创建容器
+            PrepareBindSources(options.WorkspacePath, dockerOpts);
+
+            // 创建容器；名字被上次没收尾的容器占着时（进程崩溃、删除失败）清掉它再建一次
             var containerId = await CreateContainerAsync(httpClient, containerName, options, dockerOpts, ct);
+            if (containerId is null)
+            {
+                await RemoveOrphanAsync(httpClient, containerName, options.ThreadId, ct);
+                containerId = await CreateContainerAsync(httpClient, containerName, options, dockerOpts, ct)
+                    ?? throw new InvalidOperationException(
+                        $"Failed to create Docker container: the name {containerName} is still in use after its previous container was removed.");
+            }
+
             createdContainerId = containerId;
 
             // 启动容器
@@ -65,7 +89,7 @@ public class DockerSandboxProvider : ISandboxProvider
                 id: sandboxId,
                 httpClient: httpClient,
                 containerId: containerId,
-                workspacePath: "/workspace",
+                workspacePath: DockerBindSources.ThreadMountPoint,
                 commandTimeout: options.CommandTimeout,
                 maxOutputSize: options.MaxOutputSizeBytes,
                 logger: _logger,
@@ -82,7 +106,7 @@ public class DockerSandboxProvider : ISandboxProvider
                 commandAnalyzer: _commandAnalyzer,
                 deniedPatterns: dockerOpts.DeniedPatterns,
                 maxFileSize: options.MaxFileSizeBytes,
-                // 容器侧路径视图的换根依据：Binds 把这个目录挂在 /workspace。
+                // 容器侧路径视图的换根依据：Binds 把这个目录挂在 /workspace、子目录挂在 /mnt/*（DockerBindSources）。
                 hostWorkspacePath: options.WorkspacePath);
         }
         catch
@@ -96,8 +120,129 @@ public class DockerSandboxProvider : ISandboxProvider
                 await TryRemoveContainerAsync(httpClient, createdContainerId, sandboxId);
             }
 
+            _activeContainers.TryRemove(sandboxId, out _);
             _containerSemaphore.Release();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 建出挂载源，并在原生 Linux 上让容器用户能写进去（见 <see cref="DockerBindSources"/>）。
+    /// </summary>
+    private void PrepareBindSources(string threadDirectory, DockerSandboxOptions dockerOpts)
+    {
+        DockerBindSources.EnsureExist(threadDirectory);
+
+        var container = DockerBindSources.ParseNumericIdentity(dockerOpts.RunAsUser);
+        switch (DockerBindSources.DecideOwnership(OperatingSystem.IsLinux(), DockerBindSources.CurrentProcessUid, container))
+        {
+            case BindOwnershipAction.HandOverToContainerUser:
+                foreach (var source in DockerBindSources.WritableSources(threadDirectory))
+                {
+                    try
+                    {
+                        DockerBindSources.HandOver(source, container!.Value);
+                    }
+                    catch (IOException ex)
+                    {
+                        // 例如 root_squash 的 NFS：改不了属主不挡沙箱（读与 /tmp 照常可用），但要说出来写不进去的原因。
+                        _logger.LogWarning(ex,
+                            "Docker sandbox: could not hand {Path} to the container user {RunAsUser}; sandboxed commands may not be able to write there",
+                            source, dockerOpts.RunAsUser);
+                    }
+                }
+
+                break;
+
+            case BindOwnershipAction.WarnNotWritable:
+                if (Interlocked.Exchange(ref _notWritableWarned, 1) == 0)
+                {
+                    _logger.LogWarning(
+                        "Docker sandbox containers run as {RunAsUser}, but this process runs as uid {ProcessUid} and owns the thread " +
+                        "directories it mounts into them, so sandboxed commands cannot write to /mnt/workspace, /mnt/uploads or " +
+                        "/mnt/outputs. Set AI:Sandbox:Docker:RunAsUser to this process's non-root uid:gid, or run the application as {RunAsUser}.",
+                        dockerOpts.RunAsUser, DockerBindSources.CurrentProcessUid, dockerOpts.RunAsUser);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 容器名被占时，确认占着它的是本线程上次没收尾的沙箱容器，然后删掉它。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 容器名按线程派生，进程在运行持有容器时被杀掉（OOM、kill -9、驱逐、重启部署）后，那个容器以
+    /// <c>tail -f /dev/null</c> 一直跑下去（<c>AutoRemove</c> 只在容器退出时触发），这个线程之后每一次要沙箱都撞
+    /// 409，永久不可用，直到有人手工 <c>docker rm</c>。
+    /// </para>
+    /// <para>
+    /// 只删带着本线程沙箱标签的容器；调用前本进程已为这个线程占位，所以它不是本进程里任何一次在跑的运行。
+    /// 多个应用进程共用一个 Docker 守护进程、又在同一时刻跑同一个线程时，后到的一方会接管这个名字 ——
+    /// 跨进程没有可以查证的活性记录，这一点写在文档的已知问题里。名字被别的什么容器占着时不动它，报错点名。
+    /// </para>
+    /// </remarks>
+    private async Task RemoveOrphanAsync(HttpClient httpClient, string containerName, Guid threadId, CancellationToken ct)
+    {
+        using var inspect = await httpClient.GetAsync($"/containers/{containerName}/json", ct);
+        if (inspect.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return; // 已经不在了（刚被删掉），直接重建
+
+        if (!inspect.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create Docker container: the name {containerName} is in use and its container could not be inspected (HTTP {(int)inspect.StatusCode}).");
+        }
+
+        var (existingId, labels) = await ReadIdAndLabelsAsync(inspect, ct);
+        var isThisThreadsSandbox = labels.TryGetValue("tnzi.sandbox", out var marker) && marker == "true"
+            && labels.TryGetValue("tnzi.sandbox.thread", out var thread) && thread == threadId.ToString("N");
+        if (!isThisThreadsSandbox || string.IsNullOrEmpty(existingId))
+        {
+            throw new InvalidOperationException(
+                $"Failed to create Docker container: the name {containerName} is in use by a container that is not this thread's sandbox. Remove or rename it.");
+        }
+
+        _logger.LogWarning(
+            "Docker sandbox for thread {ThreadId}: removing container {ContainerId} left running under {ContainerName} by a run that never released it",
+            threadId, existingId, containerName);
+
+        using var remove = await httpClient.DeleteAsync($"/containers/{existingId}?force=true", ct);
+        if (!remove.IsSuccessStatusCode && remove.StatusCode != System.Net.HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException(
+                $"Failed to create Docker container: the name {containerName} is held by a leftover sandbox container that could not be removed (HTTP {(int)remove.StatusCode}).");
+        }
+    }
+
+    private static async Task<(string? Id, IReadOnlyDictionary<string, string> Labels)> ReadIdAndLabelsAsync(
+        HttpResponseMessage response, CancellationToken ct)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var root = document.RootElement;
+            var id = root.TryGetProperty("Id", out var idElement) ? idElement.GetString() : null;
+
+            if (root.TryGetProperty("Config", out var config)
+                && config.ValueKind == JsonValueKind.Object
+                && config.TryGetProperty("Labels", out var labelsElement)
+                && labelsElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var label in labelsElement.EnumerateObject())
+                {
+                    if (label.Value.ValueKind == JsonValueKind.String)
+                        labels[label.Name] = label.Value.GetString()!;
+                }
+            }
+
+            return (id, labels);
+        }
+        catch (JsonException)
+        {
+            return (null, labels);
         }
     }
 
@@ -118,7 +263,7 @@ public class DockerSandboxProvider : ISandboxProvider
             {
                 _logger.LogWarning(
                     "Docker sandbox {SandboxId}: failed to remove container {ContainerId} after a failed start: HTTP {StatusCode}. " +
-                    "The name is derived from the thread id, so this thread will hit 409 Conflict until the container is removed.",
+                    "The name is derived from the thread id; the next sandbox of this thread removes it before creating its own.",
                     sandboxId, containerId, (int)response.StatusCode);
             }
         }
@@ -143,7 +288,10 @@ public class DockerSandboxProvider : ISandboxProvider
         _logger.LogInformation("Docker sandbox {SandboxId} disposed", sandbox.Id);
     }
 
-    private async Task<string> CreateContainerAsync(HttpClient httpClient, string containerName,
+    /// <summary>
+    /// 创建容器并返回其 id；名字已被占用（HTTP 409）时返回 null，由调用方决定怎么处理。
+    /// </summary>
+    private async Task<string?> CreateContainerAsync(HttpClient httpClient, string containerName,
         SandboxCreateOptions options, DockerSandboxOptions dockerOpts, CancellationToken ct)
     {
         // CPU 限制: Docker 使用 NanoCPUs (1e9 = 1 CPU)
@@ -170,7 +318,7 @@ public class DockerSandboxProvider : ISandboxProvider
         {
             Image = dockerOpts.Image,
             Cmd = new[] { "tail", "-f", "/dev/null" }, // 保持容器运行
-            WorkingDir = "/workspace",
+            WorkingDir = DockerBindSources.ThreadMountPoint,
             // Override the image's USER directive explicitly - defends against
             // accidentally pulling a tampered image with USER root.
             User = dockerOpts.RunAsUser,
@@ -179,7 +327,8 @@ public class DockerSandboxProvider : ISandboxProvider
             {
                 // 挂载源必须是绝对路径（相对路径会被 Engine 当成卷名或直接拒绝）：
                 // VirtualPathTranslator 在构造时就把 DataRoot 归一化成了绝对路径，线程目录随之绝对。
-                Binds = new[] { $"{options.WorkspacePath}:/workspace" },
+                // 线程目录挂在 /workspace，四个子目录另挂在 /mnt/*，与 agent 看到的虚拟路径一致。
+                Binds = DockerBindSources.BuildBinds(options.WorkspacePath),
                 NanoCPUs = nanoCpus,
                 Memory = memoryBytes,
                 AutoRemove = dockerOpts.AutoRemove,
@@ -199,6 +348,11 @@ public class DockerSandboxProvider : ISandboxProvider
 
         var response = await httpClient.PostAsJsonAsync(
             $"/containers/create?name={containerName}", createBody, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            return null;
+        }
 
         if (!response.IsSuccessStatusCode)
         {

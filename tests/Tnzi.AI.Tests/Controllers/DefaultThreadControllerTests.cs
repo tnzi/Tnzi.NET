@@ -167,6 +167,39 @@ public class DefaultThreadControllerTests
     }
 
     // -------------------------------------------------------------------------
+    // Archive / Unarchive
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ArchiveAndUnarchive_OwnershipValid_SetTheArchivedState(bool archive)
+    {
+        var threadId = Guid.NewGuid();
+        _threadService.Setup(s => s.IsOwnerAsync(threadId, _userId)).ReturnsAsync(true);
+        _threadService.Setup(s => s.SetArchivedAsync(threadId, archive))
+            .ReturnsAsync(Result<AgentThreadDto>.Success(new AgentThreadDto { Id = threadId }));
+
+        var result = archive ? await _controller.Archive(threadId) : await _controller.Unarchive(threadId);
+
+        result.Succeeded.ShouldBeTrue();
+        _threadService.Verify(s => s.SetArchivedAsync(threadId, archive), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ArchiveAndUnarchive_NotOwner_ThrowsBusinessException(bool archive)
+    {
+        var threadId = Guid.NewGuid();
+        _threadService.Setup(s => s.IsOwnerAsync(threadId, _userId)).ReturnsAsync(false);
+
+        await Should.ThrowAsync<BusinessException>(
+            () => archive ? _controller.Archive(threadId) : _controller.Unarchive(threadId));
+        _threadService.Verify(s => s.SetArchivedAsync(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    // -------------------------------------------------------------------------
     // ExportAsJson
     // -------------------------------------------------------------------------
 

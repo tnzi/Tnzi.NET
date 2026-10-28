@@ -9,10 +9,10 @@ public class DualControlRequestConfiguration : EntityTypeConfigurationBase<DualC
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.Operation).IsRequired().HasMaxLength(128);
-        builder.Property(e => e.TargetId).HasMaxLength(128);
-        builder.Property(e => e.Description).HasMaxLength(512);
-        builder.Property(e => e.DecisionComment).HasMaxLength(512);
+        builder.Property(e => e.Operation).IsRequired().HasMaxLength(DualControlRequest.OperationMaxLength);
+        builder.Property(e => e.TargetId).HasMaxLength(DualControlRequest.TargetIdMaxLength);
+        builder.Property(e => e.Description).HasMaxLength(DualControlRequest.DescriptionMaxLength);
+        builder.Property(e => e.DecisionComment).HasMaxLength(DualControlRequest.DecisionCommentMaxLength);
 
         // 待办列表按状态取，是这张表最热的查询。
         if (multiTenancyEnabled)

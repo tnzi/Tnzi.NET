@@ -287,4 +287,84 @@ public class SubscriptionStatisticsContributorTests
         result.Succeeded.ShouldBeTrue();
         result.Code.ShouldNotBe(501);
     }
+
+    /// <summary>
+    /// ★ 默认的「到期取消」也是取消。此前分子只数 <c>Status == Cancelled</c>，而到期取消把订阅置为
+    /// <c>PendingRenewal</c>、到点再变 <c>Expired</c>，永远进不了流失率；分母也漏掉了等续费 / 欠费 / 暂停的在册订阅。
+    /// </summary>
+    [Fact]
+    public async Task ChurnRate_CountsPeriodEndCancellations_AgainstEverySubscriptionLiveAtMonthStart()
+    {
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        Subscription Make(SubscriptionStatus status, int createdMonthsAgo, DateTime? cancelTime = null, DateTime? endTime = null) => new()
+        {
+            Id = Guid.NewGuid(), Status = status, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe",
+            CreationTime = monthStart.AddMonths(-createdMonthsAgo), CancelTime = cancelTime, EndTime = endTime,
+            // 付过首期：真正开始过的订阅
+            LastBillingTradeNo = "PAY-" + Guid.NewGuid().ToString("N"), PaidAmount = 10m
+        };
+
+        SetupSubscriptionQueryable(
+        [
+            Make(SubscriptionStatus.Active, 3),
+            Make(SubscriptionStatus.Active, 5),
+            Make(SubscriptionStatus.PastDue, 2),
+            // 本月提出「到期取消」，还在本期里
+            Make(SubscriptionStatus.PendingRenewal, 2, cancelTime: monthStart.AddMinutes(1)),
+            // 本月提出「到期取消」，本月已到期
+            Make(SubscriptionStatus.Expired, 2, cancelTime: monthStart.AddMinutes(2), endTime: monthStart.AddMinutes(3)),
+            // 本月立即取消
+            Make(SubscriptionStatus.Cancelled, 1, cancelTime: monthStart.AddMinutes(4), endTime: monthStart.AddMinutes(4)),
+            // 上月就提出了到期取消：月初仍在册，但这一次取消算在上个月
+            Make(SubscriptionStatus.PendingRenewal, 4, cancelTime: monthStart.AddDays(-3)),
+        ]);
+
+        var metrics = await _contributor.GetSubscriptionMetricsAsync();
+
+        metrics!.CancelledThisMonth.ShouldBe(3);
+        metrics.ChurnRate.ShouldBe(Math.Round(3m / 7 * 100, 2));
+    }
+
+    /// <summary>
+    /// ★ 从没开始过的订阅不是订户，它的结束不是流失。首期单没付成的 Pending 会被系统收口为 <c>Cancelled</c>
+    /// （首期单失败 / 过期 / 关单，或付款人在付首期之前自己取消），带着 <c>CancelTime</c>。
+    /// 按 <c>CancelTime</c> 数取消时把它们一并算进去，每一次在收银台放弃都成了一次流失，
+    /// 结账放弃率直接抬高流失率与「本月取消」。判据与「是否订阅过」的探针、恢复守卫同一个：开过试用、付过订阅款。
+    /// </summary>
+    [Fact]
+    public async Task ChurnRate_IgnoresSubscriptionsThatNeverStarted()
+    {
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        Subscription Make(SubscriptionStatus status, int createdMonthsAgo, bool started, DateTime? cancelTime = null, bool trial = false) => new()
+        {
+            Id = Guid.NewGuid(), Status = status, UserId = Guid.NewGuid(), Currency = "USD", ChannelCode = "Stripe",
+            CreationTime = createdMonthsAgo == 0 ? now : monthStart.AddMonths(-createdMonthsAgo), CancelTime = cancelTime,
+            EndTime = cancelTime,
+            LastBillingTradeNo = started && !trial ? "PAY-" + Guid.NewGuid().ToString("N") : null,
+            PaidAmount = started && !trial ? 10m : 0m,
+            TrialStartTime = trial ? monthStart.AddMonths(-createdMonthsAgo) : null
+        };
+
+        SetupSubscriptionQueryable(
+        [
+            Make(SubscriptionStatus.Active, 2, started: true),
+            Make(SubscriptionStatus.Active, 3, started: true),
+            // 本月立即取消的真订户：一次流失
+            Make(SubscriptionStatus.Cancelled, 2, started: true, cancelTime: monthStart.AddMinutes(5)),
+            // 试用期内退出：同样是一次流失（试用开始过）
+            Make(SubscriptionStatus.Cancelled, 1, started: false, cancelTime: monthStart.AddMinutes(6), trial: true),
+            // 上月建单、首期单本月才过期（线下渠道按天）：系统收口的 Pending，不是订户
+            Make(SubscriptionStatus.Cancelled, 1, started: false, cancelTime: monthStart.AddMinutes(7)),
+            // 本月在收银台放弃的两次开通
+            Make(SubscriptionStatus.Cancelled, 0, started: false, cancelTime: now),
+            Make(SubscriptionStatus.Cancelled, 0, started: false, cancelTime: now),
+        ]);
+
+        var metrics = await _contributor.GetSubscriptionMetricsAsync();
+
+        metrics!.CancelledThisMonth.ShouldBe(2);
+        metrics.ChurnRate.ShouldBe(Math.Round(2m / 4 * 100, 2));
+    }
 }

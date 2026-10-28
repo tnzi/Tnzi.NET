@@ -33,8 +33,3 @@ export function getHealthStatusLabel(status: HealthStatus): string {
  * Menu badge type
  */
 export type MenuBadgeType = 'primary' | 'success' | 'warning' | 'danger' | 'info';
-
-/**
- * Feature requirement type
- */
-export type FeatureRequirementType = 'user' | 'role' | 'organization' | 'percentage' | 'time';

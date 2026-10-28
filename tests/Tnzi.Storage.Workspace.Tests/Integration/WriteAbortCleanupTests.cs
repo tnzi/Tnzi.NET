@@ -18,7 +18,8 @@ public class WriteAbortCleanupTests : WorkspaceIntegrationTestBase
             recorder,
             TestFileAccessAuthorizer.AllowAll(),
             ServiceProvider,
-            Guard(StorageOptions));
+            Guard(StorageOptions),
+            UnlimitedStorageQuota.Instance);
 
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => service.CreateVersionAsync(file.Id, new MemoryStream("v2"u8.ToArray())));
@@ -47,7 +48,9 @@ public class WriteAbortCleanupTests : WorkspaceIntegrationTestBase
             recorder,
             new StaticOptionsMonitor<StorageOptions>(StorageOptions),
             ServiceProvider,
-            Guard(StorageOptions));
+            Guard(StorageOptions),
+            UnlimitedStorageQuota.Instance,
+            Repo<FileFolder>());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => failing.CompleteChunkedUploadAsync(session.Id));
 

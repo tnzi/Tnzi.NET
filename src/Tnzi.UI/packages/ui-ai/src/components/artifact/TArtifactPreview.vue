@@ -90,7 +90,7 @@ const logLevelClass: Record<string, string> = {
         <span class="ml-auto tabular-nums">{{ logs.length }}</span>
         <Icon icon="lucide:chevron-down" class="size-3 transition-transform" :class="{ 'rotate-180': consoleOpen }" />
       </button>
-      <div v-show="consoleOpen" class="max-h-[120px] overflow-auto border-t bg-tnzi-layout/30 p-2 font-mono text-[11px]">
+      <div v-show="consoleOpen" class="t-ai-scroll relative max-h-[120px] overflow-auto border-t bg-tnzi-layout/30 p-2 font-mono text-[11px] leading-[var(--tnzi-ai-code-line-height,1.5)]">
         <div v-for="(log, i) in logs" :key="i" class="py-0.5" :class="logLevelClass[log.level]">{{ log.message }}</div>
       </div>
     </div>

@@ -10,16 +10,25 @@ public partial class SkillCategoryService : ApplicationService, ISkillCategorySe
 
     private readonly IRepository<SkillCategory, Guid> _repository;
     private readonly IRepository<SkillEntity, Guid> _skillRepository;
+    private readonly ICurrentTenant? _currentTenant;
 
     public SkillCategoryService(
         IServiceProvider serviceProvider,
         IRepository<SkillCategory, Guid> repository,
-        IRepository<SkillEntity, Guid> skillRepository)
+        IRepository<SkillEntity, Guid> skillRepository,
+        ICurrentTenant? currentTenant = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _skillRepository = Check.NotNull(skillRepository);
+        _currentTenant = currentTenant;
     }
+
+    /// <summary>
+    /// 本租户看得见的技能行（与技能管理列表同一层可见性，见 <see cref="SkillVisibility"/>）。分类本身是多租户实体，
+    /// 仓储已按租户过滤；技能行没有全局过滤器，按分类列技能与统计数量时要自己套。
+    /// </summary>
+    private IQueryable<SkillEntity> VisibleSkills() => SkillVisibility.ForTenant(_skillRepository.AsQueryable(), _currentTenant?.Id);
 
     public async Task<Result<SkillCategoryDto>> CreateAsync(CreateSkillCategoryDto input)
     {
@@ -109,7 +118,7 @@ public partial class SkillCategoryService : ApplicationService, ISkillCategorySe
 
         // 统计每个分类下的技能数量
         var categoryIds = allCategories.Select(c => c.Id).ToList();
-        var skillCounts = await _skillRepository.AsQueryable()
+        var skillCounts = await VisibleSkills()
             .Where(s => s.CategoryId != null && categoryIds.Contains(s.CategoryId.Value))
             .GroupBy(s => s.CategoryId!.Value)
             .Select(g => new { CategoryId = g.Key, Count = g.Count() })
@@ -149,12 +158,37 @@ public partial class SkillCategoryService : ApplicationService, ISkillCategorySe
         if (!categoryExists)
             return Fail<List<SkillSummaryDto>>("Skill category not found.", 404, ErrorCodes.SkillCategoryNotFound);
 
-        var skills = await _skillRepository.AsQueryable()
+        // ★ 此前不套可见性、按约定映射整个实体：别的租户挂到本分类下的行照样列出来；每一行都报成 FileSystem 来源
+        // （SkillSummaryDto.Source 的默认值）、没有标签（TagsJson 不会自动映射成 Tags）。投影与管理列表的数据库行一致。
+        var rows = await VisibleSkills()
             .Where(e => e.CategoryId == categoryId)
             .OrderByDescending(e => e.Priority).ThenBy(e => e.Name)
+            .Select(e => new
+            {
+                e.Id, e.Slug, e.Scope, e.Name, e.Description, e.WhenToUse, e.Priority, e.Version, e.Author,
+                e.Enabled, e.CategoryId, e.CreationTime, e.LastModificationTime, e.TagsJson
+            })
             .ToListAsync();
 
-        return Ok(skills.MapToList<SkillSummaryDto>());
+        return Ok(rows.Select(e => new SkillSummaryDto
+        {
+            Id = e.Id,
+            Slug = e.Slug,
+            Scope = e.Scope,
+            Name = e.Name,
+            Description = e.Description,
+            WhenToUse = e.WhenToUse,
+            Priority = e.Priority,
+            Version = e.Version,
+            Author = e.Author,
+            Enabled = e.Enabled,
+            Source = SkillSource.Database,
+            IsReadOnly = false,
+            Tags = SkillJsonHelper.DeserializeOrDefault<List<string>>(e.TagsJson) ?? [],
+            CategoryId = e.CategoryId,
+            CreationTime = e.CreationTime,
+            LastModificationTime = e.LastModificationTime
+        }).ToList());
     }
 
     /// <summary>

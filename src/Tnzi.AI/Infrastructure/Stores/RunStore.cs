@@ -45,6 +45,16 @@ public class RunStore : IRunStore
             .FirstOrDefaultAsync(r => r.Id == runId, cancellationToken);
     }
 
+    /// <inheritdoc />
+    /// <remarks>标量投影不经过变更跟踪器的身份解析，读到的是库里的值，而不是本作用域里那份已跟踪实体的内存值。</remarks>
+    public async Task<AgentRunStatus?> GetStatusAsync(Guid runId, CancellationToken cancellationToken = default)
+    {
+        return await _runRepository.AsQueryable()
+            .Where(r => r.Id == runId)
+            .Select(r => (AgentRunStatus?)r.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     /// <summary>添加节点记录</summary>
     public async Task<AgentRunNode> AddNodeAsync(AgentRunNode node, CancellationToken cancellationToken = default)
     {
@@ -115,6 +125,22 @@ public class RunStore : IRunStore
             .CountAsync(r => r.CreatorId == ownerUserId && r.ParentRunId == null
                              && (r.Status == AgentRunStatus.Pending || r.Status == AgentRunStatus.Running),
                 cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>一条条件更新：与运行自己的收尾、孤儿回收赛跑时，谁先写下终态以谁为准。</remarks>
+    public async Task<bool> CloseIfStillActiveAsync(Guid runId, AgentRunStatus status, string error, CancellationToken cancellationToken = default)
+    {
+        var now = DateTime.UtcNow;
+        var truncated = StringTruncator.Truncate(error, 1000);
+        var updated = await _runRepository.AsQueryable()
+            .Where(r => r.Id == runId && (r.Status == AgentRunStatus.Pending || r.Status == AgentRunStatus.Running))
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(r => r.Status, status)
+                .SetProperty(r => r.Error, truncated)
+                .SetProperty(r => r.LastHeartbeatAt, now)
+                .SetProperty(r => r.LastModificationTime, now), cancellationToken);
+        return updated > 0;
     }
 
     /// <summary>获取指定 Run 的父 Run ID（仅 Id + ParentRunId 字段）</summary>

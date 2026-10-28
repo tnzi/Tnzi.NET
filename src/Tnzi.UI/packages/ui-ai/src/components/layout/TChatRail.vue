@@ -125,11 +125,11 @@ const emit = defineEmits<{
   border-radius: 10px;
   background: var(--tnzi-ai-brand-mark-bg);
   color: var(--tnzi-ai-brand-mark-fg);
-  font-size: 18px;
+  font-size: var(--tnzi-ai-brand-mark-glyph-size, 18px);
 }
 .t-chat-rail__brand-logo svg {
-  width: 18px;
-  height: 18px;
+  width: var(--tnzi-ai-brand-mark-glyph-size, 18px);
+  height: var(--tnzi-ai-brand-mark-glyph-size, 18px);
 }
 /* The expand chevron replaces the mark on hover: at 40px there is no room to
    show both, and the mark is the more useful resting state. */
@@ -181,7 +181,7 @@ const emit = defineEmits<{
 }
 .t-chat-rail__btn.is-active {
   background: var(--tnzi-ai-accent-soft);
-  color: var(--tnzi-ai-accent);
+  color: var(--tnzi-ai-accent-text);
 }
 /* Stands in for the group headings that cannot fit at 56px. */
 .t-chat-rail__sep {

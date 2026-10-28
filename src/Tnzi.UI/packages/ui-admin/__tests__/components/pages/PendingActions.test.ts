@@ -142,4 +142,52 @@ describe('PendingActions', () => {
 
     expect(wrapper.findAll('input').length).toBe(0)
   })
+
+  /**
+   * ★★ 无事可办时同样要给出路，而不是一句兜底文案、没有表单、没有「返回」。
+   *
+   * 挑战只活在登录页的内存里，而 `/login/pending-actions` 这条路由刷新后还在：
+   * 刷新一次，令牌没了，旧实现停在「你必须先确认邮箱」上，唯一的出路是手改地址栏。
+   */
+  it.each([
+    ['the challenge is gone (page refreshed)', { pendingAction: null }],
+    ['the server reports nothing owed', { describe: vi.fn(async () => ({ requiredActions: [], userName: 'owing' })) }],
+    ['the host wired no describe callback', { describe: undefined }],
+  ] as const)('★ offers sign-in-again and Back when %s', async (_case, overrides) => {
+    const { ctx } = makeContext(overrides as Parameters<typeof makeContext>[0])
+
+    const wrapper = mountPanel(ctx)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('sign in again')
+    expect(wrapper.text()).not.toContain('confirm your email')
+    expect(wrapper.findAll('input').length).toBe(0)
+
+    const back = wrapper.findAll('button').find((b) => b.text().includes('Back'))
+    expect(back).toBeTruthy()
+    await back!.trigger('click')
+    expect(ctx.toggleLoginModule).toHaveBeenCalledWith('pwd-login')
+  })
+
+  // An invalid submit is answered by the inline field errors; it must not also
+  // escape as an unhandled promise rejection carrying the validation errors.
+  it('★ an invalid submit resolves quietly with the field errors on screen', async () => {
+    const { ctx } = makeContext({
+      describe: vi.fn(async () => ({ requiredActions: ['ChangePassword'], userName: 'owing' })),
+    })
+    const completePasswordChange = vi.fn()
+    ctx.callbacks!.completePasswordChange = completePasswordChange
+    const wrapper = mountPanel(ctx)
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      model: { password: string; confirmPassword: string }
+      handleSubmit: () => Promise<void>
+    }
+    vm.model.password = 'Str0ng!Pass#2026'
+    vm.model.confirmPassword = 'something else'
+
+    await expect(vm.handleSubmit()).resolves.toBeUndefined()
+    expect(completePasswordChange).not.toHaveBeenCalled()
+  })
 })

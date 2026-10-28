@@ -22,57 +22,60 @@ public class FunctionAuthCacheTests
         _cache.ShouldNotBeNull();
     }
 
+    /// <summary>经 JSON 往返的真实缓存（模拟分布式缓存）：值按分区存取。</summary>
+    private static FunctionAuthCache RoundTripCache()
+        => new(new Integration.JsonRoundTripCache(new MemoryCacheService(
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<MemoryCacheService>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new CachingOptions()))));
+
     [Fact]
-    public async Task GetUserPermissionNamesAsync_WithCachedValue_ReturnsFromCache()
+    public async Task GetUserPermissionNamesAsync_ReturnsTheSetStoredForTheSamePartition()
     {
-        // Arrange
+        var cache = RoundTripCache();
         var userId = Guid.NewGuid();
-        var permissions = new List<string> { "read", "write" };
 
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(permissions);
+        await cache.SetUserPermissionNamesAsync(userId, "t:a", new List<string> { "read", "write" });
 
-        // Act
-        var result = await _cache.GetUserPermissionNamesAsync(userId);
-
-        // Assert
+        var result = await cache.GetUserPermissionNamesAsync(userId, "t:a");
         result.ShouldNotBeNull();
-        result.Count().ShouldBe(2);
+        result.ShouldBe(new[] { "read", "write" });
+    }
+
+    /// <summary>
+    /// 另一个租户视角下算出的集合不能读给这个分区：按未命中处理，由调用方按当前分区重算。
+    /// </summary>
+    [Fact]
+    public async Task GetUserPermissionNamesAsync_TreatsAnotherPartitionAsAMiss()
+    {
+        var cache = RoundTripCache();
+        var userId = Guid.NewGuid();
+
+        await cache.SetUserPermissionNamesAsync(userId, "t:a", new List<string> { "report.export" });
+
+        (await cache.GetUserPermissionNamesAsync(userId, "t:b")).ShouldBeNull();
+        (await cache.GetUserPermissionNamesAsync(userId, "host")).ShouldBeNull();
     }
 
     [Fact]
     public async Task GetUserPermissionNamesAsync_WithNoCachedValue_ReturnsNull()
     {
-        // Arrange
-        var userId = Guid.NewGuid();
-
-        _cacheMock.Setup(x => x.GetAsync<IEnumerable<string>>(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IEnumerable<string>?)null);
-
-        // Act
-        var result = await _cache.GetUserPermissionNamesAsync(userId);
-
-        // Assert
-        result.ShouldBeNull();
+        (await RoundTripCache().GetUserPermissionNamesAsync(Guid.NewGuid(), "*")).ShouldBeNull();
     }
 
+    /// <summary>
+    /// 一个用户只有一个键：任何分区的写入都落在按用户删的那个键上，失效路径不必知道这个人在哪些分区里留过缓存。
+    /// </summary>
     [Fact]
-    public async Task SetUserPermissionNamesAsync_CallsCache()
+    public async Task RemoveUserPermissionNamesAsync_DropsWhicheverPartitionWasStored()
     {
-        // Arrange
+        var cache = RoundTripCache();
         var userId = Guid.NewGuid();
-        var permissions = new List<string> { "read", "write" };
+        await cache.SetUserPermissionNamesAsync(userId, "t:a", new List<string> { "read" });
 
-        // Act
-        await _cache.SetUserPermissionNamesAsync(userId, permissions);
+        await cache.RemoveUserPermissionNamesAsync(userId);
 
-        // Assert - 验证 SetAsync 被调用
-        _cacheMock.Verify(x => x.SetAsync(
-            It.IsAny<string>(), 
-            It.IsAny<object>(), 
-            It.IsAny<TimeSpan>(), 
-            It.IsAny<CancellationToken>()), 
-            Times.Once);
+        (await cache.GetUserPermissionNamesAsync(userId, "t:a")).ShouldBeNull();
     }
 
     [Fact]

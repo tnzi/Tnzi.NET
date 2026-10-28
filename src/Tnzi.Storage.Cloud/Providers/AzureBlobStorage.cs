@@ -196,8 +196,10 @@ public class AzureBlobStorage : IFileStorage
         }
         catch (RequestFailedException ex)
         {
+            // BlobClient.ExistsAsync 对 404 本身就答 false；走到这里的是权限、网络等故障。
+            // 不知道在不在时交给调用方判断：答「不在」会让删除路径以为对象已经没了，删掉指向它的最后一条记录。
             _logger?.LogError(ex, "Failed to check existence of file '{FilePath}' in Azure Blob Storage", filePath);
-            return false;
+            throw;
         }
     }
 
@@ -294,6 +296,15 @@ public class AzureBlobStorage : IFileStorage
             ExpiresOn = DateTimeOffset.UtcNow.AddSeconds(expiresInSeconds)
         };
         sasBuilder.SetPermissions(permissions);
+
+        // 只读 URL 由存储账户直接服务，Content-Type 是上传时按上传者给的文件名定下的（.html → text/html）：
+        // 内联白名单之外的类型要求按附件处置，浏览器打开链接时不会在存储账户的源上渲染、执行其中的脚本。
+        // 与 files/{id}/preview 同一条判据；<img> / <video> 里的子资源加载不受影响。
+        if (permissions == BlobSasPermissions.Read
+            && !FileTypeHelper.IsInlineRenderable(FileTypeHelper.GetContentType(Path.GetExtension(filePath))))
+        {
+            sasBuilder.ContentDisposition = "attachment";
+        }
 
         return blobClient.GenerateSasUri(sasBuilder).ToString();
     }

@@ -50,11 +50,54 @@ public interface IFinancialReportService
             : Task.FromResult(Result<GeneralLedgerReportDto>.Failure(
                 "This IFinancialReportService implementation does not support general ledger filtering.", 501));
 
-    /// <summary>应收账龄（按客户分组，本位币估算口径 = 未清交易币 × 捕获汇率；未清额取当前核销状态而非 asOf 时点快照，历史 asOf 为近似值）</summary>
+    /// <summary>应收账龄（按客户分组，本位币估算口径 = 未清交易币 × 捕获汇率；已核销额按 asOf 时点重建，未核销收款与贷项作负行，合计与 AR 控制科目 tie-out）</summary>
     Task<Result<AgingReportDto>> GetArAgingAsync(DateTime asOf, CancellationToken cancellationToken = default);
 
     /// <summary>应付账龄（按供应商分组）</summary>
     Task<Result<AgingReportDto>> GetApAgingAsync(DateTime asOf, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 单个往来方的账龄：<c>Rows</c> 至多一行（就是全量账龄报表里他那一行，逐字段相同），<c>Totals</c> 等于这一行。
+    /// </summary>
+    /// <remarks>
+    /// 往来方工作面与对账单只要一行，不该为它算整本账的账龄。本方法晚于接口首版加入，故为默认接口方法：
+    /// 默认实现取全量账龄再挑出这一行（结果相同、开销不变），既有实现者不重写也不会编译失败；
+    /// 框架实现把往来方谓词下推到每一条查询。
+    /// </remarks>
+    /// <param name="partyType">客户（应收）或供应商（应付）</param>
+    /// <param name="partyId">往来方 ID</param>
+    /// <param name="asOf">时点</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    async Task<Result<AgingReportDto>> GetPartyAgingAsync(
+        FinancePartyType partyType, Guid partyId, DateTime asOf, CancellationToken cancellationToken = default)
+    {
+        var full = partyType == FinancePartyType.Customer
+            ? await GetArAgingAsync(asOf, cancellationToken)
+            : await GetApAgingAsync(asOf, cancellationToken);
+        if (!full.Succeeded)
+            return full;
+
+        var report = full.Data!;
+        var row = report.Rows.FirstOrDefault(r => r.PartyId == partyId);
+        return Result<AgingReportDto>.Success(new AgingReportDto
+        {
+            AsOf = report.AsOf,
+            BaseCurrency = report.BaseCurrency,
+            Rows = row == null ? [] : [row],
+            Totals = row == null
+                ? new AgingBucketsDto { AgingBucketDays = report.Totals.AgingBucketDays }
+                : new AgingBucketsDto
+                {
+                    Current = row.Current,
+                    Days1To30 = row.Days1To30,
+                    Days31To60 = row.Days31To60,
+                    Days61To90 = row.Days61To90,
+                    Over90 = row.Over90,
+                    Total = row.Total,
+                    AgingBucketDays = row.AgingBucketDays
+                }
+        });
+    }
 
     /// <summary>
     /// 税务申报汇总（期间 × 税务机构/税率的销项税、进项税与净额；纯 GL 聚合，

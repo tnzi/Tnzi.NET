@@ -130,6 +130,22 @@ describe('TGlobalSearch', () => {
     expect(selectEvents![0][0]).toMatchObject({ path: '/payment/orders' })
   })
 
+  it('reopens with an empty box over the full list, so Enter picks what the box shows', async () => {
+    const wrapper = mount(TGlobalSearch, {
+      props: { show: true },
+      global: { stubs },
+    })
+    await wrapper.find('.n-input-stub').setValue('order')
+    expect(wrapper.findAll('.t-global-search__item')).toHaveLength(1)
+
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+
+    const input = wrapper.find('.n-input-stub').element as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(wrapper.findAll('.t-global-search__item')).toHaveLength(3)
+  })
+
   it('custom matcher prop overrides default', async () => {
     const matcher = (_q: string, item: { label: string }) => item.label.endsWith('List')
     const wrapper = mount(TGlobalSearch, {

@@ -62,6 +62,23 @@ public class TenantFeatureValueProvider : IFeatureValueProvider
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The key is a tenant id, read back as <c>ICurrentTenant.Id.ToString()</c> (lowercase, dashed),
+    /// so any GUID spelling is stored in that form and anything that is not a GUID is refused.
+    /// </remarks>
+    public bool TryNormalizeKey(string providerKey, out string normalizedKey)
+    {
+        if (Guid.TryParse(providerKey, out var tenantId))
+        {
+            normalizedKey = tenantId.ToString();
+            return true;
+        }
+
+        normalizedKey = providerKey;
+        return false;
+    }
+
+    /// <inheritdoc />
     public Task<string?> GetOrNullAsync(string featureName)
     {
         if (_currentTenant == null || !_currentTenant.IsAvailable)

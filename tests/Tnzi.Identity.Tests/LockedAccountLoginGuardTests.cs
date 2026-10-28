@@ -79,16 +79,70 @@ public class LockedAccountLoginGuardTests
         Assert.True(guard.Order < 0);
     }
 
-    private static LoginGuardContext Context(User user)
-        => new(user, LoginMethod.Passkey, "127.0.0.1", "test-agent");
+    /// <summary>
+    /// ★★ 刷新遇到的是失败计数写出来的临时锁定（剩余时长不超过失败锁定窗口）时放行：
+    /// 握着绑定会话的有效刷新令牌已经证明了身份，而把它当停用处理，等于让任何知道用户名的人输错几次密码
+    /// 就能把受害者的全部在线会话撤掉。
+    /// </summary>
+    [Fact]
+    public async Task Refresh_DuringATemporaryFailureLockout_IsAllowed()
+    {
+        var (guard, user) = CreateGuard(supportsLockout: true, isLockedOut: true, lockoutEnd: DateTimeOffset.UtcNow.AddMinutes(20));
 
-    private static (LockedAccountLoginGuard Guard, User User) CreateGuard(bool supportsLockout, bool isLockedOut)
+        var result = await guard.EvaluateAsync(Context(user, LoginMethod.RefreshToken));
+
+        Assert.True(result.Allowed);
+    }
+
+    /// <summary>对照组：同一枚临时锁定挡住每一条交互式登录，那正是锁定要挡的东西。</summary>
+    [Theory]
+    [InlineData(LoginMethod.Password)]
+    [InlineData(LoginMethod.PasswordWithRefreshToken)]
+    [InlineData(LoginMethod.Passkey)]
+    [InlineData(LoginMethod.VerificationCode)]
+    [InlineData(LoginMethod.TwoFactor)]
+    [InlineData(LoginMethod.OAuth)]
+    public async Task InteractiveSignIn_DuringATemporaryFailureLockout_IsDenied(LoginMethod method)
+    {
+        var (guard, user) = CreateGuard(supportsLockout: true, isLockedOut: true, lockoutEnd: DateTimeOffset.UtcNow.AddMinutes(20));
+
+        var result = await guard.EvaluateAsync(Context(user, method));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+    }
+
+    /// <summary>
+    /// 对照组：比失败锁定窗口长的锁定（停用 = 一百年后、管理员锁定默认一天），刷新照旧否决。
+    /// 锁定截止时间读不出来时同样否决（失败关闭）。
+    /// </summary>
+    [Theory]
+    [InlineData(36500d * 24 * 60)]
+    [InlineData(24d * 60)]
+    [InlineData(null)]
+    public async Task Refresh_DuringALongerOrUnknownLockout_IsDenied(double? minutesLeft)
+    {
+        DateTimeOffset? end = minutesLeft.HasValue ? DateTimeOffset.UtcNow.AddMinutes(minutesLeft.Value) : null;
+        var (guard, user) = CreateGuard(supportsLockout: true, isLockedOut: true, lockoutEnd: end);
+
+        var result = await guard.EvaluateAsync(Context(user, LoginMethod.RefreshToken));
+
+        Assert.False(result.Allowed);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_LOCKED, result.ErrorCode);
+    }
+
+    private static LoginGuardContext Context(User user, LoginMethod method = LoginMethod.Passkey)
+        => new(user, method, "127.0.0.1", "test-agent");
+
+    private static (LockedAccountLoginGuard Guard, User User) CreateGuard(bool supportsLockout, bool isLockedOut, DateTimeOffset? lockoutEnd = null)
     {
         var user = new User { Id = Guid.NewGuid(), UserName = "guarded" };
         var store = new Mock<IUserStore<User>>();
         var userManager = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
+        userManager.Object.Options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(30);
         userManager.Setup(x => x.SupportsUserLockout).Returns(supportsLockout);
         userManager.Setup(x => x.IsLockedOutAsync(user)).ReturnsAsync(isLockedOut);
+        userManager.Setup(x => x.GetLockoutEndDateAsync(user)).ReturnsAsync(lockoutEnd);
 
         return (new LockedAccountLoginGuard(userManager.Object), user);
     }

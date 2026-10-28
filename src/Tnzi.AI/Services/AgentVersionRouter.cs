@@ -9,6 +9,7 @@ public class AgentVersionRouter : IAgentVersionRouter
     private readonly ICurrentUser? _currentUser;
     private readonly ICurrentTenant? _currentTenant;
     private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
+    private readonly IAgentExecutionContextAccessor? _executionContextAccessor;
     private readonly ILogger<AgentVersionRouter> _logger;
 
     public AgentVersionRouter(
@@ -16,13 +17,15 @@ public class AgentVersionRouter : IAgentVersionRouter
         ILogger<AgentVersionRouter> logger,
         ICurrentUser? currentUser = null,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        IAgentExecutionContextAccessor? executionContextAccessor = null)
     {
         _versionRepository = Check.NotNull(versionRepository);
         _logger = Check.NotNull(logger);
         _currentUser = currentUser;
         _currentTenant = currentTenant;
         _multiTenancyOptions = multiTenancyOptions;
+        _executionContextAccessor = executionContextAccessor;
     }
 
     /// <summary>
@@ -53,11 +56,14 @@ public class AgentVersionRouter : IAgentVersionRouter
             return AgentVersionRouteResult.Passthrough(agent);
         }
 
-        // 流量分配维度：优先按当前用户（实现真正的用户级 A/B 分流 —— 不同用户按比例分到 A/B，
-        // 同一用户始终落同一变体）；headless（无 ICurrentUser）时退化为按 Agent 稳定分配。
+        // 流量分配维度：按运行发起人分（实现真正的用户级 A/B 分流：不同用户按比例分到 A/B，
+        // 同一用户始终落同一变体）；没有用户（IM 渠道等）时退化为按 Agent 稳定分配。
+        // 发起人取正在执行的请求的 UserId，没有请求才看环境用户，与权限检查、线程归属同源：
+        // 后台子运行在父请求结束后执行，作用域里没有环境用户；管理端代为发起时环境用户是管理员而不是归属人。
         // 使用稳定哈希（SHA256）而非 HashCode.Combine —— 后者每进程随机化哈希种子，会导致
         // 同一用户在服务重启后切换变体，破坏 A/B 实验的一致性。
-        var routingKey = _currentUser?.Id?.ToString() ?? agent.Id.ToString();
+        var routingUserId = _executionContextAccessor?.CurrentRequest?.UserId ?? _currentUser?.Id;
+        var routingKey = routingUserId?.ToString() ?? agent.Id.ToString();
         var roll = StableRoll(routingKey, agent.Id, abTestConfig.VersionA, abTestConfig.VersionB);
         var useVariantB = roll < abTestConfig.TrafficPercentB;
         var selectedVersion = useVariantB ? abTestConfig.VersionB : abTestConfig.VersionA;

@@ -119,6 +119,8 @@ const message = useSafeMessage()
 
 const crud = useCrudPage<EnvelopeTemplateListDto, string>({
   pageId: 'signing.templates',
+  // A template left alone on the switch is created active; the switch says so.
+  createDefaults: { isActive: true },
   permission: 'signing.template',
   columns: templateColumns,
   rowKey: (r) => String(r.id ?? ''),

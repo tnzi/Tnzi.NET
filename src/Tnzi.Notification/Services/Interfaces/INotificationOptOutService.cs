@@ -69,16 +69,46 @@ public interface INotificationOptOutService
     /// 为一个地址签发一键退订令牌，供放进邮件正文的退订链接。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 令牌是<b>自包含且带签名</b>的，不落库：退订链接的寿命等同于那封邮件在收件箱里的寿命
     /// （可能是几年），为此维护一张永不过期的令牌表是纯粹的负担。签名用部署自己的密钥，
     /// 所以伪造需要拿到密钥，而拿到密钥的人有比"替别人退订"更值得做的事。
+    /// </para>
+    /// <para>
+    /// ★ <b>签发时所在的租户一并签进令牌</b>：在发送那条消息的作用域里调用（派发器就是这样），
+    /// 令牌就带着那个租户。兑现令牌的请求是匿名的，邮件服务商的一键退订不带任何租户信息，
+    /// 不签进去的话退订只能落在宿主，而发送前的判定在租户作用域里看不见宿主行。
+    /// </para>
     /// </remarks>
     string CreateUnsubscribeToken(string address, NotificationType channel, string? category = null);
 
     /// <summary>
     /// 校验并解析一键退订令牌。无效返回 <c>null</c>。
     /// </summary>
+    /// <remarks>
+    /// 不带租户的旧格式令牌（地址 | 渠道 | 分类）照常成立，<see cref="UnsubscribeTokenPayload.TenantId"/> 为 <c>null</c>：
+    /// 它们还躺在收件箱里，按宿主兑现，与当初的落点一致。
+    /// </remarks>
     UnsubscribeTokenPayload? ResolveUnsubscribeToken(string token);
+
+    /// <summary>
+    /// 按令牌退订：切到令牌里签的租户（旧格式令牌为宿主）再登记，不看请求自带的租户上下文。
+    /// </summary>
+    /// <remarks>
+    /// 一键退订端点是匿名的，请求里的租户（请求头、查询串、Cookie）由调用者随意填写；
+    /// 按它落库，拿到一封信的人就能把收件人在任意租户里退订掉，而真正发信的租户照样发。
+    /// 租户只信签名。兑现令牌一律走这里，不要解析出地址再调按地址的重载。
+    /// </remarks>
+    Task<Result> OptOutAsync(
+        UnsubscribeTokenPayload payload,
+        string? source = null,
+        string? reason = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 按令牌撤销退订：与 <see cref="OptOutAsync(UnsubscribeTokenPayload, string?, string?, CancellationToken)"/> 同一个租户口径。
+    /// </summary>
+    Task<Result> OptInAsync(UnsubscribeTokenPayload payload, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 管理端分页读取退订名单。
@@ -104,7 +134,7 @@ public interface INotificationOptOutService
     /// </summary>
     /// <remarks>
     /// 按 id 而不是按 (地址, 渠道, 分类)：操作者是在列表里点的那一行，不该让他再把三元组抄一遍。
-    /// 收件人自己的撤销走 <see cref="OptInAsync"/>（持签名令牌）。
+    /// 收件人自己的撤销走 <see cref="OptInAsync(UnsubscribeTokenPayload, CancellationToken)"/>（持签名令牌）。
     /// </remarks>
     Task<Result> RemoveAsync(Guid id, CancellationToken cancellationToken = default);
 }
@@ -113,4 +143,5 @@ public interface INotificationOptOutService
 /// <param name="Address">收件地址</param>
 /// <param name="Channel">渠道</param>
 /// <param name="Category">分类；<c>null</c> = 整渠道</param>
-public sealed record UnsubscribeTokenPayload(string Address, NotificationType Channel, string? Category);
+/// <param name="TenantId">签发令牌时所在的租户；<c>null</c> = 宿主（含不带租户的旧格式令牌）</param>
+public sealed record UnsubscribeTokenPayload(string Address, NotificationType Channel, string? Category, Guid? TenantId = null);

@@ -1,3 +1,5 @@
+using Tnzi.Notification.Services.Internal;
+
 
 namespace Tnzi.Notification.Tests.Services;
 
@@ -129,5 +131,42 @@ public class ChannelQueueServiceTests
         // Assert
         // Should complete without throwing
         await Should.NotThrowAsync(async () => await startTask);
+    }
+
+    /// <summary>
+    /// ★★ A message scheduled two months out: one Task.Delay of that length throws, which used to be logged as an
+    /// error with the work item dropped (left to the dispatch recovery after its grace period). It has to keep waiting.
+    /// </summary>
+    [Fact]
+    public async Task ADelayLongerThanTheTimerCeiling_KeepsWaitingInsteadOfFailing()
+    {
+        using var cts = new CancellationTokenSource();
+        await _queueService.StartAsync(cts.Token);
+
+        await _queueService.EnqueueWithDelayAsync(
+            new NotificationWorkItem(null, (_, _) => Task.CompletedTask), TimeSpan.FromDays(60));
+        await Task.Delay(200);
+
+        _loggerMock.Invocations.ToArray()
+            .Any(i => i.Method.Name == nameof(ILogger.Log) && Equals(i.Arguments[0], LogLevel.Error))
+            .ShouldBeFalse("the delayed work item failed instead of waiting");
+
+        await _queueService.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task LongDelay_FarBeyondTheTimerCeiling_WaitsInSlicesUntilCancelled()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => LongDelay.DelayAsync(TimeSpan.FromDays(400), cts.Token));
+    }
+
+    [Fact]
+    public async Task LongDelay_OfAnEnormousSpan_DoesNotOverflow()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Should.ThrowAsync<OperationCanceledException>(() => LongDelay.DelayAsync(TimeSpan.MaxValue, cts.Token));
     }
 }

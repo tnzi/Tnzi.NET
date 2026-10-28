@@ -66,7 +66,8 @@ public static class PropertyBuilderExtensions
     /// <returns>属性构建器（用于链式调用）</returns>
     /// <remarks>
     /// SQL Server: GETUTCDATE()
-    /// PostgreSQL: (NOW() AT TIME ZONE 'UTC')
+    /// PostgreSQL: NOW()（面向 timestamp with time zone 列，即 Npgsql 对 DateTime 的默认映射；
+    /// 显式映射成 timestamp without time zone 的列请自行用 <c>(NOW() AT TIME ZONE 'UTC')</c>）
     /// MySQL: UTC_TIMESTAMP()
     /// SQLite: DATETIME('now')
     /// </remarks>
@@ -140,7 +141,7 @@ public static class PropertyBuilderExtensions
     /// <returns>属性构建器（用于链式调用）</returns>
     /// <remarks>
     /// SQL Server: CAST(GETUTCDATE() AS DATE)
-    /// PostgreSQL: (CURRENT_DATE AT TIME ZONE 'UTC')::DATE
+    /// PostgreSQL: (NOW() AT TIME ZONE 'UTC')::DATE
     /// MySQL: UTC_DATE()
     /// SQLite: DATE('now')
     /// </remarks>

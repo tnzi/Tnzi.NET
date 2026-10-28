@@ -126,7 +126,7 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
             return false;
         }
 
-        if (!MatchesCommandPrefix(context, rule.CommandPrefix))
+        if (!MatchesCommandPrefix(context, rule.CommandPrefix, rule.Behavior))
         {
             return false;
         }
@@ -136,7 +136,7 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
             return false;
         }
 
-        if (!MatchesPathPrefix(context, rule.PathPrefix))
+        if (!MatchesPathPrefix(context, rule.PathPrefix, rule.Behavior))
         {
             return false;
         }
@@ -159,11 +159,33 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
         return MatchesPattern(context.ToolName, rule.ToolPattern);
     }
 
-    private static bool MatchesCommandPrefix(ToolPermissionContext context, string? commandPrefix)
+    /// <summary>
+    /// 命令前缀规则是否覆盖这次调用。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 放行规则（Allow）要求<b>每一个</b>片段都以该前缀开头，且落在词边界上：只看「任一片段」时，
+    /// <c>bash Allow CommandPrefix=git</c> 会放行 <c>git status; rm -rf data</c>（第一个片段是 git），
+    /// 不看词边界时还会放行 <c>gitx</c>。片段来自 <see cref="IShellCommandAnalyzer"/>，含命令替换、
+    /// <c>bash -c</c> 与包装命令里的命令；没有片段（分析器不可用）时放行规则不命中（失败关闭）。
+    /// </para>
+    /// <para>
+    /// 拒绝（Deny）与询问（Ask）规则保持「任一片段命中即命中」：多命中只会多拦或多问一次人，
+    /// Ask 若也改成「全部命中」，往调用里多塞一个范围外的片段就能绕过本该询问的规则。
+    /// </para>
+    /// </remarks>
+    private static bool MatchesCommandPrefix(ToolPermissionContext context, string? commandPrefix, PermissionBehavior behavior)
     {
         if (string.IsNullOrWhiteSpace(commandPrefix))
         {
             return true;
+        }
+
+        if (behavior == PermissionBehavior.Allow)
+        {
+            var prefix = commandPrefix.Trim();
+            return context.ShellSegments.Count > 0
+                && context.ShellSegments.All(segment => StartsWithCommand(segment, prefix));
         }
 
         if (!string.IsNullOrWhiteSpace(context.ShellCommand)
@@ -181,6 +203,18 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
         }
 
         return false;
+    }
+
+    /// <summary>片段以该命令前缀开头，且前缀之后是片段结尾或空白（<c>git</c> 不命中 <c>gitx</c>）。</summary>
+    private static bool StartsWithCommand(string segment, string prefix)
+    {
+        var text = segment.TrimStart();
+        if (!text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return text.Length == prefix.Length || char.IsWhiteSpace(text[prefix.Length]);
     }
 
     private static bool MatchesPattern(string toolName, string pattern)
@@ -210,7 +244,16 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
         return string.Equals(context.ServerName, serverName, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool MatchesPathPrefix(ToolPermissionContext context, string? pathPrefix)
+    /// <summary>
+    /// 路径前缀规则是否覆盖这次调用。
+    /// </summary>
+    /// <remarks>
+    /// 放行规则（Allow）要求这次调用涉及的<b>每一个</b>路径都在前缀之下：候选路径包含模型自己填的
+    /// <c>working_directory</c> 与每个名字像路径的参数，只看「任一路径」时，<c>write_file Allow PathPrefix=/workspace</c>
+    /// 会被 <c>{path: "/etc/x", working_directory: "/workspace"}</c> 满足。没有任何路径时放行规则不命中。
+    /// 拒绝与询问规则保持「任一路径命中即命中」，理由同 <see cref="MatchesCommandPrefix"/>。
+    /// </remarks>
+    private static bool MatchesPathPrefix(ToolPermissionContext context, string? pathPrefix, PermissionBehavior behavior)
     {
         if (string.IsNullOrWhiteSpace(pathPrefix))
         {
@@ -221,6 +264,15 @@ public class ToolPermissionEvaluator : IToolPermissionEvaluator
         if (normalizedPrefix == null)
         {
             return false;
+        }
+
+        if (behavior == PermissionBehavior.Allow)
+        {
+            IReadOnlyList<string> paths = context.CandidatePaths.Count > 0
+                ? context.CandidatePaths
+                : string.IsNullOrWhiteSpace(context.WorkingDirectory) ? [] : [context.WorkingDirectory];
+            return paths.Count > 0
+                && paths.All(path => MatchesPathBoundary(NormalizePath(path), normalizedPrefix));
         }
 
         foreach (var candidate in context.CandidatePaths)

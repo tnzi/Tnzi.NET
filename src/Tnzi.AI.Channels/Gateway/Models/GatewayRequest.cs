@@ -65,4 +65,16 @@ public class GatewayRequest
     /// </summary>
     [JsonIgnore]
     public Guid? TenantId { get; init; }
+
+    /// <summary>
+    /// 服务端认证过的框架用户（已认证的 WebSocket 连接）；运行以他的名义进行，受他的 token 配额、USD 预算与
+    /// 按用户的工具权限规则约束。匿名连接与 IM 渠道为 null。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="UserId"/> 分开：<see cref="UserId"/> 是会话里的发送者标识，IM 渠道上是平台账号 id
+    ///（Slack <c>U…</c>、Telegram 数字），不是框架用户，绝不能拿去当配额主体。
+    /// [JsonIgnore]：信任边界字段，绝不接受客户端 JSON 注入，也不向客户端回写。
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? AuthenticatedUserId { get; init; }
 }

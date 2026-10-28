@@ -99,16 +99,6 @@ export interface FeatureBridge {
 const unavailable = (name: string) => (): Promise<never> =>
   Promise.reject(new Error(`feature-bridge: ${name} - no deps provided`))
 
-/** Case-insensitive keyword match over the fields a person searches flags by. */
-function matchesKeyword(keyword: string, ...fields: Array<string | null | undefined>): boolean {
-  if (!keyword) return true
-  return fields.some((f) => (f ?? '').toLowerCase().includes(keyword))
-}
-
-function keywordOf(query: CrudPageQuery): string {
-  return typeof query.searchText === 'string' ? query.searchText.trim().toLowerCase() : ''
-}
-
 export function createFeatureBridge(deps: FeatureBridgeDeps = {}): FeatureBridge {
   const definitionApi = deps.definitionApi ?? (deps.client ? useAdminFeatureDefinitionApi(deps.client) : null)
   const valueApi = deps.valueApi ?? (deps.client ? useAdminFeatureValueApi(deps.client) : null)
@@ -142,9 +132,7 @@ export function createFeatureBridge(deps: FeatureBridgeDeps = {}): FeatureBridge
       const res = await definitionApi.getAll()
       ensureOk(res)
       const items = unwrap<FeatureDefinitionDto[]>(res) ?? []
-      const keyword = keywordOf(query)
-      const filtered = items.filter((f) => matchesKeyword(keyword, f.name, f.displayName, f.group))
-      return pageArray(filtered, query)
+      return pageArray(items, query, (f) => [f.name, f.displayName, f.group])
     },
     create: async (data) => {
       const res = await definitionApi.create(data)
@@ -174,9 +162,7 @@ export function createFeatureBridge(deps: FeatureBridgeDeps = {}): FeatureBridge
       const res = await valueApi.getAll(scope.providerName, scope.providerKey ?? undefined)
       ensureOk(res)
       const items = unwrap<FeatureValueWithDefinitionDto[]>(res) ?? []
-      const keyword = keywordOf(query)
-      const filtered = items.filter((v) => matchesKeyword(keyword, v.featureName, v.displayName, v.group))
-      return pageArray(filtered, query)
+      return pageArray(items, query, (v) => [v.featureName, v.displayName, v.group])
     },
     set: async (data) => {
       const res = await valueApi.set(data)

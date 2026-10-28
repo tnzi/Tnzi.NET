@@ -15,7 +15,8 @@ import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createNotificationBridge } from '../../services/bridges/notification-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
+import { EMPTY_DASH } from '../../utils/placeholders'
 
 const total = ref<number | null>(null)
 const failed = ref<number | null>(null)
@@ -31,19 +32,20 @@ useWidgetData(async () => {
       filters: { status: 'Failed' } as Record<string, unknown>,
     }),
   ])
-  // `?.` - a 403/failed envelope can fulfil with undefined instead of throwing.
-  if (allRes.status === 'fulfilled') total.value = allRes.value?.totalCount ?? 0
-  if (failedRes.status === 'fulfilled') failed.value = failedRes.value?.totalCount ?? 0
+  // `?.` - a 403/failed envelope can fulfil with undefined instead of throwing;
+  // that, like a rejection, leaves the count unknown rather than zero.
+  total.value = allRes.status === 'fulfilled' ? (allRes.value?.totalCount ?? null) : null
+  failed.value = failedRes.status === 'fulfilled' ? (failedRes.value?.totalCount ?? null) : null
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 
 function fmt(n: number | null): string {
-  // Count semantics: a null (request failed / field missing) reads better as
-  // 0 than as an em dash, which looked like a rendering bug on the workbench.
-  return (n ?? 0).toLocaleString()
+  // A count that could not be read is not a count of zero: "no failed
+  // messages" is a claim, and a failed load must not make it.
+  return n === null ? EMPTY_DASH : n.toLocaleString()
 }
 </script>
 

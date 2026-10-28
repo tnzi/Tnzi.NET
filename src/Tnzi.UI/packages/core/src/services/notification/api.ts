@@ -7,6 +7,7 @@ import type { PagedList } from '../../types/pagination';
 import type {
   NotificationInfo,
   CreateNotificationRequest,
+  PreviewNotificationRequest,
   QueryNotificationRequest,
   NotificationStatisticsDto,
   ChannelStatisticsDto,
@@ -42,6 +43,7 @@ import type {
 
 const ADMIN_BASE = '/admin/notifications';
 const PREFERENCES_BASE = '/admin/notification-preferences';
+const MY_PREFERENCES_BASE = '/notification/preferences';
 const OPT_OUTS_BASE = '/admin/notification-opt-outs';
 const TEMPLATES_BASE = '/admin/notification-templates';
 const USER_BASE = '/notifications';
@@ -143,8 +145,8 @@ export function useAdminNotificationApi(client: HttpClient) {
         params: { interval, startDate, endDate },
       }),
 
-    /** Preview notification rendering (without creating or sending) */
-    preview: (data: CreateNotificationRequest) =>
+    /** Preview notification rendering (without creating or sending). Recipients are optional. */
+    preview: (data: PreviewNotificationRequest) =>
       client.post<NotificationPreviewDto>(`${ADMIN_BASE}/preview`, data),
 
     /** Resend to failed recipients */
@@ -220,6 +222,36 @@ export function useAdminNotificationPreferenceApi(client: HttpClient) {
     /** Reset a user's preferences to platform defaults */
     resetToDefault: (userId: string) =>
       client.post<void>(`${PREFERENCES_BASE}/user/${userId}/reset`),
+  };
+}
+
+/**
+ * Notification preference API for the signed-in user (self-service).
+ * Backend: DefaultNotificationPreferenceController.
+ *
+ * Every call acts on the caller's own rows: the user comes from the session,
+ * never from the request, and deleting someone else's row id answers 404.
+ * Transactional messages (sign-in codes, password resets) bypass preferences,
+ * quiet hours and caps, so switching a channel off here cannot lock anyone
+ * out of their account.
+ */
+export function useNotificationPreferenceApi(client: HttpClient) {
+  return {
+    /** The caller's rows: channel-wide (category null) and per-category */
+    getMine: () =>
+      client.get<NotificationPreferenceDto[]>(MY_PREFERENCES_BASE),
+
+    /** Upsert one row, keyed by (channel, category) */
+    set: (data: SetNotificationPreferenceDto) =>
+      client.put<NotificationPreferenceDto>(MY_PREFERENCES_BASE, data),
+
+    /** Delete one of the caller's rows by id */
+    delete: (id: string) =>
+      client.delete<void>(`${MY_PREFERENCES_BASE}/${id}`),
+
+    /** Remove every custom row: all channels back to the platform defaults */
+    resetToDefault: () =>
+      client.post<void>(`${MY_PREFERENCES_BASE}/reset`),
   };
 }
 

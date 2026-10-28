@@ -26,8 +26,13 @@ public class ExceptionHandlingOptions
     public bool LogRequestBody { get; set; } = false;
 
     /// <summary>
-    /// 自定义异常处理器（异常类型 -> 处理器类型）
+    /// 自定义异常处理器（异常类型 -> 处理器类型）。
     /// </summary>
+    /// <remarks>
+    /// 只能在代码里经 <c>Configure&lt;ExceptionHandlingOptions&gt;</c> 登记，配置文件绑定不了以 <see cref="Type"/> 为键的字典。
+    /// 登记在基类上的处理器也处理其子类，离抛出类型最近的登记优先；处理器返回 null 或
+    /// <see cref="ExceptionHandlingResult.ShouldContinueHandling"/> 为 true 时交给内置处理器链。
+    /// </remarks>
     public Dictionary<Type, Type> CustomHandlers { get; set; } = new();
 
     /// <summary>
@@ -36,15 +41,20 @@ public class ExceptionHandlingOptions
     public bool EnableMetrics { get; set; } = true;
 
     /// <summary>
-    /// 是否包含请求 ID 在错误响应中
+    /// 是否在错误响应里带 <c>requestId</c>：与 <c>X-Request-Id</c> 响应头同一个值（没有请求追踪中间件时退回连接级的 TraceIdentifier）
     /// </summary>
     [RuntimeSetting(Label = "Include Request ID In Response", I18n = "admin.modules.system.settings.fields.includeRequestId",
         Type = SettingFieldType.Boolean)]
     public bool IncludeRequestId { get; set; } = true;
 
     /// <summary>
-    /// 异常历史保留数量（用于重复异常检测）
+    /// 异常统计在内存里保留的最近记录条数。
     /// </summary>
+    /// <remarks>
+    /// 它同时是诊断摘要的上界：「最近 N 分钟的异常」只在这些记录里按时间窗口筛，
+    /// 所以窗口内的异常多于这个数时，摘要里的总数与各项计数停在这个数附近，不是窗口内的真实总量。
+    /// 需要准确的长期计数请看日志或指标系统。
+    /// </remarks>
     public int ExceptionHistorySize { get; set; } = 100;
 
     /// <summary>

@@ -7,6 +7,10 @@ namespace Tnzi.Payment.PayPal.Options;
 /// <remarks>
 /// 类随实现从 <c>Tnzi.Payment</c> 搬到本包，<b>配置节路径一字未改</b>：既有部署的
 /// appsettings 不用动，只是绑定与校验现在由 <see cref="PaymentPayPalModule"/> 负责。
+/// <para>
+/// 没有「PayPal 币种」这一项：建单币种按「请求指定 &gt; <c>Payment:Channels:PayPal:Currency</c> &gt;
+/// <c>Payment:DefaultCurrency</c>」解析。此前这里有一个 <c>Currency</c>（启用时还必填），却没有任何代码读它。
+/// </para>
 /// </remarks>
 public class PayPalOptions
 {
@@ -29,11 +33,6 @@ public class PayPalOptions
     /// 模式（sandbox/live）
     /// </summary>
     public string Mode { get; set; } = "sandbox";
-
-    /// <summary>
-    /// 币种
-    /// </summary>
-    public string Currency { get; set; } = "USD";
 
     /// <summary>
     /// Webhook ID

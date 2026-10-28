@@ -47,6 +47,7 @@ import {
   isSystemRoleAccount,
   type AccountRow,
 } from './account-config'
+import { filterByKeyword } from '../../utils/keyword-filter'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
 const t = makePageTranslator('finance.accounts')
@@ -104,11 +105,18 @@ const crud = useCrudPage<AccountRow>({
   permission: 'finance.account',
   columns: accountColumns,
   rowKey: (r) => String(r.id ?? ''),
-  fetchData: async () => {
+  fetchData: async (q) => {
     // Render the CoA as an indented hierarchy (tree endpoint) rather than a flat paginated list.
     const tree = await bridge.accounts.tree(true)
-    const items: AccountRow[] = []
-    flattenTree(tree, 0, items)
+    const all: AccountRow[] = []
+    flattenTree(tree, 0, all)
+    // The tree endpoint takes no keyword, so the search box filters the loaded
+    // chart (code or name). Matches render flat: an indent would point at a
+    // parent row the filter left out.
+    const keyword = q.searchText?.trim()
+    const items = keyword
+      ? filterByKeyword(all, keyword, (r) => [r.code, r.name]).map((r) => ({ ...r, _depth: 0 }))
+      : all
     return withBalances({ items, pageIndex: 1, pageSize: Math.max(items.length, 1), totalCount: items.length, totalPages: 1, hasPreviousPage: false, hasNextPage: false })
   },
   createData: async (d) => {

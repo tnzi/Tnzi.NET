@@ -74,14 +74,20 @@ public class BackplaneOptions
     public BackplaneType Type { get; set; } = BackplaneType.None;
 
     /// <summary>
-    /// Redis 连接字符串 (当 Type = Redis 时必填)
-    /// 如不指定，将尝试复用 RedisCachingModule 的连接
+    /// Redis 连接字符串（当 Type = Redis 时必填）。只读这一项，<b>不</b>回退到 Redis 缓存模块的连接配置：
+    /// 未配置时启动即抛 <c>ConfigurationException</c>。支持 <c>${VAR}</c> 环境变量占位符。
     /// </summary>
     public string? ConnectionString { get; set; }
 
     /// <summary>
-    /// 频道前缀
+    /// 频道前缀（默认 <c>Tnzi.SignalR</c>）。
     /// </summary>
+    /// <remarks>
+    /// ★ 共用一个 Redis 服务器的每个应用、每个环境都要配一个自己的前缀。backplane 的频道以 Hub 的完整类型名命名，
+    /// 框架自带的 Hub（聊天、设置推送、在线状态）在每个消费应用里类型名都相同；Redis 的 Pub/Sub 又不分库，
+    /// 「一个环境一个库号」隔离不了它。前缀相同的两个部署共享频道：一方的 <c>Clients.All</c> 推送到达另一方的客户端，
+    /// 用户 id 相同时（例如预发库由生产库克隆）按用户、按租户的推送也会跨环境送达。
+    /// </remarks>
     public string ChannelPrefix { get; set; } = "Tnzi.SignalR";
 }
 
@@ -128,8 +134,13 @@ public class RateLimitOptions
     public bool Enabled { get; set; } = false;
 
     /// <summary>
-    /// 每用户最大连接数
+    /// 每用户最大连接数（默认 5）。
     /// </summary>
+    /// <remarks>
+    /// 按用户跨<b>所有</b> Hub 计数、只对本实例成立（连接登记在进程内）。框架管理端每个浏览器标签页通常占两条
+    /// （设置推送 <c>/hubs/settings</c>，启用内置聊天时再加 <c>/hubs/chat</c>），默认值下第三个标签页的第二条会被拒绝；
+    /// 允许多标签页使用的部署按「标签页数 × 每页连接数」设置。检查在连接登记之前读取当前计数，同一用户并发握手时可能略超上限。
+    /// </remarks>
     public int MaxConnectionsPerUser { get; set; } = 5;
 
     /// <summary>
@@ -160,8 +171,9 @@ public class RateLimitOptions
     ///
     /// 计数靠连接建立时 +1、断开时 -1 维护。进程非正常退出时那些 -1 永远不会发生，
     /// 没有 TTL 的话该分区的计数会永久偏高，最终把一个正常的 IP 永久锁在门外。
-    /// TTL 让它自愈，代价是超过这个时长的长连接不再被计入 —— 那是**放宽**方向的
-    /// 失效，比永久误封可接受。
+    /// TTL 让它自愈。它是<b>固定窗口</b>：从该分区计数键创建（第一条连接）起算，之后的连接不续期，
+    /// 到期时计数整体归零，窗口内建立、此刻仍在线的连接一并不再计入，此后它们断开时的 -1 还可能把新窗口减成负数而被清零。
+    /// 失效方向是<b>放宽</b>（一个分区在一个窗口之后可以再开满一轮），比永久误封可接受；需要更紧的约束时调短这个值。
     /// </summary>
     public TimeSpan AnonymousConnectionCountTtl { get; set; } = TimeSpan.FromHours(2);
 }

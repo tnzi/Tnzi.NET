@@ -190,7 +190,8 @@ public class RevaluationService : ApplicationService, IRevaluationService
         var accountFilter = accountIds != null && accountIds.Count > 0 ? accountIds.ToHashSet() : null;
 
         var candidates = await _accountRepository.AsNoTracking()
-            .Where(a => a.Currency != null && a.Currency != baseCurrency && !a.IsGroup &&
+            // 空串币种是规范化之前写进来的存量（等价于不限币种），不是一个外币
+            .Where(a => a.Currency != null && a.Currency != "" && a.Currency != baseCurrency && !a.IsGroup &&
                         (a.RootType == AccountRootType.Asset || a.RootType == AccountRootType.Liability) &&
                         (accountFilter == null || accountFilter.Contains(a.Id)))
             .Select(a => new { a.Id, a.Code, a.Name, a.Currency, a.IsActive })

@@ -50,13 +50,19 @@ public class AiProviderOptions
     public int? TimeoutSeconds { get; set; }
 
     /// <summary>
-    /// 最大输出 Token 数。
+    /// 自动推理预算的基数：未设置 <c>Thinking.BudgetTokens</c> 时，推理中间件按它的 80% 分配推理 Token。
     /// </summary>
+    /// <remarks>
+    /// 它<b>不是</b>请求的最大输出 Token 数：请求的输出上限来自单次调用的覆盖、Agent 自身的设置或 <c>AI:Utility</c>。
+    /// </remarks>
     public int? MaxTokens { get; set; }
 
     /// <summary>
-    /// 温度参数（0-2）。
+    /// 温度参数（0-2）。只做范围校验，目前不进入任何请求。
     /// </summary>
+    /// <remarks>
+    /// 采样温度来自单次调用的覆盖、Agent 自身的设置或 <c>AI:Utility:Temperature</c>；配在提供商上不会改变请求。
+    /// </remarks>
     public double? Temperature { get; set; }
 
     /// <summary>

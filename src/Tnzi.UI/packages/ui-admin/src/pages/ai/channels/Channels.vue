@@ -4,11 +4,13 @@
     `Tnzi.AI.Channels`. A KPI strip plus three tabs:
       • Adapters - registered channel adapters (name + streaming capability)
       • Connections - IGateway live WebSocket connections (control plane)
-      • Bindings - ISessionBinder 4-scope session-binding rules
+      • Bindings - ISessionBinder 4-scope session-binding rules (configuration
+        rules and database rules, in the order the binder applies them)
 
     The module is an optional sub-module of Tnzi.AI; when it is not loaded the
     bridge surfaces `null`/empty values and the page renders a friendly
-    "module not enabled" notice instead of failing.
+    "module not enabled" notice instead of failing. A refused or failed read
+    shows its reason instead: the module answered, so it is loaded.
   -->
   <TTabsPage
     v-if="loading || moduleLoaded"
@@ -113,6 +115,7 @@
         v-else
         :columns="bindingColumns"
         :data="bindings"
+        :row-key="bindingRowKey"
         :loading="loading"
         :pagination="{ pageSize: 15 }"
         :bordered="false"
@@ -123,7 +126,8 @@
   </TTabsPage>
 
   <!-- Module not loaded (getStatus → null / 404): friendly "unavailable" state.
-       The page header (title + refresh) is preserved; no tabs are rendered. -->
+       A refused or failed read says why instead. The page header (title +
+       refresh) is preserved; no tabs are rendered. -->
   <TContentPage
     v-else
     :title="t('title')"
@@ -138,7 +142,11 @@
       </NButton>
     </template>
 
+    <NAlert v-if="loadError" type="error" :closable="false" data-test="channels-load-error">
+      {{ loadError }}
+    </NAlert>
     <NAlert
+      v-else
       :title="t('disabled.notLoaded.title')"
       type="info"
       :closable="false"
@@ -150,7 +158,7 @@
 
 <script setup lang="ts">
 import { EMPTY_DASH } from '../../../utils/placeholders'
-import { computed, h, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref, toRaw } from 'vue'
 import {
   NAlert,
   NButton,
@@ -191,6 +199,8 @@ const gatewayStatus = ref<GatewayStatusDto | null>(null)
 const adapters = ref<ChannelAdapterDto[]>([])
 const connections = ref<GatewayConnectionInfo[]>([])
 const bindings = ref<SessionBindingRuleDto[]>([])
+/** A refused or failed read (the bridge answers empty only when the module is absent). */
+const loadError = ref<string | null>(null)
 
 // Absolute i18n namespace - TStatusBadge's admin wrapper resolves `labelKey`
 // from the locale root, so mapping keys must be fully qualified.
@@ -198,18 +208,38 @@ const CH_NS = 'admin.modules.ai.channels'
 
 // SessionScope enum → unified status pill. The backend serialises it as the
 // PascalCase member NAME (JsonStringEnumConverter: Global / PerPeer /
-// PerChannelPeer / PerThread); the legacy numeric ordinals are kept too so
-// TStatusBadge's `String(value)` lookup resolves regardless of wire form. All
-// scopes share the neutral `info` tone (matches the pre-migration look).
+// PerChannelPeer / PerThread). All scopes share the neutral `info` tone.
 const scopeBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
-  0: { type: 'info', labelKey: `${CH_NS}.scope.global` },
-  1: { type: 'info', labelKey: `${CH_NS}.scope.perPeer` },
-  2: { type: 'info', labelKey: `${CH_NS}.scope.perChannelPeer` },
-  3: { type: 'info', labelKey: `${CH_NS}.scope.perThread` },
   Global: { type: 'info', labelKey: `${CH_NS}.scope.global` },
   PerPeer: { type: 'info', labelKey: `${CH_NS}.scope.perPeer` },
   PerChannelPeer: { type: 'info', labelKey: `${CH_NS}.scope.perChannelPeer` },
   PerThread: { type: 'info', labelKey: `${CH_NS}.scope.perThread` },
+}
+
+// Where a rule comes from: configuration rules (AI:Channels:Gateway:BindingRules)
+// are routing traffic too, they just have no database row.
+const sourceBadgeMapping: Record<string, { type: StatusType; labelKey: string }> = {
+  config: { type: 'info', labelKey: `${CH_NS}.source.config` },
+  database: { type: 'default', labelKey: `${CH_NS}.source.database` },
+}
+
+// Configuration rules are not persisted and all carry the empty GUID, so the id
+// alone does not identify a row. Their fields do not identify one either: two
+// rules that differ only in scope, or are even word-for-word identical, are
+// both valid configuration. What does identify a configuration rule is its
+// position in the order the binder applies them, so it is keyed by ordinal.
+const bindingRowKeys = computed(() => {
+  const keys = new WeakMap<SessionBindingRuleDto, string>()
+  let configOrdinal = 0
+  for (const rule of bindings.value) {
+    const raw = toRaw(rule)
+    keys.set(raw, raw.source === 'config' ? `config:${configOrdinal++}` : `database:${raw.id}`)
+  }
+  return keys
+})
+
+function bindingRowKey(r: SessionBindingRuleDto): string {
+  return bindingRowKeys.value.get(toRaw(r)) ?? `${r.source}:${r.id}`
 }
 
 /**
@@ -267,7 +297,6 @@ const connectionColumns: DataTableColumns<GatewayConnectionInfo> = [
   },
   { title: () => t('cols.clientType'), key: 'clientType', width: 120 },
   { title: () => t('cols.user'), key: 'userId', width: 220, render: (r) => r.userId ?? EMPTY_DASH },
-  { title: () => t('cols.deviceNode'), key: 'deviceNodeId', width: 180, render: (r) => r.deviceNodeId ?? EMPTY_DASH },
   {
     title: () => t('cols.connectedAt'),
     key: 'connectedAt',
@@ -284,6 +313,12 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
     align: 'right',
     sorter: (a, b) => a.priority - b.priority,
     defaultSortOrder: 'descend',
+  },
+  {
+    title: () => t('cols.source'),
+    key: 'source',
+    width: 110,
+    render: (r) => h(TStatusBadge, { value: r.source, size: 'tiny', mapping: sourceBadgeMapping }),
   },
   {
     title: () => t('cols.isEnabled'),
@@ -318,6 +353,7 @@ const bindingColumns: DataTableColumns<SessionBindingRuleDto> = [
 
 async function refresh(): Promise<void> {
   loading.value = true
+  loadError.value = null
   try {
     const [cs, ads, gs, conns, binds] = await Promise.all([
       bridge.channels.getStatus(),
@@ -332,12 +368,13 @@ async function refresh(): Promise<void> {
     adapters.value = ads.length > 0 ? ads : (cs?.adapters ?? [])
     connections.value = conns
     bindings.value = binds
-  } catch {
+  } catch (error) {
     channelStatus.value = null
     gatewayStatus.value = null
     adapters.value = []
     connections.value = []
     bindings.value = []
+    loadError.value = error instanceof Error ? error.message : String(error)
   } finally {
     loading.value = false
   }
@@ -345,5 +382,5 @@ async function refresh(): Promise<void> {
 
 onMounted(() => { void refresh() })
 
-defineExpose({ refresh, channelStatus, gatewayStatus, adapters, connections, bindings, moduleLoaded })
+defineExpose({ refresh, channelStatus, gatewayStatus, adapters, connections, bindings, moduleLoaded, loadError })
 </script>

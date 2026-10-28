@@ -9,15 +9,15 @@ public class PartyBankAccountConfiguration : EntityTypeConfigurationBase<PartyBa
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(e => e.Label).HasMaxLength(64);
-        builder.Property(e => e.BankName).HasMaxLength(128);
+        builder.Property(e => e.Label).HasMaxLength(BankingFieldLimits.PartyBankLabelMaxLength);
+        builder.Property(e => e.BankName).HasMaxLength(BankingFieldLimits.BankNameMaxLength);
         builder.Property(e => e.RoutingNumber).HasMaxLength(16);
         builder.Property(e => e.InstitutionNumber).HasMaxLength(8);
         builder.Property(e => e.TransitNumber).HasMaxLength(8);
         builder.Property(e => e.AccountNumberEncrypted).HasMaxLength(512);
         builder.Property(e => e.AccountNumberMasked).HasMaxLength(32);
-        builder.Property(e => e.Currency).HasMaxLength(8);
-        builder.Property(e => e.Notes).HasMaxLength(500);
+        builder.Property(e => e.Currency).HasMaxLength(BankingFieldLimits.CurrencyMaxLength);
+        builder.Property(e => e.Notes).HasMaxLength(BankingFieldLimits.PartyBankNotesMaxLength);
 
         builder.HasIndex(e => new { e.PartyType, e.PartyId });
 

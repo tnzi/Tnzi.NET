@@ -17,8 +17,7 @@ public class StripeCouponSyncTests
             Enabled = true,
             SecretKey = "sk_test_key",
             PublishableKey = "pk_test_key",
-            WebhookSecret = "whsec_test",
-            Currency = "usd"
+            WebhookSecret = "whsec_test"
         });
 
         return new StripeCouponSync(options, new Mock<ILogger<StripeCouponSync>>().Object);

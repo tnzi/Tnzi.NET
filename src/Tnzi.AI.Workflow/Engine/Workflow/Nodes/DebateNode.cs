@@ -42,9 +42,12 @@ public class DebateNode : IWorkflowNode
         // 解析最大轮次
         var maxRounds = config.TryGetValue("maxRounds", out var mrStr) && int.TryParse(mrStr, out var mr) ? mr : 5;
 
-        // 收集输入作为讨论主题
+        // 收集输入作为讨论主题（数据，不做模板替换）。步骤指令是给整场讨论的框定（每个辩论 Agent
+        // 保留自己的系统提示词），替换模板后放在主题前面；此前它被整个忽略，而编辑器照样让人填。
         var topic = WorkflowNodeHelper.CollectInput(context);
-        topic = state.ResolveTemplate(topic);
+        var instructions = WorkflowNodeHelper.ResolveInstructions(step, state);
+        if (!string.IsNullOrWhiteSpace(instructions))
+            topic = $"{instructions}\n\n{topic}";
 
         var orchestrator = new GroupChatOrchestrator(_logger)
         {

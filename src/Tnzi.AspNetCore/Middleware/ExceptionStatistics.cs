@@ -122,15 +122,11 @@ public class ExceptionStatistics : IExceptionStatistics
         while (_recentExceptions.TryDequeue(out _)) { }
     }
 
-    private static int? GetStatusCode(Exception exception)
-    {
-        return exception switch
-        {
-            BusinessException bEx => bEx.HttpStatusCode,
-            InfrastructureException => 503,
-            _ => null
-        };
-    }
+    /// <summary>
+    /// 与内置处理器同一张折算表：此前自带一份映射、对非框架异常返回 null，
+    /// 于是诊断页「按状态码」里永远没有最需要关注的 500。
+    /// </summary>
+    private static int? GetStatusCode(Exception exception) => ExceptionHttpStatusCode.Resolve(exception);
 
     private static string? GetErrorCode(Exception exception)
     {

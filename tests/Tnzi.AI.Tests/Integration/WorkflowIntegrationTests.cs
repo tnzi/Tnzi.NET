@@ -287,6 +287,71 @@ public class WorkflowIntegrationTests
         result2.StepResults.Single(r => r.StepId == "approval-step").Output.ShouldBe("Looks good");
     }
 
+    /// <summary>
+    /// With an <see cref="IWorkflowInterruptHandler"/>, a run-then-gate step (<c>RequiresApproval</c>
+    /// on a content node) is approved inline once it has run. A rejection marked the run failed but
+    /// did not stop it: the next layer was already ready (the rejected step was completed), so
+    /// <c>publish</c> ran on the rejection text in the same call. The rejected step also stayed
+    /// completed, so resuming the failed execution went past the gate without asking again.
+    /// </summary>
+    [Fact]
+    public async Task InterruptHandlerRejectsRunThenGateStep_StopsBeforeDownstream_AndResumeAsksAgain()
+    {
+        var sp = BuildServiceProvider(new Dictionary<string, string>
+        {
+            ["draft"] = "Drafted article",
+            ["publish"] = "Published"
+        });
+        var checkpointStore = new InMemoryCheckpointStore();
+        var graph = new WorkflowGraph(
+        [
+            new WorkflowStepDto { StepId = "draft", RequiresApproval = true, Configuration = new() { ["nodeType"] = "agent" } },
+            new WorkflowStepDto { StepId = "publish", DependsOn = ["draft"], Configuration = new() { ["nodeType"] = "agent" } }
+        ]);
+        var engine = sp.GetRequiredService<WorkflowEngine>();
+        var executionId = Guid.NewGuid().ToString("N");
+
+        var rejecting = new RecordingInterruptHandler(approved: false, feedback: "not good enough");
+        var first = await engine.ExecuteAsync(graph, "initial input", sp, new WorkflowExecutionOptions
+        {
+            ExecutionId = executionId,
+            CheckpointStore = checkpointStore,
+            InterruptHandler = rejecting
+        });
+
+        rejecting.StepIds.ShouldBe(["draft"]);
+        first.HasFailure.ShouldBeTrue();
+        first.StepResults.ShouldNotContain(r => r.StepId == "publish", "a rejection stops the run before anything downstream runs");
+        var checkpoint = await checkpointStore.GetCheckpointAsync(executionId);
+        checkpoint!.Status.ShouldBe(WorkflowExecutionStatus.Failed);
+        checkpoint.CompletedStepIds.ShouldNotContain("draft", "a rejected step is not done; left completed, a resume skips its gate");
+
+        var approving = new RecordingInterruptHandler(approved: true);
+        var second = await engine.ExecuteAsync(graph, "initial input", sp, new WorkflowExecutionOptions
+        {
+            ExecutionId = executionId,
+            CheckpointStore = checkpointStore,
+            Resume = true,
+            InterruptHandler = approving
+        });
+
+        approving.StepIds.ShouldBe(["draft"], "the regenerated content is put to the approver again");
+        second.HasFailure.ShouldBeFalse();
+        second.State.GetOutputText("draft").ShouldBe("Drafted article");
+        second.State.GetOutputText("publish").ShouldBe("Published");
+    }
+
+    private sealed class RecordingInterruptHandler(bool approved, string? feedback = null) : IWorkflowInterruptHandler
+    {
+        public List<string> StepIds { get; } = [];
+
+        public Task<WorkflowInterruptResult> HandleInterruptAsync(WorkflowInterruptContext context, CancellationToken ct = default)
+        {
+            StepIds.Add(context.StepId);
+            return Task.FromResult(new WorkflowInterruptResult { Approved = approved, Feedback = feedback });
+        }
+    }
+
     #endregion
 
     #region 4. Multi-step DAG - Agent→Transform→Agent 数据流转

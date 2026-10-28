@@ -60,8 +60,9 @@ public class IdentitySettingDefinitionProviderTests
         security.Order.ShouldBe(210);
         security.Icon.ShouldBe("mdi:shield-account-outline");
         // MaxFailedLoginAttempts/LockoutDurationMinutes 仍双轨冻结（见 AccountSecurityOptions 注释）。
-        // 暴露：EnableLockout + SessionTimeoutMinutes + EnableAbnormalLoginDetection + 5 风险等级 + 2 阈值 = 10。
-        security.Fields.Count.ShouldBe(10);
+        // 暴露：EnableLockout + SessionTimeoutMinutes + EnableAbnormalLoginDetection + 4 风险等级 + 2 阈值 = 9。
+        // （「位置变化风险等级」已删除：框架没有地理位置判定，那个值调了什么都不改变。）
+        security.Fields.Count.ShouldBe(9);
     }
 
     [Fact]
@@ -73,9 +74,9 @@ public class IdentitySettingDefinitionProviderTests
         registration.Order.ShouldBe(200);
         registration.Icon.ShouldBe("mdi:account-plus-outline");
         // SignIn: UseEmailAsUserName + Allow{UserName,Email,Sms}Login + AllowCodeLogin = 5；
-        // Registration: EnableSelfRegistration + EnableQuickRegister{Email,Sms} + DefaultUserNameFromEmail
-        //             + RequireConfirmed{Email,Phone} + SetPasswordTokenExpirationMinutes = 7 → 合计 12。
-        registration.Fields.Count.ShouldBe(12);
+        // Registration: EnableSelfRegistration + EnableQuickRegister{Email,Sms} + EnableOAuthRegistration
+        //             + DefaultUserNameFromEmail + RequireConfirmed{Email,Phone} + SetPasswordTokenExpirationMinutes = 8 → 合计 13。
+        registration.Fields.Count.ShouldBe(13);
     }
 
     [Fact]

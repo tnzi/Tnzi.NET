@@ -10,8 +10,23 @@ namespace Tnzi.Application;
 /// </summary>
 /// <remarks>
 /// <para><b>opt-in（不影响现有服务）</b>：继承本类纯属可选，现有手写服务不受影响。</para>
+/// <para><b>行级数据范围</b>：容器里为 <typeparamref name="TEntity"/> 注册的每个
+/// <see cref="Tnzi.Data.IDataScopeProvider{TEntity}"/> 的 <c>GetFilter()</c> 谓词，与 <see cref="ApplyScopeAsync"/>
+/// 的结果一起以 AND 施加到列表查询、取详情 / 更新 / 删除的单行校验与批删上。注册了 provider 就生效，
+/// 不需要覆写任何东西；覆写 <see cref="ApplyScopeAsync"/> 只会在此之上再收紧，不会把注册的 provider 换掉。
+/// 未注册任何 provider 且未覆写时不施加限制。provider 覆写的 <c>CanAccessAsync</c> 不参与这里的判定：
+/// 列表只能用谓词，单行校验与它同源才不会出现「列表看得见、详情 404」或反过来。
+/// 单行校验与批删同样<b>交给数据库判定</b>（按主键 AND 范围谓词查询），与列表同一套 SQL 语义：
+/// 引用导航的谓词（<c>p =&gt; p.Assignments.Any(a =&gt; a.UserId == me)</c>）不需要先加载导航，
+/// 字符串比较也按数据库的排序规则。</para>
+/// <para><b>范围只约束读取与对既有行的访问，不约束写入的结果</b>：新建的实体不过范围谓词，更新只校验映射前的那一行。
+/// <typeparamref name="TCreateDto"/> / <typeparamref name="TUpdateDto"/> 若带范围字段（部门、归属人），调用方可以把记录建进
+/// 或移进别人的范围。可见性谓词不能直接当写入规则用（「指派给我才可见」的新记录在指派之前就不在范围内；跨部门移交是正当的更新），
+/// 需要写入约束的服务自己校验：新建在 <see cref="BeforeCreateAsync"/>（收到的是映射后的实体），更新在 <see cref="AfterUpdateAsync"/>
+/// （映射之后、保存之前，抛异常整个工作单元回滚），例如对实体调 <see cref="IsInScopeAsync"/> 不通过就抛
+/// <see cref="Tnzi.Exceptions.ForbiddenException"/>；或者干脆不在输入 DTO 上暴露范围字段。</para>
 /// <para><b>可覆写钩子</b>：所有端点方法与生命周期钩子均为 <c>virtual</c>——
-/// <see cref="ApplyScopeAsync"/>（行级数据范围谓词）、
+/// <see cref="ApplyScopeAsync"/>（服务自己的行级数据范围谓词）、
 /// <see cref="BeforeCreateAsync"/> / <see cref="AfterCreateAsync"/> /
 /// <see cref="BeforeUpdateAsync"/> / <see cref="AfterUpdateAsync"/> /
 /// <see cref="BeforeDeleteAsync"/> / <see cref="AfterDeleteAsync"/>，消费者按需 override。</para>
@@ -88,7 +103,7 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
         if (!FilterExpressionBuilder.TryValidateOrderBy<TEntity>(query.OrderBy, policy, out var orderByError))
             return Fail<IPagedList<TDto>>(orderByError!, 400, ErrorCodes.VALIDATION_ERROR);
 
-        var scope = await ApplyScopeAsync(cancellationToken);
+        var scope = await ResolveScopeAsync(cancellationToken);
         var page = scope == null
             ? await Repository.GetPagedListAsync(query, cancellationToken)
             : await Repository.GetPagedListAsync(scope, query, cancellationToken);
@@ -103,8 +118,8 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
     /// </summary>
     public virtual async Task<Result<TDto>> GetByIdAsync(TKey id, CancellationToken cancellationToken = default)
     {
-        var entity = await Repository.GetAsync(id, cancellationToken);
-        if (entity == null || !await IsInScopeAsync(entity, cancellationToken))
+        var entity = await GetInScopeAsync(id, cancellationToken);
+        if (entity == null)
             return Fail<TDto>(EntityNotFoundMessage, 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         return Ok(Mapper.Map<TDto>(entity));
@@ -143,8 +158,8 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
 
         return await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var entity = await Repository.GetAsync(id, ct);
-            if (entity == null || !await IsInScopeAsync(entity, ct))
+            var entity = await GetInScopeAsync(id, ct);
+            if (entity == null)
                 return Fail<TDto>(EntityNotFoundMessage, 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
             await BeforeUpdateAsync(input, entity, ct);
@@ -166,8 +181,8 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
     {
         return await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var entity = await Repository.GetAsync(id, ct);
-            if (entity == null || !await IsInScopeAsync(entity, ct))
+            var entity = await GetInScopeAsync(id, ct);
+            if (entity == null)
                 return Fail(EntityNotFoundMessage, 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
             await BeforeDeleteAsync(entity, ct);
@@ -189,14 +204,11 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
 
         return await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            var entities = await Repository.GetListAsync(idList, ct);
-
-            var scope = await ApplyScopeAsync(ct);
-            if (scope != null)
-            {
-                var predicate = scope.Compile();
-                entities = entities.Where(predicate).ToList();
-            }
+            // 有范围时把范围谓词并进按主键取的那条查询，由数据库判定（与列表同一套语义）
+            var scope = await ResolveScopeAsync(ct);
+            var entities = scope == null
+                ? await Repository.GetListAsync(idList, ct)
+                : await Repository.ToListAsync(DataScopeExtensions.AndAlso(scope, e => idList.Contains(e.Id))!, ct);
 
             if (entities.Count == 0)
                 return Ok();
@@ -214,20 +226,57 @@ public abstract class CrudAppService<TEntity, TKey, TDto, TCreateDto, TUpdateDto
     }
 
     /// <summary>
-    /// 行级数据范围谓词。默认返回 <c>null</c>（不限制）。override 以注入自定义可见性规则
-    /// （例如「因为用户被指派到关联实体所以此行可见」），谓词会被 AND 到查询与单行访问校验中。
+    /// 本服务自己的行级数据范围谓词。默认返回 <c>null</c>（不额外限制）。override 以注入自定义可见性规则
+    /// （例如「因为用户被指派到关联实体所以此行可见」），谓词会与容器里注册的
+    /// <see cref="Tnzi.Data.IDataScopeProvider{TEntity}"/> 谓词 AND 后施加到查询与单行访问校验中。
+    /// 它不检查新建或更新之后的实体（见类说明的「范围只约束读取」）。
     /// </summary>
     protected virtual Task<Expression<Func<TEntity, bool>>?> ApplyScopeAsync(CancellationToken cancellationToken)
         => Task.FromResult<Expression<Func<TEntity, bool>>?>(null);
 
     /// <summary>
-    /// 判定单个实体是否落在当前范围内（用于取详情/更新/删除的行级校验）。
-    /// 默认编译 <see cref="ApplyScopeAsync"/> 谓词在内存中求值；无谓词时恒为 true。
+    /// 判定一个<b>内存中的</b>实体是否满足生效的范围谓词（<see cref="ApplyScopeAsync"/> AND 注册的 provider）；无谓词时恒为 true。
+    /// 用于写入约束：<see cref="BeforeCreateAsync"/> 收到的映射后实体、<see cref="AfterUpdateAsync"/> 时映射之后的实体。
     /// </summary>
+    /// <remarks>
+    /// 谓词编译后在内存中求值：它引用的导航必须已经加载在实体上，字符串按序号比较（不是数据库的排序规则）。
+    /// 框架自己的取详情 / 更新 / 删除 / 批删<b>不</b>经过这里，那几处按主键 AND 范围谓词交给数据库判定。
+    /// </remarks>
     protected virtual async Task<bool> IsInScopeAsync(TEntity entity, CancellationToken cancellationToken)
     {
-        var scope = await ApplyScopeAsync(cancellationToken);
+        var scope = await ResolveScopeAsync(cancellationToken);
         return scope == null || scope.Compile()(entity);
+    }
+
+    /// <summary>
+    /// 按主键加载一个落在范围内的实体；不存在或范围外返回 <c>null</c>（调用方一律答 404，避免存在性泄漏）。
+    /// 范围谓词与主键一起交给数据库判定，和列表查询同一套 SQL 语义。
+    /// </summary>
+    private async Task<TEntity?> GetInScopeAsync(TKey id, CancellationToken cancellationToken)
+    {
+        var entity = await Repository.GetAsync(id, cancellationToken);
+        if (entity == null)
+            return null;
+
+        var scope = await ResolveScopeAsync(cancellationToken);
+        if (scope == null)
+            return entity;
+
+        TKey[] ids = [id];
+        var inScope = await Repository.AnyAsync(DataScopeExtensions.AndAlso(scope, e => ids.Contains(e.Id)), cancellationToken);
+        return inScope ? entity : null;
+    }
+
+    /// <summary>
+    /// 生效的范围谓词：服务自己的 <see cref="ApplyScopeAsync"/> AND 容器里注册的全部
+    /// <see cref="Tnzi.Data.IDataScopeProvider{TEntity}"/>。provider 不经覆写也生效：注册了却不被框架查询读取，
+    /// 等于一个看起来已配置、实际放行全部行的授权规则。
+    /// </summary>
+    private async Task<Expression<Func<TEntity, bool>>?> ResolveScopeAsync(CancellationToken cancellationToken)
+    {
+        var own = await ApplyScopeAsync(cancellationToken);
+        var registered = ServiceProvider.BuildDataScopeFilter<TEntity>();
+        return DataScopeExtensions.AndAlso(own, registered);
     }
 
     /// <summary>创建前钩子：可校验/补全实体（可抛 <see cref="Tnzi.Exceptions.BusinessException"/> 拒绝）。</summary>

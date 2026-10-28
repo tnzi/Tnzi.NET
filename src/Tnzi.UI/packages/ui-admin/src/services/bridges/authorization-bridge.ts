@@ -9,12 +9,22 @@
  *
  * Sub-contracts:
  *   - functionModules  → /admin/modules
- *   - permissions      → /admin/modules/{moduleId}/functions  (read-only)
- *   - roleFunctions    → /admin/role-functions  (fetch by functionId)
- *   - userFunctions    → /admin/user-functions  (direct grants, no role)
+ *   - permissions      → /admin/module-functions (catalogue + writes),
+ *                        holders via /admin/function-authorization/permission/holders
+ *   - roleFunctions    → /admin/role-functions  (fetch by functionId, catalogue, roles)
+ *   - userFunctions    → /admin/user-functions  (direct grants, no role; catalogue)
  *   - entityRoles      → /admin/data-auth/entity-roles (fetch by roleId)
+ *
+ * Each page reads the permission catalogue from the controller whose class-level
+ * code gates that page (`roleFunctions.catalogue()` behind
+ * `authorization.roleFunction.view`, `userFunctions.catalogue()` behind
+ * `authorization.userFunction.view`, `permissions.catalogue()` behind
+ * `authorization.permission.view`). Reading it from `/admin/modules` made every
+ * one of them also require `authorization.functionModule.view`, so a delegated
+ * administrator holding only the page's code got a 403 and an empty matrix.
  */
 import {
+  useAdminFunctionAuthorizationApi,
   useAdminFunctionModuleApi,
   useAdminModuleFunctionApi,
   useAdminRoleFunctionApi,
@@ -35,9 +45,13 @@ import {
   type UpdateEntityRoleDto,
   type DataAuthOperation,
   type PermissionComparisonDto,
+  type PermissionHoldersDto,
+  type PermissionCatalogueModuleDto,
+  type AssignableRoleDto,
 } from '@tnzi/core/services/authorization'
+import type { ApiResult } from '@tnzi/core'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
-import { ensureOk, pageArray, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
+import { ensureOk, pageArray, pagedResult, unwrapOk } from '../_mappers'
 
 // HttpClient type derived from a factory signature.
 type HttpClient = Parameters<typeof useAdminFunctionModuleApi>[0]
@@ -60,6 +74,24 @@ export interface ModuleCascadePreview {
   affectedFunctionCount: number
 }
 
+/**
+ * The permission catalogue as the matrices consume it: the flat module list
+ * (hierarchy via `parentId`, disabled and retired rows included) and each
+ * module's functions keyed by module id.
+ */
+export interface PermissionCatalogue {
+  modules: FunctionModuleDto[]
+  functionsByModule: Map<string, ModuleFunctionDto[]>
+}
+
+function toCatalogue(rows: PermissionCatalogueModuleDto[] | null | undefined): PermissionCatalogue {
+  const list = Array.isArray(rows) ? rows : []
+  return {
+    modules: list,
+    functionsByModule: new Map(list.map((m) => [m.id, Array.isArray(m.functions) ? m.functions : []])),
+  }
+}
+
 export interface AuthorizationBridgeDeps {
   /** Production path: provide an HttpClient and the bridge builds all APIs internally. */
   client?: HttpClient
@@ -70,6 +102,7 @@ export interface AuthorizationBridgeDeps {
   userFunctionApi?: ReturnType<typeof useAdminUserFunctionApi>
   entityInfoApi?: ReturnType<typeof useAdminEntityInfoApi>
   entityRoleApi?: ReturnType<typeof useAdminEntityRoleApi>
+  functionAuthorizationApi?: ReturnType<typeof useAdminFunctionAuthorizationApi>
 }
 
 export interface AuthorizationBridge {
@@ -101,14 +134,28 @@ export interface AuthorizationBridge {
    * server-side; enable/disable stays available for emergency ops control.
    */
   permissions: {
+    /** One module's functions (`filters.moduleId`), read from the catalogue behind `authorization.permission.view`. */
     fetch(query: CrudPageQuery): Promise<CrudPageResult<ModuleFunctionDto>>
-    /** Direct, unpaginated fetch by module. */
+    /**
+     * Direct, unpaginated fetch by module from the module management surface
+     * (`authorization.functionModule.view`). Pages gated by another code read
+     * their own surface's `catalogue()` instead.
+     */
     getByModule(moduleId: string): Promise<ModuleFunctionDto[]>
+    /** The whole catalogue behind `authorization.permission.view` (the permission catalogue page). */
+    catalogue(): Promise<PermissionCatalogue>
     create(data: CreateModuleFunctionDto): Promise<ModuleFunctionDto>
     update(id: string, data: UpdateModuleFunctionDto): Promise<ModuleFunctionDto>
     delete(ids: string[]): Promise<void>
     enable(id: string): Promise<void>
     disable(id: string): Promise<void>
+    /**
+     * Who holds a code: roles that grant it (super-admin roles, effective,
+     * dormant and disabled grants), the accounts that hold it and through what,
+     * and the accounts denied it. Rejects with the server message on failure
+     * (404 unknown code, 501 Identity membership unavailable).
+     */
+    holders(code: string): Promise<PermissionHoldersDto>
   }
   roleFunctions: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<RoleFunctionDto>>
@@ -136,6 +183,10 @@ export interface AuthorizationBridge {
      * renders those roles read-only (members bypass every check).
      */
     superAdminRoles(): Promise<string[]>
+    /** The catalogue the role matrix renders, behind `authorization.roleFunction.view`. */
+    catalogue(): Promise<PermissionCatalogue>
+    /** Every role (unpaged) for the list beside the matrix, behind `authorization.roleFunction.view`. */
+    roles(): Promise<AssignableRoleDto[]>
   }
   /**
    * User-direct permission grants and denies (no role involved). Resolution
@@ -155,6 +206,8 @@ export interface AuthorizationBridge {
     getDeniedIds(userId: string): Promise<string[]>
     /** Overwrite the user's deny set; empty list clears all denies. */
     setDeniedForUser(userId: string, functionIds: string[]): Promise<void>
+    /** The catalogue the user grant matrix renders, behind `authorization.userFunction.view`. */
+    catalogue(): Promise<PermissionCatalogue>
   }
   /**
    * Data-auth entity registry (entity types that can be authorized at the row
@@ -166,6 +219,8 @@ export interface AuthorizationBridge {
   entityRoles: BridgeCrudContract<EntityRoleDto, CreateEntityRoleDto, UpdateEntityRoleDto> & {
     /** Every EntityRole assignment for a given entity type. */
     getByEntityInfo(entityInfoId: string): Promise<EntityRoleDto[]>
+    /** Every role (unpaged) for the matrix's role axis, behind `authorization.entityRole.view`. */
+    roles(): Promise<AssignableRoleDto[]>
     /**
      * Effective entity-roles for a single user - aggregated across every
      * role the user holds. Used by the EntityRole page's "Inspect User"
@@ -190,6 +245,50 @@ export interface AuthorizationBridge {
   }
 }
 
+/**
+ * A grant set read whole for an editor whose Save writes it back whole (role
+ * assignments, a user's direct grants, a user's denies). A refused or malformed
+ * read throws: an empty list in its place reads as "holds nothing", and the next
+ * Save would replace every grant held, or lift every deny, with what was ticked.
+ */
+function readGrantIds(result: ApiResult<string[]> | string[]): string[] {
+  const ids = unwrapOk<string[] | null>(result)
+  if (!Array.isArray(ids)) throw new Error('The server did not return the permission list.')
+  return ids
+}
+
+/**
+ * Every module below `rootId` in the parent hierarchy, breadth-first, each
+ * listed once and the root itself excluded. Walks `parentId` links over the
+ * flat module list and tracks visited ids, so a parent cycle left in the data
+ * (A -> B -> A) terminates instead of growing the queue until the tab hangs.
+ * Used by the cascade preview and by the parent picker, which must not offer
+ * a module's own descendants (choosing one would create exactly that cycle).
+ */
+export function collectDescendants<T extends { id: string; parentId?: string | null }>(
+  modules: readonly T[],
+  rootId: string,
+): T[] {
+  const childrenByParent = new Map<string, T[]>()
+  for (const m of modules) {
+    if (!m.parentId) continue
+    const siblings = childrenByParent.get(m.parentId) ?? []
+    siblings.push(m)
+    childrenByParent.set(m.parentId, siblings)
+  }
+  const visited = new Set<string>([rootId])
+  const descendants: T[] = []
+  const queue: T[] = [...(childrenByParent.get(rootId) ?? [])]
+  while (queue.length > 0) {
+    const node = queue.shift() as T
+    if (visited.has(node.id)) continue
+    visited.add(node.id)
+    descendants.push(node)
+    queue.push(...(childrenByParent.get(node.id) ?? []))
+  }
+  return descendants
+}
+
 export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): AuthorizationBridge {
   const fmApi = deps.functionModuleApi ?? (deps.client ? useAdminFunctionModuleApi(deps.client) : null)
   const mfApi = deps.moduleFunctionApi ?? (deps.client ? useAdminModuleFunctionApi(deps.client) : null)
@@ -197,27 +296,29 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
   const ufApi = deps.userFunctionApi ?? (deps.client ? useAdminUserFunctionApi(deps.client) : null)
   const eiApi = deps.entityInfoApi ?? (deps.client ? useAdminEntityInfoApi(deps.client) : null)
   const erApi = deps.entityRoleApi ?? (deps.client ? useAdminEntityRoleApi(deps.client) : null)
+  const faApi = deps.functionAuthorizationApi ?? (deps.client ? useAdminFunctionAuthorizationApi(deps.client) : null)
 
   // When called with no deps (e.g. scaffold test), return a no-op bridge rather than throwing.
   // Production callers MUST provide either `client` or all api deps.
-  // (userFunctionApi / entityInfoApi are later additions guarded at the call
-  // site instead, so tests injecting the original api set keep working.)
+  // (userFunctionApi / entityInfoApi / functionAuthorizationApi are later
+  // additions guarded at the call site instead, so tests injecting the original
+  // api set keep working.)
   if (!fmApi || !mfApi || !rfApi || !erApi) {
     const noOp = () => Promise.reject(new Error('createAuthorizationBridge: no deps provided'))
     return {
       functionModules: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, getAll: noOp as never, enable: noOp as never, disable: noOp as never, previewCascade: noOp as never },
-      permissions: { fetch: noOp as never, getByModule: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, enable: noOp as never, disable: noOp as never },
-      roleFunctions: { fetch: noOp as never, getAssignedIds: noOp as never, setForRole: noOp as never, clearForRole: noOp as never, compare: noOp as never, clone: noOp as never, superAdminRoles: noOp as never },
-      userFunctions: { getAssignedIds: noOp as never, setForUser: noOp as never, clearForUser: noOp as never, getDeniedIds: noOp as never, setDeniedForUser: noOp as never },
+      permissions: { fetch: noOp as never, getByModule: noOp as never, catalogue: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, enable: noOp as never, disable: noOp as never, holders: noOp as never },
+      roleFunctions: { fetch: noOp as never, getAssignedIds: noOp as never, setForRole: noOp as never, clearForRole: noOp as never, compare: noOp as never, clone: noOp as never, superAdminRoles: noOp as never, catalogue: noOp as never, roles: noOp as never },
+      userFunctions: { getAssignedIds: noOp as never, setForUser: noOp as never, clearForUser: noOp as never, getDeniedIds: noOp as never, setDeniedForUser: noOp as never, catalogue: noOp as never },
       entityInfos: { getAll: noOp as never },
-      entityRoles: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, getByEntityInfo: noOp as never, getForUser: noOp as never, setCell: noOp as never },
+      entityRoles: { fetch: noOp as never, create: noOp as never, update: noOp as never, delete: noOp as never, getByEntityInfo: noOp as never, roles: noOp as never, getForUser: noOp as never, setCell: noOp as never },
     }
   }
 
   const functionModules: AuthorizationBridge['functionModules'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FunctionModuleDto>> => {
-      const items = unwrap<FunctionModuleDto[]>(await fmApi.getList())
-      return pageArray(items, query)
+      const items = unwrapOk<FunctionModuleDto[]>(await fmApi.getList())
+      return pageArray(Array.isArray(items) ? items : [], query, (m) => [m.name, m.code, m.description])
     },
     create: async (data) => unwrapOk(await fmApi.create(data)) as FunctionModuleDto,
     update: async (id, data) => unwrapOk(await fmApi.update(String(id), data)) as FunctionModuleDto,
@@ -227,7 +328,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       }
     },
     getAll: async (): Promise<FunctionModuleDto[]> =>
-      unwrap<FunctionModuleDto[]>(await fmApi.getList()),
+      unwrapOk<FunctionModuleDto[]>(await fmApi.getList()) ?? [],
     enable: async (id: string) => {
       ensureOk(await fmApi.enable(String(id)))
     },
@@ -239,32 +340,20 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       // then sum the function counts (one `getByModule` per node - cheap
       // for typical trees of <100 modules, and avoids a dedicated backend
       // endpoint).
-      const all = unwrap<FunctionModuleDto[]>(await fmApi.getList())
+      const all = unwrapOk<FunctionModuleDto[]>(await fmApi.getList()) ?? []
       const root = all.find((m) => m.id === id)
       if (!root) {
         throw new Error(`previewCascade: module ${id} not found`)
       }
-      const childrenByParent = new Map<string, FunctionModuleDto[]>()
-      for (const m of all) {
-        if (!m.parentId) continue
-        const arr = childrenByParent.get(m.parentId) ?? []
-        arr.push(m)
-        childrenByParent.set(m.parentId, arr)
-      }
-      const descendants: FunctionModuleDto[] = []
-      const queue: FunctionModuleDto[] = [...(childrenByParent.get(root.id) ?? [])]
-      while (queue.length > 0) {
-        const node = queue.shift() as FunctionModuleDto
-        descendants.push(node)
-        const kids = childrenByParent.get(node.id)
-        if (kids) queue.push(...kids)
-      }
+      const descendants = collectDescendants(all, root.id)
       // Sum function counts across root + descendants. Run in parallel; a
       // 5-node module tree shouldn't trigger more than a handful of calls.
       const moduleIds = [root.id, ...descendants.map((m) => m.id)]
       const counts = await Promise.all(
         moduleIds.map(async (mid) => {
-          const fns = unwrap<ModuleFunctionDto[]>(await mfApi.getByModule(mid))
+          // A module whose functions cannot be read must not count as having none:
+          // the preview is the confirmation of a cascade disable.
+          const fns = unwrapOk<ModuleFunctionDto[]>(await mfApi.getByModule(mid))
           return Array.isArray(fns) ? fns.length : 0
         }),
       )
@@ -279,19 +368,21 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
   }
 
-  // Permissions (ModuleFunction) - list requires a `moduleId` filter; writes
-  // go to the dedicated /admin/module-functions endpoints.
+  // Permissions (ModuleFunction) - list requires a `moduleId` filter and reads
+  // the catalogue behind the permission page's own code; writes go to the
+  // dedicated /admin/module-functions endpoints.
   const permissions: AuthorizationBridge['permissions'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<ModuleFunctionDto>> => {
       const moduleId = (query.filters as Record<string, string>)?.moduleId
       if (!moduleId) return pagedResult({ items: [], totalCount: 0, pageIndex: 1, pageSize: query.pageSize ?? 20 })
-      const items = unwrap<ModuleFunctionDto[]>(await mfApi.getByModule(moduleId))
-      return pageArray(Array.isArray(items) ? items : [], query)
+      const { functionsByModule } = toCatalogue(unwrapOk<PermissionCatalogueModuleDto[]>(await mfApi.getCatalogue()))
+      return pageArray(functionsByModule.get(moduleId) ?? [], query, (f) => [f.name, f.code, f.description])
     },
     getByModule: async (moduleId: string): Promise<ModuleFunctionDto[]> => {
-      const items = unwrap<ModuleFunctionDto[]>(await mfApi.getByModule(moduleId))
+      const items = unwrapOk<ModuleFunctionDto[]>(await mfApi.getByModule(moduleId))
       return Array.isArray(items) ? items : []
     },
+    catalogue: async () => toCatalogue(unwrapOk<PermissionCatalogueModuleDto[]>(await mfApi.getCatalogue())),
     create: async (data) => unwrapOk(await mfApi.create(data)) as ModuleFunctionDto,
     update: async (id, data) => unwrapOk(await mfApi.update(id, data)) as ModuleFunctionDto,
     delete: async (ids) => {
@@ -304,6 +395,10 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     },
     disable: async (id) => {
       ensureOk(await mfApi.disable(id))
+    },
+    holders: async (code) => {
+      if (!faApi) throw new Error('createAuthorizationBridge: functionAuthorizationApi not provided')
+      return unwrapOk<PermissionHoldersDto>(await faApi.getPermissionHolders(code)) as PermissionHoldersDto
     },
   }
 
@@ -325,7 +420,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
         functionId: typeof filters.functionId === 'string' ? filters.functionId : undefined,
         isEnabled: typeof filters.isEnabled === 'boolean' ? filters.isEnabled : undefined,
       }
-      const result = unwrap<{ items: RoleFunctionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: RoleFunctionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await rfApi.getPagedList(params),
       )
       return pagedResult({
@@ -335,10 +430,8 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
         pageSize: result.pageSize ?? query.pageSize,
       })
     },
-    getAssignedIds: async (roleId: string): Promise<string[]> => {
-      const ids = unwrap<string[]>(await rfApi.getRoleFunctionIds(roleId))
-      return Array.isArray(ids) ? ids : []
-    },
+    getAssignedIds: async (roleId: string): Promise<string[]> =>
+      readGrantIds(await rfApi.getRoleFunctionIds(roleId)),
     setForRole: async (roleId: string, functionIds: string[]): Promise<void> => {
       ensureOk(await rfApi.setFunctions(roleId, functionIds))
     },
@@ -346,13 +439,18 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       ensureOk(await rfApi.clearFunctions(roleId))
     },
     compare: async (roleAId, roleBId) =>
-      unwrap<PermissionComparisonDto>(
+      unwrapOk<PermissionComparisonDto>(
         await rfApi.compareRolePermissions(roleAId, roleBId),
       ),
     clone: async (targetRoleId, sourceRoleId) =>
       unwrapOk<number>(await rfApi.cloneRolePermissions(targetRoleId, sourceRoleId)),
     superAdminRoles: async () =>
-      unwrap<string[]>(await rfApi.getSuperAdminRoles()) ?? [],
+      unwrapOk<string[]>(await rfApi.getSuperAdminRoles()) ?? [],
+    catalogue: async () => toCatalogue(unwrapOk<PermissionCatalogueModuleDto[]>(await rfApi.getCatalogue())),
+    roles: async () => {
+      const items = unwrapOk<AssignableRoleDto[]>(await rfApi.getRoles())
+      return Array.isArray(items) ? items : []
+    },
   }
 
   const requireUfApi = (): NonNullable<typeof ufApi> => {
@@ -361,29 +459,26 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
   }
 
   const userFunctions: AuthorizationBridge['userFunctions'] = {
-    getAssignedIds: async (userId: string): Promise<string[]> => {
-      const ids = unwrap<string[]>(await requireUfApi().getUserFunctionIds(userId))
-      return Array.isArray(ids) ? ids : []
-    },
+    getAssignedIds: async (userId: string): Promise<string[]> =>
+      readGrantIds(await requireUfApi().getUserFunctionIds(userId)),
     setForUser: async (userId: string, functionIds: string[]): Promise<void> => {
       ensureOk(await requireUfApi().setFunctions(userId, functionIds))
     },
     clearForUser: async (userId: string): Promise<void> => {
       ensureOk(await requireUfApi().clearFunctions(userId))
     },
-    getDeniedIds: async (userId: string): Promise<string[]> => {
-      const ids = unwrap<string[]>(await requireUfApi().getDeniedFunctionIds(userId))
-      return Array.isArray(ids) ? ids : []
-    },
+    getDeniedIds: async (userId: string): Promise<string[]> =>
+      readGrantIds(await requireUfApi().getDeniedFunctionIds(userId)),
     setDeniedForUser: async (userId: string, functionIds: string[]): Promise<void> => {
       ensureOk(await requireUfApi().setDeniedFunctions(userId, functionIds))
     },
+    catalogue: async () => toCatalogue(unwrapOk<PermissionCatalogueModuleDto[]>(await requireUfApi().getCatalogue())),
   }
 
   const entityInfos: AuthorizationBridge['entityInfos'] = {
     getAll: async () => {
       if (!eiApi) return []
-      const items = unwrap<EntityInfoDto[]>(await eiApi.getAll())
+      const items = unwrapOk<EntityInfoDto[]>(await eiApi.getAll())
       return Array.isArray(items) ? items : []
     },
   }
@@ -392,7 +487,7 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<EntityRoleDto>> => {
       const roleId = (query.filters as Record<string, string>)?.roleId
       if (!roleId) return pagedResult({ items: [], totalCount: 0, pageIndex: 1, pageSize: query.pageSize ?? 20 })
-      const items = unwrap<EntityRoleDto[]>(await erApi.getByRole(roleId))
+      const items = unwrapOk<EntityRoleDto[]>(await erApi.getByRole(roleId))
       return pageArray(Array.isArray(items) ? items : [], query)
     },
     create: async (data) => unwrapOk(await erApi.create(data)) as EntityRoleDto,
@@ -403,22 +498,30 @@ export function createAuthorizationBridge(deps: AuthorizationBridgeDeps = {}): A
       }
     },
     getByEntityInfo: async (entityInfoId: string) => {
-      const items = unwrap<EntityRoleDto[]>(await erApi.getByEntityInfo(entityInfoId))
+      const items = unwrapOk<EntityRoleDto[]>(await erApi.getByEntityInfo(entityInfoId))
+      return Array.isArray(items) ? items : []
+    },
+    roles: async () => {
+      const items = unwrapOk<AssignableRoleDto[]>(await erApi.getRoles())
       return Array.isArray(items) ? items : []
     },
     getForUser: async (userId: string) => {
-      const items = unwrap<EntityRoleDto[]>(await erApi.getUserEntityRoles(userId))
+      const items = unwrapOk<EntityRoleDto[]>(await erApi.getUserEntityRoles(userId))
       return Array.isArray(items) ? items : []
     },
     setCell: async ({ entityInfoId, roleId, operation, enable, filter }) => {
-      // Look up the existing row for this (entity, role, operation) tuple.
+      // Look up the existing row for this (entity, role, operation) tuple. A
+      // refused lookup rejects: read as "no row" it turned a toggle-off into a
+      // silent no-op the page reported as saved, and a toggle-on into a duplicate.
       const existing = (await entityRoles.getByEntityInfo(entityInfoId)).find(
         (r) => r.roleId === roleId && r.operation === operation,
       )
       if (enable) {
         if (existing) {
-          if (!existing.isEnabled || (filter !== undefined && existing.filter !== filter)) {
-            ensureOk(await erApi.update(existing.id, { operation, filter, isEnabled: true }))
+          // The update request carries the operation and filter only (a rule is in
+          // force for as long as it exists), so only a changed filter is worth a call.
+          if (filter !== undefined && existing.filter !== filter) {
+            ensureOk(await erApi.update(existing.id, { operation, filter }))
           }
         } else {
           ensureOk(await erApi.create({ entityInfoId, roleId, operation, filter }))

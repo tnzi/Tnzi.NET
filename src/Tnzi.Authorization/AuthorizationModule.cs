@@ -54,6 +54,9 @@ public class AuthorizationModule : TnziApplicationModule
         services.AddScoped<IUserFunctionService, UserFunctionService>();
         services.AddScoped<IDualControlService, DualControlService>();
         services.AddSingleton<FunctionAuthCache>();
+        // Authorization:SuperAdminBypassScope. Singleton: the scope registry is built once
+        // from the permission providers, on first use and only when the bypass is narrowed.
+        services.AddSingleton<SuperAdminBypassPolicy>();
 
         // 注册权限检查器。
         // 这里曾经还有一个 IPermissionManager 单例（provider + DB 的内存快照），但运行时判定
@@ -102,6 +105,13 @@ public class AuthorizationModule : TnziApplicationModule
         // register event handlers - no auto-discovery.
         services.AddEventHandler<UserRolesChangedEvent,
             Tnzi.Authorization.Events.Handlers.UserRolesChangedEventHandler>();
+
+        // A deleted role leaves its RoleFunction rows behind (RoleId has no
+        // foreign key). They grant nothing, but they block deleting the
+        // function forever; drop them when the role goes. Members' caches are
+        // handled by the per-member UserRolesChangedEvent Identity publishes.
+        services.AddEventHandler<RoleDeletedEvent,
+            Tnzi.Authorization.Events.Handlers.RoleDeletedEventHandler>();
 
         // Watch for role renames that would invalidate SuperAdminRoles by
         // name - purely diagnostic, but the alternative is "admin gets
@@ -228,6 +238,22 @@ public class AuthorizationModule : TnziApplicationModule
             logger.LogInformation(
                 "Authorization SuperAdmin bypass is DISABLED (SuperAdminRoles is empty). " +
                 "Every permission check will consult RoleFunction/UserFunction tables.");
+            if (optionsSnapshot.SuperAdminBypassScope != Tnzi.Authorization.Options.SuperAdminBypassScope.All)
+            {
+                logger.LogInformation(
+                    "Authorization.SuperAdminBypassScope is {Scope} but there is no super-admin bypass to narrow; the setting has no effect.",
+                    optionsSnapshot.SuperAdminBypassScope);
+            }
+        }
+        else if (optionsSnapshot.SuperAdminBypassScope == Tnzi.Authorization.Options.SuperAdminBypassScope.Platform)
+        {
+            var registry = serviceProvider.GetRequiredService<SuperAdminBypassPolicy>().Registry;
+            logger.LogInformation(
+                "Authorization SuperAdmin bypass enabled for roles: {Roles}, limited to platform permission groups: {PlatformGroups}. " +
+                "Application groups ({ApplicationGroups}) need explicit grants for super admins too.",
+                string.Join(", ", optionsSnapshot.SuperAdminRoles),
+                string.Join(", ", registry.GroupScopes.Where(g => g.Value == PermissionScope.Platform).Select(g => g.Key).Order()),
+                string.Join(", ", registry.GroupScopes.Where(g => g.Value == PermissionScope.Application).Select(g => g.Key).Order()));
         }
         else
         {

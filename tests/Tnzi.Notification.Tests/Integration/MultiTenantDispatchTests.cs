@@ -36,6 +36,7 @@ public class MultiTenantDispatchTests : IntegratedTestBase<MultiTenantNotificati
     private static readonly Guid TenantB = Guid.NewGuid();
 
     private readonly List<(string Address, Guid? TenantId)> _sent = [];
+    private readonly List<IReadOnlyDictionary<string, string>> _headers = [];
     private readonly RecordingQueue _queue = new();
     private readonly DispatchOptions _dispatch = new()
     {
@@ -71,11 +72,22 @@ public class MultiTenantDispatchTests : IntegratedTestBase<MultiTenantNotificati
         services.AddScoped<IUnitOfWork, EFCoreUnitOfWork<MultiTenantNotificationDbContext>>();
 
         var options = new Mock<IOptionsMonitor<NotificationOptions>>();
-        options.Setup(o => o.CurrentValue).Returns(new NotificationOptions { MaxConcurrency = 4, Dispatch = _dispatch });
+        options.Setup(o => o.CurrentValue).Returns(new NotificationOptions
+        {
+            MaxConcurrency = 4,
+            Dispatch = _dispatch,
+            // 只影响非事务性消息（带退订信头的那些）；其余用例发的都是事务性消息，不受影响
+            OptOut = new OptOutOptions
+            {
+                TokenSecret = "multi-tenant-dispatch-secret",
+                LandingUrl = "https://app.example.com/unsubscribe",
+                OneClickEndpoint = "https://api.example.com/api/notifications/unsubscribe/one-click",
+            },
+        });
         services.AddSingleton(_ => options.Object);
 
         // 发送器按作用域注册并记下发信那一刻的租户：这是唯一能观察到「切进了哪个租户」的地方。
-        services.AddScoped<IEmailSender>(sp => new TenantRecordingEmailSender(sp.GetRequiredService<ICurrentTenant>(), _sent));
+        services.AddScoped<IEmailSender>(sp => new TenantRecordingEmailSender(sp.GetRequiredService<ICurrentTenant>(), _sent, _headers));
         services.AddSingleton(_ => new Mock<ISmsSender>().Object);
         services.AddSingleton(_ => new Mock<IPushSender>().Object);
         services.AddSingleton(_ => new Mock<IFaxSender>().Object);
@@ -121,6 +133,36 @@ public class MultiTenantDispatchTests : IntegratedTestBase<MultiTenantNotificati
 
         _sent.ShouldBe([("reader@example.com", (Guid?)TenantA)]);
         (await ReloadAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
+    }
+
+    /// <summary>
+    /// ★★ 租户的群发邮件在后台工作项里发出时，信头里的退订令牌签的是这个租户。
+    /// 兑现它的是邮件服务商发来的匿名 POST，不带任何租户信息；令牌不带租户，退订就落在宿主，
+    /// 而这个租户下一次群发在自己的作用域里判抑制，看不见那一行。
+    /// </summary>
+    [Fact]
+    public async Task AQueuedTenantNewsletter_CarriesAnUnsubscribeTokenBoundToThatTenant()
+    {
+        using (var creating = ServiceProvider.CreateScope())
+        using (creating.ServiceProvider.GetRequiredService<ICurrentTenant>().Change(TenantA))
+        {
+            var request = NewRequest();
+            request.IsTransactional = false;
+            var result = await creating.ServiceProvider.GetRequiredService<INotificationService>().CreateAndSendAsync(request);
+            result.Succeeded.ShouldBeTrue(result.Message);
+        }
+
+        await RunQueuedItemsInFreshScopeAsync();
+
+        var header = _headers.ShouldHaveSingleItem()["List-Unsubscribe"];
+        var marker = header.IndexOf("token=", StringComparison.Ordinal) + "token=".Length;
+        var token = Uri.UnescapeDataString(header[marker..header.IndexOf('>', marker)]);
+
+        using var redeeming = ServiceProvider.CreateScope();
+        var payload = redeeming.ServiceProvider.GetRequiredService<INotificationOptOutService>().ResolveUnsubscribeToken(token);
+        payload.ShouldNotBeNull();
+        payload!.TenantId.ShouldBe(TenantA);
+        payload.Address.ShouldBe("reader@example.com");
     }
 
     /// <summary>定时分支走的是延迟入队，租户同样要随工作项带走。</summary>
@@ -210,6 +252,23 @@ public class MultiTenantDispatchTests : IntegratedTestBase<MultiTenantNotificati
             recipientStatus: NotificationStatus.Scheduled, deferredUntil: MinutesAgo(5), address: "a@example.com");
         var b = await SeedAsync(TenantB, NotificationStatus.Scheduled,
             recipientStatus: NotificationStatus.Scheduled, deferredUntil: MinutesAgo(5), address: "b@example.com");
+
+        await RecoverOnceAsync();
+
+        AssertSentInOwnTenant();
+        (await ReloadAsync(a)).Status.ShouldBe(NotificationStatus.Sent);
+        (await ReloadAsync(b)).Status.ShouldBe(NotificationStatus.Sent);
+    }
+
+    /// <summary>
+    /// ★ 排队 / 待重试却丢了工作项的消息（<c>Pending</c> + 已过的 <c>ScheduledTime</c>）也逐租户接手：
+    /// 租户清单只收 <c>Sending</c> / <c>Scheduled</c> 的话，这一遍在多租户下一条都扫不到。
+    /// </summary>
+    [Fact]
+    public async Task RecoverOnce_ClaimsOverdueQueuedMessagesOfEveryTenant()
+    {
+        var a = await SeedAsync(TenantA, NotificationStatus.Pending, scheduledTime: MinutesAgo(60), address: "a@example.com");
+        var b = await SeedAsync(TenantB, NotificationStatus.Pending, scheduledTime: MinutesAgo(60), address: "b@example.com");
 
         await RecoverOnceAsync();
 
@@ -337,13 +396,24 @@ public class MultiTenantDispatchTests : IntegratedTestBase<MultiTenantNotificati
     }
 
     /// <summary>记下发信那一刻的租户。</summary>
-    private sealed class TenantRecordingEmailSender(ICurrentTenant currentTenant, List<(string Address, Guid? TenantId)> sent) : IEmailSender
+    private sealed class TenantRecordingEmailSender(
+        ICurrentTenant currentTenant,
+        List<(string Address, Guid? TenantId)> sent,
+        List<IReadOnlyDictionary<string, string>> headersSent) : IEmailSender
     {
         public Task<SendResult> SendToAsync(string to, string? name, string subject, string body, bool isHtml = true,
             List<EmailAttachment>? attachments = null, CancellationToken cancellationToken = default)
         {
             sent.Add((to, currentTenant.Id));
             return Task.FromResult(SendResult.CreateSuccess("stub-id"));
+        }
+
+        public Task<SendResult> SendToWithHeadersAsync(string to, string? name, string subject, string body, bool isHtml,
+            List<EmailAttachment>? attachments, IReadOnlyDictionary<string, string>? headers, CancellationToken cancellationToken = default)
+        {
+            if (headers != null)
+                headersSent.Add(headers);
+            return SendToAsync(to, name, subject, body, isHtml, attachments, cancellationToken);
         }
     }
 

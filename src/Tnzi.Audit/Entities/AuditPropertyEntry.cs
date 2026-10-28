@@ -24,6 +24,10 @@ public class AuditPropertyEntry : EntityBase<Guid>, IHasCreationTime
     /// <summary>
     /// 获取或设置 属性显示名称
     /// </summary>
+    /// <remarks>
+    /// 给自定义采集方留的列：内置的 <c>EntityAuditSaveChangesInterceptor</c> 不写它（恒为 <c>null</c>），
+    /// 读取方不要指望它有值，按 <see cref="PropertyName"/> 显示。
+    /// </remarks>
     public string? PropertyDisplayName { get; set; }
 
     /// <summary>

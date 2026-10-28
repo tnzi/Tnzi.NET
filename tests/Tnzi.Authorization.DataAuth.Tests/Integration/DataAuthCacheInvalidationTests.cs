@@ -1,6 +1,9 @@
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Tnzi.Authorization.DataAuth.Events.Handlers;
 using Tnzi.Caching;
+using Tnzi.Data;
+using Tnzi.Identity.Events;
 
 namespace Tnzi.Authorization.DataAuth.Tests.Integration;
 
@@ -20,6 +23,11 @@ public class DataAuthCacheInvalidationTests : IntegratedTestBase<DataAuthTestDbC
     private readonly IMemoryCache _memoryCache = new MemoryCache(new MemoryCacheOptions());
     private readonly ICache _cache;
 
+    /// <summary>工作单元替身：<see cref="_inTransaction"/> 为真时表示「事务进行中，写入到提交才可见」。默认不在事务里。</summary>
+    private readonly Mock<IUnitOfWorkManager> _unitOfWork = new();
+    private readonly PostCommitActionQueue _postCommit = new();
+    private bool _inTransaction;
+
     public DataAuthCacheInvalidationTests()
     {
         MapperExtensions.SetMapper(new Mapper(new TypeAdapterConfig()));
@@ -36,6 +44,9 @@ public class DataAuthCacheInvalidationTests : IntegratedTestBase<DataAuthTestDbC
         AddRepo<EntityRole>(services);
         AddRepo<Ticket>(services);
         services.AddScoped(_ => _userRoleService.Object);
+        _unitOfWork.SetupGet(u => u.IsEnabledTransaction).Returns(() => _inTransaction);
+        services.AddScoped(_ => _unitOfWork.Object);
+        services.AddScoped<IPostCommitActionQueue>(_ => _postCommit);
     }
 
     private static void AddRepo<TEntity>(IServiceCollection services) where TEntity : class, Tnzi.Domain.Entities.IEntity<Guid>
@@ -113,6 +124,95 @@ public class DataAuthCacheInvalidationTests : IntegratedTestBase<DataAuthTestDbC
 
         // B 的段没被碰：还是同一个缓存实例。
         (await tenantB.GetDataFilterAsync<Ticket>(UserId, DataAuthOperation.Query)).ShouldBeSameAs(cachedForB);
+    }
+
+    private static readonly Guid WideRoleId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid SomeoneElse = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+    /// <summary>
+    /// ★★★ 用户同时持有「只看自己的单」与「看另一个人的单」两个角色，OR 表达式已被缓存。
+    /// 管理员把宽的那个角色摘掉之后，下一次读必须只剩自己的单：缓存键里没有角色集，
+    /// 不随成员变更失效，被摘掉的角色在 15 分钟里照样放出它的行。
+    /// 处理器在提交后的独立作用域里跑、没有用户上下文，而读的人在租户 A 里：版本键不能带调用者的租户段。
+    /// </summary>
+    [Fact]
+    public async Task A_role_removal_drops_that_roles_rows_from_the_cached_filter_at_once()
+    {
+        var entityInfo = await SeedAsync();
+        await ServiceProvider.GetRequiredService<IRepository<EntityRole, Guid>>().InsertAsync(new EntityRole
+        {
+            EntityInfoId = entityInfo.Id, RoleId = WideRoleId, Operation = DataAuthOperation.Query, IsEnabled = true,
+            Filter = $$$"""{"logic":"And","rules":[{"field":"OwnerId","operator":"Equal","value":"{{{SomeoneElse}}}"}]}""",
+        });
+        _userRoleService.Setup(s => s.GetUserRoleIdsAsync(UserId)).ReturnsAsync([RoleId, WideRoleId]);
+        var tenantA = ServiceForTenant(TenantA);
+
+        var before = (await tenantA.GetDataFilterAsync<Ticket>(UserId, DataAuthOperation.Query))!.Compile();
+        before(new Ticket { OwnerId = SomeoneElse }).ShouldBeTrue("precondition: the wide role's rows are visible");
+
+        _userRoleService.Setup(s => s.GetUserRoleIdsAsync(UserId)).ReturnsAsync([RoleId]);
+        var handler = new UserRolesChangedDataFilterCacheHandler(
+            Mock.Of<ILogger<UserRolesChangedDataFilterCacheHandler>>(), _cache);
+        await handler.HandleAsync(new UserRolesChangedEvent
+        {
+            UserId = UserId,
+            UserName = "user",
+            AddedRoleIds = [],
+            RemovedRoleIds = [WideRoleId],
+            ChangeType = UserRolesChangeType.Removed,
+            ChangedTime = DateTime.UtcNow,
+        });
+
+        var after = (await tenantA.GetDataFilterAsync<Ticket>(UserId, DataAuthOperation.Query))!.Compile();
+        after(new Ticket { OwnerId = SomeoneElse }).ShouldBeFalse("the removed role must stop contributing rows");
+        after(new Ticket { OwnerId = UserId }).ShouldBeTrue();
+    }
+
+    /// <summary>一个用户的角色变更不作废别人的缓存：失效按人，不是全清。</summary>
+    [Fact]
+    public async Task A_role_change_leaves_other_users_cached_filters_alone()
+    {
+        await SeedAsync();
+        var otherUser = Guid.NewGuid();
+        _userRoleService.Setup(s => s.GetUserRoleIdsAsync(otherUser)).ReturnsAsync([RoleId]);
+        var tenantA = ServiceForTenant(TenantA);
+        var cachedForOther = await tenantA.GetDataFilterAsync<Ticket>(otherUser, DataAuthOperation.Query);
+        cachedForOther.ShouldNotBeNull();
+
+        await new UserRolesChangedDataFilterCacheHandler(Mock.Of<ILogger<UserRolesChangedDataFilterCacheHandler>>(), _cache)
+            .HandleAsync(new UserRolesChangedEvent
+            {
+                UserId = UserId, UserName = "user", AddedRoleIds = [], RemovedRoleIds = [RoleId],
+                ChangeType = UserRolesChangeType.Removed, ChangedTime = DateTime.UtcNow,
+            });
+
+        (await tenantA.GetDataFilterAsync<Ticket>(otherUser, DataAuthOperation.Query)).ShouldBeSameAs(cachedForOther);
+    }
+
+    /// <summary>
+    /// ★★ 规则写在事务里（宿主开了全局工作单元）：版本号当场 bump，删除却要到提交才可见。
+    /// 这之间另一个请求按新版本键未命中、读到提交前的旧规则、编译并缓存 15 分钟，之后再没有 bump 作废它。
+    /// 提交后必须再 bump 一次。提交用「先落库、再执行提交后队列」表示，与真实工作单元管理器提交成功后做的事相同。
+    /// </summary>
+    [Fact]
+    public async Task A_rule_removed_inside_a_transaction_is_not_kept_alive_by_a_read_before_commit()
+    {
+        var entityInfo = await SeedAsync();
+        var tenantA = ServiceForTenant(TenantA);
+        var role = (await tenantA.GetEntityRolesByEntityAsync(entityInfo.Id)).Data!.Single();
+
+        _inTransaction = true;
+        (await tenantA.DeleteEntityRoleAsync(role.Id)).Succeeded.ShouldBeTrue();
+
+        // 并发请求：提交前读，库里还是旧规则，表达式按 bump 之后的版本键缓存下来。
+        (await tenantA.GetDataFilterAsync<Ticket>(UserId, DataAuthOperation.Query)).ShouldNotBeNull("precondition: the pre-commit read still sees the rule");
+
+        _inTransaction = false;
+        await DbContext.SaveChangesAsync();
+        await _postCommit.ExecuteAsync();
+
+        (await tenantA.GetDataFilterAsync<Ticket>(UserId, DataAuthOperation.Query))
+            .ShouldBeNull("the expression compiled from the pre-commit rows must not outlive the commit");
     }
 
     /// <summary>只替换 <see cref="ICurrentUser"/>，其余服务原样透传。</summary>

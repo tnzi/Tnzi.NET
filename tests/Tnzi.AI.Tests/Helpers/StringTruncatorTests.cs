@@ -38,6 +38,19 @@ public class StringTruncatorTests
         StringTruncator.Truncate("anything", 0).ShouldBe("...");
     }
 
+    /// <summary>
+    /// 截断点落在代理对中间时整个字符一起舍掉：摘要写进运行表，孤立的高代理项会让严格 UTF-8 的驱动拒绝写入。
+    /// </summary>
+    [Fact]
+    public void Truncate_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        // 第 10 个码元是 emoji 的前半个
+        var result = StringTruncator.Truncate("012345678\U0001F600tail", 10);
+
+        result.ShouldBe("012345678...");
+        result.ShouldNotContain('\uD83D');
+    }
+
     [Fact]
     public void Truncate_PreservesShortUnicodeInput()
     {

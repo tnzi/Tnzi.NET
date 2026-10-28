@@ -11,6 +11,21 @@ namespace Tnzi.AI.Rag.Services;
 /// scoped DbContext 查库，不能并行，见 <c>RetrieveAsync</c> 内注释），
 /// 图谱搜索结果作为附加上下文片段追加到向量检索结果之后（不参与向量结果的排序）。
 /// </para>
+/// <para>
+/// 按库检索只查存在且<b>启用中</b>的知识库，向量与图谱都是（见 <see cref="RetrievalAugmentation.LoadSearchableKnowledgeBasesAsync"/>）。
+/// </para>
+/// <para>
+/// <b>相关度是绝对值</b>：<see cref="RagRetrievalOptions.MinRelevance"/> 比的、结果里的 <see cref="RetrievalResult.Score"/> 报的，
+/// 都是检索（经 <see cref="IReranker"/>）给出的相关度，默认重排器原样透传，即余弦相似度。后处理管线（去重、min-max 归一化、
+/// 加权递减）只决定取舍与先后。★ 此前阈值作用在归一化之后：最高一条恒为 1.0、最低一条恒为 0，默认阈值 0.3 下五条都高度相关的结果
+/// 丢掉末尾两条，只命中一条毫不相关的分块时它被归一成 1.0、照样通过，还以 <c>relevance: 1.00</c> 写进 prompt 与引用。
+/// </para>
+/// <para>
+/// 每次检索记一次 <c>rag.search</c> Activity 与 <c>rag.search.count</c> / <c>rag.search.duration</c>（只按一个库检索时带上库 Id），
+/// 失败记 <c>rag.error.count</c>（<c>rag.operation=retrieval</c>）。这里是用户端两个引擎与默认 agent 检索
+/// （<c>VectorTextSearchService</c>）共同走的路径；混合检索不经过这里、自己记，所以每次请求只记一次。
+/// ★ 此前只有管理端的检索测试与混合检索记指标：默认配置下 agent 与用户的全部检索流量在仪表盘上看不见。
+/// </para>
 /// </summary>
 public class RagRetriever : ApplicationService, IRagRetriever
 {
@@ -77,91 +92,133 @@ public class RagRetriever : ApplicationService, IRagRetriever
         // 复制一份而不是改调用方的对象。
         options = ClampTopK(options ?? new RagRetrievalOptions());
 
+        var singleKnowledgeBase = options.KnowledgeBaseIds is { Count: > 0 } ids && ids.Distinct().Count() == 1
+            ? ids[0]
+            : (Guid?)null;
+        using var activity = RagActivitySource.StartSearchActivity(options.TopK, singleKnowledgeBase);
+        var stopwatch = Stopwatch.StartNew();
+
         try
         {
-            // 1. 查询改写（可选）
-            var searchQuery = query;
-            if (_queryRewriter != null)
-            {
-                var rewritten = await _queryRewriter.RewriteAsync(query, ct);
-                if (!string.IsNullOrWhiteSpace(rewritten))
-                {
-                    searchQuery = rewritten;
-                }
-            }
-
-            // 2+3. 向量搜索（含 per-KB 对齐的查询向量生成，支持多知识库）→ 图谱搜索。
-            // 必须顺序执行：两者都经本 scope 的 RagDbContext 查库（向量路径读 KnowledgeBase 取
-            // per-KB 嵌入配置，图谱路径读 KnowledgeGraphNode/Edge），并发使用同一 DbContext 会触发
-            // "A second operation was started on this context" 并被下方 catch 吞成空结果。
-            var allResults = await SearchVectorAsync(searchQuery, options, ct);
-            var graphResults = await RetrievalAugmentation.SearchGraphAsync(
-                _graphSearchService, searchQuery, options.KnowledgeBaseIds, Logger, ct);
-
-            // 4. 重排序
-            allResults = await _reranker.RerankAsync(query, allResults, options.TopK, ct);
-
-            // 5. 运行后处理管线（去重、归一化等）
-            foreach (var processor in _sortedProcessors)
-            {
-                allResults = await processor.ProcessAsync(allResults, query, ct);
-            }
-
-            // 6. 按最低相关性过滤
-            if (options.MinRelevance > 0)
-            {
-                allResults = allResults.Where(r => r.Score >= options.MinRelevance).ToList();
-            }
-
-            // 7. 相关性评分（可选）
-            if (_relevanceGrader != null && allResults.Count > 0)
-            {
-                var textResults = allResults.Select(r => new TextSearchResult
-                {
-                    Text = r.Content,
-                    Score = r.Score
-                }).ToList();
-
-                var graded = await _relevanceGrader.GradeAsync(query, textResults, ct);
-                var relevantTexts = graded.Where(g => g.IsRelevant).Select(g => g.Result.Text).ToHashSet();
-                allResults = allResults.Where(r => relevantTexts.Contains(r.Content)).ToList();
-            }
-
-            // 8. 转换为 RetrievalResult（始终包含 chunkIndex 以支持 Parent Document Retrieval）
-            var results = allResults.Select(r =>
-            {
-                var metadata = !string.IsNullOrWhiteSpace(r.Metadata)
-                    ? JsonSerializer.Deserialize<Dictionary<string, object>>(r.Metadata)
-                    : new Dictionary<string, object>();
-                metadata ??= new Dictionary<string, object>();
-                metadata.TryAdd("chunkIndex", r.ChunkIndex);
-                return new RetrievalResult
-                {
-                    Content = r.Content,
-                    Score = r.Score,
-                    KnowledgeBaseId = r.KnowledgeBaseId,
-                    DocumentId = r.DocumentId,
-                    Metadata = metadata
-                };
-            }).ToList();
-
-            // 9. Parent Document Retrieval（可选：将细粒度匹配块扩展为更大的上下文窗口）
-            results = await RetrievalAugmentation.ExpandParentsAsync(
-                _parentDocumentRetriever, results, _ragOptions, options.EnableParentRetrieval, Logger, ct);
-
-            // 10. 追加图谱搜索上下文片段（不参与向量结果排序，作为补充上下文）
-            results = RetrievalAugmentation.AppendGraphSnippets(results, graphResults);
-
-            Logger.LogDebug("RAG retrieval returned {Count} results for query length {Length}",
-                results.Count, query.Length);
-
+            var results = await RetrieveCoreAsync(query, options, ct);
+            RagActivitySource.RecordSearch(results.Count, stopwatch.Elapsed.TotalSeconds, singleKnowledgeBase);
             return results;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 调用方取消（客户端断开）不是检索故障：不记错误指标，也不记 Error 日志
+            return [];
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "RAG retrieval failed for query length {Length}", query.Length);
+            RagActivitySource.RecordError("retrieval", ex);
+            RagActivitySource.RecordActivityError(activity, ex);
             return [];
         }
+    }
+
+    /// <summary>
+    /// 检索管线本身（知识库范围 → 查询改写 → 向量与图谱 → 重排 → 阈值 → 后处理 → 评分 → 父文档 → 图谱片段）。
+    /// </summary>
+    private async Task<List<RetrievalResult>> RetrieveCoreAsync(string query, RagRetrievalOptions options, CancellationToken ct)
+    {
+        // 1. 知识库范围：按库检索只查存在且启用中的库；一个都不剩就什么都不查（连查询改写与嵌入都省掉）。
+        //    search-all（不指定库）由向量库自己的 SQL 排除禁用库。
+        List<KnowledgeBase>? knowledgeBases = null;
+        if (options.KnowledgeBaseIds is { Count: > 0 })
+        {
+            knowledgeBases = await RetrievalAugmentation.LoadSearchableKnowledgeBasesAsync(
+                _kbRepository, options.KnowledgeBaseIds.Distinct().ToList(), Logger, ct);
+            if (knowledgeBases.Count == 0)
+            {
+                return [];
+            }
+        }
+
+        // 2. 查询改写（可选）
+        var searchQuery = query;
+        if (_queryRewriter != null)
+        {
+            var rewritten = await _queryRewriter.RewriteAsync(query, ct);
+            if (!string.IsNullOrWhiteSpace(rewritten))
+            {
+                searchQuery = rewritten;
+            }
+        }
+
+        // 3+4. 向量搜索（含 per-KB 对齐的查询向量生成，支持多知识库）→ 图谱搜索。
+        // 必须顺序执行：两者都经本 scope 的 RagDbContext 查库（图谱路径读 KnowledgeGraphNode/Edge），
+        // 并发使用同一 DbContext 会触发 "A second operation was started on this context" 并被下方 catch 吞成空结果。
+        var allResults = await SearchVectorAsync(searchQuery, knowledgeBases, options.TopK, ct);
+        var graphResults = await RetrievalAugmentation.SearchGraphAsync(
+            _graphSearchService, searchQuery, knowledgeBases?.Select(kb => kb.Id).ToList(), Logger, ct);
+
+        // 5. 重排序
+        allResults = await _reranker.RerankAsync(query, allResults, options.TopK, ct);
+
+        // 6. 按最低相关性过滤：比的是检索 / 重排给出的绝对相关度，必须在归一化之前（见类注释）
+        if (options.MinRelevance > 0)
+        {
+            allResults = allResults.Where(r => r.Score >= options.MinRelevance).ToList();
+        }
+
+        var relevanceByChunk = new Dictionary<Guid, double>();
+        foreach (var result in allResults)
+        {
+            relevanceByChunk.TryAdd(result.Id, result.Score);
+        }
+
+        // 7. 运行后处理管线（去重、归一化、加权递减）：只决定取舍与先后
+        foreach (var processor in _sortedProcessors)
+        {
+            allResults = await processor.ProcessAsync(allResults, query, ct);
+        }
+
+        // 8. 转换为 RetrievalResult：分数报回绝对相关度（自定义后处理器造出的新块没有原值，沿用它给的分数）；
+        //    始终包含 chunkIndex 以支持 Parent Document Retrieval
+        var results = allResults.Select(r =>
+        {
+            var metadata = !string.IsNullOrWhiteSpace(r.Metadata)
+                ? JsonSerializer.Deserialize<Dictionary<string, object>>(r.Metadata)
+                : new Dictionary<string, object>();
+            metadata ??= new Dictionary<string, object>();
+            metadata.TryAdd("chunkIndex", r.ChunkIndex);
+            return new RetrievalResult
+            {
+                Content = r.Content,
+                Score = relevanceByChunk.TryGetValue(r.Id, out var relevance) ? relevance : r.Score,
+                KnowledgeBaseId = r.KnowledgeBaseId,
+                DocumentId = r.DocumentId,
+                Metadata = metadata
+            };
+        }).ToList();
+
+        // 9. 相关性评分（可选）
+        if (_relevanceGrader != null && results.Count > 0)
+        {
+            var textResults = results.Select(r => new TextSearchResult
+            {
+                Text = r.Content,
+                Score = r.Score
+            }).ToList();
+
+            var graded = await _relevanceGrader.GradeAsync(query, textResults, ct);
+            var relevantTexts = graded.Where(g => g.IsRelevant).Select(g => g.Result.Text).ToHashSet();
+            results = results.Where(r => relevantTexts.Contains(r.Content)).ToList();
+        }
+
+        // 10. Parent Document Retrieval（可选：将细粒度匹配块扩展为更大的上下文窗口）
+        results = await RetrievalAugmentation.ExpandParentsAsync(
+            _parentDocumentRetriever, results, _ragOptions, options.EnableParentRetrieval, Logger, ct);
+
+        // 11. 追加图谱搜索上下文片段（不参与向量结果排序，作为补充上下文）
+        results = RetrievalAugmentation.AppendGraphSnippets(results, graphResults);
+
+        Logger.LogDebug("RAG retrieval returned {Count} results for query length {Length}",
+            results.Count, query.Length);
+
+        return results;
     }
 
     /// <summary>
@@ -171,7 +228,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
     {
         return results.Select(r => new CitationDto
         {
-            Text = r.Content.Length > maxContentLength ? r.Content[..maxContentLength] + "..." : r.Content,
+            Text = r.Content.Truncate(maxContentLength),
             Score = r.Score
         }).ToList();
     }
@@ -181,27 +238,14 @@ public class RagRetriever : ApplicationService, IRagRetriever
     /// <para>
     /// query 向量必须与各知识库摄取时使用相同的 embedding provider/model，否则向量空间不一致、
     /// 检索结果无意义（与 <c>KnowledgeBaseService.SearchAsync</c> 同范式）。多 KB 且嵌入配置不一致时，
-    /// 按 (provider, model) 分组逐组生成 query 向量后分别检索；未指定 KB（search-all）时使用全局默认配置。
+    /// 按 (provider, model) 分组逐组生成 query 向量后分别检索；未指定 KB（<paramref name="knowledgeBases"/> 为 null，search-all）时使用全局默认配置。
     /// </para>
     /// </summary>
     private async Task<List<VectorSearchResult>> SearchVectorAsync(
-        string searchQuery, RagRetrievalOptions options, CancellationToken ct)
+        string searchQuery, IReadOnlyList<KnowledgeBase>? knowledgeBases, int topK, CancellationToken ct)
     {
-        if (options.KnowledgeBaseIds is { Count: > 0 })
+        if (knowledgeBases is not null)
         {
-            // 加载 KB 嵌入配置（经 EF 全局过滤器自动应用租户隔离；缺失的 KB 直接跳过）
-            var kbIds = options.KnowledgeBaseIds.Distinct().ToList();
-            var knowledgeBases = await _kbRepository.AsQueryable()
-                .Where(kb => kbIds.Contains(kb.Id))
-                .ToListAsync(ct);
-
-            if (knowledgeBases.Count < kbIds.Count)
-            {
-                Logger.LogWarning(
-                    "RAG retrieval skipped {Missing} of {Requested} requested knowledge bases (not found or not accessible)",
-                    kbIds.Count - knowledgeBases.Count, kbIds.Count);
-            }
-
             var allResults = new List<VectorSearchResult>();
 
             // 按嵌入配置分组：同空间共用一个 query 向量，组内多 KB 并行检索
@@ -217,7 +261,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
                 }
 
                 var tasks = groupKbIds.Select(kbId =>
-                    _vectorStore.SearchAsync(embeddingResult.Data!, options.TopK, kbId, ct));
+                    _vectorStore.SearchAsync(embeddingResult.Data!, topK, kbId, ct));
                 var resultSets = await Task.WhenAll(tasks);
                 foreach (var resultSet in resultSets)
                 {
@@ -228,7 +272,7 @@ public class RagRetriever : ApplicationService, IRagRetriever
             // 跨知识库结果按得分排序并截取 TopK
             return allResults
                 .OrderByDescending(r => r.Score)
-                .Take(options.TopK)
+                .Take(topK)
                 .ToList();
         }
 
@@ -241,6 +285,6 @@ public class RagRetriever : ApplicationService, IRagRetriever
             return [];
         }
 
-        return await _vectorStore.SearchAsync(defaultEmbedding.Data!, options.TopK, ct: ct);
+        return await _vectorStore.SearchAsync(defaultEmbedding.Data!, topK, ct: ct);
     }
 }

@@ -28,12 +28,16 @@ public class CreateEntityInfoRequest
 }
 
 /// <summary>
-/// 更新实体信息请求
+/// 更新实体信息请求：整体替换可编辑的三个字段（<c>TypeName</c> 不可改）。
 /// </summary>
+/// <remarks>
+/// 名称必填且不能为空白；启用开关必须显式给出。此前两者都有缺省值（空串、true），
+/// 只改显示名的调用会把名称清空、把一个停用的实体悄悄重新启用。<see cref="DisplayName"/> 给 null 即清空。
+/// </remarks>
 public class UpdateEntityInfoRequest
 {
     /// <summary>
-    /// 实体名称
+    /// 实体名称（必填）
     /// </summary>
     public string Name { get; set; } = string.Empty;
 
@@ -43,9 +47,9 @@ public class UpdateEntityInfoRequest
     public string? DisplayName { get; set; }
 
     /// <summary>
-    /// 是否启用数据授权
+    /// 是否启用数据授权（必填）
     /// </summary>
-    public bool IsDataAuthEnabled { get; set; } = true;
+    public bool? IsDataAuthEnabled { get; set; }
 }
 
 /// <summary>

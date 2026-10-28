@@ -68,10 +68,7 @@ public class HangfireOptionsValidator : OptionsValidatorBase<HangfireOptions>
                 errors.Add("Hangfire.Server.WorkerCount must be greater than 0.");
             }
 
-            if (options.Server.Queues == null || options.Server.Queues.Count == 0)
-            {
-                errors.Add("Hangfire.Server.Queues cannot be empty.");
-            }
+            // Queues 留空不是错误：留空即只处理 default 队列（见 ServerOptions.ResolveQueues）
         }
         else
         {

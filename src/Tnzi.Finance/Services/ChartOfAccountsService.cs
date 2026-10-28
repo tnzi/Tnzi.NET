@@ -92,7 +92,7 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
             SubType = input.SubType,
             ParentId = input.ParentId,
             IsGroup = input.IsGroup,
-            Currency = input.Currency?.Trim().ToUpperInvariant(),
+            Currency = NormalizeAccountCurrency(input.Currency),
             SystemRole = input.SystemRole,
             CashFlowActivity = input.CashFlowActivity,
             IsActive = true
@@ -105,8 +105,11 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            // 预检与写入之间的并发窗口由唯一索引兜底，翻译为与预检一致的 409
-            await _accountRepository.DeleteAsync(account, cancellationToken);
+            // 预检与写入之间的并发窗口由唯一索引兜底，翻译为与预检一致的 409。
+            // ★ 失败的插入只从变更跟踪器里摘掉（Discard），绝不走 DeleteAsync：科目是软删实体，
+            // 对一个 Added 实体做软删会把它带着已删标记真的插进库里（Code / SystemRole 的唯一索引
+            // 排除已删行，所以连报错都没有），凭空多出一行隐藏的重复科目。
+            _accountRepository.Discard(account);
             return Fail<AccountDto>("Account code or system role already exists.", 409);
         }
 
@@ -139,7 +142,7 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
                 return Fail<AccountDto>("Re-parenting would create a cycle in the account tree.");
         }
 
-        var newCurrency = input.Currency?.Trim().ToUpperInvariant();
+        var newCurrency = NormalizeAccountCurrency(input.Currency);
         if (!string.Equals(account.Currency, newCurrency, StringComparison.Ordinal) &&
             await _lineRepository.AnyAsync(l => l.AccountId == id, cancellationToken))
         {
@@ -294,8 +297,11 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
-            // 并发播种：另一请求已抢先写入，与预检语义保持一致返回 409
-            await _accountRepository.DeleteManyAsync(accounts, cancellationToken);
+            // 并发播种：另一请求已抢先写入，与预检语义保持一致返回 409。
+            // 失败的整批插入只从跟踪器里摘掉（同 CreateAsync）：DeleteManyAsync 会把这些 Added 实体
+            // 改成 Modified 去 UPDATE 不存在的行，在 catch 里抛并发异常成 500。
+            foreach (var account in accounts)
+                _accountRepository.Discard(account);
             return Fail<int>("Chart of accounts is not empty. The default template can only be seeded into an empty chart.", 409);
         }
 
@@ -311,6 +317,17 @@ public class ChartOfAccountsService : ApplicationService, IChartOfAccountsServic
         Check.NotNullOrWhiteSpace(code);
         return _accountRepository.FirstOrDefaultAsync(a => a.Code == code, cancellationToken);
     }
+
+    /// <summary>
+    /// 科目币种的规范形：空白一律视为「不限币种」（null），其余去空白转大写。
+    /// </summary>
+    /// <remarks>
+    /// ★ 空白若存成空串，它既不是 null（引擎按「限定币种」处理，该科目只收本位币），
+    /// 也不是本位币（期末重估把它当外币科目选中，随后按币种 "" 解析汇率当场抛异常，整次重估 500）。
+    /// 与客户 / 供应商的币种同一口径。
+    /// </remarks>
+    private static string? NormalizeAccountCurrency(string? currency)
+        => string.IsNullOrWhiteSpace(currency) ? null : currency.Trim().ToUpperInvariant();
 
     /// <summary>
     /// 创建/更新共用的字段与唯一性校验（excludeId 排除自身）

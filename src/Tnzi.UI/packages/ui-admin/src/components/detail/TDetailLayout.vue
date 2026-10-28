@@ -75,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, provide, ref, type CSSProperties, type ComponentPublicInstance, type VNodeChild } from 'vue'
+import { computed, h, nextTick, onMounted, provide, ref, watch, type CSSProperties, type ComponentPublicInstance, type VNodeChild } from 'vue'
 import { NTabs, NTab, NMenu } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import TPageHeader from '../layout/TPageHeader.vue'
@@ -228,10 +228,25 @@ const panelRef = ref<HTMLElement | null>(null)
 async function scrollToSection(key: string): Promise<void> {
   emit('update:activeSection', key)
   await nextTick()
-  const navEl = navRef.value?.$el as HTMLElement | undefined
-  navEl?.querySelector?.('.n-menu-item-content--selected')?.scrollIntoView?.({ block: 'nearest' })
+  revealActiveNavItem()
   bodyRef.value?.scrollTo?.({ top: 0 })
   panelRef.value?.scrollTo?.({ top: 0 })
+}
+
+/**
+ * Bring the selected `side` nav item into view within the nav's own scroll box, by the shortest distance and
+ * without animation. Nothing moves when the item is already fully visible, so a click on a visible item leaves
+ * the list where it was. Deliberately not `scrollIntoView`: that also scrolls every scrollable ancestor, which on
+ * a deep link jumps the page.
+ */
+function revealActiveNavItem(): void {
+  const nav = navRef.value?.$el as HTMLElement | undefined
+  const item = nav?.querySelector?.('.n-menu-item-content--selected')
+  if (!nav || !item) return
+  const box = nav.getBoundingClientRect()
+  const at = item.getBoundingClientRect()
+  if (at.top < box.top) nav.scrollTop -= box.top - at.top
+  else if (at.bottom > box.bottom) nav.scrollTop += at.bottom - box.bottom
 }
 
 // exposed for unit testing the section handler without simulating naive events
@@ -246,7 +261,8 @@ defineExpose({ onSection, scrollToSection })
  */
 function sectionBadge(s: DetailSection, index: number): string {
   const text = label(s).trim()
-  if (text) return text.slice(0, 1).toUpperCase()
+  // First code point, not first code unit: an emoji label would otherwise show half a character.
+  if (text) return (Array.from(text)[0] ?? '').toUpperCase()
   return String(index + 1)
 }
 
@@ -303,6 +319,12 @@ const menuOptions = computed(() => {
     children: (byGroup.get(g) ?? []).map((s) => toItem(s, props.sections.indexOf(s))),
   }))
 })
+
+// A deep link, a query change or a cleared search can select an item outside the nav's visible area (a long list
+// with the target near the bottom); the reader must still see which item is selected. `post` so the selected class
+// is in the DOM; sections arriving late (async groups) re-reveal too.
+watch([() => props.activeSection, menuOptions], revealActiveNavItem, { flush: 'post' })
+onMounted(revealActiveNavItem)
 </script>
 
 <style scoped>

@@ -227,6 +227,8 @@ public class AuditPropertyEntryDto
 {
     public Guid Id { get; set; }
     public string? PropertyName { get; set; }
+
+    /// <summary>显示名；内置拦截器不写它（恒为 <c>null</c>），只有自定义采集方填了才有值。</summary>
     public string? PropertyDisplayName { get; set; }
     public string? PropertyTypeName { get; set; }
     public string? OriginalValue { get; set; }

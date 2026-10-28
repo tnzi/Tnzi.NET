@@ -30,6 +30,8 @@ public class KnowledgeGraphEdgeConfiguration : EntityTypeConfigurationBase<Knowl
         builder.HasIndex(e => e.SourceNodeId);
         builder.HasIndex(e => e.TargetNodeId);
         builder.HasIndex(e => new { e.SourceNodeId, e.TargetNodeId });
+        // 删除文档 / 重新摄取时按来源文档清理（DocumentId 是按值引用，无外键：文档行删除在先，图谱清理在后）
+        builder.HasIndex(e => e.DocumentId);
 
         // 外键关系：KnowledgeBase → 级联删除（删除 KB 时清理图数据）
         builder.HasOne<KnowledgeBase>()

@@ -1,8 +1,10 @@
 <template>
+  <!-- The list endpoint takes no keyword: no free-text box, the filters stay. -->
   <TCrudPage
     :state="crud"
     :all-columns="columns"
     :search-fields="searchFields"
+    :show-default-search="false"
     :title="title"
     :row-actions="rowActions"
     :translate="t"
@@ -41,10 +43,10 @@
         @update:checked-row-keys="onChecked"
       />
       <div class="fin-recon__actions">
-        <NButton size="small" :disabled="!isDraftOpen || saving" :loading="saving" type="primary" @click="saveLines">
+        <NButton size="small" :disabled="!isDraftOpen || !worksheetReady || saving" :loading="saving" type="primary" @click="saveLines">
           {{ t('worksheet.save') }}
         </NButton>
-        <NButton size="small" type="success" :disabled="!isDraftOpen || liveDifference !== 0 || saving" @click="completeFromWorksheet">
+        <NButton size="small" type="success" :disabled="!isDraftOpen || !worksheetReady || liveDifference !== 0 || saving" @click="completeFromWorksheet">
           {{ t('actions.complete') }}
         </NButton>
       </div>
@@ -144,6 +146,23 @@ const worksheetDetail = useDetail<ReconciliationDto>({
 const worksheet = ref<ReconciliationWorksheetDto | null>(null)
 const selectedIds = ref<string[]>([])
 const saving = ref(false)
+/**
+ * The reconciliation the worksheet on screen was read for, set only when that
+ * read succeeded.
+ *
+ * Save and Complete write the selection as the reconciliation's ENTIRE set of
+ * cleared lines, so they are offered only for a worksheet read for the open
+ * reconciliation: with the read still out or failed the selection is empty (and
+ * the difference bar reads 0, which would enable Complete), and a late answer for
+ * the reconciliation opened before would put its lines on this one.
+ */
+const worksheetReadFor = ref<string | null>(null)
+/** Bumped by every read: only the newest may fill the worksheet, the drawer can move mid-flight. */
+let worksheetLoadSeq = 0
+const worksheetReady = computed(() => {
+  const id = worksheetDetail.data.value?.id
+  return id != null && worksheetReadFor.value === String(id)
+})
 
 const isDraftOpen = computed(() => worksheetDetail.data.value?.status === ReconciliationStatus.Draft)
 
@@ -170,13 +189,19 @@ const liveDifference = computed(() => {
 watch(
   () => worksheetDetail.data.value?.id,
   async (id) => {
+    const seq = ++worksheetLoadSeq
     worksheet.value = null
     selectedIds.value = []
+    worksheetReadFor.value = null
     if (!id) return
     try {
-      worksheet.value = await bridge.reconciliations.worksheet(String(id))
-      selectedIds.value = worksheet.value.lines.filter((l) => l.isSelected).map((l) => l.journalLineId)
+      const loaded = await bridge.reconciliations.worksheet(String(id))
+      if (seq !== worksheetLoadSeq) return
+      worksheet.value = loaded
+      selectedIds.value = loaded.lines.filter((l) => l.isSelected).map((l) => l.journalLineId)
+      worksheetReadFor.value = String(id)
     } catch (error) {
+      if (seq !== worksheetLoadSeq) return
       message.error(error instanceof Error ? error.message : String(error))
     }
   },
@@ -226,11 +251,16 @@ const lineColumns: DataTableColumns<ReconciliationCandidateLineDto> = [
 
 async function saveLines() {
   const id = worksheetDetail.data.value?.id
-  if (!id) return
+  // The disabled button is not the guard: this write replaces the whole cleared set.
+  if (id == null || !worksheetReady.value || saving.value) return
+  const key = String(id)
   saving.value = true
   try {
-    worksheet.value = await bridge.reconciliations.setLines(String(id), selectedIds.value)
-    selectedIds.value = worksheet.value.lines.filter((l) => l.isSelected).map((l) => l.journalLineId)
+    const saved = await bridge.reconciliations.setLines(key, [...selectedIds.value])
+    if (worksheetReadFor.value === key) {
+      worksheet.value = saved
+      selectedIds.value = saved.lines.filter((l) => l.isSelected).map((l) => l.journalLineId)
+    }
     message.success(t('worksheet.saved'))
     await crud.refresh()
   } catch (error) {
@@ -242,12 +272,14 @@ async function saveLines() {
 
 async function completeFromWorksheet() {
   const id = worksheetDetail.data.value?.id
-  if (!id) return
+  if (id == null || !worksheetReady.value || saving.value) return
+  const key = String(id)
   saving.value = true
   try {
     // Persist the current selection first so the server-side gate sees it.
-    worksheet.value = await bridge.reconciliations.setLines(String(id), selectedIds.value)
-    await bridge.reconciliations.complete(String(id))
+    const saved = await bridge.reconciliations.setLines(key, [...selectedIds.value])
+    if (worksheetReadFor.value === key) worksheet.value = saved
+    await bridge.reconciliations.complete(key)
     message.success(t('completeSuccess'))
     worksheetDetail.close()
     await crud.refresh()

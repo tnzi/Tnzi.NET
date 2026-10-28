@@ -20,6 +20,14 @@ namespace Tnzi.AI.Cli.Workspace;
 /// <item><b>文件存在、有 marker</b> → 原地替换块内容，块外一字不动。
 /// 同一工作目录反复运行不会让文件无限增长。</item>
 /// </list>
+/// <para>
+/// ★ 「字节级」是按字节读写换来的，不是按文本：文件按自己的 BOM 判编码（UTF-8 / UTF-16 / UTF-32 带 BOM，无 BOM 按 UTF-8），
+/// 严格解码后<b>再编回去比一遍</b>，逐字节一致才动它，写回时带上原来的 BOM、用原来的编码。此前走
+/// <c>ReadAllText</c> / <c>WriteAllText</c>：带 BOM 的文件每跑一次少 3 个字节，UTF-16 文件被整体转成 UTF-8，
+/// GBK / Shift-JIS 这类文件里的非 ASCII 字节被永久替换成 U+FFFD。判不出能逐字节还原的编码时<b>拒绝注入</b>
+/// （抛 <see cref="IOException"/>，运行以「工作区布置失败」结束），而不是跳过 brief 静默开跑：
+/// 绑定选了注入 Agent 指令，少了它跑出来的就不是那个 Agent。
+/// </para>
 /// </remarks>
 public static class BriefMarkerWriter
 {
@@ -38,70 +46,109 @@ public static class BriefMarkerWriter
     /// </remarks>
     public const string ManagedSeparator = "\n\n";
 
+    /// <summary>新建记忆文件用的编码：UTF-8、无 BOM（与此前一致，CLI 自己写出的记忆文件也是这样）。</summary>
+    private static readonly UTF8Encoding NewFileEncoding = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     /// <summary>
     /// 写入或更新受管 brief 块。
     /// </summary>
+    /// <param name="fileSystem">记忆文件所在的文件系统（执行目标的）。</param>
+    /// <param name="path">记忆文件路径。</param>
+    /// <param name="brief">受管块内容。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
     /// <returns>本次是否<b>创建</b>了该文件（清理时据此决定删文件还是切块）。</returns>
-    public static async Task<bool> WriteAsync(string path, string brief, CancellationToken cancellationToken)
+    public static async Task<bool> WriteAsync(ICliHostFileSystem fileSystem, string path, string brief, CancellationToken cancellationToken)
     {
+        Check.NotNull(fileSystem);
         Check.NotNullOrWhiteSpace(path);
 
         var block = MarkerBegin + "\n" + (brief ?? string.Empty).TrimEnd('\n') + "\n" + MarkerEnd + "\n";
 
-        if (!File.Exists(path))
+        if (!await fileSystem.FileExistsAsync(path, cancellationToken))
         {
-            await File.WriteAllTextAsync(path, block, cancellationToken);
+            await fileSystem.WriteAllBytesAsync(path, NewFileEncoding.GetBytes(block), cancellationToken);
             return true;
         }
 
-        var existing = await File.ReadAllTextAsync(path, cancellationToken);
-        if (TryLocateBlock(existing, out var start, out var end))
+        var file = await fileSystem.ReadAllBytesAsync(path, cancellationToken);
+        if (!RoundTripText.TryDecode(file, out var existing))
         {
-            await File.WriteAllTextAsync(path, existing[..start] + block + existing[end..], cancellationToken);
-            return false;
+            throw UnsupportedEncoding(fileSystem, path);
         }
 
-        await File.WriteAllTextAsync(path, existing + ManagedSeparator + block, cancellationToken);
+        var updated = TryLocateBlock(existing.Text, out var start, out var end)
+            ? existing.Text[..start] + block + existing.Text[end..]
+            : existing.Text + ManagedSeparator + block;
+
+        await fileSystem.WriteAllBytesAsync(path, existing.Encode(updated), cancellationToken);
         return false;
     }
 
     /// <summary>
+    /// 确认一个已存在的记忆文件能被注入并逐字节还原；不能则抛 <see cref="IOException"/>。文件不存在时什么都不做。
+    /// </summary>
+    /// <remarks>
+    /// 工作区布置在往用户目录写任何东西之前先问这一句：注入注定被拒的运行，不该先在用户仓库里留下 <c>.tnzi</c> 再失败。
+    /// </remarks>
+    public static async Task EnsureInjectableAsync(ICliHostFileSystem fileSystem, string path, CancellationToken cancellationToken)
+    {
+        Check.NotNull(fileSystem);
+        Check.NotNullOrWhiteSpace(path);
+
+        if (await fileSystem.FileExistsAsync(path, cancellationToken)
+            && !RoundTripText.TryDecode(await fileSystem.ReadAllBytesAsync(path, cancellationToken), out _))
+        {
+            throw UnsupportedEncoding(fileSystem, path);
+        }
+    }
+
+    private static IOException UnsupportedEncoding(ICliHostFileSystem fileSystem, string path)
+        => new($"'{fileSystem.Paths.GetFileName(path)}' in the working directory is not in an encoding the agent brief can be added to " +
+               "and removed from byte for byte (UTF-8, or UTF-16 / UTF-32 with a byte order mark). The file was left untouched " +
+               "and the run was not started. Convert the file to UTF-8, or turn off agent instruction injection for this binding.");
+
+    /// <summary>
     /// 切除受管块，把文件还原到写入前的字节。
     /// </summary>
+    /// <param name="fileSystem">记忆文件所在的文件系统（执行目标的）。</param>
     /// <param name="path">记忆文件路径。</param>
     /// <param name="createdByUs">本次运行是否创建了该文件（true 则直接删文件）。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    public static async Task CleanupAsync(string path, bool createdByUs, CancellationToken cancellationToken)
+    public static async Task CleanupAsync(ICliHostFileSystem fileSystem, string path, bool createdByUs, CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
+        Check.NotNull(fileSystem);
+
+        if (!await fileSystem.FileExistsAsync(path, cancellationToken))
         {
             return;
         }
 
         if (createdByUs)
         {
-            File.Delete(path);
+            await fileSystem.DeleteFileAsync(path, cancellationToken);
             return;
         }
 
-        var existing = await File.ReadAllTextAsync(path, cancellationToken);
-        if (!TryLocateBlock(existing, out var start, out var end))
+        // 解不出能逐字节还原的文本 = 不是我们注入过的样子（注入时同一判据已经拒绝过），不碰。
+        if (!RoundTripText.TryDecode(await fileSystem.ReadAllBytesAsync(path, cancellationToken), out var existing)
+            || !TryLocateBlock(existing.Text, out var start, out var end))
         {
             // 没有受管块 = 这里从没被注入过，不碰。
             return;
         }
 
         // 连同前面的固定分隔符一起切掉。分隔符是我们加的，属于受管区。
+        var text = existing.Text;
         var prefixEnd = start;
         if (start >= ManagedSeparator.Length
-            && existing.AsSpan(start - ManagedSeparator.Length, ManagedSeparator.Length).SequenceEqual(ManagedSeparator))
+            && text.AsSpan(start - ManagedSeparator.Length, ManagedSeparator.Length).SequenceEqual(ManagedSeparator))
         {
             prefixEnd = start - ManagedSeparator.Length;
         }
 
         // 不做 TrimEnd、不补换行、不因"剩下的是空白"就删文件 ——
         // 那些"顺手整理"每一条都会在用户仓库里留下一个 diff。
-        await File.WriteAllTextAsync(path, existing[..prefixEnd] + existing[end..], cancellationToken);
+        await fileSystem.WriteAllBytesAsync(path, existing.Encode(text[..prefixEnd] + text[end..]), cancellationToken);
     }
 
     /// <summary>
@@ -141,5 +188,69 @@ public static class BriefMarkerWriter
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// 一个能逐字节还原的已解码文件：原样的 BOM + 原来的编码 + 严格解码出的文本。
+    /// </summary>
+    private sealed class RoundTripText
+    {
+        private readonly byte[] _preamble;
+        private readonly Encoding _encoding;
+
+        private RoundTripText(byte[] preamble, Encoding encoding, string text)
+        {
+            _preamble = preamble;
+            _encoding = encoding;
+            Text = text;
+        }
+
+        public string Text { get; }
+
+        /// <summary>用文件原来的 BOM 与编码编码一段文本。</summary>
+        public byte[] Encode(string text) => [.. _preamble, .. _encoding.GetBytes(text)];
+
+        /// <summary>
+        /// 按 BOM 判编码、严格解码，并确认编回去与原字节逐一相同；任何一步不成立都返回 false。
+        /// </summary>
+        /// <remarks>
+        /// UTF-32 LE 的 BOM 以 UTF-16 LE 的 BOM 开头，所以先认 4 字节的再认 2 字节的。
+        /// 编回去再比一遍不是多余的：严格解码只保证「没有非法字节」，保证不了「换个写法编出来还是这些字节」。
+        /// </remarks>
+        public static bool TryDecode(byte[] bytes, [NotNullWhen(true)] out RoundTripText? decoded)
+        {
+            var (encoding, preambleLength) = Detect(bytes);
+            var body = bytes.AsSpan(preambleLength);
+
+            string text;
+            try
+            {
+                text = encoding.GetString(body);
+            }
+            catch (DecoderFallbackException)
+            {
+                decoded = null;
+                return false;
+            }
+
+            if (!encoding.GetBytes(text).AsSpan().SequenceEqual(body))
+            {
+                decoded = null;
+                return false;
+            }
+
+            decoded = new RoundTripText(bytes[..preambleLength], encoding, text);
+            return true;
+        }
+
+        private static (Encoding Encoding, int PreambleLength) Detect(byte[] bytes) => bytes switch
+        {
+            [0xEF, 0xBB, 0xBF, ..] => (new UTF8Encoding(false, true), 3),
+            [0xFF, 0xFE, 0x00, 0x00, ..] => (new UTF32Encoding(bigEndian: false, byteOrderMark: false, throwOnInvalidCharacters: true), 4),
+            [0x00, 0x00, 0xFE, 0xFF, ..] => (new UTF32Encoding(bigEndian: true, byteOrderMark: false, throwOnInvalidCharacters: true), 4),
+            [0xFF, 0xFE, ..] => (new UnicodeEncoding(bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true), 2),
+            [0xFE, 0xFF, ..] => (new UnicodeEncoding(bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true), 2),
+            _ => (NewFileEncoding, 0)
+        };
     }
 }

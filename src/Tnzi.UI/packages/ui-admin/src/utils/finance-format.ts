@@ -200,11 +200,7 @@ export function formatAccountingDateRange(
 }
 
 /** Local date (00:00) → the `YYYY-MM-DD` string the backend date binder accepts. */
-export function tsToIsoDate(ts: number): string {
-  const d = new Date(ts)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
+export { tsToIsoDate } from './calendar-date'
 
 /** Backend date-only value → local-midnight timestamp for naive date pickers. */
 export function isoDateToLocalTs(iso: string): number {

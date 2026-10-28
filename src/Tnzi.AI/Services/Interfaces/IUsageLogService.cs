@@ -63,4 +63,27 @@ public interface IUsageLogService
         // 默认实现：忽略缓存指标（向后兼容）
         return LogUsageAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, ct);
     }
+
+    /// <summary>
+    /// 记录使用日志：调用方给出成本（null = 按配置的单价算），同时记下缓存指标。
+    /// </summary>
+    Task LogUsageAsync(
+        string operationType,
+        string provider,
+        string model,
+        int inputTokens,
+        int outputTokens,
+        long durationMs,
+        bool isSuccess,
+        string? errorMessage,
+        Guid? agentId,
+        Guid? threadId,
+        decimal? estimatedCostUsd,
+        int cachedInputTokens,
+        int cacheCreationTokens,
+        CancellationToken ct = default)
+    {
+        // 默认实现：忽略缓存指标（向后兼容）
+        return LogUsageAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, estimatedCostUsd, ct);
+    }
 }

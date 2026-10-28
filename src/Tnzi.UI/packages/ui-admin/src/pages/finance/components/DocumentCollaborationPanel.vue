@@ -1,6 +1,7 @@
 <template>
-  <div class="fin-collab">
+  <div v-if="canViewAttachments || canViewComments" class="fin-collab">
     <TAttachmentPanel
+      v-if="canViewAttachments"
       :items="attachments"
       :loading="loadingAttachments"
       :can-add="canAttach"
@@ -13,6 +14,7 @@
     />
 
     <TCommentThread
+      v-if="canViewComments"
       :items="comments"
       :loading="loadingComments"
       :can-post="canComment"
@@ -38,6 +40,7 @@ import TAttachmentPanel from '../../../components/data/TAttachmentPanel.vue'
 import TCommentThread from '../../../components/data/TCommentThread.vue'
 import { usePermissionGuard } from '../../../headless/usePermissionGuard'
 import { makePageTranslator } from '../../_shared/translate'
+import { useSafeMessage } from '../../_shared/safe-message'
 import { useAdminClient } from '../../../plugin/client'
 import { createStorageBridge } from '../../../services/bridges/storage-bridge'
 import {
@@ -57,31 +60,43 @@ const finance = createFinanceBridge({ client })
 const storage = createStorageBridge({ client })
 const { can } = usePermissionGuard()
 const t = makePageTranslator('finance.docs')
+const message = useSafeMessage()
 
 const attachments = ref<DocumentAttachmentDto[]>([])
 const comments = ref<DocumentCommentDto[]>([])
 const loadingAttachments = ref(false)
 const loadingComments = ref(false)
 
+// Each half has its own read code: seeing a document does not mean seeing its
+// internal discussion. Without the code the read is a certain 403, so it is not
+// sent and that half is not shown.
+const canViewAttachments = computed(() => can('finance.attachment.view'))
+const canViewComments = computed(() => can('finance.comment.view'))
 const canAttach = computed(() => can('finance.attachment.create'))
 const canRemoveAttachment = computed(() => can('finance.attachment.delete'))
 const canComment = computed(() => can('finance.comment.create'))
 
+// A failed read is said out loud: the empty list it leaves behind would
+// otherwise read as "this document has no attachments / no comments".
 async function loadAttachments() {
-  if (!props.docId) return
+  if (!props.docId || !canViewAttachments.value) return
   loadingAttachments.value = true
   try {
     attachments.value = await finance.collaboration.attachments(props.docType, props.docId)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
   } finally {
     loadingAttachments.value = false
   }
 }
 
 async function loadComments() {
-  if (!props.docId) return
+  if (!props.docId || !canViewComments.value) return
   loadingComments.value = true
   try {
     comments.value = await finance.collaboration.comments(props.docType, props.docId)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
   } finally {
     loadingComments.value = false
   }

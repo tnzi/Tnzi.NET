@@ -29,7 +29,7 @@ const emit = defineEmits<{
 <template>
   <div class="space-y-2">
     <div class="flex items-center gap-2 text-sm font-medium">
-      <Icon icon="lucide:library" class="size-4 text-primary" />
+      <Icon icon="lucide:library" class="size-4 text-ai-accent-text" />
       {{ t.knowledge.panel }}
     </div>
     <NScrollbar style="max-height: 300px">

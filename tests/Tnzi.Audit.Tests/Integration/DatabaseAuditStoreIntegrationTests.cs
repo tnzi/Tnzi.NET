@@ -91,58 +91,6 @@ public class DatabaseAuditStoreIntegrationTests : IntegrationTestBase
 
     #endregion
 
-    #region SaveEntityEntriesAsync Tests
-
-    [Fact]
-    public async Task SaveEntityEntriesAsync_Should_Insert_Entries()
-    {
-        // Arrange - 先创建父级 Operation
-        var operation = new AuditOperation
-        {
-            Id = Guid.NewGuid(),
-            FunctionName = "Test.Action",
-            ResultType = AuditResultType.Success,
-            CreationTime = DateTime.UtcNow,
-            StartTime = DateTime.UtcNow,
-            Elapsed = 100
-        };
-        await DbContext.AuditOperations.AddAsync(operation);
-        await DbContext.SaveChangesAsync();
-
-        var entries = new List<AuditEntityEntry>
-        {
-            new AuditEntityEntry
-            {
-                Id = Guid.NewGuid(),
-                AuditOperationId = operation.Id,
-                EntityTypeName = "User",
-                EntityTypeFullName = "Tnzi.Domain.User",
-                EntityId = "123",
-                OperationType = Tnzi.Audit.Metadata.EntityState.Modified,
-                CreationTime = DateTime.UtcNow
-            },
-            new AuditEntityEntry
-            {
-                Id = Guid.NewGuid(),
-                AuditOperationId = operation.Id,
-                EntityTypeName = "Product",
-                EntityTypeFullName = "Tnzi.Domain.Product",
-                EntityId = "456",
-                OperationType = Tnzi.Audit.Metadata.EntityState.Added,
-                CreationTime = DateTime.UtcNow
-            }
-        };
-
-        // Act
-        await _store.SaveEntityEntriesAsync(entries);
-
-        // Assert
-        var count = await DbContext.AuditEntityEntries.CountAsync();
-        count.ShouldBe(2);
-    }
-
-    #endregion
-
     #region DeleteExpiredAsync Tests
 
     [Fact]
@@ -241,7 +189,6 @@ public class DatabaseAuditStoreIntegrationTests : IntegrationTestBase
         var repository = new CountingDeleteRepository(DbContext, ServiceProvider);
         var store = new DatabaseAuditStore(
             repository,
-            ServiceProvider.GetRequiredService<IRepository<AuditEntityEntry, Guid>>(),
             new StaticOptionsMonitor<AuditOptions>(new AuditOptions { BatchSize = 2 }));
 
         var deleted = await store.DeleteExpiredAsync(days: 90);

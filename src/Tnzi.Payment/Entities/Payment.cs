@@ -84,6 +84,21 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     public Guid? UserId { get; set; }
 
     /// <summary>
+    /// 这笔钱记在哪个计费账户上：种类（见 <see cref="BillingAccountTypes"/>）。没有归属的付款（匿名建单）为空。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="UserId"/> 分开：<see cref="UserId"/> 是经办人（谁点的付款），这两列是「这笔钱算谁的」。
+    /// 默认的 User 范围下两者指向同一个人；单客户部署（Installation 范围）下，几位管理者付的每一笔都记在同一个账户上，
+    /// 订阅状态机与「我的付款」都按这两列认主。
+    /// </remarks>
+    public string? BillingAccountType { get; set; }
+
+    /// <summary>
+    /// 计费账户 Id（与 <see cref="BillingAccountType"/> 成对）。
+    /// </summary>
+    public string? BillingAccountId { get; set; }
+
+    /// <summary>
     /// 客户名称快照（开票与通知使用，避免跨模块回查 Identity）
     /// </summary>
     public string? CustomerName { get; set; }
@@ -160,6 +175,33 @@ public class Payment : MultiTenantAuditedEntity<Guid>
     /// </para>
     /// </remarks>
     public decimal ReservedRefundAmount { get; set; }
+
+    /// <summary>
+    /// 建单时的计税拆分（<see cref="Dtos.TaxLineDto"/> 列表的 JSON）。开票时原样抄到发票上，
+    /// 税率日后改了，已收款的这一笔印的仍是当时的税。没有计税时为空。
+    /// </summary>
+    public string? TaxLinesJson { get; set; }
+
+    /// <summary>付款用的卡组织（visa / mastercard ...），已知时记下，收据上印；不知道时为空。</summary>
+    public string? PaymentMethodBrand { get; set; }
+
+    /// <summary>付款用的卡尾号，已知时记下。</summary>
+    public string? PaymentMethodLast4 { get; set; }
+
+    /// <summary>渠道争议号（拒付）。没有争议时为空。</summary>
+    public string? DisputeId { get; set; }
+
+    /// <summary>争议状态。</summary>
+    public PaymentDisputeStatus DisputeStatus { get; set; }
+
+    /// <summary>争议原因（渠道原文）。</summary>
+    public string? DisputeReason { get; set; }
+
+    /// <summary>争议金额。</summary>
+    public decimal? DisputeAmount { get; set; }
+
+    /// <summary>争议状态最后一次变化的时间。</summary>
+    public DateTime? DisputeUpdatedTime { get; set; }
 
     /// <summary>
     /// 退款记录集合

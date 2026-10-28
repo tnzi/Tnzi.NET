@@ -41,6 +41,7 @@ global using Tnzi.Data.Snows;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.Domain.Specifications;
+global using Tnzi.Json;
 global using Tnzi.EFCore.Dapper;
 global using Tnzi.EFCore.Dapper.Internal;
 global using Tnzi.EFCore.Dapper.Providers;

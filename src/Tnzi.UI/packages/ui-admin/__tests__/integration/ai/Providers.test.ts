@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { useAdminAuthStore } from '../../../src/stores/useAdminAuthStore'
 
 /**
  * Providers integration test - card grid (TCardPage) with create/edit modal +
@@ -92,6 +93,13 @@ describe('Providers page (TCardPage card grid)', () => {
     mount(Providers, { global: { stubs } })
     await flushPromises()
     expect(providerFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('cards cannot be dragged to reorder without ai.provider.update', async () => {
+    useAdminAuthStore().setUserInfo({ id: 'r', username: 'reader', roles: [], permissions: ['ai.provider.view'] })
+    const wrapper = mount(Providers, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'TCardPage' }).props('draggable')).toBe(false)
   })
 
   it('renders one card per provider', async () => {

@@ -36,7 +36,7 @@ public class SkillSearchService : ISkillSearchService
     // 语义搜索阈值
     private const double SemanticThreshold = 0.5;
 
-    // 嵌入缓存 key 前缀
+    // 候选嵌入缓存 key 前缀（按被嵌入文本的 SHA-256 摘要索引，见 GetCandidateEmbeddingsAsync）
     private const string EmbeddingCachePrefix = "skill_embedding:";
 
     // 查询串嵌入缓存 key 前缀（按 SHA-256 摘要索引 —— 查询串是任意用户输入，
@@ -206,7 +206,7 @@ public class SkillSearchService : ISkillSearchService
     /// 取查询串的嵌入向量，命中缓存则不发生任何计费调用。
     /// </summary>
     /// <remarks>
-    /// 候选技能的嵌入本来就走缓存（按 slug），但查询串每次都现算 —— 而查询串正是
+    /// 候选技能的嵌入本来就走缓存（按被嵌入文本的摘要），但查询串每次都现算，而查询串正是
     /// <b>调用方能自由重复</b>的那一半：搜索端点每收到一次关键词命中不足的请求就产生一次
     /// 嵌入计费调用。按摘要缓存后，重复查询在 TTL 内只算一次。
     /// </remarks>
@@ -239,10 +239,15 @@ public class SkillSearchService : ISkillSearchService
         var uncachedIndices = new List<int>();
         var uncachedTexts = new List<string>();
 
+        // 键取被嵌入文本本身的摘要：向量只由这段文本决定。★ 此前按 slug 取键，而缓存全进程共享、slug 只在
+        // (作用域, 租户, 所有者) 之内唯一：先被嵌入的那份技能的向量被所有同 slug 的技能沿用（别的租户、别的用户的同名技能），
+        // 改了名称 / 描述 / 适用场景之后 TTL 内也还按旧文本排序。
+        var cacheKeys = new string[candidates.Count];
         for (var i = 0; i < candidates.Count; i++)
         {
-            var cacheKey = EmbeddingCachePrefix + candidates[i].Slug;
-            if (_embeddingCache != null && _embeddingCache.TryGetValue(cacheKey, out float[]? cached) && cached != null)
+            var text = $"{candidates[i].Name} {candidates[i].Description} {candidates[i].WhenToUse}";
+            cacheKeys[i] = EmbeddingCachePrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            if (_embeddingCache != null && _embeddingCache.TryGetValue(cacheKeys[i], out float[]? cached) && cached != null)
             {
                 result.Add(cached);
             }
@@ -250,7 +255,7 @@ public class SkillSearchService : ISkillSearchService
             {
                 result.Add([]); // placeholder
                 uncachedIndices.Add(i);
-                uncachedTexts.Add($"{candidates[i].Name} {candidates[i].Description} {candidates[i].WhenToUse}");
+                uncachedTexts.Add(text);
             }
         }
 
@@ -273,11 +278,7 @@ public class SkillSearchService : ISkillSearchService
             result[idx] = generated[j];
 
             // Cache the embedding
-            if (_embeddingCache != null)
-            {
-                var cacheKey = EmbeddingCachePrefix + candidates[idx].Slug;
-                _embeddingCache.Set(cacheKey, generated[j], EmbeddingCacheEntryOptions());
-            }
+            _embeddingCache?.Set(cacheKeys[idx], generated[j], EmbeddingCacheEntryOptions());
         }
 
         if (uncachedIndices.Count < candidates.Count)

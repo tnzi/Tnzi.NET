@@ -5,6 +5,7 @@ import type { ColumnDef } from '../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { StatusType } from '@tnzi/ui'
+import { billingAccountColumn } from './billing-account-config'
 
 /**
  * Subscriptions page config - aligned with `SubscriptionDto`
@@ -13,7 +14,7 @@ import type { StatusType } from '@tnzi/ui'
  * `status` / `cycleType` serialise as member-name strings (global
  * JsonStringEnumConverter):
  *   SubscriptionStatus: Pending / Trial / Active / PendingRenewal / Paused /
- *     Cancelled / Expired / PastDue
+ *     Cancelled / Expired / PastDue / Suspended
  *   BillingCycleType:   Day / Week / Month / Year / OneTime
  *
  * Subscriptions are initiated by users, so the list stays read-only; the admin
@@ -29,6 +30,7 @@ const STATUS_TONE: Record<string, StatusType> = {
   Cancelled: 'default',
   Expired: 'default',
   PastDue: 'error',
+  Suspended: 'error',
 }
 // member name → i18n leaf key under `payment.subscriptions.status.*`
 const STATUS_KEY: Record<string, string> = {
@@ -40,6 +42,7 @@ const STATUS_KEY: Record<string, string> = {
   Cancelled: 'cancelled',
   Expired: 'expired',
   PastDue: 'pastDue',
+  Suspended: 'suspended',
 }
 const CYCLE_KEY: Record<string, string> = {
   Day: 'daily',
@@ -57,6 +60,7 @@ export function buildSubscriptionColumns(t: (key: string) => string): ColumnDef[
   return [
     { key: 'subscriptionNo', title: 'columns.subscriptionNo', minWidth: 150 },
     { key: 'userId', title: 'columns.userId', minWidth: 140 },
+    billingAccountColumn(),
     { key: 'planName', title: 'columns.planName', minWidth: 130 },
     {
       key: 'status',
@@ -146,6 +150,7 @@ export const paymentSubscriptionFormSchema: FormSchemaItem[] = [
   { key: 'paymentMethodLast4', labelKey: 'form.paymentMethodLast4', label: 'Card Last 4', type: 'text' },
   { key: 'renewalRetryCount', labelKey: 'form.renewalRetryCount', label: 'Failed Attempts', type: 'number' },
   { key: 'pastDueSince', labelKey: 'form.pastDueSince', label: 'Past Due Since', type: 'text' },
+  { key: 'suspendedAt', labelKey: 'form.suspendedAt', label: 'Suspended Since', type: 'text' },
   { key: 'pausedAt', labelKey: 'form.pausedAt', label: 'Paused Since', type: 'text' },
   { key: 'pausedUntil', labelKey: 'form.pausedUntil', label: 'Paused Until', type: 'text' },
 ]

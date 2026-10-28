@@ -102,20 +102,21 @@ public class AiReceiptExtractorTests
     }
 
     /// <summary>
-    /// 清空 <c>VisionContentTypes</c> = 不拦：接了自己 provider 或过一道转码的部署照常能用。
+    /// <c>VisionContentTypes = ["*"]</c> = 不拦：接了自己 provider 或过一道转码的部署照常能用。
     /// </summary>
     /// <remarks>
     /// 这条是上一条的对照。没有它，「视觉格式白名单」就成了写死在框架里的天花板，
     /// 而消费方能不能用某个格式取决于他们的 provider，不取决于我们。
+    /// 「不拦」不用空数组表达：JSON 空数组不产生任何配置键，与「没配」无从区分（见下一条）。
     /// </remarks>
     [Fact]
-    public async Task Empty_vision_content_types_disables_the_gate()
+    public async Task Wildcard_vision_content_type_disables_the_gate()
     {
         var fixture = new Fixture
         {
             StoredContentType = "image/heic",
             FileName = "photo.heic",
-            VisionContentTypes = []
+            VisionContentTypes = [FinanceAiOptions.AnyVisionContentType]
         };
         var extractor = fixture.Build();
 
@@ -123,6 +124,34 @@ public class AiReceiptExtractorTests
 
         result.Succeeded.ShouldBeTrue(result.Message);
         fixture.CapturedImageContentType.ShouldBe("image/heic");
+    }
+
+    /// <summary>空清单 = 缺省的四种格式（不是「不拦」）：HEIC 仍被拦下，JPEG 照常放行。</summary>
+    [Theory]
+    [InlineData("photo.heic", false)]
+    [InlineData("photo.jpg", true)]
+    public async Task Empty_vision_content_types_fall_back_to_the_built_in_list(string fileName, bool accepted)
+    {
+        var fixture = new Fixture { StoredContentType = "application/octet-stream", FileName = fileName, VisionContentTypes = [] };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = fileName });
+
+        result.Succeeded.ShouldBe(accepted, result.Message);
+    }
+
+    /// <summary>配置收窄到一种格式时只剩那一种：其余缺省格式不再放行。</summary>
+    [Fact]
+    public async Task A_configured_list_replaces_the_built_in_list()
+    {
+        var fixture = new Fixture { StoredContentType = "image/jpeg", FileName = "photo.jpg", VisionContentTypes = ["image/png"] };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "photo.jpg" });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("image/jpeg");
     }
 
     /// <summary>既不是图片也不是 PDF → 400，且<b>不下载</b>。</summary>
@@ -314,6 +343,78 @@ public class AiReceiptExtractorTests
         result.Data!.RawText!.ShouldContain("Text truncated");
     }
 
+    /// <summary>
+    /// ★ 正文在前几页就已超限 → 其余页根本不读，注明里说清有几页没读。
+    /// </summary>
+    /// <remarks>
+    /// 提示词只用得到前 <c>MaxPdfTextChars</c> 个字符。此前每一页都先在请求线程上解析一遍再整段丢掉，
+    /// 一份几百页的纯文字 PDF 就是几百页的白干。这里第一页单独就超限，后面两页必须一页都不碰。
+    /// </remarks>
+    [Fact]
+    public async Task Pdf_pages_after_the_limit_is_reached_are_not_read()
+    {
+        const int limit = 1000;
+        var fixture = new Fixture
+        {
+            StoredContentType = "application/pdf",
+            FileName = "long.pdf",
+            MaxPdfTextChars = limit,
+            ContentBytes = PdfWithPages(
+                string.Join(" ", Enumerable.Repeat("LOREMIPSUM", 150)),
+                "SECONDPAGEMARKER",
+                "THIRDPAGEMARKER")
+        };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "long.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var raw = result.Data!.RawText!;
+        raw.ShouldContain("Text truncated");
+        raw.ShouldContain("remaining 2 page(s) were not read");
+        raw.ShouldNotContain("PAGEMARKER");
+    }
+
+    /// <summary>
+    /// 正文截到上限时，截断点落在代理对中间则整个字符一起舍掉，注明里的「截掉了多少」按实际截掉的算。
+    /// </summary>
+    /// <remarks>
+    /// 同一份文本作为 <c>RawText</c> 落库，半个 emoji 会让严格 UTF-8 的驱动（Npgsql）拒绝写入。标准 14 字体画不出 emoji，
+    /// 所以这里直接调截断这一步，不经 PDF。
+    /// </remarks>
+    [Fact]
+    public void Prompt_text_cut_inside_a_surrogate_pair_drops_the_whole_character()
+    {
+        // 第 10 个码元是 emoji 的前半个；共 15 个码元
+        var text = new string('a', 9) + "\U0001F600tail";
+
+        var clamped = AiReceiptExtractor.ClampPromptText(new AiReceiptExtractor.PdfText(text, 0), 10);
+
+        clamped.ShouldStartWith(new string('a', 9) + Environment.NewLine);
+        clamped.ShouldContain("[Text truncated: 6 more characters were omitted.");
+        clamped.ShouldNotContain('\uD83D');
+    }
+
+    /// <summary>对照：每页都短、合计不超限时逐页读完，不加注明。</summary>
+    [Fact]
+    public async Task Pdf_pages_within_the_limit_are_all_read()
+    {
+        var fixture = new Fixture
+        {
+            StoredContentType = "application/pdf",
+            FileName = "short.pdf",
+            MaxPdfTextChars = 1000,
+            ContentBytes = PdfWithPages("FIRSTPAGE", "SECONDPAGEMARKER", "THIRDPAGEMARKER")
+        };
+        var extractor = fixture.Build();
+
+        var result = await extractor.ExtractAsync(new ReceiptExtractionRequest { FileId = FileId, FileName = "short.pdf" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.RawText!.ShouldContain("THIRDPAGEMARKER");
+        result.Data.RawText!.ShouldNotContain("Text truncated");
+    }
+
     /// <summary>对照：不超限时不加任何注明，正文逐字送出。</summary>
     [Fact]
     public async Task Pdf_text_within_the_limit_is_sent_verbatim()
@@ -380,6 +481,24 @@ public class AiReceiptExtractorTests
         return builder.Build();
     }
 
+    /// <summary>一页一段文字的多页 PDF（每段在自己那页上折行）。</summary>
+    private static byte[] PdfWithPages(params string[] pages)
+    {
+        var builder = new PdfDocumentBuilder();
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        foreach (var text in pages)
+        {
+            var page = builder.AddPage(PageSize.A4);
+            var y = 780;
+            foreach (var chunk in Chunks(text, 90))
+            {
+                page.AddText(chunk, 10, new PdfPoint(30, y), font);
+                y -= 12;
+            }
+        }
+        return builder.Build();
+    }
+
     private static IEnumerable<string> Chunks(string value, int size)
     {
         for (var i = 0; i < value.Length; i += size)
@@ -394,7 +513,7 @@ public class AiReceiptExtractorTests
         public byte[] ContentBytes { get; init; } = [1, 2, 3, 4];
         public int MaxFileSizeMb { get; init; } = 20;
         public int MaxPdfTextChars { get; init; } = 20000;
-        public string[] VisionContentTypes { get; init; } = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+        public string[] VisionContentTypes { get; init; } = [];
         public bool FileMissing { get; init; }
 
         /// <summary>视觉路径实际递给模型的内容类型（null = 没走视觉路径）。</summary>

@@ -12,7 +12,8 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
  * operator-edited row would drift from reality, and an operator-created row
  * would match no real device at all.
  */
-const PLATFORM_LABELS: Record<number, { type: 'info' | 'success' | 'warning'; labelKey: string }> = {
+// Keyed by the member name the server writes ("Android"), not by the number.
+const PLATFORM_LABELS: Record<string, { type: 'info' | 'success' | 'warning'; labelKey: string }> = {
   [DevicePlatform.Android]: { type: 'success', labelKey: 'tnzi.admin.modules.notification.devices.platform.android' },
   [DevicePlatform.Ios]: { type: 'info', labelKey: 'tnzi.admin.modules.notification.devices.platform.ios' },
   [DevicePlatform.Web]: { type: 'warning', labelKey: 'tnzi.admin.modules.notification.devices.platform.web' },
@@ -42,7 +43,7 @@ export const notificationDeviceColumns: ColumnDef[] = [
     title: 'columns.platform',
     width: 120,
     render: (row) => {
-      const meta = PLATFORM_LABELS[Number(row.platform)]
+      const meta = PLATFORM_LABELS[String(row.platform ?? '')]
       return meta
         ? h(TStatusBadge, { value: true, mapping: { true: meta } })
         : String(row.platform ?? '')

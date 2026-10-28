@@ -14,6 +14,7 @@ vi.mock('@microsoft/signalr', () => {
         off: offSpy,
         start: startSpy,
         stop: stopSpy,
+        onclose: vi.fn(),
         get state() { return connectionState },
       }
     }

@@ -84,6 +84,7 @@ public class FileCleanupMultiTenantTests : IDisposable
             _currentTenant,
             new StaticOptionsMonitor<StorageOptions>(_options),
             sp,
+            new OrphanReferenceScanCursor(),
             contributors: null,
             MsOptions.Create(new MultiTenancyOptions { Enabled = true }));
     }

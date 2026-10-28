@@ -110,12 +110,16 @@
               </span>
             </div>
 
+            <NAlert v-if="documentsError" type="error" :bordered="false" class="ai-knowledge-docs-error">
+              {{ documentsError }}
+            </NAlert>
             <TResponsiveTable
               :columns="documentColumns"
               :data="documents"
               :loading="documentsLoading"
               :row-key="(row: KnowledgeDocumentDto) => row.id"
-              :pagination="false"
+              remote
+              :pagination="documentPagination"
               :empty-text="t('manage.noDocuments')"
               :row-actions="documentRowActions"
               :row-actions-title="t('columns.actions')"
@@ -184,6 +188,7 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import {
+  NAlert,
   NButton,
   NInput,
   NInputNumber,
@@ -197,6 +202,7 @@ import {
 } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { formatDateTime, formatFileSize } from '@tnzi/core'
+import { truncate as truncateText } from '@tnzi/core/utils'
 import TCardPage from '../../../components/crud/TCardPage.vue'
 import TDetailHost from '../../../components/detail/TDetailHost.vue'
 import TEntityCard from '../../../components/data/TEntityCard.vue'
@@ -251,7 +257,8 @@ const crud = useCrudPage<KnowledgeBaseDto>({
 })
 
 async function removeOne(item: KnowledgeBaseDto): Promise<void> {
-  await crud.handleDelete([item.id])
+  // handleDelete has already reported a refusal (toast or onError) before rethrowing.
+  await crud.handleDelete([item.id]).catch(() => undefined)
 }
 
 // --- agents that depend on a knowledge base ----------------------------------
@@ -307,6 +314,23 @@ const manageTab = ref<'documents' | 'search' | 'agents'>('documents')
 
 const documents = ref<KnowledgeDocumentDto[]>([])
 const documentsLoading = ref(false)
+const documentsError = ref<string | null>(null)
+
+// The documents endpoint is paged (its default page is 10 rows). Asking for one
+// page without a pager left every document past it out of reach - it could not
+// be seen, refreshed or deleted - with nothing saying more existed.
+const DOCUMENT_PAGE_SIZE = 20
+const documentPage = ref(1)
+const documentTotal = ref(0)
+const documentPagination = computed(() => ({
+  page: documentPage.value,
+  pageSize: DOCUMENT_PAGE_SIZE,
+  itemCount: documentTotal.value,
+  onUpdatePage: (page: number) => {
+    documentPage.value = page
+    void loadDocuments()
+  },
+}))
 
 async function openManage(row: KnowledgeBaseDto): Promise<void> {
   await manageDetail.open('view', row)
@@ -321,6 +345,7 @@ watch(() => manageDetail.data.value, async (kb) => {
   searchResults.value = []
   searchedOnce.value = false
   viewUsage.reset()
+  documentPage.value = 1
   await loadDocuments()
 })
 
@@ -330,17 +355,37 @@ watch(manageTab, (tab) => {
   if (tab === 'agents') loadViewUsage()
 })
 
+// Only the latest request may fill the table: the drawer can be re-bound to
+// another knowledge base (or paged) while an earlier answer is still on its way.
+let documentsFetchToken = 0
+
 async function loadDocuments(): Promise<void> {
   const kb = manageDetail.data.value
   if (!kb) return
+  const myToken = ++documentsFetchToken
   documentsLoading.value = true
   try {
-    const page = await bridge.knowledge.getDocuments(kb.id)
+    let page = await bridge.knowledge.getDocuments(kb.id, { pageIndex: documentPage.value, pageSize: DOCUMENT_PAGE_SIZE })
+    if (myToken !== documentsFetchToken) return
+    // Deleting the last row of the last page leaves that page empty: show the
+    // page that is now last instead of an empty table over remaining documents.
+    const lastPage = Math.max(1, Math.ceil(page.totalCount / DOCUMENT_PAGE_SIZE))
+    if (page.items.length === 0 && documentPage.value > lastPage) {
+      documentPage.value = lastPage
+      page = await bridge.knowledge.getDocuments(kb.id, { pageIndex: lastPage, pageSize: DOCUMENT_PAGE_SIZE })
+      if (myToken !== documentsFetchToken) return
+    }
     documents.value = page.items
-  } catch {
+    documentTotal.value = page.totalCount
+    documentsError.value = null
+  } catch (err) {
+    if (myToken !== documentsFetchToken) return
+    // A refused list must not read as "No documents yet".
     documents.value = []
+    documentTotal.value = 0
+    documentsError.value = t('manage.loadError', { message: err instanceof Error ? err.message : String(err) })
   } finally {
-    documentsLoading.value = false
+    if (myToken === documentsFetchToken) documentsLoading.value = false
   }
 }
 
@@ -469,6 +514,8 @@ async function onFilePicked(event: Event): Promise<void> {
         ? t('upload.duplicate')
         : `${t('upload.success')} (${statusLabel})`,
     }
+    // Newest first: the upload is on the first page.
+    documentPage.value = 1
     await loadDocuments()
   } catch (err) {
     uploadStatus.value = {
@@ -514,7 +561,7 @@ function formatScore(score: number | null | undefined): string {
 
 function truncate(text: string | null | undefined, max = 240): string {
   const value = (text ?? '').trim()
-  return value.length > max ? `${value.slice(0, max)}…` : value
+  return truncateText(value, max + 1, '…')
 }
 
 defineExpose({ openManage, onReindex, reindexBusyId, manageVisible, managed })
@@ -574,6 +621,9 @@ defineExpose({ openManage, onReindex, reindexBusyId, manageVisible, managed })
 }
 .ai-knowledge-upload__input {
   display: none;
+}
+.ai-knowledge-docs-error {
+  margin-bottom: 12px;
 }
 .ai-knowledge-upload__status[data-kind='error'] {
   color: var(--tnzi-error, #d03050);

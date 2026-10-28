@@ -82,6 +82,52 @@ public class NamedSenderOptionsValidationTests
     }
 
     /// <summary>
+    /// ★ 回执轮询只从默认节 <c>FaxSender:Confirmation</c> 注册。具名节上的收件箱不会被任何东西读到：
+    /// 此前它照样被当成生效的配置校验，经那个网关失败的传真永远停在「已发送」，日志里什么都没有。
+    /// </summary>
+    [Fact]
+    public void ANamedFaxProfileWithItsOwnConfirmationMailbox_IsRejected()
+    {
+        var options = new NotificationOptions
+        {
+            FaxSenders =
+            {
+                ["legal"] = new FaxSenderOptions
+                {
+                    GatewayDomain = "fax.legal.example.com",
+                    Confirmation = new FaxConfirmationOptions { Host = "imap.legal.example.com", UserName = "fax", Password = "p" }
+                }
+            }
+        };
+
+        var result = Validate(options);
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("FaxSenders:legal.Confirmation is not supported");
+        result.FailureMessage.ShouldContain("Notification:FaxSender:Confirmation");
+    }
+
+    /// <summary>对照：默认节上的收件箱照常有效。</summary>
+    [Fact]
+    public void TheDefaultFaxProfilesConfirmationMailbox_StillPasses()
+    {
+        var options = new NotificationOptions
+        {
+            FaxSender = new FaxSenderOptions
+            {
+                GatewayDomain = "fax.example.com",
+                Confirmation = new FaxConfirmationOptions { Host = "imap.example.com", UserName = "fax", Password = "p" }
+            },
+            FaxSenders =
+            {
+                ["legal"] = new FaxSenderOptions { GatewayDomain = "fax.legal.example.com" }
+            }
+        };
+
+        Validate(options).Succeeded.ShouldBeTrue();
+    }
+
+    /// <summary>
     /// ★ <c>default</c> 是保留键：默认发送器永远是单数那一节，配置里再定义一个同名 profile
     /// 就是同一个键两个来源，哪个生效取决于注册顺序。
     /// </summary>

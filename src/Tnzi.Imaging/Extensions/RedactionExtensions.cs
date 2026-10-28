@@ -32,6 +32,10 @@ public static class RedactionExtensions
     /// <para>
     /// 区域超出图像边界会被裁到边界内；完全落在图外则原样返回。
     /// </para>
+    /// <para>
+    /// ★ <b>多帧图像的每一帧都改写。</b>只改首帧时，动画的其余帧原样保留，编码成 WebP / PNG
+    /// 就是一段从第二帧起把被遮内容重新播放出来的动画。
+    /// </para>
     /// </remarks>
     public static Image<Rgba32> Redact(this Image<Rgba32> image, Rectangle region, Color? fill = null)
         => image.Redact([region], fill);
@@ -59,13 +63,16 @@ public static class RedactionExtensions
                 continue;
             }
 
-            clone.ProcessPixelRows(accessor =>
+            foreach (var frame in clone.Frames)
             {
-                for (var y = clipped.Top; y < clipped.Bottom; y++)
+                frame.ProcessPixelRows(accessor =>
                 {
-                    accessor.GetRowSpan(y).Slice(clipped.Left, clipped.Width).Fill(pixel);
-                }
-            });
+                    for (var y = clipped.Top; y < clipped.Bottom; y++)
+                    {
+                        accessor.GetRowSpan(y).Slice(clipped.Left, clipped.Width).Fill(pixel);
+                    }
+                });
+            }
         }
 
         return clone;
@@ -119,36 +126,44 @@ public static class RedactionExtensions
     /// <summary>
     /// 用区域自身的平均色平涂该区域。小到无法卷积的选区走这条路。
     /// </summary>
+    /// <remarks>
+    /// 逐帧各取各的均色、各涂各的：卷积那条路（<c>Mutate</c>）本来就作用于每一帧，这条兜底路必须与它一致，
+    /// 否则同一个选区在多帧图上只在首帧被处理。
+    /// </remarks>
     private static Image<Rgba32> FillWithAverage(Image<Rgba32> image, Rectangle region)
     {
-        long r = 0, g = 0, b = 0, a = 0;
         var count = (long)region.Width * region.Height;
 
-        image.ProcessPixelRows(accessor =>
+        foreach (var frame in image.Frames)
         {
-            for (var y = region.Top; y < region.Bottom; y++)
+            long r = 0, g = 0, b = 0, a = 0;
+
+            frame.ProcessPixelRows(accessor =>
             {
-                var row = accessor.GetRowSpan(y);
-                for (var x = region.Left; x < region.Right; x++)
+                for (var y = region.Top; y < region.Bottom; y++)
                 {
-                    var pixel = row[x];
-                    r += pixel.R;
-                    g += pixel.G;
-                    b += pixel.B;
-                    a += pixel.A;
+                    var row = accessor.GetRowSpan(y);
+                    for (var x = region.Left; x < region.Right; x++)
+                    {
+                        var pixel = row[x];
+                        r += pixel.R;
+                        g += pixel.G;
+                        b += pixel.B;
+                        a += pixel.A;
+                    }
                 }
-            }
-        });
+            });
 
-        var average = new Rgba32((byte)(r / count), (byte)(g / count), (byte)(b / count), (byte)(a / count));
+            var average = new Rgba32((byte)(r / count), (byte)(g / count), (byte)(b / count), (byte)(a / count));
 
-        image.ProcessPixelRows(accessor =>
-        {
-            for (var y = region.Top; y < region.Bottom; y++)
+            frame.ProcessPixelRows(accessor =>
             {
-                accessor.GetRowSpan(y).Slice(region.Left, region.Width).Fill(average);
-            }
-        });
+                for (var y = region.Top; y < region.Bottom; y++)
+                {
+                    accessor.GetRowSpan(y).Slice(region.Left, region.Width).Fill(average);
+                }
+            });
+        }
 
         return image;
     }

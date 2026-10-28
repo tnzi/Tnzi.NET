@@ -31,18 +31,12 @@ public interface IFunctionAuthorizationService : Tnzi.Security.Authorization.IFu
     Task<Result<IEnumerable<string>>> GetUserPermissionNamesWithResultAsync(Guid userId);
 
     /// <summary>
-    /// Reverse permission query: get all roles that have a specific permission
+    /// 谁持有这个码：授予它的角色（含超管角色、行停用与休眠授权）、最终持有它的账号及其路径
+    /// （超管 / 角色 / 直授）、被单独否定的账号。持有者名单与 <c>CheckPermissionAsync</c> 逐人一致，
+    /// 收窄到调用者的租户范围。码不存在答 404；Identity 的角色成员关系或角色表不可用答 501。
     /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of roles with the permission</returns>
-    Task<Result<IEnumerable<PermissionRoleDto>>> GetPermissionRolesAsync(string permissionName);
-
-    /// <summary>
-    /// Reverse permission query: get all user IDs that have a specific permission (via roles)
-    /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of users with the permission</returns>
-    Task<Result<IEnumerable<PermissionUserDto>>> GetPermissionUsersAsync(string permissionName);
+    /// <param name="permissionName">权限码（大小写不敏感，与运行时检查同口径）</param>
+    Task<Result<PermissionHoldersDto>> GetPermissionHoldersAsync(string permissionName);
 
     /// <summary>
     /// Get authorization statistics overview

@@ -8,18 +8,26 @@ public class CliAgentBindingService : ApplicationService, ICliAgentBindingServic
     private readonly IRepository<CliAgentBinding, Guid> _repository;
     private readonly IRepository<Entities.CliRuntime, Guid> _runtimeRepository;
     private readonly IRepository<Agent, Guid> _agentRepository;
+    private readonly ICliProviderRegistry? _providerRegistry;
 
     /// <summary>初始化绑定服务。</summary>
+    /// <param name="repository">绑定仓储。</param>
+    /// <param name="runtimeRepository">运行时仓储。</param>
+    /// <param name="agentRepository">Agent 仓储。</param>
+    /// <param name="serviceProvider">服务提供者。</param>
+    /// <param name="providerRegistry">provider 描述表；缺省（直接构造的测试）时一律答「收不了附件」。</param>
     public CliAgentBindingService(
         IRepository<CliAgentBinding, Guid> repository,
         IRepository<Entities.CliRuntime, Guid> runtimeRepository,
         IRepository<Agent, Guid> agentRepository,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        ICliProviderRegistry? providerRegistry = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
         _runtimeRepository = Check.NotNull(runtimeRepository);
         _agentRepository = Check.NotNull(agentRepository);
+        _providerRegistry = providerRegistry;
     }
 
     /// <inheritdoc />
@@ -126,6 +134,7 @@ public class CliAgentBindingService : ApplicationService, ICliAgentBindingServic
 
         dto.CliRuntimeName = runtime?.Name;
         dto.ProviderKey = runtime?.ProviderKey;
+        dto.AcceptsAttachments = runtime?.ProviderKey is { } key && _providerRegistry?.Find(key) is { AcceptsAttachments: true };
         return dto;
     }
 }

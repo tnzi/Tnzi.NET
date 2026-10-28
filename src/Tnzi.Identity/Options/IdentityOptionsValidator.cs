@@ -80,6 +80,11 @@ public class IdentityOptionsValidator : OptionsValidatorBase<IdentityOptions>
         if (multiLogin.MaxConcurrentSessions < 0)
             errors.Add("MultiLogin.MaxConcurrentSessions cannot be negative.");
 
+        // 验证邀请配置
+        var invitationLifetime = options.Invitation.LinkLifetimeHours;
+        if (invitationLifetime < 1 || invitationLifetime > InvitationOptions.MaxLinkLifetimeHours)
+            errors.Add($"Invitation.LinkLifetimeHours must be between 1 and {InvitationOptions.MaxLinkLifetimeHours}.");
+
         // 验证验证码配置
         var captcha = options.Captcha;
         if (captcha.CaptchaFailThreshold < 0)

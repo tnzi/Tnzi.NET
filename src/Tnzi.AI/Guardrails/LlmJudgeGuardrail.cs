@@ -4,8 +4,16 @@ namespace Tnzi.AI.Guardrails;
 /// LLM-as-Judge Guardrail - 使用 LLM 评估输入/输出内容的安全性和适当性
 /// </summary>
 /// <remarks>
+/// <para>
 /// 同时实现 IInputGuardrail 和 IOutputGuardrail，通过不同的系统提示词分别评估输入和输出。
-/// 采用 fail-open 策略：当 LLM 调用失败或超时时，放行请求以避免阻塞正常操作。
+/// </para>
+/// <para>
+/// 只有以 <c>PASS</c> 这个词开头的答复才算通过，以 <c>FAIL</c> 开头的一律拒绝。评审<b>不可用</b>
+/// （调用出错、超时、答复既不是 PASS 也不是 FAIL）时按 <see cref="GuardrailsOptions.FailClosed"/> 处理：
+/// 默认 true 即拒绝，管理员显式关掉才放行。评审必须自己执行这条规则：它吞掉了自己的失败，
+/// ToolGuardrailMiddleware 的 fail-closed 分支永远看不到异常，输入 / 输出防护也从不读这个开关，
+/// 放行就成了无论开关怎么设都一样的结果。
+/// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "LLM-as-Judge guardrail is in preview")]
 public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailProvider
@@ -21,6 +29,10 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         "Evaluate whether this tool call should be allowed to execute. Respond with ONLY 'PASS' or 'FAIL: <reason>'";
 
     private const string GuardrailName = nameof(LlmJudgeGuardrail);
+
+    private const string DefaultRejectionReason = "Content rejected by LLM judge";
+
+    private const string UnavailableReason = "Content could not be verified by the LLM judge";
 
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IOptionsMonitor<AIOptions> _options;
@@ -46,7 +58,7 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         }
 
         var systemPrompt = JudgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
-        return await JudgeAsync(input, systemPrompt, ct);
+        return (await JudgeAsync(input, systemPrompt, ct)).Result;
     }
 
     /// <summary>
@@ -60,13 +72,13 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         }
 
         var systemPrompt = JudgeOptions.OutputJudgePrompt ?? DefaultOutputJudgePrompt;
-        return await JudgeAsync(output, systemPrompt, ct);
+        return (await JudgeAsync(output, systemPrompt, ct)).Result;
     }
 
     /// <summary>
     /// 调用 LLM 评估内容
     /// </summary>
-    private async Task<GuardrailResult> JudgeAsync(string content, string systemPrompt, CancellationToken ct)
+    private async Task<JudgeVerdict> JudgeAsync(string content, string systemPrompt, CancellationToken ct)
     {
         try
         {
@@ -82,15 +94,13 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
             };
 
             var response = await chatClient.GetResponseAsync(messages, cancellationToken: timeoutCts.Token);
-            var responseText = response.Text?.Trim() ?? string.Empty;
-
-            return ParseJudgeResponse(responseText);
+            return ParseJudgeResponse(response.Text ?? string.Empty);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // 超时（非外部取消）- fail-open
-            _logger.LogWarning("LLM-as-Judge timed out after {TimeoutSeconds}s, allowing content through (fail-open)", JudgeOptions.TimeoutSeconds);
-            return GuardrailResult.Allowed();
+            // 超时（非外部取消）：评审不可用
+            _logger.LogWarning("LLM-as-Judge timed out after {TimeoutSeconds}s", JudgeOptions.TimeoutSeconds);
+            return Unavailable("timeout");
         }
         catch (OperationCanceledException)
         {
@@ -99,10 +109,25 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         }
         catch (Exception ex)
         {
-            // LLM 调用失败 - fail-open
-            _logger.LogWarning(ex, "LLM-as-Judge evaluation failed, allowing content through (fail-open)");
-            return GuardrailResult.Allowed();
+            // LLM 调用失败：评审不可用
+            _logger.LogWarning(ex, "LLM-as-Judge evaluation failed");
+            return Unavailable("error");
         }
+    }
+
+    /// <summary>
+    /// 评审给不出裁决时的结果：<see cref="GuardrailsOptions.FailClosed"/> 为 true（默认）拒绝，否则放行。
+    /// </summary>
+    private JudgeVerdict Unavailable(string cause)
+    {
+        if (!_options.CurrentValue.Guardrails.FailClosed)
+        {
+            _logger.LogWarning("LLM-as-Judge unavailable ({Cause}); allowing content through because Guardrails:FailClosed is false", cause);
+            return new JudgeVerdict(GuardrailResult.Allowed(), null);
+        }
+
+        _logger.LogWarning("LLM-as-Judge unavailable ({Cause}); rejecting content because Guardrails:FailClosed is true", cause);
+        return new JudgeVerdict(GuardrailResult.Rejected(GuardrailName, UnavailableReason), GuardrailReasonCodes.LlmJudgeUnavailable);
     }
 
     /// <summary>
@@ -119,39 +144,50 @@ public class LlmJudgeGuardrail : IInputGuardrail, IOutputGuardrail, IGuardrailPr
         var systemPrompt = request.ToolName != null
             ? JudgeOptions.ToolJudgePrompt ?? DefaultToolJudgePrompt
             : JudgeOptions.InputJudgePrompt ?? DefaultInputJudgePrompt;
-        var result = await JudgeAsync(request.Content, systemPrompt, ct);
+        var verdict = await JudgeAsync(request.Content, systemPrompt, ct);
 
-        return result.IsAllowed
+        return verdict.Result.IsAllowed
             ? GuardrailDecision.Allow()
-            : GuardrailDecision.Deny(GuardrailReasonCodes.LlmJudgeRejected, result.Reason ?? "Content rejected by LLM judge");
+            : GuardrailDecision.Deny(
+                verdict.ReasonCode ?? GuardrailReasonCodes.LlmJudgeRejected,
+                verdict.Result.Reason ?? DefaultRejectionReason);
     }
 
     /// <summary>
-    /// 解析 LLM 评估响应
+    /// 解析 LLM 评估响应。
     /// </summary>
-    private static GuardrailResult ParseJudgeResponse(string responseText)
+    /// <remarks>
+    /// 通过只认第一个词恰好是 <c>PASS</c>（忽略大小写与前导的空白 / 标点，如 <c>**PASS**</c>）：
+    /// 「以 PASS 开头」会把 <c>PASSABLE, but ...</c> 这类答复也当成通过。以 <c>FAIL</c> 开头的一律拒绝，
+    /// 不论开关怎么设。其余答复（<c>Unsafe: ...</c>、<c>OK</c>、空串）不是裁决，按评审不可用处理。
+    /// </remarks>
+    private JudgeVerdict ParseJudgeResponse(string responseText)
     {
-        if (responseText.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
+        var verdict = responseText.TrimStart().TrimStart('*', '_', '`', '"', '\'', '#', '>', '-', ' ');
+        var firstWordLength = 0;
+        while (firstWordLength < verdict.Length && char.IsLetter(verdict[firstWordLength]))
         {
-            return GuardrailResult.Allowed();
+            firstWordLength++;
         }
 
-        if (responseText.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase))
+        var firstWord = verdict[..firstWordLength];
+        if (string.Equals(firstWord, "PASS", StringComparison.OrdinalIgnoreCase))
+        {
+            return new JudgeVerdict(GuardrailResult.Allowed(), null);
+        }
+
+        if (verdict.StartsWith("FAIL", StringComparison.OrdinalIgnoreCase))
         {
             // 提取 "FAIL: <reason>" 中的原因部分
-            var reason = responseText.Length > 5
-                ? responseText[5..].TrimStart(':', ' ')
-                : "Content rejected by LLM judge";
-
-            if (string.IsNullOrWhiteSpace(reason))
-            {
-                reason = "Content rejected by LLM judge";
-            }
-
-            return GuardrailResult.Rejected(GuardrailName, reason);
+            var reason = verdict[firstWordLength..].Trim().TrimStart(':', '*', ' ').Trim();
+            return new JudgeVerdict(
+                GuardrailResult.Rejected(GuardrailName, string.IsNullOrWhiteSpace(reason) ? DefaultRejectionReason : reason),
+                GuardrailReasonCodes.LlmJudgeRejected);
         }
 
-        // 无法解析的响应 - 视为通过（fail-open）
-        return GuardrailResult.Allowed();
+        return Unavailable("unparseable verdict");
     }
+
+    /// <summary>评审结果与（拒绝时的）原因代码</summary>
+    private sealed record JudgeVerdict(GuardrailResult Result, string? ReasonCode);
 }

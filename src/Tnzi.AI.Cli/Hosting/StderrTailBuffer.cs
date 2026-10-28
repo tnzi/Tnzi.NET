@@ -36,6 +36,13 @@ public sealed class StderrTailBuffer
             var overflow = _buffer.Length - _capacity;
             if (overflow > 0)
             {
+                // 从头部丢掉的那一刀不落在代理对中间：尾部以孤立的低代理项开头的话，它随错误信息落库时
+                // 严格 UTF-8 的驱动（Npgsql）会拒绝写入，这次运行的失败原因整条丢失。
+                if (overflow < _buffer.Length && char.IsLowSurrogate(_buffer[overflow]))
+                {
+                    overflow++;
+                }
+
                 _buffer.Remove(0, overflow);
             }
         }

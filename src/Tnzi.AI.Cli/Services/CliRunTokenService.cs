@@ -6,16 +6,24 @@ namespace Tnzi.AI.Cli.Services;
 /// <remarks>
 /// <para>
 /// 外部 agent 可能需要反过来调用平台（建工单、发评论、改状态）。框架已经有更合适的通道：
-/// <c>Tnzi.AI.Mcp</c> 把 agent 暴露为 HTTP/SSE MCP server，而每个编码 CLI 都原生支持 MCP。
+/// <c>Tnzi.AI.Mcp</c> 把 agent 与消费方自定义工具暴露为 Streamable HTTP MCP server，而每个编码 CLI 都原生支持 MCP。
 /// 缺的只是<b>凭据</b>。
 /// </para>
 /// <para>
-/// 凭据必须是运行范围的：绑到一次运行，随它结束失效，权限上限是该 Agent 自身的权限，
-/// <b>绝不是</b>派发这次运行的那个人的完整权限 —— 外部 agent 能执行任意代码，
+/// 凭据必须是运行范围的：绑到一次运行，随它结束失效；能调用的工具由部署方的
+/// <c>AI:Cli:WriteBack:AllowedTools</c> 决定（MCP server 按它过滤 <c>tools/list</c>、拒绝越界的 <c>tools/call</c>），
+/// 不来自 Agent 的权限，<b>更不是</b>派发这次运行的那个人的完整权限：外部 agent 能执行任意代码，
 /// 把派发者的权限交给它等于把那个人的账号交出去。
 /// </para>
 /// <para>
-/// 存的是<b>哈希</b>，原文只在启动子进程的那一刻存在。数据库泄漏不该等于「拿到一把还能用的钥匙」。
+/// 数据库里存的是<b>哈希</b>：数据库泄漏不该等于「拿到一把还能用的钥匙」。原文在运行期间写在工作目录的 MCP 配置里
+/// （CLI 只认这种投递方式）。运行到达终态即作废：<see cref="ValidateAsync"/> 只认进行中的运行，
+/// 写终态的各处（执行器的完成 / 失败 / 取消、队列的租约回收）同时清掉哈希，终态记录里不留任何凭据材料。
+/// </para>
+/// <para>
+/// ★ 收窄（运行范围、工具白名单、租户）只对持有这把凭据的那次运行成立，<b>挡不住同宿主上的别的外部运行</b>：
+/// 所有运行共用宿主进程这一个 OS 账号，任一运行都读得到别的运行工作目录里的凭据原文并以它的租户调用 MCP。
+/// 多租户或互不信任的使用者须按宿主级隔离部署。
 /// </para>
 /// </remarks>
 public class CliRunTokenService : IRunScopedCredentialValidator
@@ -51,11 +59,20 @@ public class CliRunTokenService : IRunScopedCredentialValidator
         var secret = TokenPrefix + Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
-        run.WriteBackTokenHash = Hash(secret);
-        run.WriteBackTokenExpiresAt = DateTime.UtcNow.Add(lifetime);
+        var hash = Hash(secret);
+        var expiresAt = DateTime.UtcNow.Add(lifetime);
 
-        await _repository.UpdateAsync(run, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        // 只写这两列。整实体回写会把调用方加载时的旧值一起写回：别的副本此刻写下的取消标记被改回 false，
+        // 续租写下的新租约被改回认领时的旧值。跨租户：签发发生在后台作用域，运行行带着自己的租户。
+        await _repository.AcrossTenants()
+            .Where(r => r.Id == run.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.WriteBackTokenHash, hash)
+                .SetProperty(r => r.WriteBackTokenExpiresAt, expiresAt), cancellationToken);
+
+        // 让调用方手里的那份与库里一致。终态写入按列清掉这两列，不读这里的值。
+        run.WriteBackTokenHash = hash;
+        run.WriteBackTokenExpiresAt = expiresAt;
 
         return secret;
     }
@@ -80,7 +97,7 @@ public class CliRunTokenService : IRunScopedCredentialValidator
                         && r.WriteBackTokenExpiresAt != null
                         && r.WriteBackTokenExpiresAt > now
                         && (r.Status == CliRunStatus.Dispatched || r.Status == CliRunStatus.Running))
-            .Select(r => new { r.Id, r.AgentId, r.TenantId })
+            .Select(r => new { r.Id, r.AgentId, r.TenantId, r.CreatorId, r.ThreadId })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (match is null)
@@ -102,24 +119,12 @@ public class CliRunTokenService : IRunScopedCredentialValidator
             RunId = match.Id,
             AgentId = match.AgentId,
             TenantId = match.TenantId,
+            // 派发者与租户同一来源（运行记录），消费方工具据此做按用户的授权
+            CreatorId = match.CreatorId,
+            // 这次运行在哪段对话里：消费方工具按线程维护状态时不必再拿运行 id 回查
+            ThreadId = match.ThreadId,
             AllowedToolNames = allowedTools
         };
-    }
-
-    /// <summary>
-    /// 立刻作废一次运行的凭据。
-    /// </summary>
-    /// <remarks>
-    /// 运行到达终态时调用。虽然 <see cref="ValidateAsync"/> 已经按状态挡掉了，
-    /// 但把哈希也清掉意味着终态记录里根本不留任何凭据材料 —— 少一份可被离线爆破的东西。
-    /// </remarks>
-    public async Task RevokeAsync(Guid runId, CancellationToken cancellationToken)
-    {
-        await _repository.AsQueryable()
-            .Where(r => r.Id == runId)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(r => r.WriteBackTokenHash, (string?)null)
-                .SetProperty(r => r.WriteBackTokenExpiresAt, (DateTime?)null), cancellationToken);
     }
 
     private static string Hash(string secret)

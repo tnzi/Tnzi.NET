@@ -74,6 +74,21 @@ export interface CreateAdminAppOptions extends DefineAdminAppOptions {
   notFoundRedirect?: RouteRecordRaw['redirect']
 }
 
+/**
+ * A redirect by name inherits the params of the route it leaves, and the
+ * catch-all's `pathMatch` exists on no named target: vue-router discards it with
+ * a "Discarded invalid param(s)" console warning on every unknown URL. An
+ * explicit empty `params` is what the redirect merges over the inherited ones.
+ * Path redirects, function redirects and targets that set their own `params`
+ * are left as they are.
+ */
+function withoutInheritedParams(redirect: RouteRecordRaw['redirect']): RouteRecordRaw['redirect'] {
+  if (typeof redirect !== 'object' || redirect === null || 'path' in redirect || 'params' in redirect) {
+    return redirect
+  }
+  return { ...redirect, params: {} }
+}
+
 export interface AdminAppHandle extends DefineAdminAppResult {
   /** The created Vue app. */
   app: App
@@ -107,7 +122,7 @@ export function createAdminApp(options: CreateAdminAppOptions): AdminAppHandle {
   // basePath), instead of silently bouncing to the dashboard.
   const catchAll: RouteRecordRaw = {
     path: '/:pathMatch(.*)*',
-    redirect: options.notFoundRedirect ?? { name: 'not-found' },
+    redirect: withoutInheritedParams(options.notFoundRedirect ?? { name: 'not-found' }),
   } as RouteRecordRaw
 
   // `def.routes` already ends with the consumer's `rootRoutes` - `defineAdminApp`

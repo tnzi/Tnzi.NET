@@ -2,10 +2,41 @@ import { computed, ref, shallowRef, toRaw, watchEffect, type ComputedRef, type R
 
 export type FormModalMode = 'create' | 'edit' | 'view'
 
+/**
+ * A switch at the left of the form modal's footer, opposite Cancel / Confirm: one line with the label, an optional
+ * ⓘ hint and the switch; clicking the label toggles it too. For a record-level flag such as "Active" that is not a
+ * field of the form but a state of the record.
+ *
+ * Shown on edit only by default: a new record starts in its default state, and an "off" switch on create would read
+ * as "this will be created off".
+ */
+export interface FormFooterSwitch {
+  /** The form model field the switch writes (`isActive`). */
+  key: string
+  /** Label: an i18n key resolved through the page translator, or literal text. */
+  label: string
+  /** Optional hint behind an ⓘ after the label (same resolution as `label`). */
+  hint?: string
+  /** The modes it appears in. Default `['edit']`. */
+  modes?: ReadonlyArray<Exclude<FormModalMode, 'view'>>
+}
+
 export interface UseFormModalReturn<T> {
   visible: Ref<boolean>
   mode: Ref<FormModalMode | null>
   formData: Ref<T | null>
+  /**
+   * A save of this form is in flight. Set by the engine that owns the write
+   * (`useCrudPage.submit` / `useDetail.submit`), which also refuses a second
+   * call while it is true; the Confirm buttons of `TFormModal` / `TDetailHost`
+   * show it as their loading state. A double-clicked Confirm on a create form
+   * would otherwise post the same record twice.
+   *
+   * Deliberately NOT reset by `close()`: closing the overlay does not cancel
+   * the request, and a form reopened meanwhile must not start a second write
+   * before the first has answered.
+   */
+  submitting: Ref<boolean>
   open: (mode: FormModalMode, initial?: T | null) => void
   close: () => void
   confirm: () => Promise<T | null>
@@ -31,6 +62,7 @@ export function useFormModal<T = unknown>(): UseFormModalReturn<T> {
   const visible = ref(false)
   const mode = ref<FormModalMode | null>(null)
   const formData = ref<T | null>(null) as Ref<T | null>
+  const submitting = ref(false)
 
   function open(nextMode: FormModalMode, initial: T | null = null): void {
     mode.value = nextMode
@@ -53,6 +85,7 @@ export function useFormModal<T = unknown>(): UseFormModalReturn<T> {
     visible,
     mode,
     formData,
+    submitting,
     open,
     close,
     confirm,

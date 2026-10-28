@@ -354,8 +354,11 @@ public class EntityAuditSaveChangesInterceptor : SaveChangesInterceptor
             }
 
             // 敏感字段脱敏：字段名与 SensitiveFields 大小写不敏感匹配时以掩码入库，
-            // 与 RequestBodyRedactor 的请求体脱敏语义一致（同一掩码）
-            if (options.SensitiveFields.Contains(metadata.Name))
+            // 与 RequestBodyRedactor 的请求体脱敏语义一致（同一掩码）。
+            // ★ 字段级加密列（IsEncrypted()）同样只记「变了」：变更跟踪器里的是模型值 = 明文，
+            // 加密只发生在提供程序边界上。原样记下等于在审计表里留一份不受密钥管辖的明文副本：
+            // 加密删除销毁了密钥、保留策略硬删了行，这份副本都还在。
+            if (options.SensitiveFields.Contains(metadata.Name) || metadata.IsEncryptedColumn())
             {
                 if (originalValue != null)
                 {
@@ -437,8 +440,9 @@ public class EntityAuditSaveChangesInterceptor : SaveChangesInterceptor
         return underlying != null ? underlying.Name + "?" : type.Name;
     }
 
-    private static string Truncate(string value, int maxLength)
-        => value.Length <= maxLength ? value : value[..maxLength];
+    // 不切开代理对：属性值里的 emoji 落在截断边界上时，孤立的高代理项会让严格的 UTF-8 编码器（Npgsql）
+    // 拒绝写入审计条目
+    private static string Truncate(string value, int maxLength) => value.FitToLength(maxLength);
 
     /// <param name="AuditEntry">已快照的审计条目</param>
     /// <param name="EfEntry">EF 变更条目引用（用于保存后定稿主键）</param>

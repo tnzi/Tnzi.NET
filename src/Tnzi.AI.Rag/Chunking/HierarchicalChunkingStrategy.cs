@@ -11,7 +11,10 @@ namespace Tnzi.AI.Rag.Chunking;
 /// 3. 返回 <see cref="HierarchicalChunkResult"/>，包含父块和子块的映射关系
 /// </para>
 /// <para>
-/// 使用场景：检索时先匹配子块（精确定位），再回溯父块获取更完整的上下文。
+/// 作为切块策略（<c>AI:Rag:ChunkingStrategy=Hierarchical</c>）接入摄取时只用到 <see cref="Chunk"/>：
+/// 切块契约只能返回文本列表，摄取得到的是扁平的子块，父子关系不落库（<c>DocumentChunk.ParentChunkId</c> 恒为空），
+/// 检索也不会回溯父块。效果上它是「先按标题 / 空行分段、再定长切」的块；需要更大上下文时用父文档检索
+/// （<c>IParentDocumentRetriever</c>，按同一文档的相邻块窗口扩展）。<see cref="ChunkWithHierarchy"/> 只供直接调用者取父子映射。
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "Hierarchical chunking is in preview")]

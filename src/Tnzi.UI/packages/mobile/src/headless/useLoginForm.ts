@@ -1,6 +1,7 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from '@tnzi/core/adapters/i18n'
 import { composeImageCaptchaToken } from '@tnzi/core/services/captcha'
+import { isBlank } from './blank'
 
 export interface LoginCredentials {
   userName: string
@@ -56,8 +57,8 @@ export function useLoginForm(options: UseLoginFormOptions = {}): UseLoginFormRet
   const isSubmitting = ref(false)
 
   const isValid = computed(() => {
-    if (!username.value || !password.value) return false
-    if (options.showCaptcha && !captchaCode.value) return false
+    if (isBlank(username.value) || isBlank(password.value)) return false
+    if (options.showCaptcha && isBlank(captchaCode.value)) return false
     return true
   })
 
@@ -65,9 +66,9 @@ export function useLoginForm(options: UseLoginFormOptions = {}): UseLoginFormRet
 
   function validate(): boolean {
     const newErrors: Record<string, string> = {}
-    if (!username.value) newErrors.username = t('auth.pleaseEnter', { field: t('auth.username') })
-    if (!password.value) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
-    if (options.showCaptcha && !captchaCode.value) {
+    if (isBlank(username.value)) newErrors.username = t('auth.pleaseEnter', { field: t('auth.username') })
+    if (isBlank(password.value)) newErrors.password = t('auth.pleaseEnter', { field: t('auth.password') })
+    if (options.showCaptcha && isBlank(captchaCode.value)) {
       newErrors.captchaCode = t('auth.pleaseEnter', { field: t('auth.verificationCode') })
     }
     errors.value = newErrors

@@ -73,7 +73,17 @@ public class RateLimitHubFilter : IHubFilter
                 break;
         }
 
-        await next(context);
+        try
+        {
+            await next(context);
+        }
+        catch
+        {
+            // ★ OnConnectedAsync 链路抛出时 SignalR 不再调用 OnDisconnectedAsync：占下的名额在这里还回去，
+            //   否则每次被拒绝的握手都漏掉一个，同一出口 IP 重试若干次后整个分区在计数 TTL 内被拒。
+            await ReleaseAnonymousConnectionAsync(context.Context);
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -128,10 +138,19 @@ public class RateLimitHubFilter : IHubFilter
             return;
         }
 
-        // 匿名连接：把占用的名额还回去。用连接期存下的那个键，不重算。
-        if (context.Context.Items.TryGetValue(AnonymousPartitionItemKey, out var stored)
+        // 匿名连接：把占用的名额还回去。
+        await ReleaseAnonymousConnectionAsync(context.Context);
+    }
+
+    /// <summary>
+    /// 归还连接期占下的匿名名额：用连接期存下的那个键，不重算；归还后移除这个键，同一条连接不会还两次。
+    /// </summary>
+    private async Task ReleaseAnonymousConnectionAsync(HubCallerContext context)
+    {
+        if (context.Items.TryGetValue(AnonymousPartitionItemKey, out var stored)
             && stored is string partitionKey)
         {
+            context.Items.Remove(AnonymousPartitionItemKey);
             await _rateLimitService.ReleaseAnonymousConnectionAsync(partitionKey);
         }
     }

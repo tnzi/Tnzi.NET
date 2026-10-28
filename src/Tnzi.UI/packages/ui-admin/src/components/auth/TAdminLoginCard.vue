@@ -97,10 +97,14 @@ function t(key: string, fallback?: string): string {
 const submitLabel = computed(() => t('admin.login.submit', 'Sign in'))
 const codeBtnLabel = computed(() => t('admin.login.sendCode', 'Send code'))
 
+// `whitespace: true`: a field holding only spaces is as empty as a blank one.
+// The backend's [Required] refuses it, so letting it through only trades the
+// field message for a failed sign-in.
 const rules = computed<FormRules>(() => ({
   userName: [
     {
       required: true,
+      whitespace: true,
       trigger: ['blur', 'input'],
       message: t('admin.login.errorEmptyUsername', 'Please enter username'),
     },
@@ -108,6 +112,7 @@ const rules = computed<FormRules>(() => ({
   password: [
     {
       required: true,
+      whitespace: true,
       trigger: ['blur', 'input'],
       message:
         method.value === 'pwd'
@@ -117,17 +122,26 @@ const rules = computed<FormRules>(() => ({
   ],
 }))
 
+/**
+ * The form's submit is the one way in: Sign in is a submit button, and Enter in
+ * a field submits the form (the browser clicks that button). A click handler or
+ * an Enter key handler on top of it sent the same sign-in two or three times,
+ * each one counting towards the lockout. The in-flight flag goes up before
+ * validation, which awaits, so a second submit in that gap is dropped too.
+ */
 async function handleSubmit(): Promise<void> {
+  if (submitting.value) return
   submitError.value = ''
+  submitting.value = true
   try {
     // Field-level validation via NForm rules - throws if invalid.
     await formRef.value?.validate()
   } catch {
     // Naive-UI shows inline errors automatically; nothing else to do.
+    submitting.value = false
     return
   }
 
-  submitting.value = true
   try {
     await props.onLogin({ ...form, method: method.value })
     emit('success')
@@ -197,7 +211,6 @@ function fillDemo(account: DemoAccount): void {
               v-model:value="form.userName"
               :placeholder="t('admin.login.userNamePlaceholder', 'Enter username')"
               autocomplete="username"
-              @keyup.enter="handleSubmit"
             />
           </NFormItem>
 
@@ -208,7 +221,6 @@ function fillDemo(account: DemoAccount): void {
               show-password-on="click"
               :placeholder="t('admin.login.passwordPlaceholder', 'Enter password')"
               autocomplete="current-password"
-              @keyup.enter="handleSubmit"
             />
           </NFormItem>
 
@@ -240,7 +252,6 @@ function fillDemo(account: DemoAccount): void {
             :loading="submitting"
             attr-type="submit"
             class="t-admin-login__submit"
-            @click="handleSubmit"
           >
             {{ submitLabel }}
           </NButton>

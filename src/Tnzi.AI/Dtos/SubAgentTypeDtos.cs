@@ -46,16 +46,18 @@ public class SubAgentTypeDto
 }
 
 /// <summary>
-/// 子 Agent 类型输入 DTO（创建/更新共用）
+/// 子 Agent 类型输入 DTO（创建/更新共用；字符串长度上限与列一致）
 /// </summary>
 public class SubAgentTypeInputDto
 {
     /// <summary>Type name (unique identifier)</summary>
     [Required]
+    [MaxLength(100)]
     public string Name { get; set; } = null!;
 
     /// <summary>Type description</summary>
     [Required]
+    [MaxLength(500)]
     public string Description { get; set; } = null!;
 
     /// <summary>Tool groups</summary>
@@ -64,13 +66,16 @@ public class SubAgentTypeInputDto
     /// <summary>Excluded tool groups</summary>
     public List<string>? ExcludedToolGroups { get; set; }
 
-    /// <summary>Maximum turns (default 50)</summary>
+    /// <summary>Maximum turns (default 50): the tool-loop cap of every run spawned from this type</summary>
+    [Range(1, int.MaxValue, ErrorMessage = "MaxTurns must be at least 1.")]
     public int MaxTurns { get; set; } = 50;
 
     /// <summary>System instructions</summary>
+    [MaxLength(4000)]
     public string? Instructions { get; set; }
 
     /// <summary>Default model</summary>
+    [MaxLength(200)]
     public string? DefaultModel { get; set; }
 
     /// <summary>Default approval mode</summary>

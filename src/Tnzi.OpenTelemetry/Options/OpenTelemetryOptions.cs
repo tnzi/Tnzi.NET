@@ -73,7 +73,7 @@ public class OpenTelemetryOptions
     public int OtlpTimeoutMilliseconds { get; set; } = 10_000;
 
     /// <summary>
-    /// 是否把每条 EF Core 命令的<b>完整 SQL 文本</b>作为 <c>db.statement</c> 附到 span 上。
+    /// 是否把每条 EF Core 命令的<b>完整 SQL 文本</b>作为 <c>db.query.text</c>（旧语义约定下是 <c>db.statement</c>）附到 span 上。
     /// 默认值：<c>false</c>。
     /// </summary>
     /// <remarks>

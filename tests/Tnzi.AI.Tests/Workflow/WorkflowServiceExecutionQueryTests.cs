@@ -105,7 +105,7 @@ public class WorkflowServiceExecutionQueryTests
         _runRepository.Object,
         _agentRepository.Object,
         Mock.Of<IUsageLogService>(),
-        Mock.Of<IQuotaService>(),
+        Mock.Of<IUsageLimitService>(),
         Mock.Of<IWorkflowCheckpointStore>(),
         new WorkflowEngine(Mock.Of<ILogger<WorkflowEngine>>()),
         _serviceProvider.GetServices<IWorkflowNode>(),

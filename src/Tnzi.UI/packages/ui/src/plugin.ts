@@ -23,7 +23,7 @@ import {
   setNotificationAdapter,
   setLoadingBarAdapter,
 } from '@tnzi/core/adapters';
-import { provideStoreRuntime } from './stores/factory';
+import { initStoreRuntime } from './stores/factory';
 
 // Import adapters
 import { createUiAdapter } from './adapters/create-ui-adapter';
@@ -49,9 +49,12 @@ export interface TnziUiOptions {
   router?: VueRouterLike;
   /** localStorage key prefix for runtime adapter storage */
   storagePrefix?: string;
-  /** HTTP client for store API calls (enables provide/inject DI, SSR-safe) */
+  /**
+   * HTTP client for the Pinia stores in `@tnzi/ui/stores`. Sets the module-level
+   * store runtime (`initStoreRuntime`), which every app in the page shares.
+   */
   httpClient?: HttpClient;
-  /** Storage adapter for persistence (used with httpClient for provide/inject DI) */
+  /** Storage adapter for those stores' persistence (used with `httpClient`). */
   storage?: StorageAdapter;
   /** Whether to register all T* components globally (default: true) */
   registerComponents?: boolean;
@@ -117,9 +120,9 @@ export function createTnziUi(options: TnziUiOptions = {}): Plugin {
         setLoadingBarAdapter(createLoadingBarAdapter());
       }
 
-      // 3. Provide store runtime via inject (SSR-safe)
+      // 3. Point the Pinia stores at the given HTTP client (module-level runtime)
       if (httpClient) {
-        provideStoreRuntime(app, httpClient, storage);
+        initStoreRuntime(httpClient, storage);
       }
 
       // 4. Initialize i18n locale

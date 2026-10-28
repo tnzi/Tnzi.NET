@@ -65,7 +65,7 @@ public class PerformanceCollector : IPerformanceCollector
             MaxDurationMs: durations.Max(),
             SlowRequestCount: slowRequestCount,
             ByPath: relevantRecords
-                .GroupBy(r => r.Path)
+                .GroupBy(r => r.EndpointKey)
                 .ToDictionary(g => g.Key, g => g.Count()),
             ByMethod: relevantRecords
                 .GroupBy(r => r.Method)

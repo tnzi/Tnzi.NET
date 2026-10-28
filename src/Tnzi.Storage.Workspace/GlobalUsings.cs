@@ -10,6 +10,7 @@ global using System.Threading;
 global using System.Threading.Tasks;
 
 global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.AspNetCore.Http;
 global using Microsoft.EntityFrameworkCore;
 global using Microsoft.EntityFrameworkCore.Metadata.Builders;
 global using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,8 @@ global using Tnzi.Data;
 global using Tnzi.Domain.Entities;
 global using Tnzi.Domain.Repositories;
 global using Tnzi.EFCore;
+global using Tnzi.EFCore.Extensions;
+global using Tnzi.Mapster;
 global using Tnzi.EFCore.Internal;
 global using Tnzi.EventBus;
 global using Tnzi.Exceptions;
@@ -40,6 +43,7 @@ global using Tnzi.Storage.Dtos;
 // 这正是「子引用父」的方向。父模块反过来对本模块的实体一无所知。
 global using Tnzi.Storage.Entities;
 global using Tnzi.Storage.Events;
+global using Tnzi.Storage.Filters;
 global using Tnzi.Storage.Helpers;
 global using Tnzi.Storage.Options;
 global using Tnzi.Storage.Permissions;
@@ -50,6 +54,7 @@ global using Tnzi.Storage.Services;
 global using Tnzi.Storage.Workspace.Dtos;
 global using Tnzi.Storage.Workspace.Entities;
 global using Tnzi.Storage.Workspace.Events;
+global using Tnzi.Storage.Workspace.Events.Handlers;
 global using Tnzi.Storage.Workspace.Services;
 
 // 与父模块 Tnzi.Storage 的别名同一条理由：这三个类型名都与 BCL 撞车。

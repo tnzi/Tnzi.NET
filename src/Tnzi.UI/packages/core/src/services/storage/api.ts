@@ -45,6 +45,16 @@ import type {
   CreateFileFolderDto,
   UpdateFileFolderDto,
   MoveFilesToFolderRequest,
+  StorageQuotaDto,
+  StorageAllowanceDto,
+  SetStorageAllowanceDto,
+  FileSpaceListingDto,
+  FileSpaceListQuery,
+  FileSpaceSearchQuery,
+  FileSpaceEntryDto,
+  RecycleBinEntryDto,
+  MoveToRecycleBinDto,
+  RecycleBinRestoreResult,
 } from './types';
 
 // Aligned with DefaultStorageController [Route("files")]
@@ -55,6 +65,14 @@ const PREVIEW_BASE = '/files/preview';
 const ADMIN_BASE = '/admin/files';
 // Aligned with DefaultFileFolderAdminController [Route("admin/storage/folders")]
 const ADMIN_FOLDER_BASE = '/admin/storage/folders';
+// Aligned with DefaultFileFolderController [Route("storage/folders")]
+const FOLDER_BASE = '/storage/folders';
+// Aligned with DefaultFileSpaceController [Route("storage/space")]
+const SPACE_BASE = '/storage/space';
+// Aligned with DefaultRecycleBinController [Route("storage/recycle-bin")]
+const RECYCLE_BIN_BASE = '/storage/recycle-bin';
+// Aligned with DefaultStorageQuotaAdminController [Route("admin/storage/quotas")]
+const ADMIN_QUOTA_BASE = '/admin/storage/quotas';
 
 /**
  * Accept either the new options object or a bare progress callback, so existing
@@ -88,12 +106,18 @@ export function useStorageApi(client: HttpClient) {
      * Pass `{ isPublic: true }` for site assets that must be reachable through an
      * anonymous `<img src>`. Avatars do not need it - the backend flags the file
      * public by itself once the id lands in a `[FileField(Public = true)]` field.
+     *
+     * Pass `{ isTemporary: false }` for a file that is kept without any entity
+     * referencing it (a file library entry); see `FileUploadOptions.isTemporary`.
      */
     upload: (file: File, options?: FileUploadOptions | ((progress: number) => void)) => {
-      const { onProgress, isPublic } = normalizeUploadOptions(options);
+      const { onProgress, isPublic, isTemporary } = normalizeUploadOptions(options);
+      const additionalData: Record<string, string> = {};
+      if (isPublic) additionalData.isPublic = 'true';
+      if (isTemporary !== undefined) additionalData.isTemporary = String(isTemporary);
       return client.upload<FileRecordDto>(`${BASE}/upload`, file, {
         onProgress,
-        additionalData: isPublic ? { isPublic: 'true' } : undefined,
+        additionalData: Object.keys(additionalData).length > 0 ? additionalData : undefined,
       });
     },
 
@@ -125,7 +149,13 @@ export function useStorageApi(client: HttpClient) {
     /** Get thumbnail URL */
     getThumbnailUrl: (id: string) => client.resolveUrl(`${BASE}/${id}/thumbnail`),
 
-    /** Get file URL (signed/expirable) */
+    /**
+     * Get the file's download route (`/api/files/{id}/download`). The URL is
+     * neither signed nor expiring: every request is authorized again, so a
+     * browser opening a private file needs a bearer token or an access token
+     * from `getAccessToken` appended as `?sig=`. `expiresIn` is ignored by the
+     * server. Use `getPresignedUrl` for a time-limited direct link.
+     */
     getUrl: (id: string, expiresIn?: number) =>
       client.get<string>(`${BASE}/${id}/url`, { params: { expiresIn } }),
 
@@ -161,6 +191,15 @@ export function useStorageApi(client: HttpClient) {
     copy: (id: string, newFileName?: string) =>
       client.post<FileRecordDto>(`${BASE}/${id}/copy`, { newFileName }),
 
+    /**
+     * The signed-in user's storage quota: bytes used and the allowance
+     * (`allowanceBytes` null = unlimited). Uploads that would go over it are
+     * refused with HTTP 413 and error code `FILE_QUOTA_EXCEEDED`, whose
+     * `errorDetails` is a `StorageQuotaExceededDetails`.
+     */
+    getQuota: () =>
+      client.get<StorageQuotaDto>(`${BASE}/quota`),
+
     // ---- Versioning ----
 
     /** Create a new file version */
@@ -176,6 +215,26 @@ export function useStorageApi(client: HttpClient) {
     /** Restore a specific version */
     restoreVersion: (id: string, version: number) =>
       client.post<FileRecordDto>(`${BASE}/${id}/versions/${version}/restore`),
+
+    /**
+     * Download one version's bytes as a Blob (the current version pointer does
+     * not move). Save it under `versionedFileName(originalName, version)`.
+     *
+     * There is deliberately no URL helper for this route: it needs a signed-in
+     * caller, and a browser navigation (`<a href>`, `window.open`) carries no
+     * Authorization header - nor does a `?sig=` token get past that gate, since
+     * the route is not anonymous. The bytes come through the client, with the
+     * same 401 refresh as every other request.
+     */
+    downloadVersion: (id: string, version: number) =>
+      client.download(`${BASE}/${id}/versions/${version}/download`),
+
+    /**
+     * Delete a version that is not current: its record and its stored copy.
+     * The server refuses the current version (400) - restore another one first.
+     */
+    deleteVersion: (id: string, version: number) =>
+      client.delete<void>(`${BASE}/${id}/versions/${version}`),
 
     // ---- Sharing ----
 
@@ -240,21 +299,39 @@ export function useStorageApi(client: HttpClient) {
     initiateChunkedUpload: (data: InitiateChunkedUploadDto) =>
       client.post<FileUploadSessionDto>(`${BASE}/upload/chunk/init`, data),
 
-    /** Upload a single chunk */
-    uploadChunk: (uploadSessionId: string, chunkIndex: number, chunk: File) =>
-      client.upload<FileChunkDto>(`${BASE}/upload/chunk/${uploadSessionId}`, chunk, { params: { chunkIndex } }),
+    /**
+     * Upload a single chunk.
+     *
+     * The part is named `chunk`, the parameter name the endpoint binds
+     * (`IFormFile chunk`). `client.upload` names it `file`, which the endpoint
+     * never sees, so every chunk would fail with 400 "Chunk file is required".
+     */
+    uploadChunk: (uploadSessionId: string, chunkIndex: number, chunk: Blob) => {
+      const formData = new FormData();
+      formData.append('chunk', chunk);
+      return client.uploadFormData<FileChunkDto>(`${BASE}/upload/chunk/${uploadSessionId}`, formData, {
+        params: { chunkIndex },
+      });
+    },
 
-    /** Complete chunked upload */
+    /**
+     * Complete chunked upload. Pass `{ folderId }` to put the merged file
+     * straight into one of the uploader's folders (the user file space): it is
+     * then kept permanently, like `useFileSpaceApi().upload`.
+     */
     completeChunkedUpload: (
       uploadSessionId: string,
       dataOrIsTemporary: CompleteChunkedUploadDto | boolean = { isTemporary: false }
     ) =>
-      client.post<FileRecordDto>(`${BASE}/upload/chunk/${uploadSessionId}/complete`, {
-        isTemporary:
-          typeof dataOrIsTemporary === 'boolean'
-            ? dataOrIsTemporary
-            : dataOrIsTemporary.isTemporary ?? false,
-      }),
+      client.post<FileRecordDto>(
+        `${BASE}/upload/chunk/${uploadSessionId}/complete`,
+        typeof dataOrIsTemporary === 'boolean'
+          ? { isTemporary: dataOrIsTemporary }
+          : {
+              isTemporary: dataOrIsTemporary.isTemporary ?? false,
+              ...(dataOrIsTemporary.folderId ? { folderId: dataOrIsTemporary.folderId } : {}),
+            }
+      ),
 
     /** Cancel chunked upload */
     cancelChunkedUpload: (uploadSessionId: string) =>
@@ -284,9 +361,16 @@ export function useStoragePreviewApi(client: HttpClient) {
     getPreviewType: (id: string) =>
       client.get<string>(`${PREVIEW_BASE}/${id}/preview-type`),
 
-    /** Get generated preview stream URL */
-    getGeneratedPreviewUrl: (id: string) =>
-      client.resolveUrl(`${PREVIEW_BASE}/${id}/preview`),
+    /**
+     * Download the generated preview (image / PDF / media / text) as a Blob.
+     *
+     * Fetched with the caller's session rather than returned as a URL: the endpoint
+     * is authenticated and does not accept a `?sig=` token, so a bare URL in an
+     * `<img>` / `<iframe>` is refused for every file. Show the Blob through
+     * `URL.createObjectURL`, or sign a read URL with `createFileUrlResolver`.
+     */
+    getGeneratedPreview: (id: string) =>
+      client.download(`${PREVIEW_BASE}/${id}/preview`),
   };
 }
 
@@ -382,6 +466,13 @@ export function useAdminFileApi(client: HttpClient) {
     getUserStorageUsage: (userId: string) =>
       client.get<UserStorageUsageDto>(`${ADMIN_BASE}/usage/user/${userId}`),
 
+    /**
+     * A user's storage quota: bytes used (files plus old versions) and the
+     * effective allowance. Set a per-user allowance with `useAdminStorageQuotaApi`.
+     */
+    getUserQuota: (userId: string) =>
+      client.get<StorageQuotaDto>(`${ADMIN_BASE}/quota/${userId}`),
+
     /** Get top users by storage usage */
     getTopUsersByStorage: (top: number = 20) =>
       client.get<UserStorageUsageDto[]>(`${ADMIN_BASE}/usage/top-users`, { params: { top } }),
@@ -431,9 +522,13 @@ export function useAdminFileApi(client: HttpClient) {
     setFileTags: (id: string, data: SetFileTagsDto) =>
       client.put<FileRecordDto>(`${ADMIN_BASE}/${id}/tags`, data),
 
-    /** Get files by tag */
+    /**
+     * Get files by tag. The tag is a path segment, so it is percent-encoded; ASP.NET Core
+     * does not decode an encoded `/` in a route value, so for a tag that contains one use
+     * `query({ tag })`, which filters on the same exact match.
+     */
     getFilesByTag: (tag: string, pageIndex: number = 1, pageSize: number = 20) =>
-      client.get<PagedList<FileRecordDto>>(`${ADMIN_BASE}/by-tag/${tag}`, { params: { pageIndex, pageSize } }),
+      client.get<PagedList<FileRecordDto>>(`${ADMIN_BASE}/by-tag/${encodeURIComponent(tag)}`, { params: { pageIndex, pageSize } }),
 
     // ---- Metadata ----
 
@@ -477,11 +572,19 @@ export function useAdminFileApi(client: HttpClient) {
  */
 export function useAdminFileFolderApi(client: HttpClient) {
   return {
-    /** Fetch the folder tree rooted at `parentId` (omit for full tree from root). */
-    getTree: (parentId?: string | null) =>
-      client.get<FileFolderDto[]>(`${ADMIN_FOLDER_BASE}/tree`, {
-        params: parentId ? { parentId } : undefined,
-      }),
+    /**
+     * Fetch the folder tree rooted at `parentId` (omit for full tree from root).
+     * Every user has their own namespace; pass `ownerId` to see one user's tree,
+     * otherwise the tree mixes every owner's folders.
+     */
+    getTree: (parentId?: string | null, ownerId?: string | null) => {
+      const params: Record<string, string> = {};
+      if (parentId) params.parentId = parentId;
+      if (ownerId) params.ownerId = ownerId;
+      return client.get<FileFolderDto[]>(`${ADMIN_FOLDER_BASE}/tree`, {
+        params: Object.keys(params).length > 0 ? params : undefined,
+      });
+    },
 
     /** Lookup a single folder by id. */
     getById: (id: string) =>
@@ -537,5 +640,133 @@ export function useAdminStorageAuditApi(client: HttpClient) {
     /** Paged version rows, optionally narrowed to one file and/or current-only. */
     getVersions: (query?: FileVersionAuditQueryDto) =>
       client.get<PagedList<FileVersionAuditDto>>(`${ADMIN_STORAGE_AUDIT_BASE}/versions`, { params: query }),
+  };
+}
+
+/**
+ * The signed-in user's own folders. Aligned with DefaultFileFolderController
+ * under /storage/folders. Paths are unique per owner; another user's folders
+ * are never visible here.
+ *
+ * `delete` removes an EMPTY folder permanently. A file space UI deletes through
+ * `useRecycleBinApi().moveToRecycleBin` instead, which also takes non-empty
+ * folders (with their contents) and can be undone.
+ */
+export function useFileFolderApi(client: HttpClient) {
+  return {
+    /** The signed-in user's folder tree below `parentId` (omit for the whole tree). */
+    getTree: (parentId?: string | null) =>
+      client.get<FileFolderDto[]>(`${FOLDER_BASE}/tree`, {
+        params: parentId ? { parentId } : undefined,
+      }),
+
+    getById: (id: string) =>
+      client.get<FileFolderDto>(`${FOLDER_BASE}/${id}`),
+
+    create: (data: CreateFileFolderDto) =>
+      client.post<FileFolderDto>(FOLDER_BASE, data),
+
+    update: (id: string, data: UpdateFileFolderDto) =>
+      client.put<FileFolderDto>(`${FOLDER_BASE}/${id}`, data),
+
+    /** Permanently delete an empty folder (see the note on this factory). */
+    delete: (id: string) =>
+      client.delete<void>(`${FOLDER_BASE}/${id}`),
+
+    /** Move a folder under another of the user's folders (or to the root). */
+    move: (id: string, newParentId?: string | null) =>
+      client.post<void>(`${FOLDER_BASE}/${id}/move`, null, {
+        params: newParentId ? { newParentId } : undefined,
+      }),
+
+    /** Put files into a folder (or the root when folderId is null). */
+    moveFiles: (data: MoveFilesToFolderRequest) =>
+      client.post<void>(`${FOLDER_BASE}/move-files`, data),
+  };
+}
+
+/**
+ * The signed-in user's file space: browse a folder, search by name, upload into
+ * a folder. Aligned with DefaultFileSpaceController under /storage/space.
+ *
+ * Files are opened with the regular file endpoints (`useStorageApi()` download /
+ * preview / thumbnail / versions / share) using the entry id.
+ *
+ * Uploads land as permanent files and are never merged with an earlier upload of
+ * the same bytes. Files larger than `Storage:MaxFileSize` go through the chunked
+ * upload (`useStorageApi()` initiate / upload chunk / complete with `{ folderId }`).
+ */
+export function useFileSpaceApi(client: HttpClient) {
+  return {
+    /** Folders first, then files, paged together. Omit `folderId` for the root. */
+    list: (query: FileSpaceListQuery = {}) =>
+      client.get<FileSpaceListingDto>(`${SPACE_BASE}/items`, { params: query }),
+
+    /** Search the user's files by name, extension or content type (recycle bin excluded). */
+    search: (query: FileSpaceSearchQuery) =>
+      client.get<PagedList<FileSpaceEntryDto>>(`${SPACE_BASE}/search`, { params: query }),
+
+    /** Upload a file into a folder (omit `folderId` for the root). */
+    upload: (file: File, folderId?: string | null, onProgress?: (progress: number) => void) =>
+      client.upload<FileRecordDto>(`${SPACE_BASE}/files`, file, {
+        onProgress,
+        additionalData: folderId ? { folderId } : undefined,
+      }),
+  };
+}
+
+/**
+ * The signed-in user's recycle bin. Aligned with DefaultRecycleBinController
+ * under /storage/recycle-bin. Items are purged automatically after
+ * `Storage:RecycleBin:RetentionDays` and count against the quota until then.
+ */
+export function useRecycleBinApi(client: HttpClient) {
+  return {
+    /** Most recently deleted first. */
+    list: (pageIndex: number = 1, pageSize: number = 50) =>
+      client.get<PagedList<RecycleBinEntryDto>>(RECYCLE_BIN_BASE, { params: { pageIndex, pageSize } }),
+
+    /** Move files and folders (with everything in them) to the bin. */
+    moveToRecycleBin: (data: MoveToRecycleBinDto) =>
+      client.post<void>(RECYCLE_BIN_BASE, data),
+
+    /** Restore entries to where they were deleted from (or the root when that folder is gone). */
+    restore: (entryIds: string[]) =>
+      client.post<RecycleBinRestoreResult>(`${RECYCLE_BIN_BASE}/restore`, { entryIds }),
+
+    /** Delete entries permanently; returns how many were processed. */
+    purge: (entryIds: string[]) =>
+      client.post<number>(`${RECYCLE_BIN_BASE}/purge`, { entryIds }),
+
+    /** Empty the bin; returns how many entries were purged. */
+    empty: () =>
+      client.delete<number>(RECYCLE_BIN_BASE),
+  };
+}
+
+/**
+ * Per-user storage allowances set by an administrator (override
+ * `Storage:Quota:DefaultUserAllowanceBytes`). Aligned with
+ * DefaultStorageQuotaAdminController under /admin/storage/quotas
+ * (`storage.file.view`; writes need `storage.file.update`).
+ * A user's usage and effective allowance: `useAdminFileApi().getUserQuota`.
+ */
+export function useAdminStorageQuotaApi(client: HttpClient) {
+  return {
+    /** Users who have an allowance of their own. */
+    list: (pageIndex: number = 1, pageSize: number = 20) =>
+      client.get<PagedList<StorageAllowanceDto>>(ADMIN_QUOTA_BASE, { params: { pageIndex, pageSize } }),
+
+    /** A user's own allowance; 404 when the default applies. */
+    get: (userId: string) =>
+      client.get<StorageAllowanceDto>(`${ADMIN_QUOTA_BASE}/${userId}`),
+
+    /** Set a user's allowance (`allowanceBytes` null = unlimited for this user). */
+    set: (userId: string, data: SetStorageAllowanceDto) =>
+      client.put<StorageAllowanceDto>(`${ADMIN_QUOTA_BASE}/${userId}`, data),
+
+    /** Remove a user's allowance so the default applies again. */
+    remove: (userId: string) =>
+      client.delete<void>(`${ADMIN_QUOTA_BASE}/${userId}`),
   };
 }

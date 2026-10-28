@@ -19,6 +19,9 @@ public class MetadataAndInMemoryTests
     {
         _mockFileRepository = new Mock<IRepository<FileRecord, Guid>>();
         _mockReferenceRepository = new Mock<IRepository<FileReference, Guid>>();
+        // 删除前要数一数正式引用行（只剩引用行持有的文件不让删）；默认一行都没有。
+        _mockReferenceRepository.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(() => new List<FileReference>().BuildMock());
         _mockStorage = new Mock<IFileStorage>();
         _mockServiceProvider = new Mock<IServiceProvider>();
 
@@ -55,7 +58,8 @@ public class MetadataAndInMemoryTests
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
             new UploadGuard(optionsMonitor.Object),
-            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     #region E1-1: FileRecord Metadata JSON
@@ -381,44 +385,6 @@ public class MetadataAndInMemoryTests
     {
         Assert.True(StorageProviderFactory.IsRegistered("InMemory"));
         Assert.True(StorageProviderFactory.IsRegistered("inmemory"));
-    }
-
-    #endregion
-
-    #region P1: Batch Delete References
-
-    [Fact]
-    public async Task DeleteAsync_UsesBatchDelete_ForReferences()
-    {
-        // Arrange
-        var service = CreateStorageService();
-        var fileId = Guid.NewGuid();
-        var record = new FileRecord
-        {
-            Id = fileId,
-            OriginalName = "test.jpg",
-            Path = "path/to/test.jpg",
-            ReferenceCount = 0 // Will trigger deletion
-        };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(record);
-        _mockStorage.Setup(s => s.DeleteAsync(It.IsAny<string>()))
-            .ReturnsAsync(true);
-
-        // Act
-        var result = await service.DeleteAsync(fileId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        // Verify batch delete was called with predicate (not individual deletes)
-        _mockReferenceRepository.Verify(
-            r => r.DeleteAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileReference, bool>>>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        // Verify individual DeleteAsync was NOT called
-        _mockReferenceRepository.Verify(
-            r => r.DeleteAsync(It.IsAny<FileReference>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     #endregion

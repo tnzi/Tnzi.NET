@@ -57,12 +57,24 @@ export interface AiThemeTokens {
   readonly divider?: string;
 
   // -- Accent --------------------------------------------------------------
-  /** `--tnzi-ai-accent` brand accent (send button, focus ring). */
+  /**
+   * `--tnzi-ai-accent` brand accent fill (send button, focus ring).
+   *
+   * This overrides the fill only. `onAccent` and `accentText` keep following
+   * the `@tnzi/ui` primary, so set them alongside it - or, better, recolour the
+   * brand through the theme context (`setColor('primary', ...)`, or a snapshot's
+   * `ui.primary`), which recomputes both for whatever colour it is.
+   */
   readonly accent?: string;
   /** `--tnzi-ai-accent-soft` tinted accent background. */
   readonly accentSoft?: string;
   /** `--tnzi-ai-accent-glow` accent shadow colour. */
   readonly accentGlow?: string;
+  /** `--tnzi-ai-on-accent` foreground on the accent fill. */
+  readonly onAccent?: string;
+  /** `--tnzi-ai-accent-text` the accent as a text / icon colour on the canvas.
+   *  An override here is one value for both light and dark mode. */
+  readonly accentText?: string;
   /** `--tnzi-ai-accent-contrast` high-contrast neutral fill for a primary
    *  action that must out-rank the brand accent around it. */
   readonly accentContrast?: string;
@@ -78,6 +90,8 @@ export interface AiThemeTokens {
   readonly danger?: string;
   /** `--tnzi-ai-danger-soft` hover wash behind a destructive row. */
   readonly dangerSoft?: string;
+  /** `--tnzi-ai-on-status` foreground on a status fill (failed stage, subtask badges). */
+  readonly onStatus?: string;
 
   // -- Interaction overlays ------------------------------------------------
   /** `--tnzi-ai-hover` */
@@ -100,6 +114,10 @@ export interface AiThemeTokens {
   readonly streamingCursor?: string;
   /** `--tnzi-ai-code-bg` code block background. */
   readonly codeBg?: string;
+  /** `--tnzi-ai-code-frame-bg` the frame of a fenced code block in a message. */
+  readonly codeFrameBg?: string;
+  /** `--tnzi-ai-code-inline-text` inline code text in a message. */
+  readonly codeInlineText?: string;
 
   // -- Workflow ------------------------------------------------------------
   /** `--tnzi-ai-node-active` running workflow node. */
@@ -127,6 +145,8 @@ export interface AiThemeTokens {
   // the stylesheet from the start but were missing from this map, so the only
   // way to reach them was `applyThemeVars` with a hand-written variable name -
   // which is exactly the raw-name API this typed map exists to avoid.
+  /** `--tnzi-ai-brand-mark-glyph-size` size of the glyph in the brand tile, sidebar header and rail (CSS length). */
+  readonly brandMarkGlyphSize?: string;
   /** `--tnzi-ai-modal-radius` corner radius of modal surfaces (CSS length). */
   readonly modalRadius?: string;
   /** `--tnzi-ai-composer-radius` corner radius of the composer (CSS length). */
@@ -137,6 +157,8 @@ export interface AiThemeTokens {
   readonly backdropBlur?: string;
   /** `--tnzi-ai-scrollbar-size` scrollbar thickness (CSS length). */
   readonly scrollbarSize?: string;
+  /** `--tnzi-ai-code-line-height` line height of multi-line code (unitless). */
+  readonly codeLineHeight?: string;
   /** `--tnzi-ai-duration-fast` micro-interaction duration (CSS time). */
   readonly durationFast?: string;
   /** `--tnzi-ai-duration-base` default transition duration (CSS time). */
@@ -176,11 +198,14 @@ export const TOKEN_TO_VAR: Record<keyof AiThemeTokens, string> = {
   accent: '--tnzi-ai-accent',
   accentSoft: '--tnzi-ai-accent-soft',
   accentGlow: '--tnzi-ai-accent-glow',
+  onAccent: '--tnzi-ai-on-accent',
+  accentText: '--tnzi-ai-accent-text',
 
   success: '--tnzi-ai-success',
   warning: '--tnzi-ai-warning',
   danger: '--tnzi-ai-danger',
   dangerSoft: '--tnzi-ai-danger-soft',
+  onStatus: '--tnzi-ai-on-status',
   accentContrast: '--tnzi-ai-accent-contrast',
   onAccentContrast: '--tnzi-ai-on-accent-contrast',
 
@@ -194,6 +219,8 @@ export const TOKEN_TO_VAR: Record<keyof AiThemeTokens, string> = {
   toolCallBg: '--tnzi-ai-tool-call-bg',
   streamingCursor: '--tnzi-ai-streaming-cursor',
   codeBg: '--tnzi-ai-code-bg',
+  codeFrameBg: '--tnzi-ai-code-frame-bg',
+  codeInlineText: '--tnzi-ai-code-inline-text',
 
   nodeActive: '--tnzi-ai-node-active',
   nodeCompleted: '--tnzi-ai-node-completed',
@@ -205,11 +232,13 @@ export const TOKEN_TO_VAR: Record<keyof AiThemeTokens, string> = {
   fontMono: '--tnzi-ai-font-mono',
   contentWidth: '--tnzi-ai-content-width',
 
+  brandMarkGlyphSize: '--tnzi-ai-brand-mark-glyph-size',
   modalRadius: '--tnzi-ai-modal-radius',
   composerRadius: '--tnzi-ai-composer-radius',
   composerShadow: '--tnzi-ai-composer-shadow',
   backdropBlur: '--tnzi-ai-backdrop-blur',
   scrollbarSize: '--tnzi-ai-scrollbar-size',
+  codeLineHeight: '--tnzi-ai-code-line-height',
   durationFast: '--tnzi-ai-duration-fast',
   durationBase: '--tnzi-ai-duration-base',
   durationSlow: '--tnzi-ai-duration-slow',

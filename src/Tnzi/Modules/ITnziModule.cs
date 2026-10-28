@@ -88,6 +88,9 @@ public interface ITnziModule
 /// </summary>
 public class ServiceConfigurationContext
 {
+    // 与 Microsoft.Extensions.Hosting.HostDefaults.EnvironmentKey 相同：宿主据此决定 IHostEnvironment.EnvironmentName
+    private const string HostEnvironmentKey = "environment";
+
     /// <summary>
     /// 服务集合
     /// </summary>
@@ -101,17 +104,25 @@ public class ServiceConfigurationContext
     /// <summary>
     /// Host environment name (e.g., "Development", "Production").
     /// </summary>
+    /// <remarks>
+    /// 依次取：显式传入的值、宿主的环境键 <c>environment</c>（命令行 <c>--environment</c>、
+    /// <c>WebApplicationOptions.EnvironmentName</c> 与去掉前缀的 <c>ASPNETCORE_ENVIRONMENT</c> 都落在这个键上）、
+    /// 原始的 <c>ASPNETCORE_ENVIRONMENT</c> / <c>DOTNET_ENVIRONMENT</c>，都没有时为 <c>Production</c>。
+    /// </remarks>
     public string EnvironmentName { get; }
 
     public ServiceConfigurationContext(IServiceCollection services, IConfiguration configuration, string? environmentName = null)
     {
         Services = Check.NotNull(services);
         Configuration = Check.NotNull(configuration);
-        EnvironmentName = environmentName
-            ?? configuration["ASPNETCORE_ENVIRONMENT"]
-            ?? configuration["DOTNET_ENVIRONMENT"]
+        EnvironmentName = NullIfBlank(environmentName)
+            ?? NullIfBlank(configuration[HostEnvironmentKey])
+            ?? NullIfBlank(configuration["ASPNETCORE_ENVIRONMENT"])
+            ?? NullIfBlank(configuration["DOTNET_ENVIRONMENT"])
             ?? "Production"; // 安全默认值：未知环境视为生产环境
     }
+
+    private static string? NullIfBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     /// <summary>
     /// Check if the environment is Production.

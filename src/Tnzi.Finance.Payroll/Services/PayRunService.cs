@@ -139,8 +139,17 @@ public partial class PayRunService : ApplicationService, IPayRunService
         run.StructureId = input.StructureId;
         run.Memo = input.Memo;
 
-        await _runRepo.UpdateAsync(run, cancellationToken);
-        await _runRepo.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _runRepo.UpdateAsync(run, cancellationToken);
+            await _runRepo.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 与 DeleteAsync / CalculateAsync 同一形态：「只有草稿能改」是 check-then-act，
+            // 并发的编辑 / 计算 / 过账由并发戳挡住，但那是 409 不是 500。
+            return Fail<PayRunDto>("The pay run was modified concurrently. Reload and try again.", 409);
+        }
 
         return Ok(await ToDtoAsync(run, cancellationToken));
     }
@@ -210,7 +219,7 @@ public partial class PayRunService : ApplicationService, IPayRunService
 
         var payslips = calcResult.Data!;
         if (payslips.Count == 0)
-            return Fail<PayRunDto>("No employees are eligible for this pay run (check active status, assignments and the structure filter).", 400);
+            return Fail<PayRunDto>("No employees are eligible for this pay run (check active status, hire dates, assignments, the structure filter and the structures' pay frequency).", 400);
 
         var oldPayslips = await _payslipRepo.AsQueryable(true).Include(p => p.Lines)
             .Where(p => p.PayRunId == id).ToListAsync(cancellationToken);
@@ -338,6 +347,12 @@ public partial class PayRunService : ApplicationService, IPayRunService
         Check.NotNull(input);
         if (input.PaymentDate == default)
             return Fail<PayRunDto>("PaymentDate is required.", 400);
+        // 付款方式落在每张工资单上；参考号拼进付款凭证摘要（见 PayrollFieldLimits.PaymentReferenceMaxLength）。
+        var paymentTooLong = PayrollFieldLimits.FirstTooLong(
+            (input.PaymentMethod, PayrollFieldLimits.PaymentMethodMaxLength, "payment method"),
+            (input.Reference, PayrollFieldLimits.PaymentReferenceMaxLength, "payment reference"));
+        if (paymentTooLong != null)
+            return Fail<PayRunDto>(paymentTooLong, 400);
 
         var run = await _runRepo.AsQueryable(true).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (run == null)
@@ -552,6 +567,14 @@ public partial class PayRunService : ApplicationService, IPayRunService
         if (payslip == null)
             return Fail<PayslipDto>("Payslip not found.", 404);
 
+        // ★ 出勤天数不可能超过期间的日历天数。不设上界的话，30 天的月份把 30 录成 300，
+        // 按出勤折算的公式（BASE * WORKED_DAYS / PERIOD_DAYS）就是十倍工资，不报错、照常可以过账。
+        if (input.WorkedDays > payslip.PeriodDays)
+        {
+            return Fail<PayslipDto>(
+                $"WorkedDays cannot exceed the {payslip.PeriodDays:0.##} days in the pay period.", 400);
+        }
+
         var recalc = await RecalculatePayslipAsync(run, payslip, input.WorkedDays, cancellationToken);
         if (!recalc.Succeeded)
             return Fail<PayslipDto>(recalc.Message ?? "Recalculation failed.", recalc.Code ?? 400);
@@ -649,15 +672,29 @@ public partial class PayRunService : ApplicationService, IPayRunService
 
     private async Task<Result> ValidateDraftAsync(CreatePayRunDto input, CancellationToken cancellationToken)
     {
+        // 列宽在入口先查（缘由见 PayrollFieldLimits）：超长答 400 并点名字段，而不是落库时一个不点名的 500。
+        var memoTooLong = PayrollFieldLimits.FirstTooLong((input.Memo, PayrollFieldLimits.MemoMaxLength, "memo"));
+        if (memoTooLong != null)
+            return Fail(memoTooLong, 400);
+
         if (!Enum.IsDefined(input.Frequency))
             return Fail("Frequency must be Monthly, SemiMonthly, BiWeekly or Weekly.");
         if (input.PeriodStart.ToUtcDate() > input.PeriodEnd.ToUtcDate())
             return Fail("PeriodStart cannot be later than PeriodEnd.");
 
-        if (input.StructureId.HasValue &&
-            !await _structureRepo.AnyAsync(s => s.Id == input.StructureId.Value, cancellationToken))
+        if (input.StructureId.HasValue)
         {
-            return Fail("The selected salary structure was not found.", 404);
+            var structure = await _structureRepo.AsNoTracking()
+                .Where(s => s.Id == input.StructureId.Value)
+                .Select(s => new { s.Frequency })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (structure == null)
+                return Fail("The selected salary structure was not found.", 404);
+
+            // 圈选判据会把频率不同的员工排除在外（PayRunEligibility）：一个频率与自己的结构过滤
+            // 不一致的批次一个人也圈不到。在这里说清楚，而不是让计算时才报「没有合格员工」。
+            if (structure.Frequency != input.Frequency)
+                return Fail($"The selected salary structure is paid {structure.Frequency}, but the pay run is {input.Frequency}.");
         }
 
         return Ok();

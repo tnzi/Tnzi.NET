@@ -16,6 +16,11 @@ namespace Tnzi.Audit.Retention;
 /// 只是让数据在应用里看不见，行还在库里、也还在备份里，这不叫销毁。
 /// 框架自带实现因此显式走硬删除路径。
 /// </para>
+/// <para>
+/// <strong>处置过的记录要离开策略的到期集合。</strong>硬删除天然满足；匿名化这类保留行的处置，
+/// 要让处置过的行不再匹配策略（例如在 <c>Scope</c> 里排除已匿名化的行），否则每一轮扫描都会拿回同一批，
+/// 一遍遍重复处置、重复出证明，后面的记录永远轮不到。
+/// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "保留策略的声明形态与销毁证明字段仍在演进")]
 public interface IDataDestroyer

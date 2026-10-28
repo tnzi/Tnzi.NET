@@ -8,6 +8,12 @@ namespace Tnzi.AI.Tests.Integration;
 /// </summary>
 public class McpClientServerIntegrationTests
 {
+    /// <summary>
+    /// 与 AIModule 的默认注册一致：服务器的 <c>ApprovalMode</c> 默认是 AlwaysRequire，
+    /// 没有审批处理器时审批包装会把调用拒掉，这里要验的是 MCP 客户端与服务端的往返而不是审批。
+    /// </summary>
+    private static readonly IToolApprovalHandler DefaultApprovalHandler = new AutoApprovalHandler(NullLogger<AutoApprovalHandler>.Instance);
+
     private readonly Mock<IMcpClientFactory> _clientFactory = new();
     private readonly Mock<ILoggerFactory> _loggerFactory = new();
 
@@ -596,7 +602,7 @@ public class McpClientServerIntegrationTests
         var promptLogger = new Mock<ILogger<McpPromptProvider>>();
 
         var catalog = new OptionsBackedMcpServerCatalog(options.Object);
-        var toolProvider = new McpToolProvider(new StaticOptionsMonitor<AIOptions>(aiOptions), catalog, _clientFactory.Object, _loggerFactory.Object, toolLogger.Object);
+        var toolProvider = new McpToolProvider(new StaticOptionsMonitor<AIOptions>(aiOptions), catalog, _clientFactory.Object, _loggerFactory.Object, toolLogger.Object, DefaultApprovalHandler);
         var resourceProvider = new McpResourceProvider(catalog, _clientFactory.Object, resourceLogger.Object);
         var promptProvider = new McpPromptProvider(catalog, _clientFactory.Object, promptLogger.Object);
 
@@ -665,7 +671,7 @@ public class McpClientServerIntegrationTests
         options.Setup(x => x.Value).Returns(aiOptions);
 
         var logger = new Mock<ILogger<McpToolProvider>>();
-        return new McpToolProvider(new StaticOptionsMonitor<AIOptions>(aiOptions), new OptionsBackedMcpServerCatalog(options.Object), _clientFactory.Object, _loggerFactory.Object, logger.Object);
+        return new McpToolProvider(new StaticOptionsMonitor<AIOptions>(aiOptions), new OptionsBackedMcpServerCatalog(options.Object), _clientFactory.Object, _loggerFactory.Object, logger.Object, DefaultApprovalHandler);
     }
 
     private McpResourceProvider CreateResourceProvider(params McpServerConfig[] servers)

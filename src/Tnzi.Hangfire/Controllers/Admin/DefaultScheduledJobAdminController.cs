@@ -97,7 +97,10 @@ public class DefaultScheduledJobAdminController : ApiAdminControllerBase
         if (string.IsNullOrWhiteSpace(id))
             return Result.Failure("id is required", 400).ToApiResult();
 
-        RecurringJob.TriggerJob(id);
+        // 周期任务不存在时 TriggerJob 返回 null 而不抛异常；丢掉返回值会对一个什么都没入队的请求答 200
+        if (RecurringJob.TriggerJob(id) is null)
+            return Result.Failure($"Recurring job '{id}' not found", 404).ToApiResult();
+
         return Result.Success().ToApiResult();
     }
 

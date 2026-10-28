@@ -60,12 +60,22 @@ public class SkillInternalVisibilityTests : IDisposable
     private void GrantSkillView()
         => _permissionChecker.Setup(p => p.IsGrantedAsync("ai.skill.view")).ReturnsAsync(true);
 
-    private SkillService CreateService() => new(
-        _serviceProvider,
+    private SkillService CreateService(IEventBus? eventBus = null) => new(
+        eventBus == null ? _serviceProvider : WithEventBus(eventBus),
         _repository.Object,
+        Mock.Of<IRepository<SkillCategory, Guid>>(),
         _registry.Object,
         _templateEngine.Object,
         _fileStore);
+
+    private IServiceProvider WithEventBus(IEventBus eventBus)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped(_ => _permissionChecker.Object);
+        services.AddSingleton(eventBus);
+        return services.BuildServiceProvider();
+    }
 
     private static SkillDefinition MakeSkill(string slug, bool isInternal = false) => new()
     {
@@ -139,6 +149,64 @@ public class SkillInternalVisibilityTests : IDisposable
 
         result.Succeeded.ShouldBeTrue();
         result.Data!.Slug.ShouldBe("shared-resource");
+    }
+
+    [Fact]
+    public async Task Activate_SelfService_AnswersNotFoundForInternalSkill_AndRecordsNoActivation()
+    {
+        // 激活返回渲染后的完整正文：详情已经藏起来的技能，从这里一样拿得到，还会记一次激活。
+        var eventBus = new Mock<IEventBus>();
+        _registry.Setup(r => r.GetBySlugAsync("shared-resource", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeSkill("shared-resource", isInternal: true));
+
+        var result = await CreateService(eventBus.Object).ActivateAsync("shared-resource");
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(404);
+        _templateEngine.Verify(t => t.Render(It.IsAny<SkillDefinition>(), It.IsAny<Dictionary<string, string>?>()), Times.Never);
+        eventBus.Verify(b => b.PublishAsync(It.IsAny<SkillActivatedEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Activate_DisabledInternalSkill_AnswersNotFoundRatherThanDisabled()
+    {
+        var skill = MakeSkill("shared-resource", isInternal: true);
+        skill.Enabled = false;
+        _registry.Setup(r => r.GetBySlugAsync("shared-resource", It.IsAny<CancellationToken>())).ReturnsAsync(skill);
+
+        var result = await CreateService().ActivateAsync("shared-resource");
+
+        result.Code.ShouldBe(404, "a 400 'disabled' would confirm the slug exists");
+    }
+
+    [Fact]
+    public async Task Activate_WithSkillView_RendersInternalSkill()
+    {
+        GrantSkillView();
+        _registry.Setup(r => r.GetBySlugAsync("shared-resource", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeSkill("shared-resource", isInternal: true));
+        _templateEngine.Setup(t => t.Render(It.IsAny<SkillDefinition>(), It.IsAny<Dictionary<string, string>?>()))
+            .Returns(new SkillRenderResult { Success = true, RenderedContent = "Full prompt body" });
+
+        var result = await CreateService().ActivateAsync("shared-resource");
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.RenderedContent.ShouldBe("Full prompt body");
+    }
+
+    [Fact]
+    public async Task Activate_SelfService_PublicSkill_IsUnaffected()
+    {
+        _registry.Setup(r => r.GetBySlugAsync("public-one", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeSkill("public-one"));
+        _templateEngine.Setup(t => t.Render(It.IsAny<SkillDefinition>(), It.IsAny<Dictionary<string, string>?>()))
+            .Returns(new SkillRenderResult { Success = true, RenderedContent = "Full prompt body" });
+
+        var result = await CreateService().ActivateAsync("public-one");
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        // 没有内部技能参与时不问权限。
+        _permissionChecker.Verify(p => p.IsGrantedAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

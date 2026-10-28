@@ -65,8 +65,15 @@ export function createMessageAdapter(messageApi?: NaiveMessageApi): MessageAdapt
     info(content: string, options?: MessageOptions) {
       resolveApi(messageApi)?.info(content, toNaiveOptions(options));
     },
+    /**
+     * Stays open until the returned function runs: naive closes any message
+     * after its provider default (3000 ms) unless told `duration: 0`. An
+     * explicit `duration` from the caller still wins.
+     */
     loading(content: string, options?: MessageOptions) {
-      const instance = resolveApi(messageApi)?.loading(content, toNaiveOptions(options));
+      const loadingOptions: Record<string, unknown> = { duration: options?.duration ?? 0 };
+      if (options?.closable !== undefined) loadingOptions.closable = options.closable;
+      const instance = resolveApi(messageApi)?.loading(content, loadingOptions);
       return () => instance?.destroy();
     },
   };

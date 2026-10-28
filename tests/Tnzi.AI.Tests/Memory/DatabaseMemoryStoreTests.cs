@@ -1,4 +1,5 @@
 using Tnzi.AI.Infrastructure.Memory;
+using Tnzi.Exceptions;
 
 namespace Tnzi.AI.Tests.Memory;
 
@@ -234,8 +235,12 @@ public class DatabaseMemoryStoreTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// 别的 scope 的条目（共享 / 项目快照 scope 的条目也会出现在 search_memory 的结果里）：不改，且报出来而不是静默返回：
+    /// 记忆工具按「没抛异常」回报「已更新」。
+    /// </summary>
     [Fact]
-    public async Task UpdateEntryAsync_WrongScope_DoesNotUpdate()
+    public async Task UpdateEntryAsync_WrongScope_ThrowsAndDoesNotUpdate()
     {
         var entryId = Guid.NewGuid();
         var entry = new MemoryEntry { Id = entryId, Scope = "other-scope", Content = "content", CreationTime = DateTime.UtcNow };
@@ -244,19 +249,19 @@ public class DatabaseMemoryStoreTests
         mockRepo.Setup(r => r.GetAsync(entryId, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
         var store = CreateStore(mockRepo);
 
-        await store.UpdateEntryAsync("wrong-scope", entryId, "new content");
+        await Should.ThrowAsync<ResourceNotFoundException>(() => store.UpdateEntryAsync("wrong-scope", entryId, "new content"));
 
         mockRepo.Verify(r => r.UpdateAsync(It.IsAny<MemoryEntry>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task UpdateEntryAsync_NotFound_DoesNotUpdate()
+    public async Task UpdateEntryAsync_NotFound_ThrowsAndDoesNotUpdate()
     {
         var mockRepo = CreateMockRepo([]);
         mockRepo.Setup(r => r.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((MemoryEntry?)null);
         var store = CreateStore(mockRepo);
 
-        await store.UpdateEntryAsync("scope", Guid.NewGuid(), "new content");
+        await Should.ThrowAsync<ResourceNotFoundException>(() => store.UpdateEntryAsync("scope", Guid.NewGuid(), "new content"));
 
         mockRepo.Verify(r => r.UpdateAsync(It.IsAny<MemoryEntry>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -282,8 +287,9 @@ public class DatabaseMemoryStoreTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>同 <see cref="UpdateEntryAsync_WrongScope_ThrowsAndDoesNotUpdate"/>：静默返回会让 delete_memory 对用户确认一条其实还在的记忆已被遗忘。</summary>
     [Fact]
-    public async Task DeleteEntryAsync_WrongScope_DoesNotDelete()
+    public async Task DeleteEntryAsync_WrongScope_ThrowsAndDoesNotDelete()
     {
         var entryId = Guid.NewGuid();
         var entry = new MemoryEntry { Id = entryId, Scope = "real-scope", Content = "content", CreationTime = DateTime.UtcNow };
@@ -292,19 +298,19 @@ public class DatabaseMemoryStoreTests
         mockRepo.Setup(r => r.GetAsync(entryId, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
         var store = CreateStore(mockRepo);
 
-        await store.DeleteEntryAsync("wrong-scope", entryId);
+        await Should.ThrowAsync<ResourceNotFoundException>(() => store.DeleteEntryAsync("wrong-scope", entryId));
 
         mockRepo.Verify(r => r.DeleteAsync(It.IsAny<MemoryEntry>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task DeleteEntryAsync_NotFound_DoesNotDelete()
+    public async Task DeleteEntryAsync_NotFound_ThrowsAndDoesNotDelete()
     {
         var mockRepo = CreateMockRepo([]);
         mockRepo.Setup(r => r.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((MemoryEntry?)null);
         var store = CreateStore(mockRepo);
 
-        await store.DeleteEntryAsync("scope", Guid.NewGuid());
+        await Should.ThrowAsync<ResourceNotFoundException>(() => store.DeleteEntryAsync("scope", Guid.NewGuid()));
 
         mockRepo.Verify(r => r.DeleteAsync(It.IsAny<MemoryEntry>(), It.IsAny<CancellationToken>()), Times.Never);
     }

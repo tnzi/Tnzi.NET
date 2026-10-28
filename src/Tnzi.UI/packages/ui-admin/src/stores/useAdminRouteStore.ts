@@ -69,6 +69,10 @@ export interface AdminRouteMeta {
   icon?: string
   order?: number
   constant?: boolean
+  /**
+   * Keep the page (filters, page, scroll, a half-filled form) while its tab is
+   * open; `TAdminRouterView` drops it when the tab closes.
+   */
   keepAlive?: boolean
   hideInMenu?: boolean
   /**
@@ -147,7 +151,8 @@ export interface AdminMenuItem {
 
 /**
  * Admin route store - manages constant routes (always available), auth routes
- * (filtered by permissions), the derived menu tree, and the keepAlive cache list.
+ * (filtered by permissions) and the derived menu tree. Page caching is
+ * `TAdminRouterView`'s (route `meta.keepAlive` + the open tabs).
  */
 export const useAdminRouteStore = defineStore('admin-route', () => {
   const constantRoutes = ref<AdminRouteRecord[]>([])
@@ -224,9 +229,6 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     ...authRoutes.value,
   ])
 
-  /** Cache-eligible route names (meta.keepAlive === true). Feeds `<KeepAlive :include>`. */
-  const cacheRoutes = ref<string[]>([])
-
   /** Derived menu tree from allRoutes, excluding hideInMenu entries, sorted by meta.order. */
   const menus = computed<AdminMenuItem[]>(() => {
     const appStore = useAdminAppStore()
@@ -268,9 +270,11 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     // (a) flashed the full menu for the 1-2s the backend logout call takes before
     // the login redirect, and (b) let a freshly-switched role transiently see the
     // previous / full menu and click a page it can't open (→ 403). Gating on
-    // `isLogin` separates the two. Super users still bypass unconditionally.
+    // `isLogin` separates the two. Super users bypass while their backend bypass
+    // covers every code; under a narrowed bypass (`Authorization:SuperAdminBypassScope
+    // = Platform`) their access-profile list is the whole truth and filters as usual.
     const bypassPermissionFilter =
-      authStore.isSuperUser || (!permissionsLoaded && authStore.isLogin)
+      authStore.bypassesPermissionChecks || (!permissionsLoaded && authStore.isLogin)
     function isVisible(route: AdminRouteRecord): boolean {
       if (bypassPermissionFilter) return true
       // Permission gate (unchanged): singular wins; else plural ANY-of.
@@ -453,7 +457,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     const authStore = useAdminAuthStore()
     const denied = new Set<string>()
     const permissionsLoaded = authStore.userInfo !== null
-    if (authStore.isSuperUser || !permissionsLoaded) return denied
+    if (authStore.bypassesPermissionChecks || !permissionsLoaded) return denied
     const granted = new Set(authStore.userPermissions.map((p) => p.toLowerCase()))
     const grantedRoles = new Set(authStore.userRoles.map((r) => r.toLowerCase()))
     function isAllowed(route: AdminRouteRecord): boolean {
@@ -508,20 +512,8 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     return denied
   })
 
-  function collectCacheRouteNames(routes: AdminRouteRecord[]): string[] {
-    const names: string[] = []
-    for (const route of routes) {
-      if (route.meta?.keepAlive) names.push(route.name)
-      if (route.children) {
-        names.push(...collectCacheRouteNames(route.children))
-      }
-    }
-    return names
-  }
-
   function setConstantRoutes(routes: AdminRouteRecord[]): void {
     constantRoutes.value = routes
-    cacheRoutes.value = collectCacheRouteNames([...routes, ...authRoutes.value])
   }
 
   /**
@@ -537,12 +529,7 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
    */
   function setAuthRoutes(routes: AdminRouteRecord[], _userPermissions: string[] = []): void {
     authRoutes.value = routes
-    cacheRoutes.value = collectCacheRouteNames([...constantRoutes.value, ...authRoutes.value])
     routesLoaded.value = true
-  }
-
-  function resetRouteCache(routeName: string): void {
-    cacheRoutes.value = cacheRoutes.value.filter((n) => n !== routeName)
   }
 
   /**
@@ -619,7 +606,6 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     moduleSignalPending.value = false
     runtimeHiddenOwners.clear()
     runtimeHiddenRouteNames.value = new Set()
-    cacheRoutes.value = []
     routesLoaded.value = false
   }
 
@@ -638,7 +624,6 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     unavailableRouteNames,
     runtimeHiddenRouteNames,
     menuBadges,
-    cacheRoutes,
     setConstantRoutes,
     setAuthRoutes,
     setAvailableModules,
@@ -646,7 +631,6 @@ export const useAdminRouteStore = defineStore('admin-route', () => {
     setModuleSignalPending,
     setRuntimeHiddenRoutes,
     setMenuBadge,
-    resetRouteCache,
     clearRoutes,
   }
 })

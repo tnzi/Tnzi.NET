@@ -7,7 +7,12 @@ namespace Tnzi.HealthChecks.Checks;
 public class CacheHealthCheck : IHealthCheck
 {
     private readonly ICache _cache;
-    private const string TestKey = "__health_check_cache_test__";
+    /// <summary>
+    /// 测试键前缀；每次检查再拼一个 Guid。缓存在多实例间共享，/health 与 /health/ready 又各自跑全部检查，
+    /// 固定键会让一次检查读到另一次写入的值、或被另一次删掉，健康状态在 Healthy 与 Degraded 之间抖动。
+    /// 30 秒过期兜底清理中途失败留下的键。
+    /// </summary>
+    private const string TestKeyPrefix = "__health_check_cache_test__:";
 
     public CacheHealthCheck(ICache cache)
     {
@@ -20,12 +25,13 @@ public class CacheHealthCheck : IHealthCheck
     {
         try
         {
-            // 测试写入
+            // 测试写入（每次检查一个独立的键）
             var testValue = Guid.NewGuid().ToString();
-            await _cache.SetAsync(TestKey, testValue, TimeSpan.FromSeconds(30), cancellationToken);
+            var testKey = TestKeyPrefix + testValue;
+            await _cache.SetAsync(testKey, testValue, TimeSpan.FromSeconds(30), cancellationToken);
 
             // 测试读取
-            var readValue = await _cache.GetAsync<string>(TestKey, cancellationToken);
+            var readValue = await _cache.GetAsync<string>(testKey, cancellationToken);
             
             if (readValue != testValue)
             {
@@ -33,8 +39,8 @@ public class CacheHealthCheck : IHealthCheck
             }
 
             // 测试删除
-            await _cache.RemoveAsync(TestKey, cancellationToken);
-            var afterDelete = await _cache.ExistsAsync(TestKey, cancellationToken);
+            await _cache.RemoveAsync(testKey, cancellationToken);
+            var afterDelete = await _cache.ExistsAsync(testKey, cancellationToken);
             
             if (afterDelete)
             {

@@ -126,22 +126,44 @@ public class LlmMemoryConsolidatorTests
         result.Action.ShouldBe(MemoryAction.Noop);
     }
 
-    [Fact]
-    public async Task ConsolidateAsync_Update_WithoutTargetId_UsesHighestScoreEntry()
+    /// <summary>
+    /// 没点名目标的 UPDATE / DELETE 不替模型猜一条（此前取最高分那条），按新增处理：
+    /// 多存一条可以再合并，改写或删错的记忆找不回来。
+    /// </summary>
+    [Theory]
+    [InlineData("""{"action":"update","content":"merged"}""")]
+    [InlineData("""{"action":"delete"}""")]
+    [InlineData("""{"action":"delete","targetId":null}""")]
+    public async Task ConsolidateAsync_UpdateOrDelete_WithoutTargetId_FallsBackToAdd(string llmResponse)
     {
-        var lowId = Guid.NewGuid();
-        var highId = Guid.NewGuid();
-        var consolidator = CreateConsolidator("""{"action":"update","content":"merged"}""");
+        var consolidator = CreateConsolidator(llmResponse);
         var existing = new List<MemorySearchResult>
         {
-            new() { Id = lowId, Content = "low score", Score = 0.3 },
-            new() { Id = highId, Content = "high score", Score = 0.9 }
+            new() { Id = Guid.NewGuid(), Content = "low score", Score = 0.3 },
+            new() { Id = Guid.NewGuid(), Content = "high score", Score = 0.9 }
         };
 
         var result = await consolidator.ConsolidateAsync("new", existing);
 
-        result.Action.ShouldBe(MemoryAction.Update);
-        result.TargetEntryId.ShouldBe(highId);
-        result.UpdatedContent.ShouldBe("merged");
+        result.Action.ShouldBe(MemoryAction.Add);
+        result.TargetEntryId.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("update")]
+    [InlineData("delete")]
+    public async Task ConsolidateAsync_TargetIdNotAmongTheCandidates_FallsBackToAdd(string action)
+    {
+        var consolidator = CreateConsolidator(
+            $$"""{"action":"{{action}}","content":"merged","targetId":"{{Guid.NewGuid()}}"}""");
+        var existing = new List<MemorySearchResult>
+        {
+            new() { Id = Guid.NewGuid(), Content = "User lives in Toronto", Score = 0.9 }
+        };
+
+        var result = await consolidator.ConsolidateAsync("User moved to Vancouver", existing);
+
+        result.Action.ShouldBe(MemoryAction.Add);
+        result.TargetEntryId.ShouldBeNull();
     }
 }

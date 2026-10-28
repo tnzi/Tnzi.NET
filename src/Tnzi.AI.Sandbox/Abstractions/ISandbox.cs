@@ -30,7 +30,7 @@ public interface ISandbox : IAsyncDisposable
     /// <remarks>
     /// <para>
     /// 默认恒等：本地 provider 直接在宿主上跑，路径就是路径。Docker provider 把线程目录挂在容器的
-    /// <c>/workspace</c> 下，容器里根本不存在宿主路径（Linux 宿主上是 <c>/var/lib/.../{tid}/...</c>，
+    /// <c>/workspace</c>、四个子目录挂在 <c>/mnt/{workspace,uploads,outputs,skills}</c>，容器里根本不存在宿主路径（Linux 宿主上是 <c>/var/lib/.../{tid}/...</c>，
     /// Windows 宿主上甚至是 <c>D:\...</c>），所以每一条交给沙箱的路径（文件工具的参数、bash 命令里
     /// 翻译出来的 <c>/mnt/*</c> token）都要先经这里换根。
     /// </para>

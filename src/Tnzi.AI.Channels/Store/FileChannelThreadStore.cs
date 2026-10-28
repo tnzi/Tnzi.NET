@@ -69,6 +69,27 @@ public class FileChannelThreadStore : IChannelThreadStore
         }
     }
 
+    public async Task RemoveByThreadIdAsync(Guid threadId)
+    {
+        await _lock.WaitAsync();
+        try
+        {
+            var mappings = await LoadAsync();
+            if (!mappings.ContainsValue(threadId)) return;
+
+            // 不可变模式：过滤出新字典再整体换入，无锁读路径看到的要么是旧快照、要么是新快照
+            var updated = mappings
+                .Where(kvp => kvp.Value != threadId)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            await SaveAtomicAsync(updated);
+            _cache = updated;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private static string BuildKey(string channelName, string chatId, string? topicId)
     {
         return topicId != null ? $"{channelName}:{chatId}:{topicId}" : $"{channelName}:{chatId}";

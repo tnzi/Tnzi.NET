@@ -15,7 +15,19 @@
     :hint="t('detail.execution.hint')"
   >
     <NSpin :show="loading">
-      <div class="t-agent-exec">
+      <!-- The binding or the runtime list could not be read (403, 5xx, timeout).
+           Nothing below may render then: "Built-in" or "no runtimes" would
+           describe a state nobody read, and a save from it would replace the
+           real binding with defaults. -->
+      <NAlert
+        v-if="loadError"
+        type="error"
+        :closable="false"
+        data-test="cli-execution-load-error"
+      >
+        {{ loadError }}
+      </NAlert>
+      <div v-else class="t-agent-exec">
         <!-- Mode picker. Disabled with an explanation rather than hidden when
              no runtime is available: an admin who cannot find the option needs
              to be told why, not left guessing. -->
@@ -158,7 +170,7 @@
       <!-- Unbinding is the only destructive action here and it is not a form
            field: it removes the binding row outright, so it gets its own
            confirm rather than riding on Save. -->
-      <NPopconfirm v-if="canEdit && isBound" @positive-click="emit('unbind')">
+      <NPopconfirm v-if="canUnbind && isBound && !loadError" @positive-click="emit('unbind')">
         <template #trigger>
           <NButton size="small" type="error" ghost :loading="saving">
             {{ t('detail.execution.unbind') }}
@@ -218,12 +230,24 @@ interface Props {
   saving?: boolean
   /** Whether the viewer holds `ai.cliBinding.update`. */
   canEdit?: boolean
+  /**
+   * Whether the viewer holds `ai.cliBinding.delete`. Unbinding (the button, or
+   * saving with Built-in chosen) deletes the binding row, a different gate.
+   */
+  canUnbind?: boolean
+  /**
+   * Why the binding or the runtime list could not be read. While set, the
+   * panel shows it in place of the form and offers no save or unbind.
+   */
+  loadError?: string | null
   icon?: string
 }
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
   saving: false,
   canEdit: false,
+  canUnbind: false,
+  loadError: null,
   icon: undefined,
 })
 
@@ -383,11 +407,11 @@ const mcpConfigError = computed(() => {
 })
 
 const canSave = computed(() => {
-  if (!isDirty.value || props.saving) return false
+  if (props.loadError || !isDirty.value || props.saving) return false
   if (mode.value === 'builtIn') {
     // Switching back to built-in is an unbind; Save only means something when
-    // there is a binding to remove.
-    return isBound.value
+    // there is a binding to remove, and the viewer may remove it.
+    return isBound.value && props.canUnbind
   }
 
   if (!form.cliRuntimeId) return false

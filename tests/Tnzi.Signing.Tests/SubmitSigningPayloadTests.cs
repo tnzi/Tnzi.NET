@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using Tnzi.Documents.Exceptions;
+using Tnzi.Documents.Models;
+using Tnzi.Geometry;
 using Tnzi.ScopedContext;
 using Tnzi.Security.Claims;
 using Tnzi.Signing.Dtos;
@@ -29,8 +32,8 @@ public class SubmitSigningPayloadTests : SigningStorageTestBase
     private const string TinyPng =
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
-    /// <summary>JFIF 头（FF D8 FF E0）+ 一点填充：嗅探只看头，这里不需要一张能解码的完整图。</summary>
-    private static readonly string TinyJpeg = Convert.ToBase64String([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00]);
+    /// <summary>一张完整的小 JPEG：只有文件头的 JPEG 现在会被拒（见下面的残缺图用例）。</summary>
+    private static readonly string TinyJpeg = TestImages.SmallJpegBase64;
 
     /// <summary>请求上下文：签署审计从这里取 IP 与 User-Agent。</summary>
     private sealed class TestScopedContext : Tnzi.ScopedContext.ScopedContext
@@ -120,6 +123,190 @@ public class SubmitSigningPayloadTests : SigningStorageTestBase
         SignatureImagePayload.IsWellFormed(payload).ShouldBeFalse();
     }
 
+    // ── 残缺与损坏：文件头对，图不完整 ──────────────────────────────────────
+
+    public static TheoryData<string, byte[]> BrokenImages()
+    {
+        var png = Convert.FromBase64String(TestImages.TinyPngBase64);
+        var jpeg = TestImages.SmallJpeg;
+
+        var badCrc = png.ToArray();
+        badCrc[29] ^= 0xFF; // IHDR 的 CRC
+
+        var badPixels = TestImages.Png(4, 4);
+        badPixels[^20] ^= 0x5A; // IDAT 数据（CRC 随之对不上）
+
+        return new TheoryData<string, byte[]>
+        {
+            { "bare PNG signature", png[..8] },
+            { "PNG cut inside IHDR", png[..20] },
+            { "PNG cut inside IDAT", png[..45] },
+            { "PNG without IEND", png[..^12] },
+            { "PNG with a corrupt CRC", badCrc },
+            { "PNG with corrupt pixel data", badPixels },
+            { "PNG whose image data is shorter than its size", TestImages.Png(16, 16, new byte[10]) },
+            { "PNG whose image data is not a zlib stream (CRC intact)", TestImages.PngWithRawIdat(4, 4, [0x78, 0x9C, 0xFF, 0xFF, 0x00, 0x01]) },
+            { "JPEG header only", [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00] },
+            { "JPEG cut before the end-of-image marker", jpeg[..^2] },
+            { "JPEG cut inside a marker segment", jpeg[..30] },
+        };
+    }
+
+    /// <summary>
+    /// 以合法文件头开始的残缺图（签名板库或代理截断了 data URL、只发了文件头、CRC 损坏）此前都能过校验：
+    /// 存进去、Signed，密封时盖章方解不开而永远失败，只剩作废、让每个人重签一遍。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BrokenImages))]
+    public void An_incomplete_or_corrupt_image_is_rejected(string because, byte[] image)
+    {
+        SignatureImagePayload.Inspect(Convert.ToBase64String(image)).ShouldBe(SignatureImageVerdict.Malformed, because);
+    }
+
+    [Fact]
+    public void Complete_pngs_and_jpegs_are_accepted()
+    {
+        SignatureImagePayload.Inspect(TestImages.TinyPngBase64).ShouldBe(SignatureImageVerdict.Valid);
+        SignatureImagePayload.Inspect(TestImages.SmallRgbPngBase64).ShouldBe(SignatureImageVerdict.Valid);
+        SignatureImagePayload.Inspect(Convert.ToBase64String(TestImages.Png(600, 200))).ShouldBe(SignatureImageVerdict.Valid);
+        SignatureImagePayload.Inspect(TestImages.SmallJpegBase64).ShouldBe(SignatureImageVerdict.Valid);
+    }
+
+    // ── 尺寸：文件头声明的像素数，早于任何解压 ────────────────────────────────
+
+    public static TheoryData<string, byte[]> OversizedImages() => new()
+    {
+        // 几十个字节的图像数据声明 4 亿像素：整张解码要分配上 GB。
+        { "20000 x 20000 PNG", TestImages.Png(20000, 20000, new byte[16]) },
+        { "PNG wider than the side limit", TestImages.Png(SigningLimits.MaxSignatureImageSide + 1, 10, new byte[16]) },
+        { "PNG over the pixel budget", TestImages.Png(SigningLimits.MaxSignatureImageSide, 1025, new byte[16]) },
+        { "JPEG declaring 5000 x 100", TestImages.JpegDeclaring(5000, 100) },
+    };
+
+    [Theory]
+    [MemberData(nameof(OversizedImages))]
+    public void An_image_declaring_too_many_pixels_is_rejected_before_it_is_decoded(string because, byte[] image)
+    {
+        SignatureImagePayload.Inspect(Convert.ToBase64String(image)).ShouldBe(SignatureImageVerdict.TooLarge, because);
+    }
+
+    [Fact]
+    public void An_image_at_the_limits_is_accepted()
+    {
+        var atLimit = TestImages.Png(SigningLimits.MaxSignatureImageSide, SigningLimits.MaxSignatureImagePixels / SigningLimits.MaxSignatureImageSide);
+
+        SignatureImagePayload.Inspect(Convert.ToBase64String(atLimit)).ShouldBe(SignatureImageVerdict.Valid);
+    }
+
+    /// <summary>PNG 规范允许的每一种色彩类型 × 位深，隔行与不隔行各一。</summary>
+    public static TheoryData<int, int, bool> AllPngVariants()
+    {
+        var data = new TheoryData<int, int, bool>();
+        var depths = new Dictionary<int, int[]>
+        {
+            [0] = [1, 2, 4, 8, 16],
+            [2] = [8, 16],
+            [3] = [1, 2, 4, 8],
+            [4] = [8, 16],
+            [6] = [8, 16],
+        };
+        foreach (var (colorType, bitDepths) in depths)
+        {
+            foreach (var bitDepth in bitDepths)
+            {
+                data.Add(colorType, bitDepth, false);
+                data.Add(colorType, bitDepth, true);
+            }
+        }
+
+        return data;
+    }
+
+    private static bool RealStamperDecodes(string image)
+    {
+        try
+        {
+            RealStamper.Create(new PdfStampRequest
+            {
+                AppendPages = [new PdfPageSpec { WidthPoints = 300, HeightPoints = 100 }],
+                Stamps = [new PdfImageStamp { PageNumber = 1, Rect = new NormalizedRect(0, 0, 1, 1), DataUrl = image }],
+            });
+            return true;
+        }
+        catch (PdfDocumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 结构完整不等于盖章方解得开：PDFsharp 不认 1 / 2 / 4 / 16 位灰度、2 位调色板、隔行的 1 / 4 位调色板与全部 16 位 PNG。
+    /// 这些若在提交时放行，密封会在盖章那一步失败、请求钉死。两边对每一种组合的判定必须一致：
+    /// 盖章实现换版本、支持面变了，这里先红，提醒同步 <c>SignatureImagePayload</c>。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AllPngVariants))]
+    public void The_validator_accepts_exactly_the_png_variants_the_stamper_can_draw(int colorType, int bitDepth, bool interlaced)
+    {
+        var image = Convert.ToBase64String(TestImages.PngOf(colorType, bitDepth, interlaced));
+
+        var decodes = RealStamperDecodes(image);
+        var verdict = SignatureImagePayload.Inspect(image);
+
+        verdict.ShouldBe(decodes ? SignatureImageVerdict.Valid : SignatureImageVerdict.Unsupported);
+    }
+
+    [Theory]
+    [InlineData(TestImages.SmallJpegBase64, true)]
+    [InlineData(TestImages.ProgressiveRgbJpegBase64, true)]
+    [InlineData(TestImages.CmykJpegBase64, false)]
+    public void The_validator_accepts_exactly_the_jpeg_variants_the_stamper_can_draw(string image, bool stampable)
+    {
+        RealStamperDecodes(image).ShouldBe(stampable);
+        SignatureImagePayload.Inspect(image).ShouldBe(stampable ? SignatureImageVerdict.Valid : SignatureImageVerdict.Unsupported);
+    }
+
+    [Fact]
+    public async Task A_signature_image_the_stamper_cannot_draw_is_refused_at_submit()
+    {
+        var (_, requestId, token) = await ArrangeSentEnvelopeAsync();
+        var sixteenBit = TestImages.DataUrl("image/png", TestImages.PngOf(colorType: 6, bitDepth: 16, interlaced: false));
+
+        using var submit = BeginRequest();
+        var result = await submit.Envelopes.SubmitAsync(token, new SubmitSigningDto { SignatureImage = sixteenBit });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("cannot be stamped");
+        (await SignerOfAsync(requestId)).Status.ShouldNotBe(SigningRecipientStatus.Signed);
+    }
+
+    /// <summary>
+    /// 这道校验的全部意义是「放行的图，密封时一定盖得上」：用生产的盖章实现把每一张放行的素材真的画一遍。
+    /// </summary>
+    [Fact]
+    public void Every_accepted_fixture_is_decoded_by_the_real_stamper()
+    {
+        string[] accepted =
+        [
+            TinyPng,
+            TestImages.DataUrl("image/png", Convert.FromBase64String(TestImages.SmallRgbPngBase64)),
+            TestImages.DataUrl("image/png", TestImages.Png(600, 200)),
+            TestImages.DataUrl("image/jpeg", TestImages.SmallJpeg),
+        ];
+
+        foreach (var image in accepted)
+        {
+            SignatureImagePayload.IsWellFormed(image).ShouldBeTrue();
+            var pdf = RealStamper.Create(new PdfStampRequest
+            {
+                AppendPages = [new PdfPageSpec { WidthPoints = 300, HeightPoints = 100 }],
+                Stamps = [new PdfImageStamp { PageNumber = 1, Rect = new NormalizedRect(0, 0, 1, 1), DataUrl = image }],
+            });
+            pdf.Length.ShouldBeGreaterThan(0);
+        }
+    }
+
     // ── 提交路径 ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -147,6 +334,7 @@ public class SubmitSigningPayloadTests : SigningStorageTestBase
     [Theory]
     [InlineData("not an image at all")]
     [InlineData("data:image/png;base64,AAAA")]
+    [InlineData("data:image/png;base64,iVBORw0KGgo=")]
     public async Task A_signature_image_that_is_not_a_png_or_jpeg_is_refused_at_submit_not_at_seal(string payload)
     {
         var (_, requestId, token) = await ArrangeSentEnvelopeAsync();
@@ -161,6 +349,25 @@ public class SubmitSigningPayloadTests : SigningStorageTestBase
         // 关键在这里：请求没有被钉死。收件人仍可重交，信封仍是 Sent/Viewed 而不是一个永远密封不了的 InProgress。
         var envelope = await DbContext.Set<Envelope>().AsNoTracking().SingleAsync(e => e.Id == requestId);
         envelope.Status.ShouldNotBe(EnvelopeStatus.InProgress);
+        (await SignerOfAsync(requestId)).Status.ShouldNotBe(SigningRecipientStatus.Signed);
+    }
+
+    /// <summary>
+    /// 一张字符数在上限之内、却声明了上亿像素的图：提交时就拦（400），收件人仍可重交。
+    /// 等到密封才解码，进程要为它分配上 GB，而每一次重新密封都会再来一遍。
+    /// </summary>
+    [Fact]
+    public async Task A_signature_image_declaring_too_many_pixels_is_refused_at_submit()
+    {
+        var (_, requestId, token) = await ArrangeSentEnvelopeAsync();
+        var bomb = TestImages.DataUrl("image/png", TestImages.Png(20000, 20000, new byte[16]));
+
+        using var submit = BeginRequest();
+        var result = await submit.Envelopes.SubmitAsync(token, new SubmitSigningDto { SignatureImage = bomb });
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("too large");
         (await SignerOfAsync(requestId)).Status.ShouldNotBe(SigningRecipientStatus.Signed);
     }
 
@@ -297,8 +504,17 @@ public class SubmitSigningPayloadTests : SigningStorageTestBase
         signer.FindProperty(nameof(Signer.ConsentText))!.GetMaxLength().ShouldBe(SigningLimits.MaxConsentTextLength);
         signer.FindProperty(nameof(Signer.SignerUserAgent))!.GetMaxLength().ShouldBe(SigningLimits.MaxSignerUserAgentLength);
         signer.FindProperty(nameof(Signer.DeclineReason))!.GetMaxLength().ShouldBe(SigningLimits.MaxDeclineReasonLength);
+        signer.FindProperty(nameof(Signer.Name))!.GetMaxLength().ShouldBe(SigningLimits.MaxSignerNameLength);
+        signer.FindProperty(nameof(Signer.Role))!.GetMaxLength().ShouldBe(SigningLimits.MaxRoleLength);
+        signer.FindProperty(nameof(Signer.Email))!.GetMaxLength().ShouldBe(SigningLimits.MaxEmailLength);
 
         var value = DbContext.Model.FindEntityType(typeof(FieldValue))!;
         value.FindProperty(nameof(FieldValue.Value))!.GetMaxLength().ShouldBe(SigningLimits.MaxFieldValueLength);
+        value.FindProperty(nameof(FieldValue.FieldKey))!.GetMaxLength().ShouldBe(SigningLimits.MaxFieldKeyLength);
+
+        // 发起方写入的列（CreateAsync 在落库之前按同一组常量校验）。
+        var envelope = DbContext.Model.FindEntityType(typeof(Envelope))!;
+        envelope.FindProperty(nameof(Envelope.Title))!.GetMaxLength().ShouldBe(SigningLimits.MaxTitleLength);
+        envelope.FindProperty(nameof(Envelope.HostEntityType))!.GetMaxLength().ShouldBe(SigningLimits.MaxHostEntityTypeLength);
     }
 }

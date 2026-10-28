@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { EMPTY_DASH } from '../../../src/utils/placeholders'
+import { translatePageKey } from '../../../src/pages/_shared/translate'
 
 /**
  * Agents integration test - production-grade card page (TCardPage) with a health
@@ -59,6 +61,10 @@ const getHealth = vi.fn(async () => ({
   unhealthyDetails: [],
 }))
 const agentClone = vi.fn(async (id: string) => ({ id: `${id}-copy`, name: 'Writer (copy)' }))
+const agentUpdate = vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) }))
+const getProviderOptions = vi.fn(async () => [
+  { id: 'p1', name: 'DeepSeek', providerType: 'deepseek', defaultModel: 'deepseek-v4-pro' },
+])
 
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   createAiBridge: () => ({
@@ -67,13 +73,11 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       getHealth,
       clone: agentClone,
       create: vi.fn(async (data: unknown) => ({ id: 'a3', ...(data as object) })),
-      update: vi.fn(async (id: string, data: unknown) => ({ id, ...(data as object) })),
+      update: agentUpdate,
       delete: vi.fn(async () => undefined),
     },
     providers: {
-      getOptions: vi.fn(async () => [
-        { id: 'p1', name: 'DeepSeek', providerType: 'deepseek', defaultModel: 'deepseek-v4-pro' },
-      ]),
+      getOptions: getProviderOptions,
     },
   }),
 }))
@@ -160,6 +164,16 @@ describe('Agents page (production card grid)', () => {
     expect(wrapper.text()).toContain('Total')
   })
 
+  // A refused or failed health read is not a fleet of zero agents with none
+  // unhealthy: the strip shows dashes instead of a reassuring row of zeros.
+  it('★ a health summary that could not be read shows dashes, not zeros', async () => {
+    getHealth.mockRejectedValueOnce(new Error('Forbidden'))
+    const wrapper = mount(Agents, { global: { stubs } })
+    await flushPromises()
+    const values = wrapper.findAll('.ai-agent-page__kpi .t-stat-card__value').map((v) => v.text())
+    expect(values).toEqual([EMPTY_DASH, EMPTY_DASH, EMPTY_DASH, EMPTY_DASH])
+  })
+
   it('View calls router.push to the agent detail route', async () => {
     const wrapper = mount(Agents, { global: { stubs } })
     await flushPromises()
@@ -167,6 +181,75 @@ describe('Agents page (production card grid)', () => {
     vm.openDetail({ id: 'a1', name: 'Writer' })
     // By NAME so the link follows any basePath / history-base prefix.
     expect(routerPush).toHaveBeenCalledWith({ name: 'ai.agents.detail', params: { id: 'a1' } })
+  })
+
+  // The list row carries grants, persona and execution config that the modal
+  // never shows. Sending them back reverted whatever the detail page (or
+  // another admin) had changed since the list loaded.
+  it('the Edit modal sends the fields it shows, not the whole list row', async () => {
+    agentUpdate.mockClear()
+    const wrapper = mount(Agents, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      crud: {
+        openEdit: (row: unknown) => void
+        submit: () => Promise<unknown>
+        formModal: { formData: { value: Record<string, unknown> } }
+      }
+    }
+    vm.crud.openEdit({
+      id: 'a1', name: 'Writer', description: 'Old', provider: 'openai', model: 'gpt-4o', isEnabled: true,
+      executionMode: 0, instructions: 'Be brief', temperature: 0.7, maxTokens: 2048, timeoutSeconds: 60,
+      skillSlugs: ['stale-skill'], knowledgeBaseIds: ['kb-1'], toolGroups: ['web'], persona: 'Stale persona',
+      executionConfig: { maxRounds: 3 }, domains: ['writing'], roles: ['writer'],
+      qualityTier: 3, latencyTier: 3, costTier: 3, creationTime: '2026-04-01T00:00:00Z',
+    })
+    vm.crud.formModal.formData.value.description = 'Generates release notes'
+    await vm.crud.submit()
+
+    expect(agentUpdate).toHaveBeenCalledTimes(1)
+    const dto = agentUpdate.mock.calls[0]![1] as Record<string, unknown>
+    expect(dto.description).toBe('Generates release notes')
+    expect(dto.name).toBe('Writer')
+    for (const notShown of ['skillSlugs', 'knowledgeBaseIds', 'toolGroups', 'persona', 'executionConfig', 'domains', 'roles', 'qualityTier', 'id', 'creationTime']) {
+      expect(dto).not.toHaveProperty(notShown)
+    }
+  })
+
+  // The runtime resolves an agent's provider by the configured provider's NAME.
+  // A built-in list of type slugs ("openai", "anthropic") matches none of those
+  // names unless one happens to be configured under it, so an agent created
+  // from it saved fine and failed at run time.
+  it('the provider field offers the configured provider names', async () => {
+    const wrapper = mount(Agents, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { agentFormSchemaWithProviders: Array<{ key: string; type: string; options?: Array<{ value: unknown }> }> }
+    const field = vm.agentFormSchemaWithProviders.find((f) => f.key === 'provider')!
+    expect(field.type).toBe('select')
+    expect(field.options?.map((o) => o.value)).toEqual(['DeepSeek'])
+  })
+
+  it('the provider hints ask for a configured provider name, not a type slug', () => {
+    for (const key of ['form.providerPlaceholder', 'detail.providerPlaceholder']) {
+      expect(translatePageKey('ai.agents', key)).not.toMatch(/openai|anthropic/i)
+    }
+  })
+
+  it('with no readable provider list the provider is typed, never picked from a guessed list', async () => {
+    getProviderOptions.mockRejectedValueOnce(new Error('Forbidden'))
+    const wrapper = mount(Agents, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      agentFormSchemaWithProviders: Array<{ key: string; type: string; options?: unknown[]; placeholderKey?: string }>
+      searchFields: Array<{ key: string; type: string; options?: unknown[] }>
+    }
+    const field = vm.agentFormSchemaWithProviders.find((f) => f.key === 'provider')!
+    expect(field.type).toBe('text')
+    expect(field.options ?? []).toEqual([])
+    expect(field.placeholderKey).toBe('form.providerPlaceholder')
+    const filter = vm.searchFields.find((f) => f.key === 'provider')!
+    expect(filter.type).toBe('text')
+    expect(filter.options ?? []).toEqual([])
   })
 
   it('Clone calls bridge.agents.clone and refreshes', async () => {

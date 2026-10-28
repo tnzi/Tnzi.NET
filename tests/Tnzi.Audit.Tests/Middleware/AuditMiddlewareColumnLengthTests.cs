@@ -140,6 +140,42 @@ public class AuditMiddlewareColumnLengthTests
         operation.Exception.ShouldContain(message);
     }
 
+    /// <summary>
+    /// 列宽正好落在一个增补平面字符的两个码元之间：裁出来的值不能以孤立的高代理项结尾。
+    /// PostgreSQL（Npgsql 的严格 UTF-8 编码）会拒绝这一行，整批审计随之丢弃；SQLite 照收不误。
+    /// 异常消息是这里最常带非 ASCII 字符的列（消息里常常拼着用户输入）。
+    /// </summary>
+    [Fact]
+    public async Task MessageCutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var message = new string('m', AuditOperationColumns.MessageMaxLength - 1) + "\U0001F600tail";
+
+        var operation = await CaptureAsync(CreateOversizedRequest(), _ => throw new InvalidOperationException(message));
+
+        operation.Message.ShouldNotBeNull();
+        operation.Message.Length.ShouldBe(AuditOperationColumns.MessageMaxLength - 1);
+        char.IsHighSurrogate(operation.Message[^1]).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <c>Url</c> 存转义形式的路径（与转义的查询串同一种编码），所以路径里的增补平面字符以 <c>%XX</c> 落库：
+    /// 列里只有 ASCII，裁到列宽也裁不出孤立的代理项。
+    /// </summary>
+    [Fact]
+    public async Task ANonAsciiPath_IsStoredEscaped_AndFitsTheColumn()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "GET";
+        context.Request.Path = "/" + new string('p', AuditOperationColumns.UrlMaxLength - 2) + "\U0001F600tail";
+
+        var operation = await CaptureAsync(context, _ => Task.CompletedTask);
+
+        operation.Url.ShouldNotBeNull();
+        operation.Url.Length.ShouldBe(AuditOperationColumns.UrlMaxLength);
+        operation.Url.ShouldStartWith("/ppp");
+        operation.Url.ShouldAllBe(c => c < 128);
+    }
+
     [Fact]
     public async Task FallbackFunctionName_WithoutRouteData_FitsTheColumn()
     {

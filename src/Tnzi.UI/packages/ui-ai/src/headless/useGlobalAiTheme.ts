@@ -16,7 +16,8 @@
  * success when a 403 came back would tell the operator their change reached
  * every user when it reached nobody.
  */
-import { ref, computed, shallowRef, type Ref, type ComputedRef } from 'vue';
+import { ref, computed, shallowRef, hasInjectionContext, inject, type Ref, type ComputedRef } from 'vue';
+import { THEME_CONTEXT_KEY, type ThemeContext } from '@tnzi/ui';
 import {
   useAppearanceApi,
   useAdminAppearanceApi,
@@ -44,6 +45,13 @@ export interface UseGlobalAiThemeOptions {
   canManage?: () => boolean;
   /** Apply the loaded snapshot to the document. Default true. */
   autoApply?: boolean;
+  /**
+   * The host's `@tnzi/ui` theme context, which the published brand colour is
+   * applied through (see `applyAiThemeSnapshot`). Defaults to the one provided
+   * to the calling component (`defineChatApp()` / `createTnziUi()`); `null`
+   * applies the brand colour as inline variables instead.
+   */
+  themeContext?: ThemeContext | null;
 }
 
 export interface UseGlobalAiThemeReturn {
@@ -80,6 +88,13 @@ function sameSnapshot(a: AiThemeSnapshot | null, b: AiThemeSnapshot | null): boo
 export function useGlobalAiTheme(options: UseGlobalAiThemeOptions = {}): UseGlobalAiThemeReturn {
   const scope = options.scope ?? AI_THEME_SCOPE;
   const autoApply = options.autoApply !== false;
+  const themeContext =
+    options.themeContext !== undefined
+      ? options.themeContext
+      : hasInjectionContext()
+        ? inject(THEME_CONTEXT_KEY, null)
+        : null;
+  const apply = (snapshot: AiThemeSnapshot | null) => applyAiThemeSnapshot(snapshot, undefined, themeContext);
 
   const remote = shallowRef<AiThemeSnapshot | null>(null);
   const draft = shallowRef<AiThemeSnapshot | null>(null);
@@ -108,7 +123,7 @@ export function useGlobalAiTheme(options: UseGlobalAiThemeOptions = {}): UseGlob
       const snapshot = readSnapshot(res?.data);
       remote.value = snapshot;
       draft.value = snapshot;
-      if (autoApply) applyAiThemeSnapshot(snapshot);
+      if (autoApply) apply(snapshot);
     } catch {
       // Decoration must never take the product down with it.
     } finally {
@@ -132,7 +147,7 @@ export function useGlobalAiTheme(options: UseGlobalAiThemeOptions = {}): UseGlob
         return false;
       }
       remote.value = draft.value;
-      if (autoApply) applyAiThemeSnapshot(draft.value);
+      if (autoApply) apply(draft.value);
       return true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to publish the theme';
@@ -155,7 +170,7 @@ export function useGlobalAiTheme(options: UseGlobalAiThemeOptions = {}): UseGlob
       }
       remote.value = null;
       draft.value = null;
-      if (autoApply) applyAiThemeSnapshot(null);
+      if (autoApply) apply(null);
       return true;
     } catch (e) {
       error.value = e instanceof Error ? e.message : 'Failed to reset the theme';

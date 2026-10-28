@@ -11,6 +11,8 @@ public partial class PaymentService : ApplicationService, IPaymentService
     private readonly IPaymentTaxCalculator _taxCalculator;
     private readonly IPaymentMethodService _paymentMethodService;
     private readonly IOptionsMonitor<PaymentOptions> _paymentOptionsMonitor;
+    private readonly IBillingAccountResolver _accountResolver;
+    private readonly IBillingAccountService _billingAccountService;
 
     /// <summary>
     /// 折扣能力。未加载促销包时为 null —— 那台宿主上不存在任何优惠券码，
@@ -24,8 +26,15 @@ public partial class PaymentService : ApplicationService, IPaymentService
     /// 后续处理（CAS、事件发布、下游状态机）要切到那笔支付所属的租户里做。
     /// </summary>
     private readonly ICurrentTenant? _currentTenant;
+    private readonly IRefundService? _refundService;
 
     private const int ExpiredPaymentScanPageSize = 200;
+
+    /// <summary>过期清扫每轮最多翻的页数：一轮的工作量（每笔最多两次渠道调用）有上界。闸门，不是调优项。</summary>
+    private const int ExpiredPaymentScanMaxPages = 10;
+
+    /// <summary>关单发出的 <see cref="PaymentFailedEvent"/> 的失败原因前缀。</summary>
+    private const string ClosedFailReason = "Payment closed";
 
     private PaymentOptions PaymentOptions => _paymentOptionsMonitor.CurrentValue;
 
@@ -35,10 +44,13 @@ public partial class PaymentService : ApplicationService, IPaymentService
         IPaymentTaxCalculator taxCalculator,
         IPaymentMethodService paymentMethodService,
         IOptionsMonitor<PaymentOptions> paymentOptionsMonitor,
+        IBillingAccountResolver accountResolver,
+        IBillingAccountService billingAccountService,
         IServiceProvider serviceProvider,
         ICouponService? couponService = null,
         ICache? cache = null,
-        ICurrentTenant? currentTenant = null)
+        ICurrentTenant? currentTenant = null,
+        IRefundService? refundService = null)
         : base(serviceProvider)
     {
         _paymentRepository = Check.NotNull(paymentRepository);
@@ -46,9 +58,12 @@ public partial class PaymentService : ApplicationService, IPaymentService
         _taxCalculator = Check.NotNull(taxCalculator);
         _paymentMethodService = Check.NotNull(paymentMethodService);
         _paymentOptionsMonitor = Check.NotNull(paymentOptionsMonitor);
+        _accountResolver = Check.NotNull(accountResolver);
+        _billingAccountService = Check.NotNull(billingAccountService);
         _couponService = couponService;
         _cache = cache;
         _currentTenant = currentTenant;
+        _refundService = refundService;
     }
 
     /// <summary>
@@ -57,6 +72,25 @@ public partial class PaymentService : ApplicationService, IPaymentService
     private static string GenerateTradeNo()
     {
         return $"{PaymentConstants.TradeNoPrefix}{IdHelper.NextId()}";
+    }
+
+    /// <summary>计税拆分存成 JSON 随支付落库（收据 / 发票逐行列示用）；没有税额行时为空。</summary>
+    internal static string? SerializeTaxLines(TaxCalculationResult tax)
+        => tax.TaxLines is { Count: > 0 } lines ? JsonSerializer.Serialize(lines, TnziJsonDefaults.Options) : null;
+
+    /// <summary><see cref="SerializeTaxLines"/> 的逆；读不出来（空、旧数据、损坏）时为空列表。</summary>
+    public static List<TaxLineDto> ParseTaxLines(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<TaxLineDto>>(json, TnziJsonDefaults.Options) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     public async Task<Result<PaymentOrderResultDto>> CreatePaymentAsync(CreatePaymentDto request, CancellationToken cancellationToken = default)
@@ -86,20 +120,52 @@ public partial class PaymentService : ApplicationService, IPaymentService
             return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentBusinessTypeSystemOnly, 400);
         }
 
-        var channelCode = string.IsNullOrWhiteSpace(request.ChannelCode)
+        var provider = _paymentProviderFactory.GetProvider(string.IsNullOrWhiteSpace(request.ChannelCode)
             ? PaymentOptions.DefaultChannelCode
-            : request.ChannelCode;
-
-        var provider = _paymentProviderFactory.GetProvider(channelCode);
+            : request.ChannelCode);
         if (provider == null)
             return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentChannelNotSupported, 400);
 
-        var paymentMethod = request.PaymentMethod ?? PaymentMethod.CreditCard;
+        // ★ 存渠道自己的写法，不存请求原样：渠道查找不区分大小写，存下的值却被按等值比较（统计按渠道分组、
+        // 对账按渠道筛选），以小写 "stripe" 建的单会在报表里与 "Stripe" 分成两个渠道
+        var channelCode = provider.ChannelCode;
+
+        var paymentMethod = request.PaymentMethod ?? ResolveDefaultPaymentMethod(provider);
         if (!provider.IsSupported(paymentMethod))
             return Fail<PaymentOrderResultDto>(ErrorCodes.PaymentChannelNotSupported, 400);
 
         var currency = ResolveCurrency(request.Currency, channelCode);
         var userId = CurrentUser?.Id;
+
+        // 这笔钱记在谁的账上：系统通道（订阅首付 / 补缴 / 补差）由调用方指定订阅所属的账户；
+        // 用户面按当前用户解析，且要能代表那个账户付款（User 范围下恒成立，与此前逐字相同）。匿名建单没有账户。
+        BillingAccountRef? account = null;
+        if (request.IsSystemInitiated && request.BillingAccount != null)
+        {
+            account = request.BillingAccount;
+        }
+        else if (userId.HasValue)
+        {
+            var scope = await _accountResolver.ResolveScopeAsync(userId, manage: true, cancellationToken);
+            if (!scope.Succeeded)
+                return Fail<PaymentOrderResultDto>(scope.Message ?? ErrorCodes.BillingAccountAccessDenied, scope.Code ?? 403);
+            account = scope.Data;
+        }
+
+        var contact = await _billingAccountService.ResolveContactAsync(account, CurrentUser?.UserName, CurrentUser?.Email, userId, cancellationToken);
+
+        // 付款同时存卡：只在渠道支持保存支付方式时才向渠道要求；否则照常收款，只是之后的续费没有卡可扣。
+        var savePaymentMethod = request.IsSystemInitiated && request.SavePaymentMethod && account != null;
+        if (savePaymentMethod && !provider.SupportsPaymentMethodStorage)
+        {
+            Logger.LogInformation("Channel {Channel} cannot save payment methods; payment for {BusinessOrderNo} is taken without saving the card.",
+                channelCode, request.BusinessOrderNo);
+            savePaymentMethod = false;
+        }
+
+        var providerCustomerId = savePaymentMethod
+            ? await _paymentMethodService.FindProviderCustomerIdAsync(account!, channelCode, cancellationToken)
+            : null;
 
         // 1. 折扣：先试算，确认渠道能建单后再核销，避免"券被吃掉但订单没建成"
         var discount = await PreviewCouponAsync(request, currency, userId, cancellationToken);
@@ -140,17 +206,20 @@ public partial class PaymentService : ApplicationService, IPaymentService
             PaymentMethod = paymentMethod,
             Description = request.Description,
             UserId = userId,
-            CustomerName = CurrentUser?.UserName,
-            CustomerEmail = CurrentUser?.Email,
+            BillingAccountType = account?.Type,
+            BillingAccountId = account?.Id,
+            CustomerName = contact.Name,
+            CustomerEmail = contact.PrimaryEmail,
             CouponId = discount.Data?.PromotionId,
             ExpireTime = ResolveExpireTime(request.ExpireMinutes, channelCode),
-            ExtraData = request.ExtraData
+            ExtraData = request.ExtraData,
+            TaxLinesJson = SerializeTaxLines(tax.Data)
         };
 
         await _paymentRepository.InsertAsync(payment, cancellationToken);
 
         // 3. 核销优惠券（拿到 paymentId 后写核销记录，失败即中止且不产生订单）
-        Guid? couponUsageId = null;
+        var couponApplied = false;
         if (discount.Data != null && userId.HasValue)
         {
             var applied = await _couponService!.ApplyCouponAsync(
@@ -164,7 +233,7 @@ public partial class PaymentService : ApplicationService, IPaymentService
                 return Fail<PaymentOrderResultDto>(applied.Message ?? ErrorCodes.CouponInvalid, applied.Code ?? 400, applied.ErrorCode);
             }
 
-            couponUsageId = applied.Data.Id;
+            couponApplied = true;
         }
 
         // 4. 渠道下单
@@ -177,7 +246,14 @@ public partial class PaymentService : ApplicationService, IPaymentService
             Description = request.Description,
             ExpireTime = payment.ExpireTime,
             ReturnUrl = request.ReturnUrl ?? PaymentOptions.DefaultReturnUrl,
-            ExtraData = request.ExtraData
+            ExtraData = request.ExtraData,
+            SavePaymentMethod = savePaymentMethod,
+            // 订阅收款不论这一次存不存卡都只收卡：之后的每一期都靠一张能无人值守扣款的卡
+            ReusableMethodsOnly = savePaymentMethod || request.BusinessType == BusinessType.Subscription,
+            ProviderCustomerId = providerCustomerId,
+            BillingAccount = account,
+            CustomerName = contact.Name,
+            CustomerEmail = contact.PrimaryEmail
         });
 
         if (!result.Succeeded || result.Data == null)
@@ -186,9 +262,11 @@ public partial class PaymentService : ApplicationService, IPaymentService
             payment.ChannelResponse = result.Message;
             await _paymentRepository.UpdateAsync(payment, cancellationToken);
 
-            // 渠道建单失败必须把券还给用户，否则一次失败就白扣一张券
-            if (couponUsageId.HasValue)
-                await _couponService!.ReleaseCouponAsync(couponUsageId.Value, cancellationToken);
+            // 渠道建单失败必须把券还给用户，否则一次失败就白扣一张券。
+            // ★ 按这笔支付归还而不是按核销记录 Id：同一张单上先建的另一笔支付可能共用同一条核销记录
+            // （幂等键是促销 + 用户 + 单号），按记录 Id 还掉的是那笔仍在等付款的支付的折扣。
+            if (couponApplied)
+                await _couponService!.ReleaseCouponForPaymentAsync(payment.Id, cancellationToken);
 
             return Fail<PaymentOrderResultDto>(result.Message ?? ErrorCodes.PaymentCreationFailed);
         }
@@ -219,7 +297,11 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     public async Task<Result<PaymentDto>> GetPaymentAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var payment = await FindOwnedAsync(tradeNo, ownerUserId, cancellationToken);
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: false, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail<PaymentDto>(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
+
+        var payment = await FindOwnedAsync(tradeNo, owner.Data, cancellationToken);
         if (payment == null)
             return Fail<PaymentDto>(ErrorCodes.PaymentNotFound, 404);
 
@@ -230,12 +312,20 @@ public partial class PaymentService : ApplicationService, IPaymentService
     {
         Check.NotNull(query);
 
-        var queryable = _paymentRepository.AsNoTracking();
-        if (ownerUserId.HasValue)
-            queryable = queryable.Where(p => p.UserId == ownerUserId.Value);
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: false, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail<IPagedList<PaymentDto>>(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
 
+        var queryable = _paymentRepository.AsNoTracking();
+        if (owner.Data is { } account)
+            queryable = queryable.Where(p => p.BillingAccountType == account.Type && p.BillingAccountId == account.Id);
+
+        // 分页必须有确定的顺序：没有 ORDER BY 时数据库按执行计划给行，翻页会重复或漏掉，最新的单也不在第一页。
+        // Id 作并列时的决胜键，同一时刻建的单在两页之间不会换位。
         var pagedList = await queryable
             .Filter(query)
+            .OrderByDescending(p => p.CreationTime)
+            .ThenByDescending(p => p.Id)
             .ProjectTo<PaymentEntity, PaymentDto>()
             .CreateAsync(query.PageIndex, query.PageSize, cancellationToken);
 
@@ -244,7 +334,11 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     public async Task<Result> ClosePaymentAsync(string tradeNo, string? reason, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var payment = await FindOwnedAsync(tradeNo, ownerUserId, cancellationToken);
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: true, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
+
+        var payment = await FindOwnedAsync(tradeNo, owner.Data, cancellationToken);
         if (payment == null)
             return Fail(ErrorCodes.PaymentNotFound, 404);
 
@@ -264,12 +358,55 @@ public partial class PaymentService : ApplicationService, IPaymentService
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PaymentStatus.Closed), cancellationToken);
 
         if (affected == 0)
-            return Fail(ErrorCodes.PaymentCannotClose, 409);
+            return await ResolveLostCloseAsync(payment, cancellationToken);
+
+        payment.Status = PaymentStatus.Closed;
+
+        // 关单与失败、过期一样是「钱没收到」的终态：为它核销的券要还回去，否则每关一次单用户就白丢一张券
+        // （取消一条还没付首期的订阅会关掉它的首期单，带券开通再取消就是这条路径）。
+        // 同一张单上另一笔支付仍在用这次折扣时，促销侧改绑而不归还（见 ICouponService.ReleaseCouponForPaymentAsync）。
+        await ReleaseCouponForPaymentAsync(payment, cancellationToken);
+
+        // ★ 也要告诉下游：等着失败 / 过期事件去收口业务单的消费方，收不到这一条就永远停在「待付款」
+        // （订阅的首期单被付款人在收银台关掉，订阅就一直是 Pending）。发的是失败事件，与渠道回报「已作废」同一个：
+        // 关单先作废了渠道侧的意图，渠道的作废回调若抢在上面的条件更新之前落地，走的正是那条路径，
+        // 同一次关单下游看到的必须是同一件事。状态列（Closed / Cancelled / Failed）分得出是哪一种。
+        if (EventBus != null)
+            await EventBus.PublishAsync(BuildFailedEvent(payment, BuildClosedFailReason(reason)));
 
         Logger.LogInformation("Payment closed. TradeNo: {TradeNo}, Reason: {Reason}", tradeNo, reason);
 
         return Ok();
     }
+
+    /// <summary>
+    /// 关单的条件更新落空：这张单在关单途中被别的路径结束了。以「没收到钱」结束的（渠道的作废回调、过期清扫、另一次关单）
+    /// 已经还了券、发了终态事件，关单要的结果已经达成，答成功；被记成成功的（钱到了）照旧拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 此前一律答 409：关单自己作废了渠道侧的意图，渠道的作废回调抢先落地时，用户的「取消」得到一个冲突错误，
+    /// 订阅取消随之被拒（它要先关掉首期单），而那张单其实已经付不了了。
+    /// </remarks>
+    private async Task<Result> ResolveLostCloseAsync(PaymentEntity payment, CancellationToken cancellationToken)
+    {
+        var current = await _paymentRepository.AsNoTracking()
+            .Where(p => p.Id == payment.Id)
+            .Select(p => (PaymentStatus?)p.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (current is { } status && IsUnpaidTerminalStatus(status))
+        {
+            Logger.LogInformation("Payment {TradeNo} ended as {Status} while it was being closed; nothing left to close.",
+                payment.TradeNo, status);
+            return Ok();
+        }
+
+        return Fail(ErrorCodes.PaymentCannotClose, 409);
+    }
+
+    /// <summary>关单发出的失败事件里的原因：固定前缀让下游分得出这是一次关单，后面跟调用方给的理由。</summary>
+    private static string BuildClosedFailReason(string? reason)
+        => string.IsNullOrWhiteSpace(reason) ? ClosedFailReason : $"{ClosedFailReason}: {reason}";
 
     /// <summary>
     /// 本地关单 / 过期之前确认渠道侧再也收不到这张单的钱。三层：能作废的渠道先作废；作废不了（渠道没这能力，
@@ -333,7 +470,8 @@ public partial class PaymentService : ApplicationService, IPaymentService
             {
                 // 渠道已经收到钱：走与回调同一条推进路径（金额校验 + 事件），这不是一次关单
                 var paidAmount = state.Data.Amount > 0 ? state.Data.Amount : payment.PayableAmount;
-                await ApplySucceededAsync(payment, paidAmount, state.Data.ExternalTradeNo, JsonSerializer.Serialize(state.Data), cancellationToken);
+                await ApplySucceededAsync(payment, paidAmount, state.Data.ExternalTradeNo, JsonSerializer.Serialize(state.Data), cancellationToken,
+                    paidCurrency: state.Data.Currency);
                 Logger.LogWarning("Payment {TradeNo} was already paid on channel {Channel} when it was about to be closed; recorded as succeeded instead.",
                     payment.TradeNo, payment.ChannelCode);
                 return Fail(ErrorCodes.PaymentAlreadyPaid, 409);
@@ -361,9 +499,19 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     public async Task<Result<PaymentParamsDto>> GetPaymentParamsAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var payment = await FindOwnedAsync(tradeNo, ownerUserId, cancellationToken);
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: true, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail<PaymentParamsDto>(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
+
+        var payment = await FindOwnedAsync(tradeNo, owner.Data, cancellationToken);
         if (payment == null)
             return Fail<PaymentParamsDto>(ErrorCodes.PaymentNotFound, 404);
+
+        // ★ 只给还能付的单发付款凭据。渠道侧的意图可能比本地状态活得久：Stripe 拒付后 intent 回到
+        // requires_payment_method，同一个 client secret 换张卡就能再确认。对一笔本地已经失败的续费扣款这么做，
+        // 钱进来时撞上失败终态只留一行告警，订阅照样降级并换一笔再扣。已结束的单要付就重新建单。
+        if (payment.Status is not (PaymentStatus.Pending or PaymentStatus.Processing))
+            return Fail<PaymentParamsDto>(ErrorCodes.PaymentNotPayable, 400);
 
         var provider = _paymentProviderFactory.GetProvider(payment.ChannelCode);
         if (provider == null)
@@ -380,7 +528,12 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     public async Task<Result> SyncOrderAsync(string tradeNo, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
-        var payment = await FindOwnedAsync(tradeNo, ownerUserId, cancellationToken);
+        // 管理权限：还没结束的单经同步收款（PayPal capture），那是付款人一侧的动作
+        var owner = await _accountResolver.ResolveScopeAsync(ownerUserId, manage: true, cancellationToken);
+        if (!owner.Succeeded)
+            return Fail(owner.Message ?? ErrorCodes.BillingAccountAccessDenied, owner.Code ?? 403);
+
+        var payment = await FindOwnedAsync(tradeNo, owner.Data, cancellationToken);
         if (payment == null)
             return Fail(ErrorCodes.PaymentNotFound, 404);
 
@@ -388,7 +541,12 @@ public partial class PaymentService : ApplicationService, IPaymentService
         if (provider == null)
             return Fail(ErrorCodes.PaymentChannelNotSupported, 400);
 
-        var result = await provider.SyncOrderAsync(payment.ExternalTradeNo ?? tradeNo);
+        // ★ 还没结束的支付由付款人这一侧的同步把钱收下来（PayPal 的批准订单要商户 capture，见 FinalizePaymentAsync）：
+        // 付款人从渠道回到站点时前端调的就是这个。已经结束的只读渠道状态，绝不替一张已关掉的单收钱。
+        var channelTradeNo = payment.ExternalTradeNo ?? tradeNo;
+        var result = IsTerminalStatus(payment.Status)
+            ? await provider.SyncOrderAsync(channelTradeNo)
+            : await provider.FinalizePaymentAsync(channelTradeNo);
         if (!result.Succeeded)
             return Fail(result.Message ?? ErrorCodes.PaymentCreationFailed);
 
@@ -396,13 +554,19 @@ public partial class PaymentService : ApplicationService, IPaymentService
         // 否则 Refunded 会被同步回 Succeeded 从而放开二次退款。
         if (IsTerminalStatus(payment.Status))
         {
+            // ★ 渠道给了一个更准的参考号（PayPal 收款之后是 capture id，退款要打它）：只写这一列。
+            // 上面那份支付读在渠道往返之前，这期间退款可能已经在这一行上预留了额度、改了状态，
+            // 整行写回会把它们拨回旧值，额度守卫就此失效。
             if (!string.IsNullOrEmpty(result.Data?.ExternalTradeNo) && payment.ExternalTradeNo != result.Data.ExternalTradeNo)
             {
-                payment.ExternalTradeNo = result.Data.ExternalTradeNo;
-                await _paymentRepository.UpdateAsync(payment, cancellationToken);
+                var externalTradeNo = result.Data.ExternalTradeNo;
+                await _paymentRepository.AsQueryable()
+                    .Where(p => p.Id == payment.Id)
+                    .ExecuteUpdateAsync(s => s.SetProperty(p => p.ExternalTradeNo, externalTradeNo), cancellationToken);
+                payment.ExternalTradeNo = externalTradeNo;
             }
             if (result.Data != null)
-                await RecordPaidAfterLocalCloseAsync(payment, result.Data.Status, JsonSerializer.Serialize(result.Data), cancellationToken);
+                await RecordPaidAfterLocalEndAsync(payment, result.Data.Status, JsonSerializer.Serialize(result.Data), cancellationToken);
             return Ok();
         }
 
@@ -413,11 +577,24 @@ public partial class PaymentService : ApplicationService, IPaymentService
         if (syncedStatus == PaymentStatus.Succeeded)
         {
             var paidAmount = result.Data!.Amount > 0 ? result.Data.Amount : payment.PayableAmount;
-            return await ApplySucceededAsync(payment, paidAmount, result.Data.ExternalTradeNo, JsonSerializer.Serialize(result.Data), cancellationToken);
+            return await ApplySucceededAsync(payment, paidAmount, result.Data.ExternalTradeNo, JsonSerializer.Serialize(result.Data), cancellationToken,
+                paidCurrency: result.Data.Currency, savedPaymentMethodToken: result.Data.SavedPaymentMethodToken);
         }
 
-        if (syncedStatus == PaymentStatus.Failed)
-            return await ApplyFailedAsync(payment, result.Data?.FailReason ?? "Synced as failed", JsonSerializer.Serialize(result.Data), cancellationToken);
+        // 渠道报取消（Stripe 的 canceled）与失败同一件事：钱没收到，券要还，下游要拿到失败事件。
+        // 此前取消落进下面的中间态写，本地成了 Cancelled 而券不还、事件不发，随后的取消回调又被终态守卫吞掉。
+        if (syncedStatus is PaymentStatus.Failed or PaymentStatus.Cancelled)
+            return await ApplyFailedAsync(
+                payment, result.Data?.FailReason ?? $"Synced as {syncedStatus}", JsonSerializer.Serialize(result.Data), cancellationToken, syncedStatus);
+
+        // 这里往下只落中间态。渠道若报了别的终态（自定义渠道报 Closed / Expired / Refunded 之类），
+        // 直接写进去同样绕开还券与事件：保持本地状态，由回调或过期清扫按正规路径收口。
+        if (syncedStatus is not (PaymentStatus.Pending or PaymentStatus.Processing))
+        {
+            Logger.LogWarning("Sync of payment {TradeNo} on channel {Channel} reported {Status}, which a sync does not apply; the payment stays {Current}.",
+                payment.TradeNo, payment.ChannelCode, syncedStatus, payment.Status);
+            syncedStatus = payment.Status;
+        }
 
         // 中间态：只在确实有变化时写库。渠道对未完成订单常年回同一个中间态，
         // 无条件写会给每次同步产生一条无意义的 UPDATE 与审计记录。
@@ -427,11 +604,14 @@ public partial class PaymentService : ApplicationService, IPaymentService
         if (!externalChanged && syncedStatus == payment.Status)
             return Ok();
 
-        if (externalChanged)
-            payment.ExternalTradeNo = result.Data!.ExternalTradeNo;
-
-        payment.Status = syncedStatus;
-        await _paymentRepository.UpdateAsync(payment, cancellationToken);
+        // 同样只写这两列，且只改仍未结束的支付：渠道往返期间回调或关单可能已经把它推进到终态
+        var syncedExternalTradeNo = externalChanged ? result.Data!.ExternalTradeNo : payment.ExternalTradeNo;
+        await _paymentRepository.AsQueryable()
+            .Where(p => p.Id == payment.Id
+                && (p.Status == PaymentStatus.Pending || p.Status == PaymentStatus.Processing))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.ExternalTradeNo, syncedExternalTradeNo)
+                .SetProperty(p => p.Status, syncedStatus), cancellationToken);
 
         return Ok();
     }
@@ -479,10 +659,14 @@ public partial class PaymentService : ApplicationService, IPaymentService
         return Ok(payment.MapTo<PaymentDto>());
     }
 
-    private Task<PaymentEntity?> FindOwnedAsync(string tradeNo, Guid? ownerUserId, CancellationToken cancellationToken)
+    /// <summary>按流水号取一笔支付；<paramref name="owner"/> 不为 null 时只认记在这个账户上的。</summary>
+    private Task<PaymentEntity?> FindOwnedAsync(string tradeNo, BillingAccountRef? owner, CancellationToken cancellationToken)
     {
+        if (owner == null)
+            return _paymentRepository.FirstOrDefaultAsync(p => p.TradeNo == tradeNo, cancellationToken);
+
         return _paymentRepository.FirstOrDefaultAsync(
-            p => p.TradeNo == tradeNo && (!ownerUserId.HasValue || p.UserId == ownerUserId), cancellationToken);
+            p => p.TradeNo == tradeNo && p.BillingAccountType == owner.Type && p.BillingAccountId == owner.Id, cancellationToken);
     }
 
     /// <summary>
@@ -492,16 +676,25 @@ public partial class PaymentService : ApplicationService, IPaymentService
     private string ResolveCurrency(string? requested, string channelCode)
     {
         if (!string.IsNullOrWhiteSpace(requested))
-            return requested;
+            return NormalizeCurrency(requested);
 
         var channelCurrency = PaymentOptions.Channels
             .FirstOrDefault(x => string.Equals(x.Key, channelCode, StringComparison.OrdinalIgnoreCase))
             .Value?.Currency;
 
-        return !string.IsNullOrWhiteSpace(channelCurrency)
+        return NormalizeCurrency(!string.IsNullOrWhiteSpace(channelCurrency)
             ? channelCurrency
-            : PaymentOptions.DefaultCurrency;
+            : PaymentOptions.DefaultCurrency);
     }
+
+    /// <summary>
+    /// 币种一律按 ISO 4217 的大写形式落库与送进渠道。
+    /// </summary>
+    /// <remarks>
+    /// 此前按调用方的写法原样保存：PayPal 拒收小写的 <c>usd</c>，而每日退款限额按支付行的币种等值统计，
+    /// <c>usd</c> 与 <c>USD</c> 的退款各算各的额度。
+    /// </remarks>
+    private static string NormalizeCurrency(string currency) => currency.Trim().ToUpperInvariant();
 
     /// <summary>
     /// 校验调用方给的回跳地址；不通过时记一条指名配置项的 Error 再返回 false。
@@ -525,6 +718,18 @@ public partial class PaymentService : ApplicationService, IPaymentService
 
     private static bool IsOfflineChannel(string channelCode)
         => string.Equals(channelCode, PaymentConstants.OfflineChannelCode, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 调用方没指定支付方式时记哪一种：渠道支持的第一种（按枚举顺序，信用卡在最前，能收卡的渠道照旧记信用卡）；
+    /// 渠道一种都不支持时退回信用卡，随后的 <see cref="IPaymentProvider.IsSupported"/> 校验照常拒绝。
+    /// </summary>
+    /// <remarks>
+    /// 此前缺省值硬编码为信用卡：线下渠道（出厂默认渠道）只收银行转账 / 线下汇款、PayPal 只收 PayPal，
+    /// 不带支付方式的建单在这两个渠道上一律 400，订阅的首期单与补差单（从不传支付方式）在上面一条都建不出来。
+    /// 刻意不做成渠道接口上的默认成员：Moq 之类的替身不执行默认接口成员，读到的会是枚举的 0，一个不存在的支付方式。
+    /// </remarks>
+    private static PaymentMethod ResolveDefaultPaymentMethod(IPaymentProvider provider)
+        => Enum.GetValues<PaymentMethod>().FirstOrDefault(provider.IsSupported, PaymentMethod.CreditCard);
 
     /// <summary>
     /// 订单有效期：调用方显式指定优先；否则线下渠道按天计（等人工核对到账），在线渠道按分钟计。

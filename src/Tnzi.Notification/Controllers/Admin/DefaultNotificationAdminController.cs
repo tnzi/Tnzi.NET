@@ -112,14 +112,21 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 删除（取消）通知
+    /// 删除通知（软删除，与批量删除同一条路径）。找不到答 404。
     /// </summary>
+    /// <remarks>
+    /// ★ 取消走 <c>POST {id}/cancel</c>（<c>.update</c>）。这个端点此前调的是取消：删一条已发出的消息答
+    /// 「已发送、不能取消」的 400，删一条待发的只是把它取消、照样留在列表里，而只有 <c>.delete</c> 的角色借它就能取消群发。
+    /// </remarks>
     [HttpDelete("{id:guid}")]
     [ApiAuthorize(PermissionName = "notification.message.delete")]
     public virtual async Task<ApiResult> Delete(Guid id)
     {
-        var result = await NotificationService.CancelAsync(id);
-        return result.ToApiResult();
+        var result = await QueryService.BatchDeleteAsync([id]);
+        if (result.Succeeded && result.Data == 0)
+            return NotFound("Notification not found");
+
+        return ((Result)result).ToApiResult();
     }
 
     /// <summary>
@@ -219,10 +226,10 @@ public class DefaultNotificationAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 预览通知渲染结果（不创建、不发送）
+    /// 预览通知渲染结果（不创建、不发送）。不需要收件人：管理端按模板名 + 变量预览时没有任何地址可填。
     /// </summary>
     [HttpPost("preview")]
-    public virtual async Task<ApiResult<NotificationPreviewDto>> Preview([FromBody] CreateNotificationRequest request)
+    public virtual async Task<ApiResult<NotificationPreviewDto>> Preview([FromBody] PreviewNotificationRequest request)
     {
         var result = await NotificationService.PreviewAsync(request);
         return result.ToApiResult();

@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Exporter;
-using OpenTelemetry.Instrumentation.EntityFrameworkCore;
 using Tnzi.OpenTelemetry.Options;
 
 namespace Tnzi.OpenTelemetry.Tests;
@@ -69,18 +68,6 @@ public class OpenTelemetryExportOptionsTests
     public void RecordDbStatementText_DefaultsToFalse()
     {
         new OpenTelemetryOptions().RecordDbStatementText.ShouldBeFalse();
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void EntityFrameworkInstrumentation_FollowsTheSwitch(bool record)
-    {
-        var options = new EntityFrameworkInstrumentationOptions();
-
-        OpenTelemetryModule.ApplyEntityFrameworkOptions(options, new OpenTelemetryOptions { RecordDbStatementText = record });
-
-        options.SetDbStatementForText.ShouldBe(record);
     }
 
     // ---- 无处可去 ----
@@ -153,9 +140,10 @@ public class OpenTelemetryExportOptionsTests
         };
         var otlp = new OtlpExporterOptions();
 
-        OpenTelemetryModule.ApplyOtlpOptions(otlp, config);
+        OpenTelemetryModule.ApplyOtlpOptions(otlp, config, OtlpSignal.Traces);
 
-        otlp.Endpoint.ShouldBe(new Uri("https://collector.example:4318"));
+        // HTTP/protobuf：配置的是基地址，信号路径由框架追加（导出器对显式端点不追加）
+        otlp.Endpoint.ShouldBe(new Uri("https://collector.example:4318/v1/traces"));
         otlp.Protocol.ShouldBe(OtlpExportProtocol.HttpProtobuf);
         otlp.TimeoutMilliseconds.ShouldBe(2500);
         otlp.Headers.ShouldBe("x-api-key=k1");
@@ -167,11 +155,36 @@ public class OpenTelemetryExportOptionsTests
         var otlp = new OtlpExporterOptions();
         var before = otlp.Headers;
 
-        OpenTelemetryModule.ApplyOtlpOptions(otlp, new OpenTelemetryOptions { OtlpEndpoint = "http://c:4317" });
+        OpenTelemetryModule.ApplyOtlpOptions(otlp, new OpenTelemetryOptions { OtlpEndpoint = "http://c:4317" }, OtlpSignal.Traces);
 
         otlp.Headers.ShouldBe(before);
         otlp.Protocol.ShouldBe(OtlpExportProtocol.Grpc);
     }
+
+    // ---- OTLP/HTTP 的信号路径 ----
+
+    [Theory]
+    [InlineData("http://collector:4318", "Traces", "http://collector:4318/v1/traces")]
+    [InlineData("http://collector:4318", "Metrics", "http://collector:4318/v1/metrics")]
+    [InlineData("http://collector:4318", "Logs", "http://collector:4318/v1/logs")]
+    [InlineData("http://collector:4318/", "Logs", "http://collector:4318/v1/logs")]
+    // 带路径前缀的托管采集器
+    [InlineData("https://ingest.example/otlp", "Metrics", "https://ingest.example/otlp/v1/metrics")]
+    [InlineData("https://ingest.example/otlp/", "Traces", "https://ingest.example/otlp/v1/traces")]
+    // 为 traces 填好的完整地址：指标与日志改到各自的路径，而不是都投到 traces
+    [InlineData("http://collector:4318/v1/traces", "Traces", "http://collector:4318/v1/traces")]
+    [InlineData("http://collector:4318/v1/traces", "Metrics", "http://collector:4318/v1/metrics")]
+    [InlineData("https://ingest.example/otlp/v1/metrics/", "Logs", "https://ingest.example/otlp/v1/logs")]
+    public void HttpEndpoint_GetsTheSignalPath(string configured, string signal, string expected)
+        => OpenTelemetryModule.ResolveOtlpEndpoint(configured, useGrpc: false, Enum.Parse<OtlpSignal>(signal)).ShouldBe(new Uri(expected));
+
+    [Theory]
+    [InlineData("Traces")]
+    [InlineData("Metrics")]
+    [InlineData("Logs")]
+    public void GrpcEndpoint_IsUsedAsIs(string signal)
+        => OpenTelemetryModule.ResolveOtlpEndpoint("http://collector:4317", useGrpc: true, Enum.Parse<OtlpSignal>(signal))
+            .ShouldBe(new Uri("http://collector:4317"));
 
     [Fact]
     public void Validator_RejectsANonPositiveTimeout()

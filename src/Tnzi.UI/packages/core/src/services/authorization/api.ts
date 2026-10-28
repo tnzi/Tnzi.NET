@@ -40,6 +40,9 @@ import type {
   SetUserFunctionsInScopeRequest,
   UserPermissionPictureDto,
   AccessProfileDto,
+  PermissionHoldersDto,
+  PermissionCatalogueModuleDto,
+  AssignableRoleDto,
   DualControlRequestDto,
   DualControlQueryDto,
   DualControlDecisionDto,
@@ -57,9 +60,20 @@ const FUNCTION_AUTH_BASE = '/admin/function-authorization'
 
 export function useAdminModuleFunctionApi(client: HttpClient) {
   return {
-    /** Get all functions (permissions) for a specific module */
+    /**
+     * Get all functions (permissions) for a specific module. Served by the
+     * module management surface (`authorization.functionModule.view`); the
+     * permission catalogue page reads `getCatalogue` instead.
+     */
     getByModule: (moduleId: string) =>
       client.get<ModuleFunctionDto[]>(`${MODULES_BASE}/${moduleId}/functions`),
+
+    /**
+     * The whole permission catalogue (every module with all of its functions,
+     * disabled and retired rows included) behind `authorization.permission.view`.
+     */
+    getCatalogue: () =>
+      client.get<PermissionCatalogueModuleDto[]>(`${MODULE_FUNCTIONS_BASE}/catalogue`),
 
     /** Create a custom permission point */
     create: (data: CreateModuleFunctionDto) =>
@@ -211,6 +225,17 @@ export function useAdminRoleFunctionApi(client: HttpClient) {
      */
     getSuperAdminRoles: () =>
       client.get<string[]>(`${ROLE_FUNCTIONS_BASE}/super-admin-roles`),
+
+    /**
+     * The permission catalogue the role matrix renders (every module with all
+     * of its functions), behind `authorization.roleFunction.view` alone.
+     */
+    getCatalogue: () =>
+      client.get<PermissionCatalogueModuleDto[]>(`${ROLE_FUNCTIONS_BASE}/catalogue`),
+
+    /** Every role (unpaged) for the list beside the role matrix, behind `authorization.roleFunction.view`. */
+    getRoles: () =>
+      client.get<AssignableRoleDto[]>(`${ROLE_FUNCTIONS_BASE}/roles`),
   }
 }
 
@@ -313,6 +338,13 @@ export function useAdminUserFunctionApi(client: HttpClient) {
       client.get<UserPermissionPictureDto>(`${USER_FUNCTIONS_BASE}/user/${userId}/picture`, {
         params: scope ? { scope } : undefined,
       }),
+
+    /**
+     * The permission catalogue the user grant matrix renders (every module with
+     * all of its functions), behind `authorization.userFunction.view` alone.
+     */
+    getCatalogue: () =>
+      client.get<PermissionCatalogueModuleDto[]>(`${USER_FUNCTIONS_BASE}/catalogue`),
   }
 }
 
@@ -363,6 +395,10 @@ export function useAdminEntityRoleApi(client: HttpClient) {
     getByRole: (roleId: string) =>
       client.get<EntityRoleDto[]>(`${DATA_AUTH_BASE}/roles/${roleId}/entity-roles`),
 
+    /** Every role (unpaged) for the matrix's role axis, behind `authorization.entityRole.view`. */
+    getRoles: () =>
+      client.get<AssignableRoleDto[]>(`${DATA_AUTH_BASE}/roles`),
+
     /** Create entity role */
     create: (data: CreateEntityRoleDto) =>
       client.post<EntityRoleDto>(`${DATA_AUTH_BASE}/entity-roles`, data),
@@ -376,7 +412,7 @@ export function useAdminEntityRoleApi(client: HttpClient) {
   }
 }
 
-// ─── Function Authorization API (current-user permissions, checks) ────────────
+// ─── Function Authorization API (current-user permissions, checks, holders) ───
 
 /**
  * Function authorization API - maps to `DefaultFunctionAuthorizationAdminController`
@@ -405,6 +441,17 @@ export function useAdminFunctionAuthorizationApi(client: HttpClient) {
     checkPermission: (userId: string, permissionName: string) =>
       client.get<boolean>(`${FUNCTION_AUTH_BASE}/check`, {
         params: { userId, permissionName },
+      }),
+    /**
+     * Who holds a permission code: the roles that grant it (super-admin roles,
+     * effective, dormant and disabled grants), every account that holds it and
+     * through what, and the accounts denied it. The holder list matches the
+     * runtime check account by account. The code is matched case-insensitively;
+     * an unknown code answers 404.
+     */
+    getPermissionHolders: (permissionName: string) =>
+      client.get<PermissionHoldersDto>(`${FUNCTION_AUTH_BASE}/permission/holders`, {
+        params: { permissionName },
       }),
   }
 }

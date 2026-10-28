@@ -66,7 +66,7 @@ public class HangfireModule : TnziInfrastructureModule
             {
                 serverOptions.ServerName = options.Server.ServerName;
             }
-            serverOptions.Queues = options.Server.Queues.ToArray();
+            serverOptions.Queues = options.Server.ResolveQueues();
         });
 
         // 注册 IBackgroundJobManager

@@ -139,6 +139,8 @@ public class ChannelPackageAbsenceTests
             new DefaultPaymentTaxCalculator(taxOptions.Object),
             new Mock<IPaymentMethodService>().Object,
             paymentOptions.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProvider.Object);
     }
 }

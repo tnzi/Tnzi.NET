@@ -63,6 +63,14 @@ function isCurrent(row: UserSessionDto): boolean {
   const current = currentSessionId.value
   return current !== null && row.id.toLowerCase() === current.toLowerCase()
 }
+function isDelegated(row: UserSessionDto): boolean {
+  return !!row.groupKey
+}
+function delegatedHint(row: UserSessionDto): string | undefined {
+  return row.absoluteExpiresAt
+    ? t('sessions.delegatedUntil', { time: formatDateTime(row.absoluteExpiresAt, { fallback: EMPTY_DASH }) })
+    : undefined
+}
 // What "Sign out other devices" would actually act on. The list always
 // includes the caller's own session while signed in, so `sessions.length`
 // never disabled the button: it stayed live with nobody else to sign out and
@@ -110,15 +118,31 @@ const columns = computed<DataTableColumns<UserSessionDto>>(() => [
     title: t('sessions.cols.device'),
     render: (row) => {
       const deviceProfile = parseDeviceInfo(row.deviceInfo)
+      // A delegated session was issued by the app for another device (a
+      // passcode exchanged on someone else's computer), not by a sign-in. It
+      // carries the app's own name and a hard end, so it reads as that rather
+      // than as one more browser the user may not recognise.
+      const delegated = isDelegated(row)
       return h('span', { class: 'inline-flex items-center gap-6px' }, [
         h(TSvgIcon, {
           icon: deviceProfile.icon,
           size: 16,
           style: `color: ${deviceIconColor(deviceProfile.osFamily)}`,
         }),
-        h('span', { class: 'text-13px', title: row.deviceInfo ?? '' }, deviceProfile.label),
+        h(
+          'span',
+          { class: 'text-13px', title: row.deviceInfo ?? '' },
+          delegated && row.label ? row.label : deviceProfile.label,
+        ),
         isCurrent(row)
           ? h(NTag, { size: 'tiny', type: 'success', bordered: false }, { default: () => t('sessions.thisDevice') })
+          : null,
+        delegated
+          ? h(
+              NTag,
+              { size: 'tiny', type: 'info', bordered: false, title: delegatedHint(row) },
+              { default: () => t('sessions.delegated') },
+            )
           : null,
       ])
     },

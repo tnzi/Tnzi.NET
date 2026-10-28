@@ -6,6 +6,7 @@ import type { FormSchemaItem } from '../_shared/form-schema'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
 import type { StatusType } from '@tnzi/ui'
 import { TRelativeTime } from '@tnzi/ui'
+import { billingAccountColumn } from './billing-account-config'
 
 /**
  * Refunds page config - aligned with the real `RefundDto`
@@ -29,6 +30,8 @@ interface RefundRow {
   approveTime?: string | null
   approveRemark?: string | null
   completedTime?: string | null
+  billingAccountType?: string | null
+  billingAccountId?: string | null
   creationTime?: string
 }
 
@@ -93,6 +96,7 @@ export function buildRefundColumns(t: (key: string) => string): ColumnDef<Refund
         })
       },
     },
+    billingAccountColumn<RefundRow>(),
     {
       key: 'creationTime',
       title: 'columns.creationTime',

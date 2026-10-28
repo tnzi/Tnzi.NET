@@ -13,15 +13,18 @@ public class DefaultThreadController : ApiControllerBase
     protected readonly IAgentThreadService ThreadService;
     protected readonly IMessageFeedbackService FeedbackService;
     protected readonly ISuggestionService? SuggestionService;
+    protected readonly IAgentAttachmentService? AttachmentService;
 
     public DefaultThreadController(
         IAgentThreadService threadService,
         IMessageFeedbackService feedbackService,
-        ISuggestionService? suggestionService = null)
+        ISuggestionService? suggestionService = null,
+        IAgentAttachmentService? attachmentService = null)
     {
         ThreadService = Check.NotNull(threadService);
         FeedbackService = Check.NotNull(feedbackService);
         SuggestionService = suggestionService;
+        AttachmentService = attachmentService;
     }
 
     /// <summary>
@@ -48,6 +51,42 @@ public class DefaultThreadController : ApiControllerBase
     }
 
     /// <summary>
+    /// 往回翻页取当前用户线程的消息：<paramref name="beforeOrder"/> 之前（不含）的最近 <paramref name="limit"/> 条，旧的在前；
+    /// 不带 <paramref name="beforeOrder"/> 时取最新的一页。用返回页第一条的 <c>order</c> 作下一次的 <paramref name="beforeOrder"/>。
+    /// </summary>
+    [HttpGet("{id:guid}/messages")]
+    public virtual async Task<ApiResult<ThreadMessagePageDto>> GetMessages(
+        Guid id, [FromQuery] int? beforeOrder = null, [FromQuery][Range(1, 200)] int limit = 50)
+    {
+        await EnsureOwnershipAsync(id);
+        var result = await ThreadService.GetMessagesAsync(id, beforeOrder, limit);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 读一个附件的内容（用户随消息发的图片 / PDF，或工具返回的图片）。只有线程的主人能读。
+    /// </summary>
+    [HttpGet("{threadId:guid}/attachments/{attachmentId:guid}")]
+    public virtual async Task<IActionResult> GetAttachment(Guid threadId, Guid attachmentId, CancellationToken ct = default)
+    {
+        if (AttachmentService is null)
+        {
+            return NotFound(ApiResult.Error("Attachment not found.", 404));
+        }
+
+        var userId = GetCurrentUserId();
+        var result = await AttachmentService.GetContentAsync(threadId, attachmentId, userId, ct);
+        if (!result.Succeeded || result.Data is null)
+        {
+            return NotFound(result.ToApiResult());
+        }
+
+        // 只存过 PNG / JPEG / GIF / WebP / PDF（按文件头认过的），不会是能在本站执行脚本的类型；nosniff 让浏览器不去另猜
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(result.Data.Content, result.Data.MediaType, result.Data.FileName, enableRangeProcessing: false);
+    }
+
+    /// <summary>
     /// 更新当前用户的线程标题
     /// </summary>
     [HttpPatch("{id:guid}/title")]
@@ -55,6 +94,29 @@ public class DefaultThreadController : ApiControllerBase
     {
         await EnsureOwnershipAsync(id);
         var result = await ThreadService.UpdateTitleAsync(id, input.Title);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 归档当前用户的线程：它离开「最近对话」（列表按 <c>Status = Active</c> 筛选时），内容不变；
+    /// 在里面再发一条消息即取消归档。
+    /// </summary>
+    [HttpPost("{id:guid}/archive")]
+    public virtual async Task<ApiResult<AgentThreadDto>> Archive(Guid id)
+    {
+        await EnsureOwnershipAsync(id);
+        var result = await ThreadService.SetArchivedAsync(id, archived: true);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 取消归档当前用户的线程
+    /// </summary>
+    [HttpPost("{id:guid}/unarchive")]
+    public virtual async Task<ApiResult<AgentThreadDto>> Unarchive(Guid id)
+    {
+        await EnsureOwnershipAsync(id);
+        var result = await ThreadService.SetArchivedAsync(id, archived: false);
         return result.ToApiResult();
     }
 

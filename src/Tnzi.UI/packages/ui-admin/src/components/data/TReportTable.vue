@@ -26,6 +26,7 @@
 import { computed, h, useAttrs, type VNodeChild } from 'vue'
 import type { DataTableColumns } from 'naive-ui'
 import TResponsiveTable from './TResponsiveTable.vue'
+import { formatAmount } from '../../utils/finance-format'
 
 export interface ReportColumn<R> {
   key: string
@@ -45,7 +46,12 @@ const props = withDefaults(
   defineProps<{
     columns: ReportColumn<T>[]
     rows: T[]
-    /** Money formatter. Default: `en-US` 2-decimal. */
+    /**
+     * Money formatter, handed the cell as a number (a blank cell as 0).
+     * Default: `formatAmount`, the package's money convention: grouped, two
+     * decimals, a credit in parentheses `(500.00)`, a blank cell as a dash
+     * rather than `0.00`.
+     */
     formatMoney?: (value: number) => string
     totalsLabel?: string
     /** Force the totals row on. Default (unset): on when any column has `total`. */
@@ -83,9 +89,10 @@ const isPaged = computed(() => Boolean(attrs.remote) || Boolean(attrs.pagination
 const emit = defineEmits<{ 'row-click': [row: T] }>()
 
 const fmt = (value: unknown): string => {
-  const n = Number(value ?? 0)
-  if (props.formatMoney) return props.formatMoney(n)
-  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (props.formatMoney) return props.formatMoney(Number(value ?? 0))
+  // A blank cell is unknown, not zero: printing 0.00 reads as "nothing owed".
+  if (value === null || value === undefined || value === '') return formatAmount(null)
+  return formatAmount(Number(value))
 }
 
 // `showTotals` is a Boolean prop → absent coerces to `false`, so `||` (not `??`)

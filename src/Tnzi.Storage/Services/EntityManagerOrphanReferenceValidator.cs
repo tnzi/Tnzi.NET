@@ -4,7 +4,8 @@ namespace Tnzi.Storage.Services;
 /// 默认的孤立引用验证器实现。
 ///
 /// 通过 <see cref="IEntityManager"/> 把引用记录上的实体类型名（FileReference.EntityType，如 "User"）
-/// 解析为已注册的 CLR 实体类型，再定位其所属 DbContext，按主键查询该实体是否仍物理存在。
+/// 解析为已注册的 CLR 实体类型，再定位其所属 DbContext，按主键查询该实体是否仍物理存在
+/// （软删除的记录算存在：它可以被恢复，它的引用行在软删除时是刻意保留的）。
 ///
 /// 保守策略（绝不误删）：当无法把名称解析为唯一实体类型、无法确定 DbContext、查询抛错或任何
 /// 不确定情形时，一律返回 true（视为"实体仍存在"），从而避免误删仍被引用的文件。
@@ -72,10 +73,21 @@ public class EntityManagerOrphanReferenceValidator : IOrphanReferenceValidator
                 return true;
             }
 
-            // 3. 按主键查询是否存在（FindAsync 会先查本地缓存再查库；忽略软删除过滤器，
-            //    软删除实体仍算"存在"=保守不删，符合"绝不误删"原则）
-            var found = await dbContext.FindAsync(clrType, [entityId], cancellationToken);
-            return found != null;
+            // 3. 按主键查询是否存在，不受全局查询过滤器约束：软删的实体仍算「存在」（可能被恢复，保守不删）。
+            //    ★ 不能用 FindAsync：它查库时套用全局查询过滤器，软删的行查不到，会被判成孤立、文件随后被物理删除。
+            //    租户过滤器一并忽略：Id 是全局唯一的 Guid，任一租户里有这一行就是这个实体。
+            var keyName = ResolveGuidKeyName(dbContext, clrType);
+            if (keyName == null)
+            {
+                _logger.LogDebug(
+                    "Orphan reference validator found no single Guid key on '{EntityType}', treating as existing (conservative)",
+                    entityType);
+                return true;
+            }
+
+            var exists = (Task<bool>)ExistsIgnoringQueryFiltersMethod.MakeGenericMethod(clrType)
+                .Invoke(null, [dbContext, keyName, entityId, cancellationToken])!;
+            return await exists;
         }
         catch (Exception ex)
         {
@@ -86,6 +98,29 @@ public class EntityManagerOrphanReferenceValidator : IOrphanReferenceValidator
             return true;
         }
     }
+
+    private static readonly MethodInfo ExistsIgnoringQueryFiltersMethod = typeof(EntityManagerOrphanReferenceValidator)
+        .GetMethod(nameof(ExistsIgnoringQueryFiltersAsync), BindingFlags.NonPublic | BindingFlags.Static)!;
+
+    /// <summary>主键是单列 Guid 时返回其属性名（<c>[FileField]</c> 只支持 Guid 主键的实体）；否则 null。</summary>
+    private static string? ResolveGuidKeyName(DbContext dbContext, Type clrType)
+    {
+        var key = dbContext.Model.FindEntityType(clrType)?.FindPrimaryKey();
+        if (key is not { Properties.Count: 1 })
+        {
+            return null;
+        }
+
+        var property = key.Properties[0];
+        return property.ClrType == typeof(Guid) ? property.Name : null;
+    }
+
+    private static Task<bool> ExistsIgnoringQueryFiltersAsync<TEntity>(
+        DbContext dbContext, string keyName, Guid entityId, CancellationToken cancellationToken)
+        where TEntity : class
+        => dbContext.Set<TEntity>()
+            .IgnoreQueryFilters()
+            .AnyAsync(e => EF.Property<Guid>(e, keyName) == entityId, cancellationToken);
 
     /// <summary>
     /// 把实体类型名解析为唯一的已注册 CLR 实体类型。

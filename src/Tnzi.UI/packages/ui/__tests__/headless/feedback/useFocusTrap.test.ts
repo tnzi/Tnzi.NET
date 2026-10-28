@@ -56,6 +56,18 @@ describe('useFocusTrap', () => {
     wrapper.unmount()
   })
 
+  // Escape during an IME composition cancels the composition; closing the
+  // dialog as well threw away whatever was typed in it.
+  it('does not call onEscape for the Escape that cancels an IME composition', async () => {
+    const Host = createHost()
+    const wrapper = mount(Host, { props: { active: true }, attachTo: document.body })
+    await flushFocus()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, keyCode: 229 }))
+    expect(wrapper.vm.onEscape).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('does not call onEscape when inactive', async () => {
     const Host = createHost()
     const wrapper = mount(Host, { props: { active: false }, attachTo: document.body })

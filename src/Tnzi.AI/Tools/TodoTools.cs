@@ -20,6 +20,7 @@ public class TodoTools : IAIToolProvider
     private readonly IAgentExecutionContextAccessor _contextAccessor;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ICurrentTenant? _currentTenant;
+    private readonly IOptionsMonitor<TodoOptions>? _options;
     private readonly ILogger<TodoTools> _logger;
 
     private readonly object _gate = new();
@@ -31,25 +32,35 @@ public class TodoTools : IAIToolProvider
         IAgentExecutionContextAccessor contextAccessor,
         IServiceScopeFactory? scopeFactory = null,
         ICurrentTenant? currentTenant = null,
-        ILogger<TodoTools>? logger = null)
+        ILogger<TodoTools>? logger = null,
+        IOptionsMonitor<TodoOptions>? options = null)
     {
         _contextAccessor = Check.NotNull(contextAccessor);
         _scopeFactory = scopeFactory;
         _currentTenant = currentTenant;
         _logger = logger ?? NullLogger<TodoTools>.Instance;
+        _options = options;
     }
 
     /// <summary>
     /// Write or update the todo list for the current task plan.
     /// Use this to track progress on multi-step tasks.
     /// </summary>
+    /// <remarks>不标 IsConcurrencySafe：每次写的是完整列表、最后一次胜出，并行时哪一份最后落笔不确定；写入的运行属性包也不是线程安全的。</remarks>
     [AIFunction("write_todos",
-        "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.",
-        IsConcurrencySafe = true)]
+        "Write or update the todo list for tracking task progress in plan mode. Include ALL items with their current status.")]
     public string WriteTodos(
         [Description("Complete list of todo items with status (Pending/InProgress/Completed/Skipped)")] List<TodoItemDto> items)
     {
         var snapshot = items?.ToList() ?? [];
+
+        // 超过 AI:Todo:MaxItems 的列表整份拒收（不截断：截掉哪几项该由模型决定），上一份列表原样保留
+        var maxItems = (_options?.CurrentValue ?? new TodoOptions()).MaxItems;
+        if (snapshot.Count > maxItems)
+        {
+            return $"Error: the todo list has {snapshot.Count} items but at most {maxItems} are allowed. "
+                + $"Merge or drop items and call write_todos again with no more than {maxItems} items.";
+        }
 
         // 将 Todos 存储到共享属性包，TodoMiddleware 在 next 完成后读取
         _contextAccessor.Properties[ContextPropertyKeys.Todos] = snapshot;

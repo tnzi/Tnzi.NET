@@ -11,7 +11,7 @@ namespace Tnzi.AI.Infrastructure.ContextProviders;
 /// Instructions - 摘要注入到系统指令；OnDemandTools - 暴露 skill_search/skill_get/skill_activate 工具；Both - 两者都启用。
 /// </para>
 /// <para>
-/// 此类由 AgentExecutorOptionsBuilder 手动构造，不在 DI 容器中注册。
+/// 此类由 SkillContributor 按每次运行手动构造，不在 DI 容器中注册。
 /// </para>
 /// </remarks>
 public sealed class SkillContextProvider : IContextProvider
@@ -186,7 +186,7 @@ public sealed class SkillContextProvider : IContextProvider
         {
             sb.AppendLine($"- **{s.Name}** (slug: {s.Slug})");
             if (!string.IsNullOrWhiteSpace(s.Description))
-                sb.AppendLine($"  {(s.Description.Length > 200 ? s.Description[..200] + "..." : s.Description)}");
+                sb.AppendLine($"  {s.Description.Truncate(200)}");
         }
         sb.AppendLine("\nUse skill_get or skill_activate with the slug.");
         return sb.ToString();
@@ -437,121 +437,10 @@ public sealed class SkillContextProvider : IContextProvider
     }
 
     /// <summary>
-    /// 检查资源路径列表是否匹配技能的 Paths glob 模式。
-    /// </summary>
-    /// <param name="skill">技能定义（含 Paths glob 模式列表）</param>
-    /// <param name="resourcePaths">当前上下文的资源路径列表</param>
-    /// <returns>任意路径匹配任意模式时返回 true</returns>
-    public static bool MatchesResourcePaths(SkillDefinition skill, IReadOnlyList<string> resourcePaths)
-    {
-        if (skill.Paths.Count == 0) return false;
-
-        foreach (var resourcePath in resourcePaths)
-        {
-            foreach (var pattern in skill.Paths)
-            {
-                if (GlobMatch(resourcePath, pattern))
-                    return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// 简易 glob 匹配：支持 * (单层段内任意字符) 和 ** (递归匹配任意层)。
-    /// 路径分隔符统一为 /，匹配不区分大小写。
-    /// </summary>
-    public static bool GlobMatch(string path, string pattern)
-    {
-        // 统一分隔符
-        var normalizedPath = path.Replace('\\', '/');
-        var normalizedPattern = pattern.Replace('\\', '/');
-
-        // 精确匹配（忽略大小写）
-        if (normalizedPath.Equals(normalizedPattern, StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        var pathSegments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var patternSegments = normalizedPattern.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-        return GlobMatchSegments(pathSegments, 0, patternSegments, 0);
-    }
-
-    /// <summary>
-    /// 递归段匹配：pi = pathIndex, gi = patternIndex
-    /// </summary>
-    private static bool GlobMatchSegments(string[] path, int pi, string[] pattern, int gi)
-    {
-        // 两边都消耗完 → 匹配成功
-        if (gi == pattern.Length)
-            return pi == path.Length;
-
-        // ** 递归段
-        if (pattern[gi] == "**")
-        {
-            // ** 可以匹配零个到多个段
-            for (var skip = 0; skip <= path.Length - pi; skip++)
-            {
-                if (GlobMatchSegments(path, pi + skip, pattern, gi + 1))
-                    return true;
-            }
-            return false;
-        }
-
-        // 路径段已用完但模式还有 → 不匹配
-        if (pi == path.Length)
-            return false;
-
-        // 单段通配符匹配（* 匹配段内任意字符）
-        if (WildcardMatchSegment(path[pi], pattern[gi]))
-            return GlobMatchSegments(path, pi + 1, pattern, gi + 1);
-
-        return false;
-    }
-
-    /// <summary>
-    /// 单段内 * 通配符匹配（* 匹配任意字符序列，不含路径分隔符）
-    /// </summary>
-    private static bool WildcardMatchSegment(string text, string pattern)
-    {
-        int ti = 0, pi = 0;
-        int starTi = -1, starPi = -1;
-
-        while (ti < text.Length)
-        {
-            if (pi < pattern.Length && pattern[pi] == '*')
-            {
-                starPi = pi++;
-                starTi = ti;
-            }
-            else if (pi < pattern.Length && char.ToLowerInvariant(text[ti]) == char.ToLowerInvariant(pattern[pi]))
-            {
-                ti++;
-                pi++;
-            }
-            else if (starPi >= 0)
-            {
-                pi = starPi + 1;
-                ti = ++starTi;
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        // 跳过剩余的 *
-        while (pi < pattern.Length && pattern[pi] == '*')
-            pi++;
-
-        return pi == pattern.Length;
-    }
-
-    /// <summary>
     /// 检查 Agent 名称是否匹配 agents 列表（支持通配符 *）。
     /// </summary>
     /// <remarks>
-    /// Wildcard pattern: "rpi-*" matches "rpi-assistant", "rpi-finance", etc.
+    /// Wildcard pattern: "support-*" matches "support-billing", "support-returns", etc.
     /// </remarks>
     public static bool IsAgentAllowed(SkillDefinition skill, string? agentName)
     {

@@ -204,6 +204,13 @@ public class PartyBankAccountService : ApplicationService, IPartyBankAccountServ
     {
         if (input.PartyId == Guid.Empty)
             return Result.Failure("A party is required.", 400);
+        var tooLong = BankingFieldLimits.FirstTooLong(
+            (input.Label, BankingFieldLimits.PartyBankLabelMaxLength, "label"),
+            (input.BankName, BankingFieldLimits.BankNameMaxLength, "bank name"),
+            (input.Currency?.Trim(), BankingFieldLimits.CurrencyMaxLength, "currency"),
+            (input.Notes, BankingFieldLimits.PartyBankNotesMaxLength, "notes"));
+        if (tooLong != null)
+            return Result.Failure(tooLong, 400);
         return BankNumberHelper.ValidateRouting(input.Scheme, input.RoutingNumber, input.InstitutionNumber, input.TransitNumber);
     }
 

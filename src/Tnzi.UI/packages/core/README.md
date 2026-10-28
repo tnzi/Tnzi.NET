@@ -77,6 +77,10 @@ import { DataQueryController, PaginationController, SortController, SelectionCon
 import { calculateTotalPages, clampPageIndex, updatePageQuery } from "@tnzi/core/headless";
 ```
 
+页面上打开着的浮层的先后是 `useOverlayLayerStack()`（`open` / `close` / `isTop` / `top`，`layers` 是响应式的）：
+只管排序、不碰 DOM，挂在全局注册表上，所以每个 bundle、页面上每一份 UI 包看到的都是同一个栈。
+按键与焦点由 UI 包处理（`@tnzi/ui` 的 `useOverlayLayer` / `useFocusTrap`）。
+
 ### 状态管理
 
 ```typescript
@@ -86,17 +90,31 @@ import { AuthStateManager, UserStateManager, AppStateManager } from "@tnzi/core/
 
 ## 服务覆盖
 
-| 服务         | 类型 | API | Schema |
-| ------------ | ---- | --- | ------ |
-| Identity     | ✅   | ✅  | ✅     |
-| Storage      | ✅   | ✅  | ✅     |
-| Notification | ✅   | ✅  | ✅     |
-| Chat         | ✅   | ✅  | ✅     |
-| Payment      | ✅   | ✅  | ✅     |
-| Audit        | ✅   | ✅  | ✅     |
-| Template     | ✅   | ✅  | ✅     |
-| AI           | ✅   | ✅  | ⏳     |
-| App          | ✅   | ✅  | ✅     |
+每个后端模块一个子路径 `@tnzi/core/services/<name>`，各自带类型与 API 工厂（DTO schema 不内置，见上文「Schema 验证」）：
+
+| 子路径 | 后端模块 |
+| ------ | -------- |
+| `services/ai` | Tnzi.AI（含 CLI 运行、MCP、RAG、工作流等子模块的端点） |
+| `services/audit` | Tnzi.Audit |
+| `services/authorization` | Tnzi.Authorization |
+| `services/captcha` | Tnzi.AspNetCore 的人机验证 |
+| `services/chat` | Tnzi.Chat |
+| `services/diagnostics` | 框架诊断端点 |
+| `services/feature` | Tnzi.Feature |
+| `services/finance` | Tnzi.Finance 及其子模块 |
+| `services/identity` | Tnzi.Identity |
+| `services/localization` | Tnzi.Localization |
+| `services/logging` | Tnzi.Logging |
+| `services/notification` | Tnzi.Notification |
+| `services/payment` | Tnzi.Payment |
+| `services/payroll` | Tnzi.Finance.Payroll |
+| `services/performance` | Tnzi.Performance |
+| `services/presence` | Tnzi.Identity.Presence |
+| `services/signalr` | Tnzi.SignalR |
+| `services/signing` | Tnzi.Signing |
+| `services/storage` | Tnzi.Storage |
+| `services/system` | Tnzi.System |
+| `services/template` | Tnzi.Template |
 
 ## Service 层是手写的
 

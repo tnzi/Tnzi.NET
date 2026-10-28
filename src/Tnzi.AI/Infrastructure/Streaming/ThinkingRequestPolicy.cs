@@ -37,20 +37,20 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
 
     /// <summary>
     /// Inject provider-specific thinking params into request body when configured.
-    /// Routes to different injection formats based on ProviderName.
+    /// Routes by <see cref="ThinkingRequestContext.Format"/> (stamped by <see cref="ReasoningAwareChatClientDecorator"/>
+    /// from the provider entry and model it is bound to); a context without a format falls back to the entry name.
     /// </summary>
-    private static void InjectThinkingParams(PipelineMessage message)
+    internal static void InjectThinkingParams(PipelineMessage message)
     {
         var context = RequestContext.Value;
-        var providerName = context?.ProviderName;
+        var format = context?.Format ?? ThinkingPayloadFormats.Resolve(new ProviderOptions { Name = context?.ProviderName ?? string.Empty }, model: null);
 
         // DeepSeek: always-on reasoning, no body injection needed.
         // BUT multi-turn tool calls require all assistant messages to carry reasoning_content.
         // MEAI doesn't serialize reasoning content into outgoing messages, so we patch it here.
-        // Detect via explicit provider name OR by request URL - the latter handles always-on
-        // reasoning models (e.g., deepseek-reasoner) selected via think-model routing where
-        // no explicit ThinkingOptions are configured and RequestContext may be null.
-        if (IsDeepSeekProvider(providerName) || IsDeepSeekEndpoint(message.Request?.Uri))
+        // Detect via the resolved format OR by request URL - the latter handles always-on
+        // reasoning models (e.g., deepseek-reasoner) reached through a client that set no context.
+        if (format == ThinkingPayloadFormat.DeepSeek || IsDeepSeekEndpoint(message.Request?.Uri))
         {
             EnsureDeepSeekReasoningContent(message);
             return;
@@ -59,8 +59,9 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
         if (context?.Thinking is not { Effort: not ReasoningEffort.None } thinking)
             return;
 
-        // Anthropic: thinking handled by AnthropicThinkingChatClient decorator
-        if (IsAnthropicProvider(providerName))
+        // Anthropic: thinking handled by AnthropicThinkingChatClient decorator;
+        // None: always-on / inline <think> vendors take no thinking parameters
+        if (format is ThinkingPayloadFormat.Anthropic or ThinkingPayloadFormat.None)
             return;
 
         var request = message.Request;
@@ -82,19 +83,29 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
                 // Copy existing properties, skipping ones we'll replace
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
-                    if (prop.NameEquals("extra_body") || prop.NameEquals("reasoning") ||
+                    if (prop.NameEquals("extra_body") || prop.NameEquals("reasoning") || prop.NameEquals("reasoning_effort") ||
                         prop.NameEquals("enable_thinking") || prop.NameEquals("thinking_budget"))
                         continue;
                     prop.WriteTo(writer);
                 }
 
+                var model = doc.RootElement.TryGetProperty("model", out var modelElement) && modelElement.ValueKind == JsonValueKind.String
+                    ? modelElement.GetString()
+                    : null;
+
                 // Route to provider-specific injection
-                if (IsGeminiProvider(providerName))
-                    InjectGeminiThinking(writer, thinking);
-                else if (IsQwenProvider(providerName))
-                    InjectQwenThinking(writer, thinking);
-                else
-                    InjectOpenAIThinking(writer, thinking);
+                switch (format)
+                {
+                    case ThinkingPayloadFormat.Gemini:
+                        InjectGeminiThinking(writer, thinking, model);
+                        break;
+                    case ThinkingPayloadFormat.Qwen:
+                        InjectQwenThinking(writer, thinking);
+                        break;
+                    default:
+                        InjectOpenAIThinking(writer, thinking);
+                        break;
+                }
 
                 writer.WriteEndObject();
             }
@@ -108,21 +119,19 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
     }
 
     /// <summary>
-    /// OpenAI reasoning injection: { "reasoning": { "effort": "high", "summary": "auto" } }
+    /// OpenAI Chat Completions injection: { "reasoning_effort": "high" }.
+    /// The nested { "reasoning": { "effort": ... } } object belongs to the Responses API, which this client does not call.
     /// </summary>
     private static void InjectOpenAIThinking(Utf8JsonWriter writer, ThinkingOptions thinking)
     {
-        writer.WritePropertyName("reasoning");
-        writer.WriteStartObject();
-        writer.WriteString("effort", MapOpenAIEffort(thinking.Effort));
-        writer.WriteString("summary", "auto");
-        writer.WriteEndObject();
+        writer.WriteString("reasoning_effort", MapOpenAIEffort(thinking.Effort));
     }
 
     /// <summary>
-    /// Gemini injection: { "extra_body": { "google": { "thinking_config": { ... } } } }
+    /// Gemini injection: { "extra_body": { "google": { "thinking_config": { ... } } } }.
+    /// Gemini 2.5 takes <c>thinking_budget</c>, later families take <c>thinking_level</c>; only one is sent.
     /// </summary>
-    private static void InjectGeminiThinking(Utf8JsonWriter writer, ThinkingOptions thinking)
+    private static void InjectGeminiThinking(Utf8JsonWriter writer, ThinkingOptions thinking, string? model)
     {
         writer.WritePropertyName("extra_body");
         writer.WriteStartObject();
@@ -131,13 +140,17 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
         writer.WritePropertyName("thinking_config");
         writer.WriteStartObject();
         writer.WriteBoolean("include_thoughts", true);
-        writer.WriteString("thinking_level", MapGeminiEffort(thinking.Effort));
-        if (thinking.BudgetTokens.HasValue)
-            writer.WriteNumber("thinking_budget", thinking.BudgetTokens.Value);
+        if (UsesGeminiThinkingBudget(model))
+            writer.WriteNumber("thinking_budget", thinking.BudgetTokens ?? MapGeminiBudget(thinking.Effort));
+        else
+            writer.WriteString("thinking_level", MapGeminiEffort(thinking.Effort));
         writer.WriteEndObject(); // thinking_config
         writer.WriteEndObject(); // google
         writer.WriteEndObject(); // extra_body
     }
+
+    private static bool UsesGeminiThinkingBudget(string? model)
+        => model?.Contains("gemini-2.", StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>
     /// Qwen injection: { "enable_thinking": true, "thinking_budget": N }
@@ -158,13 +171,22 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
         _ => "none"
     };
 
+    /// <summary>Gemini 3 起的 thinking_level：与 Gemini 文档里 reasoning_effort → thinking_level 的对应一致（Pro 不收 minimal）</summary>
     private static string MapGeminiEffort(ReasoningEffort effort) => effort switch
     {
-        ReasoningEffort.Low => "minimal",
-        ReasoningEffort.Medium => "low",
-        ReasoningEffort.High => "medium",
+        ReasoningEffort.Low => "low",
+        ReasoningEffort.Medium => "medium",
+        ReasoningEffort.High => "high",
         ReasoningEffort.Max => "high",
-        _ => "none"
+        _ => "low"
+    };
+
+    /// <summary>Gemini 2.5 的 thinking_budget：与 Gemini 文档里 reasoning_effort → thinking_budget 的对应一致</summary>
+    private static int MapGeminiBudget(ReasoningEffort effort) => effort switch
+    {
+        ReasoningEffort.Low => 1024,
+        ReasoningEffort.Medium => 8192,
+        _ => 24576
     };
 
     private static int MapQwenBudget(ReasoningEffort effort) => effort switch
@@ -176,23 +198,8 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
         _ => 0
     };
 
-    private static bool IsDeepSeekProvider(string? providerName)
-        => string.Equals(providerName, "DeepSeek", StringComparison.OrdinalIgnoreCase);
-
     private static bool IsDeepSeekEndpoint(Uri? uri)
         => uri?.Host.Contains("deepseek", StringComparison.OrdinalIgnoreCase) ?? false;
-
-    private static bool IsGeminiProvider(string? providerName)
-        => string.Equals(providerName, "Gemini", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(providerName, "Google", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsQwenProvider(string? providerName)
-        => string.Equals(providerName, "Qwen", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(providerName, "DashScope", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(providerName, "Alibaba", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsAnthropicProvider(string? providerName)
-        => string.Equals(providerName, "Anthropic", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// DeepSeek thinking mode requires all assistant messages in the conversation history
@@ -308,11 +315,18 @@ public sealed class ThinkingRequestPolicy : PipelinePolicy
 /// <summary>
 /// Context passed from ThinkingMiddleware/ReasoningAwareChatClientDecorator to ThinkingRequestPolicy.
 /// </summary>
+/// <remarks>
+/// 管线内由 <c>ThinkingMiddleware</c> 写入，<b>关闭也写</b>（<see cref="ThinkingOptions.Effort"/> 为 None）：
+/// 「没有上下文」只表示调用不经过管线（IAiUtility、评审、摘要），那时装饰器才回退到提供商配置。
+/// </remarks>
 public sealed class ThinkingRequestContext
 {
-    /// <summary>推理配置</summary>
+    /// <summary>推理配置；<see cref="ThinkingOptions.Effort"/> 为 None 表示显式关闭</summary>
     public required ThinkingOptions Thinking { get; init; }
 
-    /// <summary>Provider 名称，用于路由到不同的注入格式</summary>
+    /// <summary>Provider 条目名（日志与无 <see cref="Format"/> 时的回退路由）</summary>
     public string? ProviderName { get; init; }
+
+    /// <summary>请求体注入形态；由绑定了提供商与模型的装饰器写入，为 null 时按 <see cref="ProviderName"/> 识别</summary>
+    public ThinkingPayloadFormat? Format { get; init; }
 }

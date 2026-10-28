@@ -8,6 +8,8 @@ public class CliRunMessageConfiguration : EntityTypeConfigurationBase<CliRunMess
     /// <inheritdoc />
     public override void Configure(EntityTypeBuilder<CliRunMessage> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.Tool).HasMaxLength(200);
         builder.Property(e => e.CallId).HasMaxLength(200);
         builder.Property(e => e.Status).HasMaxLength(64);
@@ -18,6 +20,9 @@ public class CliRunMessageConfiguration : EntityTypeConfigurationBase<CliRunMess
         // 本表只追加不软删，因此无需过滤器。
         builder.HasIndex(e => new { e.RunId, e.Sequence }).IsUnique();
 
-        builder.HasIndex(e => e.TenantId);
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => e.TenantId);
+        }
     }
 }

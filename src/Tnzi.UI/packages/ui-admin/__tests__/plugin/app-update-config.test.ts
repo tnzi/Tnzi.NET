@@ -1,17 +1,41 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { resetDialogAdapter } from '@tnzi/core/adapters'
 
 const installAppUpdate = vi.fn((options: unknown) => ({ options }))
 vi.mock('@tnzi/core/app-update', () => ({ installAppUpdate: (o: unknown) => installAppUpdate(o) }))
 
-const confirm = vi.fn(async () => true)
-vi.mock('@tnzi/core/adapters', () => ({ useDialog: () => ({ confirm }) }))
-
 import { installAdminAppUpdate, confirmAdminAppUpdate } from '../../src/plugin/app-update-config'
+
+type DialogOptions = Record<string, unknown> & {
+  onPositiveClick?: () => void
+  onNegativeClick?: () => void
+}
+
+/** Stand-in for the naive dialog API that `TAdminWindowHandles` publishes as `window.$dialog`. */
+function publishDialogHandle() {
+  const shown: DialogOptions[] = []
+  const show = (options: DialogOptions) => {
+    shown.push(options)
+  }
+  ;(window as unknown as { $dialog?: unknown }).$dialog = {
+    info: show,
+    warning: show,
+    success: show,
+    error: show,
+    create: show,
+  }
+  return shown
+}
 
 describe('installAdminAppUpdate', () => {
   beforeEach(() => {
     installAppUpdate.mockClear()
-    confirm.mockClear()
+    resetDialogAdapter()
+  })
+
+  afterEach(() => {
+    delete (window as unknown as { $dialog?: unknown }).$dialog
+    vi.restoreAllMocks()
   })
 
   it('is on by default and hands the router through', () => {
@@ -40,11 +64,42 @@ describe('installAdminAppUpdate', () => {
     expect(options).toMatchObject({ mode: 'prompt', prompt, checkInterval: 0 })
   })
 
-  it('asks with the dialog adapter and English fallbacks', async () => {
-    await expect(confirmAdminAppUpdate()).resolves.toBe(true)
-    expect(confirm).toHaveBeenCalledWith(
-      expect.stringContaining('new version'),
-      expect.objectContaining({ title: 'New version available', confirmText: 'Reload', cancelText: 'Later' }),
-    )
+  it('asks with the admin dialog handle and English fallbacks', async () => {
+    const shown = publishDialogHandle()
+    const answer = confirmAdminAppUpdate()
+    expect(shown).toHaveLength(1)
+    expect(shown[0]).toMatchObject({
+      title: 'New version available',
+      positiveText: 'Reload',
+      negativeText: 'Later',
+    })
+    expect(String(shown[0].content)).toContain('new version')
+    shown[0].onPositiveClick?.()
+    await expect(answer).resolves.toBe(true)
+  })
+
+  it('reports "Later" as a refusal, so the page is not reloaded', async () => {
+    const shown = publishDialogHandle()
+    const answer = confirmAdminAppUpdate()
+    shown[0].onNegativeClick?.()
+    await expect(answer).resolves.toBe(false)
+  })
+
+  // The admin shell never installs anything into core's dialog slot, so a
+  // prompt routed through core `useDialog()` reached the console fallback,
+  // which used to answer yes without showing anything: 'prompt' mode reloaded
+  // the page unasked and discarded unsaved input.
+  it('never reloads unasked when no dialog handle is published', async () => {
+    // happy-dom has no native confirm; a browser always does.
+    const nativeConfirm = vi.fn(() => false)
+    const w = window as unknown as { confirm?: unknown }
+    const original = w.confirm
+    w.confirm = nativeConfirm
+    try {
+      await expect(confirmAdminAppUpdate()).resolves.toBe(false)
+      expect(nativeConfirm).toHaveBeenCalledTimes(1)
+    } finally {
+      w.confirm = original
+    }
   })
 })

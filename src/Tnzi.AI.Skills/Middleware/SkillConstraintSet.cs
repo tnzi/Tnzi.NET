@@ -9,15 +9,16 @@ namespace Tnzi.AI.Skills.Middleware;
 /// <remarks>
 /// <para>合并规则（最严格优先，与 docs/modules/ai-skills.md「多 Skill 约束合并」一致）：</para>
 /// <list type="bullet">
-/// <item>AllowedToolGroups：交集（经 <see cref="ISkillConstraintEnforcer"/> 逐技能收窄可用组）。</item>
-/// <item>AllowedTools：<b>仅在声明了白名单的技能之间</b>取交集；未声明者不清空交集。</item>
+/// <item>工具限制<b>逐技能判定、取与</b>：受组管理的工具 T（组 G）要对<b>每一个</b>限制工具的技能都成立
+/// 「T 在它的白名单里 或 G 在它的组里」。声明了组的技能放行组内全部工具，它自己的白名单在组之外<b>补充</b>放行单个工具；
+/// 只声明白名单的技能只放行白名单里的；两者都没声明的技能不限制工具，也不清空别人的结果。</item>
 /// <item>DeniedTools：并集；deny 永远胜出。</item>
 /// <item>Model / Provider：按 Priority 降序逐个应用，最高优先级技能的值最后落定。</item>
 /// </list>
-/// <para>受组管理的工具 T（组 G）可用 ⇔ 未被拉黑 且（T 在白名单 或 G 在有效组内）；
-/// 声明了组的技能放行组内全部工具，白名单在组之外<b>补充</b>放行单个工具；
-/// 只声明白名单不声明组时，受组管理的工具只剩白名单里的。不在注册表里的工具（MCP / 动态）
-/// 组约束与白名单管不到，只有黑名单能按名字拦下。</para>
+/// <para>由此组取交集、白名单在声明了白名单的技能之间取交集，都是这条规则的特例。
+/// ★ 此前把各技能的组与白名单先各自合并、再拿合并结果判定：只声明组 [file] 的技能 A 与只声明白名单 [web_search] 的
+/// 技能 B 同时激活时，file 组的工具因「组在有效组内」放行、web_search 因「在白名单里」放行：多激活一条技能反而放宽了
+/// B 自己的限制。不在注册表里的工具（MCP / 动态）组约束与白名单管不到，只有黑名单能按名字拦下。</para>
 /// <para>
 /// ★ 技能<b>只收窄、不扩权</b>：白名单里的工具名只用来让该工具躲过组过滤，
 /// 从不按名字去全局注册表把 agent 没配置的工具拉进来（那会绕过 RequiredPermissions
@@ -32,24 +33,18 @@ public sealed class SkillConstraintSet
         "skill_search", "skill_get", "skill_activate", "skill_deactivate", "skill_get_resource"
     };
 
-    private readonly HashSet<string> _effectiveGroups;
-    private readonly HashSet<string>? _allowedTools;
+    private readonly IReadOnlyList<ToolRestriction> _restrictions;
     private readonly HashSet<string> _deniedTools;
-    private readonly bool _groupsDeclared;
 
     private SkillConstraintSet(
         IReadOnlyList<SkillDefinition> activeSkills,
-        HashSet<string> effectiveGroups,
-        bool groupsDeclared,
-        HashSet<string>? allowedTools,
+        IReadOnlyList<ToolRestriction> restrictions,
         HashSet<string> deniedTools,
         string? model,
         string? provider)
     {
         ActiveSkills = activeSkills;
-        _effectiveGroups = effectiveGroups;
-        _groupsDeclared = groupsDeclared;
-        _allowedTools = allowedTools;
+        _restrictions = restrictions;
         _deniedTools = deniedTools;
         EffectiveModel = model;
         EffectiveProvider = provider;
@@ -65,7 +60,7 @@ public sealed class SkillConstraintSet
     public string? EffectiveProvider { get; }
 
     /// <summary>是否有任何技能对工具施加了限制（组 / 白名单 / 黑名单）。</summary>
-    public bool RestrictsTools => _groupsDeclared || _allowedTools != null || _deniedTools.Count > 0;
+    public bool RestrictsTools => _restrictions.Count > 0 || _deniedTools.Count > 0;
 
     /// <summary>
     /// 折叠一组已激活技能。<paramref name="availableGroups"/> 是注册表里全部工具组；
@@ -91,33 +86,25 @@ public sealed class SkillConstraintSet
             CurrentProvider = currentProvider
         };
 
-        HashSet<string>? allowed = null;
+        var restrictions = new List<ToolRestriction>();
         var denied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var skill in ordered)
         {
+            // 顺序折叠只用来落定 Model / Provider（高优先级最后落定）。
             var result = enforcer.Apply(skill, ctx);
             ctx.AvailableToolGroups = result.EffectiveToolGroups;
             ctx.CurrentModel = result.EffectiveModel;
             ctx.CurrentProvider = result.EffectiveProvider;
 
-            if (result.EffectiveTools is { Count: > 0 })
-            {
-                var skillTools = new HashSet<string>(result.EffectiveTools, StringComparer.OrdinalIgnoreCase);
-                if (allowed == null)
-                    allowed = skillTools;
-                else
-                    allowed.IntersectWith(skillTools);
-            }
-
             if (result.DeniedTools is { Count: > 0 })
                 denied.UnionWith(result.DeniedTools);
+
+            if (ToolRestriction.For(skill, result, availableGroups, enforcer) is { } restriction)
+                restrictions.Add(restriction);
         }
 
-        var effectiveGroups = new HashSet<string>(ctx.AvailableToolGroups, StringComparer.OrdinalIgnoreCase);
-        var groupsDeclared = ordered.Any(s => s.AllowedToolGroups is { Count: > 0 });
-
-        return new SkillConstraintSet(ordered, effectiveGroups, groupsDeclared, allowed, denied, ctx.CurrentModel, ctx.CurrentProvider);
+        return new SkillConstraintSet(ordered, restrictions, denied, ctx.CurrentModel, ctx.CurrentProvider);
     }
 
     /// <summary>
@@ -139,21 +126,46 @@ public sealed class SkillConstraintSet
         if (group == null)
             return null;
 
-        // 白名单里的工具躲过组过滤（"补充白名单" 语义）；只对 agent 已经拥有的工具有意义，
-        // 从不据此把注册表里的工具拉进 agent。
-        if (_allowedTools?.Contains(toolName) == true)
-            return null;
-
-        if (_groupsDeclared)
+        // 每一条限制都要放行它：白名单里的工具躲过该技能的组过滤（"补充白名单" 语义）。
+        // 白名单只对 agent 已经拥有的工具有意义，从不据此把注册表里的工具拉进 agent。
+        foreach (var restriction in _restrictions)
         {
-            return _effectiveGroups.Contains(group)
-                ? null
-                : $"Tool '{toolName}' (group '{group}') is outside the tool groups permitted by the active skills.";
+            if (restriction.Allows(toolName, group))
+                continue;
+
+            return restriction.Groups != null
+                ? $"Tool '{toolName}' (group '{group}') is outside the tool groups permitted by the active skills."
+                : $"Tool '{toolName}' is not in the tool whitelist of the active skills.";
         }
 
-        if (_allowedTools != null)
-            return $"Tool '{toolName}' is not in the tool whitelist of the active skills.";
-
         return null;
+    }
+
+    /// <summary>
+    /// 一个技能自己的工具限制：它声明的组（经执行器对照全部可用组求出）与它自己的白名单；两者都没有的技能不产生限制。
+    /// </summary>
+    private sealed record ToolRestriction(HashSet<string>? Groups, HashSet<string>? Tools)
+    {
+        public static ToolRestriction? For(
+            SkillDefinition skill, SkillConstraintResult sequentialResult, IReadOnlyList<string> availableGroups, ISkillConstraintEnforcer enforcer)
+        {
+            var tools = sequentialResult.EffectiveTools is { Count: > 0 }
+                ? new HashSet<string>(sequentialResult.EffectiveTools, StringComparer.OrdinalIgnoreCase)
+                : null;
+
+            HashSet<string>? groups = null;
+            if (skill.AllowedToolGroups is { Count: > 0 })
+            {
+                // 单独对照全部可用组求这个技能自己的组，而不是沿用顺序折叠里已被前面技能收窄过的那一份：
+                // 后者会让前一个技能的组限制混进这一个技能的「白名单补充」判定里。
+                var own = enforcer.Apply(skill, new SkillConstraintContext { AvailableToolGroups = [.. availableGroups] });
+                groups = new HashSet<string>(own.EffectiveToolGroups, StringComparer.OrdinalIgnoreCase);
+            }
+
+            return groups == null && tools == null ? null : new ToolRestriction(groups, tools);
+        }
+
+        public bool Allows(string toolName, string group)
+            => Tools?.Contains(toolName) == true || Groups?.Contains(group) == true;
     }
 }

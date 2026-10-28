@@ -47,7 +47,6 @@ public class InvitationTenantScopeIntegrationTests : RelationalIdentityIntegrati
             ServiceProvider,
             eventBus: EventBusMock.Object,
             currentUser: _currentUser.Object,
-            cache: Cache,
             currentTenant: _currentTenant.Object,
             multiTenancyOptions: multiTenancy);
         _tokens = new AuthTokenService(

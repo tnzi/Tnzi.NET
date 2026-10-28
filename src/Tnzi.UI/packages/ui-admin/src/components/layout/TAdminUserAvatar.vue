@@ -17,7 +17,7 @@ import { NDropdown, NButton, useDialog } from 'naive-ui'
 import type { DropdownOption } from 'naive-ui'
 import { TSvgIcon, TAvatar } from '@tnzi/ui'
 import { UserPresenceStatus } from '@tnzi/core/services/chat'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 import TPresenceDot from '../chat/TPresenceDot.vue'
 
 interface Props {
@@ -96,11 +96,9 @@ const currentPresenceLabel = computed(() => {
 function t(key: string, fallback: string): string {
   if (props.translate) return props.translate(key, fallback)
   // Bundled-locale fallback so the user-avatar dropdown localises out of
-  // the box. `translatePageKey('', absoluteKey)` resolves `admin.*` keys
-  // against the active locale and humanises misses.
-  const bundled = translatePageKey('', key)
-  if (bundled && bundled !== key) return bundled
-  return fallback
+  // the box: the active locale's `admin.*` entry, or the English literal on a
+  // miss (a page translator would humanise the key instead).
+  return translateChromeKey(key, fallback)
 }
 
 const options = computed<DropdownOption[]>(() => {

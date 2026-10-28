@@ -91,10 +91,18 @@ public class AgentTaskService : ApplicationService, IAgentTaskService
         return Ok(tasks.OrderBy(t => t.OrderIndex).MapToList<AgentTaskDto>());
     }
 
-    public async Task<Result<List<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatus status, CancellationToken cancellationToken = default)
+    public async Task<Result<IPagedList<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatusQueryDto query, CancellationToken cancellationToken = default)
     {
-        var tasks = await _repository.ToListAsync(e => e.Status == status, cancellationToken);
-        return Ok(tasks.OrderBy(t => t.CreationTime).MapToList<AgentTaskDto>());
+        Check.NotNull(query);
+
+        // 排序与分页都在数据库里：此前把该状态的全部任务读进内存再排序，Completed 随运行持续累积，一次请求无界增长
+        var page = await _repository
+            .Where(e => e.Status == query.Status)
+            .OrderBy(e => e.CreationTime)
+            .ThenBy(e => e.Id)
+            .ProjectTo<AgentTask, AgentTaskDto>()
+            .CreateAsync(query, cancellationToken);
+        return Ok(page);
     }
 
     /// <summary>

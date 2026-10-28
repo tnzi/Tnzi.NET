@@ -35,6 +35,7 @@ public class RequestLoggingCredentialLeakTests
     private const string AccessTokenSecret = "eyJhbGciOiJIUzI1NiJ9.THIS_IS_THE_JWT";
     private const string SignatureSecret = "SIGNATURE-c0ffee-DO-NOT-LOG";
     private const string SharePasswordSecret = "share-passphrase-hunter2";
+    private const string PathTokenSecret = "PATH-TOKEN-5eC4e7-DO-NOT-LOG";
 
     private static readonly string SecretQuery =
         $"?access_token={AccessTokenSecret}&sig={SignatureSecret}&password={SharePasswordSecret}";
@@ -103,6 +104,32 @@ public class RequestLoggingCredentialLeakTests
     }
 
     /// <summary>
+    /// 路径里作为凭据的路由参数（名单里的名字，如 <c>{token}</c>、<c>{tempToken}</c>）同样不得落进请求完成事件：
+    /// 它与请求跟踪、审计、访问日志用的是同一份名单。判定只看参数名，下面两条是本测试自己映射的路由形状
+    /// （整段参数、参数后还跟着一段），不对应框架的某个端点。
+    /// </summary>
+    [Theory]
+    [InlineData("/invitations/{token}")]
+    [InlineData("/auth/pending-actions/{tempToken}/complete")]
+    public async Task RouteCredentialInPath_IsMaskedInTheCompletionEvent(string template)
+    {
+        var target = template
+            .Replace("{token}", PathTokenSecret, StringComparison.Ordinal)
+            .Replace("{tempToken}", PathTokenSecret, StringComparison.Ordinal);
+
+        var sink = await CaptureAsync(new LoggingOptions(), target, routeTemplate: template);
+
+        var completion = sink.RequestCompletionEvent();
+        completion.ShouldNotBeNull();
+        completion.Properties["RequestPath"].ToString().Trim('"')
+            .ShouldBe(target.Replace(PathTokenSecret, "***", StringComparison.Ordinal));
+        var offenders = sink.EventsContaining(PathTokenSecret);
+        offenders.ShouldBeEmpty(
+            $"route credential leaked into {offenders.Count} log event(s):"
+            + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+    }
+
+    /// <summary>
     /// 关掉请求日志时不得再有请求完成事件（否则"关掉"只是没写模板）。
     /// </summary>
     [Fact]
@@ -147,7 +174,8 @@ public class RequestLoggingCredentialLeakTests
         LoggingOptions options,
         string target,
         bool throwOnRequest = false,
-        Dictionary<string, string?>? configuration = null)
+        Dictionary<string, string?>? configuration = null,
+        string? routeTemplate = null)
     {
         var sink = new InMemorySink();
         var previous = Log.Logger;
@@ -165,7 +193,7 @@ public class RequestLoggingCredentialLeakTests
                     {
                         web.ConfigureAppConfiguration(cfg => cfg.AddInMemoryCollection(configuration));
                     }
-                    web.ConfigureServices(services => services.AddSerilog());
+                    web.ConfigureServices(services => services.AddSerilog().AddRouting());
                     web.Configure(app =>
                     {
                         // 与真实启动完全一致：由模块自己装请求日志中间件。
@@ -173,6 +201,13 @@ public class RequestLoggingCredentialLeakTests
                             .OnApplicationInitializationAsync(
                                 new ApplicationInitializationContext(app.ApplicationServices, app))
                             .GetAwaiter().GetResult();
+
+                        if (routeTemplate != null)
+                        {
+                            // 路由值在端点匹配之后才有：请求日志中间件在管线跑完后记录，正好读得到。
+                            app.UseRouting();
+                            app.UseEndpoints(endpoints => endpoints.MapGet(routeTemplate, _ => Task.CompletedTask));
+                        }
 
                         app.Run(_ => throwOnRequest
                             ? throw new InvalidOperationException("boom")

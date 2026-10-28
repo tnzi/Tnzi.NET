@@ -79,6 +79,46 @@ public abstract class Specification<TEntity> : ISpecification<TEntity>
         return this;
     }
 
+    /// <summary>
+    /// 组合规约继承操作数的形状：Include 取并集；排序与分页最多一侧声明（两侧都声明时组合含义不明确，构造时拒绝）。
+    /// </summary>
+    /// <remarks>
+    /// 组合只合并谓词而不带形状的话，<c>new RecentOrdersSpec() &amp; new ByCustomerSpec(id)</c> 交给仓储后
+    /// 静默变成不排序、不分页、不加载导航：调用方以为拿到最近 20 条，实际是全部匹配的行、顺序不定。
+    /// 形状施加在组合后的谓词上（先按组合谓词筛选，再排序、分页）。
+    /// </remarks>
+    private protected void InheritShapeFrom(params ISpecification<TEntity>[] operands)
+    {
+        foreach (var include in operands.SelectMany(o => o.IncludeExpressions).Distinct())
+        {
+            _includeExpressions.Add(include);
+        }
+
+        var ordered = operands.Where(o => o.OrderByExpressions.Count > 0).ToList();
+        if (ordered.Count > 1)
+        {
+            throw new InvalidOperationException(
+                "Both specifications being combined declare an ordering, so the order of the combination is ambiguous. Declare the ordering on only one of them.");
+        }
+
+        if (ordered.Count == 1)
+        {
+            _orderByExpressions.AddRange(ordered[0].OrderByExpressions);
+        }
+
+        var paged = operands.Where(o => o.Paging.HasValue).ToList();
+        if (paged.Count > 1)
+        {
+            throw new InvalidOperationException(
+                "Both specifications being combined declare paging, so the page of the combination is ambiguous. Declare paging on only one of them.");
+        }
+
+        if (paged.Count == 1)
+        {
+            _paging = paged[0].Paging;
+        }
+    }
+
     #endregion
 
     #region Combination Operators
@@ -146,6 +186,7 @@ internal class AndSpecification<TEntity> : Specification<TEntity>
     {
         _left = Check.NotNull(left);
         _right = Check.NotNull(right);
+        InheritShapeFrom(left, right);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()
@@ -174,6 +215,7 @@ internal class OrSpecification<TEntity> : Specification<TEntity>
     {
         _left = Check.NotNull(left);
         _right = Check.NotNull(right);
+        InheritShapeFrom(left, right);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()
@@ -200,6 +242,8 @@ internal class NotSpecification<TEntity> : Specification<TEntity>
     public NotSpecification(ISpecification<TEntity> specification)
     {
         _specification = Check.NotNull(specification);
+        // 取反的是谓词，不是形状：排序、分页与导航加载照旧
+        InheritShapeFrom(specification);
     }
 
     public override Expression<Func<TEntity, bool>> ToExpression()

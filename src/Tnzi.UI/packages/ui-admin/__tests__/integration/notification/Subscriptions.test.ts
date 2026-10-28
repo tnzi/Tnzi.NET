@@ -75,6 +75,56 @@ describe('Subscriptions page (Phase 3.27)', () => {
   })
 })
 
+describe('Subscriptions page - editing a row', () => {
+  beforeEach(() => { setActivePinia(createPinia()) })
+
+  // A preference is upserted by (user, channel, category), not by its id. Editing
+  // any of the three saved a second row and left the original untouched; on edit
+  // they are shown, not edited.
+  const formStubs = {
+    ...stubs,
+    Modal: { props: ['show'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
+    Input: { props: ['value', 'disabled'], template: '<input :value="value" :disabled="disabled" />' },
+    TUserSelector: { props: ['value', 'disabled'], template: '<input class="user-selector" :value="value" :disabled="disabled" />' },
+    Select: { props: ['value', 'disabled', 'options'], template: '<div class="select-stub" />' },
+  }
+
+  async function mountPage() {
+    const { default: Subscriptions } = await import('../../../src/pages/notification/Subscriptions.vue')
+    const wrapper = mount(Subscriptions, { global: { stubs: formStubs } })
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 10))
+    return wrapper
+  }
+
+  it('★ shows the user, channel and category of an edited row without letting them change', async () => {
+    const wrapper = await mountPage()
+    const crud = (wrapper.vm as unknown as { crud: { openEdit: (r: unknown) => void } }).crud
+
+    crud.openEdit({ id: 's1', userId: 'u1', channel: 'Email', category: 'Marketing', isEnabled: true })
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 10))
+
+    const locked = wrapper.findAll('input')
+      .filter((i) => i.attributes('disabled') !== undefined)
+      .map((i) => (i.element as HTMLInputElement).value)
+    expect(locked).toEqual(['u1', 'Email', 'Marketing'])
+    expect(wrapper.find('.user-selector').exists()).toBe(false)
+  })
+
+  it('a new preference takes its user, channel and category as input', async () => {
+    const wrapper = await mountPage()
+    const crud = (wrapper.vm as unknown as { crud: { openCreate: () => void } }).crud
+
+    crud.openCreate()
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(wrapper.find('.user-selector').exists()).toBe(true)
+    expect(wrapper.findAll('input').some((i) => i.attributes('disabled') !== undefined)).toBe(false)
+  })
+})
+
 describe('notificationSubscriptionColumns config', () => {
   it('exports columns with required keys aligned to NotificationPreferenceDto', async () => {
     const { notificationSubscriptionColumns } = await import('../../../src/pages/notification/subscription-config')

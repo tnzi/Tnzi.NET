@@ -72,12 +72,16 @@ public class PaymentRedirectGuardWiringTests
             new DefaultPaymentTaxCalculator(taxOptionsMock.Object),
             new Mock<IPaymentMethodService>().Object,
             _optionsMock.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProviderMock.Object);
 
         _methodService = new PaymentMethodService(
             _methodRepositoryMock.Object,
             _providerFactoryMock.Object,
             _optionsMock.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             serviceProviderMock.Object);
     }
 

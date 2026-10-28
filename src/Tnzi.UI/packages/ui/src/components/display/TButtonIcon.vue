@@ -8,7 +8,13 @@ import TSvgIcon from './TSvgIcon.vue'
  * TSvgIcon to keep one consistent set of props for every clickable icon.
  *
  * Inspired by soybean-admin's `ButtonIcon` (src/components/custom/button-icon.vue).
+ *
+ * Attributes (`class`, `style`, `data-*`) land on the button itself. With a
+ * tooltip the root is `NTooltip`, which does not pass them to its trigger, so
+ * a caller's state class (a spinning reload icon, an active pin) was dropped.
  */
+defineOptions({ inheritAttrs: false })
+
 interface Props {
   /** Iconify icon name, e.g. `mdi:refresh`. */
   icon?: string
@@ -67,6 +73,7 @@ defineEmits<{ click: [event: MouseEvent] }>()
   >
     <template #trigger>
       <NButton
+        v-bind="$attrs"
         class="t-button-icon"
         :type="type"
         :quaternary="ghost"
@@ -84,6 +91,7 @@ defineEmits<{ click: [event: MouseEvent] }>()
   </NTooltip>
   <NButton
     v-else
+    v-bind="$attrs"
     class="t-button-icon"
     :type="type"
     :quaternary="ghost"

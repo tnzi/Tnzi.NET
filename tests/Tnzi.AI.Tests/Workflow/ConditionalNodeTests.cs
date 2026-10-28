@@ -87,6 +87,26 @@ public class ConditionalNodeTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_NoCondition_UpstreamVerdictStillRoutes()
+    {
+        // review / router 后面的条件节点本来就只靠上游的裁决路由：空条件不能把它丢掉、直接答 default。
+        var depOutputs = new Dictionary<string, WorkflowStepOutput>
+        {
+            ["review-step"] = new WorkflowStepOutput
+            {
+                Text = "Needs work",
+                Metadata = new Dictionary<string, string> { ["verdict"] = "rework" }
+            }
+        };
+        var context = CreateContext(condition: null, dependencyOutputs: depOutputs);
+
+        var result = await _node.ExecuteAsync(context);
+
+        result.IsSuccess.ShouldBeTrue();
+        result.RouteTo.ShouldBe("rework");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_UpstreamHasVerdict_UsesVerdictAsRoute()
     {
         // Arrange: 上游 ReviewNode 输出了 verdict metadata

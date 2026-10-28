@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DataQueryController } from '../../src/headless/data-query';
+import { HttpError } from '../../src/errors/api-error';
+import { NetworkError } from '../../src/errors/network-error';
 import type { ApiResult, PagedList } from '../../src/types/index';
 
 interface TestItem {
@@ -194,6 +196,66 @@ describe('DataQueryController - retry', () => {
     expect(fetchFn).toHaveBeenCalledTimes(3);
     expect(q.error).toBe('server said no');
   });
+
+  // A refusal is an answer, not a hiccup: asking again gets the same 403 / 404 /
+  // 400, only seconds later, multiplied by the attempts.
+  it.each([400, 401, 403, 404, 409, 422])('does not retry a %i rejection', async (status) => {
+    const fetchFn = vi.fn(async () => {
+      throw new HttpError({ succeeded: false, success: false, code: status, message: 'refused', data: undefined });
+    });
+    const onError = vi.fn();
+    const q = new DataQueryController<TestItem>({ fetchFn, retry: { attempts: 3, delayMs: 0 }, onError });
+    await q.fetch();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(q.status).toBe('error');
+    expect(q.error).toBe('refused');
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a failed envelope that carries a 4xx code, and keeps its status', async () => {
+    const fetchFn = vi.fn(async () => ({ succeeded: false, code: 403, message: 'forbidden' }) as ApiResult<PagedList<TestItem>>);
+    const q = new DataQueryController<TestItem>({ fetchFn, retry: { attempts: 3, delayMs: 0 } });
+    await q.fetch();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(q.error).toBe('forbidden');
+    expect((q.errorObject as { statusCode?: number } | null)?.statusCode).toBe(403);
+  });
+
+  // The status is read structurally: every `@tnzi/core` entry inlines its own
+  // copy of HttpError, so the error a bridge throws need not be the class this
+  // module imports.
+  it.each([
+    ['a statusCode', { statusCode: 403 }],
+    ['a numeric code and no statusCode', { code: 400 }],
+  ])('does not retry an error of another class that carries %s', async (_shape, fields) => {
+    const fetchFn = vi.fn(async () => {
+      throw Object.assign(new Error('refused'), fields);
+    });
+    const q = new DataQueryController<TestItem>({ fetchFn, retry: { attempts: 2, delayMs: 0 } });
+    await q.fetch();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 429, 500, 502, 503])('still retries a %i rejection', async (status) => {
+    const fetchFn = vi.fn(async () => {
+      throw new HttpError({ succeeded: false, success: false, code: status, message: 'busy', data: undefined });
+    });
+    const q = new DataQueryController<TestItem>({ fetchFn, retry: { attempts: 2, delayMs: 0 } });
+    await q.fetch();
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ['a network error', new NetworkError('offline')],
+    ['an error whose code is not a number', Object.assign(new Error('offline'), { code: 'ECONNRESET' })],
+  ])('still retries %s, which carries no status', async (_shape, error) => {
+    const fetchFn = vi.fn(async () => {
+      throw error;
+    });
+    const q = new DataQueryController<TestItem>({ fetchFn, retry: { attempts: 2, delayMs: 0 } });
+    await q.fetch();
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe('DataQueryController - page/sort behaviour switches', () => {
@@ -282,6 +344,93 @@ describe('DataQueryController - page clamping', () => {
   });
 });
 
+/**
+ * A fetchFn that behaves like the backend: it honours pageIndex/pageSize over a
+ * mutable row set and does NOT clamp - a page past the end comes back empty
+ * with the real total (`Skip((pageIndex - 1) * pageSize)`).
+ */
+function serverBackedBy(rows: TestItem[]) {
+  return vi.fn(async (query: Record<string, unknown>) => {
+    const pageIndex = Number(query['pageIndex']);
+    const pageSize = Number(query['pageSize']);
+    const slice = rows.slice((pageIndex - 1) * pageSize, pageIndex * pageSize);
+    return { items: slice, totalCount: rows.length, pageIndex, pageSize } as PagedList<TestItem>;
+  });
+}
+
+function rowsOf(count: number): TestItem[] {
+  return Array.from({ length: count }, (_, i) => ({ id: String(i + 1), name: `Row ${i + 1}` }));
+}
+
+describe('DataQueryController - the current page emptied under the reader', () => {
+  it('moves to the last page that has rows and shows them', async () => {
+    // 21 rows over 20 per page; the reader is on page 2 and deletes its only row.
+    const rows = rowsOf(21);
+    const fetchFn = serverBackedBy(rows);
+    const q = new DataQueryController<TestItem>({ fetchFn, pagination: { initialPageSize: 20 } });
+    await q.fetch();
+    await q.changePage(2);
+    expect(q.items.map((r) => r.id)).toEqual(['21']);
+
+    rows.pop();
+    fetchFn.mockClear();
+    await expect(q.fetch()).resolves.toBe(true);
+
+    expect(q.pagination.pageIndex).toBe(1);
+    expect(q.items).toHaveLength(20);
+    expect(q.isEmpty).toBe(false);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect((fetchFn.mock.calls[1][0] as Record<string, unknown>)['pageIndex']).toBe(1);
+  });
+
+  it('asks again only once when the server keeps answering an empty page', async () => {
+    // A server whose total disagrees with its pages must not cause a loop.
+    const fetchFn = vi.fn(async () => page([], 50));
+    const q = new DataQueryController<TestItem>({ fetchFn, pagination: { initialPageSize: 20 }, clampPageToTotal: false });
+    await q.changePage(9);
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(q.pagination.pageIndex).toBe(3);
+    expect(q.status).toBe('success');
+  });
+
+  it('does not ask again for a genuinely empty list', async () => {
+    const fetchFn = serverBackedBy([]);
+    const q = new DataQueryController<TestItem>({ fetchFn });
+    await q.fetch();
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(q.isEmpty).toBe(true);
+  });
+
+  it('lets a newer fetch win over the corrective request', async () => {
+    const rows = rowsOf(21);
+    const q = new DataQueryController<TestItem>({ fetchFn: serverBackedBy(rows), pagination: { initialPageSize: 20 } });
+    await q.fetch();
+    await q.changePage(2);
+    rows.pop();
+
+    // The corrective request hangs until released; a newer fetch lands meanwhile.
+    let release: () => void = () => {};
+    let calls = 0;
+    const slow = serverBackedBy(rows);
+    (q as unknown as { _fetchFn: unknown })._fetchFn = vi.fn(async (query: Record<string, unknown>, signal?: AbortSignal) => {
+      calls += 1;
+      if (calls === 2) await new Promise<void>((resolve) => (release = resolve));
+      return slow(query, signal as never);
+    });
+
+    const corrected = q.fetch();
+    await vi.waitFor(() => expect(calls).toBe(2));
+    const newer = q.fetch();
+    release();
+
+    await expect(corrected).resolves.toBe(false);
+    await expect(newer).resolves.toBe(true);
+    expect(q.items).toHaveLength(20);
+  });
+});
+
 describe('DataQueryController - setSort', () => {
   it('states the target sort outright instead of cycling', async () => {
     const q = new DataQueryController<TestItem>({ fetchFn: async () => page() });
@@ -345,5 +494,64 @@ describe('DataQueryController - staleness', () => {
     await first;
 
     expect(q.items).toEqual([{ id: '9', name: 'Current' }]);
+  });
+});
+
+describe('DataQueryController - resetting returns to the default filter', () => {
+  interface StatusFilter {
+    status?: string;
+    keyword?: string;
+    tags?: string[];
+  }
+
+  it('resetFilter() goes back to the configured default and asks for it', async () => {
+    const queries: Record<string, unknown>[] = [];
+    const q = new DataQueryController<TestItem, StatusFilter>({
+      fetchFn: async (query) => {
+        queries.push(query);
+        return page();
+      },
+      defaultFilter: { status: 'Active' },
+    });
+    await q.applyFilter({ status: 'All', keyword: 'x' });
+    await q.resetFilter();
+    expect(q.filter).toEqual({ status: 'Active' });
+    expect(queries.at(-1)).toMatchObject({ status: 'Active' });
+    expect(queries.at(-1)).not.toHaveProperty('keyword');
+  });
+
+  it('reset() goes back to the configured default too', async () => {
+    const q = new DataQueryController<TestItem, StatusFilter>({
+      fetchFn: async () => page(),
+      defaultFilter: { status: 'Active' },
+    });
+    await q.applyFilter({ status: 'All' });
+    await q.reset();
+    expect(q.filter).toEqual({ status: 'Active' });
+  });
+
+  it('an explicit argument still wins', async () => {
+    const q = new DataQueryController<TestItem, StatusFilter>({
+      fetchFn: async () => page(),
+      defaultFilter: { status: 'Active' },
+    });
+    await q.resetFilter({ status: 'Archived' });
+    expect(q.filter).toEqual({ status: 'Archived' });
+  });
+
+  it('mutating the live filter in place never alters the stored default', async () => {
+    const defaultFilter: StatusFilter = { status: 'Active', tags: ['a'] };
+    const q = new DataQueryController<TestItem, StatusFilter>({
+      fetchFn: async () => page(),
+      defaultFilter,
+    });
+    q.filter.tags!.push('b');
+    q.filter.status = 'Changed';
+    await q.resetFilter();
+    expect(q.filter).toEqual({ status: 'Active', tags: ['a'] });
+    q.filter.tags!.push('c');
+    await q.resetFilter();
+    expect(q.filter).toEqual({ status: 'Active', tags: ['a'] });
+    expect(defaultFilter).toEqual({ status: 'Active', tags: ['a'] });
   });
 });

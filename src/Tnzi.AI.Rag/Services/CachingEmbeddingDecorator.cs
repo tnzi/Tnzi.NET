@@ -143,8 +143,25 @@ public class CachingEmbeddingDecorator : IEmbeddingService
         var provider = options?.Provider ?? "default";
         var model = options?.Model ?? "default";
         var tenantId = _currentTenant?.Id?.ToString("N") ?? "global";
-        var input = $"{tenantId}:{provider}:{model}:{text}";
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        // 维度与附加参数不同的向量不能互相顶替：两者都交给了生成器（Dimensions 决定向量长度，
+        // input_type 这类参数决定向量本身）。都没指定时键与以往相同，已有缓存照常命中
+        var key = new StringBuilder($"{tenantId}:{provider}:{model}:");
+        if (options?.Dimensions is { } dimensions)
+        {
+            key.Append(dimensions.ToString(CultureInfo.InvariantCulture)).Append(':');
+        }
+
+        if (options?.Parameters is { Count: > 0 } parameters)
+        {
+            key.Append(DescribeParameters(parameters)).Append(':');
+        }
+
+        key.Append(text);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key.ToString()));
         return $"{CacheKeyPrefix}{Convert.ToHexStringLower(hash)}";
     }
+
+    /// <summary>附加参数的规范形：按键排序后序列化，书写顺序不同的同一组参数得到同一个键。</summary>
+    private static string DescribeParameters(Dictionary<string, object> parameters)
+        => JsonSerializer.Serialize(new SortedDictionary<string, object>(parameters, StringComparer.Ordinal));
 }

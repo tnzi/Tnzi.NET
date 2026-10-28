@@ -13,6 +13,12 @@ export interface UserCenterBuiltInDef {
   icon: string
   /** Relative i18n key for the nav label (e.g. `nav.profile`). */
   labelKey: string
+  /**
+   * Module short-name the section's endpoints belong to. A built-in that talks
+   * to an optional module is hidden when the backend did not load it, the same
+   * gate consumer sections get (fail-open while the signal is unknown).
+   */
+  module?: string
 }
 
 /** A fully-resolved nav section (built-in merged with consumer config, or a
@@ -35,7 +41,7 @@ export interface ResolveSectionsDeps {
   t: (key: string) => string
   /** Permission gate for consumer custom sections. */
   can: (permission: string) => boolean
-  /** Module-availability gate for consumer custom sections. */
+  /** Module-availability gate for module-bound built-ins and consumer custom sections. */
   hasModule: (module: string) => boolean
   /** Resolve a group key to its display label. */
   groupLabel: (groupKey: string) => string
@@ -65,6 +71,7 @@ export function resolveUserCenterSections(
 
   for (const b of builtins) {
     if (hideSections.has(b.key)) continue
+    if (b.module && !deps.hasModule(b.module)) continue
     const groupKey = groupOverride[b.key] ?? b.group
     out.push({
       key: b.key,

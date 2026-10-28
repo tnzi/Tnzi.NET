@@ -57,6 +57,12 @@
     <template v-for="(_, name) in forwardedSlots" :key="name" #[name]="slotProps">
       <slot :name="name" v-bind="slotProps ?? {}" />
     </template>
+    <!-- NDataTable has no empty-text prop: without this the page's sentence
+         ("nothing to print", or why the read failed) reached phones only and
+         the desktop table showed the library's generic "No Data". -->
+    <template v-if="emptyText && !forwardedSlots.empty" #empty>
+      <TEmpty :text="emptyText" />
+    </template>
   </NDataTable>
 </template>
 
@@ -73,6 +79,7 @@ import { useBreakpoint } from '../../headless/useBreakpoint'
 import { estimateRowActionsWidth, type RowAction } from '../../headless/row-actions'
 import TRowActions from '../crud/TRowActions.vue'
 import TDataCardList, { type CardColumn } from './TDataCardList.vue'
+import { TEmpty } from '@tnzi/ui'
 
 export interface TResponsivePagination {
   page?: number
@@ -106,6 +113,11 @@ export interface TResponsiveTableProps<T = unknown> {
   /** `cards` (default) → stacked cards on phones; `scroll` → keep the table
    *  with horizontal scroll (use for dense dashboards / selection tables). */
   mobile?: 'cards' | 'scroll'
+  /**
+   * What an empty table says, on the desktop table and on the phone cards
+   * alike. Omit it to keep each one's own generic empty state. A page's own
+   * `#empty` slot wins over it.
+   */
   emptyText?: string
   /**
    * Declarative row actions. When supplied, a right-fixed operation column is
@@ -158,7 +170,7 @@ const props = withDefaults(defineProps<TResponsiveTableProps<T>>(), {
   pagination: undefined,
   actionKeys: () => ['actions', 'action', 'operation', '__row_actions__'],
   mobile: 'cards',
-  emptyText: 'No data',
+  emptyText: undefined,
   rowActions: undefined,
   rowActionsTitle: undefined,
   translate: undefined,

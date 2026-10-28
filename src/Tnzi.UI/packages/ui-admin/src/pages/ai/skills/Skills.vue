@@ -6,7 +6,11 @@
     between the page header and the card grid via the #kpis slot (content-page
     standard: header → KPI row → list). The card grid shows the
     full skill catalog (DB + file-source rows merged); file-source rows are
-    read-only (isReadOnly → edit/delete disabled). Toolbar has a category-tree
+    read-only (isReadOnly → edit/delete disabled). The on/off switch and delete
+    are offered only where the batch endpoints can act (isListManaged: not
+    read-only, not System scope). Edit goes through the single-skill update,
+    which applies its own rules to a System skill.
+    Toolbar has a category-tree
     filter (#toolbarLeft) + Export/Import + Popular buttons (#toolbarRight); the
     keyword search lives in the header bar (searchFields). A view drawer lazy-
     loads the full SKILL.md content via getBySlug; a popular drawer shows the
@@ -119,8 +123,9 @@
             </div>
 
             <template #actions>
+              <!-- File-source skills have no database row to switch: their SKILL.md decides. -->
               <NButton
-                v-if="can('ai.skill.update') && item.enabled"
+                v-if="can('ai.skill.update') && isListManaged(item) && item.enabled"
                 size="small"
                 ghost
                 @click="toggleEnabled(item)"
@@ -128,7 +133,7 @@
                 {{ t('actions.deactivate') }}
               </NButton>
               <NButton
-                v-else-if="can('ai.skill.update')"
+                v-else-if="can('ai.skill.update') && isListManaged(item)"
                 size="small"
                 type="success"
                 ghost
@@ -146,7 +151,7 @@
                 {{ t('actions.edit') }}
               </NButton>
               <NPopconfirm
-                v-if="!item.isReadOnly && crud.canDelete"
+                v-if="isListManaged(item) && crud.canDelete"
                 @update:show="(show) => onDeleteConfirmShow(item, show)"
                 @positive-click="removeOne(item)"
               >
@@ -167,14 +172,18 @@
           </TEntityCard>
         </template>
 
+        <!-- Edit fills `content` from the stored SKILL.md first (the list row
+             has no body); the spinner holds the form until it has. -->
         <template #form="{ formData, mode }">
-          <TFormSchemaRenderer
-            :schema="skillFormSchema"
-            :model="(formData ?? {}) as Record<string, unknown>"
-            :readonly="mode === 'view'"
-            :translate="t"
-            :columns="2"
-          />
+          <NSpin :show="mode === 'edit' && editBody === 'loading'" size="small">
+            <TFormSchemaRenderer
+              :schema="mode === 'edit' ? editSchema : skillFormSchema"
+              :model="(formData ?? {}) as Record<string, unknown>"
+              :readonly="mode === 'view'"
+              :translate="t"
+              :columns="2"
+            />
+          </NSpin>
         </template>
 
         <!-- Read-only detail - full SKILL.md content (lazy-loaded by slug via
@@ -315,10 +324,14 @@ import AgentGrantUsage from '../_shared/AgentGrantUsage.vue'
 import { useAgentGrantUsage } from '../_shared/useAgentGrantUsage'
 import {
   skillColumns,
+  skillCreateDefaults,
   skillFormSchema,
+  skillEditFormSchema,
+  skillEditFormSchemaWithoutContent,
   describePreview,
   scopeLabelKey,
   scopeBadgeType,
+  isListManaged,
   flattenCategoryTree,
   type CategoryOption,
 } from './skill-config'
@@ -398,6 +411,9 @@ const crud = useCrudPage<SkillSummaryDto>({
     return bridge.skills.fetch(query)
   },
   createData: (data) => bridge.skills.create(data as CreateSkillDto),
+  // The server's create defaults: an unseeded switch renders OFF while the
+  // created record is enabled.
+  createDefaults: skillCreateDefaults,
   updateData: (id, data) => bridge.skills.update(String(id), data as UpdateSkillDto),
   deleteData: (ids) => bridge.skills.delete(ids.map(String)),
   onView: (row) => void loadSkillContent(row),
@@ -423,13 +439,17 @@ async function loadCategories(): Promise<void> {
 }
 
 // --- KPI strip -------------------------------------------------------------
+// No statistics (not loaded, or the read failed) show dashes, not a row of zeros.
 const stats = ref<SkillUsageStatsDto | null>(null)
-const kpiCards = computed(() => [
-  { key: 'total', labelKey: 'kpi.total', value: stats.value?.totalSkills ?? 0 },
-  { key: 'enabled', labelKey: 'kpi.enabled', value: stats.value?.enabledSkills ?? 0 },
-  { key: 'disabled', labelKey: 'kpi.disabled', value: stats.value?.disabledSkills ?? 0 },
-  { key: 'activations', labelKey: 'kpi.activations', value: stats.value?.totalActivations ?? 0 },
-])
+const kpiCards = computed(() => {
+  const s = stats.value
+  return [
+    { key: 'total', labelKey: 'kpi.total', value: s ? s.totalSkills ?? 0 : null },
+    { key: 'enabled', labelKey: 'kpi.enabled', value: s ? s.enabledSkills ?? 0 : null },
+    { key: 'disabled', labelKey: 'kpi.disabled', value: s ? s.disabledSkills ?? 0 : null },
+    { key: 'activations', labelKey: 'kpi.activations', value: s ? s.totalActivations ?? 0 : null },
+  ]
+})
 
 async function loadStats(): Promise<void> {
   try {
@@ -455,13 +475,15 @@ async function toggleEnabled(item: SkillSummaryDto): Promise<void> {
     }
     await crud.refresh()
     await loadStats()
-  } catch {
-    message?.error(t('actions.toggleFailed'))
+  } catch (e) {
+    // The bridge throws the server's reason, or why nothing changed.
+    message?.error(e instanceof Error && e.message ? e.message : t('actions.toggleFailed'))
   }
 }
 
 async function removeOne(item: SkillSummaryDto): Promise<void> {
-  await crud.handleDelete([crud.rowKey(item)])
+  // handleDelete has already reported a refusal (toast or onError) before rethrowing.
+  await crud.handleDelete([crud.rowKey(item)]).catch(() => undefined)
   await loadStats()
 }
 
@@ -488,6 +510,63 @@ async function loadSkillContent(row: SkillSummaryDto): Promise<void> {
     detailLoading.value = false
   }
 }
+
+// --- edit form: the stored SKILL.md body ------------------------------------
+// Every way into edit (the card button, the detail drawer's footer, a restored
+// `?detail=edit:<id>`) opens on a list row, a SkillSummaryDto, which has no
+// `content`. Left like that, the required body showed empty: Save was refused
+// until the operator typed something, and what they typed replaced the stored
+// body. So the body is loaded into the form first. If it cannot be (a failed
+// request, or the slug resolves to a different definition that shadows this
+// row), the field is dropped instead: an update without `content` keeps the
+// stored body, and this form never writes one the operator has not seen.
+type EditBodyState = 'loading' | 'ready' | 'unavailable'
+const editBody = ref<EditBodyState>('ready')
+const editSchema = computed(() =>
+  editBody.value === 'unavailable' ? skillEditFormSchemaWithoutContent : skillEditFormSchema,
+)
+
+type SkillEditModel = SkillSummaryDto & { content?: string }
+
+function sameId(a: unknown, b: unknown): boolean {
+  return String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase()
+}
+
+async function loadEditBody(row: SkillEditModel): Promise<void> {
+  // A record reopened with its body already in place needs nothing.
+  if (typeof row.content === 'string') {
+    editBody.value = 'ready'
+    return
+  }
+  editBody.value = 'loading'
+  let body: string | null = null
+  try {
+    const full: SkillDetailDto = await bridge.skills.getBySlug(row.slug)
+    if (sameId(full.id, row.id)) body = full.content ?? ''
+  } catch {
+    body = null
+  }
+  // The operator may have closed this form, or opened another, meanwhile.
+  if (crud.formModal.formData.value !== row) return
+  if (body === null) {
+    editBody.value = 'unavailable'
+    message?.warning(t('editForm.contentUnavailable'))
+    return
+  }
+  row.content = body
+  editBody.value = 'ready'
+}
+
+watch(
+  () =>
+    crud.formModal.visible.value && crud.formModal.mode.value === 'edit'
+      ? (crud.formModal.formData.value as SkillEditModel | null)
+      : null,
+  (row) => {
+    if (row) void loadEditBody(row)
+  },
+  { immediate: true },
+)
 
 // --- popular drawer --------------------------------------------------------
 // A singleton (non-record) ranking overlay driven by the detail engine so it is

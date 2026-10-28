@@ -50,8 +50,7 @@ public class StorageKeyHelperTests
     [Fact]
     public void ThumbnailAndChunkKeys_AreRecognisedAsGenerated()
     {
-        var key = StorageKeyHelper.NewKey(".png");
-        Assert.True(StorageKeyHelper.IsGenerated(StorageKeyHelper.ThumbnailKey(key)));
+        Assert.True(StorageKeyHelper.IsGenerated(StorageKeyHelper.NewThumbnailKey()));
         Assert.True(StorageKeyHelper.IsGenerated(StorageKeyHelper.ChunkKey(Guid.NewGuid(), 7)));
     }
 

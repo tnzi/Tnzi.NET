@@ -146,13 +146,6 @@ public class SummarizeOptions
     public string? SummaryModelId { get; set; }
 
     /// <summary>
-    /// 摘要分段数（将历史分成多段分别摘要）
-    /// </summary>
-    [RuntimeSetting(Label = "Summary Parts", I18n = "admin.modules.system.settings.fields.historySummarizeParts",
-        Type = SettingFieldType.Int, Min = 1, Subsection = "Summarize")]
-    public int Parts { get; set; } = 1;
-
-    /// <summary>
     /// 自定义摘要提示词
     /// </summary>
     [RuntimeSetting(Label = "Summary Prompt", I18n = "admin.modules.system.settings.fields.historySummarizeSummaryPrompt",

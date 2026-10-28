@@ -14,16 +14,6 @@ public class ModuleHotReloadOptionsValidator : OptionsValidatorBase<ModuleHotRel
             errors.Add("ReloadDelayMs must be non-negative.");
         }
 
-        if (options.RetryCount < 0)
-        {
-            errors.Add("RetryCount must be non-negative.");
-        }
-
-        if (options.RetryDelayMs < 0)
-        {
-            errors.Add("RetryDelayMs must be non-negative.");
-        }
-
         if (options.WatchedFileExtensions == null || options.WatchedFileExtensions.Length == 0)
         {
             errors.Add("WatchedFileExtensions must not be null or empty.");

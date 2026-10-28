@@ -34,13 +34,8 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
             temporaryRef.IsTemporary = false;
             await _referenceRepository.UpdateAsync(temporaryRef);
 
-            // 增加文件引用计数
-            var fileRecord = await _repository.FindAsync(fileId);
-            if (fileRecord != null)
-            {
-                fileRecord.ReferenceCount++;
-                await _repository.UpdateAsync(fileRecord);
-            }
+            // 增加文件引用计数（原子 +1，见 FileReferenceCounts）
+            await FileReferenceCounts.AddAsync(_repository, fileId);
         }
         else
         {
@@ -67,13 +62,8 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
             {
                 await _referenceRepository.DeleteAsync(oldRef);
 
-                // 减少旧文件的引用计数
-                var oldFile = await _repository.GetAsync(oldFileId.Value);
-                if (oldFile != null)
-                {
-                    DecrementReferenceCount(oldFile);
-                    await _repository.UpdateAsync(oldFile);
-                }
+                // 减少旧文件的引用计数（原子 -1，不低于 0）
+                await FileReferenceCounts.ReleaseAsync(_repository, oldFileId.Value);
             }
         }
 
@@ -111,12 +101,7 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
                     temporaryRef.IsTemporary = false;
                     await _referenceRepository.UpdateAsync(temporaryRef, cancellationToken);
 
-                    var fileRecord = await _repository.GetAsync(refInfo.FileId, cancellationToken);
-                    if (fileRecord != null)
-                    {
-                        fileRecord.ReferenceCount++;
-                        await _repository.UpdateAsync(fileRecord, cancellationToken);
-                    }
+                    await FileReferenceCounts.AddAsync(_repository, refInfo.FileId, cancellationToken);
                     confirmedCount++;
                 }
                 else
@@ -160,12 +145,7 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
                     {
                         await _referenceRepository.DeleteAsync(oldRef, cancellationToken);
 
-                        var oldFile = await _repository.GetAsync(fileId, cancellationToken);
-                        if (oldFile != null)
-                        {
-                            DecrementReferenceCount(oldFile);
-                            await _repository.UpdateAsync(oldFile, cancellationToken);
-                        }
+                        await FileReferenceCounts.ReleaseAsync(_repository, fileId, cancellationToken);
                     }
                 }
 
@@ -256,8 +236,7 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
             return Fail<int>(PermanentRecordCannotBeSynced, 400, ErrorCodes.VALIDATION_ERROR);
 
         var actualCount = await CountPermanentReferenceRowsAsync(fileId, cancellationToken);
-        fileRecord.ReferenceCount = actualCount;
-        await _repository.UpdateAsync(fileRecord, cancellationToken);
+        await FileReferenceCounts.SetAsync(_repository, fileId, actualCount, cancellationToken);
 
         return Ok(actualCount);
     }
@@ -302,26 +281,61 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
         => _referenceRepository.AsQueryable()
             .CountAsync(r => r.FileId == fileId && !r.IsTemporary, cancellationToken);
 
+    /// <summary>
+    /// 手动清理最短的保留期。更年轻的临时上传可能属于一张还没提交的表单：上传与保存实体之间隔着用户填表的时间。
+    /// </summary>
+    internal static readonly TimeSpan MinimumManualCleanupAge = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// 删掉过了保留期、无人持有的临时文件（判据见 <see cref="TemporaryFileCriteria"/>），外加过期的临时引用行与它们指向的无人持有的记录。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 此前只遍历临时引用行，而真正的临时上传一条引用行都没有：维护页的「清理」恒报 0。
+    /// 保留期不得短于 <see cref="MinimumManualCleanupAge"/>：0 或负数会让截止时刻落在现在或将来，
+    /// 把用户刚刚上传、表单还没提交的文件一起删掉。
+    /// </remarks>
     public async Task<Result<int>> CleanupTemporaryFilesAsync(TimeSpan? olderThan = null)
     {
+        var age = olderThan ?? DefaultTemporaryAge;
+        if (age < MinimumManualCleanupAge)
+            return Fail<int>("Temporary files can only be cleaned up once they are at least one hour old; younger uploads may belong to a form that has not been submitted yet.", 400, ErrorCodes.VALIDATION_ERROR);
+
         return await ExecuteInUnitOfWorkAsync(async cancellationToken =>
         {
-            var cutoffTime = DateTime.UtcNow.Subtract(olderThan ?? TimeSpan.FromHours(24));
+            var cutoffTime = DateTime.UtcNow.Subtract(age);
+            var deletedCount = 0;
+
+            var expiredRecords = await _repository.AsQueryable()
+                .Where(TemporaryFileCriteria.Expired(cutoffTime))
+                .ToListAsync(cancellationToken);
+
+            foreach (var fileRecord in expiredRecords)
+            {
+                // 条件删除：列出来之后才被绑定的（计数已不为 0）不删，理由见 FileReferenceCounts。
+                // 指向它的临时引用行随记录一起走，下面按引用行那一趟就不会再找到它。
+                if (!await FileReferenceCounts.TryDeleteUnheldAsync(_repository, _referenceRepository, fileRecord.Id, cancellationToken))
+                    continue;
+
+                await PublishDeletionAsync(fileRecord, cancellationToken);
+                deletedCount++;
+            }
 
             var temporaryRefs = await _referenceRepository
                 .ToListAsync(r => r.IsTemporary && r.CreationTime < cutoffTime, cancellationToken);
 
-            var deletedCount = 0;
             foreach (var reference in temporaryRefs)
             {
-                var fileRecord = await _repository.GetAsync(reference.FileId, cancellationToken);
-                if (fileRecord != null && fileRecord.ReferenceCount == 0)
+                var fileRecord = await _repository.AsQueryable().FirstOrDefaultAsync(f => f.Id == reference.FileId, cancellationToken);
+                if (fileRecord != null
+                    && IsUnheldOutsideAFolder(fileRecord)
+                    && await FileReferenceCounts.TryDeleteUnheldAsync(_repository, _referenceRepository, fileRecord.Id, cancellationToken))
                 {
-                    await _repository.DeleteAsync(fileRecord, cancellationToken);
+                    await PublishDeletionAsync(fileRecord, cancellationToken);
                     deletedCount++;
                 }
 
-                await _referenceRepository.DeleteAsync(reference, cancellationToken);
+                // 按条件删：记录删掉时它名下的引用行已一并删掉，同一份文件的另一条临时引用行也可能刚被删过。
+                await _referenceRepository.DeleteAsync(r => r.Id == reference.Id, cancellationToken);
             }
 
             LogInformation("Cleaned up {Count} temporary files", deletedCount);
@@ -329,20 +343,45 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
         });
     }
 
+    /// <summary>
+    /// 列出 <see cref="CleanupTemporaryFilesAsync"/> 会删的那些文件：同一个判据，所以列表里看到的正是清理会删的。
+    /// </summary>
     public async Task<Result<IEnumerable<FileRecord>>> GetTemporaryFilesAsync(TimeSpan? olderThan = null)
     {
-        var cutoffTime = DateTime.UtcNow.Subtract(olderThan ?? TimeSpan.FromHours(24));
+        var age = olderThan ?? DefaultTemporaryAge;
+        if (age < TimeSpan.Zero)
+            return Fail<IEnumerable<FileRecord>>("The age threshold cannot be negative.", 400, ErrorCodes.VALIDATION_ERROR);
 
-        var temporaryFileIds = await _referenceRepository
+        var cutoffTime = DateTime.UtcNow.Subtract(age);
+
+        var expired = await _repository.AsQueryable()
+            .Where(TemporaryFileCriteria.Expired(cutoffTime))
+            .OrderBy(f => f.CreationTime)
+            .ToListAsync();
+
+        var fileIdsWithExpiredTemporaryRefs = await _referenceRepository
             .Where(r => r.IsTemporary && r.CreationTime < cutoffTime)
             .Select(r => r.FileId)
             .Distinct()
             .ToListAsync();
 
-        var files = await _repository.GetListAsync(temporaryFileIds);
+        var fromReferences = fileIdsWithExpiredTemporaryRefs.Count == 0
+            ? []
+            : (await _repository.GetListAsync(fileIdsWithExpiredTemporaryRefs)).Where(IsUnheldOutsideAFolder).ToList();
+
+        var files = expired
+            .Concat(fromReferences.Where(f => expired.All(e => e.Id != f.Id)))
+            .ToList();
 
         return Ok((IEnumerable<FileRecord>)files);
     }
+
+    /// <summary>无人持有，且不是归档进目录的临时记录（与孤儿回收同一条豁免）。</summary>
+    private static bool IsUnheldOutsideAFolder(FileRecord fileRecord)
+        => fileRecord.ReferenceCount <= 0 && !(fileRecord.IsTemporary && fileRecord.FolderId != null);
+
+    /// <summary>管理端不给保留期时的默认值，与 <c>Storage:Cleanup:TemporaryFileRetentionHours</c> 的默认值一致。</summary>
+    private static readonly TimeSpan DefaultTemporaryAge = TimeSpan.FromHours(24);
 
     /// <summary>
     /// FileReference -> FileReferenceDto 投影表达式（复用于多个查询方法）
@@ -381,12 +420,7 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
                 existing.IsTemporary = false;
                 await _referenceRepository.UpdateAsync(existing, cancellationToken);
 
-                var fr = await _repository.GetAsync(fileId, cancellationToken);
-                if (fr != null)
-                {
-                    fr.ReferenceCount++;
-                    await _repository.UpdateAsync(fr, cancellationToken);
-                }
+                await FileReferenceCounts.AddAsync(_repository, fileId, cancellationToken);
             }
             return;
         }
@@ -403,22 +437,32 @@ public class FileReferenceService : ApplicationService, IFileReferenceService
         await _referenceRepository.InsertAsync(reference, cancellationToken);
 
         if (!isTemporary)
-        {
-            var fileRecord = await _repository.GetAsync(fileId, cancellationToken);
-            if (fileRecord != null)
-            {
-                fileRecord.ReferenceCount++;
-                await _repository.UpdateAsync(fileRecord, cancellationToken);
-            }
-        }
+            await FileReferenceCounts.AddAsync(_repository, fileId, cancellationToken);
     }
 
     /// <summary>
-    /// 安全地减少文件引用计数（防止变为负数）
+    /// 记录删掉之后，请求删除它名下的对象，并通知别的程序集收掉挂在这个文件上的数据。
     /// </summary>
-    private static int DecrementReferenceCount(FileRecord fileRecord)
+    /// <remarks>
+    /// ★ 此前这条路径只删行：原件与缩略图留在存储里，而孤儿回收按记录枚举，永远找不到它们。
+    /// 对象经 <see cref="FileDeleteRequestedEvent"/> 删除（事务感知：外层工作单元回滚则不删，处理器失败由总线重试），
+    /// 与解绑归零那条路径同一个机制。没有事件总线时只能留下对象（只占空间），不能在提交之前就把它删掉。
+    /// </remarks>
+    private async Task PublishDeletionAsync(FileRecord fileRecord, CancellationToken cancellationToken)
     {
-        fileRecord.ReferenceCount = Math.Max(0, fileRecord.ReferenceCount - 1);
-        return fileRecord.ReferenceCount;
+        if (EventBus == null)
+        {
+            LogWarning("No event bus: stored objects of deleted temporary file {FileId} are left in storage", fileRecord.Id);
+            return;
+        }
+
+        await EventBus.PublishAsync(new FileDeleteRequestedEvent
+        {
+            FileId = fileRecord.Id,
+            FilePath = fileRecord.Path,
+            ThumbnailPath = fileRecord.ThumbnailPath,
+            Provider = fileRecord.Provider ?? "Local"
+        }, cancellationToken);
+        await EventBus.PublishAsync(new FileRecordDeletedEvent { FileId = fileRecord.Id }, cancellationToken);
     }
 }

@@ -2,6 +2,9 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Localization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Options;
+using Tnzi.Localization.Controllers;
 using Tnzi.Localization.Resources;
 using Tnzi.Modules;
 
@@ -58,7 +61,7 @@ public sealed class ResxMissingTranslationTrackingTests
     public async Task ResxMode_UnresolvedKey_IsTracked()
     {
         using var provider = BuildProvider("Resx");
-        var localizer = provider.GetRequiredService<IStringLocalizer<SharedResource>>();
+        var localizer = provider.GetRequiredService<IStringLocalizer<ResxProbeResource>>();
         var tracker = provider.GetRequiredService<IMissingTranslationTracker>();
         using var culture = UseCulture("zh-CN");
 
@@ -74,13 +77,56 @@ public sealed class ResxMissingTranslationTrackingTests
     public async Task ResxMode_FormattedLookup_IsTrackedToo()
     {
         using var provider = BuildProvider("Resx");
-        var localizer = provider.GetRequiredService<IStringLocalizer<SharedResource>>();
+        var localizer = provider.GetRequiredService<IStringLocalizer<ResxProbeResource>>();
         var tracker = provider.GetRequiredService<IMissingTranslationTracker>();
         using var culture = UseCulture("en");
 
         _ = localizer["Validation.Phone.Required", "Phone"];
 
         (await tracker.GetMissingKeysAsync()).ShouldContain(m => m.Key == "Validation.Phone.Required");
+    }
+
+    /// <summary>
+    /// ★★ 一个资源都没有的资源源，它的未命中不记：那不是「缺一条翻译」，而是这个键在 Resx 模式下根本无处可补。
+    /// </summary>
+    /// <remarks>
+    /// Resx 只在资源类型<b>自己的程序集</b>里找清单。框架的 <see cref="SharedResource"/> 住在 Tnzi.Localization，
+    /// 那里没有任何 .resx；消费方照文档在自己项目里加的 SharedResource.resx 编进的是消费方程序集，永远不会被查。
+    /// 此前每个异常都经它查一次错误码，Missing Translations 页因此堆满 NOT_FOUND、VALIDATION_ERROR 这类
+    /// 运维无论如何也补不上的键。
+    /// </remarks>
+    [Fact]
+    public async Task ResxMode_KeysOfASourceWithNoResourcesInAnySupportedCulture_AreNotTracked()
+    {
+        using var provider = BuildProvider("Resx");
+        var localizer = provider.GetRequiredService<IStringLocalizer<SharedResource>>();
+        var tracker = provider.GetRequiredService<IMissingTranslationTracker>();
+        using var culture = UseCulture("zh-CN");
+
+        var value = localizer["NOT_FOUND"];
+
+        value.ResourceNotFound.ShouldBeTrue();
+        (await tracker.GetMissingKeysAsync()).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// ★ 匿名的 <c>GET localization/resources/{culture}</c> 在默认 Resx 模式下对每个受支持语言都 500：
+    /// 框架的 SharedResource 没有任何清单，<c>GetAllStrings</c> 抛 <c>MissingManifestResourceException</c>。
+    /// 没有资源就答一个空集。
+    /// </summary>
+    [Fact]
+    public void ResxMode_ResourcesEndpoint_ReturnsAnEmptySet_InsteadOfThrowing()
+    {
+        using var provider = BuildProvider("Resx");
+        var controller = new DefaultLocalizationController(
+            provider.GetRequiredService<IOptions<RequestLocalizationOptions>>(),
+            provider.GetRequiredService<IStringLocalizerFactory>());
+
+        var result = controller.GetResources("en");
+
+        result.Success.ShouldBeTrue();
+        result.Data!.Culture.ShouldBe("en");
+        result.Data.Resources.ShouldBeEmpty();
     }
 
     [Fact]

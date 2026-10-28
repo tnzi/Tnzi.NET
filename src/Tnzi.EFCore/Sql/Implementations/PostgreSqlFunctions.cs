@@ -18,13 +18,21 @@ internal sealed class PostgreSqlFunctions : ISqlFunctions
     #region 日期时间函数
 
     /// <inheritdoc />
-    public string CurrentUtcTime => "(NOW() AT TIME ZONE 'UTC')";
+    /// <remarks>
+    /// ★ 面向 <c>timestamp with time zone</c> 列（Npgsql 对 <see cref="DateTime"/> 的默认映射）：<c>NOW()</c> 是绝对时刻，
+    /// 与会话时区无关。<c>(NOW() AT TIME ZONE 'UTC')</c> 得到的是不带时区的 UTC 墙钟，赋给 timestamptz 列时
+    /// PostgreSQL 按会话 <c>TimeZone</c> 把它当本地时间再换算一次，非 UTC 时区的服务器上默认值整体偏移一个时区差。
+    /// </remarks>
+    public string CurrentUtcTime => "NOW()";
 
     /// <inheritdoc />
     public string CurrentLocalTime => "NOW()";
 
     /// <inheritdoc />
-    public string CurrentUtcDate => "(CURRENT_DATE AT TIME ZONE 'UTC')::DATE";
+    /// <remarks>
+    /// 先把当前时刻换到 UTC 再取日期。<c>CURRENT_DATE</c> 是会话时区的本地日期，从它出发在每天的一段时间里会差一天。
+    /// </remarks>
+    public string CurrentUtcDate => "(NOW() AT TIME ZONE 'UTC')::DATE";
 
     /// <inheritdoc />
     public string CurrentLocalDate => "CURRENT_DATE";

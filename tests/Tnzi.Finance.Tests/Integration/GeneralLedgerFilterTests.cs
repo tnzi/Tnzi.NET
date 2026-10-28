@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Tnzi.Finance.Tests.Integration;
@@ -261,6 +260,22 @@ public class GeneralLedgerFilterTests : FinanceIntegrationTestBase
         var voided = await ByKeywordAsync(bank, "7799");
         voided.Lines.TotalCount.ShouldBe(0);
         voided.Lines.Items.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// 票面与 MICR 上印的是补零后的号（默认 5 位：07788），操作员照着纸或对账单输入的就是这个形状。
+    /// </summary>
+    [Theory]
+    [InlineData("07788")]
+    [InlineData("0007788")]
+    public async Task Keyword_MatchesIssuedCheckNumber_WrittenWithLeadingZeros(string keyword)
+    {
+        var bank = await SeedAsync();
+
+        var issued = await ByKeywordAsync(bank, keyword);
+
+        issued.Lines.TotalCount.ShouldBe(1);
+        issued.Lines.Items.Single().Credit.ShouldBe(500m);
     }
 
     [Fact]
@@ -561,61 +576,5 @@ public class GeneralLedgerFilterTests : FinanceIntegrationTestBase
         desc.Data.OpeningBalance.ShouldBe(0m);
         desc.Data.ClosingBalance.ShouldBe(0m);
         desc.Data.Lines.Items.ShouldAllBe(l => l.RunningBalance == 0m);
-    }
-
-    /// <summary>
-    /// 只收 EF 的 Database.Command 日志（含 EnableSensitiveDataLogging 打印的参数值）
-    /// </summary>
-    private sealed class SqlCapture : ILoggerFactory
-    {
-        private readonly List<string> _commands = [];
-
-        public IReadOnlyList<string> Commands
-        {
-            get { lock (_commands) return [.. _commands]; }
-        }
-
-        public void Clear()
-        {
-            lock (_commands) _commands.Clear();
-        }
-
-        public void AddProvider(ILoggerProvider provider)
-        {
-        }
-
-        public ILogger CreateLogger(string categoryName) => new CategoryLogger(this, categoryName);
-
-        public void Dispose()
-        {
-        }
-
-        private sealed class CategoryLogger(SqlCapture owner, string category) : ILogger
-        {
-            private readonly bool _isCommand = category == DbLoggerCategory.Database.Command.Name;
-
-            public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
-
-            public bool IsEnabled(LogLevel logLevel) => _isCommand;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            {
-                if (!_isCommand)
-                    return;
-
-                var message = formatter(state, exception);
-                lock (owner._commands)
-                    owner._commands.Add(message);
-            }
-        }
-
-        private sealed class NullScope : IDisposable
-        {
-            public static readonly NullScope Instance = new();
-
-            public void Dispose()
-            {
-            }
-        }
     }
 }

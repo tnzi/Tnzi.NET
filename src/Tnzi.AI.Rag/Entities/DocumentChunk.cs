@@ -38,7 +38,7 @@ public class DocumentChunk : EntityBase<Guid>, IMultiTenant
     public string? Metadata { get; set; }
 
     /// <summary>
-    /// 父块 ID - 用于层级切块策略的父子关系（null 表示顶层块或非层级块）
+    /// 父块 ID（预留）。当前没有任何切块策略或摄取路径写入它，恒为 null：层级切块接入摄取时只产出扁平的子块。
     /// </summary>
     public Guid? ParentChunkId { get; set; }
 }

@@ -164,6 +164,8 @@ public class SubscriptionPaymentCompletedHandler : IEventHandler<PaymentComplete
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
             PayerUserId = eventData.UserId,
+            PayerAccount = BillingAccountRef.From(eventData.BillingAccountType, eventData.BillingAccountId),
+            SavedPaymentMethodId = eventData.SavedPaymentMethodId,
             PaymentTradeNo = eventData.TradeNo,
             Amount = eventData.Amount,
             Currency = eventData.Currency
@@ -215,6 +217,7 @@ public class SubscriptionPaymentFailedHandler : IEventHandler<PaymentFailedEvent
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
             PayerUserId = eventData.UserId,
+            PayerAccount = BillingAccountRef.From(eventData.BillingAccountType, eventData.BillingAccountId),
             PaymentTradeNo = eventData.TradeNo,
             FailReason = eventData.FailReason
         }, cancellationToken);
@@ -262,6 +265,7 @@ public class SubscriptionPaymentExpiredHandler : IEventHandler<PaymentExpiredEve
             SubscriptionNo = eventData.BusinessOrderNo,
             ChangeId = meta.ChangeId,
             PayerUserId = eventData.UserId,
+            PayerAccount = BillingAccountRef.From(eventData.BillingAccountType, eventData.BillingAccountId),
             PaymentTradeNo = eventData.TradeNo,
             FailReason = "Payment order expired"
         }, cancellationToken);

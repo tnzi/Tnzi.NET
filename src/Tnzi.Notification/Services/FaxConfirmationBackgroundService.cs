@@ -81,7 +81,7 @@ public class FaxConfirmationBackgroundService : BackgroundService
 
             try
             {
-                await Task.Delay(interval, stoppingToken);
+                await LongDelay.DelayAsync(interval, stoppingToken);
             }
             catch (OperationCanceledException)
             {

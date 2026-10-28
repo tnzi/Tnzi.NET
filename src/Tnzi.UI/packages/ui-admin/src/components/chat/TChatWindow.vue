@@ -353,7 +353,11 @@ function onPickFile() {
 // drag-and-drop. The message kind is derived from the file's MIME type (images
 // render as an inline preview bubble, everything else as a download chip).
 async function uploadAndSend(file: File) {
-  if (!file || !store.activeId || !client) return
+  // The conversation the file was dropped into, captured now: the upload can
+  // take a while and the list stays usable, so re-reading `activeId` after it
+  // sent the file to whichever thread the user had moved on to.
+  const conversationId = store.activeId
+  if (!file || !conversationId || !client) return
   // Deployment gate - the entry points are hidden, but a stray drop can still
   // land here; the server rejects media messages regardless.
   if (!store.config.enableFileMessages) return
@@ -389,7 +393,7 @@ async function uploadAndSend(file: File) {
     // marker (the store keeps it), so swallow it here - only a genuine UPLOAD
     // failure (outer catch) still surfaces as a toast.
     try {
-      await store.sendMedia(store.activeId, {
+      await store.sendMedia(conversationId, {
         contentType,
         fileId: uploaded.id,
         fileName: uploaded.originalName || uploaded.fileName,

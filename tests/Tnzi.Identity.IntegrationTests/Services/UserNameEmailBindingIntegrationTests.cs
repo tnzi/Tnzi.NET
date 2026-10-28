@@ -26,7 +26,6 @@ public abstract class UserNameEmailBindingIntegrationTestBase : RelationalIdenti
             ServiceProvider,
             eventBus: EventBusMock.Object,
             currentUser: ServiceProvider.GetRequiredService<ICurrentUser>(),
-            cache: Cache,
             identityOptions: ServiceProvider.GetRequiredService<IOptionsMonitor<IdentityOptions>>());
     }
 

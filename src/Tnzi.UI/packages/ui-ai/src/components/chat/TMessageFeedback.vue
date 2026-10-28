@@ -9,6 +9,7 @@
 import { NButton, NTooltip, NInput } from 'naive-ui';
 import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
+import { isImeComposing } from '@tnzi/core/utils';
 import { useAiI18n } from '../../i18n/index';
 export type FeedbackValue = 'positive' | 'negative' | null;
 
@@ -43,6 +44,12 @@ function handleNegative(): void {
   }
 }
 
+// The Enter that commits an IME candidate is part of typing the reason.
+function onReasonEnter(event: KeyboardEvent): void {
+  if (isImeComposing(event)) return;
+  submitReason();
+}
+
 function submitReason(): void {
   emit('feedback', 'negative', reason.value || undefined);
   showReasonInput.value = false;
@@ -59,6 +66,8 @@ function submitReason(): void {
           quaternary
           size="tiny"
           :class="isPositive ? 'text-ai-node-completed' : ''"
+          :aria-label="t.feedback.helpful"
+          :aria-pressed="isPositive"
           @click="handlePositive"
         >
           <template #icon><Icon icon="lucide:thumbs-up" /></template>
@@ -74,6 +83,8 @@ function submitReason(): void {
           quaternary
           size="tiny"
           :class="isNegative ? 'text-ai-node-failed' : ''"
+          :aria-label="t.feedback.notHelpful"
+          :aria-pressed="isNegative"
           @click="handleNegative"
         >
           <template #icon><Icon icon="lucide:thumbs-down" /></template>
@@ -92,7 +103,7 @@ function submitReason(): void {
         size="tiny"
         style="width: 192px"
         :placeholder="t.feedback.reasonPlaceholder"
-        @keydown.enter="submitReason"
+        @keydown.enter="onReasonEnter"
       />
       <NButton quaternary size="tiny" @click="submitReason">
         <template #icon><Icon icon="lucide:send" /></template>

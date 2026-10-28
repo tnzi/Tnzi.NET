@@ -3,8 +3,8 @@
  * User Center (self-service personal center) page shipped by `@tnzi/ui-admin`.
  *
  * The default `UserCenter.vue` page is a **section-registry-driven** shell (the
- * same shape as the Settings Center): six built-in sections (profile / security
- * / sessions / history / linked / danger) live in a registry, and this config
+ * same shape as the Settings Center): seven built-in sections (profile / security
+ * / notifications / sessions / history / linked / danger) live in a registry, and this config
  * lets a consuming application reshape that registry at `defineAdminApp()` time -
  * hide a section that doesn't fit its business, move a section to a different (or
  * a brand-new) group, override a built-in section with its own component, append
@@ -38,16 +38,18 @@
  * ```
  *
  * Everything here is OPTIONAL and additive: with no `userCenter` config the page
- * renders the six built-in sections exactly as before.
+ * renders the built-in sections exactly as before. `notifications` appears only
+ * when the backend loaded the Notification module.
  */
 import type { App, Component, InjectionKey } from 'vue'
 import { inject } from 'vue'
 
-/** Keys of the six built-in sections - the values accepted by `hideSections`,
+/** Keys of the seven built-in sections - the values accepted by `hideSections`,
  *  `overrides`, `sectionGroups` and `sectionOrder`. */
 export type UserCenterBuiltInSectionKey =
   | 'profile'
   | 'security'
+  | 'notifications'
   | 'sessions'
   | 'history'
   | 'linked'

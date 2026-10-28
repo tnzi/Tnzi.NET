@@ -16,7 +16,7 @@ public class EmbeddingOptions
     public string? Model { get; set; }
 
     /// <summary>
-    /// 输出维度（部分模型支持）
+    /// 输出维度（部分模型支持），作为 <c>EmbeddingGenerationOptions.Dimensions</c> 交给生成器
     /// </summary>
     /// <remarks>
     /// 例如 OpenAI 的 text-embedding-3-small 支持 256-1536 维
@@ -24,7 +24,7 @@ public class EmbeddingOptions
     public int? Dimensions { get; set; }
 
     /// <summary>
-    /// 其他模型参数
+    /// 其他模型参数，作为 <c>EmbeddingGenerationOptions.AdditionalProperties</c> 交给生成器
     /// </summary>
     public Dictionary<string, object>? Parameters { get; set; }
 }

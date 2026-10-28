@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Exceptions;
 using System.Text;
 using System.Text.Json;
 using Tnzi.EventBus;
@@ -139,6 +140,36 @@ public class ConsumerAcknowledgementTests : IDisposable
         _brokerCalls.ShouldBe(
             ["republish(retry=1)", "ack"],
             "修复前这里只有一条 ack：消息被确认后永久消失，不重试、不进死信、无迹可寻");
+    }
+
+    /// <summary>
+    /// 代理没接下重试副本（nack，或副本被退回）时，原消息进死信而不是被确认。
+    /// </summary>
+    /// <remarks>
+    /// 发布 Channel 开着发布确认，副本发布要等代理的 ack 才返回；没有确认时写完帧即返回，
+    /// 原消息随即被确认，副本若在代理侧丢失，这条消息就没了。这里守的是另一半：
+    /// 确认带回来的失败（nack、退回）必须走「重发失败」分支，不能被当成副本已入队。
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WhenTheBrokerDoesNotTakeTheRetryCopy_TheOriginalGoesToTheDeadLetterQueue(bool returned)
+    {
+        PublishException failure = returned
+            ? new PublishReturnException(1, "unroutable", string.Empty, "q", 312, "NO_ROUTE")
+            : new PublishException(1, isReturn: false);
+        _mockChannel.Setup(c => c.BasicPublishAsync<BasicProperties>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(),
+                It.IsAny<BasicProperties>(), It.IsAny<ReadOnlyMemory<byte>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => _brokerCalls.Add("republish"))
+            .Returns(ValueTask.FromException(failure));
+
+        var bus = CreateBusWith(new RecordingHandler(shouldThrow: true));
+        var consumer = await SubscribeAndCaptureConsumerAsync(bus);
+        await DeliverAsync(consumer, new ProbeEvent("boom"));
+
+        _brokerCalls.ShouldBe(["republish", "nack"], "副本没被代理接下就确认原消息，等于把它丢了");
     }
 
     /// <summary>

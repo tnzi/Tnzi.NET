@@ -1,8 +1,11 @@
 namespace Tnzi.Payment.Billing.Events;
 
 /// <summary>
-/// 发票生成事件
+/// 发票生成事件：一张发票落库（从支付自动开出或手工开出）。
 /// </summary>
+/// <remarks>
+/// 发出与否看 <see cref="InvoiceSentEvent"/>。此前事件类在这里，发布方一个都没有，订阅它的消费方永远收不到。
+/// </remarks>
 public class InvoiceGeneratedEvent : EventBase
 {
     /// <summary>
@@ -21,7 +24,7 @@ public class InvoiceGeneratedEvent : EventBase
     public Guid? PaymentId { get; set; }
 
     /// <summary>
-    /// 发票金额
+    /// 应付总额（<c>Invoice.DueAmount</c>：原价 − 折扣 + 税额）
     /// </summary>
     public decimal Amount { get; set; }
 
@@ -29,15 +32,10 @@ public class InvoiceGeneratedEvent : EventBase
     /// 客户邮箱
     /// </summary>
     public string CustomerEmail { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 是否自动发送
-    /// </summary>
-    public bool AutoSent { get; set; }
 }
 
 /// <summary>
-/// 发票发送事件
+/// 发票发送事件：发票作为附件成功交给了通知模块（自动发送、管理端补发、用户自己重发都算）。
 /// </summary>
 public class InvoiceSentEvent : EventBase
 {
@@ -62,7 +60,7 @@ public class InvoiceSentEvent : EventBase
     public DateTime SentTime { get; set; }
 
     /// <summary>
-    /// PDF URL
+    /// 发票文件在 Storage 里的下载地址（站内、按会话鉴权；未加载 Storage 时为 null）
     /// </summary>
     public string? PdfUrl { get; set; }
 }

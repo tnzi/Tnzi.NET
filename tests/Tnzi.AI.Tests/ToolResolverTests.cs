@@ -313,6 +313,33 @@ public class ToolResolverTests
         result!.Count.ShouldBe(1);
     }
 
+    /// <summary>
+    /// 审批已开启（AlwaysRequire）而容器里既没有审批处理器、也没有权限评估器时（应用把两者移除了），
+    /// C# 工具仍要被包装，调用在包装器里被拒绝。此前这里「没有处理器就原样返回工具」，
+    /// 于是开了审批的工具不经任何检查直接执行。
+    /// </summary>
+    [Fact]
+    public async Task ResolveToolsAsync_ApprovalRequired_NoHandlerNoEvaluator_CSharpToolIsWrappedAndRejected()
+    {
+        var registry = new Mock<IToolRegistry>();
+        registry.Setup(r => r.GetToolsByGroupsWithPermissions(
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<IEnumerable<string>>()))
+            .Returns([MakeToolDef("echo", "utility", nameof(DummyToolProvider.Echo))]);
+
+        var options = CreateOptionsMonitor(o =>
+            o.ToolApproval = new ToolApprovalOptions { Enabled = true, Mode = ToolApprovalMode.AlwaysRequire });
+
+        var resolver = CreateResolver(toolRegistry: registry.Object, options: options);
+
+        var result = await resolver.ResolveToolsAsync(["utility"]);
+
+        result.ShouldNotBeNull();
+        var tool = result!.ShouldHaveSingleItem().ShouldBeOfType<ApprovalToolWrapper>();
+        var outcome = await tool.InvokeAsync(new AIFunctionArguments(new Dictionary<string, object?>()));
+        outcome.ShouldBe("Tool call rejected: approval handler is not configured.");
+    }
+
     [Fact]
     public async Task ResolveToolsAsync_PermissionEvaluatorWithoutCurrentRules_StillWrapsCSharpTools()
     {
@@ -401,6 +428,54 @@ public class ToolResolverTests
 
     private static IServiceProvider BuildServiceProvider()
         => new ServiceCollection().AddLogging().BuildServiceProvider();
+
+    // ------------------------------------------------------------------
+    // memory 组随召回开关热生效
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Memory.Enabled 是运行时设置。此前只在启动时按它从注册表删组：运行时关掉记忆后 save_memory 仍交给模型
+    /// （写下的记忆不再被注入），以关闭状态启动后打开则一直没有记忆工具，直到重启。
+    /// </summary>
+    [Fact]
+    public async Task ResolveToolsAsync_MemoryGroup_FollowsTheCurrentRecallSwitch()
+    {
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(MakeToolDef("save_memory", "memory", nameof(DummyToolProvider.WriteFile)));
+        registry.Register(MakeToolDef("read_file", "fs", nameof(DummyToolProvider.ReadFile)));
+
+        var aiOptions = new AIOptions();
+        aiOptions.ContextProviders.Enabled = true;
+        aiOptions.ContextProviders.Memory.Enabled = true;
+        var monitor = new MutableOptionsMonitor<AIOptions>(aiOptions);
+        var resolver = CreateResolver(toolRegistry: registry, options: monitor, serviceProvider: BuildServiceProvider());
+
+        (await resolver.ResolveToolsAsync(["memory", "fs"]))!.Select(t => t.Name).OrderBy(n => n)
+            .ShouldBe(["read_file", "save_memory"]);
+
+        aiOptions.ContextProviders.Memory.Enabled = false;
+        monitor.Set(aiOptions);
+        (await resolver.ResolveToolsAsync(["memory", "fs"]))!.Select(t => t.Name).ShouldBe(["read_file"]);
+        (await resolver.ResolveToolsAsync(null, toolNames: ["save_memory"])).ShouldBeNull("a per-tool grant must not bring it back either");
+
+        aiOptions.ContextProviders.Memory.Enabled = true;
+        monitor.Set(aiOptions);
+        (await resolver.ResolveToolsAsync(["memory"]))!.Select(t => t.Name).ShouldBe(["save_memory"]);
+    }
+
+    [Fact]
+    public async Task ResolveToolsAsync_ContextProvidersOff_WithholdsTheMemoryGroup()
+    {
+        var registry = new ToolRegistry(Mock.Of<ILogger<ToolRegistry>>());
+        registry.Register(MakeToolDef("save_memory", "memory", nameof(DummyToolProvider.WriteFile)));
+
+        var aiOptions = new AIOptions();
+        aiOptions.ContextProviders.Enabled = false;
+        aiOptions.ContextProviders.Memory.Enabled = true;
+        var resolver = CreateResolver(toolRegistry: registry, options: new MutableOptionsMonitor<AIOptions>(aiOptions), serviceProvider: BuildServiceProvider());
+
+        (await resolver.ResolveToolsAsync(["memory"])).ShouldBeNull();
+    }
 
     // ------------------------------------------------------------------
     // Null name tools are excluded
@@ -509,12 +584,13 @@ public class ToolResolverTests
             {
                 OpenApiTools = new OpenApiToolsOptions { Enabled = true }
             }),
-            Mock.Of<ILogger<OpenApiToolGenerator>>());
+            Mock.Of<ILogger<OpenApiToolGenerator>>(),
+            TimeProvider.System);
         generatorMock
             .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AITool[] { functionMock.Object });
 
-        using var resolver = CreateResolver(
+        var resolver = CreateResolver(
             openApiToolGenerator: generatorMock.Object,
             options: options,
             approvalHandler: approvalHandler.Object,
@@ -548,13 +624,14 @@ public class ToolResolverTests
             {
                 OpenApiTools = new OpenApiToolsOptions { Enabled = true }
             }),
-            Mock.Of<ILogger<OpenApiToolGenerator>>());
+            Mock.Of<ILogger<OpenApiToolGenerator>>(),
+            TimeProvider.System);
         generatorMock
             .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AITool[] { functionMock.Object });
 
         // No approvalHandler, no permissionEvaluator
-        using var resolver = CreateResolver(
+        var resolver = CreateResolver(
             openApiToolGenerator: generatorMock.Object,
             options: options);
 
@@ -568,57 +645,56 @@ public class ToolResolverTests
         result[0].Name.ShouldBe("get_weather");
     }
 
+    /// <summary>
+    /// ToolResolver 按请求创建。OpenAPI 工具缓存此前放在它的实例上，每个请求都是空的，
+    /// 每轮对话都要对每份规范发一次远程 GET；缓存现在在单例生成器里，跨请求只拉一次，配置变更后重拉。
+    /// </summary>
     [Fact]
-    public async Task ResolveToolsAsync_AfterOptionsChange_RegeneratesOpenApiTools()
+    public async Task ResolveToolsAsync_SeparateRequests_ShareOneOpenApiSpecFetch()
     {
-        // Arrange: OpenAPI enabled with one spec entry so GenerateToolsAsync is actually called.
-        // We mock OpenApiToolGenerator indirectly by using a subclass that tracks call count.
-        var callCount = 0;
-        var generatorMock = new Mock<OpenApiToolGenerator>(
-            Mock.Of<IHttpClientFactory>(),
-            new StaticOptionsMonitor<AIOptions>(new AIOptions
-            {
-                OpenApiTools = new OpenApiToolsOptions { Enabled = true }
-            }),
-            Mock.Of<ILogger<OpenApiToolGenerator>>());
-        generatorMock
-            .Setup(g => g.GenerateToolsAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                callCount++;
-                return Array.Empty<AITool>();
-            });
-
+        var fetches = 0;
+        var services = new ServiceCollection();
+        services.AddHttpClient("Tnzi.AI.OpenApi").ConfigurePrimaryHttpMessageHandler(() => new CountingHandler(() =>
+        {
+            fetches++;
+            return """
+                {
+                    "openapi": "3.0.0",
+                    "info": { "title": "Weather", "version": "1.0.0" },
+                    "servers": [{ "url": "https://weather.example" }],
+                    "paths": { "/now": { "get": { "operationId": "currentWeather", "summary": "Current weather" } } }
+                }
+                """;
+        }));
+        using var sp = services.BuildServiceProvider();
         var monitor = new MutableOptionsMonitor<AIOptions>(new AIOptions
         {
-            OpenApiTools = new OpenApiToolsOptions { Enabled = true }
+            OpenApiTools = new OpenApiToolsOptions
+            {
+                Enabled = true,
+                Specs = [new OpenApiSpec { Name = "Weather", Url = "https://specs.example/weather.json" }]
+            }
         });
+        var generator = new OpenApiToolGenerator(sp.GetRequiredService<IHttpClientFactory>(), monitor, NullLogger<OpenApiToolGenerator>.Instance);
 
-        using var resolver = CreateResolver(
-            openApiToolGenerator: generatorMock.Object,
-            options: monitor);
+        // two requests = two resolver instances over the one singleton generator
+        var first = await CreateResolver(openApiToolGenerator: generator, options: monitor).ResolveToolsAsync(null);
+        var second = await CreateResolver(openApiToolGenerator: generator, options: monitor).ResolveToolsAsync(null);
 
-        // Act 1: first call → generates and caches
-        await resolver.ResolveToolsAsync(null);
-        callCount.ShouldBe(1);
+        first.ShouldNotBeNull().Select(t => t.Name).ShouldBe(["Weather_currentWeather"]);
+        second.ShouldNotBeNull().Select(t => t.Name).ShouldBe(["Weather_currentWeather"]);
+        fetches.ShouldBe(1);
 
-        // Act 2: second call before config change → served from cache
-        await resolver.ResolveToolsAsync(null);
-        callCount.ShouldBe(1);
+        // configuration change invalidates the cache
+        monitor.Set(monitor.CurrentValue);
+        await CreateResolver(openApiToolGenerator: generator, options: monitor).ResolveToolsAsync(null);
+        fetches.ShouldBe(2);
+    }
 
-        // Act 3: trigger config change → cache version bumped
-        monitor.Set(new AIOptions
-        {
-            OpenApiTools = new OpenApiToolsOptions { Enabled = true }
-        });
-
-        // Act 4: next call after config change → re-generates
-        await resolver.ResolveToolsAsync(null);
-        callCount.ShouldBe(2);
-
-        // Act 5: subsequent call without another change → served from refreshed cache
-        await resolver.ResolveToolsAsync(null);
-        callCount.ShouldBe(2);
+    private sealed class CountingHandler(Func<string> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(respond()) });
     }
 }
 

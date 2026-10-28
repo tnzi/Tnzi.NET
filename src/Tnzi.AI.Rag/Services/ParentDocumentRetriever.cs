@@ -6,6 +6,11 @@ namespace Tnzi.AI.Rag.Services;
 /// 对每个匹配块，加载同一文档中相邻的块（ChunkIndex ± windowSize），
 /// 将重叠/相邻的匹配块合并为一个连续的上下文块，减少冗余并提供更完整的上下文。
 /// </para>
+/// <para>
+/// 一次查询只取各窗口里的块（按文档、按合并后的窗口逐个限定）。★ 此前把所有文档、所有命中压成一个全局区间
+/// [最小窗口起点, 最大窗口终点]，再对每篇文档都套这个区间：命中文档 A 第 3 块与文档 B 第 650 块，就把两篇的第 1..652 块原文全部读进内存，
+/// 只为拼出两个 5 块窗口；同一文档里相距很远的两处命中也一样。它跑在 agent 每一轮检索与用户 RAG 端点上，随文档长度线性放大。
+/// </para>
 /// </summary>
 public class ParentDocumentRetriever : ApplicationService, IParentDocumentRetriever
 {
@@ -73,26 +78,18 @@ public class ParentDocumentRetriever : ApplicationService, IParentDocumentRetrie
 
             var docIds = docMatchInfos.Keys.ToList();
 
-            // 3. 计算全局范围后发起一次合并查询
-            var globalMin = int.MaxValue;
-            var globalMax = int.MinValue;
-            foreach (var (_, infos) in docMatchInfos)
-            {
-                var min = infos.Min(m => m.ChunkIndex) - options.WindowSize;
-                var max = infos.Max(m => m.ChunkIndex) + options.WindowSize;
-                if (min < 0) min = 0;
-                if (min < globalMin) globalMin = min;
-                if (max > globalMax) globalMax = max;
-            }
+            // 3. 每篇文档按命中计算窗口并合并重叠 / 相邻的窗口
+            var windowsByDoc = docMatchInfos.ToDictionary(
+                entry => entry.Key,
+                entry => MergeIntervals(ToWindows(entry.Value, options.WindowSize)));
 
-            // 4. 批量加载文档名称 + 所有相关块（各一次查询）。
+            // 4. 批量加载文档名称 + 各窗口里的块（各一次查询）。
             // 两个查询共用本 scope 的 RagDbContext，必须顺序执行：并发使用同一 DbContext 会抛
             // "A second operation was started on this context" 并被下方 catch 吞成空结果。
             var docNames = await LoadDocumentNamesAsync(docIds, ct);
             var allChunks = await _chunkRepository.AsQueryable()
-                .Where(c => docIds.Contains(c.DocumentId)
-                            && c.ChunkIndex >= globalMin
-                            && c.ChunkIndex <= globalMax)
+                .Where(BuildWindowPredicate(windowsByDoc.SelectMany(entry =>
+                    entry.Value.Select(window => new ChunkWindow(entry.Key, window.Start, window.End)))))
                 .OrderBy(c => c.DocumentId).ThenBy(c => c.ChunkIndex)
                 .Select(c => new { c.DocumentId, c.ChunkIndex, c.Content })
                 .ToListAsync(ct);
@@ -104,14 +101,14 @@ public class ParentDocumentRetriever : ApplicationService, IParentDocumentRetrie
 
             // 6. 为每个文档构建扩展结果
             var results = new List<ParentDocumentResult>();
-            foreach (var (documentId, matchInfos) in docMatchInfos)
+            foreach (var (documentId, windows) in windowsByDoc)
             {
                 if (!chunksByDoc.TryGetValue(documentId, out var chunkMap) || chunkMap.Count == 0)
                 {
                     continue;
                 }
 
-                var expandedBlocks = BuildExpandedBlocks(documentId, matchInfos, chunkMap, options);
+                var expandedBlocks = BuildExpandedBlocks(documentId, windows, chunkMap, options);
                 foreach (var block in expandedBlocks)
                 {
                     docNames.TryGetValue(block.DocumentId, out var docName);
@@ -135,27 +132,54 @@ public class ParentDocumentRetriever : ApplicationService, IParentDocumentRetrie
         }
     }
 
+    /// <summary>一篇文档里的一个块窗口（含两端）。</summary>
+    internal sealed record ChunkWindow(Guid DocumentId, int Start, int End);
+
     /// <summary>
-    /// 对单个文档中的匹配块进行扩展和合并（纯内存操作，不发起 DB 查询）
+    /// 只取各窗口里的块：<c>(DocumentId = d1 AND ChunkIndex BETWEEN s1 AND e1) OR ...</c>。
+    /// 窗口值经成员访问进入表达式，EF 把它们作为查询参数而不是内联字面量。窗口数受 TopK 约束（至多一百来个）。
     /// </summary>
-    private static List<ParentDocumentResult> BuildExpandedBlocks(
-        Guid documentId,
-        List<(int ChunkIndex, double Score)> matchInfos,
-        Dictionary<int, string> chunkMap,
-        ParentRetrievalOptions options)
+    internal static Expression<Func<DocumentChunk, bool>> BuildWindowPredicate(IEnumerable<ChunkWindow> windows)
     {
-        // 计算每个匹配块的扩展范围，合并重叠区域
-        var intervals = matchInfos
+        var chunk = Expression.Parameter(typeof(DocumentChunk), "c");
+        var documentId = Expression.Property(chunk, nameof(DocumentChunk.DocumentId));
+        var chunkIndex = Expression.Property(chunk, nameof(DocumentChunk.ChunkIndex));
+
+        Expression? body = null;
+        foreach (var window in windows)
+        {
+            var bounds = Expression.Constant(window);
+            var inWindow = Expression.AndAlso(
+                Expression.Equal(documentId, Expression.Property(bounds, nameof(ChunkWindow.DocumentId))),
+                Expression.AndAlso(
+                    Expression.GreaterThanOrEqual(chunkIndex, Expression.Property(bounds, nameof(ChunkWindow.Start))),
+                    Expression.LessThanOrEqual(chunkIndex, Expression.Property(bounds, nameof(ChunkWindow.End)))));
+            body = body is null ? inWindow : Expression.OrElse(body, inWindow);
+        }
+
+        return Expression.Lambda<Func<DocumentChunk, bool>>(body ?? Expression.Constant(false), chunk);
+    }
+
+    /// <summary>每个命中块向两侧扩展 <see cref="ParentRetrievalOptions.WindowSize"/> 块（下界截到 0），按起点排序。</summary>
+    private static List<(int Start, int End, double Score)> ToWindows(List<(int ChunkIndex, double Score)> matchInfos, int windowSize)
+        => matchInfos
             .Select(m => (
-                Start: Math.Max(0, m.ChunkIndex - options.WindowSize),
-                End: m.ChunkIndex + options.WindowSize,
+                Start: Math.Max(0, m.ChunkIndex - windowSize),
+                End: m.ChunkIndex + windowSize,
                 m.Score))
             .OrderBy(i => i.Start)
             .ToList();
 
-        var mergedIntervals = MergeIntervals(intervals);
-
-        // 6. 为每个合并区间构建结果
+    /// <summary>
+    /// 对单个文档的合并后窗口逐个拼接内容（纯内存操作，不发起 DB 查询）
+    /// </summary>
+    private static List<ParentDocumentResult> BuildExpandedBlocks(
+        Guid documentId,
+        List<(int Start, int End, double Score)> mergedIntervals,
+        Dictionary<int, string> chunkMap,
+        ParentRetrievalOptions options)
+    {
+        // 为每个合并区间构建结果
         var results = new List<ParentDocumentResult>();
         foreach (var (start, end, score) in mergedIntervals)
         {

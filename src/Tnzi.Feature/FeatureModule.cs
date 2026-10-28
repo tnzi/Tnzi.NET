@@ -67,6 +67,13 @@ public class FeatureModule : TnziApplicationModule
         services.AddEventHandler<FeatureValueChangedEvent, FeatureValueCacheInvalidationHandler>();
         services.AddEventHandler<FeatureValueDeletedEvent, FeatureValueCacheInvalidationHandler>();
 
+        // The definition snapshot is invalidated in place by FeatureService and once more after
+        // commit: under an ambient unit of work the in-place invalidation runs before the write is
+        // visible, and a concurrent refresh would cache the old row for a whole refresh interval.
+        services.AddEventHandler<FeatureDefinitionCreatedEvent, FeatureDefinitionCacheInvalidationHandler>();
+        services.AddEventHandler<FeatureDefinitionUpdatedEvent, FeatureDefinitionCacheInvalidationHandler>();
+        services.AddEventHandler<FeatureDefinitionDeletedEvent, FeatureDefinitionCacheInvalidationHandler>();
+
         // Register built-in value providers. The chain is evaluated by descending priority:
         //   Tenant (200) -> Global (100) -> definition default.
         // Global is what makes admin-written values take effect in a single-tenant deployment;

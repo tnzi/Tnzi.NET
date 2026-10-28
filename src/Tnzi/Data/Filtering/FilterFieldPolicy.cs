@@ -25,7 +25,14 @@ public sealed record FilterFieldPolicy
     /// 不做任何限制：服务端自己构造的过滤器用它。任何公共属性路径（引用导航、集合、<c>byte[]</c>、值对象）
     /// 都可以做谓词终点，只有「属性不存在」会被拒绝（那是拼写错误不是准入问题）。
     /// </summary>
-    public static FilterFieldPolicy Unrestricted { get; } = new() { AllowNavigation = true, MaxDepth = int.MaxValue, AllowAnyProperty = true };
+    public static FilterFieldPolicy Unrestricted { get; } = new()
+    {
+        AllowNavigation = true,
+        MaxDepth = int.MaxValue,
+        AllowAnyProperty = true,
+        MaxRules = int.MaxValue,
+        MaxGroupDepth = int.MaxValue,
+    };
 
     /// <summary>
     /// 请求数据的宽松策略：根实体的每一个公共标量属性都可用，禁止导航路径。
@@ -43,6 +50,20 @@ public sealed record FilterFieldPolicy
     /// 字段路径允许的最大段数（默认 1 = 只有根属性）。只在 <see cref="AllowNavigation"/> 开启时有意义。
     /// </summary>
     public int MaxDepth { get; init; } = 1;
+
+    /// <summary>
+    /// 一个过滤器（含全部嵌套分组）最多多少条规则（默认 100），超出答 400。<see cref="Unrestricted"/> 不限。
+    /// </summary>
+    /// <remarks>
+    /// 请求体里的规则数组没有别的上限（JSON 的深度限制只管嵌套、不管同层长度）：一次请求带几万条规则，
+    /// 生成的谓词与 SQL 就按规则数线性膨胀，占满 CPU 与数据库。大集合的筛选用一条 <c>In</c> 规则。
+    /// </remarks>
+    public int MaxRules { get; init; } = 100;
+
+    /// <summary>
+    /// 分组最多嵌套几层（根分组算第 1 层，默认 8），超出答 400。<see cref="Unrestricted"/> 不限。
+    /// </summary>
+    public int MaxGroupDepth { get; init; } = 8;
 
     /// <summary>
     /// 是否放弃标量 / 集合规则，只要求路径上的每一段是公共属性（默认 false）。

@@ -104,6 +104,22 @@ public class Promotion : AuditedEntity<Guid>, IMultiTenant
     public int? PerUserUsageLimit { get; set; }
 
     /// <summary>
+    /// 每用户实际生效的使用次数上限：本促销设了就用它，没设就用配置的默认值；不大于 0 视为不限（返回 null）。
+    /// </summary>
+    /// <remarks>
+    /// 核销前的校验、核销事务内的复核与券包的「剩余次数」共用这一个判定。此前券包只看本列：
+    /// 没单独设上限的促销被当成不限（用满默认 5 次后券包里仍显示可用、结账被拒），
+    /// 设为 0 的又被当成「已用完」藏起来（而守卫把 0 当不限、照常放行）。
+    /// </remarks>
+    /// <param name="perUserUsageLimit">促销自己的 <see cref="PerUserUsageLimit"/>（实体或 DTO 上的那一列）。</param>
+    /// <param name="defaultLimit">配置的默认上限（<c>Payment:Promotion:MaxCouponUsagePerUser</c>）。</param>
+    public static int? ResolvePerUserLimit(int? perUserUsageLimit, int defaultLimit)
+    {
+        var limit = perUserUsageLimit ?? defaultLimit;
+        return limit > 0 ? limit : null;
+    }
+
+    /// <summary>
     /// 是否可叠加
     /// </summary>
     public bool Stackable { get; set; }

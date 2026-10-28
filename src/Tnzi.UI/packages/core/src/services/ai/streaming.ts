@@ -14,8 +14,13 @@ import { StreamRequestError } from './stream-request-error';
 export interface ChatStreamOptions {
   /** Full URL to the streaming endpoint (use getChatStreamUrl() to build) */
   url: string;
-  /** Chat request body */
-  body: ChatRequestDto;
+  /**
+   * Chat request body. Omit it, with `method: 'GET'`, to reattach to a run's stream
+   * (`useChatApi(http).getRunStreamUrl(runId, fromSequence)`).
+   */
+  body?: ChatRequestDto;
+  /** `POST` (default, sends `body`) or `GET` (reattach to a run; no body). */
+  method?: 'POST' | 'GET';
   /** Additional headers (Authorization, etc.) */
   headers?: Record<string, string>;
   /** Called for each text delta - append directly, DO NOT add newlines */
@@ -104,14 +109,15 @@ export async function streamChat(options: ChatStreamOptions): Promise<ChatStream
   };
 
   try {
+    const method = options.method ?? 'POST';
     const response = await fetch(options.url, {
-      method: 'POST',
+      method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
         Accept: 'text/event-stream',
         ...options.headers,
       },
-      body: JSON.stringify(options.body),
+      ...(method === 'POST' ? { body: JSON.stringify(options.body ?? {}) } : {}),
       signal: options.signal,
     });
 

@@ -134,6 +134,19 @@ public class FeatureService : ApplicationService, IFeatureService
                 ErrorCodes.FeatureDefinitionAlreadyExists);
         }
 
+        var tooLong = FeatureFieldLimits.Exceeded(input.Name, FeatureFieldLimits.Name, "Name")
+            ?? ValidateDefinitionLengths(input.DisplayName, input.Description, input.DefaultValue, input.ParentName, input.Group);
+        if (tooLong != null)
+        {
+            return Fail<FeatureDefinitionDto>(tooLong, 400, ErrorCodes.FeatureFieldTooLong);
+        }
+
+        var invalidDefault = ValidateDefaultValue(input.ValueType, input.DefaultValue);
+        if (invalidDefault != null)
+        {
+            return Fail<FeatureDefinitionDto>(invalidDefault, 400, ErrorCodes.InvalidFeatureValueType);
+        }
+
         var entity = input.MapTo<FeatureDefinition>();
         entity.IsEnabled = true;
 
@@ -170,6 +183,36 @@ public class FeatureService : ApplicationService, IFeatureService
             return Fail<FeatureDefinitionDto>("Feature definition not found", 404, ErrorCodes.FeatureDefinitionNotFound);
         }
 
+        var tooLong = ValidateDefinitionLengths(input.DisplayName, input.Description, input.DefaultValue, input.ParentName, input.Group);
+        if (tooLong != null)
+        {
+            return Fail<FeatureDefinitionDto>(tooLong, 400, ErrorCodes.FeatureFieldTooLong);
+        }
+
+        var invalidDefault = ValidateDefaultValue(input.ValueType, input.DefaultValue);
+        if (invalidDefault != null)
+        {
+            return Fail<FeatureDefinitionDto>(invalidDefault, 400, ErrorCodes.InvalidFeatureValueType);
+        }
+
+        // 改值类型时既有的值要在新类型下仍然成立：String 下存的 "v2" / "enabled" 换成 Boolean 之后
+        // 解析不出来，运行时只能按关闭处理，管理端的值视图却还显示着它：一个看起来配了、实际不生效的开关。
+        if (entity.ValueType != input.ValueType)
+        {
+            var existingValues = await _valueRepository
+                .Where(v => v.FeatureDefinitionId == id)
+                .Select(v => v.Value)
+                .ToListAsync();
+            var incompatible = existingValues.Count(v => !ValidateFeatureValue(input.ValueType, v));
+            if (incompatible > 0)
+            {
+                return Fail<FeatureDefinitionDto>(
+                    $"Cannot change the value type to {input.ValueType}: {incompatible} existing value(s) of this feature are not valid {input.ValueType} values. Update or remove them first.",
+                    409,
+                    ErrorCodes.InvalidFeatureValueType);
+            }
+        }
+
         input.MapTo(entity);
         await _definitionRepository.UpdateAsync(entity);
         await _featureManager.InvalidateCacheAsync();
@@ -199,14 +242,39 @@ public class FeatureService : ApplicationService, IFeatureService
         }
 
         var name = entity.Name;
-        // Cascade delete will automatically remove associated FeatureValue records
-        await _definitionRepository.DeleteAsync(entity);
+
+        // ★ 定义是软删除，数据库的级联删除永远不会触发：值行留成孤儿，值缓存里按功能名存着的条目也没人失效。
+        // 删掉再建一个同名定义，ValueCacheSeconds 之内运行时读到的仍是旧定义的值。
+        // 所以这里显式软删它的值，并按值逐条发删除事件（值缓存按事件精确失效）。
+        var values = await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            var owned = await _valueRepository
+                .Where(v => v.FeatureDefinitionId == id)
+                .ToListAsync(ct);
+            if (owned.Count > 0)
+            {
+                await _valueRepository.DeleteManyAsync(owned, ct);
+            }
+
+            await _definitionRepository.DeleteAsync(entity, ct);
+            return owned;
+        });
         await _featureManager.InvalidateCacheAsync();
 
-        Logger.LogInformation("Feature definition deleted: {Name} (associated values cascade-deleted)", name);
+        Logger.LogInformation("Feature definition deleted: {Name} ({ValueCount} value(s) deleted with it)", name, values.Count);
 
         if (EventBus != null)
         {
+            foreach (var value in values)
+            {
+                await EventBus.PublishAsync(new FeatureValueDeletedEvent
+                {
+                    FeatureName = name,
+                    ProviderName = value.ProviderName,
+                    ProviderKey = value.ProviderKey
+                });
+            }
+
             await EventBus.PublishAsync(new FeatureDefinitionDeletedEvent
             {
                 DefinitionId = id,
@@ -286,6 +354,26 @@ public class FeatureService : ApplicationService, IFeatureService
                 $"Feature value provider '{provider.Name}' is keyless and does not accept a provider key",
                 400,
                 ErrorCodes.FeatureValueProviderKeyNotAllowed);
+        }
+
+        // 键按原样比较：租户 id 写成大写或不带连字符时，200 存进去，运行时（小写带连字符）在区分大小写的库上永远对不上。
+        // 由 provider 把键规范成它查值时用的写法；它根本不可能匹配的键（租户作用域给的不是租户 id）直接拒绝。
+        if (key != null)
+        {
+            if (!provider.TryNormalizeKey(key, out var normalized))
+            {
+                return Fail<ValueScope>(
+                    $"'{key}' is not a valid key for feature value provider '{provider.Name}'",
+                    400,
+                    ErrorCodes.FeatureValueProviderKeyInvalid);
+            }
+
+            key = normalized;
+            var keyTooLong = FeatureFieldLimits.Exceeded(key, FeatureFieldLimits.ProviderKey, "Provider key");
+            if (keyTooLong != null)
+            {
+                return Fail<ValueScope>(keyTooLong, 400, ErrorCodes.FeatureFieldTooLong);
+            }
         }
 
         // ★ 租户归属由身份决定，不由客户端参数决定：租户内的调用者点名别的键（通常是别的租户 id）
@@ -382,6 +470,12 @@ public class FeatureService : ApplicationService, IFeatureService
         if (definition == null)
         {
             return Fail<FeatureValueDto>("Feature definition not found", 404, ErrorCodes.FeatureDefinitionNotFound);
+        }
+
+        var valueTooLong = FeatureFieldLimits.Exceeded(input.Value, FeatureFieldLimits.Value, "Value");
+        if (valueTooLong != null)
+        {
+            return Fail<FeatureValueDto>(valueTooLong, 400, ErrorCodes.FeatureFieldTooLong);
         }
 
         // Validate value against definition's ValueType
@@ -511,6 +605,22 @@ public class FeatureService : ApplicationService, IFeatureService
         var providerName = scope.Provider.Name;
         var providerKey = scope.Key;
 
+        // 同一个定义在一批里出现两次时哪个值算数说不清；库里还没有行时两条都会进待插入列表，
+        // 撞唯一索引整批 500（无键作用域在 PostgreSQL / MySQL / SQLite 上连索引都挡不住，直接存成两行）。
+        var duplicated = input.Values
+            .Where(v => v.FeatureDefinitionId != Guid.Empty)
+            .GroupBy(v => v.FeatureDefinitionId)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+        if (duplicated.Count > 0)
+        {
+            return Fail<BatchSetFeatureValuesResultDto>(
+                $"Each feature definition may appear only once in a batch; repeated: {string.Join(", ", duplicated)}",
+                400,
+                ErrorCodes.FeatureValueBatchDuplicate);
+        }
+
         var result = new BatchSetFeatureValuesResultDto();
 
         // 批量加载所有涉及的定义
@@ -526,7 +636,8 @@ public class FeatureService : ApplicationService, IFeatureService
                         && definitionIds.Contains(v.FeatureDefinitionId))
             .ToListAsync();
 
-        var existingLookup = existingValues.ToDictionary(v => v.FeatureDefinitionId);
+        // 无键作用域在 NULL 互不相等的库上可能已经存着重复行（唯一索引挡不住）：取第一行，不让 ToDictionary 抛出。
+        var existingLookup = FirstPerDefinition(existingValues);
 
         var toInsert = new List<FeatureValue>();
         var toUpdate = new List<FeatureValue>();
@@ -547,6 +658,14 @@ public class FeatureService : ApplicationService, IFeatureService
             if (!definitions.TryGetValue(item.FeatureDefinitionId, out var definition))
             {
                 result.Errors.Add($"Feature definition '{item.FeatureDefinitionId}' not found");
+                result.FailedCount++;
+                continue;
+            }
+
+            var itemTooLong = FeatureFieldLimits.Exceeded(item.Value, FeatureFieldLimits.Value, $"Value of feature '{definition.Name}'");
+            if (itemTooLong != null)
+            {
+                result.Errors.Add(itemTooLong);
                 result.FailedCount++;
                 continue;
             }
@@ -597,16 +716,20 @@ public class FeatureService : ApplicationService, IFeatureService
             result.SucceededCount++;
         }
 
-        // 批量持久化
-        if (toUpdate.Count > 0)
+        // 批量持久化：更新与插入在同一个工作单元里，要么都生效要么都不生效。没有它时更新先落了库、
+        // 插入再失败，客户端拿到 500，而已经生效的那几条既不在响应里也没发事件（值缓存不失效）。
+        await ExecuteInUnitOfWorkAsync(async ct =>
         {
-            await _valueRepository.UpdateManyAsync(toUpdate);
-        }
+            if (toUpdate.Count > 0)
+            {
+                await _valueRepository.UpdateManyAsync(toUpdate, ct);
+            }
 
-        if (toInsert.Count > 0)
-        {
-            await _valueRepository.InsertManyAsync(toInsert);
-        }
+            if (toInsert.Count > 0)
+            {
+                await _valueRepository.InsertManyAsync(toInsert, ct);
+            }
+        });
 
         // 写库成功之后才通知订阅者
         if (EventBus != null)
@@ -651,7 +774,7 @@ public class FeatureService : ApplicationService, IFeatureService
             .Where(v => v.ProviderName == scope.Provider.Name && v.ProviderKey == scope.Key)
             .AsNoTracking()
             .ToListAsync();
-        var explicitLookup = scopeValues.ToDictionary(v => v.FeatureDefinitionId);
+        var explicitLookup = FirstPerDefinition(scopeValues);
 
         // 运行时链上排在该作用域之后的无键 provider（Global）：作用域没设值时由它们兜底。
         // 与 FeatureChecker 的评估顺序一致，管理员看到的「生效值」才等于运行时答案。
@@ -780,6 +903,53 @@ public class FeatureService : ApplicationService, IFeatureService
         providerName = null;
         value = string.Empty;
         return false;
+    }
+
+    /// <summary>
+    /// 一组值按定义 id 取第一行。
+    /// </summary>
+    /// <remarks>
+    /// 无键作用域（Global）的 <c>ProviderKey</c> 为 NULL，唯一索引在 PostgreSQL / MySQL / SQLite 上挡不住重复行
+    /// （NULL 互不相等）。<c>ToDictionary</c> 遇到重复行抛异常，值视图从此每次加载都 500，直到有人手工删掉那一行。
+    /// </remarks>
+    private static Dictionary<Guid, FeatureValue> FirstPerDefinition(IEnumerable<FeatureValue> values)
+    {
+        var lookup = new Dictionary<Guid, FeatureValue>();
+        foreach (var value in values)
+        {
+            lookup.TryAdd(value.FeatureDefinitionId, value);
+        }
+
+        return lookup;
+    }
+
+    /// <summary>
+    /// 定义可编辑文本字段的列宽校验；越界时返回面向调用方的消息。
+    /// </summary>
+    private static string? ValidateDefinitionLengths(string? displayName, string? description, string? defaultValue, string? parentName, string? group)
+        => FeatureFieldLimits.Exceeded(displayName, FeatureFieldLimits.DisplayName, "Display name")
+           ?? FeatureFieldLimits.Exceeded(description, FeatureFieldLimits.Description, "Description")
+           ?? FeatureFieldLimits.Exceeded(defaultValue, FeatureFieldLimits.Value, "Default value")
+           ?? FeatureFieldLimits.Exceeded(parentName, FeatureFieldLimits.Name, "Parent name")
+           ?? FeatureFieldLimits.Exceeded(group, FeatureFieldLimits.Group, "Group");
+
+    /// <summary>
+    /// 校验定义的默认值是否符合其值类型；不符合时返回面向调用方的消息。
+    /// </summary>
+    /// <remarks>
+    /// 空默认值表示「没有默认值」，不校验。此前默认值是自由文本：Boolean 功能填 "0" / "off" 意图关闭，
+    /// 运行时解析不出布尔值，按「非空即开启」放行了全部 <c>[RequireFeature]</c> 端点，值视图上却显示 "0"。
+    /// </remarks>
+    private static string? ValidateDefaultValue(FeatureValueType valueType, string? defaultValue)
+    {
+        if (string.IsNullOrEmpty(defaultValue) || ValidateFeatureValue(valueType, defaultValue))
+        {
+            return null;
+        }
+
+        return valueType == FeatureValueType.Boolean
+            ? $"Invalid default value '{defaultValue}' for a Boolean feature; use 'true' or 'false'."
+            : $"Invalid default value '{defaultValue}' for feature type {valueType}.";
     }
 
     /// <summary>

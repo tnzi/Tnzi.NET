@@ -32,10 +32,11 @@ public class DefaultSandboxAdminController : ApiAdminControllerBase
         // ★ 按<b>当前生效的 provider</b> 投影，而不是恒读 Local。此前 Provider 字段答
         // "docker"，下面三行命令/模式黑名单却始终来自 Local 配置 —— 于是管理端展示的
         // 是一份根本没在执行的规则，看上去还完全正常。
-        var (deniedCommands, deniedPatterns) = _provider.Name switch
+        // 两层命令黑名单都要列出：前缀黑名单才是做 token 级拦截的那一层，只列子串黑名单等于漏掉真正生效的规则。
+        var (deniedCommands, deniedCommandPrefixes, deniedPatterns) = _provider.Name switch
         {
-            "docker" => (opts.Docker.DeniedCommands, opts.Docker.DeniedPatterns),
-            _ => (opts.Local.DeniedCommands, opts.Local.DeniedPatterns)
+            "docker" => (opts.Docker.DeniedCommands, opts.Docker.DeniedCommandPrefixes, opts.Docker.DeniedPatterns),
+            _ => (opts.Local.DeniedCommands, opts.Local.DeniedCommandPrefixes, opts.Local.DeniedPatterns)
         };
 
         var dto = new SandboxStatusDto
@@ -44,6 +45,7 @@ public class DefaultSandboxAdminController : ApiAdminControllerBase
             Provider = _provider.Name,
             DataRoot = opts.DataRoot,
             DeniedCommands = deniedCommands.AsReadOnly(),
+            DeniedCommandPrefixes = deniedCommandPrefixes.AsReadOnly(),
             DeniedPatterns = deniedPatterns.AsReadOnly(),
             // 环境变量黑名单只有本地 provider 有（容器里根本不继承宿主环境），
             // 其它 provider 下如实返回空表，而不是端出一份不适用的清单。

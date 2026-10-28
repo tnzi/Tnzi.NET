@@ -17,7 +17,7 @@
     <TCardPage
       :state="crud"
       mode="page"
-      draggable
+      :draggable="can('ai.provider.update')"
       :drag-disabled="isConfigSource"
       @reorder="onReorder"
       :title="t('title')"
@@ -257,6 +257,9 @@ const crud = useCrudPage<ProviderDto>({
   rowKey: (p) => p.id,
   fetchData: (query) => bridge.providers.fetch(query),
   createData: (data) => bridge.providers.create(toCreateDto(data as Record<string, unknown>)),
+  // The server's create defaults: an unseeded switch renders OFF while the
+  // created record is enabled.
+  createDefaults: { isEnabled: true, priority: 0 },
   updateData: (id, data) =>
     bridge.providers.update(String(id), toUpdateDto(data as Record<string, unknown>)),
   deleteData: (ids) => bridge.providers.delete(ids.map(String)),
@@ -302,7 +305,8 @@ async function testOne(item: ProviderDto): Promise<void> {
 }
 
 async function removeOne(item: ProviderDto): Promise<void> {
-  await crud.handleDelete([item.id])
+  // handleDelete has already reported a refusal (toast or onError) before rethrowing.
+  await crud.handleDelete([item.id]).catch(() => undefined)
 }
 
 defineExpose({ testOne, testStateOf, testStates, toCreateDto, toUpdateDto, isConfigSource })

@@ -8,6 +8,18 @@ vi.mock('../../../src/plugin/client', () => ({
   useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }),
 }))
 
+// The page is gated by `authorization.entityRole.view` alone: the role axis
+// comes from the data-auth surface, and Identity's role list (`role.view`)
+// answers 403 here, as it does for a delegated data-rule administrator.
+const reads = vi.hoisted(() => ({
+  roles: vi.fn(async () => [
+    { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
+  ]),
+  identityRolesGetAll: vi.fn(async () => {
+    throw new Error('403: role.view')
+  }),
+}))
+
 vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
   createAuthorizationBridge: () => ({
     functionModules: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), getAll: vi.fn() },
@@ -25,19 +37,15 @@ vi.mock('../../../src/services/bridges/authorization-bridge', () => ({
       update: vi.fn(),
       delete: vi.fn(),
       getByEntityInfo: vi.fn(async () => []),
+      roles: reads.roles,
       setCell: vi.fn(async () => undefined),
     },
   }),
 }))
 
-// Unpaged `roles.getAll`, not the paged `fetch` (which the server clamps to 100 rows).
-const rolesFetch = vi.fn(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 100 }))
-const rolesGetAll = vi.fn(async () => [
-  { id: 'r1', name: 'Admin', normalizedName: 'ADMIN', isSystem: true, isDefault: false, creationTime: '2026-04-14T00:00:00Z' },
-])
 vi.mock('../../../src/services/bridges/identity-bridge', () => ({
   createIdentityBridge: () => ({
-    roles: { fetch: rolesFetch, getAll: rolesGetAll },
+    roles: { fetch: vi.fn(), getAll: reads.identityRolesGetAll },
     users: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     tenants: { fetch: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     organizations: { getTree: vi.fn() },
@@ -69,11 +77,13 @@ describe('EntityRoles page (Tier 3: data-permission matrix)', () => {
     expect(wrapper.find('.n-base-selection').exists()).toBe(true)
   })
 
-  it('loads the role columns from the unpaged endpoint, never the clamped paged one', async () => {
-    mount(EntityRoles)
+  it('loads the role columns from the data-auth surface, not the Identity role list', async () => {
+    const wrapper = mount(EntityRoles)
     await nextTick()
     await new Promise(r => setTimeout(r, 100))
-    expect(rolesGetAll).toHaveBeenCalled()
-    expect(rolesFetch).not.toHaveBeenCalled()
+    expect(reads.roles).toHaveBeenCalled()
+    expect(reads.identityRolesGetAll).not.toHaveBeenCalled()
+    const vm = wrapper.vm as unknown as { roles: { id: string; name: string }[] }
+    expect(vm.roles.map((r) => r.name)).toEqual(['Admin'])
   })
 })

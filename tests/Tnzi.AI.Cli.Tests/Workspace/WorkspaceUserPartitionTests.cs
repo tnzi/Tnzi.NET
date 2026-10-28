@@ -5,7 +5,7 @@ namespace Tnzi.AI.Cli.Tests;
 /// </summary>
 public class WorkspaceUserPartitionTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), "tnzi-cli-part-" + Guid.NewGuid().ToString("N"));
+    private readonly string _root = TestScratch.NewPath("part");
 
     public WorkspaceUserPartitionTests()
     {
@@ -14,14 +14,7 @@ public class WorkspaceUserPartitionTests : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-        catch (IOException)
-        {
-            // 清理失败不该让测试红。
-        }
+        TestScratch.Delete(_root);
 
         GC.SuppressFinalize(this);
     }
@@ -36,6 +29,9 @@ public class WorkspaceUserPartitionTests : IDisposable
 
     private FileSystemWorkspacePreparer Preparer(bool partition)
         => new(new TestOptionsMonitor<CliAgentOptions>(Options(partition)), NullLogger<FileSystemWorkspacePreparer>.Instance);
+
+    /// <summary>本机执行目标（分区与否由布置器的配置决定，目标只给工作区根）。</summary>
+    private LocalProcessHost Host => LocalHosts.Create(Options(partition: false));
 
     private static CliRunContext Context(Guid threadId, Guid? userId, Guid? tenantId = null) => new()
     {
@@ -54,7 +50,7 @@ public class WorkspaceUserPartitionTests : IDisposable
     {
         var threadId = Guid.NewGuid();
 
-        var workspace = await Preparer(partition: false).PrepareAsync(Context(threadId, Guid.NewGuid()), CancellationToken.None);
+        var workspace = await Preparer(partition: false).PrepareAsync(Host, Context(threadId, Guid.NewGuid()), CancellationToken.None);
 
         workspace.RootDirectory.ShouldBe(Path.Combine(_root, "host", threadId.ToString("N")));
     }
@@ -66,7 +62,7 @@ public class WorkspaceUserPartitionTests : IDisposable
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
 
-        var workspace = await Preparer(partition: true).PrepareAsync(Context(threadId, userId, tenantId), CancellationToken.None);
+        var workspace = await Preparer(partition: true).PrepareAsync(Host, Context(threadId, userId, tenantId), CancellationToken.None);
 
         workspace.RootDirectory.ShouldBe(Path.Combine(_root, tenantId.ToString("N"), "u-" + userId.ToString("N"), threadId.ToString("N")));
         workspace.WorkDirectory.ShouldStartWith(workspace.RootDirectory);
@@ -77,7 +73,7 @@ public class WorkspaceUserPartitionTests : IDisposable
     {
         var threadId = Guid.NewGuid();
 
-        var workspace = await Preparer(partition: true).PrepareAsync(Context(threadId, userId: null), CancellationToken.None);
+        var workspace = await Preparer(partition: true).PrepareAsync(Host, Context(threadId, userId: null), CancellationToken.None);
 
         workspace.RootDirectory.ShouldBe(Path.Combine(_root, "host", CliWorkspaceLayout.AnonymousUserPartition, threadId.ToString("N")));
     }
@@ -91,8 +87,8 @@ public class WorkspaceUserPartitionTests : IDisposable
         var threadId = Guid.NewGuid();
         var preparer = Preparer(partition: true);
 
-        var first = await preparer.PrepareAsync(Context(threadId, Guid.NewGuid()), CancellationToken.None);
-        var second = await preparer.PrepareAsync(Context(threadId, Guid.NewGuid()), CancellationToken.None);
+        var first = await preparer.PrepareAsync(Host, Context(threadId, Guid.NewGuid()), CancellationToken.None);
+        var second = await preparer.PrepareAsync(Host, Context(threadId, Guid.NewGuid()), CancellationToken.None);
 
         second.WorkDirectory.ShouldNotBe(first.WorkDirectory);
     }
@@ -103,12 +99,12 @@ public class WorkspaceUserPartitionTests : IDisposable
     [Fact]
     public async Task Gc_CollectsExpiredRunsInsideUserPartitionsAndLegacyLayoutAlike()
     {
-        var partitioned = await Preparer(partition: true).PrepareAsync(Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
-        var legacy = await Preparer(partition: false).PrepareAsync(Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
-        Age(partitioned.RootDirectory);
-        Age(legacy.RootDirectory);
+        var partitioned = await Preparer(partition: true).PrepareAsync(Host, Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
+        var legacy = await Preparer(partition: false).PrepareAsync(Host, Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
+        WorkspaceAging.Age(partitioned.RootDirectory, TimeSpan.FromDays(10));
+        WorkspaceAging.Age(legacy.RootDirectory, TimeSpan.FromDays(10));
 
-        Gc(Options(partition: true)).Collect(Options(partition: true));
+        Gc(Options(partition: true)).Collect(Options(partition: true), NoActiveRuns);
 
         Directory.Exists(partitioned.RootDirectory).ShouldBeFalse();
         Directory.Exists(legacy.RootDirectory).ShouldBeFalse();
@@ -121,12 +117,12 @@ public class WorkspaceUserPartitionTests : IDisposable
     [Fact]
     public async Task Gc_NeverTreatsAUserPartitionAsAnOrphanedRun()
     {
-        var live = await Preparer(partition: true).PrepareAsync(Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
+        var live = await Preparer(partition: true).PrepareAsync(Host, Context(Guid.NewGuid(), Guid.NewGuid()), CancellationToken.None);
         var partition = Path.GetDirectoryName(live.RootDirectory)!;
         Directory.SetCreationTimeUtc(partition, DateTime.UtcNow.AddDays(-30));
         Directory.SetLastWriteTimeUtc(partition, DateTime.UtcNow.AddDays(-30));
 
-        Gc(Options(partition: true)).Collect(Options(partition: true));
+        Gc(Options(partition: true)).Collect(Options(partition: true), NoActiveRuns);
 
         Directory.Exists(live.WorkDirectory).ShouldBeTrue();
     }
@@ -137,19 +133,20 @@ public class WorkspaceUserPartitionTests : IDisposable
     [Fact]
     public void Gc_LeavesTheIsolatedConfigDirectoryAlone()
     {
-        var configDirectory = CliWorkspaceLayout.ResolveConfigDirectory(CliBuiltInProviders.All["claude"], Options(partition: false));
+        var configDirectory = CliWorkspaceLayout.ResolveConfigDirectory(CliBuiltInProviders.All["claude"], Host);
         Directory.CreateDirectory(Path.Combine(configDirectory, "projects"));
         File.WriteAllText(Path.Combine(configDirectory, ".credentials.json"), "{}");
         Age(Path.Combine(_root, CliWorkspaceLayout.ConfigDirectoryName));
         Age(configDirectory);
 
-        Gc(Options(partition: false)).Collect(Options(partition: false));
+        Gc(Options(partition: false)).Collect(Options(partition: false), NoActiveRuns);
 
         File.Exists(Path.Combine(configDirectory, ".credentials.json")).ShouldBeTrue();
     }
 
-    private static CliWorkspaceGcService Gc(CliAgentOptions options)
-        => new(new TestOptionsMonitor<CliAgentOptions>(options), NullLogger<CliWorkspaceGcService>.Instance);
+    private static readonly IReadOnlySet<Guid> NoActiveRuns = new HashSet<Guid>();
+
+    private static CliWorkspaceGcService Gc(CliAgentOptions options) => WorkspaceAging.Gc(options);
 
     private static void Age(string directory)
     {

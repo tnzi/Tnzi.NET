@@ -20,6 +20,11 @@ export interface PercentileResultDto {
 
 /** Per-endpoint aggregate statistics. */
 export interface EndpointStatsDto {
+  /**
+   * Route template of the endpoint (`/api/users/{id}`), not the raw request path, so one route is
+   * one row whatever ids it was called with. Requests that matched no endpoint share the
+   * `(unmatched)` row.
+   */
   path: string;
   method: string;
   requestCount: number;
@@ -33,6 +38,7 @@ export interface EndpointStatsDto {
 
 /** A single slow-request record above the configured threshold. */
 export interface SlowRequestRecordDto {
+  /** Raw request path, with the actual route values. */
   path: string;
   method: string;
   statusCode: number;

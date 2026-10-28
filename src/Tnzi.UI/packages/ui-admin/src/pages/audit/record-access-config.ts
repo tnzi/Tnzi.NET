@@ -21,11 +21,12 @@ export const recordAccessColumns: ColumnDef[] = [
  * Filters.
  *
  * `resourceType` + `resourceId` together are the compliance question
- * ("who viewed this file"); `userId` alone is the abuse question
- * ("what has this account been reading").
+ * ("who viewed this file"). The backend also accepts `userId` alone (the abuse
+ * question, "what has this account been reading"), which this page does not
+ * offer as a filter; its read-volume view ranks accounts by how much they read.
  */
 export const recordAccessSearchFields: FormSchemaItem[] = [
-  { key: 'resourceType', label: 'columns.resourceType', type: 'input' },
-  { key: 'resourceId', label: 'columns.resourceId', type: 'input' },
-  { key: 'purpose', label: 'columns.purpose', type: 'input' },
+  { key: 'resourceType', label: 'columns.resourceType', type: 'text' },
+  { key: 'resourceId', label: 'columns.resourceId', type: 'text' },
+  { key: 'purpose', label: 'columns.purpose', type: 'text' },
 ]

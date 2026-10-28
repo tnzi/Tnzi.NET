@@ -36,6 +36,19 @@ describe('adapters/message', () => {
     expect(destroy).toHaveBeenCalled()
   })
 
+  // naive closes a message after its provider default (3000 ms) unless told
+  // `duration: 0`; a loading toast is closed by the function it returns.
+  it('loading stays open until closed unless the caller sets a duration', () => {
+    const api = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn().mockReturnValue({ destroy: vi.fn() }) }
+    const m = createMessageAdapter(api as any)
+    m.loading('wait')
+    m.loading('closable', { closable: true })
+    m.loading('timed', { duration: 5000 })
+    expect(api.loading).toHaveBeenNthCalledWith(1, 'wait', { duration: 0 })
+    expect(api.loading).toHaveBeenNthCalledWith(2, 'closable', { duration: 0, closable: true })
+    expect(api.loading).toHaveBeenNthCalledWith(3, 'timed', { duration: 5000 })
+  })
+
   it('falls back to window.$message when no API passed', () => {
     const api = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), loading: vi.fn().mockReturnValue({ destroy: vi.fn() }) }
     ;(window as any).$message = api

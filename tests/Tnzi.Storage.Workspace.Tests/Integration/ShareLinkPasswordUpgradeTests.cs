@@ -1,4 +1,6 @@
+using System.Data.Common;
 using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Tnzi.Storage.Workspace.Tests.Integration;
 
@@ -11,6 +13,13 @@ namespace Tnzi.Storage.Workspace.Tests.Integration;
 /// </remarks>
 public class ShareLinkPasswordUpgradeTests : WorkspaceIntegrationTestBase
 {
+    private readonly BeforeUpdateHook _hook = new();
+
+    protected override void ConfigureDbContextOptions(DbContextOptionsBuilder options)
+        => options.AddInterceptors(_hook);
+
+    private string ShareTable => DbContext.Model.FindEntityType(typeof(FileShare))!.GetTableName()!;
+
     private static string LegacyHash(string password)
     {
         var salt = RandomNumberGenerator.GetBytes(16);
@@ -83,6 +92,25 @@ public class ShareLinkPasswordUpgradeTests : WorkspaceIntegrationTestBase
         Assert.DoesNotContain("pbkdf2", stored);
     }
 
+    /// <summary>
+    /// ★★ 升级只改哈希这一列：口令通过之后、升级写下之前，链接被停用了（并发的失败把它停掉，或创建者撤销了它），
+    /// 升级不能把它写回启用。此前升级读出整行改完再整行写回，<c>IsEnabled</c> 与两个计数都被写回读到的旧值。
+    /// </summary>
+    [Fact]
+    public async Task TheUpgrade_DoesNotReEnableALinkDisabledInBetween()
+    {
+        var share = await SeedLegacyShareAsync("old-secret");
+        _hook.Arm("\"PasswordHash\"", $"UPDATE \"{ShareTable}\" SET \"IsEnabled\" = 0;");
+
+        var opened = await CreateShareService().ValidateShareAccessAsync(share.ShareToken, "old-secret");
+
+        Assert.True(_hook.Fired, "the concurrent disable was never injected");
+        Assert.True(opened.Data);
+        var stored = await DbContext.FileShares.AsNoTracking().SingleAsync(s => s.Id == share.Id);
+        Assert.False(stored.IsEnabled);
+        Assert.StartsWith("pbkdf2$", stored.PasswordHash);
+    }
+
     [Fact]
     public async Task ANewShare_StoresAPbkdf2Hash()
     {
@@ -91,5 +119,56 @@ public class ShareLinkPasswordUpgradeTests : WorkspaceIntegrationTestBase
 
         var stored = await StoredHashAsync(created.Id);
         Assert.StartsWith("pbkdf2$", stored);
+    }
+
+    /// <summary>
+    /// 在第一条写到某一列的 UPDATE 执行之前，在同一个连接与事务上先执行一段 SQL：模拟一次刚刚提交的并发修改。只触发一次。
+    /// </summary>
+    private sealed class BeforeUpdateHook : DbCommandInterceptor
+    {
+        private string? _column;
+        private string? _sql;
+
+        public bool Fired { get; private set; }
+
+        public void Arm(string column, string sql)
+        {
+            _column = column;
+            _sql = sql;
+            Fired = false;
+        }
+
+        public override async ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            await FireAsync(command, cancellationToken);
+            return result;
+        }
+
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result, CancellationToken cancellationToken = default)
+        {
+            await FireAsync(command, cancellationToken);
+            return result;
+        }
+
+        private async Task FireAsync(DbCommand command, CancellationToken cancellationToken)
+        {
+            if (_sql == null
+                || !command.CommandText.TrimStart().StartsWith("UPDATE", StringComparison.OrdinalIgnoreCase)
+                || !command.CommandText.Contains(_column!, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var sql = _sql;
+            _sql = null;
+
+            await using var injected = command.Connection!.CreateCommand();
+            injected.Transaction = command.Transaction;
+            injected.CommandText = sql;
+            await injected.ExecuteNonQueryAsync(cancellationToken);
+            Fired = true;
+        }
     }
 }

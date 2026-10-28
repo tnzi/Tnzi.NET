@@ -67,7 +67,7 @@ function mockThreadApi() {
     updateTitle: vi.fn(async (id: string, d: { title: string }) => ({ id, title: d.title })),
     delete: vi.fn(async () => undefined),
     exportJson: vi.fn(),
-    getExportMarkdownUrl: vi.fn(),
+    exportMarkdown: vi.fn(),
   }
 }
 
@@ -229,12 +229,16 @@ function mockMcpApi() {
   }
 }
 
-function mockQuotaApi() {
+function mockUsageLimitApi() {
   return {
-    getQuota: vi.fn(async (userId: string) => ({ userId, dailyTokenLimit: 1000 })),
-    getList: vi.fn(async () => pagedList([{ id: 'q1', userId: 'u1', dailyTokenLimit: 1000 }])),
-    setQuota: vi.fn(async (d: unknown) => ({ ...(d as object) })),
-    resetQuota: vi.fn(),
+    getDefaults: vi.fn(async () => ok({ policy: {}, configuration: {}, effective: {}, catalog: [] })),
+    saveDefaults: vi.fn(async (d: unknown) => ok({ policy: d, configuration: {}, effective: {}, catalog: [] })),
+    getUser: vi.fn(async (userId: string) => ok({ userId, hasCustomPolicy: false })),
+    saveUser: vi.fn(async (userId: string, d: unknown) => ok({ userId, hasCustomPolicy: true, policy: d })),
+    clearUser: vi.fn(async () => ok(undefined)),
+    resetUser: vi.fn(async () => ok(undefined)),
+    queryUsers: vi.fn(async () => ok(pagedList([{ userId: 'u1', hasCustomPolicy: false, windows: [] }]))),
+    getBudgetSummary: vi.fn(async () => ok({ byAgent: [] })),
   }
 }
 
@@ -259,7 +263,7 @@ function makeBridge() {
     usageApi: mockUsageApi() as never,
     knowledgeBaseApi: mockKnowledgeBaseApi() as never,
     mcpApi: mockMcpApi() as never,
-    quotaApi: mockQuotaApi() as never,
+    usageLimitApi: mockUsageLimitApi() as never,
     evaluationApi: mockEvaluationApi() as never,
   })
 }
@@ -292,6 +296,13 @@ describe('ai-bridge', () => {
       await expect(bridge.threads.exportJson('t1')).rejects.toThrow('thread is being archived')
     })
 
+    // Same for the Markdown file: a refused export must not become a download.
+    it('threads.exportMarkdown', async () => {
+      const threadApi = { ...mockThreadApi(), exportMarkdown: vi.fn(async () => refused('thread is being archived')) }
+      const bridge = createAiBridge({ threadApi: threadApi as never, client: {} as never })
+      await expect(bridge.threads.exportMarkdown('t1')).rejects.toThrow('thread is being archived')
+    })
+
     it('knowledgeBases.reindex', async () => {
       const knowledgeBaseApi = { ...mockKnowledgeBaseApi(), reindex: vi.fn(async () => refused('reindex already running')) }
       const bridge = createAiBridge({ knowledgeBaseApi: knowledgeBaseApi as never, client: {} as never })
@@ -300,17 +311,48 @@ describe('ai-bridge', () => {
 
     // skillCategories / mcpToolAnalytics are built straight from `deps.client` (no
     // injectable api), so the refusal is fed through a client whose writes all refuse.
-    it('skillCategories.create / update and mcpToolAnalytics.cleanup', async () => {
+    it('mcpToolAnalytics.cleanup', async () => {
       const client = {
         get: vi.fn(async () => ({ succeeded: true, success: true, code: 200, data: [] })),
-        post: vi.fn(async () => refused('category exists')),
-        put: vi.fn(async () => refused('category locked')),
+        post: vi.fn(async () => refused('retention too short')),
+        put: vi.fn(async () => refused('retention too short')),
         delete: vi.fn(async () => refused('retention too short')),
       }
       const bridge = createAiBridge({ client: client as never })
-      await expect(bridge.skillCategories.create({ name: 'x' } as never)).rejects.toThrow('category exists')
-      await expect(bridge.skillCategories.update('c1', { name: 'x' } as never)).rejects.toThrow('category locked')
       await expect(bridge.mcpToolAnalytics.cleanup(1)).rejects.toThrow('retention too short')
+    })
+
+    // Single-record reads: a refused envelope resolved null, and the page then
+    // failed on a TypeError ("Cannot read properties of null") instead of
+    // showing the server's 404 / 403 text.
+    it('single-record reads reject a refusal with the server reason', async () => {
+      const notFound = () => refused('No such record')
+      const bridge = createAiBridge({
+        agentApi: { ...mockAgentApi(), getById: vi.fn(async () => notFound()), validate: vi.fn(async () => notFound()) } as never,
+        agentRunApi: { getById: vi.fn(async () => notFound()), getRunTraces: vi.fn(async () => notFound()) } as never,
+        threadApi: { getDetail: vi.fn(async () => notFound()) } as never,
+        workflowApi: {
+          ...mockWorkflowApi(),
+          getById: vi.fn(async () => notFound()),
+          validate: vi.fn(async () => notFound()),
+          getExecutionDetail: vi.fn(async () => notFound()),
+        } as never,
+        skillApi: { getBySlug: vi.fn(async () => notFound()) } as never,
+        evaluationApi: { ...mockEvaluationApi(), getById: vi.fn(async () => notFound()) } as never,
+        providerApi: { ...mockProviderApi(), getOptions: vi.fn(async () => notFound()) } as never,
+        client: {} as never,
+      })
+      await expect(bridge.agents.getById('a1')).rejects.toThrow('No such record')
+      await expect(bridge.agents.validate('a1')).rejects.toThrow('No such record')
+      await expect(bridge.agentRuns.getById('r1')).rejects.toThrow('No such record')
+      await expect(bridge.agentRuns.getTraces('r1')).rejects.toThrow('No such record')
+      await expect(bridge.threads.getDetail('t1')).rejects.toThrow('No such record')
+      await expect(bridge.workflows.getById('w1')).rejects.toThrow('No such record')
+      await expect(bridge.workflows.validate('w1')).rejects.toThrow('No such record')
+      await expect(bridge.workflowRuns.getDetail('x1')).rejects.toThrow('No such record')
+      await expect(bridge.skills.getBySlug('s')).rejects.toThrow('No such record')
+      await expect(bridge.evaluations.getDetail('e1')).rejects.toThrow('No such record')
+      await expect(bridge.providers.getOptions()).rejects.toThrow('No such record')
     })
 
     // Read-only probes with a non-optional result type: a refused envelope (403/404)
@@ -323,6 +365,35 @@ describe('ai-bridge', () => {
       const bridge = createAiBridge({ providerApi: providerApi as never, mcpApi: mcpApi as never, client: {} as never })
       await expect(bridge.providers.test('p1')).rejects.toThrow('provider is disabled')
       await expect(bridge.mcpServers.test('m1')).rejects.toThrow('server not found')
+    })
+
+    // The usage dashboard and the budget tab are where an operator watches spend. A
+    // refused read (403, 500, a timeout) resolved to null and was mapped to zero
+    // usage / "Within budget, $0.00", which reads exactly like a quiet month.
+    it('usage analytics reads and the budget summary', async () => {
+      const denied = () => vi.fn(async () => refused('cost tracking unavailable'))
+      const usageApi = {
+        getSummary: denied(),
+        getLogs: denied(),
+        getByProvider: denied(),
+        getByModel: denied(),
+        getTrend: denied(),
+        getByAgent: denied(),
+        getAgentFeedbackStats: denied(),
+        getCostSummary: denied(),
+      }
+      const usageLimitApi = { ...mockUsageLimitApi(), getBudgetSummary: denied() }
+      const bridge = createAiBridge({ usageApi: usageApi as never, usageLimitApi: usageLimitApi as never, client: {} as never })
+      const q = { pageIndex: 1, pageSize: 20, searchText: '', filters: { startTime: '2026-04-01', endTime: '2026-04-30' } }
+
+      await expect(bridge.usage.summary(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.byAgent(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.byModel(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.byDay(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.getLogs(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.feedbackStats(20)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usage.costSummary(q)).rejects.toThrow('cost tracking unavailable')
+      await expect(bridge.usageLimits.getBudgetSummary()).rejects.toThrow('cost tracking unavailable')
     })
   })
 
@@ -349,7 +420,7 @@ describe('ai-bridge', () => {
       'usage',
       'knowledge',
       'mcpServers',
-      'quota',
+      'usageLimits',
       'evaluations',
     ] as const
     for (const key of keys) expect(bridge).toHaveProperty(key)
@@ -367,6 +438,13 @@ describe('ai-bridge', () => {
     expect(agentApi.getList).toHaveBeenCalledWith(expect.objectContaining({ keyword: 'bot' }))
     expect(result.items).toHaveLength(1)
     expect(result.totalCount).toBe(1)
+  })
+
+  it('list reads reject a refused read instead of answering an empty list', async () => {
+    const refused = { succeeded: false, success: false, code: 500, data: null, message: 'Database unavailable' }
+    const agentApi = { ...mockAgentApi(), getList: vi.fn(async () => refused) }
+    const bridge = createAiBridge({ agentApi: agentApi as never, client: {} as never })
+    await expect(bridge.agents.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })).rejects.toThrow('Database unavailable')
   })
 
   it('agents.create / update reject with the server message on a failed envelope', async () => {
@@ -414,9 +492,13 @@ describe('ai-bridge', () => {
     expect(traces[0]?.eventType).toBe('tool_call')
   })
 
-  it('agentRuns.tail rejects (not implemented in core)', async () => {
-    const bridge = makeBridge()
-    await expect(bridge.agentRuns.tail('run-1')).rejects.toThrow(/not implemented/)
+  it('agentRuns.getById reads one run', async () => {
+    const run = { id: 'run-1', status: 'Running' }
+    const bridge = createAiBridge({
+      agentRunApi: { getById: vi.fn(async () => ok(run)) } as never,
+      client: {} as never,
+    })
+    await expect(bridge.agentRuns.getById('run-1')).resolves.toEqual(run)
   })
 
   it('workflows.delete uses batchDelete and clone delegates correctly', async () => {
@@ -554,6 +636,27 @@ describe('ai-bridge', () => {
     expect(skillApi.batchDisable).toHaveBeenCalledWith(['skill-1'])
   })
 
+  // The batch endpoints answer 200 with the number of rows they changed and skip
+  // what they may not touch (System-scope rows, a file-source row's empty id). A
+  // count of 0 used to read as success: "Deactivated", and the skill still offered.
+  it('skills.activate / deactivate / delete fail when the server changed nothing', async () => {
+    const skillApi = {
+      ...mockSkillApi(),
+      batchEnable: vi.fn(async () => ok(0)),
+      batchDisable: vi.fn(async () => ok(0)),
+      batchDelete: vi.fn(async () => ok(1)),
+    }
+    const bridge = createAiBridge({ skillApi: skillApi as never, client: {} as never })
+    await expect(bridge.skills.activate('skill-1')).rejects.toThrow(/not changed/)
+    await expect(bridge.skills.deactivate('skill-1')).rejects.toThrow(/not changed/)
+    await expect(bridge.skills.delete(['skill-1', 'skill-2'])).rejects.toThrow(/1 of 2/)
+
+    skillApi.batchDisable.mockResolvedValueOnce(ok(1))
+    await expect(bridge.skills.deactivate('skill-1')).resolves.toBeUndefined()
+    skillApi.batchDelete.mockResolvedValueOnce(ok(2))
+    await expect(bridge.skills.delete(['skill-1', 'skill-2'])).resolves.toBeUndefined()
+  })
+
   it('providers.fetch delegates to providerApi.getList', async () => {
     const providerApi = mockProviderApi()
     const bridge = createAiBridge({ providerApi: providerApi as never, client: {} as never })
@@ -652,6 +755,55 @@ describe('ai-bridge', () => {
     expect(usageApi.getTrend).toHaveBeenCalled()
   })
 
+  // The dashboard filters by agent and provider. Each panel used to receive a
+  // different subset, so the KPI cards, the trend and the breakdowns described
+  // different rows on the same screen.
+  it('usage reads forward the agent and provider filters to every panel that takes them', async () => {
+    const usageApi = mockUsageApi()
+    usageApi.getCostSummary.mockResolvedValueOnce({ totalCostUsd: 0 })
+    const bridge = createAiBridge({ usageApi: usageApi as never, client: {} as never })
+    const q = {
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: '',
+      filters: { startTime: '2026-04-01T00:00:00.000Z', endTime: '2026-04-12T00:00:00.000Z', agentId: 'agent-7', provider: 'OpenAI' },
+    }
+    await bridge.usage.summary(q)
+    await bridge.usage.byDay(q)
+    await bridge.usage.byAgent(q)
+    await bridge.usage.byModel(q)
+    await bridge.usage.costSummary(q)
+
+    expect(usageApi.getSummary).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'agent-7', provider: 'OpenAI' }))
+    expect(usageApi.getTrend).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'agent-7', provider: 'OpenAI' }))
+    expect(usageApi.getByAgent).toHaveBeenCalledWith(
+      '2026-04-01T00:00:00.000Z', '2026-04-12T00:00:00.000Z', 20,
+      expect.objectContaining({ agentId: 'agent-7', provider: 'OpenAI' }),
+    )
+    expect(usageApi.getByModel).toHaveBeenCalledWith('2026-04-01T00:00:00.000Z', '2026-04-12T00:00:00.000Z', 'OpenAI', 'agent-7')
+    expect(usageApi.getCostSummary).toHaveBeenCalledWith('2026-04-01T00:00:00.000Z', '2026-04-12T00:00:00.000Z', 'OpenAI', undefined, 'agent-7')
+  })
+
+  // A cleared date picker went out as '' and every endpoint (non-nullable
+  // DateTime) answered 400; the trend skipped its request and drew nothing.
+  it('usage reads send a cleared date as an open bound, never as an empty string', async () => {
+    const usageApi = mockUsageApi()
+    const bridge = createAiBridge({ usageApi: usageApi as never, client: {} as never })
+    const q = { pageIndex: 1, pageSize: 20, searchText: '', filters: { startTime: undefined, endTime: '', agentId: '  ' } }
+    await bridge.usage.summary(q)
+    await bridge.usage.byDay(q)
+    await bridge.usage.byAgent(q)
+
+    const summaryQuery = usageApi.getSummary.mock.calls[0]?.[0] as { startTime: string; endTime: string; agentId?: string }
+    expect(summaryQuery.startTime).toBe(new Date(0).toISOString())
+    expect(Number.isNaN(Date.parse(summaryQuery.endTime))).toBe(false)
+    expect(summaryQuery.agentId).toBeUndefined()
+    expect(usageApi.getTrend).toHaveBeenCalledTimes(1)
+    const [start, end] = usageApi.getByAgent.mock.calls[0] as unknown as [string, string]
+    expect(start).not.toBe('')
+    expect(end).not.toBe('')
+  })
+
   it('knowledge.fetch handles paged-list shape from kb api', async () => {
     const kbApi = mockKnowledgeBaseApi()
     const bridge = createAiBridge({ knowledgeBaseApi: kbApi as never, client: {} as never })
@@ -670,6 +822,17 @@ describe('ai-bridge', () => {
     const bridge = createAiBridge({ knowledgeBaseApi: kbApi as never, client: {} as never })
     await bridge.knowledge.reindex('kb1')
     expect(kbApi.reindex).toHaveBeenCalledWith('kb1')
+  })
+
+  // The markdown export is a file behind an authenticated admin endpoint. It goes
+  // through the client (which sends the token) and comes back as a Blob; a bare URL
+  // handed to the browser carries no Authorization header and always got a 401.
+  it('threads.exportMarkdown downloads the file through the client', async () => {
+    const file = new Blob(['# Thread'], { type: 'text/markdown' })
+    const threadApi = { ...mockThreadApi(), exportMarkdown: vi.fn(async () => ok(file)) }
+    const bridge = createAiBridge({ threadApi: threadApi as never, client: {} as never })
+    await expect(bridge.threads.exportMarkdown('t1')).resolves.toBe(file)
+    expect(threadApi.exportMarkdown).toHaveBeenCalledWith('t1')
   })
 
   it('mcpServers.fetch delegates to mcpApi.getList with paged query + filters', async () => {
@@ -730,51 +893,42 @@ describe('ai-bridge', () => {
     expect(result).toEqual({ ok: true, latency: 7, error: undefined })
   })
 
-  it('quota.fetch delegates to quotaApi.getList with pagination + filters', async () => {
-    const quotaApi = mockQuotaApi()
-    const bridge = createAiBridge({ quotaApi: quotaApi as never, client: {} as never })
-    const result = await bridge.quota.fetch({
+  it('usageLimits.fetchUsers pages the metered users and filters by user', async () => {
+    const usageLimitApi = mockUsageLimitApi()
+    const bridge = createAiBridge({ usageLimitApi: usageLimitApi as never, client: {} as never })
+    const result = await bridge.usageLimits.fetchUsers({
       pageIndex: 2,
       pageSize: 50,
       searchText: '',
-      filters: { userId: 'u1', isEnabled: true },
+      filters: { userId: 'u1' },
     })
-    expect(quotaApi.getList).toHaveBeenCalledWith({
-      pageIndex: 2,
-      pageSize: 50,
-      skip: 50,
-      take: 50,
-      userId: 'u1',
-      isEnabled: true,
-    })
+    expect(usageLimitApi.queryUsers).toHaveBeenCalledWith({ pageIndex: 2, pageSize: 50, skip: 50, take: 50, userId: 'u1' })
     expect(result.items).toHaveLength(1)
-    expect(result.totalCount).toBe(1)
+
+    await bridge.usageLimits.fetchUsers({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
+    expect(usageLimitApi.queryUsers).toHaveBeenLastCalledWith({ pageIndex: 1, pageSize: 20, skip: 0, take: 20, userId: null })
   })
 
-  it('quota.fetch passes nullish filters when none provided', async () => {
-    const quotaApi = mockQuotaApi()
-    const bridge = createAiBridge({ quotaApi: quotaApi as never, client: {} as never })
-    await bridge.quota.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
-    expect(quotaApi.getList).toHaveBeenCalledWith({
-      pageIndex: 1,
-      pageSize: 20,
-      skip: 0,
-      take: 20,
-      userId: null,
-      isEnabled: null,
-    })
+  it('usageLimits writes delegate, and a refused write rejects instead of reading as saved', async () => {
+    const usageLimitApi = mockUsageLimitApi()
+    const bridge = createAiBridge({ usageLimitApi: usageLimitApi as never, client: {} as never })
+    const payload = { sessionLimit: { mode: 'Limited', amountUsd: 5 }, weeklyLimit: { mode: 'Inherit' } } as never
+
+    await bridge.usageLimits.saveDefaults(payload)
+    expect(usageLimitApi.saveDefaults).toHaveBeenCalledWith(payload)
+    await expect(bridge.usageLimits.saveUser('u1', payload)).resolves.toMatchObject({ hasCustomPolicy: true })
+    await bridge.usageLimits.clearUser('u1')
+    expect(usageLimitApi.clearUser).toHaveBeenCalledWith('u1')
+    await bridge.usageLimits.resetUser('u1')
+    expect(usageLimitApi.resetUser).toHaveBeenCalledWith('u1')
+
+    usageLimitApi.saveUser.mockResolvedValueOnce({ succeeded: false, code: 400, message: 'Invalid policy' } as never)
+    await expect(bridge.usageLimits.saveUser('u1', payload)).rejects.toThrow('Invalid policy')
+    usageLimitApi.resetUser.mockResolvedValueOnce({ succeeded: false, code: 403, message: 'Forbidden' } as never)
+    await expect(bridge.usageLimits.resetUser('u1')).rejects.toThrow('Forbidden')
   })
 
-  it('quota.create / update both call setQuota', async () => {
-    const quotaApi = mockQuotaApi()
-    const bridge = createAiBridge({ quotaApi: quotaApi as never, client: {} as never })
-    await bridge.quota.create({ userId: 'u1', dailyTokenLimit: 500 } as never)
-    expect(quotaApi.setQuota).toHaveBeenCalled()
-    await bridge.quota.update('u1', { dailyTokenLimit: 800 } as never)
-    expect(quotaApi.setQuota).toHaveBeenCalledTimes(2)
-  })
-
-  it('evaluations.fetch / delete / create / runBatch delegate; run(id) rejects with descriptive error', async () => {
+  it('evaluations.fetch / delete / create / runBatch delegate', async () => {
     const evaluationApi = mockEvaluationApi()
     const bridge = createAiBridge({ evaluationApi: evaluationApi as never, client: {} as never })
     await bridge.evaluations.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })
@@ -796,8 +950,6 @@ describe('ai-bridge', () => {
       cases: [{ input: 'hi' }],
     })
     expect(evaluationApi.runBatch).toHaveBeenCalled()
-
-    await expect(bridge.evaluations.run('e1')).rejects.toThrow(/creates and runs in one call/)
   })
 
   it('evaluations.getDetail delegates to evaluationApi.getById', async () => {

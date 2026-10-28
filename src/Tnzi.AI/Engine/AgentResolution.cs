@@ -63,6 +63,28 @@ public class AgentResolution
     }
 
     /// <summary>
+    /// 换一个执行器与模型、其余字段原样保留的副本（解析之后按 Agent 自己的提供商切换模型时使用）。
+    /// </summary>
+    public AgentResolution WithExecutor(IAgentExecutor agent, string? model)
+    {
+        Check.NotNull(agent);
+        return new AgentResolution
+        {
+            Agent = agent,
+            Provider = Provider,
+            Model = model,
+            AgentId = AgentId,
+            ExecutionMode = ExecutionMode,
+            AgentConfiguration = AgentConfiguration,
+            PersonaContent = PersonaContent,
+            KnowledgeBaseIds = KnowledgeBaseIds,
+            SkillSlugs = SkillSlugs,
+            ErrorCode = ErrorCode,
+            CreationParameters = CreationParameters
+        };
+    }
+
+    /// <summary>
     /// 创建失败结果
     /// </summary>
     public static AgentResolution Failure(string provider, string? model, Guid? agentId, string errorCode)

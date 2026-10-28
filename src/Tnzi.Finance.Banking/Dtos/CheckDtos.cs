@@ -260,6 +260,9 @@ public class CheckTemplateDto
     /// <summary>模板是否启用（库内行的 <c>IsActive</c>；尚未播种的出厂版式为 true）</summary>
     public bool IsActive { get; set; } = true;
 
-    /// <summary>模板库里是否已有对应的行（false = 出厂版式尚未播种，下次启动会补上）</summary>
+    /// <summary>
+    /// 当前租户作用域的模板库里是否已有对应的行。false 的出厂版式照常可选：渲染时直接用程序集自带的正文
+    /// （单租户 = 尚未播种、下次启动补上；多租户 = 播种行是宿主行，租户侧没有自己那一行）。
+    /// </summary>
     public bool IsSeeded { get; set; }
 }

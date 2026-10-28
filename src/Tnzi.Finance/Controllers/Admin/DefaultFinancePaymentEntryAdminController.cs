@@ -84,8 +84,14 @@ public class DefaultFinancePaymentEntryAdminController : ApiAdminControllerBase
     /// <summary>
     /// 外部收款摄取（幂等；网关收款 → 收款单）
     /// </summary>
+    /// <remarks>
+    /// <c>AutoPost</c>（默认 true）时直接过账，且对同来源的既有草稿补投过账；过账在
+    /// <c>{id}/post</c> 上要 <c>.update</c>，故两个码叠加。一个端点一种授权，不随请求体里的
+    /// <c>AutoPost</c> 变化，接入凭据按它能做到的最大效果授权。
+    /// </remarks>
     [HttpPost("external")]
     [ApiAuthorize(PermissionName = "finance.document.create")]
+    [ApiAuthorize(PermissionName = "finance.document.update")]
     public virtual async Task<ApiResult<PaymentEntryDto>> CreateFromExternal([FromBody] ExternalPaymentIngestDto request)
     {
         var result = await _service.CreateFromExternalAsync(request);

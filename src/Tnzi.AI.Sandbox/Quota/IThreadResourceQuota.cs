@@ -8,10 +8,10 @@ namespace Tnzi.AI.Sandbox.Quota;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This quota is complementary to (but independent of) <c>IQuotaService</c>
-/// (LLM token quota) and <c>IBudgetService</c> (USD spend). Sandbox compute
-/// has its own resource dimensions (CPU seconds, IO bytes) that token-based
-/// quotas cannot constrain.
+/// This quota is complementary to (but independent of) <c>IUsageLimitService</c>
+/// (per-user usage limits in API-equivalent USD) and <c>IBudgetService</c> (USD spend).
+/// Sandbox compute has its own resource dimensions (CPU seconds, IO bytes) that
+/// spend-based limits cannot constrain.
 /// </para>
 /// <para>
 /// Storage is <see cref="Tnzi.Caching.ICache"/>-backed via three independent
@@ -59,8 +59,8 @@ public interface IThreadResourceQuota
 
     /// <summary>
     /// Drops all counters for the thread; the next <see cref="CheckAsync"/>
-    /// will see a fresh quota. Used by tests and by admin-initiated thread
-    /// resets.
+    /// will see a fresh quota. Called when the thread is deleted
+    /// (<c>SandboxThreadCleanupHandler</c>).
     /// </summary>
     Task ResetAsync(Guid threadId, CancellationToken ct = default);
 }

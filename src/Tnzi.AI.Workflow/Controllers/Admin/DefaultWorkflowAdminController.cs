@@ -75,8 +75,14 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// <summary>
     /// 运行工作流
     /// </summary>
+    /// <remarks>
+    /// 运行与恢复四个端点不进请求级工作单元（<c>EnableGlobalUnitOfWork</c> 时也一样）：一次执行要跑数分钟，
+    /// 执行行、检查点与终态在运行期间就必须对其他请求可见（状态查询、取消、心跳与看门狗），
+    /// 而包在请求事务里时它们要到请求结束才提交，期间配额行的锁也一直被持有。
+    /// </remarks>
     [HttpPost("{id:guid}/run")]
     [ApiAuthorize(PermissionName = "ai.workflow.execute")]
+    [UnitOfWork(IsDisabled = true)]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> Run(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
         // 配额一律记在当前登录用户名下（防止请求体伪造他人 UserId）；
@@ -88,10 +94,13 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
 
     /// <summary>
     /// 流式运行工作流（支持 SSE 和 NDJSON 格式）
-    /// 输出工作流专用结构化流式事件，保留步骤状态和 StepResults 语义
+    /// 输出工作流专用结构化流式事件，保留步骤状态和 StepResults 语义：
+    /// 开始事件（<c>started</c>，带 executionId）→ 每个步骤完成时一个 <c>step</c> 事件 → <c>completed</c> 汇总事件。
+    /// 一个节点跑得久时，事件之间每 <see cref="StreamHeartbeatInterval"/> 写一次心跳，反向代理不会把空闲连接切断。
     /// </summary>
     [HttpPost("{id:guid}/run/stream")]
     [ApiAuthorize(PermissionName = "ai.workflow.execute")]
+    [UnitOfWork(IsDisabled = true)]
     public virtual async Task RunStreaming(Guid id, [FromBody] RunWorkflowRequestDto request, CancellationToken cancellationToken = default)
     {
         var userId = CurrentUser?.Id ?? request.UserId;
@@ -111,8 +120,14 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
                 IsDone = true
             },
             format,
-            cancellationToken);
+            cancellationToken,
+            heartbeatInterval: StreamHeartbeatInterval);
     }
+
+    /// <summary>
+    /// 流式运行时两个事件之间最长的静默：一个节点可以合法地跑上几分钟，而常见反向代理的空闲超时是 60 到 100 秒。
+    /// </summary>
+    protected static readonly TimeSpan StreamHeartbeatInterval = TimeSpan.FromSeconds(15);
 
     /// <summary>
     /// 克隆工作流（深拷贝定义，生成新 ID）
@@ -150,6 +165,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPost("executions/{executionId}/resume")]
     [ApiAuthorize(PermissionName = "ai.workflow.execute")]
+    [UnitOfWork(IsDisabled = true)]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeExecution(string executionId, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ResumeAsync(executionId, cancellationToken);
@@ -172,6 +188,7 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
     /// </summary>
     [HttpPost("executions/{executionId}/resume-with-input")]
     [ApiAuthorize(PermissionName = "ai.workflow.execute")]
+    [UnitOfWork(IsDisabled = true)]
     public virtual async Task<ApiResult<WorkflowExecutionResultDto>> ResumeWithInput(string executionId, [FromBody] ResumeWorkflowInputDto input, CancellationToken cancellationToken = default)
     {
         var result = await WorkflowService.ResumeWithInputAsync(executionId, input.StepId, input.Input, cancellationToken);
@@ -333,11 +350,14 @@ public class DefaultWorkflowAdminController : ApiAdminControllerBase
             || result.Status == nameof(WorkflowExecutionStatus.AwaitingInput)
             || result.Status.StartsWith("PartialFailure", StringComparison.Ordinal);
         var stepId = result.StepResults is { Count: 1 } ? result.StepResults[0].StepId : null;
+        var isStarted = result.Status == nameof(WorkflowExecutionStatus.Running) && result.StepResults == null;
 
         return new WorkflowStreamEventDto
         {
             ExecutionId = result.ExecutionId,
-            EventType = isCompleted ? WorkflowStreamEventTypes.Completed : WorkflowStreamEventTypes.Step,
+            EventType = isCompleted
+                ? WorkflowStreamEventTypes.Completed
+                : isStarted ? WorkflowStreamEventTypes.Started : WorkflowStreamEventTypes.Step,
             StepId = stepId,
             Status = result.Status,
             Output = result.Output,

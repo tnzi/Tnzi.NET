@@ -12,6 +12,9 @@ import { Icon } from '@iconify/vue';
 import { useEmbedMode } from '../headless/useEmbedMode';
 import TChatBox from '../components/chat/TChatBox.vue';
 import type { ChatMessage } from '../headless/useChat';
+import { useAiI18n } from '../i18n/index';
+
+const t = useAiI18n();
 
 const { isOpen, toggle, minimize, isMinimized, expand } = useEmbedMode('floating');
 
@@ -69,12 +72,12 @@ watch(isOpen, (v) => {
       >
         <!-- Header -->
         <div class="t-floating-chat__header">
-          <span class="text-sm font-medium">AI Chat</span>
+          <span class="text-sm font-medium">{{ t.embed.title }}</span>
           <div class="flex items-center gap-1">
-            <NButton text size="small" @click="minimize()">
+            <NButton text size="small" :aria-label="t.embed.minimize" @click="minimize()">
               <template #icon><Icon icon="lucide:minimize-2" class="size-3.5" /></template>
             </NButton>
-            <NButton text size="small" @click="toggle()">
+            <NButton text size="small" :aria-label="t.embed.close" @click="toggle()">
               <template #icon><Icon icon="lucide:x" class="size-3.5" /></template>
             </NButton>
           </div>
@@ -99,11 +102,12 @@ watch(isOpen, (v) => {
     <div
       v-if="isOpen && isMinimized"
       class="t-floating-chat__minimized"
+      :title="t.embed.expand"
       @click="expand()"
     >
       <Icon icon="lucide:message-circle" class="size-4 t-floating-chat__primary-icon" />
-      <span class="text-sm">AI Chat</span>
-      <NButton text size="small" class="size-5" @click.stop="toggle()">
+      <span class="text-sm">{{ t.embed.title }}</span>
+      <NButton text size="small" class="size-5" :aria-label="t.embed.close" @click.stop="toggle()">
         <template #icon><Icon icon="lucide:x" class="size-3" /></template>
       </NButton>
     </div>
@@ -114,6 +118,7 @@ watch(isOpen, (v) => {
         type="primary"
         round
         class="t-floating-chat__fab"
+        :aria-label="isOpen ? t.embed.close : t.embed.open"
         @click="toggle()"
       >
         <template #icon>
@@ -138,6 +143,10 @@ watch(isOpen, (v) => {
   margin-bottom: 12px;
   width: 380px;
   height: 560px;
+  /* On a short viewport the window shrinks rather than rising into the page's
+     top inset (`--tnzi-overlay-inset-top`) or off the top: 96px is the
+     launcher below it (16 + 48 + 12) plus a 20px gap at the top. */
+  max-height: calc(100vh - var(--tnzi-overlay-inset-top, 0px) - 96px);
   border-radius: 16px;
   border: 1px solid var(--tnzi-border);
   background-color: var(--tnzi-container-bg);
@@ -165,7 +174,7 @@ watch(isOpen, (v) => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   cursor: pointer;
 }
-.t-floating-chat__primary-icon { color: var(--tnzi-primary); }
+.t-floating-chat__primary-icon { color: var(--tnzi-ai-accent-text); }
 .t-floating-chat__fab {
   width: 48px;
   height: 48px;

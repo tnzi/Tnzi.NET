@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref, computed } from 'vue'
 import TCrudPage from '../../../src/components/crud/TCrudPage.vue'
+import TFormModal from '../../../src/components/crud/TFormModal.vue'
 
 const stubs = {
   DataTable: {
@@ -282,5 +283,37 @@ describe('TCrudPage', () => {
       global: { stubs },
     })
     expect(wrapper.find('.t-list-shell__header-card').exists()).toBe(true)
+  })
+})
+
+// A reader without create or update permission still gets View, which opens
+// the form modal on #form when the page has no #detail. The wrappers forward
+// #form only when the page gives one, so the shell can tell whether the modal
+// has anything to show.
+describe('TCrudPage - the form modal for a read-only reader', () => {
+  function readOnlyState() {
+    const state = { ...makeState(), canCreate: false, canUpdate: false }
+    state.formModal.visible.value = true
+    state.formModal.mode.value = 'view'
+    return state
+  }
+
+  it('opens a view on #form', () => {
+    const state = readOnlyState()
+    const wrapper = mount(TCrudPage, {
+      props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value },
+      global: { stubs },
+      slots: { form: '<div class="form-body">F</div>' },
+    })
+    expect(wrapper.find('.form-body').exists()).toBe(true)
+  })
+
+  it('does not mount the modal when the page has no form to show', () => {
+    const state = readOnlyState()
+    const wrapper = mount(TCrudPage, {
+      props: { state: state as any, allColumns: state.columnSettings.visibleColumns.value },
+      global: { stubs },
+    })
+    expect(wrapper.findComponent(TFormModal).exists()).toBe(false)
   })
 })

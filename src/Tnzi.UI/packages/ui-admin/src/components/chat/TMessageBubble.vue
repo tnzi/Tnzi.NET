@@ -10,9 +10,9 @@
       <div v-if="message.title" class="t-bubble-notice__title">{{ message.title }}</div>
       <div class="t-bubble-notice__body">{{ message.content }}</div>
       <a
-        v-if="message.linkUrl"
+        v-if="noticeHref"
         class="t-bubble-notice__link"
-        :href="message.linkUrl"
+        :href="noticeHref"
         target="_blank"
         rel="noopener noreferrer"
       >
@@ -128,6 +128,25 @@ const avatarName = computed(() => (props.mine ? props.myName || props.message.se
 
 // Call-to-action label for a rich notification's link.
 const linkLabel = computed(() => translatePageKey('chat', 'window.viewDetails'))
+
+/**
+ * A notification's link is whatever its sender typed (the server checks only
+ * the length), and Vue does not sanitise `:href`: a `javascript:` / `vbscript:`
+ * / `data:` URL would run in the admin origin for every recipient who clicks
+ * it. Only a web address (http, https, or one relative to the app) becomes a
+ * link. Parsed the way the browser parses it, so tabs, newlines and case in the
+ * scheme do not slip past.
+ */
+const noticeHref = computed<string | undefined>(() => {
+  const url = props.message.linkUrl
+  if (!url) return undefined
+  try {
+    const { protocol } = new URL(url, window.location.href)
+    return protocol === 'http:' || protocol === 'https:' ? url : undefined
+  } catch {
+    return undefined
+  }
+})
 
 // Tooltip fallback on the retry marker when the backend gave no reason.
 const retryLabel = computed(() => translatePageKey('chat', 'window.resend'))

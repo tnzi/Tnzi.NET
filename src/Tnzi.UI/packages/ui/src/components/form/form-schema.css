@@ -172,6 +172,18 @@
   width: 100%;
   min-width: 0;
 }
+/* Number and date inputs fill their grid cell like text and select inputs do, so fields in one row share
+   one width rule. */
+.t-form-schema__fill {
+  width: 100%;
+}
+
+/* Label with its hint behind an ⓘ (`hintMode: 'popover'`). */
+.t-form-schema__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .t-form-schema__hint {
   font-size: 11.5px;
   line-height: 1.45;

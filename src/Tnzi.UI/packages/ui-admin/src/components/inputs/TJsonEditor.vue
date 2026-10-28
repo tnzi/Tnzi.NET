@@ -14,6 +14,7 @@ import { ref, computed, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NButton } from 'naive-ui'
 import { useBreakpoint } from '../../headless/useBreakpoint'
+import { formatJsonText, minifyJsonText } from '../../utils/json-text'
 
 // Touch: bump the toolbar buttons from tiny → small (paired with the
 // pointer:coarse ≥40px hit-area rule below).
@@ -24,7 +25,11 @@ interface Props {
   rows?: number
   placeholder?: string
   readonly?: boolean
-  /** Run format on blur. */
+  /**
+   * Format on blur, after the value was edited in this focus. Clicking in and
+   * out of the box leaves the value untouched, and a read-only editor never
+   * emits. Formatting only moves whitespace (see `formatJsonText`).
+   */
   autoFormat?: boolean
 }
 
@@ -58,7 +63,18 @@ function tryParse(text: string): { ok: true; value: unknown } | { ok: false; err
   }
 }
 
+// Whether the text was typed into since the box last took focus. Auto-format
+// tidies up what the user just wrote; a value they only looked at is saved
+// back exactly as it was loaded.
+let editedSinceFocus = false
+
+function handleFocus(): void {
+  editedSinceFocus = false
+}
+
 function handleInput(event: Event): void {
+  if (props.readonly) return
+  editedSinceFocus = true
   const text = (event.target as HTMLTextAreaElement).value
   emit('update:value', text)
 }
@@ -67,20 +83,26 @@ function handleBlur(event: FocusEvent): void {
   const text = (event.target as HTMLTextAreaElement).value
   const result = tryParse(text)
   errorMessage.value = result.ok ? null : result.error
-  if (result.ok && props.autoFormat && text.trim()) {
-    const formatted = JSON.stringify(result.value, null, 2)
+  const shouldFormat = editedSinceFocus && !props.readonly && props.autoFormat
+  editedSinceFocus = false
+  if (result.ok && shouldFormat && text.trim()) {
+    const formatted = formatJsonText(text, { indent: 2 })
     if (formatted !== text) {
       emit('update:value', formatted)
     }
   }
 }
 
+// Format / Minify re-indent the text instead of re-serialising a parsed value:
+// JSON.parse rounds integers past 2^53 and drops duplicate keys. The parse
+// stays, for validation and its error message.
 function format(): void {
+  if (props.readonly) return
   const result = tryParse(props.value)
   if (result.ok) {
     errorMessage.value = null
     if (props.value.trim()) {
-      emit('update:value', JSON.stringify(result.value, null, 2))
+      emit('update:value', formatJsonText(props.value, { indent: 2 }))
     }
   } else {
     errorMessage.value = result.error
@@ -88,10 +110,11 @@ function format(): void {
 }
 
 function minify(): void {
+  if (props.readonly) return
   const result = tryParse(props.value)
-  if (result.ok && result.value !== null) {
+  if (result.ok && props.value.trim()) {
     errorMessage.value = null
-    emit('update:value', JSON.stringify(result.value))
+    emit('update:value', minifyJsonText(props.value))
   } else if (!result.ok) {
     errorMessage.value = result.error
   }
@@ -154,6 +177,7 @@ defineExpose({ format, minify, isValid, errorMessage })
       :placeholder="placeholder"
       :readonly="readonly"
       spellcheck="false"
+      @focus="handleFocus"
       @input="handleInput"
       @blur="handleBlur"
     />

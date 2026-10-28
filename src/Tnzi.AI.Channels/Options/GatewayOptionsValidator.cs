@@ -11,6 +11,8 @@ public class GatewayOptionsValidator : OptionsValidatorBase<GatewayOptions>
 
         if (string.IsNullOrWhiteSpace(options.Path))
             errors.Add("Path must not be empty");
+        else if (!options.Path.StartsWith('/'))
+            errors.Add("Path must start with '/'");
 
         if (options.MaxConnectionsPerUser < 1)
             errors.Add("MaxConnectionsPerUser must be at least 1");

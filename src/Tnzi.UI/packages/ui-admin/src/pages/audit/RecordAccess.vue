@@ -1,6 +1,7 @@
 <template>
   <TCrudPage
     :search-fields="recordAccessSearchFields"
+    :show-default-search="false"
     :state="crud"
     :all-columns="recordAccessColumns"
     :title="t('title')"
@@ -10,10 +11,6 @@
     :detail-width="620"
   >
     <template #toolbarRight>
-      <NButton size="small" secondary :loading="verifying" @click="verifyChain">
-        <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="14" /></template>
-        {{ t('actions.verify') }}
-      </NButton>
       <NButton size="small" secondary :loading="loadingStats" @click="openStatistics">
         <template #icon><TSvgIcon icon="mdi:chart-bar" :size="14" /></template>
         {{ t('actions.statistics') }}
@@ -22,6 +19,16 @@
 
     <template #detail="{ data }">
       <TDescriptions v-if="data" :items="detailItems(data as RecordAccessDto)" />
+    </template>
+
+    <!-- Chains are per reader, so verification lives on a row: it checks the
+         chain of the reader this row belongs to (the anonymous chain for an
+         anonymous read), and the result names which chain that was. -->
+    <template #detailFooter="{ data }">
+      <NButton v-if="data" size="small" secondary :loading="verifying" @click="verifyChain(data as RecordAccessDto)">
+        <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="14" /></template>
+        {{ t('actions.verify') }}
+      </NButton>
     </template>
   </TCrudPage>
 
@@ -76,18 +83,23 @@ const loadingStats = ref(false)
 const stats = ref<RecordAccessUserStatDto[]>([])
 
 /**
- * Chain verification.
+ * Chain verification for the reader of one row.
  *
- * Verifies the chain of the row currently open (or the whole anonymous chain
- * when nothing is selected): chains are per user, so there is no single
- * "verify everything" call to make.
+ * Every reader has a chain of their own (anonymous reads form one more), and
+ * the backend checks one chain per call: omitting the user id checks only the
+ * anonymous chain. A list-level button could therefore only ever verify that
+ * one, under a message that read as the whole trail. Verifying from a row, and
+ * naming that row's reader in the result, says exactly what was checked.
  */
-async function verifyChain() {
+async function verifyChain(row: RecordAccessDto) {
   verifying.value = true
   try {
-    const selected = crud.formModal.formData.value as RecordAccessDto | null
-    await bridge.recordAccess.verify(selected?.userId ?? undefined)
-    message.success(t('verify.ok'))
+    await bridge.recordAccess.verify(row.userId ?? undefined)
+    message.success(
+      row.userId
+        ? t('verify.okUser', { name: row.userName || row.userId })
+        : t('verify.okAnonymous'),
+    )
   } catch (error) {
     // A broken chain is a security finding, not a transient glitch - surface
     // the backend's message (it names the first bad sequence) rather than a

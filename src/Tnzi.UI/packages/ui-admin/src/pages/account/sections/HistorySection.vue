@@ -31,6 +31,7 @@ import { formatDateTime } from '@tnzi/core'
 import type { LoginLogDto } from '@tnzi/core/services/identity'
 import TUserCenterSection from './TUserCenterSection.vue'
 import TResponsiveTable from '../../../components/data/TResponsiveTable.vue'
+import { deviceIconColor, parseDeviceInfo } from '../../_shared/device-info'
 import { createGuardedLoader } from '../guarded-loader'
 import { useUserCenterContext } from '../user-center-context'
 
@@ -57,7 +58,24 @@ const columns = computed<DataTableColumns<LoginLogDto>>(() => [
     render: (row) => formatDateTime(row.loginTime, { fallback: EMPTY_DASH }),
   },
   { key: 'ipAddress', title: t('history.cols.ip') },
-  { key: 'deviceInfo', title: t('history.cols.device') },
+  {
+    // A login log records the raw user agent (no pre-formatted device string),
+    // so the column parses it the way the sessions table parses its device.
+    key: 'userAgent',
+    title: t('history.cols.device'),
+    render: (row) => {
+      if (!row.userAgent) return EMPTY_DASH
+      const deviceProfile = parseDeviceInfo(row.userAgent)
+      return h('span', { class: 'inline-flex items-center gap-6px', title: row.userAgent }, [
+        h(TSvgIcon, {
+          icon: deviceProfile.icon,
+          size: 16,
+          style: `color: ${deviceIconColor(deviceProfile.osFamily)}`,
+        }),
+        h('span', { class: 'text-13px' }, deviceProfile.label),
+      ])
+    },
+  },
   {
     key: 'isSuccess',
     title: t('history.cols.result'),

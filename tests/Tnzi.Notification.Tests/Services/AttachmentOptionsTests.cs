@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using System.Diagnostics;
+using System.Net.Sockets;
+using Tnzi.Http;
 using Tnzi.Modules;
 using Tnzi.Notification.Services.Internal;
 
@@ -127,6 +129,59 @@ public class AttachmentOptionsTests
         };
 
         allowAutoRedirect.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// ★★ 取远程附件的连接钉在连接那一刻校验过的地址上。<see cref="AttachmentSourcePolicy"/> 的 <c>EgressGuard</c>
+    /// 在下载之前解析并检查主机，而 <see cref="HttpClient"/> 连接时会再解析一次：一个 TTL 为 0、先答公网地址
+    /// 再答 <c>169.254.169.254</c> 的域名（DNS rebinding）就这样连进内网，回应装进信里寄给请求里写的收件人。
+    /// 这一行只在模块注册里，接错了发送器照常工作。
+    /// </summary>
+    [Fact]
+    public void TheAttachmentHttpClient_ChecksTheAddressItConnectsTo()
+    {
+        using var provider = BuildProvider([]);
+
+        var primary = PrimaryHandler(provider);
+
+        var sockets = primary.ShouldBeOfType<SocketsHttpHandler>();
+        sockets.ConnectCallback.ShouldNotBeNull();
+        sockets.ConnectCallback!.Method.DeclaringType.ShouldBe(typeof(EgressGuardedConnector));
+        // 经代理时连接的是代理、目标由代理解析，连接期的检查就钉不住它
+        sockets.UseProxy.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// 端到端：绕过事先的来源检查，直接用这个具名客户端去取回环上的服务，连接那一刻被拒，服务一个连接都收不到。
+    /// </summary>
+    [Fact]
+    public async Task TheAttachmentHttpClient_RefusesToConnectToAnInternalService()
+    {
+        using var provider = BuildProvider([]);
+        var internalService = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        internalService.Start();
+        try
+        {
+            var port = ((System.Net.IPEndPoint)internalService.LocalEndpoint).Port;
+            using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(NotificationHttpClientNames.Attachments);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            await Should.ThrowAsync<HttpRequestException>(() => client.GetAsync($"http://127.0.0.1:{port}/invoice.pdf", timeout.Token));
+
+            internalService.Pending().ShouldBeFalse();
+        }
+        finally
+        {
+            internalService.Stop();
+        }
+    }
+
+    private static HttpMessageHandler PrimaryHandler(ServiceProvider provider)
+    {
+        HttpMessageHandler handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(NotificationHttpClientNames.Attachments);
+        while (handler is DelegatingHandler { InnerHandler: { } inner })
+            handler = inner;
+        return handler;
     }
 
     private static ServiceProvider BuildProvider(Dictionary<string, string?> settings)

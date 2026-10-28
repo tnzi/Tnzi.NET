@@ -124,19 +124,18 @@ public class SkillConstraintPipelineTests
     }
 
     /// <summary>
-    /// Restoring the persisted activation set used to live only inside the Skills context provider,
-    /// which the composite skips once earlier providers (Memory / RAG) exhaust
-    /// <see cref="ContextProvidersOptions.MaxTokenBudget"/>. A turn that never reached the provider
-    /// ran with an empty tracker: no tool withheld, no tool call blocked, only a Debug log.
-    /// Restore must happen for the turn regardless of whether the content step ran.
+    /// <see cref="ContextProvidersOptions.MaxTokenBudget"/> only limits injected messages. When earlier providers
+    /// (Memory / RAG) fill it, the Skills provider still runs: its summary message is dropped, its skill_* tools
+    /// and the persisted activation set are not. (The composite used to stop calling providers once the budget
+    /// was full, so that turn had no skill tools at all.) The constraints of the persisted skill hold either way.
     /// </summary>
     [Fact]
-    public async Task PersistedSkill_BudgetExhaustedBeforeSkillsProvider_ConstraintsStillApply()
+    public async Task PersistedSkill_BudgetExhaustedBeforeSkillsProvider_ToolsStillOfferedAndConstraintsApply()
     {
         var threadStore = await StoreWithActivatedSkillAsync();
 
         // A "memory" provider ahead of Skills whose injection exactly fills the budget
-        // (40 ASCII chars ≈ 10 tokens), so the composite breaks before reaching Skills.
+        // (40 ASCII chars ≈ 10 tokens), so nothing of the Skills summary fits.
         var run = new Scope(threadStore, maxTokenBudget: 10, extraContributor: new BulkContributor(ContextProviderOrders.Memory, new string('x', 40)));
         var ctx = run.NewContext();
 
@@ -148,7 +147,7 @@ public class SkillConstraintPipelineTests
             return new AgentRunResult { Response = "ok" };
         });
 
-        ctx.AdditionalTools.Select(t => t.Name).ShouldNotContain("skill_activate", "precondition: the skills provider really was skipped by the budget");
+        ctx.AdditionalTools.Select(t => t.Name).ShouldContain("skill_activate", "a full message budget must not take the skill tools away");
         ctx.ExcludedToolNames.ShouldContain("bash");
         ctx.EffectiveModel.ShouldBe("claude-opus");
     }

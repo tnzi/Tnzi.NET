@@ -15,7 +15,7 @@
  */
 import { computed } from 'vue'
 import { TWorkbenchLayout as TWorkbenchLayoutBase, type WidgetDef, type WorkbenchConfig } from '@tnzi/ui'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey, translatePageKey } from '../../i18n/translate'
 
 interface Props {
   widgets: WidgetDef[]
@@ -45,9 +45,9 @@ const resolvedPersistKey = computed(() => props.persistKey ?? ADMIN_DEFAULT_PERS
 
 const adminTranslate = (key: string): string => translatePageKey('', key)
 
-const refreshLabel = computed(() => translatePageKey('', 'admin.common.reload') || 'Refresh')
-const dragLabel = computed(() => translatePageKey('', 'admin.widgets.dragHandle') || 'Drag to reorder')
-const errorLabel = computed(() => translatePageKey('', 'admin.common.error') || 'Error')
+const refreshLabel = computed(() => translateChromeKey('admin.common.reload', 'Refresh'))
+const dragLabel = computed(() => translateChromeKey('admin.widgets.dragHandle', 'Drag to reorder'))
+const errorLabel = computed(() => translateChromeKey('admin.common.error', 'Error'))
 </script>
 
 <template>

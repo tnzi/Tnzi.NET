@@ -22,7 +22,7 @@ public class HistoryMiddlewareTests
         var mockThreadService = new Mock<IAgentThreadInternalService>();
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -76,7 +76,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, int?, CancellationToken>((_, limit, _) => capturedLimit = limit)
@@ -109,7 +109,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, int?, CancellationToken>((_, limit, _) => capturedLimit = limit)
@@ -143,7 +143,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, int?, CancellationToken>((_, limit, _) => capturedLimit = limit)
@@ -174,7 +174,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -213,7 +213,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -259,7 +259,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(history);
@@ -298,7 +298,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -337,7 +337,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -377,7 +377,7 @@ public class HistoryMiddlewareTests
         // 做归属校验（早退曾让客户端给的 threadId 完全绕过它），故必须显式建模这一步。
         mockThreadService
             .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((default(ConversationContext)!, threadId, false));
+            .ReturnsAsync((threadId, false));
         mockThreadService
             .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ChatMessage>());
@@ -425,6 +425,86 @@ public class HistoryMiddlewareTests
             observedAssistantId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// The built-in path stores the client's per-turn metadata with the user message, as the external path does.
+    /// </summary>
+    [Fact]
+    public async Task InvokeStreamingAsync_TurnMetadata_IsStoredWithTheUserMessage()
+    {
+        var threadId = Guid.NewGuid();
+        var mockThreadService = new Mock<IAgentThreadInternalService>();
+        mockThreadService
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((threadId, false));
+        mockThreadService
+            .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ChatMessage>());
+        mockThreadService
+            .Setup(s => s.SaveMessageAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        IReadOnlyDictionary<string, JsonElement>? stored = null;
+        mockThreadService
+            .Setup(s => s.SaveUserMessageAsync(
+                threadId, "test", It.IsAny<IReadOnlyDictionary<string, JsonElement>?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Callback((Guid _, string _, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? _, CancellationToken _) => stored = metadata)
+            .ReturnsAsync(Guid.NewGuid());
+
+        var middleware = new HistoryMiddleware(mockThreadService.Object, CreateOptions(maxLoadedMessages: 100), Mock.Of<ILogger<HistoryMiddleware>>());
+        using var targets = JsonDocument.Parse("""["pc-1"]""");
+        var context = CreateContext(threadId, new Dictionary<string, JsonElement> { ["targets"] = targets.RootElement.Clone() });
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(context, (_, _) => CreateCompletedStream(), CancellationToken.None))
+        {
+        }
+
+        stored.ShouldNotBeNull()["targets"][0].GetString().ShouldBe("pc-1");
+        mockThreadService.Verify(s => s.SaveMessageAsync(
+            threadId, "user", It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the user message is stored once, with its metadata");
+    }
+
+    [Fact]
+    public async Task InvokeStreamingAsync_SeveralUsageChunks_PersistsTheirSumOnTheAssistantMessage()
+    {
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量：消息上记的是这一轮全部调用之和
+        var threadId = Guid.NewGuid();
+        var mockThreadService = new Mock<IAgentThreadInternalService>();
+        mockThreadService
+            .Setup(s => s.GetOrCreateThreadAsync(threadId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((threadId, false));
+        mockThreadService
+            .Setup(s => s.GetMessageHistoryAsync(threadId, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ChatMessage>());
+        string? persistedUsage = null;
+        mockThreadService
+            .Setup(s => s.SaveMessageAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, string role, string _, string? _, string? usage, Guid? messageId, CancellationToken _) =>
+            {
+                if (role == "assistant") persistedUsage = usage;
+                return Task.FromResult(messageId ?? Guid.NewGuid());
+            });
+
+        var middleware = new HistoryMiddleware(mockThreadService.Object, CreateOptions(maxLoadedMessages: 100), Mock.Of<ILogger<HistoryMiddleware>>());
+        var upstream = new[]
+        {
+            new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 100, OutputTokens = 10 } },
+            new AgentStreamChunk { Text = "ok", FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 200, OutputTokens = 20 } }
+        };
+
+        await foreach (var _ in middleware.InvokeStreamingAsync(CreateContext(threadId), (_, _) => upstream.ToAsyncEnumerable(), CancellationToken.None))
+        {
+        }
+
+        persistedUsage.ShouldNotBeNull();
+        var usage = JsonSerializer.Deserialize<TokenUsageDto>(persistedUsage!)!;
+        usage.InputTokens.ShouldBe(300);
+        usage.OutputTokens.ShouldBe(30);
+    }
+
     #region Helpers
 
     private static IOptionsMonitor<AIOptions> CreateOptions(int? maxLoadedMessages, bool useDefault = false)
@@ -441,14 +521,15 @@ public class HistoryMiddlewareTests
         return new StaticOptionsMonitor<AIOptions>(aiOptions);
     }
 
-    private static AiMiddlewareContext CreateContext(Guid threadId)
+    private static AiMiddlewareContext CreateContext(Guid threadId, IReadOnlyDictionary<string, JsonElement>? turnMetadata = null)
     {
         return new AiMiddlewareContext
         {
             Request = new AgentRunRequest
             {
                 ThreadId = threadId,
-                UserMessage = "test"
+                UserMessage = "test",
+                TurnMetadata = turnMetadata
             },
             Agent = new AgentResolution
             {

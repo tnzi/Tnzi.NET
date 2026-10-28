@@ -32,15 +32,17 @@ public class SubscriptionBindingSink : IStoredPaymentMethodBindingSink
 
     /// <inheritdoc />
     /// <remarks>
-    /// 把新绑定的默认支付方式同步到该用户尚未绑卡的有效订阅，让「绑了卡就能自动续费」成立。
+    /// 把新绑定的默认支付方式同步到该账户尚未绑卡的有效订阅，让「绑了卡就能自动续费」成立。
     /// 已显式绑过其它卡的订阅不动，避免覆盖用户的明确选择。
     /// </remarks>
-    public async Task OnBoundAsync(Guid userId, StoredPaymentMethod method, CancellationToken cancellationToken = default)
+    public async Task OnBoundAsync(BillingAccountRef account, StoredPaymentMethod method, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(account);
         Check.NotNull(method);
 
         var affected = await _subscriptionRepository.AsQueryable()
-            .Where(s => s.UserId == userId
+            .Where(s => s.BillingAccountType == account.Type
+                && s.BillingAccountId == account.Id
                 && s.ChannelCode == method.ChannelCode
                 && s.StoredPaymentMethodId == null
                 && s.Status != SubscriptionStatus.Cancelled
@@ -53,7 +55,22 @@ public class SubscriptionBindingSink : IStoredPaymentMethodBindingSink
                 .SetProperty(x => x.PaymentMethodLast4, method.Last4), cancellationToken);
 
         if (affected > 0)
-            _logger.LogInformation("Bound payment method to {Count} subscriptions without one. UserId: {UserId}", affected, userId);
+            _logger.LogInformation("Bound payment method to {Count} subscriptions without one. Account: {Account}", affected, account);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 只刷新订阅上的卡组织与尾号快照（订阅页显示的就是它们），绑定关系与凭据不动。
+    /// </remarks>
+    public async Task OnUpdatedAsync(StoredPaymentMethod method, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(method);
+
+        await _subscriptionRepository.AsQueryable()
+            .Where(s => s.StoredPaymentMethodId == method.Id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.PaymentMethodBrand, method.Brand)
+                .SetProperty(x => x.PaymentMethodLast4, method.Last4), cancellationToken);
     }
 
     /// <inheritdoc />

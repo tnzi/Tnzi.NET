@@ -7,6 +7,7 @@ import TLoginPage from '../../../src/components/pages/TLoginPage.vue'
 import TDashboardPage from '../../../src/components/pages/TDashboardPage.vue'
 import PwdLogin from '../../../src/pages/login/modules/PwdLogin.vue'
 import Register from '../../../src/pages/login/modules/Register.vue'
+import ResetPwd from '../../../src/pages/login/modules/ResetPwd.vue'
 import { reactive } from 'vue'
 import {
   LOGIN_CONTEXT_KEY,
@@ -484,6 +485,38 @@ describe('TLoginPage', () => {
 
     expect(resolveUrl).toHaveBeenCalledWith('/captcha/altcha/challenge?purpose=register')
     expect(wrapper.find('altcha-widget').attributes('challengeurl')).toBe('/api/captcha/altcha/challenge?purpose=register')
+  })
+
+  // Each code flow has its own backend switches. Code sign-in by SMS + email
+  // says nothing about where a sign-up or a recovery code may go.
+  it('Register accepts the addresses quick registration can reach, not the code sign-in ones', () => {
+    const ctx = makeLoginContext({
+      callbacks: { sendCode: vi.fn(), register: vi.fn() },
+      features: {
+        ...DEFAULT_LOGIN_FEATURES,
+        codeChannels: { sms: true, email: true },
+        registerChannels: { sms: false, email: true },
+      },
+    })
+    const wrapper = mount(Register, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    expect(wrapper.find('input').attributes('placeholder')).toBe('Enter email')
+  })
+
+  it('ResetPwd accepts the addresses recovery can reach, not the code sign-in ones', () => {
+    const ctx = makeLoginContext({
+      callbacks: { sendCode: vi.fn(), resetPwd: vi.fn() },
+      features: {
+        ...DEFAULT_LOGIN_FEATURES,
+        codeChannels: { sms: true, email: false },
+        recoveryChannels: { sms: false, email: true },
+      },
+    })
+    const wrapper = mount(ResetPwd, {
+      global: { provide: { ...themeProvide(), [LOGIN_CONTEXT_KEY as unknown as symbol]: ctx } },
+    })
+    expect(wrapper.find('input').attributes('placeholder')).toBe('Enter email')
   })
 
   it('Register hides the captcha when the register captcha is off', () => {

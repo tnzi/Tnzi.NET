@@ -17,8 +17,14 @@
  * once the components stopped being split across two directories.
  */
 export { default as TChatApp } from './components/chat/TChatApp.vue';
-export type { ThemePref, ChatAppView, BuiltinViewId } from './components/chat/TChatApp.vue';
+export type { ThemePref, ChatAppView, BuiltinViewId, ChatAppAttachmentsResult } from './components/chat/TChatApp.vue';
 export type { ThreadItem } from './components/chat/TThreadList.vue';
+export { default as TRecentsPage } from './components/chat/TRecentsPage.vue';
+export { RECENTS_VIEW_ID } from './headless/recents';
+export type { RecentThreadsController, RecentsPreferences } from './headless/recents';
 export type { LandingChip } from './components/chat/TLandingPage.vue';
 export type { NavItem, NavGroup } from './components/layout/TSidebarNav.vue';
 export type { UserMenuItem, UserBarAction } from './components/overlay/TUserMenu.vue';
+export { useChatAside } from './headless/useAsidePanel';
+export type { ChatAsideControl } from './headless/useAsidePanel';
+export { default as TAsidePanel } from './components/layout/TAsidePanel.vue';

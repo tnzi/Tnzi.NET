@@ -77,6 +77,27 @@ public class PaymentCallbackTerminalStatusTests : PaymentIntegrationTestBase
         (await ReloadAsync<PaymentEntity>(paymentId))!.Status.ShouldBe(PaymentStatus.Failed);
     }
 
+    /// <summary>
+    /// 本地已判失败 / 取消，渠道随后又报「已付」（例如客户在同一个收银台换卡重试成功）：状态不回退，
+    /// 但这笔钱必须在支付行上留下渠道回报（并告警），而不是被终态守卫静静吞掉，那是一笔只能人工退的钱。
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(PaymentStatus.Failed))]
+    [InlineData(nameof(PaymentStatus.Cancelled))]
+    public async Task ASucceededCallbackAfterALocalFailure_LeavesATrailOnThePayment(string terminalStatus)
+    {
+        var tradeNo = "PAY-LATE-" + terminalStatus;
+        var paymentId = await SeedPendingPaymentAsync(tradeNo);
+        (await CallbackAsync(tradeNo, terminalStatus)).Succeeded.ShouldBeTrue();
+
+        (await CallbackAsync(tradeNo, nameof(PaymentStatus.Succeeded))).Succeeded.ShouldBeTrue();
+
+        var payment = await ReloadAsync<PaymentEntity>(paymentId);
+        payment!.Status.ShouldBe(Enum.Parse<PaymentStatus>(terminalStatus));
+        payment.ChannelResponse.ShouldNotBeNull();
+        payment.ChannelResponse.ShouldContain($"\"Status\":{(int)PaymentStatus.Succeeded}");
+    }
+
     [Fact]
     public async Task ASucceededCallback_StillSucceeds()
     {

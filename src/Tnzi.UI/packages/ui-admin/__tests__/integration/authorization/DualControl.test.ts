@@ -57,12 +57,14 @@ vi.mock('../../../src/services/bridges/dual-control-bridge', () => ({
   }),
 }))
 
-// Super-user short-circuits `can()`, so every permission-gated action is visible
+// Super-user short-circuits `can()` (an unnarrowed bypass, so
+// `bypassesPermissionChecks`), so every permission-gated action is visible
 // unless a test says otherwise.
 vi.mock('../../../src/stores/useAdminAuthStore', () => ({
   useAdminAuthStore: () => ({
     userInfo: { id: ME, permissions: [] },
     isSuperUser: true,
+    bypassesPermissionChecks: true,
   }),
 }))
 
@@ -130,6 +132,16 @@ describe('Dual-control approval queue', () => {
     expect(vm.prettyPayload('{"amount":100}')).toContain('"amount": 100')
     // Unparseable payloads must still be shown, not swallowed.
     expect(vm.prettyPayload('not json')).toBe('not json')
+  })
+
+  it('★ shows a 19-digit id in the payload exactly as it will be executed', async () => {
+    const wrapper = await mountPage()
+    const vm = wrapper.vm as unknown as Vm
+    // A JSON.parse round trip shows 1234567890123456800: the approver would be
+    // agreeing to a different record than the one the permit carries.
+    const shown = vm.prettyPayload('{"payRunId":1234567890123456789,"amount":100.50}')
+    expect(shown).toContain('"payRunId": 1234567890123456789')
+    expect(shown).toContain('"amount": 100.50')
   })
 
   it('distinguishes a spent permit from a live one', async () => {

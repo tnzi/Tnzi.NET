@@ -49,6 +49,7 @@ public class EFCoreModule : TnziInfrastructureModule
         //   什么都不注册时，实体里调用 IsEncrypted() 只会得到一句含糊的 DI 错误；
         //   这样能给出"去哪里打开这个开关"的确切指引。
         //   两种情况下，都不会静默降级成明文落库。
+        services.TryAddSingleton<FieldEncryptionKeyRing>();
         services.TryAddSingleton<IFieldEncryptor>(sp =>
         {
             var options = sp.GetRequiredService<IOptionsMonitor<FieldEncryptionOptions>>();
@@ -60,8 +61,15 @@ public class EFCoreModule : TnziInfrastructureModule
                     + "Encrypted properties are never silently stored as plaintext.");
             }
 
-            return new AesGcmFieldEncryptor(options);
+            var keyRing = sp.GetRequiredService<FieldEncryptionKeyRing>();
+            return options.CurrentValue.Mode == FieldEncryptionMode.Envelope
+                ? new EnvelopeFieldEncryptor(keyRing)
+                : new AesGcmFieldEncryptor(keyRing);
         });
+        services.TryAddSingleton<IFieldRewrapper>(sp => sp.GetRequiredService<IFieldEncryptor>() as IFieldRewrapper
+            ?? throw new InvalidOperationException(
+                "The registered IFieldEncryptor does not support re-wrapping. Set EFCore:FieldEncryption:Mode to Envelope, "
+                + "or register an IFieldRewrapper alongside your custom IFieldEncryptor."));
 
         // 注册 TableNamePrefixConfiguration（使用工厂方式，以便获取 IModuleContainer）
         services.AddSingleton<IEntityBatchConfiguration>(serviceProvider =>
@@ -92,11 +100,9 @@ public class EFCoreModule : TnziInfrastructureModule
         // 使用 TryAdd 确保不会覆盖 AspNetCoreModule 的注册
         services.TryAddTransient<ICurrentUser, DesignTimeCurrentUser>();
 
-        // 注册新的服务类
-        services.AddSingleton<Services.IDbContextDiscoveryService, Services.DbContextDiscoveryService>();
-        services.AddSingleton<Services.IDbContextRegistrar, Services.DbContextRegistrar>();
-        services.AddSingleton<Services.IDataSeederManager, Services.DataSeederManager>();
-        services.AddSingleton<Services.IRepositoryRegistrar, Services.RepositoryRegistrar>();
+        // DbContext 发现 / 注册、种子发现与仓储注册（DbContextDiscoveryService / DbContextRegistrar /
+        // DataSeederManager / RepositoryRegistrar）不进容器：它们在容器建成之前的配置期工作，
+        // 由本模块与 AddTnziDbContext 直接构造，往容器里替换它们不会有任何效果。
 
         // 注册数据库迁移器（TryAdd 确保不覆盖用户自定义实现）
         services.TryAddScoped<IDbMigrator, Services.EfCoreDbMigrator>();
@@ -108,7 +114,7 @@ public class EFCoreModule : TnziInfrastructureModule
         // 注册慢查询日志拦截器（Scoped 以支持 Logger 注入）
         services.AddScoped<Interceptors.SlowQueryLoggingInterceptor>();
 
-        // 注册 Dapper 相关服务
+        // 注册 Dapper 相关服务（AddTnziDbContext 不再重复注册）
         services.AddScoped<Dapper.DapperExecutorFactory>();
 
         // 读取 Outbox 配置，决定是否启用

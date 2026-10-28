@@ -24,3 +24,4 @@ export { default as TCollapsibleSidebar } from './TCollapsibleSidebar.vue';
 export { default as TSidebarNav } from './TSidebarNav.vue';
 export type { NavItem, NavGroup, NavGroupAction } from './TSidebarNav.vue';
 export { default as TChatRail } from './TChatRail.vue';
+export { default as TAsidePanel } from './TAsidePanel.vue';

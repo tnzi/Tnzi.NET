@@ -29,9 +29,22 @@ describe('resolveHubConfigs', () => {
     expect(r.settings?.hubUrl).toBe('/custom/settings')
   })
 
-  it('does NOT enable chat when the consumer did not opt in', () => {
+  it('derives the chat hub when the consumer omits the chat option (chat is on by default)', () => {
+    // An omitted `chat` is the default chat, enabled: the shell provides
+    // `options.chat ?? {}` and only `enabled: false` turns the launcher off.
+    // Leaving it undefined here sent the chat hub to the root-relative path
+    // the apiBase exists to replace.
     const r = resolveHubConfigs('/api', undefined, undefined)
-    expect(r.chat).toBeUndefined() // a bare { hubUrl } would enable chat - must stay undefined
-    expect(r.settings).toEqual({ hubUrl: '/api/hubs/settings' }) // settings hub runs regardless
+    expect(r.chat).toEqual({ hubUrl: '/api/hubs/chat' })
+    expect(r.settings).toEqual({ hubUrl: '/api/hubs/settings' })
+  })
+
+  it('a disabled chat stays disabled when its hub URL is derived', () => {
+    const r = resolveHubConfigs('/api', { enabled: false }, undefined)
+    expect(r.chat).toEqual({ enabled: false, hubUrl: '/api/hubs/chat' })
+  })
+
+  it('no apiBase and no chat option leaves chat undefined', () => {
+    expect(resolveHubConfigs(undefined, undefined, undefined).chat).toBeUndefined()
   })
 })

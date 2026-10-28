@@ -11,7 +11,11 @@ public interface IFileStorageService
     /// </summary>
     /// <param name="fileName">原始文件名</param>
     /// <param name="stream">文件内容</param>
-    /// <param name="isTemporary">临时文件（ReferenceCount 初始为 0，未被引用时由清理任务回收）</param>
+    /// <param name="isTemporary">
+    /// 临时文件（ReferenceCount 初始为 0，未被引用时由清理任务回收）。临时上传<b>不参与 MD5 去重</b>，
+    /// 每次都落一条自己的记录：它还没有持有者，复用别人的记录要么永久多算一个持有者，要么让它的文件
+    /// 随原持有者的删除一起消失。正式上传照常去重。
+    /// </param>
     /// <param name="isPublic">
     /// 标记为公开可读（<see cref="FileRecord.IsPublic"/>）。头像、站点素材这类要以匿名
     /// <c>&lt;img src&gt;</c> 消费的资源传 true；默认 false，文件只有创建者与持
@@ -20,6 +24,33 @@ public interface IFileStorageService
     /// 因此**不必**依赖每个调用方都记得传这个参数。
     /// </param>
     Task<Result<FileRecord>> SaveAsync(string fileName, Stream stream, bool isTemporary = false, bool isPublic = false);
+
+    /// <summary>
+    /// 保存文件，可以指定不去重、以及记录归属哪个用户（见 <see cref="FileSaveOptions"/>）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 给用户文件空间写<b>正式</b>文件用这个：<c>Deduplicate = false</c> 让每一次上传落一条自己的记录；
+    /// 服务端代某个用户写（后台任务里没有当前用户）时再给 <c>OwnerId</c>。两者都与配额一起生效：
+    /// 字节记在所有者名下，超出他的配额就 413 / <c>FILE_QUOTA_EXCEEDED</c>。
+    /// </para>
+    /// <para>
+    /// 默认实现只认得 <see cref="SaveAsync(string, Stream, bool, bool)"/> 能表达的那部分；要求不去重或指定所有者时答 501，
+    /// 不把这两个要求静默丢掉（丢掉的后果是记录挂在错误的人名下）。框架自己的实现在 <c>FileStorageService</c>。
+    /// </para>
+    /// </remarks>
+    Task<Result<FileRecord>> SaveAsync(string fileName, Stream stream, FileSaveOptions options, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(options);
+        if (options.OwnerId != null || !options.Deduplicate)
+        {
+            return Task.FromResult(Result<FileRecord>.Failure(
+                "Saving without deduplication or on behalf of another user is not supported by this IFileStorageService implementation.", 501));
+        }
+
+        return SaveAsync(fileName, stream, options.IsTemporary, options.IsPublic);
+    }
+
     /// <summary>
     /// 获取文件流（下载语义：发布 <c>FileAccessType.Download</c> 的 <c>FileAccessedEvent</c>）。
     /// </summary>
@@ -49,12 +80,27 @@ public interface IFileStorageService
     /// 获取文件信息（返回 FileInfoDto DTO）
     /// </summary>
     Task<Result<FileInfoDto>> GetFileInfoAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// 文件的下载路由 <c>/api/files/{id}/download</c>（调用者须能读这个文件）。
+    /// </summary>
+    /// <remarks>
+    /// 返回的是一条<b>不带签名、不会过期</b>的 API 路径：每次访问照常过授权器，所以浏览器直接打开一份私密文件时
+    /// 要么带上 Authorization，要么另取 <c>files/{id}/access-token</c> 拼成 <c>?sig=</c>。<paramref name="expiresIn"/>
+    /// 不被读取（保留在签名上只为兼容既有调用方）。要直连对象存储、有时效的地址走 <see cref="GetPresignedUrlAsync"/>。
+    /// </remarks>
     Task<Result<string>> GetUrlAsync(Guid id, int? expiresIn = null);
     /// <summary>
     /// 获取文件缩略图流
     /// </summary>
     Task<Result<Stream>> GetThumbnailAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Result> DeleteAsync(Guid id);
+    /// <summary>
+    /// 按内容去重地保存一份文件：调用者自己已有同样字节的正式记录就复用它（计数 +1），否则新建一条。
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="md5Hash"/> 是调用方<b>声称</b>的哈希，只用来核对：与流的实际 MD5 不一致直接 400，不复用、不新建。
+    /// 去重一律按服务端算出的哈希（净化器改写过内容时按改写后的字节），声称值不参与查找。
+    /// </remarks>
     Task<Result<FileRecord>> GetOrCreateByMd5Async(string md5Hash, string fileName, Stream stream);
 
     // 批量操作
@@ -124,6 +170,20 @@ public interface IFileStorageService
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>List of user storage usages</returns>
     Task<Result<IEnumerable<UserStorageUsage>>> GetTopUsersByStorageAsync(int top = 20, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 一个用户的存储配额：已用多少、可用多少（见 <see cref="StorageQuotaDto"/>）。管理端用；不做授权判定。
+    /// </summary>
+    /// <remarks>默认实现返回 501，自定义实现不必为此升级。</remarks>
+    Task<Result<StorageQuotaDto>> GetStorageQuotaAsync(Guid userId, CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<StorageQuotaDto>.Failure("Storage quotas are not supported by this IFileStorageService implementation.", 501));
+
+    /// <summary>
+    /// 当前登录用户自己的存储配额。未登录答 401。
+    /// </summary>
+    /// <remarks>默认实现返回 501，自定义实现不必为此升级。</remarks>
+    Task<Result<StorageQuotaDto>> GetMyStorageQuotaAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(Result<StorageQuotaDto>.Failure("Storage quotas are not supported by this IFileStorageService implementation.", 501));
 
     // File integrity verification
     /// <summary>

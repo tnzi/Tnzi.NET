@@ -187,10 +187,23 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
 
 // UsageDashboard now wraps TDashboardPage → useEcharts → useTheme. Provide
 // a minimal theme stub so tests can mount without installing @tnzi/ui plugin.
+//
+// useEcharts is stubbed too: TDashboardPage renders its chart containers only
+// once data has loaded, and a real chart created on them keeps painting on a
+// canvas happy-dom does not have (an unhandled TypeError per animation frame).
+// Nothing here asserts on the charts.
 vi.mock('@tnzi/ui', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('@tnzi/ui')
+  const { ref, shallowRef } = await import('vue')
   return {
     ...actual,
+    useEcharts: () => ({
+      containerRef: ref<HTMLDivElement | null>(null),
+      chart: shallowRef(null),
+      setOption: vi.fn(),
+      resize: vi.fn(),
+      dispose: vi.fn(),
+    }),
     useTheme: () => ({
       settings: { value: { mode: 'light', colors: { primary: '#646cff' } } },
       isDark: { value: false },
@@ -338,6 +351,20 @@ describe('UsageDashboard page (Phase 5 Task 5.9 analytics)', () => {
     expect(wrapper.text()).toContain('openai/gpt-4o') // byModel succeeded
     expect(wrapper.text()).toContain('2026-04-12') // byDay succeeded
     expect(wrapper.text()).toContain('89') // summary succeeded
+  })
+
+  // A log page that came back empty-handed (no payload) threw a TypeError inside
+  // refresh(): the spinners never stopped and nothing was reported.
+  it('★ a log read with no payload still ends the refresh', async () => {
+    getLogsMock.mockResolvedValueOnce(null as never)
+    const wrapper = mount(UsageDashboard)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="refresh-btn"]').text()).toContain('Refresh')
+    expect(wrapper.find('[data-test="refresh-btn"]').text()).not.toContain('Loading')
+    const vm = wrapper.vm as unknown as { logs: unknown[]; logTotal: number }
+    expect(vm.logs).toEqual([])
+    expect(vm.logTotal).toBe(0)
   })
 
   it('renders the page root', async () => {

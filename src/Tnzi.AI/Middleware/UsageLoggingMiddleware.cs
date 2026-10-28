@@ -78,7 +78,8 @@ public class UsageLoggingMiddleware : IAiMiddleware
     public async IAsyncEnumerable<AgentStreamChunk> InvokeStreamingAsync(AiMiddlewareContext context, AiStreamingMiddlewareDelegate next, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var sw = Stopwatch.StartNew();
-        TokenUsageDto? lastUsage = null;
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量（StreamUsage 口径），记录与计费的是全部之和
+        TokenUsageDto? totalUsage = null;
         var isSuccess = true;
         string? errorMessage = null;
         string? lastFinishReason = null;
@@ -107,10 +108,7 @@ public class UsageLoggingMiddleware : IAiMiddleware
         {
             await foreach (var chunk in stream.WithCancellation(cancellationToken))
             {
-                if (chunk.Usage != null)
-                {
-                    lastUsage = chunk.Usage;
-                }
+                totalUsage = StreamUsage.Add(totalUsage, chunk.Usage);
                 if (!string.IsNullOrWhiteSpace(chunk.FinishReason))
                 {
                     lastFinishReason = chunk.FinishReason;
@@ -130,8 +128,8 @@ public class UsageLoggingMiddleware : IAiMiddleware
         finally
         {
             sw.Stop();
-            var inputTokens = lastUsage?.InputTokens ?? 0;
-            var outputTokens = lastUsage?.OutputTokens ?? 0;
+            var inputTokens = totalUsage?.InputTokens ?? 0;
+            var outputTokens = totalUsage?.OutputTokens ?? 0;
             if (!completedNormally)
             {
                 isSuccess = false;
@@ -142,8 +140,8 @@ public class UsageLoggingMiddleware : IAiMiddleware
                 isSuccess = false;
                 errorMessage = BuildFailureMessage(lastFinishReason, errorMessage);
             }
-            var cachedInputTokens = lastUsage?.CachedInputTokens ?? 0;
-            var cacheCreationTokens = lastUsage?.CacheCreationTokens ?? 0;
+            var cachedInputTokens = totalUsage?.CachedInputTokens ?? 0;
+            var cacheCreationTokens = totalUsage?.CacheCreationTokens ?? 0;
             var actualModel = lastModel ?? context.EffectiveModel ?? context.Agent.Model;
             await LogUsageSafeAsync(operationType, actualProvider, actualModel, context, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens, sw.ElapsedMilliseconds, isSuccess, errorMessage, CancellationToken.None);
             AIActivitySource.RecordChatRequest(actualProvider, actualModel, operationType);

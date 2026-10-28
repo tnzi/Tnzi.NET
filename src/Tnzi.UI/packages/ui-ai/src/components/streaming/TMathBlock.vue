@@ -4,6 +4,12 @@
  *
  * Uses KaTeX to render LaTeX math expressions.
  * Falls back to raw expression on parse error.
+ *
+ * KaTeX writes MathML only, which the browser lays out natively. Its HTML
+ * output needs `katex.css` to position the glyph spans and to hide the MathML
+ * copy written next to them; without the stylesheet a formula rendered as a
+ * run of unpositioned glyphs beside a second, native rendering of itself.
+ * MathML needs no stylesheet, so the component carries no CSS dependency.
  */
 
 import { ref, watch, onMounted } from 'vue';
@@ -32,7 +38,7 @@ async function render(): Promise<void> {
     renderedHtml.value = katex.default.renderToString(props.expression, {
       displayMode: props.display,
       throwOnError: false,
-      output: 'htmlAndMathml',
+      output: 'mathml',
     });
     hasError.value = false;
   } catch {

@@ -113,7 +113,7 @@ public class NotificationWorkItemTests
         logger.Verify(l => l.Log(
                 It.Is<LogLevel>(level => level >= LogLevel.Warning),
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(messageId.ToString())),
+                It.Is<It.IsAnyType>((state, _) => state != null && state.ToString()!.Contains(messageId.ToString())),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

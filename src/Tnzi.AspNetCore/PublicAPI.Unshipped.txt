@@ -169,6 +169,7 @@ static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.AddRequestPipelineMi
 static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.AddRequestPipelineMiddleware<TMiddleware>(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, Tnzi.AspNetCore.Middleware.RequestPipelineStage stage) -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static Tnzi.AspNetCore.Extensions.RequestPipelineExtensions.UseRequestPipelineStage(this Microsoft.AspNetCore.Builder.IApplicationBuilder! app, Tnzi.AspNetCore.Middleware.RequestPipelineStage stage) -> Microsoft.AspNetCore.Builder.IApplicationBuilder!
 static Tnzi.AspNetCore.Middleware.ExceptionHttpStatusCode.Resolve(System.Exception! exception) -> int
+static Tnzi.AspNetCore.Middleware.ExceptionHttpStatusCode.Resolve(Microsoft.AspNetCore.Http.HttpContext! context, System.Exception! exception) -> int
 Tnzi.AspNetCore.Extensions.RequestPipelineExtensions
 Tnzi.AspNetCore.Middleware.ExceptionHttpStatusCode
 Tnzi.AspNetCore.Middleware.RequestPipelineRegistration
@@ -180,7 +181,7 @@ Tnzi.AspNetCore.Middleware.RequestPipelineStage.AfterAuthentication = 0 -> Tnzi.
 static Tnzi.AspNetCore.Mvc.MvcExtensions.ValidationMessage(this Microsoft.AspNetCore.Mvc.ModelBinding.ModelStateDictionary! modelState) -> string!
 const Tnzi.AspNetCore.Mvc.Filters.RequireCaptchaAttribute.TokenHeaderName = "X-Captcha-Token" -> string!
 const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.ChallengePath = "captcha/altcha/challenge?purpose={purpose}" -> string!
-const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.DefaultScriptUrl = "https://cdn.jsdelivr.net/npm/altcha@3/dist/altcha.min.js" -> string!
+const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.DefaultScriptUrl = "https://cdn.jsdelivr.net/npm/altcha@3.2.2/dist/main/altcha.min.js" -> string!
 const Tnzi.AspNetCore.Security.AltchaCaptchaProvider.ProviderName = "altcha" -> string!
 const Tnzi.AspNetCore.Security.CaptchaPurpose.Login = "login" -> string!
 const Tnzi.AspNetCore.Security.CaptchaPurpose.PasswordRecovery = "password-recovery" -> string!
@@ -346,3 +347,32 @@ virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetAltchaChallenge(
 virtual Tnzi.AspNetCore.Controllers.DefaultCaptchaController.GetConfig() -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.CaptchaClientConfigDto!>!
 const Tnzi.AspNetCore.Options.AltchaOptions.MaxNumberUpperBound = 10000000 -> int
 const Tnzi.AspNetCore.Security.CaptchaVerifier.MaxTokenLength = 8192 -> int
+Tnzi.AspNetCore.Options.TenantResolverOptions.ResolveResolutionOrder() -> System.Collections.Generic.IReadOnlyList<Tnzi.AspNetCore.Options.TenantResolutionSource>!
+*REMOVED*virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetAdminManifest(Tnzi.ITnziApplication! tnziApp, Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider! actionProvider) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminManifestDto!>!
+virtual Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.GetAdminManifest(Tnzi.ITnziApplication! tnziApp, Microsoft.AspNetCore.Mvc.Infrastructure.IActionDescriptorCollectionProvider! actionProvider, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.AspNetCoreOptions!>! aspNetCoreOptions) -> Tnzi.AspNetCore.Models.ApiResult<Tnzi.AspNetCore.Dtos.AdminManifestDto!>!
+*REMOVED*Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context) -> System.Threading.Tasks.Task!
+*REMOVED*Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.RequestValidationMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Tnzi.AspNetCore.Security.IRequestValidator! validator, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.RequestValidationMiddleware!>! logger) -> void
+Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.InvokeAsync(Microsoft.AspNetCore.Http.HttpContext! context, Tnzi.AspNetCore.Security.IRequestValidator! validator) -> System.Threading.Tasks.Task!
+Tnzi.AspNetCore.Middleware.RequestValidationMiddleware.RequestValidationMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.RequestValidationMiddleware!>! logger) -> void
+*REMOVED*Tnzi.AspNetCore.Middleware.TenantResolverMiddleware.TenantResolverMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.TenantResolverOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.TenantResolverMiddleware!>! logger, Tnzi.MultiTenancy.ITenantChecker? tenantChecker = null) -> void
+Tnzi.AspNetCore.Middleware.TenantResolverMiddleware.TenantResolverMiddleware(Microsoft.AspNetCore.Http.RequestDelegate! next, Microsoft.Extensions.Options.IOptions<Tnzi.AspNetCore.Options.TenantResolverOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.AspNetCore.Middleware.TenantResolverMiddleware!>! logger) -> void
+Tnzi.AspNetCore.Middleware.LoggedBodySanitizer
+static Tnzi.AspNetCore.Middleware.LoggedBodySanitizer.AllowsBodyCapture(Microsoft.AspNetCore.Http.PathString path) -> bool
+static Tnzi.AspNetCore.Middleware.LoggedBodySanitizer.Redact(string? body, string? contentType = null) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetRedactedPath(this Microsoft.AspNetCore.Http.HttpContext! context, System.Collections.Generic.IReadOnlyCollection<string!>? sensitiveRouteKeys = null) -> string!
+Tnzi.AspNetCore.Options.QueryStringTokenOptions
+Tnzi.AspNetCore.Options.QueryStringTokenOptions.QueryStringTokenOptions() -> void
+const Tnzi.AspNetCore.Options.QueryStringTokenOptions.ParameterName = "access_token" -> string!
+const Tnzi.AspNetCore.Options.QueryStringTokenOptions.HubsPathPrefix = "/hubs" -> string!
+Tnzi.AspNetCore.Options.QueryStringTokenOptions.PathPrefixes.get -> System.Collections.Generic.List<string!>!
+Tnzi.AspNetCore.Options.QueryStringTokenOptions.AcceptsQueryToken(Microsoft.AspNetCore.Http.PathString path) -> bool
+*REMOVED*Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.DefaultDiagnosticsAdminController(Tnzi.AspNetCore.Services.IExceptionStatisticsService! exceptionStatisticsService) -> void
+Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.DefaultDiagnosticsAdminController(Tnzi.AspNetCore.Services.IExceptionStatisticsService? exceptionStatisticsService = null) -> void
+*REMOVED*readonly Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.ExceptionStatisticsService -> Tnzi.AspNetCore.Services.IExceptionStatisticsService!
+readonly Tnzi.AspNetCore.Controllers.DefaultDiagnosticsAdminController.ExceptionStatisticsService -> Tnzi.AspNetCore.Services.IExceptionStatisticsService?
+const Tnzi.AspNetCore.Options.HttpEncryptOptions.DefaultMaxRequestBodyBytes = 1048576 -> int
+Tnzi.AspNetCore.Options.HttpEncryptOptions.MaxRequestBodyBytes.get -> int
+Tnzi.AspNetCore.Options.HttpEncryptOptions.MaxRequestBodyBytes.set -> void
+const Tnzi.AspNetCore.Security.RequestValidator.MaxNonceLength = 128 -> int
+static Tnzi.AspNetCore.Http.HttpContextExtensions.GetEndpointRouteTemplate(this Microsoft.AspNetCore.Http.HttpContext! context) -> string?
+static Tnzi.AspNetCore.Http.HttpContextExtensions.IsLongLivedConnection(this Microsoft.AspNetCore.Http.HttpContext! context) -> bool

@@ -87,4 +87,48 @@ describe('Payroll Setup page', () => {
     expect(seedPack).toHaveBeenCalledWith('US')
     expect(fetchComponents.mock.calls.length).toBeGreaterThan(0)
   })
+
+  // The structure line editor picks from a component list read once on mount.
+  // A component created on the Components tab was missing from it until the
+  // page was reloaded; editing or deleting one left the stale entry behind.
+  it.each(['create', 'update', 'delete'] as const)(
+    '★ the structure editor picks up a component after a %s on the Components tab',
+    async (kind) => {
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const vm = wrapper.vm as unknown as {
+        componentCrud: {
+          openCreate: () => void
+          openEdit: (row: unknown) => void
+          submit: () => Promise<unknown>
+          formModal: { formData: { value: Record<string, unknown> | null } }
+          remove?: (row: unknown) => Promise<unknown>
+        }
+        componentActions: Array<{ key: string; onClick?: (row: unknown) => unknown }>
+        sources: { componentList: { value: Array<{ code: string }> } }
+      }
+      const bonus = { id: 'c9', code: 'BONUS', name: 'Bonus', type: 'Earning', isActive: true }
+      fetchComponents.mockImplementation((async () => ({ items: [bonus], totalCount: 1, pageIndex: 1, pageSize: 100 })) as never)
+
+      try {
+        if (kind === 'create') {
+          vm.componentCrud.openCreate()
+          vm.componentCrud.formModal.formData.value!.code = 'BONUS'
+          vm.componentCrud.formModal.formData.value!.name = 'Bonus'
+          await vm.componentCrud.submit()
+        } else if (kind === 'update') {
+          vm.componentCrud.openEdit(bonus)
+          await vm.componentCrud.submit()
+        } else {
+          await vm.componentActions.find((a) => a.key === 'delete')!.onClick!(bonus)
+        }
+        await flushPromises()
+
+        expect(vm.sources.componentList.value.map((c) => c.code)).toEqual(['BONUS'])
+      } finally {
+        fetchComponents.mockImplementation(async () => ({ items: [], totalCount: 0, pageIndex: 1, pageSize: 20 }))
+        wrapper.unmount()
+      }
+    },
+  )
 })

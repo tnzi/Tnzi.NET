@@ -22,17 +22,43 @@ public class JsonStringLocalizerFactory : IStringLocalizerFactory
     /// 框架的本地化选项。<c>DefaultCulture</c> 是查找链的最后一级 —— 没有它时，
     /// 只写在默认语言资源里的键在别的语言下会退化成键名本身。
     /// </param>
+    /// <param name="hostEnvironment">
+    /// 宿主环境。相对的 <c>ResourcesPath</c> 按它的 <c>ContentRootPath</c> 解析（与 appsettings.json 同一个基准）；
+    /// 没有宿主环境时才按进程当前目录解析。
+    /// </param>
     public JsonStringLocalizerFactory(
         IOptions<Microsoft.Extensions.Localization.LocalizationOptions> options,
         ILoggerFactory loggerFactory,
         IMissingTranslationTracker? missingTranslationTracker = null,
-        IOptions<Tnzi.Localization.Options.LocalizationOptions>? tnziOptions = null)
+        IOptions<Tnzi.Localization.Options.LocalizationOptions>? tnziOptions = null,
+        IHostEnvironment? hostEnvironment = null)
     {
         Check.NotNull(options);
         _loggerFactory = Check.NotNull(loggerFactory);
         _missingTranslationTracker = missingTranslationTracker;
-        _resourcesPath = options.Value.ResourcesPath ?? "Resources";
+        _resourcesPath = ResolveResourcesPath(options.Value.ResourcesPath ?? "Resources", hostEnvironment);
         _defaultCulture = tnziOptions?.Value.DefaultCulture;
+
+        // 资源目录不存在时每个键都会退化成键名，与「缺翻译」看起来一模一样：启动时说一次
+        if (!Directory.Exists(_resourcesPath))
+        {
+            _loggerFactory.CreateLogger<JsonStringLocalizerFactory>()
+                .LogWarning("JSON localization resources directory {ResourcesPath} does not exist; every key will render as its own name", _resourcesPath);
+        }
+    }
+
+    /// <summary>
+    /// 相对路径按内容根解析。此前按进程当前目录解析：Windows 服务的当前目录是系统目录、显式指定内容根的宿主
+    /// 当前目录与内容根不同，这两种部署下配置照常加载而每个译文都安静地退化成键名。
+    /// </summary>
+    private static string ResolveResourcesPath(string resourcesPath, IHostEnvironment? hostEnvironment)
+    {
+        if (Path.IsPathRooted(resourcesPath) || string.IsNullOrEmpty(hostEnvironment?.ContentRootPath))
+        {
+            return resourcesPath;
+        }
+
+        return Path.Combine(hostEnvironment.ContentRootPath, resourcesPath);
     }
 
     /// <summary>

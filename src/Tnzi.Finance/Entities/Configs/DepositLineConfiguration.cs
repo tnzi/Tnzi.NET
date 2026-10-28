@@ -9,8 +9,8 @@ public class DepositLineConfiguration : EntityTypeConfigurationBase<DepositLine,
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(l => l.Description).HasMaxLength(500);
-        builder.Property(l => l.Reference).HasMaxLength(128);
+        builder.Property(l => l.Description).HasMaxLength(FinanceFieldLimits.LineDescriptionMaxLength);
+        builder.Property(l => l.Reference).HasMaxLength(FinanceFieldLimits.ReferenceMaxLength);
         builder.Property(l => l.Amount).HasMoneyPrecision();
 
         // 「一张收款至多被一张存活的存款单收走」是数据库保证的，不是先查再写保证的：

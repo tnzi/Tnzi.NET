@@ -61,7 +61,8 @@ public class PasswordResetRequestedEventHandlerTests
         ISettingService? settings = null,
         IResetPasswordUrlGenerator? generator = null,
         string? resetPasswordRoute = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        string? apiPathPrefix = null)
         => new(
             Notifications(),
             NullLogger<PasswordResetRequestedEventHandler>.Instance,
@@ -71,7 +72,10 @@ public class PasswordResetRequestedEventHandlerTests
                 Recovery = new RecoveryOptions { ResetPasswordRoute = resetPasswordRoute ?? string.Empty, ResetTokenExpirationMinutes = 30 },
             }),
             urlGenerator: generator,
-            configuration: configuration);
+            configuration: configuration,
+            aspNetCoreOptions: apiPathPrefix == null
+                ? null
+                : Microsoft.Extensions.Options.Options.Create(new AspNetCoreOptions { ApiPathPrefix = apiPathPrefix }));
 
     private static IConfiguration ConfigWith(string key, string value)
         => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { [key] = value }).Build();
@@ -195,8 +199,26 @@ public class PasswordResetRequestedEventHandlerTests
         var sent = Assert.Single(_sent);
         Assert.Equal("PasswordReset", sent.TemplateName);
         var resetUrl = Assert.IsType<string>(sent.TemplateVariables!["ResetUrl"]);
-        Assert.StartsWith("https://api.example.com/auth/reset-password?", resetUrl);
+        // 端点经 RoutePrefixConvention 挂在 ApiPathPrefix（默认 /api）之下；不带前缀的链接点开是 404。
+        Assert.StartsWith("https://api.example.com/api/auth/reset-password?", resetUrl);
         Assert.Contains("token=reset-token", resetUrl);
+    }
+
+    [Theory]
+    [InlineData("/api", "https://api.example.com", "https://api.example.com/api/auth/reset-password?")]
+    [InlineData("/api/v2", "https://api.example.com", "https://api.example.com/api/v2/auth/reset-password?")]
+    [InlineData("", "https://api.example.com", "https://api.example.com/auth/reset-password?")]
+    // 部署在子路径下：ApiBaseUrl 带上子路径，前缀接在它后面
+    [InlineData("/api", "https://host.example.com/app", "https://host.example.com/app/api/auth/reset-password?")]
+    // 为绕开旧缺陷已经写成 .../api 的部署：不再追加，否则成了 /api/api
+    [InlineData("/api", "https://api.example.com/api/", "https://api.example.com/api/auth/reset-password?")]
+    public async Task TheBackendResetLink_SitsUnderTheConfiguredApiPathPrefix(string apiPathPrefix, string apiBaseUrl, string expectedStart)
+    {
+        var handler = Build(settings: SettingsWith(apiBaseUrl: apiBaseUrl, frontendUrl: null), apiPathPrefix: apiPathPrefix);
+
+        await handler.HandleAsync(AnEvent());
+
+        Assert.StartsWith(expectedStart, (string)Assert.Single(_sent).TemplateVariables!["ResetUrl"]);
     }
 
     [Fact]

@@ -46,6 +46,35 @@ export const FINANCE_SOURCE_TYPE_LABEL_KEYS: Record<string, string> = {
 }
 
 /**
+ * Source tokens whose journal entries are undone by voiding the document, not by
+ * reversing the entry from the ledger.
+ *
+ * The ledger's reverse endpoint refuses these with 409 (the backend's
+ * document-projected set): reversing an invoice's entry there would offset the
+ * ledger while the invoice stays Posted and keeps ageing. The core documents plus
+ * the payroll sub-module's two pay-run tokens. `Revaluation` and
+ * `PaymentApplication` are deliberately absent - they have no document-level void,
+ * so reversing from the ledger is their only undo. A consuming app can add its
+ * own tokens on the server; those still offer Reverse and are refused there.
+ */
+const VOID_ONLY_SOURCE_TYPES: ReadonlySet<string> = new Set([
+  'Invoice',
+  'Bill',
+  'CreditMemo',
+  'Expense',
+  'PaymentEntry',
+  'Transfer',
+  'Deposit',
+  'PayRun',
+  'PayRun.Payment',
+])
+
+/** Whether the ledger itself may reverse an entry with this source (manual entries carry none). */
+export function isReversibleFromLedger(token?: string | null): boolean {
+  return !token || !VOID_ONLY_SOURCE_TYPES.has(token)
+}
+
+/**
  * Label for a journal `sourceType` token.
  *
  * The token set is open, not an enum: consuming apps that post programmatically

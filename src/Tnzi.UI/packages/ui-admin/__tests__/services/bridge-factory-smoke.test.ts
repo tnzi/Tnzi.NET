@@ -49,6 +49,13 @@ describe('bridge factories that no page test executes', () => {
   describe('writes reject with the server reason on a refused envelope', () => {
     const writes: Array<[string, () => Promise<unknown>]> = [
       ['diagnostics.exceptions.clear', () => createDiagnosticsBridge({ client }).exceptions.clear()],
+      // Reads, but each one's empty answer is a claim on the page ("no sensitive
+      // endpoints are active", "no exceptions"), so a refusal must reach it.
+      ['diagnostics.modules.list', () => createDiagnosticsBridge({ client }).modules.list()],
+      ['diagnostics.controllers.list', () => createDiagnosticsBridge({ client }).controllers.list()],
+      ['diagnostics.sensitiveEndpoints.list', () => createDiagnosticsBridge({ client }).sensitiveEndpoints.list()],
+      ['diagnostics.exceptions.getSummary', () => createDiagnosticsBridge({ client }).exceptions.getSummary()],
+      ['diagnostics.exceptions.getRecent', () => createDiagnosticsBridge({ client }).exceptions.getRecent()],
       ['invoice.send', () => createInvoiceBridge({ client }).send('i1', 'a@b.c')],
       ['invoice.markAsPaid', () => createInvoiceBridge({ client }).markAsPaid('i1', {} as never)],
       ['invoice.cancel', () => createInvoiceBridge({ client }).cancel('i1', 'duplicate')],
@@ -58,6 +65,11 @@ describe('bridge factories that no page test executes', () => {
       // has nothing to render without it, so the server's reason must reach it.
       ['logging.logFiles.getLevels', () => createLoggingBridge({ client }).logFiles.getLevels()],
       ['performance.clear', () => createPerformanceBridge({ client }).clear()],
+      // Reads behind a list page and the Evaluate tab: an empty answer is a claim
+      // ("no rules", "no decision"), so a refusal must reach the page.
+      ['permission.getPersistedRules', () => createPermissionBridge({ client }).getPersistedRules()],
+      ['permission.getRules', () => createPermissionBridge({ client }).getRules()],
+      ['permission.evaluate', () => createPermissionBridge({ client }).evaluate({ toolName: 'x' } as never)],
       ['permission.createPersistedRule', () => createPermissionBridge({ client }).createPersistedRule({} as never)],
       ['permission.updatePersistedRule', () => createPermissionBridge({ client }).updatePersistedRule('r1', {} as never)],
       ['permission.deletePersistedRule', () => createPermissionBridge({ client }).deletePersistedRule('r1')],
@@ -72,19 +84,29 @@ describe('bridge factories that no page test executes', () => {
     })
   })
 
+  // The optional-module status reads answer their default only when the module
+  // is absent (404 / 501, see read-refusals.test.ts): their pages read that
+  // default as "module not loaded", so a 403 must not produce it.
+  describe('optional-module reads reject a refusal instead of reading as "not loaded"', () => {
+    const reads: Array<[string, () => Promise<unknown>]> = [
+      ['channels.channels.getAdapters', () => createChannelsBridge({ client }).channels.getAdapters()],
+      ['channels.channels.getStatus', () => createChannelsBridge({ client }).channels.getStatus()],
+      ['channels.gateway.getConnections', () => createChannelsBridge({ client }).gateway.getConnections()],
+      ['sandbox.getStatus', () => createSandboxBridge({ client }).getStatus()],
+    ]
+
+    it.each(reads)('%s', async (_name, call) => {
+      await expect(call()).rejects.toThrow(REFUSAL)
+    })
+  })
+
   describe('reads degrade to the declared tolerant default, never to the raw envelope', () => {
     const reads: Array<[string, () => Promise<unknown>, unknown]> = [
-      ['channels.channels.getAdapters', () => createChannelsBridge({ client }).channels.getAdapters(), []],
-      ['channels.channels.getStatus', () => createChannelsBridge({ client }).channels.getStatus(), null],
-      ['channels.gateway.getConnections', () => createChannelsBridge({ client }).gateway.getConnections(), []],
-      ['diagnostics.modules.list', () => createDiagnosticsBridge({ client }).modules.list(), []],
       ['loginSecurity.getOverview', () => createLoginSecurityBridge({ client }).getOverview(), null],
       ['loginSecurity.getFrequentFailures', () => createLoginSecurityBridge({ client }).getFrequentFailures(), []],
       ['paymentStatistics.getOverview', () => createPaymentStatisticsBridge({ client }).getOverview(), null],
       ['paymentStatistics.getRevenueTrend', () => createPaymentStatisticsBridge({ client }).getRevenueTrend('2026-01-01', '2026-01-31', 'day' as never), []],
       ['performance.getEndpoints', () => createPerformanceBridge({ client }).getEndpoints(), []],
-      ['permission.getPersistedRules', () => createPermissionBridge({ client }).getPersistedRules(), []],
-      ['sandbox.getStatus', () => createSandboxBridge({ client }).getStatus(), null],
       ['signalr.getOnlineUsers', () => createSignalRBridge({ client }).getOnlineUsers(), []],
       ['signalr.isUserOnline', () => createSignalRBridge({ client }).isUserOnline('u1'), false],
     ]

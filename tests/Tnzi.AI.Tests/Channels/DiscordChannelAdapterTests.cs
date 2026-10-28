@@ -106,6 +106,7 @@ public class DiscordChannelAdapterTests
     {
         var adapter = CreateAdapter(allowedGuilds: []);
         adapter.IsGuildAllowed("123456").ShouldBeTrue();
+        adapter.IsGuildAllowed(null).ShouldBeTrue();
     }
 
     [Fact]
@@ -115,6 +116,7 @@ public class DiscordChannelAdapterTests
         adapter.IsGuildAllowed("G100").ShouldBeTrue();
         adapter.IsGuildAllowed("G200").ShouldBeTrue();
         adapter.IsGuildAllowed("G999").ShouldBeFalse();
+        adapter.IsGuildAllowed(null).ShouldBeFalse();
     }
 
     [Fact]
@@ -508,6 +510,75 @@ public class DiscordChannelAdapterTests
     }
 
     [Fact]
+    public async Task HandleEventAsync_ApplicationCommand_DirectMessage_WithGuildAllowlist_Ignored()
+    {
+        // 私信里的交互不带 guild_id。配了 AllowedGuilds 时它不属于任何允许的 guild，必须拒绝；
+        // 跳过检查等于让任何与机器人共享一个服务器的人在私信里绕开 guild 白名单。
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, allowedGuilds: ["G1"]);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            type = 2, id = "i1", application_id = "app1", token = "itok", channel_id = "DM001",
+            user = new { id = "U001" },
+            data = new { name = "ask", type = 1, options = new[] { new { name = "prompt", type = 3, value = "hi" } } }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_GatewayMessage_WithoutGuild_WithGuildAllowlist_Ignored()
+    {
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, allowedGuilds: ["G1"]);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            t = "MESSAGE_CREATE",
+            d = new
+            {
+                id = "msg001",
+                channel_id = "DM001",
+                content = "Hello",
+                author = new { id = "U001" }
+            }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        (await TryConsumeAsync(bus, TimeSpan.FromMilliseconds(100))).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_GatewayMessage_WithoutGuild_NoGuildAllowlist_Published()
+    {
+        // 正控制：没配 AllowedGuilds 时私信照常放行，拒绝只针对「配了名单却缺 guild」
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus, allowedGuilds: []);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            t = "MESSAGE_CREATE",
+            d = new
+            {
+                id = "msg001",
+                channel_id = "DM001",
+                content = "Hello",
+                author = new { id = "U001" }
+            }
+        });
+
+        await adapter.HandleEventAsync(json);
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.ChatId.ShouldBe("DM001");
+    }
+
+    [Fact]
     public async Task SendAsync_WithInteractionToken_PatchesOriginalThenFollowsUp()
     {
         var requests = new List<(HttpMethod Method, string Url, string Body)>();
@@ -641,6 +712,26 @@ public class DiscordChannelAdapterTests
     /// <summary>
     /// 尝试从消息总线消费一条入站消息，超时返回 null
     /// </summary>
+    [Theory]
+    [InlineData("G001", "group")]
+    [InlineData(null, "user")]
+    public async Task HandleEventAsync_ReportsThePeerKindFromGuildPresence(string? guildId, string expected)
+    {
+        // 没有 guild_id 是私信，有的是服务器频道；绑定规则的 PeerKind 按它匹配
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus);
+
+        await adapter.HandleEventAsync(JsonSerializer.Serialize(new
+        {
+            t = "MESSAGE_CREATE",
+            d = new { id = "msg001", channel_id = "C001", guild_id = guildId, content = "hi", author = new { id = "U001" } }
+        }));
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.PeerKind.ShouldBe(expected);
+    }
+
     private static async Task<InboundMessage?> TryConsumeAsync(InMemoryChannelMessageBus bus, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

@@ -6,8 +6,8 @@
  *   1. Take `defaultAdminRoutes` and filter / override / extend them.
  *   2. Bridge consumer-supplied `RouteRecordRaw[]` to the admin route store
  *      (so `TAdminSidebar` can render the menu).
- *   3. Install the `@tnzi/ui-admin` plugin (pinia plugin + DI + global
- *      Ctrl/Cmd-K shortcut).
+ *   3. Install the `@tnzi/ui-admin` plugin (pinia plugin + DI + the
+ *      shell configuration).
  *
  * Phase B (0.2.4) ships this as the new front-door API. Consumers can still
  * call `createTnziUiAdmin()` directly if they want fine-grained control.
@@ -44,18 +44,22 @@ import type { RouteRecordRaw, Router } from 'vue-router'
 import type { HttpClient } from '@tnzi/core/http'
 import {
   THEME_CONTEXT_KEY,
+  PASSWORD_POLICY_KEY,
   buildDefaultLoginCallbacks,
   type ThemeContext,
   type AdminAuthRuntime,
   type LoginCallbackHelpers,
+  type PasswordPolicy,
 } from '@tnzi/ui'
 import { useAdminFunctionAuthorizationApi } from '@tnzi/core/services/authorization'
 import { createIdentityBridge } from '../services/bridges/identity-bridge'
 import { defaultAdminRoutes } from '../router/routes'
 import { createAuthGuard, createModuleGuard, createPermissionGuard } from '../router/guards'
-import { useAdminAuthStore } from '../stores/useAdminAuthStore'
+import { useAdminAuthStore, type AdminSuperAdminBypassScope } from '../stores/useAdminAuthStore'
 import { useAdminAppStore } from '../stores/useAdminAppStore'
 import { useAdminTabStore } from '../stores/useAdminTabStore'
+import { useAdminDesktopStore } from '../stores/useAdminDesktopStore'
+import { useChatStore } from '../stores/useChatStore'
 import {
   appendUnderAdmin,
   applyBasePath,
@@ -67,14 +71,16 @@ import {
   markBuiltInModules,
   normalizeBasePath,
   normalizeName,
+  removePublicPages,
   toAdminRouteRecords,
+  type AdminPublicPage,
 } from './route-transforms'
 // Re-exported because `normalizeBasePath` was part of this module's public
 // surface before the transforms moved out; keeping the name resolving from here
 // means the split is invisible to `createAdminApp`, `plugin/index` and any
 // consumer that imported it.
 export { normalizeBasePath } from './route-transforms'
-import { warnMisplacedTopLevelRoutes } from './route-diagnostics'
+import { warnMisplacedTopLevelRoutes, warnUnknownModuleNames } from './route-diagnostics'
 import { runPeerChecks } from './peer-check'
 import { loadLocaleMessages, type AdminLocale } from '../i18n/messages'
 import { registerAdminLocales, type AdminLocaleDefinition } from '../i18n/locale-registry'
@@ -92,6 +98,7 @@ import { ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig, type AdminDeepLinkConfig } 
 import { provideAdminRuntime } from './runtime'
 import type { AdminThemeConfig } from './theme-config'
 import type { AdminShellConfig } from './shell-config'
+import type { AdminBillingConfig } from './billing-config'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 import { useRouteProgress } from '../headless/useRouteProgress'
 import { waitForClientToken } from '../headless/waitForClientToken'
@@ -100,6 +107,24 @@ import { BUILTIN_APPEARANCE_PRESETS } from '../theme/appearance-presets'
 import { fetchAdminShellSignal } from '../services/admin-shell-modules'
 import { resetAllFileUrlResolvers } from '../services/file-url-resolver'
 import { installAdminAppUpdate, type AdminAppUpdateConfig } from './app-update-config'
+
+/**
+ * Drop what the shell holds for the user whose session just ended - on a
+ * deliberate sign-out and when the session expires. The SPA navigates to the
+ * login page rather than reloading, so anything left here is what the next
+ * person to sign in on this tab starts from.
+ */
+function clearSignedInState(): void {
+  useAdminAuthStore().logout()
+  // Signed file URLs outlive the request that minted them; keeping them across
+  // an identity switch would let the next user render the previous one's files
+  // until they expire.
+  resetAllFileUrlResolvers()
+  // Conversations, cached threads and the chat config live in memory for the
+  // life of the tab; the next shell mount would otherwise show them (and mount
+  // the chat host on the previous user's `chat.use`) before its own probe.
+  useChatStore().reset()
+}
 
 export interface DefineAdminAppOptions {
   /**
@@ -314,16 +339,22 @@ export interface DefineAdminAppOptions {
   basePath?: string
 
   /**
-   * Module short names to hide from the menu (case-insensitive, dot/dash
-   * normalized - so `"AI.Skills"`, `"ai.skills"`, `"ai-skills"` all match).
-   * Hidden modules have their child routes stripped entirely.
+   * Module groups to strip from the route table: the route names of the groups
+   * directly under the admin root (`identity`, `payment`, `finance`, `payroll`,
+   * `ai`, ...), case-insensitive. A hidden group loses its child routes
+   * entirely.
+   *
+   * These are menu groups, not backend module names: `"Finance.Payroll"` is the
+   * `payroll` group, and a sub-module's pages (`"AI.Skills"`) live inside their
+   * parent's group, so hide them with `hideRoutes`. An entry that matches no
+   * group gets a start-up warning that lists the group names.
    */
   hideModules?: string[]
 
   /**
-   * Module short names to show - when set, anything not listed is hidden.
-   * Useful when you want to keep just a few modules instead of listing
-   * everything to hide.
+   * Module groups to keep - when set, every group not listed is stripped.
+   * Same names as `hideModules`. Useful when you want to keep just a few
+   * groups instead of listing everything to hide.
    */
   showOnlyModules?: string[]
 
@@ -405,6 +436,10 @@ export interface DefineAdminAppOptions {
    *   - The route table position and `meta` are preserved
    *   - Only the `component` field is swapped
    *   - Permission checks, keepAlive, breadcrumb labels stay intact
+   *
+   * `'admin-root'` names the shell layout itself (the `/admin` route that
+   * renders every page inside the sidebar, header and tabs): overriding it
+   * replaces the layout and keeps the pages under it.
    */
   overridePages?: Record<string, Component | (() => Promise<unknown>)>
 
@@ -561,6 +596,14 @@ export interface DefineAdminAppOptions {
    * See {@link AdminChromeAction} for where they render in each layout mode.
    */
   shell?: AdminShellConfig
+  /**
+   * Billing standing in the shell: a banner while a payment is overdue (for
+   * users who may manage billing) and a suspended screen once the billing gate
+   * refuses requests. Off unless `enabled: true`; when off nothing is mounted
+   * and no request is made. Register the billing sections in the Settings
+   * Center with `settings: { sections: billingSettingsSections() }` (from `@tnzi/ui-admin/billing`).
+   */
+  billing?: AdminBillingConfig
 
   /**
    * App-wide deep-link switch for URL-synced UI state (`?detail=` overlay
@@ -575,6 +618,28 @@ export interface DefineAdminAppOptions {
 
   /** Replace the placeholder `/403` forbidden component. */
   forbiddenComponent?: Component
+
+  /**
+   * Public recipient pages to leave out of the route table: `'share-link'`
+   * (`/share/:token`), `'unsubscribe'` and `'accept-invitation'`. For an app
+   * whose recipients open those links in another front end; the backend then
+   * has to send them there (for invitations, `Identity:Invitation:AcceptUrlTemplate`).
+   * A left-out page is not registered at all, so its address falls through to
+   * the 404 page rather than rendering an unused screen, and the built-in
+   * pages that link to it stop offering the link (the shares list's "Copy
+   * link"). `hideRoutes` cannot do this: it only hides menu entries.
+   */
+  hidePublicPages?: AdminPublicPage[]
+
+  /**
+   * The deployment's password policy (`Identity:PasswordPolicy`), for every
+   * `useFormRules().password()` rule in the app, the built-in register, reset
+   * and invitation pages included. Fields left out keep the server's defaults
+   * (a digit and a lowercase letter, at least 6 characters). Set it to the
+   * values the server is configured with: the server enforces its own policy
+   * either way, and a form that checks less passes passwords it then refuses.
+   */
+  passwordPolicy?: Partial<PasswordPolicy>
 
   /**
    * Recovery for tabs left open across a deployment. On by default.
@@ -597,9 +662,9 @@ export interface DefineAdminAppOptions {
   appUpdate?: AdminAppUpdateConfig
 
   /**
-   * Extra options forwarded to `createTnziUiAdmin()`. Mostly: pass a custom
-   * `globalSearchShortcut`, or set `installPersistedstate: false` if you
-   * already installed the pinia plugin yourself.
+   * Extra options forwarded to `createTnziUiAdmin()`. Mostly: set
+   * `installPersistedstate: false` if you already installed the pinia plugin
+   * yourself.
    */
   pluginOptions?: Omit<TnziUiAdminOptions, 'client' | 'pinia'>
 
@@ -701,6 +766,12 @@ export interface AdminCurrentUser {
    *  reflects an uploaded picture, not just an external `avatar` link. */
   avatarId?: string | null
   roles?: string[]
+  /**
+   * The session's tenant id (`useAdminAuthStore().currentTenantId`). Neither
+   * the profile nor the access profile carries it, so only the caller can
+   * supply it; a later call without it (the framework's own refreshes) keeps
+   * the value for the same user.
+   */
   tenantId?: string
   /**
    * Pre-fetched permission codes. When provided, `loadPermissions` SKIPS the
@@ -726,8 +797,8 @@ export interface DefineAdminAppResult {
 
   /**
    * Install the admin plugin. Call after `app.use(pinia)` and
-   * `app.use(router)` - wires up the HttpClient DI, persistedstate, the
-   * Ctrl/Cmd-K shortcut, and seeds `useAdminRouteStore` from `routes`
+   * `app.use(router)` - wires up the HttpClient DI and persistedstate, and
+   * seeds `useAdminRouteStore` from `routes`
    * so the sidebar renders.
    *
    * Passing `router` is optional but recommended - the install will then
@@ -742,11 +813,16 @@ export interface DefineAdminAppResult {
    * session). THIS is what wires permission-filtered menus + route guards to
    * real data: until it runs, the sidebar fails OPEN (shows everything).
    *
-   * Fetches `GET /admin/function-authorization/user/{id}/permissions`, then
+   * Fetches `GET /admin/function-authorization/access-profile` (falling back to
+   * `user/{id}/permissions` on an older backend), then
    * `setUserInfo({ …, permissions })`. A legitimate empty list (user has no
-   * grants) sets `userInfo` and the sidebar shows only public entries; a network
-   * failure THROWS without touching `userInfo`, so the menu stays fail-open and
-   * the caller can retry. Must run after `install()` (needs an active pinia).
+   * grants) sets `userInfo` and the sidebar shows only public entries. A failed
+   * permission read (5xx, network) still refreshes the identity, but keeps the
+   * permission set and super-user flag the store already held for the SAME user
+   * (none held: an empty set, not super) and prunes no tabs. When neither the
+   * identity nor the permissions resolve, `userInfo` is left untouched, so the
+   * menu stays fail-open and a later call can retry. Never throws for a failed
+   * read. Must run after `install()` (needs an active pinia).
    *
    * @returns the loaded permission codes.
    *
@@ -839,7 +915,10 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
   // consumer routes join (addModules appends later and stays unstamped) -
   // this is what the sidebar's built-in-menus toggle keys on.
   routes = markBuiltInModules(routes)
+  if (options.hideModules?.length) warnUnknownModuleNames(routes, 'hideModules', options.hideModules)
+  if (options.showOnlyModules?.length) warnUnknownModuleNames(routes, 'showOnlyModules', options.showOnlyModules)
   routes = filterModules(routes, hideSet, showOnlySet)
+  if (options.hidePublicPages?.length) routes = removePublicPages(routes, options.hidePublicPages)
   if (hideRoutesSet.size > 0) {
     routes = applyHideRoutes(routes, hideRoutesSet)
   }
@@ -962,11 +1041,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
             try {
               await consumerOnLogout()
             } finally {
-              useAdminAuthStore().logout()
-              // Signed file URLs outlive the request that minted them; keeping
-              // them across an identity switch would let the next user render
-              // the previous one's files until they expire.
-              resetAllFileUrlResolvers()
+              clearSignedInState()
             }
           },
         },
@@ -1080,6 +1155,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       theme: options.theme,
       userCenter: options.userCenter,
       shell: options.shell,
+      billing: options.billing,
     })
 
     // Register host-app i18n overrides at the correct time - AFTER
@@ -1157,6 +1233,9 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // via tryInjectDeepLinkConfig(). Provided unconditionally so per-page
     // engines never need to guard against a missing key.
     app.provide(ADMIN_DEEP_LINK_KEY, resolveDeepLinkConfig(options.deepLink))
+
+    // The deployment's password policy, for every `password()` rule built in the app.
+    if (options.passwordPolicy) app.provide(PASSWORD_POLICY_KEY, options.passwordPolicy)
 
     // The wired runtime, for the one page that receives a session outside the
     // login route (invitation acceptance applies the tokens the backend issues
@@ -1238,10 +1317,11 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
         router.beforeEach(createAuthGuard({ loginPath: explicitLoginPath, resolveSession }))
       }
       // Module-availability guard BEFORE the permission guard: a route into an
-      // unloaded framework module should bounce to /403 (graceful) without the
-      // permission guard first recording it as a tab. Orthogonal to auth, holds
-      // for super users; a no-op (empty denied set) until the signal loads, and
-      // skipped entirely when module gating is disabled.
+      // unloaded framework module bounces to /403 (graceful) whatever the
+      // user's permissions. Orthogonal to auth, holds for super users; a no-op
+      // (empty denied set) until the signal loads, and skipped entirely when
+      // module gating is disabled. Neither guard records a tab: the shell does,
+      // once the navigation has landed inside it.
       if (moduleGatingEnabled) {
         router.beforeEach(createModuleGuard({ forbiddenPath: explicitForbiddenPath }))
       }
@@ -1264,8 +1344,7 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     if (router && options.auth?.sessionExpiredRedirect !== false) {
       // Optional call: tolerates HttpClient builds predating addUnauthorizedListener.
       resolvedClient.addUnauthorizedListener?.(() => {
-        useAdminAuthStore().logout()
-        resetAllFileUrlResolvers()
+        clearSignedInState()
         const current = router.currentRoute.value
         const onLogin =
           current.name === 'login' ||
@@ -1409,21 +1488,28 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // token + userInfo land, or (on the failed-resolution guard) neither.
 
     // Resolve permissions (BEST-EFFORT). The identity `setUserInfo` below MUST run
-    // even when this fails: a regular (non-admin) user gets 403 from the admin
-    // permission endpoint, yet still needs their name / avatar / id - the chat
-    // window's own `myId` and the header name both read `userInfo`. A failure just
-    // leaves the permission list empty (the sidebar then shows only public
-    // entries); it must NEVER throw and block the identity.
+    // even when this fails: the header name / avatar and the chat window's own
+    // `myId` all read `userInfo`, and they must not wait on the permission
+    // endpoint. It must NEVER throw and block the identity.
     //
-    // (This was the "bob still shows Admin + no green bubbles" bug: bob's 403 on
-    //  /admin/function-authorization/user/{id}/permissions threw BEFORE setUserInfo
-    //  ran, so `userInfo` stayed null → header fell back to the static 'Admin' and
-    //  `myId` was undefined → own messages never matched as mine.)
+    // (This was the "bob still shows Admin + no green bubbles" bug: a refused
+    //  permission read threw BEFORE setUserInfo ran, so `userInfo` stayed null →
+    //  header fell back to the static 'Admin' and `myId` was undefined → own
+    //  messages never matched as mine.)
+    //
+    // A failed read is not an empty grant list, though. access-profile is
+    // self-service for every signed-in user, so a failure there is an outage
+    // (5xx, network, a host without the Authorization module), not "this user
+    // holds nothing". `permissionsResolved` tells the two apart below.
     let permissions = user.permissions ?? []
+    let permissionsResolved = user.permissions !== undefined
     // Backend-authoritative super-admin flag. `null` = unresolved (endpoint
     // unavailable / caller pre-supplied permissions) → fall back to the legacy
     // client-side inference from `superAdminRoles` below.
     let backendIsSuper: boolean | null = null
+    // Backend `Authorization:SuperAdminBypassScope`, read with the profile.
+    // `null` = not read this call (same fallbacks as `backendIsSuper`).
+    let backendBypassScope: AdminSuperAdminBypassScope | null = null
     if (user.permissions === undefined) {
       try {
         const api = useAdminFunctionAuthorizationApi(resolvedClient)
@@ -1434,13 +1520,19 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
         if (profileRes.success && profileRes.data) {
           permissions = profileRes.data.permissions ?? []
           backendIsSuper = profileRes.data.isSuperAdmin === true
+          // Absent on the wire = the default, unnarrowed bypass.
+          backendBypassScope = profileRes.data.superAdminBypassScope === 'Platform' ? 'Platform' : 'All'
+          permissionsResolved = true
         } else if (userId) {
           // Older backend without the access-profile endpoint.
           const legacy = await api.getUserPermissionNames(userId)
-          if (legacy.success) permissions = legacy.data ?? []
+          if (legacy.success) {
+            permissions = legacy.data ?? []
+            permissionsResolved = true
+          }
         }
       } catch {
-        // best-effort - keep the identity, leave permissions empty
+        // best-effort - keep the identity; `permissionsResolved` stays false
       }
     }
 
@@ -1473,6 +1565,20 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     const accessToken = user.token ?? liveToken ?? undefined
     if (accessToken) authStore.setToken(accessToken, user.refreshToken)
 
+    // What the store already knows about THIS user (a persisted session on
+    // reload, or an earlier load in this tab). Never another user's: their
+    // grants and tier must not survive into this sign-in.
+    const prior = authStore.userInfo
+    const priorIsSameUser = prior !== null && userId !== '' && prior.id === userId
+    // A failed permission read keeps the same user's last known permission set
+    // and tier rather than writing "no permissions, not super": that would
+    // collapse a super admin's sidebar to public entries, 403 every page in
+    // the guard and prune their tabs for the length of a database timeout.
+    const keepPriorAccess = !permissionsResolved && priorIsSameUser
+    if (keepPriorAccess) permissions = prior.permissions ?? []
+    const priorIsSuper = authStore.isSuperUser
+    const priorBypassScope = authStore.superAdminBypassScope
+
     authStore.setUserInfo({
       id: userId,
       username,
@@ -1483,12 +1589,18 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       avatarId,
       roles,
       permissions,
-      tenantId: user.tenantId,
+      // None of this call's sources (profile, access profile) carries the
+      // session tenant; only a caller can supply it. The framework's own
+      // refreshes call this bare, so they keep the value the caller gave for
+      // the same user instead of clearing it.
+      tenantId: user.tenantId ?? (priorIsSameUser ? prior.tenantId : undefined),
     })
     const superRoleSet = new Set((options.superAdminRoles ?? []).map((r) => r.toLowerCase()))
     const isSuper =
       backendIsSuper ??
-      (user.superUser === true || roles.some((r) => superRoleSet.has(r.toLowerCase())))
+      (user.superUser === true ||
+        roles.some((r) => superRoleSet.has(r.toLowerCase())) ||
+        (keepPriorAccess && priorIsSuper))
     // Write UNCONDITIONALLY (true OR false). A one-way `if (isSuper) setSuperUser(true)`
     // let a previous super-admin session's `true` - persisted by the auth store - leak
     // into the NEXT sign-in of a non-super user (e.g. a Business admin): `isSuperUser`
@@ -1496,6 +1608,20 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
     // and showed every menu. Overwriting with the current user's real tier on every
     // permission load closes that cross-session leak.
     authStore.setSuperUser(isSuper)
+    // Same unconditional write for the bypass scope: a narrowed scope must not be
+    // lost on an outage (that would hand a platform operator every business menu
+    // until the next good read), and a stale one must not outlive its user.
+    authStore.setSuperAdminBypassScope(backendBypassScope ?? (keepPriorAccess ? priorBypassScope : 'All'))
+
+    // Bind the per-user shell state to the freshly-resolved user. Desktop
+    // windows are persisted with record names in their titles and record ids
+    // in their stacks; the chat store holds conversations and threads in
+    // memory. Either one restored for a different user (another account
+    // signing in on the same browser, or a user switch without a sign-out)
+    // showed that user the previous one's records. Outside the tab try/catch
+    // below on purpose: a failure here must surface, not be swallowed.
+    useAdminDesktopStore().claimForUser(userId)
+    useChatStore().claimForUser(userId)
 
     // Drop any persisted tabs the freshly-resolved user can't open - the
     // cross-session tab leak (a prior super-admin's Diagnostics / MCP / Sandbox
@@ -1511,7 +1637,10 @@ export function defineAdminApp(options: DefineAdminAppOptions): DefineAdminAppRe
       // without a sign-out (accepting an invitation while someone else is
       // signed in) must not carry the previous user's tabs over.
       tabStore.claimForUser(userId)
-      tabStore.pruneTabs(routeStore.deniedRouteNames)
+      // Only a permission set this call actually read can prove a tab is no
+      // longer allowed. Pruning against an outage's empty set would drop the
+      // user's tabs, pinned ones included, for good.
+      if (permissionsResolved) tabStore.pruneTabs(routeStore.deniedRouteNames)
     } catch {
       // ignore - tabs are cosmetic; the navigation guard still blocks access
     }

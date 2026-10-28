@@ -1,12 +1,15 @@
 namespace Tnzi.Data;
 
 /// <summary>
-/// 数据库初始化器接口（迁移 + 种子数据）
+/// 数据库初始化器接口（迁移）
 /// </summary>
+/// <remarks>
+/// 每个 DbContext 注册一个。种子数据不经它：启动流程在全部迁移完成后把每个 <see cref="IDataSeeder"/> 执行一次，
+/// 与有几个 DbContext 无关（种子挂在初始化器上就会按 DbContext 的个数重复执行）。
+/// </remarks>
 public interface IDbInitializer
 {
     Task MigrateAsync(CancellationToken cancellationToken = default);
-    Task SeedAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -17,7 +17,7 @@
   >
     <template #kpis>
       <TKpiRow cols="1 s:2 l:4">
-        <TKpiCard :label="t('kpi.modules')" :value="modules.length" icon="mdi:view-grid-outline" />
+        <TKpiCard :label="t('kpi.modules')" :value="modulesError ? null : modules.length" icon="mdi:view-grid-outline" />
         <TKpiCard :label="t('kpi.controllers')" :value="controllerResult?.totalCount ?? null" icon="mdi:router-network" />
         <TKpiCard :label="t('kpi.exceptions', { minutes: windowMinutes })" :value="summary?.totalCount ?? null" icon="mdi:alert-circle-outline" />
         <TKpiCard
@@ -53,7 +53,11 @@
         :bordered="false"
         size="small"
         :flex-height="true"
-      />
+      >
+        <template v-if="modulesError" #empty>
+          <TEmpty :text="modulesError" icon="mdi:alert-circle-outline" />
+        </template>
+      </TResponsiveTable>
     </template>
 
     <!-- ─── Controllers ─── -->
@@ -88,7 +92,11 @@
         :bordered="false"
         size="small"
         :flex-height="true"
-      />
+      >
+        <template v-if="controllersError" #empty>
+          <TEmpty :text="controllersError" icon="mdi:alert-circle-outline" />
+        </template>
+      </TResponsiveTable>
     </template>
 
     <!-- ─── Sensitive endpoints ─── -->
@@ -127,8 +135,11 @@
         size="small"
         :flex-height="true"
       >
+        <!-- The all-clear is an answer; after a failed read there is none, so the
+             reason takes its place (a green shield over a 403 is a false all-clear). -->
         <template #empty>
-          <TEmpty :text="t('sensitive.empty')" icon="mdi:shield-check-outline" />
+          <TEmpty v-if="sensitiveError" :text="sensitiveError" icon="mdi:alert-circle-outline" />
+          <TEmpty v-else :text="t('sensitive.empty')" icon="mdi:shield-check-outline" />
         </template>
       </TResponsiveTable>
     </template>
@@ -215,7 +226,11 @@
         :pagination="exceptionsPagination"
         :bordered="false"
         size="small"
-      />
+      >
+        <template v-if="exceptionsError" #empty>
+          <TEmpty :text="exceptionsError" icon="mdi:alert-circle-outline" />
+        </template>
+      </TResponsiveTable>
     </template>
   </TTabsPage>
 </template>
@@ -253,6 +268,7 @@ import {
   type SensitiveEndpointReportDto,
 } from '../../services/bridges/diagnostics-bridge'
 import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safe-message'
 import { methodTone } from '../_shared/http-method'
 import TTabsPage, { type TabSection } from '../../components/layout/TTabsPage.vue'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -260,6 +276,7 @@ import { usePermissionGuard } from '../../headless/usePermissionGuard'
 const bridge = createDiagnosticsBridge({ client: useAdminClient() })
 
 const t = makePageTranslator('system.diagnostics')
+const message = useSafeMessage()
 
 // 危险触发操作按钮级权限门控(fail-open,后端 [ApiAuthorize] 是真墙)
 const { can } = usePermissionGuard()
@@ -288,6 +305,11 @@ function makeClientPagination(defaultPageSize: number): TResponsivePagination {
     prefix: ({ itemCount }: { itemCount?: number }) => `${t('admin.crud.total')} ${itemCount ?? 0}`,
   }
 }
+/** The server's reason for a failed read, shown where that tab's rows would be. */
+function readFailure(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 const modulesPagination = makeClientPagination(20)
 const controllersPagination = makeClientPagination(25)
 const exceptionsPagination = makeClientPagination(20)
@@ -296,6 +318,8 @@ const sensitivePagination = makeClientPagination(20)
 // ─── Modules tab ───────────────────────────────────────────────────
 const modules = ref<ModuleDiagnosticsDto[]>([])
 const modulesLoading = ref(false)
+/** Why the module list could not be read (empty = it was read). */
+const modulesError = ref('')
 const moduleFilter = ref('')
 
 const moduleColumns: DataTableColumns<ModuleDiagnosticsDto> = [
@@ -375,10 +399,12 @@ const filteredModules = computed(() => {
 
 async function refreshModules(): Promise<void> {
   modulesLoading.value = true
+  modulesError.value = ''
   try {
     modules.value = await bridge.modules.list()
-  } catch {
+  } catch (error) {
     modules.value = []
+    modulesError.value = readFailure(error)
   } finally {
     modulesLoading.value = false
   }
@@ -387,6 +413,8 @@ async function refreshModules(): Promise<void> {
 // ─── Controllers tab ───────────────────────────────────────────────
 const controllerResult = ref<ControllerDiagnosticsResultDto | null>(null)
 const controllersLoading = ref(false)
+/** Why the controller list could not be read (empty = it was read). */
+const controllersError = ref('')
 const controllerFilter = ref('')
 const moduleFilterForCtrls = ref<string | null>(null)
 
@@ -442,10 +470,12 @@ const filteredControllers = computed(() => {
 
 async function refreshControllers(): Promise<void> {
   controllersLoading.value = true
+  controllersError.value = ''
   try {
     controllerResult.value = await bridge.controllers.list()
-  } catch {
+  } catch (error) {
     controllerResult.value = null
+    controllersError.value = readFailure(error)
   } finally {
     controllersLoading.value = false
   }
@@ -458,6 +488,8 @@ async function refreshControllers(): Promise<void> {
 // without anything prompting an already-reviewed app to look again.
 const sensitiveReport = ref<SensitiveEndpointReportDto | null>(null)
 const sensitiveLoading = ref(false)
+/** Why the report could not be read (empty = it was read). */
+const sensitiveError = ref('')
 const sensitiveFilter = ref('')
 
 /** Anonymously reachable sensitive endpoints - the rows to read first. */
@@ -523,10 +555,12 @@ const filteredSensitive = computed(() => {
 
 async function refreshSensitive(): Promise<void> {
   sensitiveLoading.value = true
+  sensitiveError.value = ''
   try {
     sensitiveReport.value = await bridge.sensitiveEndpoints.list()
-  } catch {
+  } catch (error) {
     sensitiveReport.value = null
+    sensitiveError.value = readFailure(error)
   } finally {
     sensitiveLoading.value = false
   }
@@ -536,6 +570,8 @@ async function refreshSensitive(): Promise<void> {
 const summary = ref<ExceptionSummaryDto | null>(null)
 const exceptions = ref<ExceptionEntryDto[]>([])
 const exceptionsLoading = ref(false)
+/** Why the exception summary or list could not be read (empty = both were read). */
+const exceptionsError = ref('')
 const windowMinutes = ref<number>(60)
 const windowOptions = [
   { value: 15, label: '15 min' },
@@ -606,6 +642,7 @@ const exceptionColumns: DataTableColumns<ExceptionEntryDto> = [
 
 async function refreshExceptions(): Promise<void> {
   exceptionsLoading.value = true
+  exceptionsError.value = ''
   try {
     const [s, recent] = await Promise.all([
       bridge.exceptions.getSummary(windowMinutes.value),
@@ -613,9 +650,10 @@ async function refreshExceptions(): Promise<void> {
     ])
     summary.value = s
     exceptions.value = recent
-  } catch {
+  } catch (error) {
     summary.value = null
     exceptions.value = []
+    exceptionsError.value = readFailure(error)
   } finally {
     exceptionsLoading.value = false
   }
@@ -625,8 +663,9 @@ async function clearExceptions(): Promise<void> {
   try {
     await bridge.exceptions.clear()
     await refreshExceptions()
-  } catch {
-    // Bridge already swallows; refresh still safe.
+  } catch (error) {
+    // The bridge throws the server's refusal; a failed clear must not read as done.
+    message.error(error instanceof Error ? error.message : String(error))
   }
 }
 

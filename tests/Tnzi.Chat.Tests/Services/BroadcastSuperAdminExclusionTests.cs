@@ -32,6 +32,8 @@ public class BroadcastSuperAdminExclusionTests : Integration.IntegrationTestBase
         var userRepo = new Mock<IRepository<User, Guid>>();
         userRepo.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<User, bool>>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Expression<Func<User, bool>> p, CancellationToken _) => allUsers.Where(p.Compile()).ToList());
+        userRepo.Setup(r => r.GetListAsync(It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IEnumerable<Guid> ids, CancellationToken _) => allUsers.Where(u => ids.Contains(u.Id)).ToList());
         services.AddScoped(_ => userRepo.Object);
 
         var funcAuth = new Mock<IFunctionAuthorizationService>();

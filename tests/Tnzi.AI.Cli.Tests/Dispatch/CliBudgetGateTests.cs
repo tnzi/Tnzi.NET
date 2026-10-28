@@ -92,6 +92,7 @@ public class CliBudgetGateTests : IntegratedTestBase<CliBudgetDbContext>
             ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
             // 这些用例从不带 ThreadId 入队，线程归属判定（CliRunEnqueueThreadOwnershipTests）不在此处。
             Mock.Of<IRepository<AgentThread, Guid>>(),
+            TestAgents.Repository(AgentId),
             new CliRunSignalHub(),
             new CliRunCancellationRegistry(),
             EnabledOptions(),
@@ -167,12 +168,11 @@ public class CliBudgetGateTests : IntegratedTestBase<CliBudgetDbContext>
             Mock.Of<IRepository<Agent, Guid>>(),
             Mock.Of<ICliProviderRegistry>(),
             Mock.Of<ICliProtocolAdapterFactory>(),
-            Mock.Of<ICliProcessHost>(),
+            Mock.Of<ICliHost>(),
             Mock.Of<ICliWorkspacePreparer>(),
             Mock.Of<ICliBriefComposer>(),
             Mock.Of<ICliMcpConfigComposer>(),
             new CliRunTokenService(runs, NullLogger<CliRunTokenService>.Instance),
-            Mock.Of<ICliExecutableResolver>(),
             new CliLaunchEnvironmentComposer(Mock.Of<ICliAuthStatusProbe>(), NullLogger<CliLaunchEnvironmentComposer>.Instance),
             Mock.Of<IAgentGrantService>(),
             Mock.Of<ISkillService>(),
@@ -180,6 +180,7 @@ public class CliBudgetGateTests : IntegratedTestBase<CliBudgetDbContext>
             EnabledOptions(),
             ServiceProvider.GetRequiredService<ICurrentTenant>(),
             NullLogger<CliRunExecutor>.Instance,
+            ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
             budgetService: budgetService);
     }
 
@@ -210,29 +211,8 @@ public class CliBudgetGateTests : IntegratedTestBase<CliBudgetDbContext>
         stored.StartedAt.ShouldBeNull();
     }
 
-    [Fact]
-    public async Task Execute_ResolvesBudgetFromThePersistedRun_NotAmbientContext()
-    {
-        // 认领发生在后台服务里，那里没有 HTTP 请求也没有 ICurrentTenant。
-        // 读环境只会拿到 null，于是每条运行都退化成「按全局预算算」，租户维度形同虚设。
-        var tenantId = Guid.Parse("33333333-3333-3333-3333-333333333333");
-        var run = new CliRun
-        {
-            AgentId = AgentId,
-            CliRuntimeId = RuntimeId,
-            Status = CliRunStatus.Dispatched,
-            Prompt = "x",
-            TenantId = tenantId
-        };
-        DbContext.Set<CliRun>().Add(run);
-        await DbContext.SaveChangesAsync();
-
-        var budget = BudgetSaying(false, "exhausted");
-        await CreateExecutor(budget.Object).ExecuteAsync(run.Id, CancellationToken.None);
-
-        budget.Verify(b => b.CheckBudgetAsync(
-            It.IsAny<Guid?>(), tenantId, AgentId, It.IsAny<CancellationToken>()), Times.Once);
-    }
+    // 「认领点的预算按运行记录上持久化的租户算」在 CliRunClaimMultiTenancyTests 里：这个上下文没开多租户，
+    // TenantId 根本不在模型里、写不进库，在这里只能靠变更跟踪器把种子实例原样交回来才「成立」。
 
     [Fact]
     public async Task Enqueue_ChecksBudgetAgainstTheRequestedAgent()

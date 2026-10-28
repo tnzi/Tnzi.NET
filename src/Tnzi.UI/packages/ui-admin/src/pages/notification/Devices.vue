@@ -12,6 +12,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="notificationDeviceColumns"
+    :show-default-search="false"
     :title="title"
     :translate="t"
     :row-actions="rowActions"

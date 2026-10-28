@@ -34,24 +34,23 @@ public class ExchangeRateService : ApplicationService, IExchangeRateService
         // date-only 语义 + Utc Kind（PostgreSQL timestamptz 参数要求）
         var targetDate = date.ToUtcDate();
 
-        // "不晚于目标日期的最近一条"生效汇率
-        Task<decimal?> LatestRateAsync(string f, string t) => _rateRepository.AsNoTracking()
+        // 两个方向各取"不晚于目标日期的最近一条"生效汇率
+        Task<ExchangeRate?> LatestRateAsync(string f, string t) => _rateRepository.AsNoTracking()
             .Where(r => r.FromCurrency == f && r.ToCurrency == t && r.RateDate <= targetDate)
             .OrderByDescending(r => r.RateDate)
-            .Select(r => (decimal?)r.Rate)
             .FirstOrDefaultAsync(cancellationToken);
 
-        // 直接汇率优先
         var direct = await LatestRateAsync(from, to);
-        if (direct.HasValue)
-            return direct.Value;
-
-        // 反向汇率取倒数
         var inverse = await LatestRateAsync(to, from);
-        if (inverse is > 0)
-            return 1m / inverse.Value;
+        if (inverse is { Rate: <= 0 })
+            inverse = null;
 
-        return null;
+        // ★ 取日期较新的那一条，同日直接汇率优先。只要直接方向有记录就用它的话，
+        // 一条几年前手录的直接汇率会永远压过此后每天维护的反向汇率，过账与重估一律按旧价换算且不报警。
+        if (direct != null && (inverse == null || direct.RateDate >= inverse.RateDate))
+            return direct.Rate;
+
+        return inverse != null ? 1m / inverse.Rate : null;
     }
 
     public async Task<Result<IPagedList<ExchangeRateDto>>> GetListAsync(ExchangeRateQueryDto query, CancellationToken cancellationToken = default)

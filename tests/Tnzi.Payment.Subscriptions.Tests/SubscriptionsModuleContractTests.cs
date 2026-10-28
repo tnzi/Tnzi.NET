@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Tnzi.EventBus;
 
@@ -22,6 +23,35 @@ public class SubscriptionsModuleContractTests
         module.PreConfigureServicesAsync(context).GetAwaiter().GetResult();
         module.ConfigureServicesAsync(context).GetAwaiter().GetResult();
         return services;
+    }
+
+    // ───────────────────────── 访问门禁 ─────────────────────────
+
+    [Fact]
+    public void AccessGate_IsWiredButOffByDefault()
+    {
+        var services = ConfiguredModule();
+
+        services.ShouldContain(d => d.ServiceType == typeof(ISubscriptionAccessGate) && d.ImplementationType == typeof(SubscriptionAccessGate));
+        services.ShouldContain(d => d.ServiceType == typeof(IEventHandler<BillingAccountStandingChangedEvent>));
+
+        using var provider = services.AddLogging().BuildServiceProvider();
+        provider.GetRequiredService<IOptions<SubscriptionAccessGateOptions>>().Value.Enabled
+            .ShouldBeFalse("a deployment that never configured the gate keeps today's behaviour");
+
+        // 已连上的 WebSocket 上的方法调用只有 Hub 过滤器拦得住，漏注册它中间件也救不回来
+        provider.GetRequiredService<IOptions<HubOptions>>().Value.ShouldNotBeNull();
+        var hubOptions = new HubOptions();
+        foreach (var configure in provider.GetServices<IConfigureOptions<HubOptions>>())
+            configure.Configure(hubOptions);
+        typeof(HubOptions).GetProperty("HubFilters", BindingFlags.NonPublic | BindingFlags.Instance)!
+            .GetValue(hubOptions).ShouldBeAssignableTo<System.Collections.IEnumerable>()!
+            .Cast<object>()
+            // AddFilter<T>() 登记的是一个按类型解析的工厂，类型存在它的私有字段里
+            .SelectMany(f => f.GetType().GetFields(BindingFlags.NonPublic | BindingFlags.Instance)
+                .Where(field => field.FieldType == typeof(Type))
+                .Select(field => field.GetValue(f)))
+            .ShouldContain(typeof(SubscriptionAccessGateHubFilter));
     }
 
     // ───────────────────────── 权限码 ─────────────────────────
@@ -132,15 +162,15 @@ public class SubscriptionsModuleContractTests
     // ───────────────────────── 路由与端点 ─────────────────────────
 
     /// <summary>
-    /// 两条路由模板与端点数量都不变：<c>subscriptions</c> 14 个、<c>admin/subscriptions</c> 12 个。
+    /// 两条路由模板与端点数量都不变：<c>subscriptions</c> 16 个（含当场补缴 <c>pay-now</c> 与账户境况 <c>standing</c>）、<c>admin/subscriptions</c> 13 个（含新建计划的预填值 <c>plans/defaults</c>）。
     /// </summary>
     /// <remarks>
     /// 路由是已经发出去的 URL，属于持久化契约。端点数固定住是为了让「顺手删了一个端点」
     /// 或者「悄悄加了一个未授权的写端点」立刻现形。
     /// </remarks>
     [Theory]
-    [InlineData(typeof(Controllers.DefaultSubscriptionController), "subscriptions", 14)]
-    [InlineData(typeof(Controllers.DefaultSubscriptionAdminController), "admin/subscriptions", 12)]
+    [InlineData(typeof(Controllers.DefaultSubscriptionController), "subscriptions", 17)]
+    [InlineData(typeof(Controllers.DefaultSubscriptionAdminController), "admin/subscriptions", 13)]
     public void RouteTemplatesAndEndpointCountsAreUnchanged(Type controller, string template, int endpointCount)
     {
         controller.GetCustomAttributes(typeof(RouteAttribute), false)
@@ -299,10 +329,13 @@ public class SubscriptionsModuleContractTests
             .Select(d => d.ImplementationType!)
             .ToList();
 
-        scans.Count.ShouldBe(6);
+        scans.Count.ShouldBe(7);
 
+        // 七条里六条问订阅服务，存储采样问存储计量
         var names = scans
-            .Select(t => (IPaymentScheduledScan)Activator.CreateInstance(t, new Mock<ISubscriptionService>().Object)!)
+            .Select(t => (IPaymentScheduledScan)Activator.CreateInstance(t, t == typeof(SubscriptionScheduledScans.SampleStorageUsage)
+                ? new Mock<ISubscriptionStorageMeter>().Object
+                : new Mock<ISubscriptionService>().Object)!)
             .Select(s => s.Name)
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
@@ -314,6 +347,7 @@ public class SubscriptionsModuleContractTests
             "expire overdue subscriptions",
             "renew due subscriptions",
             "resume due paused subscriptions",
+            "sample storage usage",
             "send renewal reminders",
         ]);
     }

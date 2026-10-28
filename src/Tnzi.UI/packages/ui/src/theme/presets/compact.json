@@ -9,8 +9,6 @@
     "error": "#d03050"
   },
   "mode": "light",
-  "isInfoFollowPrimary": false,
-  "recommendColor": false,
   "naiveOverrides": {
     "common": {
       "fontSize": "13px",

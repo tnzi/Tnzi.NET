@@ -42,3 +42,7 @@ export type { UseDataQueryOptions, UseDataQueryReturn } from './useDataQuery';
 
 // 随作用域自动取消的防抖（关键词框、自动保存）
 export { useDebounced, DEFAULT_DEBOUNCE_MS } from './useDebounced';
+
+// 页面上打开着的浮层的先后（只管排序，不碰 DOM；按键与焦点由 UI 包处理）
+export { useOverlayLayerStack, createOverlayLayerStack, resetOverlayLayerStack } from './overlay-layers';
+export type { OverlayLayerStack, OverlayLayerEntry } from './overlay-layers';

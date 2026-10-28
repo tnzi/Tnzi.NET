@@ -32,13 +32,17 @@ const submitError = ref('')
 /** 还欠哪些，以及办它们需要的材料。挑战本身只带名字，材料要另外问。 */
 const remaining = ref<string[]>([])
 /**
- * 读取待办清单本身失败了（令牌过期 / 网络断了 / 后端出错）。
+ * 本页办不了任何事、只能回去重新登录的原因；null = 有一件可办。
  *
- * ★ 必须与「没有待办」分开。两者的 `remaining` 都是空的，而把它们混为一谈的后果是
- * 渲染出一张**猜出来的**表单（三元链的兜底分支），用户填完只会拿到一句
- * 「该流程尚未配置」—— 真正的原因一个字都没说。
+ * - `loadFailed`：读取待办清单失败（令牌过期 / 网络断了 / 后端出错 / 宿主没接 describe 回调）。
+ * - `expired`：手里没有挑战（挑战只活在登录页内存里，刷新后路由还在、令牌已没了），
+ *   或服务端答「什么都不欠」。两者都只能重新登录。
+ *
+ * ★ 必须与「有待办」分开渲染。`remaining` 为空时三元链会落到兜底分支（确认邮箱），
+ * 渲染出一张**猜出来的**提示，而表单与唯一的「返回」按钮都挂在 `current` 上，
+ * 用户停在一句错话上，出路只有手改地址栏。
  */
-const loadFailed = ref(false)
+const blocked = ref<'loadFailed' | 'expired' | null>(null)
 const totpSetup = ref<{ sharedKey: string; authenticatorUri: string } | null>(null)
 const maskedEmail = ref<string | null>(null)
 
@@ -65,6 +69,7 @@ const rules = computed<FormRules>(() => {
     code: [
       {
         required: true,
+        whitespace: true,
         trigger: ['blur', 'input'],
         message: translate('admin.login.errorEmptyCode', 'Please enter the verification code'),
       },
@@ -75,6 +80,7 @@ const rules = computed<FormRules>(() => {
 async function refresh(): Promise<void> {
   const token = pendingAction.value?.tempToken
   if (!token || !callbacks.describePendingActions) {
+    blocked.value = token ? 'loadFailed' : 'expired'
     loading.value = false
     return
   }
@@ -82,16 +88,16 @@ async function refresh(): Promise<void> {
   try {
     const described = await callbacks.describePendingActions(token)
     if (!described) {
-      loadFailed.value = true
+      blocked.value = 'loadFailed'
       return
     }
 
-    loadFailed.value = false
     remaining.value = described.requiredActions
     totpSetup.value = described.totpSetup ?? null
     maskedEmail.value = described.maskedEmail ?? null
+    blocked.value = remaining.value.length > 0 ? null : 'expired'
   } catch {
-    loadFailed.value = true
+    blocked.value = 'loadFailed'
   } finally {
     loading.value = false
   }
@@ -100,8 +106,19 @@ async function refresh(): Promise<void> {
 onMounted(refresh)
 
 async function handleSubmit(): Promise<void> {
+  // One attempt at a time. Enter in the last field and a click on the button
+  // both land here, and validation awaits, so the flag goes up before it: a
+  // second Enter in that gap spent the one-time code (or the challenge) again.
+  if (submitting.value) return
+  submitting.value = true
   submitError.value = ''
-  await validate()
+  try {
+    await validate()
+  } catch {
+    // The field errors are already shown inline.
+    submitting.value = false
+    return
+  }
 
   const token = pendingAction.value?.tempToken
   if (!token) {
@@ -111,10 +128,10 @@ async function handleSubmit(): Promise<void> {
       'admin.login.pendingActions.expired',
       'This request expired. Please sign in again.',
     )
+    submitting.value = false
     return
   }
 
-  submitting.value = true
   try {
     const outcome = await runCurrentAction(token)
     if (!outcome) return
@@ -190,16 +207,18 @@ function handleCancel(): void {
 <template>
   <NSpin :show="loading">
     <!--
-      读不到待办清单时给一条能行动的说明 + 回登录页，而不是猜一个表单出来。
-      令牌一次性且十分钟有效，所以「重新登录」是这里唯一真的能解决问题的动作。
+      读不到待办清单、挑战已不在、或无事可办时，给一条能行动的说明 + 回登录页，
+      而不是猜一个表单出来。令牌一次性且十分钟有效，所以「重新登录」是这里唯一真的能解决问题的动作。
     -->
-    <div v-if="loadFailed" class="flex flex-col gap-16px">
-      <NAlert type="error" :bordered="false">
+    <div v-if="blocked" class="flex flex-col gap-16px">
+      <NAlert :type="blocked === 'loadFailed' ? 'error' : 'warning'" :bordered="false">
         {{
-          translate(
-            'admin.login.pendingActions.loadFailed',
-            'We could not load what is required. Please sign in again.',
-          )
+          blocked === 'loadFailed'
+            ? translate(
+                'admin.login.pendingActions.loadFailed',
+                'We could not load what is required. Please sign in again.',
+              )
+            : translate('admin.login.pendingActions.expired', 'This request expired. Please sign in again.')
         }}
       </NAlert>
       <NButton size="large" block :round="ui.pill" @click="handleCancel">

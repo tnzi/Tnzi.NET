@@ -11,21 +11,13 @@ namespace Tnzi.AI.Cli.Tests;
 /// </remarks>
 public class BriefMarkerWriterTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(
-        Path.GetTempPath(), "tnzi-cli-brief-" + Guid.NewGuid().ToString("N"));
+    private readonly string _directory = TestScratch.NewPath("brief");
 
     public BriefMarkerWriterTests() => Directory.CreateDirectory(_directory);
 
     public void Dispose()
     {
-        try
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-        catch (IOException)
-        {
-            // 清理失败不该让测试红。
-        }
+        TestScratch.Delete(_directory);
 
         GC.SuppressFinalize(this);
     }
@@ -37,7 +29,7 @@ public class BriefMarkerWriterTests : IDisposable
     {
         var path = Path_("CLAUDE.md");
 
-        var created = await BriefMarkerWriter.WriteAsync(path, "hello", CancellationToken.None);
+        var created = await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "hello", CancellationToken.None);
 
         created.ShouldBeTrue();
         var content = await File.ReadAllTextAsync(path);
@@ -50,9 +42,9 @@ public class BriefMarkerWriterTests : IDisposable
     public async Task Cleanup_WhenWeCreatedTheFile_RemovesItEntirely()
     {
         var path = Path_("CLAUDE.md");
-        var created = await BriefMarkerWriter.WriteAsync(path, "hello", CancellationToken.None);
+        var created = await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "hello", CancellationToken.None);
 
-        await BriefMarkerWriter.CleanupAsync(path, created, CancellationToken.None);
+        await BriefMarkerWriter.CleanupAsync(LocalHostFileSystem.Instance, path, created, CancellationToken.None);
 
         // 目录列表必须回到写入前的样子，否则用户会在 git status 里看到一个陌生文件。
         File.Exists(path).ShouldBeFalse();
@@ -69,14 +61,14 @@ public class BriefMarkerWriterTests : IDisposable
         var path = Path_("AGENTS.md");
         await File.WriteAllTextAsync(path, original);
 
-        var created = await BriefMarkerWriter.WriteAsync(path, "managed brief", CancellationToken.None);
+        var created = await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "managed brief", CancellationToken.None);
         created.ShouldBeFalse();
 
         var afterWrite = await File.ReadAllTextAsync(path);
         afterWrite.ShouldStartWith(original);
         afterWrite.ShouldContain("managed brief");
 
-        await BriefMarkerWriter.CleanupAsync(path, created, CancellationToken.None);
+        await BriefMarkerWriter.CleanupAsync(LocalHostFileSystem.Instance, path, created, CancellationToken.None);
 
         var restored = await File.ReadAllTextAsync(path);
         restored.ShouldBe(original);
@@ -88,9 +80,9 @@ public class BriefMarkerWriterTests : IDisposable
         var path = Path_("CLAUDE.md");
         await File.WriteAllTextAsync(path, "user content\n");
 
-        await BriefMarkerWriter.WriteAsync(path, "first", CancellationToken.None);
-        await BriefMarkerWriter.WriteAsync(path, "second", CancellationToken.None);
-        await BriefMarkerWriter.WriteAsync(path, "third", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "first", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "second", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "third", CancellationToken.None);
 
         var content = await File.ReadAllTextAsync(path);
 
@@ -110,8 +102,8 @@ public class BriefMarkerWriterTests : IDisposable
         var path = Path_("CLAUDE.md");
         await File.WriteAllTextAsync(path, $"docs mention {BriefMarkerWriter.MarkerEnd} here\n");
 
-        await BriefMarkerWriter.WriteAsync(path, "first", CancellationToken.None);
-        await BriefMarkerWriter.WriteAsync(path, "second", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "first", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "second", CancellationToken.None);
 
         var content = await File.ReadAllTextAsync(path);
         CountOccurrences(content, BriefMarkerWriter.MarkerBegin).ShouldBe(1);
@@ -127,7 +119,7 @@ public class BriefMarkerWriterTests : IDisposable
         var path = Path_("CLAUDE.md");
         await File.WriteAllTextAsync(path, $"user\n\n{BriefMarkerWriter.MarkerBegin}\nhalf written");
 
-        await BriefMarkerWriter.WriteAsync(path, "recovered", CancellationToken.None);
+        await BriefMarkerWriter.WriteAsync(LocalHostFileSystem.Instance, path, "recovered", CancellationToken.None);
 
         var content = await File.ReadAllTextAsync(path);
         CountOccurrences(content, BriefMarkerWriter.MarkerBegin).ShouldBe(1);
@@ -141,7 +133,7 @@ public class BriefMarkerWriterTests : IDisposable
         var path = Path_("AGENTS.md");
         await File.WriteAllTextAsync(path, "purely user content");
 
-        await BriefMarkerWriter.CleanupAsync(path, createdByUs: false, CancellationToken.None);
+        await BriefMarkerWriter.CleanupAsync(LocalHostFileSystem.Instance, path, createdByUs: false, CancellationToken.None);
 
         (await File.ReadAllTextAsync(path)).ShouldBe("purely user content");
     }

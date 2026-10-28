@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   composeImageCaptchaToken,
   isAbsoluteUrl,
@@ -71,14 +71,61 @@ describe('captcha types', () => {
 });
 
 describe('useCaptchaApi', () => {
-  it('hits the captcha controller routes', async () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('hits the captcha config route', async () => {
     const get = vi.fn(() => Promise.resolve({ succeeded: true, data: null }));
     const api = useCaptchaApi({ get } as unknown as HttpClient);
 
     await api.getConfig();
-    await api.getAltchaChallenge('login');
 
-    expect(get).toHaveBeenNthCalledWith(1, '/captcha/config');
-    expect(get).toHaveBeenNthCalledWith(2, '/captcha/altcha/challenge', { params: { purpose: 'login' } });
+    expect(get).toHaveBeenCalledWith('/captcha/config');
+  });
+
+  // The endpoint answers the bare Altcha document (the widget validates a top-level `challenge`
+  // key), not an ApiResult envelope. Read through `client.get`, the envelope normaliser put
+  // `raw.data` (undefined) into `data`: a successful result with no challenge in it.
+  it('returns the bare Altcha document the endpoint answers with', async () => {
+    const doc = { algorithm: 'SHA-256', challenge: 'c0ffee', maxnumber: 100000, salt: 's?expires=1', signature: 'sig' };
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify(doc), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = useCaptchaApi(new HttpClient({ baseUrl: '/api' }));
+
+    const result = await api.getAltchaChallenge('contact');
+
+    expect(result.succeeded).toBe(true);
+    expect(result.data).toEqual(doc);
+    expect(fetchMock).toHaveBeenCalledWith('/api/captcha/altcha/challenge?purpose=contact', expect.anything());
+  });
+
+  it('keeps a failed envelope a failed result', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(
+      JSON.stringify({ code: 404, success: false, message: 'Altcha is not the active captcha provider.' }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    ))));
+    const api = useCaptchaApi(new HttpClient({ baseUrl: '/api' }));
+
+    const result = await api.getAltchaChallenge('contact');
+
+    expect(result.succeeded).toBe(false);
+    expect(result.code).toBe(404);
+    expect(result.data).toBeUndefined();
+  });
+
+  it('reports a body that is not a challenge document as a failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('<html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    }))));
+    const api = useCaptchaApi(new HttpClient({ baseUrl: '/api' }));
+
+    const result = await api.getAltchaChallenge('contact');
+
+    expect(result.succeeded).toBe(false);
   });
 });

@@ -346,6 +346,53 @@ describe('notification-bridge', () => {
     expect(typeof result.isHtml).toBe('boolean')
   })
 
+  // The preview endpoint takes a PreviewNotificationRequest: no recipients
+  // (a template preview has no addresses) and no placeholder subject (a
+  // placeholder counts as raw content, so a template that fails to render
+  // would come back as a blank "successful" preview).
+  it('templates.preview sends only the rendering inputs', async () => {
+    const notificationApi = mockNotificationApi()
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await bridge.templates.preview({ templateName: 'welcome', variables: { name: 'World' } })
+    const body = (notificationApi.preview.mock.calls as unknown as Array<[Record<string, unknown>]>)[0][0]
+    expect(body).not.toHaveProperty('recipients')
+    expect(body.subject).toBeUndefined()
+    expect(body.content).toBeUndefined()
+    expect(body.templateName).toBe('welcome')
+    expect(body.templateVariables).toEqual({ name: 'World' })
+  })
+
+  it('templates.preview rejects with the server message when rendering is refused', async () => {
+    const notificationApi = mockNotificationApi()
+    notificationApi.preview.mockResolvedValueOnce({
+      succeeded: false,
+      code: 500,
+      message: "Template 'welcome' could not be rendered (Template not found)",
+      data: null,
+    } as never)
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+    await expect(bridge.templates.preview({ templateName: 'welcome' })).rejects.toThrow("Template 'welcome' could not be rendered")
+  })
+
+  // A miss must not be papered over: with a stand-in subject in the request
+  // the server falls back to it and the preview shows "Preview" over an empty
+  // body, which reads as an empty template; a test send would go out that way.
+  it('templates.preview and sendTest carry no stand-in subject or body', async () => {
+    const notificationApi = mockNotificationApi()
+    const bridge = createNotificationBridge({ notificationApi: notificationApi as never })
+
+    await bridge.templates.preview({ templateName: 'otp', category: 'Auth' })
+    await bridge.templates.sendTest({ templateName: 'otp', category: 'Auth', recipientAddress: 'ops@example.com' })
+
+    const previewBody = (notificationApi.preview.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(previewBody.subject ?? '').toBe('')
+    expect(previewBody.content ?? '').toBe('')
+    const sendBody = (notificationApi.createAndSend.mock.calls[0] as unknown[])[0] as Record<string, unknown>
+    expect(sendBody.subject ?? '').toBe('')
+    expect(sendBody.category).toBe('Auth')
+    expect(sendBody.recipients).toEqual([{ address: 'ops@example.com' }])
+  })
+
   // ---- subscriptions sub-contract (backend gap - stubs reject) ----
 
   it('subscriptions.fetch rejects with backend-gap error', async () => {
@@ -358,10 +405,92 @@ describe('notification-bridge', () => {
     await expect(bridge.subscriptions.create({})).rejects.toThrow()
   })
 
+  // ---- myPreferences (the signed-in user's own rows) ----
+
+  function mockMyPreferenceApi() {
+    return {
+      getMine: vi.fn(async () => ({ success: true, data: [{ id: 'p1', userId: 'u1', channel: 'Email', isEnabled: false }] })),
+      set: vi.fn(async (body: object) => ({ success: true, data: { id: 'p2', userId: 'u1', ...body } })),
+      delete: vi.fn(async () => ({ success: true, data: null })),
+      resetToDefault: vi.fn(async () => ({ success: true, data: null })),
+    }
+  }
+
+  it('myPreferences round-trips the self-service API and unwraps the envelopes', async () => {
+    const myPreferenceApi = mockMyPreferenceApi()
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, myPreferenceApi: myPreferenceApi as never })
+
+    expect((await bridge.myPreferences.list()).map((r) => r.id)).toEqual(['p1'])
+    const saved = await bridge.myPreferences.set({ channel: 'Sms', isEnabled: false, quietHoursTimeZone: 'Asia/Tokyo' })
+    expect(saved.quietHoursTimeZone).toBe('Asia/Tokyo')
+    await bridge.myPreferences.remove('p1')
+    expect(myPreferenceApi.delete).toHaveBeenCalledWith('p1')
+    await bridge.myPreferences.reset()
+    expect(myPreferenceApi.resetToDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('myPreferences.set rejects on a failure envelope (an invalid zone is not a saved preference)', async () => {
+    const myPreferenceApi = mockMyPreferenceApi()
+    myPreferenceApi.set.mockResolvedValueOnce({ success: false, code: 400, message: 'Unknown time zone' } as never)
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, myPreferenceApi: myPreferenceApi as never })
+
+    await expect(bridge.myPreferences.set({ channel: 'Email', isEnabled: true, quietHoursTimeZone: 'Mars/Olympus' })).rejects.toThrow('Unknown time zone')
+  })
+
+  it('myPreferences works from a bare client too (the User Center builds the bridge that way)', async () => {
+    const client = {
+      get: vi.fn(async () => ({ success: true, data: [] })),
+      put: vi.fn(), post: vi.fn(), delete: vi.fn(),
+    }
+    const bridge = createNotificationBridge({ client: client as never })
+    await bridge.myPreferences.list()
+    expect(client.get).toHaveBeenCalledWith('/notification/preferences')
+  })
+
+  it('subscriptions.update passes the quiet-hours time zone to the admin upsert', async () => {
+    const preferenceApi = {
+      getPagedList: vi.fn(),
+      setPreference: vi.fn(async (_u: string, body: object) => ({ success: true, data: { id: 's1', userId: 'u1', ...body } })),
+      delete: vi.fn(),
+    }
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, preferenceApi: preferenceApi as never })
+
+    await bridge.subscriptions.update('s1', { userId: 'u1', channel: 'Email', isEnabled: true, quietHoursTimeZone: 'Europe/London' } as never)
+    expect(preferenceApi.setPreference).toHaveBeenCalledWith('u1', expect.objectContaining({ quietHoursTimeZone: 'Europe/London' }))
+
+    // Cleared in the form = UTC on the server, sent as null rather than an empty string.
+    await bridge.subscriptions.update('s1', { userId: 'u1', channel: 'Email', isEnabled: true, quietHoursTimeZone: '' } as never)
+    expect(preferenceApi.setPreference).toHaveBeenLastCalledWith('u1', expect.objectContaining({ quietHoursTimeZone: null }))
+  })
+
+  // A cleared text box is an empty string. The quiet-hours times bind to
+  // TimeOnly? on the server, which cannot read '' (400), and the category is
+  // part of the upsert key, where '' is a different row from the channel-wide
+  // null one. Left out of the body, the server reads them as null.
+  it.each(['create', 'update'] as const)('subscriptions.%s leaves cleared text fields out instead of sending empty strings', async (op) => {
+    const preferenceApi = {
+      getPagedList: vi.fn(),
+      setPreference: vi.fn(async (_u: string, body: object) => ({ success: true, data: { id: 's1', userId: 'u1', ...body } })),
+      delete: vi.fn(),
+    }
+    const bridge = createNotificationBridge({ notificationApi: mockNotificationApi() as never, preferenceApi: preferenceApi as never })
+    const row = { userId: 'u1', channel: 'Email', category: '', isEnabled: true, quietHoursStart: '', quietHoursEnd: ' ' }
+
+    if (op === 'create') await bridge.subscriptions.create(row as never)
+    else await bridge.subscriptions.update('s1', row as never)
+
+    const body = JSON.parse(JSON.stringify(preferenceApi.setPreference.mock.calls[0]![1])) as Record<string, unknown>
+    expect(body).not.toHaveProperty('category')
+    expect(body).not.toHaveProperty('quietHoursStart')
+    expect(body).not.toHaveProperty('quietHoursEnd')
+    expect(body).toMatchObject({ channel: 'Email', isEnabled: true })
+  })
+
   // ---- no-deps fallback ----
 
   it('bridge with no deps returns stub contracts that reject on call', async () => {
     const bridge = createNotificationBridge()
     await expect(bridge.messages.fetch({ pageIndex: 1, pageSize: 20, searchText: '', filters: {} })).rejects.toThrow()
+    await expect(bridge.myPreferences.list()).rejects.toThrow()
   })
 })

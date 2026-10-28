@@ -13,8 +13,18 @@ namespace Tnzi.Identity.Services;
 /// <para>
 /// 令牌把「当前用户是谁」带过这两次跳转：前端先在<b>已认证</b>的端点上取令牌，再把它作为 <c>linkToken</c>
 /// 查询参数发起 OAuth；发起端点校验（不消费）后把它写进 <c>AuthenticationProperties.Items</c>，
-/// 经 <c>Identity.External</c> cookie 签名往返到回调；回调消费它并把外部登录挂到签发它的账号上，
-/// 不签发令牌、不新建账号。与 passkey 注册令牌同一形状（借 <c>AuthToken</c> 表存哈希，零迁移）。
+/// 经 <c>Identity.External</c> cookie 签名往返到回调；回调消费它，但<b>不在那里关联</b>。
+/// 与 passkey 注册令牌同一形状（借 <c>AuthToken</c> 表存哈希，零迁移）。
+/// </para>
+/// <para>
+/// ★★★ <b>回调只暂存，关联要回到发起绑定的那个会话里完成。</b>令牌是一个能交给任何人的 URL 参数，
+/// 回调又是匿名的：攻击者给自己签一枚令牌，把 <c>auth/oauth/github/login?linkToken=…</c> 发给受害者，
+/// 受害者在 GitHub 那边早已授权过、整个流程静默走完，受害者的 GitHub 身份就挂到了攻击者账号上：
+/// 此后受害者「用 GitHub 登录」登进的是攻击者的账号，在里面留下的东西攻击者都看得到。
+/// 所以回调把提供商证实的外部身份暂存在签发令牌的账号名下（<see cref="StagePendingLinkAsync"/>），
+/// 换出一枚一次性的完成码交回浏览器；前端再以<b>已认证</b>身份调完成端点（<see cref="ConsumePendingLinkAsync"/>），
+/// 只有当前登录的就是签发令牌的那个账号时才真正关联。受害者的浏览器里要么没有会话（什么都完成不了），
+/// 要么登录的是受害者自己（对不上，拒绝）。
 /// </para>
 /// </remarks>
 public interface IOAuthLinkTokenService
@@ -34,4 +44,29 @@ public interface IOAuthLinkTokenService
     /// 消费：条件同 <see cref="PeekAsync"/>，成功即作废（并发下只有一次成功）。回调端点用它。
     /// </summary>
     Task<Result<Guid>> ConsumeAsync(string token, string provider);
+
+    /// <summary>
+    /// 回调端点用：把提供商证实的外部身份暂存在 <paramref name="userId"/>（签发绑定令牌的账号）名下，
+    /// 返回一枚一次性的完成码。<b>此时还没有关联任何东西。</b>
+    /// </summary>
+    /// <remarks>
+    /// 完成码短期有效、库里只存哈希；同一账号对同一提供商同时只有一份暂存，再暂存一次就顶掉上一份。
+    /// 提供商回调里取不到用户标识时 400。
+    /// </remarks>
+    /// <param name="userId">签发绑定令牌的账号（<see cref="ConsumeAsync"/> 的结果）</param>
+    /// <param name="provider">提供商名（不区分大小写）</param>
+    /// <param name="principal">提供商回调的 ClaimsPrincipal</param>
+    Task<Result<string>> StagePendingLinkAsync(Guid userId, string provider, ClaimsPrincipal principal);
+
+    /// <summary>
+    /// 完成端点用：取出暂存在<b>当前登录账号</b>名下、与 <paramref name="code"/> 匹配的那份外部身份，成功即作废。
+    /// </summary>
+    /// <remarks>
+    /// 只按当前账号去找：别的账号暂存的绑定从这里根本够不着，所以「完成码对、账号不对」与
+    /// 「完成码不对」「已用」「过期」是同一个回答（400）。
+    /// </remarks>
+    /// <param name="userId">当前已认证的用户</param>
+    /// <param name="provider">提供商名（不区分大小写）</param>
+    /// <param name="code">回调页交回浏览器的完成码</param>
+    Task<Result<PendingOAuthLinkDto>> ConsumePendingLinkAsync(Guid userId, string provider, string code);
 }

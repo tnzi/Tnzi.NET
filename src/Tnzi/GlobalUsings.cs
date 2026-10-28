@@ -25,7 +25,6 @@ global using System.Diagnostics;
 global using System.Diagnostics.Metrics;
 global using System.Globalization;
 global using System.IO;
-global using System.IO.Compression;
 global using System.Linq;
 global using System.Linq.Expressions;
 global using System.Net;

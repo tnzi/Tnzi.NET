@@ -10,7 +10,7 @@ namespace Tnzi;
 /// 删除已登记 API 触发 RS0017（在 Tnzi / Tnzi.EFCore / Tnzi.AspNetCore 中提级为编译错误）。
 /// 分工：本特性负责「意图」，analyzer 负责「事实校验」。详见 docs/coding-standards/public-api-governance.md。
 /// </remarks>
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Interface | AttributeTargets.Method | AttributeTargets.Property, Inherited = false)]
 public sealed class StableApiAttribute : Attribute
 {
     /// <summary>

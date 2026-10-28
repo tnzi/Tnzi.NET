@@ -9,6 +9,7 @@ public class HostHttpCrypto : IHostHttpCrypto
 {
     private readonly ILogger _logger;
     private readonly string? _privateKey;
+    private readonly int _maxRequestBodyBytes = HttpEncryptOptions.DefaultMaxRequestBodyBytes;
 
     /// <summary>
     /// 当前请求的加密器实例（Scoped 生命周期，线程安全）
@@ -32,6 +33,13 @@ public class HostHttpCrypto : IHostHttpCrypto
             {
                 throw new TnziException("The HostPrivateKey of the HttpEncrypt node in the configuration file cannot be empty");
             }
+
+            if (httpEncrypt.MaxRequestBodyBytes <= 0)
+            {
+                throw new TnziException("The MaxRequestBodyBytes of the HttpEncrypt node in the configuration file must be greater than zero");
+            }
+
+            _maxRequestBodyBytes = httpEncrypt.MaxRequestBodyBytes;
         }
     }
 
@@ -70,31 +78,51 @@ public class HostHttpCrypto : IHostHttpCrypto
             return request;
         }
 
-        try
+        // 这段读发生在认证与限流之前，任何带 ClientPublicKey 头的未认证调用方都能让它跑：
+        // 声明了 Content-Length 的在读之前拒绝；没声明的（chunked）只读到上限 + 1 字节就停，
+        // 绝不「先读到底再查大小」：那等于让调用方决定服务端分配多大的字符串。
+        if (request.ContentLength > _maxRequestBodyBytes)
         {
-            string data = await request.ReadAsStringAsync();
-            if (string.IsNullOrEmpty(data))
-            {
-                return request;
-            }
+            throw RequestBodyTooLarge(request.ContentLength.Value);
+        }
 
-            data = _encryptor.DecryptAndVerifyData(data);
-            if (data == null)
-            {
-                throw new TnziException("An exception occurred while the server was parsing the request data.");
-            }
-
-            _logger.LogDebug("Use the server's private key to decrypt the request data, and use the client's public key to verify the data");
-            await request.WriteBodyAsync(data);
+        var data = await request.TryReadAsStringAsync(_maxRequestBodyBytes, request.HttpContext.RequestAborted)
+                   ?? throw RequestBodyTooLarge(null);
+        if (string.IsNullOrEmpty(data))
+        {
             return request;
         }
-        catch (Exception ex)
+
+        if (!_encryptor.IsEncryptedPayload(data))
         {
-            _logger.LogError(ex, ex is CryptographicException
-                ? "An exception occurred when the server parsed the transmitted data."
-                : "An exception occurred when the server decrypted the requested data.");
-            throw new TnziException("An exception occurred while the server was decrypting the request data.", ex);
+            // 协商了但正文不是本协议的密文：原样交给管线（读取后已回到流首），不解密也不验签
+            _logger.LogDebug("The request body is not in the encrypted transport format; it was passed through without decryption or signature verification");
+            return request;
         }
+
+        try
+        {
+            data = _encryptor.DecryptAndVerifyData(data);
+        }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException or FormatException)
+        {
+            // 解不开、验不过、格式不对都是客户端送来的载荷有问题：答 400，记 Warning，不当服务器故障记 500
+            _logger.LogWarning(ex, "The encrypted request body could not be decrypted or verified");
+            throw new BusinessException("The encrypted request body could not be decrypted or verified.", ErrorCodes.DATA_INVALID, StatusCodes.Status400BadRequest);
+        }
+
+        _logger.LogDebug("Use the server's private key to decrypt the request data, and use the client's public key to verify the data");
+        await request.WriteBodyAsync(data);
+        return request;
+    }
+
+    private BusinessException RequestBodyTooLarge(long? declaredBytes)
+    {
+        _logger.LogWarning("Encrypted request body rejected: {DeclaredBytes} bytes declared, limit {Limit} bytes", declaredBytes, _maxRequestBodyBytes);
+        return new BusinessException(
+            $"The encrypted request body exceeds the {_maxRequestBodyBytes}-byte limit.",
+            ErrorCodes.DATA_INVALID,
+            StatusCodes.Status413PayloadTooLarge);
     }
 
     /// <summary>

@@ -61,5 +61,10 @@ public enum InvoiceType
     /// <summary>
     /// 收据
     /// </summary>
-    Receipt = 3
+    Receipt = 3,
+
+    /// <summary>
+    /// 贷项通知单（退款冲减原发票，<c>OriginalInvoiceId</c> 指向被冲减的那一张）
+    /// </summary>
+    CreditNote = 4
 }

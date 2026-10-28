@@ -161,6 +161,73 @@ public class SemanticChunkingStrategyTests
         chunks.Count.ShouldBeGreaterThan(1);
     }
 
+    /// <summary>
+    /// 句子按 <c>EmbeddingBatchSize</c> 分批送去嵌入。此前全部句子一次送出：提供商对单次输入条数有上限，
+    /// 大文档必然被拒，策略静默回退定长切块，语义切块实际只对小文档生效。
+    /// </summary>
+    [Fact]
+    public async Task ChunkAsync_EmbedsSentencesInBatches_AndBreaksOnTheWholeDocument()
+    {
+        // 7 句：前 4 句一个方向、后 3 句另一个方向；批大小 3 → 3 + 3 + 1，断点落在第二批里
+        var text = "Cats purr. Cats nap. Cats hunt. Cats climb. Code compiles. Code runs. Code ships.";
+        var vectors = new[]
+        {
+            MakeVector(1f, 0f, 0f), MakeVector(1f, 0.05f, 0f), MakeVector(1f, 0f, 0.05f), MakeVector(1f, 0.05f, 0.05f),
+            MakeVector(0f, 1f, 0f), MakeVector(0.05f, 1f, 0f), MakeVector(0f, 1f, 0.05f)
+        };
+        var batchSizes = new List<int>();
+        var offset = 0;
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string> batch, EmbeddingOptions? _, CancellationToken _) =>
+            {
+                // 模拟提供商的单次输入上限
+                if (batch.Count > 3)
+                {
+                    return Result<List<float[]>>.Failure("Too many inputs in one request");
+                }
+
+                batchSizes.Add(batch.Count);
+                var slice = vectors.Skip(offset).Take(batch.Count).ToList();
+                offset += batch.Count;
+                return Result<List<float[]>>.Success(slice);
+            });
+        var ragOptions = Microsoft.Extensions.Options.Options.Create(new AIRagOptions { EmbeddingBatchSize = 3 });
+        var strategy = new SemanticChunkingStrategy(
+            _embeddingServiceMock.Object, _loggerMock.Object, similarityThreshold: 0.5, minChunkSize: 10, ragOptions: ragOptions);
+
+        var chunks = await strategy.ChunkAsync(text, chunkSize: 60, chunkOverlap: 0);
+
+        batchSizes.ShouldBe([3, 3, 1]);
+        chunks.Count.ShouldBe(2, "a semantic split, not the fixed-size fallback");
+        chunks[0].ShouldBe("Cats purr. Cats nap. Cats hunt. Cats climb.");
+        chunks[1].ShouldBe("Code compiles. Code runs. Code ships.");
+    }
+
+    [Fact]
+    public async Task ChunkAsync_AFailedBatch_FallsBackToFixedSizeOnce()
+    {
+        var text = "One here. Two here. Three here. Four here. Five here.";
+        var calls = 0;
+        _embeddingServiceMock
+            .Setup(e => e.GenerateEmbeddingsAsync(It.IsAny<List<string>>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string> batch, EmbeddingOptions? _, CancellationToken _) =>
+            {
+                calls++;
+                return calls == 2
+                    ? Result<List<float[]>>.Failure("Provider unavailable")
+                    : Result<List<float[]>>.Success(batch.Select(_ => MakeVector(1f, 0f, 0f)).ToList());
+            });
+        var ragOptions = Microsoft.Extensions.Options.Options.Create(new AIRagOptions { EmbeddingBatchSize = 2 });
+        var strategy = new SemanticChunkingStrategy(
+            _embeddingServiceMock.Object, _loggerMock.Object, similarityThreshold: 0.5, minChunkSize: 10, ragOptions: ragOptions);
+
+        var chunks = await strategy.ChunkAsync(text, chunkSize: 20, chunkOverlap: 0);
+
+        calls.ShouldBe(2, "the remaining batches are not requested once one has failed");
+        chunks.ShouldBe(new FixedSizeChunkingStrategy().Chunk(text, 20, 0));
+    }
+
     [Fact]
     public async Task ChunkAsync_WithRagOptions_AlignsEmbeddingProviderAndModel()
     {

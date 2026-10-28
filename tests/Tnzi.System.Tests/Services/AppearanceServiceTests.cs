@@ -8,6 +8,10 @@ public class AppearanceServiceTests
     private readonly Mock<IRepository<Setting, Guid>> _repositoryMock = new();
     private readonly Mock<ISettingService> _settingServiceMock = new();
     private readonly Mock<IServiceProvider> _serviceProviderMock = new();
+    private readonly Mock<ICache> _cacheMock = new();
+
+    /// <summary>「已配置的主题键」清单（缓存里的那一份）；<see cref="StoredAt"/> 存了值的键都在里面。</summary>
+    private readonly List<string> _configuredKeys = [];
 
     public AppearanceServiceTests()
     {
@@ -20,6 +24,10 @@ public class AppearanceServiceTests
         _settingServiceMock
             .Setup(s => s.GetSettingAsync(It.IsAny<string>(), null))
             .ReturnsAsync(Result.Success<string?>(null));
+
+        _cacheMock
+            .Setup(c => c.GetAsync<List<string>>(AppearanceService.ConfiguredThemeKeysCacheKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _configuredKeys.ToList());
     }
 
     /// Returned as the interface: the `*AdminTheme*` overloads are default
@@ -27,14 +35,20 @@ public class AppearanceServiceTests
     private IAppearanceService CreateService() => new AppearanceService(
         _serviceProviderMock.Object,
         _settingServiceMock.Object,
-        _repositoryMock.Object);
+        _repositoryMock.Object,
+        _cacheMock.Object);
 
     private static JsonElement ThemeObject(string json = """{"version":1,"admin":{"tabVisible":false},"ui":{"mode":"dark"}}""")
         => JsonDocument.Parse(json).RootElement.Clone();
 
-    private void StoredAt(string key, string? value) => _settingServiceMock
-        .Setup(s => s.GetSettingAsync(key, null))
-        .ReturnsAsync(Result.Success<string?>(value));
+    private void StoredAt(string key, string? value)
+    {
+        _settingServiceMock
+            .Setup(s => s.GetSettingAsync(key, null))
+            .ReturnsAsync(Result.Success<string?>(value));
+        if (value is not null)
+            _configuredKeys.Add(key);
+    }
 
     [Fact]
     public async Task GetTheme_Should_Return_Unset_When_No_Setting_Row()
@@ -106,6 +120,62 @@ public class AppearanceServiceTests
 
         result.Succeeded.ShouldBeTrue();
         result.Data!.Theme.ShouldBeNull();
+    }
+
+    /// <summary>
+    /// 读端点是匿名的，而按键读取对「没有这一行」也缓存一小时：此前每个合法字形的随机 scope 都要一次查库、留一条缓存，
+    /// 循环请求就能让缓存无界增长。没配置的 scope 现在不碰按键读取。
+    /// </summary>
+    [Fact]
+    public async Task GetTheme_For_An_Unconfigured_Scope_Does_Not_Touch_The_Per_Key_Read()
+    {
+        StoredAt(AdminKey, """{"theme":{"who":"admin"}}""");
+
+        var result = await CreateService().GetThemeAsync("a7f3c9e1");
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.Theme.ShouldBeNull();
+        _settingServiceMock.Verify(s => s.GetSettingAsync(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    /// <summary>清单不在缓存里时从库里读一次（只读主题键），缓存起来。</summary>
+    [Fact]
+    public async Task GetTheme_Loads_And_Caches_The_Configured_Scopes_When_They_Are_Not_Cached()
+    {
+        _cacheMock
+            .Setup(c => c.GetAsync<List<string>>(AppearanceService.ConfiguredThemeKeysCacheKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((List<string>?)null);
+        _repositoryMock.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<Setting>
+        {
+            new() { Key = ChatKey, Value = """{"theme":{"who":"chat"}}""", Scope = SettingScope.Global },
+            new() { Key = "Mail:Host", Value = "smtp.example.com", Scope = SettingScope.Global },
+        }.BuildMock());
+        _settingServiceMock.Setup(s => s.GetSettingAsync(ChatKey, null)).ReturnsAsync(Result.Success<string?>("""{"theme":{"who":"chat"}}"""));
+
+        var service = CreateService();
+        (await service.GetThemeAsync("chat")).Data!.Theme!.Value.GetProperty("who").GetString().ShouldBe("chat");
+        (await service.GetThemeAsync("other")).Data!.Theme.ShouldBeNull();
+
+        _cacheMock.Verify(c => c.SetAsync(
+            AppearanceService.ConfiguredThemeKeysCacheKey,
+            It.Is<List<string>>(keys => keys.SequenceEqual(new[] { ChatKey })),
+            It.IsAny<TimeSpan?>(),
+            It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        _settingServiceMock.Verify(s => s.GetSettingAsync("Appearance:Theme:other", It.IsAny<string?>()), Times.Never);
+    }
+
+    /// <summary>清单读不出来（缓存或库故障）时退回逐键读取，不让主题读取整体失败。</summary>
+    [Fact]
+    public async Task GetTheme_Falls_Back_To_The_Per_Key_Read_When_The_Configured_Scopes_Cannot_Be_Read()
+    {
+        _cacheMock
+            .Setup(c => c.GetAsync<List<string>>(AppearanceService.ConfiguredThemeKeysCacheKey, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("cache unavailable"));
+        _settingServiceMock.Setup(s => s.GetSettingAsync(ChatKey, null)).ReturnsAsync(Result.Success<string?>("""{"theme":{"who":"chat"}}"""));
+
+        var result = await CreateService().GetThemeAsync("chat");
+
+        result.Data!.Theme!.Value.GetProperty("who").GetString().ShouldBe("chat");
     }
 
     [Theory]

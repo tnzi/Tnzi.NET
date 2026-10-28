@@ -41,7 +41,9 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     public async Task<Result<SlidingCaptchaDto>> GenerateAsync(SlidingCaptchaOptions? options = null, string? purpose = null, CancellationToken cancellationToken = default)
     {
         var opts = options ?? _imagingOptions.Value.SlidingCaptcha;
-        return await GeneratePuzzleAsync(opts, addNoise: false, purpose: purpose, cancellationToken: cancellationToken);
+        // ★ 这道题不调难度，但它上面的失败照样记到客户端键上：同一个验证接口核销两种题，
+        //   只有自适应题计失败的话，在固定难度的题上连续失败多少次都不会让后面的自适应题变难。
+        return await GeneratePuzzleAsync(opts, addNoise: false, ResolveClientKey(), purpose, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -76,8 +78,8 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
 
         // 容差由生成时的服务端决策说话：自适应难度调紧的容差、以及配置里的
         // SlidingCaptcha.Tolerance 都随令牌一起存下，验证时优先采用；
-        // 只有旧令牌（未带容差）才回退到入参。
-        var effectiveTolerance = storedData.Tolerance > 0 ? storedData.Tolerance : tolerance;
+        // 只有没记录容差的令牌（null）才回退到入参。0 是一个合法的配置（要求精确对齐），不是「没记录」。
+        var effectiveTolerance = storedData.Tolerance ?? tolerance;
         var diff = Math.Abs(userX - storedData.CorrectX);
         var isSuccess = diff <= effectiveTolerance;
 
@@ -158,16 +160,14 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
             failureCount = await GetFailureCountAsync(clientId, cancellationToken);
         }
 
-        // 根据失败次数调整难度
-        var (tolerance, pieceSize, addNoise) = GetDifficultySettings(failureCount);
+        // 根据失败次数调整难度：以配置为基线只收紧不放宽
+        var (tolerance, pieceSize, addNoise) = GetDifficultySettings(failureCount, baseOptions);
 
         var adaptiveOptions = new SlidingCaptchaOptions
         {
             Width = baseOptions.Width,
             Height = baseOptions.Height,
-            // 难度只会把拼图块变小（更难），不能超过配置的基线尺寸：
-            // 基线是被 ImagingOptionsValidator 校验过与 Width/Height 相容的那个值
-            PieceSize = Math.Min(baseOptions.PieceSize, pieceSize),
+            PieceSize = pieceSize,
             Tolerance = tolerance,
             ExpirationMinutes = baseOptions.ExpirationMinutes
         };
@@ -210,15 +210,21 @@ public class SlidingCaptchaService : ApplicationService, ISlidingCaptchaService
     }
 
     /// <summary>
-    /// 根据失败次数获取难度设置
+    /// 根据失败次数获取难度设置。
     /// </summary>
-    private static (int Tolerance, int PieceSize, bool AddNoise) GetDifficultySettings(long failureCount)
+    /// <remarks>
+    /// 每一档都以配置为基线、只收紧不放宽：普通难度就是配置本身，往上各档的容差与拼图块尺寸
+    /// 取「配置值」与「该档上限」中较小的那个。拼图块不超过配置值，是因为配置值是被
+    /// <c>ImagingOptionsValidator</c> 校验过与 Width/Height 相容的那个；容差不超过配置值，是因为
+    /// 此前各档容差写死 (5, 3, 2)，配置 Tolerance = 2 时没有失败历史的客户端反而拿到 5 像素，比不走自适应还宽。
+    /// </remarks>
+    private static (int Tolerance, int PieceSize, bool AddNoise) GetDifficultySettings(long failureCount, SlidingCaptchaOptions baseline)
     {
         return failureCount switch
         {
-            <= 2 => (5, 50, false),   // 普通难度
-            <= 5 => (3, 40, false),   // 较高难度
-            _ => (2, 35, true)        // 最高难度
+            <= 2 => (baseline.Tolerance, baseline.PieceSize, false),                                // 普通难度
+            <= 5 => (Math.Min(baseline.Tolerance, 3), Math.Min(baseline.PieceSize, 40), false),     // 较高难度
+            _ => (Math.Min(baseline.Tolerance, 2), Math.Min(baseline.PieceSize, 35), true)          // 最高难度
         };
     }
 
@@ -587,9 +593,9 @@ internal class SlidingCaptchaStoredData
     public int CorrectX { get; set; }
 
     /// <summary>
-    /// 生成时决定的验证容差（像素）。0 表示未记录（旧令牌），验证时回退到调用方入参。
+    /// 生成时决定的验证容差（像素）。null 表示没记录，验证时回退到调用方入参；0 是合法值（要求精确对齐）。
     /// </summary>
-    public int Tolerance { get; set; }
+    public int? Tolerance { get; set; }
 
     /// <summary>
     /// 客户端标识（用于自适应难度）

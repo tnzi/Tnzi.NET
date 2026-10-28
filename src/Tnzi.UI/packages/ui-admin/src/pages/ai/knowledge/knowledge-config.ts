@@ -42,12 +42,18 @@ export const knowledgeCreateFormSchema: FormSchemaItem[] = [
     type: 'text',
     placeholder: 'e.g. text-embedding-3-small',
   },
+  // Same bounds as the backend's chunk settings rule: 128-8192 characters per
+  // chunk, overlap at most half the chunk (the server answers 400 otherwise,
+  // including when only the size is given and the configured default overlap
+  // is too large for it).
   {
     key: 'chunkSize',
     labelKey: 'form.chunkSize',
     label: 'Chunk Size',
     type: 'number',
     placeholder: '1000',
+    min: 128,
+    max: 8192,
   },
   {
     key: 'chunkOverlap',
@@ -55,6 +61,8 @@ export const knowledgeCreateFormSchema: FormSchemaItem[] = [
     label: 'Chunk Overlap',
     type: 'number',
     placeholder: '200',
+    min: 0,
+    max: 4096,
   },
   // Off by default: the user-facing RAG endpoints refuse a knowledge base that
   // was never opened, so a new base is agent-only until an admin flips this.

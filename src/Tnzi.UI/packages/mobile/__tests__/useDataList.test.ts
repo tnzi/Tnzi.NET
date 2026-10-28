@@ -138,3 +138,92 @@ describe('useDataList', () => {
     expect(hasMore.value).toBe(true)
   })
 })
+
+describe('useDataList when a refresh overtakes a page load', () => {
+  /** onLoad whose answers the test hands out one call at a time. */
+  function heldLoader() {
+    const calls: { page: number; answer: (rows: { id: number }[]) => void }[] = []
+    const onLoad = vi.fn(
+      (page: number) => new Promise<{ id: number }[]>((resolve) => calls.push({ page, answer: resolve })),
+    )
+    return { onLoad, calls }
+  }
+  const rows = (from: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: from + i }))
+
+  it('drops the page that was in flight when the refresh started', async () => {
+    const { onLoad, calls } = heldLoader()
+    const list = useDataList({ onLoad, pageSize: 2 })
+    // Pages 1 and 2 are in; page 3 is on its way.
+    const p1 = list.loadMore(); calls[0]!.answer(rows(1, 2)); await p1
+    const p2 = list.loadMore(); calls[1]!.answer(rows(3, 2)); await p2
+    const p3 = list.loadMore()
+
+    // Pull to refresh: it answers first, with page 1.
+    const refreshing = list.refresh()
+    await new Promise<void>((r) => setTimeout(r, 0))
+    calls[3]!.answer(rows(1, 2))
+    await refreshing
+    // Then the old page 3 arrives.
+    calls[2]!.answer(rows(5, 2))
+    await p3
+
+    // It used to be appended after the fresh page 1 and move the cursor to 3.
+    expect(list.items.value).toEqual(rows(1, 2))
+    expect(list.page.value).toBe(2)
+    expect(list.isLoading.value).toBe(false)
+  })
+
+  it('does not start a page load while a refresh is running', async () => {
+    const { onLoad, calls } = heldLoader()
+    const list = useDataList({ onLoad, pageSize: 2 })
+
+    const refreshing = list.refresh()
+    await list.loadMore()
+    await new Promise<void>((r) => setTimeout(r, 0))
+    expect(onLoad).toHaveBeenCalledTimes(1)
+
+    calls[0]!.answer(rows(1, 2))
+    await refreshing
+    const next = list.loadMore()
+    expect(calls[1]!.page).toBe(2)
+    calls[1]!.answer(rows(3, 1))
+    await next
+    expect(list.items.value).toEqual(rows(1, 3))
+  })
+
+  it('drops a refresh that reset() overtook', async () => {
+    const { onLoad, calls } = heldLoader()
+    const list = useDataList({ onLoad, pageSize: 2 })
+
+    const refreshing = list.refresh()
+    await new Promise<void>((r) => setTimeout(r, 0))
+    list.reset()
+    calls[0]!.answer(rows(1, 2))
+    await refreshing
+
+    expect(list.items.value).toEqual([])
+    expect(list.page.value).toBe(1)
+    expect(list.isRefreshing.value).toBe(false)
+  })
+
+  it('drops a load that reset() overtook, and lets the next load run', async () => {
+    const { onLoad, calls } = heldLoader()
+    const list = useDataList({ onLoad, pageSize: 2 })
+
+    const stale = list.loadMore()
+    list.reset()
+    const fresh = list.loadMore()
+    expect(onLoad).toHaveBeenCalledTimes(2)
+
+    calls[0]!.answer(rows(100, 2))
+    await stale
+    // The stale load finishing must not clear the flag of the one still running.
+    expect(list.isLoading.value).toBe(true)
+
+    calls[1]!.answer(rows(1, 2))
+    await fresh
+    expect(list.items.value).toEqual(rows(1, 2))
+    expect(list.page.value).toBe(2)
+    expect(list.isLoading.value).toBe(false)
+  })
+})

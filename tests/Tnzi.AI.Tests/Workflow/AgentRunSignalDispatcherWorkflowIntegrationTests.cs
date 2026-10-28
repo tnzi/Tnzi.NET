@@ -64,7 +64,8 @@ public class AgentRunSignalDispatcherWorkflowIntegrationTests : IntegratedTestBa
 
         services.AddScoped(_ => Mock.Of<IRepository<Agent, Guid>>());
         services.AddScoped(_ => Mock.Of<IUsageLogService>());
-        services.AddScoped(_ => Mock.Of<IQuotaService>());
+        // A resume reserves quota for the signed-in user; a bare mock answers that with null.
+        services.AddScoped(_ => WorkflowServiceSqliteTestBase.UsageLimitsThatGrantEverything());
 
         services.AddScoped<IRunStore, RunStore>();
         services.AddScoped<IWorkflowCheckpointStore, DatabaseWorkflowCheckpointStore>();

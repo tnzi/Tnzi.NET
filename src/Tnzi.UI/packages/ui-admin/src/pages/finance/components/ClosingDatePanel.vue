@@ -1,7 +1,16 @@
 <template>
   <div class="fin-lock">
     <div class="fin-lock__head">
-      <div class="fin-lock__state">
+      <!-- An unread lock is "unknown", never "open": the failed read says nothing
+           about whether a closing date (or its password) is in force. -->
+      <div v-if="loadError !== null" class="fin-lock__state">
+        <TSvgIcon icon="mdi:help-circle-outline" :size="18" class="fin-lock__icon--off" />
+        <div>
+          <div class="fin-lock__value">{{ t('closingDate.unknown') }}</div>
+          <div class="fin-lock__hint">{{ loadError }}</div>
+        </div>
+      </div>
+      <div v-else class="fin-lock__state">
         <TSvgIcon :icon="locked ? 'mdi:lock-outline' : 'mdi:lock-open-variant-outline'" :size="18" :class="locked ? 'fin-lock__icon--on' : 'fin-lock__icon--off'" />
         <div>
           <div class="fin-lock__value">
@@ -13,13 +22,16 @@
       </div>
 
       <div class="fin-lock__actions">
-        <NTag v-if="lock?.isPasswordProtected" size="small" type="warning" :bordered="false">
-          <template #icon><TSvgIcon icon="mdi:key-outline" :size="13" /></template>
-          {{ t('closingDate.passwordSet') }}
-        </NTag>
-        <NButton v-if="canEdit" size="small" :type="locked ? 'default' : 'primary'" @click="openEditor">
-          {{ locked ? t('closingDate.change') : t('closingDate.set') }}
-        </NButton>
+        <NButton v-if="loadError !== null" size="small" @click="load">{{ t('closingDate.retry') }}</NButton>
+        <template v-else>
+          <NTag v-if="lock?.isPasswordProtected" size="small" type="warning" :bordered="false">
+            <template #icon><TSvgIcon icon="mdi:key-outline" :size="13" /></template>
+            {{ t('closingDate.passwordSet') }}
+          </NTag>
+          <NButton v-if="canEdit" size="small" :type="locked ? 'default' : 'primary'" @click="openEditor">
+            {{ locked ? t('closingDate.change') : t('closingDate.set') }}
+          </NButton>
+        </template>
       </div>
     </div>
 
@@ -29,6 +41,7 @@
     </p>
 
     <TModalShell v-model:show="editing" :title="t('closingDate.editTitle')" :width="520">
+      <NAlert v-if="error" type="error" :show-icon="false" class="fin-lock__error">{{ error }}</NAlert>
       <NForm label-placement="top" size="small">
         <NFormItem :label="t('closingDate.field')">
           <NDatePicker v-model:value="draftDate" type="date" clearable class="fin-lock__picker" :is-date-disabled="isFuture" />
@@ -87,7 +100,7 @@
  * silent per-entry bypass.
  */
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NDatePicker, NForm, NFormItem, NInput, NTag } from 'naive-ui'
+import { NAlert, NButton, NDatePicker, NForm, NFormItem, NInput, NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { TModalShell } from '@tnzi/ui'
 import { formatAccountingDate, isoDateToLocalTs, tsToIsoDate } from '../../../utils/finance-format'
@@ -109,6 +122,8 @@ const password = ref('')
 const newPassword = ref('')
 const note = ref('')
 const error = ref<string | null>(null)
+/** Why the last read failed; null once a read succeeded. */
+const loadError = ref<string | null>(null)
 
 const locked = computed(() => Boolean(lock.value?.closingDate))
 
@@ -124,10 +139,12 @@ function isFuture(ts: number): boolean {
 async function load() {
   try {
     lock.value = await props.bridge.fiscalYears.getClosingDate()
-  } catch {
-    // Read failure must not blank the fiscal-year list underneath: leave the
-    // panel in its "unknown" state rather than asserting "not closed".
+    loadError.value = null
+  } catch (e) {
+    // Read failure must not blank the fiscal-year list underneath, and must not
+    // read as "not closed" either: the panel shows an unknown state instead.
     lock.value = null
+    loadError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -142,6 +159,7 @@ function openEditor() {
 
 async function save() {
   saving.value = true
+  error.value = null
   try {
     lock.value = await props.bridge.fiscalYears.setClosingDate({
       closingDate: draftDate.value === null ? null : tsToIsoDate(draftDate.value),
@@ -153,8 +171,9 @@ async function save() {
     editing.value = false
     emit('changed')
   } catch (e) {
+    // Shown inside the editor, which stays open for a correction (wrong
+    // password, future date). Not rethrown: the caller is a click handler.
     error.value = e instanceof Error ? e.message : String(e)
-    throw e
   } finally {
     saving.value = false
   }
@@ -211,6 +230,10 @@ defineExpose({ reload: load })
 
 .fin-lock__explain {
   margin: -6px 0 10px;
+}
+
+.fin-lock__error {
+  margin-bottom: 12px;
 }
 
 .fin-lock__actions {

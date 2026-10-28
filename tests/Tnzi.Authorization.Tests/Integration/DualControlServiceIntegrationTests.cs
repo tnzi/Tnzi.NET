@@ -444,6 +444,225 @@ public class DualControlServiceIntegrationTests : IntegratedTestBase<Authorizati
         Assert.Null(single.Data.RequesterName);
     }
 
+    /// <summary>
+    /// ★★★ 第二位审批人的拒绝是在第一位批准之前读到 Pending 的，落库却在批准之后：
+    /// 先读后整行回写会把 Approved 覆盖成 Rejected，两条相反的决定事件先后发出，
+    /// 而总线上先到的那条批准可能已经让发起人执行了动作。
+    /// </summary>
+    [Fact]
+    public async Task A_decision_made_on_a_stale_read_does_not_overwrite_a_concurrent_one()
+    {
+        var id = await RequestAsync();
+        var stale = await ReadInConcurrentRequestAsync(id);
+
+        ActAs(Approver);
+        Assert.True((await Service.ApproveAsync(id)).Succeeded);
+
+        ActAs(ThirdParty);
+        var rejected = await stale.Service.RejectAsync(id, "no");
+
+        Assert.False(rejected.Succeeded);
+        Assert.Equal(409, rejected.Code);
+        var row = await ReadCommittedAsync(id);
+        Assert.Equal(DualControlStatus.Approved, row.Status);
+        Assert.Equal(Approver, row.ApproverId);
+    }
+
+    /// <summary>反方向：拒绝先落库，带着旧快照的批准后到，不得把一张被否决的许可变成可用。</summary>
+    [Fact]
+    public async Task A_stale_approval_cannot_turn_a_rejection_into_a_usable_permit()
+    {
+        var id = await RequestAsync();
+        var stale = await ReadInConcurrentRequestAsync(id);
+
+        ActAs(Approver);
+        Assert.True((await Service.RejectAsync(id, "no")).Succeeded);
+
+        ActAs(ThirdParty);
+        var approved = await stale.Service.ApproveAsync(id);
+
+        Assert.False(approved.Succeeded);
+        Assert.Equal(409, approved.Code);
+        Assert.Equal(DualControlStatus.Rejected, (await ReadCommittedAsync(id)).Status);
+    }
+
+    /// <summary>
+    /// 整行回写还会把 <c>IsConsumed</c> 一起写回读到的旧值：许可已经被执行过，审计上却成了「从未使用」。
+    /// </summary>
+    [Fact]
+    public async Task A_stale_decision_cannot_reset_a_consumed_permit()
+    {
+        var id = await RequestAsync();
+        var stale = await ReadInConcurrentRequestAsync(id);
+
+        ActAs(Approver);
+        Assert.True((await Service.ApproveAsync(id)).Succeeded);
+        ActAs(Requester);
+        Assert.True((await Service.ConsumeAsync(id, "payrun.void", "{\"amount\":100}")).Succeeded);
+
+        ActAs(ThirdParty);
+        Assert.False((await stale.Service.ApproveAsync(id)).Succeeded);
+
+        var row = await ReadCommittedAsync(id);
+        Assert.True(row.IsConsumed);
+        Assert.NotNull(row.ConsumedAt);
+        Assert.Equal(Approver, row.ApproverId);
+    }
+
+    /// <summary>发起人的撤回与审批人的决定并发：只能有一个成立，后到的那个不得覆盖先到的。</summary>
+    [Fact]
+    public async Task A_cancel_made_on_a_stale_read_does_not_overwrite_a_decision()
+    {
+        var id = await RequestAsync();
+        var stale = await ReadInConcurrentRequestAsync(id);
+
+        ActAs(Approver);
+        Assert.True((await Service.ApproveAsync(id)).Succeeded);
+
+        ActAs(Requester);
+        var cancelled = await stale.Service.CancelAsync(id);
+
+        Assert.False(cancelled.Succeeded);
+        Assert.Equal(409, cancelled.Code);
+        Assert.Equal(DualControlStatus.Approved, (await ReadCommittedAsync(id)).Status);
+    }
+
+    /// <summary>决定落库时审计列照常记下是谁、何时改的（条件更新绕过了保存拦截器）。</summary>
+    [Fact]
+    public async Task A_decision_stamps_the_modification_audit_columns()
+    {
+        var id = await RequestAsync();
+
+        ActAs(Approver);
+        Assert.True((await Service.ApproveAsync(id)).Succeeded);
+
+        var row = await ReadCommittedAsync(id);
+        Assert.Equal(Approver, row.LastModifierId);
+        Assert.NotNull(row.LastModificationTime);
+    }
+
+    // ── 发起与决定的输入边界 ────────────────────────────────────────────────
+
+    /// <summary>
+    /// 逐请求覆盖的有效期与配置默认值受同一个 30 天上限约束：再长，「两个人当场同意」就不再成立。
+    /// 此前只钳配置值，覆盖值只看是否为正：十年有效的许可照签不误。
+    /// </summary>
+    [Fact]
+    public async Task A_lifetime_override_beyond_thirty_days_is_refused()
+    {
+        ActAs(Requester);
+
+        var result = await Service.RequestAsync(
+            new DualControlRequestInput("payrun.void", "PR-1", "{}", Lifetime: TimeSpan.FromDays(3650)));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Empty(await DbContext.DualControlRequests.AsNoTracking().ToListAsync());
+    }
+
+    /// <summary>超出 <see cref="DateTime"/> 能表示的有效期答 400，而不是在算到期时刻时抛出成 500。</summary>
+    [Fact]
+    public async Task An_unrepresentable_lifetime_is_a_validation_error_not_an_exception()
+    {
+        ActAs(Requester);
+
+        var result = await Service.RequestAsync(
+            new DualControlRequestInput("payrun.void", "PR-1", "{}", Lifetime: TimeSpan.MaxValue));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+    }
+
+    [Fact]
+    public async Task A_lifetime_of_exactly_thirty_days_is_accepted()
+    {
+        ActAs(Requester);
+
+        var result = await Service.RequestAsync(
+            new DualControlRequestInput("payrun.void", "PR-1", "{}", Lifetime: TimeSpan.FromMinutes(43200)));
+
+        Assert.True(result.Succeeded, result.Message);
+    }
+
+    /// <summary>
+    /// 列宽之外的说明、动作标识与目标标识在服务层答 400：PostgreSQL 在保存时才拒（500），
+    /// SQLite 根本不拒（落库的值超出约定的列宽）。
+    /// </summary>
+    [Theory]
+    [InlineData("operation")]
+    [InlineData("target")]
+    [InlineData("description")]
+    public async Task Over_length_request_fields_are_refused(string field)
+    {
+        ActAs(Requester);
+        var operation = field == "operation" ? new string('o', DualControlRequest.OperationMaxLength + 1) : "payrun.void";
+        var target = field == "target" ? new string('t', DualControlRequest.TargetIdMaxLength + 1) : "PR-1";
+        var description = field == "description" ? new string('d', DualControlRequest.DescriptionMaxLength + 1) : "why";
+
+        var result = await Service.RequestAsync(new DualControlRequestInput(operation, target, "{}", description));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Empty(await DbContext.DualControlRequests.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Fields_at_their_length_limit_are_accepted()
+    {
+        ActAs(Requester);
+
+        var result = await Service.RequestAsync(new DualControlRequestInput(
+            new string('o', DualControlRequest.OperationMaxLength),
+            new string('t', DualControlRequest.TargetIdMaxLength),
+            "{}",
+            new string('d', DualControlRequest.DescriptionMaxLength)));
+
+        Assert.True(result.Succeeded, result.Message);
+    }
+
+    /// <summary>审批意见同样受列宽约束；超长时请求保持待批，而不是条件更新在库里失败。</summary>
+    [Fact]
+    public async Task An_over_length_decision_comment_is_refused_and_the_request_stays_pending()
+    {
+        var id = await RequestAsync();
+
+        ActAs(Approver);
+        var result = await Service.RejectAsync(id, new string('r', DualControlRequest.DecisionCommentMaxLength + 1));
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(DualControlStatus.Pending, (await ReadCommittedAsync(id)).Status);
+    }
+
+    /// <summary>
+    /// 在另一个作用域（另一个 DbContext）里先把请求读进来，像一个与当前请求并发的 HTTP 请求那样：
+    /// 之后对它的决定拿到的是这份读时的快照。
+    /// </summary>
+    private async Task<(IServiceScope Scope, DualControlService Service)> ReadInConcurrentRequestAsync(Guid id)
+    {
+        var scope = ServiceProvider.CreateScope();
+        _scopes.Add(scope);
+        var snapshot = await scope.ServiceProvider.GetRequiredService<IRepository<DualControlRequest, Guid>>().GetAsync(id);
+        Assert.Equal(DualControlStatus.Pending, snapshot!.Status);
+        return (scope, scope.ServiceProvider.GetRequiredService<DualControlService>());
+    }
+
+    /// <summary>绕过任何上下文的跟踪副本，读库里此刻的那一行。</summary>
+    private async Task<DualControlRequest> ReadCommittedAsync(Guid id)
+        => await DbContext.DualControlRequests.AsNoTracking().SingleAsync(r => r.Id == id);
+
+    private readonly List<IServiceScope> _scopes = [];
+
+    public override void Dispose()
+    {
+        foreach (var scope in _scopes)
+        {
+            scope.Dispose();
+        }
+
+        base.Dispose();
+    }
+
     private async Task SeedUserAsync(Guid id, string userName)
     {
         DbContext.Set<Tnzi.Identity.Entities.User>().Add(new Tnzi.Identity.Entities.User

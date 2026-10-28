@@ -57,4 +57,11 @@ public class AiMiddlewareContext
     /// </summary>
     public string? EffectiveUserMessage { get; set; }
 
+    /// <summary>
+    /// 经 InputGuardrail 修改后的有效内容块（请求带 <see cref="AgentRunRequest.ContentParts"/> 且守卫改写了文本时写入，
+    /// 是新列表，请求原值不动）。内容块非空时模型只读内容块，守卫的改写必须落在这里才进得了模型；
+    /// AgentRuntime.Core 优先读取此值（未设置则回退到 Request.ContentParts）。
+    /// </summary>
+    public List<ContentPartDto>? EffectiveContentParts { get; set; }
+
 }

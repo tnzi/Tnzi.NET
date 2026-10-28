@@ -2,7 +2,7 @@ import { EMPTY_DASH } from '../../utils/placeholders'
 import { h } from 'vue'
 import type { ColumnDef } from '../../headless/useColumnSettings'
 import TStatusBadge from '../../components/display/TStatusBadge.vue'
-import { moneyCell, fmtDate } from './money'
+import { moneyCell, fmtDate, tsToIsoDate } from './money'
 import { FinanceOfferStatus } from '../../services/bridges/finance-bridge'
 
 /**
@@ -64,12 +64,26 @@ export function offerStatusCell(status: FinanceOfferStatus | undefined, t: (key:
  * True while the document is still worth chasing AND its validity date has
  * passed. Lapsing is read off the date rather than stored as a status, so there
  * is only ever one answer to "has this expired".
+ *
+ * The date is a calendar day the document is good through, so it is compared
+ * as a day with the viewer's today. Comparing the instant it parses to with
+ * "now" read the last valid day as lapsed from its midnight (UTC midnight for
+ * a date-only value: the evening before, in the Americas).
  */
 export function isLapsed(row: OfferRow, dateField: 'expiryDate' | 'expectedDate'): boolean {
   const value = row[dateField]
   if (!value) return false
   if (row.status !== FinanceOfferStatus.Sent && row.status !== FinanceOfferStatus.Accepted) return false
-  return new Date(value).getTime() < Date.now()
+  const day = calendarDay(value)
+  return day !== null && day < tsToIsoDate(Date.now())
+}
+
+/** `YYYY-MM-DD` as written on the record, or the local day of a value that carries no date prefix. */
+function calendarDay(value: string): string | null {
+  const written = /^(\d{4}-\d{2}-\d{2})/.exec(value)
+  if (written) return written[1]!
+  const ts = new Date(value).getTime()
+  return Number.isNaN(ts) ? null : tsToIsoDate(ts)
 }
 
 export function buildOfferColumns(

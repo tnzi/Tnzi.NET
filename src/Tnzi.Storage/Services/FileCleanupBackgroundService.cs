@@ -4,8 +4,21 @@ namespace Tnzi.Storage.Services;
 /// 文件清理后台服务
 /// 定时执行文件清理任务
 /// </summary>
+/// <remarks>
+/// ★★ <b>这个可选的后台任务无论出什么事都不能把宿主带走。</b>.NET 的 <c>BackgroundService</c>
+/// 在 <c>ExecuteAsync</c> 故障时默认停止整个宿主（<c>BackgroundServiceExceptionBehavior.StopHost</c>），
+/// 而此前这里有两条受支持的配置会走到那一步：间隔超过约 71582 分钟，或一条首次触发在约 49.7 天之后的
+/// 合法 cron（季度、年度）。<c>Task.Delay</c> 不接受超过 Timer 上限的时长，抛出的
+/// <c>ArgumentOutOfRangeException</c> 只被当成「不是取消」放过去。所以等待一律按
+/// <see cref="MaxDelaySlice"/> 切片，并且整个调度外面有一层兜底：失败关闭的是清理任务，不是应用。
+/// </remarks>
 public class FileCleanupBackgroundService : BackgroundService
 {
+    /// <summary>
+    /// 单次 <c>Task.Delay</c> 的上限。更长的等待切成多段，每段之后按目标时刻重算剩余时长。
+    /// </summary>
+    internal static readonly TimeSpan MaxDelaySlice = TimeSpan.FromDays(1);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptionsMonitor<StorageOptions> _options;
     private readonly ILogger<FileCleanupBackgroundService> _logger;
@@ -28,6 +41,46 @@ public class FileCleanupBackgroundService : BackgroundService
             return;
         }
 
+        try
+        {
+            await RunScheduleAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 宿主正在停止
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "File cleanup background task stopped after an unexpected scheduling error. The application keeps running; scheduled cleanup resumes after a restart.");
+        }
+    }
+
+    /// <summary>
+    /// 等到 <paramref name="targetUtc"/>。按 <see cref="MaxDelaySlice"/> 切片，所以任意远的目标都不会让
+    /// <c>Task.Delay</c> 越界抛出；每段之后按目标时刻重算，系统时钟被校正时也不会多等一整段。
+    /// </summary>
+    internal static async Task DelayUntilAsync(DateTime targetUtc, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var remaining = targetUtc - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+                return;
+
+            await Task.Delay(remaining < MaxDelaySlice ? remaining : MaxDelaySlice, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// 本轮之后等多久。小于 1 分钟的配置值按 1 分钟算：0 会变成无间隔的紧循环清理，负数会让等待本身抛出。
+    /// 设置中心已经把下限钉在 1，这里兜的是直接写在配置文件里的值。
+    /// </summary>
+    internal static TimeSpan EffectiveInterval(int configuredMinutes)
+        => TimeSpan.FromMinutes(Math.Max(1, configuredMinutes));
+
+    private async Task RunScheduleAsync(CancellationToken stoppingToken)
+    {
         _logger.LogInformation("File cleanup background task started, interval: {Interval} minutes",
             _options.CurrentValue.Cleanup.IntervalMinutes);
 
@@ -77,17 +130,13 @@ public class FileCleanupBackgroundService : BackgroundService
                     break;
                 }
 
-                var wait = next.Value - DateTime.UtcNow;
-                if (wait > TimeSpan.Zero)
+                try
                 {
-                    try
-                    {
-                        await Task.Delay(wait, stoppingToken);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
+                    await DelayUntilAsync(next.Value, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
             }
 
@@ -108,9 +157,17 @@ public class FileCleanupBackgroundService : BackgroundService
             // 间隔模式：等待固定间隔后再次执行（Cron 模式由循环顶部重新计算）
             if (cron == null)
             {
+                var configuredMinutes = _options.CurrentValue.Cleanup.IntervalMinutes;
+                if (configuredMinutes < 1)
+                {
+                    _logger.LogWarning(
+                        "Storage:Cleanup:IntervalMinutes is {Configured}; cleanup runs every minute instead. Set it to 1 or more.",
+                        configuredMinutes);
+                }
+
                 try
                 {
-                    await Task.Delay(TimeSpan.FromMinutes(_options.CurrentValue.Cleanup.IntervalMinutes), stoppingToken);
+                    await DelayUntilAsync(DateTime.UtcNow + EffectiveInterval(configuredMinutes), stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {

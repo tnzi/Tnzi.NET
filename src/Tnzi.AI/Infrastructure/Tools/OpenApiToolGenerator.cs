@@ -12,26 +12,44 @@ namespace Tnzi.AI.Infrastructure.Tools;
 /// 支持 path 参数、query 参数和 request body 的提取，
 /// 以及通过 IncludeOperations / ExcludeOperations 过滤端点。
 /// </para>
+/// <para>
+/// 本类是单例，<see cref="GenerateToolsAsync"/> 按规范缓存生成结果 <see cref="SpecCacheDuration"/>：
+/// 工具清单在每次 Agent 解析时都要取，按请求拉取意味着每轮对话在第一个 token 之前先对每份规范发一次远程 GET。
+/// 配置变更时整体失效；刷新失败时沿用上一次成功的结果（记 Warning），一次短暂的规范主机故障不会让这些工具消失。
+/// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "OpenAPI tool generation is evolving")]
 public partial class OpenApiToolGenerator
 {
+    /// <summary>一份规范生成的工具缓存多久；过期后下一次解析重新拉取（远端规范可能已更新）</summary>
+    public static readonly TimeSpan SpecCacheDuration = TimeSpan.FromMinutes(5);
+
+    /// <summary>刷新失败、沿用旧结果时，隔多久再试（避免故障期间每个请求都去拉一次）</summary>
+    public static readonly TimeSpan FailedRefreshRetryDelay = TimeSpan.FromSeconds(30);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<AIOptions> _aiOptions;
     private readonly ILogger<OpenApiToolGenerator> _logger;
+    private readonly TimeProvider _timeProvider;
+    private readonly ConcurrentDictionary<string, SpecCacheEntry> _specCache = new(StringComparer.Ordinal);
 
     public OpenApiToolGenerator(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AIOptions> aiOptions,
-        ILogger<OpenApiToolGenerator> logger)
+        ILogger<OpenApiToolGenerator> logger,
+        TimeProvider? timeProvider = null)
     {
         _httpClientFactory = Check.NotNull(httpClientFactory);
         _aiOptions = Check.NotNull(aiOptions);
         _logger = Check.NotNull(logger);
+        _timeProvider = timeProvider ?? TimeProvider.System;
+
+        // 规范地址、请求头、过滤条件都在配置里：配置一变，缓存的工具就不再对应当前配置
+        _aiOptions.OnChange(_ => _specCache.Clear());
     }
 
     /// <summary>
-    /// 从所有已配置的 OpenAPI 规范生成 AITool 列表
+    /// 从所有已配置的 OpenAPI 规范生成 AITool 列表（每份规范的结果缓存 <see cref="SpecCacheDuration"/>）
     /// </summary>
     /// <param name="ct">取消令牌</param>
     /// <returns>生成的 AITool 列表；禁用时返回空列表</returns>
@@ -45,6 +63,7 @@ public partial class OpenApiToolGenerator
 
         var allTools = new List<AITool>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fetched = 0;
 
         foreach (var spec in options.Specs)
         {
@@ -56,7 +75,12 @@ public partial class OpenApiToolGenerator
 
             try
             {
-                var tools = await GenerateToolsFromSpecAsync(spec, ct);
+                var (tools, fromNetwork) = await GetSpecToolsAsync(spec, ct);
+                if (fromNetwork)
+                {
+                    fetched++;
+                }
+
                 foreach (var tool in tools)
                 {
                     if (tool.Name != null && seenNames.Add(tool.Name))
@@ -79,11 +103,45 @@ public partial class OpenApiToolGenerator
             }
         }
 
-        _logger.LogInformation("Generated {ToolCount} OpenAPI tools from {SpecCount} specs",
-            allTools.Count, options.Specs.Count);
+        if (fetched > 0)
+        {
+            _logger.LogInformation("Generated {ToolCount} OpenAPI tools from {SpecCount} specs ({FetchedCount} fetched)",
+                allTools.Count, options.Specs.Count, fetched);
+        }
 
         return allTools;
     }
+
+    /// <summary>
+    /// 取一份规范的工具：缓存未过期直接返回；过期或没有时拉取并重建。
+    /// 拉取失败而手里有上一次成功的结果时沿用它，隔 <see cref="FailedRefreshRetryDelay"/> 再试；没有时向上抛。
+    /// </summary>
+    private async Task<(IReadOnlyList<AITool> Tools, bool FromNetwork)> GetSpecToolsAsync(OpenApiSpec spec, CancellationToken ct)
+    {
+        var key = spec.Name + "\n" + spec.Url;
+        var now = _timeProvider.GetUtcNow();
+        if (_specCache.TryGetValue(key, out var cached) && cached.ExpiresAt > now)
+        {
+            return (cached.Tools, false);
+        }
+
+        try
+        {
+            var tools = await GenerateToolsFromSpecAsync(spec, ct);
+            _specCache[key] = new SpecCacheEntry(tools, now + SpecCacheDuration);
+            return (tools, true);
+        }
+        catch (Exception ex) when (cached != null && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "Failed to refresh OpenAPI spec '{SpecName}' at '{SpecUrl}'; keeping the {ToolCount} tools from the last successful fetch",
+                spec.Name, spec.Url, cached.Tools.Count);
+            _specCache[key] = cached with { ExpiresAt = now + FailedRefreshRetryDelay };
+            return (cached.Tools, false);
+        }
+    }
+
+    private sealed record SpecCacheEntry(IReadOnlyList<AITool> Tools, DateTimeOffset ExpiresAt);
 
     /// <summary>
     /// 从单个 OpenAPI 规范生成 AITool 列表
@@ -177,6 +235,11 @@ public partial class OpenApiToolGenerator
         {
             var path = pathItem.Name;
 
+            // 路径级 parameters 对该路径下所有操作生效（操作级同名同位置的覆盖它）
+            var pathLevelParameters = pathItem.Value.TryGetProperty("parameters", out var sharedParams)
+                ? sharedParams
+                : (JsonElement?)null;
+
             foreach (var operation in pathItem.Value.EnumerateObject())
             {
                 var method = operation.Name.ToUpperInvariant();
@@ -202,7 +265,7 @@ public partial class OpenApiToolGenerator
 
                 try
                 {
-                    var tool = CreateToolFromOperation(spec, baseUrl, path, method, operationElement, operationId);
+                    var tool = CreateToolFromOperation(spec, root, baseUrl, path, method, operationElement, pathLevelParameters, operationId);
                     if (tool != null)
                     {
                         tools.Add(tool);
@@ -225,10 +288,12 @@ public partial class OpenApiToolGenerator
     /// </summary>
     private AITool? CreateToolFromOperation(
         OpenApiSpec spec,
+        JsonElement root,
         string? baseUrl,
         string path,
         string method,
         JsonElement operation,
+        JsonElement? pathLevelParameters,
         string? operationId)
     {
         // 生成工具名称：优先使用 operationId，否则使用 method_path 格式
@@ -242,27 +307,22 @@ public partial class OpenApiToolGenerator
         // 构建描述
         var description = BuildDescription(operation, method, path);
 
-        // 收集参数
+        // 收集参数：操作级优先，路径级补上操作级没有声明的（同名同位置）
         var parameters = new List<OpenApiParameter>();
-
-        // 路径参数和查询参数
         if (operation.TryGetProperty("parameters", out var paramsArray))
         {
-            foreach (var param in paramsArray.EnumerateArray())
-            {
-                var paramObj = ParseParameter(param);
-                if (paramObj != null)
-                {
-                    parameters.Add(paramObj);
-                }
-            }
+            AddParameters(parameters, paramsArray, root);
+        }
+        if (pathLevelParameters.HasValue)
+        {
+            AddParameters(parameters, pathLevelParameters.Value, root);
         }
 
         // 请求体
         var hasRequestBody = operation.TryGetProperty("requestBody", out var requestBody);
         if (hasRequestBody)
         {
-            var bodyParams = ParseRequestBody(requestBody);
+            var bodyParams = ParseRequestBody(OpenApiSchemaResolver.ResolveReference(requestBody, root), root);
             parameters.AddRange(bodyParams);
         }
 
@@ -303,16 +363,88 @@ public partial class OpenApiToolGenerator
                 ct);
         }
 
-        // 使用 AIFunctionFactory.Create 创建 AIFunction
-        var aiFunction = AIFunctionFactory.Create(
-            InvokeAsync,
-            new AIFunctionFactoryOptions
-            {
-                Name = fullToolName,
-                Description = description
-            });
+        // 参数 schema 必须由解析出的参数构造：AIFunctionFactory 按委托签名生成 schema，
+        // 而 (AIFunctionArguments, CancellationToken) 两个参数都被它特殊绑定、排除在 schema 之外，
+        // 模型因此看到一个没有任何属性的对象，只会以 {} 调用
+        return new OpenApiAIFunction(fullToolName, description, BuildToolSchema(capturedParameters), InvokeAsync);
+    }
 
-        return aiFunction;
+    /// <summary>
+    /// 按解析出的参数构造工具的 JSON Schema：每个参数一个属性（同名时先出现的为准，与调用期按名取参同口径），
+    /// 路径参数与必填参数进 <c>required</c>。
+    /// </summary>
+    internal static JsonElement BuildToolSchema(IReadOnlyList<OpenApiParameter> parameters)
+    {
+        var properties = new JsonObject();
+        var required = new JsonArray();
+        foreach (var parameter in parameters)
+        {
+            if (properties.ContainsKey(parameter.Name))
+            {
+                continue;
+            }
+
+            var schema = parameter.Schema.ValueKind == JsonValueKind.Object
+                ? JsonNode.Parse(parameter.Schema.GetRawText())!.AsObject()
+                : new JsonObject { ["type"] = "string" };
+            if (!string.IsNullOrWhiteSpace(parameter.Description) && !schema.ContainsKey("description"))
+            {
+                schema["description"] = parameter.Description;
+            }
+
+            properties[parameter.Name] = schema;
+            if (IsRequired(parameter))
+            {
+                required.Add(parameter.Name);
+            }
+        }
+
+        var root = new JsonObject { ["type"] = "object", ["properties"] = properties };
+        if (required.Count > 0)
+        {
+            root["required"] = required;
+        }
+
+        return JsonSerializer.SerializeToElement(root);
+    }
+
+    /// <summary>路径参数按 OpenAPI 规范恒为必填（缺了 URL 里会留下占位符）。</summary>
+    private static bool IsRequired(OpenApiParameter parameter) => parameter.Required || parameter.In == "path";
+
+    private static void AddParameters(List<OpenApiParameter> parameters, JsonElement parameterArray, JsonElement root)
+    {
+        if (parameterArray.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var param in parameterArray.EnumerateArray())
+        {
+            var paramObj = ParseParameter(OpenApiSchemaResolver.ResolveReference(param, root), root);
+            if (paramObj != null && !parameters.Any(p => p.Name == paramObj.Name && p.In == paramObj.In))
+            {
+                parameters.Add(paramObj);
+            }
+        }
+    }
+
+    /// <summary>
+    /// OpenAPI 操作对应的工具：schema 来自解析出的参数，调用委托给 <see cref="ExecuteHttpCallAsync"/>。
+    /// </summary>
+    private sealed class OpenApiAIFunction(
+        string name,
+        string description,
+        JsonElement jsonSchema,
+        Func<AIFunctionArguments, CancellationToken, Task<object?>> invoke) : AIFunction
+    {
+        public override string Name => name;
+
+        public override string Description => description;
+
+        public override JsonElement JsonSchema => jsonSchema;
+
+        protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+            => await invoke(arguments, cancellationToken);
     }
 
     /// <summary>
@@ -330,6 +462,21 @@ public partial class OpenApiToolGenerator
         ILogger logger,
         CancellationToken ct)
     {
+        // 缺必填参数时不发请求：带着 {占位符} 的 URL 或缺字段的请求体只会换来一个让模型更难理解的远端错误
+        var missing = parameters
+            .Where(p => IsRequired(p) && (!args.TryGetValue(p.Name, out var v) || v == null))
+            .Select(p => p.Name)
+            .Distinct()
+            .ToList();
+        if (missing.Count > 0)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                error = true,
+                message = $"Missing required parameter(s): {string.Join(", ", missing)}. Call the tool again with these arguments."
+            });
+        }
+
         try
         {
             // 构建 URL：替换路径参数、添加查询参数
@@ -374,19 +521,31 @@ public partial class OpenApiToolGenerator
             // 设置请求体（仅对含 body 参数的操作）
             if (hasBody)
             {
-                var bodyArgs = new Dictionary<string, object?>();
-                foreach (var param in parameters.Where(p => p.In == "body"))
+                // 非对象 schema（数组、标量、组合）整体作为一个参数：它的值就是请求体本身，不再包一层 {"body": ...}
+                var wholeBody = parameters.FirstOrDefault(p => p.In == "body" && p.IsWholeBody);
+                if (wholeBody != null)
                 {
-                    if (args.TryGetValue(param.Name, out var value))
+                    if (args.TryGetValue(wholeBody.Name, out var bodyValue) && bodyValue != null)
                     {
-                        bodyArgs[param.Name] = value;
+                        request.Content = new StringContent(JsonSerializer.Serialize(bodyValue), Encoding.UTF8, "application/json");
                     }
                 }
-
-                if (bodyArgs.Count > 0)
+                else
                 {
-                    var bodyJson = JsonSerializer.Serialize(bodyArgs);
-                    request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+                    var bodyArgs = new Dictionary<string, object?>();
+                    foreach (var param in parameters.Where(p => p.In == "body"))
+                    {
+                        if (args.TryGetValue(param.Name, out var value))
+                        {
+                            bodyArgs[param.Name] = value;
+                        }
+                    }
+
+                    if (bodyArgs.Count > 0)
+                    {
+                        var bodyJson = JsonSerializer.Serialize(bodyArgs);
+                        request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+                    }
                 }
             }
 
@@ -436,9 +595,9 @@ public partial class OpenApiToolGenerator
     }
 
     /// <summary>
-    /// 解析单个参数
+    /// 解析单个参数（参数本身的 <c>$ref</c> 已由调用方解开；schema 内的 <c>$ref</c> 在这里内联）
     /// </summary>
-    private static OpenApiParameter? ParseParameter(JsonElement param)
+    private static OpenApiParameter? ParseParameter(JsonElement param, JsonElement root)
     {
         var name = param.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
         var location = param.TryGetProperty("in", out var inEl) ? inEl.GetString() : null;
@@ -459,7 +618,7 @@ public partial class OpenApiToolGenerator
 
         // 获取 schema
         var schema = param.TryGetProperty("schema", out var schemaEl)
-            ? schemaEl
+            ? OpenApiSchemaResolver.Inline(schemaEl, root)
             : CreateDefaultStringSchema();
 
         return new OpenApiParameter
@@ -475,7 +634,7 @@ public partial class OpenApiToolGenerator
     /// <summary>
     /// 解析请求体为参数列表
     /// </summary>
-    private static List<OpenApiParameter> ParseRequestBody(JsonElement requestBody)
+    private static List<OpenApiParameter> ParseRequestBody(JsonElement requestBody, JsonElement root)
     {
         var parameters = new List<OpenApiParameter>();
 
@@ -485,12 +644,15 @@ public partial class OpenApiToolGenerator
         }
 
         // 优先处理 application/json
-        JsonElement schemaElement;
         if (content.TryGetProperty("application/json", out var jsonContent)
-            && jsonContent.TryGetProperty("schema", out schemaElement))
+            && jsonContent.TryGetProperty("schema", out var rawSchema))
         {
+            // 先内联 $ref：最常见的写法就是 "schema": { "$ref": "#/components/schemas/X" }，
+            // 不解开就看不到 properties，整个请求体会被当成一个不透明参数
+            var schemaElement = OpenApiSchemaResolver.Inline(rawSchema, root);
+
             // 如果 schema 是 object 类型且有 properties，提取每个属性作为参数
-            if (schemaElement.TryGetProperty("properties", out var properties))
+            if (schemaElement.ValueKind == JsonValueKind.Object && schemaElement.TryGetProperty("properties", out var properties))
             {
                 var requiredSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (schemaElement.TryGetProperty("required", out var requiredArray))
@@ -523,14 +685,15 @@ public partial class OpenApiToolGenerator
             }
             else
             {
-                // 非 object schema，作为单一 body 参数
+                // 非 object schema，作为单一 body 参数：调用时它的值就是整个请求体
                 parameters.Add(new OpenApiParameter
                 {
                     Name = "body",
                     In = "body",
-                    Required = requestBody.TryGetProperty("required", out var reqEl) && reqEl.GetBoolean(),
+                    Required = requestBody.TryGetProperty("required", out var reqEl) && reqEl.ValueKind == JsonValueKind.True,
                     Description = "Request body",
-                    Schema = schemaElement
+                    Schema = schemaElement,
+                    IsWholeBody = true
                 });
             }
         }
@@ -676,4 +839,10 @@ public class OpenApiParameter
     /// 参数 JSON Schema
     /// </summary>
     public JsonElement Schema { get; set; }
+
+    /// <summary>
+    /// 是否代表整个请求体（请求体 schema 不是带 properties 的对象时）：调用时它的值原样作为请求体发送，
+    /// 而不是作为请求体对象的一个字段
+    /// </summary>
+    public bool IsWholeBody { get; set; }
 }

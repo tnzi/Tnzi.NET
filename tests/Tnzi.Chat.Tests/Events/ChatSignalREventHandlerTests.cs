@@ -28,6 +28,24 @@ public class ChatSignalREventHandlerTests
     }
 
     [Fact]
+    public async Task MessageRecalled_Should_Push_To_Recipients()
+    {
+        var push = new Mock<IMessagePushService>();
+        var handler = new ChatSignalREventHandler(NullLogger<ChatSignalREventHandler>.Instance, push.Object);
+        var recipients = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() };
+
+        await handler.HandleAsync(new ConversationMessageRecalledEvent
+        {
+            ConversationId = Guid.NewGuid(),
+            MessageId = Guid.NewGuid(),
+            Preview = "[Message recalled]",
+            RecipientUserIds = recipients
+        });
+
+        push.Verify(p => p.PushToUsersAsync(recipients, "Chat.MessageRecalled", It.IsAny<object[]>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Handler_Should_Swallow_Push_Exceptions()
     {
         var push = new Mock<IMessagePushService>();

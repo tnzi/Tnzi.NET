@@ -53,6 +53,10 @@ public class DefaultLocalizationController : ApiControllerBase
     ///
     /// 答案本身同样重要：对任意串都回 200 + 空集的话，调用方分不清
     /// "这个语言没有翻译"和"根本没有这个语言"。
+    ///
+    /// ★ 受支持的语言没有任何资源时答 200 + 空集，不抛。Resx 模式（默认）只在资源类型自己的程序集里找清单，
+    /// 框架的 <see cref="SharedResource"/> 所在程序集没有任何 .resx，<c>GetAllStrings</c> 因此抛
+    /// <see cref="MissingManifestResourceException"/>，此前这个匿名端点因此对每个受支持语言都是 500。
     /// </summary>
     /// <param name="culture">文化名称（如 "en", "zh-CN"）</param>
     [HttpGet("resources/{culture}")]
@@ -72,12 +76,19 @@ public class DefaultLocalizationController : ApiControllerBase
         try
         {
             CultureInfo.CurrentUICulture = supported;
-            var allStrings = localizer.GetAllStrings(includeParentCultures: true);
 
             var resources = new Dictionary<string, string>();
-            foreach (var str in allStrings)
+            try
             {
-                resources[str.Name] = str.Value;
+                foreach (var str in localizer.GetAllStrings(includeParentCultures: true))
+                {
+                    resources[str.Name] = str.Value;
+                }
+            }
+            catch (MissingManifestResourceException)
+            {
+                // 这个语言（连同父链与中性资源）一条资源都没有：答空集。
+                resources.Clear();
             }
 
             return Ok(new ResourceDto

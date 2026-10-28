@@ -26,7 +26,8 @@ public class SigningPermissions : IPermissionDefinitionProvider
 {
     public void Define(IPermissionDefinitionContext context)
     {
-        context.AddGroup("signing", "E-Signature");
+        // 应用范围：签署件是使用方机构与它的客户之间的文书（见 PermissionScope）。
+        context.AddGroup("signing", "E-Signature").Scope = PermissionScope.Application;
         context.AddPermission("signing.view", "View E-Signature", parentName: "signing");
         context.AddCrudPermissions("signing.template", "Signing Templates", parentName: "signing");
         // 发起 = .create；发出/作废这类生命周期推进 = .update。

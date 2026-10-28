@@ -158,8 +158,14 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }
         }
 
-        // 计算层级信息
-        var (parentPath, level) = await CalculatePathAndLevelAsync(input.ParentId);
+        // 计算层级信息；给了父组织却找不到（不存在、已删除、别家租户）一律 404，
+        // 而不是悄悄挂成根节点、ParentId 却留着那个找不到的 id。
+        var parentLocation = await CalculatePathAndLevelAsync(input.ParentId);
+        if (parentLocation == null)
+        {
+            return Fail<OrganizationDto>("Parent organization not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+        var (parentPath, level) = parentLocation.Value;
 
         var organization = input.MapTo<Organization>();
         organization.IsEnabled = true;
@@ -233,11 +239,7 @@ public class OrganizationService : ApplicationService, IOrganizationService
         }
 
         // 记录变更前的值用于事件字段对比
-        var originalName = organization.Name;
-        var originalCode = organization.Code;
-        var originalRemark = organization.Remark;
-        var originalSortOrder = organization.SortOrder;
-        var originalIsEnabled = organization.IsEnabled;
+        var before = OrganizationFields.Of(organization);
 
         input.MapTo(organization);
 
@@ -265,18 +267,11 @@ public class OrganizationService : ApplicationService, IOrganizationService
         // 发布组织更新事件
         if (_eventBus != null)
         {
-            var updatedFields = new List<string>();
-            if (!string.Equals(input.Name, originalName, StringComparison.Ordinal)) updatedFields.Add(nameof(Organization.Name));
-            if (!string.Equals(input.Code, originalCode, StringComparison.OrdinalIgnoreCase)) updatedFields.Add(nameof(Organization.Code));
-            if (!string.Equals(input.Remark, originalRemark, StringComparison.Ordinal)) updatedFields.Add(nameof(Organization.Remark));
-            if (input.SortOrder != originalSortOrder) updatedFields.Add(nameof(Organization.SortOrder));
-            if (input.IsEnabled != originalIsEnabled) updatedFields.Add(nameof(Organization.IsEnabled));
-
             await _eventBus.PublishAsync(new OrganizationUpdatedEvent
             {
                 OrganizationId = organization.Id,
                 OrganizationName = organization.Name,
-                UpdatedFields = updatedFields,
+                UpdatedFields = before.DescribeChanges(input),
                 LastModifierId = _currentUser?.Id
             }, cancellationToken: default);
         }
@@ -305,7 +300,18 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("Cannot delete organization with children.", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        await _organizationRepository.DeleteAsync(id);
+        if (_dbContext == null)
+        {
+            return Fail(MembersCannotBeDetached, 500, ErrorCodes.INTERNAL_SERVER_ERROR);
+        }
+
+        // 成员与组织在同一个工作单元里摘下、删除（理由见 DetachMembersAsync）。
+        var detached = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            var members = await DetachMembersAsync(_dbContext, [id]);
+            await _organizationRepository.DeleteAsync(id);
+            return members;
+        });
 
         // 清除缓存
         await ClearOrganizationCacheAsync(id);
@@ -321,7 +327,9 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }, cancellationToken: default);
         }
 
-        LogInformation("Organization deleted: {Name} (ID: {Id})", organization.Name, organization.Id);
+        await PublishMembersDetachedAsync(detached, [organization]);
+
+        LogInformation("Organization deleted: {Name} (ID: {Id}); {Count} member(s) detached", organization.Name, organization.Id, detached.Count);
         return Ok();
     }
 
@@ -336,9 +344,17 @@ public class OrganizationService : ApplicationService, IOrganizationService
             return Fail("Organization not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // 检查是否移动到自己的子组织下（防止循环引用）
+        // 检查是否移动到自己或自己的子组织下（防止循环引用）。
+        // ★ 自己要单独判：后代集合按定义不含自己，此前 newParentId == id 一路放行，
+        //   组织成了自己的父节点，连同整棵子树从组织树里消失（ToTree 只把它当子节点挂，永远挂不上），
+        //   界面上再也选不到它们来挪回去，启动修复任务也不碰成环的链。
         if (newParentId.HasValue)
         {
+            if (newParentId.Value == id)
+            {
+                return Fail("An organization cannot be its own parent.", 400, ErrorCodes.VALIDATION_ERROR);
+            }
+
             var allChildren = await GetAllChildrenIdsAsync(id);
             if (allChildren.Contains(newParentId.Value))
             {
@@ -346,8 +362,13 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }
         }
 
-        // 计算新的层级信息
-        var (parentPath, level) = await CalculatePathAndLevelAsync(newParentId);
+        // 计算新的层级信息；目标父组织找不到时拒绝，不把它悄悄挪成根节点、ParentId 却指着一个不存在的 id。
+        var parentLocation = await CalculatePathAndLevelAsync(newParentId);
+        if (parentLocation == null)
+        {
+            return Fail("Parent organization not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+        var (parentPath, level) = parentLocation.Value;
         var oldPath = organization.Path;
         if (string.IsNullOrEmpty(oldPath))
         {
@@ -445,9 +466,9 @@ public class OrganizationService : ApplicationService, IOrganizationService
     }
 
     /// <summary>
-    /// 计算父组织的路径和层级
+    /// 计算父组织的路径和层级；给了父组织 id 却找不到（不存在、已删除、别家租户）时返回 <c>null</c>。
     /// </summary>
-    private async Task<(string parentPath, int level)> CalculatePathAndLevelAsync(Guid? parentId)
+    private async Task<(string parentPath, int level)?> CalculatePathAndLevelAsync(Guid? parentId)
     {
         if (!parentId.HasValue)
         {
@@ -457,10 +478,75 @@ public class OrganizationService : ApplicationService, IOrganizationService
         var parent = await _organizationRepository.GetAsync(parentId.Value);
         if (parent == null)
         {
-            return ("/", 0);
+            return null;
         }
 
         return (parent.Path ?? $"/{parentId.Value}/", parent.Level);
+    }
+
+    /// <summary>删除组织时摘不下成员（没有 DbContext）的回答。</summary>
+    private const string MembersCannotBeDetached =
+        "Database context is not available, so the organization's members cannot be detached; the organization was not deleted.";
+
+    /// <summary>一个被摘下的成员，连同他原来所在的组织。</summary>
+    private sealed record DetachedMember(User User, Guid OrganizationId);
+
+    /// <summary>
+    /// 把挂在这些组织上的账号摘下来（<c>OrganizationId</c> 置空），返回被摘下的人。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 组织是软删的：<c>User.OrganizationId</c> 上声明的 <c>SetNull</c> 只在真删一行时由数据库执行，
+    /// 软删从不触发它。此前删掉组织之后，成员仍指着那个已删除的组织：组织列显示为空、按组织筛选照样命中、
+    /// 统计照样计数，而从用户列表编辑这些人会把原组织 id 原样带回去，被「组织不存在」拒绝，
+    /// 改不了任何资料，直到有人单独调用一次移出组织。这里在服务层兑现那条 SetNull。
+    /// 绕开查询过滤器（软删的账号同样摘下）与外键行为一致；成员按组织 id 唯一确定，不会碰到别家租户。
+    /// 换新 <c>ConcurrencyStamp</c> 与 <c>UserManager</c> 的写入同一惯例：拿着旧快照的并发写入会失败，而不是把人挂回去。
+    /// </remarks>
+    private static async Task<List<DetachedMember>> DetachMembersAsync(DbContext dbContext, IReadOnlyCollection<Guid> organizationIds)
+    {
+        var members = await dbContext.Set<User>()
+            .IgnoreQueryFilters()
+            .Where(u => u.OrganizationId.HasValue && organizationIds.Contains(u.OrganizationId.Value))
+            .ToListAsync();
+        if (members.Count == 0)
+        {
+            return [];
+        }
+
+        var detached = members.Select(u => new DetachedMember(u, u.OrganizationId!.Value)).ToList();
+        foreach (var member in members)
+        {
+            member.OrganizationId = null;
+            member.ConcurrencyStamp = Guid.NewGuid().ToString();
+        }
+
+        await dbContext.SaveChangesAsync();
+        return detached;
+    }
+
+    /// <summary>
+    /// 被摘下的每个成员各发一条 <see cref="UserRemovedFromOrganizationEvent"/>：订阅它维护成员关系的消费方，
+    /// 不该因为「组织被删」而不是「人被移出」就漏掉这些人。
+    /// </summary>
+    private async Task PublishMembersDetachedAsync(IReadOnlyCollection<DetachedMember> members, IReadOnlyCollection<Organization> organizations)
+    {
+        if (_eventBus == null || members.Count == 0)
+        {
+            return;
+        }
+
+        var names = organizations.ToDictionary(o => o.Id, o => o.Name);
+        foreach (var member in members)
+        {
+            await _eventBus.PublishAsync(new UserRemovedFromOrganizationEvent
+            {
+                UserId = member.User.Id,
+                UserName = member.User.UserName ?? string.Empty,
+                OrganizationId = member.OrganizationId,
+                OrganizationName = names.GetValueOrDefault(member.OrganizationId, string.Empty),
+                RemovedBy = _currentUser?.Id
+            }, cancellationToken: default);
+        }
     }
 
     /// <summary>
@@ -536,8 +622,16 @@ public class OrganizationService : ApplicationService, IOrganizationService
             string parentPath = "/";
             int level = 0;
 
-            if (input.ParentId.HasValue && parentsMap.TryGetValue(input.ParentId.Value, out var parent))
+            if (input.ParentId.HasValue)
             {
+                // 与 CreateAsync 同一口径：找不到的父组织整批拒绝，不悄悄挂成根节点。
+                // 批量里的条目没有预定的 id，不可能互相引用，所以父组织必须是已有的组织。
+                if (!parentsMap.TryGetValue(input.ParentId.Value, out var parent))
+                {
+                    return Fail<IEnumerable<OrganizationDto>>(
+                        $"Parent organization {input.ParentId.Value} not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+                }
+
                 parentPath = parent.Path ?? $"/{parent.Id}/";
                 level = parent.Level;
             }
@@ -624,7 +718,9 @@ public class OrganizationService : ApplicationService, IOrganizationService
                 .ToDictionary(g => g.Key, g => g.Select(o => o.Id).ToList())
             : new Dictionary<string, List<Guid>>();
 
-        // 批量更新
+        // 批量更新。★ 变更前的值要在映射之前记下：映射改的就是这个被跟踪的实体，
+        // 映射之后再拿 DTO 去比它，每一项都相等，事件里的字段列表恒为空。
+        var before = new Dictionary<Guid, OrganizationFields>();
         foreach (var (id, dto) in inputList)
         {
             if (!orgDict.TryGetValue(id, out var organization))
@@ -641,6 +737,8 @@ public class OrganizationService : ApplicationService, IOrganizationService
                 }
             }
 
+            // 同一个 id 在一批里出现两次时，第二次看到的已是映射过的实体；快照只取第一次的。
+            before.TryAdd(id, OrganizationFields.Of(organization));
             dto.MapTo(organization);
             organizations.Add(organization);
         }
@@ -682,18 +780,12 @@ public class OrganizationService : ApplicationService, IOrganizationService
             foreach (var (id, dto) in inputList)
             {
                 var organization = orgDict[id];
-                var updatedFields = new List<string>();
-                if (dto.Name != organization.Name) updatedFields.Add(nameof(Organization.Name));
-                if (dto.Code != organization.Code) updatedFields.Add(nameof(Organization.Code));
-                if (dto.Remark != organization.Remark) updatedFields.Add(nameof(Organization.Remark));
-                if (dto.SortOrder != organization.SortOrder) updatedFields.Add(nameof(Organization.SortOrder));
-                if (dto.IsEnabled != organization.IsEnabled) updatedFields.Add(nameof(Organization.IsEnabled));
 
                 await _eventBus.PublishAsync(new OrganizationUpdatedEvent
                 {
                     OrganizationId = organization.Id,
                     OrganizationName = organization.Name,
-                    UpdatedFields = updatedFields,
+                    UpdatedFields = before[id].DescribeChanges(dto),
                     LastModifierId = _currentUser?.Id
                 }, cancellationToken: default);
             }
@@ -725,7 +817,19 @@ public class OrganizationService : ApplicationService, IOrganizationService
             .Where(o => idList.Contains(o.Id))
             .ToListAsync();
 
-        await _organizationRepository.DeleteManyAsync(organizations);
+        if (_dbContext == null)
+        {
+            return Fail(MembersCannotBeDetached, 500, ErrorCodes.INTERNAL_SERVER_ERROR);
+        }
+
+        // 与单个删除同一口径：成员先摘下，再删组织，同一个工作单元。
+        var organizationIds = organizations.Select(o => o.Id).ToList();
+        var detached = await ExecuteInUnitOfWorkAsync(async _ =>
+        {
+            var members = await DetachMembersAsync(_dbContext, organizationIds);
+            await _organizationRepository.DeleteManyAsync(organizations);
+            return members;
+        });
 
         // 清除缓存
         foreach (var organization in organizations)
@@ -747,7 +851,9 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }
         }
 
-        LogInformation("Deleted {Count} organizations", organizations.Count);
+        await PublishMembersDetachedAsync(detached, organizations);
+
+        LogInformation("Deleted {Count} organizations; {MemberCount} member(s) detached", organizations.Count, detached.Count);
         return Ok();
     }
 
@@ -917,12 +1023,6 @@ public class OrganizationService : ApplicationService, IOrganizationService
             }, cancellationToken: default);
         }
 
-        // 清除用户缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
-        }
-
         LogInformation("User {UserName} assigned to organization {OrgName} (ID: {OrgId})", user.UserName ?? string.Empty, organization!.Name ?? string.Empty, organizationId);
         return Ok();
     }
@@ -970,12 +1070,6 @@ public class OrganizationService : ApplicationService, IOrganizationService
                 OrganizationName = organizationName,
                 RemovedBy = _currentUser?.Id
             }, cancellationToken: default);
-        }
-
-        // 清除用户缓存
-        if (_cache != null)
-        {
-            await _cache.RemoveAsync(CacheKeys.Identity.User(user.Id));
         }
 
         LogInformation("User {UserName} removed from organization (ID: {OrgId})", user.UserName ?? string.Empty, oldOrganizationId?.ToString() ?? string.Empty);
@@ -1174,6 +1268,28 @@ public class OrganizationService : ApplicationService, IOrganizationService
             {
                 row.OrganizationName = name;
             }
+        }
+    }
+
+    /// <summary>
+    /// 更新前的可编辑字段快照，以及「这次更新改了哪几项」的判定（<see cref="OrganizationUpdatedEvent.UpdatedFields"/>）。
+    /// 单条与批量更新共用这一份，免得两边各写一遍再各自走样。
+    /// </summary>
+    private readonly record struct OrganizationFields(string Name, string? Code, string? Remark, int SortOrder, bool IsEnabled)
+    {
+        public static OrganizationFields Of(Organization organization)
+            => new(organization.Name, organization.Code, organization.Remark, organization.SortOrder, organization.IsEnabled);
+
+        /// <summary>代码按大小写不敏感比较，与唯一性判定同一口径；其余逐字比较。</summary>
+        public List<string> DescribeChanges(UpdateOrganizationDto input)
+        {
+            var updatedFields = new List<string>();
+            if (!string.Equals(input.Name, Name, StringComparison.Ordinal)) updatedFields.Add(nameof(Organization.Name));
+            if (!string.Equals(input.Code, Code, StringComparison.OrdinalIgnoreCase)) updatedFields.Add(nameof(Organization.Code));
+            if (!string.Equals(input.Remark, Remark, StringComparison.Ordinal)) updatedFields.Add(nameof(Organization.Remark));
+            if (input.SortOrder != SortOrder) updatedFields.Add(nameof(Organization.SortOrder));
+            if (input.IsEnabled != IsEnabled) updatedFields.Add(nameof(Organization.IsEnabled));
+            return updatedFields;
         }
     }
 }

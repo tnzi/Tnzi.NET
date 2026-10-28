@@ -10,6 +10,7 @@ public class TaxService : ApplicationService, ITaxService
     private readonly IRepository<TaxCode, Guid> _codeRepository;
     private readonly IRepository<TaxCodeComponent, Guid> _componentRepository;
     private readonly IReadOnlyRepository<JournalLine, Guid> _lineRepository;
+    private readonly IEnumerable<IMasterDataUsageProvider> _usageProviders;
 
     public TaxService(
         IServiceProvider serviceProvider,
@@ -17,7 +18,8 @@ public class TaxService : ApplicationService, ITaxService
         IRepository<TaxRate, Guid> rateRepository,
         IRepository<TaxCode, Guid> codeRepository,
         IRepository<TaxCodeComponent, Guid> componentRepository,
-        IReadOnlyRepository<JournalLine, Guid> lineRepository)
+        IReadOnlyRepository<JournalLine, Guid> lineRepository,
+        IEnumerable<IMasterDataUsageProvider>? usageProviders = null)
         : base(serviceProvider)
     {
         _agencyRepository = Check.NotNull(agencyRepository);
@@ -25,6 +27,7 @@ public class TaxService : ApplicationService, ITaxService
         _codeRepository = Check.NotNull(codeRepository);
         _componentRepository = Check.NotNull(componentRepository);
         _lineRepository = Check.NotNull(lineRepository);
+        _usageProviders = usageProviders ?? Enumerable.Empty<IMasterDataUsageProvider>();
     }
 
     // ── 税务机构 ──────────────────────────────────────────────
@@ -60,6 +63,7 @@ public class TaxService : ApplicationService, ITaxService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _agencyRepository.Discard(agency); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<TaxAgencyDto>($"Tax agency '{agency.Name}' already exists.", 409);
         }
 
@@ -254,6 +258,7 @@ public class TaxService : ApplicationService, ITaxService
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
+            _codeRepository.Discard(code); // 失败的插入摘出跟踪器，免得被本作用域之后的 SaveChanges 重放
             return Fail<TaxCodeDto>($"Tax code '{code.Name}' already exists.", 409);
         }
 
@@ -280,10 +285,8 @@ public class TaxService : ApplicationService, ITaxService
         code.IsRecoverable = input.IsRecoverable;
 
         // 组件全量替换（硬删重建，与草稿行范式一致）
-        if (code.Components.Count > 0)
-            await _componentRepository.DeleteManyAsync(code.Components.ToList(), cancellationToken);
+        var oldComponents = code.Components.ToList();
         code.Components.Clear();
-
         foreach (var component in input.Components)
         {
             code.Components.Add(new TaxCodeComponent
@@ -295,10 +298,17 @@ public class TaxService : ApplicationService, ITaxService
             });
         }
 
+        // 删旧组件与改字段、插新组件同一个工作单元：在事务外，删除会立即落库并连带 flush 已跟踪的改名，
+        // 重名的唯一索引冲突就从下面的 catch 之外抛出（500 而不是 409）；而删除成功、插入失败时
+        // 会留下一个零组件、计税恒为 0 的税码。
         try
         {
-            await _codeRepository.UpdateAsync(code, cancellationToken);
-            await _codeRepository.SaveChangesAsync(cancellationToken);
+            await ExecuteInUnitOfWorkAsync(async ct =>
+            {
+                if (oldComponents.Count > 0)
+                    await _componentRepository.DeleteManyAsync(oldComponents, ct);
+                await _codeRepository.UpdateAsync(code, ct);
+            }, cancellationToken);
         }
         catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
         {
@@ -316,13 +326,52 @@ public class TaxService : ApplicationService, ITaxService
         if (code == null)
             return Fail("Tax code not found.", 404);
 
-        // P2b：被单据行引用时拒绝删除
-        // 组件无软删除，随税码一并物理删除——否则残留组件会永久阻塞税率删除
-        if (code.Components.Count > 0)
-            await _componentRepository.DeleteManyAsync(code.Components.ToList(), cancellationToken);
+        // 被引用时拒绝删除，指路停用（对齐 Customer/Vendor/Item 守卫）。税码软删后被全局过滤器隐藏，
+        // 而计税器经过滤后的仓储加载它：引用它的草稿从此保存与过账都答 404、周期性模板每期生成失败、
+        // 界面再也显示不出它的名字，且软删在界面上不可恢复。停用同样会让草稿报 inactive，但那是可逆的。
+        var usage = await FindCodeUsageAsync(id, cancellationToken);
+        if (usage != null)
+            return Fail(usage, 409);
 
-        await _codeRepository.DeleteAsync(code, cancellationToken);
+        // 组件无软删除，随税码一并物理删除，否则残留组件会永久阻塞税率删除。
+        // 同一工作单元：组件删了而税码没删，会留下一个零组件、计税为 0 的税码。
+        await ExecuteInUnitOfWorkAsync(async ct =>
+        {
+            if (code.Components.Count > 0)
+                await _componentRepository.DeleteManyAsync(code.Components.ToList(), ct);
+
+            await _codeRepository.DeleteAsync(code, ct);
+        }, cancellationToken);
         return Ok();
+    }
+
+    /// <summary>
+    /// 税码还被谁在用：先查会计内核自己的单据行与默认税码，再问 <see cref="IMasterDataUsageProvider"/>
+    /// （周期性模板行、报价单 / 采购订单行住在子模块里）。返回给操作员的说明；无人在用返回 null。
+    /// </summary>
+    /// <remarks>
+    /// 只用存在性查询；引用仓储在删除冷路径按需解析（同 <c>ItemService.DeleteAsync</c>，
+    /// 免得把单据行与往来方仓储强加给只用税模型的服务图）。
+    /// </remarks>
+    private async Task<string?> FindCodeUsageAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var onLines =
+            await GetRequiredService<IReadOnlyRepository<InvoiceLine, Guid>>().AnyAsync(l => l.TaxCodeId == id, cancellationToken) ||
+            await GetRequiredService<IReadOnlyRepository<BillLine, Guid>>().AnyAsync(l => l.TaxCodeId == id, cancellationToken) ||
+            await GetRequiredService<IReadOnlyRepository<CreditMemoLine, Guid>>().AnyAsync(l => l.TaxCodeId == id, cancellationToken) ||
+            await GetRequiredService<IReadOnlyRepository<ExpenseLine, Guid>>().AnyAsync(l => l.TaxCodeId == id, cancellationToken);
+        if (onLines)
+            return "Cannot delete a tax code referenced by invoice, bill, credit-memo, or expense lines. Deactivate it instead.";
+
+        var asDefault =
+            await GetRequiredService<IReadOnlyRepository<Customer, Guid>>().AnyAsync(c => c.DefaultTaxCodeId == id, cancellationToken) ||
+            await GetRequiredService<IReadOnlyRepository<Vendor, Guid>>().AnyAsync(v => v.DefaultTaxCodeId == id, cancellationToken) ||
+            await GetRequiredService<IReadOnlyRepository<Item, Guid>>().AnyAsync(i => i.DefaultTaxCodeId == id, cancellationToken);
+        if (asDefault)
+            return "Cannot delete a tax code that a customer, vendor, or item uses as its default. Change those defaults or deactivate the tax code instead.";
+
+        var usage = await MasterDataUsageAsker.AskAsync(_usageProviders, FinanceMasterDataKind.TaxCode, id, cancellationToken);
+        return usage?.Detail;
     }
 
     private async Task<Result> ValidateCodeAsync(UpsertTaxCodeDto input, CancellationToken cancellationToken)
@@ -364,6 +413,7 @@ public class TaxService : ApplicationService, ITaxService
         Name = code.Name,
         Description = code.Description,
         IsActive = code.IsActive,
+        IsRecoverable = code.IsRecoverable,
         Components = code.Components
             .OrderBy(c => c.Order)
             .Select(c => new TaxCodeComponentDto

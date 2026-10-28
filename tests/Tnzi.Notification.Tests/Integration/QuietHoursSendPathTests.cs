@@ -30,6 +30,7 @@ public class QuietHoursSendPathTests : IntegrationTestBase
     private static readonly Guid Alice = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     private readonly Mock<IEmailSender> _emailSender = new();
+    private readonly AdjustableClock _clock = new();
     private readonly DispatchOptions _dispatch = new()
     {
         EnableRecovery = true,
@@ -44,6 +45,7 @@ public class QuietHoursSendPathTests : IntegrationTestBase
         AddRepo<Recipient>(services);
         AddRepo<OptOut>(services);
         AddRepo<Preference>(services);
+        services.AddSingleton<TimeProvider>(_clock);
 
         var entityManagerMock = new Mock<IEntityManager>();
         entityManagerMock.Setup(m => m.GetAllDbContextTypes()).Returns(new[] { typeof(NotificationTestDbContext) });
@@ -197,6 +199,77 @@ public class QuietHoursSendPathTests : IntegrationTestBase
         recipient.DeferredUntil!.Value.ShouldBeGreaterThan(DateTime.UtcNow);
     }
 
+    // ── 定时消息 + 延后 ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ★★★ 一条<b>定时</b>消息在发送时有人被延后，到期扫描不能把它重新认领、发「没人可发」、然后记成 Sent。
+    /// </summary>
+    /// <remarks>
+    /// 定时消息的 <c>ScheduledTime</c> 一直留在行上，延后又把消息退回 <c>Scheduled</c>：于是一个宽限期之后
+    /// 「到期却没人发的定时消息」那一遍认得出它。此前它会被认领，发送路径找不到到期的收件人，写下
+    /// <c>Sent</c> + <c>SentTime</c>；而延后那一遍只看 <c>Scheduled</c> 的消息，到点再也看不见它：
+    /// 被延后的人永远收不到，消息显示已发送。
+    /// </remarks>
+    [Fact]
+    public async Task AScheduledMessageWaitingOnADeferral_IsNotReclaimedAndMarkedSent()
+    {
+        await SetQuietHoursAsync(AroundNow());
+        var messageId = await SeedDeferredMessageAsync(
+            Alice, deferredUntil: DateTime.UtcNow.AddHours(2), scheduledTime: DateTime.UtcNow.AddMinutes(-60));
+
+        await RecoverOnceAsync();
+
+        VerifySent(Times.Never());
+        var message = await ReloadMessageAsync(messageId);
+        message.Status.ShouldBe(NotificationStatus.Scheduled);
+        message.SentTime.ShouldBeNull();
+        message.RetryCount.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// ★★ 同一条消息，延后到点之后照样被延后那一遍发出去：上一条的另一半。
+    /// </summary>
+    [Fact]
+    public async Task AScheduledMessageWaitingOnADeferral_IsDeliveredWhenTheDeferralEnds()
+    {
+        await SetQuietHoursAsync(AroundNow());
+        var messageId = await SeedDeferredMessageAsync(
+            Alice, deferredUntil: DateTime.UtcNow.AddHours(2), scheduledTime: DateTime.UtcNow.AddMinutes(-60));
+        await RecoverOnceAsync();
+
+        // 免打扰结束、延后时刻到了。
+        await SetQuietHoursAsync(InThePast());
+        await DbContext.Set<Recipient>().Where(r => r.MessageId == messageId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.DeferredUntil, DateTime.UtcNow.AddMinutes(-1)));
+        DbContext.ChangeTracker.Clear();
+
+        await RecoverOnceAsync();
+
+        VerifySent(Times.Once());
+        (await ReloadRecipientAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
+        (await ReloadMessageAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
+    }
+
+    /// <summary>
+    /// ★★ 发送路径自己的那一半：被发送时没有到期的收件人、但还有人排在延后里，消息留在 <c>Scheduled</c>，
+    /// 不盖 <c>SentTime</c>。管理端对它点「发送」就是这条路径。
+    /// </summary>
+    [Fact]
+    public async Task SendingAMessageWhoseOnlyRecipientsAreStillDeferred_KeepsItScheduled()
+    {
+        await SetQuietHoursAsync(AroundNow());
+        var messageId = await SeedDeferredMessageAsync(
+            Alice, deferredUntil: DateTime.UtcNow.AddHours(2), scheduledTime: DateTime.UtcNow.AddMinutes(-60));
+
+        var result = await SendAsync(messageId);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        VerifySent(Times.Never());
+        var message = await ReloadMessageAsync(messageId);
+        message.Status.ShouldBe(NotificationStatus.Scheduled);
+        message.SentTime.ShouldBeNull();
+    }
+
     // ── 谁不受影响（对照）───────────────────────────────────────────────────
 
     /// <summary>★ 事务性消息穿透免打扰：凌晨的密码重置码必须现在就到。</summary>
@@ -248,6 +321,65 @@ public class QuietHoursSendPathTests : IntegrationTestBase
         VerifySent(Times.Once());
     }
 
+    // ── 按偏好上的时区解释 ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// ★★ 设了时区的窗口按那个时区的本地时间判定：东京此刻落在东京本地的窗口里，于是被延后，
+    /// 延到东京本地的结束时刻。
+    /// </summary>
+    [Fact]
+    public async Task AZonedWindowAroundLocalNow_DefersUntilItsLocalEnd()
+    {
+        var tokyoNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Tokyo);
+        await SetQuietHoursAsync(
+            (TimeOnly.FromDateTime(tokyoNow.AddHours(-1)), TimeOnly.FromDateTime(tokyoNow.AddHours(1))), "Asia/Tokyo");
+        var messageId = await SeedMessageAsync(Alice);
+
+        await SendAsync(messageId);
+
+        VerifySent(Times.Never());
+        var recipient = await ReloadRecipientAsync(messageId);
+        recipient.Status.ShouldBe(NotificationStatus.Scheduled);
+        recipient.DeferredUntil!.Value.ShouldBe(DateTime.UtcNow.AddHours(1), TimeSpan.FromMinutes(2));
+    }
+
+    /// <summary>
+    /// ★★ 同样的两个墙上时刻，带了时区就不再按 UTC 读：此刻在 UTC 的窗口里，
+    /// 而东京已经是九个小时之后，于是照常发出。时区在取数到判定的任何一环被丢掉，这条就会变红。
+    /// </summary>
+    [Fact]
+    public async Task AZonedWindow_IsNotReadAsUtc()
+    {
+        await SetQuietHoursAsync(AroundNow(), "Asia/Tokyo");
+        var messageId = await SeedMessageAsync(Alice);
+
+        await SendAsync(messageId);
+
+        VerifySent(Times.Once());
+    }
+
+    /// <summary>
+    /// ★★★ 秋季拨慢那一夜（多伦多 2026-11-01）：窗口在 EDT 开始、在 EST 结束，结束在本地 07:00 EST。
+    /// </summary>
+    /// <remarks>
+    /// 这条钉住的是<b>发送路径问的是带时区的那个读取口</b>。只认 UTC 时刻的老读取口在当天换算
+    /// 永远正确，差别只在切换那一夜出现：它按某一个偏移把窗口折成固定的 UTC 时刻，
+    /// 在这一刻（22:30 EDT）要么还没进窗口、要么在 11:00 UTC 就放行，无论测试在哪个季节跑。
+    /// </remarks>
+    [Fact]
+    public async Task OnTheFallBackNight_TheDeferralEndsAtSevenOnTheNewOffset()
+    {
+        _clock.Now = new DateTimeOffset(2026, 11, 1, 2, 30, 0, TimeSpan.Zero); // 10 月 31 日 22:30 EDT
+        await SetQuietHoursAsync((new TimeOnly(22, 0), new TimeOnly(7, 0)), "America/Toronto");
+        var messageId = await SeedMessageAsync(Alice);
+
+        await SendAsync(messageId);
+
+        VerifySent(Times.Never());
+        (await ReloadRecipientAsync(messageId)).DeferredUntil
+            .ShouldBe(new DateTime(2026, 11, 1, 12, 0, 0, DateTimeKind.Utc)); // 07:00 EST
+    }
+
     // ── 与旧那个零调用方法共用一份判定 ───────────────────────────────────────
 
     /// <summary>
@@ -264,7 +396,49 @@ public class QuietHoursSendPathTests : IntegrationTestBase
         (await preferences.GetQuietHoursAsync([Alice], NotificationType.Email)).ShouldContainKey(Alice);
     }
 
+    // ── 重发失败项 ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// ★★ "Resend failed" runs the same quiet-hours step and defers the recipient. The message is then not
+    /// finished: it has to sit in Scheduled, the only state the deferred pass looks at. Before, the resend
+    /// answered "no failed recipients", left the message Failed, and the deferred recipient was never sent to.
+    /// </summary>
+    [Fact]
+    public async Task ResendingAFailedRecipientInsideQuietHours_HandsTheMessageToTheDeferredPass()
+    {
+        await SetQuietHoursAsync(AroundNow());
+        var messageId = await SeedAsync(Alice, false, NotificationStatus.Failed, NotificationStatus.Failed, null);
+
+        var result = await ServiceProvider.GetRequiredService<INotificationService>().ResendToFailedRecipientsAsync(messageId);
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        VerifySent(Times.Never());
+        (await ReloadRecipientAsync(messageId)).Status.ShouldBe(NotificationStatus.Scheduled);
+        (await ReloadMessageAsync(messageId)).Status.ShouldBe(NotificationStatus.Scheduled);
+
+        // The quiet hours end: the deferred pass sends it.
+        await SetQuietHoursAsync(InThePast());
+        await DbContext.Set<Recipient>().Where(r => r.MessageId == messageId)
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.DeferredUntil, DateTime.UtcNow.AddMinutes(-1)));
+        DbContext.ChangeTracker.Clear();
+
+        await RecoverOnceAsync();
+
+        VerifySent(Times.Once());
+        (await ReloadMessageAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
+    }
+
     // ── 夹具 ─────────────────────────────────────────────────────────────────
+
+    private static readonly TimeZoneInfo Tokyo = TimeZoneInfo.FindSystemTimeZoneById("Asia/Tokyo");
+
+    /// <summary>默认走真实时钟；个别用例把「现在」钉在某一刻。</summary>
+    private sealed class AdjustableClock : TimeProvider
+    {
+        public DateTimeOffset? Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Now ?? base.GetUtcNow();
+    }
 
     /// <summary>一个必然包含"现在"的窗口（前后各一小时）。</summary>
     private static (TimeOnly Start, TimeOnly End) AroundNow()
@@ -294,7 +468,7 @@ public class QuietHoursSendPathTests : IntegrationTestBase
                 new Mock<ILogger<NotificationDispatchBackgroundService>>().Object)
             .RecoverOnceAsync(_dispatch, CancellationToken.None);
 
-    private async Task SetQuietHoursAsync((TimeOnly Start, TimeOnly End) window)
+    private async Task SetQuietHoursAsync((TimeOnly Start, TimeOnly End) window, string? timeZone = null)
     {
         var result = await ServiceProvider.GetRequiredService<INotificationPreferenceService>()
             .SetPreferenceAsync(Alice, new SetNotificationPreferenceDto
@@ -303,6 +477,7 @@ public class QuietHoursSendPathTests : IntegrationTestBase
                 IsEnabled = true,
                 QuietHoursStart = window.Start,
                 QuietHoursEnd = window.End,
+                QuietHoursTimeZone = timeZone,
             });
         result.Succeeded.ShouldBeTrue(result.Message);
         DbContext.ChangeTracker.Clear();
@@ -323,15 +498,16 @@ public class QuietHoursSendPathTests : IntegrationTestBase
     private Task<Guid> SeedMessageAsync(Guid? userId, bool isTransactional = false)
         => SeedAsync(userId, isTransactional, NotificationStatus.Pending, NotificationStatus.Pending, null);
 
-    private Task<Guid> SeedDeferredMessageAsync(Guid userId, DateTime deferredUntil)
-        => SeedAsync(userId, false, NotificationStatus.Scheduled, NotificationStatus.Scheduled, deferredUntil);
+    private Task<Guid> SeedDeferredMessageAsync(Guid userId, DateTime deferredUntil, DateTime? scheduledTime = null)
+        => SeedAsync(userId, false, NotificationStatus.Scheduled, NotificationStatus.Scheduled, deferredUntil, scheduledTime);
 
     private async Task<Guid> SeedAsync(
         Guid? userId,
         bool isTransactional,
         NotificationStatus messageStatus,
         NotificationStatus recipientStatus,
-        DateTime? deferredUntil)
+        DateTime? deferredUntil,
+        DateTime? scheduledTime = null)
     {
         var message = new Message
         {
@@ -342,6 +518,7 @@ public class QuietHoursSendPathTests : IntegrationTestBase
             Category = "General",
             IsTransactional = isTransactional,
             Status = messageStatus,
+            ScheduledTime = scheduledTime,
             TotalRecipientCount = 1,
             Recipients =
             [

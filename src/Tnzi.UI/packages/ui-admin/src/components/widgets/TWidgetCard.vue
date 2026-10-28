@@ -16,7 +16,7 @@
  */
 import { computed } from 'vue'
 import { TWidgetCard as TWidgetCardBase } from '@tnzi/ui'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey, translatePageKey } from '../../i18n/translate'
 
 interface Props {
   id: string
@@ -43,9 +43,9 @@ defineEmits<{
 
 const adminTranslate = (key: string): string => translatePageKey('', key)
 
-const refreshLabel = computed(() => translatePageKey('', 'admin.common.reload') || 'Refresh')
-const dragLabel = computed(() => translatePageKey('', 'admin.widgets.dragHandle') || 'Drag to reorder')
-const errorLabel = computed(() => translatePageKey('', 'admin.common.error') || 'Error')
+const refreshLabel = computed(() => translateChromeKey('admin.common.reload', 'Refresh'))
+const dragLabel = computed(() => translateChromeKey('admin.widgets.dragHandle', 'Drag to reorder'))
+const errorLabel = computed(() => translateChromeKey('admin.common.error', 'Error'))
 </script>
 
 <template>

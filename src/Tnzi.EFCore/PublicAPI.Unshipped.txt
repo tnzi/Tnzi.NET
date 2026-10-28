@@ -60,6 +60,7 @@ override Tnzi.EFCore.DocumentNumbering.DocumentSequenceConfiguration.Configure(M
 override Tnzi.EFCore.Encryption.FieldEncryptionOptionsValidator.ValidateOptions(Tnzi.EFCore.Encryption.FieldEncryptionOptions! options, System.Collections.Generic.List<string!>! errors) -> void
 override Tnzi.EFCore.TnziDbContext<TDbContext>.ConfigureConventions(Microsoft.EntityFrameworkCore.ModelConfigurationBuilder! configurationBuilder) -> void
 static Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions.IsEncrypted(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<string!>! builder, string? purpose = null) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<string!>!
+static Tnzi.EFCore.Extensions.EncryptedPropertyBuilderExtensions.IsEncryptedColumn(this Microsoft.EntityFrameworkCore.Metadata.IReadOnlyProperty! property) -> bool
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnEqualsAndIsDeletedFalse(string! columnName, int value, Tnzi.EFCore.DatabaseProvider provider) -> string!
 static Tnzi.EFCore.IndexFilterFactory.GetColumnNotEquals(string! columnName, int value) -> string!
@@ -135,3 +136,86 @@ Tnzi.EFCore.Dapper.Providers.IDatabaseProvider.MaxParametersPerCommand.get -> in
 Tnzi.EFCore.Dapper.Providers.SqlServerProvider.MaxParametersPerCommand.get -> int
 static Tnzi.EFCore.Extensions.BatchOperationExtensions.BatchSoftDeleteByAsync<T>(this System.Linq.IQueryable<T!>! query, System.Guid? deleterId, System.DateTime deletionTime, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<int>!
 Tnzi.EFCore.EFCoreRepository<TDbContext, TEntity, TKey>.NewId() -> TKey
+Tnzi.EFCore.IEntityManager.GetEntityRegisters(System.Type! dbContextType, bool? isPrimary) -> Tnzi.EFCore.IEntityRegister![]!
+virtual Tnzi.EFCore.EntityManager.GetEntityRegisters(System.Type! dbContextType, bool? isPrimary) -> Tnzi.EFCore.IEntityRegister![]!
+const Tnzi.EFCore.Outbox.OutboxMessage.LastErrorMaxLength = 2000 -> int
+*REMOVED*Tnzi.EFCore.Options.EFCoreOptions.LogAutoSaveDecisions.get -> bool
+*REMOVED*Tnzi.EFCore.Options.EFCoreOptions.LogAutoSaveDecisions.set -> void
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.Clear() -> void
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.Dispose() -> void
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.GetSlowQueries(int count = 10) -> System.Collections.Generic.List<Tnzi.EFCore.SlowQueryRecord!>!
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.GetStatistics(System.TimeSpan timeWindow) -> Tnzi.EFCore.SlowQueryStatistics!
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.QueryPerformanceMonitor(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.QueryPerformanceMonitor!>? logger = null, System.TimeSpan? slowQueryThreshold = null, int maxSlowQueries = 100) -> void
+*REMOVED*Tnzi.EFCore.QueryPerformanceMonitor.RecordQuery(string! sql, object? parameters, System.TimeSpan executionTime, int? rowCount = null) -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.ExecutionTime.get -> System.TimeSpan
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.ExecutionTime.set -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Parameters.get -> object?
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Parameters.set -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.RowCount.get -> int?
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.RowCount.set -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.SlowQueryRecord() -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Sql.get -> string!
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Sql.set -> void
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Timestamp.get -> System.DateTime
+*REMOVED*Tnzi.EFCore.SlowQueryRecord.Timestamp.set -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.AverageExecutionTime.get -> System.TimeSpan
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.AverageExecutionTime.init -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.Deconstruct(out int TotalCount, out System.TimeSpan AverageExecutionTime, out System.TimeSpan MaxExecutionTime, out System.TimeSpan MinExecutionTime) -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.MaxExecutionTime.get -> System.TimeSpan
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.MaxExecutionTime.init -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.MinExecutionTime.get -> System.TimeSpan
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.MinExecutionTime.init -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.SlowQueryStatistics(Tnzi.EFCore.SlowQueryStatistics! original) -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.SlowQueryStatistics(int TotalCount, System.TimeSpan AverageExecutionTime, System.TimeSpan MaxExecutionTime, System.TimeSpan MinExecutionTime) -> void
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.TotalCount.get -> int
+*REMOVED*Tnzi.EFCore.SlowQueryStatistics.TotalCount.init -> void
+*REMOVED*override Tnzi.EFCore.SlowQueryStatistics.Equals(object? obj) -> bool
+*REMOVED*override Tnzi.EFCore.SlowQueryStatistics.GetHashCode() -> int
+*REMOVED*override Tnzi.EFCore.SlowQueryStatistics.ToString() -> string!
+*REMOVED*static Tnzi.EFCore.SlowQueryStatistics.operator !=(Tnzi.EFCore.SlowQueryStatistics? left, Tnzi.EFCore.SlowQueryStatistics? right) -> bool
+*REMOVED*static Tnzi.EFCore.SlowQueryStatistics.operator ==(Tnzi.EFCore.SlowQueryStatistics? left, Tnzi.EFCore.SlowQueryStatistics? right) -> bool
+*REMOVED*virtual Tnzi.EFCore.SlowQueryStatistics.<Clone>$() -> Tnzi.EFCore.SlowQueryStatistics!
+*REMOVED*virtual Tnzi.EFCore.SlowQueryStatistics.EqualityContract.get -> System.Type!
+*REMOVED*virtual Tnzi.EFCore.SlowQueryStatistics.Equals(Tnzi.EFCore.SlowQueryStatistics? other) -> bool
+*REMOVED*virtual Tnzi.EFCore.SlowQueryStatistics.PrintMembers(System.Text.StringBuilder! builder) -> bool
+*REMOVED*Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.EFCoreDbInitializer(TDbContext! dbContext, System.IServiceProvider! serviceProvider, System.Collections.Generic.IEnumerable<Tnzi.Data.IDataSeeder!>! seeders, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreDbInitializer<TDbContext!>!>! logger) -> void
+*REMOVED*Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.SeedAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Tnzi.EFCore.EFCoreDbInitializer<TDbContext>.EFCoreDbInitializer(TDbContext! dbContext, System.IServiceProvider! serviceProvider, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.EFCoreDbInitializer<TDbContext!>!>! logger) -> void
+const Tnzi.EFCore.Encryption.FieldEncryptionOptions.MaxKeyIdLength = 64 -> int
+Tnzi.EFCore.Extensions.JsonListPropertyBuilderExtensions
+static Tnzi.EFCore.Extensions.JsonListPropertyBuilderExtensions.HasJsonListConversion<T>(this Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<System.Collections.Generic.List<T>?>! builder) -> Microsoft.EntityFrameworkCore.Metadata.Builders.PropertyBuilder<System.Collections.Generic.List<T>?>!
+virtual Tnzi.EFCore.EntityTypeConfigurationBase<TEntity, TKey>.IsEnabledFor(Microsoft.EntityFrameworkCore.DbContext? dbContext) -> bool
+*REMOVED*Tnzi.EFCore.Data.DataFilterManager.DataFilterManager(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Data.DataFilterManager!>? logger = null) -> void
+Tnzi.EFCore.Data.DataFilterManager.DataFilterManager(Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Data.DataFilterManager!>? logger = null, Microsoft.Extensions.Options.IOptions<Tnzi.MultiTenancy.MultiTenancyOptions!>? multiTenancyOptions = null) -> void
+const Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.OverheadChars = 165 -> int
+const Tnzi.EFCore.Encryption.FieldEncryptionKeyRing.FileCheckIntervalMs = 2000 -> int
+static Tnzi.EFCore.Encryption.FieldEncryptionDesignTime.Mode.get -> Tnzi.EFCore.Encryption.FieldEncryptionMode
+static Tnzi.EFCore.Encryption.FieldEncryptionDesignTime.Mode.set -> void
+Tnzi.EFCore.Encryption.AesGcmFieldEncryptor.AesGcmFieldEncryptor(Tnzi.EFCore.Encryption.FieldEncryptionKeyRing! keyRing) -> void
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.CiphertextOverheadChars.get -> int
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.Decrypt(string! ciphertext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.Encrypt(string! plaintext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.EnvelopeFieldEncryptor(Tnzi.EFCore.Encryption.FieldEncryptionKeyRing! keyRing) -> void
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.IsEncrypted(string! value) -> bool
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.NeedsRewrap(string! ciphertext) -> bool
+Tnzi.EFCore.Encryption.EnvelopeFieldEncryptor.Rewrap(string! ciphertext, string! purpose) -> string!
+Tnzi.EFCore.Encryption.FieldEncryptionDesignTime
+Tnzi.EFCore.Encryption.FieldEncryptionKeyRing
+Tnzi.EFCore.Encryption.FieldEncryptionKeyRing.ActiveKeyId.get -> string?
+Tnzi.EFCore.Encryption.FieldEncryptionKeyRing.Contains(string! keyId) -> bool
+Tnzi.EFCore.Encryption.FieldEncryptionKeyRing.FieldEncryptionKeyRing(Microsoft.Extensions.Options.IOptionsMonitor<Tnzi.EFCore.Encryption.FieldEncryptionOptions!>! options, Microsoft.Extensions.Logging.ILogger<Tnzi.EFCore.Encryption.FieldEncryptionKeyRing!>? logger = null) -> void
+Tnzi.EFCore.Encryption.FieldEncryptionMode
+Tnzi.EFCore.Encryption.FieldEncryptionMode.Direct = 0 -> Tnzi.EFCore.Encryption.FieldEncryptionMode
+Tnzi.EFCore.Encryption.FieldEncryptionMode.Envelope = 1 -> Tnzi.EFCore.Encryption.FieldEncryptionMode
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.KeyFile.get -> string?
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.KeyFile.set -> void
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Mode.get -> Tnzi.EFCore.Encryption.FieldEncryptionMode
+Tnzi.EFCore.Encryption.FieldEncryptionOptions.Mode.set -> void
+Tnzi.EFCore.Encryption.IFieldEncryptor.CiphertextOverheadChars.get -> int
+Tnzi.EFCore.Encryption.IFieldRewrapper
+Tnzi.EFCore.Encryption.IFieldRewrapper.NeedsRewrap(string! ciphertext) -> bool
+Tnzi.EFCore.Encryption.IFieldRewrapper.Rewrap(string! ciphertext, string! purpose) -> string!

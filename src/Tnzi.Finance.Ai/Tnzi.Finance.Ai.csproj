@@ -25,7 +25,11 @@
       AI 那边的文档转换器删除后传递链断了 —— 直接依赖就该直接声明。
       版本对齐 Tnzi.Documents / Tnzi.AI.Rag。
     -->
-    <PackageReference Include="PdfPig" Version="0.1.15" />
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.Finance.Ai.Tests, PublicKey=$(TnziPublicKey)" />
   </ItemGroup>
 
 </Project>

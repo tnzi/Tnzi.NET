@@ -34,17 +34,6 @@ public class TwoFactorBruteForceTests
         var store = new Mock<IUserStore<User>>();
         _userManagerMock = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
 
-        var options = new Mock<IOptionsSnapshot<IdentityOptions>>();
-        options.Setup(x => x.Value).Returns(new IdentityOptions
-        {
-            Otp = new OtpOptions { EnableSms = true, EnableEmail = true, EnableTotp = true }
-        });
-
-        var serviceProvider = new Mock<IServiceProvider>();
-        var loggerFactory = new Mock<ILoggerFactory>();
-        loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
-        serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
-
         // 一个够用的内存计数器：本组要断言的是「计数器有没有被用上」，不是缓存实现本身。
         _cacheMock.Setup(x => x.GetCounterAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string k, CancellationToken _) => _counters.TryGetValue(k, out var v) ? v : 0);
@@ -58,13 +47,58 @@ public class TwoFactorBruteForceTests
                 return Task.CompletedTask;
             });
 
-        _service = new TwoFactorService(
+        _service = CreateService(MaxAttempts);
+    }
+
+    private TwoFactorService CreateService(int maxAttempts)
+    {
+        var options = new Mock<IOptionsSnapshot<IdentityOptions>>();
+        options.Setup(x => x.Value).Returns(new IdentityOptions
+        {
+            Otp = new OtpOptions { EnableSms = true, EnableEmail = true, EnableTotp = true, MaxAttempts = maxAttempts }
+        });
+
+        var serviceProvider = new Mock<IServiceProvider>();
+        var loggerFactory = new Mock<ILoggerFactory>();
+        loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
+
+        return new TwoFactorService(
             _repositoryMock.Object,
             _userManagerMock.Object,
             serviceProvider.Object,
             eventBus: null,
             identityOptions: options.Object,
             cache: _cacheMock.Object);
+    }
+
+    /// <summary>
+    /// ★★ 上限读的是设置中心里的 <c>Identity:Otp:MaxAttempts</c>，不是写死的 5。
+    /// 此前它是一个只有校验器读的字段：管理员把它收紧到 3，设置中心答「已保存」，闸门照旧放 5 次。
+    /// 两个方向各验一次：收紧到 3（第 4 次就挡），放宽到 7（第 6 次仍是「码不对」）。TOTP 与按地址两条路径都要。
+    /// </summary>
+    [Theory]
+    [InlineData(3)]
+    [InlineData(7)]
+    public async Task TheGate_FollowsTheConfiguredMaxAttempts(int configured)
+    {
+        var service = CreateService(configured);
+        var user = ArrangeUser();
+        ArrangeNoStoredCodes();
+        ArrangeTotp(user, valid: false);
+
+        for (var i = 0; i < configured; i++)
+        {
+            (await service.VerifyCodeAsync(user.Id, "000000", TwoFactorType.Totp, VerificationCodePurpose.TwoFactor))
+                .Code.ShouldBe(400, $"TOTP attempt {i + 1} of {configured} is still evaluated");
+            (await service.VerifyCodeByAddressAndMarkUsedAsync("victim@example.com", "000000", TwoFactorType.Email, VerificationCodePurpose.PasswordRecovery))
+                .Code.ShouldBe(400, $"address attempt {i + 1} of {configured} is still evaluated");
+        }
+
+        (await service.VerifyCodeAsync(user.Id, "000000", TwoFactorType.Totp, VerificationCodePurpose.TwoFactor))
+            .Code.ShouldBe(429);
+        (await service.VerifyCodeByAddressAndMarkUsedAsync("victim@example.com", "000000", TwoFactorType.Email, VerificationCodePurpose.PasswordRecovery))
+            .Code.ShouldBe(429);
     }
 
     private User ArrangeUser()
@@ -130,6 +164,57 @@ public class TwoFactorBruteForceTests
         }
 
         (await InvokeAsync()).Code.ShouldBe(429, $"{methodName}: attempt {MaxAttempts + 1} must be gated");
+    }
+
+    /// <summary>
+    /// ★★★ 同一个地址换个写法（大小写、首尾空白）不是一个新的桶。账号解析走 <c>FindByEmailAsync</c>（规范化），
+    /// 此前失败计数却按请求原样的字符串分桶：每个变体各有 5 次，而在不区分大小写的排序规则下
+    /// 每个变体查到的又是同一批码，「每个地址 5 次」从来不是「每个账号 5 次」，验证码找回密码因此可以被穷举。
+    /// </summary>
+    [Fact]
+    public async Task AddressSpellingVariants_ShareOneFailureCounter()
+    {
+        ArrangeNoStoredCodes();
+        string[] variants = ["Victim@Example.com", " victim@example.com", "VICTIM@EXAMPLE.COM ", "victim@EXAMPLE.com", "vIctim@example.COM"];
+
+        foreach (var variant in variants)
+        {
+            (await _service.VerifyCodeByAddressAndMarkUsedAsync(variant, "000000", TwoFactorType.Email, VerificationCodePurpose.PasswordRecovery))
+                .Code.ShouldBe(400);
+        }
+
+        (await _service.VerifyCodeByAddressAndMarkUsedAsync("victim@example.com", "000000", TwoFactorType.Email, VerificationCodePurpose.PasswordRecovery))
+            .Code.ShouldBe(429);
+    }
+
+    /// <summary>
+    /// ★★★ 闸门按<b>原子递增的返回值</b>判定，不按一次单独的读。
+    /// </summary>
+    /// <remarks>
+    /// 此前是「读计数 → 查库 → 失败才递增」：同时在途的一批请求全都先读到同一个旧值，
+    /// 于是并发喷射的猜测在计数到 5 之前就远超 5 次。这里让计数读出恒为 0（正是那批请求看到的样子），
+    /// 只有递增是真的：判定若还依赖那次读，第 6 次就不会被挡下。
+    /// </remarks>
+    [Fact]
+    public async Task TheGate_DecidesOnTheAtomicIncrement_NotOnASeparateRead()
+    {
+        var user = ArrangeUser();
+        ArrangeNoStoredCodes();
+        ArrangeTotp(user, valid: false);
+        _cacheMock.Setup(x => x.GetCounterAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(0L);
+
+        for (var i = 0; i < MaxAttempts; i++)
+        {
+            (await _service.VerifyCodeByAddressAndMarkUsedAsync("victim@example.com", "000000", TwoFactorType.Email, VerificationCodePurpose.CodeLogin))
+                .Code.ShouldBe(400);
+            (await _service.VerifyCodeAsync(user.Id, "000000", TwoFactorType.Totp, VerificationCodePurpose.TwoFactor))
+                .Code.ShouldBe(400);
+        }
+
+        (await _service.VerifyCodeByAddressAndMarkUsedAsync("victim@example.com", "000000", TwoFactorType.Email, VerificationCodePurpose.CodeLogin))
+            .Code.ShouldBe(429);
+        (await _service.VerifyCodeAsync(user.Id, "000000", TwoFactorType.Totp, VerificationCodePurpose.TwoFactor))
+            .Code.ShouldBe(429);
     }
 
     private void ArrangeTotp(User user, bool valid)

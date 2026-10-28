@@ -131,6 +131,10 @@ public class DefaultLayoutAdminController : ApiAdminControllerBase
     [ApiAuthorize(PermissionName = "template.layout.create")]
     public virtual async Task<ApiResult<LayoutImportResultDto>> Import([FromBody] LayoutImportRequest request)
     {
+        // 覆盖已有布局就是改写它们：还要 PUT 端点要求的那个码（理由见 ImportOverwriteGate）。
+        if (request.OverwriteExisting)
+            await ImportOverwriteGate.RequireAsync(Services, "template.layout.update");
+
         var result = await LayoutStoreService.ImportLayoutsAsync(request.Json, request.OverwriteExisting);
         return result.ToApiResult();
     }

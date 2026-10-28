@@ -38,7 +38,28 @@ public class PushSenderTokenLoggingTests
     }
 
     /// <summary>
-    /// 源码级门禁：<c>PushSender</c> 里每一处把令牌交给日志的地方都要过掩码。
+    /// 带点击目标与数据的发法同样只记掩码：被内容校验拒掉那一条、走到 provider 分派那一条都是。
+    /// </summary>
+    [Fact]
+    public async Task A_delivery_attempt_with_link_and_data_does_not_write_the_raw_token_into_the_log()
+    {
+        var logger = new CapturingLogger<PushSender>();
+        var sender = new PushSender(new PushSenderOptions { Provider = "apns" }, logger);
+
+        await sender.SendToAsync(Token, new PushContent("Title", "Body") { Link = "/relative" });
+        await sender.SendToAsync(Token, new PushContent("Title", "Body")
+        {
+            Link = "https://app.example.com/chat/42",
+            Data = new Dictionary<string, string> { ["threadId"] = "42" },
+        });
+
+        logger.Messages.Count.ShouldBeGreaterThanOrEqualTo(2, "both attempts must have logged - otherwise this passes vacuously");
+        logger.Messages.ShouldAllBe(m => !m.Contains(Token));
+        logger.Messages.Count(m => m.Contains(PushTokenMask.Of(Token))).ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    /// <summary>
+    /// 源码级门禁：每一处把令牌交给日志的地方都要过掩码（<c>PushSender</c> 与父模块的两个回退）。
     /// </summary>
     /// <remarks>
     /// 上面那条只覆盖得到一条分支（其余几条要么需要真的连上 FCM，要么需要 FCM 抛出
@@ -46,14 +67,21 @@ public class PushSenderTokenLoggingTests
     /// 任何行为测试变红。所以按源码对账：<c>{DeviceToken}</c> 这个日志占位符出现的每一行，
     /// 它的实参必须是 <c>PushTokenMask.Of(...)</c>。
     /// <para>
+    /// 两个回退（<c>NullPushSender</c> / <c>UnconfiguredPushSender</c>）也在扫描范围里：开发期宿主与
+    /// 少装了包的部署同样每次投递都写一行日志，而那一行曾经原样带着令牌。
+    /// </para>
+    /// <para>
     /// 唯一豁免是主题地址那一条：<c>FcmTopicName.LooksLikeTopicAddress</c> 已经确定它以
     /// <c>/topics/</c> 开头 —— 那不是令牌，而调用方要看到自己填错的那个值。
     /// </para>
     /// </remarks>
-    [Fact]
-    public void Every_log_call_that_names_a_device_token_masks_it()
+    [Theory]
+    [InlineData("Tnzi.Notification.Push", "PushSender.cs")]
+    [InlineData("Tnzi.Notification", "NullPushSender.cs")]
+    [InlineData("Tnzi.Notification", "UnconfiguredPushSender.cs")]
+    public void Every_log_call_that_names_a_device_token_masks_it(string project, string file)
     {
-        var path = Path.Combine(RepoRoot.Locate(), "src", "Tnzi.Notification.Push", "Services", "PushSender.cs");
+        var path = Path.Combine(RepoRoot.Locate(), "src", project, "Services", file);
         File.Exists(path).ShouldBeTrue($"{path} not found - the scan would pass vacuously");
 
         var lines = File.ReadAllLines(path);
@@ -79,12 +107,15 @@ public class PushSenderTokenLoggingTests
     }
 
     /// <summary>对照：扫描真的看得见那些行（否则上一条在一个空集合上恒真）。</summary>
-    [Fact]
-    public void The_scan_actually_finds_the_log_calls_it_is_guarding()
+    [Theory]
+    [InlineData("Tnzi.Notification.Push", "PushSender.cs", 5)]
+    [InlineData("Tnzi.Notification", "NullPushSender.cs", 2)]
+    [InlineData("Tnzi.Notification", "UnconfiguredPushSender.cs", 1)]
+    public void The_scan_actually_finds_the_log_calls_it_is_guarding(string project, string file, int atLeast)
     {
-        var path = Path.Combine(RepoRoot.Locate(), "src", "Tnzi.Notification.Push", "Services", "PushSender.cs");
+        var path = Path.Combine(RepoRoot.Locate(), "src", project, "Services", file);
 
-        File.ReadAllLines(path).Count(l => l.Contains("{DeviceToken}")).ShouldBeGreaterThan(3);
+        File.ReadAllLines(path).Count(l => l.Contains("{DeviceToken}")).ShouldBeGreaterThanOrEqualTo(atLeast);
     }
 
     /// <summary>只记下格式化后消息文本的日志替身。</summary>

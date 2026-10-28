@@ -138,6 +138,13 @@ public class BankFeedService : ApplicationService, IBankFeedService
         {
             if (!item.SuggestedRuleId.HasValue || !byId.TryGetValue(item.SuggestedRuleId.Value, out var rule))
                 continue;
+            // 与求值器同一判据：费用规则不解释进账。流水上存的规则 Id 可能是在这条判据之前
+            // 写下的，照样展开会把「建费用」预填到一笔存款上，而建单端会拒绝它。
+            if (rule.DocType == BankFeedDocType.Expense && item.Amount > 0)
+            {
+                item.SuggestedRuleId = null;
+                continue;
+            }
 
             item.SuggestedRuleName = rule.Name;
             item.SuggestedDocType = rule.DocType;
@@ -211,6 +218,10 @@ public class BankFeedService : ApplicationService, IBankFeedService
             {
                 foreach (var txn in pending)
                 {
+                    // ★ 只写建议真的变了的行：每一次写都是带并发标记的比对，期间被别人确认 / 排除的行
+                    // 若建议没变就不该碰它（也就不会让整批 409）；变了的那一行比对失败，整批回滚 409，
+                    // 绝不把别人的确认整行写回 Pending。
+                    var before = SuggestionState.Of(txn);
                     var suggestion = _engine.Suggest(
                         txn, candidatesByAmount.TryGetValue(txn.Amount, out var forAmount) ? forAmount : noCandidates);
                     if (suggestion == null || assigned.Contains(suggestion.JournalLineId))
@@ -237,7 +248,8 @@ public class BankFeedService : ApplicationService, IBankFeedService
                             txn.SuggestedRuleId = null;
                         }
 
-                        await _txnRepository.UpdateAsync(txn, ct);
+                        if (SuggestionState.Of(txn) != before)
+                            await _txnRepository.UpdateAsync(txn, ct);
                         continue;
                     }
 
@@ -278,7 +290,8 @@ public class BankFeedService : ApplicationService, IBankFeedService
                         txn.SuggestedJournalLineId = suggestion.JournalLineId;
                         txn.MatchConfidence = suggestion.Confidence;
                         txn.MatchRule = suggestion.Rule;
-                        await _txnRepository.UpdateAsync(txn, ct);
+                        if (SuggestionState.Of(txn) != before)
+                            await _txnRepository.UpdateAsync(txn, ct);
                         summary.Suggested++;
                     }
                 }
@@ -298,7 +311,7 @@ public class BankFeedService : ApplicationService, IBankFeedService
         }
         catch (DbUpdateConcurrencyException)
         {
-            return Fail<BankSuggestResultDto>("The draft reconciliation was completed by another operation. Reload and retry.", 409);
+            return Fail<BankSuggestResultDto>("Bank transactions or the draft reconciliation were modified by another operation. Reload and retry.", 409);
         }
 
         foreach (var matched in autoConfirmed)
@@ -572,6 +585,21 @@ public class BankFeedService : ApplicationService, IBankFeedService
         if (txn.Status != BankTransactionStatus.Pending)
             return Fail<BankDocumentResultDto>("Only pending transactions can spawn a document.", 409);
 
+        // ★ 流水上已经挂着一张还在的单据时不再新建：那多半是上一次「新建并对账」过账失败留下的草稿
+        // （消息让操作员修好再过账），或已过账而匹配失败的单据。再建一张会把挂接挪走，前一张成了没人引用的
+        // 草稿，两张都过账就是同一笔钱记两次。与 AutoApply 跳过已建过单据的流水同一判据；被删或已作废的
+        // 单据不算，照常新建并改挂。
+        if (txn.CreatedDocId is { } linkedId && !string.IsNullOrEmpty(txn.CreatedDocType))
+        {
+            var linkedStatus = await _drafter.GetStatusAsync(txn.CreatedDocType, linkedId, cancellationToken);
+            if (linkedStatus is { } status && status != FinanceDocumentStatus.Voided)
+            {
+                return Fail<BankDocumentResultDto>(
+                    $"This transaction already has a linked {txn.CreatedDocType} ({status}). Post it if needed and match it to this transaction, or delete or void it before creating another one.",
+                    409);
+            }
+        }
+
         // 「新建并对账」的两个前置条件与 ConfirmMatchAsync 逐字一致，且在建任何东西
         // **之前**校验：先建后发现不能确认，会留下一张操作员没打算单独维护的孤儿草稿。
         if (input.PostAndMatch)
@@ -586,6 +614,19 @@ public class BankFeedService : ApplicationService, IBankFeedService
                 return Fail<BankDocumentResultDto>("Create a draft reconciliation for this account before confirming matches.", 400);
         }
 
+        // ★ 建任何东西之前先认领这一行：一次不改字段的整行写，带并发标记比对。
+        // 上面的 Pending 检查是读出来的，双击 / 重试 / 与 AutoApply 交错的两个「新建并对账」会各自通过，
+        // 各建一张单据、各过一次账，一行流水记两笔钱。认领失败就在建单之前 409。
+        try
+        {
+            await _txnRepository.UpdateAsync(txn, cancellationToken);
+            await _txnRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Fail<BankDocumentResultDto>("The transaction was modified by another operation. Reload and retry.", 409);
+        }
+
         var draft = await _drafter.CreateDraftAsync(txn, input, cancellationToken);
         if (!draft.Succeeded)
             return Fail<BankDocumentResultDto>(draft.Message!, draft.Code ?? 400);
@@ -593,8 +634,19 @@ public class BankFeedService : ApplicationService, IBankFeedService
 
         txn.CreatedDocType = docType;
         txn.CreatedDocId = docId;
-        await _txnRepository.UpdateAsync(txn, cancellationToken);
-        await _txnRepository.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _txnRepository.UpdateAsync(txn, cancellationToken);
+            await _txnRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // 认领之后、挂接之前有人改了这一行：草稿已建但没挂上，也没过账。说清楚它在哪，
+            // 否则操作员重试一次就多一张没人引用的草稿。
+            return Fail<BankDocumentResultDto>(
+                $"The transaction was modified by another operation while the {docType} draft was being created. The draft was not linked or posted; review it before retrying.",
+                409);
+        }
 
         var result = new BankDocumentResultDto { DocType = docType, DocId = docId };
         if (!input.PostAndMatch)
@@ -624,8 +676,12 @@ public class BankFeedService : ApplicationService, IBankFeedService
         result.JournalEntryId = entry.Id;
 
         var confirmResult = await ConfirmMatchAsync(txn.Id, new ConfirmBankMatchDto { JournalLineId = line.Id }, cancellationToken);
+        // 与过账失败那条同一理由：此刻单据**已经过账**。只回匹配的报错，读起来像什么都没发生，
+        // 操作员重试一次就会再记一笔。
         if (!confirmResult.Succeeded)
-            return Fail<BankDocumentResultDto>(confirmResult.Message!, confirmResult.Code ?? 400);
+            return Fail<BankDocumentResultDto>(
+                $"{confirmResult.Message} The {docType} was posted and is still linked to this transaction; match it manually instead of creating another one.",
+                confirmResult.Code ?? 400);
         result.Matched = true;
 
         return Ok(result);
@@ -676,25 +732,42 @@ public class BankFeedService : ApplicationService, IBankFeedService
         if (batch == null)
             return Fail("Import batch not found.", 404);
 
+        const string hasMatchedMessage = "The batch has matched transactions; unmatch them before deleting the batch.";
         var hasMatched = await _txnRepository.AnyAsync(t => t.ImportBatchId == batchId && t.Status == BankTransactionStatus.Matched, cancellationToken);
         if (hasMatched)
-            return Fail("The batch has matched transactions; unmatch them before deleting the batch.", 409);
+            return Fail(hasMatchedMessage, 409);
 
         try
         {
             return await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
-                var txns = await _txnRepository.ToListAsync(t => t.ImportBatchId == batchId, ct);
-                if (txns.Count > 0)
-                    await _txnRepository.DeleteManyAsync(txns, ct);
+                // ★ 上面那次检查是事务外读的：之后被确认的行不能跟着批次一起软删（它的勾选行还在草稿对账里）。
+                // 一条语句只删未匹配的行，并顺手换掉每行的并发标记，此后并发的确认比对失败转 409；
+                // 删之前已提交的确认在这里留下来，下面再查一次，有就整体回滚。
+                await _txnRepository.DeleteAsync(t => t.ImportBatchId == batchId && t.Status != BankTransactionStatus.Matched, ct);
+                if (await _txnRepository.AnyAsync(t => t.ImportBatchId == batchId, ct))
+                    throw new UnitOfWorkAbortException(Result.Failure(hasMatchedMessage, 409));
+
                 await _batchRepository.DeleteAsync(batch, ct);
                 return Result.Success();
             }, cancellationToken);
+        }
+        catch (UnitOfWorkAbortException ex)
+        {
+            return Fail(ex.Result.Message ?? hasMatchedMessage, ex.Result.Code ?? 409);
         }
         catch (DbUpdateConcurrencyException)
         {
             return Fail("The batch was modified by another operation. Reload and retry.", 409);
         }
+    }
+
+    /// <summary>「建议匹配」会改的那几列：前后相同就不写这一行。</summary>
+    private readonly record struct SuggestionState(
+        BankTransactionStatus Status, Guid? SuggestedJournalLineId, Guid? SuggestedRuleId, decimal? MatchConfidence, string? MatchRule)
+    {
+        public static SuggestionState Of(BankTransaction txn)
+            => new(txn.Status, txn.SuggestedJournalLineId, txn.SuggestedRuleId, txn.MatchConfidence, txn.MatchRule);
     }
 
     private async Task<Result<BankTransactionDto>> GetDtoAsync(Guid id, CancellationToken cancellationToken)

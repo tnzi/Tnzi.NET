@@ -35,6 +35,10 @@ export enum AccountSystemRole {
   OpeningBalance = 'OpeningBalance',
   /** Currency exchange clearing (cross-currency transfers net to zero through this account) */
   CurrencyExchangeClearing = 'CurrencyExchangeClearing',
+  /** Wages payable (a posted pay run credits net pay here; paying it clears the balance) */
+  WagesPayable = 'WagesPayable',
+  /** Non-recoverable purchase tax (expensed here when the tax code is not recoverable, instead of TaxReceivable) */
+  NonRecoverableTaxExpense = 'NonRecoverableTaxExpense',
 }
 
 /**

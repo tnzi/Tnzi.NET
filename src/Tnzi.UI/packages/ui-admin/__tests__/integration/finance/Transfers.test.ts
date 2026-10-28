@@ -25,6 +25,8 @@ const fetchList = vi.fn(async () => ({
   pageSize: 20,
 }))
 
+const accountTree = vi.fn(async (): Promise<unknown[]> => [])
+
 const transferSection = {
   fetch: fetchList,
   getById: vi.fn(async () => null),
@@ -40,8 +42,9 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
   return {
     FinanceDocumentStatus: original.FinanceDocumentStatus,
     ReconciliationStatus: original.ReconciliationStatus,
+    CashFlowActivity: original.CashFlowActivity,
     createFinanceBridge: () => ({
-      accounts: { tree: vi.fn(async () => []) },
+      accounts: { tree: accountTree },
       transfers: transferSection,
     }),
   }
@@ -69,6 +72,87 @@ describe('Finance Transfers page', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     fetchList.mockClear()
+  })
+
+  /**
+   * The transfer form shows a cross-currency target rate but not the source
+   * rate, and a draft update replaces the transfer. A manual source rate set
+   * through the API must survive an unrelated edit, and must not follow the
+   * transfer into a different currency.
+   */
+  describe('editing a foreign-currency draft', () => {
+    type CrudVm = {
+      formModal: { formData: { value: Record<string, unknown> | null } }
+      openEdit: (row: unknown) => void
+      submit: () => Promise<unknown>
+    }
+    const draft = {
+      id: 't7', status: 'Draft', fromAccountId: 'usd-bank', toAccountId: 'usd-savings', transferDate: '2026-07-01',
+      amount: 500, currency: 'USD', exchangeRate: 1.3577, targetCurrency: null, targetAmount: null, targetExchangeRate: 0, reference: null, memo: null,
+    }
+
+    it('sends the stored source rate back when the currency is unchanged', async () => {
+      transferSection.updateDraft.mockClear()
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const crud = (wrapper.vm as unknown as { crud: CrudVm }).crud
+
+      crud.openEdit(draft)
+      crud.formModal.formData.value!.reference = 'Sweep'
+      await crud.submit()
+
+      expect(transferSection.updateDraft).toHaveBeenCalledWith('t7', expect.objectContaining({ reference: 'Sweep', currency: 'USD', exchangeRate: 1.3577 }))
+      wrapper.unmount()
+    })
+
+    it('leaves the rate to the rate table once the currency changes', async () => {
+      transferSection.updateDraft.mockClear()
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const crud = (wrapper.vm as unknown as { crud: CrudVm }).crud
+
+      crud.openEdit(draft)
+      crud.formModal.formData.value!.currency = 'EUR'
+      await crud.submit()
+
+      expect(transferSection.updateDraft).toHaveBeenCalledWith('t7', expect.objectContaining({ currency: 'EUR', exchangeRate: null }))
+      wrapper.unmount()
+    })
+  })
+
+  // The transfer list endpoint has no keyword, so a search box would be
+  // shown and silently ignored: typing a reference returned every row.
+  it('★ shows no keyword search box', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.find('.t-list-shell__search').exists()).toBe(true)
+    expect(wrapper.find('.t-list-shell__search-input').exists()).toBe(false)
+  })
+
+  // The server takes only funds (CashEquivalent) accounts on either side of a
+  // transfer; offering every leaf let the form present choices it always refused.
+  it('★ offers only funds accounts as the transfer sides', async () => {
+    const leaf = (id: string, cashFlowActivity: string) => ({ id, code: id, name: id, isGroup: false, isActive: true, cashFlowActivity, children: [] })
+    accountTree.mockResolvedValue([
+      { id: 'assets', code: '1000', name: 'Assets', isGroup: true, isActive: true, children: [leaf('bank', 'CashEquivalent'), leaf('ar', 'Operating')] },
+      leaf('sales', 'Operating'),
+    ])
+    try {
+      const wrapper = mount(Page, { global: { stubs } })
+      await flushPromises()
+      const vm = wrapper.vm as unknown as {
+        crud: { openCreate: () => void }
+        fieldRenderers: Record<string, (ctx: unknown) => { props: { options: Array<{ value: string }> } }>
+      }
+      vm.crud.openCreate()
+      await flushPromises()
+
+      const select = vm.fieldRenderers['finance-account']!({ value: null, readonly: false, onUpdate: () => {} })
+      expect(select.props.options.map((o) => o.value)).toEqual(['bank'])
+      wrapper.unmount()
+    } finally {
+      accountTree.mockReset().mockResolvedValue([])
+    }
   })
 
   it('mounts and loads its data', async () => {

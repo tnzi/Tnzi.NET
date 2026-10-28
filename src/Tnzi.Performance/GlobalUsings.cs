@@ -1,4 +1,3 @@
-global using Microsoft.AspNetCore.Builder;
 global using Microsoft.AspNetCore.Http;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.Extensions.Configuration;
@@ -14,6 +13,7 @@ global using System.Linq;
 global using System.Threading;
 global using System.Threading.Tasks;
 global using Tnzi.AspNetCore;
+global using Tnzi.AspNetCore.Http;
 global using Tnzi.AspNetCore.Models;
 global using Tnzi.AspNetCore.Mvc;
 global using Tnzi.Modules;
@@ -28,3 +28,5 @@ global using Tnzi.Settings;
 global using Tnzi.Utilities;
 global using Tnzi.Performance.Permissions;
 global using Tnzi.Services;
+global using Tnzi.AspNetCore.Extensions;
+global using Tnzi.AspNetCore.Middleware;

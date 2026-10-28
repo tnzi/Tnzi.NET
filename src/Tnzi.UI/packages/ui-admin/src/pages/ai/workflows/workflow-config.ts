@@ -3,6 +3,7 @@ import { h } from 'vue'
 import { formatDateTime } from '@tnzi/core'
 import type { ColumnDef } from '../../../headless/useColumnSettings'
 import type { FormSchemaItem } from '../../_shared/form-schema'
+import type { UpdateWorkflowDefinitionDto, WorkflowDefinitionDto } from '@tnzi/core/services/ai'
 import TStatusBadge from '../../../components/display/TStatusBadge.vue'
 
 /**
@@ -103,3 +104,15 @@ export const workflowFormSchema: FormSchemaItem[] = [
   },
   { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
 ]
+
+/**
+ * The list Edit modal's update: the fields {@link workflowFormSchema} shows,
+ * and only those. A list row also carries the steps and the graph
+ * configuration; sent back from the modal they reverted whatever the graph
+ * editor saved after the list loaded. A field the update leaves out is left
+ * as it is.
+ */
+export function toWorkflowUpdateDto(data: Partial<WorkflowDefinitionDto>): UpdateWorkflowDefinitionDto {
+  const row = data as Record<string, unknown>
+  return Object.fromEntries(workflowFormSchema.map((f) => [f.key, row[f.key]])) as UpdateWorkflowDefinitionDto
+}

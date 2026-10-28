@@ -5,6 +5,7 @@
     :title-help="t('titleHelp')"
     :translate="t"
     :search-fields="searchFields"
+    :show-default-search="false"
     :detail-width="720"
     :detail-title="detailTitle"
     :show-create="false"
@@ -151,6 +152,7 @@ import { createDualControlBridge } from '../../services/bridges/dual-control-bri
 import { useAdminClient } from '../../plugin/client'
 import { useAdminAuthStore } from '../../stores/useAdminAuthStore'
 import { EMPTY_DASH } from '../../utils/placeholders'
+import { formatJsonText } from '../../utils/json-text'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import {
@@ -184,8 +186,8 @@ const searchFields = computed(() => [
     type: 'select' as const,
     options: DUAL_CONTROL_STATUS_OPTIONS.map((v) => ({ label: v, value: v })),
   },
-  { key: 'operation', label: t('filters.operation'), type: 'input' as const },
-  { key: 'targetId', label: t('filters.targetId'), type: 'input' as const },
+  { key: 'operation', label: t('filters.operation'), type: 'text' as const },
+  { key: 'targetId', label: t('filters.targetId'), type: 'text' as const },
 ])
 
 const detailTitle = (row: DualControlRequestDto) => row.operation || t('title')
@@ -227,11 +229,15 @@ function detailItems(row: DualControlRequestDto) {
  *
  * Presentation only: the backend compares the stored snapshot byte for byte and
  * deliberately does NOT normalise JSON, so nothing here is ever sent back.
+ * Still re-indented rather than re-serialised: a parse round trip rounds ids
+ * past 2^53, and the approver would read a different record than the one the
+ * permit carries.
  */
 function prettyPayload(payload?: string | null): string {
   if (!payload) return ''
   try {
-    return JSON.stringify(JSON.parse(payload), null, 2)
+    JSON.parse(payload)
+    return formatJsonText(payload, { indent: 2, normalizeStrings: true })
   } catch {
     return payload
   }

@@ -30,9 +30,23 @@ public class AnthropicChatClientProvider : IChatClientProvider
         Check.NotNull(options);
         Check.NotNullOrWhiteSpace(model);
 
-        var client = CreateAnthropicClient(options);
-        var chatClient = client.AsIChatClient(model);
-        return new AnthropicThinkingChatClient(chatClient);
+        return CreateThinkingAwareClient(CreateAnthropicClient(options), model);
+    }
+
+    /// <summary>
+    /// SDK 适配器 + thinking 装饰器，按型号成对选定 thinking 的请求形态。
+    /// </summary>
+    /// <remarks>
+    /// 适配器只能在创建时选一种形态（SDK 默认 adaptive），而 4.6 之前的型号拒收 adaptive、4.7 起的型号拒收
+    /// <c>budget_tokens</c>，选错了一开推理就是 400。装饰器也要知道选了哪种：显式预算只在 extended 下发得出去。
+    /// </remarks>
+    internal static IChatClient CreateThinkingAwareClient(IAnthropicClient client, string model)
+    {
+        var adaptive = ModelCapabilities.UsesClaudeAdaptiveThinking(model);
+        var chatClient = client.AsIChatClient(
+            model,
+            thinkingMode: adaptive ? AnthropicThinkingMode.Adaptive : AnthropicThinkingMode.Extended);
+        return new AnthropicThinkingChatClient(chatClient, adaptive);
     }
 
     /// <summary>
@@ -64,7 +78,7 @@ public class AnthropicChatClientProvider : IChatClientProvider
 
         try
         {
-            var httpClient = _httpClientFactory.CreateClient(ResilientHttpClientNames.For(options.Name));
+            var httpClient = _httpClientFactory.CreateClient(options.HttpClientName ?? ResilientHttpClientNames.For(options.Name));
             if (options.TimeoutSeconds.HasValue)
             {
                 httpClient.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds.Value);
@@ -74,19 +88,28 @@ public class AnthropicChatClientProvider : IChatClientProvider
                 ? TimeSpan.FromSeconds(options.TimeoutSeconds.Value)
                 : null;
 
+            // 重试只留一层：框架的命名客户端（按提供商名的、回退的、租户端点的）都挂着 Polly 标准管线（重试 3 次）。
+            // SDK 自己默认再重试 2 次，而且连客户端超时也重试、无上限地遵从 Retry-After；它叠在 HttpClient 外面，
+            // 一次调用最多变成 3 轮完整的 Polly 重试（12 次 HTTP 尝试），HttpClient.Timeout（= TimeoutSeconds）也只约束其中一轮。
+            // 调用方另给的客户端名不保证有管线，照旧交给 SDK 重试（null = SDK 默认）。
+            int? maxRetries = options.HttpClientName is null || options.HttpClientName == ResilientHttpClientNames.TenantEndpoint
+                ? 0
+                : null;
             var client = baseUrl != null
                 ? new AnthropicClient
                 {
                     ApiKey = apiKey,
                     HttpClient = httpClient,
                     BaseUrl = baseUrl,
-                    Timeout = timeout
+                    Timeout = timeout,
+                    MaxRetries = maxRetries
                 }
                 : new AnthropicClient
                 {
                     ApiKey = apiKey,
                     HttpClient = httpClient,
-                    Timeout = timeout
+                    Timeout = timeout,
+                    MaxRetries = maxRetries
                 };
 
             return client;

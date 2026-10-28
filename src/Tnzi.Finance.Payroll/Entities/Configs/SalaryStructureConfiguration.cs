@@ -9,8 +9,8 @@ public class SalaryStructureConfiguration : EntityTypeConfigurationBase<SalarySt
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(s => s.Name).HasMaxLength(200).IsRequired();
-        builder.Property(s => s.Description).HasMaxLength(500);
+        builder.Property(s => s.Name).HasMaxLength(PayrollFieldLimits.NameMaxLength).IsRequired();
+        builder.Property(s => s.Description).HasMaxLength(PayrollFieldLimits.DescriptionMaxLength);
 
         builder.HasIndex(s => s.Name);
         builder.HasIndex(s => s.IsActive);

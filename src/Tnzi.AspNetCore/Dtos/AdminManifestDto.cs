@@ -61,7 +61,8 @@ public class AdminEntityEntryDto
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
-    /// Full route template, e.g. <c>"admin/users"</c>.
+    /// Controller-level route template without the API path prefix, e.g. <c>"admin/users"</c>
+    /// (served at <c>/api/admin/users</c> under the default <c>ApiPathPrefix</c>).
     /// </summary>
     public string Route { get; set; } = string.Empty;
 

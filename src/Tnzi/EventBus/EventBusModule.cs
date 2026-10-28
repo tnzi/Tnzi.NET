@@ -8,6 +8,12 @@ namespace Tnzi.EventBus;
 [DependsOn(typeof(CachingModule))]
 public class EventBusModule : TnziInfrastructureModule
 {
+    /// <summary>
+    /// 本模块在 <see cref="ConfigureServicesAsync"/> 里自动注册出的处理器描述符，
+    /// 留到 <see cref="PostConfigureServicesAsync"/> 与手动注册对账。
+    /// </summary>
+    private List<ServiceDescriptor> _autoRegisteredHandlers = [];
+
     public override int LoadOrder => 10;
 
     public override Task PreConfigureServicesAsync(ServiceConfigurationContext context)
@@ -35,6 +41,7 @@ public class EventBusModule : TnziInfrastructureModule
 
         // 如果启用自动注册，执行自动注册逻辑
         // 注意：此时无法获取 ILogger，使用 NullLogger（日志将在运行时通过 IEventBus 记录）
+        _autoRegisteredHandlers = [];
         if (options.AutoRegisterHandlers)
         {
             // 使用 NullLogger，因为此时服务还未完全注册
@@ -72,6 +79,100 @@ public class EventBusModule : TnziInfrastructureModule
         services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<LocalEventBus>());
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 撤下被手动注册覆盖的自动注册：同一个处理器每次事件只执行一次，生命周期以手动注册为准。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 本模块（LoadOrder 10）先于应用模块执行 <see cref="ConfigureServicesAsync"/>，扫描那一刻看不见应用模块随后写的
+    /// <c>AddEventHandler</c>，<see cref="IsAlreadyRegistered"/> 只拦得住更早的注册。两条描述符并存时同一个处理器
+    /// 每次事件执行两遍（重复发信、重复扣减），没有任何告警；而文档与示例都在推荐应用层手动注册。
+    /// 到 PostConfigure 时所有模块的 <c>ConfigureServicesAsync</c> 都已执行完，对账在这里做。
+    /// </para>
+    /// <para>
+    /// 刻意不把自动注册整个挪到这里：应用模块在 <c>ConfigureServicesAsync</c> 里 <c>RemoveEventHandler</c> /
+    /// <c>ReplaceEventHandler</c> 掉的自动注册处理器会被重新加回来。
+    /// 认不出的两种情形：经工厂委托注册的处理器（描述符上看不到实现类型），以及排在本模块之后的 PostConfigure 里才写的注册。
+    /// </para>
+    /// </remarks>
+    public override Task PostConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        RemoveAutoRegistrationsShadowedByManualOnes(context.Services);
+        return Task.CompletedTask;
+    }
+
+    private void RemoveAutoRegistrationsShadowedByManualOnes(IServiceCollection services)
+    {
+        if (_autoRegisteredHandlers.Count == 0)
+            return;
+
+        var autoRegistered = new HashSet<ServiceDescriptor>(_autoRegisteredHandlers, ReferenceEqualityComparer.Instance);
+        _autoRegisteredHandlers = [];
+
+        var manuallyRegistered = new HashSet<(Type ServiceType, Type ImplementationType)>();
+        foreach (var descriptor in services)
+        {
+            if (descriptor.IsKeyedService || autoRegistered.Contains(descriptor) || !IsEventHandlerService(descriptor.ServiceType))
+                continue;
+
+            var implementationType = descriptor.ImplementationType ?? descriptor.ImplementationInstance?.GetType();
+            if (implementationType != null)
+                manuallyRegistered.Add((descriptor.ServiceType, implementationType));
+        }
+
+        foreach (var descriptor in autoRegistered)
+        {
+            if (manuallyRegistered.Contains((descriptor.ServiceType, descriptor.ImplementationType!)))
+                services.Remove(descriptor);
+        }
+    }
+
+    private static bool IsEventHandlerService(Type serviceType)
+        => serviceType.IsGenericType && serviceType.GetGenericTypeDefinition() == typeof(IEventHandler<>);
+
+    /// <summary>
+    /// 启动自证：<c>EventBus:Type</c> 选了分布式传输时，容器里必须真的有 <see cref="IDistributedEventBus"/>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 只有传输模块自己读 <c>Type</c>，模块没加载时它们根本不运行。配了 <c>Type=RabbitMQ</c> 却漏了
+    /// <c>[DependsOn(typeof(RabbitMQEventBusModule))]</c> 的服务：集成事件经 <c>PublishEventAsync</c> 落到本地总线，
+    /// 发布成功、本服务的处理器照常执行、健康检查是绿的，只是别的服务永远收不到。
+    /// 与缓存、对象存储同口径：配了却没加载就抛异常并指名要加载的包，绝不回退。
+    /// </para>
+    /// <para>
+    /// 只问「注册了没有」，不解析也不看实现类型：解析会构造总线并连接代理，代理暂时不可达不该让这道检查失败；
+    /// 自定义传输是正当做法。
+    /// </para>
+    /// </remarks>
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        var type = context.ServiceProvider.GetService<IOptions<EventBusOptions>>()?.Value.Type;
+        string? package = null;
+        string? moduleName = null;
+        if (string.Equals(type, "RabbitMQ", StringComparison.OrdinalIgnoreCase))
+        {
+            (package, moduleName) = ("Tnzi.RabbitMQ", "RabbitMQEventBusModule");
+        }
+        else if (string.Equals(type, "Kafka", StringComparison.OrdinalIgnoreCase))
+        {
+            (package, moduleName) = ("Tnzi.Kafka", "KafkaEventBusModule");
+        }
+
+        if (package == null)
+            return Task.CompletedTask;
+
+        var isService = context.ServiceProvider.GetService<IServiceProviderIsService>();
+        if (isService == null || isService.IsService(typeof(IDistributedEventBus)))
+            return Task.CompletedTask;
+
+        throw new ConfigurationException(
+            "EventBus:Type",
+            $"EventBus:Type is '{type}' but no IDistributedEventBus is registered, so integration events would only be " +
+            "delivered inside this process while publishing, logs and health checks all look healthy. " +
+            $"Load the {package} package ([DependsOn(typeof({moduleName}))]) or set EventBus:Type to 'Local'.");
     }
 
     /// <summary>
@@ -145,7 +246,10 @@ public class EventBusModule : TnziInfrastructureModule
                     // TryAddEnumerable 会检查是否已存在相同的 ServiceType + ImplementationType，避免重复注册
                     var handlerServiceType = typeof(IEventHandler<>).MakeGenericType(eventType);
                     var descriptor = new ServiceDescriptor(handlerServiceType, handlerInfo.HandlerType, lifetime);
+                    var countBefore = services.Count;
                     services.TryAddEnumerable(descriptor);
+                    if (services.Count > countBefore)
+                        _autoRegisteredHandlers.Add(descriptor);
 
                     registeredCount++;
                     logger.LogDebug("Auto-registered handler {HandlerType} for event {EventType} with lifetime {Lifetime}",
@@ -263,11 +367,9 @@ public class EventBusModule : TnziInfrastructureModule
         else
         {
             // 扫描所有已加载的非系统程序集。
-            // 框架程序集（Tnzi.*）默认被排除：framework rule 要求所有
-            // Tnzi.* handler 必须 manual register via `AddEventHandler<TEvent, THandler>()`。
-            // 若同时被 auto-scan 扫到，由于 EventBusModule 比应用模块先跑，
-            // IsAlreadyRegistered 在 auto-scan 时还看不到后续的手动注册，
-            // 结果同一 handler 在 DI 出现两条 descriptor → 一次事件被调用两次。
+            // 框架程序集（Tnzi.*）默认被排除：框架模块的处理器一律经 `AddEventHandler<TEvent, THandler>()`
+            // 手动注册，其中一部分按配置有条件地注册，扫描会把模块刻意没注册的那些也加进来。
+            // （与手动注册重复的自动注册由 PostConfigureServicesAsync 撤下，不会让同一处理器执行两遍。）
             // 用 `EventBus.ExcludeFrameworkAssemblies = false` 可恢复旧行为。
             return AppDomain.CurrentDomain.GetAssemblies()
                 .Where(a =>

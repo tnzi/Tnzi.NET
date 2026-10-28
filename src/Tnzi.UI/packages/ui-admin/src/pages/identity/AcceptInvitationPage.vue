@@ -86,13 +86,16 @@
  * `meta.requiresAuth = false`, a centred card, no admin shell. The person opening this
  * link has, by definition, no account they can sign in with yet - every issuance path
  * refuses an `InvitationPending` account until the invitation is accepted - so an
- * acceptance page behind the login form would be unreachable. Until this landed the
- * default invite link (`{System:FrontendUrl}/accept-invitation?token=`) pointed at the
- * 404 route: the admin half (invite / resend / revoke) was complete, the recipient half
- * did not exist.
+ * acceptance page behind the login form would be unreachable.
+ *
+ * The route sits under the admin `basePath` like every other top-level route, so with
+ * the default `/admin` it is served at `/admin/accept-invitation`, which is where the
+ * backend's default invite link points (`{System:FrontendUrl}/admin/accept-invitation?token=`).
+ * An app mounted on another `basePath` (`/`, `/console`) sets
+ * `Identity:Invitation:AcceptUrlTemplate` to this page's real address.
  *
  * Three things on purpose:
- *  - **Preview first, then act.** `GET invitations/{token}` does not consume the token
+ *  - **Preview first, then act.** `POST invitations/preview` does not consume the token
  *    and shows a masked contact so the invitee can confirm "this is me" - the link may
  *    have been forwarded.
  *  - **`completed: false` is not an error.** The app's acceptance handler may want more
@@ -107,8 +110,9 @@
  *   `DefaultInvitationUrlGenerator` builds it: mail clients handle query strings most
  *   consistently when forwarding, and the route path stays a plain literal.
  *
- * Override: register a route at the same path (`/accept-invitation`) to replace this
- * page, or set `Identity:Invitation:AcceptUrlTemplate` to point the link elsewhere.
+ * Override: register a route at the same path (`/accept-invitation`, prefixed with the
+ * `basePath` like this one) to replace this page, or set
+ * `Identity:Invitation:AcceptUrlTemplate` to point the link elsewhere.
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

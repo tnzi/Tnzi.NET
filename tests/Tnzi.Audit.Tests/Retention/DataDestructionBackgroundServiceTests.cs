@@ -18,6 +18,29 @@ namespace Tnzi.Audit.Tests.Retention;
 /// </remarks>
 public class DataDestructionBackgroundServiceTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(DataDestructionOptions.MaxIntervalHours + 1)]
+    public void Validator_RejectsAnIntervalTheLoopCannotSleep(int hours)
+    {
+        // Task.Delay 等不了 49 天以上；放行一个写大了的间隔 = 第一轮之后后台服务抛异常、宿主停机。
+        var result = new DataDestructionOptionsValidator().Validate(null, new DataDestructionOptions { Enabled = true, IntervalHours = hours });
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain(nameof(DataDestructionOptions.IntervalHours));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(24)]
+    [InlineData(DataDestructionOptions.MaxIntervalHours)]
+    public void Validator_AcceptsAnIntervalWithinTheBounds(int hours)
+    {
+        new DataDestructionOptionsValidator().Validate(null, new DataDestructionOptions { Enabled = true, IntervalHours = hours })
+            .Succeeded.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task DuplicatePolicyFailure_IsStillLoggedAsError()
     {
@@ -72,7 +95,58 @@ public class DataDestructionBackgroundServiceTests
         logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
     }
 
+    /// <summary>
+    /// 一轮只销毁 BatchSize 条；还有剩余时同一周期接着跑，而不是睡满 IntervalHours 再来
+    /// （否则每天到期量超过 BatchSize 的策略积压只会线性增长）。
+    /// </summary>
+    [Fact]
+    public async Task Backlog_IsWorkedOffWithinTheSameCycle()
+    {
+        var runs = new Queue<Result<DataDestructionRunDto>>([Pass(destroyed: 500, hasMore: true), Pass(destroyed: 500, hasMore: true), Pass(destroyed: 120, hasMore: false)]);
+        var calls = 0;
+        var service = Create(new CapturingLogger(), () => { calls++; return runs.Dequeue(); });
+
+        await service.RunOnceAsync(CancellationToken.None);
+
+        calls.ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Backlog_StopsAtTheCapPerCycle()
+    {
+        // 销毁器没让行离开到期集合（只匿名化）时每一轮都「还有剩余」：上限挡住死循环。
+        var calls = 0;
+        var service = Create(new CapturingLogger(), () => { calls++; return Pass(destroyed: 500, hasMore: true); });
+
+        await service.RunOnceAsync(CancellationToken.None);
+
+        calls.ShouldBe(DataDestructionBackgroundService.MaxRunsPerCycle);
+    }
+
+    [Theory]
+    [InlineData(true, 500)]   // 空跑：什么都没删，下一轮拿回的是同一批
+    [InlineData(false, 0)]    // 一条没销毁（整批保全或销毁器没删）：接着跑只会原地打转
+    public async Task NoProgress_DoesNotRunAgain(bool dryRun, int destroyed)
+    {
+        var calls = 0;
+        var service = Create(new CapturingLogger(), () => { calls++; return Pass(destroyed, hasMore: true, dryRun); });
+
+        await service.RunOnceAsync(CancellationToken.None);
+
+        calls.ShouldBe(1);
+    }
+
+    private static Result<DataDestructionRunDto> Pass(int destroyed, bool hasMore, bool dryRun = false)
+    {
+        var run = new DataDestructionRunDto { IsDryRun = dryRun };
+        run.Policies.Add(new DataDestructionPolicyResultDto { PolicyName = "p", DestroyedCount = destroyed, HasMore = hasMore });
+        return Result<DataDestructionRunDto>.Success(run);
+    }
+
     private static DataDestructionBackgroundService Create(ILogger<DataDestructionBackgroundService> logger, Result<DataDestructionRunDto> outcome)
+        => Create(logger, () => outcome);
+
+    private static DataDestructionBackgroundService Create(ILogger<DataDestructionBackgroundService> logger, Func<Result<DataDestructionRunDto>> outcome)
     {
         var services = new ServiceCollection();
         services.AddScoped<IDataDestructionService>(_ => new StubDestructionService(outcome));
@@ -84,9 +158,9 @@ public class DataDestructionBackgroundServiceTests
             logger);
     }
 
-    private sealed class StubDestructionService(Result<DataDestructionRunDto> outcome) : IDataDestructionService
+    private sealed class StubDestructionService(Func<Result<DataDestructionRunDto>> outcome) : IDataDestructionService
     {
-        public Task<Result<DataDestructionRunDto>> RunAsync(CancellationToken cancellationToken = default) => Task.FromResult(outcome);
+        public Task<Result<DataDestructionRunDto>> RunAsync(CancellationToken cancellationToken = default) => Task.FromResult(outcome());
 
         public Task<Result> VerifyChainAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

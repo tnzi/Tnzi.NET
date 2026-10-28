@@ -57,7 +57,8 @@ public class ExceptionHandlingResult
     public string? ErrorDetail { get; set; }
 
     /// <summary>
-    /// 是否继续使用默认处理逻辑
+    /// 是否继续使用默认处理逻辑：为 true 时忽略本结果的其余字段，由内置处理器链写出标准错误信封
+    /// （适合只做旁路动作，如告警、记录，而不改变响应的处理器）
     /// </summary>
     public bool ShouldContinueHandling { get; set; } = false;
 }

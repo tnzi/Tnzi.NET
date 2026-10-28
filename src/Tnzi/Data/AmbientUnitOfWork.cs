@@ -17,7 +17,7 @@ public interface IAmbientUnitOfWorkScope
     /// 将操作排入事务提交后执行队列
     /// 事务提交成功后按入队顺序执行;事务回滚时全部丢弃
     /// </summary>
-    /// <param name="action">提交后执行的操作</param>
+    /// <param name="action">提交后执行的操作；收到的令牌不可取消（不是请求的取消令牌，事务此时已经提交）</param>
     void EnqueuePostCommit(Func<CancellationToken, Task> action);
 }
 

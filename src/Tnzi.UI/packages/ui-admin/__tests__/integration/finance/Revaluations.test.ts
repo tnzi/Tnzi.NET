@@ -101,4 +101,43 @@ describe('Finance Revaluations page', () => {
     const arg = runFn.mock.calls[0]![0] as { asOf: string; accountIds: string[] | null }
     expect(arg.accountIds).toEqual(['a1'])
   })
+
+  // The server reads "no account list" as "every eligible account". Unchecking
+  // every row is how someone says "post none of these", so Execute must not
+  // turn it into a run over all of them.
+  it('★ an emptied selection posts nothing instead of revaluing every account', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as RevalVm & { onChecked: (keys: string[]) => void; canExecute: boolean; displayedTotal: number }
+
+    await vm.doPreview()
+    vm.onChecked([])
+    await flushPromises()
+
+    expect(vm.canExecute).toBe(false)
+    expect(vm.displayedTotal).toBe(0)
+    await vm.execute()
+    expect(runFn).not.toHaveBeenCalled()
+  })
+
+  // Execute posts as of the date in the picker. A preview read for another date
+  // shows amounts that run would not post, so changing the date drops it.
+  it('★ changing the as-of date drops the preview it no longer matches', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as RevalVm & { asOfTs: number | null; canExecute: boolean }
+
+    vm.asOfTs = new Date(2026, 2, 31).getTime()
+    await flushPromises()
+    await vm.doPreview()
+    expect(vm.canExecute).toBe(true)
+
+    vm.asOfTs = new Date(2026, 3, 30).getTime()
+    await flushPromises()
+
+    expect(vm.preview).toBeNull()
+    expect(vm.canExecute).toBe(false)
+    await vm.execute()
+    expect(runFn).not.toHaveBeenCalled()
+  })
 })

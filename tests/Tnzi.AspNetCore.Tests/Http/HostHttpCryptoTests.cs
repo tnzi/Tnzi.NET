@@ -263,4 +263,170 @@ public class HostHttpCryptoTests
 
         Assert.Equal(plaintext, seen);
     }
+
+    // ---------------------------------------------------------------
+    // 已协商但正文不是本协议格式：原样透传、不验签，日志也不说「已验签」
+    // ---------------------------------------------------------------
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+    }
+
+    [Fact]
+    public async Task APlaintextBody_WithANegotiatedKey_PassesThrough_WithoutClaimingVerification()
+    {
+        var host = NewParty();
+        var client = NewParty();
+        const string plaintext = """{"userName":"alice"}""";
+        var logger = new RecordingLogger<HostHttpCrypto>();
+        var crypto = new HostHttpCrypto(
+            Microsoft.Extensions.Options.Options.Create(new AspNetCoreOptions
+            {
+                HttpEncrypt = new HttpEncryptOptions { Enabled = true, HostPrivateKey = host.PrivateKey, HostPublicKey = host.PublicKey }
+            }),
+            logger);
+
+        string? seen = null;
+        await RunAsync(crypto, RequestFrom(client, HttpMethods.Post, body: plaintext), async ctx =>
+        {
+            using var reader = new StreamReader(ctx.Request.Body, leaveOpen: true);
+            seen = await reader.ReadToEndAsync();
+            await ctx.Response.WriteAsync("{}");
+        });
+
+        Assert.Equal(plaintext, seen);
+        Assert.DoesNotContain(logger.Messages, m => m.Contains("verify the data"));
+        Assert.Contains(logger.Messages, m => m.Contains("not in the encrypted transport format"));
+    }
+
+    [Fact]
+    public void IsEncryptedPayload_TellsTheProtocolFormatFromPlainText()
+    {
+        var host = NewParty();
+        var client = NewParty();
+        var sender = new TransmissionEncryptor(client.PrivateKey, host.PublicKey);
+        var receiver = new TransmissionEncryptor(host.PrivateKey, client.PublicKey);
+        const string plaintext = """{"userName":"alice"}""";
+
+        var cipher = sender.EncryptData(plaintext);
+
+        Assert.True(receiver.IsEncryptedPayload(cipher));
+        Assert.Equal(plaintext, receiver.DecryptAndVerifyData(cipher));
+        Assert.False(receiver.IsEncryptedPayload(plaintext));
+        Assert.Same(plaintext, receiver.DecryptAndVerifyData(plaintext));
+    }
+
+    // ---------------------------------------------------------------
+    // 请求解密的上界与失败语义：解密在认证与限流之前，任何带 ClientPublicKey 头的未认证调用方都够得着
+    // ---------------------------------------------------------------
+
+    private static HostHttpCrypto CryptoFor(Party host, int maxRequestBodyBytes)
+        => new(
+            Microsoft.Extensions.Options.Options.Create(new AspNetCoreOptions
+            {
+                HttpEncrypt = new HttpEncryptOptions
+                {
+                    Enabled = true,
+                    HostPrivateKey = host.PrivateKey,
+                    HostPublicKey = host.PublicKey,
+                    MaxRequestBodyBytes = maxRequestBodyBytes
+                }
+            }),
+            NullLogger<HostHttpCrypto>.Instance);
+
+    [Fact]
+    public async Task ADeclaredBodyOverTheLimit_IsRejectedWith413BeforeAnyByteIsRead()
+    {
+        var host = NewParty();
+        var context = RequestFrom(NewParty(), HttpMethods.Post);
+        var body = new CountingStream(new byte[4096]);
+        context.Request.Body = body;
+        context.Request.ContentLength = 4096;
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => CryptoFor(host, 1024).DecryptRequest(context.Request));
+
+        Assert.Equal(413, error.HttpStatusCode);
+        Assert.Equal(0, body.BytesRead);
+    }
+
+    [Fact]
+    public async Task AChunkedBodyOverTheLimit_IsRejectedWith413AfterReadingAtMostOneByteMore()
+    {
+        // 没有 Content-Length 时此前读到底再说：一个 30 MB 的体就是约 60 MB 的 UTF-16 字符串
+        var host = NewParty();
+        var context = RequestFrom(NewParty(), HttpMethods.Post);
+        var body = new CountingStream(new byte[64 * 1024]);
+        context.Request.Body = body;
+        context.Request.ContentLength = null;
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => CryptoFor(host, 1024).DecryptRequest(context.Request));
+
+        Assert.Equal(413, error.HttpStatusCode);
+        Assert.True(body.BytesRead <= 1025 + 4096, $"read {body.BytesRead} bytes");
+    }
+
+    [Fact]
+    public async Task AMalformedCiphertext_IsAClientError_NotAServerError()
+    {
+        // 此前任何解密失败都包成普通 TnziException，异常处理中间件记成 500
+        var host = NewParty();
+        // 分隔符在线上是 base64 形态：带上它才会进入解密分支（没有分隔符的体被当作明文原样放行）
+        var separator = Convert.ToBase64String(Encoding.UTF8.GetBytes("#@|tnzi|@#"));
+        var context = RequestFrom(NewParty(), HttpMethods.Post, body: $"not-base64!{separator}garbage");
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => CryptoFor(host).DecryptRequest(context.Request));
+
+        Assert.Equal(400, error.HttpStatusCode);
+        Assert.Equal(ErrorCodes.DATA_INVALID, error.Code);
+    }
+
+    [Fact]
+    public async Task ABodyWithinTheLimit_IsStillDecrypted()
+    {
+        var host = NewParty();
+        var client = NewParty();
+        var ciphertext = new TransmissionEncryptor(client.PrivateKey, host.PublicKey).EncryptData("""{"q":"x"}""");
+        var context = RequestFrom(client, HttpMethods.Post, body: ciphertext);
+
+        await CryptoFor(host, ciphertext.Length).DecryptRequest(context.Request);
+
+        using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+        Assert.Equal("""{"q":"x"}""", await reader.ReadToEndAsync());
+    }
+
+    /// <summary>不可定位、记录读了多少字节的请求体（Kestrel 给的就是不可定位的流）。</summary>
+    private sealed class CountingStream(byte[] bytes) : Stream
+    {
+        private readonly MemoryStream _inner = new(bytes);
+        public long BytesRead { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = _inner.Read(buffer, offset, count);
+            BytesRead += read;
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var read = await _inner.ReadAsync(buffer, cancellationToken);
+            BytesRead += read;
+            return read;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 }

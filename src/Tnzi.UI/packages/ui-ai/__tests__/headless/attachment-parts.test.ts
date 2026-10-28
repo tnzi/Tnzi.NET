@@ -21,11 +21,11 @@ describe('filesToContentParts', () => {
     const result = await filesToContentParts('what is this?', [makeFile('a.png', 'image/png', [0x89, 0x50, 0x4e, 0x47])]);
     expect(result.parts).toEqual([
       { type: 'text', text: 'what is this?' },
-      { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png' },
+      { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png', fileName: 'a.png' },
     ]);
     // The user row renders the same bytes as a thumbnail.
     expect(result.attachments).toEqual([
-      { type: 'image', fileName: 'a.png', mediaType: 'image/png', base64Data: 'iVBORw==' },
+      { type: 'image', fileName: 'a.png', mediaType: 'image/png', base64Data: 'iVBORw==', size: 4 },
     ]);
   });
 
@@ -56,13 +56,13 @@ describe('filesToContentParts', () => {
 
   it('references a non-image file through the upload hook', async () => {
     const uploadFile = vi.fn(async (file: File) => ({ id: 'f-1', fileName: file.name }));
-    const result = await filesToContentParts('summarise', [makeFile('doc.pdf', 'application/pdf')], { uploadFile });
+    const result = await filesToContentParts('summarise', [makeFile('notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')], { uploadFile });
     expect(uploadFile).toHaveBeenCalledTimes(1);
     expect(result.parts).toEqual([
       { type: 'text', text: 'summarise' },
-      { type: 'file', fileId: 'f-1', fileName: 'doc.pdf' },
+      { type: 'file', fileId: 'f-1', fileName: 'notes.docx' },
     ]);
-    expect(result.attachments).toEqual([{ type: 'file', fileId: 'f-1', fileName: 'doc.pdf' }]);
+    expect(result.attachments).toEqual([{ type: 'file', fileId: 'f-1', fileName: 'notes.docx' }]);
   });
 
   /**
@@ -71,10 +71,10 @@ describe('filesToContentParts', () => {
    * refusal the user sees, not a request that quietly leaves the file behind.
    */
   it('refuses a non-image file when no upload hook is configured', async () => {
-    await expect(filesToContentParts('x', [makeFile('doc.pdf', 'application/pdf')])).rejects.toBeInstanceOf(
+    await expect(filesToContentParts('x', [makeFile('notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')])).rejects.toBeInstanceOf(
       AttachmentRefusedError,
     );
-    await expect(filesToContentParts('x', [makeFile('doc.pdf', 'application/pdf')])).rejects.toThrow(/doc\.pdf/);
+    await expect(filesToContentParts('x', [makeFile('notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')])).rejects.toThrow(/notes\.docx/);
   });
 
   it('refuses an oversized attachment before anything is read or uploaded', async () => {
@@ -89,7 +89,7 @@ describe('filesToContentParts', () => {
       throw new Error('storage down');
     });
     await expect(
-      filesToContentParts('x', [makeFile('doc.pdf', 'application/pdf')], { uploadFile }),
+      filesToContentParts('x', [makeFile('notes.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')], { uploadFile }),
     ).rejects.toThrow('storage down');
   });
 });

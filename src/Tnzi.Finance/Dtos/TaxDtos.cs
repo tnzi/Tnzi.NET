@@ -54,8 +54,11 @@ public class TaxCodeDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsActive { get; set; }
-    /// <summary>采购税是否可抵扣（false = 不可抵扣、作为成本，见 <see cref="Entities.TaxCode.IsRecoverable"/>）</summary>
-    public bool IsRecoverable { get; set; } = true;
+    /// <summary>
+    /// 采购税是否可抵扣（false = 不可抵扣、作为成本，见 <see cref="Entities.TaxCode.IsRecoverable"/>）。
+    /// ★ 刻意不设默认值：编辑表单由这里预填后整单回写，漏映射时宁可显式答 false，也不要「看起来对」的 true
+    /// </summary>
+    public bool IsRecoverable { get; set; }
     public List<TaxCodeComponentDto> Components { get; set; } = new();
 }
 

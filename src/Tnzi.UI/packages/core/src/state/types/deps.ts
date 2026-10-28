@@ -22,8 +22,18 @@ export interface StateDeps {
   theme?: ThemeAdapter;
   /** Router adapter (optional) */
   router?: RouterAdapter;
-  /** Custom function to fetch user permissions (optional, used after token refresh/restore) */
-  permissionsFetchFn?: () => Promise<string[]>;
+  /**
+   * How the signed-in user's permission codes are loaded (after login, restore
+   * and every token refresh), feeding `hasPermission()` / `hasAnyPermission()`.
+   *
+   * Left undefined, the framework's own access profile is read
+   * (`GET /admin/function-authorization/access-profile`). Pass a function to
+   * load them elsewhere, or `null` to skip loading in an app that never checks
+   * a permission - `hasPermission()` then answers `false` to everything, so a
+   * surface gated on it never appears, with nothing logged. That silent denial
+   * is why loading is the default rather than opt-in.
+   */
+  permissionsFetchFn?: (() => Promise<string[]>) | null;
   /** Callback invoked after logout completes (e.g., to clear UserStateManager) */
   onLogout?: () => void | Promise<void>;
   /**

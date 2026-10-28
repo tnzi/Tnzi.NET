@@ -23,15 +23,22 @@ public class AltchaCaptchaProvider : ICaptchaProvider
     public const string ProviderName = "altcha";
 
     /// <summary>
-    /// 默认控件脚本（jsDelivr，<b>钉在 3.x 大版本线</b>）。自托管改 <c>AspNetCore:Captcha:ScriptUrl</c>。
+    /// 默认控件脚本（jsDelivr，<b>钉在精确版本</b>）。自托管改 <c>AspNetCore:Captcha:ScriptUrl</c>。
     /// </summary>
     /// <remarks>
+    /// <para>
     /// 前端驱动（<c>@tnzi/core</c> 的 <c>mountCaptchaWidget</c>）按 3.x 的属性契约挂控件（出题地址写在 <c>challenge</c>
-    /// 属性上；2.x 的 <c>challengeurl</c> 也一并写着）。不钉大版本的地址会随 npm latest 漂过驱动会说的那一版，
-    /// 而症状只在浏览器里出现：构建与启动都不报错，控件却拿不到题。2026-09-17 实发于 3.x（当时地址不带版本，
-    /// 驱动只写 2.x 的属性名）。
+    /// 属性上；2.x 的 <c>challengeurl</c> 也一并写着）。地址一旦随 npm 漂走，症状只在浏览器里出现：构建与启动都不报错，
+    /// 控件却拿不到题。2026-09-17 实发于 3.x（当时地址不带版本，驱动只写 2.x 的属性名）。
+    /// </para>
+    /// <para>
+    /// 只钉大版本也不够：3.4.0 的 V1 挑战识别写坏了（对任何对象都判否），而本端出的正是 V1 挑战，控件报
+    /// 「Challenge validation failed」。所以钉的是 <c>@tnzi/core</c> 用真控件跑测试的同一个版本
+    /// （<c>AltchaCaptchaProviderTests</c> 守着两边一致），路径是 3.x 的 <c>dist/main/</c>，2.x 的
+    /// <c>dist/altcha.min.js</c> 在 3.x 上是 404。
+    /// </para>
     /// </remarks>
-    public const string DefaultScriptUrl = "https://cdn.jsdelivr.net/npm/altcha@3/dist/altcha.min.js";
+    public const string DefaultScriptUrl = "https://cdn.jsdelivr.net/npm/altcha@3.2.2/dist/main/altcha.min.js";
 
     /// <summary>挑战端点模板（相对 API 根，<c>{purpose}</c> 由客户端替换）。</summary>
     public const string ChallengePath = "captcha/altcha/challenge?purpose={purpose}";

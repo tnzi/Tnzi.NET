@@ -11,6 +11,12 @@ public class PromotionService : ApplicationService, IPromotionService
     private readonly IOptionsMonitor<PromotionOptions> _promotionOptions;
 
     /// <summary>
+    /// 支付侧的配置：不带币种创建的促销落在 <see cref="PaymentOptions.DefaultCurrency"/> 上，
+    /// 与不带币种的订单同一个默认值，否则同一张券在结账时会被判币种不符。
+    /// </summary>
+    private readonly IOptionsMonitor<PaymentOptions> _paymentOptions;
+
+    /// <summary>
     /// 渠道侧优惠券同步的实现。未加载任何渠道包时为 null，此时同步端点返回 501 并指名要加载什么，
     /// 而不是当作已同步。
     /// </summary>
@@ -23,6 +29,7 @@ public class PromotionService : ApplicationService, IPromotionService
     /// 这个探针只会让校验多拒绝，从不让它少拒绝。
     /// </summary>
     private readonly ISubscriptionHistoryProbe? _subscriptionHistory;
+    private readonly IBillingAccountResolver? _accountResolver;
 
     /// <summary>没有渠道同步实现时给出的提示，同时用于日志与失败结果。</summary>
     private const string CouponSyncMissingMessage =
@@ -30,22 +37,31 @@ public class PromotionService : ApplicationService, IPromotionService
         + "Load the Tnzi.Payment.Stripe module ([DependsOn(typeof(PaymentStripeModule))]) "
         + "or register your own IPaymentChannelCouponSync.";
 
+    /// <summary>百分比折扣的上限：超过 100% 的折扣意味着倒贴钱给买家。</summary>
+    private const decimal MaxPercentageDiscount = 100m;
+
+    private const string PercentageDiscountTooLargeMessage = "A percentage discount cannot exceed 100.";
+
     public PromotionService(
         IRepository<Promotion, Guid> promotionRepository,
         IRepository<CouponUsage, Guid> couponUsageRepository,
         IRepository<UserCoupon, Guid> userCouponRepository,
         IOptionsMonitor<PromotionOptions> promotionOptions,
+        IOptionsMonitor<PaymentOptions> paymentOptions,
         IServiceProvider serviceProvider,
         IPaymentChannelCouponSync? couponSync = null,
-        ISubscriptionHistoryProbe? subscriptionHistory = null)
+        ISubscriptionHistoryProbe? subscriptionHistory = null,
+        IBillingAccountResolver? accountResolver = null)
         : base(serviceProvider)
     {
         _promotionRepository = Check.NotNull(promotionRepository);
         _couponUsageRepository = Check.NotNull(couponUsageRepository);
         _userCouponRepository = Check.NotNull(userCouponRepository);
         _promotionOptions = Check.NotNull(promotionOptions);
+        _paymentOptions = Check.NotNull(paymentOptions);
         _couponSync = couponSync;
         _subscriptionHistory = subscriptionHistory;
+        _accountResolver = accountResolver;
     }
 
     public async Task<Result<PromotionDto>> CreateAsync(CreatePromotionDto request, CancellationToken cancellationToken = default)
@@ -62,6 +78,9 @@ public class PromotionService : ApplicationService, IPromotionService
         if (request.ApplyScope != ApplyScope.Global && (request.ScopeIds == null || request.ScopeIds.Count == 0))
             return Fail<PromotionDto>(ErrorCodes.CouponScopeMismatch, 400);
 
+        if (request.DiscountType == DiscountType.Percentage && request.DiscountValue > MaxPercentageDiscount)
+            return Fail<PromotionDto>(PercentageDiscountTooLargeMessage, 400);
+
         var promotion = new Promotion
         {
             PromotionCode = request.PromotionCode,
@@ -70,7 +89,7 @@ public class PromotionService : ApplicationService, IPromotionService
             Type = request.Type,
             DiscountValue = request.DiscountValue,
             DiscountType = request.DiscountType,
-            Currency = request.Currency,
+            Currency = ResolveCurrency(request.Currency),
             MaxDiscountAmount = request.MaxDiscountAmount,
             MinimumOrderAmount = request.MinimumOrderAmount,
             ProductType = request.ProductType,
@@ -95,51 +114,77 @@ public class PromotionService : ApplicationService, IPromotionService
         return Ok(ToDto(promotion));
     }
 
+    /// <summary>
+    /// 促销的币种：调用方指定的按 ISO 4217 规范写法（去空白、大写）落库，没指定就是本部署的默认币种。
+    /// </summary>
+    /// <remarks>
+    /// 结账侧按不区分大小写比较币种，但列表、渠道同步与报表读的是原样，所以落库前统一写法。
+    /// </remarks>
+    private string ResolveCurrency(string? requested) =>
+        string.IsNullOrWhiteSpace(requested)
+            ? _paymentOptions.CurrentValue.DefaultCurrency
+            : requested.Trim().ToUpperInvariant();
+
     public async Task<Result> UpdateAsync(Guid id, UpdatePromotionDto request, CancellationToken cancellationToken = default)
     {
         Check.NotNull(request);
 
-        var promotion = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
-        if (promotion == null)
+        // 百分比折扣不能超过 100：折扣类型建好就不能改，这里只在改折扣值时按库里那一行的类型判一次
+        if (request.DiscountValue > MaxPercentageDiscount
+            && await _promotionRepository.AnyAsync(p => p.Id == id && p.DiscountType == DiscountType.Percentage, cancellationToken))
+        {
+            return Fail(PercentageDiscountTooLargeMessage, 400);
+        }
+
+        // ★ 只写请求里给了的那几列（外加修改时间），不读出来再整行写回。UsedCount 由核销 / 归还经裸 SQL 原子增减，
+        // 总量上限的 CAS 也靠它：读出快照、改几列、整行写回，读与写之间落地的核销就被写回旧值，
+        // 限量券于是超发（读到 60、期间又核销 15、写回 60，CAS 以为还剩 40 个名额）。
+        var now = DateTime.UtcNow;
+        var updated = await _promotionRepository.AsQueryable()
+            .Where(p => p.Id == id)
+            .ExecuteUpdateAsync(s =>
+            {
+                if (request.Name != null)
+                    s.SetProperty(p => p.Name, request.Name);
+
+                if (request.Description != null)
+                    s.SetProperty(p => p.Description, request.Description);
+
+                if (request.DiscountValue.HasValue)
+                    s.SetProperty(p => p.DiscountValue, request.DiscountValue.Value);
+
+                if (request.MaxDiscountAmount.HasValue)
+                    s.SetProperty(p => p.MaxDiscountAmount, request.MaxDiscountAmount.Value);
+
+                if (request.MinimumOrderAmount.HasValue)
+                    s.SetProperty(p => p.MinimumOrderAmount, request.MinimumOrderAmount.Value);
+
+                if (request.EndTime.HasValue)
+                    s.SetProperty(p => p.EndTime, request.EndTime.Value);
+
+                if (request.TotalUsageLimit.HasValue)
+                    s.SetProperty(p => p.TotalUsageLimit, request.TotalUsageLimit.Value);
+
+                if (request.PerUserUsageLimit.HasValue)
+                    s.SetProperty(p => p.PerUserUsageLimit, request.PerUserUsageLimit.Value);
+
+                if (request.Stackable.HasValue)
+                    s.SetProperty(p => p.Stackable, request.Stackable.Value);
+
+                if (request.Priority.HasValue)
+                    s.SetProperty(p => p.Priority, request.Priority.Value);
+
+                if (request.IsActive.HasValue)
+                    s.SetProperty(p => p.IsActive, request.IsActive.Value);
+
+                if (request.IsPublic.HasValue)
+                    s.SetProperty(p => p.IsPublic, request.IsPublic.Value);
+
+                s.SetProperty(p => p.LastModificationTime, now);
+            }, cancellationToken);
+
+        if (updated == 0)
             return Fail(ErrorCodes.PromotionNotFound, 404);
-
-        if (request.Name != null)
-            promotion.Name = request.Name;
-
-        if (request.Description != null)
-            promotion.Description = request.Description;
-
-        if (request.DiscountValue.HasValue)
-            promotion.DiscountValue = request.DiscountValue.Value;
-
-        if (request.MaxDiscountAmount.HasValue)
-            promotion.MaxDiscountAmount = request.MaxDiscountAmount.Value;
-
-        if (request.MinimumOrderAmount.HasValue)
-            promotion.MinimumOrderAmount = request.MinimumOrderAmount.Value;
-
-        if (request.EndTime.HasValue)
-            promotion.EndTime = request.EndTime.Value;
-
-        if (request.TotalUsageLimit.HasValue)
-            promotion.TotalUsageLimit = request.TotalUsageLimit.Value;
-
-        if (request.PerUserUsageLimit.HasValue)
-            promotion.PerUserUsageLimit = request.PerUserUsageLimit.Value;
-
-        if (request.Stackable.HasValue)
-            promotion.Stackable = request.Stackable.Value;
-
-        if (request.Priority.HasValue)
-            promotion.Priority = request.Priority.Value;
-
-        if (request.IsActive.HasValue)
-            promotion.IsActive = request.IsActive.Value;
-
-        if (request.IsPublic.HasValue)
-            promotion.IsPublic = request.IsPublic.Value;
-
-        await _promotionRepository.UpdateAsync(promotion, cancellationToken);
 
         Logger.LogInformation("Promotion updated. Id: {Id}", id);
 
@@ -148,12 +193,16 @@ public class PromotionService : ApplicationService, IPromotionService
 
     public async Task<Result> DeactivateAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var promotion = await _promotionRepository.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
-        if (promotion == null)
-            return Fail(ErrorCodes.PromotionNotFound, 404);
+        // 只写这一列（理由同 UpdateAsync：整行写回会冲掉并发核销对 UsedCount 的增减）
+        var now = DateTime.UtcNow;
+        var deactivated = await _promotionRepository.AsQueryable()
+            .Where(p => p.Id == id)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.IsActive, false)
+                .SetProperty(p => p.LastModificationTime, now), cancellationToken);
 
-        promotion.IsActive = false;
-        await _promotionRepository.UpdateAsync(promotion, cancellationToken);
+        if (deactivated == 0)
+            return Fail(ErrorCodes.PromotionNotFound, 404);
 
         Logger.LogInformation("Promotion deactivated. Id: {Id}", id);
 
@@ -231,7 +280,11 @@ public class PromotionService : ApplicationService, IPromotionService
         if (_subscriptionHistory == null)
             return true;
 
-        return !await _subscriptionHistory.HasAnySubscriptionAsync(userId, cancellationToken);
+        // 首单资格按这个用户此刻代表的计费账户判：机构里换一位管理者开通仍是老客户。
+        // 解析不出账户（Tenant 范围下的宿主用户）时退回他的个人账户，与默认的 User 范围相同
+        var access = _accountResolver == null ? null : await _accountResolver.ResolveAsync(userId, cancellationToken);
+        var account = access?.Account ?? BillingAccountRef.ForUser(userId);
+        return !await _subscriptionHistory.HasAnySubscriptionAsync(account, cancellationToken);
     }
 
     public async Task<Result<DiscountCalculationResultDto>> CalculateDiscountAsync(CouponApplyContext context, CancellationToken cancellationToken = default)
@@ -325,8 +378,21 @@ public class PromotionService : ApplicationService, IPromotionService
             return Fail("The coupon sync reported success but returned no channel coupon id.", 502);
         }
 
-        promotion.StripeCouponId = syncResult.Data;
-        await _promotionRepository.UpdateAsync(promotion, cancellationToken);
+        // 只写渠道券标识这一列：上面那次渠道往返期间核销照常发生，整行写回会把 UsedCount 写回读出时的值。
+        // 条件「还没有标识」顺带让并发的两次同步只有一次落库。
+        var couponId = syncResult.Data;
+        var stored = await _promotionRepository.AsQueryable()
+            .Where(p => p.Id == promotionId && (p.StripeCouponId == null || p.StripeCouponId == ""))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.StripeCouponId, couponId)
+                .SetProperty(p => p.LastModificationTime, DateTime.UtcNow), cancellationToken);
+
+        if (stored == 0)
+        {
+            Logger.LogWarning(
+                "Promotion {PromotionCode} got channel coupon {CouponId}, but the promotion was removed or synced by another request meanwhile; the coupon id was not stored.",
+                promotion.PromotionCode, couponId);
+        }
 
         Logger.LogInformation("Promotion synced to Stripe. PromotionCode: {Code}", promotion.PromotionCode);
         return Ok();
@@ -370,9 +436,8 @@ public class PromotionService : ApplicationService, IPromotionService
         if (context.UserId == Guid.Empty)
             return null;
 
-        // 每用户使用次数：促销未单独设置时用配置兜底，不再"完全不限"
-        var perUserLimit = promotion.PerUserUsageLimit ?? _promotionOptions.CurrentValue.MaxCouponUsagePerUser;
-        if (perUserLimit > 0)
+        // 每用户使用次数：促销未单独设置时用配置兜底，不再"完全不限"（判定见 Promotion.ResolvePerUserLimit）
+        if (Promotion.ResolvePerUserLimit(promotion.PerUserUsageLimit, _promotionOptions.CurrentValue.MaxCouponUsagePerUser) is { } perUserLimit)
         {
             var userUsageCount = await _couponUsageRepository.CountAsync(
                 c => c.CouponId == promotion.Id && c.UserId == context.UserId, cancellationToken);

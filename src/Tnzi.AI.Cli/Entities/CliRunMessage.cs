@@ -37,9 +37,18 @@ public class CliRunMessage : CreationAuditedEntity<Guid>, IMultiTenant
     /// <summary>工具输出，超长截断。</summary>
     public string? Output { get; set; }
 
+    /// <summary>
+    /// 工具输出的分块（JSON 数组：文本块与图片块）。图片块只带附件 id，字节存在 <c>AgentAttachment</c>。
+    /// 不认识分块的协议（ACP）为 null，只有 <see cref="Output"/>。
+    /// </summary>
+    public string? OutputBlocksJson { get; set; }
+
     /// <summary>状态标识（Status 事件）。</summary>
     public string? Status { get; set; }
 
     /// <summary>日志级别（Log 事件）。</summary>
     public string? Level { get; set; }
+
+    /// <summary>权限请求与结局（<c>CliAgentPermission</c> 的 JSON，PermissionRequest / PermissionResolved 事件）。</summary>
+    public string? PermissionJson { get; set; }
 }

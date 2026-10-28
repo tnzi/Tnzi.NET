@@ -25,9 +25,10 @@ const accountsFetch = vi.fn(async () => ({
   pageIndex: 1,
   pageSize: 20,
 }))
-const accountsTree = vi.fn(async () => [
+const defaultTree = async (): Promise<unknown[]> => [
   { id: 'a1', code: '1000', name: 'Assets', rootType: 'Asset', isGroup: true, isActive: true, children: [] },
-])
+]
+const accountsTree = vi.fn(defaultTree)
 const seedDefault = vi.fn(async () => 26)
 
 vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) => {
@@ -71,8 +72,38 @@ describe('Finance Accounts page', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     accountsFetch.mockClear()
-    accountsTree.mockClear()
+    accountsTree.mockReset()
+    accountsTree.mockImplementation(defaultTree)
     seedDefault.mockClear()
+  })
+
+  // The chart renders from the tree endpoint, which takes no keyword: the
+  // search box was shown and ignored, so "1200" re-rendered the whole chart.
+  it('★ the search box filters the loaded chart by code or name, rendering matches flat', async () => {
+    accountsTree.mockImplementation(async () => [
+      {
+        id: 'a1', code: '1000', name: 'Assets', rootType: 'Asset', isGroup: true, isActive: true,
+        children: [
+          { id: 'a2', code: '1200', name: 'Accounts Receivable', rootType: 'Asset', isGroup: false, isActive: true, children: [] },
+          { id: 'a3', code: '1100', name: 'Cash', rootType: 'Asset', isGroup: false, isActive: true, children: [] },
+        ],
+      },
+    ])
+    const wrapper = mount(Accounts, { global: { stubs } })
+    await flushPromises()
+    type Row = { id: string; _depth: number }
+    const crud = (wrapper.vm as unknown as { crud: { items: { value: Row[] }; setSearch: (s: string) => void; refresh: () => Promise<void> } }).crud
+    expect(crud.items.value.map((r) => r.id)).toEqual(['a1', 'a2', 'a3'])
+
+    crud.setSearch('receivable')
+    await crud.refresh()
+    await flushPromises()
+    expect(crud.items.value.map((r) => [r.id, r._depth])).toEqual([['a2', 0]])
+
+    crud.setSearch('1100')
+    await crud.refresh()
+    await flushPromises()
+    expect(crud.items.value.map((r) => r.id)).toEqual(['a3'])
   })
 
   it('mounts and renders the account tree (indented list + parent options)', async () => {

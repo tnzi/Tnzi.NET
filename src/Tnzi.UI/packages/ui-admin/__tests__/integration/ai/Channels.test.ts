@@ -7,7 +7,7 @@ import { createPinia, setActivePinia } from 'pinia'
  * strip + three tabs:
  *   • Adapters - registered channel adapters (name + streaming badge)
  *   • Connections - IGateway live WebSocket connections
- *   • Bindings - ISessionBinder session-binding rules
+ *   • Bindings - ISessionBinder session-binding rules (configuration + database)
  *
  * The admin client + the channels bridge are mocked so the page mounts without
  * a backend. The bridge exposes `channels.getStatus/getAdapters` and
@@ -42,15 +42,13 @@ const getConnections = vi.fn(async () => [
   {
     connectionId: 'conn-001',
     userId: 'u-1',
-    clientType: 'web',
-    deviceNodeId: null,
+    clientType: 'websocket',
     connectedAt: '2026-06-07T08:00:00Z',
   },
   {
     connectionId: 'conn-002',
     userId: null,
-    clientType: 'device',
-    deviceNodeId: 'node-win-01',
+    clientType: 'websocket',
     connectedAt: '2026-06-07T08:05:00Z',
   },
 ])
@@ -61,9 +59,10 @@ const getBindings = vi.fn(async () => [
     peerKind: 'group',
     peerId: 'g-42',
     agentId: 'agent-support',
-    scope: 2,
+    scope: 'PerChannelPeer',
     priority: 100,
     isEnabled: true,
+    source: 'database',
   },
 ])
 
@@ -108,11 +107,12 @@ const stubs = {
   },
   Button: { name: 'Button', template: '<button @click="$emit(\'click\')"><slot /></button>' },
   // Stub the responsive table wrapper so we can assert rendered row counts per
-  // tab without mounting naive's NDataTable.
+  // tab (and the column keys) without mounting naive's NDataTable.
   TResponsiveTable: {
     name: 'TResponsiveTable',
-    props: ['data', 'columns', 'loading'],
-    template: '<div class="t-responsive-table-stub" :data-rows="(data || []).length"></div>',
+    props: ['data', 'columns', 'loading', 'rowKey'],
+    template:
+      '<div class="t-responsive-table-stub" :data-rows="(data || []).length" :data-cols="(columns || []).map((c) => c.key).join()"></div>',
   },
 }
 
@@ -184,6 +184,58 @@ describe('Channels page (KPI strip + adapters / connections / bindings tabs)', (
     expect(rowsByName(wrapper).bindings).toBe(1)
   })
 
+  it('Bindings tab shows where each rule comes from, with a row key that tells configuration rules apart', async () => {
+    // Configuration rules are not persisted: every one carries the empty GUID
+    getBindings.mockResolvedValueOnce([
+      { id: '00000000-0000-0000-0000-000000000000', channel: 'slack', peerKind: null, peerId: null, agentId: 'a-1', scope: 'PerPeer', priority: 5, isEnabled: true, source: 'config' },
+      { id: '00000000-0000-0000-0000-000000000000', channel: 'discord', peerKind: null, peerId: null, agentId: 'a-1', scope: 'Global', priority: 1, isEnabled: true, source: 'config' },
+      { id: 'bind-1', channel: 'telegram', peerKind: 'group', peerId: 'g-42', agentId: 'agent-support', scope: 'PerChannelPeer', priority: 100, isEnabled: true, source: 'database' },
+    ] as never)
+    const wrapper = mount(Channels, { global: { stubs } })
+    await flushPromises()
+
+    const pane = wrapper.findAll('.n-tab-pane-stub').find((p) => p.attributes('data-name') === 'bindings')!
+    const table = pane.findComponent({ name: 'TResponsiveTable' })
+    expect(table.attributes('data-cols')!.split(',')).toContain('source')
+
+    const rowKey = table.props('rowKey') as (r: unknown) => string
+    const keys = (table.props('data') as unknown[]).map(rowKey)
+    expect(new Set(keys).size).toBe(3)
+  })
+
+  it('Bindings tab keys configuration rules apart even when they differ only in scope or not at all', async () => {
+    // Every field but scope is shared by the first two; the last two are the
+    // same rule written twice. All four are valid configuration.
+    const emptyId = '00000000-0000-0000-0000-000000000000'
+    const base = { id: emptyId, channel: 'slack', peerKind: 'group', peerId: 'g-1', agentId: 'a-1', priority: 5, isEnabled: true, source: 'config' }
+    getBindings.mockResolvedValueOnce([
+      { ...base, scope: 'PerPeer' },
+      { ...base, scope: 'PerThread' },
+      { ...base, scope: 'Global' },
+      { ...base, scope: 'Global' },
+      { id: 'bind-1', channel: 'slack', peerKind: 'group', peerId: 'g-1', agentId: 'a-1', scope: 'Global', priority: 5, isEnabled: true, source: 'database' },
+    ] as never)
+    const wrapper = mount(Channels, { global: { stubs } })
+    await flushPromises()
+
+    const pane = wrapper.findAll('.n-tab-pane-stub').find((p) => p.attributes('data-name') === 'bindings')!
+    const table = pane.findComponent({ name: 'TResponsiveTable' })
+    const rowKey = table.props('rowKey') as (r: unknown) => string
+    const rows = table.props('data') as unknown[]
+    const keys = rows.map(rowKey)
+    expect(new Set(keys).size).toBe(5)
+    // The key is a pure function of the row: asking again gives the same answer,
+    // so selection and re-render stay pinned to the same rule.
+    expect(rows.map(rowKey)).toEqual(keys)
+  })
+
+  it('Connections tab has no device node column (the field is gone from the wire)', async () => {
+    const wrapper = mount(Channels, { global: { stubs } })
+    await flushPromises()
+    const pane = wrapper.findAll('.n-tab-pane-stub').find((p) => p.attributes('data-name') === 'connections')!
+    expect(pane.find('.t-responsive-table-stub').attributes('data-cols')).not.toContain('deviceNodeId')
+  })
+
   it('falls back to status.adapters when getAdapters returns empty', async () => {
     getAdapters.mockResolvedValueOnce([])
     const wrapper = mount(Channels, { global: { stubs } })
@@ -234,19 +286,26 @@ describe('Channels page (KPI strip + adapters / connections / bindings tabs)', (
     expect(warn?.exists()).toBe(true)
   })
 
-  it('degrades to empty state when the bridge throws (network / 404)', async () => {
-    getChannelStatus.mockRejectedValueOnce(new Error('404'))
-    getAdapters.mockRejectedValueOnce(new Error('404'))
-    getGatewayStatus.mockRejectedValueOnce(new Error('404'))
-    getConnections.mockRejectedValueOnce(new Error('404'))
-    getBindings.mockRejectedValueOnce(new Error('404'))
+  it('reports a refused or failed read instead of claiming the module is not loaded', async () => {
+    // The bridge answers null / [] only for an absent module (404 / 501);
+    // anything else rejects with the server's reason.
+    const refusal = new Error('You do not have permission to read the gateway')
+    getChannelStatus.mockResolvedValueOnce({ enabled: true, maxConcurrency: 8, streamingThrottleMs: 200, adapters: [] })
+    getAdapters.mockResolvedValueOnce([])
+    getGatewayStatus.mockRejectedValueOnce(refusal)
+    getConnections.mockRejectedValueOnce(refusal)
+    getBindings.mockRejectedValueOnce(refusal)
     const wrapper = mount(Channels, { global: { stubs } })
     await flushPromises()
-    const vm = wrapper.vm as unknown as Vm
+    const vm = wrapper.vm as unknown as Vm & { loadError: string | null }
     expect(vm.channelStatus).toBeNull()
     expect(vm.adapters).toHaveLength(0)
     expect(vm.connections).toHaveLength(0)
     expect(vm.bindings).toHaveLength(0)
-    expect(vm.moduleLoaded).toBe(false)
+    expect(vm.loadError).toBe('You do not have permission to read the gateway')
+    const error = wrapper.findAll('.n-alert-stub').find((a) => a.attributes('data-type') === 'error')
+    expect(error?.text()).toContain('You do not have permission to read the gateway')
+    // Not the "module not enabled" notice: the module answered.
+    expect(wrapper.findAll('.n-alert-stub').some((a) => a.attributes('data-type') === 'info')).toBe(false)
   })
 })

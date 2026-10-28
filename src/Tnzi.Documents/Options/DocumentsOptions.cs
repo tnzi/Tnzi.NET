@@ -22,6 +22,7 @@ public class DocumentsOptions
     /// <remarks>
     /// 实测（Windows + LibreOffice 25.8）冷 profile 首次约 4.9s，之后暖启动约 1.4s；
     /// 120s 留足了首启动与大文档的余量。超时后整棵进程树会被杀掉。
+    /// 转换全局串行，排队等槽位同样以它为上界：等满仍轮不到即抛可重试的转换失败。
     /// </remarks>
     public int ConversionTimeoutSeconds { get; set; } = 120;
 

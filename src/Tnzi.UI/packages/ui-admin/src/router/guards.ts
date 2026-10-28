@@ -1,6 +1,5 @@
-import type { NavigationGuard, RouteLocationNormalized } from 'vue-router'
+import type { NavigationGuard } from 'vue-router'
 import { useAdminAuthStore } from '../stores/useAdminAuthStore'
-import { useAdminTabStore } from '../stores/useAdminTabStore'
 import { usePermissionGuard } from '../headless/usePermissionGuard'
 import { useAdminRouteStore } from '../stores/useAdminRouteStore'
 
@@ -74,8 +73,12 @@ export function createAuthGuard(options: AuthGuardOptions = {}): NavigationGuard
  * Permission guard - checks `meta.permission` (single) and `meta.permissions`
  * (plural, ANY-of) via `usePermissionGuard`, matching the sidebar filter's
  * reading of both fields - a route only declaring the plural form used to be
- * hidden from the menu yet still pass this guard. On successful navigation,
- * records the route as a tab.
+ * hidden from the menu yet still pass this guard.
+ *
+ * It records no tab: a guard runs before the navigation is confirmed (a later
+ * guard can still cancel or redirect it, its page chunk can still fail to
+ * load) and for every route, including pages rendered outside the admin
+ * shell. The shell records the tab once the navigation has landed inside it.
  */
 export function createPermissionGuard(
   options: PermissionGuardOptions = {},
@@ -97,21 +100,10 @@ export function createPermissionGuard(
       // mirrors the menu layer and avoids bouncing a freshly-logged-in user to
       // 403 before their permissions arrive (or in apps that never wire them).
       // Real enforcement is the backend `[ApiAuthorize]`.
-      const auth = useAdminAuthStore()
-      if (auth.userInfo !== null) {
-        const { can, canAny, canAnySettings } = usePermissionGuard()
-        const permAllowed =
-          (required ? can(required) : true) &&
-          (requiredAny.length > 0 ? canAny(requiredAny) : true) &&
-          (requiresAnySettings ? canAnySettings() : true)
-        const roleAllowed =
-          requiredRoles.length === 0 || auth.isSuperUser || auth.hasAnyRole(requiredRoles)
-        if (!permAllowed || !roleAllowed) {
-          return options.forbiddenPath ?? { name: 'forbidden' }
-        }
+      if (!usePermissionGuard().canReachRoute(to.meta)) {
+        return options.forbiddenPath ?? { name: 'forbidden' }
       }
     }
-    addTabFromRoute(to)
     return true
   }
 }
@@ -145,28 +137,4 @@ export function createModuleGuard(
     }
     return true
   }
-}
-
-function addTabFromRoute(to: RouteLocationNormalized): void {
-  const tabStore = useAdminTabStore()
-  const name = String(to.name ?? to.path)
-  tabStore.addTab({
-    name,
-    path: to.path,
-    fullPath: to.fullPath,
-    query: to.query as Record<string, unknown>,
-    params: to.params as Record<string, unknown>,
-    meta: {
-      title: (to.meta?.title as string | undefined) ?? name,
-      keepAlive: to.meta?.keepAlive !== false,
-      fixedIndexInTab: to.meta?.fixedIndexInTab as number | undefined,
-      multiTab: to.meta?.multiTab as boolean | undefined,
-      icon: to.meta?.icon as string | undefined,
-      // MUST be forwarded: `addTab` refuses the route on this flag, and this
-      // hand-built meta is what it sees. Dropping it (as this copy did) made
-      // `meta.hideInTab` silently dead - a consumer route flagged non-tab
-      // still opened a tab.
-      hideInTab: to.meta?.hideInTab as boolean | undefined,
-    },
-  })
 }

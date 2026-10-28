@@ -48,9 +48,11 @@ public class PendingActionService : ApplicationService, IPendingActionService
 
         // 欠着绑验证器就把密钥一起带出来 —— 不带的话前端只知道「你得绑个验证器」，
         // 却没有二维码可扫，那一步走不下去。
+        // ★ 用「已有未确认的密钥就原样交回」的那个入口：描述会被反复拉取（刷新、组件重挂、办完上一件待办之后），
+        //   此前每拉一次就换一枚密钥，用户已经扫进验证器的那枚当场作废，下一步只会得到「验证码不对」。
         if ((owed & PendingUserActions.EnrollTotp) != PendingUserActions.None && _twoFactorService != null)
         {
-            var setup = await _twoFactorService.GetTotpSetupInfoAsync(user.Id);
+            var setup = await _twoFactorService.GetOrCreateTotpSetupInfoAsync(user.Id);
             if (setup.Succeeded)
             {
                 dto.TotpSetup = setup.Data;
@@ -123,8 +125,17 @@ public class PendingActionService : ApplicationService, IPendingActionService
 
         // ★ 地址由服务端自己取，不接受调用方指定：这是一个匿名端点，让它决定「发到哪」
         //   等于把这件事交给一个可能已被接管的会话（与 step-up 发码同一判据）。
-        var sent = await _twoFactorService.SendCodeToUserAsync(
-            user.Id, TwoFactorType.Email, VerificationCodePurpose.ConfirmEmail);
+        // ★★★ 但不能走 SendCodeToUserAsync：它只往**已验证**的地址发（step-up 与两步验证的前提），
+        //   而这一位恰恰只挂在邮箱还没确认的账号上。走它的话每次发码都答 400，码永远收不到，
+        //   义务永远清不掉，账号每次登录都停在这一步。往账号自己那个未确认的地址发码、凭码确认，
+        //   正是「确认邮箱」这件事本身；地址仍然只取自账号。
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            return Fail("This account has no email address to confirm", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        var sent = await _twoFactorService.SendCodeByAddressAsync(
+            user.Email, TwoFactorType.Email, VerificationCodePurpose.ConfirmEmail, user.Id);
 
         return sent.Succeeded ? Ok() : Fail(sent.Message ?? "Failed to send the code", sent.Code ?? 400, sent.ErrorCode);
     }

@@ -60,27 +60,40 @@ public class DatabaseSkillStore : ISkillStore
     }
 
     /// <inheritdoc/>
-    public async Task<SkillDefinition?> GetBySlugAsync(string slug, CancellationToken ct = default)
+    public Task<SkillDefinition?> GetBySlugAsync(string slug, CancellationToken ct = default)
+        => GetBySlugAsync(slug, scope: null, ct);
+
+    /// <summary>
+    /// 按 slug 取当前调用者可见的那一份；<paramref name="scope"/> 非空时只在该作用域里找。
+    /// </summary>
+    /// <remarks>
+    /// 同一个 slug 可以同时有一份 Tenant 技能与调用者自己的 User 技能：按 <see cref="SkillPrecedence"/> 选（Tenant 胜过 User，
+    /// 同作用域 Priority 大者胜），与列表合并同一把尺子。★ 此前不排序地取第一行、也不看作用域前缀：
+    /// <c>tenant:x</c> 能拿到调用者的个人版，不带前缀时拿到哪一份取决于行在库里的顺序，列表里显示的是租户版而激活的是个人版。
+    /// </remarks>
+    public async Task<SkillDefinition?> GetBySlugAsync(string slug, SkillScope? scope, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(slug)) return null;
 
         // Check per-request cache first (populated by prior GetAllAsync call)
         if (_cachedResults != null)
-            return _cachedResults.FirstOrDefault(s => string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            return SkillPrecedence.PickWinner(_cachedResults.Where(s =>
+                string.Equals(s.Slug, slug, StringComparison.OrdinalIgnoreCase) && (scope == null || s.Scope == scope)));
 
         try
         {
             var tenantId = _currentTenant?.Id;
             var userId = _currentUser?.Id;
 
-            var entity = await _repository
+            var entities = await _repository
                 .Where(e => e.Enabled && e.Slug.ToLower() == slug.ToLower() &&
                     ((e.Scope == SkillScope.Tenant && e.TenantId == tenantId) ||
                      (e.Scope == SkillScope.User && e.OwnerUserId == userId
                         && (e.TenantId == null || e.TenantId == tenantId))))
-                .FirstOrDefaultAsync(ct);
+                .WhereIf(e => e.Scope == scope!.Value, scope.HasValue)
+                .ToListAsync(ct);
 
-            return entity == null ? null : MapToDefinition(entity);
+            return SkillPrecedence.PickWinner(entities.Select(MapToDefinition));
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -89,6 +102,9 @@ public class DatabaseSkillStore : ISkillStore
             return null;
         }
     }
+
+    /// <summary>丢掉本请求已经读过的结果：同一请求里写过数据库技能之后，下一次读要看到写入。</summary>
+    internal void ClearRequestCache() => _cachedResults = null;
 
     // -------------------------------------------------------------------------
     // Mapping

@@ -471,6 +471,165 @@ public class DepositTests : FinanceIntegrationTestBase
         wrongCurrency.Succeeded.ShouldBeFalse("一张存款单只能是一种币");
     }
 
+    // ── 外币存款的本位币差额 ─────────────────────────────────
+    //
+    // 收款按各自的汇率借记待存款项，存款按存款日的汇率贷记它：交易币归零了，本位币却留下差额。
+    // 默认科目表的待存款项不限定币种，期末重估只看限定了外币的科目。不在过账时实现掉，
+    // 这笔差额就永远挂在那里，资产负债表与现金流量表上出现一笔不存在的现金，且每笔外币存款都在累加。
+
+    private async Task<(Guid Undeposited, Guid Bank, Guid Fx, DepositDto Posted)> PostEuroDepositAsync(decimal depositRate)
+    {
+        await SeedCoaAsync();
+        var undeposited = await AccountIdByCodeAsync("1130");
+        var bank = await AccountIdByCodeAsync("1120");
+        var fx = await AccountIdByCodeAsync("5800");
+        var customer = await CreateCustomerAsync("Euro Customer");
+
+        // 本位币：100 × 1.10 + 50 × 1.20 = 170
+        var first = await PostReceiptAsync(customer.Data!.Id, undeposited, 100m, new DateTime(2026, 3, 20), "EUR", 1.10m);
+        var second = await PostReceiptAsync(customer.Data.Id, undeposited, 50m, new DateTime(2026, 3, 21), "EUR", 1.20m);
+
+        var draft = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.CreateDraftAsync(new CreateDepositDto
+        {
+            FromAccountId = undeposited,
+            ToAccountId = bank,
+            DepositDate = new DateTime(2026, 3, 25),
+            Currency = "EUR",
+            ExchangeRate = depositRate,
+            PaymentEntryIds = [first.Id, second.Id],
+            OtherFunds = []
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        var posted = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+        return (undeposited, bank, fx, posted.Data!);
+    }
+
+    [Theory]
+    [InlineData(1.05, 157.50, 12.50)]   // 存款日汇率更低：汇兑损失（借汇兑损益）
+    [InlineData(1.30, 195.00, -25.00)]  // 存款日汇率更高：汇兑收益（贷汇兑损益）
+    public async Task ForeignDeposit_AtAnotherRate_RealizesTheBaseDifference_AndLeavesNothingOnUndepositedFunds(
+        decimal depositRate, decimal bankBase, decimal fxBalance)
+    {
+        var (undeposited, bank, fx, posted) = await PostEuroDepositAsync(depositRate);
+        var period = (From: new DateTime(2026, 3, 1), To: new DateTime(2026, 3, 31));
+
+        (await ClosingBalanceAsync(undeposited, period.From, period.To)).ShouldBe(0m, "交易币已归零，本位币也必须归零");
+        (await ClosingBalanceAsync(bank, period.From, period.To)).ShouldBe(bankBase);
+        (await ClosingBalanceAsync(fx, period.From, period.To)).ShouldBe(fxBalance);
+        posted.BaseAmount.ShouldBe(bankBase);
+
+        var tb = await InScopeAsync<IFinancialReportService, Result<TrialBalanceReportDto>>(
+            s => s.GetTrialBalanceAsync(period.From, period.To));
+        tb.Data!.TotalPeriodDebit.ShouldBe(tb.Data.TotalPeriodCredit);
+
+        // 差额凭证同样以本存款单为来源：总账端点冲不掉它，只能随单据一起作废
+        var entries = await InScopeAsync<ILedgerPostingService, Result<List<JournalEntryDto>>>(
+            s => s.GetBySourceAsync(FinanceSourceTypes.Deposit, posted.Id.ToString()));
+        entries.Data!.Count.ShouldBe(2);
+        var fxEntry = entries.Data.Single(e => e.Id != posted.JournalEntryId);
+        var reversed = await InScopeAsync<IJournalEntryService, Result<JournalEntryDto>>(
+            s => s.ReverseAsync(fxEntry.Id, new ReverseJournalEntryDto()));
+        reversed.Code.ShouldBe(409);
+    }
+
+    /// <summary>作废要把差额凭证一起冲掉：只冲主凭证，汇兑损益就留下一笔再也对不上任何单据的数。</summary>
+    [Fact]
+    public async Task VoidingAForeignDeposit_ReversesTheFxEntryToo()
+    {
+        var (undeposited, bank, fx, posted) = await PostEuroDepositAsync(1.05m);
+        var period = (From: new DateTime(2026, 3, 1), To: new DateTime(2026, 3, 31));
+
+        var voided = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.VoidAsync(posted.Id));
+        voided.Succeeded.ShouldBeTrue(voided.Message);
+        voided.Data!.Status.ShouldBe(FinanceDocumentStatus.Voided);
+
+        (await ClosingBalanceAsync(undeposited, period.From, period.To)).ShouldBe(170m, "收款回到待存款项，按它们当初的本位币价值");
+        (await ClosingBalanceAsync(bank, period.From, period.To)).ShouldBe(0m);
+        (await ClosingBalanceAsync(fx, period.From, period.To)).ShouldBe(0m);
+
+        var entries = await InScopeAsync<ILedgerPostingService, Result<List<JournalEntryDto>>>(
+            s => s.GetBySourceAsync(FinanceSourceTypes.Deposit, posted.Id.ToString()));
+        entries.Data!.Where(e => e.ReversalOfEntryId == null).ShouldAllBe(e => e.Status == JournalEntryStatus.Reversed);
+    }
+
+    /// <summary>
+    /// 差额凭证过不去（这里是汇兑损益科目没指定角色）时，主凭证已经分配了凭证号，
+    /// 必须整体回滚：不留主凭证、不分配单据号、单据仍是草稿，收款仍挂在草稿上。
+    /// </summary>
+    [Fact]
+    public async Task ForeignDeposit_WhenTheFxEntryCannotPost_RollsBackEverything()
+    {
+        await SeedCoaAsync();
+        var undeposited = await AccountIdByCodeAsync("1130");
+        var bank = await AccountIdByCodeAsync("1120");
+        var customer = await CreateCustomerAsync("Euro Customer");
+        var receipt = await PostReceiptAsync(customer.Data!.Id, undeposited, 100m, new DateTime(2026, 3, 20), "EUR", 1.10m);
+
+        var draft = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.CreateDraftAsync(new CreateDepositDto
+        {
+            FromAccountId = undeposited,
+            ToAccountId = bank,
+            DepositDate = new DateTime(2026, 3, 25),
+            Currency = "EUR",
+            ExchangeRate = 1.05m,
+            PaymentEntryIds = [receipt.Id],
+            OtherFunds = []
+        }));
+        draft.Succeeded.ShouldBeTrue(draft.Message);
+
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var accounts = scope.ServiceProvider.GetRequiredService<IRepository<Account, Guid>>();
+            var fx = await accounts.AsQueryable(true).SingleAsync(a => a.SystemRole == AccountSystemRole.ExchangeGainLoss);
+            fx.SystemRole = null;
+            await accounts.UpdateAsync(fx);
+            await accounts.SaveChangesAsync();
+        }
+
+        var posted = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.PostAsync(draft.Data!.Id));
+
+        posted.Succeeded.ShouldBeFalse();
+        posted.Message!.ShouldContain(nameof(AccountSystemRole.ExchangeGainLoss));
+        var entries = await InScopeAsync<ILedgerPostingService, Result<List<JournalEntryDto>>>(
+            s => s.GetBySourceAsync(FinanceSourceTypes.Deposit, draft.Data!.Id.ToString()));
+        entries.Data!.ShouldBeEmpty("主凭证必须随差额凭证一起回滚");
+        var reloaded = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.GetAsync(draft.Data!.Id));
+        reloaded.Data!.Status.ShouldBe(FinanceDocumentStatus.Draft);
+        reloaded.Data.Number.ShouldBeNull();
+        (await ClosingBalanceAsync(undeposited, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31))).ShouldBe(110m);
+    }
+
+    /// <summary>汇率没变就没有差额：不为一个 0 过一张空凭证。</summary>
+    [Fact]
+    public async Task ForeignDeposit_AtTheReceiptRates_PostsNoFxEntry()
+    {
+        await SeedCoaAsync();
+        var undeposited = await AccountIdByCodeAsync("1130");
+        var bank = await AccountIdByCodeAsync("1120");
+        var customer = await CreateCustomerAsync("Euro Customer");
+        var receipt = await PostReceiptAsync(customer.Data!.Id, undeposited, 100m, new DateTime(2026, 3, 20), "EUR", 1.10m);
+
+        var draft = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.CreateDraftAsync(new CreateDepositDto
+        {
+            FromAccountId = undeposited,
+            ToAccountId = bank,
+            DepositDate = new DateTime(2026, 3, 25),
+            Currency = "EUR",
+            ExchangeRate = 1.10m,
+            PaymentEntryIds = [receipt.Id],
+            OtherFunds = []
+        }));
+        var posted = await InScopeAsync<IDepositService, Result<DepositDto>>(s => s.PostAsync(draft.Data!.Id));
+        posted.Succeeded.ShouldBeTrue(posted.Message);
+
+        var entries = await InScopeAsync<ILedgerPostingService, Result<List<JournalEntryDto>>>(
+            s => s.GetBySourceAsync(FinanceSourceTypes.Deposit, posted.Data!.Id.ToString()));
+        entries.Data!.Count.ShouldBe(1);
+        (await ClosingBalanceAsync(undeposited, new DateTime(2026, 3, 1), new DateTime(2026, 3, 31))).ShouldBe(0m);
+    }
+
     /// <summary>空单据、重复收款、两侧同科目 —— 三条最容易撞上的输入错误</summary>
     [Fact]
     public async Task Draft_RejectsEmptyDuplicateAndSameAccountInput()

@@ -1,6 +1,7 @@
 <template>
   <TCrudPage
     :search-fields="destructionSearchFields"
+    :show-default-search="false"
     :state="crud"
     :all-columns="destructionColumns"
     :title="t('title')"

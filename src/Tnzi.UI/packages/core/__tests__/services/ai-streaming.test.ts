@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { streamChat } from '../../src/services/ai/streaming';
 import type { ChatStreamOptions } from '../../src/services/ai/streaming';
+import type { ChatStreamEvent, StreamTodoItemDto } from '../../src/services/ai/types';
 
 // ---------------------------------------------------------------------------
 // Helpers - build SSE byte streams from text frames
@@ -100,6 +101,31 @@ describe('streamChat', () => {
     expect(result.threadId).toBe('thread-1');
     expect(result.error).toBeNull();
     expect(deltas).toEqual(['Hello', ' world']);
+  });
+
+  it('exposes structured events (clarification, todos, sub-agent) as typed fields', async () => {
+    const events: ChatStreamEvent[] = [];
+    fetchSpy.mockResolvedValue(
+      mockStreamResponse([
+        sseFrame({ eventType: 'sub_agent_started', eventData: { agent: 'researcher', task: 'find sources' } }),
+        sseFrame({ eventType: 'todos_updated', todos: [{ content: 'Draft', status: 2, order: 1 }] }),
+        sseFrame({
+          delta: 'Which region?',
+          finishReason: 'requires_clarification',
+          eventType: 'clarification',
+          eventData: { type: 'MissingInfo', options: ['EU', 'US'] },
+        }),
+        sseDone(),
+      ]),
+    );
+
+    await streamChat(defaultOptions({ onEvent: (e) => events.push(e) }));
+
+    const clarification = events.find((e) => e.eventType === 'clarification');
+    expect(clarification?.eventData?.['options']).toEqual(['EU', 'US']);
+    const todos: StreamTodoItemDto[] | null | undefined = events.find((e) => e.eventType === 'todos_updated')?.todos;
+    expect(todos).toEqual([{ content: 'Draft', status: 2, order: 1 }]);
+    expect(events[0]?.eventData?.['agent']).toBe('researcher');
   });
 
   it('should accumulate reasoning deltas separately', async () => {

@@ -25,11 +25,27 @@ public interface IFileChunkUploadService
     /// </summary>
     /// <param name="uploadSessionId">上传会话 id；必须是当前用户开的、未完成、未取消、未过期的会话</param>
     /// <param name="isTemporary">
-    /// 与 <see cref="IFileStorageService.SaveAsync"/> 同一口径：<c>true</c> 落成临时记录
+    /// 与 <see cref="IFileStorageService.SaveAsync(string, Stream, bool, bool)"/> 同一口径：<c>true</c> 落成临时记录
     /// （<c>IsTemporary = true</c>、引用计数从 0 起，由临时清理回收），<c>false</c> 落成正式记录（引用计数从 1 起）。
     /// </param>
     /// <param name="cancellationToken">取消令牌</param>
     Task<Result<FileRecord>> CompleteChunkedUploadAsync(Guid uploadSessionId, bool isTemporary = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 完成分块上传并把文件直接放进上传者自己的一个目录（用户文件空间的大文件上传）。
+    /// </summary>
+    /// <param name="uploadSessionId">上传会话 id</param>
+    /// <param name="isTemporary">同 <see cref="CompleteChunkedUploadAsync(Guid, bool, CancellationToken)"/>；指定了目录时必须为 <c>false</c>
+    /// （放进目录的文件由文件空间持有，不是临时上传），否则答 400</param>
+    /// <param name="folderId">目标目录；<c>null</c> 等同于不带目录的那个重载。目录必须是上传者自己的、且不在回收站里，否则 404</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <remarks>
+    /// 默认实现只认得 <paramref name="folderId"/> 为 <c>null</c> 的调用，否则答 501（目录在 <c>Tnzi.Storage.Workspace</c>）。
+    /// </remarks>
+    Task<Result<FileRecord>> CompleteChunkedUploadAsync(Guid uploadSessionId, bool isTemporary, Guid? folderId, CancellationToken cancellationToken = default)
+        => folderId == null
+            ? CompleteChunkedUploadAsync(uploadSessionId, isTemporary, cancellationToken)
+            : Task.FromResult(Result<FileRecord>.Failure("Placing a chunked upload into a folder is not supported by this IFileChunkUploadService implementation.", 501));
 
     /// <summary>
     /// 取消分块上传

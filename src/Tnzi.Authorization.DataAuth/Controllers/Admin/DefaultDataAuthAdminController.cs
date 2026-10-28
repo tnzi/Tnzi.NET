@@ -119,6 +119,22 @@ public class DefaultDataAuthAdminController : ApiAdminControllerBase
     #region EntityRole 管理
 
     /// <summary>
+    /// Every role (unpaged), for the role axis of the entity-role matrix.
+    /// </summary>
+    /// <remarks>
+    /// Behind this controller's <c>authorization.entityRole.view</c> gate: configuring
+    /// row-level rules per role means seeing the roles, and Identity's role list sits
+    /// behind <c>role.view</c>, which a delegated data-rule administrator need not hold.
+    /// The role management page stays behind <c>role.view</c>.
+    /// </remarks>
+    [HttpGet("roles")]
+    public virtual async Task<ApiResult<IEnumerable<RoleDto>>> GetRoles([FromServices] IRoleService roleService)
+    {
+        var result = await roleService.GetAllAsync();
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 获取用户的所有实体角色
     /// </summary>
     /// <param name="userId">用户ID</param>

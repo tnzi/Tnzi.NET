@@ -52,6 +52,10 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             nameof(ExecutePolicyAsync),
             BindingFlags.Instance | BindingFlags.NonPublic)!;
 
+    private static readonly MethodInfo OrderByMethod =
+        typeof(Queryable).GetMethods()
+            .Single(m => m.Name == nameof(Queryable.OrderBy) && m.GetParameters().Length == 2);
+
     private static readonly MethodInfo CollectTenantIdsMethod =
         typeof(DataDestructionService).GetMethod(
             nameof(CollectTenantIdsAsync),
@@ -305,7 +309,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         DataDestructionOptions options,
         CancellationToken cancellationToken)
     {
-        var cutoff = DateTime.UtcNow - policy.RetentionPeriod;
+        // 截到整微秒：截止时间既用来挑出到期行，也写进证书并进哈希：存进库里的必须就是哈希过的那一个（见 ChainTimestamp）。
+        var cutoff = ChainTimestamp.Normalize(DateTime.UtcNow - policy.RetentionPeriod);
 
         try
         {
@@ -380,7 +385,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
 
             using (_currentTenant.Change(tenantId))
             {
-                var perTenant = await InvokePolicyAsync(policy, options, cutoff, cancellationToken);
+                var perTenant = await RunTenantSafelyAsync(policy, options, cutoff, tenantId, cancellationToken);
 
                 merged.DestroyedCount += perTenant.DestroyedCount;
                 merged.HeldCount += perTenant.HeldCount;
@@ -398,6 +403,44 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
         }
 
         return merged;
+    }
+
+    /// <summary>
+    /// 在已切入的租户里跑一条策略，把该租户的异常收敛成该租户的失败结果。
+    /// </summary>
+    /// <remarks>
+    /// ★ 收敛在逐租户这一层，而不是让异常冒到 <see cref="RunPolicySafelyAsync"/>：冒上去的话，
+    /// 排在失败租户后面的租户本轮不跑，排在前面、已经不可逆地销毁并出了证明的租户也被报成「销毁 0 条」。
+    /// 一个租户的保全系统查不通只中止这个租户（宁可不销毁），其余租户照常跑、计数照实合并。
+    /// 取消不在此列：丢锁 / 宿主停止要让整轮停下。
+    /// </remarks>
+    private async Task<DataDestructionPolicyResultDto> RunTenantSafelyAsync(
+        RetentionPolicy policy,
+        DataDestructionOptions options,
+        DateTime cutoff,
+        Guid? tenantId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await InvokePolicyAsync(policy, options, cutoff, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var actual = (ex as TargetInvocationException)?.InnerException ?? ex;
+
+            Logger.LogError(actual,
+                "Retention policy '{PolicyName}' failed for entity {EntityType} in tenant {TenantId}.",
+                policy.Name, policy.EntityType.FullName, tenantId);
+
+            return new DataDestructionPolicyResultDto
+            {
+                PolicyName = policy.Name,
+                EntityType = policy.EntityType.FullName ?? policy.EntityType.Name,
+                Cutoff = cutoff,
+                Error = $"Tenant {tenantId?.ToString() ?? "(none)"}: {actual.Message}"
+            };
+        }
     }
 
     /// <summary>
@@ -478,27 +521,65 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             query = query.Where(e => ((IMultiTenant)e).TenantId == tenantId);
         }
 
-        var candidates = await query
-            .Where(BuildExpiredPredicate(typed.Timestamp, cutoff))
-            .Take(options.BatchSize)
-            .ToListAsync(cancellationToken);
+        var expired = OrderForScan(query.Where(BuildExpiredPredicate(typed.Timestamp, cutoff)));
 
-        if (candidates.Count == 0)
+        // ★ 按页往后翻，直到凑满 BatchSize 条「可以销毁」的行或者翻到底：BatchSize 限的是一轮销毁多少条，
+        // 被保全的行不占这个名额。此前只取前 BatchSize 条到期行（不排序），被保全的行按存储顺序总排在前面，
+        // 保全行一旦不少于 BatchSize，这条策略每一轮都只拿到同一批保全行、写一张「销毁 0」的证明，
+        // 其后已到期且没被保全的数据永远轮不到：超过法定期限仍在库里，而且不报任何错。
+        // 翻页期间什么都不销毁，所以按主键排序的 Skip 在整个扫描里看到的是同一个有序集合。
+        var survivors = new List<(string Id, TEntity Entity)>();
+        var heldCount = 0;
+        var scanned = 0;
+        var exhausted = false;
+        var truncated = false;
+        while (survivors.Count < options.BatchSize)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var page = await expired.Skip(scanned).Take(options.BatchSize).ToListAsync(cancellationToken);
+            scanned += page.Count;
+
+            var pageIds = page.Select(e => (Id: FormatIdentifier(e), Entity: e)).ToList();
+            HashSet<string> held = pageIds.Count == 0
+                ? []
+                : await CollectHeldIdentifiersAsync(policy, typeof(TEntity), pageIds.Select(p => p.Id).ToList(), cancellationToken);
+
+            foreach (var candidate in pageIds)
+            {
+                if (survivors.Count == options.BatchSize)
+                {
+                    // 名额满了，本页剩下的留给下一轮（不计进本轮的保全数）。
+                    truncated = true;
+                    break;
+                }
+
+                if (held.Contains(candidate.Id))
+                {
+                    heldCount++;
+                }
+                else
+                {
+                    survivors.Add(candidate);
+                }
+            }
+
+            if (page.Count < options.BatchSize)
+            {
+                exhausted = true;
+                break;
+            }
+        }
+
+        if (scanned == 0)
         {
             // 无到期数据不出证明：证明链是销毁的证据，不是心跳。
             return result;
         }
 
-        result.HasMore = candidates.Count == options.BatchSize;
-
-        var identifiers = candidates.ToDictionary(FormatIdentifier, e => e, StringComparer.Ordinal);
-        var held = await CollectHeldIdentifiersAsync(policy, typeof(TEntity), identifiers.Keys, cancellationToken);
-
-        var survivors = identifiers
-            .Where(pair => !held.Contains(pair.Key))
-            .ToList();
-
-        result.HeldCount = candidates.Count - survivors.Count;
+        // 名额凑满时停下的（不是翻到底停下的），或者最后一页没处理完，才可能还有剩余。
+        result.HasMore = truncated || !exhausted;
+        result.HeldCount = heldCount;
 
         if (survivors.Count == 0)
         {
@@ -508,8 +589,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             return result;
         }
 
-        var survivingEntities = survivors.Select(pair => pair.Value).ToList();
-        var survivingIds = survivors.Select(pair => pair.Key).ToList();
+        var survivingEntities = survivors.Select(s => s.Entity).ToList();
+        var survivingIds = survivors.Select(s => s.Id).ToList();
 
         result.DestroyedCount = options.DryRun
             ? survivingEntities.Count
@@ -598,7 +679,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
                 // 受害租户的证书视图永远是空的。不带租户维度的实体在循环外，读到的是环境租户（宿主为 null）。
                 TenantId = _currentTenant.Id,
                 PreviousHash = tail?.Hash ?? string.Empty,
-                CreationTime = DateTime.UtcNow
+                // 截到整微秒：存进库里的必须就是哈希过的那一个（见 ChainTimestamp）。
+                CreationTime = ChainTimestamp.UtcNow()
             };
             entry.Hash = ComputeHash(entry);
 
@@ -687,6 +769,32 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     }
 
     /// <summary>
+    /// 给到期扫描一个确定的顺序：<see cref="IEntity{TKey}"/> 按主键排。
+    /// </summary>
+    /// <remarks>
+    /// 分页（<c>Skip</c>）要求每一页看到的是同一个有序集合，没有 <c>ORDER BY</c> 时数据库可以每次给出不同的顺序。
+    /// 按主键而不按时间戳排：主键上有（聚簇）索引，带过滤条件的扫描按索引顺序走、取够一页就停；
+    /// 时间戳不一定有索引，按它排每一页都是一次「全部到期行的排序」。
+    /// 不实现 <see cref="IEntity{TKey}"/> 的实体（复合主键）没有通用的键可排，原样返回：默认销毁器本来就不支持它们，
+    /// 自带销毁器的消费方在保全行跨页时可能看到重复或遗漏，下一轮会补上。
+    /// </remarks>
+    private static IQueryable<TEntity> OrderForScan<TEntity>(IQueryable<TEntity> query)
+    {
+        var keyType = typeof(TEntity).GetInterfaces()
+            .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEntity<>))
+            ?.GetGenericArguments()[0];
+        if (keyType == null)
+        {
+            return query;
+        }
+
+        var parameter = Expression.Parameter(typeof(TEntity), "e");
+        var key = Expression.Lambda(Expression.Property(parameter, nameof(IEntity<Guid>.Id)), parameter);
+        var orderBy = OrderByMethod.MakeGenericMethod(typeof(TEntity), keyType);
+        return (IQueryable<TEntity>)orderBy.Invoke(null, [query, key])!;
+    }
+
+    /// <summary>
     /// 把实体主键格式化成字符串标识（复合键以逗号连接）。
     /// </summary>
     private static string FormatIdentifier(IEntity entity)
@@ -715,8 +823,8 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
     /// 计算条目哈希：覆盖链上一条的哈希与本条的全部关键字段。
     /// </summary>
     /// <remarks>
-    /// 字段以不可能出现在内容里的分隔符连接，避免拼接歧义。时间用往返格式（"O"）
-    /// 与不变文化，否则换个服务器区域设置就会算出不同的哈希。
+    /// 字段以不可能出现在内容里的分隔符连接，避免拼接歧义。时间经 <see cref="ChainTimestamp.Format"/>：
+    /// 按 UTC 解释读回来的值、往返格式与不变文化。
     /// </remarks>
     private static string ComputeHash(AuditDataDestruction entry)
     {
@@ -726,7 +834,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             entry.Sequence.ToString(CultureInfo.InvariantCulture),
             entry.PolicyName,
             entry.EntityType,
-            entry.Cutoff.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            ChainTimestamp.Format(entry.Cutoff),
             entry.DestroyedCount.ToString(CultureInfo.InvariantCulture),
             entry.HeldCount.ToString(CultureInfo.InvariantCulture),
             entry.IdentifierDigest,
@@ -734,7 +842,7 @@ public class DataDestructionService : ApplicationService, IDataDestructionServic
             entry.EncryptionKeyId ?? string.Empty,
             entry.IsKeyDestroyed ? "1" : "0",
             entry.IsDryRun ? "1" : "0",
-            entry.CreationTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            ChainTimestamp.Format(entry.CreationTime));
 
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
     }

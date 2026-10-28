@@ -48,7 +48,9 @@ public class A2ATools : IAIToolProvider
             if (response.Status is "failed")
                 return $"Remote agent task failed: {response.Error ?? "unknown error"}";
 
-            // 轮询等待 pending/running 状态
+            // 轮询等待 pending/running 状态。轮询窗口有自己的上限（MaxPollAttempts × PollIntervalMs），
+            // 不占工具的执行超时：否则窗口在工具超时处就被截断，后面的轮询全是白跑
+            using var suspended = ToolCallTimeout.Suspend();
             for (var i = 0; i < MaxPollAttempts; i++)
             {
                 await Task.Delay(PollIntervalMs, ct);
@@ -63,6 +65,11 @@ public class A2ATools : IAIToolProvider
             }
 
             return $"Remote agent task timed out after {MaxPollAttempts * PollIntervalMs / 1000}s (task: {response.TaskId})";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 取消（运行被取消 / 工具超时）要传出去，不能变成一句「调用出错」的工具结果
+            throw;
         }
         catch (Exception ex)
         {

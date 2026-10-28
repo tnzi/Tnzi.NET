@@ -8,7 +8,10 @@ public interface IChannelAdapter : IAsyncDisposable
     /// <summary>适配器名称（telegram, feishu, dingtalk 等）</summary>
     string Name { get; }
 
-    /// <summary>是否支持流式编辑消息</summary>
+    /// <summary>
+    /// 是否支持流式编辑消息。只用于管理端展示：<c>ChannelManager</c> 对 IM 渠道恒以整条回复发送，
+    /// 运行期不读这个值，因此内置适配器一律答 <c>false</c>。
+    /// </summary>
     bool SupportsStreaming { get; }
 
     /// <summary>

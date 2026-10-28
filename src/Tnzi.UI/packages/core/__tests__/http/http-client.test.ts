@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { HttpClient, createHttpClient } from '../../src/http/http';
+import { HttpClient, createHttpClient, REQUEST_PATH_REJECTED_ERROR_CODE } from '../../src/http/http';
 
 // Mock fetch globally
 const mockFetch = vi.fn();
@@ -10,7 +10,7 @@ function jsonResponse(data: Record<string, unknown>, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(data),
+    text: () => Promise.resolve(JSON.stringify(data)),
     blob: () => Promise.resolve(new Blob()),
     headers: new Headers(),
   } as unknown as Response;
@@ -174,6 +174,30 @@ describe('HttpClient', () => {
       expect(url).not.toContain('name');
       expect(url).not.toContain('age');
       expect(url).toContain('status=active');
+    });
+
+    // A record id taken from a link (a route param, a `?detail=edit:<id>`)
+    // and interpolated into the path can carry `../`: fetch resolves it and
+    // the request lands on another resource, with the admin's credentials.
+    it.each([
+      '/admin/users/x/../../roles/1',
+      '/admin/users/..',
+      '/admin/users/./1',
+      '/admin/users/%2e%2e/roles/1',
+      '/admin/users/.%2E/roles/1',
+      '/admin/users/a\\..\\roles',
+    ])('refuses to send a path with a dot segment: %s', async (path) => {
+      const result = await client.put(path, { name: 'x' });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+      expect(result.errorCode).toBe(REQUEST_PATH_REJECTED_ERROR_CODE);
+    });
+
+    it('still sends dots inside a segment and in the query string', async () => {
+      await client.get('/files/report.v2.pdf', { params: { path: '../x' } });
+      await client.get('/files/a..b?dir=./y');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -465,6 +489,154 @@ describe('HttpClient', () => {
       await c.get('/test');
       expect(mockFetch).toHaveBeenCalledTimes(2); // 1 original + 1 retry
     });
+
+    // A 5xx, a gateway 502/504, a client-side timeout (408) or a dropped
+    // connection says nothing about whether the server already committed a
+    // write. Replaying a POST on any of them can create the payment / journal
+    // entry two or three times while the caller sees one success.
+    it.each([
+      ['POST', 503],
+      ['POST', 504],
+      ['POST', 408],
+      ['POST', 500],
+      ['PUT', 503],
+      ['PATCH', 502],
+      ['DELETE', 503],
+    ] as const)('does not replay a %s that answered %d by default', async (method, status) => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 2, baseDelay: 1 },
+      });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: status }, status));
+
+      const send = {
+        POST: () => c.post('/finance/payments', { amount: 10 }),
+        PUT: () => c.put('/finance/payments/1', { amount: 10 }),
+        PATCH: () => c.patch('/finance/payments/1', { amount: 10 }),
+        DELETE: () => c.delete('/finance/payments/1'),
+      }[method];
+      const result = await send();
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(result.code).toBe(status);
+    });
+
+    it('does not replay a POST whose client-side timeout fired', async () => {
+      vi.useFakeTimers();
+      try {
+        const c = new HttpClient({
+          baseUrl: '/api',
+          timeout: 50,
+          retry: { maxRetries: 2, baseDelay: 1 },
+        });
+        mockFetch.mockImplementation((_url: string, opts: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            );
+          }),
+        );
+
+        const p = c.post('/finance/payments', { amount: 10 });
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await p;
+
+        expect(result.code).toBe(408);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('retries the methods listed in retryMethods', async () => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 2, baseDelay: 1, retryMethods: ['GET', 'PUT'] },
+      });
+      mockFetch
+        .mockResolvedValueOnce(jsonResponse({ succeeded: false, code: 503 }, 503))
+        .mockResolvedValueOnce(apiSuccessResponse({ id: 1 }));
+
+      const result = await c.put('/settings/1', { value: 1 });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.succeeded).toBe(true);
+    });
+
+    it('still refuses a method left out of retryMethods', async () => {
+      const c = new HttpClient({
+        baseUrl: '/api',
+        retry: { maxRetries: 2, baseDelay: 1, retryMethods: ['PUT'] },
+      });
+      mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 503 }, 503));
+
+      await c.get('/test');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not retry a GET the caller aborted, and does not wait for the backoff', async () => {
+      vi.useFakeTimers();
+      try {
+        const c = new HttpClient({
+          baseUrl: '/api',
+          retry: { maxRetries: 2, baseDelay: 10_000 },
+        });
+        const controller = new AbortController();
+        mockFetch.mockImplementation((_url: string, opts: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            );
+          }),
+        );
+
+        let settled = false;
+        const p = c.get('/list', { signal: controller.signal }).then((r) => {
+          settled = true;
+          return r;
+        });
+        controller.abort();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(settled).toBe(true);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect((await p).succeeded).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops during the backoff when the caller aborts, without sending again', async () => {
+      vi.useFakeTimers();
+      try {
+        const c = new HttpClient({
+          baseUrl: '/api',
+          retry: { maxRetries: 2, baseDelay: 10_000 },
+        });
+        const controller = new AbortController();
+        mockFetch.mockResolvedValue(jsonResponse({ succeeded: false, code: 503 }, 503));
+
+        let settled = false;
+        const p = c.get('/list', { signal: controller.signal }).then((r) => {
+          settled = true;
+          return r;
+        });
+        // First attempt answered 503; the client is now sleeping 10s.
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(settled).toBe(false);
+
+        controller.abort();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(settled).toBe(true);
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect((await p).code).toBe(503);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // ------------------------------------------
@@ -483,6 +655,16 @@ describe('HttpClient', () => {
       const result = await client.download('/file');
       expect(result.succeeded).toBe(true);
       expect(result.data).toBeInstanceOf(Blob);
+    });
+
+    // A download can be a POST (`method`), and its path carries record ids
+    // like any other request: the dot-segment refusal must cover it.
+    it('refuses to send a download whose path has a dot segment', async () => {
+      const result = await client.download('/finance/statements/x/../../../users/1/export', { method: 'POST' });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+      expect(result.errorCode).toBe(REQUEST_PATH_REJECTED_ERROR_CODE);
     });
 
     it('should return failed result on error', async () => {
@@ -855,6 +1037,76 @@ describe('HttpClient', () => {
       // Two signal-free callers share one fetch; the signal-bearing one is its own.
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });
+
+    it('does not deadlock when the refresh reads the URL whose 401 started it', async () => {
+      // `createTnziClient`'s refresh re-reads the access profile with
+      // skipAuthRefresh. When an ordinary GET of that same URL is the one whose
+      // 401 started the refresh, joining it meant: the GET waits on the refresh,
+      // the refresh waits on its own read, the read waits on the GET - until the
+      // 30s refresh timeout signed the user out.
+      const onUnauthorized = vi.fn();
+      const c: HttpClient = new HttpClient({
+        baseUrl: '/api',
+        onUnauthorized,
+        refreshTokenFn: async () => {
+          c.setAccessToken('new-token');
+          await c.get('/access-profile', { skipAuthRefresh: true });
+          return 'new-token';
+        },
+      });
+      c.setAccessToken('old-token');
+      mockFetch
+        .mockResolvedValueOnce(apiErrorResponse('expired', 401))
+        .mockResolvedValue(apiSuccessResponse({ permissions: ['a'] }));
+
+      const outcome = await Promise.race([
+        c.get('/access-profile'),
+        new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 1000)),
+      ]);
+
+      expect(outcome).not.toBe('hung');
+      expect((outcome as { succeeded: boolean }).succeeded).toBe(true);
+      expect(onUnauthorized).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+
+    it('never shares between an auth-flow GET and an ordinary one, in either direction', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+
+      await Promise.all([client.get('/me'), client.get('/me', { skipAuthRefresh: true })]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      mockFetch.mockClear();
+      await Promise.all([client.get('/me', { skipAuthRefresh: true }), client.get('/me')]);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not hand a GET the response to one sent with a different token', async () => {
+      let release: (r: Response) => void = () => {};
+      mockFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => (release = resolve)));
+      mockFetch.mockResolvedValue(apiSuccessResponse({ user: 'second' }));
+
+      client.setAccessToken('first-user');
+      const first = client.get('/profile');
+      client.setAccessToken('second-user');
+      const second = await client.get('/profile');
+      release(apiSuccessResponse({ user: 'first' }));
+      await first;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(second.data).toEqual({ user: 'second' });
+      const [, secondInit] = mockFetch.mock.calls[1];
+      expect((secondInit as { headers: Record<string, string> }).headers['Authorization']).toBe('Bearer second-user');
+    });
+
+    it('still shares identical GETs sent with the same token', async () => {
+      mockFetch.mockResolvedValue(apiSuccessResponse({}));
+      client.setAccessToken('same');
+
+      await Promise.all([client.get('/users', { headers: { 'X-A': '1' } }), client.get('/users', { headers: { 'x-a': '1' } })]);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ------------------------------------------
@@ -1218,6 +1470,165 @@ describe('HttpClient', () => {
       expect(refreshFn).not.toHaveBeenCalled();
       expect(sends.sends).toBe(1);
       expect(result.code).toBe(401);
+    });
+
+    // Uploads are writes, and their paths carry record ids too
+    // (`files/${fileId}/versions`): the dot-segment refusal must cover them.
+    it('refuses to send an upload whose path has a dot segment', async () => {
+      const sends = stubXhr([{ status: 200, body: { succeeded: true, code: 200 } }]);
+      const c = new HttpClient({ baseUrl: '/api' });
+
+      const result = await c.uploadFormData('/files/x/../../users/1/avatar', new FormData());
+
+      expect(sends.sends).toBe(0);
+      expect(result.succeeded).toBe(false);
+      expect(result.code).toBe(400);
+      expect(result.errorCode).toBe(REQUEST_PATH_REJECTED_ERROR_CODE);
+    });
+  });
+
+  // ------------------------------------------
+  // Upload timeouts: a large file is not a slow request
+  // ------------------------------------------
+
+  describe('upload timeouts', () => {
+    /** An XHR the test drives by hand: progress, completion and abort. */
+    class ManualXhr {
+      static last: ManualXhr | null = null;
+      status = 0;
+      statusText = '';
+      responseText = '';
+      timeout = 0;
+      withCredentials = false;
+      aborted = false;
+      sent = false;
+      upload: { onprogress: ((e: ProgressEvent) => void) | null; onload: (() => void) | null } = {
+        onprogress: null,
+        onload: null,
+      };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      constructor() {
+        ManualXhr.last = this;
+      }
+      open() {}
+      setRequestHeader() {}
+      send() {
+        this.sent = true;
+      }
+      abort() {
+        this.aborted = true;
+        this.onabort?.();
+      }
+      progress(loaded: number, total: number) {
+        this.upload.onprogress?.({ lengthComputable: true, loaded, total } as ProgressEvent);
+      }
+      respond(status: number, body: unknown) {
+        this.status = status;
+        this.responseText = JSON.stringify(body);
+        this.onload?.();
+      }
+    }
+
+    function track<T>(promise: Promise<T>) {
+      const state = { settled: false, value: undefined as T | undefined };
+      void promise.then((value) => {
+        state.settled = true;
+        state.value = value;
+      });
+      return state;
+    }
+
+    beforeEach(() => {
+      ManualXhr.last = null;
+      vi.stubGlobal('XMLHttpRequest', ManualXhr);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.stubGlobal('fetch', mockFetch);
+    });
+
+    it('does not cap the whole transfer with the instance default', () => {
+      void client.uploadFormData('/files/upload', new FormData());
+      expect(ManualXhr.last!.timeout).toBe(0);
+    });
+
+    it('keeps an upload that is still moving alive past the default window', async () => {
+      vi.useFakeTimers();
+      const upload = track(client.uploadFormData<{ id: string }>('/files/upload', new FormData()));
+      const xhr = ManualXhr.last!;
+
+      // 75 s in total, never 30 s without a progress event.
+      for (let sent = 1; sent <= 3; sent++) {
+        await vi.advanceTimersByTimeAsync(25_000);
+        xhr.progress(sent * 10, 30);
+      }
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(upload.settled).toBe(false);
+      expect(xhr.aborted).toBe(false);
+
+      xhr.respond(200, { succeeded: true, code: 200, data: { id: 'f1' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(upload.value?.succeeded).toBe(true);
+    });
+
+    it('fails a stalled upload with REQUEST_TIMEOUT after the default window without progress', async () => {
+      vi.useFakeTimers();
+      const upload = track(client.uploadFormData('/files/upload', new FormData()));
+      const xhr = ManualXhr.last!;
+      xhr.progress(5, 30);
+
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(upload.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(xhr.aborted).toBe(true);
+      expect(upload.value).toMatchObject({ succeeded: false, code: 408, errorCode: 'REQUEST_TIMEOUT' });
+    });
+
+    it('gives the server a fresh window once the body is sent, and fails if it never answers', async () => {
+      vi.useFakeTimers();
+      const upload = track(client.uploadFormData('/files/upload', new FormData()));
+      const xhr = ManualXhr.last!;
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      xhr.upload.onload?.();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(upload.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(upload.value).toMatchObject({ code: 408, errorCode: 'REQUEST_TIMEOUT' });
+    });
+
+    it('still caps the whole upload when the caller passes a timeout', () => {
+      void client.uploadFormData('/files/upload', new FormData(), { timeout: 5000 });
+      expect(ManualXhr.last!.timeout).toBe(5000);
+    });
+
+    it('honours the caller\'s abort signal', async () => {
+      const controller = new AbortController();
+      const upload = client.uploadFormData('/files/upload', new FormData(), { signal: controller.signal });
+      const xhr = ManualXhr.last!;
+
+      controller.abort();
+      const result = await upload;
+
+      expect(xhr.aborted).toBe(true);
+      expect(result.succeeded).toBe(false);
+      expect(result.errorCode).not.toBe('REQUEST_TIMEOUT');
+    });
+
+    it('does not send at all when the signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      const result = await client.uploadFormData('/files/upload', new FormData(), { signal: controller.signal });
+
+      expect(ManualXhr.last?.sent ?? false).toBe(false);
+      expect(result.succeeded).toBe(false);
     });
   });
 

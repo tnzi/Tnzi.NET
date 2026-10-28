@@ -67,10 +67,15 @@ public class PaymentProviderFactory : IPaymentProviderFactory
     private static bool IsTestChannel(string channelCode)
         => string.Equals(channelCode, PaymentConstants.NullChannelCode, StringComparison.OrdinalIgnoreCase);
 
+    /// <remarks>
+    /// 按 <see cref="IsChannelEnabled"/> 判定而不是逐个调 <see cref="GetProvider"/>：后者每判一次不可用就记一条 Warning，
+    /// 列一次渠道清单（典型是结账页渲染可选渠道）不该把每个没启用的渠道都报一遍。
+    /// </remarks>
     public IEnumerable<IPaymentProvider> GetEnabledProviders()
     {
+        var options = _paymentOptions.CurrentValue;
         return _providers.Values
-            .Where(x => GetProvider(x.ChannelCode) != null)
+            .Where(x => IsChannelEnabled(options, x.ChannelCode))
             .ToList();
     }
 }

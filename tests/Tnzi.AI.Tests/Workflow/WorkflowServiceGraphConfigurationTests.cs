@@ -69,6 +69,32 @@ public class WorkflowServiceGraphConfigurationTests : WorkflowServiceSqliteTestB
     }
 
     [Fact]
+    public async Task RunAsync_RouteKeysInAnotherCase_StillRouteAfterTheDefinitionIsStored()
+    {
+        // review / conditional 节点给出的路由键一律小写。字典的比较器不随 JSON 存储，读回来是区分大小写的：
+        // 写成 "A" 的键查不到 "a"，没有默认目标时两个分支都跑，有默认目标时每个裁决都落到它上面。
+        var service = CreateService();
+        var created = await service.CreateAsync(RoutedWorkflow(new WorkflowGraphConfigurationDto
+        {
+            ConditionalEdges =
+            [
+                new WorkflowConditionalEdgeDto
+                {
+                    FromNodeId = "classify",
+                    Routes = new Dictionary<string, string> { ["A"] = "handleA", ["B"] = "handleB" }
+                }
+            ]
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+
+        var run = await service.RunAsync(created.Data!.Id, "start");
+
+        run.Succeeded.ShouldBeTrue(run.Message);
+        _recorder.Executions.ShouldContain("handleA");
+        _recorder.Executions.ShouldNotContain("handleB", "the node routed 'a', which is the stored key 'A'");
+    }
+
+    [Fact]
     public async Task CreateAsync_WithoutConfiguration_BothBranchesRun_AsBefore()
     {
         var service = CreateService();

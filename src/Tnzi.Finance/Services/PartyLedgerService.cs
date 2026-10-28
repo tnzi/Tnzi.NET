@@ -57,9 +57,8 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
 
         // 未清与分桶直接取账龄的那一行：这是"欠多少"的唯一权威口径（时点已核销重建 +
         // 未核销收付款/贷项的负行 + 与 GL 控制科目 tie-out）。在这里另写一遍必然漂移。
-        var aging = partyType == FinancePartyType.Customer
-            ? await _reportService.GetArAgingAsync(asOfDate, cancellationToken)
-            : await _reportService.GetApAgingAsync(asOfDate, cancellationToken);
+        // 取的是只算这一个往来方的账龄（同一段计算，查询带往来方谓词），而不是整本账的账龄再挑一行。
+        var aging = await _reportService.GetPartyAgingAsync(partyType, partyId, asOfDate, cancellationToken);
         if (!aging.Succeeded)
             return Fail<PartyLedgerSummaryDto>(aging.Message!, aging.Code ?? 400);
 
@@ -126,6 +125,21 @@ public class PartyLedgerService : ApplicationService, IPartyLedgerService
 
         return Ok<IPagedList<PartyLedgerEntryDto>>(
             new PagedList<PartyLedgerEntryDto>(page, pageIndex, pageSize, ordered.Count));
+    }
+
+    public async Task<Result<List<PartyLedgerEntryDto>>> GetAllTransactionsAsync(
+        FinancePartyType partyType,
+        Guid partyId,
+        DateTime? from = null,
+        DateTime? to = null,
+        CancellationToken cancellationToken = default)
+    {
+        var entries = await LoadEntriesAsync(partyType, partyId, from, to, cancellationToken);
+        return Ok(entries
+            .OrderByDescending(e => e.DocDate)
+            .ThenByDescending(e => e.Number ?? string.Empty)
+            .ThenBy(e => e.DocId)
+            .ToList());
     }
 
     private async Task<string?> ResolveNameAsync(FinancePartyType partyType, Guid partyId, CancellationToken cancellationToken)

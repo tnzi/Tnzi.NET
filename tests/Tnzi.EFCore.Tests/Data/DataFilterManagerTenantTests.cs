@@ -27,7 +27,51 @@ public class DataFilterManagerTenantTests
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
-                    state.ToString()!.Contains("Multi-tenant filter disabled")),
+                    state != null && state.ToString()!.Contains("Multi-tenant filter disabled")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// 多租户关着时没有租户隔离可绕过：不记那条「将绕过租户隔离」的警告（单租户部署每次启动、
+    /// 工作流看门狗每一轮都会触发它）。开着时照记，见上一条。
+    /// </summary>
+    [Fact]
+    public void Disable_MultiTenantFilter_WithMultiTenancyOff_DoesNotWarn()
+    {
+        var loggerMock = CreateLoggerMock();
+        var options = Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions { Enabled = false });
+        var manager = new DataFilterManager(loggerMock.Object, options);
+
+        using var scope = manager.Disable<IMultiTenantFilter>();
+
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+        Assert.False(manager.IsEnabled<IMultiTenantFilter>());
+    }
+
+    [Fact]
+    public void Disable_MultiTenantFilter_WithMultiTenancyOn_StillWarns()
+    {
+        var loggerMock = CreateLoggerMock();
+        var options = Microsoft.Extensions.Options.Options.Create(new MultiTenancyOptions { Enabled = true });
+        var manager = new DataFilterManager(loggerMock.Object, options);
+
+        using var scope = manager.Disable<IMultiTenantFilter>();
+
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state != null && state.ToString()!.Contains("Multi-tenant filter disabled")),
                 null,
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

@@ -6,7 +6,7 @@ namespace Tnzi.Finance.Documents;
 /// 让 Finance 的支票打印（<c>admin/finance/checks</c> 的 print / preview / reprint / calibration）开箱即用。
 /// </summary>
 /// <remarks>
-/// 可选。<see cref="ICheckDocumentRenderer"/> 契约留在 Finance 核心（核心刻意零渲染库引用——支票号分配、
+/// 可选。<see cref="ICheckDocumentRenderer"/> 契约在 <c>Tnzi.Finance.Banking</c>（银行域刻意零渲染库引用：支票号分配、
 /// 打印队列、登记、作废、毁票等生命周期与渲染无关），本子模块把渲染依赖（Razor 模板引擎、PdfSharp）
 /// 隔离进来，纯会计消费者不再被传递拉入。加载本模块即绑定渲染实现；消费应用可先自注册
 /// <see cref="ICheckDocumentRenderer"/> 覆盖（默认经 <c>TryAddScoped</c>，先注册者胜出），
@@ -42,7 +42,8 @@ public class FinanceDocumentsModule : TnziCustomModule
         // 目录端点返回 501 引导（同渲染器缺席的处理）。
         context.Services.TryAddScoped<ICheckTemplateCatalog, CheckTemplateCatalog>();
 
-        // 出厂支票版式的幂等播种（迁移之后执行，空库首启即可用；已存在则跳过不覆盖）。
+        // 出厂支票版式的幂等播种（迁移之后执行，空库首启即可用；没人改过的出厂行随框架正文刷新，
+        // 用户编辑过的行一个字节都不碰，见 CheckTemplateSeeder）。
         context.Services.AddTransient<IPostMigrationStartupTask, CheckTemplateSeeder>();
 
         return base.ConfigureServicesAsync(context);

@@ -33,7 +33,8 @@ public class FileAccessTokenTests
             new TestFileUrlSigner(),
             _serviceProvider.Object,
             new UploadGuard(monitor.Object),
-            new FileThumbnailGenerator(_storage.Object, monitor.Object));
+            new FileThumbnailGenerator(_storage.Object, monitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     private static FileRecord Record(Guid id) => new() { Id = id, FileName = "photo.jpg" };

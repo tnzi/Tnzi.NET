@@ -124,6 +124,9 @@ public class SystemModule : TnziApplicationModule
             services.AddEventHandler<SettingChangedEvent, SettingChangedEventHandler>();
         }
 
+        // 按键缓存在提交之后再清一次（SettingService 的就地清除在外层事务提交之前），每个部署都要。
+        services.AddEventHandler<SettingChangedEvent, SettingCacheInvalidationHandler>();
+
         // 多实例一致性收端无条件注册（未订阅时零开销）：即使本实例没接 source/SignalR，
         // 跨实例清按键缓存（MemoryCache 每实例独立）依然必要。分布式总线是否加载在
         // OnApplicationInitializationAsync 才可知，订阅在 init 阶段按需接线。

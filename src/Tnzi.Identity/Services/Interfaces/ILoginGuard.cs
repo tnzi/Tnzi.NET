@@ -36,6 +36,7 @@ public enum LoginMethod
     /// 「账号已停用」这道检查绑在登录动作上，而刷新不是登录，检查就这么消失了，
     /// 且<b>没有任何东西会报错</b>。后果是管理员停用一个账号之后，
     /// 手里还攥着刷新令牌的一方可以无限续期，永远进得来。
+    /// 守卫按这个值区别对待的一处：输错密码触发的临时锁定不否决刷新（理由见 <see cref="LockedAccountLoginGuard"/>）。
     /// </remarks>
     RefreshToken = 7,
 
@@ -44,10 +45,19 @@ public enum LoginMethod
     /// </summary>
     /// <remarks>
     /// 这一步走守卫链而不是直接签发：账号刚从
-    /// <see cref="PendingUserActions.InvitationPending"/> 转出，此刻它与任何其它账号一样，
-    /// 该被停用就得被停用（管理员可能在邀请发出后又把人停掉了）。
+    /// <see cref="PendingUserActions.InvitationPending"/> 转出，此刻它与任何其它账号一样受全部守卫管辖。
+    /// 待接受期间管理员停用 / 锁定会被拒绝（409，指向撤销邀请），所以这里清掉的锁定只会是邀请自己的占位。
     /// </remarks>
     Invitation = 8,
+
+    /// <summary>
+    /// 应用代码为一个身份已经确认的用户签发委派会话（<see cref="IAuthService.IssueDelegatedSessionAsync"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 守卫按登录对待它：停用、锁定（含输错密码触发的临时锁定）、IP 允许列表都会拒绝签发。
+    /// 之后的续期走 <see cref="RefreshToken"/>。
+    /// </remarks>
+    Delegated = 9,
 }
 
 /// <summary>

@@ -20,6 +20,8 @@ public class RoleServiceTests
         _roleManagerMock = new Mock<RoleManager<Role>>(roleStore.Object, null!, null!, null!, null!);
 
         _dbContextMock = new Mock<DbContext>(new DbContextOptions<DbContext>());
+        // 删除角色前要先取成员（发成员变更事件用）；默认是一个没有成员的空表，需要成员的用例自己覆盖。
+        _dbContextMock.Setup(x => x.Set<UserRole>()).Returns(new List<UserRole>().BuildMockDbSet().Object);
         _eventBusMock = new Mock<IEventBus>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 

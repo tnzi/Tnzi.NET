@@ -26,6 +26,7 @@ public class PromotionsTestDbContext : TnziDbContext<PromotionsTestDbContext>
         modelBuilder.ApplyConfiguration(new PaymentConfiguration());
         modelBuilder.ApplyConfiguration(new RefundConfiguration());
         modelBuilder.ApplyConfiguration(new StoredPaymentMethodConfiguration());
+        modelBuilder.ApplyConfiguration(new BillingAccountConfiguration());
 
         modelBuilder.ApplyConfiguration(new PromotionConfiguration());
         modelBuilder.ApplyConfiguration(new CouponUsageConfiguration());

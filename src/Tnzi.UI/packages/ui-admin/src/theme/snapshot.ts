@@ -10,6 +10,7 @@ import type { ThemeContext, ThemeColors } from '@tnzi/ui'
 import type { AdminSurfaceStyle, useAdminThemeStore } from '../stores/useAdminThemeStore'
 import type { AdminThemeSnapshot } from './admin-config'
 import { applyAppearancePreset, type AdminThemePreset } from './appearance-presets'
+import { cssColorOrNull } from './css-color'
 
 export type AdminThemeStore = ReturnType<typeof useAdminThemeStore>
 
@@ -224,27 +225,29 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
     themeStore.setFooterHeight(snapshot.admin.footerHeight)
   }
   // Per-surface background overrides - `undefined` = absent in an older
-  // snapshot (keep current), `null` = clear the override.
+  // snapshot (keep current), `null` = clear the override. A value that is not
+  // a CSS color clears it too (see css-color.ts): a snapshot is applied for
+  // every user, and these land in custom properties `background:` reads.
   if ('siderBg' in snapshot.admin) {
-    themeStore.setSiderBg(snapshot.admin.siderBg ?? null)
+    themeStore.setSiderBg(cssColorOrNull(snapshot.admin.siderBg))
   }
   if ('headerBg' in snapshot.admin) {
-    themeStore.setHeaderBg(snapshot.admin.headerBg ?? null)
+    themeStore.setHeaderBg(cssColorOrNull(snapshot.admin.headerBg))
   }
   if ('tabBg' in snapshot.admin) {
-    themeStore.setTabBg(snapshot.admin.tabBg ?? null)
+    themeStore.setTabBg(cssColorOrNull(snapshot.admin.tabBg))
   }
   if ('footerBg' in snapshot.admin) {
-    themeStore.setFooterBg(snapshot.admin.footerBg ?? null)
+    themeStore.setFooterBg(cssColorOrNull(snapshot.admin.footerBg))
   }
   if ('contentBg' in snapshot.admin) {
-    themeStore.setContentBg(snapshot.admin.contentBg ?? null)
+    themeStore.setContentBg(cssColorOrNull(snapshot.admin.contentBg))
   }
   if ('pageHeaderBg' in snapshot.admin) {
-    themeStore.setPageHeaderBg(snapshot.admin.pageHeaderBg ?? null)
+    themeStore.setPageHeaderBg(cssColorOrNull(snapshot.admin.pageHeaderBg))
   }
   if ('desktopWallpaperBg' in snapshot.admin) {
-    themeStore.setDesktopWallpaperBg(snapshot.admin.desktopWallpaperBg ?? null)
+    themeStore.setDesktopWallpaperBg(cssColorOrNull(snapshot.admin.desktopWallpaperBg))
   }
   if ('desktopWallpaperImage' in snapshot.admin) {
     themeStore.setDesktopWallpaperImage(snapshot.admin.desktopWallpaperImage ?? null)
@@ -253,7 +256,7 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
     themeStore.setDesktopWallpaperScrim(snapshot.admin.desktopWallpaperScrim)
   }
   if ('desktopTaskbarBg' in snapshot.admin) {
-    themeStore.setDesktopTaskbarBg(snapshot.admin.desktopTaskbarBg ?? null)
+    themeStore.setDesktopTaskbarBg(cssColorOrNull(snapshot.admin.desktopTaskbarBg))
   }
   if (typeof snapshot.admin.desktopTaskbarHeight === 'number') {
     themeStore.setDesktopTaskbarHeight(snapshot.admin.desktopTaskbarHeight)
@@ -262,20 +265,20 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
     themeStore.setDesktopVibrancy(snapshot.admin.desktopVibrancy)
   }
   if ('desktopWindowBarBg' in snapshot.admin) {
-    themeStore.setDesktopWindowBarBg(snapshot.admin.desktopWindowBarBg ?? null)
+    themeStore.setDesktopWindowBarBg(cssColorOrNull(snapshot.admin.desktopWindowBarBg))
   }
   if ('cardBg' in snapshot.admin) {
-    themeStore.setCardBg(snapshot.admin.cardBg ?? null)
+    themeStore.setCardBg(cssColorOrNull(snapshot.admin.cardBg))
   }
   // Per-surface foreground (text) color - `undefined` = absent in an older
   // snapshot (keep current); `null` clears the override (back to auto).
-  if ('siderTextColor' in snapshot.admin) themeStore.setSiderTextColor(snapshot.admin.siderTextColor ?? null)
-  if ('headerTextColor' in snapshot.admin) themeStore.setHeaderTextColor(snapshot.admin.headerTextColor ?? null)
-  if ('tabTextColor' in snapshot.admin) themeStore.setTabTextColor(snapshot.admin.tabTextColor ?? null)
-  if ('footerTextColor' in snapshot.admin) themeStore.setFooterTextColor(snapshot.admin.footerTextColor ?? null)
-  if ('contentTextColor' in snapshot.admin) themeStore.setContentTextColor(snapshot.admin.contentTextColor ?? null)
-  if ('pageHeaderTextColor' in snapshot.admin) themeStore.setPageHeaderTextColor(snapshot.admin.pageHeaderTextColor ?? null)
-  if ('cardTextColor' in snapshot.admin) themeStore.setCardTextColor(snapshot.admin.cardTextColor ?? null)
+  if ('siderTextColor' in snapshot.admin) themeStore.setSiderTextColor(cssColorOrNull(snapshot.admin.siderTextColor))
+  if ('headerTextColor' in snapshot.admin) themeStore.setHeaderTextColor(cssColorOrNull(snapshot.admin.headerTextColor))
+  if ('tabTextColor' in snapshot.admin) themeStore.setTabTextColor(cssColorOrNull(snapshot.admin.tabTextColor))
+  if ('footerTextColor' in snapshot.admin) themeStore.setFooterTextColor(cssColorOrNull(snapshot.admin.footerTextColor))
+  if ('contentTextColor' in snapshot.admin) themeStore.setContentTextColor(cssColorOrNull(snapshot.admin.contentTextColor))
+  if ('pageHeaderTextColor' in snapshot.admin) themeStore.setPageHeaderTextColor(cssColorOrNull(snapshot.admin.pageHeaderTextColor))
+  if ('cardTextColor' in snapshot.admin) themeStore.setCardTextColor(cssColorOrNull(snapshot.admin.cardTextColor))
   // Colors always apply; mode follows the default-vs-user-choice rule
   // documented on ApplyThemeSnapshotOptions.
   if (!options?.modeAsDefault) {
@@ -293,7 +296,8 @@ export function applyThemeSnapshot(snapshot: AdminThemeSnapshot, themeStore: Adm
   if (typeof snapshot.admin.themeSchemaVisible === 'boolean') {
     themeStore.setThemeSchemaVisible(snapshot.admin.themeSchemaVisible)
   }
-  for (const [role, color] of Object.entries(snapshot.ui.colors)) {
+  for (const [role, value] of Object.entries(snapshot.ui.colors)) {
+    const color = cssColorOrNull(value)
     if (color) ctx.setColor(role as keyof ThemeColors, color)
   }
 }

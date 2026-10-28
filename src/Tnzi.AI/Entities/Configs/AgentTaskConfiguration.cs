@@ -7,6 +7,8 @@ public class AgentTaskConfiguration : EntityTypeConfigurationBase<AgentTask, Gui
 {
     public override void Configure(EntityTypeBuilder<AgentTask> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.Title)
             .IsRequired()
             .HasMaxLength(500);
@@ -18,6 +20,9 @@ public class AgentTaskConfiguration : EntityTypeConfigurationBase<AgentTask, Gui
         builder.HasIndex(e => new { e.RunId, e.OrderIndex });
 
         // 按租户 + 状态查询
-        builder.HasIndex(e => new { e.TenantId, e.Status });
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.Status });
+        }
     }
 }

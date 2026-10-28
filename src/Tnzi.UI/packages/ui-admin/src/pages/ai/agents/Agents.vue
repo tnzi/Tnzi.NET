@@ -77,7 +77,7 @@
         <div class="flex flex-wrap gap-4px mt-8px">
           <NTag
             size="small"
-            :type="tierTagType(item.qualityTier)"
+            :type="tierTagType(item.qualityTier, 'higherIsBetter')"
             :bordered="false"
             :title="`${t('tier.quality')}: ${item.qualityTier ?? 0}`"
           >
@@ -85,7 +85,7 @@
           </NTag>
           <NTag
             size="small"
-            :type="tierTagType(item.latencyTier)"
+            :type="tierTagType(item.latencyTier, 'lowerIsBetter')"
             :bordered="false"
             :title="`${t('tier.latency')}: ${item.latencyTier ?? 0}`"
           >
@@ -93,7 +93,7 @@
           </NTag>
           <NTag
             size="small"
-            :type="tierTagType(item.costTier)"
+            :type="tierTagType(item.costTier, 'lowerIsBetter')"
             :bordered="false"
             :title="`${t('tier.cost')}: ${item.costTier ?? 0}`"
           >
@@ -142,17 +142,18 @@ import TFormSchemaRenderer from '../../_shared/form-schema'
 import type { FormSchemaItem } from '../../_shared/form-schema'
 import { translatePageKey } from '../../_shared/translate'
 import {
+  agentCreateDefaults,
   agentFormSchema,
   agentSearchFields,
   executionModeKey,
   tierLabelKey,
   tierTagType,
+  toAgentUpdateDto,
 } from './agent-config'
 import type {
   AgentDto,
   AgentHealthSummaryDto,
   CreateAgentDto,
-  UpdateAgentDto,
   ProviderOptionDto,
 } from '@tnzi/core/services/ai'
 
@@ -173,15 +174,19 @@ const crud = useCrudPage<AgentDto>({
   rowKey: (a) => a.id,
   fetchData: (query) => bridge.agents.fetch(query),
   createData: (data) => bridge.agents.create(data as CreateAgentDto),
-  updateData: (id, data) => bridge.agents.update(String(id), data as UpdateAgentDto),
+  updateData: (id, data) => bridge.agents.update(String(id), toAgentUpdateDto(data)),
   deleteData: (ids) => bridge.agents.delete(ids.map(String)),
+  // The server's create defaults: an unseeded switch renders OFF while the
+  // created record is enabled.
+  createDefaults: agentCreateDefaults,
 })
 
 // --- provider dropdown (API-driven) ----------------------------------------
-// The static agent-config provider list uses lowercase slugs which won't match
-// the configured provider *names* the runtime resolves against. Load the real
-// enabled providers and inject them into the create-form + search provider
-// selects (falling back to the static list if the API yields nothing).
+// The runtime resolves an agent's provider by the configured provider's NAME.
+// Load the enabled providers and turn the create-form + search provider fields
+// into selects over them. When the list cannot be read (it needs
+// `ai.provider.view`) or is empty, the fields stay free text: a guessed list of
+// type slugs would save an agent that cannot run.
 const providerOptions = ref<ProviderOptionDto[]>([])
 async function loadProviderOptions(): Promise<void> {
   try {
@@ -195,7 +200,7 @@ loadProviderOptions().catch(() => undefined)
 function withProviderOptions(schema: FormSchemaItem[]): FormSchemaItem[] {
   if (providerOptions.value.length === 0) return schema
   const opts = providerOptions.value.map((p) => ({ label: `${p.name} · ${p.providerType}`, value: p.name }))
-  return schema.map((f) => (f.key === 'provider' ? { ...f, options: opts } : f))
+  return schema.map((f) => (f.key === 'provider' ? { ...f, type: 'select', options: opts } : f))
 }
 
 const agentFormSchemaWithProviders = computed(() => withProviderOptions(agentFormSchema))
@@ -213,13 +218,15 @@ async function loadHealth(): Promise<void> {
 }
 loadHealth().catch(() => undefined)
 
-const kpiCards = computed<Array<{ key: string; labelKey: string; icon: string; tone: TKpiCardTone; value: number }>>(() => {
+// No summary (not loaded, or the read failed) shows dashes: a row of zeros
+// would read as "no agents, none unhealthy".
+const kpiCards = computed<Array<{ key: string; labelKey: string; icon: string; tone: TKpiCardTone; value: number | null }>>(() => {
   const h = health.value
   return [
-    { key: 'total', labelKey: 'kpi.total', icon: 'mdi:robot-outline', tone: 'default', value: h?.totalAgents ?? 0 },
-    { key: 'healthy', labelKey: 'kpi.healthy', icon: 'mdi:check-circle-outline', tone: 'success', value: h?.healthyAgents ?? 0 },
-    { key: 'unhealthy', labelKey: 'kpi.unhealthy', icon: 'mdi:alert-circle-outline', tone: 'error', value: h?.unhealthyAgents ?? 0 },
-    { key: 'disabled', labelKey: 'kpi.disabled', icon: 'mdi:pause-circle-outline', tone: 'warning', value: h?.disabledAgents ?? 0 },
+    { key: 'total', labelKey: 'kpi.total', icon: 'mdi:robot-outline', tone: 'default', value: h ? h.totalAgents ?? 0 : null },
+    { key: 'healthy', labelKey: 'kpi.healthy', icon: 'mdi:check-circle-outline', tone: 'success', value: h ? h.healthyAgents ?? 0 : null },
+    { key: 'unhealthy', labelKey: 'kpi.unhealthy', icon: 'mdi:alert-circle-outline', tone: 'error', value: h ? h.unhealthyAgents ?? 0 : null },
+    { key: 'disabled', labelKey: 'kpi.disabled', icon: 'mdi:pause-circle-outline', tone: 'warning', value: h ? h.disabledAgents ?? 0 : null },
   ]
 })
 
@@ -246,7 +253,8 @@ async function cloneOne(item: AgentDto): Promise<void> {
 }
 
 async function removeOne(item: AgentDto): Promise<void> {
-  await crud.handleDelete([item.id])
+  // handleDelete has already reported a refusal (toast or onError) before rethrowing.
+  await crud.handleDelete([item.id]).catch(() => undefined)
   await loadHealth()
 }
 </script>

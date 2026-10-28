@@ -41,8 +41,7 @@ public class NotificationDeepIterationTests
         optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
-            SmsMaxContentLength = 140,
-            Queue = new QueueOptions { Enabled = false },
+            Queue = new QueueOptions(),
             Retry = new RetryOptions { RetryDelaySeconds = 1 }
         });
 
@@ -54,7 +53,8 @@ public class NotificationDeepIterationTests
             optionsMock.Object,
             serviceProviderMock.Object,
             PassThroughOptOut(),
-            PassThroughPreferences());
+            PassThroughPreferences(),
+            new Mock<IRepository<Recipient, Guid>>().Object);
 
         _queryService = new NotificationQueryService(
             _repositoryMock.Object,
@@ -135,32 +135,8 @@ public class NotificationDeepIterationTests
         return mock.Object;
     }
 
-    [Fact]
-    public async Task BatchCancelAsync_Should_Cancel_Only_Pending_And_Scheduled()
-    {
-        // Arrange
-        var pendingMsg = CreateMessage(NotificationStatus.Pending);
-        var scheduledMsg = CreateMessage(NotificationStatus.Scheduled);
-        var sentMsg = CreateMessage(NotificationStatus.Sent);
-        var failedMsg = CreateMessage(NotificationStatus.Failed);
-        var cancelledMsg = CreateMessage(NotificationStatus.Cancelled);
-
-        var allMessages = new List<Message> { pendingMsg, scheduledMsg, sentMsg, failedMsg, cancelledMsg };
-        var ids = allMessages.Select(m => m.Id).ToList();
-        SetupQueryable(allMessages);
-
-        // Act
-        var result = await _notificationService.BatchCancelAsync(ids);
-
-        // Assert - 只有 Pending 和 Scheduled 应该被取消
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldBe(2);
-        _repositoryMock.Verify(r => r.UpdateManyAsync(
-            It.Is<List<Message>>(list =>
-                list.Count == 2 &&
-                list.All(m => m.Status == NotificationStatus.Cancelled)),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
+    // 真正取消的那几条（只停 Pending / Scheduled、只停请求里的、条件更新不盖掉并发的发送）在真库上验：
+    // 见 Integration/CancelRaceTests。取消是条件更新，模拟的查询源执行不了它。
 
     [Fact]
     public async Task BatchCancelAsync_Should_Return_Zero_When_No_Cancellable_Found()
@@ -198,40 +174,6 @@ public class NotificationDeepIterationTests
         // Act & Assert - Check.NotNullOrEmpty 抛 ArgumentNullException
         await Should.ThrowAsync<ArgumentNullException>(async () =>
             await _notificationService.BatchCancelAsync(null!));
-    }
-
-    [Fact]
-    public async Task BatchCancelAsync_Should_Save_Changes_After_Update()
-    {
-        // Arrange
-        var pendingMsg = CreateMessage(NotificationStatus.Pending);
-        SetupQueryable(new List<Message> { pendingMsg });
-
-        // Act
-        await _notificationService.BatchCancelAsync(new List<Guid> { pendingMsg.Id });
-
-        // Assert
-        _unitOfWorkMock.Verify(u => u.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task BatchCancelAsync_Should_Only_Cancel_Matching_Ids()
-    {
-        // Arrange - 只请求部分 ID
-        var pending1 = CreateMessage(NotificationStatus.Pending);
-        var pending2 = CreateMessage(NotificationStatus.Pending);
-        var pending3 = CreateMessage(NotificationStatus.Pending);
-        SetupQueryable(new List<Message> { pending1, pending2, pending3 });
-
-        // 只取消 pending1 和 pending2
-        var ids = new List<Guid> { pending1.Id, pending2.Id };
-
-        // Act
-        var result = await _notificationService.BatchCancelAsync(ids);
-
-        // Assert - 只取消请求的 2 个
-        result.Succeeded.ShouldBeTrue();
-        result.Data.ShouldBe(2);
     }
 
     #endregion

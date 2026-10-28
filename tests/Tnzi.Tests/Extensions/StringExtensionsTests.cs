@@ -175,6 +175,47 @@ public class StringExtensionsTests
         Assert.Equal(expected, result);
     }
 
+    /// <summary>"ab" 后接一个增补平面字符（两个码元）再接 "cd"：截到 3 正好切在代理对中间。</summary>
+    private const string TextWithEmojiAtIndex2 = "ab\U0001F600cd";
+
+    [Fact]
+    public void Truncate_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var result = TextWithEmojiAtIndex2.Truncate(3, "...");
+
+        Assert.Equal("ab...", result);
+    }
+
+    [Theory]
+    [InlineData(3, "ab")]            // 截断点在代理对中间：整个字符让出去
+    [InlineData(4, "ab\U0001F600")]  // 截断点在代理对之后：完整保留
+    [InlineData(2, "ab")]            // 截断点在代理对之前
+    [InlineData(6, "ab\U0001F600cd")] // 正好装得下：原样返回
+    [InlineData(0, "")]
+    public void FitToLength_NeverEndsWithALoneHighSurrogate(int maxLength, string expected)
+    {
+        var result = TextWithEmojiAtIndex2.FitToLength(maxLength);
+
+        Assert.Equal(expected, result);
+        Assert.True(result.Length <= maxLength);
+        Assert.False(result.Length > 0 && char.IsHighSurrogate(result[^1]));
+        // 严格 UTF-8 编码器（与 Npgsql 同一判据）能编码结果
+        _ = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetBytes(result);
+    }
+
+    [Fact]
+    public void FitToLength_LeavesNullAndShortValuesAlone()
+    {
+        Assert.Null(((string?)null).FitToLength(5));
+        Assert.Equal("abc", "abc".FitToLength(5));
+    }
+
+    [Fact]
+    public void FitToLength_RejectsANegativeLength()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => "abc".FitToLength(-1));
+    }
+
     [Theory]
     [InlineData("<p>Hello</p>", "Hello")]
     [InlineData("<div><span>Test</span></div>", "Test")]

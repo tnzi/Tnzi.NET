@@ -1,5 +1,6 @@
 namespace Tnzi.System.Tests.Services;
 
+using Tnzi.AspNetCore.Options;
 using Tnzi.Security.Authorization;
 
 public class SettingsCenterServiceTests
@@ -29,7 +30,7 @@ public class SettingsCenterServiceTests
             .AddInMemoryCollection(new Dictionary<string, string?> { ["Demo:FromAppSettings"] = "from-config" })
             .Build();
 
-        _repositoryMock.Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>());
+        _repositoryMock.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>());
     }
 
     private SettingsCenterService CreateService() => new(
@@ -114,7 +115,7 @@ public class SettingsCenterServiceTests
             new SettingFieldDefinition { Key = "Demo:Overridden", Label = "O" },
             new SettingFieldDefinition { Key = "Demo:FromAppSettings", Label = "C" },
             new SettingFieldDefinition { Key = "Demo:Compiled", Label = "D", DefaultValueAccessor = () => "compiled-default" })));
-        _repositoryMock.Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
+        _repositoryMock.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
         {
             new() { Id = Guid.NewGuid(), Key = "Demo:Overridden", Value = "db-value", Scope = SettingScope.Global },
         });
@@ -137,7 +138,7 @@ public class SettingsCenterServiceTests
     {
         _providers.Add(new FakeProvider(DemoGroup(
             new SettingFieldDefinition { Key = "Demo:Secret", Label = "S", Type = SettingFieldType.Password })));
-        _repositoryMock.Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
+        _repositoryMock.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
         {
             new() { Id = Guid.NewGuid(), Key = "Demo:Secret", Value = "enc:abc", Scope = SettingScope.Global, IsEncrypted = true },
         });
@@ -325,6 +326,116 @@ public class SettingsCenterServiceTests
         (await service.SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:B"] = "9" })).Succeeded.ShouldBeTrue();
     }
 
+    // ---- 嵌套段的组：运行时验证的是根 Options -----------------------------------------
+    //
+    // ★★ 组的 Options 类型常常只是某个根 Options 的一段（AspNetCore:RateLimit 是 AspNetCoreOptions.RateLimit），
+    // 它自己没有验证器，运行时真正重绑定并验证的是根类型。预检只查组类型时一律放行，
+    // 而根验证器里「开关打开才检查」的规则正好在这次保存之后才开始生效：落库成功、reload 后每个读
+    // IOptionsMonitor<根>.CurrentValue 的请求都抛 OptionsValidationException，连改回去的配置中心端点也 500。
+
+    [ConfigSection("Outer")]
+    public sealed class OuterOptions
+    {
+        public InnerOptions? Inner { get; set; }
+    }
+
+    [ConfigSection("Outer:Inner")]
+    public sealed class InnerOptions
+    {
+        public bool Enabled { get; set; }
+        public int Limit { get; set; }
+    }
+
+    public sealed class OuterValidator : IValidateOptions<OuterOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, OuterOptions options)
+            => options.Inner?.Enabled == true && options.Inner.Limit <= 0
+                ? ValidateOptionsResult.Fail("Inner.Limit must be greater than 0")
+                : ValidateOptionsResult.Success;
+    }
+
+    private SettingsCenterService NestedGroupService(Dictionary<string, string?> baseConfig, SettingDefinitionGroup group)
+    {
+        _providers.Add(new FakeProvider(group));
+        var config = new ConfigurationBuilder().AddInMemoryCollection(baseConfig).Build();
+        return new SettingsCenterService(
+            _serviceProviderMock.Object, _settingServiceMock.Object, _repositoryMock.Object,
+            config, _providers, _handlers);
+    }
+
+    private void SetupValidators<TOptions>(params IValidateOptions<TOptions>[] validators) where TOptions : class
+        => _serviceProviderMock
+            .Setup(x => x.GetService(typeof(IEnumerable<IValidateOptions<TOptions>>)))
+            .Returns(validators);
+
+    [Fact]
+    public async Task SaveGroup_Of_A_Nested_Section_Should_Run_The_Enclosing_Options_Validator()
+    {
+        SetupValidators<InnerOptions>();
+        SetupValidators(new OuterValidator());
+        var service = NestedGroupService(
+            new Dictionary<string, string?> { ["Outer:Inner:Enabled"] = "false", ["Outer:Inner:Limit"] = "0" },
+            new SettingDefinitionGroup
+            {
+                Key = "outer-inner",
+                ModuleName = "Demo",
+                DisplayName = "Inner",
+                OptionsTypes = [typeof(InnerOptions)],
+                Fields = [new SettingFieldDefinition { Key = "Outer:Inner:Enabled", Label = "Enabled", Type = SettingFieldType.Boolean }],
+            });
+
+        var result = await service.SaveGroupAsync("outer-inner", new Dictionary<string, string?> { ["Outer:Inner:Enabled"] = "true" });
+
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("Inner.Limit must be greater than 0");
+        _settingServiceMock.Verify(s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveGroup_Web_RateLimit_Enable_With_A_Latent_Invalid_Path_Rule_Is_Rejected()
+    {
+        // 真实的组与真实的根验证器：ByPath 规则 Limit=0 在 Enabled=false 时能过启动，打开开关的那一次保存必须被拦下。
+        SetupValidators<RateLimitOptions>();
+        SetupValidators<AspNetCoreOptions>(new AspNetCoreOptionsValidator());
+        var service = NestedGroupService(
+            new Dictionary<string, string?>
+            {
+                ["AspNetCore:RateLimit:Enabled"] = "false",
+                ["AspNetCore:RateLimit:ByPath:/x:Limit"] = "0",
+                ["AspNetCore:RateLimit:ByPath:/x:WindowSeconds"] = "60",
+            },
+            RuntimeSettingMetadataExtractor.Extract(typeof(RateLimitOptions))!);
+
+        var result = await service.SaveGroupAsync("web-ratelimit", new Dictionary<string, string?> { ["AspNetCore:RateLimit:Enabled"] = "true" });
+
+        result.Code.ShouldBe(400);
+        result.Message!.ShouldContain("RateLimit.ByPath");
+        _settingServiceMock.Verify(s => s.SetSettingAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SaveGroup_Web_RateLimit_Enable_With_Valid_Rules_Succeeds()
+    {
+        // 对照组：同一次保存，规则合法时照常落库。拦下的是那条规则，不是「打开限流」本身。
+        SetupValidators<RateLimitOptions>();
+        SetupValidators<AspNetCoreOptions>(new AspNetCoreOptionsValidator());
+        _settingServiceMock
+            .Setup(s => s.SetSettingAsync("AspNetCore:RateLimit:Enabled", It.IsAny<string>(), It.IsAny<string?>(), "web-ratelimit"))
+            .ReturnsAsync(Result.Success());
+        var service = NestedGroupService(
+            new Dictionary<string, string?>
+            {
+                ["AspNetCore:RateLimit:Enabled"] = "false",
+                ["AspNetCore:RateLimit:ByPath:/x:Limit"] = "10",
+                ["AspNetCore:RateLimit:ByPath:/x:WindowSeconds"] = "60",
+            },
+            RuntimeSettingMetadataExtractor.Extract(typeof(RateLimitOptions))!);
+
+        var result = await service.SaveGroupAsync("web-ratelimit", new Dictionary<string, string?> { ["AspNetCore:RateLimit:Enabled"] = "true" });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+    }
+
     [Fact]
     public async Task SaveGroup_Should_Flush_Pending_Writes_Before_Reading_Back()
     {
@@ -343,7 +454,7 @@ public class SettingsCenterServiceTests
             .Callback(() => calls.Add("flush"))
             .ReturnsAsync(1);
         _repositoryMock
-            .Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>()))
+            .Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>()))
             .Callback(() => calls.Add("read"))
             .ReturnsAsync(new List<Setting>());
 
@@ -403,7 +514,7 @@ public class SettingsCenterServiceTests
         var rowId = Guid.NewGuid();
         _providers.Add(new FakeProvider(DemoGroup(
             new SettingFieldDefinition { Key = "Demo:X", Label = "X" })));
-        _repositoryMock.Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
+        _repositoryMock.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
         {
             new() { Id = rowId, Key = "Demo:X", Value = "old", Scope = SettingScope.Global },
         });
@@ -423,7 +534,7 @@ public class SettingsCenterServiceTests
         _providers.Add(new FakeProvider(DemoGroup(
             new SettingFieldDefinition { Key = "Demo:A", Label = "A" },
             new SettingFieldDefinition { Key = "Demo:B", Label = "B" })));
-        _repositoryMock.Setup(r => r.ToListAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
+        _repositoryMock.Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new List<Setting>
         {
             new() { Id = id1, Key = "Demo:A", Value = "1", Scope = SettingScope.Global },
             new() { Id = id2, Key = "Demo:B", Value = "2", Scope = SettingScope.Global },
@@ -612,5 +723,75 @@ public class SettingsCenterServiceTests
 
         result.Succeeded.ShouldBeTrue();
         _settingServiceMock.Verify(s => s.SetSettingAsync("Chat:X", "v", It.IsAny<string?>(), "chat-general"), Times.Once);
+    }
+
+    // ── 只读需要的行；删就删全 ────────────────────────────────────────────
+
+    /// <summary>仓储按调用方给的谓词筛（模拟数据库端过滤）；谓词为 null 时交出整张表。</summary>
+    private void StoredSettings(params Setting[] rows)
+        => _repositoryMock
+            .Setup(r => r.ToListAsync(It.IsAny<Expression<Func<Setting, bool>>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Expression<Func<Setting, bool>>? predicate, CancellationToken _) =>
+                predicate is null ? rows.ToList() : rows.Where(predicate.Compile()).ToList());
+
+    /// <summary>
+    /// <c>Sys_Setting</c> 也存每个用户 / 租户的设置行与每个前端产品一份最大 64 KB 的主题快照：
+    /// 配置中心此前每次读、存、恢复默认都把整张表读进内存再过滤。现在只向数据库要这一组键的 Global 行（键不分大小写）。
+    /// </summary>
+    [Fact]
+    public async Task GetDefinitions_Reads_Only_The_Global_Rows_Of_Its_Own_Keys()
+    {
+        _providers.Add(new FakeProvider(DemoGroup(new SettingFieldDefinition { Key = "Demo:X", Label = "X" })));
+        StoredSettings(
+            new() { Id = Guid.NewGuid(), Key = "demo:x", Value = "global", Scope = SettingScope.Global },
+            new() { Id = Guid.NewGuid(), Key = "Demo:X", Value = "user", Scope = SettingScope.User, ScopeId = "u1" },
+            new() { Id = Guid.NewGuid(), Key = "Appearance:Theme:admin", Value = "{}", Scope = SettingScope.Global });
+
+        var result = await CreateService().GetDefinitionsAsync();
+
+        var field = result.Data!.Single().Fields.Single();
+        field.Value.ShouldBe("global");
+        field.IsOverridden.ShouldBeTrue();
+        _repositoryMock.Verify(r => r.ToListAsync(null, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Global 行的 ScopeId 为 null，PostgreSQL / MySQL / SQLite 上 null 互不相等，唯一索引挡不住两次并发保存各插一行。
+    /// 恢复默认此前每个键只删一行：报成功而覆盖仍然生效。
+    /// </summary>
+    [Fact]
+    public async Task ResetGroup_Deletes_Every_Row_Of_A_Duplicated_Override()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        _providers.Add(new FakeProvider(DemoGroup(new SettingFieldDefinition { Key = "Demo:A", Label = "A" })));
+        StoredSettings(
+            new() { Id = first, Key = "Demo:A", Value = "1", Scope = SettingScope.Global },
+            new() { Id = second, Key = "Demo:A", Value = "2", Scope = SettingScope.Global });
+        _settingServiceMock.Setup(s => s.DeleteSettingAsync(It.IsAny<Guid>())).ReturnsAsync(Result.Success());
+
+        var result = await CreateService().ResetGroupAsync("demo");
+
+        result.Succeeded.ShouldBeTrue();
+        _settingServiceMock.Verify(s => s.DeleteSettingAsync(first), Times.Once);
+        _settingServiceMock.Verify(s => s.DeleteSettingAsync(second), Times.Once);
+    }
+
+    [Fact]
+    public async Task SaveGroup_Null_Value_Deletes_Every_Row_Of_A_Duplicated_Override()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        _providers.Add(new FakeProvider(DemoGroup(new SettingFieldDefinition { Key = "Demo:X", Label = "X" })));
+        StoredSettings(
+            new() { Id = first, Key = "Demo:X", Value = "1", Scope = SettingScope.Global },
+            new() { Id = second, Key = "Demo:X", Value = "2", Scope = SettingScope.Global });
+        _settingServiceMock.Setup(s => s.DeleteSettingAsync(It.IsAny<Guid>())).ReturnsAsync(Result.Success());
+
+        var result = await CreateService().SaveGroupAsync("demo", new Dictionary<string, string?> { ["Demo:X"] = null });
+
+        result.Succeeded.ShouldBeTrue();
+        _settingServiceMock.Verify(s => s.DeleteSettingAsync(first), Times.Once);
+        _settingServiceMock.Verify(s => s.DeleteSettingAsync(second), Times.Once);
     }
 }

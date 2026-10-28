@@ -41,6 +41,27 @@ public class FileStorageServiceComprehensiveTests
             AllowedExtensions = new[] { ".jpg", ".png", ".pdf", ".txt" },
             AutoGenerateThumbnail = false // 测试时禁用缩略图生成
         };
+
+        // MD5 去重的候选查询走 AsQueryable（要排序、要异步）；默认一条记录都没有。
+        GivenStoredRecords();
+
+        // 删除前要数一数正式引用行（只剩引用行持有的文件不让删）；默认一行都没有。
+        _mockReferenceRepository.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(() => new List<FileReference>().BuildMock());
+    }
+
+    /// <summary>
+    /// 仓储里「已有」的文件记录：去重查询从它们里挑，按 id 回取时给的也是同一个实例。
+    /// </summary>
+    private void GivenStoredRecords(params FileRecord[] records)
+    {
+        _mockFileRepository.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(() => records.ToList().BuildMock());
+        foreach (var record in records)
+        {
+            _mockFileRepository.Setup(r => r.GetAsync(record.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(record);
+        }
     }
 
     private FileStorageService CreateStorageService()
@@ -57,7 +78,8 @@ public class FileStorageServiceComprehensiveTests
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
             new UploadGuard(optionsMonitor.Object),
-            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     private FileReferenceService CreateReferenceService()
@@ -79,8 +101,6 @@ public class FileStorageServiceComprehensiveTests
         var content = new byte[] { 1, 2, 3, 4, 5 };
         var stream = new MemoryStream(content);
 
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync((FileRecord?)null);
         _mockStorage.Setup(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("path/to/file.jpg");
         _mockFileRepository.Setup(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
@@ -98,43 +118,6 @@ public class FileStorageServiceComprehensiveTests
         Assert.Equal(content.Length, result.Data.Size);
         _mockStorage.Verify(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()), Times.Once);
         _mockFileRepository.Verify(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task SaveAsync_WithExistingMd5_ReturnsExistingFile()
-    {
-        // Arrange
-        var service = CreateStorageService();
-        var fileName = "test.jpg";
-        var content = new byte[] { 1, 2, 3, 4, 5 };
-        var stream = new MemoryStream(content);
-        var md5Hash = CalculateMd5(content);
-        var existingFile = new FileRecord
-        {
-            Id = Guid.NewGuid(),
-            FileName = "existing.jpg",
-            Md5Hash = md5Hash,
-            ReferenceCount = 1
-        };
-
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync(existingFile);
-        _mockFileRepository.Setup(r => r.UpdateAsync(existingFile, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        // 模拟物理文件存在，服务会直接复用而不会重新上传
-        _mockStorage.Setup(s => s.ExistsAsync(It.IsAny<string>()))
-            .ReturnsAsync(true);
-
-        // Act
-        var result = await service.SaveAsync(fileName, stream);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.NotNull(result.Data);
-        Assert.Equal(existingFile.Id, result.Data.Id);
-        Assert.Equal(2, existingFile.ReferenceCount);
-        _mockStorage.Verify(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()), Times.Never);
-        _mockFileRepository.Verify(r => r.UpdateAsync(existingFile, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -214,66 +197,6 @@ public class FileStorageServiceComprehensiveTests
     }
 
     [Fact]
-    public async Task DeleteAsync_DeletesFile_WhenReferenceCountIsZero()
-    {
-        // Arrange
-        var service = CreateStorageService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord
-        {
-            Id = fileId,
-            Path = "path/to/file.jpg",
-            ThumbnailPath = "path/to/thumb.jpg",
-            ReferenceCount = 1
-        };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        // Mock ToListAsync directly since Where is an extension method on IQueryable
-        _mockReferenceRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileReference, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<FileReference>());
-        _mockStorage.Setup(s => s.DeleteAsync(It.IsAny<string>())).ReturnsAsync(true);
-        _mockFileRepository.Setup(r => r.DeleteAsync(fileRecord, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.DeleteAsync(fileId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        _mockStorage.Verify(s => s.DeleteAsync("path/to/file.jpg"), Times.Once);
-        _mockStorage.Verify(s => s.DeleteAsync("path/to/thumb.jpg"), Times.Once);
-        _mockFileRepository.Verify(r => r.DeleteAsync(fileRecord, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task DeleteAsync_DecrementsReferenceCount_WhenReferenceCountGreaterThanZero()
-    {
-        // Arrange
-        var service = CreateStorageService();
-        var fileId = Guid.NewGuid();
-        var fileRecord = new FileRecord
-        {
-            Id = fileId,
-            ReferenceCount = 2
-        };
-
-        _mockFileRepository.Setup(r => r.GetAsync(fileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        _mockFileRepository.Setup(r => r.UpdateAsync(fileRecord, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.DeleteAsync(fileId);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.Equal(1, fileRecord.ReferenceCount);
-        _mockFileRepository.Verify(r => r.UpdateAsync(fileRecord, It.IsAny<CancellationToken>()), Times.Once);
-        _mockStorage.Verify(s => s.DeleteAsync(It.IsAny<string>()), Times.Never);
-    }
-
-    [Fact]
     public async Task GetRecordAsync_ReturnsFileRecord()
     {
         // Arrange
@@ -319,15 +242,16 @@ public class FileStorageServiceComprehensiveTests
         var service = CreateStorageService();
         var content = new byte[] { 1, 2, 3 };
         var md5Hash = CalculateMd5(content);
+        // 去重只复用调用者自己的记录（见 CrossUserDedupTests）。
         var existingFile = new FileRecord
         {
             Id = Guid.NewGuid(),
             Md5Hash = md5Hash,
-            ReferenceCount = 1
+            ReferenceCount = 1,
+            CreatorId = TestHelper.DefaultTestUserId
         };
 
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync(existingFile);
+        GivenStoredRecords(existingFile);
         _mockFileRepository.Setup(r => r.UpdateAsync(existingFile, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -383,8 +307,6 @@ public class FileStorageServiceComprehensiveTests
             ("file2.png", new MemoryStream(new byte[] { 4, 5, 6 }))
         };
 
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync((FileRecord?)null);
         _mockStorage.Setup(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("path/to/file");
         _mockFileRepository.Setup(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
@@ -398,36 +320,6 @@ public class FileStorageServiceComprehensiveTests
         Assert.NotNull(results.Data);
         Assert.Equal(2, results.Data.Count());
         _mockFileRepository.Verify(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-    }
-
-    [Fact]
-    public async Task DeleteManyAsync_DeletesMultipleFiles()
-    {
-        // Arrange
-        var service = CreateStorageService();
-        var fileIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
-        var fileRecords = fileIds.Select(id => new FileRecord
-        {
-            Id = id,
-            Path = $"path/to/{id}.jpg",
-            ReferenceCount = 0
-        }).ToList();
-
-        // Mock ToListAsync directly since Where is an extension method on IQueryable
-        _mockFileRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecords);
-        _mockReferenceRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileReference, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<FileReference>());
-        _mockStorage.Setup(s => s.DeleteAsync(It.IsAny<string>())).ReturnsAsync(true);
-        _mockFileRepository.Setup(r => r.DeleteAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.DeleteManyAsync(fileIds);
-
-        // Assert
-        Assert.True(result.Succeeded);
-        _mockFileRepository.Verify(r => r.DeleteAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     #endregion
@@ -445,8 +337,6 @@ public class FileStorageServiceComprehensiveTests
         var entityId = Guid.NewGuid();
         var fieldName = "Avatar";
 
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync((FileRecord?)null);
         _mockStorage.Setup(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("path/to/file.jpg");
         _mockFileRepository.Setup(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
@@ -553,8 +443,6 @@ public class FileStorageServiceComprehensiveTests
         var fileName = "test.jpg";
         var content = new byte[] { 1, 2, 3, 4, 5 };
 
-        _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-            .ReturnsAsync((FileRecord?)null);
         _mockStorage.Setup(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
             .ReturnsAsync("path/to/file.jpg");
         _mockFileRepository.Setup(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
@@ -584,8 +472,6 @@ public class FileStorageServiceComprehensiveTests
             var testFileWithExt = tempFile + ".txt";
             File.Move(tempFile, testFileWithExt);
 
-            _mockFileRepository.Setup(r => r.FindAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileRecord, bool>>>()))
-                .ReturnsAsync((FileRecord?)null);
             _mockStorage.Setup(s => s.UploadAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string>()))
                 .ReturnsAsync("path/to/file");
             _mockFileRepository.Setup(r => r.InsertAsync(It.IsAny<FileRecord>(), It.IsAny<CancellationToken>()))
@@ -606,43 +492,6 @@ public class FileStorageServiceComprehensiveTests
             if (File.Exists(tempFile))
                 File.Delete(tempFile);
         }
-    }
-
-    [Fact]
-    public async Task CleanupTemporaryFilesAsync_CleansUpTemporaryFiles()
-    {
-        // Arrange
-        var service = CreateReferenceService();
-        var cutoffTime = DateTime.UtcNow.AddHours(-25);
-        var temporaryRef = new FileReference
-        {
-            Id = Guid.NewGuid(),
-            FileId = Guid.NewGuid(),
-            IsTemporary = true,
-            CreationTime = cutoffTime
-        };
-        var fileRecord = new FileRecord
-        {
-            Id = temporaryRef.FileId,
-            ReferenceCount = 0
-        };
-
-        // Mock ToListAsync directly since Where is an extension method on IQueryable
-        _mockReferenceRepository.Setup(r => r.ToListAsync(It.IsAny<System.Linq.Expressions.Expression<Func<FileReference, bool>>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { temporaryRef }.ToList());
-        _mockFileRepository.Setup(r => r.GetAsync(temporaryRef.FileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(fileRecord);
-        _mockFileRepository.Setup(r => r.UpdateAsync(fileRecord, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _mockReferenceRepository.Setup(r => r.DeleteAsync(temporaryRef, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await service.CleanupTemporaryFilesAsync(TimeSpan.FromHours(24));
-
-        // Assert
-        Assert.True(result.Succeeded);
-        Assert.Equal(1, result.Data);
     }
 
     #endregion

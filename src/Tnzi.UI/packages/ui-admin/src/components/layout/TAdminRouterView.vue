@@ -1,144 +1,179 @@
 <script setup lang="ts">
 /**
  * `TAdminRouterView` - drop-in `<router-view>` replacement that wires up the
- * three pieces an admin shell needs but that `<router-view>` doesn't give
- * out of the box:
+ * pieces an admin shell needs but that `<router-view>` doesn't give out of
+ * the box:
  *
- *   1. `<KeepAlive>` caching - toggled per-route via `meta.keepAlive`,
- *      with a max-cache prop (`max`) so the cache doesn't grow forever.
- *      Excluded route names (e.g. login, 404) can be passed in `exclude`.
- *   2. `<Transition>` page transitions - uses the same `tnzi-` keyframe
- *      family as TAdminContent (fade-slide default, six built-in).
- *   3. `appStore.reloadFlag` reactivity - when the consumer clicks the
- *      header reload button, this view tears down and re-mounts the
- *      current route, blowing the keep-alive cache for that slot.
+ *   1. `<KeepAlive>` caching of tab pages. A route opts in with
+ *      `meta.keepAlive: true`; its page then keeps its state (filters, page,
+ *      scroll, a half-filled form) while its tab is open, and is dropped when
+ *      the tab closes. A page that is not a tab (`meta.hideInTab`) is kept only
+ *      while it is on screen. `cache` turns caching off altogether (the admin
+ *      shell binds it to the theme's "Cache tab pages" switch); `max` bounds
+ *      the cache (least recently used first); `exclude` lists route names that
+ *      are never cached.
+ *   2. `appStore.reloadFlag` reactivity - the header reload button tears the
+ *      current page down and mounts it afresh, cached or not.
  *
- * Use inside TAdminContent's default slot to get the soybean-style
- * "every tab keeps its state until you close it" feel:
+ * A kept page sees its own route, not whichever route is on screen: its
+ * `useRoute()` stands still while another page is shown and catches up when
+ * it is shown again (see `kept-page.ts`). A page that reads the route only in
+ * `onMounted` (a `?party=` hand-off, a `?roleId=` deep link) must also watch
+ * it, or a hand-off into its already-open tab is missed.
+ *
+ * Use inside TAdminContent's default slot:
  *
  *     <TAdminContent>
  *       <TAdminRouterView :exclude="['login', '403', '404']" />
  *     </TAdminContent>
  */
-import { computed, watchEffect } from 'vue'
+import { computed, reactive, watch, type Component as PageHolder } from 'vue'
 import { RouterView, useRoute, type RouteLocationNormalizedLoaded } from 'vue-router'
 import { useAdminAppStore } from '../../stores/useAdminAppStore'
-import { isMultiInstanceRoute, multiInstanceKey } from '../../stores/useAdminTabStore'
+import { useAdminTabStore } from '../../stores/useAdminTabStore'
+import { defineKeptPage, pageKeyOf } from './kept-page'
 
 interface Props {
   /**
-   * Override the transition name. Defaults to whatever
-   * `useAdminThemeStore().pageTransition` reports.
+   * Accepted for compatibility; has no effect. Page transitions are
+   * deliberately not rendered here - see the comment above the template.
    */
   transitionName?: string
-  /** Maximum number of cached components. Default 20. */
+  /**
+   * Cache pages at all. Default true. The admin shell binds the theme's
+   * "Cache tab pages" switch (`themeStore.tabCache`) here.
+   */
+  cache?: boolean
+  /** Maximum number of cached pages. Default 20. */
   max?: number
   /**
-   * Route names (or `meta.keepAlive === false`) to skip caching for.
-   * Anonymous routes (no name) are always skipped.
+   * Route names never cached, whatever their `meta.keepAlive`. Anonymous
+   * routes (no name) are never cached either.
    */
   exclude?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   transitionName: undefined,
+  cache: true,
   max: 20,
   exclude: () => [],
 })
 
 const route = useRoute()
 const appStore = useAdminAppStore()
+const tabStore = useAdminTabStore()
 
-// NOTE: there is deliberately no page Transition here - see the long comment
-// above the template. The `transitionName` prop and the theme's page-transition
-// setting therefore have no effect in this component; re-introducing the
-// wrapper would bring back the permanent leave-pending navigation bug.
-
-// The cache include list - route names whose meta.keepAlive is not strictly
-// false, are not in `exclude`, and have a name we can use as the cache key.
-const includedNames = computed<string[]>(() => {
-  const list: string[] = []
-  const matched = route.matched
-  for (const r of matched) {
-    const name = typeof r.name === 'string' ? r.name : null
-    if (!name) continue
-    if (props.exclude.includes(name)) continue
-    const meta = r.meta as Record<string, unknown> | undefined
-    if (meta?.keepAlive === false) continue
-    list.push(name)
-  }
-  return list
-})
-
-// Keep-alive remount on reload is driven by `v-if="appStore.reloadFlag"` in the
-// template (falsy → truthy rebuilds the tree); the superseded wrapper-key
-// approach that also lived here has been removed.
-
-/**
- * Component identity key. Single-instance routes key by name so re-visiting the
- * same page (incl. query-only changes on a list) reuses the cached instance.
- * Multi-instance routes (detail pages with dynamic params, or `meta.multiTab`
- * deep-links) key by their per-instance key (param routes → `path`, so volatile
- * `?section=` deep-links don't remount; multiTab+query → `fullPath`) so customer
- * A's detail and customer B's detail mount as SEPARATE component instances -
- * without this they share one instance (same route name) and B's page would
- * render A's stale data. This stays in lockstep with the tab store's id so a tab
- * and its component instance map 1:1.
- */
-function keyOf(r: RouteLocationNormalizedLoaded): string {
-  if (isMultiInstanceRoute(r)) return multiInstanceKey(r)
-  return (typeof r.name === 'string' ? r.name : undefined) ?? r.fullPath
+/** The page of `r` may be cached: opted in, named and not excluded. */
+function isCacheable(r: RouteLocationNormalizedLoaded): boolean {
+  const name = typeof r.name === 'string' ? r.name : null
+  if (!name || props.exclude.includes(name)) return false
+  return r.meta?.keepAlive === true
 }
 
-// Defensive: log a hint if no name attached to current route - keep-alive
-// silently skips those entries.
-watchEffect(() => {
-  if (typeof route.name === 'string') return
-  // No-op for prod; the silent skip is the documented behavior.
+const currentKey = computed(() => pageKeyOf(route))
+
+/**
+ * Keys that were on screen while cacheable - the only pages the cache can
+ * hold. Remembered here because a tab carries no reliable copy of its route's
+ * `meta.keepAlive`; a key leaves the set once it is neither a tab nor on screen.
+ */
+const keptKeys = reactive(new Set<string>())
+watch(
+  [currentKey, () => isCacheable(route)],
+  ([key, cacheable]) => {
+    if (cacheable) keptKeys.add(key)
+  },
+  { immediate: true, flush: 'sync' },
+)
+
+/**
+ * The keys allowed to stay alive: kept keys whose tab is still open, plus the
+ * page on screen when it may be cached. A key dropping out of this list is
+ * what makes `<KeepAlive>` destroy its page (closing a tab, leaving a page
+ * that has none, switching caching off). During a reload the page on screen
+ * is left out, so the next render mounts it afresh instead of re-showing the
+ * cached instance.
+ */
+const includedKeys = computed<string[]>(() => {
+  if (!props.cache) return []
+  const openTabs = new Set(tabStore.allTabs.map((tab) => tab.id))
+  const keys = new Set<string>()
+  for (const key of keptKeys) {
+    if (openTabs.has(key)) keys.add(key)
+  }
+  if (isCacheable(route) && appStore.reloadFlag) keys.add(currentKey.value)
+  else keys.delete(currentKey.value)
+  return [...keys]
 })
+
+/**
+ * One holder component per cache key, named for KeepAlive's `include`. Plain
+ * (non-reactive) map: a holder must stay the same component for as long as
+ * KeepAlive may hold its key, because the cache reuses an instance by key
+ * without checking its type.
+ */
+const holders = new Map<string, PageHolder>()
+let holderSeq = 0
+const holderNames = new Map<string, string>()
+
+function holderFor(key: string): PageHolder {
+  let holder = holders.get(key)
+  if (!holder) {
+    const name = `TnziKeptPage${++holderSeq}`
+    holder = defineKeptPage(name, key)
+    holders.set(key, holder)
+    holderNames.set(key, name)
+  }
+  return holder
+}
+
+const includedNames = computed<string[]>(() =>
+  includedKeys.value.map((key) => {
+    holderFor(key)
+    return holderNames.get(key)!
+  }),
+)
+
+// Forget what can no longer be on screen. Post-flush, with the final include
+// list, so a key that left and came back within one tick keeps its holder in
+// step with KeepAlive (which prunes from the same final list).
+watch(
+  includedKeys,
+  (keys) => {
+    const live = new Set(keys)
+    live.add(currentKey.value)
+    for (const key of [...keptKeys]) {
+      if (!live.has(key)) keptKeys.delete(key)
+    }
+    for (const key of [...holders.keys()]) {
+      if (live.has(key)) continue
+      holders.delete(key)
+      holderNames.delete(key)
+    }
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
-  <!-- Phase H3 L2 reverted (page-render regression): wrapping the
-       lazy `defineAsyncComponent` routes with Suspense + KeepAlive
-       caused the router to stay in a permanent loading state - the
-       async component setup never resolved inside the nested
-       Suspense + KeepAlive + v-if combination. The route progress
-       bar stayed at "on" forever and the content area rendered an
-       empty `.t-admin-content__page`. Reverted to the soybean-
-       parity simple shell: RouterView → Transition → KeepAlive →
-       component. First-visit splash can come back later as a
-       targeted enhancement once we move the route definitions away
-       from `defineAsyncComponent()` (Vue Router also warns about
-       this - see the routes.ts cleanup follow-up). -->
-  <!-- Phase: route-async + Transition + KeepAlive interplay (P0).
-       The previous shape (`<Transition mode="out-in"><KeepAlive
-       :include><component :is :v-if :key></KeepAlive></Transition>`)
-       strands navigation when the new route is a vue-router
-       async-wrapped component (`() => import(...)`): the Transition
-       waits for leave to finish before enter, but the new entry is
-       still resolving its async chunk while Transition's leave/enter
-       state machine and KeepAlive's :include matching race each other,
-       producing a permanent leave-pending state - old DOM stays
-       mounted, new DOM never appears, URL is already the new path.
-
-       Dropping `mode` (so enter/leave run together) only made it
-       worse: the page DIV accumulated 3-4 stale `t-crud-page` siblings
-       because leave never resolved its class transitions.
-
-       Fix: split Transition and KeepAlive cleanly. KeepAlive lives
-       inside RouterView's slot but Transition is dropped - the
-       `:key="r.fullPath"` already drives the right unmount/mount on
-       navigation, and KeepAlive's `:include` reactivates cached
-       instances by component name. Without the Transition wrapper the
-       new component mounts instantly, no enter/leave race, and the
-       async chunk loader works the way vue-router intends. -->
+  <!-- No page Transition, on purpose. Wrapping the lazy route components in
+       `<Transition mode="out-in"><KeepAlive>` stranded navigation: the leave
+       waited while the new route was still resolving its async chunk, the
+       old DOM stayed mounted and the new one never appeared although the URL
+       had changed (without `mode`, stale page siblings piled up instead). A
+       Suspense + KeepAlive + v-if wrapper left the router permanently
+       loading. The `:key` already drives the right mount on navigation. -->
+  <!-- Each page renders inside a holder named for its cache key (see
+       `kept-page.ts`): KeepAlive matches `include` against component names,
+       and a page component's own name says nothing about its route. -->
   <RouterView v-slot="{ Component, route: r }">
     <KeepAlive :include="includedNames" :max="max">
       <component
-        :is="Component"
-        v-if="appStore.reloadFlag"
-        :key="keyOf(r)"
+        :is="holderFor(pageKeyOf(r))"
+        v-if="Component && appStore.reloadFlag"
+        :key="pageKeyOf(r)"
+        :page="Component"
       />
     </KeepAlive>
   </RouterView>

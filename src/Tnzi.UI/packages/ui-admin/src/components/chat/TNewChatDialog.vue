@@ -59,6 +59,7 @@
       v-if="selected.length >= 2"
       v-model:value="groupName"
       size="small"
+      :maxlength="GROUP_TITLE_MAX"
       :placeholder="t('window.groupName')"
     />
 
@@ -80,6 +81,8 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { NScrollbar, NCheckbox, NInput, NButton } from 'naive-ui'
 import { Icon } from '@iconify/vue'
+import { useSafeMessage } from '@tnzi/ui'
+import { useDebounced } from '@tnzi/core/headless'
 import type { ChatContactDto } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../stores/useChatStore'
 import { translatePageKey } from '../../i18n/translate'
@@ -95,8 +98,15 @@ const emit = defineEmits<{
 
 const t = (k: string) => translatePageKey('chat', k)
 const store = useChatStore()
+const message = useSafeMessage()
 // Phone (<md) flexes the fixed list height so it never exceeds the viewport.
 const { isSm } = useBreakpoint()
+/** The server's column width for a conversation title. */
+const GROUP_TITLE_MAX = 200
+
+function reportError(e: unknown): void {
+  message.error(e instanceof Error ? e.message : String(e))
+}
 
 const keyword = ref('')
 const focused = ref(false)
@@ -117,21 +127,24 @@ const canSubmit = computed(() => {
 })
 
 // Load the directory list (blank keyword = starting list) so contacts show up
-// the moment the dialog opens - no "type to see anything" dead state.
+// the moment the dialog opens - no "type to see anything" dead state. Only the
+// latest search fills the list: an earlier keyword answering last would show
+// contacts that do not match what is typed.
+let loadSeq = 0
 async function load(kw: string) {
+  const seq = ++loadSeq
   loading.value = true
   try {
-    contacts.value = await store.searchContacts(kw.trim())
+    const found = await store.searchContacts(kw.trim())
+    if (seq === loadSeq) contacts.value = found
+  } catch (e) {
+    if (seq === loadSeq) reportError(e)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-function onSearch() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => void load(keyword.value), 300)
-}
+const onSearch = useDebounced(() => void load(keyword.value))
 
 function clearKeyword() {
   keyword.value = ''
@@ -179,6 +192,8 @@ function onConfirm() {
   else void onStartDirect()
 }
 
+// A refusal (past the member cap, groups switched off, chat not granted) keeps
+// the dialog open with the selection, next to the server's reason.
 async function onStartDirect() {
   const contact = selected.value[0]
   if (!contact) return
@@ -188,6 +203,8 @@ async function onStartDirect() {
     emit('created', id)
     emit('update:show', false)
     reset()
+  } catch (e) {
+    reportError(e)
   } finally {
     submitting.value = false
   }
@@ -201,6 +218,8 @@ async function onCreateGroup() {
     emit('created', id)
     emit('update:show', false)
     reset()
+  } catch (e) {
+    reportError(e)
   } finally {
     submitting.value = false
   }

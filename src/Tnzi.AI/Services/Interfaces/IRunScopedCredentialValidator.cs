@@ -19,6 +19,14 @@ public sealed record RunScopedCredential
     /// <summary>通配：允许调用 MCP server 暴露的全部工具。</summary>
     public const string AllTools = "*";
 
+    /// <summary>
+    /// 允许看见并调用<b>派发这次运行的用户</b>自己连接的远程 MCP 服务器的工具（消费方经 <c>IUserMcpServerSource</c> 贡献，
+    /// MCP server 把调用转发过去）。<b>不被 <see cref="AllTools"/> 涵盖</b>：通配本来只覆盖部署方注册的工具，
+    /// 让它悄悄扩到用户的第三方账号，等于升级后外部 CLI 就能碰用户的 GitHub 之类；必须显式写这一项。
+    /// 运行没有派发者（<see cref="CreatorId"/> 为空）时没有可转发的账号，此项不生效。
+    /// </summary>
+    public const string UserMcpTools = "@user-mcp";
+
     /// <summary>运行 ID。</summary>
     public required Guid RunId { get; init; }
 
@@ -29,12 +37,34 @@ public sealed record RunScopedCredential
     public Guid? TenantId { get; init; }
 
     /// <summary>
+    /// 派发这次运行的用户（运行记录的 <c>CreatorId</c>，来源同 <see cref="TenantId"/>）；后台或系统派出、没有登录用户的运行为 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 它回答「这次运行替谁在干活」，供消费方工具按用户授权（只许碰这个人的资源）。它<b>不</b>扩大凭据的调用面：
+    /// 能调哪些工具仍只由 <see cref="AllowedToolNames"/> 决定，凭据也从不带上这个用户的权限。
+    /// 按它授权的强度以宿主隔离为上限：同一宿主上的外部运行共用一个 OS 账号，读得到彼此工作目录里的凭据原文。
+    /// </remarks>
+    public Guid? CreatorId { get; init; }
+
+    /// <summary>
+    /// 这次运行所在的对话线程（运行记录的 <c>ThreadId</c>，来源同 <see cref="TenantId"/>）；一次性任务为 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 供消费方工具知道「这次调用是为哪一段对话做的」（按线程维护的状态、把结果关联到对话），不必再拿 <see cref="RunId"/> 回查运行。
+    /// 与 <see cref="CreatorId"/> 一样不扩大调用面。
+    /// </remarks>
+    public Guid? ThreadId { get; init; }
+
+    /// <summary>
     /// 允许经此凭据调用的 MCP 工具名（大小写不敏感）。<c>["*"]</c> = 全部；空列表 = 只能 <c>tools/list</c>（结果为空）、
     /// 一次 <c>tools/call</c> 都不许 —— 缺省是关闭的那一边。
     /// </summary>
     public required IReadOnlyList<string> AllowedToolNames { get; init; }
 
-    /// <summary>该凭据是否允许调用名为 <paramref name="toolName"/> 的工具。</summary>
+    /// <summary>该凭据是否带有 <see cref="UserMcpTools"/>。</summary>
+    public bool AllowsUserMcpTools => CreatorId.HasValue && AllowedToolNames.Any(n => string.Equals(n, UserMcpTools, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>该凭据是否允许调用名为 <paramref name="toolName"/> 的工具（用户 MCP 工具另见 <see cref="AllowsUserMcpTools"/>）。</summary>
     public bool AllowsTool(string toolName)
         => AllowedToolNames.Any(n => n == AllTools || string.Equals(n, toolName, StringComparison.OrdinalIgnoreCase));
 }

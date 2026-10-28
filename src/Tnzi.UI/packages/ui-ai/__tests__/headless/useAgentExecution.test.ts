@@ -56,6 +56,41 @@ describe('useAgentExecution', () => {
     expect(exec.toolCalls.value[0]?.output).toBe('{"result": "ok"}');
   });
 
+  /**
+   * The same tool called twice is two entries, and each result settles one of
+   * them. Pairing through a name-keyed map ended every pending call of that
+   * name on the first result and dropped the second result.
+   */
+  it('settles repeated calls of one tool one result at a time, in order', () => {
+    const exec = useAgentExecution();
+    exec.handleEvent({ type: 'tool_call_start', toolNames: ['web_search', 'web_search'] });
+
+    exec.handleEvent({ type: 'tool_call_end', toolCalls: [{ name: 'web_search', durationMs: 120, output: 'first' }] });
+    expect(exec.toolCalls.value[0]?.durationMs).toBe(120);
+    expect(exec.toolCalls.value[0]?.output).toBe('first');
+    expect(exec.toolCalls.value[1]?.endedAt).toBeNull();
+
+    exec.handleEvent({ type: 'tool_call_end', toolCalls: [{ name: 'web_search', durationMs: 340, output: 'second' }] });
+    expect(exec.toolCalls.value[1]?.endedAt).not.toBeNull();
+    expect(exec.toolCalls.value[1]?.durationMs).toBe(340);
+    expect(exec.toolCalls.value[1]?.output).toBe('second');
+  });
+
+  it('settles both calls when one event reports two results for the same tool', () => {
+    const exec = useAgentExecution();
+    exec.handleEvent({ type: 'tool_call_start', toolNames: ['web_search', 'web_search'] });
+    exec.handleEvent({
+      type: 'tool_call_end',
+      toolCalls: [
+        { name: 'web_search', durationMs: 10 },
+        { name: 'web_search', durationMs: 20, isSuccess: false, error: 'timeout' },
+      ],
+    });
+    expect(exec.toolCalls.value.map((c) => c.durationMs)).toEqual([10, 20]);
+    expect(exec.toolCalls.value[1]?.isSuccess).toBe(false);
+    expect(exec.toolCalls.value[1]?.error).toBe('timeout');
+  });
+
   it('should accumulate reasoning deltas (flushed on done)', () => {
     const exec = useAgentExecution();
     exec.handleEvent({ type: 'reasoning_delta', reasoningDelta: 'Let me ' });

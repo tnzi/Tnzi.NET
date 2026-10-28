@@ -26,4 +26,10 @@
     <ProjectReference Include="..\Tnzi.Imaging\Tnzi.Imaging.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tnzi.Storage.Tests, PublicKey=$(TnziPublicKey)" />
+    <!-- 工作区子模块把临时上传挪进目录时要给计数 +1：计数只能经 FileReferenceCounts 原子地改，整行写回不写这一列。 -->
+    <InternalsVisibleTo Include="Tnzi.Storage.Workspace, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

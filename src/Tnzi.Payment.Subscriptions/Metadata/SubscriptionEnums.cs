@@ -45,9 +45,52 @@ public enum SubscriptionStatus
     Expired = 6,
 
     /// <summary>
-    /// 逾期欠费（续费/试用转正扣款失败，宽限期内等待重试，超期则过期）
+    /// 逾期欠费（续费/试用转正扣款失败，宽限期内等待重试，超期则过期或暂停服务）
     /// </summary>
-    PastDue = 7
+    PastDue = 7,
+
+    /// <summary>
+    /// 已暂停服务：宽限期满仍未收到款，且 <c>Payment:Subscription:GracePeriodEndAction = Suspend</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>不是终态</b>，与 <see cref="Expired"/> 刻意分开：过期是「这条订阅结束了，要用就重新开通」，
+    /// 而暂停服务是「账户欠着这一期，付清就原样回来」。它照常占着「同一账户同一产品只有一条有效订阅」的名额
+    /// （唯一索引只排除 Cancelled / Expired），所以补缴恢复的是同一条订阅，不会与一条新开通的撞上。
+    /// 不再自动扣款（续费扫描只取 Active / PastDue），由管理者在订阅页当场补缴（<c>POST subscriptions/{id}/pay-now</c>）
+    /// 或换卡（换卡后当场重试一次）恢复；恢复时新的一期从付款那一刻起算，暂停期间不追收。
+    /// 与 <see cref="Paused"/> 也不是一回事：那是客户自己按的暂停，到期自动恢复。
+    /// </remarks>
+    Suspended = 8
+}
+
+/// <summary>
+/// 宽限期满仍未收到款时怎么处理（<c>Payment:Subscription:GracePeriodEndAction</c>）。
+/// </summary>
+public enum GracePeriodEndAction
+{
+    /// <summary>订阅过期（终态），要用就重新开通。默认，与引入这一项之前相同。</summary>
+    Expire = 0,
+
+    /// <summary>暂停服务（<see cref="SubscriptionStatus.Suspended"/>），补缴或换卡后原样恢复。</summary>
+    Suspend = 1
+}
+
+/// <summary>
+/// 一条订阅让它所属的账户处在什么境况（门禁与提示据此判断）。
+/// </summary>
+public enum BillingStanding
+{
+    /// <summary>没有在生效的订阅（未开通、已取消、已过期、客户自己暂停中）。</summary>
+    None = 0,
+
+    /// <summary>正常：试用中、已付到期内、或到期后取消但本期未走完。</summary>
+    Good = 1,
+
+    /// <summary>扣款失败，宽限期内：服务照常，需要提醒管理者更新支付方式。</summary>
+    Warning = 2,
+
+    /// <summary>宽限期满仍未付清，服务已暂停。</summary>
+    Suspended = 3
 }
 
 /// <summary>
@@ -73,7 +116,16 @@ public enum SubscriptionBillingPurpose
     /// <summary>
     /// 升级补差价
     /// </summary>
-    Proration = 3
+    Proration = 3,
+
+    /// <summary>
+    /// 当场补缴（管理者在订阅页上为一条逾期欠费或已暂停服务的订阅付款，有人在场，可做 3-D Secure）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="Renewal"/> 分开的理由在失败那一侧：一张补缴单被放弃或过期，不是一次扣款失败：
+    /// 不计重试、不发催款信、不动订阅行。成功时：逾期欠费按续费推进一期；已暂停服务从付款那一刻起算新的一期。
+    /// </remarks>
+    Recovery = 4
 }
 
 /// <summary>

@@ -497,7 +497,7 @@ public class StatisticsServiceTests
         result.Data.TotalRevenue.ShouldBe(0);
         result.Data.TotalRefunds.ShouldBe(0);
         result.Data.NetRevenue.ShouldBe(0);
-        result.Data.CsvContent.ShouldContain("TradeNo"); // Header should be present
+        result.Data.CsvContent!.ShouldContain("TradeNo"); // Header should be present
     }
 
     [Fact]
@@ -538,8 +538,8 @@ public class StatisticsServiceTests
         data.TotalRevenue.ShouldBe(290m); // 90 + 200
         data.TotalRefunds.ShouldBe(30m);
         data.NetRevenue.ShouldBe(260m); // 290 - 30
-        data.CsvContent.ShouldContain("TRD001");
-        data.CsvContent.ShouldContain("TRD002");
+        data.CsvContent!.ShouldContain("TRD001");
+        data.CsvContent!.ShouldContain("TRD002");
         data.FileName.ShouldContain("reconciliation_");
         data.FileName.ShouldEndWith(".csv");
     }
@@ -572,8 +572,32 @@ public class StatisticsServiceTests
         result.Succeeded.ShouldBeTrue();
         result.Data!.TotalRecords.ShouldBe(1);
         result.Data.TotalRevenue.ShouldBe(100m);
-        result.Data.CsvContent.ShouldContain("TRD001");
-        result.Data.CsvContent.ShouldNotContain("TRD002");
+        result.Data.CsvContent!.ShouldContain("TRD001");
+        result.Data.CsvContent!.ShouldNotContain("TRD002");
+    }
+
+    /// <summary>渠道代码不区分大小写（渠道查找本来就不区分）：按 "stripe" 筛选导出的不是一份空对账单。</summary>
+    [Fact]
+    public async Task ExportReconciliationAsync_ChannelFilter_IgnoresCase()
+    {
+        var now = DateTime.UtcNow;
+        SetupPaymentQueryable(new List<PaymentEntity>
+        {
+            new() { Id = Guid.NewGuid(), TradeNo = "TRD001", BusinessOrderNo = "ORD001", ChannelCode = "Stripe", PaidAmount = 100m, Currency = "USD", Status = PaymentStatus.Succeeded, CreationTime = now.AddDays(-1) },
+            new() { Id = Guid.NewGuid(), TradeNo = "TRD002", BusinessOrderNo = "ORD002", ChannelCode = "PayPal", PaidAmount = 200m, Currency = "USD", Status = PaymentStatus.Succeeded, CreationTime = now.AddDays(-1) }
+        });
+        SetupRefundQueryable(new List<Refund>());
+
+        var result = await _service.ExportReconciliationAsync(new ReconciliationQueryDto
+        {
+            StartTime = now.AddDays(-7),
+            EndTime = now,
+            ChannelCode = "stripe"
+        });
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data!.TotalRecords.ShouldBe(1);
+        result.Data.CsvContent.ShouldNotBeNull().ShouldContain("TRD001");
     }
 
     [Fact]
@@ -603,8 +627,8 @@ public class StatisticsServiceTests
         // Assert
         result.Succeeded.ShouldBeTrue();
         result.Data!.TotalRecords.ShouldBe(1);
-        result.Data.CsvContent.ShouldContain("TRD001");
-        result.Data.CsvContent.ShouldNotContain("TRD002");
+        result.Data.CsvContent!.ShouldContain("TRD001");
+        result.Data.CsvContent!.ShouldNotContain("TRD002");
     }
 
     [Fact]
@@ -907,8 +931,8 @@ public class StatisticsServiceTests
 
         // Assert
         result.Succeeded.ShouldBeTrue();
-        result.Data!.CsvContent.ShouldContain("'=2+5");
-        result.Data.CsvContent.ShouldNotContain(",=2+5");
+        result.Data!.CsvContent!.ShouldContain("'=2+5");
+        result.Data.CsvContent!.ShouldNotContain(",=2+5");
     }
 
     #endregion

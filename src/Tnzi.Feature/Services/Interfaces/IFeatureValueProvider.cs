@@ -66,6 +66,26 @@ public interface IFeatureValueProvider
         => !RequiresKey || string.Equals(providerKey, callerTenantId, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Bring a (trimmed, non-empty) provider key to the exact form <see cref="GetOrNullAsync"/>
+    /// looks up, or report that the key can never be matched.
+    /// </summary>
+    /// <remarks>
+    /// Keys are compared as stored. A tenant id typed as <c>AAAAAAAA-...</c> or without dashes is
+    /// saved with 200 and then never matches the runtime's lowercase dashed form on a
+    /// case-sensitive database, so a provider whose keys have a canonical spelling normalizes
+    /// them here; a key that cannot be one of its keys at all is refused with 400. The default
+    /// accepts every key unchanged.
+    /// </remarks>
+    /// <param name="providerKey">The key as sent, already trimmed and non-empty.</param>
+    /// <param name="normalizedKey">The key to store and look up.</param>
+    /// <returns><c>false</c> when the key can never be matched by this provider.</returns>
+    bool TryNormalizeKey(string providerKey, out string normalizedKey)
+    {
+        normalizedKey = providerKey;
+        return true;
+    }
+
+    /// <summary>
     /// Get the feature value for the current context, or null if not set
     /// </summary>
     /// <param name="featureName">Feature name</param>

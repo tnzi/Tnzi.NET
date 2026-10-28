@@ -20,7 +20,7 @@ public class TnziAiClientTests
         threadService.Setup(s => s.CreateAsync(It.IsAny<CreateAgentThreadDto>()))
             .ReturnsAsync(Result<AgentThreadDto>.Success(new AgentThreadDto { Id = Guid.NewGuid() }));
 
-        var client = new TnziAiClient(runtime.Object, threadService.Object);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), threadService.Object);
 
         var response = await client.ChatAsync("Hello");
 
@@ -41,7 +41,7 @@ public class TnziAiClientTests
                 FinishReason = FinishReasons.Stop
             });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var response = await client.ChatAsync("Continue", threadId);
 
@@ -61,7 +61,7 @@ public class TnziAiClientTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AgentRunResult { Response = "OK", FinishReason = FinishReasons.Stop });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         await client.ChatAsync("Hi", options: new AiClientOptions { AgentId = agentId });
 
@@ -90,7 +90,7 @@ public class TnziAiClientTests
                 ClarificationQuestion = "Which region should I use?"
             });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var response = await client.ChatAsync("Hello");
 
@@ -116,7 +116,7 @@ public class TnziAiClientTests
                 FinishReason = FinishReasons.QuotaExceeded
             });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
 
@@ -135,7 +135,7 @@ public class TnziAiClientTests
                 FinishReason = FinishReasons.GuardrailRejected
             });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
 
@@ -154,7 +154,7 @@ public class TnziAiClientTests
                 FinishReason = FinishReasons.MaxHandoffs
             });
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var ex = await Should.ThrowAsync<BusinessException>(() => client.ChatAsync("Hello"));
 
@@ -171,7 +171,7 @@ public class TnziAiClientTests
         threadService.Setup(s => s.CreateAsync(It.IsAny<CreateAgentThreadDto>()))
             .ReturnsAsync(Result<AgentThreadDto>.Success(new AgentThreadDto { Id = expectedId }));
 
-        var client = new TnziAiClient(runtime.Object, threadService.Object);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), threadService.Object);
 
         var threadId = await client.CreateThreadAsync("Test Thread");
 
@@ -187,7 +187,7 @@ public class TnziAiClientTests
         threadService.Setup(s => s.DeleteAsync(threadId))
             .ReturnsAsync(Result.Success());
 
-        var client = new TnziAiClient(runtime.Object, threadService.Object);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), threadService.Object);
 
         await client.DeleteThreadAsync(threadId);
 
@@ -208,7 +208,7 @@ public class TnziAiClientTests
         runtime.Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
             .Returns(ToAsyncEnumerable(chunks));
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         var events = new List<AiClientStreamEvent>();
         await foreach (var e in client.ChatStreamingAsync("Hi"))
@@ -220,6 +220,34 @@ public class TnziAiClientTests
         Assert.Equal("Hello ", events[0].Text);
         Assert.Equal("world", events[1].Text);
         Assert.NotNull(events[2].FinishReason);
+    }
+
+    [Fact]
+    public async Task ChatStreamingAsync_TerminalEventCarriesTheTotalAndUsageOnlyChunksAreNotEvents()
+    {
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量：对外只在终止事件上给出累计值
+        var runtime = new Mock<IAgentRuntime>();
+        var chunks = new List<AgentStreamChunk>
+        {
+            new() { Usage = new TokenUsageDto { InputTokens = 100, OutputTokens = 10 } },
+            new() { Text = "answer" },
+            new() { FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 200, OutputTokens = 20 } }
+        };
+        runtime.Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(chunks));
+
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
+        var events = new List<AiClientStreamEvent>();
+        await foreach (var e in client.ChatStreamingAsync("Hi"))
+        {
+            events.Add(e);
+        }
+
+        Assert.Equal(2, events.Count);
+        Assert.Null(events[0].Usage);
+        Assert.NotNull(events[1].Usage);
+        Assert.Equal(300, events[1].Usage!.InputTokens);
+        Assert.Equal(30, events[1].Usage!.OutputTokens);
     }
 
     [Fact]
@@ -252,7 +280,7 @@ public class TnziAiClientTests
         runtime.Setup(r => r.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
             .Returns(ToAsyncEnumerable(chunks));
 
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
         var events = new List<AiClientStreamEvent>();
 
         await foreach (var e in client.ChatStreamingAsync("Hi"))
@@ -280,7 +308,7 @@ public class TnziAiClientTests
     public async Task CreateThreadAsync_ThrowsWhenNoThreadService()
     {
         var runtime = new Mock<IAgentRuntime>();
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.CreateThreadAsync("Test"));
     }
@@ -289,7 +317,7 @@ public class TnziAiClientTests
     public async Task DeleteThreadAsync_ThrowsWhenNoThreadService()
     {
         var runtime = new Mock<IAgentRuntime>();
-        var client = new TnziAiClient(runtime.Object, null);
+        var client = new TnziAiClient(TestDispatchFacade.Wrap(runtime.Object), null);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.DeleteThreadAsync(Guid.NewGuid()));
     }

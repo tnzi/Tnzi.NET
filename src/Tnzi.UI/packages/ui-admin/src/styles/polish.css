@@ -663,43 +663,10 @@ body *::-webkit-scrollbar-thumb:active {
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 }
 
-/* ===== Naive UI button restoration (UnoCSS preflight override) =====
- *
- * UnoCSS's presetWind4 preflight emits
- *   `button, [type="submit"], … { background-color: transparent }`
- * with selector specificity (0,1,0). Naive UI's `.n-button { background-color:
- * var(--n-color) }` is also (0,1,0) - they tie, so cascade order decides, and
- * preflight wins when the reset is imported after naive-ui's CSS-in-JS injects
- * its rules (or when naive-ui's rules use `:where()` to keep specificity at 0).
- *
- * Result: primary/info/success/warning/error buttons render as transparent
- * outlines with white text on white surfaces - basically invisible.
- *
- * Fix: double the class selector to raise specificity to (0,2,0) and restore
- * the var-driven background / border / hover / pressed colors. Applies app-
- * wide so login/dialog/popover buttons recover too, not just admin-shell ones.
- */
-/* ONLY restore background - naive-ui draws the button outline via a
-   `.n-button__border` pseudo element, NOT on the button itself.
-   Reapplying `border: var(--n-border)` here was producing a double
-   border (1px from the pseudo + 1px from this rule) and the button
-   read visibly thicker than soybean's reference. */
-.n-button.n-button {
-  background-color: var(--n-color);
-}
-.n-button.n-button:hover {
-  background-color: var(--n-color-hover);
-}
-.n-button.n-button:active,
-.n-button.n-button.n-button--pressed {
-  background-color: var(--n-color-pressed);
-}
-.n-button.n-button:focus {
-  background-color: var(--n-color-focus);
-}
-.n-button.n-button.n-button--disabled {
-  background-color: var(--n-color-disabled);
-}
+/* ===== Naive UI button restoration =====
+ * Lives in `@tnzi/ui` (styles/naive-buttons.css), which this stylesheet
+ * imports: every package that renders naive buttons needs it, not only the
+ * admin shell. */
 
 /* ===== Naive UI image-preview toolbar icon restoration (UnoCSS preflight) =====
  *

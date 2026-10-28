@@ -62,9 +62,10 @@ public class EftBatch : MultiTenantAuditedEntity<Guid>, IConcurrencyStamp
     /// 框架无从知道文件有没有真的上传到银行门户，但完全知道它有没有被交出去过 ——
     /// 而「交出去过」正是释放付款从安全变危险的那条分界线。
     /// <para>
-    /// 由 <c>DownloadAsync</c> 在解密成功之后原子戳（<c>ExecuteUpdate</c>，不经变更跟踪器
-    /// 也就不碰 <see cref="ConcurrencyStamp"/>）—— 否则两个人同时下载会有一个拿到 409，
-    /// 让一个纯读动作因并发而失败。
+    /// 由 <c>DownloadAsync</c> 在解密成功之后原子戳（<c>ExecuteUpdate</c>，不经变更跟踪器）：
+    /// 否则两个人同时下载会有一个拿到 409，让一个纯读动作因并发而失败。那次条件写只在
+    /// Generated 态生效并换掉 <see cref="ConcurrencyStamp"/>：已被并发作废的批次不再交出文件，
+    /// 而读到「从未下载」的作废在提交时比对失败转 409，不会在文件交出之后放回付款。
     /// </para>
     /// </remarks>
     public DateTime? FirstDownloadedTime { get; set; }

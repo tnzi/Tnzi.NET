@@ -26,12 +26,12 @@ public class DefaultTaskAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 按状态获取任务列表
+    /// 按状态分页获取任务列表
     /// </summary>
     [HttpGet("by-status")]
-    public virtual async Task<ApiResult<List<AgentTaskDto>>> GetByStatus([FromQuery] AgentTaskStatus status)
+    public virtual async Task<ApiResult<IPagedList<AgentTaskDto>>> GetByStatus([FromQuery] AgentTaskStatusQueryDto query, CancellationToken ct = default)
     {
-        var result = await _taskService.GetByStatusAsync(status);
+        var result = await _taskService.GetByStatusAsync(query, ct);
         return result.ToApiResult();
     }
 }

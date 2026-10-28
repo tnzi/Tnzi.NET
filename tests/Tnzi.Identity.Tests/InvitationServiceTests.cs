@@ -1,4 +1,5 @@
 ﻿using System.Security.Cryptography;
+using Tnzi.Security.Authorization;
 using TnziIdentityOptions = Tnzi.Identity.Options.IdentityOptions;
 
 namespace Tnzi.Identity.Tests;
@@ -109,6 +110,55 @@ public class InvitationServiceTests
     }
 
     /// <summary>
+    /// ★★★ 发出邀请时不宣布「已注册」：那一刻账号没有密码、登录不进去，而框架自带的订阅者会据此
+    /// 发一封「账号已可用」的欢迎邮件，被邀请人先收到它、再收到真正的邀请。
+    /// </summary>
+    [Fact]
+    public async Task Invite_DoesNotAnnounceARegistration()
+    {
+        var fixture = new Fixture();
+
+        var result = await fixture.Service.InviteAsync(NewInvitation());
+
+        Assert.True(result.Succeeded);
+        fixture.UserService.Verify(x => x.CreateAsync(It.IsAny<CreateUserDto>()), Times.Never);
+        fixture.EventBus.Verify(x => x.PublishAsync(It.IsAny<UserRegisteredEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.EventBus.Verify(x => x.PublishAsync(It.IsAny<UserInvitedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>★★ 注册事件在接受邀请、账号真正可用的那一刻发布，且只发一次。</summary>
+    [Fact]
+    public async Task Accept_AnnouncesTheRegistrationOnce_WhenTheAccountBecomesUsable()
+    {
+        var fixture = new Fixture();
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token, Password = "P@ssw0rd!" });
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token, Password = "P@ssw0rd!" });
+
+        fixture.EventBus.Verify(
+            x => x.PublishAsync(
+                It.Is<UserRegisteredEvent>(e => e.UserId == fixture.CreatedUser!.Id && e.Email == "newhire@example.com"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>还没办完（handler 说还差一步）或激活写失败：账号仍不可用，不宣布注册。</summary>
+    [Fact]
+    public async Task Accept_DoesNotAnnounceARegistration_UntilTheAccountIsActivated()
+    {
+        var fixture = new Fixture { HandlerOutcome = InvitationAcceptOutcome.NeedsMore("SetPassword") };
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token });
+        fixture.HandlerOutcome = InvitationAcceptOutcome.Done();
+        fixture.FailUserUpdate = true;
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token, Password = "P@ssw0rd!" });
+
+        fixture.EventBus.Verify(x => x.PublishAsync(It.IsAny<UserRegisteredEvent>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
     /// ★★ 并发接受：抢占失败的那一方不能也把账号激活一遍、再拿一份登录令牌。
     /// </summary>
     [Fact]
@@ -160,6 +210,24 @@ public class InvitationServiceTests
         Assert.Contains('*', preview.MaskedEmail!);
         // 用户名要给全：本人此后用它登录。
         Assert.Equal("newhire", preview.UserName);
+    }
+
+    /// <summary>
+    /// 本地部分与域名都以 emoji 开头：首字母按码元取会露出半个代理项（预览页上是一个替换字符），所以那一段一个字符都不露。
+    /// </summary>
+    [Fact]
+    public async Task Preview_EmailStartingWithAnEmoji_ShowsNoLoneSurrogate()
+    {
+        var fixture = new Fixture();
+        var invitation = NewInvitation();
+        invitation.Email = "\U0001F600hire@\U0001F600mail.com";
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(invitation)).Data!.AcceptUrl);
+
+        var masked = (await fixture.Service.PreviewAsync(token)).Data!.MaskedEmail!;
+
+        // 本地部分 6 个码元、域名主体 6 个码元，都整段遮掉；顶级域照留
+        Assert.Equal("******@******.com", masked);
+        Assert.DoesNotContain(masked, char.IsSurrogate);
     }
 
     /// <summary>
@@ -251,6 +319,196 @@ public class InvitationServiceTests
         Assert.False(result.Succeeded);
         Assert.Equal(409, result.Code);
         Assert.False(fixture.UserDeleted);
+    }
+
+    /// <summary>
+    /// ★★★ 重发邀请会把一条新的接受链接交给调用者：对一个预设了超管角色、还没接受的账号，
+    /// 持 <c>user.update</c> 的普通管理员拿它设上自己的密码、接受邀请，就以超管身份登录了。
+    /// </summary>
+    /// <remarks>
+    /// 同一个权限码下的重置密码早就挂着超管护栏，重发邀请是同一件事（决定谁能以这个账号登录）换了一条路。
+    /// 拒绝必须发生在动令牌之前：被邀请人手里那条链接要原样可用。
+    /// </remarks>
+    [Fact]
+    public async Task Resend_ForAPendingSuperAdmin_ByANonSuperAdmin_IsForbidden_AndLeavesTheLinkAlone()
+    {
+        var fixture = Fixture.WithANonSuperAdminActorAgainstASuperAdminTarget();
+        var original = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+        var savedBefore = fixture.LastSavedTokenValue;
+
+        var result = await fixture.Service.ResendAsync(fixture.CreatedUser!.Id);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.Equal(ErrorCodes.FORBIDDEN, result.ErrorCode);
+        Assert.Null(result.Data);
+        Assert.Equal(savedBefore, fixture.LastSavedTokenValue);
+        Assert.True((await fixture.Service.PreviewAsync(original)).Succeeded);
+    }
+
+    /// <summary>
+    /// 删账号那一步对超管目标答 403：先拦下来，管理员看到的回答与重发一致，被邀请人的链接原样可用。
+    /// </summary>
+    [Fact]
+    public async Task Revoke_ForAPendingSuperAdmin_ByANonSuperAdmin_IsForbidden_AndKeepsTheLink()
+    {
+        var fixture = Fixture.WithANonSuperAdminActorAgainstASuperAdminTarget();
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+
+        var result = await fixture.Service.RevokeAsync(fixture.CreatedUser!.Id);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(403, result.Code);
+        Assert.False(fixture.UserDeleted);
+        Assert.True((await fixture.Service.PreviewAsync(token)).Succeeded);
+    }
+
+    /// <summary>
+    /// ★★ 删账号可能被拒（消费方的 <c>IUserUsageProvider</c> 声明账号在用时 409）：此前令牌先作废，
+    /// 管理员看到 409 以为什么都没发生，被邀请人手里的链接却已经打不开了，账号停在 Pending、再没有令牌。
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenTheDeleteIsRefused_KeepsTheLink()
+    {
+        var fixture = new Fixture
+        {
+            DeleteResult = Result.Failure("A staff record is linked to this account", 409, ErrorCodes.IDENTITY_USER_IN_USE),
+        };
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+
+        var result = await fixture.Service.RevokeAsync(fixture.CreatedUser!.Id);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_USER_IN_USE, result.ErrorCode);
+        Assert.True((await fixture.Service.PreviewAsync(token)).Succeeded);
+    }
+
+    /// <summary>
+    /// ★ 预填资料只在「已邀请、还没接受」的窗口里有意义。它不带过期时间、撤销又是软删，
+    /// 此前接受与撤销都不删它，管理员预填的个人资料在每一份邀请上无限期留存。
+    /// </summary>
+    [Fact]
+    public async Task Accept_WhenDone_RemovesTheAdminSuppliedProfile()
+    {
+        var fixture = new Fixture();
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitationWithProfile())).Data!.AcceptUrl);
+        Assert.True(fixture.HasStoredToken(ProfileTokenName));
+
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token, Password = "P@ssw0rd!" });
+
+        Assert.False(fixture.HasStoredToken(ProfileTokenName));
+    }
+
+    /// <summary>对照：handler 说还没做完时资料留着，用户拿同一条链接回来时还要用它当初值。</summary>
+    [Fact]
+    public async Task Accept_WhenIncomplete_KeepsTheProfileForTheNextAttempt()
+    {
+        var fixture = new Fixture { HandlerOutcome = InvitationAcceptOutcome.NeedsMore("EnrollTotp") };
+        var token = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitationWithProfile())).Data!.AcceptUrl);
+
+        await fixture.Service.AcceptAsync(new AcceptInvitationDto { Token = token });
+
+        Assert.True(fixture.HasStoredToken(ProfileTokenName));
+    }
+
+    [Fact]
+    public async Task Revoke_RemovesTheAdminSuppliedProfile()
+    {
+        var fixture = new Fixture();
+        await fixture.Service.InviteAsync(NewInvitationWithProfile());
+
+        var result = await fixture.Service.RevokeAsync(fixture.CreatedUser!.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.False(fixture.HasStoredToken(ProfileTokenName));
+    }
+
+    /// <summary>
+    /// ★ 有效期在建号之前校验：此前 int.MaxValue 小时到签发那一步才在 AddHours 上抛异常，
+    /// 账号已经建好、置成 Pending，留下一个没有令牌的待接受账号与一个 500；而 876000 小时签出的是百年有效的匿名凭据。
+    /// </summary>
+    [Theory]
+    [InlineData(int.MaxValue)]
+    [InlineData(InvitationOptions.MaxLinkLifetimeHours + 1)]
+    [InlineData(0)]
+    public async Task Invite_WithAnOutOfRangeLifetime_IsRejectedBeforeCreatingAnAccount(int lifetimeHours)
+    {
+        var fixture = new Fixture();
+        var input = NewInvitation();
+        input.LifetimeHours = lifetimeHours;
+
+        var result = await fixture.Service.InviteAsync(input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(ErrorCodes.VALIDATION_ERROR, result.ErrorCode);
+        Assert.Null(fixture.CreatedUser);
+    }
+
+    [Fact]
+    public async Task Invite_AtTheMaximumLifetime_IsIssued()
+    {
+        var fixture = new Fixture();
+        var input = NewInvitation();
+        input.LifetimeHours = InvitationOptions.MaxLinkLifetimeHours;
+
+        var result = await fixture.Service.InviteAsync(input);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Data!.ExpiresAt > DateTime.UtcNow.AddHours(InvitationOptions.MaxLinkLifetimeHours - 1));
+    }
+
+    [Fact]
+    public async Task Resend_WithAnOutOfRangeLifetime_IsRejected_AndLeavesTheLinkAlone()
+    {
+        var fixture = new Fixture();
+        var original = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+        var savedBefore = fixture.LastSavedTokenValue;
+
+        var result = await fixture.Service.ResendAsync(fixture.CreatedUser!.Id, InvitationOptions.MaxLinkLifetimeHours + 1);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(savedBefore, fixture.LastSavedTokenValue);
+        Assert.True((await fixture.Service.PreviewAsync(original)).Succeeded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(InvitationOptions.MaxLinkLifetimeHours + 1)]
+    public void OptionsValidation_RejectsAConfiguredLifetimeOutOfRange(int configured)
+    {
+        var options = new TnziIdentityOptions();
+        options.Invitation.LinkLifetimeHours = configured;
+
+        var result = new IdentityOptionsValidator().Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains(result.Failures!, f => f.Contains("Invitation.LinkLifetimeHours"));
+    }
+
+    private const string ProfileTokenName = "InvitationProfile";
+
+    private static CreateInvitationDto NewInvitationWithProfile()
+    {
+        using var doc = JsonDocument.Parse("""{"employeeNo":"E-1024"}""");
+        var input = NewInvitation();
+        input.Profile = doc.RootElement.Clone();
+        return input;
+    }
+
+    /// <summary>对照：超管替超管重发照常可以：护栏拦的是越级，不是这件事本身。</summary>
+    [Fact]
+    public async Task Resend_ForAPendingSuperAdmin_ByASuperAdmin_IsAllowed()
+    {
+        var fixture = Fixture.WithANonSuperAdminActorAgainstASuperAdminTarget(actorIsSuperAdmin: true);
+        var first = fixture.ExtractToken((await fixture.Service.InviteAsync(NewInvitation())).Data!.AcceptUrl);
+
+        var result = await fixture.Service.ResendAsync(fixture.CreatedUser!.Id);
+
+        Assert.True(result.Succeeded);
+        Assert.NotEqual(first, fixture.ExtractToken(result.Data!.AcceptUrl));
     }
 
     /// <summary>
@@ -346,6 +604,10 @@ public class InvitationServiceTests
 
         public InvitationService Service { get; }
 
+        public Mock<IUserService> UserService { get; private set; } = null!;
+
+        public Mock<IEventBus> EventBus { get; } = new();
+
         public User? CreatedUser { get; private set; }
 
         public CreateUserDto? LastCreateInput { get; private set; }
@@ -367,7 +629,24 @@ public class InvitationServiceTests
 
         public JsonElement? HandlerSawProfile { get; private set; }
 
-        public Fixture()
+        /// <summary><c>IUserService.DeleteAsync</c> 的回答；为空或成功时照常删除。</summary>
+        public Result? DeleteResult { get; set; }
+
+        public bool HasStoredToken(string name) => _tokens.Any(t => t.Name == name);
+
+        /// <summary>
+        /// 调用者是 <paramref name="actorIsSuperAdmin"/> 指定身份的管理员，而被邀请的账号（调用者之外的任何人）是超管。
+        /// </summary>
+        public static Fixture WithANonSuperAdminActorAgainstASuperAdminTarget(bool actorIsSuperAdmin = false)
+        {
+            var actorId = Guid.NewGuid();
+            var functionAuthorization = new Mock<IFunctionAuthorizationService>();
+            functionAuthorization.Setup(a => a.IsSuperAdminAsync(It.Is<Guid>(id => id != actorId))).ReturnsAsync(true);
+            functionAuthorization.Setup(a => a.IsSuperAdminAsync(actorId)).ReturnsAsync(actorIsSuperAdmin);
+            return new Fixture(actorId, functionAuthorization.Object);
+        }
+
+        public Fixture(Guid? actorId = null, IFunctionAuthorizationService? functionAuthorization = null)
         {
             var store = new Mock<IUserStore<User>>();
             var userManager = new Mock<UserManager<User>>(store.Object, null!, null!, null!, null!, null!, null!, null!, null!);
@@ -391,9 +670,10 @@ public class InvitationServiceTests
                     ? IdentityResult.Failed(new IdentityError { Description = "concurrency failure" })
                     : IdentityResult.Success);
 
-            var userService = new Mock<IUserService>();
+            UserService = new Mock<IUserService>();
+            var userService = UserService;
             userService
-                .Setup(x => x.CreateAsync(It.IsAny<CreateUserDto>()))
+                .Setup(x => x.CreateForInvitationAsync(It.IsAny<CreateUserDto>()))
                 .ReturnsAsync((CreateUserDto input) =>
                 {
                     LastCreateInput = input;
@@ -408,7 +688,16 @@ public class InvitationServiceTests
                 });
             userService
                 .Setup(x => x.DeleteAsync(It.IsAny<Guid>()))
-                .ReturnsAsync(() => { UserDeleted = true; return Result.Success(); });
+                .ReturnsAsync(() =>
+                {
+                    if (DeleteResult is { Succeeded: false } refused)
+                    {
+                        return refused;
+                    }
+
+                    UserDeleted = true;
+                    return Result.Success();
+                });
 
             var authTokenService = new Mock<IAuthTokenService>();
             authTokenService
@@ -489,14 +778,15 @@ public class InvitationServiceTests
             options.Setup(x => x.CurrentValue).Returns(new TnziIdentityOptions());
 
             Service = new InvitationService(
-                BuildServiceProvider(),
+                BuildServiceProvider(actorId, EventBus.Object),
                 userManager.Object,
                 userService.Object,
                 authTokenService.Object,
                 handler.Object,
                 urlGenerator.Object,
                 options.Object,
-                UnscopedUserTenantScope.Create());
+                UnscopedUserTenantScope.Create(),
+                functionAuthorization: functionAuthorization);
         }
 
         public string ExtractToken(string acceptUrl)
@@ -510,13 +800,22 @@ public class InvitationServiceTests
             }
         }
 
-        private static IServiceProvider BuildServiceProvider()
+        private static IServiceProvider BuildServiceProvider(Guid? actorId, IEventBus eventBus)
         {
             var loggerFactory = new Mock<ILoggerFactory>();
             loggerFactory.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
 
             var serviceProvider = new Mock<IServiceProvider>();
             serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
+            serviceProvider.Setup(x => x.GetService(typeof(IEventBus))).Returns(eventBus);
+            if (actorId.HasValue)
+            {
+                var currentUser = new Mock<ICurrentUser>();
+                currentUser.SetupGet(c => c.Id).Returns(actorId.Value);
+                currentUser.SetupGet(c => c.IsAuthenticated).Returns(true);
+                serviceProvider.Setup(x => x.GetService(typeof(ICurrentUser))).Returns(currentUser.Object);
+            }
+
             return serviceProvider.Object;
         }
     }

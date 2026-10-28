@@ -74,7 +74,28 @@ public class UsageLogService : ApplicationService, IUsageLogService
         int cacheCreationTokens,
         CancellationToken ct = default)
     {
-        var cost = _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens);
+        var cost = _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens);
+        return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, cachedInputTokens, cacheCreationTokens, ct);
+    }
+
+    public Task LogUsageAsync(
+        string operationType,
+        string provider,
+        string model,
+        int inputTokens,
+        int outputTokens,
+        long durationMs,
+        bool isSuccess,
+        string? errorMessage,
+        Guid? agentId,
+        Guid? threadId,
+        decimal? estimatedCostUsd,
+        int cachedInputTokens,
+        int cacheCreationTokens,
+        CancellationToken ct = default)
+    {
+        var cost = estimatedCostUsd
+                   ?? _costCalculator?.CalculateCost(provider, model, inputTokens, outputTokens, cachedInputTokens, cacheCreationTokens);
         return LogUsageCoreAsync(operationType, provider, model, inputTokens, outputTokens, durationMs, isSuccess, errorMessage, agentId, threadId, cost, cachedInputTokens, cacheCreationTokens, ct);
     }
 
@@ -94,10 +115,11 @@ public class UsageLogService : ApplicationService, IUsageLogService
         int cacheCreationTokens,
         CancellationToken ct)
     {
+        UsageLog? log = null;
         try
         {
             var httpContext = _httpContextAccessor.HttpContext;
-            var log = new UsageLog
+            log = new UsageLog
             {
                 OperationType = operationType,
                 Provider = provider,
@@ -127,7 +149,13 @@ public class UsageLogService : ApplicationService, IUsageLogService
         }
         catch (Exception ex)
         {
-            // Logging failure should not affect main flow
+            // Logging failure should not affect main flow. 插入失败的那一行仍是 Added，留在变更跟踪器里
+            // 会让本作用域下一次 SaveChanges（运行收尾、历史落库）重放它再失败一次，记账失败就成了运行失败。
+            if (log != null)
+            {
+                _repository.Discard(log);
+            }
+
             Logger.LogWarning(ex, "Failed to log usage");
         }
     }

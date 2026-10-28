@@ -16,4 +16,9 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 定义快照降级重试间隔等纯内部调节项为 internal，仅对本模块的测试项目开放。 -->
+    <InternalsVisibleTo Include="Tnzi.Feature.Tests, PublicKey=$(TnziPublicKey)" />
+  </ItemGroup>
+
 </Project>

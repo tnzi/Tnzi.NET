@@ -113,8 +113,9 @@ public class MailKitEmailSender : IEmailSender
             mimeMessage.Body = bodyBuilder.ToMessageBody();
 
             using var client = new MailKit.Net.Smtp.SmtpClient();
-            await client.ConnectAsync(_options.SmtpServer, _options.SmtpPort, _options.EnableSsl ? SecureSocketOptions.StartTls : SecureSocketOptions.None, cancellationToken);
-            await client.AuthenticateAsync(_options.Username, _options.Password, cancellationToken);
+            await client.ConnectAsync(_options.SmtpServer, _options.SmtpPort, SocketOptionsFor(_options), cancellationToken);
+            if (ShouldAuthenticate(_options))
+                await client.AuthenticateAsync(_options.Username, _options.Password, cancellationToken);
 
             await client.SendAsync(mimeMessage, cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
@@ -169,6 +170,41 @@ public class MailKitEmailSender : IEmailSender
             }
         }
     }
+
+    /// <summary>
+    /// 这一节配置怎么连 SMTP：不启用 SSL = 明文；启用且端口是 465 = 连上就握 TLS；启用的其余端口 = <b>必须</b> STARTTLS。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ★ 465 是隐式 TLS 的提交端口（RFC 8314）：服务器一连上就等 TLS 握手，而 STARTTLS 等的是服务器先说话：
+    /// 只会 STARTTLS 时两边互等到超时，每一封信都记成失败。
+    /// </para>
+    /// <para>
+    /// ★★ <b>刻意不用</b> <see cref="SecureSocketOptions.Auto"/> / <see cref="SecureSocketOptions.StartTlsWhenAvailable"/>：
+    /// 服务器不宣告 STARTTLS 时它们悄悄退回明文，而 <c>EnableSsl = true</c> 的部署接下来会把凭据明文发出去。
+    /// 配了 SSL 就必须是 SSL，握不上就失败。
+    /// </para>
+    /// </remarks>
+    internal static SecureSocketOptions SocketOptionsFor(MailSenderOptions options)
+    {
+        if (!options.EnableSsl)
+            return SecureSocketOptions.None;
+
+        return options.SmtpPort == ImplicitTlsPort ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
+    }
+
+    /// <summary>
+    /// 要不要做 SMTP 认证：用户名为空就不做。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 配置校验只在 <c>EnableSsl = true</c> 时要求用户名密码，所以「不带认证的内网中继」（端口 25、不启用 SSL、无凭据）
+    /// 是一份合法配置。此前这里无条件 <c>AUTH</c>：服务器不宣告认证时 MailKit 当场抛异常，每一封信都记成失败，
+    /// 包括密码重置。
+    /// </remarks>
+    internal static bool ShouldAuthenticate(MailSenderOptions options) => !string.IsNullOrWhiteSpace(options.Username);
+
+    /// <summary>隐式 TLS 的 SMTP 提交端口（RFC 8314）。</summary>
+    private const int ImplicitTlsPort = 465;
 
     private static void AddAddresses(InternetAddressList target, List<EmailAddress> addresses)
     {

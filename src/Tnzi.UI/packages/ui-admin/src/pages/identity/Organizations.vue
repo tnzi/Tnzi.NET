@@ -90,11 +90,14 @@
             <!--
               Organization members panel - paged user list scoped to the
               selected org. The `includeChildren` toggle expands the
-              backend query to every descendant unit. The "Remove" row
-              action calls `users.removeFromOrganization(userId)` which
-              detaches the user without deleting them - the user just
-              ends up orphaned and an admin can reassign via the user
-              page or by adding them to a different org.
+              backend query to every descendant unit. "Add members" calls
+              `users.assignToOrganization(userId, orgId)` for each picked
+              user (a user belongs to one organization, so this moves them
+              here). The "Remove" row action calls
+              `users.removeFromOrganization(userId)`, which detaches the user
+              without deleting them; adding them here or to another org puts
+              them back. This panel is the only place in the admin that
+              writes membership.
             -->
             <div class="t-org-page__members">
               <header class="t-org-page__section-header">
@@ -109,6 +112,27 @@
                 </NSpace>
               </header>
               <p class="t-org-page__hint">{{ t('members.hint') }}</p>
+              <div v-if="can('user.update')" class="t-org-page__add-members">
+                <TUserSelector
+                  :value="memberPicker.userIds"
+                  :fetcher="userFetcher"
+                  :placeholder="t('members.addPlaceholder')"
+                  multiple
+                  clearable
+                  size="small"
+                  class="t-org-page__add-members-picker"
+                  @update:value="onPickMembers"
+                />
+                <NButton
+                  size="small"
+                  type="primary"
+                  :disabled="!memberPicker.userIds.length"
+                  :loading="memberPicker.saving"
+                  @click="addMembers"
+                >
+                  {{ t('members.add') }}
+                </NButton>
+              </div>
               <TResponsiveTable
                 :data="members.items"
                 :columns="memberColumns"
@@ -187,6 +211,8 @@ import {
   NSwitch, NSpin, NForm, NFormItem, NPopconfirm,
 } from 'naive-ui'
 import TResponsiveTable from '../../components/data/TResponsiveTable.vue'
+import TUserSelector from '../../components/forms/TUserSelector.vue'
+import type { SelectorOption } from '../../components/forms/_selector-factory'
 import { type RowAction } from '../../headless/row-actions'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 import { useSafeMessage } from '../_shared/safe-message'
@@ -383,7 +409,12 @@ const members = reactive({
   loading: false,
 })
 
+// Last-wins: selecting unit A then unit B must not let A's late answer list A's
+// members under B's header (where Remove would act on them).
+let membersSeq = 0
+
 async function loadMembers(orgId: string): Promise<void> {
+  const mine = ++membersSeq
   members.loading = true
   try {
     const result = await bridge.organizations.getUsers(orgId, {
@@ -391,14 +422,16 @@ async function loadMembers(orgId: string): Promise<void> {
       pageSize: members.pageSize,
       includeChildren: members.includeChildren,
     })
+    if (mine !== membersSeq) return
     members.items = result.items as OrgMemberRow[]
     members.totalCount = result.totalCount
   } catch (e) {
+    if (mine !== membersSeq) return
     message.error(e instanceof Error ? e.message : String(e))
     members.items = []
     members.totalCount = 0
   } finally {
-    members.loading = false
+    if (mine === membersSeq) members.loading = false
   }
 }
 
@@ -416,12 +449,70 @@ async function removeMember(user: OrgMemberRow): Promise<void> {
   }
 }
 
+// "Add members": pick users, then assign each to the selected org. One user at
+// a time so a refusal (a non-super admin moving a super admin is 403) names
+// the account it hit while the rest still land.
+const memberPicker = reactive({
+  userIds: [] as string[],
+  saving: false,
+})
+
+const userFetcher = async (keyword: string): Promise<SelectorOption[]> => {
+  try {
+    const res = await bridge.users.fetch({
+      pageIndex: 1,
+      pageSize: 20,
+      searchText: keyword.trim(),
+      sortField: undefined,
+      sortOrder: null,
+      filters: {},
+    })
+    return res.items.map((u) => ({
+      label: u.email ? `${u.userName} (${u.email})` : u.userName,
+      value: u.id,
+    }))
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+    return []
+  }
+}
+
+function onPickMembers(value: unknown): void {
+  memberPicker.userIds = Array.isArray(value) ? value.map(String) : []
+}
+
+async function addMembers(): Promise<void> {
+  const orgId = selectedKey.value
+  if (!orgId || !memberPicker.userIds.length) return
+  memberPicker.saving = true
+  const pending = [...memberPicker.userIds]
+  let added = 0
+  const failures: string[] = []
+  try {
+    for (const userId of pending) {
+      try {
+        await bridge.users.assignToOrganization(userId, orgId)
+        added += 1
+      } catch (e) {
+        failures.push(e instanceof Error ? e.message : String(e))
+      }
+    }
+  } finally {
+    memberPicker.saving = false
+  }
+  if (added > 0) message.success(t('members.addSuccess', { count: added }))
+  if (failures.length) message.error(failures[0]!)
+  memberPicker.userIds = []
+  reloadMembers()
+}
+
 // Reset paging + reload whenever the selected org changes. Skip the
 // effect when nothing's selected (the empty-state placeholder shows).
 watch(selectedKey, (key) => {
   members.pageIndex = 1
   members.items = []
   members.totalCount = 0
+  memberPicker.userIds = []
   if (key) void loadMembers(key)
 })
 
@@ -526,5 +617,17 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.5;
   margin: 0 0 12px;
+}
+.t-org-page__add-members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.t-org-page__add-members-picker {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 420px;
 }
 </style>

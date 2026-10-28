@@ -42,6 +42,7 @@ vi.mock('../../../../src/services/bridges/identity-bridge', () => ({
 }))
 
 import BroadcastDialog from '../../../../src/pages/chat/components/BroadcastDialog.vue'
+import { translatePageKey } from '../../../../src/pages/_shared/translate'
 
 type DialogVm = {
   form: { content: string; targetMode: string; roleIds: string[]; userIds: string[] }
@@ -117,5 +118,44 @@ describe('BroadcastDialog', () => {
     await vm.handleSend()
     await flushPromises()
     expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('the content rule speaks the active locale', async () => {
+    const wrapper = mount(BroadcastDialog, { props: { show: true } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { rules: { content: Array<{ message: string }> } }
+    expect(vm.rules.content[0]!.message).toBe(translatePageKey('chat.broadcast', 'contentRequired'))
+    expect(vm.rules.content[0]!.message).toBe('Enter the message to broadcast')
+  })
+
+  it('an empty message is held at the form instead of rejecting the send', async () => {
+    // Render the modal body in place so the form (and its validation) is real.
+    const wrapper = mount(BroadcastDialog, {
+      props: { show: true },
+      global: { stubs: { NModal: { template: '<div><slot /></div>' }, TOverlayTheme: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as DialogVm
+    vm.form.content = ''
+    await expect(vm.handleSend()).resolves.toBeUndefined()
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('a whitespace-only message is held at the form too (the server refuses it)', async () => {
+    const wrapper = mount(BroadcastDialog, {
+      props: { show: true },
+      global: { stubs: { NModal: { template: '<div><slot /></div>' }, TOverlayTheme: { template: '<div><slot /></div>' } } },
+    })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as DialogVm
+    vm.form.content = ' \n\t '
+    await expect(vm.handleSend()).resolves.toBeUndefined()
+    expect(broadcast).not.toHaveBeenCalled()
+
+    // Positive control: the same form sends once the message has text in it.
+    vm.form.content = '  Hello  '
+    await vm.handleSend()
+    await flushPromises()
+    expect(broadcast).toHaveBeenCalledTimes(1)
   })
 })

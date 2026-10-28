@@ -10,10 +10,17 @@ namespace Tnzi.Payment.Subscriptions.Controllers;
 public class DefaultSubscriptionController : ApiControllerBase
 {
     private readonly ISubscriptionService _subscriptionService;
+    private readonly ISubscriptionAccessGate? _accessGate;
+    private readonly ISubscriptionStorageMeter? _storageMeter;
 
-    public DefaultSubscriptionController(ISubscriptionService subscriptionService)
+    /// <param name="subscriptionService">订阅服务</param>
+    /// <param name="accessGate">访问门禁（本模块恒注册；可选只是为了不打断按旧签名继承本控制器的消费方）</param>
+    /// <param name="storageMeter">存储计量（本模块恒注册；可选的理由同上）</param>
+    public DefaultSubscriptionController(ISubscriptionService subscriptionService, ISubscriptionAccessGate? accessGate = null, ISubscriptionStorageMeter? storageMeter = null)
     {
         _subscriptionService = Check.NotNull(subscriptionService);
+        _accessGate = accessGate;
+        _storageMeter = storageMeter;
     }
 
     protected ISubscriptionService SubscriptionService => _subscriptionService;
@@ -40,13 +47,13 @@ public class DefaultSubscriptionController : ApiControllerBase
     }
 
     /// <summary>
-    /// 获取我的订阅列表
+    /// 获取我的订阅列表（分页；不带参数时为最新 100 条）
     /// </summary>
     [HttpGet("my")]
-    public virtual async Task<ApiResult<IPagedList<SubscriptionDto>>> GetMySubscriptions()
+    public virtual async Task<ApiResult<IPagedList<SubscriptionDto>>> GetMySubscriptions([FromQuery] OwnerListQueryDto query)
     {
         var userId = GetRequiredCurrentUser().Id!.Value;
-        var result = await _subscriptionService.GetUserSubscriptionsAsync(userId);
+        var result = await _subscriptionService.GetUserSubscriptionsAsync(userId, query);
         return result.ToApiResult();
     }
 
@@ -106,6 +113,47 @@ public class DefaultSubscriptionController : ApiControllerBase
     }
 
     /// <summary>
+    /// 当前用户所代表的计费账户此刻的境况：外壳启动时与收到 402 之后读它，决定显示提醒横幅、暂停页面还是什么都不显示。
+    /// 任何已登录用户都能读；需要处理的那条订阅的细节只给能查看账单的人。门禁永远放行这个端点。
+    /// </summary>
+    [HttpGet("standing")]
+    public virtual async Task<ApiResult<BillingStandingDto>> GetStanding([FromQuery] string? productCode = null)
+    {
+        if (_accessGate == null)
+            return ApiResult<BillingStandingDto>.Error("The subscription access gate is not registered.", 501);
+
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var standing = await _accessGate.GetStandingAsync(userId, productCode, HttpContext.RequestAborted);
+        return ApiResult<BillingStandingDto>.Ok(standing);
+    }
+
+    /// <summary>
+    /// 当前用户所代表的计费账户的存储用量：最近一次每日样本、计划包含量、本期至今按平均用量累计的超额（需要能查看账单）。
+    /// 计划不计量存储时 <c>metered = false</c>。
+    /// </summary>
+    [HttpGet("storage-usage")]
+    public virtual async Task<ApiResult<StorageUsageDto>> GetStorageUsage([FromQuery] string? productCode = null)
+    {
+        if (_storageMeter == null)
+            return ApiResult<StorageUsageDto>.Error("Storage metering is not registered.", 501);
+
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _storageMeter.GetUsageAsync(userId, productCode, HttpContext.RequestAborted);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
+    /// 当场补缴（逾期欠费或已暂停服务的订阅）：返回收银台单，前端用渠道组件确认（含 3-D Secure）。付清后订阅立即恢复。
+    /// </summary>
+    [HttpPost("{id:guid}/pay-now")]
+    public virtual async Task<ApiResult<SubscriptionPayNowResultDto>> PayNow(Guid id)
+    {
+        var userId = GetRequiredCurrentUser().Id!.Value;
+        var result = await _subscriptionService.PayNowAsync(id, userId);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 变更订阅计划（含按比例计费）
     /// </summary>
     [HttpPost("{id:guid}/change-plan")]
@@ -155,7 +203,8 @@ public class DefaultSubscriptionController : ApiControllerBase
     [HttpGet("plans")]
     public virtual async Task<ApiResult<List<SubscriptionPlanDto>>> GetPlans([FromQuery] bool activeOnly = true, [FromQuery] string? productCode = null)
     {
-        var result = await _subscriptionService.GetSubscriptionPlansAsync(activeOnly, productCode);
+        // 用户端带税：开通页要写「含税 / 另加税」与一期应付额
+        var result = await _subscriptionService.GetSubscriptionPlansAsync(activeOnly, productCode, includeTax: true, HttpContext.RequestAborted);
         return result.ToApiResult();
     }
 

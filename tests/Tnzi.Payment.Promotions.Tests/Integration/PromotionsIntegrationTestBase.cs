@@ -55,6 +55,7 @@ public abstract class PromotionsIntegrationTestBase : IntegratedTestBase<Promoti
         AddRepo<PaymentEntity>(services);
         AddRepo<Refund>(services);
         AddRepo<StoredPaymentMethod>(services);
+        AddRepo<BillingAccount>(services);
         AddRepo<Promotion>(services);
         AddRepo<CouponUsage>(services);
         AddRepo<RedemptionCode>(services);
@@ -77,6 +78,9 @@ public abstract class PromotionsIntegrationTestBase : IntegratedTestBase<Promoti
 
         // 父模块的业务服务
         services.AddScoped<IPaymentTaxCalculator, DefaultPaymentTaxCalculator>();
+        // 计费账户：默认的 User 范围（与引入计费账户之前逐字相同）
+        services.AddScoped<IBillingAccountResolver, DefaultBillingAccountResolver>();
+        services.AddScoped<IBillingAccountService, BillingAccountService>();
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPaymentMethodService, PaymentMethodService>();
         services.AddScoped<IRefundService, RefundService>();

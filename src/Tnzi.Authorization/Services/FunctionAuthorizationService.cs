@@ -14,10 +14,37 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     private readonly FunctionAuthCache? _functionAuthCache;
     private readonly IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? _options;
     private readonly IRepository<Tnzi.Identity.Entities.Role, Guid>? _roleRepository;
+    private readonly IRepository<Tnzi.Identity.Entities.User, Guid>? _userRepository;
+    private readonly IUserTenantScopeProvider? _userScope;
+    private readonly bool _multiTenancyEnabled;
+    private readonly ICurrentTenant? _currentTenant;
+    private readonly IDataFilterManager? _dataFilterManager;
+    private readonly ITnziApplication? _application;
+    private readonly SuperAdminBypassPolicy? _bypassPolicy;
+
+    /// <summary>Identity 用户管理面的读门；持有者反查只把用户名给持有它的调用者。</summary>
+    private const string UserViewPermission = "user.view";
+
+    /// <summary>
+    /// 权限目录（模块 / 功能）是全部租户共用的一张表，租户上下文里的写入一律拒绝。
+    /// </summary>
+    private const string CatalogueIsHostManaged =
+        "The permission catalogue is shared by every tenant and can only be changed outside a tenant context.";
 
     /// <summary>
     /// 初始化一个<see cref="FunctionAuthorizationService"/>类型的新实例
     /// </summary>
+    /// <remarks>
+    /// 最后两个可选依赖只被 <see cref="GetPermissionHoldersAsync"/> 读：用户仓储把持有者的 id 换成用户名
+    /// 并剔除已不存在的账号，范围提供者把名单收窄到调用者的租户。用户仓储缺席时不判存在、用户名留空；
+    /// 范围提供者是安全边界，缺席时持有者反查答 501 而不是把名单放宽到所有租户。
+    /// 范围提供者在场时，按用户 id 读权限的两个管理端入口也先问它（越界与不存在同答 404）。
+    /// <para>
+    /// 最后三个描述「这次计算落在哪个租户过滤器之下」，与 <c>TnziDbContext</c> 同一组判据：
+    /// 每用户权限缓存按它分区（见 <see cref="PermissionCachePartition"/>），权限目录的写入按它判定是否在宿主上下文。
+    /// 多租户开关缺席按未开启处理，与数据库侧一致。
+    /// </para>
+    /// </remarks>
     public FunctionAuthorizationService(
         IRepository<FunctionModule, Guid> moduleRepository,
         IRepository<ModuleFunction, Guid> moduleFunctionRepository,
@@ -27,7 +54,14 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         IUserRoleService? userRoleService = null,
         FunctionAuthCache? functionAuthCache = null,
         IOptions<Tnzi.Authorization.Options.AuthorizationOptions>? options = null,
-        IRepository<Tnzi.Identity.Entities.Role, Guid>? roleRepository = null)
+        IRepository<Tnzi.Identity.Entities.Role, Guid>? roleRepository = null,
+        IRepository<Tnzi.Identity.Entities.User, Guid>? userRepository = null,
+        IUserTenantScopeProvider? userScope = null,
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        ICurrentTenant? currentTenant = null,
+        IDataFilterManager? dataFilterManager = null,
+        ITnziApplication? application = null,
+        SuperAdminBypassPolicy? bypassPolicy = null)
         : base(serviceProvider)
     {
         _moduleRepository = Check.NotNull(moduleRepository);
@@ -38,7 +72,23 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         _functionAuthCache = functionAuthCache;
         _options = options;
         _roleRepository = roleRepository;
+        _userRepository = userRepository;
+        _userScope = userScope;
+        _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
+        _currentTenant = currentTenant;
+        _dataFilterManager = dataFilterManager;
+        _application = application;
+        _bypassPolicy = bypassPolicy;
     }
+
+    /// <summary>
+    /// 超管旁路是否覆盖全部码（<c>Authorization:SuperAdminBypassScope = All</c>，默认）。
+    /// 策略缺席（手工组装服务的宿主与单元测试）按全部覆盖处理，与引入范围之前逐字相同。
+    /// </summary>
+    private bool BypassCoversEveryCode => _bypassPolicy?.CoversEveryCode ?? true;
+
+    /// <summary>超管旁路是否覆盖这个码（见 <see cref="SuperAdminBypassPolicy.Covers"/>）。</summary>
+    private bool BypassCovers(string permissionName) => _bypassPolicy?.Covers(permissionName) ?? true;
 
     /// <summary>
     /// Whether the user is a super administrator - member of any role listed
@@ -108,8 +158,29 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (await IsSuperAdminAsync(grantorUserId)) return true;
         if (await IsSuperAdminRoleAsync(roleId)) return false;
 
-        var grantorCodes = ToCaseInsensitiveSet(await GetUserPermissionNamesAsync(grantorUserId));
+        // 已确认不是超管：有效集就是显式集，不必经 GetUserPermissionNamesAsync 再做一次超管判定。
+        var grantorCodes = ToCaseInsensitiveSet(await GetExplicitUserPermissionNamesAsync(grantorUserId));
         var roleCodes = await GetRoleGrantedCodesAsync(roleId);
+        return roleCodes.All(grantorCodes.Contains);
+    }
+
+    /// <summary>
+    /// 成员变更（以及角色本身的改动与删除）的支配判定：在 <see cref="CanManageRoleAsync"/> 之上，
+    /// 角色的休眠授权（启用的授权行指向已停用或已退役的功能）按码一并计入。
+    /// </summary>
+    /// <remarks>
+    /// 休眠码不在任何人的有效集里（超管的目录也只含生效功能），所以结果就是「带休眠授权的角色只有超管能改成员」。
+    /// 这正是要的：此前弱管理员可以先停用一个码（或等它因模块未加载而退役）、把自己挂进带着它的角色
+    /// （只看生效码，支配平凡成立）、再启用它，全程无人授出就持有了那个码。
+    /// 授权矩阵的写入与克隆仍只算生效码（<see cref="GetRoleGrantViolationAsync"/>），那边的放宽是为了不被休眠授权锁死。
+    /// </remarks>
+    public async Task<bool> CanManageRoleMembershipAsync(Guid grantorUserId, Guid roleId)
+    {
+        if (await IsSuperAdminAsync(grantorUserId)) return true;
+        if (await IsSuperAdminRoleAsync(roleId)) return false;
+
+        var grantorCodes = ToCaseInsensitiveSet(await GetExplicitUserPermissionNamesAsync(grantorUserId));
+        var roleCodes = await GetRoleGrantedCodesAsync(roleId, includeDormant: true);
         return roleCodes.All(grantorCodes.Contains);
     }
 
@@ -132,14 +203,19 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             && superRoles.Contains(roleName, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>角色显式授予的功能码（RoleFunction 直连），仅启用项。</summary>
-    private async Task<List<string>> GetRoleGrantedCodesAsync(Guid roleId)
+    /// <summary>
+    /// 角色显式授予的功能码（RoleFunction 直连，授权行启用）。默认只取生效功能；
+    /// <paramref name="includeDormant"/> 为 true 时连指向已停用 / 已退役功能的休眠授权一起取（已删除的功能不算，它们不会回来）。
+    /// </summary>
+    private async Task<List<string>> GetRoleGrantedCodesAsync(Guid roleId, bool includeDormant = false)
     {
-        var enabledFunctions = _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
+        var functions = includeDormant
+            ? _moduleFunctionRepository.AsQueryable()
+            : _moduleFunctionRepository.Where(f => f.IsEnabled && !f.IsRetired);
 
         return await _roleFunctionRepository
             .Where(rf => rf.RoleId == roleId && rf.IsEnabled)
-            .Join(enabledFunctions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .Join(functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
             .Distinct()
             .ToListAsync();
     }
@@ -150,20 +226,25 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// 允许时返回 null，越界时返回英文错误消息（调用方包装为 403）。
     /// 无用户上下文（系统/播种/内部路径与单元测试）时整体跳过。
     /// </summary>
+    /// <remarks>
+    /// 支配判定与 <see cref="CanManageRoleAsync"/> 逐字相同，只是授权者已确认不是超管、他的有效集也只读一次：
+    /// 经公开方法走一遍会把同一个超管判定（一次不经缓存的角色查询）在一次写入里做上四次。
+    /// </remarks>
     private async Task<string?> GetRoleGrantViolationAsync(Guid roleId, IReadOnlyCollection<Guid>? functionIdsToGrant = null)
     {
         var grantorId = CurrentUser?.Id;
         if (grantorId == null || grantorId == Guid.Empty) return null;
         if (await IsSuperAdminAsync(grantorId.Value)) return null;
 
-        if (!await CanManageRoleAsync(grantorId.Value, roleId))
-        {
-            return "You cannot manage this role: its permission set is not contained in yours, or it is a super-admin role.";
-        }
+        const string notDominated = "You cannot manage this role: its permission set is not contained in yours, or it is a super-admin role.";
+        if (await IsSuperAdminRoleAsync(roleId)) return notDominated;
+
+        // 非超管的有效集就是显式集（超管才取整个目录）。
+        var grantorCodes = ToCaseInsensitiveSet(await GetExplicitUserPermissionNamesAsync(grantorId.Value));
+        if (!(await GetRoleGrantedCodesAsync(roleId)).All(grantorCodes.Contains)) return notDominated;
 
         if (functionIdsToGrant is { Count: > 0 })
         {
-            var grantorCodes = ToCaseInsensitiveSet(await GetUserPermissionNamesAsync(grantorId.Value));
             var idList = functionIdsToGrant.ToList();
             var requestedCodes = await _moduleFunctionRepository
                 .Where(f => idList.Contains(f.Id))
@@ -196,7 +277,10 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // SuperAdmin bypass - short-circuit before touching the function
         // tables. Everyone else resolves through explicit grants only
         // (deny-by-default): no role is implicitly granted anything.
-        if (await IsSuperAdminAsync(userId)) return true;
+        // With SuperAdminBypassScope = Platform the bypass only reaches platform
+        // codes; an application code falls through to the explicit grants below,
+        // for super admins as for everyone else (deny rows included).
+        if (BypassCovers(permissionName) && await IsSuperAdminAsync(userId)) return true;
 
         // Permission codes are matched case-insensitively. The admin-roles
         // comparison above already uses OrdinalIgnoreCase; this brings the
@@ -228,9 +312,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         var ids = userIds.Where(id => id != Guid.Empty).Distinct().ToList();
         if (ids.Count == 0) return granted;
 
-        // 1. 超管旁路：一次角色名查询覆盖整份名单。
+        // 1. 超管旁路：一次角色名查询覆盖整份名单。旁路收窄到平台码时，应用码不走这一步。
         var superRoles = _options?.Value.SuperAdminRoles;
-        if (superRoles is { Count: > 0 } && _userRoleService != null)
+        if (BypassCovers(permissionName) && superRoles is { Count: > 0 } && _userRoleService != null)
         {
             var superSet = new HashSet<string>(superRoles, StringComparer.OrdinalIgnoreCase);
             var roleNamesByUser = await _userRoleService.GetUserRolesAsync(ids)
@@ -302,13 +386,23 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // path resolved through the ENABLED-only catalogue, so an endpoint
         // gate (single check) and an in-service RequireAllPermissionsAsync
         // (batch check) could reach opposite verdicts for the same super admin.
-        if (await IsSuperAdminAsync(userId))
+        if (BypassCoversEveryCode)
         {
-            return permissionNameList.ToDictionary(p => p, _ => true);
+            if (await IsSuperAdminAsync(userId))
+            {
+                return permissionNameList.ToDictionary(p => p, _ => true);
+            }
+        }
+        else if (permissionNameList.Any(BypassCovers) && await IsSuperAdminAsync(userId))
+        {
+            // 收窄的旁路：平台码直接通过，其余码与单查一样走显式集。
+            var explicitSet = ToCaseInsensitiveSet(await GetExplicitUserPermissionNamesAsync(userId));
+            return permissionNameList.ToDictionary(p => p, p => BypassCovers(p) || explicitSet.Contains(p));
         }
 
-        // 一次性获取用户的所有权限名称（带缓存）
-        var userPermissions = await GetUserPermissionNamesAsync(userId);
+        // 一次性获取用户的所有权限名称（带缓存）。上面已判定不是超管，直接取显式集：
+        // 经 GetUserPermissionNamesAsync 会把同一个超管判定（一次不经缓存的角色查询）再做一遍。
+        var userPermissions = await GetExplicitUserPermissionNamesAsync(userId);
         // Case-insensitive match - see comment in CheckPermissionAsync for rationale.
         var userPermissionSet = ToCaseInsensitiveSet(userPermissions);
 
@@ -324,6 +418,17 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// </summary>
     private static HashSet<string> ToCaseInsensitiveSet(IEnumerable<string> permissions)
         => new(permissions, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 系统托管行上由声明决定的文字（名称、说明）是否与请求里的相同：去首尾空白后逐字比较，
+    /// null、空串与纯空白视为同一个「没写」（表单把 null 渲染成空输入框，回传的可能是任何一种）。
+    /// </summary>
+    private static bool SameDeclaredText(string? stored, string? requested)
+    {
+        var a = string.IsNullOrWhiteSpace(stored) ? null : stored.Trim();
+        var b = string.IsNullOrWhiteSpace(requested) ? null : requested.Trim();
+        return string.Equals(a, b, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Resolve the super-admin permission catalogue with cache.
@@ -366,10 +471,24 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         // request when a UI repeatedly enumerates permissions.
         if (await IsSuperAdminAsync(userId))
         {
-            return await GetSuperAdminCatalogueAsync();
+            return BypassCoversEveryCode
+                ? await GetSuperAdminCatalogueAsync()
+                : await GetNarrowedSuperAdminPermissionNamesAsync(userId);
         }
 
         return await GetExplicitUserPermissionNamesAsync(userId);
+    }
+
+    /// <summary>
+    /// 旁路收窄到平台码时超管的有效集：目录里的平台码 ∪ 他的显式集。
+    /// 与 <see cref="CheckPermissionAsync"/> 逐码一致：平台码由旁路放行（否定行不起作用），
+    /// 应用码只认显式授权（否定行照常扣除）。
+    /// </summary>
+    private async Task<IEnumerable<string>> GetNarrowedSuperAdminPermissionNamesAsync(Guid userId)
+    {
+        var platformCodes = (await GetSuperAdminCatalogueAsync()).Where(BypassCovers);
+        var explicitCodes = await GetExplicitUserPermissionNamesAsync(userId);
+        return platformCodes.Union(explicitCodes, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     /// <summary>
@@ -381,10 +500,12 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// </summary>
     private async Task<IEnumerable<string>> GetExplicitUserPermissionNamesAsync(Guid userId)
     {
-        // 1. 尝试从缓存获取
-        if (_functionAuthCache != null)
+        // 1. 尝试从缓存获取。缓存按「这份集合在哪个租户过滤器下算出来」分区：
+        //    别的租户视角下算出的集合不能读给这个请求（见 PermissionCachePartition）。
+        var partition = _functionAuthCache != null ? CurrentCachePartition() : null;
+        if (partition != null)
         {
-            var cached = await _functionAuthCache.GetUserPermissionNamesAsync(userId);
+            var cached = await _functionAuthCache!.GetUserPermissionNamesAsync(userId, partition);
             if (cached != null)
             {
                 return cached;
@@ -414,20 +535,41 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             .Where(uf => uf.UserId == userId && uf.IsEnabled && !uf.IsGranted)
             .Join(enabledFunctions, uf => uf.FunctionId, f => f.Id, (uf, f) => f.Code);
 
-        // 合并去重再扣除，EF Core 翻译为 UNION / EXCEPT SQL
-        var permissions = await directRoleFunctionCodes
+        // 合并去重在 SQL 里做，扣除在内存里按大小写不敏感做：码的匹配处处大小写不敏感，
+        // 而 SQL 的 EXCEPT 按数据库排序规则比较（PostgreSQL / SQLite 区分大小写）；
+        // 库里若留着只差大小写的两行，对其中一行的否定在 SQL 里扣不掉另一行。
+        var granted = await directRoleFunctionCodes
             .Union(directUserFunctionCodes)
-            .Except(deniedCodes)
             .ToListAsync();
+        var denied = ToCaseInsensitiveSet(await deniedCodes.ToListAsync());
+        var permissions = denied.Count == 0
+            ? granted
+            : granted.Where(code => !denied.Contains(code)).ToList();
 
-        // 3. 结果存入缓存 (30分钟)
-        if (_functionAuthCache != null)
+        // 3. 结果存入缓存 (30分钟)，连同算出它的分区
+        if (partition != null)
         {
-            await _functionAuthCache.SetUserPermissionNamesAsync(userId, permissions);
+            await _functionAuthCache!.SetUserPermissionNamesAsync(userId, partition, permissions);
         }
 
         return permissions;
     }
+
+    /// <summary>当前请求的权限缓存分区；<c>null</c> = 这次计算不经过缓存。</summary>
+    private string? CurrentCachePartition()
+        => PermissionCachePartition.Resolve(_multiTenancyEnabled, _dataFilterManager, _currentTenant, CurrentUser);
+
+    /// <summary>
+    /// 权限目录（模块 / 功能，均为全局表）的写入是否被拒绝：多租户开启且请求带着租户上下文时拒绝。
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FunctionModule"/> / <see cref="ModuleFunction"/> 没有 <c>TenantId</c>，一次停用、改码、删除影响所有租户；
+    /// 而写它们的权限码是按租户授予的（角色与角色授权都按租户隔离），租户管理员持有它们是常态。
+    /// 「当前租户为空 = 全局管理员」与用户管理端的 <see cref="UserTenantScope"/> 同一口径；
+    /// 没有已认证主体的调用（播种、后台任务）不在此列。多租户未开启时恒为 false，与此前逐字相同。
+    /// </remarks>
+    private bool IsCatalogueWriteForbidden()
+        => !UserTenantScope.Resolve(_multiTenancyEnabled, _currentTenant, CurrentUser).IsUnrestricted;
 
     /// <summary>
     /// 检查用户是否有权限访问指定功能（返回 Result，用于 Controller）
@@ -440,6 +582,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         if (string.IsNullOrEmpty(permissionName))
         {
             return Fail<bool>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        if (!await IsUserInCallerScopeAsync(userId))
+        {
+            return Fail<bool>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
         }
 
         try
@@ -461,6 +608,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>权限名称集合</returns>
     public async Task<Result<IEnumerable<string>>> GetUserPermissionNamesWithResultAsync(Guid userId)
     {
+        if (!await IsUserInCallerScopeAsync(userId))
+        {
+            return Fail<IEnumerable<string>>("User not found", 404, ErrorCodes.IDENTITY_USER_NOT_FOUND);
+        }
+
         try
         {
             var permissionNames = await GetUserPermissionNamesAsync(userId);
@@ -480,11 +632,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     public async Task<Result<IEnumerable<FunctionModule>>> GetModuleTreeAsync()
     {
         // 1. 获取所有启用的模块，并包含功能
-        // 不需要 Include Children，我们手动构建树以确保层级正确且不受 EF Core 追踪行为影响
+        // 不跟踪：树由下面手动构建，不能让变更跟踪器的关系修复替我们把 Children 填上：
+        // 库里若留着父链环（写入口加守卫之前的数据），修复会把环原样填进 Children，序列化溢出深度。
         var allModules = await _moduleRepository
             .Where(m => m.IsEnabled && !m.IsRetired)
             .Include(m => m.Functions.Where(f => !f.IsRetired))
             .OrderBy(m => m.Order)
+            .AsNoTracking()
             .ToListAsync();
 
         // 2. 内存构建树
@@ -493,14 +647,14 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
 
         foreach (var module in allModules)
         {
-            // 只要有 ParentId 且父节点在已加载列表中，就作为子节点处理
-            if (module.ParentId.HasValue && moduleDict.TryGetValue(module.ParentId.Value, out var parent))
+            // 有 ParentId、父节点在已加载列表中、且不在父链环上，就作为子节点处理。
+            // 环上的模块作为根输出：否则环上谁都不是根，整组连同功能从树里消失。
+            if (module.ParentId.HasValue
+                && moduleDict.TryGetValue(module.ParentId.Value, out var parent)
+                && !IsOnParentCycle(module, moduleDict))
             {
-                // 确保不重复添加 (EF Core Fixup 可能会自动添加，这里做保险)
-                if (!parent.Children.Contains(module))
-                {
-                    parent.Children.Add(module);
-                }
+                parent.Children.Add(module);
+                module.Parent = parent;
             }
             else
             {
@@ -552,12 +706,56 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// 获取所有模块
     /// </summary>
     /// <returns>模块列表</returns>
+    /// <remarks>
+    /// 平铺列表，层级只由 <see cref="FunctionModule.ParentId"/> 表达（前端按它在客户端建树）。
+    /// 不跟踪：跟踪查询会让关系修复把每个模块的子树填进 <see cref="FunctionModule.Children"/>，
+    /// 平铺列表因此按层级重复输出，库里有父链环时序列化溢出深度、整页 500，而这一页正是修复数据的入口。
+    /// </remarks>
     public async Task<Result<IEnumerable<FunctionModule>>> GetModulesAsync()
     {
         var modules = await _moduleRepository
             .OrderBy(m => m.Order)
+            .AsNoTracking()
             .ToListAsync();
         return Ok((IEnumerable<FunctionModule>)modules);
+    }
+
+    /// <summary>
+    /// 权限目录：全部模块连同各自的全部功能，两条查询读出。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="GetModulesAsync"/> 加逐模块 <see cref="GetModuleFunctionsAsync"/> 同一口径（含停用与退役行），
+    /// 只是把前端原先的 1 + N 次请求并成一次。模块按运行中的模块图标出 <c>IsBuiltIn</c>，与 <c>GET admin/modules</c> 相同。
+    /// </remarks>
+    public async Task<Result<IReadOnlyList<PermissionCatalogueModuleDto>>> GetPermissionCatalogueAsync()
+    {
+        var modules = await _moduleRepository
+            .OrderBy(m => m.Order)
+            .AsNoTracking()
+            .ToListAsync();
+        var functions = await _moduleFunctionRepository
+            .AsNoTracking()
+            .ToListAsync();
+
+        var functionsByModule = functions.ToLookup(f => f.ModuleId);
+        var builtInCodes = _application is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : FrameworkModuleResolver.GetLoadedFrameworkModuleCodes(_application);
+
+        // 归属只在旁路收窄时才有意义，也只在那时下发（默认模式的响应不变）。没有 provider 声明的模块（后台手建）是应用。
+        var registry = BypassCoversEveryCode ? null : _bypassPolicy!.Registry;
+        IReadOnlyList<PermissionCatalogueModuleDto> catalogue = modules
+            .Select(m =>
+            {
+                var dto = PermissionCatalogueMapping.ToCatalogueModule(m, functionsByModule[m.Id], builtInCodes.Contains(m.Code));
+                if (registry != null)
+                {
+                    dto.Scope = registry.GetGroupScope(m.Code) ?? PermissionScope.Application;
+                }
+                return dto;
+            })
+            .ToList();
+        return Ok(catalogue);
     }
 
     /// <summary>
@@ -567,10 +765,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>创建的模块</returns>
     public async Task<Result<FunctionModule>> CreateModuleAsync(CreateFunctionModuleRequest request)
     {
-        // 检查代码是否已存在
-        var exists = await _moduleRepository
-            .Where(m => m.Code == request.Code)
-            .AnyAsync();
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail<FunctionModule>(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // 检查代码是否已存在（大小写不敏感，见 IsModuleCodeTakenAsync）
+        var exists = await IsModuleCodeTakenAsync(request.Code);
 
         if (exists)
         {
@@ -606,30 +807,46 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>更新后的模块</returns>
     public async Task<Result<FunctionModule>> UpdateModuleAsync(Guid id, UpdateFunctionModuleRequest request)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail<FunctionModule>(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var module = await _moduleRepository.FindAsync(id);
         if (module == null)
         {
             return Fail<FunctionModule>("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // System-managed rows: only IsEnabled / Order are editable. Code /
-        // Name / Description / ParentId mirror the IPermissionDefinitionProvider
-        // declaration and changing them via admin UI would drift from code-
-        // as-truth on next startup (seeder restores). Treat attempts as 403
-        // so admin sees the constraint, not as silent revert.
-        if (module.IsSystemManaged && !string.Equals(module.Code, request.Code, StringComparison.Ordinal))
+        // System-managed rows: only Order is editable here (enable / disable go
+        // through their own endpoints). Code / Name / Description / ParentId
+        // mirror the IPermissionDefinitionProvider declaration and the seeder
+        // restores them on the next startup, so an edit would take effect now and
+        // silently disappear later. Refuse with 403 so the admin sees the
+        // constraint. Compared by value: the admin form posts every field.
+        if (module.IsSystemManaged)
         {
-            return Fail<FunctionModule>(
-                "System-managed module code cannot be changed. Update the IPermissionDefinitionProvider declaration in code instead.",
-                403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            if (!string.Equals(module.Code, request.Code, StringComparison.Ordinal))
+            {
+                return Fail<FunctionModule>(
+                    "System-managed module code cannot be changed. Update the IPermissionDefinitionProvider declaration in code instead.",
+                    403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            }
+
+            if (!SameDeclaredText(module.Name, request.Name)
+                || !SameDeclaredText(module.Description, request.Description)
+                || module.ParentId != request.ParentId)
+            {
+                return Fail<FunctionModule>(
+                    "The name, description and parent of a system-managed module come from its IPermissionDefinitionProvider declaration and cannot be changed here; only the order can.",
+                    403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            }
         }
 
-        // 检查代码是否被其他模块使用
+        // 检查代码是否被其他模块使用（大小写不敏感）
         if (module.Code != request.Code)
         {
-            var codeExists = await _moduleRepository
-                .Where(m => m.Code == request.Code && m.Id != id)
-                .AnyAsync();
+            var codeExists = await IsModuleCodeTakenAsync(request.Code, exceptId: id);
 
             if (codeExists)
             {
@@ -637,7 +854,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             }
         }
 
-        // 如果指定了父模块，验证父模块存在且不是自己
+        // 如果指定了父模块，验证父模块存在、且挂上去不会成环
         if (request.ParentId.HasValue)
         {
             if (request.ParentId.Value == id)
@@ -653,16 +870,25 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             {
                 return Fail<FunctionModule>("Parent module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
             }
+
+            var parentViolation = await DescribeParentCycleAsync(id, request.ParentId.Value);
+            if (parentViolation != null)
+            {
+                return Fail<FunctionModule>(parentViolation, 400, ErrorCodes.VALIDATION_ERROR);
+            }
         }
 
-        var oldEnabled = module.IsEnabled;
-        request.MapTo(module);
-        await _moduleRepository.UpdateAsync(module);
-        
-        if (oldEnabled != module.IsEnabled)
+        // 系统托管行只落排序：其余字段上面已判定与声明相同，不让请求里的空白差异写进库。
+        // 请求里没有启用状态（启停走专门的级联端点），所以这里的改动不触及权限解析，不必失效缓存。
+        if (module.IsSystemManaged)
         {
-            await InvalidateAllCacheAsync();
+            module.Order = request.Order;
         }
+        else
+        {
+            request.MapTo(module);
+        }
+        await _moduleRepository.UpdateAsync(module);
 
         LogInformation("Module updated: {Code}, Name: {Name}", request.Code, request.Name);
         return Ok(module, "Module updated successfully");
@@ -674,6 +900,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">模块ID</param>
     public async Task<Result> DeleteModuleAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var module = await _moduleRepository.FindAsync(id);
         if (module == null)
         {
@@ -1007,13 +1238,34 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// 获取功能的角色列表
     /// </summary>
     /// <param name="functionId">功能ID</param>
-    /// <returns>角色功能列表</returns>
-    public async Task<Result<IEnumerable<RoleFunction>>> GetFunctionRolesAsync(Guid functionId)
+    /// <returns>角色功能列表，与 <see cref="GetRoleFunctionsPagedAsync"/> 同一个形状（带码、名称与所属模块）</returns>
+    /// <remarks>
+    /// 此前直接返回授权行实体：<c>Function</c> 导航不加载，线上没有码、名称与模块，
+    /// 而前端按 <c>RoleFunctionDto</c> 读它，得到的是 undefined 且编译期看不出来。
+    /// </remarks>
+    public async Task<Result<IEnumerable<RoleFunctionDto>>> GetFunctionRolesAsync(Guid functionId)
     {
+        var function = await _moduleFunctionRepository
+            .Where(f => f.Id == functionId)
+            .Select(f => new { f.Code, f.Name, f.ModuleId })
+            .FirstOrDefaultAsync();
+
         var roleFunctions = await _roleFunctionRepository
             .Where(rf => rf.FunctionId == functionId && rf.IsEnabled)
             .ToListAsync();
-        return Ok((IEnumerable<RoleFunction>)roleFunctions);
+
+        var dtos = roleFunctions.Select(rf => new RoleFunctionDto
+        {
+            Id = rf.Id,
+            RoleId = rf.RoleId,
+            FunctionId = rf.FunctionId,
+            FunctionCode = function?.Code ?? string.Empty,
+            FunctionName = function?.Name ?? string.Empty,
+            ModuleId = function?.ModuleId ?? Guid.Empty,
+            IsEnabled = rf.IsEnabled,
+            CreationTime = rf.CreationTime
+        }).ToList();
+        return Ok((IEnumerable<RoleFunctionDto>)dtos);
     }
 
     /// <summary>
@@ -1023,8 +1275,9 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="functionIds">功能ID列表</param>
     public async Task<Result> BatchAssignFunctionsAsync(IEnumerable<Guid> roleIds, IEnumerable<Guid> functionIds)
     {
-        var roleIdList = roleIds.ToList();
-        var functionIdList = functionIds.ToList();
+        // 集合语义：重复的角色不该被判两次、写两次。
+        var roleIdList = roleIds.Distinct().ToList();
+        var functionIdList = functionIds.Distinct().ToList();
 
         if (roleIdList.Count == 0 || functionIdList.Count == 0)
         {
@@ -1102,10 +1355,13 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>创建的功能</returns>
     public async Task<Result<ModuleFunction>> CreateModuleFunctionAsync(CreateModuleFunctionRequest request)
     {
-        // 检查代码是否已存在
-        var codeExists = await _moduleFunctionRepository
-            .Where(f => f.Code == request.Code)
-            .AnyAsync();
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail<ModuleFunction>(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
+        // 检查代码是否已存在（大小写不敏感，见 IsFunctionCodeTakenAsync）
+        var codeExists = await IsFunctionCodeTakenAsync(request.Code);
 
         if (codeExists)
         {
@@ -1113,26 +1369,26 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
         }
 
         // 验证模块存在
-        var moduleExists = await _moduleRepository
+        var module = await _moduleRepository
             .Where(m => m.Id == request.ModuleId)
-            .AnyAsync();
+            .Select(m => new { m.IsEnabled })
+            .FirstOrDefaultAsync();
 
-        if (!moduleExists)
+        if (module == null)
         {
             return Fail<ModuleFunction>("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
+        // 停用模块是级联操作而不是生效判据：建在停用模块下的功能随模块一起停用，
+        // 否则停用模块下会冒出一个生效的码；重新启用模块时被级联带起来。
         var function = request.MapTo<ModuleFunction>();
-        function.IsEnabled = true;
+        function.IsEnabled = module.IsEnabled;
 
         await _moduleFunctionRepository.InsertAsync(function);
         // A new enabled function belongs in the super-admin catalogue
         // immediately; without this, it would be invisible to super admins
         // until the catalogue TTL (1h) expires.
-        if (_functionAuthCache != null)
-        {
-            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
-        }
+        await InvalidateSuperAdminCatalogueAsync();
         LogInformation("Module function created: {Code}, Name: {Name}", request.Code, request.Name);
         return Ok(function, "Module function created successfully");
     }
@@ -1145,14 +1401,21 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <returns>更新后的功能</returns>
     public async Task<Result<ModuleFunction>> UpdateModuleFunctionAsync(Guid id, UpdateModuleFunctionRequest request)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail<ModuleFunction>(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var function = await _moduleFunctionRepository.FindAsync(id);
         if (function == null)
         {
             return Fail<ModuleFunction>("Module function not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // System-managed: Code/Name/ModuleId are owned by the
-        // IPermissionDefinitionProvider; admin can only flip IsEnabled.
+        // System-managed: Code / Name / Description / ModuleId / Category are owned
+        // by the IPermissionDefinitionProvider (the seeder restores them on the
+        // next startup); admin can only reorder here and flip IsEnabled through
+        // its own endpoints. Category is ignored below rather than refused.
         if (function.IsSystemManaged)
         {
             if (!string.Equals(function.Code, request.Code, StringComparison.Ordinal))
@@ -1167,18 +1430,29 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                     "System-managed function cannot be moved to a different module.",
                     403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
             }
+            if (!SameDeclaredText(function.Name, request.Name) || !SameDeclaredText(function.Description, request.Description))
+            {
+                return Fail<ModuleFunction>(
+                    "The name and description of a system-managed function come from its IPermissionDefinitionProvider declaration and cannot be changed here; only the order can.",
+                    403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
+            }
         }
 
-        // 检查代码是否被其他功能使用
+        // 检查代码是否被其他功能使用（大小写不敏感）
         if (function.Code != request.Code)
         {
-            var codeExists = await _moduleFunctionRepository
-                .Where(f => f.Code == request.Code && f.Id != id)
-                .AnyAsync();
+            var codeExists = await IsFunctionCodeTakenAsync(request.Code, exceptId: id);
 
             if (codeExists)
             {
                 return Fail<ModuleFunction>($"Function with code '{request.Code}' already exists", 409, ErrorCodes.VALIDATION_ERROR);
+            }
+
+            if (await IsCodeRenameForbiddenAsync(function.Code, request.Code))
+            {
+                return Fail<ModuleFunction>(
+                    "Only a super administrator can change a permission code: the new code would be granted to everyone who holds this one.",
+                    403, ErrorCodes.FORBIDDEN);
             }
         }
 
@@ -1192,18 +1466,25 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail<ModuleFunction>("Module not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
         }
 
-        // Category needs guarding around the blanket MapTo below:
+        // Category needs guarding:
         // - system-managed rows: category is a code-owned contract (the seeder
-        //   re-asserts it), protected like Code/ModuleId - admin edits ignored;
+        //   re-asserts it); only Order is written for these rows, so admin
+        //   category edits are ignored;
         // - admin-created rows: apply only when the request explicitly provides
         //   a value. A nullable-with-default would silently downgrade Technical
         //   to Business on any update that omits the field, erasing the
         //   warning badge assignment UIs rely on to flag dangerous surfaces.
-        var currentCategory = function.Category;
-        request.MapTo(function);
-        function.Category = function.IsSystemManaged
-            ? currentCategory
-            : request.Category ?? currentCategory;
+        if (function.IsSystemManaged)
+        {
+            // 其余声明字段上面已判定与声明相同；只落排序。
+            function.Order = request.Order;
+        }
+        else
+        {
+            var currentCategory = function.Category;
+            request.MapTo(function);
+            function.Category = request.Category ?? currentCategory;
+        }
         await _moduleFunctionRepository.UpdateAsync(function);
         // 全局清理功能权限缓存，因为功能变更可能影响广泛
         await InvalidateAllCacheAsync();
@@ -1217,6 +1498,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">功能ID</param>
     public async Task<Result> DeleteModuleFunctionAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var function = await _moduleFunctionRepository.FindAsync(id);
         if (function == null)
         {
@@ -1232,9 +1518,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 403, ErrorCodes.IDENTITY_ROLE_SYSTEM_PROTECTED);
         }
 
-        // 检查是否有角色关联
-        var hasRoleFunctions = await _roleFunctionRepository
-            .Where(rf => rf.FunctionId == id)
+        // 检查是否有角色关联。功能是全局行，授权按租户：关联要跨租户数（绕开租户过滤器，软删照旧排除），
+        // 否则调用者看不见别家租户还挂着的授权，删掉之后那些授权指向一行墓碑。
+        var hasRoleFunctions = await _roleFunctionRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(rf => rf.FunctionId == id && !rf.IsDeleted)
             .AnyAsync();
 
         if (hasRoleFunctions)
@@ -1242,9 +1530,10 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return Fail("Cannot delete function with role associations", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        // 检查是否有用户直授关联
-        var hasUserFunctions = await _userFunctionRepository
-            .Where(uf => uf.FunctionId == id)
+        // 检查是否有用户直授关联（同上，跨租户）
+        var hasUserFunctions = await _userFunctionRepository.AsQueryable()
+            .IgnoreQueryFilters()
+            .Where(uf => uf.FunctionId == id && !uf.IsDeleted)
             .AnyAsync();
 
         if (hasUserFunctions)
@@ -1264,6 +1553,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">功能ID</param>
     public async Task<Result> EnableModuleFunctionAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var function = await _moduleFunctionRepository.FindAsync(id);
         if (function == null)
         {
@@ -1284,6 +1578,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">功能ID</param>
     public async Task<Result> DisableModuleFunctionAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var function = await _moduleFunctionRepository.FindAsync(id);
         if (function == null)
         {
@@ -1304,6 +1603,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">模块ID</param>
     public async Task<Result> EnableModuleAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var module = await _moduleRepository.FindAsync(id);
         if (module == null)
         {
@@ -1338,6 +1642,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// <param name="id">模块ID</param>
     public async Task<Result> DisableModuleAsync(Guid id)
     {
+        if (IsCatalogueWriteForbidden())
+        {
+            return Fail(CatalogueIsHostManaged, 403, ErrorCodes.FORBIDDEN);
+        }
+
         var module = await _moduleRepository.FindAsync(id);
         if (module == null)
         {
@@ -1367,130 +1676,242 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
-    /// Reverse permission query: get all roles that have a specific permission
+    /// 谁持有这个码（访问审查的反向问题）。
     /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of roles with the permission</returns>
-    public async Task<Result<IEnumerable<PermissionRoleDto>>> GetPermissionRolesAsync(string permissionName)
+    /// <remarks>
+    /// <para>
+    /// 持有者判定与 <see cref="CheckPermissionAsync"/> 同一套规则，只是从码出发：超管角色成员一律持有
+    /// （检查最前短路，否定行与功能是否生效都不看）；其余人经「授权行启用且功能生效」的角色、或启用的用户直授持有，
+    /// 用户级否定行把他扣掉。「功能是否生效」与 <see cref="FunctionLiveness"/> 同一判据（启用且未退役）。
+    /// </para>
+    /// <para>
+    /// 常数次查询，与角色数、人数无关：功能、授权行、角色（含超管角色识别）、全部相关角色的成员（一次批量）、
+    /// 用户直授 / 否定、范围收窄、用户名。刻意不经每用户权限缓存：缓存按用户分片，反查面要的是此刻库里的事实。
+    /// </para>
+    /// <para>
+    /// ★ 超管角色的识别与 <see cref="IsSuperAdminAsync"/> 同口径：按角色<b>名</b>、在内存里用同一个比较器
+    /// （<see cref="StringComparer.OrdinalIgnoreCase"/>）比，不交给 SQL 折叠大小写。角色表与
+    /// <see cref="IUserRoleService"/> 走同一个 DbContext 的全局过滤器，多租户下两边看见的是同一批角色。
+    /// </para>
+    /// <para>
+    /// ★ 用户名只给持有 <c>user.view</c> 的调用者（超管照常放行）：这个端点的门是 <c>authorization.permission.view</c>，
+    /// 而成批的账号名（包括每一个超管账号）本属于用户管理面。没有 <c>user.view</c> 时名单照样完整，只是只有 id，
+    /// <see cref="PermissionHoldersDto.UserNamesHidden"/> 为 true。没有用户上下文的内部调用照常带用户名。
+    /// </para>
+    /// </remarks>
+    public async Task<Result<PermissionHoldersDto>> GetPermissionHoldersAsync(string permissionName)
     {
         if (string.IsNullOrWhiteSpace(permissionName))
         {
-            return Fail<IEnumerable<PermissionRoleDto>>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+            return Fail<PermissionHoldersDto>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
         }
 
-        // Find the function by code
-        var function = await _moduleFunctionRepository
-            .Where(f => f.Code == permissionName)
-            .FirstOrDefaultAsync();
-
-        if (function == null)
+        // 角色到成员这一跳、超管角色的识别都离不开 Identity。缺了它只能答出直授的那一小撮人，
+        // 漏掉的恰恰是超管与全部经角色持有的人。宁可明说做不到，也不给一份看起来完整的短名单。
+        // 租户范围同理：它是安全边界，缺了它就只能把别家租户的账号一起列出来。
+        if (_userRoleService == null || _roleRepository == null || _userScope == null)
         {
-            return Fail<IEnumerable<PermissionRoleDto>>($"Permission '{permissionName}' not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+            return Fail<PermissionHoldersDto>(
+                "Listing permission holders needs the Identity module's role membership, role lookup and user tenant scope, which are not available.", 501);
         }
 
-        // Find all role-function assignments for this function
-        var roleFunctions = await _roleFunctionRepository
-            .Where(rf => rf.FunctionId == function.Id)
+        // 码大小写不敏感（与运行时检查同口径），所以同一个码可能对应不止一行；展示用写法完全一致的那一行。
+        var requested = permissionName.Trim();
+        var lowered = requested.ToLowerInvariant();
+        var functions = await _moduleFunctionRepository
+            .Where(f => f.Code.ToLower() == lowered)
+            .Select(f => new { f.Id, f.Code, f.Name, f.Category, f.IsEnabled, f.IsRetired })
+            .ToListAsync();
+        if (functions.Count == 0)
+        {
+            return Fail<PermissionHoldersDto>($"Permission '{requested}' not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+        }
+
+        var primary = functions.FirstOrDefault(f => f.Code == requested)
+            ?? functions.FirstOrDefault(f => f.IsEnabled && !f.IsRetired)
+            ?? functions[0];
+        var functionIds = functions.Select(f => f.Id).ToList();
+        var liveIds = functions.Where(f => f.IsEnabled && !f.IsRetired).Select(f => f.Id).ToList();
+
+        // 1. 授权行：行停用的、指向休眠功能的也取，角色视图要把它们标出来。
+        var grants = await _roleFunctionRepository
+            .Where(rf => functionIds.Contains(rf.FunctionId))
+            .Select(rf => new { rf.RoleId, rf.FunctionId, rf.IsEnabled })
             .ToListAsync();
 
-        var result = roleFunctions.Select(rf => new PermissionRoleDto
-        {
-            RoleId = rf.RoleId,
-            IsEnabled = rf.IsEnabled,
-            FunctionId = function.Id,
-            FunctionCode = function.Code,
-            FunctionName = function.Name
-        });
+        // 2. 角色名与超管角色，一次查询。超管角色只能在内存里认：SQL 的 upper() / lower() 在 SQLite 与
+        //    C 排序规则的 PostgreSQL 上只折叠 ASCII，库里的 'général' 折不成 'GÉNÉRAL'，按它预筛会让配置了
+        //    非 ASCII 名字的超管角色整个消失，而 IsSuperAdminAsync 照样认他们是超管。角色表很小，按 (Id, Name) 全取。
+        //    旁路收窄到平台码、而这是一个应用码时，超管角色对它没有特权：按普通角色看它的授权行。
+        var superNames = new HashSet<string>(
+            BypassCovers(requested)
+                ? (_options?.Value.SuperAdminRoles ?? []).Where(n => !string.IsNullOrWhiteSpace(n))
+                : [],
+            StringComparer.OrdinalIgnoreCase);
+        var roles = await _roleRepository
+            .Select(r => new { r.Id, r.Name })
+            .ToListAsync();
+        var roleNames = roles.ToDictionary(r => r.Id, r => r.Name ?? string.Empty);
+        var superRoleIds = roles
+            .Where(r => r.Name != null && superNames.Contains(r.Name))
+            .Select(r => r.Id)
+            .ToHashSet();
 
-        return Ok(result);
+        // 每个角色与这个码的关系：超管角色压过一切，其余看授权行。
+        var states = superRoleIds.ToDictionary(id => id, _ => PermissionRoleGrantState.SuperAdmin);
+        foreach (var roleGrants in grants.GroupBy(g => g.RoleId).Where(g => !states.ContainsKey(g.Key)))
+        {
+            states[roleGrants.Key] = roleGrants.Any(g => g.IsEnabled && liveIds.Contains(g.FunctionId))
+                ? PermissionRoleGrantState.Effective
+                : roleGrants.Any(g => g.IsEnabled)
+                    ? PermissionRoleGrantState.Dormant
+                    : PermissionRoleGrantState.GrantDisabled;
+        }
+
+        // 3. 全部相关角色的成员，一次批量（不起作用的角色也要报成员数）。
+        var membersByRole = states.Count == 0
+            ? new Dictionary<Guid, IEnumerable<Guid>>()
+            : await _userRoleService.GetRoleUserIdsAsync(states.Keys.ToList()) ?? new Dictionary<Guid, IEnumerable<Guid>>();
+        IEnumerable<Guid> MembersOf(Guid roleId) => membersByRole.TryGetValue(roleId, out var ids) ? ids : [];
+
+        // 4. 用户直授 / 否定：只有生效功能上的启用行参与解析（GetExplicitUserPermissionNamesAsync 同判据）。
+        var userRows = liveIds.Count == 0
+            ? []
+            : await _userFunctionRepository
+                .Where(uf => liveIds.Contains(uf.FunctionId) && uf.IsEnabled)
+                .Select(uf => new { uf.UserId, uf.IsGranted })
+                .ToListAsync();
+        var direct = userRows.Where(r => r.IsGranted).Select(r => r.UserId).ToHashSet();
+        var denied = userRows.Where(r => !r.IsGranted).Select(r => r.UserId).ToHashSet();
+
+        // 5. 持有路径：超管角色在前，其后是生效的授予角色，同组按名称。
+        var roleOrder = states
+            .OrderBy(s => s.Value)
+            .ThenBy(s => roleNames.GetValueOrDefault(s.Key, string.Empty), StringComparer.OrdinalIgnoreCase)
+            .Select(s => s.Key)
+            .ToList();
+        var rolesByUser = new Dictionary<Guid, List<Guid>>();
+        foreach (var roleId in roleOrder.Where(id => states[id] is PermissionRoleGrantState.SuperAdmin or PermissionRoleGrantState.Effective))
+        {
+            foreach (var userId in MembersOf(roleId))
+            {
+                if (!rolesByUser.TryGetValue(userId, out var via))
+                {
+                    rolesByUser[userId] = via = [];
+                }
+                via.Add(roleId);
+            }
+        }
+
+        var superAdmins = superRoleIds.SelectMany(MembersOf).ToHashSet();
+
+        // 否定行只对非超管有效：超管在检查最前短路。
+        var holderIds = rolesByUser.Keys.Union(direct)
+            .Where(id => superAdmins.Contains(id) || !denied.Contains(id))
+            .ToList();
+        var deniedIds = denied.Where(id => !superAdmins.Contains(id)).ToList();
+
+        // 6. 收窄到调用者范围内、账号仍存在的那些，调用者看得了账号时顺带取用户名。
+        var withNames = await CallerMayReadUserNamesAsync();
+        var accounts = await ResolveVisibleAccountsAsync(
+            holderIds.Concat(deniedIds).Concat(states.Keys.SelectMany(MembersOf)).ToHashSet(), _userScope, withNames);
+
+        return Ok(new PermissionHoldersDto
+        {
+            FunctionId = primary.Id,
+            Code = primary.Code,
+            Name = primary.Name,
+            Category = primary.Category,
+            IsEnabled = primary.IsEnabled,
+            IsRetired = primary.IsRetired,
+            IsInEffect = liveIds.Count > 0,
+            UserNamesHidden = !withNames,
+            Roles = roleOrder.Select(roleId => new PermissionHolderRoleDto
+            {
+                Id = roleId,
+                Name = roleNames.GetValueOrDefault(roleId, string.Empty),
+                State = states[roleId],
+                MemberCount = MembersOf(roleId).Count(accounts.ContainsKey)
+            }).ToList(),
+            Users = holderIds
+                .Where(accounts.ContainsKey)
+                .Select(userId => new PermissionHolderUserDto
+                {
+                    Id = userId,
+                    UserName = accounts[userId],
+                    IsSuperAdmin = superAdmins.Contains(userId),
+                    IsDirect = direct.Contains(userId),
+                    Roles = rolesByUser.TryGetValue(userId, out var via)
+                        ? via.Select(roleId => new PermissionHolderRoleRefDto
+                        {
+                            Id = roleId,
+                            Name = roleNames.GetValueOrDefault(roleId, string.Empty)
+                        }).ToList()
+                        : []
+                })
+                .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(u => u.Id)
+                .ToList(),
+            DeniedUsers = deniedIds
+                .Where(accounts.ContainsKey)
+                .Select(userId => new PermissionDeniedUserDto { Id = userId, UserName = accounts[userId] })
+                .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(u => u.Id)
+                .ToList()
+        });
     }
 
     /// <summary>
-    /// Reverse permission query: get all user IDs that have a specific
-    /// permission, via roles or via direct UserFunction grants. Direct-grant
-    /// users carry an empty RoleIds list.
+    /// 目标账号是否在调用者的租户范围内（范围提供者缺席时不判）。
     /// </summary>
-    /// <param name="permissionName">Permission name (function code)</param>
-    /// <returns>List of users with the permission</returns>
-    public async Task<Result<IEnumerable<PermissionUserDto>>> GetPermissionUsersAsync(string permissionName)
+    /// <remarks>
+    /// 按用户 id 读权限的两个管理端入口（检查某人有没有某码、列出某人的有效权限）此前接受任意 id：
+    /// 用户-角色关联不按租户过滤，租户 A 的管理员借此读得到别家租户账号的权限，
+    /// 越界的计算结果还曾写进那个人自己读的缓存。越界与不存在同一个回答，口径同 <see cref="UserTenantScope"/>。
+    /// </remarks>
+    private async Task<bool> IsUserInCallerScopeAsync(Guid userId)
+        => _userScope == null || await _userScope.ContainsAsync(userId);
+
+    /// <summary>
+    /// 调用者能否看到持有者的用户名：持有 <c>user.view</c>（超管照常放行），或者没有用户上下文（框架内部调用）。
+    /// </summary>
+    private async Task<bool> CallerMayReadUserNamesAsync()
     {
-        if (string.IsNullOrWhiteSpace(permissionName))
+        var callerId = CurrentUser?.Id;
+        if (callerId == null || callerId == Guid.Empty) return true;
+        return await CheckPermissionAsync(callerId.Value, UserViewPermission);
+    }
+
+    /// <summary>
+    /// 把一批用户 id 收窄到调用者租户范围内、账号仍存在的那些；<paramref name="withNames"/> 为 true 时取用户名，否则用户名留空。
+    /// </summary>
+    /// <remarks>
+    /// 用户表不按租户过滤（登录链路要跨租户找人），范围由 <see cref="IUserTenantScopeProvider"/> 补；
+    /// 已软删的账号登不进来，不算持有者。用户仓储缺席时不判存在、用户名留空。
+    /// </remarks>
+    private async Task<Dictionary<Guid, string>> ResolveVisibleAccountsAsync(
+        IReadOnlyCollection<Guid> userIds, IUserTenantScopeProvider userScope, bool withNames)
+    {
+        var inScope = userIds.Count > 0 ? await userScope.FilterAsync(userIds) : userIds;
+        if (inScope.Count == 0)
         {
-            return Fail<IEnumerable<PermissionUserDto>>("Permission name cannot be empty", 400, ErrorCodes.VALIDATION_ERROR);
+            return new Dictionary<Guid, string>();
         }
 
-        if (_userRoleService == null)
+        if (_userRepository == null)
         {
-            return Fail<IEnumerable<PermissionUserDto>>("User role service is not available", 503, ErrorCodes.INTERNAL_SERVER_ERROR);
+            return inScope.Distinct().ToDictionary(id => id, _ => string.Empty);
         }
 
-        // Find the function by code
-        var function = await _moduleFunctionRepository
-            .Where(f => f.Code == permissionName)
-            .FirstOrDefaultAsync();
-
-        if (function == null)
-        {
-            return Fail<IEnumerable<PermissionUserDto>>($"Permission '{permissionName}' not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
-        }
-
-        // Find all roles that have this function (enabled only)
-        var roleIds = await _roleFunctionRepository
-            .Where(rf => rf.FunctionId == function.Id && rf.IsEnabled)
-            .Select(rf => rf.RoleId)
-            .Distinct()
-            .ToListAsync();
-
-        // For each role, get the users
-        var userRoleMap = new Dictionary<Guid, List<Guid>>(); // userId -> roleIds
-        foreach (var roleId in roleIds)
-        {
-            var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
-            foreach (var userId in userIds)
-            {
-                if (!userRoleMap.TryGetValue(userId, out var roles))
-                {
-                    roles = new List<Guid>();
-                    userRoleMap[userId] = roles;
-                }
-                roles.Add(roleId);
-            }
-        }
-
-        // Users holding the function via a direct grant (no role involved).
-        // They appear with an empty RoleIds list unless a role also grants it.
-        var directUserIds = await _userFunctionRepository
-            .Where(uf => uf.FunctionId == function.Id && uf.IsEnabled && uf.IsGranted)
-            .Select(uf => uf.UserId)
-            .Distinct()
-            .ToListAsync();
-        foreach (var userId in directUserIds)
-        {
-            if (!userRoleMap.ContainsKey(userId))
-            {
-                userRoleMap[userId] = new List<Guid>();
-            }
-        }
-
-        // User-level deny rows override every grant path - drop those users
-        // so the reverse query mirrors the actual resolution semantics.
-        var deniedUserIds = await _userFunctionRepository
-            .Where(uf => uf.FunctionId == function.Id && uf.IsEnabled && !uf.IsGranted)
-            .Select(uf => uf.UserId)
-            .Distinct()
-            .ToListAsync();
-        foreach (var userId in deniedUserIds)
-        {
-            userRoleMap.Remove(userId);
-        }
-
-        var result = userRoleMap.Select(kvp => new PermissionUserDto
-        {
-            UserId = kvp.Key,
-            RoleIds = kvp.Value
-        });
-
-        return Ok(result);
+        var idList = inScope.ToList();
+        var existing = _userRepository.Where(u => idList.Contains(u.Id));
+        return withNames
+            ? await existing
+                .Select(u => new { u.Id, u.UserName })
+                .ToDictionaryAsync(u => u.Id, u => u.UserName ?? string.Empty)
+            : await existing
+                .Select(u => u.Id)
+                .ToDictionaryAsync(id => id, _ => string.Empty);
     }
 
     /// <summary>
@@ -1560,12 +1981,20 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// </summary>
     public async Task<Result<AccessProfileDto>> GetAccessProfileAsync(Guid userId)
     {
+        // 与 GetUserPermissionNamesAsync 同一个结果，只是超管判定只做一次（它是一次不经缓存的角色查询，
+        // 而访问画像在每次进管理端时都要取）。
         var isSuperAdmin = await IsSuperAdminAsync(userId);
-        var permissions = await GetUserPermissionNamesAsync(userId);
+        var permissions = !isSuperAdmin
+            ? await GetExplicitUserPermissionNamesAsync(userId)
+            : BypassCoversEveryCode
+                ? await GetSuperAdminCatalogueAsync()
+                : await GetNarrowedSuperAdminPermissionNamesAsync(userId);
         return Ok(new AccessProfileDto
         {
             IsSuperAdmin = isSuperAdmin,
             Permissions = permissions.ToList(),
+            // 只在收窄时下发：前端据此停止按 isSuperAdmin 放行，只认这份列表。默认模式不写这个字段。
+            SuperAdminBypassScope = BypassCoversEveryCode ? null : _bypassPolicy!.Scope,
         });
     }
 
@@ -1783,17 +2212,131 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     }
 
     /// <summary>
+    /// 模块码是否已被（另一个）模块占用，大小写不敏感。
+    /// </summary>
+    /// <remarks>
+    /// ★ 判重必须与运行时同一个比较口径。权限检查、播种器、持有者反查都按大小写不敏感认码，
+    /// 而 SQL 的 <c>==</c> 与唯一索引在 PostgreSQL / SQLite 上区分大小写：此前建得出与系统码只差大小写的行，
+    /// 播种器把两行收进同一个不区分大小写的字典时抛异常、整轮跳过（之后每次启动都是），
+    /// 功能码上更能借改码拿到一个系统码的「别名」，运行时按它放行。码按约定是 ASCII，
+    /// 两侧都降成小写比较（服务端 <c>LOWER()</c>，客户端 <c>ToLowerInvariant</c>）在各数据库上同义。
+    /// </remarks>
+    private Task<bool> IsModuleCodeTakenAsync(string code, Guid? exceptId = null)
+    {
+        var lowered = (code ?? string.Empty).ToLowerInvariant();
+        return _moduleRepository
+            .Where(m => m.Code.ToLower() == lowered && (exceptId == null || m.Id != exceptId))
+            .AnyAsync();
+    }
+
+    /// <summary>
+    /// 功能码是否已被（另一个）功能占用，大小写不敏感（理由见 <see cref="IsModuleCodeTakenAsync"/>）。
+    /// </summary>
+    private Task<bool> IsFunctionCodeTakenAsync(string code, Guid? exceptId = null)
+    {
+        var lowered = (code ?? string.Empty).ToLowerInvariant();
+        return _moduleFunctionRepository
+            .Where(f => f.Code.ToLower() == lowered && (exceptId == null || f.Id != exceptId))
+            .AnyAsync();
+    }
+
+    /// <summary>
+    /// 非超管能否改一个功能的码：不能（只改大小写除外）。
+    /// </summary>
+    /// <remarks>
+    /// 角色授权与用户直授按功能 id 挂在这一行上，改码等于把新码一次授给这一行的每一个持有者，
+    /// 却不经过「只能授出自己持有的码」那道护栏。新码在判重之后不对应任何现存的行，任何非超管都不可能持有它，
+    /// 所以这里就是「只有超管能改码」。没有用户上下文的内部调用不受限。
+    /// 只差大小写的改动不改变任何人的权限（码处处大小写不敏感），照常放行。
+    /// </remarks>
+    private async Task<bool> IsCodeRenameForbiddenAsync(string currentCode, string newCode)
+    {
+        if (string.Equals(currentCode, newCode, StringComparison.OrdinalIgnoreCase)) return false;
+
+        var callerId = CurrentUser?.Id;
+        if (callerId == null || callerId == Guid.Empty) return false;
+        return !await IsSuperAdminAsync(callerId.Value);
+    }
+
+    /// <summary>
+    /// 把 <paramref name="moduleId"/> 挂到 <paramref name="parentId"/> 下会不会成环；会则返回英文说明，不会返回 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 只拦「自己做自己的父」不够：把模块挂到自己的子孙下面，同样造出一个谁都不是根的环。
+    /// 环一旦落库，级联启停的遍历永不结束（事务与连接一直占着），模块树里整组连同功能一起消失，
+    /// 而模块列表返回的实体带着关系修复填进去的 Children，序列化溢出深度、整页 500，界面上再也修不回来。
+    /// 从新父模块沿父链向上走，碰到自己就是挂进了自己的子树；碰到走过的节点说明那条链本身已经成环
+    /// （守卫之前留下的数据），挂上去同样从树上不可达，一并拒绝。
+    /// 模块表是一张小的目录表，一次读出全部父子关系在内存里走，比逐级查询便宜，也不受链长影响。
+    /// </remarks>
+    private async Task<string?> DescribeParentCycleAsync(Guid moduleId, Guid parentId)
+    {
+        var parentOf = await _moduleRepository
+            .Select(m => new { m.Id, m.ParentId })
+            .ToDictionaryAsync(m => m.Id, m => m.ParentId);
+
+        var visited = new HashSet<Guid>();
+        Guid? current = parentId;
+        while (current.HasValue)
+        {
+            if (current.Value == moduleId)
+            {
+                return "Module cannot be moved under itself or one of its descendants";
+            }
+
+            if (!visited.Add(current.Value))
+            {
+                return "The parent module's ancestry is cyclic; fix its parent first";
+            }
+
+            current = parentOf.GetValueOrDefault(current.Value);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 模块是否在一个父链环上（沿父链向上能走回自己）。只在内存里的一批模块上判断。
+    /// </summary>
+    private static bool IsOnParentCycle(FunctionModule module, IReadOnlyDictionary<Guid, FunctionModule> modulesById)
+    {
+        var visited = new HashSet<Guid>();
+        var current = module.ParentId;
+        while (current.HasValue && visited.Add(current.Value))
+        {
+            if (current.Value == module.Id)
+            {
+                return true;
+            }
+
+            current = modulesById.TryGetValue(current.Value, out var parent) ? parent.ParentId : null;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 级联设置模块及其所有子模块的启用状态，同时更新关联功能
     /// </summary>
+    /// <remarks>
+    /// 遍历按模块去重：写入口已拒绝成环，但库里可能留着守卫之前的环数据，
+    /// 没有去重的广度优先遍历在环上永不结束。
+    /// </remarks>
     private async Task<List<Guid>> SetModuleEnabledCascadeAsync(Guid moduleId, bool enabled)
     {
         var affectedIds = new List<Guid>();
+        var visited = new HashSet<Guid>();
         var queue = new Queue<Guid>();
         queue.Enqueue(moduleId);
 
         while (queue.Count > 0)
         {
             var currentId = queue.Dequeue();
+            if (!visited.Add(currentId))
+            {
+                continue;
+            }
+
             affectedIds.Add(currentId);
 
             // 更新当前模块
@@ -1840,12 +2383,26 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// For narrow scopes (single-function toggle, single-role change),
     /// prefer the precise variants below to avoid invalidating every
     /// active user's cache entry.
+    /// 此刻清一遍，身处事务时提交后再清一遍（见 <see cref="PermissionCacheInvalidation"/>）。
     /// </remarks>
     private async Task InvalidateAllCacheAsync()
     {
         if (_functionAuthCache != null)
         {
-            await _functionAuthCache.ClearAllAsync();
+            await PermissionCacheInvalidation.RunAsync(
+                _functionAuthCache, cache => cache.ClearAllAsync(), UnitOfWorkManager, PostCommitActionQueue, Logger, "all users");
+        }
+    }
+
+    /// <summary>
+    /// 只作废超管全功能目录（新增一个启用的功能时：它属于目录，不属于任何人的显式授权）。
+    /// </summary>
+    private async Task InvalidateSuperAdminCatalogueAsync()
+    {
+        if (_functionAuthCache != null)
+        {
+            await PermissionCacheInvalidation.RunAsync(
+                _functionAuthCache, cache => cache.InvalidateSuperAdminCatalogueAsync(), UnitOfWorkManager, PostCommitActionQueue, Logger, "the super-admin catalogue");
         }
     }
 
@@ -1860,14 +2417,19 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// </summary>
     private async Task InvalidateCacheForFunctionAsync(Guid functionId)
     {
-        if (_functionAuthCache == null || _userRoleService == null)
+        if (_functionAuthCache == null || _userRoleService == null || _multiTenancyEnabled)
         {
             // Without the user-role lookup we can't compute the precise
             // user set, so fall back to the safe global clear.
+            // Multi-tenant: the function row is global but the grant rows below
+            // are tenant-filtered, so the precise set would only cover the
+            // caller's tenant and every other tenant's holders would keep a
+            // stale entry until the TTL. A function toggle is rare; clear all.
             await InvalidateAllCacheAsync();
             return;
         }
 
+        HashSet<Guid> affectedUserIds;
         try
         {
             // (a) Direct UserFunction grants on the function itself.
@@ -1883,7 +2445,7 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                 .Select(rf => rf.RoleId)
                 .ToListAsync();
 
-            var affectedUserIds = new HashSet<Guid>(directGrantUserIds);
+            affectedUserIds = new HashSet<Guid>(directGrantUserIds);
             foreach (var roleId in roleFunctionRoleIds.Distinct())
             {
                 var roleUsers = await _userRoleService.GetRoleUserIdsAsync(roleId);
@@ -1892,26 +2454,37 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
                     foreach (var uid in roleUsers) affectedUserIds.Add(uid);
                 }
             }
-
-            if (affectedUserIds.Count > 0)
-            {
-                await _functionAuthCache.RemoveUserPermissionNamesAsync(affectedUserIds);
-            }
-
-            // The super-admin catalogue is derived from "all enabled
-            // functions" - any function enable/disable affects it.
-            await _functionAuthCache.InvalidateSuperAdminCatalogueAsync();
         }
         catch (Exception ex)
         {
             // Precise invalidation is an optimisation, not a correctness
-            // guarantee - if anything goes wrong (DB transient error etc.),
-            // fall back to a global clear so we never leave stale entries.
+            // guarantee - if the holder set cannot be computed (DB transient
+            // error etc.), fall back to a global clear so we never leave stale entries.
             Logger.LogWarning(ex,
                 "Precise cache invalidation failed for function {FunctionId}; falling back to global clear.",
                 functionId);
             await InvalidateAllCacheAsync();
+            return;
         }
+
+        // The super-admin catalogue is derived from "all enabled
+        // functions" - any function enable/disable affects it.
+        // A failed removal falls back to a global clear inside the helper.
+        await PermissionCacheInvalidation.RunAsync(
+            _functionAuthCache,
+            async cache =>
+            {
+                if (affectedUserIds.Count > 0)
+                {
+                    await cache.RemoveUserPermissionNamesAsync(affectedUserIds);
+                }
+
+                await cache.InvalidateSuperAdminCatalogueAsync();
+            },
+            UnitOfWorkManager,
+            PostCommitActionQueue,
+            Logger,
+            $"holders of function {functionId}");
     }
 
     /// <summary>
@@ -1934,6 +2507,11 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
     /// 清除角色下所有用户的权限缓存
     /// 当角色功能发生变更时调用
     /// </summary>
+    /// <remarks>
+    /// 此刻清一遍，身处事务时提交后再清一遍；按人删除失败退到全清，全清也失败则抛出
+    /// （见 <see cref="PermissionCacheInvalidation"/>）。此前失败被吞成一条警告、接口照样报成功，
+    /// 被撤销的码在缓存期内继续放行。成员查不出来时同样退到全清：不知道该删谁，就不能假装删过了。
+    /// </remarks>
     /// <param name="roleId">角色ID</param>
     private async Task InvalidateRoleCacheAsync(Guid roleId)
     {
@@ -1942,21 +2520,30 @@ public class FunctionAuthorizationService : ApplicationService, IFunctionAuthori
             return;
         }
 
+        List<Guid> userIds;
         try
         {
-            // 获取该角色的所有用户
-            var userIds = await _userRoleService.GetRoleUserIdsAsync(roleId);
-            if (userIds != null && userIds.Any())
-            {
-                // 批量清除用户权限缓存
-                await _functionAuthCache.RemoveUserPermissionNamesAsync(userIds);
-            }
+            userIds = (await _userRoleService.GetRoleUserIdsAsync(roleId))?.ToList() ?? [];
         }
         catch (Exception ex)
         {
-            // 缓存失效失败不应影响主业务流程，权限缓存会在过期后自动刷新
-            Logger.LogWarning(ex, "Failed to invalidate permission cache for role {RoleId}", roleId);
+            Logger.LogWarning(ex, "Could not list the members of role {RoleId}; clearing the whole permission cache instead.", roleId);
+            await InvalidateAllCacheAsync();
+            return;
         }
+
+        if (userIds.Count == 0)
+        {
+            return;
+        }
+
+        await PermissionCacheInvalidation.RunAsync(
+            _functionAuthCache,
+            cache => cache.RemoveUserPermissionNamesAsync(userIds),
+            UnitOfWorkManager,
+            PostCommitActionQueue,
+            Logger,
+            $"members of role {roleId}");
     }
 
     /// <summary>

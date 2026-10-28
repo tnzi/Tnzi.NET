@@ -44,22 +44,14 @@ public class AgentFactory : IAgentFactory
         Guid? agentId = null,
         CancellationToken ct = default)
     {
-        // 1. 解析 Provider 配置
-        var resolvedProvider = providerName ?? _options.CurrentValue.DefaultProvider;
-
-        if (!_options.CurrentValue.Providers.TryGetValue(resolvedProvider, out var providerConfig))
-        {
-            throw new InvalidOperationException($"AI provider '{resolvedProvider}' is not configured");
-        }
-
-        if (!providerConfig.Enabled)
-        {
-            throw new InvalidOperationException($"AI provider '{resolvedProvider}' is disabled");
-        }
-
-        // 2. 获取 MEAI ChatClient
-        var meaiChatClient = _chatClientFactory.GetChatClient(providerName, model);
-        var resolvedModel = model ?? providerConfig.DefaultModel;
+        // 1. 获取 MEAI ChatClient。提供商的解析与校验只在工厂里做一次：调用方租户的启用行 > System 启用行 >
+        // 已启用的 AI:Providers 配置条目，名字不存在或已禁用时由工厂抛出。
+        // ★ 这里不能再先查一遍 AI:Providers：管理端登记的提供商（Agent 编辑器的下拉框把它们列在最前面）只存在于库里，
+        // 那道预检让绑定它们的 Agent 每次对话都失败；库里重新启用一个配置里 Enabled=false 的同名条目，也照样被拒。
+        // 空白与未指定同义：省略 provider 的 YAML 定义在实体里存的是空串（列非空），它的意思是「用默认提供商」
+        var requestedProvider = string.IsNullOrWhiteSpace(providerName) ? null : providerName;
+        var resolvedProvider = requestedProvider ?? _options.CurrentValue.DefaultProvider;
+        var meaiChatClient = _chatClientFactory.GetChatClient(requestedProvider, model);
 
         // 3. 解析工具（C# + MCP 合并，按用户权限过滤；toolNames 提供 per-tool 授权/请求覆盖）
         var toolNamesList = toolNames as IReadOnlyCollection<string> ?? toolNames?.ToList();
@@ -101,7 +93,7 @@ public class AgentFactory : IAgentFactory
 
         _logger.LogDebug(
             "AgentExecutor created: Name={Name}, Provider={Provider}, Model={Model}, ToolCount={ToolCount}",
-            executorOptions.Name, resolvedProvider, resolvedModel, tools?.Count ?? 0);
+            executorOptions.Name, resolvedProvider, model ?? "(provider default)", tools?.Count ?? 0);
 
         return agent;
     }

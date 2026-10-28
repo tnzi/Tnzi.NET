@@ -17,6 +17,7 @@ const fullConfig: AuthConfigDto = {
   codeLoginViaSms: false,
   codeLoginViaEmail: true,
   enableRegistration: false,
+  registerViaPassword: false,
   registerViaSms: false,
   registerViaEmail: false,
   enablePasswordRecovery: true,
@@ -82,7 +83,54 @@ describe('mapAuthConfig', () => {
   })
 })
 
+describe('mapAuthConfig - each code flow reads its own switches', () => {
+  // The login stack's register module is code-based (quick registration): it
+  // always sends a code first. `enableRegistration` is the union that also
+  // covers password self-registration, which no built-in module offers.
+  it('offers sign-up only when a quick-registration channel is open', () => {
+    const passwordOnly = mapAuthConfig({ ...fullConfig, enableRegistration: true, registerViaPassword: true })
+    expect(passwordOnly.register).toBe(false)
+
+    const byEmail = mapAuthConfig({ ...fullConfig, enableRegistration: true, registerViaEmail: true })
+    expect(byEmail.register).toBe(true)
+    expect(byEmail.registerChannels).toEqual({ sms: false, email: true })
+  })
+
+  it('takes the sign-up and recovery channels from their own flags, not from code sign-in', () => {
+    const f = mapAuthConfig({
+      ...fullConfig,
+      codeLoginViaSms: true,
+      codeLoginViaEmail: true,
+      enableRegistration: true,
+      registerViaSms: true,
+      registerViaEmail: false,
+      recoveryViaEmail: true,
+      recoveryViaSms: false,
+    })
+    expect(f.codeChannels).toEqual({ sms: true, email: true })
+    expect(f.registerChannels).toEqual({ sms: true, email: false })
+    expect(f.recoveryChannels).toEqual({ sms: false, email: true })
+  })
+
+  it('keeps recovery reachable on a deployment with code sign-in off', () => {
+    const f = mapAuthConfig({ ...fullConfig, enableCodeLogin: false, codeLoginViaSms: false, codeLoginViaEmail: false })
+    expect(f.passwordRecovery).toBe(true)
+    expect(f.recoveryChannels).toEqual({ sms: false, email: true })
+  })
+})
+
 describe('mergeFeatures', () => {
+  it('shallow-merges the sign-up and recovery channel overrides', () => {
+    const merged = mergeFeatures(DEFAULT_LOGIN_FEATURES, {
+      registerChannels: { sms: false },
+      recoveryChannels: { email: false },
+    })
+    expect(merged.registerChannels).toEqual({ sms: false, email: true })
+    expect(merged.recoveryChannels).toEqual({ sms: true, email: false })
+    expect(DEFAULT_LOGIN_FEATURES.registerChannels).toEqual({ sms: true, email: true })
+    expect(DEFAULT_LOGIN_FEATURES.recoveryChannels).toEqual({ sms: true, email: true })
+  })
+
   it('consumer override wins; nested groups shallow-merge', () => {
     const merged = mergeFeatures(DEFAULT_LOGIN_FEATURES, { register: false, codeChannels: { sms: false } })
     expect(merged.register).toBe(false)

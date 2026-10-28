@@ -13,6 +13,9 @@ namespace Tnzi.Storage;
 /// 因为那批端点长在本模块的 <c>files</c> / <c>admin/files</c> 路由上、没有搬走。
 /// </remarks>
 [DependsOn(typeof(EFCore.EFCoreModule))]
+[SuppressDependencyAudit(
+    "Quota allowance source: the defaults-only fallback is registered in PostConfigureServices, and the Workspace sub-module (or the consumer) registers the real one during Configure",
+    IgnoredServiceType = typeof(IStorageAllowanceProvider))]
 public class StorageModule : TnziApplicationModule
 {
     /// <summary>
@@ -46,8 +49,10 @@ public class StorageModule : TnziApplicationModule
         // 否则 Kestrel 默认 30MB（IIS 同样有默认上限）会在 FileStorageService 的
         // MaxFileSize 校验之前就把更大的请求体以不透明的 413 拒绝，使配置的上限
         // （默认 100MB）形同虚设。多租户/分片上传不受影响（分片走小请求）。
+        // ★ 这里只认启动时的配置（设置中心的值此刻还没进 IConfiguration）。上传端点自己经
+        //   [StorageUploadLimit] 按 MaxFileSize 的当前值逐请求再设一次，设置中心里调大调小对它们立即生效。
         var maxFileSize = context.Configuration.GetValue<long?>("Storage:MaxFileSize") ?? (100L * 1024 * 1024);
-        var bodyLimit = maxFileSize + (1L * 1024 * 1024); // 预留 multipart 边界/表单字段的余量
+        var bodyLimit = maxFileSize + StorageUploadLimitAttribute.Allowance; // 预留 multipart 边界/表单字段的余量
         services.Configure<KestrelServerOptions>(o => o.Limits.MaxRequestBodySize = bodyLimit);
         services.Configure<IISServerOptions>(o => o.MaxRequestBodySize = bodyLimit);
         services.Configure<FormOptions>(o => o.MultipartBodyLengthLimit = bodyLimit);
@@ -81,6 +86,9 @@ public class StorageModule : TnziApplicationModule
         // 走不了 IFileStorageService.GetAsync 那条「这个人读」的路。契约同样在核心。
         services.TryAddScoped<IFileContentReader, FileContentReader>();
 
+        // 一个范围此刻占了多少字节（按存储量计费的一方在后台每天问一次）。契约同样在核心。
+        services.TryAddScoped<IStorageUsageReader, StorageUsageReader>();
+
         // 访问令牌签名器(单例:密钥构造时解析一次)。让私密文件能被 <img src> 渲染 ——
         // 浏览器发起的资源请求带不了 Authorization 头。
         services.TryAddSingleton<IFileUrlSigner, FileUrlSigner>();
@@ -96,6 +104,14 @@ public class StorageModule : TnziApplicationModule
         // [FileField(Public = true)] 字段清单（反射结果缓存，故为单例）。
         // 供历史数据回填用：字段声明只对之后写入的引用生效。
         services.TryAddSingleton<IPublicFileFieldResolver, PublicFileFieldResolver>();
+
+        // 按用户的存储配额：每条写路径在交出字节之前问它。配额来源（IStorageAllowanceProvider）的默认实现
+        // 在 PostConfigureServicesAsync 里补上，好让工作区子模块与消费方在配置阶段注册的那份先到先得。
+        services.AddScoped<IStorageQuotaService, StorageQuotaService>();
+
+        // 系统身份放掉文件的隐式持有（文件空间的永久删除 / 回收站过期清除用）。独立成服务而不挂在清理服务上，
+        // 理由见 IFileHoldService：清理服务驱动子模块的贡献者，贡献者又要调它，放在一起是一个依赖环。
+        services.AddScoped<IFileHoldService, FileHoldService>();
 
         // 注册文件存储服务
         services.AddScoped<IFileStorageService, FileStorageService>();
@@ -134,10 +150,49 @@ public class StorageModule : TnziApplicationModule
 
         // 注册文件清理服务
         services.AddScoped<IFileCleanupService, FileCleanupService>();
+        // 孤立引用清理的扫描位置要跨轮次活着（每轮清理是一个新作用域），所以是单例。
+        services.AddSingleton<OrphanReferenceScanCursor>();
 
         // 注册文件清理后台任务（定时执行）
         services.AddHostedService<FileCleanupBackgroundService>();
 
         return Task.CompletedTask;
+    }
+
+    public override Task PostConfigureServicesAsync(ServiceConfigurationContext context)
+    {
+        // 配额来源的回退：只读 Storage:Quota:DefaultUserAllowanceBytes。★ 放在 PostConfigure 而不是 Configure：
+        // 工作区子模块（LoadOrder 更高）在 Configure 阶段注册它的覆盖表实现，父模块在 Configure 里 TryAdd 会抢先占位，
+        // 子模块的那份就永远解析不到，而配额照常工作、只是按用户覆盖安静地失效。
+        context.Services.TryAddScoped<IStorageAllowanceProvider, OptionsStorageAllowanceProvider>();
+        return Task.CompletedTask;
+    }
+
+    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
+    {
+        EnsureFileFieldHostsHaveGuidKeys(context.ServiceProvider);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 已注册的实体里有 <c>[FileField]</c> 长在非 Guid 主键上就拒绝启动，逐个点名（理由见 <see cref="FileFieldHostKeyGuard"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 引用追踪关闭时不查：那时 <c>[FileField]</c> 本来就不起作用。实体清单来自 EFCore 的实体管理器
+    /// （它在 EFCore 模块的初始化里建好，本模块依赖 EFCore，初始化排在它之后）。
+    /// </remarks>
+    private static void EnsureFileFieldHostsHaveGuidKeys(IServiceProvider provider)
+    {
+        var options = provider.GetService<IOptionsMonitor<StorageOptions>>()?.CurrentValue;
+        if (options is not { EnableFileReference: true })
+            return;
+
+        var entityManager = provider.GetService<IEntityManager>();
+        if (entityManager == null)
+            return;
+
+        var unsupported = FileFieldHostKeyGuard.FindUnsupportedHosts(entityManager.GetAllEntityTypes());
+        if (unsupported.Count > 0)
+            throw new InvalidOperationException(FileFieldHostKeyGuard.DescribeUnsupportedHosts(unsupported));
     }
 }

@@ -98,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   NModal, NTabs, NTabPane, NButton, NForm, NFormItem, NInput, NPagination, NRadioButton, NRadioGroup,
 } from 'naive-ui'
@@ -134,9 +134,10 @@ const form = ref({
   roleIds: [] as string[],
   userIds: [] as string[],
 })
-const rules: FormRules = {
-  content: [{ required: true, message: 'Content is required', trigger: 'blur' }],
-}
+// Computed so the message follows the active locale (it may land after setup).
+const rules = computed<FormRules>(() => ({
+  content: [{ required: true, whitespace: true, message: t('contentRequired'), trigger: 'blur' }],
+}))
 
 // Role / user pickers reuse the shared TRoleSelector / TUserSelector (the
 // selector factory handles debounced remote search + retaining the labels of
@@ -196,7 +197,12 @@ async function loadHistory(): Promise<void> {
 }
 
 async function handleSend(): Promise<void> {
-  await formRef.value?.validate()
+  // An invalid form is already marked at its fields; validate() rejects for it.
+  try {
+    await formRef.value?.validate()
+  } catch {
+    return
+  }
 
   // Target selection is validated manually (the picker is conditional, so a
   // form rule on roleIds/userIds would fire for the hidden field too).

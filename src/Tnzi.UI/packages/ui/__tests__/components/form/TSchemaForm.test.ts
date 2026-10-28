@@ -181,3 +181,92 @@ describe('TSchemaForm - required fields validate, not just mark', () => {
     expect(await host!.validate()).toBe(true)
   })
 })
+
+describe('TSchemaForm - date fields write the shape they read', () => {
+  // NDatePicker answers with the local midnight of the picked day in epoch
+  // milliseconds. The backend binds date fields to DateTime, which a JSON number
+  // is not, so a form that forwarded its model was refused with 400.
+  it('writes a picked day back as a local calendar date (YYYY-MM-DD)', async () => {
+    const { NDatePicker } = await import('naive-ui')
+    const model: Record<string, unknown> = { birthday: '1990-05-17' }
+    const wrapper = mount(TSchemaForm, {
+      props: { schema: [{ key: 'birthday', type: 'date', label: 'Birthday' }], model },
+    })
+    const picker = wrapper.findComponent(NDatePicker)
+    // The picker is fed the stored calendar date as that local day.
+    expect(picker.props('value')).toBe(new Date(1990, 4, 17).getTime())
+
+    picker.vm.$emit('update:value', new Date(2026, 0, 31).getTime())
+    expect(model.birthday).toBe('2026-01-31')
+
+    picker.vm.$emit('update:value', null)
+    expect(model.birthday).toBeNull()
+  })
+
+  it('leaves an untouched value exactly as it arrived', () => {
+    const model: Record<string, unknown> = { expiredAt: '2026-12-31T23:59:59Z' }
+    mount(TSchemaForm, {
+      props: { schema: [{ key: 'expiredAt', type: 'date', label: 'Expires' }], model },
+    })
+    expect(model.expiredAt).toBe('2026-12-31T23:59:59Z')
+  })
+})
+
+describe('TSchemaForm - hint placement', () => {
+  const longHint = 'Three-letter code. Currency and billing cycle cannot change while the plan has live subscriptions.'
+
+  it('shows an inline hint as a line under the control by default', () => {
+    const wrapper = mount(TSchemaForm, {
+      props: {
+        schema: [{ key: 'currency', type: 'text', label: 'Currency', hint: longHint }],
+        model: { currency: 'CAD' },
+      },
+    })
+    expect(wrapper.find('.t-form-schema__hint').text()).toBe(longHint)
+    expect(wrapper.find('.t-hint').exists()).toBe(false)
+  })
+
+  it('puts a popover hint behind an info icon next to the label, not under the control', () => {
+    const wrapper = mount(TSchemaForm, {
+      props: {
+        schema: [{ key: 'currency', type: 'text', label: 'Currency', hint: longHint, hintMode: 'popover' }],
+        model: { currency: 'CAD' },
+      },
+    })
+    expect(wrapper.find('.t-form-schema__hint').exists()).toBe(false)
+    const label = wrapper.find('.t-form-schema__label')
+    expect(label.text()).toContain('Currency')
+    expect(label.find('.t-hint').attributes('aria-label')).toBe(longHint)
+  })
+
+  it('puts a popover section hint next to the heading', () => {
+    const wrapper = mount(TSchemaForm, {
+      props: {
+        schema: [{ key: 'price', type: 'number', label: 'Price', section: 'pricing' }],
+        sections: [{ key: 'pricing', label: 'Pricing', hint: longHint, hintMode: 'popover' }],
+        model: { price: 1 },
+      },
+    })
+    expect(wrapper.find('.t-form-schema__section-hint').exists()).toBe(false)
+    expect(wrapper.find('.t-form-schema__section-title .t-hint').attributes('aria-label')).toBe(longHint)
+  })
+})
+
+describe('TSchemaForm - every control fills its grid cell', () => {
+  // naive's number and date inputs are inline and size to their content, so next to a full-width text input
+  // in the same row they read as half-width. One width rule for a row: every control fills its cell.
+  it('gives number and date inputs the full cell width, like text and select', async () => {
+    const { NDatePicker, NInputNumber } = await import('naive-ui')
+    const wrapper = mount(TSchemaForm, {
+      props: {
+        schema: [
+          { key: 'price', type: 'number', label: 'Price' },
+          { key: 'startsOn', type: 'date', label: 'Starts on' },
+        ],
+        model: { price: 10, startsOn: null },
+      },
+    })
+    expect(wrapper.findComponent(NInputNumber).classes()).toContain('t-form-schema__fill')
+    expect(wrapper.findComponent(NDatePicker).classes()).toContain('t-form-schema__fill')
+  })
+})

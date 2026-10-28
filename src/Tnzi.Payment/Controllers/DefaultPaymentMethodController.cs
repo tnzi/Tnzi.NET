@@ -53,6 +53,16 @@ public class DefaultPaymentMethodController : ApiControllerBase
     }
 
     /// <summary>
+    /// 浏览器端拉起渠道收银组件要用的公开配置（Stripe publishable key）。<paramref name="channelCode"/> 留空取默认渠道。
+    /// </summary>
+    [HttpGet("client-config")]
+    public virtual ApiResult<PaymentClientConfigDto> GetClientConfig([FromQuery] string? channelCode = null)
+    {
+        var result = _paymentMethodService.GetClientConfig(channelCode);
+        return result.ToApiResult();
+    }
+
+    /// <summary>
     /// 设为默认支付方式
     /// </summary>
     [HttpPost("{id:guid}/default")]

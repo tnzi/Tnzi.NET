@@ -12,7 +12,9 @@ public interface IUnitOfWorkManager
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 开始所有 DbContext 的事务
+    /// 开始所有 DbContext 的事务（与 <see cref="EnableTransaction"/> 等价：支持嵌套，每次调用深度 +1，
+    /// 物理事务延迟到首次保存时开启）。必须与一次 <see cref="CommitTransactionAsync"/> 或
+    /// <see cref="RollbackTransactionAsync"/> 配对；嵌套层的提交只 flush，物理提交由最外层决定。
     /// </summary>
     Task BeginTransactionAsync(CancellationToken cancellationToken = default);
 

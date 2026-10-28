@@ -10,8 +10,19 @@
 /// 而<b>不需要认识</b>那些模块的任何实体。
 /// </para>
 /// <para>
-/// ★ <b>实现必须幂等。</b>完成动作会在瞬时失败后被重试（密封成功但归档那一步超时是最典型的情形），
-/// 而"同一份合同在案卷里出现两次"这种事，发现它的通常不是我们，是客户。
+/// ★ <b>实现必须幂等。</b>归档失败不回滚密封、只记日志；补救是管理端对这份已完成的请求再调一次
+/// <c>IEnvelopeService.SealAsync</c>（<c>POST admin/signing/requests/{id}/seal</c>），它不重做成品，只把成品再交给
+/// 本接口一次，而管理员并不知道上一次是不是其实已经挂上了（例如超时发生在写入之后）。框架不会自动重试。
+/// "同一份合同在案卷里出现两次"这种事，发现它的通常不是我们，是客户。
+/// </para>
+/// <para>
+/// ★★ <b>这里无从授权，也不该依赖当前用户。</b>归档发生在<b>最后一位签署人</b>的请求里：签署人通常不是系统用户，
+/// 请求是匿名的（已切到信封所属的租户）；<c>entityId</c> 是发起人在创建时填的。绑定是否被允许，只能在创建那一刻、
+/// 由同一宿主类型的 <see cref="IMergeSourceProvider.ResolveAsync"/> 按发起人的访问权判定（无权即抛
+/// <c>ForbiddenException</c>，请求根本建不起来）。<b>给一个宿主类型注册了 sink，就要同时注册它的 provider</b>
+/// （哪怕它没有任何合并变量、不覆写 <see cref="IMergeSourceProvider.Describe"/>）：只有 sink 没有 provider 的类型，
+/// 绑定完全不经授权：任何持 <c>signing.request.create</c> 的人都能往任意一条该类记录里挂一份自己签完的 PDF。
+/// 所以创建请求时遇到这种类型（点名了记录、只有 sink 没有 provider）一律失败关闭，请求建不起来。
 /// </para>
 /// </remarks>
 [ExperimentalApi(Reason = "E-signature contracts are shaped by a single consumer so far; they may change before a second one validates them")]
@@ -51,6 +62,9 @@ public interface IMergeSourceRegistry
     /// <summary>按宿主类型取归档 sink；未注册返回 <c>null</c>。</summary>
     IDocumentHostSink? FindSink(string? entityType);
 
-    /// <summary>已接线的全部宿主类型（供管理端展示"哪些记录可以发起签署"）。</summary>
+    /// <summary>已接线的全部宿主类型（provider 与 sink 的并集，不分大小写去重、排序）。</summary>
+    /// <remarks>
+    /// 预留给管理端的宿主类型选择（「哪些记录可以发起签署」）；<b>框架内目前没有调用方</b>，请求表单里的宿主类型仍是自由文本。
+    /// </remarks>
     IReadOnlyList<string> KnownHostTypes { get; }
 }

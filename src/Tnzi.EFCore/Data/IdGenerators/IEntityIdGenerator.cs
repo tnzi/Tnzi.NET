@@ -23,7 +23,6 @@ public interface IEntityIdGenerator
 public class DefaultEntityIdGenerator : IEntityIdGenerator
 {
     private readonly Microsoft.EntityFrameworkCore.DbContext _dbContext;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SequentialGuid.SequentialGuidType> _guidTypeCache = new();
 
     public DefaultEntityIdGenerator(Microsoft.EntityFrameworkCore.DbContext dbContext)
     {
@@ -49,15 +48,6 @@ public class DefaultEntityIdGenerator : IEntityIdGenerator
             // 获取 ProviderName 可能失败（例如数据库未初始化），使用默认值
         }
 
-        providerName ??= "Default";
-
-        return _guidTypeCache.GetOrAdd(providerName, name =>
-            name switch
-            {
-                "Microsoft.EntityFrameworkCore.SqlServer" => SequentialGuid.SequentialGuidType.SequentialAtEnd,
-                "Npgsql.EntityFrameworkCore.PostgreSQL" => SequentialGuid.SequentialGuidType.SequentialAsBinary,
-                "Pomelo.EntityFrameworkCore.MySql" or "MySql.EntityFrameworkCore" or "Microsoft.EntityFrameworkCore.Sqlite" => SequentialGuid.SequentialGuidType.SequentialAsString,
-                _ => SequentialGuid.SequentialGuidType.SequentialAtEnd
-            });
+        return IdGenerationHelper.GetSequentialGuidType(providerName);
     }
 }

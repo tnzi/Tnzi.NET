@@ -85,20 +85,13 @@ public class AuditModule : TnziApplicationModule
         // 注册审计后台服务
         context.Services.AddHostedService<AuditBackgroundService>();
 
-        return Task.CompletedTask;
-    }
-
-    public override Task OnApplicationInitializationAsync(ApplicationInitializationContext context)
-    {
-        var app = context.App;
-        if (app != null)
-        {
-            // 审计应该尽早执行，但要在异常处理之后
-            // AspNetCoreModule 注册了 ExceptionHandlingMiddleware
-            // 这里我们希望 AuditMiddleware 记录所有请求结果
-            app.UseMiddleware<AuditMiddleware>();
-        }
+        // ★ 采集点登记在认证之后、限流 / 租户解析 / 授权之前，不在 OnApplicationInitializationAsync 里 UseMiddleware：
+        // 那只能追加在授权之后，而 401 / 403 / 429 由授权与限流中间件就地写出、不再调用下游：
+        // 逐个试探管理端写接口的账号每次都被拒成 403，审计表里却一行都没有。路由在管线最前面已经跑过，
+        // 这里读得到端点元数据（[AuditDisabled] 与写/读分类都靠它）。
+        context.Services.AddRequestPipelineMiddleware<AuditMiddleware>(RequestPipelineStage.AfterAuthentication);
 
         return Task.CompletedTask;
     }
+
 }

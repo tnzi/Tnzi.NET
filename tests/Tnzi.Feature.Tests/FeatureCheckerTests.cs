@@ -63,6 +63,55 @@ public class FeatureCheckerTests
         result.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// 定义按名查找不分大小写，provider 却按拿到的名字查值、建缓存键；值的写入与缓存失效用的都是定义自己的写法。
+    /// 调用方的大小写与定义不同时，PostgreSQL 上管理员设的值永远查不到，用量统计也按大小写分成几份。
+    /// </summary>
+    [Fact]
+    public async Task IsEnabledAsync_CallerCasingDiffers_ProvidersAndUsageSeeTheDefinitionsName()
+    {
+        _featureManagerMock.Setup(m => m.GetOrNullAsync("orders.advancedSearch"))
+            .ReturnsAsync(new FeatureDefinitionRecord("Orders.AdvancedSearch", "Advanced search", null, "false", FeatureValueType.Boolean, null, true, null));
+        var asked = new List<string>();
+        _providers.Add(new StubFeatureValueProvider("Global", 100, requiresKey: false, resolve: name =>
+        {
+            asked.Add(name);
+            return name == "Orders.AdvancedSearch" ? "true" : null;
+        }));
+        var usage = new Mock<IFeatureUsageService>();
+        var checker = new FeatureChecker(_featureManagerMock.Object, _providers, usage.Object);
+
+        var result = await checker.IsEnabledAsync("orders.advancedSearch");
+
+        result.ShouldBeTrue();
+        asked.ShouldBe(["Orders.AdvancedSearch"]);
+        usage.Verify(u => u.RecordUsageAsync("Orders.AdvancedSearch", true, "FeatureChecker"), Times.Once);
+    }
+
+    /// <summary>
+    /// Boolean 功能解析不出布尔值时按关闭处理：默认值写成 "0" / "off" 意图关闭，
+    /// 不能因为「非空即开启」把 [RequireFeature] 守护的端点对所有人放行。
+    /// </summary>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("off")]
+    [InlineData("no")]
+    [InlineData("disabled")]
+    public async Task IsEnabledAsync_BooleanFeatureWithUnparsableValue_FailsClosed(string value)
+    {
+        SetupFeature("Feature.Test", value, FeatureValueType.Boolean);
+        var result = await _checker.IsEnabledAsync("Feature.Test");
+        result.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task IsEnabledAsync_StringFeatureWithAnyValue_StaysEnabled()
+    {
+        SetupFeature("Feature.Variant", "v2", FeatureValueType.String);
+        var result = await _checker.IsEnabledAsync("Feature.Variant");
+        result.ShouldBeTrue();
+    }
+
     [Fact]
     public async Task IsEnabledAsync_NonBooleanWithValue_ReturnsTrue()
     {

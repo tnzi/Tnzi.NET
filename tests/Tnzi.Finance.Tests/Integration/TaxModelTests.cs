@@ -1,3 +1,5 @@
+using Moq;
+
 namespace Tnzi.Finance.Tests.Integration;
 
 /// <summary>
@@ -114,6 +116,235 @@ public class TaxModelTests : FinanceIntegrationTestBase
         updated.Data!.Name.ShouldBe("GST+PST");
         updated.Data.Components.Count.ShouldBe(2);
         updated.Data.Components.Select(c => c.RateName).ShouldBe(new[] { "GST 5%", "PST 7%" });
+    }
+
+    /// <summary>
+    /// 回归：改名撞上已有税码要答 409，且税码原样保留。组件的删除曾在工作单元之外立即落库，
+    /// 连带把已跟踪的改名一起 flush，唯一索引冲突从 409 的 catch 之外抛出，管理端拿到的是 500。
+    /// </summary>
+    [Fact]
+    public async Task Code_RenameToExistingName_Returns409_And_KeepsCode()
+    {
+        var agency = await CreateAgencyAsync("Agency D");
+        var gst = await CreateRateAsync(agency.Data!.Id, "GST 5%", 5m);
+        var pst = await CreateRateAsync(agency.Data.Id, "PST 7%", 7m);
+        var code = await CreateCodeAsync("GST", (gst.Data!.Id, 1, false));
+        code.Succeeded.ShouldBeTrue(code.Message);
+        var codeId = code.Data!.Id;
+        (await CreateCodeAsync("HST", (pst.Data!.Id, 1, false))).Succeeded.ShouldBeTrue();
+
+        var renamed = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.UpdateCodeAsync(codeId, new UpsertTaxCodeDto
+        {
+            Name = "HST",
+            Components =
+            [
+                new UpsertTaxCodeComponentDto { TaxRateId = gst.Data.Id, Order = 1 },
+                new UpsertTaxCodeComponentDto { TaxRateId = pst.Data.Id, Order = 2 }
+            ]
+        }));
+        renamed.Succeeded.ShouldBeFalse();
+        renamed.Code.ShouldBe(409);
+
+        var stored = (await InScopeAsync<ITaxService, Result<List<TaxCodeDto>>>(s => s.GetCodesAsync()))
+            .Data!.Single(c => c.Id == codeId);
+        stored.Name.ShouldBe("GST");
+        stored.Components.Select(c => c.TaxRateId).ShouldBe(new[] { gst.Data.Id });
+    }
+
+    /// <summary>
+    /// 回归：「可抵扣」标志必须随 DTO 往返。管理端编辑表单由列表行预填、整单提交，
+    /// 返回 DTO 只要漏报一次 false，下一次为任何原因（改描述、改税率）保存都会把它写回 true，
+    /// 此后采购税静默改走 TaxReceivable（多报进项、少记成本）。
+    /// </summary>
+    [Fact]
+    public async Task Code_IsRecoverable_SurvivesListPrefilledEdit()
+    {
+        var agency = await CreateAgencyAsync("Agency R");
+        var rate = await CreateRateAsync(agency.Data!.Id, "Sales tax 8%", 8m);
+
+        var created = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.CreateCodeAsync(new UpsertTaxCodeDto
+        {
+            Name = "Non-recoverable",
+            IsRecoverable = false,
+            Components = [new UpsertTaxCodeComponentDto { TaxRateId = rate.Data!.Id, Order = 1 }]
+        }));
+        created.Succeeded.ShouldBeTrue(created.Message);
+        created.Data!.IsRecoverable.ShouldBeFalse();
+
+        var listed = (await InScopeAsync<ITaxService, Result<List<TaxCodeDto>>>(s => s.GetCodesAsync()))
+            .Data!.Single(c => c.Id == created.Data.Id);
+        listed.IsRecoverable.ShouldBeFalse();
+
+        // 只改描述，其余字段原样取自列表行（即编辑表单的预填值）
+        var updated = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.UpdateCodeAsync(listed.Id, new UpsertTaxCodeDto
+        {
+            Name = listed.Name,
+            Description = "edited",
+            IsActive = listed.IsActive,
+            IsRecoverable = listed.IsRecoverable,
+            Components = listed.Components
+                .Select(c => new UpsertTaxCodeComponentDto { TaxRateId = c.TaxRateId, Order = c.Order, IsCompound = c.IsCompound })
+                .ToList()
+        }));
+        updated.Succeeded.ShouldBeTrue(updated.Message);
+        updated.Data!.IsRecoverable.ShouldBeFalse();
+
+        // 落库值仍是不可抵扣：采购税整笔进 NonRecoverableTotal，不进进项组件
+        var purchase = await InScopeAsync<ITaxCalculator, TaxCalculationResult>(c => c.CalculateAsync(new TaxCalculationRequest
+        {
+            IsPurchase = true,
+            Lines = [new TaxCalculationLine { Amount = 100m, TaxCodeId = listed.Id }]
+        }));
+        purchase.NonRecoverableTotal.ShouldBe(8m);
+        purchase.Components.ShouldBeEmpty();
+
+        // 反向同样成立：可抵扣税码要如实答 true（不能靠 DTO 默认值碰巧对上任何一边）
+        var recoverable = await CreateCodeAsync("Recoverable", (rate.Data!.Id, 1, false));
+        recoverable.Data!.IsRecoverable.ShouldBeTrue();
+        (await InScopeAsync<ITaxService, Result<List<TaxCodeDto>>>(s => s.GetCodesAsync()))
+            .Data!.Single(c => c.Id == recoverable.Data.Id).IsRecoverable.ShouldBeTrue();
+    }
+
+    // ── 税码删除守卫 ─────────────────────────────────────────
+    //
+    // 税码软删后被全局过滤器隐藏，而计税器按过滤后的仓储加载它：引用它的每一张草稿从此保存与过账都答
+    // 404「Tax code ... not found」，周期性模板每期生成都失败，界面也再显示不出它的名字。软删在界面上不可恢复。
+
+    private async Task<Guid> ReferencedCodeAsync(string name)
+    {
+        var agency = await CreateAgencyAsync($"Agency {name}");
+        var rate = await CreateRateAsync(agency.Data!.Id, $"{name} 5%", 5m);
+        var code = await CreateCodeAsync(name, (rate.Data!.Id, 1, false));
+        code.Succeeded.ShouldBeTrue(code.Message);
+        return code.Data!.Id;
+    }
+
+    private async Task ShouldStillExistWithComponentsAsync(Guid codeId)
+    {
+        var codes = await InScopeAsync<ITaxService, Result<List<TaxCodeDto>>>(s => s.GetCodesAsync());
+        var code = codes.Data!.SingleOrDefault(c => c.Id == codeId);
+        code.ShouldNotBeNull("拒绝路径不得软删税码");
+        code.Components.Count.ShouldBe(1, "拒绝路径不得先把组件硬删掉");
+    }
+
+    [Theory]
+    [InlineData("invoice")]
+    [InlineData("bill")]
+    [InlineData("creditMemo")]
+    [InlineData("expense")]
+    public async Task Code_ReferencedByDocumentLine_DeleteReturns409(string documentKind)
+    {
+        await SeedCoaAsync();
+        var codeId = await ReferencedCodeAsync($"Old GST {documentKind}");
+        var revenue = await AccountIdByCodeAsync("4100");
+        var expense = await AccountIdByCodeAsync("5200");
+        var bank = await AccountIdByCodeAsync("1120");
+        var docDate = new DateTime(2026, 3, 10);
+
+        bool drafted;
+        switch (documentKind)
+        {
+            case "invoice":
+            {
+                var customer = await InScopeAsync<ICustomerService, Result<CustomerDto>>(s => s.CreateAsync(new CreateCustomerDto { Name = "Tax Customer" }));
+                drafted = (await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.CreateDraftAsync(new CreateInvoiceDto
+                {
+                    CustomerId = customer.Data!.Id, DocDate = docDate,
+                    Lines = [new CreateInvoiceLineDto { AccountId = revenue, Quantity = 1, UnitPrice = 100m, TaxCodeId = codeId }]
+                }))).Succeeded;
+                break;
+            }
+            case "bill":
+            {
+                var vendor = await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "Tax Vendor" }));
+                drafted = (await InScopeAsync<IBillService, Result<BillDto>>(s => s.CreateDraftAsync(new CreateBillDto
+                {
+                    VendorId = vendor.Data!.Id, DocDate = docDate,
+                    Lines = [new CreateBillLineDto { AccountId = expense, Quantity = 1, UnitPrice = 100m, TaxCodeId = codeId }]
+                }))).Succeeded;
+                break;
+            }
+            case "creditMemo":
+            {
+                var customer = await InScopeAsync<ICustomerService, Result<CustomerDto>>(s => s.CreateAsync(new CreateCustomerDto { Name = "Tax Credit Customer" }));
+                drafted = (await InScopeAsync<ICreditMemoService, Result<CreditMemoDto>>(s => s.CreateDraftAsync(new CreateCreditMemoDto
+                {
+                    CustomerId = customer.Data!.Id, DocDate = docDate,
+                    Lines = [new CreateCreditMemoLineDto { AccountId = revenue, Quantity = 1, UnitPrice = 100m, TaxCodeId = codeId }]
+                }))).Succeeded;
+                break;
+            }
+            default:
+                drafted = (await InScopeAsync<IExpenseService, Result<ExpenseDto>>(s => s.CreateDraftAsync(new CreateExpenseDto
+                {
+                    PaidFromAccountId = bank, DocDate = docDate,
+                    Lines = [new CreateExpenseLineDto { AccountId = expense, Amount = 100m, TaxCodeId = codeId }]
+                }))).Succeeded;
+                break;
+        }
+        drafted.ShouldBeTrue();
+
+        var delete = await InScopeAsync<ITaxService, Result>(s => s.DeleteCodeAsync(codeId));
+
+        delete.Succeeded.ShouldBeFalse("引用它的草稿从此保存与过账都会 404");
+        delete.Code.ShouldBe(409);
+        await ShouldStillExistWithComponentsAsync(codeId);
+    }
+
+    [Theory]
+    [InlineData("customer")]
+    [InlineData("vendor")]
+    [InlineData("item")]
+    public async Task Code_ReferencedAsADefault_DeleteReturns409(string holder)
+    {
+        await SeedCoaAsync();
+        var codeId = await ReferencedCodeAsync($"Default {holder}");
+
+        var created = holder switch
+        {
+            "customer" => (await InScopeAsync<ICustomerService, Result<CustomerDto>>(s => s.CreateAsync(new CreateCustomerDto { Name = "Defaulted", DefaultTaxCodeId = codeId }))).Succeeded,
+            "vendor" => (await InScopeAsync<IVendorService, Result<VendorDto>>(s => s.CreateAsync(new CreateVendorDto { Name = "Defaulted", DefaultTaxCodeId = codeId }))).Succeeded,
+            _ => (await InScopeAsync<IItemService, Result<ItemDto>>(s => s.CreateAsync(new CreateItemDto { Name = "Defaulted", DefaultTaxCodeId = codeId }))).Succeeded,
+        };
+        created.ShouldBeTrue();
+
+        var delete = await InScopeAsync<ITaxService, Result>(s => s.DeleteCodeAsync(codeId));
+
+        delete.Succeeded.ShouldBeFalse("新开单据会从这里预填一个已不存在的税码");
+        delete.Code.ShouldBe(409);
+        await ShouldStillExistWithComponentsAsync(codeId);
+    }
+
+    /// <summary>
+    /// 会计内核之外的引用者（周期性模板行、报价单 / 采购订单行）经 <see cref="IMasterDataUsageProvider"/> 作答。
+    /// </summary>
+    [Fact]
+    public async Task Code_ReportedInUseByAUsageProvider_DeleteReturns409WithItsDetail()
+    {
+        var codeId = await ReferencedCodeAsync("Provider-held");
+        var provider = new Mock<IMasterDataUsageProvider>();
+        provider.Setup(p => p.FindUsageAsync(FinanceMasterDataKind.TaxCode, codeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MasterDataUsage("Held by a template line."));
+
+        Result delete;
+        using (var scope = ServiceProvider.CreateScope())
+        {
+            var sp = scope.ServiceProvider;
+            var service = new TaxService(
+                sp,
+                sp.GetRequiredService<IRepository<TaxAgency, Guid>>(),
+                sp.GetRequiredService<IRepository<TaxRate, Guid>>(),
+                sp.GetRequiredService<IRepository<TaxCode, Guid>>(),
+                sp.GetRequiredService<IRepository<TaxCodeComponent, Guid>>(),
+                sp.GetRequiredService<IReadOnlyRepository<JournalLine, Guid>>(),
+                [provider.Object]);
+            delete = await service.DeleteCodeAsync(codeId);
+        }
+
+        delete.Succeeded.ShouldBeFalse();
+        delete.Code.ShouldBe(409);
+        delete.Message.ShouldBe("Held by a template line.");
+        await ShouldStillExistWithComponentsAsync(codeId);
     }
 
     [Fact]

@@ -16,7 +16,8 @@ public sealed class SettingConfigurationSource : IConfigurationSource
     internal SettingConfigurationProvider? Provider { get; private set; }
 
     /// <summary>
-    /// 永不进 IConfiguration 的 key 集合（OrdinalIgnoreCase）。
+    /// 永不进 IConfiguration 的 key 集合（OrdinalIgnoreCase）。每一项同时排除它下面的整棵子树：
+    /// <c>Appearance:Theme</c>（或 <c>Appearance:Theme:</c>）挡住 <c>Appearance:Theme:admin</c>。
     /// 适合保护启动级关键开关（如测试模式标志），避免 DB 误改影响线上。
     /// </summary>
     public IReadOnlySet<string> ExcludedKeys { get; init; } =
@@ -39,17 +40,22 @@ public sealed class SettingConfigurationSource : IConfigurationSource
         if (Provider == null)
             return;    // Source 未 Build (理论上 host build 后一定有), no-op
         Provider.AttachServiceProvider(rootServiceProvider);
-        await Provider.ReloadFromDatabaseAsync(cancellationToken);
+        // 启动期：读库失败只记日志、沿用 appsettings 的值，不打断启动。
+        await Provider.ReloadFromDatabaseAsync(propagateFailure: false, cancellationToken);
     }
 
     /// <summary>
     /// 重新从数据库拉取 Setting 表内容，触发 IConfiguration reload token 让 IOptionsMonitor 通知订阅者。
     /// 必须在 <see cref="AttachAsync"/> 之后调用；之前调用会静默 no-op。
     /// </summary>
+    /// <remarks>
+    /// 读库失败时<b>抛出</b>，配置保持上一次成功读到的值：调用方是配置变更事件的处理器，异常交给事件总线重试。
+    /// 吞掉的话，一次瞬时的数据库故障就让 <c>IOptionsMonitor</c> 停在旧值，直到下一次任意设置变更或重启。
+    /// </remarks>
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
     {
         if (Provider == null)
             return;
-        await Provider.ReloadFromDatabaseAsync(cancellationToken);
+        await Provider.ReloadFromDatabaseAsync(propagateFailure: true, cancellationToken);
     }
 }

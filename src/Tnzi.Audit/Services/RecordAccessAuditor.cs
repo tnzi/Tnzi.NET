@@ -111,7 +111,8 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
                 // 也永远扫不到值。
                 TenantId = CurrentUser?.TenantId,
                 PreviousHash = tail?.Hash ?? string.Empty,
-                CreationTime = DateTime.UtcNow
+                // 截到整微秒：存进库里的必须就是哈希过的那一个（见 ChainTimestamp）。
+                CreationTime = ChainTimestamp.UtcNow()
             };
             entry.Hash = ComputeHash(entry);
 
@@ -353,8 +354,8 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
     /// </summary>
     /// <remarks>
     /// 字段以不可能出现在内容里的分隔符连接，避免「把 ResourceType 的尾部挪到 ResourceId 的头部」
-    /// 这类拼接歧义产生相同的哈希。时间用往返格式（"O"）与不变文化，
-    /// 否则换个服务器区域设置就会算出不同的哈希。
+    /// 这类拼接歧义产生相同的哈希。时间经 <see cref="ChainTimestamp.Format"/>：按 UTC 解释读回来的值
+    /// （数据库读回的 Kind 多是 Unspecified，ToUniversalTime 会把它当本地时间再平移一次）、往返格式与不变文化。
     /// </remarks>
     private static string ComputeHash(AuditRecordAccess entry)
     {
@@ -366,7 +367,7 @@ public class RecordAccessAuditor : ApplicationService, IRecordAccessAuditor
             entry.ResourceId,
             entry.Purpose ?? string.Empty,
             entry.UserId?.ToString() ?? string.Empty,
-            entry.CreationTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            ChainTimestamp.Format(entry.CreationTime));
 
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexStringLower(hash);

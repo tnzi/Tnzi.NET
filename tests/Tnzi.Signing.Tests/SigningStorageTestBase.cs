@@ -67,13 +67,80 @@ public class SigningStorageDbContext : TnziDbContext<SigningStorageDbContext>
 /// </remarks>
 public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorageDbContext>
 {
-    protected static readonly byte[] RenderedPdf = [0x25, 0x50, 0x44, 0x46, 0x2D, 0x31, 0x2E, 0x34];
+    /// <summary>
+    /// 渲染稿：一份真的单页 PDF。建模板时会真的打开它（读页数、试盖章、找锚），所以不能只是一个文件头。
+    /// </summary>
+    protected static readonly byte[] RenderedPdf = TestPdfs.SinglePage;
+
+    /// <summary>真实的读取器：锚文本的定位与建模板时的预检都要真的跑一遍。</summary>
+    protected static readonly IPdfInspector Inspector = new PdfPigPdfInspector();
+
+    /// <summary>
+    /// 真实的盖章器，只给模板服务的预检用（以修改模式打开一次）：请求那一侧的盖章仍走 <see cref="Stamper"/>，好计数、好注入失败。
+    /// </summary>
+    protected static readonly IPdfStamper RealStamper = new PdfSharpPdfStamper(NullLogger<PdfSharpPdfStamper>.Instance);
 
     protected InMemoryFileStorage Bucket { get; } = new();
     protected CountingStamper Stamper { get; } = new();
 
+    /// <summary>
+    /// 经 <see cref="FileStorageService"/> 读写的那一层（包着 <see cref="Bucket"/>），可以注入一次下载故障。
+    /// </summary>
+    protected FaultyStorage Storage { get; }
+
+    protected SigningStorageTestBase()
+    {
+        Storage = new FaultyStorage(Bucket);
+    }
+
+    /// <summary>
+    /// 包着真实存储、能注入一次下载故障的存储：下载抛异常（对象存储超时），或者下载那一刻触发一次回调
+    /// （例如取消调用方的令牌，模拟收件人在密封途中断开）。
+    /// </summary>
+    protected sealed class FaultyStorage(IFileStorage inner) : IFileStorage
+    {
+        /// <summary>置位后下一次下载抛异常，然后自动复位。</summary>
+        public bool FailNextDownload { get; set; }
+
+        /// <summary>下一次下载时执行一次（执行后清空），在返回内容之前。</summary>
+        public Action? OnNextDownload { get; set; }
+
+        public string ProviderName => inner.ProviderName;
+
+        public Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null) => inner.UploadAsync(fileName, stream, contentType);
+
+        public Task<Stream> DownloadAsync(string filePath)
+        {
+            var hook = OnNextDownload;
+            OnNextDownload = null;
+            hook?.Invoke();
+
+            if (FailNextDownload)
+            {
+                FailNextDownload = false;
+                throw new TimeoutException("Simulated storage timeout.");
+            }
+
+            return inner.DownloadAsync(filePath);
+        }
+
+        public Task<bool> DeleteAsync(string filePath) => inner.DeleteAsync(filePath);
+
+        public Task<bool> ExistsAsync(string filePath) => inner.ExistsAsync(filePath);
+
+        public Task<string> GetUrlAsync(string filePath, int? expiresIn = null) => inner.GetUrlAsync(filePath, expiresIn);
+
+        public Task<long> GetFileSizeAsync(string filePath) => inner.GetFileSizeAsync(filePath);
+
+        public Task<(Stream Stream, long Start, long End, long TotalLength)> DownloadRangeAsync(string filePath, long? rangeStart = null, long? rangeEnd = null)
+            => inner.DownloadRangeAsync(filePath, rangeStart, rangeEnd);
+    }
+
     /// <summary>领域侧插进来的合并变量 provider；默认一个都没有。</summary>
     protected virtual IEnumerable<IMergeSourceProvider> MergeProviders => [];
+
+    /// <summary>领域侧插进来的归档 sink；默认一个都没有。</summary>
+    protected virtual IEnumerable<IDocumentHostSink> HostSinks => [];
     protected StorageOptions StorageOptions { get; } = new()
     {
         AutoGenerateThumbnail = false,
@@ -87,6 +154,12 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
 
         /// <summary>置位后下一次盖章抛异常（模拟一次瞬时的密封失败），然后自动复位。</summary>
         public bool FailNext { get; set; }
+
+        /// <summary>置位后下一次从零新建（完成证书走这一条）抛异常，然后自动复位。</summary>
+        public bool FailNextCreate { get; set; }
+
+        /// <summary>每一次从零新建收到的请求（完成证书），按先后顺序。</summary>
+        public List<PdfStampRequest> Creates { get; } = [];
 
         /// <summary>每一次盖章收到的请求，按先后顺序（发出前的预填、密封各是一次）。</summary>
         public List<PdfStampRequest> Requests { get; } = [];
@@ -103,7 +176,20 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             return [.. pdf, .. BitConverter.GetBytes(Interlocked.Increment(ref _stamps))];
         }
 
-        public byte[] Create(PdfStampRequest request) => [0x25, 0x50, 0x44, 0x46];
+        public byte[] Create(PdfStampRequest request)
+        {
+            if (FailNextCreate)
+            {
+                FailNextCreate = false;
+                throw new InvalidOperationException("Simulated certificate rendering failure.");
+            }
+
+            Creates.Add(request);
+            return [0x25, 0x50, 0x44, 0x46, .. BitConverter.GetBytes(Creates.Count)];
+        }
+
+        public double MeasureTextWidth(string text, double fontSize, bool bold = false, bool italic = false)
+            => TestTextMetrics.Width(text, fontSize, bold);
     }
 
     private sealed class NoPublicFields : IPublicFileFieldResolver
@@ -140,6 +226,9 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
         /// <summary>模板服务，带真实的 <see cref="FileReadAccessProbe"/>（写入侧的归属探针）。</summary>
         public EnvelopeTemplateService Templates { get; }
 
+        /// <summary>这次请求的作用域服务（与上面各服务解析自同一个作用域，例如作用域内的工作单元管理器）。</summary>
+        public IServiceProvider Services => _scope.ServiceProvider;
+
         public void Dispose() => _scope.Dispose();
     }
 
@@ -174,14 +263,15 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
         var files = new FileStorageService(
             fileRecords,
             fileReferences,
-            Bucket,
+            Storage,
             options.Object,
             authorizer,
             new NoPublicFields(),
             new Mock<IFileUrlSigner>().Object,
             sp,
             new UploadGuard(options.Object),
-            new FileThumbnailGenerator(Bucket, options.Object));
+            new FileThumbnailGenerator(Bucket, options.Object),
+            new StorageQuotaService(fileRecords, new OptionsStorageAllowanceProvider(options.Object), []));
 
         var envelopes = new EnvelopeService(
             sp,
@@ -190,8 +280,8 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             new EFCoreRepository<SigningStorageDbContext, FieldValue, Guid>(db, null, sp),
             new EFCoreRepository<SigningStorageDbContext, EnvelopeTemplate, Guid>(db, null, sp),
             new EFCoreRepository<SigningStorageDbContext, Field, Guid>(db, null, sp),
-            new MergeSourceRegistry(MergeProviders, []),
-            new SigningSealer(Stamper, new Mock<IPdfInspector>().Object, files, NullLogger<SigningSealer>.Instance),
+            new MergeSourceRegistry(MergeProviders, HostSinks),
+            new SigningSealer(Stamper, Inspector, files, NullLogger<SigningSealer>.Instance),
             new SigningCertificateBuilder(Stamper, files, NullLogger<SigningCertificateBuilder>.Instance),
             new ComposedDocumentRenderer(Stamper),
             files,
@@ -204,7 +294,8 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
             new EFCoreRepository<SigningStorageDbContext, Field, Guid>(db, null, sp),
             new EFCoreRepository<SigningStorageDbContext, Envelope, Guid>(db, null, sp),
             new FileReadAccessProbe(fileRecords, authorizer),
-            files);
+            files,
+            new SigningSealer(RealStamper, Inspector, files, NullLogger<SigningSealer>.Instance));
 
         return new Request(scope, grants, files, authorizer, envelopes, templates);
     }
@@ -224,10 +315,11 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
     /// 渲染稿的文件名（决定 Storage 记下的 Content-Type）。模板行直接写库、不经模板服务的入口校验，
     /// 所以这里能造出一份「渲染稿不是 PDF」的存量模板 —— 那正是收件人面要拒绝的形态。
     /// </param>
+    /// <param name="renderedPdf">渲染稿的字节；默认 <see cref="RenderedPdf"/>。</param>
     protected async Task<(Guid TemplateId, Guid RenderedId)> ArrangeTemplateAsync(
-        IReadOnlyList<Field>? fields = null, string renderedFileName = "contract.pdf")
+        IReadOnlyList<Field>? fields = null, string renderedFileName = "contract.pdf", byte[]? renderedPdf = null)
     {
-        var renderedId = await StoreAsync(renderedFileName, RenderedPdf);
+        var renderedId = await StoreAsync(renderedFileName, renderedPdf ?? RenderedPdf);
 
         var template = new EnvelopeTemplate
         {
@@ -259,11 +351,15 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
     /// <param name="renderedFileName">见 <see cref="ArrangeTemplateAsync"/>。</param>
     /// <param name="recipients">收件人；默认一个 Client。</param>
     /// <param name="prefilledValues">发起方预填。</param>
+    /// <param name="hostEntityType">宿主类型；默认不绑定宿主。</param>
+    /// <param name="hostEntityId">宿主记录 id。</param>
     protected async Task<(Guid RenderedId, Guid RequestId, IReadOnlyList<string> Tokens)> ArrangeSentEnvelopeWithTokensAsync(
         IReadOnlyList<Field>? fields = null,
         string renderedFileName = "contract.pdf",
         List<CreateSignerDto>? recipients = null,
-        Dictionary<string, string?>? prefilledValues = null)
+        Dictionary<string, string?>? prefilledValues = null,
+        string? hostEntityType = null,
+        Guid? hostEntityId = null)
     {
         var (templateId, renderedId) = await ArrangeTemplateAsync(fields, renderedFileName);
 
@@ -276,6 +372,8 @@ public abstract class SigningStorageTestBase : IntegratedTestBase<SigningStorage
                 Title = "Engagement Letter",
                 Recipients = recipients ?? SingleClient(),
                 PrefilledValues = prefilledValues,
+                HostEntityType = hostEntityType,
+                HostEntityId = hostEntityId,
             });
             created.Succeeded.ShouldBeTrue(created.Message);
             requestId = created.Data!.Id;

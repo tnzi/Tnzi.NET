@@ -50,8 +50,23 @@ public class PushSender : IPushSender
     /// <summary>FCM 回 <c>SenderIdMismatch</c> 时是否退役令牌（见构造参数说明）。</summary>
     internal bool SenderIdMismatchIsConclusive => _senderIdMismatchIsConclusive;
 
-    public async Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    /// <remarks>
+    /// 只是 <see cref="SendToAsync(string, PushContent, CancellationToken)"/> 的一个写法：两种发法走同一条路径，
+    /// 主题地址守卫、死令牌退役与日志掩码因此不可能只在其中一条上生效。只带标题与正文时发出去的消息与从前逐字相同。
+    /// </remarks>
+    public Task<SendResult> SendToAsync(string deviceToken, string title, string body, CancellationToken cancellationToken = default)
+        => SendToAsync(deviceToken, new PushContent(title, body), cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 次序：先判地址（主题地址填错了位置），再判内容（链接、数据键），最后才按 provider 分派：
+    /// 前两样是<b>调用方</b>给的，provider 是<b>部署方</b>配的，先报调用方能自己改掉的那一个。
+    /// </remarks>
+    public async Task<SendResult> SendToAsync(string deviceToken, PushContent content, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(content);
+
         // ★ 主题地址填错了位置，就地说清楚，不要交给 FCM 去回一句「不是合法的注册令牌」。
         // 这条守的是通知管线那个入口：RecipientChannelDispatcher 对 NotificationType.Push
         // 一律走本方法（Recipient.Address 就是设备令牌），而主题投递刻意**不在**那条管线上
@@ -70,15 +85,21 @@ public class PushSender : IPushSender
                 + "opt-out is keyed by address and preferences by user, and a topic has neither.");
         }
 
+        if (!FcmPushPayload.TryValidate(content, out var contentFailure))
+        {
+            _logger.LogWarning("Push delivery to {DeviceToken} refused: {Reason}", PushTokenMask.Of(deviceToken), contentFailure);
+            return SendResult.CreateFailure(contentFailure!);
+        }
+
         try
         {
             switch (_options.Provider.ToLower())
             {
                 case "fcm":
                 case "firebase":
-                    return await SendViaFcmAsync(deviceToken, title, body, cancellationToken);
+                    return await SendViaFcmAsync(deviceToken, content, cancellationToken);
                 case "apns":
-                    return await SendViaApnsAsync(deviceToken, title, body, cancellationToken);
+                    return await SendViaApnsAsync(deviceToken, cancellationToken);
                 default:
                     _logger.LogWarning("Unknown Push provider: {Provider}", _options.Provider);
                     return SendResult.CreateFailure($"Unknown Push provider: {_options.Provider}");
@@ -91,7 +112,7 @@ public class PushSender : IPushSender
         }
     }
 
-    private async Task<SendResult> SendViaFcmAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
+    private async Task<SendResult> SendViaFcmAsync(string deviceToken, PushContent content, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.FirebaseProjectId))
             throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
@@ -102,24 +123,7 @@ public class PushSender : IPushSender
         {
             var app = EnsureFirebaseInitialized(projectId);
 
-            var message = new FirebaseAdmin.Messaging.Message
-            {
-                // FirebaseAdmin 3.6.0 起把 Message.Token 标记为过时并指向 Fid，但两者
-                // 不是改名：Token 序列化成 JSON 的 "token"（FCM 注册令牌），Fid 序列化成
-                // "fid"（Firebase 安装 ID），是两个不同的标识符和两个不同的线缆字段。
-                // 本方法的契约是 SendToAsync(string deviceToken, ...)，消费方传进来的
-                // 就是客户端 SDK 拿到的注册令牌，直接改成 Fid 会让所有消费方的推送
-                // 静默不再送达。改用 FID 需要消费方改变它们采集与存储的是什么标识符，
-                // 那是一次契约变更而不是一次版本升级，因此这里就地抑制过时警告。
-#pragma warning disable CS0618 // Type or member is obsolete
-                Token = deviceToken,
-#pragma warning restore CS0618
-                Notification = new FirebaseAdmin.Messaging.Notification
-                {
-                    Title = title,
-                    Body = body
-                }
-            };
+            var message = FcmPushPayload.ForDevice(deviceToken, content);
 
             var response = await FirebaseMessaging.GetMessaging(app).SendAsync(message, cancellationToken);
 
@@ -205,7 +209,7 @@ public class PushSender : IPushSender
         }
     }
 
-    private async Task<SendResult> SendViaApnsAsync(string deviceToken, string title, string body, CancellationToken cancellationToken)
+    private async Task<SendResult> SendViaApnsAsync(string deviceToken, CancellationToken cancellationToken)
     {
         _logger.LogWarning("Apple Push Notification Service (APNs) provider is not yet implemented. Push to {DeviceToken} was not sent.", PushTokenMask.Of(deviceToken));
         return SendResult.CreateFailure(
@@ -215,17 +219,30 @@ public class PushSender : IPushSender
     }
 
     /// <inheritdoc />
+    /// <remarks>只是 <see cref="SendToTopicAsync(string, PushContent, CancellationToken)"/> 的一个写法，理由同按令牌的那一对。</remarks>
+    public Task<SendResult> SendToTopicAsync(string topic, string title, string body, CancellationToken cancellationToken = default)
+        => SendToTopicAsync(topic, new PushContent(title, body), cancellationToken);
+
+    /// <inheritdoc />
     /// <remarks>
-    /// 结构与 <see cref="SendToAsync"/> 平行（先看配置、再按 provider 分派），只多一步：
-    /// <b>主题名先过字符集校验</b>。校验放在分派之前是刻意的 —— 主题名是<b>调用方</b>给的，
+    /// 结构与 <see cref="SendToAsync(string, PushContent, CancellationToken)"/> 平行（先看调用方给的、再按 provider 分派），
+    /// 只是地址那一步换成<b>主题名的字符集校验</b>。校验放在分派之前是刻意的 —— 主题名与内容是<b>调用方</b>给的，
     /// 而 provider 是<b>部署方</b>配的，先报调用方能自己改掉的那一个。
     /// </remarks>
-    public async Task<SendResult> SendToTopicAsync(string topic, string title, string body, CancellationToken cancellationToken = default)
+    public async Task<SendResult> SendToTopicAsync(string topic, PushContent content, CancellationToken cancellationToken = default)
     {
+        Check.NotNull(content);
+
         if (!FcmTopicName.TryValidate(topic, out var topicFailure))
         {
             _logger.LogWarning("Push topic delivery refused: {Reason}", topicFailure);
             return SendResult.CreateFailure(topicFailure!);
+        }
+
+        if (!FcmPushPayload.TryValidate(content, out var contentFailure))
+        {
+            _logger.LogWarning("Push delivery to topic {Topic} refused: {Reason}", topic, contentFailure);
+            return SendResult.CreateFailure(contentFailure!);
         }
 
         try
@@ -234,7 +251,7 @@ public class PushSender : IPushSender
             {
                 case "fcm":
                 case "firebase":
-                    return await SendViaFcmTopicAsync(topic, title, body, cancellationToken);
+                    return await SendViaFcmTopicAsync(topic, content, cancellationToken);
                 case "apns":
                     // ★ 刻意不走 SendViaApnsAsync 那个存根。它说的是「装上 APNs SDK 再来」，
                     // 而装上了也不会有主题广播：APNs 根本没有 FCM 这种客户端自助订阅的主题
@@ -259,7 +276,7 @@ public class PushSender : IPushSender
         }
     }
 
-    private async Task<SendResult> SendViaFcmTopicAsync(string topic, string title, string body, CancellationToken cancellationToken)
+    private async Task<SendResult> SendViaFcmTopicAsync(string topic, PushContent content, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.FirebaseProjectId))
             throw new ConfigurationException("Notification:PushSender:FirebaseProjectId", "Firebase Project ID is not configured.");
@@ -270,18 +287,7 @@ public class PushSender : IPushSender
         {
             var app = EnsureFirebaseInitialized(projectId);
 
-            var message = new FirebaseAdmin.Messaging.Message
-            {
-                // Topic 与 Token 是 Message 上互斥的寻址字段（FCM 只接受其中一个）。
-                // 这里不设 Token —— 主题投递的全部意义就是后端手上一个设备标识符都没有。
-                // /topics/ 前缀由 SDK 自己剥掉（Message.FormattedTopic），这里原样传。
-                Topic = topic,
-                Notification = new FirebaseAdmin.Messaging.Notification
-                {
-                    Title = title,
-                    Body = body
-                }
-            };
+            var message = FcmPushPayload.ForTopic(topic, content);
 
             var response = await FirebaseMessaging.GetMessaging(app).SendAsync(message, cancellationToken);
 

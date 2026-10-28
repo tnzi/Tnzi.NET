@@ -120,6 +120,44 @@ public sealed class ChannelManagerBindingRuleTests
         run!.AgentId.ShouldBe(RuleAgent, "the only run is the gateway one, on the rule agent");
     }
 
+    [Fact]
+    public async Task PeerKindRule_GroupMessagesRouteToTheRuleAgent_DirectMessagesDoNot()
+    {
+        // 此前没有任何入口填 PeerKind：一条 PeerKind=group 的规则在管理端显示启用，却一条消息都匹配不上
+        var rule = new SessionBindingRule
+        {
+            Channel = "telegram", PeerKind = ChannelPeerKinds.Group, AgentId = RuleAgent,
+            Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true
+        };
+        var harness = CreateHarness(channelDefaultAgentId: ChannelDefaultAgent, configRules: [rule]);
+
+        var group = await RunInboundAsync(harness,
+            new InboundMessage("telegram", "-100123", "u1", "hello", PeerKind: ChannelPeerKinds.Group));
+        group.AgentId.ShouldBe(RuleAgent);
+
+        var direct = await RunInboundAsync(harness,
+            new InboundMessage("telegram", "42", "u1", "hello", PeerKind: ChannelPeerKinds.User));
+        direct.AgentId.ShouldBe(ChannelDefaultAgent);
+    }
+
+    [Fact]
+    public async Task PeerKindRule_NewCommandInAGroup_CreatesTheThreadForTheRuleAgent()
+    {
+        // /new 建线程用的绑定解析必须与 Gateway 同一份上下文，否则线程建给了别的 Agent，下一条消息被拒
+        var rule = new SessionBindingRule
+        {
+            Channel = "telegram", PeerKind = ChannelPeerKinds.Group, AgentId = RuleAgent,
+            Scope = SessionScope.PerPeer, Priority = 10, IsEnabled = true
+        };
+        var harness = CreateHarness(channelDefaultAgentId: ChannelDefaultAgent, configRules: [rule]);
+
+        await RunInboundAsync(harness,
+            new InboundMessage("telegram", "-100123", "u1", "/new", InboundMessageType.Command, PeerKind: ChannelPeerKinds.Group),
+            expectRun: false);
+
+        harness.CreatedThreads.ShouldHaveSingleItem().AgentId.ShouldBe(RuleAgent);
+    }
+
     // =====================================================================
     // 装配 - 真实 ChannelManager + 真实 Bus + 真实 DefaultGateway + 真实 DefaultSessionBinder（配置规则）
     // =====================================================================

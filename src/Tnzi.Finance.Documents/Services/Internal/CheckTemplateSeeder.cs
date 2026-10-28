@@ -36,6 +36,12 @@ namespace Tnzi.Finance.Documents.Services.Internal;
 /// ★ 刷新只写<b>正文</b>：描述、启用状态、布局绑定都是消费应用可能特意调过的，
 /// 而它们都不影响印在纸上的东西。
 /// </para>
+/// <para>
+/// ★ 播种跑在启动时的根容器里，没有租户上下文，写下的是<b>宿主行</b>（<c>TenantId</c> 为空）。
+/// 多租户开启时租户过滤器是严格等值，这些行对任何租户都不可见；所以租户侧没有自己那一行时，
+/// <see cref="TemplateCheckRenderer"/> 直接渲染程序集自带的正文（与这里播下去的是同一份）。
+/// 这里刻意不逐租户播种：租户表属于身份模块，为此引入跨模块依赖不值得，而读路径上的兜底不需要任何写入。
+/// </para>
 /// </remarks>
 internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
 {
@@ -64,7 +70,7 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var content = ReadEmbeddedTemplate(builtIn.ResourceFile);
+        var content = BuiltInCheckTemplates.ReadContent(builtIn);
         if (content == null)
         {
             logger.LogWarning("Embedded check template resource '{Resource}' was not found; skipping the seed.", builtIn.ResourceFile);
@@ -185,22 +191,5 @@ internal sealed class CheckTemplateSeeder : IPostMigrationStartupTask
                 "Could not refresh the built-in check template '{TemplateName}'; it stays on the body it already had. "
                 + "The other built-in layouts are unaffected.", builtIn.Name);
         }
-    }
-
-    /// <summary>嵌入资源按后缀匹配（资源全名带程序集根命名空间前缀，避免受命名空间改动影响）。</summary>
-    private static string? ReadEmbeddedTemplate(string resourceFile)
-    {
-        var assembly = typeof(CheckTemplateSeeder).Assembly;
-        var suffix = "Templates." + resourceFile;
-        var name = Array.Find(assembly.GetManifestResourceNames(), n => n.EndsWith(suffix, StringComparison.Ordinal));
-        if (name == null)
-            return null;
-
-        using var stream = assembly.GetManifestResourceStream(name);
-        if (stream == null)
-            return null;
-
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
     }
 }

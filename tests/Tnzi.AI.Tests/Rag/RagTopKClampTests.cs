@@ -18,7 +18,7 @@ public class RagTopKClampTests
 
     private readonly Mock<IRagRetriever> _retriever = new();
     private readonly Mock<IAiUtility> _aiUtility = new();
-    private readonly Mock<IAgentRuntime> _agentRuntime = new();
+    private readonly Mock<IAgentDispatchFacade> _agentRuntime = new();
     private readonly Mock<IRagAccessAuthorizer> _authorizer = new();
     private readonly IServiceProvider _serviceProvider;
     private readonly List<int> _capturedTopK = [];
@@ -56,7 +56,8 @@ public class RagTopKClampTests
     private static StaticOptionsMonitor<AIRagOptions> Options() => new(new AIRagOptions { MaxTopK = MaxTopK });
 
     private RagQueryEngine CreateQueryEngine()
-        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object, Options());
+        => new(_serviceProvider, _retriever.Object, _aiUtility.Object, _authorizer.Object,
+            Mock.Of<IUsageLimitService>(), Mock.Of<IBudgetService>(), new HeuristicTokenEstimator(), Mock.Of<ICurrentTenant>(), Options());
 
     private RagChatEngine CreateChatEngine()
         => new(_serviceProvider, _retriever.Object, _agentRuntime.Object, _authorizer.Object, Options());

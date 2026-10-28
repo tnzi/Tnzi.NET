@@ -53,7 +53,7 @@ public class PaymentStripeModule : TnziCustomModule
     /// <inheritdoc />
     public override Task ConfigureServicesAsync(ServiceConfigurationContext context)
     {
-        // 渠道是多注册服务：父模块注册 PayPal / Offline / Null，本模块再添一条，
+        // 渠道是多注册服务：父模块注册 Offline / Null（PayPal 在兄弟包 Tnzi.Payment.PayPal），本模块再添一条，
         // 由 PaymentProviderFactory 按 ChannelCode 分发，所以这里是 Add 而不是 TryAdd。
         context.Services.AddScoped<IPaymentProvider, StripeProvider>();
 

@@ -9,7 +9,7 @@ public class MessageFeedbackDto
     [Required]
     public bool Rating { get; set; }
 
-    /// <summary>Feedback tags (for negative rating), e.g. ["incorrect","too_long"]</summary>
+    /// <summary>Feedback tags (for negative rating), each one of <see cref="FeedbackTags.All"/>, e.g. ["incorrect","too_long"]</summary>
     public List<string>? Tags { get; set; }
 
     /// <summary>Optional feedback comment</summary>
@@ -30,7 +30,7 @@ public static class FeedbackTags
     public const string Outdated = "outdated";
     public const string Other = "other";
 
-    /// <summary>All known tags for validation</summary>
+    /// <summary>All known tags; <c>MessageFeedbackService.SubmitAsync</c> rejects any other value with 400</summary>
     public static readonly HashSet<string> All =
     [
         NotHelpful, Incorrect, Unsafe, TooLong, TooShort, Outdated, Other

@@ -434,6 +434,28 @@ public class SlackChannelAdapterTests
     /// <summary>
     /// 尝试从消息总线消费一条入站消息，超时返回 null
     /// </summary>
+    [Theory]
+    [InlineData("im", "user")]
+    [InlineData("channel", "group")]
+    [InlineData("group", "group")]
+    [InlineData("mpim", "group")]
+    [InlineData(null, null)]
+    public async Task HandleEventAsync_ReportsThePeerKindFromChannelType(string? channelType, string? expected)
+    {
+        // 绑定规则的 PeerKind 按它匹配：不报出来，带 PeerKind 的规则永远不会命中
+        var bus = new InMemoryChannelMessageBus(NullLogger<InMemoryChannelMessageBus>.Instance);
+        var adapter = CreateAdapter(bus: bus);
+
+        await adapter.HandleEventAsync(JsonSerializer.Serialize(new
+        {
+            @event = new { type = "message", channel = "C001", user = "U001", text = "hi", ts = "1.2", channel_type = channelType }
+        }));
+
+        var received = await TryConsumeAsync(bus, TimeSpan.FromSeconds(1));
+        received.ShouldNotBeNull();
+        received.PeerKind.ShouldBe(expected);
+    }
+
     private static async Task<InboundMessage?> TryConsumeAsync(InMemoryChannelMessageBus bus, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

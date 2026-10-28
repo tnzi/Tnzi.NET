@@ -104,6 +104,49 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
     }
 
     /// <inheritdoc />
+    public async Task<int> RevokeSessionGroupAsync(Guid userId, string groupKey, SessionRevocationReason reason)
+    {
+        Check.NotNullOrWhiteSpace(groupKey);
+
+        if (userId == Guid.Empty)
+        {
+            return 0;
+        }
+
+        // 理由同 RevokeUserSessionsAsync：令牌按会话 id 直接删，范围判断不能交给会话服务。
+        if (!await _scope.ContainsAsync(userId))
+        {
+            LogWarning("Refused to revoke a session group of user {UserId}: not within the caller's tenant scope.", userId);
+            return 0;
+        }
+
+        // 连已撤销的一起取：它们若还留着刷新令牌，正好在这里一并清掉（同 RevokeSessionAsync 的口径）。
+        var sessions = await _sessionService.GetUserSessionsAsync(userId, includeRevoked: true);
+        var members = sessions.Succeeded && sessions.Data != null
+            ? sessions.Data.Where(s => string.Equals(s.GroupKey, groupKey, StringComparison.Ordinal)).ToList()
+            : [];
+
+        var sessionCount = 0;
+        foreach (var member in members.Where(s => !s.IsRevoked))
+        {
+            if ((await _sessionService.RevokeSessionAsync(member.Id)).Succeeded)
+            {
+                sessionCount++;
+            }
+        }
+
+        var tokenCount = await _authTokenService.RemoveSessionTokensAsync(members.Select(s => s.Id).ToList());
+
+        await PublishRevokedAsync(userId, sessionCount, tokenCount, reason, excludedSessionId: null, groupKey);
+
+        LogInformation(
+            "Session group revoked for user {UserId} (reason: {Reason}): {SessionCount} sessions, {TokenCount} tokens",
+            userId, reason, sessionCount, tokenCount);
+
+        return sessionCount;
+    }
+
+    /// <inheritdoc />
     public async Task<int> RevokeInactiveSessionsAsync(TimeSpan inactiveThreshold)
     {
         var cleaned = await _sessionService.CleanInactiveSessionsAsync(inactiveThreshold);
@@ -135,7 +178,7 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
     }
 
     private async Task PublishRevokedAsync(
-        Guid userId, int sessionCount, int tokenCount, SessionRevocationReason reason, Guid? excludedSessionId)
+        Guid userId, int sessionCount, int tokenCount, SessionRevocationReason reason, Guid? excludedSessionId, string? groupKey = null)
     {
         // 一次都没踢到、也没删到令牌，就没有发生任何事，不必制造一条噪声事件。
         if (_eventBus == null || (sessionCount == 0 && tokenCount == 0))
@@ -150,6 +193,7 @@ public class SessionRevocationService : ApplicationService, ISessionRevocationSe
             TokenCount = tokenCount,
             Reason = reason,
             ExcludedSessionId = excludedSessionId,
+            GroupKey = groupKey,
             RevokedTime = DateTime.UtcNow
         }, cancellationToken: default);
     }

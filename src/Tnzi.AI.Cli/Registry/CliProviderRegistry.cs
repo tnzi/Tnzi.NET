@@ -70,7 +70,8 @@ public class CliProviderRegistry : ICliProviderRegistry
                 SkillsRelativePath = custom.SkillsRelativePath,
                 LaunchHeader = custom.LaunchHeader,
                 // 自定义 provider 一律 fail-closed：框架没验证过它能否区分 resume 被拒，
-                // 于是「分不清」，于是不做 fresh-session 重试。
+                // 于是 stream-json 适配器不拿内置 provider 实测出来的短语与佐证去猜，不做 fresh-session 重试。
+                // ACP 不受这一位影响：那里只认 JSON-RPC 错误里明说的「会话不存在」，那是正面证据而不是猜测。
                 ResumeRejectionDetectable = false,
                 RequiresInlineSystemPrompt = string.IsNullOrWhiteSpace(custom.BriefFileName),
                 BlockedArgs = ProtocolBlockedArgs(custom.Protocol),
@@ -83,7 +84,21 @@ public class CliProviderRegistry : ICliProviderRegistry
                 ExcludeUserSettingsArgs = custom.ExcludeUserSettingsArgs.ToList(),
                 ConfigDirectoryEnvironmentVariable = custom.ConfigDirectoryEnvironmentVariable,
                 UserConfigIsolation = custom.UserConfigIsolation,
-                ConfigDirectory = custom.ConfigDirectory
+                ConfigDirectory = custom.ConfigDirectory,
+                LaunchArgsWithoutAutoApproval = custom.LaunchArgsWithoutAutoApproval.Count > 0
+                    ? custom.LaunchArgsWithoutAutoApproval.ToList()
+                    : null,
+                ProjectDirectoryNameEnvironmentVariable = custom.ProjectDirectoryNameEnvironmentVariable,
+                SessionStorePaths = custom.SessionStorePaths.ToList(),
+                AppendSystemPromptFileArg = custom.AppendSystemPromptFileArg,
+                AddDirectoryArg = custom.AddDirectoryArg,
+                BuiltInToolsArg = custom.BuiltInToolsArg,
+                SettingSourcesArg = custom.SettingSourcesArg,
+                SettingsArg = custom.SettingsArg,
+                SessionRetentionSettingName = custom.SessionRetentionSettingName,
+                MinimumVersion = custom.MinimumVersion,
+                MaximumVersion = custom.MaximumVersion,
+                AllowFallbackAuthTokenOnRemoteTargets = custom.AllowFallbackAuthTokenOnRemoteTargets
             };
         }
 
@@ -104,7 +119,10 @@ public class CliProviderRegistry : ICliProviderRegistry
             DefaultModel = overrides.DefaultModel,
             ExtraArgs = overrides.ExtraArgs.ToList(),
             UserConfigIsolation = overrides.UserConfigIsolation,
-            ConfigDirectory = overrides.ConfigDirectory
+            ConfigDirectory = overrides.ConfigDirectory,
+            MinimumVersion = overrides.MinimumVersion,
+            MaximumVersion = overrides.MaximumVersion,
+            AllowFallbackAuthTokenOnRemoteTargets = overrides.AllowFallbackAuthTokenOnRemoteTargets
         };
     }
 

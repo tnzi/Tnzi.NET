@@ -202,7 +202,22 @@ async function refresh() {
   }
 }
 
+// The selected feature's stats and trend are last-wins: clicking feature A then
+// feature B must not let A's late answer chart A's usage under B's name. They
+// are counted apart because the period select re-reads only the trend: one
+// shared counter let a period switch drop the stats the selection was still
+// waiting for, leaving the KPI row on the previous feature.
+let statsSeq = 0
+let trendSeq = 0
+
 async function select(featureName: string) {
+  const statsMine = ++statsSeq
+  const trendMine = ++trendSeq
+  // Another feature: nothing of the previous one stays under this name while it loads.
+  if (featureName !== selected.value) {
+    stats.value = null
+    trend.value = []
+  }
   selected.value = featureName
   trendLoading.value = true
   try {
@@ -211,24 +226,26 @@ async function select(featureName: string) {
       bridge.usage.stats(featureName, query),
       bridge.usage.trend(featureName, period.value, query),
     ])
-    stats.value = s
-    trend.value = tr
+    if (statsMine === statsSeq) stats.value = s
+    if (trendMine === trendSeq) trend.value = tr
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    if (statsMine === statsSeq) message.error(err instanceof Error ? err.message : String(err))
   } finally {
-    trendLoading.value = false
+    if (trendMine === trendSeq) trendLoading.value = false
   }
 }
 
 async function loadTrend() {
   if (!selected.value) return
+  const mine = ++trendSeq
   trendLoading.value = true
   try {
-    trend.value = await bridge.usage.trend(selected.value, period.value, toRangeQuery(range.value))
+    const loaded = await bridge.usage.trend(selected.value, period.value, toRangeQuery(range.value))
+    if (mine === trendSeq) trend.value = loaded
   } catch (err) {
-    message.error(err instanceof Error ? err.message : String(err))
+    if (mine === trendSeq) message.error(err instanceof Error ? err.message : String(err))
   } finally {
-    trendLoading.value = false
+    if (mine === trendSeq) trendLoading.value = false
   }
 }
 

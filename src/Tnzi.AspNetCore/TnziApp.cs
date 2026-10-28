@@ -56,7 +56,7 @@ public static class TnziApp
     /// var app = await TnziApp.CreateAsync&lt;StartupModule&gt;(
     ///     args,
     ///     options => {
-    ///         options.EnableDiagnostics = true;
+    ///         options.EnableModuleDependencyAudit = true;
     ///     },
     ///     builder => {
     ///         // 自定义 builder 配置
@@ -197,16 +197,7 @@ public static class TnziApp
     public static async Task RunAsync<TStartupModule>(string[] args)
         where TStartupModule : ITnziModule
     {
-        try
-        {
-            var app = await CreateAsync<TStartupModule>(args);
-            await app.RunAsync();
-        }
-        catch (Exception ex)
-        {
-            WriteStartupError(ex);
-            throw;
-        }
+        await RunAsync<TStartupModule>(args, null, null, null);
     }
 
     /// <summary>
@@ -221,7 +212,7 @@ public static class TnziApp
     /// <code>
     /// await TnziApp.RunAsync&lt;StartupModule&gt;(
     ///     args,
-    ///     options => options.EnableDiagnostics = true
+    ///     options => options.EnableModuleDependencyAudit = true
     /// );
     /// </code>
     /// TnziOptions 也可经 "Tnzi" 配置节设置（代码回调优先）。
@@ -233,14 +224,21 @@ public static class TnziApp
         Func<WebApplication, Task>? configureApp = null)
         where TStartupModule : ITnziModule
     {
+        // 配置在建 builder 时就拿到手：失败可能发生在容器建成之前，那时读不到 IOptions<TnziOptions>
+        IConfiguration? configuration = null;
         try
         {
-            var app = await CreateAsync<TStartupModule>(args, configureOptions, configureBuilder, configureApp);
+            var builder = WebApplication.CreateBuilder(args);
+            configuration = builder.Configuration;
+            ConfigureTnziOptions(builder, configureOptions);
+            configureBuilder?.Invoke(builder);
+
+            var app = await BuildAndInitializeAsync<TStartupModule>(builder, configureApp);
             await app.RunAsync();
         }
         catch (Exception ex)
         {
-            WriteStartupError(ex);
+            WriteStartupError(ex, ShouldWriteStartupErrorLog(configuration, configureOptions));
             throw;
         }
     }
@@ -248,9 +246,36 @@ public static class TnziApp
     private const string StartupErrorLogFileName = "startup-error.log";
 
     /// <summary>
-    /// 格式化输出启动错误到控制台和文件
+    /// 启动失败时是否写 <c>startup-error.log</c>：按 "Tnzi" 配置节与代码回调即时算一份 <see cref="TnziOptions"/>
+    /// （回调优先，与容器里的 <c>IOptions&lt;TnziOptions&gt;</c> 一致）。配置还没建起来、或绑定本身出错（往往就是
+    /// 这次启动失败的原因）时按默认值写文件。
     /// </summary>
-    private static void WriteStartupError(Exception ex)
+    private static bool ShouldWriteStartupErrorLog(IConfiguration? configuration, Action<TnziOptions>? configureOptions)
+    {
+        var defaultValue = new TnziOptions().WriteStartupErrorLog;
+        if (configuration == null)
+        {
+            return defaultValue;
+        }
+
+        try
+        {
+            var options = new TnziOptions();
+            configuration.GetSection("Tnzi").Bind(options);
+            configureOptions?.Invoke(options);
+            return options.WriteStartupErrorLog;
+        }
+        catch (Exception)
+        {
+            // 启动错误本身照常输出到控制台并向上抛出，这里只决定要不要另外落盘
+            return defaultValue;
+        }
+    }
+
+    /// <summary>
+    /// 格式化输出启动错误到控制台，按 <paramref name="writeLogFile"/> 决定是否同时写入文件
+    /// </summary>
+    private static void WriteStartupError(Exception ex, bool writeLogFile)
     {
         var sb = new StringBuilder();
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
@@ -314,6 +339,11 @@ public static class TnziApp
         }
 
         // 写入 startup-error.log（IIS/Docker/Service 场景保底）
+        if (!writeLogFile)
+        {
+            return;
+        }
+
         try
         {
             var logPath = Path.Combine(AppContext.BaseDirectory, StartupErrorLogFileName);

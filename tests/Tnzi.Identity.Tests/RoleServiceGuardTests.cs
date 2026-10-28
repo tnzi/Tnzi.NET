@@ -7,7 +7,7 @@ namespace Tnzi.Identity.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ★★★ 守的是一条顺序提权：成员变更早有委托护栏（<c>CanManageRoleAsync</c>），
+/// ★★★ 守的是一条顺序提权：成员变更早有委托护栏（<c>CanManageRoleMembershipAsync</c>），
 /// 但它读的是角色<b>当时的名字</b>。于是把顺序倒过来就能绕开 ——
 /// ①建一个零权限的普通角色（空集被任何人包含，护栏平凡通过）
 /// ②把自己加进去（同上）
@@ -45,6 +45,8 @@ public class RoleServiceGuardTests
 
         _authMock.Setup(x => x.GetSuperAdminRoleNames()).Returns([SuperAdminRoleName]);
         _authMock.Setup(x => x.IsSuperAdminAsync(It.IsAny<Guid>())).ReturnsAsync(false);
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
+        // 矩阵版本恒放行：下面拒绝的用例只能是成员版本（休眠授权一并计入）拒的。
         _authMock.Setup(x => x.CanManageRoleAsync(It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(true);
 
         _currentUserMock.Setup(x => x.Id).Returns(_actorId);
@@ -55,9 +57,13 @@ public class RoleServiceGuardTests
         serviceProvider.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactory.Object);
         serviceProvider.Setup(x => x.GetService(typeof(ICurrentUser))).Returns(_currentUserMock.Object);
 
+        // 删除角色前要先取成员（发成员变更事件用）；这里的角色都没有成员。
+        var dbContext = new Mock<DbContext>();
+        dbContext.Setup(x => x.Set<UserRole>()).Returns(new List<UserRole>().BuildMockDbSet().Object);
+
         _service = new RoleService(
             _roleManagerMock.Object,
-            new Mock<DbContext>().Object,
+            dbContext.Object,
             serviceProvider.Object,
             _authMock.Object);
     }
@@ -123,7 +129,7 @@ public class RoleServiceGuardTests
     public async Task Update_OnANonDominatedRole_IsRejected()
     {
         var role = ArrangeExistingRole("Finance");
-        _authMock.Setup(x => x.CanManageRoleAsync(_actorId, role.Id)).ReturnsAsync(false);
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(_actorId, role.Id)).ReturnsAsync(false);
 
         var result = await _service.UpdateAsync(role.Id, new UpdateRoleDto { Name = "Finance2" });
 
@@ -137,7 +143,7 @@ public class RoleServiceGuardTests
     public async Task Delete_OnANonDominatedRole_IsRejected()
     {
         var role = ArrangeExistingRole("Finance");
-        _authMock.Setup(x => x.CanManageRoleAsync(_actorId, role.Id)).ReturnsAsync(false);
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(_actorId, role.Id)).ReturnsAsync(false);
 
         var result = await _service.DeleteAsync(role.Id);
 
@@ -146,13 +152,57 @@ public class RoleServiceGuardTests
         _roleManagerMock.Verify(x => x.DeleteAsync(It.IsAny<Role>()), Times.Never);
     }
 
+    /// <summary>
+    /// ★ 批量删除与单个删除同一道护栏，且一条越权整批不删：此前批量入口没有护栏，
+    /// 把强角色夹进批量里就绕开了 DeleteAsync 的拒绝。
+    /// </summary>
+    [Fact]
+    public async Task DeleteMany_WithANonDominatedRole_DeletesNothing()
+    {
+        var weak = ArrangeExistingRole("Interns");
+        var strong = ArrangeExistingRole("Finance");
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(_actorId, strong.Id)).ReturnsAsync(false);
+
+        var result = await _service.DeleteManyAsync([weak.Id, strong.Id]);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        _roleManagerMock.Verify(x => x.DeleteAsync(It.IsAny<Role>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteMany_OfDominatedRoles_DeletesThem()
+    {
+        var a = ArrangeExistingRole("Interns");
+        var b = ArrangeExistingRole("Volunteers");
+
+        (await _service.DeleteManyAsync([a.Id, b.Id])).Succeeded.ShouldBeTrue();
+
+        _roleManagerMock.Verify(x => x.DeleteAsync(It.IsAny<Role>()), Times.Exactly(2));
+    }
+
+    /// <summary>★ 设默认角色与 UpdateAsync 改 IsDefault 是同一件事，同一道护栏（此前这个入口没有）。</summary>
+    [Fact]
+    public async Task SetDefault_OnANonDominatedRole_IsRejected()
+    {
+        var role = ArrangeExistingRole("Finance");
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(_actorId, role.Id)).ReturnsAsync(false);
+
+        var result = await _service.SetDefaultAsync(role.Id, true);
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        role.IsDefault.ShouldBeFalse();
+        _roleManagerMock.Verify(x => x.UpdateAsync(It.IsAny<Role>()), Times.Never);
+    }
+
     /// <summary>超管本人不受支配判定约束（它支配一切角色）。</summary>
     [Fact]
     public async Task Update_BySuperAdmin_SkipsTheDominationCheck()
     {
         var role = ArrangeExistingRole("Finance");
         _authMock.Setup(x => x.IsSuperAdminAsync(_actorId)).ReturnsAsync(true);
-        _authMock.Setup(x => x.CanManageRoleAsync(_actorId, role.Id)).ReturnsAsync(false);
+        _authMock.Setup(x => x.CanManageRoleMembershipAsync(_actorId, role.Id)).ReturnsAsync(false);
 
         var result = await _service.UpdateAsync(role.Id, new UpdateRoleDto { Name = "Finance2" });
 

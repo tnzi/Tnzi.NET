@@ -12,8 +12,11 @@ public class ThreadQuotaUsage
     /// <summary>
     /// Total non-rejected <c>bash</c> invocations admitted in the current window.
     /// Counts every command that passed the quota pre-flight (reserved a slot),
-    /// including ones that later exit non-zero - only quota/blacklist-denied
-    /// commands are excluded.
+    /// including ones that later exit non-zero and ones the command blacklist
+    /// rejects: the blacklist is evaluated inside the sandbox provider, after the
+    /// slot is reserved, so an agent cannot probe the blacklist for free. Only
+    /// quota denials and path-escape denials (both decided before the reservation)
+    /// are excluded.
     /// </summary>
     public long CommandCount { get; init; }
 

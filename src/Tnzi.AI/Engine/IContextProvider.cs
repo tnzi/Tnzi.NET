@@ -37,9 +37,16 @@ public interface IContextProvider
     Task<ContextInjection> GetContextAsync(List<ChatMessage> messages, CancellationToken ct = default);
 
     /// <summary>
-    /// 在 Agent 执行后回调（可选，用于保存新消息到向量存储等）
+    /// 在 Agent 执行后回调（可选，用于保存新消息到向量存储、提炼记忆等）
     /// </summary>
-    /// <param name="messages">完整消息列表（含 Agent 回复）</param>
+    /// <remarks>
+    /// 只在这一轮以答复收场时调用（被拒、失败类结局不调用）。令牌不是请求的令牌：客户端断开后回调仍会跑完，
+    /// 时限由框架另设。
+    /// </remarks>
+    /// <param name="messages">
+    /// 完成的这一轮：已加载的历史（纯文本）+ 注入的系统消息 + 本轮用户消息（守卫放行后的文本）+ 本轮答复（最后一条 Assistant 消息）。
+    /// 不含本轮的工具调用与工具结果。
+    /// </param>
     /// <param name="ct">取消令牌</param>
     Task OnCompletedAsync(List<ChatMessage> messages, CancellationToken ct = default) => Task.CompletedTask;
 }

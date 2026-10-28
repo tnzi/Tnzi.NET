@@ -61,7 +61,7 @@
   <TDetailHost :state="entryDetail" :title="editorTitle" :width="920" :footer="false" :translate="t">
     <DocumentEditor
       :key="editorSeq"
-      :kind="kind === 'estimate' ? 'sales' : 'expense'"
+      kind="sales"
       :entry="editingEntry"
       :party-label="t('form.party')"
       :party-options="partyOptions"
@@ -126,6 +126,7 @@ import { useAdminClient } from '../../../plugin/client'
 import { createFinanceOptionSources } from '../options'
 import { buildOfferColumns, offerStatusCell, type OfferRow } from '../offer-config'
 import { fmtDate, fmtMoney, moneyCell, tsToIsoDate } from '../money'
+import { useViewedRecord } from '../viewed-record'
 import {
   createFinanceBridge,
   FinanceOfferStatus,
@@ -158,7 +159,13 @@ const secondDateLabel = computed(() => (isEstimate.value ? t('columns.expiryDate
 const partyOptions = computed(() => (isEstimate.value ? sources.customerOptions.value : sources.vendorOptions.value))
 
 const columns = computed(() => buildOfferColumns(t, props.kind, (row) => crud.openView(row)))
-const viewed = ref<OfferDto | null>(null)
+// The full document behind the read-only drawer. Last-wins: a late answer for
+// the row opened before must not paint the drawer of the one open now.
+const viewing = useViewedRecord<OfferDto>(
+  async (id) => (await api.value.getById(id)) as OfferDto | null,
+  (error) => message.error(error),
+)
+const viewed = viewing.record
 
 function partyName(row: OfferRow): string | null | undefined {
   return isEstimate.value ? row.customerName : row.vendorName
@@ -172,12 +179,12 @@ function statusCell(status?: FinanceOfferStatus): Component {
   return { render: () => offerStatusCell(status, t) }
 }
 
-const lineColumns = computed<DataTableColumns<Record<string, unknown>>>(() => [
+const lineColumns = computed<DataTableColumns<OfferDto['lines'][number]>>(() => [
   { key: 'lineNumber', title: '#', width: 50 },
-  { key: 'description', title: td('editor.description'), minWidth: 180, render: (r) => (r.description as string) ?? EMPTY_DASH },
+  { key: 'description', title: td('editor.description'), minWidth: 180, render: (r) => r.description ?? EMPTY_DASH },
   { key: 'quantity', title: td('editor.qty'), width: 80, align: 'right' },
-  { key: 'unitPrice', title: td('editor.price'), width: 110, align: 'right', render: (r) => moneyCell(r.unitPrice as number, viewed.value?.currency) },
-  { key: 'amount', title: td('editor.amount'), width: 120, align: 'right', render: (r) => moneyCell(r.amount as number, viewed.value?.currency, true) },
+  { key: 'unitPrice', title: td('editor.price'), width: 110, align: 'right', render: (r) => moneyCell(r.unitPrice, viewed.value?.currency) },
+  { key: 'amount', title: td('editor.amount'), width: 120, align: 'right', render: (r) => moneyCell(r.amount, viewed.value?.currency, true) },
 ])
 
 const crud = useCrudPage<OfferRow>({
@@ -190,16 +197,10 @@ const crud = useCrudPage<OfferRow>({
   deleteData: async (ids) => {
     for (const id of ids) await api.value.deleteDraft(String(id))
   },
-  onView: (row) => void loadViewed(row),
+  onView: (row) => void viewing.load(String(row.id ?? '')),
 })
 
 const detailTitle = (d: OfferRow) => d.number ?? t('detail.draftTitle')
-
-async function loadViewed(row: OfferRow) {
-  viewed.value = null
-  if (!row.id) return
-  viewed.value = (await api.value.getById(String(row.id))) as OfferDto | null
-}
 
 // ── Line editor ─────────────────────────────────────────────────
 const entryDetail = useDetail<OfferDto>({
@@ -259,6 +260,10 @@ async function saveEditor(payload: DocumentEditorPayload, send: boolean) {
     taxCodeId: l.taxCodeId,
   }))
 
+  // The update replaces the document: the internal note (and a purchase order's
+  // ship-to), which this editor has no field for, are carried from the record
+  // being edited rather than cleared.
+  const loaded = entryDetail.data.value?.id ? entryDetail.data.value : null
   const data = isEstimate.value
     ? ({
         customerId: payload.partyId!,
@@ -266,6 +271,7 @@ async function saveEditor(payload: DocumentEditorPayload, send: boolean) {
         expiryDate: payload.dueDate,
         currency: payload.currency,
         memo: payload.memo,
+        internalNote: loaded?.internalNote ?? null,
         lines,
       } as CreateEstimateDto)
     : ({
@@ -274,6 +280,8 @@ async function saveEditor(payload: DocumentEditorPayload, send: boolean) {
         expectedDate: payload.dueDate,
         currency: payload.currency,
         memo: payload.memo,
+        internalNote: loaded?.internalNote ?? null,
+        shipTo: loaded?.shipTo ?? null,
         lines,
       } as CreatePurchaseOrderDto)
 
@@ -400,12 +408,19 @@ const rowActions = computed<RowAction<OfferRow>[]>(() => [
   },
   {
     ...editAction(crud),
-    show: (row) => row.status !== FinanceOfferStatus.Converted && row.status !== FinanceOfferStatus.Closed,
+    // Replaces editAction's own `show` rather than composing with it: that one
+    // reads the list engine's `canUpdate`, which is false here because the
+    // editor saves through its own flow. So the update grant is checked here.
+    show: (row) =>
+      can(`${permissionBase.value}.update`) &&
+      row.status !== FinanceOfferStatus.Converted &&
+      row.status !== FinanceOfferStatus.Closed,
     onClick: (row) => void entryDetail.open('edit', String(row.id ?? '')),
   },
   // Only a draft can be deleted: once sent, the other side holds a copy of that
-  // number, and deleting it would leave a gap nobody can explain.
-  { ...deleteAction(crud), show: (row) => row.status === FinanceOfferStatus.Draft },
+  // number, and deleting it would leave a gap nobody can explain. Passed as an
+  // option so it composes with the delete grant check.
+  deleteAction(crud, { show: (row) => row.status === FinanceOfferStatus.Draft }),
 ])
 
 onMounted(() => {

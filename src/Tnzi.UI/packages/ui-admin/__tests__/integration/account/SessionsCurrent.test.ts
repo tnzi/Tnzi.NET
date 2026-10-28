@@ -108,6 +108,30 @@ describe('SessionsSection - current session', () => {
     expect(button.attributes('disabled')).toBeUndefined()
   })
 
+  it('★ a delegated session shows the label the app gave it and is marked as temporary access', async () => {
+    clientMock.token = jwtWith(OWN.id)
+    const DELEGATED = {
+      id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+      userId: 'u1',
+      deviceInfo: 'PortableClient / Windows',
+      ipAddress: '10.0.0.3',
+      creationTime: '2026-09-12T02:00:00Z',
+      lastActivityTime: '2026-09-12T02:30:00Z',
+      absoluteExpiresAt: '2026-09-15T02:00:00Z',
+      groupKey: 'pass:p1:d1',
+      label: 'Library computer',
+      isRevoked: false,
+    }
+    const { wrapper } = await mountSessions([OWN, DELEGATED])
+
+    const rows = wrapper.findAll('tbody tr')
+    const delegated = rows.find((r) => r.text().includes('Library computer'))!
+    const own = rows.find((r) => r.text().includes('This device'))!
+    expect(delegated.text()).toContain('Temporary access')
+    expect(delegated.findAll('button').some((b) => b.text() === 'Revoke')).toBe(true)
+    expect(own.text()).not.toContain('Temporary access')
+  })
+
   it('without a session-bound token nothing is marked and every row keeps its (confirmed) Revoke', async () => {
     clientMock.token = 'opaque'
     const { wrapper } = await mountSessions([OWN, OTHER])

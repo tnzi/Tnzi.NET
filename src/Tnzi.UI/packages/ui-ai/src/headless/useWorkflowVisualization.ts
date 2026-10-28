@@ -1,5 +1,9 @@
 /**
  * useWorkflowVisualization - Converts workflow definitions to @vue-flow nodes/edges
+ *
+ * Emits node type `custom` and edge type `animated` (or `default`), which
+ * `TWorkflowCanvas` renders as status cards and flowing edges without any
+ * slot: `<TWorkflowCanvas :nodes="nodes" :edges="edges" />`.
  */
 
 import { ref, computed, readonly, type Ref, type DeepReadonly } from 'vue';

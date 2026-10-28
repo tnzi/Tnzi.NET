@@ -60,11 +60,12 @@ public class ProviderOptions : AiProviderOptions
     public int? ContextWindowSize { get; set; }
 
     /// <summary>
-    /// 覆盖 <c>OpenAIChatClientProvider</c> 取用的命名 HttpClient；为空时按 <see cref="AiProviderOptions.Name"/>
+    /// 覆盖内建 <c>IChatClientProvider</c>（OpenAI / Anthropic）取用的命名 HttpClient；为空时按 <see cref="AiProviderOptions.Name"/>
     /// 取带 Polly 管线的客户端（<c>ResilientHttpClientNames</c>）。
     /// </summary>
     /// <remarks>
-    /// 只供程序内构造的一次性条目用（<c>AiUtilityService</c> 的调用方自带提供商）。刻意 <c>internal</c>：
+    /// 只由程序内设置：<c>AiUtilityService</c> 的调用方自带提供商，以及 <c>ChatClientFactory</c> 给租户自填端点的数据库行
+    /// 指定带 egress 检查的客户端（<c>ResilientHttpClientNames.TenantEndpoint</c>）。刻意 <c>internal</c>：
     /// 配置绑定只认公开属性，配置文件与数据库条目不可能设置它。
     /// </remarks>
     internal string? HttpClientName { get; set; }

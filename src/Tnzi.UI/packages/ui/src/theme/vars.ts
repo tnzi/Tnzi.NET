@@ -1,8 +1,21 @@
 import type { CssVarMap, ColorRole, PaletteLevel, ThemeColors } from './types'
-import { getColorPalette, colorToRgbTriplet } from './palette'
+import { getColorPalette, colorToRgbTriplet, getContrastTextColor, getReadableColor } from './palette'
 
 const ROLES: readonly ColorRole[] = ['primary', 'info', 'success', 'warning', 'error']
 const LEVELS: readonly PaletteLevel[] = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]
+
+/**
+ * The surfaces `--tnzi-primary-text-on-light` / `-on-dark` are guaranteed to
+ * read on (4.5:1): every light surface from white down to the light reference,
+ * every dark surface from black up to the dark reference.
+ *
+ * The light reference is a light grey rather than the page canvas because
+ * accent-coloured text also sits on side panels and rails a step darker than
+ * the canvas; a colour that reads there reads on every lighter surface. The
+ * dark reference is the lightest dark surface in the palette (the dark
+ * container, rgb(28, 28, 28)).
+ */
+export const READABLE_TEXT_BACKGROUND = { light: '#ebebeb', dark: '#1c1c1c' } as const
 
 /**
  * Generate the full CSS variable map for a theme given the base colors and mode.
@@ -12,6 +25,10 @@ const LEVELS: readonly PaletteLevel[] = [50, 100, 200, 300, 400, 500, 600, 700, 
  *   --tnzi-{role}-rgb          R G B triplet for `rgb(var(...) / α)` syntax
  *   --tnzi-{role}-{lvl}        palette level hex (50~950)
  *   --tnzi-{role}-{lvl}-rgb    palette level RGB triplet
+ *   --tnzi-on-primary          text / icons on a primary fill (white or a near-black ink)
+ *   --tnzi-primary-text-on-light / -on-dark
+ *                              the primary as text on light / dark surfaces (4.5:1);
+ *                              the stylesheet's `--tnzi-primary-text` picks one per mode
  *   --tnzi-base-text           primary text color
  *   --tnzi-layout-bg           body / layout background
  *   --tnzi-container-bg        card / container background
@@ -39,6 +56,13 @@ export function buildCssVars(
       vars[`--tnzi-${role}-${level}-rgb`] = colorToRgbTriplet(hex)
     }
   }
+
+  // Mode-independent on purpose: the fill is the same colour in both modes,
+  // and the text pair is resolved per mode by the stylesheet alias, so a
+  // writer that cannot follow the mode (an inline snapshot) still gets both.
+  vars['--tnzi-on-primary'] = getContrastTextColor(colors.primary)
+  vars['--tnzi-primary-text-on-light'] = getReadableColor(colors.primary, READABLE_TEXT_BACKGROUND.light)
+  vars['--tnzi-primary-text-on-dark'] = getReadableColor(colors.primary, READABLE_TEXT_BACKGROUND.dark)
 
   if (mode === 'light') {
     vars['--tnzi-base-text'] = 'rgb(51, 54, 57)'

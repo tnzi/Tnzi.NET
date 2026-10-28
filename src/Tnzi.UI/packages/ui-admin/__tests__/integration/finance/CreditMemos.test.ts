@@ -64,6 +64,7 @@ vi.mock('../../../src/services/bridges/finance-bridge', async (importOriginal) =
 })
 
 import Page from '../../../src/pages/finance/CreditMemos.vue'
+import { applyDocumentSearch } from './document-search.helper'
 
 const stubs = {
   Card: { name: 'Card', template: '<div><slot /></div>' },
@@ -94,5 +95,37 @@ describe('Finance CreditMemos page', () => {
     mount(Page, { global: { stubs } })
     await flushPromises()
     expect(fetchList.mock.calls.length).toBeGreaterThan(0)
+  })
+  // The list endpoint binds its filters by name: credit memos filter by customer (`customerId`), and a
+  // key it does not declare is dropped without an error, so the list would
+  // claim to be filtered while showing every party. The date goes out as the
+  // picked calendar day; the picker's epoch number fails model binding.
+  it('the advanced search filters by the party key the list endpoint binds, and a calendar date', async () => {
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const filters = await applyDocumentSearch(wrapper)
+    expect(filters).toEqual({ dateFrom: '2026-01-15', customerId: 'party-1' })
+  })
+
+  it('keeps Apply on a partly applied memo until its credit is used up', async () => {
+    // The first application moves a memo to PartiallyPaid, and the settlement
+    // service accepts a PartiallyPaid memo as a source again. This page is the
+    // only place a credit memo is applied from, so hiding Apply there strands
+    // the rest of the credit.
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { rowActions: Array<{ key: string; show?: (row: Record<string, unknown>) => boolean }> }
+    const byKey = Object.fromEntries(vm.rowActions.map((a) => [a.key, a]))
+
+    const posted = { id: 'm1', status: 'Posted', total: 500, appliedTotal: 0 }
+    const partlyApplied = { id: 'm2', status: 'PartiallyPaid', total: 500, appliedTotal: 200 }
+    const usedUp = { id: 'm3', status: 'Paid', total: 500, appliedTotal: 500 }
+
+    expect(byKey.apply!.show!(posted)).toBe(true)
+    expect(byKey.apply!.show!(partlyApplied)).toBe(true)
+    expect(byKey.apply!.show!(usedUp)).toBe(false)
+    // Void stays limited to a memo nothing has been applied from.
+    expect(byKey.void!.show!(posted)).toBe(true)
+    expect(byKey.void!.show!(partlyApplied)).toBe(false)
   })
 })

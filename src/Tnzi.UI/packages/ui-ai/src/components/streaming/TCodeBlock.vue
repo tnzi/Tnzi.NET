@@ -10,6 +10,9 @@ import { NButton } from 'naive-ui';
 import { computed, ref, onBeforeUnmount } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useCodeHighlight } from '../../headless/useCodeHighlight';
+import { useAiI18n } from '../../i18n/index';
+
+const t = useAiI18n();
 
 const props = withDefaults(defineProps<{
   code: string;
@@ -64,7 +67,7 @@ onBeforeUnmount(() => {
         <NButton
           text
           size="small"
-          :aria-label="isCopied ? 'Copied' : 'Copy code'"
+          :aria-label="isCopied ? t.chat.copied : t.chat.copyCode"
           @click="handleCopy"
         >
           <template #icon>
@@ -81,7 +84,7 @@ onBeforeUnmount(() => {
     <!-- Highlighted code -->
     <div
       v-if="isLoaded && highlightedHtml"
-      class="t-code-block__highlighted"
+      class="t-code-block__highlighted t-ai-scroll"
       :class="{ 't-code-block__highlighted--line-numbers': showLineNumbers }"
       v-html="highlightedHtml"
     />
@@ -89,7 +92,7 @@ onBeforeUnmount(() => {
     <!-- Fallback (plain text) -->
     <pre
       v-else
-      class="t-code-block__fallback"
+      class="t-code-block__fallback t-ai-scroll"
     ><code :class="language && `language-${language}`">{{ props.code }}</code></pre>
   </div>
 </template>
@@ -114,8 +117,10 @@ onBeforeUnmount(() => {
 .t-code-block__copy--done { color: var(--tnzi-ai-node-completed); }
 .t-code-block__highlighted {
   overflow-x: auto;
+  position: relative;
   padding: 12px;
   font-size: 14px;
+  line-height: var(--tnzi-ai-code-line-height, 1.5);
 }
 .t-code-block__highlighted :deep(pre) {
   background: transparent !important;
@@ -124,8 +129,10 @@ onBeforeUnmount(() => {
 }
 .t-code-block__fallback {
   overflow-x: auto;
+  position: relative;
   padding: 12px;
   font-size: 14px;
+  line-height: var(--tnzi-ai-code-line-height, 1.5);
   margin: 0;
 }
 </style>

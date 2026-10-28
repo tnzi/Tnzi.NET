@@ -14,7 +14,7 @@ import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
 import { createStorageBridge } from '../../services/bridges/storage-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 
 const totalFiles = ref<number>(0)
 const totalSizeBytes = ref<number>(0)
@@ -32,7 +32,7 @@ useWidgetData(async () => {
 })
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 
 function fmtBytes(bytes: number): string {

@@ -22,6 +22,8 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
     private readonly IDataProtectionProvider _dataProtection = new EphemeralDataProtectionProvider();
     private readonly Guid _tenantA = Guid.NewGuid();
     private readonly Guid _tenantB = Guid.NewGuid();
+    // 登记了一个与部署配置同名、端点指向自己服务器、不带密钥的行
+    private readonly Guid _tenantC = Guid.NewGuid();
 
     public ChatClientFactoryTenantIsolationTests()
     {
@@ -70,6 +72,18 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
                 Name = "Shared", ProviderType = "OpenAI", IsEnabled = true, Priority = 5,
                 Endpoint = "https://tenant-b-shared.example/v1", ApiKeyEncrypted = protector.Protect("key-b-shared"),
                 Scope = ResourceScope.Tenant, TenantId = _tenantB
+            },
+            new Provider
+            {
+                Name = "Hosted", ProviderType = "OpenAI", IsEnabled = true,
+                Endpoint = "https://attacker.example/v1", ApiKeyEncrypted = null,
+                Scope = ResourceScope.Tenant, TenantId = _tenantC
+            },
+            new Provider
+            {
+                Name = "SelfHosted", ProviderType = "OpenAI", IsEnabled = true,
+                Endpoint = "https://inference.internal.example/v1", ApiKeyEncrypted = null,
+                Scope = ResourceScope.System, TenantId = null
             });
         ctx.SaveChangesAsync().GetAwaiter().GetResult();
     }
@@ -83,7 +97,7 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private ChatClientFactory CreateFactory()
+    private ChatClientFactory CreateFactory(ILogger<ChatClientFactory>? logger = null)
     {
         var options = new AIOptions
         {
@@ -96,11 +110,29 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
                     BaseUrl = "https://config.example/v1"
                 },
                 ["Shared"] = new() { Name = "Shared", Enabled = true, ApiKey = "config-shared", DefaultModel = "gpt-4o" },
+                ["SelfHosted"] = new() { Name = "SelfHosted", Enabled = true, ApiKey = "config-self-hosted", DefaultModel = "llama" },
+                ["Hosted"] = new()
+                {
+                    Name = "Hosted", Enabled = true, ApiKey = "config-hosted", DefaultModel = "gpt-4o",
+                    BaseUrl = "https://hosted.example/v1"
+                },
                 // 配置里的主提供商，降级到 OpenAI —— 而 OpenAI 这个名字租户 A 有自己的行
                 ["Primary"] = new()
                 {
                     Name = "Primary", Enabled = true, ApiKey = "config-primary", DefaultModel = "gpt-4o",
                     BaseUrl = "https://primary.example/v1", FallbackProviders = ["OpenAI"]
+                },
+                // 配置里的主提供商，降级到 System 行 Shared（管理端可改它的端点）
+                ["PrimaryToShared"] = new()
+                {
+                    Name = "PrimaryToShared", Enabled = true, ApiKey = "config-primary", DefaultModel = "gpt-4o",
+                    BaseUrl = "https://primary.example/v1", FallbackProviders = ["Shared"]
+                },
+                // 降级到一个哪里都没有的提供商
+                ["PrimaryToMissing"] = new()
+                {
+                    Name = "PrimaryToMissing", Enabled = true, ApiKey = "config-primary", DefaultModel = "gpt-4o",
+                    BaseUrl = "https://primary.example/v1", FallbackProviders = ["Missing"]
                 }
             }
         };
@@ -108,7 +140,84 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
             new StaticOptionsMonitor<AIOptions>(options),
             [_provider],
             _serviceProvider.GetRequiredService<IServiceScopeFactory>(),
-            _log);
+            logger ?? _log);
+    }
+
+    /// <summary>
+    /// 租户管理员登记与部署配置同名的行、端点指向自己的服务器、不填密钥：此前合并时 <c>ApiKey = 行密钥 ?? 配置密钥</c>，
+    /// 宿主的密钥随每一次对话（含 IAiUtility 这类宿主级调用）发到租户的端点。
+    /// </summary>
+    [Fact]
+    public void TenantRowWithoutAKey_NeverBorrowsTheDeploymentKey_ForChat()
+    {
+        var log = new CapturingLogger(throwOnWarning: false);
+        var factory = CreateFactory(log);
+
+        AmbientTenant.Value = _tenantC;
+        factory.GetChatClient("Hosted");
+
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://attacker.example/v1");
+        _provider.LastOptions.ApiKey.ShouldBeNull();
+        _provider.AllOptions.ShouldNotContain(o => o.ApiKey == "config-hosted");
+        log.Entries.ShouldContain(e => e.Contains("never lent to tenant rows", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TenantRowWithoutAKey_NeverBorrowsTheDeploymentKey_ForEmbeddings()
+    {
+        var factory = CreateFactory(new CapturingLogger(throwOnWarning: false));
+
+        AmbientTenant.Value = _tenantC;
+        factory.GetEmbeddingGenerator("Hosted");
+
+        _provider.LastEmbeddingOptions!.BaseUrl.ShouldBe("https://attacker.example/v1");
+        _provider.LastEmbeddingOptions.ApiKey.ShouldBeNull();
+    }
+
+    [Fact]
+    public void SystemRowWithoutAKey_StillUsesTheDeploymentKey()
+    {
+        var factory = CreateFactory();
+
+        AmbientTenant.Value = _tenantC;
+        factory.GetChatClient("SelfHosted");
+
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://inference.internal.example/v1");
+        _provider.LastOptions.ApiKey.ShouldBe("config-self-hosted");
+    }
+
+    /// <summary>
+    /// 租户自填的端点：写入时的 EgressGuard 挡不住事后把 DNS 改指内网、端点回 307 指向内网，也没检查过守卫之前的存量行。
+    /// 运行时的连接必须走带连接期检查、不跟随重定向的客户端。
+    /// </summary>
+    [Fact]
+    public void TenantRowWithItsOwnEndpoint_ConnectsThroughTheEgressGuardedClient()
+    {
+        var factory = CreateFactory();
+
+        AmbientTenant.Value = _tenantA;
+        factory.GetChatClient("OpenAI");
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://tenant-a.example/v1");
+        _provider.LastOptions.HttpClientName.ShouldBe(ResilientHttpClientNames.TenantEndpoint);
+
+        factory.GetEmbeddingGenerator("OpenAI");
+        _provider.LastEmbeddingOptions!.HttpClientName.ShouldBe(ResilientHttpClientNames.TenantEndpoint);
+    }
+
+    [Fact]
+    public void SystemRowAndConfigurationEntry_KeepTheDeploymentClient()
+    {
+        // 宿主维护的端点（本地 Ollama / vLLM 是常见用法）不受连接期守卫约束
+        var factory = CreateFactory();
+
+        AmbientTenant.Value = _tenantC;
+        factory.GetChatClient("SelfHosted");
+        _provider.LastOptions!.HttpClientName.ShouldBeNull();
+
+        AmbientTenant.Value = _tenantB;
+        factory.GetChatClient("OpenAI");
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://config.example/v1");
+        _provider.LastOptions.HttpClientName.ShouldBeNull();
     }
 
     [Fact]
@@ -247,6 +356,82 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
         _provider.AllOptions.Skip(2).Select(o => o.BaseUrl).ShouldBe(["https://primary.example/v1", "https://tenant-a.example/v1"]);
     }
 
+    /// <summary>
+    /// 降级链跟着主提供商缓存。降级项的端点改了（密钥没变）而缓存键不变，
+    /// <c>InvalidateProvider("Shared")</c> 只清以 Shared 为主的条目，链就继续打旧端点直到进程重启。
+    /// </summary>
+    [Fact]
+    public async Task FallbackChain_FallbackEndpointEdited_InvalidateRebuildsTheChain()
+    {
+        var factory = CreateFactory();
+        AmbientTenant.Value = null;
+
+        var before = factory.GetChatClient("PrimaryToShared");
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://shared.example/v1");
+
+        await EditSystemSharedEndpointAsync("https://shared-edited.example/v1");
+        factory.InvalidateProvider("Shared");
+
+        var after = factory.GetChatClient("PrimaryToShared");
+        after.ShouldNotBeSameAs(before);
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://shared-edited.example/v1");
+    }
+
+    /// <summary>
+    /// 多实例时别的实例收不到 InvalidateProvider，只能等数据库缓存过期重读：
+    /// 重读到的新端点必须换出新链，而不是命中按旧键缓存的那条。
+    /// </summary>
+    [Fact]
+    public async Task FallbackChain_FallbackEndpointEdited_DatabaseCacheExpiry_RebuildsTheChain()
+    {
+        var factory = CreateFactory();
+        AmbientTenant.Value = null;
+
+        var before = factory.GetChatClient("PrimaryToShared");
+
+        await EditSystemSharedEndpointAsync("https://shared-elsewhere.example/v1");
+        factory.ExpireDatabaseProviderCacheForTesting();
+
+        var after = factory.GetChatClient("PrimaryToShared");
+        after.ShouldNotBeSameAs(before);
+        _provider.LastOptions!.BaseUrl.ShouldBe("https://shared-elsewhere.example/v1");
+
+        // 链没变时照常命中缓存
+        factory.GetChatClient("PrimaryToShared").ShouldBeSameAs(after);
+    }
+
+    /// <summary>
+    /// 降级链在每次 GetChatClient 时解析：一条指向不存在的提供商的规格此前每个请求都写一条带异常的 Error。
+    /// </summary>
+    [Fact]
+    public void FallbackChain_UnresolvableSpec_LogsTheErrorOnce()
+    {
+        var log = new CapturingLogger(throwOnWarning: false);
+        var factory = CreateFactory(log);
+        AmbientTenant.Value = null;
+
+        for (var i = 0; i < 3; i++)
+        {
+            factory.GetChatClient("PrimaryToMissing");
+        }
+
+        log.Entries.Count(e => e.StartsWith("[Error]", StringComparison.Ordinal) && e.Contains("'Missing'", StringComparison.Ordinal)).ShouldBe(1);
+
+        // InvalidateProvider（例如管理员刚把它登记上）之后，仍解析不了就再报一次
+        factory.InvalidateProvider("Missing");
+        factory.GetChatClient("PrimaryToMissing");
+        log.Entries.Count(e => e.StartsWith("[Error]", StringComparison.Ordinal) && e.Contains("'Missing'", StringComparison.Ordinal)).ShouldBe(2);
+    }
+
+    private async Task EditSystemSharedEndpointAsync(string endpoint)
+    {
+        using var scope = _serviceProvider.CreateScope();
+        var ctx = scope.ServiceProvider.GetRequiredService<SharedResourceMtDbContext>();
+        var row = ctx.Set<Provider>().IgnoreQueryFilters().Single(p => p.Name == "Shared" && p.TenantId == null);
+        row.Endpoint = endpoint;
+        await ctx.SaveChangesAsync();
+    }
+
     // ---------------------------------------------------------------------
     // stubs
     // ---------------------------------------------------------------------
@@ -265,13 +450,19 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
             return Mock.Of<IChatClient>();
         }
 
-        public IEmbeddingGenerator<string, Embedding<float>>? CreateEmbeddingGenerator(ProviderOptions options, string model) => null;
+        public ProviderOptions? LastEmbeddingOptions { get; private set; }
+
+        public IEmbeddingGenerator<string, Embedding<float>>? CreateEmbeddingGenerator(ProviderOptions options, string model)
+        {
+            LastEmbeddingOptions = options;
+            return Mock.Of<IEmbeddingGenerator<string, Embedding<float>>>();
+        }
 
         public object CreateNativeClient(ProviderOptions options) => new object();
     }
 
     /// <summary>工厂把库读失败吞成 Warning 后退回配置；测试失败时要能看见那条原因。</summary>
-    private sealed class CapturingLogger : ILogger<ChatClientFactory>
+    private sealed class CapturingLogger(bool throwOnWarning = true) : ILogger<ChatClientFactory>
     {
         public List<string> Entries { get; } = [];
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -279,7 +470,7 @@ public class ChatClientFactoryTenantIsolationTests : IDisposable
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             Entries.Add($"[{logLevel}] {formatter(state, exception)} {exception}");
-            if (logLevel >= LogLevel.Warning)
+            if (throwOnWarning && logLevel >= LogLevel.Warning)
                 throw new InvalidOperationException($"ChatClientFactory logged {logLevel}: {formatter(state, exception)}", exception);
         }
     }

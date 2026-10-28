@@ -76,7 +76,9 @@
   <!--
     The issued links. This overlay is the ONLY moment those tokens exist
     outside the recipients' inboxes: the store keeps hashes, so re-opening the
-    request will never show them again and re-sending invalidates them.
+    request will never show them again, and there is no way to re-issue a link
+    for a request that has gone out (a lost link means voiding and starting a
+    new request).
   -->
   <TModalShell
     v-model:show="linksShow"
@@ -124,7 +126,7 @@
  * the consuming application. `send` therefore hands the operator the raw
  * one-time tokens.
  */
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NInputGroup, NProgress, NSelect } from 'naive-ui'
 import { TModalShell, TSvgIcon } from '@tnzi/ui'
 import { formatDateOnly } from '@tnzi/core'
@@ -133,6 +135,7 @@ import TItemCard, { type ItemCardTag } from '../../components/data/TItemCard.vue
 import TRowActions from '../../components/crud/TRowActions.vue'
 import RecipientsEditor from './components/RecipientsEditor.vue'
 import RequestDetail from './components/RequestDetail.vue'
+import SenderValuesEditor from './components/SenderValuesEditor.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { fetchAllPages } from '../../headless/fetchAllPages'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -147,7 +150,10 @@ import {
   ENVELOPE_STATUS_OPTIONS,
   envelopeColumns,
   envelopeStatusTone,
+  isRequiredAtCreate,
+  isSenderField,
 } from './signing-config'
+import { envelopeStatusLabel } from './signing-labels'
 import {
   EnvelopeStatus,
   isTerminalEnvelopeStatus,
@@ -155,6 +161,7 @@ import {
   type CreateSignerDto,
   type EnvelopeListDto,
   type IssuedSigningLink,
+  type TemplateFieldDto,
 } from '@tnzi/core/services/signing'
 
 const bridge = createSigningBridge({ client: useAdminClient() })
@@ -164,6 +171,8 @@ const { can } = usePermissionGuard()
 
 const crud = useCrudPage<EnvelopeListDto, string>({
   pageId: 'signing.requests',
+  // A request left alone on the switch is created sequential; the switch says so.
+  createDefaults: { isSequential: true },
   permission: { create: 'signing.request.create' },
   columns: envelopeColumns,
   rowKey: (r) => String(r.id ?? ''),
@@ -171,7 +180,16 @@ const crud = useCrudPage<EnvelopeListDto, string>({
   // No `loadDetailById`: the drawer loads its own record from the id (see
   // RequestDetail). A cold `?detail=view:<id>` still resolves - useDetail
   // retries against `items` once the first page arrives.
-  createData: (data) => bridge.requests.create(toCreate(data)),
+  createData: (data) => {
+    // A request cannot be edited after it is created, and send refuses while a
+    // required sender field is empty - so an empty one here would make a draft
+    // that can only ever be voided. Refuse before creating it.
+    const missing = missingSenderValues(data)
+    if (missing.length > 0) {
+      return Promise.reject(new Error(t('form.senderValuesMissing', { fields: missing.join(', ') })))
+    }
+    return bridge.requests.create(toCreate(data))
+  },
   // No updateData / deleteData: see the file header. Omitting them is what
   // makes the shell hide the edit and delete affordances.
 })
@@ -181,9 +199,9 @@ const searchFields = computed(() => [
     key: 'status',
     label: t('filters.status'),
     type: 'select' as const,
-    options: ENVELOPE_STATUS_OPTIONS.map((v) => ({ label: v, value: v })),
+    options: ENVELOPE_STATUS_OPTIONS.map((v) => ({ label: envelopeStatusLabel(v), value: v })),
   },
-  { key: 'hostEntityType', label: t('filters.hostEntityType'), type: 'input' as const },
+  { key: 'hostEntityType', label: t('filters.hostEntityType'), type: 'text' as const },
 ])
 
 const rowActions: RowAction<EnvelopeListDto>[] = [
@@ -195,29 +213,34 @@ const rowActions: RowAction<EnvelopeListDto>[] = [
     onClick: (row) => void sendRequest(row),
   },
   {
-    key: 'resend',
-    label: 'actions.resend',
-    // Re-issuing invalidates the links already out there, so it asks first.
-    confirm: 'actions.resendConfirm',
-    show: (row) =>
-      can('signing.request.update') &&
-      (row.status === EnvelopeStatus.Sent || row.status === EnvelopeStatus.InProgress),
-    onClick: (row) => void sendRequest(row),
-  },
-  {
     // Everyone signed but the seal step failed (a transient storage or
     // stamping error): the request sits in InProgress with every recipient
     // Signed and nobody able to re-submit. Sealing again is the recovery.
+    // Sent is included for single-recipient requests stranded by older
+    // versions, which never passed through InProgress; the server accepts both.
     key: 'seal',
     label: 'actions.seal',
     type: 'primary',
     confirm: 'actions.sealConfirm',
     show: (row) =>
       can('signing.request.update') &&
-      row.status === EnvelopeStatus.InProgress &&
+      (row.status === EnvelopeStatus.InProgress || row.status === EnvelopeStatus.Sent) &&
       row.recipientCount > 0 &&
       row.signedCount === row.recipientCount,
     onClick: (row) => void sealRequest(row),
+  },
+  {
+    // A completed request whose certificate or host archive failed at sealing
+    // (both are only logged then: the signed document stands). Sealing it again
+    // never re-seals - the hash is computed once - it only produces a missing
+    // certificate and hands the sealed document to its host record again. The
+    // list row cannot tell whether either step failed, so it is offered on
+    // every completed request and is harmless when nothing is missing.
+    key: 'finish',
+    label: 'actions.finish',
+    confirm: 'actions.finishConfirm',
+    show: (row) => can('signing.request.update') && row.status === EnvelopeStatus.Completed,
+    onClick: (row) => void finishRequest(row),
   },
   {
     key: 'void',
@@ -274,6 +297,17 @@ async function sealRequest(row: EnvelopeListDto): Promise<void> {
   }
 }
 
+async function finishRequest(row: EnvelopeListDto): Promise<void> {
+  if (!row.id) return
+  try {
+    await bridge.requests.seal(String(row.id))
+    message.success(t('actions.finishSuccess'))
+    await crud.refresh()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  }
+}
+
 async function voidRequest(row: EnvelopeListDto): Promise<void> {
   if (!row.id) return
   try {
@@ -289,9 +323,18 @@ async function voidRequest(row: EnvelopeListDto): Promise<void> {
 
 const createSchema: FormSchemaItem[] = [
   { key: 'templateId', label: 'form.template', type: 'custom', required: true },
-  { key: 'title', label: 'form.title', type: 'input' },
-  { key: 'hostEntityType', label: 'form.hostEntityType', type: 'input' },
-  { key: 'hostEntityId', label: 'form.hostEntityId', type: 'input' },
+  // Values for the fields the sender fills (no recipient role). Only shown once
+  // the chosen template turns out to have any.
+  {
+    key: 'prefilledValues',
+    label: 'form.senderValues',
+    type: 'signing-sender-values',
+    span: 'full',
+    visible: () => senderFields.value.length > 0,
+  },
+  { key: 'title', label: 'form.title', type: 'text' },
+  { key: 'hostEntityType', label: 'form.hostEntityType', type: 'text' },
+  { key: 'hostEntityId', label: 'form.hostEntityId', type: 'text' },
   { key: 'isSequential', label: 'form.isSequential', type: 'switch' },
   { key: 'expiresInDays', label: 'form.expiresInDays', type: 'number', min: 1, max: 365 },
   { key: 'recipients', label: 'form.recipients', type: 'recipients' },
@@ -316,6 +359,50 @@ async function loadTemplateOptions(): Promise<void> {
 }
 void loadTemplateOptions()
 
+// ── Sender values ─────────────────────────────────────────────────────────
+
+/** The chosen template's sender fields. The template list has no fields, so the full template is loaded on pick. */
+const senderFields = ref<TemplateFieldDto[]>([])
+
+// A request sequence number, so a slow response for a template the operator
+// has already switched away from cannot overwrite the current one.
+let senderSequence = 0
+
+watch(
+  () => (crud.formModal.formData.value as Record<string, unknown> | null)?.templateId as string | null | undefined,
+  async (templateId) => {
+    const ticket = ++senderSequence
+    senderFields.value = []
+    if (!templateId) return
+    try {
+      const template = await bridge.templates.getById(String(templateId))
+      if (ticket === senderSequence) senderFields.value = (template.fields ?? []).filter(isSenderField)
+    } catch {
+      // Without the fields the form simply offers no sender inputs; the backend
+      // still refuses to send a request whose required sender fields are empty.
+      if (ticket === senderSequence) senderFields.value = []
+    }
+  },
+)
+
+/** Labels of the required, unbound sender fields the form leaves empty. */
+function missingSenderValues(data: unknown): string[] {
+  const values = ((data ?? {}) as Record<string, unknown>).prefilledValues as Record<string, string | null> | undefined
+  return senderFields.value
+    .filter(isRequiredAtCreate)
+    .filter((f) => !(values?.[f.key] ?? '').trim())
+    .map((f) => f.label || f.key)
+}
+
+/** Only the current template's sender fields, and only those with a value: switching templates must not carry stale keys. */
+function senderValuesOf(data: Record<string, unknown>): Record<string, string | null> | undefined {
+  const values = data.prefilledValues as Record<string, string | null> | undefined
+  const entries = senderFields.value
+    .map((f) => [f.key, values?.[f.key] ?? null] as const)
+    .filter(([, value]) => value !== null && value.trim() !== '')
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
+}
+
 const fieldRenderers: Record<string, FieldRenderer> = {
   custom: (ctx) =>
     h(NSelect, {
@@ -325,6 +412,13 @@ const fieldRenderers: Record<string, FieldRenderer> = {
       clearable: true,
       placeholder: t('form.templatePlaceholder'),
       'onUpdate:value': (v: string | null) => ctx.onUpdate(v),
+    }),
+  'signing-sender-values': (ctx) =>
+    h(SenderValuesEditor, {
+      fields: senderFields.value,
+      modelValue: (ctx.value as Record<string, string | null> | null) ?? null,
+      translate: t,
+      'onUpdate:modelValue': (v: Record<string, string | null>) => ctx.onUpdate(v),
     }),
   recipients: (ctx) =>
     h(RecipientsEditor, {
@@ -345,6 +439,7 @@ function toCreate(data: unknown): CreateEnvelopeDto {
     isSequential: src.isSequential === undefined ? true : Boolean(src.isSequential),
     expiresInDays: Number(src.expiresInDays ?? 30),
     recipients: (src.recipients as CreateSignerDto[] | undefined) ?? [],
+    prefilledValues: senderValuesOf(src),
   }
 }
 
@@ -360,7 +455,7 @@ function progressOf(row: EnvelopeListDto): number {
 }
 
 function requestTags(row: EnvelopeListDto): ItemCardTag[] {
-  return [{ label: String(row.status), type: envelopeStatusTone(row.status) }]
+  return [{ label: envelopeStatusLabel(row.status), type: envelopeStatusTone(row.status) }]
 }
 </script>
 

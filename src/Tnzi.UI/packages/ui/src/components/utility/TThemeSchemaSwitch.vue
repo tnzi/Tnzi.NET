@@ -10,6 +10,7 @@
 import { computed, ref, watch } from 'vue'
 import type { ThemeMode } from '@tnzi/core/types'
 import { applyThemeModeToDocument } from '../../theme/document'
+import { resolveThemeMode } from '../../theme/naive-bridge'
 import TButtonIcon from '../display/TButtonIcon.vue'
 
 /**
@@ -71,9 +72,15 @@ function cycle(): void {
 
 watch(
   current,
-  (s) => {
+  (s, _prev, onCleanup) => {
     if (!props.applyDocumentClass) return
     applyThemeModeToDocument(s)
+    if (s !== 'auto') return
+    // 'auto' follows the OS for as long as it stays selected, not only the OS
+    // scheme at the moment it was picked. The listener goes when the value
+    // changes or the component unmounts.
+    const { cleanup } = resolveThemeMode('auto', (resolved) => applyThemeModeToDocument(resolved))
+    if (cleanup) onCleanup(cleanup)
   },
   { immediate: true },
 )

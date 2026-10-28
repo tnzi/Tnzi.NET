@@ -1,3 +1,5 @@
+using TemplateEntity = Tnzi.Template.Entities.Template;
+
 namespace Tnzi.Notification.Tests.Services;
 
 /// <summary>
@@ -32,8 +34,7 @@ public class NotificationServiceTemplateTests
         _optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
-            SmsMaxContentLength = 140,
-            Queue = new QueueOptions { Enabled = false },
+            Queue = new QueueOptions(),
             Retry = new RetryOptions { RetryDelaySeconds = 1 }
         });
 
@@ -62,6 +63,7 @@ public class NotificationServiceTemplateTests
             serviceProviderMock.Object,
             PassThroughOptOut(),
             PassThroughPreferences(),
+            new Mock<IRepository<Recipient, Guid>>().Object,
             null,
             _templateRenderServiceMock.Object
         );
@@ -238,22 +240,7 @@ public class NotificationServiceTemplateTests
     public async Task CreateAsync_WithTemplate_But_No_Render_Service_And_No_Raw_Content_Should_Fail()
     {
         // 同一条线的另一端：Template 模块没加载。有原始内容时照旧直接发；两手空空时同样不能发一封空的。
-        var serviceProviderMock = new Mock<IServiceProvider>();
-        var loggerFactoryMock = new Mock<ILoggerFactory>();
-        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
-        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
-
-        var withoutRenderer = new NotificationService(
-            _repositoryMock.Object,
-            new FixedProviderResolver(_emailSenderMock.Object, _smsSenderMock.Object, _pushSenderMock.Object, new Mock<IFaxSender>().Object),
-            new DefaultNotificationProviderSelector(),
-            _unitOfWorkMock.Object,
-            _optionsMock.Object,
-            serviceProviderMock.Object,
-            PassThroughOptOut(),
-            PassThroughPreferences(),
-            null,
-            templateRenderService: null);
+        var withoutRenderer = CreateServiceWith(templateRenderService: null);
 
         var request = new CreateNotificationRequest
         {
@@ -269,6 +256,132 @@ public class NotificationServiceTemplateTests
 
         result.Succeeded.ShouldBeFalse();
         _repositoryMock.Verify(r => r.InsertAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 同一条回落规则对<b>渲染期出错</b>（而不只是模板不存在）也成立。这里用真的渲染服务与引擎，
+    /// 不 mock：模板库里的模板对缺失字段取成员（一次空引用绑定），引擎把它包成异常，渲染服务必须落成失败的 Result。
+    /// 此前它原样重抛，带了原始主题与正文的创建直接以异常结束，文档承诺的回落从来没走到过。
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_WithTemplate_Runtime_Render_Error_Should_Fallback_To_Raw_Content()
+    {
+        using var renderer = BrokenTemplateRenderer.Create();
+        var service = CreateServiceWith(renderer.Service);
+
+        var request = new CreateNotificationRequest
+        {
+            Type = NotificationType.Email,
+            Subject = "Fallback Subject",
+            Content = "Fallback Content",
+            TemplateName = BrokenTemplateRenderer.TemplateName,
+            TemplateVariables = new Dictionary<string, object> { ["Name"] = "x" },
+            Recipients = new List<RecipientInput> { new RecipientInput { Address = "test@example.com", Name = "TestUser" } }
+        };
+
+        var result = await service.CreateAsync(request);
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldNotBeNull();
+        result.Data.Subject.ShouldBe("Fallback Subject");
+        result.Data.Content.ShouldBe("Fallback Content");
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithTemplate_Runtime_Render_Error_And_No_Raw_Content_Should_Fail_Not_Throw()
+    {
+        using var renderer = BrokenTemplateRenderer.Create();
+        var service = CreateServiceWith(renderer.Service);
+
+        var request = new CreateNotificationRequest
+        {
+            Type = NotificationType.Email,
+            TemplateName = BrokenTemplateRenderer.TemplateName,
+            TemplateVariables = new Dictionary<string, object> { ["Name"] = "x" },
+            Recipients = new List<RecipientInput> { new RecipientInput { Address = "test@example.com", Name = "TestUser" } }
+        };
+
+        var result = await service.CreateAsync(request);
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.NOTIFICATION_ERROR);
+        result.Message.ShouldNotBeNull();
+        result.Message.ShouldContain(BrokenTemplateRenderer.TemplateName);
+        _repositoryMock.Verify(r => r.InsertAsync(It.IsAny<Message>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private NotificationService CreateServiceWith(ITemplateRenderService? templateRenderService)
+    {
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>())).Returns(new Mock<ILogger>().Object);
+        serviceProviderMock.Setup(x => x.GetService(typeof(ILoggerFactory))).Returns(loggerFactoryMock.Object);
+
+        return new NotificationService(
+            _repositoryMock.Object,
+            new FixedProviderResolver(_emailSenderMock.Object, _smsSenderMock.Object, _pushSenderMock.Object, new Mock<IFaxSender>().Object),
+            new DefaultNotificationProviderSelector(),
+            _unitOfWorkMock.Object,
+            _optionsMock.Object,
+            serviceProviderMock.Object,
+            PassThroughOptOut(),
+            PassThroughPreferences(),
+            new Mock<IRepository<Recipient, Guid>>().Object,
+            null,
+            templateRenderService);
+    }
+
+    /// <summary>
+    /// 真的 <see cref="TemplateRenderService"/> + <see cref="RazorTemplateEngine"/>，模板库里只有一条渲染期必然出错的模板。
+    /// </summary>
+    private sealed class BrokenTemplateRenderer : IDisposable
+    {
+        public const string TemplateName = "BrokenWelcome";
+
+        private readonly MemoryCache _cache;
+        private readonly ServiceProvider _provider;
+
+        private BrokenTemplateRenderer(MemoryCache cache, ServiceProvider provider, TemplateRenderService service)
+        {
+            _cache = cache;
+            _provider = provider;
+            Service = service;
+        }
+
+        public TemplateRenderService Service { get; }
+
+        public static BrokenTemplateRenderer Create()
+        {
+            var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 100 });
+            var engine = new RazorTemplateEngine(
+                Microsoft.Extensions.Options.Options.Create(new TemplateOptions { TemplateRootPath = Path.GetTempPath() }),
+                new Mock<ILogger<RazorTemplateEngine>>().Object,
+                cache);
+
+            var store = new Mock<ITemplateStoreService>();
+            store
+                .Setup(s => s.GetTemplateAsync(TemplateName, "Notification", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Result<TemplateEntity>.Success(new TemplateEntity
+                {
+                    TemplateName = TemplateName,
+                    Module = "Notification",
+                    Category = "Email",
+                    Type = TemplateType.Email,
+                    SubjectTemplate = "Welcome @Model.Name",
+                    // 缺失的字段经 SafeDynamicObject 返回 null，再取成员就是渲染期的空引用绑定
+                    ContentTemplate = "Items: @Model.Items.Count",
+                    IsActive = true
+                }));
+
+            var provider = new ServiceCollection().AddLogging().BuildServiceProvider();
+            return new BrokenTemplateRenderer(cache, provider, new TemplateRenderService(provider, engine, store.Object));
+        }
+
+        public void Dispose()
+        {
+            _cache.Dispose();
+            _provider.Dispose();
+        }
     }
 
     [Fact]

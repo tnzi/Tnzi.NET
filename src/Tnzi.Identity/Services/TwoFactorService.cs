@@ -5,8 +5,11 @@ namespace Tnzi.Identity.Services;
 /// </summary>
 public partial class TwoFactorService : ApplicationService, ITwoFactorService
 {
+    /// <summary>
+    /// 验证尝试计数的窗口。固定 15 分钟：计数只在首次创建时定过期（见 <see cref="TryReserveAttemptAsync"/>），
+    /// 上限读 <see cref="OtpOptions.MaxAttempts"/>。
+    /// </summary>
     private static readonly TimeSpan TwoFactorFailureCacheExpiration = TimeSpan.FromMinutes(15);
-    private const int MaxTwoFactorFailureAttempts = 5;
 
     private readonly IRepository<TwoFactorCode, Guid> _repository;
     private readonly UserManager<User> _userManager;
@@ -14,6 +17,10 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     private readonly OtpOptions _otpOptions;
     private readonly PasskeyOptions _passkeyOptions;
     private readonly ICache? _cache;
+    private readonly IConfiguration? _configuration;
+
+    /// <summary>站点名没配时 otpauth URI 里的签发方。</summary>
+    private const string DefaultTotpIssuer = "Tnzi";
 
     public TwoFactorService(
         IRepository<TwoFactorCode, Guid> repository,
@@ -21,9 +28,11 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         IServiceProvider serviceProvider,
         IEventBus? eventBus = null,
         IOptionsSnapshot<IdentityOptions>? identityOptions = null,
-        ICache? cache = null)
+        ICache? cache = null,
+        IConfiguration? configuration = null)
         : base(serviceProvider)
     {
+        _configuration = configuration;
         _repository = Check.NotNull(repository);
         _userManager = Check.NotNull(userManager);
         _eventBus = eventBus;
@@ -34,33 +43,70 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     }
 
     /// <summary>
-    /// 验证失败计数的缓存键。<paramref name="scope"/> 是「针对谁」——
-    /// 有收件地址的方式用地址，TOTP 用用户 ID。
+    /// 验证尝试计数的缓存键。<paramref name="scope"/> 是「针对谁」：
+    /// 有收件地址的方式用<b>规范化后的</b>地址（<see cref="CanonicalAddress"/>），TOTP 用用户 ID。
     /// </summary>
     /// <remarks>
-    /// ★ 三个 helper 存在的理由是「两条验证路径必须受同一道闸门管辖」。
+    /// ★ 这组 helper 存在的理由是「两条验证路径必须受同一道闸门管辖」。
     /// 此前 TOTP 与 SMS/Email 各写各的（准确说 TOTP 一行都没写），
     /// 而两者给出不同的爆破成本是不可接受的 —— 用户看到的是同一个「两步验证」。
     /// </remarks>
     private static string FailureCacheKey(string scope, TwoFactorType type, VerificationCodePurpose purpose)
         => $"2FA_Verify_Fail_Count:{scope}:{(int)type}:{(int)purpose}";
 
-    /// <summary>是否已达失败上限。无缓存时恒为 false（见下方注释）。</summary>
-    private async Task<bool> IsFailureLockedOutAsync(string cacheKey)
+    /// <summary>
+    /// 验证码子系统里一个收件地址的规范形态：存储、查询、重发节流、失败计数四处只认这一种写法。
+    /// 邮箱按 <see cref="UserManager{TUser}.KeyNormalizer"/> 规范化（与账号解析 <c>FindByEmailAsync</c> 同一口径），
+    /// 手机号去掉全部空白。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 账号按规范化的邮箱解析，而节流与失败计数此前按请求原样的字符串分桶：<c>Victim@x.com</c>、
+    /// <c>victim@x.com </c> 解析到同一个账号，却各有一个重发桶、各有 5 次猜测；在不区分大小写（或忽略尾随空格）的
+    /// 排序规则下，每个变体查到的还是同一批码。于是「每个地址 5 次」从来不是「每个账号 5 次」，
+    /// 同时攒出上千枚有效码再逐个变体去猜，验证码找回密码几千次请求内就能命中。
+    /// 收窄只会让更多写法共用一个桶，不会让任何一种写法得到更多尝试，所以宁可多收不可少收。
+    /// </remarks>
+    private string CanonicalAddress(string address, TwoFactorType type)
     {
-        // ⚠ 无 ICache 时不设限。ICache 由核心 CachingModule 无条件注册，所以这一支
-        // 实际不发生；但要注意默认实现是**进程内**内存缓存 —— 多实例部署未加载 Redis 时，
-        // 上限是「每实例 5 次」而不是「全局 5 次」。这一条写进 docs/modules/identity.md。
-        if (_cache == null) return false;
-        return await _cache.GetCounterAsync(cacheKey) >= MaxTwoFactorFailureAttempts;
+        var trimmed = address.Trim();
+        if (type == TwoFactorType.Email)
+        {
+            return _userManager.KeyNormalizer?.NormalizeEmail(trimmed) ?? trimmed.ToUpperInvariant();
+        }
+
+        return string.Concat(trimmed.Where(c => !char.IsWhiteSpace(c))).ToUpperInvariant();
     }
 
-    /// <summary>记一次验证失败。</summary>
-    private async Task RecordFailureAsync(string cacheKey)
+    /// <summary>
+    /// 占用一次验证尝试：<b>先原子递增、再按递增后的值判定</b>。超出上限返回 false，调用方答 429 且不再验码。
+    /// </summary>
+    /// <remarks>
+    /// ★★★ 此前是「读计数 → 查库 / 验码 → 失败才递增」：同时在途的一批请求全都先读到同一个旧值，
+    /// 并发喷射的猜测在计数到上限之前就远超上限。计的是尝试而不是失败，验证成功时清零
+    /// （<see cref="ClearFailuresAsync"/>）；窗口固定（<c>IncrementAsync</c> 只在首次创建时定过期），
+    /// 被挡下之后的重试不会把锁定续长。
+    /// <para>
+    /// ⚠ 无 ICache 时不设限。ICache 由核心 CachingModule 无条件注册，所以这一支
+    /// 实际不发生；但要注意默认实现是**进程内**内存缓存：多实例部署未加载 Redis 时，
+    /// 上限是「每实例 N 次」而不是「全局 N 次」。这一条写进 docs/modules/identity.md。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> TryReserveAttemptAsync(string cacheKey)
     {
-        if (_cache == null) return;
-        await _cache.IncrementAsync(cacheKey, 1, TwoFactorFailureCacheExpiration);
+        if (_cache == null) return true;
+        var attempts = await _cache.IncrementAsync(cacheKey, 1, TwoFactorFailureCacheExpiration);
+        return attempts <= MaxAttempts;
     }
+
+    /// <summary>
+    /// 每个窗口内的尝试上限，取设置中心的 <c>Identity:Otp:MaxAttempts</c>（每请求热读）。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 此前这里是一个写死的 5，而那个设置项只有选项校验器读：管理员把它收紧到 3，设置中心答「已保存」，
+    /// 闸门照旧放 5 次。不足 1 按 1 处理：校验器挡得住配置文件里的 0，挡不住绕过校验写进来的值，
+    /// 而 0 会让每一次尝试都被拒、本人也永远验不过。
+    /// </remarks>
+    private int MaxAttempts => Math.Max(1, _otpOptions.MaxAttempts);
 
     /// <summary>验证成功，清掉失败记录。</summary>
     private async Task ClearFailuresAsync(string cacheKey)
@@ -126,7 +172,7 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
             // （运行时按 ±2 个时间步验证，任一时刻有 5 枚码同时有效）。
             // 键按 userId 而不是 address：TOTP 不绑任何联系地址。
             var totpFailureKey = FailureCacheKey(userId.ToString("N"), type, purpose);
-            if (await IsFailureLockedOutAsync(totpFailureKey))
+            if (!await TryReserveAttemptAsync(totpFailureKey))
             {
                 return TooManyAttempts();
             }
@@ -135,7 +181,6 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
                 user, _userManager.Options.Tokens.AuthenticatorTokenProvider, code);
             if (!isValid)
             {
-                await RecordFailureAsync(totpFailureKey);
                 return Fail("Invalid TOTP code", 400, ErrorCodes.VALIDATION_ERROR);
             }
 
@@ -502,7 +547,22 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         return Ok<string>("Two-factor method enabled successfully");
     }
 
-    public async Task<Result<TotpSetupDto>> GetTotpSetupInfoAsync(Guid userId)
+    public Task<Result<TotpSetupDto>> GetTotpSetupInfoAsync(Guid userId)
+        => BuildTotpSetupAsync(userId, reuseUnconfirmedKey: false);
+
+    /// <inheritdoc />
+    public Task<Result<TotpSetupDto>> GetOrCreateTotpSetupInfoAsync(Guid userId)
+        => BuildTotpSetupAsync(userId, reuseUnconfirmedKey: true);
+
+    /// <summary>
+    /// 交出登记验证器用的密钥与 otpauth URI。<paramref name="reuseUnconfirmedKey"/> 为 true 时，账号已有的那枚
+    /// （尚未确认的）密钥原样交回，没有才生成；为 false 时每次都换一枚新的。
+    /// </summary>
+    /// <remarks>
+    /// 复用是安全的：能走到这一步的账号没有启用验证器（已启用的在下面被 409 挡住），所以库里那枚密钥要么是
+    /// 关闭验证器时换上的、从没给任何人看过的随机值，要么是本人在这次（或上次没走完的）登记里拿到的那一枚。
+    /// </remarks>
+    private async Task<Result<TotpSetupDto>> BuildTotpSetupAsync(Guid userId, bool reuseUnconfirmedKey)
     {
         // 部署层关闭了验证器方式 → 不允许生成密钥/设置 TOTP(与短信/邮箱渠道关闭时一致)。
         if (!_otpOptions.EnableTotp)
@@ -524,14 +584,18 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
         if (user.AuthenticatorTwoFactorEnabled)
             return Fail<TotpSetupDto>("An authenticator is already enabled. Disable it before enrolling a new one.", 409, ErrorCodes.DATA_CONFLICT);
 
-        // 重置并获取 authenticator key。重置没落库时不能把密钥交出去：用户扫进验证器的是一枚库里没有的密钥，
-        // 下一步 totp/enable 必然失败，而症状是「验证码不对」。
-        var keyReset = await _userManager.ResetAuthenticatorKeyAsync(user);
-        if (!keyReset.Succeeded)
-            return SaveFailed<TotpSetupDto>(keyReset);
-        var unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+        var unformattedKey = reuseUnconfirmedKey ? await _userManager.GetAuthenticatorKeyAsync(user) : null;
         if (string.IsNullOrEmpty(unformattedKey))
-            return Fail<TotpSetupDto>("Failed to generate authenticator key", 500);
+        {
+            // 重置并获取 authenticator key。重置没落库时不能把密钥交出去：用户扫进验证器的是一枚库里没有的密钥，
+            // 下一步 totp/enable 必然失败，而症状是「验证码不对」。
+            var keyReset = await _userManager.ResetAuthenticatorKeyAsync(user);
+            if (!keyReset.Succeeded)
+                return SaveFailed<TotpSetupDto>(keyReset);
+            unformattedKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            if (string.IsNullOrEmpty(unformattedKey))
+                return Fail<TotpSetupDto>("Failed to generate authenticator key", 500);
+        }
 
         // 生成 otpauth URI
         var email = await _userManager.GetEmailAsync(user);
@@ -786,10 +850,15 @@ public partial class TwoFactorService : ApplicationService, ITwoFactorService
     /// <summary>
     /// 生成标准 otpauth:// URI（用于二维码扫描）
     /// </summary>
+    /// <remarks>
+    /// 签发方取部署方配置的站点名（<c>System:SiteName</c>，与邀请信、重置信同一个来源），没配才退回框架名。
+    /// 此前写死 <c>Tnzi</c>：每个消费应用的用户在验证器里看到的都是框架名，两个基于本框架的站点的条目分不清，
+    /// 输错码的人看不出是哪一个。签发方只在登记时写进验证器，改它不影响已经登记好的条目。
+    /// </remarks>
     private string GenerateQrCodeUri(string email, string unformattedKey)
     {
         const string authenticatorUriFormat = "otpauth://totp/{0}:{1}?secret={2}&issuer={0}&digits=6";
-        var issuer = Uri.EscapeDataString("Tnzi");
+        var issuer = Uri.EscapeDataString(SiteNameResolver.Resolve(_configuration, Logger) ?? DefaultTotpIssuer);
         var accountName = Uri.EscapeDataString(email);
         return string.Format(authenticatorUriFormat, issuer, accountName, unformattedKey);
     }

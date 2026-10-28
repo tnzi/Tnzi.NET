@@ -16,7 +16,8 @@ namespace Tnzi.Payment.Services;
 public interface IPaymentMethodService
 {
     /// <summary>
-    /// 创建绑卡会话
+    /// 创建绑卡会话。<paramref name="userId"/> 是经办人：卡记在他所代表的计费账户上（需要 <c>payment.account.manage</c>，
+    /// 只在 Installation / Tenant 范围下检查）。本接口其余以 <c>userId</c> 开头的用户面方法同理，读操作要查看权限。
     /// </summary>
     Task<Result<SetupSessionDto>> CreateSetupSessionAsync(Guid userId, CreateSetupSessionDto request, CancellationToken cancellationToken = default);
 
@@ -41,19 +42,43 @@ public interface IPaymentMethodService
     Task<Result> RemoveAsync(Guid userId, Guid paymentMethodId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取用户在指定渠道下的默认支付方式（内部调用：订阅创建/变更时取默认卡）
+    /// 获取计费账户在指定渠道下的默认支付方式（内部调用：订阅创建/变更时取默认卡）
     /// </summary>
-    Task<StoredPaymentMethod?> FindDefaultAsync(Guid userId, string channelCode, CancellationToken cancellationToken = default);
+    Task<StoredPaymentMethod?> FindDefaultAsync(BillingAccountRef account, string channelCode, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 按ID获取用户的支付方式（内部调用）
+    /// 按ID获取计费账户的支付方式（内部调用）
     /// </summary>
-    Task<StoredPaymentMethod?> FindByIdAsync(Guid userId, Guid paymentMethodId, CancellationToken cancellationToken = default);
+    Task<StoredPaymentMethod?> FindByIdAsync(BillingAccountRef account, Guid paymentMethodId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 登记支付方式并返回实体（内部调用：订阅创建时一步完成绑卡）
+    /// 登记支付方式并返回实体（内部调用：订阅创建时一步完成绑卡、付款时留存下来的卡）。不做权限检查：调用方已经认过账户。
     /// </summary>
-    Task<Result<StoredPaymentMethod>> BindEntityAsync(Guid userId, string channelCode, string paymentMethodToken, string? customerName, string? customerEmail, bool setAsDefault, CancellationToken cancellationToken = default);
+    /// <param name="account">卡归属的计费账户</param>
+    /// <param name="actingUserId">经办人（渠道回调里没有当前用户，传付款行上的经办人）</param>
+    /// <param name="channelCode">渠道代码</param>
+    /// <param name="paymentMethodToken">渠道侧支付方式标识</param>
+    /// <param name="customerName">需要新建渠道客户时的名称</param>
+    /// <param name="customerEmail">需要新建渠道客户时的邮箱</param>
+    /// <param name="setAsDefault">是否设为该账户在该渠道下的默认卡</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task<Result<StoredPaymentMethod>> BindEntityAsync(BillingAccountRef account, Guid actingUserId, string channelCode, string paymentMethodToken, string? customerName, string? customerEmail, bool setAsDefault, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 计费账户在指定渠道下已有的渠道客户（内部调用：建单时复用，让留存下来的卡挂在同一个客户名下）
+    /// </summary>
+    Task<string?> FindProviderCustomerIdAsync(BillingAccountRef account, string channelCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 浏览器端拉起渠道收银组件所需的公开配置（publishable key）。<paramref name="channelCode"/> 为空时取默认渠道。
+    /// </summary>
+    Result<PaymentClientConfigDto> GetClientConfig(string? channelCode);
+
+    /// <summary>
+    /// 渠道侧告知某张已保存的卡换了有效期 / 卡组织 / 尾号时刷新本地展示信息（内部调用：webhook 回调触发）。
+    /// 找不到对应记录时视为成功：同一个渠道账户可能还服务着别的应用。
+    /// </summary>
+    Task<Result> RefreshByTokenAsync(string channelCode, PaymentProviderPaymentMethodResult details, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 标记支付方式最近一次成功使用（内部调用：扣款成功后回写）

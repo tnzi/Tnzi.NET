@@ -25,6 +25,9 @@ public class BillingTestDbContext : TnziDbContext<BillingTestDbContext>
         modelBuilder.ApplyConfiguration(new PaymentConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceConfiguration());
         modelBuilder.ApplyConfiguration(new InvoiceLineItemConfiguration());
+        modelBuilder.ApplyConfiguration(new BillingAccountConfiguration());
+        // 存储替身的「文件记录」：插入随工作单元延迟落库，与真实存储的仓储同一种行为（见 StagedStorage）
+        modelBuilder.Entity<StagedDocument>(b => b.ToTable("Test_StagedDocument"));
 
         base.OnModelCreating(modelBuilder);
         TestHelper.ApplySqliteUtcDateTimeConverter(modelBuilder, Database.ProviderName);

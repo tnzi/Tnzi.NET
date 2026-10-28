@@ -19,15 +19,11 @@ public class SubAgentTypeConfiguration : EntityTypeConfigurationBase<SubAgentTyp
 
         // JSON 值转换列（与 AgentConfiguration 的 Domains/Roles 同模式）
         builder.Property(e => e.ToolGroups)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasJsonListConversion()
             .HasMaxLength(2000);
 
         builder.Property(e => e.ExcludedToolGroups)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasJsonListConversion()
             .HasMaxLength(2000);
 
         builder.Property(e => e.Instructions)
@@ -37,9 +33,7 @@ public class SubAgentTypeConfiguration : EntityTypeConfigurationBase<SubAgentTyp
             .HasMaxLength(200);
 
         builder.Property(e => e.CapabilityTags)
-            .HasConversion(
-                v => v == null ? null : JsonSerializer.Serialize(v, TnziJsonDefaults.Options),
-                v => v == null ? null : JsonSerializer.Deserialize<List<string>>(v, TnziJsonDefaults.Options))
+            .HasJsonListConversion()
             .HasMaxLength(1000);
 
         // 唯一索引：(TenantId, Name)

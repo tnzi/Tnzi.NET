@@ -29,7 +29,8 @@ public class WriteAbortCleanupTests : StorageIntegrationTestBase
             new TestFileUrlSigner(),
             ServiceProvider,
             CreateUploadGuard(Options()),
-            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(Options())));
+            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(Options())),
+            UnlimitedStorageQuota.Instance);
 
     [Fact]
     public async Task CopyAsync_InsertThrows_DeletesTheCopiedObject()
@@ -79,7 +80,8 @@ public class WriteAbortCleanupTests : StorageIntegrationTestBase
             new TestFileUrlSigner(),
             ServiceProvider,
             CreateUploadGuard(options),
-            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(options)));
+            new FileThumbnailGenerator(recorder, new StaticOptionsMonitor<StorageOptions>(options)),
+            UnlimitedStorageQuota.Instance);
         var png = TinyPng();
         var md5 = Convert.ToHexString(MD5.HashData(png)).ToLowerInvariant();
 

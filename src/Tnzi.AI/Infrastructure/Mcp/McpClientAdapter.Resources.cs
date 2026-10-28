@@ -1,509 +1,133 @@
+// 文件级：该命名空间的 Result / Prompt / Role 等类型与框架类型同名，不能放进全局 using
+using ModelContextProtocol.Protocol;
 
 namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
-/// <see cref="McpClientAdapter"/> 的资源/提示相关 partial - Resource/Prompt 的列举与读取（经 SDK 反射）。
+/// <see cref="McpClientAdapter"/> 的资源/提示相关 partial - Resource/Prompt 的列举与读取。
 /// </summary>
+/// <remarks>
+/// <para>
+/// 直接调用 SDK 的强类型 API。这四个方法返回 <c>ValueTask&lt;T&gt;</c>：此前经反射调用、只认 <c>Task</c> 的实现
+/// 把未等待的 ValueTask 本身当结果对象解析，对任何服务器都安静地返回空列表 / null（请求发出去了却没人等它）。
+/// </para>
+/// <para>
+/// 服务器没有声明对应能力（<c>resources</c> / <c>prompts</c>）时不发请求、直接返回空。
+/// 其余异常照常抛出，由 <see cref="McpProviderBase{TSelf}"/> 按服务器记录警告并跳过。
+/// </para>
+/// </remarks>
 internal sealed partial class McpClientAdapter
 {
     /// <inheritdoc />
     public async Task<IReadOnlyList<McpResourceInfo>> ListResourcesAsync(CancellationToken ct = default)
     {
-        try
+        if (!SupportsResources)
         {
-            if (_listResourcesMethod == null)
-            {
-                _logger.LogDebug("MCP server '{ServerName}' client does not support ListResourcesAsync", _serverName);
-                return Array.Empty<McpResourceInfo>();
-            }
-
-            var taskObj = InvokeWithCancellation(_listResourcesMethod, ct);
-            if (taskObj == null)
-            {
-                return Array.Empty<McpResourceInfo>();
-            }
-
-            var result = await AwaitAndExtractResultAsync(taskObj).ConfigureAwait(false);
-            return ConvertToResourceInfoList(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to list resources from MCP server '{ServerName}'", _serverName);
             return Array.Empty<McpResourceInfo>();
         }
+
+        var resources = await _client.ListResourcesAsync(cancellationToken: ct).ConfigureAwait(false);
+        return resources
+            .Where(r => !string.IsNullOrWhiteSpace(r.Uri))
+            .Select(r => new McpResourceInfo(r.Uri, r.Name, r.MimeType, r.Description))
+            .ToList();
     }
 
     /// <inheritdoc />
     public async Task<McpResourceContent?> ReadResourceAsync(string uri, CancellationToken ct = default)
     {
-        try
+        Check.NotNullOrWhiteSpace(uri);
+        if (!SupportsResources)
         {
-            if (_readResourceMethod == null)
-            {
-                _logger.LogDebug("MCP server '{ServerName}' client does not support ReadResourceAsync", _serverName);
-                return null;
-            }
-
-            var parameters = _readResourceMethod.GetParameters();
-            object? taskObj;
-
-            // ReadResourceAsync(string uri, CancellationToken ct) 或 ReadResourceAsync(Uri uri, CancellationToken ct)
-            if (parameters.Length == 2 && parameters[1].ParameterType == typeof(CancellationToken))
-            {
-                var uriArg = parameters[0].ParameterType == typeof(Uri) ? (object)new Uri(uri) : uri;
-                taskObj = _readResourceMethod.Invoke(_client, [uriArg, ct]);
-            }
-            else if (parameters.Length == 1)
-            {
-                var uriArg = parameters[0].ParameterType == typeof(Uri) ? (object)new Uri(uri) : uri;
-                taskObj = _readResourceMethod.Invoke(_client, [uriArg]);
-            }
-            else
-            {
-                // 尝试带 CancellationToken 的最后一个参数
-                var args = new object?[parameters.Length];
-                var uriArg = parameters[0].ParameterType == typeof(Uri) ? (object)new Uri(uri) : uri;
-                args[0] = uriArg;
-                for (var i = 1; i < parameters.Length; i++)
-                {
-                    args[i] = parameters[i].ParameterType == typeof(CancellationToken) ? ct : GetDefault(parameters[i].ParameterType);
-                }
-                taskObj = _readResourceMethod.Invoke(_client, args);
-            }
-
-            if (taskObj == null)
-            {
-                return null;
-            }
-
-            var result = await AwaitAndExtractResultAsync(taskObj).ConfigureAwait(false);
-            return ConvertToResourceContent(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to read resource '{Uri}' from MCP server '{ServerName}'", uri, _serverName);
             return null;
         }
+
+        var result = await _client.ReadResourceAsync(uri, cancellationToken: ct).ConfigureAwait(false);
+
+        // 一次读取可能返回多段内容：取第一段能表示成文本的（与契约「一个资源一段内容」一致）
+        foreach (var contents in result.Contents)
+        {
+            switch (contents)
+            {
+                case TextResourceContents text:
+                    return new McpResourceContent(text.Text, text.MimeType);
+                case BlobResourceContents blob:
+                    return new McpResourceContent(BlobToBase64(blob), blob.MimeType);
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<McpPromptInfo>> ListPromptsAsync(CancellationToken ct = default)
     {
-        try
+        if (!SupportsPrompts)
         {
-            if (_listPromptsMethod == null)
-            {
-                _logger.LogDebug("MCP server '{ServerName}' client does not support ListPromptsAsync", _serverName);
-                return Array.Empty<McpPromptInfo>();
-            }
-
-            var taskObj = InvokeWithCancellation(_listPromptsMethod, ct);
-            if (taskObj == null)
-            {
-                return Array.Empty<McpPromptInfo>();
-            }
-
-            var result = await AwaitAndExtractResultAsync(taskObj).ConfigureAwait(false);
-            return ConvertToPromptInfoList(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to list prompts from MCP server '{ServerName}'", _serverName);
             return Array.Empty<McpPromptInfo>();
         }
+
+        var prompts = await _client.ListPromptsAsync(cancellationToken: ct).ConfigureAwait(false);
+        return prompts
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new McpPromptInfo(p.Name, p.Description, ToPromptArguments(p.ProtocolPrompt.Arguments)))
+            .ToList();
     }
 
     /// <inheritdoc />
     public async Task<McpPromptResult?> GetPromptAsync(string promptName, Dictionary<string, string>? arguments = null, CancellationToken ct = default)
     {
-        try
-        {
-            if (_getPromptMethod == null)
-            {
-                _logger.LogDebug("MCP server '{ServerName}' client does not support GetPromptAsync", _serverName);
-                return null;
-            }
-
-            var parameters = _getPromptMethod.GetParameters();
-            var args = new object?[parameters.Length];
-
-            // 第一个参数: promptName (string)
-            args[0] = promptName;
-
-            for (var i = 1; i < parameters.Length; i++)
-            {
-                if (parameters[i].ParameterType == typeof(CancellationToken))
-                {
-                    args[i] = ct;
-                }
-                else if (IsDictionaryLikeStringString(parameters[i].ParameterType))
-                {
-                    args[i] = arguments;
-                }
-                else if (parameters[i].HasDefaultValue)
-                {
-                    args[i] = parameters[i].DefaultValue;
-                }
-                else
-                {
-                    args[i] = GetDefault(parameters[i].ParameterType);
-                }
-            }
-
-            var taskObj = _getPromptMethod.Invoke(_client, args);
-            if (taskObj == null)
-            {
-                return null;
-            }
-
-            var result = await AwaitAndExtractResultAsync(taskObj).ConfigureAwait(false);
-            return ConvertToPromptResult(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get prompt '{PromptName}' from MCP server '{ServerName}'", promptName, _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 将 SDK 返回的资源列表转为 McpResourceInfo 列表。
-    /// </summary>
-    private IReadOnlyList<McpResourceInfo> ConvertToResourceInfoList(object? result)
-    {
-        if (result == null)
-        {
-            return Array.Empty<McpResourceInfo>();
-        }
-
-        var list = new List<McpResourceInfo>();
-        if (result is System.Collections.IEnumerable enumerable)
-        {
-            foreach (var item in enumerable)
-            {
-                var info = ExtractResourceInfo(item);
-                if (info != null)
-                {
-                    list.Add(info);
-                }
-            }
-        }
-        return list;
-    }
-
-    /// <summary>
-    /// 从 SDK Resource 对象中提取 McpResourceInfo。
-    /// </summary>
-    private McpResourceInfo? ExtractResourceInfo(object? item)
-    {
-        if (item == null)
+        Check.NotNullOrWhiteSpace(promptName);
+        if (!SupportsPrompts)
         {
             return null;
         }
 
-        try
+        // SDK 的参数类型是 IReadOnlyDictionary<string, object?>：Dictionary<string, string> 不能直接传，逐项转换
+        var promptArguments = arguments?.ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
+        var result = await _client.GetPromptAsync(promptName, promptArguments, cancellationToken: ct).ConfigureAwait(false);
+
+        var messages = new List<McpPromptMessage>();
+        foreach (var message in result.Messages)
         {
-            var type = item.GetType();
-            var uri = (type.GetProperty("Uri")?.GetValue(item))?.ToString() ?? string.Empty;
-            var name = type.GetProperty("Name")?.GetValue(item) as string ?? string.Empty;
-            var mimeType = type.GetProperty("MimeType")?.GetValue(item) as string;
-            var description = type.GetProperty("Description")?.GetValue(item) as string;
-
-            if (string.IsNullOrWhiteSpace(uri))
-            {
-                return null;
-            }
-
-            return new McpResourceInfo(uri, name, mimeType, description);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to extract resource info from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 将 SDK 返回的 ReadResource 结果转为 McpResourceContent。
-    /// </summary>
-    private McpResourceContent? ConvertToResourceContent(object? result)
-    {
-        if (result == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var type = result.GetType();
-
-            // SDK ReadResourceResult 通常有 Contents 属性（ResourceContents 列表）
-            var contentsProp = type.GetProperty("Contents");
-            if (contentsProp != null)
-            {
-                var contents = contentsProp.GetValue(result);
-                if (contents is System.Collections.IEnumerable enumerable)
-                {
-                    foreach (var content in enumerable)
-                    {
-                        return ExtractResourceContent(content);
-                    }
-                }
-            }
-
-            // 降级：直接从 result 提取 Text/MimeType
-            return ExtractResourceContent(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to convert resource content from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 从单个 ResourceContents 对象提取 McpResourceContent。
-    /// </summary>
-    private McpResourceContent? ExtractResourceContent(object? item)
-    {
-        if (item == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var type = item.GetType();
-            var text = type.GetProperty("Text")?.GetValue(item) as string;
-            var mimeType = type.GetProperty("MimeType")?.GetValue(item) as string;
-
-            // 某些 SDK 版本使用 Blob 属性
+            var text = ToText(message.Content);
             if (text == null)
             {
-                var blob = type.GetProperty("Blob")?.GetValue(item);
-                if (blob is byte[] bytes)
-                {
-                    text = Convert.ToBase64String(bytes);
-                }
-                else if (blob is string blobStr)
-                {
-                    text = blobStr;
-                }
+                _logger.LogDebug(
+                    "MCP server '{ServerName}' prompt '{PromptName}' returned a {ContentType} message that has no text form; skipped",
+                    _serverName, promptName, message.Content?.GetType().Name);
+                continue;
             }
 
-            if (text == null)
-            {
-                return null;
-            }
+            messages.Add(new McpPromptMessage(message.Role == Role.Assistant ? "assistant" : "user", text));
+        }
 
-            return new McpResourceContent(text, mimeType);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to extract resource content from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
+        return messages.Count > 0 ? new McpPromptResult(messages) : null;
     }
 
-    /// <summary>
-    /// 将 SDK 返回的 Prompt 列表转为 McpPromptInfo 列表。
-    /// </summary>
-    private IReadOnlyList<McpPromptInfo> ConvertToPromptInfoList(object? result)
+    private bool SupportsResources => _client.ServerCapabilities?.Resources != null;
+
+    private bool SupportsPrompts => _client.ServerCapabilities?.Prompts != null;
+
+    private static IReadOnlyList<McpPromptArgument>? ToPromptArguments(IList<PromptArgument>? arguments)
     {
-        if (result == null)
+        if (arguments is not { Count: > 0 })
         {
-            return Array.Empty<McpPromptInfo>();
+            return null;
         }
 
-        var list = new List<McpPromptInfo>();
-        if (result is System.Collections.IEnumerable enumerable)
-        {
-            foreach (var item in enumerable)
-            {
-                var info = ExtractPromptInfo(item);
-                if (info != null)
-                {
-                    list.Add(info);
-                }
-            }
-        }
-        return list;
+        return arguments
+            .Where(a => !string.IsNullOrWhiteSpace(a.Name))
+            .Select(a => new McpPromptArgument(a.Name, a.Description, a.Required == true))
+            .ToList();
     }
 
-    /// <summary>
-    /// 从 SDK Prompt 对象中提取 McpPromptInfo。
-    /// </summary>
-    private McpPromptInfo? ExtractPromptInfo(object? item)
+    private static string? ToText(ContentBlock? content) => content switch
     {
-        if (item == null)
-        {
-            return null;
-        }
+        TextContentBlock text => text.Text,
+        EmbeddedResourceBlock { Resource: TextResourceContents resource } => resource.Text,
+        _ => null
+    };
 
-        try
-        {
-            var type = item.GetType();
-            var name = type.GetProperty("Name")?.GetValue(item) as string;
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return null;
-            }
-
-            var description = type.GetProperty("Description")?.GetValue(item) as string;
-            var argumentsProp = type.GetProperty("Arguments");
-            IReadOnlyList<McpPromptArgument>? arguments = null;
-
-            if (argumentsProp != null)
-            {
-                var argsObj = argumentsProp.GetValue(item);
-                if (argsObj is System.Collections.IEnumerable argsEnumerable)
-                {
-                    var argList = new List<McpPromptArgument>();
-                    foreach (var arg in argsEnumerable)
-                    {
-                        var argInfo = ExtractPromptArgument(arg);
-                        if (argInfo != null)
-                        {
-                            argList.Add(argInfo);
-                        }
-                    }
-                    if (argList.Count > 0)
-                    {
-                        arguments = argList;
-                    }
-                }
-            }
-
-            return new McpPromptInfo(name, description, arguments);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to extract prompt info from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 从 SDK PromptArgument 对象中提取 McpPromptArgument。
-    /// </summary>
-    private McpPromptArgument? ExtractPromptArgument(object? item)
-    {
-        if (item == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var type = item.GetType();
-            var name = type.GetProperty("Name")?.GetValue(item) as string;
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return null;
-            }
-
-            var description = type.GetProperty("Description")?.GetValue(item) as string;
-            var required = type.GetProperty("Required")?.GetValue(item) is true;
-
-            return new McpPromptArgument(name, description, required);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to extract prompt argument from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 将 SDK 返回的 GetPrompt 结果转为 McpPromptResult。
-    /// </summary>
-    private McpPromptResult? ConvertToPromptResult(object? result)
-    {
-        if (result == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var type = result.GetType();
-
-            // SDK GetPromptResult 通常有 Messages 属性
-            var messagesProp = type.GetProperty("Messages");
-            if (messagesProp != null)
-            {
-                var messagesObj = messagesProp.GetValue(result);
-                if (messagesObj is System.Collections.IEnumerable enumerable)
-                {
-                    var messages = new List<McpPromptMessage>();
-                    foreach (var msg in enumerable)
-                    {
-                        var message = ExtractPromptMessage(msg);
-                        if (message != null)
-                        {
-                            messages.Add(message);
-                        }
-                    }
-                    if (messages.Count > 0)
-                    {
-                        return new McpPromptResult(messages);
-                    }
-                }
-            }
-
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to convert prompt result from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// 从 SDK PromptMessage 对象中提取 McpPromptMessage。
-    /// </summary>
-    private McpPromptMessage? ExtractPromptMessage(object? item)
-    {
-        if (item == null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var type = item.GetType();
-
-            // Role 可能是 string 或 enum
-            var roleObj = type.GetProperty("Role")?.GetValue(item);
-            var role = roleObj?.ToString()?.ToLowerInvariant() ?? "user";
-
-            // Content 可能是 string 或复杂对象
-            var contentObj = type.GetProperty("Content")?.GetValue(item);
-            string? content = null;
-
-            if (contentObj is string contentStr)
-            {
-                content = contentStr;
-            }
-            else if (contentObj != null)
-            {
-                // 尝试从 Content 对象中提取 Text 属性
-                var text = contentObj.GetType().GetProperty("Text")?.GetValue(contentObj) as string;
-                content = text ?? contentObj.ToString();
-            }
-
-            if (content == null)
-            {
-                return null;
-            }
-
-            return new McpPromptMessage(role, content);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to extract prompt message from MCP server '{ServerName}'", _serverName);
-            return null;
-        }
-    }
+    private static string BlobToBase64(BlobResourceContents blob) => Convert.ToBase64String(blob.DecodedData.Span);
 }

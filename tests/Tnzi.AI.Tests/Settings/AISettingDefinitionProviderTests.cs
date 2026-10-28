@@ -210,7 +210,7 @@ public class AISettingDefinitionProviderTests
         typeof(GuardrailsOptions), typeof(AllowlistGuardrailOptions), typeof(LlmJudgeOptions),
         typeof(HistoryStoreOptions), typeof(HistoryReductionOptions), typeof(PruneOptions), typeof(SummarizeOptions),
         typeof(MemoryOptions), typeof(EntityMemoryOptions), typeof(TextSearchOptions), typeof(ChatHistoryMemoryOptions),
-        typeof(RetryOptions), typeof(QuotaOptions),
+        typeof(RetryOptions),
     ];
 
     [Fact]
@@ -316,17 +316,6 @@ public class AISettingDefinitionProviderTests
     }
 
     [Fact]
-    public void QuotaOptions_yields_ai_quota_group_with_two_limits()
-    {
-        var g = RuntimeSettingMetadataExtractor.Extract(typeof(QuotaOptions))!;
-
-        Assert.Equal("ai-quota", g.Key);
-        Assert.Contains(g.Fields, f => f.Key == "AI:Quota:DefaultDailyTokenLimit");
-        Assert.Contains(g.Fields, f => f.Key == "AI:Quota:DefaultMonthlyTokenLimit");
-        Assert.Equal("1000000", g.Fields.Single(f => f.Key == "AI:Quota:DefaultDailyTokenLimit").DefaultValueAccessor!());
-    }
-
-    [Fact]
     public void SummarizationTrigger_and_ToolFills_merge_into_expected_groups()
     {
         var trigger = RuntimeSettingMetadataExtractor.Extract(typeof(SummarizationTrigger))!;
@@ -363,7 +352,7 @@ public class AISettingDefinitionProviderTests
         // Expanded set of AI group keys is present.
         var groupKeys = groups.Select(g => g!.Key).Distinct().ToList();
         foreach (var key in new[] { "ai-general", "ai-tools", "ai-summarization", "ai-conversation",
-                     "ai-guardrails", "ai-history", "ai-memory", "ai-retry", "ai-quota" })
+                     "ai-guardrails", "ai-history", "ai-memory", "ai-retry" })
             Assert.Contains(key, groupKeys);
     }
 }

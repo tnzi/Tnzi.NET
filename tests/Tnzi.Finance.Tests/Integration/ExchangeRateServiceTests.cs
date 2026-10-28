@@ -63,6 +63,58 @@ public class ExchangeRateServiceTests : FinanceIntegrationTestBase
         rate.ShouldBe(1.25m);
     }
 
+    /// <summary>
+    /// 一条几年前手录的直接汇率，不能压过此后每天维护的反向汇率：两个方向取日期较新的那条。
+    /// </summary>
+    [Fact]
+    public async Task Resolve_NewerInverseRate_WinsOverAnOlderDirectRate()
+    {
+        await UpsertAsync("EUR", "USD", 1.05m, new DateTime(2024, 1, 1));
+        await UpsertAsync("USD", "EUR", 0.8m, new DateTime(2026, 1, 10));
+
+        var rate = await InScopeAsync<IExchangeRateService, decimal?>(
+            s => s.ResolveRateAsync("EUR", "USD", new DateTime(2026, 2, 1)));
+
+        rate.ShouldBe(1.25m);
+    }
+
+    [Fact]
+    public async Task Resolve_NewerDirectRate_WinsOverAnOlderInverseRate()
+    {
+        await UpsertAsync("USD", "EUR", 0.8m, new DateTime(2024, 1, 1));
+        await UpsertAsync("EUR", "USD", 1.1m, new DateTime(2026, 1, 10));
+
+        var rate = await InScopeAsync<IExchangeRateService, decimal?>(
+            s => s.ResolveRateAsync("EUR", "USD", new DateTime(2026, 2, 1)));
+
+        rate.ShouldBe(1.1m);
+    }
+
+    [Fact]
+    public async Task Resolve_SameDayInBothDirections_PrefersTheDirectRate()
+    {
+        await UpsertAsync("EUR", "USD", 1.1m, new DateTime(2026, 1, 10));
+        await UpsertAsync("USD", "EUR", 0.8m, new DateTime(2026, 1, 10));
+
+        var rate = await InScopeAsync<IExchangeRateService, decimal?>(
+            s => s.ResolveRateAsync("EUR", "USD", new DateTime(2026, 2, 1)));
+
+        rate.ShouldBe(1.1m);
+    }
+
+    /// <summary>反向汇率晚于目标日的那条不参与比较（两个方向都只看不晚于目标日的记录）。</summary>
+    [Fact]
+    public async Task Resolve_InverseRateAfterTheTargetDate_IsIgnored()
+    {
+        await UpsertAsync("EUR", "USD", 1.1m, new DateTime(2026, 1, 1));
+        await UpsertAsync("USD", "EUR", 0.8m, new DateTime(2026, 3, 1));
+
+        var rate = await InScopeAsync<IExchangeRateService, decimal?>(
+            s => s.ResolveRateAsync("EUR", "USD", new DateTime(2026, 2, 1)));
+
+        rate.ShouldBe(1.1m);
+    }
+
     [Fact]
     public async Task Resolve_SameCurrency_ReturnsOne()
     {

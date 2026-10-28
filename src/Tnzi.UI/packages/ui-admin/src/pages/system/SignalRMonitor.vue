@@ -83,11 +83,13 @@ import {
   type SignalRStatsDto,
 } from '../../services/bridges/signalr-bridge'
 import { makePageTranslator } from '../_shared/translate'
+import { useSafeMessage } from '../_shared/safe-message'
 import TContentPage from '../../components/layout/TContentPage.vue'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
 
 const bridge = createSignalRBridge({ client: useAdminClient() })
 const t = makePageTranslator('system.signalr')
+const message = useSafeMessage()
 
 const loading = ref(false)
 const stats = ref<SignalRStatsDto | null>(null)
@@ -250,7 +252,10 @@ async function disconnect(userId: string): Promise<void> {
   try {
     await bridge.disconnectUser(userId)
     await refresh()
-  } catch { /* bridge swallows */ }
+  } catch (error) {
+    // The bridge throws the server's refusal; a failed disconnect must not read as done.
+    message.error(error instanceof Error ? error.message : String(error))
+  }
 }
 
 onMounted(() => { void refresh() })

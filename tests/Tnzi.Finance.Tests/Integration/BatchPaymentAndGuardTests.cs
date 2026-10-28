@@ -154,6 +154,155 @@ public class BatchPaymentAndGuardTests : FinanceIntegrationTestBase
         after.Data.AppliedTotal.ShouldBe(120m);
     }
 
+    // ── 分配金额按币种精度舍入（客户端浮点运算的产物不得落库）────────
+
+    [Fact]
+    public async Task Pay_SubCentAllocation_SettlesTheBillInFull()
+    {
+        await SeedCoaAsync();
+        var vendor = await CreateVendorAsync("Float Vendor");
+        var bill = await PostBillAsync(vendor, 50.30m);
+        var bank = await AccountIdAsync("1120");
+
+        (await PayAsync(new BatchPaymentDto
+        {
+            DocDate = new DateTime(2026, 4, 10),
+            FundsAccountId = bank,
+            Targets = [new BatchPaymentTargetDto { DocType = SettlementDocType.Bill, DocId = bill.Id, Amount = 20.10m }]
+        })).Succeeded.ShouldBeTrue();
+
+        // 浏览器里 50.3 - 20.1 = 30.199999999999996：一个按「未清余额」预填的付款界面就会发出这个数
+        var result = await PayAsync(new BatchPaymentDto
+        {
+            DocDate = new DateTime(2026, 4, 11),
+            FundsAccountId = bank,
+            Targets = [new BatchPaymentTargetDto { DocType = SettlementDocType.Bill, DocId = bill.Id, Amount = 30.199999999999996m }]
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        result.Data!.Applications.Single().AppliedAmount.ShouldBe(30.20m);
+        var payment = result.Data.Payments.Single();
+        payment.Amount.ShouldBe(30.20m);
+        payment.AppliedTotal.ShouldBe(payment.Amount);
+
+        var after = await InScopeAsync<IBillService, Result<BillDto>>(s => s.GetAsync(bill.Id));
+        after.Data!.AppliedTotal.ShouldBe(50.30m);
+        after.Data.Status.ShouldBe(FinanceDocumentStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Pay_GroupedSubCentAllocations_PaymentEqualsWhatItSettles()
+    {
+        await SeedCoaAsync();
+        var vendor = await CreateVendorAsync("Half Cent Vendor");
+        var billA = await PostBillAsync(vendor, 10.01m);
+        var billB = await PostBillAsync(vendor, 10.01m);
+        var bank = await AccountIdAsync("1120");
+
+        // 同一供应商两张账单合成一张付款单：先求和再舍入是 20.01，逐张舍入后再求和是 20.02，
+        // 后者才是这张付款单要核销掉的总额。顺序反了，第二笔核销会撞上「超出付款单剩余额」。
+        var result = await PayAsync(new BatchPaymentDto
+        {
+            DocDate = new DateTime(2026, 4, 10),
+            FundsAccountId = bank,
+            Targets =
+            [
+                new BatchPaymentTargetDto { DocType = SettlementDocType.Bill, DocId = billA.Id, Amount = 10.005m },
+                new BatchPaymentTargetDto { DocType = SettlementDocType.Bill, DocId = billB.Id, Amount = 10.005m }
+            ]
+        });
+
+        result.Succeeded.ShouldBeTrue(result.Message);
+        var payment = result.Data!.Payments.Single();
+        payment.Amount.ShouldBe(20.02m);
+        payment.AppliedTotal.ShouldBe(20.02m);
+        foreach (var billId in new[] { billA.Id, billB.Id })
+            (await InScopeAsync<IBillService, Result<BillDto>>(s => s.GetAsync(billId))).Data!.Status.ShouldBe(FinanceDocumentStatus.Paid);
+    }
+
+    [Fact]
+    public async Task Apply_SubCentAllocation_SettlesTheInvoiceInFull()
+    {
+        await SeedCoaAsync();
+        var customer = await CreateCustomerAsync("Float Customer");
+        var invoice = await PostInvoiceAsync(customer, 30.20m);
+        var bank = await AccountIdAsync("1120");
+        var draft = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.CreateDraftAsync(new CreatePaymentEntryDto
+        {
+            Direction = PaymentDirection.Inbound,
+            PartyType = FinancePartyType.Customer,
+            PartyId = customer,
+            DocDate = new DateTime(2026, 4, 5),
+            Amount = 30.20m,
+            DepositToAccountId = bank
+        }));
+        var payment = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.PostAsync(draft.Data!.Id));
+        payment.Succeeded.ShouldBeTrue(payment.Message);
+
+        var applied = await InScopeAsync<ISettlementService, Result<List<PaymentApplicationDto>>>(s => s.ApplyAsync(new ApplySettlementDto
+        {
+            SourceType = SettlementDocType.PaymentEntry,
+            SourceId = payment.Data!.Id,
+            Targets = [new ApplySettlementTargetDto { TargetType = SettlementDocType.Invoice, TargetId = invoice.Id, Amount = 30.199999999999996m }]
+        }));
+
+        applied.Succeeded.ShouldBeTrue(applied.Message);
+        applied.Data!.Single().AppliedAmount.ShouldBe(30.20m);
+        var invoiceAfter = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.GetAsync(invoice.Id));
+        invoiceAfter.Data!.AppliedTotal.ShouldBe(30.20m);
+        invoiceAfter.Data.Status.ShouldBe(FinanceDocumentStatus.Paid);
+        var paymentAfter = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.GetAsync(payment.Data!.Id));
+        paymentAfter.Data!.AppliedTotal.ShouldBe(30.20m);
+    }
+
+    [Fact]
+    public async Task Settlement_AllocationThatRoundsToZero_IsRejected()
+    {
+        await SeedCoaAsync();
+        var vendor = await CreateVendorAsync("Dust Vendor");
+        var bill = await PostBillAsync(vendor, 10m);
+        var customer = await CreateCustomerAsync("Dust Customer");
+        var invoice = await PostInvoiceAsync(customer, 10m);
+        var bank = await AccountIdAsync("1120");
+
+        // 0.001 舍入后是 0：一笔不移动任何钱的核销不该被记成一次付款
+        var paid = await PayAsync(new BatchPaymentDto
+        {
+            DocDate = new DateTime(2026, 4, 10),
+            FundsAccountId = bank,
+            Targets = [new BatchPaymentTargetDto { DocType = SettlementDocType.Bill, DocId = bill.Id, Amount = 0.001m }]
+        });
+        paid.Succeeded.ShouldBeFalse();
+        paid.Code.ShouldBe(400);
+        (await InScopeAsync<IBillService, Result<BillDto>>(s => s.GetAsync(bill.Id)))
+            .Data!.Status.ShouldBe(FinanceDocumentStatus.Posted);
+
+        // 核销路径同理：否则发票会带着 0.001 的已核销额从 Posted 变成 PartiallyPaid
+        var draft = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.CreateDraftAsync(new CreatePaymentEntryDto
+        {
+            Direction = PaymentDirection.Inbound,
+            PartyType = FinancePartyType.Customer,
+            PartyId = customer,
+            DocDate = new DateTime(2026, 4, 5),
+            Amount = 10m,
+            DepositToAccountId = bank
+        }));
+        var payment = await InScopeAsync<IPaymentEntryService, Result<PaymentEntryDto>>(s => s.PostAsync(draft.Data!.Id));
+        payment.Succeeded.ShouldBeTrue(payment.Message);
+
+        var applied = await InScopeAsync<ISettlementService, Result<List<PaymentApplicationDto>>>(s => s.ApplyAsync(new ApplySettlementDto
+        {
+            SourceType = SettlementDocType.PaymentEntry,
+            SourceId = payment.Data!.Id,
+            Targets = [new ApplySettlementTargetDto { TargetType = SettlementDocType.Invoice, TargetId = invoice.Id, Amount = 0.001m }]
+        }));
+        applied.Succeeded.ShouldBeFalse();
+        applied.Code.ShouldBe(400);
+        var invoiceAfter = await InScopeAsync<IInvoiceService, Result<InvoiceDto>>(s => s.GetAsync(invoice.Id));
+        invoiceAfter.Data!.Status.ShouldBe(FinanceDocumentStatus.Posted);
+        invoiceAfter.Data.AppliedTotal.ShouldBe(0m);
+    }
+
     [Fact]
     public async Task Pay_Invoices_CreatesInboundReceipts()
     {

@@ -218,37 +218,41 @@ public class OrganizationServiceTests
         Assert.Equal(input.Name, result.Data.Name);
     }
 
+    /// <summary>
+    /// 删除组织要先把成员摘下来（组织是软删的，外键上的 SetNull 不会替我们做），而那一步要用到 DbContext。
+    /// 拿不到它就不删：删了留下一批指向已删除组织、从用户列表再也改不动的账号。删除的正常路径由
+    /// <c>Integration/OrganizationTreeIntegrityTests</c> 在真实数据库上覆盖。
+    /// </summary>
     [Fact]
-    public async Task DeleteAsync_WithValidId_DeletesOrganization()
+    public async Task DeleteAsync_WithoutADbContext_RefusesInsteadOfLeavingMembersDangling()
     {
         // Arrange
         var orgId = Guid.NewGuid();
         var organization = new Organization { Id = orgId, Name = "Test Org" };
 
-        // DeleteAsync 使用 GetRequiredAsync
-        _organizationRepositoryMock.Setup(x => x.GetRequiredAsync(orgId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(organization);
-
         _organizationRepositoryMock.Setup(x => x.GetAsync(orgId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(organization);
-
         _organizationRepositoryMock.Setup(x => x.AnyAsync(It.IsAny<System.Linq.Expressions.Expression<Func<Organization, bool>>>()))
             .ReturnsAsync(false);
 
-        _organizationRepositoryMock.Setup(x => x.DeleteAsync(orgId, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        _cacheMock.Setup(x => x.RemoveAsync(It.IsAny<string>()))
-            .Returns(Task.CompletedTask);
-
-        _eventBusMock.Setup(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Organization.Events.OrganizationDeletedEvent>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var service = new OrganizationService(
+            _organizationRepositoryMock.Object,
+            _serviceProviderMock.Object,
+            dbContext: null,
+            _eventBusMock.Object,
+            _currentUserMock.Object,
+            currentTenant: null,
+            multiTenancyOptions: null,
+            _cacheMock.Object,
+            _userManagerMock.Object);
 
         // Act
-        await _organizationService.DeleteAsync(orgId);
+        var result = await service.DeleteAsync(orgId);
 
         // Assert
-        _organizationRepositoryMock.Verify(x => x.DeleteAsync(orgId, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(result.Succeeded);
+        Assert.Equal(500, result.Code);
+        _organizationRepositoryMock.Verify(x => x.DeleteAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

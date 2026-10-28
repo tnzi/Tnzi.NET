@@ -15,6 +15,52 @@ describe('createZodSchema', () => {
       expect(schema.safeParse({}).success).toBe(false);
     });
 
+    it('rejects an empty string for a required field with the required message', () => {
+      const schema = createZodSchema<{ name: string }>({
+        name: { required: true, requiredMessage: 'Name is required' },
+      });
+      const result = schema.safeParse({ name: '' });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.message).toBe('Name is required');
+    });
+
+    it.each([' ', '   ', '\t', '\n', ' \t\r\n '])(
+      'rejects a whitespace-only string %j for a required field with the required message',
+      (blank) => {
+        // The backend's [Required] refuses whitespace-only strings, so passing
+        // them here would only turn a field error into a 400 on submit.
+        const schema = createZodSchema<{ name: string }>({
+          name: { required: true, requiredMessage: 'Name is required' },
+        });
+        const result = schema.safeParse({ name: blank });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues[0]?.message).toBe('Name is required');
+      },
+    );
+
+    it('accepts a required value with surrounding whitespace and does not trim it', () => {
+      const schema = createZodSchema<{ name: string }>({
+        name: { required: true },
+      });
+      const result = schema.safeParse({ name: '  Ada  ' });
+      expect(result.success).toBe(true);
+      expect(result.data?.name).toBe('  Ada  ');
+    });
+
+    it('still accepts a whitespace-only string for an optional field', () => {
+      const schema = createZodSchema<{ name?: string }>({
+        name: { required: false },
+      });
+      expect(schema.safeParse({ name: '   ' }).success).toBe(true);
+    });
+
+    it('still accepts an empty string for an optional field', () => {
+      const schema = createZodSchema<{ name?: string }>({
+        name: { required: false },
+      });
+      expect(schema.safeParse({ name: '' }).success).toBe(true);
+    });
+
     it('should enforce min length', () => {
       const schema = createZodSchema<{ name: string }>({
         name: { required: true, min: 3 },

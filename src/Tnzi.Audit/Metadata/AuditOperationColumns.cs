@@ -59,7 +59,8 @@ public static class AuditOperationColumns
     /// </summary>
     /// <remarks>
     /// 刻意不加省略号后缀：后缀会让结果再次超出列宽，而这里唯一的目标就是「装得进去」。
+    /// 截断点落在代理对中间时少截一个字符（<see cref="StringExtensions.FitToLength"/>）：孤立的高代理项会让
+    /// PostgreSQL 拒绝整条批量 INSERT，与超列宽是同一个后果。
     /// </remarks>
-    public static string? Fit(string? value, int maxLength)
-        => value is null || value.Length <= maxLength ? value : value[..maxLength];
+    public static string? Fit(string? value, int maxLength) => value.FitToLength(maxLength);
 }

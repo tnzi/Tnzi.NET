@@ -32,8 +32,7 @@ public class NotificationServiceTests
         _optionsMock.Setup(x => x.CurrentValue).Returns(new NotificationOptions
         {
             MaxConcurrency = 5,
-            SmsMaxContentLength = 140,
-            Queue = new QueueOptions { Enabled = true },
+            Queue = new QueueOptions(),
             Retry = new RetryOptions { RetryDelaySeconds = 1 }
         });
 
@@ -52,6 +51,7 @@ public class NotificationServiceTests
             serviceProviderMock.Object,
             PassThroughOptOut(),
             PassThroughPreferences(),
+            new Mock<IRepository<Recipient, Guid>>().Object,
             _queueServiceMock.Object
         );
     }

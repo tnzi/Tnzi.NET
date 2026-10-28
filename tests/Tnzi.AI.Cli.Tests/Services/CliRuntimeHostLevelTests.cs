@@ -105,6 +105,7 @@ public class CliRuntimeHostLevelTests : IntegratedTestBase<CliMultiTenantDbConte
             scope.ServiceProvider.GetRequiredService<IRepository<CliAgentBinding, Guid>>(),
             scope.ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
             Mock.Of<IRepository<AgentThread, Guid>>(),
+            TestAgents.Repository(AgentId),
             new CliRunSignalHub(),
             new CliRunCancellationRegistry(),
             EnabledOptions(),
@@ -197,16 +198,16 @@ public class CliRuntimeHostLevelTests : IntegratedTestBase<CliMultiTenantDbConte
         registry.Setup(r => r.GetAll()).Returns([claude]);
         registry.Setup(r => r.Find(It.IsAny<string>())).Returns(claude);
 
-        var resolver = new Mock<ICliExecutableResolver>();
-        resolver.Setup(r => r.Resolve(It.IsAny<CliProviderDescriptor>())).Returns("/usr/bin/claude");
-        resolver.Setup(r => r.DetectVersionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("1.0.0");
+        // 版本探测是在目标上起一条短命令：`--version` 的进程吐一行版本号就退出
+        var host = new TestCliHost(
+            (_, _) => Task.FromResult<ICliProcess>(new ScriptedExitProcess(["1.0.0"])), executablePath: "/usr/bin/claude");
 
         return new CliRuntimeService(
             scoped.GetRequiredService<IRepository<CliRuntime, Guid>>(),
             scoped.GetRequiredService<IRepository<CliAgentBinding, Guid>>(),
             registry.Object,
             Mock.Of<ICliProtocolAdapterFactory>(),
-            resolver.Object,
+            host,
             EnabledOptions(),
             scoped,
             scoped.GetRequiredService<ICurrentTenant>(),

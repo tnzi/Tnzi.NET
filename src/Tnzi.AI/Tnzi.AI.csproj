@@ -10,17 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.9.0" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.9.0" />
-    <PackageReference Include="Anthropic" Version="12.42.0" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.11.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.11.0" />
+    <PackageReference Include="Anthropic" Version="12.58.0" />
     <!-- Resilience -->
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.11.0" />
     <!-- MCP (Model Context Protocol) - official C# SDK for connecting to MCP servers -->
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
     <!-- YAML parsing for agent definition files -->
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <!-- T-SQL AST parser for AI SQL tools (validator hardening) -->
-    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.78.1" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.140.0" />
     <!-- Readability: HTML article extraction（0.11.1 起要求 AngleSharp >= 1.5.2，含 mXSS 修复 GHSA-pgww-w46g-26qg） -->
     <PackageReference Include="SmartReader" Version="0.11.1" />
   </ItemGroup>
@@ -33,6 +33,11 @@
     <ProjectReference Include="..\Tnzi.EFCore\Tnzi.EFCore.csproj" />
     <ProjectReference Include="..\Tnzi.AspNetCore\Tnzi.AspNetCore.csproj" />
     <ProjectReference Include="..\Tnzi\Tnzi.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The inline widget runner page (Infrastructure/Widgets/WidgetRunnerEndpoint) -->
+    <EmbeddedResource Include="Infrastructure\Widgets\widget-runner.html" LogicalName="Tnzi.AI.Infrastructure.Widgets.widget-runner.html" />
   </ItemGroup>
 
   <ItemGroup>

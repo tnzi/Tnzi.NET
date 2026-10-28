@@ -450,6 +450,46 @@ public class AIOptionsValidatorTests
         result.Succeeded.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// 叫 OpenAI 的条目指向 OpenAI 兼容端点（Ollama、vLLM、网关）时，密钥是任意字符串；
+    /// 「sk-」规则只属于官方端点，按条目名套用会让宿主起不来。
+    /// </summary>
+    [Theory]
+    [InlineData("http://ollama:11434/v1", "ollama")]
+    [InlineData("https://gateway.example.com/openai/v1", "gw-1234")]
+    public void Validate_OpenAIEntry_CompatibleEndpoint_AcceptsAnyKeyShape(string baseUrl, string apiKey)
+    {
+        var result = ValidateOptions(OpenAIEntry(baseUrl, apiKey));
+
+        result.Succeeded.ShouldBeTrue(string.Join("; ", result.Failures ?? []));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://api.openai.com/v1")]
+    public void Validate_OpenAIEntry_OfficialEndpoint_StillRequiresTheSkKeyShape(string? baseUrl)
+    {
+        var result = ValidateOptions(OpenAIEntry(baseUrl, "abc"));
+
+        result.Failed.ShouldBeTrue();
+        result.FailureMessage.ShouldContain("must start with 'sk-'");
+    }
+
+    private static AIOptions OpenAIEntry(string? baseUrl, string apiKey) => new()
+    {
+        DefaultProvider = "OpenAI",
+        Providers = new Dictionary<string, ProviderOptions>
+        {
+            ["OpenAI"] = new()
+            {
+                Enabled = true,
+                DefaultModel = "llama3",
+                BaseUrl = baseUrl,
+                ApiKey = apiKey
+            }
+        }
+    };
+
     private static AIOptions ProviderWithCaching(PromptCachingOptions caching) => new()
     {
         DefaultProvider = "anthropic",

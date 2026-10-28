@@ -2,6 +2,8 @@
  * Pagination Types - Aligned with Tnzi.NET backend PagedList<T> and PagedQuery
  */
 
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '../constants/pagination';
+
 /**
  * Paged list response from backend
  */
@@ -45,7 +47,7 @@ export interface PagedQueryDto extends PagedQuery {
 /**
  * Create a PagedQueryDto from page index and size
  */
-export function createPagedQuery(pageIndex = 1, pageSize = 10): PagedQueryDto {
+export function createPagedQuery(pageIndex = DEFAULT_PAGE, pageSize = DEFAULT_PAGE_SIZE): PagedQueryDto {
   return {
     pageIndex,
     pageSize,
@@ -58,8 +60,8 @@ export function createPagedQuery(pageIndex = 1, pageSize = 10): PagedQueryDto {
  * Update skip/take based on pageIndex and pageSize
  */
 export function updatePagedQuery(query: Partial<PagedQueryDto>): PagedQueryDto {
-  const pageIndex = query.pageIndex ?? 1;
-  const pageSize = query.pageSize ?? 10;
+  const pageIndex = query.pageIndex ?? DEFAULT_PAGE;
+  const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
   return {
     pageIndex,
     pageSize,
@@ -74,7 +76,11 @@ export function updatePagedQuery(query: Partial<PagedQueryDto>): PagedQueryDto {
 export type SortDirection = 'asc' | 'desc' | 'ascending' | 'descending';
 
 /**
- * Paged query with sorting
+ * Paged query with sorting, for an endpoint whose request DTO declares
+ * `SortBy` / `SortDescending` (the admin user list). Only extend it for such an
+ * endpoint: most list endpoints sort in a fixed order and drop these fields
+ * without an error, and the admin file query names its direction differently
+ * (`FileQueryDto`).
  */
 export interface SortedPagedQueryDto extends PagedQueryDto {
   /** Field to sort by */

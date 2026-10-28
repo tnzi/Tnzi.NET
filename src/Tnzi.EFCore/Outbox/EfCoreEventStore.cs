@@ -96,6 +96,7 @@ public class EfCoreEventStore : IEventStore
 
         var dbContext = GetDbContext();
         var processedTime = _timeProvider.GetUtcNow().UtcDateTime;
+        error = FitLastError(error);
 
         await dbContext.Set<OutboxMessage>()
             .Where(m => m.Id == eventId)
@@ -109,6 +110,7 @@ public class EfCoreEventStore : IEventStore
     public async Task MarkAsFailedAsync(Guid eventId, string error, CancellationToken cancellationToken = default)
     {
         var dbContext = GetDbContext();
+        error = FitLastError(error);
 
         // 使用 ExecuteUpdateAsync 原子递增 FailureCount，避免 Load-then-Update 的并发竞争
         await dbContext.Set<OutboxMessage>()
@@ -118,6 +120,17 @@ public class EfCoreEventStore : IEventStore
                 .SetProperty(m => m.LastError, error),
                 cancellationToken);
     }
+
+    /// <summary>
+    /// 把错误信息截到 <c>LastError</c> 列的长度。
+    /// </summary>
+    /// <remarks>
+    /// ★★ 超长的错误信息会让记账的 UPDATE 本身失败（SQL Server / PostgreSQL / MySQL 严格模式），
+    /// 失败次数一次都记不上，这条事件就一直是最早的未处理行，中继每一轮都卡在它上面。
+    /// 截断点落在代理对中间时少截一个字符（<see cref="StringExtensions.FitToLength"/>）：孤立的高代理项会让
+    /// 严格的 UTF-8 编码器（Npgsql）拒绝写入，同一条消息每一轮都在同一处失败，回到要避免的局面。
+    /// </remarks>
+    private static string FitLastError(string error) => error.FitToLength(OutboxMessage.LastErrorMaxLength);
 
     public async Task<StoredEvent?> GetEventAsync(Guid eventId, CancellationToken cancellationToken = default)
     {

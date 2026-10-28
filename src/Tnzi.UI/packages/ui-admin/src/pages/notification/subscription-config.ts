@@ -7,7 +7,7 @@ import TStatusBadge from '../../components/display/TStatusBadge.vue'
  * Subscriptions page config - aligned with NotificationPreferenceDto
  * (2026-04-14 unstub). Backend fields:
  *   id, userId, channel, category, isEnabled,
- *   quietHoursStart, quietHoursEnd, maxFrequencyPerHour
+ *   quietHoursStart, quietHoursEnd, quietHoursTimeZone, maxFrequencyPerHour
  *
  * "Subscription" in the admin UI is the Preference entity - keyed by
  * (userId, channel, category). Create/update both upsert through
@@ -34,23 +34,38 @@ export const notificationSubscriptionColumns: ColumnDef[] = [
   },
   { key: 'quietHoursStart',     title: 'columns.quietHoursStart', visible: false },
   { key: 'quietHoursEnd',       title: 'columns.quietHoursEnd',   visible: false },
+  // Empty = the two times are UTC (rows written before zones existed).
+  { key: 'quietHoursTimeZone',  title: 'columns.quietHoursTimeZone', visible: false },
   { key: 'maxFrequencyPerHour', title: 'columns.maxFrequencyPerHour',   visible: false },
 ]
 
 // Quiet hours defer, they do not drop: a recipient inside the window is held
 // until it ends and the delivery report shows the instant it was held until.
 // The schema has no help-text slot, so the placeholder carries that sentence.
-const QUIET_HOURS_HINT = 'HH:mm:ss (UTC). Deliveries inside the window are held until it ends, not dropped.'
+// The two times are wall-clock times in the row's time zone (UTC when empty),
+// evaluated by the server across daylight-saving changes.
+const QUIET_HOURS_HINT = 'HH:mm:ss in the time zone below. Deliveries inside the window are held until it ends, not dropped.'
+
+/**
+ * Field type the page renders as a read-only value (registered in Subscriptions.vue).
+ *
+ * A preference is upserted by (user, channel, category), not by its id, so
+ * editing any of the three saved a second row and left the original as it was.
+ * On edit they are shown, not edited; moving a preference to another channel
+ * or category is a new preference (and a delete of the old one).
+ */
+export const SUBSCRIPTION_KEY_LOCKED_TYPE = 'subscription-key-locked'
+const lockedOnEdit = (type: string) => (model: Record<string, unknown>) => (model.id ? SUBSCRIPTION_KEY_LOCKED_TYPE : type)
 
 export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
   // `type: 'user'` is a custom field rendered by the page via a TUserSelector
   // fieldRenderer (remote user search) instead of a raw GUID text input.
-  { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'user',   required: true },
+  { key: 'userId',    labelKey: 'form.userId', label: 'User',    type: 'user', typeFn: lockedOnEdit('user'), required: true },
   // The preference channel vocabulary is deliberately wider than the backend
   // NotificationType enum: InApp / Webhook name channels that do not exist yet,
   // and a preference row for a channel that never sends is simply never consulted.
   // Email / Sms / Push / Fax are the four that actually deliver.
-  { key: 'channel',   labelKey: 'form.channel', label: 'Channel', type: 'select', required: true, options: [
+  { key: 'channel',   labelKey: 'form.channel', label: 'Channel', type: 'select', typeFn: lockedOnEdit('select'), required: true, options: [
     { label: 'Email',   value: 'Email' },
     { label: 'SMS',     value: 'Sms' },
     { label: 'Push',    value: 'Push' },
@@ -58,9 +73,12 @@ export const notificationSubscriptionFormSchema: FormSchemaItem[] = [
     { label: 'InApp',   value: 'InApp' },
     { label: 'Webhook', value: 'Webhook' },
   ] },
-  { key: 'category',  labelKey: 'form.category', label: 'Category (optional)', type: 'text' },
+  { key: 'category',  labelKey: 'form.category', label: 'Category (optional)', type: 'text', typeFn: lockedOnEdit('text') },
   { key: 'isEnabled', labelKey: 'form.isEnabled', label: 'Enabled', type: 'switch' },
-  { key: 'quietHoursStart',     labelKey: 'form.quietHoursStart', label: 'Quiet Hours Start (HH:mm:ss UTC)', type: 'text', placeholder: QUIET_HOURS_HINT },
-  { key: 'quietHoursEnd',       labelKey: 'form.quietHoursEnd', label: 'Quiet Hours End (HH:mm:ss UTC)',   type: 'text', placeholder: QUIET_HOURS_HINT },
+  { key: 'quietHoursStart',     labelKey: 'form.quietHoursStart', label: 'Quiet Hours Start (HH:mm:ss)', type: 'text', placeholderKey: 'form.quietHoursPlaceholder', placeholder: QUIET_HOURS_HINT },
+  { key: 'quietHoursEnd',       labelKey: 'form.quietHoursEnd', label: 'Quiet Hours End (HH:mm:ss)',   type: 'text', placeholderKey: 'form.quietHoursPlaceholder', placeholder: QUIET_HOURS_HINT },
+  // `type: 'timezone'` is a page field renderer (filterable IANA zone select);
+  // the server rejects anything that is not an IANA id with a 400.
+  { key: 'quietHoursTimeZone',  labelKey: 'form.quietHoursTimeZone', label: 'Quiet Hours Time Zone', type: 'timezone', placeholderKey: 'form.quietHoursTimeZonePlaceholder', placeholder: 'UTC when empty' },
   { key: 'maxFrequencyPerHour', labelKey: 'form.maxFrequencyPerHour', label: 'Max Frequency / Hour',             type: 'number' },
 ]

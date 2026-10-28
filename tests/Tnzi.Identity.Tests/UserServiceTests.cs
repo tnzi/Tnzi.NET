@@ -11,7 +11,6 @@ public partial class UserServiceTests
     private readonly Mock<IOrganizationService> _organizationServiceMock;
     private readonly Mock<IEventBus> _eventBusMock;
     private readonly Mock<ICurrentUser> _currentUserMock;
-    private readonly Mock<Tnzi.Caching.ICache> _cacheMock;
     private readonly Mock<ISessionRevocationService> _sessionRevocationMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
 
@@ -40,7 +39,6 @@ public partial class UserServiceTests
         _organizationServiceMock = new Mock<IOrganizationService>();
         _eventBusMock = new Mock<IEventBus>();
         _currentUserMock = new Mock<ICurrentUser>();
-        _cacheMock = new Mock<Tnzi.Caching.ICache>();
         _sessionRevocationMock = new Mock<ISessionRevocationService>();
         _serviceProviderMock = new Mock<IServiceProvider>();
 
@@ -59,7 +57,6 @@ public partial class UserServiceTests
             _organizationServiceMock.Object,
             _eventBusMock.Object,
             _currentUserMock.Object,
-            _cacheMock.Object,
             sessionRevocation: _sessionRevocationMock.Object
         );
     }
@@ -118,6 +115,27 @@ public partial class UserServiceTests
 
         Assert.False(result.Succeeded);
         Assert.Equal(expected, result.Message);
+    }
+
+    /// <summary>
+    /// 角色在建号之前已经问过，分配那一步仍可能失败（角色恰在此刻被删、存储层拒绝）。
+    /// 失败就把刚建的账号收回：返回失败而库里留着一个无角色的账号，正是前置检查要杜绝的局面。
+    /// </summary>
+    [Fact]
+    public async Task CreateAsync_WhenRoleAssignmentFailsAfterTheAccountExists_RemovesTheAccount()
+    {
+        var role = new Role { Id = Guid.NewGuid(), Name = "Staff" };
+        _roleManagerMock.Setup(x => x.Roles).Returns(new List<Role> { role }.BuildMock());
+        _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>(), "Password123!")).ReturnsAsync(IdentityResult.Success);
+        _userManagerMock.Setup(x => x.AddToRolesAsync(It.IsAny<User>(), It.IsAny<IEnumerable<string>>()))
+            .ReturnsAsync(IdentityResult.Failed(new IdentityError { Description = "role store refused" }));
+        _userManagerMock.Setup(x => x.DeleteAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        var result = await _userService.CreateAsync(new CreateUserDto { Email = "late@example.com", Password = "Password123!", RoleIds = [role.Id] });
+
+        Assert.False(result.Succeeded);
+        _userManagerMock.Verify(x => x.DeleteAsync(It.Is<User>(u => u.Email == "late@example.com")), Times.Once);
+        _eventBusMock.Verify(x => x.PublishAsync(It.IsAny<Tnzi.Identity.Events.UserRegisteredEvent>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -250,7 +268,6 @@ public partial class UserServiceTests
             _organizationServiceMock.Object,
             _eventBusMock.Object,
             _currentUserMock.Object,
-            _cacheMock.Object,
             userDetailService: detailService.Object,
             sessionRevocation: _sessionRevocationMock.Object);
 
@@ -433,6 +450,34 @@ public partial class UserServiceTests
         Assert.Equal(PendingUserActions.InvitationPending, user.PendingActions);
     }
 
+    /// <summary>
+    /// ★★ 停用 / 锁定一个还没接受邀请的账号同样拒绝（与启用对称），指向撤销邀请。
+    /// </summary>
+    /// <remarks>
+    /// 停用写下的「一百年后」与邀请占位写下的那个锁定形状完全一样，接受邀请时分不出来，会一并清掉：
+    /// 管理员停掉一个待接受的人，那人照样点开链接、设好密码、带着预设角色登录进来。
+    /// 想让这个人不进来，正确的动作是撤销邀请（链接作废、账号删除）；在源头拒绝就不存在这种歧义。
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DisableOrLock_OnAnInvitedAccount_IsRejected_AndDoesNotTouchLockout(bool disable)
+    {
+        var userId = Guid.NewGuid();
+        var user = new User { Id = userId, UserName = "invitee", PendingActions = PendingUserActions.InvitationPending };
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+
+        var result = disable
+            ? await _userService.DisableAsync(userId, "changed my mind")
+            : await _userService.LockAsync(userId, DateTimeOffset.UtcNow.AddDays(1), "changed my mind");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_ACTIVATION_PENDING, result.ErrorCode);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(It.IsAny<User>(), It.IsAny<bool>()), Times.Never);
+        _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(It.IsAny<User>(), It.IsAny<DateTimeOffset?>()), Times.Never);
+    }
+
     [Fact]
     public async Task DisableAsync_WithValidUserId_DisablesUser()
     {
@@ -506,6 +551,40 @@ public partial class UserServiceTests
         _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(user, true), Times.Once);
         _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(user, null), Times.Once);
         _userManagerMock.Verify(x => x.ResetAccessFailedCountAsync(user), Times.Once);
+    }
+
+    /// <summary>
+    /// ★★★ 「解锁」与「启用」是同一个原语（清 LockoutEnd），所以要有同一道邀请守卫。
+    /// </summary>
+    /// <remarks>
+    /// 只守住 <see cref="UserService.EnableAsync"/> 而不守这里，管理端点一下「解锁」
+    /// 就绕过了那道守卫：一个没有密码、角色却已预设好的账号被放出锁定。
+    /// </remarks>
+    [Fact]
+    public async Task UnlockAsync_OnAnInvitedAccount_IsRejected_AndDoesNotTouchLockout()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var user = new User
+        {
+            Id = userId,
+            UserName = "newhire",
+            PendingActions = PendingUserActions.InvitationPending
+        };
+
+        _userManagerMock.Setup(x => x.FindByIdAsync(userId.ToString()))
+            .ReturnsAsync(user);
+
+        // Act
+        var result = await _userService.UnlockAsync(userId);
+
+        // Assert
+        Assert.False(result.Succeeded);
+        Assert.Equal(409, result.Code);
+        Assert.Equal(ErrorCodes.IDENTITY_ACTIVATION_PENDING, result.ErrorCode);
+        _userManagerMock.Verify(x => x.SetLockoutEnabledAsync(It.IsAny<User>(), It.IsAny<bool>()), Times.Never);
+        _userManagerMock.Verify(x => x.SetLockoutEndDateAsync(It.IsAny<User>(), It.IsAny<DateTimeOffset?>()), Times.Never);
+        Assert.Equal(PendingUserActions.InvitationPending, user.PendingActions);
     }
 
     /// <summary>三个 Set*Async 都返回成功的最小装配。</summary>

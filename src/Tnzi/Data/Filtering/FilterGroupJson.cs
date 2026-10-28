@@ -6,7 +6,7 @@ namespace Tnzi.Data.Filtering;
 /// <remarks>
 /// <para>
 /// 方言 = 属性名大小写不敏感（<c>logic</c> / <c>Logic</c> 都认）+ 枚举按名字（<c>"operator":"Equal"</c>）。
-/// 这与列表 API 的 <see cref="FilterQueryableExtensions.ApplyFilterFromJson{T}"/> 逐字相同，
+/// 这与列表 API 的 <see cref="FilterQueryableExtensions.ApplyFilterFromJson{T}(IQueryable{T}, string, FilterFieldPolicy)"/> 逐字相同，
 /// 所以一份在列表接口上合法的过滤器 JSON，在行级数据授权那边也是同一个意思。
 /// </para>
 /// <para>

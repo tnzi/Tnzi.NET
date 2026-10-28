@@ -158,16 +158,19 @@ public class JwtTokenServiceTests
         injectedValues.ShouldNotContain(injected);
     }
 
+    /// <summary>
+    /// 令牌服务只构造令牌，不签发登录：它曾经有一个返回「访问令牌 + 刷新令牌」的方法，签出来的刷新令牌从不落库、
+    /// 也不绑会话，刷新时一律被拒。为自定义登录签发令牌走 <see cref="IAuthService.IssueTokenAsync"/>。
+    /// </summary>
     [Fact]
-    public void GenerateTokenResult_WithExtraClaims_AccessTokenContainsThem()
+    public void TheTokenService_HasNoMemberThatHandsOutARefreshTokenAlongsideAnAccessToken()
     {
-        var service = CreateService();
-        var user = CreateUser();
-
-        var result = service.GenerateTokenResult(user, new[] { "user" },
-            new[] { new Claim("ai_roles", "admin") });
-
-        Decode(result.AccessToken).ShouldContain(c => c.Type == "ai_roles" && c.Value == "admin");
+        typeof(ITokenService).GetMethods()
+            .Where(m => m.ReturnType == typeof(TokenResult))
+            .ShouldBeEmpty();
+        typeof(ITokenService).GetMethods()
+            .Where(m => m.ReturnType == typeof(ClaimsPrincipal))
+            .ShouldBeEmpty();
     }
 
     [Fact]

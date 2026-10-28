@@ -212,6 +212,52 @@ public class WorkflowDelegatorTests
         workflowService.Verify(x => x.ResumeAsync("exec-2", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    /// <summary>
+    /// A node awaiting approval after it ran (<c>requiresApproval</c> on a content node) holds the
+    /// content under review in its run record, and the engine does not run it again on resume.
+    /// Overwriting that record with the reviewer's comment left the run showing the comment as what
+    /// the node produced. The comment still reaches the workflow service, which records it as
+    /// approval metadata on the step.
+    /// </summary>
+    [Fact]
+    public async Task ResumeWorkflowRunAsync_ApproveWithComment_KeepsTheNodeOutput()
+    {
+        var workflowService = new Mock<IWorkflowService>();
+        workflowService.Setup(x => x.ApproveStepAsync("exec-4", "draft", "Looks good", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result.Success());
+        workflowService.Setup(x => x.ResumeAsync("exec-4", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<WorkflowExecutionResultDto>.Success(new WorkflowExecutionResultDto
+            {
+                ExecutionId = "exec-4",
+                Output = "published",
+                Status = "Completed"
+            }));
+
+        var updatedNodes = new List<AgentRunNode>();
+        var runStore = CreateRunStore(new List<AgentRun>(), updatedNodes);
+        var runTracker = new RunTracker(runStore.Object, CreateTraceStore().Object, Mock.Of<ILogger<RunTracker>>());
+        var delegator = new WorkflowDelegator(workflowService.Object, runStore.Object, runTracker);
+
+        var run = new AgentRun
+        {
+            Id = Guid.NewGuid(),
+            WorkflowExecutionId = "exec-4",
+            WorkflowDefinitionId = Guid.NewGuid(),
+            Status = AgentRunStatus.AwaitingApproval,
+            Nodes = new List<AgentRunNode>
+            {
+                new() { Id = Guid.NewGuid(), NodeName = "draft", Status = AgentRunNodeStatus.AwaitingApproval, Output = "ARTICLE" }
+            }
+        };
+
+        await delegator.ResumeWorkflowRunAsync(run,
+            new ResumeRunInput { ApprovalDecision = "approve", ApprovalComment = "Looks good" }, CancellationToken.None);
+
+        var approved = updatedNodes.Single(n => n.Status == AgentRunNodeStatus.Approved);
+        approved.Output.ShouldBe("ARTICLE", "the run record keeps what was approved, not the reviewer's remark");
+        workflowService.Verify(x => x.ApproveStepAsync("exec-4", "draft", "Looks good", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ============== ResumeWorkflowRunAsync - RequiresClarification path ==============
 
     [Fact]

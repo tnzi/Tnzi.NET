@@ -33,9 +33,9 @@ public class AuditOptionsValidator : OptionsValidatorBase<AuditOptions>
             AddError(errors, nameof(options.ChannelCapacity), "ChannelCapacity must be 0 (unbounded) or greater.");
         }
 
-        if (options.MaxRequestBodySize is <= 0 or > 65536)
+        if (options.MaxRequestBodySize is <= 0 or > AuditOptions.MaxRequestBodySizeLimit)
         {
-            AddError(errors, nameof(options.MaxRequestBodySize), "MaxRequestBodySize must be between 1 and 65536.");
+            AddError(errors, nameof(options.MaxRequestBodySize), $"MaxRequestBodySize must be between 1 and {AuditOptions.MaxRequestBodySizeLimit}.");
         }
     }
 }

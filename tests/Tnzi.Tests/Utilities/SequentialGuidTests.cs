@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 
 namespace Tnzi.Tests.Utilities;
 
@@ -68,99 +69,118 @@ public class SequentialGuidTests
 
     #endregion
 
-    #region 有序性测试
+    #region 有序性测试（按目标数据库的真实比较规则）
+
+    // 只比较 ToByteArray 的某一段证明不了任何事：数据库比较的是整个值，而且各库的比较规则不同。
+    // 下面每条都按目标库实际的比较方式断言整段序列严格递增。
 
     [Fact]
-    public void NewGuid_SequentialAtEnd_ShouldBeSequential()
+    public void NewGuid_SequentialAsString_IsOrderedAsText()
     {
-        // Arrange
-        const int count = 50;
-        var guids = new List<Guid>();
+        // MySQL char(36) / SQLite TEXT 存的是 ToString() 的文本
+        var guids = GenerateSequence(SequentialGuid.SequentialGuidType.SequentialAsString);
 
-        // Act
-        for (int i = 0; i < count; i++)
+        AssertStrictlyIncreasing(guids, (a, b) => string.CompareOrdinal(a.ToString(), b.ToString()));
+        AssertStrictlyIncreasing(guids, (a, b) => string.CompareOrdinal(a.ToString().ToUpperInvariant(), b.ToString().ToUpperInvariant()));
+    }
+
+    [Fact]
+    public void NewGuid_SequentialAsString_IsOrderedAsBigEndianBytes()
+    {
+        // PostgreSQL uuid 按 RFC 9562 的大端字节序逐字节比较
+        var guids = GenerateSequence(SequentialGuid.SequentialGuidType.SequentialAsString);
+
+        AssertStrictlyIncreasing(guids, (a, b) => a.ToByteArray(bigEndian: true).AsSpan().SequenceCompareTo(b.ToByteArray(bigEndian: true)));
+    }
+
+    [Fact]
+    public void NewGuid_SequentialAtEnd_IsOrderedAsSqlServerUniqueIdentifier()
+    {
+        // SqlGuid.CompareTo 就是 SQL Server uniqueidentifier 的比较规则
+        var guids = GenerateSequence(SequentialGuid.SequentialGuidType.SequentialAtEnd);
+
+        AssertStrictlyIncreasing(guids, CompareAsSqlServer);
+    }
+
+    [Fact]
+    public void NewGuid_SequentialAsBinary_IsOrderedAsDotNetByteOrder()
+    {
+        var guids = GenerateSequence(SequentialGuid.SequentialGuidType.SequentialAsBinary);
+
+        AssertStrictlyIncreasing(guids, CompareAsDotNetBytes);
+    }
+
+    public static TheoryData<SequentialGuid.SequentialGuidType> AllLayouts =>
+    [
+        SequentialGuid.SequentialGuidType.SequentialAsString,
+        SequentialGuid.SequentialGuidType.SequentialAsBinary,
+        SequentialGuid.SequentialGuidType.SequentialAtEnd,
+    ];
+
+    [Theory]
+    [MemberData(nameof(AllLayouts))]
+    public void Layout_LaterTimestampSortsLater_AcrossEveryByteBoundary(SequentialGuid.SequentialGuidType type)
+    {
+        // 2^24 与 2^32 毫秒是旧排列的两处回绕点（约 4.66 小时、约 49.7 天）；随机字节故意取最不利的值
+        (long Earlier, long Later)[] boundaries =
+        [
+            (0xFFL, 0x100L),
+            (0xFFFFL, 0x1_0000L),
+            (0xFF_FFFFL, 0x100_0000L),
+            (0xFFFF_FFFFL, 0x1_0000_0000L),
+            (0xFF_FFFF_FFFFL, 0x100_0000_0000L),
+            (0xFFFF_FFFF_FFFEL, 0xFFFF_FFFF_FFFFL),
+        ];
+
+        foreach (var (earlier, later) in boundaries)
         {
-            guids.Add(SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAtEnd));
-            Thread.Sleep(1); // 确保时间戳不同
+            var a = Compose(type, earlier, counter: 0xFFF, randomFill: 0xFF);
+            var b = Compose(type, later, counter: 0, randomFill: 0x00);
+
+            Assert.True(CompareFor(type)(a, b) < 0, $"{type}: timestamp {earlier:X} should sort before {later:X}");
         }
+    }
 
-        // Assert
-        // 验证 GUID 按字节数组顺序递增（SQL Server 末尾排序）
-        for (int i = 1; i < guids.Count; i++)
+    [Theory]
+    [MemberData(nameof(AllLayouts))]
+    public void Layout_CounterOrdersIdsWithinOneMillisecond(SequentialGuid.SequentialGuidType type)
+    {
+        const long timestamp = 0x0199_0000_0000L;
+        (int Earlier, int Later)[] counters = [(0, 1), (0x0F, 0x10), (0xFF, 0x100), (0xFFE, 0xFFF)];
+
+        foreach (var (earlier, later) in counters)
         {
-            var prevBytes = guids[i - 1].ToByteArray();
-            var currBytes = guids[i].ToByteArray();
+            var a = Compose(type, timestamp, earlier, randomFill: 0xFF);
+            var b = Compose(type, timestamp, later, randomFill: 0x00);
 
-            // 比较最后6字节（时间戳4字节+计数器2字节）
-            var prevLast6 = new byte[6];
-            var currLast6 = new byte[6];
-            Array.Copy(prevBytes, 10, prevLast6, 0, 6);
-            Array.Copy(currBytes, 10, currLast6, 0, 6);
-
-            // 后生成的应该大于等于先生成的（大端序比较）
-            var comparison = CompareByteArrays(prevLast6, currLast6);
-            Assert.True(comparison <= 0, $"GUID at index {i} should be >= GUID at index {i - 1}");
+            Assert.True(CompareFor(type)(a, b) < 0, $"{type}: counter {earlier:X} should sort before {later:X}");
         }
     }
 
     [Fact]
-    public void NewGuid_SequentialAsString_ShouldBeSequential()
+    public void NewGuid_SequentialAsString_CarriesTheUnixMillisecondTimestampOfUuidV7()
     {
-        // Arrange
-        const int count = 50;
-        var guids = new List<Guid>();
+        // 标准 UUIDv7：前 12 个十六进制字符是 Unix 毫秒时间戳，任何 UUIDv7 解析器都读得出生成时刻
+        var before = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var guid = SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsString);
+        var after = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        // Act
-        for (int i = 0; i < count; i++)
-        {
-            guids.Add(SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsString));
-            Thread.Sleep(1);
-        }
+        var timestamp = Convert.ToInt64(guid.ToString("N")[..12], 16);
 
-        // Assert
-        for (int i = 1; i < guids.Count; i++)
-        {
-            var previousBytes = guids[i - 1].ToByteArray();
-            var currentBytes = guids[i].ToByteArray();
-
-            var previousOrderedBytes = previousBytes[6..14];
-            var currentOrderedBytes = currentBytes[6..14];
-
-            var comparison = CompareByteArrays(previousOrderedBytes, currentOrderedBytes);
-            Assert.True(comparison <= 0, $"GUID at index {i} should be >= GUID at index {i - 1}");
-        }
+        Assert.InRange(timestamp, before, after);
     }
 
     [Fact]
-    public void NewGuid_SequentialAsBinary_ShouldBeSequential()
+    public void GetDateFrom_ReturnsTheGenerationTimeOfTheDefaultLayout()
     {
-        // Arrange
-        const int count = 50;
-        var guids = new List<Guid>();
+        var before = DateTime.UtcNow.AddMilliseconds(-1);
+        var guid = SequentialGuid.NewGuid();
+        var after = DateTime.UtcNow.AddMilliseconds(1);
 
-        // Act
-        for (int i = 0; i < count; i++)
-        {
-            guids.Add(SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsBinary));
-            Thread.Sleep(1); // 确保时间戳不同
-        }
+        var date = SequentialGuid.GetDateFrom(guid);
 
-        // Assert
-        // 验证 GUID 按二进制顺序递增（前6字节是时间戳）
-        for (int i = 1; i < guids.Count; i++)
-        {
-            var prevBytes = guids[i - 1].ToByteArray();
-            var currBytes = guids[i].ToByteArray();
-
-            // 比较前6字节（时间戳）
-            var prevFirst6 = new byte[6];
-            var currFirst6 = new byte[6];
-            Array.Copy(prevBytes, 0, prevFirst6, 0, 6);
-            Array.Copy(currBytes, 0, currFirst6, 0, 6);
-
-            var comparison = CompareByteArrays(prevFirst6, currFirst6);
-            Assert.True(comparison <= 0, $"GUID at index {i} should be >= GUID at index {i - 1}");
-        }
+        Assert.Equal(DateTimeKind.Utc, date.Kind);
+        Assert.InRange(date, before, after);
     }
 
     [Fact]
@@ -286,48 +306,31 @@ public class SequentialGuidTests
     #region GUID 格式验证
 
     [Fact]
-    public void NewGuid_SequentialAtEnd_ShouldHaveCorrectVariantAndVersion()
+    public void NewGuid_SequentialAtEnd_IsAnRfc9562Version8Uuid()
     {
-        // Act
         var guid = SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAtEnd);
-        var bytes = guid.ToByteArray();
 
-        // Assert
-        // 版本位（字节6的高4位）应该是 0100 (0x40)
-        var version = (bytes[6] >> 4) & 0x0F;
-        Assert.Equal(0x04, version);
-
-        // 变体位（字节8的高2位）应该是 10 (0x80)
-        var variant = (bytes[8] >> 6) & 0x03;
-        Assert.Equal(0x02, variant);
+        Assert.Equal(8, guid.Version);
+        Assert.Equal(0x80, guid.ToByteArray()[8] & 0xC0);
     }
 
     [Fact]
-    public void NewGuid_SequentialAsBinary_ShouldHaveCorrectVariant()
+    public void NewGuid_SequentialAsBinary_IsAnRfc9562Version8Uuid()
     {
-        // Act
         var guid = SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsBinary);
-        var bytes = guid.ToByteArray();
 
-        // Assert
-        // 变体位（字节8的高2位）应该是 10 (0x80)
-        var variant = (bytes[8] >> 6) & 0x03;
-        Assert.Equal(0x02, variant);
-
-        // 注意：SequentialAsBinary 不设置版本位（字节6是计数器）
+        Assert.Equal(8, guid.Version);
+        Assert.Equal(0x80, guid.ToByteArray()[8] & 0xC0);
     }
 
     [Fact]
-    public void NewGuid_SequentialAsString_ShouldNotHaveVersionOrVariant()
+    public void NewGuid_SequentialAsString_IsAnRfc9562Version7Uuid()
     {
-        // Act
         var guid = SequentialGuid.NewGuid(SequentialGuid.SequentialGuidType.SequentialAsString);
-        var bytes = guid.ToByteArray();
 
-        // Assert
-        // SequentialAsString 不设置版本位和变体位（字节6和8是时间戳的一部分）
-        // 这里主要验证 GUID 是有效的
-        Assert.NotEqual(Guid.Empty, guid);
+        Assert.Equal(7, guid.Version);
+        Assert.Equal(0x80, guid.ToByteArray()[8] & 0xC0);
+        Assert.Equal('7', guid.ToString()[14]);
     }
 
     #endregion
@@ -418,25 +421,47 @@ public class SequentialGuidTests
     #region 辅助方法
 
     /// <summary>
-    /// 比较两个字节数组（大端序）
-    /// 返回: -1 如果 a &lt; b, 0 如果 a == b, 1 如果 a &gt; b
+    /// 连续生成一段 Guid：大部分落在同一毫秒内（走计数器），中间穿插几次跨毫秒
     /// </summary>
-    private static int CompareByteArrays(byte[] a, byte[] b)
+    private static List<Guid> GenerateSequence(SequentialGuid.SequentialGuidType type)
     {
-        if (a.Length != b.Length)
+        var guids = new List<Guid>();
+        for (int i = 0; i < 600; i++)
         {
-            throw new ArgumentException("数组长度必须相同");
+            guids.Add(SequentialGuid.NewGuid(type));
+            if (i % 100 == 99)
+                Thread.Sleep(2);
         }
+        return guids;
+    }
 
-        for (int i = 0; i < a.Length; i++)
+    private static void AssertStrictlyIncreasing(List<Guid> guids, Func<Guid, Guid, int> compare)
+    {
+        for (int i = 1; i < guids.Count; i++)
         {
-            if (a[i] < b[i])
-                return -1;
-            if (a[i] > b[i])
-                return 1;
+            Assert.True(compare(guids[i - 1], guids[i]) < 0, $"GUID at index {i} ({guids[i]}) should sort after index {i - 1} ({guids[i - 1]})");
         }
+    }
 
-        return 0;
+    private static Func<Guid, Guid, int> CompareFor(SequentialGuid.SequentialGuidType type) => type switch
+    {
+        SequentialGuid.SequentialGuidType.SequentialAsString => (a, b) => string.CompareOrdinal(a.ToString(), b.ToString()),
+        SequentialGuid.SequentialGuidType.SequentialAsBinary => CompareAsDotNetBytes,
+        _ => CompareAsSqlServer,
+    };
+
+    private static int CompareAsSqlServer(Guid a, Guid b) => new SqlGuid(a).CompareTo(new SqlGuid(b));
+
+    private static int CompareAsDotNetBytes(Guid a, Guid b) => a.ToByteArray().AsSpan().SequenceCompareTo(b.ToByteArray());
+
+    /// <summary>
+    /// 直接驱动排列函数：时钟给不出跨越 2^24 / 2^32 毫秒的相邻时间戳
+    /// </summary>
+    private static Guid Compose(SequentialGuid.SequentialGuidType type, long timestamp, int counter, byte randomFill)
+    {
+        var method = typeof(SequentialGuid).GetMethod("Compose", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("SequentialGuid.Compose(type, timestamp, counter, random) was not found; the layout tests drive it directly.");
+        return (Guid)method.Invoke(null, [type, timestamp, counter, Enumerable.Repeat(randomFill, 16).ToArray()])!;
     }
 
     #endregion

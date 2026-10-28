@@ -21,7 +21,8 @@ public class McpToolUsageRecordConfiguration : EntityTypeConfigurationBase<McpTo
         builder.HasIndex(e => new { e.ToolName, e.CreationTime });
 
         // TenantId 是分析维度字段（非隔离边界，实体不实现 IMultiTenant）：
-        // 值来自不可信的 X-Tenant-Id 请求头，仅用于统计分组查询，故建普通索引、
+        // 当前写入路径从不填它（客户端自报的租户头不是可信来源，早已不读），
+        // 留给日后接入可信租户来源（运行范围凭据）时按租户分组统计。故建普通索引、
         // 不挂租户过滤器，也不随多租户开关增减列。
         builder.HasIndex(e => new { e.TenantId, e.ToolName });
     }

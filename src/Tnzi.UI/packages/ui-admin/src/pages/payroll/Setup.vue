@@ -83,10 +83,19 @@ const componentCrud = useCrudPage<ComponentRow>({
   columns: componentColumns,
   rowKey: (r) => String(r.id ?? ''),
   fetchData: (q) => bridge.components.fetch(q),
-  createData: (d) => bridge.components.create(toComponentPayload(d)),
-  updateData: (id, d) => bridge.components.update(String(id), toComponentPayload(d)),
-  deleteData: (ids) => bridge.components.delete(ids.map(String)),
+  // Each write re-reads the component list the structure line editor picks from;
+  // it is read once on mount, so a component created here was missing from that
+  // editor (and a deleted one still offered) until the page was reloaded.
+  createData: (d) => afterComponentWrite(bridge.components.create(toComponentPayload(d))),
+  updateData: (id, d) => afterComponentWrite(bridge.components.update(String(id), toComponentPayload(d))),
+  deleteData: (ids) => afterComponentWrite(bridge.components.delete(ids.map(String))),
 })
+
+async function afterComponentWrite<T>(write: Promise<T>): Promise<T> {
+  const result = await write
+  void sources.refreshComponents()
+  return result
+}
 const componentActions: RowAction<ComponentRow>[] = [editAction(componentCrud), deleteAction(componentCrud)]
 
 // ── Structures ────────────────────────────────────────────────────

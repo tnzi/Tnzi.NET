@@ -50,12 +50,12 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 按模型分组统计
+    /// 按模型分组统计（可按提供商、Agent 过滤）
     /// </summary>
     [HttpGet("by-model")]
-    public virtual async Task<ApiResult<List<ModelUsageDto>>> GetByModel([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] string? provider = null)
+    public virtual async Task<ApiResult<List<ModelUsageDto>>> GetByModel([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] string? provider = null, [FromQuery] Guid? agentId = null)
     {
-        var result = await AnalyticsService.GetUsageByModelAsync(startTime, endTime, provider);
+        var result = await AnalyticsService.GetUsageByModelAsync(startTime, endTime, provider, agentId);
         return result.ToApiResult();
     }
 
@@ -70,12 +70,12 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 按 Agent 分组统计（Top N 消耗 Agent）
+    /// 按 Agent 分组统计（Top N 消耗 Agent；可按提供商、模型、Agent 过滤）
     /// </summary>
     [HttpGet("by-agent")]
-    public virtual async Task<ApiResult<List<AgentUsageDto>>> GetByAgent([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery][Range(1, 100)] int topN = 20)
+    public virtual async Task<ApiResult<List<AgentUsageDto>>> GetByAgent([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery][Range(1, 100)] int topN = 20, [FromQuery] string? provider = null, [FromQuery] string? model = null, [FromQuery] Guid? agentId = null)
     {
-        var result = await AnalyticsService.GetUsageByAgentAsync(startTime, endTime, topN);
+        var result = await AnalyticsService.GetUsageByAgentAsync(startTime, endTime, topN, provider, model, agentId);
         return result.ToApiResult();
     }
 
@@ -90,12 +90,12 @@ public class DefaultUsageAnalyticsAdminController : ApiAdminControllerBase
     }
 
     /// <summary>
-    /// 成本摘要（按提供商和模型分组的美元成本统计）
+    /// 成本摘要（按提供商和模型分组的美元成本统计；可按提供商、模型、Agent 过滤）
     /// </summary>
     [HttpGet("cost-summary")]
-    public virtual async Task<ApiResult<CostSummaryDto>> GetCostSummary([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] string? provider = null, [FromQuery] string? model = null)
+    public virtual async Task<ApiResult<CostSummaryDto>> GetCostSummary([FromQuery] DateTime startTime, [FromQuery] DateTime endTime, [FromQuery] string? provider = null, [FromQuery] string? model = null, [FromQuery] Guid? agentId = null)
     {
-        var result = await AnalyticsService.GetCostSummaryAsync(startTime, endTime, provider, model);
+        var result = await AnalyticsService.GetCostSummaryAsync(startTime, endTime, provider, model, agentId);
         return result.ToApiResult();
     }
 }

@@ -21,8 +21,9 @@ public class EnvelopeTemplate : FullAuditedEntity<Guid>, IMultiTenant
     /// 可用于哪些宿主类型（逗号分隔）。空 = 不限。
     /// </summary>
     /// <remarks>
-    /// 存的是 <see cref="Services.IMergeSourceProvider.EntityType"/> 那些字符串；
-    /// 模板设计器据此决定给出哪些合并变量。
+    /// 存的是 <see cref="Services.IMergeSourceProvider.EntityType"/> 那些字符串，保存时规范化（去空白、去空项、
+    /// 不分大小写去重）。按整项、不分大小写比较：模板列表按宿主类型筛选时只命中整项；
+    /// 发起请求时宿主类型必须是其中一项（清单不空时也不能不绑定宿主），否则 400。
     /// </remarks>
     public string? HostEntityTypes { get; set; }
 
@@ -131,7 +132,9 @@ public class Field : EntityBase<Guid>, IMultiTenant, IHasOrder
     /// <summary>高（归一化 0-1）</summary>
     public decimal H { get; set; }
 
-    /// <summary>字号（磅）；null = 由渲染器按框高自适应</summary>
+    /// <summary>
+    /// 字号（磅）；null = 10 磅。值放不下时按框宽换行，行数装不进框高时逐步缩小（以此为上限，不小于 6 磅）。
+    /// </summary>
     public decimal? FontSize { get; set; }
 
     /// <summary>排序</summary>

@@ -147,7 +147,12 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
             ToolApprovalResult result;
             try
             {
-                result = await _approvalHandler.RequestApprovalAsync(request, cts.Token);
+                // 等人审批有自己的上限（ToolApproval:TimeoutSeconds），不占工具的执行超时：
+                // 否则审批窗口实际只有工具超时那么长，晚于它的批准永远到不了工具
+                using (ToolCallTimeout.Suspend())
+                {
+                    result = await _approvalHandler.RequestApprovalAsync(request, cts.Token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -388,20 +393,19 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         var currentRequest = executionContextAccessor?.CurrentRequest;
         // User 级规则靠它绑定到人；与下面发出的审批请求同源，两条路径不会各说各话
         context.UserId = currentRequest?.UserId;
-        context.WorkflowId = currentRequest?.WorkflowId;
-        context.IsWorkflowRun = currentRequest?.WorkflowId.HasValue == true;
-        context.WorkflowExecutionId = GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowExecutionId);
-        context.WorkflowNodeName = GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowNodeName);
 
-        if (currentRequest?.Metadata != null)
-        {
-            context.WorkflowExecutionId ??=
-                GetMetadataString(currentRequest.Metadata, "workflow_execution_id")
-                ?? GetMetadataString(currentRequest.Metadata, "workflowExecutionId");
-            context.WorkflowNodeName ??=
-                GetMetadataString(currentRequest.Metadata, "node_name")
-                ?? GetMetadataString(currentRequest.Metadata, "nodeName");
-        }
+        // 工作流身份只认进程内来源：引擎在每个节点执行期间设置的节点作用域（节点里另起的运行沿执行流继承），
+        // 其次是进程内代码写进属性包的值。刻意不读运行请求的元数据（node_name / workflow_execution_id）：
+        // 元数据可以来自请求体（管理端 spawn 的 metadata），读它就是让调用方自己挑一条按节点放行的规则。
+        // 此前恰恰只有元数据这一条路能提供节点名而引擎从不提供，按节点限定的规则在运行时永不命中。
+        var workflowNode = WorkflowNodeScope.Current;
+        context.WorkflowId = currentRequest?.WorkflowId ?? workflowNode?.WorkflowId;
+        // 直接执行的工作流（管理端 / IWorkflowService.RunAsync）没有运行请求，只有节点作用域
+        context.IsWorkflowRun = currentRequest?.WorkflowId.HasValue == true || workflowNode != null;
+        context.WorkflowExecutionId = workflowNode?.ExecutionId
+            ?? GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowExecutionId);
+        context.WorkflowNodeName = workflowNode?.NodeName
+            ?? GetContextPropertyString(executionContextAccessor, ContextPropertyKeys.WorkflowNodeName);
 
         if (currentRequest?.Metadata?.TryGetValue("working_directory", out var workingDirectory) == true
             && string.IsNullOrWhiteSpace(context.WorkingDirectory))
@@ -626,15 +630,6 @@ public sealed class ApprovalToolWrapper : DelegatingAIFunction
         }
 
         return ConvertToString(value);
-    }
-
-    private static string? GetMetadataString(
-        IReadOnlyDictionary<string, object> metadata,
-        string key)
-    {
-        return metadata.TryGetValue(key, out var value)
-            ? ConvertToString(value)
-            : null;
     }
 
     private static string? ConvertToString(object? value)

@@ -34,5 +34,39 @@ public enum CliUserConfigIsolation
     /// <remarks>
     /// 专用目录里起初没有登录态，需要在其中登录一次，或配置 <c>FallbackAuthToken</c> 兜底。
     /// </remarks>
-    IsolatedConfigDirectory = 2
+    IsolatedConfigDirectory = 2,
+
+    /// <summary>
+    /// 每个工作区一个配置目录（<c>{运行根}/.cli-config/{provider}</c>）：CLI 写下的一切，包括每个会话的完整记录，
+    /// 都跟着工作区走，工作区被删（删除线程、回收器）时一起删掉。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 每线程工作区下就是每线程一个目录，同一线程的下一轮在同一个目录里续接会话；每运行工作区下每次运行一个。
+    /// 用户提供的工作目录不支持（它的运行根按运行分，每一轮都续接不上前一轮），那样的运行以启动失败结束。
+    /// </para>
+    /// <para>
+    /// 目录里<b>永远没有存储的登录</b>，也没有个人设置、全局记忆文件与插件：认证只能来自环境变量里的令牌
+    /// （<c>FallbackAuthToken</c>，或经 <c>EnvironmentWhitelist</c> 透传的令牌 / API key）。
+    /// 会话记录随工作区的回收而消失，所以线程闲置超过 <c>Gc:CompletedTtl</c> 之后的下一轮从新会话开始。
+    /// </para>
+    /// </remarks>
+    PerWorkspaceConfigDirectory = 3,
+
+    /// <summary>
+    /// 配置目录与项目目录名都由执行位置（或调用方）按运行给出（<see cref="CliLaunchProfile.ConfigDirectory"/>、
+    /// <see cref="CliLaunchProfile.ProjectDirectoryName"/>），支持用户提供的工作目录。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 典型用法是每个用户一个执行位置（容器）、每个用户一份配置目录（容器里的 <c>~/.claude</c>）：登录态、用户自己的设置与 MCP 都在里面，
+    /// 会话记录按项目固定在 <c>&lt;配置目录&gt;/projects/&lt;项目目录名&gt;/</c>。同一个项目的不同 worktree（每个会话一个）续接的是同一份记录。
+    /// </para>
+    /// <para>
+    /// 删除线程时按每一轮的会话 id 删掉对应的记录（provider 的 <c>SessionStorePaths</c>）；执行位置当时连不上的，
+    /// 记录留到 CLI 自己按保留期清理（<see cref="CliLaunchProfile.SessionRetentionDays"/>）。
+    /// </para>
+    /// <para>档案没给出配置目录时运行以 <c>LaunchFailed</c> 结束。</para>
+    /// </remarks>
+    ProvidedConfigDirectory = 4
 }

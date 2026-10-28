@@ -19,7 +19,8 @@ public abstract class TemplateBase : RazorEngineTemplateBase
 
     /// <summary>
     /// 写出一个 <c>@expression</c> 的值：默认 <b>HTML 编码</b>，
-    /// 只有 <see cref="RawContent"/>（即 <see cref="Raw"/> / <c>Html.Raw</c> 的产物）原样输出。
+    /// 只有 <see cref="RawContent"/>（<see cref="Raw"/> / <c>Html.Raw</c> 的产物，以及已经编码过的
+    /// <see cref="HtmlEncode"/> / <c>Html.Encode</c> 的产物）原样输出。
     /// </summary>
     /// <remarks>
     /// ★ 基类直接把值 Append 进输出，于是模板里的每一个 <c>@Model.X</c> 都是原样注入 HTML。
@@ -42,7 +43,7 @@ public abstract class TemplateBase : RazorEngineTemplateBase
             base.Write(obj);
             return;
         }
-        base.Write(HtmlEncode(obj));
+        base.Write(EncodeText(obj));
     }
 
     /// <summary>
@@ -60,7 +61,7 @@ public abstract class TemplateBase : RazorEngineTemplateBase
             base.WriteAttributeValue(prefix, prefixOffset, value, valueOffset, valueLength, isLiteral);
             return;
         }
-        base.WriteAttributeValue(prefix, prefixOffset, HtmlEncode(value), valueOffset, valueLength, isLiteral);
+        base.WriteAttributeValue(prefix, prefixOffset, EncodeText(value), valueOffset, valueLength, isLiteral);
     }
 
     /// <summary>
@@ -73,13 +74,21 @@ public abstract class TemplateBase : RazorEngineTemplateBase
     }
 
     /// <summary>
-    /// HTML 编码
+    /// HTML 编码。产物已经是编码过的文本，<c>@HtmlEncode(x)</c> 写出时原样输出，不会被 <c>@expr</c> 再编码一次。
     /// </summary>
-    public string HtmlEncode(object? value)
+    /// <remarks>
+    /// 返回 <see cref="RawContent"/> 而不是 <see cref="string"/>：<c>@expr</c> 默认编码之后，一个返回普通字符串的编码助手
+    /// 在写出时会被再编码一遍，<c>A &amp; B</c> 渲染成 <c>A &amp;amp; B</c>。<see cref="RawContent"/> 可隐式转成
+    /// <see cref="string"/>，拼字符串、赋给 <c>string</c> 变量、传给收 <c>string</c> 的助手照旧可用；
+    /// 只是那样得到的是普通字符串，直接写出时按普通值处理。
+    /// </remarks>
+    public RawContent HtmlEncode(object? value)
     {
-        if (value == null) return string.Empty;
-        return System.Net.WebUtility.HtmlEncode(value.ToString() ?? string.Empty);
+        return new RawContent(EncodeText(value));
     }
+
+    private static string EncodeText(object? value)
+        => value == null ? string.Empty : System.Net.WebUtility.HtmlEncode(value.ToString() ?? string.Empty);
 
     /// <summary>
     /// URL 编码
@@ -130,15 +139,13 @@ public abstract class TemplateBase : RazorEngineTemplateBase
     }
 
     /// <summary>
-    /// 截断文本
+    /// 截断文本：正文最多 <paramref name="maxLength"/> 个 UTF-16 码元，被截时加 <paramref name="suffix"/>。
     /// </summary>
+    /// <remarks>
+    /// 截断点落在代理对中间时整个字符一起舍掉：半个 emoji 在渲染出来的邮件或页面里是一个替换字符。
+    /// </remarks>
     public string Truncate(string? value, int maxLength, string suffix = "...")
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-            return value ?? string.Empty;
-
-        return value[..maxLength] + suffix;
-    }
+        => string.IsNullOrEmpty(value) ? string.Empty : value.Truncate(maxLength, suffix);
 }
 
 /// <summary>

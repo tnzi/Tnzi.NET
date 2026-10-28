@@ -43,14 +43,14 @@
           :value="moneyOrDash(summary?.openBalance)"
           :animated="false"
           icon="mdi:scale-balance"
-          :tone="(summary?.openBalance ?? 0) > 0 ? 'default' : 'success'"
+          :tone="summary && summary.openBalance <= 0 ? 'success' : 'default'"
         />
         <TKpiCard
           :label="tp('kpi.overdue')"
           :value="moneyOrDash(summary?.overdue)"
           :animated="false"
           icon="mdi:clock-alert-outline"
-          :tone="(summary?.overdue ?? 0) > 0 ? 'error' : 'success'"
+          :tone="!summary ? 'default' : summary.overdue > 0 ? 'error' : 'success'"
         />
         <TKpiCard
           :label="tp('kpi.openDocuments')"
@@ -251,36 +251,50 @@ const canCreateDoc = computed(() => can('finance.document.create'))
 const canManageRemit = computed(() => can('finance.partyBank.create') || can('finance.partyBank.update'))
 const primaryAddress = computed(() => party.value?.billingAddress ?? party.value?.address ?? null)
 
-/** Money in the party's own currency, falling back to the ledger's base. */
+/**
+ * A summary figure in the ledger's base currency. The summary converts every
+ * open item to base (the aging bar under the strip says so too); the party's
+ * own currency is only what its documents are written in, so labelling these
+ * totals with it would quote base-currency amounts under a foreign symbol.
+ */
 function moneyOrDash(amount?: number | null): string {
   if (amount == null) return EMPTY_DASH
-  return fmtMoney(amount, party.value?.currency ?? summary.value?.baseCurrency)
+  return fmtMoney(amount, summary.value?.baseCurrency)
 }
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-async function loadParty(): Promise<void> {
+// Every read is last-wins. The route reuses this page from one party to the next
+// and the ledger re-reads on every page / scope flip: an earlier answer landing
+// late would paint another party's name, balance or ledger under this one.
+let recordSeq = 0
+let txnSeq = 0
+
+async function loadParty(mine: number): Promise<void> {
   try {
-    party.value = (await api.value.get(props.id)) as CustomerDto & VendorDto
+    const loaded = (await api.value.get(props.id)) as CustomerDto & VendorDto
+    if (mine === recordSeq) party.value = loaded
   } catch (e) {
-    loadError.value = message(e)
+    if (mine === recordSeq) loadError.value = message(e)
   }
 }
 
-async function loadSummary(): Promise<void> {
+async function loadSummary(mine: number): Promise<void> {
   summaryLoading.value = true
   try {
-    summary.value = await api.value.summary(props.id)
+    const loaded = await api.value.summary(props.id)
+    if (mine === recordSeq) summary.value = loaded
   } catch (e) {
-    loadError.value = message(e)
+    if (mine === recordSeq) loadError.value = message(e)
   } finally {
-    summaryLoading.value = false
+    if (mine === recordSeq) summaryLoading.value = false
   }
 }
 
 async function loadTransactions(): Promise<void> {
+  const mine = ++txnSeq
   txnLoading.value = true
   try {
     const result = await api.value.transactions(props.id, {
@@ -288,21 +302,23 @@ async function loadTransactions(): Promise<void> {
       pageSize: PAGE_SIZE,
       openOnly: scope.value === 'open' ? true : undefined,
     })
+    if (mine !== txnSeq) return
     entries.value = result.items ?? []
     txnTotal.value = result.totalCount ?? 0
     // The overview's "recent activity" is the first page's head - no second
     // round-trip for what we already hold.
     if (pageIndex.value === 1 && scope.value === 'all') recent.value = entries.value.slice(0, RECENT_SIZE)
   } catch (e) {
-    loadError.value = message(e)
+    if (mine === txnSeq) loadError.value = message(e)
   } finally {
-    txnLoading.value = false
+    if (mine === txnSeq) txnLoading.value = false
   }
 }
 
 async function reload(): Promise<void> {
+  const mine = ++recordSeq
   loadError.value = null
-  await Promise.all([loadParty(), loadSummary(), loadTransactions()])
+  await Promise.all([loadParty(mine), loadSummary(mine), loadTransactions()])
 }
 
 function onScope(next: 'all' | 'open'): void {
@@ -350,6 +366,12 @@ function newPayment(): void {
 watch(
   () => [props.id, props.partyType] as const,
   () => {
+    // Another party: nothing of the previous one stays on screen while it loads.
+    party.value = null
+    summary.value = null
+    entries.value = []
+    recent.value = []
+    txnTotal.value = 0
     pageIndex.value = 1
     scope.value = 'all'
     void reload()

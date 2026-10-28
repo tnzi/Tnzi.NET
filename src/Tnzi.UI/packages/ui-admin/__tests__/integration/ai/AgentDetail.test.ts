@@ -154,6 +154,7 @@ const skillsFetchMock = vi.fn(async () => ({ ...emptyPage }))
 const getMemoryMock = vi.fn(async () => ({ ...emptyPage }))
 
 const routerReplaceMock = vi.fn(async () => undefined)
+const updateMemoryMock = vi.fn(async () => undefined)
 
 vi.mock('../../../src/plugin/client', () => ({ useAdminClient: () => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }) }))
 vi.mock('../../../src/services/bridges/ai-bridge', () => ({
@@ -175,7 +176,7 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
       getToolGroups: getToolGroupsMock,
       getMemory: getMemoryMock,
       createMemory: vi.fn(),
-      updateMemory: vi.fn(),
+      updateMemory: updateMemoryMock,
       deleteMemory: vi.fn(),
     },
     agentRuns: {
@@ -197,6 +198,20 @@ vi.mock('../../../src/services/bridges/ai-bridge', () => ({
   }),
 }))
 
+const cliBindingGetMock = vi.fn(async (_agentId: string): Promise<unknown> => null)
+const cliRuntimesListMock = vi.fn(async (): Promise<unknown[]> => [])
+vi.mock('../../../src/services/bridges/cli-agent-bridge', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../src/services/bridges/cli-agent-bridge')>()
+  return {
+    ...original,
+    createCliAgentBridge: () => ({
+      runtimes: { list: cliRuntimesListMock, providers: vi.fn(async () => []), probe: vi.fn(), update: vi.fn(), remove: vi.fn() },
+      bindings: { get: cliBindingGetMock, upsert: vi.fn(), remove: vi.fn() },
+      runs: { list: vi.fn(), get: vi.fn(), messages: vi.fn(async () => []), cancel: vi.fn(), streamUrl: vi.fn(() => '') },
+    }),
+  }
+})
+
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: 'agent-1' }, query: {} }),
   // `resolve` is part of the real router contract - the page uses it to build
@@ -210,6 +225,7 @@ vi.mock('vue-router', () => ({
 }))
 
 import AgentDetail from '../../../src/pages/ai/agents/AgentDetail.vue'
+import AgentExecutionPanel from '../../../src/pages/ai/agents/sections/AgentExecutionPanel.vue'
 
 describe('AgentDetail page (TDetailLayout tabs)', () => {
   beforeEach(() => {
@@ -360,5 +376,183 @@ describe('AgentDetail page (TDetailLayout tabs)', () => {
     await vm.handleStopAbTest()
     await flushPromises()
     expect(stopAbTestMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// An emptied field went out as `null`, which the update reads as "no change":
+// the page said "Saved", the old system prompt / forced model stayed stored and
+// the field snapped back. Text fields clear with an empty string; the numbers
+// cannot be cleared through an update, so the page does not offer it.
+describe('AgentDetail basic info - emptied fields', () => {
+  type EditVm = {
+    edit: Record<string, unknown>
+    isDirty: boolean
+    handleSave: () => Promise<void>
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    updateMock.mockClear()
+    getByIdMock.mockClear()
+  })
+
+  it('a cleared description, prompt and model go out as empty strings', async () => {
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+
+    vm.edit.description = ''
+    vm.edit.instructions = ''
+    vm.edit.model = null // the model select's clear button
+    await vm.handleSave()
+
+    expect(updateMock).toHaveBeenCalledTimes(1)
+    expect(updateMock.mock.calls[0]![1]).toEqual({ description: '', instructions: '', model: '' })
+  })
+
+  it('a model that was never set and is cleared again is not a change', async () => {
+    getByIdMock.mockResolvedValueOnce({ ...AGENT_1, model: null } as never)
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+
+    vm.edit.model = null
+    await flushPromises()
+    expect(vm.isDirty).toBe(false)
+  })
+
+  it('an emptied temperature or max tokens returns to the stored value', async () => {
+    getByIdMock.mockResolvedValueOnce({ ...AGENT_1, temperature: 0.7, maxTokens: 2048 } as never)
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as EditVm
+
+    const numberInputs = wrapper.findAllComponents({ name: 'InputNumber' })
+    const temperature = numberInputs.find((c) => c.props('value') === 0.7)!
+    const maxTokens = numberInputs.find((c) => c.props('value') === 2048)!
+    expect(temperature.props('clearable')).toBeFalsy()
+    expect(maxTokens.props('clearable')).toBeFalsy()
+
+    temperature.vm.$emit('update:value', null)
+    maxTokens.vm.$emit('update:value', null)
+    temperature.vm.$emit('blur', new FocusEvent('blur'))
+    maxTokens.vm.$emit('blur', new FocusEvent('blur'))
+    await flushPromises()
+
+    expect(vm.edit.temperature).toBe(0.7)
+    expect(vm.edit.maxTokens).toBe(2048)
+    expect(vm.isDirty).toBe(false)
+  })
+})
+
+describe('AgentDetail memory - clearing a category', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    updateMemoryMock.mockClear()
+  })
+
+  // The update reads null as "no change" and an empty string as "clear".
+  it('an emptied category goes out as an empty string', async () => {
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openMemoryEdit: (row: { id: string; content: string; category: string | null; importance: number }) => void
+      memoryModal: { category: string }
+      saveMemory: () => Promise<void>
+    }
+    vm.openMemoryEdit({ id: 'mem-1', content: 'Prefers metric units', category: 'preferences', importance: 0.5 })
+    vm.memoryModal.category = ''
+    await vm.saveMemory()
+
+    expect(updateMemoryMock).toHaveBeenCalledWith('agent-1', 'mem-1', { content: 'Prefers metric units', category: '', importance: 0.5 })
+  })
+})
+
+describe('AgentDetail memory and versions - every page, not the first', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getMemoryMock.mockClear()
+    getVersionsMock.mockClear()
+  })
+
+  // The server clamps PageSize to 100 without saying so: one request for 200
+  // returned the first 100 memories, and entries past them could not be
+  // reviewed or deleted. Versions stopped at 50.
+  function clampedPages<T>(all: T[]) {
+    return async (_id: string, query?: { pageIndex?: number; pageSize?: number }) => {
+      const size = Math.min(query?.pageSize ?? 10, 100)
+      const index = query?.pageIndex ?? 1
+      const items = all.slice((index - 1) * size, index * size)
+      return {
+        items,
+        totalCount: all.length,
+        pageIndex: index,
+        pageSize: size,
+        totalPages: Math.ceil(all.length / size),
+        hasNextPage: index * size < all.length,
+        hasPreviousPage: index > 1,
+      }
+    }
+  }
+
+  it('lists all 150 memories of an agent', async () => {
+    const memories = Array.from({ length: 150 }, (_, i) => ({
+      id: `mem-${i + 1}`, agentId: 'agent-1', content: `m${i + 1}`, category: null, importance: 0.5,
+    }))
+    getMemoryMock.mockImplementation(clampedPages(memories) as never)
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    ;(wrapper.vm as unknown as { setSection: (k: string) => void }).setSection('memory')
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { memoryRows: unknown[] }
+    expect(vm.memoryRows).toHaveLength(150)
+    getMemoryMock.mockReset().mockImplementation(async () => ({ ...emptyPage }))
+  })
+
+  it('lists all 60 versions of an agent', async () => {
+    const versions = Array.from({ length: 60 }, (_, i) => ({
+      id: `ver-${60 - i}`, agentId: 'agent-1', version: 60 - i, changeNote: null, configSnapshot: '{}',
+      creationTime: '2026-04-01T00:00:00Z',
+    }))
+    const original = getVersionsMock.getMockImplementation()
+    getVersionsMock.mockImplementation(clampedPages(versions) as never)
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    ;(wrapper.vm as unknown as { setSection: (k: string) => void }).setSection('versions')
+    await flushPromises()
+    const vm = wrapper.vm as unknown as { versions: unknown[] }
+    expect(vm.versions).toHaveLength(60)
+    if (original) getVersionsMock.mockImplementation(original)
+  })
+})
+
+describe('AgentDetail execution - a binding that could not be read', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    cliBindingGetMock.mockClear()
+    cliRuntimesListMock.mockClear()
+  })
+
+  it('hands the read failure to the panel instead of an empty binding', async () => {
+    cliBindingGetMock.mockRejectedValueOnce(new Error('Forbidden'))
+    cliRuntimesListMock.mockResolvedValueOnce([{ id: 'rt-1', name: 'Claude Code @ BUILD-01' }])
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    ;(wrapper.vm as unknown as { setSection: (k: string) => void }).setSection('execution')
+    await flushPromises()
+
+    expect(cliBindingGetMock).toHaveBeenCalledWith('agent-1')
+    const panel = wrapper.findComponent(AgentExecutionPanel)
+    expect(panel.props('loadError')).toBe('Forbidden')
+    expect(panel.find('[data-test="cli-execution-load-error"]').exists()).toBe(true)
+  })
+
+  it('clears the failure once the binding reads', async () => {
+    cliBindingGetMock.mockResolvedValueOnce(null)
+    const wrapper = mount(AgentDetail)
+    await flushPromises()
+    ;(wrapper.vm as unknown as { setSection: (k: string) => void }).setSection('execution')
+    await flushPromises()
+    expect(wrapper.findComponent(AgentExecutionPanel).props('loadError')).toBeNull()
   })
 })

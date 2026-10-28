@@ -12,6 +12,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     private readonly IRepository<Agent, Guid> _agentRepository;
     private readonly ICurrentTenant? _currentTenant;
     private readonly IOptions<MultiTenancyOptions>? _multiTenancyOptions;
+    private readonly IRepository<AgentAttachment, Guid>? _attachmentRepository;
 
     /// <summary>
     /// 按 threadId 的消息写入互斥锁，防止并发写入产生相同 Order
@@ -24,7 +25,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         IRepository<Agent, Guid> agentRepository,
         IServiceProvider serviceProvider,
         ICurrentTenant? currentTenant = null,
-        IOptions<MultiTenancyOptions>? multiTenancyOptions = null)
+        IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
+        IRepository<AgentAttachment, Guid>? attachmentRepository = null)
         : base(serviceProvider)
     {
         _repository = Check.NotNull(repository);
@@ -32,6 +34,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         _agentRepository = Check.NotNull(agentRepository);
         _currentTenant = currentTenant;
         _multiTenancyOptions = multiTenancyOptions;
+        _attachmentRepository = attachmentRepository;
     }
 
     /// <summary>
@@ -133,10 +136,145 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             MessageCount = totalMessageCount,
             LastActivityTime = entity.LastActivityTime,
             CreationTime = entity.CreationTime,
-            Messages = recentMessages.MapToList<ThreadMessageDto>()
+            ArchivedTime = entity.ArchivedTime,
+            Messages = ToMessageDtos(recentMessages)
         };
 
+        await FillAttachmentsAsync(dto.Messages);
         return Ok(dto);
+    }
+
+    /// <inheritdoc />
+    public async Task<Result<ThreadMessagePageDto>> GetMessagesAsync(Guid id, int? beforeOrder, int limit)
+    {
+        var take = Math.Clamp(limit, 1, 200);
+
+        var query = _messageRepository.Where(m => m.ThreadId == id);
+        if (beforeOrder is { } before)
+        {
+            query = query.Where(m => m.Order < before);
+        }
+
+        // 多取一条判断还有没有更早的，免得客户端为了知道「到头了」再发一次请求
+        var page = await query
+            .OrderByDescending(m => m.Order)
+            .Take(take + 1)
+            .ToListAsync();
+
+        var hasMore = page.Count > take;
+        if (hasMore)
+        {
+            page.RemoveAt(page.Count - 1);
+        }
+
+        page.Reverse();
+        var messages = ToMessageDtos(page);
+        await FillAttachmentsAsync(messages);
+
+        return Ok(new ThreadMessagePageDto { Messages = messages, HasMore = hasMore });
+    }
+
+    /// <summary>
+    /// 消息实体 → DTO：存档的每轮元数据从 JSON 读回成对象（名字不同，映射器不会碰它）。
+    /// </summary>
+    private static List<ThreadMessageDto> ToMessageDtos(List<AgentThreadMessage> entities)
+    {
+        var dtos = entities.MapToList<ThreadMessageDto>();
+        for (var i = 0; i < dtos.Count; i++)
+        {
+            dtos[i].Metadata = ChatTurnMetadata.Parse(entities[i].MetadataJson);
+        }
+
+        return dtos;
+    }
+
+    /// <summary>
+    /// 给一页消息补上附件清单（一次查询，不带内容）。
+    /// </summary>
+    private async Task FillAttachmentsAsync(List<ThreadMessageDto> messages)
+    {
+        if (_attachmentRepository is null || messages.Count == 0)
+        {
+            return;
+        }
+
+        var ids = messages.Select(m => m.Id).ToList();
+        var attachments = await _attachmentRepository.AsQueryable()
+            .Where(a => a.MessageId != null && ids.Contains(a.MessageId.Value))
+            .OrderBy(a => a.CreationTime)
+            .ThenBy(a => a.Id)
+            .Select(a => new
+            {
+                MessageId = a.MessageId!.Value,
+                Dto = new AttachmentDto
+                {
+                    Id = a.Id,
+                    Origin = a.Origin,
+                    MediaType = a.MediaType,
+                    FileName = a.FileName,
+                    Size = a.Size,
+                    ToolCallId = a.ToolCallId
+                }
+            })
+            .ToListAsync();
+
+        var byMessage = attachments.ToLookup(a => a.MessageId, a => a.Dto);
+        foreach (var message in messages)
+        {
+            var list = byMessage[message.Id].ToList();
+            message.Attachments = list.Count > 0 ? list : null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<ThreadMessageRef?> FindUserMessageAsync(Guid threadId, Guid? messageId, CancellationToken ct = default)
+    {
+        var userMessages = _messageRepository.Where(m => m.ThreadId == threadId && m.Role == MessageRole.User);
+
+        var message = messageId is { } id
+            ? await userMessages.Where(m => m.Id == id)
+                .Select(m => new ThreadMessageRef(m.Id, m.Order, m.Content) { MetadataJson = m.MetadataJson })
+                .FirstOrDefaultAsync(ct)
+            : await userMessages.OrderByDescending(m => m.Order)
+                .Select(m => new ThreadMessageRef(m.Id, m.Order, m.Content) { MetadataJson = m.MetadataJson })
+                .FirstOrDefaultAsync(ct);
+
+        return message;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 与 <see cref="SaveMessageAsync"/> 共用同一把按线程的锁：回退与追加交错时，追加算出的 MAX(Order)+1
+    /// 可能落在正被删掉的区间里。附件先删（它们挂在这些消息上），两条删除都是不经变更跟踪器的语句，先加入物理事务。
+    /// </remarks>
+    public async Task<int> DeleteMessagesFromAsync(Guid threadId, int fromOrder, CancellationToken ct = default)
+    {
+        await using var _ = await _messageOrderLock.LockAsync($"thread-msg:{threadId:N}", ct);
+
+        var removed = await _messageRepository
+            .Where(m => m.ThreadId == threadId && m.Order >= fromOrder)
+            .Select(m => m.Id)
+            .ToListAsync(ct);
+        if (removed.Count == 0)
+        {
+            return 0;
+        }
+
+        await _messageRepository.EnsureTransactionStartedAsync(ct);
+
+        if (_attachmentRepository is not null)
+        {
+            await _attachmentRepository.AsQueryable()
+                .Where(a => a.MessageId != null && removed.Contains(a.MessageId.Value))
+                .ExecuteDeleteAsync(ct);
+        }
+
+        var deleted = await _messageRepository.AsQueryable()
+            .Where(m => m.ThreadId == threadId && m.Order >= fromOrder)
+            .ExecuteDeleteAsync(ct);
+
+        Logger.LogInformation("Thread {ThreadId} rewound: removed {Count} messages from order {Order}", threadId, deleted, fromOrder);
+        return deleted;
     }
 
     public async Task<Result<IPagedList<AgentThreadDto>>> GetListAsync(ThreadListQueryDto query)
@@ -151,6 +289,12 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         if (query.AgentId.HasValue)
         {
             q = q.Where(t => t.AgentId == query.AgentId.Value);
+        }
+
+        if (query.AgentIds is { Count: > 0 })
+        {
+            var agentIds = query.AgentIds.Distinct().ToList();
+            q = q.Where(t => t.AgentId != null && agentIds.Contains(t.AgentId.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(query.Keyword))
@@ -169,10 +313,24 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             q = q.Where(t => t.LastActivityTime <= query.EndTime.Value);
         }
 
+        q = query.Status switch
+        {
+            ThreadListStatus.Active => q.Where(t => t.ArchivedTime == null),
+            ThreadListStatus.Archived => q.Where(t => t.ArchivedTime != null),
+            _ => q
+        };
+
+        // 每种排序都以 Id 收尾：同一时刻 / 同名的行在两页之间不漂移
+        IOrderedQueryable<AgentThreadEntity> ordered = query.Sort switch
+        {
+            ThreadListSort.CreationTime => q.OrderByDescending(t => t.CreationTime).ThenByDescending(t => t.Id),
+            ThreadListSort.Title => q.OrderBy(t => t.Title == null ? null : t.Title.ToLower()).ThenByDescending(t => t.Id),
+            _ => q.OrderByDescending(t => t.LastActivityTime).ThenByDescending(t => t.Id)
+        };
+
         // Project explicitly so AgentName resolves through the Agent navigation
         // (LEFT JOIN; null when the agent was deleted or the thread is agent-less).
-        var pagedList = await q
-            .OrderByDescending(t => t.LastActivityTime)
+        var pagedList = await ordered
             .Select(t => new AgentThreadDto
             {
                 Id = t.Id,
@@ -180,7 +338,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
                 AgentName = t.Agent != null ? t.Agent.Name : null,
                 Title = t.Title,
                 LastActivityTime = t.LastActivityTime,
-                CreationTime = t.CreationTime
+                CreationTime = t.CreationTime,
+                ArchivedTime = t.ArchivedTime
             })
             .CreateAsync(query);
 
@@ -221,6 +380,25 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok(entity.MapTo<AgentThreadDto>());
     }
 
+    public async Task<Result<AgentThreadDto>> SetArchivedAsync(Guid id, bool archived)
+    {
+        var entity = await _repository.GetAsync(id);
+        if (entity == null)
+        {
+            return Fail<AgentThreadDto>("Thread not found", 404, ErrorCodes.ThreadNotFound);
+        }
+
+        var archivedTime = archived ? entity.ArchivedTime ?? DateTime.UtcNow : (DateTime?)null;
+        if (archivedTime != entity.ArchivedTime)
+        {
+            entity.ArchivedTime = archivedTime;
+            await _repository.UpdateAsync(entity);
+            Logger.LogInformation("Agent thread {Action}: {ThreadId}", archived ? "archived" : "unarchived", id);
+        }
+
+        return Ok(entity.MapTo<AgentThreadDto>());
+    }
+
     public async Task<Result> DeleteAsync(Guid id)
     {
         var entity = await _repository.GetAsync(id);
@@ -229,6 +407,8 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             return Fail("Thread not found", 404, ErrorCodes.ThreadNotFound);
         }
 
+        // 旧版本在这一列里存过一份对话正文的副本（早已无人读取）；软删除只留下行，不能把正文也留下
+        entity.SerializedData = null;
         await _repository.DeleteAsync(entity);
 
         // 发布 ThreadDeletedEvent 触发级联清理（静默失败）
@@ -255,7 +435,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return Ok();
     }
 
-    public async Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
+    public async Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default)
     {
         // 仅当提供 agentId 时验证 Agent 存在
         if (agentId.HasValue)
@@ -307,47 +487,27 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
                 }
             }
 
-            // 如果有序列化数据，尝试反序列化恢复
-            if (!string.IsNullOrWhiteSpace(threadEntity.SerializedData))
-            {
-                var context = ConversationContext.Deserialize(threadEntity.SerializedData);
-                if (context != null)
-                {
-                    Logger.LogDebug("Deserialized conversation context from database: {ThreadId}", threadId.Value);
-                    return (context, threadEntity.Id, false);
-                }
-
-                Logger.LogWarning("Failed to deserialize conversation context: {ThreadId}. Rebuilding from history.", threadId.Value);
-            }
-
-            // 无序列化数据或反序列化失败，从历史消息重建
-            var rebuilt = await RebuildContextFromHistoryAsync(threadEntity.Id, ct);
-            return (rebuilt, threadEntity.Id, false);
+            // 历史由 HistoryMiddleware 按 AI:History:Store:MaxLoadedMessages 单独加载，这里只做解析与归属校验
+            return (threadEntity.Id, false);
         }
 
-        // 无 threadId，创建新的线程和空的 ConversationContext
-        // 注意：必须在 InsertAsync 之前把 SerializedData 填好，不能在 InsertAsync 之后
-        // 再调用 SaveThreadSerializedDataAsync。后者会 GetAsync 拿到尚未持久化的实体
-        // （ChangeTracker State=Added），然后 UpdateAsync 把状态翻转成 Modified，导致
-        // SaveChanges 时 EF Core 发 UPDATE 而非 INSERT，得到 0 rows affected 并整事务回滚。
+        // 无 threadId，创建新的线程
         // ★ CreatorId 显式按运行发起人写，不交给审计钩子：钩子只在为 null 时填环境用户，而后台子运行
         //   （spawn_agent）在父请求返回后建线程时作用域里没有环境用户，线程会落成无主；
         //   上面的读路径与续跑前置的 IsOwnerAsync 都按发起人比对，无主线程对它们永远不满足。
-        var newContext = new ConversationContext();
         var newEntity = new AgentThreadEntity
         {
             AgentId = agentId,
             CreatorId = ResolveRunOriginatorId(),
             Title = $"Thread {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
-            LastActivityTime = DateTime.UtcNow,
-            SerializedData = newContext.Serialize()
+            LastActivityTime = DateTime.UtcNow
         };
 
         await _repository.InsertAsync(newEntity);
 
         Logger.LogDebug("Created new thread: {ThreadId} for Agent: {AgentId}", newEntity.Id, agentId);
 
-        return (newContext, newEntity.Id, true);
+        return (newEntity.Id, true);
     }
 
     /// <summary>
@@ -362,7 +522,16 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
     /// 保存消息到线程。<paramref name="messageId"/> 非空时使用该 ID 持久化；为空时由
     /// framework SaveChangesAsync 自动生成 sequential GUID。返回最终持久化的 message ID。
     /// </summary>
-    public async Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
+    public Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default)
+        => SaveMessageCoreAsync(threadId, role, content, toolCalls, usage, messageId, metadataJson: null, ct);
+
+    /// <inheritdoc />
+    public Task<Guid> SaveUserMessageAsync(Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, CancellationToken ct = default)
+        => SaveMessageCoreAsync(threadId, MessageRole.User, content, toolCalls: null, usage: null, messageId,
+            ChatTurnMetadata.Serialize(metadata), ct);
+
+    private async Task<Guid> SaveMessageCoreAsync(
+        Guid threadId, string role, string content, string? toolCalls, string? usage, Guid? messageId, string? metadataJson, CancellationToken ct)
     {
         // Existence probe via GetAsync (DbSet.FindAsync). FindAsync consults the
         // ChangeTracker first - a ChangeTracker hit returns the entity without issuing a
@@ -395,6 +564,7 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             Content = content,
             ToolCalls = toolCalls,
             Usage = usage,
+            MetadataJson = metadataJson,
             Order = maxOrder + 1
         };
         if (messageId.HasValue && messageId.Value != Guid.Empty)
@@ -410,11 +580,21 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         // the (ThreadId, Order) unique index.
         await _messageRepository.SaveChangesAsync(ct);
 
-        // 更新线程最后活动时间 - 同样跳过 query filter（见上方注释）
-        await _repository.AsQueryable()
-            .IgnoreQueryFilters()
-            .Where(t => t.Id == threadId)
-            .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastActivityTime, DateTime.UtcNow), ct);
+        // 更新线程最后活动时间 - 同样跳过 query filter（见上方注释）。
+        // 用户在已归档的线程里接着说话 = 这段对话又在进行，取消归档；否则它是屏幕上开着的会话，却不在「最近对话」里。
+        // 只认用户消息：归档时还在写的回复落库不应把它拉回来。
+        var now = DateTime.UtcNow;
+        var thread = _repository.AsQueryable().IgnoreQueryFilters().Where(t => t.Id == threadId);
+        if (role == MessageRole.User)
+        {
+            await thread.ExecuteUpdateAsync(s => s
+                .SetProperty(t => t.LastActivityTime, now)
+                .SetProperty(t => t.ArchivedTime, (DateTime?)null), ct);
+        }
+        else
+        {
+            await thread.ExecuteUpdateAsync(s => s.SetProperty(t => t.LastActivityTime, now), ct);
+        }
 
         Logger.LogDebug("Message saved to thread: {ThreadId}, Role: {Role}, Order: {Order}, MessageId: {MessageId}", threadId, role, message.Order, message.Id);
         return message.Id;
@@ -460,37 +640,6 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
         return result;
     }
 
-    /// <summary>
-    /// 保存对话上下文的序列化数据到数据库
-    /// </summary>
-    public async Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default)
-    {
-        Check.NotNull(context);
-
-        try
-        {
-            var threadEntity = await _repository.GetAsync(threadId, ct);
-            if (threadEntity == null)
-            {
-                Logger.LogWarning("Thread not found when saving serialized data: {ThreadId}", threadId);
-                return;
-            }
-
-            // 直接序列化 ConversationContext
-            threadEntity.SerializedData = context.Serialize();
-            threadEntity.LastActivityTime = DateTime.UtcNow;
-
-            await _repository.UpdateAsync(threadEntity);
-
-            Logger.LogDebug("Saved conversation context data: {ThreadId}", threadId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to save conversation context data: {ThreadId}", threadId);
-            // 不抛出异常，允许继续执行
-        }
-    }
-
     public async Task<Result<ThreadExportDto>> ExportAsJsonAsync(Guid id)
     {
         var entity = await _repository.AsQueryable()
@@ -518,9 +667,10 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             LastActivityTime = entity.LastActivityTime,
             CreationTime = entity.CreationTime,
             ExportedAt = DateTime.UtcNow,
-            Messages = allMessages.MapToList<ThreadMessageDto>()
+            Messages = ToMessageDtos(allMessages)
         };
 
+        await FillAttachmentsAsync(dto.Messages);
         return Ok(dto);
     }
 
@@ -640,28 +790,5 @@ public class AgentThreadService : ApplicationService, IAgentThreadService, IAgen
             Logger.LogWarning(ex, "Thread metadata is not a JSON object; it will be replaced on the next write");
             return null;
         }
-    }
-
-    /// <summary>
-    /// 从历史消息重建 ConversationContext
-    /// </summary>
-    private async Task<ConversationContext> RebuildContextFromHistoryAsync(Guid threadId, CancellationToken ct)
-    {
-        var messages = await GetMessageHistoryAsync(threadId, null, ct);
-
-        Logger.LogDebug("Rebuilt conversation context from {MessageCount} history messages for thread: {ThreadId}", messages.Count, threadId);
-
-        var context = new ConversationContext
-        {
-            Messages = messages
-        };
-
-        // 保存重建后的上下文数据
-        if (messages.Count > 0)
-        {
-            await SaveThreadSerializedDataAsync(threadId, context, ct);
-        }
-
-        return context;
     }
 }

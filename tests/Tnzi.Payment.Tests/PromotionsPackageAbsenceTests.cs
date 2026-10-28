@@ -186,6 +186,8 @@ public class PromotionsPackageAbsenceTests
             new DefaultPaymentTaxCalculator(taxOptions.Object),
             new Mock<IPaymentMethodService>().Object,
             paymentOptions.Object,
+            TestBillingAccounts.UserScope(),
+            TestBillingAccounts.NoProfiles(),
             LoggingServiceProvider());
     }
 

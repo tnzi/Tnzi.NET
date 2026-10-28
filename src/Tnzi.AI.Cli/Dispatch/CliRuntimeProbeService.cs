@@ -1,7 +1,7 @@
 namespace Tnzi.AI.Cli.Dispatch;
 
 /// <summary>
-/// 定时探测本宿主 PATH 上的外部 agent CLI，注册/更新运行时记录。
+/// 定时在执行宿主的宿主级目标上探测外部 agent CLI（本机宿主 = 这台机器的 PATH），注册/更新运行时记录。
 /// </summary>
 /// <remarks>
 /// 定时而不是只在启动时探测：CLI 会被安装、卸载、升级换路径，而管理员不会因为
@@ -26,26 +26,26 @@ public class CliRuntimeProbeService : BackgroundService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <c>AI:Cli:Enabled</c> 每轮重读：关着时按 <c>PollInterval</c> 空转等它打开，而不是在启动时读一次就退出，
+    /// 那样运行期打开开关后，这台宿主上的 CLI 永远不会被登记成运行时。
+    /// </remarks>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.CurrentValue.Enabled)
-        {
-            return;
-        }
-
         while (!stoppingToken.IsCancellationRequested)
         {
+            var interval = TimeSpan.Zero;
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var probe = scope.ServiceProvider.GetRequiredService<ICliRuntimeService>();
-                var result = await probe.ProbeAsync(stoppingToken);
-
-                if (result.Succeeded && result.Data is not null)
+                var options = _options.CurrentValue;
+                if (!options.Enabled)
                 {
-                    _logger.LogDebug(
-                        "CLI runtime probe registered {Found} runtime(s); {Missing} provider(s) not on PATH",
-                        result.Data.Runtimes.Count, result.Data.NotFound.Count);
+                    interval = options.PollInterval;
+                }
+                else
+                {
+                    interval = options.ProbeInterval;
+                    await ProbeOnceAsync(stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -54,18 +54,32 @@ public class CliRuntimeProbeService : BackgroundService
             }
             catch (Exception ex)
             {
-                // 探测失败只影响可用性展示，不该让后台服务停掉。
+                // 探测失败（含运行期改出一份通不过校验的配置）只影响可用性展示，不该让后台服务停掉。
                 _logger.LogWarning(ex, "CLI runtime probe failed; will retry on the next interval");
             }
 
             try
             {
-                await Task.Delay(_options.CurrentValue.ProbeInterval, stoppingToken);
+                await Task.Delay(interval > TimeSpan.Zero ? interval : new CliAgentOptions().ProbeInterval, stoppingToken);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
+        }
+    }
+
+    private async Task ProbeOnceAsync(CancellationToken stoppingToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var probe = scope.ServiceProvider.GetRequiredService<ICliRuntimeService>();
+        var result = await probe.ProbeAsync(stoppingToken);
+
+        if (result.Succeeded && result.Data is not null)
+        {
+            _logger.LogDebug(
+                "CLI runtime probe registered {Found} runtime(s); {Missing} provider(s) not on PATH",
+                result.Data.Runtimes.Count, result.Data.NotFound.Count);
         }
     }
 }

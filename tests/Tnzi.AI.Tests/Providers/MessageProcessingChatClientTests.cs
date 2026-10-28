@@ -105,6 +105,46 @@ public class MessageProcessingChatClientTests
         inner.ReceivedMessages!.Select(m => m.Text).ShouldBe(["hi", "hello", "again"]);
     }
 
+    [Fact]
+    public async Task MiniMaxProvider_NonStreamingAgentRun_StillCallsTheToolTheModelAskedFor()
+    {
+        // MiniMax 在同一条助手消息里同时返回内联 <think> 正文与 tool_calls；
+        // 处理器重建消息时若只留正文，执行器找不到工具调用，运行安静地结束
+        var toolInvoked = false;
+        var tool = AIFunctionFactory.Create(() => { toolInvoked = true; return "sunny"; }, "get_weather", "Get the weather");
+        var inner = new ToolThenAnswerChatClient();
+        var client = new MessageProcessingChatClient(inner, new MiniMaxChatMessageProcessor());
+        var executor = new AgentExecutor(client, new AgentExecutorOptions { Tools = [tool] });
+
+        var response = await executor.ExecuteAsync([new ChatMessage(ChatRole.User, "weather?")]);
+
+        toolInvoked.ShouldBeTrue();
+        response.Text.ShouldBe("It is sunny.");
+    }
+
+    private sealed class ToolThenAnswerChatClient : IChatClient
+    {
+        private int _calls;
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            var message = _calls++ == 0
+                ? new ChatMessage(ChatRole.Assistant,
+                [
+                    new TextContent("<think>I should look it up</think>Checking."),
+                    new FunctionCallContent("call-1", "get_weather", new Dictionary<string, object?>())
+                ])
+                : new ChatMessage(ChatRole.Assistant, "<think>done</think>It is sunny.");
+            return Task.FromResult(new ChatResponse(message));
+        }
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
     [Theory]
     [InlineData("MyGlm", "OpenAI", "https://open.bigmodel.cn/api/paas/v4", "glm-z1-flash", "glm")]
     [InlineData("Kimi", "OpenAI", "https://api.moonshot.cn/v1", "kimi-k2", "kimi")]

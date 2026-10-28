@@ -15,6 +15,16 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { NewMessagePayload } from '@tnzi/core/services/chat'
 import { useChatStore } from '../../../src/stores/useChatStore'
+import { useAdminDesktopStore } from '../../../src/stores/useAdminDesktopStore'
+import { useAdminThemeStore } from '../../../src/stores/useAdminThemeStore'
+import TChatHost from '../../../src/components/chat/TChatHost.vue'
+
+// TChatHost is imported statically on purpose: the module graph behind it is
+// large, and a dynamic import inside a test paid its whole transform under that
+// test's timeout, which a machine busy with a parallel build could exceed.
+// Collection has no such timeout. The mounted host settles in a few
+// microtasks; the generous wait only absorbs a starved event loop.
+const MOUNT_SETTLE_TIMEOUT_MS = 10_000
 
 // ── Shared mutable captures ────────────────────────────────────────────────
 let capturedOnNewMessage: ((p: NewMessagePayload) => void) | undefined
@@ -97,9 +107,8 @@ describe('TChatHost - closed window still notifies for the last active conversat
   async function mountHost() {
     const pinia = createPinia()
     setActivePinia(pinia)
-    const TChatHost = (await import('../../../src/components/chat/TChatHost.vue')).default
     const wrapper = mount(TChatHost, { global: { stubs: globalStubs, plugins: [pinia] } })
-    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled())
+    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled(), { timeout: MOUNT_SETTLE_TIMEOUT_MS })
     const store = useChatStore()
     return { wrapper, store }
   }
@@ -169,6 +178,102 @@ describe('TChatHost - closed window still notifies for the last active conversat
 
     expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore + 1)
     expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(0)
+    wrapper.unmount()
+  })
+})
+
+// ── Desktop layout: the chat window is a desktop window, not the modal ──────
+describe('TChatHost - desktop layout: the chat window on screen counts as visible', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    capturedOnNewMessage = undefined
+    fakeBridge.listConversations.mockResolvedValue([
+      { id: 'c1', type: 'Direct', title: 'Alice', unreadCount: 0, isMuted: false, memberCount: 2, lastMessageAt: '' },
+    ])
+  })
+
+  async function mountDesktopHost() {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAdminThemeStore().layoutMode = 'desktop'
+    const wrapper = mount(TChatHost, { global: { stubs: globalStubs, plugins: [pinia] } })
+    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled(), { timeout: MOUNT_SETTLE_TIMEOUT_MS })
+    return { wrapper, store: useChatStore(), desktop: useAdminDesktopStore() }
+  }
+
+  function chatWindowId(desktop: ReturnType<typeof useAdminDesktopStore>): string {
+    const win = desktop.windows.find(w => w.stack[w.stackIndex]?.panel === 'chat')
+    expect(win).toBeDefined()
+    return win!.id
+  }
+
+  it('marks the open thread read and plays the in-thread tone while its window is on screen', async () => {
+    const { wrapper, store, desktop } = await mountDesktopHost()
+
+    wrapper.findComponent(LauncherStub).vm.$emit('open')
+    await wrapper.vm.$nextTick()
+    chatWindowId(desktop)
+    expect(store.windowVisible).toBe(true)
+    await store.openConversation('c1')
+
+    const readCallsBefore = fakeBridge.markRead.mock.calls.length
+    store.applyIncomingMessage(payload('d1'), 'me')
+    capturedOnNewMessage!(payload('d1'))
+    await wrapper.vm.$nextTick()
+
+    expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(0)
+    expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore + 1)
+    expect(mockPlayMessage).toHaveBeenCalledTimes(1)
+    expect(mockPlayNotification).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(LauncherStub).props('attention')).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('treats a minimised or closed chat window as not visible, and catches up on restore', async () => {
+    const { wrapper, store, desktop } = await mountDesktopHost()
+
+    wrapper.findComponent(LauncherStub).vm.$emit('open')
+    await wrapper.vm.$nextTick()
+    await store.openConversation('c1')
+    const id = chatWindowId(desktop)
+
+    desktop.minimize(id)
+    await wrapper.vm.$nextTick()
+    expect(store.windowVisible).toBe(false)
+
+    const readCallsBefore = fakeBridge.markRead.mock.calls.length
+    store.applyIncomingMessage(payload('d2'), 'me')
+    capturedOnNewMessage!(payload('d2'))
+    await wrapper.vm.$nextTick()
+    expect(store.conversations.find(c => c.id === 'c1')!.unreadCount).toBe(1)
+    expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore)
+    expect(mockPlayNotification).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent(LauncherStub).props('attention')).toBe(1)
+
+    // Bringing the window back lands on the thread with the message rendered,
+    // so its unread clears right away (same as reopening the modal).
+    desktop.focus(id)
+    await wrapper.vm.$nextTick()
+    expect(store.windowVisible).toBe(true)
+    expect(fakeBridge.markRead.mock.calls.length).toBe(readCallsBefore + 1)
+
+    desktop.close(id)
+    await wrapper.vm.$nextTick()
+    expect(store.windowVisible).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('counts a chat window restored with the desktop as on screen from the first render', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useAdminThemeStore().layoutMode = 'desktop'
+    // The desktop is persisted: after a reload the chat window is already open
+    // before the host mounts, so there is no open transition to observe.
+    useAdminDesktopStore().open({ panel: 'chat', name: 'chat-panel', path: '', title: 'Chat' })
+    const wrapper = mount(TChatHost, { global: { stubs: globalStubs, plugins: [pinia] } })
+    await vi.waitFor(() => expect(fakeBridge.listConversations).toHaveBeenCalled(), { timeout: MOUNT_SETTLE_TIMEOUT_MS })
+
+    expect(useChatStore().windowVisible).toBe(true)
     wrapper.unmount()
   })
 })

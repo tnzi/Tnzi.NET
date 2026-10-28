@@ -7,7 +7,8 @@ namespace Tnzi.AI.Sandbox.Services;
 /// <remarks>
 /// <para>
 /// 线程根目录<b>一律</b>创建：Local provider 把它当 bash 的工作目录（不存在则进程起不来），Docker provider 把它当
-/// bind 挂载源（不存在时由 Docker 以 root 建出来）。四个子目录只在 <c>LazyDirectoryCreation=false</c> 时预建，
+/// bind 挂载源（Docker provider 在建容器前自己再建一遍线程目录与四个子目录，免得缺失的挂载源由 Docker 以 root 建出来）。
+/// 四个子目录在这里只在 <c>LazyDirectoryCreation=false</c> 时预建，
 /// 否则由沙箱在首次写入时按需创建。
 /// </para>
 /// <para>
@@ -24,6 +25,12 @@ namespace Tnzi.AI.Sandbox.Services;
 /// 那个口子要在翻译器、本地沙箱、Docker 绑定三处各开一次（容器里根本看不见宿主的链接目标），
 /// 而每处都是围栏本身。逐线程复制的代价是每个真的用到沙箱的线程一次性写入内置技能的资源文件
 /// （现约 2 MB / 139 个文件）；2026-09-14 起复制推迟到沙箱首次被用到，不再是每个线程的固定开销。
+/// </para>
+/// <para>
+/// ★ 哨兵里记着复制时技能资源的指纹（全部 slug、相对路径与内容的 SHA-256）：技能仓库里的资源变了（改了脚本、加了文件、
+/// 删了技能），下一次用到沙箱时整个 <c>skills/</c> 重新复制（先删后复制，删除不跟进链接），否则只读一下仓库缓存、算一次摘要。
+/// 此前哨兵只记时间，一条线程一旦接过线就永远用那一刻的副本：管理员修好的脚本、删掉的技能在已有线程里一直是旧样子，
+/// 而技能上下文按仓库现状列出的资源路径在副本里找不到。<c>skills/</c> 归框架所有（Docker 下容器对它只读），整体替换不丢 agent 的东西。
 /// </para>
 /// <para>
 /// 经线程目录里的哨兵 <see cref="SkillsWiredMarker"/> 幂等，但哨兵本身不是证明：
@@ -83,7 +90,7 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
     }
 
     /// <summary>
-    /// 把每个已加载技能的资源文件复制进 <see cref="ThreadDataState.SkillsPath"/>。
+    /// 把每个已加载技能的资源文件复制进 <see cref="ThreadDataState.SkillsPath"/>；已有副本与仓库现状一致时什么也不做。
     /// </summary>
     private async Task WireSkillResourcesAsync(ThreadDataState state, CancellationToken ct)
     {
@@ -91,24 +98,62 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
 
         var skillsPath = state.SkillsPath;
         var marker = Path.Combine(state.ThreadDirectory, SkillsWiredMarker);
-        if (IsWired(marker, skillsPath)) return;
 
+        // 判定与复制都在锁里：判定要读仓库、比指纹，与另一次运行的复制交错就会看到半截目录。
         var wiringLock = WiringLockFor(state.ThreadDirectory);
         await wiringLock.WaitAsync(ct);
         try
         {
-            // 进锁后再看一次：等锁期间另一次运行可能已经接好线了。
-            if (IsWired(marker, skillsPath)) return;
-
-            if (IsLink(skillsPath))
+            // 哨兵只由本进程写在线程根下。它若是链接（agent 的命令能在线程根下建链接：Local provider 直接在宿主上跑，
+            // Docker 下容器用户与本进程同一 uid 时亦然），读它读的是链接目标、刷新时写它就以本进程身份覆盖链接指向的宿主文件。
+            // 只删链接本身，按未接线重来。
+            if (SandboxFileSystem.IsLink(marker))
             {
-                RemoveLink(skillsPath);
-                _logger.LogInformation("Replaced legacy skills symlink at {Path} with a per-thread copy", skillsPath);
+                SandboxFileSystem.RemoveLink(marker);
+                _logger.LogWarning("Removed a link planted in place of the skill wiring marker at {Path}", marker);
             }
 
-            if (await CopyAllSkillResourcesAsync(skillsPath, ct))
+            List<SkillDefinition> skills;
+            try
             {
-                await File.WriteAllTextAsync(marker, $"copied at {DateTime.UtcNow:O}", ct);
+                skills = await _skillStore.GetAllAsync(ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 读不到仓库：已有的副本（如果有）照旧可用，下次再比。
+                _logger.LogWarning(ex, "Failed to read the skill store while wiring {Path}", skillsPath);
+                return;
+            }
+
+            var fingerprint = SkillResourceFingerprint.Of(skills);
+            if (IsWired(marker, skillsPath) && ReadFingerprint(marker) == fingerprint) return;
+
+            if (SandboxFileSystem.IsLink(skillsPath))
+            {
+                SandboxFileSystem.RemoveLink(skillsPath);
+                _logger.LogInformation("Replaced legacy skills symlink at {Path} with a per-thread copy", skillsPath);
+            }
+            else if (Directory.Exists(skillsPath))
+            {
+                // 旧副本（资源变了、或上次半途失败留下的）整个换掉：只覆盖不删除的话，删掉的技能与文件会一直留着。
+                // 删不掉（Windows 上另一次运行正开着其中的文件）就这一次照旧用旧副本，哨兵不动，下次再换。
+                try
+                {
+                    SandboxFileSystem.DeleteTree(skillsPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(ex, "Could not replace the skill resource copy at {Path}; keeping it until the next run", skillsPath);
+                    return;
+                }
+
+                if (File.Exists(marker))
+                    _logger.LogInformation("Skill resources changed; refreshing the copy at {Path}", skillsPath);
+            }
+
+            if (await CopyAllSkillResourcesAsync(skills, skillsPath, ct))
+            {
+                await File.WriteAllTextAsync(marker, $"copied at {DateTime.UtcNow:O}\n{FingerprintPrefix}{fingerprint}\n", ct);
             }
         }
         finally
@@ -117,7 +162,22 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
         }
     }
 
+    /// <summary>哨兵里记录资源指纹的那一行的前缀。</summary>
+    private const string FingerprintPrefix = "fingerprint: ";
+
     private static bool IsWired(string marker, string skillsPath) => File.Exists(marker) && IsRealDirectory(skillsPath);
+
+    /// <summary>哨兵记下的指纹；没有这一行（这一版之前写的哨兵）时为 null，于是按「已变化」处理、重新复制一次。</summary>
+    private static string? ReadFingerprint(string marker)
+    {
+        foreach (var line in File.ReadLines(marker))
+        {
+            if (line.StartsWith(FingerprintPrefix, StringComparison.Ordinal))
+                return line[FingerprintPrefix.Length..].Trim();
+        }
+
+        return null;
+    }
 
     private static SemaphoreSlim WiringLockFor(string threadDirectory)
     {
@@ -125,42 +185,16 @@ public sealed class ThreadDataProvisioner : IThreadDataProvisioner
         return WiringLocks[(StringComparer.Ordinal.GetHashCode(key) & int.MaxValue) % WiringLocks.Length];
     }
 
-    private static bool IsRealDirectory(string path) => Directory.Exists(path) && !IsLink(path);
-
-    /// <summary>
-    /// True when <paramref name="path"/> is itself a link (symlink or junction), dangling or not.
-    /// <see cref="File.GetAttributes(string)"/> reads the link entry rather than its target.
-    /// </summary>
-    private static bool IsLink(string path)
-    {
-        try
-        {
-            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
-        }
-        catch (FileNotFoundException) { return false; }
-        catch (DirectoryNotFoundException) { return false; }
-    }
-
-    /// <summary>
-    /// Removes the link entry only, never the directory it points to. On Windows a directory
-    /// link is removed by the directory API; on Unix a symlink is a file entry, and
-    /// <see cref="Directory.Delete(string)"/> would refuse a dangling one.
-    /// </summary>
-    private static void RemoveLink(string path)
-    {
-        if (OperatingSystem.IsWindows()) Directory.Delete(path);
-        else File.Delete(path);
-    }
+    private static bool IsRealDirectory(string path) => Directory.Exists(path) && !SandboxFileSystem.IsLink(path);
 
     /// <summary>
     /// Copies every loaded skill's resource files into <paramref name="skillsPath"/>.
     /// Returns <c>true</c> on success; the caller writes the completion marker.
     /// </summary>
-    private async Task<bool> CopyAllSkillResourcesAsync(string skillsPath, CancellationToken ct)
+    private async Task<bool> CopyAllSkillResourcesAsync(IReadOnlyList<SkillDefinition> skills, string skillsPath, CancellationToken ct)
     {
         try
         {
-            var skills = await _skillStore!.GetAllAsync(ct);
             var extractedCount = 0;
 
             foreach (var skill in skills)

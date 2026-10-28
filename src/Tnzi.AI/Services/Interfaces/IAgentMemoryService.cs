@@ -4,8 +4,8 @@ namespace Tnzi.AI.Services;
 /// Agent 记忆管理服务 - 管理端为某个 Agent 预置/管理其长期记忆（agent-bound scope）。
 /// </summary>
 /// <remarks>
-/// 记忆以结构化 <c>AgentId</c> 列 + agent-bound scope（<c>agent-bound:{agentId}:default</c>）写入，
-/// 与运行时 <c>MemoryContributor</c> 的 <c>MemoryScope.ForAgent(agentId)</c> 加载路径对齐 ——
+/// 记忆以结构化 <c>AgentId</c> 列 + agent-bound scope（<c>agent-bound:{agentId}:{DefaultScope}</c>）写入，
+/// 与运行时 <c>MemoryContributor</c> 的 <c>MemoryScope.ForAgent(agentId, DefaultScope)</c> 加载路径对齐，
 /// 因此管理端预置的记忆在该 Agent 任意一次运行时都会被注入（headless-safe）。
 /// </remarks>
 public interface IAgentMemoryService

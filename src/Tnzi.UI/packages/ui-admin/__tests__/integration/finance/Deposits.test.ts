@@ -174,6 +174,42 @@ describe('Finance Deposits page', () => {
     expect(undeposited.mock.calls[0]![0]).toEqual({ accountId: 'a1130' })
   })
 
+  it('a failed queue read says why where the receipts would be, never "nothing to deposit"', async () => {
+    undeposited.mockRejectedValueOnce(new Error('Undeposited receipts are unavailable.'))
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+
+    const emptyTexts = wrapper.findAllComponents({ name: 'TResponsiveTable' }).map((t) => t.props('emptyText'))
+    expect(emptyTexts).toContain('Undeposited receipts are unavailable.')
+  })
+
+  it("★ switching source accounts keeps the later account's receipts when the earlier read answers last", async () => {
+    // A deposit is recorded from the ticked receipts against the selected source
+    // account: a late answer for the account picked before must not fill the queue.
+    const wrapper = mount(Page, { global: { stubs } })
+    await flushPromises()
+    const vm = wrapper.vm as unknown as DepositVm & { onSourceAccountChange: () => void; queueLoading: boolean }
+    const pending = new Map<string, (rows: unknown[]) => void>()
+    const hold = ((q: { accountId: string }) =>
+      new Promise((resolve) => { pending.set(q.accountId, resolve as (rows: unknown[]) => void) })) as never
+    undeposited.mockImplementationOnce(hold).mockImplementationOnce(hold)
+
+    vm.sourceAccountId = 'a1120'
+    vm.onSourceAccountChange()
+    vm.sourceAccountId = 'a1130'
+    vm.onSourceAccountChange()
+    await flushPromises()
+
+    pending.get('a1130')!([{ paymentEntryId: 'p-of-1130', currency: 'USD', amount: 10 }])
+    await flushPromises()
+    pending.get('a1120')!([{ paymentEntryId: 'p-of-1120', currency: 'USD', amount: 20 }])
+    await flushPromises()
+
+    expect(vm.queueRows.map((r) => r.paymentEntryId)).toEqual(['p-of-1130'])
+    expect(vm.queueLoading).toBe(false)
+    wrapper.unmount()
+  })
+
   it('excludes the source account from the destination list', async () => {
     const wrapper = mount(Page, { global: { stubs } })
     await flushPromises()

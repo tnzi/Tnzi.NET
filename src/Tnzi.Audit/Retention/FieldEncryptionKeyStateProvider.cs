@@ -18,6 +18,7 @@ namespace Tnzi.Audit.Retention;
 public sealed class FieldEncryptionKeyStateProvider : IEncryptionKeyStateProvider
 {
     private readonly IOptionsMonitor<FieldEncryptionOptions>? _encryptionOptions;
+    private readonly FieldEncryptionKeyRing? _keyRing;
 
     /// <summary>
     /// 初始化一个 <see cref="FieldEncryptionKeyStateProvider"/> 类型的新实例。
@@ -25,9 +26,16 @@ public sealed class FieldEncryptionKeyStateProvider : IEncryptionKeyStateProvide
     /// <param name="encryptionOptions">
     /// 字段级加密选项。可为 <c>null</c>：不加载该能力的应用照常工作，判定恒为「未销毁」。
     /// </param>
-    public FieldEncryptionKeyStateProvider(IOptionsMonitor<FieldEncryptionOptions>? encryptionOptions = null)
+    /// <param name="keyRing">
+    /// 密钥环(配置密钥与密钥文件合并后的视图)。可为 <c>null</c>:此时只看配置里的 <c>Keys</c>,
+    /// 密钥文件里的密钥会被误判为「已销毁」,所以加载了 <c>Tnzi.EFCore</c> 的应用应当让容器提供它。
+    /// </param>
+    public FieldEncryptionKeyStateProvider(
+        IOptionsMonitor<FieldEncryptionOptions>? encryptionOptions = null,
+        FieldEncryptionKeyRing? keyRing = null)
     {
         _encryptionOptions = encryptionOptions;
+        _keyRing = keyRing;
     }
 
     /// <inheritdoc />
@@ -42,6 +50,12 @@ public sealed class FieldEncryptionKeyStateProvider : IEncryptionKeyStateProvide
         if (encryption is not { Enabled: true })
         {
             return false;
+        }
+
+        if (_keyRing is not null)
+        {
+            // 密钥文件读不出来时这里抛 FieldEncryptionException:无法确认,由调用方按契约降级为「未销毁」并记 Warning。
+            return !_keyRing.Contains(keyId);
         }
 
         return !encryption.Keys.ContainsKey(keyId);

@@ -42,7 +42,8 @@ public class PresignedUrlAndUsageTests
             new TestFileUrlSigner(),
             _mockServiceProvider.Object,
             new UploadGuard(optionsMonitor.Object),
-            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object));
+            new FileThumbnailGenerator(_mockStorage.Object, optionsMonitor.Object),
+            UnlimitedStorageQuota.Instance);
     }
 
     #region Presigned URL Tests

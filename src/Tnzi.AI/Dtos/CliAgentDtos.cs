@@ -83,6 +83,10 @@ public class CliAgentBindingDto
     public bool MaterializeSkills { get; set; }
     /// <summary>本 agent 的空闲看门狗覆盖（只允许收紧，不允许放宽）</summary>
     public TimeSpan? IdleWatchdog { get; set; }
+    /// <summary>
+    /// 绑定的 provider 能否接收消息附件（图片、PDF）。不能的 provider 收到带附件的消息时以 415 拒绝，而不是只发文本。
+    /// </summary>
+    public bool AcceptsAttachments { get; set; }
 }
 
 /// <summary>
@@ -123,9 +127,20 @@ public class CliRunRequestDto
     public string Prompt { get; set; } = null!;
     /// <summary>关联对话线程（聊天场景）</summary>
     public Guid? ThreadId { get; set; }
-    /// <summary>关联的框架 AgentRun，让外部执行也出现在统一 Run 视图里</summary>
+    /// <summary>
+    /// 调用方已有的框架 AgentRun 的关联 id，原样记在运行记录上。只是关联键：不会因此新建 AgentRun，
+    /// 外部执行也不会出现在 AgentRun 的列表或视图里。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="Priority"/> 同一规则：只对持有 <c>ai.cliRun.execute</c> 的调用方、以及没有登录用户的进程内调用方生效，
+    /// 其余一律丢弃（用户自填一个就能把自己的运行挂到别人的 AgentRun 名下）。
+    /// </remarks>
     public Guid? AgentRunId { get; set; }
     /// <summary>队列优先级，大者先</summary>
+    /// <remarks>
+    /// 只对持有 <c>ai.cliRun.execute</c> 的调用方、以及没有登录用户的进程内调用方生效，其余一律按 0 排队：
+    /// 队列只有一个、所有租户共用，用户自填的优先级等于插到所有人前面。
+    /// </remarks>
     public int Priority { get; set; }
     /// <summary>
     /// 追加到本轮提示尾部的易变上下文（触发者、上一轮是否丢失上下文等）。
@@ -134,6 +149,53 @@ public class CliRunRequestDto
     public string? PerTurnContext { get; set; }
     /// <summary>发起用户</summary>
     public Guid? UserId { get; set; }
+
+    /// <summary>
+    /// 随提示一起交给 CLI 的附件：图片（<see cref="ImageContentPartDto"/>，内联 base64）与 PDF
+    /// （<see cref="DocumentContentPartDto"/>）。文本块不在这里，文本走 <see cref="Prompt"/>。
+    /// </summary>
+    /// <remarks>
+    /// 入队时按 <c>AI:Chat:Attachments</c> 校验并存档（与 <see cref="UserMessageId"/> 关联，线程重新加载时随消息显示），
+    /// provider 不接收附件、类型不支持、超出上限都当场拒绝，绝不只发文本。
+    /// </remarks>
+    public List<ContentPartDto>? Attachments { get; set; }
+
+    /// <summary>
+    /// 这次运行回答的那条用户消息（<see cref="ThreadId"/> 里的）。聊天路径总会给出：附件随它显示，
+    /// 运行结束时的回复写在它之后，编辑或重新生成它时 CLI 会话也据此回到它之前的那一轮。
+    /// </summary>
+    public Guid? UserMessageId { get; set; }
+
+    /// <summary>
+    /// 这一轮要用的模型（交给 CLI 的 <c>--model</c>）；null = 用绑定上配的模型或 provider 默认。
+    /// </summary>
+    /// <remarks>
+    /// 调度器按用户被允许的模型校验它（<c>IUsagePolicyService.ResolveChatModelAsync</c>）：没配模型清单时不采纳，
+    /// 不在允许列表里答 403 <c>AI_MODEL_NOT_ALLOWED</c>。持 <c>ai.cliRun.execute</c> 的调用方与没有登录用户的进程内调用原样采纳。
+    /// </remarks>
+    public string? Model { get; set; }
+
+    /// <summary>
+    /// 这一轮有没有人在等：true = 「先问我」档位下的权限请求交给使用方批准（<c>PermissionRequest</c> 事件 + 回答接口）；
+    /// false = 没有人能回答（定时任务、后台派发），要权限的操作按档位直接拒绝。null = false。
+    /// </summary>
+    /// <remarks>
+    /// 聊天路径（门面）对有登录用户的一轮给 true。启动档案的 <c>CliLaunchProfile.Attended</c> 可以按运行改写它。
+    /// 只影响「先问我」档：全权、改工作区、只读三档从不发权限请求。
+    /// </remarks>
+    public bool? Attended { get; set; }
+}
+
+/// <summary>
+/// 回答外部运行的一个权限请求。
+/// </summary>
+public class CliPermissionAnswerDto
+{
+    /// <summary>选中的选项 id：必须是请求事件 <c>permission.options</c> 里的一个。</summary>
+    public string OptionId { get; set; } = null!;
+
+    /// <summary>拒绝时交给 agent 的说明（可选，例如「不要改这个文件，改用……」）。允许时忽略。</summary>
+    public string? Message { get; set; }
 }
 
 /// <summary>
@@ -177,10 +239,20 @@ public class CliRunDto
     public DateTime? CompletedAt { get; set; }
     /// <summary>耗时（毫秒）</summary>
     public long DurationMs { get; set; }
-    /// <summary>按模型分组的用量 JSON</summary>
+    /// <summary>这一轮按模型分组的用量 JSON（不是会话累计）</summary>
     public string? UsageJson { get; set; }
-    /// <summary>估算成本（USD）</summary>
+    /// <summary>这一轮的成本（USD）</summary>
     public decimal? EstimatedCostUsd { get; set; }
+    /// <summary>这一轮用户选的模型；null = 绑定上配的模型或 provider 默认</summary>
+    public string? Model { get; set; }
+    /// <summary>这次运行回答的用户消息</summary>
+    public Guid? UserMessageId { get; set; }
+    /// <summary>运行结束时写进线程的回复消息（没写时为 null）</summary>
+    public Guid? AssistantMessageId { get; set; }
+    /// <summary>失败原因为 UsageLimit 时，账号用量上限的重置时间（UTC，CLI 没报时为 null）</summary>
+    public DateTime? UsageLimitResetsAt { get; set; }
+    /// <summary>已产生的事件条数（最后一条事件的序号）</summary>
+    public int MessageCount { get; set; }
     /// <summary>创建时间</summary>
     public DateTime CreationTime { get; set; }
 }
@@ -208,10 +280,14 @@ public class CliRunMessageDto
     public string? InputJson { get; set; }
     /// <summary>工具输出（超长截断）</summary>
     public string? Output { get; set; }
+    /// <summary>工具输出的分块（文本与图片，图片以附件 id 引用）；不分块的协议为 null</summary>
+    public List<CliContentBlock>? OutputBlocks { get; set; }
     /// <summary>状态标识</summary>
     public string? Status { get; set; }
     /// <summary>日志级别</summary>
     public string? Level { get; set; }
+    /// <summary>权限请求与结局（PermissionRequest / PermissionResolved 事件）</summary>
+    public CliAgentPermission? Permission { get; set; }
     /// <summary>产生时间</summary>
     public DateTime CreationTime { get; set; }
 }
@@ -232,6 +308,8 @@ public class CliRunQueryDto : PagedQueryDto
     public CliRunStatus? Status { get; set; }
     /// <summary>按线程过滤</summary>
     public Guid? ThreadId { get; set; }
+    /// <summary>只要还没结束的运行（Queued / Dispatched / Running）；与 <see cref="Status"/> 同时给出时取两者的交集</summary>
+    public bool ActiveOnly { get; set; }
     /// <summary>起始时间（含）</summary>
     public DateTime? StartTime { get; set; }
     /// <summary>结束时间（含）</summary>

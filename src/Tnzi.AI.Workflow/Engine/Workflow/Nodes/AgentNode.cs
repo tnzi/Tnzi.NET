@@ -29,13 +29,13 @@ public class AgentNode : IWorkflowNode
             serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
-            instructions: step.Instructions,
+            instructions: WorkflowNodeHelper.ResolveInstructions(step, state),
             name: step.StepId ?? "agent-node",
             cancellationToken: cancellationToken);
 
-        // 构建输入（与引擎 node input summary 共用 WorkflowNodeHelper.BuildStepInput）
+        // 构建输入（与引擎 node input summary 共用 WorkflowNodeHelper.BuildStepInput）。
+        // 输入是数据，不做模板替换（见 WorkflowNodeHelper.ResolveInstructions）。
         var stepInput = WorkflowNodeHelper.BuildStepInput(step, state);
-        stepInput = state.ResolveTemplate(stepInput);
 
         var messages = new List<ChatMessage> { new(ChatRole.User, stepInput) };
         var response = await executor.ExecuteAsync(messages, cancellationToken);

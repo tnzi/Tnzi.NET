@@ -1,5 +1,3 @@
-using Tnzi.Data;
-
 namespace Tnzi.Chat.Services;
 
 /// <summary>
@@ -199,7 +197,12 @@ public class ChatAdminService : ApplicationService, IChatAdminService
         var msg = await _messageRepository.FindAsync(messageId);
         if (msg == null) return Fail("Message not found.", 404);
 
-        await _messageRepository.DeleteAsync(msg); // soft-delete = recall, admin override (any sender)
+        // soft-delete = recall, admin override (any sender). The preview rewrite and the push to members matter
+        // most here: a forced recall that leaves the text in everyone's conversation list has recalled nothing.
+        var recalled = await ExecuteInUnitOfWorkAsync(ct =>
+            ChatMessageRecall.RecallAsync(msg, _messageRepository, _conversationRepository, _memberRepository, ct));
+        if (EventBus != null)
+            await EventBus.PublishAsync(recalled);
         return Ok();
     }
 

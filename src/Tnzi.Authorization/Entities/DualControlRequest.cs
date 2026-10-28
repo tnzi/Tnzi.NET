@@ -17,6 +17,18 @@ namespace Tnzi.Authorization.Entities;
 /// </remarks>
 public class DualControlRequest : MultiTenantAuditedEntity<Guid>
 {
+    /// <summary><see cref="Operation"/> 的列宽。服务层按它答 400，不把超长值交给数据库（宽松的库会截断，严格的库在保存时 500）。</summary>
+    public const int OperationMaxLength = 128;
+
+    /// <summary><see cref="TargetId"/> 的列宽。</summary>
+    public const int TargetIdMaxLength = 128;
+
+    /// <summary><see cref="Description"/> 的列宽。</summary>
+    public const int DescriptionMaxLength = 512;
+
+    /// <summary><see cref="DecisionComment"/> 的列宽。</summary>
+    public const int DecisionCommentMaxLength = 512;
+
     /// <summary>
     /// 业务动作标识，例如 <c>finance.payrun.void</c>。
     /// </summary>

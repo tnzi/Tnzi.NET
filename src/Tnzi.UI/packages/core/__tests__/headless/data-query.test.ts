@@ -272,12 +272,22 @@ describe('DataQueryController', () => {
   });
 
   describe('resetFilter', () => {
-    it('should reset filter to empty and refetch', async () => {
+    it('should reset filter to the configured default and refetch', async () => {
       const query = new DataQueryController<TestItem, { keyword?: string }>({
         fetchFn,
         defaultFilter: { keyword: 'test' },
       });
       await query.fetch();
+      await query.applyFilter({ keyword: 'other' });
+      fetchFn.mockClear();
+      await query.resetFilter();
+      expect(query.filter).toEqual({ keyword: 'test' });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('should reset filter to empty when no default is configured', async () => {
+      const query = new DataQueryController<TestItem, { keyword?: string }>({ fetchFn });
+      await query.applyFilter({ keyword: 'other' });
       await query.resetFilter();
       expect(query.filter).toEqual({});
     });
@@ -315,7 +325,7 @@ describe('DataQueryController', () => {
       expect(query.status).toBe('idle');
       expect(query.items).toEqual([]);
       expect(query.error).toBeNull();
-      expect(query.filter).toEqual({});
+      expect(query.filter).toEqual({ keyword: 'test' });
       expect(query.pagination.pageIndex).toBe(1);
       expect(query.sort.sortBy).toBeNull();
     });

@@ -183,11 +183,10 @@ import { useAdminClient } from '../../../plugin/client'
 import { useSafeMessage } from '../../_shared/safe-message'
 import TFormSchemaRenderer from '../../_shared/form-schema'
 import { interpolate, translatePageKey } from '../../_shared/translate'
-import { workflowColumns, workflowFormSchema } from './workflow-config'
+import { toWorkflowUpdateDto, workflowColumns, workflowFormSchema } from './workflow-config'
 import type {
   WorkflowDefinitionDto,
   CreateWorkflowDefinitionDto,
-  UpdateWorkflowDefinitionDto,
   WorkflowValidationResultDto,
 } from '@tnzi/core/services/ai'
 // 0.2.72+ (B4): enum value routed through ai-bridge so the page stays
@@ -260,8 +259,11 @@ const crud = useCrudPage<WorkflowDefinitionDto>({
       throw err
     }
   },
-  updateData: (id, data) => bridge.workflows.update(String(id), data as UpdateWorkflowDefinitionDto),
+  updateData: (id, data) => bridge.workflows.update(String(id), toWorkflowUpdateDto(data as Partial<WorkflowDefinitionDto>)),
   deleteData: (ids) => bridge.workflows.delete(ids.map(String)),
+  // The server's create defaults: an unseeded switch renders OFF while the
+  // created record is enabled.
+  createDefaults: { isEnabled: true, executionMode: WorkflowExecutionMode.Sequential },
 })
 
 // Edit graph + run/clone/validate/delete are rendered by the page itself in the
@@ -325,7 +327,7 @@ function confirmDelete(row: Row): void {
     // No dialog provider (bare mount / test harness) - fall back to the native
     // confirm so the confirmation gate is never silently skipped.
     if (typeof window !== 'undefined' && window.confirm(t('admin.crud.confirmDelete'))) {
-      void crud.handleDelete([row.id])
+      void crud.handleDelete([row.id]).catch(() => undefined)
     }
     return
   }
@@ -334,8 +336,9 @@ function confirmDelete(row: Row): void {
     content: t('admin.crud.confirmDelete'),
     positiveText: t('admin.common.confirm'),
     negativeText: t('admin.common.cancel'),
+    // handleDelete has already reported a refusal (toast or onError) before rethrowing.
     onPositiveClick: async () => {
-      await crud.handleDelete([row.id])
+      await crud.handleDelete([row.id]).catch(() => undefined)
     },
   })
 }

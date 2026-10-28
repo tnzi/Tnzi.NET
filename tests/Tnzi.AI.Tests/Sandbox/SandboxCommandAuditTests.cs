@@ -30,7 +30,8 @@ public class SandboxCommandAuditTests : IAsyncLifetime
         _sandbox = new LocalSandbox(
             id: "audit-test",
             workspacePath: Path.Combine(threadDir, "workspace"),
-            commandTimeout: TimeSpan.FromSeconds(5),
+            // 命令本身瞬间结束；时限只为挡住挂死。5 秒在整套测试并行时不够起一个 shell 进程，命令被杀、退出码 -1。
+            commandTimeout: TimeSpan.FromSeconds(30),
             maxOutputSize: 1024,
             deniedCommands: ["rm -rf /"]);
         return Task.CompletedTask;

@@ -10,42 +10,30 @@ import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import type { ToolCallInfo } from '../../headless/useChat';
 import TStreamLoader from '../streaming/TStreamLoader.vue';
+import { formatToolDuration, readableToolName, toolCallState } from './tool-call-status';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   toolCall: ToolCallInfo;
-}>();
-
-type ToolStatus = 'pending' | 'running' | 'completed' | 'failed';
-
-const status = computed<ToolStatus>(() => {
-  // The backend reports the outcome directly (`ToolCallDetail.IsSuccess` /
-  // `Error`); that beats guessing from the output text.
-  if (props.toolCall.isSuccess === false || props.toolCall.error) return 'failed';
-  if (props.toolCall.isSuccess === true) return 'completed';
-  if (props.toolCall.output === null || props.toolCall.output === undefined) {
-    if (props.toolCall.durationMs != null) return 'running';
-    return 'pending';
-  }
-  // If output starts with "Error" or contains error indicators, treat as failed
-  if (typeof props.toolCall.output === 'string' && props.toolCall.output.startsWith('Error')) {
-    return 'failed';
-  }
-  return 'completed';
+  /** The message this call belongs to is still streaming. A call with no
+   *  result yet is then running, not waiting. */
+  streaming?: boolean;
+}>(), {
+  streaming: false,
 });
+
+/*
+ * A live call is a name-only entry: the stream announces the tool when it
+ * starts and reports duration and outcome together once it has run. So "no
+ * result yet" means running while the turn streams, and never answered once
+ * it has ended. The rules live in `tool-call-status.ts`, shared with the
+ * generic card.
+ */
+const status = computed(() => toolCallState(props.toolCall, props.streaming));
 
 /** Convert snake_case / camelCase tool name to readable form. */
-const readableName = computed(() => {
-  return (props.toolCall.name ?? '')
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-});
+const readableName = computed(() => readableToolName(props.toolCall.name));
 
-const durationLabel = computed(() => {
-  if (!props.toolCall.durationMs) return null;
-  const seconds = (props.toolCall.durationMs / 1000).toFixed(1);
-  return `${seconds}s`;
-});
+const durationLabel = computed(() => formatToolDuration(props.toolCall.durationMs));
 </script>
 
 <template>

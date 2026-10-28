@@ -196,7 +196,8 @@ public class ShareManagementAuthorizationTests
             authorizer,
             _grants,
             new StaticOptionsMonitor<StorageOptions>(new StorageOptions()),
-            _services.Object);
+            _services.Object,
+            new RecycleBinLookup(new Mock<IRepository<RecycleBinEntry, Guid>>().Object, new Mock<IRepository<FileFolder, Guid>>().Object));
 
     /// <summary>一条分享 + 它指向的文件（<paramref name="fileOwner"/> 为 null 表示文件已被删掉）。</summary>
     private FileShare SeedShare(Guid? creator, Guid? fileOwner)

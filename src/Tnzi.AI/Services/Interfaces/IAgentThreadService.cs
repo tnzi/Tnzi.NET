@@ -32,6 +32,13 @@ public interface IAgentThreadService
     Task<Result<AgentThreadDto>> UpdateTitleAsync(Guid id, string title);
 
     /// <summary>
+    /// 归档或取消归档线程。归档已归档的线程保留原归档时间（幂等）。
+    /// </summary>
+    Task<Result<AgentThreadDto>> SetArchivedAsync(Guid id, bool archived)
+        => Task.FromResult(Result<AgentThreadDto>.Failure(
+            "Archiving threads is not supported by this thread service.", 501, ErrorCodes.InternalError));
+
+    /// <summary>
     /// 验证用户是否为线程所有者
     /// </summary>
     Task<bool> IsOwnerAsync(Guid threadId, Guid userId);
@@ -50,6 +57,14 @@ public interface IAgentThreadService
     /// 导出线程为 Markdown 格式
     /// </summary>
     Task<Result<string>> ExportAsMarkdownAsync(Guid id);
+
+    /// <summary>
+    /// 往回翻页取线程消息：<paramref name="beforeOrder"/> 之前（不含）的最近 <paramref name="limit"/> 条，旧的在前；
+    /// <paramref name="beforeOrder"/> 为 null 时取最新的一页。调用方负责先核线程归属。
+    /// </summary>
+    Task<Result<ThreadMessagePageDto>> GetMessagesAsync(Guid id, int? beforeOrder, int limit)
+        => Task.FromResult(Result<ThreadMessagePageDto>.Failure(
+            "Paging thread messages is not supported by this thread service.", 501, ErrorCodes.InternalError));
 }
 
 /// <summary>
@@ -58,9 +73,11 @@ public interface IAgentThreadService
 public interface IAgentThreadInternalService
 {
     /// <summary>
-    /// 获取或创建线程对话上下文，返回上下文、实际使用的 ThreadId 及是否为新建线程的标志
+    /// 解析或创建本轮所属的线程，返回实际使用的 ThreadId 及是否为新建线程的标志。
+    /// 给定的线程不存在、不归运行发起人所有、或与 <paramref name="agentId"/> 不符时一律抛 404 的 <see cref="BusinessException"/>。
+    /// 历史消息不在这里加载（见 <see cref="GetMessageHistoryAsync"/>）。
     /// </summary>
-    Task<(ConversationContext context, Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
+    Task<(Guid threadId, bool isNewThread)> GetOrCreateThreadAsync(Guid? threadId, Guid? agentId, CancellationToken ct = default);
 
     /// <summary>
     /// 保存消息到线程。
@@ -80,20 +97,39 @@ public interface IAgentThreadInternalService
     Task<Guid> SaveMessageAsync(Guid threadId, string role, string content, string? toolCalls = null, string? usage = null, Guid? messageId = null, CancellationToken ct = default);
 
     /// <summary>
+    /// 保存一条用户消息，连同客户端随这一轮带来的每轮元数据（<c>ChatRequestDto.Metadata</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 框架的实现把元数据存在同一行里（<c>AgentThreadMessage.MetadataJson</c>）。默认实现只存消息、不存元数据，
+    /// 给替换了本接口的实现保持编译；那样的实现上，重新生成拿不回原来那一轮的元数据。
+    /// </remarks>
+    Task<Guid> SaveUserMessageAsync(Guid threadId, string content, IReadOnlyDictionary<string, JsonElement>? metadata, Guid? messageId = null, CancellationToken ct = default)
+        => SaveMessageAsync(threadId, MessageRole.User, content, messageId: messageId, ct: ct);
+
+    /// <summary>
     /// 获取线程消息历史
     /// </summary>
     Task<List<ChatMessage>> GetMessageHistoryAsync(Guid threadId, int? limit = null, CancellationToken ct = default);
-
-    /// <summary>
-    /// 保存对话上下文的序列化数据到数据库
-    /// </summary>
-    Task SaveThreadSerializedDataAsync(Guid threadId, ConversationContext context, CancellationToken ct = default);
 
     /// <summary>
     /// 读取线程元数据（<c>AgentThread.Metadata</c> JSON 对象）中某个键的值，返回该值的原始 JSON 文本；
     /// 线程不存在或键不存在返回 null。框架内部按键存放跨轮次的运行状态（如已激活技能）。
     /// </summary>
     Task<string?> GetMetadataValueAsync(Guid threadId, string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// 找线程里的一条用户消息：<paramref name="messageId"/> 给出时按 id（必须是这条线程的用户消息），
+    /// 为 null 时取最后一条用户消息。找不到返回 null。
+    /// </summary>
+    Task<ThreadMessageRef?> FindUserMessageAsync(Guid threadId, Guid? messageId, CancellationToken ct = default)
+        => throw new NotSupportedException("This thread service cannot look up messages for editing.");
+
+    /// <summary>
+    /// 回退线程：删掉 <paramref name="fromOrder"/> 及其后的全部消息（连同它们的附件），返回删掉的条数。
+    /// 编辑与重新生成用它；没有实现时调用方失败而不是假装成功。
+    /// </summary>
+    Task<int> DeleteMessagesFromAsync(Guid threadId, int fromOrder, CancellationToken ct = default)
+        => throw new NotSupportedException("This thread service cannot rewind a thread.");
 
     /// <summary>
     /// 写入线程元数据中某个键的值（<paramref name="valueJson"/> 为该值的 JSON 文本；null = 移除该键）。

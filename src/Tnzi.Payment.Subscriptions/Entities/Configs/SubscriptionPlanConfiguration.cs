@@ -11,6 +11,7 @@ public class SubscriptionPlanConfiguration : EntityTypeConfigurationBase<Subscri
         builder.Property(p => p.Currency).HasMaxLength(8).IsRequired().HasDefaultValue("USD");
         builder.Property(p => p.Price).HasMoneyPrecision();
         builder.Property(p => p.TrialDiscount).HasMoneyPrecision();
+        builder.Property(p => p.StorageOveragePricePerGbMonth).HasMoneyPrecision();
 
         builder.HasMany(p => p.Subscriptions)
             .WithOne(s => s.Plan)

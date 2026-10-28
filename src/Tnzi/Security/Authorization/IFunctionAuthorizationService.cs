@@ -86,6 +86,30 @@ public interface IFunctionAuthorizationService
     Task<bool> CanManageRoleAsync(Guid grantorUserId, Guid roleId) => Task.FromResult(false);
 
     /// <summary>
+    /// <paramref name="grantorUserId"/> 能否变更指定角色的<b>成员</b>（把人放进去、摘出来），
+    /// 或改动、删除这个角色本身。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 比 <see cref="CanManageRoleAsync"/> 多算一样东西：角色身上的<b>休眠授权</b>，即
+    /// 授权行本身启用、指向的权限却已停用或已退役。它们此刻不在任何人的有效权限里，
+    /// 所以授权矩阵的写入不拿它们判支配（否则一条休眠授权会把每个非超管都锁在这个角色的矩阵外）。
+    /// </para>
+    /// <para>
+    /// ★★★ 成员变更不能照搬那份放宽：权限一旦重新启用、声明它的模块一旦重新加载，休眠授权原样恢复，
+    /// 先把自己挂进角色的人就不经任何人授出而持有那些码。于是带休眠授权的角色，
+    /// 只有支配得了它<b>全部</b>授权的人（实际上就是超管）才能改它的成员。
+    /// </para>
+    /// <para>
+    /// 默认实现回退到 <see cref="CanManageRoleAsync"/>：不认识「休眠」的实现没有更多可算的，
+    /// 而那个方法自己的默认值已是失败关闭。
+    /// </para>
+    /// </remarks>
+    /// <param name="grantorUserId">授权者用户ID</param>
+    /// <param name="roleId">目标角色ID</param>
+    Task<bool> CanManageRoleMembershipAsync(Guid grantorUserId, Guid roleId) => CanManageRoleAsync(grantorUserId, roleId);
+
+    /// <summary>
     /// 受保护的角色名 —— 成员自动获得超管旁路的那些角色（<c>Authorization:SuperAdminRoles</c>）。
     /// </summary>
     /// <remarks>

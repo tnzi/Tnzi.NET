@@ -48,18 +48,9 @@ import ResetPwd from './modules/ResetPwd.vue'
 import BindWechat from './modules/BindWechat.vue'
 import TwoFactorChallenge from './modules/TwoFactorChallenge.vue'
 import PendingActions from './modules/PendingActions.vue'
+import { LOGIN_MODULES } from '../../router/login-modules'
 
 defineOptions({ name: 'TnziAdminLoginPage' })
-
-const KNOWN_MODULES: readonly LoginModule[] = [
-  'pwd-login',
-  'code-login',
-  'register',
-  'reset-pwd',
-  'bind-wechat',
-  'two-factor',
-  'pending-actions',
-] as const
 
 const moduleComponents = {
   'pwd-login': PwdLogin,
@@ -97,7 +88,7 @@ const activeModule = computed<LoginModule>(() => {
   const raw = route.params.module
   const value = Array.isArray(raw) ? raw[0] : raw
   const requested =
-    typeof value === 'string' && (KNOWN_MODULES as readonly string[]).includes(value)
+    typeof value === 'string' && (LOGIN_MODULES as readonly string[]).includes(value)
       ? (value as LoginModule)
       : 'pwd-login'
   // Guard feature-gated modules reached by direct URL when the backend disabled

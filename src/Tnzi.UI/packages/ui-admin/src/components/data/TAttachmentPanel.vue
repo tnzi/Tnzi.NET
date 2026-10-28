@@ -116,7 +116,20 @@ const dropping = ref(false)
 // highlight flickers as the pointer crosses the rows.
 const dragDepth = ref(0)
 
-watch(() => props.items, () => { error.value = null })
+/**
+ * Set when a batch failed part-way and asked the host to reload: that reload
+ * replaces `items`, and the reason the rest of the batch did not attach must
+ * outlive it.
+ */
+let keepErrorThroughReload = false
+
+watch(() => props.items, () => {
+  if (keepErrorThroughReload) {
+    keepErrorThroughReload = false
+    return
+  }
+  error.value = null
+})
 
 /** A recognisable glyph beats a generic page icon when scanning a list. */
 function iconFor(contentType?: string | null, name?: string): string {
@@ -161,22 +174,41 @@ async function onFilesPicked(event: Event) {
   if (files.length) await send(files)
 }
 
-async function send(files: File[]) {
+/**
+ * Batches run one after another: a drop or a pick while a batch is still
+ * uploading waits for it instead of starting a second loop beside it.
+ */
+let queue: Promise<void> = Promise.resolve()
+
+function send(files: File[]): Promise<void> {
+  const run = queue.then(() => sendBatch(files))
+  queue = run
+  return run
+}
+
+async function sendBatch(files: File[]) {
   if (!props.upload || !props.attach) return
   busy.value = true
   error.value = null
+  let attached = 0
   try {
     // Sequential on purpose: the server caps attachments per record, and a
     // parallel burst would report that cap as an opaque failure on a random file.
     for (const file of files) {
       const stored = await props.upload(file)
       await props.attach(stored)
+      attached++
     }
-    emit('changed')
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     busy.value = false
+  }
+  // The files that did attach must show even when a later one failed: a list
+  // without them invites dropping the whole batch again, attaching them twice.
+  if (attached > 0) {
+    keepErrorThroughReload = error.value !== null
+    emit('changed')
   }
 }
 

@@ -5,7 +5,7 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 /// </summary>
 /// <remarks>
 /// 配置项：
-/// - synthesizerAgentId: 综合器 Agent ID（可选）
+/// - synthesizerAgentId: 综合器 Agent ID（可选；缺失时用步骤的 AgentId）
 /// </remarks>
 public class SynthesizeNode : IWorkflowNode
 {
@@ -24,24 +24,25 @@ public class SynthesizeNode : IWorkflowNode
         var state = context.State;
         var config = step.Configuration ?? new Dictionary<string, string>();
 
-        // 收集所有上游输出
+        // 收集所有上游输出（数据，不做模板替换）
         var upstreamText = WorkflowNodeHelper.CollectAllUpstreamOutputs(context);
 
-        // 构建综合提示
-        var synthesizePrompt = BuildSynthesizePrompt(step.Instructions, upstreamText);
-        synthesizePrompt = state.ResolveTemplate(synthesizePrompt);
+        // 构建综合提示：只替换作者写的指令
+        var instructions = WorkflowNodeHelper.ResolveInstructions(step, state);
+        var synthesizePrompt = BuildSynthesizePrompt(instructions, upstreamText);
 
-        var synthAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "synthesizerAgentId");
+        var synthAgentId = WorkflowNodeHelper.ResolveNodeAgentId(step, config, "synthesizerAgentId");
 
+        // 系统提示词：步骤指令 > 综合 Agent 自己的 > 节点缺省
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: synthAgentId,
             serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
-            instructions: step.Instructions
-                ?? "You are a synthesizer. Combine and summarize the following inputs into a coherent, comprehensive response.",
+            instructions: instructions,
             name: step.StepId ?? "synthesize-node",
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            fallbackInstructions: "You are a synthesizer. Combine and summarize the following inputs into a coherent, comprehensive response.");
 
         var messages = new List<ChatMessage> { new(ChatRole.User, synthesizePrompt) };
         var response = await executor.ExecuteAsync(messages, cancellationToken);

@@ -7,10 +7,13 @@ namespace Tnzi.Storage.Cloud.Providers;
 /// </summary>
 public class R2Storage : IFileStorage, IDisposable
 {
+    /// <summary>R2 的 SigV4 签名区域。R2 只有一个逻辑区域，固定写作 "auto"。</summary>
+    private const string R2SigningRegion = "auto";
+
     private readonly R2StorageOptions _options;
     private readonly string? _baseUrl;
     private readonly IAmazonS3 _s3Client;
-    private readonly ILogger<R2Storage>? _logger;
+    private readonly S3ObjectStore _objects;
     private readonly IOptionsMonitor<StorageOptions>? _optionsMonitor;
 
     /// <summary>
@@ -36,7 +39,6 @@ public class R2Storage : IFileStorage, IDisposable
     public R2Storage(R2StorageOptions options, IConfiguration? configuration = null, ILogger<R2Storage>? logger = null, IOptionsMonitor<StorageOptions>? optionsMonitor = null)
     {
         _options = Check.NotNull(options);
-        _logger = logger;
         _optionsMonitor = optionsMonitor;
 
         Check.NotNullOrEmpty(_options.AccessKeyId);
@@ -58,15 +60,19 @@ public class R2Storage : IFileStorage, IDisposable
         }
 
         // 创建 S3 兼容客户端（用于 R2）
-        // R2 需要路径样式（ForcePathStyle = true）和自定义端点
+        // R2 需要路径样式（ForcePathStyle = true）和自定义端点。
+        // ★ 不能再设 RegionEndpoint：AWS SDK 里它与 ServiceURL 互斥，后设的那个会把先设的清空，
+        // 客户端于是连到 s3.us-east-1.amazonaws.com，拿 R2 的密钥签名，每个请求都被拒。
+        // 签名区域改由 AuthenticationRegion 给出：R2 的区域是 "auto"。
         var config = new AmazonS3Config
         {
             ServiceURL = endpoint ?? "https://r2.cloudflarestorage.com",
             ForcePathStyle = true, // R2 必须使用路径样式
-            RegionEndpoint = RegionEndpoint.USEast1 // R2 不区分区域，但需要设置一个默认值
+            AuthenticationRegion = R2SigningRegion
         };
 
         _s3Client = new AmazonS3Client(_options.AccessKeyId, _options.SecretAccessKey, config);
+        _objects = new S3ObjectStore(_s3Client, _options.BucketName, ProviderName, presignProtocol: null, logger);
     }
 
     /// <summary>
@@ -74,110 +80,20 @@ public class R2Storage : IFileStorage, IDisposable
     /// </summary>
     public string ProviderName => "R2";
 
-    /// <summary>
-    /// 上传文件
-    /// </summary>
-    /// <param name="fileName">文件名</param>
-    /// <param name="stream">文件流</param>
-    /// <param name="contentType">内容类型</param>
-    /// <returns>文件路径或URL</returns>
-    public async Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
-    {
-        Check.NotNullOrEmpty(fileName);
-        Check.NotNull(stream);
+    /// <inheritdoc />
+    public Task<string> UploadAsync(string fileName, Stream stream, string? contentType = null)
+        => _objects.UploadAsync(fileName, stream, contentType);
 
-        var request = new PutObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = fileName,
-            InputStream = stream,
-            ContentType = contentType ?? "application/octet-stream",
-            // 同 S3Storage：AWS SDK 默认读完即关掉 InputStream，而流归调用方所有
-            // （见 IFileStorage.UploadAsync 的所有权约定）。
-            AutoCloseStream = false
-        };
+    /// <inheritdoc />
+    /// <exception cref="FileNotFoundException">对象不存在。</exception>
+    public Task<Stream> DownloadAsync(string filePath) => _objects.DownloadAsync(filePath);
 
-        await _s3Client.PutObjectAsync(request);
+    /// <inheritdoc />
+    public Task<bool> DeleteAsync(string filePath) => _objects.DeleteAsync(filePath);
 
-        return fileName;
-    }
-
-    /// <summary>
-    /// 下载文件
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>文件流</returns>
-    public async Task<Stream> DownloadAsync(string filePath)
-    {
-        Check.NotNullOrEmpty(filePath);
-
-        var request = new GetObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-
-        var response = await _s3Client.GetObjectAsync(request);
-        return response.ResponseStream;
-    }
-
-    /// <summary>
-    /// 删除文件
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>是否删除成功</returns>
-    public async Task<bool> DeleteAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return false;
-
-        try
-        {
-            var request = new DeleteObjectRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            await _s3Client.DeleteObjectAsync(request);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to delete file from R2: {FilePath}", filePath);
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// 检查文件是否存在
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>是否存在</returns>
-    public async Task<bool> ExistsAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return false;
-
-        try
-        {
-            var request = new GetObjectMetadataRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            await _s3Client.GetObjectMetadataAsync(request);
-            return true;
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-        {
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to check file existence in R2: {FilePath}", filePath);
-            return false;
-        }
-    }
+    /// <inheritdoc />
+    /// <remarks>只有 404 答 <c>false</c>；权限、网络等错误照常抛出。</remarks>
+    public Task<bool> ExistsAsync(string filePath) => _objects.ExistsAsync(filePath);
 
     /// <summary>
     /// 获取文件访问URL
@@ -191,16 +107,7 @@ public class R2Storage : IFileStorage, IDisposable
             return Task.FromResult(string.Empty);
 
         if (expiresIn.HasValue && expiresIn.Value > 0)
-        {
-            var request = new GetPreSignedUrlRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath,
-                Verb = HttpVerb.GET,
-                Expires = DateTime.UtcNow.AddSeconds(expiresIn.Value)
-            };
-            return Task.FromResult(_s3Client.GetPreSignedURL(request));
-        }
+            return Task.FromResult(_objects.GetPresignedUrl(filePath, expiresIn.Value, HttpVerb.GET));
 
         // 如果没有过期时间，返回基本URL
         var baseUrl = EffectiveBaseUrl;
@@ -213,87 +120,21 @@ public class R2Storage : IFileStorage, IDisposable
         return Task.FromResult(filePath);
     }
 
-    /// <summary>
-    /// 获取文件大小
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <returns>文件大小（字节）</returns>
-    public async Task<long> GetFileSizeAsync(string filePath)
-    {
-        if (string.IsNullOrEmpty(filePath))
-            return 0L;
+    /// <inheritdoc />
+    public Task<long> GetFileSizeAsync(string filePath) => _objects.GetFileSizeAsync(filePath);
 
-        try
-        {
-            var request = new GetObjectMetadataRequest
-            {
-                BucketName = _options.BucketName,
-                Key = filePath
-            };
-            var response = await _s3Client.GetObjectMetadataAsync(request);
-            return response.ContentLength;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to get file size from R2: {FilePath}", filePath);
-            return 0L;
-        }
-    }
-
-    /// <summary>
-    /// 下载文件（支持 Range 请求，用于断点续传）。
-    /// </summary>
-    /// <param name="filePath">文件路径或URL</param>
-    /// <param name="rangeStart">Range 起始位置（字节）</param>
-    /// <param name="rangeEnd">Range 结束位置（字节）</param>
-    /// <returns>文件流和范围信息</returns>
-    public async Task<(Stream Stream, long Start, long End, long TotalLength)> DownloadRangeAsync(
+    /// <inheritdoc />
+    /// <exception cref="FileNotFoundException">对象不存在。</exception>
+    public Task<(Stream Stream, long Start, long End, long TotalLength)> DownloadRangeAsync(
         string filePath,
         long? rangeStart = null,
         long? rangeEnd = null)
-    {
-        Check.NotNullOrEmpty(filePath);
-
-        // 先获取文件元数据以获取总长度
-        var metadataRequest = new GetObjectMetadataRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-        var metadataResponse = await _s3Client.GetObjectMetadataAsync(metadataRequest);
-        var totalLength = metadataResponse.ContentLength;
-
-        var request = new GetObjectRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath
-        };
-
-        // 如果指定了范围，添加 Range 头
-        if (rangeStart.HasValue)
-        {
-            var rangeEndForRequest = rangeEnd.HasValue ? rangeEnd.Value : totalLength - 1;
-            request.ByteRange = new ByteRange(rangeStart.Value, rangeEndForRequest);
-        }
-
-        var response = await _s3Client.GetObjectAsync(request);
-
-        // 如果没有指定范围，返回整个文件
-        if (!rangeStart.HasValue)
-        {
-            return (response.ResponseStream, 0L, totalLength - 1, totalLength);
-        }
-
-        // 计算实际范围
-        var start = rangeStart.Value;
-        var actualEnd = rangeEnd.HasValue ? rangeEnd.Value : totalLength - 1;
-
-        return (response.ResponseStream, start, actualEnd, totalLength);
-    }
+        => _objects.DownloadRangeAsync(filePath, rangeStart, rangeEnd);
 
     /// <summary>
     /// Generate a presigned URL for direct upload or temporary public download access.
     /// R2 is S3-compatible, so this uses the AWS SDK presigned URL generation.
+    /// A GET URL for a type outside the inline whitelist carries a response-content-disposition of attachment.
     /// </summary>
     /// <param name="filePath">R2 object key</param>
     /// <param name="expiresInSeconds">URL expiration in seconds</param>
@@ -304,51 +145,15 @@ public class R2Storage : IFileStorage, IDisposable
         if (string.IsNullOrEmpty(filePath))
             return Task.FromResult<string?>(null);
 
-        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase)
-            ? HttpVerb.PUT
-            : HttpVerb.GET;
-
-        var request = new GetPreSignedUrlRequest
-        {
-            BucketName = _options.BucketName,
-            Key = filePath,
-            Verb = verb,
-            Expires = DateTime.UtcNow.AddSeconds(expiresInSeconds)
-        };
-
-        var url = _s3Client.GetPreSignedURL(request);
-        return Task.FromResult<string?>(url);
+        var verb = httpMethod.Equals("PUT", StringComparison.OrdinalIgnoreCase) ? HttpVerb.PUT : HttpVerb.GET;
+        return Task.FromResult<string?>(_objects.GetPresignedUrl(filePath, expiresInSeconds, verb));
     }
 
     /// <summary>
     /// Server-side copy an R2 (S3-compatible) object to a new key within the same bucket.
     /// </summary>
-    /// <param name="sourcePath">Source object key</param>
-    /// <param name="destFileName">Destination object key</param>
     /// <returns>The destination key on success, or null if the path is empty or the copy fails</returns>
-    public async Task<string?> CopyAsync(string sourcePath, string destFileName)
-    {
-        if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destFileName))
-            return null;
-
-        try
-        {
-            var request = new CopyObjectRequest
-            {
-                SourceBucket = _options.BucketName,
-                SourceKey = sourcePath,
-                DestinationBucket = _options.BucketName,
-                DestinationKey = destFileName
-            };
-            await _s3Client.CopyObjectAsync(request);
-            return destFileName;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to server-side copy R2 object: {SourcePath} -> {DestFileName}", sourcePath, destFileName);
-            return null;
-        }
-    }
+    public Task<string?> CopyAsync(string sourcePath, string destFileName) => _objects.CopyAsync(sourcePath, destFileName);
 
     public void Dispose()
     {

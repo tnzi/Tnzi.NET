@@ -402,14 +402,23 @@ export interface LoginFeatures {
   passwordLogin: boolean
   /** Show the code-login entry + module. */
   codeLogin: boolean
-  /** Show the register entry + module. */
+  /**
+   * Show the register entry + module. The built-in module is code-based (quick
+   * registration: send a code, then set a password), so this follows the
+   * quick-registration channels, not `enableRegistration`, which also covers
+   * password self-registration that no built-in module offers.
+   */
   register: boolean
   /** Show the forgot-password entry + module. */
   passwordRecovery: boolean
   /** Identifier types the password-login account field accepts. */
   identifiers: { userName: boolean; email: boolean; phone: boolean }
-  /** Channels available for code-based flows (code-login / register / recovery). */
+  /** Channels a code sign-in can be sent to. */
   codeChannels: { sms: boolean; email: boolean }
+  /** Channels a quick-registration code can be sent to (`registerViaSms` / `registerViaEmail`). */
+  registerChannels: { sms: boolean; email: boolean }
+  /** Channels a password-recovery code can be sent to (`recoveryViaSms` / `recoveryViaEmail`). */
+  recoveryChannels: { sms: boolean; email: boolean }
   /**
    * Captcha is enabled on the password-login flow. When on, the backend demands
    * a captcha adaptively (after repeated failures); `PwdLogin` only reveals the
@@ -448,6 +457,8 @@ export const DEFAULT_LOGIN_FEATURES: LoginFeatures = Object.freeze({
   passwordRecovery: true,
   identifiers: Object.freeze({ userName: true, email: true, phone: true }),
   codeChannels: Object.freeze({ sms: true, email: true }),
+  registerChannels: Object.freeze({ sms: true, email: true }),
+  recoveryChannels: Object.freeze({ sms: true, email: true }),
   // Captcha is an opt-in security add-on (backend default off). Defaulting it
   // off on config-failure avoids showing a captcha field the backend ignores.
   captchaOnLogin: false,
@@ -469,6 +480,8 @@ export interface PartialLoginFeatures {
   passwordRecovery?: boolean
   identifiers?: Partial<LoginFeatures['identifiers']>
   codeChannels?: Partial<LoginFeatures['codeChannels']>
+  registerChannels?: Partial<LoginFeatures['registerChannels']>
+  recoveryChannels?: Partial<LoginFeatures['recoveryChannels']>
   captchaOnLogin?: boolean
   captchaOnRegister?: boolean
   captchaOnPasswordRecovery?: boolean

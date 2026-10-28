@@ -76,6 +76,9 @@ public class AISandboxModule : TnziApplicationModule
         // Events - sandbox command execution audit (uses optional IAuditSender)
         context.Services.AddEventHandler<SandboxCommandExecutedEvent, SandboxCommandAuditHandler>();
 
+        // Events - a deleted thread's sandbox directory and quota counters go with it
+        context.Services.AddEventHandler<ThreadDeletedEvent, SandboxThreadCleanupHandler>();
+
         return Task.CompletedTask;
     }
 
@@ -100,26 +103,23 @@ public class AISandboxModule : TnziApplicationModule
 
     private static void RegisterDockerHttpClient(ServiceConfigurationContext context)
     {
-        var dockerHost = context.Configuration.GetSection("AI:Sandbox:Docker:DockerHost").Value;
-        if (string.IsNullOrWhiteSpace(dockerHost))
-        {
-            dockerHost = OperatingSystem.IsWindows()
-                ? "npipe:////./pipe/docker_engine"
-                : "unix:///var/run/docker.sock";
-        }
-
         context.Services.AddHttpClient(DockerSandboxProvider.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(() => new System.Net.Http.SocketsHttpHandler
+            .ConfigurePrimaryHttpMessageHandler(sp => new System.Net.Http.SocketsHttpHandler
             {
                 // .NET handles HTTP/1.1 framing; we only supply the underlying transport
                 // (unix socket / Windows named pipe / TCP) via ConnectCallback.
-                ConnectCallback = DockerSocketConnector.CreateConnectCallback(dockerHost),
+                // 地址取绑定后的选项（配置与代码方式的 Configure 都算），而不是只读原始配置键。
+                ConnectCallback = DockerSocketConnector.CreateConnectCallback(
+                    sp.GetRequiredService<IOptions<SandboxModuleOptions>>().Value.Docker.ResolveDockerHost()),
                 PooledConnectionLifetime = TimeSpan.FromMinutes(5)
             })
             .ConfigureHttpClient(client =>
             {
-                // Docker API 需要一个 base address，但实际连接通过 SocketsHttpHandler.ConnectCallback
-                client.BaseAddress = new Uri("http://localhost/v1.45");
+                // 实际连接经 ConnectCallback，基址只是 HttpClient 拼地址用的。请求一律不带 API 版本前缀，
+                // daemon 按它自己的当前版本应答：钉一个版本，比它旧的 daemon 全部拒绝（版本太新），
+                // 而新版 daemon 又会把过旧的版本拒之门外。★ 此前基址写成 /v1.45，看起来钉了版本，
+                // 但所有请求都用 / 开头的路径，按 URI 规则整段替换掉基址路径，版本前缀从未发出过。
+                client.BaseAddress = new Uri("http://localhost/");
                 client.Timeout = TimeSpan.FromMinutes(5);
             });
     }

@@ -2,7 +2,6 @@
 // 由 ImplicitUsings 提供，不在此重复）
 global using System.Globalization;
 global using System.Linq.Expressions;
-global using System.Text;
 global using System.Text.RegularExpressions;
 
 // Microsoft
@@ -27,6 +26,7 @@ global using Tnzi.EFCore.Internal;
 global using Tnzi.Geometry;
 global using Tnzi.Mapster;
 global using Tnzi.Json;
+global using Tnzi.Extensions;
 global using Tnzi.Modules;
 global using Tnzi.MultiTenancy;
 global using Tnzi.Results;

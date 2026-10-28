@@ -301,6 +301,23 @@ public class EntityAuditSaveChangesInterceptorTests : IDisposable
         property.NewValue!.Length.ShouldBe(4000);
     }
 
+    /// <summary>
+    /// 截断点落在代理对中间：少截一个字符，而不是留下孤立的高代理项（严格 UTF-8 编码器会拒绝写入整条审计）。
+    /// </summary>
+    [Fact]
+    public async Task LongPropertyValue_CutInsideASurrogatePair_DropsTheWholeCharacter()
+    {
+        var product = new EntityAuditTestProduct { Name = "Widget", Description = new string('x', 3999) + "\U0001F600" + new string('y', 100) };
+        _context.Products.Add(product);
+
+        await _context.SaveChangesAsync();
+
+        var entry = _collector.Drain().ShouldHaveSingleItem();
+        var value = entry.PropertyEntries.Single(p => p.PropertyName == nameof(EntityAuditTestProduct.Description)).NewValue!;
+        value.Length.ShouldBe(3999);
+        char.IsHighSurrogate(value[^1]).ShouldBeFalse();
+    }
+
     [Fact]
     public async Task ModifiedWithoutRealChange_IsNotCaptured()
     {

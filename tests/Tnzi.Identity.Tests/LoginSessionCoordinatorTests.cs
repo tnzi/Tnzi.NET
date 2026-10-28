@@ -67,17 +67,21 @@ public class LoginSessionCoordinatorTests
     public async Task EstablishAsync_SingleDevice_Replace_CreatesSessionAndRevokesOthers()
     {
         SetOptions(new MultiLoginOptions { AllowMultiLogin = false, OnConflict = LoginConflictPolicy.Replace });
-        SetExistingSessions(Session(DateTime.UtcNow.AddMinutes(-5)));
+        var existing = Session(DateTime.UtcNow.AddMinutes(-5));
+        SetExistingSessions(existing);
         var coordinator = CreateCoordinator();
 
         var result = await coordinator.EstablishAsync(Guid.NewGuid());
 
         result.Succeeded.ShouldBeTrue();
         result.Data.ShouldBe(_newSessionId);
-        // 先建后撤：撤销除新会话外的全部旧会话，**连同它们的刷新令牌**（走撤销出口）。
+        // 先建后撤：逐条撤销除新会话外的旧会话，**连同它们的刷新令牌**（走撤销出口）。
         _revocationMock.Verify(
-            x => x.RevokeUserSessionsAsync(It.IsAny<Guid>(), SessionRevocationReason.MultiLoginReplaced, _newSessionId),
+            x => x.RevokeSessionAsync(existing.Id, SessionRevocationReason.MultiLoginReplaced),
             Times.Once);
+        _revocationMock.Verify(
+            x => x.RevokeSessionAsync(_newSessionId, It.IsAny<SessionRevocationReason>()),
+            Times.Never);
     }
 
     [Fact]
@@ -127,6 +131,97 @@ public class LoginSessionCoordinatorTests
             x => x.RevokeSessionAsync(oldest.Id, SessionRevocationReason.MultiLoginReplaced), Times.Once);
         _revocationMock.Verify(
             x => x.RevokeSessionAsync(newer.Id, It.IsAny<SessionRevocationReason>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 会话表在本次建会话之前与之后的样子：模拟另一台设备的并发登录恰好落在「读快照」与「建会话」之间。
+    /// </summary>
+    private void SetSessionsAroundCreation(UserSessionDto[] before, UserSessionDto[] after)
+    {
+        var created = false;
+        _sessionServiceMock
+            .Setup(x => x.CreateSessionAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<DateTime?>()))
+            .Callback(() => created = true)
+            .ReturnsAsync(_newSessionId);
+        _sessionServiceMock
+            .Setup(x => x.GetUserSessionsAsync(It.IsAny<Guid>(), It.IsAny<bool>()))
+            .ReturnsAsync(() => Result<IEnumerable<UserSessionDto>>.Success(created ? after : before));
+    }
+
+    /// <summary>
+    /// ★★ 单设备 + Reject：两台设备同时登录，两边都读到 0 条、各建一条，此前收场时有两条活会话。
+    /// 建完复核一次「除我之外」的会话，看见对方就撤掉自己这条并按同一句话拒绝。
+    /// </summary>
+    [Fact]
+    public async Task EstablishAsync_SingleDevice_Reject_WhenAConcurrentSignInLandsFirst_WithdrawsTheNewSession()
+    {
+        SetOptions(new MultiLoginOptions { AllowMultiLogin = false, OnConflict = LoginConflictPolicy.Reject });
+        var concurrent = Session(DateTime.UtcNow);
+        SetSessionsAroundCreation(before: [], after: [concurrent, new UserSessionDto { Id = _newSessionId, LastActivityTime = DateTime.UtcNow }]);
+        var coordinator = CreateCoordinator();
+
+        var result = await coordinator.EstablishAsync(Guid.NewGuid());
+
+        result.Succeeded.ShouldBeFalse();
+        result.Code.ShouldBe(403);
+        result.ErrorCode.ShouldBe(ErrorCodes.IDENTITY_SESSION_ALREADY_ACTIVE);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(_newSessionId), Times.Once);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(concurrent.Id), Times.Never);
+    }
+
+    /// <summary>限并发 + Reject 同理：快照里还差一个名额，建完一数已经满了。</summary>
+    [Fact]
+    public async Task EstablishAsync_MaxConcurrent_Reject_WhenAConcurrentSignInTakesTheLastSlot_WithdrawsTheNewSession()
+    {
+        SetOptions(new MultiLoginOptions { AllowMultiLogin = true, MaxConcurrentSessions = 2, OnConflict = LoginConflictPolicy.Reject });
+        var first = Session(DateTime.UtcNow.AddMinutes(-5));
+        var concurrent = Session(DateTime.UtcNow);
+        SetSessionsAroundCreation(before: [first], after: [first, concurrent]);
+        var coordinator = CreateCoordinator();
+
+        var result = await coordinator.EstablishAsync(Guid.NewGuid());
+
+        result.Succeeded.ShouldBeFalse();
+        result.ErrorCode.ShouldBe(ErrorCodes.IDENTITY_SESSION_LIMIT_REACHED);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(_newSessionId), Times.Once);
+    }
+
+    /// <summary>对照组：复核时只有自己这一条，照常放行，什么都不撤。</summary>
+    [Fact]
+    public async Task EstablishAsync_SingleDevice_Reject_WithNoOtherSessionAfterCreation_Succeeds()
+    {
+        SetOptions(new MultiLoginOptions { AllowMultiLogin = false, OnConflict = LoginConflictPolicy.Reject });
+        SetSessionsAroundCreation(before: [], after: [new UserSessionDto { Id = _newSessionId, LastActivityTime = DateTime.UtcNow }]);
+        var coordinator = CreateCoordinator();
+
+        var result = await coordinator.EstablishAsync(Guid.NewGuid());
+
+        result.Succeeded.ShouldBeTrue();
+        result.Data.ShouldBe(_newSessionId);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 限并发 + Replace：超出几条按建完之后重读的集合算。此前用建之前的快照，并发的两次登录都只挤掉同一条最旧的，
+    /// 收场时比上限多一条。
+    /// </summary>
+    [Fact]
+    public async Task EstablishAsync_MaxConcurrent_Replace_CountsTheSurplusAfterCreation()
+    {
+        SetOptions(new MultiLoginOptions { AllowMultiLogin = true, MaxConcurrentSessions = 2, OnConflict = LoginConflictPolicy.Replace });
+        var oldest = Session(DateTime.UtcNow.AddMinutes(-30));
+        var newer = Session(DateTime.UtcNow.AddMinutes(-5));
+        var concurrent = Session(DateTime.UtcNow.AddSeconds(-1));
+        SetSessionsAroundCreation(before: [oldest, newer], after: [oldest, newer, concurrent]);
+        var coordinator = CreateCoordinator();
+
+        var result = await coordinator.EstablishAsync(Guid.NewGuid());
+
+        result.Succeeded.ShouldBeTrue();
+        // 其余 3 + 新 1 = 4，上限 2 → 撤最旧的两条，留下并发的那条与自己。
+        _revocationMock.Verify(x => x.RevokeSessionAsync(oldest.Id, SessionRevocationReason.MultiLoginReplaced), Times.Once);
+        _revocationMock.Verify(x => x.RevokeSessionAsync(newer.Id, SessionRevocationReason.MultiLoginReplaced), Times.Once);
+        _revocationMock.Verify(x => x.RevokeSessionAsync(concurrent.Id, It.IsAny<SessionRevocationReason>()), Times.Never);
     }
 
     [Fact]
@@ -196,14 +291,15 @@ public class LoginSessionCoordinatorRevocationTests
     public async Task SingleDevice_KicksOthersThroughTheRevocationExit()
     {
         SetOptions(new MultiLoginOptions { AllowMultiLogin = false, OnConflict = LoginConflictPolicy.Replace });
-        SetExistingSessions();
-        var userId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        var other = new UserSessionDto { Id = Guid.NewGuid(), LastActivityTime = now, ExpiresAt = now.AddDays(7) };
+        SetExistingSessions(other);
 
-        await _coordinator.EstablishAsync(userId);
+        await _coordinator.EstablishAsync(Guid.NewGuid());
 
         _revocationMock.Verify(
-            x => x.RevokeUserSessionsAsync(userId, SessionRevocationReason.MultiLoginReplaced, _newSessionId),
-            Times.Once);
+            x => x.RevokeSessionAsync(other.Id, SessionRevocationReason.MultiLoginReplaced), Times.Once);
+        _sessionServiceMock.Verify(x => x.RevokeSessionAsync(It.IsAny<Guid>()), Times.Never);
         _sessionServiceMock.Verify(
             x => x.RevokeAllSessionsAsync(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
     }

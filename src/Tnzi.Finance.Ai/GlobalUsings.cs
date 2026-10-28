@@ -10,6 +10,7 @@ global using Microsoft.Extensions.Options;
 global using Tnzi.AI;
 global using Tnzi.AI.Dtos;
 global using Tnzi.Application;
+global using Tnzi.Extensions;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Results;

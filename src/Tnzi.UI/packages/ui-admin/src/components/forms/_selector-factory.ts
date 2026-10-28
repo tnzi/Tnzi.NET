@@ -1,5 +1,7 @@
 import { defineComponent, h, ref, computed, onMounted, watch, type PropType } from 'vue'
 import { NSelect } from 'naive-ui'
+import { useSafeMessage } from '@tnzi/ui'
+import { useDebounced } from '@tnzi/core/headless'
 
 export interface SelectorOption {
   label: string
@@ -22,6 +24,11 @@ export type SelectorSize = 'tiny' | 'small' | 'medium' | 'large'
  * (the bug that made callers hand-roll their own `NSelect` instead of reusing
  * these). Also ships `clearable` + a pass-through `size` so the selectors sit
  * cleanly inside `size="small"` chrome and forms.
+ *
+ * Only the latest search fills the list: an earlier keyword answering after a
+ * later one would show results that no longer match what was typed. A refused
+ * search says why, and a search still waiting on its debounce is dropped when
+ * the selector goes away.
  */
 export function createSelectorComponent(name: string) {
   return defineComponent({
@@ -46,28 +53,31 @@ export function createSelectorComponent(name: string) {
       // Every option ever seen, keyed by value - so selected-but-not-in-results
       // values can be re-hydrated with their label (see component doc).
       const seen = new Map<string, SelectorOption>()
-      let searchTimer: ReturnType<typeof setTimeout> | null = null
+      const message = useSafeMessage()
+      let loadSeq = 0
 
       function remember(opts: SelectorOption[]): void {
         for (const o of opts) seen.set(String(o.value), o)
       }
 
       async function load(keyword: string): Promise<void> {
+        const seq = ++loadSeq
         loading.value = true
         try {
           const opts = await props.fetcher(keyword)
+          if (seq !== loadSeq) return
           remember(opts)
           results.value = opts
         }
+        catch (e) {
+          if (seq === loadSeq) message.error(e instanceof Error ? e.message : String(e))
+        }
         finally {
-          loading.value = false
+          if (seq === loadSeq) loading.value = false
         }
       }
 
-      function onSearch(keyword: string): void {
-        if (searchTimer) clearTimeout(searchTimer)
-        searchTimer = setTimeout(() => void load(keyword), 300)
-      }
+      const onSearch = useDebounced((keyword: string) => void load(keyword))
 
       // Current results + any selected values missing from them (re-added with
       // their remembered label so multi-select tags never collapse to ids).

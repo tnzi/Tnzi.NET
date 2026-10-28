@@ -314,4 +314,37 @@ public class FaxConfirmationTests : IntegrationTestBase
         result.Data.ShouldBeFalse();
         (await ReadRecipientAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
     }
+
+    /// <summary>
+    /// ★★ A broadcast that is still going (or still has recipients deferred by quiet hours) is not finished:
+    /// a failure confirmation for one fax must not stamp it PartiallySent. The stalled-batch pass only resumes
+    /// Sending messages and the deferred pass only Scheduled ones, so the recipients still Pending would
+    /// never be sent, and the running send loop would read the new status as "no longer mine" and stop.
+    /// </summary>
+    [Theory]
+    [InlineData(NotificationStatus.Sending)]
+    [InlineData(NotificationStatus.Scheduled)]
+    public async Task AFailureConfirmation_ForAMessageThatIsNotFinished_LeavesItsStatusAlone(NotificationStatus inFlight)
+    {
+        var messageId = await SeedSentFaxAsync();
+        await DbContext.Messages.Where(m => m.Id == messageId)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, inFlight));
+        DbContext.Recipients.Add(new Recipient
+        {
+            MessageId = messageId,
+            Address = "+1 (905) 555-0000",
+            Status = NotificationStatus.Pending
+        });
+        await DbContext.SaveChangesAsync();
+        DbContext.ChangeTracker.Clear();
+
+        var result = await ApplyAsync(Failure());
+
+        result.Data.ShouldBeTrue(result.Message);
+        DbContext.ChangeTracker.Clear();
+        var message = await DbContext.Messages.AsNoTracking().SingleAsync(m => m.Id == messageId);
+        message.Status.ShouldBe(inFlight);
+        message.FailureCount.ShouldBe(1);
+        message.SuccessCount.ShouldBe(0);
+    }
 }

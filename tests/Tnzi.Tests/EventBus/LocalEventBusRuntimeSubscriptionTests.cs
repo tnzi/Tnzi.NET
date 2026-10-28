@@ -174,7 +174,7 @@ public class LocalEventBusRuntimeSubscriptionTests
 
         Assert.Equal(0, recorder.Calls);
         logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(nameof(UnconstructibleHandler))),
+            It.Is<It.IsAnyType>((v, _) => v != null && v.ToString()!.Contains(nameof(UnconstructibleHandler))),
             It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.AtLeastOnce);
     }
 

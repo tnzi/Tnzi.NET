@@ -25,15 +25,18 @@ public class InvoiceFileReferenceAccessResolver : IFileReferenceAccessResolver
     private readonly ICurrentUser _currentUser;
     private readonly IReadOnlyRepository<Invoice, Guid> _invoices;
     private readonly IPermissionChecker? _permissionChecker;
+    private readonly IBillingAccountResolver? _accountResolver;
 
     public InvoiceFileReferenceAccessResolver(
         ICurrentUser currentUser,
         IReadOnlyRepository<Invoice, Guid> invoices,
-        IPermissionChecker? permissionChecker = null)
+        IPermissionChecker? permissionChecker = null,
+        IBillingAccountResolver? accountResolver = null)
     {
         _currentUser = Check.NotNull(currentUser);
         _invoices = Check.NotNull(invoices);
         _permissionChecker = permissionChecker;
+        _accountResolver = accountResolver;
     }
 
     public bool CanHandle(string entityType) => entityType == nameof(Invoice);
@@ -48,8 +51,17 @@ public class InvoiceFileReferenceAccessResolver : IFileReferenceAccessResolver
         if (invoice == null)
             return false;
 
-        if (invoice.UserId == userId)
+        // 发票记在调用者所代表、且他能查看的那个计费账户上（默认的 User 范围下就是他自己）
+        if (_accountResolver != null && BillingAccountRef.From(invoice.BillingAccountType, invoice.BillingAccountId) is { } account)
+        {
+            var access = await _accountResolver.ResolveAsync(userId.Value, cancellationToken);
+            if (access is { CanView: true } && access.Account == account)
+                return true;
+        }
+        else if (invoice.UserId == userId)
+        {
             return true;
+        }
 
         return _permissionChecker != null
                && await _permissionChecker.IsGrantedAsync(InvoiceViewPermission);

@@ -142,6 +142,20 @@ const overallLabel = computed(() => {
   return report.value?.status ?? t('overall.unknown')
 })
 
+/**
+ * The URL of a `/health*` endpoint. They are mapped at the API host's root,
+ * outside the API prefix, so HttpClient's baseUrl does not apply as is; only its
+ * origin does. A relative baseUrl (`/api`) means the API shares the admin's
+ * origin and the path stays relative. An absolute one
+ * (`https://api.example.com/api`) puts the API on another origin, and probing
+ * the admin's own origin there reaches the SPA host instead of the API.
+ */
+function healthUrl(path: string): string {
+  const base = client.resolveUrl?.('') ?? ''
+  const origin = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/i.exec(base)?.[0] ?? ''
+  return origin + path
+}
+
 function formatMs(v: number | undefined | null): string {
   if (v == null) return EMPTY_DASH
   if (v >= 1000) return `${(v / 1000).toFixed(2)} s`
@@ -187,21 +201,24 @@ async function refresh(): Promise<void> {
   loading.value = true
   unavailable.value = false
   try {
-    // `/health*` lives outside the `/api` prefix, so HttpClient's
-    // baseUrl + ApiResult unwrap pipeline doesn't apply. We use raw
-    // fetch but forward the admin bearer token in case the consumer
-    // protects /health behind auth (Tnzi.HealthChecks defaults to
+    // `/health*` lives outside the `/api` prefix, so HttpClient's ApiResult
+    // unwrap pipeline doesn't apply. We use raw fetch (against the API's
+    // origin, see healthUrl) but forward the admin bearer token in case the
+    // consumer protects /health behind auth (Tnzi.HealthChecks defaults to
     // anonymous, but a deployment can wrap MapHealthChecks with
-    // .RequireAuthorization()). `credentials: 'include'` covers cookie
-    // auth. For cross-origin deployments (admin on a different host than
-    // the API) consumers must either proxy /health* in their dev/prod
-    // gateway (see the consumer's vite.config.ts) or override the endpoint
-    // via the route prop.
+    // .RequireAuthorization()). `credentials: 'include'` covers cookie auth.
+    // An API served under a path base (`https://host/app/api`) is not
+    // derivable from the baseUrl; such a deployment proxies /health* at the
+    // admin's origin instead.
     const token = client.getAccessToken?.() ?? null
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (token) headers.Authorization = `Bearer ${token}`
-    const res = await fetch(endpoint.value, { credentials: 'include', headers })
-    if (res.status === 404) {
+    const res = await fetch(healthUrl(endpoint.value), { credentials: 'include', headers })
+    // An HTML answer is never a health report: it is an SPA fallback route or a
+    // proxy's error page, and shown as the status it would put a whole page
+    // of markup where "Healthy" goes.
+    const isHtml = (res.headers.get('content-type') ?? '').toLowerCase().includes('text/html')
+    if (res.status === 404 || isHtml) {
       unavailable.value = true
       report.value = null
     } else {

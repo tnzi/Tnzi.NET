@@ -51,6 +51,11 @@ public class Refund : MultiTenantAuditedEntity<Guid>
     public string? ExternalRefundNo { get; set; }
 
     /// <summary>
+    /// 退款从哪里来：本模块发起，还是在渠道后台手工退的（经渠道回调记下，不走审批、不占每日限额）。
+    /// </summary>
+    public RefundOrigin Origin { get; set; }
+
+    /// <summary>
     /// 审批人ID
     /// </summary>
     public Guid? ApproverId { get; set; }

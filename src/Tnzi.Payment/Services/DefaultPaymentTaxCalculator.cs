@@ -57,7 +57,20 @@ public class DefaultPaymentTaxCalculator : IPaymentTaxCalculator
             TaxAmount = taxAmount,
             PayableAmount = payableAmount,
             TaxRate = rate,
-            TaxIncluded = options.TaxIncluded
+            TaxIncluded = options.TaxIncluded,
+            // 单一税率：一行，金额就是全部税额，收据上印「{Name} {rate}%」与登记号
+            TaxLines = taxAmount > 0
+                ?
+                [
+                    new TaxLineDto
+                    {
+                        Name = string.IsNullOrWhiteSpace(options.Name) ? "Tax" : options.Name.Trim(),
+                        Rate = rate,
+                        Amount = taxAmount,
+                        RegistrationNumber = string.IsNullOrWhiteSpace(options.RegistrationNumber) ? null : options.RegistrationNumber.Trim()
+                    }
+                ]
+                : []
         }));
     }
 }

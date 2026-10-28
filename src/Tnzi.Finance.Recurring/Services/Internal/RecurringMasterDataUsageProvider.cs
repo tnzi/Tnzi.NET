@@ -1,7 +1,7 @@
 namespace Tnzi.Finance.Recurring.Services.Internal;
 
 /// <summary>
-/// 周期性模板对 <see cref="IMasterDataUsageProvider"/> 的实现：模板也在引用客户 / 供应商 / 目录项 / 科目，
+/// 周期性模板对 <see cref="IMasterDataUsageProvider"/> 的实现：模板也在引用客户 / 供应商 / 目录项 / 科目 / 税码，
 /// 核心的删除守卫要问得到它们。
 /// </summary>
 /// <remarks>
@@ -64,6 +64,11 @@ public class RecurringMasterDataUsageProvider : IMasterDataUsageProvider
                 var onLine = onTemplate || await LineOfLiveTemplateAsync(l => l.AccountId == id, cancellationToken);
                 return onLine
                     ? new MasterDataUsage("Cannot delete an account a recurring template posts to. End or edit the template first.")
+                    : null;
+
+            case FinanceMasterDataKind.TaxCode:
+                return await LineOfLiveTemplateAsync(l => l.TaxCodeId == id, cancellationToken)
+                    ? new MasterDataUsage("Cannot delete a tax code referenced by a recurring template line. End or edit the template first, or deactivate the tax code instead.")
                     : null;
 
             default:

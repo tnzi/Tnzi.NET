@@ -5,7 +5,7 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 /// </summary>
 /// <remarks>
 /// 配置项：
-/// - routerAgentId: 路由器 Agent ID（可选）
+/// - routerAgentId: 路由器 Agent ID（可选；缺失时用步骤的 AgentId）
 /// - routes: JSON 字典，格式 {"routeKey": "描述"}，如 {"technical": "技术问题", "billing": "账单问题"}
 /// </remarks>
 public class RouterNode : IWorkflowNode
@@ -40,23 +40,24 @@ public class RouterNode : IWorkflowNode
             };
         }
 
-        // 构建输入
+        // 构建输入（数据，不做模板替换）
         var inputText = WorkflowNodeHelper.CollectInput(context);
-        inputText = state.ResolveTemplate(inputText);
 
-        // 构建路由提示
-        var routerPrompt = BuildRouterPrompt(step.Instructions, inputText, routes);
+        // 构建路由提示：作者写的指令是模板，替换后放进提示
+        var routerPrompt = BuildRouterPrompt(WorkflowNodeHelper.ResolveInstructions(step, state), inputText, routes);
 
-        var routerAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "routerAgentId");
+        var routerAgentId = WorkflowNodeHelper.ResolveNodeAgentId(step, config, "routerAgentId");
 
+        // 系统提示词：选了 Agent 用它自己的，否则用节点缺省；「只回路由键」的要求在用户消息里
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: routerAgentId,
             serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
-            instructions: "You are a router. Classify the input and respond with ONLY the route key, nothing else.",
+            instructions: null,
             name: step.StepId ?? "router-node",
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            fallbackInstructions: "You are a router. Classify the input and respond with ONLY the route key, nothing else.");
 
         var messages = new List<ChatMessage> { new(ChatRole.User, routerPrompt) };
         var response = await executor.ExecuteAsync(messages, cancellationToken);

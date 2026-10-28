@@ -11,10 +11,10 @@
 import { computed, ref } from 'vue'
 import { Icon } from '@iconify/vue'
 import { NInput, NPopover, NEmpty } from 'naive-ui'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 
 const t = (key: string, fallback: string) =>
-  translatePageKey('', key) || fallback
+  translateChromeKey(key, fallback)
 
 interface Props {
   value?: string

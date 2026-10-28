@@ -58,8 +58,8 @@ public class EnvelopeConfiguration : EntityTypeConfigurationBase<Envelope, Guid>
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(r => r.HostEntityType).HasMaxLength(60);
-        builder.Property(r => r.Title).IsRequired().HasMaxLength(200);
+        builder.Property(r => r.HostEntityType).HasMaxLength(SigningLimits.MaxHostEntityTypeLength);
+        builder.Property(r => r.Title).IsRequired().HasMaxLength(SigningLimits.MaxTitleLength);
         builder.Property(r => r.Sha256).HasMaxLength(64);
         builder.Property(r => r.SentByName).HasMaxLength(160);
 
@@ -78,9 +78,9 @@ public class SignerConfiguration : EntityTypeConfigurationBase<Signer, Guid>
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(r => r.Role).IsRequired().HasMaxLength(60);
-        builder.Property(r => r.Name).IsRequired().HasMaxLength(160);
-        builder.Property(r => r.Email).HasMaxLength(256);
+        builder.Property(r => r.Role).IsRequired().HasMaxLength(SigningLimits.MaxRoleLength);
+        builder.Property(r => r.Name).IsRequired().HasMaxLength(SigningLimits.MaxSignerNameLength);
+        builder.Property(r => r.Email).HasMaxLength(SigningLimits.MaxEmailLength);
         builder.Property(r => r.TokenHash).HasMaxLength(64);
         builder.Property(r => r.SignerIp).HasMaxLength(64);
         // 匿名端点收进来的自由文本：列上限与服务侧的校验 / 截断取同一个常量
@@ -115,7 +115,7 @@ public class FieldValueConfiguration : EntityTypeConfigurationBase<FieldValue, G
     {
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
-        builder.Property(v => v.FieldKey).IsRequired().HasMaxLength(80);
+        builder.Property(v => v.FieldKey).IsRequired().HasMaxLength(SigningLimits.MaxFieldKeyLength);
         // 匿名收件人写入、又会被画进成品的值：上限见 SigningLimits。
         builder.Property(v => v.Value).HasMaxLength(SigningLimits.MaxFieldValueLength);
 

@@ -64,7 +64,8 @@ public class WorkspaceServiceUnitTests
             TestFileAccessAuthorizer.AllowAll(),
             new FileAccessGrantContext(),
             new StaticOptionsMonitor<StorageOptions>(_options),
-            _mockServiceProvider.Object);
+            _mockServiceProvider.Object,
+            new RecycleBinLookup(new Mock<IRepository<RecycleBinEntry, Guid>>().Object, new Mock<IRepository<FileFolder, Guid>>().Object));
     }
 
     private FileChunkUploadService CreateChunkUploadService()
@@ -76,7 +77,9 @@ public class WorkspaceServiceUnitTests
             _mockStorage.Object,
             new StaticOptionsMonitor<StorageOptions>(_options),
             _mockServiceProvider.Object,
-            Guard());
+            Guard(),
+            UnlimitedStorageQuota.Instance,
+            new Mock<IRepository<FileFolder, Guid>>().Object);
     }
 
     #region 文件分享测试（FileShareService）

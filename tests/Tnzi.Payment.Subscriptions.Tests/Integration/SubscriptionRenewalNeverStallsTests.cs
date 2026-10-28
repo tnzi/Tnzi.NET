@@ -21,12 +21,17 @@ public class SubscriptionRenewalNeverStallsTests : SubscriptionsIntegrationTestB
             : ActivatorUtilities.CreateInstance<DefaultPaymentTaxCalculator>(sp));
 
         // 一个建了单才拒付的渠道：失败经 ApplyFailedAsync 落库并发出 PaymentFailedEvent。
+        // 拒付按渠道契约回报为「成功拿到一个失败结果」；渠道返回失败是「结果未知」，那条路径见 SubscriptionChargeInFlightTests。
         var declining = new Mock<IPaymentProvider>();
         declining.SetupGet(p => p.ChannelCode).Returns(DecliningChannel);
         declining.SetupGet(p => p.ChannelName).Returns(DecliningChannel);
         declining.SetupGet(p => p.SupportsOffSessionCharge).Returns(true);
         declining.Setup(p => p.ChargeOffSessionAsync(It.IsAny<PaymentProviderChargeDto>()))
-            .ReturnsAsync(Result<PaymentProviderChargeResult>.Failure("card_declined"));
+            .ReturnsAsync(Result.Success(new PaymentProviderChargeResult
+            {
+                Status = PaymentStatus.Failed,
+                FailReason = "card_declined"
+            }));
         services.AddScoped(_ => declining.Object);
         services.Configure<PaymentOptions>(o => o.Channels[DecliningChannel] = new ChannelOptions { Enabled = true, Currency = "USD" });
     }

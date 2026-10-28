@@ -137,7 +137,8 @@ public class KafkaConsumerOptions
     /// <summary>
     /// 是否启用死信投递（默认: true）。
     /// 启用时：重试耗尽后将原始消息投递到死信主题并提交偏移量（毒消息移走、分区继续推进）。
-    /// 禁用时：重试耗尽后不提交偏移量，等待重投（at-least-once，绝不静默丢弃）。
+    /// 禁用时：重试耗尽后不提交偏移量，Seek 回这条消息，分区卡在这里重试直到处理器恢复（at-least-once，绝不静默丢弃）。
+    /// 启用但死信投递失败时同样卡住分区。
     /// </summary>
     public bool DeadLetterEnabled { get; set; } = true;
 

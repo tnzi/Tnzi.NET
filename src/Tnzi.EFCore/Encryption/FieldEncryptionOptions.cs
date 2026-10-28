@@ -23,6 +23,11 @@ namespace Tnzi.EFCore.Encryption;
 public class FieldEncryptionOptions
 {
     /// <summary>
+    /// 密钥标识的最大长度。标识写进每一条密文，<c>IsEncrypted()</c> 放宽列长时按这个上限预留。
+    /// </summary>
+    public const int MaxKeyIdLength = 64;
+
+    /// <summary>
     /// 是否启用字段级加密。默认 <c>false</c>。
     /// </summary>
     /// <remarks>
@@ -45,4 +50,34 @@ public class FieldEncryptionOptions
     /// 不要写进随代码提交的 appsettings.json。
     /// </remarks>
     public Dictionary<string, string> Keys { get; set; } = [];
+
+    /// <summary>
+    /// 主密钥文件路径(JSON,格式见模块文档「字段级加密」)。可与 <see cref="Keys"/> 并用,二者的密钥标识不得重复。
+    /// </summary>
+    /// <remarks>
+    /// 建议用绝对路径(相对路径按进程工作目录解析)。启用且文件缺失或格式错误时,应用启动失败并指出原因。
+    /// 密钥材料不进数据库、不进随机器同步的配置,是这个来源存在的理由。
+    /// </remarks>
+    public string? KeyFile { get; set; }
+
+    /// <summary>
+    /// 加密形态。默认 <see cref="FieldEncryptionMode.Direct"/>:切到 <see cref="FieldEncryptionMode.Envelope"/> 会让密文变长,
+    /// <c>IsEncrypted()</c> 放宽的列长随之变化,需要一次迁移。
+    /// </summary>
+    public FieldEncryptionMode Mode { get; set; } = FieldEncryptionMode.Direct;
+}
+
+/// <summary>
+/// 字段加密的形态。
+/// </summary>
+public enum FieldEncryptionMode
+{
+    /// <summary>每个值直接用密钥环里的密钥加密,密文 <c>{keyId}:{v2:...}</c>。</summary>
+    Direct = 0,
+
+    /// <summary>
+    /// 信封加密:每个值用一把新生成的随机数据密钥加密,数据密钥再被密钥环里的主密钥封装,封装后的数据密钥随密文存放,
+    /// 密文 <c>{keyId}:e1:{封装的数据密钥}:{载荷}</c>。
+    /// </summary>
+    Envelope = 1
 }

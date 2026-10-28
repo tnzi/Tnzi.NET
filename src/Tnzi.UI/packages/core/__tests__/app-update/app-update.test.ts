@@ -12,7 +12,11 @@ import {
 type Guard = (to: AppUpdateRoute, from: AppUpdateRoute) => boolean | void;
 type ErrorHandler = (error: unknown, to: AppUpdateRoute, from: AppUpdateRoute) => void;
 
-function fakeRouter() {
+/**
+ * `history: 'web'` resolves like `createWebHistory('/app/')`; `'hash'` like
+ * `createWebHashHistory()`, whose `href` is a bare fragment (`#/orders`).
+ */
+function fakeRouter(history: 'web' | 'hash' = 'web') {
   const guards: Guard[] = [];
   const errorHandlers: ErrorHandler[] = [];
   return {
@@ -27,7 +31,7 @@ function fakeRouter() {
       return () => errorHandlers.splice(errorHandlers.indexOf(handler), 1);
     },
     resolve(to: string) {
-      return { href: `/app${to}` };
+      return { href: history === 'hash' ? `#${to}` : `/app${to}` };
     },
     navigate(to: string, from = '/home'): boolean | void {
       let result: boolean | void;
@@ -169,6 +173,43 @@ describe('installAppUpdate', () => {
 
     expect(router.navigate('/orders')).toBe(false);
     expect(assign).toHaveBeenCalledWith(new URL('/app/orders', window.location.href).href);
+  });
+
+  describe('with hash history', () => {
+    // Every hash-router target differs from the current document only by its
+    // fragment. `location.assign` on such a URL is a same-document fragment
+    // navigation: no new shell is fetched, while the guard has already
+    // cancelled the navigation and marked the page as leaving, so every later
+    // navigation was cancelled too until a manual refresh.
+    let pushState: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      pushState = vi.fn();
+      vi.spyOn(window.history, 'pushState').mockImplementation(pushState);
+    });
+
+    it('reloads the document into the next navigation target', async () => {
+      fetchMock.mockImplementation(async () => htmlResponse(shell('/assets/index-new.js')));
+      const router = fakeRouter('hash');
+      handle = installAppUpdate({ router });
+      await handle.checkNow();
+
+      expect(router.navigate('/orders')).toBe(false);
+      const target = new URL('#/orders', window.location.href).href;
+      expect(pushState).toHaveBeenCalledWith(null, '', target);
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(assign).not.toHaveBeenCalled();
+    });
+
+    it('reloads the document when a lazy route chunk fails', () => {
+      const router = fakeRouter('hash');
+      handle = installAppUpdate({ router });
+      router.fail(new TypeError('Failed to fetch dynamically imported module: /assets/Orders-1.js'), '/orders');
+
+      expect(pushState).toHaveBeenCalledWith(null, '', new URL('#/orders', window.location.href).href);
+      expect(reload).toHaveBeenCalledTimes(1);
+      expect(assign).not.toHaveBeenCalled();
+    });
   });
 
   it('does not reload twice for the same remote build (stale cached shell)', async () => {

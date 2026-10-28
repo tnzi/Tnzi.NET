@@ -90,6 +90,7 @@ export const DEFAULT_ROUTE_ICONS: Record<string, string> = {
   // ── Payment sub-routes ──────────────────────────────────────────
   'payment.orders': 'mdi:cart-outline',
   'payment.subscriptions': 'mdi:credit-card-clock-outline',
+  'payment.subscriptionPlans': 'mdi:tag-multiple-outline',
   'payment.refunds': 'mdi:cash-refund',
   'payment.statistics': 'mdi:chart-line',
   'payment.invoices': 'mdi:file-document-outline',

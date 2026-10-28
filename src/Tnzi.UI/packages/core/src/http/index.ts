@@ -5,8 +5,14 @@
  */
 
 // HTTP Client
-export { HttpClient, createHttpClient, DEFAULT_REQUEST_TIMEOUT, REQUEST_TIMEOUT_ERROR_CODE } from './http';
-export type { HttpClientConfig, RetryConfig, DownloadOptions } from './http';
+export {
+  HttpClient,
+  createHttpClient,
+  DEFAULT_REQUEST_TIMEOUT,
+  REQUEST_TIMEOUT_ERROR_CODE,
+  REQUEST_PATH_REJECTED_ERROR_CODE,
+} from './http';
+export type { HttpClientConfig, RetryConfig, DownloadOptions, HttpResultContext, HttpResultListener } from './http';
 
 // Auth challenges (401s that are not session expiry)
 export { STEP_UP_REQUIRED, DEFAULT_AUTH_CHALLENGE_CODES } from './auth-challenge';

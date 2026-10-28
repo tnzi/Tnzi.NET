@@ -413,6 +413,14 @@ export interface UserSessionDto {
    * renewals never push it. Null means the deployment set no absolute cap.
    */
   absoluteExpiresAt?: Date | string | null;
+  /**
+   * Grouping key of a delegated session - one the application issued for
+   * another device rather than one a sign-in created. Null for ordinary
+   * sessions. The session ends at `absoluteExpiresAt` at the latest.
+   */
+  groupKey?: string | null;
+  /** Display name the application gave a delegated session; null otherwise. */
+  label?: string | null;
   isRevoked: boolean;
   revokedAt?: Date | string | null;
 }
@@ -989,10 +997,23 @@ export interface OAuthCallbackResultDto {
    * Also carries `IDENTITY_OAUTH_LINK_CONFIRMATION_REQUIRED`: the provider's email
    * was not asserted as verified, so it was NOT auto-linked to the existing local
    * account. Tell the user to sign in normally and link from their profile.
+   *
+   * And `IDENTITY_OAUTH_REGISTRATION_DISABLED`: the identity matches no local
+   * account and the deployment does not create accounts from third-party
+   * sign-ins (`Identity:Registration:EnableOAuthRegistration`, off by default).
+   * Tell the user to ask for an invitation, then link this provider from their profile.
    */
   errorCode?: string | null;
   /** Envelope details for the code above (challenge temp token, supported methods, …). */
   errorDetails?: unknown;
+  /** Set when the callback was an account *link* (lower-cased provider); no tokens are issued then. */
+  linkedProvider?: string | null;
+  /**
+   * One-time completion code of a link callback. Nothing is linked yet: the page
+   * that started the link must hand it back as the signed-in user through
+   * `useProfileApi().completeOAuthLink` (see {@link OAuthLinkTokenDto}).
+   */
+  linkCode?: string | null;
 }
 
 /**
@@ -1024,12 +1045,25 @@ export interface UserLoginDto {
  * The OAuth start and callback endpoints are anonymous full-page navigations
  * with no bearer on them, so this token is the only way the callback learns
  * who is linking. Pass `token` as `linkToken` to `oauthLoginUrl`.
+ *
+ * The callback does NOT link: a link token is just a URL parameter, so linking
+ * there would let anyone send a victim a start link and attach the victim's
+ * provider identity to their own account. The callback stages the identity and
+ * hands back a one-time completion code (`#linkCode=…&linkedProvider=…` on the
+ * return URL, or `linkCode` in the `oauth-callback` message to an opener); the
+ * page then calls `completeOAuthLink` as the signed-in user, and the link only
+ * happens when that user is the one who issued the token.
  */
 export interface OAuthLinkTokenDto {
   token: string;
   /** Lower-cased provider the token is bound to. */
   provider: string;
   expiresAt: string;
+}
+
+/** Finish an account link with the code the OAuth callback handed back. */
+export interface CompleteOAuthLinkDto {
+  code: string;
 }
 
 // ============================================
@@ -1447,6 +1481,14 @@ export interface InvitationPreviewDto {
   maskedPhoneNumber?: string | null;
   expiresAt: Date | string;
   profile?: Record<string, unknown> | null;
+}
+
+/**
+ * Read an invitation's preview. The token goes in the request body, not the URL,
+ * so it never lands in request or access logs.
+ */
+export interface PreviewInvitationDto {
+  token: string;
 }
 
 /** Accept an invitation. */

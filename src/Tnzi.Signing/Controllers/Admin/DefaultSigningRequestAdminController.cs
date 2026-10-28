@@ -42,8 +42,8 @@ public class DefaultSigningRequestAdminController : ApiAdminControllerBase
     /// 发出：签发一次性链接。
     /// </summary>
     /// <remarks>
-    /// ★ 明文令牌**只在这一次响应里出现**（库里存的是哈希）。调用方拿到就要发出去 ——
-    /// 丢了只能重发，重发会作废旧链接。
+    /// ★ 明文令牌**只在这一次响应里出现**（库里存的是哈希）。调用方拿到就要发出去：
+    /// 只有草稿能发出，丢了的链接补发不了，只能作废这份请求、重新发起。
     /// </remarks>
     [HttpPost("{id:guid}/send")]
     [ApiAuthorize(PermissionName = "signing.request.update")]
@@ -59,7 +59,7 @@ public class DefaultSigningRequestAdminController : ApiAdminControllerBase
 
     /// <summary>
     /// 重新密封：收件人已全部签完、而最后那次提交里的密封失败（请求停在 InProgress）时的恢复动作。
-    /// 已密封的请求拒绝再密封（哈希只算一次）。
+    /// 已完成的请求不再密封（哈希只算一次），只补做完成证书（缺失时）与宿主归档。
     /// </summary>
     [HttpPost("{id:guid}/seal")]
     [ApiAuthorize(PermissionName = "signing.request.update")]

@@ -28,7 +28,13 @@ public class PresenceService : ApplicationService, IPresenceService
 
     public async Task<Result> SetStatusAsync(UserPresenceStatus status)
     {
-        // Offline 不作为手动意图；越界回落 Online。
+        // 只接受定义过的状态：序列化器接受任意整数，0 或 99 此前原样落库，每个消费方都把它渲染成一个不认识的状态。
+        if (!Enum.IsDefined(status))
+        {
+            return Fail("Status must be one of Online, Away, Busy or Invisible.", 400, ErrorCodes.VALIDATION_ERROR);
+        }
+
+        // Offline 不作为手动意图，按 Online 处理。
         if (status == UserPresenceStatus.Offline) status = UserPresenceStatus.Online;
 
         // 部署禁用隐身时拒绝隐身意图（前端已隐藏该选项，此处为服务端强制）。
@@ -40,13 +46,20 @@ public class PresenceService : ApplicationService, IPresenceService
         // 从「看得见」切到隐身时，把最后可见时刻定在此刻 —— 对旁观者而言，隐身就是下线。
         // 判定要拿切换**之前**旁观者看到的状态说话（见 IsGoingDark 的 remarks：只看新意图会
         // 在隐身期间反复盖章，也会把本来就离线的人往后推），因此这里先解析一次有效状态。
-        var effectiveBefore = (await ResolveEffectiveAsync(new[] { me })).FirstOrDefault()?.Status
-            ?? UserPresenceStatus.Offline;
+        var before = (await ResolveEffectiveAsync(new[] { me })).FirstOrDefault();
+        var effectiveBefore = before?.Status ?? UserPresenceStatus.Offline;
         var goingDark = PresenceDisclosure.IsGoingDark(status, effectiveBefore);
 
         await UpsertAsync(me, p => PresenceDisclosure.ApplyIntent(p, status, DateTime.UtcNow, goingDark));
 
-        await NotifyChangedAsync(me);
+        // ★ 只在旁观者看到的东西（有效状态或最后可见时刻）真的变了时广播，与连接生灭同一判据。
+        //   此前无条件广播：已经隐身的人再点一次「隐身」，租户里每个人都收到一条「此人 Offline」的推送，
+        //   恰好告诉他们这个人此刻就在。看不见的变化（隐身中换意图、没连着时换意图）一律不出声。
+        var after = (await ResolveEffectiveAsync(new[] { me })).FirstOrDefault();
+        if (after != null && (after.Status != effectiveBefore || after.LastSeenAt != before?.LastSeenAt))
+        {
+            await PublishChangedAsync(after);
+        }
         return Ok();
     }
 
@@ -150,15 +163,19 @@ public class PresenceService : ApplicationService, IPresenceService
     {
         var dto = (await ResolveEffectiveAsync(new[] { userId })).FirstOrDefault();
         if (dto == null) return;
+        await PublishChangedAsync(dto);
+    }
+
+    /// <summary>把一个已解析的有效状态广播出去。</summary>
+    private Task PublishChangedAsync(UserPresenceDto dto)
         // 事件总线是本模块的扇出通道（Chat / 实时推送都订阅它），缺了 presence 就是哑的，
         // 因此这里要的是"必需"语义而不是静默跳过。
-        await GetRequiredEventBus().PublishAsync(new UserPresenceChangedEvent
+        => GetRequiredEventBus().PublishAsync(new UserPresenceChangedEvent
         {
-            UserId = userId,
+            UserId = dto.UserId,
             Status = dto.Status,
             LastSeenAt = dto.LastSeenAt
         });
-    }
 
     /// <summary>
     /// 每用户一行的乐观 upsert。★DbUpdateException race guard 必须**包裹整个** <c>ExecuteInUnitOfWorkAsync</c>

@@ -1,8 +1,10 @@
 <template>
+  <!-- The list endpoint takes no keyword: no free-text box, the filters stay. -->
   <TCrudPage
     :state="crud"
     :all-columns="columns"
     :search-fields="searchFields"
+    :show-default-search="false"
     :title="title"
     :row-actions="rowActions"
     :translate="t"
@@ -20,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { shallowRef, watch } from 'vue'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { usePermissionGuard } from '../../headless/usePermissionGuard'
@@ -31,7 +33,7 @@ import TFormSchemaRenderer, { selectRenderer } from '../_shared/form-schema'
 import { makePageTranslator } from '../_shared/translate'
 import { useSafeMessage } from '../_shared/safe-message'
 import { createFinanceOptionSources } from './options'
-import { tsToIsoDate } from './money'
+import { carriedExchangeRate, tsToIsoDate } from './money'
 import { buildTransferSearchFields, buildTransferColumns, transferFormSchema, type TransferRow } from './transfer-config'
 
 const bridge = createFinanceBridge({ client: useAdminClient() })
@@ -49,6 +51,15 @@ function normalizeCurrency(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim().toUpperCase() : null
 }
 
+/**
+ * The transfer as it was when the form opened. The form shows the target rate
+ * of a cross-currency transfer but not the source-side rate; a draft update
+ * replaces the transfer, so a manual source rate set through the API is sent
+ * back from here (while the currency is unchanged). Captured synchronously on
+ * open, before the operator can type into the cloned form data.
+ */
+const openedRecord = shallowRef<TransferRow | null>(null)
+
 function toPayload(d: Record<string, unknown>) {
   const currency = normalizeCurrency(d.currency)
   const targetCurrency = normalizeCurrency(d.targetCurrency)
@@ -60,6 +71,7 @@ function toPayload(d: Record<string, unknown>) {
     transferDate: typeof d.transferDate === 'number' ? tsToIsoDate(d.transferDate) : String(d.transferDate ?? ''),
     amount: Number(d.amount ?? 0),
     currency,
+    exchangeRate: openedRecord.value?.id === d.id ? carriedExchangeRate(openedRecord.value, currency) : null,
     targetCurrency: isCross ? targetCurrency : null,
     targetAmount: isCross ? Number(d.targetAmount ?? 0) : null,
     targetExchangeRate: isCross && d.targetExchangeRate != null && d.targetExchangeRate !== '' ? Number(d.targetExchangeRate) : null,
@@ -82,16 +94,26 @@ const crud = useCrudPage<TransferRow>({
   },
 })
 
+watch(
+  () => crud.formModal.formData.value,
+  (d) => {
+    openedRecord.value = d ? { ...d } : null
+  },
+  { flush: 'sync' },
+)
+
 const title = 'tnzi.admin.modules.finance.transfers.title'
 
+// Funds accounts only, not every leaf: the server resolves both sides through its
+// funds-account check, so any other account comes back a 400.
 const fieldRenderers = {
-  'finance-account': selectRenderer(() => sources.leafAccountOptions.value, { placeholder: t('form.accountPlaceholder'), clearable: false }),
+  'finance-account': selectRenderer(() => sources.fundsAccountOptions.value, { placeholder: t('form.accountPlaceholder'), clearable: false }),
 }
 
 watch(
   () => crud.formModal.visible.value,
   (open) => {
-    if (open) void sources.ensureLeafAccounts()
+    if (open) void sources.ensureFundsAccounts()
   },
   { immediate: true },
 )

@@ -2,14 +2,12 @@
 namespace Tnzi.AI.Channels.Adapters.Feishu;
 
 /// <summary>
-/// 飞书频道适配器 - 通过 HTTP REST API 收发消息，支持流式卡片更新。
+/// 飞书频道适配器 - 通过 HTTP REST API 收发消息。
 /// </summary>
 /// <remarks>
-/// 消息流程（对标 DeerFlow FeishuChannel）：
-/// 1. 用户发消息 → Webhook 接收
-/// 2. Bot 回复: "Processing..."
-/// 3. Agent 处理 → 返回结果
-/// 4. 飞书 .NET 生态较弱，直接使用 HTTP API 比依赖第三方 SDK 更可靠。
+/// 消息流程：用户发消息 → Webhook 接收 → Agent 处理 → 整条回复一次发出。
+/// 不做流式卡片更新，也不先回一条占位消息（IM 渠道的回复一律非流式，见 <see cref="SupportsStreaming"/>）。
+/// 飞书 .NET 生态较弱，直接使用 HTTP API 比依赖第三方 SDK 更可靠。
 /// </remarks>
 public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
 {
@@ -19,6 +17,13 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     private const string HeaderSignature = "X-Lark-Signature";
     private const int SignatureWindowSeconds = 300;
 
+    /// <summary>
+    /// 飞书出站请求用自己的命名客户端（与其它适配器一致），
+    /// 不共用 AI 提供商回退客户端：那条管线的熔断器会把飞书的故障计进 AI 调用，其重试还会与
+    /// <see cref="ChannelSendHelper"/> 的重试叠乘。
+    /// </summary>
+    internal const string HttpClientName = "Tnzi.AI.Feishu";
+
     private readonly ILogger<FeishuChannelAdapter> _logger;
     private readonly IChannelMessageBus _bus;
     private readonly FeishuAdapterOptions _options;
@@ -27,7 +32,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     private readonly TokenRefresher _tokenRefresher;
 
     public string Name => "feishu";
-    public bool SupportsStreaming => true;
+    public bool SupportsStreaming => false;
 
     /// <summary>此渠道 Bot 实例归属的租户（来自 adapter options；null = 单租户/全局）</summary>
     public Guid? TenantId => _options.TenantId;
@@ -318,6 +323,12 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
             if (!eventObj.TryGetProperty("message", out var msgObj)) return;
 
             var chatId = msgObj.GetProperty("chat_id").GetString() ?? "";
+            var peerKind = (msgObj.TryGetProperty("chat_type", out var chatTypeEl) ? chatTypeEl.GetString() : null) switch
+            {
+                "p2p" => ChannelPeerKinds.User,
+                "group" => ChannelPeerKinds.Group,
+                _ => null
+            };
             var senderId = eventObj.TryGetProperty("sender", out var sender)
                 ? sender.GetProperty("sender_id").GetProperty("open_id").GetString() ?? ""
                 : "";
@@ -341,7 +352,8 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
                 ChatId: chatId,
                 UserId: senderId,
                 Text: text,
-                Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat);
+                Type: isCommand ? InboundMessageType.Command : InboundMessageType.Chat,
+                PeerKind: peerKind);
 
             await _bus.PublishInboundAsync(inbound, ct);
         }
@@ -351,28 +363,78 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
         }
     }
 
-    public async Task SendAsync(OutboundMessage message, CancellationToken ct = default)
+    public Task SendAsync(OutboundMessage message, CancellationToken ct = default)
+    {
+        return ChannelSendHelper.SendChunkedWithRetryAsync(
+            message.Text,
+            _options.MaxMessageLength,
+            _options.MaxRetries,
+            (chunk, token) => PostMessageAsync(message.ChatId, chunk, token),
+            _logger,
+            Name,
+            ct);
+    }
+
+    /// <summary>
+    /// 发送一条文本消息。失败一律抛出，由 <see cref="ChannelSendHelper"/> 重试、出站管线记日志：
+    /// 飞书把多数业务错误（机器人不在群里、缺 im:message 权限）报成 HTTP 200 + 非 0 的 <c>code</c>，
+    /// 只看状态码会把这些回复当作已送达而静默丢掉。
+    /// </summary>
+    private async Task PostMessageAsync(string chatId, string text, CancellationToken ct)
     {
         var token = await _tokenRefresher.GetTokenAsync(ct);
-        var client = _httpClientFactory.CreateClient(ResilientHttpClientNames.Fallback);
+        var client = _httpClientFactory.CreateClient(HttpClientName);
 
         var payload = JsonSerializer.Serialize(new
         {
-            receive_id = message.ChatId,
+            receive_id = chatId,
             msg_type = "text",
-            content = JsonSerializer.Serialize(new { text = message.Text })
+            content = JsonSerializer.Serialize(new { text })
         });
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}/im/v1/messages?receive_id_type=chat_id");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
 
-        var response = await client.SendAsync(request, ct);
+        using var response = await client.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogWarning("Feishu send failed: {StatusCode} {Body}", response.StatusCode, body);
+            throw new HttpRequestException(
+                $"Feishu im/v1/messages returned HTTP {(int)response.StatusCode}: {body.Truncate(500)}",
+                null,
+                response.StatusCode);
+        }
+
+        var (code, msg) = ReadBusinessCode(body);
+        if (code != 0)
+        {
+            throw new HttpRequestException($"Feishu im/v1/messages rejected the message: code {code}, {msg}");
+        }
+    }
+
+    /// <summary>
+    /// 读飞书响应体里的业务码。读不出（不是 JSON、没有 code）按失败处理：成功的回复一定带 <c>code: 0</c>。
+    /// </summary>
+    private static (int Code, string? Message) ReadBusinessCode(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var message = root.TryGetProperty("msg", out var msgProp) && msgProp.ValueKind == JsonValueKind.String
+                ? msgProp.GetString()
+                : null;
+            return root.TryGetProperty("code", out var codeProp)
+                   && codeProp.ValueKind == JsonValueKind.Number
+                   && codeProp.TryGetInt32(out var code)
+                ? (code, message)
+                : (-1, "response carries no code");
+        }
+        catch (JsonException)
+        {
+            return (-1, "response is not JSON");
         }
     }
 
@@ -384,7 +446,7 @@ public class FeishuChannelAdapter : IChannelAdapter, IInboundWebhookAdapter
     /// </summary>
     private async Task<(string Token, int ExpiresInSeconds)> RefreshTenantAccessTokenAsync(CancellationToken ct)
     {
-        var client = _httpClientFactory.CreateClient(ResilientHttpClientNames.Fallback);
+        var client = _httpClientFactory.CreateClient(HttpClientName);
         var response = await client.PostAsJsonAsync(
             $"{BaseUrl}/auth/v3/tenant_access_token/internal",
             new { app_id = _options.AppId, app_secret = _options.AppSecret }, ct);

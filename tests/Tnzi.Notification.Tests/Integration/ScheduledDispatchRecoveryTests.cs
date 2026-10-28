@@ -150,21 +150,18 @@ public class ScheduledDispatchRecoveryTests : IntegrationTestBase
 
     // ── 认领是原子的 ─────────────────────────────────────────────────────────
 
-    /// <summary>一轮扫描认领之后，同一条不会被第二轮再认领一次。</summary>
+    /// <summary>一轮扫描认领并发出之后，同一条不会被第二轮再取一次。</summary>
     [Fact]
-    public async Task AMessageAlreadyClaimed_IsNotPickedUpAgain()
+    public async Task AMessageAlreadyResumed_IsNotPickedUpAgain()
     {
         var messageId = await SeedAsync(NotificationStatus.Scheduled, scheduledTime: MinutesAgo(60));
-        var service = NewService();
-        var repository = ServiceProvider.GetRequiredService<IRepository<Message, Guid>>();
-        var cutoff = MinutesAgo(15);
 
-        var first = await service.ClaimDueScheduledAsync(repository, cutoff, 50, CancellationToken.None);
+        await RecoverOnceAsync();
         DbContext.ChangeTracker.Clear();
-        var second = await service.ClaimDueScheduledAsync(repository, cutoff, 50, CancellationToken.None);
+        await RecoverOnceAsync();
 
-        first.ShouldBe([messageId]);
-        second.ShouldBeEmpty();
+        VerifySent(Times.Once());
+        (await ReloadAsync(messageId)).Status.ShouldBe(NotificationStatus.Sent);
     }
 
     /// <summary>
@@ -240,6 +237,52 @@ public class ScheduledDispatchRecoveryTests : IntegrationTestBase
         claimedMidFlight!.Value.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// ★★★ 一轮扫描不能先把整批都认领下来、再一条条慢慢发：排在后面的那些在等待期间就是一条
+    /// 「状态 Sending、时间戳停在认领那一刻」的消息，另一个实例的卡住扫描过了宽限就会合法地接手它：
+    /// 然后这一轮轮到它时照样发一遍。限速让一轮里前面的消息可以发上很久，这个窗口随之变宽。
+    /// </summary>
+    /// <remarks>
+    /// 探针在第一条消息的投递中途扮演另一个实例：按它自己的时钟（宽限已过）去认领第二条卡住的批次。
+    /// 它认领到了，这一轮就不能再发第二条；它认领不到（第二条还没被这一轮认领），这一轮照常发。
+    /// </remarks>
+    [Fact]
+    public async Task AMessageWaitingInThePass_IsNotSentAfterAnotherScannerTookItOver()
+    {
+        var first = await SeedAsync(NotificationStatus.Scheduled, scheduledTime: MinutesAgo(61));
+        var second = await SeedAsync(NotificationStatus.Scheduled, scheduledTime: MinutesAgo(60));
+
+        bool? otherInstanceClaimed = null;
+        var sends = 0;
+        _emailSender
+            .Setup(s => s.SendToAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<bool>(), It.IsAny<List<EmailAttachment>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                sends++;
+                if (otherInstanceClaimed == null)
+                {
+                    using var other = ServiceProvider.CreateScope();
+                    otherInstanceClaimed = NotificationDispatchBackgroundService
+                        .TryClaimStalledAsync(
+                            other.ServiceProvider.GetRequiredService<IRepository<Message, Guid>>(),
+                            second, DateTime.UtcNow.AddMinutes(1), CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+                return SendResult.CreateSuccess("stub-id");
+            });
+
+        await RecoverOnceAsync();
+
+        otherInstanceClaimed.ShouldNotBeNull("the probe never ran - the pass did not reach a recipient");
+        sends.ShouldBe(otherInstanceClaimed.Value ? 1 : 2,
+            otherInstanceClaimed.Value
+                ? "another scanner took the second message over, yet this pass still sent it"
+                : "the second message was neither taken over nor sent");
+        (await ReloadAsync(first)).Status.ShouldBe(NotificationStatus.Sent);
+    }
+
     /// <summary>对照：没人抢的时候认领必须成功（否则上一条是在验一个恒假的条件）。</summary>
     [Fact]
     public async Task AMessageNobodyGrabbed_IsClaimed()
@@ -260,7 +303,8 @@ public class ScheduledDispatchRecoveryTests : IntegrationTestBase
         var messageId = await SeedAsync(NotificationStatus.Scheduled, scheduledTime: MinutesAgo(60));
         var repository = ServiceProvider.GetRequiredService<IRepository<Message, Guid>>();
 
-        await NewService().ClaimDueScheduledAsync(repository, MinutesAgo(15), 50, CancellationToken.None);
+        (await NotificationDispatchBackgroundService.TryClaimScheduledAsync(repository, messageId, CancellationToken.None))
+            .ShouldBeTrue();
 
         var message = await ReloadAsync(messageId);
         message.Status.ShouldBe(NotificationStatus.Sending);
@@ -269,15 +313,15 @@ public class ScheduledDispatchRecoveryTests : IntegrationTestBase
 
     /// <summary>一轮里最多接手 RecoveryBatchSize 条 —— 否则一次积压能把发送账号打停。</summary>
     [Fact]
-    public async Task TheClaimRespectsTheBatchSize()
+    public async Task ThePassRespectsTheBatchSize()
     {
         for (var i = 0; i < 3; i++)
             await SeedAsync(NotificationStatus.Scheduled, scheduledTime: MinutesAgo(60 + i));
-        var repository = ServiceProvider.GetRequiredService<IRepository<Message, Guid>>();
+        _dispatch.RecoveryBatchSize = 2;
 
-        var claimed = await NewService().ClaimDueScheduledAsync(repository, MinutesAgo(15), batchSize: 2, CancellationToken.None);
+        await RecoverOnceAsync();
 
-        claimed.Count.ShouldBe(2);
+        VerifySent(Times.Exactly(2));
     }
 
     // ── 夹具 ─────────────────────────────────────────────────────────────────

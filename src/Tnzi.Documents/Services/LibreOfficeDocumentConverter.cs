@@ -19,8 +19,12 @@ namespace Tnzi.Documents.Services;
 /// <para><b>并发策略 = 全局串行（一个信号量 + 一个复用的 profile 目录），请不要"优化"成并发。</b>
 /// 实测：串行 6/6 全部成功、均摊 2.0s；4 路并发各自新建 profile 只成功 1/4，失败者退出码
 /// <c>0xC000041D</c>（STATUS_FATAL_USER_CALLBACK_EXCEPTION）；4 路共用一个 profile 成功 2/4，
-/// 失败者退出码 1 —— 冷 profile 的并发引导会崩。唯一能安全并发的形态是"预热过的 profile 池"
-/// （实测 4/4 通过），但转换是低频操作（只在管理员上传模板时发生），不值得为此增加复杂度。</para>
+/// 失败者退出码 1：冷 profile 的并发引导会崩。唯一能安全并发的形态是"预热过的 profile 池"
+/// （实测 4/4 通过），本包没有做。</para>
+/// <para>★ 串行是吞吐的硬上限：<c>Tnzi.Storage</c> 的 Office 预览每次请求都转换一次（不缓存结果），
+/// 浏览一批 Office 文件时所有预览都排在这一个槽位后面（每份约 1.4s 起）。排队因此有上界：
+/// 等满 <see cref="DocumentsOptions.ConversionTimeoutSeconds"/> 仍轮不到就抛可重试的
+/// <see cref="DocumentConversionException"/>，而不是无限期挂着；传入的取消令牌在排队时同样生效。</para>
 /// <para>计时基准：冷 profile 首次约 4.9s，之后暖启动约 1.4s，故默认超时 120s 足够宽裕。
 /// 超时会杀掉整棵进程树，否则会留下孤儿 <c>soffice.bin</c>。</para>
 /// </remarks>
@@ -28,9 +32,9 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
 {
     /// <summary>
     /// 进程级串行闸门。刻意是 static：即使 DI 生命周期变化或有人手工 new 出第二个实例，
-    /// 也仍然只有一路转换在跑（并发引导会崩，见类注释）。
+    /// 也仍然只有一路转换在跑（并发引导会崩，见类注释）。<c>internal</c> 只为测试能占住它。
     /// </summary>
-    private static readonly SemaphoreSlim ConversionGate = new(1, 1);
+    internal static readonly SemaphoreSlim ConversionGate = new(1, 1);
 
     /// <summary>转换用的临时工作目录根（逐次创建、用完即删）。</summary>
     private const string WorkRootName = "tnzi-doc-convert";
@@ -41,7 +45,7 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
     /// <summary>转换出来的中间文件基名，与上传文件名无关（见 <see cref="ConvertToPdfAsync"/>）。</summary>
     private const string WorkFileBaseName = "source";
 
-    private const int CapturedOutputLimit = 2000;
+    internal const int CapturedOutputLimit = 2000;
 
     private readonly IOptions<DocumentsOptions> _options;
     private readonly ILogger<LibreOfficeDocumentConverter> _logger;
@@ -107,7 +111,16 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
             var profileDirectory = EnsureProfileDirectory(options);
             var timeout = TimeSpan.FromSeconds(options.ConversionTimeoutSeconds);
 
-            await ConversionGate.WaitAsync(ct);
+            // 排队也以同一个超时为上界：一份慢文档能占满整个超时，其后的请求全排在它后面；
+            // 不设上界的话，调用方早已离开的请求还挂在队里，轮到时再完整跑一遍 soffice。
+            if (!await ConversionGate.WaitAsync(timeout, ct))
+            {
+                throw new DocumentConversionException(
+                    $"The document converter is busy: no conversion slot freed up within {options.ConversionTimeoutSeconds}s. " +
+                    "Conversions run one at a time; try again shortly.",
+                    isRetryable: true);
+            }
+
             try
             {
                 await RunAsync(executable, profileDirectory, inputPath, outputDirectory, timeout, ct);
@@ -205,10 +218,10 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
         {
             _logger.LogWarning(
                 "LibreOffice exited with code {ExitCode}. stdout: {StandardOutput} stderr: {StandardError}",
-                process.ExitCode, Truncate(output), Truncate(error));
+                process.ExitCode, TruncateCapturedOutput(output), TruncateCapturedOutput(error));
 
             throw new DocumentConversionException(
-                $"LibreOffice exited with code {process.ExitCode}. {Truncate(error)}".TrimEnd());
+                $"LibreOffice exited with code {process.ExitCode}. {TruncateCapturedOutput(error)}".TrimEnd());
         }
     }
 
@@ -253,12 +266,10 @@ public sealed class LibreOfficeDocumentConverter : IDocumentConverter
         }
     }
 
-    private static string Truncate(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return string.Empty;
-
-        var trimmed = value.Trim();
-        return trimmed.Length <= CapturedOutputLimit ? trimmed : trimmed[..CapturedOutputLimit] + "...";
-    }
+    /// <summary>
+    /// 进程输出写进日志与异常消息前的截断。截断点落在代理对中间时整个字符一起舍掉：
+    /// 文件名或文档内容里的 emoji 会被 LibreOffice 原样回显，半个代理项进了按严格 UTF-8 落库的日志汇点会让整批被拒。
+    /// </summary>
+    internal static string TruncateCapturedOutput(string? value)
+        => string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().Truncate(CapturedOutputLimit);
 }

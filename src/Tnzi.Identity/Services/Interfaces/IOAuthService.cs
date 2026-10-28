@@ -14,7 +14,7 @@ public interface IOAuthService
     Task<Result<OAuthCallbackResultDto>> HandleOAuthCallbackAsync(string provider, ClaimsPrincipal principal);
 
     /// <summary>
-    /// 关联OAuth账户到现有用户
+    /// 关联OAuth账户到现有用户。provider key 已属于另一个账号时 409，两边都不动。
     /// </summary>
     /// <param name="userId">用户ID</param>
     /// <param name="provider">提供者名称</param>
@@ -23,10 +23,15 @@ public interface IOAuthService
     Task<Result> LinkOAuthAccountAsync(Guid userId, string provider, string providerKey, string? displayName = null);
 
     /// <summary>
-    /// 个人中心发起的绑定在回调里的落地：把提供商证实的外部身份挂到<b>签发绑定令牌的那个账号</b>上。
+    /// 把一个提供商证实的外部身份挂到 <paramref name="userId"/> 上。
     /// 只做关联 —— 不签发令牌、不新建账号、不按邮箱认领；provider key 已属于另一个账号时 409。
     /// </summary>
-    /// <param name="userId">绑定令牌签发给的用户（<see cref="IOAuthLinkTokenService.ConsumeAsync"/> 的结果）</param>
+    /// <remarks>
+    /// ⚠ 调用方负责证明 <paramref name="userId"/> 就是正在完成这次授权的人。个人中心的绑定流程
+    /// 因此不在匿名回调里调它，而是把外部身份暂存（<see cref="IOAuthLinkTokenService.StagePendingLinkAsync"/>），
+    /// 等发起绑定的会话回来确认。
+    /// </remarks>
+    /// <param name="userId">要挂到的账号</param>
     /// <param name="provider">提供者名称（小写）</param>
     /// <param name="principal">提供商回调的 ClaimsPrincipal</param>
     Task<Result> LinkExternalLoginAsync(Guid userId, string provider, ClaimsPrincipal principal);

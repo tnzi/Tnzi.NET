@@ -137,7 +137,7 @@ export function createAuditBridge(deps: AuditBridgeDeps = {}): AuditBridge {
   // overridden by page-level filters.
   async function fetchAudit(query: CrudPageQuery, extra?: Partial<AuditOperationQueryDto>): Promise<CrudPageResult<AuditOperationDto>> {
     const params = { ...(mapQueryToListRequest(query) as unknown as AuditOperationQueryDto), ...extra }
-    const result = unwrap<{ items: AuditOperationDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+    const result = unwrapOk<{ items: AuditOperationDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
       await api.getList(params),
     )
     return pagedResult({
@@ -214,7 +214,7 @@ function buildRecordAccess(
         ...(mapQueryToListRequest(query) as unknown as RecordAccessQueryDto),
         ...(query.filters ?? {}),
       } as RecordAccessQueryDto
-      const result = unwrap<{ items: RecordAccessDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: RecordAccessDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await recordAccessApi.getList(params),
       )
       return pagedResult({
@@ -256,7 +256,7 @@ function buildDestruction(
         ...(mapQueryToListRequest(query) as unknown as DataDestructionQueryDto),
         ...(query.filters ?? {}),
       } as DataDestructionQueryDto
-      const result = unwrap<{ items: DataDestructionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: DataDestructionDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await destructionApi.getList(params),
       )
       return pagedResult({

@@ -70,11 +70,16 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
                 capsResult.ErrorCode ?? ErrorCodes.AgentRunFailed);
         }
 
+        // 在调用方作用域快照租户：HttpContext 派生的租户随父请求结束一起消失（holder 被置空），
+        // 后台作用域里的 ICurrentTenant 会读到 null，多租户下子运行写的每一行都落成 TenantId=null、
+        // 后续按租户过滤的查询取不到行。与 Channels 的 ChangeTenantScope 同形；单租户下 tenantId 为 null 不切换。
+        var tenantId = ServiceProvider.GetService<ICurrentTenant>()?.Id;
+
         // 归属人显式写进 CreatorId（审计钩子只在为 null 时才用环境用户填）：spawn_agent 在父运行的
         // 作用域里跑，环境里未必有当前用户；而 task 工具组按 CreatorId 认「谁的运行」，漏写 = 无主 = 谁都动得了。
         // 请求快照由 RunTracker.GetOrCreateRunAsync 在后台运行起步时按同一个 runtimeRequest 写入
         // （它需要 run.Id 才能建，这里还没有）；续跑按快照重建，模板 spawn 的运行才不会续跑成无工具的默认 agent。
-        var run = await _runStore.CreateAsync(new AgentRun
+        var run = await CreateRunDetachedAsync(new AgentRun
         {
             AgentId = prepared.AgentId,
             ThreadId = prepared.ThreadId,
@@ -86,7 +91,7 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             RootRunId = prepared.RootRunId,
             CreatorId = prepared.Request.UserId,
             LastHeartbeatAt = DateTime.UtcNow
-        }, cancellationToken);
+        }, tenantId, cancellationToken);
 
         var runtimeRequest = new AgentRunRequest
         {
@@ -109,6 +114,9 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             // 后台运行在新作用域、新执行流里跑，拿不到调用方的属性包，
             // 子 Agent 名字只能随请求一起传（AgentRuntime 据此打上 IsSubAgent / SubAgentName）
             SubAgentName = input.SubAgentType,
+            SubAgentInstructions = prepared.Request.SubAgentInstructions,
+            MaxToolIterations = prepared.Request.MaxToolIterations,
+            ExcludedToolGroups = prepared.Request.ExcludedToolGroups,
             UserId = prepared.Request.UserId,
             ReasoningEffort = prepared.Request.ReasoningEffort,
             Attachments = prepared.Request.Attachments,
@@ -131,11 +139,6 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             cts.CancelAfter(timeout);
         }
 
-        // 在调用方作用域快照租户：HttpContext 派生的租户随父请求结束一起消失（holder 被置空），
-        // 后台作用域里的 ICurrentTenant 会读到 null，多租户下子运行写的每一行都落成 TenantId=null、
-        // 后续按租户过滤的查询取不到行。与 Channels 的 ChangeTenantScope 同形；单租户下 tenantId 为 null 不切换。
-        var tenantId = ServiceProvider.GetService<ICurrentTenant>()?.Id;
-
         _ = Task.Run(async () =>
         {
             var startedAt = DateTime.UtcNow;
@@ -150,14 +153,18 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             {
                 _logger.LogWarning("Background agent run timed out after {TimeoutSeconds}s and was cancelled: RunId={RunId}",
                     timeout.TotalSeconds, run.Id);
+                await CloseAbandonedRunAsync(run.Id, tenantId, AgentRunStatus.Failed,
+                    $"The run timed out after {timeout.TotalSeconds:0} seconds.");
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Background agent run was cancelled: RunId={RunId}", run.Id);
+                await CloseAbandonedRunAsync(run.Id, tenantId, AgentRunStatus.Cancelled, "The run was cancelled.");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Background agent run failed: RunId={RunId}", run.Id);
+                await CloseAbandonedRunAsync(run.Id, tenantId, AgentRunStatus.Failed, ex.Message);
             }
             finally
             {
@@ -200,6 +207,55 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             CreationTime = run.CreationTime,
             LastModificationTime = run.LastModificationTime
         });
+    }
+
+    /// <summary>
+    /// 在独立作用域里建运行行并<b>立刻提交</b>，再启动后台任务。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 运行行绝不能落在调用方的环境事务里。宿主开着 <c>EnableGlobalUnitOfWork</c> 时，请求的事务要到 action 结束才提交，
+    /// 而 spawn_agent 在一轮聊天里被调用，那一轮（和它的事务）要等整个 LLM 回合跑完；后台任务却立刻在另一个作用域、
+    /// 另一条连接上按 <c>ExistingRunId</c> 找这一行，找不到（未提交的行在别的连接上不可见）就抛出、被吞成一条日志，
+    /// 子运行从不开始，请求提交后这一行永远停在 Pending 并占着并发上限。
+    /// </para>
+    /// <para>
+    /// 语义上这也是对的：后台运行的生命周期长于发起它的请求，这一行在不在不该由请求的事务决定；
+    /// 调用方请求事后回滚，已经起跑的子运行也照样存在。与 <c>AgentDispatchFacade.EnqueueDetachedAsync</c> 同形。
+    /// </para>
+    /// </remarks>
+    private async Task<AgentRun> CreateRunDetachedAsync(AgentRun run, Guid? tenantId, CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        using var tenantScope = ChangeTenantScope(scope.ServiceProvider, tenantId);
+        var runStore = scope.ServiceProvider.GetRequiredService<IRunStore>();
+        return await runStore.CreateAsync(run, cancellationToken);
+    }
+
+    /// <summary>
+    /// 后台运行异常结束时，把仍停在 Pending / Running 的运行行收尾。
+    /// </summary>
+    /// <remarks>
+    /// 运行在建立追踪之前就失败（Agent 解析失败、找不到运行行、起步前就被取消或超时）时，没有任何东西会写它的终态：
+    /// 行一直停在 Pending，get_agent_run / wait_agent 一直报「在跑」，并发上限也一直把它算进去，直到孤儿回收按心跳超时收掉。
+    /// 这里在执行者自己知道它已经结束的那一刻就收尾。条件更新：运行时自己已写下的终态与暂停态（等待审批 / 澄清）一律不动。
+    /// </remarks>
+    private async Task CloseAbandonedRunAsync(Guid runId, Guid? tenantId, AgentRunStatus status, string error)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            using var tenantScope = ChangeTenantScope(scope.ServiceProvider, tenantId);
+            var runStore = scope.ServiceProvider.GetRequiredService<IRunStore>();
+            if (await runStore.CloseIfStillActiveAsync(runId, status, error, CancellationToken.None))
+            {
+                _logger.LogWarning("Background agent run {RunId} ended before its runtime recorded a final state; marked {Status}", runId, status);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not close background agent run {RunId}; the orphan sweep will mark it once its heartbeat goes stale", runId);
+        }
     }
 
     /// <summary>注册表是进程级单例、按租户分桶；调用方作用域的租户决定查哪个桶</summary>
@@ -295,6 +351,9 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
         var toolGroups = input.ToolGroups;
         var provider = input.Provider;
         var model = input.Model;
+        string? templateInstructions = null;
+        int? maxToolIterations = null;
+        List<string>? excludedToolGroups = null;
 
         if (!string.IsNullOrWhiteSpace(input.SubAgentType))
         {
@@ -304,8 +363,23 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
                 return Result.Failure<SpawnPreparation>("Sub-agent type not found", 404, ErrorCodes.AgentNotFound);
             }
 
+            // 模板的每个字段都在这里定下并随请求走（续跑按快照取回，不回查注册表）：
+            // 系统指令只给没有自己 Agent 的模板运行，已定义的 Agent 用自己的指令；
+            // 上限与排除的工具组对两种 spawn 都生效，排除的组也从请求的工具组里拿掉（管理端 spawn 自带的组同样过这一道）。
+            // DefaultApprovalMode 刻意不在这里套用，见 docs/modules/ai.md 的 AI_SubAgentType。
             toolGroups ??= definition.ToolGroups.ToList();
             model ??= definition.DefaultModel;
+            templateInstructions = input.AgentId.HasValue || string.IsNullOrWhiteSpace(definition.Instructions)
+                ? null
+                : definition.Instructions;
+            maxToolIterations = definition.MaxTurns > 0 ? definition.MaxTurns : null;
+            if (definition.ExcludedToolGroups.Count > 0)
+            {
+                excludedToolGroups = definition.ExcludedToolGroups.ToList();
+                toolGroups = toolGroups
+                    .Where(g => !excludedToolGroups.Contains(g, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+            }
         }
 
         var resolution = await _agentResolver.ResolveAgentAsync(
@@ -325,9 +399,10 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
 
         var parentRunId = TryGetCurrentRunId();
 
-        // 发起人：输入显式给的（管理端 spawn）> 正在执行的父请求的用户（spawn_agent 工具）> 环境用户。
-        // 后台运行的配额计量、权限检查、权限规则评估、以及 task 工具组的归属判定全按它认人。
-        var ownerUserId = input.UserId ?? _executionContextAccessor.CurrentRequest?.UserId ?? CurrentUser?.Id;
+        // 发起人：正在执行的父请求的用户（spawn_agent 工具）> 环境用户（管理端 spawn 端点的调用者本人）。
+        // 后台运行的配额计量、权限检查、权限规则评估、线程归属以及 task 工具组的归属判定全按它认人，
+        // 所以它绝不取自输入：管理端 spawn 的输入就是 HTTP 请求体。
+        var ownerUserId = _executionContextAccessor.CurrentRequest?.UserId ?? CurrentUser?.Id;
 
         // Inherit the true root from the parent run so that MaxDescendantsPerRoot
         // bounds the whole tree rather than just per-immediate-parent fan-out.
@@ -345,7 +420,7 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
             ThreadId = input.ThreadId,
             WorkflowId = null,
             ExecutionMode = resolution.ExecutionMode,
-            InputSummary = input.Message.Length <= 500 ? input.Message : input.Message[..500] + "...",
+            InputSummary = input.Message.Truncate(500),
             ParentRunId = parentRunId,
             RootRunId = rootRunId,
             Request = new AgentRunRequest
@@ -360,6 +435,9 @@ public class SubAgentExecutionService : ApplicationService, ISubAgentExecutionSe
                 // 后台运行的工具组来自子 Agent 模板（管理员定义）或管理端 spawn 端点（ai.agentRun.execute 门控），
                 // 不是匿名可达的 HTTP 请求体；spawn_agent 工具本身不接受工具组参数
                 TrustedToolSelection = true,
+                SubAgentInstructions = templateInstructions,
+                MaxToolIterations = maxToolIterations,
+                ExcludedToolGroups = excludedToolGroups,
                 EnableRunTracking = true,
                 ParentRunId = parentRunId,
                 RootRunId = rootRunId,

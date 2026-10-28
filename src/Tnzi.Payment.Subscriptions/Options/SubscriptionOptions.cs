@@ -58,4 +58,24 @@ public class SubscriptionOptions
         Type = SettingFieldType.Int, Min = 0,
         Description = "Maximum number of days a subscription may stay paused (0 = unlimited)")]
     public int MaxPauseDays { get; set; } = 90;
+
+    /// <summary>
+    /// 宽限期满仍未收到款时怎么处理：<c>Expire</c>（默认，订阅过期）或 <c>Suspend</c>（暂停服务，补缴后原样恢复）。
+    /// </summary>
+    /// <remarks>
+    /// 按月向机构收服务费、停服后要等管理者补缴的部署配 <c>Suspend</c>。只影响逾期欠费（PastDue）那一支；
+    /// 关掉了自动续费、本期自然走完的订阅照旧过期：那是客户自己不续了，不是欠费。
+    /// </remarks>
+    [RuntimeSetting(Label = "Grace Period End Action", I18n = "admin.modules.system.settings.fields.paymentGracePeriodEndAction",
+        Type = SettingFieldType.Select,
+        Description = "What happens when a past-due subscription is still unpaid at the end of the grace period: Expire or Suspend")]
+    public GracePeriodEndAction GracePeriodEndAction { get; set; } = GracePeriodEndAction.Expire;
+
+    /// <summary>
+    /// 订阅页地址（管理者在这里换卡、补缴），写进催款、提醒与暂停服务邮件里。默认空 = 邮件里不放链接。
+    /// </summary>
+    [RuntimeSetting(Label = "Subscription Page URL", I18n = "admin.modules.system.settings.fields.paymentSubscriptionManageUrl",
+        Type = SettingFieldType.String,
+        Description = "Where billing contacts update the card or pay an overdue amount; linked from billing emails")]
+    public string? ManageUrl { get; set; }
 }

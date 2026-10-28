@@ -195,6 +195,9 @@ export function reorderKeyTarget(event: KeyboardEvent, index: number, last: numb
   }
 }
 
+/** How long after a gesture ends a click on the container is taken for the gesture's own release. */
+const RELEASE_CLICK_WINDOW_MS = 300
+
 export function useReorderable<T>(options: UseReorderableOptions<T>): UseReorderableReturn<T> {
   /**
    * VueDraggable reorders its bound array in place, and the source is usually a
@@ -206,6 +209,8 @@ export function useReorderable<T>(options: UseReorderableOptions<T>): UseReorder
   const dragging = ref(false)
   /** Order captured at gesture start, so a failed save can put the list back. */
   let beforeDrag: T[] = []
+  /** Until when a click on the container is the one a released gesture delivers (see `onClickCapture`). */
+  let swallowClickUntil = 0
 
   watch(
     () => options.source(),
@@ -249,6 +254,7 @@ export function useReorderable<T>(options: UseReorderableOptions<T>): UseReorder
 
   function onDragEnd(evt: { oldIndex?: number | null; newIndex?: number | null }): void {
     dragging.value = false
+    swallowClickUntil = Date.now() + RELEASE_CLICK_WINDOW_MS
 
     const from = evt?.oldIndex ?? -1
     const to = evt?.newIndex ?? -1
@@ -282,6 +288,7 @@ export function useReorderable<T>(options: UseReorderableOptions<T>): UseReorder
       chosenClass: options.chosenClass,
       onStart: onDragStart,
       onEnd: onDragEnd,
+      onClickCapture: swallowReleaseClick,
     }
 
     const containerClass = options.containerClass?.()
@@ -293,6 +300,20 @@ export function useReorderable<T>(options: UseReorderableOptions<T>): UseReorder
 
     return bindings
   })
+
+  /**
+   * Items that open on click must not open when the operator was dragging them. Native drag-and-drop never
+   * fires a click, but the pointer fallback (touch, and browsers without native DnD on the element) can deliver
+   * one on release, so the first click inside the container right after a gesture ends is swallowed before it
+   * reaches the item. A plain click never starts a gesture (Sortable waits for movement), so it is untouched.
+   */
+  function swallowReleaseClick(event: MouseEvent): void {
+    if (Date.now() < swallowClickUntil) {
+      swallowClickUntil = 0
+      event.stopPropagation()
+      event.preventDefault()
+    }
+  }
 
   function moveByKeyboard(event: KeyboardEvent, index: number): number | null {
     if (!options.enabled()) return null

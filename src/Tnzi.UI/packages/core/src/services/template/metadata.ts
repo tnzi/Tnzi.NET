@@ -3,11 +3,6 @@
  */
 
 /**
- * Template variable type
- */
-export type TemplateVariableType = 'string' | 'number' | 'boolean' | 'date' | 'object' | 'array';
-
-/**
  * Rendering-surface classification of a template.
  * Aligned with backend `TemplateType` (serialized by member name).
  *

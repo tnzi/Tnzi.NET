@@ -140,6 +140,40 @@ describe('TReconcileWorkspace', () => {
     expect(vm.needsDraft).toBe(false)
   })
 
+  it('unmatch and restore send a line back to review, so the count goes up', async () => {
+    // Unmatch (Categorized) and Restore (Excluded) both move the line back to
+    // Pending. Counting them down showed fewer lines left, and a finished bar,
+    // while more lines were waiting.
+    const pending = [txn('p1')]
+    const matched = [txn('m1', { status: BankTransactionStatus.Matched }), txn('m2', { status: BankTransactionStatus.Matched })]
+    const excluded = [txn('e1', { status: BankTransactionStatus.Excluded })]
+    const { wrapper, bridge } = mountWorkspace(pending)
+    bridge.bankFeed.transactions.mockImplementation(async (q: { filters: { status: BankTransactionStatus } }) => {
+      const items = q.filters.status === BankTransactionStatus.Matched ? matched : q.filters.status === BankTransactionStatus.Excluded ? excluded : pending
+      return { items, totalCount: items.length, pageIndex: 1, pageSize: 20 }
+    })
+    bridge.bankFeed.unmatch.mockResolvedValue(undefined)
+    bridge.bankFeed.restore.mockResolvedValue(undefined)
+    await flushPromises()
+
+    type Vm = WorkspaceVm & { settledActions: Array<{ key: string; onClick: (r: unknown) => void }> }
+    const vm = wrapper.vm as unknown as Vm
+    expect(vm.remaining).toBe(1)
+
+    vm.status = BankTransactionStatus.Matched
+    await flushPromises()
+    vm.settledActions.find((a) => a.key === 'unmatch')!.onClick(matched[0])
+    await flushPromises()
+    expect(bridge.bankFeed.unmatch).toHaveBeenCalledWith('m1')
+    expect(vm.remaining).toBe(2)
+
+    vm.status = BankTransactionStatus.Excluded
+    await flushPromises()
+    vm.settledActions.find((a) => a.key === 'restore')!.onClick(excluded[0])
+    await flushPromises()
+    expect(vm.remaining).toBe(3)
+  })
+
   it('refuses write actions the caller has gated off', async () => {
     const { wrapper, bridge } = mountWorkspace([txn('x1')], { canMatch: false })
     await flushPromises()
@@ -148,5 +182,80 @@ describe('TReconcileWorkspace', () => {
     vm.onMatch({ id: 'x1' }, 'l1')
     await flushPromises()
     expect(bridge.bankFeed.confirm).not.toHaveBeenCalled()
+  })
+})
+
+// The account selector sits on the same screen, so an operator can switch
+// accounts (or tabs) while a page is still loading. Whatever answers last must
+// not decide what is on screen: B's workspace listing A's lines means OK
+// confirms or creates documents for A while the operator believes it is B.
+describe('TReconcileWorkspace - a slower answer for a previous account or tab is dropped', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void
+    const promise = new Promise<T>((r) => { resolve = r })
+    return { promise, resolve }
+  }
+  const page = (items: unknown[]) => ({ items, totalCount: items.length, pageIndex: 1, pageSize: 20 })
+  type Vm = WorkspaceVm & { rows: Array<{ id: string }> }
+
+  it('keeps the newer account when the older one answers last', async () => {
+    const { wrapper, bridge } = mountWorkspace([])
+    const slowA = deferred<ReturnType<typeof page>>()
+    bridge.bankFeed.transactions.mockReset()
+    bridge.bankFeed.transactions
+      .mockImplementationOnce(() => slowA.promise)
+      .mockImplementationOnce(async () => page([txn('b1', { accountId: 'b' })]))
+
+    await wrapper.setProps({ accountId: 'a' })
+    await wrapper.setProps({ accountId: 'b' })
+    await flushPromises()
+    slowA.resolve(page([txn('a1', { accountId: 'a' }), txn('a2', { accountId: 'a' })]))
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as Vm
+    expect(vm.rows.map((r) => r.id)).toEqual(['b1'])
+    expect(vm.remaining).toBe(1)
+  })
+
+  it('keeps the newer tab when the older one answers last', async () => {
+    const { wrapper, bridge } = mountWorkspace([txn('p1')])
+    await flushPromises()
+    const slowPending = deferred<ReturnType<typeof page>>()
+    bridge.bankFeed.transactions.mockReset()
+    bridge.bankFeed.transactions
+      .mockImplementationOnce(() => slowPending.promise)
+      .mockImplementationOnce(async () => page([txn('m1', { status: BankTransactionStatus.Matched })]))
+
+    const vm = wrapper.vm as unknown as Vm
+    ;(wrapper.vm as unknown as { reload: () => Promise<void> }).reload()
+    vm.status = BankTransactionStatus.Matched
+    await flushPromises()
+    slowPending.resolve(page([txn('p1'), txn('p2')]))
+    await flushPromises()
+
+    expect(vm.rows.map((r) => r.id)).toEqual(['m1'])
+  })
+
+  it('does not count a line of the previous account against the new one', async () => {
+    const { wrapper, bridge } = mountWorkspace([txn('x1')])
+    await flushPromises()
+    const slowConfirm = deferred<unknown>()
+    bridge.bankFeed.confirm.mockImplementationOnce(() => slowConfirm.promise as never)
+    bridge.bankFeed.transactions.mockImplementation(async () => page([txn('b1'), txn('b2'), txn('b3')]))
+
+    const vm = wrapper.vm as unknown as Vm
+    vm.onMatch({ id: 'x1' }, 'l1')
+    await wrapper.setProps({ accountId: 'b' })
+    await flushPromises()
+    expect(vm.remaining).toBe(3)
+
+    slowConfirm.resolve(txn('x1', { status: BankTransactionStatus.Matched }))
+    await flushPromises()
+
+    expect(vm.remaining).toBe(3)
+    expect(vm.rows.map((r) => r.id)).toEqual(['b1', 'b2', 'b3'])
+    expect(wrapper.emitted('settled')).toHaveLength(1)
   })
 })

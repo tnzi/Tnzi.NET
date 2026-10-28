@@ -1,7 +1,7 @@
 namespace Tnzi.Finance.Banking.Permissions;
 
 /// <summary>
-/// 银行域 admin 面的操作级权限码（23 个）。
+/// 银行域 admin 面的操作级权限码。
 /// </summary>
 /// <remarks>
 /// 随模块走：不加载银行域的宿主永远不会 seed 这些码，权限矩阵里也不会多出一整块

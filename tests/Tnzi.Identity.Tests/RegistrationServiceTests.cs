@@ -416,6 +416,46 @@ public class RegistrationServiceTests
         Assert.Equal(userId, result.Data.UserId);
     }
 
+    /// <summary>
+    /// ★★★ 一次快速注册只证明一个渠道。两个开关都开着时，带着邮箱 + 别人的手机号来注册，
+    /// 只核了邮箱那枚码，却把手机号也记成「已验证」：那个号码从此解析到攻击者的账号
+    /// （短信找回密码、短信验证码登录都认已验证的号码），号码主人反而注册不了。
+    /// 两个标识一起来就整体拒绝，码不核销、账号不创建。
+    /// </summary>
+    [Fact]
+    public async Task QuickRegisterAsync_WithBothEmailAndPhone_IsRejected_AndCreatesNothing()
+    {
+        var input = new QuickRegisterDto { Email = "attacker@example.com", PhoneNumber = "+15550100", Code = "123456" };
+        _twoFactorServiceMock.Setup(x => x.VerifyCodeByAddressAndMarkUsedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()))
+            .ReturnsAsync(Result<Guid?>.Success(null));
+        _userManagerMock.Setup(x => x.CreateAsync(It.IsAny<User>())).ReturnsAsync(IdentityResult.Success);
+
+        var result = await _registrationService.QuickRegisterAsync(input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        Assert.Equal(ErrorCodes.VALIDATION_ERROR, result.ErrorCode);
+        _twoFactorServiceMock.Verify(
+            x => x.VerifyCodeByAddressAndMarkUsedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>()),
+            Times.Never);
+        _userManagerMock.Verify(x => x.CreateAsync(It.IsAny<User>()), Times.Never);
+    }
+
+    /// <summary>发码一侧同一道门：两个标识一起来时不发，否则那枚码只会发到其中一个渠道，另一个照样没人证明过。</summary>
+    [Fact]
+    public async Task SendQuickRegisterCodeAsync_WithBothEmailAndPhone_IsRejected_AndSendsNothing()
+    {
+        var input = new SendQuickRegisterCodeDto { Email = "attacker@example.com", PhoneNumber = "+15550100" };
+
+        var result = await _registrationService.SendQuickRegisterCodeAsync(input);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(400, result.Code);
+        _twoFactorServiceMock.Verify(
+            x => x.SendCodeByAddressAsync(It.IsAny<string>(), It.IsAny<TwoFactorType>(), It.IsAny<VerificationCodePurpose>(), It.IsAny<Guid?>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task QuickRegisterAsync_WithUserNameDifferentFromEmail_IsRejectedBeforeTheCodeIsConsumed()
     {

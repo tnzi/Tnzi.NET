@@ -169,6 +169,70 @@ public class RecurringMasterDataUsageTests : FinanceIntegrationTestBase
         deleted.Code.ShouldBe(409);
     }
 
+    private async Task<Guid> TaxCodeAsync()
+    {
+        var agency = await InScopeAsync<ITaxService, Result<TaxAgencyDto>>(s => s.CreateAgencyAsync(new UpsertTaxAgencyDto { Name = "Recurring CRA" }));
+        var rate = await InScopeAsync<ITaxService, Result<TaxRateDto>>(s => s.CreateRateAsync(new UpsertTaxRateDto { AgencyId = agency.Data!.Id, Name = "GST 5%", Rate = 5m }));
+        var code = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.CreateCodeAsync(new UpsertTaxCodeDto
+        {
+            Name = "GST",
+            Components = [new UpsertTaxCodeComponentDto { TaxRateId = rate.Data!.Id, Order = 1 }]
+        }));
+        code.Succeeded.ShouldBeTrue(code.Message);
+        return code.Data!.Id;
+    }
+
+    private async Task<RecurringDocumentDto> TaxedInvoiceTemplateAsync(Guid customer, Guid taxCodeId)
+    {
+        var revenue = await AccountIdByCodeAsync("4100");
+        var r = await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(s => s.CreateAsync(new CreateRecurringDocumentDto
+        {
+            Name = "Taxed retainer",
+            Kind = RecurringDocKind.Invoice,
+            PartyId = customer,
+            Currency = "USD",
+            Frequency = RecurrenceFrequency.Monthly,
+            Interval = 1,
+            StartDate = Today().AddDays(10),
+            DueDays = 30,
+            Lines = [new CreateRecurringLineDto { AccountId = revenue, Quantity = 1, UnitPrice = 500m, TaxCodeId = taxCodeId }],
+        }));
+        r.Succeeded.ShouldBeTrue(r.Message);
+        return r.Data!;
+    }
+
+    /// <summary>
+    /// 税码守卫：只被模板行引用的税码删掉后，模板每期生成都因「Tax code ... not found」失败。
+    /// </summary>
+    [Fact]
+    public async Task TaxCode_ReferencedByTemplateLine_DeleteReturns409()
+    {
+        await SeedCoaAsync();
+        var customer = await CustomerAsync();
+        var taxCode = await TaxCodeAsync();
+        await TaxedInvoiceTemplateAsync(customer, taxCode);
+
+        var deleted = await InScopeAsync<ITaxService, Result>(s => s.DeleteCodeAsync(taxCode));
+
+        deleted.Succeeded.ShouldBeFalse("the template would fail every period from now on");
+        deleted.Code.ShouldBe(409);
+        deleted.Message!.ShouldContain("recurring", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task TaxCode_ReferencedOnlyByEndedTemplate_DeleteSucceeds()
+    {
+        await SeedCoaAsync();
+        var customer = await CustomerAsync();
+        var taxCode = await TaxCodeAsync();
+        var template = await TaxedInvoiceTemplateAsync(customer, taxCode);
+        (await InScopeAsync<IRecurringDocumentService, Result<RecurringDocumentDto>>(s => s.EndAsync(template.Id))).Succeeded.ShouldBeTrue();
+
+        var deleted = await InScopeAsync<ITaxService, Result>(s => s.DeleteCodeAsync(taxCode));
+
+        deleted.Succeeded.ShouldBeTrue(deleted.Message);
+    }
+
     /// <summary>
     /// DI 接线在集成测试里看不见（基类镜像了注册图），所以直接对模块的注册断言。
     /// </summary>

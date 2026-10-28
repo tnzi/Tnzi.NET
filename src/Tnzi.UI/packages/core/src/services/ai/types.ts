@@ -2,7 +2,7 @@
  * AI Module Types - Aligned with Tnzi.NET backend AI module
  *
  * Covers: Agents, Chat, Threads, Agent Runs, Skills, Workflows,
- * Evaluations, Quotas, Usage Analytics, MCP, MCP Tool Analytics,
+ * Evaluations, Usage limits, Usage Analytics, MCP, MCP Tool Analytics,
  * Providers, Personas, Skill Categories, Artifacts, User Profile
  */
 
@@ -88,11 +88,34 @@ export enum UsageGranularity {
   Monthly = 'Monthly',
 }
 
-/** Quota warning level */
-export enum QuotaWarningLevel {
-  None = 'None',
-  Warning = 'Warning',
-  Critical = 'Critical',
+/**
+ * The two usage-limit windows. `Session` is the 5-hour window, opened by the first use when none is running;
+ * `Weekly` is a run of back-to-back 7-day periods, so it always resets on the same weekday and time.
+ */
+export enum UsageLimitWindow {
+  Session = 'Session',
+  Weekly = 'Weekly',
+}
+
+/** Thread list archive filter. `All` (the server's default) does not filter. */
+export enum ThreadListStatus {
+  All = 'All',
+  Active = 'Active',
+  Archived = 'Archived',
+}
+
+/** Thread list order: most recent activity first (default), newest first, or by title (A-Z, ignoring case). */
+export enum ThreadListSort {
+  LastActivity = 'LastActivity',
+  CreationTime = 'CreationTime',
+  Title = 'Title',
+}
+
+/** How one overridable limit is set: follow the level below, no limit, or an amount. */
+export enum UsageLimitMode {
+  Inherit = 'Inherit',
+  Unlimited = 'Unlimited',
+  Limited = 'Limited',
 }
 
 /** Skill scope */
@@ -128,6 +151,8 @@ export enum ReasoningEffort {
   Low = 'Low',
   Medium = 'Medium',
   High = 'High',
+  /** Highest effort the provider offers (e.g. Anthropic Opus, OpenAI xhigh) */
+  Max = 'Max',
 }
 
 // ============================================
@@ -213,15 +238,23 @@ export interface CreateAgentDto {
   skillSlugs?: string[] | null;
 }
 
-/** Update agent request */
+/**
+ * Update agent request. PATCH semantics: an omitted or `null` field is left as
+ * it is.
+ */
 export interface UpdateAgentDto {
   name?: string | null;
+  /** Pass an empty string to clear. */
   description?: string | null;
+  /** System prompt. Pass an empty string to clear. */
   instructions?: string | null;
   provider?: string | null;
+  /** Pass an empty string to clear; the provider's default model then applies. */
   model?: string | null;
   toolGroups?: string[] | null;
+  /** A set value cannot be cleared through an update (`null` = no change). */
   temperature?: number | null;
+  /** A set value cannot be cleared through an update (`null` = no change). */
   maxTokens?: number | null;
   timeoutSeconds?: number | null;
   isEnabled?: boolean | null;
@@ -398,6 +431,23 @@ export interface ChatRequestDto {
   toolGroups?: string[] | null;
   userId?: string | null;
   reasoningEffort?: ReasoningEffort | null;
+  /**
+   * Replace this user message of the thread (and everything after it) with the request's
+   * `message` / `content`. Needs `threadId`.
+   */
+  editMessageId?: string | null;
+  /**
+   * Send the thread's last user message again (with its attachments) for a new reply.
+   * Needs `threadId`; leave `message` and `content` empty.
+   */
+  regenerate?: boolean;
+  /**
+   * Per-turn metadata: a small set of values the consumer defines (string keys, any JSON
+   * values), such as the ids of the devices the message points at. The server bounds it
+   * (default 16 keys, 4 KB; keys start with a letter and use letters, digits, `_ . : -`),
+   * hands it to its per-turn handlers and stores it with the user message.
+   */
+  metadata?: Record<string, unknown> | null;
 }
 
 /** Chat response */
@@ -420,22 +470,100 @@ export interface ChatResponseDto {
  * Tool call detail. Mirrors backend `ToolCallDetail` (name, duration, outcome);
  * emitted on the stream once the tool has run, and persisted on the thread
  * message.
+ *
+ * For an agent bound to an external CLI runtime a call arrives twice with the
+ * same `id`: when it starts (`status: 'running'`, with `input`) and when its
+ * result is in (`completed` / `failed`, with `result`). `isSuccess` defaults to
+ * true on the backend, so read `status` first when it is present.
  */
 export interface ToolCallDetailDto {
   name: string;
+  /** The call's id (external CLI agents). */
+  id?: string | null;
+  /** `running` / `completed` / `failed` (external CLI agents). */
+  status?: string | null;
   durationMs?: number | null;
   /** Whether the call succeeded. */
   isSuccess?: boolean | null;
   /** Error message when `isSuccess` is false. */
   error?: string | null;
-  input?: string | null;
+  /** The arguments as the agent sent them (external CLI agents: a JSON value, usually an object). */
+  input?: unknown;
   output?: string | null;
+  /** What the tool returned, block by block (external CLI agents). Images carry an attachment id, not bytes. */
+  result?: ToolResultBlockDto[] | null;
+  /** How long the reply text was when the call happened, to place the call within it (external CLI agents). */
+  textOffset?: number | null;
 }
 
-/** Component reference for rich frontend rendering */
-export interface ComponentRefDto {
+/**
+ * One block of a tool result (backend `ToolResultBlockDto`). An image is read
+ * through `GET /api/threads/{threadId}/attachments/{attachmentId}`.
+ */
+export interface ToolResultBlockDto {
+  /** `text`, `image` or `file` (a file the tool handed over, by name and URI). */
   type: string;
-  props?: Record<string, unknown> | null;
+  text?: string | null;
+  mediaType?: string | null;
+  attachmentId?: string | null;
+  /** Name of a `file` block, e.g. `report.pdf`. */
+  name?: string | null;
+  /** URI of a `file` block as the tool gave it; what it links to is the consumer's call. */
+  uri?: string | null;
+}
+
+/**
+ * Component reference for rich frontend rendering (maps to backend `ComponentRefDto`).
+ * The framework never emits one itself: an application that renders interactive components
+ * sets it on the stream events of its own streaming endpoint.
+ */
+export interface ComponentRefDto {
+  /** Persistent component ID (for data fetching and session restore) */
+  id: string;
+  /** Component type, e.g. "DataTable", "Calendar" */
+  type: string;
+  /** "display" (read-only) or "action" (submittable) */
+  category: string;
+  /** Title shown above the component */
+  title: string;
+  /** Total record count (for pagination info) */
+  totalCount: number;
+  /** Column definitions JSON (ColumnDef[]) */
+  columnsJson?: string | null;
+  /** "active", "superseded", "submitted" or "expired" */
+  status?: string | null;
+}
+
+/** Structured stream event types the framework emits in `ChatStreamEvent.eventType`. */
+export type ChatStreamEventType =
+  | 'clarification'
+  | 'todos_updated'
+  | 'sub_agent_started'
+  | 'sub_agent_completed'
+  | 'sub_agent_failed'
+  | 'sub_agent_timed_out'
+  /**
+   * The first event of a turn run by an external CLI agent: carries `runId` (and
+   * `userMessageId`), so the client can find the run again after a refresh and cancel it.
+   */
+  | 'run_started'
+  /**
+   * An external agent asks to be allowed an action ("ask me" permission mode). `eventData`: `requestId`,
+   * `tool`, `toolCallId`, `input`, `description`, `title`, `reason`, `blockedPath`, `options`
+   * (`id` / `name` / `kind`), `expiresAt`, `status` (`Pending`). Answer with `answerRunPermission`.
+   */
+  | 'permission_request'
+  /** A permission request got its outcome. `eventData`: `requestId`, `status`, `optionId`, `answeredBy`. */
+  | 'permission_resolved';
+
+/**
+ * Plan-mode todo item as carried by a stream event (maps to backend `TodoItemDto`).
+ * The stream serializer writes enums as numbers: `status` is 0 Pending, 1 InProgress, 2 Completed, 3 Skipped.
+ */
+export interface StreamTodoItemDto {
+  content: string;
+  status: number;
+  order: number;
 }
 
 /**
@@ -489,17 +617,41 @@ export interface ChatStreamEvent {
   awaitingApproval?: boolean;
   /** Associated run ID */
   runId?: string | null;
-  /** Rich component reference */
+  /** Rich component reference (set by an application's own streaming endpoint; the framework never emits one) */
   componentRef?: ComponentRefDto | null;
+  /**
+   * Structured event type. `clarification` carries `eventData.type` and `eventData.options` (the question
+   * text is also in `delta`); `todos_updated` carries `todos`; the `sub_agent_*` events carry
+   * `eventData.agent` plus `task`, `result_length`, `timeout_seconds` or `error`.
+   */
+  eventType?: ChatStreamEventType | string | null;
+  /** Payload of a structured event (shape depends on `eventType`) */
+  eventData?: Record<string, unknown> | null;
+  /** Todo list snapshot (`todos_updated` events) */
+  todos?: StreamTodoItemDto[] | null;
+  /** Files the run produced */
+  artifacts?: AgentArtifactDto[] | null;
   /** Persisted user message ID (populated on the terminal event when the turn is persisted; null when persistence was skipped). */
   userMessageId?: string | null;
   /** Persisted assistant message ID (populated on the terminal event when the turn is persisted). Clients use this for message-scoped APIs such as feedback submission. */
   assistantMessageId?: string | null;
+  /**
+   * Position of the event in its run (external CLI agents). Reattach with
+   * `getRunStreamUrl(runId, sequence)` to continue after the last event seen.
+   */
+  sequence?: number | null;
+  /**
+   * With `errorCode` `AI_USAGE_LIMIT_REACHED` (the limit this deployment set for the user) or
+   * `AI_CLI_USAGE_LIMIT` (the external CLI's own account): when the limit resets (ISO, UTC), if known.
+   */
+  usageLimitResetsAt?: string | null;
+  /** With `errorCode` `AI_USAGE_LIMIT_REACHED`: which window is at its limit. */
+  usageLimitWindow?: UsageLimitWindow | null;
 }
 
-/** Content part (polymorphic: text | image | file) */
+/** Content part (polymorphic: text | image | document | file) */
 export interface ContentPartDto {
-  type: 'text' | 'image' | 'file';
+  type: 'text' | 'image' | 'document' | 'file';
 }
 
 export interface TextContentPartDto extends ContentPartDto {
@@ -512,6 +664,15 @@ export interface ImageContentPartDto extends ContentPartDto {
   url?: string | null;
   base64Data?: string | null;
   mediaType?: string | null;
+  fileName?: string | null;
+}
+
+/** A PDF sent inline (base64 or a `data:` URI). External CLI agents receive it as a document block. */
+export interface DocumentContentPartDto extends ContentPartDto {
+  type: 'document';
+  base64Data: string;
+  mediaType?: string | null;
+  fileName?: string | null;
 }
 
 export interface FileContentPartDto extends ContentPartDto {
@@ -534,6 +695,8 @@ export interface AgentThreadDto {
   messageCount: number;
   lastActivityTime: string;
   creationTime: string;
+  /** When the thread was archived; null when it is not. */
+  archivedTime?: string | null;
 }
 
 /** Create thread request */
@@ -545,9 +708,17 @@ export interface CreateAgentThreadDto {
 /** Thread list query */
 export interface ThreadListQueryDto extends PagedQueryDto {
   agentId?: string | null;
+  /** Only threads of these agents (agent-less threads never match); omitted or empty = no filter. ANDed with `agentId`. */
+  agentIds?: string[] | null;
   keyword?: string | null;
+  /** Last activity at or after (ISO). */
   startTime?: string | null;
+  /** Last activity at or before (ISO). */
   endTime?: string | null;
+  /** Archive filter; omitted = `All`. */
+  status?: ThreadListStatus;
+  /** Order; omitted = `LastActivity`. */
+  sort?: ThreadListSort;
 }
 
 /** Update thread title request */
@@ -565,6 +736,8 @@ export interface AgentThreadDetailDto {
   messageCount: number;
   lastActivityTime: string;
   creationTime: string;
+  /** When the thread was archived; null when it is not. */
+  archivedTime?: string | null;
   messages: ThreadMessageDto[];
 }
 
@@ -582,6 +755,56 @@ export interface ThreadMessageDto {
   feedbackTags?: string | null;
   feedbackComment?: string | null;
   feedbackTime?: string | null;
+  /** How the reply ended when it did not simply complete: `stopped`, `failed` or `usage_limit`. */
+  status?: string | null;
+  /** With status `usage_limit`: when the external CLI's account limit resets (ISO, UTC), if known. */
+  usageLimitResetsAt?: string | null;
+  /** On a user message: the per-turn metadata the client sent with it. */
+  metadata?: Record<string, unknown> | null;
+  /** Files shown on the message (uploads on a user message, tool images on a reply). No bytes. */
+  attachments?: AttachmentDto[] | null;
+}
+
+/** Where a stored attachment came from. */
+export type AttachmentOrigin = 'Upload' | 'ToolResult';
+
+/**
+ * A stored chat attachment (no bytes). Read its content with
+ * `useThreadApi(http).getAttachment(threadId, id)`; only the thread's owner can.
+ */
+export interface AttachmentDto {
+  id: string;
+  origin: AttachmentOrigin;
+  mediaType: string;
+  fileName?: string | null;
+  size: number;
+  /** The tool call a tool image came from. */
+  toolCallId?: string | null;
+}
+
+/** One page of a thread's messages, oldest first (`GET threads/{id}/messages`). */
+export interface ThreadMessagePageDto {
+  messages: ThreadMessageDto[];
+  /** Older messages remain before this page. */
+  hasMore: boolean;
+}
+
+/** Query for a page of thread messages: the `limit` newest before `beforeOrder` (exclusive). */
+export interface ThreadMessagePageQuery {
+  beforeOrder?: number | null;
+  /** 1-200, default 50. */
+  limit?: number;
+}
+
+/** A run of an external CLI agent on a thread, as the chat endpoints report it. */
+export interface ChatRunDto {
+  runId: string;
+  threadId?: string | null;
+  /** The user message the run answers. */
+  userMessageId?: string | null;
+  /** `Queued`, `Dispatched`, `Running`, or a terminal status. */
+  status: string;
+  creationTime: string;
 }
 
 /** Thread export data */
@@ -710,50 +933,163 @@ export interface RejectRunDto {
 }
 
 // ============================================
-// Quota Types
+// Usage Limits & Model Selection Types
 // ============================================
 
-/** User quota */
-export interface UserQuotaDto {
-  id: string;
-  userId: string;
-  dailyTokenLimit: number;
-  monthlyTokenLimit: number;
-  currentDailyUsage: number;
-  currentMonthlyUsage: number;
-  remainingDailyQuota: number;
-  remainingMonthlyQuota: number;
-  dailyUsagePercentage: number;
-  monthlyUsagePercentage: number;
-  lastResetDate: string;
-  isEnabled: boolean;
-  warningThreshold: number;
-  criticalThreshold: number;
-  warningLevel: QuotaWarningLevel;
-  creationTime: string;
+/** One overridable limit: inherit, unlimited, or an amount in USD. */
+export interface UsageLimitSettingDto {
+  mode: UsageLimitMode;
+  /** USD; only meaningful with `Limited`. */
+  amountUsd?: number | null;
+}
+
+/** A saved policy (the tenant's defaults, or one user's own settings). Unset items follow the level below. */
+export interface UsagePolicyDto {
+  sessionLimit: UsageLimitSettingDto;
+  weeklyLimit: UsageLimitSettingDto;
+  /** Allowed model ids; null = follow the level below. */
+  allowedModels?: string[] | null;
+  /** Default model id; null = follow the level below. */
+  defaultModel?: string | null;
+  note?: string | null;
   lastModificationTime?: string | null;
 }
 
-/** Set quota request */
-export interface SetQuotaDto {
-  userId: string;
-  dailyTokenLimit: number;
-  monthlyTokenLimit: number;
-  warningThreshold?: number | null;
-  criticalThreshold?: number | null;
+/** Save a policy. `allowedModels` may not be an empty list (leave it null to follow the level below). */
+export interface SaveUsagePolicyDto {
+  sessionLimit: UsageLimitSettingDto;
+  weeklyLimit: UsageLimitSettingDto;
+  allowedModels?: string[] | null;
+  defaultModel?: string | null;
+  note?: string | null;
 }
 
-/** Reset quota request */
-export interface ResetQuotaDto {
-  userId: string;
-  resetDaily: boolean;
-  resetMonthly: boolean;
+/** A model of the model list (`AI:Chat:Models`). */
+export interface ChatModelDto {
+  id: string;
+  displayName: string;
+  /** Provider the model runs on; null = any agent. */
+  provider?: string | null;
+  description?: string | null;
 }
 
-/** User quota paged query */
-export interface UserQuotaQueryDto extends PagedQueryDto {
+/** The models the current user may pick for an agent. More than one: the chat shows a picker. */
+export interface ChatModelsDto {
+  models: ChatModelDto[];
+  defaultModel?: string | null;
+}
+
+/** The policy in force after every level was applied. */
+export interface EffectiveUsagePolicyDto {
+  /** USD; null = no limit. */
+  sessionLimitUsd?: number | null;
+  /** USD; null = no limit. */
+  weeklyLimitUsd?: number | null;
+  allowedModels: ChatModelDto[];
+  defaultModel?: string | null;
+}
+
+/** The configuration level (`AI:UsageLimits`): what an unset default follows. */
+export interface UsageLimitConfigurationDto {
+  sessionLimitUsd?: number | null;
+  weeklyLimitUsd?: number | null;
+  /** Empty = every model of the model list. */
+  allowedModels: string[];
+  defaultModel?: string | null;
+  sessionWindowMinutes: number;
+  weeklyWindowMinutes: number;
+  /** 0-1 */
+  warningThreshold: number;
+}
+
+/** Everyone's defaults (admin). */
+export interface UsageLimitDefaultsDto {
+  policy: UsagePolicyDto;
+  configuration: UsageLimitConfigurationDto;
+  effective: EffectiveUsagePolicyDto;
+  catalog: ChatModelDto[];
+}
+
+/** One window's usage as an administrator sees it (amounts included). */
+export interface UsageWindowStatusDto {
+  window: UsageLimitWindow;
+  durationMinutes: number;
+  /** USD; null = no limit. */
+  limitUsd?: number | null;
+  usedUsd: number;
+  /** 0-100 (above 100 when a turn overshot); null = no limit. */
+  usedPercent?: number | null;
+  startedAt?: string | null;
+  /** UTC; null = the window has not started. */
+  resetsAt?: string | null;
+  exceeded: boolean;
+  warningReached: boolean;
+}
+
+/** One user's usage, all windows (admin). */
+export interface UsageLimitStatusDto {
+  windows: UsageWindowStatusDto[];
+  /** 0-1 */
+  warningThreshold: number;
+  checkedAt: string;
+  lastUsedAt?: string | null;
+}
+
+/** One user's settings, what they resolve to, and current usage (admin). */
+export interface UserUsageLimitsDto {
+  userId: string;
+  hasCustomPolicy: boolean;
+  policy: UsagePolicyDto;
+  /** Everyone's defaults: what this user's unset items resolve to. */
+  defaults: EffectiveUsagePolicyDto;
+  effective: EffectiveUsagePolicyDto;
+  catalog: ChatModelDto[];
+  usage: UsageLimitStatusDto;
+}
+
+/** One window of the current user's own usage: percentages and reset times, no amounts. */
+export interface MyUsageWindowDto {
+  window: UsageLimitWindow;
+  /** False = no limit on this window (and no percentage). */
+  limited: boolean;
+  /** Length of the window in minutes (`AI:UsageLimits`), for wording such as "5 hours". */
+  durationMinutes: number;
+  usedPercent?: number | null;
+  startedAt?: string | null;
+  /** UTC; null = not started (the 5-hour window starts with the next message). */
+  resetsAt?: string | null;
+  /** Sending is refused until `resetsAt`. */
+  exceeded: boolean;
+  warningReached: boolean;
+}
+
+/** The current user's own usage (`GET usage-limits/me`). */
+export interface MyUsageLimitsDto {
+  windows: MyUsageWindowDto[];
+  /** 0-1 */
+  warningThreshold: number;
+  /** When it was read (UTC): the "last updated" line. */
+  checkedAt: string;
+}
+
+/** The `errorDetails` of an `AI_USAGE_LIMIT_REACHED` refusal. */
+export interface UsageLimitDenialDto {
+  window: UsageLimitWindow;
+  /** UTC; null when the limit is zero (it does not reset on its own). */
+  resetsAt?: string | null;
+}
+
+/** Admin list of metered users. */
+export interface UsageMeterQueryDto extends PagedQueryDto {
   userId?: string | null;
-  isEnabled?: boolean | null;
+}
+
+/** One row of the admin list: a user who used AI and their windows. */
+export interface UserUsageSummaryDto {
+  userId: string;
+  hasCustomPolicy: boolean;
+  windows: UsageWindowStatusDto[];
+  lastUsedAt?: string | null;
 }
 
 /**
@@ -887,6 +1223,17 @@ export interface UsageTrendQueryDto {
   startTime: string;
   endTime: string;
   granularity?: UsageGranularity;
+  provider?: string | null;
+  model?: string | null;
+  agentId?: string | null;
+}
+
+/**
+ * Optional narrowing for the usage breakdown endpoints (`by-agent`). Matches the
+ * filters the summary and trend queries carry, so a dashboard that filters by
+ * provider, model or agent draws every panel from the same rows.
+ */
+export interface UsageBreakdownFilters {
   provider?: string | null;
   model?: string | null;
   agentId?: string | null;
@@ -1129,9 +1476,20 @@ export interface BatchEvaluationDto {
   cases: EvaluationCaseDto[];
 }
 
+/** A batch evaluation target that failed to evaluate */
+export interface BatchEvaluationFailureDto {
+  agentId: string;
+  versionNumber?: number | null;
+  /** Why the target failed */
+  message: string;
+}
+
 /** Batch evaluation result */
 export interface BatchEvaluationResultDto {
+  /** Targets that were evaluated */
   results: EvaluationRunDetailDto[];
+  /** Targets that failed; together with `results` they cover every requested target */
+  failures: BatchEvaluationFailureDto[];
   totalDuration: string;
 }
 
@@ -1164,6 +1522,10 @@ export interface SkillSummaryDto {
    * database rows.
    */
   filePath?: string | null;
+  /** Category the skill is filed under; null when uncategorised. */
+  categoryId?: string | null;
+  /** That category's display name, resolved server-side. */
+  categoryName?: string | null;
   creationTime: string;
   lastModificationTime?: string | null;
 }
@@ -1702,7 +2064,6 @@ export interface McpToolInfoDto {
 export interface McpToolExposureOptionsDto {
   toolName?: string | null;
   description?: string | null;
-  enableStreaming?: boolean;
 }
 
 // --- MCP Server Registration ----------------------------------------------

@@ -39,7 +39,7 @@ export default defineConfig({
       // so the `./style.css` export keeps resolving.
       cssFileName: 'style',
     },
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) => {
         const normalizedId = id.replace(/\\/g, '/');
 

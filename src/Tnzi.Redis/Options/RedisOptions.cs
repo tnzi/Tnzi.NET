@@ -39,8 +39,13 @@ public class RedisOptions
     /// 打开后<b>每一条</b>写入 / 删除路径都广播（含同步重载）：Set / SetMany / SetWithTags / TrySet 发
     /// <c>Update</c>；Remove / RemoveMany / RemoveByPattern / RemoveByPrefix / RemoveByTag 对每个实际删掉的键
     /// 发 <c>Remove</c>（键已去掉实例前缀）；Clear 发<b>一条</b>键为 <c>*</c> 的 <c>Clear</c>，订阅方据此整体清空 L1。
-    /// 一条覆盖不全的失效通道比没有更危险 —— 此前 RemoveByTag / RemoveByPrefix / Clear 与三个同步重载一条都不发，
+    /// 一条覆盖不全的失效通道比没有更危险：此前 RemoveByTag / RemoveByPrefix / Clear 与三个同步重载一条都不发，
     /// 而按标签批量失效恰是 L1 最需要广播的场景。发布是 fire-and-forget，失败只记 Warning。
+    /// </para>
+    /// <para>
+    /// 频道按实例名隔离（<c>{Caching:RedisInstanceName}:Tnzi:Cache:Invalidation</c>，未配实例名时是 <c>Tnzi:Cache:Invalidation</c>）：
+    /// Redis 的 Pub/Sub 不分库，共用一个 Redis 的两个应用若用同一个频道，会收到对方的失效通知，
+    /// 对方的一次 Clear 会让自己整体清空 L1。
     /// </para>
     /// </remarks>
     public bool PublishCacheInvalidation { get; set; }
@@ -68,27 +73,33 @@ public class LockOptions
 }
 
 /// <summary>
-/// Redis 连接选项
+/// Redis 连接选项。每一项只在<b>显式配置</b>时生效；不配时用连接串里的同名参数
+/// （<c>abortConnect</c> / <c>connectRetry</c> / <c>connectTimeout</c> / <c>syncTimeout</c>），两处都没写时用框架默认。
 /// </summary>
 public class ConnectionOptions
 {
     /// <summary>
-    /// 连接失败时是否中止（默认: false）
+    /// 两处都没写时 <see cref="AbortOnConnectFail"/> 的取值：启动时连不上 Redis 不让进程失败，连接在后台重试。
     /// </summary>
-    public bool AbortOnConnectFail { get; set; } = false;
+    public const bool DefaultAbortOnConnectFail = false;
 
     /// <summary>
-    /// 连接重试次数（默认: 3）
+    /// 连接失败时是否中止。不配置时取连接串的 <c>abortConnect</c>，连接串也没写时为 <see cref="DefaultAbortOnConnectFail"/>（false）
     /// </summary>
-    public int ConnectRetry { get; set; } = 3;
+    public bool? AbortOnConnectFail { get; set; }
 
     /// <summary>
-    /// 连接超时（毫秒，默认: 5000）
+    /// 连接重试次数。不配置时取连接串的 <c>connectRetry</c>，都没写时为 3
     /// </summary>
-    public int ConnectTimeout { get; set; } = 5000;
+    public int? ConnectRetry { get; set; }
 
     /// <summary>
-    /// 同步操作超时（毫秒，默认: 5000）
+    /// 连接超时（毫秒）。不配置时取连接串的 <c>connectTimeout</c>，都没写时为 5000
     /// </summary>
-    public int SyncTimeout { get; set; } = 5000;
+    public int? ConnectTimeout { get; set; }
+
+    /// <summary>
+    /// 同步操作超时（毫秒）。不配置时取连接串的 <c>syncTimeout</c>，都没写时为 5000
+    /// </summary>
+    public int? SyncTimeout { get; set; }
 }

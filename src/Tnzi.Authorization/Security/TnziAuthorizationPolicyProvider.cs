@@ -17,6 +17,17 @@ public class TnziAuthorizationPolicyProvider : DefaultAuthorizationPolicyProvide
     }
 
     /// <summary>
+    /// 允许授权中间件缓存每个端点合成后的策略。
+    /// </summary>
+    /// <remarks>
+    /// 基类只对它自己这个确切类型答 true，派生类不覆写就等于关掉缓存：每个请求都对端点上的每个
+    /// <c>[ApiAuthorize]</c> 重新取一遍策略、重新合成。这里的策略只由名字决定（<c>Permission:</c> 前缀的按名字生成，
+    /// 其余来自启动后不再变化的 <see cref="AuthorizationOptions"/>），缓存是安全的。
+    /// 权限判定本身仍在每个请求里由处理器执行，缓存的只是「这个端点要哪些码」。
+    /// </remarks>
+    public override bool AllowsCachingPolicies => true;
+
+    /// <summary>
     /// 获取授权策略
     /// </summary>
     /// <param name="policyName">策略名称</param>

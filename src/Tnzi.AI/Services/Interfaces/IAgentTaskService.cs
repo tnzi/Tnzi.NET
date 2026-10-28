@@ -17,7 +17,7 @@ public interface IAgentTaskService
     Task<Result<List<AgentTaskDto>>> GetByRunIdAsync(Guid runId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 按状态获取任务列表（按 CreationTime 排序）
+    /// 按状态分页获取任务（按 CreationTime 升序，排序与分页都在数据库里完成）
     /// </summary>
-    Task<Result<List<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatus status, CancellationToken cancellationToken = default);
+    Task<Result<IPagedList<AgentTaskDto>>> GetByStatusAsync(AgentTaskStatusQueryDto query, CancellationToken cancellationToken = default);
 }

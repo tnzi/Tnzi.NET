@@ -185,9 +185,11 @@ public class StorageQueryDeleteCopyTests : StorageIntegrationTestBase
     }
 
     [Fact]
-    public async Task GetPreviewUrlAsync_Svg_StaysOnThePreviewControllerRoute()
+    public async Task GetPreviewUrlAsync_Svg_UsesTheFilesPreviewRoute()
     {
-        // SVG 不在内联白名单里（files/{id}/preview 会按附件发出），预览控制器按种类给固定的 image/png。
+        // SVG 不在内联白名单里，但 files/{id}/preview 对它按附件发出、保留 image/svg+xml 并带 sandbox：
+        // <img> 加载子资源不理会 Content-Disposition，照样渲染。此前它被指到预览控制器，那里把所有图片
+        // 一律声明成 image/png，SVG 在任何上下文里都是破图。
         var preview = new FilePreviewService(CreateStorageService(), ServiceProvider);
         var record = new FileRecord
         {
@@ -201,7 +203,7 @@ public class StorageQueryDeleteCopyTests : StorageIntegrationTestBase
 
         var url = await preview.GetPreviewUrlAsync(record);
 
-        Assert.StartsWith($"/api/files/preview/{record.Id}/preview", url);
+        Assert.Equal($"/api/files/{record.Id}/preview", url);
     }
 
     // ==================== T12: Delete physical consistency ====================

@@ -186,6 +186,35 @@ public class ChatServiceTests
     }
 
     [Fact]
+    public async Task ChatStreamingAsync_TerminalEvent_CarriesTheSumOfAllUsageChunks()
+    {
+        // 每个 chunk 的 Usage 是一次 LLM 调用的增量；只带用量的 chunk 不单独成为 SSE 事件
+        var runtime = new Mock<IAgentRuntime>();
+        runtime.Setup(x => x.RunStreamingAsync(It.IsAny<AgentRunRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(ToAsyncEnumerable(
+            [
+                new AgentStreamChunk { IsToolCall = true, ToolCallNames = ["lookup"] },
+                new AgentStreamChunk { Usage = new TokenUsageDto { InputTokens = 100, OutputTokens = 10 } },
+                new AgentStreamChunk { Text = "answer" },
+                new AgentStreamChunk { FinishReason = FinishReasons.Stop, Usage = new TokenUsageDto { InputTokens = 200, OutputTokens = 20 } }
+            ]));
+
+        var service = CreateService(runtime.Object);
+        var events = new List<StreamEvent>();
+        await foreach (var item in service.ChatStreamingAsync(new ChatRequestDto { Message = "hello" }))
+        {
+            events.Add(item);
+        }
+
+        events.Count.ShouldBe(3);
+        var terminal = events.Single(e => e.IsDone);
+        terminal.Usage.ShouldNotBeNull();
+        terminal.Usage!.InputTokens.ShouldBe(300);
+        terminal.Usage.OutputTokens.ShouldBe(30);
+        terminal.Usage.TotalTokens.ShouldBe(330);
+    }
+
+    [Fact]
     public async Task ChatAsync_PersistedMessageIdsSurfaceOnResponse()
     {
         var userId = SequentialGuid.NewGuid();

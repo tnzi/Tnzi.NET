@@ -25,6 +25,24 @@ public sealed class DockerSandbox : ISandbox
     private static readonly StringComparison HostPathComparison =
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
+    private static readonly StringComparer MountNameComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    /// <summary>
+    /// 容器里挂四个子目录的父路径：<c>/mnt/{workspace,uploads,outputs,skills}</c>，与 agent 看到的虚拟路径逐字相同，
+    /// 所以写进脚本、文件内容里的 <c>/mnt/...</c> 在容器里同样成立。见 <see cref="DockerSandboxProvider"/> 的 Binds。
+    /// </summary>
+    internal const string VirtualMountRoot = "/mnt";
+
+    /// <summary>
+    /// 一条 exec 命令里最多携带的 base64 字符数。
+    /// </summary>
+    /// <remarks>
+    /// Linux 对单个 argv 字符串限 <c>MAX_ARG_STRLEN</c>（32 页 = 128 KiB），超出即 <c>E2BIG</c>，exec 根本起不来。
+    /// 写文件时内容以 base64 走命令行，比这更长的内容分段落到暂存文件里，命令本身留出路径与引号的余量。
+    /// </remarks>
+    private const int MaxBase64CharsPerExec = 64 * 1024;
+
     private readonly HttpClient _httpClient;
     private readonly string _containerId;
     private readonly string _workspacePath;
@@ -73,12 +91,14 @@ public sealed class DockerSandbox : ISandbox
     }
 
     /// <summary>
-    /// 宿主线程目录下的路径 → 容器里 <c>/workspace</c> 下的路径。
+    /// 宿主线程目录下的路径 → 容器里的路径。
     /// </summary>
     /// <remarks>
-    /// 只换根、只认前缀：<c>{host}/workspace/a.txt</c> → <c>/workspace/workspace/a.txt</c>，分隔符统一成
-    /// <c>/</c>（Windows 宿主给的是反斜杠）。不在挂载源之下的路径抛 <see cref="SecurityException"/> ——
-    /// 这条路径本不该走到这里（围栏在翻译器里），走到了就说明上游漏了，猜一个容器位置只会把漏洞藏起来。
+    /// 只换根、只认前缀，分隔符统一成 <c>/</c>（Windows 宿主给的是反斜杠）：四个子目录在容器里挂在与虚拟路径逐字相同的
+    /// <c>/mnt/{workspace,uploads,outputs,skills}</c>（<c>{host}/outputs/a.txt</c> → <c>/mnt/outputs/a.txt</c>），
+    /// 其余（线程根本身、根下的散文件）落在线程根的挂载点 <c>/workspace</c> 下。不在挂载源之下的路径抛
+    /// <see cref="SecurityException"/> —— 这条路径本不该走到这里（围栏在翻译器里），走到了就说明上游漏了，
+    /// 猜一个容器位置只会把漏洞藏起来。
     /// </remarks>
     public string MapPath(string hostPath)
     {
@@ -102,6 +122,16 @@ public sealed class DockerSandbox : ISandbox
         }
 
         var relative = full[(_hostWorkspacePath.Length + 1)..].Replace('\\', '/');
+        // 挂载点名按规范拼写给出：Windows 宿主上 Workspace\a.txt 与 workspace\a.txt 是同一个文件，
+        // 容器里的挂载点却区分大小写。
+        var separator = relative.IndexOf('/');
+        var firstSegment = separator < 0 ? relative : relative[..separator];
+        var mount = ThreadDataState.MountNames.FirstOrDefault(m => MountNameComparer.Equals(m, firstSegment));
+        if (mount is not null)
+        {
+            return $"{VirtualMountRoot}/{mount}{(separator < 0 ? string.Empty : relative[separator..])}";
+        }
+
         return $"{_workspacePath.TrimEnd('/')}/{relative}";
     }
 
@@ -113,17 +143,50 @@ public sealed class DockerSandbox : ISandbox
         if (DeniedCommandMatcher.IsDenied(_commandAnalyzer, command, _deniedCommands, _deniedCommandPrefixes, out var reason))
             return new CommandResult(-1, "", $"Command denied: {reason}");
 
+        var execution = await ExecuteCoreAsync(command, _maxOutputSize, ct);
+        return execution.Result;
+    }
+
+    /// <summary>
+    /// Run one of this sandbox's own file-operation commands (<c>cat</c>, <c>mkdir</c>, the base64 writes, <c>find</c>).
+    /// </summary>
+    /// <remarks>
+    /// The command blacklist screens commands an agent asked for. These are built here, with the agent's
+    /// path single-quoted and its content base64-encoded, so neither can run as a command, and holding them
+    /// to the blacklist only matches the data: the substring <c>mkfs</c> turns up case-insensitively in roughly
+    /// one of every million base64 positions, so most writes of a megabyte were refused, and so was reading any
+    /// file whose name contained a denied word. The Local provider does these operations with file APIs and
+    /// never consults the blacklist either.
+    /// </remarks>
+    private async Task<CommandResult> ExecuteFileOperationAsync(string command, CancellationToken ct)
+    {
+        var execution = await ExecuteCoreAsync(command, _maxOutputSize, ct);
+        return execution.Result;
+    }
+
+    /// <summary>
+    /// Run a command and also report whether its stdout was cut at <paramref name="outputLimitBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// The flag exists for <see cref="ReadFileAsync"/>: a bash caller is served by the notice
+    /// appended to the cut stream, but a file read must refuse partial content outright,
+    /// because whatever it returns is what <c>str_replace</c> writes back. The command blacklist is
+    /// applied by the caller (<see cref="ExecuteCommandAsync"/>), before anything reaches the daemon.
+    /// </remarks>
+    private async Task<(CommandResult Result, bool StdoutTruncated)> ExecuteCoreAsync(
+        string command, long outputLimitBytes, CancellationToken ct)
+    {
         _logger.LogDebug("Docker sandbox {Id}: executing command in container {ContainerId}", Id, _containerId);
 
         // Declared outside the try so the timeout path can return whatever the command
         // already produced before it hung, instead of discarding it.
-        var stdoutBuilder = new StringBuilder();
-        var stderrBuilder = new StringBuilder();
+        var stdout = new ExecStreamCollector(outputLimitBytes);
+        var stderr = new ExecStreamCollector(outputLimitBytes);
 
         try
         {
             // Step 1: Create exec instance. The command is wrapped so the container
-            // kills it on timeout - see WrapWithInContainerTimeout. Note the denial
+            // kills it on timeout - see BuildExecArgv. Note the denial
             // check above ran on the raw command: the wrapper must never be able to
             // launder a blacklisted command past it.
             var execCreateBody = new
@@ -131,7 +194,7 @@ public sealed class DockerSandbox : ISandbox
                 AttachStdout = true,
                 AttachStderr = true,
                 WorkingDir = _workspacePath,
-                Cmd = new[] { "/bin/sh", "-c", WrapWithInContainerTimeout(command) }
+                Cmd = BuildExecArgv(command)
             };
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -143,12 +206,12 @@ public sealed class DockerSandbox : ISandbox
             if (!createResponse.IsSuccessStatusCode)
             {
                 var error = await createResponse.Content.ReadAsStringAsync(cts.Token);
-                return new CommandResult(-1, "", $"Failed to create exec instance: {error}");
+                return (new CommandResult(-1, "", $"Failed to create exec instance: {error}"), false);
             }
 
             var createResult = await createResponse.Content.ReadFromJsonAsync<DockerExecCreateResponse>(cts.Token);
             if (createResult is null || string.IsNullOrEmpty(createResult.Id))
-                return new CommandResult(-1, "", "Failed to parse exec create response");
+                return (new CommandResult(-1, "", "Failed to parse exec create response"), false);
 
             // Step 2: Start exec instance.
             // ResponseHeadersRead is required, not an optimisation: the default
@@ -168,22 +231,29 @@ public sealed class DockerSandbox : ISandbox
             if (!startResponse.IsSuccessStatusCode)
             {
                 var error = await startResponse.Content.ReadAsStringAsync(cts.Token);
-                return new CommandResult(-1, "", $"Failed to start exec: {error}");
+                return (new CommandResult(-1, "", $"Failed to start exec: {error}"), false);
             }
 
             // Step 3: Read multiplexed output stream
-            await ReadOutputAsync(startResponse, stdoutBuilder, stderrBuilder, cts.Token);
+            await ReadOutputAsync(startResponse, stdout, stderr, cts.Token);
+            stdout.Complete();
+            stderr.Complete();
 
-            // Step 4: Inspect exec to get exit code
-            var inspectResponse = await _httpClient.GetAsync($"/exec/{createResult.Id}/json", cts.Token);
-            var exitCode = 0;
-            if (inspectResponse.IsSuccessStatusCode)
+            // Step 4: Inspect exec to get exit code. An exit status that cannot be read is a
+            // failure, never a success: defaulting to 0 turned a failed `cat` into "this file
+            // is empty", and its empty content into what str_replace writes back.
+            var exitStatus = await InspectExitCodeAsync(createResult.Id, cts.Token);
+            if (exitStatus.ExitCode is not { } exitCode)
             {
-                var inspectResult = await inspectResponse.Content.ReadFromJsonAsync<DockerExecInspectResponse>(cts.Token);
-                exitCode = inspectResult?.ExitCode ?? 0;
+                _logger.LogWarning("Docker sandbox {Id}: exit status of exec {ExecId} unavailable: {Reason}",
+                    Id, createResult.Id, exitStatus.Problem);
+                var notice = $"Unable to read the command's exit status from Docker: {exitStatus.Problem}.";
+                var errorText = stderr.ToDisplayString();
+                return (new CommandResult(-1, stdout.ToDisplayString(),
+                    string.IsNullOrWhiteSpace(errorText) ? notice : $"{notice} {errorText}"), stdout.Truncated);
             }
 
-            return new CommandResult(exitCode, stdoutBuilder.ToString(), stderrBuilder.ToString());
+            return (new CommandResult(exitCode, stdout.ToDisplayString(), stderr.ToDisplayString()), stdout.Truncated);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -191,14 +261,56 @@ public sealed class DockerSandbox : ISandbox
             // substitute. A command that hung mid-stream has usually already said why on
             // stderr, and that is the only evidence of where it stopped.
             var notice = $"Command timed out after {_commandTimeout.TotalSeconds:0.##}s.";
-            var tail = stderrBuilder.ToString();
-            return new CommandResult(-1, stdoutBuilder.ToString(),
-                string.IsNullOrWhiteSpace(tail) ? notice : $"{notice} {tail}");
+            var tail = stderr.ToDisplayString();
+            return (new CommandResult(-1, stdout.ToDisplayString(),
+                string.IsNullOrWhiteSpace(tail) ? notice : $"{notice} {tail}"), stdout.Truncated);
         }
     }
 
     /// <summary>
-    /// Wrap a command so the container terminates it when it outruns the timeout.
+    /// Read the exit code of a finished exec, or say why it could not be read.
+    /// </summary>
+    /// <remarks>
+    /// The daemon records the exit code when it handles the process-exit event, which can land
+    /// a moment after the output stream has closed; until then it reports <c>Running</c> with a
+    /// null <c>ExitCode</c>. A few short retries absorb that window; anything still unknown after
+    /// them is reported as unknown, and the caller turns that into a failed command.
+    /// </remarks>
+    private async Task<(int? ExitCode, string? Problem)> InspectExitCodeAsync(string execId, CancellationToken ct)
+    {
+        const int maxAttempts = 4;
+        var problem = "no response";
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var response = await _httpClient.GetAsync($"/exec/{execId}/json", ct);
+            if (!response.IsSuccessStatusCode)
+                return (null, $"exec inspect returned HTTP {(int)response.StatusCode}");
+
+            DockerExecInspectResponse? inspect;
+            try
+            {
+                inspect = await response.Content.ReadFromJsonAsync<DockerExecInspectResponse>(ct);
+            }
+            catch (JsonException ex)
+            {
+                return (null, $"exec inspect response could not be parsed ({ex.Message})");
+            }
+
+            if (inspect is { Running: false, ExitCode: { } exitCode })
+                return (exitCode, null);
+
+            problem = inspect is null ? "exec inspect returned no body" : "the exec has not reported an exit code";
+            if (attempt < maxAttempts)
+                await Task.Delay(TimeSpan.FromMilliseconds(20 * attempt), ct);
+        }
+
+        return (null, problem);
+    }
+
+    /// <summary>
+    /// The exec argv: the command run by <c>/bin/sh -c</c>, wrapped so the container terminates it when it
+    /// outruns the timeout.
     /// </summary>
     /// <remarks>
     /// The Docker Engine API has no kill-exec endpoint: once we stop reading the exec
@@ -216,20 +328,27 @@ public sealed class DockerSandbox : ISandbox
     /// <c>timeout</c> signals the whole process group, busybox only the direct child;
     /// grandchildren of a busybox image can still survive.
     /// </para>
+    /// <para>
+    /// The command travels as its own argument (<c>$1</c> of the wrapper script), never spliced into it:
+    /// the kernel caps every single argv string at <c>MAX_ARG_STRLEN</c> (128 KiB on Linux), and a wrapper
+    /// that repeated the command in both of its branches halved what a command could be. It also needs
+    /// no re-quoting, so a quote in the command cannot reach the wrapper's own syntax.
+    /// </para>
     /// </remarks>
-    private string WrapWithInContainerTimeout(string command)
+    private string[] BuildExecArgv(string command)
     {
         // No positive budget means "do not time out" (TimeSpan.Zero or Timeout.InfiniteTimeSpan,
         // both of which CancelAfter treats as never-cancel). There is no deadline to hand the
         // container, and inventing one would kill commands the caller deliberately left unbounded.
-        if (_commandTimeout <= TimeSpan.Zero) return command;
+        if (_commandTimeout <= TimeSpan.Zero) return ["/bin/sh", "-c", command];
 
         var seconds = (long)Math.Ceiling((_commandTimeout + InContainerTimeoutGrace).TotalSeconds);
-        var inner = EscapeSingleQuotes(command);
+        var wrapper = "if command -v timeout >/dev/null 2>&1; then "
+                    + $"timeout -s KILL {seconds} /bin/sh -c \"$1\"; "
+                    + "else /bin/sh -c \"$1\"; fi";
 
-        return $"if command -v timeout >/dev/null 2>&1; then "
-             + $"timeout -s KILL {seconds} /bin/sh -c '{inner}'; "
-             + $"else /bin/sh -c '{inner}'; fi";
+        // sh -c '<wrapper>' sh '<command>': the second word becomes $0, the command $1.
+        return ["/bin/sh", "-c", wrapper, "sh", command];
     }
 
     public async Task<string> ReadFileAsync(string path, int? offset = null, int? limit = null, CancellationToken ct = default)
@@ -246,7 +365,7 @@ public sealed class DockerSandbox : ISandbox
         // container. `wc -c` is portable across GNU coreutils and busybox.
         if (_maxFileSize > 0)
         {
-            var sizeResult = await ExecuteCommandAsync($"wc -c < '{escaped}'", ct);
+            var sizeResult = await ExecuteFileOperationAsync($"wc -c < '{escaped}'", ct);
             if (sizeResult.ExitCode == 0)
             {
                 // wc ran: a non-numeric result means we genuinely cannot determine the
@@ -283,9 +402,18 @@ public sealed class DockerSandbox : ISandbox
             readCommand = $"cat '{escaped}'";
         }
 
-        var result = await ExecuteCommandAsync(readCommand, ct);
+        // A file read is bounded by the file-size limit checked above, not by the bash output
+        // cap: the Local provider returns any file under MaxFileSizeBytes in full, and so must
+        // this one. Whatever still overflows (the precheck could not run, or the file grew in
+        // between) is refused, never returned in part: what read_file returns is what
+        // str_replace and a read-then-write_file round trip write back.
+        var readLimit = _maxFileSize > 0 ? Math.Max(_maxFileSize, _maxOutputSize) : _maxOutputSize;
+        var (result, truncated) = await ExecuteCoreAsync(readCommand, readLimit, ct);
         if (result.ExitCode != 0)
             throw new FileNotFoundException($"File not found or not readable: {path}. Error: {result.Error}");
+        if (truncated)
+            throw new IOException(
+                $"File content exceeds the {readLimit}-byte read limit of this sandbox: {path}. Read it in parts with offset and limit.");
 
         return result.Output;
     }
@@ -293,21 +421,10 @@ public sealed class DockerSandbox : ISandbox
     public async Task WriteFileAsync(string path, string content, bool append = false, CancellationToken ct = default)
     {
         Check.NotNullOrWhiteSpace(path);
+        Check.NotNull(content);
         ThrowIfDisposed();
 
-        var escapedPath = EscapePath(path);
-        // 确保目录存在
-        var dir = path.Contains('/') ? path[..path.LastIndexOf('/')] : ".";
-        await ExecuteCommandAsync($"mkdir -p '{EscapePath(dir)}'", ct);
-
-        // 使用 base64 编码写入，避免 printf 格式化注入（% 字符被 printf 解释）
-        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
-        var op = append ? ">>" : ">";
-        var cmd = $"echo '{base64}' | base64 -d {op} '{escapedPath}'";
-
-        var result = await ExecuteCommandAsync(cmd, ct);
-        if (result.ExitCode != 0)
-            throw new IOException($"Failed to write file: {path}. Error: {result.Error}");
+        await WriteBytesAsync(path, Encoding.UTF8.GetBytes(content), append, "write", ct);
     }
 
     public async Task UpdateFileAsync(string path, byte[] content, CancellationToken ct = default)
@@ -316,15 +433,70 @@ public sealed class DockerSandbox : ISandbox
         Check.NotNull(content);
         ThrowIfDisposed();
 
+        await WriteBytesAsync(path, content, append: false, "update", ct);
+    }
+
+    /// <summary>
+    /// Write <paramref name="bytes"/> to <paramref name="path"/> inside the container, as the container user.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The content crosses as base64 on the command line (<c>printf</c> would interpret a <c>%</c> in raw
+    /// text). A command line has a hard per-argument ceiling (see <see cref="MaxBase64CharsPerExec"/>), so
+    /// content that does not fit one command is staged: its base64 is appended part by part to a hidden
+    /// file next to the target, and only once every part has landed is it decoded into the target in one
+    /// step. Writing the parts straight into the target would leave a truncated file behind whenever a later
+    /// part failed, and <c>str_replace</c> writes the whole file back through here.
+    /// </para>
+    /// <para>
+    /// Exec is used rather than the Engine's archive upload so the writer stays the container user, the
+    /// same identity as every <c>bash</c> command; the archive endpoint extracts as the daemon (root).
+    /// </para>
+    /// </remarks>
+    private async Task WriteBytesAsync(string path, byte[] bytes, bool append, string verb, CancellationToken ct)
+    {
         var escapedPath = EscapePath(path);
         var dir = path.Contains('/') ? path[..path.LastIndexOf('/')] : ".";
-        await ExecuteCommandAsync($"mkdir -p '{EscapePath(dir)}'", ct);
+        await ExecuteFileOperationAsync($"mkdir -p '{EscapePath(dir)}'", ct);
 
-        // Base64 编码写入二进制内容
-        var base64 = Convert.ToBase64String(content);
-        var result = await ExecuteCommandAsync($"echo '{base64}' | base64 -d > '{escapedPath}'", ct);
-        if (result.ExitCode != 0)
-            throw new IOException($"Failed to update file: {path}. Error: {result.Error}");
+        var base64 = Convert.ToBase64String(bytes);
+        var op = append ? ">>" : ">";
+
+        if (base64.Length <= MaxBase64CharsPerExec)
+        {
+            var result = await ExecuteFileOperationAsync($"printf '%s' '{base64}' | base64 -d {op} '{escapedPath}'", ct);
+            if (result.ExitCode != 0)
+                throw new IOException($"Failed to {verb} file: {path}. Error: {result.Error}");
+            return;
+        }
+
+        var staging = EscapePath($"{dir}/.tnzi-write-{Guid.NewGuid():N}.b64");
+        try
+        {
+            for (var offset = 0; offset < base64.Length; offset += MaxBase64CharsPerExec)
+            {
+                var part = base64.Substring(offset, Math.Min(MaxBase64CharsPerExec, base64.Length - offset));
+                var redirect = offset == 0 ? ">" : ">>";
+                var staged = await ExecuteFileOperationAsync($"printf '%s' '{part}' {redirect} '{staging}'", ct);
+                if (staged.ExitCode != 0)
+                    throw new IOException($"Failed to {verb} file: {path}. Error: {staged.Error}");
+            }
+
+            var decoded = await ExecuteFileOperationAsync($"base64 -d '{staging}' {op} '{escapedPath}'", ct);
+            if (decoded.ExitCode != 0)
+                throw new IOException($"Failed to {verb} file: {path}. Error: {decoded.Error}");
+        }
+        finally
+        {
+            // Not tied to the caller's token: a cancelled write is exactly when the staging file is left over.
+            // The exec is still bounded by the command timeout.
+            var removed = await ExecuteFileOperationAsync($"rm -f '{staging}'", CancellationToken.None);
+            if (removed.ExitCode != 0)
+            {
+                _logger.LogWarning("Docker sandbox {Id}: could not remove the staging file next to {Path}: {Error}",
+                    Id, path, removed.Error);
+            }
+        }
     }
 
     public async Task<IReadOnlyList<FileEntry>> ListDirectoryAsync(string path, int maxDepth = 2, CancellationToken ct = default)
@@ -333,7 +505,7 @@ public sealed class DockerSandbox : ISandbox
         ThrowIfDisposed();
 
         // 使用 find 命令列出目录内容
-        var result = await ExecuteCommandAsync(
+        var result = await ExecuteFileOperationAsync(
             $"find '{EscapePath(path)}' -maxdepth {maxDepth} -printf '%y\\t%s\\t%p\\n' 2>/dev/null", ct);
 
         if (result.ExitCode != 0)
@@ -372,22 +544,20 @@ public sealed class DockerSandbox : ISandbox
 
         try
         {
-            // Stop the container (timeout 10s)
-            _logger.LogDebug("Docker sandbox {Id}: stopping container {ContainerId}", Id, _containerId);
-            var stopResponse = await _httpClient.PostAsync(
-                $"/containers/{_containerId}/stop?t=10", null);
+            // Kill and remove in one call. No graceful stop first: PID 1 is the keep-alive command, which
+            // has no SIGTERM handler, and a namespace's init only receives signals it handles, so a stop
+            // always waited out its whole timeout before the kill. Every run that used the sandbox returned
+            // that much later and held its container slot that long. By now every command's result has been
+            // collected and the files live on the host bind mount; there is nothing left to shut down.
+            _logger.LogDebug("Docker sandbox {Id}: removing container {ContainerId}", Id, _containerId);
+            using var removeResponse = await _httpClient.DeleteAsync($"/containers/{_containerId}?force=true");
 
-            if (!stopResponse.IsSuccessStatusCode)
+            if (removeResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                _logger.LogWarning("Docker sandbox {Id}: failed to stop container {ContainerId}: HTTP {StatusCode}",
-                    Id, _containerId, (int)stopResponse.StatusCode);
+                // Already gone (removed by the daemon on exit, or by an operator): the goal is reached.
+                _logger.LogDebug("Docker sandbox {Id}: container {ContainerId} was already removed", Id, _containerId);
             }
-
-            // Remove the container
-            var removeResponse = await _httpClient.DeleteAsync(
-                $"/containers/{_containerId}?force=true");
-
-            if (!removeResponse.IsSuccessStatusCode)
+            else if (!removeResponse.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Docker sandbox {Id}: failed to remove container {ContainerId}: HTTP {StatusCode}",
                     Id, _containerId, (int)removeResponse.StatusCode);
@@ -419,11 +589,11 @@ public sealed class DockerSandbox : ISandbox
     /// Header: [stream type (1 byte)][0,0,0][size (4 bytes big-endian)]
     /// </summary>
     /// <remarks>
-    /// The builders belong to the caller so that a cancellation part-way through a long
+    /// The collectors belong to the caller so that a cancellation part-way through a long
     /// running command still surfaces the output collected up to that point.
     /// </remarks>
-    private async Task ReadOutputAsync(HttpResponseMessage response,
-        StringBuilder stdout, StringBuilder stderr, CancellationToken ct)
+    private static async Task ReadOutputAsync(HttpResponseMessage response,
+        ExecStreamCollector stdout, ExecStreamCollector stderr, CancellationToken ct)
     {
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         var header = new byte[8];
@@ -443,12 +613,66 @@ public sealed class DockerSandbox : ISandbox
             var payloadRead = await ReadExactAsync(stream, payload, ct);
             if (payloadRead == 0) break;
 
-            var text = Encoding.UTF8.GetString(payload, 0, payloadRead);
+            // Frames past the cap are still read off the wire (the stream has to be drained for
+            // the exec to finish), the collector just stops keeping them.
             var target = streamType == 2 ? stderr : stdout;
-
-            if (target.Length < _maxOutputSize)
-                target.Append(text);
+            target.Append(payload.AsSpan(0, payloadRead));
         }
+    }
+
+    /// <summary>
+    /// One exec output stream (stdout or stderr), decoded as one continuous UTF-8 text.
+    /// </summary>
+    /// <remarks>
+    /// Docker cuts frames wherever its read of the exec pipe stopped, not on character
+    /// boundaries, so a multi-byte character regularly straddles two frames. Decoding each
+    /// frame on its own turns both halves into U+FFFD; one stateful decoder per stream keeps
+    /// the pending bytes between frames. The cap counts bytes (the option is
+    /// <c>MaxOutputSizeBytes</c>), and a cut is remembered so it can be announced or refused.
+    /// </remarks>
+    private sealed class ExecStreamCollector(long limitBytes)
+    {
+        private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
+        private readonly StringBuilder _text = new();
+        private long _bytesKept;
+
+        public bool Truncated { get; private set; }
+
+        public void Append(ReadOnlySpan<byte> payload)
+        {
+            if (Truncated) return;
+
+            var room = Math.Max(0, limitBytes - _bytesKept);
+            if (payload.Length > room)
+            {
+                payload = payload[..(int)room];
+                Truncated = true;
+            }
+
+            if (payload.IsEmpty) return;
+
+            _bytesKept += payload.Length;
+            var chars = new char[_decoder.GetCharCount(payload, flush: false)];
+            _decoder.GetChars(payload, chars, flush: false);
+            _text.Append(chars);
+        }
+
+        /// <summary>
+        /// The stream ended. A complete stream that ends inside a character is genuinely
+        /// malformed and gets its replacement character; a cut stream ends inside one only
+        /// because of the cut, so the half character is dropped rather than shown as garbage.
+        /// </summary>
+        public void Complete()
+        {
+            if (Truncated) return;
+
+            var chars = new char[_decoder.GetCharCount([], flush: true)];
+            _decoder.GetChars([], chars, flush: true);
+            _text.Append(chars);
+        }
+
+        public string ToDisplayString() =>
+            Truncated ? OutputTruncation.AppendNotice(_text.ToString(), limitBytes) : _text.ToString();
     }
 
     private static async Task<int> ReadExactAsync(Stream stream, byte[] buffer, CancellationToken ct)
@@ -479,7 +703,11 @@ public sealed class DockerSandbox : ISandbox
 
     private sealed class DockerExecInspectResponse
     {
+        // Null while the exec is still running (or before the daemon has recorded its exit).
         [JsonPropertyName("ExitCode")]
-        public int ExitCode { get; set; }
+        public int? ExitCode { get; set; }
+
+        [JsonPropertyName("Running")]
+        public bool Running { get; set; }
     }
 }

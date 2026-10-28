@@ -331,12 +331,18 @@ public class EventBusTenantTests
         var tenantId = Guid.NewGuid();
         var signal = new BackgroundHandlerSignal();
 
-        var tenantScopeDisposable = new Mock<IDisposable>();
+        // 每次 Change 都给一个新的范围：发布方作用域（同步派发前）与后台作用域各切换一次，各自都必须被释放
+        var tenantScopes = new ConcurrentQueue<Mock<IDisposable>>();
         var mockTenant = new Mock<ICurrentTenant>();
         mockTenant.Setup(t => t.Id).Returns(tenantId);
         mockTenant
             .Setup(t => t.Change(It.IsAny<Guid?>(), It.IsAny<string?>()))
-            .Returns(tenantScopeDisposable.Object);
+            .Returns(() =>
+            {
+                var scope = new Mock<IDisposable>();
+                tenantScopes.Enqueue(scope);
+                return scope.Object;
+            });
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -361,7 +367,9 @@ public class EventBusTenantTests
         // 给 finally 块一点时间执行
         await Task.Delay(50);
 
-        // Assert - 租户 scope 的 Dispose() 必须被调用
-        tenantScopeDisposable.Verify(d => d.Dispose(), Times.Once);
+        // Assert - 每一个打开过的租户 scope（含后台处理器那一个）都恰好被 Dispose() 一次
+        Assert.NotEmpty(tenantScopes);
+        foreach (var scope in tenantScopes)
+            scope.Verify(d => d.Dispose(), Times.Once);
     }
 }

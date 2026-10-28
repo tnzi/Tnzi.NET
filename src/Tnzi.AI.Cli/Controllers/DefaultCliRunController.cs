@@ -67,4 +67,10 @@ public class DefaultCliRunController : ApiControllerBase
     [HttpPost("{id:guid}/cancel")]
     public virtual async Task<ApiResult> Cancel(Guid id, CancellationToken ct = default)
         => (await Dispatcher.CancelAsync(id, ct)).ToApiResult();
+
+    /// <summary>回答自己派出的一次运行的权限请求（<c>PermissionRequest</c> 事件），从它给的选项里挑一个。</summary>
+    [HttpPost("{id:guid}/permissions/{requestId:guid}")]
+    public virtual async Task<ApiResult> AnswerPermission(
+        Guid id, Guid requestId, [FromBody] CliPermissionAnswerDto answer, CancellationToken ct = default)
+        => (await Dispatcher.AnswerPermissionAsync(id, requestId, answer, ct)).ToApiResult();
 }

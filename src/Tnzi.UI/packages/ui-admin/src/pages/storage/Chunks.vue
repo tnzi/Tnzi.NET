@@ -10,6 +10,7 @@
     :state="crud"
     :all-columns="chunkColumns"
     :search-fields="chunkSearchFields"
+    :show-default-search="false"
     :title="title"
     :title-help="t('banner.body')"
     :title-help-title="t('banner.title')"

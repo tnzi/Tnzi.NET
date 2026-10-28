@@ -11,7 +11,13 @@ namespace Tnzi.AI.Events.Handlers;
 /// thread entity it tracked here would race with the main flow's SaveChanges batch - a 0-row
 /// UPDATE has been observed in that mode. All dependencies are optional because HostingLite
 /// scenarios may not have EF Core or AI services wired up.
+/// <para>
+/// 后台处理器：标题要再调一次 LLM，同步执行时发布方（AgentRuntime 的首轮收尾）要等它完成，
+/// 非流式响应因此多一次完整的 LLM 往返，流式连接在发出 done 之后也要挂到标题生成结束。
+/// 它本就在自建作用域里工作、不依赖请求作用域；租户由总线按事件上捕获的 TenantId 恢复。
+/// </para>
 /// </remarks>
+[BackgroundEventHandler]
 public class ThreadTitleGenerationHandler : IEventHandler<ThreadFirstReplyCompletedEvent>
 {
     private readonly IServiceScopeFactory _scopeFactory;

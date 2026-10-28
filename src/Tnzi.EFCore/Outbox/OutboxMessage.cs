@@ -8,6 +8,11 @@ namespace Tnzi.EFCore.Outbox;
 public class OutboxMessage : CreationAuditedEntity<Guid>
 {
     /// <summary>
+    /// <see cref="LastError"/> 列的长度上限；写入方须先截到这个长度（超长会让记账的 UPDATE 本身失败）。
+    /// </summary>
+    public const int LastErrorMaxLength = 2000;
+
+    /// <summary>
     /// 获取或设置 事件类型的完全限定名称
     /// </summary>
     public string EventType { get; set; } = null!;

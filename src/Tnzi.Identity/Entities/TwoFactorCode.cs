@@ -25,6 +25,11 @@ namespace Tnzi.Identity.Entities;
 public class TwoFactorCode : EntityBase<Guid>, IHasCreationTime
 {
     /// <summary>
+    /// <see cref="Address"/> 的列宽。发码前按它答 400：超长地址在 PostgreSQL 上插入时 500，在 SQLite 上原样落库。
+    /// </summary>
+    public const int AddressMaxLength = 256;
+
+    /// <summary>
     /// 获取或设置 用户ID（可空，验证码登录时用户可能不存在）
     /// 当 UserId 为空时，表示验证码登录场景（用户可能尚未注册）
     /// 当 UserId 有值时，表示已登录用户的 2FA 验证场景

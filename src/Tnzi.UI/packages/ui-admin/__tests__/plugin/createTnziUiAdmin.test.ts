@@ -72,4 +72,21 @@ describe('createTnziUiAdmin', () => {
     plugin.uninstall()
     void mountAndReadCtx
   })
+
+  it('leaves Ctrl/Cmd-K to the shell: no app-wide listener swallows it', () => {
+    // The shell (TAdminShell) owns the global search shortcut and honours
+    // `builtinSearch: false`. A plugin-level listener that preventDefaults the
+    // combo everywhere also blocked the browser's own Ctrl+K on the login page
+    // and in apps that turned the built-in search off.
+    const app = createApp(defineComponent({ render: () => h('div') }))
+    const plugin = createTnziUiAdmin(app)
+
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+      const event = new KeyboardEvent('keydown', { key: 'k', cancelable: true, ...modifier })
+      window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    }
+
+    plugin.uninstall()
+  })
 })

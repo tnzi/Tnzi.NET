@@ -27,6 +27,12 @@ public class RefundConfiguration : EntityTypeConfigurationBase<Refund, Guid>
                 .HasFilter(IndexFilterFactory.GetIsDeletedFalse());
         }
 
+        // 渠道退款号全局唯一：渠道后台手工退的那一笔经回调记下时按它幂等（重投、并发两次投递都只记一行）。
+        // 不分租户：它是渠道发的号，跨租户也不会重复。
+        builder.HasIndex(r => r.ExternalRefundNo).IsUnique()
+            .HasDatabaseName("IX_Refund_ExternalRefundNo")
+            .HasFilter(IndexFilterFactory.GetCodeNotNullAndIsDeletedFalse(nameof(Refund.ExternalRefundNo), "IsDeleted"));
+
         builder.HasIndex(r => r.PaymentId);
         builder.HasIndex(r => r.Status);
         builder.HasIndex(r => r.CreationTime);

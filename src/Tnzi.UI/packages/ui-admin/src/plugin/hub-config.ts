@@ -1,10 +1,5 @@
+import type { AdminChatConfig } from './chat-config'
 import type { AdminSettingsConfig } from './settings-config'
-
-/** The inline chat config shape carried by `defineAdminApp({ chat })`. */
-export interface AdminChatConfig {
-  enabled?: boolean
-  hubUrl?: string
-}
 
 /**
  * Derive the chat / settings SignalR hub URLs from a single `apiBase`
@@ -15,9 +10,10 @@ export interface AdminChatConfig {
  * - No `apiBase` → return the configs unchanged (root-relative '/hubs/*'
  *   defaults apply downstream). Opt-in.
  * - An explicit `chat.hubUrl` / `settings.hubUrl` always wins.
- * - Chat is only derived when the consumer opted into chat (a bare `{ hubUrl }`
- *   would enable the launcher). The settings realtime hub runs regardless, so it
- *   derives even without a settings config.
+ * - Both hubs derive whether or not their config was passed. An omitted `chat`
+ *   is the default chat, which is enabled (only `enabled: false` turns the
+ *   launcher off), so it needs the derived URL as much as an explicit one;
+ *   the settings realtime hub runs regardless.
  */
 export function resolveHubConfigs(
   apiBase: string | undefined,
@@ -26,11 +22,8 @@ export function resolveHubConfigs(
 ): { chat: AdminChatConfig | undefined; settings: AdminSettingsConfig | undefined } {
   const hubBase = (apiBase ?? '').replace(/\/+$/, '')
 
-  const resolvedChat = chat
-    ? hubBase && !chat.hubUrl
-      ? { ...chat, hubUrl: `${hubBase}/hubs/chat` }
-      : chat
-    : undefined
+  const resolvedChat =
+    hubBase && !chat?.hubUrl ? { ...(chat ?? {}), hubUrl: `${hubBase}/hubs/chat` } : chat
 
   const resolvedSettings =
     hubBase && !settings?.hubUrl

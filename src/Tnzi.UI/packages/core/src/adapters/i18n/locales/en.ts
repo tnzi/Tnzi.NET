@@ -133,6 +133,7 @@ export default {
     uploading: 'Uploading...',
     uploadSuccess: 'Upload successful',
     uploadFailed: 'Upload failed',
+    cropFailed: 'The image could not be cropped. Please try another file.',
     fileSizeLimit: 'File size exceeds limit',
     fileTypeLimit: 'File type not supported',
   },

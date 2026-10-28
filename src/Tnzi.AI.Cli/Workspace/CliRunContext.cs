@@ -72,6 +72,16 @@ public sealed record CliRunContext
 
     /// <summary>受管 MCP 配置 JSON（Claude 风格 <c>mcpServers</c> 对象）。</summary>
     public string? McpConfigJson { get; init; }
+
+    /// <summary>
+    /// 这次运行留下的身份哨兵可以覆盖，即使它归属另一条线程。
+    /// </summary>
+    /// <remarks>
+    /// 由调度层在确认那次运行已经结束之后填入：运行硬崩溃（进程被杀、宿主挂掉）时清理不会发生，
+    /// 标记留在目录里；在用户目录模式下，那个目录是同一 Agent 所有线程共用的仓库，残留的标记会让别的线程的每一次运行都被拒，
+    /// 直到有人手工删掉它。占用者仍在进行中时不会填，那时拒绝是对的（两个 agent 同时写一个目录会互相破坏工作成果）。
+    /// </remarks>
+    public Guid? ReclaimableClaimRunId { get; init; }
 }
 
 /// <summary>
@@ -94,7 +104,7 @@ public sealed record CliSkillPayload
 /// </summary>
 public sealed record CliWorkspace
 {
-    /// <summary>运行根目录（隔离模式下就是 <c>{root}/{tenant}/{runId}</c>）。</summary>
+    /// <summary>运行根目录（执行目标上的路径；隔离模式下就是 <c>{root}/{tenant}/{runId}</c>）。</summary>
     public required string RootDirectory { get; init; }
 
     /// <summary>agent 的 cwd。</summary>
@@ -106,8 +116,26 @@ public sealed record CliWorkspace
     /// <summary>日志目录。</summary>
     public required string LogDirectory { get; init; }
 
-    /// <summary>受管 MCP 配置文件路径；未配置时为 null。</summary>
+    /// <summary>受管 MCP 配置文件路径（执行目标上的）；未配置时为 null。</summary>
     public string? McpConfigPath { get; init; }
+
+    /// <summary>写在 <see cref="McpConfigPath"/> 的那份 MCP 配置的内容；未配置时为 null。</summary>
+    /// <remarks>
+    /// 要读配置内容的适配器（ACP 把它翻成 <c>mcpServers</c>）拿这一份，不回头去读文件：文件在执行目标上，
+    /// 远程目标的文件系统 API 进程读不到。
+    /// </remarks>
+    public string? McpConfigJson { get; init; }
+
+    /// <summary>
+    /// agent 说明写成的追加系统提示文件（执行目标上的路径）。只在工作目录是用户提供的、且 provider 能以文件接收追加系统提示时有值。
+    /// </summary>
+    /// <remarks>受管工作目录里说明写进 provider 的记忆文件，这里为 null。</remarks>
+    public string? SystemPromptFilePath { get; init; }
+
+    /// <summary>
+    /// 物化了技能的附加目录（执行目标上的路径），作为附加目录交给 CLI。只在工作目录是用户提供的、且有技能物化时有值。
+    /// </summary>
+    public string? ContextDirectory { get; init; }
 
     /// <summary>本次布置创建的文件/目录清单（回滚依据）。</summary>
     public IReadOnlyList<string> Sidecars { get; init; } = [];

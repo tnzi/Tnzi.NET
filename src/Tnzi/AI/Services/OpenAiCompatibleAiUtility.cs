@@ -392,7 +392,7 @@ public class OpenAiCompatibleAiUtility : IAiUtility
         try
         {
             var content = RedactKey(await response.Content.ReadAsStringAsync(ct), target.ApiKey);
-            detail = content.Length > 500 ? content[..500] : content;
+            detail = content.FitToLength(500);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
         {

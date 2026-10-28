@@ -25,6 +25,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     private readonly IOptionsMonitor<StorageOptions> _options;
     private readonly bool _multiTenancyEnabled;
     private readonly IOrphanReferenceValidator? _orphanReferenceValidator;
+    private readonly OrphanReferenceScanCursor _scanCursor;
 
     /// <summary>
     /// 别的程序集挂进来的清理趟次。<b>没有任何实现时 DI 给空集合</b>，整段跳过。
@@ -41,6 +42,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
         ICurrentTenant currentTenant,
         IOptionsMonitor<StorageOptions> options,
         IServiceProvider serviceProvider,
+        OrphanReferenceScanCursor scanCursor,
         IEnumerable<IStorageCleanupContributor>? contributors = null,
         IOptions<MultiTenancyOptions>? multiTenancyOptions = null,
         IOrphanReferenceValidator? orphanReferenceValidator = null)
@@ -54,6 +56,8 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
         _options = Check.NotNull(options);
         _multiTenancyEnabled = multiTenancyOptions?.Value.Enabled ?? false;
         _orphanReferenceValidator = orphanReferenceValidator;
+        // 必需而非可选：游标要跨轮次活着（模块注册成单例），每次构造一份新的就退回「每轮查同一批」。
+        _scanCursor = Check.NotNull(scanCursor);
     }
 
     /// <summary>
@@ -102,14 +106,75 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     }
 
     /// <summary>
-    /// 清理过期临时文件（按租户隔离）
+    /// 清理过期临时文件（按租户隔离）：过了 <c>TemporaryFileRetentionHours</c> 仍无人持有的临时记录，
+    /// 外加过期的临时引用行。
     /// </summary>
+    /// <remarks>
+    /// ★★ 判据见 <see cref="TemporaryFileCriteria"/>：临时文件是<b>记录</b>，此前这一趟只遍历临时引用行，
+    /// 真正的临时上传（一条引用行都没有）要等孤儿回收的保留期才被收走，孤儿回收关掉时永远不收。
+    /// 临时引用行那一趟保留：它管的是调用方经 <c>SaveWithReferenceAsync(isTemporary: true)</c> 显式写下的临时持有。
+    /// </remarks>
     public async Task<int> CleanupTemporaryFilesAsync(CancellationToken cancellationToken = default)
     {
         var retention = TimeSpan.FromHours(_options.CurrentValue.Cleanup.TemporaryFileRetentionHours);
         var cutoffTime = DateTime.UtcNow.Subtract(retention);
         var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
+        var records = await CleanupExpiredTemporaryRecordsAsync(cutoffTime, maxFiles, cancellationToken);
+        var byReference = await CleanupExpiredTemporaryReferencesAsync(cutoffTime, maxFiles, cancellationToken);
+        return records + byReference;
+    }
+
+    /// <summary>
+    /// 过了保留期、计数为 0、没归档进目录的临时记录：连对象带记录一起删。
+    /// </summary>
+    private async Task<int> CleanupExpiredTemporaryRecordsAsync(DateTime cutoffTime, int maxFiles, CancellationToken cancellationToken)
+    {
+        var isExpired = TemporaryFileCriteria.Expired(cutoffTime);
+
+        return await ForEachTenantAsync(
+            () => _fileRepository.AsQueryable()
+                .IgnoreQueryFilters()
+                .Where(isExpired)
+                .Select(f => f.TenantId)
+                .Distinct(),
+            async () =>
+            {
+                var expired = await _fileRepository.AsQueryable()
+                    .Where(isExpired)
+                    .OrderBy(f => f.CreationTime)
+                    .Take(maxFiles)
+                    .ToListAsync(cancellationToken);
+
+                var count = 0;
+                foreach (var fileRecord in expired)
+                {
+                    try
+                    {
+                        // 先条件删记录、删掉了才删对象（理由见 FileReferenceCounts）：列出来之后才被绑定的，一个字节都不碰。
+                        // 指向它的临时引用行随记录一起走，否则下一趟按引用行再找它一次。
+                        if (!await FileReferenceCounts.TryDeleteUnheldAsync(_fileRepository, _referenceRepository, fileRecord.Id, cancellationToken))
+                            continue;
+
+                        await DeletePhysicalFileAsync(fileRecord, cancellationToken);
+                        await PublishFileRecordDeletedAsync(fileRecord.Id, cancellationToken);
+                        count++;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogWarning("Failed to clean temporary file: FileId={FileId}, Error={Error}", fileRecord.Id, ex.Message);
+                    }
+                }
+                return count;
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 过期的临时引用行：删掉引用行，它指向的记录若无人持有，一并删掉。
+    /// </summary>
+    private async Task<int> CleanupExpiredTemporaryReferencesAsync(DateTime cutoffTime, int maxFiles, CancellationToken cancellationToken)
+    {
         return await ForEachTenantAsync(
             // 跨租户取出待清理候选的 distinct TenantId（仅多租户启用时调用）
             () => _referenceRepository.AsQueryable()
@@ -131,15 +196,19 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                 {
                     try
                     {
-                        var fileRecord = await _fileRepository.GetAsync(reference.FileId, cancellationToken);
-                        if (fileRecord != null && fileRecord.ReferenceCount == 0)
+                        var fileRecord = await _fileRepository.AsQueryable().FirstOrDefaultAsync(f => f.Id == reference.FileId, cancellationToken);
+                        if (fileRecord != null
+                            && fileRecord.ReferenceCount <= 0
+                            && !(fileRecord.IsTemporary && fileRecord.FolderId != null)
+                            && await FileReferenceCounts.TryDeleteUnheldAsync(_fileRepository, _referenceRepository, fileRecord.Id, cancellationToken))
                         {
-                            await DeletePhysicalFileAsync(fileRecord);
-                            await _fileRepository.DeleteAsync(fileRecord, cancellationToken);
+                            await DeletePhysicalFileAsync(fileRecord, cancellationToken);
+                            await PublishFileRecordDeletedAsync(fileRecord.Id, cancellationToken);
                             count++;
                         }
 
-                        await _referenceRepository.DeleteAsync(reference, cancellationToken);
+                        // 按条件删：记录删掉时它名下的引用行已一并删掉，同一份文件的另一条临时引用行也可能刚被删过。
+                        await _referenceRepository.DeleteAsync(r => r.Id == reference.Id, cancellationToken);
                     }
                     catch (Exception ex)
                     {
@@ -152,7 +221,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     }
 
     /// <summary>
-    /// 清理孤岛文件（ReferenceCount=0 且超过保留期的文件，按租户隔离）
+    /// 清理孤岛文件（ReferenceCount=0 且超过保留期的文件，按租户隔离；归档进目录的临时记录除外）
     /// </summary>
     public async Task<int> CleanupOrphanFilesAsync(CancellationToken cancellationToken = default)
     {
@@ -160,16 +229,25 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
         var cutoffTime = DateTime.UtcNow.Subtract(retention);
         var maxFiles = _options.CurrentValue.Cleanup.MaxFilesPerRun;
 
+        // ★ 归档进目录的临时记录不是孤儿（FolderId 由工作区子模块写入，列在本表）。
+        //   这类行来自「文件库直传落临时记录、挪进目录只改 FolderId」那段时期：没有任何引用行、计数为 0，
+        //   回收它等于删掉用户整理在文件库里的文件，分享链接 404、版本行成孤儿，且没有任何告警。
+        //   挪动现在会把临时记录转正，这里守的是之前已经躺在目录里的那些行。
+        //   代价是这类行里被用户删掉、而物理删除又恰好失败的那一份不会再被本趟重试（保留，不误删）。
+        Expression<Func<FileRecord, bool>> isOrphan = f => f.ReferenceCount <= 0
+            && f.CreationTime < cutoffTime
+            && !(f.IsTemporary && f.FolderId != null);
+
         return await ForEachTenantAsync(
             () => _fileRepository.AsQueryable()
                 .IgnoreQueryFilters()
-                .Where(f => f.ReferenceCount <= 0 && f.CreationTime < cutoffTime)
+                .Where(isOrphan)
                 .Select(f => f.TenantId)
                 .Distinct(),
             async () =>
             {
                 var orphanFiles = await _fileRepository.AsQueryable()
-                    .Where(f => f.ReferenceCount <= 0 && f.CreationTime < cutoffTime)
+                    .Where(isOrphan)
                     .Take(maxFiles)
                     .ToListAsync(cancellationToken);
 
@@ -178,8 +256,14 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                 {
                     try
                     {
-                        await DeletePhysicalFileAsync(fileRecord);
-                        await _fileRepository.DeleteAsync(fileRecord, cancellationToken);
+                        // ★ 候选是一会儿之前读出来的快照：期间一次 MD5 复用命中、或一次实体绑定可能刚把它重新持有。
+                        //   此前照快照删除，用户刚拿到的那条记录随即连对象一起没了。现在先在库里复核并删掉记录
+                        //   （计数仍 <= 0、没有正式引用行），删掉了才删对象。
+                        if (!await FileReferenceCounts.TryDeleteUnheldAsync(_fileRepository, _referenceRepository, fileRecord.Id, cancellationToken))
+                            continue;
+
+                        await DeletePhysicalFileAsync(fileRecord, cancellationToken);
+                        await PublishFileRecordDeletedAsync(fileRecord.Id, cancellationToken);
                         count++;
 
                         Logger.LogDebug("Cleaned orphan file: {FileId}", fileRecord.Id);
@@ -218,10 +302,7 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                 .Distinct(),
             async () =>
             {
-                var references = await _referenceRepository.AsQueryable()
-                    .Where(r => r.CreationTime < cutoffTime)
-                    .Take(maxFiles)
-                    .ToListAsync(cancellationToken);
+                var references = await NextOrphanReferencePageAsync(cutoffTime, maxFiles, cancellationToken);
 
                 var count = 0;
                 foreach (var reference in references)
@@ -237,13 +318,8 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                         {
                             await _referenceRepository.DeleteAsync(reference, cancellationToken);
 
-                            // 递减文件的引用计数
-                            var fileRecord = await _fileRepository.GetAsync(reference.FileId, cancellationToken);
-                            if (fileRecord != null)
-                            {
-                                fileRecord.ReferenceCount = Math.Max(0, fileRecord.ReferenceCount - 1);
-                                await _fileRepository.UpdateAsync(fileRecord, cancellationToken);
-                            }
+                            // 递减文件的引用计数（原子 -1，不低于 0）
+                            await FileReferenceCounts.ReleaseAsync(_fileRepository, reference.FileId, cancellationToken);
 
                             count++;
                             Logger.LogDebug("Cleaned orphan reference: {ReferenceId}, Entity={EntityType}/{EntityId}",
@@ -258,6 +334,45 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
                 return count;
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// 取当前租户这一轮要查的那一页引用：从 <see cref="OrphanReferenceScanCursor"/> 记下的位置按 id 接着往后取，
+    /// 取到末尾回到开头。
+    /// </summary>
+    /// <remarks>
+    /// 本进程里第一次扫这个租户时，从一个随机位置开始（理由见 <see cref="OrphanReferenceScanCursor"/>）。
+    /// 这一页不满说明到了末尾，下一轮从头开始；这一页是空的而起点不在开头，说明起点之后已经没有了，当场从头再取一次，
+    /// 免得白跑一轮。
+    /// </remarks>
+    private async Task<List<FileReference>> NextOrphanReferencePageAsync(DateTime cutoffTime, int maxFiles, CancellationToken cancellationToken)
+    {
+        var tenantId = _currentTenant.Id;
+        var candidates = _referenceRepository.AsQueryable().Where(r => r.CreationTime < cutoffTime);
+
+        if (!_scanCursor.TryGet(tenantId, out var position))
+        {
+            var total = await candidates.CountAsync(cancellationToken);
+            var start = total > maxFiles
+                ? await candidates.OrderBy(r => r.Id).Skip(Random.Shared.Next(total)).Select(r => (Guid?)r.Id).FirstOrDefaultAsync(cancellationToken)
+                : null;
+            position = new OrphanReferenceScanCursor.Position(start);
+        }
+
+        var page = await PageAfterAsync(candidates, position.After, maxFiles, cancellationToken);
+        if (page.Count == 0 && position.After != null)
+            page = await PageAfterAsync(candidates, after: null, maxFiles, cancellationToken);
+
+        _scanCursor.Set(tenantId, new OrphanReferenceScanCursor.Position(page.Count < maxFiles ? null : page[^1].Id));
+        return page;
+    }
+
+    private static Task<List<FileReference>> PageAfterAsync(IQueryable<FileReference> candidates, Guid? after, int maxFiles, CancellationToken cancellationToken)
+    {
+        if (after is { } cursor)
+            candidates = candidates.Where(r => r.Id.CompareTo(cursor) > 0);
+
+        return candidates.OrderBy(r => r.Id).Take(maxFiles).ToListAsync(cancellationToken);
     }
 
     /// <inheritdoc />
@@ -330,34 +445,19 @@ public class FileCleanupService : ApplicationService, IFileCleanupService
     }
 
     /// <summary>
-    /// 删除物理文件及其缩略图
+    /// 记录已删除：通知别的程序集收掉挂在这个文件上的数据（工作区的历史版本与分享链接）。
     /// </summary>
-    private async Task DeletePhysicalFileAsync(FileRecord fileRecord)
+    private async Task PublishFileRecordDeletedAsync(Guid fileId, CancellationToken cancellationToken)
     {
-        // 删除主文件
-        if (!string.IsNullOrEmpty(fileRecord.Path))
-        {
-            try
-            {
-                await _storage.DeleteAsync(fileRecord.Path);
-            }
-            catch (Exception ex)
-            {
-                LogWarning("Failed to delete physical file: {Path}, Error={Error}", fileRecord.Path, ex.Message);
-            }
-        }
+        if (EventBus == null)
+            return;
 
-        // 删除缩略图
-        if (!string.IsNullOrEmpty(fileRecord.ThumbnailPath))
-        {
-            try
-            {
-                await _storage.DeleteAsync(fileRecord.ThumbnailPath);
-            }
-            catch (Exception ex)
-            {
-                LogWarning("Failed to delete thumbnail: {Path}, Error={Error}", fileRecord.ThumbnailPath, ex.Message);
-            }
-        }
+        await EventBus.PublishAsync(new FileRecordDeletedEvent { FileId = fileId }, cancellationToken);
     }
+
+    /// <summary>
+    /// 删除一条<b>已经删掉记录</b>的文件的物理对象（正文与缩略图）；删不掉的交给删除事件重试（见 <see cref="DeletedFileObjects"/>）。
+    /// </summary>
+    private Task DeletePhysicalFileAsync(FileRecord fileRecord, CancellationToken cancellationToken)
+        => DeletedFileObjects.DisposeAsync(_storage, EventBus, Logger, fileRecord, cancellationToken);
 }

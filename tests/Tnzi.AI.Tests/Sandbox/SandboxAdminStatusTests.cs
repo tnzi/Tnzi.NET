@@ -19,12 +19,14 @@ public class SandboxAdminStatusTests
         Local = new LocalSandboxOptions
         {
             DeniedCommands = ["local-denied"],
+            DeniedCommandPrefixes = ["local-binary"],
             DeniedPatterns = ["local.pem"],
             EnvironmentBlacklist = ["LOCAL_SECRET"]
         },
         Docker = new DockerSandboxOptions
         {
             DeniedCommands = ["docker-denied"],
+            DeniedCommandPrefixes = ["docker-binary"],
             DeniedPatterns = ["docker.pem"]
         }
     };
@@ -44,6 +46,7 @@ public class SandboxAdminStatusTests
 
         dto.Provider.ShouldBe("local");
         dto.DeniedCommands.ShouldBe(["local-denied"]);
+        dto.DeniedCommandPrefixes.ShouldBe(["local-binary"]);
         dto.DeniedPatterns.ShouldBe(["local.pem"]);
         dto.EnvironmentBlacklist.ShouldBe(["LOCAL_SECRET"]);
     }
@@ -55,6 +58,7 @@ public class SandboxAdminStatusTests
 
         dto.Provider.ShouldBe("docker");
         dto.DeniedCommands.ShouldBe(["docker-denied"]);
+        dto.DeniedCommandPrefixes.ShouldBe(["docker-binary"]);
         dto.DeniedPatterns.ShouldBe(["docker.pem"]);
     }
 

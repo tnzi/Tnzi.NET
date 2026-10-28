@@ -40,7 +40,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
     [Fact]
     public async Task GetResponseAsync_NoThinkingContext_PassesOptionsUnchanged()
     {
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         var originalOptions = new ChatOptions { Temperature = 0.7f };
 
         await client.GetResponseAsync([], originalOptions);
@@ -60,7 +60,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         ChatOptions? capturedOptions = null;
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -89,7 +89,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         var originalOptions = new ChatOptions();
 
         await client.GetResponseAsync([], originalOptions);
@@ -113,7 +113,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         ChatOptions? capturedOptions = null;
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -138,7 +138,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         ChatOptions? capturedOptions = null;
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -175,7 +175,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         ChatOptions? capturedOptions = null;
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -192,6 +192,121 @@ public class AnthropicThinkingChatClientTests : IDisposable
         raw.Thinking!.Value.ShouldBeOfType<ThinkingConfigEnabled>().BudgetTokens.ShouldBe(4095);
     }
 
+    /// <summary>
+    /// adaptive 型号拒收 budget_tokens：显式预算（含 ThinkingMiddleware 按 MaxTokens 自动分配的那份）不得走
+    /// RawRepresentationFactory 发出 thinking.type=enabled，改按 Effort 走 Reasoning。
+    /// </summary>
+    [Fact]
+    public async Task GetResponseAsync_AdaptiveModel_IgnoresExplicitBudgetAndUsesEffort()
+    {
+        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.Medium, BudgetTokens = 5000 },
+            ProviderName = "Anthropic"
+        };
+
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: true);
+        ChatOptions? capturedOptions = null;
+
+        _innerClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(new ChatResponse([]));
+
+        await client.GetResponseAsync([], new ChatOptions());
+
+        capturedOptions.ShouldNotBeNull();
+        capturedOptions.RawRepresentationFactory.ShouldBeNull();
+        capturedOptions.Reasoning.ShouldNotBeNull();
+        capturedOptions.Reasoning.Effort.ShouldBe(MeaiReasoningEffort.Medium);
+    }
+
+    /// <summary>
+    /// adaptive 型号默认不返回推理文本（display=omitted），框架要的是能显示的推理，所以请求摘要。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetResponseAsync_WithEffort_AsksForReasoningSummaries(bool adaptive)
+    {
+        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.High },
+            ProviderName = "Anthropic"
+        };
+
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: adaptive);
+        ChatOptions? capturedOptions = null;
+
+        _innerClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(new ChatResponse([]));
+
+        await client.GetResponseAsync([], new ChatOptions());
+
+        capturedOptions!.Reasoning!.Output.ShouldBe(ReasoningOutput.Summary);
+    }
+
+    /// <summary>
+    /// 推理上下文跟着整次运行走，单次调用却可以换型号：换上的型号与适配器不是同一种形态（adaptive 客户端上换成
+    /// 只认 budget_tokens 的型号），或根本不支持推理时，不得注入，否则 API 直接 400。
+    /// </summary>
+    [Theory]
+    [InlineData(true, "claude-haiku-4-5")]
+    [InlineData(false, "claude-opus-5-5")]
+    [InlineData(false, "claude-3-5-haiku")]
+    public async Task GetResponseAsync_PerCallModelOfAnotherForm_LeavesOptionsUntouched(bool adaptive, string perCallModel)
+    {
+        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.High },
+            ProviderName = "Anthropic"
+        };
+
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: adaptive);
+        var originalOptions = new ChatOptions { ModelId = perCallModel };
+
+        await client.GetResponseAsync([], originalOptions);
+
+        _innerClient.Verify(c => c.GetResponseAsync(
+            It.IsAny<IEnumerable<ChatMessage>>(),
+            It.Is<ChatOptions?>(o => o == originalOptions && o!.Reasoning == null && o.RawRepresentationFactory == null),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// 克隆不得丢字段：此前手写的克隆漏了 AllowMultipleToolCalls 等后加的选项，一开推理它们就从请求里消失。
+    /// </summary>
+    [Fact]
+    public async Task GetResponseAsync_WithThinking_KeepsEveryOtherOption()
+    {
+        ThinkingRequestPolicy.RequestContext.Value = new ThinkingRequestContext
+        {
+            Thinking = new ThinkingOptions { Effort = ReasoningEffort.High },
+            ProviderName = "Anthropic"
+        };
+
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: true);
+        ChatOptions? capturedOptions = null;
+
+        _innerClient.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((_, opts, _) => capturedOptions = opts)
+            .ReturnsAsync(new ChatResponse([]));
+
+        await client.GetResponseAsync([], new ChatOptions { AllowMultipleToolCalls = false, Temperature = 0.2f });
+
+        capturedOptions!.AllowMultipleToolCalls.ShouldBe(false);
+        capturedOptions.Temperature.ShouldBe(0.2f);
+    }
+
     [Fact]
     public async Task GetResponseAsync_WithThinking_DoesNotMutateOriginalOptions()
     {
@@ -201,7 +316,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         var originalOptions = new ChatOptions { Temperature = 0.5f };
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -226,7 +341,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         ChatOptions? capturedOptions = null;
 
         _innerClient.Setup(c => c.GetResponseAsync(
@@ -245,7 +360,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
     [Fact]
     public async Task GetStreamingResponseAsync_NoThinkingContext_PassesOptionsUnchanged()
     {
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         var originalOptions = new ChatOptions { Temperature = 0.7f };
 
         await client.GetStreamingResponseAsync([], originalOptions).ToListAsync();
@@ -265,7 +380,7 @@ public class AnthropicThinkingChatClientTests : IDisposable
             ProviderName = "Anthropic"
         };
 
-        var client = new AnthropicThinkingChatClient(_innerClient.Object);
+        var client = new AnthropicThinkingChatClient(_innerClient.Object, adaptiveThinking: false);
         var originalOptions = new ChatOptions { Temperature = 0.5f };
         ChatOptions? capturedOptions = null;
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { h, nextTick, ref } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { useFormHostRegistration } from '@tnzi/ui/headless'
 import { TSchemaForm } from '@tnzi/ui'
 import TFormModal from '../../../src/components/crud/TFormModal.vue'
@@ -60,6 +62,77 @@ function makeState(visible = true, mode: 'create' | 'edit' | 'view' = 'create') 
     confirm: vi.fn(async () => ({ name: 'x' })),
   } as any
 }
+
+describe('TFormModal footer switch', () => {
+  const footerSwitch = { key: 'isActive', label: 'Active', hint: 'Inactive records are hidden.' }
+
+  function mountWith(mode: 'create' | 'edit' | 'view', extra: Record<string, unknown> = {}) {
+    const state = makeState(true, mode)
+    state.formData.value = { name: 'x', isActive: true }
+    const wrapper = mount(TFormModal, {
+      props: { state, title: 'Plan', footerSwitch: { ...footerSwitch, ...extra } },
+      global: { stubs },
+    })
+    return { wrapper, state }
+  }
+
+  it('sits at the footer left, opposite the buttons, when editing', () => {
+    const { wrapper } = mountWith('edit')
+    const footer = wrapper.find('.t-form-modal__footer')
+    // First in the footer row; its `margin-right: auto` pushes Cancel / Confirm to the right
+    const children = Array.from(footer.element.children)
+    expect(children[0].classList.contains('t-form-modal__switch')).toBe(true)
+    expect(children.slice(1).map((c) => c.textContent?.trim())).toEqual(['admin.common.cancel', 'admin.common.confirm'])
+    expect(wrapper.find('.t-form-modal__switch').text()).toContain('Active')
+  })
+
+  it('is absent on create and in view mode by default', () => {
+    for (const mode of ['create', 'view'] as const) {
+      const { wrapper } = mountWith(mode)
+      expect(wrapper.find('.t-form-modal__switch').exists()).toBe(false)
+    }
+  })
+
+  it('a page may opt in to show it on create too, never in view mode', () => {
+    expect(mountWith('create', { modes: ['create', 'edit'] }).wrapper.find('.t-form-modal__switch').exists()).toBe(true)
+    expect(mountWith('view', { modes: ['create', 'edit'] }).wrapper.find('.t-form-modal__switch').exists()).toBe(false)
+  })
+
+  it('clicking the label toggles the form field, and so does the switch', async () => {
+    const { wrapper, state } = mountWith('edit')
+    await wrapper.find('.t-form-modal__switch-label').trigger('click')
+    expect(state.formData.value.isActive).toBe(false)
+
+    wrapper.findComponent({ name: 'Switch' }).vm.$emit('update:value', true)
+    await nextTick()
+    expect(state.formData.value.isActive).toBe(true)
+    expect(wrapper.findComponent({ name: 'Switch' }).props('value')).toBe(true)
+  })
+
+  /**
+   * jsdom has no layout, so this cannot see where the switch lands; the real check is visual. It pins the rule
+   * that makes it possible: the modal shell's footer is a `flex-end` row, so unless this footer grows to fill it,
+   * the box shrink-wraps its children and the switch's `margin-right: auto` has nothing to push against (the
+   * switch then renders beside Cancel, as it once did in a real browser).
+   */
+  it('the footer grows to fill the shell footer row, so the switch can sit at its left edge', () => {
+    const source = readFileSync(resolve(__dirname, '../../../src/components/crud/TFormModal.vue'), 'utf8')
+    const style = source.slice(source.indexOf('<style scoped>'))
+    const rule = (selector: string) => {
+      const start = style.indexOf(`${selector} {`)
+      expect(start, selector).toBeGreaterThanOrEqual(0)
+      return style.slice(start, style.indexOf('}', start))
+    }
+    expect(rule('.t-form-modal__footer')).toMatch(/flex-grow:\s*1/)
+    expect(rule('.t-form-modal__switch')).toMatch(/margin-right:\s*auto/)
+  })
+
+  it('without the prop the footer is the buttons alone', () => {
+    const wrapper = mount(TFormModal, { props: { state: makeState(true, 'edit'), title: 'Plan' }, global: { stubs } })
+    expect(wrapper.find('.t-form-modal__switch').exists()).toBe(false)
+    expect(wrapper.findAll('.t-form-modal__footer button')).toHaveLength(2)
+  })
+})
 
 describe('TFormModal', () => {
   it('renders NModal with show from state.visible', () => {
@@ -137,6 +210,63 @@ describe('TFormModal', () => {
       // (The button stub emits `click` AND lets the native click through, so
       // the count is not asserted - the existing Confirm test has the same shape.)
       expect(wrapper.emitted('submit')).toBeTruthy()
+    })
+  })
+
+  /**
+   * A double-clicked Confirm on a create form posted the record twice: both
+   * clicks passed validation and both emitted `submit` before the first save
+   * closed the modal.
+   */
+  describe('one save per Confirm', () => {
+    const loadingButtonStub = {
+      name: 'Button',
+      props: ['loading'],
+      template: '<button :data-loading="loading ? \'yes\' : \'no\'" @click="$emit(\'click\')"><slot /></button>',
+    }
+
+    it('★ emits submit once when Confirm is clicked again while validation is pending', async () => {
+      // Every validation waits on the same gate, so each click that got through
+      // would emit once the gate opens.
+      let release!: (valid: boolean) => void
+      const gate = new Promise<boolean>((resolve) => (release = resolve))
+      const form = participant(true, vi.fn(() => gate))
+      const state = { ...makeState(true, 'create'), submitting: ref(false) }
+      const wrapper = mount(TFormModal, {
+        props: { state, title: 'New' },
+        slots: { default: () => h(form.component) },
+        global: { stubs },
+      })
+      const confirm = wrapper.find('.t-form-modal__confirm')
+      await confirm.trigger('click')
+      await confirm.trigger('click')
+      release(true)
+      await flushPromises()
+      expect(wrapper.emitted('submit')).toHaveLength(1)
+    })
+
+    it('★ does not emit submit while the state reports a save in flight', async () => {
+      const state = { ...makeState(true, 'create'), submitting: ref(true) }
+      const wrapper = mount(TFormModal, {
+        props: { state, title: 'New' },
+        global: { stubs },
+      })
+      await wrapper.find('.t-form-modal__confirm').trigger('click')
+      await nextTick()
+      expect(wrapper.emitted('submit')).toBeUndefined()
+    })
+
+    it('shows the save in flight on the Confirm button', async () => {
+      const state = { ...makeState(true, 'create'), submitting: ref(false) }
+      const wrapper = mount(TFormModal, {
+        props: { state, title: 'New' },
+        global: { stubs: { ...stubs, Button: loadingButtonStub } },
+      })
+      const confirm = () => wrapper.find('.t-form-modal__confirm')
+      expect(confirm().attributes('data-loading')).toBe('no')
+      state.submitting.value = true
+      await nextTick()
+      expect(confirm().attributes('data-loading')).toBe('yes')
     })
   })
 

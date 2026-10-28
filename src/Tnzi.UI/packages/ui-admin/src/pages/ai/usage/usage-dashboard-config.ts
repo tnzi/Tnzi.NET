@@ -1,19 +1,11 @@
 /**
- * Phase 5 Task 5.9 - UsageDashboard pure-data config.
- *
- * Stat-card definitions, chart option factories, and i18n key catalog.
- * Kept dependency-free so it can be unit-tested without mounting the page.
- *
- * Chart library note: vue-echarts is NOT a dependency of @tnzi/ui-admin in
- * Phase 5. Per dispatch instructions, adding it is scope creep; the dashboard
- * renders top-N data in plain lists. The chart-option factories below are
- * defined as pure data so that a future Phase 6 task can wire them into
- * vue-echarts (or any other library) without touching the page component.
+ * UsageDashboard pure-data config: stat-card definitions, the default date
+ * range, top-N selectors and the cost / feedback helpers. Kept dependency-free
+ * so it can be unit-tested without mounting the page.
  */
 import type {
   AgentUsageDto,
   ModelUsageDto,
-  UsageTrendPointDto,
   ProviderCostDto,
   ModelCostDto,
   CostSummaryDto,
@@ -70,45 +62,6 @@ export function topModelsByCost(rows: ModelUsageDto[], n = 10): ModelUsageDto[] 
   return [...rows]
     .sort((a, b) => b.totalEstimatedCostUsd - a.totalEstimatedCostUsd)
     .slice(0, n)
-}
-
-/**
- * Chart-option factory placeholders. When vue-echarts lands in Phase 6 these
- * become EChartsOption builders. For now they are documented stubs returning
- * a discriminated marker so the page can pass a "spec" to the placeholder
- * card and switch to a real chart with a one-line edit.
- */
-export interface ChartSpec {
-  kind: 'line' | 'bar'
-  xAxis: string[]
-  series: Array<{ name: string; data: number[] }>
-}
-
-export function buildTrendChartSpec(points: UsageTrendPointDto[]): ChartSpec {
-  return {
-    kind: 'line',
-    xAxis: points.map((p) => p.period),
-    series: [
-      { name: 'requests', data: points.map((p) => p.totalRequests) },
-      { name: 'tokens', data: points.map((p) => p.totalTokens) },
-    ],
-  }
-}
-
-export function buildAgentBarSpec(rows: AgentUsageDto[]): ChartSpec {
-  return {
-    kind: 'bar',
-    xAxis: rows.map((r) => r.agentName),
-    series: [{ name: 'cost', data: rows.map((r) => r.totalEstimatedCostUsd) }],
-  }
-}
-
-export function buildModelBarSpec(rows: ModelUsageDto[]): ChartSpec {
-  return {
-    kind: 'bar',
-    xAxis: rows.map((r) => `${r.provider}/${r.model}`),
-    series: [{ name: 'cost', data: rows.map((r) => r.totalEstimatedCostUsd) }],
-  }
 }
 
 // ---- Cost breakdown helpers ----------------------------------------------
@@ -173,76 +126,3 @@ export function tagDistributionEntries(
 export function sortFeedbackStats(rows: AgentFeedbackStatsDto[]): AgentFeedbackStatsDto[] {
   return [...rows].sort((a, b) => b.totalRated - a.totalRated)
 }
-
-/**
- * i18n key catalog - populated as comments only. Locale entries are added in
- * Phase 5 cleanup task 5.16. translatePageKey() falls back to the bare key
- * when no translation is registered, so the page stays functional.
- *
- * admin.modules.ai.usageDashboard.title
- * admin.modules.ai.usageDashboard.refresh
- * admin.modules.ai.usageDashboard.loading
- * admin.modules.ai.usageDashboard.errors.partial
- * admin.modules.ai.usageDashboard.filter.startTime
- * admin.modules.ai.usageDashboard.filter.endTime
- * admin.modules.ai.usageDashboard.filter.agent
- * admin.modules.ai.usageDashboard.filter.provider
- * admin.modules.ai.usageDashboard.stats.requests
- * admin.modules.ai.usageDashboard.stats.cost
- * admin.modules.ai.usageDashboard.stats.tokens
- * admin.modules.ai.usageDashboard.charts.trend
- * admin.modules.ai.usageDashboard.charts.byAgent
- * admin.modules.ai.usageDashboard.charts.byModel
- * admin.modules.ai.usageDashboard.charts.placeholder
- * admin.modules.ai.usageDashboard.tabs.{overview,cost,feedback,logs}
- * admin.modules.ai.usageDashboard.cost.{title,totalCost,byProvider,provider,share,requests,model,empty}
- * admin.modules.ai.usageDashboard.feedback.{title,agent,positiveRate,totalRated,tags,empty}
- * admin.modules.ai.usageDashboard.logs.{title,time,operation,model,agent,tokens,cost,duration,result,success,failed,empty}
- */
-export const I18N_KEYS = [
-  'title',
-  'refresh',
-  'loading',
-  'errors.partial',
-  'filter.startTime',
-  'filter.endTime',
-  'filter.agent',
-  'filter.provider',
-  'stats.requests',
-  'stats.cost',
-  'stats.tokens',
-  'charts.trend',
-  'charts.byAgent',
-  'charts.byModel',
-  'charts.placeholder',
-  'tabs.overview',
-  'tabs.cost',
-  'tabs.feedback',
-  'tabs.logs',
-  'cost.title',
-  'cost.totalCost',
-  'cost.byProvider',
-  'cost.provider',
-  'cost.share',
-  'cost.requests',
-  'cost.model',
-  'cost.empty',
-  'feedback.title',
-  'feedback.agent',
-  'feedback.positiveRate',
-  'feedback.totalRated',
-  'feedback.tags',
-  'feedback.empty',
-  'logs.title',
-  'logs.time',
-  'logs.operation',
-  'logs.model',
-  'logs.agent',
-  'logs.tokens',
-  'logs.cost',
-  'logs.duration',
-  'logs.result',
-  'logs.success',
-  'logs.failed',
-  'logs.empty',
-] as const

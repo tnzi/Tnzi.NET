@@ -10,10 +10,17 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
     private readonly ConcurrentDictionary<Type, HashSet<Type>> _runtimeHandlers = new();
     private readonly SemaphoreSlim _concurrencySemaphore;
     private readonly int _maxConcurrency;
+    // 当前异步流是否已经持有一个并发名额：处理器里再发布的嵌套事件沿用它，不再排队
+    private readonly AsyncLocal<bool> _holdsPermit = new();
     private readonly ResiliencePipeline? _retryPipeline;
     // 在飞后台处理器任务跟踪：关闭时排水,避免应用关闭丢失 fire-and-forget 事件处理
     private readonly ConcurrentDictionary<Task, byte> _backgroundTasks = new();
     private volatile bool _disposed;
+
+    /// <summary>
+    /// 以运行时类型重新进入 <see cref="PublishExactTypeAsync{TEvent}"/> 的委托缓存（每个事件类型构造一次）。
+    /// </summary>
+    private static readonly ConcurrentDictionary<Type, Func<LocalEventBus, IEvent, CancellationToken, Task>> RuntimeTypeDispatchers = new();
 
     public LocalEventBus(
         IServiceProvider serviceProvider,
@@ -43,11 +50,45 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         // 处理器现在直接从DI容器动态获取，支持运行时注册
     }
 
+    /// <remarks>
+    /// <para>
+    /// <b>按事件的运行时类型派发</b>，不按调用处的静态类型：领域事件从实体上收下来时是 <see cref="IEvent"/>
+    /// 列表，<c>EventBase e = cond ? new A() : new B()</c> 这种写法也很常见，二者推断出的 <typeparamref name="TEvent"/>
+    /// 都不是事件本身的类型。按静态类型去找 <c>IEventHandler&lt;IEvent&gt;</c> 一个处理器都找不到，
+    /// 只留一条 Debug 日志。转发发生在事务感知延迟之前，处理器查找、死信记录的类型名与序列化都用同一个具体类型。
+    /// </para>
+    /// <para>
+    /// <b>租户在发布那一刻捕获</b>，不在派发那一刻：延迟到提交后的发布执行时，发布方的 <c>Change()</c>
+    /// 作用域通常已经退出（全局工作单元在 Action 返回后才提交）。
+    /// </para>
+    /// </remarks>
     public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default) where TEvent : class, IEvent
     {
         ThrowIfDisposed();
         Check.NotNull(@event);
 
+        var runtimeType = @event.GetType();
+        if (runtimeType != typeof(TEvent) && !runtimeType.IsValueType)
+        {
+            var dispatch = RuntimeTypeDispatchers.GetOrAdd(runtimeType, CreateRuntimeTypeDispatcher);
+            await dispatch(this, @event, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await PublishExactTypeAsync(@event, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Func<LocalEventBus, IEvent, CancellationToken, Task> CreateRuntimeTypeDispatcher(Type runtimeType)
+        => typeof(LocalEventBus)
+            .GetMethod(nameof(DispatchAsRuntimeType), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(runtimeType)
+            .CreateDelegate<Func<LocalEventBus, IEvent, CancellationToken, Task>>();
+
+    private static Task DispatchAsRuntimeType<TRuntime>(LocalEventBus bus, IEvent @event, CancellationToken cancellationToken) where TRuntime : class, IEvent
+        => bus.PublishExactTypeAsync((TRuntime)@event, cancellationToken);
+
+    private async Task PublishExactTypeAsync<TEvent>(TEvent @event, CancellationToken cancellationToken) where TEvent : class, IEvent
+    {
         // 事务感知发布：处于活跃工作单元事务中时,延迟到提交后执行(回滚则丢弃),
         // 使直接注入 IEventBus 的发布也默认具备事务安全性(不产生幽灵事件)
         if (_options.TransactionAwarePublish)
@@ -55,6 +96,9 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
             var ambient = AmbientUnitOfWork.Current;
             if (ambient?.IsTransactionActive == true)
             {
+                // 入队之前捕获：提交后派发时发布方的租户作用域多半已经结束
+                EventTenantContext.CaptureInNewScope(@event, _serviceProvider);
+
                 _logger.LogDebug("Event {EventType} (EventId: {EventId}) published inside an active unit-of-work transaction; deferred until after commit",
                     typeof(TEvent).Name, @event.EventId);
                 ambient.EnqueuePostCommit(ct => PublishCoreAsync(@event, ct));
@@ -83,6 +127,12 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         // 捕获与恢复都走 EventTenantContext —— 分布式传输的两侧也调它，契约不再只有本地总线兑现。
         EventTenantContext.Capture(@event, scope.ServiceProvider);
 
+        // 处理器跑在事件携带的租户下，与后台处理器、分布式消费侧同一条契约。不能只靠发布方的环境租户：
+        // 延迟到提交后的发布在发布方 Change() 退出之后才执行，显式设了 TenantId 的事件也本该在那个租户下处理。
+        // 在解析处理器之前切换（与分布式消费侧同序）：构造时就读租户的处理器也拿到同一个租户。
+        // 无租户的事件不切换（Restore 返回 null）。
+        using var tenantScope = EventTenantContext.Restore(@event, scope.ServiceProvider);
+
         // 获取所有处理器（包括直接匹配和基类匹配的，以及运行时注册的）
         var handlers = GetEventHandlers<TEvent>(eventType, scope.ServiceProvider);
 
@@ -95,26 +145,24 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         _logger.LogDebug("Found {Count} handler(s) for event {EventType}", handlers.Count, eventType.Name);
 
         // 将处理器分为同步组和后台组
-        var syncTasks = new List<Task>();
+        var syncHandlers = new List<object>();
         var backgroundHandlerTypes = new List<Type>();
 
         foreach (var handler in handlers)
         {
             var metadata = EventHandlerInvoker.GetMetadata(handler.Instance.GetType(), eventType);
             if (metadata.IsBackground)
-            {
                 backgroundHandlerTypes.Add(handler.Instance.GetType());
-            }
             else
-            {
-                syncTasks.Add(ExecuteHandlerWithConcurrencyControlAsync(handler.Instance, @event, eventType, cancellationToken));
-            }
+                syncHandlers.Add(handler.Instance);
         }
 
-        // 等待同步处理器完成（即使某些失败，其他处理器也会继续执行）
-        // scope会在这里保持活动，直到同步任务完成
-        if (syncTasks.Count > 0)
-            await Task.WhenAll(syncTasks).ConfigureAwait(false);
+        // 同步处理器逐个执行，不并发：它们共享这一个作用域，也就共享同一个 Scoped DbContext。
+        // 并发启动时第一个处理器一到真实 I/O 的 await 就让出，下一个在同一个 DbContext 上开查询，
+        // EF 抛「A second operation was started on this context instance」，而总线只把它记成一条处理器错误。
+        // 每个处理器各自错误隔离（ExecuteHandlerAsync 内 catch），前一个失败不拦后一个。
+        foreach (var handler in syncHandlers)
+            await ExecuteHandlerWithConcurrencyControlAsync(handler, @event, eventType, cancellationToken).ConfigureAwait(false);
 
         // 由总线自己构造的处理器不归作用域管，用完由总线释放（后台处理器在自己的作用域里另行构造，这里的实例只用来读元数据）
         await DisposeOwnedHandlersAsync(handlers).ConfigureAwait(false);
@@ -130,6 +178,9 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
                 // 后台处理器运行在独立作用域/独立事务中,必须隔离发布者的环境事务上下文,
                 // 防止处理器内的再发布被挂到一个可能已提交/已释放的外部事务队列上
                 AmbientUnitOfWork.Set(null);
+                // 同理不继承发布方持有的并发名额：这是另一条执行流，发布方可能早已归还名额，
+                // 它的再发布与别的顶层发布一样排队
+                _holdsPermit.Value = false;
                 try
                 {
                     using var bgScope = _serviceProvider.CreateScope();
@@ -221,7 +272,10 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
             }
         }
 
-        return allHandlers;
+        // [EventHandlerOrder] 小的先跑；没标的（0）保持上面的收集顺序（OrderBy 是稳定排序）
+        return allHandlers.Count > 1
+            ? allHandlers.OrderBy(h => EventHandlerInvoker.GetMetadata(h.Instance.GetType(), eventType).Order).ToList()
+            : allHandlers;
     }
 
     /// <summary>
@@ -321,8 +375,19 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         CancellationToken cancellationToken)
         where TEvent : class, IEvent
     {
+        // 处理器里再发布的嵌套事件沿用外层已持有的名额，不再排队。名额在外层处理器执行期间一直被占着，
+        // 嵌套发布若再去等，外层处理器占满全部名额时谁也等不到谁：这些请求永远挂起（嵌套发布多半不带令牌，
+        // 等待不会超时），之后每一次带同步处理器的发布都排在它们后面，整条本地总线卡死到重启。
+        // 嵌套发布挂在外层处理器的 await 链上，外层处理器不结束，名额就不归还。
+        if (_holdsPermit.Value)
+        {
+            await ExecuteHandlerAsync(handler, @event, eventType, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         // 等待信号量，限制并发数
         await _concurrencySemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _holdsPermit.Value = true;
 
         try
         {
@@ -330,6 +395,7 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
         }
         finally
         {
+            _holdsPermit.Value = false;
             // 释放信号量
             _concurrencySemaphore.Release();
         }
@@ -403,7 +469,8 @@ public class LocalEventBus : ILocalEventBus, IDisposable, IAsyncDisposable
                 try
                 {
                     await _deadLetterQueue.AddAsync(@event, handlerType, ex, cancellationToken).ConfigureAwait(false);
-                    _logger.LogInformation("Failed event {EventId} added to dead letter queue", @event.EventId);
+                    _logger.LogInformation("Failed event {EventId} added to dead letter queue for handler {HandlerType}",
+                        @event.EventId, handlerType.Name);
                 }
                 catch (Exception dlqEx)
                 {

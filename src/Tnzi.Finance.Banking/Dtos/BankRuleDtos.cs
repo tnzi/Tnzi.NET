@@ -97,7 +97,7 @@ public class TestBankRuleDto
 /// </summary>
 public class BankRuleTestResultDto
 {
-    /// <summary>评估的待匹配流水数</summary>
+    /// <summary>评估的待匹配流水数（最近的至多 2000 条）</summary>
     public int Evaluated { get; set; }
 
     /// <summary>命中数</summary>

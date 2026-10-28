@@ -9,6 +9,12 @@ namespace Tnzi.Redis.Locking;
 /// 当 <see cref="LockOptions.EnableAutoRenewal"/> 为 true（默认）时，持锁句柄会启动后台看门狗，
 /// 在锁过期前周期性续租，使长任务不会因固定过期时间而中途丢锁；持锁进程崩溃时看门狗随之消失，
 /// 锁仍会在过期时间内自动释放，因此不会造成死锁。关闭续租则为固定过期语义。
+/// <para>
+/// ★ 锁键带实例名前缀：<c>{instanceName}:lock:{key}</c>（与缓存键同一口径，实例名为空时是 <c>lock:{key}</c>）。
+/// 框架自己的后台作业锁键是常量（<c>Tnzi:Outbox:Relay</c>、<c>Tnzi:Audit:RetentionPurge</c>、<c>Tnzi:Audit:DataDestruction</c>），
+/// 不带前缀的话，两个共用一个 Redis、各配了不同 <c>Caching:RedisInstanceName</c> 的应用（或预发与生产）缓存已隔离而锁仍互斥：
+/// 一方持锁期间另一方的中继与清理整轮跳过，手动触发的数据销毁答「锁被占用」。
+/// </para>
 /// </remarks>
 public class RedisDistributedLock : IDistributedLock
 {
@@ -16,17 +22,27 @@ public class RedisDistributedLock : IDistributedLock
     private readonly TimeSpan _defaultExpiry;
     private readonly bool _autoRenew;
     private readonly ILoggerFactory? _loggerFactory;
+    private readonly string _keyPrefix;
 
+    /// <summary>
+    /// 初始化一个<see cref="RedisDistributedLock"/>类型的新实例
+    /// </summary>
+    /// <param name="redis">Redis 连接</param>
+    /// <param name="options">锁选项</param>
+    /// <param name="loggerFactory">日志工厂（可选）</param>
+    /// <param name="instanceName">实例名（<c>Caching:RedisInstanceName</c>），作为锁键前缀隔离共用同一 Redis 的应用</param>
     public RedisDistributedLock(
         IConnectionMultiplexer redis,
         LockOptions? options = null,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        string? instanceName = null)
     {
         _redis = Check.NotNull(redis);
         options ??= new LockOptions();
         _defaultExpiry = TimeSpan.FromSeconds(options.DefaultExpirySeconds > 0 ? options.DefaultExpirySeconds : 30);
         _autoRenew = options.EnableAutoRenewal;
         _loggerFactory = loggerFactory;
+        _keyPrefix = string.IsNullOrEmpty(instanceName) ? "lock:" : $"{instanceName}:lock:";
     }
 
     /// <inheritdoc />
@@ -37,7 +53,7 @@ public class RedisDistributedLock : IDistributedLock
     {
         Check.NotNullOrWhiteSpace(key);
 
-        var lockKey = $"lock:{key}";
+        var lockKey = _keyPrefix + key;
         var lockValue = Guid.NewGuid().ToString();
         var db = _redis.GetDatabase();
 
@@ -54,7 +70,7 @@ public class RedisDistributedLock : IDistributedLock
                 var acquired = await db.StringSetAsync(lockKey, lockValue, _defaultExpiry, When.NotExists);
                 if (acquired)
                 {
-                    return CreateHandle(db, lockKey, lockValue);
+                    return CreateHandle(db, key, lockKey, lockValue);
                 }
 
                 await Task.Delay(retryDelay, cancellationToken);
@@ -68,7 +84,7 @@ public class RedisDistributedLock : IDistributedLock
             var acquired = await db.StringSetAsync(lockKey, lockValue, _defaultExpiry, When.NotExists);
             if (acquired)
             {
-                return CreateHandle(db, lockKey, lockValue);
+                return CreateHandle(db, key, lockKey, lockValue);
             }
 
             return null;
@@ -85,10 +101,10 @@ public class RedisDistributedLock : IDistributedLock
         return (handle != null, handle);
     }
 
-    private RedisDistributedLockHandle CreateHandle(IDatabase db, string lockKey, string lockValue)
+    private RedisDistributedLockHandle CreateHandle(IDatabase db, string key, string lockKey, string lockValue)
     {
         var logger = _loggerFactory?.CreateLogger<RedisDistributedLockHandle>();
-        return new RedisDistributedLockHandle(db, lockKey, lockValue, _defaultExpiry, _autoRenew, logger);
+        return new RedisDistributedLockHandle(db, lockKey, lockValue, _defaultExpiry, _autoRenew, logger, key);
     }
 }
 
@@ -115,6 +131,7 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
 
     private readonly IDatabase _db;
     private readonly string _lockKey;
+    private readonly string? _key;
     private readonly string _lockValue;
     private readonly TimeSpan _expiry;
     private readonly ILogger? _logger;
@@ -129,7 +146,10 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
     private volatile bool _isDisposed;
     private volatile bool _lockLost;
 
-    public string Key => _lockKey.StartsWith("lock:") ? _lockKey[5..] : _lockKey;
+    /// <summary>
+    /// 调用方获取锁时传入的键（不含实例前缀与 <c>lock:</c>）。
+    /// </summary>
+    public string Key => _key ?? (_lockKey.StartsWith("lock:") ? _lockKey[5..] : _lockKey);
 
     /// <summary>
     /// 是否仍持有锁。已释放或续租失败（锁丢失）后为 false。
@@ -147,16 +167,25 @@ public class RedisDistributedLockHandle : IDistributedLockHandle
     {
     }
 
+    /// <param name="db">Redis 数据库</param>
+    /// <param name="lockKey">Redis 里的完整锁键</param>
+    /// <param name="lockValue">本次持有的令牌</param>
+    /// <param name="expiry">锁过期时间</param>
+    /// <param name="autoRenew">是否启动续租看门狗</param>
+    /// <param name="logger">日志</param>
+    /// <param name="key">调用方的锁键；不传时从 <paramref name="lockKey"/> 去掉 <c>lock:</c> 前缀得到</param>
     public RedisDistributedLockHandle(
         IDatabase db,
         string lockKey,
         string lockValue,
         TimeSpan expiry,
         bool autoRenew,
-        ILogger? logger)
+        ILogger? logger,
+        string? key = null)
     {
         _db = Check.NotNull(db);
         _lockKey = Check.NotNullOrWhiteSpace(lockKey);
+        _key = key;
         _lockValue = Check.NotNullOrWhiteSpace(lockValue);
         _expiry = expiry > TimeSpan.Zero ? expiry : TimeSpan.FromSeconds(30);
         _logger = logger;

@@ -13,7 +13,11 @@
  * Form rule
  */
 export interface IFormRule {
-  /** Whether required */
+  /**
+   * Whether required. A string of only whitespace counts as missing, like an
+   * empty one (the backend's [Required] refuses it); the value itself is
+   * never trimmed.
+   */
   required?: boolean;
   /** Error message */
   message?: string;

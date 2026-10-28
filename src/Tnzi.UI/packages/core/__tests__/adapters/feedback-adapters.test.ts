@@ -114,13 +114,32 @@ describe('message adapter fallback', () => {
 });
 
 describe('dialog adapter fallback', () => {
-  it('resolves confirm to true and prompt to null so headless callers can proceed', async () => {
+  it('never answers yes on the user\'s behalf when there is no way to ask', async () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const dialog = useDialog();
     await expect(dialog.alert('hello')).resolves.toBeUndefined();
-    await expect(dialog.confirm('sure?')).resolves.toBe(true);
+    // A confirm guards destructive actions (the app-update prompt reloads the
+    // page); auto-approving it in an app that never installed an adapter
+    // performs the action unasked.
+    await expect(dialog.confirm('sure?')).resolves.toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sure?'));
     await expect(dialog.prompt('name?')).resolves.toBeNull();
+  });
+
+  it('asks through the native confirm in a browser without an adapter', async () => {
+    const nativeConfirm = vi.fn(() => true);
+    vi.stubGlobal('window', { confirm: nativeConfirm });
+    try {
+      await expect(useDialog().confirm('reload?')).resolves.toBe(true);
+      expect(nativeConfirm).toHaveBeenCalledWith('reload?');
+
+      nativeConfirm.mockReturnValue(false);
+      await expect(useDialog().confirm('reload?')).resolves.toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('prefers the installed adapter', async () => {

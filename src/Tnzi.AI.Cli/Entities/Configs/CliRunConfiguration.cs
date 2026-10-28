@@ -11,10 +11,15 @@ public class CliRunConfiguration : EntityTypeConfigurationBase<CliRun, Guid>
         var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
 
         builder.Property(e => e.ProviderSessionId).HasMaxLength(200);
+        builder.Property(e => e.ProviderSessionEntryId).HasMaxLength(200);
+        builder.Property(e => e.ResumeAtEntryId).HasMaxLength(200);
         builder.Property(e => e.WorkDirectory).HasMaxLength(1000);
+        builder.Property(e => e.AssignedWorkDirectory).HasMaxLength(1000);
         builder.Property(e => e.ClaimedByHostId).HasMaxLength(200);
         builder.Property(e => e.EstimatedCostUsd).HasPrecision(18, 6);
         builder.Property(e => e.WriteBackTokenHash).HasMaxLength(128);
+        builder.Property(e => e.Model).HasMaxLength(200);
+        builder.Property(e => e.ReattachHandle).HasMaxLength(500);
 
         // 回写凭据校验是按哈希查找的热路径（每次 MCP 请求一次）。
         builder.HasIndex(e => e.WriteBackTokenHash);

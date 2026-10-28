@@ -5,7 +5,7 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 /// </summary>
 /// <remarks>
 /// 配置项：
-/// - condition: 条件表达式，支持以下格式：
+/// - condition: 条件表达式（缺失或为空白时取步骤的 Condition 字段，可视化编辑器写在那里；此时引擎不再把它当执行门控），支持以下格式：
 ///   - 简单值匹配：直接输出匹配值（如 "accept"）
 ///   - 模板变量：{{stepId}} 引用前置步骤输出（仅支持整步输出，不支持 {{stepId.field}} 这类字段路径）
 ///   - 默认路由：当条件无法评估时使用 "default" 路由
@@ -30,28 +30,19 @@ public class ConditionalNode : IWorkflowNode
         var config = step.Configuration ?? new Dictionary<string, string>();
 
         // 获取条件表达式
-        var condition = config.TryGetValue("condition", out var cond) ? cond : step.Condition;
-
-        if (string.IsNullOrWhiteSpace(condition))
-        {
-            _logger.LogWarning("Conditional node '{StepId}' has no condition configured", step.StepId);
-            return Task.FromResult(new WorkflowNodeResult
-            {
-                Output = new WorkflowStepOutput
-                {
-                    Text = string.Empty,
-                    Metadata = new Dictionary<string, string> { ["route"] = "default" }
-                },
-                IsSuccess = true,
-                RouteTo = "default"
-            });
-        }
+        var condition = GetRouteExpression(step);
 
         // 解析模板变量
-        var resolvedCondition = state.ResolveTemplate(condition);
+        var resolvedCondition = string.IsNullOrWhiteSpace(condition) ? string.Empty : state.ResolveTemplate(condition);
 
-        // 尝试从上游元数据中获取路由值
+        // 尝试从上游元数据中获取路由值。条件为空时也要先看上游：review / router 后面的条件节点
+        // 本来就只靠上游的 verdict / route 路由，此前空条件直接答 default，上游的裁决被丢掉。
         var routeValue = ResolveRouteValue(resolvedCondition, context);
+
+        if (string.IsNullOrWhiteSpace(condition) && routeValue == "default")
+        {
+            _logger.LogWarning("Conditional node '{StepId}' has no condition configured and no upstream verdict or route", step.StepId);
+        }
 
         _logger.LogDebug("Conditional node '{StepId}' evaluated to route: {Route}", step.StepId, routeValue);
 
@@ -65,6 +56,36 @@ public class ConditionalNode : IWorkflowNode
             IsSuccess = true,
             RouteTo = routeValue
         });
+    }
+
+    /// <summary>
+    /// 条件节点的路由表达式：<c>Configuration["condition"]</c>，没有（或为空白）时取 <see cref="WorkflowStepDto.Condition"/>。
+    /// </summary>
+    internal static string? GetRouteExpression(WorkflowStepDto step)
+    {
+        var config = step.Configuration;
+        if (config != null && config.TryGetValue("condition", out var configured) && !string.IsNullOrWhiteSpace(configured))
+            return configured;
+
+        return step.Condition;
+    }
+
+    /// <summary>
+    /// 条件节点把 <see cref="WorkflowStepDto.Condition"/> 当作自己的路由表达式时为 true，此时它不是引擎的执行门控。
+    /// </summary>
+    /// <remarks>
+    /// ★ 可视化编辑器对条件节点只给一个「条件」字段，写的就是 <see cref="WorkflowStepDto.Condition"/>。引擎对任意节点
+    /// 都把这个字段当 fail-closed 门控（只认 <c>true</c>/<c>1</c>/<c>yes</c>），于是填了 <c>accept</c> 或 <c>{{review}}</c>
+    /// 的条件节点整个被跳过：没有 RouteTo，条件边不生效，下游所有分支都跑。路由表达式只能有一种读法；
+    /// 配置键里另有表达式时，<see cref="WorkflowStepDto.Condition"/> 仍是门控。
+    /// </remarks>
+    internal static bool UsesStepConditionAsRouteExpression(WorkflowStepDto step)
+    {
+        if (!string.Equals(WorkflowStepNodeType.Get(step), WorkflowNodeTypes.Conditional, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var config = step.Configuration;
+        return config == null || !config.TryGetValue("condition", out var configured) || string.IsNullOrWhiteSpace(configured);
     }
 
     /// <summary>

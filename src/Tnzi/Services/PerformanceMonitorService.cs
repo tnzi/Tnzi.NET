@@ -54,16 +54,22 @@ public class PerformanceMonitorService : IPerformanceMonitorService, IDisposable
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// ★ 键<b>不</b>作为指标标签导出。这个 Meter 在加载 OpenTelemetry 模块后默认导出，而缓存键里有个人数据
+    /// （按邮箱 / 手机号限流的验证码键、按用户分区的权限键）：以键为标签等于把它们写进监控后端长期留存，
+    /// 且时间序列数随用户量无界增长。按冒号截取前缀也不安全（键可以以邮箱开头），所以计数器不带任何标签。
+    /// </remarks>
     public void RecordCacheHit(string cacheKey)
     {
-        _cacheHitCounter.Add(1, new KeyValuePair<string, object?>("key", cacheKey));
+        _cacheHitCounter.Add(1);
         Interlocked.Increment(ref _totalCacheHits);
     }
 
     /// <inheritdoc />
+    /// <remarks>键不作为指标标签导出，理由见 <see cref="RecordCacheHit"/>。</remarks>
     public void RecordCacheMiss(string cacheKey)
     {
-        _cacheMissCounter.Add(1, new KeyValuePair<string, object?>("key", cacheKey));
+        _cacheMissCounter.Add(1);
         Interlocked.Increment(ref _totalCacheMisses);
     }
 

@@ -75,10 +75,13 @@ public class WorkflowDelegator : IWorkflowDelegator
 
             if (!isApproved)
             {
-                foreach (var node in awaitingNodes)
+                // 拒绝作用于整次暂停：RejectStepAsync 让执行失败并一并清掉其余等待中的审批，所以只调一次。
+                // 此前逐个节点调用，第二次因执行已 Failed 被拒（不在审批中），请求失败而运行行停在 AwaitingApproval，
+                // 此后批准与拒绝都走不通。
+                if (awaitingNodes.Count > 0)
                 {
                     var rejectResult = await _workflowService.RejectStepAsync(
-                        executionId, node.NodeName,
+                        executionId, awaitingNodes[0].NodeName,
                         input.ApprovalComment ?? "Rejected by reviewer", ct);
 
                     if (!rejectResult.Succeeded)
@@ -88,7 +91,10 @@ public class WorkflowDelegator : IWorkflowDelegator
                             rejectResult.ErrorCode ?? ErrorCodes.WorkflowFailed,
                             rejectResult.Code ?? 500);
                     }
+                }
 
+                foreach (var node in awaitingNodes)
+                {
                     node.Status = AgentRunNodeStatus.Rejected;
                     node.Error = input.ApprovalComment;
                     await _runStore.UpdateNodeAsync(node, ct);
@@ -124,8 +130,10 @@ public class WorkflowDelegator : IWorkflowDelegator
                         approveResult.Code ?? 500);
                 }
 
+                // Output 不改：run-then-gate 节点（内容节点上的 requiresApproval）暂停前已执行完，记录里
+                // 就是被批准的内容，恢复时引擎不会重跑它，被评语覆盖的记录会把评语显示成节点产出。
+                // 审批节点恢复时由引擎写入真实输出。评语随 ApproveStepAsync 记在检查点的审批元数据里。
                 node.Status = AgentRunNodeStatus.Approved;
-                node.Output = input.ApprovalComment ?? node.Output;
                 await _runStore.UpdateNodeAsync(node, ct);
             }
         }

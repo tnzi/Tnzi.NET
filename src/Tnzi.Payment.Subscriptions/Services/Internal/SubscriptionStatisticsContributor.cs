@@ -15,6 +15,14 @@
 /// 两个例外是显式的：<c>NewSubscriptionsThisMonth</c> 衡量获客（一次试用开通就是一次获客），
 /// 流失率的分子分母都含试用（分子数的是所有取消，分母排掉试用会让比率系统性偏高）。
 /// </para>
+/// <para>
+/// ★ <b>流失率口径：分子 = 本月提出的取消，分母 = 月初在册的订阅。</b>
+/// 「取消」按 <c>CancelTime</c> 落在本月计，不看现在的状态：默认的「到期取消」把订阅置为
+/// <c>PendingRenewal</c>、到点由过期扫描置为 <c>Expired</c>，从来不会成为 <c>Cancelled</c>。
+/// 恢复订阅会清掉 <c>CancelTime</c>，所以撤回的取消不计。欠费到期（没人提出取消）不在分子里：
+/// 它是非自愿流失，与「取消」是两件事。分子分母都只数真正开始过的订阅（开过试用或付过订阅款）：
+/// 首期单没付成而被系统收口的 <c>Pending</c> 同样带着 <c>CancelTime</c>，它们不是订户，结束也不是流失。
+/// </para>
 /// </remarks>
 public class SubscriptionStatisticsContributor : IPaymentStatisticsContributor
 {
@@ -58,19 +66,30 @@ public class SubscriptionStatisticsContributor : IPaymentStatisticsContributor
                 && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial),
                 cancellationToken);
 
-        // 本月取消订阅
+        // 本月取消订阅：按「本月提出取消」计，不论现在是什么状态。
+        // ★ 此前只数 Status == Cancelled，而默认的「到期取消」把订阅置为 PendingRenewal、到点再变 Expired，
+        //   永远不会成为 Cancelled，本月按默认方式退订的人一个都不进流失率，看板上可以是 0%。
+        // ★ 只数真正开始过的订阅（开过试用或付过订阅款）：首期单没付成的 Pending 被系统收口为 Cancelled 时同样带着
+        //   CancelTime，算进来就是把每一次结账放弃记成一次流失。判据与「是否订阅过」的探针、恢复守卫同一个。
         var cancelledThisMonth = await _subscriptionRepository.AsNoTracking()
-            .CountAsync(s => s.Status == SubscriptionStatus.Cancelled
-                && s.CancelTime != null && s.CancelTime >= monthStart,
+            .CountAsync(s => s.CancelTime != null && s.CancelTime >= monthStart
+                && (s.TrialStartTime != null || (s.LastBillingTradeNo != null && s.LastBillingTradeNo != "") || s.PaidAmount > 0),
                 cancellationToken);
 
-        // 上月活跃数（用于流失率计算）：创建时间在本月前 + 当时活跃或本月才取消。
+        // 月初在册数（流失率分母）：创建在本月之前，且月初时还没结束：
+        // 现在仍是非终态（含等续费、欠费、暂停），或本月才提出取消、本月才到期。
         // ★ 同样刻意包含 Trial：分子 cancelledThisMonth 数的是**所有**取消（含试用期内退出），
         // 分母排掉试用会让比率系统性偏高。分子分母同口径优先于与 ActiveSubscriptions 同口径。
+        // 同样只数真正开始过的（与分子同一个判据）：上月建单、首期单本月才过期的 Pending 月初并不在册。
         var lastMonthActive = await _subscriptionRepository.AsNoTracking()
             .CountAsync(s => s.CreationTime < monthStart
+                && (s.TrialStartTime != null || (s.LastBillingTradeNo != null && s.LastBillingTradeNo != "") || s.PaidAmount > 0)
                 && (s.Status == SubscriptionStatus.Active || s.Status == SubscriptionStatus.Trial
-                    || (s.Status == SubscriptionStatus.Cancelled && s.CancelTime >= monthStart)),
+                    || s.Status == SubscriptionStatus.PendingRenewal || s.Status == SubscriptionStatus.PastDue
+                    || s.Status == SubscriptionStatus.Suspended
+                    || s.Status == SubscriptionStatus.Paused
+                    || (s.CancelTime != null && s.CancelTime >= monthStart)
+                    || (s.Status == SubscriptionStatus.Expired && s.EndTime != null && s.EndTime >= monthStart)),
                 cancellationToken);
 
         var churnRate = lastMonthActive > 0

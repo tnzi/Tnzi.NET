@@ -5,6 +5,10 @@
  * Self-contained: clicks emit `reload`, the consumer flips `loading` (or
  * passes a promise via `onReload`) and the icon rotates 360 degrees once
  * per spin cycle.
+ *
+ * `@reload="fn"` and `:on-reload="fn"` are the same vnode prop, so a handler
+ * given either way arrives as the `onReload` prop and is run (and awaited)
+ * exactly once per click.
  */
 import { ref, computed } from 'vue'
 import TButtonIcon from '../display/TButtonIcon.vue'
@@ -31,8 +35,9 @@ const internal = ref(false)
 const spinning = computed(() => props.loading ?? internal.value)
 
 async function handleClick(): Promise<void> {
-  emit('reload')
   if (props.onReload) {
+    // Not emitted as well: `emit('reload')` would call this same handler a
+    // second time, since Vue resolves it from the vnode's `onReload`.
     internal.value = true
     try {
       await props.onReload()
@@ -40,6 +45,7 @@ async function handleClick(): Promise<void> {
       internal.value = false
     }
   } else {
+    emit('reload')
     // Brief visual confirmation for fire-and-forget callers.
     internal.value = true
     setTimeout(() => {

@@ -18,6 +18,7 @@ export interface BankRuleRow {
   docType?: string
   counterAccountId?: string | null
   counterAccountName?: string | null
+  partyId?: string | null
   paymentMethod?: string | null
   autoApply?: boolean
   conditions?: BankRuleConditionDto[]

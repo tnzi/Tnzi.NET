@@ -11,6 +11,7 @@ internal sealed class MemoryContributor : IContextProviderContributor
     private readonly IOptionsMonitor<AIOptions> _options;
     private readonly IAgentExecutionContextAccessor _executionContextAccessor;
     private readonly IMemoryConsolidator? _memoryConsolidator;
+    private readonly IAgentThreadInternalService? _threadService;
     private readonly ILoggerFactory _loggerFactory;
 
     public int Order => ContextProviderOrders.Memory;
@@ -21,7 +22,8 @@ internal sealed class MemoryContributor : IContextProviderContributor
         IOptionsMonitor<AIOptions> options,
         IAgentExecutionContextAccessor executionContextAccessor,
         ILoggerFactory loggerFactory,
-        IMemoryConsolidator? memoryConsolidator = null)
+        IMemoryConsolidator? memoryConsolidator = null,
+        IAgentThreadInternalService? threadService = null)
     {
         _memoryStore = Check.NotNull(memoryStore);
         _chatClientFactory = Check.NotNull(chatClientFactory);
@@ -29,6 +31,7 @@ internal sealed class MemoryContributor : IContextProviderContributor
         _executionContextAccessor = Check.NotNull(executionContextAccessor);
         _loggerFactory = Check.NotNull(loggerFactory);
         _memoryConsolidator = memoryConsolidator;
+        _threadService = threadService;
     }
 
     public IContextProvider? TryCreate(ContextProviderCreationContext context)
@@ -60,7 +63,10 @@ internal sealed class MemoryContributor : IContextProviderContributor
                 memoryOptions,
                 _memoryConsolidator,
                 _executionContextAccessor,
-                agentBoundScope);
+                agentBoundScope,
+                // 自动沉淀的节流按线程记账（本实例每个请求新建一次）
+                _threadService,
+                context.ThreadId);
         }
         catch (Exception ex)
         {

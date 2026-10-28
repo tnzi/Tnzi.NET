@@ -142,6 +142,39 @@ public static class HttpContextExtensions
     }
 
     /// <summary>
+    /// 当前请求的路径，其中值命中敏感名单的<b>路由参数</b>换成 <c>***</c>。
+    /// 要把路径写进持久存储（审计表、访问日志表、性能指标）或日志的地方用它，不用 <c>Request.Path</c>。
+    /// </summary>
+    /// <param name="context">HTTP 上下文</param>
+    /// <param name="sensitiveRouteKeys">
+    /// 敏感的路由参数名（不区分大小写，精确匹配）。缺省为 <see cref="QueryStringRedactor.DefaultSensitiveKeys"/>：
+    /// 与查询串脱敏同一份名单：同一个凭据放在 <c>?token=</c> 里会被掩、放在 <c>/{token}</c> 里却原样入表，没有道理。
+    /// </param>
+    /// <returns>脱敏后的路径；没有匹配到端点或没有敏感路由参数时原样返回。</returns>
+    /// <remarks>
+    /// <para>
+    /// ★ 框架自己就把凭据放进路径：签署链接 <c>signing/{token}</c>、分享链接 <c>files/share/{token}</c>。
+    /// 查询串的凭据早已脱敏，路径段从未处理：这些令牌一行行落进了
+    /// <c>Audit_Operation.Url</c> 与 <c>Sys_AccessLog.Path</c>，读得到那两张表的人（或一份数据库备份）
+    /// 拿到的就是一叠能用的链接，「令牌只存哈希」的承诺被日志表整个绕过。
+    /// </para>
+    /// <para>
+    /// 判定按路由参数<b>名</b>做，所以要求路由已经匹配（<c>Request.RouteValues</c> 已填好）：
+    /// 在路由之后的中间件里、或下游返回之后调用。比对规则见核心的 <see cref="RequestPathRedactor"/>。
+    /// </para>
+    /// </remarks>
+    public static string GetRedactedPath(this HttpContext context, IReadOnlyCollection<string>? sensitiveRouteKeys = null)
+    {
+        Check.NotNull(context);
+
+        return RequestPathRedactor.Redact(
+                context.Request.Path.Value,
+                context.Request.RouteValues,
+                sensitiveRouteKeys ?? QueryStringRedactor.DefaultSensitiveKeys)
+            ?? string.Empty;
+    }
+
+    /// <summary>
     /// 获取 User-Agent
     /// </summary>
     /// <param name="context">HTTP 上下文</param>
@@ -308,6 +341,96 @@ public static class HttpContextExtensions
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 请求命中的路由端点的规范模板，例如 <c>/api/users/{id}</c>；没有命中路由端点时为 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 用作「这是哪个端点」的分组键（限流的路径维度、性能统计的端点行）：同一个端点无论用什么大小写、
+    /// 带不带末尾斜杠、填了哪个 id 来调，键都一样。
+    /// </para>
+    /// <para>
+    /// 不直接用 <c>RoutePattern.RawText</c>：约定路由（<c>{controller=Home}/{action=Index}/{id?}</c>）的每个 action
+    /// 都是一个独立端点，却共用同一段原始模板，直接用会把所有约定路由的 action 并成一个。
+    /// 这里把端点的必需值（controller / action / area）代回对应参数，其余参数一律写成 <c>{name}</c>（不带约束），整体小写。
+    /// </para>
+    /// <para>端点由路由中间件选出，在它之前调用（或宿主没有启用端点路由）时同样为 <c>null</c>。</para>
+    /// </remarks>
+    /// <param name="context">HTTP 上下文</param>
+    /// <returns>规范模板，或 <c>null</c></returns>
+    public static string? GetEndpointRouteTemplate(this HttpContext context)
+    {
+        Check.NotNull(context);
+
+        if (context.GetEndpoint() is not RouteEndpoint endpoint)
+        {
+            return null;
+        }
+
+        var pattern = endpoint.RoutePattern;
+        var builder = new StringBuilder();
+        foreach (var segment in pattern.PathSegments)
+        {
+            builder.Append('/');
+            foreach (var part in segment.Parts)
+            {
+                switch (part)
+                {
+                    case RoutePatternLiteralPart literal:
+                        builder.Append(literal.Content);
+                        break;
+
+                    case RoutePatternSeparatorPart separator:
+                        builder.Append(separator.Content);
+                        break;
+
+                    case RoutePatternParameterPart parameter
+                        when pattern.RequiredValues.TryGetValue(parameter.Name, out var required)
+                             && required is string { Length: > 0 } requiredValue:
+                        builder.Append(requiredValue);
+                        break;
+
+                    case RoutePatternParameterPart parameter:
+                        builder.Append('{').Append(parameter.Name).Append('}');
+                        break;
+                }
+            }
+        }
+
+        return builder.Length == 0 ? "/" : builder.ToString().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// 这个请求是不是一条长连接：WebSocket、SignalR Hub 的连接请求（含 SSE / 长轮询传输，不含 negotiate）、
+    /// 或者 <c>text/event-stream</c> 响应。
+    /// </summary>
+    /// <remarks>
+    /// 长连接的「耗时」是整条连接的存活时长，不是处理时长：按耗时判慢请求、算分位数时要把它们排除，
+    /// 否则每次断开都是一条「慢请求」，真正慢的接口被淹没在里面。
+    /// 前两种在进入下游之前就认得出来；事件流要等响应写出 <c>Content-Type</c> 之后才认得出来。
+    /// </remarks>
+    /// <param name="context">HTTP 上下文</param>
+    /// <returns>是长连接则为 true</returns>
+    public static bool IsLongLivedConnection(this HttpContext context)
+    {
+        Check.NotNull(context);
+
+        if (context.WebSockets.IsWebSocketRequest)
+        {
+            return true;
+        }
+
+        var metadata = context.GetEndpoint()?.Metadata;
+        if (metadata?.GetMetadata<HubMetadata>() != null && metadata.GetMetadata<NegotiateMetadata>() == null)
+        {
+            return true;
+        }
+
+        var contentType = context.Response.ContentType;
+        return contentType != null
+            && contentType.StartsWith("text/event-stream", StringComparison.OrdinalIgnoreCase);
     }
 }
 

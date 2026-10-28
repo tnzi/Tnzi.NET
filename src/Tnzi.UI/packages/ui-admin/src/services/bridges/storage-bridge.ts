@@ -6,16 +6,11 @@
  *
  * Sub-contracts:
  *   - files    → useAdminFileApi (full CRUD + chunked upload + downloadUrl)
- *   - chunks   → stub (no standalone admin chunk query endpoint in backend)
- *   - versions → stub (versions are accessed per-file; no standalone paged admin endpoint)
+ *   - chunks   → paged audit list (/admin/storage/audit/chunks), read-only
+ *   - versions → paged audit list (/admin/storage/audit/versions) + one file's history
+ *                (list / upload / restore / download / delete on /files/{id}/versions)
  *
  * BACKEND GAPS:
- *   - chunks.fetch: DefaultStorageAdminController has no GET /admin/chunks paged endpoint.
- *     Chunk data is accessed via upload session context only. Stub rejects.
- *   - versions.fetch: File versions are accessed per-file (GET /files/{id}/versions),
- *     not via a standalone paged admin endpoint. Stub rejects.
- *   - versions.restore: Version restore is per-file (POST /files/{id}/versions/{n}/restore).
- *     Without a standalone version record ID → file mapping, this is a stub.
  *   - files.create / files.update: The admin API has no dedicated create/update form endpoints;
  *     file creation goes through chunked upload. These stubs reject.
  */
@@ -41,6 +36,7 @@ import {
   useAdminStorageAuditApi,
   type FileChunkAuditDto,
   type FileVersionAuditDto,
+  type FileVersionDto,
 } from '@tnzi/core/services/storage'
 import type { BridgeCrudContract, CrudPageQuery, CrudPageResult } from '../types'
 import { ensureOk, mapQueryToListRequest, pagedResult, unwrapResult as unwrap, unwrapOk } from '../_mappers'
@@ -65,6 +61,8 @@ export interface ChunkUploader {
 }
 
 export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> {
+  /** One file record by id (rejects when it does not exist or the caller cannot read it). */
+  get(id: string): Promise<FileRecordDto>
   /**
    * Direct download URL, unsigned. Only works for PUBLIC files - a browser
    * request carries no Authorization header. Use `signedUrl` for anything else.
@@ -86,8 +84,14 @@ export interface StorageFilesContract extends BridgeCrudContract<FileRecordDto> 
   signedUrl(id: string, kind?: FileUrlKind): Promise<string | null>
   /** Signed URLs for many files at once. Unreadable ids are absent from the map. */
   signedUrls(ids: string[], kind?: FileUrlKind): Promise<Map<string, string>>
-  /** Single-shot upload for small files (e.g. avatars); pre-unwraps the envelope. */
-  upload(file: File): Promise<FileRecordDto>
+  /**
+   * Single-shot upload for small files; pre-unwraps the envelope. Without options
+   * the server stores a temporary upload held only by `[FileField]` references
+   * (avatars, attachments). The file library passes `{ isTemporary: false }`:
+   * nothing references its files, so a temporary record would be removed by
+   * background cleanup once the retention period passes.
+   */
+  upload(file: File, options?: { isTemporary?: boolean }): Promise<FileRecordDto>
   /** Move a batch of files to a target folder (null = root / unfiled). */
   moveTo(fileIds: string[], folderId: string | null): Promise<void>
   /** ChunkUploader methods for TChunkFileUpload */
@@ -125,18 +129,39 @@ export interface StorageBridge {
     delete(ids: string[]): Promise<void>
   }
   /**
-   * Versions - paged audit list wired to
-   * DefaultStorageAuditAdminController (Plan E, 2026-04-14).
-   * Supports optional filter by fileId and currentOnly via query.filters.
+   * Versions. `fetch` is the cross-file paged audit list
+   * (DefaultStorageAuditAdminController; filters `fileId` / `currentOnly` via
+   * query.filters). Everything else is one file's history and goes through the
+   * user-facing `files/{id}/versions` routes, because the audit controller is
+   * intentionally read-only.
+   *
+   * All of it needs the optional `Tnzi.Storage.Workspace` module; without it the
+   * per-file routes answer 501.
    */
   versions: {
     fetch(query: CrudPageQuery): Promise<CrudPageResult<FileVersionAuditDto>>
     /**
-     * Restore an older version as the current one. Reuses the user-facing
-     * endpoint `POST /files/{fileId}/versions/{version}/restore` because the
-     * admin audit controller is intentionally read-only.
+     * One file's version history, newest first. Resolves to `null` when the host
+     * keeps no versions at all (501: `Tnzi.Storage.Workspace` not loaded) - a
+     * fact about the deployment, not a failure to report as an error.
      */
+    list(fileId: string): Promise<FileVersionDto[] | null>
+    /**
+     * Store new bytes as the next version; it becomes current. The first upload
+     * of a file also records the existing content as version 1, so nothing is
+     * lost by uploading.
+     */
+    upload(fileId: string, file: File, description?: string): Promise<FileVersionDto>
+    /** Make an older version current again. The content it replaces stays in the history. */
     restore(fileId: string, version: number): Promise<void>
+    /**
+     * One version's bytes, for the caller to save (`downloadBlob` +
+     * `versionedFileName`). A Blob rather than a URL: the route needs a
+     * signed-in caller, which a browser navigation cannot be.
+     */
+    download(fileId: string, version: number): Promise<Blob>
+    /** Delete a version that is not current. The server refuses the current one. */
+    delete(fileId: string, version: number): Promise<void>
   }
   /** Aggregate storage statistics - GET /admin/files/statistics. */
   statistics: {
@@ -249,7 +274,7 @@ export interface StoragePublicShareContract {
 
 // FileChunkAuditDto / FileVersionAuditDto now come from @tnzi/core (re-exported
 // below so the chunk/version pages keep importing them from this bridge).
-export type { FileChunkAuditDto, FileVersionAuditDto } from '@tnzi/core/services/storage'
+export type { FileChunkAuditDto, FileVersionAuditDto, FileVersionDto } from '@tnzi/core/services/storage'
 
 export interface StorageBridgeDeps {
   /** Production path: provide an HttpClient and the bridge builds all APIs internally. */
@@ -279,6 +304,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     return {
       files: {
         fetch: noOp as never,
+        get: noOp as never,
         create: noOp as never,
         update: noOp as never,
         delete: noOp as never,
@@ -301,7 +327,14 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         move: noOp as never,
       },
       chunks: { fetch: stub as never, delete: noOp as never },
-      versions: { fetch: stub as never, restore: stub as never },
+      versions: {
+        fetch: stub as never,
+        list: noOp as never,
+        upload: noOp as never,
+        restore: stub as never,
+        download: noOp as never,
+        delete: noOp as never,
+      },
       statistics: { get: noOp as never },
       shares: { fetch: stub as never, byFile: noOp as never, batchRevoke: noOp as never },
       publicShare: {
@@ -338,7 +371,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
   const files: StorageFilesContract = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FileRecordDto>> => {
       const params = mapQueryToListRequest(query) as unknown as FileQueryDto
-      const result = unwrap<{ items: FileRecordDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
+      const result = unwrapOk<{ items: FileRecordDto[]; totalCount: number; pageIndex: number; pageSize: number }>(
         await fileApi.query(params),
       )
       return pagedResult({
@@ -348,6 +381,10 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         pageSize: result.pageSize ?? query.pageSize,
       })
     },
+
+    // unwrapOk on a read too: a refused read must not hand the page `null` as a record.
+    get: async (id: string): Promise<FileRecordDto> =>
+      unwrapOk<FileRecordDto>(await storageApi.getById(id)),
 
     // Files are not created via a form - creation happens through chunked upload.
     create: async (_data): Promise<FileRecordDto> => {
@@ -388,11 +425,13 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         ? getFileUrlResolver(deps.client).resolveMany(ids, kind)
         : Promise.resolve(new Map(ids.filter(Boolean).map((id) => [id, plainUrl(id, kind)]))),
 
-    // Single-shot upload (avatars etc.); pre-unwraps the ApiResult envelope so
-    // callers get the stored FileRecordDto directly (the endpoint returns the record;
-    // there was never a separate upload-result DTO on the backend).
-    upload: async (file: File): Promise<FileRecordDto> =>
-      unwrapOk<FileRecordDto>(await storageApi.upload(file)),
+    // Single-shot upload; pre-unwraps the ApiResult envelope so callers get the
+    // stored FileRecordDto directly (the endpoint returns the record; there was
+    // never a separate upload-result DTO on the backend).
+    upload: async (file: File, options?: { isTemporary?: boolean }): Promise<FileRecordDto> =>
+      unwrapOk<FileRecordDto>(
+        await storageApi.upload(file, options?.isTemporary === undefined ? undefined : { isTemporary: options.isTemporary }),
+      ),
 
     moveTo: async (fileIds: string[], folderId: string | null): Promise<void> => {
       if (!folderApi) {
@@ -414,7 +453,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     },
 
     uploadChunk: async (uploadId: string, chunkIndex: number, chunk: Blob): Promise<void> => {
-      ensureOk(await storageApi.uploadChunk(uploadId, chunkIndex, chunk as File))
+      ensureOk(await storageApi.uploadChunk(uploadId, chunkIndex, chunk))
     },
 
     completeUpload: async (uploadId: string): Promise<FileRecordDto> => {
@@ -434,7 +473,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
   const chunks: StorageBridge['chunks'] = {
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FileChunkAuditDto>> => {
       const uploadSessionId = query.filters.uploadSessionId
-      const paged = unwrap(
+      const paged = unwrapOk(
         await requireAuditApi('chunks.fetch').getChunks({
           pageIndex: query.pageIndex,
           pageSize: query.pageSize,
@@ -464,7 +503,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     fetch: async (query: CrudPageQuery): Promise<CrudPageResult<FileVersionAuditDto>> => {
       const fileId = query.filters.fileId
       const currentOnly = query.filters.currentOnly
-      const paged = unwrap(
+      const paged = unwrapOk(
         await requireAuditApi('versions.fetch').getVersions({
           pageIndex: query.pageIndex,
           pageSize: query.pageSize,
@@ -479,14 +518,26 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         pageSize: paged?.pageSize ?? query.pageSize,
       })
     },
+    list: async (fileId: string): Promise<FileVersionDto[] | null> => {
+      const result = await storageApi.getVersions(fileId)
+      // 501 = the host never loaded Tnzi.Storage.Workspace. That is "this server keeps
+      // no versions", which the page shows as such, not a red error on every open.
+      if (result && !result.succeeded && result.code === 501) return null
+      const items = unwrapOk<FileVersionDto[]>(result)
+      return Array.isArray(items) ? items : []
+    },
+    // The audit endpoint is read-only; every write below is the user-facing
+    // DefaultStorageController route, reached through the same core api as every
+    // other file write so no path is hand-written here.
+    upload: async (fileId: string, file: File, description?: string): Promise<FileVersionDto> =>
+      unwrapOk<FileVersionDto>(await storageApi.createVersion(fileId, file, description)),
     restore: async (fileId: string, version: number): Promise<void> => {
-      if (!deps.client) {
-        throw new Error('versions.restore: HttpClient (deps.client) is required')
-      }
-      // The audit endpoint is read-only; restore is the user-facing
-      // DefaultStorageController.RestoreVersion, reached through the same core
-      // api as every other file write so the path is never hand-written here.
-      ensureOk(await useStorageApi(deps.client).restoreVersion(fileId, version))
+      ensureOk(await storageApi.restoreVersion(fileId, version))
+    },
+    download: async (fileId: string, version: number): Promise<Blob> =>
+      unwrapOk<Blob>(await storageApi.downloadVersion(fileId, version)),
+    delete: async (fileId: string, version: number): Promise<void> => {
+      ensureOk(await storageApi.deleteVersion(fileId, version))
     },
   }
 
@@ -538,7 +589,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
         includeExpired: typeof f.includeExpired === 'boolean' ? f.includeExpired : undefined,
         includeDisabled: typeof f.includeDisabled === 'boolean' ? f.includeDisabled : undefined,
       }
-      const result = unwrap<{
+      const result = unwrapOk<{
         items: FileShareSummaryDto[]
         totalCount: number
         pageIndex: number
@@ -594,7 +645,7 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
     set: async (fileId: string, tagList: string[]): Promise<FileRecordDto> =>
       unwrapOk<FileRecordDto>(await fileApi.setFileTags(fileId, { tags: tagList })),
     byTag: async (tag: string, query: CrudPageQuery): Promise<CrudPageResult<FileRecordDto>> => {
-      const result = unwrap<{
+      const result = unwrapOk<{
         items: FileRecordDto[]
         totalCount: number
         pageIndex: number
@@ -611,8 +662,10 @@ export function createStorageBridge(deps: StorageBridgeDeps = {}): StorageBridge
 
   // ---- metadata ----
   const metadata: StorageBridge['metadata'] = {
+    // A checked read: the modal saves what it shows back as the WHOLE map, so a
+    // refused read must reach it as an error, never as an empty (or envelope-shaped) map.
     get: async (fileId: string): Promise<Record<string, string>> => {
-      const map = unwrap<Record<string, string>>(await fileApi.getMetadata(fileId))
+      const map = unwrapOk<Record<string, string> | null>(await fileApi.getMetadata(fileId))
       return map ?? {}
     },
     set: async (fileId: string, meta: Record<string, string>): Promise<FileRecordDto> =>

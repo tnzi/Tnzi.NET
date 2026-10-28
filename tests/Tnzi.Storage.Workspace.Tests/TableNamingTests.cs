@@ -38,6 +38,8 @@ public class TableNamingTests
             modelBuilder.ApplyConfiguration(new FileVersionConfiguration());
             modelBuilder.ApplyConfiguration(new FileUploadSessionConfiguration());
             modelBuilder.ApplyConfiguration(new FileChunkConfiguration());
+            modelBuilder.ApplyConfiguration(new RecycleBinEntryConfiguration());
+            modelBuilder.ApplyConfiguration(new StorageAllowanceConfiguration());
 
             // 与 EntityRegistrationHelper.ApplyBatchConfigurations 同一条路径。
             var prefixer = new TableNamePrefixConfiguration(container);
@@ -62,6 +64,9 @@ public class TableNamingTests
     [InlineData(typeof(FileVersion), "Storage_Version")]
     [InlineData(typeof(FileUploadSession), "Storage_UploadSession")]
     [InlineData(typeof(FileChunk), "Storage_Chunk")]
+    // 本模块后来新增的两张（文件空间的回收站、按用户的配额覆盖值），同一条前缀规则
+    [InlineData(typeof(RecycleBinEntry), "Storage_RecycleBinEntry")]
+    [InlineData(typeof(StorageAllowance), "Storage_Allowance")]
     // 留在父模块的两张，作为对照：前缀解析对两侧是同一套
     [InlineData(typeof(FileRecord), "Storage_Record")]
     [InlineData(typeof(FileReference), "Storage_Reference")]
@@ -101,6 +106,7 @@ public class TableNamingTests
                  {
                      typeof(FileFolder), typeof(FileShare), typeof(FileVersion),
                      typeof(FileUploadSession), typeof(FileChunk),
+                     typeof(RecycleBinEntry), typeof(StorageAllowance),
                  })
         {
             var table = db.Model.FindEntityType(clr)!.GetTableName();

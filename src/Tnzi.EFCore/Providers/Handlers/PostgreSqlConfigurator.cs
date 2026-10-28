@@ -7,6 +7,12 @@ namespace Tnzi.EFCore.Providers;
 /// </summary>
 public class PostgreSqlConfigurator : DatabaseProviderConfiguratorBase
 {
+    // 探测结果（含「没有 pgvector」这一负结果）按 options builder 类型缓存。
+    // ★ 配置器在每个作用域构建 DbContextOptions 时都会被调用；不缓存时，没部署 pgvector 的应用
+    // 每个请求都要扫一遍已加载程序集、再让 Assembly.Load 抛一次 FileNotFoundException。
+    // 负结果可以缓存：探测本身就会强制加载探测路径里的程序集，这一步失败说明它没有部署，进程内不会再出现。
+    private static readonly ConcurrentDictionary<Type, Delegate?> _useVectorActions = new();
+
     public override DatabaseProvider Provider => DatabaseProvider.PostgreSQL;
 
     protected override string AssemblyName => "Npgsql.EntityFrameworkCore.PostgreSQL";
@@ -19,16 +25,16 @@ public class PostgreSqlConfigurator : DatabaseProviderConfiguratorBase
     /// pgvector 未加载时返回 null（等价于旧的传 null 行为）。
     /// </summary>
     protected override Delegate? BuildExtraOptionsAction(Type optionsBuilderType)
-        => TryBuildUseVectorAction(optionsBuilderType);
+        => _useVectorActions.GetOrAdd(optionsBuilderType, TryBuildUseVectorAction);
 
     /// <summary>
     /// Tries to build an Action&lt;NpgsqlDbContextOptionsBuilder&gt; that calls UseVector().
     /// Returns null if Pgvector.EntityFrameworkCore is not available (safe to pass as null action).
-    /// Does NOT use the shared _assemblyCache to avoid caching null before the assembly is loaded.
+    /// Does not use the shared assembly cache: that one is keyed by name only, and this probe forces the load itself.
     /// </summary>
     private static Delegate? TryBuildUseVectorAction(Type npgsqlOptionsBuilderType)
     {
-        // Search loaded assemblies first (no cache: pgvector may not be loaded at startup)
+        // Search loaded assemblies first, then force-load from the probing path
         var pvAssembly = AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(a => a.GetName().Name == "Pgvector.EntityFrameworkCore");
 

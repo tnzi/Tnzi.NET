@@ -143,18 +143,17 @@ public sealed class CompositeContextProvider : IContextProvider
                 _logger.LogDebug("Context provider {ProviderName} is disabled for current context, skipping", provider.Name);
                 continue;
             }
-            // Token 预算检查：当预算已耗尽时跳过后续 Provider
-            if (maxBudget > 0 && usedTokens >= maxBudget)
-            {
-                _logger.LogDebug(
-                    "Token budget exhausted ({UsedTokens}/{MaxBudget}), skipping {ProviderType}",
-                    usedTokens, maxBudget, provider.GetType().Name);
-                break;
-            }
-
+            // 预算只约束注入的消息：预算用完也照常调用后面的 provider，因为工具不占消息 token
+            // （Skills 的 skill_* 工具与已激活技能的函数、按需检索工具）。预算一满就停止调用、或连工具一起丢，
+            // 模型那一轮就拿不到这些工具，而唯一的痕迹是一条 Debug 日志。
             try
             {
                 var injection = await provider.GetContextAsync(messages, ct);
+
+                if (injection.Tools is { Count: > 0 })
+                {
+                    mergedTools.AddRange(injection.Tools);
+                }
 
                 if (injection.Messages is { Count: > 0 })
                 {
@@ -164,8 +163,9 @@ public sealed class CompositeContextProvider : IContextProvider
                         var injectionTokens = EstimateMessageTokens(injection.Messages);
                         if (usedTokens + injectionTokens > maxBudget)
                         {
+                            // 丢掉这个 provider 的消息与描述这些消息的引用，工具已经合并
                             _logger.LogDebug(
-                                "Skipping {ProviderType} context ({InjectionTokens} tokens) - would exceed budget ({UsedTokens}+{InjectionTokens}>{MaxBudget})",
+                                "Skipping {ProviderType} context messages ({InjectionTokens} tokens) - would exceed budget ({UsedTokens}+{InjectionTokens}>{MaxBudget})",
                                 provider.GetType().Name, injectionTokens, usedTokens, injectionTokens, maxBudget);
                             continue;
                         }
@@ -173,11 +173,6 @@ public sealed class CompositeContextProvider : IContextProvider
                     }
 
                     mergedMessages.AddRange(injection.Messages);
-                }
-
-                if (injection.Tools is { Count: > 0 })
-                {
-                    mergedTools.AddRange(injection.Tools);
                 }
 
                 if (injection.Citations is { Count: > 0 })

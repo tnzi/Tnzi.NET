@@ -6,6 +6,7 @@
     :state="crud"
     :all-columns="loginLogColumns"
     :search-fields="loginLogSearchFields"
+    :show-default-search="false"
     :title="title"
     :translate="t"
   >

@@ -13,14 +13,17 @@ import type { HttpClient } from '../../http/http';
 // Enums (mirror backend Tnzi.AI.Options.ToolApprovalMode)
 // ---------------------------------------------------------------------------
 
-/** Default tool-approval mode for a sub-agent type. */
+/**
+ * Default tool-approval mode for a sub-agent type. The server writes the member
+ * name (`"AlwaysRequire"`), so the values are the names.
+ */
 export enum ToolApprovalMode {
   /** Never require approval (default). */
-  NeverRequire = 0,
+  NeverRequire = 'NeverRequire',
   /** Always require approval. */
-  AlwaysRequire = 1,
+  AlwaysRequire = 'AlwaysRequire',
   /** Decide per configured allow/deny lists. */
-  Specific = 2,
+  Specific = 'Specific',
 }
 
 // ---------------------------------------------------------------------------

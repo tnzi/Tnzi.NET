@@ -2,7 +2,8 @@ namespace Tnzi.AI.Infrastructure.Mcp;
 
 /// <summary>
 /// MCP 客户端工厂 - 按配置创建/复用与 MCP 服务器的连接。
-/// 第一版以 Server Name 为 key 缓存 client；配置变更需重启应用生效。
+/// client 按分区键（租户键 + Server Name，部署配置条目不带租户键）缓存复用，两个租户的同名 server 各用各的连接；
+/// 注册表改动经 <see cref="InvalidateClientAsync(string, CancellationToken)"/> 失效对应连接。
 /// </summary>
 public interface IMcpClientFactory
 {
@@ -16,12 +17,25 @@ public interface IMcpClientFactory
     Task<IMcpClientAdapter> GetOrCreateClientAsync(McpServerConfig config, CancellationToken ct = default);
 
     /// <summary>
-    /// 从缓存中移除指定名称的 MCP 客户端并释放其资源。
+    /// 从缓存中移除指定名称的 MCP 客户端并释放其资源（所有租户分区里叫这个名字的连接都失效，失败冷却一并清掉）。
     /// 幂等操作：对不存在的名称不抛异常。
     /// </summary>
     /// <param name="serverName">MCP 服务器名称</param>
     /// <param name="ct">取消令牌</param>
     Task InvalidateClientAsync(string serverName, CancellationToken ct = default);
+
+    /// <summary>
+    /// 失效<b>这一份配置</b>对应的连接。用户专属服务器（<see cref="UserMcpServerConfig"/>）只失效那个用户的那一条，
+    /// 不像按名字失效那样波及别的用户；<paramref name="refreshCredential"/> 为 true 时下一次建连会带
+    /// <c>McpCredentialRequest.Refresh = true</c> 向消费方要刷新过的凭据。其它配置等同按名字失效。
+    /// </summary>
+    Task InvalidateClientAsync(McpServerConfig config, bool refreshCredential, CancellationToken ct = default)
+        => InvalidateClientAsync(config.Name, ct);
+
+    /// <summary>
+    /// 失效某个用户的用户专属连接（连带失败冷却与待刷新标记）。<paramref name="serverName"/> 为 null = 该用户的全部。幂等。
+    /// </summary>
+    Task InvalidateUserClientsAsync(Guid userId, string? serverName, CancellationToken ct = default) => Task.CompletedTask;
 }
 
 /// <summary>

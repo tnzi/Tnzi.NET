@@ -24,6 +24,20 @@ public class ConversationMessageSentEvent : EventBase
     public ChatMessageDto? Message { get; set; }
 }
 
+/// <summary>
+/// 一条消息被撤回（本人撤回或管理端强制撤回）：推给会话全部在册成员，客户端据此把它从打开着的会话里移除。
+/// </summary>
+public class ConversationMessageRecalledEvent : EventBase
+{
+    public Guid ConversationId { get; set; }
+    public Guid MessageId { get; set; }
+
+    /// <summary>撤回的是会话最后一条消息时会话的新预览；否则为 null（预览不变）。</summary>
+    public string? Preview { get; set; }
+
+    public List<Guid> RecipientUserIds { get; set; } = new();
+}
+
 /// <summary>某成员标记会话已读（推给其他成员做已读回执）。</summary>
 public class ConversationReadEvent : EventBase
 {

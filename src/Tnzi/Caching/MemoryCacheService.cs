@@ -71,17 +71,49 @@ public class MemoryCacheService : ICache, IDisposable
         return Task.FromResult((false, default(T)));
     }
 
+    /// <summary>
+    /// 取值，没有就调工厂建一个并写入；每次调用恰好计一次命中或一次未命中。
+    /// </summary>
+    /// <remarks>
+    /// ★ 默认接口实现未命中时先 <see cref="TryGetAsync{T}"/>、拿到锁后再 <see cref="TryGetAsync{T}"/> 复查，
+    /// 两次都计数：一次未命中记成两次，<c>admin/performance/runtime</c> 的命中率被系统性低估
+    /// （真实 50% 显示约 33%）。这里与默认实现同一把锁、同一套语义（工厂返回 null 不写缓存），只是复查不计数。
+    /// </remarks>
+    public async Task<T?> GetOrAddAsync<T>(string key, Func<Task<T>> factory, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+    {
+        Check.NotNull(factory);
+
+        if (_memoryCache.TryGetValue(key, out T? value))
+        {
+            _monitor?.RecordCacheHit(key);
+            return value;
+        }
+
+        _monitor?.RecordCacheMiss(key);
+
+        await using (await CacheStampedeGuard.Instance.LockAsync(key, cancellationToken))
+        {
+            // 复查：另一个调用方可能已经填好了。本次调用已记过一次未命中，这里不再计数
+            if (_memoryCache.TryGetValue(key, out value))
+                return value;
+
+            value = await factory();
+
+            if (value is not null)
+                await SetAsync(key, value, expiration, cancellationToken);
+        }
+
+        return value;
+    }
+
     public Task SetAsync<T>(string key, T value, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
-        var options = new MemoryCacheEntryOptions();
-        if (expiration.HasValue)
+        // null 取默认过期时间，与 TrySet / SetMany 和 Redis 实现同为绝对过期（此前这里是滑动过期：
+        // 被反复读的条目永不过期，同一句调用在两种实现上寿命不同）
+        var options = new MemoryCacheEntryOptions
         {
-            options.AbsoluteExpirationRelativeToNow = expiration;
-        }
-        else
-        {
-            options.SlidingExpiration = _defaultExpiration;
-        }
+            AbsoluteExpirationRelativeToNow = expiration ?? _defaultExpiration
+        };
 
         // 如果 MemoryCache 配置了 SizeLimit，必须为每个条目指定 Size
         options.Size = 1;
@@ -288,15 +320,12 @@ public class MemoryCacheService : ICache, IDisposable
 
     public Task SetWithTagsAsync<T>(string key, T value, IEnumerable<string> tags, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
     {
-        var options = new MemoryCacheEntryOptions();
-        if (expiration.HasValue)
+        // null 取默认过期时间，与 TrySet / SetMany 和 Redis 实现同为绝对过期（此前这里是滑动过期：
+        // 被反复读的条目永不过期，同一句调用在两种实现上寿命不同）
+        var options = new MemoryCacheEntryOptions
         {
-            options.AbsoluteExpirationRelativeToNow = expiration;
-        }
-        else
-        {
-            options.SlidingExpiration = _defaultExpiration;
-        }
+            AbsoluteExpirationRelativeToNow = expiration ?? _defaultExpiration
+        };
         options.Size = 1;
 
         TrackEntry(key, options);
@@ -363,6 +392,10 @@ public class MemoryCacheService : ICache, IDisposable
             {
                 result[key] = typedValue;
                 _monitor?.RecordCacheHit(key);
+            }
+            else
+            {
+                _monitor?.RecordCacheMiss(key);
             }
         }
 

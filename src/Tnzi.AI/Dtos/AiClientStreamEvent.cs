@@ -14,7 +14,7 @@ public class AiClientStreamEvent
     /// <summary>实际执行模型</summary>
     public string? Model { get; init; }
 
-    /// <summary>Token 使用量（仅最后一个事件）</summary>
+    /// <summary>Token 使用量：本次运行到此为止的累计值，只出现在带 <see cref="FinishReason"/> 的终止事件上</summary>
     public TokenUsageDto? Usage { get; init; }
 
     /// <summary>是否工具调用中</summary>

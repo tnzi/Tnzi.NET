@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, enableAutoUnmount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
@@ -21,6 +21,11 @@ import {
   defaultWorkbenchWidgets,
 } from '../../src/components/widgets/presets'
 import type { WidgetDef } from '@tnzi/ui'
+
+// A mounted widget whose router finishes its first navigation after the test
+// ended re-runs its computeds, and a store action called there makes that
+// test's pinia active again, under the next test's fresh one.
+enableAutoUnmount(afterEach)
 
 function themeProvide() {
   const ctx = createThemeContext(mergeThemeSettings({}))
@@ -304,6 +309,61 @@ describe('TWidgetQuickActions module filtering', () => {
   it('fails open (shows every tile) while the module signal is unavailable', () => {
     const wrapper = mountActions()
     expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(3)
+  })
+})
+
+describe('TWidgetQuickActions destination route gate', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    if (typeof window !== 'undefined') window.localStorage.clear()
+  })
+
+  const page = { template: '<div />' }
+  function gatedRouter() {
+    return createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/admin/settings', name: 'settings', component: page, meta: { anySettingsPermission: true } },
+        { path: '/admin/users', name: 'users', component: page, meta: { permission: 'user.view' } },
+        { path: '/admin/:catchAll(.*)*', component: page },
+      ],
+    })
+  }
+
+  function mountActions(actions: unknown[]) {
+    return mount(TWidgetQuickActions, {
+      props: { actions: actions as never },
+      global: { plugins: [gatedRouter()], provide: themeProvide() },
+    })
+  }
+
+  it('shows the default Settings tile to an admin holding only a per-group settings view code', () => {
+    useAdminAuthStore().setUserInfo({
+      id: '1',
+      username: 'biz',
+      roles: [],
+      permissions: ['notification.settings.email.view'],
+    })
+    const settings = defaultQuickActions().filter((a) => a.key === 'settings')
+    const wrapper = mountActions(settings)
+    expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(1)
+  })
+
+  it('hides the default Settings tile from an admin with no settings code at all', () => {
+    useAdminAuthStore().setUserInfo({ id: '1', username: 'biz', roles: [], permissions: ['user.view'] })
+    const settings = defaultQuickActions().filter((a) => a.key === 'settings')
+    const wrapper = mountActions(settings)
+    expect(wrapper.findAll('.t-widget-quick-actions__tile').length).toBe(0)
+  })
+
+  it('hides a tile without its own permission when the destination route would bounce to 403', () => {
+    useAdminAuthStore().setUserInfo({ id: '1', username: 'biz', roles: [], permissions: [] })
+    const wrapper = mountActions([
+      { key: 'users', icon: 'mdi:account', label: 'Users', to: { name: 'users' } },
+      { key: 'always', icon: 'mdi:star', label: 'Always', to: '/admin/x' },
+    ])
+    expect(wrapper.text()).not.toContain('Users')
+    expect(wrapper.text()).toContain('Always')
   })
 })
 

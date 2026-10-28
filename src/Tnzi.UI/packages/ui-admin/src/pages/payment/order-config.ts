@@ -64,6 +64,17 @@ export const orderStatusOptions = Object.keys(STATUS_KEY).map((member) => ({
 }))
 
 type Money = number | null | undefined
+
+/**
+ * The figure an order row is about: what was collected once it was paid, the
+ * amount that was asked for otherwise. A failed or expired payment collected
+ * nothing, but "CA$0.00" says nothing about what was attempted.
+ */
+export function orderAmount(row: { paidAmount?: Money; payableAmount?: Money }): number {
+  const paid = Number(row.paidAmount ?? 0)
+  return paid > 0 ? paid : Number(row.payableAmount ?? 0)
+}
+
 function money(amount: Money, currency: string | null | undefined): string {
   if (amount === null || amount === undefined) return EMPTY_DASH
   return formatCurrency(Number(amount), String(currency || 'USD'))
@@ -92,7 +103,7 @@ export function buildOrderColumns(t: (key: string) => string): ColumnDef[] {
       title: 'columns.amount',
       width: 130,
       align: 'right',
-      render: (row) => money(row.paidAmount as Money, row.currency as string),
+      render: (row) => money(orderAmount(row as { paidAmount?: Money; payableAmount?: Money }), row.currency as string),
     },
     {
       key: 'status',

@@ -40,11 +40,28 @@
         <template #icon><TSvgIcon icon="mdi:history" :size="16" /></template>
         {{ t('versions.open') }}
       </NButton>
-      <NButton size="small" tertiary :disabled="!workflow" @click="onValidate">
+      <!-- Validate and Run act on the saved definition: with unsaved edits they
+           would check and run something other than what is on the canvas. -->
+      <NButton
+        size="small"
+        tertiary
+        :disabled="!workflow || hasUnsavedEdits"
+        :title="hasUnsavedEdits ? t('actions.saveFirst') : undefined"
+        data-test="wf-validate"
+        @click="onValidate"
+      >
         <template #icon><TSvgIcon icon="mdi:shield-check-outline" :size="16" /></template>
         {{ t('actions.validate') }}
       </NButton>
-      <NButton v-if="can('ai.workflow.execute')" size="small" type="info" :disabled="!workflow?.isEnabled" @click="openRun">
+      <NButton
+        v-if="can('ai.workflow.execute')"
+        size="small"
+        type="info"
+        :disabled="!workflow?.isEnabled || hasUnsavedEdits"
+        :title="hasUnsavedEdits ? t('actions.saveFirst') : undefined"
+        data-test="wf-run"
+        @click="openRun"
+      >
         <template #icon><TSvgIcon icon="mdi:play" :size="16" /></template>
         {{ t('actions.run') }}
       </NButton>
@@ -165,7 +182,7 @@
                 @tnzi/ui-ai) provides the drag-to-connect source/target dots.
               -->
               <template #node-default="nodeProps: NodeProps">
-                <Handle type="target" :position="Position.Left" />
+                <FlowHandle type="target" :position="handleLeft" />
                 <div
                   class="t-wf-flow-node-content"
                   :title="(nodeProps.data?.label as string) ?? nodeProps.id"
@@ -180,7 +197,7 @@
                     {{ (nodeProps.data?.label as string) ?? nodeProps.id }}
                   </span>
                 </div>
-                <Handle type="source" :position="Position.Right" />
+                <FlowHandle type="source" :position="handleRight" />
               </template>
             </WorkflowCanvas>
             <template #fallback>
@@ -219,9 +236,12 @@
 
           <NForm label-placement="top" size="small" :show-feedback="false">
             <NFormItem :label="t('nodeForm.stepId')">
+              <!-- Typed into a buffer; the rename lands on blur / Enter. -->
               <NInput
-                :value="selectedStep.stepId"
-                @update:value="(v: string) => onStepIdInput(v)"
+                :value="stepIdDraft"
+                @update:value="(v: string) => (stepIdDraft = v)"
+                @blur="commitStepIdRename"
+                @keydown.enter="commitStepIdRename"
               />
             </NFormItem>
 
@@ -267,10 +287,13 @@
               />
             </NFormItem>
 
-            <NFormItem v-if="selectedFields.condition" :label="t('nodeForm.condition')">
+            <NFormItem
+              v-if="selectedFields.condition"
+              :label="t(isRouteExpressionField ? 'nodeForm.routeExpression' : 'nodeForm.condition')"
+            >
               <NInput
                 v-model:value="selectedStep.condition"
-                :placeholder="t('nodeForm.conditionPlaceholder')"
+                :placeholder="t(isRouteExpressionField ? 'nodeForm.routeExpressionPlaceholder' : 'nodeForm.conditionPlaceholder')"
                 @update:value="markDirty"
               />
             </NFormItem>
@@ -544,6 +567,7 @@ import {
   getNodeTypeMeta,
   getStepKind,
   normalizeStepConfiguration,
+  usesConditionAsRouteExpression,
   NODE_TYPE_KEY,
   POS_X_KEY,
   POS_Y_KEY,
@@ -556,18 +580,21 @@ import type {
   UpdateWorkflowDefinitionDto,
   WorkflowValidationResultDto,
   WorkflowExecutionStatsDto,
+  WorkflowGraphConfigurationDto,
 } from '@tnzi/core/services/ai'
 // 0.2.72+ (B4): enum value routed through ai-bridge so the page stays
 // clean under the `no-restricted-imports` guard.
 import { WorkflowExecutionMode } from '../../../services/bridges/ai-bridge'
-// Re-exported from @tnzi/ui-ai/workflow → @vue-flow/core. The `/workflow`
-// subpath (not the root barrel) is what keeps vue-flow out of chat: the root
-// used to eagerly import `@vue-flow/core` for these two symbols, so anyone
-// touching `@tnzi/ui-ai` at all paid for the whole canvas. This route component
-// is itself lazy-loaded, so the cost stays in its own chunk.
-import { Handle, Position, type NodeProps } from '@tnzi/ui-ai/workflow'
+// Types only: `@tnzi/ui-ai` is an OPTIONAL peer of this package, and this page
+// is one of the default admin routes. A value import here (it used to take
+// `Handle` and `Position` this way) makes every consumer's bundler resolve the
+// module, so an app without `@tnzi/ui-ai` failed to build even though it never
+// opens this page. Everything that needs the module at runtime goes through a
+// dynamic import below.
+import type { NodeProps, Position } from '@tnzi/ui-ai/workflow'
 import { EMPTY_DASH } from '../../../utils/placeholders'
 import WorkflowVersionsDrawer from './WorkflowVersionsDrawer.vue'
+import { removeStepFromGraph, renameStepInGraph, sameStepId, type GraphRewrite } from './workflow-graph-refs'
 
 // `@vue-flow/core` lives inside `@tnzi/ui-ai`'s dependency tree but isn't a
 // direct ui-admin dep, so the canvas inputs are typed structurally here. These
@@ -628,6 +655,14 @@ const WorkflowCanvas = defineAsyncComponent({
   delay: 200,
   timeout: 30000,
 })
+
+// vue-flow's connection dots. Only ever rendered inside the canvas's node slot,
+// so the module is already loaded by the time this resolves.
+const FlowHandle = defineAsyncComponent(() => import('@tnzi/ui-ai/workflow').then((m) => m.Handle))
+// `Position` is a string enum ('left' / 'right' / ...). Its values are written
+// out because reading them off the enum would need the module at import time.
+const handleLeft = 'left' as Position
+const handleRight = 'right' as Position
 
 const route = useRoute()
 const router = useRouter()
@@ -691,6 +726,18 @@ const draft = reactive<DraftMetadata>({
 const stepsJson = ref('[]')
 const stepsJsonDirty = ref(false)
 const stepsJsonError = ref('')
+/**
+ * Edits not yet saved, including JSON text that does not parse yet. Validate and
+ * Run read the stored definition by id, so they wait for these to be saved.
+ */
+const hasUnsavedEdits = computed(() => dirty.value || stepsJsonDirty.value)
+
+// The graph configuration (conditional edges + loops) as loaded. The editor has
+// no surface for it, but it names steps by id, so a rename or delete in here
+// rewrites it; it is sent on save only then, and otherwise left untouched
+// (an update without `configuration` keeps the stored one).
+const draftConfiguration = ref<WorkflowGraphConfigurationDto | null>(null)
+const configurationDirty = ref(false)
 
 // --- Agents (for AgentId select) -------------------------------------------
 const agents = ref<AgentDto[]>([])
@@ -733,6 +780,8 @@ async function loadWorkflow(id: string): Promise<void> {
     draft.executionMode = wf.executionMode
     draft.isEnabled = wf.isEnabled
     draft.steps = ensureStepShape(wf.steps ?? [])
+    draftConfiguration.value = wf.configuration ?? null
+    configurationDirty.value = false
     stepsJson.value = JSON.stringify(draft.steps, null, 2)
     stepsJsonDirty.value = false
     stepsJsonError.value = ''
@@ -837,6 +886,7 @@ const selectedStep = computed<WorkflowStepDto | null>(() =>
 )
 const selectedKind = computed<WorkflowNodeKind>(() => getStepKind(selectedStep.value))
 const selectedFields = computed(() => getNodeTypeMeta(selectedKind.value).fields)
+const isRouteExpressionField = computed(() => usesConditionAsRouteExpression(selectedStep.value))
 
 const dependsOnOptions = computed(() =>
   (draft.steps ?? [])
@@ -858,29 +908,70 @@ function selectStep(stepId: string | null | undefined): void {
 }
 
 /**
- * Rename the selected step's stepId. `selectedStep` is a computed match by
- * stepId, so blindly binding `v-model:value="selectedStep.stepId"` would orphan
- * the selection after a single keystroke (the computed find can't match the
- * new id, returns null, and the inspector swaps to the metadata panel mid-edit).
+ * The step-id field edits a buffer, and the rename lands only on blur / Enter.
  *
- * Sync `selectedStepId` and rewrite any sibling `dependsOn` references that
- * pointed to the old id so the DAG stays internally consistent. Uniqueness is
- * not enforced here - the backend `validate` endpoint flags duplicates on save.
+ * Renaming on every keystroke rewired the graph through each intermediate
+ * value: with `step-1` .. `step-12`, editing `step-10` passes through `step-1`,
+ * which rewrote `step-10`'s dependents to `step-1`, and the selection (a find by
+ * id, first match) jumped to the real `step-1`, so the following keystrokes
+ * renamed THAT step and rewrote its dependents too. Every final id was unique,
+ * so nothing flagged the swapped identities and wrong edges on save.
  */
-function onStepIdInput(newId: string): void {
+const stepIdDraft = ref('')
+watch(
+  () => selectedStep.value?.stepId,
+  (id) => {
+    stepIdDraft.value = id ?? ''
+  },
+  { immediate: true },
+)
+
+/**
+ * Apply the buffered id to the selected step. Refused (and the field reset)
+ * when it is blank or already names another step, compared the way the backend
+ * compares step ids (ignoring case). A rename rewrites every reference to the
+ * old id: the other steps' `dependsOn` and the graph configuration's edges and
+ * loops.
+ */
+function commitStepIdRename(): void {
   const step = selectedStep.value
   if (!step) return
-  const oldId = step.stepId
+  const oldId = step.stepId ?? ''
+  const newId = stepIdDraft.value.trim()
+  if (newId === oldId) {
+    stepIdDraft.value = oldId
+    return
+  }
+  if (!newId) {
+    stepIdDraft.value = oldId
+    message.warning(t('editor.stepIdRequired'))
+    return
+  }
+  if ((draft.steps ?? []).some((s) => s !== step && sameStepId(s.stepId, newId))) {
+    stepIdDraft.value = oldId
+    message.warning(t('editor.stepIdTaken', { id: newId }))
+    return
+  }
+
   step.stepId = newId
-  if (oldId && oldId !== newId) {
+  if (oldId) {
     for (const s of draft.steps ?? []) {
-      if (s.dependsOn?.includes(oldId)) {
-        s.dependsOn = s.dependsOn.map((d) => (d === oldId ? newId : d))
+      if (s.dependsOn?.some((d) => sameStepId(d, oldId))) {
+        s.dependsOn = s.dependsOn.map((d) => (sameStepId(d, oldId) ? newId : d))
       }
     }
-    selectedStepId.value = newId
+    applyGraphRewrite(renameStepInGraph(draftConfiguration.value, oldId, newId))
   }
+  selectedStepId.value = newId
+  stepIdDraft.value = newId
   markDirty()
+}
+
+/** Keep a rewritten graph configuration and mark it for the next save. */
+function applyGraphRewrite(rewrite: GraphRewrite): void {
+  if (!rewrite.changed) return
+  draftConfiguration.value = rewrite.configuration
+  configurationDirty.value = true
 }
 
 function markDirty(): void {
@@ -978,8 +1069,11 @@ function deleteStep(stepId: string | undefined | null): void {
     .map((s) => ({
       ...s,
       // Remove deleted node from any remaining DependsOn lists.
-      dependsOn: s.dependsOn?.filter((d) => d !== stepId) ?? null,
+      dependsOn: s.dependsOn?.filter((d) => !sameStepId(d, stepId)) ?? null,
     }))
+  // ...and from the graph configuration's edges and loops, which would
+  // otherwise route to a step that no longer exists.
+  applyGraphRewrite(removeStepFromGraph(draftConfiguration.value, stepId))
   if (selectedStepId.value === stepId) selectedStepId.value = null
   markDirty()
 }
@@ -1120,14 +1214,22 @@ async function onSave(): Promise<void> {
   try {
     const payload: UpdateWorkflowDefinitionDto = {
       name: draft.name,
-      description: draft.description || null,
+      // `null` reads as "no change" to the update; an emptied description is
+      // sent as '' so it actually clears.
+      description: draft.description,
       executionMode: draft.executionMode,
       isEnabled: draft.isEnabled,
       steps: draft.steps,
+      // Only when a rename / delete rewrote a reference: an object with no
+      // edges and no loops CLEARS the stored configuration, so an untouched
+      // one is left out rather than echoed back.
+      ...(configurationDirty.value ? { configuration: draftConfiguration.value ?? {} } : {}),
     }
     const updated = await bridge.workflows.update(workflow.value.id, payload)
     workflow.value = updated
     draft.steps = ensureStepShape(updated.steps ?? draft.steps)
+    draftConfiguration.value = updated.configuration ?? draftConfiguration.value
+    configurationDirty.value = false
     stepsJson.value = JSON.stringify(draft.steps, null, 2)
     dirty.value = false
     stepsJsonDirty.value = false
@@ -1162,7 +1264,7 @@ const validateModal = reactive<{ show: boolean; result: WorkflowValidationResult
 })
 
 async function onValidate(): Promise<void> {
-  if (!workflow.value) return
+  if (!workflow.value || hasUnsavedEdits.value) return
   validateModal.show = true
   validateModal.result = null
   try {
@@ -1190,7 +1292,7 @@ function openRun(): void {
 
 async function confirmRun(): Promise<void> {
   if (!can('ai.workflow.execute')) return
-  if (!workflow.value) return
+  if (!workflow.value || hasUnsavedEdits.value) return
   runModal.running = true
   try {
     const result = await bridge.workflows.run(workflow.value.id, runModal.input.trim())

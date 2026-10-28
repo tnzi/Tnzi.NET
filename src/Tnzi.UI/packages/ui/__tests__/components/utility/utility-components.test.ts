@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { THEME_CONTEXT_KEY, createThemeContext, mergeThemeSettings } from '@tnzi/ui'
@@ -51,6 +51,54 @@ describe('TThemeSchemaSwitch', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     wrapper.unmount()
   })
+
+  // While the switch sits on 'auto' the document follows the OS, not only the
+  // OS scheme at the moment 'auto' was picked; leaving 'auto' or unmounting
+  // stops following it.
+  it('follows OS colour-scheme changes while on auto', async () => {
+    const originalMM = window.matchMedia
+    const listeners = new Set<(e: { matches: boolean }) => void>()
+    let osDark = false
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        get matches() {
+          return osDark
+        },
+        addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.add(fn),
+        removeEventListener: (_: string, fn: (e: { matches: boolean }) => void) => listeners.delete(fn),
+      })),
+    })
+    const switchOs = (dark: boolean) => {
+      osDark = dark
+      for (const fn of [...listeners]) fn({ matches: dark })
+    }
+    try {
+      const wrapper = mount(TThemeSchemaSwitch, {
+        props: { value: 'auto', applyDocumentClass: true },
+        global: { provide: themeProvide() },
+      })
+      expect(document.documentElement.classList.contains('dark')).toBe(false)
+
+      switchOs(true)
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+
+      await wrapper.setProps({ value: 'light' })
+      expect(listeners.size).toBe(0)
+      expect(document.documentElement.classList.contains('dark')).toBe(false)
+
+      await wrapper.setProps({ value: 'auto' })
+      switchOs(false)
+      expect(document.documentElement.classList.contains('dark')).toBe(false)
+      switchOs(true)
+      expect(document.documentElement.classList.contains('dark')).toBe(true)
+
+      wrapper.unmount()
+      expect(listeners.size).toBe(0)
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMM })
+    }
+  })
 })
 
 describe('TLangSwitch', () => {
@@ -95,7 +143,7 @@ describe('TReloadButton', () => {
     expect(wrapper.emitted('reload')).toBeTruthy()
   })
 
-  it('awaits onReload callback before re-emitting', async () => {
+  it('awaits the onReload callback and spins until it settles', async () => {
     let resolved = false
     const wrapper = mount(TReloadButton, {
       props: {
@@ -107,10 +155,26 @@ describe('TReloadButton', () => {
       global: { provide: themeProvide() },
     })
     await wrapper.find('button').trigger('click')
-    // emit fires synchronously before the awaited callback completes
-    expect(wrapper.emitted('reload')).toBeTruthy()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.t-reload-btn--spinning').exists()).toBe(true)
     await new Promise<void>((r) => setTimeout(r, 20))
+    await wrapper.vm.$nextTick()
     expect(resolved).toBe(true)
+    expect(wrapper.find('.t-reload-btn--spinning').exists()).toBe(false)
+  })
+
+  // `@reload="fn"` and `:on-reload="fn"` are the same vnode prop, which Vue
+  // hands both to the declared `onReload` prop and to `emit('reload')`, so a
+  // click that emitted and then awaited the prop ran the handler twice.
+  it('runs the reload handler once per click', async () => {
+    const handler = vi.fn(async () => {})
+    const wrapper = mount(TReloadButton, {
+      props: { onReload: handler },
+      global: { provide: themeProvide() },
+    })
+    await wrapper.find('button').trigger('click')
+    await new Promise<void>((r) => setTimeout(r, 0))
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })
 

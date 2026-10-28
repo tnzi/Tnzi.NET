@@ -483,6 +483,23 @@ describe('UserStateManager', () => {
       expect(deps.storage.has('tnzi:user:recents')).toBe(false);
       expect(deps.storage.has('tnzi:user:favorites')).toBe(false);
     });
+
+    it('clear drops a persist still waiting on the debounce', () => {
+      // Sign out within 300ms of a change: the pending write used to land after
+      // clear() and put the keys straight back.
+      vi.useFakeTimers();
+      try {
+        user.addRecentItem({ id: '1', title: 'Test', type: 'page', url: '/test' });
+        user.clear();
+        vi.advanceTimersByTime(1000);
+
+        expect(deps.storage.has('tnzi:user:preferences')).toBe(false);
+        expect(deps.storage.has('tnzi:user:recents')).toBe(false);
+        expect(deps.storage.has('tnzi:user:favorites')).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // ------------------------------------------

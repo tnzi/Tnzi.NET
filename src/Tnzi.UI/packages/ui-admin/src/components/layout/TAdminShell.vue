@@ -142,7 +142,11 @@ const emit = defineEmits<{
   openThemeDrawer: []
   localeChange: [locale: AdminLocale]
   menuSelect: [menu: AdminMenuItem]
-  /** Phase I.7.8: forwarded from TAdminTabs so AdminShellRoot can `router.push`. */
+  /**
+   * Forwarded from TAdminTabs, for a host shell that navigates on tab clicks
+   * itself. The built-in AdminShellRoot does not listen: it binds the tab
+   * store's navigator (`tabStore.bindNavigation`), which also covers closes.
+   */
   tabClick: [tab: AdminTab]
 }>()
 

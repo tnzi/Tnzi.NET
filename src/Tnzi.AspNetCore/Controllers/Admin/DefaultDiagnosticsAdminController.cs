@@ -10,25 +10,40 @@ namespace Tnzi.AspNetCore.Controllers;
 [ApiAuthorize(PermissionName = "system.diagnostics.view")]
 public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
 {
-    protected readonly IExceptionStatisticsService ExceptionStatisticsService;
+    /// <summary>
+    /// 异常统计服务；<c>AspNetCore:ExceptionHandling:EnableMetrics=false</c> 时不注册，为 null。
+    /// </summary>
+    /// <remarks>
+    /// 刻意做成可选：必填参数缺席时 <c>ConditionalControllerProvider</c> 会把整个控制器移除，
+    /// 关掉一个内存里的异常环形缓冲就会连带让敏感端点清单、模块清单、admin 清单全部 404。
+    /// 现在只有三个异常统计端点在缺席时答 501，其余照常。
+    /// </remarks>
+    protected readonly IExceptionStatisticsService? ExceptionStatisticsService;
+
+    private const string ExceptionStatisticsDisabledMessage =
+        "Exception statistics are disabled in this deployment. Set AspNetCore:ExceptionHandling:EnableMetrics to true to enable them.";
 
     /// <summary>
     /// Initializes the diagnostics admin controller
     /// </summary>
-    /// <param name="exceptionStatisticsService">Exception statistics service</param>
-    public DefaultDiagnosticsAdminController(IExceptionStatisticsService exceptionStatisticsService)
+    /// <param name="exceptionStatisticsService">Exception statistics service; absent when exception metrics are disabled</param>
+    public DefaultDiagnosticsAdminController(IExceptionStatisticsService? exceptionStatisticsService = null)
     {
-        ExceptionStatisticsService = Check.NotNull(exceptionStatisticsService);
+        ExceptionStatisticsService = exceptionStatisticsService;
     }
 
     /// <summary>
     /// Get exception summary within a time window
     /// </summary>
     /// <param name="minutes">Time window in minutes (default: 60)</param>
-    /// <returns>Exception summary including totals, breakdowns, and top exceptions</returns>
+    /// <returns>Exception summary including totals, breakdowns, and top exceptions; 501 when exception metrics are disabled</returns>
     [HttpGet("exceptions/summary")]
     public virtual ApiResult<ExceptionSummaryDto> GetExceptionSummary([FromQuery] int minutes = 60)
     {
+        // 501 而不是 503：统计没开是这个部署的配置，不是暂时性故障
+        if (ExceptionStatisticsService == null)
+            return ApiResult<ExceptionSummaryDto>.Error(ExceptionStatisticsDisabledMessage, StatusCodes.Status501NotImplemented);
+
         var result = ExceptionStatisticsService.GetSummary(minutes);
         return result.ToApiResult();
     }
@@ -37,10 +52,13 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     /// Get recent exception entries
     /// </summary>
     /// <param name="count">Number of recent entries to return (default: 20, max: 500)</param>
-    /// <returns>List of recent exception entries</returns>
+    /// <returns>List of recent exception entries; 501 when exception metrics are disabled</returns>
     [HttpGet("exceptions/recent")]
     public virtual ApiResult<List<ExceptionEntryDto>> GetRecentExceptions([FromQuery] int count = 20)
     {
+        if (ExceptionStatisticsService == null)
+            return ApiResult<List<ExceptionEntryDto>>.Error(ExceptionStatisticsDisabledMessage, StatusCodes.Status501NotImplemented);
+
         var result = ExceptionStatisticsService.GetRecentExceptions(count);
         return result.ToApiResult();
     }
@@ -48,11 +66,14 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     /// <summary>
     /// Clear all exception statistics
     /// </summary>
-    /// <returns>Operation result</returns>
+    /// <returns>Operation result; 501 when exception metrics are disabled</returns>
     [HttpDelete("exceptions")]
     [ApiAuthorize(PermissionName = "system.diagnostics.execute")]
     public virtual ApiResult ClearExceptions()
     {
+        if (ExceptionStatisticsService == null)
+            return ApiResult.Error(ExceptionStatisticsDisabledMessage, StatusCodes.Status501NotImplemented);
+
         var result = ExceptionStatisticsService.Clear();
         return result.ToApiResult();
     }
@@ -215,29 +236,45 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     /// controllers shaped for a frontend that wants to auto-render menus
     /// and CRUD pages.
     ///
-    /// Powers the <c>useAdminModuleManifest()</c> composable in
-    /// <c>@tnzi/ui-admin</c> 0.2.4+. The DTO is intentionally flatter than
+    /// Read by <c>fetchAdminManifest(client)</c> in <c>@tnzi/ui-admin</c>.
+    /// Entity routes are API routes, not admin SPA paths, so they describe the
+    /// backend surface rather than menu links. The DTO is intentionally flatter than
     /// <see cref="GetModules"/>: one entity per admin route prefix, with
     /// the HTTP methods that prefix exposes - so the frontend can decide
     /// whether to surface a page (only if route is reachable) and whether
     /// to enable Create/Update/Delete UX (based on supported verbs).
+    /// <para>
+    /// Routes are reported without the configured <c>AspNetCore:ApiPathPrefix</c>
+    /// (<c>"admin/users"</c>, never <c>"api/admin/users"</c>), and an entity's route is the
+    /// controller-level template, not the template of one of its actions. Controllers whose
+    /// controller-level template carries a route parameter (for example
+    /// <c>admin/agents/{agentId}/memory</c>) are nested resources with no page of their own
+    /// and are not listed.
+    /// </para>
     /// </summary>
     [HttpGet("admin-manifest")]
     public virtual ApiResult<AdminManifestDto> GetAdminManifest(
         [FromServices] ITnziApplication tnziApp,
-        [FromServices] IActionDescriptorCollectionProvider actionProvider)
+        [FromServices] IActionDescriptorCollectionProvider actionProvider,
+        [FromServices] IOptions<AspNetCoreOptions> aspNetCoreOptions)
     {
-        // Index controller types declared by each loaded module assembly.
-        var modulesByAssembly = tnziApp.Modules.ToDictionary(
-            m => m.Assembly.GetName().Name ?? m.Assembly.FullName ?? string.Empty);
+        // Index the loaded modules by assembly. One assembly can declare several modules
+        // (the core Tnzi assembly declares five), so the index holds every one of them.
+        var modulesByAssembly = tnziApp.Modules
+            .GroupBy(m => m.Assembly.GetName().Name ?? m.Assembly.FullName ?? string.Empty)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // RoutePrefixConvention 把 ApiPathPrefix 并进了每个 action 的模板（默认 "api/admin/..."），
+        // 判定 admin 控制器之前必须先剥掉它，否则默认配置下一个控制器都匹配不上。
+        var apiPrefix = (aspNetCoreOptions.Value.ApiPathPrefix ?? string.Empty).Trim().Trim('/');
 
         // Group all controller actions by their controller type, then bucket
         // by assembly so we can ascribe them to the owning module.
         var adminControllerGroups = actionProvider.ActionDescriptors.Items
             .OfType<ControllerActionDescriptor>()
-            .Where(a => (a.AttributeRouteInfo?.Template ?? string.Empty)
-                .StartsWith("admin/", StringComparison.OrdinalIgnoreCase))
-            .GroupBy(a => a.ControllerTypeInfo.AsType())
+            .Select(a => (Action: a, Template: StripApiPrefix(a.AttributeRouteInfo?.Template, apiPrefix)))
+            .Where(x => x.Template.StartsWith(AdminRoutePrefix, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(x => x.Action.ControllerTypeInfo.AsType())
             .ToList();
 
         var perModule = new Dictionary<string, AdminModuleEntryDto>();
@@ -248,12 +285,17 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
             var assemblyName = controllerType.Assembly.GetName().Name ?? string.Empty;
             if (string.IsNullOrEmpty(assemblyName)) continue;
 
-            // Each controller binds to one route prefix.
-            var firstAction = ctrlGroup.First();
-            var route = firstAction.AttributeRouteInfo?.Template ?? string.Empty;
-            if (string.IsNullOrEmpty(route)) continue;
+            // 实体路由取控制器级模板，不取某个 action 的完整模板：后者随 action 枚举顺序变化，
+            // 还会把 "admin/diagnostics/exceptions/summary" 这种 action 路径当成实体。
+            // 控制器上没有 [Route] 时退到全部 action 模板的公共字面前缀。
+            var route = ResolveControllerRoute(controllerType, ctrlGroup.First().Action, apiPrefix)
+                        ?? CommonLiteralPrefix(ctrlGroup.Select(x => x.Template));
+            if (!route.StartsWith(AdminRoutePrefix, StringComparison.OrdinalIgnoreCase)) continue;
 
-            // Entity name = the segment immediately after "admin/".
+            // 带路由参数的控制器模板是父实体下的子资源，没有可直接导航的页面。
+            if (route.Contains('{')) continue;
+
+            // Entity name = everything after "admin/".
             var entityName = ExtractEntityName(route);
             if (string.IsNullOrEmpty(entityName)) continue;
 
@@ -261,6 +303,7 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
 
             // Aggregate HTTP methods across all actions of this controller.
             var methods = ctrlGroup
+                .Select(x => x.Action)
                 .SelectMany(a => a.ActionConstraints?
                     .OfType<HttpMethodActionConstraint>()
                     .SelectMany(c => c.HttpMethods) ?? [])
@@ -284,13 +327,14 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
 
             if (!perModule.TryGetValue(assemblyName, out var moduleEntry))
             {
-                modulesByAssembly.TryGetValue(assemblyName, out var module);
+                modulesByAssembly.TryGetValue(assemblyName, out var modules);
                 moduleEntry = new AdminModuleEntryDto
                 {
                     Name = ExtractModuleShortName(assemblyName),
-                    FullName = module?.Type.FullName ?? assemblyName,
+                    FullName = modules?[0].Type.FullName ?? assemblyName,
                     Assembly = assemblyName,
-                    IsEnabled = module?.IsEnabled ?? true,
+                    // 同一程序集的多个模块折叠成一行：任一启用即启用（与 admin shell 的折叠规则一致）。
+                    IsEnabled = modules?.Any(m => m.IsEnabled) ?? true,
                     Entities = [],
                 };
                 perModule[assemblyName] = moduleEntry;
@@ -320,9 +364,92 @@ public class DefaultDiagnosticsAdminController : ApiAdminControllerBase
     /// </summary>
     private static string ExtractEntityName(string route)
     {
-        const string prefix = "admin/";
-        if (route.Length <= prefix.Length) return string.Empty;
-        return route.Substring(prefix.Length).TrimEnd('/');
+        if (route.Length <= AdminRoutePrefix.Length) return string.Empty;
+        return route.Substring(AdminRoutePrefix.Length).TrimEnd('/');
+    }
+
+    private const string AdminRoutePrefix = "admin/";
+
+    /// <summary>
+    /// Remove the configured API path prefix (already trimmed of slashes, e.g. <c>"api"</c>)
+    /// from a route template. Templates that do not carry it (controllers marked
+    /// <see cref="NonRoutePrefixAttribute"/>, or an empty prefix) come back unchanged.
+    /// </summary>
+    private static string StripApiPrefix(string? template, string apiPrefix)
+    {
+        var normalized = NormalizeTemplate(template);
+        if (apiPrefix.Length == 0) return normalized;
+
+        if (normalized.StartsWith(apiPrefix + "/", StringComparison.OrdinalIgnoreCase))
+            return normalized.Substring(apiPrefix.Length + 1);
+
+        return normalized.Equals(apiPrefix, StringComparison.OrdinalIgnoreCase) ? string.Empty : normalized;
+    }
+
+    /// <summary>
+    /// Route template without the leading <c>/</c> or <c>~/</c> and trailing slashes.
+    /// </summary>
+    private static string NormalizeTemplate(string? template)
+    {
+        var normalized = (template ?? string.Empty).Trim();
+        if (normalized.StartsWith("~/", StringComparison.Ordinal)) normalized = normalized.Substring(2);
+        return normalized.Trim('/');
+    }
+
+    /// <summary>
+    /// The controller-level admin route template, read the way MVC reads it: the route
+    /// attributes of the most derived class in the hierarchy that declares any, so a
+    /// subclass with its own <c>[Route]</c> replaces the inherited one.
+    /// </summary>
+    private static string? ResolveControllerRoute(Type controllerType, ControllerActionDescriptor action, string apiPrefix)
+    {
+        for (var type = controllerType; type != null && type != typeof(object); type = type.BaseType)
+        {
+            var routes = type.GetCustomAttributes<RouteAttribute>(inherit: false).ToList();
+            if (routes.Count == 0) continue;
+
+            foreach (var routeAttribute in routes)
+            {
+                var template = AttributeRouteModel.ReplaceTokens(routeAttribute.Template, action.RouteValues);
+                var route = StripApiPrefix(template, apiPrefix);
+                if (route.StartsWith(AdminRoutePrefix, StringComparison.OrdinalIgnoreCase)) return route;
+            }
+
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The longest run of leading literal segments shared by all templates, stopping at the
+    /// first segment that holds a route parameter.
+    /// </summary>
+    private static string CommonLiteralPrefix(IEnumerable<string> templates)
+    {
+        List<string>? common = null;
+        foreach (var template in templates)
+        {
+            var segments = template.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .TakeWhile(s => !s.Contains('{'))
+                .ToList();
+            if (common == null)
+            {
+                common = segments;
+                continue;
+            }
+
+            var shared = 0;
+            while (shared < common.Count && shared < segments.Count
+                   && string.Equals(common[shared], segments[shared], StringComparison.OrdinalIgnoreCase))
+            {
+                shared++;
+            }
+
+            common = common.Take(shared).ToList();
+        }
+
+        return string.Join('/', common ?? []);
     }
 
     /// <summary>

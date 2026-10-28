@@ -35,7 +35,14 @@ public class PaymentChannelSideCloseTests : PaymentIntegrationTestBase
 
     private async Task<PaymentEntity> SeedProcessingPaymentAsync(string tradeNo, DateTime? expireTime = null)
     {
-        var payment = new PaymentEntity
+        var payment = NewProcessingPayment(tradeNo, expireTime);
+        await SeedAsync(payment);
+        return payment;
+    }
+
+    private static PaymentEntity NewProcessingPayment(string tradeNo, DateTime? expireTime = null, DateTime? creationTime = null)
+    {
+        return new PaymentEntity
         {
             TradeNo = tradeNo,
             ExternalTradeNo = "scr_" + tradeNo,
@@ -47,10 +54,9 @@ public class PaymentChannelSideCloseTests : PaymentIntegrationTestBase
             Status = PaymentStatus.Processing,
             ChannelCode = ScriptedChannelProvider.Code,
             PaymentMethod = PaymentMethod.CreditCard,
-            ExpireTime = expireTime ?? DateTime.UtcNow.AddMinutes(30)
+            ExpireTime = expireTime ?? DateTime.UtcNow.AddMinutes(30),
+            CreationTime = creationTime ?? default
         };
-        await SeedAsync(payment);
-        return payment;
     }
 
     private Task<Result> CloseAsync(string tradeNo) =>
@@ -206,6 +212,33 @@ public class PaymentChannelSideCloseTests : PaymentIntegrationTestBase
         (await LoadAsync("CS-10")).Status.ShouldBe(PaymentStatus.Processing);
     }
 
+    /// <summary>
+    /// 渠道侧落不定的单（拒绝作废、仍在处理，比如数个工作日才到账的银行扣款）每轮原样留下。
+    /// 它们占满一整页（200 条）时，后面过期的单照样要轮得到；此前每轮只取最老的那一页，后者永远不被处理。
+    /// </summary>
+    [Fact]
+    public async Task ExpiryScan_ReachesPaymentsBehindAFullPageOfUnsettledOnes()
+    {
+        const int scanPageSize = 200;
+        _channel.SupportsPaymentCancellation = true;
+        _channel.ChannelStatus = PaymentStatus.Processing;
+        _channel.CancelOutcomeFor = channelTradeNo => channelTradeNo.StartsWith("scr_STUCK-", StringComparison.Ordinal)
+            ? Result.Failure("still processing", 400)
+            : Result.Success();
+
+        var expired = DateTime.UtcNow.AddMinutes(-1);
+        var oldest = DateTime.UtcNow.AddDays(-2);
+        await SeedAsync(Enumerable.Range(0, scanPageSize)
+            .Select(i => (object)NewProcessingPayment($"STUCK-{i}", expired, oldest.AddSeconds(i)))
+            .ToArray());
+        await SeedProcessingPaymentAsync("CS-BEHIND", expireTime: expired);
+
+        (await RunExpiryScanAsync()).Data.ShouldBe(1);
+
+        (await LoadAsync("CS-BEHIND")).Status.ShouldBe(PaymentStatus.Expired);
+        (await LoadAsync("STUCK-0")).Status.ShouldBe(PaymentStatus.Processing);
+    }
+
     // ---- 关了之后钱还是到了 ----
 
     [Fact]
@@ -243,20 +276,40 @@ internal sealed class ScriptedChannelProvider : IPaymentProvider
 
     public bool SupportsPaymentCancellation { get; set; }
     public Result CancelOutcome { get; set; } = Result.Success();
+
+    /// <summary>按渠道单号给出作废结果；为 null 时一律用 <see cref="CancelOutcome"/>。</summary>
+    public Func<string, Result>? CancelOutcomeFor { get; set; }
+
     public PaymentStatus ChannelStatus { get; set; } = PaymentStatus.Processing;
     public bool QueryFails { get; set; }
     public PaymentStatus CallbackStatus { get; set; } = PaymentStatus.Succeeded;
+    public bool CallbackRequiresFinalization { get; set; }
     public List<string> CancelledTradeNos { get; } = [];
+
+    /// <summary>收款（<see cref="IPaymentProvider.FinalizePaymentAsync"/>）之后渠道回报的状态；为 null 时收款请求失败。</summary>
+    public PaymentStatus? FinalizedStatus { get; set; } = PaymentStatus.Succeeded;
+    public string? FinalizedCurrency { get; set; }
+    public List<string> FinalizedTradeNos { get; } = [];
+
+    /// <summary>同步回报的渠道参考号；为 null 时回报传入的那个。</summary>
+    public string? SyncedExternalTradeNo { get; set; }
+
+    /// <summary>读渠道状态的那一刻（渠道往返期间）在别处发生的事，只跑一次。</summary>
+    public Func<Task>? DuringSync { get; set; }
+
+    /// <summary>渠道收哪些支付方式；默认全收。</summary>
+    public Func<PaymentMethod, bool> Supports { get; set; } = _ => true;
 
     public string ChannelCode => Code;
     public string ChannelName => "Scripted (test)";
-    public bool IsSupported(PaymentMethod method) => true;
+    public bool IsSupported(PaymentMethod method) => Supports(method);
 
     public Task<Result> CancelPaymentAsync(string tradeNo)
     {
-        if (CancelOutcome.Succeeded)
+        var outcome = CancelOutcomeFor?.Invoke(tradeNo) ?? CancelOutcome;
+        if (outcome.Succeeded)
             CancelledTradeNos.Add(tradeNo);
-        return Task.FromResult(CancelOutcome);
+        return Task.FromResult(outcome);
     }
 
     public Task<Result<PaymentProviderOrderResult>> CreatePaymentAsync(PaymentProviderCreateDto input) =>
@@ -267,19 +320,42 @@ internal sealed class ScriptedChannelProvider : IPaymentProvider
             ExpireTime = input.ExpireTime
         }));
 
-    public Task<Result<PaymentProviderQueryResult>> QueryPaymentAsync(string tradeNo) => SyncOrderAsync(tradeNo);
+    public async Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo)
+    {
+        if (Interlocked.Exchange(ref _duringSyncRan, 1) == 0 && DuringSync != null)
+            await DuringSync();
 
-    public Task<Result<PaymentProviderQueryResult>> SyncOrderAsync(string tradeNo) =>
-        Task.FromResult(QueryFails
+        return QueryFails
             ? Result.Failure<PaymentProviderQueryResult>("channel unreachable", 400)
             : Result.Success(new PaymentProviderQueryResult
             {
                 TradeNo = tradeNo,
-                ExternalTradeNo = tradeNo,
+                ExternalTradeNo = SyncedExternalTradeNo ?? tradeNo,
                 Status = ChannelStatus,
                 Amount = 0,
                 PaidTime = ChannelStatus == PaymentStatus.Succeeded ? DateTime.UtcNow : null
-            }));
+            });
+    }
+
+    private int _duringSyncRan;
+
+    public async Task<Result<PaymentProviderQueryResult>> FinalizePaymentAsync(string tradeNo)
+    {
+        FinalizedTradeNos.Add(tradeNo);
+        if (Interlocked.Exchange(ref _duringSyncRan, 1) == 0 && DuringSync != null)
+            await DuringSync();
+
+        return FinalizedStatus is not { } status
+            ? Result.Failure<PaymentProviderQueryResult>("channel unreachable", 502)
+            : Result.Success(new PaymentProviderQueryResult
+            {
+                TradeNo = tradeNo,
+                ExternalTradeNo = "cap_" + tradeNo,
+                Status = status,
+                Amount = 100m,
+                Currency = FinalizedCurrency
+            });
+    }
 
     public Task<Result<PaymentProviderCallbackResult>> HandleCallbackAsync(IDictionary<string, string> parameters) =>
         Task.FromResult(Result.Success(new PaymentProviderCallbackResult
@@ -288,7 +364,8 @@ internal sealed class ScriptedChannelProvider : IPaymentProvider
             ExternalTradeNo = "scr_" + parameters["trade_no"],
             Status = CallbackStatus,
             PaidAmount = 100m,
-            EventId = parameters.TryGetValue("event_id", out var id) ? id : null
+            EventId = parameters.TryGetValue("event_id", out var id) ? id : null,
+            RequiresFinalization = CallbackRequiresFinalization
         }));
 
     public Task<bool> VerifySignatureAsync(IDictionary<string, string> parameters) => Task.FromResult(true);

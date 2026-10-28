@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // last rendered with so a test can read the message list the widget would show.
 const rendered = vi.hoisted(() => ({
   messages: [] as unknown[],
+  isStreaming: undefined as boolean | undefined,
   enableAttachments: undefined as boolean | undefined,
   send: undefined as ((content: string, files: File[]) => void) | undefined,
   regenerate: undefined as ((messageId: string) => void) | undefined,
@@ -14,14 +15,16 @@ vi.mock('../../src/embed/TFloatingChat.vue', () => ({ default: { render: () => n
 vi.mock('../../src/embed/TSidebarChat.vue', () => ({ default: { render: () => null } }));
 vi.mock('../../src/embed/TInlineChat.vue', () => ({
   default: {
-    props: ['messages', 'enableAttachments', 'onSend', 'onRegenerate'],
+    props: ['messages', 'isStreaming', 'enableAttachments', 'onSend', 'onRegenerate'],
     render(this: {
       messages: unknown[];
+      isStreaming?: boolean;
       enableAttachments?: boolean;
       onSend?: (c: string, f: File[]) => void;
       onRegenerate?: (id: string) => void;
     }) {
       rendered.messages = this.messages;
+      rendered.isStreaming = this.isStreaming;
       rendered.enableAttachments = this.enableAttachments;
       rendered.send = this.onSend;
       rendered.regenerate = this.onRegenerate;
@@ -173,6 +176,24 @@ describe('createTnziChat regenerate', () => {
     chat.destroy();
   });
 
+  it('server mode asks the server to answer a stored last question again, instead of sending it twice', async () => {
+    streamChat.mockImplementationOnce(async (opts: { onDone?: (e: Record<string, unknown>) => void }) => {
+      opts.onDone?.({ threadId: 't-1', userMessageId: 'srv-u1' });
+      return { text: 'first answer', reasoning: '', completed: true, error: null };
+    });
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api' });
+    await vi.waitFor(() => expect(rendered.send).toBeDefined());
+    rendered.send!('what is this?');
+    await vi.waitFor(() => expect(rowsWithId().at(-1)?.status).toBe('done'));
+
+    rendered.regenerate!(rowsWithId().at(-1)!.id);
+    await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(2));
+
+    expect(bodyOfCall(1)).toEqual({ threadId: 't-1', regenerate: true, agentId: null, model: null });
+    expect(rowsWithId().map((r) => r.role)).toEqual(['user', 'assistant']);
+    chat.destroy();
+  });
+
   it('BYO mode hands the preceding user text back to onSend', async () => {
     const onSend = vi.fn(async (_text: string, api: { pushMessage: (m: { role: 'assistant'; content: string }) => string }) => {
       api.pushMessage({ role: 'assistant', content: 'reply' });
@@ -215,7 +236,7 @@ describe('createTnziChat regenerate', () => {
  */
 describe('createTnziChat attachments', () => {
   const png = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'shot.png', { type: 'image/png' });
-  const pdf = () => new File([new Uint8Array([1, 2, 3])], 'doc.pdf', { type: 'application/pdf' });
+  const pdf = () => new File([new Uint8Array([1, 2, 3])], 'doc.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
   type Body = { message: string; content?: unknown[] };
   const bodyOfCall = (index: number) => (streamChat.mock.calls[index] as unknown as [{ body: Body }])[0].body;
 
@@ -233,7 +254,7 @@ describe('createTnziChat attachments', () => {
     expect(bodyOfCall(0).message).toBe('what is this?');
     expect(bodyOfCall(0).content).toEqual([
       { type: 'text', text: 'what is this?' },
-      { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png' },
+      { type: 'image', base64Data: 'iVBORw==', mediaType: 'image/png', fileName: 'shot.png' },
     ]);
     expect(rows()[0]).toMatchObject({ role: 'user', content: 'what is this?' });
     expect((rows()[0] as { attachments?: unknown[] }).attachments).toHaveLength(1);
@@ -254,16 +275,60 @@ describe('createTnziChat attachments', () => {
     chat.destroy();
   });
 
-  it('server mode refuses a non-image file through onError and sends nothing', async () => {
+  /**
+   * The composer clears its draft and chips the moment it emits, so a refusal
+   * reported only through the optional `onError` lost the whole message
+   * without a word on any host page that did not wire one (the documented
+   * example does not). It is a failed turn: the text, and why it was not sent.
+   */
+  it('server mode refuses a non-image file as a failed turn and sends nothing', async () => {
     const onError = vi.fn();
     const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api', onError });
     await vi.waitFor(() => expect(rendered.send).toBeDefined());
     rendered.send!('summarise', [pdf()]);
     await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
 
-    expect(onError.mock.calls[0][0].message).toContain('doc.pdf');
+    expect(onError.mock.calls[0][0].message).toContain('doc.docx');
     expect(streamChat).not.toHaveBeenCalled();
-    expect(rows()).toEqual([]);
+    expect(rows().map((r) => r.role)).toEqual(['user', 'assistant']);
+    // Nothing was attached to the conversation, so the bubble claims no file.
+    expect(rows()[0]).toMatchObject({ content: 'summarise' });
+    expect((rows()[0] as { attachments?: unknown[] }).attachments).toBeUndefined();
+    expect(rows()[1]).toMatchObject({ status: 'error', isStreaming: false });
+    expect(rows()[1].error).toContain('doc.docx');
+    expect(rendered.isStreaming).toBe(false);
+    chat.destroy();
+  });
+
+  it('the refusal shows in the widget when the host passed no onError', async () => {
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api' });
+    await vi.waitFor(() => expect(rendered.send).toBeDefined());
+    rendered.send!('summarise', [pdf()]);
+    await vi.waitFor(() => expect(rows().at(-1)?.status).toBe('error'));
+    expect(rows().at(-1)?.error).toContain('only images');
+    chat.destroy();
+  });
+
+  it('Retry on a refused turn sends the same text and files again', async () => {
+    const uploadFile = vi
+      .fn<(file: File) => Promise<{ id: string; fileName?: string }>>()
+      .mockRejectedValueOnce(new Error('Upload failed: network'))
+      .mockResolvedValueOnce({ id: 'file-1', fileName: 'doc.docx' });
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api', uploadFile });
+    await vi.waitFor(() => expect(rendered.send).toBeDefined());
+    rendered.send!('summarise', [pdf()]);
+    await vi.waitFor(() => expect(rows().at(-1)?.status).toBe('error'));
+    const failedId = (rows().at(-1) as Row & { id: string }).id;
+
+    rendered.regenerate!(failedId);
+    await vi.waitFor(() => expect(rows().at(-1)?.status).toBe('done'));
+
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(rows().map((r) => r.role)).toEqual(['user', 'assistant']);
+    expect(bodyOfCall(0).content).toEqual([
+      { type: 'text', text: 'summarise' },
+      { type: 'file', fileId: 'file-1', fileName: 'doc.docx' },
+    ]);
     chat.destroy();
   });
 
@@ -295,6 +360,110 @@ describe('createTnziChat attachments', () => {
     await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
     expect(bodyOfCall(0).content?.map((p) => (p as { type: string }).type)).toEqual(['text', 'image']);
     expect(bodyOfCall(0).message).toBe('[Attached: shot.png]');
+    chat.destroy();
+  });
+});
+
+/**
+ * Stop and turn supersession. The stream resolves cleanly when it is aborted
+ * (`streamChat` swallows the AbortError), so without a turn identity the
+ * stopped turn's tail re-marked its row `done` - dropping the "Generation
+ * stopped" mark - and, once a new turn was running, cleared that turn's
+ * streaming flag and nulled its abort handle.
+ */
+describe('createTnziChat stop and turn identity', () => {
+  type Opts = { signal: AbortSignal };
+  const signalOfCall = (index: number) => (streamChat.mock.calls[index] as unknown as [Opts])[0].signal;
+  const pdf = () => new File([new Uint8Array([1, 2, 3])], 'doc.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+
+  /** A stream that stays open until released, and resolves cleanly when aborted - as the real one does. */
+  function holdStream(): { release: () => void } {
+    const handle = { release: () => {} };
+    streamChat.mockImplementationOnce(
+      (opts: unknown) =>
+        new Promise((resolve) => {
+          const done = () => resolve({ text: '', reasoning: '', completed: false, error: null });
+          handle.release = done;
+          (opts as Opts).signal.addEventListener('abort', done);
+        }) as never,
+    );
+    return handle;
+  }
+
+  beforeEach(() => {
+    streamChat.mockClear();
+    document.body.innerHTML = '<div id="host"></div>';
+  });
+
+  it('a stopped answer keeps its stopped mark', async () => {
+    holdStream();
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api' });
+    chat.sendMessage('hello');
+    await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
+
+    chat.stop();
+    await vi.waitFor(() => expect(signalOfCall(0).aborted).toBe(true));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(rows().at(-1)).toMatchObject({ status: 'stopped', isStreaming: false });
+    expect(rendered.isStreaming).toBe(false);
+    chat.destroy();
+  });
+
+  it("a stopped turn's tail leaves the next turn streaming and cancellable", async () => {
+    const first = holdStream();
+    streamChat.mockImplementationOnce(() => new Promise(() => {}) as never);
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api' });
+    chat.sendMessage('one');
+    await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
+
+    // Stop, but the aborted stream only settles after the next turn started.
+    signalOfCall(0).removeEventListener('abort', first.release);
+    chat.stop();
+    chat.sendMessage('two');
+    await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(2));
+    first.release();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(rendered.isStreaming).toBe(true);
+    expect(rows().at(-1)).toMatchObject({ isStreaming: true });
+    chat.stop();
+    expect(signalOfCall(1).aborted).toBe(true);
+    chat.destroy();
+  });
+
+  it('ignores a send while a reply is streaming', async () => {
+    holdStream();
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api' });
+    chat.sendMessage('one');
+    await vi.waitFor(() => expect(streamChat).toHaveBeenCalledTimes(1));
+
+    chat.sendMessage('two');
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(streamChat).toHaveBeenCalledTimes(1);
+    expect(rows().map((r) => r.content)).toEqual(['one', '']);
+    chat.destroy();
+  });
+
+  it('the upload is part of the turn: Stop shows, a second send waits, and Stop cancels it', async () => {
+    let finishUpload: (() => void) | undefined;
+    const uploadFile = vi.fn(
+      () => new Promise<{ id: string }>((resolve) => (finishUpload = () => resolve({ id: 'file-1' }))),
+    );
+    const chat = createTnziChat({ mode: 'inline', el: '#host', apiBaseUrl: '/api', uploadFile });
+    chat.sendMessage('summarise', [pdf()]);
+    await vi.waitFor(() => expect(finishUpload).toBeDefined());
+    expect(rendered.isStreaming).toBe(true);
+
+    chat.sendMessage('another');
+    chat.stop();
+    finishUpload!();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(streamChat).not.toHaveBeenCalled();
+    expect(rows()).toEqual([]);
+    expect(rendered.isStreaming).toBe(false);
     chat.destroy();
   });
 });

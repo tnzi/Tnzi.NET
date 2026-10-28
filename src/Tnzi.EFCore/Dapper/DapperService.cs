@@ -12,7 +12,7 @@ namespace Tnzi.EFCore.Dapper;
 /// 以自动提交落库、回滚撤不掉。因此写入口先经 <see cref="IUnitOfWorkManager"/> 幂等地强开物理事务
 /// （与仓储的 ExecuteUpdate/ExecuteDelete 路径同一惯例），再把事务交给 Dapper。
 /// 与仓储守卫一样有第二个分支：没有管理器（或管理器没开事务）而直接注入的作用域 <see cref="IUnitOfWork"/>
-/// 开了延迟事务（<c>EnableTransaction</c>，没有 <c>BeginTransactionAsync</c>）时，同样先加入它。
+/// 开了延迟事务（<c>EnableTransaction</c> / <c>BeginTransactionAsync</c>，物理事务尚未开启）时，同样先加入它。
 /// 两边都没开事务时保持自动提交 —— 那是正确语义，不是缺陷。
 /// </remarks>
 public class DapperService : IDapperService

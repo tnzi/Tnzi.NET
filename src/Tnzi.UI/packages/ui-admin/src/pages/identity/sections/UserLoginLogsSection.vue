@@ -8,7 +8,9 @@
     </template>
 
     <NSpin :show="loading">
-      <TEmpty v-if="!loading && !logs.length" :text="t('detail.loginLogs.empty')" size="small" />
+      <!-- "No sign-ins" is a claim about the account: made only after a load
+           that succeeded, never as the leftover of one that failed. -->
+      <TEmpty v-if="!loading && !loadFailed && !logs.length" :text="t('detail.loginLogs.empty')" size="small" />
       <template v-else>
         <ol class="ull-feed">
           <li v-for="log in logs" :key="log.id" class="ull-entry" :class="{ 'ull-entry--fail': !log.isSuccess }">
@@ -76,6 +78,7 @@ const message = useSafeMessage()
 
 const logs = ref<LoginLogDto[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 const page = ref(1)
 const pageSize = 20
 const total = ref(0)
@@ -91,7 +94,9 @@ async function load(): Promise<void> {
     })
     logs.value = res.items ?? []
     total.value = res.totalCount ?? 0
+    loadFailed.value = false
   } catch (err) {
+    loadFailed.value = true
     message.error(err instanceof Error ? err.message : String(err))
   } finally {
     loading.value = false

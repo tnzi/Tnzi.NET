@@ -41,6 +41,10 @@ public class PgVectorStore : IVectorStore
         _knowledgeBaseTable = $"{prefix}_KnowledgeBase";
     }
 
+    /// <inheritdoc />
+    /// <remarks>检索与删除的就是摄取经 EF 写入的分块表，摄取不必再逐块 upsert。</remarks>
+    public bool UsesRagChunkTable => true;
+
     /// <summary>
     /// 解析当前租户 ID。
     /// <para>

@@ -110,12 +110,15 @@ describe('sidebar row geometry', () => {
     );
   });
 
-  it('icon boxes match, so labels start at the same x', () => {
-    for (const property of ['width', 'height'] as const) {
-      expect(declaration(threads, '.t-thread-list__icon', property)).toBe(
-        declaration(nav, '.t-sidebar-nav__item-icon', property),
-      );
-    }
+  it('conversation rows carry no leading icon, so their titles start where the nav icons do', () => {
+    /* The recent-conversations list is titles only (the nav keeps its icons).
+       Its rows share the nav's padding (checked above), so a title begins at
+       the x of the nav's icons. A leading icon coming back without its own
+       geometry check would put titles at a third x. */
+    expect(threads).not.toMatch(/\.t-thread-list__icon\b/);
+    const rowSlot = /<slot name="row"[^>]*>([\s\S]*?)<\/slot>/.exec(threads)?.[1] ?? '';
+    expect(rowSlot).toMatch(/t-thread-list__title/);
+    expect(rowSlot).not.toMatch(/<Icon\b/);
   });
 
   it('TChatApp declares no row style of its own', () => {

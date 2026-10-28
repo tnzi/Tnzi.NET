@@ -1,0 +1,37 @@
+---
+subject: "Service suspended: payment overdue"
+layout: DefaultEmail
+description: Sent to the billing contacts when a past-due subscription is still unpaid at the end of the grace period and service is suspended
+metadata:
+  type: Email
+  version: "1.0"
+---
+@{
+    var manageUrl = (string?)Model.ManageUrl;
+    var hasLink = !string.IsNullOrWhiteSpace(manageUrl);
+}
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+    <tr>
+        <td class="greeting ink" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 22px; font-weight: 600; color: #1a1a2e; line-height: 1.35; padding-bottom: 14px;">
+            Your service has been suspended
+        </td>
+    </tr>
+    <tr>
+        <td class="ink-soft" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; line-height: 1.65; color: #4a5568;">
+            Hi @(string.IsNullOrWhiteSpace((string?)Model.CustomerName) ? "there" : Model.CustomerName),
+            the payment for subscription @Model.SubscriptionNo has been overdue since @Model.PastDueSince and the grace period has ended,
+            so access to @Model.PlanName is suspended. Pay the outstanding amount or update the payment method and access returns immediately.
+        </td>
+    </tr>
+</table>
+
+@if (hasLink)
+{
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" class="btn" style="margin: 26px 0 0 0;">
+    <tr>
+        <td bgcolor="#0f3460" style="border-radius: 8px;">
+            <a href="@manageUrl" target="_blank" style="display: inline-block; padding: 14px 28px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 16px; font-weight: 600; color: #ffffff; text-decoration: none; border-radius: 8px; background-color: #0f3460; text-align: center;">Pay now</a>
+        </td>
+    </tr>
+</table>
+}

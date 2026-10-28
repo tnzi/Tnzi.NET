@@ -71,8 +71,7 @@ public class StripePaymentIntentCancelTests
         {
             Enabled = true,
             SecretKey = secretKey,
-            PublishableKey = "pk_test_key",
-            Currency = "usd"
+            PublishableKey = "pk_test_key"
         });
         return new StripeProvider(options, new Mock<ILogger<StripeProvider>>().Object);
     }

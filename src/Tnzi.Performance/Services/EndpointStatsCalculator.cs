@@ -22,7 +22,7 @@ public static class EndpointStatsCalculator
             : records;
 
         var groups = filtered
-            .GroupBy(r => new { r.Path, r.Method })
+            .GroupBy(r => new { Path = r.EndpointKey, r.Method })
             .Select(g =>
             {
                 var durations = g.Select(r => r.DurationMs).OrderBy(d => d).ToList();

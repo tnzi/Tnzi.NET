@@ -13,7 +13,7 @@ interface Row {
 const columns: ColumnDef[] = [{ key: 'name', title: 'Name' }]
 const row: Row = { id: '1', name: 'Alice' }
 
-function makeCrud(permission?: string | { create?: string; update?: string; delete?: string }) {
+function makeCrud(permission?: string | { create?: string | string[]; update?: string | string[]; delete?: string }) {
   return useCrudPage<Row>({
     pageId: 'perm-test',
     columns,
@@ -65,6 +65,13 @@ describe('useCrudPage permission gating', () => {
     expect(crud.canCreate).toBe(false)
     expect(crud.canUpdate).toBe(true)
     expect(crud.canDelete).toBe(false)
+  })
+
+  it('an action naming several codes requires all of them (stacked backend gates are AND-ed)', () => {
+    signIn(['x.create', 'y.create', 'x.update'])
+    const crud = makeCrud({ create: ['x.create', 'y.create'], update: ['x.update', 'y.update'] })
+    expect(crud.canCreate).toBe(true)
+    expect(crud.canUpdate).toBe(false)
   })
 
   it('permission codes match case-insensitively', () => {

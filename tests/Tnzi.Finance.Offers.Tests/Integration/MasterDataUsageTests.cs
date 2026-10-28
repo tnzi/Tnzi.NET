@@ -148,6 +148,61 @@ public class MasterDataUsageTests : OfferIntegrationTestBase
     }
 
     /// <summary>
+    /// 税码也是要约行引用的主数据：只被报价单 / 采购订单行引用的税码删掉后，转发票 / 转账单那一步
+    /// 计税时才撞上「Tax code ... not found」。
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TaxCodeOnAnOfferLine_CannotBeDeleted(bool onEstimate)
+    {
+        await SeedCoaAsync();
+        var agency = await InScopeAsync<ITaxService, Result<TaxAgencyDto>>(s => s.CreateAgencyAsync(new UpsertTaxAgencyDto { Name = "Offer agency" }));
+        var rate = await InScopeAsync<ITaxService, Result<TaxRateDto>>(s => s.CreateRateAsync(new UpsertTaxRateDto { AgencyId = agency.Data!.Id, Name = "GST 5%", Rate = 5m }));
+        var code = await InScopeAsync<ITaxService, Result<TaxCodeDto>>(s => s.CreateCodeAsync(new UpsertTaxCodeDto
+        {
+            Name = "GST",
+            Components = [new UpsertTaxCodeComponentDto { TaxRateId = rate.Data!.Id, Order = 1 }]
+        }));
+        code.Succeeded.ShouldBeTrue(code.Message);
+        var taxCodeId = code.Data!.Id;
+
+        if (onEstimate)
+        {
+            var customer = await CustomerAsync("Contoso Ltd");
+            var revenue = await AccountIdByCodeAsync("4100");
+            var draft = await InScopeAsync<IEstimateService, Result<EstimateDto>>(s => s.CreateDraftAsync(new CreateEstimateDto
+            {
+                CustomerId = customer,
+                DocDate = DateTime.UtcNow.Date,
+                Currency = "USD",
+                Lines = [new CreateOfferLineDto { AccountId = revenue, Quantity = 1, UnitPrice = 500m, TaxCodeId = taxCodeId }]
+            }));
+            draft.Succeeded.ShouldBeTrue(draft.Message);
+        }
+        else
+        {
+            var vendor = await VendorAsync("Wingtip Toys");
+            var expense = await AccountIdByCodeAsync("5200");
+            var draft = await InScopeAsync<IPurchaseOrderService, Result<PurchaseOrderDto>>(s => s.CreateDraftAsync(new CreatePurchaseOrderDto
+            {
+                VendorId = vendor,
+                DocDate = DateTime.UtcNow.Date,
+                Currency = "USD",
+                Lines = [new CreateOfferLineDto { AccountId = expense, Quantity = 1, UnitPrice = 80m, TaxCodeId = taxCodeId }]
+            }));
+            draft.Succeeded.ShouldBeTrue(draft.Message);
+        }
+
+        var deleted = await InScopeAsync<ITaxService, Result>(s => s.DeleteCodeAsync(taxCodeId));
+
+        deleted.Succeeded.ShouldBeFalse();
+        deleted.Code.ShouldBe(409);
+        deleted.Message.ShouldNotBeNull();
+        deleted.Message.ShouldContain("estimate or purchase-order lines");
+    }
+
+    /// <summary>
     /// 没被任何要约单据引用时照旧放行：本契约回答的是事实，不是"一律拒绝"。
     /// </summary>
     [Fact]

@@ -27,12 +27,29 @@
  * out is destructive. Expressing those as data keeps consumers out of the
  * markup; anything the type cannot express goes through `menu-header` /
  * `menu-footer`, or replaces the whole surface via the `menu` slot.
+ *
+ * ## Submenus
+ *
+ * An item with `children` opens them in place, under a back row, instead of
+ * being selected: a language or theme picker in the account menu. `checked`
+ * marks the current choice. Selecting a child emits `select` with the child's
+ * id, so ids must be unique across the whole tree (`lang:en`, `theme:dark`).
+ *
+ * ```vue
+ * <TUserMenu :extra-items="[
+ *   { id: 'language', label: 'Language', value: 'English', children: [
+ *     { id: 'lang:en', label: 'English', checked: locale === 'en' },
+ *     { id: 'lang:fr', label: 'Français', checked: locale === 'fr' },
+ *   ] },
+ * ]" />
+ * ```
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { TAvatar } from '@tnzi/ui'
 import TPopoverMenu from './TPopoverMenu.vue'
-import { useAiI18n } from '../../i18n/index'
+import { useAiI18n, formatAiMessage } from '../../i18n/index'
+import { opensSubmenu, resolveMenuLevel } from './user-menu'
 
 export interface UserMenuItem {
   readonly id: string
@@ -56,6 +73,10 @@ export interface UserMenuItem {
   readonly dividerBefore?: boolean
   /** Render as a non-interactive label row. Use with `badge` for a plan row. */
   readonly static?: boolean
+  /** A submenu: activating the item opens these in its place, under a back row. */
+  readonly children?: ReadonlyArray<UserMenuItem>
+  /** The current choice in a picker submenu (a check mark at the right edge). */
+  readonly checked?: boolean
 }
 
 /** Trailing icon buttons on the status bar itself (notifications, feedback). */
@@ -145,10 +166,28 @@ const effectiveItems = computed<ReadonlyArray<UserMenuItem>>(() => [
 
 const displayName = computed(() => props.name || t.value.account.fallbackName)
 
+/* The ids of the submenus opened, outermost first; empty at the top level. */
+const path = ref<string[]>([])
+const level = computed(() => resolveMenuLevel(effectiveItems.value, path.value))
+const parentItem = computed(() => level.value.trail[level.value.trail.length - 1] ?? null)
+
+// Closing the menu returns it to the top: the next open starts where it always does.
+watch(open, (isOpen) => {
+  if (!isOpen) path.value = []
+})
+
 function selectItem(item: UserMenuItem): void {
   if (item.static) return
+  if (opensSubmenu(item)) {
+    path.value = [...path.value, item.id]
+    return
+  }
   open.value = false
   emit('select', item.id)
+}
+
+function goBack(): void {
+  path.value = path.value.slice(0, -1)
 }
 
 function selectBadge(item: UserMenuItem): void {
@@ -216,7 +255,22 @@ function onAction(id: string, event: MouseEvent): void {
       :max-width="300"
     >
       <slot name="menu" :close="() => (open = false)">
-        <slot name="menu-header">
+        <!-- Inside a submenu the back row replaces the account header: the
+             header belongs to the top of the menu, the back row says where
+             you are and how to get out. -->
+        <template v-if="parentItem">
+          <button
+            type="button"
+            class="t-popover-menu__item t-user-menu__back"
+            :aria-label="formatAiMessage(t.account.backTo, { label: parentItem.label })"
+            @click="goBack"
+          >
+            <Icon icon="lucide:chevron-left" />
+            <span class="t-user-menu__item-label">{{ parentItem.label }}</span>
+          </button>
+          <div class="t-popover-menu__sep" />
+        </template>
+        <slot v-else name="menu-header">
           <div v-if="showHeader" class="t-user-menu__head">
             <TAvatar
               :src="avatarSrc ?? undefined"
@@ -241,7 +295,7 @@ function onAction(id: string, event: MouseEvent): void {
           <div v-if="showHeader" class="t-popover-menu__sep" />
         </slot>
 
-        <template v-for="item in effectiveItems" :key="item.id">
+        <template v-for="item in level.items" :key="item.id">
           <div v-if="item.dividerBefore" class="t-popover-menu__sep" />
 
           <div v-if="item.static" class="t-popover-menu__row">
@@ -260,19 +314,22 @@ function onAction(id: string, event: MouseEvent): void {
             type="button"
             class="t-popover-menu__item"
             :class="{ 't-popover-menu__item--danger': item.danger }"
-            role="menuitem"
+            :role="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
+            :aria-checked="item.checked === undefined ? undefined : item.checked"
+            :aria-haspopup="item.children?.length ? 'menu' : undefined"
             @click="selectItem(item)"
           >
             <Icon v-if="item.icon" :icon="item.icon" />
             <span class="t-user-menu__item-label">{{ item.label }}</span>
             <span v-if="item.value" class="t-popover-menu__item-value">{{ item.value }}</span>
+            <Icon v-if="item.checked" class="t-popover-menu__item-check" icon="lucide:check" />
             <Icon
-              v-if="item.external"
+              v-else-if="item.external"
               class="t-popover-menu__item-hint"
               icon="lucide:arrow-up-right"
             />
             <Icon
-              v-else-if="item.chevron"
+              v-else-if="item.chevron || item.children?.length"
               class="t-popover-menu__item-hint"
               icon="lucide:chevron-right"
             />
@@ -303,14 +360,15 @@ function onAction(id: string, event: MouseEvent): void {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
+  /* Row tokens: a shell sets touch sizes on a phone (see TChatApp). */
+  height: max(36px, var(--tnzi-ai-row-height, 36px));
   padding: 0 6px;
   border: none;
   background: transparent;
   border-radius: 10px;
   color: var(--tnzi-ai-text);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--tnzi-ai-row-font-size, 14px);
   text-align: left;
   /* No hover fill. The account row is the last thing in the sidebar and it is
      always on screen, so a fill under the cursor is a permanent flicker as the
@@ -349,8 +407,8 @@ function onAction(id: string, event: MouseEvent): void {
   justify-content: center;
 }
 .t-user-menu__action {
-  width: 30px;
-  height: 30px;
+  width: var(--tnzi-ai-icon-button-size, 30px);
+  height: var(--tnzi-ai-icon-button-size, 30px);
   border: none;
   background: transparent;
   border-radius: 8px;

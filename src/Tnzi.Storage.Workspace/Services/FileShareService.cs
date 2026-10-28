@@ -11,6 +11,12 @@ public class FileShareService : ApplicationService, IFileShareService
     private readonly IFileAccessGrantContext _grantContext;
     private readonly IOptionsMonitor<StorageOptions> _optionsMonitor;
 
+    /// <summary>
+    /// 回收站里的文件对分享链接而言不存在：用户删掉一个文件，期待的是发出去的链接也随之失效，
+    /// 而文件在清除之前字节都还在。还原之后链接恢复可用（它没有被撤销）。
+    /// </summary>
+    private readonly RecycleBinLookup _recycleBin;
+
     private ShareOptions ShareOptions => _optionsMonitor.CurrentValue.Share;
 
     public FileShareService(
@@ -19,7 +25,8 @@ public class FileShareService : ApplicationService, IFileShareService
         IFileAccessAuthorizer accessAuthorizer,
         IFileAccessGrantContext grantContext,
         IOptionsMonitor<StorageOptions> optionsMonitor,
-        IServiceProvider serviceProvider)
+        IServiceProvider serviceProvider,
+        RecycleBinLookup recycleBin)
         : base(serviceProvider)
     {
         _shareRepository = Check.NotNull(shareRepository);
@@ -27,6 +34,7 @@ public class FileShareService : ApplicationService, IFileShareService
         _accessAuthorizer = Check.NotNull(accessAuthorizer);
         _grantContext = Check.NotNull(grantContext);
         _optionsMonitor = Check.NotNull(optionsMonitor);
+        _recycleBin = Check.NotNull(recycleBin);
     }
 
     public async Task<Result<FileSharePublicDto>> CreateShareAsync(Guid fileId, DateTime? expiresAt = null, int? maxAccessCount = null, string? password = null, CancellationToken cancellationToken = default)
@@ -39,6 +47,10 @@ public class FileShareService : ApplicationService, IFileShareService
         // for a file you may not even read would hand that credential out, so
         // this needs write-level rights, not merely the file's id.
         if (!await _accessAuthorizer.CanWriteAsync(fileRecord, cancellationToken))
+            return Fail<FileSharePublicDto>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
+
+        // 回收站里的文件不能再往外发（还原之后再分享）。
+        if (await _recycleBin.IsInRecycleBinAsync(fileRecord, cancellationToken))
             return Fail<FileSharePublicDto>("File not found", 404, ErrorCodes.RESOURCE_NOT_FOUND);
 
         // 部署级策略:管理员开了强制口令,就没有"这条我不设"的余地。
@@ -105,9 +117,9 @@ public class FileShareService : ApplicationService, IFileShareService
             return NotFoundShare<FileSharePreviewDto>();
         }
 
-        // 文件本身被删掉了,链接就没有意义 —— 同样 404,不解释。
+        // 文件本身被删掉了(或进了回收站),链接就没有意义 —— 同样 404,不解释。
         var file = await _fileRepository.GetAsync(share.FileId, cancellationToken);
-        if (file == null)
+        if (file == null || await _recycleBin.IsInRecycleBinAsync(file, cancellationToken))
             return NotFoundShare<FileSharePreviewDto>();
 
         return Ok(new FileSharePreviewDto
@@ -212,28 +224,47 @@ public class FileShareService : ApplicationService, IFileShareService
         if (share.MaxAccessCount.HasValue && share.AccessCount >= share.MaxAccessCount.Value)
             return Ok(false);
 
+        // 文件进了回收站：链接与撤销了一样用不了（排在口令之前，不为一个取不到的文件消耗尝试次数）。
+        var sharedFile = await _fileRepository.GetAsync(share.FileId, cancellationToken);
+        if (sharedFile != null && await _recycleBin.IsInRecycleBinAsync(sharedFile, cancellationToken))
+            return Ok(false);
+
         // 检查密码
         if (share.RequirePassword)
         {
+            // ★★ 先占一次尝试，再比对口令。闸门此前落在「读出来的那一份」上：一批并发的猜测都在第一次失败落库之前
+            // 读到 IsEnabled = true，各自做完哈希比对，失败计数又是读改写、彼此覆盖，10 次的上限被放大成并发数那么多次。
+            // 现在每次比对之前先在库里原子地 +1（条件里带着「仍启用、未到上限」），占不到就不比对。
+            if (!await TryReservePasswordAttemptAsync(share, options, cancellationToken))
+                return Ok(false);
+
             var supplied = !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(share.PasswordHash);
             var needsRehash = false;
             if (!supplied || !SharePasswordHasher.Verify(password!, share.PasswordHash!, out needsRehash))
             {
-                await RecordFailedAttemptAsync(share, options, cancellationToken);
+                await DisableIfAttemptsExhaustedAsync(share, options, cancellationToken);
                 return Ok(false);
             }
 
             // 连续失败计数只在真正通过时清零 —— 否则攻击者只要偶尔混进一次正确请求
             // 就能把闸门重置。这里"通过"就是唯一的重置条件。
-            // ★ 同一次写入顺带把旧格式（单轮 HMAC）的哈希就地升级成 PBKDF2：
+            // 清零带着「仍启用」：比对期间并发的失败已经把链接停用时，这一次同样拒绝。
+            if (!await TryClearPasswordAttemptsAsync(share, options, cancellationToken))
+                return Ok(false);
+
+            // ★ 把旧格式（单轮 HMAC）的哈希就地升级成 PBKDF2：
             //   只有此刻手里有明文口令，才算得出新哈希；存量链接因此不需要重发。
-            if (share.FailedAttemptCount > 0 || needsRehash)
+            // ★★ 只写这一列，条件里带着读到的旧哈希。此前读出整行改完再整行写回：清零之后、写回之前并发的失败
+            //   刚把链接停用（或创建者刚撤销了它），整行写回把 IsEnabled 写回 true，失败计数与访问计数也写回读到的旧值，
+            //   一条正在被爆破而停用的链接就这样重新打开了。
+            if (needsRehash)
             {
-                var writable = await LoadForUpdateAsync(share, cancellationToken);
-                writable.FailedAttemptCount = 0;
-                if (needsRehash)
-                    writable.PasswordHash = SharePasswordHasher.Hash(password!);
-                await _shareRepository.UpdateAsync(writable, cancellationToken);
+                var legacyHash = share.PasswordHash;
+                var upgradedHash = SharePasswordHasher.Hash(password!);
+                await _shareRepository.EnsureTransactionStartedAsync(cancellationToken);
+                await _shareRepository.AsQueryable()
+                    .Where(s => s.Id == share.Id && s.PasswordHash == legacyHash)
+                    .ExecuteUpdateAsync(set => set.SetProperty(s => s.PasswordHash, upgradedHash), cancellationToken);
             }
         }
 
@@ -242,55 +273,102 @@ public class FileShareService : ApplicationService, IFileShareService
     }
 
     /// <summary>
-    /// 记一次口令输错;达到上限就把链接停用。
-    ///
-    /// 令牌是 256 位随机数猜不到,但口令可以在线爆破。停用而不是"锁 N 分钟":
-    /// 分享链接是一次性的对外物件,有人在爆破就说明它已经泄漏,让创建者重发一条
-    /// 比让它自动解锁更合理。
-    ///
-    /// ★**必须逃出外层事务**:输错口令的请求以失败响应收场(401),而启用了
-    /// `EnableGlobalUnitOfWork` 的部署会把失败请求的整个事务回滚 —— 计数于是永远
-    /// 写不进去,这道闸门就形同虚设(实测正是如此:连错 10 次后正确口令照样放行)。
-    /// 所以在**独立 DI 作用域**里落库,与 Identity 保存 2FA 临时令牌是同一条路子。
+    /// 比对口令之前先占一次尝试：一条条件更新把失败计数 +1，条件里带着「仍启用、还没到上限」。占到返回 <see langword="true"/>。
     /// </summary>
-    private async Task RecordFailedAttemptAsync(FileShare share, ShareOptions options, CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>
+    /// ★★ 计数先加后减（通过时清零），所以同一时刻在比对口令的请求最多 <c>MaxFailedPasswordAttempts</c> 个，
+    /// 与并发数无关。上限不设（&lt;= 0）时不计数，照旧直接比对。
+    /// </para>
+    /// <para>
+    /// ★ 写库失败时拒绝而不是放行：闸门打不开就不比对。
+    /// </para>
+    /// </remarks>
+    private async Task<bool> TryReservePasswordAttemptAsync(FileShare share, ShareOptions options, CancellationToken cancellationToken)
     {
-        if (options.MaxFailedPasswordAttempts <= 0)
-            return;
+        var max = options.MaxFailedPasswordAttempts;
+        if (max <= 0)
+            return true;
 
-        // 拿不到作用域工厂(未接 DI 的宿主 / 单元测试)时退回常规保存:
-        // 未启用全局 UoW 的部署仍能工作,只是逃不出事务。
-        var scopeFactory = ServiceProvider?.GetService<IServiceScopeFactory>();
-        if (scopeFactory == null)
+        try
         {
-            var inline = await LoadForUpdateAsync(share, cancellationToken);
-            ApplyFailedAttempt(inline, options);
-            await _shareRepository.UpdateAsync(inline, cancellationToken);
-            return;
+            var affected = await UpdateOutsideRequestTransactionAsync(
+                shares => shares
+                    .Where(s => s.Id == share.Id && s.IsEnabled && s.FailedAttemptCount < max)
+                    .ExecuteUpdateAsync(set => set.SetProperty(s => s.FailedAttemptCount, s => s.FailedAttemptCount + 1), cancellationToken),
+                cancellationToken);
+            return affected == 1;
         }
-
-        using var scope = scopeFactory.CreateScope();
-        var repository = scope.ServiceProvider.GetService<IRepository<FileShare, Guid>>();
-        if (repository == null)
-            return;
-
-        var writable = await repository.GetAsync(share.Id, cancellationToken);
-        if (writable == null)
-            return;
-
-        ApplyFailedAttempt(writable, options);
-        await repository.UpdateAsync(writable, cancellationToken);
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Could not count a password attempt on file share {ShareId}; the attempt is refused", share.Id);
+            return false;
+        }
     }
 
-    private void ApplyFailedAttempt(FileShare share, ShareOptions options)
+    /// <summary>
+    /// 一次口令输错之后：计数已经到了上限就把链接停用。
+    /// </summary>
+    /// <remarks>
+    /// 令牌是 256 位随机数猜不到，但口令可以在线爆破。停用而不是"锁 N 分钟"：
+    /// 分享链接是一次性的对外物件，有人在爆破就说明它已经泄漏，让创建者重发一条比让它自动解锁更合理。
+    /// 计数本身已经在比对之前占好了（<see cref="TryReservePasswordAttemptAsync"/>），这里只判断要不要停用。
+    /// </remarks>
+    private async Task DisableIfAttemptsExhaustedAsync(FileShare share, ShareOptions options, CancellationToken cancellationToken)
     {
-        share.FailedAttemptCount++;
-        if (share.FailedAttemptCount >= options.MaxFailedPasswordAttempts)
+        var max = options.MaxFailedPasswordAttempts;
+        if (max <= 0)
+            return;
+
+        var disabled = await UpdateOutsideRequestTransactionAsync(
+            shares => shares
+                .Where(s => s.Id == share.Id && s.IsEnabled && s.FailedAttemptCount >= max)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.IsEnabled, false), cancellationToken),
+            cancellationToken);
+
+        if (disabled == 1)
         {
-            share.IsEnabled = false;
             LogWarning("File share disabled after {Count} failed password attempts: ShareToken: {ShareToken}",
-                share.FailedAttemptCount, share.ShareToken);
+                max, share.ShareToken);
         }
+    }
+
+    /// <summary>
+    /// 口令通过：把失败计数清零。只在链接仍启用时成功；比对期间它已被并发的失败停用时返回 <see langword="false"/>。
+    /// </summary>
+    private async Task<bool> TryClearPasswordAttemptsAsync(FileShare share, ShareOptions options, CancellationToken cancellationToken)
+    {
+        if (options.MaxFailedPasswordAttempts <= 0)
+            return true;
+
+        var affected = await UpdateOutsideRequestTransactionAsync(
+            shares => shares
+                .Where(s => s.Id == share.Id && s.IsEnabled)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.FailedAttemptCount, 0), cancellationToken),
+            cancellationToken);
+        return affected == 1;
+    }
+
+    /// <summary>
+    /// 在<b>独立 DI 作用域</b>里跑一条对分享表的条件更新，返回影响行数。
+    /// </summary>
+    /// <remarks>
+    /// ★ <b>必须逃出外层事务</b>：输错口令的请求以失败响应收场（401），而启用了 <c>EnableGlobalUnitOfWork</c>
+    /// 的部署会把失败请求的整个事务回滚，计数于是永远写不进去，这道闸门就形同虚设
+    /// （实测过：连错 10 次后正确口令照样放行）。与 Identity 保存 2FA 临时令牌是同一条路子。
+    /// 拿不到作用域工厂（未接 DI 的宿主 / 单元测试）时退回本作用域的仓储：未启用全局 UoW 的部署仍能工作，只是逃不出事务。
+    /// </remarks>
+    private async Task<int> UpdateOutsideRequestTransactionAsync(Func<IQueryable<FileShare>, Task<int>> update, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var scopeFactory = ServiceProvider?.GetService<IServiceScopeFactory>();
+        if (scopeFactory == null)
+            return await update(_shareRepository.AsQueryable());
+
+        using var scope = scopeFactory.CreateScope();
+        var repository = scope.ServiceProvider.GetService<IRepository<FileShare, Guid>>() ?? _shareRepository;
+        return await update(repository.AsQueryable());
     }
 
     /// <summary>

@@ -5,7 +5,7 @@ namespace Tnzi.AI.Workflow.Engine.Nodes;
 /// </summary>
 /// <remarks>
 /// 配置项：
-/// - reviewerAgentId: 审查者 Agent ID（可选）
+/// - reviewerAgentId: 审查者 Agent ID（可选；缺失时用步骤的 AgentId）
 /// - verdictOptions: 逗号分隔的 verdict 选项（默认 "accept,rework,reject"）
 /// </remarks>
 public class ReviewNode : IWorkflowNode
@@ -32,23 +32,24 @@ public class ReviewNode : IWorkflowNode
             ? vo.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             : new[] { "accept", "rework", "reject" };
 
-        // 收集上游输出
+        // 收集上游输出（数据，不做模板替换）
         var upstreamText = WorkflowNodeHelper.CollectInput(context);
 
-        // 构建审查提示
-        var reviewPrompt = BuildReviewPrompt(step.Instructions, upstreamText, verdictOptions);
-        reviewPrompt = state.ResolveTemplate(reviewPrompt);
+        // 构建审查提示：只替换作者写的指令。此前替换的是拼好的整段提示，被审内容里的 {{...}} 也会被换掉
+        var reviewPrompt = BuildReviewPrompt(WorkflowNodeHelper.ResolveInstructions(step, state), upstreamText, verdictOptions);
 
-        var reviewerAgentId = WorkflowNodeHelper.ParseAgentIdFromConfig(config, "reviewerAgentId");
+        var reviewerAgentId = WorkflowNodeHelper.ResolveNodeAgentId(step, config, "reviewerAgentId");
 
+        // 系统提示词：选了审查 Agent 用它自己的，否则用节点缺省；verdict JSON 格式的要求在用户消息里
         var executor = await WorkflowNodeHelper.CreateAgentExecutorAsync(
             agentId: reviewerAgentId,
             serviceContext: _nodeContext,
             provider: step.Provider,
             model: step.Model,
-            instructions: "You are a reviewer. Always respond with a JSON object containing 'verdict' and 'feedback' fields.",
+            instructions: null,
             name: step.StepId ?? "review-node",
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            fallbackInstructions: "You are a reviewer. Always respond with a JSON object containing 'verdict' and 'feedback' fields.");
 
         var messages = new List<ChatMessage> { new(ChatRole.User, reviewPrompt) };
         var response = await executor.ExecuteAsync(messages, cancellationToken);

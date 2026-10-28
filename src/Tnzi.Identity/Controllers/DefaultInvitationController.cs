@@ -10,6 +10,11 @@ namespace Tnzi.Identity.Controllers;
 /// 就是这条链路的全部安全性。
 /// </para>
 /// <para>
+/// ★★ <strong>令牌只走请求体，不进 URL。</strong>请求路径会被原样写进请求日志（框架的请求日志默认开启）
+/// 与访问日志表；预览不消费令牌，接受在「还差几步」时也不消费：能读日志的人拿着路径里的令牌
+/// 抢先接受邀请、设上自己的密码，就拿到了带着预设角色的新账号。所以两个端点都是 POST。
+/// </para>
+/// <para>
 /// ⚠ <strong>部署方需要确认匿名限流真的生效。</strong>框架的限流是全局中间件
 /// （<c>RateLimit:Enabled</c> + <c>RateLimitingMiddleware</c>），不是挂在这里的特性；
 /// 而它在取不到分区键时是<b>放行</b>的。这两个端点是可被穷举的入口，
@@ -39,13 +44,13 @@ public class DefaultInvitationController : ApiControllerBase
     /// 返回的邮箱与手机号是掩码的：一条链接如果能换出完整邮箱，
     /// 那么链接泄露就等于员工邮箱泄露。
     /// </remarks>
-    /// <param name="token">邀请令牌</param>
+    /// <param name="input">邀请令牌（在请求体里，见类型注释）</param>
     /// <returns>邀请展示信息</returns>
-    [HttpGet("{token}")]
+    [HttpPost("preview")]
     [AllowAnonymous]
-    public virtual async Task<ApiResult<InvitationPreviewDto>> Preview(string token)
+    public virtual async Task<ApiResult<InvitationPreviewDto>> Preview([FromBody] PreviewInvitationDto input)
     {
-        var result = await InvitationService.PreviewAsync(token);
+        var result = await InvitationService.PreviewAsync(input.Token);
         return result.ToApiResult();
     }
 

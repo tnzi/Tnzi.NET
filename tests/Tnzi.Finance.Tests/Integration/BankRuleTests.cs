@@ -333,6 +333,139 @@ public class BankRuleTests : FinanceIntegrationTestBase
         test.Data.Rows[0].WinningRuleName.ShouldBe("Specific");
     }
 
+    /// <summary>
+    /// ★试跑只统计被试规则自己命中的流水：别的规则赢下的、它根本不匹配的流水不算在它头上，
+    /// 否则界面会报「这些被更高优先级的规则抢走了，把它往上挪」，照做反而让它去抢不该抢的流水。
+    /// </summary>
+    [Fact]
+    public async Task Test_LinesTheTestedRuleDoesNotMatch_AreNotCounted()
+    {
+        var account = await BankFundsAccountAsync();
+        await RuleAsync(s => s.CreateAsync(Rule("Amazon", "amazon", priority: 1)));
+        var starbucks = await RuleAsync(s => s.CreateAsync(Rule("Starbucks", "starbucks", priority: 2)));
+        await PendingTransactionAsync(account, -40m, "AMAZON MKTP");
+        await PendingTransactionAsync(account, -55m, "AMAZON PRIME");
+
+        var test = await InScopeAsync<IBankRuleService, Result<BankRuleTestResultDto>>(
+            s => s.TestAsync(starbucks.Data!.Id, new TestBankRuleDto()));
+
+        test.Succeeded.ShouldBeTrue(test.Message);
+        test.Data!.Evaluated.ShouldBe(2);
+        test.Data.Matched.ShouldBe(0);
+        test.Data.Rows.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// 低优先级规则只命中一部分流水时，Matched 等于那一部分，且被更高优先级规则抢走的流水报真实赢家。
+    /// </summary>
+    [Fact]
+    public async Task Test_LowerPriorityRule_CountsOnlyItsOwnSubset()
+    {
+        var account = await BankFundsAccountAsync();
+        await RuleAsync(s => s.CreateAsync(Rule("Everything coffee", "coffee", priority: 1)));
+        var tested = await RuleAsync(s => s.CreateAsync(Rule("Starbucks", "starbucks", priority: 2)));
+        await PendingTransactionAsync(account, -5m, "STARBUCKS COFFEE");
+        await PendingTransactionAsync(account, -6m, "STARBUCKS #12");
+        await PendingTransactionAsync(account, -7m, "TIM HORTONS COFFEE");
+
+        var test = await InScopeAsync<IBankRuleService, Result<BankRuleTestResultDto>>(
+            s => s.TestAsync(tested.Data!.Id, new TestBankRuleDto()));
+
+        test.Succeeded.ShouldBeTrue(test.Message);
+        test.Data!.Evaluated.ShouldBe(3);
+        test.Data.Matched.ShouldBe(2);
+        test.Data.Rows.Single(r => r.Description == "STARBUCKS COFFEE").WinningRuleName.ShouldBe("Everything coffee");
+        test.Data.Rows.Single(r => r.Description == "STARBUCKS #12").WinningRuleName.ShouldBe("Starbucks");
+    }
+
+    /// <summary>
+    /// 先存成停用状态再试跑是正常用法：试跑回答的是「启用后它在当前位置会拿到什么」，
+    /// 不能因为求值器只看启用规则就恒报 0。
+    /// </summary>
+    [Fact]
+    public async Task Test_DisabledRule_ReportsWhatItWouldTakeIfEnabled()
+    {
+        var account = await BankFundsAccountAsync();
+        var draft = Rule("Starbucks (draft)", "starbucks", priority: 1);
+        draft.IsEnabled = false;
+        var tested = await RuleAsync(s => s.CreateAsync(draft));
+        await RuleAsync(s => s.CreateAsync(Rule("Catch-all coffee", "starbucks", priority: 5)));
+        await PendingTransactionAsync(account, -5m, "STARBUCKS #12");
+        await PendingTransactionAsync(account, -9m, "SHELL GAS");
+
+        var test = await InScopeAsync<IBankRuleService, Result<BankRuleTestResultDto>>(
+            s => s.TestAsync(tested.Data!.Id, new TestBankRuleDto()));
+
+        test.Succeeded.ShouldBeTrue(test.Message);
+        test.Data!.Matched.ShouldBe(1);
+        // 启用的「Catch-all coffee」排在它后面，赢不过它；不能把它报成「更高优先级的抢走者」。
+        test.Data.Rows.Single().WinningRuleId.ShouldBe(tested.Data!.Id);
+    }
+
+    /// <summary>
+    /// 停用规则排在一条启用规则后面时，真实赢家仍是那条启用规则。
+    /// </summary>
+    [Fact]
+    public async Task Test_DisabledRule_BehindAnEnabledRule_ReportsTheEnabledWinner()
+    {
+        var account = await BankFundsAccountAsync();
+        await RuleAsync(s => s.CreateAsync(Rule("Coffee", "starbucks", priority: 1)));
+        var draft = Rule("Starbucks (draft)", "starbucks", priority: 5);
+        draft.IsEnabled = false;
+        var tested = await RuleAsync(s => s.CreateAsync(draft));
+        await PendingTransactionAsync(account, -5m, "STARBUCKS #12");
+
+        var test = await InScopeAsync<IBankRuleService, Result<BankRuleTestResultDto>>(
+            s => s.TestAsync(tested.Data!.Id, new TestBankRuleDto()));
+
+        test.Succeeded.ShouldBeTrue(test.Message);
+        test.Data!.Matched.ShouldBe(1);
+        test.Data.Rows.Single().WinningRuleName.ShouldBe("Coffee");
+    }
+
+    /// <summary>
+    /// ★ 试跑有界：只评估最近的 <see cref="BankRuleService.MaxDryRunTransactions"/> 条待匹配流水（跨账户同一个上限），
+    /// 而不是把整个积压读进内存。窗口之外更早的流水既不计入 Evaluated，也不计入 Matched。
+    /// </summary>
+    [Fact]
+    public async Task Test_EvaluatesOnlyTheMostRecentWindowOfPendingLines_AcrossAccounts()
+    {
+        var account = await BankFundsAccountAsync();
+        var other = await AccountIdByCodeAsync("1120");
+        var tested = await RuleAsync(s => s.CreateAsync(Rule("Old vendor", "oldvendor")));
+
+        await InScopeAsync<IServiceProvider, int>(async sp =>
+        {
+            var repo = sp.GetRequiredService<IRepository<BankTransaction, Guid>>();
+            var recent = Enumerable.Range(0, BankRuleService.MaxDryRunTransactions).Select(i => Pending(
+                i % 2 == 0 ? account : other, new DateTime(2026, 3, 10), $"RECENT {i}"));
+            var older = Enumerable.Range(0, 3).Select(i => Pending(account, new DateTime(2026, 1, 5), $"OLDVENDOR {i}"));
+            await repo.InsertManyAsync(recent.Concat(older).ToList());
+            await repo.SaveChangesAsync();
+            return 0;
+        });
+
+        var test = await InScopeAsync<IBankRuleService, Result<BankRuleTestResultDto>>(
+            s => s.TestAsync(tested.Data!.Id, new TestBankRuleDto()));
+
+        test.Succeeded.ShouldBeTrue(test.Message);
+        test.Data!.Evaluated.ShouldBe(BankRuleService.MaxDryRunTransactions);
+        test.Data.Matched.ShouldBe(0);
+    }
+
+    private static BankTransaction Pending(Guid accountId, DateTime date, string description) => new()
+    {
+        AccountId = accountId,
+        ImportBatchId = Guid.Empty,
+        TxnDate = date,
+        Amount = -1m,
+        Currency = "USD",
+        Description = description,
+        ExternalId = $"probe:{Guid.NewGuid():N}",
+        Source = BankTransactionSource.Csv,
+        Status = BankTransactionStatus.Pending,
+    };
+
     [Fact]
     public async Task Delete_RemovesTheRuleAndItsConditions()
     {

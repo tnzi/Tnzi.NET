@@ -19,6 +19,7 @@ global using Microsoft.Extensions.Options;
 // Tnzi framework（命名空间 Tnzi 本身不必导入：本包的命名空间都在 Tnzi.* 之下，父命名空间天然可见）
 global using Tnzi.Exceptions;
 global using Tnzi.Geometry;
+global using Tnzi.Extensions;
 global using Tnzi.Modules;
 global using Tnzi.Options;
 global using Tnzi.Settings;

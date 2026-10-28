@@ -23,7 +23,13 @@ export interface UseSettingsRealtimeOptions {
    */
   hubUrl?: string | (() => string | undefined)
   /** Returns the freshest JWT (read on each (re)connect). */
-  getToken: () => string
+  getToken: () => string | Promise<string>
+  /**
+   * Obtains a fresh access token (e.g. `() => client.refreshAccessToken()`). The hub
+   * client calls it before a reconnect presents an expired token, so realtime
+   * recovers after the page sat idle past the token lifetime.
+   */
+  refreshToken?: () => Promise<string | null>
   /**
    * Called for every Global-scope setting change. The consumer routes by
    * `payload.key` prefix (e.g. `Chat:*` → re-fetch chat config,
@@ -59,6 +65,7 @@ export function useSettingsRealtime(opts: UseSettingsRealtimeOptions) {
     signal ??= createSettingsRealtimeClient({
       url: resolveUrl(),
       accessTokenFactory: () => opts.getToken(),
+      refreshAccessToken: opts.refreshToken,
     })
     signal.on('Settings.Changed', onChanged)
     await signal.start()

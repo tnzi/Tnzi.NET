@@ -45,7 +45,7 @@ public class WorkflowServiceStreamingTests
             });
 
         var usageLog = new Mock<IUsageLogService>();
-        var quota = new Mock<IQuotaService>();
+        var quota = UsageLimitMocks.Allowing();
         var service = CreateService(repository, usageLog, quota);
 
         var results = new List<WorkflowExecutionResultDto>();
@@ -54,7 +54,10 @@ public class WorkflowServiceStreamingTests
             results.Add(item);
         }
 
-        results.Count.ShouldBe(3);
+        results.Count.ShouldBe(4);
+        results[0].Status.ShouldBe("Running", "the first event announces the run before any node has finished");
+        results[0].StepResults.ShouldBeNull();
+        results.RemoveAt(0);
         results[0].Status.ShouldBe("Step 'step-a'");
         results[0].Output.ShouldBe("Hello");
         results[1].Status.ShouldBe("Step 'step-b'");
@@ -109,7 +112,7 @@ public class WorkflowServiceStreamingTests
             });
 
         var usageLog = new Mock<IUsageLogService>();
-        var quota = new Mock<IQuotaService>();
+        var quota = UsageLimitMocks.Allowing();
         var service = CreateService(repository, usageLog, quota);
 
         var results = new List<WorkflowExecutionResultDto>();
@@ -118,7 +121,10 @@ public class WorkflowServiceStreamingTests
             results.Add(item);
         }
 
-        results.Count.ShouldBe(3);
+        results.Count.ShouldBe(4);
+        results[0].Status.ShouldBe("Running", "the first event announces the run before any node has finished");
+        results[0].StepResults.ShouldBeNull();
+        results.RemoveAt(0);
         results[0].Status.ShouldBe("Step 'step-a'");
         results[0].Output.ShouldBe("ok");
         results[1].Status.ShouldBe("Step 'step-b'");
@@ -167,7 +173,7 @@ public class WorkflowServiceStreamingTests
             });
 
         var usageLog = new Mock<IUsageLogService>();
-        var quota = new Mock<IQuotaService>();
+        var quota = UsageLimitMocks.Allowing();
         var service = CreateService(repository, usageLog, quota);
 
         var results = new List<WorkflowExecutionResultDto>();
@@ -176,7 +182,10 @@ public class WorkflowServiceStreamingTests
             results.Add(item);
         }
 
-        results.Count.ShouldBe(3);
+        results.Count.ShouldBe(4);
+        results[0].Status.ShouldBe("Running", "the first event announces the run before any node has finished");
+        results[0].StepResults.ShouldBeNull();
+        results.RemoveAt(0);
         results[0].Status.ShouldBe("Step 'step-a'");
         results[0].Output.ShouldBe("A");
         results[1].Status.ShouldBe("Step 'step-b'");
@@ -223,7 +232,7 @@ public class WorkflowServiceStreamingTests
             });
 
         var usageLog = new Mock<IUsageLogService>();
-        var quota = new Mock<IQuotaService>();
+        var quota = UsageLimitMocks.Allowing();
         var executionRepository = new Mock<IRepository<WorkflowExecution, Guid>>();
         executionRepository.Setup(x => x.InsertAsync(It.IsAny<WorkflowExecution>(), It.IsAny<CancellationToken>()))
             .Callback<WorkflowExecution, CancellationToken>((execution, _) => insertedExecution = execution)
@@ -241,7 +250,10 @@ public class WorkflowServiceStreamingTests
             results.Add(item);
         }
 
-        results.Count.ShouldBe(3);
+        results.Count.ShouldBe(4);
+        results[0].Status.ShouldBe("Running", "the first event announces the run before any node has finished");
+        results[0].StepResults.ShouldBeNull();
+        results.RemoveAt(0);
         // An approval-node interrupt is an approval, not a generic input wait: the checkpoint
         // records AwaitingApproval and ApproveStepAsync only accepts that status. The row must
         // say the same thing, otherwise the documented approve -> resume flow is rejected (400).
@@ -266,7 +278,7 @@ public class WorkflowServiceStreamingTests
     private static WorkflowService CreateService(
         Mock<IRepository<WorkflowDefinition, Guid>> repository,
         Mock<IUsageLogService> usageLog,
-        Mock<IQuotaService> quota,
+        Mock<IUsageLimitService> quota,
         Mock<IRepository<WorkflowExecution, Guid>>? executionRepository = null)
     {
         var checkpointStore = new Mock<IWorkflowCheckpointStore>();

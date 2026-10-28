@@ -273,6 +273,7 @@ public class CliRunVisibilityTests : IntegratedTestBase<CliVisibilityDbContext>
             ServiceProvider.GetRequiredService<IRepository<CliRuntime, Guid>>(),
             // 这些用例从不带 ThreadId 入队，线程归属判定（CliRunEnqueueThreadOwnershipTests）不在此处。
             Mock.Of<IRepository<AgentThread, Guid>>(),
+            TestAgents.Repository(AgentId),
             new CliRunSignalHub(),
             new CliRunCancellationRegistry(),
             EnabledOptions(),

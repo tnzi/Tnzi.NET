@@ -7,6 +7,8 @@ public class FeatureUsageRecordConfiguration : EntityTypeConfigurationBase<Featu
 {
     public override void Configure(EntityTypeBuilder<FeatureUsageRecord> builder)
     {
+        var multiTenancyEnabled = (GetDbContext() as IMultiTenancySwitchProvider)?.IsMultiTenancyEnabled ?? false;
+
         builder.Property(e => e.FeatureName).IsRequired().HasMaxLength(256);
         builder.Property(e => e.Source).HasMaxLength(50);
 
@@ -14,6 +16,9 @@ public class FeatureUsageRecordConfiguration : EntityTypeConfigurationBase<Featu
         builder.HasIndex(e => new { e.FeatureName, e.CreationTime });
 
         // Composite index for tenant-scoped feature queries
-        builder.HasIndex(e => new { e.TenantId, e.FeatureName });
+        if (multiTenancyEnabled)
+        {
+            builder.HasIndex(e => new { e.TenantId, e.FeatureName });
+        }
     }
 }

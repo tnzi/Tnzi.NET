@@ -112,9 +112,18 @@ public class SettlementService : ApplicationService, ISettlementService
 
         if (input.Targets == null || input.Targets.Count == 0)
             return Fail<List<PaymentApplicationDto>>("At least one target allocation is required.");
-        if (input.Targets.Any(t => t.Amount <= 0))
+
+        // ★ 分配额先按金额精度舍入，之后的一切校验与写入都只看舍入后的数。
+        //   单据金额本身是舍入过的（Total、收付款 Amount 都经 _helper.Round），而分配额原样累加进
+        //   AppliedTotal：客户端浮点运算的产物（50.3 - 20.1 = 30.199999999999996）累加后恒小于 Total，
+        //   单据永远停在 PartiallyPaid，收付款单也永远留一截核销不掉的尾差。
+        //   舍入后为 0 的分配按「非正」拒绝：一笔不移动任何钱的核销不该改动任何单据的状态。
+        var targets = input.Targets
+            .Select(t => new ApplySettlementTargetDto { TargetType = t.TargetType, TargetId = t.TargetId, Amount = _helper.Round(t.Amount) })
+            .ToList();
+        if (targets.Any(t => t.Amount <= 0))
             return Fail<List<PaymentApplicationDto>>("Allocation amounts must be greater than zero.");
-        if (input.Targets.GroupBy(t => (t.TargetType, t.TargetId)).Any(g => g.Count() > 1))
+        if (targets.GroupBy(t => (t.TargetType, t.TargetId)).Any(g => g.Count() > 1))
             return Fail<List<PaymentApplicationDto>>("Duplicate targets in one application.");
 
         // 源加载与规则校验
@@ -123,7 +132,7 @@ public class SettlementService : ApplicationService, ISettlementService
             return Fail<List<PaymentApplicationDto>>(sourceResult.Message!, sourceResult.Code ?? 400);
         var source = sourceResult.Data!;
 
-        var allocateTotal = input.Targets.Sum(t => t.Amount);
+        var allocateTotal = targets.Sum(t => t.Amount);
         if (allocateTotal > source.Remaining)
             return Fail<List<PaymentApplicationDto>>($"Allocation {allocateTotal} exceeds the source's remaining amount {source.Remaining}.", 400);
 
@@ -136,7 +145,7 @@ public class SettlementService : ApplicationService, ISettlementService
             // 先前迭代已插入的核销与已更新的目标会被部分提交。
             applyResult = await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
-                foreach (var allocation in input.Targets)
+                foreach (var allocation in targets)
                 {
                     if (allocation.TargetType != source.AllowedTargetType)
                         throw new UnitOfWorkAbortException(Result.Failure($"A {input.SourceType} can only be applied to {source.AllowedTargetType} documents.", 400));
@@ -208,7 +217,7 @@ public class SettlementService : ApplicationService, ISettlementService
         {
             unapplyResult = await ExecuteInUnitOfWorkAsync<Result>(async ct =>
             {
-                var sourceResult = await LoadSourceAsync(application.SourceType, application.SourceId, ct);
+                var sourceResult = await LoadSourceAsync(application.SourceType, application.SourceId, ct, forUnapply: true);
                 if (!sourceResult.Succeeded)
                     return Result.Failure(sourceResult.Message!, sourceResult.Code ?? 400);
                 var targetResult = await LoadTargetAsync(application.TargetType, application.TargetId, ct);
@@ -256,12 +265,18 @@ public class SettlementService : ApplicationService, ISettlementService
 
         if (input.Targets == null || input.Targets.Count == 0)
             return Fail<BatchPaymentResultDto>("At least one target document is required.");
-        if (input.Targets.Any(t => t.Amount <= 0))
+
+        // 与 ApplyAsync 同一条舍入规则，且必须在分组求和之前：收付款单金额是各目标之和，
+        // 先舍入后求和才让「单据金额 == 核销到它名下的总额」逐分成立。
+        var targets = input.Targets
+            .Select(t => new BatchPaymentTargetDto { DocType = t.DocType, DocId = t.DocId, Amount = _helper.Round(t.Amount) })
+            .ToList();
+        if (targets.Any(t => t.Amount <= 0))
             return Fail<BatchPaymentResultDto>("Target amounts must be greater than zero.");
-        if (input.Targets.GroupBy(t => (t.DocType, t.DocId)).Any(g => g.Count() > 1))
+        if (targets.GroupBy(t => (t.DocType, t.DocId)).Any(g => g.Count() > 1))
             return Fail<BatchPaymentResultDto>("Duplicate target documents in one batch.");
 
-        var docTypes = input.Targets.Select(t => t.DocType).Distinct().ToList();
+        var docTypes = targets.Select(t => t.DocType).Distinct().ToList();
         if (docTypes.Count > 1)
             return Fail<BatchPaymentResultDto>("All targets must share the same document type (all invoices or all bills).");
         var docType = docTypes[0];
@@ -272,7 +287,7 @@ public class SettlementService : ApplicationService, ISettlementService
         var partyType = direction == PaymentDirection.Inbound ? FinancePartyType.Customer : FinancePartyType.Vendor;
 
         // 预检目标头部（快速失败与分组元数据；权威校验仍由事务内的过账与 ApplyAsync 重跑）
-        var ids = input.Targets.Select(t => t.DocId).ToList();
+        var ids = targets.Select(t => t.DocId).ToList();
         var headers = docType == SettlementDocType.Invoice
             ? await _invoiceRepository.AsNoTracking().Where(i => ids.Contains(i.Id))
                 .Select(i => new BatchTargetHeader
@@ -298,7 +313,7 @@ public class SettlementService : ApplicationService, ISettlementService
                 .ToListAsync(cancellationToken);
 
         var byId = headers.ToDictionary(h => h.Id);
-        foreach (var target in input.Targets)
+        foreach (var target in targets)
         {
             if (!byId.TryGetValue(target.DocId, out var header))
                 return Fail<BatchPaymentResultDto>($"Target document {target.DocId} was not found.", 404);
@@ -309,7 +324,7 @@ public class SettlementService : ApplicationService, ISettlementService
         }
 
         // （往来方 + 币种）分组，各组一张收付款单
-        var groups = input.Targets.GroupBy(t => (byId[t.DocId].PartyId, byId[t.DocId].Currency)).ToList();
+        var groups = targets.GroupBy(t => (byId[t.DocId].PartyId, byId[t.DocId].Currency)).ToList();
 
         var payments = new List<PaymentEntryDto>();
         var applications = new List<PaymentApplicationDto>();
@@ -418,7 +433,13 @@ public class SettlementService : ApplicationService, ISettlementService
         public string? Number { get; init; }
     }
 
-    private async Task<Result<SourceView>> LoadSourceAsync(SettlementDocType type, Guid id, CancellationToken ct)
+    /// <summary>加载核销源（收款或贷项）并按用途判定它此刻能否参与。</summary>
+    /// <remarks>
+    /// <c>forUnapply</c> = 撤销核销时加载：全额核销的贷项（Paid）同样可以撤销，与目标侧接受 Paid 对称。
+    /// ★ 此前撤销与核销共用「能不能作为源去核销」这道门，全额核销的贷项撤销答 409，而贷项与发票的作废
+    /// 都要求未核销，三条路全部堵死，核销错了只能手工做凭证。核销路径不放宽：用完的贷项没有余额可再核销。
+    /// </remarks>
+    private async Task<Result<SourceView>> LoadSourceAsync(SettlementDocType type, Guid id, CancellationToken ct, bool forUnapply = false)
     {
         switch (type)
         {
@@ -448,7 +469,9 @@ public class SettlementService : ApplicationService, ISettlementService
                 var memo = await _creditMemoRepository.AsQueryable(true).FirstOrDefaultAsync(m => m.Id == id, ct);
                 if (memo == null)
                     return Fail<SourceView>("Credit memo not found.", 404);
-                if (memo.Status is not (FinanceDocumentStatus.Posted or FinanceDocumentStatus.PartiallyPaid))
+                var open = memo.Status is FinanceDocumentStatus.Posted or FinanceDocumentStatus.PartiallyPaid
+                    || (forUnapply && memo.Status == FinanceDocumentStatus.Paid);
+                if (!open)
                     return Fail<SourceView>("Only posted credit memos can be applied.", 409);
 
                 return Ok(new SourceView

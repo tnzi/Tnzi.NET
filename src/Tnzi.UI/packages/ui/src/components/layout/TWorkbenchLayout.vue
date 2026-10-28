@@ -172,8 +172,9 @@ function spanString(value: SpanValue | undefined): string {
 /**
  * Pick the most-applicable span for the active viewport width -
  * VueDraggable needs a single grid-column span value (not a NGrid-style
- * breakpoint string), so we resolve the span object client-side using
- * the same Tailwind breakpoints naive-ui's `responsive="screen"` uses.
+ * breakpoint string), so we resolve the span object client-side with the
+ * same breakpoints and fallback the fixed layout's NGrid applies to the
+ * `spanString` above, so a widget is equally wide in both modes.
  *
  * Reactive on window.innerWidth so the cards reflow as the viewport
  * changes. Defaults to 24 (full row) on SSR or when the breakpoint key
@@ -193,10 +194,11 @@ onBeforeUnmount(() => {
 })
 
 function activeBreakpoint(width: number): 'xs' | 'sm' | 'md' | 'lg' | 'xl' {
-  // Tailwind / naive-ui responsive screen breakpoints.
+  // naive-ui's default `responsive="screen"` breakpoints, which `spanString`
+  // maps sm/md/lg/xl onto (s 640 / m 1024 / l 1280 / xl 1536).
   if (width >= 1536) return 'xl'
-  if (width >= 1024) return 'lg'
-  if (width >= 768) return 'md'
+  if (width >= 1280) return 'lg'
+  if (width >= 1024) return 'md'
   if (width >= 640) return 'sm'
   return 'xs'
 }
@@ -206,16 +208,12 @@ function resolveSpan(value: SpanValue | undefined): number {
   if (typeof value === 'number') return value
   const bp = activeBreakpoint(viewportWidth.value)
   // Fall back from current breakpoint to smaller ones so a widget that
-  // only defines `lg: 8` still renders sensibly on md/sm/xs (defaults
-  // to 24 = full width when no smaller value is supplied).
+  // only defines `lg: 8` still renders sensibly on md/sm/xs, and to 24
+  // (full width) when no smaller value is supplied: the base `spanString`
+  // gives NGrid.
   const order: Array<'xs' | 'sm' | 'md' | 'lg' | 'xl'> = ['xs', 'sm', 'md', 'lg', 'xl']
   const idx = order.indexOf(bp)
   for (let i = idx; i >= 0; i--) {
-    const v = value[order[i]!]
-    if (v !== undefined) return v
-  }
-  // If only larger-than-current keys are set, pick the smallest larger one.
-  for (let i = idx + 1; i < order.length; i++) {
     const v = value[order[i]!]
     if (v !== undefined) return v
   }
@@ -239,11 +237,27 @@ function itemStyle(def: WidgetDef): Record<string, string> {
  * previous typeof-only check incorrectly wrapped functional components
  * in `defineAsyncComponent`, which then tried to `.then()` a VNode and
  * crashed at render.
+ *
+ * ★ One wrapper per factory, reused on every render. `defineAsyncComponent`
+ * mints a new component definition per call, and the template calls this on
+ * each render: a fresh definition is a different vnode type, so Vue unmounted
+ * the widget and mounted a new one whenever its card re-rendered. A widget that
+ * marks the card busy while it loads (the standard data hook does) then
+ * refetched in a loop, and a draggable layout remounted every lazy widget on
+ * each window resize. Keyed by the factory itself, so a parent that rebuilds
+ * its `widgets` array around the same factories keeps the mounted widgets too.
  */
+const asyncWidgetComponents = new WeakMap<() => Promise<unknown>, Component>()
 function resolveComponent(def: WidgetDef): Component {
   const c = def.component
   if (typeof c === 'function' && (c as (...args: unknown[]) => unknown).length === 0) {
-    return defineAsyncComponent(c as () => Promise<{ default: Component }>)
+    const factory = c as () => Promise<{ default: Component }>
+    let wrapper = asyncWidgetComponents.get(factory)
+    if (!wrapper) {
+      wrapper = markRaw(defineAsyncComponent(factory))
+      asyncWidgetComponents.set(factory, wrapper)
+    }
+    return wrapper
   }
   return c as Component
 }

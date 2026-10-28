@@ -67,6 +67,40 @@ describe('EventBus', () => {
   // ------------------------------------------
 
   describe('once', () => {
+    it('a handler that re-arms itself runs once per emit and emit returns', () => {
+      let calls = 0;
+      bus.on('tick', () => {});
+      const rearm = () => {
+        calls += 1;
+        if (calls > 5) throw new Error('re-armed handler ran again within one emit');
+        bus.once('tick', rearm);
+      };
+      bus.once('tick', rearm);
+
+      bus.emit('tick');
+      expect(calls).toBe(1);
+      bus.emit('tick');
+      expect(calls).toBe(2);
+    });
+
+    it('a handler subscribed during an emit is not called by that emit', () => {
+      const late = vi.fn();
+      bus.on('test', () => bus.on('test', late));
+      bus.emit('test');
+      expect(late).not.toHaveBeenCalled();
+      bus.emit('test');
+      expect(late).toHaveBeenCalledTimes(1);
+    });
+
+    it('a handler removed by an earlier handler in the same emit is skipped', () => {
+      const second = vi.fn();
+      let unsubscribe: () => void = () => {};
+      bus.on('test', () => unsubscribe());
+      unsubscribe = bus.on('test', second);
+      bus.emit('test');
+      expect(second).not.toHaveBeenCalled();
+    });
+
     it('should call handler only once', () => {
       const handler = vi.fn();
       bus.once('test', handler);

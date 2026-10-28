@@ -7,23 +7,52 @@
 
 import type { HttpClient } from '../../http/http';
 import type { PagedList } from '../../types/pagination';
+import type { CitationDto, TokenUsageDto } from './types';
 
 // ---------------------------------------------------------------------------
 // DTOs
 // ---------------------------------------------------------------------------
 
+/**
+ * Body of `POST /rag/query` and the base of the chat body; mirrors the backend
+ * `RagQueryRequest`. Unknown keys are dropped silently by the server, so the
+ * names here must be exactly the backend's.
+ */
 export interface RagQueryParams {
+  /** The question. Required, at most 10000 characters. */
   query: string;
-  knowledgeBaseIds: string[];
+  /**
+   * Knowledge bases to search. Omitted or null searches every knowledge base
+   * the caller may query directly (`isUserQueryable`).
+   */
+  knowledgeBaseIds?: string[] | null;
+  /** Maximum number of retrieved chunks (server default 5). */
   topK?: number;
-  threshold?: number;
+  /** Minimum relevance score, 0-1 (server default 0.3). */
+  minRelevance?: number;
+  /** Whether the answer carries its citations (server default true). */
+  includeCitations?: boolean;
 }
 
-export interface RagChatParams {
-  message: string;
-  knowledgeBaseIds: string[];
-  threadId?: string;
-  topK?: number;
+/** Body of `POST /rag/chat` and `POST /rag/chat/stream`; mirrors the backend `RagChatRequest`. */
+export interface RagChatParams extends RagQueryParams {
+  /** Conversation thread to continue; omitted starts a new one. */
+  threadId?: string | null;
+  /** Agent to answer with; omitted uses the default configuration. */
+  agentId?: string | null;
+}
+
+/** Result of `POST /rag/query`: a generated answer grounded in the retrieved chunks. */
+export interface RagQueryResult {
+  answer: string;
+  citations: CitationDto[];
+  usage?: TokenUsageDto | null;
+}
+
+/** Result of `POST /rag/chat`. */
+export interface RagChatResult extends RagQueryResult {
+  /** The thread the turn was recorded in (the one passed in, or a new one). */
+  threadId: string;
 }
 
 /**
@@ -66,7 +95,6 @@ export interface KnowledgeDocumentDto {
   status: DocumentStatus;
   errorMessage?: string | null;
   contentHash?: string | null;
-  version: number;
   creationTime: string;
 }
 
@@ -146,19 +174,22 @@ export function useRagApi(client: HttpClient) {
   const base = '/rag';
 
   return {
-    /** Query knowledge base(s) - returns relevant chunks with scores */
+    /**
+     * Single-turn question over the knowledge base(s): retrieves the relevant
+     * chunks and returns an answer generated from them, with citations.
+     */
     query: (data: RagQueryParams) =>
-      client.post(`${base}/query`, data),
+      client.post<RagQueryResult>(`${base}/query`, data),
 
-    /** Chat with RAG context - returns answer with citations */
+    /** Multi-turn chat with RAG context: the answer, its citations and the thread id. */
     chat: (data: RagChatParams) =>
-      client.post(`${base}/chat`, data),
+      client.post<RagChatResult>(`${base}/chat`, data),
 
     /**
      * SSE stream URL for RAG chat, resolved against the client's baseUrl so a
      * raw `fetch` of it reaches the API and not the SPA root. The backend
-     * route is `POST rag/chat/stream`; the old `${base}/stream` pointed at
-     * nothing.
+     * route is `POST rag/chat/stream` and takes a {@link RagChatParams} body;
+     * the old `${base}/stream` pointed at nothing.
      */
     getStreamUrl: () =>
       client.resolveUrl(`${base}/chat/stream`),

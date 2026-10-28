@@ -123,22 +123,8 @@ public class DefaultModuleAdminController : ApiAdminControllerBase
     public virtual async Task<ApiResult<IEnumerable<ModuleFunctionDto>>> GetModuleFunctions(Guid moduleId)
     {
         var result = await ModuleManagementService.GetModuleFunctionsAsync(moduleId);
-        return result.Map(items => (IEnumerable<ModuleFunctionDto>)items.Select(MapToDto).ToList()).ToApiResult();
+        return result.Map(items => (IEnumerable<ModuleFunctionDto>)items.Select(PermissionCatalogueMapping.ToFunctionDto).ToList()).ToApiResult();
     }
-
-    private static ModuleFunctionDto MapToDto(ModuleFunction entity) => new()
-    {
-        Id = entity.Id,
-        Name = entity.Name,
-        Code = entity.Code,
-        Description = entity.Description,
-        ModuleId = entity.ModuleId,
-        IsEnabled = entity.IsEnabled,
-        Order = entity.Order,
-        IsSystemManaged = entity.IsSystemManaged,
-        Category = entity.Category,
-        IsRetired = entity.IsRetired,
-    };
 
     /// <summary>
     /// 获取模块的子模块

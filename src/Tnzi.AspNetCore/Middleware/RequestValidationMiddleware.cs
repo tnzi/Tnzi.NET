@@ -8,27 +8,33 @@ namespace Tnzi.AspNetCore.Middleware;
 public class RequestValidationMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IRequestValidator _validator;
     private readonly ILogger<RequestValidationMiddleware> _logger;
 
     /// <summary>
     /// 初始化一个<see cref="RequestValidationMiddleware"/>类型的新实例
     /// </summary>
+    /// <remarks>
+    /// ★★ <see cref="IRequestValidator"/> 刻意<b>不</b>在这里注入：约定式中间件由根容器构造、进程内只有一个实例，
+    /// 而校验器注册为 Scoped。构造注入在开发环境（ValidateScopes）让管线构建当场抛异常，
+    /// 在生产环境则让一个校验器被根作用域捕获、服务所有请求。它经 <see cref="InvokeAsync"/> 的参数按请求解析。
+    /// </remarks>
     public RequestValidationMiddleware(
         RequestDelegate next,
-        IRequestValidator validator,
         ILogger<RequestValidationMiddleware> logger)
     {
         _next = Check.NotNull(next);
-        _validator = Check.NotNull(validator);
         _logger = Check.NotNull(logger);
     }
 
     /// <summary>
     /// 处理请求
     /// </summary>
-    public async Task InvokeAsync(HttpContext context)
+    /// <param name="context">当前请求</param>
+    /// <param name="validator">本请求作用域里的校验器（由 <c>UseMiddleware</c> 从 <c>RequestServices</c> 解析）</param>
+    public async Task InvokeAsync(HttpContext context, IRequestValidator validator)
     {
+        Check.NotNull(validator);
+
         // ★ try 只包住**校验本身**，绝不能把 _next 圈进来。
         //
         // 圈进来的后果是这个中间件吞掉整条下游管线的异常并一律答 500：
@@ -42,12 +48,12 @@ public class RequestValidationMiddleware
         // 说明这里是笔误不是设计。
         try
         {
-            var error = await _validator.ValidateAsync(context);
+            var error = await validator.ValidateAsync(context);
             if (error != null)
             {
                 _logger.LogWarning(
                     "Request validation failed - Path: {Path}, Method: {Method}, IP: {IP}, Error: {Error}",
-                    context.Request.Path, context.Request.Method, context.Request.GetClientIp(), error);
+                    context.GetRedactedPath(), context.Request.Method, context.Request.GetClientIp(), error);
 
                 context.Response.StatusCode = 400;
                 context.Response.ContentType = "application/json";
@@ -61,7 +67,7 @@ public class RequestValidationMiddleware
         {
             _logger.LogError(ex,
                 "Request validation middleware error - Path: {Path}, Method: {Method}",
-                context.Request.Path, context.Request.Method);
+                context.GetRedactedPath(), context.Request.Method);
 
             // 校验器自己出错时拒绝请求：验证跑不完意味着这个请求没被检查过，
             // 放行等于让校验器的失效变成静默放行。

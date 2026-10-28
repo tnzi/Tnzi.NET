@@ -68,16 +68,30 @@ export function buildDocumentColumns(
 
 
 /**
+ * 单据列表按往来方筛选时，列表端点绑定的参数名。各单据的 `*QueryDto` 各叫各的：
+ * 发票与贷项通知单是 `customerId`，账单与费用是 `vendorId`，只有付款是 `partyId`。
+ * ★ 名字不对不会报错：模型绑定器把不认识的参数直接丢掉，列表看起来「已筛选」，
+ * 实际返回所有往来方的单据。
+ */
+export type DocumentPartyFilterKey = 'customerId' | 'vendorId' | 'partyId'
+
+/**
  * 单据列表的高级搜索字段（标准 1「有真实筛选，不是只有关键字」）。
  *
- * 后端 `*QueryDto` 一直支持 `status` / `dateFrom` / `dateTo` / `partyId`
- * （付款另有 `direction` / `paymentMethod`），此前前端一个都没接出来。
+ * 后端 `*QueryDto` 支持 `status` / `dateFrom` / `dateTo` 与往来方
+ * （参数名因单据而异，见 {@link DocumentPartyFilterKey}；付款另有 `direction` / `paymentMethod`）。
+ * 日期字段交出所选的日历日（`YYYY-MM-DD`，由 `TCrudSearchAdvanced` 换算）。
  * 往来方走 `render` 逃生口挂 `TPartySelect`——它的选项是异步远程搜索，
- * form-schema 的静态 `select` 承载不了。
+ * form-schema 的静态 `select` 承载不了；`render` 把选中的 id 写进 `model[key]`。
  */
 export function buildDocumentSearchFields(
   t: (key: string) => string,
-  options?: { party?: 'customer' | 'vendor' | 'both'; renderParty?: (model: Record<string, unknown>) => VNodeChild },
+  options?: {
+    party?: {
+      key: DocumentPartyFilterKey
+      render: (model: Record<string, unknown>, key: DocumentPartyFilterKey) => VNodeChild
+    }
+  },
 ): SearchFieldItem[] {
   const fields: SearchFieldItem[] = [
     {
@@ -97,13 +111,14 @@ export function buildDocumentSearchFields(
     { key: 'dateTo', label: t('search.dateTo'), type: 'date' },
   ]
 
-  if (options?.renderParty) {
+  const party = options?.party
+  if (party) {
     fields.push({
-      key: 'partyId',
+      key: party.key,
       labelKey: 'columns.party',
       label: 'Party',
       type: 'text',
-      render: options.renderParty,
+      render: (model) => party.render(model, party.key),
     })
   }
 

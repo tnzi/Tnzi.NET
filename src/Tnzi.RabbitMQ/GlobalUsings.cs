@@ -5,6 +5,7 @@ global using Microsoft.Extensions.Logging;
 global using Microsoft.Extensions.Options;
 global using RabbitMQ.Client;
 global using RabbitMQ.Client.Events;
+global using RabbitMQ.Client.Exceptions;
 global using System;
 global using System.Collections.Concurrent;
 global using System.Collections.Generic;

@@ -15,7 +15,7 @@
  * never blanks out the whole widget.
  */
 import { EMPTY_DASH } from '../../utils/placeholders'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
 import { TSvgIcon } from '@tnzi/ui'
 import { useAdminClient } from '../../plugin/client'
@@ -36,7 +36,7 @@ import {
 } from '../../services/bridges/login-security-bridge'
 import { useWidgetData } from '../../headless/useWidgetData'
 import { useModuleAvailability } from '../../headless/useModuleAvailability'
-import { translatePageKey } from '../../i18n/translate'
+import { translateChromeKey } from '../../i18n/translate'
 
 interface Snapshot {
   exceptions: number | null
@@ -73,15 +73,18 @@ async function safeFetch<T>(p: Promise<T>): Promise<T | null> {
   }
 }
 
-// Per-probe module gate - this rollup widget mixes always-present surfaces
-// (diagnostics / performance / SignalR ship with the AspNetCore host layer)
-// with probes owned by OPTIONAL business modules: channels → Tnzi.AI.Channels,
-// login security → Tnzi.Identity. Those two skip their fetch entirely when
-// the host didn't load the module (the row then renders its "-" empty state),
-// instead of firing a request that can only 404.
+// Per-probe module gate. Two probes belong to business modules that the
+// loaded-module signal reports: channels → Tnzi.AI.Channels, login security →
+// Tnzi.Identity. Those skip their fetch when the host didn't load the module
+// (the row then renders its "-" empty state) instead of firing a request that
+// can only 404. The other three are not in that signal: diagnostics is part of
+// the AspNetCore host layer, while performance (Tnzi.Performance) and SignalR
+// (Tnzi.SignalR) are infrastructure / framework modules a host may leave out.
+// Gating them on the signal would hide them on every host, so they stay
+// fail-soft: a host without the module answers 404 and the row shows "-".
 const moduleAvailability = useModuleAvailability()
 
-useWidgetData(async () => {
+const { reload } = useWidgetData(async () => {
   const [exc, perf, sigStats, chanStatus, secOverview] = await Promise.all([
     safeFetch(diagnostics.exceptions.getSummary(60)),
     safeFetch(performance.getSummary(60)),
@@ -103,6 +106,16 @@ useWidgetData(async () => {
     lockedOut: secOverview?.lockedOutUsers ?? null,
   }
 })
+
+// The mount-time run may have happened while the availability probe was in
+// flight (both gated probes skipped), and a refreshed signal can change the
+// loaded set: load again when it settles or changes.
+watch(
+  () => [moduleAvailability.pending.value, moduleAvailability.modules.value] as const,
+  () => {
+    void reload()
+  },
+)
 
 function exceptionTone(n: number | null): 'success' | 'warning' | 'error' | 'default' {
   if (n == null) return 'default'
@@ -136,7 +149,7 @@ function formatAdapters(n: number | null): string {
 }
 
 function t(key: string, fallback: string): string {
-  return translatePageKey('', key) || fallback
+  return translateChromeKey(key, fallback)
 }
 </script>
 

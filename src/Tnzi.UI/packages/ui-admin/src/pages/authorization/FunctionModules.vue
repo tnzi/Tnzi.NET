@@ -124,6 +124,7 @@ import TFormSchemaRenderer, { type FieldRenderContext } from '../_shared/form-sc
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
 import {
+  collectDescendants,
   createAuthorizationBridge,
   type ModuleCascadePreview,
 } from '../../services/bridges/authorization-bridge'
@@ -260,8 +261,15 @@ const parentOptions = computed(() => {
     }
     return d
   }
+  // A module cannot sit under itself or anything in its own subtree: picking a
+  // descendant as the parent closes a cycle (the server refuses it with 400).
+  const excluded = new Set<string>()
+  if (editingId.value) {
+    excluded.add(editingId.value)
+    for (const d of collectDescendants(allModules.value, editingId.value)) excluded.add(d.id)
+  }
   return allModules.value
-    .filter((m) => m.id !== editingId.value)
+    .filter((m) => !excluded.has(m.id))
     .map((m) => ({
       label: `${'  '.repeat(depthOf(m.id))}${m.name} (${m.code})`,
       value: m.id,

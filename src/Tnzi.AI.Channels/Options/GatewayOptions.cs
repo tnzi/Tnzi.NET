@@ -46,10 +46,13 @@ public class GatewayOptions
         Description = "Idle sessions inactive longer than this many hours are pruned on the next request.")]
     public int SessionEvictionHours { get; set; } = 24;
 
-    /// <summary>流式更新最小间隔（毫秒），合并快速到达的 token 增量，避免刷爆 IM 平台的编辑/限流阈值</summary>
+    /// <summary>
+    /// 流式更新最小间隔（毫秒）：合并快速到达的 token 增量，最多每此间隔向 <c>/ws/gateway</c> 客户端推一帧 <c>chat.stream</c>。
+    /// 只作用于 WebSocket 网关的流式回复；IM 渠道的回复不流式（整条发送），不受它影响。
+    /// </summary>
     [RuntimeSetting(Label = "Streaming Throttle (ms)", I18n = "admin.modules.system.settings.fields.gatewayStreamingThrottleMs",
         Type = SettingFieldType.Int, Min = 100, Subsection = "Gateway",
-        Description = "Minimum interval between streamed reply updates pushed to IM platforms, in milliseconds. Rapid token deltas are coalesced to avoid flooding platform edit/rate limits. The first token and the final message are always delivered immediately. Takes effect on the next streamed reply.")]
+        Description = "Minimum interval between chat.stream frames sent to /ws/gateway WebSocket clients, in milliseconds. Rapid token deltas are coalesced into one frame. The first token and the final message are always delivered immediately. IM channel replies are not streamed and are not affected. Takes effect on the next streamed reply.")]
     public int StreamingThrottleMs { get; set; } = 350;
 
     /// <summary>

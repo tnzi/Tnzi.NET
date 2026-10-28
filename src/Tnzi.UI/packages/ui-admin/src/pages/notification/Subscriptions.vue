@@ -8,6 +8,7 @@
   <TCrudPage
     :state="crud"
     :all-columns="notificationSubscriptionColumns"
+    :show-default-search="false"
     :title="title"
     :translate="t"
     :form-modal-width="760"
@@ -28,6 +29,7 @@
 
 <script setup lang="ts">
 import { h } from 'vue'
+import { NInput, NSelect } from 'naive-ui'
 import TCrudPage from '../../components/crud/TCrudPage.vue'
 import { useCrudPage } from '../../headless/useCrudPage'
 import { editAction, deleteAction, type RowAction } from '../../headless/row-actions'
@@ -38,8 +40,13 @@ import type { NotificationPreferenceDto } from '@tnzi/core/services/notification
 import TFormSchemaRenderer, { type FieldRenderer } from '../_shared/form-schema'
 import TUserSelector from '../../components/forms/TUserSelector.vue'
 import type { SelectorOption } from '../../components/forms/_selector-factory'
-import { notificationSubscriptionColumns, notificationSubscriptionFormSchema } from './subscription-config'
+import {
+  notificationSubscriptionColumns,
+  notificationSubscriptionFormSchema,
+  SUBSCRIPTION_KEY_LOCKED_TYPE,
+} from './subscription-config'
 import { makePageTranslator } from '../_shared/translate'
+import { browserTimeZone, timeZoneIds } from '../../utils/time-zones'
 
 const title = 'title'
 const client = useAdminClient()
@@ -64,6 +71,9 @@ const userFetcher = async (keyword: string): Promise<SelectorOption[]> => {
 }
 
 const fieldRenderers: Record<string, FieldRenderer> = {
+  // The row's key (user, channel, category) on edit: shown, not edited.
+  [SUBSCRIPTION_KEY_LOCKED_TYPE]: (ctx) =>
+    h(NInput, { value: String(ctx.value ?? ''), disabled: true, size: 'small' }),
   user: (ctx) =>
     h(TUserSelector, {
       value: (ctx.value as string | null) ?? null,
@@ -73,10 +83,25 @@ const fieldRenderers: Record<string, FieldRenderer> = {
       placeholder: ctx.translate(ctx.item.placeholderKey, ctx.item.placeholder ?? ''),
       'onUpdate:value': (v: unknown) => ctx.onUpdate(v ?? undefined),
     }),
+  // IANA zone for the row's quiet hours. Clearable: empty means the stored
+  // times are UTC, which is what every row written before zones existed holds.
+  timezone: (ctx) =>
+    h(NSelect, {
+      value: (ctx.value as string | null) || null,
+      options: timeZoneIds([ctx.value as string | null, browserTimeZone()]).map((id) => ({ label: id, value: id })),
+      filterable: true,
+      clearable: true,
+      size: 'small',
+      disabled: ctx.readonly,
+      placeholder: ctx.translate(ctx.item.placeholderKey, ctx.item.placeholder ?? ''),
+      'onUpdate:value': (v: string | null) => ctx.onUpdate(v ?? null),
+    }),
 }
 
 const crud = useCrudPage<NotificationPreferenceDto>({
   pageId: 'notification.subscriptions',
+  // A preference left alone on the switch is saved enabled; the switch says so.
+  createDefaults: { isEnabled: true },
   // Preferences are per-user UPSERTS on the backend (SetPreference), so the
   // catalogue declares no `.create` code - "create" in this UI is the same
   // operation as update and gates on the update code.

@@ -51,6 +51,15 @@ describe('useRegisterForm', () => {
     expect(errors.value.password).toBeTruthy()
   })
 
+  it('validate and canSubmit refuse an empty confirmation', () => {
+    const { fields, validate, errors, canSubmit } = useRegisterForm()
+    fields.email.value = 'test@test.com'
+    fields.password.value = 'pass'
+    expect(canSubmit.value).toBe(false)
+    expect(validate()).toBe(false)
+    expect(errors.value.confirmPassword).toBeTruthy()
+  })
+
   it('validate requires username when showUsername is true', () => {
     const { fields, validate, errors } = useRegisterForm({ showUsername: true })
     fields.email.value = 'test@test.com'

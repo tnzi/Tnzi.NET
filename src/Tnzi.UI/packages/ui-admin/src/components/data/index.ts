@@ -36,9 +36,10 @@ export type { ItemCardTag, ItemCardMeta, ItemCardTone } from './TItemCard.vue'
 // standard). TEmpty is the unified empty-state visual used by the card
 // renderers and available to bespoke pages.
 // TKpiCard was renamed from TStatCard in the 2026-06 audit to avoid colliding
-// with a then-existing globally-registered <TStatCard> in @tnzi/ui; a
-// deprecated TStatCard alias is kept for back-compat. (@tnzi/ui no longer
-// ships that component, so the alias is inert as far as name clashes go.)
+// with the globally-registered <TStatCard> of @tnzi/ui; a deprecated TStatCard
+// alias is kept for back-compat. @tnzi/ui still exports and globally registers
+// its own TStatCard, so a template that writes <TStatCard> without importing
+// it gets that one, not this alias: import TKpiCard by name.
 export { default as TKpiCard } from './TKpiCard.vue'
 export type { TKpiCardProps, TKpiCardTone } from './TKpiCard.vue'
 /** @deprecated use TKpiCard. */

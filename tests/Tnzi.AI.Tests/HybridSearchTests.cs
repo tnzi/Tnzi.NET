@@ -157,31 +157,11 @@ public class HybridSearchTests
             .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<KeywordSearchResult>());
 
-        await service.SearchAsync("how does hybrid search work");
+        await service.SearchAsync("how does hybrid search work", Scoped());
 
         capturedOptions.ShouldNotBeNull();
         capturedOptions!.Provider.ShouldBe("rag-embed-provider");
         capturedOptions.Model.ShouldBe("rag-embed-model");
-    }
-
-    [Fact]
-    public async Task SearchAsync_EmbeddingFails_ReturnsEmpty()
-    {
-        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
-
-        mocks.Embedding
-            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Result<float[]>.Failure("embedding API error"));
-
-        (await service.SearchAsync("query")).ShouldBeEmpty();
-
-        // 嵌入失败应短路：双路检索不应执行
-        mocks.VectorStore.Verify(
-            v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        mocks.Keyword.Verify(
-            k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
     }
 
     [Fact]
@@ -222,7 +202,7 @@ public class HybridSearchTests
             .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<KeywordSearchResult>
             {
-                new() { ChunkId = chunkKeywordOnly, Content = "Keyword hit", DocumentId = docKeyword, KnowledgeBaseId = kbId, Score = 4.0 }
+                new() { ChunkId = chunkKeywordOnly, Content = "Keyword hit", DocumentId = docKeyword, KnowledgeBaseId = kbId, ChunkIndex = 5, Score = 4.0 }
             });
 
         // Reranker 透传（验证融合结果交给 reranker 且其输出被映射）
@@ -239,7 +219,7 @@ public class HybridSearchTests
         };
         mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(docs.BuildMock());
 
-        var results = (await service.SearchAsync("query text", maxResults: 5)).ToList();
+        var results = (await service.SearchAsync("query text", Scoped(), maxResults: 5)).ToList();
 
         // 融合后 2 条都进入 reranker
         rerankInput.ShouldNotBeNull();
@@ -272,6 +252,7 @@ public class HybridSearchTests
             .Setup(g => g.SearchAsync("query", kbId, It.IsAny<GraphSearchOptions>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<GraphSearchResult> { new("Acme", "Organization", [], 0.8, "Acme acquired Foo") });
         var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions(), graph.Object);
+        mocks.UseKnowledgeBases(new KnowledgeBase { Id = kbId, Name = "kb" });
 
         var queryVector = new[] { 0.1f };
         mocks.Embedding
@@ -335,7 +316,7 @@ public class HybridSearchTests
         mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>()))
             .Returns(new List<KnowledgeDocument> { new() { Id = docId, FileName = "doc.md" } }.BuildMock());
 
-        var results = (await service.SearchAsync("query", maxResults: 5)).ToList();
+        var results = (await service.SearchAsync("query", Scoped(), maxResults: 5)).ToList();
 
         var only = results.ShouldHaveSingleItem();
         only.Text.ShouldBe("wider window");
@@ -351,8 +332,250 @@ public class HybridSearchTests
             .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("boom"));
 
-        (await service.SearchAsync("query")).ShouldBeEmpty();
+        (await service.SearchAsync("query", Scoped())).ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task SearchAsync_EmbeddingFails_FallsBackToKeywordResults()
+    {
+        // 嵌入失败只让向量路缺席：关键词路照常检索并返回（此前整次检索连关键词一起答空）
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
+
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Failure("embedding API error"));
+        mocks.Keyword
+            .Setup(k => k.SearchAsync("query", It.IsAny<int>(), ScopedKb, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>
+            {
+                new() { ChunkId = Guid.NewGuid(), Content = "Keyword hit", DocumentId = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, ChunkIndex = 4, Score = 2.0 }
+            });
+        PassThroughReranker(mocks);
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<KnowledgeDocument>().BuildMock());
+
+        var results = (await service.SearchAsync("query", Scoped())).ToList();
+
+        results.ShouldHaveSingleItem().Text.ShouldBe("Keyword hit");
+        mocks.VectorStore.Verify(
+            v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region 知识库范围：按库对齐查询向量、禁用的库不检索
+
+    [Fact]
+    public async Task SearchAsync_KnowledgeBasesWithTheirOwnEmbeddingModels_EachSearchedWithItsOwnQueryVector()
+    {
+        // 混合检索的查询向量与 RagRetriever / 摄取同一解析：按 (provider, model) 分组，每组生成一次
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions { DefaultEmbeddingProvider = "openai" });
+        var kbSmall = Guid.NewGuid();
+        var kbLarge = Guid.NewGuid();
+        mocks.UseKnowledgeBases(
+            new KnowledgeBase { Id = kbSmall, Name = "small", EmbeddingProvider = "openai", EmbeddingModel = "text-embedding-3-small" },
+            new KnowledgeBase { Id = kbLarge, Name = "large", EmbeddingProvider = "azure", EmbeddingModel = "text-embedding-3-large" });
+        var smallVector = new[] { 0.1f };
+        var largeVector = new[] { 0.9f };
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o!.Model == "text-embedding-3-small"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(smallVector));
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o!.Model == "text-embedding-3-large"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(largeVector));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>());
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbSmall, kbLarge] });
+
+        mocks.Embedding.Verify(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        mocks.VectorStore.Verify(v => v.SearchAsync(smallVector, It.IsAny<int>(), kbSmall, It.IsAny<CancellationToken>()), Times.Once);
+        mocks.VectorStore.Verify(v => v.SearchAsync(largeVector, It.IsAny<int>(), kbLarge, It.IsAny<CancellationToken>()), Times.Once);
+        mocks.VectorStore.Verify(v => v.SearchAsync(smallVector, It.IsAny<int>(), kbLarge, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_OneEmbeddingGroupFails_TheOtherGroupAndKeywordsStillAnswer()
+    {
+        // 不设全局默认、每库各配 provider 是文档列出的正常用法；一组的 provider 不可用不能连坐另一组
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions { DefaultEmbeddingProvider = null });
+        var kbOk = Guid.NewGuid();
+        var kbBroken = Guid.NewGuid();
+        mocks.UseKnowledgeBases(
+            new KnowledgeBase { Id = kbOk, Name = "ok", EmbeddingProvider = "openai", EmbeddingModel = "m1" },
+            new KnowledgeBase { Id = kbBroken, Name = "broken", EmbeddingProvider = "chat-only", EmbeddingModel = "m2" });
+        var okVector = new[] { 0.3f };
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o!.Provider == "openai"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(okVector));
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.Is<EmbeddingOptions?>(o => o!.Provider == "chat-only"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Failure("no embedding API"));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(okVector, It.IsAny<int>(), kbOk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>
+            {
+                new() { Id = Guid.NewGuid(), Content = "Vector hit", DocumentId = Guid.NewGuid(), KnowledgeBaseId = kbOk, Score = 0.8 }
+            });
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), kbBroken, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>
+            {
+                new() { ChunkId = Guid.NewGuid(), Content = "Keyword hit", DocumentId = Guid.NewGuid(), KnowledgeBaseId = kbBroken, ChunkIndex = 1, Score = 3.0 }
+            });
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), kbOk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>());
+        PassThroughReranker(mocks);
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<KnowledgeDocument>().BuildMock());
+
+        var results = (await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [kbOk, kbBroken] })).ToList();
+
+        results.Select(r => r.Text).ShouldBe(["Vector hit", "Keyword hit"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public async Task SearchAsync_DisabledKnowledgeBase_IsSearchedByNeitherPath()
+    {
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
+        var enabled = Guid.NewGuid();
+        var disabled = Guid.NewGuid();
+        mocks.UseKnowledgeBases(
+            new KnowledgeBase { Id = enabled, Name = "enabled" },
+            new KnowledgeBase { Id = disabled, Name = "disabled", IsEnabled = false });
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(new[] { 0.1f }));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>());
+
+        await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [enabled, disabled] });
+
+        mocks.VectorStore.Verify(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), disabled, It.IsAny<CancellationToken>()), Times.Never);
+        mocks.Keyword.Verify(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), disabled, It.IsAny<CancellationToken>()), Times.Never);
+        mocks.VectorStore.Verify(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), enabled, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SearchAsync_OnlyDisabledKnowledgeBases_ReturnsNothing()
+    {
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
+        var disabled = Guid.NewGuid();
+        mocks.UseKnowledgeBases(new KnowledgeBase { Id = disabled, Name = "disabled", IsEnabled = false });
+
+        var results = await service.SearchAsync("query", new TextSearchFilter { KnowledgeBaseIds = [disabled] });
+
+        results.ShouldBeEmpty();
+        mocks.Embedding.Verify(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mocks.Keyword.Verify(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    #endregion
+
+    #region 仅关键词命中的块索引
+
+    [Fact]
+    public async Task SearchAsync_KeywordOnlyHit_ExpandsAroundItsRealChunkIndex()
+    {
+        // 父文档扩展按 chunkIndex 取窗口：仅关键词命中的第 37 块不能被记成第 0 块（那会注入文档开头、丢掉命中段落）
+        var parent = new Mock<IParentDocumentRetriever>();
+        IReadOnlyList<RetrievalResult>? expanded = null;
+        parent
+            .Setup(p => p.RetrieveAsync(It.IsAny<IReadOnlyList<RetrievalResult>>(), It.IsAny<ParentRetrievalOptions?>(), It.IsAny<CancellationToken>()))
+            .Callback((IReadOnlyList<RetrievalResult> matches, ParentRetrievalOptions? _, CancellationToken _) => expanded = matches)
+            .ReturnsAsync(new List<ParentDocumentResult>());
+        var options = new AIRagOptions { ParentDocumentRetrieval = new ParentDocumentRetrievalOptions { Enabled = true } };
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(options, parentDocumentRetriever: parent.Object);
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(new[] { 0.1f }));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>
+            {
+                new() { ChunkId = Guid.NewGuid(), Content = "Clause 14.2", DocumentId = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, ChunkIndex = 37, Score = 5.0 }
+            });
+        PassThroughReranker(mocks);
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<KnowledgeDocument>().BuildMock());
+
+        var results = (await service.SearchAsync("clause 14.2", Scoped())).ToList();
+
+        expanded.ShouldNotBeNull();
+        expanded.ShouldHaveSingleItem().Metadata!["chunkIndex"].ShouldBe(37);
+        results.ShouldHaveSingleItem().Metadata!["chunkIndex"].ShouldBe(37);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ProviderWithoutChunkIndex_IsLookedUpFromTheChunkTable()
+    {
+        var (service, mocks) = CreateHybridSearchServiceWithMocks(new AIRagOptions());
+        var known = Guid.NewGuid();
+        var deleted = Guid.NewGuid();
+        mocks.Embedding
+            .Setup(e => e.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<EmbeddingOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Result<float[]>.Success(new[] { 0.1f }));
+        mocks.VectorStore
+            .Setup(v => v.SearchAsync(It.IsAny<float[]>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VectorSearchResult>());
+        mocks.Keyword
+            .Setup(k => k.SearchAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<KeywordSearchResult>
+            {
+                new() { ChunkId = known, Content = "Known chunk", DocumentId = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, Score = 5.0 },
+                new() { ChunkId = deleted, Content = "Chunk of a deleted document", DocumentId = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, Score = 4.0 }
+            });
+        mocks.ChunkRepo.Setup(r => r.AsQueryable(It.IsAny<bool>()))
+            .Returns(new List<DocumentChunk> { new() { Id = known, KnowledgeBaseId = ScopedKb, ChunkIndex = 12, Content = "Known chunk" } }.BuildMock());
+        PassThroughReranker(mocks);
+        mocks.DocRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<KnowledgeDocument>().BuildMock());
+
+        var results = (await service.SearchAsync("query", Scoped())).ToList();
+
+        var only = results.ShouldHaveSingleItem();
+        only.Text.ShouldBe("Known chunk");
+        only.Metadata!["chunkIndex"].ShouldBe(12);
+    }
+
+    [Fact]
+    public void FullTextSql_SelectsTheChunkIndex_InBothVariants()
+    {
+        PgFullTextSearchProvider.BuildSearchSql("RAG_DocumentChunk", "RAG_KnowledgeBase", hasKnowledgeBaseId: true, tenantId: null)
+            .ShouldContain("\"ChunkIndex\"");
+        PgFullTextSearchProvider.BuildSearchSql("RAG_DocumentChunk", "RAG_KnowledgeBase", hasKnowledgeBaseId: false, tenantId: null)
+            .ShouldContain("c.\"ChunkIndex\"");
+    }
+
+    [Fact]
+    public async Task InMemoryKeywordSearch_ReturnsTheChunkIndex()
+    {
+        var chunkRepo = new Mock<IRepository<DocumentChunk, Guid>>();
+        chunkRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(new List<DocumentChunk>
+        {
+            new() { Id = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, ChunkIndex = 9, Content = "termination clause applies" },
+            new() { Id = Guid.NewGuid(), KnowledgeBaseId = ScopedKb, ChunkIndex = 2, Content = "unrelated opening text" }
+        }.BuildMock());
+
+        var results = await new InMemoryKeywordSearchProvider(chunkRepo.Object, NullLogger<InMemoryKeywordSearchProvider>.Instance)
+            .SearchAsync("termination", topK: 5, ScopedKb);
+
+        results.ShouldHaveSingleItem().ChunkIndex.ShouldBe(9);
+    }
+
+    private static void PassThroughReranker(HybridMocks mocks)
+        => mocks.Reranker
+            .Setup(r => r.RerankAsync(It.IsAny<string>(), It.IsAny<List<VectorSearchResult>>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, List<VectorSearchResult> fused, int topK, CancellationToken _) => fused.Take(topK).ToList());
 
     #endregion
 
@@ -417,6 +640,13 @@ public class HybridSearchTests
     #region 辅助方法
 
     /// <summary>
+    /// agent 侧检索只在知识库范围内进行（没有范围恒答空，见 <c>AgentKnowledgeScopeFailClosedTests</c>），管线用例都带一个范围。
+    /// </summary>
+    private static readonly Guid ScopedKb = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+    private static TextSearchFilter Scoped() => new() { KnowledgeBaseIds = [ScopedKb] };
+
+    /// <summary>
     /// 创建 HybridSearchService 用于测试 RRF 融合逻辑
     /// </summary>
     private static HybridSearchService CreateHybridSearchService(AIRagOptions options)
@@ -438,7 +668,9 @@ public class HybridSearchTests
             keywordProviderMock.Object,
             embeddingServiceMock.Object,
             rerankerMock.Object,
+            Mock.Of<IRepository<KnowledgeBase, Guid>>(),
             docRepoMock.Object,
+            Mock.Of<IRepository<DocumentChunk, Guid>>(),
             ragOptions);
     }
 
@@ -452,6 +684,12 @@ public class HybridSearchTests
         public required Mock<IEmbeddingService> Embedding { get; init; }
         public required Mock<IReranker> Reranker { get; init; }
         public required Mock<IRepository<KnowledgeDocument, Guid>> DocRepo { get; init; }
+        public required Mock<IRepository<KnowledgeBase, Guid>> KbRepo { get; init; }
+        public required Mock<IRepository<DocumentChunk, Guid>> ChunkRepo { get; init; }
+
+        /// <summary>范围里的这些知识库存在且启用中（不在这里的 id 视为找不到）。</summary>
+        public void UseKnowledgeBases(params KnowledgeBase[] knowledgeBases)
+            => KbRepo.Setup(r => r.AsQueryable(It.IsAny<bool>())).Returns(knowledgeBases.ToList().BuildMock());
     }
 
     /// <summary>
@@ -472,8 +710,11 @@ public class HybridSearchTests
             Keyword = new Mock<IKeywordSearchProvider>(),
             Embedding = new Mock<IEmbeddingService>(),
             Reranker = new Mock<IReranker>(),
-            DocRepo = new Mock<IRepository<KnowledgeDocument, Guid>>()
+            DocRepo = new Mock<IRepository<KnowledgeDocument, Guid>>(),
+            KbRepo = new Mock<IRepository<KnowledgeBase, Guid>>(),
+            ChunkRepo = new Mock<IRepository<DocumentChunk, Guid>>()
         };
+        mocks.UseKnowledgeBases(new KnowledgeBase { Id = ScopedKb, Name = "scoped" });
 
         var service = new HybridSearchService(
             serviceProviderMock.Object,
@@ -481,7 +722,9 @@ public class HybridSearchTests
             mocks.Keyword.Object,
             mocks.Embedding.Object,
             mocks.Reranker.Object,
+            mocks.KbRepo.Object,
             mocks.DocRepo.Object,
+            mocks.ChunkRepo.Object,
             new StaticOptionsMonitor<AIRagOptions>(options),
             graphSearchService,
             parentDocumentRetriever);

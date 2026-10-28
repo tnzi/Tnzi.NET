@@ -15,3 +15,7 @@ global using Tnzi.Options;
 global using Tnzi.Utilities;
 global using Tnzi.Logging.Dtos;
 global using Tnzi.Results;
+global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http.Connections;
+global using Microsoft.AspNetCore.SignalR;
+global using Tnzi.Security;

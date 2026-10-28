@@ -120,6 +120,15 @@
   margin-top: 8px;
 }
 
+/* Profile section before its profile has loaded (or after the load failed):
+   the reason and a retry, in place of an editor that would save blanks. */
+.t-uc-profile-unloaded {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 /* Form-end action bar (Save / Reset) - right-aligned within the capped content
    column so the buttons line up with the form's right edge. */
 .t-uc-save-bar {
@@ -250,4 +259,32 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Notifications section: one block per channel, the quiet-hours switch and its
+   two time pickers on one line (wrapping on narrow panels). */
+.t-uc-notify-channels {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 8px 0 4px;
+}
+/* The quiet-hours row plus, under it, the note that a window lives in its own zone. */
+.t-uc-notify-quiet-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.t-uc-notify-own-zone {
+  margin: 0;
+}
+.t-uc-notify-quiet {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.t-uc-notify-quiet .n-select {
+  width: 104px;
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.Configuration;
 using Tnzi.Payment.Permissions;
 using Tnzi.Payment.Promotions.Permissions;
+using PaymentEntity = Tnzi.Payment.Entities.Payment;
 
 namespace Tnzi.Payment.Promotions.Tests;
 
@@ -352,6 +353,7 @@ public class PromotionsModuleContractTests
         services.AddScoped(_ => new Mock<IRepository<RedemptionCode, Guid>>().Object);
         services.AddScoped(_ => new Mock<IRepository<UserCoupon, Guid>>().Object);
         services.AddScoped(_ => new Mock<IRepository<Promotion, Guid>>().Object);
+        services.AddScoped(_ => new Mock<IRepository<PaymentEntity, Guid>>().Object);
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();

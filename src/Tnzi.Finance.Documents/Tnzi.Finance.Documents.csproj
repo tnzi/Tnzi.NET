@@ -17,7 +17,8 @@
 
   <ItemGroup>
     <!-- 支票 PDF 渲染（纯托管、MIT）；把 PdfSharp 依赖从 Finance 核心收进本可选子模块，
-         纯会计消费者不再被传递拉入 PdfSharp。EFT 文件为纯文本，不经此渲染。 -->
+         纯会计消费者不再被传递拉入 PdfSharp。EFT 文件为纯文本，不经此渲染。
+         版本锁在 6.2.4（最后一个 MIT 版本，6.5.0 起改为 AGPL-3.0-only），理由见 Tnzi.Documents.csproj。 -->
     <PackageReference Include="PdfSharp" Version="6.2.4" />
   </ItemGroup>
 

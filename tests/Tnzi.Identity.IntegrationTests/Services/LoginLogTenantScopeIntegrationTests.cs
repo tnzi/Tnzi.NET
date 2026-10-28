@@ -209,6 +209,56 @@ public class LoginLogTenantScopeIntegrationTests : RelationalIdentityIntegration
         Assert.Equal(4, logs.Data!.Count());
     }
 
+    /// <summary>
+    /// 清理过期日志是物理删除，比读更不能越界：租户管理员只删得到本租户用户的行，
+    /// 别的租户的日志与没有归属的失败尝试（暴力破解的证据）原样保留。
+    /// </summary>
+    [Fact]
+    public async Task TenantAdmin_DeleteExpiredLogs_RemovesOnlyOwnTenantRows()
+    {
+        var adminA = await CreateTenantUserAsync(TenantA, "admin-a@example.com");
+        var userA = await CreateTenantUserAsync(TenantA, "user-a@example.com");
+        var userB = await CreateTenantUserAsync(TenantB, "user-b@example.com");
+        var old = DateTime.UtcNow.AddDays(-30);
+        await AddLogAsync(userA.Id, "10.0.0.1", LoginStatus.Success, old);
+        await AddLogAsync(userA.Id, "10.0.0.1", LoginStatus.Success);
+        await AddLogAsync(userB.Id, "10.0.0.2", LoginStatus.Failed, old);
+        await AddLogAsync(null, "10.0.0.9", LoginStatus.Failed, old);
+        DbContext.ChangeTracker.Clear();
+        ActAs(adminA.Id, TenantA);
+
+        var result = await _logs.DeleteExpiredLogsAsync(days: 1);
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(1, result.Data);
+        var remaining = await DbContext.LoginLogs.AsNoTracking().ToListAsync();
+        Assert.Equal(3, remaining.Count);
+        Assert.DoesNotContain(remaining, l => l.UserId == userA.Id && l.CreationTime < DateTime.UtcNow.AddDays(-1));
+        Assert.Contains(remaining, l => l.UserId == userB.Id);
+        Assert.Contains(remaining, l => l.UserId == null);
+    }
+
+    /// <summary>对照组：不裁剪的全局管理员清理全部过期行，包括没有归属的那些。</summary>
+    [Fact]
+    public async Task GlobalAdmin_DeleteExpiredLogs_RemovesEveryExpiredRow_IncludingUnattributed()
+    {
+        var userA = await CreateTenantUserAsync(TenantA, "user-a@example.com");
+        var userB = await CreateTenantUserAsync(TenantB, "user-b@example.com");
+        var old = DateTime.UtcNow.AddDays(-30);
+        await AddLogAsync(userA.Id, "10.0.0.1", LoginStatus.Success, old);
+        await AddLogAsync(userB.Id, "10.0.0.2", LoginStatus.Failed, old);
+        await AddLogAsync(null, "10.0.0.9", LoginStatus.Failed, old);
+        await AddLogAsync(userB.Id, "10.0.0.2", LoginStatus.Success);
+        DbContext.ChangeTracker.Clear();
+        ActAs(Guid.NewGuid(), null);
+
+        var result = await _logs.DeleteExpiredLogsAsync(days: 1);
+
+        Assert.True(result.Succeeded, result.Message);
+        Assert.Equal(3, result.Data);
+        Assert.Single(await DbContext.LoginLogs.AsNoTracking().ToListAsync());
+    }
+
     /// <summary>登录链路上的异常登录检测没有已认证主体，租户上下文来自 header —— 不裁剪，检测照常跑。</summary>
     [Fact]
     public async Task SystemFlow_WithoutPrincipal_StillDetectsAbnormalLogins_AcrossTenants()

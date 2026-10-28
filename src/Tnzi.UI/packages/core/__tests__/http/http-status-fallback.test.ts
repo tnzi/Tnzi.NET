@@ -22,7 +22,7 @@ function jsonResponse(body: unknown, status: number): Response {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 200 ? 'OK' : 'Error',
-    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
     headers: new Headers(),
   } as unknown as Response;
 }
